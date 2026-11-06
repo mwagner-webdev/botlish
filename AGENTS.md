@@ -20,11 +20,80 @@ one), check `main`'s CI at both ends of the work
 * **Before you merge a finished milestone into `main`,** check again:
   `main`'s latest runs and your branch's own. `macos-arm64.yml` and
   `windows-x86_64.yml` run on every branch push; `tests.yml` and
-  `tests-arm64.yml` run on a branch only when dispatched (`workflow_dispatch`
-  with the branch as the ref), so dispatch them. Don't merge onto a red
+  `tests-arm64.yml` run only their canary on a branch push (next section)
+  and the rest only when dispatched (`workflow_dispatch` with the branch as
+  the ref), so dispatch them. Don't merge onto a red
   `main` without telling the user. A failure on your branch that `main`'s
   latest run does not have is yours to fix before the merge. Pending runs
   are acceptable: report them as pending, never as passed.
+
+A newer push cancels a running test workflow on the same ref, on `main`
+too, so a run of `main` may end `cancelled`: it was superseded, and says
+nothing either way. Read the latest run of the workflow instead. Merging a
+branch makes its unfinished runs obsolete, and `prune-runs.yml` cancels
+them (CI-RUNS.md; next section).
+
+## CI housekeeping (cancellation, pruning, the release gate, the canary)
+
+The runners are a shared, limited pool, and main's merges come in bursts
+(CI-RUNS.md). Four rules keep obsolete and doomed runs off them and keep
+releases honest; `tools/ci/runs.py` implements the second and the third,
+`tests/canary.tcl` the fourth. Keep it so:
+
+* **A newer push cancels a running test workflow on the same ref, on main
+  too:** a workflow that tests a push has `concurrency: group:
+  NAME-${{ github.ref }}` and `cancel-in-progress: true`. Never exempt main
+  again: a burst's last push gets the complete run. The only exceptions are
+  a tag's run, a release run, scalar-asm-audit.yml (it writes back to
+  main), react-native-probe.yml (census evidence) and release-gate.yml.
+* **`prune-runs.yml` cancels the unfinished runs of branches fully in
+  main** (the tip is main's or an ancestor; a deleted branch's run whose
+  commit is in main). It never cancels a run of main, a tag or a fork, or
+  of a branch with a commit main lacks; never give it such a rule. Main's
+  head may be a commit no workflow ran (scalar-asm-audit's).
+* **A release is published only once every test of its commit is green**,
+  by a run nothing cancels. `CORE`: tests.yml and tests-arm64.yml with their
+  GC-stress jobs *succeeded* (skipped is no success), macos-arm64.yml,
+  windows-x86_64.yml, static-decisions.yml when it ran, and the release's
+  own build workflow. Any run at the commit counts.
+  - `release-gate.yml` (workflow_run of those workflows on main) dispatches
+    single-executable.yml or icy-tower-windows.yml on main with
+    `release=SHA` for main's newest green commit (`run-name: release SHA`,
+    a concurrency group of its own, never cancelled). That release run
+    builds nothing: it checks again (`runs.py check --require`) and
+    publishes the artifact of the commit's green push run. A push that
+    supersedes the commit meanwhile does not stop it.
+  - A release tag's run waits for icy-tower-macos.yml's `tested` job. Until
+    the commit's tests are green it is deferred, and the gate dispatches it
+    on the tag again.
+  - Never publish from a push run, never rebuild in a release run, never
+    give the gate a credential or more than `actions: write`, and never
+    give it a way to dispatch a release twice or move a tag backwards.
+* **Every test workflow runs its host's canary first, and its expensive
+  jobs wait for it** (CI-RUNS.md, "The canary"): tests.yml, tests-arm64.yml
+  and windows-x86_64.yml a `canary` job, macos-arm64.yml the smoke job's
+  last step. It runs, within about ten minutes, the test files and golden
+  suites the push adds or changes, then the ones `tests/canary.tsv`'s
+  history says failed recently on that host; tests.yml's runs the mutant
+  catalogs and the warning gate first, as steps (a job of its own would
+  wait for a runner before the expensive jobs could start: keep them steps).
+  On a branch push tests.yml and tests-arm64.yml run only the canary. The
+  canary orders, it never skips: never drop a job or
+  a test because the canary passed, never let an expensive job start
+  before it (a job that runs after a failed need checks the canary's
+  result itself), and never give it an item list of its own beside its
+  selection. `tools/ci/test_runs.py` checks the workflows' side. A new
+  test workflow, or a new expensive job, waits for its host's canary.
+
+If you change `tools/ci/`, a workflow's concurrency or triggers, a release
+job, or the name of a workflow or of a GC-stress job a requirement names,
+run `python3 -I tools/ci/test_runs.py` (it also checks the workflows' side
+of these rules), `python3 -I audit/macos-release/tests/test_workflow.py`
+and that audit's mutants for icy-tower-macos.yml, and
+`tclsh9.0 tools/mutant-catalogs.tcl`. Then push and read the `ci tools`
+run, which runs the gate and the pruning read-only against the
+repository's runs. A new required workflow goes into `CORE` and into
+release-gate.yml's `workflow_run` list together (the tests check it).
 
 ## Documentation layout
 
@@ -260,10 +329,11 @@ zipkit holding main.tcl, the compiler stack, both native executables and the
 runtime archive, needing only glibc (and, to link a program that calls C,
 the host's C compiler driver: SINGLE-EXECUTABLE-FFI-MILESTONE-1.md). The workflow `.github/workflows/single-executable.yml`
 builds it on every push to `main` and smoke-tests it in stock Ubuntu
-containers (`single/smoke-test.sh`), then publishes it as the
-`botlish-linux-x86_64` asset of the rolling `single-latest` prerelease. The
-README's download button links to that tag and asset name: rename either
-only together with the button. Its base kit is a static tclsh that the
+containers (`single/smoke-test.sh`); once every test of the commit is green,
+the release gate's release run publishes that build as the
+`botlish-linux-x86_64` asset of the rolling `single-latest` prerelease
+(CI-RUNS.md). The README's download button links to that tag and asset
+name: rename either only together with the button. Its base kit is a static tclsh that the
 script builds once from the pinned Tcl 9.0.1 source release. That build is
 the one exception to "do not build Tcl 9 from source" above: no package ships
 a static zipfs tclsh. `--basekit PATH` uses a prebuilt zipkit instead. To run
@@ -444,8 +514,14 @@ per test file or suite, each with a private `-tmpdir`):
 * **every golden suite on all four backends**, in their place, **through the
   front-end cache** (`.hirx` entries; HIR-INTERCHANGE.md).
 
-It prints a line per file and suite, then every failure with the command
-that reruns it, and exits 1 on any.
+It starts the likeliest to fail first (`-priority 1`, the default): the
+files and suites this checkout changes against origin/main, its working
+tree included, then those that failed recently in CI on this host
+(`tests/canary.tsv`), as the CI canary selects them (CI-RUNS.md, "The
+canary"). `-fail-fast 1` starts nothing more after the first failure and
+reports the rest as not run. It prints a line per file and suite, then
+every failure with the command that reruns it, and exits 1 on any (or on
+anything not run).
 
 What it costs, measured on a 4-core container (2026-10-15):
 
@@ -518,8 +594,10 @@ What it costs, measured on a 4-core container (2026-10-15):
   - on Linux arm64 (`.github/workflows/tests-arm64.yml`, ubuntu-24.04-arm):
     the Tcl suite on interp and compile, its cranelift and cranelift-generic
     coverage, the golden suites, the native Rust unit tests (also under GC
-    stress) and, except on pull requests, the GC-stress run. Run it on a
-    branch with workflow_dispatch.
+    stress) and, on pushes to main and manual runs, the GC-stress run. Run
+    it on a branch with workflow_dispatch;
+  - first, on every push to any branch and on every host, the canary
+    (CI-RUNS.md, "The canary"), which the jobs above wait for.
 
   A push or pull request that changes only Markdown files and `docs/` starts
   no workflow (their `paths-ignore`). Renaming or removing a design document
@@ -624,8 +702,8 @@ what it depends on in its code or its constraints:
 A change can break another audit's mutant: rewrite or duplicate the text it
 replaces, and that mutant guards nothing until its own harness next runs.
 `tclsh9.0 tools/mutant-catalogs.tcl` applies every mutant of every catalog
-under `audit/` to the tree in memory (seconds; CI's `mutant-catalogs` job in
-`tests.yml`). Run it before pushing a change to code. A mutant it reports is
+under `audit/` to the tree in memory (seconds; a step of `tests.yml`'s
+canary job). Run it before pushing a change to code. A mutant it reports is
 updated in the same change, kept a mutant of the same rule, and run through
 its own harness (`-only NAME`). A new catalog whose files are not relative
 to the repository root, or not named by `## FILE` lines, gets a row in the
@@ -772,7 +850,7 @@ lists, each with the obstruction that keeps it open (REFACTOR-WARNINGS-CLEAN.md)
 `audit/refactor/tools/gate.tcl` checks it -- every corpus program and a one-line
 loader per library module, the observed warnings equal to the manifest (code
 and location), and every program and loader without an entry compiling under
-`-warnings error` -- and the `warning-gate` job of `.github/workflows/tests.yml`
+`-warnings error` -- and a step of `.github/workflows/tests.yml`'s canary job
 runs it on every push and pull request (`tests/warning-gate.test` pins that it
 passes and that it fails on a planted warning).
 
@@ -2298,12 +2376,12 @@ affinity. Keep it so:
   writing a type change what it is (`hir::resolve::ResolveApplied` builds
   the one canonical application). What makes a written application no type
   is `hir::structs::WrittenProblem`: a recursive affine application
-  (`OwnedRecursion`) or one that nests its affine argument in ever larger
-  types (`Unfolding`: an affine argument is never cut, so the compiler's
-  walks of such a type would never end), AFFINE-CONTAINER-UNSUPPORTED
-  wherever it is written -- also as a phantom slot's argument -- and the
-  same `Unfolding` for an imprint that makes one (`hir::imprint::
-  UnfoldingProblem`).
+  (`OwnedRecursion`), AFFINE-CONTAINER-UNSUPPORTED wherever it is written
+  -- also as a phantom slot's argument. One that nests its affine argument
+  in ever larger types (W[Coroutine{...}] of `next: List[W[List[T]]]`) is
+  an ordinary type: every analysis of its components answers it from its
+  declaration's summary (Declaration summaries, below). Never bring back a
+  rejection of it.
 * Imprinting reads where values of an argument exist:
   `hir::imprint::Occurrences` places an application's argument at its
   slot's positions (`hir::structs::SlotPositions`: the positions
@@ -2317,8 +2395,8 @@ affinity. Keep it so:
   or a function type's variable as none.
 
 If you change the affinity query (`hir/types.tcl`, `hir/structs.tcl`),
-written applications' admission (`ResolveApplied`, `WrittenProblem`,
-`Unfolding`) or slot positions (`SlotPositions`, `Occurrences`' application
+written applications' admission (`ResolveApplied`, `WrittenProblem`) or
+slot positions (`SlotPositions`, `Occurrences`' application
 case, `Placed`), `hir/affine.tcl`, contract-based call typing of
 `Fn`/`Coroutine` callees
 (`hir/types.tcl`'s `Call`, `hir/range.tcl`'s `VerifyStructuralCall`,
@@ -2352,6 +2430,70 @@ kinds): a change to that gate, to those kinds or to which joins can hold a
 path-release diagnostic also needs `tests/static-economics.test` and the
 static-decision harnesses (Static intrinsics, below).
 
+
+## Declaration summaries (component analyses of parameterized types)
+
+A parameterized nominal type is finite even where substituting its
+arguments again and again is not: `struct W[T]: next: List[W[List[T]]]`
+reaches W[C], W[List[C]], ... (PARAMETERIZED-DECLARATION-SUMMARIES-
+MILESTONE-1.md). An analysis that answers for a value of a type from its
+components -- Bearing, CarriedInto, Totality (HashClass, Hashable, the
+total lowerings), SendClass, MentionsMutable, MayHoldVector, CanCarry,
+the DecimalRounded guard, MutableComponent, ValueStability, the affinity
+summary, the slot positions -- answers a named struct from its
+declaration's summary (hir/summaries.tcl: one least fixpoint over the
+declarations, `hir::summaries::Fixpoint`) and its own arguments' answers,
+never by unfolding the application's fields. Keep it so:
+
+* **Component analyses of parameterized nominal types must prefer
+  declaration summaries over recursive substitution walks.** A new
+  analysis that recursively unfolds applied struct fields
+  (`hir::structs::AppliedFieldTypes` of what it meets, again and again)
+  must justify, in its comment and in the report's census, why a finite
+  declaration summary cannot express its result. Define it as a property
+  of hir/summaries.tcl (`hir::summaries::define`: the classes algebra --
+  levels joined over the slots' entries, one probe per class of argument
+  -- or the union algebra), whose node is the walk of one declaration's
+  applied fields, and read it with `Level` or `Union`.
+* A property's classes are its own: what it reads at a slot position (a
+  value held, a Fn argument type's `any`-ness, a callable's errors) decides
+  its probes and its neutral argument. Never share one property's
+  relevance or answers with another, and never assume one universal
+  neutral.
+* The summaries are facts of the registry: computed lazily, forgotten with
+  the affinity facts (`hir::structs::ForgetAffinity` calls
+  `hir::summaries::Forget`), never stored in HIR, interchange text or the
+  cache, never keyed by a name.
+* No depth limit or application count decides a semantic answer. The one
+  bounded walk left in a migrated analysis is the reason text of a class
+  that is not total (Totality, SendClass, MutableComponent,
+  ValueStability): the class is the summary's; the walk follows field order
+  and stops a non-uniform recursion grown twice (`hir::summaries::Whistle`,
+  declarations on an expansive cycle only). Never decide a class by it.
+  One question walks an application's parts once (`hir::summaries::Walk`;
+  a later path reads that walk): never let a reason walk revisit an
+  application once per path, which is exponential in a declaration with
+  several recursive fields, and never keep a walk's result past its
+  question.
+* A genuine ownership rule is not a compiler guard: a recursive affine
+  application stays AFFINE-CONTAINER-UNSUPPORTED (`OwnedRecursion`).
+
+If you change hir/summaries.tcl, a property's node, probes or classes, or
+one of the analyses above, run `tests/parameterized-declaration-summaries.test`,
+`tests/written-affine-applications.test`, `tests/hashable.test`,
+`tests/value-identity.test`, `tests/typed-callable-escape.test`,
+`tests/structural-contract-completions.test`, `tests/sendability.test`,
+`tests/tree-struct.test`, `python3 -I audit/declaration-summaries/tools/oracle.py
+selftest`, `audit/declaration-summaries/tools/fuzz.tcl` (several seeds; it
+compares the compiler with the independent oracle and with the old walks,
+audit/declaration-summaries/tools/reference.tcl, which
+`extract-reference.py` regenerates from the revision before the summaries)
+and `audit/declaration-summaries/tools/mutate.tcl` (every mutant in its
+`mutants.txt` must still apply and be killed: update a mutant's text when
+you change the code it mutates, keeping it a mutant of the same rule), plus
+the affine, tree-struct, value-identity and hashable mutation harnesses for
+a change to code they mutate. `bench/declaration-summaries.tcl` regenerates
+the scaling report.
 ## Resources (scope-bound cleanup)
 
 `opaque resource struct R:` and `cleanup fn NAME(r: R, context ...):`
@@ -4485,8 +4627,8 @@ starves everything else on the machine. So:
     run static-decisions.yml --ref BRANCH`). The optional `suites` input (file
     names, separated by spaces or commas) narrows it.
 * **Read its result.** A run takes about 30 minutes, mutable-array.bot's job
-  (the shards finish within it), and on main it may first wait for the run
-  before it. Don't wait idle for it: carry on, and before you call the change
+  (the shards finish within it); a newer push to the same ref, on main too,
+  cancels it (CI-RUNS.md), so read the latest run. Don't wait idle for it: carry on, and before you call the change
   done read the run's jobs. Each job's summary lists every suite's rounds and
   builds under both schedulers, and any `DISAGREE` or `DOES NOT COMPILE`. If
   the run has not finished, report it as pending, never as passed.
@@ -4739,9 +4881,15 @@ backend compiles, or reports why not (EMIT-*). Keep it so:
   tool, audit/emission-claims/tools/witness.tcl), never from the compiler.
 * One value analysis: the facts are hir/intset.tcl over hir::range's own
   transfers (add, sub, mul, `ModParts`, `BitOp`, `Narrowed`, `TypeFact`,
-  `InductionBinding`, `RegisteredSet`, `Paths`); the one rule only a set can
-  state is `!=`'s hole. Never add a second arithmetic, comparison or domain
-  rule in the checker. A native's result set is its registration
+  `InductionBinding`, `DomainEntered`, `RegisteredSet`, `Paths`); the one
+  rule only a set can state is `!=`'s hole. Never add a second arithmetic,
+  comparison or domain rule in the checker.
+* A counted loop drops only its zero-iteration exit, and only where
+  `hir::range::DomainEntered` proves every start and end its operands may
+  have enters it (EMISSION-COUNTED-LOOP-PRECISION-MILESTONE-1.md): never an
+  exit of an iteration (a `break`, a `continue`, a `return`, a failure, the
+  head after any iteration), never from a relation between the bounds, a
+  caller's facts or an infinity read as a bound. A native's result set is its registration
   (`-result-range {intervals ...}`, std::char::scalar_value's surrogate
   gap), a contract of the implementation both runtimes uphold -- never a
   table beside the checker, never inferred from runs.
@@ -4778,7 +4926,9 @@ lowering, loader walk or resolution, or the `emissions` table's trust
 (interchange, the cache), run `tests/emission-claims.test`,
 `tests/interval-sets.test`, `tests/dfa.test`, `audit/emission-claims/tools/
 census.tcl` (no false proof; every case as expected),
-`audit/emission-claims/tools/fuzz.tcl` (several seeds; 0 false proofs) and
+`audit/emission-claims/tools/fuzz.tcl` (several seeds; 0 false proofs),
+`audit/emission-claims/tools/loops.tcl` for a change to loops or their
+bounds' facts (several seeds; 0 false certificates, 0 regressions) and
 `audit/emission-claims/tools/mutate.tcl` (every mutant in its `mutants.txt`
 must still apply and be killed: update a mutant's text when you change the
 code it mutates, keeping it a mutant of the same rule), plus
@@ -4945,13 +5095,15 @@ The Windows executable (`build-windows.sh`, the Windows section of
 tests/workload-icy-tower.test, which needs SDL3.dll built by
 `tests/cffi/sdl3.tcl` on Windows) is built and tested only by the
 `icy-tower (windows x86-64)` workflow (`.github/workflows/icy-tower-windows.yml`,
-every push to any branch), which also publishes main's build as the
-`icy-tower-windows-latest` release the README's Windows button links to:
+every push to any branch); once every test of a commit of main is green,
+its release run publishes that commit's tested build as the
+`icy-tower-windows-latest` release the README's Windows button links to
+(CI-RUNS.md):
 run it on the branch for any change to the game, `tests/cffi/sdl3.tcl`,
 the generator's MSVC target or `tools/cheader/`.
 Its signing (ICY-TOWER-WINDOWS.md, "Signing") is the `sign` job's alone:
-only that job, on main or a manual run, in the `windows-signing`
-environment, sees signing credentials -- never give them to the build job,
+only that job, in a manual run (a release run of main among them), in the
+`windows-signing` environment, sees signing credentials -- never give them to the build job,
 a pull request or another workflow, never store a signing key or password
 in GitHub (Azure Artifact Signing through OpenID Connect), and never let the
 release publish an unsigned build while `WINDOWS_SIGNING` is set. Every
@@ -5031,8 +5183,10 @@ three modes, `adhoc` and `dry-run` for ordinary CI, `release` for the
 
 * Credentials live only in the `macos-release` environment and reach only
   the `release` job of icy-tower-macos.yml, for an `icy-tower-macos-vX.Y.Z`
-  tag of main's history, pushed or run by hand -- never a branch, a pull
-  request, a fork, `pull_request_target`, another job or another workflow;
+  tag of main's history, pushed, run by hand or dispatched again by the
+  release gate, and only once every test of the tagged commit is green (the
+  `tested` job, CI-RUNS.md) -- never a branch, a pull request, a fork,
+  `pull_request_target`, another job or another workflow;
   each secret only in the `env` of the step that reads it, never in a
   script, a `with` or a job's `env`; no step holding one traces commands.
   Nothing is committed: no certificate but Apple's public ones
@@ -5242,6 +5396,19 @@ so:
   Dependencies`): a new resolution input goes there too. The physical
   package directories on the loading stack stop a symbolic-link cycle
   (CYCLE); never drop that guard.
+* A package graph (`PACKAGES/.graph`; SHARED-PACKAGE-DEPENDENCIES-MILESTONE-1.md,
+  surface/modules.tcl's "Package graphs") makes the packages it names one
+  instance each, shared by every scope that uses them: a graph package's instance and identity are its name, from every
+  scope (`Instance`); a scope of the graph sees exactly the packages the
+  graph says it uses (`Installed`), never another package's dependency, the
+  application's modules or a hand-installed package; a graph package's own
+  `.bot_modules` is never read; every graph package claims its root
+  namespace in the application. The graph names scopes and packages and
+  nothing else: never put a version, a lock or a source in it, never let
+  the compiler choose or repair one, and read it through the seam
+  (`Probe file`, a cache dependency). A malformed graph is PACKAGE-GRAPH,
+  never a tree read instead. Hand-made nested trees (no graph) keep
+  instance-by-place identities.
 
 If you change resolution, identity, the rewrite, the seam's directory
 question or the cache's probes, run `tests/bot-modules.test`,
@@ -5282,12 +5449,26 @@ package directory and its release; nothing else. Keep it so:
   compilation, no `exec` but `kill -0` (a lock holder's liveness), no
   socket, no network (`pm-no-network-in-sources`). Native archives travel
   as opaque files built on the author's side (`tools/package-repository.tcl`).
-* Each package owns its direct requests and exact locks; a package's
-  dependencies go in its own `.bot_modules`, never its consumer's. Never
-  write a transitive lock into an application, deduplicate instances by
-  name, or let a lock change without `add`/`update` (install never moves
-  one). A request's precision is its components (`1`, `1.2`, `1.2.3`): no
-  operators, prereleases or ranges.
+* Each package owns its direct requests and exact locks, and the
+  application has one dependency graph (pm/graph.tcl;
+  SHARED-PACKAGE-DEPENDENCIES-MILESTONE-1.md; LANGUAGE-DESIGN-PRINCIPLES.md,
+  section 2): every package once, at `.bot_modules/NAME` (no package has a
+  `.bot_modules` of its own), at the one version every lock of it names,
+  and `.bot_modules/.graph` (and each view's) written from it in the same
+  transaction. Resolution is unification, never search: every demanded
+  release is explored, and two demanded versions are a
+  DEPENDENCY-CONFLICT naming every lock and its path. Never relax, move or
+  override a lock -- the application's or an author's -- to make the graph
+  agree, never make a second instance as a fallback, never select the
+  first version visited, never let an editable directory satisfy a
+  package's lock, never write a transitive lock into an application, and
+  never let a lock change without `add`/`update` (install never moves one;
+  `add` and `update` choose, within a request, the version the graph's
+  locks hold, and say so). No peer dependencies and no override syntax: a
+  departure is a language-design decision. Results and messages depend on
+  no order (declarations, repositories, traversal: the catalog keeps its
+  repositories sorted). A request's precision is its components (`1`,
+  `1.2`, `1.2.3`): no operators, prereleases or ranges.
 * Artifacts are immutable and validated whole before anything is written:
   the restricted ZIP profile, the path rules, the limits, streamed capped
   decompression, every CRC, and the descriptor in the artifact context
@@ -5396,7 +5577,7 @@ package directory and its release; nothing else. Keep it so:
 
 If you change `pm/`, the formats, `tools/package-repository.tcl`,
 `tools/package-build/`, `packages/*/botlish.json` or main.tcl's dispatch, run
-`tests/package-manager.test`, `tests/package-native.test` (its foreign
+`tests/package-manager.test` (its `pm-shared-*` tests: the one graph), `tests/package-native.test` (its foreign
 formats need clang and MinGW-w64; its linked runs the native backend),
 `tests/package-authoring.test` (clang, lld and MinGW-w64 for its foreign
 formats, git for its Git trees),
@@ -5407,8 +5588,20 @@ ninja, and the package-owned libSDL3 and libraven: `tests/cffi/sdl3.tcl`,
 and `audit/package-manager/tools/mutate.tcl` (every mutant in its
 `mutants.txt` must still apply and be killed: update a mutant's text when
 you change the code it mutates, keeping it a mutant of the same rule; a
-mutant's `%%` line names the test files that kill it). A change to a
-package's recipe or the author image also runs
+mutant's `%%` line names the test files that kill it). A change to
+resolution, the graph file or what reads it (pm/graph.tcl, the graph parts
+of pm/install.tcl, pm/view.tcl, pm/commands.tcl's `add`, `update` and
+`package graph`, surface/modules.tcl's package graphs) also runs
+`audit/shared-dependencies/tools/fuzz.tcl` (several seeds: the package
+manager against its independent resolver, `oracle.py`, whose `selftest`
+runs too), `audit/bot-modules/tools/mutate.tcl` (its `graph-*` mutants),
+`tests/package-workloads.test`'s `pw-shared-*` (two libraries over one
+event_loop_linux, run against epoll) and, after `single/build.sh`, the clean
+room (`audit/shared-dependencies/cleanroom/cleanroom.sh image`, then
+`repository.sh OUT` and `cleanroom.sh run single/out/botlish OUT RESULTS`:
+the single-file compiler and published artifacts only, no network).
+`bench/shared-dependencies.tcl` measures resolution against a baseline
+checkout (`-root`). A change to a package's recipe or the author image also runs
 `tools/package-build/author.sh build OUT -release` twice (two fresh
 containers: their artifacts and records must be identical and equal the
 recorded releases) and, on a branch, `package-reproducibility.yml`
@@ -5649,6 +5842,13 @@ mutates, keeping it a mutant of the same rule); for a scheduling change
 also `bench/lsp.tcl` (both schedulers, the census's workloads), and for
 packaging `single/smoke-test.sh` after `single/build.sh` (its `-lsp`
 session).
+
+`editors/vscode/` is a VS Code extension for the same server: a client
+like the Neovim configuration, starting `main.tcl -lsp` (its server.js
+works out the command) and adding nothing semantic. If you change it, or
+the server's capabilities, options or URIs, run its `npm test` and
+`xvfb-run -a npm run test:vscode` (VS Code itself; CI runs neither) in
+`editors/vscode` after `npm ci`, and package it (`npm run package`).
 
 ## Syntax recovery
 

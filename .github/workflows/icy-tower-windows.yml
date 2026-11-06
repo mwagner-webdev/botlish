@@ -13,41 +13,60 @@ name: icy-tower (windows x86-64)
 #
 # The game, icy-tower.exe with the SDL3.dll it loads beside it and a
 # README, is uploaded as the run's icy-tower-windows-x86_64 artifact, and
-# the generated binding as sdl3-binding-windows-x86_64. A build of main whose
-# tests pass is published as the icy-tower-windows-latest release's
+# the generated binding as sdl3-binding-windows-x86_64.
+#
+# Publishing is a run of its own (CI-RUNS.md, "The release gate"): once
+# every test of a commit of main is green -- tests.yml with its GC-stress
+# job, tests-arm64.yml with its, macOS, Windows, static-decisions when it
+# ran, and this workflow's own build and tests -- the release gate
+# (release-gate.yml) dispatches this workflow on main with release=SHA, and
+# that run signs (below) and publishes the very game the commit's push run
+# built and tested as the icy-tower-windows-latest release's
 # icy-tower-windows-x86_64.zip, which the README's Windows download button
-# links to.
+# links to. A release run builds nothing, checks the commit's tests again
+# (the tested job: tools/ci/runs.py check), and is never cancelled: a push
+# that supersedes the commit meanwhile cancels only the push runs.
 #
 # Authenticode signing (ICY-TOWER-WINDOWS.md, "Signing", has the setup): every
 # build signs copies of icy-tower.exe and SDL3.dll with a throwaway
 # self-signed certificate and plays them, so a signature is known not to
 # break the game. Real signatures are made only once the repository variable
 # WINDOWS_SIGNING says how (artifact-signing: Azure Artifact Signing
-# through OpenID Connect), only for main, by the sign job in the
-# windows-signing environment, which alone holds the credentials; the
-# release then publishes the signed files, and never the unsigned ones while
-# signing is configured.
+# through OpenID Connect), only in a manual run -- a release run of main
+# among them -- by the sign job in the windows-signing environment, which
+# alone holds the credentials; the release then publishes the signed files,
+# and never the unsigned ones while signing is configured.
 #
 # Pushes to any branch run it, as tests (windows x86-64) does, so a branch
 # gets the Windows build before this file is on main; a pull request from
 # this repository's own branches skips (its push already ran), one from a
-# fork runs. Documentation-only pushes skip. A newer push to the same branch
-# cancels a running one, except on main. The checkout keeps the
-# repository's bytes (no CRLF conversion).
+# fork runs. Documentation-only pushes skip, and so do tags (a tag's commit
+# was built where it was pushed). A newer push to the same branch cancels a
+# running one, on main too; a release run is in a group of its own and
+# never cancelled. The checkout keeps the repository's bytes (no CRLF
+# conversion).
 
 on:
   push:
+    branches: ["**"]
     paths-ignore: ["**.md", "docs/**"]
   pull_request:
     paths-ignore: ["**.md", "docs/**"]
   workflow_dispatch:
+    inputs:
+      release:
+        description: "Sign and publish the build of this commit of main (its full SHA) once its tests are green; empty: build and test"
+        type: string
+        default: ""
+
+run-name: ${{ inputs.release && format('release {0}', inputs.release) || '' }}
 
 permissions:
   contents: read
 
 concurrency:
-  group: icy-tower-windows-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  group: icy-tower-windows-${{ inputs.release && 'release' || github.ref }}
+  cancel-in-progress: ${{ !inputs.release }}
 
 defaults:
   run:
@@ -58,7 +77,9 @@ defaults:
 jobs:
   build:
     name: icy-tower (build and test, Windows x86-64, MSVC)
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    if: >-
+      !inputs.release
+      && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository)
     runs-on: windows-2025
     timeout-minutes: 90
     env:
@@ -230,32 +251,61 @@ jobs:
             test.log
           if-no-files-found: warn
 
+  # A release run's check (CI-RUNS.md): every test of the commit is green,
+  # this workflow's own push run among them, whose id the sign and release
+  # jobs download the game from. It fails the run otherwise.
+  tested:
+    name: the commit's tests are green
+    if: inputs.release && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      run_id: ${{ steps.check.outputs.run_id }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          sparse-checkout: tools/ci
+
+      - name: The commit's tests are green
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ inputs.release }}
+        run: python3 -I tools/ci/runs.py check "$SHA" --for icy-tower-windows --require
+
   # Authenticode signatures for the release (ICY-TOWER-WINDOWS.md,
   # "Signing"). Off while the repository variable WINDOWS_SIGNING is unset:
   # a repository variable, not the environment's, because a job's `if` is
-  # decided before the job enters its environment. Pushes to main get here,
-  # and a manual run (workflow_dispatch) on any ref, in the windows-signing
-  # environment, which holds the credentials and whose deployment rule
-  # admits main alone (a manual run elsewhere fails here unless the rule
-  # admits its branch): the build job, other pushes and pull requests never
-  # see them. It signs icy-tower.exe and SDL3.dll in place (a SHA-256
-  # digest, an RFC 3161 timestamp), requires both signatures to be valid and
-  # timestamped, plays the signed game and uploads it as
-  # icy-tower-windows-x86_64-signed. The one method is artifact-signing
-  # (Azure Artifact Signing, through OpenID Connect: no key or password in
-  # GitHub); another service's signing step would take its place before the
-  # verification.
+  # decided before the job enters its environment. Only a manual run
+  # (workflow_dispatch) gets here -- a release run of main, which signs the
+  # game its commit's push run built, or a plain manual run on any ref,
+  # which signs its own build -- in the windows-signing environment, which
+  # holds the credentials and whose deployment rule admits main alone (a
+  # manual run elsewhere fails here unless the rule admits its branch): the
+  # build job, pushes and pull requests never see them. It signs
+  # icy-tower.exe and SDL3.dll in place (a SHA-256 digest, an RFC 3161
+  # timestamp), requires both signatures to be valid and timestamped, plays
+  # the signed game and uploads it as icy-tower-windows-x86_64-signed. The
+  # one method is artifact-signing (Azure Artifact Signing, through OpenID
+  # Connect: no key or password in GitHub); another service's signing step
+  # would take its place before the verification.
   sign:
     name: sign (Authenticode)
-    needs: build
+    needs: [build, tested]
     if: >-
-      vars.WINDOWS_SIGNING != '' && github.event_name != 'pull_request'
-      && (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch')
+      !cancelled() && vars.WINDOWS_SIGNING != '' && github.event_name == 'workflow_dispatch'
+      && (needs.build.result == 'success'
+          || (inputs.release && needs.build.result == 'skipped' && needs.tested.result == 'success'))
     runs-on: windows-2025
     timeout-minutes: 30
     environment: windows-signing
     permissions:
       contents: read
+      actions: read
       id-token: write
     outputs:
       publisher: ${{ steps.verify.outputs.publisher }}
@@ -277,10 +327,21 @@ jobs:
       # For sign-windows.ps1 -Verify.
       - uses: actions/checkout@v5
 
+      # The game: this run's build, or, in a release run, the one the
+      # commit's tested push run built.
       - uses: actions/download-artifact@v4
+        if: needs.build.result == 'success'
         with:
           name: icy-tower-windows-x86_64
           path: dist/icy-tower-windows-x86_64
+
+      - uses: actions/download-artifact@v4
+        if: needs.build.result != 'success'
+        with:
+          name: icy-tower-windows-x86_64
+          path: dist/icy-tower-windows-x86_64
+          run-id: ${{ needs.tested.outputs.run_id }}
+          github-token: ${{ github.token }}
 
       # Third-party actions that see signing credentials are pinned by
       # commit, their release in the comment.
@@ -342,55 +403,68 @@ jobs:
           if-no-files-found: error
 
   # The README's Windows download button: a rolling prerelease whose tag and
-  # asset follow main, as single-executable.yml's single-latest. Run
-  # artifacts need a GitHub login to download and expire; a release asset
-  # has a stable URL anyone can fetch:
+  # asset follow main's newest commit whose tests are green, as
+  # single-executable.yml's single-latest. Run artifacts need a GitHub login
+  # to download and expire; a release asset has a stable URL anyone can
+  # fetch:
   #   https://github.com/OWNER/REPO/releases/download/icy-tower-windows-latest/icy-tower-windows-x86_64.zip
-  # It publishes the signed game when the sign job ran, and the unsigned one
-  # only while signing is not configured: a failed or cancelled signature
-  # publishes nothing.
+  # Only in a release run. It publishes the signed game when the sign job
+  # ran, and the unsigned one (the commit's push run's) only while signing is
+  # not configured: a failed or cancelled signature publishes nothing.
   release:
     name: publish the latest build
-    needs: [build, sign]
+    needs: [tested, sign]
     if: >-
-      !cancelled() && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-      && needs.build.result == 'success'
+      !cancelled() && inputs.release && github.ref == 'refs/heads/main'
+      && needs.tested.result == 'success'
       && (needs.sign.result == 'success' || (needs.sign.result == 'skipped' && vars.WINDOWS_SIGNING == ''))
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    # One publication at a time, never cancelled, so two pushes in quick
-    # succession cannot interleave their tag move and upload.
+      actions: read
+    # One publication at a time, never cancelled, so two release runs in
+    # quick succession cannot interleave their tag move and upload.
     concurrency:
       group: icy-tower-windows-release
       cancel-in-progress: false
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
+      SHA: ${{ inputs.release }}
+      BUILD_RUN: ${{ needs.tested.outputs.run_id }}
       TAG: icy-tower-windows-latest
       ASSET: icy-tower-windows-x86_64.zip
       SIGNED: ${{ needs.sign.result == 'success' }}
       PUBLISHER: ${{ needs.sign.outputs.publisher }}
     steps:
       - uses: actions/download-artifact@v4
+        if: needs.sign.result == 'success'
         with:
-          name: ${{ needs.sign.result == 'success' && 'icy-tower-windows-x86_64-signed' || 'icy-tower-windows-x86_64' }}
+          name: icy-tower-windows-x86_64-signed
           path: dist/icy-tower-windows-x86_64
+
+      - uses: actions/download-artifact@v4
+        if: needs.sign.result != 'success'
+        with:
+          name: icy-tower-windows-x86_64
+          path: dist/icy-tower-windows-x86_64
+          run-id: ${{ needs.tested.outputs.run_id }}
+          github-token: ${{ github.token }}
 
       - name: Publish to the icy-tower-windows-latest release
         run: |
           set -euo pipefail
-          # Builds of main can finish out of order: never replace the build
+          # Release runs can finish out of order: never replace the build
           # of a later commit with an earlier one. (A tag left on a commit
           # main no longer holds, after a force push, is "diverged" and is
           # replaced.)
           if old=$(gh api "repos/$GH_REPO/git/ref/tags/$TAG" --jq .object.sha 2>/dev/null); then
-            if [ "$(gh api "repos/$GH_REPO/compare/$old...$GITHUB_SHA" --jq .status)" = behind ]; then
-              echo "$TAG already holds $old, a later commit than $GITHUB_SHA: left as it is."
+            if [ "$(gh api "repos/$GH_REPO/compare/$old...$SHA" --jq .status)" = behind ]; then
+              echo "$TAG already holds $old, a later commit than $SHA: left as it is."
               exit 0
             fi
             gh api --method PATCH "repos/$GH_REPO/git/refs/tags/$TAG" \
-              -f sha="$GITHUB_SHA" -F force=true >/dev/null
+              -f sha="$SHA" -F force=true >/dev/null
           fi
           cd dist
           zip -r -X "$ASSET" icy-tower-windows-x86_64
@@ -400,7 +474,7 @@ jobs:
           else
             signature="The files are not code-signed yet, so Windows SmartScreen warns (\"Windows protected your PC\"): More info, then Run anyway."
           fi
-          notes="Icy Tower, a game written in Botlish, for Windows x86-64 (docs/ICY-TOWER-WINDOWS.md): icy-tower.exe and the SDL3.dll it loads, in one zip -- unpack it and run icy-tower.exe. Built from main at $GITHUB_SHA by $GITHUB_SERVER_URL/$GH_REPO/actions/runs/$GITHUB_RUN_ID and replaced on every push to main whose Windows build passes its tests.
+          notes="Icy Tower, a game written in Botlish, for Windows x86-64 (docs/ICY-TOWER-WINDOWS.md): icy-tower.exe and the SDL3.dll it loads, in one zip -- unpack it and run icy-tower.exe. Built from main at $SHA and tested by $GITHUB_SERVER_URL/$GH_REPO/actions/runs/$BUILD_RUN, published by $GITHUB_SERVER_URL/$GH_REPO/actions/runs/$GITHUB_RUN_ID once every test of that commit was green, and replaced by main's next commit whose tests are.
 
           $signature
 
@@ -409,6 +483,6 @@ jobs:
             gh release upload "$TAG" "$ASSET" "$ASSET.sha256" --clobber
             gh release edit "$TAG" --notes "$notes"
           else
-            gh release create "$TAG" "$ASSET" "$ASSET.sha256" --target "$GITHUB_SHA" \
+            gh release create "$TAG" "$ASSET" "$ASSET.sha256" --target "$SHA" \
               --prerelease --title "Icy Tower for Windows (latest main)" --notes "$notes"
           fi

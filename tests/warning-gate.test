@@ -1,6 +1,6 @@
 # warning-gate.test -- the warning gate (REFACTOR-WARNINGS-CLEAN.md, item 12):
 # audit/refactor/tools/gate.tcl asserts that the corpus's warnings are
-# exactly audit/refactor/manifest.txt. Its CI step is the `warning-gate` job
+# exactly audit/refactor/manifest.txt. In CI it is a step of the canary job
 # of .github/workflows/tests.yml; these tests pin that it passes on the tree
 # and that it is a ratchet -- it fails on a planted new warning, on a closed
 # finding the manifest still lists, on a drifted location, on a program the

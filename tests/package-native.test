@@ -96,7 +96,7 @@ proc pm {args} {
 }
 
 proc kindOf {err} {
-    if {[regexp {\(PM ([A-Z]+)\)\s*$} $err -> kind]} { return $kind }
+    if {[regexp {\(PM ([A-Z-]+)\)\s*$} $err -> kind]} { return $kind }
     return ""
 }
 
@@ -295,7 +295,7 @@ test pn-one-artifact-two-targets {one immutable geo 1.0.0 carries both targets' 
     list [dict get $added status] [lrange [split [dict get $added out] \n] 1 1] $a1 [lrange [split [dict get $b out] \n] 1 2] $b1 \
         [lrange [split [dict get $again out] \n] 1 2] $a2 [expr {[treeState [file join $app .bot_modules .targets linux-x86_64]] eq $before}] \
         [lsort [glob -tails -directory [file join $app .bot_modules .targets] *]]
-} -cleanup cleanup -result {0 {{view linux-x86_64: derived (3 files, 0 native libraries)}} {"linux-x86_64/1.0.0"} {{view linux-aarch64: derived (3 files, 0 native libraries)} {view linux-x86_64: unchanged}} {"linux-aarch64/1.0.0"} {{view linux-aarch64: unchanged} {view linux-x86_64: unchanged}} {"linux-x86_64/1.0.0"} 1 {linux-aarch64 linux-x86_64}}
+} -cleanup cleanup -result {0 {{view linux-x86_64: derived (4 files, 0 native libraries)}} {"linux-x86_64/1.0.0"} {{view linux-aarch64: derived (4 files, 0 native libraries)} {view linux-x86_64: unchanged}} {"linux-aarch64/1.0.0"} {{view linux-aarch64: unchanged} {view linux-x86_64: unchanged}} {"linux-x86_64/1.0.0"} 1 {linux-aarch64 linux-x86_64}}
 
 test pn-concurrent-target-compiles {two compilations for two targets, run at once in two processes, each read their own view: the results are what each gives alone} -body {
     set repo [fresh repo]
@@ -325,7 +325,7 @@ test pn-update-derives-every-view {an update replaces the store and derives ever
     pm install -project $app -repository $repo -target linux-x86_64 -target linux-aarch64
     set r [pm update -project $app -repository $repo]
     list [dict get $r status] [lrange [split [dict get $r out] \n] 1 2] [appValue $app linux-x86_64] [appValue $app linux-aarch64]
-} -cleanup cleanup -result {0 {{view linux-aarch64: derived again (3 files, 0 native libraries)} {view linux-x86_64: derived again (3 files, 0 native libraries)}} {"linux-x86_64/1.0.1"} {"linux-aarch64/1.0.1"}}
+} -cleanup cleanup -result {0 {{view linux-aarch64: derived again (4 files, 0 native libraries)} {view linux-x86_64: derived again (4 files, 0 native libraries)}} {"linux-x86_64/1.0.1"} {"linux-aarch64/1.0.1"}}
 
 test pn-unsupported-target {a package names the targets it supports, and nothing else is assumed: preparing another is UNSUPPORTED, naming the dependency path, and changes nothing; a nested dependency with less target support limits its consumer} -body {
     set repo [fresh repo]
@@ -349,39 +349,47 @@ test pn-unprepared-target-diagnostic {compiling for a target whose view was neve
     string map [list $app APP] [appValue $app linux-aarch64]
 } -cleanup cleanup -match glob -result {UNKNOWN-NAMESPACE: *APP/.bot_modules/.targets holds the application's packages by target, and none for linux-aarch64 (no directory APP/.bot_modules/.targets/linux-aarch64): its packages are not prepared for that target*}
 
-test pn-two-versions-in-views {two versions of one target-aware package on separate branches are two instances in every view, each with its own target files} -body {
+test pn-shared-in-views {a target-aware package two packages lock at one version is one instance in every view, each target's files once, its package graph beside it; two versions of it are a conflict, in no view} -body {
     set repo [fresh repo]
     set src [fresh src]
     pack [geoPackage $src 1.0.0] $repo
     pack [geoPackage $src 2.0.0] $repo
-    foreach {name v} {physics 1.0 rendering 2.0} {
+    foreach {name v} {physics 1.0 rendering 1.0 other 2.0} {
         pack [packageDir $src $name 1.0.0 "{\"schema\": 1, \"name\": \"$name\", \"version\": \"1.0.0\", \"dependencies\": {\"geo\": \"$v\"}, \"lock\": {\"geo\": \"$v.0\"}}" [list $name.bot "import geo\n\nfn which() -> str:\n    geo::which()\n"]] $repo
     }
     set app [application "import physics\nimport rendering\n\n\[physics::which(), rendering::which()\]\n"]
     pm add physics -project $app -repository $repo -target linux-x86_64 -target linux-aarch64
     pm add rendering -project $app -repository $repo
-    list [appValue $app linux-x86_64] [appValue $app linux-aarch64]
-} -cleanup cleanup -result {{["linux-x86_64/1.0.0", "linux-x86_64/2.0.0"]} {["linux-aarch64/1.0.0", "linux-aarch64/2.0.0"]}}
+    set r [pm add other -project $app -repository $repo]
+    list [appValue $app linux-x86_64] [appValue $app linux-aarch64] \
+        [lsort [glob -tails -types d -directory [file join $app .bot_modules .targets linux-aarch64] *]] \
+        [readBytes [file join $app .bot_modules .targets linux-aarch64 .graph]] [kindOf [dict get $r err]]
+} -cleanup cleanup -result {{["linux-x86_64/1.0.0", "linux-x86_64/1.0.0"]} {["linux-aarch64/1.0.0", "linux-aarch64/1.0.0"]} {geo physics rendering} {botlish package graph 1
+application physics rendering
+package geo
+package physics geo
+package rendering geo
+} DEPENDENCY-CONFLICT}
 
-test pn-pure-packages-no-views {target-independent packages never get views: no .targets, the record schema 1 as in PM-1, and -target asks for nothing to do} -body {
+test pn-pure-packages-no-views {target-independent packages never get views: no .targets, the record's views empty, and -target asks for nothing to do} -body {
     set repo [fresh repo]
     pack [packageDir [fresh src] web 1.0.0 {{"schema": 1, "name": "web", "version": "1.0.0"}} [list web.bot "fn hello() -> str:\n    \"hello\"\n"]] $repo
     set app [application "import web\n\nweb::hello()\n"]
     set r [pm add web -project $app -repository $repo]
     set t [pm install -project $app -repository $repo -target linux-aarch64]
     list [regexp {^web 1\.0\.0 \(sha256 [0-9a-f]+\): installed\nadded web} [dict get $r out]] [file exists [file join $app .bot_modules .targets]] \
-        [string range [readBytes [file join $app .bot_modules .botlish state.json]] 0 14] [dict get $t out] [appValue $app]
-} -cleanup cleanup -result [list 1 0 "{\n  \"state\": 1," "web 1.0.0: unchanged\nnote: no installed package is target-specific: every target compiles from .bot_modules itself, so there is no target view to keep" {"hello"}]
+        [string match {*"views": {}*} [readBytes [file join $app .bot_modules .botlish state.json]]] [dict get $t out] [appValue $app]
+} -cleanup cleanup -result [list 1 0 1 "web 1.0.0: unchanged\nnote: no installed package is target-specific: every target compiles from .bot_modules itself, so there is no target view to keep" {"hello"}]
 
-test pn-views-dropped-with-last-aware-package {removing the last target-aware package removes every view and .targets with them: the record is schema 1 again} -body {
+test pn-views-dropped-with-last-aware-package {removing the last target-aware package removes every view and .targets with them: the record has no view again} -body {
     set repo [fresh repo]
     pack [geoPackage [fresh src] 1.0.0] $repo
     set app [application "1\n"]
     pm add geo -project $app -repository $repo -target linux-x86_64 -target linux-aarch64
     set r [pm remove geo -project $app]
     list [dict get $r status] [lrange [split [dict get $r out] \n] 0 3] [file exists [file join $app .bot_modules .targets]] \
-        [string range [readBytes [file join $app .bot_modules .botlish state.json]] 0 14]
-} -cleanup cleanup -result [list 0 {{removed geo} {note: no installed package is target-specific any more: its target views are removed, and every target compiles from .bot_modules itself} {view linux-aarch64: removed} {view linux-x86_64: removed}} 0 "{\n  \"state\": 1,"]
+        [string match {*"views": {}*} [readBytes [file join $app .bot_modules .botlish state.json]]]
+} -cleanup cleanup -result [list 0 {{removed geo} {note: no installed package is target-specific any more: its target views are removed, and every target compiles from .bot_modules itself} {view linux-aarch64: removed} {view linux-x86_64: removed}} 0 1]
 
 test pn-drop-target {-drop-target removes one view and keeps the others} -body {
     set repo [fresh repo]

@@ -36,7 +36,26 @@
 # SHA-256 of what it was derived from (pm/view.tcl's Derived: the record of
 # the packages, the target, the consumer's origins and the manual packages
 # it links), its files and links relative to the view's directory. A record
-# without views is written as schema 1, byte for byte PM-1's.
+# without views was written as schema 1, byte for byte PM-1's.
+#
+# Shared dependencies (SHARED-PACKAGE-DEPENDENCIES-MILESTONE-1.md, pm/graph.tcl)
+# make the record schema 3, which every operation now writes: the packages
+# are the application's one dependency graph, each installed once at
+# PROJECT/.bot_modules/NAME, none under another's .bot_modules:
+#
+#   {"state": 3, "application": [NAME, ...], "packages": {NAME: NODE, ...},
+#    "views": {...}}
+#   NODE := {"kind": "artifact", "version": V, "sha256": D,
+#            "files": {...}, "uses": {NAME: VERSION, ...}}
+#         | {"kind": "editable", "directory": RELATIVE-PATH, "version": V,
+#            "uses": {NAME: VERSION, ...}}
+#
+# `application` the project's direct dependencies, `uses` each package's own
+# (the versions its botlish.json locks, which are the graph's): together the
+# graph PROJECT/.bot_modules/.graph states (pm::graph::OfState). A schema 1
+# or 2 record is read as the nested layout of earlier package managers (one
+# instance per dependency path, `children`), which an operation replaces by
+# the graph's layout. In memory a schema 3 node has `uses` and no children.
 
 namespace eval pm::state {}
 
@@ -60,10 +79,21 @@ proc pm::state::views {meta} {
     return [dict get [readAll $meta] views]
 }
 
+# The record's application dependencies (schema 3), and its layout: graph
+# (schema 3), nested (an earlier package manager's schema 1 or 2) or none
+# (no record).
+proc pm::state::application {meta} {
+    return [dict get [readAll $meta] application]
+}
+
+proc pm::state::layout {meta} {
+    return [dict get [readAll $meta] layout]
+}
+
 proc pm::state::readAll {meta} {
     set path [Path $meta]
     if {![pm::Exists $path]} {
-        return [dict create packages [empty] views [dict create]]
+        return [dict create packages [empty] views [dict create] application {} layout none]
     }
     if {[file type $path] ne "file"} {
         pm::Fail STATE "the installation record $path is not a regular file"
@@ -72,17 +102,46 @@ proc pm::state::readAll {meta} {
         set value [pm::json::decode [pm::ReadBytes $path] -limit [expr {64 * 1024 * 1024}]]
         set members [Object $value record]
         set views [dict create]
+        set application {}
+        set layout nested
         if {[dict keys $members] eq {state packages} && [dict get $members state] eq {num 1}} {
         } elseif {[dict keys $members] eq {state packages views} && [dict get $members state] eq {num 2}} {
             set views [Views [dict get $members views]]
+        } elseif {[dict keys $members] eq {state application packages views} && [dict get $members state] eq {num 3}} {
+            set views [Views [dict get $members views]]
+            set layout graph
+            set list [dict get $members application]
+            if {[pm::json::type $list] ne "arr"} {
+                error "the application's dependencies are not a list"
+            }
+            foreach item [pm::json::payload $list] {
+                if {[pm::json::type $item] ne "str" || [pm::descriptor::NameProblem [pm::json::payload $item]] ne ""} {
+                    error "the application's dependency \"[pm::json::payload $item]\""
+                }
+                lappend application [pm::json::payload $item]
+            }
         } else {
-            error "not a schema 1 or 2 installation record"
+            error "not a schema 1, 2 or 3 installation record"
         }
-        set packages [Nodes [dict get $members packages]]
+        set packages [Nodes [dict get $members packages] $layout]
+        if {$layout eq "graph"} {
+            foreach name $application {
+                if {![dict exists $packages $name]} {
+                    error "the application's dependency $name is no package of the record"
+                }
+            }
+            dict for {name node} $packages {
+                foreach dep [dict keys [dict get $node uses]] {
+                    if {![dict exists $packages $dep]} {
+                        error "$name uses $dep, which is no package of the record"
+                    }
+                }
+            }
+        }
     } message]} {
         pm::Fail STATE "the installation record $path is damaged ($message): the package manager cannot tell its packages from yours. Move .bot_modules aside and run install again"
     }
-    return [dict create packages $packages views $views]
+    return [dict create packages $packages views $views application $application layout $layout]
 }
 
 proc pm::state::Views {value} {
@@ -113,8 +172,11 @@ proc pm::state::Views {value} {
 }
 
 # "" when PATH is a path inside a view: an archive path, or one under its
-# .lib or a package's .bot_modules.
+# .lib or a package's .bot_modules, or its package graph .graph.
 proc pm::state::ViewPathProblem {path} {
+    if {$path eq ".graph"} {
+        return ""
+    }
     return [pm::archive::pathProblem [string map {.bot_modules/ bot_modules/ .lib/ lib/} $path]]
 }
 
@@ -150,7 +212,9 @@ proc pm::state::String {members key} {
     return [pm::json::payload [dict get $members $key]]
 }
 
-proc pm::state::Nodes {value} {
+# The nodes of the record's `packages` VALUE, in the LAYOUT of its schema:
+# graph (flat, each with the versions it uses) or nested.
+proc pm::state::Nodes {value {layout nested}} {
     set nodes [dict create]
     foreach {name item} [Object $value packages] {
         if {[pm::descriptor::NameProblem $name] ne ""} {
@@ -160,7 +224,8 @@ proc pm::state::Nodes {value} {
         set kind [String $members kind]
         switch -- $kind {
             artifact {
-                if {[lsort [dict keys $members]] ne {dependencies files kind sha256 version}} {
+                set expected [expr {$layout eq "graph" ? {files kind sha256 uses version} : {dependencies files kind sha256 version}}]
+                if {[lsort [dict keys $members]] ne $expected} {
                     error "$name: unexpected keys"
                 }
                 set files [dict create]
@@ -182,15 +247,24 @@ proc pm::state::Nodes {value} {
                 if {![pm::version::isVersion $version] || ![regexp {^[0-9a-f]{64}$} $digest]} {
                     error "$name: the version or digest"
                 }
-                dict set nodes $name [dict create kind artifact version $version sha256 $digest \
-                    files $files children [Nodes [dict get $members dependencies]]]
+                if {$layout eq "graph"} {
+                    dict set nodes $name [dict create kind artifact version $version sha256 $digest \
+                        files $files children {} uses [Uses [dict get $members uses] $name]]
+                } else {
+                    dict set nodes $name [dict create kind artifact version $version sha256 $digest \
+                        files $files children [Nodes [dict get $members dependencies]]]
+                }
             }
             editable {
-                if {[lsort [dict keys $members]] ne {directory kind version}} {
+                set expected [expr {$layout eq "graph" ? {directory kind uses version} : {directory kind version}}]
+                if {[lsort [dict keys $members]] ne $expected} {
                     error "$name: unexpected keys"
                 }
                 dict set nodes $name [dict create kind editable version [String $members version] \
                     directory [String $members directory]]
+                if {$layout eq "graph"} {
+                    dict set nodes $name uses [Uses [dict get $members uses] $name]
+                }
             }
             default {
                 error "$name: unknown kind \"$kind\""
@@ -200,14 +274,38 @@ proc pm::state::Nodes {value} {
     return $nodes
 }
 
-# The JSON value of NODES.
+# A graph node's `uses` VALUE (NAME -> exact version) of the package NAME.
+proc pm::state::Uses {value name} {
+    set uses [dict create]
+    foreach {dep version} [Object $value "$name's uses"] {
+        if {[pm::descriptor::NameProblem $dep] ne "" || [pm::json::type $version] ne "str"
+                || ![pm::version::isVersion [pm::json::payload $version]] || $dep eq $name} {
+            error "$name: the dependency \"$dep\""
+        }
+        dict set uses $dep [pm::json::payload $version]
+    }
+    return $uses
+}
+
+# The JSON value of NODES (graph nodes with their `uses`; nested ones with
+# their dependencies' nodes).
 proc pm::state::Value {nodes} {
     set object {}
     foreach name [lsort [dict keys $nodes]] {
         set node [dict get $nodes $name]
+        set uses {}
+        if {[dict exists $node uses]} {
+            foreach dep [lsort [dict keys [dict get $node uses]]] {
+                lappend uses $dep [list str [dict get $node uses $dep]]
+            }
+        }
         if {[dict get $node kind] eq "editable"} {
-            lappend object $name [list obj [list kind {str editable} \
-                directory [list str [dict get $node directory]] version [list str [dict get $node version]]]]
+            set members [list kind {str editable} \
+                directory [list str [dict get $node directory]] version [list str [dict get $node version]]]
+            if {[dict exists $node uses]} {
+                lappend members uses [list obj $uses]
+            }
+            lappend object $name [list obj $members]
             continue
         }
         set files {}
@@ -215,17 +313,21 @@ proc pm::state::Value {nodes} {
             lassign [dict get $node files $path] size crc
             lappend files $path [list obj [list size [list num $size] crc32 [list str $crc]]]
         }
-        lappend object $name [list obj [list kind {str artifact} version [list str [dict get $node version]] \
-            sha256 [list str [dict get $node sha256]] files [list obj $files] \
-            dependencies [Value [dict get $node children]]]]
+        set members [list kind {str artifact} version [list str [dict get $node version]] \
+            sha256 [list str [dict get $node sha256]] files [list obj $files]]
+        if {[dict exists $node uses]} {
+            lappend members uses [list obj $uses]
+        } else {
+            lappend members dependencies [Value [dict get $node children]]
+        }
+        lappend object $name [list obj $members]
     }
     return [list obj $object]
 }
 
-proc pm::state::encode {nodes {views ""}} {
-    if {$views eq ""} {
-        return [pm::json::encode [list obj [list state {num 1} packages [Value $nodes]]]]
-    }
+# The record's bytes: the graph's packages NODES (each with its `uses`), the
+# views VIEWS and the application's dependencies APPLICATION, schema 3.
+proc pm::state::encode {nodes {views ""} {application {}}} {
     set object {}
     foreach target [lsort [dict keys $views]] {
         set view [dict get $views $target]
@@ -241,7 +343,9 @@ proc pm::state::encode {nodes {views ""}} {
         lappend object $target [list obj [list derived [list str [dict get $view derived]] \
             files [list obj $files] links [list obj $links]]]
     }
-    return [pm::json::encode [list obj [list state {num 2} packages [Value $nodes] views [list obj $object]]]]
+    set list [lmap name [lsort $application] {list str $name}]
+    return [pm::json::encode [list obj [list state {num 3} application [list arr $list] \
+        packages [Value $nodes] views [list obj $object]]]]
 }
 
 # How the view directory DIR differs from its record VIEW: a list of

@@ -71,6 +71,8 @@ For an editor with a standard LSP client the whole configuration is:
 
 `editors/neovim/botlish.lua` is that configuration for Neovim 0.10 or
 later: the `.bot` filetype and one shared client for every Botlish buffer.
+`editors/vscode/` (added after this milestone) is a VS Code extension doing
+the same; its README says how to install it.
 
 ### An editor session
 
@@ -1026,7 +1028,9 @@ for `.bot` files (section 1).
   more finely.
 * **Neovim is the one real editor tested.** Others need only the command
   (section 1); VS Code would need a small extension to start a server, which
-  this milestone does not include.
+  this milestone does not include. (One was added later, `editors/vscode/`,
+  tested in VS Code itself by its own `npm run test:vscode`, which CI does
+  not run.)
 
 ## 12. Next milestone
 

@@ -1,0 +1,551 @@
+# parameterized-declaration-summaries.test -- the component analyses of
+# parameterized nominal types answered from finite declaration summaries,
+# never by unfolding applications (PARAMETERIZED-DECLARATION-SUMMARIES-
+# MILESTONE-1.md).
+#
+# A parameterized declaration is a finite semantic object even where
+# substituting its arguments again and again makes infinitely many distinct
+# applications (`struct W[T]: next: List[W[List[T]]]` reaches W[C],
+# W[List[C]], ...). hir/summaries.tcl summarizes each declaration once, by
+# a least fixpoint over the declarations, and every analysis reads an
+# application's answer from its declaration's summary and its own
+# arguments' answers: Bearing, CarriedInto, Totality (equality, hash),
+# SendClass, MentionsMutable, MayHoldVector, CanCarry, the DecimalRounded
+# equality guard, MutableComponent and ValueStability. These tests pin the
+# specimens' answers, their parity with the walks they replaced
+# (audit/declaration-summaries/tools/reference.tcl) and with an independent
+# model (oracle.py), the structural counters, isolation and interchange, and
+# that the obsolete `no finite form` rejection is gone.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot audit declaration-summaries tools parity.tcl]
+
+testConstraint python3 [expr {![catch {exec python3 -c {print(1)}}]}]
+
+set pdsDecls {import std::list
+import std::transfer
+import std::immutable_set
+import std::ffi::c
+
+struct Message:
+    value: int
+
+struct Event:
+    value: int
+
+error Oops
+
+error Ouch
+
+struct Raises:
+    f: Fn{args: [], return: int, errors: [Oops]}
+
+struct Box[T]:
+    value: T
+
+struct Phantom[T]:
+    value: int
+
+struct Pair[A, B]:
+    first: A
+    second: B
+
+struct W[T]:
+    next: List[W[List[T]]]
+
+struct Mixed[A, B]:
+    value: A
+    next: List[Mixed[A, List[B]]]
+
+struct PhantomRec[T]:
+    next: List[PhantomRec[List[T]]]
+
+struct UA[T]:
+    b: List[UB[T]]
+    v: T
+
+struct UB[T]:
+    a: UA[T]
+
+struct GrowA[T]:
+    b: List[GrowB[List[T]]]
+
+struct GrowB[T]:
+    a: GrowA[T]
+    v: T
+
+struct OwnGrow[T]:
+    next: List[OwnGrow[List[T]]]
+    f: Fn{args: [int], return: int}
+
+struct OwnAny[T]:
+    next: List[OwnAny[List[T]]]
+    f: Fn{args: [any], return: int}
+
+struct Node[T]:
+    value: T
+    children: List[Node[T]]
+
+struct Handler[T]:
+    f: Fn{args: [T], return: int}
+
+struct Getter[T]:
+    f: Fn{args: [], return: T}
+
+struct Ref[T]:
+    p: std::ffi::c::Ptr[T]
+
+struct OfList[T]:
+    v: Box[List[T]]
+
+struct Deep[T]:
+    values: List[List[T]]
+
+struct GrowBoxed[T]:
+    next: List[Box[GrowBoxed[List[T]]]]
+    v: T
+
+struct OfBox[T]:
+    v: Box[Box[T]]
+
+struct OfPhantom[T]:
+    v: Box[Phantom[T]]
+
+struct OfFn[T]:
+    v: Box[Fn{args: [], return: T}]
+
+struct OfPtr[T]:
+    v: Box[std::ffi::c::Ptr[T]]
+
+fn worker(seed: int, resume Message) -> Event:
+    message = yield Event {value: seed}
+    return Event {value: message.value}
+
+}
+
+# The handle type as a program writes it.
+set pdsC {Coroutine{args: [Message], return: Event}}
+
+proc pdsProgram {body} {
+    return [string map [list @C@ $::pdsC] "$::pdsDecls$body"]
+}
+
+# The error code of the first diagnostic of program TEXT, or "ok".
+proc pdsCode {text} {
+    if {[catch {surface::compile $text -warnings off} message options]} {
+        if {[dict exists $options -diagnostics]} {
+            return [lindex [dict get [lindex [dict get $options -diagnostics] 0] errorcode] end]
+        }
+        return [lindex [dict get $options -errorcode] end]
+    }
+    return ok
+}
+
+# The HIR of $pdsDecls, its declarations active.
+proc pdsHir {} {
+    set hir [surface::compile [pdsProgram "1\n"] -warnings off]
+    hir::activate $hir
+    return $hir
+}
+
+set pdsCo [hir::types::MakeCoroutineType [list {nstruct Message}] {nstruct Event} {}]
+set pdsFn [hir::types::MakeFn {int} int {}]
+set pdsErr [hir::types::MakeFn {} int {Oops}]
+proc pdsApp {id args} {
+    return [hir::types::MakeApplied $id $args]
+}
+
+# Every analysis's answer for TYPE (classes only for the three-valued ones).
+proc pdsAnswers {hir type} {
+    return [list \
+        affine [hir::types::IsAffine $type] \
+        bearing [hir::callables::Bearing $hir $type] \
+        carried [hir::callables::CarriedErrors $hir $type] \
+        equality [lindex [hir::types::Totality equality $type] 0] \
+        hash [lindex [hir::types::Totality hash $type] 0] \
+        send [lindex [hir::types::SendClass $type] 0] \
+        mutable [hir::types::MentionsMutable $type] \
+        vector [hir::mutvec::MayHoldVector $type] \
+        carry [hir::staticdeps::CanCarry $hir $type]]
+}
+
+# ---------------------------------------------------------------------------
+# The framework
+
+test pds-framework {one framework: the affinity summary and the slot positions share its fixpoint, and each migrated analysis is a property of it -- the classes algebra (levels joined over the slots' entries) or the union algebra (CarriedInto's errors); the walks they replaced and the no-finite-form rejection are gone} -body {
+    list [string match *hir::summaries::Fixpoint* [info body hir::structs::Fixpoint]] \
+        [lsort [dict keys $::hir::summaries::properties]] \
+        [dict get $::hir::summaries::properties carried algebra] \
+        [dict get $::hir::summaries::properties bearing algebra] \
+        [lmap name {hir::structs::Unfolding hir::structs::UnfoldingFrom hir::structs::UnfoldingMessage hir::imprint::UnfoldingProblem hir::callables::HasMutArray} {info commands $name}]
+} -result {1 {bearing canCarry carried decimalMentions mayHoldVector mentionsMutable mutableComponent send totality.equality totality.hash valueStability} union classes {{} {} {} {} {}}}
+
+# ---------------------------------------------------------------------------
+# Non-uniform recursion
+
+test pds-w-specimens {W[T] of `next: List[W[List[T]]]` holds no value of T at any depth, so W[int], W[Coroutine{...}] and W[List[int]] have one answer, the declaration's own: unrestricted, no obligation, nothing carried, total, sendable, nothing mutable -- whatever the argument, and with no application unfolded} -body {
+    set hir [pdsHir]
+    set deep $::pdsCo
+    for {set k 0} {$k < 8} {incr k} {
+        set deep [hir::types::MakeList $deep]
+    }
+    lmap t [list [pdsApp W int] [pdsApp W $::pdsCo] [pdsApp W [hir::types::MakeList int]] [pdsApp W $::pdsErr] [pdsApp W $deep]] {
+        pdsAnswers $hir $t
+    }
+} -result [lrepeat 5 {affine 0 bearing 0 carried {} equality total hash total send total mutable 0 vector 0 carry 0}]
+
+test pds-w-programs {W[Coroutine{...}] is an ordinary unrestricted type (it was AFFINE-CONTAINER-UNSUPPORTED, "no finite form"): written as a parameter, a result and a field, made by an imprint, copied, compared, hashed, held in an ImmutableSet, erased to any and transferred, on every backend} -body {
+    list [sourceAgree [pdsProgram {struct Holder:
+    w: W[@C@]
+
+fn depth(w: W[@C@]) -> int:
+    std::list::length(w.next)
+
+fn mk() -> W[T]:
+    W[T] {next: []}
+
+fn id(w: W[@C@]) -> W[@C@]:
+    w
+
+fn erase(x: any) -> int:
+    1
+
+w = W[@C@] {next: [W[List[@C@]] {next: []}]}
+v = w
+h = Holder {w: id(v)}
+e = mk[@C@]()
+s = std::immutable_set::from_list([w, v])
+b = std::transfer::encode(w)
+r = std::transfer::decode[W[@C@]](b):
+    on TransferMalformed:
+        e
+    on TransferVersion:
+        e
+    on TransferTypeMismatch:
+        e
+    on TransferInvalidValue:
+        e
+    on TransferLimit:
+        e
+if w == v and hash(w) == hash(h.w) and r == w and std::immutable_set::contains(s, v):
+    depth(w) + depth(v) + depth(e) + erase(w) + 1
+else:
+    0
+}]]
+} -result {{value 4}}
+
+test pds-nonuniform-own {a non-uniform recursion whose declaration has an answer of its own keeps it, read from the summary: OwnGrow[T] (a Fn field beside `next: List[OwnGrow[List[T]]]`) is bearing and has no total equality for every argument, an affine one included, and its reason names the Fn field even where the walk would follow the growing applications forever (summaries.tcl's reason walk)} -body {
+    set hir [pdsHir]
+    hir::structs::ForgetAffinity
+    set c [pdsApp OwnGrow $::pdsCo]
+    # (OwnGrow[List[int]] is met, at the neutral argument, while OwnGrow's
+    # summary is computed: asked after, it has its final class.)
+    list [pdsAnswers $hir [pdsApp OwnGrow int]] [pdsAnswers $hir $c] \
+        [string match {*field "f" of OwnGrow*a function has no total equality*} [lindex [hir::types::Totality equality $c] 1]] \
+        [lindex [hir::types::Totality equality [pdsApp OwnGrow [hir::types::MakeList int]]] 0] \
+        [lindex [hir::types::SendClass [pdsApp OwnGrow [hir::types::MakeList int]]] 0]
+} -result {{affine 0 bearing 1 carried {} equality none hash none send none mutable 0 vector 0 carry 1} {affine 0 bearing 1 carried {} equality none hash none send none mutable 0 vector 0 carry 1} 1 none none}
+
+test pds-mutual {mutual recursion, uniform (UA/UB: the slot reaches a value through the cycle) and non-uniform (GrowA/GrowB: each round nests the argument in a List): every analysis terminates on the declaration graph and the argument contributes exactly where a value of it is held -- GrowB's own `v: T`, reached from GrowA[T] as GrowB[List[T]]} -body {
+    set hir [pdsHir]
+    set result {}
+    foreach id {UA GrowA} {
+        foreach a [list int $::pdsCo $::pdsFn [hir::types::MakeMutVec int 0]] {
+            set answers [pdsAnswers $hir [pdsApp $id $a]]
+            lappend result [dict get $answers affine] [dict get $answers equality] [dict get $answers bearing] [dict get $answers mutable]
+        }
+    }
+    set result
+} -result {0 total 0 0 1 none 0 0 0 none 1 0 0 none 0 1 0 total 0 0 1 none 0 0 0 none 1 0 0 none 0 1}
+
+test pds-phantom-recursion {a phantom slot that grows forever (PhantomRec[T] of `next: List[PhantomRec[List[T]]]`) contributes nothing: an affine, a bearing, a non-total or a mutable argument leaves the application unrestricted, without obligation, total and sendable -- the summary is of the declaration, not of the substitutions} -body {
+    set hir [pdsHir]
+    lsort -unique [lmap a [list int $::pdsCo $::pdsFn $::pdsErr [hir::types::MakeMutVec int 0] any] {
+        pdsAnswers $hir [pdsApp PhantomRec $a]
+    }]
+} -result {{affine 0 bearing 0 carried {} equality total hash total send total mutable 0 vector 0 carry 0}}
+
+test pds-mixed {Mixed[A, B] of `value: A` and `next: List[Mixed[A, List[B]]]`: A contributes (it is held), B does not (it only grows) -- an approach that took every growing argument for relevant would make Mixed[int, Coroutine{...}] affine and Mixed[int, Fn{...}] non-total} -body {
+    set hir [pdsHir]
+    lmap args [list [list int $::pdsFn] [list $::pdsFn int] [list $::pdsCo int] [list int $::pdsCo] [list int $::pdsErr] [list $::pdsErr int]] {
+        set answers [pdsAnswers $hir [pdsApp Mixed {*}$args]]
+        list [dict get $answers affine] [dict get $answers equality] [dict get $answers bearing] [dict get $answers carried]
+    }
+} -result {{0 total 0 {}} {0 none 1 {}} {1 none 0 {}} {0 total 0 {}} {0 total 0 {}} {0 none 1 Oops}}
+
+# ---------------------------------------------------------------------------
+# Slot relevance is each property's own
+
+test pds-relevance-per-property {a slot's relevance is the property's: a Fn type's argument position is read by Bearing (is the argument `any`) and by nothing else -- Handler[int] bears, Handler[any] does not, neither carries an error nor is affine for an affine argument -- while a Fn's result position is read by Bearing and CarriedInto (Getter[Fn with Oops] carries Oops) and by no affinity; a pointee position (Ref[T]) is no value of T for Totality or CarriedInto} -body {
+    set hir [pdsHir]
+    list [hir::callables::Bearing $hir [pdsApp Handler int]] [hir::callables::Bearing $hir [pdsApp Handler any]] \
+        [hir::callables::CarriedErrors $hir [pdsApp Handler $::pdsErr]] [hir::types::IsAffine [pdsApp Handler $::pdsCo]] \
+        [hir::callables::Bearing $hir [pdsApp Getter $::pdsErr]] [hir::callables::CarriedErrors $hir [pdsApp Getter $::pdsErr]] \
+        [hir::types::IsAffine [pdsApp Getter $::pdsCo]] \
+        [hir::callables::CarriedErrors $hir [pdsApp Ref $::pdsErr]] [lindex [hir::types::Totality equality [pdsApp Ref int]] 0] \
+        [hir::summaries::Summary bearing Handler] [hir::summaries::Summary carried Getter]
+} -result {1 0 {} 0 1 Oops 0 {} none {own 0 values {{0 1 1}}} {own {} relevant 0}}
+
+test pds-nested-arguments {a slot nested in another application, a List, a function type or a pointer is read through that application's own summary and the constructor's rule, never by reopening the declaration: S[List[T]], S[Box[T]], S[Phantom[T]], S[Fn{return: T}], S[Ptr[T]] at a bearing, a non-total and an affine argument} -body {
+    set hir [pdsHir]
+    set result {}
+    foreach id {OfList OfBox OfPhantom OfFn OfPtr} {
+        set row {}
+        foreach a [list $::pdsErr $::pdsCo] {
+            set answers [pdsAnswers $hir [pdsApp $id $a]]
+            lappend row [dict get $answers bearing] [dict get $answers carried] [dict get $answers equality] [dict get $answers affine]
+        }
+        lappend result $id $row
+    }
+    set result
+} -result {OfList {1 Oops none 0 0 {} none 1} OfBox {1 Oops none 0 0 {} none 1} OfPhantom {0 {} total 0 0 {} total 0} OfFn {1 Oops none 0 0 {} none 0} OfPtr {0 {} none 1 0 {} none 1}}
+
+test pds-carried-union {CarriedInto is a union, not a Boolean: a declaration's own errors (Raises) and every relevant slot's argument's errors (Pair[A, B] at two functions of different errors, Mixed[A, B] where only A is held) join, each once} -body {
+    set hir [pdsHir]
+    set ouch [hir::types::MakeFn {} int {Ouch}]
+    list [hir::callables::CarriedErrors $hir {nstruct Raises}] \
+        [hir::callables::CarriedErrors $hir [pdsApp Pair $::pdsErr $ouch]] \
+        [hir::callables::CarriedErrors $hir [pdsApp Pair $ouch $ouch]] \
+        [hir::callables::CarriedErrors $hir [pdsApp Mixed $ouch $::pdsErr]] \
+        [hir::callables::CarriedErrors $hir [pdsApp Pair {nstruct Raises} $ouch]]
+} -result {Oops {Oops Ouch} Ouch Ouch {Oops Ouch}}
+
+test pds-identity-not-name {a summary belongs to a declaration's identity, never its spelling: a module's Box (phantom) and the entry program's Box (holding its argument) answer differently in one compilation} -body {
+    set dir [file join [temporaryDirectory] pds-identity]
+    file delete -force $dir
+    file mkdir $dir
+    set f [open [file join $dir geo.bot] w]
+    puts $f "struct Box\[T\]:\n    value: int"
+    close $f
+    set f [open [file join $dir main.bot] w]
+    puts $f "import geo\n\nstruct Box\[T\]:\n    value: T\n\nfn f(a: geo::Box\[int\], b: Box\[int\]) -> int:\n    1\n1"
+    close $f
+    set hir [surface::readProgramFile [file join $dir main.bot] -warnings off]
+    hir::activate $hir
+    set fn [hir::types::MakeFn {} int {Oops}]
+    list [lindex [hir::types::Totality equality [pdsApp geo::Box $fn]] 0] [lindex [hir::types::Totality equality [pdsApp Box $fn]] 0] \
+        [lindex [hir::types::Totality equality [pdsApp geo::Box $fn]] 0] [hir::callables::Bearing $hir [pdsApp geo::Box $fn]] [hir::callables::Bearing $hir [pdsApp Box $fn]]
+} -cleanup {file delete -force [file join [temporaryDirectory] pds-identity]} -result {total none total 0 1}
+
+test pds-reason-classification-terminates {an argument is classified by its class alone, never by a reason walk of its own: GrowBoxed[MutableVector[int]] (`next: List[Box[GrowBoxed[List[T]]]]` before `v: T`) is unstable, holds a mutable value, is not total and is sendable -- each answered, with a reason, though every step of its growth is an argument of Box, whose classification, walking afresh, never ended (a fuzzer's program found it)} -body {
+    set hir [pdsHir]
+    set t [pdsApp GrowBoxed [hir::types::MakeMutVec int 0]]
+    list [expr {[hir::sourcetypes::ValueStability $t] ne ""}] [expr {[hir::structs::MutableComponent $t] ne ""}] \
+        [lindex [hir::types::Totality equality $t] 0] [lindex [hir::types::SendClass $t] 0] \
+        [string match *MutableVector* [hir::sourcetypes::ValueStability $t]]
+} -result {1 1 none total 1}
+
+test pds-reason-walk-polynomial {one question's reason walk walks an application's parts once, and a later path that reaches it reads that walk: Braid[Braid[Fn{...}, int], Braid[any, str]] of a declaration with three recursive fields, two of them growing (f1 swaps and wraps its arguments, f3 nests one), is answered with a reason by every walk, each walking about a hundred applications -- the walk that revisited an application once per path reaching it walked them hundreds of thousands of times along paths sixty deep and did not finish (a fuzzer's program found it, seed 31); the classes are the summaries'} -body {
+    set hir [surface::compile "import std::mutable_vector\n\nerror Oops\n\nstruct Braid\[A, B\]:\n    f0: Braid\[MutableVector\[int\], Fn{args: \[Fn{args: \[int\], return: int}\], return: int}\]\n    f1: Braid\[B, List\[Braid\[str, A\]\]\]\n    f2: B\n    f3: List\[Braid\[List\[A\], B\]\]\n\n1\n" -warnings off]
+    hir::activate $hir
+    set q [hir::types::MakeApplied Braid [list \
+        [hir::types::MakeApplied Braid [list [hir::types::MakeFn {} int {Oops}] int]] \
+        [hir::types::MakeApplied Braid [list any str]]]]
+    set results {}
+    foreach script {
+        {hir::types::Totality equality $q}
+        {hir::types::Totality hash $q}
+        {hir::types::SendClass $q}
+        {list "" [hir::structs::MutableComponent $q]}
+        {list "" [hir::sourcetypes::ValueStability $q]}
+    } {
+        hir::summaries::ResetCounters
+        lassign [eval $script] class why
+        set c [hir::summaries::counters]
+        lappend results [list $class [string match {*field "f0"*} $why] \
+            [expr {[dict getdef $c reasonWalks 0] <= 300}] [expr {[dict getdef $c reasonReuses 0] > 0}]]
+    }
+    set results
+} -result {{none 1 1 1} {none 1 1 1} {none 1 1 1} {{} 1 1 1} {{} 1 1 1}}
+
+test pds-no-depth-threshold {no depth or size decides an answer: an affine argument is never cut by the type bound, so W[List^N[Coroutine]], Mixed[int, List^N[Coroutine]] and Box^N[Coroutine] exist at every depth (8, 24, 48 and 96: Box^96[Coroutine] is a type of 1,605 characters), and each answers exactly as at depth 1 -- W and Mixed total and sendable, holding no handle; Box not total, not sendable and affine} -body {
+    set hir [pdsHir]
+    set results {}
+    set longest 0
+    foreach n {1 8 24 48 96} {
+        set nested $::pdsCo
+        set boxed $::pdsCo
+        for {set i 0} {$i < $n} {incr i} {
+            set nested [hir::types::MakeList $nested]
+            set boxed [pdsApp Box $boxed]
+        }
+        set row {}
+        foreach t [list [pdsApp W $nested] [pdsApp Mixed int $nested] $boxed] {
+            if {[string length $t] > $longest} {
+                set longest [string length $t]
+            }
+            lappend row [list [lindex [hir::types::Totality equality $t] 0] \
+                [lindex [hir::types::Totality hash $t] 0] [lindex [hir::types::SendClass $t] 0] \
+                [hir::types::IsAffine $t]]
+        }
+        lappend results $row
+    }
+    list [expr {[llength [lsort -unique $results]] == 1}] [lindex $results 0] [expr {$longest > 1000}]
+} -result {1 {{total total total 0} {total total total 0} {none none none 1}} 1}
+
+test pds-reason-past-the-bound {the class reads the argument uncut, so a reason walk over field types the type bound cut (Deep[List[Fn{...}]] of `values: List[List[T]]`: the function sits past the aggregate bound) names the argument that decides it, with the argument's own reason -- never a cut type's, never a recursion that is not there} -body {
+    set hir [pdsHir]
+    set t [pdsApp Deep [hir::types::MakeList $::pdsFn]]
+    lassign [hir::types::Totality equality $t] class why
+    lassign [hir::types::SendClass $t] sclass swhy
+    list $class [string match {its fields hold values of its type argument List[[]Fn*: its elements (Fn*): a function has no total equality*} $why] \
+        $sclass [string match {its fields hold values of its type argument*a function or closure*} $swhy] [string match *recursive* $why]
+} -result {none 1 none 1 0}
+
+# ---------------------------------------------------------------------------
+# Parity with the walks the summaries replaced, and an independent model
+
+test pds-parity-corpus {over the small parity corpus (audit/declaration-summaries/corpus.bot applied to one argument of every class the analyses read; audit/declaration-summaries/tools/corpus.tcl runs the full one), every analysis's answer -- the classes and the reasons -- is the old recursive walk's, except where that walk read a field type the type bound had cut (an argument substituted deeper than the bound: the summary reads the uncut argument) or does not finish (a non-uniform recursion with an affine argument, never cut)} -body {
+    set hir [parity::CorpusHir]
+    set ::reference::budget 400
+    set verdicts [dict create]
+    set different {}
+    set boundTypes {}
+    foreach t [parity::Corpus small] {
+        foreach row [parity::Compare $hir $t] {
+            lassign $row analysis new old exact verdict
+            dict incr verdicts $verdict
+            if {$verdict eq "DIFFERENT"} {
+                lappend different [list $analysis [hir::types::show $t] $new $old]
+            }
+            if {$verdict eq "bound"} {
+                lappend boundTypes [hir::types::show $t]
+            }
+        }
+    }
+    # (Every `bound` verdict is a GrowV application: its growth goes through
+    # Box, whose nesting past the applied-type bound the old walk read as
+    # Box[any]; the summary reads the argument uncut.)
+    list [expr {[dict get $verdicts same] > 1000}] $different \
+        [lsort -unique [lmap t $boundTypes {regsub {^(List\[)?(\w+).*$} $t {\2}}]]
+} -cleanup {set ::reference::budget 5000} -result {1 {} GrowV}
+
+test pds-oracle {the independent model (oracle.py: one least fixpoint over declarations and the abstract values of all their arguments together, no probes and no per-slot join) agrees with the compiler on the hand-made declarations of its selftest} -constraints python3 -body {
+    exec python3 -I [file join $::projectRoot audit declaration-summaries tools oracle.py] selftest
+} -result {oracle selftest: 13 cases, 0 failures}
+
+# ---------------------------------------------------------------------------
+# Structural counters
+
+test pds-counters-linear {a chain of declarations whose fields reach the next level twice (L(i)[A, B]: inner, rest, same) is summarized in a fixed number of rounds and a number of node computations linear in the levels -- 16 levels cost at most twice 8 levels' plus a constant, not 2^N paths and not N rounds of N declarations} -body {
+    set counts {}
+    foreach n {8 16} {
+        set decls "struct L0\[A, B\]:\n    x: A\n    y: B\n\n"
+        for {set i 1} {$i <= $n} {incr i} {
+            set p [expr {$i - 1}]
+            append decls "struct L$i\[A, B\]:\n    inner: L$p\[B, A\]\n    tag: int\n    rest: List\[L$p\[int, A\]\]\n    same: List\[L$i\[int, int\]\]\n    f: Fn{args: \[A\], return: int}\n\n"
+        }
+        set hir [surface::compile "${decls}1\n" -warnings off]
+        hir::activate $hir
+        hir::structs::ForgetAffinity
+        hir::summaries::ResetCounters
+        set t [pdsApp L$n [hir::types::MakeCoroutineType {} int {}] int]
+        hir::types::Totality equality $t
+        hir::callables::Bearing $hir $t
+        hir::callables::CarriedErrors $hir $t
+        set c [hir::summaries::counters]
+        lappend counts [list [dict getdef $c rounds 0] [expr {[dict getdef $c computations.totality.equality 0] + [dict getdef $c computations.bearing 0] + [dict getdef $c computations.carried 0]}]]
+    }
+    lassign $counts c8 c16
+    list [expr {[lindex $c8 0] == [lindex $c16 0] && [lindex $c16 0] <= 9}] [expr {[lindex $c16 1] <= 2 * [lindex $c8 1] + 64}]
+} -result {1 1}
+
+test pds-counters-nonuniform {answering W[C], W[List[C]], ..., W[List^8[C]] computes W's summary once (each property's first question) and then only reads it: the computations do not grow with the argument's nesting, and no application is evaluated twice per question} -body {
+    set hir [pdsHir]
+    hir::structs::ForgetAffinity
+    hir::summaries::ResetCounters
+    set a $::pdsCo
+    for {set k 0} {$k <= 8} {incr k} {
+        hir::types::Totality equality [pdsApp W $a]
+        set a [hir::types::MakeList $a]
+    }
+    set first [dict get [hir::summaries::counters] computations.totality.equality]
+    for {set k 0} {$k <= 8} {incr k} {
+        hir::types::Totality equality [pdsApp W $a]
+        set a [hir::types::MakeList $a]
+    }
+    set c [hir::summaries::counters]
+    list [expr {$first <= 4}] [expr {[dict get $c computations.totality.equality] == $first}] \
+        [expr {[dict get $c applications.totality.equality] <= 18 + 2 * $first}]
+} -result {1 1 1}
+
+# ---------------------------------------------------------------------------
+# Isolation, interchange, ownership
+
+test pds-isolation {summaries are facts of the registry: three interleaved compilations that declare Box[T] differently (holding T, phantom, holding a Fn returning T) each answer from their own declaration after hir::activate, whatever was computed for another} -body {
+    set holds [surface::compile "struct Box\[T\]:\n    value: T\n1\n" -warnings off]
+    set phantom [surface::compile "struct Box\[T\]:\n    value: int\n1\n" -warnings off]
+    set getter [surface::compile "struct Box\[T\]:\n    value: Fn{args: \[\], return: T}\n1\n" -warnings off]
+    set result {}
+    foreach hir [list $holds $phantom $getter $holds $getter $phantom] {
+        hir::activate $hir
+        set t [pdsApp Box [hir::types::MakeFn {} int {Oops}]]
+        lappend result [list [hir::callables::CarriedErrors $hir $t] [lindex [hir::types::Totality equality $t] 0] [hir::callables::Bearing $hir $t]]
+    }
+    set result
+} -result {{Oops none 1} {{} total 0} {Oops none 1} {Oops none 1} {Oops none 1} {{} total 0}}
+
+test pds-interchange {a HIR read back from interchange text (in another compilation's state) recomputes the same summaries from its declarations: nothing of them is in the text (the text is the same before any summary is computed and after)} -body {
+    set hir [surface::compile [pdsProgram "fn f(w: W\[@C@\], m: Mixed\[int, @C@\]) -> int:\n    1\n1\n"] -warnings off]
+    hir::activate $hir
+    hir::structs::ForgetAffinity
+    set unsummarized [hir::interchange::encode $hir]
+    set before [lmap t [list [pdsApp W $::pdsCo] [pdsApp Mixed int $::pdsCo] [pdsApp OwnGrow $::pdsCo]] {pdsAnswers $hir $t}]
+    set text [hir::interchange::encode $hir]
+    surface::compile "struct W\[T\]:\n    next: Fn{args: \[\], return: T}\n1\n" -warnings off
+    set read [hir::interchange::decode $text]
+    hir::activate $read
+    set after [lmap t [list [pdsApp W $::pdsCo] [pdsApp Mixed int $::pdsCo] [pdsApp OwnGrow $::pdsCo]] {pdsAnswers $read $t}]
+    list [expr {$before eq $after}] [expr {$text eq $unsummarized}]
+} -result {1 1}
+
+test pds-owned-recursion-kept {removing the no-finite-form rejection weakens no ownership rule: a recursive affine application (Node[Coroutine{...}]: a value of T in a List of its own applications) is AFFINE-CONTAINER-UNSUPPORTED where it is written; an affine application that holds a growing recursive affine one (GrowB[C] holds C and reaches GrowB[List[C]] through a List) too; W[C] and PhantomRec[C], which hold no handle, are ordinary} -body {
+    lmap body {
+        "fn f(n: Node\[@C@\]) -> int:\n    1\n0\n"
+        "fn f(n: GrowB\[@C@\]) -> int:\n    1\n0\n"
+        "fn f(n: GrowA\[@C@\]) -> int:\n    1\n0\n"
+        "fn f(w: W\[@C@\]) -> int:\n    1\n0\n"
+        "fn f(w: PhantomRec\[@C@\]) -> int:\n    1\n0\n"
+    } {pdsCode [pdsProgram $body]}
+} -result {AFFINE-CONTAINER-UNSUPPORTED AFFINE-CONTAINER-UNSUPPORTED AFFINE-CONTAINER-UNSUPPORTED ok ok}
+
+test pds-written-inferred {writing W[Coroutine{...}] and inferring it make one type with one set of answers: a construction typed by inference and a parameter of the written type agree} -body {
+    set hir [surface::compile [pdsProgram "fn written(w: W\[@C@\]) -> W\[@C@\]:\n    w\nfn inferred(x):\n    x\nv = W\[@C@\] {next: \[\]}\na = written(v)\nb = inferred(v)\n0\n"] -warnings off]
+    hir::activate $hir
+    set types {}
+    dict for {b info} [dict get $hir bindings] {
+        set name [hir::semantic::SourceName $hir $b]
+        if {$name in {a b v}} {
+            dict set types $name [hir::bindingType $hir $b]
+        }
+    }
+    list [expr {[dict get $types a] eq [dict get $types v] && [dict get $types b] eq [dict get $types v]}] \
+        [expr {[dict get $types v] eq [pdsApp W $::pdsCo]}] \
+        [pdsAnswers $hir [dict get $types v]]
+} -result {1 1 {affine 0 bearing 0 carried {} equality total hash total send total mutable 0 vector 0 carry 0}}
+
+test pds-total-lowering {proof-derived unchecked lowering follows the summary: == of two W[Coroutine{...}] and of two Mixed[int, Coroutine{...}] (total: the handle is held by no value) is veqtotal and their hash hashtotal, while == of OwnAny[int] (a Fn field: none) keeps the checked veq} -body {
+    set nir [dict get [native::lower::program [surface::compile [pdsProgram {fn e1(a: W[@C@], b: W[@C@]) -> bool:
+    a == b
+
+fn e2(a: Mixed[int, @C@], b: Mixed[int, @C@]) -> bool:
+    a == b
+
+fn h1(a: W[@C@]) -> int:
+    hash(a)
+
+fn e3(a: OwnAny[int], b: OwnAny[int]) -> bool:
+    a == b
+
+fn g(x: any) -> int:
+    1
+
+w = W[@C@] {next: []}
+m = Mixed[int, @C@] {value: 1, next: []}
+o = OwnAny[int] {next: [], f: g}
+[e1(w, w), e2(m, m), h1(w) == h1(w), e3(o, o)]
+}] -warnings off] -tiny-leaf-inline-opt 0 -specialize 0] text]
+    list [regexp -all {op veqtotal} $nir] [regexp -all {op hashtotal} $nir] [regexp -all {op veq } $nir]
+} -result {2 1 1}
+
+cleanupTests

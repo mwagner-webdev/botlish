@@ -102,9 +102,9 @@ The whole compiler is one Linux x86-64 executable: the command line, the
 standard library, every backend and the native code generator, in a single
 file that needs nothing but glibc (2.39 or newer). There is no Tcl, Rust, C
 compiler or linker to install, and the standalone executables it builds need
-nothing else either. CI builds it from `main` on every push and publishes
-each build that passes its smoke tests, run in stock Ubuntu containers, as
-the [`single-latest` release](https://github.com/mwagner-webdev/botlish/releases/tag/single-latest),
+nothing else either. CI builds it from `main` on every push, smoke-tests it in
+stock Ubuntu containers, and publishes the build of the newest commit whose
+tests are all green as the [`single-latest` release](https://github.com/mwagner-webdev/botlish/releases/tag/single-latest),
 with its SHA-256 checksum. Save the program above as `hello.bot`, then:
 
 ```sh
@@ -158,7 +158,8 @@ checkout, where the generated SDL3 binding is.
 On Windows, unzip
 [`icy-tower-windows-x86_64.zip`](https://github.com/mwagner-webdev/botlish/releases/download/icy-tower-windows-latest/icy-tower-windows-x86_64.zip)
 and run `icy-tower.exe`: the `SDL3.dll` it needs is beside it, and nothing
-else is (no Visual C++ runtime). The zip is the latest build of main by the
+else is (no Visual C++ runtime). The zip is the build of main's newest
+commit whose tests are all green, by the
 [Windows workflow](https://github.com/mwagner-webdev/botlish/actions/workflows/icy-tower-windows.yml),
 which also keeps every run's game as its `icy-tower-windows-x86_64`
 artifact; `examples/games/icy-tower/build-windows.sh` builds it on Windows

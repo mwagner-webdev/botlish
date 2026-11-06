@@ -36,13 +36,16 @@ recursion limit, core/core.tcl): main.tcl's own behavior, packed.
 
 CI builds it on every push to `main` (`.github/workflows/single-executable.yml`),
 smoke-tests it in stock `ubuntu:24.04` and `ubuntu:latest` containers, and
-uploads it as the run's `botlish-linux-x86_64` artifact. A build that passes
-every smoke test is then published as the `botlish-linux-x86_64` asset (with
-its `.sha256`) of the `single-latest` prerelease, whose tag follows `main`:
-the README's download button links to
+uploads it as the run's `botlish-linux-x86_64` artifact. Once every test of
+the commit is green (CI-RUNS.md, "The release gate": tests.yml and
+tests-arm64.yml with their GC-stress jobs, macOS, Windows, and these smoke
+tests), a release run publishes exactly that artifact as the
+`botlish-linux-x86_64` asset (with its `.sha256`) of the `single-latest`
+prerelease, whose tag follows main's newest green commit: the README's
+download button links to
 `https://github.com/mwagner-webdev/botlish/releases/download/single-latest/botlish-linux-x86_64`.
-Builds can finish out of order; one never replaces the build of a later
-commit.
+Release runs can finish out of order; one never replaces the build of a
+later commit.
 
 Only the compiler and its CLI are packed. The tests, benchmarks and audit
 tools stay checkout-only, and the executables the compiler emits were

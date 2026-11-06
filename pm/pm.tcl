@@ -7,6 +7,13 @@
 #       and native inspect|plan|deploy|add|require|audit; the exit status
 #       (0 success, 1 a failed operation, 2 a usage error)
 #
+# Each package's own dependencies are part of the application's one
+# dependency graph (pm/graph.tcl, SHARED-PACKAGE-DEPENDENCIES-MILESTONE-1.md):
+# every package is installed once, at PROJECT/.bot_modules/NAME, shared by
+# every package that depends on it, and PROJECT/.bot_modules/.graph tells
+# the compiler which package uses which; locks that do not agree on one
+# version are a conflict, never two instances.
+#
 # main.tcl sources this file only when its first argument is one of those
 # command words, before it loads anything of the compiler: an ordinary
 # compilation never loads the package manager, reads a botlish.json or
@@ -29,6 +36,8 @@
 #   catalog.tcl     where artifacts come from: archive sources, repositories
 #   state.tcl       the installation record: what the manager installed
 #   native.tcl      native verification, the native closure, the plan
+#   graph.tcl       the application's one dependency graph: resolution by
+#                   unification of exact locks, conflicts, the .graph file
 #   view.tcl        target views: one package tree per target
 #   deploy.tcl      placing a target's bundled shared libraries
 #   install.tcl     resolution, plans, staging and transactions
@@ -56,7 +65,7 @@ namespace eval pm {
     variable here [file join $root pm]
 }
 
-foreach pm::file {json sha256 version target binary targets descriptor archive catalog state native view deploy install commands} {
+foreach pm::file {json sha256 version target binary targets descriptor archive catalog state graph native view deploy install commands} {
     source [file join $pm::here $pm::file.tcl]
 }
 unset pm::file

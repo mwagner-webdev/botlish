@@ -13,6 +13,8 @@
 #   botlish package inspect FILE.botpkg [-target T] [-provenance FILE.json]
 #   botlish package stage [DIR] -target T... -modules|-headers|-files SRC [-as PATH] [-replace]
 #   botlish package compare A.botpkg B.botpkg [-provenance A.json -provenance B.json]
+#   botlish package graph [-project DIR] [-repository DIR]...   the project's
+#                                                dependency graph, resolved
 #   botlish native inspect FILE [-target T]       what a native file is
 #   botlish native plan [-target T]               the project's native plan
 #   botlish native deploy -target T -out DIR      its shared libraries, placed
@@ -52,6 +54,7 @@ namespace eval pm::cli {
         inspect {-target T -provenance FILE}
         stage {-target T -modules DIR -headers DIR -files DIR -as PATH -replace {}}
         compare {-provenance FILE}
+        graph {-project DIR -repository DIR}
         native-inspect {-target T}
         native-plan {-project DIR -target T -include {}}
         native-deploy {-project DIR -target T -out DIR -force {}}
@@ -77,6 +80,7 @@ proc pm::cli::usage {} {
         "       $me package stage \[DIR\] -target T -modules|-headers|-files SRC" \
         "                     \[-as PATH\] \[-replace\]" \
         "       $me package compare A.botpkg B.botpkg \[-provenance FILE\]..." \
+        "       $me package graph \[-project DIR\] \[-repository DIR\]..." \
         "       $me native inspect FILE \[-target T\]" \
         "       $me native plan \[-project DIR\] \[-target T\] \[-include\]" \
         "       $me native deploy -target T -out DIR \[-project DIR\] \[-force\]" \
@@ -102,9 +106,11 @@ proc pm::cli::usage {} {
         "  -force             replace installed packages that were changed" \
         "  -recover           roll back an interrupted operation" \
         "" \
-        "Packages are installed under PROJECT/.bot_modules, each package's own" \
-        "dependencies in its own .bot_modules. Nothing is downloaded and nothing a" \
-        "package holds is run. Reference: $me -help packages"] \n]
+        "Packages are installed under PROJECT/.bot_modules as the application's one" \
+        "dependency graph: each package once, shared by every package that depends on" \
+        "it, its version the one every lock in the graph names (locks that disagree" \
+        "are a conflict). Nothing is downloaded and nothing a package holds is run." \
+        "Reference: $me -help packages"] \n]
 }
 
 proc pm::cli::UsageError {message} {
@@ -140,12 +146,12 @@ proc pm::cli::Run {argv} {
     if {$command eq "package"} {
         set command [lindex $rest 0]
         set rest [lrange $rest 1 end]
-        if {$command ni {pack inspect stage compare}} {
+        if {$command ni {pack inspect stage compare graph}} {
             if {$command in {"" -help --help -h}} {
                 puts [usage]
                 return 0
             }
-            UsageError "unknown package command \"$command\" (known: pack, inspect, stage, compare)"
+            UsageError "unknown package command \"$command\" (known: pack, inspect, stage, compare, graph)"
         }
     } elseif {$command eq "native"} {
         set command [lindex $rest 0]
@@ -278,23 +284,30 @@ proc pm::commands::install {words given} {
         set descriptor [pm::install::Descriptor $ctx]
         set plan [pm::install::Resolve $ctx $descriptor $state [Flag $given -force]]
         Print [pm::install::Apply $ctx $plan $state [Flag $given -force] "" [ViewSpec $given $descriptor]]
-        Notes $ctx $plan
     }
     return 0
 }
 
-# Notes about editable dependencies whose own dependencies are not
-# installed (the manager never writes into an editable directory).
-proc pm::commands::Notes {ctx plan} {
-    dict for {name node} $plan {
-        if {[dict get $node kind] ne "editable"} continue
-        set descriptor [dict get $node descriptor]
-        foreach dep [lsort [dict keys [dict get $descriptor dependencies]]] {
-            if {![file isdirectory [file join [dict get $node target] .bot_modules $dep]]} {
-                puts "note: the editable package $name needs $dep, which is not installed in [dict get $node target]/.bot_modules: run install there (the package manager never writes into an editable directory)"
-            }
-        }
+# The version of NAME the dependency graph of the project CTX already holds
+# -- DESCRIPTOR's graph without NAME as one of its own dependencies (STATE
+# its record) -- as {VERSION LOCKERS}, LOCKERS the releases ("lib_a 1.0.0")
+# whose locks name it; "" when no package of the graph depends on NAME, and
+# {"" LOCKERS} when they lock several versions (the graph is in conflict
+# already: its resolution says so).
+proc pm::commands::Held {ctx descriptor state name} {
+    foreach key {dependencies lock sources} {
+        dict unset descriptor $key $name
     }
+    set found [pm::graph::Demands $ctx $descriptor $state]
+    if {![dict exists $found demands $name]} {
+        return ""
+    }
+    set versions [lsort -unique [lmap d [dict get $found demands $name] {dict get $d version}]]
+    set lockers [lsort -unique [lmap d [dict get $found demands $name] {join [dict get $d by]}]]
+    if {[llength $versions] != 1} {
+        return [list "" $lockers]
+    }
+    return [list [lindex $versions 0] $lockers]
 }
 
 proc pm::commands::add {words given} {
@@ -311,6 +324,7 @@ proc pm::commands::add {words given} {
         set state [pm::state::read [dict get $ctx meta]]
         set descriptor [pm::install::Descriptor $ctx 1]
         set source ""
+        set heldNote ""
         if {[string match *.botpkg $spec]} {
             set path [file normalize $spec]
             set artifact [pm::catalog::Load $path "the archive $spec"]
@@ -346,7 +360,16 @@ proc pm::commands::add {words given} {
             if {$versions eq ""} {
                 pm::Fail UNAVAILABLE "no repository holds a version of $name"
             }
-            if {$request ne ""} {
+            # A package the graph already holds is added at the version its
+            # packages lock: the graph has one instance of it.
+            set held [Held $ctx $descriptor $state $name]
+            lassign $held version lockers
+            if {$held ne "" && $version ne ""} {
+                if {$request ne "" && ![pm::version::satisfies $version $request]} {
+                    pm::Fail DEPENDENCY-CONFLICT "cannot add $name with the request \"$request\": [join $lockers {, }] lock[expr {[llength $lockers] == 1 ? "s" : ""}] $name $version, which the request does not accept. The application's dependency graph has one instance of $name, used by every package that depends on it, and a package's lock is never changed to make the graph agree: request a version $version satisfies (or none), or use releases of [join [lmap l $lockers {lindex $l 0}] {, }] that lock another"
+                }
+                set heldNote "note: $name $version is the version [join $lockers {, }] lock[expr {[llength $lockers] == 1 ? "s" : ""}]: the application shares that instance"
+            } elseif {$request ne ""} {
                 set version [pm::version::newest $versions $request]
                 if {$version eq ""} {
                     pm::Fail REQUEST "no version of $name the repositories hold ([join $versions {, }]) satisfies the request \"$request\""
@@ -386,12 +409,14 @@ proc pm::commands::add {words given} {
         set descriptor [pm::descriptor::fromBytes $bytes project botlish.json]
         set plan [pm::install::Resolve $ctx $descriptor $state [Flag $given -force]]
         Print [pm::install::Apply $ctx $plan $state [Flag $given -force] $bytes [ViewSpec $given $descriptor]]
+        if {$heldNote ne ""} {
+            puts $heldNote
+        }
         if {$source ne "" && [dict get $source kind] eq "directory"} {
             puts "added $name (request \"$request\"), editable: a link to [dict get $source path], not an immutable release"
         } else {
             puts "added $name (request \"$request\", lock $version)"
         }
-        Notes $ctx $plan
     }
     return 0
 }
@@ -417,40 +442,79 @@ proc pm::commands::update {words given} {
                 pm::Fail UNKNOWN "$name is not a dependency of [dict get $ctx project]"
             }
         }
-        set lines {}
+        set lines [dict create]
+        set movable {}
+        set newest [dict create]
         foreach name $names {
             set request [dict get $deps $name]
             set source [dict getdef [dict get $descriptor sources] $name ""]
             if {$source ne "" && [dict get $source kind] eq "directory"} {
-                lappend lines "$name: editable ([dict get $source path]): nothing to update"
+                dict set lines $name "$name: editable ([dict get $source path]): nothing to update"
                 continue
             }
             if {$source ne ""} {
-                lappend lines "$name: pinned to the archive [dict get $source path]: add a newer archive with -replace to update it"
+                dict set lines $name "$name: pinned to the archive [dict get $source path]: add a newer archive with -replace to update it"
                 continue
             }
             if {[pm::catalog::RepositoryCount] == 0} {
                 pm::Fail UNAVAILABLE "update $name needs a repository to look in: pass -repository DIR"
             }
             set versions [pm::catalog::Versions $name]
-            set newest [pm::version::newest $versions $request]
-            if {$newest eq ""} {
+            set version [pm::version::newest $versions $request]
+            if {$version eq ""} {
                 pm::Fail UNAVAILABLE "no version of $name the repositories hold ([join [Or $versions none] {, }]) satisfies the request \"$request\""
             }
-            set locked [dict getdef [dict get $descriptor lock] $name ""]
-            if {$locked eq $newest} {
-                lappend lines "$name: $newest is the newest version \"$request\" accepts"
-            } elseif {$locked eq ""} {
-                lappend lines "$name: locked to $newest"
-            } else {
-                lappend lines "$name: $locked -> $newest"
+            dict set newest $name $version
+            lappend movable $name
+        }
+        set before [dict get $descriptor lock]
+        foreach name $movable {
+            dict set descriptor lock $name [dict get $newest $name]
+        }
+        # A dependency some package of the graph locks is held at the
+        # version they lock, when its request accepts it: the graph has one
+        # instance of it, and their locks are theirs (pm/graph.tcl). One
+        # pass per dependency at most: a held lock stays held.
+        set held [dict create]
+        for {set round 0} {$round <= [llength $movable]} {incr round} {
+            set changed 0
+            foreach name $movable {
+                if {[dict exists $held $name]} continue
+                lassign [Held $ctx $descriptor $state $name] version lockers
+                if {$version eq "" || $version eq [dict get $descriptor lock $name]
+                        || ![pm::version::satisfies $version [dict get $deps $name]]} continue
+                dict set descriptor lock $name $version
+                dict set held $name $lockers
+                set changed 1
             }
-            dict set descriptor lock $name $newest
+            if {!$changed} break
+        }
+        foreach name $movable {
+            set request [dict get $deps $name]
+            set locked [dict getdef $before $name ""]
+            set now [dict get $descriptor lock $name]
+            if {[dict exists $held $name]} {
+                set lockers [dict get $held $name]
+                set why "held at $now: [join $lockers {, }] lock[expr {[llength $lockers] == 1 ? "s" : ""}] it, and the graph shares one instance (the newest \"$request\" accepts is [dict get $newest $name])"
+                if {$locked eq $now} {
+                    dict set lines $name "$name: $why"
+                } elseif {$locked eq ""} {
+                    dict set lines $name "$name: locked to $now, $why"
+                } else {
+                    dict set lines $name "$name: $locked -> $now, $why"
+                }
+            } elseif {$locked eq $now} {
+                dict set lines $name "$name: $now is the newest version \"$request\" accepts"
+            } elseif {$locked eq ""} {
+                dict set lines $name "$name: locked to $now"
+            } else {
+                dict set lines $name "$name: $locked -> $now"
+            }
         }
         set bytes [DescriptorBytes $descriptor]
         set plan [pm::install::Resolve $ctx $descriptor $state [Flag $given -force]]
         Print [pm::install::Apply $ctx $plan $state [Flag $given -force] $bytes [ViewSpec $given $descriptor]]
-        Print $lines
+        Print [lmap name $names {dict get $lines $name}]
     }
     return 0
 }
@@ -484,8 +548,76 @@ proc pm::commands::remove {words given} {
         set bytes [DescriptorBytes $descriptor]
         set plan [pm::install::Resolve $ctx $descriptor $state [Flag $given -force]]
         Print [pm::install::Apply $ctx $plan $state [Flag $given -force] $bytes [ViewSpec $given $descriptor]]
+        foreach name $words {
+            if {[dict exists $plan packages $name]} {
+                lappend notes "note: $name stays installed: [join [dict get $plan users $name] {, }] depend[expr {[llength [dict get $plan users $name]] == 1 ? "s" : ""}] on it"
+            }
+        }
         Print $notes
         puts "removed [join $words {, }] from botlish.json"
+    }
+    return 0
+}
+
+# ---------------------------------------------------------------------------
+# package graph
+
+# Prints the project's dependency graph as resolution makes it (pm/graph.tcl):
+# every package, the version every lock of it names, which scopes use it,
+# and whether it is installed so; a conflict is reported as resolution
+# reports it. Nothing is written: the graph an install would make.
+proc pm::commands::graph {words given} {
+    if {$words ne ""} {
+        pm::cli::UsageError "package graph takes no package names (it shows the project's whole graph)"
+    }
+    set ctx [pm::install::Project [Option $given -project [pwd]]]
+    pm::catalog::configure [dict getdef $given -repository {}]
+    set descriptor [pm::install::Descriptor $ctx]
+    set state [pm::state::read [dict get $ctx meta]]
+    set plan [pm::graph::Resolve $ctx $descriptor $state]
+    set packages [dict get $plan packages]
+    set demands [dict get $plan demands]
+    puts "the dependency graph of [dict get $ctx project]: [dict size $packages] package[expr {[dict size $packages] == 1 ? "" : "s"}], one instance of each"
+    puts "application uses: [join [Or [dict get $plan application] none] {, }]"
+    foreach name [lsort [dict keys $packages]] {
+        set node [dict get $packages $name]
+        set users [lmap user [dict get $plan users $name] {
+            if {$user eq ""} { set user "the application" } else { set user }
+        }]
+        set where "installed"
+        if {![dict get $node reuse]} {
+            if {[dict get $node kind] eq "editable"} {
+                set where "not linked yet (run install)"
+            } else {
+                set where "not installed so yet (run install): [dict get $node artifact path]"
+            }
+        }
+        if {[dict get $node kind] eq "editable"} {
+            puts "$name [dict get $node version] (editable [dict get $node directory]): used by [join $users {, }]; $where"
+        } else {
+            puts "$name [dict get $node version] (sha256 [pm::Short [dict get $node digest]]): used by [join $users {, }]; $where"
+        }
+        set mine {}
+        set locks {}
+        foreach demand [dict get $demands $name] {
+            set by [dict get $demand by]
+            if {$by ne ""} {
+                lappend locks [join $by]
+            } elseif {[dict get $demand kind] eq "lock"} {
+                lappend mine "the application (request \"[dict get $demand request]\")"
+            } else {
+                lappend mine "the application (editable [dict get $demand directory])"
+            }
+        }
+        puts "  locked by: [join [concat $mine [lsort -unique $locks]] {, }]"
+        set uses [dict get $node uses]
+        if {$uses ne ""} {
+            puts "  uses: [join [lmap {dep version} $uses {string cat $dep " " $version}] {, }]"
+        }
+        if {[llength [dict get $plan users $name]] > 1} {
+            puts "  shared: one instance, $name, for [join $users {, }]"
+        }
+        puts "  path: [pm::catalog::Chain [dict get $plan paths $name]]"
     }
     return 0
 }
@@ -506,8 +638,13 @@ proc pm::commands::verify {words given} {
         lappend problems "a package operation is running, or was interrupted (the next add, install, update or remove recovers it)"
     }
     set descriptor [pm::install::Descriptor $ctx]
-    set state [pm::state::read [dict get $ctx meta]]
+    set meta [dict get $ctx meta]
+    set state [pm::state::read $meta]
+    set layout [pm::state::layout $meta]
     set modules [dict get $ctx modules]
+    if {$layout eq "nested" && [dict size $state] > 0} {
+        lappend problems "the packages are installed one copy per dependency path, by an earlier package manager: run install to install them as the application's one dependency graph"
+    }
     foreach name [lsort [dict keys [dict get $descriptor dependencies]]] {
         set record [dict getdef $state $name ""]
         set active [file join $modules $name]
@@ -552,15 +689,52 @@ proc pm::commands::verify {words given} {
         }
         VerifyNode $ctx $name $record $active .bot_modules/$name $artifactSource [list $name [dict get $record version]] problems notes checked
     }
-    foreach name [lsort [dict keys $state]] {
-        if {![dict exists $descriptor dependencies $name]} {
-            lappend problems "$name: installed by the package manager, and no longer a dependency (install removes it)"
+    if {$layout eq "graph"} {
+        # The rest of the graph: every package a package uses, reached from
+        # the application's dependencies; the graph file the compiler reads.
+        set reached [dict create]
+        set queue [dict get $descriptor dependencies]
+        set queue [lsort [dict keys $queue]]
+        while {$queue ne ""} {
+            set queue [lassign $queue name]
+            if {[dict exists $reached $name] || ![dict exists $state $name]} continue
+            dict set reached $name 1
+            lappend queue {*}[dict keys [dict getdef [dict get $state $name] uses {}]]
+        }
+        foreach name [lsort [dict keys $state]] {
+            set record [dict get $state $name]
+            if {[dict exists $descriptor dependencies $name]} continue
+            if {![dict exists $reached $name]} {
+                lappend problems "$name: installed by the package manager, and no package of the graph depends on it (install removes it)"
+                continue
+            }
+            if {[dict get $record kind] ne "artifact"} {
+                lappend problems "$name: an editable link is installed where the graph needs a release (run install)"
+                continue
+            }
+            VerifyNode $ctx $name $record [file join $modules $name] .bot_modules/$name "" [list $name [dict get $record version]] problems notes checked
+        }
+        set application [pm::state::application $meta]
+        set expected [pm::graph::OfState $application $state]
+        set graphPath [pm::install::GraphPath $ctx]
+        if {$expected ne ""} {
+            if {![pm::Exists $graphPath] || [file type $graphPath] ne "file"} {
+                lappend problems ".bot_modules/.graph, the package graph the compiler reads, is missing (run install)"
+            } elseif {[encoding convertfrom utf-8 [pm::ReadBytes $graphPath]] ne $expected} {
+                lappend problems ".bot_modules/.graph is not the graph of the installation (run install)"
+            }
+        }
+    } else {
+        foreach name [lsort [dict keys $state]] {
+            if {![dict exists $descriptor dependencies $name]} {
+                lappend problems "$name: installed by the package manager, and no longer a dependency (install removes it)"
+            }
         }
     }
     VerifyViews $ctx $state $descriptor [Option $given -target] problems notes
     if {[file isdirectory $modules]} {
         foreach entry [pm::state::Entries $modules] {
-            if {$entry in {.botlish .targets} || [dict exists $state $entry] || [dict exists $descriptor dependencies $entry]} continue
+            if {$entry in {.botlish .targets .graph} || [dict exists $state $entry] || [dict exists $descriptor dependencies $entry]} continue
             lappend notes "$entry: .bot_modules/$entry was installed by hand: not managed, not verified"
         }
     }
@@ -583,8 +757,8 @@ proc pm::commands::VerifyNode {ctx name record dir shown source chain problemsVa
     foreach change $changes {
         lappend problems "$name $version: $change"
     }
-    # The installed descriptor: the artifact's, with the record's children as
-    # its locks.
+    # The installed descriptor: the artifact's, with the record's uses (or,
+    # nested, its children) as its locks.
     set descriptorPath [file join $dir botlish.json]
     if {[file isfile $descriptorPath]} {
         if {[catch {pm::descriptor::read $descriptorPath artifact} descriptor]} {
@@ -594,9 +768,13 @@ proc pm::commands::VerifyNode {ctx name record dir shown source chain problemsVa
                 lappend problems "$name $version: its installed botlish.json says [dict get $descriptor name] [dict get $descriptor version]"
             }
             set locks [lsort -stride 2 [dict get $descriptor lock]]
-            set installed [lsort -stride 2 [concat {*}[lmap {child childRecord} [dict get $record children] {
-                list $child [dict get $childRecord version]
-            }]]]
+            if {[dict exists $record uses]} {
+                set installed [lsort -stride 2 [dict get $record uses]]
+            } else {
+                set installed [lsort -stride 2 [concat {*}[lmap {child childRecord} [dict get $record children] {
+                    list $child [dict get $childRecord version]
+                }]]]
+            }
             if {$locks ne $installed} {
                 lappend problems "$name $version: its dependencies installed ([Pairs $installed]) are not the ones its botlish.json locks ([Pairs $locks])"
             }
@@ -646,12 +824,13 @@ proc pm::commands::VerifyViews {ctx state descriptor target problemsVar notesVar
     set views [pm::state::views [dict get $ctx meta]]
     set origins [dict getdef $descriptor origins {}]
     set manual [pm::view::Manual $ctx $state]
+    set application [pm::state::application [dict get $ctx meta]]
     dict for {name view} $views {
         set changes [pm::state::ViewChanges [pm::view::Dir $ctx $name] $view .bot_modules/.targets/$name]
         foreach change $changes {
             lappend problems "view $name: $change (run install)"
         }
-        if {[dict get $view derived] ne [pm::view::Derived $name $state $origins $manual]} {
+        if {[dict get $view derived] ne [pm::view::Derived $name $state $origins $manual $application]} {
             lappend problems "view $name: derived from another installation than the current one (run install)"
         }
     }

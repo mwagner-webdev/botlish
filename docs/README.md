@@ -3594,7 +3594,7 @@ hir::warnings::of $hir      ;# {code message primary secondary data} records
 the examples and the benchmarks compile clean under them, except exactly the
 findings `audit/refactor/manifest.txt` lists, each with the obstruction that
 keeps it open on today's surface (REFACTOR-WARNINGS-CLEAN.md). A gate
-(`audit/refactor/tools/gate.tcl`, the `warning-gate` CI job) compiles every
+(`audit/refactor/tools/gate.tcl`, a step of CI's canary job) compiles every
 corpus program and a one-line loader of every library module, asserts that the
 observed warnings are exactly the manifest -- a new warning anywhere, an entry
 that no longer fires, or a drifted location fails it -- and compiles every

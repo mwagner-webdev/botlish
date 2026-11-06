@@ -1,0 +1,40 @@
+# main.bot -- two independently authored libraries over one Linux driver
+# (examples/event-loop/shared; SHARED-PACKAGE-DEPENDENCIES-MILESTONE-1.md).
+#
+#   botlish add beats -repository REPO
+#   botlish add probes -repository REPO
+#   botlish add event_loop_linux -repository REPO
+#   botlish -backend cranelift main.bot
+#
+# beats and probes each depend on event_loop_linux and lock 0.3.0. The
+# package manager resolves the application's one dependency graph: one
+# event_loop_linux, used by beats, probes and the application, so the
+# Linux driver and its Native capability the application installs below --
+# once -- are the ones both libraries require, and the driver's C adapter
+# is one archive in the link. Only the entry program installs contexts.
+import beats
+import event_loop_linux
+import probes
+import std::event_loop
+
+fn main(context ev: std::event_loop::Loop, d: event_loop_linux::Linux, n: event_loop_linux::Native) -> List[str] errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    std::event_loop::sync()
+    coroutine {step: b, first: bf} = beats::run(3, 1000)
+    std::event_loop::adopt(b, bf)
+    coroutine {step: p, first: pf} = probes::run(2, 2500)
+    std::event_loop::adopt(p, pf)
+    std::event_loop::run()
+    std::event_loop::trace()
+
+with context std::event_loop::create(64)
+with context event_loop_linux::create()
+with context event_loop_linux::native()
+main():
+    on IndexNotFound:
+        ["IndexNotFound"]
+    on std::event_loop::SchedulerFault:
+        ["SchedulerFault"]
+    on std::event_loop::DriverFault {code}:
+        ["DriverFault"]
+    on std::event_loop::LoopReentered:
+        ["LoopReentered"]

@@ -152,9 +152,11 @@ proc pm::version::compare {a b} {
 @@ update-ignores-request update takes the newest version in the repository, whatever the request accepts
 ## pm/commands.tcl
 <<<<
-            set newest [pm::version::newest $versions $request]
+            set versions [pm::catalog::Versions $name]
+            set version [pm::version::newest $versions $request]
 ====
-            set newest [lindex $versions end]
+            set versions [pm::catalog::Versions $name]
+            set version [lindex $versions end]
 >>>>
 
 # ---------------------------------------------------------------------------
@@ -173,14 +175,14 @@ proc pm::version::compare {a b} {
 @@ install-replaces-modified a managed package that changed since its installation is replaced without -force
 ## pm/install.tcl
 <<<<
-        CheckUnchanged $ctx $name [dict get $state $name] $force
+        lappend changed {*}[Changed $ctx $name [dict get $state $name] $force]
         lappend operations [list $name [pm::Exists $active] 1]
 ====
         lappend operations [list $name [pm::Exists $active] 1]
 >>>>
 
 @@ install-reuse-ignores-changes an installed package of the locked version is reused as it is, its files unchecked
-## pm/install.tcl
+## pm/graph.tcl
 <<<<
     return [expr {[pm::state::Changes $installed $record x] eq ""}]
 ====
@@ -214,11 +216,11 @@ proc pm::version::compare {a b} {
 >>>>
 
 @@ cycle-unchecked a package that depends, through others, on its own release recurses until a limit
-## pm/install.tcl
+## pm/graph.tcl
 <<<<
-            if {$ancestor eq $dep && $ancestorVersion eq $version} {
+        if {[lsearch -exact [lmap {n v} $here {set n}] $dep] >= 0} {
 ====
-            if {0} {
+        if {0} {
 >>>>
 
 # ---------------------------------------------------------------------------
@@ -294,7 +296,7 @@ proc pm::version::compare {a b} {
 %% package-native.test
 ## pm/view.tcl
 <<<<
-    append text [pm::state::encode $state]
+    append text [pm::state::encode $state {} $application]
 ====
     append text [dict keys $state]
 >>>>
@@ -343,10 +345,10 @@ proc pm::version::compare {a b} {
 ## surface/modules.tcl
 <<<<
     set targets [file join $modules .targets]
-    if {![Probe directory $targets]} {
+    if {[Probe directory $targets]} {
 ====
     set targets [file join $modules .targets]
-    if {1} {
+    if {0} {
 >>>>
 
 @@ native-machine-unchecked an ELF of any machine is taken for the target's
@@ -799,4 +801,89 @@ proc pm::version::compare {a b} {
     set ::pm::authoringLoaded 1
 }
 pm::authoring
+>>>>
+
+# ---------------------------------------------------------------------------
+# Shared dependencies: one resolved graph (SHARED-PACKAGE-DEPENDENCIES-MILESTONE-1.md)
+
+@@ graph-conflicts-unchecked locks that disagree are not refused: one of the demanded versions is selected silently
+## pm/graph.tcl
+<<<<
+    if {$conflicts ne ""} {
+====
+    if {0} {
+>>>>
+
+@@ graph-relaxes-locks a package's lock is relaxed to the newest release the repositories hold
+## pm/graph.tcl
+<<<<
+        lappend uses $dep [dict get $artifactDescriptor lock $dep]
+====
+        lappend uses $dep [lindex [pm::catalog::Versions $dep] end]
+>>>>
+
+@@ graph-editable-satisfies-lock an application's editable directory satisfies a package's lock of the same version
+## pm/graph.tcl
+<<<<
+        if {[llength $versions] > 1 || ($editable && [llength $list] > 1)} {
+====
+        if {[llength $versions] > 1} {
+>>>>
+
+@@ graph-artifact-conflict-unchecked an archive source and the repositories' different file of one release are both taken for it, the archive winning
+## pm/graph.tcl
+<<<<
+        if {[dict get $artifact digest] ne [dict get $node digest]} {
+====
+        if {0} {
+>>>>
+
+@@ graph-add-ignores-held add takes the newest version of a package the graph already holds at another
+## pm/commands.tcl
+<<<<
+            if {$held ne "" && $version ne ""} {
+====
+            if {0} {
+>>>>
+
+@@ graph-update-ignores-holds update moves a dependency some package locks to the newest its request accepts
+## pm/commands.tcl
+<<<<
+        for {set round 0} {$round <= [llength $movable]} {incr round} {
+====
+        for {set round 0} {0} {incr round} {
+>>>>
+
+@@ graph-file-not-written the graph file the compiler reads is never written
+## pm/install.tcl
+<<<<
+                pm::ReplaceFile $graphPath $graphBytes
+====
+                list
+>>>>
+
+@@ graph-not-rolled-back a rollback restores the record and botlish.json, never the graph file
+## pm/install.tcl
+<<<<
+        if {![dict exists $members $key]} continue
+====
+        if {![dict exists $members $key] || $key eq "graph"} continue
+>>>>
+
+@@ graph-manual-replaced a package graph placed by hand is replaced like the manager's own
+## pm/install.tcl
+<<<<
+    if {[pm::Exists $graphPath] && ($oldLayout ne "graph" || [file type $graphPath] ne "file")} {
+====
+    if {0} {
+>>>>
+
+@@ graph-orphans-kept a package no package of the graph uses any more is left installed
+## pm/install.tcl
+<<<<
+    foreach name [lsort [dict keys $state]] {
+        if {[dict exists $packages $name]} continue
+====
+    foreach name [lsort [dict keys $state]] {
+        if {1} continue
 >>>>

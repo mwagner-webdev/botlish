@@ -42,8 +42,8 @@ The 42nd is `examples/surface/13-hygiene.bot`'s `FIXED-ARITY-LIST-RETURN`
 fact core IR cannot carry, and the sample is a fixture of the check that its
 HIR is what analysis of its core IR derives.
 
-A **gate** now holds the corpus there: `audit/refactor/tools/gate.tcl` (CI
-job `warning-gate`) asserts that the observed warnings are exactly the
+A **gate** now holds the corpus there: `audit/refactor/tools/gate.tcl` (in CI
+a step of tests.yml's canary job) asserts that the observed warnings are exactly the
 manifest, `audit/refactor/manifest.txt`, and compiles every program and
 loader without an entry under `-warnings error` -- **42 of the 68 units** (32
 programs, 10 of the 14 library loaders). It demonstrably fails on a planted new
@@ -687,9 +687,9 @@ mechanisms tried do not close it.
 It reports 42 strict units (32 programs, 10 loaders) and 19 carrying
 entries (43 and 33 programs since the merge into `main` brought the enum
 milestone's `examples/surface/15-enums.bot`, listed with no entries: it
-compiles under `-warnings error`), in about 20 seconds; CI runs it as the `warning-gate` job of
-`.github/workflows/tests.yml` on every push and pull request (no native build
-needed: warnings are discovered before any backend). `-root DIR` gates another
+compiles under `-warnings error`), in about 20 seconds; CI runs it as a step of
+`.github/workflows/tests.yml`'s canary job on every push and pull request (no
+native build needed: warnings are discovered before any backend). `-root DIR` gates another
 tree's corpus with this checkout's compiler, which is how
 `tests/warning-gate.test` tests the ratchet: on a scratch copy it plants a new
 one-character literal in `stdlib/mathish.bot` (fails: "unexpected warning

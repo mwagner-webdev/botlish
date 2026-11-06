@@ -587,7 +587,7 @@ constraints are part of its entries.
 | an argument that does not satisfy its slot's trait | TRAIT-NOT-SATISFIED | the application (parameter, result, field, construction, explicit imprint, the call whose binding makes it) |
 | a field's nested application over a slot that does not state the obligation | TRAIT-NOT-SATISFIED | the field |
 | a trait or context trait as an argument | TRAIT-STORAGE-UNSUPPORTED, CONTEXT-TRAIT-POSITION | the application |
-| a written recursive affine application, or one with no finite form | AFFINE-CONTAINER-UNSUPPORTED | the application |
+| a written recursive affine application (one with no finite form was too, until PARAMETERIZED-DECLARATION-SUMMARIES-MILESTONE-1.md made it an ordinary type) | AFFINE-CONTAINER-UNSUPPORTED | the application |
 | a construction that establishes no single type for a slot | IMPRINT | the construction |
 | a variable a constraint would be needed to establish | IMPRINT | the call |
 | a bad slot declaration (name, duplicate, unknown trait, a type that is no trait, a context trait, a context struct with slots) | TYPE | the slot |

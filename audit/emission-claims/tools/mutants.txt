@@ -201,6 +201,182 @@ proc hir::emission::NativeMayFail {name} {
     for {set k 0} {$k < $count - 1 && $head ne {}} {incr k} {
 >>>>
 
+@@ entered-always counted-loop entry (EMISSION-COUNTED-LOOP-PRECISION-MILESTONE-1.md): every counted loop read as entered, its zero-iteration exit dropped
+%% match ec-loop-entered-* ec-loop-exact-count ec-loop-fixpoint
+## hir/emission.tcl
+<<<<
+    if {$vs in {* {}} || $ve in {* {}}} { return 0 }
+    return [hir::range::DomainEntered
+====
+    return 1
+    return [hir::range::DomainEntered
+>>>>
+
+@@ entered-unknown-bound counted-loop entry: a bound of no known Int set read as entered
+%% match ec-loop-entered-*
+## hir/emission.tcl
+<<<<
+    if {$vs in {* {}} || $ve in {* {}}} { return 0 }
+====
+    if {$vs in {* {}} || $ve in {* {}}} { return 1 }
+>>>>
+
+@@ entered-sentinel counted-loop entry: an unbounded side read as a finite sentinel (10^21) past which no value goes
+%% match ec-loop-entered-huge ec-loop-entered-*
+## hir/emission.tcl
+<<<<
+    return [hir::range::DomainEntered [hir::intset::HullRange $vs] [hir::intset::HullRange $ve] $direction $endKind]
+====
+    return [hir::range::DomainEntered [string map {+inf 1000000000000000000000 -inf -1000000000000000000000} [hir::intset::HullRange $vs]] [string map {+inf 1000000000000000000000 -inf -1000000000000000000000} [hir::intset::HullRange $ve]] $direction $endKind]
+>>>>
+
+@@ entered-exclusive-as-inclusive counted-loop entry: an ascending `to` loop entered when its start may equal its end (the `through` test)
+%% match iset-domain-entered-* ec-loop-entered-endpoints ec-loop-entered-*
+## hir/range.tcl
+<<<<
+        up/exclusive   { return [expr {$s < $z}] }
+====
+        up/exclusive   { return [expr {$s <= $z}] }
+>>>>
+
+@@ entered-inclusive-as-exclusive counted-loop entry: an ascending `through` loop not entered when its start may equal its end (the `to` test)
+%% match iset-domain-entered-* ec-loop-entered-endpoints ec-loop-entered-*
+## hir/range.tcl
+<<<<
+        up/inclusive   { return [expr {$s <= $z}] }
+====
+        up/inclusive   { return [expr {$s < $z}] }
+>>>>
+
+@@ entered-down-equal counted-loop entry: a descending `to` loop entered when its start may equal its end
+%% match iset-domain-entered-* ec-loop-entered-endpoints ec-loop-entered-*
+## hir/range.tcl
+<<<<
+        down/exclusive { return [expr {$s > $z}] }
+====
+        down/exclusive { return [expr {$s >= $z}] }
+>>>>
+
+@@ entered-direction-swapped counted-loop entry: a descending loop judged by the ascending extrema (its start's largest value, its end's smallest)
+%% match iset-domain-entered-* ec-loop-entered-endpoints ec-loop-entered-*
+## hir/range.tcl
+<<<<
+        set s [dict get $startR min]
+        set z [dict get $endR max]
+    }
+====
+        set s [dict get $startR max]
+        set z [dict get $endR min]
+    }
+>>>>
+
+@@ entered-some-pair counted-loop entry: an ascending loop entered when some start is below some end (its start's smallest value against its end's largest), not every pair
+%% match iset-domain-entered-* ec-loop-entered-endpoints ec-loop-entered-*
+## hir/range.tcl
+<<<<
+        set s [dict get $startR max]
+        set z [dict get $endR min]
+    } else {
+====
+        set s [dict get $startR min]
+        set z [dict get $endR max]
+    } else {
+>>>>
+
+@@ entered-no-value counted-loop entry: a Range of no Int (an infinity its only bound, or contradictory) read as an ordinary operand
+%% match iset-domain-entered-* ec-loop-entered-*
+## hir/range.tcl
+<<<<
+        if {$lo eq "+inf" || $hi eq "-inf"} {
+            return 0
+        }
+        if {$lo ne "-inf" && $hi ne "+inf" && $lo > $hi} {
+            return 0
+        }
+====
+>>>>
+
+@@ entered-drops-body-exits counted-loop entry: an entered loop's `break` exits dropped with its zero-iteration exit
+%% match ec-loop-entered-* ec-break-continue
+## hir/emission.tcl
+<<<<
+        lappend out {*}[dict get $breaks $e]
+        if {!$entered} {
+====
+        if {!$entered} {
+            lappend out {*}[dict get $breaks $e]
+>>>>
+<<<<
+    set env $before
+    lappend out {*}[dict get $breaks $e]
+    if {$kind ne "loop"} {
+====
+    set env $before
+    if {!$entered} { lappend out {*}[dict get $breaks $e] }
+    if {$kind ne "loop"} {
+>>>>
+
+@@ entered-first-break-ignored counted-loop entry: an entered loop's first-iteration `break` forgotten after that iteration
+%% match ec-loop-entered-* ec-break-continue
+## hir/emission.tcl
+<<<<
+        lappend out {*}[dict get $breaks $e]
+        if {!$entered} {
+====
+        dict set breaks $e {}
+        if {!$entered} {
+>>>>
+
+@@ entered-only-first counted-loop entry: an entered loop checked by its first iteration only, its later iterations never walked
+%% match ec-loop-entered-*
+## hir/emission.tcl
+<<<<
+    if {$head ne {}} {
+        while 1 {
+====
+    if {$head ne {} && !$entered} {
+        while 1 {
+>>>>
+
+@@ entered-first-failures-dropped counted-loop entry: the failure points of an entered loop's first iteration forgotten (a handler starts only where the later ones fail)
+%% match ec-loop-entered-*
+## hir/emission.tcl
+<<<<
+        dict set env $counter $first
+        lassign [EvalBody [dict get $node body] $s] after -
+====
+        dict set env $counter $first
+        variable fails
+        set savedFails $fails
+        lassign [EvalBody [dict get $node body] $s] after -
+        if {$entered} { set fails $savedFails }
+>>>>
+
+@@ entered-first-returns-dropped counted-loop entry: an entered loop's first-iteration `return` forgotten
+%% match ec-loop-entered-*
+## hir/emission.tcl
+<<<<
+        dict set env $counter $first
+        lassign [EvalBody [dict get $node body] $s] after -
+====
+        dict set env $counter $first
+        variable returns
+        set savedReturns $returns
+        lassign [EvalBody [dict get $node body] $s] after -
+        if {$entered} { set returns $savedReturns }
+>>>>
+
+@@ entered-first-continues-dropped counted-loop entry: an entered loop's first-iteration `continue` not carried to the next iteration's head nor to the exit
+%% match ec-loop-entered-*
+## hir/emission.tcl
+<<<<
+        set head [lsort -unique [concat $after [dict get $continues $e]]]
+        lappend out {*}[dict get $breaks $e]
+====
+        if {$entered} { set head [lsort -unique $after] } else { set head [lsort -unique [concat $after [dict get $continues $e]]] }
+        lappend out {*}[dict get $breaks $e]
+>>>>
+
 @@ join-first-state function-summary joins: a call's exits from its first entry state only
 %% match ec-join-states ec-boundary-* ec-loop-*
 ## hir/emission.tcl
@@ -224,7 +400,7 @@ proc hir::emission::NativeMayFail {name} {
 >>>>
 
 @@ summary-context-free function summaries keyed without their arguments: a helper's first argument context stands for every later one
-%% match ec-context-sensitive ec-arithmetic
+%% match ec-context-sensitive ec-arithmetic ec-loop-entered-contexts
 ## hir/emission.tcl
 <<<<
     if {[dict exists $seen $vals]} {

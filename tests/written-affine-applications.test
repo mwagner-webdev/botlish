@@ -329,28 +329,36 @@ test wd-native-release {natively every handle a written affine application owns 
         [lmap backend {cranelift-generic cranelift} {lrange [outcomeUnderHir $backend $hir] 0 1}]
 } -cleanup {unset -nocomplain text hir report} -result {100 0 {value 20} {{value 20} {value 20}}}
 
-test wd-nested-walks-linear {a deep application with an affine argument is never cut by the type bound, so a walk of its components must visit each type once: MentionsMutable (asked of a declared parameter's type by the semantic instances) reads each of the 3 applications per level of a 16-level specimen whose fields reach the next level twice (inner and rest) once -- it used to take every path, 2^N applied-field reads -- and the program declaring that type compiles} -body {
+test wd-nested-walks-linear {a deep application with an affine argument is never cut by the type bound, so a walk of its components must not follow every path: MentionsMutable (asked of a declared parameter's type by the semantic instances) answers a specimen whose fields reach the next level twice (inner and rest) from its declarations' summaries (PARAMETERIZED-DECLARATION-SUMMARIES-MILESTONE-1.md) -- its applied-field reads grow linearly with the levels (16 levels read at most twice as many as 8, plus a constant), where it used to take every path (2^N) -- and the program declaring that type compiles} -body {
     set C {Coroutine{args: [], return: int, errors: []}}
-    set decls "struct L0\[A, B\]:\n    x: A\n    y: B\n\n"
-    for {set i 1} {$i <= 16} {incr i} {
-        set p [expr {$i - 1}]
-        append decls "struct L$i\[A, B\]:\n    inner: L$p\[B, A\]\n    tag: int\n    rest: List\[L$p\[int, A\]\]\n    same: List\[L$i\[int, int\]\]\n\n"
+    set result {}
+    set reads {}
+    foreach n {8 16} {
+        set decls "struct L0\[A, B\]:\n    x: A\n    y: B\n\n"
+        for {set i 1} {$i <= $n} {incr i} {
+            set p [expr {$i - 1}]
+            append decls "struct L$i\[A, B\]:\n    inner: L$p\[B, A\]\n    tag: int\n    rest: List\[L$p\[int, A\]\]\n    same: List\[L$i\[int, int\]\]\n\n"
+        }
+        set text "${decls}fn pass(x: L$n\[$C, int\]) -> L$n\[$C, int\]:\n    x\n0\n"
+        set hir [surface::compile $text -warnings off]
+        hir::activate $hir
+        hir::structs::ForgetAffinity
+        set t [wdApp L$n [hir::types::MakeCoroutineType {} int {}] int]
+        set ::wdReads 0
+        trace add execution hir::structs::AppliedFieldTypes enter wdCountRead
+        try {
+            set mentions [hir::types::MentionsMutable $t]
+        } finally {
+            trace remove execution hir::structs::AppliedFieldTypes enter wdCountRead
+        }
+        lappend reads $::wdReads
+        lappend result $mentions [hir::types::Affinity $t]
     }
-    set text "${decls}fn pass(x: L16\[$C, int\]) -> L16\[$C, int\]:\n    x\n0\n"
-    set hir [surface::compile $text -warnings off]
-    hir::activate $hir
-    set t [wdApp L16 [hir::types::MakeCoroutineType {} int {}] int]
-    set ::wdReads 0
-    trace add execution hir::structs::AppliedFieldTypes enter wdCountRead
-    try {
-        set mentions [hir::types::MentionsMutable $t]
-    } finally {
-        trace remove execution hir::structs::AppliedFieldTypes enter wdCountRead
-    }
-    list $mentions [expr {$::wdReads <= 3 * 17}] [hir::types::Affinity $t]
+    lassign $reads r8 r16
+    list {*}$result [expr {$r8 > 0 && $r16 <= 2 * $r8 + 32}]
 } -setup {
     proc wdCountRead {args} { incr ::wdReads }
-} -cleanup {unset -nocomplain C decls text hir t mentions; rename wdCountRead {}} -result {0 1 affine}
+} -cleanup {unset -nocomplain C decls text hir t mentions result reads r8 r16; rename wdCountRead {}} -result {0 affine 0 affine 1}
 
 # ---------------------------------------------------------------------------
 # Recursive affine applications
@@ -372,15 +380,14 @@ test wd-recursive-message {a written recursive affine application's message is t
     wdMessage [wdProgram "fn g(n: Node\[@C@\]) -> int:\n    1\n0\n"]
 } -result {unknown or invalid type Node[Coroutine{args: [Message], return: Event, errors: []}] for parameter "n": Node[Coroutine{args: [Message], return: Event, errors: []}] is affine (its field "value" holds Coroutine{args: [Message], return: Event, errors: []}) and holds affine values of struct "Node" in a List, MutableVector or MutableArray (Node[Coroutine{args: [Message], return: Event, errors: []}].children: List[Node[Coroutine{args: [Message], return: Event, errors: []}]]): a recursive affine type is not supported -- its release would have to recurse as deep as the value nests, and an affine value is released by a static, finite walk of its type (an unrestricted struct may hold itself in a container)}
 
-test wd-unbounded-rejected {an unrestricted application that hands its affine argument on to ever larger applications (W[C] of `next: List[W[List[T]]]`) has no finite form -- an affine argument is never cut -- and is AFFINE-CONTAINER-UNSUPPORTED where it is written, held by another application, or made by an imprint; at int (cut like any type) it is an ordinary type} -body {
+test wd-unbounded-accepted {an unrestricted application that hands its affine argument on to ever larger applications (W[C] of `next: List[W[List[T]]]`) is an ordinary type -- every analysis of its components answers it from its declaration's summary, never by unfolding it (PARAMETERIZED-DECLARATION-SUMMARIES-MILESTONE-1.md; it was AFFINE-CONTAINER-UNSUPPORTED, "no finite form") -- written directly, held by another application and made by an imprint; at int it is the same ordinary type} -body {
     list [wdBody "fn f(w: W\[@C@\]) -> int:\n    1\n0\n"] \
         [wdBody "struct M\[T\]:\n    a: T\n    w: W\[T\]\nfn f(m: M\[@C@\]) -> int:\n    1\n0\n"] \
         [wdBody "fn mk() -> W\[T\]:\n    W\[T\] {next: \[\]}\nx = mk\[@C@\]()\n0\n"] \
+        [sourceAgree [wdProgram "fn f(w: W\[@C@\]) -> int:\n    std::list::length(w.next)\nf(W\[@C@\] {next: \[W\[List\[@C@\]\] {next: \[\]}\]})\n"]] \
         [sourceAgree [wdProgram "fn f(w: W\[int\]) -> int:\n    std::list::length(w.next)\nf(W\[int\] {next: \[W\[List\[int\]\] {next: \[\]}\]})\n"]] \
-        [hir::structs::Unfolding [wdApp W int]] \
-        [string match {unknown or invalid type W\[*\] for parameter "w": W\[*\] has no finite form: its fields nest its affine type argument in ever larger types (W\[*\].next: List\[W\[List\[*} \
-            [wdMessage [wdProgram "fn f(w: W\[@C@\]) -> int:\n    1\n0\n"]]]
-} -result {AFFINE-CONTAINER-UNSUPPORTED AFFINE-CONTAINER-UNSUPPORTED IMPRINT {value 1} {} 1}
+        [info commands hir::structs::Unfolding] [hir::types::Affinity [wdApp W $::wdT]]
+} -result {ok ok ok {value 1} {value 1} {} unrestricted}
 
 # ---------------------------------------------------------------------------
 # Phantom applications

@@ -21,6 +21,12 @@ on:
 permissions:
   contents: read
 
+# A newer push (or run on the same ref) cancels the running one, on main
+# too (CI-RUNS.md).
+concurrency:
+  group: icy-tower-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   slice:
     name: icy-tower (build, test, oracle, mutants, Xvfb)

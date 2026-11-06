@@ -46,13 +46,12 @@ on:
 permissions:
   contents: read
 
-# One run per branch at a time. On main a newer push waits for the running
-# comparison (and replaces any run still waiting), so every run finishes and
-# the newest commit is always checked; on another branch a newer dispatch
-# cancels the running one.
+# One run per branch at a time: a newer push or dispatch cancels the running
+# comparison, on main too (CI-RUNS.md), so the newest commit is the one
+# checked -- a burst of merges is compared once, at its last push.
 concurrency:
   group: static-decisions-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  cancel-in-progress: true
 
 jobs:
   plan:

@@ -1,0 +1,32 @@
+# probes.bot -- endpoints of the Linux driver, as a library of its own (the
+# package probes, examples/event-loop/shared;
+# SHARED-PACKAGE-DEPENDENCIES-MILESTONE-1.md). Written independently of
+# beats, it depends on the same driver package, event_loop_linux, and locks
+# the same release: the application's dependency graph has one instance of
+# it, so the Native capability the application installs is the one this
+# library requires.
+import event_loop_linux
+import std::event_loop
+import std::int
+import std::list
+import std::str
+import type std::event_loop::Wake
+
+# Opens COUNT endpoints through the driver (C calls of its adapter), checks
+# that each is empty, waits DELAY microseconds on a timer, wakes the loop,
+# and closes them. Its result is the number of endpoints it opened.
+fn run(count: int, delay: int, context ev: std::event_loop::Loop, n: event_loop_linux::Native) -> int errors std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    opened = loop i from 0 to count:
+        event_loop_linux::endpoint(4)
+    empty = loop e in opened:
+        event_loop_linux::endpoint_count(e) == 0
+    std::event_loop::log("probes: opened ".concat(std::int::to_string(std::list::length(opened))).concat(" endpoints"))
+    w = std::event_loop::sleep(delay)
+    if w == Wake::Timer:
+        std::event_loop::log("probes: the timer woke the probe")
+    event_loop_linux::wake()
+    closed = loop e in opened:
+        event_loop_linux::close_endpoint(e)
+    if std::list::length(empty) == count:
+        std::event_loop::log("probes: every endpoint was empty, and closed")
+    std::list::length(closed)

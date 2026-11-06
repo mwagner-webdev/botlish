@@ -209,7 +209,10 @@ proc pm::install::Rollback {ctx} {
         }
     }
     TidyViews $ctx
-    foreach {key path} [list state [pm::state::Path [dict get $ctx meta]] descriptor [dict get $ctx descriptor]] {
+    foreach {key path} [list state [pm::state::Path [dict get $ctx meta]] descriptor [dict get $ctx descriptor] \
+            graph [GraphPath $ctx]] {
+        # (A journal of an earlier package manager has no graph.)
+        if {![dict exists $members $key]} continue
         set saved [pm::json::payload [dict get $members $key]]
         set copy [file join $txn old-$key]
         switch -- $saved {
@@ -246,129 +249,13 @@ proc pm::install::TidyViews {ctx} {
 # Resolution
 
 # The plan of the project CTX with the descriptor DESCRIPTOR and the current
-# record STATE: a dict NAME -> NODE of every direct dependency, where NODE is
-#
-#   {kind artifact name N version V digest D artifact A children {NAME NODE ...}
-#    reuse 0}                    to be extracted from the artifact A
-#   {kind artifact ... reuse 1 record R}    already installed exactly so
-#                                            (R its record), kept as it is
-#   {kind editable name N version V directory P target T reuse 0|1}
-#
-# Every artifact is acquired and validated, every lock checked, before
-# anything is written. FORCE allows replacing installed packages that
-# changed since they were installed.
+# record STATE: the application's one dependency graph (pm/graph.tcl's
+# Resolve: {application NAMES packages {NAME NODE ...} paths users}), every
+# release in it acquired and validated, every lock checked, before anything
+# is written. FORCE allows replacing installed packages that changed since
+# they were installed (Apply).
 proc pm::install::Resolve {ctx descriptor state force} {
-    set plan [dict create]
-    set count 0
-    foreach name [lsort [dict keys [dict get $descriptor dependencies]]] {
-        dict set plan $name [ResolveDirect $ctx $descriptor $state $name count]
-    }
-    return $plan
-}
-
-proc pm::install::ResolveDirect {ctx descriptor state name countVar} {
-    upvar 1 $countVar count
-    set project [dict get $ctx project]
-    set request [dict get $descriptor dependencies $name]
-    set record [dict getdef $state $name ""]
-    set installed [file join [dict get $ctx modules] $name]
-    set source [dict getdef [dict get $descriptor sources] $name ""]
-    if {$source ne "" && [dict get $source kind] eq "directory"} {
-        set editable [pm::catalog::Editable $project $name $source]
-        if {![pm::version::satisfies [dict get $editable version] $request]} {
-            pm::Fail REQUEST "dependency $name: the editable directory [dict get $source path] is version [dict get $editable version], which the request \"$request\" does not accept"
-        }
-        set reuse [expr {$record ne "" && [dict get $record kind] eq "editable"
-            && [dict get $record directory] eq [dict get $source path]
-            && [LinkTarget $installed] eq [dict get $editable target]}]
-        incr count
-        return [dict create kind editable name $name version [dict get $editable version] \
-            directory [dict get $source path] target [dict get $editable target] reuse $reuse \
-            descriptor [dict get $editable descriptor]]
-    }
-    if {![dict exists $descriptor lock $name]} {
-        pm::Fail LOCK "dependency $name (request \"$request\") has no lock in botlish.json: install installs exact releases only. Run update $name to choose one"
-    }
-    set version [dict get $descriptor lock $name]
-    set digest ""
-    if {$source ne ""} {
-        set digest [dict get $source sha256]
-    }
-    if {[Reusable $record $version $digest $installed]} {
-        incr count [Count $record]
-        return [dict create kind artifact name $name version $version reuse 1 record $record]
-    }
-    if {$source ne ""} {
-        set artifact [pm::catalog::ArchiveSource $project $name $source]
-        if {[dict get $artifact version] ne $version} {
-            pm::Fail LOCK "dependency $name: the archive [dict get $source path] is version [dict get $artifact version], and the lock says $version"
-        }
-    } else {
-        set artifact [pm::catalog::Find $name $version {}]
-    }
-    return [ArtifactNode $artifact [list $name $version] $record $installed count]
-}
-
-# The node of ARTIFACT at the dependency path CHAIN (NAME VERSION pairs, its
-# own last), its children resolved from the repositories; RECORD and
-# INSTALLED the record and directory of what is installed at its place now.
-proc pm::install::ArtifactNode {artifact chain record installed countVar} {
-    upvar 1 $countVar count
-    variable maxDepth
-    variable maxInstances
-    if {[incr count] > $maxInstances} {
-        pm::Fail LIMIT "the dependency tree has more than $maxInstances package instances"
-    }
-    if {[llength $chain] / 2 > $maxDepth} {
-        pm::Fail LIMIT "[pm::catalog::Chain $chain]: the dependency tree is deeper than $maxDepth levels"
-    }
-    set descriptor [dict get $artifact descriptor]
-    set children [dict create]
-    foreach dep [lsort [dict keys [dict get $descriptor dependencies]]] {
-        set version [dict get $descriptor lock $dep]
-        foreach {ancestor ancestorVersion} $chain {
-            if {$ancestor eq $dep && $ancestorVersion eq $version} {
-                pm::Fail CYCLE "[pm::catalog::Chain $chain] -> $dep $version: a dependency cycle (a package cannot contain itself)"
-            }
-        }
-        set childRecord ""
-        if {$record ne "" && [dict get $record kind] eq "artifact"} {
-            set childRecord [dict getdef [dict get $record children] $dep ""]
-        }
-        set childInstalled [file join $installed .bot_modules $dep]
-        if {[Reusable $childRecord $version "" $childInstalled]} {
-            incr count [Count $childRecord]
-            dict set children $dep [dict create kind artifact name $dep version $version reuse 1 \
-                record $childRecord installed $childInstalled]
-            continue
-        }
-        set child [pm::catalog::Find $dep $version $chain]
-        dict set children $dep [ArtifactNode $child [concat $chain [list $dep $version]] $childRecord $childInstalled count]
-    }
-    return [dict create kind artifact name [dict get $artifact name] version [dict get $artifact version] \
-        digest [dict get $artifact digest] artifact $artifact children $children reuse 0]
-}
-
-# 1 when the RECORD at INSTALLED is the artifact node VERSION (with the
-# digest DIGEST, when one is required) exactly as it was installed.
-proc pm::install::Reusable {record version digest installed} {
-    if {$record eq "" || [dict get $record kind] ne "artifact" || [dict get $record version] ne $version} {
-        return 0
-    }
-    if {$digest ne "" && [dict get $record sha256] ne $digest} {
-        return 0
-    }
-    return [expr {[pm::state::Changes $installed $record x] eq ""}]
-}
-
-proc pm::install::Count {record} {
-    set n 1
-    if {[dict get $record kind] eq "artifact"} {
-        dict for {- child} [dict get $record children] {
-            incr n [Count $child]
-        }
-    }
-    return $n
+    return [pm::graph::Resolve $ctx $descriptor $state]
 }
 
 # The normalized target of the link PATH, or "".
@@ -382,17 +269,42 @@ proc pm::install::LinkTarget {path} {
 # ---------------------------------------------------------------------------
 # Applying a plan
 
+# The path of the project's package graph (surface/modules.tcl's ReadGraph):
+# PROJECT/.bot_modules/.graph.
+proc pm::install::GraphPath {ctx} {
+    return [file join [dict get $ctx modules] .graph]
+}
+
 # Applies PLAN to the project CTX whose record is STATE, then writes
 # DESCRIPTORBYTES as its botlish.json ("" leaves it as it is). Lines
 # describing what changed are returned.
+#
+# Every package of the graph is installed once, at .bot_modules/NAME, and
+# .bot_modules/.graph says which package uses which (the compiler's scopes:
+# BOT-MODULES-MILESTONE-1.md, "Package graphs"); no package has a
+# .bot_modules of its own. An installation of an earlier package manager
+# (its record's nested layout: one copy per dependency path) is replaced as
+# a whole.
 proc pm::install::Apply {ctx plan state force descriptorBytes {viewSpec {}}} {
     set modules [dict get $ctx modules]
+    set packages [dict get $plan packages]
+    set application [dict get $plan application]
     set report {}
     set operations {}
-    set oldViews [pm::state::views [dict get $ctx meta]]
+    set meta [dict get $ctx meta]
+    # (The record read once: a large one's JSON costs.)
+    set old [pm::state::readAll $meta]
+    set oldViews [dict get $old views]
+    set oldLayout [dict get $old layout]
+    # The package graph: the manager's own file, never one someone placed.
+    set graphPath [GraphPath $ctx]
+    if {[pm::Exists $graphPath] && ($oldLayout ne "graph" || [file type $graphPath] ne "file")} {
+        pm::Fail MANUAL "$graphPath exists, and the package manager did not make it: a package graph there is yours (the compiler reads it), and it never replaces one. Move it out of .bot_modules and run the command again"
+    }
     # What the plan replaces or removes must be the manager's, unchanged.
-    foreach name [lsort [dict keys $plan]] {
-        set node [dict get $plan $name]
+    set changed {}
+    foreach name [lsort [dict keys $packages]] {
+        set node [dict get $packages $name]
         if {[dict get $node reuse]} continue
         set active [file join $modules $name]
         if {![dict exists $state $name]} {
@@ -402,13 +314,26 @@ proc pm::install::Apply {ctx plan state force descriptorBytes {viewSpec {}}} {
             lappend operations [list $name 0 1]
             continue
         }
-        CheckUnchanged $ctx $name [dict get $state $name] $force
+        lappend changed {*}[Changed $ctx $name [dict get $state $name] $force]
         lappend operations [list $name [pm::Exists $active] 1]
     }
     foreach name [lsort [dict keys $state]] {
-        if {[dict exists $plan $name]} continue
-        CheckUnchanged $ctx $name [dict get $state $name] $force
+        if {[dict exists $packages $name]} continue
+        lappend changed {*}[Changed $ctx $name [dict get $state $name] $force]
         lappend operations [list $name [pm::Exists [file join $modules $name]] 0]
+    }
+    if {$changed ne ""} {
+        set names [lsort -unique [lmap change $changed {lindex $change 0}]]
+        set shown [lmap change [lrange $changed 0 9] {lindex $change 1}]
+        if {[llength $changed] > 10} {
+            lappend shown "... ([llength $changed] changes)"
+        }
+        if {[llength $names] == 1} {
+            set what "the installed package [lindex $names 0] changed since it was installed, and this operation would replace or remove it"
+        } else {
+            set what "the installed packages [join $names {, }] changed since they were installed, and this operation would replace or remove them"
+        }
+        pm::Fail MODIFIED "$what:\n  [join $shown "\n  "]\nKeep the changes elsewhere, or pass -force to discard them"
     }
     set newState [dict create]
     set txn [Txn $ctx]
@@ -417,8 +342,8 @@ proc pm::install::Apply {ctx plan state force descriptorBytes {viewSpec {}}} {
     try {
         # Stage.
         set sources [dict create]
-        foreach name [lsort [dict keys $plan]] {
-            set node [dict get $plan $name]
+        foreach name [lsort [dict keys $packages]] {
+            set node [dict get $packages $name]
             if {[dict get $node reuse]} {
                 dict set newState $name [Record $node]
                 dict set sources $name [file join $modules $name]
@@ -431,30 +356,44 @@ proc pm::install::Apply {ctx plan state force descriptorBytes {viewSpec {}}} {
         # The target views (pm/view.tcl): derived again where their inputs
         # changed, made for the targets asked for, removed when dropped or
         # when no package is target-aware any more.
-        lassign [Views $ctx $state $newState $sources $oldViews $viewSpec] newViews viewOperations viewLines
+        lassign [Views $ctx $state $newState $sources $oldViews $viewSpec $application] newViews viewOperations viewLines
         lappend operations {*}$viewOperations
     } on error {message options} {
         pm::RemoveTree $txn
         return -options $options $message
     }
-    set newStateBytes [pm::state::encode $newState $newViews]
-    set statePath [pm::state::Path [dict get $ctx meta]]
+    set graphBytes [encoding convertto utf-8 [pm::graph::OfState $application $newState]]
+    set oldGraph ""
+    if {[pm::Exists $graphPath]} {
+        set oldGraph [pm::ReadBytes $graphPath]
+    }
+    set newStateBytes [pm::state::encode $newState $newViews $application]
+    set statePath [pm::state::Path $meta]
+    set notes {}
+    if {$oldLayout eq "nested" && [dict size $state] > 0} {
+        lappend notes "note: the packages were installed one copy per dependency path by an earlier package manager: they are installed again as the application's one dependency graph, each package once"
+    }
+    if {$oldGraph ne "" && [encoding convertfrom utf-8 $oldGraph] ne [pm::graph::OfState [dict get $old application] $state]} {
+        lappend notes "note: .bot_modules/.graph was changed since it was written; it is derived again (the package graph is the package manager's, never your file)"
+    }
     if {$operations eq "" && [pm::Exists $statePath] && [pm::ReadBytes $statePath] eq $newStateBytes
+            && $oldGraph eq $graphBytes
             && ($descriptorBytes eq "" || ([pm::Exists [dict get $ctx descriptor]]
                 && [pm::ReadBytes [dict get $ctx descriptor]] eq $descriptorBytes))} {
         pm::RemoveTree $txn
-        return [concat [Report $plan $state {}] $viewLines]
+        return [concat $notes [Report $plan $state {}] $viewLines]
     }
-    Commit $ctx $operations $newStateBytes $descriptorBytes
-    return [concat [Report $plan $state $operations] $viewLines]
+    Commit $ctx $operations $newStateBytes $descriptorBytes $graphBytes
+    return [concat $notes [Report $plan $state $operations] $viewLines]
 }
 
 # The views of the new installation: {VIEWS OPERATIONS LINES}, VIEWS its
 # record (TARGET -> {derived files links}), OPERATIONS the view renames
 # ({TARGET HASOLD HASNEW view}) and LINES the report, after staging every
 # view that must be made in the transaction directory. VIEWSPEC: {requested
-# {T...} dropped {T...} origins {LIBRARY ORIGIN...}}.
-proc pm::install::Views {ctx oldState newState sources oldViews viewSpec} {
+# {T...} dropped {T...} origins {LIBRARY ORIGIN...}}; APPLICATION the
+# application's dependencies (the graph's first line).
+proc pm::install::Views {ctx oldState newState sources oldViews viewSpec application} {
     set requested [dict getdef $viewSpec requested {}]
     set dropped [dict getdef $viewSpec dropped {}]
     set origins [dict getdef $viewSpec origins {}]
@@ -498,7 +437,7 @@ proc pm::install::Views {ctx oldState newState sources oldViews viewSpec} {
     set operations {}
     foreach target $targets {
         set dir [pm::view::Dir $ctx $target]
-        set derived [pm::view::Derived $target $newState $origins $manual]
+        set derived [pm::view::Derived $target $newState $origins $manual $application]
         if {[dict exists $oldViews $target] && [dict get $oldViews $target derived] eq $derived} {
             set changes [pm::state::ViewChanges $dir [dict get $oldViews $target] .bot_modules/.targets/$target]
             if {$changes eq ""} {
@@ -510,7 +449,7 @@ proc pm::install::Views {ctx oldState newState sources oldViews viewSpec} {
         }
         set staged [file join [Txn $ctx] views $target]
         file mkdir [file dirname $staged]
-        set built [pm::view::Build $ctx $newState $sources $target $origins $manual $staged]
+        set built [pm::view::Build $ctx $newState $sources $target $origins $manual $staged $application]
         dict set views $target [dict get $built record]
         set plan [dict get $built plan]
         lappend operations [list $target [pm::Exists $dir] 1 view]
@@ -529,42 +468,33 @@ proc pm::install::Views {ctx oldState newState sources oldViews viewSpec} {
     return [list $views $operations $lines]
 }
 
-proc pm::install::CheckUnchanged {ctx name record force} {
+# How the installed package NAME (its record RECORD) changed since it was
+# installed: {NAME CHANGE} pairs, none with FORCE (its changes are then
+# discarded).
+proc pm::install::Changed {ctx name record force} {
     set active [file join [dict get $ctx modules] $name]
-    if {!$force && [pm::Exists $active]} {
-        set changes [pm::state::Changes $active $record .bot_modules/$name]
-        if {$changes ne ""} {
-            set shown [lrange $changes 0 9]
-            if {[llength $changes] > 10} {
-                lappend shown "... ([llength $changes] changes)"
-            }
-            pm::Fail MODIFIED "the installed package $name changed since it was installed, and this operation would replace or remove it:\n  [join $shown "\n  "]\nKeep the changes elsewhere, or pass -force to discard them"
-        }
+    if {$force || ![pm::Exists $active]} {
+        return {}
     }
+    return [lmap change [pm::state::Changes $active $record .bot_modules/$name] {list $name $change}]
 }
 
 # The record of a reused NODE (its own record, or for an editable one the
-# link it is).
+# link it is), with the versions it uses.
 proc pm::install::Record {node} {
     if {[dict get $node kind] eq "editable"} {
-        return [dict create kind editable version [dict get $node version] directory [dict get $node directory]]
+        return [dict create kind editable version [dict get $node version] directory [dict get $node directory] \
+            uses [dict get $node uses]]
     }
     return [dict get $node record]
 }
 
-# Writes NODE at DEST (which does not exist): an artifact's files, then its
-# children under DEST/.bot_modules; a reused node's installed tree, copied;
-# an editable one's link. Its record.
+# Writes NODE at DEST (which does not exist): an artifact's files; an
+# editable one's link. Its record.
 proc pm::install::Materialize {node dest} {
-    switch -- [dict get $node kind] {
-        editable {
-            file link -symbolic $dest [dict get $node target]
-            return [Record $node]
-        }
-    }
-    if {[dict get $node reuse]} {
-        file copy -- [dict get $node installed] $dest
-        return [dict get $node record]
+    if {[dict get $node kind] eq "editable"} {
+        file link -symbolic $dest [dict get $node target]
+        return [Record $node]
     }
     set artifact [dict get $node artifact]
     file mkdir $dest
@@ -575,28 +505,30 @@ proc pm::install::Materialize {node dest} {
         pm::WriteNew $target $bytes
     }
     pm::Fault extract
-    set children [dict create]
-    if {[dict get $node children] ne ""} {
-        file mkdir [file join $dest .bot_modules]
-        dict for {name child} [dict get $node children] {
-            dict set children $name [Materialize $child [file join $dest .bot_modules $name]]
-        }
-    }
-    return [pm::state::ArtifactNode [dict get $artifact version] [dict get $artifact digest] $files $children]
+    set record [pm::state::ArtifactNode [dict get $artifact version] [dict get $artifact digest] $files {}]
+    dict set record uses [dict get $node uses]
+    return $record
 }
 
 # The commit: OPERATIONS ({NAME HASOLD HASNEW} each) move the old
-# installations out and the staged ones in; the record and botlish.json are
-# replaced. A failure rolls back.
-proc pm::install::Commit {ctx operations stateBytes descriptorBytes} {
+# installations out and the staged ones in; the package graph is replaced
+# by GRAPHBYTES ("" removes it), the record and botlish.json are replaced.
+# A failure rolls back.
+proc pm::install::Commit {ctx operations stateBytes descriptorBytes graphBytes} {
     set txn [Txn $ctx]
     set modules [dict get $ctx modules]
     set statePath [pm::state::Path [dict get $ctx meta]]
     set descriptorPath [dict get $ctx descriptor]
-    # The journal: what the renames are, and how to restore the record and
-    # botlish.json.
+    set graphPath [GraphPath $ctx]
+    set oldGraph ""
+    if {[pm::Exists $graphPath]} {
+        set oldGraph [pm::ReadBytes $graphPath]
+    }
+    # The journal: what the renames are, and how to restore the record,
+    # botlish.json and the package graph.
     set saved [dict create]
-    foreach {key path changes} [list state $statePath 1 descriptor $descriptorPath [expr {$descriptorBytes ne ""}]] {
+    foreach {key path changes} [list state $statePath 1 descriptor $descriptorPath [expr {$descriptorBytes ne ""}] \
+            graph $graphPath [expr {$oldGraph ne $graphBytes}]] {
         if {!$changes} {
             dict set saved $key unchanged
         } elseif {[pm::Exists $path]} {
@@ -612,7 +544,8 @@ proc pm::install::Commit {ctx operations stateBytes descriptorBytes} {
         list obj [list kind [list str $kind] name [list str $name] old [list bool $hasOld] new [list bool $hasNew]]
     }]
     set journal [list obj [list journal {num 1} operations [list arr $ops] \
-        state [list str [dict get $saved state]] descriptor [list str [dict get $saved descriptor]]]]
+        state [list str [dict get $saved state]] descriptor [list str [dict get $saved descriptor]] \
+        graph [list str [dict get $saved graph]]]]
     pm::ReplaceFile [file join $txn journal.json] [pm::json::encode $journal]
     try {
         pm::Fault journal
@@ -636,6 +569,14 @@ proc pm::install::Commit {ctx operations stateBytes descriptorBytes} {
             incr step
         }
         TidyViews $ctx
+        if {$oldGraph ne $graphBytes} {
+            if {$graphBytes eq ""} {
+                file delete -- $graphPath
+            } else {
+                pm::ReplaceFile $graphPath $graphBytes
+            }
+            pm::Fault graph-written
+        }
         pm::ReplaceFile $statePath $stateBytes
         pm::Fault state-written
         if {$descriptorBytes ne ""} {
@@ -653,11 +594,12 @@ proc pm::install::Commit {ctx operations stateBytes descriptorBytes} {
     pm::RemoveTree $txn
 }
 
-# Lines describing the outcome of PLAN over the previous record STATE.
+# Lines describing the outcome of PLAN over the previous record STATE: one
+# per package of the graph, in name order, with the scopes that share it.
 proc pm::install::Report {plan state operations} {
     set lines {}
-    foreach name [lsort [dict keys $plan]] {
-        Describe [dict get $plan $name] [dict getdef $state $name ""] "" lines
+    dict for {name node} [lsort -stride 2 [dict get $plan packages]] {
+        lappend lines [Describe $node [dict getdef $state $name ""] [dict get $plan users $name]]
     }
     foreach op $operations {
         lassign $op name hasOld hasNew kind
@@ -668,36 +610,39 @@ proc pm::install::Report {plan state operations} {
     return $lines
 }
 
-proc pm::install::Describe {node record indent linesVar} {
-    upvar 1 $linesVar lines
+# The line of NODE, installed over RECORD, used by USERS ("" the
+# application, else package names).
+proc pm::install::Describe {node record users} {
     set name [dict get $node name]
     set version [dict get $node version]
+    set shared ""
+    if {$users ne [list ""]} {
+        set shown {}
+        foreach user $users {
+            if {$user eq ""} {
+                lappend shown "the application"
+            } else {
+                lappend shown $user
+            }
+        }
+        set shared ", used by [join $shown {, }]"
+    }
     if {[dict get $node kind] eq "editable"} {
         if {[dict get $node reuse]} {
-            lappend lines "${indent}$name $version (editable [dict get $node directory]): unchanged"
-        } else {
-            lappend lines "${indent}$name $version (editable [dict get $node directory]): linked"
+            return "$name $version (editable [dict get $node directory]): unchanged$shared"
         }
-        return
+        return "$name $version (editable [dict get $node directory]): linked$shared"
     }
     if {[dict get $node reuse]} {
-        lappend lines "${indent}$name $version: unchanged"
-        return
+        return "$name $version: unchanged$shared"
     }
     set what installed
     if {$record ne "" && [dict get $record kind] eq "artifact"} {
         if {[dict get $record version] ne $version} {
             set what "installed (was [dict get $record version])"
-        } else {
+        } elseif {[dict exists $record uses]} {
             set what reinstalled
         }
     }
-    lappend lines "${indent}$name $version (sha256 [pm::Short [dict get $node digest]]): $what"
-    dict for {child childNode} [dict get $node children] {
-        set childRecord ""
-        if {$record ne "" && [dict get $record kind] eq "artifact"} {
-            set childRecord [dict getdef [dict get $record children] $child ""]
-        }
-        Describe $childNode $childRecord "$indent  " lines
-    }
+    return "$name $version (sha256 [pm::Short [dict get $node digest]]): $what$shared"
 }

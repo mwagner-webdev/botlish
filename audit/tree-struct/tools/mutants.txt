@@ -243,63 +243,49 @@ core::value::setTreeTest ""
 @@ totality-equatable-unconditional every tree application is total for both operations, whatever its payload
 ## hir/types.tcl
 <<<<
-                set child [hir::structs::treeField $id]
-                foreach {name t} [hir::structs::AppliedFieldTypes $type] {
+    set child [hir::structs::treeField $id]
+    foreach {name t} [hir::structs::AppliedFieldTypes $type] {
 ====
-                set child [hir::structs::treeField $id]
-                if {$child ne ""} {
-                    return {total ""}
-                }
-                foreach {name t} [hir::structs::AppliedFieldTypes $type] {
+    set child [hir::structs::treeField $id]
+    if {$child ne ""} {
+        return {}
+    }
+    foreach {name t} [hir::structs::AppliedFieldTypes $type] {
 >>>>
 
 @@ totality-hashable-unconditional every tree application is hash-total, whatever its payload
 ## hir/types.tcl
 <<<<
-                set child [hir::structs::treeField $id]
-                foreach {name t} [hir::structs::AppliedFieldTypes $type] {
+proc hir::types::TotalityClass {operation type} {
 ====
-                set child [hir::structs::treeField $id]
-                if {$child ne "" && $operation eq "hash"} {
-                    return {total ""}
-                }
-                foreach {name t} [hir::structs::AppliedFieldTypes $type] {
+proc hir::types::TotalityClass {operation type} {
+    if {[hir::structs::treeField [lindex $type 1]] ne "" && $operation eq "hash"} {
+        return total
+    }
 >>>>
 
-@@ totality-child-infinite the child field is walked as an independent requirement, the application not remembered as walked: an infinite totality recursion
-## hir/types.tcl
-<<<<
-                    if {$name eq $child} {
-                        # A tree struct's child field (TREE-STRUCT-
-                        # MILESTONE-1.md) is a List of values of this very
-                        # application: it adds no requirement of its own,
-                        # so the tree is total exactly when its other
-                        # fields are (every tree is finite).
-                        continue
-                    }
-====
-                    if {$name eq $child} {
-                        lassign [Totality $operation $t $seen] class why
-                        continue
-                    }
->>>>
+# (Retired, PARAMETERIZED-DECLARATION-SUMMARIES-MILESTONE-1.md:
+# `totality-child-infinite` walked the child field as a requirement of its
+# own with the application not remembered, an infinite recursion. A tree's
+# class is now its declaration summary's least fixpoint, which reaches the
+# child field's application as the declaration being summarized and adds
+# nothing: walking it is equivalent to skipping it, and cannot recurse. The
+# tree-child rule stays pinned by totality-child-unknown.)
 
 @@ totality-child-unknown the child field is treated as an independent requirement it cannot decide: no tree is ever Equatable or Hashable
 ## hir/types.tcl
 <<<<
-                    if {$name eq $child} {
-                        # A tree struct's child field (TREE-STRUCT-
-                        # MILESTONE-1.md) is a List of values of this very
-                        # application: it adds no requirement of its own,
-                        # so the tree is total exactly when its other
-                        # fields are (every tree is finite).
-                        continue
-                    }
+        if {$name eq $child} {
+            # A tree struct's child field is a List of values of this very
+            # application: it adds no requirement of its own, so the tree is
+            # total exactly when its other fields are (every tree is finite).
+            continue
+        }
 ====
-                    if {$name eq $child} {
-                        lappend parts [list "field \"$name\" of $shown" any]
-                        continue
-                    }
+        if {$name eq $child} {
+            lappend parts [list "field \"$name\" of $shown" any]
+            continue
+        }
 >>>>
 
 # ---------------------------------------------------------------------------

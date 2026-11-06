@@ -1,0 +1,75 @@
+== the clean room
+tclsh: none; cargo: none; rustc: none
+network: unknown 
+beats-1.0.0.botpkg
+event_loop_linux-0.3.0.botpkg
+event_loop_linux-0.4.0.botpkg
+future-1.0.0.botpkg
+probes-1.0.0.botpkg
+== botlish add
+beats 1.0.0 (sha256 804bb3efb378): installed
+event_loop_linux 0.3.0 (sha256 3746cece124b): installed, used by beats
+view linux-x86_64: derived (10 files, 1 native library)
+added beats (request "1.0", lock 1.0.0)
+status 0
+beats 1.0.0: unchanged
+event_loop_linux 0.3.0: unchanged, used by beats, probes
+probes 1.0.0 (sha256 03197da6e134): installed
+view linux-x86_64: derived again (12 files, 1 native library)
+added probes (request "1.0", lock 1.0.0)
+status 0
+beats 1.0.0: unchanged
+event_loop_linux 0.3.0: unchanged, used by the application, beats, probes
+probes 1.0.0: unchanged
+view linux-x86_64: derived again (12 files, 1 native library)
+note: event_loop_linux 0.3.0 is the version beats 1.0.0, probes 1.0.0 lock: the application shares that instance
+added event_loop_linux (request "0.3", lock 0.3.0)
+status 0
+== the installed graph
+botlish package graph 1
+application beats event_loop_linux probes
+package beats event_loop_linux
+package event_loop_linux
+package probes event_loop_linux
+== botlish package graph
+the dependency graph of /home/dev/app: 3 packages, one instance of each
+application uses: beats, event_loop_linux, probes
+beats 1.0.0 (sha256 804bb3efb378): used by the application; installed
+  locked by: the application (request "1.0")
+  uses: event_loop_linux 0.3.0
+  path: the project -> beats 1.0.0
+event_loop_linux 0.3.0 (sha256 3746cece124b): used by the application, beats, probes; installed
+  locked by: the application (request "0.3"), beats 1.0.0, probes 1.0.0
+  shared: one instance, event_loop_linux, for the application, beats, probes
+  path: the project -> event_loop_linux 0.3.0
+probes 1.0.0 (sha256 03197da6e134): used by the application; installed
+  locked by: the application (request "1.0")
+  uses: event_loop_linux 0.3.0
+  path: the project -> probes 1.0.0
+== botlish verify
+note: target views: linux-x86_64 (verify -target T verifies one's native dependencies again)
+verify: 3 package instance(s) in /home/dev/app: as installed
+(integrity only: installed bytes against local artifacts and the installation record; no artifact carries a publisher signature to authenticate)
+== native executable
+executable: main
+["t=0: probes: opened 2 endpoints", "t=1: beats: beat 1", "t=2: beats: beat 2", "t=3: probes: the timer woke the probe", "t=3: probes: every endpoint was empty, and closed", "t=5: beats: beat 3", "t=5: beats: the driver's clock never went back"]
+== a library locking another release of the driver
+error: cannot select one version of event_loop_linux for the application's dependency graph: 0.3.0 and 0.4.0 are demanded:
+  the application's botlish.json locks event_loop_linux 0.3.0 (request "0.3")
+  beats 1.0.0 locks event_loop_linux 0.3.0 (the project -> beats 1.0.0)
+  probes 1.0.0 locks event_loop_linux 0.3.0 (the project -> probes 1.0.0)
+  future 1.0.0 locks event_loop_linux 0.4.0 (the project -> future 1.0.0)
+A package of the application's dependency graph has one instance, at one version, used by every package that depends on it; a lock is the release its package was built and tested with, and is never changed, relaxed or overridden to make the graph agree, and no second instance is made. Choose versions whose locks agree (update, add -request), or ask the packages' authors for releases that lock the same version (PM DEPENDENCY-CONFLICT)
+== checks
+PASS botlish.json has the three dependencies
+PASS one driver instance, used by the application, beats and probes
+PASS no package holds a .bot_modules of its own
+PASS the graph shows the driver shared
+PASS verify is clean
+PASS the program builds as a native executable
+PASS beats ran under the shared driver
+PASS probes ran under the shared driver
+PASS add future fails
+PASS the failure is a DEPENDENCY-CONFLICT
+PASS it names future's lock
+PASS the installation is unchanged

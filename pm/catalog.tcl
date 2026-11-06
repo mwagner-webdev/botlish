@@ -35,6 +35,10 @@ namespace eval pm::catalog {
     variable loaded [dict create]
 }
 
+# The repositories DIRS of a command: kept sorted, so that nothing a
+# command does or says -- not even the order a message names them in --
+# depends on the order the command line gave them (there is no precedence
+# among them).
 proc pm::catalog::configure {dirs} {
     variable repositories
     variable loaded
@@ -45,10 +49,9 @@ proc pm::catalog::configure {dirs} {
         if {![file isdirectory $dir]} {
             pm::Fail REPOSITORY "the repository $dir is not a directory"
         }
-        if {$dir ni $repositories} {
-            lappend repositories $dir
-        }
+        lappend repositories $dir
     }
+    set repositories [lsort -unique $repositories]
 }
 
 proc pm::catalog::RepositoryCount {} {

@@ -2,7 +2,8 @@ name: tests
 
 on:
   push:
-    branches: [main]
+    # Every branch: a branch push runs the canary only (below).
+    branches: ["**"]
     paths-ignore: ["**.md", "docs/**"]
   pull_request:
     paths-ignore: ["**.md", "docs/**"]
@@ -11,9 +12,77 @@ on:
 permissions:
   contents: read
 
+# A newer push (or run on the same ref) cancels the running one, on main
+# too (CI-RUNS.md).
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  canary:
+    name: canary (linux x86-64)
+    # The likeliest to fail, first (CI-RUNS.md, "The canary"): the test files
+    # and golden suites the push adds or changes, smallest first, then the
+    # ones that failed in recent CI runs on this host (tests/canary.tsv),
+    # within about ten minutes (tests/canary.tcl). It compares HEAD with
+    # main's previous head on a push to main, with its merge base with main
+    # otherwise. Before it, the two cheap gates: every mutant applies, and
+    # the warning gate. They are steps here, not jobs, so that they gate the
+    # rest without each waiting for a runner of its own (with the pool full
+    # that wait was close to an hour, 2026-11-05); each step runs whatever an
+    # earlier one found. Every other job waits for this one, so a push that
+    # breaks them costs one runner for minutes, not every runner for hours.
+    # On a branch push it is all that runs: dispatch the workflow on the
+    # branch for the rest.
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      LANG: C.utf8
+      LC_ALL: C.utf8
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # The history to the merge base, without file contents.
+          fetch-depth: 0
+          filter: blob:none
+
+      - name: Install project prerequisites
+        run: bash .devcontainer/setup.sh
+
+      # Every mutant of every audit's catalog still applies to this tree: its
+      # text to replace occurs exactly once (MAIN-TEST-DEFECTS-2026-11.md).
+      # The harnesses report a mutant that does not as NOT-APPLIED, but only
+      # when they run, which is when their own area changes; a change
+      # elsewhere that rewrites or duplicates the text it targets fails here
+      # instead, on its own push. Reads files only: seconds.
+      - name: Every mutant applies
+        run: tclsh9.0 tools/mutant-catalogs.tcl -verbose 1
+
+      # The shipped stdlib, libraries, examples and benchmarks compile with
+      # exactly the warnings audit/refactor/manifest.txt lists, each with its
+      # named obstruction, and every program without a manifest entry
+      # compiles under -warnings error (REFACTOR-WARNINGS-CLEAN.md). A new
+      # warning, a closed finding still listed, or a location that drifted
+      # fails it. Warnings are discovered before any backend runs: no native
+      # build needed. About two and a half minutes.
+      - name: Warning gate
+        if: ${{ !cancelled() }}
+        run: tclsh9.0 audit/refactor/tools/gate.tcl
+
+      - name: Build native (Cranelift) backend
+        if: ${{ !cancelled() }}
+        uses: ./.github/actions/build-native
+
+      - name: Canary
+        if: ${{ !cancelled() }}
+        env:
+          BASE: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.event.before || 'origin/main' }}
+        run: tclsh9.0 tests/canary.tcl -base "$BASE"
+
   test:
     name: tests (${{ matrix.backend }})
+    needs: canary
+    if: github.event_name != 'push' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -81,6 +150,8 @@ jobs:
     # The whole suite with each native backend as CORE_BACKEND: specialized
     # (cranelift) and unspecialized (cranelift-generic, -specialize 0).
     name: tests (${{ matrix.backend }} coverage)
+    needs: canary
+    if: github.event_name != 'push' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -133,6 +204,8 @@ jobs:
 
   rust:
     name: tests (native Rust unit tests)
+    needs: canary
+    if: github.event_name != 'push' || github.ref == 'refs/heads/main'
     # The native runtime's and code generator's own Rust tests, unstressed,
     # on every push and pull request (the gc-stress job below runs them again
     # under GC stress, on pushes).
@@ -151,6 +224,8 @@ jobs:
 
   stub-linker:
     name: tests (stub-linked executables)
+    needs: canary
+    if: github.event_name != 'push' || github.ref == 'refs/heads/main'
     # Every test file that builds a standalone executable, with executables
     # linked by the toolchain-free `stub` linker the single-file compiler uses
     # (SINGLE-EXECUTABLE.md) instead of rustc. The tests that read a
@@ -181,6 +256,8 @@ jobs:
 
   system-linker:
     name: tests (system-linked executables)
+    needs: canary
+    if: github.event_name != 'push' || github.ref == 'refs/heads/main'
     # Every test file that builds a standalone executable or links a program
     # that calls C, with executables linked by the `system` linker the
     # single-file compiler uses for programs that call C
@@ -224,51 +301,10 @@ jobs:
         run: |
           tclsh9.0 tests/all.tcl -file "system-linker.test c-ffi.test c-byte-borrowing.test c-ffi-error-capture.test coroutines.test native-link-plan.test"
 
-  warning-gate:
-    name: warning gate (manifest)
-    # The shipped stdlib, libraries, examples and benchmarks compile with
-    # exactly the warnings audit/refactor/manifest.txt lists, each with its
-    # named obstruction, and every program without a manifest entry compiles
-    # under -warnings error (REFACTOR-WARNINGS-CLEAN.md). A new warning, a
-    # closed finding still listed, or a location that drifted fails the job.
-    # Warnings are discovered before any backend runs, so no native build is
-    # needed.
-    runs-on: ubuntu-latest
-    env:
-      LANG: C.utf8
-      LC_ALL: C.utf8
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Install project prerequisites
-        run: bash .devcontainer/setup.sh
-
-      - name: Warning gate
-        run: tclsh9.0 audit/refactor/tools/gate.tcl
-
-  mutant-catalogs:
-    name: mutation catalogs (every mutant applies)
-    # Every mutant of every audit's catalog still applies to this tree: its
-    # text to replace occurs exactly once (MAIN-TEST-DEFECTS-2026-11.md).
-    # The harnesses report a mutant that does not as NOT-APPLIED, but only
-    # when they run, which is when their own area changes; a change elsewhere
-    # that rewrites or duplicates the text it targets fails here instead, on
-    # its own push. Reads files only: seconds.
-    runs-on: ubuntu-latest
-    env:
-      LANG: C.utf8
-      LC_ALL: C.utf8
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Install project prerequisites
-        run: bash .devcontainer/setup.sh
-
-      - name: Every mutant applies
-        run: tclsh9.0 tools/mutant-catalogs.tcl -verbose 1
-
   method-filter:
     name: method-call decision (oracle, reference audit)
+    needs: canary
+    if: github.event_name != 'push' || github.ref == 'refs/heads/main'
     # The method-call decision (hir/methods.tcl,
     # METHOD-RESOLUTION-CORRECTNESS-MILESTONE-1.md) judges a candidate by the
     # call's own checks, certified relative to the decided program; its kind
@@ -306,6 +342,8 @@ jobs:
 
   golden:
     name: golden suites (Botlish-native tests, shard ${{ matrix.shard }}/4)
+    needs: canary
+    if: github.event_name != 'push' || github.ref == 'refs/heads/main'
     # The Botlish golden test suites (tests/golden/*.bot, stdlib/test.bot,
     # GOLDEN-TEST-FRAMEWORK.md, LARGE-SCALE-GOLDEN-MIGRATION.md) on every
     # backend, side by side with the Tcl tests they were ported from: every
@@ -338,11 +376,12 @@ jobs:
 
   gc-stress:
     name: tests (native GC-stress)
+    needs: canary
     # GC-stress forces a GC attempt at every allocation site, which is the
     # standard way to surface native stack-walking/root-tracking bugs (see
-    # AGENTS.md). It's slower than a plain run, so it's push-only rather
-    # than running on every PR too.
-    if: github.event_name == 'push'
+    # AGENTS.md). It's slower than a plain run, so it runs on pushes to main
+    # only: not on pull requests, manual runs or branch pushes.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     env:
       LANG: C.utf8
