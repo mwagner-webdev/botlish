@@ -436,8 +436,8 @@ test http-package-docs {every botlish block of the package's README.md and GUIDE
 
 test http-uri {URI parsing: scheme and host lowercased, default ports omitted from the authority, IPv6 in brackets, the query kept and the fragment dropped; user information, other schemes, bad escapes, bad hosts and ports refused} -constraints {httpBuilt} -body {
     httpRun parse-many "https://Example.COM:0443/a%20b?x=1#f" "http://\[::1\]:8080" "HTTP://h:/" "http://h/p?" \
-        "http://1.2.3/" "http://user@h/" "https://h/%zz" "http://a..b/" "ftp://h/" "http://h:65536/" "http://\[::1%25eth0\]/" "http://h/a b"
-} -result {{https example.com 443 /a%20b?x=1 example.com} {http ::1 8080 / [::1]:8080} {http h 80 / h} {http h 80 /p? h} invalid invalid invalid invalid invalid invalid invalid invalid {final: clients 0 exchanges 0 panics 0}}
+        "http://1.2.3/" "http://user@h/" "https://h/%zz" "https://h/%az" "http://a..b/" "ftp://h/" "http://h:65536/" "http://\[::1%25eth0\]/" "http://h/a b"
+} -result {{https example.com 443 /a%20b?x=1 example.com} {http ::1 8080 / [::1]:8080} {http h 80 / h} {http h 80 /p? h} invalid invalid invalid invalid invalid invalid invalid invalid invalid {final: clients 0 exchanges 0 panics 0}}
 
 httpStop
 cleanupTests

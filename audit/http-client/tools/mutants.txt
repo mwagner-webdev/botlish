@@ -54,14 +54,19 @@
             return false
 >>>>
 
-@@ header-native-forbidden the native layer accepts a framing header (transfer-encoding) a program built by hand
+@@ header-native-value the native layer accepts any bytes as a header value (CR LF included) of a Header a program built by hand
 %% http-client.test:http-header-validation
 ## packages/http/native/src/client.rs
 <<<<
-        if pair[0].first() == Some(&b':') || FORBIDDEN.contains(&name.as_str()) {
+        let value = HeaderValue::from_bytes(pair[1])
 ====
-        if pair[0].first() == Some(&b':') {
+        let value = Ok::<_, ()>(unsafe { HeaderValue::from_maybe_shared_unchecked(bytes::Bytes::copy_from_slice(pair[1])) })
 >>>>
+
+# (The native layer's check of a header *name* -- a token, none the client
+# owns -- is not a mutant: open_exchange checks every name in Botlish
+# before the native call, so no program reaches it; it is defense in depth,
+# and its mutant is equivalent.)
 
 # ---------------------------------------------------------------------------
 # Bodies (packages/http/native/src/client.rs, body.rs)
@@ -168,7 +173,7 @@
 # ---------------------------------------------------------------------------
 # URIs (packages/http/http.bot)
 
-@@ uri-bad-escape a percent sign needs no hex digits after it: "%zz" passes
+@@ uri-bad-escape a percent sign needs one hex digit after it, not two: "%az" passes
 %% http-client.test:http-uri
 !! tclsh9.0 audit/http-client/tools/syntax-fuzz.tcl -seed 1 -count 1500
 ## packages/http/http.bot

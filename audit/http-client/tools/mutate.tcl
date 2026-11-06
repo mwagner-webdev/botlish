@@ -175,7 +175,13 @@ try {
             continue
         }
         # The native files of this tree (tests/cffi/http.tcl: the provider
-        # archive, the released and the test unit), rebuilt from its sources.
+        # archive, the released and the test unit), rebuilt from its sources:
+        # what an earlier mutant's build left in the tree's cache is removed
+        # first (the recipe reuses a stamped archive, which would hide a
+        # mutant of the recipe itself). cargo's own incremental state stays.
+        foreach sub {provider-archives units stub-bssl} {
+            file delete -force [file join $cache http-package $sub]
+        }
         lassign [run [dict get $options -timeout] $tree tclsh9.0 [file join $tree tests cffi http.tcl]] status output
         if {$status != 0} {
             lappend results [list $name $description NOT-BUILT ""]
