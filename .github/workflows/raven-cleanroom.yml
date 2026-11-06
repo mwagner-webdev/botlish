@@ -78,7 +78,7 @@ jobs:
         run: audit/raven-cleanroom/tools/cleanroom.sh image
 
       - name: Run the clean-room acceptance
-        run: audit/raven-cleanroom/tools/cleanroom.sh run dist/botlish repo/raven-0.3.2.botpkg out
+        run: audit/raven-cleanroom/tools/cleanroom.sh run dist/botlish repo/raven-0.4.0.botpkg out
 
       - if: always()
         uses: actions/upload-artifact@v4

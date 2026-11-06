@@ -5592,6 +5592,16 @@ author image, for a release). Keep it so:
   for headless use. A `raven` change of contents is a new version: the tool
   refuses to overwrite a different `NAME-VERSION.botpkg` (`-force` only
   for a local file the author means to replace).
+* The event bridge (native/raven_bridge.c, RAVEN-BINDINGS.md section 5)
+  only records: it never calls Botlish, never keeps a pointer Raven gave
+  it, and its one input hook (`watch_input`) answers "not consumed" to
+  every event, so watching a window changes nothing Raven does
+  (`raven-input`). A press is an event of its own (KeyPressed,
+  MousePressed), never derived from state; consecutive moves are one
+  record. Every number a record holds is finite, so `events()`, `rect()`
+  and `mouse_position()` declare no error: never make them fallible again
+  for a value Raven cannot produce. A change to the record or its kinds
+  bumps the bridge's ABI and raven.bot's check together.
 * Builds are recognized by their configuration's stamp
   (tests/cffi/raven.tcl: `headless`, `desktop`), never by a library merely
   present; the desktop build's Vulkan headers are the pinned Khronos commit
