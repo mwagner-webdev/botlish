@@ -2376,12 +2376,12 @@ affinity. Keep it so:
   writing a type change what it is (`hir::resolve::ResolveApplied` builds
   the one canonical application). What makes a written application no type
   is `hir::structs::WrittenProblem`: a recursive affine application
-  (`OwnedRecursion`) or one that nests its affine argument in ever larger
-  types (`Unfolding`: an affine argument is never cut, so the compiler's
-  walks of such a type would never end), AFFINE-CONTAINER-UNSUPPORTED
-  wherever it is written -- also as a phantom slot's argument -- and the
-  same `Unfolding` for an imprint that makes one (`hir::imprint::
-  UnfoldingProblem`).
+  (`OwnedRecursion`), AFFINE-CONTAINER-UNSUPPORTED wherever it is written
+  -- also as a phantom slot's argument. One that nests its affine argument
+  in ever larger types (W[Coroutine{...}] of `next: List[W[List[T]]]`) is
+  an ordinary type: every analysis of its components answers it from its
+  declaration's summary (Declaration summaries, below). Never bring back a
+  rejection of it.
 * Imprinting reads where values of an argument exist:
   `hir::imprint::Occurrences` places an application's argument at its
   slot's positions (`hir::structs::SlotPositions`: the positions
@@ -2395,8 +2395,8 @@ affinity. Keep it so:
   or a function type's variable as none.
 
 If you change the affinity query (`hir/types.tcl`, `hir/structs.tcl`),
-written applications' admission (`ResolveApplied`, `WrittenProblem`,
-`Unfolding`) or slot positions (`SlotPositions`, `Occurrences`' application
+written applications' admission (`ResolveApplied`, `WrittenProblem`) or
+slot positions (`SlotPositions`, `Occurrences`' application
 case, `Placed`), `hir/affine.tcl`, contract-based call typing of
 `Fn`/`Coroutine` callees
 (`hir/types.tcl`'s `Call`, `hir/range.tcl`'s `VerifyStructuralCall`,
@@ -2430,6 +2430,70 @@ kinds): a change to that gate, to those kinds or to which joins can hold a
 path-release diagnostic also needs `tests/static-economics.test` and the
 static-decision harnesses (Static intrinsics, below).
 
+
+## Declaration summaries (component analyses of parameterized types)
+
+A parameterized nominal type is finite even where substituting its
+arguments again and again is not: `struct W[T]: next: List[W[List[T]]]`
+reaches W[C], W[List[C]], ... (PARAMETERIZED-DECLARATION-SUMMARIES-
+MILESTONE-1.md). An analysis that answers for a value of a type from its
+components -- Bearing, CarriedInto, Totality (HashClass, Hashable, the
+total lowerings), SendClass, MentionsMutable, MayHoldVector, CanCarry,
+the DecimalRounded guard, MutableComponent, ValueStability, the affinity
+summary, the slot positions -- answers a named struct from its
+declaration's summary (hir/summaries.tcl: one least fixpoint over the
+declarations, `hir::summaries::Fixpoint`) and its own arguments' answers,
+never by unfolding the application's fields. Keep it so:
+
+* **Component analyses of parameterized nominal types must prefer
+  declaration summaries over recursive substitution walks.** A new
+  analysis that recursively unfolds applied struct fields
+  (`hir::structs::AppliedFieldTypes` of what it meets, again and again)
+  must justify, in its comment and in the report's census, why a finite
+  declaration summary cannot express its result. Define it as a property
+  of hir/summaries.tcl (`hir::summaries::define`: the classes algebra --
+  levels joined over the slots' entries, one probe per class of argument
+  -- or the union algebra), whose node is the walk of one declaration's
+  applied fields, and read it with `Level` or `Union`.
+* A property's classes are its own: what it reads at a slot position (a
+  value held, a Fn argument type's `any`-ness, a callable's errors) decides
+  its probes and its neutral argument. Never share one property's
+  relevance or answers with another, and never assume one universal
+  neutral.
+* The summaries are facts of the registry: computed lazily, forgotten with
+  the affinity facts (`hir::structs::ForgetAffinity` calls
+  `hir::summaries::Forget`), never stored in HIR, interchange text or the
+  cache, never keyed by a name.
+* No depth limit or application count decides a semantic answer. The one
+  bounded walk left in a migrated analysis is the reason text of a class
+  that is not total (Totality, SendClass, MutableComponent,
+  ValueStability): the class is the summary's; the walk follows field order
+  and stops a non-uniform recursion grown twice (`hir::summaries::Whistle`,
+  declarations on an expansive cycle only). Never decide a class by it.
+  One question walks an application's parts once (`hir::summaries::Walk`;
+  a later path reads that walk): never let a reason walk revisit an
+  application once per path, which is exponential in a declaration with
+  several recursive fields, and never keep a walk's result past its
+  question.
+* A genuine ownership rule is not a compiler guard: a recursive affine
+  application stays AFFINE-CONTAINER-UNSUPPORTED (`OwnedRecursion`).
+
+If you change hir/summaries.tcl, a property's node, probes or classes, or
+one of the analyses above, run `tests/parameterized-declaration-summaries.test`,
+`tests/written-affine-applications.test`, `tests/hashable.test`,
+`tests/value-identity.test`, `tests/typed-callable-escape.test`,
+`tests/structural-contract-completions.test`, `tests/sendability.test`,
+`tests/tree-struct.test`, `python3 -I audit/declaration-summaries/tools/oracle.py
+selftest`, `audit/declaration-summaries/tools/fuzz.tcl` (several seeds; it
+compares the compiler with the independent oracle and with the old walks,
+audit/declaration-summaries/tools/reference.tcl, which
+`extract-reference.py` regenerates from the revision before the summaries)
+and `audit/declaration-summaries/tools/mutate.tcl` (every mutant in its
+`mutants.txt` must still apply and be killed: update a mutant's text when
+you change the code it mutates, keeping it a mutant of the same rule), plus
+the affine, tree-struct, value-identity and hashable mutation harnesses for
+a change to code they mutate. `bench/declaration-summaries.tcl` regenerates
+the scaling report.
 ## Resources (scope-bound cleanup)
 
 `opaque resource struct R:` and `cleanup fn NAME(r: R, context ...):`

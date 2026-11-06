@@ -1871,16 +1871,13 @@ proc hir::mutvec::MayHoldVector {type {seen {}}} {
     }
     if {[hir::types::IsNamedStruct $type]} {
         # (An application's fields, its slots replaced by the arguments:
-        # TRAIT-CONSTRAINED-IMPRINTED-TYPES.md.)
-        if {$type in $seen} {
-            return 0
-        }
-        foreach {name t} [hir::structs::AppliedFieldTypes $type] {
-            if {[MayHoldVector $t [concat $seen [list $type]]]} {
-                return 1
-            }
-        }
-        return 0
+        # TRAIT-CONSTRAINED-IMPRINTED-TYPES.md -- answered from the
+        # declaration's summary, hir/summaries.tcl, by whether each argument
+        # may hold one where a field holds a value of it: a struct met again
+        # adds nothing, the least fixpoint.)
+        set classes [lmap a [hir::summaries::Arguments $type] {MayHoldVector $a $seen}]
+        set level [hir::summaries::Level mayHoldVector $type $classes]
+        return [expr {$level ne "" && $level > 0}]
     }
     if {[hir::types::IsEnum $type]} {
         # An enum (ENUMS.md) holds what its case payloads hold: nothing,
@@ -1902,6 +1899,24 @@ proc hir::mutvec::MayHoldVector {type {seen {}}} {
     return [expr {[lindex $type 0] ni {int str bool unit UnicodeChar never list immutableSet block native fn coroutine result}
         && ![core::type::isFloat [lindex $type 0]]}]
 }
+
+# MayHoldVector of {nstruct ID ARGUMENTS} from its applied fields (the
+# summary's node).
+proc hir::mutvec::MayHoldVectorNode {id arguments} {
+    set type [list nstruct $id]
+    if {$arguments ne {}} {
+        lappend type $arguments
+    }
+    foreach {name t} [hir::structs::AppliedFieldTypes $type] {
+        if {[MayHoldVector $t]} {
+            return 1
+        }
+    }
+    return 0
+}
+
+hir::summaries::define mayHoldVector -algebra classes -neutral int \
+    -probes [list int [list mutvec int]] -node hir::mutvec::MayHoldVectorNode
 
 # The function blocks of BLOCKS whose every result (Results) cannot hold a
 # vector (MayHoldVector), or is fresh: a new vector, a share, a struct

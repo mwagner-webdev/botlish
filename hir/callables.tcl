@@ -189,7 +189,6 @@ proc hir::callables::CarriedErrors {hir type} {
 
 proc hir::callables::CarriedInto {hir type errorsVar} {
     upvar 1 $errorsVar errors
-    variable carriedVisiting
     set type [hir::types::Unrefined $type]
     if {[hir::types::IsMutArray $type] || [hir::types::IsSet $type] || [hir::types::IsMutVec $type]} {
         CarriedInto $hir [lindex $type 1] errors
@@ -228,43 +227,102 @@ proc hir::callables::CarriedInto {hir type errorsVar} {
         return
     }
     if {[hir::types::IsNamedStruct $type]} {
-        if {[info exists carriedVisiting] && $type in $carriedVisiting} {
+        # A named struct carries what its fields carry: its declaration's
+        # own errors (every slot neutral) and the whole of what each
+        # relevant slot's argument carries -- a slot is relevant where its
+        # argument's callables are reached (a field, an element, a callable's
+        # result: never a Fn argument, which no erased value of the struct
+        # holds). Answered from the declaration's summary (hir/summaries.tcl),
+        # never by unfolding the application; a cycle adds nothing (the least
+        # fixpoint).
+        set summary [hir::summaries::Union carried $type]
+        if {$summary eq ""} {
             return
         }
-        lappend carriedVisiting $type
-        try {
-            foreach {name t} [hir::structs::AppliedFieldTypes $type] {
-                CarriedInto $hir $t errors
-            }
-        } finally {
-            set carriedVisiting [lrange $carriedVisiting 0 end-1]
+        lassign $summary own relevant
+        lappend errors {*}$own
+        set arguments [hir::summaries::Arguments $type]
+        foreach i $relevant {
+            CarriedInto $hir [lindex $arguments $i] errors
         }
     }
 }
 
+# What {nstruct ID ARGUMENTS} carries, from its applied fields (the
+# summary's node: hir::summaries::Compute gives it the neutral argument and
+# the marker). A declaration's field types name no exact block, so the walk
+# needs no HIR.
+proc hir::callables::CarriedNode {id arguments} {
+    set type [list nstruct $id]
+    if {$arguments ne {}} {
+        lappend type $arguments
+    }
+    set errors {}
+    foreach {name t} [hir::structs::AppliedFieldTypes $type] {
+        CarriedInto {} $t errors
+    }
+    return [lsort -unique $errors]
+}
+
+# The marker CarriedInto's summary probes a slot with: a function whose
+# contract declares the one error no program can name.
+hir::summaries::define carried -algebra union -neutral any \
+    -marker [hir::types::MakeFn {} int {#summary-marker}] -marker-name #summary-marker \
+    -node hir::callables::CarriedNode
+
 # Bearing of the named struct type TYPE: any of its field types bears (an
 # application's, its slots replaced by the arguments: TRAIT-CONSTRAINED-
 # IMPRINTED-TYPES.md -- Box[Fn{...}] bears what its declaration's `value: T`
-# does not show). A struct may name itself (directly or through others), so
-# a type being examined contributes nothing further (a cycle adds no
-# obligation its first visit did not already count).
+# does not show). A struct may name itself (directly or through others): a
+# cycle adds no obligation its first visit did not already count -- the
+# least fixpoint.
+#
+# Answered from the declaration's summary (hir/summaries.tcl,
+# PARAMETERIZED-DECLARATION-SUMMARIES-MILESTONE-1.md), never by unfolding
+# the application: Bearing reads an argument at a slot position in exactly
+# two ways -- where a value of it is held (a field, an element, a result:
+# does the argument bear) and as a Fn type's argument type (is it anything
+# but `any`, the one argument type that obliges a caller to nothing) -- so
+# an argument's Bearing class is one of three, `any` (neither), not `any`
+# (the second only) and bearing (both: a bearing type is never `any`), and
+# the summary holds the declaration's answer at each slot for each class.
+# BearingNode is the walk of one declaration's applied fields the summary is
+# computed from.
 proc hir::callables::BearingNamed {hir type mutable} {
-    variable visiting
-    if {[info exists visiting] && $type in $visiting} {
-        return 0
-    }
-    lappend visiting $type
-    try {
-        foreach {name t} [hir::structs::AppliedFieldTypes $type] {
-            if {[Bearing $hir $t $mutable]} {
-                return 1
-            }
-        }
-        return 0
-    } finally {
-        set visiting [lrange $visiting 0 end-1]
-    }
+    set classes [lmap a [hir::summaries::Arguments $type] {BearingClass $hir $a $mutable}]
+    set level [hir::summaries::Level bearing $type $classes]
+    return [expr {$level ne "" && $level > 0}]
 }
+
+# The Bearing class of argument type A (BearingNamed): 0 `any`, 1 another
+# type that does not bear, 2 a bearing type.
+proc hir::callables::BearingClass {hir a mutable} {
+    if {[Bearing $hir $a $mutable]} {
+        return 2
+    }
+    return [expr {$a ne "any"}]
+}
+
+# Bearing of {nstruct ID ARGUMENTS} from its applied fields (the summary's
+# node: hir::summaries::Compute gives it the classes' probes). A declaration's
+# field types name no exact block (the one form whose answer reads a HIR), so
+# the walk needs none.
+proc hir::callables::BearingNode {id arguments} {
+    set type [list nstruct $id]
+    if {$arguments ne {}} {
+        lappend type $arguments
+    }
+    foreach {name t} [hir::structs::AppliedFieldTypes $type] {
+        if {[Bearing {} $t]} {
+            return 1
+        }
+    }
+    return 0
+}
+
+hir::summaries::define bearing -algebra classes -neutral any \
+    -probes [list any int [hir::types::MakeFn {int} int {}]] \
+    -node hir::callables::BearingNode
 
 # 1 if a value of static TYPE flowing into a position of static type FINAL
 # keeps every obligation it carries checkable: TYPE carries none, or FINAL
@@ -381,56 +439,6 @@ proc hir::callables::CheckPreserved {hirVar arg finalType contextText} {
     hir::Diagnose hir TYPE [format \
         {%s has typed parameter requirements that cannot be preserved %s: its declared parameter contract would be erased and could no longer be checked at every future call} \
         $label $contextText] $arg
-}
-
-# 1 if a MutableArray contract occurs anywhere inside TYPE (other than the
-# vacuous MutableArray[any]): the array itself, an element of a List/set, a
-# function's parameter or result, an exact block's result.
-proc hir::callables::HasMutArray {type} {
-    set type [hir::types::Unrefined $type]
-    if {[hir::types::IsMutArray $type]} {
-        return [expr {[lindex $type 1] ne "any" || [HasMutArray [lindex $type 1]]}]
-    }
-    if {[hir::types::IsList $type]} {
-        foreach t [concat [list [lindex $type 1]] [hir::types::shapeOf $type]] {
-            if {[HasMutArray $t]} { return 1 }
-        }
-        return 0
-    }
-    if {[hir::types::IsSet $type] || [hir::types::IsMutVec $type]} {
-        return [HasMutArray [lindex $type 1]]
-    }
-    if {[hir::types::IsFn $type]} {
-        foreach t [concat [hir::types::FnArgs $type] [list [hir::types::FnReturn $type]]] {
-            if {[HasMutArray $t]} { return 1 }
-        }
-        return 0
-    }
-    if {[hir::types::IsExactBlock $type]} {
-        return [HasMutArray [lindex $type 3]]
-    }
-    if {[hir::types::IsStruct $type]} {
-        foreach {name t} [lindex $type 1] {
-            if {[HasMutArray $t]} { return 1 }
-        }
-        return 0
-    }
-    if {[hir::types::IsNamedStruct $type]} {
-        variable hasVisiting
-        if {[info exists hasVisiting] && $type in $hasVisiting} {
-            return 0
-        }
-        lappend hasVisiting $type
-        try {
-            foreach {name t} [hir::structs::AppliedFieldTypes $type] {
-                if {[HasMutArray $t]} { return 1 }
-            }
-            return 0
-        } finally {
-            set hasVisiting [lrange $hasVisiting 0 end-1]
-        }
-    }
-    return 0
 }
 
 # The trailing statement of BODY (an "if" branch or a function's own body),

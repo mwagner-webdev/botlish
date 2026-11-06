@@ -527,15 +527,97 @@ proc hir::sourcetypes::ValueStability {type {visiting {}}} {
     }
     if {[hir::types::IsNamedStruct $type]} {
         # (An application's fields: TRAIT-CONSTRAINED-IMPRINTED-TYPES.md.)
+        # Whether it is unstable is its declaration summary's answer
+        # (hir/summaries.tcl): an argument is read only where a value of it
+        # is held, and only by whether it is stable. The fields are walked
+        # only to say why (summaries.tcl's reason walk).
         if {$type in $visiting} { return "" }
-        foreach {field t} [hir::structs::AppliedFieldTypes $type] {
-            set why [ValueStability $t [concat $visiting [list $type]]]
-            if {$why ne ""} { return "has a field \"$field\" that $why" }
+        set classes [lmap a [hir::summaries::Arguments $type] {ValueStabilityClass $a}]
+        set level [hir::summaries::Level valueStability $type $classes]
+        if {$level eq "" || $level == 0} {
+            return ""
+        }
+        variable stabilityClassOnly
+        if {$stabilityClassOnly} {
+            # (A class alone was asked: ValueStabilityClass.)
+            return "is not stable"
+        }
+        if {[hir::summaries::Walked [list valueStability $type] why]} {
+            return $why
+        }
+        if {[hir::summaries::Whistle $type $visiting]} {
+            return ""
+        }
+        set why [hir::summaries::Walk [list valueStability $type] {
+            ValueStabilityParts $type [concat $visiting [list $type]]
+        }]
+        if {$why ne ""} {
+            return $why
+        }
+        if {$visiting eq {}} {
+            hir::summaries::Count fallbacks
+            set i [hir::summaries::Contributor valueStability $type $classes 1]
+            if {$i ne ""} {
+                set a [lindex [hir::summaries::Arguments $type] $i]
+                return "has fields that hold values of its type argument, [hir::types::show $a], that [ValueStability $a]"
+            }
+            return "has fields that hold, through a non-uniformly recursive declaration, a value that is not stable"
         }
         return ""
     }
     return ""
 }
+
+# Why a value of the named struct type TYPE is not stable: its first field,
+# in order, that is not (ValueStability's reason walk; VISITING already holds
+# TYPE), or "".
+proc hir::sourcetypes::ValueStabilityParts {type visiting} {
+    foreach {field t} [hir::structs::AppliedFieldTypes $type] {
+        set why [ValueStability $t $visiting]
+        if {$why ne ""} {
+            return "has a field \"$field\" that $why"
+        }
+    }
+    return ""
+}
+
+# 1 if TYPE is not stable (ValueStability's class alone: no reason is looked
+# for, so a named struct's class is its summary's and nothing walks its
+# fields -- an argument's classification never starts a reason walk of its
+# own).
+proc hir::sourcetypes::ValueStabilityClass {type} {
+    variable stabilityClassOnly
+    set saved $stabilityClassOnly
+    set stabilityClassOnly 1
+    try {
+        return [expr {[ValueStability $type] ne ""}]
+    } finally {
+        set stabilityClassOnly $saved
+    }
+}
+
+namespace eval hir::sourcetypes {
+    # 1 while ValueStability is asked for a class alone (ValueStabilityClass).
+    variable stabilityClassOnly 0
+}
+
+# ValueStability of {nstruct ID ARGUMENTS} from its applied fields (the
+# summary's node): 1 if one is not stable.
+proc hir::sourcetypes::ValueStabilityNode {id arguments} {
+    set type [list nstruct $id]
+    if {$arguments ne {}} {
+        lappend type $arguments
+    }
+    foreach {field t} [hir::structs::AppliedFieldTypes $type] {
+        if {[ValueStabilityClass $t]} {
+            return 1
+        }
+    }
+    return 0
+}
+
+hir::summaries::define valueStability -algebra classes -neutral int \
+    -probes [list int [list mutvec int]] -node hir::sourcetypes::ValueStabilityNode
 
 # Validates DECL's parent (PARENTID, its resolved identity, "" if none is
 # visible) and domain, registers it (core::type::register), and returns its

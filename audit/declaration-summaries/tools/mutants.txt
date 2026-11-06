@@ -1,0 +1,479 @@
+# Mutants of the declaration summaries (audit/declaration-summaries/tools/
+# mutate.tcl; PARAMETERIZED-DECLARATION-SUMMARIES-MILESTONE-1.md, "Mutation
+# testing"): each a deliberate bug in the framework (hir/summaries.tcl), in
+# one migrated analysis (hir/callables.tcl, hir/types.tcl), or a return of
+# the rejection or the unfolding the summaries replaced (hir/structs.tcl).
+#
+#   @@ NAME DESCRIPTION
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+#
+# Lines starting with # outside an edit are comments.
+#
+# Not mutants (equivalent, and why):
+#   * "an argument's contribution applied twice": every algebra's join is
+#     idempotent (max of levels, union of sets), so applying a slot's entry
+#     or a relevant argument's errors twice is the same program.
+#   * "Bearing's unused `mutable` flag dropped": it decides nothing
+#     (PARAMETERIZED-DECLARATION-SUMMARIES-MILESTONE-1.md, the census).
+#   * "hash totality read from equality's summary": the two summaries are
+#     equal by construction today -- core::value's `incomparable` and
+#     core::hashing's `unhashable` list the same kinds, and the one form
+#     whose answer differs by operation (a variable constrained by
+#     Equatable, not Hashable) is only ever an argument, classified by the
+#     operation's own Totality, never a probe. They stay two properties
+#     because they are two operations.
+
+# ---------------------------------------------------------------------------
+# The framework
+
+@@ fixpoint-one-round-early the fixpoint stops after the round that meets the declarations: a declaration computed before what its fields name has settled keeps a too-small answer
+## hir/summaries.tcl
+<<<<
+                set first 0
+                continue
+====
+                set first 0
+                break
+>>>>
+
+@@ fixpoint-never-revisits later rounds recompute only the last declaration met: a declaration met early never sees what its dependencies settled to
+## hir/summaries.tcl
+<<<<
+            for {set i [expr {[llength $ids] - 1}]} {$i >= 0} {incr i -1} {
+====
+            for {set i [expr {[llength $ids] - 1}]} {$i >= [expr {[llength $ids] - 1}]} {incr i -1} {
+>>>>
+
+@@ summary-keyed-by-name a summary is found by its declaration's spelling (the last name component), not its identity: a module's Box answers for the entry program's Box
+## hir/summaries.tcl
+<<<<
+    upvar #0 ::hir::summaries::facts.$name facts
+    if {[dict exists $facts $id]} {
+        Count hits.$name
+        return [dict get $facts $id]
+    }
+====
+    upvar #0 ::hir::summaries::facts.$name facts
+    foreach known [dict keys $facts] {
+        if {[namespace tail $known] eq [namespace tail $id]} {
+            Count hits.$name
+            return [dict get $facts $known]
+        }
+    }
+>>>>
+
+@@ summary-survives-reset the summaries are not forgotten when the declarations change: an earlier compilation's Box decides a later one's
+## hir/summaries.tcl
+<<<<
+        set ::hir::summaries::facts.$name [dict create]
+====
+>>>>
+
+@@ slot-order-swapped an application's arguments are matched with the summary's slot rows in reverse order
+## hir/summaries.tcl
+<<<<
+    foreach row [dict get $summary values] class $classes {
+        set l [lindex $row $class]
+====
+    foreach row [lreverse [dict get $summary values]] class $classes {
+        set l [lindex $row $class]
+>>>>
+
+@@ last-slot-ignored the last slot's entries are never read: its argument contributes nothing
+## hir/summaries.tcl
+<<<<
+    foreach row [dict get $summary values] class $classes {
+        set l [lindex $row $class]
+====
+    foreach row [lrange [dict get $summary values] 0 end-1] class [lrange $classes 0 end-1] {
+        set l [lindex $row $class]
+>>>>
+
+@@ every-slot-relevant every slot is relevant at its worst: a slot's entry is read at the highest class, whatever its argument
+## hir/summaries.tcl
+<<<<
+        set l [lindex $row $class]
+====
+        set l [tcl::mathfunc::max {*}$row]
+>>>>
+
+@@ no-slot-relevant no slot is relevant: only the declaration's own answer is read
+## hir/summaries.tcl
+<<<<
+        set l [lindex $row $class]
+====
+        set l 0
+>>>>
+
+@@ own-omitted the declaration's own answer is not read (a slot-less declaration answers the bottom)
+## hir/summaries.tcl
+<<<<
+    set level [dict get $summary own]
+    foreach row
+====
+    set level 0
+    foreach row
+>>>>
+
+@@ union-every-slot the union algebra joins every argument's errors, relevant or not: a Fn argument or a phantom slot's argument carries its errors into the application
+## hir/callables.tcl
+<<<<
+        foreach i $relevant {
+            CarriedInto $hir [lindex $arguments $i] errors
+====
+        foreach i [lsearch -all $arguments *] {
+            CarriedInto $hir [lindex $arguments $i] errors
+>>>>
+
+@@ fixpoint-pessimistic every summary starts at the property's top, not its bottom: the greatest fixpoint -- a recursive declaration keeps the obligation, the class or the mutability it assumed
+## hir/summaries.tcl
+<<<<
+    set row [lrepeat [llength [dict get $spec probes]] 0]
+    return [dict create own 0 values [lrepeat $n $row]]
+====
+    set row [lrepeat [llength [dict get $spec probes]] 1]
+    return [dict create own 1 values [lrepeat $n $row]]
+>>>>
+
+@@ fixpoint-optimistic-unrevised a declaration met inside a running fixpoint keeps its starting answer: it never joins the fixpoint, so what it names through others is never counted
+## hir/summaries.tcl
+<<<<
+    lappend ids $id
+    if {$inside} {
+        return $start
+====
+    if {!$inside} {
+        lappend ids $id
+    }
+    if {$inside} {
+        return $start
+>>>>
+
+# ---------------------------------------------------------------------------
+# Bearing and BearingNamed
+
+@@ bearing-own-fields-ignored Bearing reads only the fields that mention a slot: a declaration's own Fn field (Tree, OwnGrow) is no obligation
+## hir/callables.tcl
+<<<<
+        if {[Bearing {} $t]} {
+            return 1
+        }
+====
+        if {[hir::summaries::Variables [hir::structs::fieldType $id $name]] ne {} && [Bearing {} $t]} {
+            return 1
+        }
+>>>>
+
+@@ bearing-slot-ignored an argument's Bearing class is always `any`: no argument ever contributes (Box[Fn{args: [int], ...}] bears nothing)
+## hir/callables.tcl
+<<<<
+    if {[Bearing $hir $a $mutable]} {
+        return 2
+    }
+    return [expr {$a ne "any"}]
+====
+    return 0
+>>>>
+
+@@ bearing-phantom-contributes an application bears whenever an argument bears, held or not: Phantom[Fn{...}] and PhantomRec[Fn{...}] are obligations
+## hir/callables.tcl
+<<<<
+    set level [hir::summaries::Level bearing $type $classes]
+    return [expr {$level ne "" && $level > 0}]
+====
+    set level [hir::summaries::Level bearing $type $classes]
+    return [expr {($level ne "" && $level > 0) || 2 in $classes}]
+>>>>
+
+@@ bearingnamed-other-summary BearingNamed reads another property's summary (equality totality): an application that is not total is taken for an obligation (Handler[any])
+## hir/callables.tcl
+<<<<
+    set level [hir::summaries::Level bearing $type $classes]
+====
+    set level [hir::summaries::Level totality.equality $type $classes]
+>>>>
+
+@@ bearing-unfolds-again BearingNamed unfolds the application's fields again, remembering its own path: a non-uniform recursion with an affine argument (W[Coroutine{...}]) never ends
+## hir/callables.tcl
+<<<<
+    set classes [lmap a [hir::summaries::Arguments $type] {BearingClass $hir $a $mutable}]
+    set level [hir::summaries::Level bearing $type $classes]
+====
+    variable visiting
+    if {[info exists visiting] && $type in $visiting} {
+        return 0
+    }
+    lappend visiting $type
+    try {
+        foreach {name t} [hir::structs::AppliedFieldTypes $type] {
+            if {[Bearing $hir $t $mutable]} {
+                return 1
+            }
+        }
+        return 0
+    } finally {
+        set visiting [lrange $visiting 0 end-1]
+    }
+    set classes [lmap a [hir::summaries::Arguments $type] {BearingClass $hir $a $mutable}]
+    set level [hir::summaries::Level bearing $type $classes]
+>>>>
+
+# ---------------------------------------------------------------------------
+# CarriedInto
+
+@@ carried-item-dropped a declaration's own errors lose one: the last of them in order
+## hir/callables.tcl
+<<<<
+        CarriedInto {} $t errors
+    }
+    return [lsort -unique $errors]
+====
+        CarriedInto {} $t errors
+    }
+    return [lrange [lsort -unique $errors] 0 end-1]
+>>>>
+
+@@ carried-slot-ignored no slot's argument carries anything into the application (Getter[Fn with Oops] carries nothing)
+## hir/callables.tcl
+<<<<
+        foreach i $relevant {
+            CarriedInto $hir [lindex $arguments $i] errors
+====
+        foreach i {} {
+            CarriedInto $hir [lindex $arguments $i] errors
+>>>>
+
+@@ carried-first-only the union is replaced by its first contribution: only the first relevant slot's argument carries
+## hir/callables.tcl
+<<<<
+        foreach i $relevant {
+            CarriedInto $hir [lindex $arguments $i] errors
+====
+        foreach i [lrange $relevant 0 0] {
+            CarriedInto $hir [lindex $arguments $i] errors
+>>>>
+
+@@ carried-unfolds-again CarriedInto unfolds the application's fields again: a non-uniform recursion with an affine argument never ends
+## hir/callables.tcl
+<<<<
+        set summary [hir::summaries::Union carried $type]
+        if {$summary eq ""} {
+            return
+        }
+====
+        foreach {name t} [hir::structs::AppliedFieldTypes $type] {
+            CarriedInto $hir $t errors
+        }
+        return
+        set summary [hir::summaries::Union carried $type]
+        if {$summary eq ""} {
+            return
+        }
+>>>>
+
+# ---------------------------------------------------------------------------
+# Totality (correctness-sensitive: unchecked equality and hashing are
+# chosen from it)
+
+@@ totality-unknown-as-total an unknown class is taken for total: an application holding `any` is Hashable and compared with veqtotal
+## hir/types.tcl
+<<<<
+    return [hir::summaries::Remember totality.$operation $type [lindex {total unknown none} $level]]
+====
+    return [hir::summaries::Remember totality.$operation $type [lindex {total total none} $level]]
+>>>>
+
+@@ totality-none-as-unknown none is taken for unknown: a struct holding a function is no longer known not to be Hashable
+## hir/types.tcl
+<<<<
+    return [hir::summaries::Remember totality.$operation $type [lindex {total unknown none} $level]]
+====
+    return [hir::summaries::Remember totality.$operation $type [lindex {total unknown unknown} $level]]
+>>>>
+
+@@ totality-field-ignored the summary's node skips a declaration's first part: a non-total first field is not counted
+## hir/types.tcl
+<<<<
+    set worst 0
+    foreach part [TotalityParts $type] {
+====
+    set worst 0
+    foreach part [lrange [TotalityParts $type] 1 end] {
+>>>>
+
+@@ totality-phantom-poisons every argument's class counts, held or not: a phantom slot's function argument makes Phantom[Fn{...}] and W[Fn{...}] non-total
+## hir/types.tcl
+<<<<
+    set level [hir::summaries::Level totality.$operation $type $classes]
+    if {$level eq ""} {
+        return unknown
+    }
+====
+    set level [tcl::mathfunc::max [hir::summaries::Level totality.$operation $type $classes] {*}$classes]
+    if {$level eq ""} {
+        return unknown
+    }
+>>>>
+
+@@ totality-slot-ignored no argument contributes: every argument is taken for total (Box[Fn{...}] is Hashable)
+## hir/types.tcl
+<<<<
+        lsearch -exact {total unknown none} [TotalityClassOf $operation $a]
+====
+        string cat 0
+>>>>
+
+@@ totality-total-too-early a nested application is taken for total while a fixpoint runs, whatever its declaration settled to: what a declaration holds through another one is lost
+## hir/types.tcl
+<<<<
+    set level [hir::summaries::Level totality.$operation $type $classes]
+    if {$level eq ""} {
+        return unknown
+    }
+====
+    set level [hir::summaries::Level totality.$operation $type $classes]
+    if {$level eq "" || [hir::summaries::Running totality.$operation]} {
+        return [expr {$level eq "" ? "unknown" : "total"}]
+    }
+>>>>
+
+@@ totality-none-too-early the totality summaries start at none (a recursive type is assumed to have no total equality until shown otherwise, and never is: Node[int] and Tree-shaped types are not Hashable)
+## hir/summaries.tcl
+<<<<
+    set row [lrepeat [llength [dict get $spec probes]] 0]
+    return [dict create own 0 values [lrepeat $n $row]]
+====
+    if {[string match totality.* $name]} {
+        set row [lrepeat [llength [dict get $spec probes]] 2]
+        return [dict create own 2 values [lrepeat $n $row]]
+    }
+    set row [lrepeat [llength [dict get $spec probes]] 0]
+    return [dict create own 0 values [lrepeat $n $row]]
+>>>>
+
+@@ hashable-rejects-total the summary's probe for a total argument is `any`: every application whose argument is held is taken for unknown (Box[int] is not Hashable)
+## hir/types.tcl
+<<<<
+    hir::summaries::define totality.$operation -algebra classes -neutral int \
+        -probes [list int any [hir::types::MakeFn {} int {}]] \
+====
+    hir::summaries::define totality.$operation -algebra classes -neutral int \
+        -probes [list any any [hir::types::MakeFn {} int {}]] \
+>>>>
+
+@@ totality-unfolds-again the class is decided by walking the application's parts again (the old walk): a non-uniform recursion with an affine argument never ends
+## hir/types.tcl
+<<<<
+                set class [TotalityClass $operation $type]
+                if {$class eq "total"} {
+                    return {total ""}
+                }
+====
+                return [Components $operation [TotalityParts $type] [concat $seen [list $type]]]
+                set class [TotalityClass $operation $type]
+                if {$class eq "total"} {
+                    return {total ""}
+                }
+>>>>
+
+@@ totality-depth-limit a depth limit decides the class: an application whose text is long (a deeply nested argument) is unknown, whatever it holds
+## hir/types.tcl
+<<<<
+proc hir::types::TotalityClass {operation type} {
+====
+proc hir::types::TotalityClass {operation type} {
+    if {[string length $type] > 200} {
+        return unknown
+    }
+>>>>
+
+# ---------------------------------------------------------------------------
+# The rejection the summaries made obsolete
+
+@@ unfolding-retained the old rejection comes back: a written application of an expansive declaration with an affine argument (W[Coroutine{...}]) is AFFINE-CONTAINER-UNSUPPORTED, "no finite form"
+## hir/structs.tcl
+<<<<
+    set recursion [OwnedRecursion $type]
+    if {$recursion ne ""} {
+        return [list AFFINE-CONTAINER-UNSUPPORTED [RecursionMessage [lindex $type 1] $type $recursion]]
+    }
+    return ""
+}
+====
+    set recursion [OwnedRecursion $type]
+    if {$recursion ne ""} {
+        return [list AFFINE-CONTAINER-UNSUPPORTED [RecursionMessage [lindex $type 1] $type $recursion]]
+    }
+    if {[hir::types::AnyAffine [hir::types::StructArgs $type]] && [hir::summaries::Expansive [lindex $type 1]]} {
+        return [list AFFINE-CONTAINER-UNSUPPORTED "[hir::types::presented $type] has no finite form"]
+    }
+    return ""
+}
+>>>>
+
+@@ growing-argument-rejected every written application of a declaration on an expansive cycle is rejected, whatever its argument (W[int] too)
+## hir/structs.tcl
+<<<<
+    set recursion [OwnedRecursion $type]
+    if {$recursion ne ""} {
+        return [list AFFINE-CONTAINER-UNSUPPORTED [RecursionMessage [lindex $type 1] $type $recursion]]
+    }
+    return ""
+}
+====
+    set recursion [OwnedRecursion $type]
+    if {$recursion ne ""} {
+        return [list AFFINE-CONTAINER-UNSUPPORTED [RecursionMessage [lindex $type 1] $type $recursion]]
+    }
+    if {[hir::summaries::Expansive [lindex $type 1]]} {
+        return [list AFFINE-CONTAINER-UNSUPPORTED "[hir::types::presented $type] grows"]
+    }
+    return ""
+}
+>>>>
+
+@@ owned-recursion-allowed with the rejection gone, genuine recursive ownership goes too: a written recursive affine application (Node[Coroutine{...}]) is accepted
+## hir/structs.tcl
+<<<<
+    set recursion [OwnedRecursion $type]
+    if {$recursion ne ""} {
+        return [list AFFINE-CONTAINER-UNSUPPORTED [RecursionMessage [lindex $type 1] $type $recursion]]
+    }
+    return ""
+}
+====
+    return ""
+}
+>>>>
+
+@@ schema-unfolds-phantom the transfer schema keeps a phantom slot's affine argument: the schema of W[Coroutine{...}] follows the growing applications forever
+## hir/transfer.tcl
+<<<<
+    set type [Erased $type]
+====
+>>>>
+
+@@ answers-outlive-declarations the remembered application classes are not forgotten when the declarations change: an earlier compilation's Box[Fn{...}] decides a later one's totality
+## hir/summaries.tcl
+<<<<
+    variable answers
+    set answers [dict create]
+}
+====
+}
+>>>>
+
+@@ answers-remembered-provisionally an application's class is remembered while a fixpoint still runs: a provisional answer outlives the fixpoint
+## hir/summaries.tcl
+<<<<
+    if {![Running $name]} {
+        dict set answers [list $name $key] $answer
+    }
+====
+    dict set answers [list $name $key] $answer
+>>>>
