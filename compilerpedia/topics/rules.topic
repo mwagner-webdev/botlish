@@ -2257,12 +2257,12 @@ its std:: (`import std::list`).
 
 @topic rule.package-modules
 title: Installed packages: .bot_modules, downward only
-summary: A package is a module tree in its owner's .bot_modules/NAME, claiming the root namespace NAME there; it sees its own modules, its own packages and std only, and each copy is its own instance.
+summary: A package is a module tree in its owner's .bot_modules/NAME, claiming its root namespace; it sees its own modules, packages and std only; a .graph makes each package one shared instance.
 index: rules
 alias: package; packages; .bot_modules; install a library; third-party module; dependency; vendored library; node_modules
-keywords: package, .bot_modules, installed, dependency, scope, owner, instance, root namespace, identity, downward, consumer, sibling, collision, std, .targets, target package tree
-related: rule.application-modules concept.modules concept.imports error.module-collision error.unknown-namespace error.reserved-namespace cli.packages
-docs: BOT-MODULES-MILESTONE-1.md IMPORTS.md STD-NAMESPACE.md PACKAGE-MANAGER-MILESTONE-1.md PACKAGE-MANAGER-MILESTONE-2.md
+keywords: package, .bot_modules, installed, dependency, scope, owner, instance, root namespace, identity, downward, consumer, sibling, collision, std, .targets, target package tree, .graph, package graph, shared dependency, one instance, peer dependency
+related: rule.application-modules concept.modules concept.imports error.module-collision error.unknown-namespace error.reserved-namespace error.package-graph cli.packages
+docs: BOT-MODULES-MILESTONE-1.md IMPORTS.md STD-NAMESPACE.md PACKAGE-MANAGER-MILESTONE-1.md PACKAGE-MANAGER-MILESTONE-2.md SHARED-PACKAGE-DEPENDENCIES-MILESTONE-1.md
 
 == THE RULE
 A package is an ordinary module tree installed under the immediate
@@ -2307,6 +2307,37 @@ manager derives these trees (cli.packages: target views); a HIR compiled
 from one is its target's, and the tree's .lib directory is searched when
 the program links natively.
 
+== PACKAGE GRAPHS
+When the application's packages directory (ROOT/.bot_modules, or the
+target's tree) holds a file .graph, its packages are one resolved
+dependency graph, not a tree: one instance of each, at PACKAGES/NAME, shared
+by every scope that depends on it. The file names, for the application and
+for each package, the packages that scope uses -- and nothing else (no
+version, lock or source):
+
+    botlish package graph 1
+    application event_loop_linux lib_a lib_b
+    package event_loop_linux
+    package lib_a event_loop_linux
+    package lib_b event_loop_linux
+
+A scope of the graph sees exactly the packages the graph says it uses, each
+the graph's one instance, whose identity is its name: lib_a's
+event_loop_linux, lib_b's and the application's are one module, with one
+Native context type and one archive declaration. Sharing is no ambient
+visibility: a package that does not depend on a package of the graph
+cannot import it (UNKNOWN-NAMESPACE says who installed it), the
+application imports its own dependencies only, a graph package never sees
+the application's modules or a package installed by hand, and its own
+.bot_modules is not read. Every package of the graph claims its root
+namespace in the application, used by it or not (MODULE-COLLISION for an
+application file of that namespace). A directory the graph does not name
+is a package installed by hand, with its own scope as above. A malformed
+graph is PACKAGE-GRAPH (error.package-graph). The package manager writes
+the graph from the dependency graph it resolved (cli.packages: one version
+of each package, every lock agreeing, or a DEPENDENCY-CONFLICT); a
+hand-made one compiles the same.
+
 == IDENTITY
 A package instance is its place in the dependency tree (`physics`, the
 application's; `physics/geometry`, physics's own geometry). A module's
@@ -2315,13 +2346,18 @@ identity is that place and its namespace below the package's root:
 module of physics's geometry, which no source can spell. Two installed
 copies of a package are two instances: physics/geometry::Point and
 rendering/geometry::Point are distinct types, their errors distinct
-errors, on every backend.
+errors, on every backend. A package of a package graph is one instance,
+named by its name, wherever it is imported from (PACKAGE GRAPHS).
 
 == WHY
 A package must work wherever it is installed, so it resolves only what it
 installed itself; and an installation never changes the meaning of a
-program it is not part of (BOT-MODULES-MILESTONE-1.md). A package needs a
-directory and files, so there is no single-file example.
+program it is not part of (BOT-MODULES-MILESTONE-1.md). Independently
+written packages that depend on one package must share it -- one driver
+whose context the application installs once for all of them -- so a
+resolved graph says which instance each import is, by name
+(SHARED-PACKAGE-DEPENDENCIES-MILESTONE-1.md). A package needs a directory
+and files, so there is no single-file example.
 
 @topic rule.flags
 title: Flag parameters: declared last, written by name

@@ -234,13 +234,19 @@ and adds it to the job summary, with what the budget left out.
 
 | workflow | the canary | waits for it |
 |---|---|---|
-| tests.yml | job `canary`, beside `warning-gate` and `mutant-catalogs` | every other job, and for those two gates too |
+| tests.yml | job `canary`, after its steps for the two cheap gates (every mutant applies, the warning gate) | every other job |
 | tests-arm64.yml | job `canary` | every other job |
 | macos-arm64.yml | the smoke job's last step | system-linker, acceptance, app (and app-clean, link-plan-sdl3 and main-thread-startup after it), full |
 | windows-x86_64.yml | job `canary` | every other job (acceptance and system-linker still also after smoke, whatever its result) |
 
+The two cheap gates are steps of tests.yml's canary job, not jobs: on
+2026-11-05, as jobs of their own, the warning gate waited 55 minutes for a
+runner after the canary had passed, and the expensive jobs waited with it.
+Each step runs whatever an earlier one found, so one red push reports all
+three.
+
 tests.yml and tests-arm64.yml now run on every branch push, but there only
-the canary (and tests.yml's two gates): their other jobs run, as before, on
+the canary: their other jobs run, as before, on
 pushes to main, on pull requests and when dispatched, and GC stress only on
 pushes to main (and arm64's in a manual run). macOS and Windows run
 everything on every push, as before, once the canary passes.
@@ -286,7 +292,7 @@ and reports the rest as not run.
 A green run starts its expensive jobs about fifteen minutes later than
 before (the canary's build and its ten minutes); on main, where GC stress
 takes three hours, that is under a tenth. A red push whose failure the
-canary finds stops after one job per host (three on tests.yml).
+canary finds stops after one job per host.
 
 The canary orders; it skips nothing. A test it runs runs again in its
 ordinary job, and a failure it misses is found there as before. It is no

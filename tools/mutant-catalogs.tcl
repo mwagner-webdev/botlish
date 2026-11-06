@@ -21,7 +21,7 @@
 # unguarded meanwhile (MAIN-TEST-DEFECTS-2026-11.md). This check reads
 # every catalog and applies every mutant to an in-memory copy of the files
 # it names, compiling and running nothing: it takes seconds, so CI runs it
-# on every push (tests.yml's `mutant-catalogs` job).
+# on every push (a step of tests.yml's canary job).
 #
 # A catalog is any .txt file under audit/ with a line that is exactly
 # `<<<<`. Its edits name their files in one of three ways (Catalogs below):

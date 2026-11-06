@@ -18,7 +18,9 @@ change when it arrives (section G). (It arrived as
 PACKAGE-MANAGER-MILESTONE-1.md, beside the compiler, with these rules
 unchanged; the sdlkit package below is now `packages/sdlkit`. PM-2,
 PACKAGE-MANAGER-MILESTONE-2.md, added one rule beside them: "Target package
-trees", below.)
+trees", below; SHARED-PACKAGE-DEPENDENCIES-MILESTONE-1.md a second: a
+package graph, `.bot_modules/.graph`, makes the packages it names one
+shared instance each, "Package graphs", below.)
 
 Contents:
 
@@ -217,6 +219,25 @@ cache dependencies), a HIR compiled from a tree records its target
 `nativeDirs`, which the native backends search when the program links. The
 compiler knows the directory's name and nothing of how it was made: the
 package manager derives the trees, and a hand-made one compiles the same.
+
+### Package graphs (SHARED-PACKAGE-DEPENDENCIES-MILESTONE-1.md)
+
+When the application's packages directory (`ROOT/.bot_modules`, or the
+target's tree) holds a file `.graph`, the packages it names are one resolved
+dependency graph instead of a tree: one instance of each, its directory
+`PACKAGES/NAME`, shared by every scope that depends on it. The file says,
+for the application and each package, which packages that scope uses
+(`surface/modules.tcl`'s `ReadGraph` has the format), and nothing else. A
+scope of the graph sees exactly the packages it uses, and each is the
+graph's one instance, whose identity is its name: two packages that both
+use `geometry` see one `geometry::Point`. A graph package never sees a
+package it does not use, the application's modules or a package installed
+by hand; its own `.bot_modules` is not read. Every package of the graph
+claims its root namespace in the application (`MODULE-COLLISION`), and a
+malformed graph is `PACKAGE-GRAPH`. A directory the graph does not name is
+a package installed by hand, with the scope of its own `.bot_modules`. The
+package manager writes the graph; a hand-made one compiles the same
+(`tests/bot-modules.test`'s `bm-graph-*`).
 
 ## C. Semantic identity
 
@@ -867,7 +888,10 @@ None known in the resolution model or identity. What was not done:
   milestone's model of independent ownership; a package manager that wants
   one shared instance must install one package that both use through its
   own API (a *peer* arrangement), which the language does not express yet
-  (below).
+  (below). (Closed by SHARED-PACKAGE-DEPENDENCIES-MILESTONE-1.md without a
+  peer arrangement: a package graph names one instance of each package,
+  shared by every scope that depends on it; hand-made nested trees keep
+  this section's model.)
 
 ### Intentional omissions reserved for the package manager
 

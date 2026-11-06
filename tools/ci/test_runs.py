@@ -834,7 +834,7 @@ class Workflows(unittest.TestCase):
     # The canary (CI-RUNS.md, "The canary"): which job of each test workflow
     # runs it, and the jobs that need not wait for it.
     CANARY = {
-        "tests.yml": ("canary", {"warning-gate", "mutant-catalogs"}),
+        "tests.yml": ("canary", set()),
         "tests-arm64.yml": ("canary", set()),
         "macos-arm64.yml": ("smoke", {"linux-control", "app-mutants"}),
         "windows-x86_64.yml": ("canary", set()),
@@ -862,6 +862,20 @@ class Workflows(unittest.TestCase):
                 # A job that runs whatever its needs' results checks the canary's itself.
                 if "always()" in if_ or "!cancelled()" in if_:
                     self.assertTrue("needs.%s.result" % canary in if_, "%s: job %s runs after a failed canary" % (name, n))
+
+    def test_cheap_gates_are_steps_of_the_canary(self):
+        # Steps, not jobs: a job of its own waits for a runner before the
+        # expensive jobs may start (close to an hour with the pool full).
+        steps = workflow("tests.yml")["jobs"]["canary"]["steps"]
+        runs = [st.get("run") or "" for st in steps]
+        for command in ("tclsh9.0 tools/mutant-catalogs.tcl", "tclsh9.0 audit/refactor/tools/gate.tcl"):
+            at = [i for i, r in enumerate(runs) if r.startswith(command)]
+            self.assertEqual(len(at), 1, command)
+            canary = [i for i, r in enumerate(runs) if "tests/canary.tcl" in r][0]
+            self.assertLess(at[0], canary, "%s runs before the canary" % command)
+        first = min(i for i, r in enumerate(runs) if "mutant-catalogs.tcl" in r or "gate.tcl" in r)
+        for st in steps[first + 1:]:
+            self.assertIn("!cancelled()", str(st.get("if")), "step %s must run whatever an earlier gate found" % st.get("name"))
 
     def test_branch_pushes_run_only_the_canary_on_linux(self):
         for name in ("tests.yml", "tests-arm64.yml"):

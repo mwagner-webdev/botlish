@@ -74,9 +74,11 @@ releases honest; `tools/ci/runs.py` implements the second and the third,
   and windows-x86_64.yml a `canary` job, macos-arm64.yml the smoke job's
   last step. It runs, within about ten minutes, the test files and golden
   suites the push adds or changes, then the ones `tests/canary.tsv`'s
-  history says failed recently on that host. On a branch push tests.yml and
-  tests-arm64.yml run only the canary (and tests.yml's warning gate and
-  mutant catalogs). The canary orders, it never skips: never drop a job or
+  history says failed recently on that host; tests.yml's runs the mutant
+  catalogs and the warning gate first, as steps (a job of its own would
+  wait for a runner before the expensive jobs could start: keep them steps).
+  On a branch push tests.yml and tests-arm64.yml run only the canary. The
+  canary orders, it never skips: never drop a job or
   a test because the canary passed, never let an expensive job start
   before it (a job that runs after a failed need checks the canary's
   result itself), and never give it an item list of its own beside its
@@ -700,8 +702,8 @@ what it depends on in its code or its constraints:
 A change can break another audit's mutant: rewrite or duplicate the text it
 replaces, and that mutant guards nothing until its own harness next runs.
 `tclsh9.0 tools/mutant-catalogs.tcl` applies every mutant of every catalog
-under `audit/` to the tree in memory (seconds; CI's `mutant-catalogs` job in
-`tests.yml`). Run it before pushing a change to code. A mutant it reports is
+under `audit/` to the tree in memory (seconds; a step of `tests.yml`'s
+canary job). Run it before pushing a change to code. A mutant it reports is
 updated in the same change, kept a mutant of the same rule, and run through
 its own harness (`-only NAME`). A new catalog whose files are not relative
 to the repository root, or not named by `## FILE` lines, gets a row in the
@@ -848,7 +850,7 @@ lists, each with the obstruction that keeps it open (REFACTOR-WARNINGS-CLEAN.md)
 `audit/refactor/tools/gate.tcl` checks it -- every corpus program and a one-line
 loader per library module, the observed warnings equal to the manifest (code
 and location), and every program and loader without an entry compiling under
-`-warnings error` -- and the `warning-gate` job of `.github/workflows/tests.yml`
+`-warnings error` -- and a step of `.github/workflows/tests.yml`'s canary job
 runs it on every push and pull request (`tests/warning-gate.test` pins that it
 passes and that it fails on a planted warning).
 
@@ -5354,6 +5356,19 @@ so:
   Dependencies`): a new resolution input goes there too. The physical
   package directories on the loading stack stop a symbolic-link cycle
   (CYCLE); never drop that guard.
+* A package graph (`PACKAGES/.graph`; SHARED-PACKAGE-DEPENDENCIES-MILESTONE-1.md,
+  surface/modules.tcl's "Package graphs") makes the packages it names one
+  instance each, shared by every scope that uses them: a graph package's instance and identity are its name, from every
+  scope (`Instance`); a scope of the graph sees exactly the packages the
+  graph says it uses (`Installed`), never another package's dependency, the
+  application's modules or a hand-installed package; a graph package's own
+  `.bot_modules` is never read; every graph package claims its root
+  namespace in the application. The graph names scopes and packages and
+  nothing else: never put a version, a lock or a source in it, never let
+  the compiler choose or repair one, and read it through the seam
+  (`Probe file`, a cache dependency). A malformed graph is PACKAGE-GRAPH,
+  never a tree read instead. Hand-made nested trees (no graph) keep
+  instance-by-place identities.
 
 If you change resolution, identity, the rewrite, the seam's directory
 question or the cache's probes, run `tests/bot-modules.test`,
@@ -5394,12 +5409,26 @@ package directory and its release; nothing else. Keep it so:
   compilation, no `exec` but `kill -0` (a lock holder's liveness), no
   socket, no network (`pm-no-network-in-sources`). Native archives travel
   as opaque files built on the author's side (`tools/package-repository.tcl`).
-* Each package owns its direct requests and exact locks; a package's
-  dependencies go in its own `.bot_modules`, never its consumer's. Never
-  write a transitive lock into an application, deduplicate instances by
-  name, or let a lock change without `add`/`update` (install never moves
-  one). A request's precision is its components (`1`, `1.2`, `1.2.3`): no
-  operators, prereleases or ranges.
+* Each package owns its direct requests and exact locks, and the
+  application has one dependency graph (pm/graph.tcl;
+  SHARED-PACKAGE-DEPENDENCIES-MILESTONE-1.md; LANGUAGE-DESIGN-PRINCIPLES.md,
+  section 2): every package once, at `.bot_modules/NAME` (no package has a
+  `.bot_modules` of its own), at the one version every lock of it names,
+  and `.bot_modules/.graph` (and each view's) written from it in the same
+  transaction. Resolution is unification, never search: every demanded
+  release is explored, and two demanded versions are a
+  DEPENDENCY-CONFLICT naming every lock and its path. Never relax, move or
+  override a lock -- the application's or an author's -- to make the graph
+  agree, never make a second instance as a fallback, never select the
+  first version visited, never let an editable directory satisfy a
+  package's lock, never write a transitive lock into an application, and
+  never let a lock change without `add`/`update` (install never moves one;
+  `add` and `update` choose, within a request, the version the graph's
+  locks hold, and say so). No peer dependencies and no override syntax: a
+  departure is a language-design decision. Results and messages depend on
+  no order (declarations, repositories, traversal: the catalog keeps its
+  repositories sorted). A request's precision is its components (`1`,
+  `1.2`, `1.2.3`): no operators, prereleases or ranges.
 * Artifacts are immutable and validated whole before anything is written:
   the restricted ZIP profile, the path rules, the limits, streamed capped
   decompression, every CRC, and the descriptor in the artifact context
@@ -5508,7 +5537,7 @@ package directory and its release; nothing else. Keep it so:
 
 If you change `pm/`, the formats, `tools/package-repository.tcl`,
 `tools/package-build/`, `packages/*/botlish.json` or main.tcl's dispatch, run
-`tests/package-manager.test`, `tests/package-native.test` (its foreign
+`tests/package-manager.test` (its `pm-shared-*` tests: the one graph), `tests/package-native.test` (its foreign
 formats need clang and MinGW-w64; its linked runs the native backend),
 `tests/package-authoring.test` (clang, lld and MinGW-w64 for its foreign
 formats, git for its Git trees),
@@ -5519,8 +5548,20 @@ ninja, and the package-owned libSDL3 and libraven: `tests/cffi/sdl3.tcl`,
 and `audit/package-manager/tools/mutate.tcl` (every mutant in its
 `mutants.txt` must still apply and be killed: update a mutant's text when
 you change the code it mutates, keeping it a mutant of the same rule; a
-mutant's `%%` line names the test files that kill it). A change to a
-package's recipe or the author image also runs
+mutant's `%%` line names the test files that kill it). A change to
+resolution, the graph file or what reads it (pm/graph.tcl, the graph parts
+of pm/install.tcl, pm/view.tcl, pm/commands.tcl's `add`, `update` and
+`package graph`, surface/modules.tcl's package graphs) also runs
+`audit/shared-dependencies/tools/fuzz.tcl` (several seeds: the package
+manager against its independent resolver, `oracle.py`, whose `selftest`
+runs too), `audit/bot-modules/tools/mutate.tcl` (its `graph-*` mutants),
+`tests/package-workloads.test`'s `pw-shared-*` (two libraries over one
+event_loop_linux, run against epoll) and, after `single/build.sh`, the clean
+room (`audit/shared-dependencies/cleanroom/cleanroom.sh image`, then
+`repository.sh OUT` and `cleanroom.sh run single/out/botlish OUT RESULTS`:
+the single-file compiler and published artifacts only, no network).
+`bench/shared-dependencies.tcl` measures resolution against a baseline
+checkout (`-root`). A change to a package's recipe or the author image also runs
 `tools/package-build/author.sh build OUT -release` twice (two fresh
 containers: their artifacts and records must be identical and equal the
 recorded releases) and, on a branch, `package-reproducibility.yml`

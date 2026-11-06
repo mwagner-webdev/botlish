@@ -857,12 +857,12 @@ stderr). The program cannot choose its own exit status
 
 @topic cli.packages
 title: The package manager: botlish.json, .botpkg artifacts, add and install
-summary: botlish add, install, update, remove and verify manage a project's packages from local .botpkg artifacts and botlish.json; package pack makes an artifact. Nothing is downloaded or run.
+summary: botlish add, install, update, remove and verify manage a project's packages -- one shared dependency graph -- from local .botpkg artifacts and botlish.json. Nothing is downloaded or run.
 index: backends
 alias: package manager; botlish.json; .botpkg; botlish add; botlish install; package artifact; lock file; dependency versions
-keywords: add, install, update, remove, verify, pack, inspect, native, plan, deploy, botlish.json, lock, request, repository, artifact, editable, sha256, .bot_modules, targets, target view, .targets, bundled, system library, origins, -target, -drop-target, native add, native require, native audit, package stage, package compare, provenance, evidence, runtime, run-time dependency, license, notices, schema 3, authoring
+keywords: add, install, update, remove, verify, pack, inspect, graph, package graph, shared dependency, DEPENDENCY-CONFLICT, held, native, plan, deploy, botlish.json, lock, request, repository, artifact, editable, sha256, .bot_modules, targets, target view, .targets, bundled, system library, origins, -target, -drop-target, native add, native require, native audit, package stage, package compare, provenance, evidence, runtime, run-time dependency, license, notices, schema 3, authoring
 related: rule.package-modules concept.modules concept.native-link-plan cli.usage cli.exit-status backend.targets
-docs: PACKAGE-MANAGER-MILESTONE-1.md PACKAGE-MANAGER-MILESTONE-2.md PACKAGE-MANAGER-MILESTONE-3.md BOTLISH-JSON.md BOTPKG-FORMAT.md BOTPKG-PROVENANCE.md BOT-MODULES-MILESTONE-1.md
+docs: PACKAGE-MANAGER-MILESTONE-1.md PACKAGE-MANAGER-MILESTONE-2.md PACKAGE-MANAGER-MILESTONE-3.md SHARED-PACKAGE-DEPENDENCIES-MILESTONE-1.md BOTLISH-JSON.md BOTPKG-FORMAT.md BOTPKG-PROVENANCE.md BOT-MODULES-MILESTONE-1.md
 
 == THE COMMANDS
     botlish add NAME|FILE.botpkg|DIR [-request R] [-replace]
@@ -872,6 +872,7 @@ docs: PACKAGE-MANAGER-MILESTONE-1.md PACKAGE-MANAGER-MILESTONE-2.md PACKAGE-MANA
     botlish verify
     botlish package pack [DIR] [-out DIR] [-force] [-evidence FILE]
     botlish package inspect FILE.botpkg [-target T] [-provenance FILE]
+    botlish package graph [-project DIR] [-repository DIR]...
     botlish native inspect FILE [-target T]
     botlish native plan [-target T] [-include]
     botlish native deploy -target T -out DIR [-force]
@@ -893,21 +894,47 @@ were changed), -recover (roll back an interrupted operation), -target T
 
 == WHAT THEY DO
   * add NAME installs the newest version a repository holds (or the newest
-    -request accepts), writes the request (MAJOR.MINOR by default) and the
-    exact lock to botlish.json, and installs the package's own locked
-    dependencies in its own .bot_modules. add FILE.botpkg records the
-    archive and its SHA-256 as the dependency's source; add DIR (a path
-    with "/") links an editable directory, which has no lock.
+    -request accepts) -- or, when a package of the graph already locks
+    NAME, the version it locks -- writes the request (MAJOR.MINOR by
+    default) and the exact lock to botlish.json, and installs the package's
+    own locked dependencies in the application's graph (ONE GRAPH, below).
+    add FILE.botpkg records the archive and its SHA-256 as the dependency's
+    source; add DIR (a path with "/") links an editable directory, which
+    has no lock.
   * install recreates exactly what botlish.json locks, from the
     repositories; it never changes a lock. update moves locks to the newest
-    version their requests accept (1.2 never becomes 1.3); remove deletes a
-    dependency and its installed tree.
+    version their requests accept (1.2 never becomes 1.3), and holds a
+    dependency some package of the graph locks at that version, saying so;
+    remove deletes a dependency, and the packages nothing else uses any
+    more.
+  * package graph shows the graph an install makes, without writing
+    anything: every package once, its version, who uses it, who locks it,
+    whether it is installed so, a path to it; or the conflict.
   * verify compares installed files with the installation record and,
     where a repository holds them, with the artifacts' bytes.
   * package pack makes a deterministic NAME-VERSION.botpkg from a package
     directory whose botlish.json has a name, a version and a lock for
     every dependency, checking a target-aware package's layout and every
     bundled native file first.
+
+== ONE GRAPH
+A package declares its dependencies and locks each to the release its
+author built and tested it with; a package's dependencies are never its
+consumer's to install. The application has one dependency graph: every
+package in it once, at the one version every lock of it names, installed
+at .bot_modules/NAME and shared by every package that depends on it
+(.bot_modules/.graph says which uses which: rule.package-modules). Two
+independently written libraries that both need event_loop_linux get one
+instance of it, so the driver contexts the application installs once are
+the ones both require, and its native archive is linked once. Locks that
+disagree -- two packages locking two releases of one package, or the
+application's lock and a package's -- are a DEPENDENCY-CONFLICT naming
+every lock and the path to the package that holds it: no lock is ever
+moved, relaxed or overridden to make the graph agree, and no second
+instance is made. There are no peer dependencies: a library declares what
+it uses like any dependency. An editable directory satisfies no package's
+lock; two different files claiming one release are a CONFLICT; a package
+that depends on itself through others is a CYCLE.
 
 == TARGETS AND NATIVE DEPENDENCIES
 A botlish.json of schema 2 may name the targets a package supports
@@ -985,11 +1012,10 @@ leaves the previous installation as it was.
 == THE COMPILER
 The compiler reads the .bot_modules trees the package manager builds
 exactly as hand-made ones (rule.package-modules), and never reads
-botlish.json, a version, a lock, an artifact or native
-metadata. A package's dependencies
-are in its own .bot_modules, so the application cannot import them;
-two packages may lock different versions of one dependency, and each
-gets its own instance.
+botlish.json, a version, a lock, an artifact or native metadata: the
+graph file names scopes and packages, nothing else. A package of the
+graph is imported only by the scopes that depend on it: the application
+cannot import a package only its packages use.
 
 @topic cli.lsp
 title: The language server (editor integration)

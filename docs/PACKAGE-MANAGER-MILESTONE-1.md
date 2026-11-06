@@ -229,6 +229,14 @@ names, then the chosen one is validated); `install` never chooses.
 
 ### The dependency tree
 
+*Superseded by SHARED-PACKAGE-DEPENDENCIES-MILESTONE-1.md:* an application
+now has one dependency graph -- each package installed once, at
+`.bot_modules/NAME`, shared by every package that depends on it, with
+`.bot_modules/.graph` telling the compiler which package uses which -- and
+two packages locking different versions of one dependency are a
+`DEPENDENCY-CONFLICT`, never two instances. This section records PM-1's
+nested layout, which an `install` of the new package manager replaces.
+
 `Resolve` builds the whole plan before anything is written: for each direct
 dependency of the project, its node, and for an artifact node its children
 from its own locks, recursively. A node is
