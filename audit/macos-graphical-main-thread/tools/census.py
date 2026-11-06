@@ -450,10 +450,10 @@ class Census:
                     f"status {status} signal {sig} timed_out {timed_out} wall {wall:.1f} ms\n"
                     f"--- stdout\n{out}\n--- stderr\n{err}\n")
         first = runs[0]
-        if kind in ("identity", "sdl", "runtime") and first["status"] == 0 and not first["timed_out"]:
+        if kind in ("identity", "graphical", "dispatch", "runtime") and first["status"] == 0 and not first["timed_out"]:
             # An executable prints no value of its own (PROGRAM-OUTPUT-MILESTONE-1.md): the program's value is
-            # read from a second run's driver protocol result.
-            first["value"] = self.protocol_value(cmd, env, timeout)
+            # read from a second run's driver protocol result (every kind whose classifier reads "value").
+            first["value"] = self.protocol_value(cmd, env, timeout, signal_after)
         rec = {"name": name, "group": group, "kind": kind, "cmd": " ".join(map(str, cmd)), "env": env,
                "signal_after": list(signal_after) if signal_after else None,
                "status": first["status"], "signal": first["signal"], "timed_out": first["timed_out"],
@@ -470,7 +470,7 @@ class Census:
         log(f"RESULT {name}: {cls}{'' if expected else ' (UNEXPECTED)'} {json.dumps(facts, sort_keys=True)[:600]}")
         return rec
 
-    def protocol_value(self, cmd, env, timeout):
+    def protocol_value(self, cmd, env, timeout, signal_after=None):
         """The value the program CMD computes, read through the driver protocol (BOTLISH_NATIVE_RESULT=FILE: the
         executable writes "value V" there), as Python data; None when the run reports no value."""
         result = self.work / "protocol-value.result"
@@ -478,7 +478,7 @@ class Census:
         result.unlink(missing_ok=True)
         script.write_text(PROTOCOL_VALUE_TCL)
         env = {k: v for k, v in env.items() if k != "MTP_CAPTURE"}
-        run(cmd, env={**env, "BOTLISH_NATIVE_RESULT": str(result)}, timeout=timeout)
+        run(cmd, env={**env, "BOTLISH_NATIVE_RESULT": str(result)}, timeout=timeout, signal_after=signal_after)
         if not result.exists():
             return None
         shown = subprocess.run([str(self.args.tclsh), str(script), str(result)], capture_output=True, text=True,
@@ -1162,8 +1162,11 @@ class Census:
     def oracle_selftest(self):
         """Synthetic records the classifier must not accept (section 25): a dummy-driver run claiming Cocoa,
         a value that contradicts the fixture, a lifecycle on the worker."""
-        def synthetic(lines, stdout="", status=0):
-            return {"status": status, "signal": 0, "timed_out": False, "wall_ms": 1, "stdout": stdout,
+        def synthetic(lines, shown="", status=0):
+            # SHOWN is the program's value as Botlish shows it (what protocol_value reads); the executable
+            # itself prints nothing.
+            return {"status": status, "signal": 0, "timed_out": False, "wall_ms": 1, "stdout": "",
+                    "value": value(shown) if shown else None,
                     "stderr": "\n".join("MTP " + json.dumps(l) for l in lines), "mtp": lines}
         base = [{"kind": "sdl", "stage": "before-init", "ok": True, "sdl_is_main": True, "pthread_main": 1, "driver": None},
                 {"kind": "sdl", "stage": "after-init", "ok": True, "sdl_is_main": True, "pthread_main": 1, "driver": "cocoa"},
