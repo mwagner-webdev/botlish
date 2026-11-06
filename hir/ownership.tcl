@@ -76,8 +76,9 @@
 # component is *bad* when one of its internal edges crosses an element; its
 # states are affine (an unrestricted state owns nothing affine, so the walk
 # never enters one). No depth, budget or application count decides it: a
-# chain of ninety-six declarations is ninety-six states; W[List^96[C]] is one
-# state of W, unrestricted.
+# chain of ninety-six declarations is ninety-seven states; GrowA[List^96[C]]
+# is the two states of GrowA and GrowB; W[List^96[C]] is unrestricted, and
+# nothing is explored.
 #
 # The witness
 # -----------
@@ -87,7 +88,10 @@
 # graph after the verdict (Witness), the steps of each edge instantiated with
 # the arguments the path has reached so far. The search never decides
 # anything: it reads the components Explore classified, and it walks each
-# state at most twice (with and without a crossed element).
+# state at most twice (with and without a crossed element). The walks keep no
+# steps, only a compact provenance per event (Walk), which the witness
+# expands along its own path (Expand): a deep argument or a long recursion
+# costs the verdict nothing for the diagnostic's sake.
 #
 # Every fact here is the registry's: computed lazily, forgotten with the
 # affinity facts (hir::structs::ForgetAffinity calls Forget), keyed by
