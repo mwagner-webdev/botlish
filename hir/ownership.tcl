@@ -95,15 +95,19 @@
 # hir::summaries::Count's (ownership.*), structural evidence only.
 
 namespace eval hir::ownership {
-    # ID -> {{CROSSED STEPS ...} ...}: through(ID), one dict per slot in slot
-    # order (Through). STEPS, a witness in ID's own slot variables, is set
-    # when an entry is first found and never changed: the fixpoint grows
-    # sets only, so it ends.
+    # ID -> {{CROSSED PROVENANCE ...} ...}: through(ID), one dict per slot in
+    # slot order (Through), its keys the crossings found. PROVENANCE (Walk's)
+    # is set when an entry is first found and never changed: the fixpoint
+    # grows sets only, so it ends, and every provenance refers to entries
+    # found before it (well founded: Expand follows it to the end).
     variable through [dict create]
     variable running 0
     variable met {}
-    # ID -> {{TARGET ARGS CROSSED STEPS} ...}: edges(ID) (Edges).
+    # ID -> {{TARGET ARGS CROSSED PROVENANCE} ...}: edges(ID) (Edges).
     variable edges [dict create]
+    # {ID SLOT CROSSED} -> the steps of through(ID)'s entry, expanded
+    # (ThroughSteps): for a witness only.
+    variable expanded [dict create]
     # STATE -> {affine 0|1 succ {{STATE CROSSED EDGE} ...} scc N bad 0|1
     # reach 0|1}: the state graph, classified (Explore).
     variable states [dict create]
@@ -114,16 +118,18 @@ namespace eval hir::ownership {
     variable cycles [dict create]
     # The size (characters of a type term) past which a witness's arguments
     # are no longer instantiated (Witness): presentation only.
-    variable witnessSize 2000
+    variable witnessSize 400
 }
 
 proc hir::ownership::Forget {} {
     variable through
     variable edges
+    variable expanded
     variable states
     variable verdicts
     variable cycles
     set through [dict create]
+    set expanded [dict create]
     set edges [dict create]
     set states [dict create]
     set verdicts [dict create]
@@ -140,13 +146,18 @@ proc hir::ownership::Count {counter {by 1}} {
 # The events of TYPE, a type expression in the frame of a declaration whose
 # slots are SLOTS ({} for the root: TYPE is concrete, or its variables are
 # free and unrestricted), reached with CROSSED (1 once the way to it crossed
-# a container element): {push ID ARGS CROSSED STEPS} for every application
-# it holds at an owned position in this frame, {pop INDEX CROSSED STEPS} for
-# every one of the frame's slots it holds at one. STEPS lead from TYPE to
-# the event ({OWNER FIELD FIELDTYPE} each: OWNER "" for an anonymous
-# struct). Each event once (the first found, in field order). MEMO (the
-# caller's variable) keeps one session's answers per (TYPE, CROSSED): a
-# deeply nested argument is walked once, not once per way to it.
+# a container element): {push ID ARGS CROSSED PROVENANCE} for every
+# application it holds at an owned position in this frame, {pop INDEX
+# CROSSED PROVENANCE} for every one of the frame's slots it holds at one.
+# PROVENANCE is how the event was reached from TYPE, compactly: hops {f
+# OWNER FIELD FIELDTYPE} (a struct field: OWNER "" for an anonymous struct)
+# and {t ID SLOT CROSSED BINDING} (through an application of ID holding its
+# SLOT, by through(ID)'s entry of CROSSED, its arguments BINDING) -- never
+# steps substituted, which a deep argument or a long recursion would make
+# large: a witness expands the few it names (Expand). Each event once (the
+# first found, in field order). MEMO (the caller's variable) keeps one
+# session's answers per (TYPE, CROSSED): a deeply nested argument is walked
+# once, not once per way to it.
 proc hir::ownership::Walk {slots type crossed memoVar} {
     upvar 1 $memoVar memo
     set key [list $type $crossed]
@@ -186,7 +197,7 @@ proc hir::ownership::WalkUncached {slots type crossed memoVar} {
             }
             set events {}
             foreach {name t} [lindex $type 1] {
-                lappend events {*}[Prefixed [Walk $slots $t $crossed memo] [list "" $name $t]]
+                lappend events {*}[Prefixed [Walk $slots $t $crossed memo] [list f "" $name $t]]
             }
             return [Unique $events]
         }
@@ -202,10 +213,11 @@ proc hir::ownership::WalkUncached {slots type crossed memoVar} {
             foreach entry [Through $id] {
                 # A matched push and pop: the application holds its slot j,
                 # so what its argument holds is held here, in this frame.
-                dict for {c steps} $entry {
+                foreach c {0 1} {
+                    if {![dict exists $entry $c]} continue
                     set inner [Walk $slots [lindex $arguments $j] [expr {$crossed || $c}] memo]
                     if {$inner eq {}} continue
-                    lappend events {*}[Prefixed $inner {*}[Substituted $steps $binding]]
+                    lappend events {*}[Prefixed $inner [list t $id $j $c $binding]]
                 }
                 incr j
             }
@@ -219,18 +231,41 @@ proc hir::ownership::WalkUncached {slots type crossed memoVar} {
     return {}
 }
 
-# EVENTS with the steps STEP... put before each event's own.
-proc hir::ownership::Prefixed {events args} {
-    if {$args eq {}} {
-        return $events
-    }
+# EVENTS with the hop HOP put before each event's provenance.
+proc hir::ownership::Prefixed {events hop} {
     return [lmap event $events {
-        lset event end [concat $args [lindex $event end]]
+        lset event end [linsert [lindex $event end] 0 $hop]
         set event
     }]
 }
 
-# EVENTS without the later of two that differ by their steps only.
+# The steps ({OWNER FIELD FIELDTYPE} each) of PROVENANCE, in the variables
+# of the frame it was walked in.
+proc hir::ownership::Expand {provenance} {
+    set steps {}
+    foreach hop $provenance {
+        if {[lindex $hop 0] eq "f"} {
+            lappend steps [lrange $hop 1 3]
+        } else {
+            lassign $hop - id j c binding
+            lappend steps {*}[Substituted [ThroughSteps $id $j $c] $binding]
+        }
+    }
+    return $steps
+}
+
+# The steps of through(ID)'s entry for slot J, crossing C, in ID's own slot
+# variables.
+proc hir::ownership::ThroughSteps {id j c} {
+    variable expanded
+    set key [list $id $j $c]
+    if {![dict exists $expanded $key]} {
+        dict set expanded $key [Expand [dict get [lindex [Through $id] $j] $c]]
+    }
+    return [dict get $expanded $key]
+}
+
+# EVENTS without the later of two that differ by their provenance only.
 proc hir::ownership::Unique {events} {
     set seen [dict create]
     set result {}
@@ -269,7 +304,7 @@ proc hir::ownership::Binding {id arguments} {
 # STEPS with BINDING's arguments substituted for the slot variables they
 # name (a witness of one frame read in another).
 proc hir::ownership::Substituted {steps binding} {
-    if {[dict size $binding] == 0} {
+    if {[dict size $binding] == 0 || $steps eq {}} {
         return $steps
     }
     return [lmap step $steps {
@@ -288,10 +323,10 @@ proc hir::ownership::Apply {type binding} {
 # ---------------------------------------------------------------------------
 # through(ID): the matched pushes and pops (a least fixpoint)
 
-# {{CROSSED STEPS ...} ...}: for each slot of struct ID, the ways ID holds
-# its argument at an owned position -- CROSSED 0 through fields alone, 1
-# through a container element -- each with a witness (steps in ID's slot
-# variables); {} for an identity no declaration has.
+# {{CROSSED PROVENANCE ...} ...}: for each slot of struct ID, the ways ID
+# holds its argument at an owned position -- CROSSED 0 through fields alone,
+# 1 through a container element -- each with the provenance of the first
+# found (from ID's own fields); {} for an identity no declaration has.
 proc hir::ownership::Through {id} {
     variable through
     if {[dict exists $through $id]} {
@@ -309,7 +344,7 @@ proc hir::ownership::ThroughBottom {id} {
 }
 
 # through(ID) its fields give, every application they hold read at its
-# current through facts; an entry already found keeps its witness.
+# current through facts; an entry already found keeps its provenance.
 proc hir::ownership::ThroughOf {id} {
     variable through
     Count throughComputations
@@ -321,11 +356,11 @@ proc hir::ownership::ThroughOf {id} {
     set self [hir::structs::SelfType $id]
     set memo [dict create]
     foreach {name t} [hir::structs::fieldTypes $id] {
-        foreach event [Prefixed [Walk $slots $t 0 memo] [list $self $name $t]] {
+        foreach event [Prefixed [Walk $slots $t 0 memo] [list f $self $name $t]] {
             if {[lindex $event 0] ne "pop"} continue
-            lassign $event - index c steps
+            lassign $event - index c provenance
             if {![dict exists [lindex $result $index] $c]} {
-                lset result $index [dict replace [lindex $result $index] $c $steps]
+                lset result $index [dict replace [lindex $result $index] $c $provenance]
             }
         }
     }
@@ -335,9 +370,10 @@ proc hir::ownership::ThroughOf {id} {
 # ---------------------------------------------------------------------------
 # edges(ID): the applications ID's frame pushes
 
-# {{TARGET ARGS CROSSED STEPS} ...}: the applications struct ID's fields hold
-# at owned positions in ID's own frame (Walk), ARGS over ID's slot
-# variables, STEPS from ID's own type (its declaration at its slots).
+# {{TARGET ARGS CROSSED PROVENANCE} ...}: the applications struct ID's
+# fields hold at owned positions in ID's own frame (Walk), ARGS over ID's
+# slot variables, PROVENANCE from ID's own type (its declaration at its
+# slots).
 proc hir::ownership::Edges {id} {
     variable edges
     if {[dict exists $edges $id]} {
@@ -349,7 +385,7 @@ proc hir::ownership::Edges {id} {
     set memo [dict create]
     set events {}
     foreach {name t} [hir::structs::fieldTypes $id] {
-        lappend events {*}[Prefixed [Walk $slots $t 0 memo] [list $self $name $t]]
+        lappend events {*}[Prefixed [Walk $slots $t 0 memo] [list f $self $name $t]]
     }
     set result {}
     foreach event [Unique $events] {
@@ -559,15 +595,15 @@ proc hir::ownership::Reach {state} {
     return [dict get $states $state reach]
 }
 
-# The pushes of the root walk of TYPE: {STATE ARGS STEPS} each, ARGS the
-# application's concrete arguments, STEPS from TYPE.
+# The pushes of the root walk of TYPE: {STATE ARGS PROVENANCE} each, ARGS
+# the application's concrete arguments, PROVENANCE from TYPE.
 proc hir::ownership::RootEdges {type} {
     set memo [dict create]
     set result {}
     foreach event [Walk {} $type 0 memo] {
         if {[lindex $event 0] ne "push"} continue
-        lassign $event - id arguments c steps
-        lappend result [list [StateOf $id $arguments] $arguments $steps]
+        lassign $event - id arguments c provenance
+        lappend result [list [StateOf $id $arguments] $arguments $provenance]
     }
     return $result
 }
@@ -596,22 +632,23 @@ proc hir::ownership::Witness {type roots} {
         if {[info exists found]} break
     }
     lassign $found root path
-    lassign $root state arguments steps
+    lassign $root state arguments provenance
     set headState $state
     if {$path ne {}} {
         set headState [lindex $path end 0]
     }
     set head [lindex $headState 0]
     set cycle [Cycle $headState]
-    # Instantiate: each edge's steps in the frame's arguments, the frame's
-    # arguments the edge's substituted. (Presentation only: arguments that
-    # grow at every step -- `f0: D0[D0[U, T], List[T]]` doubles them -- are
-    # shown, past a size, in each declaration's own terms instead.)
+    # The steps: the root push's from TYPE, then each edge's in the frame's
+    # arguments, the frame's arguments the edge's substituted -- expanded
+    # from the provenances on this path only. (Presentation only: arguments
+    # that grow at every step -- `f0: D0[D0[U, T], List[T]]` doubles them --
+    # are shown, past a size, in each declaration's own terms instead.)
     variable witnessSize
+    set steps [Expand $provenance]
     set id [lindex $state 0]
     set symbolic 0
     foreach move [concat $path $cycle] {
-        lassign $move next c k
         if {!$symbolic && [string length $arguments] > $witnessSize} {
             set symbolic 1
         }
@@ -620,8 +657,8 @@ proc hir::ownership::Witness {type roots} {
         } else {
             set binding [Binding $id $arguments]
         }
-        lassign [lindex [Edges $id] $k] target edgeArguments - edgeSteps
-        lappend steps {*}[Substituted $edgeSteps $binding]
+        lassign [lindex [Edges $id] [lindex $move 2]] target edgeArguments - edgeProvenance
+        lappend steps {*}[Substituted [Expand $edgeProvenance] $binding]
         if {!$symbolic} {
             set arguments [lmap a $edgeArguments {Apply $a $binding}]
         }

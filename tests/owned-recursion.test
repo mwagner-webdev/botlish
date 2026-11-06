@@ -102,6 +102,10 @@ struct HoldsUnrelated:
     c: @C@
     tree: Unrelated
 
+struct HoldsW:
+    c: @C@
+    w: W[@C@]
+
 struct Vectored[T]:
     value: T
     kids: MutableVector[Vectored[T]]
@@ -222,16 +226,16 @@ proc orChain {n} {
 # ---------------------------------------------------------------------------
 # The specimens
 
-test or-specimens {each specimen's verdict, from the declaration graph: Node[C] (a value of T in a List of its own applications) recursive; W[C] and PhantomRec[C] (the argument only grows, no value holds it) not; Mixed's owning slot recursive, its phantom slot not; GrowA/GrowB (non-uniform mutual recursion, T held in B) recursive from either side; T held nowhere not, held in A recursive; a MutableVector edge recursive; a Fn type over the slot, an unrelated unrestricted recursion and a recursion whose argument becomes a function type over the slot (FnArg[C]: kids hold FnArg[Fn{args: [C]}], unrestricted) not} -body {
+test or-specimens {each specimen's verdict, from the declaration graph: Node[C] (a value of T in a List of its own applications) recursive; W[C] and PhantomRec[C] (the argument only grows, no value holds it) not; Mixed's owning slot recursive, its phantom slot not; GrowA/GrowB (non-uniform mutual recursion, T held in B) recursive from either side; T held nowhere not, held in A recursive; a MutableVector edge recursive; a Fn type over the slot, an unrelated unrestricted recursion and a recursion whose argument becomes a function type over the slot (FnArg[C]: kids hold FnArg[Fn{args: [C]}], unrestricted) not, nor an affine struct beside an unrestricted W[C] (HoldsW)} -body {
     orHir
     set c $::orCo
     lmap t [list [orApp Node $c] [orApp Node int] [orApp W $c] [orApp PhantomRec $c] \
             [orApp Mixed $c int] [orApp Mixed int $c] [orApp GrowA $c] [orApp GrowB $c] \
             [orApp NowhereA $c] [orApp InA $c] [orApp InB $c] [orApp Vectored $c] \
-            [orApp Fun $c] {nstruct HoldsUnrelated} [orApp GrowA [orList $c]] [orApp FnArg $c]] {
+            [orApp Fun $c] {nstruct HoldsUnrelated} [orApp GrowA [orList $c]] [orApp FnArg $c] {nstruct HoldsW}] {
         string cat [orVerdict $t].
     }
-} -result {recursive. . . . recursive. . recursive. recursive. . recursive. recursive. recursive. . . recursive. .}
+} -result {recursive. . . . recursive. . recursive. recursive. . recursive. recursive. recursive. . . recursive. . .}
 
 test or-declarations {a declaration is judged at its own slots (unrestricted): an intrinsically affine recursion through a container (R: handle and List[R]) and one through a pointer-holding struct (an affine C address in every level) are AFFINE-CONTAINER-UNSUPPORTED at the declaration, as is one whose own field introduces the affine argument (Q[T]: kids: List[Q[C]]); a recursion through fields alone (FieldSelf: no finite value) and an unrelated unrestricted recursion are accepted} -body {
     lmap text [list \
@@ -284,10 +288,10 @@ test or-deep-slot-chain {a chain of 100 parameterized declarations handing T on 
         [orCode "${::orDecls}${chain}struct H100\[T\]:\n    n: Node\[T\]\nfn f(x: H0\[int\]) -> int:\n    1\n1\n"]
 } -cleanup {unset -nocomplain chain i} -result {ok AFFINE-CONTAINER-UNSUPPORTED ok}
 
-test or-wrapped-recursion {a recursive affine type wrapped 1, 70 or 100 levels deep in Box is rejected at every depth: the wrapping is the type's own finite argument, the recursion Node's; a coroutine wrapped as deep (a type of thousands of characters, past the applied-type bound) is a finite type at every depth} -body {
+test or-wrapped-recursion {a recursive affine type wrapped 1, 70, 100 or 400 levels deep in Box is rejected at every depth: the wrapping is the type's own finite argument, the recursion Node's; a coroutine wrapped as deep (a type of thousands of characters, past the applied-type bound) is a finite type at every depth} -body {
     orHir
     set result {}
-    foreach k {1 70 100} {
+    foreach k {1 70 100 400} {
         set t [orApp Node $::orCo]
         set u $::orCo
         for {set i 0} {$i < $k} {incr i} {
@@ -297,7 +301,7 @@ test or-wrapped-recursion {a recursive affine type wrapped 1, 70 or 100 levels d
         lappend result [orVerdict $t]/[orVerdict $u]/[expr {[string length $u] > 1000 * ($k > 1)}]
     }
     set result
-} -cleanup {unset -nocomplain result t u i k} -result {recursive//1 recursive//1 recursive//1}
+} -cleanup {unset -nocomplain result t u i k} -result {recursive//1 recursive//1 recursive//1 recursive//1}
 
 # ---------------------------------------------------------------------------
 # What the old walk got wrong
