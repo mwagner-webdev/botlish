@@ -44,7 +44,9 @@ set httpTests [file join $::projectRoot tests http]
 # The application and the client's executable, made once.
 proc httpExecutable {} {
     if {![info exists ::httpExe]} {
-        file delete -force $::httpDir
+        # Never the whole directory: a peer started before the first
+        # executable holds the certificates of $httpDir/pki.
+        file delete -force [file join $::httpDir .bot_modules]
         file mkdir $::httpDir
         httppkg::App $::httpDir 1
         foreach f {client.bot probe.bot} {
@@ -132,6 +134,33 @@ proc httpStop {} {
 }
 
 # --- the build
+
+# The packages' metadata agrees with itself: http locks exactly this
+# repository's releases of its dependencies (the versions their botlish.json
+# name), its requests admit those locks, and the provider's identity symbol
+# is the boringssl package's version and pinned commit.
+proc httpJsonField {path key} {
+    set text [readFile $path]
+    if {![regexp "\"$key\": \"(\[^\"\]*)\"" $text -> value]} { return "" }
+    return $value
+}
+
+test http-package-metadata {http's locks are this repository's releases of event_loop_linux and boringssl, its requests admit them, and the provider identity the unit references names boringssl's version and pinned commit} -constraints httpBuilt -body {
+    set pkgs [file join $::projectRoot packages]
+    set http [readFile [file join $pkgs http botlish.json]]
+    regexp {"lock": \{([^\}]*)\}} $http -> locks
+    regexp {"dependencies": \{([^\}]*)\}} $http -> requests
+    set out {}
+    foreach dep {event_loop_linux boringssl} {
+        set version [httpJsonField [file join $pkgs $dep botlish.json] version]
+        regexp "\"$dep\": \"(\[^\"\]*)\"" $locks -> lock
+        regexp "\"$dep\": \"(\[^\"\]*)\"" $requests -> request
+        lappend out $dep [expr {$lock eq $version}] [string match $request.* $lock]
+    }
+    set pin [httppkg::Pin]
+    lappend out [expr {[dict get $pin tag] eq [httpJsonField [file join $pkgs boringssl botlish.json] version]}] \
+        [expr {[httppkg::ProviderId] eq "[string map {. _} [dict get $pin tag]]_[dict get $pin commit]"}]
+} -result {event_loop_linux 1 1 boringssl 1 1 1 1}
 
 test http-unit-exports {the released unit's only global definitions are the bh_* C functions (no test export, no Rust or BoringSSL symbol: the unit is localized, and BoringSSL is linked from the provider, never bundled); the test unit adds bh_t_*} -constraints httpBuilt -body {
     set target [httppkg::Host]
@@ -270,6 +299,18 @@ test http-concurrency {eight requests at once: over HTTP/2 one connection carrie
         [llength [lsearch -all $h1 {task * status 200 HTTP/1.1 bytes 32768}]] [lindex $h1 end-1]
 } -result {8 {http1 0 http2 1} 8 {http1 6 http2 0}}
 
+test http-executor-budget {the executor polls at most its budget (32) of the tasks ready when a turn starts: sixty-four requests made at once over one HTTP/2 connection take several turns, and every request completes} -constraints {httpBuilt httpPeer} -body {
+    set out [httpRun concurrent [httpTlsUrl "/stream?n=2&size=1024&delay=20"] [httpCa] 64]
+    regexp {max polls per run (\d+)} [lindex $out end-2] -> polls
+    list [llength [lsearch -all $out {task * status 200 HTTP/2 bytes 2048}]] [expr {$polls <= 32}] [lindex $out end-1]
+} -result {64 1 {http1 0 http2 1}}
+
+test http-executor-budget-control {the negative control: with the budget ignored (fault 2) a turn polls every task ready, the sixty-four at once} -constraints {httpBuilt httpPeer} -body {
+    set out [httpRun fault 2 concurrent [httpTlsUrl "/stream?n=2&size=1024&delay=20"] [httpCa] 64]
+    regexp {max polls per run (\d+)} [lindex $out end-2] -> polls
+    expr {$polls > 32}
+} -result 1
+
 test http-keep-alive {sequential requests reuse one connection: HTTP/1.1 keep-alive (one connection open, idle in the pool after) and one HTTP/2 connection} -constraints {httpBuilt httpPeer} -body {
     list [lindex [httpRun sequential [httpPlainUrl /hello] "" 5 [httpPlainUrl /conns]] end-1] \
         [lindex [httpRun sequential [httpTlsUrl /hello] [httpCa] 5 [httpTlsUrl /conns]] end-1]
@@ -290,6 +331,19 @@ test http-abandon {releasing an exchange mid-body: its identity is Released afte
 test http-abandon-control {the negative control: with releases leaving their tasks running (fault 128) the same scenario finds tasks left} -constraints {httpBuilt httpPeer} -body {
     lindex [httpRun fault 128 abandon [httpPlainUrl "/stream?n=100&size=1000&delay=10"] "" [httpPlainUrl /conns]] 2
 } -result {after abandon: exchanges 0 idle 0 http2 0 tasks 2}
+
+test http-stale-handle {a released exchange whose native slot another exchange took: its reads are Released, never the other exchange's body (the handle's generation), on both protocols} -constraints {httpBuilt httpPeer} -body {
+    list [httpRun stale [httpTlsUrl "/stream?n=50&size=1000&delay=10"] [httpCa] [httpTlsUrl /hello]] \
+        [httpRun stale [httpPlainUrl "/stream?n=50&size=1000&delay=10"] "" [httpPlainUrl /hello]]
+} -result {{{first chunk 1000} {stale read: <released>} {fresh read: hello\n} {final: clients 0 exchanges 0 panics 0}} {{first chunk 1000} {stale read: <released>} {fresh read: hello\n} {final: clients 0 exchanges 0 panics 0}}}
+
+test http-stale-handle-control {the negative control: with an index-only handle lookup (fault 256) the released exchange's read reaches the exchange that reused its slot} -constraints {httpBuilt httpPeer} -body {
+    lindex [httpRun fault 256 stale [httpTlsUrl "/stream?n=50&size=1000&delay=10"] [httpCa] [httpTlsUrl /hello]] 1
+} -result {stale read: hello\n}
+
+test http-header-validation {request header validation in both layers: http::header refuses a control character, a trailing space, a name that is no token and a connection-specific name where the program builds the header; a Header built by hand is refused natively when sent (a CR LF value, a framing header), and obs-text bytes pass} -constraints {httpBuilt httpPeer} -body {
+    httpRun headers [httpTlsUrl /echo] [httpCa] [httpPlainUrl /echo]
+} -result {{crlf value: refused: the value of header x-a holds a control character, or leading or trailing space} {trailing space: refused: the value of header x-a holds a control character, or leading or trailing space} {name with a space: refused: a header name is not a token: "bad name"} {connection: refused: the client sets the connection header itself} {tab inside: accepted x-ok} {hand-built crlf: error InvalidRequest invalid value of header x-a} {hand-built transfer-encoding: error InvalidRequest the client sets the transfer-encoding header itself} {hand-built obs-text: status 200 bytes 0} {final: clients 0 exchanges 0 panics 0}}
 
 test http-release-client {releasing a client while another task reads from one of its exchanges: the reader fails with Closed, and the client's connections and watches are gone} -constraints {httpBuilt httpPeer} -body {
     list [httpRun release-client [httpTlsUrl "/stream?n=100&size=100&delay=20"] [httpCa]] \

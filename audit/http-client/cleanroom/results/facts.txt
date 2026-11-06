@@ -1,0 +1,9 @@
+compiler b912d295c995c22eb6866e238602ea29d430352be3745d60983b699ce86ac98d 14813944 bytes
+147590a720cd92aa31105b7126fca5f7eb6ae34bc675e017541fa996a89050f3  ./boringssl-0.20261020.0.botpkg
+3746cece124b660fa03bf018271e4d5bc6d25f2bf684da84bc9fd621a2bc453c  ./event_loop_linux-0.3.0.botpkg
+100b878a99fe78636afeb0fe7fa8df1f66446f80e374382f18f05171e3f36636  ./feeds-1.0.0.botpkg
+e0bfd797780375433e17366723a19b550471c241af5f80ed621d8bb16ef3e330  ./http-0.1.0.botpkg
+bafbeee24dcab4c46349886637a1b44056277e0c172b93642564c6433c851568  ./oldtls-1.0.0.botpkg
+cc: cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0
+libstdc++: /usr/lib/x86_64-linux-gnu/libstdc++.so.6 /usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.33 
+build: 48.4527 s, executable 7212600 bytes

@@ -310,6 +310,7 @@ fn concurrent(args: List[str], context h: http::Http, ev: std::event_loop::Loop,
             break
         std::event_loop::sleep(1000)
     st = http::stats()
+    say("max polls per run ".concat(n(st.max_polls_per_run)))
     say("http1 ".concat(n(st.http1_connections)).concat(" http2 ").concat(n(st.http2_connections)))
 
 # N requests one after another on one client: args url pem n conns-url.
@@ -436,6 +437,72 @@ fn abandon(args: List[str], context h: http::Http, ev: std::event_loop::Loop, na
     st = http::stats()
     say("after abandon: exchanges ".concat(n(st.exchanges)).concat(" idle ").concat(n(st.idle_connections)).concat(" http2 ").concat(n(st.http2_connections)).concat(" tasks ").concat(n(st.tasks)))
     say(attempt(client, http::get(http::uri(arg(args, 3)))))
+
+# A released exchange's identity after another exchange took its native
+# slot: args url pem url2. Its reads must be Released, never the other
+# exchange's body (the handles' generation check; fault 256 is the
+# index-only control).
+fn stale(args: List[str], context h: http::Http, ev: std::event_loop::Loop, nat: event_loop_linux::Native, o: Out) errors http::InvalidUri, http::InvalidRequest, http::ResolveFailed, http::ConnectFailed, http::TlsVerifyFailed, http::TlsHandshakeFailed, http::ProtocolError, http::Timeout, http::Cancelled, http::Closed, http::Unsupported, http::TrustFailed, http::Released, http::Fault, http::BodyTooLarge, std::event_loop::SchedulerFault:
+    {owner, client} = http::client(config_for(arg(args, 2)))
+    {owner: xa, response: a} = client.send(http::get(http::uri(arg(args, 1))))
+    first = a.exchange.read()
+    say("first chunk ".concat(n(size(first))))
+    http::close(xa)
+    {owner: xb, response: b} = client.send(http::get(http::uri(arg(args, 3))))
+    old = a.exchange.read():
+        on http::Released:
+            utf8("<released>")
+    say("stale read: ".concat(text_of(old)))
+    fresh = b.exchange.read_all(1048576)
+    say("fresh read: ".concat(text_of(fresh)))
+
+# Request header validation, in both layers: the constructors (http::header)
+# refuse a bad name or value where the program builds it; a Header the
+# program builds by hand is checked again natively when it is sent. Args:
+# url pem.
+nomethod fn header_verdict(name: str, value: str) -> str:
+    h = http::header(name, value):
+        on http::InvalidRequest:
+            return "refused"
+    "accepted ".concat(h.name)
+
+nomethod fn header_outcome(name: str, value: str) -> str:
+    h = http::header(name, value):
+        on http::InvalidRequest {reason}:
+            return "refused: ".concat(reason)
+    "accepted ".concat(h.name)
+
+fn headers(args: List[str], context h: http::Http, ev: std::event_loop::Loop, nat: event_loop_linux::Native, o: Out) errors http::InvalidUri, http::Fault, http::TrustFailed, http::Unsupported, std::event_loop::SchedulerFault:
+    say("crlf value: ".concat(header_outcome("x-a", "a\r\nb")))
+    say("trailing space: ".concat(header_outcome("x-a", "a ")))
+    say("name with a space: ".concat(header_outcome("bad name", "v")))
+    say("connection: ".concat(header_outcome("Connection", "close")))
+    say("tab inside: ".concat(header_outcome("X-Ok", "a\tb")))
+    {owner, client} = http::client(config_for(arg(args, 2)))
+    target = http::uri(arg(args, 1))
+    crlf = http::Header {name: "x-a", value: utf8("a\r\nb")}
+    say("hand-built crlf: ".concat(attempt(client, http::get(target).with_header(crlf))))
+    framing = http::Header {name: "transfer-encoding", value: utf8("chunked")}
+    say("hand-built transfer-encoding: ".concat(attempt(client, http::get(target).with_header(framing))))
+    high = std::byte::from_int(128):
+        on std::byte::BelowRange:
+            0
+        on std::byte::AboveRange:
+            0
+    obs = http::Header {name: "x-obs", value: std::abi::bytes::from_list([high])}
+    # Over HTTP/1.1 (args 3: a plaintext URL): the HTTP/2 test peer's
+    # library refuses a header value that is not UTF-8, and stalls.
+    say("hand-built obs-text: ".concat(attempt(client, http::get(http::uri(arg(args, 3))).with_header(obs))))
+
+# The constructor's verdict on each NAME VALUE pair of the arguments
+# after the scenario's name (the syntax fuzzer's oracle comparison:
+# audit/http-client/tools/syntax-fuzz.tcl).
+fn headers_many(args: List[str], context o: Out):
+    loop i from 0 to std::list::length(args):
+        if 2 + 2 * i >= std::list::length(args):
+            break
+        say(header_verdict(arg(args, 1 + 2 * i), arg(args, 2 + 2 * i)))
+    unit
 
 # Releasing a client while another task streams from it: args url pem.
 fn reader(x: http::Exchange, context h: http::Http, ev: std::event_loop::Loop, o: Out) -> int errors std::event_loop::SchedulerFault:
@@ -701,7 +768,7 @@ fn parse(args: List[str], context o: Out):
     say(u.scheme.concat(" ").concat(u.host).concat(" ").concat(n(u.port)).concat(" ").concat(http::target(u)).concat(" ").concat(http::authority(u)))
 
 # Parse every argument after the scenario's name, one line each (the URI
-# fuzzer's oracle comparison: audit/http-client/tools/uri-fuzz.tcl).
+# fuzzer's oracle comparison: audit/http-client/tools/syntax-fuzz.tcl).
 fn parse_many(args: List[str], context o: Out):
     loop i from 1 to std::list::length(args):
         text = std::list::get(args, i, "")
@@ -738,6 +805,12 @@ fn scenario(args: List[str], context h: http::Http, ev: std::event_loop::Loop, n
         abandon(args)
     elif name == "release-client":
         release_client(args)
+    elif name == "stale":
+        stale(args)
+    elif name == "headers":
+        headers(args)
+    elif name == "headers-many":
+        headers_many(args)
     elif name == "fuzz":
         fuzz(args)
     elif name == "parse":

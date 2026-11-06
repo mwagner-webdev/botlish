@@ -432,4 +432,7 @@ decompression (a `content-encoding` body arrives as sent); no response
 trailers; no cache; no Happy Eyeballs; no h2c (HTTP/2 without TLS); no
 client certificates, session resumption or OCSP; no TLS key logging or
 verification bypass, ever. Linux x86-64 only. The response body crosses
-into Botlish storage as a copy per chunk (no borrowed foreign bytes).
+into Botlish storage as a copy per chunk (no borrowed foreign bytes). A
+TLS handshake runs on the loop's thread, inside the executor's step. IPv6
+connections are made like IPv4 ones but have not been tested yet (the test
+machine refused IPv6 sockets); IPv6 literals are parsed and verified.

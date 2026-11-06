@@ -61,21 +61,27 @@ case ${1:-} in
     }
     trap cleanup EXIT
     sh "$root/tests/http/pki.sh" "$stage/pki" >/dev/null 2>&1
-    # A peer: its port, once it says "ready PORT".
+    # A peer NAME, its port in the variable VAR once it says "ready PORT"
+    # (never in a command substitution: its subshell would keep the pid
+    # the cleanup must kill).
     peer() {
-      local log=$stage/peer-$1.log
-      shift
+      local name=$1 var=$2
+      shift 2
+      local log=$stage/peer-$name.log
       python3 -I "$root/tests/http/server.py" --port 0 "$@" > "$log" 2>/dev/null &
       pids+=($!)
       for _ in $(seq 100); do
-        if grep -q '^ready ' "$log"; then sed -n 's/^ready \([0-9]*\)$/\1/p' "$log" | head -1; return; fi
+        if grep -q '^ready ' "$log"; then
+          printf -v "$var" '%s' "$(sed -n 's/^ready \([0-9]*\)$/\1/p' "$log" | head -1)"
+          return
+        fi
         sleep 0.1
       done
-      echo "cleanroom.sh: a peer did not start" >&2
+      echo "cleanroom.sh: the peer $name did not start" >&2
       exit 1
     }
-    good=$(peer good --tls "$stage/pki/good.pem" "$stage/pki/good.key")
-    untrusted=$(peer untrusted --tls "$stage/pki/untrusted.pem" "$stage/pki/untrusted.key")
+    peer good good --tls "$stage/pki/good.pem" "$stage/pki/good.key"
+    peer untrusted untrusted --tls "$stage/pki/untrusted.pem" "$stage/pki/untrusted.key"
     closed=$(python3 -I -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')
     mkdir -p "$stage/inputs/repo" "$stage/inputs/src" "$stage/harness"
     cp "$compiler" "$stage/inputs/botlish"

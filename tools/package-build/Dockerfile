@@ -37,8 +37,8 @@ RUN --mount=type=secret,id=build-ca,required=true \
     if [ -n "${HTTPS_PROXY:-}" ]; then \
       echo "Acquire::https::Proxy \"$HTTPS_PROXY\";" >> /etc/apt/apt.conf.d/99build; \
     fi; \
-    apt-get -o Acquire::Check-Valid-Until=false update; \
-    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    apt-get -o Acquire::Check-Valid-Until=false -o Acquire::Retries=8 update; \
+    DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=8 install -y --no-install-recommends \
       ca-certificates curl git cmake ninja-build gcc libc6-dev libx11-dev clang \
       gcc-aarch64-linux-gnu libc6-dev-arm64-cross binutils-aarch64-linux-gnu \
       dpkg-dev xz-utils tzdata zlib1g; \
@@ -69,8 +69,8 @@ RUN --mount=type=secret,id=build-ca,required=true \
     if [ -n "${HTTPS_PROXY:-}" ]; then \
       echo "Acquire::https::Proxy \"$HTTPS_PROXY\";" >> /etc/apt/apt.conf.d/99build; \
     fi; \
-    apt-get -o Acquire::Check-Valid-Until=false update; \
-    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends g++ libclang-dev; \
+    apt-get -o Acquire::Check-Valid-Until=false -o Acquire::Retries=8 update; \
+    DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=8 install -y --no-install-recommends g++ libclang-dev; \
     curl -fsSL --cacert /tmp/build-ca.crt --retry 3 -o /tmp/rustup-init \
       https://static.rust-lang.org/rustup/archive/1.28.2/x86_64-unknown-linux-gnu/rustup-init; \
     echo "20a06e644b0d9bd2fbdbfd52d42540bdde820ea7df86e92e533c073da0cdd43c  /tmp/rustup-init" | sha256sum -c -; \
@@ -80,7 +80,7 @@ RUN --mount=type=secret,id=build-ca,required=true \
     rm -f /tmp/rustup-init /etc/apt/apt.conf.d/99build /tmp/build-ca.crt; \
     rm -rf /var/lib/apt/lists/*; \
     dpkg-query -W -f '${Package} ${Version} ${Architecture}\n' | sort > /etc/botlish-author-packages; \
-    /usr/local/cargo/bin/rustc --version >> /etc/botlish-author-environment
+    RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo /usr/local/cargo/bin/rustc --version >> /etc/botlish-author-environment
 ENV LANG=C.utf8 LC_ALL=C.utf8 BOTLISH_CACHE_DIR=/cache \
     RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo PATH=/usr/local/cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 WORKDIR /src

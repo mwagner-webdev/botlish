@@ -1,0 +1,4 @@
+error: cannot select one version of boringssl for the application's dependency graph: 0.20250101.0 and 0.20261020.0 are demanded:
+  oldtls 1.0.0 locks boringssl 0.20250101.0 (the project -> oldtls 1.0.0)
+  http 0.1.0 locks boringssl 0.20261020.0 (the project -> http 0.1.0)
+A package of the application's dependency graph has one instance, at one version, used by every package that depends on it; a lock is the release its package was built and tested with, and is never changed, relaxed or overridden to make the graph agree, and no second instance is made. Choose versions whose locks agree (update, add -request), or ask the packages' authors for releases that lock the same version (PM DEPENDENCY-CONFLICT)

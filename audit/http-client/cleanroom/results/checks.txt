@@ -1,0 +1,51 @@
+PASS no Tcl, Rust, Cargo, CMake or Ninja in the clean room
+PASS no Botlish checkout or BoringSSL source in the clean room
+PASS botlish.json requests http, the driver and feeds
+PASS the application uses one instance each of the driver, feeds and http
+PASS feeds uses the application's driver and http
+PASS http uses the one driver and the one BoringSSL provider
+PASS every package is installed once, no package holds a .bot_modules of its own
+PASS the graph reports the driver shared
+PASS verify is clean
+PASS the provenance record of boringssl-0.20261020.0 matches its artifact
+PASS the provenance record of http-0.1.0 matches its artifact
+PASS the program builds as a native executable, warning-free
+PASS the executable holds the HTTP unit once
+PASS the executable holds one BoringSSL provider, the one http locks
+PASS the executable holds one SSL_CTX_new
+PASS the executable depends on no shared BoringSSL or OpenSSL
+PASS A: the public URL answers 200
+PASS A: the body arrives
+PASS A: no exchange or client is left
+PASS B: 200 over HTTP/2
+PASS B: the peer saw the method and headers
+PASS B: the body round-trips
+PASS B: no exchange or client is left
+PASS C: 64 MiB arrive chunk by chunk
+PASS C: at most one chunk held natively
+PASS C: peak memory bounded
+PASS C: UTF-8 text split across chunks decodes
+PASS C: the streamed upload arrives whole
+PASS C: no exchange or client is left
+PASS D: feeds poll 1 answered
+PASS D: feeds poll 2 answered
+PASS D: feeds poll 3 answered
+PASS D: the application's request 1 answered
+PASS D: the application's request 2 answered
+PASS D: the application's request 3 answered
+PASS D: the application's request 4 answered
+PASS D: feeds' timer paced its polls
+PASS D: when the application's task ended, feeds' client was still open (the two ran concurrently)
+PASS D: no exchange or client is left once feeds is done
+PASS E: an unknown host is ResolveFailed
+PASS E: an untrusted certificate is TlsVerifyFailed
+PASS E: a refused connection is ConnectFailed
+PASS E: a deadline is Timeout deadline
+PASS E: an idle body is Timeout idle
+PASS E: cancellation is Cancelled
+PASS E: an early release drops the exchange
+PASS E: the client works after it
+PASS E: no exchange or client is left
+PASS add oldtls fails
+PASS the failure is a DEPENDENCY-CONFLICT naming both locks
+PASS the installation is unchanged

@@ -5578,6 +5578,66 @@ the experiment's Tasks app with `audit/raven-cleanroom/tools/build-app.sh`
 (the clean room's consumer build) and publishes it as an artifact: run it
 after a change to `build-app.sh` or the release.
 
+## The http and boringssl packages (HTTP client)
+
+`packages/http` is the official HTTP/1.1 and HTTP/2 client with TLS
+(HTTP-CLIENT-PACKAGE-MILESTONE-1.md; its README.md and GUIDE.md are the
+user's documentation): Hyper and BoringSSL in a Rust unit
+(`packages/http/native`, crate `botlish_http`, built and localized by
+`tools/http-package.tcl` into `native/libbotlish_http.a`), driven by the
+program's own event loop and the Linux driver package; `packages/boringssl`
+is the provider (BoringSSL's pinned release, `packages/boringssl/PIN`, in
+one archive of its own name, `libbotlish_boringssl.a`, with the provider's
+identity symbol). `tools/package-repository.tcl`'s `author::boringssl` and
+`author::http` are their release recipes. Keep it so:
+
+* Nothing of them enters the compiler, the runtime, the standard library or
+  the single executable: a consumer installs the released artifacts and
+  compiles none of their native code. No Tokio runtime and no second
+  scheduler: the unit's executor runs a bounded batch per `bh_step` (the
+  module's budget) from a task of the loop, its timers are the loop's
+  clock, its readiness the driver's watches; the only threads are the name
+  resolver's, which answer and wake the loop (`botlish_event_post`).
+* The public interface is Botlish values, declared errors and resources:
+  no handle integer, Rust type, BoringSSL object or raw status reaches a
+  program (every `bh_*` is `private`); a client and an exchange are
+  resources released where their owners' scopes end. Never add a public
+  function that takes or returns a handle, a descriptor or a pointer.
+* TLS is verified, always: chain, host name (or IP address) and expiry,
+  against the system's bundle and the anchors a program passes as data.
+  Never add a switch, an option, an environment variable or a test-only
+  path in the released unit that turns verification off or reads another
+  trust file (the bundles are the documented `SYSTEM_BUNDLES`).
+* Test-only behavior is the `testing` feature's (fault bits, counters, a
+  counting allocator, the `bh_t_*` exports): the released unit compiles
+  every fault check to `false` and exports only `bh_*`
+  (`http-unit-exports`). Never read an environment variable in the unit.
+* The provider is identified, not assumed: the unit references
+  `botlish_boringssl_<tag>_<commit>`, which only the provider package's
+  archive defines (`http-provider-identity`); the http package locks the
+  boringssl release it was built against, and a graph with another release
+  is a DEPENDENCY-CONFLICT. Never prefix, patch or bundle BoringSSL into
+  the unit (boring-sys builds link-only against empty archives).
+* Releases are reproducible: `--locked`, one codegen unit, remapped paths,
+  deterministic archives; the pinned author image (tools/package-build/)
+  carries the Rust toolchain. A change to the unit or the provider is a new
+  version of the package.
+
+If you change `packages/http`, `packages/boringssl`, `tools/http-package.tcl`
+or their recipes, run `tclsh9.0 tests/cffi/http.tcl` (it builds the
+provider and both units into Botlish's cache), `tests/http-client.test`
+(independent peers: Python's asyncio, ssl and `h2`, which it needs, and
+nghttpd where installed), `tests/resources.test`,
+`audit/http-client/tools/syntax-fuzz.tcl` (several seeds; URIs and header
+fields against their oracles) and `audit/http-client/tools/mutate.tcl`
+(every mutant in its `mutants.txt` must still apply and be killed: update a
+mutant's text when you change the code it mutates, keeping it a mutant of
+the same rule), plus the clean room for a change to what a consumer
+installs or links (`audit/http-client/cleanroom/cleanroom.sh image`, then
+`repository.sh OUT` and `cleanroom.sh run single/out/botlish OUT RESULTS`
+after `single/build.sh`: the report's "Clean room").
+`audit/http-client/tools/measure.tcl` regenerates the measurements.
+
 ## Diagnostic recovery
 
 A rejected compilation reports every independent diagnostic it finds and

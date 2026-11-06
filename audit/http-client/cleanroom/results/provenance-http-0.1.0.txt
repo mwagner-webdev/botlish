@@ -1,0 +1,110 @@
+http 0.1.0
+  sha256 e0bfd797780375433e17366723a19b550471c241af5f80ed621d8bb16ef3e330
+  5326387 bytes, 95 files
+  dependency boringssl "0.20261020", locked 0.20261020.0
+  dependency event_loop_linux "0.3", locked 0.3.0
+      20949  GUIDE.md
+       7180  README.md
+        797  botlish.json
+      69295  http.bot
+       1807  licenses/http/CRATES.md
+       1073  licenses/http/LICENSE
+      10847  licenses/http/crates/atomic-waker-1.1.2/LICENSE-APACHE
+       1023  licenses/http/crates/atomic-waker-1.1.2/LICENSE-MIT
+       1849  licenses/http/crates/atomic-waker-1.1.2/LICENSE-THIRD-PARTY
+      10847  licenses/http/crates/bitflags-2.13.2/LICENSE-APACHE
+       1071  licenses/http/crates/bitflags-2.13.2/LICENSE-MIT
+        665  licenses/http/crates/boring-5.4.0/LICENSE
+       1108  licenses/http/crates/boring-sys-5.4.0/LICENSE-MIT
+       1055  licenses/http/crates/bytes-1.12.1/LICENSE
+      10847  licenses/http/crates/equivalent-1.0.3/LICENSE-APACHE
+       1049  licenses/http/crates/equivalent-1.0.3/LICENSE-MIT
+      10847  licenses/http/crates/fnv-1.0.7/LICENSE-APACHE
+       1056  licenses/http/crates/fnv-1.0.7/LICENSE-MIT
+      11358  licenses/http/crates/foreign-types-0.5.0/LICENSE-APACHE
+       1072  licenses/http/crates/foreign-types-0.5.0/LICENSE-MIT
+      11358  licenses/http/crates/foreign-types-macros-0.2.4/LICENSE-APACHE
+       1072  licenses/http/crates/foreign-types-macros-0.2.4/LICENSE-MIT
+      11358  licenses/http/crates/foreign-types-shared-0.3.1/LICENSE-APACHE
+       1072  licenses/http/crates/foreign-types-shared-0.3.1/LICENSE-MIT
+      10874  licenses/http/crates/futures-channel-0.3.34/LICENSE-APACHE
+       1094  licenses/http/crates/futures-channel-0.3.34/LICENSE-MIT
+      10874  licenses/http/crates/futures-core-0.3.34/LICENSE-APACHE
+       1094  licenses/http/crates/futures-core-0.3.34/LICENSE-MIT
+      10874  licenses/http/crates/futures-sink-0.3.34/LICENSE-APACHE
+       1094  licenses/http/crates/futures-sink-0.3.34/LICENSE-MIT
+       1054  licenses/http/crates/h2-0.4.20/LICENSE
+      10847  licenses/http/crates/hashbrown-0.17.1/LICENSE-APACHE
+       1060  licenses/http/crates/hashbrown-0.17.1/LICENSE-MIT
+      10835  licenses/http/crates/http-1.5.0/LICENSE-APACHE
+       1059  licenses/http/crates/http-1.5.0/LICENSE-MIT
+       1083  licenses/http/crates/http-body-1.1.0/LICENSE
+       1083  licenses/http/crates/http-body-util-0.1.5/LICENSE
+      10847  licenses/http/crates/httparse-1.10.1/LICENSE-APACHE
+       1063  licenses/http/crates/httparse-1.10.1/LICENSE-MIT
+       1062  licenses/http/crates/hyper-1.12.0/LICENSE
+      10847  licenses/http/crates/indexmap-2.14.2/LICENSE-APACHE
+       1049  licenses/http/crates/indexmap-2.14.2/LICENSE-MIT
+       9723  licenses/http/crates/itoa-1.0.18/LICENSE-APACHE
+       1023  licenses/http/crates/itoa-1.0.18/LICENSE-MIT
+       9723  licenses/http/crates/libc-0.2.191/LICENSE-APACHE
+       1066  licenses/http/crates/libc-0.2.191/LICENSE-MIT
+      10847  licenses/http/crates/once_cell-1.21.4/LICENSE-APACHE
+       1023  licenses/http/crates/once_cell-1.21.4/LICENSE-MIT
+      11358  licenses/http/crates/openssl-macros-0.1.1/LICENSE-APACHE
+       1058  licenses/http/crates/openssl-macros-0.1.1/LICENSE-MIT
+      10174  licenses/http/crates/pin-project-lite-0.2.17/LICENSE-APACHE
+       1023  licenses/http/crates/pin-project-lite-0.2.17/LICENSE-MIT
+       9723  licenses/http/crates/proc-macro2-1.0.107/LICENSE-APACHE
+       1023  licenses/http/crates/proc-macro2-1.0.107/LICENSE-MIT
+       9723  licenses/http/crates/quote-1.0.47/LICENSE-APACHE
+       1023  licenses/http/crates/quote-1.0.47/LICENSE-MIT
+       1055  licenses/http/crates/slab-0.4.12/LICENSE
+      10847  licenses/http/crates/smallvec-1.16.4/LICENSE-APACHE
+       1072  licenses/http/crates/smallvec-1.16.4/LICENSE-MIT
+       9723  licenses/http/crates/syn-2.0.119/LICENSE-APACHE
+       1023  licenses/http/crates/syn-2.0.119/LICENSE-MIT
+       9723  licenses/http/crates/syn-3.0.9/LICENSE-APACHE
+       1023  licenses/http/crates/syn-3.0.9/LICENSE-MIT
+       1070  licenses/http/crates/tokio-1.54.1/LICENSE
+       1070  licenses/http/crates/tokio-util-0.7.20/LICENSE
+       1062  licenses/http/crates/tracing-0.1.44/LICENSE
+       1062  licenses/http/crates/tracing-core-0.1.36/LICENSE
+       1096  licenses/http/crates/try-lock-0.2.5/LICENSE
+       9723  licenses/http/crates/unicode-ident-1.0.27/LICENSE-APACHE
+       1023  licenses/http/crates/unicode-ident-1.0.27/LICENSE-MIT
+       1995  licenses/http/crates/unicode-ident-1.0.27/LICENSE-UNICODE
+       1063  licenses/http/crates/want-0.3.2/LICENSE
+      15215  native/Cargo.lock
+       1413  native/Cargo.toml
+       1938  native/build.rs
+      15969  native/src/abi.rs
+       7453  native/src/body.rs
+      13839  native/src/bridge/exec.rs
+       3202  native/src/bridge/ffi.rs
+       6365  native/src/bridge/io.rs
+       1775  native/src/bridge/mod.rs
+       1467  native/src/bridge/notices.rs
+       2445  native/src/bridge/slab.rs
+       2895  native/src/bridge/stats.rs
+       6525  native/src/bridge/time.rs
+      41500  native/src/client.rs
+       1633  native/src/faults.rs
+       1186  native/src/lib.rs
+      13944  native/src/net.rs
+        836  native/src/notify.c
+       2694  native/src/rt.rs
+       2821  native/src/stream.rs
+       2067  native/src/testing.rs
+      13326  native/src/tls.rs
+   17040508  targets/linux-x86_64/native/libbotlish_http.a
+  target linux-x86_64: 95 files in its view (targets/linux-x86_64 at the package root)
+    library botlish_http: bundled static, native/libbotlish_http.a, license ((MIT OR Apache-2.0) AND Unicode-3.0) AND Apache-2.0 AND (Apache-2.0  OR  MIT) AND (Apache-2.0 OR MIT) AND MIT AND (MIT OR Apache-2.0) AND (MIT OR Apache-2.0) (the author's statement)
+      notices: licenses/http/LICENSE, licenses/http/CRATES.md
+  native closure of linux-x86_64: complete
+  provenance /home/dev/inputs/repo/http-0.1.0.provenance.json (sha256 d4dffb59f283, format 1)
+    describes this artifact: its subject's SHA-256 and every file's digest are the artifact's
+    asserted by the author, unchecked unless a check below says so: 0 source(s), 1 build(s), 0 generator(s)
+    check made when the record was made: build http unit linux-x86_64 output targets/linux-x86_64/native/libbotlish_http.a: confirmed (26490165a907)
+    unsigned: the record does not authenticate who made the artifact or its sources (PM-4 and PM-5)
+(a valid .botpkg, format 1, schema 3: one release for every target it names; nothing authenticates who made it)

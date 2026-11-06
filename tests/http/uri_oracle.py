@@ -1,6 +1,6 @@
 """uri_oracle.py -- an independent statement of the http package's URI rules
 (packages/http/http.bot's `uri`; HTTP-CLIENT-PACKAGE-MILESTONE-1.md,
-"URIs"), for audit/http-client/tools/uri-fuzz.tcl: Python's ipaddress for
+"URIs"), for audit/http-client/tools/syntax-fuzz.tcl: Python's ipaddress for
 the address forms, and the rules written out here again, from RFC 3986 and
 the package's documentation, never from its code.
 
