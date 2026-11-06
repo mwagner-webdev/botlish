@@ -4910,6 +4910,14 @@ backend compiles, or reports why not (EMIT-*). Keep it so:
 * Diagnostics anchor at the claimed function (its unit: recovery, static
   sites) and are located at the yield or call; a claim whose code holds
   another diagnostic, poison or a hole is `dependent` and says nothing.
+  Its code is what the walk reads, also without evaluating it: a call's
+  callee reference (an unresolved name is typed `never`, which is no
+  divergence) and the code of a helper whose `never` result the walk
+  relies on (`hir::emission::Taint`; `Read`, a summary read for its code:
+  its taint and fingerprint the claim's, never its violations;
+  EMISSION-CALLEE-DEPENDENCY-CORRECTNESS-MILESTONE-1.md). Never stop the
+  walk at a `never` it has not read, and never make a claim dependent on
+  code its walk does not read.
   Messages never print an internal id. Every EMIT-* kind has a
   `std::compiler::DiagnosticCode` case and a Compilerpedia topic.
 * A claim is about the yield trace, never the result: a claimed function
