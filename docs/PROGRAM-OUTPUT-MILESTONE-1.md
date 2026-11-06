@@ -132,7 +132,7 @@ work):
 | CLI | main.tcl: the `run` form (parser, usage, header comment, `runProgram`); single/main.tcl's `MayLink` |
 | tests | tests/helpers.tcl's `standaloneValue` and `bareValue` (the protocol); about 70 test files that read an executable's standard output migrated: the value through the protocol, a program's output without the trailing value line, plain runs pinned to empty output; tests/main-cli.test's eight `cli-run-*` tests; native-executable.test's `native-executable-prints-no-value`; their census rows and the regenerated manifest |
 | CI and scripts | windows-x86_64.yml (the executables' values, Windows I/O's expected output), macos-arm64.yml (the main-thread job), icy-tower-macos.yml and icy-tower-windows.yml (their comparisons of two runs now require a summary line), single/smoke-test.sh (and `run`: output, arguments, a rejection), single/ffi-smoke-test.sh (values through the protocol's words, `run` of a program that calls C with a fresh cache), single/macos/app-test.sh and compare.sh |
-| tools | bench/golden-aot.tcl and bench/c-ffi-error-capture.tcl, audit/abi-bytes and audit/mutable-bytes fuzzers, audit/dfa/tools/differential.tcl (it dropped the last line unconditionally), audit/macos-graphical-main-thread/tools/census.py, fuzz/scripts/replay.tcl, fuzz/scripts/baseline.sh (a value column), fuzz/windows/replay-json.ps1, tests/platform's aot-facts.tcl, native-status.tcl, gc-workloads.tcl and link-plan-sdl3.sh |
+| tools | bench/golden-aot.tcl and bench/c-ffi-error-capture.tcl, audit/abi-bytes and audit/mutable-bytes fuzzers, audit/dfa/tools/differential.tcl (it dropped the last line unconditionally), audit/macos-graphical-main-thread/tools/census.py, fuzz/scripts/replay.tcl, fuzz/scripts/baseline.sh (a value column), fuzz/windows/replay-json.ps1, tests/platform's aot-facts.tcl, native-status.tcl, gc-workloads.tcl and link-plan-sdl3.sh; the clean rooms' acceptance scripts (audit/raven-cleanroom/acceptance/inside.sh's moved headless test, audit/shared-dependencies/cleanroom/inside.sh's trace), values through the protocol's words |
 | Icy Tower | game.bot's `main` prints the run's summary line itself (its `--headless` mode printed nothing but its value); the entry programs end in `unit`; the committed executable audit/icy-tower/artifacts/icy-tower rebuilt |
 | mutants | audit/native-aot's `result-not-printed` (the old rule) replaced by `result-printed`; audit/single-executable's new `run-command-not-linking` |
 | documentation | README.md's hello transcript, docs/README.md, Compilerpedia (the new `cli.run`; `cli.usage`, `cli.output`, `cli.exit-status`, `backend.native-executable`, `backend.io`, `backend.native-only`, `task.print-output`, `capability.process-exit-status`, `concept.program-value`), example comments, AGENTS.md's "Program output" section, the census's status |
@@ -176,6 +176,24 @@ built by tests/cffi/sdl3.tcl):
   abi-bytes, c-ffi and main-thread-startup, tests/platform/aot-facts.tcl
   and native-status.tcl passing again; Icy Tower's committed executable
   rebuilt on the merged runtime.
+* After merging main at 01d2ccf (shared package dependencies, declaration
+  summaries, the CI canary): the whole local run again -- the 117 golden
+  suites on all four backends, 0 failed; every Tcl test file, 8,822 tests
+  passed on interp and 8,817 on compile, 0 failed. A container restart
+  stopped the first run after 309 items (every golden suite and 96 test
+  files on both passes, all passed); the 173 files it had not finished ran
+  again. The golden manifest regenerated equal to the merged one;
+  tools/mutant-catalogs.tcl: 86 catalogs, 0 problems; Compilerpedia's
+  check: 1,221 topics, 745 examples, 0 problems.
+* Three scripts still read an executable's printed value, found after the
+  first validation: main's new shared-dependencies clean room (its trace;
+  adapted in the merge, not run here: it needs Docker and the single-file
+  compiler), the raven clean room's `moved-test-runs` (its workflow at
+  a236620) and the macOS graphical census, which read the value through
+  the protocol for a case kind no case has (`sdl`, for `graphical`; and not
+  for `dispatch`: macos-arm64.yml's main-thread-startup job at 70bdcb4,
+  13 cases not as predicted). All three read the value through the driver
+  protocol now; the census workflow passed on the fix.
 * Every test file the migration changed passed on its own run (about 75
   files; the macOS- and Windows-only tests in them were edited by reading),
   among them tests/workload-icy-tower.test's executable tests with SDL3
