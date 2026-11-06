@@ -74,9 +74,11 @@ releases honest; `tools/ci/runs.py` implements the second and the third,
   and windows-x86_64.yml a `canary` job, macos-arm64.yml the smoke job's
   last step. It runs, within about ten minutes, the test files and golden
   suites the push adds or changes, then the ones `tests/canary.tsv`'s
-  history says failed recently on that host. On a branch push tests.yml and
-  tests-arm64.yml run only the canary (and tests.yml's warning gate and
-  mutant catalogs). The canary orders, it never skips: never drop a job or
+  history says failed recently on that host; tests.yml's runs the mutant
+  catalogs and the warning gate first, as steps (a job of its own would
+  wait for a runner before the expensive jobs could start: keep them steps).
+  On a branch push tests.yml and tests-arm64.yml run only the canary. The
+  canary orders, it never skips: never drop a job or
   a test because the canary passed, never let an expensive job start
   before it (a job that runs after a failed need checks the canary's
   result itself), and never give it an item list of its own beside its
@@ -700,8 +702,8 @@ what it depends on in its code or its constraints:
 A change can break another audit's mutant: rewrite or duplicate the text it
 replaces, and that mutant guards nothing until its own harness next runs.
 `tclsh9.0 tools/mutant-catalogs.tcl` applies every mutant of every catalog
-under `audit/` to the tree in memory (seconds; CI's `mutant-catalogs` job in
-`tests.yml`). Run it before pushing a change to code. A mutant it reports is
+under `audit/` to the tree in memory (seconds; a step of `tests.yml`'s
+canary job). Run it before pushing a change to code. A mutant it reports is
 updated in the same change, kept a mutant of the same rule, and run through
 its own harness (`-only NAME`). A new catalog whose files are not relative
 to the repository root, or not named by `## FILE` lines, gets a row in the
@@ -848,7 +850,7 @@ lists, each with the obstruction that keeps it open (REFACTOR-WARNINGS-CLEAN.md)
 `audit/refactor/tools/gate.tcl` checks it -- every corpus program and a one-line
 loader per library module, the observed warnings equal to the manifest (code
 and location), and every program and loader without an entry compiling under
-`-warnings error` -- and the `warning-gate` job of `.github/workflows/tests.yml`
+`-warnings error` -- and a step of `.github/workflows/tests.yml`'s canary job
 runs it on every push and pull request (`tests/warning-gate.test` pins that it
 passes and that it fails on a planted warning).
 
