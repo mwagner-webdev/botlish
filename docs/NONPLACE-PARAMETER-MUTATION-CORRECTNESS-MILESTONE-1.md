@@ -40,12 +40,15 @@ report argues for.
   parameter and observing that the caller was unchanged. One golden test,
   `native-aggregates.bot`'s chunked builder, pinned a real dropped write
   (section 11.2); it now declares the intended `place`.
-* **Not migrated, by decision:** three research corpora (the hash-table
-  experiment's implementations, the strict-reference-determinism
-  experiment's variants and the frozen kickoff fixture). No test or
-  workflow compiles the first two. The third is read only by the CLI
-  warning tests, which still pass, but now see three fewer programs
-  (section 11.4).
+* **The frozen kickoff fixture was migrated too, at the user's direction**
+  (section 11.4). Three of its programs mutated parameters; each now copies
+  the parameter into a local before the first mutation. Every program's
+  results and every warning's text are what the tree before the milestone
+  printed for the unmigrated fixture, on all four backends; only positions
+  moved. AGENTS.md now allows exactly this kind of edit.
+* **Not migrated, by decision:** two research corpora (the hash-table
+  experiment's implementations and the strict-reference-determinism
+  experiment's variants). No test or workflow compiles them (section 11.4).
 
 ## 2. Starting semantics and reproduction
 
@@ -405,20 +408,40 @@ The tests that state the replaced behaviour (`pp-parameter-as-place`,
 observable result. The original programs are this milestone's rejection
 tests (`npm-place-argument`, `npm-untyped-parameter`, ...).
 
-### 11.4 Not migrated
+### 11.4 The frozen fixture, and what was not migrated
 
 * **`audit/refactor/kickoff-corpus/`** (csv_chunked, csv_records and
-  hashtable). AGENTS.md says nothing may edit this frozen fixture. Those
-  three programs now stop at NONPLACE-PARAMETER-MUTATION. The CLI tests
-  that read the fixture (`me-`, `fa-`, `oc-`, `mb-`, `pn-` and
-  `sf-cli-backend-independent-*`) still pass: they compare each program's
-  warning lines across backends, and the other programs still carry
-  warnings. But they now compare three fewer programs, and the fixture no
-  longer contains any SAME-RETURN-VALUE line (only csv_records and
-  hashtable had them). Restoring that coverage takes a deliberate edit of
-  the fixture, applying the same local copies as section 11.1, which
-  leaves every warning in place. That decision belongs to the fixture's
-  owner and is not made here.
+  hashtable) is migrated. AGENTS.md used to forbid any edit of this frozen
+  fixture, so the first commit left it as written.
+  - The cost of not editing it: its three programs stopped at
+    NONPLACE-PARAMETER-MUTATION. The CLI tests that read the fixture
+    (`me-`, `fa-`, `oc-`, `mb-`, `pn-` and
+    `sf-cli-backend-independent-*`) still passed, since the other programs
+    still carry warnings. But they compared three fewer programs, and the
+    fixture no longer held any SAME-RETURN-VALUE line (only csv_records and
+    hashtable had them).
+  - The user then directed the migration, and changed the rule: the fixture
+    is edited when a language change makes one of its programs stop
+    compiling, only as far as compiling again takes, keeping every warning
+    and every result.
+  - The edit: each of the nine functions copies its parameter into a local
+    (`updated = table`, `filling = final`) right before its first mutation,
+    and the code after the copy uses the local. Each parameter keeps its
+    name, because SAME-RETURN-VALUE names a returned value by its alias
+    root. A first attempt that renamed the parameter (`table =
+    given_table`) changed `ht_delete`'s line to "the value of
+    `given_table`".
+  - The check: each of the eleven programs ran on all four backends with
+    `-warnings default`, in the tree before the milestone (13dd290, the
+    fixture unmigrated) and in this one. All 88 standard outputs and
+    standard errors are identical, once the base tree's paths, the internal
+    HIR ids in the compile backend's `type:` lines and the nine inserted
+    lines' shifts are mapped. The 357 warnings located in the fixture (285
+    METHOD-ELIGIBLE, 64 ONE-CHAR-STRING-LITERAL, 5 FIXED-ARITY-LIST-RETURN,
+    3 SAME-RETURN-VALUE) keep their code and text. `hashtable.bot` is
+    refused by cranelift-generic (NATIVE UNSUPPORTED struct-shape) in both
+    trees alike.
+  - The fixture's README.md records the edit under "Migrations".
 * **`audit/hash-table/impl/*.bot`** (15 implementations) and
   **`audit/strict-reference-determinism/experiment/csv_records-*.bot`**.
   These are records of finished experiments, measured and reported as
@@ -529,7 +552,7 @@ agree.
 * **Method decisions with several candidates** report NO-APPLICABLE-METHOD,
   with the NONPLACE-PARAMETER-MUTATION text as the mutating candidate's
   reason (section 7), as MUTABLE-PLACE-RECEIVER always has.
-* **The unmigrated corpora** of section 11.4 no longer compile.
+* **The two unmigrated research corpora** of section 11.4 no longer compile.
 * **No bypass is known.** Section 6's alias census found no second
   spelling of a parameter-rooted destination. If a later feature adds one
   (a reference, an element place outside contexts, a capture that may
@@ -544,7 +567,9 @@ checks in `verify`, the header). The code: `hir/static.tcl`,
 `compilerpedia/topics/errors-ownership.topic` and `concepts.topic`.
 Documents: this report, `docs/INDEX.md`, `docs/PLACE-PARAMETERS.md`,
 `docs/MUTABLE-VECTOR.md`, `docs/MUTABLE-ARRAY.md`, `AGENTS.md` (the "Value
-parameters are never mutated" section). Tests and tools: the new test
+parameters are never mutated" section, and the warning gate's rule for the
+kickoff fixture), `audit/refactor/kickoff-corpus/README.md` and the
+fixture's three migrated programs. Tests and tools: the new test
 file, golden suite, fragment, census rows, names and manifest rows, the
 mutation catalog and harness, and the migrations of section 11.
 
@@ -576,7 +601,7 @@ pre-change tree, `main` at 13dd290):
   before committing). Each file it showed failing or carrying a site was
   migrated and run again (section 11.3), until the only sites left were
   the new test file's own rejections and main.tcl's reads of the frozen
-  fixture (section 11.4). A front-end pass over every golden suite under
+  fixture, since migrated (section 11.4). A front-end pass over every golden suite under
   the same hook found the one site in mutable-vector.bot that its first
   rejection had hidden.
 * `audit/nonplace-parameter-mutation/tools/mutate.tcl`: 12 of 12 mutants

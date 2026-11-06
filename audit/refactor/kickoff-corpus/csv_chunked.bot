@@ -59,9 +59,10 @@ fn chunked_append(builder: ChunkedBuilder, value) errors IndexNotFound:
         std::mutable_array::set(fresh, 0, value)
         return ChunkedBuilder {completed: std::list::append(builder.completed, builder.current), current: fresh, filled: std::mutable_array::create(1, 1)}
 
-    std::mutable_array::set(builder.current, filled, value)
-    std::mutable_array::set(builder.filled, 0, filled + 1)
-    builder
+    updated = builder
+    std::mutable_array::set(updated.current, filled, value)
+    std::mutable_array::set(updated.filled, 0, filled + 1)
+    updated
 
 # FINAL with each of CHUNKS[INDEX..) (all full, chunk_size() elements)
 # bulk-copied into it from OFFSET on.
@@ -70,8 +71,9 @@ fn chunked_copy_chunks(chunks, index, final, offset) errors IndexNotFound, Lower
         return final
 
     chunk = std::list::at(chunks, index)
-    std::mutable_array::copy(final, offset, chunk, 0, chunk_size())
-    chunked_copy_chunks(chunks, index + 1, final, offset + chunk_size())
+    filling = final
+    std::mutable_array::copy(filling, offset, chunk, 0, chunk_size())
+    chunked_copy_chunks(chunks, index + 1, filling, offset + chunk_size())
 
 # BUILDER's elements as an ordinary immutable List: one exact-size
 # MutableArray, filled by bulk-copying every completed chunk followed by the

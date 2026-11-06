@@ -846,7 +846,14 @@ If you add or change a program in `examples/`, `bench/` or `stdlib/`, run
 * A new corpus program must be listed (with its entries, if any).
 * Do not edit `audit/refactor/kickoff-corpus/`: it is the frozen,
   warning-bearing fixture the backend-independence CLI tests (and one
-  String-region test of the `peek()` idiom) read, not corpus.
+  String-region test of the `peek()` idiom) read, not corpus. Never clean a
+  warning out of it. The one exception is a language change that makes one
+  of its programs stop compiling: migrate that program in the same change,
+  only as far as compiling again takes. Every warning must keep its code
+  and its text (only positions may move), and every program its results on
+  every backend: compare against the tree before the change. Then list the
+  edit in its README.md, beside the first one
+  (NONPLACE-PARAMETER-MUTATION-CORRECTNESS-MILESTONE-1.md's).
 
 ## Refinement values
 
