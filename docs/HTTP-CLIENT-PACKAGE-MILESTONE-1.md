@@ -261,14 +261,16 @@ SHA-256):
 byte-identical artifacts and provenance records; the same command on this
 host, outside the image (its own Rust 1.97.0 and gcc 13.3.0, a cache made
 hours earlier), produced the same two artifacts, so `-release` accepts
-them as the recorded releases. Earlier candidates made on the host
+them as the recorded releases; and the branch's `package reproducibility`
+workflow rebuilt every package on two GitHub runners, each in its own
+build of the pinned image, and both reported `boringssl` and `http` as
+the recorded releases (run 42249747446). Earlier candidates made on the host
 differed only in the two documentation files changed in between
 (`botlish package compare`). The image could first be built only after
 two changes this milestone made to its Dockerfile: apt retries (the pinned
 Ubuntu snapshot answered 502 and 500 for hours through this environment's
 proxy, the failure main's `package-reproducibility` run shows) and the
-`rustc --version` check run with rustup's home. With them the branch's
-`package reproducibility` workflow passes. Each artifact has a provenance
+`rustc --version` check run with rustup's home. Each artifact has a provenance
 record beside it (`botlish package inspect ... -provenance` checks it; the
 clean room does). License notices travel in the artifacts: BoringSSL's
 LICENSE, and every crate of the unit's dependency closure with its own
