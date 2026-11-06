@@ -76,8 +76,10 @@ its fingerprint reached the proof.
     pin behavior that must not change.
   * 14 new mutants; the catalog is 86 of 86 killed.
   * The JSON and CSV emitters stay certified with the same summary counts.
-  * The census, the fuzzer and the emission, CSV, recovery, service and
-    interchange test files pass (section 15).
+  * The census, the fuzzer and the loops differential are identical to
+    the baseline.
+  * `tests/local.tcl` passes: every Tcl test file on two backends and
+    every golden suite on four (section 15).
 
 ## 2. Minimal reproducer
 
@@ -526,7 +528,7 @@ of the parent commit) as the baseline where a comparison says "the same":
 | `audit/emission-claims/tools/mutate.tcl` | 86 of 86 killed |
 | `tools/mutant-catalogs.tcl` | 86 catalogs, 3,069 mutants, 0 problems |
 | `tools/compilerpedia.tcl check` | passes |
-| `tests/local.tcl` (every Tcl test file on interp and compile, every golden suite on four backends, through the front-end cache) | pending at this commit (running) |
+| `tests/local.tcl` (every Tcl test file on interp and compile, every golden suite on four backends, through the front-end cache) | passes: every Tcl test on interp (8,798 passed) and compile (8,793 passed), 0 failed; every golden suite (117) on interp, compile, cranelift-generic and cranelift, 0 failed; 88 minutes with 4 jobs |
 
 The JSON emitters (`examples/dfa/json`) and the CSV emitters
 (`examples/dfa/csv`, the selective counted-loop field included) are all
@@ -542,8 +544,31 @@ compiler-service, LSP, HIR interchange and cache, DFA and coroutine test
 files are too. No native code is involved: the checker is a compile-time
 analysis, and no backend reads a claim.
 
-**CI.** Pending at this commit: the branch push starts `tests (macos arm64)`,
-`tests (windows x86-64)` and the canaries of `tests` and `tests (linux arm64)`.
+**CI** (the branch at 5fa86cd):
+
+| workflow | result |
+|---|---|
+| `tests`, canary (linux x86-64) | passed: every mutant applies, the warning gate, the canary |
+| `tests (linux arm64)`, canary | passed |
+| `icy-tower (windows x86-64)`, `icy-tower (macos arm64)` | passed |
+| `tests (macos arm64)` | failed in one job, `Botlish.app (macOS arm64 distribution)`, step `single/smoke-test.sh` |
+| `tests (windows x86-64)` | pending when this was written |
+
+The macOS failure is `FAIL: package graph shows the shared geometry`:
+`error writing "stdout": broken pipe` in `pm::commands::graph`. That is
+the package manager, which this change does not touch. `main`'s own run
+at 12ce65f, the commit this branch starts from, fails the same job at the
+same step with the same message. The smoke, system-linker and four
+acceptance-tier jobs passed. The full `tests` and `tests (linux arm64)`
+workflows run on a branch only when dispatched (AGENTS.md); they were not
+dispatched for this report.
+
+**`main` when the branch started (12ce65f).** `tests`, `tests (linux
+arm64)`, `tests (windows x86-64)` and `tests (macos arm64)` were in
+progress: pending, not passed. `tests (macos arm64)` has since failed in
+the job above. The last completed `tests` run (1f076e1) was green. The
+last `raven clean room` and `package reproducibility` runs (1f076e1)
+failed.
 
 ## 16. Performance and files changed
 
@@ -553,12 +578,13 @@ analysis, and no backend reads a claim.
   computed, 60 reused, 44 rounds; CSV 207, 121, 104; loops 224, 60, 160.
   The new `never` branch is not taken at all by the JSON and CSV programs:
   no claimed function there calls a function whose result is `never`.
-* **Time.** In a first measurement, JSON's 22 claims took a median 269 ms
-  to check, against 276 ms before, and CSV's 52 claims 688 ms, against
-  679 ms (5 runs each, on a 4-core container also running other jobs).
-  The difference is within the runs' spread. The final version adds one
-  more walk over the summary graph per claim (the read set), and its
-  measurement is pending.
+* **Time.** On an idle 4-core container, 5 runs each, medians:
+  * JSON's 22 claims: 272 ms to check, against 279 ms before;
+  * CSV's 52 claims: 733 ms, against 732 ms.
+
+  That is within the runs' spread (JSON 261-327 ms, CSV 700-846 ms). The
+  final version walks the summary graph once more per claim (the read
+  set), which this does not show.
 * **Programs without claims** do no work: `hir::emission::verify` returns
   before `Reset`, as before.
 * **What a claim costs now.**
