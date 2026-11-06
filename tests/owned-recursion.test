@@ -393,11 +393,13 @@ test or-message-three-steps {a recursion of three declarations is named by its t
     orMessage [orText "import std::coroutine\nstruct TA:\n    c: @C@\n    b: TB\nstruct TB:\n    kids: List\[TC\]\nstruct TC:\n    a: TA\n1\n"]
 } -result {struct "TA" is affine and holds values of its own type in a List, MutableVector or MutableArray (TA.b: TB, TB.kids: List[TC], TC.a: TA): a recursive affine type is not supported -- its release would have to recurse as deep as the value nests, and an affine value is released by a static, finite walk of its type (an unrestricted struct may hold itself in a container)}
 
-test or-argument-named {an application whose argument is itself the recursive affine type (Box[Node[C]]) names the argument, as before; an application whose recursion is its field's (Holder[C]) names itself} -body {
+test or-argument-named {an application whose argument is itself the recursive affine type (Box[Node[C]]) names the argument, as before; an application whose recursion is its field's (Holder[C]) names itself; the witness of Box[Node[C]] itself starts with the way into its argument (Box's value) before Node's recursion} -body {
     orHir
+    set r [hir::structs::OwnedRecursion [orApp Box [orApp Node $::orCo]]]
     list [lindex [hir::structs::ApplicationIssue [orApp Box [orApp Node $::orCo]]] 1] \
-        [string range [lindex [hir::structs::ApplicationIssue [orApp Holder $::orCo]] 1] 0 59]
-} -result {{Node[Coroutine{args: [], return: int, errors: []}] is affine (its field "value" holds Coroutine{args: [], return: int, errors: []}) and holds affine values of struct "Node" in a List, MutableVector or MutableArray (Node[Coroutine{args: [], return: int, errors: []}].children: List[Node[Coroutine{args: [], return: int, errors: []}]]): a recursive affine type is not supported -- its release would have to recurse as deep as the value nests, and an affine value is released by a static, finite walk of its type (an unrestricted struct may hold itself in a container)} {Holder[Coroutine{args: [], return: int, errors: []}] is affi}}
+        [string range [lindex [hir::structs::ApplicationIssue [orApp Holder $::orCo]] 1] 0 59] \
+        [hir::structs::RecursionSteps [lindex $r 1]] [lindex $r 2]
+} -result {{Node[Coroutine{args: [], return: int, errors: []}] is affine (its field "value" holds Coroutine{args: [], return: int, errors: []}) and holds affine values of struct "Node" in a List, MutableVector or MutableArray (Node[Coroutine{args: [], return: int, errors: []}].children: List[Node[Coroutine{args: [], return: int, errors: []}]]): a recursive affine type is not supported -- its release would have to recurse as deep as the value nests, and an affine value is released by a static, finite walk of its type (an unrestricted struct may hold itself in a container)} {Holder[Coroutine{args: [], return: int, errors: []}] is affi} {Box[Node[Coroutine{args: [], return: int, errors: []}]].value: Node[Coroutine{args: [], return: int, errors: []}], Node[Coroutine{args: [], return: int, errors: []}].children: List[Node[Coroutine{args: [], return: int, errors: []}]]} Node}
 
 # ---------------------------------------------------------------------------
 # Written, inferred, imprinted
