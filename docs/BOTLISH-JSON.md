@@ -139,8 +139,37 @@ component by component (`1.10.0` is above `1.9.7`).
 accepts of each. `lock` names, for direct dependencies, the exact version
 selected. A transitive dependency appears in neither: each package's own
 `botlish.json` names and locks its own direct dependencies (distributed
-locking), and the package manager installs it in that package's own
-`.bot_modules`.
+locking).
+
+An application has one dependency graph
+(SHARED-PACKAGE-DEPENDENCIES-MILESTONE-1.md): every package that appears in
+it, directly or through other packages, appears once, at one version, and
+every package that depends on it -- the application among them -- uses that
+one instance. The package manager installs each at the application's
+`.bot_modules/NAME` and writes `.bot_modules/.graph`, which tells the
+compiler which package uses which. A lock is binding wherever it is written:
+
+* every lock of a package in the graph -- the application's and every
+  package author's -- names the same exact version, or the graph is a
+  `DEPENDENCY-CONFLICT` that names every lock and the dependency path to the
+  package that holds it;
+* no lock is ever moved, relaxed or overridden to make the graph agree --
+  not by the application, not by the package manager -- and no second
+  instance of a package is made as a fallback;
+* a request (one, two or three numbers) is satisfied by the version the
+  graph selects only when it accepts it; `add` and `update` choose, within
+  a request, the version the graph's locks already hold when a package of
+  the graph locks one (`update` says the dependency is held, and why);
+* an editable dependency (section 7) is no release and satisfies no
+  package's lock;
+* a release is one artifact: two different files claiming one name and
+  version are a `CONFLICT`, also when one is the application's archive
+  source and a package of the graph locks that release;
+* a package that depends on itself through its dependencies is a `CYCLE`.
+
+There are no peer dependencies: a library declares and locks what it uses
+like any dependency, and it is shared because the graph has one instance of
+it, not because it is declared differently.
 
 In every context:
 
@@ -196,7 +225,9 @@ artifact (section 8).
 * **project**: the `botlish.json` of a directory a command manages (an
   application, or a package under development). `install` installs exact
   releases only, so it refuses a dependency without a lock (`update NAME`
-  resolves one); `add` and `update` write locks.
+  resolves one); `add` and `update` write locks. An editable dependency's
+  own `botlish.json` is read as a project's, and its dependencies, which
+  join the application's graph, must be locked there.
 * **pack**: a package directory being packed (`package pack`). Packing
   requires a name, an exact version, and an exact, compatible lock for every
   direct dependency.

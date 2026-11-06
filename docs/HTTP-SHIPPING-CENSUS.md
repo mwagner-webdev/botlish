@@ -326,6 +326,20 @@ rules:
 
 ### 6.2 The structural gap: the driver is a peer dependency
 
+*Closed by SHARED-PACKAGE-DEPENDENCIES-MILESTONE-1.md* (D1, option (a),
+without peer declarations): the gap below was confirmed by a two-package
+reproducer (that report's section 2: LINK-CONFLICT for the driver's
+archive, and MISSING-CONTEXT of `lib_a/drv::Native` and `lib_b/drv::Native`
+for an application installing its own `drv::Native`). An application now
+has one dependency graph: an HTTP package and any other library that
+declare and lock `event_loop_linux` share its one instance, whose `Native`
+is the type the application installs, and whose archive is one link
+declaration; locks that disagree are a DEPENDENCY-CONFLICT. Point 4's
+workaround (the HTTP package re-exporting the driver) is unnecessary. The
+BoringSSL provider of the last paragraph is the same shape and is closed
+the same way: a provider package two packages lock at one release is one
+instance. The text below is the census as it was.
+
 Inferred from documented rules; not executed.
 
 1. The HTTP package's Linux executor needs `event_loop_linux::Native` as a
@@ -539,7 +553,7 @@ crates carry no license field today. Generating the notice set from
 
 | | decision | options | depends on it |
 |---|---|---|---|
-| D1 | how a library reaches the application's driver | (a) peer/shared dependencies in the package model and the language; (b) lift B4 so a `std` readiness context trait can be implemented with `Loop` and `Native`; (c) the Linux driver in `std` over syscalls (S4) | any reusable HTTP library, package or std |
+| D1 | how a library reaches the application's driver | (a) peer/shared dependencies in the package model and the language; (b) lift B4 so a `std` readiness context trait can be implemented with `Loop` and `Native`; (c) the Linux driver in `std` over syscalls (S4). **Decided and built: (a), as shared dependencies without peer declarations** (SHARED-PACKAGE-DEPENDENCIES-MILESTONE-1.md); B4 untouched | any reusable HTTP library, package or std |
 | D2 | where the engines live | package (recommended: no rule reversed); std native root (S1); runtime (S2, rejected) | everything after |
 | D3 | what "in the single executable" means | E1 + E2 (recommended); E3 with an explicitly named built-in repository; E4 | distribution work only |
 | D4 | the BoringSSL convention | converge on one pin; unprefixed (what boring needs) with distinct archive names, the C FFI's acceptance rebuilt on it; or keep two providers with disjoint link names and symbols | provider package, B7 |
@@ -554,7 +568,7 @@ milestone like the ones in `docs/`, L: several). Projected.
 
 | # | work | size | needs |
 |---|---|---|---|
-| 1 | D1 decided and built (peer dependencies, or B4, or the std driver) | M-L | language design |
+| 1 | D1 decided and built (peer dependencies, or B4, or the std driver) -- done: shared dependencies, SHARED-PACKAGE-DEPENDENCIES-MILESTONE-1.md | M-L | language design |
 | 2 | provider: one BoringSSL convention (D4), a provider package with distinct archive names, its recipe in the author image | M | D4, Rust/CMake in the image |
 | 3 | the bridge as a maintained crate: test-only exports and the environment read moved to a test unit, the batched executor step, B12's worker, send retry for UDP | M | -- |
 | 4 | transport: addresses, IPv4/IPv6, name resolution off the loop, listen/connect options, the transport context (8.1) | M | 3 |

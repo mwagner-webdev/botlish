@@ -472,6 +472,15 @@ types, errors, contexts and functions are distinct on every backend. No
 manifest, version, lock or registry is read; the installed directories are
 the whole of it. `tests/bot-modules.test` holds the tests.
 
+A *package graph* (SHARED-PACKAGE-DEPENDENCIES-MILESTONE-1.md) changes one
+thing: when `.bot_modules` holds a file `.graph` (the package manager
+writes one), the packages it names are one instance each, at
+`.bot_modules/NAME`, and each scope imports exactly the packages the graph
+says it uses. Two packages that both depend on `geometry` then see one
+module `geometry`, one `geometry::Point`, one context type: the instance's
+identity is its name. Imports stay exact, non-transitive and limited to
+declared dependencies (BOT-MODULES-MILESTONE-1.md, "Package graphs").
+
 ## Corpus migration
 
 A migrated file is the same program plus a header: `x = std::list::at(xs, i)` is
