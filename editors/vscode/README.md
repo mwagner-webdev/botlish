@@ -24,7 +24,7 @@ toggling, bracket matching and spaces for indentation are configured
   builds it into `C:\botlish-tcl` (Visual Studio's C++ tools needed; the
   language server needs no Rust, so that step of the script can fail
   harmlessly). Magicsplat's Tcl 9 installer works too; check its version
-  with `echo puts [info patchlevel] | tclsh90`. A later 9.0 runs the
+  with `'puts [info patchlevel]' | tclsh90` (PowerShell). A later 9.0 runs the
   server, but its Unicode tables may differ from 9.0.1's (macOS's port
   records Homebrew's newer Tcl breaking the Unicode 16 semantics), so a
   fact about case-mapped or astral text can differ from CI's.
