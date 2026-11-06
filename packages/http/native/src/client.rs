@@ -706,7 +706,21 @@ async fn exchange(x: i64, client: i64, settings: Rc<Settings>, parts: Parts, mut
         if attempts > 4 {
             return Err(Failure::new(Kind::Protocol, 0, "no connection would take the request (it was handed back unsent four times)").at(&origin));
         }
-        let conn = acquire(client, &origin).await?;
+        // The connect timeout bounds getting a connection, waiting for a
+        // pool slot included: a program holding MAX_CONNECTIONS unread
+        // HTTP/1.1 responses of an origin gets a Timeout, not a wait
+        // without end.
+        let conn = match rt::within(settings.connect_us, acquire(client, &origin)).await {
+            Ok(c) => c?,
+            Err(()) => {
+                return Err(Failure::new(
+                    Kind::Timeout,
+                    TIMEOUT_CONNECT,
+                    "no connection to the origin within the connect timeout (every HTTP/1.1 connection the client may open to it is busy: are earlier responses unread?)",
+                )
+                .at(&origin))
+            }
+        };
         let proto = match &conn {
             Conn::H1(_) => Proto::H1,
             Conn::H2(_) => Proto::H2,

@@ -54,14 +54,14 @@ pub fn bump(c: Counter) {
 }
 
 pub fn add(c: Counter, n: u64) {
-    LOCAL.with(|l| {
+    let _ = LOCAL.try_with(|l| {
         let cell = &l[c as usize];
         cell.set(cell.get() + n)
     });
 }
 
 pub fn max(c: Counter, n: u64) {
-    LOCAL.with(|l| {
+    let _ = LOCAL.try_with(|l| {
         let cell = &l[c as usize];
         if n > cell.get() {
             cell.set(n)

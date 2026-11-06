@@ -60,8 +60,10 @@ thread_local! {
 /// posts a wake record to the executor's source -- the executor may be
 /// parked on it, and nothing else would wake it.
 pub fn kick() {
-    if !RUNNING.with(|r| r.get()) {
-        KICK.with(|k| k.set(true));
+    // try_with: a destructor may run while the thread's locals are being
+    // destroyed (the thread's end drops what the executor still holds).
+    if !RUNNING.try_with(|r| r.get()).unwrap_or(true) {
+        let _ = KICK.try_with(|k| k.set(true));
     }
 }
 
@@ -244,8 +246,12 @@ pub fn spawn<F: Future<Output = ()> + 'static>(name: &'static str, future: F) ->
 /// Cancel a task: its future is dropped now (on the loop thread); a later
 /// wake of it is stale. False when it already ended.
 pub fn cancel(key: TaskKey) -> bool {
-    let task = EXEC.with(|e| {
-        let mut e = e.borrow_mut();
+    // A destructor calls this (a connection's, dropping its driver task),
+    // also while the thread's locals are destroyed at its end, and also
+    // while the executor's table is borrowed by that destruction: then
+    // there is nothing left to cancel.
+    let task = EXEC.try_with(|e| {
+        let mut e = e.try_borrow_mut().ok()?;
         let x = e.as_mut()?;
         let index = (key & 0xffff_ffff) as usize;
         let slot = x.tasks.get_mut(index)?;
@@ -257,7 +263,9 @@ pub fn cancel(key: TaskKey) -> bool {
             x.free.push(index as u32);
         }
         t
-    });
+    })
+    .ok()
+    .flatten();
     let removed = task.is_some();
     if removed {
         stats::bump(Counter::Cancellations);

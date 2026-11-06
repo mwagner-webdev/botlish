@@ -260,7 +260,10 @@ pub unsafe extern "C" fn bh_request(
             let headers = client::parse_headers(&copy_in(headers, headers_len as usize))?;
             let first = Bytes::from(copy_in(body, body_len as usize));
             let declared = (length >= 0).then_some(length as u64);
-            let outgoing = if streamed != 0 {
+            // A streamed body whose first bytes are already its declared
+            // length is complete: nothing waits for a finish.
+            let complete = declared.is_some_and(|n| n == first.len() as u64);
+            let outgoing = if streamed != 0 && !complete {
                 if let Some(n) = declared {
                     if (first.len() as u64) > n {
                         return Err(Failure::new(Kind::InvalidRequest, 0, "the body is longer than its declared length"));

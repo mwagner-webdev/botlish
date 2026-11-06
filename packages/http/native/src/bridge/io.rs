@@ -59,8 +59,10 @@ pub fn reset() {
 
 /// Park W until FD is ready for DIR (READ or WRITE).
 pub fn park(fd: i32, dir: u8, w: &Waker) {
-    IO.with(|r| {
-        let mut r = r.borrow_mut();
+    // try_with/try_borrow_mut: a destructor (a TLS stream's close_notify
+    // attempt) may park while the thread's locals are destroyed.
+    let _ = IO.try_with(|r| {
+        let Ok(mut r) = r.try_borrow_mut() else { return };
         let r = &mut *r;
         let e = r.fds.entry(fd).or_default();
         let slot = if dir == READ { &mut e.read } else { &mut e.write };
@@ -73,7 +75,7 @@ pub fn park(fd: i32, dir: u8, w: &Waker) {
             r.changes.push_back(fd);
             super::exec::kick();
         }
-    })
+    });
 }
 
 /// The next (fd, interest) Botlish should arm: READ|WRITE as wanted, or

@@ -10,12 +10,15 @@
 # errors propagate.
 import event_loop_linux
 import http
+import probe
 import std::abi
 import std::abi::bytes
 import std::byte
+import std::char
 import std::event_loop
 import std::int
 import std::list
+import std::mutable_array
 import std::mutable_vector
 import std::str
 import type std::event_loop::Wake
@@ -431,7 +434,7 @@ fn abandon(args: List[str], context h: http::Http, ev: std::event_loop::Loop, na
     say("read after release ".concat(n(size(again))))
     std::event_loop::sleep(20000)
     st = http::stats()
-    say("after abandon: exchanges ".concat(n(st.exchanges)).concat(" idle ").concat(n(st.idle_connections)))
+    say("after abandon: exchanges ".concat(n(st.exchanges)).concat(" idle ").concat(n(st.idle_connections)).concat(" tasks ").concat(n(st.tasks)))
     say(attempt(client, http::get(http::uri(arg(args, 3)))))
 
 # Releasing a client while another task streams from it: args url pem.
@@ -484,6 +487,211 @@ fn release_client(args: List[str], context h: http::Http, ev: std::event_loop::L
     st = http::stats()
     say("after release: clients ".concat(n(st.clients)).concat(" http1 ").concat(n(st.http1_connections)).concat(" http2 ").concat(n(st.http2_connections)).concat(" watched ").concat(n(st.watched)))
 
+# Lifetimes: a sequence of operations the test generates from a seed
+# (args url pem ops), each a letter and a digit -- n new client, s send on
+# client D, r read one chunk of exchange D, x release the newest live
+# exchange, X release the newest live client, k cancel the token every
+# request carries, w wait D milliseconds -- applied in order. Identities
+# stay usable after their owners are released, so later operations meet
+# Released, Closed and Cancelled as well as values. Every outcome is
+# counted; at the end every owner is released and the native counts must
+# be zero.
+nomethod fn digit_of(ops: str, i: int) -> int:
+    c = ops.char_at(i):
+        on IndexNotFound:
+            '0'
+    k = std::char::scalar_value(c)
+    if k >= 48 and k <= 57:
+        k - 48
+    else:
+        0
+
+nomethod fn bump_count(place counts: MutableVector[int], i: int):
+    old = counts.at(i):
+        on IndexNotFound:
+            0
+    counts.swap(i, old + 1):
+        on IndexNotFound:
+            0
+
+nomethod fn pick_index(count: int, d: int) -> int:
+    if count <= 0:
+        return 0
+    k = std::mutable_array::create(1, d)
+    loop i from 0 to 10:
+        v = std::mutable_array::at(k, 0):
+            on IndexNotFound:
+                0
+        if v < count:
+            return v
+        std::mutable_array::set(k, 0, v - count):
+            on IndexNotFound:
+                unit
+    0
+
+# One read of X, as an outcome code (0 a chunk or the end, 1 Released,
+# 2 Closed, 3 Cancelled, 4 another error).
+fn read_code(x: http::Exchange, context h: http::Http, ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    x.read():
+        on http::Released:
+            return 1
+        on http::Closed:
+            return 2
+        on http::Cancelled:
+            return 3
+        on http::ProtocolError:
+            return 4
+        on http::Timeout:
+            return 4
+        on http::Fault:
+            return 5
+        on http::ResolveFailed:
+            return 4
+        on http::ConnectFailed:
+            return 4
+        on http::TlsVerifyFailed:
+            return 4
+        on http::TlsHandshakeFailed:
+            return 4
+        on http::InvalidRequest:
+            return 4
+        on http::Unsupported:
+            return 4
+        on http::TrustFailed:
+            return 4
+    0
+
+fn fuzz(args: List[str], context h: http::Http, ev: std::event_loop::Loop, nat: event_loop_linux::Native, o: Out) errors http::InvalidUri, http::InvalidRequest, http::ResolveFailed, http::ConnectFailed, http::TlsVerifyFailed, http::TlsHandshakeFailed, http::ProtocolError, http::Timeout, http::Cancelled, http::Closed, http::Unsupported, http::TrustFailed, http::Released, http::Fault, std::event_loop::SchedulerFault:
+    target = http::uri(arg(args, 1))
+    # A short connect timeout: a send that finds every HTTP/1.1 connection
+    # of the origin busy with an unread response gets a Timeout.
+    config = with_connect(config_for(arg(args, 2)), 1000000)
+    ops = arg(args, 3)
+    token = http::cancellation()
+    {owner: first_owner, client: first} = http::client(config)
+    {owner: seed_owner, response: seeded} = first.send(http::get(target))
+    seed = seeded.exchange
+    client_owners = std::mutable_vector::from_list([first_owner])
+    clients = std::mutable_vector::from_list([first])
+    exchange_owners = std::mutable_vector::from_list([seed_owner])
+    exchanges = std::mutable_vector::from_list([seed])
+    # 0 values, 1 Released, 2 Closed, 3 Cancelled, 4 other errors, 5 Fault
+    counts = std::mutable_vector::from_list([0, 0, 0, 0, 0, 0])
+    length = std::str::length(ops)
+    loop j from 0 to length:
+        if 2 * j + 1 >= length:
+            break
+        op = ops.char_at(2 * j):
+            on IndexNotFound:
+                'w'
+        d = digit_of(ops, 2 * j + 1)
+        code = if op == 'n':
+            {owner: co, client: cn} = http::client(config)
+            client_owners.push(co)
+            clients.push(cn)
+            0
+        elif op == 's':
+            ci = pick_index(std::mutable_vector::length(clients), d)
+            c = clients.at(ci):
+                on IndexNotFound:
+                    first
+            r = c.send(http::get(target).with_cancel(token)):
+                on http::Released:
+                    bump_count(counts, 1)
+                    continue
+                on http::Closed:
+                    bump_count(counts, 2)
+                    continue
+                on http::Cancelled:
+                    bump_count(counts, 3)
+                    continue
+                on http::Fault:
+                    bump_count(counts, 5)
+                    continue
+                on http::ProtocolError:
+                    bump_count(counts, 4)
+                    continue
+                on http::Timeout:
+                    bump_count(counts, 4)
+                    continue
+                on http::ResolveFailed:
+                    bump_count(counts, 4)
+                    continue
+                on http::ConnectFailed:
+                    bump_count(counts, 4)
+                    continue
+                on http::TlsVerifyFailed:
+                    bump_count(counts, 4)
+                    continue
+                on http::TlsHandshakeFailed:
+                    bump_count(counts, 4)
+                    continue
+                on http::Unsupported:
+                    bump_count(counts, 4)
+                    continue
+                on http::TrustFailed:
+                    bump_count(counts, 4)
+                    continue
+            {owner: xo, response} = r
+            exchange_owners.push(xo)
+            exchanges.push(response.exchange)
+            0
+        elif op == 'r':
+            xi = pick_index(std::mutable_vector::length(exchanges), d)
+            x = exchanges.at(xi):
+                on IndexNotFound:
+                    seed
+            read_code(x)
+        elif op == 'x':
+            if not exchange_owners.empty?():
+                xo = exchange_owners.pop():
+                    on IndexNotFound:
+                        continue
+                http::close(xo)
+            0
+        elif op == 'X':
+            if std::mutable_vector::length(client_owners) > 1:
+                co = client_owners.pop():
+                    on IndexNotFound:
+                        continue
+                http::close_client(co)
+            0
+        elif op == 'k':
+            http::cancel(token)
+            0
+        else:
+            std::event_loop::sleep(1000 * d)
+            0
+        bump_count(counts, code)
+    # Everything released: the owners' cleanups, then a turn for the
+    # executor to close what they held.
+    loop:
+        if exchange_owners.empty?():
+            break
+        xo = exchange_owners.pop():
+            on IndexNotFound:
+                break
+        http::close(xo)
+    loop:
+        if client_owners.empty?():
+            break
+        co = client_owners.pop():
+            on IndexNotFound:
+                break
+        http::close_client(co)
+    std::event_loop::sleep(20000)
+    st = http::stats()
+    final = loop i from 0 to 6:
+        k = counts.at(i):
+            on IndexNotFound:
+                -1
+        n(k)
+    fn v(i: int) -> str:
+        found = std::list::get(final, i, "?")
+        found.concat("")
+    say("outcomes values ".concat(v(0)).concat(" released ").concat(v(1)).concat(" closed ").concat(v(2)).concat(" cancelled ").concat(v(3)).concat(" other ").concat(v(4)).concat(" faults ").concat(v(5)))
+    say("after: clients ".concat(n(st.clients)).concat(" exchanges ").concat(n(st.exchanges)).concat(" tasks ").concat(n(st.tasks)).concat(" watched ").concat(n(st.watched)).concat(" panics ").concat(n(st.panics)))
+
 # Parse a URI (pure): args text.
 fn parse(args: List[str], context o: Out):
     u = http::uri(arg(args, 1)):
@@ -518,6 +726,8 @@ fn scenario(args: List[str], context h: http::Http, ev: std::event_loop::Loop, n
         abandon(args)
     elif name == "release-client":
         release_client(args)
+    elif name == "fuzz":
+        fuzz(args)
     elif name == "parse":
         parse(args)
     else:
@@ -567,8 +777,17 @@ fn main(context ev: std::event_loop::Loop, d: event_loop_linux::Linux, nat: even
     raw = argv():
         on InvalidArgumentEncoding:
             ["client", "bad-argv"]
-    # argv()'s first element is the program's name.
-    args = loop i from 1 to std::list::length(raw):
+    # argv()'s first element is the program's name; "fault BITS" first sets
+    # the test unit's fault bits.
+    skip = if std::list::get(raw, 1, "") == "fault":
+        bits = std::int::from_string(std::list::get(raw, 2, "0")):
+            on InvalidIntegerText:
+                0
+        probe::set_fault(bits)
+        3
+    else:
+        1
+    args = loop i from skip to std::list::length(raw):
         std::list::get(raw, i, "")
     coroutine {step: s, first: f} = run_scenario(args)
     std::event_loop::adopt(s, f)
