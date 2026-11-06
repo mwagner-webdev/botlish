@@ -5803,6 +5803,13 @@ also `bench/lsp.tcl` (both schedulers, the census's workloads), and for
 packaging `single/smoke-test.sh` after `single/build.sh` (its `-lsp`
 session).
 
+`editors/vscode/` is a VS Code extension for the same server: a client
+like the Neovim configuration, starting `main.tcl -lsp` (its server.js
+works out the command) and adding nothing semantic. If you change it, or
+the server's capabilities, options or URIs, run its `npm test` and
+`xvfb-run -a npm run test:vscode` (VS Code itself; CI runs neither) in
+`editors/vscode` after `npm ci`, and package it (`npm run package`).
+
 ## Syntax recovery
 
 `-check`, the compiler service and the language server analyze a program

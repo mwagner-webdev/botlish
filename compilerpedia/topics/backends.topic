@@ -1022,7 +1022,7 @@ title: The language server (editor integration)
 summary: botlish -lsp is a language server on stdin and stdout: the compiler's own diagnostics, hover, definitions and references for an editor's unsaved Botlish source.
 index: backends
 alias: lsp; language server; editor; neovim; vscode; ide; editor support
-keywords: -lsp, LSP, hover, definition, references, diagnostics, editor, neovim
+keywords: -lsp, LSP, hover, definition, references, diagnostics, editor, neovim, vscode
 related: cli.options cli.usage cli.exit-status concept.modules
 docs: LSP-MILESTONE-1.md COMPILER-SERVICE-MILESTONE-1.md
 
@@ -1030,8 +1030,9 @@ docs: LSP-MILESTONE-1.md COMPILER-SERVICE-MILESTONE-1.md
     botlish -lsp                    (tclsh9.0 main.tcl -lsp in a checkout)
 An editor starts the server and talks to it on its stdin and stdout; the
 server writes nothing else there (its log goes to stderr). It needs no
-daemon, socket or configuration. A Neovim configuration is in the
-repository's editors/neovim/ directory.
+daemon, socket or configuration. The repository's editors/ directory
+holds a Neovim configuration (editors/neovim/) and a VS Code extension
+(editors/vscode/, which finds a checkout's main.tcl and a Tcl 9 itself).
 
 == WHAT IT DOES
     diagnostics   textDocument/publishDiagnostics: exactly what -check
