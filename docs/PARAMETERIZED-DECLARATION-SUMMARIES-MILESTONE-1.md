@@ -96,11 +96,10 @@ applications substitution would make.
   failed only `main`'s `pa-add-refusals` and three tests of
   compilerpedia.test, fixed since; on the merge of `main`'s fixes
   (e6c1d05) the full local run has no failure (section 22).
-* **CI.** `static-decisions`, the Linux arm64 test workflow (all 12 jobs)
-  and the Windows one passed before the merges of `main`; macOS failed
-  only `main`'s `/proc` defect, which the first merge fixes. On the
-  merged head the Linux, Linux arm64, macOS and Windows test workflows
-  are pending (section 22).
+* **CI.** On 889c5c4, the third merge of `main`, every test workflow
+  passed: Linux x86-64 and Linux arm64 (dispatched), macOS, Windows and
+  the icy-tower builds; `static-decisions` passed on 961dc07. The runs of
+  the last merge of `main` (1e1fe84) are pending (section 22).
 * **What the audit found and fixed on the way:**
   * one wrong answer: a refinement's name read as imprecise
     (`MayHoldVector(Box[Small])`, full corpus);
@@ -1117,7 +1116,7 @@ on 7bb86da. Under `BOTLISH_NATIVE_GC_STRESS=1`, the summaries test file
 catalogs and 3,003 mutants. Its 11 problems are the 11 `main` repaired,
 none in a catalog this milestone touches.
 
-**Merges of `main`.** `main` was merged into the branch three times as it
+**Merges of `main`.** `main` was merged into the branch four times as it
 moved, without a conflict each time:
 
 | merge | `main` at | what `main` brought |
@@ -1125,6 +1124,7 @@ moved, without a conflict each time:
 | e6c1d05 | 13dd290 | per-thread runtime state, the three test-defect fixes above, `tools/mutant-catalogs.tcl`, run cancellation and the release gate |
 | 2aedd83 | 5872c80 | the CI canary |
 | 889c5c4 | 418bae3 | counted-loop precision in the emission checker (`hir/range.tcl`, `hir/emission.tcl`), run pruning without a concurrency group |
+| 1e1fe84 | a9479ef | one canonical instance per package in the application's dependency graph (SHARED-PACKAGE-DEPENDENCIES-MILESTONE-1.md: `surface/modules.tcl`, `pm/`), the canary job's steps, the scalar assembly audit corpus |
 
 The files both sides changed were checked by hand: AGENTS.md,
 docs/INDEX.md, `audit/value-identity/tools/mutants.txt`,
@@ -1133,7 +1133,7 @@ had disjoint hunks, and `audit/hashable/tools/mutants.txt` holds `main`'s
 repair of `struct-ignores-non-hashable-field`, the same `lassign` line
 this branch added, once. After each merge the manifest that
 `audit/golden/migration/merge.tcl` regenerates equals the merged one, and
-`tools/mutant-catalogs.tcl` finds no problem (86 catalogs, 3,039 mutants
+`tools/mutant-catalogs.tcl` finds no problem (86 catalogs, 3,055 mutants
 after the last).
 
 * **e6c1d05**, the full local run (`tests/local.tcl`, 4 jobs, 6,824 s),
@@ -1151,6 +1151,15 @@ after the last).
     duplicates as golden tests), written-affine-applications 26, canary 11;
   - hashable.bot, hashable-admission.bot and range-and-contract-values.bot
     on all four backends.
+* **1e1fe84**, the same way, 0 failures:
+  - bot-modules 68 (1 skipped), package-manager 86, package-native 38 (1
+    skipped), static-compile 55 (and its 28 duplicates as golden tests),
+    warning-gate 6, parameterized-declaration-summaries 24, hashable 39,
+    written-affine-applications 26, canary 11;
+  - static-compile.bot, diagnostics.bot, errors.bot, hashable.bot and
+    hashable-admission.bot on all four backends;
+  - `tools/compilerpedia.tcl check`: 1,220 topics, 745 examples, 0
+    problems.
 
 **CI on the branch.** Status when this section was last written. Pending
 runs are pending: none is counted as passed.
@@ -1163,20 +1172,29 @@ runs are pending: none is counted as passed.
 | `tests (macos arm64)` | 0a9398b | **failed**: one test, `pn-concurrent-target-compiles` (the system-linker job), `main`'s defect above (its wait probed `/proc`, which macOS does not have); every other job passed. e6c1d05 merges `main`'s fix |
 | `icy-tower (macos arm64)`, `icy-tower (windows x86-64)` | e6c1d05 | **passed** |
 | `raven clean room`, `package reproducibility`, `ci tools` | e6c1d05 | **passed** |
-| `tests` (Linux x86-64, dispatched) | 889c5c4 | **queued: pending** |
-| `tests (linux arm64)` (dispatched) | 889c5c4 | **queued: pending** |
-| `tests (macos arm64)`, `tests (windows x86-64)` | 889c5c4 | **queued: pending** |
+| `tests` (Linux x86-64, dispatched) | 889c5c4 | **passed** |
+| `tests (linux arm64)` (dispatched) | 889c5c4 | **passed** |
+| `tests (macos arm64)`, `tests (windows x86-64)` | 889c5c4 | **passed** |
+| `icy-tower (macos arm64)`, `icy-tower (windows x86-64)` | 889c5c4 | **passed** |
+| `ci tools` | 889c5c4 | **failed**: GitHub's API answered HTTP 502 to `tools/ci/history.py`'s read of a run's jobs; the job's tests and the gate's and the pruning's dry runs before it had passed |
+| every workflow | 1e1fe84 | **pending**: the last merge's push runs |
 
 Infrastructure, not product:
 
-* No `tests` (Linux x86-64) run on this branch has finished. Each one
-  dispatched waited for a runner until the next push to the branch
-  replaced it (the workflows' concurrency rule; since 5872c80 a branch
-  push starts its canary, so the dispatched run is replaced by the push's
-  run, and dispatched again).
-* `main`'s own `tests` and `tests (linux arm64)` push runs, from c6269fd
-  to eb2b481, were each cancelled by `main`'s next push before they
-  finished; its runs of 418bae3 are pending.
+* The first `tests` (Linux x86-64) run of this branch to finish is
+  889c5c4's. Each one dispatched before waited for a runner until the
+  next push to the branch replaced it (the workflows' concurrency rule;
+  since 5872c80 a branch push starts its canary, so the dispatched run is
+  replaced by the push's run, and dispatched again).
+* `main` when the branch was merged into it was a9479ef, the scalar
+  assembly audit's write-back, which no workflow runs; its parent
+  1f076e1's runs: `tests (linux arm64)`, macOS, Windows,
+  `static-decisions`, c-bindgen, the single executable and the icy-tower
+  workflows passed; `tests` had 13 of its 14 jobs passed, GC stress still
+  running (pending); `raven clean room` and `package reproducibility`
+  failed building the author image, where apt found no package in the
+  pinned Ubuntu snapshot (20261101T000000Z) before any of the
+  repository's code ran. The same two passed on this branch's e6c1d05.
 
 The commits after 961dc07 change the reason texts and the reason walks'
 cost, never a class, a diagnostic kind or a fact the static-decision
