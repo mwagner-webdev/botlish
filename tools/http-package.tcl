@@ -24,9 +24,8 @@
 # The provider (packages/boringssl/PIN): BoringSSL fetched by its pinned tag
 # and checked by tag object and commit, built with upstream's CMake (Ninja,
 # Release, position-independent, unpatched, unprefixed). Its archives are
-# renamed libbotlish_boringssl_crypto.a and libbotlish_boringssl_ssl.a, and
-# the crypto archive gains one member, the provider's identity symbol
-# (packages/boringssl/native/identity.c).
+# put in one archive of its own name, libbotlish_boringssl.a, with one more
+# member, the provider's identity symbol (packages/boringssl/native/identity.c).
 #
 # The unit (packages/http/native, crate botlish_http): built by cargo
 # --locked against the provider's headers in link-only mode -- boring-sys is
@@ -191,17 +190,21 @@ proc httppkg::Provider {{target ""}} {
     return $dir
 }
 
-# The provider package's archives for TARGET: libbotlish_boringssl_crypto.a
-# (libcrypto.a's members and identity.o) and libbotlish_boringssl_ssl.a.
+# The provider package's archive for TARGET, libbotlish_boringssl.a: the
+# members of libcrypto.a and of libssl.a, in their order, and the identity
+# member. One archive, not two: BoringSSL's C++ objects define their inline
+# functions and its stack helpers weakly in both libraries, which a link
+# merges but an audit of two static libraries reads as one symbol defined
+# twice (HTTP-CLIENT-PACKAGE-MILESTONE-1.md, "The provider"). No member name
+# occurs in both libraries (checked here).
 proc httppkg::ProviderArchives {{target ""}} {
     variable root
     if {$target eq ""} { set target [Host] }
     set provider [Provider $target]
     set id [ProviderId]
     set dir [file join [CacheDir] provider-archives $id-$target]
-    set crypto [file join $dir libbotlish_boringssl_crypto.a]
-    set ssl [file join $dir libbotlish_boringssl_ssl.a]
-    if {[file exists $crypto] && [file exists $ssl] && [file exists [file join $dir STAMP]]} {
+    set archive [file join $dir libbotlish_boringssl.a]
+    if {[file exists $archive] && [file exists [file join $dir STAMP]]} {
         return $dir
     }
     file delete -force $dir
@@ -209,24 +212,37 @@ proc httppkg::ProviderArchives {{target ""}} {
     set identity [file join $dir botlish_boringssl_identity.o]
     exec cc -O2 -Wall -Wextra -Werror -fPIC -DBOTLISH_BORINGSSL_ID=$id \
         -ffile-prefix-map=$root=/botlish -c [file join $root packages boringssl native identity.c] -o $identity
-    # Upstream's members unchanged, in their order, then the identity
-    # member: ar's deterministic mode (no times, owners or modes).
-    set work [file join $dir members]
-    file mkdir $work
-    set members [exec ar t [file join $provider lib libcrypto.a]]
-    exec ar x --output $work [file join $provider lib libcrypto.a]
+    # Upstream's members, in their order, then the identity member: ar's
+    # deterministic mode (no times, owners or modes).
     set paths {}
-    foreach m [split $members \n] {
-        lappend paths [file join $work $m]
+    set seen [dict create]
+    foreach lib {crypto ssl} {
+        set work [file join $dir members-$lib]
+        file mkdir $work
+        set members [split [exec ar t [file join $provider lib lib$lib.a]] \n]
+        exec ar x --output $work [file join $provider lib lib$lib.a]
+        foreach m $members {
+            if {[dict exists $seen $m]} {
+                error "http-package: libcrypto.a and libssl.a both hold a member $m"
+            }
+            dict set seen $m 1
+            lappend paths [file join $work $m]
+        }
     }
     lappend paths $identity
-    exec ar rcsD $crypto {*}$paths
-    file delete -force $work
-    file copy [file join $provider lib libssl.a] $ssl
-    exec ar sD $ssl
+    # Upstream's build carries full debug information (93% of the archive's
+    # bytes, over a package entry's limit): stripped, members unchanged
+    # otherwise.
+    foreach path $paths {
+        exec objcopy --strip-debug $path
+    }
+    exec ar qcsD $archive {*}$paths
+    foreach lib {crypto ssl} {
+        file delete -force [file join $dir members-$lib]
+    }
     file delete $identity
     set f [open [file join $dir STAMP] w]
-    puts $f [list id $id crypto [Sha256 $crypto] ssl [Sha256 $ssl]]
+    puts $f [list id $id archive [Sha256 $archive]]
     close $f
     return $dir
 }
@@ -329,9 +345,7 @@ proc httppkg::App {app {testing 0}} {
     set b [file join $modules boringssl]
     file mkdir [file join $b native]
     file copy [file join $root packages boringssl boringssl.bot] $b
-    foreach a {libbotlish_boringssl_crypto.a libbotlish_boringssl_ssl.a} {
-        file copy [file join $archives $a] [file join $b native $a]
-    }
+    file copy [file join $archives libbotlish_boringssl.a] [file join $b native libbotlish_boringssl.a]
     set h [file join $modules http]
     file mkdir [file join $h native]
     file copy [file join $root packages http http.bot] $h

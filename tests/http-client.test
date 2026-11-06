@@ -145,11 +145,11 @@ test http-unit-exports {the released unit's only global definitions are the bh_*
     set out
 } -result {release 0 0 0 testing 0 5 0}
 
-test http-provider-identity {the unit references the provider's identity symbol, which only the provider package's crypto archive defines: a link with another BoringSSL (the census's provider's archives, unrenamed and without it) fails naming the symbol, never runs silently against other code} -constraints httpBuilt -body {
+test http-provider-identity {the unit references the provider's identity symbol, which only the provider package's archive defines: a link with another BoringSSL (the census's provider's archives, unrenamed and without it) fails naming the symbol, never runs silently against other code} -constraints httpBuilt -body {
     set target [httppkg::Host]
     set provider [httppkg::Provider $target]
     set id [httppkg::ProviderId]
-    set crypto [file join [httppkg::ProviderArchives $target] libbotlish_boringssl_crypto.a]
+    set crypto [file join [httppkg::ProviderArchives $target] libbotlish_boringssl.a]
     set unit [file join [httppkg::CacheDir] units release-$target libbotlish_http.a]
     list [expr {"botlish_boringssl_$id" in [httppkg::Defined $crypto]}] \
         [expr {"botlish_boringssl_$id" in [httppkg::Defined [file join $provider lib libcrypto.a]]}] \
@@ -360,6 +360,23 @@ test http-nghttpd {nghttpd (nghttp2's server): a 3 MiB file over HTTP/2 with TLS
     list [lrange [httpRun get https://localhost:$port/big.bin [httpCa] pattern] 0 2] \
         [lindex [httpRun concurrent https://localhost:$port/big.bin [httpCa] 8] end-1]
 } -result {{{status 200 HTTP/2} {bytes 3145728} {pattern matches yes}} {http1 0 http2 1}}
+
+# --- documentation
+
+test http-package-docs {every botlish block of the package's README.md and GUIDE.md is a complete program that compiles under -warnings error against the installed package (they reach public hosts, so they are compiled, not run)} -constraints httpBuilt -body {
+    httpExecutable
+    set out {}
+    foreach doc {README.md GUIDE.md} {
+        set text [readFile [file join $::projectRoot packages http $doc]]
+        set i 0
+        foreach {- block} [regexp -all -inline {```botlish\n(.*?)```} $text] {
+            set path [file join $::httpDir doc-[file rootname $doc]-[incr i].bot]
+            writeFile $path $block
+            lappend out $doc $i [expr {[catch {surface::readProgramFile $path -warnings error -cache ""} message] ? $message : "ok"}]
+        }
+    }
+    set out
+} -result {README.md 1 ok GUIDE.md 1 ok GUIDE.md 2 ok}
 
 # --- URIs
 

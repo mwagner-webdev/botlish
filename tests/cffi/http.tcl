@@ -19,7 +19,7 @@ namespace eval cffi {
 }
 source [file join [file dirname [file dirname $::cffi::httpHere]] tools http-package.tcl]
 
-# 1 when the provider's archives and both units exist for the host.
+# 1 when the provider's archive and both units exist for the host.
 proc cffi::httpBuilt {} {
     if {[catch {httppkg::Host} target]} { return 0 }
     set id [httppkg::ProviderId]

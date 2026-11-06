@@ -6,10 +6,9 @@
 # cloudflare/boring 309bf35b), upstream's release tag 0.20261020.0, the
 # HTTP stack census's provider (audit/http-stack/boringssl/PIN). It is
 # built from upstream, unpatched and unprefixed (the `boring` crate cannot
-# consume a prefixed build: HTTP-SHIPPING-CENSUS.md's B7), with archive
-# names of its own -- libbotlish_boringssl_crypto.a and
-# libbotlish_boringssl_ssl.a -- so that no link ever takes another library
-# named crypto or ssl (a system OpenSSL's) for it.
+# consume a prefixed build: HTTP-SHIPPING-CENSUS.md's B7), in one archive of
+# its own name -- libbotlish_boringssl.a -- so that no link ever takes
+# another library named crypto or ssl (a system OpenSSL's) for it.
 #
 # The tag is an annotated tag object, not a signed one: its id and its
 # commit are both pinned here, independently of the server that serves

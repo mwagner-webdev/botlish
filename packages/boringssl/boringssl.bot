@@ -5,18 +5,18 @@
 # imports it, and an application's dependency graph holds one instance of
 # it, so every such package links the same archives, once.
 #
-# The archives are BoringSSL's release tag 0.20261020.0 (commit d3bf4795,
-# the PIN file), upstream's CMake build, unpatched and unprefixed, renamed
-# libbotlish_boringssl_crypto.a and libbotlish_boringssl_ssl.a: no other
-# library of the system (a distribution's OpenSSL) can stand in for them.
-# libbotlish_boringssl_crypto.a also holds the provider's identity symbol
-# (native/identity.c), which a unit compiled against these headers
-# references: another provider fails the link. libssl is C++: its exception
-# runtime is the system's libstdc++ (a system library the package declares).
+# The archive is BoringSSL's release tag 0.20261020.0 (commit d3bf4795, the
+# PIN file), upstream's CMake build, unpatched and unprefixed: the members of
+# libcrypto.a and libssl.a in one archive of its own name,
+# libbotlish_boringssl.a, which no other library of the system (a
+# distribution's OpenSSL) can stand in for. It also holds the provider's
+# identity symbol (native/identity.c), which a unit compiled against these
+# headers references: another provider fails the link. libssl is C++: its
+# exception runtime is the system's libstdc++ (a system library the package
+# declares).
 #
 # Native programs only, on the package's targets (Linux x86-64).
-extern c library "botlish_boringssl_crypto" static at "native/libbotlish_boringssl_crypto.a"
-extern c library "botlish_boringssl_ssl" static at "native/libbotlish_boringssl_ssl.a"
+extern c library "botlish_boringssl" static at "native/libbotlish_boringssl.a"
 extern c library "stdc++"
 
 # The provider's identity: its tag and commit.

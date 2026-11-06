@@ -385,7 +385,7 @@ private nomethod fn lower_ascii(s: str) -> str:
     std::str::lowercase(s)
 
 # A dotted-quad IPv4 address: four decimal octets, no leading zeros.
-fn ipv4?(s: str) -> bool:
+nomethod fn ipv4?(s: str) -> bool:
     n = std::str::length(s)
     # 0: dots seen, 1: digits in the current octet, 2: its value
     st = std::mutable_array::create(3, 0)
@@ -415,7 +415,7 @@ fn ipv4?(s: str) -> bool:
 # An IPv6 address (RFC 4291's text form: eight groups of 1-4 hex digits, at
 # most one "::" standing for one or more groups of zeros, an IPv4 address in
 # place of the last two groups). No zone identifier.
-fn ipv6?(s: str) -> bool:
+nomethod fn ipv6?(s: str) -> bool:
     n = std::str::length(s)
     if n < 2 or n > 45:
         return false
@@ -461,7 +461,7 @@ fn ipv6?(s: str) -> bool:
 # A DNS name as a URI host: labels of letters, digits and '-', separated
 # by '.', none empty (a trailing '.' is allowed), at most 63 characters
 # each and 253 in all.
-fn dns_name?(s: str) -> bool:
+nomethod fn dns_name?(s: str) -> bool:
     n = std::str::length(s)
     if n == 0 or n > 254:
         return false
@@ -500,7 +500,7 @@ private nomethod fn numeric_dotted?(s: str) -> bool:
     true
 
 # Parse TEXT as an absolute http or https URI.
-fn uri(text: str) -> Uri errors InvalidUri:
+nomethod fn uri(text: str) -> Uri errors InvalidUri:
     n = std::str::length(text)
     loop i from 0 to n:
         k = code_of(char_of(text, i))
@@ -648,7 +648,7 @@ private nomethod fn token_char?(c: UnicodeChar) -> bool:
     alpha?(c) or digit?(c) or c == '!' or c == '#' or c == '$' or c == '%' or c == '&' or c == '\'' or c == '*' or c == '+' or c == '-' or c == '.' or c == '^' or c == '_' or c == '`' or c == '|' or c == '~'
 
 # A token (RFC 9110, section 5.6.2): a method's or a header name's syntax.
-fn token?(s: str) -> bool:
+nomethod fn token?(s: str) -> bool:
     n = std::str::length(s)
     if n == 0:
         return false
@@ -673,7 +673,7 @@ private nomethod fn check_name(name: str) -> str errors InvalidRequest:
 
 # Whether TEXT is a valid field value: visible characters, spaces and tabs
 # inside, no control character, no leading or trailing space or tab.
-fn field_value?(text: str) -> bool:
+nomethod fn field_value?(text: str) -> bool:
     n = std::str::length(text)
     loop i from 0 to n:
         k = code_of(char_of(text, i))
@@ -685,14 +685,14 @@ fn field_value?(text: str) -> bool:
     true
 
 # A request header NAME: VALUE (VALUE's UTF-8 bytes).
-fn header(name: str, value: str) -> Header errors InvalidRequest:
+nomethod fn header(name: str, value: str) -> Header errors InvalidRequest:
     lower = check_name(name)
     if not field_value?(value):
         fail InvalidRequest {reason: "the value of header ".concat(lower).concat(" holds a control character, or leading or trailing space")}
     Header {name: lower, value: std::abi::bytes::from_list(std::str::encode_utf8(value))}
 
 # A request header NAME with VALUE's bytes as they are (checked when sent).
-fn header_bytes(name: str, value: std::abi::bytes::Bytes) -> Header errors InvalidRequest:
+nomethod fn header_bytes(name: str, value: std::abi::bytes::Bytes) -> Header errors InvalidRequest:
     lower = check_name(name)
     Header {name: lower, value: value}
 
@@ -746,15 +746,15 @@ struct Request:
     cancel: Cancel
 
 # A request of METHOD for TARGET (no headers, no body).
-fn request(method: str, target: Uri) -> Request errors InvalidRequest:
+nomethod fn request(method: str, target: Uri) -> Request errors InvalidRequest:
     if not token?(method):
         fail InvalidRequest {reason: "the method is not a token: \"".concat(method).append_char('"')}
     Request {method: method, target: target, headers: [], body: std::abi::bytes::from_list([]), deadline: 0, cancel: no_cancel()}
 
-fn get(target: Uri) -> Request:
+nomethod fn get(target: Uri) -> Request:
     Request {method: "GET", target: target, headers: [], body: std::abi::bytes::from_list([]), deadline: 0, cancel: no_cancel()}
 
-fn post(target: Uri, body: std::abi::bytes::Bytes) -> Request:
+nomethod fn post(target: Uri, body: std::abi::bytes::Bytes) -> Request:
     Request {method: "POST", target: target, headers: [], body: body, deadline: 0, cancel: no_cancel()}
 
 fn with_header(r: Request, h: Header) -> Request:
@@ -1471,7 +1471,7 @@ private nomethod fn version_code(v: Versions) -> int:
         2
 
 # A client of CONFIG. TrustFailed: its trust anchors could not be made.
-fn client(config: Config, context h: Http, ev: std::event_loop::Loop, n: event_loop_linux::Native) -> OwnedClient errors TrustFailed, Unsupported, Fault, std::event_loop::SchedulerFault:
+nomethod fn client(config: Config, context h: Http, ev: std::event_loop::Loop, n: event_loop_linux::Native) -> OwnedClient errors TrustFailed, Unsupported, Fault, std::event_loop::SchedulerFault:
     start_runtime()
     system = if config.trust.system:
         1

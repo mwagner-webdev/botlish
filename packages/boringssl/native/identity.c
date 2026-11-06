@@ -1,7 +1,7 @@
 /* identity.c -- the BoringSSL provider package's identity symbol
  * (HTTP-CLIENT-PACKAGE-MILESTONE-1.md, "The provider"): one defined symbol
  * whose name is the provider's tag and commit, a member of
- * libbotlish_boringssl_crypto.a. A native unit compiled against this
+ * libbotlish_boringssl.a. A native unit compiled against this
  * provider's headers references it (botlish_http's provider.rs), so linking
  * that unit with another provider -- another revision's archives, a system
  * OpenSSL, none -- fails at link time with this name undefined, instead of

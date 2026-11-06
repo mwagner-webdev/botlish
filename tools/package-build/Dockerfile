@@ -1,7 +1,7 @@
 # The pinned author build environment of this repository's native packages
 # (PACKAGE-MANAGER-MILESTONE-3.md, "Reproducibility"): where
-# tools/package-repository.tcl builds SDL3's, Raven's and the event loop's
-# native files and packs their releases. An author's environment, never a
+# tools/package-repository.tcl builds SDL3's, Raven's, the event loop's,
+# BoringSSL's and the http client's native files and packs their releases. An author's environment, never a
 # consumer's: installing a package runs nothing of it.
 #
 #   tools/package-build/author.sh image
@@ -55,5 +55,32 @@ RUN --mount=type=secret,id=build-ca,required=true \
     rm -rf /var/lib/apt/lists/*; \
     dpkg-query -W -f '${Package} ${Version} ${Architecture}\n' | sort > /etc/botlish-author-packages; \
     echo "snapshot $SNAPSHOT" > /etc/botlish-author-environment
-ENV LANG=C.utf8 LC_ALL=C.utf8 BOTLISH_CACHE_DIR=/cache
+# The http package's native unit (HTTP-CLIENT-PACKAGE-MILESTONE-1.md,
+# "Building the packages"): g++ for BoringSSL's libssl (C++), libclang for
+# boring-sys's bindgen, from the same snapshot; Rust 1.97.0 by rustup, whose
+# installer is pinned by SHA-256 here and which checks the toolchain it
+# downloads against the Rust project's signed release manifest. The crates
+# are fetched by cargo --locked when a release is built: Cargo.lock pins
+# each one's SHA-256.
+RUN --mount=type=secret,id=build-ca,required=true \
+    set -eu; \
+    install -m 0644 /run/secrets/build-ca /tmp/build-ca.crt; \
+    echo 'Acquire::https::CaInfo "/tmp/build-ca.crt";' > /etc/apt/apt.conf.d/99build; \
+    if [ -n "${HTTPS_PROXY:-}" ]; then \
+      echo "Acquire::https::Proxy \"$HTTPS_PROXY\";" >> /etc/apt/apt.conf.d/99build; \
+    fi; \
+    apt-get -o Acquire::Check-Valid-Until=false update; \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends g++ libclang-dev; \
+    curl -fsSL --cacert /tmp/build-ca.crt --retry 3 -o /tmp/rustup-init \
+      https://static.rust-lang.org/rustup/archive/1.28.2/x86_64-unknown-linux-gnu/rustup-init; \
+    echo "20a06e644b0d9bd2fbdbfd52d42540bdde820ea7df86e92e533c073da0cdd43c  /tmp/rustup-init" | sha256sum -c -; \
+    chmod +x /tmp/rustup-init; \
+    SSL_CERT_FILE=/tmp/build-ca.crt RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo \
+      /tmp/rustup-init -y --no-modify-path --profile minimal --default-toolchain 1.97.0; \
+    rm -f /tmp/rustup-init /etc/apt/apt.conf.d/99build /tmp/build-ca.crt; \
+    rm -rf /var/lib/apt/lists/*; \
+    dpkg-query -W -f '${Package} ${Version} ${Architecture}\n' | sort > /etc/botlish-author-packages; \
+    /usr/local/cargo/bin/rustc --version >> /etc/botlish-author-environment
+ENV LANG=C.utf8 LC_ALL=C.utf8 BOTLISH_CACHE_DIR=/cache \
+    RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo PATH=/usr/local/cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 WORKDIR /src
