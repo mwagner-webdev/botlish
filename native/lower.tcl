@@ -2651,16 +2651,11 @@ proc native::lower::CompanionFunction {id} {
     if {$body eq ""} {
         throw {NATIVE BUG} "native lowering: companion of instance $id has an empty body"
     }
-    set ok 1
-    foreach e [lrange $body 0 end-1] {
-        if {[Expr fn $e] eq "never"} {
-            set ok 0
-            break
-        }
-    }
-    if {$ok} {
-        set fields [TaggedFields fn [VirtualValue fn [lindex $body end] $arity [hir::escape::resultCut $escape $id]]]
+    if {[SequenceStatements fn $body]} {
+        set last [lindex $body end]
+        set fields [TaggedFields fn [VirtualValue fn $last $arity [hir::escape::resultCut $escape $id]]]
         if {$fields ne "never"} {
+            ReleaseHandles fn [hir::affine::releasesAfter $hir $last] $last
             Emit fn "retmulti [join $fields { }]"
         }
     }
@@ -2747,16 +2742,11 @@ proc native::lower::RegionCompanionFunction {id} {
     if {$body eq ""} {
         throw {NATIVE BUG} "native lowering: region companion of instance $id has an empty body"
     }
-    set ok 1
-    foreach e [lrange $body 0 end-1] {
-        if {[Expr fn $e] eq "never"} {
-            set ok 0
-            break
-        }
-    }
-    if {$ok} {
-        set fields [Expr fn [lindex $body end] region]
+    if {[SequenceStatements fn $body]} {
+        set last [lindex $body end]
+        set fields [Expr fn $last region]
         if {$fields ne "never"} {
+            ReleaseHandles fn [hir::affine::releasesAfter $hir $last] $last
             Emit fn "retmulti [join $fields { }]"
         }
     }
@@ -2988,16 +2978,11 @@ proc native::lower::InternalRegionCompanionFunction {id} {
     if {$body eq ""} {
         throw {NATIVE BUG} "native lowering: internal region companion of instance $id has an empty body"
     }
-    set ok 1
-    foreach e [lrange $body 0 end-1] {
-        if {[Expr fn $e] eq "never"} {
-            set ok 0
-            break
-        }
-    }
-    if {$ok} {
-        set fields [Expr fn [lindex $body end] region]
+    if {[SequenceStatements fn $body]} {
+        set last [lindex $body end]
+        set fields [Expr fn $last region]
         if {$fields ne "never"} {
+            ReleaseHandles fn [hir::affine::releasesAfter $hir $last] $last
             Emit fn "retmulti [join $fields { }]"
         }
     }
@@ -3091,16 +3076,11 @@ proc native::lower::InternalCompanionFunction {id} {
     if {$body eq ""} {
         throw {NATIVE BUG} "native lowering: internal scalar companion of instance $id has an empty body"
     }
-    set ok 1
-    foreach e [lrange $body 0 end-1] {
-        if {[Expr fn $e] eq "never"} {
-            set ok 0
-            break
-        }
-    }
-    if {$ok} {
-        set fields [TaggedFields fn [VirtualValue fn [lindex $body end] $arity [hir::escape::resultCut $escape $id]]]
+    if {[SequenceStatements fn $body]} {
+        set last [lindex $body end]
+        set fields [TaggedFields fn [VirtualValue fn $last $arity [hir::escape::resultCut $escape $id]]]
         if {$fields ne "never"} {
+            ReleaseHandles fn [hir::affine::releasesAfter $hir $last] $last
             Emit fn "retmulti [join $fields { }]"
         }
     }
@@ -3289,16 +3269,11 @@ proc native::lower::FieldsCompanionFunction {id} {
     if {$body eq ""} {
         throw {NATIVE BUG} "native lowering: fields+companion of instance $id has an empty body"
     }
-    set ok 1
-    foreach e [lrange $body 0 end-1] {
-        if {[Expr fn $e] eq "never"} {
-            set ok 0
-            break
-        }
-    }
-    if {$ok} {
-        set fields [TaggedFields fn [VirtualValue fn [lindex $body end] $arity [hir::escape::resultCut $escape $id]]]
+    if {[SequenceStatements fn $body]} {
+        set last [lindex $body end]
+        set fields [TaggedFields fn [VirtualValue fn $last $arity [hir::escape::resultCut $escape $id]]]
         if {$fields ne "never"} {
+            ReleaseHandles fn [hir::affine::releasesAfter $hir $last] $last
             Emit fn "retmulti [join $fields { }]"
         }
     }
@@ -13183,17 +13158,41 @@ proc native::lower::PlanCallResult {fnVar e result family want} {
 proc native::lower::SequenceVirtual {fnVar exprs n {cut ""}} {
     upvar 1 $fnVar fn
     variable hir
-    foreach e [lrange $exprs 0 end-1] {
-        if {[Expr fn $e] eq "never"} {
-            return never
-        }
+    if {![SequenceStatements fn $exprs]} {
+        return never
     }
     set last [lindex $exprs end]
     if {[hir::typeOf $hir $last] eq "never"} {
         Expr fn $last
         return never
     }
-    return [VirtualValue fn $last $n $cut]
+    set value [VirtualValue fn $last $n $cut]
+    if {$value ne "never"} {
+        ReleaseHandles fn [hir::affine::releasesAfter $hir $last] $last
+    }
+    return $value
+}
+
+# The statements of EXPRS but the last, as Sequence runs them: each one
+# evaluated, then the affine values dead after it released (its own
+# discarded value included). 0 when one cannot complete normally. Every
+# lowering of a sequence whose value is wanted in a form of its own (a
+# virtual aggregate, a raw Int, a scalar String, a construction plan) runs
+# its statements so, and releases what dies after its last expression once
+# that value is had: releasing is the sequence's, whatever form its value
+# takes (a resource's cleanup, a coroutine's release and an affine
+# aggregate's drop were once skipped on these paths' normal exits).
+proc native::lower::SequenceStatements {fnVar exprs} {
+    upvar 1 $fnVar fn
+    variable hir
+    foreach e [lrange $exprs 0 end-1] {
+        set result [Expr fn $e]
+        if {$result eq "never"} {
+            return 0
+        }
+        ReleaseHandles fn [hir::affine::releasesAfter $hir $e] $e $result
+    }
+    return 1
 }
 
 # Like Sequence, for a body whose value is wanted as a raw machine integer
@@ -13203,15 +13202,19 @@ proc native::lower::SequenceVirtual {fnVar exprs n {cut ""}} {
 # small-Int domain.
 proc native::lower::SequenceRaw {fnVar exprs} {
     upvar 1 $fnVar fn
+    variable hir
     if {$exprs eq ""} {
         throw {NATIVE BUG} "native lowering: a raw-Int body has no value"
     }
-    foreach e [lrange $exprs 0 end-1] {
-        if {[Expr fn $e] eq "never"} {
-            return never
-        }
+    if {![SequenceStatements fn $exprs]} {
+        return never
     }
-    return [Expr fn [lindex $exprs end] rawjoin]
+    set last [lindex $exprs end]
+    set r [Expr fn $last rawjoin]
+    if {$r ne "never"} {
+        ReleaseHandles fn [hir::affine::releasesAfter $hir $last] $last
+    }
+    return $r
 }
 
 # Like SequenceRaw, for a body whose value flows into a scalar String register
@@ -13219,32 +13222,39 @@ proc native::lower::SequenceRaw {fnVar exprs} {
 # effect, the last is produced as KIND.
 proc native::lower::SequenceShort {fnVar exprs kind} {
     upvar 1 $fnVar fn
+    variable hir
     if {$exprs eq ""} {
         throw {NATIVE BUG} "native lowering: a ShortString1 body has no value"
     }
-    foreach e [lrange $exprs 0 end-1] {
-        if {[Expr fn $e] eq "never"} {
-            return never
-        }
+    if {![SequenceStatements fn $exprs]} {
+        return never
     }
-    return [Expr fn [lindex $exprs end] $kind]
+    set last [lindex $exprs end]
+    set r [Expr fn $last $kind]
+    if {$r ne "never"} {
+        ReleaseHandles fn [hir::affine::releasesAfter $hir $last] $last
+    }
+    return $r
 }
 
 proc native::lower::SequenceTo {fnVar exprs family} {
     upvar 1 $fnVar fn
+    variable hir
     if {$family eq "" || $exprs eq ""} {
         return [Sequence fn $exprs]
     }
-    foreach e [lrange $exprs 0 end-1] {
-        if {[Expr fn $e] eq "never"} {
-            return never
-        }
+    if {![SequenceStatements fn $exprs]} {
+        return never
     }
     set last [lindex $exprs end]
     set pieces [PlanPieces fn $last $family]
     if {$pieces eq "never"} {
         return never
     }
+    # The pieces are evaluated values (registers live into the construction
+    # below): what dies after the last expression is released now, as
+    # Sequence would release it after the value.
+    ReleaseHandles fn [hir::affine::releasesAfter $hir $last] $last
     return [PiecesToPlan fn $pieces $family $last]
 }
 

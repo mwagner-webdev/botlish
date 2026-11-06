@@ -86,11 +86,15 @@ proc rsProbe {name} {
 # --------------------------------------------------------------------------
 # One outcome on every backend
 
-foreach name {scope flow coro collections} {
+foreach name {scope flow coro collections forms} {
     test rs-agree-$name "tests/resources/$name.bot compiles under -warnings error and gives one outcome on every backend of the pass" -body {
         lindex [rsRun $name] 0
     } -result 1
 }
+
+test rs-value-forms {forms.bot: a function's Handles are released at its end whatever form its value takes natively -- a String its caller concatenates (10), two Handles before a plan result, in reverse (21 20), a raw Int (30), a projected struct (40), a branch joining a plan (50) -- each before the caller's next note} -body {
+    rsValue forms
+} -result {[10, 1, 21, 20, 2, 30, 3, 40, 4, 50, 5]}
 
 # --------------------------------------------------------------------------
 # Scope (scope.bot)
