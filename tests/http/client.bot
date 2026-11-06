@@ -1,0 +1,593 @@
+# client.bot -- the http package's test client (tests/http-client.test;
+# HTTP-CLIENT-PACKAGE-MILESTONE-1.md, "Testing"). One program, compiled once
+# to an executable; each test runs one scenario:
+#
+#   client SCENARIO ARG...       its value: the scenario's report lines
+#
+# The test CA (PEM) is passed as an argument where a scenario trusts it.
+# Every scenario's failure is reported as one line, "error KIND: REASON",
+# by run's one handler: the scenarios themselves let the package's declared
+# errors propagate.
+import event_loop_linux
+import http
+import std::abi
+import std::abi::bytes
+import std::byte
+import std::event_loop
+import std::int
+import std::list
+import std::mutable_vector
+import std::str
+import type std::event_loop::Wake
+
+opaque context struct Out:
+    lines: MutableVector[str]
+
+fn out() -> Out:
+    lines = std::mutable_vector::from_list([""])
+    lines.clear()
+    Out {lines: lines}
+
+nomethod fn say(text: str, context o: Out):
+    o.lines.push(text)
+
+nomethod fn n(x: int) -> str:
+    std::int::to_string(x)
+
+nomethod fn arg(args: List[str], i: int) -> str:
+    std::list::get(args, i, "")
+
+nomethod fn num(args: List[str], i: int) -> int:
+    std::int::from_string(arg(args, i)):
+        on InvalidIntegerText:
+            0
+
+nomethod fn utf8(text: str) -> std::abi::bytes::Bytes:
+    std::abi::bytes::from_list(std::str::encode_utf8(text))
+
+nomethod fn size(b: std::abi::bytes::Bytes) -> int:
+    std::abi::bytes::length(b).value
+
+nomethod fn yes(b: bool) -> str:
+    if b:
+        "yes"
+    else:
+        "NO"
+
+nomethod fn text_of(b: std::abi::bytes::Bytes) -> str:
+    std::abi::bytes::decode_utf8(b):
+        on InvalidUtf8:
+            "<not utf-8>"
+
+# A client trusting the test CA PEM only (no system bundle) when PEM is
+# given, the system bundle otherwise.
+nomethod fn config_for(pem: str) -> http::Config:
+    c = http::config()
+    if pem == "":
+        return c
+    http::Config {
+        versions: c.versions,
+        trust: http::Trust {system: false, anchors: utf8(pem)},
+        connect_timeout: c.connect_timeout,
+        idle_timeout: c.idle_timeout,
+        max_connections: c.max_connections,
+        max_header_bytes: c.max_header_bytes,
+        pool_idle: c.pool_idle,
+        window: c.window
+    }
+
+nomethod fn with_versions(c: http::Config, v: http::Versions) -> http::Config:
+    http::Config {versions: v, trust: c.trust, connect_timeout: c.connect_timeout, idle_timeout: c.idle_timeout, max_connections: c.max_connections, max_header_bytes: c.max_header_bytes, pool_idle: c.pool_idle, window: c.window}
+
+nomethod fn with_idle(c: http::Config, idle: int) -> http::Config:
+    http::Config {versions: c.versions, trust: c.trust, connect_timeout: c.connect_timeout, idle_timeout: idle, max_connections: c.max_connections, max_header_bytes: c.max_header_bytes, pool_idle: c.pool_idle, window: c.window}
+
+nomethod fn with_window(c: http::Config, w: int) -> http::Config:
+    http::Config {versions: c.versions, trust: c.trust, connect_timeout: c.connect_timeout, idle_timeout: c.idle_timeout, max_connections: c.max_connections, max_header_bytes: c.max_header_bytes, pool_idle: c.pool_idle, window: w}
+
+nomethod fn with_connect(c: http::Config, t: int) -> http::Config:
+    http::Config {versions: c.versions, trust: c.trust, connect_timeout: t, idle_timeout: c.idle_timeout, max_connections: c.max_connections, max_header_bytes: c.max_header_bytes, pool_idle: c.pool_idle, window: c.window}
+
+nomethod fn version_text(v: http::Version) -> str:
+    if v == http::Version::Http2:
+        "HTTP/2"
+    else:
+        "HTTP/1.1"
+
+nomethod fn phase_text(p: http::Phase) -> str:
+    if p == http::Phase::Connect:
+        "connect"
+    elif p == http::Phase::Deadline:
+        "deadline"
+    else:
+        "idle"
+
+# The pattern /bytes and /stream send: byte i is i mod 256, from START.
+nomethod fn pattern(count: int, start: int) -> std::abi::bytes::Bytes:
+    values = loop i from 0 to 256:
+        std::byte::from_int(i):
+            on std::byte::BelowRange:
+                0
+            on std::byte::AboveRange:
+                0
+    block = std::abi::bytes::from_list(values)
+    blocks = std::mutable_vector::from_list([block])
+    loop:
+        if 256 * std::mutable_vector::length(blocks) >= start + count:
+            break
+        blocks.push(block)
+    parts = loop i from 0 to std::mutable_vector::length(blocks):
+        blocks.at(i):
+            on IndexNotFound:
+                block
+    std::abi::bytes::join(parts).slice(start, start + count):
+        on LowerUnderrun:
+            block
+        on UpperOverrun:
+            block
+
+# A response's header lines, "name: value" (values as text, or "<bytes>").
+nomethod fn header_lines(r: http::Response, context o: Out):
+    loop i from 0 to std::list::length(r.headers):
+        h = std::list::get(r.headers, i, http::Header {name: "", value: utf8("")})
+        value = http::text(h):
+            on http::HeaderNotText:
+                "<bytes>"
+        say("header ".concat(h.name).concat(": ").concat(value))
+    unit
+
+# --- scenarios
+
+fn get(args: List[str], context h: http::Http, ev: std::event_loop::Loop, nat: event_loop_linux::Native, o: Out) errors http::InvalidUri, http::InvalidRequest, http::ResolveFailed, http::ConnectFailed, http::TlsVerifyFailed, http::TlsHandshakeFailed, http::ProtocolError, http::Timeout, http::Cancelled, http::Closed, http::Unsupported, http::TrustFailed, http::Released, http::Fault, http::BodyTooLarge, http::HeaderNotText, std::event_loop::SchedulerFault:
+    {owner, client} = http::client(config_for(arg(args, 2)))
+    {owner: x, response} = client.send(http::get(http::uri(arg(args, 1))))
+    say("status ".concat(n(response.status)).concat(" ").concat(version_text(response.version)))
+    body = response.exchange.read_all(1073741824)
+    say("bytes ".concat(n(size(body))))
+    if arg(args, 3) == "pattern":
+        say("pattern matches ".concat(yes(body == pattern(size(body), 0))))
+    elif arg(args, 3) == "text":
+        say("text ".concat(text_of(body)))
+    if arg(args, 4) == "headers":
+        header_lines(response)
+
+fn versions(args: List[str], context h: http::Http, ev: std::event_loop::Loop, nat: event_loop_linux::Native, o: Out) errors http::InvalidUri, http::InvalidRequest, http::ResolveFailed, http::ConnectFailed, http::TlsVerifyFailed, http::TlsHandshakeFailed, http::ProtocolError, http::Timeout, http::Cancelled, http::Closed, http::Unsupported, http::TrustFailed, http::Released, http::Fault, http::BodyTooLarge, std::event_loop::SchedulerFault:
+    policy = if arg(args, 3) == "h1":
+        http::Versions::Http1
+    elif arg(args, 3) == "h2":
+        http::Versions::Http2
+    else:
+        http::Versions::Negotiate
+    {owner, client} = http::client(with_versions(config_for(arg(args, 2)), policy))
+    {owner: x, response} = client.send(http::get(http::uri(arg(args, 1))))
+    body = response.exchange.read_all(1048576)
+    say("status ".concat(n(response.status)).concat(" ").concat(version_text(response.version)).concat(" bytes ").concat(n(size(body))))
+
+fn post_json(args: List[str], context h: http::Http, ev: std::event_loop::Loop, nat: event_loop_linux::Native, o: Out) errors http::InvalidUri, http::InvalidRequest, http::ResolveFailed, http::ConnectFailed, http::TlsVerifyFailed, http::TlsHandshakeFailed, http::ProtocolError, http::Timeout, http::Cancelled, http::Closed, http::Unsupported, http::TrustFailed, http::Released, http::Fault, http::BodyTooLarge, http::HeaderNotText, std::event_loop::SchedulerFault:
+    {owner, client} = http::client(config_for(arg(args, 2)))
+    body = utf8("{\"model\": \"m\", \"input\": \"héllo\", \"stream\": true}")
+    r = http::post(http::uri(arg(args, 1)), body).with_header(http::header("Content-Type", "application/json")).with_header(http::header("Authorization", "Bearer test-token-123")).with_header(http::header("X-Custom", "v1"))
+    {owner: x, response} = client.send(r)
+    say("status ".concat(n(response.status)).concat(" ").concat(version_text(response.version)))
+    header_lines(response)
+    echoed = response.exchange.read_all(1048576)
+    say("same body ".concat(yes(echoed == body)))
+
+fn stream(args: List[str], context h: http::Http, ev: std::event_loop::Loop, nat: event_loop_linux::Native, o: Out) errors http::InvalidUri, http::InvalidRequest, http::ResolveFailed, http::ConnectFailed, http::TlsVerifyFailed, http::TlsHandshakeFailed, http::ProtocolError, http::Timeout, http::Cancelled, http::Closed, http::Unsupported, http::TrustFailed, http::Released, http::Fault, http::BodyTooLarge, std::event_loop::SchedulerFault:
+    # args: url pem pause-us progress-url [window]
+    base = config_for(arg(args, 2))
+    config = if num(args, 5) > 0:
+        with_window(base, num(args, 5))
+    else:
+        base
+    {owner, client} = http::client(config)
+    {owner: x, response} = client.send(http::get(http::uri(arg(args, 1))))
+    first = response.exchange.read()
+    pause = num(args, 3)
+    std::event_loop::sleep(pause)
+    {owner: p, response: progress} = client.send(http::get(http::uri(arg(args, 4))))
+    report = text_of(progress.exchange.read_all(65536))
+    say("server after pause: ".concat(report))
+    st = http::stats()
+    say("max bytes held natively: ".concat(n(st.max_held)))
+    rest = response.exchange.read_all(1073741824)
+    say("total ".concat(n(size(first) + size(rest))))
+    say("max bytes held natively after: ".concat(n(http::stats().max_held)))
+
+# A request body streamed in chunks: args url pem total chunk declared(1/0).
+fn upload(args: List[str], context h: http::Http, ev: std::event_loop::Loop, nat: event_loop_linux::Native, o: Out) errors http::InvalidUri, http::InvalidRequest, http::ResolveFailed, http::ConnectFailed, http::TlsVerifyFailed, http::TlsHandshakeFailed, http::ProtocolError, http::Timeout, http::Cancelled, http::Closed, http::Unsupported, http::TrustFailed, http::Released, http::Fault, http::BodyTooLarge, http::HeaderNotText, std::event_loop::SchedulerFault:
+    {owner, client} = http::client(config_for(arg(args, 2)))
+    total = num(args, 3)
+    chunk = num(args, 4)
+    length = if arg(args, 5) == "1":
+        total
+    else:
+        -1
+    r = http::request("PUT", http::uri(arg(args, 1))).with_header(http::header("content-type", "application/octet-stream"))
+    {owner: x, exchange} = client.start(r, length)
+    data = pattern(total, 0)
+    loop i from 0 to total + 1:
+        start = i * chunk
+        if start >= total:
+            break
+        end = if start + chunk > total:
+            total
+        else:
+            start + chunk
+        piece = data.slice(start, end):
+            on LowerUnderrun:
+                data
+            on UpperOverrun:
+                data
+        exchange.write(piece)
+    response = exchange.finish()
+    say("status ".concat(n(response.status)).concat(" ").concat(version_text(response.version)))
+    header_lines(response)
+    echoed = response.exchange.read_all(1073741824)
+    say("echoed ".concat(n(size(echoed))).concat(" same ").concat(yes(echoed == pattern(total, 0))))
+
+fn fetch_line(client: http::Client, url: str, context h: http::Http, ev: std::event_loop::Loop) -> str errors http::InvalidUri, std::event_loop::SchedulerFault:
+    target = http::uri(url)
+    sent = client.send(http::get(target)):
+        on http::InvalidRequest {reason}:
+            return "error InvalidRequest ".concat(reason)
+        on http::ResolveFailed {reason}:
+            return "error ResolveFailed ".concat(reason)
+        on http::ConnectFailed {reason}:
+            return "error ConnectFailed ".concat(reason)
+        on http::TlsVerifyFailed {reason}:
+            return "error TlsVerifyFailed ".concat(reason)
+        on http::TlsHandshakeFailed {reason}:
+            return "error TlsHandshakeFailed ".concat(reason)
+        on http::ProtocolError {reason}:
+            return "error ProtocolError ".concat(reason)
+        on http::Timeout {reason}:
+            return "error Timeout ".concat(reason)
+        on http::Cancelled:
+            return "error Cancelled"
+        on http::Closed:
+            return "error Closed"
+        on http::Unsupported {reason}:
+            return "error Unsupported ".concat(reason)
+        on http::TrustFailed {reason}:
+            return "error TrustFailed ".concat(reason)
+        on http::Released:
+            return "error Released"
+        on http::Fault {reason}:
+            return "error Fault ".concat(reason)
+    {owner, response} = sent
+    body = response.exchange.read_all(1073741824):
+        on http::BodyTooLarge:
+            return "error BodyTooLarge"
+        on http::ProtocolError {reason}:
+            return "error ProtocolError ".concat(reason)
+        on http::Timeout {reason}:
+            return "error Timeout ".concat(reason)
+        on http::Cancelled:
+            return "error Cancelled"
+        on http::Closed:
+            return "error Closed"
+        on http::Released:
+            return "error Released"
+        on http::Fault {reason}:
+            return "error Fault ".concat(reason)
+        on http::ResolveFailed:
+            return "error ResolveFailed"
+        on http::ConnectFailed:
+            return "error ConnectFailed"
+        on http::TlsVerifyFailed:
+            return "error TlsVerifyFailed"
+        on http::TlsHandshakeFailed:
+            return "error TlsHandshakeFailed"
+        on http::InvalidRequest:
+            return "error InvalidRequest"
+        on http::Unsupported:
+            return "error Unsupported"
+        on http::TrustFailed:
+            return "error TrustFailed"
+    "status ".concat(n(response.status)).concat(" ").concat(version_text(response.version)).concat(" bytes ").concat(n(size(body)))
+
+# N tasks fetching URL at once on one client: args url pem n.
+fn task_get(client: http::Client, url: str, i: int, context h: http::Http, ev: std::event_loop::Loop, o: Out) -> int errors std::event_loop::SchedulerFault:
+    line = fetch_line(client, url):
+        on http::InvalidUri {reason}:
+            "error InvalidUri ".concat(reason)
+    say("task ".concat(n(i)).concat(" ").concat(line))
+    0
+
+fn concurrent(args: List[str], context h: http::Http, ev: std::event_loop::Loop, nat: event_loop_linux::Native, o: Out) errors http::Fault, http::TrustFailed, http::Unsupported, std::event_loop::SchedulerFault:
+    {owner, client} = http::client(config_for(arg(args, 2)))
+    count = num(args, 3)
+    loop i from 0 to count:
+        coroutine {step: s, first: f} = task_get(client, arg(args, 1), i)
+        std::event_loop::adopt(s, f)
+    # Wait for the tasks (each reports); the client lives until they end.
+    loop:
+        if std::mutable_vector::length(o.lines) >= count:
+            break
+        std::event_loop::sleep(1000)
+    st = http::stats()
+    say("http1 ".concat(n(st.http1_connections)).concat(" http2 ").concat(n(st.http2_connections)))
+
+# N requests one after another on one client: args url pem n conns-url.
+fn sequential(args: List[str], context h: http::Http, ev: std::event_loop::Loop, nat: event_loop_linux::Native, o: Out) errors http::InvalidUri, http::Fault, http::TrustFailed, http::Unsupported, std::event_loop::SchedulerFault:
+    {owner, client} = http::client(config_for(arg(args, 2)))
+    loop i from 0 to num(args, 3):
+        say(fetch_line(client, arg(args, 1)))
+    say(fetch_line(client, arg(args, 4)))
+    st = http::stats()
+    say("idle ".concat(n(st.idle_connections)).concat(" http1 ").concat(n(st.http1_connections)).concat(" http2 ").concat(n(st.http2_connections)))
+
+fn attempt(client: http::Client, r: http::Request, context h: http::Http, ev: std::event_loop::Loop) -> str errors std::event_loop::SchedulerFault:
+    sent = client.send(r):
+        on http::InvalidRequest {reason}:
+            return "error InvalidRequest ".concat(reason)
+        on http::ResolveFailed {reason, code}:
+            return "error ResolveFailed code ".concat(n(code)).concat(" ").concat(reason)
+        on http::ConnectFailed {reason, code, port}:
+            return "error ConnectFailed code ".concat(n(code)).concat(" port ").concat(n(port))
+        on http::TlsVerifyFailed {reason, code}:
+            return "error TlsVerifyFailed code ".concat(n(code)).concat(" ").concat(reason)
+        on http::TlsHandshakeFailed {reason}:
+            return "error TlsHandshakeFailed ".concat(reason)
+        on http::ProtocolError {reason, code}:
+            return "error ProtocolError code ".concat(n(code)).concat(" ").concat(reason)
+        on http::Timeout {phase}:
+            return "error Timeout ".concat(phase_text(phase))
+        on http::Cancelled:
+            return "error Cancelled"
+        on http::Closed:
+            return "error Closed"
+        on http::Unsupported {reason}:
+            return "error Unsupported ".concat(reason)
+        on http::TrustFailed {reason}:
+            return "error TrustFailed ".concat(reason)
+        on http::Released:
+            return "error Released"
+        on http::Fault {reason}:
+            return "error Fault ".concat(reason)
+    {owner, response} = sent
+    body = response.exchange.read_all(1073741824):
+        on http::BodyTooLarge:
+            return "error BodyTooLarge"
+        on http::ProtocolError {reason, code}:
+            return "body error ProtocolError code ".concat(n(code)).concat(" ").concat(reason)
+        on http::Timeout {phase}:
+            return "body error Timeout ".concat(phase_text(phase))
+        on http::Cancelled:
+            return "body error Cancelled"
+        on http::Closed:
+            return "body error Closed"
+        on http::Released:
+            return "body error Released"
+        on http::Fault {reason}:
+            return "body error Fault ".concat(reason)
+        on http::ResolveFailed:
+            return "body error ResolveFailed"
+        on http::ConnectFailed:
+            return "body error ConnectFailed"
+        on http::TlsVerifyFailed:
+            return "body error TlsVerifyFailed"
+        on http::TlsHandshakeFailed:
+            return "body error TlsHandshakeFailed"
+        on http::InvalidRequest:
+            return "body error InvalidRequest"
+        on http::Unsupported:
+            return "body error Unsupported"
+        on http::TrustFailed:
+            return "body error TrustFailed"
+    "status ".concat(n(response.status)).concat(" bytes ").concat(n(size(body)))
+
+# One request: report how it ends (args url pem [connect|idle|deadline] [us]).
+fn outcome(args: List[str], context h: http::Http, ev: std::event_loop::Loop, nat: event_loop_linux::Native, o: Out) errors http::InvalidUri, http::Fault, http::TrustFailed, http::Unsupported, std::event_loop::SchedulerFault:
+    base = config_for(arg(args, 2))
+    limit = num(args, 4)
+    config = if arg(args, 3) == "idle":
+        with_idle(base, limit)
+    elif arg(args, 3) == "connect":
+        with_connect(base, limit)
+    else:
+        base
+    {owner, client} = http::client(config)
+    r = http::get(http::uri(arg(args, 1)))
+    timed = if arg(args, 3) == "deadline":
+        r.with_timeout(limit)
+    else:
+        r
+    if arg(args, 5) == "debug":
+        say("now ".concat(n(event_loop_linux::now_us())).concat(" deadline ").concat(n(timed.deadline)))
+    say(attempt(client, timed))
+
+# Cancellation from another task: args url pem after-us.
+fn canceller(c: http::Cancel, after: int, context h: http::Http, ev: std::event_loop::Loop, o: Out) -> int errors std::event_loop::SchedulerFault:
+    std::event_loop::sleep(after)
+    k = http::cancel(c):
+        on http::Fault:
+            -1
+    say("cancelled in flight ".concat(n(k)))
+    0
+
+fn cancel(args: List[str], context h: http::Http, ev: std::event_loop::Loop, nat: event_loop_linux::Native, o: Out) errors http::InvalidUri, http::Fault, http::TrustFailed, http::Unsupported, std::event_loop::SchedulerFault:
+    {owner, client} = http::client(config_for(arg(args, 2)))
+    c = http::cancellation()
+    coroutine {step: s, first: f} = canceller(c, num(args, 3))
+    std::event_loop::adopt(s, f)
+    say(attempt(client, http::get(http::uri(arg(args, 1))).with_cancel(c)))
+    # A later request carrying the same token fails at once.
+    say(attempt(client, http::get(http::uri(arg(args, 1))).with_cancel(c)))
+    st = http::stats()
+    say("exchanges ".concat(n(st.exchanges)).concat(" tasks ").concat(n(st.tasks)))
+
+# An exchange abandoned mid-body, then another request: args url pem url2.
+fn abandon(args: List[str], context h: http::Http, ev: std::event_loop::Loop, nat: event_loop_linux::Native, o: Out) errors http::InvalidUri, http::InvalidRequest, http::ResolveFailed, http::ConnectFailed, http::TlsVerifyFailed, http::TlsHandshakeFailed, http::ProtocolError, http::Timeout, http::Cancelled, http::Closed, http::Unsupported, http::TrustFailed, http::Released, http::Fault, std::event_loop::SchedulerFault:
+    {owner, client} = http::client(config_for(arg(args, 2)))
+    {owner: x, response} = client.send(http::get(http::uri(arg(args, 1))))
+    first = response.exchange.read()
+    say("first chunk ".concat(n(size(first))))
+    http::close(x)
+    again = response.exchange.read():
+        on http::Released:
+            std::abi::bytes::from_list([])
+    say("read after release ".concat(n(size(again))))
+    std::event_loop::sleep(20000)
+    st = http::stats()
+    say("after abandon: exchanges ".concat(n(st.exchanges)).concat(" idle ").concat(n(st.idle_connections)))
+    say(attempt(client, http::get(http::uri(arg(args, 3)))))
+
+# Releasing a client while another task streams from it: args url pem.
+fn reader(x: http::Exchange, context h: http::Http, ev: std::event_loop::Loop, o: Out) -> int errors std::event_loop::SchedulerFault:
+    loop:
+        c = x.read():
+            on http::Closed:
+                say("reader: error Closed")
+                return 0
+            on http::ProtocolError {reason}:
+                say("reader: error ProtocolError ".concat(reason))
+                return 0
+            on http::Timeout:
+                say("reader: error Timeout")
+                return 0
+            on http::Cancelled:
+                return 0
+            on http::Released:
+                say("reader: error Released")
+                return 0
+            on http::Fault {reason}:
+                say("reader: error Fault ".concat(reason))
+                return 0
+            on http::ResolveFailed:
+                return 0
+            on http::ConnectFailed:
+                return 0
+            on http::TlsVerifyFailed:
+                return 0
+            on http::TlsHandshakeFailed:
+                return 0
+            on http::InvalidRequest:
+                return 0
+            on http::Unsupported:
+                return 0
+            on http::TrustFailed:
+                return 0
+        if size(c) == 0:
+            say("reader: end")
+            return 0
+
+fn release_client(args: List[str], context h: http::Http, ev: std::event_loop::Loop, nat: event_loop_linux::Native, o: Out) errors http::InvalidUri, http::InvalidRequest, http::ResolveFailed, http::ConnectFailed, http::TlsVerifyFailed, http::TlsHandshakeFailed, http::ProtocolError, http::Timeout, http::Cancelled, http::Closed, http::Unsupported, http::TrustFailed, http::Released, http::Fault, std::event_loop::SchedulerFault:
+    {owner, client} = http::client(config_for(arg(args, 2)))
+    {owner: x, response} = client.send(http::get(http::uri(arg(args, 1))))
+    coroutine {step: s, first: f} = reader(response.exchange)
+    std::event_loop::adopt(s, f)
+    std::event_loop::sleep(50000)
+    http::close_client(owner)
+    std::event_loop::sleep(50000)
+    st = http::stats()
+    say("after release: clients ".concat(n(st.clients)).concat(" http1 ").concat(n(st.http1_connections)).concat(" http2 ").concat(n(st.http2_connections)).concat(" watched ").concat(n(st.watched)))
+
+# Parse a URI (pure): args text.
+fn parse(args: List[str], context o: Out):
+    u = http::uri(arg(args, 1)):
+        on http::InvalidUri {reason}:
+            say("invalid: ".concat(reason))
+            return unit
+    say(u.scheme.concat(" ").concat(u.host).concat(" ").concat(n(u.port)).concat(" ").concat(http::target(u)).concat(" ").concat(http::authority(u)))
+
+# --- dispatch
+
+fn scenario(args: List[str], context h: http::Http, ev: std::event_loop::Loop, nat: event_loop_linux::Native, o: Out) errors http::InvalidUri, http::InvalidRequest, http::ResolveFailed, http::ConnectFailed, http::TlsVerifyFailed, http::TlsHandshakeFailed, http::ProtocolError, http::Timeout, http::Cancelled, http::Closed, http::Unsupported, http::TrustFailed, http::Released, http::Fault, http::BodyTooLarge, http::HeaderNotText, std::event_loop::SchedulerFault:
+    name = arg(args, 0)
+    if name == "get":
+        get(args)
+    elif name == "versions":
+        versions(args)
+    elif name == "post":
+        post_json(args)
+    elif name == "stream":
+        stream(args)
+    elif name == "upload":
+        upload(args)
+    elif name == "concurrent":
+        concurrent(args)
+    elif name == "sequential":
+        sequential(args)
+    elif name == "outcome":
+        outcome(args)
+    elif name == "cancel":
+        cancel(args)
+    elif name == "abandon":
+        abandon(args)
+    elif name == "release-client":
+        release_client(args)
+    elif name == "parse":
+        parse(args)
+    else:
+        say("unknown scenario ".concat(name))
+
+fn run_scenario(args: List[str], context h: http::Http, ev: std::event_loop::Loop, nat: event_loop_linux::Native, o: Out) -> int errors std::event_loop::SchedulerFault:
+    scenario(args):
+        on http::InvalidUri {reason}:
+            say("error InvalidUri ".concat(reason))
+        on http::InvalidRequest {reason}:
+            say("error InvalidRequest ".concat(reason))
+        on http::ResolveFailed {reason, code}:
+            say("error ResolveFailed code ".concat(n(code)).concat(" ").concat(reason))
+        on http::ConnectFailed {reason, code}:
+            say("error ConnectFailed code ".concat(n(code)).concat(" ").concat(reason))
+        on http::TlsVerifyFailed {reason, code}:
+            say("error TlsVerifyFailed code ".concat(n(code)).concat(" ").concat(reason))
+        on http::TlsHandshakeFailed {reason}:
+            say("error TlsHandshakeFailed ".concat(reason))
+        on http::ProtocolError {reason, code}:
+            say("error ProtocolError code ".concat(n(code)).concat(" ").concat(reason))
+        on http::Timeout {phase, reason}:
+            say("error Timeout ".concat(phase_text(phase)).concat(" ").concat(reason))
+        on http::Cancelled:
+            say("error Cancelled")
+        on http::Closed:
+            say("error Closed")
+        on http::Unsupported {reason}:
+            say("error Unsupported ".concat(reason))
+        on http::TrustFailed {reason}:
+            say("error TrustFailed ".concat(reason))
+        on http::Released:
+            say("error Released")
+        on http::Fault {reason}:
+            say("error Fault ".concat(reason))
+        on http::BodyTooLarge {limit}:
+            say("error BodyTooLarge ".concat(n(limit)))
+        on http::HeaderNotText {name}:
+            say("error HeaderNotText ".concat(name))
+    st = http::stats():
+        on http::Fault:
+            return 0
+    say("final: clients ".concat(n(st.clients)).concat(" exchanges ").concat(n(st.exchanges)).concat(" panics ").concat(n(st.panics)))
+    0
+
+fn main(context ev: std::event_loop::Loop, d: event_loop_linux::Linux, nat: event_loop_linux::Native, h: http::Http, o: Out) -> List[str] errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    raw = argv():
+        on InvalidArgumentEncoding:
+            ["client", "bad-argv"]
+    # argv()'s first element is the program's name.
+    args = loop i from 1 to std::list::length(raw):
+        std::list::get(raw, i, "")
+    coroutine {step: s, first: f} = run_scenario(args)
+    std::event_loop::adopt(s, f)
+    std::event_loop::run()
+    lines = loop i from 0 to std::mutable_vector::length(o.lines):
+        o.lines.at(i):
+            on IndexNotFound:
+                ""
+    lines
+
+with context std::event_loop::create(64)
+with context event_loop_linux::create()
+with context event_loop_linux::native()
+with context http::create()
+with context out()
+main():
+    on std::event_loop::SchedulerFault:
+        ["SchedulerFault"]
+    on std::event_loop::DriverFault:
+        ["DriverFault"]
+    on std::event_loop::LoopReentered:
+        ["LoopReentered"]

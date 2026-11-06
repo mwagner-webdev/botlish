@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "name": "http",
+  "version": "0.1.0",
+  "dependencies": {
+    "boringssl": "0.20261020",
+    "event_loop_linux": "0.3"
+  },
+  "lock": {
+    "boringssl": "0.20261020.0",
+    "event_loop_linux": "0.3.0"
+  }
+}
