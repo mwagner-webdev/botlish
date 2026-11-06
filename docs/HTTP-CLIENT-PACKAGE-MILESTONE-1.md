@@ -48,9 +48,10 @@ under one driver, and every failure as a declared error (section 9).
 It is Linux x86-64 only (the packages name no other target and the package
 manager refuses one), HTTP/1.1 and HTTP/2 only (no HTTP/3, server,
 WebSocket, redirects, cookies, proxies or decompression: section 14), and
-its releases are candidates until they are built in the pinned author
-image (section 8: the image's pinned Ubuntu snapshot answered 502/500 to
-this environment for hours, as it does on main's CI).
+its releases (`http` 0.1.0, `boringssl` 0.20261020.0) are recorded in
+`packages/RELEASES.tsv` from the pinned author image, where two fresh
+containers built byte-identical artifacts that a host outside the image
+also reproduced (section 8).
 
 Two compiler defects surfaced while testing, and one was fixed here
 because it leaked the client's resources: natively, a function that owned
@@ -239,39 +240,45 @@ census's B3); a deterministic archive. It references the provider's
 identity symbol, so it links only with the provider it was built against
 (the census's B2).
 
-**Artifacts** (built in this environment, not in the pinned image):
+**Releases** (recorded in `packages/RELEASES.tsv`), built by
+`tools/package-build/author.sh build OUT -release boringssl event_loop_linux
+http` in the pinned author image (Ubuntu 24.04 by digest, Ubuntu's archive
+at 2026-11-01T00:00Z, gcc and g++ 13.3.0, cmake 3.28.3, ninja 1.11.1, clang
+18 for boring-sys's bindgen, Rust 1.97.0 by rustup-init 1.28.2 checked by
+SHA-256):
 
 | artifact | SHA-256 | size |
 |---|---|---|
-| `boringssl-0.20261020.0.botpkg` | `147590a720cd92aa31105b7126fca5f7eb6ae34bc675e017541fa996a89050f3` | 1,820,965 |
-| `http-0.1.0.botpkg` | `e0bfd797780375433e17366723a19b550471c241af5f80ed621d8bb16ef3e330` | 5,326,387 (17,611,604 unpacked) |
-| `event_loop_linux-0.3.0.botpkg` | `3746cece124b660fa03bf018271e4d5bc6d25f2bf684da84bc9fd621a2bc453c` (the recorded release) | 33,589 |
-| the released unit `libbotlish_http.a` | `26490165a9072ff1195ada72c2e64512bfd26fd540501c633663f4f2692f8e27` | |
+| `boringssl-0.20261020.0.botpkg` | `9124d0a25d4c08579530d1d18fdafb0c92c27fe3f223b6227220503383edf453` | 1,821,938 (7 files, 5,805,143 unpacked) |
+| `http-0.1.0.botpkg` | `3d40620ee4bead40c3df6c5e076ce7193ecbe73a5104f21bd62bf08d2b0bc436` | 5,326,480 (95 files, 17,611,825 unpacked) |
+| `event_loop_linux-0.3.0.botpkg` (the recorded release, rebuilt) | `3746cece124b660fa03bf018271e4d5bc6d25f2bf684da84bc9fd621a2bc453c` | 33,589 |
+| provenance records (boringssl, http) | `c6fb5d8e63d08fdcc7d5eac72a6dbf30ca99b048490666cd0d305ed61ec9a08b`, `5263823b8ed31aa903c82a3536679cb7a4da5b4795ead1f569a7ae5f46f6cbd8` | |
+| the unit `libbotlish_http.a` inside `http` | `26490165a9072ff1195ada72c2e64512bfd26fd540501c633663f4f2692f8e27` | 17,040,508 |
 
-**Reproducibility.** Two builds of the provider and the unit from empty
-caches on this host produced identical archives and an identical
-`boringssl` artifact; `http`'s artifacts differed only where `http.bot`
-had changed between the builds. Each artifact has a provenance record
-beside it (`botlish package inspect ... -provenance` checks it; the clean
-room does). **Not recorded in `packages/RELEASES.tsv`**: the repository's
-rule is that a release is built in the pinned author image
-(`tools/package-build/author.sh build OUT -release`), and the image could
-not be built here -- its pinned Ubuntu snapshot (`snapshot.ubuntu.com`)
-returned 502 and 500 for package downloads through this environment's
-proxy on three attempts over several hours, the failure main's
-`package-reproducibility` run shows too. The Dockerfile now retries apt
-downloads; the first image build that completes should run `author.sh
-build OUT -release boringssl http` twice and record the two releases.
-License notices travel in the artifacts: BoringSSL's LICENSE, and every
-crate of the unit's dependency closure with its own license files
-(`licenses/http/crates/`, `CRATES.md`).
+**Reproducibility.** Two builds in fresh containers of the image produced
+byte-identical artifacts and provenance records; the same command on this
+host, outside the image (its own Rust 1.97.0 and gcc 13.3.0, a cache made
+hours earlier), produced the same two artifacts, so `-release` accepts
+them as the recorded releases. Earlier candidates made on the host
+differed only in the two documentation files changed in between
+(`botlish package compare`). The image could first be built only after
+two changes this milestone made to its Dockerfile: apt retries (the pinned
+Ubuntu snapshot answered 502 and 500 for hours through this environment's
+proxy, the failure main's `package-reproducibility` run shows) and the
+`rustc --version` check run with rustup's home. With them the branch's
+`package reproducibility` workflow passes. Each artifact has a provenance
+record beside it (`botlish package inspect ... -provenance` checks it; the
+clean room does). License notices travel in the artifacts: BoringSSL's
+LICENSE, and every crate of the unit's dependency closure with its own
+license files (`licenses/http/crates/`, `CRATES.md`).
 
 ## 9. Clean room
 
 `audit/http-client/cleanroom/` (commands in section 17). The image is
 Ubuntu 24.04 with `gcc g++ libc6-dev ca-certificates` and nothing else;
-the harness copies in the single-file compiler (built from a64bd30), the
-artifacts and their provenance records, the consumer's source
+the harness copies in the single-file compiler (built from 6673eb8, which
+holds the fix of section 12), the recorded release artifacts and their
+provenance records, the consumer's source
 (`app/main.bot`) and the test CA's certificate (the consumer's own anchor
 file). The peers run outside it: `tests/http/server.py` with a certificate
 the test CA signs, one signed by a CA nobody trusts, and a closed port.
@@ -306,9 +313,10 @@ store and the program's anchors, and nothing else.
 
 ### 10.1 tests/http-client.test
 
-38 tests; the native files come from the release recipe's builds
-(`tests/cffi/http.tcl`); the client is `tests/http/client.bot` built with
-the test unit. The peers are independent of Hyper and BoringSSL:
+38 tests, all passing (the last full run: 38 passed, 0 skipped, on this
+milestone's final code); the native files come from the release recipe's
+builds (`tests/cffi/http.tcl`); the client is `tests/http/client.bot`
+built with the test unit. The peers are independent of Hyper and BoringSSL:
 
 * `tests/http/server.py`: Python 3.13.18's asyncio and ssl (OpenSSL
   3.5.9), the `h2` 4.3.0 library for HTTP/2, a small HTTP/1.1
@@ -337,7 +345,8 @@ the consumer (512).
   generated from grammars of valid parts and corruptions, run through the
   package (`parse-many`, `headers-many`) and through independent oracles
   (`tests/http/uri_oracle.py`, `tests/http/header_oracle.py`, written from
-  the documentation and the RFCs).
+  the documentation and the RFCs). Seeds 1-4: 12,000 URIs (1,944 valid)
+  and 12,000 header fields (4,526 accepted), 0 disagreements.
 * **Handle operations and lifetime ordering, cancellation against
   completion, notices and wakeups** (`http-lifetime-fuzz`): seeded
   sequences of sends, reads, exchange and client releases, cancellations
@@ -350,8 +359,43 @@ the consumer (512).
 ### 10.3 Mutation testing
 
 `audit/http-client/tools/mutate.tcl` (`mutants.txt`): each mutant is
-applied to a private copy of the tree, whose own cache rebuilds the unit,
-and must be killed by the tests its line names.
+applied to a private copy of the tree, whose own cache rebuilds the
+provider archive and the units, and must be killed by the detectors its
+lines name. **16 mutants, 16 killed** -- the brief's nine kinds and seven
+more:
+
+| mutant | the defect | killed by |
+|---|---|---|
+| `tls-no-hostname` | the certificate's names never checked against the host | `http-tls-verify` |
+| `tls-no-verify` | `SSL_VERIFY_NONE` | `http-tls-verify` |
+| `header-value-control` | the constructor accepts control characters, CR LF included | `http-header-validation` |
+| `header-native-value` | the unit accepts any bytes as a hand-built header's value | `http-header-validation` |
+| `body-duplicate-chunk` | each received chunk queued twice | `http-get-h1`, `http-get-h2-tls`, `http-utf8-split` |
+| `body-drop-chunk` | every second chunk dropped | the same three |
+| `backpressure-ignored` | the pump reads on while a chunk waits | `http-backpressure` |
+| `cancel-leaves-task` | a cancelled exchange's task runs on | `http-cancel` |
+| `release-leaves-task` | a released exchange's task runs on | `http-abandon` |
+| `slab-index-only` | a stale handle reaches the object that reused its slot | `http-stale-handle` |
+| `executor-unbounded` | a step polls every ready task | `http-executor-budget` |
+| `foreign-wake-lost` | the resolver's answer never posted to the loop | `http-resolver-control` |
+| `deadline-ignored` | a request's deadline never enforced | `http-timeouts` |
+| `uri-bad-escape` | `%` needs one hex digit, not two | `http-uri`, `syntax-fuzz.tcl` |
+| `provider-mismatch` | the provider archive identifies another BoringSSL | `http-provider-identity`, `http-get-h1` (the link fails) |
+| `graph-lock-drift` | http locks a driver release the repository does not hold | `http-package-metadata` |
+
+Two lessons from the first run, both fixed before the second: the native
+check of a header *name* had a mutant that survived because no program can
+reach it (the module checks every name before the native call: an
+equivalent mutant, replaced by the value check's, which a hand-built
+header does reach); and the harness reused the provider archive an earlier
+mutant had built, so the recipe's mutant never ran (it now rebuilds the
+archive and the units per mutant). `uri-bad-escape` was first killed only
+by the fuzzer; `http-uri` now refuses `%az` too.
+
+The compiler fix of section 12 was checked by the affine and coroutine
+catalogs' mutants of `native/lower.tcl` (affine 2 of 2, coroutines 3 of 3
+killed), the affine (seeds 1, 5), coroutine (1, 5) and lexical-cleanup (1,
+7) fuzzers (0 disagreements), and `tools/mutant-catalogs.tcl`.
 
 ### 10.4 The integration census's 50 claims
 
@@ -380,6 +424,98 @@ How each of HTTP-STACK-INTEGRATION-CENSUS.md's claims maps to the client
 | `measurements-recorded` | section 11 |
 
 ## 11. Measurements
+
+`tclsh9.0 audit/http-client/tools/measure.tcl -runs 3` (medians of three
+runs) on this 4-core shared container, with the released unit (no test
+feature; `audit/http-client/bench/bench.bot`), the system linker, loopback
+peers: the Python test peer (`tests/http/server.py`), nghttpd serving a
+64 MiB file over TLS, Python's `http.server` serving it over plaintext
+HTTP/1.0, and curl 8.5.0 (OpenSSL 3.0.13, nghttp2 1.59.0) against the same
+peers as a baseline. Representative, not benchmarks: the peers bound
+several numbers, as noted. The raw table and the attribution below are in
+`audit/http-client/results/measurements.txt`
+(`audit/http-client/tools/attribute.py` makes the attribution).
+
+| measurement | value |
+|---|---:|
+| warm HTTP/1.1 GET (6 bytes), plaintext, one client | 217 µs (curl, same peer: 151 µs) |
+| warm HTTP/2 GET (6 bytes), TLS, one client | 460 µs (curl: 376 µs) |
+| guarded C calls per request (HTTP/1.1, HTTP/2) | 14.2, 17.7 |
+| cold request, new client, HTTP/1.1 plaintext | 4.5 ms |
+| cold request, new client, HTTP/2 over TLS (handshake included) | 6.4 ms |
+| of which making the client (the system bundle and the anchors parsed into a trust store) | 4.0 ms |
+| 64 concurrent HTTP/2 requests of 16 KiB on one connection (whole process: start, client, handshake) | 102 ms |
+| download 64 MiB, HTTP/2 over TLS from nghttpd (16 KiB frames: 4,096 chunks) | 258 MiB/s (curl: 931) |
+| download 64 MiB, plaintext from `http.server` (1,175 chunks) | 1,280 MiB/s (curl: 1,800) |
+| guarded C calls per chunk (HTTP/2, plaintext) | 3.2, 2.0 |
+| peak memory growth while 64 MiB passed (HTTP/2, plaintext) | 3.8 MiB, 1.8 MiB |
+| most bytes held natively for one exchange (HTTP/2, plaintext) | 16 KiB, 112 KiB (one read of the socket) |
+| slow consumer (2 ms per chunk), 64 MiB over HTTP/2: peak memory growth | 3.7 MiB (16 KiB held natively; 7.4 MiB/s) |
+| upload 16 MiB and read the echo back, plaintext, writes of 1 KiB / 16 KiB / 64 KiB / 1 MiB | 60 / 399 / 477 / 427 MiB/s (curl, same peer, without `Expect: 100-continue`'s wait: about 790) |
+| upload 16 MiB, HTTP/2 over TLS, writes of 1 KiB / 16 KiB / 64 KiB / 1 MiB | 3 / 17 / 19 / 20 MiB/s (curl: 20: the peer's pure-Python HTTP/2 bounds it) |
+| guarded C calls per write, plaintext (1 KiB ... 1 MiB) | 3.0, 3.6, 5.6, 42.2 |
+| front end of a program importing `http` (no cache) | 29 s |
+| front end, code generation and the system link | 49 s (the clean room: 48 s) |
+| executable (the measurement program), unstripped / stripped | 17.0 MB / 6.1 MB (the clean room's: 7.2 MB) |
+| `libbotlish_http.a` / `libbotlish_boringssl.a` | 17.0 MB / 5.8 MB |
+| `http-0.1.0.botpkg` / `boringssl-0.20261020.0.botpkg` | 5.3 MB (17.6 MB unpacked) / 1.8 MB (5.8 MB) |
+
+**Per request and per chunk, with the test unit** (`tests/http/client.bot`'s
+`costs`: 100 sequential GETs on a warm client, then a 1 MiB body in 4 KiB
+chunks; the client side only, unlike the census's figures, which counted
+both ends in one process):
+
+| per | C calls | executor steps | polls | notices | readiness | bytes copied out / in | Rust allocations (bytes) |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| HTTP/1.1 request | 14.3 | 5.1 | 6.2 | 3.0 | 1.1 | 396 / 18 | 45.3 (45.5 KB) |
+| HTTP/2 request (TLS) | 16.3 | 7.0 | 9.2 | 3.0 | 1.2 | 422 / 18 | 51.3 (44.1 KB) |
+| HTTP/1.1 4 KiB chunk | 3.0 | 1.0 | 2.0 | 1.0 | 0 | 3,993 / 0 | 2.2 (2.9 KB) |
+| HTTP/2 4 KiB chunk (TLS) | 3.4 | 1.0 | 1.8 | 1.0 | 0.4 | 4,175 / 0 | 4.6 (11.0 KB) |
+
+Resource counts after completion, cancellation, release and abandonment
+are zero in every test that ends a scenario (`final: clients 0 exchanges
+0`), the lifetime fuzzer's twenty orders included.
+
+**Where the time goes.** Callgrind's instruction counts (no `perf` here)
+of the warm HTTP/2 run, 201 requests minus 1 (startup subtracted): about
+1.9 million instructions per request --
+
+| | share |
+|---|---:|
+| copying and zeroing (libc `memcpy`, `memset`) | 29% |
+| allocation (libc `malloc`, `free`) | 28% |
+| Botlish runtime: layout decoding (`bin_extent`, `bin_decode`, `rt_bin_load`) | 16% |
+| Botlish runtime: everything else (construction, heap, structs, vectors) | 15% |
+| compiled Botlish code | 7.5% |
+| Hyper, h2 and the bridge | 1.7% |
+| BoringSSL | 0.7% |
+
+and for a 16 MiB HTTP/2 download (per 16 KiB chunk, about 640,000
+instructions): copying and zeroing 49%, allocation 15%, BoringSSL
+(decryption) 13%, the Botlish runtime 15%, compiled Botlish 4.6%, Hyper
+and the bridge 1.1%. **The overhead is the module's own buffer handling on
+the Botlish side of the boundary**, not Hyper, TLS, C crossings or the
+event loop's syscalls (kernel time is not in these counts): every `read` allocates and
+zeroes a 64 KiB `MutableBytes` for the C call to write into, whatever the
+chunk's size, then copies the chunk out of it; every executor step
+allocates its 2 KiB record buffer and decodes all 64 records of the batch
+layout, though a step returns a few. Both are local to `http.bot` and have
+plain remedies -- a read buffer sized to the waiting chunk (the unit knows
+it: `Recv::front`), and decoding only the records a step returned -- left
+for a later release, which would be a new version (0.1.0 is recorded).
+None needs a zero-copy facility.
+
+**Against the integration census** (its section 13; it counted both ends
+in one process): C calls per exchange fell from 75 (HTTP/1.1) and 87
+(HTTP/2) to 14 and 16-18 for the client -- the batched step replaced the
+census's per-query calls -- and per streamed chunk from 20 to 3. Rust
+allocations per exchange are higher (45 and 51 for the client alone,
+against 33 and 43 for both ends): the production API's head and failure
+records, and Hyper's client-side header map. The unit is 17 MB against
+31 MB (no quiche), a program 17 MB unstripped against 45 MB; compiling and
+linking a program takes 49 s against about 40 s (the module is larger).
+Latency and throughput are not comparable directly (the census's peer was
+Hyper in the same process; here, Python's asyncio and nghttpd).
 
 ## 12. Findings (and the compiler fix they led to)
 
@@ -476,8 +612,6 @@ fixture); B4 and B8 were not needed; B9 and B10 remain.
 * **On the loop's thread**: TLS handshakes and certificate verification
   run inside the executor's step (measured in section 11); a very slow
   handshake delays other tasks by its duration.
-* **Releases**: not recorded in RELEASES.tsv until built in the pinned
-  author image (section 8).
 * **CI**: no workflow runs `tests/http-client.test` yet (it needs the
   provider's and the unit's builds, Python's h2 and nghttpd); it runs
   locally.
@@ -507,8 +641,7 @@ type, a BoringSSL object or a C type, and the installation needs no Rust,
 Cargo or BoringSSL source -- only the C compiler driver and the C++
 standard library's link name the system linker needs, which README.md
 states. "Production-quality" with stated limits: no proxy support, no
-redirects, Linux x86-64 only, releases not yet recorded from the pinned
-image (sections 8, 14).
+redirects, Linux x86-64 only (section 14).
 
 **B. Can that client coexist with independently authored event-loop
 consumers under one shared driver and one coherent package graph?** Yes.
@@ -554,8 +687,8 @@ deficiencies?** Primarily subprocess execution, terminal input and output
 as event-loop sources, and the platform restriction. On the HTTP side the
 consumer-visible deficiencies are small and known: no proxy support
 (environments that require `HTTPS_PROXY` cannot reach a provider), no
-built-in SSE or JSON decoding (a consumer's few dozen lines), Linux x86-64
-only, and the releases still to be recorded from the pinned author image.
+built-in SSE or JSON decoding (a consumer's few dozen lines), and Linux
+x86-64 only.
 None of them needs the client's architecture to change.
 
 ## 17. Commands

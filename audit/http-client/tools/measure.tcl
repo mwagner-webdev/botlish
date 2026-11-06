@@ -130,6 +130,14 @@ try {
         }
         lappend rows [list "cold request, $label: new client" [format %.0f [median $us]] us]
     }
+    # Making a client: its TLS context and trust store (the system bundle
+    # parsed, plus the program's anchors), no connection.
+    set us {}
+    for {set r 0} {$r < $runs} {incr r} {
+        set d [bench clients https://localhost:$tls/hello $ca 20]
+        lappend us [expr {[dict get $d clients_total_us] / 20.0}]
+    }
+    lappend rows [list "  of which making the client (system bundle and anchors parsed)" [format %.0f [median $us]] us]
     # Throughput: 64 MiB.
     foreach {label url anchors curlFlags} [list "HTTP/2, TLS, nghttpd" https://localhost:$ng/big.bin $ca [list --http2 --cacert $ca] \
             "HTTP/1.0, plaintext, Python http.server" http://127.0.0.1:$hs/big.bin "" {}] {
@@ -175,6 +183,15 @@ try {
             lappend rows [list "upload 16 MiB and read it back, $label, writes of $chunk bytes" [format %.0f [median $mbs]] MiB/s]
             lappend rows [list "  guarded C calls per write" [format %.2f [median $calls]] calls]
         }
+        set upload [file join $dir upload.bin]
+        if {![file exists $upload]} { exec head -c 16777216 /dev/zero > $upload }
+        set flags [expr {$anchors eq "" ? {} : [list --http2 --cacert $anchors]}]
+        set curlMbs {}
+        for {set r 0} {$r < $runs} {incr r} {
+            set t [timed {exec curl -s -o /dev/null -H "Expect:" -T $upload {*}$flags $url}]
+            lappend curlMbs [expr {2 * 16.0 / ($t / 1e6)}]
+        }
+        lappend rows [list "  curl, the same upload to the same peer" [format %.0f [median $curlMbs]] MiB/s]
     }
     # The boundary's costs, with the test unit (its allocation counter):
     # tests/http/client.bot's `costs` scenario, per request and per chunk.

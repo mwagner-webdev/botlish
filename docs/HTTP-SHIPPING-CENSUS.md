@@ -585,7 +585,7 @@ milestone like the ones in `docs/`, L: several). Projected.
 | 4 | transport: addresses, IPv4/IPv6, name resolution off the loop, listen/connect options, the transport context (8.1) -- done for outbound connections (no listen) | M | 3 |
 | 5 | HTTP/1.1 and HTTP/2 API: headers, URIs, byte bodies, declared errors, resource-typed handles with detach-to-executor release, graceful shutdown, limits -- done for the client | L | 1, 3, 4 |
 | 6 | TLS policy: system trust anchors, application certificates and keys, ALPN, no verification bypass -- done for the client (no client certificates) | M | 2, 5 |
-| 7 | the release recipe: vendored crates, pinned rustc, link-only unit, localization, identity checks, reproducible archives, notices; `packages/http` and RELEASES.tsv -- done but for RELEASES.tsv: the releases are recorded once built in the pinned author image | M | 2, D5 |
+| 7 | the release recipe: vendored crates, pinned rustc, link-only unit, localization, identity checks, reproducible archives, notices; `packages/http` and RELEASES.tsv -- done (boringssl 0.20261020.0 and http 0.1.0 recorded from the pinned image) | M | 2, D5 |
 | 8 | tests, GC stress, AArch64, interop, mutants, fuzzing, CI jobs with caching; AGENTS.md section; milestone report -- done but for AArch64 and a CI job | M | 5-7 |
 | 9 | HTTP/3: multi-connection endpoints, retry and version negotiation, Alt-Svc, BBR2 configuration | L | 5-8 |
 | 10 | std vocabulary module(s) (5.3), Compilerpedia, warning gate, stdlib census | S-M | D2, D6 |

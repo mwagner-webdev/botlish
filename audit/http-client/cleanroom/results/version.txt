@@ -1,5 +1,5 @@
 Botlish compiler (no release version; this is a development build)
-source revision: a64bd30, packaged
+source revision: 6673eb8, packaged
 front end: 2618e63d10ebfb8e-5170579
 Tcl: 9.0.1
 native backend: packaged (663d73be-10816976-82cde1d6-1474136-627b00bc-16797454)

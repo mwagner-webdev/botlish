@@ -9,28 +9,28 @@ python3: none
 git: none
 operator CA: 1 certificate(s) added to the system store
 Botlish compiler (no release version; this is a development build)
-source revision: a64bd30, packaged
+source revision: 6673eb8, packaged
 front end: 2618e63d10ebfb8e-5170579
 Tcl: 9.0.1
 native backend: packaged (663d73be-10816976-82cde1d6-1474136-627b00bc-16797454)
 invocation: botlish
-147590a720cd92aa31105b7126fca5f7eb6ae34bc675e017541fa996a89050f3  ./boringssl-0.20261020.0.botpkg
+9124d0a25d4c08579530d1d18fdafb0c92c27fe3f223b6227220503383edf453  ./boringssl-0.20261020.0.botpkg
 3746cece124b660fa03bf018271e4d5bc6d25f2bf684da84bc9fd621a2bc453c  ./event_loop_linux-0.3.0.botpkg
 100b878a99fe78636afeb0fe7fa8df1f66446f80e374382f18f05171e3f36636  ./feeds-1.0.0.botpkg
-e0bfd797780375433e17366723a19b550471c241af5f80ed621d8bb16ef3e330  ./http-0.1.0.botpkg
+3d40620ee4bead40c3df6c5e076ce7193ecbe73a5104f21bd62bf08d2b0bc436  ./http-0.1.0.botpkg
 bafbeee24dcab4c46349886637a1b44056277e0c172b93642564c6433c851568  ./oldtls-1.0.0.botpkg
 cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0
 == botlish add
-boringssl 0.20261020.0 (sha256 147590a720cd): installed, used by http
+boringssl 0.20261020.0 (sha256 9124d0a25d4c): installed, used by http
 event_loop_linux 0.3.0 (sha256 3746cece124b): installed, used by http
-http 0.1.0 (sha256 e0bfd7977803): installed
-view linux-x86_64: derived (111 files, 4 native libraries)
+http 0.1.0 (sha256 3d40620ee4be): installed
+view linux-x86_64: derived (112 files, 4 native libraries)
 added http (request "0.1", lock 0.1.0)
 status 0
 boringssl 0.20261020.0: unchanged, used by http
 event_loop_linux 0.3.0: unchanged, used by the application, http
 http 0.1.0: unchanged
-view linux-x86_64: derived again (111 files, 4 native libraries)
+view linux-x86_64: derived again (112 files, 4 native libraries)
 note: event_loop_linux 0.3.0 is the version http 0.1.0 locks: the application shares that instance
 added event_loop_linux (request "0.3", lock 0.3.0)
 status 0
@@ -38,7 +38,7 @@ boringssl 0.20261020.0: unchanged, used by http
 event_loop_linux 0.3.0: unchanged, used by the application, feeds, http
 feeds 1.0.0 (sha256 100b878a99fe): installed
 http 0.1.0: unchanged, used by the application, feeds
-view linux-x86_64: derived again (113 files, 4 native libraries)
+view linux-x86_64: derived again (114 files, 4 native libraries)
 added feeds (request "1.0", lock 1.0.0)
 status 0
 == the installed graph
@@ -50,7 +50,7 @@ package feeds event_loop_linux http
 package http boringssl event_loop_linux
 the dependency graph of /home/dev/app: 4 packages, one instance of each
 application uses: event_loop_linux, feeds, http
-boringssl 0.20261020.0 (sha256 147590a720cd): used by http; installed
+boringssl 0.20261020.0 (sha256 9124d0a25d4c): used by http; installed
   locked by: http 0.1.0
   path: the project -> http 0.1.0 -> boringssl 0.20261020.0
 event_loop_linux 0.3.0 (sha256 3746cece124b): used by the application, feeds, http; installed
@@ -61,7 +61,7 @@ feeds 1.0.0 (sha256 100b878a99fe): used by the application; installed
   locked by: the application (request "1.0")
   uses: event_loop_linux 0.3.0, http 0.1.0
   path: the project -> feeds 1.0.0
-http 0.1.0 (sha256 e0bfd7977803): used by the application, feeds; installed
+http 0.1.0 (sha256 3d40620ee4be): used by the application, feeds; installed
   locked by: the application (request "0.1"), feeds 1.0.0
   uses: boringssl 0.20261020.0, event_loop_linux 0.3.0
   shared: one instance, http, for the application, feeds
@@ -73,12 +73,12 @@ verify: 4 package instance(s) in /home/dev/app: as installed
 == provenance records
 == native executable
 executable: main
-	linux-vdso.so.1 (0x00007fba0ddfe000)
-	libstdc++.so.6 => /lib/x86_64-linux-gnu/libstdc++.so.6 (0x00007fba0d595000)
-	libgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1 (0x00007fba0d567000)
-	libm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007fba0d47e000)
-	libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007fba0d26b000)
-	/lib64/ld-linux-x86-64.so.2 (0x00007fba0de00000)
+	linux-vdso.so.1 (0x00007f55de5fd000)
+	libstdc++.so.6 => /lib/x86_64-linux-gnu/libstdc++.so.6 (0x00007f55ddd94000)
+	libgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1 (0x00007f55ddd66000)
+	libm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007f55ddc7d000)
+	libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007f55dda6a000)
+	/lib64/ld-linux-x86-64.so.2 (0x00007f55de5ff000)
 == A: a public HTTPS URL
 -- ./main public https://example.com/
 public: status 200, HTTP/2
@@ -88,7 +88,7 @@ end: clients 0, exchanges 0, panics 0
 0
 exit 0
 == B: JSON over HTTPS, the program's own anchor
--- ./main post https://localhost:32879 /home/dev/inputs/test-ca.pem
+-- ./main post https://localhost:39231 /home/dev/inputs/test-ca.pem
 post: status 200, HTTP/2
 post: the peer saw method POST, content-type application/json, authorization Bearer cleanroom-token
 post: the echoed body is the body sent: yes: {"input": "héllo ✓", "stream": false}
@@ -96,10 +96,10 @@ end: clients 0, exchanges 0, panics 0
 0
 exit 0
 == C: streaming, bounded memory, UTF-8 across chunks, a streamed upload
--- ./main stream https://localhost:32879 /home/dev/inputs/test-ca.pem
+-- ./main stream https://localhost:39231 /home/dev/inputs/test-ca.pem
 stream: 67108864 bytes in 4096 chunks over HTTP/2, the largest 16384
 stream: at most 16384 bytes held natively while the program did not read
-stream: peak memory grew by 3828 KiB while 65536 KiB passed through: bounded yes
+stream: peak memory grew by 3584 KiB while 65536 KiB passed through: bounded yes
 stream: utf-8 text in 27 chunks: héllo wörld ✓ 😀 end
 
 stream: uploaded 4194304 bytes in 64 writes; the peer saw content-length 4194304 and echoed 4194304
@@ -107,7 +107,7 @@ end: clients 0, exchanges 0, panics 0
 0
 exit 0
 == D: a separately authored library under the same driver and runtime
--- ./main shared https://localhost:32879 /home/dev/inputs/test-ca.pem
+-- ./main shared https://localhost:39231 /home/dev/inputs/test-ca.pem
 app: request 1: status 200, HTTP/2, 6 bytes
 app: request 2: status 200, HTTP/2, 6 bytes
 app: request 3: status 200, HTTP/2, 6 bytes
@@ -121,10 +121,10 @@ feeds task done: clients 0, exchanges 0, panics 0
 0
 exit 0
 == E: failures
--- ./main failures https://localhost:32879 /home/dev/inputs/test-ca.pem https://localhost:43901 http://127.0.0.1:48199
+-- ./main failures https://localhost:39231 /home/dev/inputs/test-ca.pem https://localhost:45735 http://127.0.0.1:38321
 failures: name resolution: error ResolveFailed no-such-host.invalid: Name or service not known
 failures: untrusted certificate: error TlsVerifyFailed localhost: unable to get local issuer certificate
-failures: refused: error ConnectFailed 127.0.0.1 port 48199: Connection refused (os error 111) (127.0.0.1:48199)
+failures: refused: error ConnectFailed 127.0.0.1 port 38321: Connection refused (os error 111) (127.0.0.1:38321)
 failures: deadline: error Timeout deadline: the request's deadline passed
 failures: idle body: body error Timeout idle: the server sent nothing within the idle timeout
 failures: cancelled: error Cancelled
@@ -191,12 +191,12 @@ PASS add oldtls fails
 PASS the failure is a DEPENDENCY-CONFLICT naming both locks
 PASS the installation is unchanged
 == facts
-compiler b912d295c995c22eb6866e238602ea29d430352be3745d60983b699ce86ac98d 14813944 bytes
-147590a720cd92aa31105b7126fca5f7eb6ae34bc675e017541fa996a89050f3  ./boringssl-0.20261020.0.botpkg
+compiler aa76822ca6daa695d4ab58575873d76510f6316154f9f80615e948c035d463c6 14815032 bytes
+9124d0a25d4c08579530d1d18fdafb0c92c27fe3f223b6227220503383edf453  ./boringssl-0.20261020.0.botpkg
 3746cece124b660fa03bf018271e4d5bc6d25f2bf684da84bc9fd621a2bc453c  ./event_loop_linux-0.3.0.botpkg
 100b878a99fe78636afeb0fe7fa8df1f66446f80e374382f18f05171e3f36636  ./feeds-1.0.0.botpkg
-e0bfd797780375433e17366723a19b550471c241af5f80ed621d8bb16ef3e330  ./http-0.1.0.botpkg
+3d40620ee4bead40c3df6c5e076ce7193ecbe73a5104f21bd62bf08d2b0bc436  ./http-0.1.0.botpkg
 bafbeee24dcab4c46349886637a1b44056277e0c172b93642564c6433c851568  ./oldtls-1.0.0.botpkg
 cc: cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0
 libstdc++: /usr/lib/x86_64-linux-gnu/libstdc++.so.6 /usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.33 
-build: 48.4527 s, executable 7212600 bytes
+build: 48.2712 s, executable 7212600 bytes
