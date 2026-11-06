@@ -428,7 +428,11 @@ agreed end to end, and 34 runtime programs (8 of them natively) released
 every coroutine exactly once.
 `or-old-walk` pins the classes on named specimens. `parity.tcl` runs both
 over every affine named struct type the golden suites and examples give an
-expression, a binding or a field: see section 19 for its result.
+expression, a binding or a field: 216 programs (34 of them do not compile
+on their own -- a module, another platform's program, one that needs a
+package), 68 distinct affine named struct types, all 68 the same verdict
+from both. Real programs meet none of the changed classes: every difference
+is in what random declaration graphs, and the specimens, write.
 
 Each changed class is a former artifact of the old walk's shape or bound,
 not a change of the rule of section 2: the rule always said "values nest to
