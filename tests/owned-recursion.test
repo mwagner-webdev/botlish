@@ -110,6 +110,10 @@ struct Fun[T]:
     f: Fn{args: [T], return: int}
     kids: List[Fun[T]]
 
+struct FnArg[T]:
+    value: T
+    kids: List[FnArg[Fn{args: [T], return: int}]]
+
 fn worker(seed: int) -> int:
     yield seed
     seed
@@ -218,16 +222,16 @@ proc orChain {n} {
 # ---------------------------------------------------------------------------
 # The specimens
 
-test or-specimens {each specimen's verdict, from the declaration graph: Node[C] (a value of T in a List of its own applications) recursive; W[C] and PhantomRec[C] (the argument only grows, no value holds it) not; Mixed's owning slot recursive, its phantom slot not; GrowA/GrowB (non-uniform mutual recursion, T held in B) recursive from either side; T held nowhere not, held in A recursive; a MutableVector edge recursive; a Fn type over the slot and an unrelated unrestricted recursion not} -body {
+test or-specimens {each specimen's verdict, from the declaration graph: Node[C] (a value of T in a List of its own applications) recursive; W[C] and PhantomRec[C] (the argument only grows, no value holds it) not; Mixed's owning slot recursive, its phantom slot not; GrowA/GrowB (non-uniform mutual recursion, T held in B) recursive from either side; T held nowhere not, held in A recursive; a MutableVector edge recursive; a Fn type over the slot, an unrelated unrestricted recursion and a recursion whose argument becomes a function type over the slot (FnArg[C]: kids hold FnArg[Fn{args: [C]}], unrestricted) not} -body {
     orHir
     set c $::orCo
     lmap t [list [orApp Node $c] [orApp Node int] [orApp W $c] [orApp PhantomRec $c] \
             [orApp Mixed $c int] [orApp Mixed int $c] [orApp GrowA $c] [orApp GrowB $c] \
             [orApp NowhereA $c] [orApp InA $c] [orApp InB $c] [orApp Vectored $c] \
-            [orApp Fun $c] {nstruct HoldsUnrelated} [orApp GrowA [orList $c]]] {
+            [orApp Fun $c] {nstruct HoldsUnrelated} [orApp GrowA [orList $c]] [orApp FnArg $c]] {
         string cat [orVerdict $t].
     }
-} -result {recursive. . . . recursive. . recursive. recursive. . recursive. recursive. recursive. . . recursive.}
+} -result {recursive. . . . recursive. . recursive. recursive. . recursive. recursive. recursive. . . recursive. .}
 
 test or-declarations {a declaration is judged at its own slots (unrestricted): an intrinsically affine recursion through a container (R: handle and List[R]) and one through a pointer-holding struct (an affine C address in every level) are AFFINE-CONTAINER-UNSUPPORTED at the declaration, as is one whose own field introduces the affine argument (Q[T]: kids: List[Q[C]]); a recursion through fields alone (FieldSelf: no finite value) and an unrelated unrestricted recursion are accepted} -body {
     lmap text [list \
@@ -280,14 +284,20 @@ test or-deep-slot-chain {a chain of 100 parameterized declarations handing T on 
         [orCode "${::orDecls}${chain}struct H100\[T\]:\n    n: Node\[T\]\nfn f(x: H0\[int\]) -> int:\n    1\n1\n"]
 } -cleanup {unset -nocomplain chain i} -result {ok AFFINE-CONTAINER-UNSUPPORTED ok}
 
-test or-wrapped-recursion {a recursive affine type wrapped 1, 70 or 100 levels deep in Box is rejected at every depth: the wrapping is the type's own finite argument, the recursion Node's} -body {
+test or-wrapped-recursion {a recursive affine type wrapped 1, 70 or 100 levels deep in Box is rejected at every depth: the wrapping is the type's own finite argument, the recursion Node's; a coroutine wrapped as deep (a type of thousands of characters, past the applied-type bound) is a finite type at every depth} -body {
     orHir
-    lmap k {1 70 100} {
+    set result {}
+    foreach k {1 70 100} {
         set t [orApp Node $::orCo]
-        for {set i 0} {$i < $k} {incr i} { set t [orApp Box $t] }
-        orVerdict $t
+        set u $::orCo
+        for {set i 0} {$i < $k} {incr i} {
+            set t [orApp Box $t]
+            set u [orApp Box $u]
+        }
+        lappend result [orVerdict $t]/[orVerdict $u]/[expr {[string length $u] > 1000 * ($k > 1)}]
     }
-} -cleanup {unset -nocomplain t i} -result {recursive recursive recursive}
+    set result
+} -cleanup {unset -nocomplain result t u i k} -result {recursive//1 recursive//1 recursive//1}
 
 # ---------------------------------------------------------------------------
 # What the old walk got wrong
@@ -363,6 +373,10 @@ test or-messages {the witness: the path from the type to the recursion and once 
         [orMessage "${::orDecls}[orText "fn f(x: Wrap\[@C@\]) -> int:\n    1\n1\n"]"]
 } -result {{unknown or invalid type Node[Coroutine{args: [], return: int, errors: []}] for parameter "x": Node[Coroutine{args: [], return: int, errors: []}] is affine (its field "value" holds Coroutine{args: [], return: int, errors: []}) and holds affine values of struct "Node" in a List, MutableVector or MutableArray (Node[Coroutine{args: [], return: int, errors: []}].children: List[Node[Coroutine{args: [], return: int, errors: []}]]): a recursive affine type is not supported -- its release would have to recurse as deep as the value nests, and an affine value is released by a static, finite walk of its type (an unrestricted struct may hold itself in a container)} {unknown or invalid type GrowA[Coroutine{args: [], return: int, errors: []}] for parameter "x": GrowA[Coroutine{args: [], return: int, errors: []}] is affine (its field "b" holds List[GrowB[List[Coroutine{args: [], return: int, errors: []}]]]) and holds affine values of struct "GrowA" in a List, MutableVector or MutableArray (GrowA[Coroutine{args: [], return: int, errors: []}].b: List[GrowB[List[Coroutine{args: [], return: int, errors: []}]]], GrowB[List[Coroutine{args: [], return: int, errors: []}]].a: GrowA[List[Coroutine{args: [], return: int, errors: []}]]): a recursive affine type is not supported -- its release would have to recurse as deep as the value nests, and an affine value is released by a static, finite walk of its type (an unrestricted struct may hold itself in a container)} {struct "D" is affine and holds values of its own type in a List, MutableVector or MutableArray (D.kids: List[Box[D]], Box[D].value: D): a recursive affine type is not supported -- its release would have to recurse as deep as the value nests, and an affine value is released by a static, finite walk of its type (an unrestricted struct may hold itself in a container)} {unknown or invalid type Wrap[Coroutine{args: [], return: int, errors: []}] for parameter "x": Wrap[Coroutine{args: [], return: int, errors: []}] is affine (its field "g" holds Grow[Coroutine{args: [], return: int, errors: []}]) and holds affine values of struct "Grow" in a List, MutableVector or MutableArray (Wrap[Coroutine{args: [], return: int, errors: []}].g: Grow[Coroutine{args: [], return: int, errors: []}], Grow[Coroutine{args: [], return: int, errors: []}].next: List[Grow[List[Coroutine{args: [], return: int, errors: []}]]]): a recursive affine type is not supported -- its release would have to recurse as deep as the value nests, and an affine value is released by a static, finite walk of its type (an unrestricted struct may hold itself in a container)}}
 
+test or-message-three-steps {a recursion of three declarations is named by its three steps, at the declaration whose own type it returns to} -body {
+    orMessage [orText "import std::coroutine\nstruct TA:\n    c: @C@\n    b: TB\nstruct TB:\n    kids: List\[TC\]\nstruct TC:\n    a: TA\n1\n"]
+} -result {struct "TA" is affine and holds values of its own type in a List, MutableVector or MutableArray (TA.b: TB, TB.kids: List[TC], TC.a: TA): a recursive affine type is not supported -- its release would have to recurse as deep as the value nests, and an affine value is released by a static, finite walk of its type (an unrestricted struct may hold itself in a container)}
+
 test or-argument-named {an application whose argument is itself the recursive affine type (Box[Node[C]]) names the argument, as before; an application whose recursion is its field's (Holder[C]) names itself} -body {
     orHir
     list [lindex [hir::structs::ApplicationIssue [orApp Box [orApp Node $::orCo]]] 1] \
@@ -434,6 +448,43 @@ test or-counters-paths {a chain of declarations each reaching the next through f
     lassign $result eight sixteen
     list $result [expr {[lindex $sixteen 3] <= 2 * [lindex $eight 3] + 20}]
 } -cleanup {unset -nocomplain result n text i next hir v c eight sixteen} -result {{{. 9 16 151} {. 17 32 295}} 1}
+
+test or-large-graph {a chain of 2100 declarations, each reaching the next through a field and through a List (4200 edges: more than the old walk's 4096-type budget, 2100 deep: far past its 64), is a finite affine type, decided by one visit of each state and edge} -body {
+    set text "import std::coroutine\n"
+    for {set i 0} {$i < 2100} {incr i} {
+        append text "struct S$i:\n    next: S[expr {$i + 1}]\n    more: List\[S[expr {$i + 1}]\]\n"
+    }
+    append text [orText "struct S2100:\n    c: @C@\nfn f(x: S0) -> int:\n    1\n1\n"]
+    set hir [surface::compile $text -warnings off]
+    hir::activate $hir
+    hir::structs::ForgetAffinity
+    hir::summaries::ResetCounters
+    set v [orVerdict {nstruct S0}]
+    set c [hir::summaries::counters]
+    list $v. [dict get $c ownership.states] [dict get $c ownership.edges] [dict get $c ownership.edgeComputations]
+} -cleanup {unset -nocomplain text i hir v c} -result {. 2101 4200 2101}
+
+test or-late-met {a declaration first met in a later round of the through fixpoint is computed, never left at its bottom: D0 holds its own U through a MutableVector element (f1, then f3) only once its first round is known, and only then reaches D1 through U, whose T D0[T, T] holds -- D1[C] recurses through D0 (a fuzzer's program found the framework's fixpoint leaving D1's facts empty)} -body {
+    set hir [surface::compile [orText "import std::coroutine\nimport std::mutable_vector\nstruct D0\[T, U\]:\n    f0: D0\[U, D1\[U\]\]\n    f1: D0\[MutableVector\[U\], U\]\n    f2: Fn{args: \[U\], return: int}\n    f3: T\nstruct D1\[T\]:\n    f0: D0\[T, T\]\n1\n"] -warnings off]
+    hir::activate $hir
+    hir::structs::ForgetAffinity
+    list [lmap e [hir::ownership::Through D0] {dict keys $e}] [lmap e [hir::ownership::Through D1] {dict keys $e}] [orVerdict [orApp D1 $::orCo]]
+} -cleanup {unset -nocomplain hir} -result {{0 {0 1}} {{0 1}} recursive}
+
+test or-identity-not-name {the facts belong to a declaration's identity, never its spelling: a module's Node (finite) and the entry program's Node (recursive) answer differently in one compilation} -body {
+    set dir [file join [temporaryDirectory] or-identity]
+    file delete -force $dir
+    file mkdir $dir
+    set f [open [file join $dir geo.bot] w]
+    puts $f "struct Node\[T\]:\n    value: T\n    children: List\[int\]"
+    close $f
+    set f [open [file join $dir main.bot] w]
+    puts $f "import geo\n\nstruct Node\[T\]:\n    value: T\n    children: List\[Node\[T\]\]\n\nfn f(a: geo::Node\[int\], b: Node\[int\]) -> int:\n    1\n1"
+    close $f
+    set hir [surface::readProgramFile [file join $dir main.bot] -warnings off]
+    hir::activate $hir
+    list [orVerdict [orApp geo::Node $::orCo]]. [orVerdict [orApp Node $::orCo]]. [orVerdict [orApp geo::Node $::orCo]].
+} -cleanup {file delete -force [file join [temporaryDirectory] or-identity]; unset -nocomplain dir f hir} -result {. recursive. .}
 
 # ---------------------------------------------------------------------------
 # Isolation and interchange
