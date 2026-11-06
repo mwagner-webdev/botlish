@@ -1367,7 +1367,7 @@ index: concepts
 alias: declaration summary; non-uniform recursion; recursive generic type; W[List[T]]; infinite type expansion
 keywords: recursive, parameterized, application, summary, fixpoint, Hashable, affine, sendable, W, nested, expansion
 related: concept.parameterized-structs concept.hashable concept.structs
-docs: PARAMETERIZED-DECLARATION-SUMMARIES-MILESTONE-1.md TRAIT-CONSTRAINED-IMPRINTED-TYPES.md
+docs: PARAMETERIZED-DECLARATION-SUMMARIES-MILESTONE-1.md OWNED-RECURSION-DECLARATION-SUMMARY-MILESTONE-1.md TRAIT-CONSTRAINED-IMPRINTED-TYPES.md
 
 == WHAT IT IS
     struct W[T]:
@@ -1397,7 +1397,11 @@ and hashes totally and can be sent, exactly as `W[int]` can.
     argument type is a caller's obligation; a `Phantom[T]` holds nothing.
   * A recursive affine application (`Node[Coroutine{...}]`: a value of T in
     a List of its own applications) is still AFFINE-CONTAINER-UNSUPPORTED:
-    that is a rule of ownership, not of the compiler's analysis.
+    that is a rule of ownership, not of the compiler's analysis. It too is
+    decided from the declarations: on the finite graph of declaration
+    states (a declaration and which of its slots hold affine arguments),
+    never by expanding the type or by a depth, so a deep finite affine type
+    is an ordinary one (error.affine-container-unsupported).
 
 == EXAMPLES
 @example accept
