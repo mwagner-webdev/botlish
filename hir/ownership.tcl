@@ -112,6 +112,9 @@ namespace eval hir::ownership {
     variable verdicts [dict create]
     # ID -> FieldCycle's answer.
     variable cycles [dict create]
+    # The size (characters of a type term) past which a witness's arguments
+    # are no longer instantiated (Witness): presentation only.
+    variable witnessSize 2000
 }
 
 proc hir::ownership::Forget {} {
@@ -601,14 +604,27 @@ proc hir::ownership::Witness {type roots} {
     set head [lindex $headState 0]
     set cycle [Cycle $headState]
     # Instantiate: each edge's steps in the frame's arguments, the frame's
-    # arguments the edge's substituted.
+    # arguments the edge's substituted. (Presentation only: arguments that
+    # grow at every step -- `f0: D0[D0[U, T], List[T]]` doubles them -- are
+    # shown, past a size, in each declaration's own terms instead.)
+    variable witnessSize
     set id [lindex $state 0]
+    set symbolic 0
     foreach move [concat $path $cycle] {
         lassign $move next c k
-        set binding [Binding $id $arguments]
+        if {!$symbolic && [string length $arguments] > $witnessSize} {
+            set symbolic 1
+        }
+        if {$symbolic} {
+            set binding [dict create]
+        } else {
+            set binding [Binding $id $arguments]
+        }
         lassign [lindex [Edges $id] $k] target edgeArguments - edgeSteps
         lappend steps {*}[Substituted $edgeSteps $binding]
-        set arguments [lmap a $edgeArguments {Apply $a $binding}]
+        if {!$symbolic} {
+            set arguments [lmap a $edgeArguments {Apply $a $binding}]
+        }
         set id $target
     }
     return [list recursive $steps $head]

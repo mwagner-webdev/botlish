@@ -280,14 +280,22 @@ proc hir::summaries::Fixpoint {table running met of bottom id} {
             # met after the one whose fields name it, so a chain of N
             # declarations settles in one round, not N (the fixpoint is the
             # same in any order; a round that still changes a fact -- a
-            # cycle, or one more met -- is followed by another).
-            for {set i [expr {[llength $ids] - 1}]} {$i >= 0} {incr i -1} {
+            # cycle, or one more met -- is followed by another). A
+            # declaration first met in a later round (a property whose node
+            # reaches an application only once another fact allows it:
+            # hir/ownership.tcl's through facts) is computed by the next
+            # round, never left at its bottom.
+            set count [llength $ids]
+            for {set i [expr {$count - 1}]} {$i >= 0} {incr i -1} {
                 set d [lindex $ids $i]
                 set fact [{*}$of $d]
                 if {$fact ne [dict get $facts $d]} {
                     dict set facts $d $fact
                     set changed 1
                 }
+            }
+            if {[llength $ids] > $count} {
+                set changed 1
             }
         }
     } on error {message options} {

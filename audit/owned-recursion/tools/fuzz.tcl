@@ -134,7 +134,14 @@ proc genProgram {} {
         set fields {}
         set count [expr {1 + int(rand() * 4)}]
         for {set k 0} {$k < $count} {incr k} {
-            lappend fields f$k [genType $decls $slots 2]
+            set t [genType $decls $slots 2]
+            if {$::restricted && [lindex $t 0] eq "app" && [chance 0.7]} {
+                # (A runtime program's declarations recurse through Lists
+                # mostly: a field of a declaration's own application makes
+                # its values impossible, and nothing to build.)
+                set t [list list $t]
+            }
+            lappend fields f$k $t
         }
         dict set decls $d fields $fields
     }
@@ -271,7 +278,7 @@ proc valueOf {decls t depth countVar} {
             return "make($count)"
         }
         list {
-            if {$depth > 0 && [chance 0.6]} {
+            if {$depth > 0 && [chance 0.85]} {
                 set inner [valueOf $decls [lindex $t 1] [expr {$depth - 1}] count]
                 if {$inner ne ""} {
                     return "\[$inner\]"
@@ -340,16 +347,6 @@ proc substitute {t binding} {
 # root's and is itself accepted (its affinity dies out before it recurs);
 # "" when neither explains it (a DIFFERENT, a failure).
 proc Explained {type old} {
-    foreach step [lindex $old 1] {
-        lassign $step owner name t
-        foreach x [list $owner $t] {
-            foreach application [hir::summaries::Applications $x] {
-                if {[hir::ownership::FieldCycle [lindex $application 0]]} {
-                    return uninhabited
-                }
-            }
-        }
-    }
     set target [lindex $old 1 end 2]
     while {![hir::types::IsNamedStruct $target] || [lindex $target 1] ne [lindex $type 1]} {
         if {[llength $target] < 2} { return "" }
@@ -364,8 +361,10 @@ proc Explained {type old} {
     }
     # "nested": the application it met again is one the type's own
     # arguments, or a declaration's field types, spell -- Box[List[Box[C]]]
-    # holds a List of Box[C] because its argument says so -- not one its
-    # declaration's recursion reaches: a finite nesting.
+    # holds a List of Box[C] because its argument says so -- or the root's
+    # declaration has no recursion of its own at all (no cycle of the
+    # declarations' edges through it): not one its declaration's recursion
+    # reaches, a finite nesting.
     set key [list [lindex $target 1] [lindex $target 2]]
     set spelled [hir::summaries::Applications [lindex $type 2]]
     dict for {d entry} $::hir::structs::registry {
@@ -373,17 +372,49 @@ proc Explained {type old} {
             lappend spelled {*}[hir::summaries::Applications $ft]
         }
     }
-    if {$key in $spelled} {
+    if {$key in $spelled || ![DeclarationCycle [lindex $type 1]]} {
         return nested
     }
+    # "uninhabited": the path passes an application of a declaration whose
+    # every value would hold itself through fields alone (FieldCycle): no
+    # value of what it found exists.
+    foreach step [lindex $old 1] {
+        lassign $step owner name t
+        foreach x [list $owner $t] {
+            foreach application [hir::summaries::Applications $x] {
+                if {[hir::ownership::FieldCycle [lindex $application 0]]} {
+                    return uninhabited
+                }
+            }
+        }
+    }
     return ""
+}
+
+# 1 if declaration ID reaches itself by the declarations' edges
+# (hir::ownership::Edges, whatever they cross and whatever the affinity).
+proc DeclarationCycle {id} {
+    set seen [dict create]
+    set work [list $id]
+    while {$work ne {}} {
+        set d [lindex $work end]
+        set work [lrange $work 0 end-1]
+        foreach edge [hir::ownership::Edges $d] {
+            set target [lindex $edge 0]
+            if {$target eq $id} { return 1 }
+            if {[dict exists $seen $target]} continue
+            dict set seen $target 1
+            lappend work $target
+        }
+    }
+    return 0
 }
 
 # ---------------------------------------------------------------------------
 # The run
 
 set scratch [file tempdir botlish-owned-recursion-fuzz]
-set counts [dict create programs 0 rejected 0 queries 0 bad 0 same 0 old-bound 0 other-declaration 0 transient 0 uninhabited 0 nested 0 runtime 0 runtimeSkipped 0 native 0 endToEnd 0]
+set counts [dict create programs 0 rejected 0 queries 0 bad 0 same 0 old-bound 0 old-diverges 0 other-declaration 0 transient 0 uninhabited 0 nested 0 runtime 0 runtimeSkipped 0 native 0 endToEnd 0]
 set failures 0
 proc fail {message} {
     global failures
@@ -407,6 +438,9 @@ try {
     for {set p 0} {$p < [dict get $options -programs]} {incr p} {
         set restricted [expr {$p < [dict get $options -runtime]}]
         set decls [genProgram]
+        if {[dict get $options -verbose]} {
+            puts stderr "program $p\n[declText $decls]"
+        }
         dict incr counts programs
         set text "$imports[declText $decls]"
         # The declarations alone.
@@ -484,6 +518,8 @@ try {
                 dict incr counts same
             } elseif {$oldVerdict eq "unbounded"} {
                 dict incr counts old-bound
+            } elseif {$oldVerdict eq "diverges"} {
+                dict incr counts old-diverges
             } elseif {$oldVerdict eq "ok" && [lindex $new 2] ne [lindex $type 1]} {
                 dict incr counts other-declaration
                 if {[dict get $options -verbose]} { puts "other-declaration: [botlish $t]\n[declText $decls]" }
@@ -536,6 +572,13 @@ try {
             foreach {id t} $queries {
                 if {[dict get $verdicts $id] ne "ok"} continue
                 if {[lindex $t 0] ne "app"} continue
+                # (Written, a type with a recursive application anywhere in
+                # it is no type, a phantom slot's argument included.)
+                set subBad 0
+                dict for {sub verdict} $verdicts {
+                    if {[string match $id.* $sub] && $verdict eq "bad"} { set subBad 1 }
+                }
+                if {$subBad} continue
                 hir::activate $hir
                 set type [term $t]
                 if {![hir::types::IsAffine $type]} continue
@@ -552,7 +595,7 @@ try {
                     # A construction the inference does not type as written
                     # (a phantom slot's argument, say): not this check's.
                     dict incr counts runtimeSkipped
-                    if {[dict get $options -verbose]} { puts "runtime skipped ([kindOf [lindex $result 0]]): $spelled" }
+                    if {[dict get $options -verbose]} { puts "runtime skipped ([kindOf [lindex $result 0]]): $spelled: [dict get [lindex $result 0] message]\n$program" }
                     continue
                 }
                 dict incr counts runtime
@@ -584,5 +627,5 @@ try {
     file delete -force $scratch
 }
 
-puts "[dict get $counts programs] programs ([dict get $counts rejected] rejected at their declarations), [dict get $counts queries] queries ([dict get $counts bad] recursive), old walk: [dict get $counts same] same, [dict get $counts old-bound] old-bound, [dict get $counts other-declaration] other-declaration, [dict get $counts transient] transient, [dict get $counts uninhabited] uninhabited, [dict get $counts nested] nested; [dict get $counts endToEnd] written, [dict get $counts runtime] runtime ([dict get $counts runtimeSkipped] not built, [dict get $counts native] native), $failures failures"
+puts "[dict get $counts programs] programs ([dict get $counts rejected] rejected at their declarations), [dict get $counts queries] queries ([dict get $counts bad] recursive), old walk: [dict get $counts same] same, [dict get $counts old-bound] old-bound, [dict get $counts old-diverges] old-diverges, [dict get $counts other-declaration] other-declaration, [dict get $counts transient] transient, [dict get $counts uninhabited] uninhabited, [dict get $counts nested] nested; [dict get $counts endToEnd] written, [dict get $counts runtime] runtime ([dict get $counts runtimeSkipped] not built, [dict get $counts native] native), $failures failures"
 exit [expr {$failures > 0}]

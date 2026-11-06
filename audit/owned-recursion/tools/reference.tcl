@@ -10,6 +10,13 @@
 namespace eval ::reference::owned {
     variable recursionDepth 64
     variable recursionBudget 4096
+    # The one addition: a walk that meets a type longer than this stops
+    # with {diverges PATH}. The old walk's types can grow exponentially
+    # before its depth bound trips (`f0: D0[D0[U, T], List[T]]` doubles the
+    # applied type at every level): it then exhausted memory -- the old
+    # compiler crashed on a program writing such a type -- instead of
+    # answering. The guard only stops walks that would not have finished.
+    variable sizeGuard 20000
 }
 
 proc ::reference::owned::OwnedRecursion {type} {
@@ -26,6 +33,10 @@ proc ::reference::owned::OwnedRecursionFrom {target start type crossed path visi
     variable recursionDepth
     variable recursionBudget
     set type [hir::types::Unrefined $type]
+    variable sizeGuard
+    if {[string length $type] > $sizeGuard} {
+        return [list diverges $path]
+    }
     if {![hir::types::IsAffine $type]} {
         return ""
     }
