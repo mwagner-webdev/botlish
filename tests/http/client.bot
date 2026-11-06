@@ -504,6 +504,41 @@ fn headers_many(args: List[str], context o: Out):
         say(header_verdict(arg(args, 1 + 2 * i), arg(args, 2 + 2 * i)))
     unit
 
+# The boundary's costs (HTTP-CLIENT-PACKAGE-MILESTONE-1.md, "Measurements";
+# audit/http-client/tools/measure.tcl): N sequential GETs of URL on one
+# warm client, then one GET of URL2 read chunk by chunk; for each part, the
+# totals of the runtime's counters and the test unit's allocation counter
+# (args: url pem n url2).
+fn cost_line(label: str, before: http::Stats, allocs: int, bytes: int, context h: http::Http, o: Out) errors http::Fault:
+    st = http::stats()
+    say(label.concat(" calls ").concat(n(st.calls - before.calls)).concat(" steps ").concat(n(st.steps - before.steps)).concat(" runs ").concat(n(st.runs - before.runs)).concat(" polls ").concat(n(st.polls - before.polls)).concat(" notices ").concat(n(st.notices - before.notices)).concat(" readiness ").concat(n(st.readiness - before.readiness)).concat(" out ").concat(n(st.bytes_out - before.bytes_out)).concat(" in ").concat(n(st.bytes_in - before.bytes_in)).concat(" allocs ").concat(n(probe::alloc(0) - allocs)).concat(" alloc_bytes ").concat(n(probe::alloc(1) - bytes)))
+
+fn costs(args: List[str], context h: http::Http, ev: std::event_loop::Loop, nat: event_loop_linux::Native, o: Out) errors http::InvalidUri, http::InvalidRequest, http::ResolveFailed, http::ConnectFailed, http::TlsVerifyFailed, http::TlsHandshakeFailed, http::ProtocolError, http::Timeout, http::Cancelled, http::Closed, http::Unsupported, http::TrustFailed, http::Released, http::Fault, http::BodyTooLarge, std::event_loop::SchedulerFault:
+    {owner, client} = http::client(config_for(arg(args, 2)))
+    target = http::uri(arg(args, 1))
+    count = num(args, 3)
+    {owner: w, response: warm} = client.send(http::get(target))
+    warm.exchange.read_all(1048576)
+    http::close(w)
+    before = http::stats()
+    allocs = probe::alloc(0)
+    bytes = probe::alloc(1)
+    loop i from 0 to count:
+        {owner: x, response} = client.send(http::get(target))
+        response.exchange.read_all(1048576)
+    unit
+    cost_line("requests ".concat(n(count)), before, allocs, bytes)
+    before2 = http::stats()
+    allocs2 = probe::alloc(0)
+    bytes2 = probe::alloc(1)
+    {owner: y, response: big} = client.send(http::get(http::uri(arg(args, 4))))
+    chunks = fold with intermediate k 0:
+        chunk = big.exchange.read()
+        if size(chunk) == 0:
+            break
+        k + 1
+    cost_line("chunks ".concat(n(chunks)), before2, allocs2, bytes2)
+
 # Releasing a client while another task streams from it: args url pem.
 fn reader(x: http::Exchange, context h: http::Http, ev: std::event_loop::Loop, o: Out) -> int errors std::event_loop::SchedulerFault:
     loop:
@@ -811,6 +846,8 @@ fn scenario(args: List[str], context h: http::Http, ev: std::event_loop::Loop, n
         headers(args)
     elif name == "headers-many":
         headers_many(args)
+    elif name == "costs":
+        costs(args)
     elif name == "fuzz":
         fuzz(args)
     elif name == "parse":

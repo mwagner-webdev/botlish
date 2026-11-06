@@ -6,7 +6,8 @@
 #   bench latency URL ANCHORFILE N       N sequential GETs on one client
 #   bench cold URL ANCHORFILE N          N GETs, each on a new client
 #                                        (connect, TLS handshake, request)
-#   bench stream URL ANCHORFILE          one GET read chunk by chunk
+#   bench stream URL ANCHORFILE [PAUSE]  one GET read chunk by chunk (a slow
+#                                        consumer sleeps PAUSE us per chunk)
 #   bench upload URL ANCHORFILE BYTES CHUNK  one PUT written CHUNK at a time
 import event_loop_linux
 import http
@@ -126,6 +127,7 @@ fn cold(args: List[str], context h: http::Http, ev: std::event_loop::Loop, nat: 
 
 fn stream(args: List[str], context h: http::Http, ev: std::event_loop::Loop, nat: event_loop_linux::Native, io: std::io::IO, fs: std::linux::fs::LinuxFS) errors http::InvalidUri, http::InvalidRequest, http::ResolveFailed, http::ConnectFailed, http::TlsVerifyFailed, http::TlsHandshakeFailed, http::ProtocolError, http::Timeout, http::Cancelled, http::Closed, http::Unsupported, http::TrustFailed, http::Released, http::Fault, http::BodyTooLarge, std::event_loop::SchedulerFault:
     target = http::uri(arg(args, 1))
+    pause = num(args, 3)
     {owner, client} = http::client(config_for(arg(args, 2)))
     before = peak_kib()
     calls = http::stats().calls
@@ -136,6 +138,8 @@ fn stream(args: List[str], context h: http::Http, ev: std::event_loop::Loop, nat
         k = size(chunk)
         if k == 0:
             break
+        if pause > 0:
+            std::event_loop::sleep(pause)
         {total: acc.total + k, chunks: acc.chunks + 1}
     elapsed = event_loop_linux::now_us() - started
     say(line(["stream_bytes ", n(seen.total), " bytes"]))

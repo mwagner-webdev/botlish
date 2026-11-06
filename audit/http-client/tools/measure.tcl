@@ -155,6 +155,13 @@ try {
         lappend rows [list "  peak memory growth while 64 MiB passed" [median $growth] KiB]
         lappend rows [list "  most bytes held natively" [median $held] bytes]
     }
+    # A slow consumer: nghttpd's 64 MiB over HTTP/2, read with a 2 ms pause
+    # after every chunk (4,096 chunks: about 9 s).
+    set slowUrl https://localhost:$ng/big.bin
+    set d [bench stream $slowUrl $ca 2000]
+    lappend rows [list "slow consumer (2 ms per chunk), 64 MiB over HTTP/2: peak memory growth" [dict get $d stream_peak_growth] KiB]
+    lappend rows [list "  most bytes held natively" [dict get $d stream_max_held] bytes]
+    lappend rows [list "  its throughput" [format %.1f [expr {67108864 / 1048576.0 / ([dict get $d stream_us] / 1e6)}]] MiB/s]
     # Upload: 16 MiB to the Python peer's /echo, by write size.
     foreach {label url anchors} [list "HTTP/1.1, plaintext" http://127.0.0.1:$plain/echo "" "HTTP/2, TLS" https://localhost:$tls/echo $ca] {
         foreach chunk {1024 16384 65536 1048576} {
@@ -169,6 +176,39 @@ try {
             lappend rows [list "  guarded C calls per write" [format %.2f [median $calls]] calls]
         }
     }
+    # The boundary's costs, with the test unit (its allocation counter):
+    # tests/http/client.bot's `costs` scenario, per request and per chunk.
+    set tdir [file join $dir test]
+    file mkdir $tdir
+    httppkg::App $tdir 1
+    foreach f {client.bot probe.bot} { file copy [file join $root tests http $f] $tdir }
+    set thir [surface::readProgramFile [file join $tdir client.bot] -warnings off -cache ""]
+    set client [native::executable $thir [file join $tdir client]]
+    proc costs {client args} {
+        set out [exec $client costs {*}$args]
+        set lines {}
+        foreach {- line} [regexp -all -inline {"((?:[^"\\]|\\.)*)"} $out] { lappend lines $line }
+        return $lines
+    }
+    foreach {label url anchors big} [list "HTTP/1.1, plaintext" http://127.0.0.1:$plain/hello "" "http://127.0.0.1:$plain/stream?n=256&size=4096" \
+            "HTTP/2, TLS" https://localhost:$tls/hello [readFile $ca] "https://localhost:$tls/stream?n=256&size=4096"] {
+        set lines [costs $client $url $anchors 100 $big]
+        foreach line [lrange $lines 0 1] {
+            set fields [lrange $line 2 end]
+            set per [lindex $line 1]
+            set what [expr {[lindex $line 0] eq "requests" ? "per request" : "per 4 KiB chunk"}]
+            set text {}
+            foreach {k v} $fields { lappend text "$k [format %.1f [expr {double($v) / $per}]]" }
+            lappend rows [list "$label, $what (test unit)" [join $text {, }] ""]
+        }
+    }
+    # Concurrent HTTP/2 streams: 64 requests of 16 KiB at once, one client.
+    set us {}
+    for {set r 0} {$r < $runs} {incr r} {
+        set t [timed {exec $client concurrent "https://localhost:$tls/stream?n=4&size=4096" [readFile $ca] 64}]
+        lappend us $t
+    }
+    lappend rows [list "64 concurrent HTTP/2 requests of 16 KiB on one connection (whole process)" [format %.0f [expr {[median $us] / 1000.0}]] ms]
     puts "| measurement | value | unit |"
     puts "|---|---:|---|"
     foreach row $rows {
