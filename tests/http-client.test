@@ -1,0 +1,372 @@
+# http-client.test -- the http package (packages/http; HTTP-CLIENT-PACKAGE-
+# MILESTONE-1.md): an HTTP/1.1 and HTTP/2 client with TLS, on Hyper and
+# BoringSSL, scheduled by the Botlish event loop with the Linux driver.
+#
+# The package, its dependencies (event_loop_linux, boringssl) and the test
+# client (tests/http/client.bot, with tests/http/probe.bot: the test unit's
+# fault injection and counters) are installed into a private application
+# directory as one package graph (tools/http-package.tcl app, with the test
+# unit), and the client is compiled once to an executable. Each test runs
+# one of its scenarios against independent peers the test starts:
+#
+#   * tests/http/server.py -- Python's asyncio and ssl (OpenSSL), the `h2`
+#     library for HTTP/2 and a small HTTP/1.1 implementation of its own:
+#     plaintext HTTP/1.1; TLS offering h2 and http/1.1; TLS offering
+#     http/1.1 only; TLS with a wrong-host, an expired and an untrusted
+#     certificate (tests/http/pki.sh, made by the openssl command-line tool);
+#   * nghttpd (nghttp2's HTTP/2 server, C), where installed.
+#
+# The native files are built by tests/cffi/http.tcl (the release recipe's
+# builds: tools/http-package.tcl); without them the tests are skipped.
+# Linux x86-64 only (the package's one target).
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+source [file join $::projectRoot native native.tcl]
+source [file join $::projectRoot tests cffi http.tcl]
+
+interp recursionlimit {} 100000
+
+proc httpHostOk {} {
+    expr {$::tcl_platform(os) eq "Linux" && $::tcl_platform(machine) in {x86_64 amd64}}
+}
+testConstraint httpBuilt [expr {[httpHostOk] && [cffi::httpBuilt] && [testConstraint nativeCCalls] && [testConstraint cLinker]}]
+proc httpPeerUsable {} {
+    if {[auto_execok python3] eq "" || [auto_execok openssl] eq ""} { return 0 }
+    return [expr {![catch {exec python3 -I -c "import h2, ssl"}]}]
+}
+testConstraint httpPeer [httpPeerUsable]
+testConstraint nghttpd [expr {[auto_execok nghttpd] ne ""}]
+
+set httpDir [file join [temporaryDirectory] http-client-[pid]]
+set httpTests [file join $::projectRoot tests http]
+
+# The application and the client's executable, made once.
+proc httpExecutable {} {
+    if {![info exists ::httpExe]} {
+        file delete -force $::httpDir
+        file mkdir $::httpDir
+        httppkg::App $::httpDir 1
+        foreach f {client.bot probe.bot} {
+            file copy [file join $::httpTests $f] $::httpDir
+        }
+        set hir [surface::readProgramFile [file join $::httpDir client.bot] -warnings off -cache ""]
+        set ::httpExe [native::executable $hir [file join $::httpDir client]]
+    }
+    return $::httpExe
+}
+
+# The certificates (tests/http/pki.sh), made once.
+proc httpPki {} {
+    set dir [file join $::httpDir pki]
+    if {![file exists [file join $dir ok]]} {
+        exec sh [file join $::httpTests pki.sh] $dir
+        writeFile [file join $dir ok] ok
+    }
+    return $dir
+}
+
+proc httpCa {} {
+    readFile [file join [httpPki] ca.pem]
+}
+
+# Start a peer (tests/http/server.py ARGS, or another command); its port.
+proc httpPeer {name command} {
+    if {![info exists ::httpPeers($name)]} {
+        set chan [open |[concat $command [list 2> /dev/null]] r]
+        set line ""
+        set deadline [expr {[clock milliseconds] + 10000}]
+        while {[gets $chan line] >= 0} {
+            if {[regexp {^ready (\d+)$} $line -> port]} break
+            if {[clock milliseconds] > $deadline} break
+        }
+        if {![info exists port]} {
+            catch {exec kill [pid $chan]}
+            catch {close $chan}
+            error "peer $name did not start: $line"
+        }
+        set ::httpPeers($name) [list $chan $port]
+    }
+    return [lindex $::httpPeers($name) 1]
+}
+
+proc httpServer {name args} {
+    httpPeer $name [list python3 -I [file join $::httpTests server.py] --port 0 {*}$args]
+}
+
+proc httpTls {name cert {alpn h2,http/1.1}} {
+    set pki [httpPki]
+    httpServer $name --tls [file join $pki $cert.pem] [file join $pki $cert.key] --alpn $alpn
+}
+
+proc httpPlainUrl {path} {
+    return http://127.0.0.1:[httpServer plain]$path
+}
+
+proc httpTlsUrl {path {name good} {cert good} {alpn h2,http/1.1}} {
+    return https://localhost:[httpTls $name $cert $alpn]$path
+}
+
+# The report lines of scenario ARGS (the executable's value).
+proc httpRun {args} {
+    set exe [httpExecutable]
+    if {[catch {exec $exe {*}$args} out]} {
+        return [list FAILED $out]
+    }
+    regexp -all -inline {"((?:[^"\\]|\\.)*)"} $out
+    set lines {}
+    foreach {- line} [regexp -all -inline {"((?:[^"\\]|\\.)*)"} $out] {
+        lappend lines [string map {\\" \" \\\\ \\} $line]
+    }
+    return $lines
+}
+
+proc httpStop {} {
+    foreach name [array names ::httpPeers] {
+        lassign $::httpPeers($name) chan
+        catch {exec kill [pid $chan]}
+        catch {close $chan}
+    }
+    array unset ::httpPeers
+    file delete -force $::httpDir
+}
+
+# --- the build
+
+test http-unit-exports {the released unit's only global definitions are the bh_* C functions (no test export, no Rust or BoringSSL symbol: the unit is localized, and BoringSSL is linked from the provider, never bundled); the test unit adds bh_t_*} -constraints httpBuilt -body {
+    set target [httppkg::Host]
+    set out {}
+    foreach kind {release testing} {
+        set defined [httppkg::Defined [file join [httppkg::CacheDir] units $kind-$target libbotlish_http.a]]
+        lappend out $kind [llength [lmap s $defined {expr {[string match bh_* $s] ? [continue] : $s}}]] \
+            [llength [lmap s $defined {expr {[string match bh_t_* $s] ? $s : [continue]}}]] \
+            [expr {"SSL_new" in $defined}]
+    }
+    set out
+} -result {release 0 0 0 testing 0 5 0}
+
+test http-provider-identity {the unit references the provider's identity symbol, which only the provider package's crypto archive defines: a link with another BoringSSL (the census's provider's archives, unrenamed and without it) fails naming the symbol, never runs silently against other code} -constraints httpBuilt -body {
+    set target [httppkg::Host]
+    set provider [httppkg::Provider $target]
+    set id [httppkg::ProviderId]
+    set crypto [file join [httppkg::ProviderArchives $target] libbotlish_boringssl_crypto.a]
+    set unit [file join [httppkg::CacheDir] units release-$target libbotlish_http.a]
+    list [expr {"botlish_boringssl_$id" in [httppkg::Defined $crypto]}] \
+        [expr {"botlish_boringssl_$id" in [httppkg::Defined [file join $provider lib libcrypto.a]]}] \
+        [expr {[lsearch -exact [split [exec nm -u $unit] \n] "                 U botlish_boringssl_$id"] >= 0}]
+} -result {1 0 1}
+
+test http-warning-clean {the package's module compiles under -warnings error, and a program importing it costs three whole-program builds: no method-style call of the module is left to whole-program deviations (a lexical helper named like a method once cost 69 builds and seven minutes)} -constraints httpBuilt -body {
+    httpExecutable
+    set path [file join $::httpDir clean.bot]
+    writeFile $path "import event_loop_linux\nimport http\nimport std::event_loop\n\nfn main(context ev: std::event_loop::Loop, d: event_loop_linux::Linux, n: event_loop_linux::Native, h: http::Http) -> int:\n    0\n\nwith context std::event_loop::create(64)\nwith context event_loop_linux::create()\nwith context event_loop_linux::native()\nwith context http::create()\nmain()\n"
+    set before [dict get $::hir::buildStats builds]
+    surface::readProgramFile $path -warnings error -cache ""
+    set builds [expr {[dict get $::hir::buildStats builds] - $before}]
+    list ok [expr {$builds <= 4}]
+} -result {ok 1}
+
+# --- requests and responses
+
+test http-get-h1 {a GET over plaintext HTTP/1.1: status, version, 100000 bytes in the pattern the server sent} -constraints {httpBuilt httpPeer} -body {
+    httpRun get [httpPlainUrl /bytes?n=100000] "" pattern
+} -result {{status 200 HTTP/1.1} {bytes 100000} {pattern matches yes} {final: clients 0 exchanges 0 panics 0}}
+
+test http-get-h2-tls {a GET over TLS, trusting the test CA only: ALPN selects HTTP/2, and 300000 bytes arrive exactly} -constraints {httpBuilt httpPeer} -body {
+    httpRun get [httpTlsUrl /bytes?n=300000] [httpCa] pattern
+} -result {{status 200 HTTP/2} {bytes 300000} {pattern matches yes} {final: clients 0 exchanges 0 panics 0}}
+
+test http-get-ip-literal {an IPv4 literal host: no name resolution, no SNI, and the certificate is verified against the address (its IP subjectAltName)} -constraints {httpBuilt httpPeer} -body {
+    httpRun outcome https://127.0.0.1:[httpTls good good]/hello [httpCa]
+} -result {{status 200 bytes 6} {final: clients 0 exchanges 0 panics 0}}
+
+test http-post-json {a JSON POST with Content-Type and Authorization: the server receives exactly the headers and the body sent (it echoes them), over HTTP/2} -constraints {httpBuilt httpPeer} -body {
+    httpRun post [httpTlsUrl /echo] [httpCa]
+} -result {{status 200 HTTP/2} {header x-echo-method: POST} {header x-echo-version: HTTP/2} {header x-echo-length: 49} {header x-echo-content-type: application/json} {header x-echo-authorization: Bearer test-token-123} {header x-echo-x-custom: v1} {header content-length: 49} {same body yes} {final: clients 0 exchanges 0 panics 0}}
+
+test http-post-json-h1 {the same POST over HTTP/1.1 (ALPN http/1.1 only)} -constraints {httpBuilt httpPeer} -body {
+    lrange [httpRun post [httpTlsUrl /echo h1only good http/1.1] [httpCa]] 0 2
+} -result {{status 200 HTTP/1.1} {header x-echo-method: POST} {header x-echo-version: HTTP/1.1}}
+
+test http-repeated-headers {repeated response fields are kept, each name's values in their order} -constraints {httpBuilt httpPeer} -body {
+    httpRun get [httpTlsUrl /headers] [httpCa] text headers
+} -result {{status 200 HTTP/2} {bytes 2} {text ok} {header set-cookie: a=1} {header set-cookie: b=2} {header x-multi: one} {header x-multi: two} {final: clients 0 exchanges 0 panics 0}}
+
+test http-statuses {a 404 and a 204 are responses, not failures} -constraints {httpBuilt httpPeer} -body {
+    list [httpRun outcome [httpTlsUrl /status/404] [httpCa]] [httpRun outcome [httpPlainUrl /status/204] ""]
+} -result {{{status 404 bytes 10} {final: clients 0 exchanges 0 panics 0}} {{status 204 bytes 0} {final: clients 0 exchanges 0 panics 0}}}
+
+test http-utf8-split {UTF-8 text sent one byte per write arrives as the same bytes (decoding is the program's, once it has them)} -constraints {httpBuilt httpPeer} -body {
+    lindex [httpRun get [httpTlsUrl /utf8] [httpCa] text] 2
+} -result "text h\u00e9llo w\u00f6rld \u2713 \U0001F600 end\\n"
+
+test http-upload {streamed request bodies: a declared length (Content-Length) over HTTP/2, an unknown one chunked over HTTP/1.1 and as DATA frames over HTTP/2; the server receives every byte} -constraints {httpBuilt httpPeer} -body {
+    list [lmap l [httpRun upload [httpTlsUrl /echo] [httpCa] 1000000 65536 1] {expr {[string match {header x-echo-length*} $l] || [string match echoed* $l] ? $l : [continue]}}] \
+        [lmap l [httpRun upload [httpPlainUrl /echo] "" 1000000 65536 0] {expr {[string match {header x-echo-length*} $l] || [string match echoed* $l] ? $l : [continue]}}] \
+        [lmap l [httpRun upload [httpTlsUrl /echo] [httpCa] 300000 10000 0] {expr {[string match {header x-echo-length*} $l] || [string match echoed* $l] ? $l : [continue]}}]
+} -result {{{header x-echo-length: 1000000} {echoed 1000000 same yes}} {{header x-echo-length: none} {echoed 1000000 same yes}} {{header x-echo-length: none} {echoed 300000 same yes}}}
+
+# --- versions and TLS
+
+test http-alpn {ALPN: negotiate takes h2 when offered and HTTP/1.1 otherwise; HTTP/1.1-only stays HTTP/1.1; HTTP/2-only refuses a server that does not select h2 (Unsupported, never a silent fallback)} -constraints {httpBuilt httpPeer} -body {
+    list [lindex [httpRun versions [httpTlsUrl /hello] [httpCa] any] 0] \
+        [lindex [httpRun versions [httpTlsUrl /hello h1only good http/1.1] [httpCa] any] 0] \
+        [lindex [httpRun versions [httpTlsUrl /hello] [httpCa] h1] 0] \
+        [lindex [httpRun versions [httpTlsUrl /hello h1only good http/1.1] [httpCa] h2] 0]
+} -result {{status 200 HTTP/2 bytes 6} {status 200 HTTP/1.1 bytes 6} {status 200 HTTP/1.1 bytes 6} {error Unsupported the server did not negotiate HTTP/2 (ALPN h2), and the client allows HTTP/2 only}}
+
+test http-tls-verify {certificate verification: a wrong host (62), an expired certificate (10), an unknown issuer (20), and the test CA's certificate under system trust alone (20): each TlsVerifyFailed with BoringSSL's verify result} -constraints {httpBuilt httpPeer} -body {
+    list [lindex [httpRun outcome [httpTlsUrl /hello wrong wronghost] [httpCa]] 0] \
+        [lindex [httpRun outcome [httpTlsUrl /hello expired expired] [httpCa]] 0] \
+        [lindex [httpRun outcome [httpTlsUrl /hello untrusted untrusted] [httpCa]] 0] \
+        [lindex [httpRun outcome [httpTlsUrl /hello] ""] 0]
+} -result {{error TlsVerifyFailed code 62 Hostname mismatch} {error TlsVerifyFailed code 10 certificate has expired} {error TlsVerifyFailed code 20 unable to get local issuer certificate} {error TlsVerifyFailed code 20 unable to get local issuer certificate}}
+
+test http-trust-config {a client trusting nothing is refused when it is made (TrustFailed); anchors that are no PEM certificates likewise} -constraints {httpBuilt httpPeer} -body {
+    list [lindex [httpRun outcome [httpTlsUrl /hello] "not a certificate"] 0]
+} -result {{error TrustFailed the trust anchors are not PEM certificates: no certificate}}
+
+# --- transport failures and timeouts
+
+test http-transport-failures {name resolution failure (ResolveFailed with getaddrinfo's code), a refused connection (ConnectFailed with ECONNREFUSED)} -constraints {httpBuilt httpPeer} -body {
+    list [lindex [httpRun outcome https://nonexistent.invalid/ [httpCa]] 0] [lindex [httpRun outcome http://127.0.0.1:1/ ""] 0]
+} -result {{error ResolveFailed code -2 Name or service not known} {error ConnectFailed code 111 port 1}}
+
+test http-timeouts {three distinct limits: the server's silence before the head and between chunks (Timeout Idle), the request's deadline (Timeout Deadline, while the body streams), connecting (Timeout Connect)} -constraints {httpBuilt httpPeer} -body {
+    list [lindex [httpRun outcome [httpTlsUrl /slowhead?delay=1000] [httpCa] idle 300000] 0] \
+        [lindex [httpRun outcome [httpTlsUrl /idle?delay=1000] [httpCa] idle 300000] 0] \
+        [lindex [httpRun outcome [httpTlsUrl "/stream?n=50&size=100&delay=20"] [httpCa] deadline 200000] 0] \
+        [lindex [httpRun outcome [httpTlsUrl "/stream?n=50&size=100&delay=20"] [httpCa] deadline 3000000] 0]
+} -result {{error Timeout idle} {body error Timeout idle} {body error Timeout deadline} {status 200 bytes 5000}}
+
+test http-protocol-failures {a body cut short (HTTP/1.1: fewer bytes than Content-Length; HTTP/2: RST_STREAM INTERNAL_ERROR, its code 2) and an invalid status line are ProtocolError, never a panic} -constraints {httpBuilt httpPeer} -body {
+    list [lindex [httpRun outcome [httpPlainUrl /truncate] ""] 0] \
+        [lindex [httpRun outcome [httpTlsUrl /truncate] [httpCa]] 0] \
+        [lindex [httpRun outcome [httpPlainUrl /malformed] ""] 0]
+} -result {{body error ProtocolError code -1 error reading a body from connection: end of file before message length reached} {body error ProtocolError code 2 error reading a body from connection: stream error received: unexpected internal error encountered} {error ProtocolError code -1 invalid HTTP status-code parsed}}
+
+# --- streaming and backpressure
+
+test http-backpressure {a program that reads one chunk and pauses 1.5 s: the native side holds at most one 16 KiB chunk, and the server gets only as far ahead as HTTP/2's window lets it (a 64 KiB window: under 128 KiB of a 4 MiB body; the 1 MiB default: under 1.25 MiB); every byte arrives once reading resumes} -constraints {httpBuilt httpPeer} -body {
+    set small [httpRun stream [httpTlsUrl "/stream?n=64&size=65536&id=w64"] [httpCa] 1500000 [httpTlsUrl /progress?id=w64] 65536]
+    set default [httpRun stream [httpTlsUrl "/stream?n=64&size=65536&id=wd"] [httpCa] 1500000 [httpTlsUrl /progress?id=wd]]
+    regexp {written (\d+)} [lindex $small 0] -> a
+    regexp {written (\d+)} [lindex $default 0] -> b
+    list [expr {$a < 131072}] [expr {$b < 1310720}] [lindex $small 1] [lindex $small 2] [lindex $default 2]
+} -result {1 1 {max bytes held natively: 16384} {total 4194304} {total 4194304}}
+
+test http-backpressure-control {the negative control: with the receive pump ignoring the consumer (fault 512), the native side holds almost the whole body while the program pauses -- what the test above would see without backpressure} -constraints {httpBuilt httpPeer} -body {
+    set out [httpRun fault 512 stream [httpTlsUrl "/stream?n=64&size=65536&id=wf"] [httpCa] 1500000 [httpTlsUrl /progress?id=wf]]
+    regexp {held natively: (\d+)} [lindex $out 1] -> held
+    expr {$held > 1048576}
+} -result 1
+
+# --- connections
+
+test http-concurrency {eight requests at once: over HTTP/2 one connection carries them all; over HTTP/1.1 at most six connections (max_connections) are open, and every request completes} -constraints {httpBuilt httpPeer} -body {
+    set h2 [httpRun concurrent [httpTlsUrl "/stream?n=8&size=4096&delay=20"] [httpCa] 8]
+    set h1 [httpRun concurrent [httpPlainUrl "/stream?n=8&size=4096&delay=20"] "" 8]
+    list [llength [lsearch -all $h2 {task * status 200 HTTP/2 bytes 32768}]] [lindex $h2 end-1] \
+        [llength [lsearch -all $h1 {task * status 200 HTTP/1.1 bytes 32768}]] [lindex $h1 end-1]
+} -result {8 {http1 0 http2 1} 8 {http1 6 http2 0}}
+
+test http-keep-alive {sequential requests reuse one connection: HTTP/1.1 keep-alive (one connection open, idle in the pool after) and one HTTP/2 connection} -constraints {httpBuilt httpPeer} -body {
+    list [lindex [httpRun sequential [httpPlainUrl /hello] "" 5 [httpPlainUrl /conns]] end-1] \
+        [lindex [httpRun sequential [httpTlsUrl /hello] [httpCa] 5 [httpTlsUrl /conns]] end-1]
+} -result {{idle 1 http1 1 http2 0} {idle 0 http1 0 http2 1}}
+
+# --- cancellation, abandonment, release
+
+test http-cancel {a cancellation token: an exchange in flight fails with Cancelled when another task cancels it, a later request carrying the token fails at once, and nothing native is left} -constraints {httpBuilt httpPeer} -body {
+    list [httpRun cancel [httpTlsUrl "/stream?n=100&size=100&delay=20"] [httpCa] 100000] \
+        [httpRun cancel [httpPlainUrl "/stream?n=100&size=100&delay=20"] "" 100000]
+} -result {{{cancelled in flight 1} {error Cancelled} {error Cancelled} {exchanges 0 tasks 0} {final: clients 0 exchanges 0 panics 0}} {{cancelled in flight 1} {error Cancelled} {error Cancelled} {exchanges 0 tasks 0} {final: clients 0 exchanges 0 panics 0}}}
+
+test http-abandon {releasing an exchange mid-body: its identity is Released afterwards and its native work is gone; an HTTP/1.1 connection it held is closed rather than reused (no task left), an HTTP/2 stream is reset and the shared connection stays (its driver and Hyper's connection task); the client goes on} -constraints {httpBuilt httpPeer} -body {
+    list [httpRun abandon [httpPlainUrl "/stream?n=100&size=1000&delay=10"] "" [httpPlainUrl /conns]] \
+        [httpRun abandon [httpTlsUrl "/stream?n=100&size=1000&delay=10"] [httpCa] [httpTlsUrl /conns]]
+} -result {{{first chunk 1000} {read after release 0} {after abandon: exchanges 0 idle 0 http2 0 tasks 0} {status 200 bytes 14} {final: clients 0 exchanges 0 panics 0}} {{first chunk 1000} {read after release 0} {after abandon: exchanges 0 idle 0 http2 1 tasks 2} {status 200 bytes 14} {final: clients 0 exchanges 0 panics 0}}}
+
+test http-abandon-control {the negative control: with releases leaving their tasks running (fault 128) the same scenario finds tasks left} -constraints {httpBuilt httpPeer} -body {
+    lindex [httpRun fault 128 abandon [httpPlainUrl "/stream?n=100&size=1000&delay=10"] "" [httpPlainUrl /conns]] 2
+} -result {after abandon: exchanges 0 idle 0 http2 0 tasks 2}
+
+test http-release-client {releasing a client while another task reads from one of its exchanges: the reader fails with Closed, and the client's connections and watches are gone} -constraints {httpBuilt httpPeer} -body {
+    list [httpRun release-client [httpTlsUrl "/stream?n=100&size=100&delay=20"] [httpCa]] \
+        [httpRun release-client [httpPlainUrl "/stream?n=100&size=100&delay=20"] ""]
+} -result {{{reader: error Closed} {after release: clients 0 http1 0 http2 0 watched 0} {final: clients 0 exchanges 0 panics 0}} {{reader: error Closed} {after release: clients 0 http1 0 http2 0 watched 0} {final: clients 0 exchanges 0 panics 0}}}
+
+test http-resolver-control {the name resolver's answer comes back to the loop by a foreign wake: with that wake lost (fault 1) a request to localhost never connects (its connect timeout fails it), and without the fault it succeeds} -constraints {httpBuilt httpPeer} -body {
+    list [lindex [httpRun fault 1 outcome [httpTlsUrl /hello] [httpCa] connect 500000] 0] \
+        [lindex [httpRun outcome [httpTlsUrl /hello] [httpCa] connect 500000] 0]
+} -result {{error Timeout connect} {status 200 bytes 6}}
+
+# --- lifetimes under random operation orders
+
+proc httpOps {seed count} {
+    expr {srand($seed)}
+    set letters [split nsssrrrrrxXkw ""]
+    set ops ""
+    for {set i 0} {$i < $count} {incr i} {
+        append ops [lindex $letters [expr {int(rand() * [llength $letters])}]][expr {int(rand() * 10)}]
+    }
+    return $ops
+}
+
+test http-lifetime-fuzz {twenty seeded orders of sends, reads, exchange and client releases, cancellations and waits on both protocols: every outcome a value or a declared error, no Fault, and at the end no client, exchange, task or watch left} -constraints {httpBuilt httpPeer} -body {
+    set bad {}
+    for {set seed 1} {$seed <= 10} {incr seed} {
+        set ops [httpOps $seed 150]
+        foreach url [list [httpTlsUrl "/stream?n=20&size=2000&delay=5"] [httpPlainUrl "/stream?n=20&size=2000&delay=5"]] {
+            set pem [expr {[string match https* $url] ? [httpCa] : ""}]
+            set out [httpRun fuzz $url $pem $ops]
+            if {![string match "*faults 0" [lindex $out 0]] || [lindex $out 1] ne "after: clients 0 exchanges 0 tasks 0 watched 0 panics 0"} {
+                lappend bad $seed $url $out
+            }
+        }
+    }
+    set bad
+} -result {}
+
+# --- GC stress
+
+test http-gc-stress {the scenarios hold with a collection at every allocation (BOTLISH_NATIVE_GC_STRESS=1)} -constraints {httpBuilt httpPeer} -body {
+    withEnvironment {BOTLISH_NATIVE_GC_STRESS 1} {
+        list [httpRun get [httpTlsUrl /bytes?n=200000] [httpCa] pattern] \
+            [lindex [httpRun post [httpTlsUrl /echo] [httpCa]] end-1] \
+            [lindex [httpRun upload [httpPlainUrl /echo] "" 300000 10000 0] end-1] \
+            [lindex [httpRun concurrent [httpTlsUrl "/stream?n=8&size=4096&delay=5"] [httpCa] 6] end-1] \
+            [lindex [httpRun abandon [httpPlainUrl "/stream?n=100&size=1000&delay=10"] "" [httpPlainUrl /conns]] 2] \
+            [lindex [httpRun release-client [httpTlsUrl "/stream?n=100&size=100&delay=20"] [httpCa]] 0] \
+            [lindex [httpRun fuzz [httpTlsUrl "/stream?n=20&size=2000&delay=5"] [httpCa] [httpOps 3 100]] 1]
+    }
+} -result {{{status 200 HTTP/2} {bytes 200000} {pattern matches yes} {final: clients 0 exchanges 0 panics 0}} {same body yes} {echoed 300000 same yes} {http1 0 http2 1} {after abandon: exchanges 0 idle 0 http2 0 tasks 0} {reader: error Closed} {after: clients 0 exchanges 0 tasks 0 watched 0 panics 0}}
+
+# --- an independent HTTP/2 implementation
+
+test http-nghttpd {nghttpd (nghttp2's server): a 3 MiB file over HTTP/2 with TLS arrives exactly; eight requests share one connection} -constraints {httpBuilt httpPeer nghttpd} -body {
+    set root [file join $::httpDir docroot]
+    file mkdir $root
+    exec python3 -I -c "open('[file join $root big.bin]','wb').write(bytes(i % 256 for i in range(3 * 1048576)))"
+    set pki [httpPki]
+    # nghttpd prints nothing when ready: wait for its port.
+    set port [expr {20000 + [pid] % 20000}]
+    set chan [open |[list nghttpd -d $root $port [file join $pki good.key] [file join $pki good.pem] 2> /dev/null] r]
+    set ::httpPeers(nghttpd) [list $chan $port]
+    for {set i 0} {$i < 50} {incr i} {
+        if {![catch {socket 127.0.0.1 $port} s]} { close $s; break }
+        after 100
+    }
+    list [lrange [httpRun get https://localhost:$port/big.bin [httpCa] pattern] 0 2] \
+        [lindex [httpRun concurrent https://localhost:$port/big.bin [httpCa] 8] end-1]
+} -result {{{status 200 HTTP/2} {bytes 3145728} {pattern matches yes}} {http1 0 http2 1}}
+
+# --- URIs
+
+test http-uri {URI parsing: scheme and host lowercased, default ports omitted from the authority, IPv6 in brackets, the query kept and the fragment dropped; user information, other schemes, bad escapes, bad hosts and ports refused} -constraints {httpBuilt} -body {
+    httpRun parse-many "https://Example.COM:0443/a%20b?x=1#f" "http://\[::1\]:8080" "HTTP://h:/" "http://h/p?" \
+        "http://1.2.3/" "http://user@h/" "https://h/%zz" "http://a..b/" "ftp://h/" "http://h:65536/" "http://\[::1%25eth0\]/" "http://h/a b"
+} -result {{https example.com 443 /a%20b?x=1 example.com} {http ::1 8080 / [::1]:8080} {http h 80 / h} {http h 80 /p? h} invalid invalid invalid invalid invalid invalid invalid invalid {final: clients 0 exchanges 0 panics 0}}
+
+httpStop
+cleanupTests

@@ -701,10 +701,11 @@ async fn exchange(x: i64, client: i64, settings: Rc<Settings>, parts: Parts, mut
     let origin = parts.origin.clone();
     let slot = body.slot();
     let mut attempts = 0;
+    let mut last = String::from("the connection was not ready");
     let (response, conn) = loop {
         attempts += 1;
         if attempts > 4 {
-            return Err(Failure::new(Kind::Protocol, 0, "no connection would take the request (it was handed back unsent four times)").at(&origin));
+            return Err(Failure::new(Kind::Protocol, -1, format!("four connections failed before the request was sent: {last}")).at(&origin));
         }
         // The connect timeout bounds getting a connection, waiting for a
         // pool slot included: a program holding MAX_CONNECTIONS unread
@@ -755,6 +756,7 @@ async fn exchange(x: i64, client: i64, settings: Rc<Settings>, parts: Parts, mut
             (Err(mut e), conn) => {
                 if let Some(req) = e.take_message() {
                     // Unsent: no byte of it reached the connection.
+                    last = protocol(e.error()).text;
                     drop(conn);
                     if proto == Proto::H2 {
                         forget_h2(client, &origin);

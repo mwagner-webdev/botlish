@@ -434,7 +434,7 @@ fn abandon(args: List[str], context h: http::Http, ev: std::event_loop::Loop, na
     say("read after release ".concat(n(size(again))))
     std::event_loop::sleep(20000)
     st = http::stats()
-    say("after abandon: exchanges ".concat(n(st.exchanges)).concat(" idle ").concat(n(st.idle_connections)).concat(" tasks ").concat(n(st.tasks)))
+    say("after abandon: exchanges ".concat(n(st.exchanges)).concat(" idle ").concat(n(st.idle_connections)).concat(" http2 ").concat(n(st.http2_connections)).concat(" tasks ").concat(n(st.tasks)))
     say(attempt(client, http::get(http::uri(arg(args, 3)))))
 
 # Releasing a client while another task streams from it: args url pem.
@@ -700,6 +700,18 @@ fn parse(args: List[str], context o: Out):
             return unit
     say(u.scheme.concat(" ").concat(u.host).concat(" ").concat(n(u.port)).concat(" ").concat(http::target(u)).concat(" ").concat(http::authority(u)))
 
+# Parse every argument after the scenario's name, one line each (the URI
+# fuzzer's oracle comparison: audit/http-client/tools/uri-fuzz.tcl).
+fn parse_many(args: List[str], context o: Out):
+    loop i from 1 to std::list::length(args):
+        text = std::list::get(args, i, "")
+        u = http::uri(text):
+            on http::InvalidUri:
+                say("invalid")
+                continue
+        say(u.scheme.concat(" ").concat(u.host).concat(" ").concat(n(u.port)).concat(" ").concat(http::target(u)).concat(" ").concat(http::authority(u)))
+    unit
+
 # --- dispatch
 
 fn scenario(args: List[str], context h: http::Http, ev: std::event_loop::Loop, nat: event_loop_linux::Native, o: Out) errors http::InvalidUri, http::InvalidRequest, http::ResolveFailed, http::ConnectFailed, http::TlsVerifyFailed, http::TlsHandshakeFailed, http::ProtocolError, http::Timeout, http::Cancelled, http::Closed, http::Unsupported, http::TrustFailed, http::Released, http::Fault, http::BodyTooLarge, http::HeaderNotText, std::event_loop::SchedulerFault:
@@ -730,6 +742,8 @@ fn scenario(args: List[str], context h: http::Http, ev: std::event_loop::Loop, n
         fuzz(args)
     elif name == "parse":
         parse(args)
+    elif name == "parse-many":
+        parse_many(args)
     else:
         say("unknown scenario ".concat(name))
 
