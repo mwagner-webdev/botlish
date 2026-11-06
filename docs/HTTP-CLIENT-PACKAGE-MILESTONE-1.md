@@ -53,11 +53,12 @@ its releases (`http` 0.1.0, `boringssl` 0.20261020.0) are recorded in
 containers built byte-identical artifacts that a host outside the image
 also reproduced (section 8).
 
-Two compiler defects surfaced while testing, and one was fixed here
-because it leaked the client's resources: natively, a function that owned
-a resource and returned a String its caller concatenated (or a small Int,
-a scalar String, a projected struct) never released the resource (section
-12). The others are recorded with reproducers.
+Compiler defects surfaced while testing (section 12). The one that leaked
+the client's resources was fixed here: natively, a function that owned a
+resource and returned a String its caller concatenated (or a small Int, a
+scalar String, a projected struct) never released the resource. The others
+-- a wrong method candidate inside a fold, a build per method call in some
+import sets, a call of an Int accepted -- are recorded with reproducers.
 
 ## 2. What was built
 
@@ -550,8 +551,9 @@ the releases after each form's last expression. Validated by
 `tests/affine-applications.test`,
 `tests/written-affine-applications.test`, `tests/event-loop.test`,
 `tests/event-loop-linux.test`, `tests/resources.test` and
-`tests/affine.test` under GC stress, and `tools/mutant-catalogs.tcl` (86
-catalogs, 3,037 mutants, every one still applies).
+`tests/affine.test` under GC stress, `tools/mutant-catalogs.tcl` (86
+catalogs, 3,037 mutants, every one still applies), and the affine,
+coroutine and lexical-cleanup harnesses (section 10.3).
 
 **F2. A fold's method-style call charged another module's function
 (open).** With `std::linux::fs` imported, `fold p in parts with
@@ -622,9 +624,13 @@ fixture); B4 and B8 were not needed; B9 and B10 remain.
   Eyeballs (a name's addresses are tried one after another, all within
   the one connect timeout, which covers resolution, connecting and the
   TLS handshake).
-* **On the loop's thread**: TLS handshakes and certificate verification
-  run inside the executor's step (measured in section 11); a very slow
-  handshake delays other tasks by its duration.
+* **On the loop's thread**: making a client parses the system bundle into
+  a trust store (4.0 ms here), and a TLS handshake with its certificate
+  verification runs inside the executor's step (about 2 ms of a cold
+  request here: section 11); other tasks wait meanwhile. A program should
+  make its clients once and reuse them (each also has its own connection
+  pools); GUIDE.md should say so in the next release (0.1.0's text is
+  fixed: it is the recorded artifact's).
 * **CI**: no workflow runs `tests/http-client.test` yet (it needs the
   provider's and the unit's builds, Python's h2 and nghttpd); it runs
   locally.

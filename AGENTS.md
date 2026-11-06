@@ -5620,8 +5620,11 @@ identity symbol). `tools/package-repository.tcl`'s `author::boringssl` and
   the unit (boring-sys builds link-only against empty archives).
 * Releases are reproducible: `--locked`, one codegen unit, remapped paths,
   deterministic archives; the pinned author image (tools/package-build/)
-  carries the Rust toolchain. A change to the unit or the provider is a new
-  version of the package.
+  carries the Rust toolchain. `http` 0.1.0 and `boringssl` 0.20261020.0
+  are recorded in packages/RELEASES.tsv: any change under
+  `packages/http` or `packages/boringssl` (its documentation included:
+  the artifact holds it) is a new version, built and recorded as they
+  were.
 
 If you change `packages/http`, `packages/boringssl`, `tools/http-package.tcl`
 or their recipes, run `tclsh9.0 tests/cffi/http.tcl` (it builds the
