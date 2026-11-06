@@ -482,7 +482,47 @@ tests/affine-applications.test, tests/written-affine-applications.test and
 a fuzzer pass, each detector in its own process under a memory cap (a mutant
 that brings back an unfolding must not exhaust the machine).
 
-MUTATION-RESULTS
+36 mutants, all killed (the first run killed 34; the two survivors --
+`pointer-pointee-treated-owned` and `reason-prefix-dropped` -- had no
+detector, and got one: `or-specimens`' PtrLoop[C] and PtrList[C], a
+recursion through a pointer's pointee, and `or-argument-named`'s witness of
+Box[Node[C]], which starts with the way into its argument; both then
+killed):
+
+| group | mutant | killed by |
+|---|---|---|
+| thresholds | `depth-64-rejection-restored` | or-deep-chain-accepted (65+), or-large-graph |
+| | `budget-4096-rejection-restored` | or-large-graph (4200 edges) |
+| | `depth-limit-raised-instead-of-removed` (1024) | or-large-graph (2100 deep) |
+| | `application-text-size-used-as-limit` | or-wrapped-recursion (Box^400[C]) |
+| | `type-bound-used-as-recursion-verdict` | or-wrapped-recursion |
+| soundness | `all-recursion-accepted`, `all-affine-recursion-accepted` | everything |
+| | `self-recursion-accepted` (Node) | or-specimens, or-written, the fuzzer |
+| | `mutual-recursion-accepted` (GrowA/GrowB, TA/TB/TC) | or-specimens, or-message-three-steps |
+| | `nonuniform-recursion-accepted` | or-specimens (GrowA) |
+| | `intrinsic-affine-recursion-accepted` | or-declarations (R) |
+| | `container-ownership-edge-ignored` | or-specimens (Vectored) |
+| | `other-declaration-recursion-ignored` (the old hole) | or-written, or-holder |
+| | `late-met-left-at-bottom` (the framework defect) | or-late-met, the fuzzer |
+| precision | `field-cycle-rejected` | or-declarations (FieldSelf), or-written (FieldGrow) |
+| | `phantom-slot-treated-owned` | or-specimens (HoldsW) |
+| | `pointer-pointee-treated-owned` | or-specimens (PtrLoop, PtrList) |
+| | `unrestricted-recursion-counted` | or-specimens (HoldsUnrelated) |
+| | `growth-alone-treated-invalid` | or-written (FieldGrow) |
+| | `transient-affinity-kept` (the old rule) | or-written, or-nested-runs (Swap) |
+| slot transformations | `slot-transformation-ignored`, `all-slots-conflated` | or-written (Swap) |
+| | `list-element-not-crossed` | or-specimens (Node) |
+| | `wrong-slot-index-propagated` | or-specimens (Mixed) |
+| | `mutual-edge-omitted` | or-specimens (GrowA), or-message-three-steps |
+| | `transformed-affinity-by-spelling` | or-specimens (FnArg) |
+| diagnostics | `reason-unfolds-applications`, `reason-loses-recursive-field` | or-messages |
+| | `reason-prefix-dropped` | or-argument-named |
+| | `reason-depends-on-threshold` | or-message-three-steps |
+| | `reason-walk-unbounded` | did not complete (the timeout and memory cap) |
+| memo lifetime | `facts-keyed-by-name` | or-identity-not-name |
+| | `verdicts-survive-reset`, `states-survive-reset` | or-isolation |
+| descriptor | `descriptor-field-cycle-uncut` | did not complete (FieldGrow[C]'s descriptor) |
+| | `descriptor-cuts-any-repeat` | or-nested-runs, or-field-cycle |
 
 Existing mutants retargeted (`tools/mutant-catalogs.tcl`: 87 catalogs, 0
 problems):
@@ -570,4 +610,31 @@ applied fields under a depth or budget:
 
 ## 22. Next milestone
 
-NEXT
+The evidence this milestone produced points to **depth-safe parsing of
+nested expressions**, not to function-type polarity (nothing here bears on
+it). Building the deep finite specimens, a construction literal nested 96
+deep -- `S0 {next: S1 {next: ... S96 {c: make(1)}}}` -- did not compile: the
+recursive-descent parser exhausted Tcl's evaluation depth ("too many nested
+evaluations (infinite loop?)", errorcode TCL LIMIT STACK) before any
+analysis ran. Measured on this branch and on the revision before it alike:
+List literals and struct constructions nested 80 deep, and parenthesized
+arithmetic nested 100 deep, all fail the same way. That is an
+implementation limit deciding whether a program is accepted -- the theme of
+this milestone -- and it surfaces as a host error, not a diagnostic: the
+tests here build such values one statement per level instead. A milestone
+would make the parser's and the lowering's nesting depth-safe (an explicit
+stack, or a stated, diagnosed nesting limit with a code of its own), pin
+both with generated programs a thousand levels deep, and check the walks
+downstream of the parser (`hir::build`, the resolver, the typing of nested
+constructions) for the same recursion.
+
+Smaller, also evidenced:
+
+* **Uninhabited declarations.** `hir::ownership::FieldCycle` now proves that
+  no finite value of a declaration exists (a recursion through mandatory
+  fields alone); such a declaration is accepted silently. A warning backed
+  by that proof would tell its author.
+* **A nested construction's type at 20 levels.** `Box {value: Box {value:
+  ... 1}}` nested 20 deep is a TYPE error on both revisions (the applied-type
+  bound cuts an unrestricted argument to `any` while the construction's
+  value is still precise); unrelated to ownership, not investigated here.
