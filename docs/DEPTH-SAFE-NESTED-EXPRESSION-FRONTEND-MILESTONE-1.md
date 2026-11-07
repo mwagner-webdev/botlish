@@ -44,17 +44,21 @@ Every specimen family -- parentheses, unary minus and `not`, binary
 arithmetic nested right and left, a flat operator chain, List literals,
 named struct constructions, projection chains, calls, method chains, `or`
 and `and` chains, `elif` chains, nested `if` blocks, nested function
-declarations, nested handlers, and all of them mixed -- compiles 1000 deep
-at Tcl's *default* recursion limit of 1000 nested evaluations, through every
-compile-time path (the front end with every warning pass, HIR text printed
-and read back, interchange text, core IR and its check, the Tcl compiler,
-native lowering, a trait program, a coroutine program, a `static compile:`
-block, an imported module, the compiler service), and runs on all four
-backends with the value its structure gives it. Parentheses and List
+declarations, nested handlers, all of them mixed, and what nests that is
+no expression -- a written type, a destructuring pattern, loops and folds,
+one Boolean condition, `inject` blocks, a layout's arrays of arrays, a
+chain of 1001 affine struct declarations built in one expression --
+compiles 1000 deep at Tcl's *default* recursion limit of 1000 nested
+evaluations, through every compile-time path (the front end with every
+warning pass, HIR text printed and read back, interchange text, core IR
+and its check, the Tcl compiler, native lowering, a trait program, a
+coroutine program, a `static compile:` block, an imported module, a module
+binding, the compiler service), and runs on all four backends with the
+value its structure gives it. Parentheses and List
 literals compile 5000 deep; the fuzzer compiles mixed programs 1500 deep.
 
 The walks are unchanged. Each procedure whose recursion follows the
-program's nesting (132 of them, `audit/depth-safe-nesting/census.tsv`)
+program's nesting (CENSUSCOUNT of them, `audit/depth-safe-nesting/census.tsv`)
 starts with one guard:
 
     if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
@@ -160,7 +164,7 @@ the service) while each specimen kind 24 deep goes through each scenario
 simultaneous activations. One active at least 12 times at once recurses with
 the nesting. `probe.tcl` runs every specimen 1000 deep through every
 scenario at the default limit and names the procedures a TCL LIMIT STACK's
-stack repeats. The census found 132 procedures:
+stack repeats. The census found CENSUSCOUNT procedures:
 
 | phase | procedures | recursive shape | terminates | changed | why it stays recursive |
 |---|---|---|---|---|---|
@@ -212,7 +216,7 @@ What the census leaves out on purpose:
 
 ## 5. The mechanism: recursion in segments (core/deep.tcl)
 
-The prompt preferred explicit work stacks. Rewriting 132 procedures --
+The prompt preferred explicit work stacks. Rewriting CENSUSCOUNT procedures --
 the type checker's `Expr`, the range analysis, the completion analysis,
 native lowering's 13,000 lines -- each into continuation-passing style over
 its own explicit stack would have been the largest change to the compiler
@@ -460,6 +464,16 @@ stops it:
   (`hir::syntax::words`, an explicit work list, matching each node's own
   fields). Peak memory for a List literal: 590 MB at 400 deep before,
   FIXME after; at 800 deep FIXME.
+* **The loader's sections.** The loader collected each module's lowered
+  syntax with `dict set state sections [concat ... [list $section]]`: every
+  module loaded after the first had its whole syntax stringified, a string
+  at each level. The `loops` specimen in an imported module (it imports
+  std::list, so its section comes second) took more than 12 GB 1000 deep
+  and 159 MB 120 deep; appended with `dict lappend`, 41 MB 120 deep and 65
+  MB 240 deep. The declaration lists beside it (whose layouts and types
+  nest as written) are joined with `list {*}...` too.
+  `dsn-module-not-stringified` pins it (`concat` returns its only
+  non-empty list untouched, so the test's module imports another).
 * **A repeated constant fold.** Native lowering asked, at every call of an
   integer constant expression, whether its whole subtree was constant
   (`native::lower::ConstantIntValue`): 41,090 calls for 200 levels. It is
@@ -555,7 +569,47 @@ FIXME
 
 ## 24. Remaining recursion: the final census
 
-FIXME
+The census (`audit/depth-safe-nesting/census.tsv`) lists CENSUSCOUNT
+procedures, every one guarded (`dsn-census-guarded`). `census.tcl` over
+every specimen kind through every scenario (24 deep; `loops`, `cond` and
+`mixed`, which cycle through forms, 48 deep at `-fraction 4`) finds no
+procedure active half as many times as the program nests that the census
+does not list, and `probe.tcl` runs every kind 1000 deep through every
+scenario at the default limit without one TCL LIMIT STACK.
+
+What still recurses, and why it may (`static-census.tcl` lists the
+STATICCOUNT procedures that call themselves without the guard, by
+namespace):
+
+* **Types.** `hir::types` (subtyping, joins, meets, printing, totality),
+  `hir::decimal`, `hir::structs`, `hir::imprint`, `hir::callables`'
+  bearing, `hir::semantic`'s erasures: walks of a type term. Every type the
+  analyses hold is cut to the lattice's bounds -- an aggregate 3 deep, an
+  application 6 deep (`hir::types` `aggregateDepth`, `appliedDepth`) --
+  written types included: a parameter declared `List[List[...int...]]`
+  1000 deep is `List[List[List[list]]]` in its diagnostics, and a
+  function type 1000 deep is cut the same way. The syntax of a written type
+  (`TypeExpr`, `ResolveTypeExpr`, `TypeRefs`) is as deep as it is written,
+  and guarded.
+* **Declarations.** Summaries (`hir::summaries`) and recursive ownership
+  (`hir::ownership`) are least fixpoints over declaration states, not
+  recursion over a chain; the one walk that followed a chain of
+  declarations, an affine type's drop descriptor (`hir::affine::Descriptor`),
+  is guarded (`affine`: 1001 declarations).
+* **The call graph and instances.** Contracts, specialization and semantic
+  instances nest one analysis per call, bounded by their budgets
+  (`hir::semantic`'s `maxDepth`, the completion analysis' `maxDepth`),
+  whose analyses run in the guarded walks' segments.
+* **Values of other protocols.** The language server's JSON
+  (`lsp::json`), the native driver's records and the service's protocol
+  values are the tools' data, not the program's nesting.
+* **Self-calls that are no recursion** -- a procedure that normalizes its
+  arguments and calls itself once, or whose name appears as another
+  command's word or in a string -- are in the static list too; it is an
+  over-approximation for a reader adding a walk, not a census.
+* **The run** (section 22): the reference interpreter evaluates the
+  program's nesting as the program's own recursion, under the program
+  recursion limit.
 
 ## 25. Explicit limitations
 
@@ -565,7 +619,46 @@ FIXME
   same diagnostic at the same place as 7 deep (`dsn-box-bound`), where the
   front end used to fail with TCL LIMIT STACK at 100. That precision limit
   is the next milestone's candidate, not this one's.
-* **Superlinear phases left**: FIXME
+* **Superlinear phases left** (section 20 has the numbers). None is a
+  depth limit -- each compiles 1000 deep -- and each is an algorithm's
+  cost, not the segments':
+  - **Nested folds whose intermediate widens: exponential.** A fold's
+    intermediate type is a bounded fixpoint (`hir::types::FoldBody`): when
+    the body's type widens the intermediate's, the body is walked again,
+    nested folds inside it included -- 6, 9 and 12 nested folds over `[]`
+    compile in 58, 134 and 712 ms. A fold whose intermediate keeps its type
+    is walked once, and nests linearly (the `loops` specimen's). Found while
+    writing that specimen; changing fold typing is FOLD-LOOPS-MILESTONE-1's
+    territory, with its own audit, and is not done here.
+  - **Nested handlers: quadratic.** The completion analysis range-analyzes
+    each live handler body standalone (`hir::range::analyzeSequence`, from
+    `hir::completions::EvalHandle`) to admit its completion type, and that
+    body holds every handler nested in it: N handlers analyze N(N+1)/2
+    levels. Reusing the enclosing analysis would change what is proven
+    (it knows the outer bindings' facts), so it is left.
+  - **Nested functions in the Tcl compiler: quadratic code.** Each function
+    value carries its body's core IR (`core::value::block {} {...}`), the
+    functions nested in it included, and each function's prologue walks
+    one environment parent per enclosing scope: 420 KB of Tcl for 100
+    nested functions, 1.66 MB for 200, and `hir::lower::ReleasingOnError`
+    asked N(N-1)/2 times.
+  - **Nested blocks on the Tcl backend.** The Tcl compiler's code for a
+    nested block is a nested, indented Tcl script: 1.57 MB of Tcl for 125
+    nested handlers, 6.15 MB for 250. Defining the unit's procedures takes
+    milliseconds, but running it makes Tcl's own parser scan each level's
+    text once per enclosing braced script: 0.8 s at 125, 5.9 s at 250 and
+    46 s at 500 on the `compile` backend (the other backends run 500 nested
+    handlers in under half a second). `dsn-1000-handler` runs that one
+    backend 250 deep; the program still compiles 1000 deep, the Tcl
+    compiler's unit included.
+  - **Block nesting's text.** A block nested N deep is indented N times:
+    the source of `ifnest`, `fnnest`, `handler`, `loops` and `inject` is
+    O(N^2) characters (2.7 MB for `loops` 1000 deep), and the lexer and
+    every span with it.
+  - **`or`/`and` chains**: about x2.4 per doubling in inference, the
+    completion analysis, branch facts and the range analysis; **struct
+    construction and projection chains** in native lowering's escape and
+    scalar-replacement planning (section 20).
 * **The guard's contract** is a convention the census test checks for the
   guard's presence, not for every caller's variables: a guarded procedure
   passed a namespace variable under another name (`upvar #0 ::x y`) would
