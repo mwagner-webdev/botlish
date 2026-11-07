@@ -48,6 +48,9 @@ source [file join $root compilerpedia compilerpedia.tcl]
 core::useProgramRecursionLimit
 
 namespace eval cpt {
+    # A design document's name as a text cites it: docs/NAME.md by its bare
+    # name (or a path), a README by its path.
+    variable docPattern {(?:[A-Za-z0-9_.]+/)*[A-Z0-9][A-Z0-9]*(?:-[A-Z0-9]+)*\.md}
     variable root $::root
     variable generated [file join $::root compilerpedia generated stdlib.topic]
     variable notes [file join $::root compilerpedia notes stdlib.notes]
@@ -183,6 +186,38 @@ proc cpt::CommentAbove {lines line name} {
     return $result
 }
 
+# The design documents a text cites (docs/NAME.md, a README) are the
+# repository's, never the reference's: the single executable carries no
+# docs/, so a page never names one (`check` rejects a page that does). A
+# library comment cites them for its maintainers; Unreferenced is the
+# comment's TEXT as a page shows it, without them: a parenthetical of
+# citations only is dropped, citations leading or ending a parenthetical
+# ("(DOC: ...)", "(...; DOC)", "(...: DOC)"), a "-- see DOC" and a sentence
+# that is only
+# citations are taken out of it. Anything else that still names a document
+# is left as it is, for `check` to report and the comment to be reworded.
+proc cpt::Unreferenced {text} {
+    variable docPattern
+    # A name the comment split at one of its hyphens, across two lines.
+    regsub -all {([A-Z0-9]-)\s+([A-Z0-9][A-Z0-9-]*\.md)} $text {\1\2} text
+    set doc $docPattern
+    set suffix {(?:,?\s+(?:"[^"]*"|sections?\s+[0-9][0-9.]*(?:(?:,|\s+and)\s+[0-9][0-9.]*)*|items?\s+[0-9]+(?:(?:,|\s+and|-)\s*[0-9]+)*|[0-9]+(?:\.[0-9]+)*(?=[\s,;:)])))*}
+    set ref "(?:see\\s+)?${doc}${suffix}"
+    set refs "${ref}(?:\\s*(?:\[;,\]|\\s+and)\\s*${ref})*"
+    for {set pass 0} {$pass < 4} {incr pass} {
+        set before $text
+        regsub -all "\\s*\\(\\s*${refs}\\s*\\)" $text "" text
+        regsub -all "\\(\\s*${refs}\\s*\[:;,\]\\s*" $text "(" text
+        regsub -all "\\s*\[;,:\]\\s*${refs}\\s*(\\.?)\\)" $text {\1)} text
+        regsub -all "\\s+--\\s+see\\s+${refs}" $text "" text
+        regsub -all "(^|\[.!?\]\\s+)${refs}\\.(?=\\s|\$)" $text {\1} text
+        if {$text eq $before} {
+            break
+        }
+    }
+    return $text
+}
+
 # The comment LINES with each paragraph of prose (consecutive lines that start
 # with neither a space nor "*") refilled to the topic text width, 76 columns;
 # a bulleted item ("* " and its lines indented two spaces) is refilled the
@@ -204,7 +239,7 @@ proc cpt::Reflow {lines} {
             continue
         }
         if {$paragraph ne ""} {
-            set filled [compilerpedia::Wrap [join $paragraph " "] "" 76]
+            set filled [compilerpedia::Wrap [string trim [Unreferenced [join $paragraph " "]]] "" 76]
             lappend out {*}[split $filled \n]
             set paragraph {}
         }
@@ -222,8 +257,12 @@ proc cpt::Reflow {lines} {
                     set wide 1
                 }
             }
+            set text [join [lmap itemLine $item {string trim $itemLine}] " "]
+            if {[Unreferenced $text] ne $text} {
+                set text [Unreferenced $text]
+                set wide 1
+            }
             if {$wide} {
-                set text [join [lmap itemLine $item {string trim $itemLine}] " "]
                 set filled [split [compilerpedia::Wrap [string range $text 2 end] "  " 76] \n]
                 lset filled 0 "* [string range [lindex $filled 0] 2 end]"
                 lappend out {*}$filled
@@ -233,14 +272,15 @@ proc cpt::Reflow {lines} {
             set i [expr {$j - 1}]
             continue
         }
-        lappend out $line
+        regexp {^(\s*)(.*)$} $line -> indent rest
+        lappend out [string trimright $indent[Unreferenced $rest]]
     }
     return $out
 }
 
 # The first sentence of the comment LINES, for a one-line listing.
 proc cpt::FirstSentence {lines} {
-    set text [string trim [join $lines " "]]
+    set text [string trim [Unreferenced [join $lines " "]]]
     if {[regexp {^(.*?[.:;])(\s|$)} $text -> sentence]} {
         set text $sentence
     }
@@ -324,14 +364,14 @@ proc cpt::Notes {} {
 # Topic-file text for one generated topic: ID, its header FIELDS (key ->
 # value or list), its SECTIONS ({HEADING LINES}), merged with NOTE (a parsed
 # notes topic, or ""): the note's summary replaces a derived one, its
-# aliases, keywords, related and docs are added, its sections and examples
+# aliases, keywords and related are added, its sections and examples
 # follow the derived sections.
 proc cpt::TopicText {id fields sections note} {
     if {$note ne ""} {
         if {[dict get $note summary] ne "" && [dict get $note summary] ne "-"} {
             dict set fields summary [dict get $note summary]
         }
-        foreach key {alias keywords related docs index} {
+        foreach key {alias keywords related index} {
             if {[dict get $note $key] ne ""} {
                 set merged [expr {[dict exists $fields $key] ? [dict get $fields $key] : {}}]
                 foreach value [dict get $note $key] {
@@ -344,7 +384,7 @@ proc cpt::TopicText {id fields sections note} {
         }
     }
     set out [list "@topic $id"]
-    foreach key {title summary index code symbol alias keywords related docs} {
+    foreach key {title summary index code symbol alias keywords related} {
         if {![dict exists $fields $key] || [dict get $fields $key] eq ""} {
             continue
         }
@@ -570,7 +610,7 @@ proc cpt::Generate {} {
         set where [expr {$ns eq "root" ? "The root namespace: language primitives, visible in every file without an import." \
             : [expr {$relativePath ne "" ? "$relativePath (import $ns)." : "Compiler intrinsics only, no module file (import $ns)."}]}]
         if {$direct} {
-            append where " A direct module (DIRECT-MODULES.md): it exercises raw authority."
+            append where " A direct module (concept.direct-modules): it exercises raw authority."
         }
         if {[dict exists $modules $ns] && [lindex [dict get $modules $ns] 1] ne ""} {
             append where " [string totitle [lindex [dict get $modules $ns] 1] 0 0]."
@@ -944,6 +984,51 @@ proc cpt::Check {options} {
     }
     if {![file exists $generated] || [ReadFile $generated] ne $text} {
         lappend problems "compilerpedia/generated/stdlib.topic is not what tools/compilerpedia.tcl generate writes: regenerate it"
+    }
+    # No page names a design document: the reference ships without docs/
+    # (in the single executable and Botlish.app), so a page says what it
+    # means itself and points at other topics, never at a repository file.
+    variable docPattern
+    set pages [lmap id [compilerpedia::topics] {list $id [compilerpedia::render $id]}]
+    lappend pages {*}[lmap name [concat [compilerpedia::indexNames] all] {list "index $name" [compilerpedia::renderIndex $name]}]
+    lappend pages [list overview [compilerpedia::renderOverview]]
+    foreach page $pages {
+        lassign $page id text
+        foreach doc [lsort -unique [regexp -all -inline "\\m$docPattern" $text]] {
+            lappend problems "$id: names the design document $doc (the reference ships without docs/: say it, or name a topic)"
+        }
+    }
+    # A capability page documents what the standard library lacks or limits.
+    # A phrase it answers (an alias) that names an existing standard-library
+    # operation -- a function or an intrinsic, not a predicate (NAME?), as
+    # "read file" names std::linux::fs::read_file -- means the page may be
+    # out of date: it passes only when the page relates that operation's
+    # topic or its module's, i.e. accounts for it (AGENTS.md, "Compilerpedia
+    # (the built-in reference)").
+    set named [dict create]
+    foreach id [compilerpedia::topics] {
+        if {![string match stdlib.* $id] || [string match stdlib.module.* $id]} continue
+        set topic [compilerpedia::topic $id]
+        if {![regexp { -- (Function|intrinsic|language primitive)} [dict get $topic title]]} continue
+        foreach symbol [dict get $topic symbol] {
+            if {[string index $symbol end] eq "?"} continue
+            set words [string tolower [string map {_ " "} [namespace tail $symbol]]]
+            dict lappend named $words [list $symbol $id stdlib.module.[namespace qualifiers $symbol]]
+        }
+    }
+    foreach id [compilerpedia::topics] {
+        if {![string match capability.* $id]} continue
+        set topic [compilerpedia::topic $id]
+        foreach alias [dict get $topic alias] {
+            set words [string tolower [string trim $alias]]
+            if {![dict exists $named $words]} continue
+            foreach entry [dict get $named $words] {
+                lassign $entry symbol symbolTopic moduleTopic
+                if {$symbolTopic ni [dict get $topic related] && $moduleTopic ni [dict get $topic related]} {
+                    lappend problems "$id: its alias \"$alias\" names $symbol, which exists: document it on the page (relate $symbolTopic or $moduleTopic) or drop the alias"
+                }
+            }
+        }
     }
     # Every intrinsic has a note: a summary of what it does.
     foreach name [core::native::names] {

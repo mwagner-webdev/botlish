@@ -1322,13 +1322,13 @@ numeral (Nl), a combining mark or punctuation. It decides what
 std::str::is_tcl_alpha decides for the one-character String of the same
 character, but it is total -- every UnicodeChar is one character, so there
 is no RANGE case -- and it never makes a String: read the characters of a
-text with std::str::char_at and classify them as they are
-(UNICODECHAR-CLASSIFIERS.md). Like the std::str form, it reproduces Tcl's
-class rather than being Botlish's eventual character-classification API.
-Its parameter is a UnicodeChar: a one-character String is the TYPE error,
-and a method-style call x.is_tcl_alpha() with both std::char and std::str
-imported needs x's type to choose (with an untyped x it is
-AMBIGUOUS-METHOD-CALL: call the one you mean).
+text with std::str::char_at and classify them as they are. Like the
+std::str form, it reproduces Tcl's class rather than being Botlish's
+eventual character-classification API. Its parameter is a UnicodeChar: a
+one-character String is the TYPE error, and a method-style call
+x.is_tcl_alpha() with both std::char and std::str imported needs x's type
+to choose (with an untyped x it is AMBIGUOUS-METHOD-CALL: call the one you
+mean).
 
 == EXAMPLES
 @example accept
@@ -2416,15 +2416,15 @@ related: stdlib.module.std::abi::bytes stdlib.module.std::mutable_byte_store
 == NOTES
 Intrinsics, no module file. A byte storage is a runtime value kind of its
 own: an immutable, finite sequence of bytes with an exact length, no
-terminator, compared and hashed by its bytes. No source type spells it (its
-static type is any); std::abi::bytes::Bytes is the opaque struct whose one
-field holds one, and only module std::abi::bytes can construct or open a
-Bytes. So programs use std::abi::bytes::from_list, std::abi::bytes::length
-and the rest of that module; these intrinsics are what it is written in.
-There is deliberately no operation that indexes or iterates the bytes: they
-are combined and cut whole (join, slice) and converted to and from text
-(decode_utf8; encode_utf16le and decode_utf16le,
-UTF16-BYTE-STORAGE-MILESTONE-1.md).
+terminator, compared and hashed by its bytes. No source type spells it
+(its static type is any); std::abi::bytes::Bytes is the opaque struct
+whose one field holds one, and only module std::abi::bytes can construct
+or open a Bytes. So programs use std::abi::bytes::from_list,
+std::abi::bytes::length and the rest of that module; these intrinsics are
+what it is written in. There is deliberately no operation that indexes or
+iterates the bytes: they are combined and cut whole (join, slice) and
+converted to and from text (decode_utf8; encode_utf16le and
+decode_utf16le).
 
 @topic stdlib.std::byte_store::from_list
 title: -
@@ -2484,7 +2484,7 @@ The substrate of std::abi::bytes::join, which is what programs call (it
 takes a List[std::abi::bytes::Bytes]). One copy of the total length; the
 empty List, or only empty parts, gives the empty storage. An element that
 is not a byte storage is the TYPE error when the call runs. It reads no
-byte into a Botlish value. WINDOWS-X86-64-MILESTONE-7.md.
+byte into a Botlish value.
 
 == EXAMPLES
 @example accept
@@ -2510,8 +2510,7 @@ byte indices, valid exactly when 0 <= start <= end <= the byte count, with
 std::str::substring's rule for the two errors: start below 0, or end below
 start, is LowerUnderrun; end past the count is UpperOverrun. It copies the
 range into a new storage and reads no byte into a Botlish value. The file
-writers use it to continue after a short write
-(WINDOWS-X86-64-MILESTONE-7.md).
+writers use it to continue after a short write.
 
 == EXAMPLES
 @example accept
@@ -2538,9 +2537,9 @@ related: stdlib.std::abi::bytes::decode_utf8 stdlib.std::str::encode_utf8 stdlib
 The substrate of std::abi::bytes::decode_utf8, which is what programs call
 (it takes a std::abi::bytes::Bytes). Strict: an overlong form, an encoded
 surrogate (WTF-8's form of an unpaired UTF-16 surrogate), a value above
-U+10FFFF, a truncated sequence or a stray continuation byte is the declared
-error InvalidUtf8, never a replacement character. A 0 byte is U+0000.
-WINDOWS-X86-64-MILESTONE-7.md.
+U+10FFFF, a truncated sequence or a stray continuation byte is the
+declared error InvalidUtf8, never a replacement character. A 0 byte is
+U+0000.
 
 == EXAMPLES
 @example accept
@@ -2562,12 +2561,11 @@ related: stdlib.std::abi::bytes::encode_utf16le stdlib.std::byte_store::decode_u
 
 == NOTES
 The substrate of std::abi::bytes::encode_utf16le, which is what programs
-call (it returns a std::abi::bytes::Bytes). Each Unicode scalar value is one
-UTF-16 code unit, or for a scalar above U+FFFF its surrogate pair, high unit
-first; each unit is stored low byte first whatever the host's byte order.
-U+0000 is the bytes 00 00; nothing is added (no byte-order mark, no NUL
-terminator) and nothing normalized. Total.
-UTF16-BYTE-STORAGE-MILESTONE-1.md.
+call (it returns a std::abi::bytes::Bytes). Each Unicode scalar value is
+one UTF-16 code unit, or for a scalar above U+FFFF its surrogate pair,
+high unit first; each unit is stored low byte first whatever the host's
+byte order. U+0000 is the bytes 00 00; nothing is added (no byte-order
+mark, no NUL terminator) and nothing normalized. Total.
 
 == EXAMPLES
 @example accept
@@ -2586,13 +2584,12 @@ related: stdlib.std::abi::bytes::decode_utf16le stdlib.std::byte_store::encode_u
 
 == NOTES
 The substrate of std::abi::bytes::decode_utf16le, which is what programs
-call (it takes a std::abi::bytes::Bytes). Strict: an odd byte count, or code
-units that are not well-formed UTF-16 -- an unpaired high or low surrogate,
-in any position -- is the declared error InvalidUtf16, never a replacement
-character. FF FE is the character U+FEFF, never a byte-order mark: the byte
-order is always little-endian, never detected. A UTF-16 code unit is not a
-character: a surrogate pair is one scalar.
-UTF16-BYTE-STORAGE-MILESTONE-1.md.
+call (it takes a std::abi::bytes::Bytes). Strict: an odd byte count, or
+code units that are not well-formed UTF-16 -- an unpaired high or low
+surrogate, in any position -- is the declared error InvalidUtf16, never a
+replacement character. FF FE is the character U+FEFF, never a byte-order
+mark: the byte order is always little-endian, never detected. A UTF-16
+code unit is not a character: a surrogate pair is one scalar.
 
 == EXAMPLES
 @example accept
@@ -2855,10 +2852,10 @@ keywords: syscall; system call; kernel; x86-64
 related: concept.direct-modules backend.native-only stdlib.module.std::linux
 
 == NOTES
-An intrinsic namespace declared direct (DIRECT-MODULES.md): a module that
-calls into it must itself be a `direct module` or mediate the call through a
-context it declares. stdlib/linux/sys.x86_64.bot and stdlib/linux.bot wrap
-it; programs use std::linux::write, std::linux::read, std::linux::io or io.
+An intrinsic namespace declared direct: a module that calls into it must
+itself be a `direct module` or mediate the call through a context it
+declares. stdlib/linux/sys.x86_64.bot and stdlib/linux.bot wrap it;
+programs use std::linux::write, std::linux::read, std::linux::io or io.
 
 @topic stdlib.module.std::linux::abi::aarch64
 title: -
@@ -2925,15 +2922,15 @@ related: concept.binary-layouts stdlib.module.std::abi::bytes
 `import std::binary` for the ten intrinsics and the scalar field types
 std::binary::U8 ... std::binary::I64. A `layout` declaration names a fixed
 number of bytes with explicit size, alignment and field offsets; every
-multi-byte field is little-endian (the target's order), and padding is never
-a field. The layout is static: it is named at a parse or a query and read
-from the value's type at an emit, never a runtime value. A field may be a
-fixed array, `field name: array 16 of std::ffi::c::Char at 8`: N elements of
-any representation (a scalar, a pointer, a nested layout, another array),
-element i at the field's offset plus i times the element's width; its
-copied value is a List of exactly N elements (FIXED-LAYOUT-ARRAYS.md).
-There are no bitfields, variable-length tails or zero-length arrays in a
-layout; overlapping interpretations are a union layout's (LAYOUT-UNIONS.md).
+multi-byte field is little-endian (the target's order), and padding is
+never a field. The layout is static: it is named at a parse or a query and
+read from the value's type at an emit, never a runtime value. A field may
+be a fixed array, `field name: array 16 of std::ffi::c::Char at 8`: N
+elements of any representation (a scalar, a pointer, a nested layout,
+another array), element i at the field's offset plus i times the element's
+width; its copied value is a List of exactly N elements. There are no
+bitfields, variable-length tails or zero-length arrays in a layout;
+overlapping interpretations are a union layout's.
 
 A field may be C's float or double (std::ffi::c::Float, 4 bytes;
 std::ffi::c::Double, 8), its value a Float64. A read of one --
@@ -2956,11 +2953,11 @@ std::binary::load).
 Writes name their field statically, LAYOUT.FIELD or a path through nested
 layouts (Header.origin.x). A record in byte storage the program owns is
 filled a field at a time: std::binary::write(data, L.f, v) is a new
-std::abi::bytes::MutableBytes with that field written (data unchanged), and
-a pointer field takes an existing pointer only through the explicit
+std::abi::bytes::MutableBytes with that field written (data unchanged),
+and a pointer field takes an existing pointer only through the explicit
 std::binary::write_foreign. Live native memory foreign code handed out is
 written through a NativeEdit[L] (std::binary::native::edit, then
-std::binary::store). NATIVE-LAYOUT-WRITES.md.
+std::binary::store).
 
 A fixed array read through a view or an edit (v.items) is a live array,
 NativeView[array N of E] or NativeEdit[array N of E]:
@@ -3065,9 +3062,9 @@ related: concept.binary-layouts stdlib.std::binary::load stdlib.module.std::bina
 
 == NOTES
 L is a layout name written at the call; p must statically be an
-std::ffi::c::Ptr[T] (a data pointer), observed, never moved. Nothing is read
-when the view is made: each field is read when it is projected (v.field,
-one load at the layout's offset), a nested layout's field is a
+std::ffi::c::Ptr[T] (a data pointer), observed, never moved. Nothing is
+read when the view is made: each field is read when it is projected
+(v.field, one load at the layout's offset), a nested layout's field is a
 NativeView of the inner layout, and a pointer field is the exact pointer
 the memory holds. A view is read-only, never a pointer, a LayoutStruct or
 another layout's view, and has no equality. Making one is raw authority:
@@ -3077,8 +3074,8 @@ reading a view someone else made is not. It reads memory only on the
 native backends: interp and compile refuse a view of a non-null pointer
 with NATIVE-ONLY. A null pointer is the builtin declared error
 NativeViewNull on every backend. The memory must hold at least
-std::binary::layout_length(L) bytes for as long as the view is read; nothing
-checks it. Declared nomethod. NATIVE-LAYOUT-VIEWS.md.
+std::binary::layout_length(L) bytes for as long as the view is read;
+nothing checks it. Declared nomethod.
 
 == EXAMPLES
 @example accept
@@ -3115,22 +3112,23 @@ related: concept.binary-layouts stdlib.std::binary::store stdlib.std::binary::na
 
 == NOTES
 L is a layout name written at the call; p must statically be an
-std::ffi::c::Ptr[T] (a data pointer), observed, never moved. Nothing is read
-or written when the edit is made. An edit reads exactly as a NativeView does
-(v.field, destructuring, std::binary::load) except that a nested layout's
-field is a NativeEdit of the inner layout, and std::binary::store writes
-through it. It is write authority, never ownership: no lifetime, no
-exclusive access (copies, other edits and views of the same address, and
-foreign code all alias the memory). A NativeView never becomes an edit and
-an edit is not a view: neither is the other's subtype. Making one is raw
-authority like a view: std::binary::native is a direct namespace, so the
-calling module must be a `direct module` (or mediate the call through a
-context of its own); writing through an edit someone else made is not. It
-touches memory only on the native backends: interp and compile refuse an
-edit of a non-null pointer with NATIVE-ONLY. A null pointer is the builtin
-declared error NativeEditNull on every backend. The memory must be live,
-writable and at least std::binary::layout_length(L) bytes for as long as the
-edit is used; nothing checks it. Declared nomethod. NATIVE-LAYOUT-WRITES.md.
+std::ffi::c::Ptr[T] (a data pointer), observed, never moved. Nothing is
+read or written when the edit is made. An edit reads exactly as a
+NativeView does (v.field, destructuring, std::binary::load) except that a
+nested layout's field is a NativeEdit of the inner layout, and
+std::binary::store writes through it. It is write authority, never
+ownership: no lifetime, no exclusive access (copies, other edits and views
+of the same address, and foreign code all alias the memory). A NativeView
+never becomes an edit and an edit is not a view: neither is the other's
+subtype. Making one is raw authority like a view: std::binary::native is a
+direct namespace, so the calling module must be a `direct module` (or
+mediate the call through a context of its own); writing through an edit
+someone else made is not. It touches memory only on the native backends:
+interp and compile refuse an edit of a non-null pointer with NATIVE-ONLY.
+A null pointer is the builtin declared error NativeEditNull on every
+backend. The memory must be live, writable and at least
+std::binary::layout_length(L) bytes for as long as the edit is used;
+nothing checks it. Declared nomethod.
 
 == EXAMPLES
 @example accept
@@ -3173,16 +3171,16 @@ nested layouts (L.origin.x), naming a field of e's own layout
 (LAYOUT-OPERAND otherwise). The value is held to the field's type the way
 a construction's field values are: a scalar proven in its integer domain
 (no conversion, truncation or run-time guard), a pointer field exactly its
-declared std::ffi::c::Ptr or FnPtr type. A pointer stored is observed, never
-moved: its address bits are copied, the memory does not own the pointee,
-and nothing keeps it alive. Padding and every other field are untouched.
-A designator may name an array element statically (L.items[3]) or a
-whole fixed array, whose value is a List of exactly its extent: every
+declared std::ffi::c::Ptr or FnPtr type. A pointer stored is observed,
+never moved: its address bits are copied, the memory does not own the
+pointee, and nothing keeps it alive. Padding and every other field are
+untouched. A designator may name an array element statically (L.items[3])
+or a whole fixed array, whose value is a List of exactly its extent: every
 extent is checked before the first byte is written (LayoutExtentMismatch,
 declared only when the compiler cannot prove the extents). Otherwise it
-declares no error and returns unit. A store is an ordinary native
-store: not volatile, atomic or ordered; another thread's synchronization
-is the program's protocol. Declared nomethod. NATIVE-LAYOUT-WRITES.md.
+declares no error and returns unit. A store is an ordinary native store:
+not volatile, atomic or ordered; another thread's synchronization is the
+program's protocol. Declared nomethod.
 
 @topic stdlib.std::binary::write
 title: -
@@ -3239,18 +3237,18 @@ keywords: read field from bytes; read one field; union alternative; interpret by
 related: stdlib.std::binary::write stdlib.std::binary::parse concept.layout-unions concept.binary-layouts
 
 == NOTES
-data must statically be a std::abi::bytes::Bytes (std::abi::bytes::freeze a
-MutableBytes); the designator is written L.FIELD, a path through nested
+data must statically be a std::abi::bytes::Bytes (std::abi::bytes::freeze
+a MutableBytes); the designator is written L.FIELD, a path through nested
 layouts and unions (L.u.alt.field) and element indices (L.items[3]),
-resolved statically to one constant offset. It is std::binary::write's read
-twin, and how a union is read from bytes: a union has no copied value
+resolved statically to one constant offset. It is std::binary::write's
+read twin, and how a union is read from bytes: a union has no copied value
 (LAYOUT-UNION), so a program reads the alternative it means
-(std::binary::read(data, U.whole)), each alternative by its own encoding. It
-may name a nested layout (its LayoutStruct) or a fixed array (a List of
+(std::binary::read(data, U.whole)), each alternative by its own encoding.
+It may name a nested layout (its LayoutStruct) or a fixed array (a List of
 exactly its extent, which the compiler knows); never a union itself
 (LAYOUT-OPERAND: name an alternative), a C pointer, or anything holding
 one (LAYOUT-NATIVE-ONLY: bytes never become a pointer). Runs on every
-backend. Declared nomethod. LAYOUT-UNIONS.md.
+backend. Declared nomethod.
 
 == EXAMPLES
 @example accept
@@ -3287,15 +3285,15 @@ The explicit foreign encoding: the field must be a C pointer field, or a
 fixed array of them written from a List of pointers of exactly its extent
 (LAYOUT-FOREIGN-WRITE otherwise: an array of records holding pointers is
 filled a field at a time, L.rs[1].p), and p exactly its declared
-std::ffi::c::Ptr or FnPtr type (an Int is TYPE). p is observed, never moved:
-the bytes do not own it, keep it alive, or know whether C keeps it after a
-call -- a wrapper models that protocol. The record built this way is exposed
-to C by the existing borrowing contract (a read noescape pointer parameter).
-The law is one-way: std::binary::parse of a layout with a pointer field
-stays LAYOUT-NATIVE-ONLY whatever the bytes hold, and a pointer is read back
-only from native memory, through a view or an edit. Runs on every backend (a
-C pointer's address is its value there too). Declared nomethod.
-NATIVE-LAYOUT-WRITES.md.
+std::ffi::c::Ptr or FnPtr type (an Int is TYPE). p is observed, never
+moved: the bytes do not own it, keep it alive, or know whether C keeps it
+after a call -- a wrapper models that protocol. The record built this way
+is exposed to C by the existing borrowing contract (a read noescape
+pointer parameter). The law is one-way: std::binary::parse of a layout
+with a pointer field stays LAYOUT-NATIVE-ONLY whatever the bytes hold, and
+a pointer is read back only from native memory, through a view or an edit.
+Runs on every backend (a C pointer's address is its value there too).
+Declared nomethod.
 
 @topic stdlib.std::binary::load
 title: -
@@ -3328,13 +3326,12 @@ NativeEdit[array N of E] (an array field read through a view or an edit,
 v.items, or an element of one); anything else is BINARY-OPERAND. One
 access at the array's address plus i times the element's width: a scalar
 element is one load, a pointer element is read fresh (observed, affine
-like any pointer), and a record or row element is its own live view
-(edit, through an edit) at its address, nothing read. The whole array is
-never copied. An index the compiler proves in 0..N-1 (a constant, a loop
-over the extent, a branch) needs no handler; one proven outside is
-KNOWN-ERROR. It reads native memory only on the native backends (a view
-of a non-null pointer is refused on interp and compile). Declared
-nomethod. FIXED-LAYOUT-ARRAYS.md.
+like any pointer), and a record or row element is its own live view (edit,
+through an edit) at its address, nothing read. The whole array is never
+copied. An index the compiler proves in 0..N-1 (a constant, a loop over
+the extent, a branch) needs no handler; one proven outside is KNOWN-ERROR.
+It reads native memory only on the native backends (a view of a non-null
+pointer is refused on interp and compile). Declared nomethod.
 
 == EXAMPLES
 @example accept
@@ -3369,14 +3366,14 @@ keywords: write array element; store element; set native array; c array assignme
 related: stdlib.std::binary::element stdlib.std::binary::store stdlib.std::binary::native::edit concept.binary-layouts
 
 == NOTES
-The array must statically be NativeEdit[array N of E] (an array read through
-a view is read-only: BINARY-OPERAND) and its element a scalar or a pointer
-(a record or row element is LAYOUT-OPERAND: write its fields through
-std::binary::element(a, i), the element's own edit). The value is held to
-the element's type as std::binary::store's is. Exactly the element's bytes
-are written; a store outside 0..N-1 writes nothing. A static index is also a
-designator: std::binary::store(e, L.items[3], v). Declared nomethod.
-FIXED-LAYOUT-ARRAYS.md.
+The array must statically be NativeEdit[array N of E] (an array read
+through a view is read-only: BINARY-OPERAND) and its element a scalar or a
+pointer (a record or row element is LAYOUT-OPERAND: write its fields
+through std::binary::element(a, i), the element's own edit). The value is
+held to the element's type as std::binary::store's is. Exactly the
+element's bytes are written; a store outside 0..N-1 writes nothing. A
+static index is also a designator: std::binary::store(e, L.items[3], v).
+Declared nomethod.
 
 @topic stdlib.std::binary::layout_length
 title: -
@@ -4633,7 +4630,7 @@ title: -
 summary: Portable text output -- std::io::print, print_line, write_error and write_error_line -- through the std::io::IO context trait; with std::linux::io it runs on the native backends.
 index: stdlib
 keywords: print; output; stdout; stderr; write text; console
-related: task.print-output backend.io concept.context-traits
+related: task.print-output backend.io concept.context-traits stdlib.module.std::io::fs stdlib.module.std::io::path capability.files
 
 == NOTES
 The operations require the std::io::IO context trait, which a program
@@ -4642,8 +4639,9 @@ satisfies by installing a context that implements it, normally
 with raw Linux syscalls, so printing runs only on the native backends
 (cranelift, cranelift-generic, executables); on interp and compile the
 first write fails with NATIVE-ONLY. On every backend the program's final
-value is still printed by main.tcl. There is no input, file or
-formatting API here.
+value is still printed by main.tcl. Files and directories are
+std::io::fs's (capability.files); there is no text input or formatting
+API here (capability.input, capability.string-formatting).
 
 @topic stdlib.std::linux::path::LinuxPath
 title: -

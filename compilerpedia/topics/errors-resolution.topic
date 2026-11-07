@@ -8,7 +8,6 @@ index: errors
 alias: unbound name; undefined name; name is not defined
 keywords: unbound, undefined, not defined, declared later, forward reference, binding, scope, typo, hoisting
 related: concept.bindings concept.definition-order rule.forward-references rule.no-callable-types concept.enums concept.mutual-recursion concept.imports error.missing-import
-docs: STRICT-REFERENCE-DETERMINISM.md README.md
 code: CORE SEMANTIC UNBOUND
 
 == MEANING
@@ -46,7 +45,7 @@ The message says which case it is:
     call only runs later. Write callees first.
   * Two functions that call each other. One of the two calls is always a
     forward reference, so plain mutual recursion is rejected; `mutual:`
-    groups exist only as a design (MUTUAL-RECURSION.md), not in this
+    groups exist only as a design, not in this
     compiler.
   * A bare enum case (`Red`) or the enum type itself used as a value.
   * A type used as a function or predicate: `Small(3)`, `Small?(x)`, or a
@@ -138,7 +137,6 @@ index: errors
 alias: already bound; rebinding a name
 keywords: duplicate, rebinding, reassignment, same scope, handler, errors clause, parameter, shadow
 related: concept.bindings rule.immutable-bindings capability.assignment rule.one-handler-per-error concept.errors concept.c-ffi error.unbound error.duplicate-field
-docs: README.md STRICT-REFERENCE-DETERMINISM.md C-FFI.md
 code: CORE SEMANTIC DUPLICATE
 
 == MEANING
@@ -216,7 +214,6 @@ index: errors
 alias: wrong number of arguments; argument count; too many arguments; too few arguments
 keywords: arity, arguments, parameters, count, flags, layout_length, extern
 related: concept.functions concept.flags rule.flags concept.binary-layouts error.unknown-flag error.type
-docs: FLAGS.md BINARY-LAYOUT.md README.md
 code: CORE SEMANTIC ARITY
 
 == MEANING
@@ -230,7 +227,7 @@ What is checked when:
   * At compile time, reported as this code:
         function emit takes 1 ordinary argument(s) and the flags :quiet,
         got 2 ordinary argument(s)
-            a call of a function that declares flags (FLAGS.md);
+            a call of a function that declares flags;
         std::binary::layout_length takes exactly one argument, a layout name
         (2 given)
             the layout queries;
@@ -299,7 +296,6 @@ index: errors
 alias: lockstep variable twice
 keywords: lockstep, loop, iteration clause, variable, and
 related: concept.lockstep concept.loops error.duplicate
-docs: COLLECTING-LOOPS.md README.md
 code: CORE SEMANTIC DUPLICATE-LOOP-VARIABLE
 
 == MEANING
@@ -344,7 +340,6 @@ index: errors
 alias: type error; type mismatch; wrong type
 keywords: type, cannot be proven, declared type, admissible, annotation, parameter type, result type, expected, got, kind
 related: rule.type-argument rule.type-result rule.type-field rule.type-annotation rule.type-generic-call rule.type-declaration concept.types proof.types rule.typed-parameters concept.function-types concept.mutable-vector concept.integer-domains
-docs: STRICT-TYPED-PARAMETERS.md MINIMAL-APPLIED-LIST-TYPES.md STRUCTURAL-FUNCTION-TYPES.md TYPED-CALLABLE-ESCAPE-SOUNDNESS.md README.md
 code: CORE SEMANTIC TYPE
 code: SURFACE MODULE TYPE
 
@@ -487,7 +482,6 @@ index: rules errors
 alias: generic function call invalid; inferred parameter type
 keywords: untyped parameter, generic, inferred, instance, specialization, call to, is invalid, statically incompatible, sound type
 related: error.type concept.specialization concept.functions rule.type-argument rule.typed-parameters error.unproven-field
-docs: STRICT-TYPED-PARAMETERS.md INTRINSIC-FUNCTION-CONTRACT-INFERENCE.md OPPORTUNISTIC-SEMANTIC-INSTANCES.md
 match: CORE SEMANTIC TYPE | call to * is invalid: *
 match: CORE SEMANTIC TYPE | *the parameter type inferred from the function body*
 match: CORE SEMANTIC TYPE | cannot infer a sound type for parameter *
@@ -508,8 +502,7 @@ checks every call of the function in two ways:
     When g's parameter type holds an imprint variable (`b: Box[T]`), x
     takes it with a variable of its own function's, shown T': the
     function is imprinted as if declared `fn f(x: Box[T])`, and each call
-    establishes T' from its argument (see "Inherited imprint variables"
-    in INTRINSIC-FUNCTION-CONTRACT-INFERENCE.md).
+    establishes T' from its argument.
   * Semantic instance. A direct call is also analyzed with the actual
     argument types, as if the body had been written for them. A problem
     found there is reported at the call that made it:
@@ -596,7 +589,6 @@ index: rules errors
 alias: parameter type mismatch
 keywords: argument, parameter, typed parameter, cannot be proven to satisfy, facts, integer domain, admissible, call
 related: error.type rule.typed-parameters rule.type-result rule.type-generic-call concept.types concept.integer-domains proof.types proof.ranges
-docs: STRICT-TYPED-PARAMETERS.md SOURCE-DEFINED-INTEGER-DOMAINS.md MINIMAL-APPLIED-LIST-TYPES.md
 match: CORE SEMANTIC TYPE | *argument for parameter * cannot be proven to satisfy*
 
 == THE RULE
@@ -678,7 +670,6 @@ index: rules errors
 alias: function result does not prove declared type; result type mismatch
 keywords: result type, return type, declared result, return, does not prove, ->
 related: error.type rule.type-argument concept.functions concept.integer-domains proof.types principle.guard-clauses
-docs: CROSS-MODULE-REFINED-SIGNATURES.md STRICT-TYPED-PARAMETERS.md
 match: CORE SEMANTIC TYPE | function result does not prove declared type *
 
 == THE RULE
@@ -747,7 +738,6 @@ index: rules errors
 alias: field cannot be proven to satisfy its declared type; payload field type
 keywords: struct field, construction, payload, declared type, field type, fail
 related: error.type rule.struct-construction concept.structs concept.error-payloads rule.type-argument
-docs: STRUCTS.md ERROR-PAYLOADS.md
 match: CORE SEMANTIC TYPE | field "*" of struct * cannot be proven to satisfy its declared type *
 match: CORE SEMANTIC TYPE | payload field "*" of error * cannot be proven to satisfy its declared type *
 
@@ -824,7 +814,6 @@ index: rules errors
 alias: unknown or invalid type; unknown type name
 keywords: annotation, type name, int, str, bool, Int, String, List, unknown type, parent type, type constructor
 related: error.type concept.types concept.imports concept.integer-domains concept.function-types rule.type-declaration
-docs: MINIMAL-APPLIED-LIST-TYPES.md SOURCE-DEFINED-INTEGER-DOMAINS.md STRUCTURAL-FUNCTION-TYPES.md README.md
 match: CORE SEMANTIC TYPE | unknown or invalid *
 match: CORE SEMANTIC TYPE | unknown parent type *
 
@@ -898,7 +887,6 @@ index: rules errors
 alias: type is already declared; duplicate enum case; duplicate struct field declaration
 keywords: declaration, already declared, duplicate case, duplicate field, built-in type, struct, enum, type, redeclare
 related: error.type concept.structs concept.enums concept.integer-domains rule.type-annotation error.duplicate-field
-docs: STRUCTS.md ENUMS.md SOURCE-DEFINED-INTEGER-DOMAINS.md
 match: CORE SEMANTIC TYPE | type "*" is already declared*
 match: CORE SEMANTIC TYPE | duplicate field "*" in struct "*"
 match: CORE SEMANTIC TYPE | duplicate case "*" in enum "*"*
@@ -994,7 +982,6 @@ index: errors
 alias: duplicate field; field given twice
 keywords: duplicate field, construction, destructuring, payload, layout, field twice
 related: rule.struct-construction concept.structs concept.destructuring concept.error-payloads concept.binary-layouts rule.type-declaration error.missing-field
-docs: STRUCTS.md STRUCT-DESTRUCTURING.md ERROR-PAYLOADS.md BINARY-LAYOUT.md
 code: CORE SEMANTIC DUPLICATE-FIELD
 code: DUPLICATE-FIELD
 match: SURFACE SYNTAX | DUPLICATE-FIELD: *
@@ -1065,7 +1052,6 @@ index: errors
 alias: missing field; field not given; default field value
 keywords: missing field, construction, payload, fail, defaults, required field
 related: rule.struct-construction concept.structs concept.error-payloads error.unknown-field error.duplicate-field
-docs: STRUCTS.md ERROR-PAYLOADS.md
 code: CORE SEMANTIC MISSING-FIELD
 
 == MEANING
@@ -1128,7 +1114,6 @@ index: errors
 alias: no such field; struct has no field
 keywords: unknown field, field access, projection, construction, payload, typo, method syntax
 related: concept.structs rule.struct-construction concept.method-sugar concept.error-payloads error.missing-field error.not-a-struct error.missing-import
-docs: STRUCTS.md METHOD-SUGAR.md ERROR-PAYLOADS.md
 code: CORE SEMANTIC UNKNOWN-FIELD
 
 == MEANING
@@ -1186,7 +1171,6 @@ index: errors
 alias: unknown struct type; not a struct type
 keywords: construction, struct, unknown struct, braces, layout, LayoutStruct, domain
 related: concept.structs rule.struct-construction concept.imports concept.binary-layouts error.not-a-struct
-docs: STRUCTS.md BINARY-LAYOUT.md
 code: CORE SEMANTIC UNKNOWN-STRUCT
 
 == MEANING
@@ -1235,7 +1219,6 @@ index: errors
 alias: only a struct has fields; cannot project field
 keywords: projection, field, dot, struct, method syntax, destructuring, enum case braces
 related: concept.structs concept.method-sugar concept.enums error.unknown-field error.missing-import rule.method-requires-import
-docs: STRUCTS.md METHOD-SUGAR.md DIAGNOSTIC-RECOVERY.md ENUMS.md
 code: CORE SEMANTIC NOT-A-STRUCT
 code: SURFACE MODULE NOT-A-STRUCT
 
@@ -1298,7 +1281,6 @@ index: errors
 alias: receiver's struct type is not known; field of untyped parameter
 keywords: generic, untyped parameter, field projection, any, function value, higher-order, instance
 related: concept.specialization concept.structs rule.type-generic-call concept.function-types error.not-a-struct
-docs: STRUCTS.md OPPORTUNISTIC-SEMANTIC-INSTANCES.md DIAGNOSTIC-RECOVERY.md
 code: CORE SEMANTIC UNPROVEN-FIELD
 
 == MEANING
@@ -1372,7 +1354,6 @@ index: errors
 alias: opaque struct construction; opaque representation owned by
 keywords: opaque, construction, representation, module, owner, abstraction
 related: concept.opaque-structs rule.opaque-authority error.opaque-representation concept.modules concept.structs
-docs: OPAQUE-STRUCTS.md
 code: CORE SEMANTIC OPAQUE-CONSTRUCTION
 
 == MEANING
@@ -1423,7 +1404,6 @@ index: errors
 alias: field access on opaque struct; opaque fields
 keywords: opaque, field access, projection, destructuring, representation, owner
 related: concept.opaque-structs rule.opaque-authority error.opaque-construction concept.destructuring
-docs: OPAQUE-STRUCTS.md
 code: CORE SEMANTIC OPAQUE-REPRESENTATION
 
 == MEANING
@@ -1475,7 +1455,6 @@ index: errors
 alias: is private to module; private function; cannot be accessed from
 keywords: private, access, module, visibility, method syntax, helper
 related: concept.private concept.modules concept.opaque-structs error.private-type-escape error.missing-import
-docs: MODULE-PRIVACY-AND-CONTEXT-ESCAPE-MILESTONE-1.md
 code: SURFACE MODULE PRIVATE-ACCESS
 code: CORE SEMANTIC PRIVATE-ACCESS
 
@@ -1532,7 +1511,6 @@ index: errors
 alias: exposes private type; private type in public signature
 keywords: private, public, signature, interface, opaque, inferred result, context requirement
 related: concept.private error.private-access concept.opaque-structs
-docs: MODULE-PRIVACY-AND-CONTEXT-ESCAPE-MILESTONE-1.md
 code: CORE SEMANTIC PRIVATE-TYPE-ESCAPE
 
 == MEANING
@@ -1607,7 +1585,6 @@ index: errors
 alias: no such enum case; enum has no case
 keywords: enum, case, typo, did you mean, closed sum
 related: concept.enums error.not-an-enum error.ambiguous-qualifier
-docs: ENUMS.md
 code: CORE SEMANTIC UNKNOWN-ENUM-CASE
 
 == MEANING
@@ -1648,7 +1625,6 @@ index: errors
 alias: not an enum; only an enum type qualifies a case
 keywords: enum, case, qualifier, struct, built-in type, namespace
 related: concept.enums error.unknown-enum-case error.unknown-namespace error.ambiguous-qualifier
-docs: ENUMS.md
 code: SURFACE MODULE NOT-AN-ENUM
 
 == MEANING
@@ -1691,7 +1667,6 @@ index: errors
 alias: enum without cases; empty enum
 keywords: enum, case, declaration, empty
 related: concept.enums error.anonymous-enum
-docs: ENUMS.md
 code: ENUM-EMPTY
 code: CORE SEMANTIC ENUM-EMPTY
 match: SURFACE SYNTAX | ENUM-EMPTY: *
@@ -1740,7 +1715,6 @@ index: errors
 alias: anonymous enum; inline enum
 keywords: enum, anonymous, braces, declaration
 related: concept.enums error.enum-empty
-docs: ENUMS.md
 code: ANONYMOUS-ENUM
 match: SURFACE SYNTAX | ANONYMOUS-ENUM: *
 
@@ -1786,7 +1760,6 @@ index: errors
 alias: namespace and enum with the same name
 keywords: enum, namespace, qualifier, ambiguous, rename
 related: concept.enums concept.imports error.not-an-enum error.unknown-namespace
-docs: ENUMS.md IMPORTS.md
 code: SURFACE MODULE AMBIGUOUS-QUALIFIER
 
 == MEANING
@@ -1834,7 +1807,6 @@ index: errors
 alias: ambiguous method call; more than one visible function accepts the call; more than one visible function accepts the receiver
 keywords: method syntax, method sugar, candidates, ambiguous, precedence, field, local name, parameter name, shadowing, related information, cascade
 related: concept.method-sugar rule.method-resolution error.no-applicable-method error.nomethod-call concept.imports
-docs: METHOD-SUGAR.md IMPORTS.md 2048-ENGINE-WORKLOAD.md
 code: CORE SEMANTIC AMBIGUOUS-METHOD-CALL
 
 == MEANING
@@ -1926,7 +1898,6 @@ index: errors
 alias: no visible function accepts the receiver; none of the visible functions of that name accepts the call
 keywords: method syntax, candidates, receiver type, argument, overload, no applicable, rejects the receiver, rejects argument
 related: concept.method-sugar rule.method-resolution error.ambiguous-method-call error.type
-docs: METHOD-SUGAR.md IMPORTS.md
 code: CORE SEMANTIC NO-APPLICABLE-METHOD
 
 == MEANING
@@ -2012,7 +1983,6 @@ index: errors
 alias: declared nomethod; cannot be called with method syntax
 keywords: nomethod, method syntax, receiver, bit_and, function form
 related: concept.nomethod concept.method-sugar warning.method-eligible error.ambiguous-method-call
-docs: WARNINGS-METHOD-ELIGIBLE.md METHOD-SUGAR.md
 code: CORE SEMANTIC NOMETHOD-CALL
 
 == MEANING
@@ -2063,7 +2033,6 @@ index: errors
 alias: does not accept flag; unknown flag
 keywords: flag, flags, :name, option, flag section
 related: concept.flags rule.flags error.duplicate-flag error.flag-callee-unknown principle.options-are-flags
-docs: FLAGS.md
 code: CORE SEMANTIC UNKNOWN-FLAG
 
 == MEANING
@@ -2107,7 +2076,6 @@ index: errors
 alias: flag supplied more than once
 keywords: flag, flags, duplicate, call
 related: concept.flags rule.flags error.unknown-flag error.duplicate-flag-declaration
-docs: FLAGS.md
 code: CORE SEMANTIC DUPLICATE-FLAG
 
 == MEANING
@@ -2142,7 +2110,6 @@ index: errors
 alias: flag declared more than once
 keywords: flag, flags, declaration, flag section, duplicate
 related: concept.flags rule.flags error.flag-binding-collision error.duplicate
-docs: FLAGS.md
 code: CORE SEMANTIC DUPLICATE-FLAG-DECLARATION
 
 == MEANING
@@ -2177,7 +2144,6 @@ index: errors
 alias: flag named like a parameter
 keywords: flag, flags, parameter, local name, collision
 related: concept.flags rule.flags error.duplicate-flag-declaration error.duplicate
-docs: FLAGS.md
 code: CORE SEMANTIC FLAG-BINDING-COLLISION
 
 == MEANING
@@ -2217,7 +2183,6 @@ index: errors
 alias: cannot supply flag to a function value
 keywords: flag, flags, function value, parameter, higher-order, callee
 related: concept.flags rule.flags error.flag-function-value concept.function-types
-docs: FLAGS.md
 code: CORE SEMANTIC FLAG-CALLEE-UNKNOWN
 
 == MEANING
@@ -2264,7 +2229,6 @@ index: errors
 alias: function with flags as a value
 keywords: flag, flags, function value, higher-order, alias, argument
 related: concept.flags rule.flags error.flag-callee-unknown concept.function-types
-docs: FLAGS.md
 code: CORE SEMANTIC FLAG-FUNCTION-VALUE
 
 == MEANING
@@ -2327,7 +2291,6 @@ index: errors
 alias: invalid proves clause
 keywords: proves, refinement, predicate, validator, refined type, carrier, -> bool, -> unit
 related: concept.refinements proof.refinements error.refinement-mint-authority error.refinement-carrier warning.proves-naming
-docs: REFINEMENT-VALUES.md
 code: CORE SEMANTIC PROOF-CLAUSE
 
 == MEANING
@@ -2411,7 +2374,6 @@ index: errors
 alias: only its owning module may mint it
 keywords: refinement, proves, owner, module, authority, mint
 related: concept.refinements error.proof-clause concept.modules rule.opaque-authority
-docs: REFINEMENT-VALUES.md
 code: CORE SEMANTIC REFINEMENT-MINT-AUTHORITY
 
 == MEANING
@@ -2459,7 +2421,6 @@ index: errors
 alias: refinement carrier cycle
 keywords: refined type, carrier, cycle, declaration
 related: concept.refinements error.refinement-carrier rule.type-declaration
-docs: REFINEMENT-VALUES.md
 code: CORE SEMANTIC CYCLIC-REFINEMENT
 
 == MEANING
@@ -2500,7 +2461,6 @@ index: errors
 alias: invalid refinement carrier
 keywords: refined type, carrier, struct, List, scalar, declaration
 related: concept.refinements error.cyclic-refinement concept.integer-domains concept.opaque-structs
-docs: REFINEMENT-VALUES.md
 code: CORE SEMANTIC REFINEMENT-CARRIER
 
 == MEANING
@@ -2546,7 +2506,6 @@ index: errors
 alias: binary emit operand; binary parse operand
 keywords: binary, layout, emit, parse, LayoutStruct, Bytes, static operand
 related: concept.binary-layouts error.type
-docs: BINARY-LAYOUT.md
 code: CORE SEMANTIC BINARY-OPERAND
 
 == MEANING
@@ -2593,7 +2552,6 @@ index: errors
 alias: namespace is internal to the standard library; internal namespace; private intrinsic
 keywords: internal, namespace, standard library, private, table_hash, keyed hash, import
 related: concept.hashable concept.imports error.internal-intrinsic-value error.missing-import
-docs: HASHABLE-AND-KEYED-HASH.md IMPORTS.md
 code: SURFACE MODULE INTERNAL-NAMESPACE
 code: CORE SEMANTIC INTERNAL-NAMESPACE
 
@@ -2628,7 +2586,6 @@ index: errors
 alias: can only be called, never used as a value; internal intrinsic value
 keywords: internal, intrinsic, function value, standard library, table_hash
 related: error.internal-namespace concept.hashable concept.function-types
-docs: HASHABLE-AND-KEYED-HASH.md
 code: CORE SEMANTIC INTERNAL-INTRINSIC-VALUE
 
 == MEANING
@@ -2651,7 +2608,6 @@ index: errors
 alias: namespace is not imported; add import; not imported
 keywords: import, namespace, qualified, method syntax, method sugar, exact imports, transitive, static compile, compiler
 related: concept.imports rule.method-requires-import rule.imports-not-transitive concept.method-sugar error.unknown-namespace error.unknown-symbol principle.explicit-dependencies
-docs: IMPORTS.md DIAGNOSTIC-RECOVERY.md METHOD-SUGAR.md
 code: SURFACE MODULE MISSING-IMPORT
 code: CORE SEMANTIC MISSING-IMPORT
 
@@ -2692,8 +2648,7 @@ It is reported for each use, in both spellings:
 
 Earlier compilers reported the method-syntax case as a confusing TYPE
 error elsewhere ("function result does not prove declared type str");
-since the diagnostic recovery work (DIAGNOSTIC-RECOVERY.md) it is always
-this diagnostic.
+since the diagnostic recovery work it is always this diagnostic.
 
 == WHY
 What a file can name is decided by its own header, never by what other
@@ -2759,7 +2714,6 @@ index: errors
 alias: unknown namespace; no such module; module not found
 keywords: import, namespace, module, application module, standard library, path, file beside, nested namespace
 related: concept.imports concept.modules rule.application-modules rule.package-modules error.missing-import error.unknown-symbol error.module-collision error.not-an-enum
-docs: STD-NAMESPACE.md IMPORTS.md STDLIB-NAMESPACES.md BOT-MODULES-MILESTONE-1.md
 code: SURFACE MODULE UNKNOWN-NAMESPACE
 
 == MEANING
@@ -2839,7 +2793,6 @@ index: errors
 alias: namespace has no definition; no such member
 keywords: member, definition, function, type, struct, error, intrinsic, namespace, typo
 related: concept.imports error.missing-import error.unknown-namespace error.not-a-type concept.modules
-docs: IMPORTS.md STDLIB-NAMESPACES.md
 code: SURFACE MODULE UNKNOWN-SYMBOL
 
 == MEANING
@@ -2888,7 +2841,6 @@ index: errors
 alias: is a struct, not a source-defined type
 keywords: import type, struct, type declaration, enum, function, error, layout, qualified
 related: rule.import-type concept.imports capability.struct-type-import concept.structs concept.enums error.type-import-collision
-docs: IMPORTS.md
 code: SURFACE MODULE NOT-A-TYPE
 
 == MEANING
@@ -2955,7 +2907,6 @@ index: errors
 alias: type import collision
 keywords: import type, collision, short name, shadow, built-in type, qualified
 related: concept.imports error.not-a-type error.duplicate-import
-docs: IMPORTS.md
 code: SURFACE MODULE TYPE-IMPORT-COLLISION
 
 == MEANING
@@ -3006,7 +2957,6 @@ index: errors
 alias: already imported
 keywords: import, import type, header, duplicate
 related: concept.imports error.type-import-collision error.self-import
-docs: IMPORTS.md
 code: SURFACE MODULE DUPLICATE-IMPORT
 
 == MEANING
@@ -3041,7 +2991,6 @@ index: errors
 alias: import own namespace; entry program imports itself
 keywords: import, entry program, module, own namespace, self
 related: concept.imports concept.modules error.cycle error.duplicate-import
-docs: IMPORTS.md
 code: SURFACE MODULE SELF-IMPORT
 
 == MEANING
@@ -3090,7 +3039,6 @@ index: errors
 alias: module dependency cycle; circular import
 keywords: import, cycle, circular, module, dependency, entry program
 related: concept.modules concept.imports error.self-import rule.application-modules
-docs: IMPORTS.md
 code: SURFACE MODULE CYCLE
 
 == MEANING
@@ -3132,7 +3080,6 @@ index: errors
 alias: application module has the name of an intrinsic namespace; application module named like a package; package collision; .bot_modules collision
 keywords: application module, package, .bot_modules, installed package, root namespace, intrinsic namespace, collision, rename, test fixture, entry file directory
 related: rule.application-modules rule.package-modules concept.modules concept.imports concept.standard-library error.unknown-namespace error.reserved-namespace
-docs: STD-NAMESPACE.md IMPORTS.md BOT-MODULES-MILESTONE-1.md POST-2048-PRODUCT-FIXES.md
 code: SURFACE MODULE MODULE-COLLISION
 
 == MEANING
@@ -3177,7 +3124,6 @@ index: errors
 alias: malformed .graph; package graph damaged; broken package graph
 keywords: package graph, .graph, .bot_modules, shared dependency, malformed, install, format, line
 related: rule.package-modules cli.packages error.unknown-namespace error.module-collision
-docs: SHARED-PACKAGE-DEPENDENCIES-MILESTONE-1.md BOT-MODULES-MILESTONE-1.md
 code: SURFACE MODULE PACKAGE-GRAPH
 
 == MEANING
@@ -3213,7 +3159,6 @@ index: errors
 alias: application module named std; shadow the standard library; std directory in my project; package named std
 keywords: std, standard library, reserved, shadow, application module, std/ directory, rename
 related: concept.standard-library rule.application-modules rule.package-modules concept.modules error.unknown-namespace error.module-collision
-docs: STD-NAMESPACE.md IMPORTS.md BOT-MODULES-MILESTONE-1.md
 code: SURFACE MODULE RESERVED-NAMESPACE
 
 == MEANING
@@ -3254,7 +3199,6 @@ index: errors
 alias: leading ::; absolute name; ::name
 keywords: ::, rooted, absolute, root namespace, qualified name, std, syntax
 related: concept.standard-library concept.imports error.surface-syntax error.unknown-namespace
-docs: STD-NAMESPACE.md
 code: ROOTED-NAME
 match: SURFACE SYNTAX | ROOTED-NAME: *
 
@@ -3303,7 +3247,6 @@ index: errors
 alias: statement at module top level
 keywords: module, top level, statement, expression, call, destructuring, declarations
 related: concept.modules rule.module-bindings error.module-immutable concept.program-value
-docs: MODULE-BINDINGS.md IMPORTS.md
 code: SURFACE MODULE INVALID-TOPLEVEL
 
 == MEANING
@@ -3317,7 +3260,7 @@ its top level is rejected when the module is loaded:
     level, found a "call" statement
     module "helper" (...): a struct destructuring is not allowed at
     module top level (module bindings are context-free immutable values,
-    and a struct value is not one: MODULE-BINDINGS.md); destructure
+    and a struct value is not one); destructure
     inside a function
 
 (`with context` at a module's top level is reported as
@@ -3349,7 +3292,6 @@ index: errors
 alias: cannot redefine an intrinsic
 keywords: intrinsic, native, module, redefine, overload, standard library
 related: concept.modules stdlib.module.std::list error.module-collision
-docs: STDLIB-NAMESPACES.md IMPORTS.md
 code: SURFACE MODULE DUPLICATE-NATIVE
 
 == MEANING
@@ -3390,7 +3332,6 @@ index: errors
 alias: module binding cannot retain mutable value
 keywords: module binding, global, constant, immutable, mutable, MutableArray, initializer, order
 related: rule.module-bindings concept.modules concept.values error.invalid-toplevel
-docs: MODULE-BINDINGS.md MODULE-STATIC-RETAINED-VALUES.md
 code: CORE SEMANTIC MODULE-IMMUTABLE
 
 == MEANING
@@ -3445,7 +3386,6 @@ index: errors
 alias: module file and architecture-specific module files
 keywords: architecture, module file, x86_64, aarch64, standard library, std::linux::sys
 related: error.unsupported-architecture error.unknown-target backend.targets concept.modules
-docs: LINUX-SYSCALL-TRANSPORTS.md
 code: SURFACE MODULE AMBIGUOUS-MODULE
 
 == MEANING
@@ -3481,7 +3421,6 @@ index: errors
 alias: none of the known targets
 keywords: target, -target, host, architecture, std::ffi::c, std::linux::sys, C ABI
 related: backend.targets backend.platforms cli.options error.unsupported-architecture error.ambiguous-module concept.c-ffi
-docs: C-ABI-TYPES.md LINUX-SYSCALL-TRANSPORTS.md
 code: SURFACE MODULE UNKNOWN-TARGET
 
 == MEANING
@@ -3522,7 +3461,6 @@ index: errors
 alias: Linux platform; linux namespace on macOS; darwin namespace on Linux; macOS platform; Windows platform; windows namespace on Linux
 keywords: platform, linux, std::linux::io, std::linux::sys, std::linux::path, darwin, std::darwin::io, std::darwin::path, windows, std::windows::io, macOS, Windows, target, -target, operating system, extern c framework, framework
 related: error.unknown-target error.unsupported-architecture backend.platforms backend.targets cli.options concept.modules concept.native-link-plan
-docs: MACOS-AARCH64-MILESTONE-2.md MACOS-AARCH64-MILESTONE-8.md WINDOWS-X86-64-MILESTONE-2.md LINUX-SYSCALL-TRANSPORTS.md C-ABI-TYPES.md NATIVE-LINK-PLAN-MILESTONE-1.md
 code: SURFACE MODULE UNSUPPORTED-PLATFORM
 
 == MEANING
@@ -3609,7 +3547,6 @@ index: errors
 alias: conflicting extern c library; two archives for one library; library and framework of one name
 keywords: extern c library, extern c framework, static, at, archive, link plan, conflict
 related: concept.native-link-plan concept.c-ffi error.native-link
-docs: NATIVE-LINK-PLAN-MILESTONE-1.md C-FFI.md
 code: CORE SEMANTIC LINK-CONFLICT
 
 == MEANING
@@ -3668,7 +3605,6 @@ index: errors
 alias: no module for the architecture
 keywords: architecture, target, module file, x86_64, aarch64, -target
 related: error.unknown-target error.ambiguous-module backend.targets backend.platforms
-docs: LINUX-SYSCALL-TRANSPORTS.md
 code: SURFACE MODULE UNSUPPORTED-ARCHITECTURE
 
 == MEANING
@@ -3704,7 +3640,6 @@ index: errors
 alias: refinement parameter; scalar refinement parameter; minDecimalsPreserved missing; maxDecimalsPreserved below minDecimalsPreserved; bare DecimalRounded; negative list length
 keywords: DecimalRounded, minDecimalsPreserved, maxDecimalsPreserved, List, length, braces, parameter, refinement, annotation, type
 related: concept.scalar-refinements concept.decimal-rounded concept.list-length rule.type-annotation error.type error.decimal-precision
-docs: DECIMAL-ROUNDED-MILESTONE-1.md LIST-CARDINALITY-REFINEMENTS.md
 code: CORE SEMANTIC REFINEMENT-PARAMETER
 
 == MEANING
@@ -3775,7 +3710,6 @@ index: errors
 alias: only proven correct to; decimal places not proven; precision loss; not proven correct; divides by an exactly zero decimal
 keywords: DecimalRounded, decimal, places, precision, proof, binary64, literal, constant, rounding, cancellation, large number
 related: concept.decimal-rounded error.decimal-guarantee-lost error.refinement-parameter error.known-error concept.floats
-docs: DECIMAL-ROUNDED-MILESTONE-1.md
 code: CORE SEMANTIC DECIMAL-PRECISION
 
 == MEANING
@@ -3838,7 +3772,6 @@ index: errors
 alias: guarantee lost; no decimal place can be proved; decimal arithmetic on parameters; DecimalRounded arithmetic
 keywords: DecimalRounded, arithmetic, parameter, guarantee, proof, rounding cell, decay, from_decimal_rounded, round
 related: concept.decimal-rounded stdlib.std::float64::from_decimal_rounded stdlib.std::decimal_rounded::round error.decimal-precision
-docs: DECIMAL-ROUNDED-MILESTONE-1.md
 code: CORE SEMANTIC DECIMAL-GUARANTEE-LOST
 
 == MEANING
@@ -3900,7 +3833,6 @@ index: errors
 alias: callback c fn parameter type; callback signature; C callback type
 keywords: callback c fn, callback, std::ffi::c::FnPtr, RawDouble, RawFloat, Float64, Double, errors, error channel
 related: concept.c-callbacks error.callback-environment error.callback-placement error.callback-reference error.export-signature
-docs: C-CALLBACK-MILESTONE-1.md C-FFI.md
 code: CORE SEMANTIC CALLBACK-SIGNATURE
 
 == MEANING
@@ -3950,7 +3882,6 @@ index: errors
 alias: nested callback c fn; callback inside a function
 keywords: callback c fn, top level, nested function
 related: concept.c-callbacks error.callback-signature
-docs: C-CALLBACK-MILESTONE-1.md
 code: CORE SEMANTIC CALLBACK-PLACEMENT
 
 == WHAT TO DO
@@ -3977,7 +3908,6 @@ index: errors
 alias: callback c fn captures; callback requires a context; callback yields
 keywords: callback c fn, capture, closure, context, yield, coroutine, module static, authority
 related: concept.c-callbacks error.callback-signature concept.contexts
-docs: C-CALLBACK-MILESTONE-1.md
 code: CORE SEMANTIC CALLBACK-ENVIRONMENT
 
 == MEANING
@@ -4013,7 +3943,6 @@ index: errors
 alias: callback of an ordinary function; Fn to FnPtr; closure as C callback
 keywords: std::ffi::c::callback, FnPtr, Fn, closure, function value, callback c fn
 related: concept.c-callbacks stdlib.std::ffi::c::callback error.callback-signature
-docs: C-CALLBACK-MILESTONE-1.md C-ABI-TYPES.md
 code: CORE SEMANTIC CALLBACK-REFERENCE
 
 == MEANING
@@ -4045,7 +3974,6 @@ index: errors
 alias: exported c fn parameter type; export signature; C export type
 keywords: exported c fn, int64_t, double, bool, str, unit, -> unit, flags, context, variadic
 related: backend.native-library error.export-environment error.export-placement error.export-name
-docs: NATIVE-LIBRARY-MILESTONE-1.md
 code: CORE SEMANTIC EXPORT-SIGNATURE
 
 == MEANING
@@ -4084,7 +4012,6 @@ index: errors
 alias: nested exported c fn; export inside a function
 keywords: exported c fn, top level, nested function, -export
 related: backend.native-library error.export-signature
-docs: NATIVE-LIBRARY-MILESTONE-1.md
 code: CORE SEMANTIC EXPORT-PLACEMENT
 
 == MEANING
@@ -4115,7 +4042,6 @@ index: errors
 alias: exported c fn name; question mark in an export
 keywords: exported c fn, C identifier, symbol, predicate, ?
 related: backend.native-library error.export-signature
-docs: NATIVE-LIBRARY-MILESTONE-1.md
 code: CORE SEMANTIC EXPORT-NAME
 
 == WHAT TO DO
@@ -4137,7 +4063,6 @@ index: errors
 alias: exported c fn captures; export requires a context; export yields
 keywords: exported c fn, capture, closure, context, yield, coroutine, module static
 related: backend.native-library error.export-signature concept.contexts
-docs: NATIVE-LIBRARY-MILESTONE-1.md
 code: CORE SEMANTIC EXPORT-ENVIRONMENT
 
 == MEANING

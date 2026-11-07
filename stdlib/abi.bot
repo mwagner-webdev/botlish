@@ -73,9 +73,9 @@
 #   ordinary field projection, uniform over the whole family, statically
 #   typed with the domain (so `std::byte::from_int(x.value)` needs no handler for
 #   `x: std::abi::U8`). It never sign-extends, truncates or reinterprets bits.
-#   There is no std::abi::to_int: Botlish has no overloading, and one function
-#   over ten nominal types would need it (or ten *_to_int functions that
-#   only repeat the projection).
+#   So `n.value` is the conversion: a std::abi::Usize length n is the int
+#   n.value. It is a field, not a function (Botlish has no overloading,
+#   and ten *_to_int functions would only repeat the projection).
 # * Nominal. std::abi::I32 and std::abi::U32 are distinct types even where their values
 #   overlap; so are std::abi::I64 and std::abi::Isize, and std::abi::U64 and std::abi::Usize,
 #   whose domains are identical on today's target. `fn f(x: std::abi::Usize)`

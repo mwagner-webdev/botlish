@@ -9,7 +9,6 @@ index: concepts
 alias: sendable; Sendable; send a value to another VM; copy a value between VMs; serialize for another thread; transfer; value copy; cross-VM message
 keywords: Sendable, sendable, std::transfer, encode, decode, transfer, copy, VM, heap, NOT-SENDABLE, TRANSFER-OPEN-TYPE, SENDABLE-DECLARATION, sendable clause, opaque, through, TransferMalformed, TransferTypeMismatch
 related: error.not-sendable error.transfer-open-type error.sendable-declaration concept.opaque-structs concept.affine concept.contexts
-docs: SENDABILITY-AND-VALUE-COPY-MILESTONE-1.md THREAD-ACTOR-ARCHITECTURE-CENSUS.md
 
 == WHAT IT IS
 A Botlish VM owns its heap, its runtime resources (coroutine stacks,
@@ -87,7 +86,6 @@ index: errors
 alias: not sendable; cannot send a function; cannot send a context; value cannot cross VMs; Sendable not satisfied
 keywords: Sendable, sendable, transfer, encode, decode, function, closure, coroutine, pointer, context, opaque, any, reason path
 related: concept.sendability error.sendable-declaration error.transfer-open-type
-docs: SENDABILITY-AND-VALUE-COPY-MILESTONE-1.md
 code: CORE SEMANTIC NOT-SENDABLE
 
 == MEANING
@@ -147,15 +145,14 @@ index: errors
 alias: transfer in a generic function; encode of an imprint variable; open type
 keywords: transfer, encode, decode, imprint variable, generic, schema, Sendable, satisfies
 related: concept.sendability error.not-sendable
-docs: SENDABILITY-AND-VALUE-COPY-MILESTONE-1.md
 code: CORE SEMANTIC TRANSFER-OPEN-TYPE
 
 == MEANING
 The bytes a transfer writes describe the value's static type (its schema
 and fingerprint), which the compiler writes into the call. Inside a body
 whose parameter is `Box[T]` with `T satisfies Sendable`, every value is
-sendable, but which schema to write depends on the caller's T. This
-milestone writes schemas only where the type is closed.
+sendable, but which schema to write depends on the caller's T. The
+compiler writes schemas only where the type is closed.
 
 == WHAT TO DO
 Call std::transfer::encode or decode where the concrete type is known --
@@ -186,7 +183,6 @@ index: errors
 alias: sendable clause; sendable fields; sendable through; owner statement of sendability
 keywords: sendable, opaque, owner, fields, through, representation, projection, rebuild, context, resource, any
 related: concept.sendability error.not-sendable concept.opaque-structs
-docs: SENDABILITY-AND-VALUE-COPY-MILESTONE-1.md
 code: CORE SEMANTIC SENDABLE-DECLARATION
 
 == MEANING

@@ -368,9 +368,11 @@ proc service::Configuration {workspace path} {
 #             column endLine endColumn} each)
 #   notes     further locations with a text of their own (the entry's
 #             notes, core::raiseDiagnostics: where a method-style call's
-#             candidates are declared), in order: a range's keys,
-#             `message` (its text) and `text` (located, as main.tcl prints
-#             it) each
+#             candidates are declared, the imports that load the module
+#             file a loader diagnostic is in), in order: a range's keys,
+#             `message` (its text), `text` (located, as main.tcl prints
+#             it) and, when the producer gives one, `kind` (`import`: an
+#             import of that chain, surface::modules::ImportNotes) each
 #   record    the producer's own record, when it has one (the HIR
 #             diagnostic, the warning, the syntax diagnostic), else ""
 proc service::Record {severity entry} {
@@ -400,7 +402,11 @@ proc service::Record {severity entry} {
     }]
     dict set diagnostic notes [lmap note [dict getdef $entry notes {}] {
         if {[dict get $note location] eq ""} continue
-        dict replace [Range [dict get $note location]] message [dict get $note summary] text [dict get $note message]
+        set n [dict replace [Range [dict get $note location]] message [dict get $note summary] text [dict get $note message]]
+        if {[dict exists $note kind]} {
+            dict set n kind [dict get $note kind]
+        }
+        set n
     }]
     dict set diagnostic record [dict getdef $entry record ""]
     return $diagnostic

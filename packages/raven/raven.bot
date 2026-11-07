@@ -1,9 +1,10 @@
 # raven.bot -- a Botlish interface to Raven, the C GUI library
-# (github.com/oscar-soirey/Raven; RAVEN-BINDINGS.md), a package: installed
-# as APP/.bot_modules/raven (tools/raven-package.tcl install APP), beside the
-# GENERATED binding of the target (raven::core, raven::window, ...:
-# generated/c/raven/TARGET/raven/) and the event bridge's archive
-# (native/libraven_bridge.a, built by the install from native/raven_bridge.c).
+# (github.com/oscar-soirey/Raven), a package: installed as
+# APP/.bot_modules/raven (`botlish add raven-VERSION.botpkg`), beside the
+# generated binding of Raven's whole C API (raven::core, raven::window, ...:
+# the package's raven/ tree) and the event bridge's archive
+# (native/libraven_bridge.a, built from native/raven_bridge.c). README.md
+# has the requirements and installation, GUIDE.md the API by task.
 #
 #   with context raven::create()
 #   ...
@@ -11,7 +12,7 @@
 #   w = raven::window("Hello", 420, 220)
 #   b = raven::button("Quit")
 #   w.set_content(raven::vbox().add(b))
-#   ... a frame loop: wait_frame, then events() (examples/raven/counter.bot's run)
+#   ... a frame loop: wait_frame, then events() (examples/clicks/clicks.bot's run)
 #   raven::stop()
 #
 # What this module is, and is not:
@@ -23,18 +24,23 @@
 #   anything this module leaves to the generated binding
 #   (`raven::controls::Rlabel_set_markdown(label.id, 1)`).
 #
-# * Events. Raven reports what happens by calling C callbacks, and no
-#   Botlish function can be one (RAVEN-BINDINGS.md, "Callbacks"). So the
-#   controls this module makes are watched by the event bridge, C code whose
-#   callbacks only record what they are given, and the program takes the
-#   records -- events() -- after each frame it asks for (draw_frame,
-#   wait_frame). No Botlish code runs inside Raven, and a handler is
-#   ordinary code in the program's own loop.
+# * Events. Raven reports what happens by calling C callbacks it keeps,
+#   and no Botlish function can be one that C keeps (a Botlish callback
+#   runs only during the C call it is passed to: botlish -help
+#   concept.c-callbacks). So the controls this module makes are watched by
+#   the event bridge, C code whose callbacks only record what they are
+#   given, and the program takes the records -- events() -- after each
+#   frame it asks for (draw_frame, wait_frame). No Botlish code runs inside
+#   Raven, and a handler is ordinary code in the program's own loop. A
+#   window watched for input (watch_input) reports its keys, mouse buttons,
+#   pointer moves and wheel the same way; the current state of the keys and
+#   buttons is read directly (key_down?, mouse_button_down?).
 #
-# * Authority (DIRECT-MODULES.md). Calls that take only handles, numbers
-#   and strings are ordinary: Raven's convention is that every string it is
-#   given is copied (the binding's profile states `read noescape` for each),
-#   so a String is lent to the call as bytes and nothing escapes. What needs
+# * Authority (botlish -help concept.direct-modules). Calls that take only
+#   handles, numbers and strings are ordinary: Raven's convention is that
+#   every string it is given is copied (the binding states `read noescape`
+#   for each), so a String is lent to the call as bytes and nothing
+#   escapes (botlish -help concept.c-ffi). What needs
 #   raw authority -- native memory for Rinit_ex's descriptor and for the
 #   out-parameters of Rwindow_get_size, Rwidget_get_rect and
 #   Rerror_get_last, which take pointers to C ints, floats and strings no
@@ -44,10 +50,12 @@
 #
 # * Floats. Raven's coordinates, sizes and slider values are C floats; a
 #   Float64 outside binary32's range is NonFiniteFloat before C runs
-#   (C-FLOAT-FFI-MILESTONE-1.md), and so is a non-finite float Raven
-#   returns. The functions that pass or read one say so. A slider's and a
-#   spin box's value are bound raw (RAW-C-FLOAT-FFI-MILESTONE-1.md: the
-#   binding profile's representations), so the caller chooses: the C value
+#   (botlish -help concept.c-floats). The functions that pass one say so;
+#   the numbers this module reads back from Raven -- events, a widget's
+#   rectangle, the pointer's position -- are finite (a number that is not
+#   reads 0.0), so reading them declares no error. A slider's and a spin
+#   box's value are bound raw (botlish -help concept.raw-c-floats), so the
+#   caller chooses: the C value
 #   itself, every bit of it (slider_raw_value, spin_box_raw_value), or its
 #   explicit admission to a Float64 (slider_value, spin_box_value:
 #   NonFiniteFloat for a NaN or an infinity, -0.0 as 0.0). A raw setter
@@ -88,9 +96,10 @@ import raven::xml
 extern c library "raven_bridge" static at "native/libraven_bridge.a"
 
 # ---------------------------------------------------------------------------
-# The event bridge (native/raven_bridge.c), ABI version 1: its contracts are
+# The event bridge (native/raven_bridge.c), ABI version 2: its contracts are
 # its own code's -- every string it is given is read during the call, the
-# text it copies out is written into OUT only.
+# text it copies out is written into OUT only. Its numbers are C doubles it
+# keeps finite; they are read raw and admitted here (finite).
 
 private extern c fn botlish_raven_bridge_abi() -> std::ffi::c::Int
 private extern c fn botlish_raven_watch_errors() -> unit
@@ -103,12 +112,17 @@ private extern c fn botlish_raven_watch_spin_box(spin_box: std::ffi::c::UInt) ->
 private extern c fn botlish_raven_watch_text_input(text_input: std::ffi::c::UInt) -> unit
 private extern c fn botlish_raven_watch_combo_box(combo_box: std::ffi::c::UInt) -> unit
 private extern c fn botlish_raven_watch_window(window: std::ffi::c::UInt, allow_close: std::ffi::c::Int) -> unit
+private extern c fn botlish_raven_watch_input(window: std::ffi::c::UInt, watch: std::ffi::c::Int) -> unit
 private extern c fn botlish_raven_timer(interval_seconds: std::ffi::c::Double, repeat: std::ffi::c::Int) -> std::ffi::c::UInt
 private extern c fn botlish_raven_next() -> std::ffi::c::Int
 private extern c fn botlish_raven_source() -> std::ffi::c::UInt
 private extern c fn botlish_raven_value() -> std::ffi::c::Int
 private extern c fn botlish_raven_extra() -> std::ffi::c::Int
-private extern c fn botlish_raven_number() -> std::ffi::c::Double
+private extern c fn botlish_raven_number() -> std::ffi::c::RawDouble
+private extern c fn botlish_raven_x() -> std::ffi::c::RawDouble
+private extern c fn botlish_raven_y() -> std::ffi::c::RawDouble
+private extern c fn botlish_raven_dx() -> std::ffi::c::RawDouble
+private extern c fn botlish_raven_dy() -> std::ffi::c::RawDouble
 private extern c fn botlish_raven_text() -> std::ffi::c::Ptr[std::ffi::c::Char]
 private extern c fn botlish_raven_pending() -> std::ffi::c::ULong
 private extern c fn botlish_raven_lost() -> std::ffi::c::ULong
@@ -157,6 +171,11 @@ struct Size:
     width: int
     height: int
 
+# A point of a window, in its logical units.
+struct Point:
+    x: Float64
+    y: Float64
+
 # ---------------------------------------------------------------------------
 # Strings
 
@@ -170,7 +189,7 @@ private fn cstring(text: str) -> std::abi::bytes::Bytes:
 # The text of the NUL-terminated string P (Raven's or the bridge's, read at
 # once: Raven keeps a string it returns only until the next call returning
 # one of its kind): its length, then its bytes copied by the bridge into
-# Botlish storage lent for that call (C-POINTER-BORROWING.md), decoded as
+# Botlish storage lent for that call (a `write noescape` parameter), decoded as
 # UTF-8; "" for a null P. The two integer errors cannot happen (a C length
 # is a size_t, every one a Usize) but are declared by the conversion;
 # InvalidUtf8, bytes that are no UTF-8.
@@ -224,6 +243,26 @@ fn version() -> str:
 #   TimerElapsed    a timer's interval elapsed
 #   Error           Raven reported an error: value, the RError; extra, the
 #                   RSeverity; text, Raven's description
+#
+# The raw input of a window watched for it (watch_input), its source the
+# window, x and y where the pointer was (the window's logical units) and
+# extra the modifier keys held (raven::window::R_MOD_*, ORed):
+#
+#   KeyPressed      a key went down: value, the RKey (raven::window::R_KEY_*)
+#   KeyRepeated     a held key repeated (the keyboard's auto-repeat): value
+#   KeyReleased     a key went up: value
+#   MousePressed    a mouse button went down: value, the RMouseButton
+#                   (raven::window::R_MOUSE_LEFT, ...)
+#   MouseReleased   a mouse button went up: value
+#   MouseMoved      the pointer moved: dx and dy, how far since the last
+#                   MouseMoved (the moves between two takes of events() are
+#                   one event)
+#   Wheel           the wheel turned: dx and dy, in lines (positive: left,
+#                   up)
+#
+# A press is an event of its own, once per press: a program that acts on
+# MousePressed or KeyPressed acts once, however long the button or key is
+# held (key_down? and mouse_button_down? say whether it is held now).
 enum EventKind:
     Clicked,
     Toggled,
@@ -236,9 +275,19 @@ enum EventKind:
     Resized,
     TimerElapsed,
     Error,
+    KeyPressed,
+    KeyRepeated,
+    KeyReleased,
+    MousePressed,
+    MouseReleased,
+    MouseMoved,
+    Wheel,
 
 # One thing that happened, as the bridge recorded it. SOURCE is the Rid of
-# the widget, window or timer it happened to (R_INVALID_ID when none).
+# the widget, window or timer it happened to (R_INVALID_ID when none). Every
+# number is finite: a ValueChanged of a spin box whose value is an infinity
+# (a range set_spin_box_raw_range made infinite) has number 0.0 and value 1
+# -- read spin_box_raw_value then.
 struct Event:
     kind: EventKind
     source: std::ffi::c::UInt
@@ -246,10 +295,32 @@ struct Event:
     extra: int
     number: Float64
     text: str
+    x: Float64
+    y: Float64
+    dx: Float64
+    dy: Float64
 
-# The bridge's record kinds (raven_bridge.c's BR_*), 1 to 12; the ABI
+# The raw input record kinds, 13 to 19.
+private fn input_kind_of(code: int) -> EventKind:
+    if code == 13:
+        return EventKind::KeyPressed
+    if code == 14:
+        return EventKind::KeyRepeated
+    if code == 15:
+        return EventKind::KeyReleased
+    if code == 16:
+        return EventKind::MousePressed
+    if code == 17:
+        return EventKind::MouseReleased
+    if code == 18:
+        return EventKind::MouseMoved
+    EventKind::Wheel
+
+# The bridge's record kinds (raven_bridge.c's BR_*), 1 to 19; the ABI
 # version start checks fixes the set, so 12 is the only other.
 private fn kind_of(code: int) -> EventKind:
+    if code >= 13:
+        return input_kind_of(code)
     if code == 1:
         return EventKind::Clicked
     if code == 2:
@@ -272,8 +343,24 @@ private fn kind_of(code: int) -> EventKind:
         return EventKind::TimerElapsed
     EventKind::Error
 
+# RAW as a number: the bridge records finite numbers only, so the 0.0 of a
+# number that is not one is never read.
+private fn finite(raw: std::ffi::c::RawDouble) -> Float64:
+    number = raw.double_to_float64():
+        on NonFiniteFloat:
+            0.0
+    number
+
+# RAW as a number (0.0 for a C float that is not one, which Raven's
+# coordinates never are).
+private fn finite_float(raw: std::ffi::c::RawFloat) -> Float64:
+    number = raw.float_to_float64():
+        on NonFiniteFloat:
+            0.0
+    number
+
 # EVENTS followed by every record of the bridge's queue, oldest first.
-private fn drain(events: List[Event]) -> List[Event] errors NonFiniteFloat:
+private fn drain(events: List[Event]) -> List[Event]:
     code = botlish_raven_next()
     if code == 0:
         return events
@@ -282,15 +369,18 @@ private fn drain(events: List[Event]) -> List[Event] errors NonFiniteFloat:
         source: botlish_raven_source(),
         value: botlish_raven_value(),
         extra: botlish_raven_extra(),
-        number: botlish_raven_number(),
-        text: text_of(botlish_raven_text())
+        number: finite(botlish_raven_number()),
+        text: text_of(botlish_raven_text()),
+        x: finite(botlish_raven_x()),
+        y: finite(botlish_raven_y()),
+        dx: finite(botlish_raven_dx()),
+        dy: finite(botlish_raven_dy())
     }
     drain(events.append(event))
 
 # Every event recorded since the last call, oldest first (and the queue
-# empty). NonFiniteFloat: a value Raven reported is no finite number
-# (no Float64 is one).
-fn events() -> List[Event] errors NonFiniteFloat:
+# empty).
+fn events() -> List[Event]:
     drain([])
 
 # How many events are waiting.
@@ -400,6 +490,13 @@ private layout FloatCell:
     size 4
     align 4
     field value: std::ffi::c::Float at 0
+
+# A FloatCell read as the C float it holds, every bit (admitted by
+# finite_float: Raven's coordinates are finite).
+private layout RawFloatCell:
+    size 4
+    align 4
+    field value: std::ffi::c::RawFloat at 0
 
 private layout TextCell:
     size 8
@@ -514,25 +611,22 @@ private fn error_texts(events: List[Event], i: int, text: str) -> str:
 # LAST ("Rinit: cannot initialize the X11 window system"), which names only
 # the part that failed. LAST alone when Raven recorded nothing more.
 private fn startup_reasons(last: str) -> str:
-    recorded = events():
-        on NonFiniteFloat:
-            []
-    reasons = recorded.error_texts(0, "")
+    reasons = events().error_texts(0, "")
     if reasons == "":
         return last
     reasons
 
 # Starts Raven with OPTIONS (Rinit_ex): this thread becomes its UI thread,
 # and errors and unbound actions are events from now on. Starting a started
-# Raven changes nothing. RavenFailed: the bridge is not ABI 1, no memory,
+# Raven changes nothing. RavenFailed: the bridge is not ABI 2, no memory,
 # OPTIONS' ui_scale is no C float, or Rinit_ex failed (its code is Raven's
 # last error, its detail every error Raven reported while it started:
 # startup_reasons).
 fn start(options: Options, context ui: Ui) errors RavenFailed:
     if not ui.open.empty?():
         return unit
-    if botlish_raven_bridge_abi() != 1:
-        fail RavenFailed {call: "botlish_raven_bridge_abi", code: 0, detail: "native/libraven_bridge.a is not the event bridge this raven.bot reads (ABI 1)"}
+    if botlish_raven_bridge_abi() != 2:
+        fail RavenFailed {call: "botlish_raven_bridge_abi", code: 0, detail: "native/libraven_bridge.a is not the event bridge this raven.bot reads (ABI 2)"}
     ui.open.push(allocate())
     described = session_describe(options):
         on IndexNotFound:
@@ -617,7 +711,7 @@ nomethod fn window(title: str, width: std::ffi::c::Int, height: std::ffi::c::Int
     id.botlish_raven_watch_window(1)
     Window {id: id}
 
-# The window XML describes (Raven's XML interfaces: RAVEN-BINDINGS.md); its
+# The window XML describes (Raven's XML interfaces: GUIDE.md, section 10); its
 # controls' actions (OnClicked="...") are Action events. A close request
 # closes it. Its id is R_INVALID_ID when the XML is not a window (an Error
 # event says why).
@@ -714,6 +808,61 @@ fn capture(window: Window, context ui: Ui) -> Image:
     image
 
 # ---------------------------------------------------------------------------
+# Input: a window's keys, mouse buttons, pointer and wheel
+#
+# Two ways to read input, for two questions. "Did the player press?" is an
+# event: watch the window (watch_input) and act on KeyPressed or
+# MousePressed, which come once per press however long it is held. "Is it
+# held now?" is the state: key_down?, mouse_button_down?, modifiers_down,
+# mouse_position, as of the last frame (or the last injection). Deriving a
+# press from the state by comparing frames is the program's work and easy
+# to get wrong (a button held over a tile is down in every frame); the
+# events do it.
+
+# WINDOW's keys, mouse buttons, pointer moves and wheel are events
+# (KeyPressed, ..., Wheel: EventKind) from now on (WATCH true), or no longer
+# (false). Watching consumes nothing: Raven still delivers every key and
+# click to its widgets, shortcuts and dialogs. A window not watched reports
+# no raw input.
+fn watch_input(window: Window, watch: bool):
+    window.id.botlish_raven_watch_input(c_bool(watch))
+
+# Whether KEY (an RKey: raven::window::R_KEY_LEFT, R_KEY_A, ...) is held in
+# WINDOW now.
+fn key_down?(window: Window, key: std::ffi::c::UInt) -> bool:
+    window.id.Rwindow_is_key_down(key) != 0
+
+# Whether BUTTON (raven::window::R_MOUSE_LEFT, R_MOUSE_RIGHT, ...) is held
+# in WINDOW now.
+fn mouse_button_down?(window: Window, button: std::ffi::c::UInt) -> bool:
+    window.id.Rwindow_is_mouse_button_down(button) != 0
+
+# The modifier keys held in WINDOW now (raven::window::R_MOD_SHIFT, _CTRL,
+# _ALT, _SUPER, ORed; test one with bit_and).
+fn modifiers_down(window: Window) -> int:
+    raven::window::Rwindow_get_modifiers(window.id)
+
+# Whether the pointer is over WINDOW's content now.
+fn mouse_inside?(window: Window) -> bool:
+    raven::window::Rwindow_is_mouse_inside(window.id) != 0
+
+private fn session_mouse_position(window: Window, context ui: Ui) -> Point errors IndexNotFound, NativeViewNull:
+    window.id.Rwindow_get_mouse_position(ui.open.element(0).x, ui.open.element(0).y)
+    x = std::binary::native::view(RawFloatCell, ui.open.element(0).x).value
+    y = std::binary::native::view(RawFloatCell, ui.open.element(0).y).value
+    Point {x: finite_float(x), y: finite_float(y)}
+
+# Where the pointer is (or was last) in WINDOW, in its logical units (0.0,
+# 0.0 when Raven is not running).
+fn mouse_position(window: Window, context ui: Ui) -> Point:
+    position = session_mouse_position(window):
+        on IndexNotFound:
+            Point {x: 0.0, y: 0.0}
+        on NativeViewNull:
+            Point {x: 0.0, y: 0.0}
+    position
+
+# ---------------------------------------------------------------------------
 # Widgets and panels
 
 # A vertical (horizontal) panel: its children one below (beside) another.
@@ -758,17 +907,17 @@ fn set_spacing(panel: Widget, spacing: Float64) errors NonFiniteFloat:
 fn set_padding(widget: Widget, left: Float64, top: Float64, right: Float64, bottom: Float64) errors NonFiniteFloat:
     widget.id.Rslot_set_padding(left, top, right, bottom)
 
-private fn session_rect(widget: Widget, context ui: Ui) -> Rect errors IndexNotFound, NativeViewNull, NonFiniteFloat:
+private fn session_rect(widget: Widget, context ui: Ui) -> Rect errors IndexNotFound, NativeViewNull:
     widget.id.Rwidget_get_rect(ui.open.element(0).x, ui.open.element(0).y, ui.open.element(0).w, ui.open.element(0).h)
-    x = std::binary::native::view(FloatCell, ui.open.element(0).x).value
-    y = std::binary::native::view(FloatCell, ui.open.element(0).y).value
-    width = std::binary::native::view(FloatCell, ui.open.element(0).w).value
-    height = std::binary::native::view(FloatCell, ui.open.element(0).h).value
-    Rect {x: x, y: y, width: width, height: height}
+    x = std::binary::native::view(RawFloatCell, ui.open.element(0).x).value
+    y = std::binary::native::view(RawFloatCell, ui.open.element(0).y).value
+    width = std::binary::native::view(RawFloatCell, ui.open.element(0).w).value
+    height = std::binary::native::view(RawFloatCell, ui.open.element(0).h).value
+    Rect {x: finite_float(x), y: finite_float(y), width: finite_float(width), height: finite_float(height)}
 
 # Where WIDGET was laid out in its window by the last frame (all 0.0 when
-# Raven is not running). NonFiniteFloat: Raven's numbers were not finite.
-fn rect(widget: Widget, context ui: Ui) -> Rect errors NonFiniteFloat:
+# Raven is not running).
+fn rect(widget: Widget, context ui: Ui) -> Rect:
     laid_out = session_rect(widget):
         on IndexNotFound:
             Rect {x: 0.0, y: 0.0, width: 0.0, height: 0.0}
@@ -958,3 +1107,23 @@ fn inject_text(window: Window, text: str):
 fn inject_key(window: Window, key: std::ffi::c::UInt, modifiers: std::ffi::c::UInt):
     window.id.Rwindow_inject_key(key, 1, modifiers)
     window.id.Rwindow_inject_key(key, 0, modifiers)
+
+# KEY goes down (and stays down: key_down? is true until inject_key_up).
+fn inject_key_down(window: Window, key: std::ffi::c::UInt, modifiers: std::ffi::c::UInt):
+    window.id.Rwindow_inject_key(key, 1, modifiers)
+
+fn inject_key_up(window: Window, key: std::ffi::c::UInt, modifiers: std::ffi::c::UInt):
+    window.id.Rwindow_inject_key(key, 0, modifiers)
+
+# The pointer moves to X, Y of WINDOW.
+fn inject_move(window: Window, x: Float64, y: Float64) errors NonFiniteFloat:
+    window.id.Rwindow_inject_mouse_move(x, y)
+
+# BUTTON (raven::window::R_MOUSE_*) goes down (PRESSED) or up where the
+# pointer is.
+fn inject_button(window: Window, button: std::ffi::c::UInt, pressed: bool):
+    window.id.Rwindow_inject_mouse_button(button, c_bool(pressed))
+
+# The wheel turns DX, DY lines (positive: left, up) where the pointer is.
+fn inject_wheel(window: Window, dx: Float64, dy: Float64) errors NonFiniteFloat:
+    window.id.Rwindow_inject_mouse_wheel(dx, dy)

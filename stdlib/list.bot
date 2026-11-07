@@ -37,8 +37,8 @@
 #                                Written directly (not merely "not any?(...)
 #                                "): a genuinely independent higher-order
 #                                idiom, and another honest predicate call
-#                                site for the next milestone's callvalue
-#                                corpus -- not special-cased against any?.
+#                                site for a callvalue corpus -- not
+#                                special-cased against any?.
 #   std::list::find(xs, predicate)   the first element satisfying predicate,
 #                                left to right, short-circuiting at the
 #                                first match. No match (including an empty
@@ -51,26 +51,26 @@
 # backend's discarded-result lowering (RETURNING-ITERABLE-LOOPS.md items
 # 20-22, 28-29) applies at every one of these call sites, so none of these
 # four helpers causes an output-List allocation the caller never asked
-# for -- see that report's allocation census.
+# for (RETURNING-ITERABLE-LOOPS.md, "allocation census").
 #
 # No `continue` appears below, deliberately: it would only ever change what
 # a *discarded* iteration contributes to a List none of these four
 # functions ever reads (a skipped iteration's own `if`, with no `else` and
 # nothing after it, already completes normally with `unit` -- ordinary
-# Botlish `if`-without-`else` typing, ASCII-AND-URI-UNRESERVED.md's own
-# `if not label_char?(...): return false` shape among many others -- so
+# Botlish `if`-without-`else` typing, the shape of `if not label_char?(...):
+# return false` among many others; ASCII-AND-URI-UNRESERVED.md) -- so
 # omitting `continue` here costs nothing observable and keeps the shape of
 # each function to its one real decision). A `continue` remains load-
-# bearing wherever a returning loop's own collected List *is* read -- see
-# item 4's own filtering idiom, `loop x in xs: if not predicate(x):
-# continue \n x`, in RETURNING-ITERABLE-LOOPS.md.
+# bearing wherever a returning loop's own collected List *is* read, as in
+# the filtering idiom `loop x in xs: if not predicate(x): continue \n x`
+# (RETURNING-ITERABLE-LOOPS.md, item 4).
 #
 # `predicate(x)` is an ordinary dynamic call through an untyped parameter
 # (`callvalue` at the interpreter/native level, exactly like stdlib/web.bot's
-# own `scan_while`'s `predicate(char_at(i))`): this milestone intentionally
+# own `scan_while`'s `predicate(char_at(i))`): this module intentionally
 # does not add finite callable-target provenance, devirtualization, or any
-# other optimization of that call -- see the report's higher-order
-# callvalue census, and RETURNING-ITERABLE-LOOPS.md items 47/81.
+# other optimization of that call (its higher-order callvalue census:
+# RETURNING-ITERABLE-LOOPS.md, items 47 and 81).
 error NotFound
 
 fn get(xs, index, default):

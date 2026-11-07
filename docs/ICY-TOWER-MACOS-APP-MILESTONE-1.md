@@ -100,8 +100,8 @@ far as a runner allows, run on macOS:
 * **Executed, the credential path**: the preflight's 63 tests (every
   mistake of the brief's table, each with its code and remedy, no secret
   printed, nothing written), the stages' 63 tests, the workflow's 23 trust
-  tests, and every mutant of the catalog killed (70 of 70 then; 74 of 74
-  since the Gatekeeper correction, section 30), on Linux and on macOS; on the
+  tests, and every mutant of the catalog killed (70 of 70 then; 75 of 75
+  since the Gatekeeper and dry-run corrections, sections 30 and 25), on Linux and on macOS; on the
   runner, a rehearsal with a throwaway identity: the preflight, the
   temporary keychain, the identity selected by its SHA-1, Apple's own
   answer to an unknown key (HTTP 401, classified MACOS-NOTARY-AUTH), never
@@ -960,7 +960,7 @@ same construction in every mode, so ordinary CI tests what a release signs:
 | mode | identity | flags | where |
 |---|---|---|---|
 | adhoc | `-` | `--options runtime --timestamp=none` | ordinary CI: the bundle every LaunchServices case plays |
-| dry-run | a throwaway test identity in the temporary keychain | `--options runtime --timestamp=none` (no throwaway signature is sent to Apple's timestamp service) | ordinary CI: the release's preflight, keychain, identity selection, Apple's credential check and cleanup, rehearsed; the signature itself is Environment-blocked (below) |
+| dry-run | a throwaway test identity in the temporary keychain | `--options runtime --timestamp=none` (no throwaway signature is sent to Apple's timestamp service) | ordinary CI: the release's preflight, keychain, identity selection, Apple's credential check and cleanup, rehearsed; the signature itself Environment-blocked on most runners, signed, verified and launched where the runner's codesign signs (below) |
 | release | the Developer ID Application identity | `--options runtime --timestamp` | the release job |
 
 A release never falls back: its sign stage refuses to run without the
@@ -1008,6 +1008,26 @@ attempts either (test_workflow's `test_no_job_changes_a_trust_setting`).
 The dry run classifies exactly that codesign refusal as ENVIRONMENT-BLOCKED
 and any other failure as a failure. A release meets neither limit:
 Apple's root is the system's.
+
+**Not every runner refuses it** (run 42377791764, the tag
+icy-tower-macos-v1.0.2): with the same keychain and the same untrusted
+chain (`Cert Verify Result: CSSMERR_TP_NOT_TRUSTED`), that runner's
+codesign signed (`sign (dry-run): Developer ID Application: Icy Tower Dry
+Run (DRYRUN0000), CDHash 021c07d2...`), and the dry run reached, for the
+first time, the branch that verifies and launches its signature -- which
+refused it: `MACOS-SIGN: the bundle's signature is not a dry-run
+signature: its identifier is org.botlish.examples.icy-tower.ci, not the
+bundle's org.botlish.examples.icy-tower.dry-run`. The step had signed a
+copy of the CI bundle while its environment named the dry run's
+identifier; it now assembles its bundle as the release job does
+(package-macos.sh with the environment's MACOS_BUNDLE_ID;
+test_workflow's `test_dry_run_bundle_is_assembled_as_a_release_s`, the
+mutant `dry-run-signs-the-ci-bundle`). Every other requirement of a
+dry-run signature held there (the hardened runtime, arm64, no
+entitlement, the throwaway identity as its signer). Whether a runner's
+codesign signs with an untrusted chain is the runner's, and the step
+takes either answer: ENVIRONMENT-BLOCKED, or a signature verified and
+launched.
 
 **Credential-blocked, the Developer ID signature**: `--timestamp`, the
 authority chain, the team, the secure timestamp (section 44).
@@ -1344,7 +1364,7 @@ the release job compiles nothing; the executable is the game job's.
 Two mutant sets, both in the repository's mutant format, each killed only
 by the check that states the rule it breaks.
 
-**The release pipeline** (`audit/macos-release/mutants.txt`, 74 mutants,
+**The release pipeline** (`audit/macos-release/mutants.txt`, 75 mutants,
 `audit/macos-release/tools/mutate.py`: each applied to a private copy of
 macos/, package-macos.sh, the workflow and the tests, the tests its `!!`
 line names run there):
@@ -1354,10 +1374,11 @@ line names run there):
 | the credential preflight (14) | base64-permissive, base64-padding-unchecked, p8-double-encoding-accepted, p12-accepts-pem, no-private-key-accepted, certificate-type-unchecked, team-unchecked, apple-chain-unchecked, validity-unchecked, p8-algorithm-unchecked, p8-curve-unchecked, pkcs8-unchecked, p8-layout-unchecked, issuer-uuid-unchecked |
 | the release's stages (36) | preflight-prints-a-secret, continue-after-failed-preflight, test-anchors-in-release, remote-auth-skipped, continue-after-auth-failure, unspecific-auth-unexplained, auth-misclassified, secrets-printed, secret-files-kept, adhoc-fallback, adhoc-signature-accepted, no-hardened-runtime, runtime-unchecked, no-timestamp, timestamp-unchecked, entitlements-unchecked, seal-unchecked, notarization-ignored, rejected-as-accepted, ticket-unchecked, timeout-as-failure, staple-retries-everything, stapling-omitted, gatekeeper-ignored, gatekeeper-origin-required, gatekeeper-origin-unchecked, gatekeeper-team-unanchored, tamper-not-tampered, zip-modes-unchecked, sums-unchecked, publish-before-final-launch, acceptance-not-required, identity-may-change, ambiguous-identity-chosen, adhoc-publishable, sign-remedy-misleads |
 | the bundle's checks (6) | worker-startup-accepted, architecture-unchecked, dynamic-sdl-accepted, permissions-unchecked, executable-name-unchecked, package-replaces-on-failure |
-| the workflow's trust boundary (18) | release-on-pull-requests, release-before-green, release-on-any-ref, pull-request-target, secret-in-game-job, secret-in-script, trace-with-secrets, secret-files-uploaded, release-adhoc, workflow-no-staple, workflow-no-notary-auth, publish-before-release, release-assets-unchecked, upload-submission-zip, release-writes, release-trusts-a-root, dry-run-trusts-its-root, dry-run-blocked-as-passed |
+| the workflow's trust boundary (19) | release-on-pull-requests, release-before-green, release-on-any-ref, pull-request-target, secret-in-game-job, secret-in-script, trace-with-secrets, secret-files-uploaded, release-adhoc, workflow-no-staple, workflow-no-notary-auth, publish-before-release, release-assets-unchecked, upload-submission-zip, release-writes, release-trusts-a-root, dry-run-trusts-its-root, dry-run-blocked-as-passed, dry-run-signs-the-ci-bundle |
 
-**Executed**: 74 of 74 killed on Linux (this checkout, 167 s, after the
-Gatekeeper correction of section 30; 70 of 70 when the milestone landed); on macOS in
+**Executed**: 75 of 75 killed on Linux (this checkout, 159 s, after the
+Gatekeeper correction of section 30 and the dry run's bundle of section
+25; 70 of 70 when the milestone landed); on macOS in
 every acceptance run, as the game job's step (run 41207619549: 66 of 66,
 the set before its last three; run 41212691891: 68 of 68, 180 s). Every
 named test passes on the unmutated tree first (the harness's baseline), so
@@ -1568,6 +1589,8 @@ run was superseded by the next push unless said otherwise.
 | 41245041656 | bf73c0d | failure | the Info.plist check: 31 of 31 mutants killed; the harness's `app-bundle` baseline failed its LaunchServices lookup in a temporary directory; the session's `restart` failed (section 39) |
 | **41297189955** | **2bc2c92** | **success** | `mutants: true`, `mutants_only: agent-application` (manual): the harness's bundles under the home directory; `baseline app:app-bundle pass`, the agent mutant killed; every step of the job green, the original session's 12 cases and the 13 LaunchServices cases among them |
 | 42290405708 | 1f076e1 (the tag icy-tower-macos-v1.0.0) | failure | the first release run (section 44): attempt 1 MACOS-CERTIFICATE-DECRYPT (the stored password did not open the stored .p12); attempt 2 signed with the Developer ID, played under the hardened runtime, notarized (Accepted), stapled, Gatekeeper `accepted` -- and refused by the stage for a missing `origin=` line (section 30) |
+| 42376915608 | 011a536 (the tag icy-tower-macos-v1.0.1) | deferred | `tested` found 011a536 not green: every required run at it cancelled by later pushes to main (section 44) |
+| 42377791764 | 43f6869e (the tag icy-tower-macos-v1.0.2) | failure | green; every check of the game job passed but the dry run, whose runner's codesign signed with the throwaway identity and whose copied CI bundle then failed its identifier check (section 25); the release job skipped |
 
 The general workflows started by the same pushes: `icy-tower (windows
 x86-64)` passed at c0f3165 (41205557419), e0231c4 (41207619531), ba18cda
@@ -1617,6 +1640,22 @@ the commit green and its game job passed both times.
     (section 30), which the stage then refused for its missing `origin=`
     line: the release stopped there, with no tamper control, ZIP, final
     launch or publication. The cleanup ran and was verified.
+
+The second tag, `icy-tower-macos-v1.0.1` on 011a536 (the Gatekeeper
+correction), was **deferred** and will stay so: every required test run at
+011a536 was cancelled by the next pushes to main (run 42376915608's
+`tested` job found it not green), and a commit whose runs were all
+cancelled is never green (docs/CI-RUNS.md, "The tagged release"). The
+third, `icy-tower-macos-v1.0.2` on 43f6869e (the newest green commit of
+main holding the correction; `tools/ci/runs.py check`: all six
+requirements green), ran as run 42377791764: green, and every check of the
+game job passed -- the build, the tests, the oracle, the 12 graphical and
+13 LaunchServices cases, the release tooling's 74 mutants -- but its dry
+run, which signed with the throwaway identity on that runner for the first
+time, refused the copied CI bundle's identifier (section 25), and the
+release job did not run. Nothing was signed with the Developer ID, sent to
+Apple or published. Tag a green commit that holds the dry run's correction
+next.
 
 Sections 25 to 30 are therefore Executed by Apple's service and the
 runner. Section 31 (the notarized download launched), the tamper control
@@ -1829,7 +1868,7 @@ Added:
 | `examples/games/icy-tower/macos/apple-ca/` | Apple Root CA and the Developer ID Certification Authorities G1 and G2 (public, pinned) |
 | `audit/macos-release/tests/test_credentials.py`, `test_release.py`, `test_workflow.py` | the preflight's negative tests, the stages against stand-ins and the bundle's controls, the workflow's trust boundary |
 | `audit/macos-release/tools/fixtures.py`, `machofake.py`, `stub-tool.py` | synthetic credentials, synthetic Mach-O files, recording stand-ins of Apple's tools |
-| `audit/macos-release/tools/mutate.py`, `audit/macos-release/mutants.txt` | the release pipeline's 74 mutants and their harness |
+| `audit/macos-release/tools/mutate.py`, `audit/macos-release/mutants.txt` | the release pipeline's 75 mutants and their harness |
 | `audit/macos-release/requirements.txt` | the tests' environment (PyYAML beside the release's) |
 | `audit/icy-tower/tools/app-abi-check.py` | macos_app.bot's C declarations against the SDK |
 | `docs/ICY-TOWER-MACOS-APP-MILESTONE-1.md` | this report |

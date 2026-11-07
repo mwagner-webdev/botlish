@@ -235,13 +235,18 @@ test cp-render-code-lists-rules {a broad code's page lists the specific rules wh
     list [string match "*SPECIFIC RULES*proof.list-bounds*proof.slices*" $page]
 } -cleanup {unset -nocomplain page} -result 1
 
-test cp-render-examples-and-related {examples are shown with their expectation, related topics with their summaries, design documents as optional repository paths} -body {
+test cp-render-examples-and-related {examples are shown with their expectation, related topics with their summaries, and no design document: the reference ships without docs/} -body {
     set page [compilerpedia::render proof.list-bounds]
     list [string match "*Accepted (value 3) -- A counted loop*" $page] \
         [string match "*Rejected (CORE SEMANTIC UNHANDLED-ERROR at 6:5)*" $page] \
         [string match "*RELATED*proof.slices *" $page] \
-        [string match "*DESIGN DOCUMENTS (in a repository checkout; optional)*docs/STDLIB-NAMESPACES.md*" $page]
-} -cleanup {unset -nocomplain page} -result {1 1 1 1}
+        [regexp {DESIGN DOCUMENTS|docs/|[A-Z0-9]-?[A-Z0-9]*\.md} $page]
+} -cleanup {unset -nocomplain page} -result {1 1 1 0}
+
+test cp-no-docs-key {a topic file's header has no docs: key (a design document is the repository's, never the reference's)} -body {
+    catch {compilerpedia::parse "@topic concept.x\ntitle: t\nsummary: s.\nindex: concepts\ndocs: STRUCTS.md\n" x.topic} message
+    string match "*expected a header line KEY: VALUE*" $message
+} -cleanup {unset -nocomplain message} -result 1
 
 test cp-render-fits-80-columns {every line of every page, index and the overview fits 80 columns, except code (indented six or more: example and declaration lines, shown as written)} -body {
     set long {}

@@ -10,7 +10,6 @@ index: backends
 alias: backends; which backend; backend comparison
 keywords: interp, compile, cranelift, native, JIT, Tcl, speed, semantics
 related: backend.interp backend.compile backend.cranelift backend.cranelift-generic backend.native-executable backend.native-only backend.io backend.performance task.choose-backend cli.options
-docs: README.md DIRECT-HIR-NATIVE-PATH.md
 
 == WHAT THEY ARE
     interp             the reference interpreter (the default): runs the
@@ -49,7 +48,6 @@ index: backends
 alias: interp; interpreter; reference interpreter
 keywords: interp, interpreter, reference, core IR, recursion limit
 related: backend.overview backend.compile backend.performance
-docs: README.md
 
 == WHAT IT IS
 `-backend interp` (also the default). The front end lowers the analyzed HIR
@@ -72,7 +70,6 @@ index: backends
 alias: compile backend; tcl compiler
 keywords: compile, Tcl, procedures, -code
 related: backend.overview backend.interp backend.performance cli.options
-docs: README.md DIRECT-HIR-NATIVE-PATH.md
 
 == WHAT IT IS
 `-backend compile`. compiler/compiler.tcl compiles the program's HIR once
@@ -90,7 +87,6 @@ index: backends
 alias: cranelift; native backend; JIT; machine code
 keywords: cranelift, native, JIT, specialization, NIR, CLIF, botlish-native
 related: backend.overview backend.cranelift-generic backend.native-executable backend.native-only backend.platforms concept.specialization
-docs: README.md DIRECT-HIR-NATIVE-PATH.md NATIVE-AUDIT.md
 
 == WHAT IT IS
 `-backend cranelift`. native/lower.tcl lowers the analyzed HIR to NIR (the
@@ -117,7 +113,6 @@ index: backends
 alias: cranelift-generic; generic native
 keywords: generic, unspecialized, native, guards
 related: backend.cranelift backend.overview
-docs: README.md
 
 == WHAT IT IS
 `-backend cranelift-generic`: the same pipeline as cranelift with
@@ -133,7 +128,6 @@ index: backends
 alias: native executable; standalone executable; emit-native-executable; compile to binary
 keywords: executable, ELF, Mach-O, PE, exe, AOT, stub linker, rustc, emit, macOS, Windows, MSVC
 related: backend.cranelift backend.single-executable backend.platforms cli.exit-status cli.run concept.argv
-docs: README.md SINGLE-EXECUTABLE.md ARGV.md MACOS-AARCH64-MILESTONE-5.md WINDOWS-X86-64-MILESTONE-1.md PROGRAM-OUTPUT-MILESTONE-1.md
 
 == WHAT IT IS
 `-emit-native-executable game.bot` writes ./game (the input's name without
@@ -184,7 +178,6 @@ index: backends
 alias: native startup; startup policy; main thread; main-thread; run on the main thread; native-startup
 keywords: -native-startup, worker, main-thread, main thread, Cocoa, AppKit, SDL3, LC_MAIN, stack_size, 512 MiB, pthread_main_np, macOS, graphical, window
 related: backend.native-executable backend.platforms backend.macos-application cli.options error.native-unsupported error.native-startup error.native-limit-stack
-docs: MAIN-THREAD-STARTUP-MILESTONE-1.md MACOS-GRAPHICAL-MAIN-THREAD-CENSUS.md SINGLE-EXECUTABLE.md ICY-TOWER-MACOS-MILESTONE-1.md
 
 == WHAT IT IS
 A property of the executable, fixed when -emit-native-executable builds it
@@ -205,18 +198,16 @@ by a library it links, a context or anything the program declares.
 
 examples/games/icy-tower/build-macos.sh builds the Icy Tower game this way
 with Botlish.app: one Mach-O with the pinned SDL3 linked into it as a
-static archive, played in a Cocoa window with Metal
-(ICY-TOWER-MACOS-MILESTONE-1.md).
+static archive, played in a Cocoa window with Metal.
 
 == WHY
 On macOS, AppKit -- and so SDL3's Cocoa video driver -- works on the
 process's main thread only: on the worker, SDL_Init(SDL_INIT_VIDEO) fails
-with "No available video device" (MACOS-GRAPHICAL-MAIN-THREAD-CENSUS.md).
-An executable built with main-thread runs the same compiled program on
-the main thread, where a window, a Metal renderer and its events work,
-from the program's own direct C calls; a coroutine's stack is switched to
-on that same thread, so C calls made from a coroutine are on the main
-thread too.
+with "No available video device". An executable built with main-thread
+runs the same compiled program on the main thread, where a window, a Metal
+renderer and its events work, from the program's own direct C calls; a
+coroutine's stack is switched to on that same thread, so C calls made from
+a coroutine are on the main thread too.
 
 == WHAT IS THE SAME
 The program's meaning, output, argv(), errors, exit statuses and the
@@ -246,7 +237,6 @@ index: backends
 alias: native library; library mode; exported c fn; emit-native-library; static library; shared library; C export; call Botlish from C
 keywords: exported, export, library, .a, .so, header, manifest, instance, create, destroy, thread, C ABI, int64_t, owned buffer, Tcl extension, embedding
 related: backend.native-executable concept.c-ffi cli.options error.export-signature error.export-placement error.export-name error.export-environment error.native-library error.native-limit-stack
-docs: NATIVE-LIBRARY-MILESTONE-1.md C-FFI.md
 
 == WHAT IT IS
 A Botlish program can be a library a C program calls. Its exports are
@@ -330,7 +320,6 @@ index: backends
 alias: single executable; botlish executable; packed compiler; zipkit
 keywords: single, zipkit, zipfs, cache, install, glibc
 related: backend.native-executable backend.platforms backend.macos-application cli.usage
-docs: SINGLE-EXECUTABLE.md
 
 == WHAT IT IS
 A Tcl 9 zipkit (single/build.sh in a checkout): a static tclsh with the
@@ -361,7 +350,6 @@ index: backends
 alias: Botlish.app; macOS application; mac app; app bundle; Tcl.framework
 keywords: macos, app, bundle, framework, zipfs, codesign, ad hoc, notarization, xcode-select, Library/Caches
 related: backend.single-executable backend.platforms backend.native-executable error.native-link
-docs: MACOS-AARCH64-MILESTONE-9.md SINGLE-EXECUTABLE.md
 
 == WHAT IT IS
 single/macos/build.sh in a checkout builds Botlish.app and its download
@@ -396,14 +384,13 @@ index: backends rules
 alias: native only; native-only operations; only on cranelift
 keywords: NATIVE-ONLY, syscall, address, io, ffi, C, Tcl backends
 related: backend.io backend.overview concept.c-ffi concept.direct-modules concept.context-traits
-docs: LINUX-X86-64-SYSCALL.md ABI-BYTES.md C-FFI.md CONTEXT-TRAITS.md
 
 == WHAT THEY ARE
   * the address bridges std::abi::x86_64::from_bytes / from_mutable_bytes
     (and the aarch64 ones): a byte buffer's machine address;
   * the system-call transports std::linux::abi::x86_64::syscall and
     std::linux::abi::aarch64::syscall;
-  * calls of C functions (`extern c fn`, C-FFI.md);
+  * calls of C functions (`extern c fn`);
 and so everything built on them: stdlib/linux.bot, std::linux::io, and
 therefore io's printing through std::linux::io::LinuxIO. Each such
 standard-library entry says so in its BACKENDS section (-help
@@ -425,12 +412,11 @@ executable and `botlish run` never print it).
 
 @topic backend.io
 title: Which forms of I/O work on which backend
-summary: The development run prints the program's value on every backend (an executable never does); printing and reading stdin need a native backend; no portable file or exit-status API.
+summary: The program's value is printed on every backend; printing, reading stdin and the filesystem need a native backend or an executable; there is no exit-status API.
 index: backends stdlib
 alias: input output; io backends; printing on interp; output on every backend
 keywords: io, print, print_line, stdout, stderr, value, native, interp
-related: task.print-output backend.native-only stdlib.module.std::io stdlib.std::io::print_line stdlib.module.std::darwin::io stdlib.module.std::windows::io capability.input capability.files capability.process-exit-status concept.program-value concept.context-traits cli.run
-docs: CONTEXT-TRAITS.md POST-2048-PRODUCT-FIXES.md MACOS-AARCH64-MILESTONE-8.md WINDOWS-X86-64-MILESTONE-2.md
+related: task.print-output backend.native-only stdlib.module.std::io stdlib.std::io::print_line stdlib.module.std::darwin::io stdlib.module.std::windows::io capability.input capability.files stdlib.module.std::io::fs capability.process-exit-status concept.program-value concept.context-traits cli.run
 
 == OUTPUT, BY BACKEND
     the program's value          every backend: the compiler's development
@@ -464,7 +450,17 @@ same on all three; only the installed context differs.
     std::darwin::io::read(buffer)     cranelift-generic and native executables
                                  (capability.input)
 
-There is no text or line input in io, and no portable file or directory API
+There is no text or line input in io.
+
+== FILES
+    std::io::fs's operations,    cranelift, cranelift-generic and native
+    std::linux::fs,              executables, with the platform's context
+    std::darwin::fs,             installed; interp and compile refuse the
+    std::windows::fs             underlying system call (NATIVE-ONLY)
+
+The portable layer, std::io::fs, reads, writes and creates whole files and
+lists, creates and removes directories through any platform's path type;
+each platform module also streams through owned File handles
 (capability.files).
 
 == EXIT STATUS
@@ -478,7 +474,6 @@ index: backends
 alias: platforms; operating systems; aarch64; arm64; x86-64; supported platforms
 keywords: Linux, x86-64, AArch64, arm64, macOS, Windows, MSVC, Tcl 9, coroutines, stub
 related: backend.targets backend.overview backend.native-executable backend.native-startup backend.single-executable backend.macos-application
-docs: README.md LINUX-SYSCALL-TRANSPORTS.md COROUTINES.md WINDOWS-X86-64-MILESTONE-1.md WINDOWS-X86-64-MILESTONE-2.md WINDOWS-X86-64-MILESTONE-3.md WINDOWS-X86-64-MILESTONE-5.md MACOS-AARCH64-MILESTONE-8.md MACOS-AARCH64-MILESTONE-9.md
 
 == WHAT IS TESTED
 The repository's continuous integration runs every test on Linux x86-64 and
@@ -503,11 +498,11 @@ other platforms.
                              windows-x86_64-gnu is no native target)
     native coroutines        Linux x86-64 and AArch64 and macOS AArch64
                              (hand-written stack switching), Windows
-                             x86-64 (a Windows fiber per coroutine stack:
-                             WINDOWS-X86-64-MILESTONE-5.md), or, for a
-                             coroutine closed inside one function, none
-                             (COROUTINE-FUSION-MILESTONE-1.md); the Tcl
-                             backends run coroutines everywhere
+                             x86-64 (a Windows fiber per coroutine
+                             stack), or, for a coroutine closed inside
+                             one function, none (it is fused into that
+                             function); the Tcl backends run coroutines
+                             everywhere
     native stack overflow    NATIVE LIMIT STACK, for the thread's stack
                              and a coroutine's, on Linux x86-64 and
                              AArch64, macOS AArch64 and Windows x86-64
@@ -553,7 +548,6 @@ index: backends
 alias: target; -target; cross compile; C ABI target
 keywords: target, linux-x86_64, linux-aarch64, macos, macos-aarch64, windows, windows-x86_64-gnu, mingw, ffi, std::linux::sys, architecture, operating system, triple
 related: backend.platforms concept.c-ffi cli.options error.unsupported-platform error.native-target error.hir-interchange-target
-docs: C-ABI-TYPES.md LINUX-SYSCALL-TRANSPORTS.md MACOS-AARCH64-MILESTONE-2.md
 
 == WHAT IT DOES
 The targets are linux-x86_64, linux-aarch64, macos-x86_64, macos-aarch64,
@@ -593,7 +587,6 @@ index: backends
 alias: hirx; hir interchange; front-end cache; BOTLISH_HIR_CACHE
 keywords: hirx, cache, interchange, fingerprint, front end
 related: cli.options backend.overview
-docs: HIR-INTERCHANGE.md
 
 == WHAT IT IS
 `-emit-hir-interchange game.bot` writes game.hirx and runs nothing;
@@ -633,7 +626,6 @@ index: backends
 alias: usage; how to run; run a program; command line; cli
 keywords: main.tcl, botlish, invoke, file, .bot, .hir, .hirx, .ir
 related: cli.options cli.output cli.exit-status cli.packages backend.overview task.choose-backend backend.single-executable
-docs: README.md SINGLE-EXECUTABLE.md
 
 == FORMS
     botlish FILE.bot                run the program on interp
@@ -671,7 +663,6 @@ index: backends
 alias: options; flags of the command line; command-line options
 keywords: -backend, -warnings, -target, -L, -F, -runtime-path, -argv, -argv-hex, -argv-none, -emit-native-executable, -native-startup, -emit-hir-interchange, -emit-native-library, -export, -out, -check, -lsp, -lsp-scheduler, -lsp-worker, -code, -hir, -ast, -aot, -aot-data, -aot-spec, -contexts, -direct, -traits, -emit-nir, -emit-clif, -help, -version
 related: cli.usage cli.output cli.exit-status cli.lsp lint.policy backend.targets backend.hir-interchange backend.native-executable backend.native-startup backend.native-library concept.argv
-docs: README.md
 
 == RUNNING
     -backend NAME     interp (default), compile, cranelift,
@@ -801,7 +792,6 @@ index: backends
 alias: output format; value line; what main prints
 keywords: value, ==, error, help, warning, stderr, stdout, refinements
 related: cli.usage cli.exit-status cli.run concept.program-value backend.io lint.policy
-docs: README.md
 
 == A RUN
     == game.bot (cranelift)
@@ -820,9 +810,9 @@ writes (cli.run).
     == broken.bot (interp)
        error: broken.bot:3:5: unbound name "x" (CORE SEMANTIC UNBOUND)
        help: botlish -help error.unbound
-Every independent diagnostic gets its own line (DIAGNOSTIC-RECOVERY.md);
-each is followed by a help line naming the Compilerpedia topic of its rule
-or code, once per topic per file.
+Every independent diagnostic gets its own line; each is followed by a help
+line naming the Compilerpedia topic of its rule or code, once per topic
+per file.
 
 == WARNINGS
 Printed on stderr as they are found, `FILE:LINE:COL: warning: MESSAGE
@@ -878,7 +868,6 @@ index: backends
 alias: run; botlish run; run a program as a command; utility; unix tool; run with arguments; no value line; quiet run
 keywords: run, command, arguments, argv, stdin, stdout, value, status, utility, pipe
 related: cli.usage cli.output cli.exit-status backend.native-executable concept.argv concept.program-value task.print-output
-docs: PROGRAM-OUTPUT-MILESTONE-1.md
 
 == THE FORM
     botlish run [OPTION...] FILE.bot [ARG...]
@@ -913,7 +902,6 @@ index: backends
 alias: package manager; botlish.json; .botpkg; botlish add; botlish install; package artifact; lock file; dependency versions
 keywords: add, install, update, remove, verify, pack, inspect, graph, package graph, shared dependency, DEPENDENCY-CONFLICT, held, native, plan, deploy, botlish.json, lock, request, repository, artifact, editable, sha256, .bot_modules, targets, target view, .targets, bundled, system library, origins, -target, -drop-target, native add, native require, native audit, package stage, package compare, provenance, evidence, runtime, run-time dependency, license, notices, schema 3, authoring
 related: rule.package-modules concept.modules concept.native-link-plan cli.usage cli.exit-status backend.targets
-docs: PACKAGE-MANAGER-MILESTONE-1.md PACKAGE-MANAGER-MILESTONE-2.md PACKAGE-MANAGER-MILESTONE-3.md SHARED-PACKAGE-DEPENDENCIES-MILESTONE-1.md BOTLISH-JSON.md BOTPKG-FORMAT.md BOTPKG-PROVENANCE.md BOT-MODULES-MILESTONE-1.md
 
 == THE COMMANDS
     botlish add NAME|FILE.botpkg|DIR [-request R] [-replace]
@@ -1047,7 +1035,7 @@ botlish.json names it and its version; -package DIR or DIR elsewhere):
     generators) also writes NAME-VERSION.provenance.json beside the
     artifact: unsigned, bound to its SHA-256, the computed facts, the
     assertions and the checks it made (a Git tree recomputed from the
-    source files) kept apart (BOTPKG-PROVENANCE.md). package inspect
+    source files) kept apart. package inspect
     -provenance checks a record against an artifact; package compare
     explains how two builds of one release differ (a release is one
     artifact: at most one of them is it).
@@ -1075,7 +1063,6 @@ index: backends
 alias: lsp; language server; editor; neovim; vscode; ide; editor support
 keywords: -lsp, LSP, hover, definition, references, diagnostics, editor, neovim, vscode
 related: cli.options cli.usage cli.exit-status concept.modules
-docs: LSP-MILESTONE-1.md COMPILER-SERVICE-MILESTONE-1.md
 
 == STARTING IT
     botlish -lsp                    (tclsh9.0 main.tcl -lsp in a checkout)
@@ -1101,6 +1088,13 @@ an open document's unsaved text is what the compiler analyzes, and the
 server never writes a file. Positions are UTF-16 (or UTF-32 when the
 editor prefers it).
 
+A program that does not load (an import that finds no module, anywhere
+in the modules it imports) answers nothing. A loader diagnostic in a
+module file names, in note lines (-check prints them too), the imports
+that load that file, the entry program's first; for such a program the
+server also shows the diagnostic at each of those imports, so the file
+open in the editor says why it answers nothing.
+
 == PROGRAMS AND STALENESS
 Each open document is analyzed as a program unless another open program
 imports it; then it is that program's module. A document with a syntax
@@ -1115,4 +1109,4 @@ process, so the server answers while it runs.
 == NOT YET
 Completion, signature help, rename, code actions, formatting, semantic
 tokens, workspace symbols and references across programs are not
-implemented (LSP-MILESTONE-1.md, "Limitations").
+implemented.

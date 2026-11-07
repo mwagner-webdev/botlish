@@ -334,6 +334,8 @@ tests/aot-stub-linker.test stub-linker-near-mapping pass
 tests/aot-stub-linker.test stub-linker-outcomes pass
 tests/aot-stub-linker.test stub-linker-parity pass
 tests/application-modules.test app-cannot-shadow-standard pass
+tests/application-modules.test app-check-import-notes pass
+tests/application-modules.test app-entry-diagnostic-no-import-notes pass
 tests/application-modules.test app-entry-not-a-module pass
 tests/application-modules.test app-interchange-without-sources pass
 tests/application-modules.test app-main-from-elsewhere pass
@@ -341,6 +343,7 @@ tests/application-modules.test app-method-sugar pass
 tests/application-modules.test app-missing-module pass
 tests/application-modules.test app-missing-nested-module pass
 tests/application-modules.test app-module-cycle pass
+tests/application-modules.test app-module-diagnostic-import-notes pass
 tests/application-modules.test app-module-diagnostic-location pass
 tests/application-modules.test app-module-imports-module pass
 tests/application-modules.test app-module-loaded-once pass
@@ -1110,6 +1113,7 @@ tests/compiler-service.test cs-entry-syntax-first pass
 tests/compiler-service.test cs-facts-explicit pass
 tests/compiler-service.test cs-hover-no-internal-ids pass
 tests/compiler-service.test cs-hover-signatures pass
+tests/compiler-service.test cs-import-notes pass
 tests/compiler-service.test cs-index-matches-scan pass
 tests/compiler-service.test cs-loader-diagnostic-location pass
 tests/compiler-service.test cs-normalize-disk-equals-buffer pass
@@ -10071,6 +10075,7 @@ tests/lsp.test lsp-frame-several-in-one pass
 tests/lsp.test lsp-frame-headers pass
 tests/lsp.test lsp-frame-errors pass
 tests/lsp.test lsp-frame-oversize pass
+tests/lsp.test lsp-lang-module-load-error pass
 tests/lsp.test lsp-rpc-classify pass
 tests/lsp.test lsp-rpc-messages pass
 tests/lsp.test lsp-positions-encodings pass

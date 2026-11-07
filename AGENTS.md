@@ -5845,6 +5845,16 @@ author image, for a release). Keep it so:
   for headless use. A `raven` change of contents is a new version: the tool
   refuses to overwrite a different `NAME-VERSION.botpkg` (`-force` only
   for a local file the author means to replace).
+* The event bridge (native/raven_bridge.c, RAVEN-BINDINGS.md section 5)
+  only records: it never calls Botlish, never keeps a pointer Raven gave
+  it, and its one input hook (`watch_input`) answers "not consumed" to
+  every event, so watching a window changes nothing Raven does
+  (`raven-input`). A press is an event of its own (KeyPressed,
+  MousePressed), never derived from state; consecutive moves are one
+  record. Every number a record holds is finite, so `events()`, `rect()`
+  and `mouse_position()` declare no error: never make them fallible again
+  for a value Raven cannot produce. A change to the record or its kinds
+  bumps the bridge's ABI and raven.bot's check together.
 * Builds are recognized by their configuration's stamp
   (tests/cffi/raven.tcl: `headless`, `desktop`), never by a library merely
   present; the desktop build's Vulkan headers are the pinned Khronos commit
@@ -5976,7 +5986,12 @@ no semantics of its own. Keep it so:
   `surface::syntaxEntries`, the loader's `Error`, `hir::recovery::entries`,
   `hir::warnings::Rejection` and `entry` (core::raiseDiagnostics' `summary`,
   `location`, `related`) -- never parsed out of its text. A new producer of
-  raised diagnostics gives them too.
+  raised diagnostics gives them too. So is the way to a module file: every
+  diagnostic the loader reports from one (a load error, a reference error,
+  a syntax error) carries `import` notes, the chain of imports that loaded
+  it, the entry program's first (`surface::modules::ImportNotes`, recorded
+  as each module is first loaded); notes are never part of a diagnostic's
+  message, order or identity, and the service keeps their `kind`.
 * The service reports the strict compilation's diagnostics -- the very
   entries it raises, in its order, `hir::recovery::reported` deciding what
   is dependent -- and the warnings the compilation attached: never filter,
@@ -6012,7 +6027,12 @@ transport, scheduling and presentation, never semantics. Keep it so:
   `service::diagnostics` re-encoded, hover, definition and references are
   `service::at`'s facts, Compilerpedia topics `service::explain`'s and the
   facts' own (by identity). Never match names, parse formatted CLI output,
-  run a second analysis or resolver, or compute a type in `lsp/`.
+  run a second analysis or resolver, or compute a type in `lsp/`. The one
+  presentation choice: a program with no analysis (a loader error) also
+  shows each diagnostic at its `import` notes, the loader's chain of imports
+  to the module file it is in (`ImportMirror`); an analyzed program's
+  module diagnostics stay in their own file. Never find an import yourself
+  (by name or by parsing): only the loader's notes say which one.
 * Layers: `transport.tcl` (bytes, Content-Length framing, nothing else),
   `json.tcl` (typed values: a category is never guessed from a Tcl
   string), `jsonrpc.tcl` (messages, no LSP method knowledge), then
@@ -6151,12 +6171,50 @@ runs it); it fails when:
 * an example no longer compiles, runs or is rejected as stated: when the
   compiler learns to prove a pattern a proof page lists as a limitation, or
   changes a rule, update the page, never the example's expectation alone;
-* a reference, alias or matcher is broken.
+* a reference, alias or matcher is broken;
+* a page names a design document (`docs/NAME.md`, a README): the reference
+  ships without `docs/` (the single executable, Botlish.app), so a page says
+  what it means itself and points at other topics. There is no `docs:`
+  header key. A standard-library comment may cite a document for its
+  maintainers; the generator drops a citation it can (`cpt::Unreferenced`:
+  a parenthetical of citations, a citation leading or ending one, a
+  "-- see DOC", a sentence that is only citations), and a citation it
+  cannot fails the check until the comment is reworded (keep the file's
+  line count: the warning gate's manifest pins locations);
+* a capability page's alias names an existing standard-library operation
+  (a function or intrinsic, not a predicate: "read file" and
+  std::linux::fs::read_file) and the page does not relate its topic or its
+  module's (next paragraph).
 
 State only what the compiler does today; document an absent facility as
 absent (`capability.*`) with the nearest alternative. A change to the
 command line updates `cliOptions` (main.tcl), the `cli.options` topic and
 main.tcl's header comment (`tests/main-cli.test` checks all three).
+
+**Cross-check the capability pages against the standard library's
+registry.** `capability.*` pages say what Botlish lacks, and the stdlib
+grows under them: `capability.files` said "no open exists" for months after
+std::io::fs and std::linux::fs shipped, and sent a user to hand-written C
+calls. So whenever you add, rename or remove a public standard-library
+module, function or intrinsic (a new `stdlib/` module, a registered
+native, a public declaration):
+
+* list the capability pages (`tclsh9.0 main.tcl -help capability.overview`)
+  and read every one whose subject the change touches -- by its title and
+  STATUS, not only its aliases -- and run `-help` with the names a user
+  would type for the new facility (`-help "read file"`, `-help timer`):
+  each must lead to the real documentation;
+* a page the change makes wrong is rewritten in the same change: the real
+  documentation, its ID kept (other topics and help lines name it), its
+  title saying "limited" or describing what exists, its `related:` naming
+  the new modules' and operations' topics, an example that compiles;
+* a page that stays right but whose alias now names an operation of the
+  same spelling relates that operation's topic (`capability.null` relates
+  std::ffi::c::null) or drops the alias.
+
+The check catches only the mechanical case (an alias that is an
+operation's name); a broader claim -- "no tasks" while std::event_loop
+schedules them -- is found only by reading the pages, so read them.
 
 ## Golden tests (Botlish-native test framework)
 

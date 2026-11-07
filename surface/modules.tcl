@@ -1810,6 +1810,10 @@ proc surface::modules::LoadNamespace {stateVar name usedAtSpan {path ""} {scope 
     if {$path eq ""} {
         set path [ModuleFile $name [dict get $state target] $usedAtSpan]
     }
+    # The import that loads the module (the first: a module is loaded once),
+    # for the notes of a diagnostic located in its file (ImportNotes).
+    dict set state importSites $name [dict create importer [lindex [dict get $state stack] end] \
+        span $usedAtSpan path $path spelling $spelling]
     if {![surface::source::exists $path]} {
         Error UNKNOWN-NAMESPACE $usedAtSpan "unknown namespace \"$name\": no such module file $path"
     }
@@ -2849,7 +2853,62 @@ proc surface::modules::NewState {files nextFile} {
         referenceErrors {} recover 0 syntaxEntries {} fileOf [dict create] open [dict create] \
         dependentRefs [dict create] typeKeys [dict create] dfaRegistry [dict create] dfaNames {} \
         scopeOf [dict create] spellingOf [dict create] packages [dict create] names [dict create] \
-        physical {}]
+        physical {} importSites [dict create]]
+}
+
+# The notes (core::raiseDiagnostics) that say how the program reaches FILE, a
+# module file STATE loaded: one per import of the chain that loaded it, the
+# entry program's first -- "the import of "NS" here loads FILE", located at
+# the import's namespace, kind `import`. None for a file no import loaded
+# (the entry program's own). They name where a module's diagnostic comes from
+# for a reader of the file that imports it (main.tcl's note lines; the
+# language server shows the diagnostic at each of them); never part of a
+# diagnostic's message, order or identity.
+proc surface::modules::ImportNotes {state file} {
+    set module ""
+    dict for {name site} [dict get $state importSites] {
+        if {[dict get $site path] eq $file} {
+            set module $name
+            break
+        }
+    }
+    set tail [file tail $file]
+    set notes {}
+    set seen {}
+    while {$module ne "" && $module ni $seen && [dict exists $state importSites $module]} {
+        lappend seen $module
+        set site [dict get $state importSites $module]
+        set span [dict get $site span]
+        if {$span eq ""} {
+            # Loaded by name (LoadNamespaces), not by an import.
+            break
+        }
+        set summary "the import of \"[dict get $site spelling]\" here loads $tail"
+        set notes [linsert $notes 0 [dict create message "[surface::ast::location $span]: $summary" \
+            summary $summary location $span kind import]]
+        set module [dict get $site importer]
+    }
+    return $notes
+}
+
+# ENTRIES (core::raiseDiagnostics') with the import notes of each one located
+# in a module file (ImportNotes) after its own notes; an entry that has them
+# already is kept as it is.
+proc surface::modules::ImportNoted {state entries} {
+    return [lmap entry $entries {
+        set location [dict getdef $entry location ""]
+        set notes [dict getdef $entry notes {}]
+        if {$location eq "" || ![dict exists $location file]
+                || [lsearch -exact [lmap n $notes {dict getdef $n kind ""}] import] >= 0} {
+            set entry
+        } else {
+            set imports [ImportNotes $state [dict get $location file]]
+            if {$imports ne {}} {
+                dict set entry notes [concat $notes $imports]
+            }
+            set entry
+        }
+    }]
 }
 
 # Raises the qualified references of every file STATE loaded that the file
@@ -2931,13 +2990,17 @@ proc surface::modules::BuildProgram {ast strict {target ""} {root ""} {recover 0
         set ast [CollectAndLoad state $ast ""]
         RaiseReferenceErrors $state
     } on error {message options} {
+        # A diagnostic in a module file names the imports that load it.
+        if {[dict exists $options -diagnostics]} {
+            dict set options -diagnostics [ImportNoted $state [dict get $options -diagnostics]]
+        }
         if {[dict get $state syntaxEntries] eq {}
                 || ([lrange [dict get $options -errorcode] 0 1] ne {SURFACE MODULE} && [lindex [dict get $options -errorcode] 0] ne "POSIX")} {
             return -options $options $message
         }
         # The syntax errors first, as a compilation without recovery
         # reports one of them first.
-        core::raiseDiagnostics [concat [dict get $state syntaxEntries] [dict getdef $options -diagnostics \
+        core::raiseDiagnostics [concat [ImportNoted $state [dict get $state syntaxEntries]] [dict getdef $options -diagnostics \
             [list [dict create errorcode [dict get $options -errorcode] message $message]]]]
     }
     lassign [surface::lower::SplitTypeDecls [dict get $ast body]] executable ownDecls ownErrorDecls ownStructDecls ownTraitDecls \
@@ -2955,6 +3018,7 @@ proc surface::modules::BuildProgram {ast strict {target ""} {root ""} {recover 0
     set sections [dict get $state sections]
     set recovery {}
     if {[dict get $state syntaxEntries] ne {}} {
+        dict set state syntaxEntries [ImportNoted $state [dict get $state syntaxEntries]]
         lassign [Recovery $state $nodes $sections] nodes sections recovery
     }
     # A strict compilation goes on past resolution failures: what checking

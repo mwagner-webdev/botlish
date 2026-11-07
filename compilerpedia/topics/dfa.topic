@@ -8,7 +8,6 @@ index: concepts
 alias: dfa; recognizer; finite automaton; lexer; tokenizer; class declaration; accept before; lookahead
 keywords: dfa, class, recognizer, automaton, DFA, lexer, tokenizer, token, accept, accept before, lookahead, unread, end, call, then, over, bytes, ascii, unicode, sequence, std::dfa, UnrecognizedInput, UnexpectedEnd
 related: concept.coroutines stdlib.module.std::dfa error.dfa-ambiguous-transition error.dfa-unread-beyond-input error.dfa-call-lookahead
-docs: DFA-COROUTINE-MILESTONE-2.md DFA-COROUTINE-EXPLORATION.md COROUTINES.md COROUTINE-FUSION-MILESTONE-1.md
 
 == WHAT IT IS
 A recognizer is a table: states, and for each state the symbols it takes
@@ -92,8 +91,8 @@ A recognizer is an ordinary coroutine: eager start, typed resumes, a
 stable final result or failure, affine handle, deep yields through calls.
 Nothing new runs: the transition table is one internal call the native
 backend compiles to a jump table, an interval search or a table load, and
-coroutine fusion (COROUTINE-FUSION-MILESTONE-1.md) compiles a driver that
-keeps its recognizers' handles into one loop without coroutine objects.
+coroutine fusion compiles a driver that keeps its recognizers' handles
+into one loop without coroutine objects.
 
 @example accept
 import std::dfa
@@ -130,7 +129,6 @@ index: errors
 alias: transitions overlap; nondeterministic transition
 keywords: dfa, determinism, overlap, ambiguous, class, range
 related: concept.recognizers
-docs: DFA-COROUTINE-MILESTONE-2.md
 code: CORE SEMANTIC DFA-AMBIGUOUS-TRANSITION
 
 == MEANING
@@ -168,7 +166,6 @@ index: errors
 alias: unknown state
 keywords: dfa, state, typo, target
 related: concept.recognizers
-docs: DFA-COROUTINE-MILESTONE-2.md
 code: CORE SEMANTIC DFA-UNKNOWN-STATE
 
 == MEANING
@@ -198,7 +195,6 @@ index: errors
 alias: unknown class
 keywords: dfa, class, typo, declared later, qualified class
 related: concept.recognizers error.missing-import
-docs: DFA-COROUTINE-MILESTONE-2.md
 code: CORE SEMANTIC DFA-UNKNOWN-CLASS
 
 == MEANING
@@ -231,7 +227,6 @@ index: errors
 alias: unknown recognizer; call to a later recognizer
 keywords: dfa, call, delegation, forward reference, order
 related: concept.recognizers error.dfa-recursive-call
-docs: DFA-COROUTINE-MILESTONE-2.md
 code: CORE SEMANTIC DFA-UNKNOWN-DFA
 
 == WHAT TO DO
@@ -262,7 +257,6 @@ index: errors
 alias: recursive recognizer
 keywords: dfa, recursion, nesting, stack, call
 related: concept.recognizers error.dfa-unknown-dfa
-docs: DFA-COROUTINE-MILESTONE-2.md
 code: CORE SEMANTIC DFA-RECURSIVE-CALL
 
 == WHAT TO DO
@@ -289,7 +283,6 @@ index: errors
 alias: alphabet mismatch
 keywords: dfa, call, alphabet, bytes, unicode, ascii
 related: concept.recognizers error.dfa-alphabet
-docs: DFA-COROUTINE-MILESTONE-2.md
 code: CORE SEMANTIC DFA-CALL-ALPHABET
 
 @example reject
@@ -316,7 +309,6 @@ index: errors
 alias: outside the alphabet; unknown alphabet
 keywords: dfa, alphabet, bytes, ascii, unicode, surrogate, range
 related: concept.recognizers error.dfa-byte-character
-docs: DFA-COROUTINE-MILESTONE-2.md
 code: CORE SEMANTIC DFA-ALPHABET
 
 == MEANING
@@ -345,7 +337,6 @@ index: errors
 alias: character is not a byte
 keywords: dfa, bytes, UTF-8, character, code unit
 related: concept.recognizers error.dfa-alphabet
-docs: DFA-COROUTINE-MILESTONE-2.md
 code: CORE SEMANTIC DFA-BYTE-CHARACTER
 
 == WHAT TO DO
@@ -371,7 +362,6 @@ index: errors
 alias: empty range; empty class
 keywords: dfa, range, class, except, empty
 related: concept.recognizers
-docs: DFA-COROUTINE-MILESTONE-2.md
 code: CORE SEMANTIC DFA-EMPTY-RANGE
 
 @example reject
@@ -394,7 +384,6 @@ index: errors
 alias: end consumed
 keywords: dfa, end, end of input, EOF
 related: concept.recognizers error.dfa-missing-end
-docs: DFA-COROUTINE-MILESTONE-2.md
 code: CORE SEMANTIC DFA-END-CONSUMED
 
 @example reject
@@ -418,7 +407,6 @@ index: errors
 alias: unreachable state; unused state
 keywords: dfa, state, unreachable, unused
 related: concept.recognizers
-docs: DFA-COROUTINE-MILESTONE-2.md
 code: CORE SEMANTIC DFA-UNREACHABLE-STATE
 
 @example reject
@@ -443,7 +431,6 @@ index: errors
 alias: never accepts
 keywords: dfa, accept, state, closing quote
 related: concept.recognizers
-docs: DFA-COROUTINE-MILESTONE-2.md
 code: CORE SEMANTIC DFA-NO-ACCEPT
 
 == MEANING
@@ -473,7 +460,6 @@ index: errors
 alias: dead call
 keywords: dfa, call, delegation, reject
 related: concept.recognizers
-docs: DFA-COROUTINE-MILESTONE-2.md
 code: CORE SEMANTIC DFA-DEAD-TRANSITION
 
 @example reject
@@ -500,7 +486,6 @@ index: errors
 alias: missing end
 keywords: dfa, end, end of input, accept before, EOF
 related: concept.recognizers error.dfa-end-consumed
-docs: DFA-COROUTINE-MILESTONE-2.md
 code: CORE SEMANTIC DFA-MISSING-END
 
 @example reject
@@ -526,7 +511,6 @@ index: errors
 alias: duplicate state; duplicate class; duplicate dfa
 keywords: dfa, class, state, duplicate, declared twice
 related: concept.recognizers
-docs: DFA-COROUTINE-MILESTONE-2.md
 code: CORE SEMANTIC DFA-DUPLICATE
 
 @example reject
@@ -551,7 +535,6 @@ index: errors
 alias: unread count too large; accept before too many; lookahead beyond the token
 keywords: dfa, accept before, lookahead, unread, bound, empty token, buffer
 related: concept.recognizers error.dfa-call-lookahead
-docs: DFA-COROUTINE-MILESTONE-2.md
 code: CORE SEMANTIC DFA-UNREAD-BEYOND-INPUT
 
 == MEANING
@@ -592,7 +575,6 @@ index: errors
 alias: call lookahead
 keywords: dfa, call, delegation, lookahead, accept before, unread
 related: concept.recognizers error.dfa-unread-beyond-input
-docs: DFA-COROUTINE-MILESTONE-2.md
 code: CORE SEMANTIC DFA-CALL-LOOKAHEAD
 
 == MEANING
