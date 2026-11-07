@@ -4492,6 +4492,7 @@ proc native::lower::OpenedFieldObject {fnVar b name e} {
 }
 
 proc native::lower::Project {fnVar e node {want tagged}} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $fnVar fn
     variable hir
     variable escape
@@ -7437,6 +7438,7 @@ proc native::lower::RootValue {fnVar e binding} {
 }
 
 proc native::lower::Bind {fnVar e node} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $fnVar fn
     variable construction
     variable hir
@@ -7726,6 +7728,7 @@ proc native::lower::Closure {fnVar e} {
 # fixed-shape construction -- never a materialized List register. "never"
 # if evaluating one of its parts cannot complete normally.
 proc native::lower::VirtualValue {fnVar e arity {cut ""}} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $fnVar fn
     variable hir
     set node [hir::node $hir $e]
@@ -12408,6 +12411,7 @@ proc native::lower::CountOps {direction endKind} {
 # own Require call for this node feeds it, exactly like ListLoop's iterable
 # check); no Range/List/iterator allocation exists beyond the result.
 proc native::lower::CountLoop {fnVar e node} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $fnVar fn
     variable context
     variable ranges

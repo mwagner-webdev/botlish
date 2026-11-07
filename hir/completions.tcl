@@ -2050,6 +2050,7 @@ proc hir::completions::LoopDomain {hirVar ctxVar diagnose enclosing guard operan
 # conservative assumption, so this is at least as sound as EvalLoop's own
 # case.
 proc hir::completions::EvalCountloop {hirVar ctxVar diagnose enclosing guard e node} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $hirVar hir $ctxVar ctx
     set ranges [LoopDomain hir ctx $diagnose $enclosing $guard \
         [concat [list [dict get $node start] [dict get $node end]] [hir::FoldInitials $node]]]

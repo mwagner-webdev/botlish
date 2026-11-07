@@ -13,8 +13,9 @@
 # under Tcl's default limit of 1000 nested evaluations and reports any that
 # fails with TCL LIMIT STACK, naming the procedures that repeat most in the
 # error's stack: a walk whose recursion follows the nesting and carries no
-# guard (core/deep.tcl). It prints one line per kind and scenario, then a
-# summary; exit status 1 if any path failed. -root runs another checkout's
+# guard (core/deep.tcl), and any other error the program 3 deep does not
+# get too. It prints one line per kind and scenario, then a summary; exit
+# status 1 if any path failed. -root runs another checkout's
 # compiler (the revision before the milestone fails nearly everything).
 
 set options [dict create -depth 1000 -kinds "" -scenarios "" -limit 1000 \
@@ -77,7 +78,20 @@ foreach kind $kinds {
             incr failures
             puts "$kind $name: TCL LIMIT STACK ($ms ms) [Repeated [dict get $info -errorinfo]]"
         } elseif {$code == 1} {
-            puts "$kind $name: [lrange [dict get $info -errorcode] 0 2] ($ms ms) [string range $result 0 120]"
+            # (A refusal is the language's when the program 3 deep gets it
+            # too -- a module binding's initializer that is no
+            # context-free form, say; otherwise it is the depth's.)
+            set refusal [lrange [dict get $info -errorcode] 0 2]
+            set deep $source
+            set source [dict get [dsn::specimen $kind 3] source]
+            catch [dict get $scenarios $name] shallowResult shallow
+            set source $deep
+            if {[lrange [dict get $shallow -errorcode] 0 2] eq $refusal} {
+                puts "$kind $name: refused at any depth: $refusal ($ms ms)"
+            } else {
+                incr failures
+                puts "$kind $name: $refusal only [dict get $options -depth] deep ($ms ms) [string range $result 0 120]"
+            }
         } else {
             puts "$kind $name: ok ($ms ms)"
         }
@@ -85,5 +99,5 @@ foreach kind $kinds {
     }
 }
 file delete -force $dir
-puts "[llength $kinds] kinds, [llength $names] scenarios, $failures paths that hit Tcl's limit"
+puts "[llength $kinds] kinds, [llength $names] scenarios, $failures paths that failed"
 exit [expr {$failures > 0}]

@@ -456,6 +456,7 @@ proc hir::callables::CheckTrailing {hirVar body finalType contextText} {
 # (FOLD-LOOPS-MILESTONE-1.md), a join like an if's, of the intermediate's
 # one type. 1 when NODE is a fold (walked), 0 otherwise.
 proc hir::callables::WalkFold {hirVar node} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $hirVar hir
     if {![hir::IsFoldNode $node]} {
         return 0

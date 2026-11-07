@@ -2372,6 +2372,7 @@ proc core::compiler::CountBoundWord {ctxVar op name} {
 # exhaustion yields the whole List (the finalization mirrors
 # CompileListLoop's own "no break happened" case).
 proc core::compiler::CompileCountLoop {ctxVar e} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $ctxVar ctx
     variable hir
     set startOp [CompileExpr ctx [N $e start]]

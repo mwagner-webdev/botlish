@@ -131,6 +131,13 @@ proc surface::parser::Statement {pVar} {
 >>>>
 ## surface/parser.tcl
 <<<<
+proc surface::parser::Value {pVar} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc surface::parser::Value {pVar} {
+>>>>
+## surface/parser.tcl
+<<<<
 proc surface::parser::Statements {pVar stop} {
     if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
 ====
@@ -177,6 +184,13 @@ proc surface::parser::Loop {pVar} {
     if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
 ====
 proc surface::parser::Loop {pVar} {
+>>>>
+## surface/parser.tcl
+<<<<
+proc surface::parser::Fold {pVar} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc surface::parser::Fold {pVar} {
 >>>>
 ## surface/parser.tcl
 <<<<
@@ -544,6 +558,13 @@ proc hir::types::Project {hirVar ctxVar e} {
 >>>>
 ## hir/types.tcl
 <<<<
+proc hir::types::FoldBody {hirVar ctxVar e node initial} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc hir::types::FoldBody {hirVar ctxVar e node initial} {
+>>>>
+## hir/types.tcl
+<<<<
 proc hir::types::Sequence {hirVar ctxVar exprs} {
     if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
 ====
@@ -646,6 +667,13 @@ proc hir::refine::Implication {hir ctx e {depth 0}} {
 ====
 proc hir::refine::Implication {hir ctx e {depth 0}} {
 >>>>
+## hir/refine.tcl
+<<<<
+proc hir::refine::BodyImplication {hir ctx body depth {decided 0}} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc hir::refine::BodyImplication {hir ctx body depth {decided 0}} {
+>>>>
 
 @@ completions-recursion the completion analysis recursive
 !! dsn-1000-call dsn-1000-handler
@@ -728,6 +756,13 @@ proc hir::completions::EvalListloop {hirVar ctxVar diagnose enclosing guard e no
 >>>>
 ## hir/completions.tcl
 <<<<
+proc hir::completions::EvalCountloop {hirVar ctxVar diagnose enclosing guard e node} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc hir::completions::EvalCountloop {hirVar ctxVar diagnose enclosing guard e node} {
+>>>>
+## hir/completions.tcl
+<<<<
 proc hir::completions::ExitsLoop {hir loop exprs} {
     if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
 ====
@@ -742,6 +777,13 @@ proc hir::callables::WalkExpr {hirVar e} {
     if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
 ====
 proc hir::callables::WalkExpr {hirVar e} {
+>>>>
+## hir/callables.tcl
+<<<<
+proc hir::callables::WalkFold {hirVar node} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc hir::callables::WalkFold {hirVar node} {
 >>>>
 
 @@ warnings-recursion the warning passes' walks recursive
@@ -980,6 +1022,13 @@ proc core::compiler::CompileListLoop {ctxVar e} {
 >>>>
 ## compiler/compiler.tcl
 <<<<
+proc core::compiler::CompileCountLoop {ctxVar e} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc core::compiler::CompileCountLoop {ctxVar e} {
+>>>>
+## compiler/compiler.tcl
+<<<<
 proc core::compiler::ArrayOfRecords {descriptor} {
     if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
 ====
@@ -1067,6 +1116,13 @@ proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0} {wan
 >>>>
 ## native/lower.tcl
 <<<<
+proc native::lower::Bind {fnVar e node} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc native::lower::Bind {fnVar e node} {
+>>>>
+## native/lower.tcl
+<<<<
 proc native::lower::CallArgs {fnVar argExprs fieldWidths rawSlots {planSlots {}} {fieldCuts {}}} {
     if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
 ====
@@ -1092,6 +1148,13 @@ proc native::lower::Expr {fnVar e {want tagged}} {
     if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
 ====
 proc native::lower::Expr {fnVar e {want tagged}} {
+>>>>
+## native/lower.tcl
+<<<<
+proc native::lower::Project {fnVar e node {want tagged}} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc native::lower::Project {fnVar e node {want tagged}} {
 >>>>
 ## native/lower.tcl
 <<<<
@@ -1198,6 +1261,13 @@ proc native::lower::Struct {fnVar e node} {
 ====
 proc native::lower::Struct {fnVar e node} {
 >>>>
+## native/lower.tcl
+<<<<
+proc native::lower::VirtualValue {fnVar e arity {cut ""}} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc native::lower::VirtualValue {fnVar e arity {cut ""}} {
+>>>>
 ## native/rawabi.tcl
 <<<<
 proc native::rawabi::Call {e node sink why} {
@@ -1211,6 +1281,13 @@ proc native::lower::ListLoop {fnVar e node} {
     if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
 ====
 proc native::lower::ListLoop {fnVar e node} {
+>>>>
+## native/lower.tcl
+<<<<
+proc native::lower::CountLoop {fnVar e node} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc native::lower::CountLoop {fnVar e node} {
 >>>>
 ## native/lower.tcl
 <<<<

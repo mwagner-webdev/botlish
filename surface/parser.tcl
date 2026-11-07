@@ -3075,6 +3075,7 @@ proc surface::parser::Injection {pVar} {
 
 # A statement's value: an if, a loop, or an expression.
 proc surface::parser::Value {pVar} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $pVar p
     if {[Kind p] eq "if"} {
         return [If p]
@@ -4219,6 +4220,7 @@ proc surface::parser::IsWord {pVar offset word} {
 # intermediate: a fold is a loop that carries one value instead of
 # collecting its iterations' values.
 proc surface::parser::Fold {pVar} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $pVar p
     set start [dict get [Advance p] span]
     set clauses {}

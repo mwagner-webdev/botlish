@@ -23,6 +23,7 @@
 ::surface::parser::Primary	parse	recursive descent: a production per precedence level and per bracketed form, re-entered for every nested operand, argument, element, field value and block
 ::surface::parser::Simple	parse	recursive descent: a production per precedence level and per bracketed form, re-entered for every nested operand, argument, element, field value and block
 ::surface::parser::Statement	parse	recursive descent: a production per precedence level and per bracketed form, re-entered for every nested operand, argument, element, field value and block
+::surface::parser::Value	parse	recursive descent: a production per precedence level and per bracketed form, re-entered for every nested operand, argument, element, field value and block
 ::surface::parser::Statements	parse	recursive descent: a production per precedence level and per bracketed form, re-entered for every nested operand, argument, element, field value and block
 ::surface::parser::Suite	parse	recursive descent: a production per precedence level and per bracketed form, re-entered for every nested operand, argument, element, field value and block
 ::surface::parser::Unary	parse	recursive descent: a production per precedence level and per bracketed form, re-entered for every nested operand, argument, element, field value and block
@@ -47,6 +48,7 @@
 ::hir::types::Handle	inference	type inference: Expr dispatches on a node and re-enters for its children
 ::hir::types::If	inference	type inference: Expr dispatches on a node and re-enters for its children
 ::hir::types::Project	inference	type inference: Expr dispatches on a node and re-enters for its children
+::hir::types::FoldBody	inference	a fold's body typed to its intermediate's fixpoint, nested folds within
 ::hir::types::Sequence	inference	type inference: Expr dispatches on a node and re-enters for its children
 ::hir::types::Struct	inference	type inference: Expr dispatches on a node and re-enters for its children
 ::hir::types::inferRegion	inference	type inference: Expr dispatches on a node and re-enters for its children
@@ -61,7 +63,9 @@
 ::hir::range::VerifyCallArguments	range	range analysis, admission and verification of calls
 ::hir::refine::IfImplication	refinement	implication through nested conditions
 ::hir::refine::Implication	refinement	implication through nested conditions
+::hir::refine::BodyImplication	refinement	implication through nested conditions
 ::hir::callables::WalkExpr	callables	callable-bearing audit
+::hir::callables::WalkFold	callables	callable-bearing audit
 ::hir::completions::EffectiveFacts	completions	completion analysis (also nests per static call: the call chain)
 ::hir::completions::Eval	completions	completion analysis (also nests per static call: the call chain)
 ::hir::completions::EvalCall	completions	completion analysis (also nests per static call: the call chain)
@@ -108,10 +112,12 @@
 ::hir::escape::LiteralTree	native lowering	escape and scalar-replacement plans of nested constructions
 ::hir::escape::WriteBackPaths	native lowering	escape and scalar-replacement plans of nested constructions
 ::native::lower::Call	native lowering	HIR to NIR, one call per nested expression
+::native::lower::Bind	native lowering	HIR to NIR, one call per nested expression
 ::native::lower::CallArgs	native lowering	HIR to NIR, one call per nested expression
 ::native::lower::CallInner	native lowering	HIR to NIR, one call per nested expression
 ::native::lower::ConstantIntValue	native lowering	HIR to NIR, one call per nested expression
 ::native::lower::Expr	native lowering	HIR to NIR, one call per nested expression
+::native::lower::Project	native lowering	HIR to NIR, one call per nested expression
 ::native::lower::Handle	native lowering	HIR to NIR, one call per nested expression
 ::native::lower::If	native lowering	HIR to NIR, one call per nested expression
 ::native::lower::MandatoryWriteBack	native lowering	HIR to NIR, one call per nested expression
@@ -148,17 +154,22 @@
 ::hir::resolve::ResolveTypeExpr	resolution	a written type's arguments resolved
 ::hir::resolve::ShowTypeExpr	resolution	a written type shown in a diagnostic
 ::native::lower::Struct	native lowering	HIR to NIR, one call per nested expression
+::native::lower::VirtualValue	native lowering	a scalar-replaced struct's fields read back as a value, one level per nested construction
 ::native::rawabi::Call	native lowering	raw ABI walk
 ::hir::affine::Descriptor	ownership	an affine type's drop descriptor, one level per owned component (a chain of declarations is as deep as it is long)
 ::hir::affine::DescriptorOf	ownership	an affine type's drop descriptor, one level per owned component (a chain of declarations is as deep as it is long)
 ::hir::affine::Seq	ownership	the affine flow, one call per nested sequence (a loop's body)
 ::hir::completions::EvalListloop	completions	completion analysis (also nests per static call: the call chain)
+::hir::completions::EvalCountloop	completions	completion analysis (also nests per static call: the call chain)
 ::hir::completions::ExitsLoop	completions	whether a nested loop body exits its loop
 ::hir::static::Sequence	static sites	decided static blocks replaced in nested syntax (a sequence)
 ::surface::parser::Loop	parse	a loop's header and suite
+::surface::parser::Fold	parse	a fold's header and suite
 ::surface::lower::LoopSyntax	surface lowering	AST to HIR syntax, one call per nested loop
 ::core::compiler::CompileListLoop	Tcl compiler	code generation, one call per nested expression
+::core::compiler::CompileCountLoop	Tcl compiler	code generation, one call per nested expression
 ::native::lower::ListLoop	native lowering	HIR to NIR, one call per nested expression
+::native::lower::CountLoop	native lowering	HIR to NIR, one call per nested expression
 ::native::lower::IterationBody	native lowering	HIR to NIR, one call per nested expression
 ::native::lower::DeferredNeeds	native lowering	HIR to NIR, one call per nested expression
 ::native::lower::Condition	native lowering	a branch-form condition's Boolean structure (BRANCH-FORM-BOOLEAN-LOWERING.md)

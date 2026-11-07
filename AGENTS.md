@@ -229,10 +229,13 @@ Keep it so:
 If you change core/deep.tcl, a guarded procedure's frame use, the census or
 a walk over nesting, run `tests/depth-safe-nesting.test` (at Tcl's default
 limit), `audit/depth-safe-nesting/tools/probe.tcl` (every path of every
-specimen 1000 deep at the default limit: no TCL LIMIT STACK),
+specimen 1000 deep at the default limit: no TCL LIMIT STACK, and no
+refusal the program 3 deep does not get too),
 `audit/depth-safe-nesting/tools/census.tcl` (no recursive procedure
-missing from the census; once more with `-kinds loops,cond,mixed -depth 48
--fraction 4` for the specimens that cycle through forms),
+missing from the census; the specimens that cycle through forms once
+more each, with `-fraction` their number of forms: `-kinds loops -fraction
+3`, `-kinds mixed -fraction 4`, and `-kinds cond -depth 12 -fraction 3`,
+whose traced Boolean analyses take over an hour 24 deep),
 `audit/depth-safe-nesting/tools/fuzz.tcl`
 (several seeds) and `audit/depth-safe-nesting/tools/mutate.tcl` (every
 mutant in its `mutants.txt` must still apply and be killed by a detector

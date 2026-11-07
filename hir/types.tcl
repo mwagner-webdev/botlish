@@ -4633,6 +4633,7 @@ proc hir::types::FoldInitial {hirVar ctxVar node} {
 # is then poison too (FoldResult). Elsewhere T is `any`, the sound dynamic
 # type.
 proc hir::types::FoldBody {hirVar ctxVar e node initial} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $hirVar hir $ctxVar ctx
     variable foldAttempts
     set b [dict get $node foldBinding]

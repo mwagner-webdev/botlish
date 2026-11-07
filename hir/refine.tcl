@@ -362,6 +362,7 @@ proc hir::refine::IfImplication {hir ctx e node depth} {
 # is all that makes it unreachable, and that outcome keeps facts
 # (IfImplication).
 proc hir::refine::BodyImplication {hir ctx body depth {decided 0}} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     if {$body eq {}} {
         return [Nothing]
     }
