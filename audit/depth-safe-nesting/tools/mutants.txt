@@ -744,23 +744,6 @@ proc hir::callables::WalkExpr {hirVar e} {
 proc hir::callables::WalkExpr {hirVar e} {
 >>>>
 
-@@ specialize-recursion call-site specialization recursive
-!! dsn-1000-fnnest
-## hir/specialize.tcl
-<<<<
-proc hir::specialize::Analyze {id} {
-    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
-====
-proc hir::specialize::Analyze {id} {
->>>>
-## hir/specialize.tcl
-<<<<
-proc hir::specialize::Handle {op args} {
-    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
-====
-proc hir::specialize::Handle {op args} {
->>>>
-
 @@ warnings-recursion the warning passes' walks recursive
 !! dsn-warnings
 ## hir/warnings.tcl
@@ -1356,7 +1339,7 @@ proc service::SyntaxWalk {node itemsVar nodesVar} {
 >>>>
 
 @@ repeatable-recursion the repeatability analysis recursive
-!! dsn-1000-call dsn-1000-list
+!! dsn-repeatable
 ## hir/repeatable.tcl
 <<<<
 proc hir::repeatable::Expr {hir e env memoVar} {

@@ -19,6 +19,12 @@ def edit(name):
     assert len(hits)==1, (name, len(hits))
     f,m=hits[0]
     return (f[len(ROOT):], m.group(1)+'\n'+GUARD, m.group(1))
+# No phase mutant for call-site specialization (hir::specialize::Analyze,
+# Handle): its walk re-enters type inference at every level (Analyze ->
+# hir::types::inferRegion -> Sequence -> Expr -> Call -> Handle -> Analyze),
+# whose guards bound it, so removing its own guards changes nothing -- an
+# equivalent mutant (the report, section 19). Its guards stay: the census
+# lists every procedure active as deep as the program nests.
 groups=[
  ('parser-recursion', 'the parser\'s productions recurse through host calls again (every parser guard removed)', ['::surface::parser::'], 'dsn-1000-paren dsn-1000-list dsn-1000-ifnest dsn-census-guarded'),
  ('paren-recursion', 'parentheses recurse through host calls again: the expression chain unguarded, the List, field and argument productions still guarded', ['::surface::parser::Expression','::surface::parser::Conjunction','::surface::parser::Logical','::surface::parser::Inversion','::surface::parser::Comparison','::surface::parser::Additive','::surface::parser::Multiplicative','::surface::parser::Unary','::surface::parser::Postfix','::surface::parser::Primary','::surface::parser::ValueOrHandled','::surface::parser::Simple'], 'dsn-1000-paren'),
@@ -32,7 +38,6 @@ groups=[
  ('range-recursion', 'the range analysis recursive', ['::hir::range::','::hir::refine::'], 'dsn-1000-rbin dsn-1000-elif'),
  ('completions-recursion', 'the completion analysis recursive', ['::hir::completions::'], 'dsn-1000-call dsn-1000-handler'),
  ('callables-recursion', 'the callable audit recursive', ['::hir::callables::'], 'dsn-1000-call'),
- ('specialize-recursion', 'call-site specialization recursive', ['::hir::specialize::'], 'dsn-1000-fnnest'),
  ('warnings-recursion', 'the warning passes\' walks recursive', ['::hir::warnings::'], 'dsn-warnings'),
  ('affine-recursion', 'the affine flow recursive', ['::hir::affine::'], 'dsn-affine-chain'),
  ('stamp-recursion', 'a trait or coroutine program\'s syntax stamped recursively', ['::hir::traits::'], 'dsn-trait-program dsn-affine-chain'),
@@ -42,7 +47,7 @@ groups=[
  ('native-recursion', 'the Tcl compiler depth-safe, native lowering recursive', ['::native::','::hir::escape::','::hir::construction::'], 'dsn-1000-list dsn-1000-struct'),
  ('hirtext-recursion', 'HIR text printed and read recursively', ['::hir::format::','::hir::read::'], 'dsn-text dsn-cache'),
  ('service-recursion', 'the service\'s index of a file recursive', ['::service::'], 'dsn-service'),
- ('repeatable-recursion', 'the repeatability analysis recursive', ['::hir::repeatable::'], 'dsn-1000-call dsn-1000-list'),
+ ('repeatable-recursion', 'the repeatability analysis recursive', ['::hir::repeatable::'], 'dsn-repeatable'),
  ('modulebinding-recursion', 'a module binding\'s value walked recursively', ['::hir::modulebinding::'], 'dsn-module-binding'),
  ('injection-recursion', 'the injection proof\'s provenance walk recursive', ['::hir::injection::'], 'dsn-1000-inject'),
  ('layouts-recursion', 'layout representations resolved and described recursively', ['::hir::layouts::'], 'dsn-1000-layout'),

@@ -58,7 +58,7 @@ proc dsnRunning {script} {
 # {OUTCOME ...}, one per backend, each `value SHOWN` or `error CODE`.
 proc dsnOutcomes {source {backends {interp compile cranelift-generic cranelift}}} {
     set hir [surface::compile $source -warnings off]
-    hir::lower $hir
+    core::ir::check [list block {} {*}[hir::lower $hir]]
     core::compiler::compileHir $hir
     native::lowered $hir
     return [dsnRunning {
@@ -444,19 +444,20 @@ test dsn-module-binding {a module binding 1000 deep -- a List literal, a sum, a 
     set results
 } -cleanup {file delete -force $dir; unset -nocomplain dir results kind specimen first f hir outcomes} -result {1 1 1}
 
-test dsn-service {the compiler service analyzes an unsaved 1000-deep document (no diagnostic) and a malformed one (the parser's diagnostic), at the default limit} -body {
+test dsn-service {the compiler service analyzes an unsaved 1000-deep document (no diagnostic) and answers position queries inside its nesting (its index of the file's syntax), and a malformed one (the parser's diagnostic), at the default limit} -body {
     set ws [service::workspace -warnings off -cache ""]
     set path [file join [temporaryDirectory] dsn-service.bot]
     service::setDocument $ws $path [dict get [dsn::specimen list 1000] source]
     set good [service::analyze $ws $path]
+    set answered [lmap column {1 500 1001} {expr {![catch {service::at $good $path 1 $column}]}}]
     service::setDocument $ws $path [dict get [dsn::malformed list 1000] source]
     set bad [service::analyze $ws $path]
-    set result [list [dict get [service::revision $good] outcome] [llength [service::diagnostics $good]] \
+    set result [list [dict get [service::revision $good] outcome] [llength [service::diagnostics $good]] $answered \
         [dict get [service::revision $bad] outcome] \
         [lmap d [service::diagnostics $bad] {list [dict get $d code] [dict get $d line] [dict get $d column]}]]
     service::closeWorkspace $ws
     set result
-} -cleanup {unset -nocomplain ws path good bad result} -result {ok 0 syntax {{{SURFACE SYNTAX} 2 1}}}
+} -cleanup {unset -nocomplain ws path good bad result answered} -result {ok 0 {1 1 1} syntax {{{SURFACE SYNTAX} 2 1}}}
 
 test dsn-cache {a 1000-deep program read through the front-end cache twice (written, then read back by the interchange reader) is the HIR its build makes} -body {
     set dir [file join [temporaryDirectory] dsn-cache]
@@ -489,12 +490,28 @@ test dsn-isolation {deep valid, deep malformed, ordinary and deep programs compi
         $core::deep::current $core::deep::bound [info commands ::core::deep::seg*]
 } -cleanup {unset -nocomplain programs alone interleaved hir source} -result {1 1 {} 200 {}}
 
-test dsn-warnings {every warning pass runs over 1000-deep programs at the default limit (the completion walks they repeat included): the struct chain draws none, a 1000-term `or` chain none} -body {
-    lmap kind {struct or handler mixed} {
+test dsn-warnings {every warning pass runs over 1000-deep programs at the default limit (the completion walks they repeat included, and the exit walks over 1000 nested blocks): the struct chain draws none, a 1000-term `or` chain none, the nested ifs one -- their 42nd else returns 42, as the innermost branch does: SAME-RETURN-VALUE, from 42 levels on, segments or not} -body {
+    lmap kind {struct or handler mixed ifnest inject} {
         set hir [surface::compile [dict get [dsn::specimen $kind 1000] source] -warnings default -warning-channel ""]
-        llength [hir::warnings::of $hir]
+        lmap warning [hir::warnings::of $hir] {dict get $warning code}
     }
-} -cleanup {unset -nocomplain hir} -result {0 0 0 0}
+} -cleanup {unset -nocomplain hir} -result {{} {} {} {} SAME-RETURN-VALUE {}}
+
+test dsn-repeatable {a proof-producing predicate whose body nests 1000 deep, decided at its second call: the repeatability walk over its body (hir/repeatable.tcl) runs at the default limit, and the decided call is taken} -body {
+    set s x
+    for {set i 0} {$i < 1000} {incr i} {
+        set s "x + ($s)"
+    }
+    set source "refined type Big = int\n\nfn big?(x: int) -> bool proves x: Big:\n    $s > 0\n\ny = 5\nr = if big?(y):\n    if big?(y):\n        1\n    else:\n        2\nelse:\n    3\nr\n"
+    set ::dsnRepeatable 0
+    trace add execution hir::repeatable::Block enter {apply {args {incr ::dsnRepeatable}}}
+    try {
+        set hir [surface::compile $source -warnings off]
+    } finally {
+        trace remove execution hir::repeatable::Block enter {apply {args {incr ::dsnRepeatable}}}
+    }
+    list [expr {$::dsnRepeatable > 0}] [dsnRunning {lrange [outcomeUnderHir interp $hir] 0 1}]
+} -cleanup {unset -nocomplain s i source hir ::dsnRepeatable} -result {1 {value 1}}
 
 test dsn-text {HIR text and the AST's text of 1000-deep programs: printed, and HIR text read back into the same HIR text} -body {
     lmap kind {list rbin struct} {
