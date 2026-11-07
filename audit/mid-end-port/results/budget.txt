@@ -1,0 +1,4 @@
+15 types: accepted; 15 semantic instances, at most 15 of one function; declined: 
+16 types: accepted; 16 semantic instances, at most 16 of one function; declined: 
+17 types: rejected TYPE: budget-17.bot:114:17: argument for parameter "f" cannot be proven to satisfy Fact (argument type: any)
+18 types: rejected TYPE: budget-18.bot:118:17: argument for parameter "f" cannot be proven to satisfy Fact (argument type: any)
