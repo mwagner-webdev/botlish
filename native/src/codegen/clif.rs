@@ -3055,6 +3055,10 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                         // decode's declared refusals and an owner call's
                         // failure.
                         TransferEncode => ("rt_transfer_encode", None, true, None),
+                        // Threads and the transport (runtime/thread.rs): one
+                        // helper, the operation's code its first operand;
+                        // each may allocate its result (a safepoint).
+                        ThreadOp => ("rt_thread_op", None, true, None),
                         TransferDecode => ("rt_transfer_decode", None, true, None),
                         // Never fallible (see ops.rs's rt_str_decode_char_at):
                         // a one-character String can never exceed

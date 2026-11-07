@@ -31,6 +31,45 @@ pub use macos::{current_stack, thread_token};
 #[cfg(all(windows, target_arch = "x86_64", target_env = "msvc"))]
 pub use windows::{current_stack, guarded_threads, published_stack, set_active_stack, set_result_file, thread_token, OverflowGuard};
 
+/// A guard record reserved for a Botlish thread that does not run yet
+/// (runtime/thread.rs, BOTLISH-OWNED-THREADS-AND-CROSS-THREAD-ACTORS-
+/// MILESTONE-1.md): its index, or None when every record is in use or
+/// reserved -- the start is refused, never run unguarded.
+#[cfg(any(unix, all(windows, target_arch = "x86_64", target_env = "msvc")))]
+pub fn reserve_guard() -> Option<usize> {
+    records::reserve()
+}
+
+#[cfg(any(unix, all(windows, target_arch = "x86_64", target_env = "msvc")))]
+pub fn unreserve_guard(index: usize) {
+    records::unreserve(index)
+}
+
+/// How many guard records are free (std::thread::capacity).
+#[cfg(any(unix, all(windows, target_arch = "x86_64", target_env = "msvc")))]
+pub fn free_guards() -> usize {
+    records::free_count()
+}
+
+/// The calling thread's guard mode, which a thread it starts installs too:
+/// (an executable's, its report's destination); a thread with no guard's
+/// is an executable's on standard error.
+#[cfg(any(unix, all(windows, target_arch = "x86_64", target_env = "msvc")))]
+pub fn guard_mode() -> (bool, usize) {
+    records::mine().map(|r| (r.executable(), r.destination())).unwrap_or((true, 2))
+}
+
+/// Installs the calling thread's guard in reservation RESERVATION.
+#[cfg(any(unix, all(windows, target_arch = "x86_64", target_env = "msvc")))]
+pub fn install_reserved_guard(reservation: usize, executable: bool, destination: usize, label: &[u8]) -> std::io::Result<OverflowGuard> {
+    let stack = super::native_stack::NativeStack::current()?;
+    // The driver's result file takes its result lines unlabelled; an
+    // executable's report on standard error names the thread.
+    let label = if executable { label } else { b"" };
+    let label = &label[..label.len().min(records::LABEL_BYTES)];
+    OverflowGuard::install_reserved(&stack, reservation, executable, destination, label)
+}
+
 /// What every host's guard writes for an exhausted stack: the driver's
 /// result line for RtError::StackOverflow (runtime/error.rs), so that the
 /// host reads it the ordinary way; a standalone executable writes the same

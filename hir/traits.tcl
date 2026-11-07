@@ -3072,6 +3072,13 @@ proc hir::traits::ImprintPolyBlocks {hir candidates} {
                 dict set direct $block 1
                 continue
             }
+            if {[SendsVariable $hir $e $n $vars]} {
+                # A transfer of a type generic in the block's own variables:
+                # its schema is the binding's (SelectingBinding's Sendable
+                # case).
+                dict set direct $block 1
+                continue
+            }
             lassign [dict getdef $n target ""] tk tb
             if {$tk ne "block"} {
                 continue
@@ -3107,6 +3114,32 @@ proc hir::traits::ImprintPolyBlocks {hir candidates} {
         }
     }
     return $result
+}
+
+# 1 if call E (node N) is a transfer -- a native registered `-sending`
+# (std::transfer's encode and decode: core/transfer.tcl) -- whose
+# transferred type mentions one of the imprint variables VARS: the call
+# needs its function specialized per binding, so that the schema
+# hir::transfer::Elaborate writes is a closed type's.
+proc hir::traits::SendsVariable {hir e n vars} {
+    set name [hir::decimal::CalledNative $hir $e]
+    if {$name eq ""} {
+        return 0
+    }
+    set sending [dict getdef [core::native::metadata $name] sending ""]
+    if {$sending eq ""} {
+        return 0
+    }
+    if {$sending eq "result"} {
+        set type [hir::typeOf $hir $e]
+    } else {
+        set arg [lindex [dict get $n args] $sending]
+        if {$arg eq ""} {
+            return 0
+        }
+        set type [hir::typeOf $hir $arg]
+    }
+    return [MentionsAny $type $vars]
 }
 
 # 1 if TYPE mentions one of the imprint variables VARS.
@@ -3182,7 +3215,14 @@ proc hir::traits::SelectingBinding {hir block binding} {
     set selecting [dict create]
     dict for {name traits} [hir::imprint::ConstraintsOf $sig] {
         foreach trait $traits {
-            if {![isIntrinsic $trait]} {
+            # A source trait's variable selects its operations' witnesses;
+            # Sendable's selects its transfers' schemas: a body generic in
+            # it is specialized per binding, so each clone transfers a
+            # closed type (hir::transfer::Elaborate; BOTLISH-OWNED-THREADS-
+            # AND-CROSS-THREAD-ACTORS-MILESTONE-1.md). Hashable and
+            # Equatable select nothing: their operations are total
+            # lowerings of the value's own kind.
+            if {![isIntrinsic $trait] || "send" in [intrinsicGuarantees $trait]} {
                 dict set selecting $name 1
             }
         }

@@ -939,6 +939,9 @@ proc surface::lower::Node {node} {
             if {[dict getdef $node callback ""] ne ""} {
                 set block [hir::syntax::withCallback $block [dict get $node callback]]
             }
+            if {[dict getdef $node thread 0]} {
+                set block [hir::syntax::withThread $block]
+            }
             if {$variadic ne ""} {
                 set block [hir::syntax::withVariadic $block \
                     [Origin [dict get $variadic span] "[dict get $node id]/variadic"]]

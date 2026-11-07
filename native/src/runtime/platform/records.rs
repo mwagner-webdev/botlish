@@ -45,6 +45,12 @@ const FREE: usize = 0;
 /// claims a fault through it. No thread's token (Linux tids and Windows
 /// thread ids are small, pthread_self an aligned address).
 const CLAIMING: usize = usize::MAX;
+/// A record's owner while it is reserved for a thread that does not run
+/// yet (`reserve`: a Botlish thread's start, BOTLISH-OWNED-THREADS-AND-
+/// CROSS-THREAD-ACTORS-MILESTONE-1.md): neither free nor any thread's, so
+/// no other claim takes it and no handler claims a fault through it. No
+/// thread's token either (an odd word).
+const RESERVED: usize = usize::MAX - 2;
 
 pub struct Record {
     owner: AtomicUsize,
@@ -142,19 +148,41 @@ impl Record {
 /// stack's pair WORDS published first, the report's mode, destination and
 /// label. Its index; refused when the thread holds one already, when
 /// LABEL is too long, or when every record is in use.
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn claim(token: usize, words: (usize, usize), executable: bool, destination: usize, label: &[u8]) -> io::Result<usize> {
+    claim_as(None, token, words, executable, destination, label)
+}
+
+/// Claims record RESERVATION, which `reserve` reserved for the calling
+/// thread, as `claim` claims a free one (else as `claim`, with None).
+pub fn claim_as(
+    reservation: Option<usize>,
+    token: usize,
+    words: (usize, usize),
+    executable: bool,
+    destination: usize,
+    label: &[u8],
+) -> io::Result<usize> {
     if label.len() > LABEL_BYTES {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, format!("a guard label holds at most {LABEL_BYTES} bytes")));
     }
     if mine().is_some() {
         return Err(io::Error::new(io::ErrorKind::AlreadyExists, "this thread's stack-overflow guard is already installed"));
     }
-    // A record a dead thread of this token left (released by no
-    // destructor), else a free one.
-    let found = TABLE
-        .iter()
-        .position(|r| r.owner.compare_exchange(token, CLAIMING, Ordering::AcqRel, Ordering::Relaxed).is_ok())
-        .or_else(|| TABLE.iter().position(|r| r.owner.compare_exchange(FREE, CLAIMING, Ordering::AcqRel, Ordering::Relaxed).is_ok()));
+    let found = match reservation {
+        Some(index) => {
+            if index >= RECORDS || TABLE[index].owner.compare_exchange(RESERVED, CLAIMING, Ordering::AcqRel, Ordering::Relaxed).is_err() {
+                return Err(io::Error::new(io::ErrorKind::InvalidInput, "the guard record is not reserved"));
+            }
+            Some(index)
+        }
+        // A record a dead thread of this token left (released by no
+        // destructor), else a free one.
+        None => TABLE
+            .iter()
+            .position(|r| r.owner.compare_exchange(token, CLAIMING, Ordering::AcqRel, Ordering::Relaxed).is_ok())
+            .or_else(|| TABLE.iter().position(|r| r.owner.compare_exchange(FREE, CLAIMING, Ordering::AcqRel, Ordering::Relaxed).is_ok())),
+    };
     let Some(index) = found else {
         return Err(io::Error::new(io::ErrorKind::Other, format!("every one of the {RECORDS} stack-overflow guard records is in use")));
     };
@@ -174,6 +202,26 @@ pub fn claim(token: usize, words: (usize, usize), executable: bool, destination:
     // Registers the destructor that releases the record at the thread's end.
     RELEASER.with(|_| ());
     Ok(index)
+}
+
+/// Reserves a free record for a thread that does not run yet (a Botlish
+/// thread's start: runtime/thread.rs): its index, which that thread claims
+/// with `claim_as`, or None when every record is in use or reserved -- the
+/// start is refused before the thread exists, never run unguarded.
+pub fn reserve() -> Option<usize> {
+    TABLE.iter().position(|r| r.owner.compare_exchange(FREE, RESERVED, Ordering::AcqRel, Ordering::Relaxed).is_ok())
+}
+
+/// Gives back reservation INDEX unclaimed (a start that failed).
+pub fn unreserve(index: usize) {
+    if index < RECORDS {
+        let _ = TABLE[index].owner.compare_exchange(RESERVED, FREE, Ordering::AcqRel, Ordering::Relaxed);
+    }
+}
+
+/// How many records are free: neither in use nor reserved.
+pub fn free_count() -> usize {
+    TABLE.iter().filter(|r| r.owner.load(Ordering::Acquire) == FREE).count()
 }
 
 /// Releases record INDEX, the calling thread's: from now on no fault is
@@ -221,7 +269,7 @@ pub fn mine() -> Option<&'static Record> {
 /// loads only (async-signal-safe; the handlers' lookup).
 #[inline(always)]
 pub fn find(token: usize) -> Option<&'static Record> {
-    if token == FREE || token == CLAIMING {
+    if token == FREE || token == CLAIMING || token == RESERVED {
         return None;
     }
     TABLE.iter().find(|r| r.owner.load(Ordering::Acquire) == token)
@@ -234,12 +282,12 @@ pub fn find(token: usize) -> Option<&'static Record> {
 /// mutants' "any thread" rule is stated with it on every host).
 #[cfg_attr(not(unix), allow(dead_code))]
 pub fn any() -> Option<&'static Record> {
-    TABLE.iter().find(|r| !matches!(r.owner.load(Ordering::Acquire), FREE | CLAIMING))
+    TABLE.iter().find(|r| !matches!(r.owner.load(Ordering::Acquire), FREE | CLAIMING | RESERVED))
 }
 
 /// How many threads are guarded now (tests, the concurrent-VM harness).
 pub fn in_use() -> usize {
-    TABLE.iter().filter(|r| !matches!(r.owner.load(Ordering::Acquire), FREE | CLAIMING)).count()
+    TABLE.iter().filter(|r| !matches!(r.owner.load(Ordering::Acquire), FREE | CLAIMING | RESERVED)).count()
 }
 
 #[cfg(test)]
@@ -299,6 +347,30 @@ mod tests {
         assert!(find(token(1)).is_none());
         assert!(mine().is_none());
         assert!(find(FREE).is_none() && find(CLAIMING).is_none());
+    }
+
+    /// A reserved record is nobody's: no claim or lookup takes it, only the
+    /// reserving start claims it (`claim_as`), and an unclaimed reservation
+    /// goes back free.
+    #[test]
+    fn reservations_are_claimed_only_by_their_thread() {
+        let before = free_count();
+        let r = reserve().expect("a free record");
+        assert_eq!(free_count(), before - 1);
+        assert!(find(RESERVED).is_none());
+        let index = std::thread::spawn(move || {
+            let index = claim_as(Some(r), 0x6262_0000, (1, 2), false, 1, b"thread t ").expect("claims its reservation");
+            assert!(claim_as(Some(r), 0x6262_0008, (1, 2), false, 1, b"").is_err(), "claimed once");
+            let words = find(0x6262_0000).map(|x| x.words());
+            release(index);
+            (index, words)
+        })
+        .join()
+        .unwrap();
+        assert_eq!(index, (r, Some((1, 2))));
+        let s = reserve().expect("a free record");
+        unreserve(s);
+        assert_eq!(free_count(), before);
     }
 
     /// A token a dead thread's record still carries is reclaimed, never

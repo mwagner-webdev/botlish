@@ -688,8 +688,11 @@ proc runFile {path showCode showHir showAst showAot showNative} {
         # interpreter. The Tcl compiler compiles the HIR once (below), for
         # running, -code and the printed types alike.
         set program ""
-        if {$backend eq "interp"} {
-            set program [hir::lower $hir]
+        if {$backend eq "interp" && [catch {hir::lower $hir} program options]} {
+            # (A program the interpreter refuses to compile: one that starts
+            # a Botlish thread, THREAD-UNAVAILABLE.)
+            printError stdout "   error: " $program $options
+            return 1
         }
         # A native run writes what the program prints to this process's own
         # standard output and error, before the value line below, as a

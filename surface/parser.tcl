@@ -481,8 +481,10 @@ namespace eval surface::parser {
     # `callback`, always followed by its foreign ABI (`callback c fn`,
     # C-CALLBACK-MILESTONE-1.md) -> `callback c`, `callbackSpan`; `cleanup`
     # -> `cleanup 1`, `cleanupSpan`, present only on a resource's cleanup
-    # (LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md).
-    variable functionModifiers {nomethod exported callback cleanup}
+    # (LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md); `thread` ->
+    # `thread 1`, `threadSpan`, present only on a thread entry
+    # (BOTLISH-OWNED-THREADS-AND-CROSS-THREAD-ACTORS-MILESTONE-1.md).
+    variable functionModifiers {nomethod exported callback cleanup thread}
     # The contextual words that may precede `type` in a type declaration
     # (REFINEMENT-VALUES.md): `refined type NAME = CARRIER`.
     variable typeModifiers {refined}
@@ -3495,6 +3497,15 @@ proc surface::parser::Function {pVar} {
         # ordinary declaration's node is unchanged.
         dict set node cleanup 1
         dict set node cleanupSpan [dict get $modifiers cleanup]
+    }
+    if {[dict exists $modifiers thread]} {
+        # A thread entry (BOTLISH-OWNED-THREADS-AND-CROSS-THREAD-ACTORS-
+        # MILESTONE-1.md, hir/threads.tcl): present only then.
+        if {$abi ne "" || $callbackAbi ne "" || [dict exists $modifiers cleanup]} {
+            Fail [dict create span [dict get $modifiers thread]] "a thread entry is no C export, C callback or cleanup: it runs only as the first computation of a Botlish thread (std::thread::start)"
+        }
+        dict set node thread 1
+        dict set node threadSpan [dict get $modifiers thread]
     }
     return $node
 }

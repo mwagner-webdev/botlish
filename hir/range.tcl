@@ -2046,7 +2046,7 @@ proc hir::range::VerifySending {hirVar e node name} {
             "$what is not sendable: [hir::types::show $type] cannot be reconstructed in another VM\n$why"] $at
         return
     }
-    if {![hir::types::IsClosedType $type] || ($sending eq "result" && [hir::types::IsTrait $type])} {
+    if {![hir::types::IsClosedType $type {} 1] || ($sending eq "result" && [hir::types::IsTrait $type])} {
         # (A view of Sendable is closed where it is a value -- its function
         # is cloned per witness before the elaboration -- but never as the
         # type a decode makes: that must be a concrete type.)
