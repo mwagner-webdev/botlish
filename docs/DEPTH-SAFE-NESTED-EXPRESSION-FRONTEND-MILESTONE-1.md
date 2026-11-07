@@ -800,11 +800,22 @@ substitutions; native code has no recursion for it at all.
 Locally (a 4-core container, Tcl 9.0.1), on the branch with main merged:
 
 * `tests/depth-safe-nesting.test` at Tcl's default limit: 51 tests, all
-  pass (about 21 minutes alone; recorded for the canary,
-  `tests/canary.tsv`).
-* `tclsh9.0 tests/local.tcl -jobs 3`: LOCALRESULT
+  pass (1,179 s alone; recorded for the canary, `tests/canary.tsv`).
+* `tclsh9.0 tests/local.tcl -jobs 3`: 662 items -- 272 Tcl test files on
+  interp and compile (golden duplicates skipped) and 118 golden suites on
+  all four backends -- in 118 minutes: 658 passed. The other four were two
+  tests that counted something segments change, each failing on both
+  passes, fixed and run again. `dsn-mechanism-walk` asked for more than
+  300 segments, which only 60-frame segments make (it asks for a segment
+  per segment's frames now: the file 51 of 51). branch-form-boolean.test's
+  `bf-lowering-work-linear` counted every entry of two guarded procedures,
+  and a call that goes on in a segment is entered twice; it counts the
+  entry that does not descend now (a trace sees the level the call will),
+  the same at segments of 25, 60 and 150 frames: 32 of 32 on both passes,
+  and its audit's `nir-static-outcome-unmemoized` is still killed by it.
 * The probe (section 18), the census of every kind (section 4), the fuzzer
-  (seeds 1 to 6, section 18), the mutants (section 19), the corpus's
+  (seeds 1 to 6, section 18, and seeds 7 and 8 on the final tree: 24
+  programs 25 to 1,382 deep, 0 failures), the mutants (section 19), the corpus's
   invariance against the old tree (section 21), `tools/compilerpedia.tcl
   check` (1222 topics, 753 examples, 0 problems) and
   `tools/mutant-catalogs.tcl` (89 catalogs, 3175 mutants, every one
