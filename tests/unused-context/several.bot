@@ -1,0 +1,8 @@
+# Several imported modules, each with a context requirement of its own,
+# none of them installed, none used.
+import terminal
+import clock
+import spool
+import relay
+
+terminal::width() + clock::seconds() + spool::pages() + relay::wide(0)

@@ -2622,12 +2622,31 @@ carries, so only the frames' release pads run. Keep it so:
   verdict (`hir::staticdeps::ScopedBy`, `PathJoins`), and whether the
   program unwinds is the waiting channel `C:unwind`. A new way for code to
   make a binding scoped, or for the program to unwind, goes into them.
+* A cleanup is compiled where code that may release its resource is
+  compiled, never because it is declared
+  (NATIVE-UNUSED-CONTEXT-IMPORT-CORRECTNESS-MILESTONE-1.md): natively it is
+  a value of each region whose release edges name it
+  (`hir::contexts::releasedCleanups`, the edges the context analysis charges
+  its requirement through; hir::specialize's `-releases`), and the cleanup
+  table holds unit for one the program compiles nothing for
+  (`LiveCleanups`, `CleanupTable`; the runtime refuses a unit entry). So a
+  program that imports a module for its other declarations requires and
+  loads none of its cleanups' contexts. Never root a cleanup
+  unconditionally, never state a second "may release" rule beside
+  `ReleaseEdges`, and never make an import compile by supplying, skipping or
+  tolerating a load of a context the program does not install (the
+  `UninstalledContext` NATIVE BUG stays the backstop).
 
 If you change any of that (hir/resources.tcl, the resource cases of
 hir/affine.tcl, hir/structs.tcl and hir/contexts.tcl, the cleanup and
 abandonment runtimes in core/affine.tcl, core/coroutines.tcl,
 native/src/runtime/{affine,coroutine,mutvec}.rs, native/lower.tcl's release
-lowering, or std::event_loop's Owner), run `tests/resources.test`,
+lowering, which cleanups native lowering compiles -- `releasedCleanups`,
+hir/specialize.tcl's `ReleaseValues`, native/lower.tcl's `LiveCleanups`,
+`LiveCleanup` and `CleanupTable` -- or std::event_loop's Owner), run
+`tests/resources.test`, `tests/unused-context.test`,
+`audit/unused-context-import/tools/mutate.tcl` (every mutant must still
+apply and be killed by a test its `!!` line names),
 `tests/event-loop.test` (its `el-owned-*`), `tests/event-loop-linux.test`
 (`el-linux-owned`), `tests/affine.test`, `tests/coroutines.test`,
 `audit/lexical-cleanup/tools/fuzz.tcl` (several seeds) and

@@ -23,10 +23,10 @@
 @@ root-not-specialized a callback's function is no root of specialization: its generic instance is not made an open, used instance (it is whatever Botlish callers specialized, or nothing)
 ## native/lower.tcl
 <<<<
-            [CleanupBlocks $hirProgram] \
-            [lmap callback [hir::callbacks::of $hirProgram] {dict get $callback block}]]]
+        -exports [concat [lmap export [dict get $options -exports] {dict get $export block}] \
+            [lmap callback [hir::callbacks::of $hirProgram] {dict get $callback block}]] \
 ====
-            [CleanupBlocks $hirProgram]]]
+        -exports [lmap export [dict get $options -exports] {dict get $export block}] \
 >>>>
 
 @@ root-dropped-by-fusion dead-code elimination after coroutine fusion keeps only what the program function and the exports reach: a callback's function, which only its entry point calls, is dropped

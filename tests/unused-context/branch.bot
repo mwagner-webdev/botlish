@@ -1,0 +1,11 @@
+# branch.bot -- a release in a branch that may run (tests/unused-context.test):
+# the requirement stands whatever this run's argument is.
+import terminal
+
+fn maybe(n: int) -> int:
+    if n > 100:
+        s = terminal::enter(n)
+        terminal::note(n)
+    n + 1
+
+maybe(1)

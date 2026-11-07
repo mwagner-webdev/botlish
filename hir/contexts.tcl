@@ -952,6 +952,34 @@ proc hir::contexts::ReleaseEdges {hir owner parent blocks} {
     return $result
 }
 
+# The cleanups each region of HIR may release: region (a block ExprId, or
+# `program` for the top level) -> the cleanup function blocks of its release
+# edges (ReleaseEdges), sorted; {} for a program without a cleanup. This is
+# the rule the native backend compiles a cleanup by
+# (NATIVE-UNUSED-CONTEXT-IMPORT-CORRECTNESS-MILESTONE-1.md;
+# hir::specialize's -releases): a cleanup is compiled where code that may
+# release its resource is compiled, never because it is declared. These are
+# the edges the requirement analysis charges a cleanup's contexts through
+# (Requirements), so a cleanup a compiled region reaches needs only contexts
+# the program was proven to install, and a cleanup no compiled region may
+# release -- one of a module imported for its other declarations -- is not
+# compiled: its context requirement is no requirement of the program.
+proc hir::contexts::releasedCleanups {hir} {
+    hir::activate $hir
+    if {[dict size [hir::resources::table $hir]] == 0} {
+        return {}
+    }
+    lassign [Walk $hir] owner parent rootOf calls blocks
+    set result [dict create]
+    dict for {o edges} [ReleaseEdges $hir $owner $parent $blocks] {
+        if {$o eq ""} {
+            set o program
+        }
+        dict set result $o [lsort -unique [lmap edge $edges {lindex $edge 1}]]
+    }
+    return $result
+}
+
 # 1 if expression E's whole value is its function's result whenever E
 # completes: E is a `return`'s value, or the last statement of the function's
 # body, through the last statements of `if` branches and handler bodies and

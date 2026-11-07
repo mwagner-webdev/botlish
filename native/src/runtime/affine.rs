@@ -65,6 +65,9 @@ pub extern "C" fn rt_affine_drop_run(p: *mut Vm, value: Value, descriptor: Value
 
 /// `cleanuptable %f...`: the run's cleanup functions, entry K the K-th
 /// operand (hir/resources.tcl's cleanup table), held for the rest of the run.
+/// An entry is unit when the program compiles no code that may release that
+/// resource (native/lower.tcl's LiveCleanups; NATIVE-UNUSED-CONTEXT-IMPORT-
+/// CORRECTNESS-MILESTONE-1.md): `cleanup` refuses it, never calls it.
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_cleanup_table(p: *mut Vm, n: u64, functions: *const Value) -> Value {
     let functions = unsafe { std::slice::from_raw_parts(functions, n as usize) };
@@ -98,9 +101,11 @@ pub fn drop_at(p: *mut Vm, value: Value, d: &[u8], pos: &mut usize) -> bool {
 }
 
 /// Calls cleanup K of the run's cleanup table with resource VALUE; false
-/// when it failed (a run-time fault: a cleanup declares no error).
+/// when it failed (a run-time fault: a cleanup declares no error). An entry
+/// the program did not compile (unit: no compiled code releases that
+/// resource) is a compiler bug, like a missing one.
 fn cleanup(p: *mut Vm, k: usize, value: Value) -> bool {
-    let Some(&f) = vm(p).cleanups.get(k) else {
+    let Some(&f) = vm(p).cleanups.get(k).filter(|&&f| f != UNIT) else {
         vm(p).fail(super::error::RtError::Bug(format!("no cleanup function {k} in this run's cleanup table")));
         return false;
     };
