@@ -19,7 +19,7 @@ compilation fails, because of how deep the program nests.
 7. Parentheses, unary and binary nesting, flat chains
 8. Lists, struct constructions, calls and postfix chains
 9. Statement nesting: blocks, functions, handlers, elif chains
-10. Mixed nesting
+10. Mixed nesting, and nesting that is no expression's
 11. HIR build, resolution, typing, the analyses
 12. Lowering and code generation
 13. Diagnostics and recovery
@@ -81,10 +81,42 @@ were 700 deep.
 Measured on the revision before this milestone (`c483709`) with
 `audit/depth-safe-nesting/tools/specimens.tcl`'s programs, the front end and
 every lowering at Tcl's default limit of 1000, bisected
-(`baseline.tcl`, the largest depth that compiled and the first that did not,
+(`audit/depth-safe-nesting/tools/baseline.tcl -root`: the largest depth
+that compiled and the first that did not,
 with the procedure repeated most in the error's stack):
 
-FIXME baseline table
+| specimen | compiles at | fails at | how it fails |
+|---|---:|---:|---|
+| `paren` | 81 | 82 | TCL LIMIT STACK in the parser (`surface::parser::Logical` ...) |
+| `rbin` | 81 | 82 | TCL LIMIT STACK in the parser (`surface::parser::Logical` ...) |
+| `lbin` | 81 | 82 | TCL LIMIT STACK in the parser (`surface::parser::Logical` ...) |
+| `flat` | 496 | 497 | TCL LIMIT STACK in the core IR lowering (`hir::lower::expr`) |
+| `neg` | 496 | 497 | TCL LIMIT STACK in the core IR lowering (`hir::lower::expr`) |
+| `not` | 599 | 600 | killed: more than 3 GB of memory (a ulimit; section 16) |
+| `list` | 74 | 75 | TCL LIMIT STACK in the parser (`surface::parser::Logical` ...) |
+| `struct` | 73 | 74 | TCL LIMIT STACK in the parser (`surface::parser::Logical` ...) |
+| `project` | 781 | 782 | killed: more than 3 GB of memory (a ulimit; section 16) |
+| `call` | 88 | 89 | TCL LIMIT STACK in the parser (`surface::parser::Logical` ...) |
+| `method` | 496 | 497 | TCL LIMIT STACK in the core IR lowering (`hir::lower::expr`) |
+| `or` | 502 | 503 | killed: more than 3 GB of memory (a ulimit; section 16) |
+| `and` | 447 | 448 | killed: more than 3 GB of memory (a ulimit; section 16) |
+| `elif` | 330 | 331 | TCL LIMIT STACK in the parser (`Statements`) |
+| `ifnest` | 242 | 243 | TCL LIMIT STACK in the parser (`Statement`) |
+| `fnnest` | 243 | 244 | TCL LIMIT STACK in the parser (`Statement`) |
+| `handler` | 160 | 161 | TCL LIMIT STACK in the parser (`ValueOrHandled`) |
+| `mixed` | 62 | 63 | TCL LIMIT STACK in the parser (`surface::parser::Logical` ...) |
+| `typed` | 74 | 75 | TCL LIMIT STACK in the parser (`surface::parser::Logical` ...) |
+| `pattern` | 73 | 74 | TCL LIMIT STACK in the parser (`surface::parser::Logical` ...) |
+| `loops` | 180 | 181 | TCL LIMIT STACK in the parser (`Statement`) |
+| `cond` | 76 | 77 | TCL LIMIT STACK in the parser (`surface::parser::Logical` ...) |
+| `inject` | 161 | 162 | TCL LIMIT STACK in the parser (`Statement`) |
+| `layout` | 493 | 494 | TCL LIMIT STACK in the parser (`TypeExpr`) |
+| `affine` | 72 | 73 | TCL LIMIT STACK in the parser (`surface::parser::Logical` ...) |
+
+No specimen compiled 1000 deep. The typed, pattern, cond and affine
+specimens stop at their List literal or construction, before their own
+form; the old tree's first failure is whichever walk of the program is
+shallowest per level.
 
 Under main.tcl, which raises the limit to 100000 for the programs it runs
 (`core::useProgramRecursionLimit`), the parser reaches further, but memory
@@ -304,7 +336,7 @@ nothing was rewritten.
 * `or` and `and` chains of 1000 terms (HASH-TABLE-COMPILER-PRESSURE.md's
   CO-8: 1024 terms failed): each lowers to nested `if`s.
 
-## 10. Mixed nesting
+## 10. Mixed nesting, and nesting that is no expression's
 
 `mixed` cycles a List literal, a call of an untyped identity, a
 construction projected again and parentheses, 1000 deep: guards on one
@@ -312,6 +344,28 @@ production's cycle do not cover another's, and the census found the
 cross-production cycles (Primary -> Arguments -> Expression ->
 ... -> Primary -> FieldInits -> ...). The fuzzer (section 18) draws a new
 mix per program.
+
+A program nests in more than its expressions, and each form below failed
+at the default limit before it had a specimen of its own (found while
+writing them, after the expression census was complete):
+
+| specimen | what nests 1000 deep | walks it reached that recursed unguarded |
+|---|---|---|
+| `typed` | a written parameter type `List[List[...int...]]`, given a List as deep | `surface::parser::TypeExpr`, `surface::modules::TypeRefs`, `hir::resolve::ResolveTypeExpr` (and the printers `surface::ast::showType`, `hir::resolve::ShowTypeExpr`) |
+| `pattern` | a destructuring pattern `{next: {next: ... {value: y}}}` of the struct chain | `surface::parser::Pattern`, `surface::ast::PatternIds`, `surface::lower::Projections` (and `surface::ast::PatternText`) |
+| `loops` | collecting, counted and fold loops in turn | `surface::parser::Loop`, `surface::lower::LoopSyntax`, `hir::static::Sequence`, `hir::affine::Seq`, `hir::completions::EvalListloop`, `ExitsLoop`, `core::compiler::CompileListLoop`, `native::lower::ListLoop`, `IterationBody`, `DeferredNeeds` |
+| `cond` | one `if` condition of `and`, `or` and `not not` in turn, at the top level and in a collecting loop's body (an inlined region consumer) | native lowering's branch form: `native::lower::Condition`, `ConditionIf`, `ConditionBody`, `EmitRegionConsumerCondition`, `EmitRegionConsumerBody` |
+| `inject` | `inject no context:` blocks | the parser's `Injection`; the injection proof's provenance walk, `hir::injection::Seq`, `Tau` |
+| `layout` | a layout field `array 1 of array 1 of ... U8`, parsed from one byte | the parser's `ArrayTypeExpr`; `hir::layouts`' representation walks (`ResolveRepr`, `ResolveArrayTerm`, `ReprDescriptor`, `ReprText`, `CopyType`, `WordsFormats`, ...); native lowering's `ReprRead`, `ArrayRead` -- and, guarded with them, every other walk of a representation (writes, views, checks, the Tcl compiler's layout leaves), which parsing does not reach |
+| `affine` | the struct chain built in one expression with a coroutine handle innermost: 1001 affine declarations | the drop descriptor, `hir::affine::Descriptor`, `DescriptorOf` |
+| (scenario `modbinding`) | a module binding's value | `hir::modulebinding::ContextExpr`, `ImmutableExpr` |
+
+A written type deeper than the type lattice's bounds is cut the way it
+always was (`hir::types`' aggregate and applied depths): the walks over
+*types* -- subtyping, joins, printing -- never see more than those bounds
+of a written type, and the declaration-graph walks (summaries, ownership)
+are fixpoints, not recursion; the one type walk that followed a chain of
+declarations, the drop descriptor, is guarded.
 
 ## 11. HIR build, resolution, typing, the analyses
 
@@ -425,9 +479,11 @@ deep the program's expressions nest around it -- and recorded a request as
 `info level` measures a segment, and the rule would have silently stopped
 applying; under the design law it should never have applied. The nesting
 budget is the instance stack's now (`maxDepth` nested analyses), only.
-Over the 118 golden suites and the benchmarks, the old tree's deepest
-`info level` at that check was FIXME (far below 350), so no corpus
-decision changes (`levelprobe.tcl`).
+Over the 118 golden suites, the 2048 engine and eight benchmark programs,
+compiled by the old tree with a probe on that check
+(`audit/depth-safe-nesting/tools/levelprobe.tcl -root`), the deepest `info level`
+there was 120 (branch-form-boolean.bot; 79 the next): far below both 350
+and 700, so no decision of the corpus changes.
 
 ## 18. Oracle, fuzzer, probe
 
@@ -519,7 +575,27 @@ FIXME
 
 ## 26. Next milestone
 
-FIXME
+Depth no longer decides whether a program compiles; two things still
+decide what a deep program costs or means, and either is a milestone of
+its own:
+
+* **Precision of applied types past `appliedDepth`** (section 25): `Box
+  {value: Box {value: ...}}` 7 deep is a TYPE error because the
+  argument's inferred type is cut to `any` one application before the
+  value's own type is. Now that nothing else stops a deep program, this is
+  the first rule a deep valid program meets. The milestone would make the
+  cut keep what the declared field type needs (or check the field against
+  the uncut value), with the same finite-lattice argument the bound exists
+  for.
+* **The superlinear phases** (section 25), measured by
+  `bench/nested-frontend.tcl`: a handler body range-analyzed standalone
+  once per enclosing handler, and the code a nested function's Tcl
+  compilation repeats. Each needs a decision about what an analysis may
+  reuse, not a mechanism.
+
+The reference interpreter's own recursion (section 22) is the program's,
+not the compiler's, and stays under the program recursion limit by
+design.
 
 ## 27. What to run when changing this
 

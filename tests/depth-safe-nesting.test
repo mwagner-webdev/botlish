@@ -511,6 +511,24 @@ test dsn-no-stringified-syntax {searching a program's syntax for an intrinsic tr
     list $results [dsnStringified $inner] [dsnStringified $middle] [dsnStringified [lindex $children 1]]
 } -cleanup {unset -nocomplain node inner middle bind results ast call children i} -result {{{} 0 3} 0 0 0}
 
+test dsn-module-not-stringified {loading a module never gives its nested syntax a string: a List literal 200 deep in a module's function, loaded after the module it imports, comes out of the loader with no string at a node 100 levels down (the modules' sections were once concatenated, which gave every node of every module after the first one)} -body {
+    withPrivateLibrary {
+        set f [open [file join $::core::libraryDir dsndeep.bot] w]
+        puts -nonewline $f "import std::list\n\nfn value():\n    std::list::length([string repeat \[ 200]1[string repeat \] 200])\n"
+        close $f
+        set loaded [surface::modules::LoadNamespaces {std::dsndeep}]
+    }
+    set section [lindex [dict get $loaded sections] end]
+    set node [dict get [lindex [dict get $section nodes] 0] value]
+    while {[dict get $node kind] ne "call"} {
+        set node [lindex [dict get $node body] end]
+    }
+    for {set i 0} {$i <= 100} {incr i} {
+        set node [lindex [dict get $node args] 0]
+    }
+    list [dict get $section namespace] [dict get $node kind] [dsnStringified $node]
+} -cleanup {unset -nocomplain f loaded section node i} -result {std::dsndeep call 0}
+
 test dsn-linear-constant-fold {native lowering asks each integer constant expression's value once: 1 + (1 + ...) 400 deep asks it about as many times as the expression has nodes, not once per level per node below} -body {
     set hir [surface::compile "x = [dsnSum 400]\nx\n" -warnings off]
     set ::dsnFolds 0

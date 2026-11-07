@@ -177,8 +177,12 @@ STACK, "too many nested evaluations") is an implementation property, never
 a language limit. The walks that follow source nesting -- the parser's
 productions, the AST and loader walks, surface lowering, resolution,
 inference, the range, completion and warning walks, HIR text, core IR and
-its check, the Tcl compiler and native lowering -- stay recursive
-procedures, and each starts with the guard
+its check, the Tcl compiler and native lowering, and the walks of what
+else nests as deep as the source writes it (destructuring patterns,
+written types, loops, Boolean conditions, inject blocks, layout
+representations, module bindings, an affine type's drop descriptor over a
+chain of declarations) -- stay recursive procedures, and each starts with
+the guard
 
     if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
 
@@ -227,7 +231,9 @@ a walk over nesting, run `tests/depth-safe-nesting.test` (at Tcl's default
 limit), `audit/depth-safe-nesting/tools/probe.tcl` (every path of every
 specimen 1000 deep at the default limit: no TCL LIMIT STACK),
 `audit/depth-safe-nesting/tools/census.tcl` (no recursive procedure
-missing from the census), `audit/depth-safe-nesting/tools/fuzz.tcl`
+missing from the census; once more with `-kinds loops,cond,mixed -depth 48
+-fraction 4` for the specimens that cycle through forms),
+`audit/depth-safe-nesting/tools/fuzz.tcl`
 (several seeds) and `audit/depth-safe-nesting/tools/mutate.tcl` (every
 mutant in its `mutants.txt` must still apply and be killed by a detector
 its `!!` line names: update a mutant's text when you change the code it

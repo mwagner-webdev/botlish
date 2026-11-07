@@ -32,6 +32,27 @@ proc dsn::ListShown {n} {
     return "[string repeat \[ $n]1[string repeat \] $n]"
 }
 
+# The `loops` specimen's loops N deep, from the header continuing `y = `:
+# each level's header, the next one level further in (after a fold, as the
+# value bound to its `inner`), and after the innermost [1] each fold's last
+# line, the innermost's first. Built in a loop: the generator nests nothing.
+proc dsn::LoopsLevels {n} {
+    set text ""
+    set closing {}
+    for {set i 0} {$i < $n} {incr i} {
+        set in [Indent [expr {$i + 1}]]
+        switch -- [expr {$i % 3}] {
+            0 { append text "loop x$i in \[1\]:\n$in" }
+            1 { append text "loop x$i from 1 through 1:\n$in" }
+            2 {
+                append text "fold x$i in \[1\] with intermediate a$i 0:\n${in}inner$i = "
+                set closing [linsert $closing 0 "${in}a$i + std::list::length(inner$i)\n"]
+            }
+        }
+    }
+    return "$text\[1\]\n[join $closing ""]"
+}
+
 proc dsn::specimen {kind n} {
     switch -- $kind {
         paren {
@@ -212,21 +233,25 @@ proc dsn::specimen {kind n} {
         }
         loops {
             # N nested loops, cycling a collecting loop over [1], a counted
-            # collecting loop from 1 through 1 and a fold over [1] from []
-            # (each one iteration), around [1]: each collecting loop wraps
-            # its body's value in a List, a fold is its body's value.
-            set text "y = "
-            set depth 1
-            for {set i 0} {$i < $n} {incr i} {
-                switch -- [expr {$i % 3}] {
-                    0 { append text "[Indent $i]loop x$i in \[1\]:\n"; incr depth }
-                    1 { append text "[Indent $i]loop x$i from 1 through 1:\n"; incr depth }
-                    2 { append text "[Indent $i]fold x$i in \[1\] with intermediate a$i \[\]:\n" }
+            # collecting loop from 1 through 1 and a fold over [1] from 0
+            # whose body binds the next loop and adds its length -- each one
+            # iteration, around [1]. A collecting loop wraps its body's value
+            # in a List; a fold is 0 + the length of the List its body bound,
+            # 1. (A fold whose intermediate's type widens is walked again
+            # per fixpoint attempt: nested, that is exponential, the report's
+            # section 25; this one's intermediate stays an Int.)
+            set text "import std::list\n\ny = [LoopsLevels $n]y\n"
+            set value {list 1}
+            for {set i [expr {$n - 1}]} {$i >= 0} {incr i -1} {
+                if {$i % 3 == 2} {
+                    set value {int 1}
+                } elseif {[lindex $value 0] eq "list"} {
+                    set value [list list [expr {[lindex $value 1] + 1}]]
+                } else {
+                    set value {list 1}
                 }
             }
-            set text "y = [string trimleft [string range $text 4 end]]"
-            append text "[Indent $n]\[1\]\ny\n"
-            return [dict create source $text value [ListShown $depth]]
+            return [dict create source $text value [expr {[lindex $value 0] eq "list" ? [ListShown [lindex $value 1]] : 1}]]
         }
         affine {
             # The struct chain built in one expression, its innermost field a

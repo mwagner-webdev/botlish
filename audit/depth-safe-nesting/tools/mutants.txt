@@ -1765,6 +1765,15 @@ proc core::deep::descend {cmd} {
         call               { return [concat [list [dict get $node callee]] [dict get $node args]] }
 >>>>
 
+@@ sections-concatenated the loader joins the modules' sections with concat again: every node of every module loaded after the first gets a string
+!! dsn-module-not-stringified
+## surface/modules.tcl
+<<<<
+    dict lappend state sections $section
+====
+    dict set state sections [concat [dict get $state sections] [list $section]]
+>>>>
+
 @@ constant-fold-repeated native lowering asks every integer constant expression's whole subtree again at each level
 !! dsn-linear-constant-fold
 ## native/lower.tcl
