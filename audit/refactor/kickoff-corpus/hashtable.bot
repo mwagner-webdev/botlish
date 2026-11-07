@@ -207,10 +207,11 @@ fn ht_rehash_probe(newControls, index, capacity) errors IndexNotFound:
 # KEY's hash on.
 fn ht_rehash_insert(dest, capacity, key, value) errors IndexNotFound:
     index = ht_rehash_probe(dest.controls, mod(hash(key), capacity), capacity)
-    std::mutable_array::set(dest.controls, index, ht_occupied_state())
-    std::mutable_array::set(dest.keys, index, key)
-    std::mutable_array::set(dest.values, index, value)
-    dest
+    updated = dest
+    std::mutable_array::set(updated.controls, index, ht_occupied_state())
+    std::mutable_array::set(updated.keys, index, key)
+    std::mutable_array::set(updated.values, index, value)
+    updated
 
 # DEST with every OCCUPIED slot of the old table (its arrays CONTROLS, KEYS
 # and VALUES) from I on rehashed into it at NEWCAPACITY. Only individual
@@ -265,21 +266,23 @@ fn ht_grow_or_clean(table) errors IndexNotFound:
 # from two branches (with and without a resize in between).
 fn ht_place(table, index, key, value) errors IndexNotFound:
     prior = std::mutable_array::at(table.controls, index)
-    std::mutable_array::set(table.controls, index, ht_occupied_state())
-    std::mutable_array::set(table.keys, index, key)
-    std::mutable_array::set(table.values, index, value)
-    std::mutable_array::set(table.counts, 0, ht_size(table) + 1)
+    updated = table
+    std::mutable_array::set(updated.controls, index, ht_occupied_state())
+    std::mutable_array::set(updated.keys, index, key)
+    std::mutable_array::set(updated.values, index, value)
+    std::mutable_array::set(updated.counts, 0, ht_size(updated) + 1)
     if prior == ht_tombstone_state():
-        std::mutable_array::set(table.counts, 1, ht_tombstones(table) - 1)
+        std::mutable_array::set(updated.counts, 1, ht_tombstones(updated) - 1)
 
-    table
+    updated
 
 # TABLE with KEY mapped to VALUE (replacing an existing mapping of KEY).
 fn ht_set(table, key, value) errors IndexNotFound:
     index = ht_find_insert(table, key, ht_probe_start(table, key), -1)
     if std::mutable_array::at(table.controls, index) == ht_occupied_state():
-        std::mutable_array::set(table.values, index, value)
-        return table
+        updated = table
+        std::mutable_array::set(updated.values, index, value)
+        return updated
 
     if ht_should_grow(table):
         grown = ht_grow_or_clean(table)
@@ -300,12 +303,13 @@ fn ht_delete(table, key) errors IndexNotFound:
     if index < 0:
         return table
 
-    std::mutable_array::set(table.controls, index, ht_tombstone_state())
-    std::mutable_array::set(table.keys, index, unit)
-    std::mutable_array::set(table.values, index, unit)
-    std::mutable_array::set(table.counts, 0, ht_size(table) - 1)
-    std::mutable_array::set(table.counts, 1, ht_tombstones(table) + 1)
-    table
+    updated = table
+    std::mutable_array::set(updated.controls, index, ht_tombstone_state())
+    std::mutable_array::set(updated.keys, index, unit)
+    std::mutable_array::set(updated.values, index, unit)
+    std::mutable_array::set(updated.counts, 0, ht_size(updated) - 1)
+    std::mutable_array::set(updated.counts, 1, ht_tombstones(updated) + 1)
+    updated
 
 # ---------------------------------------------------------------------------
 # Iteration (req #46: only what correctness testing needs, not an iterator

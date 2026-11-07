@@ -326,7 +326,7 @@ test app-root-inside-library {an entry file inside the library directory: the fi
 # HIR interchange (the front-end cache's application root and dependencies:
 # tests/hir-cache.test's hc-application-*)
 
-test app-interchange-without-sources {the analyzed HIR of an application (.hirx) runs on every backend, and becomes NIR and an executable, after its source directory is gone} -constraints {nativeBuilt executableAot} -body {
+test app-interchange-without-sources {the analyzed HIR of an application (.hirx) runs on every backend, and becomes NIR and an executable, after its source directory is gone: the executable prints nothing (no value of its own) and its value, through the driver protocol, is the program's} -constraints {nativeBuilt executableAot} -body {
     set dir [app [list main.bot "import counter\n\n\[counter::count_down(250), counter::doubled(21)\]\n" counter.bot $counterModule]]
     exec [info nameofexecutable] $::mainScript -warnings off -emit-hir-interchange [file join $dir main.bot]
     set elsewhere [makeDirectory app-interchange-[pid]]
@@ -339,11 +339,11 @@ test app-interchange-without-sources {the analyzed HIR of an application (.hirx)
         }]
         set nir [regexp {func } [exec [info nameofexecutable] $::mainScript -emit-nir $hirx]]
         exec [info nameofexecutable] $::mainScript -emit-native-executable $hirx
-        list $values $nir [exec [file join $elsewhere main]]
+        list $values $nir [exec [file join $elsewhere main]] [standaloneValue [file join $elsewhere main]]
     } finally {
         removeDirectory app-interchange-[pid]
     }
-} -cleanup removeApps -result {{{   value: [250, 42]} {   value: [250, 42]} {   value: [250, 42]} {   value: [250, 42]}} 1 {[250, 42]}}
+} -cleanup removeApps -result {{{   value: [250, 42]} {   value: [250, 42]} {   value: [250, 42]} {   value: [250, 42]}} 1 {} {[250, 42]}}
 
 # ---------------------------------------------------------------------------
 # main.tcl

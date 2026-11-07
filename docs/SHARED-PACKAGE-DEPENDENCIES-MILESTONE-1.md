@@ -578,6 +578,12 @@ executable: main
 ["t=0: probes: opened 2 endpoints", "t=1: beats: beat 1", ..., "t=5: beats: the driver's clock never went back"]
 ```
 
+That transcript predates PROGRAM-OUTPUT-MILESTONE-1.md, when an executable
+still printed its program's value. A standalone executable now writes
+nothing of its own, so `inside.sh` reads the trace through the driver
+protocol (`BOTLISH_NATIVE_RESULT`) and checks the words of its `value`
+line; the clean room has not been run again since that change.
+
 All 12 checks passed: the three adds, one driver instance in the graph, no
 nested `.bot_modules`, `package graph` showing the driver shared, a clean
 `verify`, a native executable (`-warnings error -emit-native-executable`,

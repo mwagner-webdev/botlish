@@ -438,14 +438,14 @@ test std-bundled-native {the bundled compiler's native backends run a program of
 # ---------------------------------------------------------------------------
 # 11. An application executable needs no Botlish source
 
-test std-executable-needs-no-source {a natively compiled executable of local and standard modules runs with its source gone} -constraints {executableAot nativeBuilt} -body {
+test std-executable-needs-no-source {a natively compiled executable of local and standard modules runs with its source gone: it prints nothing (an executable prints no value), and its value, through the driver protocol, is the program's} -constraints {executableAot nativeBuilt} -body {
     set dir [app [list main.bot "import list\nimport std::list\nimport std::str\n\n\[list::shuffle(\[1\]), std::list::length(\[1, 2\]), std::str::length(\"abc\")\]\n" list.bot $localList]]
     exec [info nameofexecutable] $::mainScript -emit-native-executable [file join $dir main.bot] 2>@1
     set exe [native::executableFile [file join [makeDirectory stdns-exe-[pid]] main]]
     file rename [native::executableFile [file join $dir main]] $exe
     file delete -force $dir
-    exec $exe
-} -cleanup {removeApps; file delete -force [file join [temporaryDirectory] stdns-exe-[pid]]} -result {[[1], 2, 3]}
+    list [exec $exe] [standaloneValue $exe]
+} -cleanup {removeApps; file delete -force [file join [temporaryDirectory] stdns-exe-[pid]]} -result {{} {[[1], 2, 3]}}
 
 # ---------------------------------------------------------------------------
 # 12. Representative public APIs of every area, unchanged

@@ -65,6 +65,24 @@ proc runCaptured {executable stdin args} {
     return $result
 }
 
+# The outcome of a run of EXECUTABLE with STDIN and ENV as runCaptured runs
+# it, in the driver protocol (BOTLISH_NATIVE_RESULT names the file its result
+# lines go to): {value V}, V shown as Botlish shows it, or {error CODE
+# MESSAGE}. An executable prints no value of its own
+# (PROGRAM-OUTPUT-MILESTONE-1.md): this is how a test reads one.
+proc runOutcome {executable stdin args} {
+    set result [ProtocolResultFile]
+    try {
+        runCaptured $executable $stdin {*}$args BOTLISH_NATIVE_RESULT=$result
+        if {[catch {ProtocolValue $result} value options]} {
+            return [list error [dict get $options -errorcode] $value]
+        }
+        return [list value $value]
+    } finally {
+        file delete $result
+    }
+}
+
 # Programs covering what the image must carry: constants of every kind,
 # installed contexts (each Vm's own area, its base loaded from the Vm:
 # PER-THREAD-RUNTIME-STATE-MILESTONE-1.md), generic entries (GOT slots for
@@ -112,7 +130,7 @@ std::mutable_array::allocate(0 - 1)}
 args}
 }
 
-test stub-linker-parity {examples and feature programs linked with rustc and with the stub produce the same standard output, standard error and exit status, also under GC stress} -constraints rustcAvailable -body {
+test stub-linker-parity {examples and feature programs linked with rustc and with the stub produce the same standard output, standard error, exit status and value (read through the driver protocol), also under GC stress} -constraints rustcAvailable -body {
     set dir [makeDirectory stub-linker-parity]
     set inputs {}
     foreach name {io/hello linux/context-hello linux/read-stdin linux/getpid} {
@@ -139,19 +157,22 @@ test stub-linker-parity {examples and feature programs linked with rustc and wit
             set rustc [runCaptured [file join $dir $name.rustc] "some input\n" {*}$extra]
             set stub [runCaptured [file join $dir $name.stub] "some input\n" {*}$extra]
             if {$rustc ne $stub} { lappend differences [list $name $extra $rustc $stub] }
+            set rustc [runOutcome [file join $dir $name.rustc] "some input\n" {*}$extra]
+            set stub [runOutcome [file join $dir $name.stub] "some input\n" {*}$extra]
+            if {$rustc ne $stub} { lappend differences [list $name $extra value $rustc $stub] }
         }
     }
     # argv() of each, run with the same argument vector through one path.
     file copy [file join $dir argv.stub] [file join $dir same]
-    set fromStub [lindex [runCaptured [file join $dir same] "" ] 1]
+    set fromStub [runOutcome [file join $dir same] ""]
     file delete [file join $dir same]
     file copy [file join $dir argv.rustc] [file join $dir same]
-    set fromRustc [lindex [runCaptured [file join $dir same] "" ] 1]
+    set fromRustc [runOutcome [file join $dir same] ""]
     removeDirectory stub-linker-parity
     list $differences [expr {$fromStub eq $fromRustc}] [llength $inputs]
 } -result {{} 1 10}
 
-test stub-linker-outcomes {stub-linked executables print their value, report a runtime error with a failing status, and read their own arguments and standard input} -constraints stubLinker -body {
+test stub-linker-outcomes {stub-linked executables print nothing of their own (their value, read through the driver protocol, is the program's), report a runtime error with a failing status, and read their own arguments and standard input} -constraints stubLinker -body {
     set dir [makeDirectory stub-linker-outcomes]
     set results {}
     foreach {name text} [dict create {*}$::stubPrograms] {
@@ -159,16 +180,17 @@ test stub-linker-outcomes {stub-linked executables print their value, report a r
         set hir [surface::compile $text $name.bot]
         linkWith stub $hir [file join $dir $name]
         lassign [runCaptured [file join $dir $name] "" ] status stdout stderr
-        lappend results $name $status $stdout [string match {*(CORE SEMANTIC RANGE)*} $stderr]
+        lappend results $name $status $stdout [string match {*(CORE SEMANTIC RANGE)*} $stderr] \
+            [lrange [runOutcome [file join $dir $name] ""] 0 1]
     }
     set hir [surface::readProgramFile [file join $::projectRoot examples linux read-stdin.bot]]
     linkWith stub $hir [file join $dir read-stdin]
-    lappend results stdin [lrange [runCaptured [file join $dir read-stdin] "hello from stdin\n"] 0 1]
+    lappend results stdin [lrange [runCaptured [file join $dir read-stdin] "hello from stdin\n"] 0 1] \
+        [lrange [runOutcome [file join $dir read-stdin] "hello from stdin\n"] 0 1]
     set results [string map [list $dir DIR] $results]
     removeDirectory stub-linker-outcomes
     set results
-} -result {enums 0 {[Color::Green, Color::Red]} 0 error 1 {} 1 argv 0 {["DIR/argv"]} 0 stdin {0 {hello from stdin
-17}}}
+} -result {enums 0 {} 0 {value {[Color::Green, Color::Red]}} error 1 {} 1 {error {CORE SEMANTIC RANGE}} argv 0 {} 0 {value {["DIR/argv"]}} stdin {0 {hello from stdin}} {value 17}}
 
 test stub-linker-image {a stub-linked executable is the stub's own bytes, then the program image, its length and the magic; the bare stub refuses to run} -constraints stubLinker -body {
     set dir [makeDirectory stub-linker-image]
@@ -225,7 +247,7 @@ test stub-linker-failures {an unknown linker or a missing stub is a {NATIVE AOT}
     set results
 } -result {1 {NATIVE AOT} 1 1 {NATIVE AOT} 1 {} {}}
 
-test stub-linker-near-mapping {the program's code is mapped executable within rel32 reach of the stub's own code, so its runtime-helper calls are direct calls} -constraints {stubLinker} -body {
+test stub-linker-near-mapping {the program's code is mapped executable within rel32 reach of the stub's own code, so its runtime-helper calls are direct calls (and the program then completes: its output is its echo alone, an executable printing no value of its own)} -constraints {stubLinker} -body {
     set dir [makeDirectory stub-linker-near]
     set exe [file join $dir program]
     linkWith stub [surface::readProgramFile [file join $::projectRoot examples linux read-stdin.bot]] $exe
@@ -259,7 +281,6 @@ test stub-linker-near-mapping {the program's code is mapped executable within re
         removeDirectory stub-linker-near
     }
 } -result {2 2 1 {done
-5
 }}
 
 cleanupTests

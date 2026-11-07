@@ -468,11 +468,11 @@ test workload-icy-tower-executable-builds {build.sh stages the game with the gen
 
 test workload-icy-tower-executable-headless {the executable's --headless run prints seed 7's summary, the oracle's, and exits 0} -constraints icyTowerExecutable -body {
     icyRun {} --headless --frames 600 --seed 7
-} -result [list 0 "\"$seed7\"" {}]
+} -result [list 0 $seed7 {}]
 
 test workload-icy-tower-executable-dummy-driver {the real SDL loop on SDL's dummy video driver -- SDL_Init, a window, a renderer, events, the keyboard state, every frame drawn (rectangles, lines, debug text through C floats) and presented, then everything released -- plays the same 600 frames as the headless run, with the autopilot and fixed steps} -constraints icyTowerExecutable -body {
     icyRun {} --autopilot --fixed-step --frames 600 --seed 7
-} -result [list 0 "\"$seed7\"" {}]
+} -result [list 0 $seed7 {}]
 
 test workload-icy-tower-executable-gc-stress {the dummy-driver run under BOTLISH_NATIVE_GC_STRESS=1 (a collection at every allocation): 120 frames, the same state as without} -constraints icyTowerExecutable -body {
     set plain [icyRun {} --autopilot --fixed-step --frames 120 --seed 11]
@@ -504,7 +504,7 @@ test workload-icy-tower-executable-no-leaks {valgrind's memcheck over a whole du
     set text [core::ReadFile $log]
     file delete $log
     list $code [string trim $output] [regexp {definitely lost: 0 bytes} $text] [regexp {indirectly lost: 0 bytes} $text] [regexp {ERROR SUMMARY: 0 errors} $text]
-} -result [list 0 "\"frames=30 round=1 floor=0 score=0 best=1.9 time=0.5 over=no x=375 y=222 camera=0 platforms=10 rng=768150900\"" 1 1 1]
+} -result [list 0 "frames=30 round=1 floor=0 score=0 best=1.9 time=0.5 over=no x=375 y=222 camera=0 platforms=10 rng=768150900" 1 1 1]
 
 test workload-icy-tower-executable-usage {an unknown option is a usage error, status 2; --help prints the usage, status 0} -constraints icyTowerExecutable -body {
     lassign [icyRun {} --fly] code1 out1 err1
@@ -585,11 +585,11 @@ test workload-icy-tower-windows-builds {build-windows.sh generates the MSVC SDL3
 
 test workload-icy-tower-windows-headless {the Windows executable's --headless run prints seed 7's summary, the oracle's, and exits 0} -constraints icyTowerWindowsExecutable -body {
     icyRunWindows {} --headless --frames 600 --seed 7
-} -result [list 0 "\"$seed7\"" {}]
+} -result [list 0 $seed7 {}]
 
 test workload-icy-tower-windows-dummy-driver {the real SDL loop on Windows, on SDL's dummy video driver -- SDL_Init, a window, a renderer, events, the keyboard state, every frame drawn (rectangles, lines, debug text through C floats) and presented, then everything released -- plays the same 600 frames as the headless run} -constraints icyTowerWindowsExecutable -body {
     icyRunWindows {} --autopilot --fixed-step --frames 600 --seed 7
-} -result [list 0 "\"$seed7\"" {}]
+} -result [list 0 $seed7 {}]
 
 test workload-icy-tower-windows-gc-stress {the Windows dummy-driver run under BOTLISH_NATIVE_GC_STRESS=1: 120 frames, the same state as without} -constraints icyTowerWindowsExecutable -body {
     set plain [icyRunWindows {} --autopilot --fixed-step --frames 120 --seed 11]
@@ -657,11 +657,11 @@ test workload-icy-tower-macos-builds {build-macos.sh stages the game with the ma
 
 test workload-icy-tower-macos-headless {the macOS executable's --headless run prints seed 7's summary, the oracle's, and exits 0} -constraints icyTowerMacosExecutable -body {
     icyRunMacos {} --headless --frames 600 --seed 7
-} -result [list 0 "\"$seed7\"" {}]
+} -result [list 0 $seed7 {}]
 
 test workload-icy-tower-macos-dummy-driver {the real SDL loop on macOS, on SDL's dummy video driver, on the process's main thread -- SDL_Init, a window, a renderer, events, the keyboard state, every frame drawn and presented, everything released -- plays the same 600 frames as the headless run} -constraints icyTowerMacosExecutable -body {
     icyRunMacos {} --autopilot --fixed-step --frames 600 --seed 7
-} -result [list 0 "\"$seed7\"" {}]
+} -result [list 0 $seed7 {}]
 
 test workload-icy-tower-macos-gc-stress {the macOS dummy-driver run under BOTLISH_NATIVE_GC_STRESS=1 (a collection at every allocation, the main thread's stack walked): 120 frames, the same state as without} -constraints icyTowerMacosExecutable -body {
     set plain [icyRunMacos {} --autopilot --fixed-step --frames 120 --seed 11]

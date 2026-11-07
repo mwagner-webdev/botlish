@@ -105,9 +105,9 @@ test bounds-verdict-two-slices-not-conflated {std::mutable_array::copy checks a 
     set srcOk "src = std::mutable_array::allocate(4)"
     list \
         [verdictOf [format $decl src $dstOk {std::mutable_array::allocate(1)}] std::mutable_array::copy] \
-        [verdictOf [format $decl dst $srcOk {std::mutable_array::allocate(1)}] std::mutable_array::copy] \
+        [verdictOf [format $decl given "dst = given\n    $srcOk" {std::mutable_array::allocate(1)}] std::mutable_array::copy] \
         [verdictOf [format $decl k "$dstOk\n    $srcOk" 0] std::mutable_array::copy] \
-        [verdictOf [format $decl "dst, src" "" {std::mutable_array::allocate(1), std::mutable_array::allocate(1)}] std::mutable_array::copy]
+        [verdictOf [format $decl "given, src" "dst = given" {std::mutable_array::allocate(1), std::mutable_array::allocate(1)}] std::mutable_array::copy]
 } -result [list {{{} UpperOverrun} 0} {{UpperOverrun {}} 0} {{{} {}} 1} {{UpperOverrun UpperOverrun} 0}]
 
 test bounds-verdict-per-element-union {a literal-List loop walks its body once per element: a check is proven only if every walk proved it, in either order (a later element never overwrites an earlier unproven one)} -body {
@@ -167,7 +167,7 @@ proc strictKind {source} {
 test bounds-reduced-mod-index {an index reduced mod the container's own size designates an element (mod returns only for a nonzero divisor, and then 0 <= r < |d|): every indexed access, every way of writing it (inline, method syntax, through local bindings of the size and of the index), a parameter or a local container} -body {
     list \
         [verdictOf "fn f(a: MutableArray\[int\], h: int) -> int:\n    std::mutable_array::at(a, mod(h, std::mutable_array::capacity(a)))\nf(std::mutable_array::create(3, 0), -7)" std::mutable_array::at] \
-        [verdictOf "fn f(a: MutableArray\[int\], h: int):\n    c = std::mutable_array::capacity(a)\n    i = h.mod(c)\n    std::mutable_array::set(a, i, h)\nf(std::mutable_array::create(3, 0), -7)" std::mutable_array::set] \
+        [verdictOf "fn f(a: MutableArray\[int\], h: int):\n    w = a\n    c = std::mutable_array::capacity(w)\n    i = h.mod(c)\n    std::mutable_array::set(w, i, h)\nf(std::mutable_array::create(3, 0), -7)" std::mutable_array::set] \
         [verdictOf "fn f(xs: List\[int\], k) -> int:\n    std::list::at(xs, hash(k).mod(std::list::length(xs)))\nf(\[1, 2, 3\], \"k\")" std::list::at] \
         [verdictOf "fn f(s: str, h: int):\n    std::str::char_at(s, mod(h + 1, std::str::length(s)))\nf(\"abc\", 5)" std::str::char_at] \
         [verdictOf "fn f(h: int) -> int:\n    a = std::mutable_array::create(5, 0)\n    std::mutable_array::at(a, mod(h, std::mutable_array::capacity(a)))\nf(9)" std::mutable_array::at]
@@ -237,8 +237,8 @@ test bounds-field-path-index {a guard, a counted loop or a reduction on the size
         [verdictOf [format $decl "if i < 0 or i > std::str::length(b.name):\n        return \"\"\n    std::str::substring(b.name, i, std::str::length(b.name))"] std::str::substring]
 } -result [lrepeat 6 {{{}} 1}]
 
-test bounds-field-path-write {a write through a field place, t.s.set(i, v), is proven by a guard or a reduction on the same path's capacity, or on a local copy of the field (a copy has the field's capacity): the in-place write has no local-alias form} -body {
-    set decl "${fieldStructs}fn f(t: T, i: int, h: int) -> T:\n    %s\n    t\nf(T {s: std::mutable_array::create(2, 0), r: std::mutable_array::create(3, 0)}, 1, 5)"
+test bounds-field-path-write {a write through a field place, t.s.set(i, v) (t a parameter's local copy: a parameter not declared `place` is never mutated itself), is proven by a guard or a reduction on the same path's capacity, or on a local copy of the field (a copy has the field's capacity): the in-place write has no local-alias form} -body {
+    set decl "${fieldStructs}fn f(t0: T, i: int, h: int) -> T:\n    t = t0\n    %s\n    t\nf(T {s: std::mutable_array::create(2, 0), r: std::mutable_array::create(3, 0)}, 1, 5)"
     list \
         [verdictOf [format $decl "if i < 0 or i >= std::mutable_array::capacity(t.s):\n        return t\n    t.s.set(i, 7)"] std::mutable_array::set] \
         [verdictOf [format $decl "s = t.s\n    if i < 0 or i >= std::mutable_array::capacity(s):\n        return t\n    t.s.set(i, 7)"] std::mutable_array::set] \
@@ -493,12 +493,16 @@ set vectorSnapshots {
 # The program of one snapshot shape: f declares ERRORS ("" for none) and is
 # called at H (with HANDLER, if any, as the call's handler).
 proc vectorSnapshotProgram {body h errors {handler ""}} {
-    set signature "fn f(b: Box, h: int, w: MutableVector\[int\], context log: Log) -> any"
+    # The Box and the vector are local copies of the parameters (`b = b0`,
+    # `w = w0`): a parameter not declared `place` is never mutated itself
+    # (NONPLACE-PARAMETER-MUTATION), so "a parameter" and "a field path" are
+    # places rooted in a parameter's local copy.
+    set signature "fn f(b0: Box, h: int, w0: MutableVector\[int\], context log: Log) -> any"
     if {$errors ne ""} {
         append signature " errors $errors"
     }
     set v "std::mutable_vector::from_list(\[1, 2, 3\])"
-    return "${::vectorDecls}$signature:\n    $body\n\nwith context Log {items: std::mutable_vector::from_list(\[1, 2\])}\nf(Box {v: $v}, $h, $v)$handler\n"
+    return "${::vectorDecls}$signature:\n    b = b0\n    w = w0\n    $body\n\nwith context Log {items: std::mutable_vector::from_list(\[1, 2\])}\nf(Box {v: $v}, $h, $v)$handler\n"
 }
 
 test bounds-vector-snapshots-rejected {a List collected over a MutableVector has the length that loop's evaluation saw: an index proven against a later loop over the vector (a counted loop, mod, a mask, a guard) or an earlier one after a pop or clear, a mutation between them, proves nothing about it -- a local, a parameter, a field path, a context member a callee grows (also in a branch), two copies taken around a push, a push through a copy, a push in a loop body, a handler or a branch, a push in a loop body after a later loop over the vector in it, the earlier loop's own body pushing, a push in a branch before the later loop in it, a pop in the condition of the branch the later loop is in, a context member grown by a callee's callee, or by a coroutine body a callee resumes (directly, or through a function value given the handle) -- so the read is checked and a function without `errors` is rejected} -body {
@@ -527,10 +531,10 @@ test bounds-vector-snapshots-fail {each snapshot shape the prover leaves checked
     list $name {-424242 -424242 -424242 -424242} 1 0
 }]
 
-test bounds-vector-snapshots-lockstep {a lockstep clause over a MutableVector and a List an earlier loop collected over it, the vector grown in between, are not proven equal (a local or a field path): LOCKSTEP-UNPROVEN, the diagnostic naming each loop's evaluation of the vector by where it is written} -body {
+test bounds-vector-snapshots-lockstep {a lockstep clause over a MutableVector and a List an earlier loop collected over it, the vector grown in between, are not proven equal (a local or a field path of a parameter's local copy): LOCKSTEP-UNPROVEN, the diagnostic naming each loop's evaluation of the vector by where it is written} -body {
     set out {}
-    foreach {v setup} {v "v = std::mutable_vector::from_list(\[1, 2, 3\])\n    " b.v ""} {
-        set source "${vectorDecls}fn f(b: Box) -> List\[int\]:\n    ${setup}ys = loop x in $v:\n        x * 10\n    $v.push(4)\n    loop a in $v and y in ys:\n        a + y\n0"
+    foreach {v setup} {v "v = std::mutable_vector::from_list(\[1, 2, 3\])\n    " b.v "b = b0\n    "} {
+        set source "${vectorDecls}fn f(b0: Box) -> List\[int\]:\n    ${setup}ys = loop x in $v:\n        x * 10\n    $v.push(4)\n    loop a in $v and y in ys:\n        a + y\n0"
         set path [makeFile [withImports $source] proven-bounds-vector-lockstep.bot]
         try {
             catch {surface::readProgramFile $path -warnings off} message options
@@ -541,7 +545,7 @@ test bounds-vector-snapshots-lockstep {a lockstep clause over a MutableVector an
         lappend out [lindex [dict get $first errorcode] end] [regexp -inline {could not prove [^(]*\([^)]*\) == [^(]*\([^)]*\)} [dict get $first message]]
     }
     set out
-} -result {LOCKSTEP-UNPROVEN {{could not prove length(v at 13:15) == length(v at 10:20)}} LOCKSTEP-UNPROVEN {{could not prove length(b.v at 12:15) == length(b.v at 9:20)}}}
+} -result {LOCKSTEP-UNPROVEN {{could not prove length(v at 13:15) == length(v at 10:20)}} LOCKSTEP-UNPROVEN {{could not prove length(b.v at 13:15) == length(b.v at 10:20)}}}
 
 test bounds-vector-same-place-lockstep {a lockstep loop evaluates its domains once, in written order, before its first iteration: two clauses over the same vector place (a local, a field path), with no mutation before or between them in the loop's statement, walk the same vector and are proven equal (and agree on every backend); a copy of the vector (w = v, then v pushed) is another place and stays unproven} -body {
     set same "${vectorDecls}fn f(b: Box) -> List\[List\[int\]\]:\n    v = std::mutable_vector::from_list(\[1, 2, 3\])\n    v.push(4)\n    p = loop a in v and c in v:\n        a + c\n    q = loop a in b.v and c in b.v:\n        a * c\n    \[p, q\]\nf(Box {v: std::mutable_vector::from_list(\[5, 6\])})"
@@ -550,7 +554,7 @@ test bounds-vector-same-place-lockstep {a lockstep loop evaluates its domains on
 } -result {{} {[[2, 4, 6, 8], [25, 36]]} LOCKSTEP-UNPROVEN}
 
 test bounds-fixed-length-snapshots-proven {a List and a MutableArray keep their keyed lengths: two loops over one List or one MutableArray (a parameter, a field path), the array written in place between them, have one length, so a reduction or a counted loop by the later one proves a read of the earlier, and a lockstep over a field's array and a List collected over it is accepted; so does an iterable of no collection type (an untyped parameter), which a loop requires to be a List} -body {
-    set decl "struct T:\n    s: MutableArray\[int\]\nfn f(xs: List\[int\], a: MutableArray\[int\], t: T, h: int) -> any:\n    %s\nf(\[1, 2, 3\], std::mutable_array::create(3, 0), T {s: std::mutable_array::create(3, 0)}, 7)"
+    set decl "struct T:\n    s: MutableArray\[int\]\nfn f(xs: List\[int\], a0: MutableArray\[int\], t0: T, h: int) -> any:\n    a = a0\n    t = t0\n    %s\nf(\[1, 2, 3\], std::mutable_array::create(3, 0), T {s: std::mutable_array::create(3, 0)}, 7)"
     list \
         [verdictOf [format $decl "ys = loop x in xs:\n        x * 10\n    zs = loop x in xs:\n        x\n    ys.at(h.mod(std::list::length(zs)))"] std::list::at] \
         [verdictOf [format $decl "ys = loop x in a:\n        x * 10\n    a.set(h.mod(a.capacity()), 9)\n    zs = loop x in a:\n        x\n    ys.at(h.mod(std::list::length(zs)))"] std::list::at] \
@@ -781,8 +785,9 @@ set vectorQuiet {
         x
     ys.at(k.mod(std::list::length(zs)))} 3
     context-value-argument {fn grow(l: Log) -> int:
-        l.items.push(9)
-        l.items.length()
+        w = l
+        w.items.push(9)
+        w.items.length()
     ys = loop x in log.items:
         x * 10
     n = grow(log)
@@ -947,7 +952,7 @@ test bounds-guarded-local-index {a guard on a local bound to a computed index pr
     list \
         [verdictOf [format $decl "j = i + 1\n    if j < 0 or j >= std::mutable_array::capacity(a):\n        return 0\n    std::mutable_array::at(a, j)"] std::mutable_array::at] \
         [verdictOf [format $decl "t = g(i)\n    if t >= 0 and t < std::list::length(xs):\n        std::list::at(xs, t)\n    else:\n        0"] std::list::at] \
-        [verdictOf [format $decl "j = i + 1\n    if j < 0 or j >= std::mutable_array::capacity(a):\n        return 0\n    k = j\n    std::mutable_array::set(a, k, 1)"] std::mutable_array::set] \
+        [verdictOf [format $decl "w = a\n    j = i + 1\n    if j < 0 or j >= std::mutable_array::capacity(w):\n        return 0\n    k = j\n    std::mutable_array::set(w, k, 1)"] std::mutable_array::set] \
         [verdictOf [format $decl "j = h.mod(7)\n    if j >= std::mutable_array::capacity(a):\n        return 0\n    std::mutable_array::at(a, j)"] std::mutable_array::at] \
         [verdictOf [format $decl "j = i * 2\n    if j < 0 or j >= std::str::length(s):\n        return 0\n    std::str::char_at(s, j)"] std::str::char_at]
 } -result [lrepeat 5 {{{}} 1}]
@@ -973,20 +978,20 @@ test bounds-declared-signature-unchanged {proving a check never changes the nati
 
 test bounds-nir-index-ops {proven std::list::at / std::mutable_array::at / ::set lower to the check-free opcodes, unproven ones keep the checked opcode} -body {
     set text [boundsNir "xs = \[1, 2, 3\]\na = std::mutable_array::allocate(3)\nloop i from 0 to 3:\n    std::mutable_array::set(a, i, std::list::at(xs, i))\nloop j from 0 to 3:\n    std::mutable_array::at(a, j)"]
-    set unknown [boundsNir "fn f(xs, a, i) errors IndexNotFound:\n    std::mutable_array::set(a, i, std::list::at(xs, i))\n    std::mutable_array::at(a, i)\nf(\[1\], std::mutable_array::allocate(1), 0)"]
+    set unknown [boundsNir "fn f(xs, a, i) errors IndexNotFound:\n    w = a\n    std::mutable_array::set(w, i, std::list::at(xs, i))\n    std::mutable_array::at(w, i)\nf(\[1\], std::mutable_array::allocate(1), 0)"]
     list [pairCounts $text listget] [pairCounts $text mutarrayget] [pairCounts $text mutarrayset] \
         [pairCounts $unknown listget] [pairCounts $unknown mutarrayget] [pairCounts $unknown mutarrayset]
 } -result {{0 1} {0 1} {0 1} {1 0} {1 0} {1 0}}
 
 test bounds-nir-reduced-index {a read or write whose index is reduced mod, or masked by, the container's own size lowers to the check-free opcode; reduced by another size (another array's, the length plus one) or masked without a proven m >= 0 it keeps the checked one} -body {
-    set proven [boundsNir "fn f(a: MutableArray\[int\], xs: List\[int\], h: int) -> int:\n    i = h.mod(std::mutable_array::capacity(a))\n    std::mutable_array::set(a, i, h)\n    if std::mutable_array::capacity(a) == 0:\n        return 0\n    std::mutable_array::at(a, bit_and(h, std::mutable_array::capacity(a) - 1)) + std::list::at(xs, h.mod(std::list::length(xs)))\nf(std::mutable_array::create(3, 0), \[1, 2\], 7)"]
-    set unknown [boundsNir "fn f(a: MutableArray\[int\], b: MutableArray\[int\], xs: List\[int\], h: int) -> int errors IndexNotFound:\n    i = h.mod(std::mutable_array::capacity(b))\n    std::mutable_array::set(a, i, h)\n    std::mutable_array::at(a, bit_and(h, std::mutable_array::capacity(a) - 1)) + std::list::at(xs, h.mod(std::list::length(xs) + 1))\nf(std::mutable_array::create(3, 0), std::mutable_array::create(3, 0), \[1, 2\], 7)"]
+    set proven [boundsNir "fn f(a: MutableArray\[int\], xs: List\[int\], h: int) -> int:\n    w = a\n    i = h.mod(std::mutable_array::capacity(w))\n    std::mutable_array::set(w, i, h)\n    if std::mutable_array::capacity(w) == 0:\n        return 0\n    std::mutable_array::at(w, bit_and(h, std::mutable_array::capacity(w) - 1)) + std::list::at(xs, h.mod(std::list::length(xs)))\nf(std::mutable_array::create(3, 0), \[1, 2\], 7)"]
+    set unknown [boundsNir "fn f(a: MutableArray\[int\], b: MutableArray\[int\], xs: List\[int\], h: int) -> int errors IndexNotFound:\n    w = a\n    i = h.mod(std::mutable_array::capacity(b))\n    std::mutable_array::set(w, i, h)\n    std::mutable_array::at(w, bit_and(h, std::mutable_array::capacity(w) - 1)) + std::list::at(xs, h.mod(std::list::length(xs) + 1))\nf(std::mutable_array::create(3, 0), std::mutable_array::create(3, 0), \[1, 2\], 7)"]
     list [pairCounts $proven mutarrayset] [pairCounts $proven mutarrayget] [pairCounts $proven listget] \
         [pairCounts $unknown mutarrayset] [pairCounts $unknown mutarrayget] [pairCounts $unknown listget]
 } -result {{0 1} {0 1} {0 1} {1 0} {1 0} {1 0}}
 
 test bounds-nir-field-path-write {a write through a field place reduced by the field path's own capacity lowers to mutarraysetproven, in place (no logical copy of the field: no mvshare), and the read through the path to mutarraygetproven; reduced by another field's capacity both stay checked} -body {
-    set source "struct T:\n    s: MutableArray\[int\]\n    r: MutableArray\[int\]\nfn store(t: T, h: int) -> T%s:\n    t.s.set(h.mod(std::mutable_array::capacity(t.%s)), h)\n    t\nfn read(t: T, h: int) -> int%s:\n    std::mutable_array::at(t.s, h.mod(std::mutable_array::capacity(t.%s)))\nread(store(T {s: std::mutable_array::create(3, 0), r: std::mutable_array::create(4, 0)}, 5), 5)"
+    set source "struct T:\n    s: MutableArray\[int\]\n    r: MutableArray\[int\]\nfn store(t: T, h: int) -> T%s:\n    w = t\n    w.s.set(h.mod(std::mutable_array::capacity(w.%s)), h)\n    w\nfn read(t: T, h: int) -> int%s:\n    std::mutable_array::at(t.s, h.mod(std::mutable_array::capacity(t.%s)))\nread(store(T {s: std::mutable_array::create(3, 0), r: std::mutable_array::create(4, 0)}, 5), 5)"
     set proven [boundsNir [format $source "" s "" s]]
     set unknown [boundsNir [format $source " errors IndexNotFound" r " errors IndexNotFound" r]]
     list [pairCounts $proven mutarrayset] [pairCounts $proven mutarrayget] [opCount $proven mvshare] \
@@ -994,7 +999,7 @@ test bounds-nir-field-path-write {a write through a field place reduced by the f
 } -result {{0 1} {0 1} 0 {1 0} {1 0}}
 
 test bounds-nir-guarded-local {a read and a write at a computed local guarded against the container's size lower to the check-free opcodes; guarded on one side only they keep the checked ones} -body {
-    set source "fn f(a: MutableArray\[int\], i: int) -> int%s:\n    j = i + 1\n    if %sj >= std::mutable_array::capacity(a):\n        return 0\n    std::mutable_array::set(a, j, i)\n    std::mutable_array::at(a, j)\nf(std::mutable_array::create(3, 0), 1)"
+    set source "fn f(a: MutableArray\[int\], i: int) -> int%s:\n    w = a\n    j = i + 1\n    if %sj >= std::mutable_array::capacity(w):\n        return 0\n    std::mutable_array::set(w, j, i)\n    std::mutable_array::at(w, j)\nf(std::mutable_array::create(3, 0), 1)"
     set proven [boundsNir [format $source "" "j < 0 or "]]
     set unknown [boundsNir [format $source " errors IndexNotFound" ""]]
     list [pairCounts $proven mutarrayset] [pairCounts $proven mutarrayget] \
@@ -1003,7 +1008,7 @@ test bounds-nir-guarded-local {a read and a write at a computed local guarded ag
 
 test bounds-nir-slice-ops {proven substring / freeze / copy lower to the check-free opcodes, unproven ones keep the checked opcode} -body {
     set text [boundsNir "s = \"abcd\"\na = std::mutable_array::allocate(3)\nb = std::mutable_array::allocate(5)\nstd::mutable_array::copy(a, 0, b, 2, 3)\n\[std::str::substring(s, 1, 3), std::mutable_array::freeze(a, 3)\]"]
-    set unknown [boundsNir "fn f(s, a, b, n) errors LowerUnderrun, UpperOverrun:\n    std::mutable_array::copy(a, 0, b, 0, n)\n    \[std::str::substring(s, 0, n), std::mutable_array::freeze(a, n)\]\nf(\"abc\", std::mutable_array::allocate(3), std::mutable_array::allocate(3), 2)"]
+    set unknown [boundsNir "fn f(s, a, b, n) errors LowerUnderrun, UpperOverrun:\n    w = a\n    std::mutable_array::copy(w, 0, b, 0, n)\n    \[std::str::substring(s, 0, n), std::mutable_array::freeze(w, n)\]\nf(\"abc\", std::mutable_array::allocate(3), std::mutable_array::allocate(3), 2)"]
     list [pairCounts $text substr] [pairCounts $text mutarrayfreeze] [pairCounts $text mutarraycopy] \
         [pairCounts $unknown substr] [pairCounts $unknown mutarrayfreeze] [pairCounts $unknown mutarraycopy]
 } -result {{0 1} {0 1} {0 1} {1 0} {1 0} {1 0}}
@@ -1017,7 +1022,7 @@ test bounds-nir-copy-one-slice-proven-stays-checked {a copy with the destination
     set decl "fn f(%s) errors LowerUnderrun, UpperOverrun:\n    %s\n    std::mutable_array::copy(dst, 0, src, 0, 2)\nf(%s)"
     list \
         [pairCounts [boundsNir [format $decl src "dst = std::mutable_array::allocate(4)" {std::mutable_array::allocate(1)}]] mutarraycopy] \
-        [pairCounts [boundsNir [format $decl dst "src = std::mutable_array::allocate(4)" {std::mutable_array::allocate(1)}]] mutarraycopy] \
+        [pairCounts [boundsNir [format $decl given "dst = given\n    src = std::mutable_array::allocate(4)" {std::mutable_array::allocate(1)}]] mutarraycopy] \
         [pairCounts [boundsNir [format $decl k "dst = std::mutable_array::allocate(4)\n    src = std::mutable_array::allocate(4)" 0]] mutarraycopy]
 } -result {{1 0} {1 0} {0 1}}
 
@@ -1112,8 +1117,8 @@ test bounds-values-agree-unknown {an unknown site still fails when its check fai
     list \
         [agreedValue "fn g(xs, i):\n    std::list::at(xs, i):\n        on IndexNotFound:\n            -1\n\[g(\[1, 2\], 1), g(\[1, 2\], 2), g(\[1, 2\], -1), g(\[\], 0)\]"] \
         [agreedValue "fn s(t, a, b):\n    std::str::substring(t, a, b):\n        on LowerUnderrun:\n            \"lo\"\n        on UpperOverrun:\n            \"hi\"\n\[s(\"abc\", 0, 2), s(\"abc\", -1, 2), s(\"abc\", 2, 1), s(\"abc\", 1, 9)\]"] \
-        [agreedValue "fn st(a, i):\n    std::mutable_array::set(a, i, 1):\n        on IndexNotFound:\n            2\nb = std::mutable_array::allocate(2)\n\[st(b, 0), st(b, 2), st(b, -1)\]"] \
-        [agreedValue "fn c(a, b, i, n):\n    std::mutable_array::copy(a, i, b, 0, n):\n        on LowerUnderrun:\n            \"lo\"\n        on UpperOverrun:\n            \"hi\"\nx = std::mutable_array::allocate(3)\ny = std::mutable_array::allocate(2)\n\[c(x, y, 0, 2), c(x, y, 0, 3), c(x, y, 2, 2), c(x, y, -1, 1)\]"]
+        [agreedValue "fn st(a, i):\n    w = a\n    std::mutable_array::set(w, i, 1):\n        on IndexNotFound:\n            2\nb = std::mutable_array::allocate(2)\n\[st(b, 0), st(b, 2), st(b, -1)\]"] \
+        [agreedValue "fn c(a, b, i, n):\n    w = a\n    std::mutable_array::copy(w, i, b, 0, n):\n        on LowerUnderrun:\n            \"lo\"\n        on UpperOverrun:\n            \"hi\"\nx = std::mutable_array::allocate(3)\ny = std::mutable_array::allocate(2)\n\[c(x, y, 0, 2), c(x, y, 0, 3), c(x, y, 2, 2), c(x, y, -1, 1)\]"]
 } -result [list {[2, -1, -1, -1]} {["ab", "lo", "lo", "hi"]} {[unit, 2, 2]} {[unit, "hi", "hi", "lo"]}]
 
 test bounds-values-agree-reduced {indices reduced mod or masked by the container's own size compute the same values on every backend, for negative indices, indices beyond a machine word, a capacity that is no power of two and an empty array} -body {
@@ -1123,11 +1128,11 @@ test bounds-values-agree-reduced {indices reduced mod or masked by the container
         [agreedValue "${reads}loop h in hs:\n    masked(a, h)"] \
         [agreedValue "${reads}e = std::mutable_array::create(0, 0)\nloop h in hs:\n    masked(e, h)"] \
         [agreedValue "${reads}loop h in hs:\n    item(\[1, 2, 3\], h)"] \
-        [agreedValue "fn put(a: MutableArray\[int\], h: int) -> MutableArray\[int\]:\n    a.set(h.mod(a.capacity()), h)\n    a\nb = std::mutable_array::create(3, 0)\nc = put(put(put(b, -1), 4), 9)\nloop i from 0 to std::mutable_array::capacity(c):\n    std::mutable_array::at(c, i)"]
+        [agreedValue "fn put(a: MutableArray\[int\], h: int) -> MutableArray\[int\]:\n    w = a\n    w.set(h.mod(w.capacity()), h)\n    w\nb = std::mutable_array::create(3, 0)\nc = put(put(put(b, -1), 4), 9)\nloop i from 0 to std::mutable_array::capacity(c):\n    std::mutable_array::at(c, i)"]
 } -result {{[10, 30, 50, 30, 50, 20]} {[10, 50, 50, 10, 10, 10]} {[-1, -1, -1, -1, -1, -1]} {[1, 2, 3, 2, 2, 3]} {[9, 4, -1]}}
 
 test bounds-values-agree-field-path {accesses through field paths proven by the same path's size compute the same values on every backend: in-place writes reduced mod the field's capacity, guarded reads of every index around it, a reduced List read and a lockstep loop over a field} -body {
-    set table "struct Table:\n    slots: MutableArray\[int\]\n    names: List\[str\]\nfn store(t: Table, h: int) -> Table:\n    t.slots.set(h.mod(std::mutable_array::capacity(t.slots)), h)\n    t\nfn read(t: Table, i: int) -> int:\n    if i < 0 or i >= std::mutable_array::capacity(t.slots):\n        return -1\n    std::mutable_array::at(t.slots, i)\nfn name(t: Table, h: int) -> str:\n    std::list::at(t.names, h.mod(std::list::length(t.names)))\nfn widths(t: Table) -> List\[int\]:\n    loop x in t.names and k from 0 to std::list::length(t.names):\n        std::str::length(x) + k\nt = store(store(store(Table {slots: std::mutable_array::create(5, 0), names: \[\"a\", \"bb\", \"ccc\"\]}, -3), 11), 1180591620717411303424)\n"
+    set table "struct Table:\n    slots: MutableArray\[int\]\n    names: List\[str\]\nfn store(t: Table, h: int) -> Table:\n    w = t\n    w.slots.set(h.mod(std::mutable_array::capacity(w.slots)), h)\n    w\nfn read(t: Table, i: int) -> int:\n    if i < 0 or i >= std::mutable_array::capacity(t.slots):\n        return -1\n    std::mutable_array::at(t.slots, i)\nfn name(t: Table, h: int) -> str:\n    std::list::at(t.names, h.mod(std::list::length(t.names)))\nfn widths(t: Table) -> List\[int\]:\n    loop x in t.names and k from 0 to std::list::length(t.names):\n        std::str::length(x) + k\nt = store(store(store(Table {slots: std::mutable_array::create(5, 0), names: \[\"a\", \"bb\", \"ccc\"\]}, -3), 11), 1180591620717411303424)\n"
     list \
         [agreedValue "${table}loop i from -1 to 6:\n    read(t, i)"] \
         [agreedValue "${table}loop h in \[0, -1, 4, 1180591620717411303424\]:\n    name(t, h)"] \
@@ -1135,7 +1140,7 @@ test bounds-values-agree-field-path {accesses through field paths proven by the 
 } -result {{[-1, 0, 11, -3, 0, 1180591620717411303424, -1]} {["a", "ccc", "bb", "bb"]} {[1, 3, 5]}}
 
 test bounds-values-agree-guarded-local {reads and writes at computed locals proven by a guard compute the same values on every backend, for indices in range, just outside it on both sides and far outside it} -body {
-    set fns "fn after(xs: List\[int\], i: int) -> int:\n    t = i + 1\n    if t < 0 or t >= std::list::length(xs):\n        return -1\n    std::list::at(xs, t)\nfn bump(a: MutableArray\[int\], i: int) -> MutableArray\[int\]:\n    j = i * 2\n    if j >= 0 and j < std::mutable_array::capacity(a):\n        std::mutable_array::set(a, j, std::mutable_array::at(a, j) + 1)\n    a\n"
+    set fns "fn after(xs: List\[int\], i: int) -> int:\n    t = i + 1\n    if t < 0 or t >= std::list::length(xs):\n        return -1\n    std::list::at(xs, t)\nfn bump(a: MutableArray\[int\], i: int) -> MutableArray\[int\]:\n    w = a\n    j = i * 2\n    if j >= 0 and j < std::mutable_array::capacity(w):\n        std::mutable_array::set(w, j, std::mutable_array::at(w, j) + 1)\n    w\n"
     list \
         [agreedValue "${fns}loop i in \[-3, -2, -1, 0, 1, 2, 3, 1180591620717411303424\]:\n    after(\[10, 20, 30\], i)"] \
         [agreedValue "${fns}b = bump(bump(bump(bump(std::mutable_array::create(5, 0), 0), 2), 1), -1)\nloop k from 0 to std::mutable_array::capacity(b):\n    std::mutable_array::at(b, k)"]

@@ -73,10 +73,13 @@ hello():
 $ tclsh9.0 main.tcl -emit-native-executable examples/io/hello.bot
 $ examples/io/hello
 Hello, world!
-unit
+$ tclsh9.0 main.tcl run examples/io/hello.bot
+Hello, world!
 ```
 
-(An executable prints its program's value last: here `unit`.) `hello` never
+(An executable prints what its program writes and nothing else, and `run`
+runs a program the same way without building it:
+[PROGRAM-OUTPUT-MILESTONE-1.md](docs/PROGRAM-OUTPUT-MILESTONE-1.md).) `hello` never
 says where its output goes. `std::io::print_line` needs an `std::io::IO` context; the
 program installs one, `std::linux::io::LinuxIO`; and the compiler turns the call
 into a direct call of `std::linux::io::write_text`, which is one `write(2)` system
@@ -239,8 +242,9 @@ built for rich debugging.
 
 ## A tour
 
-Every program below runs, with the value shown, on the interpreter, the Tcl
-compiler and the native backend.
+Every program below runs, with the value shown (`tclsh9.0 main.tcl
+FILE.bot`: its development run prints the program's value), on the
+interpreter, the Tcl compiler and the native backend.
 
 ### Loops are expressions
 

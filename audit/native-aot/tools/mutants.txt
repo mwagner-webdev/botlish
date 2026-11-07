@@ -185,12 +185,15 @@ const C_CALLS: bool = cfg!(any(
         let _ = argv;
 >>>>
 
-@@ result-not-printed a standalone executable prints no value
+@@ result-printed a standalone executable prints its program's value again
 ## native/src/runtime/aot.rs
 <<<<
-        match writeln!(std::io::stdout().lock(), "{}", show(&vm.info, result)) {
+        // std::io. Tooling that wants the value runs the driver protocol.
+        0
 ====
-        match write!(std::io::stdout().lock(), "") {
+        // std::io. Tooling that wants the value runs the driver protocol.
+        let _ = writeln!(std::io::stdout().lock(), "{}", super::show::show(&vm.info, result));
+        0
 >>>>
 
 # ---------------------------------------------------------------------------

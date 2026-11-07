@@ -274,7 +274,10 @@ fn chunked_append(builder, value):
     std::mutable_array::set(current, filled, value)
     [completed, current, filled + 1]
 
-fn chunked_copy_chunks(chunks, index, final, offset):
+# FINAL is chunked_finish's array, filled through a place parameter (an
+# ordinary parameter would be the function's own copy: the completed chunks
+# would never reach the result, NONPLACE-PARAMETER-MUTATION).
+fn chunked_copy_chunks(chunks, index, place final: mutarray, offset):
     if index >= std::list::length(chunks):
         return offset
 
@@ -393,7 +396,7 @@ fn fill(b, i, n):
 
 test mutarray-gc-stress-2 {allocation report stays internally consistent while MutableArrays are live} -body {
     set ::env(BOTLISH_NATIVE_GC_STRESS) 1
-    set text "import std::mutable_array\nimport std::str\nfn build(n, i, a):\n    if i >= n:\n        return a\n    std::mutable_array::set(a, i, std::str::concat(\"x\", \"\"))\n    build(n, i + 1, a)\n\nstd::mutable_array::capacity(build(30, 0, std::mutable_array::allocate(30)))"
+    set text "import std::mutable_array\nimport std::str\nfn build(n, i, a):\n    w = a\n    if i >= n:\n        return w\n    std::mutable_array::set(w, i, std::str::concat(\"x\", \"\"))\n    build(n, i + 1, w)\n\nstd::mutable_array::capacity(build(30, 0, std::mutable_array::allocate(30)))"
     set report [native::allocationReport [sourceHir $text] summary]
     unset ::env(BOTLISH_NATIVE_GC_STRESS)
     set total [dict get $report total]

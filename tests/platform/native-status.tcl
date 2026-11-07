@@ -47,8 +47,10 @@ foreach {option value} $argv {
 # Botlish program with native::evalHir; object writes its program object
 # (native::object) and reports the object's header {FORMAT ARCHITECTURE
 # KIND} (tests/binary-header.tcl); executable links it with
-# native::executable, runs the executable and reports its header and the
-# value it prints; target asks the driver how it
+# native::executable, runs the executable and reports its header, what it
+# prints -- the program's own output: an executable prints no value of its
+# own (PROGRAM-OUTPUT-MILESTONE-1.md) -- and its value, read through the
+# driver protocol (protocolValue); target asks the driver how it
 # reads the host target's triple (botlish-native target TRIPLE: its object
 # format, C calling convention and whether code for it runs here);
 # convention compiles the program to CLIF (native::clif: no C call runs) and
@@ -355,7 +357,8 @@ f(1)
 # The recorded outcomes: HOST-TARGET -> NAME -> {value TEXT} (exactly) or
 # {error CODE MESSAGE-GLOB}. A program object is the host's object format
 # and architecture everywhere, and so is a standalone executable, which
-# prints its value: on macos-aarch64 a Mach-O executable since milestone 5
+# prints nothing of its own and whose value the driver protocol reads: on
+# macos-aarch64 a Mach-O executable since milestone 5
 # (MACOS-AARCH64-MILESTONE-5.md), where until then emission was refused
 # (`executable emission requires Linux glibc on x86_64 or aarch64 (NATIVE
 # AOT)`). A C call (libc's labs, through the platform linker) is linked and
@@ -420,9 +423,10 @@ f(1)
 #
 # A standalone executable started on the process's main thread
 # (main-thread-executable: native::executable -startup main-thread,
-# MAIN-THREAD-STARTUP-MILESTONE-1.md) is macos-aarch64's: there it prints its
-# value and its startup report says the policy and that the thread is the
-# process's main thread; every other target refuses the policy before
+# MAIN-THREAD-STARTUP-MILESTONE-1.md) is macos-aarch64's: there it prints
+# nothing of its own, its value is read through the driver protocol, and its
+# startup report says the policy and that the thread is the process's main
+# thread; every other target refuses the policy before
 # anything is linked (NATIVE UNSUPPORTED startup), saying why.
 #
 # Since milestone 2 (MACOS-AARCH64-MILESTONE-2.md) a program importing a
@@ -459,12 +463,12 @@ set linux [dict create \
 set expected [dict create \
     linux-x86_64 [dict merge $linux {
         object {value {elf x86_64 relocatable}}
-        executable {value {{elf x86_64 shared} 6765}}
+        executable {value {{elf x86_64 shared} {} 6765}}
         main-thread-executable {error {NATIVE UNSUPPORTED startup} {the startup policy main-thread is supported for macOS AArch64 native executables only, and this executable is for linux-x86_64. On Linux, glibc reports no guard*}}
     }] \
     linux-aarch64 [dict merge $linux {
         object {value {elf aarch64 relocatable}}
-        executable {value {{elf aarch64 shared} 6765}}
+        executable {value {{elf aarch64 shared} {} 6765}}
         main-thread-executable {error {NATIVE UNSUPPORTED startup} {the startup policy main-thread is supported for macOS AArch64 native executables only, and this executable is for linux-aarch64. On Linux, glibc reports no guard*}}
     }] \
     macos-aarch64 [dict create \
@@ -485,14 +489,13 @@ set expected [dict create \
         darwin-read-write {value {[0, 0, -1, 9]}} \
         darwin-errno {value {[-1, 9, 0, 0, -1, 9]}} \
         darwin-io {value {"ok"}} \
-        darwin-executable {value {{macho arm64 execute} {Hello, world!
-unit}}} \
+        darwin-executable {value {{macho arm64 execute} {Hello, world!} unit}} \
         windows-write {error {SURFACE MODULE UNSUPPORTED-PLATFORM} {*namespace "std::windows" belongs to the Windows platform*unavailable for target macos-aarch64 (macOS on aarch64)*}} \
         windows-io {error {SURFACE MODULE UNSUPPORTED-PLATFORM} {*namespace "std::windows::io" belongs to the Windows platform*unavailable for target macos-aarch64 (macOS on aarch64)*}} \
         windows-executable {error {SURFACE MODULE UNSUPPORTED-PLATFORM} {*namespace "std::windows::io" belongs to the Windows platform*unavailable for target macos-aarch64 (macOS on aarch64)*}} \
         object {value {macho arm64 object}} \
-        executable {value {{macho arm64 execute} 6765}} \
-        main-thread-executable {value {{macho arm64 execute} 6765 {startup main-thread} {process-main-thread 1}}} \
+        executable {value {{macho arm64 execute} {} 6765}} \
+        main-thread-executable {value {{macho arm64 execute} {} 6765 {startup main-thread} {process-main-thread 1}}} \
         target {value {format macho c-call-conv apple_aarch64 runs 1}} \
         c-convention {value {labs apple_aarch64 abs apple_aarch64}} \
         c-variadic {value {printf apple_aarch64}} \
@@ -519,10 +522,9 @@ unit}}} \
         darwin-executable {error {SURFACE MODULE UNSUPPORTED-PLATFORM} {*namespace "std::darwin::io" belongs to the macOS platform*unavailable for target windows-x86_64 (Windows on x86_64)*}} \
         windows-write {value {[true, 0, 0]}} \
         windows-io {value {"ok"}} \
-        windows-executable {value {{pe x86_64 executable} {Hello, world!
-unit}}} \
+        windows-executable {value {{pe x86_64 executable} {Hello, world!} unit}} \
         object {value {coff x86_64 object}} \
-        executable {value {{pe x86_64 executable} 6765}} \
+        executable {value {{pe x86_64 executable} {} 6765}} \
         main-thread-executable {error {NATIVE UNSUPPORTED startup} {the startup policy main-thread is supported for macOS AArch64 native executables only, and this executable is for windows-x86_64. On Windows, the main thread's stack is the 1 MiB link.exe reserves*}} \
         target {value {format coff c-call-conv windows_fastcall runs 1}} \
         c-convention {value {labs windows_fastcall abs windows_fastcall}} \
@@ -610,7 +612,8 @@ proc observe {name} {
             try {
                 return [outcome $environment {
                     set path [native::executable [surface::compile $argument -warnings off] [file join $work probe]]
-                    list [binaryHeader $path] [string trim [exec $path]]
+                    set printed [string trim [exec $path]]
+                    list [binaryHeader $path] $printed [protocolValue $path [file join $work result]]
                 }]
             } finally {
                 file delete -force $work
@@ -622,15 +625,34 @@ proc observe {name} {
                 return [outcome $environment {
                     set path [native::executable [surface::compile $argument -warnings off] [file join $work probe] -startup main-thread]
                     set report [file join $work report]
-                    set value [string trim [exec env BOTLISH_NATIVE_STARTUP_REPORT=$report $path]]
+                    set printed [string trim [exec env BOTLISH_NATIVE_STARTUP_REPORT=$report $path]]
                     set lines [split [core::ReadFile $report] \n]
-                    list [binaryHeader $path] $value [lsearch -inline $lines {startup *}] [lsearch -inline $lines {process-main-thread *}]
+                    list [binaryHeader $path] $printed [protocolValue $path [file join $work result]] \
+                        [lsearch -inline $lines {startup *}] [lsearch -inline $lines {process-main-thread *}]
                 }]
             } finally {
                 file delete -force $work
             }
         }
     }
+}
+
+# The value of a run of the executable PATH in the driver protocol
+# (runtime/aot.rs: BOTLISH_NATIVE_RESULT names the file RESULT, which its
+# result lines go to; its standard output stays the program's, dropped
+# here): shown as Botlish shows a value (core::value::show), or the
+# program's error raised (native::Outcome). An executable prints no value
+# of its own (PROGRAM-OUTPUT-MILESTONE-1.md): this is how a probe reads one.
+proc protocolValue {path result} {
+    set saved [array get ::env BOTLISH_NATIVE_RESULT]
+    set ::env(BOTLISH_NATIVE_RESULT) $result
+    try {
+        exec $path
+    } finally {
+        unset ::env(BOTLISH_NATIVE_RESULT)
+        if {$saved ne {}} { set ::env(BOTLISH_NATIVE_RESULT) [lindex $saved 1] }
+    }
+    return [core::value::show [native::Outcome [split [string trimright [core::ReadFile $result] \n] \n]] 1]
 }
 
 # {SYMBOL CONVENTION ...}: the calling convention of every foreign C

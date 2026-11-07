@@ -603,42 +603,51 @@ fn rd(fd: int, data: std::abi::bytes::MutableBytes) -> std::linux::ReadResult er
 }
 set runCounter 0
 
-# {STDOUT FILE3 FILE4} of one run of EXECUTABLE: descriptor 0 a FILE holding
+# {VALUE FILE3 FILE4} of one run of EXECUTABLE: descriptor 0 a FILE holding
 # INPUT (a read of it returns what is there, up to the buffer), descriptors 3
-# and 4 files. STDOUT is the program's result line (trimmed).
+# and 4 files. VALUE is the program's value, which the run reports through
+# the driver protocol (BOTLISH_NATIVE_RESULT, ProtocolValue): an executable
+# prints no value of its own (PROGRAM-OUTPUT-MILESTONE-1.md). These programs
+# write nothing to descriptor 1: anything there is an error.
 proc runIn {executable input {gcStress 0}} {
     set n [incr ::runCounter]
     set f0 [file join $::outputDir fd0.$n]
     set f3 [file join $::outputDir fd3.$n]
     set f4 [file join $::outputDir fd4.$n]
+    set result [file join $::outputDir result.$n]
     writeBinary $f0 $input
     set command [list sh -c {exec "$0" 3>"$1" 4>"$2" <"$3"} $executable $f3 $f4 $f0]
+    set environment [list BOTLISH_NATIVE_RESULT $result]
     if {$gcStress} {
-        set stdout [withEnv BOTLISH_NATIVE_GC_STRESS 1 {exec {*}$command}]
-    } else {
-        set stdout [exec {*}$command]
+        lappend environment BOTLISH_NATIVE_GC_STRESS 1
     }
-    return [list [string trim $stdout] [readBinary $f3] [readBinary $f4]]
+    set stdout [withEnvironment $environment {exec {*}$command}]
+    if {$stdout ne ""} {
+        error "the executable wrote to its standard output: $stdout"
+    }
+    return [list [ProtocolValue $result] [readBinary $f3] [readBinary $f4]]
 }
 
 # The same, with descriptor 0 a REAL PIPE the test writes INPUT into and
-# closes: STDOUT is then the executable's own standard output, exactly (not
-# trimmed).
+# closes: {VALUE FILE3 FILE4 STDOUT}, STDOUT the executable's own standard
+# output, exactly (what the program writes to descriptor 1, and nothing
+# else).
 proc runPiped {executable input {gcStress 0}} {
     set n [incr ::runCounter]
     set f3 [file join $::outputDir fd3.$n]
     set f4 [file join $::outputDir fd4.$n]
+    set result [file join $::outputDir result.$n]
     set command [list sh -c {exec "$0" 3>"$1" 4>"$2"} $executable $f3 $f4]
+    set environment [list BOTLISH_NATIVE_RESULT $result]
     if {$gcStress} {
-        set channel [withEnv BOTLISH_NATIVE_GC_STRESS 1 {open |$command r+b}]
-    } else {
-        set channel [open |$command r+b]
+        lappend environment BOTLISH_NATIVE_GC_STRESS 1
     }
+    set channel [withEnvironment $environment {open |$command r+b}]
     puts -nonewline $channel $input
     chan close $channel write
     set stdout [read $channel]
     close $channel
-    return [list $stdout [readBinary $f3] [readBinary $f4]]
+    return [list [ProtocolValue $result] [readBinary $f3] [readBinary $f4] $stdout]
 }
 
 proc utf8 {text} {
@@ -658,11 +667,12 @@ b = out(4, std::abi::bytes::freeze(buf))
 \[r.result, a, b\]"
 }
 
-test abi-mutable-bytes-example-echoes-stdin {examples/linux/read-stdin.bot as a standalone executable fed a real pipe: it makes one read(2) of descriptor 0 into a 4096-byte MutableBytes, freezes exactly the 17 bytes received and writes them to descriptor 1 through std::linux::write; the runner's own result line (the 17 bytes written) follows} -constraints {nativeLinux posixShell} -body {
+test abi-mutable-bytes-example-echoes-stdin {examples/linux/read-stdin.bot as a standalone executable fed a real pipe: it makes one read(2) of descriptor 0 into a 4096-byte MutableBytes, freezes exactly the 17 bytes received and writes them to descriptor 1 through std::linux::write, and nothing follows them (an executable never prints its value); its value, the 17 bytes written, is read through the driver protocol} -constraints {nativeLinux posixShell} -body {
     set path [file join $::executableDir read-stdin]
     native::executable [surface::readProgramFile [file join $::projectRoot examples linux read-stdin.bot]] $path
-    lindex [runPiped $path "hello from stdin\n"] 0
-} -result "hello from stdin\n17\n"
+    lassign [runPiped $path "hello from stdin\n"] value - - stdout
+    list $stdout $value
+} -result [list "hello from stdin\n" 17]
 
 test abi-mutable-bytes-example-eof-and-binary {the example at end of file (no input) writes nothing and its value is the raw 0; with binary input -- NUL, 0x80, 0xff and multi-byte UTF-8 -- the bytes arrive byte for byte (it is a byte abstraction, not a text API)} -constraints {nativeLinux posixShell} -body {
     set path [file join $::executableDir read-stdin]
@@ -670,16 +680,16 @@ test abi-mutable-bytes-example-eof-and-binary {the example at end of file (no in
         native::executable [surface::readProgramFile [file join $::projectRoot examples linux read-stdin.bot]] $path
     }
     set binary "[binary format c* {0 128 255 1 0 0 254}][utf8 "héllo ☃ \U0001f600"]"
-    set eof [lindex [runPiped $path ""] 0]
-    set data [lindex [runPiped $path $binary] 0]
-    list [string trim $eof] [expr {$data eq "$binary[string length $binary]\n"}] [string length $binary]
+    lassign [runPiped $path ""] eof - - eofOutput
+    lassign [runPiped $path $binary] value - - data
+    list $eof [expr {$eofOutput eq "" && $data eq $binary && $value == [string length $binary]}] [string length $binary]
 } -result "0 1 [expr {7 + 15}]"
 
 test abi-mutable-bytes-read-short-read-and-untouched-suffix {a real short read: 5 bytes are available for a 16-byte buffer of A's. The result is exactly 5, the returned buffer is the 5 bytes then the 11 untouched A's (no truncation, no resizing, nothing past the kernel's count overwritten), and the caller's own buffer is still 16 A's} -constraints {nativeLinux posixShell} -body {
     set exe [buildExecutable short [readProgram 16]]
     foreach mode {runIn runPiped} {
-        lassign [$mode $exe hello] stdout f3 f4
-        lappend results [string trim $stdout] $f3 $f4
+        lassign [$mode $exe hello] value f3 f4
+        lappend results $value $f3 $f4
     }
     set results
 } -result "{\[5, 16, 16\]} helloAAAAAAAAAAA AAAAAAAAAAAAAAAA {\[5, 16, 16\]} helloAAAAAAAAAAA AAAAAAAAAAAAAAAA"
@@ -689,21 +699,21 @@ test abi-mutable-bytes-read-binary-prefix-and-suffix {the issue's example, binar
 buf = std::abi::bytes::from_bytes(std::abi::bytes::from_list(\[std::byte::from_int(170), std::byte::from_int(170), std::byte::from_int(170), std::byte::from_int(170), std::byte::from_int(170), std::byte::from_int(170)\]))
 r = rd(0, buf)
 \[r.result, out(3, std::abi::bytes::freeze(r.data)), out(4, std::abi::bytes::freeze(buf))\]"]
-    lassign [runIn $exe [binary format c* {1 2 3}]] stdout f3 f4
-    list $stdout [binary encode hex $f3] [binary encode hex $f4]
+    lassign [runIn $exe [binary format c* {1 2 3}]] value f3 f4
+    list $value [binary encode hex $f3] [binary encode hex $f4]
 } -result {{[3, 6, 6]} 010203aaaaaa aaaaaaaaaaaa}
 
 test abi-mutable-bytes-read-eof {end of file is the raw result 0, not an error and not a special object: the returned buffer is unchanged (still all A's), the length is unchanged, nothing is read in a loop} -constraints {nativeLinux posixShell} -body {
     set exe [buildExecutable eof [readProgram 8]]
-    lassign [runIn $exe ""] stdout f3 f4
-    lassign [runPiped $exe ""] stdout2 f3b f4b
-    list $stdout $f3 $f4 [string trim $stdout2] $f3b
+    lassign [runIn $exe ""] value f3 f4
+    lassign [runPiped $exe ""] value2 f3b f4b
+    list $value $f3 $f4 $value2 $f3b
 } -result {{[0, 8, 8]} AAAAAAAA AAAAAAAA {[0, 8, 8]} AAAAAAAA}
 
 test abi-mutable-bytes-read-error-is-the-raw-negative-result {a read the kernel refuses returns its raw negative -errno as an ordinary Int, preserved exactly: an invalid descriptor is EBADF (-9), a descriptor that is not readable (the write end, descriptor 1 here is a file opened for writing) is EBADF too; the returned buffer is unchanged and nothing is mapped to an error} -constraints {nativeLinux posixShell} -body {
     set bad [buildExecutable badfd [readProgram 8 1000]]
-    lassign [runIn $bad "ignored"] stdout f3 f4
-    list $stdout $f3 $f4
+    lassign [runIn $bad "ignored"] value f3 f4
+    list $value $f3 $f4
 } -result {{[-9, 8, 8]} AAAAAAAA AAAAAAAA}
 
 test abi-mutable-bytes-read-larger-input-reads-one-chunk {more input than the buffer: 10000 bytes for a 4096-byte buffer. The one std::linux::read returns exactly 4096 and mutates only that capacity, allocates nothing more, does not continue reading -- and the remaining 5904 bytes are still there for the next reader of the same open file (a shell `cat` after the program, sharing its file offset)} -constraints {nativeLinux posixShell} -body {
@@ -716,8 +726,12 @@ test abi-mutable-bytes-read-larger-input-reads-one-chunk {more input than the bu
     set f4 [file join $::outputDir larger.f4]
     set rest [file join $::outputDir larger.rest]
     writeBinary $f0 $input
-    set stdout [exec sh -c {{ "$0" 3>"$2" 4>"$3"; cat >"$4"; } <"$1"} $exe $f0 $f3 $f4 $rest]
-    list [string trim $stdout] [expr {[readBinary $f3] eq [string range $input 0 4095]}] [expr {[readBinary $f4] eq [string repeat A 4096]}] \
+    set result [file join $::outputDir larger.result]
+    set stdout [exec env BOTLISH_NATIVE_RESULT=$result sh -c {{ "$0" 3>"$2" 4>"$3"; cat >"$4"; } <"$1"} $exe $f0 $f3 $f4 $rest]
+    if {$stdout ne ""} {
+        error "the executable wrote to its standard output: $stdout"
+    }
+    list [ProtocolValue $result] [expr {[readBinary $f3] eq [string range $input 0 4095]}] [expr {[readBinary $f4] eq [string repeat A 4096]}] \
         [expr {[readBinary $rest] eq [string range $input 4096 end]}] [string length [readBinary $rest]]
 } -result {{[4096, 4096, 4096]} 1 1 1 5904}
 
@@ -727,8 +741,8 @@ original = mb(\"______\")
 r1 = rd(0, original)
 r2 = rd(0, original)
 \[r1.result, r2.result, out(3, std::abi::bytes::freeze(r1.data)), out(3, std::abi::bytes::freeze(r2.data)), out(3, std::abi::bytes::freeze(original)), original == mb(\"______\"), r1.data == original, r2.data == original\]"]
-    lassign [runIn $exe "abcdef"] stdout f3 f4
-    list $stdout $f3
+    lassign [runIn $exe "abcdef"] value f3 f4
+    list $value $f3
 } -result {{[6, 0, 6, 6, 6, true, false, true]} abcdef____________}
 
 test abi-mutable-bytes-read-result-copies-are-independent {a std::linux::ReadResult contains a MutableBytes, so copying the result copies the value: r2 = r1, then updating the buffer derived from one leaves the other result's logical contents unchanged (value-copy semantics recurse through ordinary structs), through a List and a function parameter as well} -constraints {nativeLinux posixShell} -body {
@@ -741,8 +755,8 @@ r3 = bump(r1)
 xs = \[r1, r3\]
 r4 = bump(r2)
 \[r1.result, out(3, std::abi::bytes::freeze(r1.data)), out(3, std::abi::bytes::freeze(r2.data)), out(3, std::abi::bytes::freeze(r3.data)), out(3, std::abi::bytes::freeze(r4.data)), r1.data == r2.data, r3.data == r4.data, r1.data == r3.data, std::list::length(xs)\]"]
-    lassign [runIn $exe "abcdef"] stdout f3 f4
-    list $stdout $f3
+    lassign [runIn $exe "abcdef"] value f3 f4
+    list $value $f3
 } -result {{[6, 6, 6, 6, 6, true, true, false, 2]} abcdefabcdefZbcdefZbcdef}
 
 test abi-mutable-bytes-read-is-exactly-one-syscall {the wrapper makes ONE read(2) (the program as a whole has two syscall ops: this one and std::linux::write's) and returns exactly the kernel's result: std::linux::read's NIR has exactly one syscall op and no branch, jump, label or tail call, so there is no loop or retry to fill the buffer or repeat a short read; and its register mapping is rax = 0 (SYS_read), r10 = r8 = r9 = 0} -body {
@@ -1030,7 +1044,7 @@ dict for {shape body} $livenessShapes {
     test abi-mutable-bytes-liveness-$shape "a MutableBytes only the raw WRITABLE address refers to survives until the syscall returns, the address reaching the syscall by the \"$shape\" route, even though a register word evaluated after the address allocates a same-sized one (a collection at every allocation): the kernel receives the first storage's 2048 A bytes, 30 times, and the NIR keeps the storage alive after the syscall" -constraints {linuxX86_64 posixShell} -body [string map [list @SHAPE@ $shape] {
         set text "$::livenessHeader[dict get $::livenessShapes @SHAPE@]$::livenessFooter"
         set exe [buildExecutable mliveness-@SHAPE@ $text]
-        lassign [runIn $exe "" 1] stdout f3 f4
+        lassign [runIn $exe "" 1] value f3 f4
         set nir [native::nir [bytesHir $text]]
         list [expr {$f3 eq [string repeat A 61440]}] [string length $f3] [expr {[regexp -all {op keepalive} [nirFunction $nir w]] >= 1}]
     }] -result {1 61440 1}
@@ -1044,7 +1058,7 @@ test abi-mutable-bytes-liveness-mutant-without-keepalive-is-detected {the inline
     }] \n]
     set path [file join $::executableDir mliveness-mutant]
     native::Driver executable $mutant $path
-    lassign [runIn $path "" 1] stdout f3 f4
+    lassign [runIn $path "" 1] value f3 f4
     list [expr {[regexp -all {op keepalive} $nir] > 0}] [expr {$f3 ne [string repeat A 61440]}] [string length $f3]
 } -result {1 1 61440}
 
@@ -1058,9 +1072,9 @@ rs = loop i from 0 to 5:
     raw_read(std::abi::i32(0), sa, sb)
 rs"
     set exe [buildExecutable mreadlive $program]
-    lassign [runIn $exe [string repeat z 100000] 1] stdout f3 f4
+    lassign [runIn $exe [string repeat z 100000] 1] value f3 f4
     set nir [native::nir [bytesHir $program]]
-    list $stdout [expr {[regexp -all {op keepalive} [nirFunction $nir raw_read]] >= 1}]
+    list $value [expr {[regexp -all {op keepalive} [nirFunction $nir raw_read]] >= 1}]
 } -result {{[2048, 2048, 2048, 2048, 2048]} 1}
 
 # ---------------------------------------------------------------------------
@@ -1073,8 +1087,8 @@ b = a
 n = std::abi::x86_64::to_int(std::linux::abi::x86_64::syscall({rax: std::abi::x86_64::register64(0), rdi: std::abi::x86_64::from_i32(std::abi::i32(0)), rsi: std::abi::x86_64::from_mutable_bytes(a), rdx: std::abi::x86_64::from_usize(std::abi::bytes::mutable_length(a))}))
 \[n, out(3, std::abi::bytes::freeze(a)), out(3, std::abi::bytes::freeze(b))\]"
     set exe [buildExecutable rawshare $program]
-    lassign [runIn $exe "abcdef"] stdout f3 f4
-    list $stdout $f3
+    lassign [runIn $exe "abcdef"] value f3 f4
+    list $value $f3
 } -result {{[6, 6, 6]} abcdefabcdef}
 
 test abi-mutable-bytes-wrapper-read-never-writes-through-shared-values {the safe wrapper over the same situation: read(0, a) with b = a, c = [a] and a struct holding a all keep their contents -- the kernel's bytes are only in result.data} -constraints {nativeLinux posixShell} -body {
@@ -1088,8 +1102,8 @@ h = Holder {data: a}
 r = rd(0, a)
 \[r.result, out(3, std::abi::bytes::freeze(r.data)), out(3, std::abi::bytes::freeze(a)), out(3, std::abi::bytes::freeze(b)), out(3, std::abi::bytes::freeze(h.data)), std::list::length(xs), xs == \[b\]\]"
     set exe [buildExecutable wrappershare $program]
-    lassign [runIn $exe "abcdef"] stdout f3 f4
-    list $stdout $f3
+    lassign [runIn $exe "abcdef"] value f3 f4
+    list $value $f3
 } -result {{[6, 6, 6, 6, 6, 1, true]} abcdef__________________}
 
 # ---------------------------------------------------------------------------
@@ -1158,8 +1172,8 @@ n = std::abi::x86_64::to_int(std::linux::abi::x86_64::syscall({rax: std::abi::x8
 after = std::abi::bytes::freeze(m)
 \[n, out(3, before), out(3, after), before == after\]"
     set exe [buildExecutable barrier $program]
-    lassign [runIn $exe "abcdef"] stdout f3 f4
-    list $stdout $f3
+    lassign [runIn $exe "abcdef"] value f3 f4
+    list $value $f3
 } -result {{[6, 6, 6, false]} ______abcdef}
 
 removeDirectory abi-mutable-bytes-executables

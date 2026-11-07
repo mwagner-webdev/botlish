@@ -333,9 +333,11 @@ into a unique vector are 0 shares, 0 detaches, under 20 growths.
 
 `hir/mutvec.tcl`. `verify` (part of `hir::check`, after the affine
 discipline) checks every mutation's receiver is a place path -- a reference
-to a local, parameter or context parameter of the same function, or field
-projections from one -- of static type `MutableVector[T]`, and records the
-place roots. `Elaborate` (after `hir::check`, before every backend; once:
+to a local, place parameter or context parameter of the same function, or
+field projections from one -- of static type `MutableVector[T]`, and records
+the place roots. (A parameter not declared `place` is no such root: a
+mutation through it is NONPLACE-PARAMETER-MUTATION,
+NONPLACE-PARAMETER-MUTATION-CORRECTNESS-MILESTONE-1.md.) `Elaborate` (after `hir::check`, before every backend; once:
 never on HIR rebuilt from Core IR) writes out:
 
 * **read-outs** -- a value use of a place path (anything but a vector
@@ -374,8 +376,14 @@ shows the change (`mv-receiver-places`).
 
 ### 13. Parameter receiver mutation
 
-A parameter is a place: the callee mutates its own copy (its entry share),
-never the caller's (`mv-cow-calls`; the fuzzer's `push_len`/`bump`).
+A parameter was a place: the callee mutated its own copy (its entry share),
+never the caller's (`mv-cow-calls`; the fuzzer's `push_len`/`bump`). That
+silently lost every update its caller meant to make, and
+NONPLACE-PARAMETER-MUTATION-CORRECTNESS-MILESTONE-1.md made it a
+compile-time error: a parameter not declared `place` is never a mutation's
+destination. A callee that means its own copy binds it to a local first
+(`w = v`) and mutates the local -- the same entry share, now explicit; the
+tests and the fuzzer's `push_len`/`bump` do so.
 
 ### 14. Struct-field receiver mutation
 

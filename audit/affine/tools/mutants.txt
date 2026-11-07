@@ -289,26 +289,27 @@
         } else {
 >>>>
 
-@@ app-recursion-declared-fields the recursive-affine walk reads a struct's declared fields, not an application's: Node[Coroutine{...}] and a declaration holding itself through Box[D] are accepted
-## hir/structs.tcl
+@@ app-recursion-declared-fields the recursive-affine analysis reads a struct's declared fields, not an application's: what an application holds through its slots (its arguments' values) is never followed, so a declaration holding itself through Box[D] is accepted
+## hir/ownership.tcl
 <<<<
-        dict set visited $type,$crossed 1
-        set owner $type
-        set fields [AppliedFieldTypes $type]
+            set binding [Binding $id $arguments]
+            set j 0
+            foreach entry [Through $id] {
 ====
-        dict set visited $type,$crossed 1
-        set owner $type
-        set fields [fieldTypes $id]
+            set binding [Binding $id $arguments]
+            set j 0
+            foreach entry {} {
 >>>>
 
-@@ app-recursion-same-type-only the recursive-affine walk finds only the very same application again: V[Coroutine{...}] (next: List[V[List[T]]]) is accepted
-## hir/structs.tcl
+@@ app-recursion-same-type-only the recursive-affine analysis finds only the very same application again: a declaration's application of itself to other arguments is no edge, so V[Coroutine{...}] (next: List[V[List[T]]]) is accepted
+## hir/ownership.tcl
 <<<<
-        if {$path ne {} && $id eq $target} {
-            if {$crossed} {
+        lassign $edge target arguments c
+        Count edges
 ====
-        if {$path ne {} && $type eq $start} {
-            if {$crossed} {
+        lassign $edge target arguments c
+        if {$target eq $id && $arguments ne [Arguments [hir::structs::SelfType $id]]} continue
+        Count edges
 >>>>
 
 @@ app-recursion-tree-only a recursive affine application is rejected only for a tree struct (the tree milestone's special case): Node[Coroutine{...}] of an ordinary struct is accepted

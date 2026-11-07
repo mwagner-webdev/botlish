@@ -550,7 +550,9 @@ proc runReadFile {exe input stress} {
     set channel [open $f0 wb]; puts -nonewline $channel $input; close $channel
     set saved [expr {[info exists ::env(BOTLISH_NATIVE_GC_STRESS)] ? $::env(BOTLISH_NATIVE_GC_STRESS) : ""}]
     if {$stress} { set ::env(BOTLISH_NATIVE_GC_STRESS) 1 }
-    set printed [exec sh -c {{ "$0" 3>"$2" 4>"$3"; cat >"$4"; } <"$1"} $exe $f0 $f3 $f4 $rest]
+    set result [file join $::scratch result.$::counter]
+    exec env BOTLISH_NATIVE_RESULT=$result sh -c {{ "$0" 3>"$2" 4>"$3"; cat >"$4"; } <"$1"} $exe $f0 $f3 $f4 $rest
+    set printed [ReportedValue $result]
     if {$stress && !$::gcStress} { unset ::env(BOTLISH_NATIVE_GC_STRESS) }
     set got {}
     foreach f [list $f3 $f4 $rest] {
@@ -561,16 +563,27 @@ proc runReadFile {exe input stress} {
     return [list [string trim $printed] {*}$got]
 }
 
+# The value the executable reported through the driver protocol in the
+# result file FILE (deleted), as Botlish shows it: an executable prints no
+# value of its own (PROGRAM-OUTPUT-MILESTONE-1.md).
+proc ReportedValue {file} {
+    set shown [core::value::show [native::Outcome [split [string trim [core::ReadFile $file]] \n]] 1]
+    file delete $file
+    return $shown
+}
+
 proc runReadPipe {exe input stress} {
     set f3 [file join $::scratch fd3.[incr ::counter]]
     set f4 [file join $::scratch fd4.$::counter]
-    set command [list sh -c {exec "$0" 3>"$1" 4>"$2"} $exe $f3 $f4]
+    set result [file join $::scratch result.$::counter]
+    set command [list env BOTLISH_NATIVE_RESULT=$result sh -c {exec "$0" 3>"$1" 4>"$2"} $exe $f3 $f4]
     if {$stress} { set ::env(BOTLISH_NATIVE_GC_STRESS) 1 }
     set pipe [open |$command r+b]
     puts -nonewline $pipe $input
     chan close $pipe write
-    set printed [read $pipe]
+    read $pipe
     close $pipe
+    set printed [ReportedValue $result]
     if {$stress && !$::gcStress} { unset ::env(BOTLISH_NATIVE_GC_STRESS) }
     set got {}
     foreach f [list $f3 $f4] {

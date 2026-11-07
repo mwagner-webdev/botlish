@@ -21,9 +21,11 @@
 # generic, bare or in an anonymous struct whose field becomes a place), a
 # move of an affine one, length, empty?,
 # unrestricted at, push, pop, take, swap (also with its affine result
-# discarded), clear, a pass through a function that mutates its parameter
-# and returns it, a function that mutates its parameter and returns only a
-# count (the caller's vector is unchanged), growth across several capacities
+# discarded), clear, a pass through a function that mutates a local copy of
+# its parameter and returns it, a function that mutates a local copy of its
+# parameter and returns only a count (the caller's vector is unchanged; a
+# parameter not declared `place` is never mutated itself), growth across
+# several capacities
 # (a callee pushing 2..40 elements in a loop), storing a vector in a struct,
 # mutating it through the field path, copying it out (unrestricted) or
 # destructuring the struct (affine), iteration -- over an unrestricted
@@ -69,7 +71,8 @@
 # affine vector after a whole move, a pass, a consuming loop or a store into
 # a struct (USE-AFTER-MOVE); an affine `at` (AFFINE-ELEMENT-COPY-OUT); a
 # mutation of a temporary, or of an enclosing function's vector from a nested
-# function (MUTABLE-PLACE-RECEIVER); a nested function reading a vector its
+# function (MUTABLE-PLACE-RECEIVER); a mutation of a nested function's own
+# value parameter (NONPLACE-PARAMETER-MUTATION); a nested function reading a vector its
 # enclosing function mutates (MUTABLE-PLACE-CAPTURE); an affine vector
 # erased to `any` (AFFINE-ERASURE-UNSUPPORTED) or captured
 # (AFFINE-CAPTURE-UNSUPPORTED); a projection of a Queue's vector field
@@ -137,18 +140,21 @@ fn contents(v: MutableVector[int]) -> List[int]:
         x
 
 fn bump(v: MutableVector[int], x: int) -> MutableVector[int]:
-    v.push(x)
-    v
+    w = v
+    w.push(x)
+    w
 
 fn push_len(v: MutableVector[int], x: int) -> int:
-    v.push(x)
-    v.push(x)
-    v.length()
+    w = v
+    w.push(x)
+    w.push(x)
+    w.length()
 
 fn grow(v: MutableVector[int], n: int) -> MutableVector[int]:
+    w = v
     loop i from 0 to n:
-        v.push(i)
-    v
+        w.push(i)
+    w
 
 fn ident(v: MutableVector[int]) -> MutableVector[int]:
     v
@@ -183,18 +189,21 @@ fn boom_if(x: int) -> int errors Boom:
     x
 
 fn pass_q(q: MutableVector[Coroutine{args: [Msg], return: Ev}], a: int) -> MutableVector[Coroutine{args: [Msg], return: Ev}]:
-    q.push(make(a))
-    q
+    w = q
+    w.push(make(a))
+    w
 
 fn fill(q: MutableVector[Coroutine{args: [Msg], return: Ev}], n: int, a: int) -> MutableVector[Coroutine{args: [Msg], return: Ev}]:
+    w = q
     loop i from 0 to n:
-        q.push(make(a + i))
-    q
+        w.push(make(a + i))
+    w
 
 fn fill_jobs(q: MutableVector[Job], n: int, a: int) -> MutableVector[Job]:
+    w = q
     loop i from 0 to n:
-        q.push(Job {id: i, step: make(a + i)})
-    q
+        w.push(Job {id: i, step: make(a + i)})
+    w
 
 fn drain(q: MutableVector[Coroutine{args: [Msg], return: Ev}], x: int) -> List[int]:
     loop c in q:
@@ -524,7 +533,7 @@ proc UOperation {stateVar} {
 proc UFault {stateVar} {
     upvar 1 $stateVar state
     set places [UPlaces $state]
-    set kinds {temporary wrongtype}
+    set kinds {temporary wrongtype valueparam}
     set bindings [lsearch -all -inline -glob $places v*]
     if {$places ne {}} { lappend kinds nestedmutation }
     set mutatedBindings [lmap v $bindings {expr {[dict exists $state mutated $v] ? $v : [continue]}}]
@@ -549,6 +558,17 @@ proc UFault {stateVar} {
         capture {
             Emit state "fn nested() -> int:" "    [Pick $mutatedBindings].length()"
             return MUTABLE-PLACE-CAPTURE
+        }
+        valueparam {
+            # A function's ordinary parameter is its own copy: mutating it
+            # would be lost (NONPLACE-PARAMETER-MUTATION), whether the
+            # function returns it or not.
+            if {[Rand 2]} {
+                Emit state "fn lost(w: MutableVector\[int\]) -> int:" "    w.push(1)" "    w.length()"
+            } else {
+                Emit state "fn lost(w: MutableVector\[int\]) -> MutableVector\[int\]:" "    w.push(1)" "    w"
+            }
+            return NONPLACE-PARAMETER-MUTATION
         }
     }
 }
@@ -1052,33 +1072,40 @@ struct Res:
     duo: Duo
 
 fn two(a: MutableVector[int], b: MutableVector[int]) -> int:
-    a.push(1)
-    b.push(2)
-    b.push(2)
-    a.length() * 100 + b.length()
+    wb = b
+    wa = a
+    wa.push(1)
+    wb.push(2)
+    wb.push(2)
+    wa.length() * 100 + wb.length()
 
 fn pushed(a: MutableVector[int], x: int) -> int:
-    a.push(x)
-    a.length()
+    wa = a
+    wa.push(x)
+    wa.length()
 
 fn rebuild(d: Duo, x: int) -> Duo:
-    d.left.push(x)
-    Duo {left: d.left, right: d.right, n: d.n + x}
+    e = d
+    e.left.push(x)
+    Duo {left: e.left, right: e.right, n: e.n + x}
 
 fn with_n(d: Duo, n: int) -> Duo:
-    d.right.push(n)
-    Duo {left: d.left, right: d.right, n: n}
+    e = d
+    e.right.push(n)
+    Duo {left: e.left, right: e.right, n: n}
 
 fn rput(d: Duo, x: int) -> Res:
-    old = d.n
-    d.left.push(x)
-    Res {old: old, duo: d}
+    e = d
+    old = e.n
+    e.left.push(x)
+    Res {old: old, duo: e}
 
 fn fails(a: MutableVector[int], x: int) -> int errors Boom:
-    a.push(x)
-    if a.length() > 3:
+    wa = a
+    wa.push(x)
+    if wa.length() > 3:
         fail Boom
-    a.length()
+    wa.length()
 
 fn obs2(a: MutableVector[int], n: int) -> int:
     a.length() * 10 + n

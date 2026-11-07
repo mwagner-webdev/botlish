@@ -1,16 +1,17 @@
 # value-display.test -- how a String and a UnicodeChar are displayed
 # (core::value::show, core/value.tcl; native/src/runtime/show.rs renders the
-# same text for the native runtime's own messages and a standalone
-# executable's output): each in its own quotes, escaping the lexer's escape
+# same text for the native runtime's own messages): each in its own quotes,
+# escaping the lexer's escape
 # set (surface/lexer.tcl, `String` and `Char`) -- backslash, newline, carriage
 # return, tab and the kind's own quote -- and writing every other character
 # raw. So both kinds escape the same control characters, the display of such
 # a value is a literal that denotes it, and no display carries a raw carriage
 # return (a terminal takes one as "back to the start of the line").
 #
-# The native backends hand a value or a message back to Tcl as Tcl list text
-# (show.rs's tcl_value and tcl_element), so every control character a String
-# can hold has to survive that transport too before it is displayed.
+# The native backends -- and a standalone executable, through the driver
+# protocol -- hand a value or a message back to Tcl as Tcl list text (show.rs's
+# tcl_value and tcl_element), so every control character a String can hold
+# has to survive that transport too before it is displayed.
 
 source [file join [file dirname [file normalize [info script]]] helpers.tcl]
 
@@ -117,12 +118,13 @@ test value-display-native-message-controls {a runtime error naming a String of e
 } -result {{error {CORE SEMANTIC TYPE}} 1}
 
 # ---------------------------------------------------------------------------
-# Printed output: main.tcl's value line, and a standalone executable's stdout
-# (show.rs). Both are read back without end-of-line translation, so a raw
-# carriage return could not be translated away. main.tcl's own lines end in
-# its standard output's line ending, Tcl's default: "\r\n" on Windows (an
-# executable's output is its bytes, "\n"); the value line is split at
-# exactly that.
+# Printed output: main.tcl's value line, and a standalone executable's stdout,
+# which holds no value of its own (PROGRAM-OUTPUT-MILESTONE-1.md: its value
+# reaches the host only through the driver protocol, show.rs's tcl_value).
+# Both are read back without end-of-line translation, so a raw carriage
+# return could not be translated away. main.tcl's own lines end in its
+# standard output's line ending, Tcl's default: "\r\n" on Windows; the value
+# line is split at exactly that.
 set mainEol [if {$::tcl_platform(platform) eq "windows"} {string cat \r\n} else {string cat \n}]
 
 test value-display-main {main.tcl prints a value holding a carriage return escaped, on every backend} -body {
@@ -140,23 +142,23 @@ test value-display-main {main.tcl prints a value holding a carriage return escap
     }
 } -result [lrepeat 4 {   value: ["a\rb", '\r']}]
 
-test value-display-executable {a standalone executable prints a carriage return escaped, and every ASCII control character as core::value::show does} -constraints executableAot -body {
+test value-display-executable {a standalone executable prints no value, so no raw control character: its standard output is empty; its value -- a carriage return, every ASCII control character -- reaches the host through the driver protocol intact and displays escaped, as core::value::show displays it} -constraints executableAot -body {
     set lines {}
     foreach {source value} [list {["a\rb", "\r", '\r']} {} [controlsSource] [controlsValue]] {
-        set path [file join $scratch executable]
-        native::executable [surface::compile $source -warnings off] $path
-        set channel [open |[list env PATH= $path] r]
+        set path [native::executable [surface::compile $source -warnings off] [file join $scratch executable]]
+        set channel [withEnvironment {PATH {}} {open |[list $path] r}]
         fconfigure $channel -translation lf -encoding utf-8
-        set output [read $channel]
+        set printed [read $channel]
         close $channel
+        set output [standaloneValue $path]
         file delete $path
         if {$value ne ""} {
-            set output [expr {$output eq "[core::value::show $value]\n"}]
+            set output [expr {$output eq [core::value::show $value]}]
         }
-        lappend lines $output
+        lappend lines $printed $output
     }
     set lines
-} -result [list "\[\"a\\rb\", \"\\r\", '\\r'\]\n" 1]
+} -result [list {} "\[\"a\\rb\", \"\\r\", '\\r'\]" {} 1]
 
 removeDirectory value-display-scratch
 

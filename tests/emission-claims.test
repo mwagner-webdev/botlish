@@ -1855,6 +1855,200 @@ test ec-recovery-dependent {a claim whose code holds another diagnostic says not
         [lmap r [hir::emission::claims $hir] {list [dict get $r function] [dict get $r verdict]}]
 } -result {{TYPE EMIT-END-SYMBOL EMIT-REJECTED} {{a dependent} {b rejected}}}
 
+# ---------------------------------------------------------------------------
+# Unresolved callees (EMISSION-CALLEE-DEPENDENCY-CORRECTNESS-MILESTONE-1.md)
+#
+# An unresolved name is typed `never` with no target (DIAGNOSTIC-RECOVERY.md,
+# section 2): to every other analysis a divergence. A claim whose walk reads
+# such a call -- directly, in any position, or through a helper whose code
+# holds one -- is dependent on the UNBOUND, which stays the one diagnostic:
+# never proven (the walk stopping at the `never`), never rejected (the walk
+# missing what the call does), no certificate, no EMIT diagnostic.
+
+# The program TEXT compiled leniently: {REPORTED CLAIMS EMIT}: the kinds of
+# the diagnostics a rejecting compilation reports (hir::recovery::reported),
+# each claim's {NAME VERDICT CERTIFIED} (1 when its record holds a
+# certificate), and the kinds of the emission checker's own diagnostics in
+# the HIR, reported or not.
+proc dependency {text} {
+    set hir [surface::compile $text -warnings off -strict 0]
+    list [lmap d [hir::recovery::reported $hir] {dict get $d kind}] \
+        [lmap r [hir::emission::claims $hir] {list [dict get $r function] [dict get $r verdict] [dict exists $r certificate]}] \
+        [lmap d [dict get $hir diagnostics] {if {![dict exists $d emission]} continue; dict get $d kind}]
+}
+
+test ec-callee-unbound {a claimed function calling a name declared later (a forward reference) or never declared: UNBOUND, the claim dependent, no certificate, nothing memoized -- this was "proven": the call's never ended the walk before its yield} -setup {
+    set ::hir::emission::memo [dict create]
+} -body {
+    set forward "${digitDfa}fn emitter() -> unit emits digit_token:\n    later()\n    yield 49\n    unit\n\nfn later() -> unit:\n    unit\n\n0\n"
+    set out [list [dependency $forward] \
+        [dependency "${digitDfa}fn emitter() -> unit emits digit_token:\n    missing()\n    yield 49\n    unit\n\n0\n"]]
+    set hir [surface::compile $forward -warnings off -strict 0]
+    set d [lindex [hir::recovery::reported $hir] 0]
+    set origin [lrange [hir::static::PrimaryOrigin $hir $d] 2 end]
+    lappend out [dict get $origin line]:[dict get $origin column] [string match "*\"later\" is declared later*" [dict get $d message]] \
+        [dict size $::hir::emission::memo]
+} -result {{UNBOUND {{emitter dependent 0}} {}} {UNBOUND {{emitter dependent 0}} {}} 10:5 1 0}
+
+test ec-callee-positions {an unresolved call makes the claim dependent wherever the walk reads it: inside an expression, a condition, after a yield, in a handled call, as an argument, in a loop body, with a coroutine handle} -body {
+    set D "${digitDfa}error Oops:\n    v: int\n\nfn h(x: int) -> unit:\n    unit\n\nfn src() -> int:\n    yield 7\n    0\n\n"
+    lmap body [list "    yield 48 + missing()" \
+            "    if missing():\n        yield 49\n    else:\n        yield 50" \
+            "    yield 49\n    missing()" \
+            "    missing():\n        on Oops:\n            unit\n    yield 49" \
+            "    h(missing())\n    yield 49" \
+            "    loop i from 0 to 3:\n        missing()\n        continue\n    yield 49" \
+            "    coroutine {step, first} = src()\n    missing(step)\n    yield 49"] {
+        lrange [dependency "import std::coroutine\n${D}fn emitter() -> unit emits digit_token:\n$body\n    unit\n\n0\n"] 0 1
+    }
+} -result {{UNBOUND {{emitter dependent 0}}} {UNBOUND {{emitter dependent 0}}} {UNBOUND {{emitter dependent 0}}} {UNBOUND {{emitter dependent 0}}} {UNBOUND {{emitter dependent 0}}} {UNBOUND {{emitter dependent 0}}} {UNBOUND {{emitter dependent 0}}}}
+
+test ec-callee-helpers {the dependency follows the helpers the walk reads: a helper declared to return, one whose inferred result is never because of the unresolved call (its body was never read: "proven"), two levels down, a yielding helper (this was "rejected", an EMIT-INCOMPLETE the walk made up), recursion -- every one dependent, with no EMIT diagnostic} -body {
+    lmap helper [list "fn helper() -> unit:\n    missing()\n    unit\n\nfn emitter() -> unit emits digit_token:\n    helper()\n    yield 49\n    unit" \
+            "fn helper():\n    missing()\n\nfn emitter() -> unit emits digit_token:\n    helper()\n    yield 49\n    unit" \
+            "fn h2():\n    missing()\n\nfn helper() -> unit:\n    h2()\n    unit\n\nfn emitter() -> unit emits digit_token:\n    yield 49\n    helper()\n    unit" \
+            "fn helper() -> unit:\n    missing()\n    yield 49\n    unit\n\nfn emitter() -> unit emits digit_token:\n    helper()\n    unit" \
+            "fn r(n: int) -> unit:\n    if n > 0:\n        r(n - 1)\n    else:\n        missing()\n    unit\n\nfn emitter(n: int) -> unit emits digit_token:\n    r(n)\n    yield 49\n    unit" \
+            "fn r(n: int) -> unit:\n    if n > 0:\n        r(n - 1)\n    else:\n        missing()\n        yield 49\n    unit\n\nfn emitter(n: int) -> unit emits digit_token:\n    r(n)\n    unit"] {
+        dependency "${digitDfa}$helper\n\n0\n"
+    }
+} -result {{UNBOUND {{emitter dependent 0}} {}} {UNBOUND {{emitter dependent 0}} {}} {UNBOUND {{emitter dependent 0}} {}} {UNBOUND {{emitter dependent 0}} {}} {UNBOUND {{emitter dependent 0}} {}} {UNBOUND {{emitter dependent 0}} {}}}
+
+test ec-callee-independent {the dependency is the walk's, not the program's: a claim that reads no unresolved call is decided as ever beside one that does; a helper's clean summary, reused by a later claim after a claim that also called the unresolved name, stays clean; a tainted helper's summary, reused, stays tainted} -body {
+    set text "${digitDfa}type DigitValue = Int in 0..9\n\nfn helper(d: DigitValue) -> unit:\n    yield 48 + d\n    unit\n\nfn broken() -> unit:\n    missing()\n    yield 49\n    unit\n\nfn a() -> unit emits digit_token:\n    helper(1)\n    missing()\n    unit\n\nfn b() -> unit emits digit_token:\n    helper(1)\n    unit\n\nfn c() -> unit emits digit_token:\n    broken()\n    unit\n\nfn d() -> unit emits digit_token:\n    broken()\n    unit\n\nfn e(n: int) -> unit emits digit_token:\n    yield 48 + n\n    unit\n\n0\n"
+    list [dependency $text] [expr {[dict get $::hir::emission::stats summariesReused] > 0}]
+} -result {{{UNBOUND UNBOUND EMIT-END-SYMBOL EMIT-REJECTED} {{a dependent 0} {b proven 1} {c dependent 0} {d dependent 0} {e rejected 0}} {EMIT-END-SYMBOL EMIT-REJECTED}} 1}
+
+test ec-callee-genuine-nonreturn {a call that genuinely never returns still ends the trace: a helper whose inferred result is never (a loop without end, a recursion without end) -- the claim proven, a yield after the call unreachable -- and the never helper's code is part of the proof (its certificate depends on it); its code is read, not judged: a trait operation it calls, which the checker cannot follow, does not make the claim not proved (an accepted program stays accepted); a helper declared to return that loops is walked past, as before} -setup {
+    set ::hir::emission::memo [dict create]
+} -body {
+    set out [lmap helper [list "fn spin():\n    loop:\n        continue" \
+            "fn forever(n: int):\n    forever(n + 1)\n\nfn spin():\n    forever(0)"] {
+        lrange [dependency "${digitDfa}$helper\n\nfn emitter() -> unit emits digit_token:\n    yield 49\n    spin()\n    yield 65\n    unit\n\n0\n"] 1 2
+    }]
+    lappend out [dict keys [dict get $::hir::emission::memo {emitter digit_token} depends functions]]
+    set hir [surface::compile "${digitDfa}trait Coded:\n    fn code(self: Coded) -> int\n\nstruct Seven:\n    unused: int\n\nfn code(s: Seven) -> int:\n    55\n\nfn spin(c: Coded):\n    k = c.code()\n    loop:\n        continue\n\nfn emitter() -> unit emits digit_token:\n    yield 49\n    spin(Seven {unused: 0})\n    unit\n\n0\n" -warnings off]
+    lappend out [lmap r [hir::emission::claims $hir] {list [dict get $r function] [dict get $r verdict]}]
+    lappend out [lrange [dependency "${digitDfa}fn spin() -> unit:\n    loop:\n        continue\n    unit\n\nfn emitter() -> unit emits digit_token:\n    yield 49\n    spin()\n    unit\n\n0\n"] 1 2]
+} -result {{{{emitter proven 1}} {}} {{{emitter proven 1}} {}} {emitter forever spin} {{emitter proven}} {{{emitter proven 1}} {}}}
+
+test ec-callee-unreachable {an unresolved call the walk never reads -- in a branch decided false, after a call that genuinely never returns -- is no part of the proof: the claim proven, the UNBOUND reported; the same as a TYPE diagnostic there} -body {
+    lmap body [list "    yield 49\n    if false:\n        missing()" \
+            "    yield 49\n    if false:\n        x = 48 + \"x\"" \
+            "    yield 49\n    spin()\n    missing()"] {
+        lrange [dependency "${digitDfa}fn spin():\n    loop:\n        continue\n\nfn emitter() -> unit emits digit_token:\n$body\n    unit\n\n0\n"] 0 1
+    }
+} -result {{UNBOUND {{emitter proven 1}}} {TYPE {{emitter proven 1}}} {UNBOUND {{emitter proven 1}}}}
+
+test ec-callee-independent-path {a claim the walk finds an unresolved call in is dependent even where another path holds a violation of its own -- the existing rule, a TYPE diagnostic there makes it dependent too; once the name resolves, the violation is reported} -body {
+    set body "fn emitter(n: int) -> unit emits digit_token:\n    if n > 0:\n        %s\n    yield 65\n    unit\n\n0\n"
+    list [dependency "${digitDfa}[format $body missing()]"] [dependency "${digitDfa}[format $body {x = 48 + "x"}]"] \
+        [dependency "${digitDfa}fn missing() -> unit:\n    unit\n\n[format $body missing()]"]
+} -result {{UNBOUND {{emitter dependent 0}} {}} {TYPE {{emitter dependent 0}} {}} {EMIT-REJECTED {{emitter rejected 0}} EMIT-REJECTED}}
+
+test ec-callee-multiple-claims {every claim of a function whose code reads an unresolved call is dependent; another function's two claims are proven} -body {
+    dependency "${digitDfa}dfa one over ascii:\n    start:\n        '1' -> accept\n\nfn emitter() -> unit emits digit_token, one:\n    missing()\n    yield 49\n    unit\n\nfn good() -> unit emits digit_token, one:\n    yield 49\n    unit\n\n0\n"
+} -result {UNBOUND {{emitter dependent 0} {emitter dependent 0} {good proven 1} {good proven 1}} {}}
+
+test ec-callee-coroutine {a coroutine constructed from an unresolved name: dependent; one constructed from a function whose code holds one: its yields are its own (the boundary), the constructor's claim proven; a claimed coroutine source whose own code holds one: dependent} -body {
+    set D "import std::coroutine\n${digitDfa}fn src() -> int:\n    yield 7\n    missing()\n    0\n\n"
+    list [lrange [dependency "${D}fn emitter() -> unit emits digit_token:\n    coroutine {step, first} = absent()\n    yield 49\n    unit\n\n0\n"] 1 1] \
+        [lrange [dependency "${D}fn emitter() -> unit emits digit_token:\n    coroutine {step, first} = src()\n    step()\n    yield 49\n    unit\n\n0\n"] 1 1] \
+        [lrange [dependency "import std::coroutine\n${digitDfa}fn source() -> int emits digit_token:\n    missing()\n    yield 49\n    0\n\nfn consumer() -> int:\n    coroutine {step, first} = source()\n    first\n\n0\n"] 1 1]
+} -result {{{{emitter dependent 0}}} {{{emitter proven 1}}} {{{source dependent 0}}}}
+
+test ec-callee-memo {the in-process memo across the dependency: a certificate is never reused for code that calls an unresolved name, the claim proved again once it resolves (reused: the code is what it was); a never helper's code is a dependency of the certificate that read it -- it gains an unresolved call, the claim is dependent (this reused the certificate); an unrelated function changes nothing} -setup {
+    set ::hir::emission::memo [dict create]
+} -body {
+    set dir [emit::workspace]
+    set path [file join $dir main.bot]
+    set before "${digitDfa}fn later() -> unit:\n    unit\n\nfn emitter() -> unit emits digit_token:\n    later()\n    yield 49\n    unit\n\n0\n"
+    set after "${digitDfa}fn emitter() -> unit emits digit_token:\n    later()\n    yield 49\n    unit\n\nfn later() -> unit:\n    unit\n\n0\n"
+    set out {}
+    foreach text [list $before $after $before] {
+        emit::writeText $path $text
+        lappend out [reuse $path]
+    }
+    set ::hir::emission::memo [dict create]
+    set spin "fn h():\n    loop:\n        continue"
+    set program "${digitDfa}%s\n\nfn emitter() -> unit emits digit_token:\n    yield 49\n    h()\n    unit\n\n0\n"
+    foreach helper [list $spin "fn h():\n    missing()" $spin "$spin\n\nfn other() -> int:\n    3"] {
+        emit::writeText $path [format $program $helper]
+        lappend out [reuse $path]
+    }
+    set out
+} -result {{{emitter proven 0}} {{emitter dependent 0}} {{emitter proven 1}} {{emitter proven 0}} {{emitter dependent 0}} {{emitter proven 1}} {{emitter proven 1}}}
+
+test ec-callee-interchange {a lenient HIR whose claim is dependent on an unresolved call reads back from interchange text verified again, the claim dependent; the dependent record forged proven, with a certificate, is refused} -body {
+    set hir [surface::compile "${digitDfa}fn emitter() -> unit emits digit_token:\n    missing()\n    yield 49\n    unit\n\nfn good() -> unit emits digit_token:\n    yield 49\n    unit\n\n0\n" -warnings off -strict 0]
+    set back [hir::interchange::decode [hir::interchange::encode $hir]]
+    set records [dict get $hir emissions]
+    set forged [lmap r $records {
+        if {[dict get $r verdict] eq "dependent"} {
+            dict set r verdict proven
+            dict set r certificate [dict get [lindex $records 1] certificate]
+        }
+        set r
+    }]
+    list [expr {$back eq $hir}] [lmap r [hir::emission::claims $back] {dict get $r verdict}] \
+        [catch {hir::interchange::decode [hir::interchange::encode [dict replace $hir emissions $forged]]} m o] [dict get $o -errorcode]
+} -result {1 {dependent proven} 1 {HIR INTERCHANGE EMISSION}}
+
+test ec-callee-cache {the front-end cache across the dependency: the certified program is cached; the edit that leaves the call unresolved is a miss and raises UNBOUND, never a cached certificate; the repaired program reads its entry again, verified, proven} -body {
+    set dir [emit::workspace]
+    set path [file join $dir main.bot]
+    set cache [file join $dir cache]
+    file mkdir $cache
+    set good "${digitDfa}fn later() -> unit:\n    unit\n\nfn emitter() -> unit emits digit_token:\n    later()\n    yield 49\n    unit\n\n0\n"
+    set bad "${digitDfa}fn emitter() -> unit emits digit_token:\n    later()\n    yield 49\n    unit\n\nfn later() -> unit:\n    unit\n\n0\n"
+    set out {}
+    foreach text [list $good $bad $good] {
+        emit::writeText $path $text
+        set hits [dict get $::surface::cache::stats hits]
+        if {[catch {surface::readProgramFile $path -warnings off -cache $cache} hir options]} {
+            lappend out [lindex [dict get $options -errorcode] end]
+        } else {
+            lappend out [list [expr {[dict get $::surface::cache::stats hits] - $hits}] [lmap r [hir::emission::claims $hir] {dict get $r verdict}]]
+        }
+    }
+    set out
+} -result {{0 proven} UNBOUND {1 proven}}
+
+test ec-callee-static-compile {a claim in a static compile block calling an unresolved name rejects the block with UNBOUND, its first diagnostic, never an EMIT code; a claimed function holding a rejected static compile block whose body calls one is certified: the block's diagnostics are its own, its failure a failure point} -body {
+    set a [surface::compile "import std::compiler\n${digitDfa}fn probe() -> str errors std::compiler::CompilerError:\n    static compile:\n        fn bad() -> unit emits digit_token:\n            missing()\n            yield 49\n            unit\n        0\n    \"accepted\"\n\nprobe():\n    on std::compiler::CompilerError {code}:\n        \"rejected\"\n" -warnings off]
+    set b [surface::compile "import std::compiler\n${digitDfa}fn emitter() -> unit errors std::compiler::CompilerError emits digit_token:\n    static compile:\n        missing()\n    yield 49\n    unit\n\n0\n" -warnings off]
+    list [lmap {key site} [hir::static::sites $a] {list [dict get $site outcome] [dict get $site diagnostic kind]}] \
+        [lmap {key site} [hir::static::sites $b] {list [dict get $site outcome] [dict get $site diagnostic kind]}] \
+        [lmap r [hir::emission::claims $b] {list [dict get $r function] [dict get $r verdict]}] [dict get $b diagnostics]
+} -result {{{rejected UNBOUND}} {{rejected UNBOUND}} {{emitter proven}} {}}
+
+test ec-callee-syntax-recovery {a partial revision (a syntax error elsewhere) with an unresolved call: the claim that reads it is dependent, an intact one proven; a malformed call is a hole, dependent as before} -body {
+    set dir [emit::workspace main.bot "${digitDfa}fn good() -> unit emits digit_token:\n    yield 49\n    unit\n\nfn emitter() -> unit emits digit_token:\n    missing()\n    yield 49\n    unit\n\nfn malformed() -> unit emits digit_token:\n    missing(1 +)\n    yield 49\n    unit\n\nfn other() -> unit:\n    x = = 3\n    unit\n\n0\n"]
+    set hir [surface::readProgramFile [file join $dir main.bot] -warnings off -strict 0 -recover-syntax 1]
+    lmap r [hir::emission::claims $hir] {list [dict get $r function] [dict get $r verdict]}
+} -result {{good proven} {emitter dependent} {malformed dependent}}
+
+test ec-callee-service {the compiler service's hover shows the current verdict: an unresolved call, not checked; resolved by an edit, certified; unresolved again, not checked; an independent claim certified throughout, also in a partial revision} -body {
+    set dir [emit::workspace main.bot "0\n"]
+    set path [file join $dir main.bot]
+    set ws [service::workspace -root $dir]
+    set good "fn good() -> unit emits digit_token:\n    yield 49\n    unit\n\n"
+    set emitter "fn emitter() -> unit emits digit_token:\n    later()\n    yield 49\n    unit\n\n"
+    set later "fn later() -> unit:\n    unit\n\n"
+    set out {}
+    # {TEXT LINE-OF-EMITTER}: the emitter at line 13 before later, 16 after it.
+    foreach {text line} [list "${digitDfa}$good$emitter${later}0\n" 13 "${digitDfa}$good$later${emitter}0\n" 16 \
+            "${digitDfa}$good$emitter${later}0\n" 13 "${digitDfa}$good$emitter${later}fn other() -> unit:\n    x = = 3\n    unit\n\n0\n" 13] {
+        service::setDocument $ws $path $text
+        set rev [service::analyze $ws $path]
+        lappend out [list [lmap d [service::diagnostics $rev] {lindex [dict get $d code] end}] \
+            [lindex [split [dict get [service::at $rev $path 9 4] hover] \n] 1] \
+            [lindex [split [dict get [service::at $rev $path $line 4] hover] \n] 1]]
+    }
+    service::closeWorkspace $ws
+    set out
+} -result {{UNBOUND {emits digit_token: certified to emit digit_token: every normal completion has yielded exactly one token, every prefix it yields is viable; its token completes on its own last symbol} {emits digit_token: not checked -- its code holds another diagnostic}} {{} {emits digit_token: certified to emit digit_token: every normal completion has yielded exactly one token, every prefix it yields is viable; its token completes on its own last symbol} {emits digit_token: certified to emit digit_token: every normal completion has yielded exactly one token, every prefix it yields is viable; its token completes on its own last symbol}} {UNBOUND {emits digit_token: certified to emit digit_token: every normal completion has yielded exactly one token, every prefix it yields is viable; its token completes on its own last symbol} {emits digit_token: not checked -- its code holds another diagnostic}} {{SYNTAX UNBOUND} {emits digit_token: certified to emit digit_token: every normal completion has yielded exactly one token, every prefix it yields is viable; its token completes on its own last symbol} {emits digit_token: not checked -- its code holds another diagnostic}}}
+
 test ec-result-not-symbol {a claimed function's result is no symbol, whatever its type: an Int-returning source emits its token and completes with any Int -- its argument, 0, -1 -- certified alike (CSV-EMISSION-VALIDATION-MILESTONE-1.md, section 18; this was EMIT-TERMINAL-VALUE's -1 rule)} -body {
     set hir [surface::compile "${digitDfa}fn s(n: int) -> int emits digit_token:\n    yield 55\n    n\n\nfn z() -> int emits digit_token:\n    yield 55\n    0\n\nfn e() -> int emits digit_token:\n    yield 55\n    -1\n\n0\n" -warnings off -strict 0]
     list [lmap d [dict get $hir diagnostics] {dict get $d kind}] \

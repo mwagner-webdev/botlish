@@ -67,11 +67,11 @@ x
 
 @topic capability.process-exit-status
 title: Setting the process exit status: absent
-summary: A Botlish program cannot choose its exit status: there is no exit function; a compiled program exits 0 after printing its value, nonzero only after a run-time error.
+summary: A Botlish program cannot choose its exit status: there is no exit function; an executable (and botlish run) exits 0 when the program completes, 1 only after a run-time error.
 index: concepts backends
 alias: exit status; set exit code; process exit; exit function; return code
 keywords: exit, status, code, process, fail, verdict
-related: cli.exit-status backend.native-executable concept.program-value concept.testing
+related: cli.exit-status cli.run backend.native-executable concept.program-value concept.testing
 
 == STATUS
 There is no `exit` operation and no way to make the compiler or an
@@ -83,8 +83,10 @@ them in (rule.unhandled-errors).
 == NEAREST ALTERNATIVE
 Make the outcome the program's value and test it outside: a golden suite
 returns its report (std::test::report(), or a verdict String such as
-"GOLDEN PASS: 258 passed") and a script compares the printed value. The
-compiler's own status is 1 when a program is rejected or fails at run time.
+"GOLDEN PASS: 258 passed") and a script compares the value the compiler's
+development run prints ("   value:", cli.output), or what the program
+prints itself. An executable prints no value. The compiler's own status is
+1 when a program is rejected or fails at run time.
 
 @topic capability.test-timeout
 title: Per-test timeouts: absent

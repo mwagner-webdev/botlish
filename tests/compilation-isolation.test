@@ -330,7 +330,7 @@ test ci-executable {a standalone executable of an earlier HIR built after a late
     native::executable $hA [file join $dir alone]
     ciCompile "struct Point:\n    z: int\n\nPoint {z: 1}.z\n" b.bot
     native::executable $hA [file join $dir after]
-    list [exec [file join $dir alone]] [catch {exec [file join $dir after]} out] $out
+    list [standaloneValue [file join $dir alone]] [catch {standaloneValue [file join $dir after]} out] $out
 } -cleanup {
     file delete -force $dir
     if {$savedLinker eq ""} { unset -nocomplain ::env(BOTLISH_NATIVE_LINKER) } else { set ::env(BOTLISH_NATIVE_LINKER) [lindex $savedLinker 0] }

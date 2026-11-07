@@ -20,9 +20,11 @@
 # constants than GeometricBuilder's.
 #
 # A MutableArray is a value (MUTABLE-ARRAY.md): every function below that
-# fills an array returns it, and a builder passed to chunked_append at its
-# last use is updated without a copy (hir/mutvec.tcl, "Last uses and consumed
-# parameters"). (Before MutableArray became a value, the state was a
+# fills an array fills a local of its own -- a parameter not declared
+# `place` is the function's copy, never a place it may mutate
+# (NONPLACE-PARAMETER-MUTATION) -- and returns it, and a builder passed to
+# chunked_append at its last use is updated without a copy (hir/mutvec.tcl,
+# "Last uses and consumed parameters"). (Before MutableArray became a value, the state was a
 # positional List [completed, current, filled] whose current chunk every
 # alias wrote, and chunked_copy_chunks filled its caller's array through its
 # parameter.)
@@ -59,9 +61,10 @@ fn chunked_append(builder: ChunkedBuilder, value) errors IndexNotFound:
         fresh.set(0, value)
         return ChunkedBuilder {completed: builder.completed.append(builder.current), current: fresh, filled: std::mutable_array::create(1, 1)}
 
-    builder.current.set(filled, value)
-    builder.filled.set(0, filled + 1)
-    builder
+    updated = builder
+    updated.current.set(filled, value)
+    updated.filled.set(0, filled + 1)
+    updated
 
 # FINAL with each of CHUNKS[INDEX..) (all full, chunk_size() elements)
 # bulk-copied into it from OFFSET on.
@@ -70,8 +73,9 @@ fn chunked_copy_chunks(chunks, index, final, offset) errors IndexNotFound, Lower
         return final
 
     chunk = std::list::at(chunks, index)
-    std::mutable_array::copy(final, offset, chunk, 0, chunk_size())
-    chunks.chunked_copy_chunks(index + 1, final, offset + chunk_size())
+    filling = final
+    std::mutable_array::copy(filling, offset, chunk, 0, chunk_size())
+    chunks.chunked_copy_chunks(index + 1, filling, offset + chunk_size())
 
 # BUILDER's elements as an ordinary immutable List: one exact-size
 # MutableArray, filled by bulk-copying every completed chunk followed by the

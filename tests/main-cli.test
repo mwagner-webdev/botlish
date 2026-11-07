@@ -360,6 +360,86 @@ test cli-check-missing-file {-check of a file that does not exist reports it as 
 } -cleanup {unset -nocomplain r} -result {1 1}
 
 # ---------------------------------------------------------------------------
+# run FILE ARG... (PROGRAM-OUTPUT-MILESTONE-1.md): one program run as a
+# command, as an executable built from it runs: its own output only, its
+# arguments, status 0 or 1.
+
+# The program runs natively unless -backend says otherwise; printing goes
+# through std::linux::io, whose syscalls exist on Linux x86-64 and AArch64.
+testConstraint nativeBuilt [expr {![catch {native::binary}]}]
+testConstraint nativeLinux [expr {$::tcl_platform(os) eq "Linux" &&
+    $::tcl_platform(machine) in {x86_64 amd64 aarch64}}]
+
+# {STATUS STDOUT STDERR} of main.tcl run ARGS with the text INPUT on its
+# standard input: STDOUT its exact bytes, STDERR as text.
+proc runCommand {input args} {
+    set errFile [file join [temporaryDirectory] main-cli-run-stderr-[pid].txt]
+    try {
+        set pipe [open |[list [info nameofexecutable] $::mainScript run {*}$args 2> $errFile] r+]
+        fconfigure $pipe -translation binary
+        puts -nonewline $pipe $input
+        chan close $pipe write
+        set out [read $pipe]
+        set status 0
+        if {[catch {close $pipe} message options]} {
+            set code [dict get $options -errorcode]
+            set status [expr {[lindex $code 0] eq "CHILDSTATUS" ? [lindex $code 2] : $code}]
+        }
+        set channel [open $errFile]
+        set err [read $channel]
+        close $channel
+        return [list $status $out $err]
+    } finally {
+        file delete $errFile
+    }
+}
+
+test cli-run-output-only {run writes nothing but the program's own output -- no header, no value line after it, its bytes as written (no newline added) -- and exits 0} -constraints {nativeLinux nativeBuilt} -body {
+    set dir [checkApp run-output {main.bot "import std::io\nimport std::linux::io\n\nfn hello() errors std::io::WriteFailed:\n    std::io::print_line(\"one\")\n    std::io::print(\"two\")\n\nwith context std::linux::io::create()\n\nhello():\n    on std::io::WriteFailed:\n        unit\n42\n"}]
+    runCommand "" -warnings off [file join $dir main.bot]
+} -cleanup {file delete -force $dir; unset -nocomplain dir} -result [list 0 "one\ntwo" {}]
+
+test cli-run-arguments {run gives the program its file, as typed, as argument zero and every word after the file as its own, option-like words included} -constraints {nativeLinux nativeBuilt} -body {
+    set dir [checkApp run-arguments {main.bot "import std::io\nimport std::linux::io\n\nfn show() errors std::io::WriteFailed:\n    words = argv():\n        on InvalidArgumentEncoding:\n            return unit\n    loop w in words:\n        std::io::print_line(w)\n    unit\n\nwith context std::linux::io::create()\n\nshow():\n    on std::io::WriteFailed:\n        unit\n"}]
+    set path [file join $dir main.bot]
+    lassign [runCommand "" -warnings off $path one -v {two words} -hir] status out err
+    list $status [expr {$out eq "$path\none\n-v\ntwo words\n-hir\n"}] $err
+} -cleanup {file delete -force $dir; unset -nocomplain dir path status out err} -result {0 1 {}}
+
+test cli-run-standard-input {the program reads run's standard input: a one-chunk echo writes exactly what it read, and not the byte count it ends with} -constraints {nativeLinux nativeBuilt} -body {
+    runCommand "hello from stdin\n" -warnings off [file join $::projectRoot examples linux read-stdin.bot]
+} -result [list 0 "hello from stdin\n" {}]
+
+test cli-run-tcl-backends {on the Tcl backends a program that completes shows nothing either -- no header, no value -- and exits 0} -body {
+    set dir [checkApp run-tcl {main.bot "fn f(n: int) -> int:\n    n * 2\n\nf(21)\n"}]
+    lmap backend {interp compile} {runCommand "" -backend $backend [file join $dir main.bot]}
+} -cleanup {file delete -force $dir; unset -nocomplain dir} -result {{0 {} {}} {0 {} {}}}
+
+test cli-run-rejected {a rejected program: its diagnostics on stderr after its file's name, each with its help line; nothing on stdout; status 1} -body {
+    set dir [checkApp run-rejected {main.bot "x + 1\n"}]
+    lassign [runCommand "" [file join $dir main.bot]] status out err
+    list $status $out [string match "[file join $dir main.bot]: *unbound*(CORE SEMANTIC UNBOUND)\nhelp: * -help *" $err]
+} -cleanup {file delete -force $dir; unset -nocomplain dir status out err} -result {1 {} 1}
+
+test cli-run-runtime-error {a program that fails at run time: the error on stderr as an executable writes it, MESSAGE (CODE); status 1} -body {
+    set dir [checkApp run-error {main.bot "import std::mutable_array\nstd::mutable_array::allocate(0 - 1)\n"}]
+    lassign [runCommand "" -backend interp [file join $dir main.bot]] status out err
+    list $status $out [string match "*(CORE SEMANTIC RANGE)\n" $err]
+} -cleanup {file delete -force $dir; unset -nocomplain dir status out err} -result {1 {} 1}
+
+test cli-run-runtime-error-native {natively too: a run-time failure is the error on stderr and status 1, the program's output before it kept} -constraints {nativeLinux nativeBuilt} -body {
+    set dir [checkApp run-error-native {main.bot "import std::io\nimport std::linux::io\nimport std::mutable_array\n\nfn first() errors std::io::WriteFailed:\n    std::io::print_line(\"before\")\n\nwith context std::linux::io::create()\n\nfirst():\n    on std::io::WriteFailed:\n        unit\nstd::mutable_array::allocate(0 - 1)\n"}]
+    lassign [runCommand "" -warnings off [file join $dir main.bot]] status out err
+    list $status $out [string match "*(CORE SEMANTIC RANGE)\n" $err]
+} -cleanup {file delete -force $dir; unset -nocomplain dir status out err} -result [list 1 "before\n" 1]
+
+test cli-run-usage-errors {run needs the program's file, and refuses an option that inspects, builds or checks (status 2, nothing run)} -body {
+    list [dict get [runMain run] status] \
+        [dict get [set r [runMain run -hir x.bot]] status] [string match "*run cannot be combined with -hir*" [dict get $r err]] \
+        [dict get [runMain run -check x.bot] status] [dict get [runMain run -emit-native-executable x.bot] status]
+} -cleanup {unset -nocomplain r} -result {2 2 1 2 2}
+
+# ---------------------------------------------------------------------------
 # -lsp (LSP-MILESTONE-1.md; the protocol itself is tests/lsp.test's)
 
 test cli-lsp-end-of-input {-lsp takes no file and reads the protocol on stdin: input that ends before shutdown ends it with status 1, having written nothing to stdout} -body {

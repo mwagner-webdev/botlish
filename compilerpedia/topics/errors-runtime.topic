@@ -210,7 +210,8 @@ prints "Hello, world!" on cranelift; on interp and compile it stops with
 Run it with -backend cranelift (or cranelift-generic), or build an
 executable (-emit-native-executable). To keep a program runnable
 everywhere, compute its result in portable code and return it as the
-program's value, which every backend prints; print only at a native edge
+program's value, which the compiler's development run prints on every
+backend (an executable never prints it); print only at a native edge
 (backend.io).
 
 @topic error.not-boolean

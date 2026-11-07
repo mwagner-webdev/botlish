@@ -107,24 +107,41 @@ proc appValue {dir} {
     return [lindex $outcome 1]
 }
 
-# What DIR's program prints as a standalone executable (its value line),
-# built with ENVIRONMENT ({NAME VALUE ...}) for the run. Raises when the
-# executable exits with a non-zero status or is killed by a signal; what it
-# writes to its standard error (Guard Malloc's banner) is kept in DIR's
-# `stderr`, never taken for a failure.
+# The value of DIR's program as a standalone executable, built and run with
+# ENVIRONMENT ({NAME VALUE ...}) for the run: an executable prints no value
+# of its own (PROGRAM-OUTPUT-MILESTONE-1.md), so the run reports it through
+# the driver protocol (BOTLISH_NATIVE_RESULT, ProtocolValue), and anything
+# it writes to its standard output is an error (these programs print
+# nothing). Raises when the executable exits with a non-zero status or is
+# killed by a signal (the error code exec gives), or when the program fails
+# (its error, from the result file); what it writes to its standard error
+# (Guard Malloc's banner) is kept in DIR's `stderr`, never taken for a
+# failure.
 proc appExecutable {dir {environment {}}} {
     set exe [native::withLinkDirs [list $::fixtureDir] {native::executable [appHir $dir] [file join $dir program]}]
-    if {$::tcl_platform(platform) eq "windows"} {
-        # Windows has no env(1).
-        return [string trim [withEnvironment $environment {exec $exe 2> [file join $dir stderr]}]]
+    set result [ProtocolResultFile]
+    lappend environment BOTLISH_NATIVE_RESULT $result
+    try {
+        if {$::tcl_platform(platform) eq "windows"} {
+            # Windows has no env(1).
+            set output [withEnvironment $environment {exec $exe 2> [file join $dir stderr]}]
+        } else {
+            # env(1) gives the variables to the executable alone. How they
+            # reach it does not decide what Guard Malloc catches:
+            # bb-guard-malloc's former control, a one-byte over-read of a
+            # 4080-byte storage, did not fault through env(1) either (macOS
+            # run 39603310734) -- the page after that storage's 4096-byte
+            # block was mapped (MACOS-AARCH64-MILESTONE-7.md, section 8),
+            # which is why the test now exposes 16-byte storages.
+            set output [exec env {*}[lmap {k v} $environment {string cat $k=$v}] $exe 2> [file join $dir stderr]]
+        }
+        if {$output ne ""} {
+            error "the executable wrote: $output"
+        }
+        return [ProtocolValue $result]
+    } finally {
+        file delete $result
     }
-    # env(1) gives the variables to the executable alone. How they reach it
-    # does not decide what Guard Malloc catches: bb-guard-malloc's former
-    # control, a one-byte over-read of a 4080-byte storage, did not fault
-    # through env(1) either (macOS run 39603310734) -- the page after that
-    # storage's 4096-byte block was mapped (MACOS-AARCH64-MILESTONE-7.md,
-    # section 8), which is why the test now exposes 16-byte storages.
-    return [string trim [exec env {*}[lmap {k v} $environment {string cat $k=$v}] $exe 2> [file join $dir stderr]]]
 }
 
 # Runs SCRIPT in the caller with BOTLISH_NATIVE_GC_STRESS=1 (a collection

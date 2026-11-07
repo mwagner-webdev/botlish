@@ -119,8 +119,30 @@ def mtp(text):
     return lines
 
 
+# The value line of a driver protocol result file (BOTLISH_NATIVE_RESULT: "value V", V in the host's value format,
+# a Tcl list tree) as Botlish shows a value: Ints, Booleans, Strings, unit and Lists, enough for these programs.
+PROTOCOL_VALUE_TCL = r"""
+proc conv {v} {
+    switch -- [lindex $v 0] {
+        int - bool { return [lindex $v 1] }
+        unit { return unit }
+        str { return "\"[string map {\\ \\\\ \" \\\"} [lindex $v 1]]\"" }
+        list { return "\[[join [lmap x [lindex $v 1] {conv $x}] {, }]\]" }
+        default { return "<[lindex $v 0]>" }
+    }
+}
+set f [open [lindex $argv 0]]
+fconfigure $f -encoding utf-8
+fconfigure stdout -encoding utf-8
+foreach line [split [read $f] \n] {
+    if {![catch {lindex $line 0} tag] && $tag eq "value"} { puts [conv [lindex $line 1]] }
+}
+"""
+
+
 def value(stdout):
-    """The Botlish program's printed value, as Python data (true/false -> True/False)."""
+    """A Botlish value as Botlish shows it (the text PROTOCOL_VALUE_TCL prints), as Python data (true/false ->
+    True/False)."""
     text = stdout.strip().splitlines()[-1] if stdout.strip() else ""
     try:
         return ast.literal_eval(re.sub(r"\btrue\b", "True", re.sub(r"\bfalse\b", "False", text)))
@@ -428,6 +450,10 @@ class Census:
                     f"status {status} signal {sig} timed_out {timed_out} wall {wall:.1f} ms\n"
                     f"--- stdout\n{out}\n--- stderr\n{err}\n")
         first = runs[0]
+        if kind in ("identity", "graphical", "dispatch", "runtime") and first["status"] == 0 and not first["timed_out"]:
+            # An executable prints no value of its own (PROGRAM-OUTPUT-MILESTONE-1.md): the program's value is
+            # read from a second run's driver protocol result (every kind whose classifier reads "value").
+            first["value"] = self.protocol_value(cmd, env, timeout, signal_after)
         rec = {"name": name, "group": group, "kind": kind, "cmd": " ".join(map(str, cmd)), "env": env,
                "signal_after": list(signal_after) if signal_after else None,
                "status": first["status"], "signal": first["signal"], "timed_out": first["timed_out"],
@@ -443,6 +469,21 @@ class Census:
         self.records.append(rec)
         log(f"RESULT {name}: {cls}{'' if expected else ' (UNEXPECTED)'} {json.dumps(facts, sort_keys=True)[:600]}")
         return rec
+
+    def protocol_value(self, cmd, env, timeout, signal_after=None):
+        """The value the program CMD computes, read through the driver protocol (BOTLISH_NATIVE_RESULT=FILE: the
+        executable writes "value V" there), as Python data; None when the run reports no value."""
+        result = self.work / "protocol-value.result"
+        script = self.work / "protocol-value.tcl"
+        result.unlink(missing_ok=True)
+        script.write_text(PROTOCOL_VALUE_TCL)
+        env = {k: v for k, v in env.items() if k != "MTP_CAPTURE"}
+        run(cmd, env={**env, "BOTLISH_NATIVE_RESULT": str(result)}, timeout=timeout, signal_after=signal_after)
+        if not result.exists():
+            return None
+        shown = subprocess.run([str(self.args.tclsh), str(script), str(result)], capture_output=True, text=True,
+                               encoding="utf-8", errors="replace", timeout=120).stdout
+        return value(shown) if shown.strip() else None
 
     def marks(self, r):
         return {l["stage"]: l for l in r["mtp"] if l.get("kind") == "mark"}
@@ -461,7 +502,7 @@ class Census:
         facts = {"status": r["status"], "pthread_main": entry.get("pthread_main"), "ns_main": entry.get("ns_main"),
                  "same_tid_as_main": entry.get("same_tid"), "threads": entry.get("threads"),
                  "stack_bytes": entry.get("stack_bytes"), "since_exec_us": entry.get("since_exec_us"),
-                 "value": value(r["stdout"])}
+                 "value": r.get("value")}
         if rt:
             facts["runtime"] = rt[0]
         bad = self.ended(r)
@@ -492,7 +533,7 @@ class Census:
                  "threads_max": max([l.get("threads", 0) for l in r["mtp"] if isinstance(l.get("threads"), int)] or [0])}
         if res:
             facts.update({"presented": res["presented"], "quit_seen": res["quit_seen"], "events": res["events"]})
-        v = value(r["stdout"])
+        v = r.get("value")
         facts["value"] = v
         if isinstance(v, list) and len(v) == 4 and isinstance(v[3], list):
             # sdl.bot: [before, init, after, [window, [renderer, presented, in_coroutine, pushed, [events, quit]]]]
@@ -546,7 +587,7 @@ class Census:
 
     def classify_runtime(self, r, expect, name):
         err = "\n".join(l for l in r["stderr"].splitlines() if not l.startswith("MTP "))
-        facts = {"status": r["status"], "signal": r["signal"], "value": value(r["stdout"]),
+        facts = {"status": r["status"], "signal": r["signal"], "value": r.get("value"),
                  "native_limit_stack": "NATIVE LIMIT STACK" in err, "stderr": err[-300:]}
         rt = [l for l in r["mtp"] if l.get("kind") == "runtime"]
         if rt:
@@ -968,7 +1009,13 @@ class Census:
             for label, env, exe, where in runs:
                 no = refused if label.startswith("main") else {}
                 self.case(f"s-{label}-declared", "semantics", [exe("errors"), "declared"], "process", env=env,
-                          expect={"status": 0, "stdout": r"^1008$", **no}, build=f"{where}/errors")
+                          expect={"status": 0, "stdout": r"^$", **no}, build=f"{where}/errors",
+                          note="a program that completes: status 0, nothing printed (an executable prints no value)")
+                declared = self.work / f"declared-{label}.txt"
+                self.case(f"s-{label}-declared-value", "semantics", [exe("errors"), "declared"], "process",
+                          env={**env, "BOTLISH_NATIVE_RESULT": str(declared)},
+                          expect={"status": 0, "stdout": r"^$", "file": str(declared), "file_re": r"^value \{int 1008\}$", **no},
+                          build=f"{where}/errors", note="its value, through the driver protocol")
                 self.case(f"s-{label}-runtime", "semantics", [exe("errors"), "runtime"], "process", env=env,
                           expect={"status": 1, "stdout": r"^$", "stderr": r"\+: expected int, got \[true\] \(CORE SEMANTIC TYPE\)", **no},
                           build=f"{where}/errors")
@@ -1115,8 +1162,11 @@ class Census:
     def oracle_selftest(self):
         """Synthetic records the classifier must not accept (section 25): a dummy-driver run claiming Cocoa,
         a value that contradicts the fixture, a lifecycle on the worker."""
-        def synthetic(lines, stdout="", status=0):
-            return {"status": status, "signal": 0, "timed_out": False, "wall_ms": 1, "stdout": stdout,
+        def synthetic(lines, shown="", status=0):
+            # SHOWN is the program's value as Botlish shows it (what protocol_value reads); the executable
+            # itself prints nothing.
+            return {"status": status, "signal": 0, "timed_out": False, "wall_ms": 1, "stdout": "",
+                    "value": value(shown) if shown else None,
                     "stderr": "\n".join("MTP " + json.dumps(l) for l in lines), "mtp": lines}
         base = [{"kind": "sdl", "stage": "before-init", "ok": True, "sdl_is_main": True, "pthread_main": 1, "driver": None},
                 {"kind": "sdl", "stage": "after-init", "ok": True, "sdl_is_main": True, "pthread_main": 1, "driver": "cocoa"},

@@ -317,6 +317,7 @@ jobs:
           b=$("$workspace.hidden/out/icy-tower-macos-aarch64/icy-tower" --headless --frames 600 --seed 7)
           echo "relocated: $a"
           [ "$a" = "$b" ]
+          case $a in frames=600\ *) ;; *) echo "::error::no summary line: $a"; exit 1 ;; esac
           codesign --verify --deep --strict "$APP"
 
       - name: The executable's tests (tests/workload-icy-tower.test, macOS section)

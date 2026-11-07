@@ -451,16 +451,27 @@ proc buildExecutable {name text} {
     return $path
 }
 
-# {CHILD-PID OUTPUT} of one run of EXECUTABLE.
+# {CHILD-PID VALUE} of one run of EXECUTABLE: VALUE its value, which the run
+# reports through the driver protocol (BOTLISH_NATIVE_RESULT, ProtocolValue):
+# an executable prints no value of its own (PROGRAM-OUTPUT-MILESTONE-1.md).
+# These programs print nothing: anything the run writes is an error.
 proc runWithPid {executable} {
-    set channel [open |[list $executable] r]
-    set child [pid $channel]
-    set output [string trim [read $channel]]
-    close $channel
-    return [list $child $output]
+    set result [ProtocolResultFile]
+    try {
+        set channel [withEnvironment [list BOTLISH_NATIVE_RESULT $result] {open |[list $executable] r}]
+        set child [pid $channel]
+        set output [read $channel]
+        close $channel
+        if {$output ne ""} {
+            error "the executable wrote: $output"
+        }
+        return [list $child [ProtocolValue $result]]
+    } finally {
+        file delete $result
+    }
 }
 
-test linux-syscall-standalone-getpid-is-its-pid {a standalone executable prints exactly its own pid (as the launching Tcl process sees it); two runs of one build are two processes with two pids: the syscall runs at run time, never folded into the build} -constraints linuxX86_64 -body {
+test linux-syscall-standalone-getpid-is-its-pid {a standalone executable's value (read through the driver protocol) holds exactly its own pid (as the launching Tcl process sees it); two runs of one build are two processes with two pids: the syscall runs at run time, never folded into the build} -constraints linuxX86_64 -body {
     set exe [buildExecutable rawpid "${::rawGetpid}a = raw_getpid()\nb = raw_getpid()\n\[a, a == b\]"]
     lassign [runWithPid $exe] pid1 out1
     lassign [runWithPid $exe] pid2 out2

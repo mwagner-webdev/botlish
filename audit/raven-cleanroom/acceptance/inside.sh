@@ -145,8 +145,12 @@ run "nothing of the package is left" -- bash -c 'ls -a /home/dev/app; find / -xd
 check package-gone bash -c "! grep -q '/home/dev/app/.bot_modules' <<< \"\$LAST\""
 run "which libraven the moved executable resolves (the loader's own trace)" -- bash -c 'cd /tmp && ldd /home/dev/elsewhere/deep/moved/window | grep -E "raven|X11"'
 check loads-deployed-library has "/home/dev/elsewhere/deep/moved/lib/libraven.so.0"
-run "the moved headless test runs" -- env -u DISPLAY /home/dev/elsewhere/deep/moved/test
-check moved-test-runs has '["2", "2 clicks", "0", "0 clicks"]'
+# An executable prints no value of its own (PROGRAM-OUTPUT-MILESTONE-1.md):
+# its value is read through the driver protocol, the words of the result
+# file's `value V` line with their quoting removed.
+run "the moved headless test runs" -- env -u DISPLAY BOTLISH_NATIVE_RESULT=/tmp/moved-test.result /home/dev/elsewhere/deep/moved/test
+run "its value (the driver protocol's result file)" -- bash -c 'tr -d "\\\\{}" < /tmp/moved-test.result | tr -s " \n" " "'
+check moved-test-runs has 'value list str 2 str 2 clicks str 0 str 0 clicks'
 run "the moved desktop program on a real window" -- "$H/desktop-session.sh" "$OUT/session-moved" /home/dev/elsewhere/deep/moved/window
 check desktop-moved has "PASS"
 run "the libraries the running program mapped" -- cat "$OUT/session-moved/mapped"

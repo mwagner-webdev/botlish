@@ -534,6 +534,12 @@ $ desktop-session.sh ... moved/window PASS (the session of section E)
           libvulkan.so.1.3.275, libvulkan_lvp.so, ...
 ```
 
+That transcript predates PROGRAM-OUTPUT-MILESTONE-1.md, when an executable
+printed its program's value. An executable now writes nothing of its own:
+the acceptance runs `moved/test` with `BOTLISH_NATIVE_RESULT` and checks
+the words of the result file's `value` line (`value list str 2 str 2
+clicks str 0 str 0 clicks`).
+
 No `LD_LIBRARY_PATH` and no package tree: the executable's RUNPATH found
 the deployed library, and the running process's own memory map shows it
 loaded that file (not a copy elsewhere: there is none). The system's X11

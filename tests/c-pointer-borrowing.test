@@ -758,13 +758,13 @@ test cb-strict0-replay {an unchecked (-strict 0) program keeps a refused exposur
     }
 } -cleanup {unset -nocomplain body outcome} -result {{error {CORE SEMANTIC TYPE} 1} {error {CORE SEMANTIC TYPE} 1} {error {CORE SEMANTIC TYPE} 1}}
 
-test cb-executable {a standalone executable of a program with read and write exposures prints what every in-process backend computes} -constraints executableAot -body {
+test cb-executable {a standalone executable of a program with read and write exposures computes what every in-process backend computes: its value, read through the driver protocol, and a plain run printing nothing (an executable never prints its value)} -constraints executableAot -body {
     set dir [makeDirectory cb-executables]
     set exe [file join $dir borrow]
     set exe [native::executable [cbHir "m = std::abi::bytes::zeroed(std::abi::usize(4))\nr = ffi_fixture::fill\[std::ffi::c::UChar\](m, 4, 33)\n\[ffi_fixture::read\[std::ffi::c::UChar\](mk(3, 9), 3), ffi_fixture::read\[std::ffi::c::Void\](r.out, 4)\]"] $exe]
-    set out [exec $exe]
+    set out [list [standaloneValue $exe] [exec $exe]]
     file delete -force $dir
     set out
-} -cleanup {unset -nocomplain dir exe out} -result "\[[cbList [cbPattern 3 9]], [cbList [cbFill 4 33]]\]"
+} -cleanup {unset -nocomplain dir exe out} -result [list "\[[cbList [cbPattern 3 9]], [cbList [cbFill 4 33]]\]" {}]
 
 cleanupTests

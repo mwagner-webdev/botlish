@@ -458,15 +458,19 @@ sorted = qsort(data, 8, 1, cmp)
     }
 } -cleanup removeCbApps -result {{[true, true]}}
 
-test cb-executable {a standalone executable runs the nested callbacks with no Tcl, no JIT and no source -- moved out of its build directory, run with an empty environment -- and under GC stress} -constraints cbFixture -body {
+test cb-executable {a standalone executable runs the nested callbacks with no Tcl, no JIT and no source -- moved out of its build directory, run with an empty environment -- and under GC stress: its value read through the driver protocol, and plain runs printing nothing (an executable never prints its value)} -constraints cbFixture -body {
     set dir [cbxApp $::cbNested]
     set exe [native::withLinkDirs [list $::cbFixtureDir] {native::executable [cbHir $dir] [file join $dir program]}]
     set elsewhere [makeDirectory cb-moved-[pid]]
     set moved [file join $elsewhere [file tail $exe]]
     file rename $exe $moved
     file delete -force $dir
-    list [string trim [runBare $moved]] [string trim [exec env -i BOTLISH_NATIVE_GC_STRESS=1 $moved]]
-} -cleanup {removeCbApps; file delete -force [file join [temporaryDirectory] cb-moved-[pid]]} -result {{["kept-by-main-1", "kept-by-main-2", "205"]} {["kept-by-main-1", "kept-by-main-2", "205"]}}
+    set result [ProtocolResultFile]
+    set stressed [exec env -i BOTLISH_NATIVE_GC_STRESS=1 BOTLISH_NATIVE_RESULT=$result $moved]
+    set stressedValue [ProtocolValue $result]
+    file delete $result
+    list [bareValue $moved] $stressedValue $stressed [runBare $moved] [exec env -i BOTLISH_NATIVE_GC_STRESS=1 $moved]
+} -cleanup {removeCbApps; file delete -force [file join [temporaryDirectory] cb-moved-[pid]]} -result {{["kept-by-main-1", "kept-by-main-2", "205"]} {["kept-by-main-1", "kept-by-main-2", "205"]} {} {} {}}
 
 # ---------------------------------------------------------------------------
 # What the runtime refuses: each ends the (linked) program's process, fail-

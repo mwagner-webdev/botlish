@@ -263,11 +263,12 @@ caller()}] caller]
 
 test tiny-leaf-ineligible-mutating {a leaf that mutates a MutableArray declines (allocation/mutation, not proven effect-free)} -body {
     set body [FunctionBody [nirTextOf {import std::mutable_array
-fn touch(a):
+fn touch(place a: MutableArray[int]):
     std::mutable_array::set(a, 0, 1)
 
 fn caller():
-    touch(std::mutable_array::allocate(1))
+    b = std::mutable_array::allocate(1)
+    touch(b)
 
 caller()}] caller]
     HasCallIn $body

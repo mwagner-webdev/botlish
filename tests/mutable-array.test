@@ -225,7 +225,7 @@ proc maRoute {decls body} {
 test ma-cow-routes {items 6, 36, 43-45: every route a copy can take -- binding, parameter, result, identity function, generic identity and wrapper, struct field, List element, MutableVector element, nested aggregate, a function called indirectly (passed as a value, so only its own entry copy protects the caller) -- gives an independent value: mutating the copy never changes the never-mutated original} -body {
     list \
         [maRoute "" "    b = a\n    b.swap(0, 9)\n    \[a.at(0), b.at(0)\]\n"] \
-        [maRoute "fn modify(x: MutableArray\[int\]) -> int errors IndexNotFound:\n    x.swap(0, 9)\n    x.at(0)\n" "    m = modify(a)\n    \[a.at(0), m\]\n"] \
+        [maRoute "fn modify(x: MutableArray\[int\]) -> int errors IndexNotFound:\n    w = x\n    w.swap(0, 9)\n    w.at(0)\n" "    m = modify(a)\n    \[a.at(0), m\]\n"] \
         [maRoute "fn back(x: MutableArray\[int\]) -> MutableArray\[int\]:\n    x\n" "    b = back(a)\n    b.set(0, 9)\n    \[a.at(0), b.at(0)\]\n"] \
         [maRoute "fn same(x):\n    x\n" "    b = same(a)\n    b.swap(0, 9)\n    \[a.at(0), b.at(0)\]\n"] \
         [maRoute "fn wrap(x):\n    {data: x}\n" "    s = wrap(a)\n    s.data.swap(0, 9)\n    \[a.at(0), s.data.at(0)\]\n"] \
@@ -233,7 +233,7 @@ test ma-cow-routes {items 6, 36, 43-45: every route a copy can take -- binding, 
         [maRoute "" "    xs = \[a\]\n    b = std::list::at(xs, 0)\n    b.swap(0, 9)\n    \[a.at(0), std::list::at(xs, 0).at(0), b.at(0)\]\n"] \
         [maRoute "" "    v = std::mutable_vector::from_list(\[a\])\n    b = v.at(0)\n    b.swap(0, 9)\n    \[a.at(0), v.at(0).at(0), b.at(0)\]\n"] \
         [maRoute "" "    n = {xs: \[a\]}\n    b = std::list::at(n.xs, 0)\n    b.set(1, 7)\n    \[a.at(1), b.at(1)\]\n"] \
-        [maRoute "fn poke(x: MutableArray\[int\]) -> int:\n    x.set(0, 9):\n        on IndexNotFound:\n            unit\n    x.capacity()\nfn apply(g: Fn{args: \[MutableArray\[int\]\], return: int}, v: MutableArray\[int\]) -> int:\n    g(v)\n" "    m = apply(poke, a)\n    \[a.at(0), m\]\n"]
+        [maRoute "fn poke(x: MutableArray\[int\]) -> int:\n    w = x\n    w.set(0, 9):\n        on IndexNotFound:\n            unit\n    w.capacity()\nfn apply(g: Fn{args: \[MutableArray\[int\]\], return: int}, v: MutableArray\[int\]) -> int:\n    g(v)\n" "    m = apply(poke, a)\n    \[a.at(0), m\]\n"]
 } -result {{value {[0, 9]}} {value {[0, 9]}} {value {[0, 9]}} {value {[0, 9]}} {value {[0, 9]}} {value {[0, 9]}} {value {[0, 0, 9]}} {value {[0, 0, 9]}} {value {[0, 7]}} {value {[0, 2]}}}
 
 test ma-cow-surviving-result {item 35: a function result returned while another copy survives is independent of it, also when the caller mutates the result first} -body {
@@ -273,12 +273,12 @@ test ma-place-receiver {item 33: a temporary receiver (a call's result, a List e
 } -result {MUTABLE-PLACE-RECEIVER {the receiver of std::mutable_array::set is not a place: it is a temporary value, so the updated array would be lost (a MutableArray is a value; bind it to a name, mutate the name, and use the name afterwards)
 <input>:4:1: this call of "std::mutable_array::set" may produce the declared error "IndexNotFound", which is neither handled here nor admitted by the enclosing function's own "errors" declaration (CORE SEMANTIC UNHANDLED-ERROR)} MUTABLE-PLACE-RECEIVER MUTABLE-PLACE-RECEIVER MUTABLE-PLACE-RECEIVER MUTABLE-PLACE-CAPTURE}
 
-test ma-generic-place {item 33: a generic function's untyped parameter is a place its body may mutate (a dynamic copy on entry, `d`): the caller's array never changes} -body {
-    maRoute "fn fill(x, v) errors IndexNotFound:\n    std::mutable_array::set(x, 0, v)\n    x\n" "    b = fill(a, 4)\n    c = fill(b, 5)\n    \[a.at(0), b.at(0), c.at(0)\]\n"
+test ma-generic-place {item 33: a generic function's untyped parameter's local copy is a place its body may mutate (a dynamic copy, `d`): the caller's array never changes} -body {
+    maRoute "fn fill(x, v) errors IndexNotFound:\n    w = x\n    std::mutable_array::set(w, 0, v)\n    w\n" "    b = fill(a, 4)\n    c = fill(b, 5)\n    \[a.at(0), b.at(0), c.at(0)\]\n"
 } -result {value {[0, 4, 5]}}
 
 test ma-any-slot-copies {a struct whose `any` slot sits beside a typed array slot is copied slot by slot, the `any` slot by what it holds at run time (`d`): a copy of the struct taken before the `any` slot's array is moved into a generic function that writes it, at its path's last use while the typed sibling is read later, keeps its own array; so does the array a place's `any` slot was entered from -- on every backend} -body {
-    set decls "import std::mutable_array\nstruct Bucket:\n    hashes: MutableArray\[int\]\n    slots: any\nfn mut(v) errors IndexNotFound:\n    v.set(0, 99)\n    v\n"
+    set decls "import std::mutable_array\nstruct Bucket:\n    hashes: MutableArray\[int\]\n    slots: any\nfn mut(v) errors IndexNotFound:\n    w = v\n    w.set(0, 99)\n    w\n"
     list \
         [maAgree "${decls}fn f() errors IndexNotFound:\n    b = Bucket {hashes: std::mutable_array::create(2, 7), slots: std::mutable_array::create(2, 0)}\n    saved = b\n    r = mut(b.slots)\n    hs = b.hashes\n    \[std::mutable_array::at(saved.slots, 0), r.at(0), hs.at(0)\]\nr = f():\n    on IndexNotFound:\n        \[\]\nr\n"] \
         [maAgree "${decls}fn f() errors IndexNotFound:\n    orig = std::mutable_array::create(4, 0)\n    p = Bucket {hashes: std::mutable_array::create(1, 0), slots: orig}\n    p.hashes.set(0, 1)\n    s = mut(p.slots)\n    n = p.hashes.at(0)\n    \[orig.at(0), s.at(0), n\]\nr = f():\n    on IndexNotFound:\n        \[\]\nr\n"]
@@ -376,7 +376,8 @@ r
 
 test ma-affine-swap-failure {item 11: an out-of-range swap of an affine replacement leaves the array unchanged, releases the replacement it was given, and propagates IndexNotFound; the source binding stays moved (USE-AFTER-MOVE)} -constraints nativeCoroutines -body {
     set text "${maDecls}fn put(a: MutableArray\[Coroutine{args: \[Command\], return: Event}\], i: int, c: Coroutine{args: \[Command\], return: Event}) -> int errors IndexNotFound:
-    old = a.swap(i, c)
+    w = a
+    old = w.swap(i, c)
     old(Command {value: 1}).value
 fn f(zero: int) -> List\[int\]:
     a = std::mutable_array::generate(2, make)
@@ -527,18 +528,20 @@ test ma-path-last-use-copies {a struct of 1000-slot arrays with an Int field, up
     set decls "import std::mutable_array\nstruct T:\n    keys: MutableArray\[int\]\n    vals: MutableArray\[int\]\n    count: int\nstruct Put:\n    old: int\n    table: T\nfn table() -> T:\n    T {keys: std::mutable_array::create(1000, 0), vals: std::mutable_array::create(1000, 0), count: 0}\n"
     lmap fns {
         {fn put(t: T, i: int) -> T errors IndexNotFound:
-    t.keys.set(i, i)
-    t.vals.set(i, i * 2)
-    T {keys: t.keys, vals: t.vals, count: t.count + 1}
+    w = t
+    w.keys.set(i, i)
+    w.vals.set(i, i * 2)
+    T {keys: w.keys, vals: w.vals, count: w.count + 1}
 fn fill(t: T, i: int, n: int) -> T errors IndexNotFound:
     if i >= n:
         return t
     fill(put(t, i), i + 1, n)
 }
         {fn store(t: T, i: int, count: int) -> T errors IndexNotFound:
-    t.keys.set(i, i)
-    t.vals.set(i, i * 2)
-    T {keys: t.keys, vals: t.vals, count: count}
+    w = t
+    w.keys.set(i, i)
+    w.vals.set(i, i * 2)
+    T {keys: w.keys, vals: w.vals, count: count}
 fn put(t: T, i: int) -> T errors IndexNotFound:
     store(t, i, t.count + 1)
 fn fill(t: T, i: int, n: int) -> T errors IndexNotFound:
@@ -547,10 +550,11 @@ fn fill(t: T, i: int, n: int) -> T errors IndexNotFound:
     fill(put(t, i), i + 1, n)
 }
         {fn put_old(t: T, i: int) -> Put errors IndexNotFound:
-    old = t.vals.at(i)
-    t.keys.set(i, i)
-    t.vals.set(i, i * 2)
-    Put {old: old, table: T {keys: t.keys, vals: t.vals, count: t.count + 1}}
+    w = t
+    old = w.vals.at(i)
+    w.keys.set(i, i)
+    w.vals.set(i, i * 2)
+    Put {old: old, table: T {keys: w.keys, vals: w.vals, count: w.count + 1}}
 fn fill(t: T, i: int, n: int) -> T errors IndexNotFound:
     if i >= n:
         return t

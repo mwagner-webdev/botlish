@@ -64,6 +64,12 @@ cd "$work/programs"
 fail() { echo "FAIL: $*" >&2; exit 1; }
 # BOTLISH ARGS... in an empty environment with a fresh HOME.
 run() { env -i HOME="$work/home" "$botlish" "$@"; }
+# A check of a command's output captures the output, then matches it
+# (`out=$(COMMAND) && grep -q PATTERN <<<"$out"`), never `COMMAND | grep -q
+# PATTERN`: grep -q stops reading at its first match, and a command still
+# writing then dies of the broken pipe (Tcl's `error writing "stdout"`),
+# which pipefail makes the check's verdict (a failure, or in an `if` the
+# silent pass of a check that should have failed).
 # BOTLISH ARGS... where it links native executables: on macOS with the C
 # compiler driver's PATH (toolchain: whether its developer tools exist).
 toolchain=1
@@ -148,14 +154,27 @@ printf 'x = \n' >broken.bot
 if run broken.bot >"$work/broken.out"; then fail "a broken program was accepted"; fi
 grep -q 'SURFACE SYNTAX' "$work/broken.out" || fail "a broken program reported no syntax error"
 
-programs="hello:unit context-hello:14"
-(( macos )) && programs=hello:unit
+# An executable writes what its program writes and nothing else: no value
+# line after it (PROGRAM-OUTPUT-MILESTONE-1.md).
+programs="hello context-hello"
+(( macos )) && programs=hello
 if (( toolchain )); then
-  for program in $programs; do
-    name=${program%%:*}
+  for name in $programs; do
     linking -warnings off -emit-native-executable "$name.bot" >/dev/null || fail "emit $name"
-    [[ $(env -i "./$name") == "Hello, world!"$'\n'"${program#*:}" ]] || fail "executable $name"
+    [[ $(env -i "./$name") == "Hello, world!" ]] || fail "executable $name"
   done
+  # run: the program as a command -- its output only, its arguments after
+  # its file, its status.
+  [[ $(linking run -warnings off hello.bot) == "Hello, world!" ]] || fail "run hello.bot"
+  # hello.bot (the host's: Linux's or macOS's context) printing its
+  # arguments instead of its greeting.
+  awk '$0 == "    std::io::print_line(\"Hello, world!\")" {
+         print "    words = argv():"; print "        on InvalidArgumentEncoding:"; print "            return unit"
+         print "    loop w in words:"; print "        std::io::print_line(w)"; print "    unit"; next }
+       { print }' hello.bot >show-args.bot
+  [[ $(linking run -warnings off show-args.bot one 'ünï cödé' -v) == "show-args.bot"$'\n'"one"$'\n'"ünï cödé"$'\n'"-v" ]] ||
+    fail "run passes no arguments: $(linking run -warnings off show-args.bot one 'ünï cödé' -v 2>&1)"
+  if linking run -warnings off broken.bot >"$work/run-broken.out" 2>&1; then fail "run accepted a broken program"; fi
 else
   # (macOS without the developer tools.)
   if linking -warnings off -emit-native-executable hello.bot >"$work/emit.out" 2>&1; then fail "linked without developer tools"; fi
@@ -171,7 +190,7 @@ mkdir -p "$work/app"
 printf 'fn count(k: int) -> int:\n    if k == 0:\n        return 0\n    1 + count(k - 1)\n' >"$work/app/counter.bot"
 printf 'import counter\n\ncounter::count(3000)\n' >"$work/app/value.bot"
 for backend in interp compile cranelift-generic cranelift; do
-  (cd / && run -backend "$backend" "$work/app/value.bot") | grep -qx '   value: 3000' ||
+  out=$(cd / && run -backend "$backend" "$work/app/value.bot") && grep -qx '   value: 3000' <<<"$out" ||
     fail "an application module on $backend"
 done
 # Non-ASCII directory names and arguments with no locale at all: file names
@@ -180,11 +199,11 @@ mkdir -p "$work/ünï cödé"
 printf 'fn count(k: int) -> int:\n    if k == 0:\n        return 0\n    1 + count(k - 1)\n' >"$work/ünï cödé/counter.bot"
 printf 'import counter\n\ncounter::count(42)\n' >"$work/ünï cödé/answer.bot"
 for backend in interp cranelift; do
-  (cd / && run -backend "$backend" "$work/ünï cödé/answer.bot") | grep -qx '   value: 42' ||
+  out=$(cd / && run -backend "$backend" "$work/ünï cödé/answer.bot") && grep -qx '   value: 42' <<<"$out" ||
     fail "a program in a non-ASCII directory, with no locale, on $backend"
 done
 printf 'argv():\n    on InvalidArgumentEncoding:\n        ["invalid"]\n' >"$work/ünï cödé/args.bot"
-(cd "$work/ünï cödé" && run -argv 'ünï cödé' args.bot) | grep -qxF '   value: ["ünï cödé"]' ||
+out=$(cd "$work/ünï cödé" && run -argv 'ünï cödé' args.bot) && grep -qxF '   value: ["ünï cödé"]' <<<"$out" ||
   fail "a non-ASCII argument with no locale"
 printf 'import nosuch\n\n1\n' >"$work/app/missing.bot"
 if run "$work/app/missing.bot" >"$work/missing.out"; then fail "a missing module was accepted"; fi
@@ -197,7 +216,7 @@ grep -qF "no such module file $work/app/nosuch.bot" "$work/missing.out" ||
 printf 'fn length(xs) -> int:\n    99\n' >"$work/app/list.bot"
 printf 'import list\nimport ::std::list\n\n[list::length([1]), ::std::list::length([1, 2])]\n' >"$work/app/both.bot"
 for backend in interp cranelift; do
-  (cd "$work/app" && run -backend "$backend" "$work/app/both.bot") | grep -qxF '   value: [99, 2]' ||
+  out=$(cd "$work/app" && run -backend "$backend" "$work/app/both.bot") && grep -qxF '   value: [99, 2]' <<<"$out" ||
     fail "a local list beside std::list on $backend"
 done
 printf 'import std::nosuch\n\n1\n' >"$work/app/nostd.bot"
@@ -220,7 +239,7 @@ if (( toolchain )); then
   else
     env -i "$botlish" -warnings off -emit-native-executable hello.bot >/dev/null || fail "emit without HOME"
   fi
-  [[ $(env -i ./hello) == $'Hello, world!\nunit' ]] || fail "executable built without HOME"
+  [[ $(env -i ./hello) == 'Hello, world!' ]] || fail "executable built without HOME"
 fi
 env -i "$botlish" -backend cranelift samples/01-arithmetic.bot >"$work/nohome.out" || fail "cranelift without HOME"
 grep -q 'value: 50' "$work/nohome.out" || fail "cranelift without HOME: wrong value"
@@ -283,7 +302,7 @@ pm package pack "$work/pkgsrc/geometry" -out "$work/pkgrepo" >/dev/null || fail 
 pm add geometry -project "$work/pkgapp" -repository "$work/pkgrepo" >/dev/null || fail "add"
 pm verify -project "$work/pkgapp" -repository "$work/pkgrepo" >/dev/null || fail "verify"
 [[ ! -e $work/home-pm/.cache ]] || fail "a package command installed the native backend ($(ls "$work/home-pm/.cache"))"
-run -warnings off "$work/pkgapp/main.bot" | grep -qF 'value: 42' || fail "a program over an installed package"
+out=$(run -warnings off "$work/pkgapp/main.bot") && grep -qF 'value: 42' <<<"$out" || fail "a program over an installed package"
 echo "   packages: pack, add, verify, with no native backend installed"
 
 # Shared dependencies (SHARED-PACKAGE-DEPENDENCIES-MILESTONE-1.md): two
@@ -308,8 +327,8 @@ pm package pack "$work/pkgsrc/clash" -out "$work/pkgrepo" >/dev/null || fail "pa
 printf 'import shapes\nimport tiles\n\ntiles::read(shapes::make(21))\n' >"$work/pkgapp3/main.bot"
 pm add shapes -project "$work/pkgapp3" -repository "$work/pkgrepo" >/dev/null || fail "add shapes"
 pm add tiles -project "$work/pkgapp3" -repository "$work/pkgrepo" >/dev/null || fail "add tiles"
-pm package graph -project "$work/pkgapp3" | grep -qF 'shared: one instance, geometry, for shapes, tiles' || fail "package graph shows the shared geometry"
-run -warnings off "$work/pkgapp3/main.bot" | grep -qF 'value: 42' || fail "a program over two packages sharing geometry"
+out=$(pm package graph -project "$work/pkgapp3") && grep -qF 'shared: one instance, geometry, for shapes, tiles' <<<"$out" || fail "package graph shows the shared geometry"
+out=$(run -warnings off "$work/pkgapp3/main.bot") && grep -qF 'value: 42' <<<"$out" || fail "a program over two packages sharing geometry"
 if pm add clash -project "$work/pkgapp3" -repository "$work/pkgrepo" 2>"$work/clash.err" >/dev/null; then fail "add clash succeeded"; fi
 grep -qF '(PM DEPENDENCY-CONFLICT)' "$work/clash.err" || fail "add clash is no DEPENDENCY-CONFLICT ($(cat "$work/clash.err"))"
 [[ ! -e $work/home-pm/.cache ]] || fail "a package command installed the native backend ($(ls "$work/home-pm/.cache"))"
@@ -330,8 +349,8 @@ pm add geo -project "$work/pkgapp2" -repository "$work/pkgrepo" -target linux-x8
 pm verify -project "$work/pkgapp2" -target linux-x86_64 >/dev/null || fail "verify -target"
 pm native inspect "$botlish" >/dev/null || fail "native inspect"
 [[ ! -e $work/home-pm/.cache ]] || fail "a package command installed the native backend ($(ls "$work/home-pm/.cache"))"
-run -warnings off -target linux-x86_64 "$work/pkgapp2/main.bot" | grep -qF 'value: "x86-64"' || fail "the linux-x86_64 view"
-run -warnings off -target linux-aarch64 "$work/pkgapp2/main.bot" | grep -qF 'value: "aarch64"' || fail "the linux-aarch64 view"
+out=$(run -warnings off -target linux-x86_64 "$work/pkgapp2/main.bot") && grep -qF 'value: "x86-64"' <<<"$out" || fail "the linux-x86_64 view"
+out=$(run -warnings off -target linux-aarch64 "$work/pkgapp2/main.bot") && grep -qF 'value: "aarch64"' <<<"$out" || fail "the linux-aarch64 view"
 echo "   packages: a two-target release, its views and native inspect, with no native backend installed"
 
 # PM-3 (PACKAGE-MANAGER-MILESTONE-3.md): authoring a native package -- a
@@ -342,7 +361,13 @@ echo "   packages: a two-target release, its views and native inspect, with no n
 # an ELF file of this host's target).
 if [[ $(uname -s) == Linux ]]; then
   case $(uname -m) in x86_64) ztarget=linux-x86_64 ;; aarch64) ztarget=linux-aarch64 ;; *) ztarget="" ;; esac
-  libz=$(ls /lib/*-linux-gnu/libz.so.1 /usr/lib/*-linux-gnu/libz.so.1 2>/dev/null | head -1)
+  # This host's own zlib, the first candidate that exists (a loop, not
+  # `ls A B | head -1`: ls fails when either is missing, and set -e then
+  # ended the script without a word).
+  libz=""
+  for candidate in "/lib/$(uname -m)-linux-gnu/libz.so.1" "/usr/lib/$(uname -m)-linux-gnu/libz.so.1"; do
+    if [[ -e $candidate ]]; then libz=$candidate; break; fi
+  done
   if [[ -n $ztarget && -n $libz ]]; then
     mkdir -p "$work/pkgsrc/zpkg" "$work/zbuild"
     cp -L "$libz" "$work/zbuild/libz.so.1"
@@ -350,11 +375,13 @@ if [[ $(uname -s) == Linux ]]; then
     printf 'extern c library "z"\n\nfn n() -> int:\n    1\n' >"$work/pkgsrc/zpkg/zpkg.bot"
     printf '{"evidence": 1, "builds": [{"name": "zlib", "outputs": ["targets/%s/native/libz.so.1"], "notes": "the system zlib, copied"}]}\n' "$ztarget" >"$work/zbuild/evidence.json"
     pm native add "$work/zbuild/libz.so.1" -target "$ztarget" -name z -symbol inflate -license Zlib -package "$work/pkgsrc/zpkg" >/dev/null || fail "native add"
-    pm native audit "$work/pkgsrc/zpkg" | grep -q "target $ztarget: complete" || fail "native audit"
+    out=$(pm native audit "$work/pkgsrc/zpkg") && grep -q "target $ztarget: complete" <<<"$out" || fail "native audit"
     pm package pack "$work/pkgsrc/zpkg" -out "$work/pkgrepo" -evidence "$work/zbuild/evidence.json" >/dev/null || fail "package pack -evidence"
-    pm package inspect "$work/pkgrepo/zpkg-1.0.0.botpkg" -provenance "$work/pkgrepo/zpkg-1.0.0.provenance.json" | grep -q "describes this artifact" || fail "package inspect -provenance"
+    out=$(pm package inspect "$work/pkgrepo/zpkg-1.0.0.botpkg" -provenance "$work/pkgrepo/zpkg-1.0.0.provenance.json") && grep -q "describes this artifact" <<<"$out" || fail "package inspect -provenance"
     [[ ! -e $work/home-pm/.cache ]] || fail "an authoring command installed the native backend ($(ls "$work/home-pm/.cache"))"
     echo "   packages: native add, audit, pack -evidence, inspect -provenance, with no compiler or native backend"
+  else
+    echo "   packages: native authoring not checked (no zlib of this host's target, $(uname -m))"
   fi
 fi
 

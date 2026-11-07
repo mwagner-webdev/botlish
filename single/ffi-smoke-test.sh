@@ -62,6 +62,11 @@ work=$(mktemp -d "${TMPDIR:-/tmp}/botlish-ffi-smoke.XXXXXX")
 trap 'rm -rf "$work"' EXIT
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
+# A check of a command's output captures the output, then matches it, never
+# `COMMAND | grep -q PATTERN`: grep -q stops reading at its first match, and
+# a command still writing then dies of the broken pipe, which pipefail makes
+# the check's verdict (a failure, or in an `if` the silent pass of a check
+# that should have failed).
 
 macos=0
 [[ $(uname -s) == Darwin ]] && macos=1
@@ -200,17 +205,39 @@ hello():
     on std::io::WriteFailed:
         unit
 EOF
-# The expected outputs: the C fixture's own arithmetic (tests/cffi/fixture.c).
+# The expected values: the C fixture's own arithmetic (tests/cffi/fixture.c),
+# as the compiler shows a value (its "value:" line).
 expected() {
   case $1 in
     a) echo 42 ;;
     b) echo '[42, 42, 321]' ;;
     c) echo '[37602, 1768, 888]' ;;
     d) echo '[[16, 0, 1736], [-1, 34, 1736], [18446744073709551615, 5], [42, 0]]' ;;
-    e) printf 'Hello from portable IO\nunit\n' ;;
+    e) echo unit ;;
     f) echo 42 ;;
   esac
 }
+# What an executable writes: only what its program writes (an executable
+# prints no value: PROGRAM-OUTPUT-MILESTONE-1.md).
+expected_output() {
+  case $1 in
+    e) echo 'Hello from portable IO' ;;
+  esac
+}
+# The same values as an executable reports them through the driver protocol
+# (BOTLISH_NATIVE_RESULT=FILE: a "value V" line, V in the host's value
+# format), its words with the format's quoting -- braces and backslashes --
+# removed (value_words): no Tcl here to read the line.
+expected_words() {
+  case $1 in
+    a | f) echo 'value int 42' ;;
+    b) echo 'value list int 42 int 42 int 321' ;;
+    c) echo 'value list int 37602 int 1768 int 888' ;;
+    d) echo 'value list list int 16 int 0 int 1736 list int -1 int 34 int 1736 list int 18446744073709551615 int 5 list int 42 int 0' ;;
+    e) echo 'value unit' ;;
+  esac
+}
+value_words() { tr -d '\\{}' <"$1" | tr -s ' \n' ' ' | sed 's/ $//'; }
 size() { wc -c <"$1" | tr -d ' '; }
 
 for name in a b c d; do
@@ -227,7 +254,7 @@ for name in a b c d; do
     grep -q '^system linker: [^ ]*/cc ' "$work/link.log" || { cat "$work/link.log" >&2; fail "building $name ran no cc (not the system linker?)"; }
     if grep -E '(rustc|cargo)' "$work/link.log"; then fail "building $name ran Rust"; fi
   fi
-  if tail -c 8 "$name" | grep -q BOTLIMG1; then fail "$name was stub-linked"; fi
+  if tail -c 8 "$name" >"$work/tail" && grep -q BOTLIMG1 "$work/tail"; then fail "$name was stub-linked"; fi
   echo "   built $name ($(size "$name") bytes)"
 done
 # E: no C compiler at all on PATH, and still an executable (the stub, on
@@ -238,7 +265,7 @@ if [[ $(uname -m) == x86_64 ]]; then
   echo "   built e ($(size e) bytes, stub-linked, no C compiler on PATH)"
 else
   run -warnings off -emit-native-executable e.bot >/dev/null || fail "build e"
-  if tail -c 8 e | grep -q BOTLIMG1; then fail "e was stub-linked on $(uname -m)"; fi
+  if tail -c 8 e >"$work/tail" && grep -q BOTLIMG1 "$work/tail"; then fail "e was stub-linked on $(uname -m)"; fi
   echo "   built e ($(size e) bytes, system-linked: no stub on $(uname -s) $(uname -m))"
 fi
 
@@ -278,22 +305,31 @@ if compgen -G '.botlish-aot-*' >/dev/null; then fail "a link left its work direc
 rm -rf "$work/bin" "$work/home"/.cache "$work/home"/Library "$work/lib"
 for name in a b c d e f; do
   got=$(env -i "./$name") || fail "executable $name failed"
-  want=$(expected "$name")
+  want=$(expected_output "$name")
   [[ $got == "$want" ]] || fail "executable $name printed '$got', not '$want'"
+  rm -f "$work/result"
+  env -i BOTLISH_NATIVE_RESULT="$work/result" "./$name" >/dev/null || fail "executable $name failed in the driver protocol"
+  [[ $(value_words "$work/result") == "$(expected_words "$name")" ]] ||
+    fail "executable $name reported '$(cat "$work/result")', not the words '$(expected_words "$name")'"
   stressed=$(env -i BOTLISH_NATIVE_GC_STRESS=1 "./$name") || fail "executable $name failed under GC stress"
   [[ $stressed == "$got" ]] || fail "executable $name under GC stress printed '$stressed'"
+  rm -f "$work/result"
+  env -i BOTLISH_NATIVE_GC_STRESS=1 BOTLISH_NATIVE_RESULT="$work/result" "./$name" >/dev/null ||
+    fail "executable $name failed in the driver protocol under GC stress"
+  [[ $(value_words "$work/result") == "$(expected_words "$name")" ]] ||
+    fail "executable $name under GC stress reported '$(cat "$work/result")'"
   # Its dynamic dependencies, and no search path of its own (an RPATH,
   # RUNPATH or LC_RPATH would point at the build's directories).
   needed=
   if command -v readelf >/dev/null; then
     needed=$(readelf -d "$name" | sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p' | tr '\n' ' ')
-    if readelf -d "$name" | grep -q -e '(RPATH)' -e '(RUNPATH)'; then fail "executable $name has a library search path: $(readelf -d "$name" | grep PATH)"; fi
+    if out=$(readelf -d "$name") && grep -q -e '(RPATH)' -e '(RUNPATH)' <<<"$out"; then fail "executable $name has a library search path: $(readelf -d "$name" | grep PATH)"; fi
   elif (( macos )); then
     needed=$(otool -L "$name" | tail -n +2 | awk '{print $1}' | tr '\n' ' ')
     for library in $needed; do
       case $library in /usr/lib/*|/System/Library/*) ;; *) fail "executable $name needs $library, not a system library" ;; esac
     done
-    if otool -l "$name" | grep -q 'cmd LC_RPATH'; then fail "executable $name has an LC_RPATH: $(otool -l "$name" | grep -A2 LC_RPATH | tr '\n' ' ')"; fi
+    if out=$(otool -l "$name") && grep -q 'cmd LC_RPATH' <<<"$out"; then fail "executable $name has an LC_RPATH: $(otool -l "$name" | grep -A2 LC_RPATH | tr '\n' ' ')"; fi
   fi
   if [[ $needed == *botlish* || $needed == *cffi* || $needed == *Tcl* ]]; then fail "executable $name needs $needed"; fi
   echo "   ran $name: ${got//$'\n'/ | }${needed:+  (needs: $needed)}"
@@ -330,6 +366,13 @@ expect_failure "an undefined symbol" "botlish_no_such_symbol" \
 [[ $(env -i HOME="$work/home-run" PATH="$path" "$botlish" -backend cranelift -warnings off -L "$work/lib" b.bot) == \
    "== b.bot (cranelift)"$'\n'"   value: $(expected b)" ]] || fail "-backend cranelift of b"
 echo "   ran b on -backend cranelift"
+# run, the program as a command (PROGRAM-OUTPUT-MILESTONE-1.md), is a native
+# run too: with a fresh cache the runtime archive is installed for it, the
+# program linked and run, and its output -- none -- is all it writes.
+out=$(env -i HOME="$work/home-run-command" PATH="$path" "$botlish" run -warnings off -L "$work/lib" b.bot) ||
+  fail "run of b (a program that calls C) failed"
+[[ -z $out ]] || fail "run of b printed '$out'"
+echo "   ran b as a command"
 # An explicit linker is the user's: BOTLISH_NATIVE_LINKER=stub refuses C.
 expect_failure "the stub linker, chosen" "the stub linker (BOTLISH_NATIVE_LINKER=stub) links no native library" \
   env -i HOME="$work/home" PATH="$path" BOTLISH_NATIVE_LINKER=stub "$botlish" -warnings off -L "$work/lib" -emit-native-executable a.bot

@@ -336,8 +336,9 @@ fn register_indexed_access_tests(zero: int, one: int, two: int, three: int, minu
     fn b_mutable_array_set() errors std::compiler::CompilerError:
         static compile:
             fn put(a, i, v) errors IndexNotFound:
-                std::mutable_array::set(a, i, v)
-                a
+                w = a
+                std::mutable_array::set(w, i, v)
+                w
             fn safe(a, i, v):
                 r = put(a, i, v):
                     on IndexNotFound:
@@ -750,7 +751,7 @@ fn register_relation_proof_tests():
                         return 0
                 std::list::at(ys, j)
             0
-    std::test::rejects_at("ns-proof-relations-do-not-outlive-their-scope/loop-guard-read", std::compiler::DiagnosticCode::UnhandledError, 751, 17, b_loop_guard_read)
+    std::test::rejects_at("ns-proof-relations-do-not-outlive-their-scope/loop-guard-read", std::compiler::DiagnosticCode::UnhandledError, 752, 17, b_loop_guard_read)
     fn b_handler_guard() errors std::compiler::CompilerError:
         static compile:
             fn f(xs, ys, j: SmallIndex):

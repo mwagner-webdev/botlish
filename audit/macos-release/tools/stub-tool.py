@@ -15,7 +15,10 @@ a small model of the real one, configured by $STUB_STATE/config.json:
                seal; -dvvv prints codesign's fields (Authority chain,
                TeamIdentifier, Timestamp, flags, CDHash)
   spctl        accepted as "Notarized Developer ID" only for an Apple-chain
-               signature with a stapled ticket of its CDHash
+               signature with a stapled ticket of its CDHash; with no origin
+               line, as macOS 15's spctl answers (config spctl_origin:
+               "subject" prints the signature's subject, any other text that
+               text)
   xcrun        notarytool (store-credentials, submit, wait, info, log) and
                stapler (staple, validate), their answers from the config
   ditto/unzip  ZIP archives with the files' modes (zipfile); copies
@@ -270,7 +273,9 @@ def spctl():
         source = "no usable signature" if not sig or sig["identity"] == "-" else "Unnotarized Developer ID"
         print("%s: rejected\nsource=%s" % (app, source), file=sys.stderr)
         sys.exit(3)
-    print("%s: accepted\nsource=Notarized Developer ID\norigin=%s" % (app, sig["subject"]), file=sys.stderr)
+    origin = CFG.get("spctl_origin")
+    origin = sig["subject"] if origin == "subject" else origin
+    print("%s: accepted\nsource=Notarized Developer ID" % app + ("\norigin=%s" % origin if origin else ""), file=sys.stderr)
 
 
 def notarytool():

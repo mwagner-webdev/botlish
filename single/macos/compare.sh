@@ -150,8 +150,10 @@ echo "   Compilerpedia: $topics topics, the checkout's"
 reflowed=0
 echo "   diagnostics, -check, NIR, Compilerpedia and the usage: $compared runs alike"
 
-# Executables: each compiler links its own; outputs, statuses and startup
-# reports must agree.
+# Executables: each compiler links its own; outputs, statuses, startup
+# reports and the values they report through the driver protocol
+# (BOTLISH_NATIVE_RESULT: an executable prints no value of its own,
+# PROGRAM-OUTPUT-MILESTONE-1.md) must agree.
 for program in coroutine.bot coroutine-kept.bot context.bot hello-darwin.bot overflow.bot; do
   name=${program%.bot}
   env -i HOME="$work/home" PATH=/usr/bin:/bin LANG=en_US.UTF-8 BOTLISH_NATIVE_LINKER=system \
@@ -167,14 +169,18 @@ for program in coroutine.bot coroutine-kept.bot context.bot hello-darwin.bot ove
       env -i BOTLISH_NATIVE_GC_STRESS=$gc BOTLISH_NATIVE_STARTUP_REPORT="$work/$which.report" "./$name.$which" one "two words" \
         >"$work/$which.out" 2>"$work/$which.err" || status=$?
       echo "status $status" >>"$work/$which.out"
+      rm -f "$work/$which.result"
+      env -i BOTLISH_NATIVE_GC_STRESS=$gc BOTLISH_NATIVE_RESULT="$work/$which.result" "./$name.$which" one "two words" \
+        >/dev/null 2>&1 || fail "$name's $which executable failed in the driver protocol"
     done
     [[ -s $work/app.report ]] || fail "$name's executable wrote no startup report"
-    for stream in out err report; do
+    [[ -s $work/app.result ]] || fail "$name's executable reported no result"
+    for stream in out err report result; do
       cmp -s "$work/checkout.$stream" "$work/app.$stream" ||
         { diff "$work/checkout.$stream" "$work/app.$stream" | head -20 >&2; fail "$name's executables differ (std$stream, GC stress $gc)"; }
     done
   done
   compared=$((compared + 1))
 done
-echo "   standalone executables (output, status, startup report, GC stress): alike"
+echo "   standalone executables (output, status, startup report, reported value, GC stress): alike"
 echo "== compare: $compared comparisons, the application and the checkout alike"

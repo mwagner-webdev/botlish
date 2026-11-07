@@ -283,7 +283,7 @@ test pw-sdlkit-runs {the application over the installed sdlkit runs natively, he
     }
 } -cleanup cleanup -result {{[[true, true, true, true, true, true], true]} {[[true, true, true, true, true, true], true]}}
 
-test pw-sdlkit-deploy-relocates {native deploy places the bundled libSDL3.so.0 in DIR/lib; the executable linked with -runtime-path '$ORIGIN/lib' records that RUNPATH, and runs after DIR is moved and the application's packages are deleted, with no LD_LIBRARY_PATH} -constraints {sdl3Run} -body {
+test pw-sdlkit-deploy-relocates {native deploy places the bundled libSDL3.so.0 in DIR/lib; the executable linked with -runtime-path '$ORIGIN/lib' records that RUNPATH, and runs after DIR is moved and the application's packages are deleted, with no LD_LIBRARY_PATH: it prints nothing (an executable prints no value), and its value, through the driver protocol, is the program's} -constraints {sdl3Run} -body {
     set repo [repository {sdlkit sdl3}]
     set app [fresh app]
     writeText [file join $app main.bot] $::sdlkitMain
@@ -296,9 +296,9 @@ test pw-sdlkit-deploy-relocates {native deploy places the bundled libSDL3.so.0 i
     file rename $dist $moved
     file delete -force [file join $app .bot_modules]
     set runpath [lsearch -inline [split [exec readelf -d [file join $moved main]] \n] *RUNPATH*]
-    set run [withEnvironment [list SDL_VIDEO_DRIVER dummy LD_LIBRARY_PATH {}] {exec [file join $moved main]}]
+    set run [withEnvironment [list SDL_VIDEO_DRIVER dummy LD_LIBRARY_PATH {}] {list [exec [file join $moved main]] [standaloneValue [file join $moved main]]}]
     list [dict get $d status] [dict get $e status] [string match {*\[$ORIGIN/lib\]*} $runpath] $run [lsort [glob -tails -directory [file join $moved lib] *]]
-} -cleanup cleanup -result {0 0 1 {[[true, true, true, true, true, true], true]} libSDL3.so.0}
+} -cleanup cleanup -result {0 0 1 {{} {[[true, true, true, true, true, true], true]}} libSDL3.so.0}
 
 test pw-sdl3-system-origin {a consumer chooses the system's SDL3 with botlish.json's origins: the package manager then verifies a system-managed SDL3 and, finding none on this host (no distribution package, no system pkg-config record), refuses -- never taking the bundled one or a stray file instead -- and changes nothing} -constraints {sdl3Package} -body {
     set repo [repository {sdlkit sdl3}]
@@ -453,7 +453,7 @@ test pw-raven-metadata-checked {the release's native metadata is checked against
         [dict get $b status] [regexp {loader dependencies|needs|Rvulkan_get_instance} [dict get $b out]]
 } -cleanup cleanup -result {1 1 1 1}
 
-test pw-raven-deploy-relocates {the release's example test as a native executable: native deploy places the bundled libraven.so.0 in DIR/lib, the executable linked with -runtime-path '$ORIGIN/lib' runs after DIR is moved and the package is removed from the application (botlish remove), with no LD_LIBRARY_PATH and no display, and the loader resolves the deployed library} -constraints {ravenRun} -body {
+test pw-raven-deploy-relocates {the release's example test as a native executable: native deploy places the bundled libraven.so.0 in DIR/lib, the executable linked with -runtime-path '$ORIGIN/lib' runs after DIR is moved and the package is removed from the application (botlish remove), with no LD_LIBRARY_PATH and no display, printing nothing (an executable prints no value) and with the example's value, through the driver protocol, and the loader resolves the deployed library} -constraints {ravenRun} -body {
     set repo [repository {raven}]
     set app [fresh app]
     pm add raven -project $app -repository $repo
@@ -467,11 +467,11 @@ test pw-raven-deploy-relocates {the release's example test as a native executabl
     set moved [file join [fresh moved] app]
     file rename $dist $moved
     set removed [pm remove raven -project $app]
-    set run [withEnvironment [list LD_LIBRARY_PATH {} DISPLAY {}] {exec [file join $moved test]}]
+    set run [withEnvironment [list LD_LIBRARY_PATH {} DISPLAY {}] {list [exec [file join $moved test]] [standaloneValue [file join $moved test]]}]
     set resolved [lsearch -inline [split [withEnvironment [list LD_LIBRARY_PATH {}] {exec ldd [file join $moved test]}] \n] *libraven*]
     list [dict get $d status] [dict get $e status] [dict get $removed status] [file exists [file join $app .bot_modules raven]] \
         $run [string match "*=> $moved/lib/libraven.so.0 *" $resolved]
-} -cleanup cleanup -result {0 0 0 0 {["2", "2 clicks", "0", "0 clicks"]} 1}
+} -cleanup cleanup -result {0 0 0 0 {{} {["2", "2 clicks", "0", "0 clicks"]}} 1}
 
 # PM-3: the releases are made by the generic authoring workflow.
 

@@ -356,8 +356,9 @@ fn register_copy_route_tests():
     fn b_parameter() errors std::compiler::CompilerError:
         static compile:
             fn modify(x: MutableArray[int]) -> int errors IndexNotFound:
-                x.swap(0, 9)
-                x.at(0)
+                w = x
+                w.swap(0, 9)
+                w.at(0)
             fn f() -> List[int] errors IndexNotFound:
                 a = std::mutable_array::create(2, 0)
                 m = modify(a)
@@ -473,10 +474,11 @@ fn register_copy_route_tests():
     fn b_indirect_callee() errors std::compiler::CompilerError:
         static compile:
             fn poke(x: MutableArray[int]) -> int:
-                x.set(0, 9):
+                w = x
+                w.set(0, 9):
                     on IndexNotFound:
                         unit
-                x.capacity()
+                w.capacity()
             fn apply(g: Fn{args: [MutableArray[int]], return: int}, v: MutableArray[int]) -> int:
                 g(v)
             fn f() -> List[int] errors IndexNotFound:
@@ -551,8 +553,9 @@ fn register_copy_route_tests():
     fn b_generic_place() errors std::compiler::CompilerError:
         static compile:
             fn fill(x, v) errors IndexNotFound:
-                std::mutable_array::set(x, 0, v)
-                x
+                w = x
+                std::mutable_array::set(w, 0, v)
+                w
             fn f() -> List[int] errors IndexNotFound:
                 a = std::mutable_array::create(2, 0)
                 b = fill(a, 4)
@@ -667,8 +670,9 @@ fn register_place_tests():
     fn b_parameter_store() errors std::compiler::CompilerError:
         static compile:
             fn poke(m: MutableArray[str]):
-                if std::mutable_array::capacity(m) > 0:
-                    std::mutable_array::set(m, 0, "q")
+                w = m
+                if std::mutable_array::capacity(w) > 0:
+                    std::mutable_array::set(w, 0, "q")
             m = std::mutable_array::create(1, "a")
             poke(m)
             std::mutable_array::freeze(m, 1)
@@ -1821,9 +1825,10 @@ fn register_admission_tests():
     fn b_pair() errors std::compiler::CompilerError:
         static compile:
             fn push(storage: MutableArray[int], length: int, v: int) -> MutableArray[int]:
-                if length >= 0 and length < std::mutable_array::capacity(storage):
-                    std::mutable_array::set(storage, length, v)
-                storage
+                w = storage
+                if length >= 0 and length < std::mutable_array::capacity(w):
+                    std::mutable_array::set(w, length, v)
+                w
             pair = [push(std::mutable_array::create(2, 0), 0, 7), 1]
             std::list::length(pair)
     std::test::value("mat-bd-2/pair", 2, b_pair)
@@ -1831,9 +1836,10 @@ fn register_admission_tests():
     fn b_storage() errors std::compiler::CompilerError:
         static compile:
             fn push(storage: MutableArray[int], length: int, v: int) -> MutableArray[int]:
-                if length >= 0 and length < std::mutable_array::capacity(storage):
-                    std::mutable_array::set(storage, length, v)
-                storage
+                w = storage
+                if length >= 0 and length < std::mutable_array::capacity(w):
+                    std::mutable_array::set(w, length, v)
+                w
             s = push(std::mutable_array::create(2, 0), 0, 7)
             std::mutable_array::freeze(s, std::mutable_array::capacity(s))
     std::test::value("mat-bd-2/storage", [7, 0], b_storage)
@@ -1858,16 +1864,18 @@ fn register_admission_tests():
     fn b_write_invalid() errors std::compiler::CompilerError:
         static compile:
             fn put(m):
-                if std::mutable_array::capacity(m) > 0:
-                    std::mutable_array::set(m, 0, 1)
+                w = m
+                if std::mutable_array::capacity(w) > 0:
+                    std::mutable_array::set(w, 0, 1)
             put(std::mutable_array::create(1, "a"))
     std::test::rejects("mat-bd-5/write-invalid", std::compiler::DiagnosticCode::Type, b_write_invalid)
 
     fn b_write_valid() errors std::compiler::CompilerError:
         static compile:
             fn put(m):
-                if std::mutable_array::capacity(m) > 0:
-                    std::mutable_array::set(m, 0, "b")
+                w = m
+                if std::mutable_array::capacity(w) > 0:
+                    std::mutable_array::set(w, 0, "b")
             put(std::mutable_array::create(1, "a"))
             1
     std::test::value("mat-bd-5/write-valid", 1, b_write_valid)
@@ -1883,8 +1891,9 @@ fn register_erasure_tests():
     fn b_raw_parameter() errors std::compiler::CompilerError:
         static compile:
             fn smash(x: mutarray) -> mutarray errors IndexNotFound:
-                std::mutable_array::set(x, 0, 123)
-                x
+                w = x
+                std::mutable_array::set(w, 0, 123)
+                w
             fn f() -> list errors IndexNotFound:
                 m = std::mutable_array::from_list(["hello"])
                 s = smash(m)
@@ -1900,8 +1909,9 @@ fn register_erasure_tests():
     fn b_untyped_write() errors std::compiler::CompilerError:
         static compile:
             fn f(x):
-                if mutarray?(x):
-                    std::mutable_array::set(x, 0, 123)
+                w = x
+                if mutarray?(w):
+                    std::mutable_array::set(w, 0, 123)
                 else:
                     unit
             m = std::mutable_array::from_list(["a"])
@@ -2315,9 +2325,10 @@ fn register_kind_test_tests():
     fn b_refined_raw() errors std::compiler::CompilerError:
         static compile:
             fn f(x):
-                if mutarray?(x):
-                    if std::mutable_array::capacity(x) > 0:
-                        std::mutable_array::set(x, 0, 123)
+                w = x
+                if mutarray?(w):
+                    if std::mutable_array::capacity(w) > 0:
+                        std::mutable_array::set(w, 0, 123)
                 else:
                     unit
             f(std::mutable_array::allocate(1))
@@ -2672,7 +2683,8 @@ fn register_affine_swap_tests(zero: int):
     fn b_swap_failure() errors std::compiler::CompilerError:
         static compile:
             fn put(a: MutableArray[Coroutine{args: [Command], return: Event}], i: int, c: Coroutine{args: [Command], return: Event}) -> int errors IndexNotFound:
-                old = a.swap(i, c)
+                w = a
+                old = w.swap(i, c)
                 old(Command {value: 1}).value
             fn f(zero: int) -> List[int]:
                 a = std::mutable_array::generate(2, make)

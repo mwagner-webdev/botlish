@@ -842,14 +842,14 @@ test bm-bundled-compiler {the bundled compiler resolves installed packages, thei
     }
 } -cleanup removeApps -result {1 1}
 
-test bm-executable-needs-no-packages {a native executable of a program of packages runs with its source and its .bot_modules gone} -constraints {executableAot nativeBuilt} -body {
+test bm-executable-needs-no-packages {a native executable of a program of packages runs with its source and its .bot_modules gone: it prints nothing (an executable prints no value), and its value, through the driver protocol, is the program's} -constraints {executableAot nativeBuilt} -body {
     set dir [app [concat $twoGeometries [list main.bot $twoMain]]]
     exec [info nameofexecutable] $::mainScript -emit-native-executable [file join $dir main.bot] 2>@1
     set exe [native::executableFile [file join [makeDirectory bm-exe-[pid]] main]]
     file rename [native::executableFile [file join $dir main]] $exe
     file delete -force $dir
-    exec $exe
-} -cleanup {removeApps; file delete -force [file join [temporaryDirectory] bm-exe-[pid]]} -result {[3, 7, 20, 20, -100, -1000]}
+    list [exec $exe] [standaloneValue $exe]
+} -cleanup {removeApps; file delete -force [file join [temporaryDirectory] bm-exe-[pid]]} -result {{} {[3, 7, 20, 20, -100, -1000]}}
 
 # ---------------------------------------------------------------------------
 # 26. SDL3: the real generated binding as a package

@@ -326,6 +326,7 @@ namespace eval hir::static {
         MUTABLE-PLACE-RECEIVER                   MutablePlaceReceiver
         NO-APPLICABLE-METHOD                     NoApplicableMethod
         NOMETHOD-CALL                            NomethodCall
+        NONPLACE-PARAMETER-MUTATION              NonplaceParameterMutation
         NOT-A-CONTEXT                            NotAContext
         NOT-A-STRUCT                             NotAStruct
         NOT-AN-ENUM                              NotAnEnum

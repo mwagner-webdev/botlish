@@ -871,7 +871,14 @@ If you add or change a program in `examples/`, `bench/` or `stdlib/`, run
 * A new corpus program must be listed (with its entries, if any).
 * Do not edit `audit/refactor/kickoff-corpus/`: it is the frozen,
   warning-bearing fixture the backend-independence CLI tests (and one
-  String-region test of the `peek()` idiom) read, not corpus.
+  String-region test of the `peek()` idiom) read, not corpus. Never clean a
+  warning out of it. The one exception is a language change that makes one
+  of its programs stop compiling: migrate that program in the same change,
+  only as far as compiling again takes. Every warning must keep its code
+  and its text (only positions may move), and every program its results on
+  every backend: compare against the tree before the change. Then list the
+  edit in its README.md, beside the first one
+  (NONPLACE-PARAMETER-MUTATION-CORRECTNESS-MILESTONE-1.md's).
 
 ## Refinement values
 
@@ -2357,13 +2364,12 @@ so:
   never an answer per declaration, never one computed while a summary is
   still provisional, and never unfold a recursive application to classify
   it.
-* A walk of a struct type's components (drop descriptors, recursive
-  affine types: `hir::structs::OwnedRecursion`) reads an application's
-  applied fields and identifies a struct by its whole type, never by its
-  declaration alone (`Box[Box[C]]`'s inner Box is another type). A
-  recursive affine application is AFFINE-CONTAINER-UNSUPPORTED by the one
-  declaration rule, judged on its own fields (`ApplicationIssue`), trees
-  included.
+* A walk of a struct type's components (drop descriptors) reads an
+  application's applied fields and identifies a struct by its whole type,
+  never by its declaration alone (`Box[Box[C]]`'s inner Box is another
+  type). A recursive affine application is AFFINE-CONTAINER-UNSUPPORTED by
+  the one declaration rule, judged by what its values own
+  (`ApplicationIssue`; Recursive affine ownership, below), trees included.
 * An affine application is never cut to `any` by a bound
   (`hir::types::MakeApplied`), as an affine List element is never cut.
 
@@ -2476,7 +2482,8 @@ never by unfolding the application's fields. Keep it so:
   several recursive fields, and never keep a walk's result past its
   question.
 * A genuine ownership rule is not a compiler guard: a recursive affine
-  application stays AFFINE-CONTAINER-UNSUPPORTED (`OwnedRecursion`).
+  application stays AFFINE-CONTAINER-UNSUPPORTED (`OwnedRecursion`, next
+  section).
 
 If you change hir/summaries.tcl, a property's node, probes or classes, or
 one of the analyses above, run `tests/parameterized-declaration-summaries.test`,
@@ -2494,6 +2501,78 @@ you change the code it mutates, keeping it a mutant of the same rule), plus
 the affine, tree-struct, value-identity and hashable mutation harnesses for
 a change to code they mutate. `bench/declaration-summaries.tcl` regenerates
 the scaling report.
+
+## Recursive affine ownership (hir/ownership.tcl)
+
+A recursive affine type -- one whose values nest affine values to any depth
+through List, MutableVector or MutableArray elements -- has no finite drop
+descriptor and is AFFINE-CONTAINER-UNSUPPORTED
+(OWNED-RECURSION-DECLARATION-SUMMARY-MILESTONE-1.md). `hir::structs::
+OwnedRecursion` asks `hir::ownership::Recursion`, which decides it on the
+finite graph of declaration states (a declaration and which of its slots
+hold affine arguments): through facts (which slots a declaration holds, by
+fields alone or through an element: a least fixpoint), edges (the
+applications a declaration's frame holds), the state graph's strongly
+connected components; a type is recursive exactly when it reaches a
+component with an internal edge that crosses an element. Keep it so:
+
+* **Recursive affine ownership is decided from finite declaration-level
+  ownership analysis. Do not determine it by recursively unfolding applied
+  type terms or by a traversal depth or budget.** No depth, budget, type
+  size or applied-type bound decides a verdict: a chain of a thousand
+  finite affine declarations is accepted, and a recursion is found however
+  deep it starts.
+* **Non-uniform type growth is not itself invalid.** It matters only where
+  the growing recurrence participates in actual value ownership: `next:
+  List[W[List[T]]]` with no value of T held is unrestricted, `GrowA[T]`/
+  `GrowB[T]` with T held is recursive. Never reject an application for
+  growing, for being expansive (`hir::summaries::Expansive`), or for
+  meeting its own declaration again through its arguments
+  (`Box[List[Box[C]]]`, `Many[Many[C]]`: finite nesting); an application
+  whose affinity dies out along its recursion (`Swap[int, C]` of `next:
+  List[Swap[U, int]]`) is no recursion of affine values.
+* A recursion of another declaration counts (`Holder[C]` of `t:
+  Node[T]`): the verdict is any bad component reachable, the witness
+  prefers one of the type's own declaration (its message wording). A
+  declaration's own check (`apply`) reports a recursion that returns to
+  it; one it only holds is its field type's application's
+  (`VerifyDeclarations`, `ApplicationIssue`, which names an argument that
+  is itself the recursive type first).
+* A recursion through fields alone describes no finite value and is
+  accepted; the drop descriptor walk cuts such a declaration where it meets
+  it again (`hir::ownership::FieldCycle`), so every accepted type has a
+  finite descriptor. Never let Descriptor decide recursion by failing or
+  not ending; its assertion stays an internal error.
+* The ownership edges are the drop descriptor's: struct fields (applied),
+  anonymous struct fields, List, MutableVector and MutableArray elements, a
+  refinement's base. A C pointer's pointee, a function or coroutine type's
+  signature and an ImmutableSet are not edges. Never add an edge without
+  the descriptor owning it.
+* The facts are the registry's (`hir::ownership::Forget`, from
+  `ForgetAffinity`), keyed by declaration identity, never stored in HIR,
+  interchange text or the cache. A witness is built from the events'
+  provenance after the verdict, along its own path only: never let a reason
+  decide a verdict, and never instantiate a witness's growing arguments
+  without its size cap (presentation only).
+
+If you change hir/ownership.tcl, the descriptor's cut (hir/affine.tcl's
+`DescriptorOf`), the struct checks that read it (`apply`,
+`ApplicationIssue`, `WrittenProblem`, `RecursionMessage`) or the shared
+fixpoint (`hir::summaries::Fixpoint`), run `tests/owned-recursion.test`,
+`tests/affine-applications.test`, `tests/written-affine-applications.test`,
+`tests/parameterized-declaration-summaries.test`, `tests/affine.test`,
+`tests/tree-struct.test`, `python3 -I audit/owned-recursion/tools/oracle.py
+selftest`, `audit/owned-recursion/tools/fuzz.tcl` (several seeds, with a
+memory cap: `ulimit -v`; it compares the compiler with the independent
+model and classifies every difference from the old walk,
+audit/owned-recursion/tools/reference.tcl) and
+`audit/owned-recursion/tools/mutate.tcl` (every mutant in its `mutants.txt`
+must still apply and be killed: update a mutant's text when you change the
+code it mutates, keeping it a mutant of the same rule), plus the affine,
+tree-struct and declaration-summaries mutation harnesses for a change to
+code they mutate. `bench/owned-recursion.tcl` regenerates the scaling
+report.
+
 ## Resources (scope-bound cleanup)
 
 `opaque resource struct R:` and `cleanup fn NAME(r: R, context ...):`
@@ -3281,6 +3360,56 @@ array harnesses (above) for a change to hir/mutvec.tcl or hir/cardinality.tcl,
 the Hashable and trait-constrained-type harnesses for a change to how keys
 are constrained or hashed, and the warning gate (the three modules are
 warning-clean). `bench/mutable-map.tcl` regenerates the performance report.
+
+## Value parameters are never mutated (NONPLACE-PARAMETER-MUTATION)
+
+A function's parameter not declared `place` is a value: the function's
+own logical copy of its argument (NONPLACE-PARAMETER-MUTATION-CORRECTNESS-
+MILESTONE-1.md). A mutation whose destination is rooted in one -- a
+collection operation's receiver path, or the argument of another
+function's place parameter (std::mutable_map's and std::mutable_set's
+operations among them) -- is NONPLACE-PARAMETER-MUTATION, the call's own
+problem (`hir::CheckingCall`), at the mutation, relating the parameter's
+declaration (`hir::mutvec::IsValueParam`, `ValueParamMutation`, their two
+uses in `hir::mutvec::verify`). Keep it so:
+
+* The rule reads the destination's root binding only: a parameter of a
+  function block (its `params`) that is not one of its `places`. Never
+  read whether the parameter is returned or used later, its type, its
+  callers, a name or an operation's spelling; never exempt an untyped, an
+  imprinted, an affine or a nested function's parameter, a field path or a
+  call through method syntax.
+* A local is a place of its own whatever it was bound from: `w = v`, a
+  field's copy, a destructured field are independent logical copies, and
+  mutating them is legal. Never taint a value by its origin, and never
+  turn the local copy into an alias (`hir::mutvec::Moved` moves a header
+  only out of a binding the copy convention holds; a parameter of a
+  function also called through a value never is).
+* A context parameter, a loop variable, a fold's intermediate and a
+  handler's payload binding are no value parameters (their scope is a
+  construct's, or they are locals bound to the installed context).
+* An error, never a warning or a lint; checked before any backend; no
+  runtime check, no backend special case. The existing receiver rules
+  (MUTABLE-PLACE-RECEIVER: a temporary, an enclosing function's binding, a
+  module binding) report first.
+* The fix is the program's: `place` for the caller's storage, a local copy
+  for a local working value. Never recommend `place` for an affine
+  parameter (a place parameter is never affine).
+
+If you change any of that (hir/mutvec.tcl's value parameters or receiver
+and place-argument checks, what a place path is, the copy convention's
+`Moved`), run `tests/nonplace-parameter-mutation.test`, its golden suite
+(`tclsh9.0 tests/local.tcl tests/golden/nonplace-parameter-mutation.bot`),
+`tests/place-parameters.test`, `tests/mutable-vector.test`,
+`tests/mutable-array.test`, `audit/mutable-vector/tools/fuzz.tcl` and
+`audit/mutable-array/tools/fuzz.tcl` (several seeds: their
+`valueparam` faults), and `audit/nonplace-parameter-mutation/tools/mutate.tcl`
+(every mutant in its `mutants.txt` must still apply and be killed by a
+test its `!!` line names: update a mutant's text when you change the code
+it mutates, keeping it a mutant of the same rule), plus the vector, array
+and map harnesses (MutableVector, MutableArray, MutableMap above) for a
+change to code they share. `tools/compilerpedia.tcl check` keeps the
+topic (`error.nonplace-parameter-mutation`) and its examples true.
 
 ## Collection order and relational facts
 
@@ -4910,6 +5039,14 @@ backend compiles, or reports why not (EMIT-*). Keep it so:
 * Diagnostics anchor at the claimed function (its unit: recovery, static
   sites) and are located at the yield or call; a claim whose code holds
   another diagnostic, poison or a hole is `dependent` and says nothing.
+  Its code is what the walk reads, also without evaluating it: a call's
+  callee reference (an unresolved name is typed `never`, which is no
+  divergence) and the code of a helper whose `never` result the walk
+  relies on (`hir::emission::Taint`; `Read`, a summary read for its code:
+  its taint and fingerprint the claim's, never its violations;
+  EMISSION-CALLEE-DEPENDENCY-CORRECTNESS-MILESTONE-1.md). Never stop the
+  walk at a `never` it has not read, and never make a claim dependent on
+  code its walk does not read.
   Messages never print an internal id. Every EMIT-* kind has a
   `std::compiler::DiagnosticCode` case and a Compilerpedia topic.
 * A claim is about the yield trace, never the result: a claimed function
@@ -5230,6 +5367,46 @@ the same rule) with the pinned environment of
 `audit/macos-release/requirements.txt`, and push to read the game job's
 bundle, LaunchServices and dry-run steps; the release path itself runs only
 for a release tag.
+
+## Program output: executables and `run` (PROGRAM-OUTPUT-MILESTONE-1.md)
+
+A program's value is the language's (its last top-level statement) and the
+test infrastructure's oracle; printing it is main.tcl's development view
+only (PROGRAM-RESULT-PRINTING-CENSUS.md). Keep it so:
+
+* A standalone executable writes nothing of its own when its program
+  completes: status 0, standard output and error the program's alone
+  (`runtime::aot::run`). Never print the value, a trailing line or a
+  status there, and never add a switch that brings one back. A run-time
+  error stays `MESSAGE (CODE)` on standard error with status 1.
+* The driver protocol (`BOTLISH_NATIVE_RESULT=FILE`) is the one way to read
+  an executable's value: tests use tests/helpers.tcl's `standaloneValue`
+  and `bareValue`; shell scripts without Tcl compare the words of the
+  result file's `value V` line, its quoting removed (the `value_words`
+  idiom of single/ffi-smoke-test.sh). Never parse an executable's standard
+  output for its value, and never strip a "last line" from it.
+* `main.tcl run [OPTION...] FILE [ARG...]` runs one program as a command:
+  no header, no value line, every word after FILE the program's argument,
+  natively unless `-backend` says otherwise, status 0 (completed) or 1
+  (rejected, failed: the diagnostics or the error on stderr), 2 for a
+  malformed invocation; only `-backend`, `-warnings`, `-target`, `-L` and
+  `-F` combine with it. single/main.tcl's `MayLink` knows its native
+  default. main.tcl's default run keeps its `== FILE (BACKEND)` header and
+  `value:` line: it is the Tcl backends' only output, Compilerpedia's
+  `@output` check and many tests' observable.
+* The exit status is planned as the program's top-level value -- an Int,
+  or `unit` for 0 (success) -- with no early exit by design: never add an
+  exit function, a top-level `return`, or a status from anything else.
+  Until that milestone a completed program's status is 0. Icy Tower's
+  declared C `exit` is a workaround of the game's, not a pattern.
+
+If you change any of that, run `tests/native-executable.test`,
+`tests/main-cli.test`, `tests/native-program-output.test`,
+`tests/workload-2048.test`, `tests/workload-icy-tower.test`,
+`audit/native-aot/tools/mutate.tcl` (its `result-printed` mutant) and, for
+single/main.tcl, `audit/single-executable/tools/mutate.tcl` (its
+`run-command-not-linking` mutant) and both smoke tests after
+`single/build.sh`.
 
 ## Application modules, native program output, the recursion limit
 

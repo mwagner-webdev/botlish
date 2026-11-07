@@ -132,15 +132,18 @@ fn nibble(c: int) -> int:
         return c - 55
     c - 48
 
-# The bytes the hex digits of TEXT from FROM spell, pushed onto OUT.
+# OUT with the bytes the hex digits of TEXT from FROM spell pushed onto it:
+# a local of its own (`filled = out`), since a parameter not declared `place`
+# is the function's copy, never a place it may mutate.
 fn unhex(text: str, from: int, out: MutableVector[int]) -> MutableVector[int] errors IndexNotFound:
+    filled = out
     n = text.length()
     loop i from 0 to (n - from).shift_right(1):
         k = from + i * 2
         hi = nibble(std::char::scalar_value(text.char_at(k)))
         lo = nibble(std::char::scalar_value(text.char_at(k + 1)))
-        out.push(hi * 16 + lo)
-    out
+        filled.push(hi * 16 + lo)
+    filled
 
 fn next_seed(seed: int) -> int:
     (seed * 1103515245 + 12345).mod(2147483648)

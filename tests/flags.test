@@ -968,13 +968,13 @@ proc executableValue {text} {
     close $channel
     try {
         exec [info nameofexecutable] [file join $::projectRoot main.tcl] -emit-native-executable $path
-        return [runStandalone [file rootname $path]]
+        return [standaloneValue [file rootname $path]]
     } finally {
         removeDirectory {flags executable}
     }
 }
 
-test flags-standalone-executable {the standalone native executable prints what every in-process backend computes} -constraints executableAot -body {
+test flags-standalone-executable {the standalone native executable computes what every in-process backend computes (read through the driver protocol)} -constraints executableAot -body {
     set program "${::observe}fn walk(n, flags :a):\n    if n == 0:\n        return \[a\]\n    walk(n - 1, :a)\n\[observe(1, :c), 3.observe(:a, :b), walk(2)\]"
     list [executableValue $program] [parity $program]
 } -result {{[[1, false, false, true], [3, true, true, false], [true]]} {value {[[1, false, false, true], [3, true, true, false], [true]]}}}

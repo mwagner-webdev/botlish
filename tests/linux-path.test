@@ -315,17 +315,18 @@ test path-specialization-code-quality {child<LinuxPath> compiles to the same NIR
 # ---------------------------------------------------------------------------
 # Path + I/O
 
-test path-io-vertical {examples/io/show-path.bot as a standalone executable: a valid path is printed on stdout (still a String after validation), an invalid one reported on stderr by the std::io::path::NotAPath handler} -constraints {nativeLinux posixShell} -body {
+test path-io-vertical {examples/io/show-path.bot as a standalone executable: a valid path is printed on stdout (still a String after validation), an invalid one reported on stderr by the std::io::path::NotAPath handler, and nothing else is written (an executable never prints its value); its value is read through the driver protocol} -constraints {nativeLinux posixShell} -body {
     set exe [file join $::scratch show-path]
     native::executable [pathHir [readFile [file join $::projectRoot examples io show-path.bot]]] $exe
     set out [file join $::scratch show.out]
     set err [file join $::scratch show.err]
     exec $exe </dev/null >$out 2>$err
-    list [readFile $out] [readFile $err]
+    set result [file join $::scratch show.result]
+    exec env BOTLISH_NATIVE_RESULT=$result $exe </dev/null >/dev/null 2>/dev/null
+    list [readFile $out] [readFile $err] [ProtocolValue $result]
 } -result {{Path: /tmp/example
-["shown", "rejected"]
 } { is not a valid path
-}}
+} {["shown", "rejected"]}}
 
 test path-child-example {examples/io/child-path.bot agrees on every backend} -body {
     pathAgree [readFile [file join $::projectRoot examples io child-path.bot]]

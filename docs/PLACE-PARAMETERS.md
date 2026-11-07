@@ -23,8 +23,8 @@ v.length()               # 3
 
 MutableVector and MutableArray are values (MUTABLE-VECTOR.md,
 MUTABLE-ARRAY.md): a header over a copy-on-write backing, mutated in place
-through *places* (a local, a parameter, a context parameter, a field path
-from one), with the logical copies `hir::mutvec::Elaborate` writes out
+through *places* (a local, a place parameter, a context parameter, a
+field path from one), with the logical copies `hir::mutvec::Elaborate` writes out
 wherever a value is read out of a place or enters one. Their mutating
 operations (`push`, `swap`, `set`, ...) are natives whose receiver is a
 place: `MUTABLE-PLACE-RECEIVER` holds the receiver to be one, and the
@@ -32,8 +32,12 @@ operation changes the caller's header.
 
 An ordinary Botlish function has no such parameter. Its parameter is its
 own value: on entry it is a logical copy of the argument (or the argument
-itself, moved, at its last use), so `fn add(m, k)` that pushes into `m`
-pushes into its own copy, and the caller's collection is unchanged. A
+itself, moved, at its last use), so `fn add(m, k)` that pushed into `m`
+pushed into its own copy, and the caller's collection was unchanged. Since
+NONPLACE-PARAMETER-MUTATION-CORRECTNESS-MILESTONE-1.md that is a
+compile-time error (NONPLACE-PARAMETER-MUTATION): a parameter not declared
+`place` is never a mutation's destination, and a function that means its
+own copy binds it to a local first (`w = m`). A
 collection implemented in Botlish -- an ordered table over several vectors
 -- therefore could not offer `m.set(k, v)`: every mutating operation would
 have to return the new collection (`m = m.set(k, v)`), which is not
@@ -71,10 +75,10 @@ A call of such a function passes, for each place parameter, a place of the
 caller (`hir::mutvec::PlaceArgumentProblem`, reported as
 MUTABLE-PLACE-RECEIVER at the argument):
 
-* a local, a parameter (a place parameter of the caller included) or a
-  context parameter of the calling function, or a field path from one
-  (`m.table`, `ctx.cache`) -- exactly the places a collection operation's
-  receiver may be;
+* a local, a place parameter or a context parameter of the calling
+  function, or a field path from one (`m.table`, `ctx.cache`) -- exactly
+  the places a collection operation's receiver may be (an ordinary
+  parameter of the caller is no place: NONPLACE-PARAMETER-MUTATION);
 * not a temporary (`f(make())`: the update would be lost), not a module
   binding (shared by every user of the module), not a binding of an
   enclosing function (a nested function cannot update a place it

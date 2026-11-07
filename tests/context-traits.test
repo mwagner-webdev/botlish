@@ -807,7 +807,7 @@ test ct-machine-code-direct {machine code: the clone calls the implementation wi
         set direct "call +\[0-9a-f\]+ <$emit>"
         set indirect {call +\*}
     }
-    set result [list [exec $exe] [lindex $sizes 0] [expr {[lindex $sizes 0] == [lindex $sizes 1]}] \
+    set result [list [standaloneValue $exe] [lindex $sizes 0] [expr {[lindex $sizes 0] == [lindex $sizes 1]}] \
         [regexp -all $direct $body] [regexp -all $indirect $body]]
     removeDirectory ct-exe-[pid]
     set result

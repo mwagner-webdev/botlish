@@ -240,7 +240,7 @@ index: errors
 alias: set of coroutines; recursive affine struct
 keywords: affine, ImmutableSet, set, recursive struct, tree, container, release, descriptor
 related: concept.affine concept.immutable-set concept.structs concept.mutable-vector error.affine-equality-unsupported
-docs: AFFINE-VALUES.md MUTABLE-ARRAY.md AFFINE-PARAMETERIZED-APPLICATIONS-CORRECTNESS-MILESTONE-1.md
+docs: AFFINE-VALUES.md MUTABLE-ARRAY.md AFFINE-PARAMETERIZED-APPLICATIONS-CORRECTNESS-MILESTONE-1.md OWNED-RECURSION-DECLARATION-SUMMARY-MILESTONE-1.md
 code: CORE SEMANTIC AFFINE-CONTAINER-UNSUPPORTED
 
 == MEANING
@@ -252,17 +252,37 @@ Reported where the type is written, for two forms:
     (error.affine-equality-unsupported), so a set cannot own one. A List,
     a MutableVector and a MutableArray can: they are affine exactly when
     their element type is.
-  * an affine struct that holds values of its own type in a List,
-    MutableVector or MutableArray, directly or through other structs (a
-    tree of coroutines). This is a limit of the implementation: an affine
+  * a *recursive affine type*: an affine type whose values nest affine
+    values to any depth through List, MutableVector or MutableArray
+    elements -- a struct that holds values of its own type in a container,
+    directly or through other structs (a tree of coroutines). An affine
     value is released by a static, finite walk of its type, and such a
-    value nests to any depth. An unrestricted struct may hold itself in a
-    container, and an affine struct may name itself through plain fields.
-    An application of a parameterized struct is judged by its own fields,
-    its arguments substituted, wherever it is written or constructed:
-    `Node[Coroutine{...}]` of `struct Node[T]: value: T, children:
-    List[Node[T]]` (a tree struct's too) is such a type, `Node[int]` is an
-    ordinary recursive value.
+    value nests to any depth. The rule is about what values own, not about
+    how a type is spelled or how deep it is:
+      - an application of a parameterized struct is judged by its own
+        fields, its arguments substituted, wherever it is written or
+        constructed: `Node[Coroutine{...}]` of `struct Node[T]: value: T,
+        children: List[Node[T]]` (a tree struct's too) is one, `Node[int]`
+        is an ordinary recursive value;
+      - a type that holds such a type is one too (`Holder[Coroutine{...}]`
+        of `struct Holder[T]: t: Node[T]`), and so is one whose recursion
+        runs through other declarations or grows its argument at every
+        level (`b: List[GrowB[List[T]]]` in GrowA, `a: GrowA[T], value: T`
+        in GrowB);
+      - a type is not one because it is deep: a chain of a hundred structs
+        ending in a coroutine handle is an ordinary affine type, and so is
+        a type that holds its own declaration only through its arguments
+        (`Box[List[Box[Coroutine{...}]]]`: a box holding a List of boxed
+        handles), or whose affinity dies out along its recursion
+        (`next: List[Swap[U, int]]` in `struct Swap[T, U]: value: T`:
+        `Swap[int, Coroutine{...}]` holds handles two levels deep only);
+      - an argument that only grows and is never held
+        (`next: List[W[List[T]]]`) owns nothing: `W[Coroutine{...}]` is
+        unrestricted; and a recursion through plain fields alone describes
+        no finite value, so it is accepted.
+    The compiler decides it from the declarations, never by expanding the
+    type (concept.declaration-summaries); the diagnostic names the path
+    from the type to the recursion and once around it.
 
 == LIKELY CAUSES
   * a set of handles used to track "which workers are running";
@@ -300,6 +320,49 @@ struct Node:
 @caption An affine struct holding its own type in a List
 @error CORE SEMANTIC AFFINE-CONTAINER-UNSUPPORTED
 @at 3:15
+@end
+
+@example reject
+import std::coroutine
+
+struct Node[T]:
+    value: T
+    children: List[Node[T]]
+
+struct Holder[T]:
+    t: Node[T]
+
+fn count(h: Holder[Coroutine{args: [], return: int}]) -> int:
+    1
+
+0
+@caption A struct that holds another declaration's recursive affine type
+@error CORE SEMANTIC AFFINE-CONTAINER-UNSUPPORTED
+@at 10:9
+@end
+
+@example accept
+import std::coroutine
+import std::list
+
+struct Box[T]:
+    value: T
+
+fn counter() -> int:
+    yield 1
+    3
+
+fn make() -> Coroutine{args: [], return: int}:
+    coroutine {step} = counter()
+    step
+
+fn size(b: Box[List[Box[Coroutine{args: [], return: int}]]]) -> int:
+    {value} = b
+    std::list::length(value)
+
+size(Box {value: [Box {value: make()}, Box {value: make()}]})
+@caption A box holding a List of boxed handles nests finitely: an ordinary affine type
+@value 2
 @end
 
 @topic error.affine-duplication-unsupported
@@ -1060,11 +1123,11 @@ std::coroutine::done?(step)
 
 @topic error.mutable-place-receiver
 title: MUTABLE-PLACE-RECEIVER: a mutation's receiver is not a place
-summary: A MutableVector or MutableArray operation that mutates must be applied to a place -- a local, parameter or context parameter of the same function, or a field path from one.
+summary: A MutableVector or MutableArray operation that mutates must be applied to a place -- a local, place parameter or context parameter of the same function, or a field path from one.
 index: errors
 alias: push to a temporary vector; mutate a captured vector; push as a function value
 keywords: MutableVector, MutableArray, push, set, swap, take, pop, place, receiver, temporary, nested function, module binding, function value
-related: concept.mutable-vector concept.mutable-array concept.values error.mutable-place-capture stdlib.std::mutable_vector::push
+related: concept.mutable-vector concept.mutable-array concept.values error.mutable-place-capture error.nonplace-parameter-mutation stdlib.std::mutable_vector::push
 docs: MUTABLE-VECTOR.md MUTABLE-ARRAY.md
 code: CORE SEMANTIC MUTABLE-PLACE-RECEIVER
 
@@ -1073,10 +1136,12 @@ MutableVector[T] and MutableArray[T] are mutable VALUES, not references:
 a mutation (push, pop, take, swap, clear; set, swap, copy into) changes
 the header of the place it is applied to, in place, and never stores a
 new value anywhere else. So the receiver must be a place this function
-owns: a local binding, a parameter or a context parameter of the same
-function, or a chain of fields from one (`state.queue.push(x)`), whose
-binding's static type is the collection type. The message says which
-rule the receiver breaks:
+owns: a local binding, a place parameter or a context parameter of the
+same function, or a chain of fields from one (`state.queue.push(x)`),
+whose binding's static type is the collection type. (A parameter not
+declared `place` is the function's own copy: mutating it is
+NONPLACE-PARAMETER-MUTATION.) The message says which rule the receiver
+breaks:
 
   * a temporary value (a call's result, a List element): the update
     would be lost;
@@ -1102,7 +1167,9 @@ rule the receiver breaks:
 
 == WHAT TO DO
 Bind the value to a name, mutate the name, and use the name afterwards.
-For a helper, pass the collection in and return the updated one, or keep
+For a helper, declare its parameter `place` (concept.place-parameters), or
+pass the collection in, copy it into a local, and return the updated
+local, or keep
 it in a field of a context struct: a function mutates it through its
 context parameter (`log.lines.push(n)`), and every function sharing the
 installed context sees the change. To pass a mutation around, wrap it in a
@@ -1181,7 +1248,8 @@ into aliasing.
 == WHAT TO DO
 Pass the collection as an argument: the callee gets its own logical copy
 (copy-on-write, so passing is cheap). A nested function that must change
-it takes it as a parameter and returns the updated collection.
+it takes it as a place parameter (`place v: T`, concept.place-parameters),
+or copies its argument into a local and returns the updated local.
 
 @example reject
 import std::mutable_vector
@@ -1212,6 +1280,131 @@ fn fill() -> int:
 fill()
 @caption Passed as an argument, the nested function gets its own copy
 @value 2
+@end
+
+@topic error.nonplace-parameter-mutation
+title: NONPLACE-PARAMETER-MUTATION: mutating a parameter not declared `place`
+summary: A mutation's destination is rooted in a value parameter -- a parameter not declared `place` -- so it would change only the function's own copy, never the caller's storage.
+index: errors
+alias: mutating a parameter; modify a parameter; changes to a parameter are lost; caller does not see the change; update lost; write to an argument; out parameter without place
+keywords: place, parameter, value parameter, mutate, caller, copy, MutableVector, MutableArray, MutableMap, MutableSet, push, set, copy, swap, lost update
+related: concept.place-parameters concept.mutable-vector concept.mutable-array concept.values error.mutable-place-receiver
+docs: NONPLACE-PARAMETER-MUTATION-CORRECTNESS-MILESTONE-1.md PLACE-PARAMETERS.md MUTABLE-VECTOR.md
+code: CORE SEMANTIC NONPLACE-PARAMETER-MUTATION
+
+== MEANING
+A parameter that is not declared `place` is a value: on entry it is the
+function's own logical copy of its argument, not a reference to the
+caller's storage. A mutation through it -- a collection operation whose
+receiver is the parameter or a field path of it (`xs.push(x)`,
+`city.grid.tiles.set(i, t)`, `std::mutable_array::copy(dst, ...)`), or a
+call that gives it, or a path of it, to another function's place
+parameter -- would change that copy only. The caller, who wrote the call
+to see the change, would never observe it. That silently lost update is
+what this diagnostic rejects, at the mutation: the message names the
+parameter, its function and the operation.
+
+The rule reads the destination's root binding, never where its value
+came from: a local binding initialized from a parameter (`working = xs`)
+is a place of its own, an independent logical copy, and mutating it is
+legal. A context parameter, a loop variable, a fold's intermediate and a
+handler's payload are no parameters of a function: their places are
+unaffected.
+
+== WHY
+Botlish has no references: a collection is a value, mutated in place
+through places, and a place parameter is the one way a function updates
+its caller's collection (concept.place-parameters). Before this check,
+mutating an ordinary parameter compiled and ran: the function changed its
+own copy, returned normally, and the caller's collection stayed as it was.
+The function's signature already says which it means -- `place` or not --
+so the compiler holds the body to it, rather than let a natural-looking
+program drop a write without a word. It is an error, not a warning, and
+it is decided where the program is checked, before any backend runs, so
+every backend accepts and rejects the same programs.
+
+== LIKELY CAUSES
+  * a helper meant to fill its caller's vector or array, declared with an
+    ordinary parameter (`fn add(items: MutableVector[int], x: int)`);
+  * a struct holding collections passed by value and mutated through a
+    field path (`fn paint(city: City, ...)`, then
+    `city.grid.tiles.set(i, t)`);
+  * a value-style function that mutates its parameter and returns it.
+
+== WHAT TO DO
+Say which one you mean:
+
+  * the caller's storage must change: declare the parameter `place`
+    (`fn add(place items: MutableVector[int], x: int)`); the caller then
+    passes a place of its own and sees every update;
+  * a local working value is intended: copy the parameter into a local
+    first (`working = items`), mutate the local, and return it or use it.
+    The copy is logical and copy-on-write: when the parameter is not read
+    again, nothing is copied at run time.
+
+Declaring `place` gives the function write access to its caller's
+collection; prefer the local copy when the caller only needs the result.
+A parameter of an affine type cannot be a place: move it into a local
+(`working = items`) and return the local.
+
+@example reject
+import std::mutable_vector
+
+fn add(items: MutableVector[int], x: int) -> unit:
+    items.push(x)
+
+v = std::mutable_vector::from_list([1])
+add(v, 2)
+v.length()
+@caption `items` is the function's copy: the push would never reach `v`
+@error CORE SEMANTIC NONPLACE-PARAMETER-MUTATION
+@at 4:5
+@end
+
+@example accept
+import std::mutable_vector
+
+fn add(place items: MutableVector[int], x: int) -> unit:
+    items.push(x)
+
+v = std::mutable_vector::from_list([1])
+v.add(2)
+v.length()
+@caption A place parameter updates the caller's vector
+@value 2
+@end
+
+@example accept
+import std::mutable_vector
+
+fn with_item(items: MutableVector[int], x: int) -> MutableVector[int]:
+    working = items
+    working.push(x)
+    working
+
+v = std::mutable_vector::from_list([1])
+w = with_item(v, 2)
+[v.length(), w.length()]
+@caption A local copy is the function's own place: the caller keeps its value
+@value [1, 2]
+@end
+
+@example reject
+import std::mutable_vector
+
+fn add(place items: MutableVector[int], x: int) -> unit:
+    items.push(x)
+
+fn add_twice(items: MutableVector[int], x: int) -> unit:
+    add(items, x)
+    add(items, x)
+
+v = std::mutable_vector::from_list([1])
+add_twice(v, 2)
+v.length()
+@caption Passing a value parameter on to a place parameter mutates the copy only
+@error CORE SEMANTIC NONPLACE-PARAMETER-MUTATION
+@at 7:9
 @end
 
 @topic error.coroutine-binding-field
