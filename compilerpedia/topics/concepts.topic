@@ -95,8 +95,10 @@ values of the systems layer). Operations never modify their operands:
     them fails at run time (EQUALITY).
   * MutableVector[T] and MutableArray[T] are the two mutable values. They
     are still values, not references: `w = v` is a logical copy, and a
-    mutation (`v.push(x)`) must name a place -- a local, a parameter or a
-    field path from one -- and changes only that place's value.
+    mutation (`v.push(x)`) must name a place -- a local, a place
+    parameter, a context parameter or a field path from one -- and changes
+    only that place's value. An ordinary parameter is the function's copy,
+    not a place it may mutate (NONPLACE-PARAMETER-MUTATION).
 
 == WHY
 Immutable values make every binding mean one thing for its whole scope, so
@@ -4158,13 +4160,15 @@ elements copy-on-write, so copying is cheap.
   * A vector is a value, not a reference: `w = v` and passing `v` to a
     function make logical copies, and mutating one never changes another.
   * The receiver of a mutation must be a place of the function doing it
-    (MUTABLE-PLACE-RECEIVER): a local binding, a parameter, a context
-    parameter, or a field path from one. A call result or a temporary is
-    not a place, and a nested function cannot mutate an enclosing
-    function's vector (MUTABLE-PLACE-CAPTURE).
-  * A callee mutates its own copy: to give a caller the change, return the
-    vector, or declare the parameter a place (`place v: MutableVector[T]`,
-    concept.place-parameters): then the callee mutates the caller's own.
+    (MUTABLE-PLACE-RECEIVER): a local binding, a place parameter, a
+    context parameter, or a field path from one. A call result or a
+    temporary is not a place, and a nested function cannot mutate an
+    enclosing function's vector (MUTABLE-PLACE-CAPTURE).
+  * An ordinary parameter is the callee's own copy, never a place it may
+    mutate (NONPLACE-PARAMETER-MUTATION): to give a caller the change,
+    declare the parameter a place (`place v: MutableVector[T]`,
+    concept.place-parameters), then the callee mutates the caller's own;
+    or copy it into a local (`w = v`), mutate the local and return it.
   * pop, take and at fail with IndexNotFound unless proven safe.
   * A vector of affine elements is affine: it moves whole and elements
     leave it only through pop, take, swap or a consuming loop.
@@ -4180,8 +4184,9 @@ some other binding holds -- so value semantics still hold everywhere.
 import std::mutable_vector
 
 fn with_extra(v: MutableVector[int]) -> MutableVector[int]:
-    v.push(9)
-    v
+    extended = v
+    extended.push(9)
+    extended
 
 v = std::mutable_vector::from_list([1, 2])
 w = with_extra(v)
@@ -4189,7 +4194,7 @@ last = v.pop():
     on IndexNotFound:
         0
 [last, v.length(), w.length()]
-@caption The callee mutates and returns its own copy
+@caption The callee mutates and returns a local copy of its own
 @value [2, 1, 3]
 @end
 
@@ -4214,8 +4219,8 @@ title: Place parameters: `place m: T` updates the caller's collection
 summary: A parameter declared `place m: T` is the caller's place itself, so the function mutates the caller's collection (or struct of collections) in place, as the collection's own operations do.
 index: concepts
 alias: place parameter; place; in-out parameter; inout; mutable parameter; pass by reference; by-reference parameter; out parameter
-keywords: place, parameter, mutate, caller, MutableVector, MutableArray, MutableMap, MutableSet, struct, MUTABLE-PLACE-RECEIVER, MUTABLE-PLACE-CAPTURE, overlap
-related: concept.mutable-vector concept.mutable-array concept.mutable-map concept.values concept.functions error.mutable-place-receiver capability.assignment
+keywords: place, parameter, mutate, caller, MutableVector, MutableArray, MutableMap, MutableSet, struct, MUTABLE-PLACE-RECEIVER, MUTABLE-PLACE-CAPTURE, NONPLACE-PARAMETER-MUTATION, overlap
+related: concept.mutable-vector concept.mutable-array concept.mutable-map concept.values concept.functions error.mutable-place-receiver error.nonplace-parameter-mutation capability.assignment
 docs: PLACE-PARAMETERS.md MUTABLE-VECTOR.md ORDERED-MUTABLE-MAP-SET.md
 
 == WHAT IT IS
@@ -4227,7 +4232,8 @@ docs: PLACE-PARAMETERS.md MUTABLE-VECTOR.md ORDERED-MUTABLE-MAP-SET.md
     push_twice(v, 7)               v now holds [1, 7, 7]
 
 An ordinary parameter is the function's own value (a logical copy of the
-argument), so pushing into it changes nothing the caller sees. A place
+argument), so pushing into it would change nothing the caller sees: the
+compiler rejects that (NONPLACE-PARAMETER-MUTATION). A place
 parameter is the caller's place: the caller passes a place of its own and
 every mutation the function makes through the parameter -- a collection
 operation on it or on a field path of it, or a call passing it on to
@@ -4238,10 +4244,11 @@ std::mutable_set's add are ordinary functions of this kind.
   * The parameter's type is written and holds a mutable collection: a
     MutableVector, a MutableArray, or a struct whose fields hold one (a
     MutableMap is one); it is not affine. Otherwise TYPE.
-  * The argument is a place of the caller: a local, a parameter, a context
-    parameter's member, or a field path from one -- not a temporary, a
-    module binding or an enclosing function's binding
-    (MUTABLE-PLACE-RECEIVER).
+  * The argument is a place of the caller: a local, a place parameter, a
+    context parameter's member, or a field path from one -- not a
+    temporary, a module binding or an enclosing function's binding
+    (MUTABLE-PLACE-RECEIVER), and not an ordinary parameter, which is the
+    caller's own copy (NONPLACE-PARAMETER-MUTATION).
   * One call gives one place to one place parameter only: `f(a, a)` or
     `f(h, h.items)` is MUTABLE-PLACE-RECEIVER.
   * A function with a place parameter is only called, never used as a

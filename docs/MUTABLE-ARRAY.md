@@ -176,14 +176,17 @@ detach, no allocation (`ma-cow-counters`: three writes, one detach;
 ### 8. Place semantics
 
 MutableVector's (`hir::mutvec::verify`): a mutating operation's receiver
-(its registration's `place` role) must be a place -- a local, parameter or
-context parameter of the same function, or a field path from one. A
+(its registration's `place` role) must be a place -- a local, place
+parameter or context parameter of the same function, or a field path from
+one; a parameter not declared `place` is no place
+(NONPLACE-PARAMETER-MUTATION,
+NONPLACE-PARAMETER-MUTATION-CORRECTNESS-MILESTONE-1.md). A
 temporary or a value of a known non-array type is
 `MUTABLE-PLACE-RECEIVER`; a nested function mutating or capturing an array
 its function mutates is `MUTABLE-PLACE-RECEIVER` / `MUTABLE-PLACE-CAPTURE`
 (the diagnostics were `MUTABLE-VECTOR-*` and are shared now). An untyped
-generic parameter may be a place: its argument is copied for it (by the
-caller when the parameter is consumed); inside a generic body, where the
+generic parameter's local copy may be a place: its argument is copied for
+it (by the caller when the parameter is consumed); inside a generic body, where the
 static type is too imprecise to say, a binding or struct field taking the
 parameter copies it dynamically (`d`). `ma-place-receiver`,
 `ma-generic-place`, `ma-cow-extraction` (its last two routes are the ones
@@ -196,9 +199,12 @@ Unrestricted: the callee owns a logical copy -- made on entry, or by the
 caller for a *consumed* parameter (a directly called function that needs an
 exclusive header), or not at all for an *observed-only* parameter (the
 callee only reads while the caller waits): hir/mutvec.tcl's "Last uses and
-consumed parameters". A builder threaded through calls is mutated in place:
-`hashtable.bot`'s updates and `csv_chunked.bot`'s appends make no share and
-no detach (`paramagg-hashtable-2`, native counters). Affine: the array moves
+consumed parameters". The callee mutates that copy only through a local it
+binds it to (`updated = table`): a parameter not declared `place` is never
+a mutation's destination (NONPLACE-PARAMETER-MUTATION). A builder threaded
+through calls is mutated in place: `hashtable.bot`'s updates and
+`csv_chunked.bot`'s appends make no share and no detach
+(`paramagg-hashtable-2`, native counters). Affine: the array moves
 into the callee. `ma-cow-routes` (route 2), `ma-affine-whole-moves`.
 
 ### 10. Return semantics

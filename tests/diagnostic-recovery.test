@@ -236,7 +236,7 @@ test dr-poison-valid-program-absent {a valid program has no poison and no recove
 } -cleanup {unset -nocomplain hir} -result {{} 0 0}
 
 test dr-poison-lenient-run {a lenient HIR keeps its poison (the checks' recovery state) and runs as it did before poison existed: every backend checks it again without poison first (hir::recovery::runnable). An inadmissible handler's value and an opaque field's value are values at run time, never a divergence. (The opaque program on cranelift is a NATIVE BUG, before this milestone as after it: not run here.)} -body {
-    list [drLenient [dict create main.bot "import std::mutable_array\n\nfn st(a, i):\n    std::mutable_array::set(a, i, 1):\n        on IndexNotFound:\n            2\n\nb = std::mutable_array::allocate(2)\n\[st(b, 0), st(b, 2), 3\]\n"]] \
+    list [drLenient [dict create main.bot "import std::mutable_array\n\nfn st(a, i):\n    w = a\n    std::mutable_array::set(w, i, 1):\n        on IndexNotFound:\n            2\n\nb = std::mutable_array::allocate(2)\n\[st(b, 0), st(b, 2), 3\]\n"]] \
         [drLenient [dict create \
             main.bot "import vault\n\nx = vault::make().secret\n\[x, 1\]\n" \
             vault.bot "opaque struct Box:\n    secret: int\n\nfn make() -> Box:\n    Box \{secret: 7\}\n"] \

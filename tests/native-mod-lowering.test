@@ -435,7 +435,7 @@ fn installed(i: int, acc: int, context cfg: Cfg) -> int:
     else:
         installed(i + 1, acc + mod(1000, i + 1))
 
-fn capacity(i: int, a: MutableArray[int], acc: int) -> int:
+fn capacity(i: int, place a: MutableArray[int], acc: int) -> int:
     if i == std::mutable_array::capacity(a):
         acc
     else:
@@ -445,7 +445,8 @@ fn capacity(i: int, a: MutableArray[int], acc: int) -> int:
         capacity(i + 1, a, acc + mod(1000, i + 1))
 
 with context Cfg {c: 'e'}
-[built(0, "ab", 0), chosen(0, "abc", "x", true, 0), closure(0, "ab", 0), installed(0, 0), capacity(0, std::mutable_array::create(4, 0), 0)]}
+array = std::mutable_array::create(4, 0)
+[built(0, "ab", 0), chosen(0, "abc", "x", true, 0), closure(0, "ab", 0), installed(0, 0), capacity(0, array, 0)]}
     set nir [nirOf $text]
     concat [lmap name {built chosen closure installed capacity} {ModOps [FunctionBody $nir $name]}] \
         [list [sourceAgree $text]]

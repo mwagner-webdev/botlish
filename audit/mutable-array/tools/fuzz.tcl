@@ -30,8 +30,10 @@
 #                 that let a skipped copy go unnoticed, MUTABLE-VECTOR.md),
 #                 capacity, at, set, swap, std::mutable_array::copy (memmove
 #                 semantics, every slice checked before anything moves), a
-#                 function that mutates its parameter (the caller's array is
-#                 unchanged) or returns it, iteration over a snapshot while
+#                 function that mutates a local copy of its parameter (the
+#                 caller's array is unchanged; a parameter not declared
+#                 `place` is never mutated itself) or returns it, iteration
+#                 over a snapshot while
 #                 the loop mutates the array, and early exits from a loop.
 #   AFFINE        arrays of coroutine handles and of affine structs (Job
 #                 {id, step}), held in bindings and in a struct field (Pool
@@ -82,7 +84,8 @@
 # (AFFINE-ELEMENT-COPY-OUT); create repeating a handle
 # (AFFINE-DUPLICATION-UNSUPPORTED); a mutation of a temporary, or of an
 # enclosing function's array from a nested function
-# (MUTABLE-PLACE-RECEIVER); a nested function reading an array its
+# (MUTABLE-PLACE-RECEIVER); a mutation of a nested function's own value
+# parameter (NONPLACE-PARAMETER-MUTATION); a nested function reading an array its
 # enclosing function mutates (MUTABLE-PLACE-CAPTURE); an affine array erased
 # to `any` (AFFINE-ERASURE-UNSUPPORTED) or captured
 # (AFFINE-CAPTURE-UNSUPPORTED); a projection of a Pool's array field
@@ -198,14 +201,15 @@ fn vslot(m: MutableArray[MutableVector[int]], i: int) -> List[int]:
     vcontents(v)
 
 fn vpush(m: MutableArray[MutableVector[int]], i: int, x: int) -> MutableArray[MutableVector[int]]:
-    v = m.at(i):
+    w = m
+    v = w.at(i):
         on IndexNotFound:
-            return m
+            return w
     v.push(x)
-    m.set(i, v):
+    w.set(i, v):
         on IndexNotFound:
             unit
-    m
+    w
 
 fn ident(a: MutableArray[int]) -> MutableArray[int]:
     a
@@ -252,16 +256,18 @@ fn vfirst(v: MutableVector[MutableArray[int]]) -> MutableArray[int]:
     a
 
 fn bump(a: MutableArray[int], i: int, x: int) -> MutableArray[int]:
-    a.set(i, x):
+    w = a
+    w.set(i, x):
         on IndexNotFound:
             unit
-    a
+    w
 
 fn set_count(a: MutableArray[int], x: int) -> int:
-    a.set(0, x):
+    w = a
+    w.set(0, x):
         on IndexNotFound:
             unit
-    a.capacity()
+    w.capacity()
 
 fn find(a: MutableArray[int], t: int) -> int:
     loop x in a:
@@ -281,10 +287,11 @@ fn boom_if(x: int) -> int errors Boom:
     x
 
 fn pass_q(q: MutableArray[Coroutine{args: [Msg], return: Ev}], i: int, acc: int) -> MutableArray[Coroutine{args: [Msg], return: Ev}]:
-    old = q.swap(i, make(acc)):
+    w = q
+    old = w.swap(i, make(acc)):
         on IndexNotFound:
             make(77)
-    q
+    w
 
 fn drain(q: MutableArray[Coroutine{args: [Msg], return: Ev}], x: int) -> List[int]:
     loop c in q:
@@ -722,7 +729,7 @@ proc UOperation {stateVar} {
 proc UFault {stateVar} {
     upvar 1 $stateVar state
     set places [UPlaces $state]
-    set kinds {temporary wrongtype}
+    set kinds {temporary wrongtype valueparam}
     set bindings [lsearch -all -inline -glob $places a*]
     if {$places ne {}} { lappend kinds nestedmutation }
     set mutatedBindings [lmap a $bindings {expr {[dict exists $state mutated $a] ? $a : [continue]}}]
@@ -747,6 +754,17 @@ proc UFault {stateVar} {
         capture {
             Emit state "fn nested() -> int:" "    [Pick $mutatedBindings].capacity()"
             return MUTABLE-PLACE-CAPTURE
+        }
+        valueparam {
+            # A function's ordinary parameter is its own copy: mutating it
+            # would be lost (NONPLACE-PARAMETER-MUTATION), through set or
+            # as std::mutable_array::copy's destination.
+            if {[Rand 2]} {
+                Emit state "fn lost(w: MutableArray\[int\]) -> int:" "    w.set(0, 1):" "        on IndexNotFound:" "            unit" "    w.capacity()"
+            } else {
+                Emit state "fn lost(w: MutableArray\[int\], s: MutableArray\[int\]) -> MutableArray\[int\]:" "    std::mutable_array::copy(w, 0, s, 0, 0):" "        on LowerUnderrun:" "            unit" "        on UpperOverrun:" "            unit" "    w"
+            }
+            return NONPLACE-PARAMETER-MUTATION
         }
     }
 }

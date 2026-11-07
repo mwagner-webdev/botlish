@@ -240,8 +240,9 @@ struct Table:
     slots: MutableArray[int]
 
 fn store(t: Table, h: int) -> Table:
-    t.slots.set(h.mod(t.slots.capacity()), h)
-    t
+    stored = t
+    stored.slots.set(h.mod(stored.slots.capacity()), h)
+    stored
 
 t = Table {slots: std::mutable_array::create(4, 0)}.store(7)
 loop i from 0 to t.slots.capacity():

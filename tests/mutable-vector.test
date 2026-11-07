@@ -239,8 +239,8 @@ test mv-cow-copies {item 38: copies mutate independently: a.push(4) leaves b, b.
     mvAgree "import std::mutable_vector\na = std::mutable_vector::from_list(\[1, 2, 3\])\nb = a\na.push(4)\nold = b.swap(0, 9):\n    on IndexNotFound:\n        0\nc = a\nlast = a.pop():\n    on IndexNotFound:\n        0\n\[a, b, c, old, last\]\n"
 } -result {value {[<mutable-vector [1, 2, 3]>, <mutable-vector [9, 2, 3]>, <mutable-vector [1, 2, 3, 4]>, 1, 4]}}
 
-test mv-cow-calls {item 39: passing a vector to a function that mutates its parameter changes the callee's logical copy only; returning a vector and storing it in a List copies it logically} -body {
-    mvAgree "import std::mutable_vector\nfn modify(v: MutableVector\[int\]) -> int:\n    v.push(4)\n    v.length()\nfn keep(v: MutableVector\[int\]) -> List\[MutableVector\[int\]\]:\n    \[v\]\nfn grow(v: MutableVector\[int\]) -> MutableVector\[int\]:\n    v.push(9)\n    v\na = std::mutable_vector::from_list(\[1, 2, 3\])\nn = modify(a)\nxs = keep(a)\nb = grow(a)\na.push(5)\nb.push(6)\n\[n, a, xs, b\]\n"
+test mv-cow-calls {item 39: passing a vector to a function that mutates a local copy of its parameter changes that copy only; returning a vector and storing it in a List copies it logically} -body {
+    mvAgree "import std::mutable_vector\nfn modify(v: MutableVector\[int\]) -> int:\n    w = v\n    w.push(4)\n    w.length()\nfn keep(v: MutableVector\[int\]) -> List\[MutableVector\[int\]\]:\n    \[v\]\nfn grow(v: MutableVector\[int\]) -> MutableVector\[int\]:\n    w = v\n    w.push(9)\n    w\na = std::mutable_vector::from_list(\[1, 2, 3\])\nn = modify(a)\nxs = keep(a)\nb = grow(a)\na.push(5)\nb.push(6)\n\[n, a, xs, b\]\n"
 } -result {value {[4, <mutable-vector [1, 2, 3, 5]>, [<mutable-vector [1, 2, 3]>], <mutable-vector [1, 2, 3, 9, 6]>]}}
 
 test mv-cow-struct-field {items 43, 45: a struct with a vector field stays unrestricted; copying the struct copies the vector logically; `s.events.push(x)` updates that field's place; `copy = s.events` is a snapshot} -body {
@@ -261,7 +261,7 @@ test mv-cow-loop {item 49: a loop over an unrestricted vector iterates a snapsho
 
 test mv-untyped-loop {item 49: a loop the compiler does not mark consuming walks a List on every backend: a vector reaching one through a value of no collection type (an untyped parameter, an `any` struct field mutated in place) is the loop's TYPE error -- the interpreter neither drains it nor iterates it, exactly like the Tcl compiler and native code} -body {
     set untyped "import std::mutable_vector\nfn launder(v: any) -> any:\n    v\nfn f(xs):\n    ys = loop x in xs:\n        x\n    zs = loop x in xs:\n        x\n    \[ys, zs\]\nf(launder(std::mutable_vector::from_list(\[1, 2, 3\])))\n"
-    set field "import std::mutable_vector\nstruct Box:\n    v: any\nfn f(b: Box):\n    ys = loop x in b.v:\n        x * 10\n    std::mutable_vector::push(b.v, 4)\n    zs = loop x in b.v:\n        x\n    \[ys, zs\]\nf(Box {v: std::mutable_vector::from_list(\[1, 2, 3\])})\n"
+    set field "import std::mutable_vector\nstruct Box:\n    v: any\nfn f(b: Box):\n    w = b\n    ys = loop x in w.v:\n        x * 10\n    std::mutable_vector::push(w.v, 4)\n    zs = loop x in w.v:\n        x\n    \[ys, zs\]\nf(Box {v: std::mutable_vector::from_list(\[1, 2, 3\])})\n"
     lmap text [list $untyped $field] {
         set hir [surface::compile $text -warnings off]
         lsort -unique [lmap b {interp compile cranelift-generic cranelift} {lrange [outcomeUnderHir $b $hir] 0 1}]
@@ -356,8 +356,9 @@ struct Tree:
     kids: List[Tree]
 
 fn add(t: Tree, x: int) -> Tree:
-    t.items.push(x)
-    t
+    w = t
+    w.items.push(x)
+    w
 
 leaf = Tree {items: std::mutable_vector::from_list([1]), kids: []}
 root = Tree {items: std::mutable_vector::from_list([0]), kids: [leaf]}
@@ -374,9 +375,10 @@ fn leaf(x: int) -> Forest:
     Forest {items: std::mutable_vector::from_list([x]), kids: std::mutable_vector::from_list([])}
 
 fn graft(t: Forest, x: int) -> Forest:
-    t.kids.push(leaf(x))
-    t.items.push(x)
-    t
+    w = t
+    w.kids.push(leaf(x))
+    w.items.push(x)
+    w
 
 root = leaf(0)
 copy = root
@@ -396,8 +398,9 @@ fn follow(n: Node) -> Node:
     n.next
 
 fn record(c: Capture, e: str) -> Capture:
-    c.events.push(e)
-    c
+    w = c
+    w.events.push(e)
+    w
 
 cap = Capture {events: std::mutable_vector::from_list(["x0"]), n: 1}
 cap2 = cap
@@ -568,8 +571,8 @@ test mv-loop-collect-affine {item 56: a consuming loop whose body produces affin
 # ---------------------------------------------------------------------------
 # Places and diagnostics (items 13-15, 76, 99)
 
-test mv-receiver-places {items 13, 14: locals, parameters, struct field paths and context members are places; the binding stays usable after each mutation} -body {
-    mvAgree "import std::mutable_vector\nstruct Inner:\n    v: MutableVector\[int\]\nstruct Outer:\n    inner: Inner\nfn param(v: MutableVector\[int\]) -> int:\n    v.push(1)\n    v.push(2)\n    v.length()\no = Outer {inner: Inner {v: std::mutable_vector::from_list(\[\])}}\no.inner.v.push(5)\no.inner.v.push(6)\nlocal = std::mutable_vector::from_list(\[9\])\nlocal.push(8)\n\[param(local), o.inner.v.length(), local.length()\]\n"
+test mv-receiver-places {items 13, 14: locals (a parameter's local copy among them), struct field paths and context members are places; the binding stays usable after each mutation} -body {
+    mvAgree "import std::mutable_vector\nstruct Inner:\n    v: MutableVector\[int\]\nstruct Outer:\n    inner: Inner\nfn param(v: MutableVector\[int\]) -> int:\n    w = v\n    w.push(1)\n    w.push(2)\n    w.length()\no = Outer {inner: Inner {v: std::mutable_vector::from_list(\[\])}}\no.inner.v.push(5)\no.inner.v.push(6)\nlocal = std::mutable_vector::from_list(\[9\])\nlocal.push(8)\n\[param(local), o.inner.v.length(), local.length()\]\n"
 } -result {value {[4, 2, 2]}}
 
 test mv-receiver-temporary {item 15: a mutation of a temporary (a call's result, a List element) or of a non-vector is MUTABLE-PLACE-RECEIVER: the updated vector would be lost} -body {
@@ -595,7 +598,7 @@ proc mvAt {text} {
     return ok
 }
 
-test mv-operation-not-a-value {an operation that mutates its receiver in place (push, pop, take, swap, clear; set, swap, copy) is only ever called, never a value -- bound to a name, passed as an argument or stored in a field, a call through it would mutate whatever its caller passes, a header no place check sees: MUTABLE-PLACE-RECEIVER at the reference. Called (method syntax or not), or an operation that only reads (length, at) used as a value, it is accepted, and a function of one's own that mutates its parameter is a value with value semantics: through a value, it changes its own copy only. The help spells the call the way the operation can be made: a nomethod one (std::mutable_array::copy) as a function call, which compiles} -body {
+test mv-operation-not-a-value {an operation that mutates its receiver in place (push, pop, take, swap, clear; set, swap, copy) is only ever called, never a value -- bound to a name, passed as an argument or stored in a field, a call through it would mutate whatever its caller passes, a header no place check sees: MUTABLE-PLACE-RECEIVER at the reference. Called (method syntax or not), or an operation that only reads (length, at) used as a value, it is accepted, and a function of one's own that mutates a local copy of its parameter is a value with value semantics: through a value, it changes that copy only. The help spells the call the way the operation can be made: a nomethod one (std::mutable_array::copy) as a function call, which compiles} -body {
     set fn "fn apply(g: Fn{args: \[MutableVector\[int\], int\], return: unit}, w: MutableVector\[int\], x: int) -> int:\n    g(w, x)\n    w.length()\n"
     list [mvAt "import std::mutable_vector\nfn f() -> int:\n    v = std::mutable_vector::from_list(\[1, 2, 3\])\n    p = std::mutable_vector::push\n    p(v, 4)\n    v.length()\nf()\n"] \
         [mvMessage "import std::mutable_vector\nfn f() -> int:\n    v = std::mutable_vector::from_list(\[1, 2, 3\])\n    p = std::mutable_vector::push\n    p(v, 4)\n    v.length()\nf()\n"] \
@@ -611,7 +614,7 @@ test mv-operation-not-a-value {an operation that mutates its receiver in place (
         [regexp -inline {call it on a place, `[^`]*`} [mvMessage "import std::mutable_array\nfn f() -> int:\n    g = std::mutable_array::copy\n    1\nf()\n"]] \
         [mvAgree "import std::mutable_array\nfn f() -> int:\n    v = std::mutable_array::from_list(\[0, 0, 0\])\n    a = std::mutable_array::from_list(\[1, 2, 3\])\n    std::mutable_array::copy(v, 0, a, 1, 2):\n        on LowerUnderrun:\n            return -1\n        on UpperOverrun:\n            return -2\n    v.at(1):\n        on IndexNotFound:\n            -3\nf()\n"] \
         [mvAgree "import std::mutable_vector\nimport std::mutable_array\nfn f() -> List\[int\]:\n    v = std::mutable_vector::from_list(\[1, 2, 3\])\n    n = std::mutable_vector::length\n    a = std::mutable_array::at\n    w = std::mutable_array::from_list(\[7, 8\])\n    v.push(4)\n    std::mutable_vector::push(v, 5)\n    x = a(w, 1):\n        on IndexNotFound:\n            0\n    \[n(v), x\]\nf()\n"] \
-        [mvAgree "import std::mutable_vector\nfn grow(w: MutableVector\[int\], x: int):\n    w.push(x)\n${fn}fn f() -> List\[int\]:\n    v = std::mutable_vector::from_list(\[1, 2, 3\])\n    c = v\n    v.push(4)\n    n = apply(grow, v, 5)\n    \[v.length(), c.length(), n\]\nf()\n"]
+        [mvAgree "import std::mutable_vector\nfn grow(w: MutableVector\[int\], x: int):\n    w2 = w\n    w2.push(x)\n${fn}fn f() -> List\[int\]:\n    v = std::mutable_vector::from_list(\[1, 2, 3\])\n    c = v\n    v.push(4)\n    n = apply(grow, v, 5)\n    \[v.length(), c.length(), n\]\nf()\n"]
 } -result {{4:9 MUTABLE-PLACE-RECEIVER} {std::mutable_vector::push mutates its receiver in place, so it can only be called, never used as a value: a call through a function value has no receiver this check can see, and would update whatever MutableVector its caller passes -- a copy, whose update is lost, or a place's own header (call it on a place, `v.push(...)`, or wrap it in a function of your own that takes the vector and returns it)} {8:11 MUTABLE-PLACE-RECEIVER} {5:22 MUTABLE-PLACE-RECEIVER} {MUTABLE-PLACE-RECEIVER MUTABLE-PLACE-RECEIVER MUTABLE-PLACE-RECEIVER MUTABLE-PLACE-RECEIVER} {MUTABLE-PLACE-RECEIVER MUTABLE-PLACE-RECEIVER MUTABLE-PLACE-RECEIVER} {std::mutable_array::set mutates its receiver in place, so it can only be called, never used as a value: a call through a function value has no receiver this check can see, and would update whatever MutableArray its caller passes -- a copy, whose update is lost, or a place's own header (call it on a place, `v.set(...)`, or wrap it in a function of your own that takes the array and returns it)} {{call it on a place, `std::mutable_array::copy(v, ...)`}} {value 3} {value {[5, 8]}} {value {[4, 3, 4]}}}
 
 test mv-path-release {an affine binding moved on some paths only is released on each path that still owns it -- never after the join, where a moved path's new owner (a vector place, a join's value) lives on; a path no statement ends is AFFINE-PATH-RELEASE-UNSUPPORTED} -body {
@@ -640,7 +643,7 @@ test mv-hir-evidence {item 75: HIR text distinguishes an observation, a mutation
 } -cleanup {unset -nocomplain text hir formatted flags line pattern match} -result {{{call native(mutable_vector#share)} {call native(std::mutable_vector::from_list)} {call native(std::mutable_vector::length)} {call native(std::mutable_vector::pop)} {call native(std::mutable_vector::push)} {const str h} {listloop S (B t) : List[int] consuming} move-out place=B place=B.queue vector=mutate vector=observe} 1}
 
 test mv-hir-type-roundtrip {item 74: the MutableVector type and the elaborated operations read back from HIR text unchanged} -body {
-    set hir [surface::compile "import std::mutable_vector\nfn f(v: MutableVector\[MutableVector\[str\]\]) -> int:\n    v.push(std::mutable_vector::from_list(\[\"a0\"\]))\n    v.length()\nf(std::mutable_vector::from_list(\[\]))\n" -warnings off]
+    set hir [surface::compile "import std::mutable_vector\nfn f(v: MutableVector\[MutableVector\[str\]\]) -> int:\n    w = v\n    w.push(std::mutable_vector::from_list(\[\"a0\"\]))\n    w.length()\nf(std::mutable_vector::from_list(\[\]))\n" -warnings off]
     set formatted [hir::format $hir]
     list [regexp {MutableVector\[MutableVector\[str\]\]} $formatted] [expr {[hir::format [hir::parse $formatted]] eq $formatted}]
 } -cleanup {unset -nocomplain hir formatted} -result {1 1}
@@ -658,7 +661,7 @@ test mv-cow-evidence {items 61, 87, 93: natively a logical copy shares the backi
 } -cleanup {unset -nocomplain copy unique c u} -result {{value 2003} 1 1 1000 0 0 0 1}
 
 test mv-cow-fresh-results {item 39: a function's result moves its own place's header out (a mutated local or parameter dies with the call), so a call of a function whose every result is fresh enters the caller's place without a copy; a function that may return a vector some other place holds (an unmutated parameter, on one path) is copied, and the caller's vector never changes -- unless the caller passes the vector's last use, which moves it (MUTABLE-ARRAY.md, "Last uses and consumed parameters": the last `pick(true, a)` copies nothing)} -constraints nativeCoroutines -body {
-    set pre "import std::mutable_vector\nfn ints() -> MutableVector\[int\]:\n    std::mutable_vector::from_list(\[\])\nfn build(n: int) -> MutableVector\[int\]:\n    v = ints()\n    loop i from 0 to n:\n        v.push(i)\n    v\nfn id(v: MutableVector\[int\]) -> MutableVector\[int\]:\n    v\nfn keep(v: MutableVector\[int\]) -> MutableVector\[int\]:\n    v.push(1)\n    v\nfn pick(c: bool, v: MutableVector\[int\]) -> MutableVector\[int\]:\n    w = build(2)\n    if c:\n        return w\n    v\n"
+    set pre "import std::mutable_vector\nfn ints() -> MutableVector\[int\]:\n    std::mutable_vector::from_list(\[\])\nfn build(n: int) -> MutableVector\[int\]:\n    v = ints()\n    loop i from 0 to n:\n        v.push(i)\n    v\nfn id(v: MutableVector\[int\]) -> MutableVector\[int\]:\n    v\nfn keep(v: MutableVector\[int\]) -> MutableVector\[int\]:\n    w = v\n    w.push(1)\n    w\nfn pick(c: bool, v: MutableVector\[int\]) -> MutableVector\[int\]:\n    w = build(2)\n    if c:\n        return w\n    v\n"
     lmap body {
         "w = build(5)\nw.push(9)\nw.length()\n"
         "a = build(3)\nw = id(a)\nw.push(9)\n\[a.length(), w.length()\]\n"
@@ -685,9 +688,9 @@ test mv-cow-generic-results {item 39: a generic function's own body is typed imp
 test mv-cow-indirect-callee {items 39, 41: a function also passed as a value (so its caller cannot copy for it) copies its mutated parameter on entry, a result it may return unmutated is copied by the caller, and an affine vector entering it moves -- the caller's vector never changes, and no affine vector is ever shared or detached} -constraints nativeCoroutines -body {
     set pre "${mvDecls}fn v3() -> MutableVector\[int\]:\n    std::mutable_vector::from_list(\[1, 2, 3\])\n"
     set q "MutableVector\[Coroutine{args: \[Command\], return: Event}\]"
-    set grow "${pre}fn grow(xs: MutableVector\[int\]) -> int:\n    xs.push(9)\n    xs.length()\nfn apply(g: Fn{args: \[MutableVector\[int\]\], return: int}, v: MutableVector\[int\]) -> int:\n    g(v)\nfn f() -> List\[int\]:\n    a = v3()\n    n = apply(grow, a)\n    m = grow(a)\n    \[a.length(), n, m\]\nf()\n"
+    set grow "${pre}fn grow(xs: MutableVector\[int\]) -> int:\n    w = xs\n    w.push(9)\n    w.length()\nfn apply(g: Fn{args: \[MutableVector\[int\]\], return: int}, v: MutableVector\[int\]) -> int:\n    g(v)\nfn f() -> List\[int\]:\n    a = v3()\n    n = apply(grow, a)\n    m = grow(a)\n    \[a.length(), n, m\]\nf()\n"
     set pick "${pre}fn pick(c: bool, x: MutableVector\[int\]) -> MutableVector\[int\]:\n    if c:\n        return v3()\n    x\nfn via(g: Fn{args: \[bool, MutableVector\[int\]\], return: MutableVector\[int\]}, v: MutableVector\[int\]) -> int:\n    g(true, v).length()\nfn f() -> List\[int\]:\n    a = v3()\n    b = pick(false, a)\n    b.push(7)\n    n = via(pick, a)\n    \[a.length(), b.length(), n\]\nf()\n"
-    set hire "${pre}fn hire(q: $q) -> $q:\n    q.push(make(5))\n    q\nfn via(g: Fn{args: \[$q\], return: $q}, q: $q) -> $q:\n    g(q)\nfn f() -> int:\n    q = std::mutable_vector::from_list(\[make(1), make(2)\])\n    r = via(hire, q)\n    r.length()\nf()\n"
+    set hire "${pre}fn hire(q: $q) -> $q:\n    w = q\n    w.push(make(5))\n    w\nfn via(g: Fn{args: \[$q\], return: $q}, q: $q) -> $q:\n    g(q)\nfn f() -> int:\n    q = std::mutable_vector::from_list(\[make(1), make(2)\])\n    r = via(hire, q)\n    r.length()\nf()\n"
     set mv [lindex [mvNative $hire] 1]
     list [mvAgree $grow] [mvAgree $pick] [mvAgree $hire] [dict get $mv shares] [dict get $mv detaches]
 } -cleanup {unset -nocomplain pre q grow pick hire mv} -result {{value {[3, 4, 4]}} {value {[3, 4, 3]}} {value 3} 0 0}
@@ -707,14 +710,16 @@ context struct Counts:
     values: MutableVector[int]
 
 fn grow1(a: MutableVector[int], x: int) -> int:
-    a.push(x)
-    a.length()
+    w = a
+    w.push(x)
+    w.length()
 
 fn obs2(a: MutableVector[int], n: int) -> int:
     a.length() * 10 + n
 
 fn pop1(v: MutableVector[int]) -> int errors IndexNotFound:
-    v.pop()
+    w = v
+    w.pop()
 
 fn items(v: MutableVector[int]) -> List[int]:
     loop x in v:
@@ -961,25 +966,30 @@ fn table() -> T:
     T {keys: std::mutable_vector::from_list([1]), vals: std::mutable_vector::from_list([2]), count: 0}
 
 fn spend(a: MutableVector[int], x: int) -> int errors Boom:
-    a.push(x)
+    w = a
+    w.push(x)
     if x > 50:
         fail Boom
-    a.length()
+    w.length()
 
 fn grow1(a: MutableVector[int], x: int) -> int:
-    a.push(x)
-    a.length()
+    w = a
+    w.push(x)
+    w.length()
 
 fn pair(a: MutableVector[int], b: MutableVector[int]) -> int:
-    a.push(3)
-    b.push(4)
-    b.push(4)
-    a.length() * 10 + b.length()
+    w = a
+    w2 = b
+    w.push(3)
+    w2.push(4)
+    w2.push(4)
+    w.length() * 10 + w2.length()
 
 fn bump_all(t: T, c: int) -> T:
-    t.keys.push(50)
-    t.vals.push(60)
-    T {keys: t.keys, vals: t.vals, count: c}
+    w = t
+    w.keys.push(50)
+    w.vals.push(60)
+    T {keys: w.keys, vals: w.vals, count: c}
 
 }
 
@@ -1099,9 +1109,10 @@ with context Store {keys: std::mutable_vector::from_list([1, 2])}
 test mv-path-last-use-copies {the natural ways to update a struct of vectors copy nothing once each read-out is the last use of its own path: a rebuild from the struct's own fields after mutating them, a result struct whose vector field is passed on before its Int field is read, the whole struct handed to a mutating call while only its Int field is read after it, and a sub-struct field rebuilt beside an Int sibling -- natively no share and no detach, and the elaboration wrote no copy} -constraints nativeCoroutines -body {
     lmap case {
         {fn put(t: T, x: int) -> T:
-    t.keys.push(x)
-    t.vals.push(x * 10)
-    T {keys: t.keys, vals: t.vals, count: t.count + 1}
+    w = t
+    w.keys.push(x)
+    w.vals.push(x * 10)
+    T {keys: w.keys, vals: w.vals, count: w.count + 1}
 fn fill(t: T, i: int, n: int) -> T:
     if i >= n:
         return t
@@ -1111,9 +1122,10 @@ fn f():
     [t.count, t.keys.length(), t.vals.length()]
 }
         {fn put2(t: T, x: int) -> Put:
-    old = t.keys.length()
-    t.keys.push(x)
-    Put {old: old, table: t}
+    w = t
+    old = w.keys.length()
+    w.keys.push(x)
+    Put {old: old, table: w}
 fn fill2(t: T, i: int, n: int, acc: int) -> int:
     if i >= n:
         return acc * 100 + t.keys.length()
@@ -1133,8 +1145,9 @@ fn f():
     [t.count, t.keys.length(), t.vals.length()]
 }
         {fn retag(n: N, x: int) -> N:
-    n.inner.keys.push(x)
-    N {inner: n.inner, tag: n.tag + 1}
+    w = n
+    w.inner.keys.push(x)
+    N {inner: w.inner, tag: w.tag + 1}
 fn retags(n: N, i: int, k: int) -> N:
     if i >= k:
         return n
@@ -1264,8 +1277,9 @@ fn wrap(v: MutableVector[int], n: int) -> Memo:
     Memo {seen: v, count: n}
 
 fn note(m: Memo, x: int) -> Memo:
-    m.seen.push(x)
-    m
+    w = m
+    w.seen.push(x)
+    w
 
 fn steps(m: Memo, v: int) -> Step:
     if v <= 0:

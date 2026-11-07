@@ -1139,7 +1139,8 @@ fn register_proven_bounds_tests():
     fn unknown_array_set() errors std::compiler::CompilerError:
         static compile:
             fn st(a, i):
-                std::mutable_array::set(a, i, 1):
+                w = a
+                std::mutable_array::set(w, i, 1):
                     on IndexNotFound:
                         return 2
             b = std::mutable_array::allocate(2)
@@ -1149,7 +1150,8 @@ fn register_proven_bounds_tests():
     fn unknown_array_copy() errors std::compiler::CompilerError:
         static compile:
             fn c(a, b, i, n):
-                std::mutable_array::copy(a, i, b, 0, n):
+                w = a
+                std::mutable_array::copy(w, i, b, 0, n):
                     on LowerUnderrun:
                         return "lo"
                     on UpperOverrun:
@@ -1588,7 +1590,7 @@ fn register_loop_interval_scope_tests():
             loop i from 0 to 3:
                 std::list::at(xs, i)
             std::list::at(xs, 9)
-    std::test::rejects_at("loop-interval-not-after-the-loop/known-error-after", std::compiler::DiagnosticCode::KnownError, 1590, 13, known_after_loop)
+    std::test::rejects_at("loop-interval-not-after-the-loop/known-error-after", std::compiler::DiagnosticCode::KnownError, 1592, 13, known_after_loop)
 
     fn binding_after_loop() errors std::compiler::CompilerError:
         static compile:
@@ -1606,7 +1608,7 @@ fn register_loop_interval_scope_tests():
                     i
                 std::abi::u8(k)
             f(1)
-    std::test::rejects_at("loop-interval-not-after-the-loop/parameter-after", std::compiler::DiagnosticCode::UnhandledError, 1607, 17, parameter_after_loop)
+    std::test::rejects_at("loop-interval-not-after-the-loop/parameter-after", std::compiler::DiagnosticCode::UnhandledError, 1609, 17, parameter_after_loop)
 
     fn sibling_loop() errors std::compiler::CompilerError:
         static compile:
@@ -1615,7 +1617,7 @@ fn register_loop_interval_scope_tests():
                 std::list::at(xs, i)
             loop j from 0 to 4:
                 std::list::at(xs, j)
-    std::test::rejects_at("loop-interval-not-after-the-loop/sibling-loop", std::compiler::DiagnosticCode::UnhandledError, 1617, 17, sibling_loop)
+    std::test::rejects_at("loop-interval-not-after-the-loop/sibling-loop", std::compiler::DiagnosticCode::UnhandledError, 1619, 17, sibling_loop)
 
     # loop-interval-nested-loops: an inner loop's interval is its own: the
     # outer variable's interval is intact after the inner loop ends, and
@@ -1644,7 +1646,7 @@ fn register_loop_interval_scope_tests():
                 loop j from 0 to 4:
                     std::list::at(xs, j)
                 std::list::at(xs, i)
-    std::test::rejects_at("loop-interval-nested-loops/inner-out-of-range", std::compiler::DiagnosticCode::UnhandledError, 1645, 21, nested_inner_out_of_range)
+    std::test::rejects_at("loop-interval-nested-loops/inner-out-of-range", std::compiler::DiagnosticCode::UnhandledError, 1647, 21, nested_inner_out_of_range)
 
     # loop-interval-empty-loops: a statically empty loop gets no
     # contradictory interval: its body is judged under no loop fact, so an
@@ -1798,8 +1800,9 @@ fn register_bounds_theorem_tests():
     fn reduced_set() errors std::compiler::CompilerError:
         static compile:
             fn put(a: MutableArray[int], h: int) -> MutableArray[int]:
-                a.set(h.mod(a.capacity()), h)
-                a
+                w = a
+                w.set(h.mod(w.capacity()), h)
+                w
             c = put(put(put(std::mutable_array::create(3, 0), -1), 4), 9)
             loop i from 0 to std::mutable_array::capacity(c):
                 std::mutable_array::at(c, i)
@@ -1833,8 +1836,9 @@ fn register_bounds_theorem_tests():
     fn field_path_reads() errors std::compiler::CompilerError:
         static compile:
             fn store(t: BoundsTable, h: int) -> BoundsTable:
-                t.slots.set(h.mod(std::mutable_array::capacity(t.slots)), h)
-                t
+                w = t
+                w.slots.set(h.mod(std::mutable_array::capacity(w.slots)), h)
+                w
             fn read(t: BoundsTable, i: int) -> int:
                 if i < 0 or i >= std::mutable_array::capacity(t.slots):
                     return -1
@@ -1889,10 +1893,11 @@ fn register_bounds_theorem_tests():
     fn guarded_local_write() errors std::compiler::CompilerError:
         static compile:
             fn bump(a: MutableArray[int], i: int) -> MutableArray[int]:
+                w = a
                 j = i * 2
-                if j >= 0 and j < std::mutable_array::capacity(a):
-                    std::mutable_array::set(a, j, std::mutable_array::at(a, j) + 1)
-                a
+                if j >= 0 and j < std::mutable_array::capacity(w):
+                    std::mutable_array::set(w, j, std::mutable_array::at(w, j) + 1)
+                w
             b = bump(bump(bump(bump(std::mutable_array::create(5, 0), 0), 2), 1), -1)
             loop k from 0 to std::mutable_array::capacity(b):
                 std::mutable_array::at(b, k)

@@ -16086,7 +16086,8 @@ v.empty?() first if that is clearer, but the handler is still needed).
 import std::mutable_vector
 
 fn last_or_zero(v: MutableVector[int]) -> int:
-    x = v.pop():
+    rest = v
+    x = rest.pop():
         on IndexNotFound:
             0
     x
