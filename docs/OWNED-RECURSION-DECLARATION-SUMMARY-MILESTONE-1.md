@@ -678,9 +678,39 @@ macos-arm64.yml's `Botlish.app` job, whose `single/smoke-test.sh` failed at
 graph`'s output) -- a package-manager smoke step this milestone does not
 touch.
 
-The branch (claude/zen-keller-4y797x), CI:
+The branch (claude/zen-keller-4y797x), CI. The code is 466106e's; the
+later commits change only this report, and the dispatched runs ran at
+0092843, the same code:
 
-CI-RESULTS
+* tests (Linux x86-64), dispatched (run 42312449892): success -- the
+  canary, interp, compile, cranelift and cranelift-generic coverage, the
+  four golden shards, the native Rust unit tests, the stub- and
+  system-linked executables and the method-call decision's oracle and
+  reference audit. Its native GC-stress job runs only on a push to main
+  and was skipped (the local GC-stress runs above cover the files this
+  milestone touches).
+* tests (linux arm64), dispatched (run 42312453425): success -- every job,
+  both GC-stress jobs (interp, compile) included.
+* static-decisions, dispatched (run 42312456780): success -- every golden
+  suite, mutable-array.bot's job included, agrees under the batched and the
+  sequential scheduler.
+* tests (windows x86-64), push (run 42310672233): success -- canary,
+  smoke, root plans, system linker, the four acceptance shards (the
+  GC-stress tier runs only with `[ci-full]`).
+* icy-tower (windows x86-64) and icy-tower (macos arm64), push: success
+  (their signing, release and publishing jobs run only on main or a
+  release tag and were skipped).
+* tests (macos arm64), push (run 42310672219): failure in one job,
+  "Botlish.app without developer tools", step "Toolchain-free smoke test":
+  `single/smoke-test.sh` stopped at "package graph shows the shared
+  geometry" with `error writing "stdout": broken pipe` from `package
+  graph`. Every other job passed: smoke, the four acceptance shards, the
+  system linker (also under GC stress), Botlish.app, static SDL3 and the
+  main-thread startup. This is main's own failure (above): the check
+  piped `package graph` into `grep -q` under pipefail, and main fixed it
+  after this branch was cut (27a06702, "single/'s checks read a command's
+  whole output before matching it"). The branch does not touch
+  `single/` or `pm/`.
 
 ## 20. Remaining recursive walks
 

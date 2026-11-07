@@ -568,7 +568,10 @@ test or-oracle {the independent model (oracle.py: a pushdown model over field-ty
         expr {[orVerdict $t] eq "" ? "ok" : "bad"}
     }]
     list $self [expr {$oracleVerdicts eq $compiler}] $compiler
-} -cleanup {unset -nocomplain oracle self file f oracleVerdicts c compiler} -result {{28 hand cases, 0 failures} 1 {bad bad ok ok bad ok ok}}
+} -cleanup {
+    file delete -- [file join [temporaryDirectory] owned-recursion-oracle.txt]
+    unset -nocomplain oracle self file f oracleVerdicts c compiler
+} -result {{28 hand cases, 0 failures} 1 {bad bad ok ok bad ok ok}}
 
 test or-fuzz-smoke {a short run of the fuzzer (random declaration graphs against the oracle, the old walk's classified differences, written types and runtime releases) finds no failure} -constraints python3 -body {
     set output [exec [info nameofexecutable] [file join $::projectRoot audit owned-recursion tools fuzz.tcl] -programs 12 -queries 6 -seed 11 -runtime 6 -native 0]
