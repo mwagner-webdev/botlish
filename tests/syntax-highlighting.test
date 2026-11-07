@@ -238,7 +238,14 @@ proc shProgram {name text} {
 }
 
 set ::shBroken "# adds\nfn add(a: int, b: int) -> int:\n    a + bb   # oops\n\nadd(1, 2)\n"
-set ::shHelp "[file tail [info nameofexecutable]] main.tcl -help error.unbound"
+# How main.tcl names itself in its messages (its cliInvocation): the
+# interpreter's name as typed, so without Windows' .exe.
+set ::shInvocation [file tail [info nameofexecutable]]
+if {$::tcl_platform(platform) eq "windows" && [string equal -nocase [file extension $::shInvocation] .exe]} {
+    set ::shInvocation [file rootname $::shInvocation]
+}
+set ::shInvocation "$::shInvocation main.tcl"
+set ::shHelp "$::shInvocation -help error.unbound"
 
 test sh-cli-plain-unchanged {in a pipe a rejected program's output is the plain format, byte for byte as before excerpts and color existed: -color auto and -excerpts auto are off where no terminal is} -setup {
     set dir [shProgram b.bot $::shBroken]
@@ -256,13 +263,13 @@ test sh-cli-color {-color always -excerpts always: the label, location and code 
     set dir [shProgram b.bot "fn f(a: int) -> int:\n    return a + \"s\"   # mix\nf(1)\n"]
 } -body {
     lindex [shMain $dir -color always -excerpts always b.bot] 1
-} -cleanup {file delete -force $dir; unset -nocomplain dir} -result "== b.bot (interp)\n   \x1b\[1;31merror:\x1b\[0m \x1b\[1mb.bot:2:16: \x1b\[0margument 2 of native + requires int, but this operand has type str: the call could only fail when it runs \x1b\[2m(CORE SEMANTIC TYPE)\x1b\[0m\n     \x1b\[34m|\x1b\[0m\n   2 \x1b\[34m|\x1b\[0m     \x1b\[35mreturn\x1b\[0m a + \x1b\[32m\"s\"\x1b\[0m   \x1b\[90m# mix\x1b\[0m\n     \x1b\[34m|\x1b\[0m \x1b\[1;31m               ^^^\x1b\[0m\n   \x1b\[1;32mhelp:\x1b\[0m [file tail [info nameofexecutable]] main.tcl -help error.type"
+} -cleanup {file delete -force $dir; unset -nocomplain dir} -result "== b.bot (interp)\n   \x1b\[1;31merror:\x1b\[0m \x1b\[1mb.bot:2:16: \x1b\[0margument 2 of native + requires int, but this operand has type str: the call could only fail when it runs \x1b\[2m(CORE SEMANTIC TYPE)\x1b\[0m\n     \x1b\[34m|\x1b\[0m\n   2 \x1b\[34m|\x1b\[0m     \x1b\[35mreturn\x1b\[0m a + \x1b\[32m\"s\"\x1b\[0m   \x1b\[90m# mix\x1b\[0m\n     \x1b\[34m|\x1b\[0m \x1b\[1;31m               ^^^\x1b\[0m\n   \x1b\[1;32mhelp:\x1b\[0m $::shInvocation -help error.type"
 
 test sh-cli-syntax-excerpt {a syntax error's excerpt: an error at the end of a line underlines just past it} -setup {
     set dir [shProgram s.bot "fn f(a: int) -> int:\n    a +\n"]
 } -body {
     lindex [shMain $dir -excerpts always s.bot] 1
-} -cleanup {file delete -force $dir; unset -nocomplain dir} -result "== s.bot (interp)\n   error: s.bot:2:8: expected an expression, found end of line (SURFACE SYNTAX)\n     |\n   2 |     a +\n     |        ^\n   help: [file tail [info nameofexecutable]] main.tcl -help error.surface-syntax"
+} -cleanup {file delete -force $dir; unset -nocomplain dir} -result "== s.bot (interp)\n   error: s.bot:2:8: expected an expression, found end of line (SURFACE SYNTAX)\n     |\n   2 |     a +\n     |        ^\n   help: $::shInvocation -help error.surface-syntax"
 
 test sh-cli-excerpt-widths {an excerpt shows a tab as four spaces and counts a wide character as two columns, so the underline stays under the span} -setup {
     set dir [shProgram w.bot "x = \"\t\u4e16\u754c\" + zz\n"]
@@ -282,7 +289,7 @@ test sh-cli-usage {-color and -excerpts take auto, always or never; -lsp takes n
     list [lrange [shMain $dir -color sometimes b.bot] 0 0] [lindex [split [lindex [shMain $dir -color sometimes b.bot] 2] \n] 0] \
         [lindex [shMain $dir -lsp -color always] 0]
 } -cleanup {file delete -force $dir; unset -nocomplain dir} \
-    -result [list 2 "[file tail [info nameofexecutable]] main.tcl: unknown -color mode \"sometimes\" (known: auto always never)" 2]
+    -result [list 2 "$::shInvocation: unknown -color mode \"sometimes\" (known: auto always never)" 2]
 
 testConstraint scriptCommand [expr {$::tcl_platform(os) eq "Linux" && [auto_execok script] ne ""}]
 
@@ -356,7 +363,7 @@ proc shVimGroups {path positions} {
         }
         puts $script "redir END\nqa!"
         close $script
-        exec vim -Nu NONE -i NONE -es -S [file join $dir check.vim] < /dev/null
+        exec vim -Nu NONE -i NONE -es -S [file join $dir check.vim] << ""
         return [lrange [split [string trim [shRead [file join $dir out.txt]]] \n] 0 end]
     } finally {
         file delete -force $dir
@@ -382,7 +389,10 @@ proc shSyntaxMismatches {classes groups} {
     return $mismatches
 }
 
-testConstraint vimEditor [expr {[auto_execok vim] ne "" && ![catch {exec vim --version} version] && [regexp {VIM - Vi IMproved (\d+)} $version -> major] && $major >= 8}]
+# (Not on Windows, where the vim on PATH is Git's, with its own path rules:
+# the syntax file is the same on every host.)
+testConstraint vimEditor [expr {$::tcl_platform(platform) ne "windows" && [auto_execok vim] ne ""
+    && ![catch {exec vim --version} version] && [regexp {VIM - Vi IMproved (\d+)} $version -> major] && $major >= 8}]
 
 test sh-grammar-vim-fixture {the Vim syntax gives every token of the fixture the token IR's class: every keyword, contextual word, constant, number, string, character and comment, and no name a keyword or a constant (Neovim's: tests/lsp-neovim.test)} -constraints vimEditor -body {
     set classes [shFixtureClasses]
