@@ -1208,8 +1208,8 @@ fn op(p: *mut Vm, code: i64, a: [Value; 6]) -> Result<Value, Value> {
         16 => n(lock(&TRANSPORT).domain()),
         // rt_endpoint_open(capacity, fingerprint)
         17 => {
-            let capacity = int(p, a[0], "std::actor::remote::export")?;
-            let fingerprint = text(p, a[1], "std::actor::remote::export")?;
+            let capacity = int(p, a[0], "std::thread::rt_endpoint_open")?;
+            let fingerprint = text(p, a[1], "std::thread::rt_endpoint_open")?;
             let Some(fingerprint) = fingerprint_of(fingerprint) else { return Ok(n(T_MALFORMED)) };
             let port = match port_of(p) {
                 Ok(port) => port,
@@ -1220,13 +1220,13 @@ fn op(p: *mut Vm, code: i64, a: [Value; 6]) -> Result<Value, Value> {
         }
         // rt_endpoint_key(id)
         18 => {
-            let id = int(p, a[0], "std::actor::remote::export")?;
+            let id = int(p, a[0], "std::thread::rt_endpoint_key")?;
             let mut transport = lock(&TRANSPORT);
             n(transport.endpoint_mut(id as u64).map_or(0, |e| e.key as i64))
         }
         // rt_endpoint_close(id): only the owner's
         19 => {
-            let id = int(p, a[0], "std::actor::remote::close")?;
+            let id = int(p, a[0], "std::thread::rt_endpoint_close")?;
             let mine = vm(p).thread.port.clone();
             let mut transport = lock(&TRANSPORT);
             let owned = transport.endpoint_mut(id as u64).is_some_and(|e| mine.as_ref().is_some_and(|m| Arc::ptr_eq(&e.owner, m)));
@@ -1234,11 +1234,11 @@ fn op(p: *mut Vm, code: i64, a: [Value; 6]) -> Result<Value, Value> {
         }
         // rt_send(domain, id, key, data, wait-token, -): a one-way message
         20 => {
-            let domain = int(p, a[0], "std::actor::remote::send")?;
-            let id = int(p, a[1], "std::actor::remote::send")? as u64;
-            let key = int(p, a[2], "std::actor::remote::send")? as u64;
-            let data = bytes(p, a[3], "std::actor::remote::send")?.to_vec();
-            let token = int(p, a[4], "std::actor::remote::send")?;
+            let domain = int(p, a[0], "std::thread::rt_send")?;
+            let id = int(p, a[1], "std::thread::rt_send")? as u64;
+            let key = int(p, a[2], "std::thread::rt_send")? as u64;
+            let data = bytes(p, a[3], "std::thread::rt_send")?.to_vec();
+            let token = int(p, a[4], "std::thread::rt_send")?;
             let wait = if token != 0 {
                 match port_of(p) {
                     Ok(port) => Some((Arc::downgrade(&port), token)),
@@ -1252,12 +1252,12 @@ fn op(p: *mut Vm, code: i64, a: [Value; 6]) -> Result<Value, Value> {
         // rt_request(domain, id, key, data, reply-endpoint, wait-token): a
         // call; its id, or a refusal code
         21 => {
-            let domain = int(p, a[0], "std::actor::remote::call")?;
-            let id = int(p, a[1], "std::actor::remote::call")? as u64;
-            let key = int(p, a[2], "std::actor::remote::call")? as u64;
-            let data = bytes(p, a[3], "std::actor::remote::call")?.to_vec();
-            let reply = int(p, a[4], "std::actor::remote::call")? as u64;
-            let token = int(p, a[5], "std::actor::remote::call")?;
+            let domain = int(p, a[0], "std::thread::rt_request")?;
+            let id = int(p, a[1], "std::thread::rt_request")? as u64;
+            let key = int(p, a[2], "std::thread::rt_request")? as u64;
+            let data = bytes(p, a[3], "std::thread::rt_request")?.to_vec();
+            let reply = int(p, a[4], "std::thread::rt_request")? as u64;
+            let token = int(p, a[5], "std::thread::rt_request")?;
             let port = match port_of(p) {
                 Ok(port) => port,
                 Err(code) => return Ok(n(code)),
@@ -1278,7 +1278,7 @@ fn op(p: *mut Vm, code: i64, a: [Value; 6]) -> Result<Value, Value> {
         }
         // rt_take(id): the next message of this VM's endpoint ID, current
         22 => {
-            let id = int(p, a[0], "std::actor::remote")? as u64;
+            let id = int(p, a[0], "std::thread::rt_take")? as u64;
             let mine = vm(p).thread.port.clone();
             let mut transport = lock(&TRANSPORT);
             let Some(e) = transport.endpoint_mut(id) else { return Ok(n(0)) };
@@ -1318,11 +1318,11 @@ fn op(p: *mut Vm, code: i64, a: [Value; 6]) -> Result<Value, Value> {
         26 => n(vm(p).thread.current.as_ref().map_or(T_STALE, |m| m.status)),
         // rt_reply(domain, call, key, status, data)
         27 => {
-            let domain = int(p, a[0], "std::actor::remote::reply")?;
-            let call = int(p, a[1], "std::actor::remote::reply")? as u64;
-            let key = int(p, a[2], "std::actor::remote::reply")? as u64;
-            let status = int(p, a[3], "std::actor::remote::reply")?;
-            let data = bytes(p, a[4], "std::actor::remote::reply")?.to_vec();
+            let domain = int(p, a[0], "std::thread::rt_reply")?;
+            let call = int(p, a[1], "std::thread::rt_reply")? as u64;
+            let key = int(p, a[2], "std::thread::rt_reply")? as u64;
+            let status = int(p, a[3], "std::thread::rt_reply")?;
+            let data = bytes(p, a[4], "std::thread::rt_reply")?.to_vec();
             let mut transport = lock(&TRANSPORT);
             if domain != transport.domain() {
                 return Ok(n(T_UNAVAILABLE));
@@ -1341,7 +1341,7 @@ fn op(p: *mut Vm, code: i64, a: [Value; 6]) -> Result<Value, Value> {
         }
         // rt_cancel(call): the caller gives up on it; a later reply is stale
         28 => {
-            let call = int(p, a[0], "std::actor::remote::cancel")? as u64;
+            let call = int(p, a[0], "std::thread::rt_cancel")? as u64;
             let mut transport = lock(&TRANSPORT);
             let (slot, generation) = unpack(call);
             if let Some(CallSlot { generation: g, call: Some(c) }) = transport.calls.get_mut(slot) {
@@ -1367,7 +1367,7 @@ fn op(p: *mut Vm, code: i64, a: [Value; 6]) -> Result<Value, Value> {
         }
         // rt_endpoint_queued(id)
         31 => {
-            let id = int(p, a[0], "std::actor::remote")? as u64;
+            let id = int(p, a[0], "std::thread::rt_endpoint_queued")? as u64;
             let mut transport = lock(&TRANSPORT);
             n(transport.endpoint_mut(id).map_or(0, |e| e.queue.len() as i64))
         }
