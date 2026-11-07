@@ -250,6 +250,9 @@ test th-static-blocks {a thread entry declared inside a static compile block, an
 } -result [lrepeat 3 {value {[std::compiler::DiagnosticCode::ThreadEntryPlacement, std::compiler::DiagnosticCode::ThreadEntryReference]}}]
 
 test th-requirements {the compiler's context analysis (hir::contexts::required, which MISSING-CONTEXT and CONTEXT-NOT-INJECTED read): a thread entry requires nothing (it installs what it uses), the broker's operations and the worker's handler only the DeviceBroker -- never the owner's Device} -constraints threadTransport -body {
+    if {![thBuild]} {
+        return [list BUILD $::thBuildError]
+    }
     set hir [thHir $::thBroker main]
     hir::activate $hir
     set functions {worker::worker broker::read_device broker::write_device worker::handler}
