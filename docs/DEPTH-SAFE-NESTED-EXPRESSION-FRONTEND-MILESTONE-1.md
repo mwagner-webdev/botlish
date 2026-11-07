@@ -621,7 +621,7 @@ evaluation order, error positions, stringification, the constant fold).
 | `nested-drivers` | a guarded call inside a running segment starts a driver of its own there instead of yielding: each segment's frames stack on the last, and the host's nesting grows with the program's again | `dsn-1000-list`, `dsn-1000-paren` |
 | `outcome-ignored` | a segment's result is returned whatever its return code: an error deep in a walk becomes a value | `dsn-malformed`, `dsn-mechanism-errors` |
 | `limit-at-a-segment` | a program deep enough to need a segment is rejected as too deep (a limit of about six parentheses) | `dsn-depths` |
-| `limit-past-1000` | the driver's stack bounded at 500 segments: every 1000-deep specimen still compiles, 5000 parentheses do not -- 1000 made a limit | `dsn-beyond` |
+| `limit-past-1000` | the driver's stack bounded at 200 segments: every 1000-deep specimen still compiles (at most 98 at once), 5000 parentheses (370) do not -- 1000 made a limit | `dsn-beyond` |
 | `limit-stack-translated` | the parser recursive again, Tcl's stack exhaustion turned into a syntax error | `dsn-1000-paren` |
 | `host-depth-decides-instances` | hir::semantic declines an instance again where Tcl's frames are deep | `dsn-census-guarded` |
 | `additive-right-associative` | + and - associate to the right | `dsn-depths` |
@@ -648,7 +648,15 @@ inference at every level (`Analyze` -> `hir::types::inferRegion` ->
 bound it, so removing specialization's own guards changes nothing (its
 compile of 400 nested functions without them still passes). Its guards
 stay -- the census lists every procedure active as deep as the program
-nests -- and the generator no longer makes that mutant.
+nests -- and the generator no longer makes that mutant. The twelve
+procedures the last census pass found (section 4) are of the same kind:
+each recurses only through guarded procedures, so removing one's guard
+alone is caught by `dsn-census-guarded` and by no depth; the phase
+mutants were regenerated with them (they remove those guards too), and
+the seven that changed -- parser, inference, range, completions,
+callables, Tcl compiler, native lowering -- were run again with
+`limit-past-1000`, whose bound moved with the segment size (section 5):
+8 of 8 killed.
 
 The mutants of other audits that quote code this milestone changed were
 updated in place, keeping each a mutant of the same rule, and run through
@@ -657,7 +665,7 @@ and `transport-not-in-generic-lowering`, error-payloads'
 `nested-destructuring-handler-specific`, layout-unions' `union-as-struct`
 and `pointer-union-parse-allowed`, native-link-plan's
 `module-links-dropped` and binary-layout's `nested-emit-skipped-interp`:
-killed. `tools/mutant-catalogs.tcl`: 89 catalogs, every mutant applies.
+killed. `tools/mutant-catalogs.tcl`: 89 catalogs, 3175 mutants, every one applies.
 
 ## 20. Performance
 
