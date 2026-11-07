@@ -212,7 +212,7 @@ if {[info exists ::env(RUNNER_TEMP)]} {
 } else {
     set tree [file tempdir botlish-threads-mutants]
 }
-foreach dir {compiler core hir surface stdlib tests examples bench audit service lsp compilerpedia generated packages .cargo} {
+foreach dir {compiler core hir surface stdlib tests tools examples bench audit service lsp compilerpedia generated packages .cargo} {
     if {![file exists [file join $root $dir]]} continue
     file copy [file join $root $dir] [file join $tree $dir]
 }
