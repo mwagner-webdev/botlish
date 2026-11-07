@@ -1101,6 +1101,13 @@ an open document's unsaved text is what the compiler analyzes, and the
 server never writes a file. Positions are UTF-16 (or UTF-32 when the
 editor prefers it).
 
+A program that does not load (an import that finds no module, anywhere
+in the modules it imports) answers nothing. A loader diagnostic in a
+module file names, in note lines (-check prints them too), the imports
+that load that file, the entry program's first; for such a program the
+server also shows the diagnostic at each of those imports, so the file
+open in the editor says why it answers nothing.
+
 == PROGRAMS AND STALENESS
 Each open document is analyzed as a program unless another open program
 imports it; then it is that program's module. A document with a syntax

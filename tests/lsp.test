@@ -947,6 +947,33 @@ test lsp-lang-loader-error {an import that resolves to no module is the loader's
     list [lindex $missing 0 0] [lindex $missing 0 2] [lt::Hover [lspc::hover $c $main 1 8]] [file exists $dir/helper.bot] [lt::Stop $c]
 } -cleanup {file delete -force $dir; unset -nocomplain dir c main missing} -result {0:7-0:13 {SURFACE MODULE UNKNOWN-NAMESPACE} {fn helper::g(x: int) -> int} 0 0}
 
+test lsp-lang-module-load-error {a program that does not load because of a module it imports, through another: the open entry is published the module's diagnostic at its import, and the module in between at its own, each its related information the error's location; the module's file has the error itself, its related information the imports; the module repaired as an unsaved document, every one of them goes} -body {
+    set dir [lt::Dir module-load-error]
+    lt::Put $dir/a.bot "import b\n\nfn f() -> int:\n    b::g()\n"
+    lt::Put $dir/b.bot "import missing\n\nfn g() -> int:\n    1\n"
+    set c [lt::Start]
+    set main [lspc::uri $dir/main.bot]
+    lspc::didOpen $c $main "import a\n\na::f()\n"
+    set at [lt::Diagnostics $c $main 1]
+    set via [lt::Diagnostics $c [lspc::uri $dir/a.bot]]
+    set error [lt::Diagnostics $c [lspc::uri $dir/b.bot]]
+    set related [lmap uri [list $main [lspc::uri $dir/b.bot]] {
+        set d [lindex [lsp::json::elements [lsp::json::get [lspc::published $c $uri] diagnostics]] 0]
+        lmap r [lsp::json::elements [lsp::json::get $d relatedInformation]] {
+            list [lt::Location [lsp::json::get $r location]] [lsp::json::text [lsp::json::get $r message]]
+        }
+    }]
+    lspc::didOpen $c [lspc::uri $dir/b.bot] "fn g() -> int:\n    1\n"
+    lspc::until $c {[lt::Brief [lspc::published $c $main]] eq {}}
+    set hover [lt::Hover [lspc::hover $c $main 2 3]]
+    string map [list $dir APP] [list $at $via $error $related $hover [lt::Stop $c]]
+} -cleanup {file delete -force $dir; unset -nocomplain dir c main at via error related d hover} -result [list \
+    {{0:7-0:8 1 {SURFACE MODULE UNKNOWN-NAMESPACE} {the import of "a" here loads b.bot: unknown namespace "missing": no such module file APP/missing.bot (an application's own modules are the files beside its entry program)}}} \
+    {{0:7-0:8 1 {SURFACE MODULE UNKNOWN-NAMESPACE} {the import of "b" here loads b.bot: unknown namespace "missing": no such module file APP/missing.bot (an application's own modules are the files beside its entry program)}}} \
+    {{0:7-0:14 1 {SURFACE MODULE UNKNOWN-NAMESPACE} {unknown namespace "missing": no such module file APP/missing.bot (an application's own modules are the files beside its entry program)}}} \
+    {{{b.bot:0:7-0:14 {unknown namespace "missing": no such module file APP/missing.bot (an application's own modules are the files beside its entry program)}}} {{main.bot:0:7-0:8 {the import of "a" here loads b.bot}} {a.bot:0:7-0:8 {the import of "b" here loads b.bot}}}} \
+    {fn a::f() -> int} 0]
+
 test lsp-lang-closed-module-diagnostics {an error in a module no editor has open is published for that module's file, with no version} -body {
     set dir [lt::Dir closed-module]
     lt::Put $dir/shapes.bot "fn area(w: int, h: int) -> int:\n    w * nosuch\n"

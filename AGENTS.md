@@ -5900,7 +5900,12 @@ no semantics of its own. Keep it so:
   `surface::syntaxEntries`, the loader's `Error`, `hir::recovery::entries`,
   `hir::warnings::Rejection` and `entry` (core::raiseDiagnostics' `summary`,
   `location`, `related`) -- never parsed out of its text. A new producer of
-  raised diagnostics gives them too.
+  raised diagnostics gives them too. So is the way to a module file: every
+  diagnostic the loader reports from one (a load error, a reference error,
+  a syntax error) carries `import` notes, the chain of imports that loaded
+  it, the entry program's first (`surface::modules::ImportNotes`, recorded
+  as each module is first loaded); notes are never part of a diagnostic's
+  message, order or identity, and the service keeps their `kind`.
 * The service reports the strict compilation's diagnostics -- the very
   entries it raises, in its order, `hir::recovery::reported` deciding what
   is dependent -- and the warnings the compilation attached: never filter,
@@ -5936,7 +5941,12 @@ transport, scheduling and presentation, never semantics. Keep it so:
   `service::diagnostics` re-encoded, hover, definition and references are
   `service::at`'s facts, Compilerpedia topics `service::explain`'s and the
   facts' own (by identity). Never match names, parse formatted CLI output,
-  run a second analysis or resolver, or compute a type in `lsp/`.
+  run a second analysis or resolver, or compute a type in `lsp/`. The one
+  presentation choice: a program with no analysis (a loader error) also
+  shows each diagnostic at its `import` notes, the loader's chain of imports
+  to the module file it is in (`ImportMirror`); an analyzed program's
+  module diagnostics stay in their own file. Never find an import yourself
+  (by name or by parsing): only the loader's notes say which one.
 * Layers: `transport.tcl` (bytes, Content-Length framing, nothing else),
   `json.tcl` (typed values: a category is never guessed from a Tcl
   string), `jsonrpc.tcl` (messages, no LSP method knowledge), then
