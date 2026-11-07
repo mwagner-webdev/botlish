@@ -51,8 +51,14 @@
 namespace eval core::deep {
     # The frames a segment may grow before a guarded call starts another.
     # Inside a driver every walk runs in a segment, whose levels Tcl counts
-    # from its own base.
-    variable segment 60
+    # from its own base. Large enough that an ordinary program's analyses,
+    # whose call chains reach about 120 frames without any deep nesting,
+    # never cross it: a walk that goes up and down across the bound makes a
+    # segment at each crossing (5,000 for branch-form-boolean.bot at 60, a
+    # third of its front end's time); small enough that a driver 200 deep
+    # (`outside`) and a full segment stay far below Tcl's 1000 nested
+    # evaluations (every specimen compiles 1000 deep at a limit of 500).
+    variable segment 150
     # The guard's bound now: `segment` while a driver runs; outside one, a
     # walk's frames count from the interpreter's top, and only a walk that
     # deep makes a driver of its own.

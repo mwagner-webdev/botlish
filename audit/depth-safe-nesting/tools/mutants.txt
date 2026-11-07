@@ -994,6 +994,13 @@ proc core::compiler::ConditionIf {ctxVar e outVar} {
 >>>>
 ## compiler/compiler.tcl
 <<<<
+proc core::compiler::ConditionBranch {ctxVar e role outVar substitute} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc core::compiler::ConditionBranch {ctxVar e role outVar substitute} {
+>>>>
+## compiler/compiler.tcl
+<<<<
 proc core::compiler::ReleasingOnError {ctxVar e compile} {
     if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
 ====
@@ -1737,14 +1744,14 @@ proc core::deep::descend {cmd} {
     variable current
 >>>>
 
-@@ limit-past-1000 the driver's stack bounded at 500 segments: every 1000-deep specimen still compiles, 5000 parentheses do not -- 1000 made a limit
+@@ limit-past-1000 the driver's stack bounded at 200 segments: every 1000-deep specimen still compiles (at most 98 at once), 5000 parentheses (370) do not -- 1000 made a limit
 !! dsn-beyond
 ## core/deep.tcl
 <<<<
                 lappend stack [lindex $step 1]
 ====
                 lappend stack [lindex $step 1]
-                if {[llength $stack] > 500} {
+                if {[llength $stack] > 200} {
                     error "the program nests too deep" {} {SURFACE SYNTAX NESTING}
                 }
 >>>>

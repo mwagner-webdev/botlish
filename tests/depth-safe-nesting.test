@@ -588,7 +588,7 @@ test dsn-linear-segments {segments grow linearly with the nesting: List literals
         lappend counts [dict get [core::deep::stats] segments] [dict get [core::deep::stats] deepest]
     }
     lassign $counts s1 d1 s2 d2
-    list [expr {$s2 > 1.6 * $s1 && $s2 < 2.4 * $s1}] [expr {$d2 > 1.6 * $d1 && $d2 < 2.4 * $d1}] [expr {$d1 > 1000 / 60}]
+    list [expr {$s2 > 1.6 * $s1 && $s2 < 2.4 * $s1}] [expr {$d2 > 1.6 * $d1 && $d2 < 2.4 * $d1}] [expr {$d1 > 1000 / $core::deep::segment}]
 } -cleanup {unset -nocomplain counts n s1 d1 s2 d2} -result {1 1 1}
 
 # ---------------------------------------------------------------------------
@@ -616,7 +616,7 @@ proc dsnWithSegments {size source} {
     }
 }
 
-test dsn-segment-invariance {every specimen 40 deep, a malformed one and the 2048 engine with its demo compile to the same HIR text, core IR, Tcl code and NIR (or the same diagnostics) with a segment every 3 frames as with the default 60: a guarded call's segment computes exactly what the call computes} -body {
+test dsn-segment-invariance {every specimen 40 deep, a malformed one and the 2048 engine with its demo compile to the same HIR text, core IR, Tcl code and NIR (or the same diagnostics) with a segment every 3 frames as with the default 150: a guarded call's segment computes exactly what the call computes} -body {
     set sources {}
     foreach kind [dsn::kinds] {
         lappend sources $kind [dict get [dsn::specimen $kind 40] source]
@@ -627,7 +627,7 @@ test dsn-segment-invariance {every specimen 40 deep, a malformed one and the 204
     close $f
     set differ {}
     foreach {name source} $sources {
-        if {[dsnWithSegments 3 $source] ne [dsnWithSegments 60 $source]} {
+        if {[dsnWithSegments 3 $source] ne [dsnWithSegments $core::deep::segment $source]} {
             lappend differ $name
         }
     }

@@ -100,6 +100,7 @@
 ::core::compiler::CompileSequence	Tcl compiler	code generation, one call per nested expression
 ::core::compiler::CompileStruct	Tcl compiler	code generation, one call per nested expression
 ::core::compiler::ConditionIf	Tcl compiler	code generation, one call per nested expression
+::core::compiler::ConditionBranch	Tcl compiler	code generation, one call per nested expression
 ::core::compiler::ReleasingOnError	Tcl compiler	code generation, one call per nested expression
 ::hir::WalkInto	Tcl compiler	the compiler's walk of nested expressions
 ::hir::aot::TailInto	Tcl compiler	tail positions

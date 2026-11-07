@@ -58,12 +58,12 @@ value its structure gives it. Parentheses and List
 literals compile 5000 deep; the fuzzer compiles mixed programs 1500 deep.
 
 The walks are unchanged. Each procedure whose recursion follows the
-program's nesting (211 of them, `audit/depth-safe-nesting/census.tsv`)
+program's nesting (212 of them, `audit/depth-safe-nesting/census.tsv`)
 starts with one guard:
 
     if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
 
-Past a segment's 60 frames, the guarded call does not call deeper: it goes
+Past a segment's 150 frames, the guarded call does not call deeper: it goes
 on in a new *segment* -- a Tcl coroutine holding its caller's variables --
 and the segment it leaves is suspended on a driver's explicit stack. The
 driver resumes every segment from its own shallow frame, and Tcl counts a
@@ -73,12 +73,15 @@ program's depth. No recursion limit is raised (the front end's former floor
 of 100000, `hir::Deep`, is gone), nothing catches TCL LIMIT STACK, and no
 nesting limit or diagnostic was added.
 
-On the way, the front end's memory went from superlinear to linear in the
-nesting: Tcl 9.0.1 gives nested syntax nodes string representations in
-`concat`, `regexp` and `string first`, which made a List literal 400 deep
-take 590 MB and one 1000 deep exhaust the machine. And one host-depth
-decision went: hir::semantic declined semantic instances where Tcl's frames
-were 700 deep.
+On the way, the front end stopped giving nested syntax string
+representations (Tcl 9.0.1 gives them in `concat`, `regexp` and `string
+first`), which made a List literal 400 deep take 590 MB and one 1000 deep
+exhaust the machine: 39 MB now. Memory is not linear in the nesting yet:
+every AST node's structural id is its path from the root, O(depth)
+characters, and HIR origins carry it (section 16; 105 MB for `1 + (1 +
+...)` 1000 deep, 284 MB 2000 deep). And one host-depth decision went:
+hir::semantic declined semantic instances where Tcl's frames were 700
+deep.
 
 ## 2. Starting failures
 
@@ -173,11 +176,11 @@ three passes: the expression and block specimens first (132 procedures);
 the forms section 10 lists, each of which failed at the default limit
 before it had a specimen (68 more, the Tcl backends' layout codec among
 them); and the specimens that cycle through forms, traced at their own
-threshold, which found 11 more that never failed -- a fold's and a counted
-loop's walks, one implication walk of a condition's body, two of native
-lowering's struct walks, each recursing only through procedures already
-guarded, so that their own frames never added up -- 211 procedures in
-all:
+threshold, which found 12 more that never failed -- a fold's and a counted
+loop's walks, one implication walk of a condition's body, the Tcl
+compiler's branch of a condition, two of native lowering's struct walks,
+each recursing only through procedures already guarded, so that their own
+frames never added up -- 212 procedures in all:
 
 | phase | procedures | recursive shape | terminates | changed | why it stays recursive |
 |---|---|---|---|---|---|
@@ -204,7 +207,7 @@ all:
 | layouts (24) | `hir::layouts::CopyType`, `hir::layouts::ReprDescriptor`, `hir::layouts::ReprOfTerm`, `hir::layouts::ReprPointerPath`, `hir::layouts::ReprTerm`, `hir::layouts::ReprText`, `hir::layouts::ReprUnionAt`, `hir::layouts::ReprUnionPath`, `hir::layouts::ResolveArrayTerm`, `hir::layouts::ResolveRepr`, `hir::layouts::ShowTerm`, `hir::layouts::ShowTypeExpr`, `hir::layouts::WithLeafType`, `hir::layouts::WordsFormats`, `hir::layouts::align`, `hir::layouts::size`, `core::binary::EncodeForeign`, `core::binary::Rows`, `core::binary::DecodeRepr`, `core::binary::HasArrays`, `core::binary::EncodeRepr`, `core::binary::ReprHoldsRaw`, `core::binary::ReprUnionPath`, `core::binary::ReprPointerPath` | a layout representation, one level per nested array, union or record; a layout descriptor's representation, one level per nested array, union or record (the Tcl compiler's static descriptors; the Tcl backends' codec) | structural: each call descends to a child of a finite tree | guard added | section 5 |
 | core IR lowering (4) | `hir::lower::Exprs`, `hir::lower::Seq`, `hir::lower::body`, `hir::lower::expr` | HIR to core IR (the interpreter's program) | structural: each call descends to a child of a finite tree | guard added | section 5 |
 | core IR check (2) | `core::ir::CollectBindNames`, `core::ir::check` | core IR validation and binding collection | structural: each call descends to a child of a finite tree | guard added | section 5 |
-| Tcl compiler (21) | `core::compiler::CompileBind`, `core::compiler::CompileBlock`, `core::compiler::CompileBlockBody`, `core::compiler::CompileCall`, `core::compiler::CompileCondition`, `core::compiler::CompileExpr`, `core::compiler::CompileForm`, `core::compiler::CompileHandle`, `core::compiler::CompileIf`, `core::compiler::CompileProject`, `core::compiler::CompileSequence`, `core::compiler::CompileStruct`, `core::compiler::ConditionIf`, `core::compiler::ReleasingOnError`, `hir::WalkInto`, `hir::aot::TailInto`, `core::compiler::CompileListLoop`, `core::compiler::CompileCountLoop`, `core::compiler::ArrayOfRecords`, `core::compiler::LayoutLeaves`, `core::compiler::LayoutValueText` | code generation, one call per nested expression; the compiler's walk of nested expressions; tail positions; a layout representation's leaves and values | structural: each call descends to a child of a finite tree | guard added | section 5 |
+| Tcl compiler (22) | `core::compiler::CompileBind`, `core::compiler::CompileBlock`, `core::compiler::CompileBlockBody`, `core::compiler::CompileCall`, `core::compiler::CompileCondition`, `core::compiler::CompileExpr`, `core::compiler::CompileForm`, `core::compiler::CompileHandle`, `core::compiler::CompileIf`, `core::compiler::CompileProject`, `core::compiler::CompileSequence`, `core::compiler::CompileStruct`, `core::compiler::ConditionIf`, `core::compiler::ConditionBranch`, `core::compiler::ReleasingOnError`, `hir::WalkInto`, `hir::aot::TailInto`, `core::compiler::CompileListLoop`, `core::compiler::CompileCountLoop`, `core::compiler::ArrayOfRecords`, `core::compiler::LayoutLeaves`, `core::compiler::LayoutValueText` | code generation, one call per nested expression; the compiler's walk of nested expressions; tail positions; a layout representation's leaves and values | structural: each call descends to a child of a finite tree | guard added | section 5 |
 | native lowering (48) | `hir::construction::SeqUses`, `hir::construction::Uses`, `hir::escape::ChooseLevel`, `hir::escape::Classify`, `hir::escape::ClassifyIf`, `hir::escape::CutFields`, `hir::escape::LiteralTree`, `hir::escape::WriteBackPaths`, `native::lower::Call`, `native::lower::Bind`, `native::lower::CallArgs`, `native::lower::CallInner`, `native::lower::ConstantIntValue`, `native::lower::Expr`, `native::lower::Project`, `native::lower::Handle`, `native::lower::If`, `native::lower::MandatoryWriteBack`, `native::lower::Sequence`, `native::lower::SequenceTo`, `native::lower::StaticOutcome`, `native::lower::StaticOutcomeOf`, `native::lower::StructFields`, `native::shortstr::DemandBody`, `native::shortstr::DemandWalk`, `native::shortstr::LiveWalk`, `native::rawabi::If`, `native::rawabi::Seq`, `native::rawabi::Walk`, `native::lower::Struct`, `native::lower::VirtualValue`, `native::rawabi::Call`, `native::lower::ListLoop`, `native::lower::CountLoop`, `native::lower::IterationBody`, `native::lower::DeferredNeeds`, `native::lower::Condition`, `native::lower::ConditionIf`, `native::lower::ConditionBody`, `native::lower::EmitRegionConsumerCondition`, `native::lower::EmitRegionConsumerBody`, `native::lower::ArrayCheck`, `native::lower::ArrayRead`, `native::lower::LayoutLeaves`, `native::lower::ReprHasArrays`, `native::lower::ReprRead`, `native::lower::ReprWrite`, `native::lower::ViewBase` | construction uses (escape of nested values); escape and scalar-replacement plans of nested constructions; HIR to NIR, one call per nested expression; short-string demand and liveness walks; raw ABI walk; a scalar-replaced struct's fields read back as a value, one level per nested construction; a branch-form condition's Boolean structure (BRANCH-FORM-BOOLEAN-LOWERING.md); an inlined region consumer's condition and body; a layout representation's reads, writes and checks | structural: each call descends to a child of a finite tree | guard added | section 5 |
 | HIR text (2) | `hir::format::Expr`, `hir::read::Expr` | the HIR text printer, one call per nested expression; the HIR text reader, one call per nested expression | structural: each call descends to a child of a finite tree | guard added | section 5 |
 | service (1) | `service::SyntaxWalk` | the service's index of a file's nested AST | structural: each call descends to a child of a finite tree | guard added | section 5 |
@@ -232,7 +235,7 @@ What the census leaves out on purpose:
 
 ## 5. The mechanism: recursion in segments (core/deep.tcl)
 
-The prompt preferred explicit work stacks. Rewriting 211 procedures --
+The prompt preferred explicit work stacks. Rewriting 212 procedures --
 the type checker's `Expr`, the range analysis, the completion analysis,
 native lowering's 13,000 lines -- each into continuation-passing style over
 its own explicit stack would have been the largest change to the compiler
@@ -252,8 +255,16 @@ stack that every walk shares: the stack of suspended segments.
 * **The driver** (`Drive`) keeps the segments in a list -- the explicit
   stack -- and resumes the top one from its own frame: a request pushes the
   new segment, a finished segment is popped and its outcome resumes the
-  segment below. The bound is 60 frames in a segment (Tcl counts a
-  coroutine's frames from its own base), 200 outside a driver.
+  segment below. The bound is 150 frames in a segment (Tcl counts a
+  coroutine's frames from its own base), 200 outside a driver. A walk that
+  goes up and down across the bound makes a segment at each crossing, so
+  the bound sits above what an ordinary program's analyses reach without
+  deep nesting: at 60 frames, branch-form-boolean.bot's call chains, which
+  reach about 120 frames, made 5,000 segments and took a third longer to
+  compile; at 150 they make none. Every specimen still compiles 1000 deep
+  at a recursion limit of 500 (the driver's stack holds at most 98
+  segments then), so a driver started 200 frames deep and a full segment
+  stay well inside Tcl's 1000.
 * **Variables.** A coroutine sees no frame but its own, so a segment cannot
   `upvar` into the suspended caller. It takes the caller's variables
   instead (`Take`): the caller's frame is suspended below the segment, and
@@ -500,6 +511,19 @@ stops it:
   callees). Native lowering of `1 + (1 + ...)` 800 deep: 3.5 s before, 0.4
   s after.
 
+* **Structural ids are paths (not changed).** `surface::ast::Ids` gives
+  each node the id of its path from the statement that holds it
+  (`x=/value/right/right/...`), and every HIR expression's origin carries
+  its node's id (`origin {file f1 node x=/value/right/right/right ...}`):
+  a node N levels deep has an id of about 6N characters, so the ids of a
+  chain N deep hold O(N^2) characters. The parser of `1 + (1 + ...)`
+  without segments (plain recursion, a raised limit) uses 25, 63 and 167 MB
+  1000, 2000 and 4000 deep, the same as with them; parentheses, which make
+  no node, 14, 27 and 55 MB. Ids are origins, static-site and
+  method-seed keys and part of the HIR interchange text, so a
+  depth-independent id is a format change of its own (section 26), not
+  this milestone's.
+
 What stays superlinear is measured in section 20 and named in section 25.
 
 ## 17. hir::semantic's host-depth decision
@@ -637,7 +661,39 @@ killed. `tools/mutant-catalogs.tcl`: 89 catalogs, every mutant applies.
 
 ## 20. Performance
 
-FIXME bench table
+`bench/nested-frontend.tcl`: each specimen kind 250, 500 and 1000 deep
+(and the cheap kinds 2000 deep), each compiled in a fresh process at Tcl's
+default limit -- the front end (parse, lowering, the whole-program build
+and its checks), core IR, the Tcl compiler's unit, native lowering --
+with the process's peak memory and the segments made. Milliseconds 1000
+deep, then the total's growth per doubling of the depth (2 is linear),
+measured on a 4-core container while three census traces ran beside it
+(the ratios, not the times, are the point):
+
+
+
+* **Linear or nearly:** parentheses (×1.6 from 500 to 1000 deep, ×2.0 to
+  2000) and `layout` (×1.4); the expression chains -- `rbin`, `lbin`,
+  `flat`, `neg`, `not`, `list`, `call`, `method`, `mixed`, `typed` -- ×2.1
+  to ×2.6 from 500 to 1000 deep and ×2.2 to ×2.8 to 2000, as does `affine`
+  (×2.75): above 2 by their structural ids (section 16), O(depth)
+  characters each, which memory and every copy of an origin carry.
+* **Superlinear, each named in section 25:** `and`/`or` and `cond`
+  (×2.7 to ×3.0: inference, completions, branch facts and the range
+  analysis of Boolean chains), `struct`/`project` and `pattern`
+  (×3.5 to ×3.9: native lowering's escape and scalar-replacement plans of
+  nested constructions), `elif`/`ifnest`/`inject` (×3: a block nested N
+  deep is indented N times), `handler` (×4.2: each handler body
+  range-analyzed again per enclosing handler), `loops` (×4.1) and
+  `fnnest` (×5.3: the Tcl compiler's code for nested functions, 907 MB
+  1000 deep).
+* **Segments are linear in the work**: about one per 60 guarded frames
+  that the walk goes down (1,918 for `rbin` 1000 deep, 3,825 2000 deep);
+  a walk that goes up and down the nesting many times (inference of a
+  `not` chain re-entered per level: 41,110) makes as many as it descends.
+* **Ordinary programs.** `bench/guard-overhead.tcl` compiles programs that
+  nest a little, three times each, with this tree and with the revision
+  before the milestone: GUARD-OVERHEAD.
 
 ## 21. HIR, cache, isolation, the service
 
@@ -661,7 +717,7 @@ FIXME bench table
   CompilerError handled).
 * `dsn-segment-invariance`: every specimen 40 deep, a malformed one and the
   2048 engine compile to the same HIR text, core IR, Tcl code and NIR with
-  a segment every 3 frames as with the default 60 (the Tcl compiler's
+  a segment every 3 frames as with the default 150 (the Tcl compiler's
   temporaries counted from the same place: their counter is process-wide).
 * **The corpus compiles as it did.** Every golden suite and the 2048 and
   Icy Tower suites (120 programs), each compiled in a process of its own by
@@ -695,7 +751,7 @@ FIXME
 
 ## 24. Remaining recursion: the final census
 
-The census (`audit/depth-safe-nesting/census.tsv`) lists 211
+The census (`audit/depth-safe-nesting/census.tsv`) lists 212
 procedures, every one guarded (`dsn-census-guarded`). `census.tcl` over
 every specimen kind through every scenario (24 deep; `loops`, `cond` and
 `mixed`, which cycle through forms, also at `-fraction 3`, 3 and 4, `cond`
@@ -749,6 +805,12 @@ namespace):
 * **Superlinear phases left** (section 20 has the numbers). None is a
   depth limit -- each compiles 1000 deep -- and each is an algorithm's
   cost, not the segments':
+  - **Structural ids: quadratic memory.** Every AST node's id, and every
+    HIR origin with it, is the node's path from its statement (section
+    16): O(depth) characters each. It is the one superlinear term every
+    chain of nodes has (×2.5 to ×2.8 per doubling past 1000 deep, section
+    20), and the reason no specimen's memory is linear: `1 + (1 + ...)`
+    takes 105 MB 1000 deep, 284 MB 2000 deep and 866 MB 4000 deep.
   - **Nested folds whose intermediate widens: exponential.** A fold's
     intermediate type is a bounded fixpoint (`hir::types::FoldBody`): when
     the body's type widens the intermediate's, the body is walked again,
@@ -814,6 +876,12 @@ its own:
   cut keep what the declared field type needs (or check the field against
   the uncut value), with the same finite-lattice argument the bound exists
   for.
+* **Depth-independent structural ids** (sections 16 and 25): a node's id
+  as its parent's id and one step, interned, instead of its whole path,
+  would make the front end's memory linear in the nesting. Ids are HIR
+  origins, static-site and method-seed keys and interchange text, which
+  must stay stable across a static block's rebuilds: a change of the HIR
+  format with its own interchange version and audit.
 * **The superlinear phases** (section 25), measured by
   `bench/nested-frontend.tcl`: a handler body range-analyzed standalone
   once per enclosing handler, and the code a nested function's Tcl

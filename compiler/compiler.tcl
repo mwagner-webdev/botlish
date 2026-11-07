@@ -2076,6 +2076,7 @@ proc core::compiler::ConditionIf {ctxVar e outVar} {
 # is the one a decided condition always runs, emitted in place. Returns the
 # branch's status (CompileCondition's).
 proc core::compiler::ConditionBranch {ctxVar e role outVar substitute} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $ctxVar ctx $outVar out
     variable hir
     set parentFrame [CurrentFrameExpr $ctx]
