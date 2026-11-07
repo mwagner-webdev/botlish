@@ -104,33 +104,46 @@ private room_status = 1
 private n_message = 1
 private n_room = 2
 
+# A transport identity's word (a domain, an endpoint or call id, a key):
+# a small Int, so a capability fits a context's fixed slot (a broker
+# context holds one).
+type Word = Int in -4611686018427387904..4611686018427387903
+
+# X as a Word (the runtime's identities always are one; anything else is
+# 0, which names nothing).
+private nomethod fn word(x: int) -> Word:
+    if x < -4611686018427387904 or x > 4611686018427387903:
+        0
+    else:
+        x
+
 # What a capability holds: the transport's identity of its endpoint or
 # call.
 struct Identity:
-    domain: int
-    id: int
-    key: int
+    domain: Word
+    id: Word
+    key: Word
 
 # The send right of an endpoint delivering M into one mailbox, of this VM
 # or another.
 opaque struct Remote[M satisfies Sendable]:
-    domain: int
-    id: int
-    key: int
+    domain: Word
+    id: Word
+    key: Word
     sendable through(remote_out, remote_in) as Identity
 
 # The call right of a service answering requests Q with an R.
 opaque struct Service[Q satisfies Sendable, R satisfies Sendable]:
-    domain: int
-    id: int
-    key: int
+    domain: Word
+    id: Word
+    key: Word
     sendable through(service_out, service_in) as Identity
 
 # The one-shot answer right of one call.
 opaque struct Reply[R satisfies Sendable]:
-    domain: int
-    call: int
-    key: int
+    domain: Word
+    call: Word
+    key: Word
     sendable through(reply_out, reply_in) as Identity
 
 # What a service's mailbox receives: a request and its answer right.
@@ -265,7 +278,7 @@ nomethod fn export(to: std::actor::Address[M], capacity: int, context ev: std::e
     id = opened(capacity, std::transfer::fingerprint[M]())
     if id < 0:
         fail std::event_loop::DriverFault {code: id}
-    r = Remote[M] {domain: std::thread::rt_domain(), id: id, key: std::thread::rt_endpoint_key(id)}
+    r = Remote[M] {domain: word(std::thread::rt_domain()), id: word(id), key: word(std::thread::rt_endpoint_key(id))}
     chan = std::event_loop::channel(Delivery::Coalesce, 1)
     std::thread::route(n_message, id, chan)
     coroutine {step, first} = deliveries(r, to, chan)
@@ -334,7 +347,7 @@ nomethod fn deliver(to: Remote[M], m: M, context ev: std::event_loop::Loop, p: s
 # answer right: none when they do not decode.
 private nomethod fn decoded_call(s: Service[Q, R]) -> List[Call[Q, R]]:
     data = std::thread::rt_take_bytes()
-    reply = Reply[R] {domain: s.domain, call: std::thread::rt_take_call(), key: std::thread::rt_take_call_key()}
+    reply = Reply[R] {domain: s.domain, call: word(std::thread::rt_take_call()), key: word(std::thread::rt_take_call_key())}
     q = std::transfer::decode[Q](data):
         on TransferMalformed:
             return []
@@ -375,7 +388,7 @@ nomethod fn serve_calls(to: std::actor::Address[Call[Q, R]], capacity: int, cont
     id = opened(capacity, std::transfer::fingerprint[Q]())
     if id < 0:
         fail std::event_loop::DriverFault {code: id}
-    s = Service[Q, R] {domain: std::thread::rt_domain(), id: id, key: std::thread::rt_endpoint_key(id)}
+    s = Service[Q, R] {domain: word(std::thread::rt_domain()), id: word(id), key: word(std::thread::rt_endpoint_key(id))}
     chan = std::event_loop::channel(Delivery::Coalesce, 1)
     std::thread::route(n_message, id, chan)
     coroutine {step, first} = call_deliveries(s, to, chan)
@@ -471,15 +484,6 @@ nomethod fn caller(r: Replies[R], resume std::actor::Answer) -> Caller[R] errors
     rx = std::actor::listen(inbox)
     Caller[R] {endpoint: endpoint, rx: rx}
 
-# Receives C's responses until one for CALL arrives (or, with ROOM, a
-# room response): that response. Responses of other calls are stale (a
-# call this actor gave up) and dropped.
-private nomethod fn awaited(call: int, room: bool, c: Caller[R], resume std::actor::Answer) -> Response[R] errors std::actor::Closed:
-    fold with intermediate got Response[R] {call: -1, status: t_stale, values: []}:
-        if got.call == call or (room and got.status == room_status):
-            break
-        std::actor::receive(c.rx)
-
 # Calls SVC with Q from an actor and waits -- the actor suspended, its
 # thread free -- for the reply: an R. While the service's endpoint is
 # full, the call waits for room. CallFailed with the reason when the call
@@ -494,11 +498,20 @@ nomethod fn call(svc: Service[Q, R], q: Q, c: Caller[R], resume std::actor::Answ
             break
         attempt = std::thread::rt_request(svc.domain, svc.id, svc.key, data, c.endpoint, c.endpoint)
         if attempt == t_full:
-            awaited(0, true, c)
+            # Wait for room: responses until a room one (others are stale:
+            # a call this actor gave up).
+            fold with intermediate got Response[R] {call: -1, status: t_stale, values: []}:
+                if got.status == room_status:
+                    break
+                std::actor::receive(c.rx)
         attempt
     if id < 0:
         fail CallFailed {reason: reason_of(id)}
-    response = awaited(id, false, c)
+    # Responses until this call's: another call's is stale, a room one late.
+    response = fold with intermediate got Response[R] {call: -1, status: t_stale, values: []}:
+        if got.call == id:
+            break
+        std::actor::receive(c.rx)
     if response.status != t_delivered:
         fail CallFailed {reason: reason_of(response.status)}
     std::list::at(response.values, 0):

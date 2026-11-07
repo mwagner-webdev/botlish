@@ -1,0 +1,144 @@
+# worker.bot -- the broker example's worker (BOTLISH-OWNED-THREADS-AND-
+# CROSS-THREAD-ACTORS-MILESTONE-1.md): a thread entry. Its VM installs its
+# own event loop, driver, actor administration, port and DeviceBroker --
+# never the owner's Device -- and runs two handler actors, each making
+# JOBS device writes and read-backs through the broker (typed calls to the
+# owner's device-service actor, the handler suspended while it waits), and
+# a ticker actor that keeps running meanwhile. A joiner collects their
+# reports, sends the summary home and stops the loop.
+import broker
+import event_loop_linux
+import std::actor
+import std::actor::remote
+import std::event_loop
+import std::list
+import std::thread
+
+# What the owner starts a worker with: its id, its job count and the
+# owner's device service (a sendable capability).
+struct WorkerInit:
+    id: int
+    jobs: int
+    service: std::actor::remote::Service[broker::DeviceOp, broker::DeviceReply]
+
+# What a worker reports: its id, the device calls made and confirmed, the
+# calls that failed, the ticks its ticker made while the handlers waited,
+# and the highest owner serial a reply carried.
+struct WorkerSummary:
+    id: int
+    calls: int
+    confirmed: int
+    failures: int
+    ticks: int
+
+# A report to the joiner (KIND 0 a handler's, 1 the ticker's).
+struct Report:
+    kind: int
+    calls: int
+    confirmed: int
+    failures: int
+
+struct Tally:
+    calls: int
+    confirmed: int
+    failures: int
+
+# A handler: JOBS writes of its own register and their read-backs, each a
+# call through the broker.
+fn handler(worker: int, h: int, jobs: int, r: std::actor::remote::Replies[broker::DeviceReply], report: std::actor::Address[Report], context b: broker::DeviceBroker, resume std::actor::Answer) -> std::actor::Exit:
+    c = std::actor::remote::caller(r):
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    addr = worker * 2 + h
+    t = fold i from 0 to jobs with intermediate t Tally {calls: 0, confirmed: 0, failures: 0}:
+        value = worker * 100000 + h * 10000 + i
+        w = broker::write_device(addr, value, c):
+            on std::actor::remote::CallFailed {reason}:
+                break
+            on std::actor::Closed:
+                break
+        back = broker::read_device(addr, c):
+            on std::actor::remote::CallFailed {reason}:
+                break
+            on std::actor::Closed:
+                break
+        if back.value == value:
+            Tally {calls: t.calls + 2, confirmed: t.confirmed + 1, failures: t.failures}
+        else:
+            Tally {calls: t.calls + 2, confirmed: t.confirmed, failures: t.failures + 1}
+    std::actor::send(report, Report {kind: 0, calls: t.calls, confirmed: t.confirmed, failures: t.failures})
+    std::actor::exit(t.calls)
+
+# The ticker: TICKS sleeps of 200 microseconds, the loop free meanwhile.
+fn ticker(ticks: int, report: std::actor::Address[Report], context ev: std::event_loop::Loop, resume std::actor::Answer) -> std::actor::Exit:
+    n = fold i from 0 to ticks with intermediate n 0:
+        std::actor::sleep(200):
+            on std::event_loop::SchedulerFault:
+                break
+        n + 1
+    std::actor::send(report, Report {kind: 1, calls: n, confirmed: 0, failures: 0})
+    std::actor::exit(n)
+
+# The joiner: three reports, then the summary home, then the loop stops.
+fn joiner(worker: int, reports: std::actor::Inbox[Report], home: std::actor::Address[WorkerSummary], context ev: std::event_loop::Loop, resume std::actor::Answer) -> std::actor::Exit:
+    rx = std::actor::listen(reports):
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    s = fold i from 0 to 3 with intermediate s WorkerSummary {id: worker, calls: 0, confirmed: 0, failures: 0, ticks: 0}:
+        r = std::actor::receive(rx):
+            on std::actor::Closed:
+                break
+        if r.kind == 1:
+            WorkerSummary {id: s.id, calls: s.calls, confirmed: s.confirmed, failures: s.failures, ticks: r.calls}
+        else:
+            WorkerSummary {id: s.id, calls: s.calls + r.calls, confirmed: s.confirmed + r.confirmed, failures: s.failures + r.failures, ticks: s.ticks}
+    std::actor::send(home, s)
+    std::event_loop::stop():
+        on std::event_loop::SchedulerFault:
+            return std::actor::exit(-2)
+    std::actor::exit(0)
+
+private fn handled(init: WorkerInit, context ev: std::event_loop::Loop, d: std::event_loop::Driver, ac: std::actor::Actors, p: std::thread::Port, db: std::thread::Doorbell, b: broker::DeviceBroker) -> WorkerSummary errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    std::thread::serve()
+    {to: reports, inbox: reports_in} = std::actor::open[Report](8)
+    {to: home, inbox: home_in} = std::actor::open[WorkerSummary](1)
+    r1 = std::actor::remote::replies[broker::DeviceReply](4)
+    r2 = std::actor::remote::replies[broker::DeviceReply](4)
+    h1 = inject context broker::DeviceBroker:
+        coroutine {step, first} = handler(init.id, 0, init.jobs, r1, reports)
+        std::actor::spawned(step, first)
+    std::actor::start(h1)
+    h2 = inject context broker::DeviceBroker:
+        coroutine {step, first} = handler(init.id, 1, init.jobs, r2, reports)
+        std::actor::spawned(step, first)
+    std::actor::start(h2)
+    tk = inject context std::event_loop::Loop:
+        coroutine {step, first} = ticker(20, reports)
+        std::actor::spawned(step, first)
+    std::actor::start(tk)
+    j = inject context std::event_loop::Loop:
+        coroutine {step, first} = joiner(init.id, reports_in, home)
+        std::actor::spawned(step, first)
+    std::actor::start(j)
+    std::event_loop::run()
+    std::thread::close_port()
+    got = std::actor::drain(home_in)
+    std::list::at(got, 0):
+        on IndexNotFound:
+            WorkerSummary {id: init.id, calls: 0, confirmed: 0, failures: -1, ticks: 0}
+
+# The worker thread: its own contexts, its handlers, its summary.
+thread fn worker(init: WorkerInit) -> WorkerSummary:
+    with context std::event_loop::create(64)
+    with context event_loop_linux::create()
+    with context event_loop_linux::native()
+    with context std::actor::create()
+    with context std::thread::port()
+    with context broker::DeviceBroker {service: init.service}
+    handled(init):
+        on std::event_loop::SchedulerFault:
+            WorkerSummary {id: init.id, calls: 0, confirmed: 0, failures: -2, ticks: 0}
+        on std::event_loop::DriverFault {code}:
+            WorkerSummary {id: init.id, calls: 0, confirmed: 0, failures: code, ticks: 0}
+        on std::event_loop::LoopReentered:
+            WorkerSummary {id: init.id, calls: 0, confirmed: 0, failures: -3, ticks: 0}

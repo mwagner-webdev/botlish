@@ -1,0 +1,79 @@
+# device.bot -- the owner's exclusive device (the broker example,
+# BOTLISH-OWNED-THREADS-AND-CROSS-THREAD-ACTORS-MILESTONE-1.md): a context
+# whose construction acquires the process's one device (native/device.c);
+# a second acquirer, in any VM, is refused. Only the VM that installs it
+# can use it -- the owner's -- and its operations run through one actor
+# there, one at a time.
+import std::ffi::c
+import std::mutable_array
+
+extern c library "device" static at "native/libdevice.a"
+extern c fn device_acquire() -> std::ffi::c::Int
+extern c fn device_release() -> std::ffi::c::Int
+extern c fn device_enter() -> std::ffi::c::Int
+extern c fn device_exit() -> std::ffi::c::Int
+extern c fn device_stat(i: std::ffi::c::Int) -> std::ffi::c::Long
+
+# The device's handle in this VM: its registers (8 of them) and whether
+# this VM holds the device (acquire).
+opaque context struct Device:
+    registers: MutableArray[int]
+    held: MutableArray[int]
+
+# The handle, not yet holding the device.
+fn create() -> Device:
+    Device {registers: std::mutable_array::create(8, 0), held: std::mutable_array::create(1, 0)}
+
+# Acquire the process's one device for this VM: true, or false when another
+# owner -- of this VM or another -- holds it.
+fn acquire(context d: Device) -> bool:
+    if device_acquire() != 0:
+        return false
+    d.held.set(0, 1):
+        on IndexNotFound:
+            unit
+    true
+
+# Register ADDR's value (0 outside 0..7), inside an operation's bracket.
+fn read(addr: int, context d: Device) -> int:
+    d.registers.at(addr):
+        on IndexNotFound:
+            0
+
+# Set register ADDR to VALUE, inside an operation's bracket: its previous
+# value (0 outside 0..7).
+fn write(addr: int, value: int, context d: Device) -> int:
+    old = d.registers.at(addr):
+        on IndexNotFound:
+            0
+    d.registers.set(addr, value):
+        on IndexNotFound:
+            unit
+    old
+
+# An operation's bracket: begin -- how many operations are inside now (1
+# unless two overlap) -- and finish. The device's counters record every
+# bracket, so overlapping operations are seen, whatever VM made them.
+fn begin(context d: Device) -> int:
+    device_enter() + 0
+
+fn finish(context d: Device) -> int:
+    device_exit() + 0
+
+# Whether this VM holds the device.
+fn held?(context d: Device) -> bool:
+    v = d.held.at(0):
+        on IndexNotFound:
+            0
+    v == 1
+
+# Give the device back.
+fn release(context d: Device) -> int:
+    d.held.set(0, 0):
+        on IndexNotFound:
+            unit
+    device_release() + 0
+
+# The process's device counters: {entered, overlaps, peak}.
+fn stats(context d: Device) -> List[int]:
+    [device_stat(0) + 0, device_stat(1) + 0, device_stat(2) + 0]

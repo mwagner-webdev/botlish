@@ -1477,6 +1477,15 @@ proc hir::traits::OwnerBlock {hir parents e} {
     return program
 }
 
+# 1 if call E runs in an entry's own region -- the program's top level, or
+# a thread entry's body (hir/threads.tcl): where the installed contexts,
+# and so the context traits' selections, are known (hir::contexts::verify
+# checks each entry's calls against its own installations).
+proc hir::traits::EntryRegion {hir parents e} {
+    set owner [OwnerBlock $hir $parents $e]
+    return [expr {$owner eq "program" || [hir::threads::isEntry $hir $owner]}]
+}
+
 # Rejects operand E when it is a trait view: WHAT names the position.
 proc hir::traits::CheckOperand {hirVar e what} {
     upvar 1 $hirVar hir
@@ -2457,7 +2466,7 @@ proc hir::traits::PlanCalls {hir syntax} {
                             # calls).
                             set reaches [hir::get $hir $e reachable]
                             if {$reaches && $ckey eq "live"} {
-                                set reaches [expr {[OwnerBlock $hir $parents $e] eq "program"}]
+                                set reaches [EntryRegion $hir $parents $e]
                             } elseif {$reaches} {
                                 foreach c [dict get $fn contextTraits] {
                                     if {![dict exists $provided $c]} {
@@ -2683,7 +2692,7 @@ proc hir::traits::CallSpecialization {k j traits} {
         dict set bound [list $ckey $sid] [list redirect $k]
         set reaches [hir::get $hir $e reachable]
         if {$reaches && $ckey eq "live"} {
-            set reaches [expr {[OwnerBlock $hir $parents $e] eq "program"}]
+            set reaches [EntryRegion $hir $parents $e]
         } elseif {$reaches} {
             foreach c $traits {
                 if {![dict exists $provided $c]} {
@@ -2736,7 +2745,7 @@ proc hir::traits::CallImplementationClone {kind operation impl consult} {
     if {$consult} {
         set reaches [hir::get $hir $e reachable]
         if {$reaches && $ckey eq "live"} {
-            set reaches [expr {[OwnerBlock $hir $parents $e] eq "program"}]
+            set reaches [EntryRegion $hir $parents $e]
         } elseif {$reaches} {
             foreach c [dict get $fn contextTraits] {
                 if {![dict exists $provided $c]} {

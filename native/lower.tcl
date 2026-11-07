@@ -10945,12 +10945,15 @@ proc native::lower::NativeCall {fnVar e node name argRegs rawEligible op want} {
         foreach r $argRegs {
             lappend operands $r
         }
-        while {[llength $operands] < 6} {
-            lappend operands [Assign fn unit $e]
+        if {[llength $operands] < 7} {
+            while {[llength $operands] < 6} {
+                lappend operands [Assign fn unit $e]
+            }
+            # The last operand, when the operation has fewer than six: the
+            # shape of std::abi::bytes::Bytes, which an operation whose
+            # result is byte storage builds.
+            lappend operands [ThreadBytesShape fn $e]
         }
-        # The last operand: the shape of std::abi::bytes::Bytes, which an
-        # operation whose result is byte storage builds.
-        lappend operands [ThreadBytesShape fn $e]
         return [list [Assign fn "op threadop [join $operands { }]" $e] tagged]
     }
     if {$op eq "threadentry"} {
