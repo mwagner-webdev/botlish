@@ -653,7 +653,34 @@ finite) each answer from their own declaration after `hir::activate`.
 
 ## 19. Regression and CI
 
-REGRESSION
+Local (a 4-core container):
+
+* the full local run (`tclsh9.0 tests/local.tcl -jobs 4`, 81 minutes): 270
+  Tcl test files on interp (8,811 passed, 0 failed) and compile (8,806
+  passed, 0 failed), and all 117 golden suites on interp (5,589/5,589),
+  compile (5,589/5,589), cranelift-generic (5,497/5,497) and cranelift
+  (5,599/5,599);
+* tests/owned-recursion.test 28/28, and directly: affine-applications
+  21/21, written-affine-applications 26/26, parameterized-declaration-
+  summaries 24/24, affine 48/48, tree-struct 45/45;
+* under `BOTLISH_NATIVE_GC_STRESS=1`: owned-recursion 28/28,
+  affine-applications 21/21, written-affine-applications 26/26, affine
+  48/48, coroutines 81/81, resources 40/40, tree-struct 45/45,
+  mutable-vector 68/68, mutable-array 36/36;
+* `tools/compilerpedia.tcl check`: 1220 topics, 747 examples, 0 problems;
+  `tools/mutant-catalogs.tcl`: 87 catalogs, 3091 mutants, 0 problems;
+* the fuzzer (seeds 2-7, 40 programs each), the parity corpus, the oracle's
+  self-test and the mutation harnesses as reported above.
+
+`main` before branching (09b1ea9's runs): every workflow green except
+macos-arm64.yml's `Botlish.app` job, whose `single/smoke-test.sh` failed at
+"package graph shows the shared geometry" (a broken pipe writing `package
+graph`'s output) -- a package-manager smoke step this milestone does not
+touch.
+
+The branch (claude/zen-keller-4y797x), CI:
+
+CI-RESULTS
 
 ## 20. Remaining recursive walks
 
