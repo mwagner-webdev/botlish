@@ -2619,11 +2619,17 @@ proc hir::affine::DescriptorOf {hir type exclude} {
         # (another application of its declaration, Box[Box[C]]'s Box[C], is
         # another type, walked on) -- it is one no finite value has, held
         # through fields alone (each value would hold a smaller one, without
-        # end): that inner occurrence drops nothing. An affine struct type
-        # holding an affine application of its own declaration in a
-        # container element is rejected where it is declared or applied
-        # (hir::structs::OwnedRecursion): its values nest to any depth, past
-        # every finite descriptor.
+        # end): that inner occurrence drops nothing. So is another
+        # application of a declaration the walk is inside of whose every
+        # value would hold itself through fields alone (hir::ownership::
+        # FieldCycle: `g: G[List[T]]` in G[T], which meets ever larger
+        # applications and would never end). A recursive affine type -- its
+        # values nest affine values to any depth in containers -- is
+        # rejected where it is declared, written or made
+        # (hir::structs::OwnedRecursion), so every type that reaches here
+        # has a finite descriptor: an infinite walk would meet a cycle of
+        # the finite declaration-state graph, which crosses an element (a
+        # recursive affine type) or crosses none (a field cycle, cut here).
         variable descriptorVisiting
         if {[hir::types::IsNamedStruct $type]} {
             set key $type
@@ -2631,11 +2637,21 @@ proc hir::affine::DescriptorOf {hir type exclude} {
             set key ""
         }
         if {$key ne ""} {
-            if {$key in $descriptorVisiting} {
+            set again [expr {$key in $descriptorVisiting}]
+            if {!$again && [lsearch -exact -index 1 $descriptorVisiting [lindex $type 1]] >= 0} {
+                if {[hir::ownership::FieldCycle [lindex $type 1]]} {
+                    set again 1
+                } elseif {[hir::structs::OwnedRecursion $type] ne ""} {
+                    # (Never left to walk on: a recursive affine type's
+                    # walk would not end.)
+                    set again 1
+                }
+            }
+            if {$again} {
                 variable descriptorCut
                 set descriptorCut 1
                 if {[hir::structs::OwnedRecursion $type] ne ""} {
-                    error "internal compiler error: the affine struct type [hir::types::show $type] holds an affine application of its declaration in a container: it has no finite drop descriptor (hir::structs::apply rejects such a declaration, hir::structs::ApplicationIssue such an application)"
+                    error "internal compiler error: the affine struct type [hir::types::show $type] is a recursive affine type: it has no finite drop descriptor (hir::structs::apply rejects such a declaration, hir::structs::ApplicationIssue and WrittenProblem such an application)"
                 }
                 return ""
             }

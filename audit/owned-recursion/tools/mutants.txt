@@ -1,0 +1,512 @@
+# Mutants of the recursive-ownership analysis (audit/owned-recursion/tools/
+# mutate.tcl; OWNED-RECURSION-DECLARATION-SUMMARY-MILESTONE-1.md, "Mutation
+# testing"): each a deliberate bug in hir/ownership.tcl, the drop descriptor
+# walk it feeds (hir/affine.tcl), the struct checks that read it
+# (hir/structs.tcl) or the shared fixpoint (hir/summaries.tcl).
+#
+#   @@ NAME DESCRIPTION
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+#
+# Lines starting with # outside an edit are comments.
+#
+# Not mutants (equivalent, and why):
+#   * "an edge's crossing taken from the walk's last step instead of any":
+#     a walk crosses once it crossed (Walk's CROSSED only grows), so the
+#     last step's flag is the path's.
+#   * "a verdict asked during the affinity summary's fixpoint remembered":
+#     nothing asks for one there (the affinity summary reads IsAffine, never
+#     the recursion), so Recursion's guard never fires today; the provisional
+#     facts that do arise -- a fixpoint's own -- are late-met-left-at-bottom's.
+#   * "a non-affine state explored on": everything it reaches is
+#     unrestricted too (an affine component would make it affine), so no
+#     bad component is reachable through it; only the counters change.
+
+# ---------------------------------------------------------------------------
+# Thresholds: a bound comes back as the verdict
+
+@@ depth-64-rejection-restored the old depth bound decides again: a state found 64 states deep is a recursive affine type
+## hir/ownership.tcl
+<<<<
+    set v $root
+    eval $Visit
+====
+    set v $root
+    eval $Visit
+    set limit 64
+>>>>
+## hir/ownership.tcl
+<<<<
+            if {![dict exists $indices $w]} {
+                set parent $v
+====
+            if {![dict exists $indices $w]} {
+                if {$index >= $limit} {
+                    dict set nodes $v succ [linsert [dict get $nodes $v succ] end [list $v 1 0]]
+                }
+                set parent $v
+>>>>
+
+@@ budget-4096-rejection-restored the old budget decides again: a question that meets more than 4096 edges is a recursive affine type
+## hir/ownership.tcl
+<<<<
+        set roots [RootEdges $type]
+        set bad 0
+====
+        set roots [RootEdges $type]
+        set bad 0
+        set before [dict getdef [hir::summaries::counters] ownership.edges 0]
+>>>>
+## hir/ownership.tcl
+<<<<
+        if {$bad} {
+            set result [Witness $type $roots]
+        }
+====
+        if {[dict getdef [hir::summaries::counters] ownership.edges 0] - $before > 4096} {
+            set result [list recursive {} [lindex $type 1]]
+        } elseif {$bad} {
+            set result [Witness $type $roots]
+        }
+>>>>
+
+@@ depth-limit-raised-instead-of-removed the depth bound is raised, not removed: a state found 1024 states deep is a recursive affine type
+## hir/ownership.tcl
+<<<<
+    set v $root
+    eval $Visit
+====
+    set v $root
+    eval $Visit
+    set limit 1024
+>>>>
+## hir/ownership.tcl
+<<<<
+            if {![dict exists $indices $w]} {
+                set parent $v
+====
+            if {![dict exists $indices $w]} {
+                if {$index >= $limit} {
+                    dict set nodes $v succ [linsert [dict get $nodes $v succ] end [list $v 1 0]]
+                }
+                set parent $v
+>>>>
+
+@@ application-text-size-used-as-limit a type whose text is long is taken for a recursive one (a size for a verdict)
+## hir/ownership.tcl
+<<<<
+    Count queries
+    set result ""
+    if {[hir::types::IsAffine $type]} {
+====
+    Count queries
+    set result ""
+    if {[string length $type] > 2000 && [hir::types::IsAffine $type]} {
+        set result [list recursive {} [lindex $type 1]]
+    } elseif {[hir::types::IsAffine $type]} {
+>>>>
+
+@@ type-bound-used-as-recursion-verdict an application nested past the applied-type bound is taken for a recursive one (the type bound's depth for a verdict)
+## hir/ownership.tcl
+<<<<
+    Count queries
+    set result ""
+    if {[hir::types::IsAffine $type]} {
+====
+    Count queries
+    set result ""
+    set nested 0
+    for {set t $type} {[hir::types::IsAppliedStruct $t]} {set t [lindex $t 2 0]} {
+        incr nested
+    }
+    if {$nested > $::hir::types::appliedDepth && [hir::types::IsAffine $type]} {
+        set result [list recursive {} [lindex $type 1]]
+    } elseif {[hir::types::IsAffine $type]} {
+>>>>
+
+# ---------------------------------------------------------------------------
+# Soundness: a recursion is missed
+
+@@ all-recursion-accepted no type is a recursive affine type
+## hir/structs.tcl
+<<<<
+proc hir::structs::OwnedRecursion {type} {
+    return [hir::ownership::Recursion $type]
+}
+====
+proc hir::structs::OwnedRecursion {type} {
+    return ""
+}
+>>>>
+
+@@ all-affine-recursion-accepted no component is bad: a cycle crossing an element is not seen
+## hir/ownership.tcl
+<<<<
+                if {[dict exists $inside $w]} {
+                    if {$c} {
+                        set bad 1
+                    }
+====
+                if {[dict exists $inside $w]} {
+                    if {0} {
+                        set bad 1
+                    }
+>>>>
+
+@@ self-recursion-accepted a state's edge to itself is not seen: Node[Coroutine{...}] (children: List[Node[T]]) is accepted
+## hir/ownership.tcl
+<<<<
+                if {[dict exists $inside $w]} {
+                    if {$c} {
+====
+                if {[dict exists $inside $w]} {
+                    if {$c && $w ne $m} {
+>>>>
+
+@@ mutual-recursion-accepted only a state's edge to itself is seen: a cycle through two declarations (GrowA/GrowB, TA/TB/TC) is accepted
+## hir/ownership.tcl
+<<<<
+                if {[dict exists $inside $w]} {
+                    if {$c} {
+====
+                if {[dict exists $inside $w]} {
+                    if {$c && $w eq $m} {
+>>>>
+
+@@ nonuniform-recursion-accepted an argument that is no bare slot variable is taken for unrestricted: GrowA[C]'s List[T] argument, so the non-uniform recursion is not seen
+## hir/ownership.tcl
+<<<<
+            if {[hir::types::IsAffine [Apply $a $binding]]} {
+                lappend next $i
+            }
+====
+            if {[hir::types::IsImprint $a] && [hir::types::IsAffine [Apply $a $binding]]} {
+                lappend next $i
+            }
+>>>>
+
+@@ intrinsic-affine-recursion-accepted a state is affine only through an affine argument, never by its declaration's own affinity: R (a handle and List[R]) is accepted
+## hir/ownership.tcl
+<<<<
+    if {![hir::structs::IsAffine $id $probe]} {
+        # Owns nothing affine: neither does anything it holds.
+====
+    if {$affine eq {} || ![hir::structs::IsAffine $id $probe]} {
+        # Owns nothing affine: neither does anything it holds.
+>>>>
+
+@@ container-ownership-edge-ignored a MutableVector or MutableArray element is not walked as owned: Vectored[C] (kids: MutableVector[Vectored[T]]) is accepted
+## hir/ownership.tcl
+<<<<
+        list - mutvec - mutarray {
+            # A container: every element is owned, and there may be none.
+====
+        list {
+            # A container: every element is owned, and there may be none.
+>>>>
+
+@@ other-declaration-recursion-ignored only a recursion back to the type's own declaration counts (the old walk's hole): Holder[C] of `t: Node[T]` is accepted
+## hir/ownership.tcl
+<<<<
+        foreach edge $roots {
+            set state [lindex $edge 0]
+            Explore $state
+            if {[Reach $state]} {
+====
+        foreach edge $roots {
+            set state [lindex $edge 0]
+            Explore $state
+            if {[Reach $state] && [lindex [PathToHead $state [lindex $type 1]] 0]} {
+>>>>
+
+@@ late-met-left-at-bottom the shared fixpoint leaves a declaration first met in a later round at its bottom (the framework's bug the fuzzer found): D1 of the late-met specimen holds nothing, D1[C] is accepted
+## hir/summaries.tcl
+<<<<
+            if {[llength $ids] > $count} {
+                set changed 1
+            }
+====
+            if {0} {
+                set changed 1
+            }
+>>>>
+
+# ---------------------------------------------------------------------------
+# Precision: a finite type is rejected
+
+@@ field-cycle-rejected a cycle through fields alone counts as one through an element: FieldSelf and FieldGrow[C] (no finite value) are rejected
+## hir/ownership.tcl
+<<<<
+                if {[dict exists $inside $w]} {
+                    if {$c} {
+                        set bad 1
+                    }
+====
+                if {[dict exists $inside $w]} {
+                    if {1} {
+                        set bad 1
+                    }
+>>>>
+
+@@ phantom-slot-treated-owned a state is affine whenever an argument is: W[C] (the argument only grows) and Mixed's phantom slot are rejected
+## hir/ownership.tcl
+<<<<
+    if {![hir::structs::IsAffine $id $probe]} {
+        # Owns nothing affine: neither does anything it holds.
+====
+    if {$affine eq {} && ![hir::structs::IsAffine $id $probe]} {
+        # Owns nothing affine: neither does anything it holds.
+>>>>
+
+@@ pointer-pointee-treated-owned a C pointer's pointee is walked as owned
+## hir/ownership.tcl
+<<<<
+        list - mutvec - mutarray {
+            # A container: every element is owned, and there may be none.
+====
+        cptr {
+            return [Walk $slots [lindex $type 1] 1 memo]
+        }
+        list - mutvec - mutarray {
+            # A container: every element is owned, and there may be none.
+>>>>
+
+@@ unrestricted-recursion-counted an unrestricted state is explored like an affine one: HoldsUnrelated (a handle beside an unrestricted recursive tree) is rejected for the tree's recursion
+## hir/ownership.tcl
+<<<<
+    if {![hir::structs::IsAffine $id $probe]} {
+        # Owns nothing affine: neither does anything it holds.
+        return [dict create affine 0 succ {}]
+    }
+====
+>>>>
+
+@@ growth-alone-treated-invalid an affine application of a declaration on an expansive cycle is rejected: FieldGrow[C] (growth through fields alone) is
+## hir/ownership.tcl
+<<<<
+        if {$bad} {
+            set result [Witness $type $roots]
+        }
+====
+        if {!$bad && [hir::types::IsNamedStruct $type] && [hir::summaries::Expansive [lindex $type 1]]} {
+            set result [list recursive {} [lindex $type 1]]
+        } elseif {$bad} {
+            set result [Witness $type $roots]
+        }
+>>>>
+
+@@ transient-affinity-kept a declaration met again through an element is a recursion whatever its arguments' affinity (the old walk's rule): Swap[int, C], whose affinity dies out, is rejected
+## hir/ownership.tcl
+<<<<
+        lappend succ [list [list $target $next] $c $k]
+====
+        if {$target eq $id} {
+            set next $affine
+        }
+        lappend succ [list [list $target $next] $c $k]
+>>>>
+
+# ---------------------------------------------------------------------------
+# Slot transformations
+
+@@ slot-transformation-ignored an edge's arguments are taken to be its frame's, whatever they are: Swap[int, C] (next: List[Swap[U, int]]) keeps its affine slot and is rejected
+## hir/ownership.tcl
+<<<<
+        lappend succ [list [list $target $next] $c $k]
+====
+        if {[llength [hir::structs::slots $target]] == [llength $affine]} {
+            set next $affine
+        }
+        lappend succ [list [list $target $next] $c $k]
+>>>>
+
+@@ list-element-not-crossed a List's element is walked as if a field held it: no List edge crosses, Node[C] is accepted
+## hir/ownership.tcl
+<<<<
+            return [Walk $slots [lindex $type 1] 1 memo]
+        }
+        struct {
+====
+            return [Walk $slots [lindex $type 1] [expr {[lindex $type 0] eq "list" ? $crossed : 1}] memo]
+        }
+        struct {
+>>>>
+
+@@ wrong-slot-index-propagated an edge's affine arguments are recorded in reverse slot order: Mixed[C, int]'s affine slot is taken for its phantom one, and accepted
+## hir/ownership.tcl
+<<<<
+            if {[hir::types::IsAffine [Apply $a $binding]]} {
+                lappend next $i
+            }
+====
+            if {[hir::types::IsAffine [Apply $a $binding]]} {
+                lappend next [expr {[llength $arguments] - 1 - $i}]
+            }
+>>>>
+
+@@ mutual-edge-omitted a declaration's last edge is lost: GrowB's a: GrowA[T] and TC's a: TA go, their cycles with them
+## hir/ownership.tcl
+<<<<
+    set result {}
+    foreach event [Unique $events] {
+        if {[lindex $event 0] ne "push"} continue
+        lappend result [lrange $event 1 end]
+    }
+    dict set edges $id $result
+====
+    set result {}
+    foreach event [Unique $events] {
+        if {[lindex $event 0] ne "push"} continue
+        lappend result [lrange $event 1 end]
+    }
+    set result [lrange $result 0 end-1]
+    dict set edges $id $result
+>>>>
+
+@@ all-slots-conflated an edge with one affine argument is taken to have all its arguments affine: Swap[int, C] reaches Swap[C, C]'s state, a cycle, and is rejected
+## hir/ownership.tcl
+<<<<
+        lappend succ [list [list $target $next] $c $k]
+====
+        if {$next ne {}} {
+            set next {}
+            for {set j 0} {$j < [llength $arguments]} {incr j} { lappend next $j }
+        }
+        lappend succ [list [list $target $next] $c $k]
+>>>>
+
+@@ transformed-affinity-by-spelling an argument's affinity is read from its spelling (it mentions an affine probe), not its type: FnArg[C]'s Fn{args: [C]} argument is taken for affine, and rejected
+## hir/ownership.tcl
+<<<<
+            if {[hir::types::IsAffine [Apply $a $binding]]} {
+                lappend next $i
+            }
+====
+            if {[string first coroutine [Apply $a $binding]] >= 0} {
+                lappend next $i
+            }
+>>>>
+
+# ---------------------------------------------------------------------------
+# Diagnostics
+
+@@ reason-unfolds-applications the witness goes round its cycle again and again (an unfolding of the applications, as the old walk's reason did): a message no longer names one finite path
+## hir/ownership.tcl
+<<<<
+    set cycle [Cycle $headState]
+====
+    set cycle [concat {*}[lrepeat 8 [Cycle $headState]]]
+>>>>
+
+@@ reason-loses-recursive-field the witness names the way to the recursion but not the recursion itself: Node[C]'s children step is lost
+## hir/ownership.tcl
+<<<<
+    foreach move [concat $path $cycle] {
+====
+    foreach move $path {
+>>>>
+
+@@ reason-prefix-dropped the witness names the recursion but not the way to it: Holder[C]'s t step is lost
+## hir/ownership.tcl
+<<<<
+    set steps [Expand $provenance]
+====
+    set steps {}
+>>>>
+
+@@ reason-depends-on-threshold the witness is cut after two steps (a bound on the reason): TA's three-step recursion is named by two
+## hir/ownership.tcl
+<<<<
+    return [list recursive $steps $head]
+====
+    return [list recursive [lrange $steps 0 1] $head]
+>>>>
+
+@@ reason-walk-unbounded the witness follows its cycle until the arguments repeat: a growing recursion's never do, and the reason never ends
+## hir/ownership.tcl
+<<<<
+    set cycle [Cycle $headState]
+====
+    set cycle [Cycle $headState]
+    set seenArguments [dict create]
+    set probe $arguments
+    set probeId [lindex $state 0]
+    while {![dict exists $seenArguments $probe]} {
+        dict set seenArguments $probe 1
+        foreach move [concat $path $cycle] {
+            lassign [lindex [Edges $probeId] [lindex $move 2]] target edgeArguments
+            set probe [lmap a $edgeArguments {Apply $a [Binding $probeId $probe]}]
+            set probeId $target
+        }
+    }
+>>>>
+
+# ---------------------------------------------------------------------------
+# Memo lifetime
+
+@@ facts-keyed-by-name the facts are kept by a declaration's spelling (its last name component), not its identity: a module's Node answers for the entry program's Node
+## hir/ownership.tcl
+<<<<
+    variable verdicts
+    set type [hir::types::Unrefined $type]
+    if {[dict exists $verdicts $type]} {
+====
+    variable verdicts
+    set type [hir::types::Unrefined $type]
+    if {[hir::types::IsNamedStruct $type]} {
+        set type [lreplace $type 1 1 [namespace tail [lindex $type 1]]]
+    }
+    if {[dict exists $verdicts $type]} {
+>>>>
+
+@@ verdicts-survive-reset the remembered verdicts survive a change of the declarations: another compilation's Node answers for this one's
+## hir/ownership.tcl
+<<<<
+    set states [dict create]
+    set verdicts [dict create]
+    set cycles [dict create]
+}
+====
+    set states [dict create]
+    set cycles [dict create]
+}
+>>>>
+
+@@ states-survive-reset the classified states survive a change of the declarations: another compilation's Node states answer for this one's
+## hir/ownership.tcl
+<<<<
+    set edges [dict create]
+    set states [dict create]
+    set verdicts [dict create]
+====
+    set verdicts [dict create]
+>>>>
+
+# ---------------------------------------------------------------------------
+# The drop descriptor
+
+@@ descriptor-field-cycle-uncut the drop descriptor walk does not cut a declaration whose values would hold themselves through fields alone: FieldGrow[C]'s walk meets ever larger applications and never ends
+## hir/affine.tcl
+<<<<
+                if {[hir::ownership::FieldCycle [lindex $type 1]]} {
+                    set again 1
+                } elseif {[hir::structs::OwnedRecursion $type] ne ""} {
+====
+                if {0} {
+                    set again 1
+                } elseif {[hir::structs::OwnedRecursion $type] ne ""} {
+>>>>
+
+@@ descriptor-cuts-any-repeat the drop descriptor walk cuts every application of a declaration it is inside of: Box[List[Box[C]]]'s inner handles are never released
+## hir/affine.tcl
+<<<<
+                if {[hir::ownership::FieldCycle [lindex $type 1]]} {
+                    set again 1
+====
+                if {1} {
+                    set again 1
+>>>>

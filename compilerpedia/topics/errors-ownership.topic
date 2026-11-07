@@ -240,7 +240,7 @@ index: errors
 alias: set of coroutines; recursive affine struct
 keywords: affine, ImmutableSet, set, recursive struct, tree, container, release, descriptor
 related: concept.affine concept.immutable-set concept.structs concept.mutable-vector error.affine-equality-unsupported
-docs: AFFINE-VALUES.md MUTABLE-ARRAY.md AFFINE-PARAMETERIZED-APPLICATIONS-CORRECTNESS-MILESTONE-1.md
+docs: AFFINE-VALUES.md MUTABLE-ARRAY.md AFFINE-PARAMETERIZED-APPLICATIONS-CORRECTNESS-MILESTONE-1.md OWNED-RECURSION-DECLARATION-SUMMARY-MILESTONE-1.md
 code: CORE SEMANTIC AFFINE-CONTAINER-UNSUPPORTED
 
 == MEANING
@@ -252,17 +252,37 @@ Reported where the type is written, for two forms:
     (error.affine-equality-unsupported), so a set cannot own one. A List,
     a MutableVector and a MutableArray can: they are affine exactly when
     their element type is.
-  * an affine struct that holds values of its own type in a List,
-    MutableVector or MutableArray, directly or through other structs (a
-    tree of coroutines). This is a limit of the implementation: an affine
+  * a *recursive affine type*: an affine type whose values nest affine
+    values to any depth through List, MutableVector or MutableArray
+    elements -- a struct that holds values of its own type in a container,
+    directly or through other structs (a tree of coroutines). An affine
     value is released by a static, finite walk of its type, and such a
-    value nests to any depth. An unrestricted struct may hold itself in a
-    container, and an affine struct may name itself through plain fields.
-    An application of a parameterized struct is judged by its own fields,
-    its arguments substituted, wherever it is written or constructed:
-    `Node[Coroutine{...}]` of `struct Node[T]: value: T, children:
-    List[Node[T]]` (a tree struct's too) is such a type, `Node[int]` is an
-    ordinary recursive value.
+    value nests to any depth. The rule is about what values own, not about
+    how a type is spelled or how deep it is:
+      - an application of a parameterized struct is judged by its own
+        fields, its arguments substituted, wherever it is written or
+        constructed: `Node[Coroutine{...}]` of `struct Node[T]: value: T,
+        children: List[Node[T]]` (a tree struct's too) is one, `Node[int]`
+        is an ordinary recursive value;
+      - a type that holds such a type is one too (`Holder[Coroutine{...}]`
+        of `struct Holder[T]: t: Node[T]`), and so is one whose recursion
+        runs through other declarations or grows its argument at every
+        level (`b: List[GrowB[List[T]]]` in GrowA, `a: GrowA[T], value: T`
+        in GrowB);
+      - a type is not one because it is deep: a chain of a hundred structs
+        ending in a coroutine handle is an ordinary affine type, and so is
+        a type that holds its own declaration only through its arguments
+        (`Box[List[Box[Coroutine{...}]]]`: a box holding a List of boxed
+        handles), or whose affinity dies out along its recursion
+        (`next: List[Swap[U, int]]` in `struct Swap[T, U]: value: T`:
+        `Swap[int, Coroutine{...}]` holds handles two levels deep only);
+      - an argument that only grows and is never held
+        (`next: List[W[List[T]]]`) owns nothing: `W[Coroutine{...}]` is
+        unrestricted; and a recursion through plain fields alone describes
+        no finite value, so it is accepted.
+    The compiler decides it from the declarations, never by expanding the
+    type (concept.declaration-summaries); the diagnostic names the path
+    from the type to the recursion and once around it.
 
 == LIKELY CAUSES
   * a set of handles used to track "which workers are running";
@@ -300,6 +320,49 @@ struct Node:
 @caption An affine struct holding its own type in a List
 @error CORE SEMANTIC AFFINE-CONTAINER-UNSUPPORTED
 @at 3:15
+@end
+
+@example reject
+import std::coroutine
+
+struct Node[T]:
+    value: T
+    children: List[Node[T]]
+
+struct Holder[T]:
+    t: Node[T]
+
+fn count(h: Holder[Coroutine{args: [], return: int}]) -> int:
+    1
+
+0
+@caption A struct that holds another declaration's recursive affine type
+@error CORE SEMANTIC AFFINE-CONTAINER-UNSUPPORTED
+@at 10:9
+@end
+
+@example accept
+import std::coroutine
+import std::list
+
+struct Box[T]:
+    value: T
+
+fn counter() -> int:
+    yield 1
+    3
+
+fn make() -> Coroutine{args: [], return: int}:
+    coroutine {step} = counter()
+    step
+
+fn size(b: Box[List[Box[Coroutine{args: [], return: int}]]]) -> int:
+    {value} = b
+    std::list::length(value)
+
+size(Box {value: [Box {value: make()}, Box {value: make()}]})
+@caption A box holding a List of boxed handles nests finitely: an ordinary affine type
+@value 2
 @end
 
 @topic error.affine-duplication-unsupported

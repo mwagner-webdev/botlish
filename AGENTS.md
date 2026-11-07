@@ -2364,13 +2364,12 @@ so:
   never an answer per declaration, never one computed while a summary is
   still provisional, and never unfold a recursive application to classify
   it.
-* A walk of a struct type's components (drop descriptors, recursive
-  affine types: `hir::structs::OwnedRecursion`) reads an application's
-  applied fields and identifies a struct by its whole type, never by its
-  declaration alone (`Box[Box[C]]`'s inner Box is another type). A
-  recursive affine application is AFFINE-CONTAINER-UNSUPPORTED by the one
-  declaration rule, judged on its own fields (`ApplicationIssue`), trees
-  included.
+* A walk of a struct type's components (drop descriptors) reads an
+  application's applied fields and identifies a struct by its whole type,
+  never by its declaration alone (`Box[Box[C]]`'s inner Box is another
+  type). A recursive affine application is AFFINE-CONTAINER-UNSUPPORTED by
+  the one declaration rule, judged by what its values own
+  (`ApplicationIssue`; Recursive affine ownership, below), trees included.
 * An affine application is never cut to `any` by a bound
   (`hir::types::MakeApplied`), as an affine List element is never cut.
 
@@ -2483,7 +2482,8 @@ never by unfolding the application's fields. Keep it so:
   several recursive fields, and never keep a walk's result past its
   question.
 * A genuine ownership rule is not a compiler guard: a recursive affine
-  application stays AFFINE-CONTAINER-UNSUPPORTED (`OwnedRecursion`).
+  application stays AFFINE-CONTAINER-UNSUPPORTED (`OwnedRecursion`, next
+  section).
 
 If you change hir/summaries.tcl, a property's node, probes or classes, or
 one of the analyses above, run `tests/parameterized-declaration-summaries.test`,
@@ -2501,6 +2501,78 @@ you change the code it mutates, keeping it a mutant of the same rule), plus
 the affine, tree-struct, value-identity and hashable mutation harnesses for
 a change to code they mutate. `bench/declaration-summaries.tcl` regenerates
 the scaling report.
+
+## Recursive affine ownership (hir/ownership.tcl)
+
+A recursive affine type -- one whose values nest affine values to any depth
+through List, MutableVector or MutableArray elements -- has no finite drop
+descriptor and is AFFINE-CONTAINER-UNSUPPORTED
+(OWNED-RECURSION-DECLARATION-SUMMARY-MILESTONE-1.md). `hir::structs::
+OwnedRecursion` asks `hir::ownership::Recursion`, which decides it on the
+finite graph of declaration states (a declaration and which of its slots
+hold affine arguments): through facts (which slots a declaration holds, by
+fields alone or through an element: a least fixpoint), edges (the
+applications a declaration's frame holds), the state graph's strongly
+connected components; a type is recursive exactly when it reaches a
+component with an internal edge that crosses an element. Keep it so:
+
+* **Recursive affine ownership is decided from finite declaration-level
+  ownership analysis. Do not determine it by recursively unfolding applied
+  type terms or by a traversal depth or budget.** No depth, budget, type
+  size or applied-type bound decides a verdict: a chain of a thousand
+  finite affine declarations is accepted, and a recursion is found however
+  deep it starts.
+* **Non-uniform type growth is not itself invalid.** It matters only where
+  the growing recurrence participates in actual value ownership: `next:
+  List[W[List[T]]]` with no value of T held is unrestricted, `GrowA[T]`/
+  `GrowB[T]` with T held is recursive. Never reject an application for
+  growing, for being expansive (`hir::summaries::Expansive`), or for
+  meeting its own declaration again through its arguments
+  (`Box[List[Box[C]]]`, `Many[Many[C]]`: finite nesting); an application
+  whose affinity dies out along its recursion (`Swap[int, C]` of `next:
+  List[Swap[U, int]]`) is no recursion of affine values.
+* A recursion of another declaration counts (`Holder[C]` of `t:
+  Node[T]`): the verdict is any bad component reachable, the witness
+  prefers one of the type's own declaration (its message wording). A
+  declaration's own check (`apply`) reports a recursion that returns to
+  it; one it only holds is its field type's application's
+  (`VerifyDeclarations`, `ApplicationIssue`, which names an argument that
+  is itself the recursive type first).
+* A recursion through fields alone describes no finite value and is
+  accepted; the drop descriptor walk cuts such a declaration where it meets
+  it again (`hir::ownership::FieldCycle`), so every accepted type has a
+  finite descriptor. Never let Descriptor decide recursion by failing or
+  not ending; its assertion stays an internal error.
+* The ownership edges are the drop descriptor's: struct fields (applied),
+  anonymous struct fields, List, MutableVector and MutableArray elements, a
+  refinement's base. A C pointer's pointee, a function or coroutine type's
+  signature and an ImmutableSet are not edges. Never add an edge without
+  the descriptor owning it.
+* The facts are the registry's (`hir::ownership::Forget`, from
+  `ForgetAffinity`), keyed by declaration identity, never stored in HIR,
+  interchange text or the cache. A witness is built from the events'
+  provenance after the verdict, along its own path only: never let a reason
+  decide a verdict, and never instantiate a witness's growing arguments
+  without its size cap (presentation only).
+
+If you change hir/ownership.tcl, the descriptor's cut (hir/affine.tcl's
+`DescriptorOf`), the struct checks that read it (`apply`,
+`ApplicationIssue`, `WrittenProblem`, `RecursionMessage`) or the shared
+fixpoint (`hir::summaries::Fixpoint`), run `tests/owned-recursion.test`,
+`tests/affine-applications.test`, `tests/written-affine-applications.test`,
+`tests/parameterized-declaration-summaries.test`, `tests/affine.test`,
+`tests/tree-struct.test`, `python3 -I audit/owned-recursion/tools/oracle.py
+selftest`, `audit/owned-recursion/tools/fuzz.tcl` (several seeds, with a
+memory cap: `ulimit -v`; it compares the compiler with the independent
+model and classifies every difference from the old walk,
+audit/owned-recursion/tools/reference.tcl) and
+`audit/owned-recursion/tools/mutate.tcl` (every mutant in its `mutants.txt`
+must still apply and be killed: update a mutant's text when you change the
+code it mutates, keeping it a mutant of the same rule), plus the affine,
+tree-struct and declaration-summaries mutation harnesses for a change to
+code they mutate. `bench/owned-recursion.tcl` regenerates the scaling
+report.
+
 ## Resources (scope-bound cleanup)
 
 `opaque resource struct R:` and `cleanup fn NAME(r: R, context ...):`
