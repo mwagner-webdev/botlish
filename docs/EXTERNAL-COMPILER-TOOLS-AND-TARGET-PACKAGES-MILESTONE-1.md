@@ -567,6 +567,7 @@ Runs after the change, observed on this container (Linux x86-64, Tcl
 | `tools/compilerpedia.tcl check` | 0 problems (the new topics `cli.tools`, `backend.target-support`, `error.native-target-support`) |
 | `tools/mutant-catalogs.tcl` | 89 catalogs, 0 problems, after six mutants of other catalogs were updated (section 15) |
 | `python3 -I tools/ci/test_runs.py` | 44 / 44 (the workflow change) |
+| the native-aot harness's unmutated baseline | ok: `cargo test --bin botlish-native aot` and `--lib aotimage program`, `tests/native-executable.test`, `argv.test`'s standalone tests, `workload-2048.test`'s bench executable, `tests/system-linker.test`, `tests/main-thread-startup.test`, `tests/platform/aot-facts.tcl` |
 | `audit/golden/migration/merge.tcl -check 1` | clean: 48 census rows for the new tests |
 | the clean room (section 10) | 14 / 14 |
 
