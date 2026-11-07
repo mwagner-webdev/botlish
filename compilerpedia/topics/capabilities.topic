@@ -108,7 +108,7 @@ external timeout (the shell's `timeout`).
 
 @topic capability.concurrency
 title: Threads and parallelism: limited (isolated VMs, no shared memory)
-summary: Native programs start OS threads with std::thread, each running a VM of its own that shares no value with another; std::actor::remote carries typed messages and calls between them. No async/await, locks or shared mutable memory; std::event_loop and std::actor schedule cooperative tasks and actors within a VM.
+summary: Native programs start OS threads with std::thread, each a VM sharing no value with another, talking through std::actor::remote; no async/await, locks or shared mutable memory.
 index: concepts
 alias: threads; concurrency; parallelism; async; await; async await; multithreading; tasks; scheduler; locks; mutex; shared memory
 keywords: thread, concurrent, parallel, async, await, task, lock, channel, mutex, event loop, actor, mailbox, timer, std::thread, std::actor::remote, VM, isolation

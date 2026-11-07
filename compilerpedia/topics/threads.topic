@@ -4,9 +4,9 @@
 
 @topic concept.threads
 title: Threads: isolated VMs started with std::thread
-summary: A `thread fn` of a module is a thread entry; std::thread::start runs it on an OS thread of its own, in a VM of its own (its own heap, statics and contexts), with a copied initialization value, and join copies its result back.
+summary: A module's `thread fn` is a thread entry; std::thread::start runs it on an OS thread in a VM of its own, with a copied initialization value; join copies its result back.
 index: concepts
-alias: thread; threads; start a thread; spawn a thread; worker thread; parallelism; run in parallel; multithreading; thread fn; join a thread; background thread
+alias: thread; start a thread; spawn a thread; worker thread; run in parallel; thread fn; join a thread; background thread
 keywords: thread, std::thread, thread fn, entry, start, join, await_end, request_stop, stop_requested, Threads, ThreadLimit, ThreadFailed, ThreadStartFailed, VM, isolation, guard, NATIVE LIMIT STACK, parallel
 related: concept.remote-actors concept.sendability concept.contexts concept.actors stdlib.module.std::thread error.thread-entry-placement error.thread-entry-signature error.thread-entry-environment error.thread-entry-reference error.context-trait-selection-conflict error.thread-unavailable capability.concurrency
 
@@ -76,7 +76,7 @@ thread fn crunch(n: int) -> int:
 
 @topic concept.remote-actors
 title: Actors across threads: std::actor::remote
-summary: An exported mailbox (std::actor::remote::export) is a Remote[M] capability another VM's actors send to; serve_calls and call make typed request/reply calls between VMs; every message is copied as bytes, backpressure waits for room.
+summary: std::actor::remote exports a mailbox as a sendable Remote[M] that other VMs send to, and makes typed calls between VMs; messages are copied bytes and a full endpoint waits for room.
 index: concepts
 alias: remote actor; cross-thread actor; message another thread; send to another thread; channel between threads; request reply between threads; actor on another thread
 keywords: std::actor::remote, Remote, Service, Reply, Caller, export, send, deliver, serve_calls, call, reply, CallFailed, Full, Closed, Stale, TypeMismatch, Undelivered, ServiceEnded, port, std::thread::serve, backpressure
@@ -244,7 +244,7 @@ another program.
 
 @topic error.thread-unavailable
 title: THREAD-UNAVAILABLE: threads on the Tcl backends
-summary: interp and compile refuse a program that starts a Botlish thread before it runs, and the runtime operations of std::thread when reached: threads are OS threads each running a VM, which the Tcl backends do not have.
+summary: interp and compile refuse a program that starts a Botlish thread before it runs, and std::thread's runtime operations when reached: they have no OS threads, each running a VM.
 index: errors backends
 alias: threads on interp; thread on compile backend
 keywords: interp, compile, thread, std::thread, native, backend

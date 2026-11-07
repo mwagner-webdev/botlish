@@ -4818,7 +4818,7 @@ related: concept.testing concept.negative-tests
 
 @topic stdlib.module.std::thread
 title: -
-summary: Botlish-owned threads: std::thread::start runs a module's `thread fn` on an OS thread in a VM of its own, with a copied initialization value; join copies its result back. With std::thread::port, the VM's place in the cross-thread transport (std::actor::remote).
+summary: Botlish-owned threads: start runs a module's `thread fn` on an OS thread in a VM of its own, join copies its result back; port is the VM's place in the cross-thread transport.
 index: stdlib
 keywords: thread; threads; start a thread; spawn; join; parallel; worker; VM; stop request; port; Threads
 related: concept.threads concept.remote-actors stdlib.std::thread::entry stdlib.module.std::actor::remote capability.concurrency
