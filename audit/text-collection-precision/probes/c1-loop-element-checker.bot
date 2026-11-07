@@ -1,0 +1,40 @@
+# probe: the checker types a loop variable over s.encode_utf8() as Byte, as
+# it types bs.at(0): a Byte parameter accepts both, std::byte::from_int needs
+# no handler for either (TEXT-AND-COLLECTION-PRECISION-CENSUS.md, C).
+# outcome: accept
+# value: [[195, 169], 195, [195, 169], 364, [195, 169]]
+# binding: 17 bs List[int[std::byte::Byte]]
+# binding: 18 b any
+# binding: 22 x int[std::byte::Byte]
+import std::str
+import std::list
+import std::byte
+
+fn need(b: std::byte::Byte) -> int:
+    b
+
+fn via_loop(s: str) -> List[int]:
+    bs = s.encode_utf8()
+    loop b in bs:
+        need(b)
+
+fn via_at(s: str) -> int errors IndexNotFound:
+    x = s.encode_utf8().at(0)
+    need(x)
+
+fn from_int_loop(s: str):
+    loop b in s.encode_utf8():
+        std::byte::from_int(b)
+
+fn fold_sum(s: str) -> int:
+    fold b in s.encode_utf8() with intermediate acc 0:
+        acc + need(b)
+
+fn collect(s: str):
+    loop b in s.encode_utf8():
+        b
+
+first = via_at("é"):
+    on IndexNotFound:
+        0
+[via_loop("é"), first, from_int_loop("é"), fold_sum("é"), collect("é")]

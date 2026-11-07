@@ -1,0 +1,30 @@
+# probe: today's only general way from a scalar value to a UnicodeChar or
+# text: write the scalar's UTF-8 bytes by hand, decode them (InvalidUtf8
+# must be handled although the bytes are valid), read the character back (E).
+# outcome: accept
+# value: [1, 27, 233]
+import std::str
+import std::abi::bytes
+import std::byte
+import std::char
+
+fn esc() -> str errors InvalidUtf8:
+    std::abi::bytes::decode_utf8(std::abi::bytes::from_list([std::byte::from_int(27)]))
+
+fn char_of(bytes: List[std::byte::Byte]) -> UnicodeChar errors InvalidUtf8, IndexNotFound:
+    std::abi::bytes::decode_utf8(std::abi::bytes::from_list(bytes)).char_at(0)
+
+e = esc():
+    on InvalidUtf8:
+        ""
+c1 = char_of([std::byte::from_int(27)]):
+    on InvalidUtf8:
+        'x'
+    on IndexNotFound:
+        'x'
+c2 = char_of([std::byte::from_int(195), std::byte::from_int(169)]):
+    on InvalidUtf8:
+        'x'
+    on IndexNotFound:
+        'x'
+[e.length(), std::char::scalar_value(c1), std::char::scalar_value(c2)]
