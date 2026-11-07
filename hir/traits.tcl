@@ -170,13 +170,37 @@ proc hir::traits::Refines {a b} {
 # start (Stamp, the plan).
 proc hir::traits::IntrinsicDecls {nodes options} {
     variable intrinsics
+    set modules {}
+    if {[dict exists $options -modules]} {
+        set modules [dict get $options -modules]
+        dict unset options -modules
+    }
+    set mentioned [Mentions "\\m([join [dict keys $intrinsics] |])\\M" $nodes $modules $options]
     set decls {}
     foreach name [dict keys $intrinsics] {
-        if {[regexp "\\m$name\\M" $nodes] || [regexp "\\m$name\\M" $options]} {
+        if {[dict exists $mentioned $name]} {
             lappend decls [dict create name $name nameSpan "" namespace "" requirements {} span "" intrinsic 1]
         }
     }
     return $decls
+}
+
+# What PATTERN matches in the syntax NODES, the module sections MODULES (each
+# with its `nodes`) and OTHER, as a dict MATCH -> 1: what matching their text
+# finds, the nested syntax read node by node (hir::syntax::words), never put
+# into text whole.
+proc hir::traits::Mentions {pattern nodes modules other} {
+    set found [hir::syntax::words $nodes $pattern]
+    foreach section $modules {
+        set found [dict merge $found [hir::syntax::words [dict get $section nodes] $pattern]]
+        foreach match [regexp -all -inline $pattern [dict remove $section nodes]] {
+            dict set found $match 1
+        }
+    }
+    foreach match [regexp -all -inline $pattern $other] {
+        dict set found $match 1
+    }
+    return $found
 }
 
 proc hir::traits::Reset {} {
@@ -1888,6 +1912,7 @@ proc hir::traits::StampFold {nodeVar counterVar indexVar} {
 }
 
 proc hir::traits::StampNode {node counterVar indexVar} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $counterVar counter $indexVar index
     dict set node sid [incr counter]
     switch -- [dict get $node kind] {
@@ -2045,8 +2070,8 @@ proc hir::traits::AffinePolys {hir} {
 # internal native's name contains "#", which source cannot spell; a String
 # literal that happens to spell it only costs a plan that finds nothing).
 proc hir::traits::UsesCoroutines {nodes modules} {
-    set native [core::coroutines::createNative]
-    return [expr {[string first $native $nodes] >= 0 || [string first $native $modules] >= 0}]
+    set native [regsub -all {[][\\$^.*+?(){}|]} [core::coroutines::createNative] {\\&}]
+    return [expr {[dict size [Mentions $native $nodes $modules {}]] > 0}]
 }
 
 # 1 if call E (in VIEW) passes an affine argument to an untyped parameter of

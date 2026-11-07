@@ -538,6 +538,96 @@ proc hir::syntax::foldChildren {node} {
     return [list [dict get $fold initial]]
 }
 
+# The words PATTERN (a regexp of whole words) matches in the syntax NODES,
+# as a dict WORD -> 1: what matching the text of NODES finds, read field by
+# field. A node's nested nodes are visited, never put into text: the text
+# of a nested node holds its whole subtree, and Tcl keeps it with every
+# node, which made matching quadratic in the program's nesting
+# (DEPTH-SAFE-NESTED-EXPRESSION-FRONTEND-MILESTONE-1.md). An explicit work
+# list, so no nesting reaches Tcl's.
+proc hir::syntax::words {nodes pattern} {
+    set found [dict create]
+    set work $nodes
+    while {[llength $work]} {
+        set node [lpop work]
+        set rest $node
+        switch -- [dict get $node kind] {
+            bind - return - ok - error - break - fail {
+                if {[dict exists $node value] && [dict get $node value] ne ""} {
+                    lappend work [dict get $node value]
+                    dict unset rest value
+                }
+            }
+            block - static {
+                lappend work {*}[dict get $node body]
+                dict unset rest body
+            }
+            call {
+                lappend work [dict get $node callee] {*}[dict get $node args]
+                dict unset rest callee
+                dict unset rest args
+            }
+            if {
+                lappend work [dict get $node condition] {*}[dict get $node thenBody] {*}[dict get $node elseBody]
+                dict unset rest condition
+                dict unset rest thenBody
+                dict unset rest elseBody
+            }
+            loop - listloop - countloop - lockloop {
+                foreach field {iterable start end} {
+                    if {[dict exists $node $field]} {
+                        lappend work [dict get $node $field]
+                        dict unset rest $field
+                    }
+                }
+                if {[dict exists $node domains]} {
+                    set domains {}
+                    foreach domain [dict get $node domains] {
+                        foreach field {iterable start end} {
+                            if {[dict exists $domain $field]} {
+                                lappend work [dict get $domain $field]
+                                dict unset domain $field
+                            }
+                        }
+                        lappend domains $domain
+                    }
+                    dict set rest domains $domains
+                }
+                set fold [foldOf $node]
+                if {$fold ne ""} {
+                    lappend work [dict get $fold initial]
+                    dict unset fold initial
+                    dict set rest fold $fold
+                }
+                lappend work {*}[dict get $node body]
+                dict unset rest body
+            }
+            struct {
+                dict set rest fields [lmap field [dict get $node fields] {
+                    lappend work [dict get $field value]
+                    dict remove $field value
+                }]
+            }
+            project {
+                lappend work [dict get $node receiver]
+                dict unset rest receiver
+            }
+            handle {
+                lappend work [dict get $node call]
+                dict unset rest call
+                dict set rest handlers [lmap handler [dict get $node handlers] {
+                    lappend work {*}[dict get $handler body]
+                    dict remove $handler body
+                }]
+            }
+        }
+        foreach word [regexp -all -inline $pattern $rest] {
+            dict set found $word 1
+        }
+    }
+    return $found
+}
+
 # NODE with a fold's initial value replaced by the result of CMD applied to
 # it (CMD's last argument); NODE itself when it is no folding loop.
 proc hir::syntax::mapFold {node cmd} {
@@ -788,6 +878,7 @@ proc hir::syntax::scopeBindNames {nodes} {
 }
 
 proc hir::syntax::CollectBindNames {node namesVar} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $namesVar names
     switch -- [dict get $node kind] {
         bind {

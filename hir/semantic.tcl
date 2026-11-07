@@ -125,9 +125,13 @@
 # parameter -- a budget never accepts an erasure. A real type error found in an
 # instance is never turned into a fallback. Only a first request is declined
 # for nesting (a cache hit never is), so which request is declined depends on
-# the requests before it: every request made at half the nesting limits or
+# the requests before it: every request made at half the nesting limit or
 # deeper is recorded (`deep`), for the static decisions' dependency analysis
-# (hir/staticdeps.tcl, C:budget).
+# (hir/staticdeps.tcl, C:budget). The nesting counted is the instances'
+# (`maxDepth` nested analyses), never the interpreter's: a request used to be
+# declined, too, where Tcl's frames were 700 deep, so how deep the program's
+# expressions nested around it decided its typing
+# (DEPTH-SAFE-NESTED-EXPRESSION-FRONTEND-MILESTONE-1.md).
 #
 # Validity
 # --------
@@ -165,7 +169,6 @@ namespace eval hir::semantic {
     # hir::types::infer re-runs the walk (once the creation environments of
     # blocks a first pass had to decline are known) at most this many times.
     variable maxRounds 3
-    variable levelLimit 700
     # Run state (empty outside hir::types::infer).
     variable state {}
     # Per-expression facts a walk writes (hir/types.tcl); the ones that are
@@ -289,7 +292,6 @@ proc hir::semantic::Call {hir ctx e block argTypes blockResult} {
     variable maxPerBlock
     variable maxInstances
     variable maxDepth
-    variable levelLimit
     if {!$enabled || $state eq "" || ($blockResult eq "never" && ![hir::traits::IsPolymorphic $hir $block]
             && ![hir::types::AnyAffine $argTypes])} {
         # (A call that gives an affine argument always gets its instance,
@@ -372,7 +374,7 @@ proc hir::semantic::Call {hir ctx e block argTypes blockResult} {
         }
     }
     set callKey [list $caller $e]
-    if {2 * [llength [dict get $state stack]] >= $maxDepth || 2 * [info level] > $levelLimit} {
+    if {2 * [llength [dict get $state stack]] >= $maxDepth} {
         # A request at half the nesting limits or deeper, answered or not: a
         # cache hit is never declined, but once a rejection removes the
         # request that created its instance, this one may be the first and
@@ -390,7 +392,7 @@ proc hir::semantic::Call {hir ctx e block argTypes blockResult} {
                 set reason budget-total
             } elseif {[dict exists $state byBlock $block] && [dict get $state byBlock $block] >= $maxPerBlock} {
                 set reason budget-block
-            } elseif {[llength [dict get $state stack]] >= $maxDepth || [info level] > $levelLimit} {
+            } elseif {[llength [dict get $state stack]] >= $maxDepth} {
                 set reason nesting
             }
         }

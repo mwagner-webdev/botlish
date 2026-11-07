@@ -1107,6 +1107,7 @@ proc hir::read::SetField {hirVar e key value} {
 # Reads the expression at LEVEL evaluated in scope S, at IR PATH, inside the
 # block BLOCK ("" at unit level). Returns its ExprId.
 proc hir::read::Expr {hirVar level s path block} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $hirVar hir
     set line [TakeExprLine hir $level]
     set e [dict get $line id]

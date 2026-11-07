@@ -402,6 +402,7 @@ proc surface::ast::Child {parent role} {
 }
 
 proc surface::ast::Statements {statements parent} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     set counts [dict create]
     set result {}
     foreach statement $statements {
@@ -424,6 +425,7 @@ proc surface::ast::Statements {statements parent} {
 }
 
 proc surface::ast::Suite {suite id} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     dict set suite id $id
     dict set suite body [Statements [dict get $suite body] $id]
     return $suite
@@ -431,6 +433,7 @@ proc surface::ast::Suite {suite id} {
 
 # NODE and its descendants with ids, NODE's id being ID.
 proc surface::ast::Ids {node id} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     dict set node id $id
     switch -- [dict get $node kind] {
         list {
@@ -603,17 +606,18 @@ proc surface::findNode {ast id} {
     return ""
 }
 
+# (Joined with `list {*}...`, never `concat`: hir::static::Children.)
 proc surface::ast::Children {node} {
     switch -- [dict get $node kind] {
         program - suite    { return [dict get $node body] }
         list               { return [dict get $node items] }
-        call               { return [concat [list [dict get $node callee]] [dict get $node args]] }
+        call               { return [list [dict get $node callee] {*}[dict get $node args]] }
         unary - not        { return [list [dict get $node operand]] }
         anonstruct - namedstruct {
             return [lmap field [dict get $node init fields] {dict get $field value}]
         }
         project            { return [list [dict get $node receiver]] }
-        methodcall         { return [concat [list [dict get $node receiver]] [dict get $node args]] }
+        methodcall         { return [list [dict get $node receiver] {*}[dict get $node args]] }
         binary - logical   { return [list [dict get $node left] [dict get $node right]] }
         bind - return - break - destructure - coroutinebind {
             if {[dict get $node value] eq ""} {
@@ -644,7 +648,7 @@ proc surface::ast::Children {node} {
             if {$fold ne ""} {
                 lappend children [dict get $fold initial]
             }
-            return [concat $children [list [dict get $node body]]]
+            return [list {*}$children [dict get $node body]]
         }
         if {
             set children [list [dict get $node condition] [dict get $node then]]
@@ -846,6 +850,7 @@ proc surface::ast::Quote {text} {
 }
 
 proc surface::ast::Expr {node show} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     set at [At $node $show]
     switch -- [dict get $node kind] {
         int     { return "(int [dict get $node text])$at" }

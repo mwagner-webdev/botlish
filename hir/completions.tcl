@@ -163,9 +163,8 @@ namespace eval hir::completions {
     # evaluation levels each (more in a body that nests deeper), so without
     # this a long enough chain exceeded any Tcl recursion limit (a
     # 120-function chain at Tcl's default of 1000). With it the walk is at
-    # most this deep, which the recursion floor the front end runs under
-    # (hir::Deep, 100000) leaves room for at up to about 90 levels per
-    # analysis. A chain deeper than this keeps every proof up to the bound
+    # most this deep; its Tcl depth is the guarded walks' segments'
+    # (core/deep.tcl), whatever the limit. A chain deeper than this keeps every proof up to the bound
     # and loses only what the calls past it would have proven: the fallback
     # never claims an error impossible, but a caller whose call needed no
     # handler only because of such a proof then needs one. A count of
@@ -604,6 +603,7 @@ proc hir::completions::staticsOf {hir} {
 # callable acquires a structural Fn type erases (StaticSite); never enters a
 # nested block's body.
 proc hir::completions::StaticWalk {hir b e sites finals callersVar opaqueVar contraVar} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $callersVar callers $opaqueVar opaque $contraVar contravariant
     set node [dict get $hir exprs $e]
     switch -- [dict get $node kind] {
@@ -1473,6 +1473,7 @@ proc hir::completions::SeedClean {hir ctxVar block} {
 # makes it, an ordinary failure there included (KNOWN-ERROR for the
 # function's callers, exactly as with the block accepted).
 proc hir::completions::Seq {hirVar ctxVar diagnose enclosing guard e} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $hirVar hir $ctxVar ctx
     set result [hir::range::unknown]
     foreach child $e {
@@ -1491,6 +1492,7 @@ proc hir::completions::Seq {hirVar ctxVar diagnose enclosing guard e} {
 }
 
 proc hir::completions::Eval {hirVar ctxVar diagnose enclosing guard e} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $hirVar hir $ctxVar ctx
     if {[dict get $ctx record]} {
         dict set ctx visited $e 1
@@ -1868,6 +1870,7 @@ proc hir::completions::NoteMinSize {ctxVar form min} {
 }
 
 proc hir::completions::EvalIf {hirVar ctxVar diagnose enclosing guard e node} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $hirVar hir $ctxVar ctx
     set condition [dict get $node condition]
     Eval hir ctx $diagnose $enclosing $guard $condition
@@ -2406,6 +2409,7 @@ proc hir::completions::FoldCall {hir ctx name argExprs} {
 }
 
 proc hir::completions::EvalCall {hirVar ctxVar diagnose enclosing guard e node} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $hirVar hir $ctxVar ctx
     set argExprs [dict get $node args]
     set argRanges {}
@@ -2572,6 +2576,7 @@ proc hir::completions::ArgExactLists {hir ctx argExprs} {
 # maxAnalyses (item 35) and maxDepth. This is the function-instance boundary of the
 # header: an incomplete analysis keeps every error TARGET declares.
 proc hir::completions::EffectiveFacts {hirVar ctxVar target argRanges argExact argExactLists argCallables guard {captureFacts {}}} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $hirVar hir $ctxVar ctx
     variable maxAnalyses
     variable maxDepth
@@ -3341,6 +3346,7 @@ proc hir::completions::ReprValueVerdict {hir ctx repr e} {
 # followed through immutable bindings and handlers that never complete. Every fixed array in such a value has
 # exactly its extent: the copy made it so, and a value never changes.
 proc hir::completions::ExactCopy {hir e} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     set steps 0
     lassign [hir::cardinality::Chase $hir $e steps] kind id
     if {$kind ne "expr"} {
@@ -3936,6 +3942,7 @@ proc hir::completions::ErrorsPhrase {names} {
 }
 
 proc hir::completions::EvalHandle {hirVar ctxVar diagnose enclosing guard e node} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $hirVar hir $ctxVar ctx
     set call [dict get $node call]
     set callNode [hir::node $hir $call]
@@ -4081,6 +4088,7 @@ proc hir::completions::EvalHandle {hirVar ctxVar diagnose enclosing guard e node
 # exact-element facts ARGEXACTLISTS and callable facts ARGCALLABLES (never
 # diagnoses): {normal 0|1 errors NAME-LIST result Range incomplete 0|1}.
 proc hir::completions::analyzeBlock {hir block argRanges argExact argExactLists argCallables guard {captureFacts {}}} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     lassign [WalkBlock $hir $block $argRanges $argExact $argExactLists $argCallables $guard $captureFacts] ctx result
     # Normal completion is possible either by falling off the end of the
     # body (RESULT ne never) or through any reachable `return` (ctx.returned
@@ -4108,6 +4116,7 @@ proc hir::completions::analyzeBlock {hir block argRanges argExact argExactLists 
 # closure the caller's own activation created: CaptureFacts), else it has
 # none (the closure may have been created by any activation).
 proc hir::completions::WalkBlock {hir block argRanges argExact argExactLists argCallables guard {captureFacts {}}} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     set ctx [NewCtx]
     set params [hir::get $hir $block params]
     foreach b $params r $argRanges {

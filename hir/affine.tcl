@@ -1196,6 +1196,7 @@ proc hir::affine::Seq {hirVar exprs state} {
 }
 
 proc hir::affine::Flow {hirVar e state} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $hirVar hir
     variable loopExits
     variable joinStates

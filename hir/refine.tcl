@@ -116,6 +116,7 @@ proc hir::refine::IsCallKey {key} {
 # context E was typed in (its `implies`: BindingId -> implication of the
 # Boolean value an immutable binding holds); "" for none.
 proc hir::refine::Implication {hir ctx e {depth 0}} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     variable maxDepth
     if {$depth > $maxDepth} {
         return [Nothing]
@@ -320,6 +321,7 @@ proc hir::refine::AddArgumentFact {hir resultVar outcome args index fact} {
 
 # The implication of the if expression E (node NODE) used as a Boolean value.
 proc hir::refine::IfImplication {hir ctx e node depth} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     set condition [Implication $hir $ctx [dict get $node condition] [expr {$depth + 1}]]
     # A branch its condition's decided outcome makes unreachable still has
     # a value implication when that outcome keeps facts (a measured equality

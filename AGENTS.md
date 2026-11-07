@@ -167,6 +167,71 @@ others, must be identical) and `audit/compilation-isolation/tools/mutate.tcl`
 text has no declarations: core IR kept and run on a Tcl backend after another
 compilation still reads the later one's (run a HIR, or lower it again).
 
+## Depth-safe recursion (nesting is never Tcl's limit)
+
+A syntactically valid program is never rejected, and no compilation fails,
+because of how deep the program nests
+(DEPTH-SAFE-NESTED-EXPRESSION-FRONTEND-MILESTONE-1.md): Tcl's limit of
+nested evaluations (`interp recursionlimit`, 1000 by default; TCL LIMIT
+STACK, "too many nested evaluations") is an implementation property, never
+a language limit. The walks that follow source nesting -- the parser's
+productions, the AST and loader walks, surface lowering, resolution,
+inference, the range, completion and warning walks, HIR text, core IR and
+its check, the Tcl compiler and native lowering -- stay recursive
+procedures, and each starts with the guard
+
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+
+which, past a segment's frames, goes on in a new segment (a Tcl coroutine
+holding the caller's variables, core/deep.tcl) that a driver resumes from
+its own shallow frame; the interpreter's nesting stays one segment deep.
+Keep it so:
+
+* **Frontend algorithms over recursively nested source must not use host
+  call-stack depth as a language limit.** A procedure whose recursion
+  follows the program's nesting carries the guard and is listed in
+  `audit/depth-safe-nesting/census.tsv`; a new one is found by
+  `audit/depth-safe-nesting/tools/census.tcl` (and the probe, below).
+  Never raise `interp recursionlimit` for the front end, catch TCL LIMIT
+  STACK, retry, rewrite source before parsing, or add a nesting limit or a
+  diagnostic for depth. `hir::Deep` and `core::deep::run` are drivers,
+  never limit raisers.
+* **A walk proportional to arbitrary nesting uses an explicit work stack
+  or the guard.** A guarded procedure reaches its caller only through
+  `upvar 1` or `uplevel 1` (deeper levels are another segment's), never
+  yields, and passes no namespace variable by another name (`upvar #0
+  ::x y`): a segment takes its caller's variables by value and gives them
+  back, re-linking a namespace variable only under its own name. Nothing
+  reads `info level` to decide what a program means (hir::semantic's
+  instance budget is the instance stack's: `maxDepth`).
+* Segments change where frames live, never what a walk computes: no
+  segment-dependent result, order, error or diagnostic
+  (tests/depth-safe-nesting.test's `dsn-segment-invariance` compiles with
+  a segment every 3 frames).
+* A nested node is never put into text whole: `regexp`, `string first`,
+  `in`/`ni`, `lsort`, `switch` or a dict key on a syntax or AST node
+  gives every node of its subtree a string, and `concat` gives one to every
+  element of a list after the first -- quadratic memory in the nesting
+  (530 MB for a List literal 400 deep). Join node lists with `list
+  {*}...`, search syntax with `hir::syntax::words`.
+* The reference interpreter's run (core::interp, core::forms, a Botlish
+  call) is the program's own recursion, not the compiler's: it stays under
+  the program recursion limit (core::useProgramRecursionLimit), and is
+  never guarded (a Botlish coroutine's Tcl `yield` must reach its own
+  resumer).
+
+If you change core/deep.tcl, a guarded procedure's frame use, the census or
+a walk over nesting, run `tests/depth-safe-nesting.test` (at Tcl's default
+limit), `audit/depth-safe-nesting/tools/probe.tcl` (every path of every
+specimen 1000 deep at the default limit: no TCL LIMIT STACK),
+`audit/depth-safe-nesting/tools/census.tcl` (no recursive procedure
+missing from the census), `audit/depth-safe-nesting/tools/fuzz.tcl`
+(several seeds) and `audit/depth-safe-nesting/tools/mutate.tcl` (every
+mutant in its `mutants.txt` must still apply and be killed by a detector
+its `!!` line names: update a mutant's text when you change the code it
+mutates, keeping it a mutant of the same rule).
+`bench/nested-frontend.tcl` regenerates the scaling report.
+
 ## HIR interchange
 
 `hir/interchange.tcl` (HIR-INTERCHANGE.md) writes an analyzed HIR as text --

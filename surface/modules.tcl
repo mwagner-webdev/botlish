@@ -1287,6 +1287,7 @@ proc surface::modules::Ref {ns name span kind rooted} {
 # NODE after the traversal in progress: its qualified references recorded,
 # and rewritten, in source order.
 proc surface::modules::Walk {node} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     if {[dict exists $node imprints]} {
         # A call's explicit imprints (C-ABI-TYPES.md) name types like any
         # annotation.
@@ -1611,6 +1612,7 @@ proc surface::modules::RemapFlags {flags fileId} {
 # NODE (an hir/syntax.tcl node, as surface::lower::Sequence produces) with
 # every origin in its subtree repointed at FILEID.
 proc surface::modules::RemapFile {node fileId} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     dict set node origin [RemapOrigin [dict get $node origin] $fileId]
     switch -- [dict get $node kind] {
         bind {
@@ -2672,6 +2674,7 @@ proc surface::modules::StaticSites {ast} {
 }
 
 proc surface::modules::StaticSitesWalk {node sitesVar} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $sitesVar sites
     if {[dict get $node kind] eq "static"} {
         lappend sites [dict create id [dict get $node id] operation [dict get $node operation] \

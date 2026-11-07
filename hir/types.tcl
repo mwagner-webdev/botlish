@@ -3632,6 +3632,7 @@ proc hir::types::Walk {hirVar} {
 # region get their types, known outcomes and reachability. Returns the type
 # of the region's normal completion (never if none).
 proc hir::types::inferRegion {hirVar region types handler} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $hirVar hir
     set ctx [NewContext]
     dict set ctx types $types
@@ -4279,6 +4280,7 @@ proc hir::types::ValueBinding {hir e} {
 # (hir::static::reifiedStatement): what follows it stays reachable for the
 # checks, as if the block could complete (STATIC-COMPILE.md, "Completions").
 proc hir::types::Sequence {hirVar ctxVar exprs} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $hirVar hir $ctxVar ctx
     set entry [dict get $ctx reachable]
     set result unit
@@ -4304,6 +4306,7 @@ proc hir::types::Sequence {hirVar ctxVar exprs} {
 
 # Types expression E. Returns its type.
 proc hir::types::Expr {hirVar ctxVar e} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $hirVar hir $ctxVar ctx
     if {[dict exists $hir syntaxDependent $e] && ![dict exists $ctx spec]} {
         return [Dependent hir ctx $e]
@@ -4828,6 +4831,7 @@ proc hir::types::InferApplication {hirVar e id fieldTypes} {
 }
 
 proc hir::types::Struct {hirVar ctxVar e} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $hirVar hir $ctxVar ctx
     set node [dict get $hir exprs $e]
     set entry [dict get $ctx reachable]
@@ -4915,6 +4919,7 @@ proc hir::types::Struct {hirVar ctxVar e} {
 # (a receiver statically of another kind, or without that field) is `never`
 # in specialization inference, like any operation that always raises.
 proc hir::types::Project {hirVar ctxVar e} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $hirVar hir $ctxVar ctx
     set node [dict get $hir exprs $e]
     set receiver [Expr hir ctx [dict get $node receiver]]
@@ -5032,6 +5037,7 @@ proc hir::types::ProjectionFailed {hirVar ctx e} {
 # an `if` (If), applied when a validator fact is involved; otherwise the
 # construct keeps the facts after the call, as it always has.
 proc hir::types::Handle {hirVar ctxVar e} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $hirVar hir $ctxVar ctx
     set node [dict get $hir exprs $e]
     set entry [dict get $ctx reachable]
@@ -5145,6 +5151,7 @@ proc hir::types::Handle {hirVar ctxVar e} {
 }
 
 proc hir::types::Bind {hirVar ctxVar e} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $hirVar hir $ctxVar ctx
     set node [dict get $hir exprs $e]
     set b [dict get $node binding]
@@ -5189,6 +5196,7 @@ proc hir::types::Bind {hirVar ctxVar e} {
 
 # Types block expression E; SELF is the binding it is bound to (or "").
 proc hir::types::Block {hirVar outerVar e self} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $hirVar hir $outerVar outer
     set node [dict get $hir exprs $e]
     set arity [llength [dict get $node params]]
@@ -5314,6 +5322,7 @@ proc hir::types::Block {hirVar outerVar e self} {
 }
 
 proc hir::types::Call {hirVar ctxVar e} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $hirVar hir $ctxVar ctx
     set node [dict get $hir exprs $e]
     set entry [dict get $ctx reachable]
@@ -5797,6 +5806,7 @@ proc hir::types::KnownOutcome {hir condition} {
 }
 
 proc hir::types::If {hirVar ctxVar e} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $hirVar hir $ctxVar ctx
     set node [dict get $hir exprs $e]
     set condition [dict get $node condition]

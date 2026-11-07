@@ -980,6 +980,7 @@ proc hir::range::ExternalSeeds {hir spec} {
 # block standing as a statement excepted (hir::static::reifiedStatement:
 # what follows it is analyzed as if it could complete).
 proc hir::range::Sequence {hirVar ctxVar exprs} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $hirVar hir $ctxVar ctx
     set result [unknown]
     foreach e $exprs {
@@ -1128,6 +1129,7 @@ proc hir::range::BindingRange {hir bindings b} {
 }
 
 proc hir::range::Expr {hirVar ctxVar e} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $hirVar hir $ctxVar ctx
     if {![hir::get $hir $e reachable]} {
         return never
@@ -1451,6 +1453,7 @@ proc hir::range::DifferenceOffset {hir left right} {
 }
 
 proc hir::range::Call {hirVar ctxVar e node} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $hirVar hir $ctxVar ctx
     # The callee is evaluated like any other subexpression (and first, as at
     # run time): an exact call in callee position (`sel(k)(0)`,
@@ -2061,6 +2064,7 @@ proc hir::range::VerifySending {hirVar e node name} {
 # verifyDeclaredParams's own "blocks" loop above; hir::children's "block"
 # case would otherwise recurse into it).
 proc hir::range::VerifyCallArguments {hirVar ranges e} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $hirVar hir
     set node [dict get $hir exprs $e]
     set kind [dict get $node kind]
@@ -2728,6 +2732,7 @@ proc hir::range::VerifyStructuralCall {hirVar ranges e node calleeType callee ar
 }
 
 proc hir::range::If {hirVar ctxVar e node} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $hirVar hir $ctxVar ctx
     set condition [dict get $node condition]
     Expr hir ctx $condition
@@ -2857,6 +2862,7 @@ proc hir::range::Paths {hir condition outcome {limit 16}} {
 }
 
 proc hir::range::PathsWithin {hir condition outcome limit budgetVar} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $budgetVar budget
     set node [hir::node $hir $condition]
     if {[incr budget -1] >= 0 && [dict get $node kind] eq {if}} {

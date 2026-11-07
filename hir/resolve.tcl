@@ -1083,6 +1083,7 @@ proc hir::resolve::ShowTypeExpr {typeExpr} {
 #   blocks    {ExprId BodyScopeId} of every enclosing block, innermost last
 # Returns the ExprId.
 proc hir::resolve::Expr {hirVar node ctx} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $hirVar hir
     set kind [dict get $node kind]
     set origin [dict get $node origin]
@@ -2025,6 +2026,7 @@ proc hir::resolve::CtxNamespace {ctx} {
 # Whether each value fits its declared field type is hir/range.tcl's
 # VerifyStruct, after inference.
 proc hir::resolve::ResolveStruct {hirVar e node ctx} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $hirVar hir
     set typeRef [dict get $node type]
     set ns [CtxNamespace $ctx]
@@ -2237,6 +2239,7 @@ proc hir::resolve::ResolveAppliedConstruction {hirVar e typeRef ctx} {
 
 # Resolves the syntax nodes NODES in order.
 proc hir::resolve::Sequence {hirVar nodes ctx} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $hirVar hir
     set ids {}
     set planned [hir::traits::Planning]

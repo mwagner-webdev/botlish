@@ -458,6 +458,7 @@ proc hir::static::present {nodes modules} {
 }
 
 proc hir::static::HasStatic {nodes} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     foreach node $nodes {
         if {[dict get $node kind] eq "static"} {
             return 1
@@ -471,7 +472,11 @@ proc hir::static::HasStatic {nodes} {
     return 0
 }
 
-# The direct child syntax nodes of NODE, in evaluation order.
+# The direct child syntax nodes of NODE, in evaluation order. Lists are
+# joined with `list {*}...`, never `concat`: Tcl 9.0.1's concat gives every
+# element of a list after the first a string, here a nested node's whole
+# subtree -- quadratic in the program's nesting
+# (DEPTH-SAFE-NESTED-EXPRESSION-FRONTEND-MILESTONE-1.md).
 proc hir::static::Children {node} {
     switch -- [dict get $node kind] {
         bind - ok - error {
@@ -488,20 +493,20 @@ proc hir::static::Children {node} {
             return [dict get $node body]
         }
         loop {
-            return [concat [hir::syntax::foldChildren $node] [dict get $node body]]
+            return [list {*}[hir::syntax::foldChildren $node] {*}[dict get $node body]]
         }
         call {
-            return [concat [list [dict get $node callee]] [dict get $node args]]
+            return [list [dict get $node callee] {*}[dict get $node args]]
         }
         if {
-            return [concat [list [dict get $node condition]] [dict get $node thenBody] [dict get $node elseBody]]
+            return [list [dict get $node condition] {*}[dict get $node thenBody] {*}[dict get $node elseBody]]
         }
         listloop {
-            return [concat [list [dict get $node iterable]] [hir::syntax::foldChildren $node] [dict get $node body]]
+            return [list [dict get $node iterable] {*}[hir::syntax::foldChildren $node] {*}[dict get $node body]]
         }
         countloop {
-            return [concat [list [dict get $node start] [dict get $node end]] \
-                [hir::syntax::foldChildren $node] [dict get $node body]]
+            return [list [dict get $node start] [dict get $node end] \
+                {*}[hir::syntax::foldChildren $node] {*}[dict get $node body]]
         }
         lockloop {
             set children {}
@@ -512,7 +517,7 @@ proc hir::static::Children {node} {
                     }
                 }
             }
-            return [concat $children [hir::syntax::foldChildren $node] [dict get $node body]]
+            return [list {*}$children {*}[hir::syntax::foldChildren $node] {*}[dict get $node body]]
         }
         handle {
             set children [list [dict get $node call]]
@@ -551,6 +556,7 @@ proc hir::static::Sites {nodes modules} {
 }
 
 proc hir::static::CollectSites {nodes parent sitesVar} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $sitesVar sites
     foreach node $nodes {
         if {[dict get $node kind] eq "static"} {
@@ -596,6 +602,7 @@ proc hir::static::Sequence {nodes decisions} {
 # The value node NODE expanded (a static node in a value position becomes one
 # node).
 proc hir::static::Value {node decisions} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     if {$node eq ""} {
         return ""
     }
@@ -612,6 +619,7 @@ proc hir::static::Value_ {decisions node} {
 
 # NODE (not itself static) with every static node below it expanded.
 proc hir::static::Node {node decisions} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     switch -- [dict get $node kind] {
         bind - ok - error {
             dict set node value [Value [dict get $node value] $decisions]

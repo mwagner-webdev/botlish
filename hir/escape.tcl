@@ -167,6 +167,7 @@ namespace eval hir::escape {
 # caller that binds, returns or passes the value applies the cap of its own
 # boundary (local / return / argument).
 proc hir::escape::Classify {hir instance arity e {structOpts {}}} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     set kind [hir::kind $hir $e]
     if {$kind eq "struct"} {
         if {![StructEnabled $structOpts]} {
@@ -265,6 +266,7 @@ proc hir::escape::Classify {hir instance arity e {structOpts {}}} {
 # behavior). TARGETS lists every instance a branch's forwarding call demands
 # a companion of.
 proc hir::escape::ClassifyIf {hir instance arity e structOpts} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     if {![StructEnabled $structOpts]} {
         return ""
     }
@@ -1795,6 +1797,7 @@ proc hir::escape::TransportPlan {spec regions callSites arity retDepth eligible 
 
 # The number of physical fields of struct SHAPE opened as CUT.
 proc hir::escape::CutFields {shape cut} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     set n [llength [lindex $shape 1]]
     foreach {name sub subcut} $cut {
         incr n [expr {[CutFields $sub $subcut] - 1}]
@@ -1815,6 +1818,7 @@ proc hir::escape::WellFormedStruct {view e} {
 # literal, or a foreign call's write-back value (WriteBackTree: a
 # construction too).
 proc hir::escape::LiteralTree {view e} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     set node [hir::node $view $e]
     set shape [list [if {[dict get $node named]} {dict get $node structId} else {string cat ""}] [dict get $node layout]]
     set children [dict create]
@@ -1834,6 +1838,7 @@ proc hir::escape::LiteralTree {view e} {
 # holds in its fields (LiteralTree's children) otherwise. These are the
 # nested values NestingPlan may open past an independent use.
 proc hir::escape::WriteBackPaths {view e {prefix {}}} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     if {[IsWriteBack $view $e {}]} {
         return [lmap name [WrittenNames $view $e] {concat $prefix [list $name]}]
     }
@@ -2232,6 +2237,7 @@ proc hir::escape::ChooseCut {structOpts tree blocked ceiling ea er cyc} {
 }
 
 proc hir::escape::ChooseLevel {structOpts tree prefix blocked ceiling ea er cyc budget stateVar} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $stateVar state
     set cut {}
     lassign $tree shape children

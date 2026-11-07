@@ -377,8 +377,8 @@ proc native::lowered {hir args} {
     variable unsupported
     try {
         # Its walks recurse as deep as the program nests (a left-deep `and`
-        # chain: BRANCH-FORM-BOOLEAN-LOWERING.md), under the front end's
-        # recursion floor (hir::Deep); the program then runs natively.
+        # chain: BRANCH-FORM-BOOLEAN-LOWERING.md), in segments under a
+        # driver (hir::Deep, core/deep.tcl); the program then runs natively.
         return [hir::Deep {native::lower::program [prepareHir $hir] {*}$args}]
     } trap {NATIVE UNSUPPORTED} {message options} {
         lappend unsupported [list [dict get $options -errorcode] $message]

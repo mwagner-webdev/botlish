@@ -207,8 +207,9 @@ proc core::compiler::compileHir {hir} {
     hir::activate $hir
     set hir [hir::recovery::runnable $hir]
     # Compiling recurses as deep as the program nests (a left-deep `and`
-    # chain: BRANCH-FORM-BOOLEAN-LOWERING.md), under the front end's
-    # recursion floor (hir::Deep); the unit then runs under the caller's.
+    # chain: BRANCH-FORM-BOOLEAN-LOWERING.md), in segments under a driver
+    # (hir::Deep, core/deep.tcl); the unit then runs under the caller's
+    # recursion limit.
     return [Define [hir::Deep {GenerateUnit [hir::mode $hir] $hir}]]
 }
 
@@ -725,6 +726,7 @@ proc core::compiler::UnitProcSource {name ctx} {
 }
 
 proc core::compiler::CompileBlock {ctxVar e} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $ctxVar outer
     variable pending
     set procName [BlockProc $e]
@@ -737,6 +739,7 @@ proc core::compiler::CompileBlock {ctxVar e} {
 
 # Returns the proc source of block expression E.
 proc core::compiler::CompileBlockBody {outerVar e procName} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $outerVar outer
     variable envless
     variable selfTailCalls
@@ -815,6 +818,7 @@ proc core::compiler::CompileBlockBody {outerVar e procName} {
 # returns its operand.
 
 proc core::compiler::CompileSequence {ctxVar exprs} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $ctxVar ctx
     variable hir
     set result [Op box unit unit]
@@ -905,6 +909,7 @@ proc core::compiler::NoteTemp {ctxVar e op} {
 }
 
 proc core::compiler::CompileExpr {ctxVar e} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $ctxVar ctx
     set op [CompileForm ctx $e]
     if {[OpType $op] ne "never"} {
@@ -914,6 +919,7 @@ proc core::compiler::CompileExpr {ctxVar e} {
 }
 
 proc core::compiler::CompileForm {ctxVar e} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $ctxVar ctx
     variable hir
     # The coroutines an exit statement takes out of scope (COROUTINES.md,
@@ -1069,6 +1075,7 @@ proc core::compiler::CompileForm {ctxVar e} {
 # (`return -options`, CompileHandle's technique). The value is computed
 # inside the catch, keeping its representation.
 proc core::compiler::ReleasingOnError {ctxVar e compile} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $ctxVar ctx
     variable hir
     set byName [hir::affine::releasesOnError $hir $e]
@@ -1133,6 +1140,7 @@ proc core::compiler::ReleaseOnErrorCode {ctxVar byName stVar resVar} {
 # built); only then is the value built, the shape being the anonymous
 # canonical field set or the named declaration's (hir's `layout`).
 proc core::compiler::CompileStruct {ctxVar e} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $ctxVar ctx
     set ops {}
     foreach field [N $e fields] {
@@ -1158,6 +1166,7 @@ proc core::compiler::CompileStruct {ctxVar e} {
 # receiver a struct with that field; native code lowers the same projection
 # to a known slot.
 proc core::compiler::CompileProject {ctxVar e} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $ctxVar ctx
     set receiver [CompileExpr ctx [N $e receiver]]
     if {[OpType $receiver] eq "never"} {
@@ -1216,6 +1225,7 @@ proc core::compiler::CompileRef {ctxVar e} {
 }
 
 proc core::compiler::CompileBind {ctxVar e} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $ctxVar ctx
     variable bindLog
     set b [N $e binding]
@@ -1255,6 +1265,7 @@ proc core::compiler::CompileBind {ctxVar e} {
 
 # CALLEE-VAR and ARGS-VAR, if given, receive the operands of callee and argOps.
 proc core::compiler::CompileCall {ctxVar e {calleeVar ""} {argsVar ""}} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $ctxVar ctx
     if {$calleeVar ne ""} {
         upvar 1 $calleeVar callee $argsVar argOps
@@ -1791,6 +1802,7 @@ proc core::compiler::InlineTypeTest {ctxVar name arg testsType param} {
 # Control flow
 
 proc core::compiler::CompileIf {ctxVar e} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $ctxVar ctx
     set condition [N $e condition]
     # A materialized branch installs the refinements the runtime rule proves
@@ -1941,6 +1953,7 @@ proc core::compiler::CompileIf {ctxVar e} {
 # (E's outcome is decided, nothing was appended) or `never` (E does not
 # complete normally).
 proc core::compiler::CompileCondition {ctxVar e outVar} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $ctxVar ctx $outVar out
     variable hir
     switch -- [hir::condition::form $hir $e] {
@@ -1996,6 +2009,7 @@ proc core::compiler::ConditionOperand {op outVar} {
 # composed with its branches' (above). A branch that is one Boolean constant
 # (hir::condition::constant) is that constant's side of the operator.
 proc core::compiler::ConditionIf {ctxVar e outVar} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $ctxVar ctx $outVar out
     variable hir
     set constants [list [hir::condition::constant $hir [N $e thenBody]] \
@@ -2542,6 +2556,7 @@ proc core::compiler::CompileLockLoop {ctxVar e} {
 # `return -options`, the same technique core/completion.tcl's own
 # fromTclCode case 1 already uses for an ordinary Tcl error.
 proc core::compiler::CompileHandle {ctxVar e} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $ctxVar ctx
     variable hir
     set callExpr [N $e call]

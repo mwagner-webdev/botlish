@@ -336,9 +336,6 @@ namespace eval hir {
         variable recheckAudit 0
         variable recheckAudits 0
     }
-    # The Tcl recursion limit the front end runs under at least (hir::Deep):
-    # what most test files and audit tools already set for themselves.
-    variable recursionFloor 100000
 }
 
 # The build counters (hir::buildStats) as they are now.
@@ -347,31 +344,21 @@ proc hir::BuildStats {} {
     return $buildStats
 }
 
-# Evaluates SCRIPT in the caller's scope with the interpreter's recursion
-# limit at least recursionFloor, restoring the caller's limit afterwards
-# (COMPILER-BOTTLENECKS.md, 4.4). The front end's walks recurse as deep as
-# the program nests -- syntax (a left-deep `and` chain), and the completion
-# analysis also a static call chain, one nested callee analysis per call up
-# to hir::completions::maxDepth -- which Tcl's default limit of 1000 nested
-# evaluations cut short at a 120-function chain. Tcl 9's non-recursive
-# engine does not grow the C stack for a proc call, so the deeper limit costs
-# nothing until it is used. Scoped, not process-wide: the program a backend
-# then runs keeps the caller's limit (a compiled self tail call needs no Tcl
-# depth, tests/compiler-opt.test's opt-tail-2). An embedder's higher limit is
-# kept as it is.
+# Evaluates SCRIPT in the caller's scope under a driver of depth-safe
+# recursion (core/deep.tcl; DEPTH-SAFE-NESTED-EXPRESSION-FRONTEND-
+# MILESTONE-1.md). The front end's walks recurse as deep as the program
+# nests -- syntax (a left-deep `and` chain, a construction literal), and the
+# completion analysis also a static call chain, one nested callee analysis
+# per call up to hir::completions::maxDepth -- and every such walk is
+# guarded: past a segment's bound it goes on in a new segment, which the
+# driver resumes from here, so the interpreter's nesting stays at most one
+# segment deeper than this call whatever the program's (COMPILER-
+# BOTTLENECKS.md, 4.4, raised the recursion limit for this before). The
+# recursion limit is the caller's: a program a backend then runs keeps it
+# (a compiled self tail call needs no Tcl depth, tests/compiler-opt.test's
+# opt-tail-2).
 proc hir::Deep {script} {
-    variable recursionFloor
-    set limit [interp recursionlimit {}]
-    set raise [expr {$limit < $recursionFloor}]
-    if {$raise} {
-        interp recursionlimit {} $recursionFloor
-    }
-    set code [catch {uplevel 1 $script} result options]
-    if {$raise} {
-        interp recursionlimit {} $limit
-    }
-    dict incr options -level
-    return -options $options $result
+    tailcall ::core::deep::run $script
 }
 
 # ---------------------------------------------------------------------------
@@ -557,7 +544,8 @@ proc hir::build {exprs args} {
 # This is how frontends construct HIR: they state what was written and where;
 # resolution, hygiene (hygiene.tcl), types and refinements happen here.
 proc hir::buildSyntax {nodes args} {
-    # Every pass of the front end runs under its recursion floor (Deep).
+    # Every pass of the front end runs under a driver of depth-safe
+    # recursion (Deep).
     return [Deep {BuildSyntax $nodes {*}$args}]
 }
 
@@ -926,7 +914,7 @@ proc hir::ReferenceAudit {decided reference seeds} {
 # operation a witness it had none for.
 proc hir::check {hirVar} {
     upvar 1 $hirVar hir
-    # (Under the front end's recursion floor even when not entered through
+    # (Under a driver of depth-safe recursion even when not entered through
     # hir::buildSyntax: native::prepareHir re-checks a HIR itself.)
     Deep {
         set input $hir
@@ -1323,6 +1311,7 @@ proc hir::walk {hir} {
 }
 
 proc hir::WalkInto {hir e resultVar} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $resultVar result
     lappend result $e
     foreach child [children $hir $e] {

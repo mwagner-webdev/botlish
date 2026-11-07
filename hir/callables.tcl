@@ -482,6 +482,7 @@ proc hir::callables::WalkFold {hirVar node} {
 # -- it gets its own top-level call from verify's own "blocks" loop below,
 # so this never descends into a closure's body from here.
 proc hir::callables::WalkExpr {hirVar e} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $hirVar hir
     set node [dict get $hir exprs $e]
     switch -- [dict get $node kind] {

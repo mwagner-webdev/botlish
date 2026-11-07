@@ -856,6 +856,7 @@ proc service::SyntaxIndex {path revision} {
 }
 
 proc service::SyntaxWalk {node itemsVar nodesVar} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $itemsVar items $nodesVar nodes
     if {[dict exists $node span] && [dict exists $node id]} {
         set span [dict get $node span]

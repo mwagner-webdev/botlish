@@ -51,8 +51,10 @@ namespace eval hir::lower {
 proc hir::lower {hir} {
     hir::activate $hir
     set hir [hir::recovery::runnable $hir]
-    return [hir::lower::withTemporaries [hir::affine::temporaries $hir] {
-        hir::lower::Seq $hir [dict get $hir roots]
+    return [hir::Deep {
+        hir::lower::withTemporaries [hir::affine::temporaries $hir] {
+            hir::lower::Seq $hir [dict get $hir roots]
+        }
     }]
 }
 
@@ -86,6 +88,7 @@ proc hir::lower::Temporaries {hir} {
 
 # The core IR node of expression E.
 proc hir::lower::expr {hir e} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     set node [dict get $hir exprs $e]
     switch -- [dict get $node kind] {
         const {
@@ -268,6 +271,7 @@ proc hir::lower::params {hir e} {
 
 # Core IR body expressions of block expression E.
 proc hir::lower::body {hir e} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     return [Seq $hir [dict get $hir exprs $e body]]
 }
 
@@ -297,6 +301,7 @@ proc hir::lower::FoldWrap {hir node loop} {
 # value refers to, between evaluating the value and leaving: `bind T VALUE;
 # release...; return T`.
 proc hir::lower::Seq {hir ids} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     set result {}
     set n [llength $ids]
     set i 0
@@ -481,5 +486,6 @@ proc hir::lower::Pending {hir e operands build} {
 }
 
 proc hir::lower::Exprs {hir ids} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     return [lmap id $ids {expr $hir $id}]
 }
