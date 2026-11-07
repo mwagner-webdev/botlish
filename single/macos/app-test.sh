@@ -73,6 +73,11 @@ value_words() {
   tr -d '\\{}' <"$result" | tr -s ' \n' ' ' | sed 's/ $//'
 }
 section() { group=$1; echo "== $1"; }
+# A check of a command's output captures the output, then matches it, never
+# `COMMAND | grep -q PATTERN`: grep -q stops reading at its first match, and
+# a command still writing then dies of the broken pipe, which pipefail makes
+# the check's verdict (a failure, or in an `if` the silent pass of a check
+# that should have failed).
 # A private copy of the application in DIR (created), as its path.
 copy_app() { mkdir -p "$1"; cp -R "$source_app" "$1/"; echo "$1/Botlish.app"; }
 # APP's launcher with ARGS..., in an environment of HOME (default
@@ -388,13 +393,13 @@ for program in coroutine coroutine-kept context overflow args; do
 done
 for program in coroutine coroutine-kept context overflow args; do
   exe="$work/exe/$program"
-  file "$exe" | grep -q 'Mach-O 64-bit executable arm64' || fail "$program: $(file "$exe")"
-  otool -l "$exe" | grep -q 'cmd LC_MAIN' || fail "$program has no LC_MAIN entry point"
+  out=$(file "$exe") && grep -q 'Mach-O 64-bit executable arm64' <<<"$out" || fail "$program: $(file "$exe")"
+  out=$(otool -l "$exe") && grep -q 'cmd LC_MAIN' <<<"$out" || fail "$program has no LC_MAIN entry point"
   for library in $(otool -L "$exe" | tail -n +2 | awk '{print $1}'); do
     case $library in /usr/lib/*|/System/Library/*) ;; *) fail "$program needs $library" ;; esac
   done
-  if strings -a "$exe" | grep -q -e 'Botlish.app' -e "$work/builder"; then fail "$program names the application"; fi
-  if otool -l "$exe" | grep -q 'cmd LC_RPATH'; then fail "$program has an LC_RPATH"; fi
+  if out=$(strings -a "$exe") && grep -q -e 'Botlish.app' -e "$work/builder" <<<"$out"; then fail "$program names the application"; fi
+  if out=$(otool -l "$exe") && grep -q 'cmd LC_RPATH' <<<"$out"; then fail "$program has an LC_RPATH"; fi
 done
 rm -rf "$work/builder"
 cd /
@@ -424,7 +429,7 @@ write_text=$(sed -nE 's/^func ([0-9]+) "std::darwin::io::write_text".*/\1/p' "$w
 [[ -n $write_text ]] && awk -v want="call $write_text" '/^func/{inside = ($0 ~ /print_line<std::io::IO=std::darwin::io::DarwinIO>/)} inside && index($0, want) {found = 1} END {exit !found}' "$work/nir.out" ||
   fail "print_line does not call std::darwin::io::write_text directly"
 bl "$app" -warnings off -emit-native-executable hello-darwin.bot >/dev/null || fail "emit hello-darwin"
-otool -L hello-darwin | grep -q '/usr/lib/libSystem.B.dylib' || fail "hello-darwin does not link libSystem"
+out=$(otool -L hello-darwin) && grep -q '/usr/lib/libSystem.B.dylib' <<<"$out" || fail "hello-darwin does not link libSystem"
 [[ $(env -i ./hello-darwin) == 'Hello, world!' ]] || fail "hello-darwin: $(env -i ./hello-darwin)"
 echo "   checked, std::io::IO selected statically (print_line<...DarwinIO> calls write_text), libSystem, run: ok"
 

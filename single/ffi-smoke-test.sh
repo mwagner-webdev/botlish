@@ -62,6 +62,11 @@ work=$(mktemp -d "${TMPDIR:-/tmp}/botlish-ffi-smoke.XXXXXX")
 trap 'rm -rf "$work"' EXIT
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
+# A check of a command's output captures the output, then matches it, never
+# `COMMAND | grep -q PATTERN`: grep -q stops reading at its first match, and
+# a command still writing then dies of the broken pipe, which pipefail makes
+# the check's verdict (a failure, or in an `if` the silent pass of a check
+# that should have failed).
 
 macos=0
 [[ $(uname -s) == Darwin ]] && macos=1
@@ -249,7 +254,7 @@ for name in a b c d; do
     grep -q '^system linker: [^ ]*/cc ' "$work/link.log" || { cat "$work/link.log" >&2; fail "building $name ran no cc (not the system linker?)"; }
     if grep -E '(rustc|cargo)' "$work/link.log"; then fail "building $name ran Rust"; fi
   fi
-  if tail -c 8 "$name" | grep -q BOTLIMG1; then fail "$name was stub-linked"; fi
+  if tail -c 8 "$name" >"$work/tail" && grep -q BOTLIMG1 "$work/tail"; then fail "$name was stub-linked"; fi
   echo "   built $name ($(size "$name") bytes)"
 done
 # E: no C compiler at all on PATH, and still an executable (the stub, on
@@ -260,7 +265,7 @@ if [[ $(uname -m) == x86_64 ]]; then
   echo "   built e ($(size e) bytes, stub-linked, no C compiler on PATH)"
 else
   run -warnings off -emit-native-executable e.bot >/dev/null || fail "build e"
-  if tail -c 8 e | grep -q BOTLIMG1; then fail "e was stub-linked on $(uname -m)"; fi
+  if tail -c 8 e >"$work/tail" && grep -q BOTLIMG1 "$work/tail"; then fail "e was stub-linked on $(uname -m)"; fi
   echo "   built e ($(size e) bytes, system-linked: no stub on $(uname -s) $(uname -m))"
 fi
 
@@ -318,13 +323,13 @@ for name in a b c d e f; do
   needed=
   if command -v readelf >/dev/null; then
     needed=$(readelf -d "$name" | sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p' | tr '\n' ' ')
-    if readelf -d "$name" | grep -q -e '(RPATH)' -e '(RUNPATH)'; then fail "executable $name has a library search path: $(readelf -d "$name" | grep PATH)"; fi
+    if out=$(readelf -d "$name") && grep -q -e '(RPATH)' -e '(RUNPATH)' <<<"$out"; then fail "executable $name has a library search path: $(readelf -d "$name" | grep PATH)"; fi
   elif (( macos )); then
     needed=$(otool -L "$name" | tail -n +2 | awk '{print $1}' | tr '\n' ' ')
     for library in $needed; do
       case $library in /usr/lib/*|/System/Library/*) ;; *) fail "executable $name needs $library, not a system library" ;; esac
     done
-    if otool -l "$name" | grep -q 'cmd LC_RPATH'; then fail "executable $name has an LC_RPATH: $(otool -l "$name" | grep -A2 LC_RPATH | tr '\n' ' ')"; fi
+    if out=$(otool -l "$name") && grep -q 'cmd LC_RPATH' <<<"$out"; then fail "executable $name has an LC_RPATH: $(otool -l "$name" | grep -A2 LC_RPATH | tr '\n' ' ')"; fi
   fi
   if [[ $needed == *botlish* || $needed == *cffi* || $needed == *Tcl* ]]; then fail "executable $name needs $needed"; fi
   echo "   ran $name: ${got//$'\n'/ | }${needed:+  (needs: $needed)}"
