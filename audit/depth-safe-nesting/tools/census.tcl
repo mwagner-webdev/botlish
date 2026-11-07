@@ -4,9 +4,10 @@
 #   tclsh9.0 audit/depth-safe-nesting/tools/census.tcl ?-depth N?
 #       ?-kinds KIND,...? ?-scenarios NAME,...? ?-fraction F? ?-out FILE?
 #
-# Traces every procedure of the compiler (surface, hir, core's IR check and
-# Tcl compiler, native lowering, the service) while each specimen kind N deep
-# (specimens.tcl; 24 by default) goes through each scenario (scenarios.tcl),
+# Traces every procedure of the compiler (surface, hir, core's IR check,
+# Tcl compiler and layout codec, native lowering, the service) while each
+# specimen kind N deep (specimens.tcl; 24 by default) goes through each
+# scenario (scenarios.tcl),
 # counting each procedure's simultaneous activations. A procedure active at
 # least N/F times at once (F 2 by default; a specimen that cycles through K
 # forms, such as `loops`, shows a procedure of one form N/K times: use F
@@ -70,7 +71,7 @@ proc Leave {name args} {
     incr ::active($name) -1
 }
 set traced {}
-foreach ns {::surface ::hir ::native ::core::compiler ::core::ir ::service} {
+foreach ns {::surface ::hir ::native ::core::compiler ::core::ir ::core::binary ::service} {
     foreach p [AllProcs $ns] {
         if {[string match ::core::deep::* $p]} {
             continue

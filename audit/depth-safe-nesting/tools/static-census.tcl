@@ -5,8 +5,8 @@
 #   tclsh9.0 audit/depth-safe-nesting/tools/static-census.tcl ?-out FILE?
 #
 # Lists, by namespace, every procedure of the compiler (surface, hir,
-# native, core's IR check and Tcl compiler, the service, the language
-# server) whose body names it as a command -- a direct self-call, the
+# native, core's IR check, Tcl compiler and layout codec, the service,
+# the language server) whose body names it as a command -- a direct self-call, the
 # static over-approximation of recursion -- and that census.tsv does not
 # list. Each is recursion over something other than the program's nesting
 # (types and declarations, which the lattice and the declaration graph
@@ -51,7 +51,7 @@ foreach line [split [read $f] \n] {
 close $f
 
 set rows {}
-foreach ns {::surface ::hir ::native ::core::compiler ::core::ir ::service ::lsp} {
+foreach ns {::surface ::hir ::native ::core::compiler ::core::ir ::core::binary ::service ::lsp} {
     foreach p [AllProcs $ns] {
         set tail [namespace tail $p]
         set pattern "(^|\[\\\[\\s\{;\])(\[A-Za-z0-9_:\]*::)?[regsub -all {[][\\$^.*+?(){}|]} $tail {\\&}](\\s|\\\])"

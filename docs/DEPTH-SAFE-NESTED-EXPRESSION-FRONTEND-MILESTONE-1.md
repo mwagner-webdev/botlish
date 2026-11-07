@@ -58,7 +58,7 @@ value its structure gives it. Parentheses and List
 literals compile 5000 deep; the fuzzer compiles mixed programs 1500 deep.
 
 The walks are unchanged. Each procedure whose recursion follows the
-program's nesting (CENSUSCOUNT of them, `audit/depth-safe-nesting/census.tsv`)
+program's nesting (192 of them, `audit/depth-safe-nesting/census.tsv`)
 starts with one guard:
 
     if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
@@ -160,37 +160,45 @@ have exhausted the C stack instead.
 `audit/depth-safe-nesting/tools/census.tcl` traces every procedure of the
 compiler (surface, hir, core's IR check and Tcl compiler, native lowering,
 the service) while each specimen kind 24 deep goes through each scenario
-(`scenarios.tcl`: the nine paths of section 1), and counts each procedure's
+(`scenarios.tcl`: the ten paths of section 1), and counts each procedure's
 simultaneous activations. One active at least 12 times at once recurses with
-the nesting. `probe.tcl` runs every specimen 1000 deep through every
-scenario at the default limit and names the procedures a TCL LIMIT STACK's
-stack repeats. The census found CENSUSCOUNT procedures:
+the nesting (the specimens that cycle through forms -- `loops`, `cond`,
+`mixed` -- run 48 deep with a threshold of a quarter, `-fraction 4`, so
+that a procedure of one form of the cycle shows). `probe.tcl` runs every
+specimen 1000 deep through every scenario at the default limit and names
+the procedures a TCL LIMIT STACK's stack repeats. The census was found in
+two passes: the expression and block specimens first (132 procedures), then
+the forms section 10 lists, each of which failed at the default limit
+before it had a specimen -- 192 procedures in all:
 
 | phase | procedures | recursive shape | terminates | changed | why it stays recursive |
 |---|---|---|---|---|---|
-| parse (21) | `surface::parser::Additive`, `surface::parser::Arguments`, `surface::parser::CallArguments`, `surface::parser::Comparison`, `surface::parser::Conjunction`, `surface::parser::Expression`, `surface::parser::FieldInits`, `surface::parser::Function`, `surface::parser::HandledCall`, `surface::parser::If`, `surface::parser::Inversion`, `surface::parser::Logical`, `surface::parser::Multiplicative`, `surface::parser::Postfix`, `surface::parser::Primary`, `surface::parser::Simple`, `surface::parser::Statement`, `surface::parser::Statements`, `surface::parser::Suite`, `surface::parser::Unary`, `surface::parser::ValueOrHandled` | recursive descent: a production per precedence level and per bracketed form, re-entered for every nested operand, argument, element, field value and block | structural: each call descends to a child of a finite tree | guard added | section 5 |
-| AST (3) | `surface::ast::Ids`, `surface::ast::Statements`, `surface::ast::Suite` | structural ids assigned by a walk of the nested AST (a left-deep chain is as deep as it is long) | structural: each call descends to a child of a finite tree | guard added | section 5 |
-| AST text (1) | `surface::ast::Expr` | the AST printer (surface::formatAst), one call per nested node | structural: each call descends to a child of a finite tree | guard added | section 5 |
-| load (3) | `surface::modules::StaticSitesWalk`, `surface::modules::Walk`, `surface::modules::RemapFile` | an imported module's nodes given their file's id | structural: each call descends to a child of a finite tree | guard added | section 5 |
-| surface lowering (4) | `surface::lower::FieldInits`, `surface::lower::Handlers`, `surface::lower::Node`, `surface::lower::Sequence` | AST to HIR syntax, one call per nested node | structural: each call descends to a child of a finite tree | guard added | section 5 |
-| static sites (5) | `hir::static::HasStatic`, `hir::static::CollectSites`, `hir::static::Node`, `hir::static::Value`, `hir::syntax::CollectBindNames` | the names a nested syntax node binds | structural: each call descends to a child of a finite tree | guard added | section 5 |
-| resolution (3) | `hir::resolve::Expr`, `hir::resolve::ResolveStruct`, `hir::resolve::Sequence` | scopes and names over nested syntax | structural: each call descends to a child of a finite tree | guard added | section 5 |
+| parse (26) | `surface::parser::Additive`, `surface::parser::Arguments`, `surface::parser::CallArguments`, `surface::parser::Comparison`, `surface::parser::Conjunction`, `surface::parser::Expression`, `surface::parser::FieldInits`, `surface::parser::Function`, `surface::parser::HandledCall`, `surface::parser::If`, `surface::parser::Inversion`, `surface::parser::Logical`, `surface::parser::Multiplicative`, `surface::parser::Postfix`, `surface::parser::Primary`, `surface::parser::Simple`, `surface::parser::Statement`, `surface::parser::Statements`, `surface::parser::Suite`, `surface::parser::Unary`, `surface::parser::ValueOrHandled`, `surface::parser::Pattern`, `surface::parser::TypeExpr`, `surface::parser::Loop`, `surface::parser::ArrayTypeExpr`, `surface::parser::Injection` | recursive descent: a production per precedence level and per bracketed form, re-entered for every nested operand, argument, element, field value and block; a destructuring pattern's nested field patterns; a written type's arguments (List[List[...]], Fn{...}); a loop's header and suite; a written `array N of ...` representation; an inject block's header and suite | structural: each call descends to a child of a finite tree | guard added | section 5 |
+| AST (4) | `surface::ast::Ids`, `surface::ast::Statements`, `surface::ast::Suite`, `surface::ast::PatternIds` | structural ids assigned by a walk of the nested AST (a left-deep chain is as deep as it is long); structural ids of a nested destructuring pattern | structural: each call descends to a child of a finite tree | guard added | section 5 |
+| AST text (3) | `surface::ast::Expr`, `surface::ast::PatternText`, `surface::ast::showType` | the AST printer (surface::formatAst), one call per nested node; the AST printer's nested patterns; the AST printer's written types | structural: each call descends to a child of a finite tree | guard added | section 5 |
+| load (4) | `surface::modules::StaticSitesWalk`, `surface::modules::Walk`, `surface::modules::RemapFile`, `surface::modules::TypeRefs` | the loader's walks of a file's AST: qualified references, static sites; an imported module's nodes given their file's id; qualified names in a written type's arguments | structural: each call descends to a child of a finite tree | guard added | section 5 |
+| surface lowering (6) | `surface::lower::FieldInits`, `surface::lower::Handlers`, `surface::lower::Node`, `surface::lower::Sequence`, `surface::lower::Projections`, `surface::lower::LoopSyntax` | AST to HIR syntax, one call per nested node; a nested pattern's projections, one level per nested field pattern; AST to HIR syntax, one call per nested loop | structural: each call descends to a child of a finite tree | guard added | section 5 |
+| static sites (6) | `hir::static::HasStatic`, `hir::static::CollectSites`, `hir::static::Node`, `hir::static::Value`, `hir::syntax::CollectBindNames`, `hir::static::Sequence` | search of the nested syntax for a static block; the static blocks of nested syntax collected; decided static blocks replaced in nested syntax; decided static blocks replaced in nested syntax (a value position); the names a nested syntax node binds; decided static blocks replaced in nested syntax (a sequence) | structural: each call descends to a child of a finite tree | guard added | section 5 |
+| resolution (5) | `hir::resolve::Expr`, `hir::resolve::ResolveStruct`, `hir::resolve::Sequence`, `hir::resolve::ResolveTypeExpr`, `hir::resolve::ShowTypeExpr` | scopes and names over nested syntax; a written type's arguments resolved; a written type shown in a diagnostic | structural: each call descends to a child of a finite tree | guard added | section 5 |
 | inference (10) | `hir::types::Bind`, `hir::types::Block`, `hir::types::Call`, `hir::types::Expr`, `hir::types::Handle`, `hir::types::If`, `hir::types::Project`, `hir::types::Sequence`, `hir::types::Struct`, `hir::types::inferRegion` | type inference: Expr dispatches on a node and re-enters for its children | structural: each call descends to a child of a finite tree | guard added | section 5 |
 | contracts (3) | `hir::signatures::Call`, `hir::signatures::Seq`, `hir::signatures::Value` | inferred parameter contracts and results | structural: each call descends to a child of a finite tree | guard added | section 5 |
 | range (6) | `hir::range::Call`, `hir::range::Expr`, `hir::range::If`, `hir::range::PathsWithin`, `hir::range::Sequence`, `hir::range::VerifyCallArguments` | range analysis, admission and verification of calls | structural: each call descends to a child of a finite tree | guard added | section 5 |
 | refinement (2) | `hir::refine::IfImplication`, `hir::refine::Implication` | implication through nested conditions | structural: each call descends to a child of a finite tree | guard added | section 5 |
 | callables (1) | `hir::callables::WalkExpr` | callable-bearing audit | structural: each call descends to a child of a finite tree | guard added | section 5 |
-| completions (10) | `hir::completions::EffectiveFacts`, `hir::completions::Eval`, `hir::completions::EvalCall`, `hir::completions::EvalHandle`, `hir::completions::EvalIf`, `hir::completions::ExactCopy`, `hir::completions::Seq`, `hir::completions::StaticWalk`, `hir::completions::WalkBlock`, `hir::completions::analyzeBlock` | completion analysis (also nests per static call: the call chain) | structural; the static-call nesting by `maxDepth` analyses and the cycle guard | guard added | section 5 |
+| completions (12) | `hir::completions::EffectiveFacts`, `hir::completions::Eval`, `hir::completions::EvalCall`, `hir::completions::EvalHandle`, `hir::completions::EvalIf`, `hir::completions::ExactCopy`, `hir::completions::Seq`, `hir::completions::StaticWalk`, `hir::completions::WalkBlock`, `hir::completions::analyzeBlock`, `hir::completions::EvalListloop`, `hir::completions::ExitsLoop` | completion analysis (also nests per static call: the call chain); whether a nested loop body exits its loop | structural; the static-call nesting by `maxDepth` analyses and the cycle guard | guard added | section 5 |
 | specialization (2) | `hir::specialize::Analyze`, `hir::specialize::Handle` | call-site specialization analysis of nested functions | structural: each call descends to a child of a finite tree | guard added | section 5 |
 | warnings (3) | `hir::warnings::BodyInto`, `hir::warnings::FallThroughs`, `hir::warnings::Leaves` | the warning passes' completion walks | structural: each call descends to a child of a finite tree | guard added | section 5 |
-| ownership (1) | `hir::affine::Flow` | the affine flow analysis, one call per nested expression | structural: each call descends to a child of a finite tree | guard added | section 5 |
+| ownership (4) | `hir::affine::Flow`, `hir::affine::Descriptor`, `hir::affine::DescriptorOf`, `hir::affine::Seq` | the affine flow analysis, one call per nested expression; an affine type's drop descriptor, one level per owned component (a chain of declarations is as deep as it is long); the affine flow, one call per nested sequence (a loop's body) | structural (a drop descriptor: the declarations a type owns, a finite graph cut where a field cycle returns) | guard added | section 5 |
 | traits (1) | `hir::traits::StampNode` | a trait or coroutine program's syntax stamped node by node | structural: each call descends to a child of a finite tree | guard added | section 5 |
 | repeatability (1) | `hir::repeatable::Expr` | whether a nested expression repeats its value | structural: each call descends to a child of a finite tree | guard added | section 5 |
+| injection (2) | `hir::injection::Seq`, `hir::injection::Tau` | the injection proof's provenance walk over nested blocks | structural: each call descends to a child of a finite tree | guard added | section 5 |
+| module bindings (2) | `hir::modulebinding::ContextExpr`, `hir::modulebinding::ImmutableExpr` | a module binding's value, one call per nested expression | structural: each call descends to a child of a finite tree | guard added | section 5 |
+| layouts (16) | `hir::layouts::CopyType`, `hir::layouts::ReprDescriptor`, `hir::layouts::ReprOfTerm`, `hir::layouts::ReprPointerPath`, `hir::layouts::ReprTerm`, `hir::layouts::ReprText`, `hir::layouts::ReprUnionAt`, `hir::layouts::ReprUnionPath`, `hir::layouts::ResolveArrayTerm`, `hir::layouts::ResolveRepr`, `hir::layouts::ShowTerm`, `hir::layouts::ShowTypeExpr`, `hir::layouts::WithLeafType`, `hir::layouts::WordsFormats`, `hir::layouts::align`, `hir::layouts::size` | a layout representation, one level per nested array, union or record | structural: each call descends to a child of a finite tree | guard added | section 5 |
 | core IR lowering (4) | `hir::lower::Exprs`, `hir::lower::Seq`, `hir::lower::body`, `hir::lower::expr` | HIR to core IR (the interpreter's program) | structural: each call descends to a child of a finite tree | guard added | section 5 |
 | core IR check (2) | `core::ir::CollectBindNames`, `core::ir::check` | core IR validation and binding collection | structural: each call descends to a child of a finite tree | guard added | section 5 |
-| Tcl compiler (16) | `core::compiler::CompileBind`, `core::compiler::CompileBlock`, `core::compiler::CompileBlockBody`, `core::compiler::CompileCall`, `core::compiler::CompileCondition`, `core::compiler::CompileExpr`, `core::compiler::CompileForm`, `core::compiler::CompileHandle`, `core::compiler::CompileIf`, `core::compiler::CompileProject`, `core::compiler::CompileSequence`, `core::compiler::CompileStruct`, `core::compiler::ConditionIf`, `core::compiler::ReleasingOnError`, `hir::WalkInto`, `hir::aot::TailInto` | tail positions | structural: each call descends to a child of a finite tree | guard added | section 5 |
-| native lowering (27) | `hir::construction::SeqUses`, `hir::construction::Uses`, `hir::escape::ChooseLevel`, `hir::escape::Classify`, `hir::escape::ClassifyIf`, `hir::escape::CutFields`, `hir::escape::LiteralTree`, `hir::escape::WriteBackPaths`, `native::lower::Call`, `native::lower::CallArgs`, `native::lower::CallInner`, `native::lower::ConstantIntValue`, `native::lower::Expr`, `native::lower::Handle`, `native::lower::If`, `native::lower::MandatoryWriteBack`, `native::lower::Sequence`, `native::lower::SequenceTo`, `native::lower::StaticOutcome`, `native::lower::StaticOutcomeOf`, `native::lower::StructFields`, `native::shortstr::DemandBody`, `native::shortstr::DemandWalk`, `native::shortstr::LiveWalk`, `native::rawabi::If`, `native::rawabi::Seq`, `native::rawabi::Walk` | raw ABI walk | structural: each call descends to a child of a finite tree | guard added | section 5 |
-| HIR text (2) | `hir::format::Expr`, `hir::read::Expr` | the HIR text reader, one call per nested expression | structural: each call descends to a child of a finite tree | guard added | section 5 |
+| Tcl compiler (20) | `core::compiler::CompileBind`, `core::compiler::CompileBlock`, `core::compiler::CompileBlockBody`, `core::compiler::CompileCall`, `core::compiler::CompileCondition`, `core::compiler::CompileExpr`, `core::compiler::CompileForm`, `core::compiler::CompileHandle`, `core::compiler::CompileIf`, `core::compiler::CompileProject`, `core::compiler::CompileSequence`, `core::compiler::CompileStruct`, `core::compiler::ConditionIf`, `core::compiler::ReleasingOnError`, `hir::WalkInto`, `hir::aot::TailInto`, `core::compiler::CompileListLoop`, `core::compiler::ArrayOfRecords`, `core::compiler::LayoutLeaves`, `core::compiler::LayoutValueText` | code generation, one call per nested expression; the compiler's walk of nested expressions; tail positions; a layout representation's leaves and values | structural: each call descends to a child of a finite tree | guard added | section 5 |
+| native lowering (44) | `hir::construction::SeqUses`, `hir::construction::Uses`, `hir::escape::ChooseLevel`, `hir::escape::Classify`, `hir::escape::ClassifyIf`, `hir::escape::CutFields`, `hir::escape::LiteralTree`, `hir::escape::WriteBackPaths`, `native::lower::Call`, `native::lower::CallArgs`, `native::lower::CallInner`, `native::lower::ConstantIntValue`, `native::lower::Expr`, `native::lower::Handle`, `native::lower::If`, `native::lower::MandatoryWriteBack`, `native::lower::Sequence`, `native::lower::SequenceTo`, `native::lower::StaticOutcome`, `native::lower::StaticOutcomeOf`, `native::lower::StructFields`, `native::shortstr::DemandBody`, `native::shortstr::DemandWalk`, `native::shortstr::LiveWalk`, `native::rawabi::If`, `native::rawabi::Seq`, `native::rawabi::Walk`, `native::lower::Struct`, `native::rawabi::Call`, `native::lower::ListLoop`, `native::lower::IterationBody`, `native::lower::DeferredNeeds`, `native::lower::Condition`, `native::lower::ConditionIf`, `native::lower::ConditionBody`, `native::lower::EmitRegionConsumerCondition`, `native::lower::EmitRegionConsumerBody`, `native::lower::ArrayCheck`, `native::lower::ArrayRead`, `native::lower::LayoutLeaves`, `native::lower::ReprHasArrays`, `native::lower::ReprRead`, `native::lower::ReprWrite`, `native::lower::ViewBase` | construction uses (escape of nested values); escape and scalar-replacement plans of nested constructions; HIR to NIR, one call per nested expression; short-string demand and liveness walks; raw ABI walk; a branch-form condition's Boolean structure (BRANCH-FORM-BOOLEAN-LOWERING.md); an inlined region consumer's condition and body; a layout representation's reads, writes and checks | structural: each call descends to a child of a finite tree | guard added | section 5 |
+| HIR text (2) | `hir::format::Expr`, `hir::read::Expr` | the HIR text printer, one call per nested expression; the HIR text reader, one call per nested expression | structural: each call descends to a child of a finite tree | guard added | section 5 |
 | service (1) | `service::SyntaxWalk` | the service's index of a file's nested AST | structural: each call descends to a child of a finite tree | guard added | section 5 |
 
 "Terminates" is why the walk ends whatever the guard does; "changed" is
@@ -216,7 +224,7 @@ What the census leaves out on purpose:
 
 ## 5. The mechanism: recursion in segments (core/deep.tcl)
 
-The prompt preferred explicit work stacks. Rewriting CENSUSCOUNT procedures --
+The prompt preferred explicit work stacks. Rewriting 192 procedures --
 the type checker's `Expr`, the range analysis, the completion analysis,
 native lowering's 13,000 lines -- each into continuation-passing style over
 its own explicit stack would have been the largest change to the compiler
@@ -548,7 +556,13 @@ FIXME bench table
   CompilerError handled).
 * `dsn-segment-invariance`: every specimen 40 deep, a malformed one and the
   2048 engine compile to the same HIR text, core IR, Tcl code and NIR with
-  a segment every 3 frames as with the default 60.
+  a segment every 3 frames as with the default 60 (the Tcl compiler's
+  temporaries counted from the same place: their counter is process-wide).
+* `dsn-module-binding`: a List literal, a sum and a call chain 1000 deep as
+  a module binding of an imported module, read by the program, on every
+  backend (`hir::modulebinding`'s walks); `dsn-module-not-stringified`: a
+  module loaded after another keeps its syntax free of strings (section
+  16).
 
 ## 22. The run (the reference interpreter)
 
@@ -569,7 +583,7 @@ FIXME
 
 ## 24. Remaining recursion: the final census
 
-The census (`audit/depth-safe-nesting/census.tsv`) lists CENSUSCOUNT
+The census (`audit/depth-safe-nesting/census.tsv`) lists 192
 procedures, every one guarded (`dsn-census-guarded`). `census.tcl` over
 every specimen kind through every scenario (24 deep; `loops`, `cond` and
 `mixed`, which cycle through forms, 48 deep at `-fraction 4`) finds no
@@ -578,7 +592,7 @@ does not list, and `probe.tcl` runs every kind 1000 deep through every
 scenario at the default limit without one TCL LIMIT STACK.
 
 What still recurses, and why it may (`static-census.tcl` lists the
-STATICCOUNT procedures that call themselves without the guard, by
+262 procedures that call themselves without the guard, by
 namespace):
 
 * **Types.** `hir::types` (subtyping, joins, meets, printing, totality),
@@ -651,6 +665,13 @@ namespace):
     handlers in under half a second). `dsn-1000-handler` runs that one
     backend 250 deep; the program still compiles 1000 deep, the Tcl
     compiler's unit included.
+  - **Nested loops in the native code generator.** NIR stays linear (3,507
+    lines for the `loops` specimen 125 deep, 7,010 for 250) and native
+    lowering nearly so (0.4 s, 1.4 s), but the driver compiling that one
+    function -- 250 nested loops -- takes about 8 s, seven times the 125
+    levels' (the driver's passes over one function's loop nest; which
+    pass was not measured). `dsn-1000-loops`
+    runs the two native backends 250 deep; NIR is lowered 1000 deep.
   - **Block nesting's text.** A block nested N deep is indented N times:
     the source of `ifnest`, `fnnest`, `handler`, `loops` and `inject` is
     O(N^2) characters (2.7 MB for `loops` 1000 deep), and the lexer and

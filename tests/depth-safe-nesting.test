@@ -238,22 +238,32 @@ test dsn-census-guarded {every procedure of the census starts with the guard, ex
 # ---------------------------------------------------------------------------
 # A thousand levels of every production, at the default limit
 
-# The Tcl compiler's code for nested handlers is nested, indented Tcl
-# scripts, quadratic in size, which Tcl's own parser scans once per level
-# (the report, section 25): run on the `compile` backend, 1000 handlers take
-# minutes. Their program compiles 1000 deep like every other (the Tcl
-# compiler's unit included); it runs on that backend 250 deep.
-set ::dsnTclShallow {handler 250}
+# Two backends' own code costs grow faster than the nesting where the
+# front end's do not (the report, section 25): the Tcl compiler's code for
+# nested handlers is nested, indented Tcl scripts that Tcl's parser scans
+# once per level (1000 handlers take minutes on `compile`), and the native
+# driver's code generator compiles 1000 nested loops in one function in
+# minutes. Those programs compile 1000 deep like every other -- the front
+# end, core IR, the Tcl compiler's unit and NIR -- and run on those
+# backends 250 deep.
+set ::dsnShallow {handler {compile 250} loops {cranelift-generic 250 cranelift 250}}
+
+proc dsnBackends {kind} {
+    set shallow [dict getdef $::dsnShallow $kind {}]
+    return [lmap backend {interp compile cranelift-generic cranelift} {
+        if {[dict exists $shallow $backend]} continue
+        set backend
+    }]
+}
 
 foreach kind [dsn::kinds] {
     test dsn-1000-$kind "$kind nested 1000 deep compiles at Tcl's default limit (front end, core IR, the Tcl compiler's unit, native lowering) and runs on every backend with the value its structure gives it" -body {
-        if {[dict exists $::dsnTclShallow $kind]} {
-            list [dsnAgree $kind 1000 {interp cranelift-generic cranelift}] \
-                [dsnAgree $kind [dict get $::dsnTclShallow $kind] compile]
-        } else {
-            dsnAgree $kind 1000
+        set results [list [dsnAgree $kind 1000 [dsnBackends $kind]]]
+        dict for {backend depth} [dict getdef $::dsnShallow $kind {}] {
+            lappend results [dsnAgree $kind $depth $backend]
         }
-    } -result [if {[dict exists $::dsnTclShallow $kind]} {list ok ok} else {list ok}]
+        lsort -unique $results
+    } -cleanup {unset -nocomplain results backend depth} -result ok
 }
 
 test dsn-depths {every specimen kind at 1, 8, 32, 64, 96 and 128 levels on every backend (the depths the host's limit used to cut, around 80), each with its value} -body {

@@ -1514,6 +1514,65 @@ proc hir::layouts::size {id} {
 proc hir::layouts::size {id} {
 >>>>
 
+@@ codec-recursion the layout codec's descriptor walks recursive (the Tcl compiler reads them at compile time)
+!! dsn-1000-layout
+## core/binary.tcl
+<<<<
+proc core::binary::EncodeForeign {repr value bytes at what} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc core::binary::EncodeForeign {repr value bytes at what} {
+>>>>
+## core/binary.tcl
+<<<<
+proc core::binary::Rows {numbers dims} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc core::binary::Rows {numbers dims} {
+>>>>
+## core/binary.tcl
+<<<<
+proc core::binary::DecodeRepr {repr bytes at name structId} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc core::binary::DecodeRepr {repr bytes at name structId} {
+>>>>
+## core/binary.tcl
+<<<<
+proc core::binary::HasArrays {descriptor} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc core::binary::HasArrays {descriptor} {
+>>>>
+## core/binary.tcl
+<<<<
+proc core::binary::EncodeRepr {operation repr value bytes at what} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc core::binary::EncodeRepr {operation repr value bytes at what} {
+>>>>
+## core/binary.tcl
+<<<<
+proc core::binary::ReprHoldsRaw {repr} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc core::binary::ReprHoldsRaw {repr} {
+>>>>
+## core/binary.tcl
+<<<<
+proc core::binary::ReprUnionPath {repr} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc core::binary::ReprUnionPath {repr} {
+>>>>
+## core/binary.tcl
+<<<<
+proc core::binary::ReprPointerPath {repr} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc core::binary::ReprPointerPath {repr} {
+>>>>
+
 # ---------------------------------------------------------------------------
 # The mechanism (core/deep.tcl)
 

@@ -198,3 +198,11 @@
 ::core::compiler::LayoutValueText	Tcl compiler	a layout representation's leaves and values
 ::surface::parser::ArrayTypeExpr	parse	a written `array N of ...` representation
 ::surface::parser::Injection	parse	an inject block's header and suite
+::core::binary::EncodeForeign	layouts	a layout descriptor's representation, one level per nested array, union or record (the Tcl compiler's static descriptors; the Tcl backends' codec)
+::core::binary::Rows	layouts	a layout descriptor's representation, one level per nested array, union or record (the Tcl compiler's static descriptors; the Tcl backends' codec)
+::core::binary::DecodeRepr	layouts	a layout descriptor's representation, one level per nested array, union or record (the Tcl compiler's static descriptors; the Tcl backends' codec)
+::core::binary::HasArrays	layouts	a layout descriptor's representation, one level per nested array, union or record (the Tcl compiler's static descriptors; the Tcl backends' codec)
+::core::binary::EncodeRepr	layouts	a layout descriptor's representation, one level per nested array, union or record (the Tcl compiler's static descriptors; the Tcl backends' codec)
+::core::binary::ReprHoldsRaw	layouts	a layout descriptor's representation, one level per nested array, union or record (the Tcl compiler's static descriptors; the Tcl backends' codec)
+::core::binary::ReprUnionPath	layouts	a layout descriptor's representation, one level per nested array, union or record (the Tcl compiler's static descriptors; the Tcl backends' codec)
+::core::binary::ReprPointerPath	layouts	a layout descriptor's representation, one level per nested array, union or record (the Tcl compiler's static descriptors; the Tcl backends' codec)

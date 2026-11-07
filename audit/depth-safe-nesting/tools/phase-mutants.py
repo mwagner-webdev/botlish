@@ -46,6 +46,7 @@ groups=[
  ('modulebinding-recursion', 'a module binding\'s value walked recursively', ['::hir::modulebinding::'], 'dsn-module-binding'),
  ('injection-recursion', 'the injection proof\'s provenance walk recursive', ['::hir::injection::'], 'dsn-1000-inject'),
  ('layouts-recursion', 'layout representations resolved and described recursively', ['::hir::layouts::'], 'dsn-1000-layout'),
+ ('codec-recursion', 'the layout codec\'s descriptor walks recursive (the Tcl compiler reads them at compile time)', ['::core::binary::'], 'dsn-1000-layout'),
 ]
 out=[]
 out.append('''# mutants.txt -- mutants of the depth-safe front end
