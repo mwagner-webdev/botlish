@@ -400,6 +400,11 @@ nomethod fn serve_calls(to: std::actor::Address[Call[Q, R]], capacity: int, cont
 nomethod fn close_service(s: Service[Q, R]) -> int:
     std::thread::rt_endpoint_close(s.id)
 
+# Requests queued on S's endpoint in transit, not yet taken by its pump
+# (this VM's service; 0 otherwise).
+nomethod fn in_transit_calls(s: Service[Q, R]) -> int:
+    std::thread::rt_endpoint_queued(s.id)
+
 # Answer the call R with VALUE: Delivered, or Stale when it was answered
 # already, cancelled, or its caller is gone (the answer reaches nobody),
 # Unavailable. Needs no context: the answer right is the authority.

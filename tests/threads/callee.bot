@@ -1,7 +1,9 @@
 # callee.bot -- tests/threads.test: a worker VM that serves calls badly on
-# purpose (calls.bot). Its service actor answers the first call, sleeps
-# while three more arrive -- one into its mailbox of one, one taken by the
-# pump waiting for room, one left queued in the endpoint -- takes the
+# purpose (calls.bot). Its service actor answers the first call, then waits
+# -- polling its own observations, so the test depends on no timing --
+# until the other three have been sent (the process's transport counted
+# them) and its pump has settled: one in its mailbox of one, one taken by
+# the pump waiting for room, one left queued in the endpoint. It takes the
 # second and holds it unanswered, closes the service (the queued call:
 # Undelivered) and stops its loop: the VM ends owing the held call and the
 # taken one (ServiceEnded).
@@ -32,9 +34,17 @@ fn badly(inbox: std::actor::Inbox[std::actor::remote::Call[Ask, int]], svc: std:
         on std::actor::Closed:
             return std::actor::exit(-2)
     std::actor::remote::reply(first.reply, first.body.n * 10)
-    std::actor::sleep(300000):
-        on std::event_loop::SchedulerFault:
-            return std::actor::exit(-3)
+    # The service's message home and four calls: five messages queued in
+    # all; then one call left in the endpoint (the pump holds the next).
+    settled = fold i from 0 to 20000 with intermediate settled false:
+        if settled:
+            break
+        std::actor::sleep(500):
+            on std::event_loop::SchedulerFault:
+                return std::actor::exit(-3)
+        std::thread::stats().messages >= 5 and std::actor::remote::in_transit_calls(svc) == 1
+    if not settled:
+        return std::actor::exit(-6)
     held = std::actor::receive(rx):
         on std::actor::Closed:
             return std::actor::exit(-4)

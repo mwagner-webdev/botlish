@@ -1482,6 +1482,34 @@ mod tests {
         assert_eq!(refused(&mut t, domain, id, key), Some(T_STALE), "the old capability names nothing of the new endpoint");
     }
 
+    /// A call completes once: a second answer, an answer by a call id whose
+    /// slot a later call reuses, and an answer to a caller whose reply
+    /// route closed (its actor gone: the call cancelled) are all Stale and
+    /// reach nobody.
+    #[cfg(unix)]
+    #[test]
+    fn calls_complete_once() {
+        let owner = Arc::new(Port {
+            doorbell: Doorbell::open().expect("a doorbell"),
+            queue: Mutex::new(VecDeque::new()),
+            owed: Mutex::new(Vec::new()),
+            closed: AtomicBool::new(false),
+        });
+        let mut t = Transport { domain: 0, endpoints: Vec::new(), free: Vec::new(), calls: Vec::new(), free_calls: Vec::new() };
+        let reply = t.open(owner, 4, [0; 8]);
+        let (call, _) = t.new_call(reply);
+        assert_eq!(t.complete(call, T_DELIVERED, vec![1]), T_DELIVERED);
+        assert_eq!(t.complete(call, T_DELIVERED, vec![2]), T_STALE, "a second answer reaches nobody");
+        assert_eq!(t.endpoint_mut(reply).expect("open").queue.len(), 1, "one response queued");
+        // The response taken: rt_take frees an answered call's record.
+        t.free_call(call);
+        let (again, _) = t.new_call(reply);
+        assert_eq!(unpack(again).0, unpack(call).0, "the call's slot is reused");
+        assert_eq!(t.complete(call, T_DELIVERED, vec![3]), T_STALE, "an old call id names nothing of the new call");
+        t.close_endpoint(reply);
+        assert_eq!(t.complete(again, T_DELIVERED, vec![4]), T_STALE, "a caller that is gone receives nothing");
+    }
+
     /// Backpressure is first come, first served without a deadlock: a place
     /// freed on a full endpoint is granted to the first waiting sender
     /// (told with N_ROOM), whose retry takes it while everyone else --

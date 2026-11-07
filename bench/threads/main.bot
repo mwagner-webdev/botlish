@@ -1,0 +1,246 @@
+# main.bot -- the workloads of bench/threads.tcl (BOTLISH-OWNED-THREADS-AND-
+# CROSS-THREAD-ACTORS-MILESTONE-1.md, "Performance"), natively on the Linux
+# driver (real clock): thread start and join, a worker with its own loop,
+# CPU-bound VMs in parallel, the transfer codec alone, one-way remote
+# messages from 1, 2, 4 and 8 producer VMs, saturation, call round trips
+# and an idle worker's footprint. Each phase logs its operation count and
+# its wall and CPU microseconds; bench/threads.tcl divides.
+import event_loop_linux
+import meter
+import std::abi::bytes
+import std::actor
+import std::actor::remote
+import std::event_loop
+import std::int
+import std::list
+import std::mutable_vector
+import std::str
+import std::thread
+import std::transfer
+import workers
+
+nomethod fn say(text: str, n: int, context ev: std::event_loop::Loop) errors std::event_loop::SchedulerFault:
+    std::event_loop::log(text.concat(std::int::to_string(n)))
+
+nomethod fn timed(name: str, t0: int, c0: int, ops: int, context ev: std::event_loop::Loop, n: event_loop_linux::Native) errors std::event_loop::SchedulerFault:
+    say(name.concat(" ops "), ops)
+    say(name.concat(" wall us "), event_loop_linux::now_us() - t0)
+    say(name.concat(" cpu us "), event_loop_linux::cpu_us() - c0)
+
+# K threads started and joined one after the other, of entry E.
+fn sequential(e: std::thread::Entry[int, int], k: int, context t: std::thread::Threads) -> int errors std::thread::ThreadLimit, std::thread::ThreadStartFailed, std::thread::ThreadFailed:
+    fold i from 0 to k with intermediate s 0:
+        {thread} = std::thread::start(e, i)
+        s + std::thread::join(thread)
+
+# An empty vector of join rights (affine: moved in and out).
+fn rights() -> MutableVector[std::thread::Thread[int]]:
+    std::mutable_vector::from_list([])
+
+# N threads computing fib(K) at once, then joined.
+fn parallel(n: int, k: int, context t: std::thread::Threads) -> int errors std::thread::ThreadLimit, std::thread::ThreadStartFailed, std::thread::ThreadFailed:
+    started = rights()
+    loop i from 0 to n:
+        {thread} = std::thread::start(std::thread::entry(workers::crunch), k)
+        started.push(thread)
+    fold th in started with intermediate s 0:
+        s + std::thread::join(th)
+
+# Receives N notes, reports how many, stops the loop.
+fn collector(inbox: std::actor::Inbox[workers::Note], n: int, done: std::actor::Address[int], context ev: std::event_loop::Loop, resume std::actor::Answer) -> std::actor::Exit:
+    rx = inbox.listen():
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    got = fold i from 0 to n with intermediate got 0:
+        note = rx.receive():
+            on std::actor::Closed:
+                break
+        got + 1
+    done.send(got)
+    std::event_loop::stop():
+        on std::event_loop::SchedulerFault:
+            return std::actor::exit(-2)
+    std::actor::exit(got)
+
+# N calls of SVC one after the other, then the loop stops.
+fn calling(svc: std::actor::remote::Service[int, int], n: int, r: std::actor::remote::Replies[int], done: std::actor::Address[int], context ev: std::event_loop::Loop, resume std::actor::Answer) -> std::actor::Exit:
+    c = std::actor::remote::caller(r):
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    sum = fold i from 0 to n with intermediate sum 0:
+        v = std::actor::remote::call(svc, i, c):
+            on std::actor::remote::CallFailed {reason}:
+                break
+            on std::actor::Closed:
+                break
+        sum + v - i
+    done.send(sum)
+    std::event_loop::stop():
+        on std::event_loop::SchedulerFault:
+            return std::actor::exit(-2)
+    std::actor::exit(sum)
+
+# The service capability a worker sends home, then the loop stops.
+fn homing(inbox: std::actor::Inbox[std::actor::remote::Service[int, int]], out: std::actor::Address[std::actor::remote::Service[int, int]], context ev: std::event_loop::Loop, resume std::actor::Answer) -> std::actor::Exit:
+    rx = inbox.listen():
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    svc = rx.receive():
+        on std::actor::Closed:
+            return std::actor::exit(-2)
+    out.send(svc)
+    std::event_loop::stop():
+        on std::event_loop::SchedulerFault:
+            return std::actor::exit(-3)
+    std::actor::exit(0)
+
+# One-way: K producer VMs sending EACH notes (spam: retrying Full at once,
+# or deliver: waiting for room) through one endpoint of CAPACITY into a
+# mailbox of BOX, timed with the producers' starts.
+fn one_way(name: str, k: int, each: int, capacity: int, box: int, waiting: bool, context ev: std::event_loop::Loop, d: std::event_loop::Driver, ac: std::actor::Actors, t: std::thread::Threads, p: std::thread::Port, db: std::thread::Doorbell, n: event_loop_linux::Native) errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered, std::thread::ThreadLimit, std::thread::ThreadStartFailed, std::thread::ThreadFailed:
+    total = k * each
+    {to, inbox} = std::actor::open[workers::Note](box)
+    {to: done, inbox: done_in} = std::actor::open[int](1)
+    remote = std::actor::remote::export(to, capacity)
+    c = inject context std::event_loop::Loop:
+        coroutine {step, first} = collector(inbox, total, done)
+        std::actor::spawned(step, first)
+    std::actor::start(c)
+    before = std::thread::stats()
+    t0 = event_loop_linux::now_us()
+    c0 = event_loop_linux::cpu_us()
+    started = rights()
+    loop i from 0 to k:
+        plan = workers::Plan {who: i, count: each, to: remote}
+        e = if waiting:
+            std::thread::entry(workers::deliver)
+        else:
+            std::thread::entry(workers::spam)
+        {thread} = std::thread::start(e, plan)
+        started.push(thread)
+    std::event_loop::run()
+    joined = fold th in started with intermediate s 0:
+        s + std::thread::join(th)
+    timed(name, t0, c0, total)
+    after = std::thread::stats()
+    say(name.concat(": Full refusals "), after.full_refusals - before.full_refusals)
+    say(name.concat(": notes received "), std::list::length(std::actor::drain(done_in)) * total)
+    std::actor::remote::close(remote)
+    std::event_loop::take_outcomes()
+
+fn main(context ev: std::event_loop::Loop, d: std::event_loop::Driver, ac: std::actor::Actors, t: std::thread::Threads, p: std::thread::Port, db: std::thread::Doorbell, n: event_loop_linux::Native) -> List[str] errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered, std::thread::ThreadLimit, std::thread::ThreadStartFailed, std::thread::ThreadFailed:
+    std::thread::serve()
+    # 1. a VM made, run and joined, one thread at a time
+    t1 = event_loop_linux::now_us()
+    c1 = event_loop_linux::cpu_us()
+    sequential(std::thread::entry(workers::trivial), 50)
+    timed("thread start, trivial entry, join", t1, c1, 50)
+    # 2. the same with the worker's own event loop, driver and port
+    t2 = event_loop_linux::now_us()
+    c2 = event_loop_linux::cpu_us()
+    sequential(std::thread::entry(workers::with_loop), 50)
+    timed("thread start, own loop and port, join", t2, c2, 50)
+    # 3. fib(27) in 1, 2, 4, 8 VMs at once (no lock on their path)
+    loop k in [1, 2, 4, 8]:
+        t3 = event_loop_linux::now_us()
+        c3 = event_loop_linux::cpu_us()
+        parallel(k, 27)
+        timed("fib(27) in ".concat(std::int::to_string(k)).concat(" VMs at once, per VM"), t3, c3, k)
+    # 4. the codec alone, one VM: a Note encoded, then decoded
+    t4 = event_loop_linux::now_us()
+    c4 = event_loop_linux::cpu_us()
+    data = fold i from 0 to 100000 with intermediate b std::transfer::encode(workers::Note {from: 0, seq: 0}):
+        std::transfer::encode(workers::Note {from: 1, seq: i})
+    timed("encode a Note", t4, c4, 100000)
+    t5 = event_loop_linux::now_us()
+    c5 = event_loop_linux::cpu_us()
+    decoded = fold i from 0 to 100000 with intermediate s 0:
+        x = std::transfer::decode[workers::Note](data):
+            on TransferMalformed:
+                break
+            on TransferVersion:
+                break
+            on TransferTypeMismatch:
+                break
+            on TransferInvalidValue:
+                break
+            on TransferLimit:
+                break
+        s + x.from
+    timed("decode a Note", t5, c5, 100000)
+    # 5. one-way messages, 1, 2, 4, 8 producer VMs
+    one_way("one-way, 1 producer (retrying), per note", 1, 40000, 64, 64, false)
+    one_way("one-way, 2 producers (retrying), per note", 2, 20000, 64, 64, false)
+    one_way("one-way, 4 producers (retrying), per note", 4, 10000, 64, 64, false)
+    one_way("one-way, 8 producers (retrying), per note", 8, 5000, 64, 64, false)
+    one_way("one-way, 2 producers (waiting for room), per note", 2, 20000, 64, 64, true)
+    one_way("saturated: endpoint 4, mailbox 2, 2 waiting producers, per note", 2, 10000, 4, 2, true)
+    # 6. call round trips with a service VM
+    {to: home, inbox: home_in} = std::actor::open[std::actor::remote::Service[int, int]](1)
+    {to: out, inbox: out_in} = std::actor::open[std::actor::remote::Service[int, int]](1)
+    remote_home = std::actor::remote::export(home, 1)
+    {thread: service, id: service_id} = std::thread::start(std::thread::entry(workers::service), workers::Home {home: remote_home})
+    h = inject context std::event_loop::Loop:
+        coroutine {step, first} = homing(home_in, out)
+        std::actor::spawned(step, first)
+    std::actor::start(h)
+    std::event_loop::run()
+    services = std::actor::drain(out_in)
+    {to: done, inbox: done_in} = std::actor::open[int](1)
+    loop svc in services:
+        r = std::actor::remote::replies[int](4)
+        caller = inject context std::event_loop::Loop:
+            coroutine {step, first} = calling(svc, 5000, r, done)
+            std::actor::spawned(step, first)
+        std::actor::start(caller)
+    t6 = event_loop_linux::now_us()
+    c6 = event_loop_linux::cpu_us()
+    std::event_loop::run()
+    timed("call round trip to a service VM", t6, c6, 5000)
+    say("calls answered ", std::list::length(std::actor::drain(done_in)))
+    std::thread::request_stop(service_id)
+    std::thread::join(service)
+    std::event_loop::take_outcomes()
+    # 7. idle workers' footprint: 8 VMs each sleeping in its own loop
+    rss0 = meter::rss_kb()
+    vm0 = meter::vm_kb()
+    # (Their join rights dropped: detached, stopped and awaited by id.)
+    idle = loop i from 0 to 8:
+        {thread, id} = std::thread::start(std::thread::entry(workers::idle), i)
+        id
+    first = idle.at(0):
+        on IndexNotFound:
+            return ["no idle worker"]
+    std::thread::await_end(first, 300000)
+    say("8 idle workers: RSS kB ", meter::rss_kb() - rss0)
+    say("8 idle workers: address space kB ", meter::vm_kb() - vm0)
+    loop id in idle:
+        std::thread::request_stop(id)
+    stopped = fold id in idle with intermediate k 0:
+        if std::thread::await_end(id, -1):
+            k + 1
+        else:
+            k
+    say("idle workers stopped ", stopped)
+    say("decoded check ", decoded)
+    std::event_loop::trace()
+
+with context std::event_loop::create(64)
+with context event_loop_linux::create()
+with context event_loop_linux::native()
+with context std::actor::create()
+with context std::thread::create(16)
+with context std::thread::port()
+main():
+    on std::event_loop::SchedulerFault:
+        ["SchedulerFault"]
+    on std::event_loop::DriverFault:
+        ["DriverFault"]
+    on std::event_loop::LoopReentered:
+        ["LoopReentered"]
+    on std::thread::ThreadLimit:
+        ["ThreadLimit"]
+    on std::thread::ThreadStartFailed {reason}:
+        ["ThreadStartFailed", reason]
+    on std::thread::ThreadFailed {identity, message}:
+        ["ThreadFailed", identity, message]

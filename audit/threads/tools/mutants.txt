@@ -23,7 +23,37 @@
 # complete: a mutant that leaves a call or a loop waiting forever is killed
 # by the run's timeout). Lines starting with # outside an edit are comments.
 #
-# Not here, with the reason:
+# Not here, with the reason (the brief's list of defects, section 21, by
+# layer; each one's defense):
+#   * "Initialize a VM on the parent thread and move it to the worker",
+#     "Destroy a VM before its thread finishes", "Free a transport buffer
+#     before decoding", "Enqueue a sender heap pointer": no small edit
+#     expresses them -- a Vm is not Send (its thread makes it: thread.rs's
+#     run_entry), and a message is a Vec<u8> the transport owns, copied
+#     from the sender's byte storage and handed to the receiver's
+#     constructors (rt_take_bytes); each would need a rewrite the compiler
+#     refuses.
+#   * "Share a context area between workers", "Read program metadata from
+#     the wrong VM": the per-thread runtime harness's ctx-* and program-*
+#     mutants (audit/per-thread-runtime), whose detectors run several Vms.
+#   * "Leak a guard slot after termination": a record is released when its
+#     guard drops and again when its thread ends (records.rs's thread-exit
+#     release), so no single edit of the thread runtime leaks one.
+#   * "Drop a wakeup between empty-check and wait": the event loop's
+#     c-reset-without-recheck and c-wake-not-owed (audit/event-loop), and
+#     the port's own reset-then-recheck (port_notifications_are_never_lost,
+#     doorbell-silent below).
+#   * "Route a response to the wrong worker", "Complete a cancelled request
+#     with a later response": a response is queued on the reply endpoint
+#     its call recorded (Transport::complete), the call matched by slot,
+#     generation and key -- answered-twice and call-generation-unchecked
+#     below. There is no explicit cancellation operation: a call is
+#     cancelled when its caller's reply route closes, which calls_complete_once
+#     covers.
+#   * "Block the worker's whole OS thread while awaiting a broker reply",
+#     "Let an owner waiting for a worker monopolize the service actor":
+#     properties of the composition (call suspends an actor; the owner's
+#     supervise task waits with wait_end), not of one line of code.
 #   * "Join returns before the OS thread exited" (wait_ended without its
 #     JoinHandle join): the window is a few microseconds after the entry's
 #     end, so th-abi-loops sees it only sometimes; a detector that kills it
@@ -78,6 +108,16 @@
     let own = lock(&shared.own).as_ref().and_then(Weak::upgrade);
 >>>>
 
+@@ entry-failure-returned a worker whose entry failed is reported as having returned: join answers instead of failing ThreadFailed
+%% linux-x86_64 linux-aarch64
+!! threads.test:th-lifecycle
+## native/src/runtime/thread.rs
+<<<<
+    let state = if result == NO_VALUE {
+====
+    let state = if result == NO_VALUE && false {
+>>>>
+
 # --- Endpoint identity -----------------------------------------------------
 
 @@ key-unchecked an endpoint accepts a capability whatever its key: a capability nobody was given names it
@@ -125,6 +165,26 @@
     std::actor::remote::remote_out std::actor::remote::remote_in
 ====
     std::actor::remote::remote_out
+>>>>
+
+@@ remote-unconstrained a Remote's message type is not held to Sendable: a capability to send a non-sendable type can be written
+!! threads.test:th-reject-authority
+## stdlib/actor/remote.bot
+<<<<
+opaque struct Remote[M satisfies Sendable]:
+====
+opaque struct Remote[M]:
+>>>>
+
+@@ close-ignored closing a Remote's endpoint does nothing: later sends are still delivered
+!! threads.test:th-endpoints
+## stdlib/actor/remote.bot
+<<<<
+nomethod fn close(r: Remote[M]) -> int:
+    std::thread::rt_endpoint_close(r.id)
+====
+nomethod fn close(r: Remote[M]) -> int:
+    r.id * 0
 >>>>
 
 # --- Backpressure --------------------------------------------------------
@@ -178,6 +238,37 @@
             if to.send(m) != std::actor::Sent::Delivered:
 >>>>
 
+@@ doorbell-silent a notification is queued on a port without ringing its doorbell: a sleeping destination is never woken
+%% linux-x86_64 linux-aarch64
+!! rust-lib:port_notifications_are_never_lost
+## native/src/runtime/thread.rs
+<<<<
+    lock(&port.queue).push_back((kind, a, b));
+    port.doorbell.ring();
+}
+====
+    lock(&port.queue).push_back((kind, a, b));
+}
+>>>>
+
+@@ pump-delivers-twice the pump posts each message it takes twice: a message is delivered twice
+!! threads.test:th-transport
+## stdlib/actor/remote.bot
+<<<<
+            if std::actor::post_waiting(to, m) != std::actor::Sent::Delivered:
+                return -1
+        n + 1
+
+# The pump of R's endpoint
+====
+            std::actor::post_waiting(to, m)
+            if std::actor::post_waiting(to, m) != std::actor::Sent::Delivered:
+                return -1
+        n + 1
+
+# The pump of R's endpoint
+>>>>
+
 # --- Calls ---------------------------------------------------------------
 
 @@ owed-calls-forgotten a VM that ends owing calls leaves them pending: their callers wait forever instead of failing ServiceEnded
@@ -202,6 +293,35 @@
                 }
 ====
                 let _ = (call, m.status);
+>>>>
+
+@@ answered-twice a call already answered accepts another answer: a duplicate or late reply reaches its caller
+%% linux-x86_64 linux-aarch64
+!! rust-lib:calls_complete_once
+## native/src/runtime/thread.rs
+<<<<
+        let Some(c) = s.call.as_mut() else { return T_STALE };
+        if matches!(c.state, CallState::Done) {
+            return T_STALE;
+        }
+====
+        let Some(c) = s.call.as_mut() else { return T_STALE };
+>>>>
+
+@@ call-generation-unchecked an answer is matched to a call by its slot alone: an old call's late answer completes the call that reused the slot
+%% linux-x86_64 linux-aarch64
+!! rust-lib:calls_complete_once
+## native/src/runtime/thread.rs
+<<<<
+        let Some(s) = self.calls.get_mut(slot) else { return T_STALE };
+        if s.generation != generation {
+            return T_STALE;
+        }
+        let Some(c) = s.call.as_mut() else { return T_STALE };
+====
+        let Some(s) = self.calls.get_mut(slot) else { return T_STALE };
+        let _ = generation;
+        let Some(c) = s.call.as_mut() else { return T_STALE };
 >>>>
 
 # --- The event-loop integration ABI version 2 ---------------------------
@@ -268,13 +388,24 @@
 ====
 >>>>
 
+@@ entry-obligations-unchecked a thread entry's calls are not held to the contexts it installed: a worker reaches a context it never installed
+!! threads.test:th-reject-authority
+## hir/contexts.tcl
+<<<<
+                set selection [hir::CheckingCall $c {Obligations hir $c $targets $entryInstalled $required $reasons}]
+====
+                set selection {}
+>>>>
+
 @@ selection-conflict-allowed two thread entries selecting different implementations of a context trait are not diagnosed
 !! threads.test:th-reject-conflict
 ## hir/contexts.tcl
 <<<<
                     if {[dict exists $selected $trait] && [dict get $selected $trait] ne $w} {
+                        set first [dict get $selectedAt $trait]
 ====
                     if {0 && [dict exists $selected $trait] && [dict get $selected $trait] ne $w} {
+                        set first [dict get $selectedAt $trait]
 >>>>
 
 @@ install-anywhere-in-entry a context installed anywhere in a thread entry's body (a branch) is accepted as one of its installations

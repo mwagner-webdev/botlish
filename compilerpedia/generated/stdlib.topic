@@ -3910,90 +3910,6 @@ std::actor::remote::Caller.
 An actor's reply route: its reply endpoint, and what it receives the
 responses through.
 
-@topic stdlib.std::actor::remote::remote_out
-title: std::actor::remote::remote_out -- Function (nomethod)
-summary: The function (nomethod) std::actor::remote::remote_out of the standard module std::actor::remote.
-index: stdlib
-symbol: std::actor::remote::remote_out
-related: stdlib.module.std::actor::remote
-
-== DECLARATION
-    nomethod fn remote_out(r: Remote[M]) -> Identity:
-
-== MODULE
-stdlib/actor/remote.bot: import std::actor::remote, then write
-std::actor::remote::remote_out.
-
-@topic stdlib.std::actor::remote::remote_in
-title: std::actor::remote::remote_in -- Function (nomethod)
-summary: The function (nomethod) std::actor::remote::remote_in of the standard module std::actor::remote.
-index: stdlib
-symbol: std::actor::remote::remote_in
-related: stdlib.module.std::actor::remote
-
-== DECLARATION
-    nomethod fn remote_in(i: Identity) -> Remote[M]:
-
-== MODULE
-stdlib/actor/remote.bot: import std::actor::remote, then write
-std::actor::remote::remote_in.
-
-@topic stdlib.std::actor::remote::service_out
-title: std::actor::remote::service_out -- Function (nomethod)
-summary: The function (nomethod) std::actor::remote::service_out of the standard module std::actor::remote.
-index: stdlib
-symbol: std::actor::remote::service_out
-related: stdlib.module.std::actor::remote
-
-== DECLARATION
-    nomethod fn service_out(s: Service[Q, R]) -> Identity:
-
-== MODULE
-stdlib/actor/remote.bot: import std::actor::remote, then write
-std::actor::remote::service_out.
-
-@topic stdlib.std::actor::remote::service_in
-title: std::actor::remote::service_in -- Function (nomethod)
-summary: The function (nomethod) std::actor::remote::service_in of the standard module std::actor::remote.
-index: stdlib
-symbol: std::actor::remote::service_in
-related: stdlib.module.std::actor::remote
-
-== DECLARATION
-    nomethod fn service_in(i: Identity) -> Service[Q, R]:
-
-== MODULE
-stdlib/actor/remote.bot: import std::actor::remote, then write
-std::actor::remote::service_in.
-
-@topic stdlib.std::actor::remote::reply_out
-title: std::actor::remote::reply_out -- Function (nomethod)
-summary: The function (nomethod) std::actor::remote::reply_out of the standard module std::actor::remote.
-index: stdlib
-symbol: std::actor::remote::reply_out
-related: stdlib.module.std::actor::remote
-
-== DECLARATION
-    nomethod fn reply_out(r: Reply[R]) -> Identity:
-
-== MODULE
-stdlib/actor/remote.bot: import std::actor::remote, then write
-std::actor::remote::reply_out.
-
-@topic stdlib.std::actor::remote::reply_in
-title: std::actor::remote::reply_in -- Function (nomethod)
-summary: The function (nomethod) std::actor::remote::reply_in of the standard module std::actor::remote.
-index: stdlib
-symbol: std::actor::remote::reply_in
-related: stdlib.module.std::actor::remote
-
-== DECLARATION
-    nomethod fn reply_in(i: Identity) -> Reply[R]:
-
-== MODULE
-stdlib/actor/remote.bot: import std::actor::remote, then write
-std::actor::remote::reply_in.
-
 @topic stdlib.std::actor::remote::export
 title: std::actor::remote::export -- Function (nomethod) of module std::actor::remote
 summary: Export TO's mailbox
@@ -4123,6 +4039,24 @@ std::actor::remote::close_service.
 == DESCRIPTION
 Close S's endpoint (this VM's): later calls fail Closed, and the calls it
 held in transit fail Undelivered -- how many.
+
+@topic stdlib.std::actor::remote::in_transit_calls
+title: std::actor::remote::in_transit_calls -- Function (nomethod)
+summary: Requests queued on S's endpoint in transit, not yet taken by its pump (this VM's service
+index: stdlib
+symbol: std::actor::remote::in_transit_calls
+related: stdlib.module.std::actor::remote
+
+== DECLARATION
+    nomethod fn in_transit_calls(s: Service[Q, R]) -> int:
+
+== MODULE
+stdlib/actor/remote.bot: import std::actor::remote, then write
+std::actor::remote::in_transit_calls.
+
+== DESCRIPTION
+Requests queued on S's endpoint in transit, not yet taken by its pump (this
+VM's service; 0 otherwise).
 
 @topic stdlib.std::actor::remote::reply
 title: std::actor::remote::reply -- Function (nomethod) of module std::actor::remote
@@ -4292,16 +4226,11 @@ stdlib/actor/remote.bot (import std::actor::remote).
     std::actor::remote::deliver    function (nomethod) -- Send M through TO...
     std::actor::remote::export     function (nomethod) -- Export TO's mailbox
     std::actor::remote::in_transit function (nomethod) -- Messages queued o...
-    std::actor::remote::remote_in  function (nomethod)
-    std::actor::remote::remote_out function (nomethod)
+    std::actor::remote::in_transit_calls function (nomethod) -- Requests qu...
     std::actor::remote::replies    function (nomethod) -- Open the reply ro...
     std::actor::remote::reply      function (nomethod) -- Answer the call R...
-    std::actor::remote::reply_in   function (nomethod)
-    std::actor::remote::reply_out  function (nomethod)
     std::actor::remote::send       function (nomethod) -- Send M through TO...
     std::actor::remote::serve_calls function (nomethod) -- Export TO's mail...
-    std::actor::remote::service_in function (nomethod)
-    std::actor::remote::service_out function (nomethod)
 
 Each member is a topic: -help NAME (e.g. -help std::actor::remote::Call).
 
