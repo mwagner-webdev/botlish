@@ -120,7 +120,7 @@ fn to_int(register: Register64) -> Register64Word:
 # provided (raw Linux results are signed words).
 #
 # One function per ABI type, because Botlish has no overloading and this
-# milestone adds none: the ABI type a caller has selects the encoder by name
+# module adds none: the ABI type a caller has selects the encoder by name
 # (from_i32, from_usize) exactly as the creator's name selects the domain
 # (std::abi::i32, std::abi::usize). Each is an ordinary, nominally typed function --
 # from_usize does not accept a std::abi::U64 -- and none needs a check: the

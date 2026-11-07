@@ -46,8 +46,8 @@
 # std::io::WriteFailed; no count, handle or error code escapes. The text is
 # written as its UTF-8 bytes, exactly: no UTF-16 conversion, no console
 # code page applied, no newline translation (a redirected output receives
-# the bytes; a console shows them through its output code page, which
-# WINDOWS-X86-64-MILESTONE-2.md's "Text and encoding" describes).
+# the bytes; a console shows them through its output code page:
+# WINDOWS-X86-64-MILESTONE-2.md, "Text and encoding").
 #
 # Not here (deliberately): input, files, the error code beyond
 # std::io::WriteFailed (the raw std::windows::write_file and std::windows::io::write keep

@@ -50,15 +50,15 @@
 # struct field) and close it; it cannot be copied (USE-AFTER-MOVE), and a
 # closed File no longer exists. Its affinity comes from its one other field,
 # a std::io::fs::Owner, an affine token that owns nothing and costs one word:
-# Botlish has no declaration that makes a struct affine (the report, "Affine
-# ownership").
+# Botlish has no declaration that makes a struct affine
+# (WINDOWS-X86-64-MILESTONE-7.md, "Affine ownership").
 # Operations that use a File take it and give it back: `read` returns a
 # Read {file, data}, `write` a Written {file, count}, write_all the File.
 #
 # Ownership is not cleanup. Nothing closes a File for its owner: a File
 # dropped unclosed, by an owner that returns, fails or ends without closing
 # it, leaks its descriptor until the process ends (the language releases an
-# affine value without running code: AFFINE-VALUES.md). Close every File you
+# affine value without running code; AFFINE-VALUES.md). Close every File you
 # open; the whole-file operations below do it on every path. One rule
 # closes for you: a read or write that FAILS closes its File (close's own
 # result ignored) and fails with the operation's error, so a failed

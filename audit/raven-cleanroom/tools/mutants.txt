@@ -113,13 +113,13 @@
 # ---------------------------------------------------------------------------
 # The package (packages/raven)
 
-@@ metadata-version-reused the release keeps the version 0.3.1 of the release it replaces: a change of contents under an existing release's version
+@@ metadata-version-reused the release keeps the version 0.3.2 of the release it replaces: a change of contents under an existing release's version
 %% package-workloads.test:pw-raven-desktop-release
 ## packages/raven/botlish.json
 <<<<
-  "version": "0.3.2",
+  "version": "0.4.0",
 ====
-  "version": "0.3.1",
+  "version": "0.3.2",
 >>>>
 
 @@ metadata-without-x11 the recipe no longer declares the system libX11 the bundled libraven loads: the pack refuses the release (an unresolved loader dependency)

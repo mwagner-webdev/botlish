@@ -8,7 +8,6 @@ index: rules errors
 alias: if as an argument; if arguments; if as an operand; inline if; one-line if; ternary operator; conditional expression inside a call
 keywords: if, elif, else, value, operand, argument, concat, ternary, whole right side
 related: concept.if-expressions rule.loop-placement rule.indentation rule.control-placement principle.bind-before-use principle.small-functions error.surface-syntax
-docs: README.md ELIF.md METHOD-SUGAR.md DIAGNOSTIC-RECOVERY.md
 match: SURFACE SYNTAX | an "if" value must be the whole right side*
 match: SURFACE SYNTAX | expected end of line, found "if"*
 
@@ -116,7 +115,6 @@ index: rules errors
 alias: else if; elseif; elsif
 keywords: else, if, elif, chain, branch
 related: concept.if-expressions rule.if-placement rule.indentation task.first-program
-docs: ELIF.md
 match: SURFACE SYNTAX | expected ":" after "else", found "if"*
 
 == THE RULE
@@ -136,8 +134,8 @@ optional `else`:
 == WHY
 One spelling of each clause keeps the chain flat: every condition sits at
 the same indentation, and `elif` is exactly an `else` holding one nested
-`if` (ELIF.md), with no dangling-else question about which `if` an `else`
-belongs to.
+`if`, with no dangling-else question about which `if` an `else` belongs
+to.
 
 == WHAT IS REPORTED
 SURFACE SYNTAX, at the `if` after `else`:
@@ -184,7 +182,6 @@ index: rules errors
 alias: loop arguments; loop as an argument; loop as an operand; loop inside a call; collecting loop as argument
 keywords: loop, in, from, to, through, collecting, argument, operand, list of values
 related: concept.loops rule.if-placement rule.indentation rule.control-placement principle.bind-before-use error.surface-syntax
-docs: README.md COLLECTING-LOOPS.md
 match: SURFACE SYNTAX | expected an expression, found "loop"*
 
 == THE RULE
@@ -261,7 +258,6 @@ index: rules errors
 alias: forward reference; is declared later; use before definition; call a function defined below
 keywords: forward, later, declared later, hoisting, order, callee first, mutual recursion, unbound
 related: concept.definition-order concept.mutual-recursion concept.bindings rule.immutable-bindings rule.module-bindings principle.bind-before-use error.unbound
-docs: STRICT-REFERENCE-DETERMINISM.md MUTUAL-RECURSION.md MODULE-BINDINGS.md
 match: CORE SEMANTIC UNBOUND | *declared later*
 
 == THE RULE
@@ -282,19 +278,17 @@ establishes `f` before its own body. A value is not visible in its own
 initializer (`x = x + 1` with no earlier `x` is a forward reference).
 
 Two functions that call each other cannot be written today: `mutual:`
-groups are designed (MUTUAL-RECURSION.md) but not implemented, and
-`mutual:` is a syntax error.
+groups are designed but not implemented, and `mutual:` is a syntax error.
 
 == WHY
 Resolution walks the source once, in evaluation order, over scopes that
 start empty: a reference's target, identity and contract are fixed by the
-source before it (STRICT-REFERENCE-DETERMINISM.md). Every analysis then
-sees a callee completely before its first caller. When forward
-references were allowed, later definitions had to repair what earlier
-stages could not know: the caller-before-callee order of the same
-program produced about a third more specialized instances and twice the
-run-time guards. "The desired fix is not a smarter hoist; it is that
-later bindings do not exist."
+source before it. Every analysis then sees a callee completely before its
+first caller. When forward references were allowed, later definitions had
+to repair what earlier stages could not know: the caller-before-callee
+order of the same program produced about a third more specialized
+instances and twice the run-time guards. "The desired fix is not a smarter
+hoist; it is that later bindings do not exist."
 
 == WHAT IS REPORTED
 CORE SEMANTIC UNBOUND, at the reference:
@@ -355,7 +349,6 @@ index: rules errors
 alias: on A or B; one handler for two errors; handler names exactly one error; shared error handler
 keywords: on, handler, handled call, several errors, comma, enum payload
 related: concept.errors concept.error-payloads concept.enums rule.unhandled-errors capability.multi-error-handler task.handle-several-errors error.surface-syntax
-docs: ERROR-PAYLOADS.md EXPLICIT-ERROR-COMPLETIONS.md ENUMS.md
 match: SURFACE SYNTAX | a handler names exactly one error*
 
 == THE RULE
@@ -377,13 +370,13 @@ the same error is DUPLICATE. Errors the handlers do not name propagate,
 and must be admitted by the enclosing function (rule.unhandled-errors).
 
 == WHY
-`on` selects by the error's identity only (ERROR-PAYLOADS.md). A handler's
-payload binding has exactly the payload type of the one error it names --
-the anonymous struct of that error's declared fields -- and two errors are
-unrelated identities even when their fields are identical, so a handler
-for two errors would have no single payload type. One name per handler
-keeps selection nominal: which handler runs is visible from its name, with
-no matching order or precedence to reason about.
+`on` selects by the error's identity only. A handler's payload binding has
+exactly the payload type of the one error it names -- the anonymous struct
+of that error's declared fields -- and two errors are unrelated identities
+even when their fields are identical, so a handler for two errors would
+have no single payload type. One name per handler keeps selection nominal:
+which handler runs is visible from its name, with no matching order or
+precedence to reason about.
 
 == WHAT IS REPORTED
 SURFACE SYNTAX, at the comma:
@@ -422,7 +415,7 @@ Write one handler per error; when the bodies are long, call one helper
 function from each. When callers usually treat the failures alike, declare
 one error whose payload says which failure it was, as an enum field: a
 caller that does not care writes one `on Invalid:`, and one that does
-reads the field (ERROR-PAYLOADS.md, concept.enums).
+reads the field (concept.enums).
 
 @example accept
 error Empty
@@ -485,7 +478,6 @@ index: rules
 alias: errors must be handled; admit an error; propagate an error
 keywords: errors clause, handler, on, fail, propagate, declared error, completion, IndexNotFound
 related: concept.errors concept.error-payloads concept.known-errors proof.completions proof.list-bounds rule.known-error rule.one-handler-per-error principle.errors-over-sentinels task.handle-several-errors error.unhandled-error
-docs: EXPLICIT-ERROR-COMPLETIONS.md STATIC-COMPLETION-PROOFS.md ERROR-PAYLOADS.md
 
 == THE RULE
 A function's `errors` clause (`fn f(x) -> T errors E1, E2:`) declares the
@@ -509,12 +501,11 @@ produce is accepted and never runs.
 
 == WHY
 "Known failure -> compile-time rejection; unknown failure -> declared
-runtime error completion; never an undeclared one"
-(EXPLICIT-ERROR-COMPLETIONS.md). An error is a completion of the call, not
-a value: there is no Result to unwrap and nothing that could drop a
-failure silently. A function's `errors` clause is part of its contract,
-like its parameter and result types, so every caller sees what can go
-wrong and decides where each failure is answered.
+runtime error completion; never an undeclared one". An error is a
+completion of the call, not a value: there is no Result to unwrap and
+nothing that could drop a failure silently. A function's `errors` clause
+is part of its contract, like its parameter and result types, so every
+caller sees what can go wrong and decides where each failure is answered.
 
 == WHAT IS REPORTED
 CORE SEMANTIC UNHANDLED-ERROR, at the call, naming every error of the call
@@ -581,7 +572,6 @@ index: rules
 alias: a handler does not make a statically known failure legal; call that always fails
 keywords: known error, always fails, handler, literal argument, statically decided, negative test
 related: concept.known-errors concept.negative-tests concept.static-compile proof.completions rule.unhandled-errors stdlib.std::list::get error.known-error
-docs: STATIC-COMPLETION-PROOFS.md EXPLICIT-ERROR-COMPLETIONS.md
 
 == THE RULE
 For every call of an exactly known function, the compiler computes from
@@ -599,9 +589,9 @@ of a function does not take its callers' arguments into account.
 
 == WHY
 "A handler is not a way to encode an `if` for a statically known
-condition" (STATIC-COMPLETION-PROOFS.md). When the compiler knows that a
-call fails, the failure is a defect it can report now; writing the
-outcome directly says the same thing without a call that cannot succeed.
+condition". When the compiler knows that a call fails, the failure is a
+defect it can report now; writing the outcome directly says the same thing
+without a call that cannot succeed.
 
 == WHAT IS REPORTED
 CORE SEMANTIC KNOWN-ERROR, at the call:
@@ -660,7 +650,6 @@ index: rules
 alias: method call needs import; method not found on str; why does s.concat need import std::str
 keywords: method, import, visible, receiver, concat, str, list, namespace, MISSING-IMPORT
 related: concept.method-sugar concept.imports rule.method-resolution rule.imports-not-transitive principle.explicit-dependencies stdlib.module.std::str stdlib.std::str::concat error.missing-import
-docs: METHOD-SUGAR.md IMPORTS.md DIAGNOSTIC-RECOVERY.md
 
 == THE RULE
 `receiver.f(a, b)` is another spelling of the ordinary call
@@ -681,12 +670,12 @@ still an unbound name; `s.concat("xy")` and `std::str::concat(s, "xy")` are
 the two spellings.
 
 == WHY
-Method syntax is parasitic on ordinary function calls (METHOD-SUGAR.md):
-no method declaration, no method table, no search by receiver type. It
-asks "is there a function f visible here, and would f(x, ...) be valid?".
-Visibility comes from the file's own header, the one place a file
-declares what it depends on (IMPORTS.md), so the functions a file can
-reach -- with either spelling -- are those its imports name.
+Method syntax is parasitic on ordinary function calls: no method
+declaration, no method table, no search by receiver type. It asks "is
+there a function f visible here, and would f(x, ...) be valid?".
+Visibility comes from the file's own header, the one place a file declares
+what it depends on, so the functions a file can reach -- with either
+spelling -- are those its imports name.
 
 == WHAT IS REPORTED
 CORE SEMANTIC MISSING-IMPORT, at the method name, when an unimported
@@ -698,9 +687,8 @@ namespace has a function the call would apply:
 
 The qualified spelling reports SURFACE MODULE MISSING-IMPORT. When no
 known namespace has such a function, the call is reported as the
-projection of a field (NOT-A-STRUCT or UNKNOWN-FIELD). (Before
-DIAGNOSTIC-RECOVERY.md, section 1, a failed method call was typed `any`
-and surfaced as a TYPE error far from the call.)
+projection of a field (NOT-A-STRUCT or UNKNOWN-FIELD), at the call, never
+as a type error far from it.
 
 @example reject
 s = "ab"
@@ -729,7 +717,6 @@ index: rules
 alias: method candidates; which function does x.f() call; method overload
 keywords: method, candidate, ambiguous, no applicable, field, callable field, precedence, overload, nomethod
 related: concept.method-sugar concept.nomethod rule.method-requires-import rule.typed-parameters rule.sfiae error.ambiguous-method-call error.no-applicable-method error.nomethod-call
-docs: METHOD-SUGAR.md WARNINGS-METHOD-ELIGIBLE.md
 
 == THE RULE
 The candidates of `x.f(args)` are the distinct functions named `f` visible
@@ -828,7 +815,6 @@ index: rules
 alias: SFIAE; substitution failure is an error; obligations do not select; SFINAE; does a missing context change which method is called
 keywords: SFIAE, SFINAE, obligation, applicability, method, candidate, context, context trait, installed context, unhandled error, fallback, overload
 related: rule.method-resolution concept.method-sugar concept.contexts concept.context-traits error.ambiguous-method-call error.missing-context error.ambiguous-context-implementation error.unhandled-error
-docs: LANGUAGE-DESIGN-PRINCIPLES.md SFIAE-MILESTONE-1.md METHOD-SUGAR.md CONTEXTS.md CONTEXT-TRAITS.md
 
 == THE RULE
 Two questions are answered apart. Applicability -- which operation does
@@ -953,7 +939,6 @@ index: rules errors
 alias: rebind a variable; reassign a name; duplicate binding; field assignment; only a name can be bound
 keywords: binding, immutable, assignment, shadowing, duplicate, scope, accumulate, +=
 related: concept.bindings concept.values rule.forward-references capability.assignment principle.immutability concept.mutable-vector error.duplicate task.accumulate task.first-program
-docs: README.md STRUCT-DESTRUCTURING.md
 match: SURFACE SYNTAX | only a name can be bound with "="*
 match: SURFACE SYNTAX | expected an expression, found "="*
 match: CORE SEMANTIC DUPLICATE | duplicate binding "*" in the same lexical scope*
@@ -1069,7 +1054,6 @@ index: rules
 alias: type constructor call; type predicate; call a type as a function; convert to a domain type
 keywords: type, constructor, predicate, converter, domain, refinement, Small?, unbound
 related: concept.integer-domains concept.refinements concept.structs rule.struct-construction rule.typed-parameters proof.ranges proof.refinements error.unbound
-docs: ELIMINATE-AUTOMATIC-TYPE-PREDICATES.md EXPLICIT-ERROR-COMPLETIONS.md REFINEMENT-VALUES.md
 
 == THE RULE
 No type declaration -- `type`, `refined type`, `struct`, `enum`,
@@ -1091,14 +1075,13 @@ A refinement is entered through its owner's `proves` predicates and
 validators (concept.refinements).
 
 == WHY
-Automatic type predicates (`Small?`) and constructor calls (`Byte(x)`) once
-existed and were removed (ELIMINATE-AUTOMATIC-TYPE-PREDICATES.md): a
-constructor raised an undeclared run-time error, and a predicate was
-lowered differently by every backend and could not be compiled natively
-in exactly the case where a run-time test is worth anything. A converter
-is an ordinary function whose failure is a declared error in its `errors`
-clause, and a comparison is an ordinary condition: both are checked like
-any other code.
+Automatic type predicates (`Small?`) and constructor calls (`Byte(x)`)
+once existed and were removed: a constructor raised an undeclared run-time
+error, and a predicate was lowered differently by every backend and could
+not be compiled natively in exactly the case where a run-time test is
+worth anything. A converter is an ordinary function whose failure is a
+declared error in its `errors` clause, and a comparison is an ordinary
+condition: both are checked like any other code.
 
 == WHAT IS REPORTED
 CORE SEMANTIC UNBOUND, at the name: `unbound name "Small"` (or
@@ -1143,7 +1126,6 @@ index: rules
 alias: missing field in construction; struct default values; construct a struct; positional struct construction
 keywords: struct, construction, field, default, missing field, unknown field, duplicate field, shorthand
 related: concept.structs concept.opaque-structs concept.destructuring rule.no-callable-types rule.opaque-authority rule.immutable-bindings error.missing-field error.unknown-field error.duplicate-field
-docs: STRUCTS.md OPAQUE-STRUCTS.md
 
 == THE RULE
 `Point {x: 1, y: 2}` constructs a value of the declared struct `Point`:
@@ -1165,10 +1147,10 @@ construction that names every field.
 
 == WHY
 A struct is a fixed set of named fields whose shape the compiler knows, so
-a construction is complete, exact and statically checked (STRUCTS.md): one
-construction determines every field, and a projection can never fail.
-With no defaults, adding a field to a declaration turns every construction
-that lacks it into an error instead of silently filling it in.
+a construction is complete, exact and statically checked: one construction
+determines every field, and a projection can never fail. With no defaults,
+adding a field to a declaration turns every construction that lacks it
+into an error instead of silently filling it in.
 
 == WHAT IS REPORTED
 CORE SEMANTIC MISSING-FIELD, at the construction:
@@ -1215,7 +1197,6 @@ index: rules
 alias: import type; import type of a struct; short name for a module's type; import type NS::T
 keywords: import type, short name, struct, enum, type declaration, refinement, trait, NOT-A-TYPE
 related: concept.imports concept.enums concept.structs concept.integer-domains rule.imports-not-transitive capability.struct-type-import error.not-a-type error.type-import-collision
-docs: IMPORTS.md ENUMS.md STRUCTS.md
 
 == THE RULE
 `import type NS::T` binds the short name `T`, in this file's type
@@ -1235,11 +1216,11 @@ spelling, `NS::Struct`, in annotations and constructions alike, after
 built-in type or another imported short name (TYPE-IMPORT-COLLISION).
 
 == WHY
-The type import is deliberately narrow (IMPORTS.md): it names one type's
-last component for type positions only, it is not an alias (`T` and
-`NS::T` are one canonical type), and it authorizes nothing else of NS.
-Structs keep their qualified spelling after `import NS` (IMPORTS.md), and
-so do layouts; capability.struct-type-import has the alternatives.
+The type import is deliberately narrow: it names one type's last component
+for type positions only, it is not an alias (`T` and `NS::T` are one
+canonical type), and it authorizes nothing else of NS. Structs keep their
+qualified spelling after `import NS`, and so do layouts;
+capability.struct-type-import has the alternatives.
 
 == WHAT IS REPORTED
 SURFACE MODULE NOT-A-TYPE, at the imported name:
@@ -1294,7 +1275,6 @@ index: rules
 alias: unpack a list; tuple unpacking; positional destructuring
 keywords: destructuring, list, tuple, pair, struct, named fields, positional
 related: concept.destructuring concept.lists concept.structs principle.name-the-parts warning.fixed-arity-list-return error.list-destructuring
-docs: STRUCT-DESTRUCTURING.md MULTI-VALUE-RESULTS.md
 
 == THE RULE
 `[a, b] = value`, and a List pattern nested in a struct pattern (`{pair: [a,
@@ -1307,11 +1287,10 @@ proof.list-bounds) or by iterating it.
 
 == WHY
 "Destructuring is not pattern matching. It is one struct value, selected
-fields read by name" (STRUCT-DESTRUCTURING.md). Positions carry no meaning
-a reader can check, while field names do; a struct's fields are known
-statically, so struct destructuring cannot fail, while a positional
-binding would depend on the List's length. This is a language policy,
-not a missing feature.
+fields read by name". Positions carry no meaning a reader can check, while
+field names do; a struct's fields are known statically, so struct
+destructuring cannot fail, while a positional binding would depend on the
+List's length. This is a language policy, not a missing feature.
 
 == WHAT IS REPORTED
 SURFACE SYNTAX, with the parser code LIST-DESTRUCTURING:
@@ -1353,7 +1332,6 @@ index: rules
 alias: compare two values; structural equality; compare functions; compare structs
 keywords: ==, !=, equality, compare, struct, list, enum, function, MutableVector, MutableArray, hash, ordering
 related: concept.values concept.structs concept.enums concept.affine concept.mutable-vector concept.mutable-array rule.comparison-chains error.equality error.affine-equality-unsupported
-docs: STRUCTS.md ENUMS.md OPAQUE-STRUCTS.md MUTABLE-VECTOR.md MUTABLE-ARRAY.md AFFINE-VALUES.md
 
 == THE RULE
 `a == b` and `a != b` compare values, never identities:
@@ -1384,11 +1362,11 @@ operand is a TYPE error, which today is raised when the comparison runs
 
 == WHY
 Equality of functions would require identity semantics, which are out of
-scope (core/value.tcl). A MutableVector's or MutableArray's header
-is the identity of one changing value, and "a header's identity is never a
-value's", so none was defined for them. An affine value owns something
-(a suspended coroutine); comparing or hashing it would observe the
-identity of what it owns (AFFINE-VALUES.md).
+scope (core/value.tcl). A MutableVector's or MutableArray's header is the
+identity of one changing value, and "a header's identity is never a
+value's", so none was defined for them. An affine value owns something (a
+suspended coroutine); comparing or hashing it would observe the identity
+of what it owns.
 
 == WHAT IS REPORTED
 For an affine operand, CORE SEMANTIC AFFINE-EQUALITY-UNSUPPORTED at the
@@ -1441,7 +1419,6 @@ index: rules errors
 alias: chained comparison; a < b < c; range check between two bounds
 keywords: comparison, chain, <, <=, ==, between, and, precedence
 related: concept.booleans concept.integers rule.equality concept.syntax error.surface-syntax
-docs: README.md
 match: SURFACE SYNTAX | comparison chaining is not supported*
 
 == THE RULE
@@ -1494,7 +1471,6 @@ index: rules errors
 alias: tab used for indentation; indentation error; inconsistent dedent; indented block; tabs vs spaces
 keywords: indentation, indent, dedent, tab, spaces, block, colon, layout, brackets
 related: concept.syntax rule.if-placement rule.loop-placement rule.names error.surface-syntax
-docs: README.md DIAGNOSTIC-RECOVERY.md
 match: SURFACE SYNTAX | tab used for indentation*
 match: SURFACE SYNTAX | inconsistent dedent*
 match: SURFACE SYNTAX | unexpected indentation*
@@ -1633,7 +1609,6 @@ index: rules errors
 alias: name spelling; identifier syntax; question mark in a name; hyphen in a name; dash in a function name
 keywords: name, identifier, ?, predicate, hyphen, dash, underscore, keyword, snake_case, unicode
 related: concept.syntax principle.predicate-naming warning.proves-naming rule.if-placement rule.indentation error.surface-syntax error.unbound
-docs: README.md R2A2-TRAILING-QUESTION-IDENTIFIERS.md
 match: SURFACE SYNTAX | *already ends in "?"*
 match: SURFACE SYNTAX | unexpected character "?"*
 match: SURFACE SYNTAX | expected "(" after the function name, found "-"*
@@ -1657,8 +1632,7 @@ A name is `[A-Za-z_][A-Za-z0-9_]*`, optionally followed by one `?`:
 
 == WHY
 `?` at the end of a name is the predicate idiom (`emailish?`), kept
-unambiguous by allowing it nowhere else
-(R2A2-TRAILING-QUESTION-IDENTIFIERS.md); there is no `?:` operator for it
+unambiguous by allowing it nowhere else; there is no `?:` operator for it
 to be confused with. `-` stays an operator, so `a-b` means subtraction
 whatever the spacing; one consequence is that the few internal natives
 with `-` in their names cannot be named from source at all.
@@ -1731,7 +1705,6 @@ index: rules
 alias: opaque struct field access; construct an opaque struct; representation ownership
 keywords: opaque, struct, module, construction, projection, destructuring, authority, Bytes
 related: concept.opaque-structs concept.modules rule.struct-construction concept.private stdlib.std::abi::bytes::from_list error.opaque-construction error.opaque-representation
-docs: OPAQUE-STRUCTS.md
 
 == THE RULE
 `opaque struct Token:` declares an ordinary struct whose representation
@@ -1746,11 +1719,11 @@ belongs to the module that declares it (an entry program owns its own):
     module, and no struct that holds the value grants it.
 
 == WHY
-An opaque struct is representation ownership, not object-oriented privacy
-(OPAQUE-STRUCTS.md): the module that owns `std::abi::bytes::Bytes` keeps the
-invariants of its storage, because nothing else can manufacture or take
-apart a value. The check is static authority, never a run-time test, and
-the compiler still sees the fields when it optimizes.
+An opaque struct is representation ownership, not object-oriented privacy:
+the module that owns `std::abi::bytes::Bytes` keeps the invariants of its
+storage, because nothing else can manufacture or take apart a value. The
+check is static authority, never a run-time test, and the compiler still
+sees the fields when it optimizes.
 
 == WHAT IS REPORTED
 CORE SEMANTIC OPAQUE-REPRESENTATION for a field read or a destructuring
@@ -1796,7 +1769,6 @@ index: rules
 alias: where to write with context; install a context; context installed too late
 keywords: context, with context, install, entry program, top level, requirement, order, MISSING-CONTEXT
 related: concept.contexts concept.context-traits proof.contexts rule.module-bindings error.missing-context error.duplicate-context error.context-installation-unsupported
-docs: CONTEXTS.md CONTEXT-TRAITS.md
 
 == THE RULE
 `with context EXPR` installs the value of EXPR, whose type is exactly one
@@ -1817,12 +1789,12 @@ requires a context cannot become a value, an alias aside
 (CONTEXT-FUNCTION-VALUE).
 
 == WHY
-A context is a static dependency of the execution environment
-(CONTEXTS.md): the compiler proves, statement by statement, that each call
-runs after its contexts exist, and names the call chain that needs one
-when it does not. With one installation per type at the top level, each
-context has one statically known value, which native code reads from one
-fixed slot: no hidden argument, no lookup.
+A context is a static dependency of the execution environment: the
+compiler proves, statement by statement, that each call runs after its
+contexts exist, and names the call chain that needs one when it does not.
+With one installation per type at the top level, each context has one
+statically known value, which native code reads from one fixed slot: no
+hidden argument, no lookup.
 
 == WHAT IS REPORTED
 CORE SEMANTIC MISSING-CONTEXT, at the call, with the chain that needs the
@@ -1883,7 +1855,6 @@ index: rules
 alias: moved coroutine handle; copy a coroutine handle; affine ownership rule
 keywords: affine, move, owner, coroutine, handle, resume, release, USE-AFTER-MOVE
 related: concept.affine concept.coroutines proof.ownership rule.equality error.use-after-move error.affine-capture-unsupported
-docs: AFFINE-VALUES.md COROUTINES.md
 
 == THE RULE
 An affine value -- a coroutine handle, an `std::ffi::c` pointer, and every
@@ -1903,8 +1874,7 @@ struct, anonymous struct or List that owns one -- has one usable owner:
 An affine value owns something that must be released exactly once -- a
 suspended coroutine's stack and frames. A second owner could resume or
 release the same execution, so ownership is decided statically: there is
-no reference count, moved flag or ownership object at run time
-(AFFINE-VALUES.md).
+no reference count, moved flag or ownership object at run time.
 
 == WHAT IS REPORTED
 CORE SEMANTIC USE-AFTER-MOVE, at the use, with where it moved:
@@ -1975,7 +1945,6 @@ index: rules errors
 alias: break inside a nested function; break with a value; return a value from a loop
 keywords: break, continue, return, loop, function, top level, nested function, value
 related: concept.loops concept.functions rule.if-placement rule.loop-placement error.break-outside-loop error.continue-outside-loop error.return-outside-callable
-docs: README.md PAYLOAD-FREE-BREAK.md COLLECTING-LOOPS.md
 match: SURFACE SYNTAX | "break" does not take a value*
 
 == THE RULE
@@ -1990,12 +1959,12 @@ match: SURFACE SYNTAX | "break" does not take a value*
     in a collecting loop contributes nothing to the List.
 
 == WHY
-A nested function is a value that may run later, after the loop around
-its definition has finished, so a `break` inside it would have no loop to
+A nested function is a value that may run later, after the loop around its
+definition has finished, so a `break` inside it would have no loop to
 leave (README section 5, "Control placement"). `break` answers one
-question, whether the loop iterates again, never what the loop's value is
-(PAYLOAD-FREE-BREAK.md): a loop's value is its collected List, and a
-value found inside a loop leaves through `return`.
+question, whether the loop iterates again, never what the loop's value is:
+a loop's value is its collected List, and a value found inside a loop
+leaves through `return`.
 
 == WHAT IS REPORTED
 CORE SEMANTIC BREAK-OUTSIDE-LOOP (`break outside lexical loop`),
@@ -2063,7 +2032,6 @@ index: rules
 alias: transitive import; import a nested namespace; parent namespace import; why must I import std::str again
 keywords: import, transitive, exact, nested namespace, parent, child, header, dependency
 related: concept.imports concept.modules rule.method-requires-import rule.import-type rule.application-modules principle.explicit-dependencies error.missing-import error.duplicate-import
-docs: IMPORTS.md
 
 == THE RULE
 `import NS` in a file's header lets that file write `NS::name` and makes
@@ -2082,9 +2050,9 @@ namespace, it is loaded once.
 
 == WHY
 "A source file cannot refer across a namespace boundary unless it says so
-in its header" (IMPORTS.md). With exact, non-transitive imports a file's
-first lines are the complete list of what it depends on, and a library can
-change its own imports without changing what its users can see.
+in its header". With exact, non-transitive imports a file's first lines
+are the complete list of what it depends on, and a library can change its
+own imports without changing what its users can see.
 
 == WHAT IS REPORTED
 MISSING-IMPORT, at the reference -- SURFACE MODULE for a qualified name,
@@ -2123,7 +2091,6 @@ index: rules
 alias: module top level; module variable; global variable in a module; module initializer
 keywords: module, top level, binding, immutable, context-free, statement, initializer, global
 related: concept.modules concept.program-value rule.forward-references rule.context-installation rule.application-modules error.invalid-toplevel error.module-context error.module-immutable
-docs: MODULE-BINDINGS.md IMPORTS.md CONTEXTS.md
 
 == THE RULE
 A file loaded by `import` is a module. At its top level it may hold only:
@@ -2152,11 +2119,10 @@ program's value (concept.program-value).
                                         limits::largest()]
 
 == WHY
-A module is a namespace of definitions and immutable values
-(MODULE-BINDINGS.md), not a script: importing it must not run arbitrary
-code or create shared state that changes. A module value is therefore a
-constant every user sees alike, computed once in a fixed order, and reads
-of it never need revalidation.
+A module is a namespace of definitions and immutable values, not a script:
+importing it must not run arbitrary code or create shared state that
+changes. A module value is therefore a constant every user sees alike,
+computed once in a fixed order, and reads of it never need revalidation.
 
 == WHAT IS REPORTED
 In the module's file: SURFACE MODULE INVALID-TOPLEVEL for a statement
@@ -2180,7 +2146,6 @@ index: rules
 alias: module search path; import my own file; where does import look; standard library location
 keywords: import, module, file, application root, standard library, std, stdlib, entry file, directory, reserved, rooted, ::
 related: concept.modules concept.imports concept.standard-library rule.package-modules rule.imports-not-transitive rule.module-bindings error.unknown-namespace error.reserved-namespace error.module-collision error.self-import
-docs: STD-NAMESPACE.md IMPORTS.md BOT-MODULES-MILESTONE-1.md POST-2048-PRODUCT-FIXES.md
 
 == THE RULE
 A namespace path is resolved from the root, and its first segment says
@@ -2217,8 +2182,7 @@ namespaces, importable side by side.
 == WHY
 The rule is fixed so that a name has at most one candidate file: a program
 means the same thing wherever it is run from, adding a file never changes
-what an import names, and the standard library cannot be shadowed
-(STD-NAMESPACE.md).
+what an import names, and the standard library cannot be shadowed.
 
 == WHAT IS REPORTED
 SURFACE MODULE UNKNOWN-NAMESPACE names the path it looked for, and the
@@ -2262,7 +2226,6 @@ index: rules
 alias: package; packages; .bot_modules; install a library; third-party module; dependency; vendored library; node_modules
 keywords: package, .bot_modules, installed, dependency, scope, owner, instance, root namespace, identity, downward, consumer, sibling, collision, std, .targets, target package tree, .graph, package graph, shared dependency, one instance, peer dependency
 related: rule.application-modules concept.modules concept.imports error.module-collision error.unknown-namespace error.reserved-namespace error.package-graph cli.packages
-docs: BOT-MODULES-MILESTONE-1.md IMPORTS.md STD-NAMESPACE.md PACKAGE-MANAGER-MILESTONE-1.md PACKAGE-MANAGER-MILESTONE-2.md SHARED-PACKAGE-DEPENDENCIES-MILESTONE-1.md
 
 == THE RULE
 A package is an ordinary module tree installed under the immediate
@@ -2352,12 +2315,11 @@ named by its name, wherever it is imported from (PACKAGE GRAPHS).
 == WHY
 A package must work wherever it is installed, so it resolves only what it
 installed itself; and an installation never changes the meaning of a
-program it is not part of (BOT-MODULES-MILESTONE-1.md). Independently
-written packages that depend on one package must share it -- one driver
-whose context the application installs once for all of them -- so a
-resolved graph says which instance each import is, by name
-(SHARED-PACKAGE-DEPENDENCIES-MILESTONE-1.md). A package needs a directory
-and files, so there is no single-file example.
+program it is not part of. Independently written packages that depend on
+one package must share it -- one driver whose context the application
+installs once for all of them -- so a resolved graph says which instance
+each import is, by name. A package needs a directory and files, so there
+is no single-file example.
 
 @topic rule.flags
 title: Flag parameters: declared last, written by name
@@ -2366,7 +2328,6 @@ index: rules
 alias: flag parameter rules; pass a flag; computed flag; boolean option parameter
 keywords: flags, flag, option, bool, :name, call, method, alias, function value
 related: concept.flags principle.options-are-flags warning.many-boolean-arguments error.unknown-flag error.duplicate-flag error.flag-function-value error.argument-after-flag error.flag-not-a-value
-docs: FLAGS.md
 
 == THE RULE
   * A flag section follows the ordinary parameters: `fn label(n, flags
@@ -2383,11 +2344,11 @@ docs: FLAGS.md
   * Flags share the local namespace of the ordinary parameters.
 
 == WHY
-A flag is the language's form for an option that is "absent means false"
-(FLAGS.md): its name at the call says what it does, where `f(x, true,
-false)` says nothing (MANY-BOOLEAN-ARGUMENTS warns on that). Flags are
-part of the function's call interface, which a function value's type
-(`Fn{...}`) cannot carry, so such a function stays a direct callee.
+A flag is the language's form for an option that is "absent means false":
+its name at the call says what it does, where `f(x, true, false)` says
+nothing (MANY-BOOLEAN-ARGUMENTS warns on that). Flags are part of the
+function's call interface, which a function value's type (`Fn{...}`)
+cannot carry, so such a function stays a direct callee.
 
 == WHAT IS REPORTED
 CORE SEMANTIC UNKNOWN-FLAG (`function label does not accept flag :quiet
@@ -2435,7 +2396,6 @@ index: rules
 alias: typed parameter; parameter annotation; strict typed parameters; declared parameter type
 keywords: parameter, type, annotation, argument, proof, domain, range, guard, contract, inferred
 related: rule.type-argument rule.type-generic-call rule.type-result rule.type-field concept.functions concept.types concept.integer-domains proof.types proof.ranges rule.no-callable-types rule.struct-construction rule.method-resolution error.type
-docs: STRICT-TYPED-PARAMETERS.md README.md
 
 == THE RULE
 `fn f(x: T)` makes every call of f prove that its argument's possible
@@ -2455,9 +2415,9 @@ construction.
 
 == WHY
 "A parameter annotation is a compile-time proof obligation, not a runtime
-contract check" (STRICT-TYPED-PARAMETERS.md). The callee can rely on its
-declared types without testing them, the caller learns at compile time
-that a value may not fit, and no backend needs a hidden guard.
+contract check". The callee can rely on its declared types without testing
+them, the caller learns at compile time that a value may not fit, and no
+backend needs a hidden guard.
 
 == WHAT IS REPORTED
 CORE SEMANTIC TYPE, at the argument, with what the compiler knew about it:

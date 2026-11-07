@@ -1,6 +1,6 @@
 # raven -- graphical user interfaces for Botlish programs
 
-`raven` 0.3.2 is a Botlish package for [Raven](https://github.com/oscar-soirey/Raven)
+`raven` 0.4.0 is a Botlish package for [Raven](https://github.com/oscar-soirey/Raven)
 0.1.3, a C11 GUI library: real desktop windows (X11, drawn by Raven's
 Vulkan renderer) with labels, buttons, checkboxes, sliders, spin boxes,
 text inputs and combo boxes, and a headless mode -- no display, nothing
@@ -12,7 +12,7 @@ bridge and Raven itself. Nothing is built or run when you install it.
 | file in the installed package | what it is |
 |---|---|
 | `README.md` | this page: requirements, installation, a first window, running, shipping |
-| `GUIDE.md` | the API by task: lifetime, windows, controls, the frame loop, events, errors, testing |
+| `GUIDE.md` | the API by task: lifetime, windows, controls, the frame loop, events, keyboard and mouse, errors, testing, files |
 | `raven.bot` | the module `raven`; every public function has a comment saying what it does |
 | `examples/clicks/` | a complete small application: `clicks.bot` (the program), `main.bot` (desktop), `test.bot` (headless test) |
 | `raven/*.bot` | the generated binding, all 921 C functions, for what `raven` leaves out |
@@ -59,7 +59,7 @@ machine has -- never a reason the installation fails.
 In your project's directory (or with `-project DIR`):
 
 ```sh
-botlish add /path/to/raven-0.3.2.botpkg
+botlish add /path/to/raven-0.4.0.botpkg
 ```
 
 This writes `botlish.json` and `.bot_modules/`, checks every native file
@@ -79,7 +79,7 @@ with context raven::create()
 
 # The frame loop: sleep until something happens, then handle what did;
 # false once the window is closed.
-fn run(quit: raven::Widget) errors NonFiniteFloat:
+fn run(quit: raven::Widget):
     if not raven::wait_frame(-1.0):
         return unit
     ended = fold event in raven::events() with intermediate done false:
@@ -88,7 +88,7 @@ fn run(quit: raven::Widget) errors NonFiniteFloat:
         raven::quit(0)
     run(quit)
 
-fn main(context ui: raven::Ui) -> str errors raven::RavenFailed, NonFiniteFloat:
+fn main(context ui: raven::Ui) -> str errors raven::RavenFailed:
     raven::start(raven::desktop())
     window = raven::window("Hello", 320, 120)
     quit = raven::button("Quit")
@@ -100,8 +100,6 @@ fn main(context ui: raven::Ui) -> str errors raven::RavenFailed, NonFiniteFloat:
 result = main():
     on raven::RavenFailed failure:
         failure.detail
-    on NonFiniteFloat:
-        "a number Raven reported is no Float64"
 result
 ```
 
@@ -118,8 +116,9 @@ test it with no display.
 
 `raven::start(raven::headless())` uses Raven's null platform and renderer:
 no window system, no GPU, no driver, the same widgets, layout and events.
-Input is synthetic (`window.click(widget)`, `inject_text`, `inject_key`),
-each delivered by the next `raven::draw_frame()`. See GUIDE.md, "Testing",
+Input is synthetic (`window.click(widget)`, `inject_text`, `inject_key`,
+`inject_move`, `inject_button`, `inject_wheel`), each delivered by the
+next `raven::draw_frame()`. See GUIDE.md, "Testing",
 and `examples/clicks/test.bot`.
 
 To drive the real desktop configuration without a monitor, run the
@@ -181,10 +180,14 @@ those notices with it.
   to consume raw input, or run Raven's worker tasks.
 * **Wrapped**: windows, vertical and horizontal panels, labels, buttons,
   checkboxes, sliders, spin boxes, one-line text inputs, combo boxes,
-  themes, actions, timers, XML interfaces, synthetic input. **Not
-  wrapped**: menus, list and tree views, the text editor, docking, dialogs,
-  the color picker, timeline and node graph, styles, fonts, textures,
-  translations, accessibility. The generated binding reaches all of Raven's
+  themes, actions, timers, XML interfaces, a window's keyboard, mouse and
+  wheel (events and the current state: GUIDE.md, "Keyboard, mouse and
+  wheel"), synthetic input. **Not wrapped**: menus, list and tree views,
+  the text editor, docking, dialogs (the file dialog too: it runs a modal
+  loop of its own, and a program reads a file name from a text input
+  instead), the color picker, timeline and node graph, styles, fonts,
+  textures, translations, accessibility. Files are the standard library's
+  (`std::linux::fs`: GUIDE.md, "Saving and loading files"). The generated binding reaches all of Raven's
   C API (`raven::controls::Rlabel_set_markdown(label.id, 1)`: a handle's
   `id` is the C handle); functions taking callbacks or pointers you cannot
   supply stay out of reach.
@@ -196,5 +199,5 @@ those notices with it.
 
 The artifact is made from the Botlish repository with one command,
 `tclsh9.0 tools/package-repository.tcl OUT raven`, which builds Raven's
-desktop configuration for both targets, the bridge, and packs the release
-(RAVEN-CLEANROOM-DESKTOP-MILESTONE-1.md). Consumers never run it.
+desktop configuration for both targets, the bridge, and packs the release.
+Consumers never run it.

@@ -144,7 +144,6 @@ index: principles lint
 alias: lint precision; false positive; overbroad warning; why is this warning wrong
 keywords: precision, exception, suppress, silence, linter design
 related: lint.policy lint.warnings-vs-errors principle.investigate-warnings warning.same-return-value warning.method-eligible
-docs: WARNINGS-SAME-RETURN.md COMPILERPEDIA-REPORT.md
 
 == THE PRINCIPLE
 A warning makes a claim: this code is worth a second look. Because Botlish
@@ -203,7 +202,6 @@ index: principles
 alias: name the parts; multi-value result; return several values; return two values; tuple
 keywords: struct, result, destructure, positional, list
 related: warning.fixed-arity-list-return concept.structs concept.destructuring rule.no-list-destructuring
-docs: MULTI-VALUE-RESULTS.md STRUCT-DESTRUCTURING.md
 
 == THE PRINCIPLE
 `{field, next} = scan(text, i)` says what each part is at every use, is
@@ -239,7 +237,6 @@ index: principles
 alias: receiver first; API design; method syntax style; receiver-oriented
 keywords: method, receiver, API, nomethod, first parameter
 related: concept.method-sugar concept.nomethod warning.method-eligible
-docs: METHOD-SUGAR.md WARNINGS-METHOD-ELIGIBLE.md
 
 == THE PRINCIPLE
 Botlish's method syntax is exact sugar: `board.move(d)` is `move(board, d)`.
@@ -270,7 +267,6 @@ index: principles
 alias: options are flags; boolean options; boolean parameters
 keywords: flag, option, bool, argument
 related: concept.flags warning.many-boolean-arguments rule.flags
-docs: FLAGS.md
 
 == THE PRINCIPLE
 `open("f", :append)` says which option is on; `open("f", true, false)`
@@ -287,7 +283,6 @@ index: principles
 alias: characters not strings; char vs string
 keywords: UnicodeChar, character, literal, char_at, append_char
 related: concept.strings warning.one-char-string-literal stdlib.std::str::char_at stdlib.std::str::append_char
-docs: WARNINGS-ONE-CHAR-STRING-LITERAL.md
 
 == THE PRINCIPLE
 UnicodeChar is its own type: comparing `text.char_at(i) == ','` states a
@@ -312,7 +307,6 @@ index: principles
 alias: errors over sentinels; sentinel value; magic value; return -1
 keywords: sentinel, error, fail, handle, optional, null
 related: concept.errors warning.same-return-value warning.same-failure capability.null concept.error-payloads
-docs: EXPLICIT-ERROR-COMPLETIONS.md ERROR-PAYLOADS.md
 
 == THE PRINCIPLE
 A sentinel is an ordinary value that the caller must remember to test, and
@@ -360,7 +354,6 @@ index: principles proofs
 alias: restate in proven form; unproven obligation; make it provable
 keywords: proof, guard, handler, obligation, recognized form
 related: proof.overview proof.list-bounds proof.slices proof.completions
-docs: STATIC-COMPLETION-PROOFS.md
 
 == THE PRINCIPLE
 A proof page lists the forms the compiler recognizes. Code in such a form
@@ -424,7 +417,6 @@ index: principles
 alias: explicit dependencies; no globals
 keywords: import, context, global, dependency, visibility
 related: concept.imports concept.contexts rule.method-requires-import rule.imports-not-transitive
-docs: IMPORTS.md CONTEXTS.md
 
 == THE PRINCIPLE
 Botlish has no global mutable state and no implicit imports: a namespace's
@@ -440,7 +432,6 @@ index: principles
 alias: predicate naming; question mark names
 keywords: predicate, validator, ?, naming, proves
 related: warning.proves-naming concept.refinements
-docs: REFINEMENT-VALUES.md
 
 == CHECKED BY
 PROVES-NAMING (warning.proves-naming), for functions with a `proves`
