@@ -269,6 +269,16 @@ Tcl backends: `tests/local.tcl -golden-backends "interp compile"`.
   compiler failure instead of depending on the hole (outcome `failure`, the
   syntax error unreported). A defect of syntax recovery, not of this change;
   left for its own fix.
+- **The recovery harnesses** (the lexer's `indentation` list feeds syntax
+  recovery's damage record): `audit/syntax-recovery/tools/mutate.tcl`, 37
+  mutants, 37 killed (tests/syntax-recovery.test passes 33 of 33 here, so
+  each kill is the mutant's); `audit/diagnostic-recovery/tools/efficiency.tcl`,
+  15 cases, every known primary in the first compilation (32 of 32), no
+  cascade; `audit/diagnostic-recovery/tools/mutate.tcl`, 27 mutants, 25
+  killed by tests that pass here, and two (`poison-return-check`,
+  `runnable-off`, which mutate how a backend runs a lenient HIR: code this
+  change does not touch) only by tests that already fail here for the
+  native backend: inconclusive in this container.
 
 ### 9.2 The branch's CI
 
