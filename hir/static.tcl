@@ -588,6 +588,7 @@ proc hir::static::Expand {nodes modules decisions} {
 # The statement list NODES expanded: a static statement may become several
 # statements (an accepted body spliced in place).
 proc hir::static::Sequence {nodes decisions} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     set result {}
     foreach node $nodes {
         if {[dict get $node kind] eq "static"} {

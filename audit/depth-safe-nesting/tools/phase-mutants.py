@@ -43,6 +43,9 @@ groups=[
  ('hirtext-recursion', 'HIR text printed and read recursively', ['::hir::format::','::hir::read::'], 'dsn-text dsn-cache'),
  ('service-recursion', 'the service\'s index of a file recursive', ['::service::'], 'dsn-service'),
  ('repeatable-recursion', 'the repeatability analysis recursive', ['::hir::repeatable::'], 'dsn-1000-call dsn-1000-list'),
+ ('modulebinding-recursion', 'a module binding\'s value walked recursively', ['::hir::modulebinding::'], 'dsn-module-binding'),
+ ('injection-recursion', 'the injection proof\'s provenance walk recursive', ['::hir::injection::'], 'dsn-1000-inject'),
+ ('layouts-recursion', 'layout representations resolved and described recursively', ['::hir::layouts::'], 'dsn-1000-layout'),
 ]
 out=[]
 out.append('''# mutants.txt -- mutants of the depth-safe front end

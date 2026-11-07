@@ -578,6 +578,7 @@ proc surface::ast::Ids {node id} {
 # of a pattern whose parent has id PARENT is PARENT/fieldN, so a nested
 # pattern's fields are PARENT/fieldN/fieldM.
 proc surface::ast::PatternIds {pattern parent} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     set fields {}
     set index 1
     foreach field [dict get $pattern fields] {
@@ -1003,6 +1004,7 @@ proc surface::ast::ImprintsText {node} {
 }
 
 proc surface::ast::showType {type} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     if {[llength $type] == 1} {
         return $type
     }
@@ -1395,6 +1397,7 @@ proc surface::ast::Injection {node prefix indent show linesVar} {
 # Source text of the destructuring PATTERN, as written: "{a, b: c, d: {e}}"
 # (with -spans, each field entry is followed by its @LINE:COLUMN-...).
 proc surface::ast::PatternText {pattern show} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     set parts {}
     foreach field [dict get $pattern fields] {
         if {[dict get $field nested] ne ""} {

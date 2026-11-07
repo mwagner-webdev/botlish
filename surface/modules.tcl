@@ -1537,6 +1537,7 @@ proc surface::modules::ErrorRef {spelling span} {
 # each located at SPAN, and rewritten -- and the qualified errors of a
 # function type's `errors` list.
 proc surface::modules::TypeRefs {type span} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     if {$type eq ""} {
         return $type
     }

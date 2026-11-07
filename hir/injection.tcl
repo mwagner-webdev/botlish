@@ -767,6 +767,7 @@ proc hir::injection::Grow {stateVar table key origins} {
 
 # The origins of the last of the statements BODY (each evaluated).
 proc hir::injection::Seq {stateVar body} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $stateVar state
     set result {}
     foreach e $body {
@@ -798,6 +799,7 @@ proc hir::injection::HandleFree {type} {
 # The origins of the value of expression E (code of the node being
 # evaluated), its sub-expressions evaluated for what they bind and resume.
 proc hir::injection::Tau {stateVar e} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $stateVar state
     set hir [dict get $state hir]
     set node [dict get $hir exprs $e]

@@ -2172,6 +2172,7 @@ proc hir::completions::EvalLockloop {hirVar ctxVar diagnose enclosing guard e no
 # loop then goes on or ends normally, so stopping there and calling the loop
 # `never` would hide everything after it from the proof (PROOF-FACT-CENSUS.md).
 proc hir::completions::EvalListloop {hirVar ctxVar diagnose enclosing guard e node} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $hirVar hir $ctxVar ctx
     set iterable [dict get $node iterable]
     if {[LoopDomain hir ctx $diagnose $enclosing $guard [concat [list $iterable] [hir::FoldInitials $node]]] eq {never}} {
@@ -2222,6 +2223,7 @@ proc hir::completions::EvalListloop {hirVar ctxVar diagnose enclosing guard e no
 # 1 if a `break` or `continue` targeting loop LOOP occurs in EXPRS (never
 # looking inside a nested function body, which cannot target it).
 proc hir::completions::ExitsLoop {hir loop exprs} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     foreach e $exprs {
         switch -- [hir::kind $hir $e] {
             block { continue }

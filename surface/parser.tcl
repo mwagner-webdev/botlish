@@ -3017,6 +3017,7 @@ proc surface::parser::AtInject {pVar} {
 # permission to use an installed context, it never installs, selects or
 # constructs one. Every other shape is a located syntax error.
 proc surface::parser::Injection {pVar} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $pVar p
     set injectToken [Advance p]
     set start [dict get $injectToken span]
@@ -3107,6 +3108,7 @@ proc surface::parser::Value {pVar} {
 # so "Fn[...]" (a positional function type) and a bare "Fn" are syntax
 # errors here, each with its own message.
 proc surface::parser::TypeExpr {pVar what} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $pVar p
     if {[Kind p] eq "IDENT" && [dict get [Peek p] text] eq "array" && [Kind p 1] eq "INT"} {
         # `array N of TYPE` (FIXED-LAYOUT-ARRAYS.md): a fixed repetition of
@@ -3281,6 +3283,7 @@ proc surface::parser::ScalarRefinement {pVar name {base ""}} {
 # INT token's decimal text; what it may be (positive, within the layout) is
 # hir/layouts.tcl's.
 proc surface::parser::ArrayTypeExpr {pVar} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $pVar p
     Advance p
     set extent [Advance p]
@@ -4115,6 +4118,7 @@ proc surface::parser::If {pVar} {
 # keep working unchanged; a lockstep loop (two or more clauses) leaves them
 # empty and is described by `clauses` alone.
 proc surface::parser::Loop {pVar} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $pVar p
     set start [dict get [Advance p] span]
     set clauses {}
@@ -5046,6 +5050,7 @@ proc surface::parser::CoroutineBind {pVar} {
 #   nested          the pattern the field's value is destructured by, or ""
 #   shorthand       1 for `name`
 proc surface::parser::Pattern {pVar} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $pVar p
     set open [Expect p \{ "\"\{\""]
     set start [dict get $open span]

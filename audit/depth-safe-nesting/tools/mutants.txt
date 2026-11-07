@@ -157,6 +157,41 @@ proc surface::parser::ValueOrHandled {pVar} {
 ====
 proc surface::parser::ValueOrHandled {pVar} {
 >>>>
+## surface/parser.tcl
+<<<<
+proc surface::parser::Pattern {pVar} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc surface::parser::Pattern {pVar} {
+>>>>
+## surface/parser.tcl
+<<<<
+proc surface::parser::TypeExpr {pVar what} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc surface::parser::TypeExpr {pVar what} {
+>>>>
+## surface/parser.tcl
+<<<<
+proc surface::parser::Loop {pVar} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc surface::parser::Loop {pVar} {
+>>>>
+## surface/parser.tcl
+<<<<
+proc surface::parser::ArrayTypeExpr {pVar} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc surface::parser::ArrayTypeExpr {pVar} {
+>>>>
+## surface/parser.tcl
+<<<<
+proc surface::parser::Injection {pVar} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc surface::parser::Injection {pVar} {
+>>>>
 
 @@ paren-recursion parentheses recurse through host calls again: the expression chain unguarded, the List, field and argument productions still guarded
 !! dsn-1000-paren
@@ -275,6 +310,27 @@ proc surface::ast::Expr {node show} {
 ====
 proc surface::ast::Expr {node show} {
 >>>>
+## surface/ast.tcl
+<<<<
+proc surface::ast::PatternIds {pattern parent} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc surface::ast::PatternIds {pattern parent} {
+>>>>
+## surface/ast.tcl
+<<<<
+proc surface::ast::PatternText {pattern show} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc surface::ast::PatternText {pattern show} {
+>>>>
+## surface/ast.tcl
+<<<<
+proc surface::ast::showType {type} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc surface::ast::showType {type} {
+>>>>
 
 @@ loader-recursion the loader's walks of a file recursive
 !! dsn-1000-list
@@ -298,6 +354,13 @@ proc surface::modules::RemapFile {node fileId} {
     if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
 ====
 proc surface::modules::RemapFile {node fileId} {
+>>>>
+## surface/modules.tcl
+<<<<
+proc surface::modules::TypeRefs {type span} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc surface::modules::TypeRefs {type span} {
 >>>>
 
 @@ surface-lowering-recursion AST to HIR syntax recursive
@@ -329,6 +392,20 @@ proc surface::lower::Sequence {nodes} {
     if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
 ====
 proc surface::lower::Sequence {nodes} {
+>>>>
+## surface/lower.tcl
+<<<<
+proc surface::lower::Projections {pattern temp} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc surface::lower::Projections {pattern temp} {
+>>>>
+## surface/lower.tcl
+<<<<
+proc surface::lower::LoopSyntax {node origin} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc surface::lower::LoopSyntax {node origin} {
 >>>>
 
 @@ static-sites-recursion the static-site walks recursive
@@ -368,6 +445,13 @@ proc hir::syntax::CollectBindNames {node namesVar} {
 ====
 proc hir::syntax::CollectBindNames {node namesVar} {
 >>>>
+## hir/static.tcl
+<<<<
+proc hir::static::Sequence {nodes decisions} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc hir::static::Sequence {nodes decisions} {
+>>>>
 
 @@ resolve-recursion the parser and lowering depth-safe, resolution recursive
 !! dsn-1000-list dsn-1000-struct
@@ -391,6 +475,20 @@ proc hir::resolve::Sequence {hirVar nodes ctx} {
     if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
 ====
 proc hir::resolve::Sequence {hirVar nodes ctx} {
+>>>>
+## hir/resolve.tcl
+<<<<
+proc hir::resolve::ResolveTypeExpr {typeExpr {ns ""} {imprints 0}} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc hir::resolve::ResolveTypeExpr {typeExpr {ns ""} {imprints 0}} {
+>>>>
+## hir/resolve.tcl
+<<<<
+proc hir::resolve::ShowTypeExpr {typeExpr} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc hir::resolve::ShowTypeExpr {typeExpr} {
 >>>>
 
 @@ types-recursion resolution depth-safe, type inference recursive
@@ -621,6 +719,20 @@ proc hir::completions::analyzeBlock {hir block argRanges argExact argExactLists 
 ====
 proc hir::completions::analyzeBlock {hir block argRanges argExact argExactLists argCallables guard {captureFacts {}}} {
 >>>>
+## hir/completions.tcl
+<<<<
+proc hir::completions::EvalListloop {hirVar ctxVar diagnose enclosing guard e node} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc hir::completions::EvalListloop {hirVar ctxVar diagnose enclosing guard e node} {
+>>>>
+## hir/completions.tcl
+<<<<
+proc hir::completions::ExitsLoop {hir loop exprs} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc hir::completions::ExitsLoop {hir loop exprs} {
+>>>>
 
 @@ callables-recursion the callable audit recursive
 !! dsn-1000-call
@@ -681,6 +793,27 @@ proc hir::affine::Flow {hirVar e state} {
     if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
 ====
 proc hir::affine::Flow {hirVar e state} {
+>>>>
+## hir/affine.tcl
+<<<<
+proc hir::affine::Descriptor {hir type {exclude {}}} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc hir::affine::Descriptor {hir type {exclude {}}} {
+>>>>
+## hir/affine.tcl
+<<<<
+proc hir::affine::DescriptorOf {hir type exclude} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc hir::affine::DescriptorOf {hir type exclude} {
+>>>>
+## hir/affine.tcl
+<<<<
+proc hir::affine::Seq {hirVar exprs state} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc hir::affine::Seq {hirVar exprs state} {
 >>>>
 
 @@ stamp-recursion a trait or coroutine program's syntax stamped recursively
@@ -854,6 +987,34 @@ proc hir::aot::TailInto {hir e tailsVar} {
     if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
 ====
 proc hir::aot::TailInto {hir e tailsVar} {
+>>>>
+## compiler/compiler.tcl
+<<<<
+proc core::compiler::CompileListLoop {ctxVar e} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc core::compiler::CompileListLoop {ctxVar e} {
+>>>>
+## compiler/compiler.tcl
+<<<<
+proc core::compiler::ArrayOfRecords {descriptor} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc core::compiler::ArrayOfRecords {descriptor} {
+>>>>
+## compiler/compiler.tcl
+<<<<
+proc core::compiler::LayoutLeaves {descriptor base path} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc core::compiler::LayoutLeaves {descriptor base path} {
+>>>>
+## compiler/compiler.tcl
+<<<<
+proc core::compiler::LayoutValueText {descriptor varsVar} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc core::compiler::LayoutValueText {descriptor varsVar} {
 >>>>
 
 @@ native-recursion the Tcl compiler depth-safe, native lowering recursive
@@ -1047,6 +1208,125 @@ proc native::rawabi::Walk {e sink why} {
 ====
 proc native::rawabi::Walk {e sink why} {
 >>>>
+## native/lower.tcl
+<<<<
+proc native::lower::Struct {fnVar e node} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc native::lower::Struct {fnVar e node} {
+>>>>
+## native/rawabi.tcl
+<<<<
+proc native::rawabi::Call {e node sink why} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc native::rawabi::Call {e node sink why} {
+>>>>
+## native/lower.tcl
+<<<<
+proc native::lower::ListLoop {fnVar e node} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc native::lower::ListLoop {fnVar e node} {
+>>>>
+## native/lower.tcl
+<<<<
+proc native::lower::IterationBody {fnVar e body} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc native::lower::IterationBody {fnVar e body} {
+>>>>
+## native/lower.tcl
+<<<<
+proc native::lower::DeferredNeeds {fnVar x parent nested needsVar} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc native::lower::DeferredNeeds {fnVar x parent nested needsVar} {
+>>>>
+## native/lower.tcl
+<<<<
+proc native::lower::Condition {fnVar e t f} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc native::lower::Condition {fnVar e t f} {
+>>>>
+## native/lower.tcl
+<<<<
+proc native::lower::ConditionIf {fnVar e node t f} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc native::lower::ConditionIf {fnVar e node t f} {
+>>>>
+## native/lower.tcl
+<<<<
+proc native::lower::ConditionBody {fnVar body t f} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc native::lower::ConditionBody {fnVar body t f} {
+>>>>
+## native/lower.tcl
+<<<<
+proc native::lower::EmitRegionConsumerCondition {fnVar calleeView e b region t f} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc native::lower::EmitRegionConsumerCondition {fnVar calleeView e b region t f} {
+>>>>
+## native/lower.tcl
+<<<<
+proc native::lower::EmitRegionConsumerBody {fnVar calleeView e b region} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc native::lower::EmitRegionConsumerBody {fnVar calleeView e b region} {
+>>>>
+## native/lower.tcl
+<<<<
+proc native::lower::ArrayCheck {fnVar e repr value} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc native::lower::ArrayCheck {fnVar e repr value} {
+>>>>
+## native/lower.tcl
+<<<<
+proc native::lower::ArrayRead {fnVar e mode source repr base} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc native::lower::ArrayRead {fnVar e mode source repr base} {
+>>>>
+## native/lower.tcl
+<<<<
+proc native::lower::LayoutLeaves {descriptor base} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc native::lower::LayoutLeaves {descriptor base} {
+>>>>
+## native/lower.tcl
+<<<<
+proc native::lower::ReprHasArrays {repr} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc native::lower::ReprHasArrays {repr} {
+>>>>
+## native/lower.tcl
+<<<<
+proc native::lower::ReprRead {fnVar e mode source repr base} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc native::lower::ReprRead {fnVar e mode source repr base} {
+>>>>
+## native/lower.tcl
+<<<<
+proc native::lower::ReprWrite {fnVar e mode target repr base value} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc native::lower::ReprWrite {fnVar e mode target repr base value} {
+>>>>
+## native/lower.tcl
+<<<<
+proc native::lower::ViewBase {fnVar arg} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc native::lower::ViewBase {fnVar arg} {
+>>>>
 
 @@ hirtext-recursion HIR text printed and read recursively
 !! dsn-text dsn-cache
@@ -1083,6 +1363,155 @@ proc hir::repeatable::Expr {hir e env memoVar} {
     if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
 ====
 proc hir::repeatable::Expr {hir e env memoVar} {
+>>>>
+
+@@ modulebinding-recursion a module binding's value walked recursively
+!! dsn-module-binding
+## hir/modulebinding.tcl
+<<<<
+proc hir::modulebinding::ContextExpr {hir e stateVar} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc hir::modulebinding::ContextExpr {hir e stateVar} {
+>>>>
+## hir/modulebinding.tcl
+<<<<
+proc hir::modulebinding::ImmutableExpr {hir e factsVar activeVar} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc hir::modulebinding::ImmutableExpr {hir e factsVar activeVar} {
+>>>>
+
+@@ injection-recursion the injection proof's provenance walk recursive
+!! dsn-1000-inject
+## hir/injection.tcl
+<<<<
+proc hir::injection::Seq {stateVar body} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc hir::injection::Seq {stateVar body} {
+>>>>
+## hir/injection.tcl
+<<<<
+proc hir::injection::Tau {stateVar e} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc hir::injection::Tau {stateVar e} {
+>>>>
+
+@@ layouts-recursion layout representations resolved and described recursively
+!! dsn-1000-layout
+## hir/layouts.tcl
+<<<<
+proc hir::layouts::CopyType {repr} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc hir::layouts::CopyType {repr} {
+>>>>
+## hir/layouts.tcl
+<<<<
+proc hir::layouts::ReprDescriptor {repr} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc hir::layouts::ReprDescriptor {repr} {
+>>>>
+## hir/layouts.tcl
+<<<<
+proc hir::layouts::ReprOfTerm {term} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc hir::layouts::ReprOfTerm {term} {
+>>>>
+## hir/layouts.tcl
+<<<<
+proc hir::layouts::ReprPointerPath {repr} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc hir::layouts::ReprPointerPath {repr} {
+>>>>
+## hir/layouts.tcl
+<<<<
+proc hir::layouts::ReprTerm {repr} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc hir::layouts::ReprTerm {repr} {
+>>>>
+## hir/layouts.tcl
+<<<<
+proc hir::layouts::ReprText {repr} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc hir::layouts::ReprText {repr} {
+>>>>
+## hir/layouts.tcl
+<<<<
+proc hir::layouts::ReprUnionAt {repr} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc hir::layouts::ReprUnionAt {repr} {
+>>>>
+## hir/layouts.tcl
+<<<<
+proc hir::layouts::ReprUnionPath {repr} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc hir::layouts::ReprUnionPath {repr} {
+>>>>
+## hir/layouts.tcl
+<<<<
+proc hir::layouts::ResolveArrayTerm {arg ns ctor} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc hir::layouts::ResolveArrayTerm {arg ns ctor} {
+>>>>
+## hir/layouts.tcl
+<<<<
+proc hir::layouts::ResolveRepr {typeExpr pointerText ns byId doneVar stack id name fieldName typeSpan depth} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc hir::layouts::ResolveRepr {typeExpr pointerText ns byId doneVar stack id name fieldName typeSpan depth} {
+>>>>
+## hir/layouts.tcl
+<<<<
+proc hir::layouts::ShowTerm {term} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc hir::layouts::ShowTerm {term} {
+>>>>
+## hir/layouts.tcl
+<<<<
+proc hir::layouts::ShowTypeExpr {typeExpr} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc hir::layouts::ShowTypeExpr {typeExpr} {
+>>>>
+## hir/layouts.tcl
+<<<<
+proc hir::layouts::WithLeafType {repr depth type} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc hir::layouts::WithLeafType {repr depth type} {
+>>>>
+## hir/layouts.tcl
+<<<<
+proc hir::layouts::WordsFormats {words} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc hir::layouts::WordsFormats {words} {
+>>>>
+## hir/layouts.tcl
+<<<<
+proc hir::layouts::align {id} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc hir::layouts::align {id} {
+>>>>
+## hir/layouts.tcl
+<<<<
+proc hir::layouts::size {id} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc hir::layouts::size {id} {
 >>>>
 
 # ---------------------------------------------------------------------------

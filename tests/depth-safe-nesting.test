@@ -322,20 +322,7 @@ test dsn-evaluation-order {1000 nested calls: each call's argument runs before i
 # S0 {next: S1 {next: ... SN {c: make(1)}}} in one expression: a finite
 # affine value N fields deep, made, passed, returned and dropped.
 proc dsnAffineChain {n} {
-    set text "import std::coroutine\n"
-    for {set i 0} {$i < $n} {incr i} {
-        append text "struct S$i:\n    next: S[expr {$i + 1}]\n"
-    }
-    set c {Coroutine{args: [], return: int}}
-    append text "struct S$n:\n    c: $c\nfn worker(seed: int) -> int:\n    yield seed\n    seed\n"
-    append text "fn make(seed: int) -> $c:\n    coroutine \{step\} = worker(seed)\n    step\n"
-    set s "S$n \{c: make(1)\}"
-    for {set i [expr {$n - 1}]} {$i >= 0} {incr i -1} {
-        set s "S$i \{next: $s\}"
-    }
-    append text "fn build() -> S0:\n    $s\nfn pass(x: S0) -> S0:\n    x\n"
-    append text "fn main() -> int:\n    a = build()\n    b = pass(a)\n    pass(build())\n    1\nmain()\n"
-    return $text
+    return [dict get [dsn::specimen affine $n] source]
 }
 
 # {OUTCOME RELEASES DISTINCT} of HIR on BACKEND (interp or compile).
@@ -396,7 +383,7 @@ test dsn-trait-program {a trait program (its syntax stamped, checked as written,
 } -result {{value 1001} {value 1001} {value 1001} {value 1001}}
 
 test dsn-static-compile {a `static compile:` block decided by whole-program builds with a 1000-deep List in its body (accepted: the List), and one whose 1000-deep construction holds a TYPE error at its innermost field (rejected: its CompilerError handled)} -body {
-    set accepted "import std::compiler\n\nfn f() -> List errors std::compiler::CompilerError:\n    static compile:\n        [string repeat \[ 1000]1[string repeat \] 1000]\n\nr = f():\n    on std::compiler::CompilerError:\n        \[\]\nstd::list::length(r)\n"
+    set accepted "import std::compiler\n\nfn f() -> List\[any\] errors std::compiler::CompilerError:\n    static compile:\n        [string repeat \[ 1000]1[string repeat \] 1000]\n\nr = f():\n    on std::compiler::CompilerError:\n        \[\]\nstd::list::length(r)\n"
     set chain [dict get [dsn::specimen struct 1000] source]
     set decls [string range $chain 0 [string first "x = " $chain]-1]
     set s "S1000 \{value: \"wrong\"\}"
@@ -406,6 +393,34 @@ test dsn-static-compile {a `static compile:` block decided by whole-program buil
     set rejected "import std::compiler\n\n${decls}fn f() -> int errors std::compiler::CompilerError:\n    static compile:\n        x = $s\n        1\n\nf():\n    on std::compiler::CompilerError:\n        -1\n"
     list [dsnOutcomes [withImports $accepted] {interp cranelift}] [dsnOutcomes $rejected {interp cranelift}]
 } -cleanup {unset -nocomplain accepted chain decls s rejected i} -result {{{value 1} {value 1}} {{value -1} {value -1}}}
+
+test dsn-module-binding {a module binding 1000 deep -- a List literal, a sum, a call chain -- read by the importing program: compiled at the default limit, its value on every backend} -body {
+    set dir [file join [temporaryDirectory] dsn-module-binding]
+    file delete -force $dir
+    file mkdir $dir
+    set results {}
+    foreach kind {list rbin call} {
+        set specimen [dsn::specimen $kind 1000]
+        set first [lsearch -inline [split [dict get $specimen source] \n] "x = *"]
+        set f [open [file join $dir deepbind.bot] w]
+        puts -nonewline $f "[expr {$kind eq "call" ? "fn f(a: int) -> int:\n    return a\n\n" : ""}]$first\n"
+        close $f
+        set f [open [file join $dir main.bot] w]
+        puts -nonewline $f "import deepbind\n\ndeepbind::x\n"
+        close $f
+        set hir [surface::readProgramFile [file join $dir main.bot] -warnings off]
+        hir::lower $hir
+        core::compiler::compileHir $hir
+        native::lowered $hir
+        set outcomes [dsnRunning {
+            lmap backend {interp compile cranelift-generic cranelift} {
+                lrange [outcomeUnderHir $backend $hir] 0 1
+            }
+        }]
+        lappend results [expr {[lsort -unique $outcomes] eq [list [list value [dict get $specimen value]]]}]
+    }
+    set results
+} -cleanup {file delete -force $dir; unset -nocomplain dir results kind specimen first f hir outcomes} -result {1 1 1}
 
 test dsn-service {the compiler service analyzes an unsaved 1000-deep document (no diagnostic) and a malformed one (the parser's diagnostic), at the default limit} -body {
     set ws [service::workspace -warnings off -cache ""]
@@ -531,7 +546,12 @@ proc dsnWithSegments {size source} {
         if {[catch {surface::compile $source -warnings off} hir options]} {
             return [list error [dict get $options -errorcode] $hir]
         }
+        # The Tcl compiler names temporaries from a process-wide counter:
+        # both compilations count from the same place.
+        set ids $core::compiler::nextId
+        set core::compiler::nextId 0
         set unit [core::compiler::compileHir $hir]
+        set core::compiler::nextId [expr {max($ids, $core::compiler::nextId)}]
         set code [string map [list [namespace tail [dict get $unit name]] UNIT] [dict get $unit code]]
         return [list [hir::format $hir] [hir::lower $hir] $code [native::lowered $hir]]
     } finally {

@@ -824,6 +824,7 @@ proc native::rawabi::If {e node sink why} {
 }
 
 proc native::rawabi::Call {e node sink why} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     variable W
     variable Plan
     variable rawOps

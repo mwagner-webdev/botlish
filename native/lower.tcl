@@ -4397,6 +4397,7 @@ proc native::lower::StructShapeOf {node} {
 }
 
 proc native::lower::Struct {fnVar e node} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $fnVar fn
     variable context
     variable structOpt
@@ -5772,6 +5773,7 @@ proc native::lower::HoistDeferredUses {fnVar exprs e} {
 # value, a byte owner handed to a foreign call and a word compared need
 # nothing (they read the representation as it is).
 proc native::lower::DeferredNeeds {fnVar x parent nested needsVar} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $fnVar fn
     upvar 1 $needsVar needs
     variable hir
@@ -6527,6 +6529,7 @@ proc native::lower::LayoutWrite {fnVar e name role callArgs wantVirtual} {
 # and I * STRIDE are emitted here (ElementAccess). BASE is a byte count, or
 # a register holding one once an element index is dynamic.
 proc native::lower::ViewBase {fnVar arg} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $fnVar fn
     variable hir
     if {[hir::kind $hir $arg] eq "call" && [lindex [hir::get $hir $arg target] 0] eq "native"} {
@@ -6707,6 +6710,7 @@ proc native::lower::NativeField {fnVar e view field base} {
 # is one load, a nested layout its LayoutStruct (every field, then its
 # object), a fixed array its List (ArrayRead).
 proc native::lower::ReprRead {fnVar e mode source repr base} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $fnVar fn
     switch -- [lindex $repr 0] {
         layout {
@@ -6764,6 +6768,7 @@ proc native::lower::DecodeAt {fnVar e mode source descriptor base {fieldsOnly 0}
 # counted loop appending each -- O(N), straight from the descriptor's
 # constants, no descriptor read at run time (FIXED-LAYOUT-ARRAYS.md).
 proc native::lower::ArrayRead {fnVar e mode source repr base} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $fnVar fn
     variable unrollExtent
     lassign $repr - extent stride element
@@ -6835,6 +6840,7 @@ proc native::lower::ArrayScaled {fnVar e index stride} {
 # bounds check is its `extents` one): everything a write writes is checked
 # before the first byte is, and a proven write has no failure path.
 proc native::lower::ArrayCheck {fnVar e repr value} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $fnVar fn
     if {[BoundsProven $e]} {
         return
@@ -6873,6 +6879,7 @@ proc native::lower::ArrayCheck {fnVar e repr value} {
 # 1 if the representation words REPR hold a fixed array, itself or in a
 # nested layout.
 proc native::lower::ReprHasArrays {repr} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     switch -- [lindex $repr 0] {
         array {
             return 1
@@ -6898,6 +6905,7 @@ proc native::lower::ReprHasArrays {repr} {
 # it writes any (`binstorearray` / `nativestorearray`), any other element
 # in a counted loop. Only the representation's own bytes are written.
 proc native::lower::ReprWrite {fnVar e mode target repr base value} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $fnVar fn
     switch -- [lindex $repr 0] {
         union {
@@ -6966,6 +6974,7 @@ proc native::lower::LayoutDecode {fnVar e storage descriptor base {fieldsOnly 0}
 # order: the order of a LayoutStruct's leaves (ContextObjectLeaves,
 # ContextLeafRegs), REPR the leaf's representation words.
 proc native::lower::LayoutLeaves {descriptor base} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     set leaves {}
     foreach field [lindex $descriptor 3] {
         lassign $field name offset kind
@@ -9399,6 +9408,7 @@ proc native::lower::IsRefToBinding {view e b} {
 # native value), or a call to `==`/`std::str::length`/a ConsumingNative is a
 # hir::stringregion.tcl bug, not a case this lowering falls back from.
 proc native::lower::EmitRegionConsumerBody {fnVar calleeView e b region} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $fnVar fn
     switch -- [hir::kind $calleeView $e] {
         ref {
@@ -9477,6 +9487,7 @@ proc native::lower::EmitRegionConsumerBody {fnVar calleeView e b region} {
 # Ranges or statements of their own. Returns never if no path reaches T or
 # F.
 proc native::lower::EmitRegionConsumerCondition {fnVar calleeView e b region t f} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $fnVar fn
     switch -- [hir::condition::form $calleeView $e] {
         true {
@@ -11711,6 +11722,7 @@ proc native::lower::CheckCondition {fnVar e condition test} {
 # and at label F when it is false. Returns never if no path does (as Expr
 # does), "" otherwise.
 proc native::lower::Condition {fnVar e t f} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $fnVar fn
     variable hir
     switch -- [hir::condition::form $hir $e] {
@@ -11785,6 +11797,7 @@ proc native::lower::ConditionTest {fnVar e test t f} {
 # with a Boolean guard, as a value) to its branches, each of them lowered as
 # a branch to T/F (ConditionBody). Returns never if no path reaches T or F.
 proc native::lower::ConditionIf {fnVar e node t f} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $fnVar fn
     variable hir
     variable guards
@@ -11956,6 +11969,7 @@ proc native::lower::StaticOutcomeOf {fnVar parent e} {
 # releases (Sequence's order) and a `br` on the value (a Boolean constant's
 # releases and a `jump`: an affine value used on the other side only, say).
 proc native::lower::ConditionBody {fnVar body t f} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $fnVar fn
     variable hir
     foreach e [lrange $body 0 end-1] {
@@ -12189,6 +12203,7 @@ proc native::lower::LoopResultFinish {fnVar e mode accReg resultReg} {
 # distinguishable from a plain loop/countloop's own registration) tells
 # the shared Break case there is no accumulator to move on break either.
 proc native::lower::ListLoop {fnVar e node} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $fnVar fn
     variable hir
     variable context
@@ -12285,6 +12300,7 @@ proc native::lower::ListLoop {fnVar e node} {
 # HIR's analyses (the specialization's calls, the ownership releases) never
 # saw it as code that runs.
 proc native::lower::IterationBody {fnVar e body} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $fnVar fn
     variable hir
     if {$body ne "" && ![hir::get $hir [lindex $body 0] reachable]} {

@@ -196,8 +196,10 @@ Keep it so:
   STACK, retry, rewrite source before parsing, or add a nesting limit or a
   diagnostic for depth. `hir::Deep` and `core::deep::run` are drivers,
   never limit raisers.
-* **A walk proportional to arbitrary nesting uses an explicit work stack
-  or the guard.** A guarded procedure reaches its caller only through
+* **A parser/build/type/lowering walk proportional to arbitrary
+  expression nesting should use an explicit work stack or another
+  depth-safe representation** -- here the guard's segments, whose stack is
+  the driver's. A guarded procedure reaches its caller only through
   `upvar 1` or `uplevel 1` (deeper levels are another segment's), never
   yields, and passes no namespace variable by another name (`upvar #0
   ::x y`): a segment takes its caller's variables by value and gives them
@@ -212,7 +214,7 @@ Keep it so:
   `in`/`ni`, `lsort`, `switch` or a dict key on a syntax or AST node
   gives every node of its subtree a string, and `concat` gives one to every
   element of a list after the first -- quadratic memory in the nesting
-  (530 MB for a List literal 400 deep). Join node lists with `list
+  (590 MB for a List literal 400 deep). Join node lists with `list
   {*}...`, search syntax with `hir::syntax::words`.
 * The reference interpreter's run (core::interp, core::forms, a Botlish
   call) is the program's own recursion, not the compiler's: it stays under

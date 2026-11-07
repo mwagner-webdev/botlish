@@ -14,7 +14,7 @@
 
 namespace eval dsn {
     variable kinds {paren rbin lbin flat neg not list struct project call
-        method or and elif ifnest fnnest handler mixed}
+        method or and elif ifnest fnnest handler mixed typed pattern loops affine inject layout cond}
     variable malformedKinds {paren list struct call}
 }
 
@@ -187,6 +187,108 @@ proc dsn::specimen {kind n} {
                 }
             }
             return [dict create source "${text}x = $s\nx\n" value [ListShown $levels]]
+        }
+        typed {
+            # A parameter's written type List[List[...int...]] N deep, given
+            # a List literal as deep: the outermost List has one element.
+            set type "[string repeat List\[ $n]int[string repeat \] $n]"
+            set text "import std::list\n\nfn f(x: $type) -> int:\n    return std::list::length(x)\n\n"
+            return [dict create source "${text}f([string repeat \[ $n]1[string repeat \] $n])\n" value 1]
+        }
+        pattern {
+            # The struct chain of `struct`, taken apart by one destructuring
+            # pattern {next: {next: ... {value: y}}} N deep.
+            set text ""
+            for {set i 0} {$i < $n} {incr i} {
+                append text "struct D$i:\n    next: D[expr {$i + 1}]\n"
+            }
+            append text "struct D$n:\n    value: int\n"
+            set s "D$n {value: 9}"
+            for {set i [expr {$n - 1}]} {$i >= 0} {incr i -1} {
+                set s "D$i {next: $s}"
+            }
+            set pattern "[string repeat "\{next: " $n]\{value: y\}[string repeat \} $n]"
+            return [dict create source "${text}x = $s\n$pattern = x\ny\n" value 9]
+        }
+        loops {
+            # N nested loops, cycling a collecting loop over [1], a counted
+            # collecting loop from 1 through 1 and a fold over [1] from []
+            # (each one iteration), around [1]: each collecting loop wraps
+            # its body's value in a List, a fold is its body's value.
+            set text "y = "
+            set depth 1
+            for {set i 0} {$i < $n} {incr i} {
+                switch -- [expr {$i % 3}] {
+                    0 { append text "[Indent $i]loop x$i in \[1\]:\n"; incr depth }
+                    1 { append text "[Indent $i]loop x$i from 1 through 1:\n"; incr depth }
+                    2 { append text "[Indent $i]fold x$i in \[1\] with intermediate a$i \[\]:\n" }
+                }
+            }
+            set text "y = [string trimleft [string range $text 4 end]]"
+            append text "[Indent $n]\[1\]\ny\n"
+            return [dict create source $text value [ListShown $depth]]
+        }
+        affine {
+            # The struct chain built in one expression, its innermost field a
+            # coroutine handle: every struct of the chain is affine. Made
+            # twice, passed, returned and dropped; main's value is 1.
+            set text "import std::coroutine\n"
+            for {set i 0} {$i < $n} {incr i} {
+                append text "struct A$i:\n    next: A[expr {$i + 1}]\n"
+            }
+            set c {Coroutine{args: [], return: int}}
+            append text "struct A$n:\n    c: $c\nfn worker(seed: int) -> int:\n    yield seed\n    seed\n"
+            append text "fn make(seed: int) -> $c:\n    coroutine \{step\} = worker(seed)\n    step\n"
+            set s "A$n \{c: make(1)\}"
+            for {set i [expr {$n - 1}]} {$i >= 0} {incr i -1} {
+                set s "A$i \{next: $s\}"
+            }
+            append text "fn build() -> A0:\n    $s\nfn pass(x: A0) -> A0:\n    x\n"
+            append text "fn main() -> int:\n    a = build()\n    b = pass(a)\n    pass(build())\n    1\nmain()\n"
+            return [dict create source $text value 1]
+        }
+        inject {
+            # N nested `inject no context:` blocks around 1.
+            set text "fn f() -> int:\n"
+            for {set i 1} {$i <= $n} {incr i} {
+                append text "[Indent $i]inject no context:\n"
+            }
+            append text "[Indent [expr {$n + 1}]]1\nf()\n"
+            return [dict create source $text value 1]
+        }
+        layout {
+            # A layout field `array 1 of array 1 of ... U8` N deep, parsed
+            # from one byte: its value is a List N deep, the outermost of
+            # length 1.
+            set repr std::binary::U8
+            for {set i 0} {$i < $n} {incr i} {
+                set repr "array 1 of $repr"
+            }
+            set text "import std::abi::bytes\nimport std::binary\nimport std::byte\nimport std::list\n\n"
+            append text "layout L:\n    size 1\n    align 1\n    field a: $repr at 0\n\n"
+            append text "fn g() -> int:\n    b = std::byte::from_int(7):\n        on std::byte::BelowRange:\n            0\n        on std::byte::AboveRange:\n            255\n"
+            append text "    r = std::binary::parse(L, std::abi::bytes::from_list(\[b\])):\n        on LayoutLengthMismatch:\n            return 0\n"
+            append text "    std::list::length(r.a)\n\ng()\n"
+            return [dict create source $text value 1]
+        }
+        cond {
+            # One Boolean condition N deep -- `and`, `or` and `not not` in
+            # turn, each around a parenthesized rest, the innermost true --
+            # branched on by an `if` at the top level and by one in a
+            # collecting loop's body (a region consumer): true each time.
+            set c "v == 5"
+            for {set i [expr {$n - 1}]} {$i >= 0} {incr i -1} {
+                set k [expr {1000000 + $i}]
+                switch -- [expr {$i % 3}] {
+                    0 { set c "v != $k and ($c)" }
+                    1 { set c "v == $k or ($c)" }
+                    2 { set c "not not ($c)" }
+                }
+            }
+            set text "v = 5\nz = if $c:\n    1\nelse:\n    0\n"
+            append text "ys = loop v2 in \[5\]:\n    if [string map {"v " "v2 "} $c]:\n        1\n    else:\n        0\n"
+            append text "\[z, ys\]\n"
+            return [dict create source $text value {[1, [1]]}]
         }
         default {
             error "dsn::specimen: unknown kind \"$kind\""

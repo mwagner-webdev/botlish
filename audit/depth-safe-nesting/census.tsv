@@ -138,3 +138,63 @@
 ::hir::static::Node	static sites	decided static blocks replaced in nested syntax
 ::hir::static::Value	static sites	decided static blocks replaced in nested syntax (a value position)
 ::hir::syntax::CollectBindNames	static sites	the names a nested syntax node binds
+::surface::parser::Pattern	parse	a destructuring pattern's nested field patterns
+::surface::parser::TypeExpr	parse	a written type's arguments (List[List[...]], Fn{...})
+::surface::ast::PatternIds	AST	structural ids of a nested destructuring pattern
+::surface::ast::PatternText	AST text	the AST printer's nested patterns
+::surface::ast::showType	AST text	the AST printer's written types
+::surface::lower::Projections	surface lowering	a nested pattern's projections, one level per nested field pattern
+::surface::modules::TypeRefs	load	qualified names in a written type's arguments
+::hir::resolve::ResolveTypeExpr	resolution	a written type's arguments resolved
+::hir::resolve::ShowTypeExpr	resolution	a written type shown in a diagnostic
+::native::lower::Struct	native lowering	HIR to NIR, one call per nested expression
+::native::rawabi::Call	native lowering	raw ABI walk
+::hir::affine::Descriptor	ownership	an affine type's drop descriptor, one level per owned component (a chain of declarations is as deep as it is long)
+::hir::affine::DescriptorOf	ownership	an affine type's drop descriptor, one level per owned component (a chain of declarations is as deep as it is long)
+::hir::affine::Seq	ownership	the affine flow, one call per nested sequence (a loop's body)
+::hir::completions::EvalListloop	completions	completion analysis (also nests per static call: the call chain)
+::hir::completions::ExitsLoop	completions	whether a nested loop body exits its loop
+::hir::static::Sequence	static sites	decided static blocks replaced in nested syntax (a sequence)
+::surface::parser::Loop	parse	a loop's header and suite
+::surface::lower::LoopSyntax	surface lowering	AST to HIR syntax, one call per nested loop
+::core::compiler::CompileListLoop	Tcl compiler	code generation, one call per nested expression
+::native::lower::ListLoop	native lowering	HIR to NIR, one call per nested expression
+::native::lower::IterationBody	native lowering	HIR to NIR, one call per nested expression
+::native::lower::DeferredNeeds	native lowering	HIR to NIR, one call per nested expression
+::native::lower::Condition	native lowering	a branch-form condition's Boolean structure (BRANCH-FORM-BOOLEAN-LOWERING.md)
+::native::lower::ConditionIf	native lowering	a branch-form condition's Boolean structure (BRANCH-FORM-BOOLEAN-LOWERING.md)
+::native::lower::ConditionBody	native lowering	a branch-form condition's Boolean structure (BRANCH-FORM-BOOLEAN-LOWERING.md)
+::native::lower::EmitRegionConsumerCondition	native lowering	an inlined region consumer's condition and body
+::native::lower::EmitRegionConsumerBody	native lowering	an inlined region consumer's condition and body
+::hir::modulebinding::ContextExpr	module bindings	a module binding's value, one call per nested expression
+::hir::modulebinding::ImmutableExpr	module bindings	a module binding's value, one call per nested expression
+::hir::injection::Seq	injection	the injection proof's provenance walk over nested blocks
+::hir::injection::Tau	injection	the injection proof's provenance walk over nested blocks
+::hir::layouts::CopyType	layouts	a layout representation, one level per nested array, union or record
+::hir::layouts::ReprDescriptor	layouts	a layout representation, one level per nested array, union or record
+::hir::layouts::ReprOfTerm	layouts	a layout representation, one level per nested array, union or record
+::hir::layouts::ReprPointerPath	layouts	a layout representation, one level per nested array, union or record
+::hir::layouts::ReprTerm	layouts	a layout representation, one level per nested array, union or record
+::hir::layouts::ReprText	layouts	a layout representation, one level per nested array, union or record
+::hir::layouts::ReprUnionAt	layouts	a layout representation, one level per nested array, union or record
+::hir::layouts::ReprUnionPath	layouts	a layout representation, one level per nested array, union or record
+::hir::layouts::ResolveArrayTerm	layouts	a layout representation, one level per nested array, union or record
+::hir::layouts::ResolveRepr	layouts	a layout representation, one level per nested array, union or record
+::hir::layouts::ShowTerm	layouts	a layout representation, one level per nested array, union or record
+::hir::layouts::ShowTypeExpr	layouts	a layout representation, one level per nested array, union or record
+::hir::layouts::WithLeafType	layouts	a layout representation, one level per nested array, union or record
+::hir::layouts::WordsFormats	layouts	a layout representation, one level per nested array, union or record
+::hir::layouts::align	layouts	a layout representation, one level per nested array, union or record
+::hir::layouts::size	layouts	a layout representation, one level per nested array, union or record
+::native::lower::ArrayCheck	native lowering	a layout representation's reads, writes and checks
+::native::lower::ArrayRead	native lowering	a layout representation's reads, writes and checks
+::native::lower::LayoutLeaves	native lowering	a layout representation's reads, writes and checks
+::native::lower::ReprHasArrays	native lowering	a layout representation's reads, writes and checks
+::native::lower::ReprRead	native lowering	a layout representation's reads, writes and checks
+::native::lower::ReprWrite	native lowering	a layout representation's reads, writes and checks
+::native::lower::ViewBase	native lowering	a layout representation's reads, writes and checks
+::core::compiler::ArrayOfRecords	Tcl compiler	a layout representation's leaves and values
+::core::compiler::LayoutLeaves	Tcl compiler	a layout representation's leaves and values
+::core::compiler::LayoutValueText	Tcl compiler	a layout representation's leaves and values
+::surface::parser::ArrayTypeExpr	parse	a written `array N of ...` representation
+::surface::parser::Injection	parse	an inject block's header and suite

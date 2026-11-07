@@ -677,6 +677,7 @@ proc hir::resolve::SetField {hirVar e key value} {
 # only those are variables. Everywhere else such a name is the unknown type
 # it always was.
 proc hir::resolve::ResolveTypeExpr {typeExpr {ns ""} {imprints 0}} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     if {[llength $typeExpr] == 1} {
         if {($imprints eq "1" || ($imprints ni {0 ""} && $typeExpr in $imprints))
                 && [hir::imprint::IsVariableName $typeExpr]
@@ -1050,6 +1051,7 @@ proc hir::resolve::IsApplyTypeExpr {typeExpr} {
 }
 
 proc hir::resolve::ShowTypeExpr {typeExpr} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     if {[llength $typeExpr] == 1} {
         return $typeExpr
     }

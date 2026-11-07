@@ -580,6 +580,7 @@ proc surface::lower::TempName {pattern} {
 
 # The binds of the fields of PATTERN, each reading the struct bound to TEMP.
 proc surface::lower::Projections {pattern temp} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     set nodes {}
     foreach field [dict get $pattern fields] {
         set id [dict get $field id]
@@ -1102,6 +1103,7 @@ proc surface::lower::Node {node} {
 # listloop, countloop or plain loop by its clauses, whether it collects or
 # folds (Node's `loop` case adds a fold's intermediate).
 proc surface::lower::LoopSyntax {node origin} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     set body [dict get $node body]
     if {[llength [dict get $node clauses]] > 1} {
         set domains {}

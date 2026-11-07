@@ -2,13 +2,15 @@
 # (DEPTH-SAFE-NESTED-EXPRESSION-FRONTEND-MILESTONE-1.md).
 #
 #   tclsh9.0 audit/depth-safe-nesting/tools/census.tcl ?-depth N?
-#       ?-kinds KIND,...? ?-scenarios NAME,...? ?-out FILE?
+#       ?-kinds KIND,...? ?-scenarios NAME,...? ?-fraction F? ?-out FILE?
 #
 # Traces every procedure of the compiler (surface, hir, core's IR check and
 # Tcl compiler, native lowering, the service) while each specimen kind N deep
 # (specimens.tcl; 24 by default) goes through each scenario (scenarios.tcl),
 # counting each procedure's simultaneous activations. A procedure active at
-# least N/2 times at once recurses with the program's nesting: the census
+# least N/F times at once (F 2 by default; a specimen that cycles through K
+# forms, such as `loops`, shows a procedure of one form N/K times: use F
+# at least K) recurses with the program's nesting: the census
 # (audit/depth-safe-nesting/census.tsv) must list it, and it must start with
 # the guard (core/deep.tcl). Prints, per procedure found, its deepest count,
 # the kind and scenario that showed it and whether the census lists it; exit
@@ -16,7 +18,7 @@
 # runtime's calls are left out: they are a program's run, not its
 # compilation (the milestone's report, "The run").
 
-set options [dict create -depth 24 -kinds "" -scenarios "" -out ""]
+set options [dict create -depth 24 -kinds "" -scenarios "" -fraction 2 -out ""]
 foreach {option value} $argv {
     if {![dict exists $options $option]} {
         error "unknown option $option"
@@ -98,7 +100,7 @@ file delete -force $dir
 set missing 0
 set rows {}
 foreach name [array names deepest] {
-    if {$deepest($name) * 2 >= $depth} {
+    if {$deepest($name) * [dict get $options -fraction] >= $depth} {
         set inCensus [expr {$name in $listed}]
         if {!$inCensus} {
             incr missing

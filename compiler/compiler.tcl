@@ -1437,6 +1437,7 @@ proc core::compiler::CompileNativeCall {ctxVar e callee name argOps} {
 # field with a count. An array of nested layouts or pointers has no such
 # leaf (ArrayOfRecords): the reference implementation runs that layout.
 proc core::compiler::LayoutLeaves {descriptor base path} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     set leaves {}
     set slot 0
     foreach field [lindex $descriptor 3] {
@@ -1465,6 +1466,7 @@ proc core::compiler::LayoutLeaves {descriptor base path} {
 # elements are not scalars -- nested layouts or pointers -- which no one
 # `binary scan` field reads.
 proc core::compiler::ArrayOfRecords {descriptor} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     foreach field [lindex $descriptor 3] {
         set repr [lrange $field 2 end]
         if {[lindex $repr 0] eq "layout" && [ArrayOfRecords [lindex $repr 1]]} {
@@ -1493,6 +1495,7 @@ proc core::compiler::LeafCount {dims} {
 # The Tcl expression building the LayoutStruct DESCRIPTOR describes from the
 # scanned variables VARS (consumed in LayoutLeaves order).
 proc core::compiler::LayoutValueText {descriptor varsVar} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $varsVar vars
     set names {}
     set values {}
@@ -2252,6 +2255,7 @@ proc core::compiler::LoopEntry {e result acc} {
 # Exhausting the items normally (no break) sets $result to the List built
 # from every iteration's own (non-`never`) body value, in order.
 proc core::compiler::CompileListLoop {ctxVar e} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $ctxVar ctx
     variable hir
     set iterable [CompileExpr ctx [N $e iterable]]
