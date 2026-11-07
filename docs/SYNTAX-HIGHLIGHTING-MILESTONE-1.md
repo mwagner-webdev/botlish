@@ -231,20 +231,54 @@ development.
 | tests/lsp.test's `lsp-proto-initialize` and the five `lsp-tokens-*` | passed |
 | tests/main-cli.test | 68 passed, 4 skipped (native not built) |
 | editors/vscode `npm test` (grammar.test.js included) | passed |
-| tests/lsp-neovim.test's `lsp-neovim-highlighting` | not run here: Neovim is not installed, and downloading it was refused in this environment; CI installs its pinned release |
+| tests/lsp-neovim.test's `lsp-neovim-highlighting` | not run here (Neovim is not installed, and downloading it was refused in this environment); CI's dispatched tests.yml installs its pinned release (section 9.2) |
 | the IR round trip and validator, the words, over 1,504 files | 0 problems |
 | the AST of every file, `main` against this change | identical |
 | `tools/mutant-catalogs.tcl` | 0 problems after updating two compiler-service mutants of main.tcl, both killed again |
 
-The local run of the whole Tcl layer and the golden suites is in section 9.1.
+The local run of the whole Tcl layer and the golden suites, and the harnesses, are section 9.1.
 
-### 9.1 The local run
+### 9.1 The local run and the harnesses
 
-`tests/local.tcl -golden-backends "interp compile"` (every Tcl test file on
-interp and compile, the golden suites on the Tcl backends: the native
-backend is not built here) and `audit/syntax-highlighting/tools/mutate.tcl`
-were still running when this report was first committed; their results
-follow in the next commit.
+The native backend is not built in the container this was done in (it needs
+a newer Rust toolchain than the one installed), so the local run covered the
+Tcl backends: `tests/local.tcl -golden-backends "interp compile"`.
+
+- **Golden suites:** all 118 pass on interp and compile, through the
+  front-end cache.
+- **Tcl test files** (272, each on interp and compile): 198 runs pass. The
+  others fail the tests that compare all four backends, `NATIVE NOT-BUILT`
+  for the two native ones: 1,070 failing tests in all. The failures whose
+  text does not name the native backend (69 tests, the "backend
+  independent" comparisons among them) are in 21 files; each of those files
+  was run on `main` and on this change, and the two fail **the same 366
+  tests**. `traits.test` and `c-bindgen.test` were also compared by name:
+  identical. The one failure this change did cause was an expectation of
+  its own: `cs-export-import-derived` lists a revision's derived indexes,
+  which now include `tokens` (updated).
+- **Mutation testing:** `audit/syntax-highlighting/tools/mutate.tcl`, 17
+  mutants, 17 killed, each by a test its `!!` line names. The two
+  compiler-service mutants of main.tcl updated to the new code (section 9)
+  are killed again.
+- **Syntax recovery's fuzzer** (`audit/syntax-recovery/tools/fuzz.tcl`,
+  seeds 1, 7 and 23; it injects tabs and line breaks, the lexer defect's
+  ground): seeds 7 and 23 clean. Seed 1 reports two failures of one case,
+  which **reproduce on `main`**: deleting a newline between two field
+  lines of icy-tower's `struct Player` makes the declaration a hole, and
+  `struct World`'s field of type `Player` then raises "unknown type" as a
+  compiler failure instead of depending on the hole (outcome `failure`, the
+  syntax error unreported). A defect of syntax recovery, not of this change;
+  left for its own fix.
+
+### 9.2 The branch's CI
+
+The first push's runs: the Linux and arm64 canaries, the icy-tower
+workflows on Windows and macOS pass. The Windows canary failed eight tests
+of tests/syntax-highlighting.test, two portability mistakes of the tests
+(an expected `tclsh9.0.exe` where main.tcl names itself without `.exe`;
+`/dev/null` as Vim's input), fixed in the next commit. The canaries do not
+install Neovim, so `lsp-neovim-highlighting` runs only in a dispatched
+tests.yml run of the branch.
 
 ## 10. Limitations
 
