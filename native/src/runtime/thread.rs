@@ -1560,6 +1560,13 @@ mod tests {
         assert_eq!(rooms(&b), 1, "then the next waiter, even with the queue drained");
         assert_eq!(send(&mut t, Some((&b, 2))), T_DELIVERED);
         assert_eq!(send(&mut t, None), T_DELIVERED, "with nobody waiting, a free place is anyone's");
+        // A lone waiter's granted place is held for it although nobody else
+        // waits: the "in line" rule refuses no one then, the grant does.
+        assert_eq!(send(&mut t, Some((&a, 3))), T_FULL);
+        take(&mut t);
+        assert_eq!(rooms(&a), 1);
+        assert_eq!(send(&mut t, None), T_FULL, "a granted place is held for its waiter");
+        assert_eq!(send(&mut t, Some((&a, 3))), T_DELIVERED);
         let e = t.endpoint_mut(id).expect("open");
         assert!(e.waiters.is_empty() && e.granted.is_empty());
     }
