@@ -454,8 +454,9 @@ def redact(text):
 !! test_release.Stages.test_stapling_required
 ## examples/games/icy-tower/macos/release.py
 <<<<
-        work.require("staple", code="MACOS-GATEKEEPER")
+        work.require("staple", "verify-signature:stapled", code="MACOS-GATEKEEPER")
 ====
+        work.require("verify-signature:stapled", code="MACOS-GATEKEEPER")
 >>>>
 ## examples/games/icy-tower/macos/release.py
 <<<<
@@ -473,6 +474,40 @@ def redact(text):
 ====
         if False:
             work.add("gatekeeper", False, facts)
+>>>>
+
+@@ gatekeeper-origin-required Gatekeeper's acceptance needs an origin line, which macOS 15's spctl never prints (the first release run's false refusal)
+!! test_release.Stages.test_gatekeeper_without_origin_line
+## examples/games/icy-tower/macos/release.py
+<<<<
+        ok = code == 0 and re.search(r":\s*accepted\b", text) and "source=Notarized Developer ID" in text
+====
+        ok = code == 0 and re.search(r":\s*accepted\b", text) and "source=Notarized Developer ID" in text \
+            and re.search(r"origin=Developer ID Application: .*\(%s\)" % re.escape(team), text)
+>>>>
+
+@@ gatekeeper-origin-unchecked an origin line naming another team's Developer ID is accepted
+!! test_release.Stages.test_gatekeeper_origin_of_another_team_refused
+## examples/games/icy-tower/macos/release.py
+<<<<
+        if wrong:
+====
+        if False:
+>>>>
+
+@@ gatekeeper-team-unanchored Gatekeeper's acceptance is taken without the verified stapled signature of the same bundle
+!! test_release.Stages.test_gatekeeper_requires_the_stapled_signature_verified test_release.Stages.test_gatekeeper_of_another_bundle_than_the_verified_one_refused
+## examples/games/icy-tower/macos/release.py
+<<<<
+        work.require("staple", "verify-signature:stapled", code="MACOS-GATEKEEPER")
+====
+        work.require("staple", code="MACOS-GATEKEEPER")
+>>>>
+## examples/games/icy-tower/macos/release.py
+<<<<
+        if stapled["team"] != team or current_cdhash(app) != stapled["cdhash"]:
+====
+        if False:
 >>>>
 
 @@ tamper-not-tampered the tamper control changes nothing in its copy

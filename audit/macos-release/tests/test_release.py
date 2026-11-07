@@ -462,6 +462,45 @@ class Stages(unittest.TestCase):
         self.refused("package", "has not passed", "--app", self.app, "--out", self.out)
         self.refused("publishable", "MACOS-PUBLISH", "--out", self.out)
 
+    def test_gatekeeper_without_origin_line(self):
+        """macOS 15's spctl prints no origin line for a notarized Developer ID application (run 42290405708:
+        "accepted", "source=Notarized Developer ID" and nothing else): the stapled signature's team stands for it."""
+        self.through_stapling()
+        out = self.ok("gatekeeper", "--app", self.app, "--expect", "notarized")
+        self.assertIn("source=Notarized Developer ID", out)
+        self.assertNotIn("origin=", out)
+        self.ok("tamper", "--app", self.app)
+
+    def test_gatekeeper_origin_of_the_team(self):
+        self.through_stapling()
+        self.configure(spctl_origin="subject")
+        out = self.ok("gatekeeper", "--app", self.app, "--expect", "notarized")
+        self.assertIn("origin=Developer ID Application: ", out)
+
+    def test_gatekeeper_origin_of_another_team_refused(self):
+        self.through_stapling()
+        self.configure(spctl_origin="Developer ID Application: Someone Else (OTHER98765)")
+        self.refused("gatekeeper", "not as team %s's Developer ID application" % fx.TEAM,
+                     "--app", self.app, "--expect", "notarized")
+        self.refused("package", "has not passed", "--app", self.app, "--out", self.out)
+
+    def test_gatekeeper_requires_the_stapled_signature_verified(self):
+        self.through_signing()
+        self.ok("notarize", "--app", self.app, "--timeout", "30")
+        self.ok("staple", "--app", self.app)
+        self.refused("gatekeeper", "stage verify-signature:stapled has not passed",
+                     "--app", self.app, "--expect", "notarized")
+
+    def test_gatekeeper_of_another_bundle_than_the_verified_one_refused(self):
+        self.through_stapling()
+        with open(os.path.join(self.work, "state.json")) as f:
+            st = json.load(f)
+        [s for s in st["stages"] if s["stage"] == "verify-signature:stapled"][-1]["cdhash"] = "0" * 40
+        with open(os.path.join(self.work, "state.json"), "w") as f:
+            json.dump(st, f)
+        self.refused("gatekeeper", "not the one whose stapled signature verify-signature checked",
+                     "--app", self.app, "--expect", "notarized")
+
     def test_stapling_required(self):
         self.through_signing()
         self.ok("notarize", "--app", self.app, "--timeout", "30")

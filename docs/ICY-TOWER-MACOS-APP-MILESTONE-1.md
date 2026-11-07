@@ -100,7 +100,8 @@ far as a runner allows, run on macOS:
 * **Executed, the credential path**: the preflight's 63 tests (every
   mistake of the brief's table, each with its code and remedy, no secret
   printed, nothing written), the stages' 63 tests, the workflow's 23 trust
-  tests, and 70 of 70 mutants killed, on Linux and on macOS; on the
+  tests, and every mutant of the catalog killed (70 of 70 then; 74 of 74
+  since the Gatekeeper correction, section 30), on Linux and on macOS; on the
   runner, a rehearsal with a throwaway identity: the preflight, the
   temporary keychain, the identity selected by its SHA-1, Apple's own
   answer to an unknown key (HTTP 401, classified MACOS-NOTARY-AUTH), never
@@ -1091,10 +1092,17 @@ after stapling, of the stapled bundle (section 32).
 
 ## 30. Gatekeeper
 
-`spctl --assess --type execute --verbose=4`: for a release, `accepted`,
-`source=Notarized Developer ID` and `origin=Developer ID Application: ...
-(TEAM)` are all required -- not a valid signature alone, not a
-non-notarized Developer ID, not a successful extraction or a direct run.
+`spctl --assess --type execute --verbose=4`: for a release, `accepted` and
+`source=Notarized Developer ID` are required -- not a valid signature
+alone, not a non-notarized Developer ID, not a successful extraction or a
+direct run -- of the bundle whose stapled signature `verify-signature
+--label stapled` checked against APPLE_TEAM_ID (the same CDHash: that is
+what makes the accepted application the team's). An `origin=` line, which
+spctl prints on some macOS versions and not on macOS 15, must name the
+team's Developer ID Application certificate when it is there; its absence
+is no refusal. The first release run required it and was refused
+falsely (below; `test_gatekeeper_without_origin_line`, the mutant
+`gatekeeper-origin-required`).
 For the ad hoc bundle the same assessment must be a rejection (a control
 that Gatekeeper decides on the runner). The runner's `spctl --status` is
 recorded, and never changed (no `--master-disable`).
@@ -1107,8 +1115,19 @@ recorded, not changed), and the ad hoc bundle's assessment is a rejection:
     .../out/app/Icy Tower.app: rejected
 
 So Gatekeeper decides on the runner, and a bundle that is merely signed is
-refused. The notarized bundle's `accepted`, `source=Notarized Developer ID`
-is **Credential-blocked** (section 44).
+refused.
+
+**Executed** (run 42290405708, attempt 2, the first release run, macOS
+15): the notarized, stapled bundle is accepted --
+
+    $ spctl --assess --type execute --verbose=4 '.../release-app/Icy Tower.app'
+    .../release-app/Icy Tower.app: accepted
+    source=Notarized Developer ID
+
+-- with no `origin=` line, which the stage then required: it reported
+MACOS-GATEKEEPER on that acceptance, and the release stopped before its
+tamper control, its ZIP and publication (section 44). The rule above is
+the correction.
 
 ## 31. Quarantine and the downloaded artifact
 
@@ -1325,7 +1344,7 @@ the release job compiles nothing; the executable is the game job's.
 Two mutant sets, both in the repository's mutant format, each killed only
 by the check that states the rule it breaks.
 
-**The release pipeline** (`audit/macos-release/mutants.txt`, 70 mutants,
+**The release pipeline** (`audit/macos-release/mutants.txt`, 74 mutants,
 `audit/macos-release/tools/mutate.py`: each applied to a private copy of
 macos/, package-macos.sh, the workflow and the tests, the tests its `!!`
 line names run there):
@@ -1333,11 +1352,12 @@ line names run there):
 | group | mutants |
 |---|---|
 | the credential preflight (14) | base64-permissive, base64-padding-unchecked, p8-double-encoding-accepted, p12-accepts-pem, no-private-key-accepted, certificate-type-unchecked, team-unchecked, apple-chain-unchecked, validity-unchecked, p8-algorithm-unchecked, p8-curve-unchecked, pkcs8-unchecked, p8-layout-unchecked, issuer-uuid-unchecked |
-| the release's stages (33) | preflight-prints-a-secret, continue-after-failed-preflight, test-anchors-in-release, remote-auth-skipped, continue-after-auth-failure, unspecific-auth-unexplained, auth-misclassified, secrets-printed, secret-files-kept, adhoc-fallback, adhoc-signature-accepted, no-hardened-runtime, runtime-unchecked, no-timestamp, timestamp-unchecked, entitlements-unchecked, seal-unchecked, notarization-ignored, rejected-as-accepted, ticket-unchecked, timeout-as-failure, staple-retries-everything, stapling-omitted, gatekeeper-ignored, tamper-not-tampered, zip-modes-unchecked, sums-unchecked, publish-before-final-launch, acceptance-not-required, identity-may-change, ambiguous-identity-chosen, adhoc-publishable, sign-remedy-misleads |
+| the release's stages (36) | preflight-prints-a-secret, continue-after-failed-preflight, test-anchors-in-release, remote-auth-skipped, continue-after-auth-failure, unspecific-auth-unexplained, auth-misclassified, secrets-printed, secret-files-kept, adhoc-fallback, adhoc-signature-accepted, no-hardened-runtime, runtime-unchecked, no-timestamp, timestamp-unchecked, entitlements-unchecked, seal-unchecked, notarization-ignored, rejected-as-accepted, ticket-unchecked, timeout-as-failure, staple-retries-everything, stapling-omitted, gatekeeper-ignored, gatekeeper-origin-required, gatekeeper-origin-unchecked, gatekeeper-team-unanchored, tamper-not-tampered, zip-modes-unchecked, sums-unchecked, publish-before-final-launch, acceptance-not-required, identity-may-change, ambiguous-identity-chosen, adhoc-publishable, sign-remedy-misleads |
 | the bundle's checks (6) | worker-startup-accepted, architecture-unchecked, dynamic-sdl-accepted, permissions-unchecked, executable-name-unchecked, package-replaces-on-failure |
-| the workflow's trust boundary (17) | release-on-pull-requests, release-on-any-ref, pull-request-target, secret-in-game-job, secret-in-script, trace-with-secrets, secret-files-uploaded, release-adhoc, workflow-no-staple, workflow-no-notary-auth, publish-before-release, release-assets-unchecked, upload-submission-zip, release-writes, release-trusts-a-root, dry-run-trusts-its-root, dry-run-blocked-as-passed |
+| the workflow's trust boundary (18) | release-on-pull-requests, release-before-green, release-on-any-ref, pull-request-target, secret-in-game-job, secret-in-script, trace-with-secrets, secret-files-uploaded, release-adhoc, workflow-no-staple, workflow-no-notary-auth, publish-before-release, release-assets-unchecked, upload-submission-zip, release-writes, release-trusts-a-root, dry-run-trusts-its-root, dry-run-blocked-as-passed |
 
-**Executed**: 70 of 70 killed on Linux (this checkout, 165 s); on macOS in
+**Executed**: 74 of 74 killed on Linux (this checkout, 167 s, after the
+Gatekeeper correction of section 30; 70 of 70 when the milestone landed); on macOS in
 every acceptance run, as the game job's step (run 41207619549: 66 of 66,
 the set before its last three; run 41212691891: 68 of 68, 180 s). Every
 named test passes on the unmutated tree first (the harness's baseline), so
@@ -1547,6 +1567,7 @@ run was superseded by the next push unless said otherwise.
 | 41240614881 | 0e90386 | failure | `agent-application` survived the launch checks (LaunchServices activated the agent); the `restart` baseline failed |
 | 41245041656 | bf73c0d | failure | the Info.plist check: 31 of 31 mutants killed; the harness's `app-bundle` baseline failed its LaunchServices lookup in a temporary directory; the session's `restart` failed (section 39) |
 | **41297189955** | **2bc2c92** | **success** | `mutants: true`, `mutants_only: agent-application` (manual): the harness's bundles under the home directory; `baseline app:app-bundle pass`, the agent mutant killed; every step of the job green, the original session's 12 cases and the 13 LaunchServices cases among them |
+| 42290405708 | 1f076e1 (the tag icy-tower-macos-v1.0.0) | failure | the first release run (section 44): attempt 1 MACOS-CERTIFICATE-DECRYPT (the stored password did not open the stored .p12); attempt 2 signed with the Developer ID, played under the hardened runtime, notarized (Accepted), stapled, Gatekeeper `accepted` -- and refused by the stage for a missing `origin=` line (section 30) |
 
 The general workflows started by the same pushes: `icy-tower (windows
 x86-64)` passed at c0f3165 (41205557419), e0231c4 (41207619531), ba18cda
@@ -1565,16 +1586,44 @@ tooling's 63 + 63 + 23 tests), and 70 of 70 release mutants.
 
 ## 44. The release run and its notarization
 
-**Credential-blocked.** No release has run: the seven values are not
-configured in GitHub yet. Sections 25 (the Developer ID signature), 26
-(its authority chain, team and timestamp), 27 (the Developer ID-signed
-application played), 28 (notarization), 29 (stapling), 30 (Gatekeeper's
-notarized verdict), 31 (the notarized download launched), 37 (publication)
-and the release's half of 32 and 38 are therefore **not verified**: the
-code paths are exercised up to Apple's service by the dry run (section 25)
-and in full against the stand-ins (section 40), never by Apple. The first
-release tag pushed after the configuration (sections 10 to 12) runs them;
-its run ID and notarization submission ID belong here.
+The first release tag, `icy-tower-macos-v1.0.0` on 1f076e1 (the newest
+commit of main the release gate found green: docs/CI-RUNS.md, "The tagged
+release"), ran as run 42290405708, in two attempts. Its `tested` job found
+the commit green and its game job passed both times.
+
+* **Attempt 1, Executed**: the preflight refused the configuration,
+  MACOS-CERTIFICATE-DECRYPT -- the stored MACOS_CERTIFICATE_PASSWORD did
+  not open the stored .p12 (its Base64 decoded to a well-formed PKCS#12
+  container, its MAC did not verify) -- and the other five values passed.
+  Nothing was signed or sent to Apple; the cleanup ran. The password was
+  set again from the file it opens.
+* **Attempt 2, Executed**, every stage through stapling:
+  - the preflight (all seven values, under Apple's anchors), the identity
+    (the first release), the temporary keychain, and Apple's validation of
+    the notarization credentials;
+  - the Developer ID signature: `Developer ID Application: ...
+    (2QN7D8A7NA) < Developer ID Certification Authority < Apple Root CA`,
+    team 2QN7D8A7NA, identifier com.avanticonic.botlishtower, flags
+    `runtime`, a secure timestamp;
+  - the Developer ID-signed application played under the hardened runtime
+    (section 27: 8 of 8 cases EXECUTED);
+  - notarization: submission `ca9336f5-c461-4f04-8c4b-9b7c37cefc60`,
+    **Accepted** with 0 issues in its log, 24 s from upload to the result,
+    its ticket holding the bundle's CDHash
+    9cf56a4fcb3df07ee3e06102dd787966c4ba86c8;
+  - stapling (`stapler validate` passes) and the stapled signature
+    verified again;
+  - Gatekeeper's verdict, `accepted`, `source=Notarized Developer ID`
+    (section 30), which the stage then refused for its missing `origin=`
+    line: the release stopped there, with no tamper control, ZIP, final
+    launch or publication. The cleanup ran and was verified.
+
+Sections 25 to 30 are therefore Executed by Apple's service and the
+runner. Section 31 (the notarized download launched), the tamper control
+of a notarized bundle (33), the release ZIP (32), its provenance (38) and
+publication (37) are **not verified yet**: they need a release tag on a
+green commit that holds the corrected Gatekeeper stage (a new version: a
+tag names one commit, once).
 
 ## 45. Troubleshooting a release
 
@@ -1588,6 +1637,13 @@ its run ID and notarization submission ID belong here.
   combination of three structurally valid values (re-copy the Key ID and
   Issuer ID of the key whose .p8 you stored, or create a new key), and
   MACOS-NOTARY-SERVICE that Apple could not be reached (retry).
+* **MACOS-CERTIFICATE-DECRYPT with a .p12 made by OpenSSL.** That route
+  (a private key and a certificate signing request made with `openssl
+  req`, the certificate downloaded from Apple, `openssl pkcs12 -export`)
+  has two passwords: the private key's pass phrase and the .p12's export
+  password. MACOS_CERTIFICATE_PASSWORD is the export password. Test it
+  first: `openssl pkcs12 -in FILE.p12 -info -noout` asks for it and
+  answers `Mac verify error` for any other.
 * **Certificate identity errors.** "no private key": the export took the
   certificate without its key (select the identity under My Certificates).
   "does not match its certificate": a key of another request (export from
@@ -1773,7 +1829,7 @@ Added:
 | `examples/games/icy-tower/macos/apple-ca/` | Apple Root CA and the Developer ID Certification Authorities G1 and G2 (public, pinned) |
 | `audit/macos-release/tests/test_credentials.py`, `test_release.py`, `test_workflow.py` | the preflight's negative tests, the stages against stand-ins and the bundle's controls, the workflow's trust boundary |
 | `audit/macos-release/tools/fixtures.py`, `machofake.py`, `stub-tool.py` | synthetic credentials, synthetic Mach-O files, recording stand-ins of Apple's tools |
-| `audit/macos-release/tools/mutate.py`, `audit/macos-release/mutants.txt` | the release pipeline's 70 mutants and their harness |
+| `audit/macos-release/tools/mutate.py`, `audit/macos-release/mutants.txt` | the release pipeline's 74 mutants and their harness |
 | `audit/macos-release/requirements.txt` | the tests' environment (PyYAML beside the release's) |
 | `audit/icy-tower/tools/app-abi-check.py` | macos_app.bot's C declarations against the SDK |
 | `docs/ICY-TOWER-MACOS-APP-MILESTONE-1.md` | this report |
