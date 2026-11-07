@@ -1,0 +1,18 @@
+{
+  "schema": 4,
+  "name": "hostgen",
+  "version": "0.1.0",
+  "dependencies": {},
+  "tools": {
+    "host-module": {
+      "protocol": 1,
+      "summary": "generates a JavaScript-like host module (spec, adapter, package and build manifests) over a Botlish native library",
+      "programs": {
+        "linux-x86_64": "tools/linux-x86_64/host-module"
+      },
+      "inputs": [
+        "native-library"
+      ]
+    }
+  }
+}

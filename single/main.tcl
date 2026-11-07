@@ -40,12 +40,14 @@
 #      linker read the runtime archive there. Unless the invocation is only
 #      the usage summary (no arguments), -help, -version, the language
 #      server (-lsp, -lsp-worker: they analyze and never reach a backend) or
-#      a package command (add, install, update, remove, verify, package:
-#      PACKAGE-MANAGER-MILESTONE-1.md, which never compile anything), it
+#      a package command (add, install, update, remove, verify, package,
+#      native, and tool and tools, which run a package's own program and
+#      never the compiler themselves: PACKAGE-MANAGER-MILESTONE-1.md,
+#      EXTERNAL-COMPILER-TOOLS-AND-TARGET-PACKAGES-MILESTONE-1.md), it
 #      copies the executables into a per-build cache directory (once per
 #      build: later runs find them there), and the runtime archive too for a
 #      run that may link a native executable (-emit-native-executable, a
-#      native backend). The application installs nothing: its files are run
+#      native backend, -emit-native-library). The application installs nothing: its files are run
 #      and linked where they are, signed, in the bundle,
 #   3. runs the checkout's own main.tcl, unchanged, with the same arguments:
 #      every option main.tcl documents works the same way.
@@ -165,6 +167,12 @@ proc ::single::MayLink {argv} {
     for {set i $run} {$i < [llength $argv]} {incr i} {
         switch -- [lindex $argv $i] {
             -emit-native-executable { return 1 }
+            -emit-native-library {
+                # A library's object is linked with the runtime archive
+                # (native/library.tcl's RuntimeArchive): the single
+                # executable's is libbotlish_runtime.a.
+                return 1
+            }
             -backend { set backend [lindex $argv [incr i]] }
             -warnings - -target - -L - -F { incr i }
             default {
@@ -207,7 +215,7 @@ if {[info exists ::single::bundle]} {
     # runtime_archive), and there is no stub: `auto` is the system linker.
     set ::env(BOTLISH_NATIVE_BIN) [file join $::single::bundle MacOS botlish-native]
 } elseif {$::argv ne "" && [lindex $::argv 0] ni {-help --help -h -version --version}
-        && [lindex $::argv 0] ni {add install update remove verify package native}
+        && [lindex $::argv 0] ni {add install update remove verify package native tool tools}
         && "-lsp" ni $::argv && "-lsp-worker" ni $::argv} {
     # The usage summary, -help and -version run no program: they install
     # nothing (main.tcl answers them before it loads the compiler). Nor do

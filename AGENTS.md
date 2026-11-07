@@ -5829,6 +5829,88 @@ the experiment's Tasks app with `audit/raven-cleanroom/tools/build-app.sh`
 (the clean room's consumer build) and publishes it as an artifact: run it
 after a change to `build-app.sh` or the release.
 
+## External tools and target support packages
+
+A package may carry tools and target runtime artifacts
+(EXTERNAL-COMPILER-TOOLS-AND-TARGET-PACKAGES-MILESTONE-1.md; BOTLISH-TOOLS.md
+is the protocol, BOTLISH-JSON.md section 14 the key): `botlish.json` schema
+4's `tools`, run only by `botlish tool` (pm/tools.tcl, a package-manager
+command: the compiler is not loaded); a target support package's
+`botlish-target-support.json`, read only by `-emit-native-executable
+-target-support NAME` (native/support.tcl); and the native library
+manifest, schema 2 (native/library.tcl's `Manifest`), what tools consume.
+Keep it so:
+
+* Installation never implies activation: no operation but `tool` runs a
+  package's program -- not add, install, update, remove, verify, a view, an
+  import, a compilation, `tools` -- and no installed file is ever
+  executable (the program is copied into a private directory and made
+  executable there, by `tool`, after its bytes are checked against the
+  installation record). Never add a hook, a post-install step, automatic
+  activation, a compiler pass, a plugin loaded into the compiler process,
+  a grammar extension, an intrinsic or a diagnostic contributed by a
+  package, or a tool the compiler starts by itself.
+* Resolution is explicit: only the project's direct dependencies provide
+  runnable tools; a short name two of them declare is TOOL-AMBIGUOUS, never
+  resolved by order; a transitive package's tool is TOOL-NOT-DIRECT; an
+  unknown protocol, a program for another host (the host's program runs,
+  whatever -target says) and a changed or missing program are refused
+  before anything runs. Never fall back to another tool.
+* The process boundary: a tool's words reach it exactly, never as shell
+  text -- Tcl's exec reads words starting with <, >, | or 2> as
+  redirections, so Unix goes through the fixed /bin/sh trampoline
+  (`pm::tools::trampoline`: positional parameters only), and a test that
+  passes such words to a command does the same. The tool's exit status is
+  the command's; a signal, or a change to the installation (the snapshot
+  against the record taken before it ran), fails it. The project stays
+  locked while a tool runs.
+* Tool packages use ordinary dependencies: their locks join the one graph
+  (pm/graph.tcl) like any package's; never resolve a tool's dependencies
+  apart, never weaken a lock for one, no peer dependencies.
+* The request carries paths, names and facts, never a value of the
+  environment (only whether a declared variable is set), a time or compiler
+  memory; a tool consumes artifacts, never the HIR. A new request member or
+  input kind is a new protocol number.
+* The manifest binds its build: each artifact's SHA-256, the runtime ABI
+  fingerprint, ownership and release functions as data. Its keys stay in
+  their fixed order and two builds give the same bytes; `tool -artifact`
+  refuses a manifest whose files differ, of another schema or target.
+  Library mode links with libbotlish_native.a beside the driver, else the
+  runtime archive (what the single executable carries); single/main.tcl's
+  `MayLink` counts -emit-native-library.
+* Target support is declarative and explicit: the compiler reads a
+  package's descriptor only when -target-support names it, from the
+  compilation target's package tree (never the host's), and checks it --
+  and the runtime archive's own identity record (`runtime::aotimage::
+  identity_record`: the triple and `ABI_FINGERPRINT`, a static of
+  native/runtime-archive, read from the bytes, never by running anything)
+  -- before any linker runs. Never accept an archive for a target by its
+  architecture alone (another OS or C library ABI is refused), never fall
+  back to the driver's own runtime archive when the named package is
+  missing, never let a descriptor add a linker flag (its system libraries
+  are compared with the system linker's, never added), and never give a
+  target support package code generation: an unknown target stays unknown.
+  `ABI_FINGERPRINT` is the same digest `abi_fingerprint()` always computed
+  (`abi_fingerprint_constant_is_the_digest_of_its_words`): never fork it.
+
+If you change pm/tools.tcl, schema 4 (pm/descriptor.tcl), the tool command
+dispatch (pm/commands.tcl, main.tcl, single/main.tcl), native/support.tcl,
+`-target-support` (main.tcl, native::executable's -runtime-archive, the
+driver's --runtime-archive and `runtime-abi`), the identity record, the
+manifest, library mode's runtime archive, audit/external-tools/src/ or its
+packages, run `tests/external-tools.test`, `tests/native-library.test`,
+`tests/package-manager.test` (its descriptor tests), `tests/main-cli.test`,
+`audit/external-tools/tools/mutate.tcl` (every mutant in its `mutants.txt`
+must still apply and be killed by a test its `!!` line names: update a
+mutant's text when you change the code it mutates, keeping it a mutant of
+the same rule), `cargo test --release --manifest-path native/Cargo.toml --lib
+aotimage` for the fingerprint or the record, `tests/system-linker.test` for
+the driver's runtime archive, and, after `single/build.sh`, the clean room
+(`audit/external-tools/tools/packages.sh OUT native/target/release
+single/out/botlish`, then `audit/external-tools/cleanroom/cleanroom.sh
+single/out/botlish OUT/repo RESULTS`; the single-executable workflow's
+build job runs both).
+
 ## Diagnostic recovery
 
 A rejected compilation reports every independent diagnostic it finds and

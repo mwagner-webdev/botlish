@@ -1,0 +1,6 @@
+# abi_tools.bot -- the abi_tools package's one module. The package's point
+# is its tool, emit-caller (botlish tool emit-caller), which no import runs:
+# importing this module gives a program nothing but this constant.
+
+# The tool protocol the package's tools speak.
+protocol = 1
