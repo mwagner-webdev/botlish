@@ -163,11 +163,11 @@ proc dsnWalk::Top {n {fail 0}} {
         [lindex [dict get $state after] end] [llength $log] [info exists made$n]]
 }
 
-test dsn-mechanism-walk {a guarded walk 20000 deep at the default limit: its value, the caller's state in order (20001 entries, the last the bottom's, the first `after` the deepest's), the namespace variable shared by every level, the variable it made in its caller's frame -- with or without a driver} -body {
+test dsn-mechanism-walk {a guarded walk 20000 deep at the default limit: its value, the caller's state in order (20001 entries, the last the bottom's, the first `after` the deepest's), the namespace variable shared by every level, the variable it made in its caller's frame -- with or without a driver, each in a segment per segment's frames} -body {
     core::deep::resetStats
     set direct [dsnWalk::Top 20000]
     set driven [core::deep::run {dsnWalk::Top 20000}]
-    list $direct $driven [expr {[dict get [core::deep::stats] segments] > 300}] \
+    list $direct $driven [expr {[dict get [core::deep::stats] segments] >= 2 * 19800 / $core::deep::segment}] \
         [info commands ::core::deep::seg*]
 } -cleanup {unset -nocomplain direct driven} -result {{0 20000 {} 20001 0 20000 20001 1} {0 20000 {} 20001 0 20000 20001 1} 1 {}}
 

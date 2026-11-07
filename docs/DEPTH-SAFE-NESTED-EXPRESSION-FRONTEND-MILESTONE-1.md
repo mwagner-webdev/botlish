@@ -69,17 +69,17 @@ and the segment it leaves is suspended on a driver's explicit stack. The
 driver resumes every segment from its own shallow frame, and Tcl counts a
 coroutine's evaluations from where it is resumed, so the interpreter's
 nesting stays at most one segment deeper than the driver whatever the
-program's depth. No recursion limit is raised (the front end's former floor
-of 100000, `hir::Deep`, is gone), nothing catches TCL LIMIT STACK, and no
-nesting limit or diagnostic was added.
+program's depth. No recursion limit is raised (`hir::Deep`'s former floor
+of 100000 is gone: it starts a driver now), nothing catches TCL LIMIT
+STACK, and no nesting limit or diagnostic was added.
 
 On the way, the front end stopped giving nested syntax string
 representations (Tcl 9.0.1 gives them in `concat`, `regexp` and `string
 first`), which made a List literal 400 deep take 590 MB and one 1000 deep
 exhaust the machine: 39 MB now. Memory is not linear in the nesting yet:
 every AST node's structural id is its path from the root, O(depth)
-characters, and HIR origins carry it (section 16; 105 MB for `1 + (1 +
-...)` 1000 deep, 284 MB 2000 deep). And one host-depth decision went:
+characters, and HIR origins carry it (section 16; 96 MB for `1 + (1 +
+...)` 1000 deep, 248 MB 2000 deep). And one host-depth decision went:
 hir::semantic declined semantic instances where Tcl's frames were 700
 deep.
 
@@ -675,33 +675,75 @@ default limit -- the front end (parse, lowering, the whole-program build
 and its checks), core IR, the Tcl compiler's unit, native lowering --
 with the process's peak memory and the segments made. Milliseconds 1000
 deep, then the total's growth per doubling of the depth (2 is linear),
-measured on a 4-core container while three census traces ran beside it
-(the ratios, not the times, are the point):
+measured on a 4-core container with other test processes beside it (the
+ratios, not the times, are the point):
+
+| kind | tokens | HIR exprs | front | core IR | Tcl | native | total | peak MB | segments | x 250→500 | x 500→1000 | x 1000→2000 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `paren` | 2007 | 3 | 135 | 0 | 1 | 17 | 153 | 31 | 79 | 1.43 | 1.53 | 1.38 |
+| `rbin` | 4007 | 3003 | 950 | 13 | 85 | 439 | 1487 | 96 | 727 | 2.03 | 2.09 | 2.50 |
+| `lbin` | 4007 | 3003 | 921 | 13 | 81 | 477 | 1492 | 90 | 727 | 2.02 | 2.69 | 2.26 |
+| `flat` | 2007 | 3003 | 805 | 13 | 83 | 491 | 1392 | 88 | 628 | 2.05 | 2.22 | 2.14 |
+| `neg` | 1007 | 3003 | 754 | 12 | 81 | 503 | 1350 | 100 | 610 | 2.28 | 2.02 | 2.66 |
+| `not` | 1007 | 3003 | 5275 | 15 | 53 | 5470 | 10813 | 96 | 16105 | 2.26 | 2.48 | 2.66 |
+| `list` | 2007 | 2003 | 683 | 11 | 50 | 345 | 1089 | 75 | 509 | 1.99 | 2.13 | 2.42 |
+| `struct` | 17024 | 2005 | 3584 | 10 | 50 | 3249 | 6893 | 162 | 10184 | 2.61 | 4.34 | 3.91 |
+| `project` | 21024 | 4005 | 3548 | 14 | 74 | 2204 | 5840 | 129 | 6937 | 2.62 | 3.31 | 3.48 |
+| `call` | 3023 | 2007 | 577 | 11 | 44 | 319 | 951 | 74 | 530 | 2.88 | 1.72 | 2.33 |
+| `method` | 4025 | 2010 | 687 | 9 | 38 | 277 | 1011 | 100 | 440 | 1.89 | 2.06 | 2.27 |
+| `or` | 4009 | 8999 | 14948 | 38 | 167 | 12600 | 27753 | 202 | 33304 | 2.49 | 2.66 |  |
+| `and` | 4009 | 11999 | 20559 | 60 | 269 | 18315 | 39203 | 252 | 41830 | 2.76 | 2.79 |  |
+| `elif` | 10017 | 6008 | 2872 | 30 | 315 | 1078 | 4295 | 232 | 1570 | 2.94 | 2.60 |  |
+| `ifnest` | 13021 | 3006 | 2597 | 17 | 474 | 801 | 3889 | 215 | 1842 | 2.92 | 2.77 |  |
+| `fnnest` | 14003 | 4001 | 2912 | 25 | 33810 | 14682 | 51429 | 906 | 24348 | 4.93 | 5.46 |  |
+| `handler` | 14053 | 4017 | 17323 | 24 | 862 | 1090 | 19299 | 742 | 18069 | 3.83 | 3.86 |  |
+| `mixed` | 4029 | 2007 | 789 | 11 | 54 | 355 | 1209 | 98 | 560 | 1.86 | 2.27 |  |
+| `typed` | 5034 | 2066 | 764 | 10 | 48 | 341 | 1163 | 79 | 541 | 1.87 | 1.83 |  |
+| `pattern` | 19030 | 4010 | 5110 | 16 | 86 | 4792 | 10004 | 182 | 6263 | 3.37 | 3.60 |  |
+| `loops` | 15675 | 6393 | 13407 | 34 | 389 | 22575 | 36405 | 564 | 58268 | 3.79 | 3.85 |  |
+| `cond` | 10727 | 18032 | 49494 | 83 | 443 | 53117 | 103137 | 576 | 52113 | 2.71 | 2.90 |  |
+| `inject` | 7017 | 2005 | 3232 | 9 | 165 | 599 | 4005 | 260 | 1194 | 2.83 | 2.95 |  |
+| `layout` | 3145 | 481 | 464 | 2 | 29 | 169 | 664 | 53 | 234 | 1.24 | 1.31 |  |
+| `affine` | 15150 | 1047 | 1245 | 7 | 61 | 1030 | 2343 | 142 | 448 | 2.13 | 2.60 |  |
 
 
 
-* **Linear or nearly:** parentheses (×1.6 from 500 to 1000 deep, ×2.0 to
-  2000) and `layout` (×1.4); the expression chains -- `rbin`, `lbin`,
-  `flat`, `neg`, `not`, `list`, `call`, `method`, `mixed`, `typed` -- ×2.1
-  to ×2.6 from 500 to 1000 deep and ×2.2 to ×2.8 to 2000, as does `affine`
-  (×2.75): above 2 by their structural ids (section 16), O(depth)
-  characters each, which memory and every copy of an origin carry.
+* **Linear or nearly:** parentheses (×1.5 from 500 to 1000 deep, ×1.4 to
+  2000) and `layout` (×1.3); the expression chains -- `rbin`, `lbin`,
+  `flat`, `neg`, `not`, `list`, `call`, `method`, `mixed`, `typed` --
+  ×1.7 to ×2.7 from 500 to 1000 deep and ×2.1 to ×2.7 to 2000, `affine`
+  ×2.6: above 2 by their structural ids (section 16), O(depth) characters
+  each, which memory and every copy of an origin carry (`rbin` takes 96
+  MB 1000 deep, 248 MB 2000 deep).
 * **Superlinear, each named in section 25:** `and`/`or` and `cond`
-  (×2.7 to ×3.0: inference, completions, branch facts and the range
-  analysis of Boolean chains), `struct`/`project` and `pattern`
-  (×3.5 to ×3.9: native lowering's escape and scalar-replacement plans of
-  nested constructions), `elif`/`ifnest`/`inject` (×3: a block nested N
-  deep is indented N times), `handler` (×4.2: each handler body
-  range-analyzed again per enclosing handler), `loops` (×4.1) and
-  `fnnest` (×5.3: the Tcl compiler's code for nested functions, 907 MB
-  1000 deep).
-* **Segments are linear in the work**: about one per 60 guarded frames
-  that the walk goes down (1,918 for `rbin` 1000 deep, 3,825 2000 deep);
-  a walk that goes up and down the nesting many times (inference of a
-  `not` chain re-entered per level: 41,110) makes as many as it descends.
-* **Ordinary programs.** `bench/guard-overhead.tcl` compiles programs that
-  nest a little, three times each, with this tree and with the revision
-  before the milestone: GUARD-OVERHEAD.
+  (×2.7 to ×2.9: inference, completions, branch facts and the range
+  analysis of Boolean chains), `struct`/`project` and `pattern` (×3.3
+  to ×4.3: native lowering's escape and scalar-replacement plans of nested
+  constructions, and the front end's), `elif`/`ifnest`/`inject` (×2.6
+  to ×3.0: a block nested N deep is indented N times), `handler` (×3.9:
+  each handler body range-analyzed again per enclosing handler), `loops`
+  (×3.9) and `fnnest` (×5.5: the Tcl compiler's code for nested
+  functions, 906 MB 1000 deep).
+* **Segments are linear in the work**: about one per 150 guarded frames
+  that a walk goes down (727 for `rbin` 1000 deep, 1,501 2000 deep); a
+  walk that goes up and down the nesting many times (inference of a `not`
+  chain re-entered per level: 16,105) makes as many as it descends. With
+  60-frame segments (section 5) the same table had two to three times as
+  many segments and totals up to a fifth higher (`handler` 23.6 s then,
+  19.3 s now).
+* **Ordinary programs.** `bench/guard-overhead.tcl` compiles seven
+  programs that nest a little -- the branch-form-boolean, fold-loops,
+  core-semantics, coroutines, loops and callables suites and the 2048
+  suite -- three times each, keeping the fastest, with this branch and
+  with main (`f2787af`, which the branch merged), twice in turn: the front
+  end 63.6 and 64.3 s against main's 63.4 and 66.3 s, the lowerings 39.7 s
+  both times against 40.2 and 40.0 s -- within the runs' own variation.
+  One suite stands out: branch-form-boolean.bot, whose analyses run
+  deepest, 4.64 and 4.68 s against 4.23 s. Its walks make no segment
+  (section 5), but call guarded procedures often enough for the guards'
+  check -- `info level` and a qualified variable, about 0.14 µs a call --
+  to cost 8%: 4.25 s with every guard line removed. With 60-frame segments
+  it took 6.6 s.
 
 ## 21. HIR, cache, isolation, the service
 
@@ -755,7 +797,22 @@ substitutions; native code has no recursion for it at all.
 
 ## 23. Regression and CI
 
-FIXME
+Locally (a 4-core container, Tcl 9.0.1), on the branch with main merged:
+
+* `tests/depth-safe-nesting.test` at Tcl's default limit: 51 tests, all
+  pass (about 21 minutes alone; recorded for the canary,
+  `tests/canary.tsv`).
+* `tclsh9.0 tests/local.tcl -jobs 3`: LOCALRESULT
+* The probe (section 18), the census of every kind (section 4), the fuzzer
+  (seeds 1 to 6, section 18), the mutants (section 19), the corpus's
+  invariance against the old tree (section 21), `tools/compilerpedia.tcl
+  check` (1222 topics, 753 examples, 0 problems) and
+  `tools/mutant-catalogs.tcl` (89 catalogs, 3175 mutants, every one
+  applies).
+
+`main` was green or still running at both ends of the work (no workflow
+failed on it): when the branch started, and when main (`f2787af`) was
+merged into it. On the branch's head, CIRESULT
 
 ## 24. Remaining recursion: the final census
 
@@ -816,9 +873,10 @@ namespace):
   - **Structural ids: quadratic memory.** Every AST node's id, and every
     HIR origin with it, is the node's path from its statement (section
     16): O(depth) characters each. It is the one superlinear term every
-    chain of nodes has (×2.5 to ×2.8 per doubling past 1000 deep, section
-    20), and the reason no specimen's memory is linear: `1 + (1 + ...)`
-    takes 105 MB 1000 deep, 284 MB 2000 deep and 866 MB 4000 deep.
+    chain of nodes has (×2.1 to ×2.7 per doubling past 1000 deep, section
+    20), and why a chain of nodes' memory is not linear: `1 + (1 + ...)`
+    takes 96 MB 1000 deep and 248 MB 2000 deep through every lowering,
+    and its front end alone 855 MB 4000 deep.
   - **Nested folds whose intermediate widens: exponential.** A fold's
     intermediate type is a bounded fixpoint (`hir::types::FoldBody`): when
     the body's type widens the intermediate's, the body is walked again,
