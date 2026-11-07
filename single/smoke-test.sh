@@ -361,7 +361,13 @@ echo "   packages: a two-target release, its views and native inspect, with no n
 # an ELF file of this host's target).
 if [[ $(uname -s) == Linux ]]; then
   case $(uname -m) in x86_64) ztarget=linux-x86_64 ;; aarch64) ztarget=linux-aarch64 ;; *) ztarget="" ;; esac
-  libz=$(ls /lib/*-linux-gnu/libz.so.1 /usr/lib/*-linux-gnu/libz.so.1 2>/dev/null | head -1)
+  # This host's own zlib, the first candidate that exists (a loop, not
+  # `ls A B | head -1`: ls fails when either is missing, and set -e then
+  # ended the script without a word).
+  libz=""
+  for candidate in "/lib/$(uname -m)-linux-gnu/libz.so.1" "/usr/lib/$(uname -m)-linux-gnu/libz.so.1"; do
+    if [[ -e $candidate ]]; then libz=$candidate; break; fi
+  done
   if [[ -n $ztarget && -n $libz ]]; then
     mkdir -p "$work/pkgsrc/zpkg" "$work/zbuild"
     cp -L "$libz" "$work/zbuild/libz.so.1"
@@ -374,6 +380,8 @@ if [[ $(uname -s) == Linux ]]; then
     out=$(pm package inspect "$work/pkgrepo/zpkg-1.0.0.botpkg" -provenance "$work/pkgrepo/zpkg-1.0.0.provenance.json") && grep -q "describes this artifact" <<<"$out" || fail "package inspect -provenance"
     [[ ! -e $work/home-pm/.cache ]] || fail "an authoring command installed the native backend ($(ls "$work/home-pm/.cache"))"
     echo "   packages: native add, audit, pack -evidence, inspect -provenance, with no compiler or native backend"
+  else
+    echo "   packages: native authoring not checked (no zlib of this host's target, $(uname -m))"
   fi
 fi
 
