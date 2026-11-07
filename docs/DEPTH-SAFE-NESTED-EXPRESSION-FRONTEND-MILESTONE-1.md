@@ -833,9 +833,9 @@ hours; a run a newer push superseded says nothing either way):
   job), macos-arm64.yml and windows-x86_64.yml from the push -- pending.
 * **static-decisions.yml**, the batched scheduler against the sequential
   one over the golden suites: passed on `c6cdd86` (before main was merged
-  and before the last twelve guards and the segment size); dispatched on
+  and before the last twelve guards and the segment size), and passed on
   `a82e469`, whose front end is the head's (only tests and this report
-  changed since) -- pending.
+  changed since): no suite disagrees.
 * **Earlier heads, superseded before they finished:** tests.yml on
   `456f0d3` passed its canary (the mutant catalogs, the warning gate, the
   changed test files and recent failures), the native Rust unit tests and
