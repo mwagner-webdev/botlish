@@ -120,7 +120,12 @@ proc writeFile {path text} {
 proc run {timeout dir args} {
     set here [pwd]
     cd $dir
-    set pipe [open |[concat $args [list 2>@1]] r]
+    # (Off Windows, in a session of its own: a mutant that deadlocks a
+    # program the native driver launched -- a linked executable, a child of
+    # the test's own child -- is killed with its whole process group, never
+    # left running after its detector's timeout.)
+    set prefix [expr {!$::windows && [auto_execok setsid] ne "" ? [list setsid] : {}}]
+    set pipe [open |[concat $prefix $args [list 2>@1]] r]
     cd $here
     fconfigure $pipe -blocking 0 -translation auto -encoding utf-8
     set ::runOutput ""
@@ -134,7 +139,13 @@ proc run {timeout dir args} {
     after cancel $timer
     if {$::runDone eq "timeout"} {
         foreach id [pid $pipe] {
-            if {$::windows} { catch {exec taskkill /F /T /PID $id} } else { catch {exec kill -9 $id} }
+            if {$::windows} {
+                catch {exec taskkill /F /T /PID $id}
+            } elseif {$prefix ne ""} {
+                catch {exec kill -9 -- -$id}
+            } else {
+                catch {exec kill -9 $id}
+            }
         }
         catch {close $pipe}
         return [list timeout $::runOutput]
