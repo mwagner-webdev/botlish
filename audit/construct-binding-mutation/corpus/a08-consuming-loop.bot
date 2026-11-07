@@ -1,0 +1,33 @@
+# category: loop-element of a consuming loop (an affine vector of affine vectors)
+# class: A -- an ownership transfer, not a copy: each inner vector moves
+#        into the loop variable, is pushed onto and measured, and is
+#        released at its last use; nothing is shared or detached
+# expect: [2, 2]
+# alloc: mutableVector shares 0 detaches 0
+import std::coroutine
+import std::mutable_vector
+
+struct Msg:
+    v: int
+struct Ev:
+    v: int
+
+fn w(acc: int, resume Msg) -> Ev:
+    m = yield Ev {v: acc}
+    Ev {v: acc + m.v}
+
+fn make(acc: int) -> Coroutine{args: [Msg], return: Ev}:
+    coroutine {step} = w(acc)
+    step
+
+fn group(n: int) -> MutableVector[Coroutine{args: [Msg], return: Ev}]:
+    g = std::mutable_vector::from_list([make(n)])
+    g
+
+fn run() -> List[int]:
+    outer = std::mutable_vector::from_list([group(1), group(2)])
+    loop inner in outer:
+        inner.push(make(9))
+        inner.length()
+
+run()

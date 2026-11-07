@@ -1,0 +1,15 @@
+# category: loop-element, mutated from a nested function declared in the body
+# class: rejected -- MUTABLE-PLACE-RECEIVER (existing rule): a nested
+#        function cannot mutate a binding of its enclosing function
+# expect-diagnostics: MUTABLE-PLACE-RECEIVER@11:13
+import std::mutable_vector
+
+fn run() -> List[int]:
+    rows = [std::mutable_vector::from_list([1])]
+    loop row in rows:
+        fn extend() -> unit:
+            row.push(2)
+        extend()
+        0
+
+run()

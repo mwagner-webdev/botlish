@@ -1,0 +1,18 @@
+# category: loop-element (List of MutableSets), through std::mutable_set::add
+# class: C -- silently discarded write
+# intended: add 5 to both sets
+# actual: add's place parameter is given the loop variable; the sets in
+#         `sets` stay empty
+# expect: [0, 0]
+import std::mutable_set
+
+fn run() -> List[int]:
+    a = std::mutable_set::create[int]()
+    b = std::mutable_set::create[int]()
+    sets = [a, b]
+    loop s in sets:
+        s.add(5)
+    loop s in sets:
+        s.length()
+
+run()

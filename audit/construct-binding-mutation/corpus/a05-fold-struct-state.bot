@@ -1,0 +1,24 @@
+# category: fold-intermediate (a struct of two vectors)
+# class: A -- productive local mutation carrying several pieces of state;
+#        each iteration shares both vectors and detaches the one it pushes
+# expect: [100, 100]
+# alloc: mutableVector shares 400 detaches 200 detachElements 9900
+import std::mutable_vector
+
+fn ints() -> MutableVector[int]:
+    std::mutable_vector::from_list([])
+
+struct Acc:
+    evens: MutableVector[int]
+    odds: MutableVector[int]
+
+fn split(n: int) -> List[int]:
+    t = fold i from 0 to n with intermediate a Acc {evens: ints(), odds: ints()}:
+        if i < 100:
+            a.evens.push(i)
+        else:
+            a.odds.push(i)
+        a
+    [t.evens.length(), t.odds.length()]
+
+split(200)

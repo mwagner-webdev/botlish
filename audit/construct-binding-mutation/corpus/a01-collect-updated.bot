@@ -1,0 +1,35 @@
+# category: loop-element (List)
+# class: A -- productive local mutation
+# The loop variable mutated and collected, beside the same loop through an
+# explicit working local (`w = row`): one meaning, and the same copies (each
+# row is shared once and detached once: the input List still holds it).
+# expect: [[2, 2, 2], [2, 2, 2]]
+# alloc: mutableVector shares 6 detaches 6
+import std::mutable_vector
+
+fn ints() -> MutableVector[int]:
+    std::mutable_vector::from_list([])
+
+fn direct(rows: List[MutableVector[int]]) -> List[int]:
+    updated = loop row in rows:
+        row.push(42)
+        row
+    loop u in updated:
+        u.length()
+
+fn working(rows: List[MutableVector[int]]) -> List[int]:
+    updated = loop row in rows:
+        w = row
+        w.push(42)
+        w
+    loop u in updated:
+        u.length()
+
+fn rows(n: int) -> List[MutableVector[int]]:
+    loop i from 0 to n:
+        v = ints()
+        v.push(i)
+        v
+
+r = rows(3)
+[direct(r), working(r)]
