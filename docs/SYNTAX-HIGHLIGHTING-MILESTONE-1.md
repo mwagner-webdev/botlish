@@ -311,6 +311,25 @@ of tests/syntax-highlighting.test, two portability mistakes of the tests
 install Neovim, so `lsp-neovim-highlighting` runs only in a dispatched
 tests.yml run of the branch.
 
+That commit (d018048, and cd96019, documentation only beyond it): every
+run of every workflow passed, on 2026-11-07.
+
+| workflow | run | result |
+|---|---|---|
+| tests.yml (dispatched) | 42386594827 | every job passed: canary (mutant catalogs, warning gate), interp (11,595 tests, 0 failed, 213 skipped by host constraints; `lsp-neovim-highlighting` and the Vim checks ran), compile, cranelift and cranelift-generic coverage, stub- and system-linked executables, Rust unit tests, method-call reference audit, golden suites 1-4 |
+| tests-arm64.yml (dispatched) | 42391106966 | every job passed: canary, interp, compile, both GC-stress jobs, cranelift and cranelift-generic coverage, system-linked executables, Rust unit tests (also under GC stress), golden suites 1-4 |
+| windows-x86_64.yml | 42386583331 | canary, smoke, root plans, acceptance 1-4, system linker: passed |
+| macos-arm64.yml | 42386583245 | smoke, Linux control, system linker, acceptance 1-4, Botlish.app (with and without developer tools), static SDL3, main-thread startup: passed |
+| icy-tower (Windows, macOS) | 42386583394, 42386583533 | passed |
+
+The one highlighting check CI does not run is `sh-grammar-textmate-fixture`
+(skipped by `nodeTextMate`: no workflow installs the extension's npm
+packages); it runs locally with `npm ci` in editors/vscode.
+
+The declared-name fix of the grammars (section 8) came after these runs,
+from trying the grammar in VS Code; its commit's runs are the branch's
+next.
+
 ## 10. Limitations
 
 - The grammars are regular expressions: a contextual word in a position no
