@@ -1580,7 +1580,8 @@ proc native::lower::Program {hirProgram args} {
         -exports [concat [lmap export [dict get $options -exports] {dict get $export block}] \
             [CleanupBlocks $hirProgram] \
             [lmap callback [hir::callbacks::of $hirProgram] {dict get $callback block}] \
-            [lmap record $threadRecords {dict get $record block}]]]
+            [lmap record $threadRecords {dict get $record block}] \
+            [ThreadOwnerBlocks $hirProgram $threadRecords]]]
     hir::specialize::memoizeViews $hirProgram $spec
     set ranges [hir::range::analyze $hirProgram $spec [dict get $options -call-facts-opt] 1 1 \
         [dict get $options -recursive-result-range-opt] [dict get $options -recursive-range-limit]]
@@ -10328,6 +10329,30 @@ proc native::lower::ThreadDispatch {fnVar} {
         Emit fn "ret $bytes"
     }
     EmitLabel fn $main
+}
+
+# The blocks of the `through` owner functions the thread dispatch's
+# transfers call (each entry's parameter and result schemas): roots, as
+# the entries are -- nothing else may make their generic instances.
+proc native::lower::ThreadOwnerBlocks {hirProgram records} {
+    set blocks {}
+    foreach record $records {
+        foreach type [list [dict get $record param] [dict get $record result]] {
+            foreach name [dict get [hir::transfer::Schema $type] fns] {
+                set i [string last :: $name]
+                if {$i < 0} {
+                    set scope [dict get $hirProgram top]
+                } else {
+                    set scope [dict get $hirProgram modules [string range $name 0 [expr {$i - 1}]]]
+                }
+                set block [hir::aot::BoundBlock $hirProgram [dict get $hirProgram scopes $scope names $name]]
+                if {$block ne "" && $block ni $blocks} {
+                    lappend blocks $block
+                }
+            }
+        }
+    }
+    return $blocks
 }
 
 # The List of the `through` owner functions QUALIFIED names (a transfer

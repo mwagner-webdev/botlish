@@ -2028,6 +2028,9 @@ proc hir::range::VerifySending {hirVar e node name} {
     if {$sending eq "result"} {
         set at $e
         set what "the value $name decodes"
+    } elseif {$sending eq "imprint"} {
+        set at $e
+        set what "the type $name names"
     } else {
         set at [lindex [dict get $node args] $sending]
         set what "the argument of $name"
@@ -2035,7 +2038,15 @@ proc hir::range::VerifySending {hirVar e node name} {
             return
         }
     }
-    set type [hir::typeOf $hir $at]
+    if {$sending eq "imprint"} {
+        set type [hir::transfer::ImprintedType $hir $e]
+        if {$type eq ""} {
+            # (No binding: the imprint's own diagnostic.)
+            return
+        }
+    } else {
+        set type [hir::typeOf $hir $at]
+    }
     if {$type eq "never"} {
         # (No value, or poison: an earlier diagnostic's.)
         return

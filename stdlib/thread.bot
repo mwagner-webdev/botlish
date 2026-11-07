@@ -61,10 +61,15 @@
 # Native backends only: the Tcl backends refuse a program that starts a
 # thread (THREAD-UNAVAILABLE), at compile time.
 import std::abi::bytes
+import std::event_loop
 import std::ffi::c
 import std::int
+import std::mutable_array
+import std::mutable_vector
 import std::str
 import std::transfer
+import type std::event_loop::Delivery
+import type std::event_loop::Wake
 
 # No thread can start now: the Threads context's own limit, or every
 # stack-overflow guard record of the process is in use.
@@ -275,3 +280,228 @@ fn stats() -> Stats:
         joined: std::thread::rt_stat(3), detached: std::thread::rt_stat(4),
         start_failures: std::thread::rt_stat(5), limit_refusals: std::thread::rt_stat(6)
     }
+
+# ---------------------------------------------------------------------------
+# The port: this VM's place in the cross-thread transport
+#
+#   with context std::thread::port()      the VM's port (its doorbell)
+#   std::thread::serve()                  its pump, on the VM's event loop
+#
+# Other threads reach a VM through its PORT: a message on one of its
+# endpoints (std::actor::remote), room freed on an endpoint one of its
+# senders waits for, the end of a thread it started, a request that it
+# stop. The runtime rings the port's doorbell -- a descriptor -- and the
+# VM's event loop watches it through the installed driver (the context
+# trait Doorbell: event_loop_linux::Native implements it), so nothing
+# polls: the pump task drains the port's notifications and posts each to
+# the channel of whoever waits for it. A port keeps its loop alive (the
+# doorbell is a keep-alive source) until close_port.
+
+# A driver's ability to watch the port's doorbell: watch descriptor FD
+# delivering readiness records to the registration (SLOT, GEN) -- a watch
+# id or a negated errno; rearm it after a record; stop watching.
+context trait Doorbell:
+    fn watch_doorbell(fd: int, slot: int, gen: int) -> int
+    fn rearm_doorbell(watch: int, slot: int, gen: int) -> int
+    fn unwatch_doorbell(watch: int, slot: int, gen: int) -> int
+
+# The port's notifications (native/src/runtime/thread.rs).
+private n_message = 1
+private n_room = 2
+private n_ended = 3
+private n_stop = 4
+
+# A route's key: its kind times this, plus the id it is for.
+private route_unit = 72057594037927936
+
+# Port state (Port.state).
+private p_fd = 0
+private p_watch = 1
+private p_served = 2
+private p_closed = 3
+
+# This VM's port: its doorbell's descriptor and watch, and the channels its
+# notifications are routed to (KEYS[i]'s to CHANS[i]).
+opaque context struct Port:
+    state: MutableArray[int]
+    keys: MutableVector[int]
+    chans: MutableVector[std::event_loop::Reg]
+    doorbell: MutableVector[std::event_loop::Reg]
+
+private fn ints() -> MutableVector[int]:
+    std::mutable_vector::from_list([])
+
+private fn regs() -> MutableVector[std::event_loop::Reg]:
+    std::mutable_vector::from_list([])
+
+# This VM's port, opened (its doorbell). A port that could not open (no
+# descriptor) reports it when served (DriverFault).
+fn port() -> Port:
+    Port {state: std::mutable_array::from_list([std::thread::rt_port_open(), -1, 0, 0]), keys: ints(), chans: regs(), doorbell: regs()}
+
+private nomethod fn key_of(kind: int, id: int) -> int:
+    kind * route_unit + id
+
+# The index of KEY's route, or -1.
+private nomethod fn find_route(key: int, context p: Port) -> int errors IndexNotFound:
+    n = p.keys.length()
+    fold i from 0 to n with intermediate found -1:
+        if found < 0 and p.keys.at(i) == key:
+            i
+        else:
+            found
+
+# Notifications of KIND for ID are posted to CHAN from now on (internal:
+# std::actor::remote's).
+nomethod fn route(kind: int, id: int, chan: std::event_loop::Reg, context p: Port):
+    p.keys.push(key_of(kind, id))
+    p.chans.push(chan)
+
+# No notification of KIND for ID is posted any more.
+nomethod fn unroute(kind: int, id: int, context p: Port) errors IndexNotFound:
+    i = find_route(key_of(kind, id))
+    if i >= 0:
+        last = p.keys.length() - 1
+        p.keys.swap(i, p.keys.at(last))
+        p.chans.swap(i, p.chans.at(last))
+        p.keys.pop()
+        p.chans.pop()
+
+# Posts notification (KIND, A, B) to its route's channel; one nobody routed
+# is dropped (an endpoint's messages stay queued in the runtime).
+private nomethod fn dispatch(kind: int, a: int, b: int, context ev: std::event_loop::Loop, p: Port) errors IndexNotFound, std::event_loop::SchedulerFault:
+    id = if kind == n_room:
+        b
+    elif kind == n_stop:
+        0
+    else:
+        a
+    i = find_route(key_of(kind, id))
+    if i >= 0:
+        p.chans.at(i).post(kind, a)
+
+# Every notification the port holds, dispatched: how many.
+private nomethod fn drain(context ev: std::event_loop::Loop, p: Port) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    fold with intermediate n 0:
+        kind = std::thread::rt_port_take()
+        if kind < 0:
+            break
+        dispatch(kind, std::thread::rt_port_a(), std::thread::rt_port_b())
+        n + 1
+
+# The doorbell's pump: drains the port at every ring, then re-arms the
+# doorbell (after the drain, which resets it: a ring since then fires
+# again at once).
+private nomethod fn pump(src: std::event_loop::Reg, context ev: std::event_loop::Loop, p: Port, d: Doorbell) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    fold with intermediate n 0:
+        e = std::event_loop::wait(src)
+        if e.reason == Wake::Revoked or p.state.at(p_closed) == 1:
+            break
+        k = drain()
+        d.rearm_doorbell(p.state.at(p_watch), std::event_loop::native_slot(src), std::event_loop::native_generation(src))
+        n + k
+
+private nomethod fn served(context ev: std::event_loop::Loop, p: Port, d: Doorbell) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    if p.state.at(p_served) == 1:
+        # (Already served.)
+        return 1
+    fd = p.state.at(p_fd)
+    if fd < 0:
+        return fd
+    src = std::event_loop::source(Delivery::Coalesce, 1, :keep_alive)
+    w = d.watch_doorbell(fd, std::event_loop::native_slot(src), std::event_loop::native_generation(src))
+    if w < 0:
+        src.revoke()
+        return w
+    p.state.set(p_watch, w)
+    p.state.set(p_served, 1)
+    p.doorbell.push(src)
+    coroutine {step, first} = pump(src)
+    std::event_loop::adopt(step, first)
+    # (Rung before it was watched: drained by the first turn.)
+    src.post(0, 0)
+    0
+
+# Serve this VM's port on its event loop (once; later calls do nothing):
+# the doorbell is watched through the driver, and a pump task routes its
+# notifications. DriverFault with the negated errno when the doorbell
+# cannot be opened or watched.
+fn serve(context ev: std::event_loop::Loop, p: Port, d: Doorbell) errors std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    code = served():
+        on IndexNotFound:
+            fail std::event_loop::SchedulerFault
+    if code < 0:
+        fail std::event_loop::DriverFault {code: code}
+
+private nomethod fn closed(context ev: std::event_loop::Loop, p: Port, d: Doorbell) errors IndexNotFound, std::event_loop::SchedulerFault:
+    if p.state.at(p_closed) == 1:
+        return
+    p.state.set(p_closed, 1)
+    if p.doorbell.length() > 0:
+        src = p.doorbell.at(0)
+        d.unwatch_doorbell(p.state.at(p_watch), std::event_loop::native_slot(src), std::event_loop::native_generation(src))
+        src.revoke()
+    # Every waiter wakes (Wake::Revoked).
+    loop i from 0 to p.chans.length():
+        p.chans.at(i).revoke()
+    std::thread::rt_port_close()
+
+# Close this VM's port: its endpoints close (the messages they held are
+# dropped and counted; the calls among them fail), the calls it owes fail
+# with ServiceEnded, its waiters wake, and its loop is no longer kept
+# alive by it. What a VM does when it is done with the transport (its end
+# does it too).
+fn close_port(context ev: std::event_loop::Loop, p: Port, d: Doorbell) errors std::event_loop::SchedulerFault:
+    closed():
+        on IndexNotFound:
+            fail std::event_loop::SchedulerFault
+
+private nomethod fn waited_end(thread: ThreadId, context ev: std::event_loop::Loop, p: Port) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    chan = std::event_loop::channel(Delivery::Coalesce, 1)
+    route(n_ended, thread.id, chan)
+    std::thread::rt_watch(thread.id)
+    loop:
+        if ended?(std::thread::rt_status(thread.id)):
+            break
+        e = std::event_loop::wait(chan)
+        if e.reason == Wake::Revoked:
+            break
+    code = std::thread::rt_status(thread.id)
+    unroute(n_ended, thread.id)
+    chan.revoke()
+    code
+
+# Waits, as an event-loop task -- suspended, never blocking this VM's
+# thread -- until THREAD has ended (or this port closes): its status. Join
+# it afterwards: join then does not block.
+fn wait_end(thread: ThreadId, context ev: std::event_loop::Loop, p: Port, d: Doorbell) -> Status errors std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    serve()
+    code = waited_end(thread):
+        on IndexNotFound:
+            fail std::event_loop::SchedulerFault
+    status_of(code)
+
+private nomethod fn waited_stop(context ev: std::event_loop::Loop, p: Port) -> bool errors IndexNotFound, std::event_loop::SchedulerFault:
+    if stop_requested?():
+        return true
+    chan = std::event_loop::channel(Delivery::Coalesce, 1)
+    route(n_stop, 0, chan)
+    loop:
+        if stop_requested?():
+            break
+        e = std::event_loop::wait(chan)
+        if e.reason == Wake::Revoked:
+            break
+    asked = stop_requested?()
+    unroute(n_stop, 0)
+    chan.revoke()
+    asked
+
+# Waits, as an event-loop task, until this thread is asked to stop (its
+# creator's request_stop, or the program's end): true; false when the port
+# closed first.
+fn wait_stop(context ev: std::event_loop::Loop, p: Port, d: Doorbell) -> bool errors std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    serve()
+    waited_stop():
+        on IndexNotFound:
+            fail std::event_loop::SchedulerFault

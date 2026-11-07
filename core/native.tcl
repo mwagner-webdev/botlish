@@ -105,7 +105,9 @@
 #                                     names (std::binary::read of an array:
 #                                     LAYOUT-UNIONS.md); nothing for any
 #                                     other designator
-#   sending         "" or K or `result`: argument K's value, or the call's
+#   sending         "" or K or `result` or `imprint`: argument K's value, the
+#                   call's imprint variable T's binding (std::transfer::
+#                   fingerprint[T]), or the call's
 #                   (imprinted) result, crosses to another Botlish VM by
 #                   the transfer codec (core/transfer.tcl; SENDABILITY-AND-
 #                   VALUE-COPY-MILESTONE-1.md), so its static type must
@@ -797,8 +799,8 @@ proc core::native::register {name args} {
         error "core::native::register: bad -hashing \"$hashing\" for \"$name\" (K required|checked)"
     }
     set sending [dict get $options -sending]
-    if {$sending ne "" && !($sending eq "result" || ([string is digit -strict $sending] && $arity ne "*" && $sending < $arity))} {
-        error "core::native::register: bad -sending \"$sending\" for \"$name\" (K or result)"
+    if {$sending ne "" && !($sending in {result imprint} || ([string is digit -strict $sending] && $arity ne "*" && $sending < $arity))} {
+        error "core::native::register: bad -sending \"$sending\" for \"$name\" (K, result or imprint)"
     }
     set elementPlace [dict get $options -element-place]
     if {$elementPlace ni {0 1} || ($elementPlace && ($arity ne "2" || [lindex $ownership 0] ne "observe"

@@ -3132,6 +3132,8 @@ proc hir::traits::SendsVariable {hir e n vars} {
     }
     if {$sending eq "result"} {
         set type [hir::typeOf $hir $e]
+    } elseif {$sending eq "imprint"} {
+        set type [hir::transfer::ImprintedType $hir $e]
     } else {
         set arg [lindex [dict get $n args] $sending]
         if {$arg eq ""} {
