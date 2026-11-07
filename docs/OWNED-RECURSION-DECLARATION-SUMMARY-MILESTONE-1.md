@@ -546,7 +546,62 @@ fixpoint remembered (nothing asks there).
 `bench/owned-recursion.tcl` (verdict from fresh facts; structural counters;
 the old walk beside it):
 
-BENCH-TABLE
+Milliseconds include the witness of a rejected type (its diagnostic's
+path); "old" is the old walk on the same first query (its verdict and
+time). Measured on a 4-core container, idle.
+
+```
+family        N  verdict          ms  states   edges   walks   thr/edg  comps   hits   old
+chain         8  ok              0.6       9       8      10       9/9      9      0   ok 0.3 ms
+chain        16  ok              1.1      17      16      18     17/17     17      0   ok 0.1 ms
+chain        32  ok              3.0      33      32      34     33/33     33      0   ok 0.4 ms
+chain        64  ok              3.8      65      64      66     65/65     65      0   unbounded 0.4 ms
+chain        96  ok              5.6      97      96      98     97/97     97      0   unbounded 0.5 ms
+chain       128  ok              8.0     129     128     130   129/129    129      0   unbounded 0.5 ms
+node          8  recursive       1.5       1       1      36       5/1      1      0   recursive 0.5 ms
+node         16  recursive       1.8       1       1      52       5/1      1      0   recursive 1.2 ms
+node         32  recursive       3.9       1       1      84       5/1      1      0   recursive 4.4 ms
+node         64  recursive      15.3       1       1     148       5/1      1      0   unbounded 20.3 ms
+node         96  recursive      39.0       1       1     212       5/1      1      0   unbounded 52.9 ms
+node        128  recursive      79.7       1       1     276       5/1      1      0   unbounded 104.3 ms
+phantom       8  ok              0.6       2       1      20       4/1      2      0   ok 4.9 ms
+phantom      16  ok              0.6       2       1      28       4/1      2      0   ok 0.4 ms
+phantom      32  ok              0.6       2       1      44       4/1      2      0   ok 1.3 ms
+phantom      64  ok              0.9       2       1      76       4/1      2      0   ok 4.7 ms
+phantom      96  ok              1.1       2       1     108       4/1      2      0   ok 10.6 ms
+phantom     128  ok              1.4       2       1     140       4/1      2      0   ok 20.9 ms
+grow          8  recursive       1.5       2       2      41       8/2      1      0   recursive 0.5 ms
+grow         16  recursive       2.1       2       2      49       8/2      1      0   recursive 0.7 ms
+grow         32  recursive       4.3       2       2      65       8/2      1      0   recursive 1.8 ms
+grow         64  recursive       1.1       2       2      97       8/2      1      0   recursive 5.8 ms
+grow         96  recursive       1.5       2       2     129       8/2      1      0   recursive 12.2 ms
+grow        128  recursive       1.6       2       2     161       8/2      1      0   recursive 19.5 ms
+ring          8  recursive       3.9       8       8     114      32/8      1      0   recursive 1.0 ms
+ring         16  recursive       9.4      16      16     218     64/16      1      0   recursive 2.7 ms
+ring         32  recursive      30.4      32      32     426    128/32      1      0   recursive 11.2 ms
+ring         64  recursive      90.2      64      64     842    256/64      1      0   recursive 61.6 ms
+ring         96  recursive      98.8      96      96    1258    384/96      1      0   unbounded 58.0 ms
+ring        128  recursive     110.3     128     128    1674   512/128      1      0   unbounded 58.6 ms
+wide          8  recursive       5.1       8       8      69       3/1      1      0   recursive 1.3 ms
+wide         16  recursive      16.4      16      16     125       3/1      1      0   recursive 0.4 ms
+wide         32  recursive      58.2      32      32     237       3/1      1      0   recursive 0.7 ms
+repeated      8  ok              0.5       1       0      55       2/1      1      8   ok 0.1 ms
+repeated     16  ok              1.1       1       0     171       2/1      1     16   ok 0.0 ms
+repeated     32  ok              3.0       1       0     595       2/1      1     32   ok 0.1 ms
+repeated     64  ok             11.3       1       0    2211       2/1      1     64   ok 0.1 ms
+repeated     96  ok             25.5       1       0    4851       2/1      1     96   ok 0.1 ms
+repeated    128  ok             75.3       1       0    8515       2/1      1    128   ok 0.1 ms
+```
+
+Every family's work follows its declarations, never its applications: the
+chain visits N + 1 states; `node`, `phantom` and `grow` a constant 1-2
+states whatever their argument's depth (their walks grow linearly with the
+argument's own text, which the root walk reads once); the ring and the
+rotation N states and edges. The ring's diagnostic was the one quadratic
+cost (4.2 s at 128 when walks carried substituted steps); with provenance
+it is 110 ms, its verdict alone 37 ms. The old walk is faster on the small
+families -- it did less: it stopped at its bound, answering "unbounded",
+where the new analysis answers.
 
 The structural assertions in tests/owned-recursion.test do not time
 anything: `or-counters-nonuniform` (GrowA[List^k[C]] visits 2 states and
@@ -556,7 +611,32 @@ through four fields -- 4^16 paths -- is 17 states and 32 edges, and its walks
 grow linearly: 151 for 8 levels, 295 for 16), `or-deep-chain-accepted` (N + 1
 states), `or-large-graph` (2101 states, 4200 edges).
 
-FRONTEND-TABLE
+The whole front end (parse to checked HIR, no cache), median of three
+compilations in fresh processes, this branch against the revision before it
+(audit worktree at 09b1ea9), golden suites holding affine values,
+coroutines, parameterized structs, maps, Hashable, trees and Icy Tower's
+golden suite:
+
+```
+suite                                this   baseline   change
+affinity.bot                       9391.0     9168.0     2.4%
+coroutines.bot                    12520.2    12278.9     2.0%
+mutable-map.bot                   16857.7    16366.9     3.0%
+mutable-array.bot                 45001.3    45395.9    -0.9%
+mutable-vector.bot                13804.5    13819.8    -0.1%
+hashable.bot                       4851.3     4852.4    -0.0%
+tree-struct.bot                   10724.5    10868.4    -1.3%
+trait-constrained-types.bot        6476.6     6515.0    -0.6%
+collections.bot                    6973.8     6918.0     0.8%
+value-identity.bot                13142.0    12682.9     3.6%
+immutable-map.bot                 46347.4    45592.3     1.7%
+golden.bot                        33207.5    32841.9     1.1%
+total                            219298.0   217300.3     0.9%
+```
+
++0.9% in total, every suite within -1.3% to +3.6%: the verdict is computed
+once per type and remembered, and real programs' types meet a handful of
+states.
 
 ## 18. HIR, interchange, isolation
 
