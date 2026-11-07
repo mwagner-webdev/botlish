@@ -372,7 +372,7 @@ New: `tests/unused-context.test` (27 tests) with the application root
 |---|---|
 | `tclsh9.0 tests/unused-context.test` | 27 passed |
 | the same against the tree before the fix | 15 failed, 12 passed. Every test of the absent false dependency fails. `uc-declarations-still-checked` also fails, because it calls the new `releasedCleanups`. The preservation tests pass on both trees. |
-| `BOTLISH_NATIVE_GC_STRESS=1 tclsh9.0 tests/resources.test`, `... tests/unused-context.test` | 40 passed, 25 passed (before `uc-stdlib-imports` existed) |
+| `BOTLISH_NATIVE_GC_STRESS=1 tclsh9.0 tests/resources.test`, `... tests/unused-context.test` | 40 passed, 27 passed |
 | `tclsh9.0 tests/resources.test` (all four backends) | 40 passed |
 | `cargo test --release --manifest-path native/Cargo.toml --bin botlish-native cleanup_root_tests` | 2 passed; the new one fails with the runtime's `unit` check removed |
 | `tclsh9.0 tests/local.tcl` over the related test files (section 10.1) | see 10.1 |
@@ -393,20 +393,20 @@ passed:
 
 | file or suite | interp pass | compile pass |
 |---|---|---|
-| unused-context.test (25 tests at the time) | 25 | 25 |
+| unused-context.test (25 tests at the time; all 27 later, separately) | 25 | 25 |
 | resources.test | 40 | 40 |
 | contexts.test | 61 (12 golden duplicates) | 61 |
 | context-affine.test | 28 | 28 |
 | context-traits.test | 53 (8) | 53 |
 | affine.test | 28 (20) | 28 |
 | coroutines.test | 37 (44) | 37 |
-| event-loop.test | PENDING | 109 |
-| actor.test | 67 | PENDING |
+| event-loop.test | 109 | 109 |
+| actor.test | 67 | 67 |
 | c-callbacks.test | 36 | 36 |
 | native-library.test | 28 | 28 |
-| hir-interchange.test | PENDING | PENDING |
+| hir-interchange.test | 11 | 11 |
 | hir-cache.test | 19 | 19 |
-| compilation-isolation.test | 19 | PENDING |
+| compilation-isolation.test | 19 | 19 |
 | bot-modules.test | 68 (1 skipped) | 68 |
 | imports.test | 61 (43) | 61 |
 | compiler-service.test | 56 | 56 |
@@ -417,7 +417,8 @@ The golden suites passed on interp, compile, cranelift-generic and
 cranelift: coroutines (62), contexts (88), affinity (67), ownership (38),
 diagnostics (27), imports (59), imports-abi-child (17), compiled-values
 (118), imports-unimported (16), imports-library-modules (12),
-imports-abi-family (6) and modules (31).
+imports-abi-family (6) and modules (31): 541 golden tests on each
+backend, 0 failed. The run took 1660 s of wall time with 3 jobs.
 
 Also executed: `tclsh9.0 tools/compilerpedia.tcl check` (1222 topics, 753
 examples, 0 problems).
@@ -452,7 +453,11 @@ the lexical-cleanup harness was also run on the mutants closest to that
 code (`audit/lexical-cleanup/tools/mutate.tcl -only no-release-edges,
 everything-returned,cleanup-index-zero,no-cleanup-descriptor,
 tcl-cleanup-not-called,native-cleanup-not-called`). `no-cleanup-descriptor`
-is killed (24 event-loop ownership tests). The others are PENDING.
+and the other five are killed too: 6 of 6, each by the resources and
+event-loop ownership tests (for example `no-release-edges` by 27 failures,
+`native-cleanup-not-called` by 20, `cleanup-index-zero` by the resources
+tests). `native-cleanup-not-called` edits `native/src/runtime/affine.rs`,
+so the harness rebuilt a private native backend for it.
 `tools/mutant-catalogs.tcl` confirms that every mutant of every catalog
 still applies.
 
