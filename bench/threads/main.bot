@@ -140,12 +140,12 @@ fn main(context ev: std::event_loop::Loop, d: std::event_loop::Driver, ac: std::
     c2 = event_loop_linux::cpu_us()
     sequential(std::thread::entry(workers::with_loop), 50)
     timed("thread start, own loop and port, join", t2, c2, 50)
-    # 3. fib(27) in 1, 2, 4, 8 VMs at once (no lock on their path)
+    # 3. fib(32), about 25 ms, in 1, 2, 4, 8 VMs at once (no lock on their path)
     loop k in [1, 2, 4, 8]:
         t3 = event_loop_linux::now_us()
         c3 = event_loop_linux::cpu_us()
-        parallel(k, 27)
-        timed("fib(27) in ".concat(std::int::to_string(k)).concat(" VMs at once, per VM"), t3, c3, k)
+        parallel(k, 32)
+        timed("fib(32) in ".concat(std::int::to_string(k)).concat(" VMs at once, per VM"), t3, c3, k)
     # 4. the codec alone, one VM: a Note encoded, then decoded
     t4 = event_loop_linux::now_us()
     c4 = event_loop_linux::cpu_us()

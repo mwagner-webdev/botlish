@@ -120,6 +120,14 @@ waiting senders, a worker VM's event loop outliving it, and a lowering
 crash for every program that imports std::event_loop without installing
 its Loop (a pre-existing bug that every thread program would have hit).
 
+Evidence in short: tests/threads.test passes on Linux x86-64 on both
+passes, also its GC-stress tests (**observed**); 29 of 29 targeted mutants
+are killed (section 18); the measurements of section 19 were taken on a
+machine that two orphaned test processes kept partly busy, so its scaling
+figures are lower bounds; Linux AArch64, macOS and Windows results are
+**CI**, pending or (macOS, Windows) failed in a test-harness build step and
+fixed, awaiting their rerun (section 20).
+
 ## 2. Starting architecture
 
 **static**, from main at `f2787af` and the earlier milestones:
@@ -627,17 +635,195 @@ refuse them), or that other harnesses already kill (a shared context area,
 the wrong VM's metadata, a dropped wakeup between check and wait), are
 listed with their defenses in mutants.txt's header.
 
-Results: section 20's table.
+Results (**observed**, `tclsh9.0 audit/threads/tools/mutate.tcl`, Linux
+x86-64): **29 of 29 killed**, each by its named detector.
+
+| Layer | Mutant | Killed by |
+|---|---|---|
+| lifecycle, guard | thread-unguarded | th-lifecycle |
+| | start-ignores-limit | th-limit |
+| | stop-unseen | th-limit (hangs: the detector's timeout) |
+| | entry-failure-returned | th-lifecycle |
+| endpoint identity | key-unchecked, generation-unchecked | Rust `endpoints_are_named_by_domain_generation_and_key` |
+| | fingerprint-unchecked, close-ignored | th-endpoints |
+| | rebuild-public | th-reject-forgery |
+| | remote-unconstrained | th-reject-authority |
+| backpressure | grant-refused-in-line | Rust `freed_places_are_granted_in_order` |
+| | grant-not-reserved | Rust `freed_places_are_granted_in_order` (see below) |
+| | deliver-polls | th-backpressure |
+| | pump-drops-on-full | th-transport |
+| delivery | doorbell-silent | Rust `port_notifications_are_never_lost` |
+| | pump-delivers-twice | th-transport (hangs) |
+| calls | owed-calls-forgotten, undelivered-forgotten | th-calls (hang: a call left waiting) |
+| | answered-twice, call-generation-unchecked | Rust `calls_complete_once` |
+| event-loop ABI v2 | v1-routed-to-first, loop-left-open | th-abi-loops |
+| compiler | entry-call-allowed, install-anywhere-in-entry | th-reject-entries |
+| | entry-types-unsent, entry-obligations-unchecked | th-reject-authority |
+| | entry-charged-requirements | th-requirements |
+| | selection-conflict-allowed | th-reject-conflict |
+| | tcl-runs-threads | th-tcl-refusal |
+
+The first full run (44 min 40 s) killed 28. **grant-not-reserved
+survived**: the grant test's waiters both retried, so a grant that was
+not held for its waiter went unnoticed. The test now also covers a lone
+waiter (its granted place is refused to a sender that did not wait,
+then taken by the waiter), and the mutant's rerun was killed by it. Four
+mutants are killed by a hang (their detector never finishes: a call or a
+stop that never completes is exactly the defect); the harness runs each
+detector in a session of its own and kills its process group at the
+timeout. Two processes of the first run's hung detectors, started before
+that change, outlived the run on this machine (section 19).
+
+The mutants this milestone's changes touched in other catalogs were
+updated to the code they mutate and rerun through their own harnesses,
+all killed: value-transfer `open-type-admitted`, coroutines
+`context-reselected-per-resume`, c-callbacks `root-not-specialized`,
+per-thread-runtime `guard-one-thread`, native-aot
+`sys-startup-failure-succeeds`, and event-loop's five per-loop C mutants
+(`c-post-never-signals`, `c-reset-without-recheck`, `c-wake-not-owed`,
+`c-source-drained-first`, `c-hold-forgets-record`).
+`tclsh9.0 tools/mutant-catalogs.tcl`: 89 catalogs, 3,157 mutants, 0
+problems.
 
 ## 19. Performance
 
-`tclsh9.0 bench/threads.tcl -runs 3` (bench/threads/main.bot; times
-per operation, best and worst of three processes): see the table below,
-filled from that run.
+`tclsh9.0 bench/threads.tcl -runs 5` (bench/threads/main.bot, the
+cranelift JIT, Linux x86-64, a 4-vCPU container), **observed**. Each
+phase prints wall and CPU microseconds per operation, the best and worst
+of five processes. The CPU column is the process's (getrusage), so a
+phase with several busy threads shows more CPU than wall.
+
+**The machine was not quiet.** Two processes left by the first mutation
+run's hung detectors (one `botlish-runner`, one `botlish-native` in the
+harness's private tree: three spinning threads, about 1.8 of the 4 vCPUs)
+kept running; this session was not permitted to kill them. Every number
+below was measured beside them. That matters most for parallel scaling;
+single-thread costs are less affected but still an upper bound.
+
+| Phase | ops | wall µs/op best (worst) | CPU µs/op best (worst) |
+|---|---:|---:|---:|
+| thread start, trivial entry, join | 50 | 486 (645) | 437 (536) |
+| thread start with its own event loop and port, join | 50 | 437 (552) | 437 (551) |
+| fib(32) in 1 VM, per VM | 1 | 18,969 (22,177) | 18,918 (22,179) |
+| fib(32) in 2 VMs at once, per VM | 2 | 15,753 (21,788) | 19,299 (21,755) |
+| fib(32) in 4 VMs at once, per VM | 4 | 12,254 (21,122) | 19,057 (22,410) |
+| fib(32) in 8 VMs at once, per VM | 8 | 10,852 (13,963) | 19,835 (22,193) |
+| encode a Note (std::transfer, one VM) | 100,000 | 0.27 (0.32) | 0.27 (0.31) |
+| decode a Note | 100,000 | 0.21 (0.25) | 0.21 (0.25) |
+| one-way, 1 producer VM retrying Full, per note | 40,000 | 9.76 (11.75) | 14.22 (15.32) |
+| one-way, 2 producers retrying | 40,000 | 9.43 (14.87) | 16.56 (23.45) |
+| one-way, 4 producers retrying | 40,000 | 12.93 (18.67) | 24.07 (33.89) |
+| one-way, 8 producers retrying | 40,000 | 19.69 (28.59) | 46.81 (67.49) |
+| one-way, 2 producers waiting for room (deliver) | 40,000 | 7.38 (9.42) | 8.05 (13.27) |
+| saturated: endpoint of 4, mailbox of 2, 2 waiting producers | 20,000 | 10.55 (12.17) | 12.23 (16.40) |
+| call round trip to a service VM (std::actor::remote::call) | 5,000 | 20.36 (21.95) | 19.36 (21.51) |
+
+What the numbers show:
+
+* **Thread creation and VM initialization**: about 0.44-0.49 ms for a
+  start, the VM made on the new thread, a trivial entry and the join; a
+  worker that also opens its own event loop, Linux driver and port costs
+  no measurably more.
+* **No global serialization of Botlish code.** CPU per VM stays at 18.9-19.8
+  ms of fib(32) from 1 to 8 VMs at once (within 5%): nothing on that path
+  is a shared lock. Wall per VM falls from 19.0 to 10.9 ms (throughput
+  1.75x at 8 VMs) -- the share of the machine the orphaned spinners left.
+  A direct check with a longer workload (fib(39) per VM, standalone
+  executables): 1 VM 0.61 s; 2 VMs 0.72 s wall and 1.19 s CPU (1.65
+  cores busy); 4 VMs 1.19 s wall and 2.44 s CPU (2.05 cores). Scaling on
+  a quiet 4-core machine is **projected**, not measured here. (The first
+  run of this benchmark, with fib(27), about 2.3 ms per VM, also
+  overlapped a test run starting 63 spinners, and its parallel numbers
+  showed one core: a phase that short measures the scheduler's placement
+  on a loaded machine, not the runtime, so the phase now uses fib(32).)
+* **Encoding and decoding separately**: 0.27 µs and 0.21 µs for a Note
+  (two Ints in a struct). M2 measured 0.48 and 0.86 µs for a larger
+  actor-sized message on another host; the two are not the same message
+  and are not compared.
+* **Typed one-way messages**: 7-10 µs per note end to end (encode, enqueue,
+  doorbell, the consumer VM's loop, the pump into the mailbox, the actor's
+  receive, decode) with one or two producers. Retrying producers spin on
+  Full (0.6-2.2 million refusals per 40,000 notes): that is the cost of
+  not waiting, and CPU grows with the producers while wall per note grows
+  from 9.8 to 19.7 µs at 8 producers -- the transport mutex and the one
+  consumer. Producers that wait for room (deliver) take 7.4 µs per note
+  with about 0.3 refusals per note (a first try that found the endpoint
+  full, then one wait): **backpressure under saturation** stays
+  event-driven, and the saturated configuration (an endpoint of 4 places
+  and a mailbox of 2) runs at 10.6 µs per note with no polling.
+* **Typed request/reply**: 20 µs per call round trip to a service in
+  another VM (two transfers each way, two notifications, two loop turns);
+  one cross-thread notification is therefore at most about 10 µs
+  (**derived**, not measured alone).
+* **Idle worker memory**: 8 idle workers (each sleeping in its own loop)
+  add 656,544 KiB of address space, about 80 MiB each: the 64 MiB default
+  native stack reservation (start_sized lowers it) plus the VM's heap
+  and its loop's actor stacks. Their resident set could not be separated
+  from the earlier phases' freed pages (the RSS delta was negative), so
+  it is **not measured**.
+
+Not measured separately: the raw enqueue/dequeue without a VM on either
+side (the Rust unit tests exercise it, untimed), the broker's operation
+round trip (its transport part is the call round trip above), transport
+queue and outstanding-call-table memory (**static**: a queued message is
+its transfer bytes plus a fixed record of sender and sequence; a call is
+one slot of the transport's call table until answered), GC impact, and
+event-loop fairness under remote traffic (th-transport checks
+correctness under it, not latency). Medians and tail percentiles are not
+reported: the harness records each process's phase totals, so "best" and
+"worst" of five processes are what it can state.
 
 ## 20. Regressions and CI
 
-Filled from the runs (below).
+**Local** (**observed**, Linux x86-64): `tclsh9.0 tests/local.tcl` --
+272 Tcl test files on interp and compile, 118 golden suites on all four
+backends through the front-end cache -- reported 647 entries passing and
+13 failing in 7 files, every one a consequence of this change:
+
+| File | Failure | Fix |
+|---|---|---|
+| mutable-array-type.test | the typed-array fence met std::thread's port state | the fence admits it |
+| abi-mutable-bytes.test | the registry's name fence matched "read" in "thread" | it reads an operation's own name |
+| method-eligible.test, linux-syscall.test | native inventories without std::thread's and std::transfer's new natives | listed |
+| golden-framework.test | std::test::code_name lacked the two new DiagnosticCode cases | named |
+| compilerpedia.test (3) | the new topics' summaries and aliases failed validation | rewritten |
+| actor.test (compile pass) | actor-source-ordinary: the transport's argument errors in native/src/runtime/thread.rs named std::actor (no native runtime file may name actors) | they name the operation called, std::thread::rt_* |
+
+Each file was rerun on both passes after its fix and passes. The run ended
+at the session's two-hour task limit before warning-gate.test reported on
+either pass; the warning gate itself was run directly (below). The native
+backend was rebuilt once while the run was in progress (that fix): the
+files that ran after it ran on the new driver, and tests/threads.test and
+actor.test's source fences were rerun on the final build. (actor.test's
+interp pass, which ran after the rebuild, passed.)
+
+Directly, on the final tree: tests/threads.test (21 tests, both passes),
+tests/sendability.test, tests/actor.test's source fences,
+`tools/mutant-catalogs.tcl` (89 catalogs, 0 problems),
+`tools/compilerpedia.tcl check`, the warning gate
+(`audit/refactor/tools/gate.tcl`), `cargo test --release --lib
+runtime::thread` and the mutation harnesses of section 18.
+
+**CI** (the branch `claude/inspiring-davinci-idqbr0`). The shared runner
+pool was congested throughout: main's own latest tests.yml run (f2787af,
+**success**) took over seven hours from push to completion.
+
+| Workflow | Commit | Result |
+|---|---|---|
+| tests.yml canary (mutant catalogs, warning gate, changed tests) | e0b45f0 | **success** |
+| tests.yml full (dispatched) | e0b45f0 | **pending** (queued for runners) |
+| tests-arm64.yml full (dispatched) | e0b45f0 | **pending** (queued for runners) |
+| static-decisions.yml (dispatched) | 4db90b0 | **pending** (queued for runners) |
+| macos-arm64.yml | e0b45f0 | **failure**: only threads.test's lifecycle, limit and overflow tests, which built the Linux package (sys/epoll.h); fixed in 748e182 |
+| windows-x86_64.yml | e0b45f0 | **failure**: the same four tests (clang refused -fPIC for MSVC: the same build); fixed in 748e182 |
+| macos-arm64.yml, windows-x86_64.yml (dispatched) | 748e182 | **pending** |
+| icy-tower (macos arm64), icy-tower (windows x86-64) | e0b45f0 | **success** |
+
+The commits after e0b45f0 change the transport's argument-error labels
+and a Rust unit test (native/src/runtime/thread.rs), tests/threads.test
+and its lifecycle program, the mutation harness, the benchmark program and
+this report; the full Linux runs were left to finish on e0b45f0 rather
+than restarted behind the queue for them.
 
 ## 21. Remaining limitations
 
@@ -694,5 +880,5 @@ export LANG=C.utf8 LC_ALL=C.utf8
 cargo build --release --manifest-path native/Cargo.toml
 tclsh9.0 tests/threads.test
 tclsh9.0 audit/threads/tools/mutate.tcl
-tclsh9.0 bench/threads.tcl -runs 3
+tclsh9.0 bench/threads.tcl -runs 5
 ```
