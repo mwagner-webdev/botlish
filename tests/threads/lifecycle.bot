@@ -26,8 +26,9 @@ fn ledgered(n: int, context t: std::thread::Threads) -> str:
             "failed: ".concat(identity)
 
 # Starts spinners until the process's guard records run out: how many ran,
-# whether a 1 ms bounded wait saw the first still running, and whether
-# every one ended once asked to stop.
+# whether a 1 ms bounded wait returned with the first not ended, whether it
+# reaches Running before it is asked to stop, and whether every one ended
+# once asked to stop.
 fn spinners(context t: std::thread::Threads) -> List[any] errors IndexNotFound:
     ids = loop i from 0 to 100:
         s = std::thread::start(std::thread::entry(crunch::spin), i):
@@ -39,7 +40,13 @@ fn spinners(context t: std::thread::Threads) -> List[any] errors IndexNotFound:
         id
     capacity = std::thread::capacity()
     waited = std::thread::await_end(std::list::at(ids, 0), 1000)
-    status = std::thread::status(std::list::at(ids, 0)) == std::thread::Status::Running
+    # A thread is Starting until its VM is made: wait (boundedly) until the
+    # first one runs, rather than expect it to be running already.
+    status = fold i from 0 to 20000 with intermediate seen false:
+        if seen:
+            break
+        std::thread::await_end(std::list::at(ids, 0), 1000)
+        std::thread::status(std::list::at(ids, 0)) == std::thread::Status::Running
     asked = loop id in ids:
         std::thread::request_stop(id)
     ended = loop id in ids:

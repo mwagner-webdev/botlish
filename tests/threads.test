@@ -81,8 +81,10 @@ proc thHir {dir name} {
     return $::thHirs($key)
 }
 
-# Program NAME's outcome on cranelift, {value SHOWN} or {error CODE
-# MESSAGE}; ENVIRONMENT: variable pairs set for the run.
+# Program NAME of DIR (the application by default; tests/threads itself
+# for the programs that need no C and no Linux driver: the lifecycle tests
+# run on every host with threads) on cranelift, {value SHOWN} or {error
+# CODE MESSAGE}; ENVIRONMENT: variable pairs set for the run.
 proc thRun {name {environment {}} {dir ""}} {
     if {$dir eq ""} {
         set dir $::thApp
@@ -91,7 +93,7 @@ proc thRun {name {environment {}} {dir ""}} {
     if {[info exists ::thRuns($key)]} {
         return $::thRuns($key)
     }
-    if {![thBuild]} {
+    if {$dir ne $::thSources && ![thBuild]} {
         return [list error BUILD $::thBuildError]
     }
     if {[catch {thHir $dir $name} message options]} {
@@ -128,19 +130,19 @@ test th-build {the application builds: the driver package installs, the C probes
 # Lifecycle
 
 test th-lifecycle {workers return their entries' values (copied back into this VM), a worker's declared failure is joined as ThreadFailed with its identity, each VM has its own contexts (the worker's Ledger is not the main VM's), starts stop at the process's 64 guard records (the main VM's own and 63 workers': ThreadLimit, never an unguarded thread), a bounded wait returns while the thread runs, and every spinner ends once asked to stop} -constraints botlishThreads -body {
-    thRun lifecycle
+    thRun lifecycle {} $::thSources
 } -result {value {["f20=6765", "f21=10946", "7:3", "failed: ledger::Refused", 1, 1, [63, 0, false, true, 63, true]]}}
 
 test th-lifecycle-gc-stress {the same under GC stress: a collection at every allocation site of every VM, each walking only its own thread's stack} -constraints botlishThreads -body {
-    thRun lifecycle {BOTLISH_NATIVE_GC_STRESS 1}
+    thRun lifecycle {BOTLISH_NATIVE_GC_STRESS 1} $::thSources
 } -result {value {["f20=6765", "f21=10946", "7:3", "failed: ledger::Refused", 1, 1, [63, 0, false, true, 63, true]]}}
 
 test th-limit {a Threads authority's own limit: made with std::thread::create(1), a second start while its thread runs is ThreadLimit, and once the thread ended another starts} -constraints botlishThreads -body {
-    thRun limit
+    thRun limit {} $::thSources
 } -result {value {[false, true, true]}}
 
 test th-overflow {a worker's native stack overflow ends the process (NATIVE LIMIT STACK), as the main thread's does: no thread-only recovery} -constraints botlishThreads -body {
-    thRun overflow
+    thRun overflow {} $::thSources
 } -result {error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}}
 
 test th-tcl-refusal {the Tcl backends refuse a program that starts a thread before it runs (BACKEND THREAD-UNAVAILABLE, from the lowering: nothing ran), on both; a program that only imports std::thread compiles there, and reaching one of its runtime operations is refused when it runs (CORE SEMANTIC THREAD-UNAVAILABLE), never emulated} -constraints botlishThreads -body {
