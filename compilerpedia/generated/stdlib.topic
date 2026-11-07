@@ -3504,6 +3504,26 @@ An actor ready to start: STEP is its coroutine, FIRST what its construction
 returned (its first request). No context: an actor is constructed under the
 authority it is given (an inject block) and handed out of it this way.
 
+@topic stdlib.std::actor::post_waiting
+title: std::actor::post_waiting -- Function (nomethod) of module std::actor
+summary: Send M to TO's mailbox from an event-loop task that is no actor (a transport's pump
+index: stdlib
+symbol: std::actor::post_waiting
+related: stdlib.module.std::actor
+
+== DECLARATION
+    nomethod fn post_waiting(to: Address[M], m: M, context ev: std::event_loop::Loop, ac: Actors) -> Sent errors std::event_loop::SchedulerFault:
+
+== MODULE
+stdlib/actor.bot: import std::actor, then write std::actor::post_waiting.
+
+== DESCRIPTION
+Send M to TO's mailbox from an event-loop task that is no actor (a
+transport's pump: std::actor::remote), waiting -- that task suspended, never
+its thread -- for room when it is full, as an actor's deliver does (the
+senders waiting for room are served first-come first-served): Delivered,
+Closed or Stale.
+
 @topic stdlib.std::actor::start
 title: std::actor::start -- Function of module std::actor
 summary: Start actor A
@@ -3652,6 +3672,7 @@ stdlib/actor.bot (import std::actor).
     std::actor::open               function (nomethod) -- A new, empty mail...
     std::actor::pause              function -- Let the other ready tasks ru...
     std::actor::post               function (nomethod) -- Send M to TO's ma...
+    std::actor::post_waiting       function (nomethod) -- Send M to TO's ma...
     std::actor::queued             function (nomethod) -- Messages queued i...
     std::actor::reap               function -- Close the mailboxes of every...
     std::actor::receive            function -- The next message of RX's mai...
@@ -3663,6 +3684,626 @@ stdlib/actor.bot (import std::actor).
     std::actor::try_receive        function -- The next message of RX's mai...
 
 Each member is a topic: -help NAME (e.g. -help std::actor::Actors).
+
+@topic stdlib.std::actor::remote::Sent
+title: std::actor::remote::Sent -- Enum of module std::actor::remote
+summary: What a remote send did.
+index: stdlib
+symbol: std::actor::remote::Sent
+related: stdlib.module.std::actor::remote
+
+== DECLARATION
+    enum Sent:
+        Delivered,
+        Full,
+        Closed,
+        Stale,
+        Unavailable,
+        TooLarge,
+        TypeMismatch,
+
+== MODULE
+stdlib/actor/remote.bot: import std::actor::remote, then write
+std::actor::remote::Sent.
+
+== DESCRIPTION
+What a remote send did.
+
+@topic stdlib.std::actor::remote::CallFailed
+title: std::actor::remote::CallFailed -- Error of module std::actor::remote
+summary: A call that could not complete
+index: stdlib
+symbol: std::actor::remote::CallFailed
+related: stdlib.module.std::actor::remote
+
+== DECLARATION
+    error CallFailed:
+        reason: str
+
+== MODULE
+stdlib/actor/remote.bot: import std::actor::remote, then write
+std::actor::remote::CallFailed.
+
+== DESCRIPTION
+A call that could not complete: REASON says why (Closed, Stale, Unavailable,
+Undelivered, ServiceEnded, TooLarge, TypeMismatch).
+
+@topic stdlib.std::actor::remote::Word
+title: std::actor::remote::Word -- Type of module std::actor::remote
+summary: A transport identity's word (a domain, an endpoint or call id, a key)
+index: stdlib
+symbol: std::actor::remote::Word
+related: stdlib.module.std::actor::remote
+
+== DECLARATION
+    type Word = Int in -4611686018427387904..4611686018427387903
+
+== MODULE
+stdlib/actor/remote.bot: import std::actor::remote, then write
+std::actor::remote::Word.
+
+== DESCRIPTION
+A transport identity's word (a domain, an endpoint or call id, a key): a
+small Int, so a capability fits a context's fixed slot (a broker context
+holds one).
+
+@topic stdlib.std::actor::remote::Identity
+title: std::actor::remote::Identity -- Struct of module std::actor::remote
+summary: What a capability holds
+index: stdlib
+symbol: std::actor::remote::Identity
+related: stdlib.module.std::actor::remote
+
+== DECLARATION
+    struct Identity:
+        domain: Word
+        id: Word
+        key: Word
+
+== MODULE
+stdlib/actor/remote.bot: import std::actor::remote, then write
+std::actor::remote::Identity.
+
+== DESCRIPTION
+What a capability holds: the transport's identity of its endpoint or call.
+
+@topic stdlib.std::actor::remote::Remote
+title: std::actor::remote::Remote -- Opaque struct of module std::actor::remote
+summary: The send right of an endpoint delivering M into one mailbox, of this VM or another.
+index: stdlib
+symbol: std::actor::remote::Remote
+related: stdlib.module.std::actor::remote
+
+== DECLARATION
+    opaque struct Remote[M satisfies Sendable]:
+        domain: Word
+        id: Word
+        key: Word
+        sendable through(remote_out, remote_in) as Identity
+
+== MODULE
+stdlib/actor/remote.bot: import std::actor::remote, then write
+std::actor::remote::Remote.
+
+== DESCRIPTION
+The send right of an endpoint delivering M into one mailbox, of this VM or
+another.
+
+@topic stdlib.std::actor::remote::Service
+title: std::actor::remote::Service -- Opaque struct of module std::actor::remote
+summary: The call right of a service answering requests Q with an R.
+index: stdlib
+symbol: std::actor::remote::Service
+related: stdlib.module.std::actor::remote
+
+== DECLARATION
+    opaque struct Service[Q satisfies Sendable, R satisfies Sendable]:
+        domain: Word
+        id: Word
+        key: Word
+        sendable through(service_out, service_in) as Identity
+
+== MODULE
+stdlib/actor/remote.bot: import std::actor::remote, then write
+std::actor::remote::Service.
+
+== DESCRIPTION
+The call right of a service answering requests Q with an R.
+
+@topic stdlib.std::actor::remote::Reply
+title: std::actor::remote::Reply -- Opaque struct of module std::actor::remote
+summary: The one-shot answer right of one call.
+index: stdlib
+symbol: std::actor::remote::Reply
+related: stdlib.module.std::actor::remote
+
+== DECLARATION
+    opaque struct Reply[R satisfies Sendable]:
+        domain: Word
+        call: Word
+        key: Word
+        sendable through(reply_out, reply_in) as Identity
+
+== MODULE
+stdlib/actor/remote.bot: import std::actor::remote, then write
+std::actor::remote::Reply.
+
+== DESCRIPTION
+The one-shot answer right of one call.
+
+@topic stdlib.std::actor::remote::Call
+title: std::actor::remote::Call -- Struct of module std::actor::remote
+summary: What a service's mailbox receives
+index: stdlib
+symbol: std::actor::remote::Call
+related: stdlib.module.std::actor::remote
+
+== DECLARATION
+    struct Call[Q satisfies Sendable, R satisfies Sendable]:
+        body: Q
+        reply: Reply[R]
+
+== MODULE
+stdlib/actor/remote.bot: import std::actor::remote, then write
+std::actor::remote::Call.
+
+== DESCRIPTION
+What a service's mailbox receives: a request and its answer right.
+
+@topic stdlib.std::actor::remote::Response
+title: std::actor::remote::Response -- Opaque struct of module std::actor::remote
+summary: What a caller's reply mailbox receives (the protocol's).
+index: stdlib
+symbol: std::actor::remote::Response
+related: stdlib.module.std::actor::remote
+
+== DECLARATION
+    opaque struct Response[R satisfies Sendable]:
+        call: int
+        status: int
+        values: List[R]
+
+== MODULE
+stdlib/actor/remote.bot: import std::actor::remote, then write
+std::actor::remote::Response.
+
+== DESCRIPTION
+What a caller's reply mailbox receives (the protocol's).
+
+@topic stdlib.std::actor::remote::Replies
+title: std::actor::remote::Replies -- Struct of module std::actor::remote
+summary: What replies opens
+index: stdlib
+symbol: std::actor::remote::Replies
+related: stdlib.module.std::actor::remote
+
+== DECLARATION
+    struct Replies[R satisfies Sendable]:
+        inbox: std::actor::Inbox[Response[R]]
+        endpoint: int
+
+== MODULE
+stdlib/actor/remote.bot: import std::actor::remote, then write
+std::actor::remote::Replies.
+
+== DESCRIPTION
+What replies opens: the reply mailbox's receive right (the caller's actor's)
+and its reply endpoint.
+
+@topic stdlib.std::actor::remote::Caller
+title: std::actor::remote::Caller -- Opaque struct of module std::actor::remote
+summary: An actor's reply route
+index: stdlib
+symbol: std::actor::remote::Caller
+related: stdlib.module.std::actor::remote
+
+== DECLARATION
+    opaque struct Caller[R satisfies Sendable]:
+        endpoint: int
+        rx: std::actor::Receiver[Response[R]]
+
+== MODULE
+stdlib/actor/remote.bot: import std::actor::remote, then write
+std::actor::remote::Caller.
+
+== DESCRIPTION
+An actor's reply route: its reply endpoint, and what it receives the
+responses through.
+
+@topic stdlib.std::actor::remote::remote_out
+title: std::actor::remote::remote_out -- Function (nomethod)
+summary: The function (nomethod) std::actor::remote::remote_out of the standard module std::actor::remote.
+index: stdlib
+symbol: std::actor::remote::remote_out
+related: stdlib.module.std::actor::remote
+
+== DECLARATION
+    nomethod fn remote_out(r: Remote[M]) -> Identity:
+
+== MODULE
+stdlib/actor/remote.bot: import std::actor::remote, then write
+std::actor::remote::remote_out.
+
+@topic stdlib.std::actor::remote::remote_in
+title: std::actor::remote::remote_in -- Function (nomethod)
+summary: The function (nomethod) std::actor::remote::remote_in of the standard module std::actor::remote.
+index: stdlib
+symbol: std::actor::remote::remote_in
+related: stdlib.module.std::actor::remote
+
+== DECLARATION
+    nomethod fn remote_in(i: Identity) -> Remote[M]:
+
+== MODULE
+stdlib/actor/remote.bot: import std::actor::remote, then write
+std::actor::remote::remote_in.
+
+@topic stdlib.std::actor::remote::service_out
+title: std::actor::remote::service_out -- Function (nomethod)
+summary: The function (nomethod) std::actor::remote::service_out of the standard module std::actor::remote.
+index: stdlib
+symbol: std::actor::remote::service_out
+related: stdlib.module.std::actor::remote
+
+== DECLARATION
+    nomethod fn service_out(s: Service[Q, R]) -> Identity:
+
+== MODULE
+stdlib/actor/remote.bot: import std::actor::remote, then write
+std::actor::remote::service_out.
+
+@topic stdlib.std::actor::remote::service_in
+title: std::actor::remote::service_in -- Function (nomethod)
+summary: The function (nomethod) std::actor::remote::service_in of the standard module std::actor::remote.
+index: stdlib
+symbol: std::actor::remote::service_in
+related: stdlib.module.std::actor::remote
+
+== DECLARATION
+    nomethod fn service_in(i: Identity) -> Service[Q, R]:
+
+== MODULE
+stdlib/actor/remote.bot: import std::actor::remote, then write
+std::actor::remote::service_in.
+
+@topic stdlib.std::actor::remote::reply_out
+title: std::actor::remote::reply_out -- Function (nomethod)
+summary: The function (nomethod) std::actor::remote::reply_out of the standard module std::actor::remote.
+index: stdlib
+symbol: std::actor::remote::reply_out
+related: stdlib.module.std::actor::remote
+
+== DECLARATION
+    nomethod fn reply_out(r: Reply[R]) -> Identity:
+
+== MODULE
+stdlib/actor/remote.bot: import std::actor::remote, then write
+std::actor::remote::reply_out.
+
+@topic stdlib.std::actor::remote::reply_in
+title: std::actor::remote::reply_in -- Function (nomethod)
+summary: The function (nomethod) std::actor::remote::reply_in of the standard module std::actor::remote.
+index: stdlib
+symbol: std::actor::remote::reply_in
+related: stdlib.module.std::actor::remote
+
+== DECLARATION
+    nomethod fn reply_in(i: Identity) -> Reply[R]:
+
+== MODULE
+stdlib/actor/remote.bot: import std::actor::remote, then write
+std::actor::remote::reply_in.
+
+@topic stdlib.std::actor::remote::export
+title: std::actor::remote::export -- Function (nomethod) of module std::actor::remote
+summary: Export TO's mailbox
+index: stdlib
+symbol: std::actor::remote::export
+related: stdlib.module.std::actor::remote
+
+== DECLARATION
+    nomethod fn export(to: std::actor::Address[M], capacity: int, context ev: std::event_loop::Loop, ac: std::actor::Actors, p: std::thread::Port) -> Remote[M] errors std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+
+== MODULE
+stdlib/actor/remote.bot: import std::actor::remote, then write
+std::actor::remote::export.
+
+== DESCRIPTION
+Export TO's mailbox: an endpoint of this VM whose messages (at most CAPACITY
+in transit) are delivered into it, in order. The capability is sendable; the
+mailbox's actor receives as from any sender.
+
+@topic stdlib.std::actor::remote::close
+title: std::actor::remote::close -- Function (nomethod) of module std::actor::remote
+summary: Close R's endpoint, if it is this VM's
+index: stdlib
+symbol: std::actor::remote::close
+related: stdlib.module.std::actor::remote
+
+== DECLARATION
+    nomethod fn close(r: Remote[M]) -> int:
+
+== MODULE
+stdlib/actor/remote.bot: import std::actor::remote, then write
+std::actor::remote::close.
+
+== DESCRIPTION
+Close R's endpoint, if it is this VM's: later sends are Closed, and the
+messages it held in transit are dropped -- how many.
+
+@topic stdlib.std::actor::remote::in_transit
+title: std::actor::remote::in_transit -- Function (nomethod)
+summary: Messages queued on R's endpoint in transit (this VM's endpoint
+index: stdlib
+symbol: std::actor::remote::in_transit
+related: stdlib.module.std::actor::remote
+
+== DECLARATION
+    nomethod fn in_transit(r: Remote[M]) -> int:
+
+== MODULE
+stdlib/actor/remote.bot: import std::actor::remote, then write
+std::actor::remote::in_transit.
+
+== DESCRIPTION
+Messages queued on R's endpoint in transit (this VM's endpoint; 0
+otherwise).
+
+@topic stdlib.std::actor::remote::send
+title: std::actor::remote::send -- Function (nomethod) of module std::actor::remote
+summary: Send M through TO now
+index: stdlib
+symbol: std::actor::remote::send
+related: stdlib.module.std::actor::remote
+
+== DECLARATION
+    nomethod fn send(to: Remote[M], m: M) -> Sent:
+
+== MODULE
+stdlib/actor/remote.bot: import std::actor::remote, then write
+std::actor::remote::send.
+
+== DESCRIPTION
+Send M through TO now: Delivered, or why not -- Full (its endpoint holds its
+capacity in transit, or senders wait for room before this one), Closed,
+Stale (no endpoint has this identity now), Unavailable (another process's),
+TooLarge. It never waits and needs no context: an actor sends with it.
+
+@topic stdlib.std::actor::remote::deliver
+title: std::actor::remote::deliver -- Function (nomethod)
+summary: Send M through TO from an event-loop task, waiting -- the task suspended, never its thread -- for room while it is Full
+index: stdlib
+symbol: std::actor::remote::deliver
+related: stdlib.module.std::actor::remote
+
+== DECLARATION
+    nomethod fn deliver(to: Remote[M], m: M, context ev: std::event_loop::Loop, p: std::thread::Port) -> Sent errors std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+
+== MODULE
+stdlib/actor/remote.bot: import std::actor::remote, then write
+std::actor::remote::deliver.
+
+== DESCRIPTION
+Send M through TO from an event-loop task, waiting -- the task suspended,
+never its thread -- for room while it is Full: Delivered, Closed, Stale,
+Unavailable or TooLarge.
+
+@topic stdlib.std::actor::remote::serve_calls
+title: std::actor::remote::serve_calls -- Function (nomethod)
+summary: Export TO's mailbox as a service
+index: stdlib
+symbol: std::actor::remote::serve_calls
+related: stdlib.module.std::actor::remote
+
+== DECLARATION
+    nomethod fn serve_calls(to: std::actor::Address[Call[Q, R]], capacity: int, context ev: std::event_loop::Loop, ac: std::actor::Actors, p: std::thread::Port) -> Service[Q, R] errors std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+
+== MODULE
+stdlib/actor/remote.bot: import std::actor::remote, then write
+std::actor::remote::serve_calls.
+
+== DESCRIPTION
+Export TO's mailbox as a service: its actor receives a Call[Q, R] per
+request (at most CAPACITY in transit) and answers each with reply.
+
+@topic stdlib.std::actor::remote::close_service
+title: std::actor::remote::close_service -- Function (nomethod)
+summary: Close S's endpoint (this VM's)
+index: stdlib
+symbol: std::actor::remote::close_service
+related: stdlib.module.std::actor::remote
+
+== DECLARATION
+    nomethod fn close_service(s: Service[Q, R]) -> int:
+
+== MODULE
+stdlib/actor/remote.bot: import std::actor::remote, then write
+std::actor::remote::close_service.
+
+== DESCRIPTION
+Close S's endpoint (this VM's): later calls fail Closed, and the calls it
+held in transit fail Undelivered -- how many.
+
+@topic stdlib.std::actor::remote::reply
+title: std::actor::remote::reply -- Function (nomethod) of module std::actor::remote
+summary: Answer the call R with VALUE
+index: stdlib
+symbol: std::actor::remote::reply
+related: stdlib.module.std::actor::remote
+
+== DECLARATION
+    nomethod fn reply(r: Reply[R], value: R) -> Sent:
+
+== MODULE
+stdlib/actor/remote.bot: import std::actor::remote, then write
+std::actor::remote::reply.
+
+== DESCRIPTION
+Answer the call R with VALUE: Delivered, or Stale when it was answered
+already, cancelled, or its caller is gone (the answer reaches nobody),
+Unavailable. Needs no context: the answer right is the authority.
+
+@topic stdlib.std::actor::remote::replies
+title: std::actor::remote::replies -- Function (nomethod)
+summary: Open the reply route of one calling actor
+index: stdlib
+symbol: std::actor::remote::replies
+related: stdlib.module.std::actor::remote
+
+== DECLARATION
+    nomethod fn replies(capacity: int, context ev: std::event_loop::Loop, ac: std::actor::Actors, p: std::thread::Port) -> Replies[R] errors std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+
+== MODULE
+stdlib/actor/remote.bot: import std::actor::remote, then write
+std::actor::remote::replies.
+
+== DESCRIPTION
+Open the reply route of one calling actor: a mailbox of responses (at most
+CAPACITY queued), fed by a reply endpoint of this VM. Hand the result to the
+actor, which makes its Caller of it (caller).
+
+@topic stdlib.std::actor::remote::caller
+title: std::actor::remote::caller -- Function (nomethod) of module std::actor::remote
+summary: The Caller an actor calls through, made of its Replies
+index: stdlib
+symbol: std::actor::remote::caller
+related: stdlib.module.std::actor::remote
+
+== DECLARATION
+    nomethod fn caller(r: Replies[R], resume std::actor::Answer) -> Caller[R] errors std::actor::Closed:
+
+== MODULE
+stdlib/actor/remote.bot: import std::actor::remote, then write
+std::actor::remote::caller.
+
+== DESCRIPTION
+The Caller an actor calls through, made of its Replies: the reply mailbox is
+bound to the actor (std::actor::listen).
+
+@topic stdlib.std::actor::remote::call
+title: std::actor::remote::call -- Function (nomethod) of module std::actor::remote
+summary: Calls SVC with Q from an actor and waits -- the actor suspended, its thread free -- for the reply
+index: stdlib
+symbol: std::actor::remote::call
+related: stdlib.module.std::actor::remote
+
+== DECLARATION
+    nomethod fn call(svc: Service[Q, R], q: Q, c: Caller[R], resume std::actor::Answer) -> R errors CallFailed, std::actor::Closed:
+
+== MODULE
+stdlib/actor/remote.bot: import std::actor::remote, then write
+std::actor::remote::call.
+
+== DESCRIPTION
+Calls SVC with Q from an actor and waits -- the actor suspended, its thread
+free -- for the reply: an R. While the service's endpoint is full, the call
+waits for room. CallFailed with the reason when the call cannot complete:
+the service is Closed (or its request Undelivered when it closed),
+ServiceEnded (its VM ended before answering), Stale, Unavailable, TooLarge,
+TypeMismatch. Closed when C's own reply mailbox closed.
+
+@topic stdlib.module.std::actor::remote
+title: std::actor::remote -- standard namespace
+summary: Typed messages and calls between actors of different Botlish threads.
+index: stdlib
+symbol: std::actor::remote
+
+== DESCRIPTION
+  # the receiving VM: an ordinary mailbox, exported
+  {to: jobs, inbox} = std::actor::open[Job](16)
+  r = std::actor::remote::export(jobs, 64)       # Remote[Job]: a capability
+  # ... give r to another thread (it is sendable: a thread's
+  # initialization value, a message) ...
+
+  # the sending VM
+  std::actor::remote::send(r, Job {...})         # Delivered, Full, Closed, ...
+
+An exported mailbox stays an ordinary std::actor mailbox: its actor receives
+with std::actor::receive, under its own restricted authority, on its own
+thread; this module adds no scheduler. Between the threads the message is
+BYTES: the sender encodes it in its VM (std::transfer, its Sendable type
+checked statically), the runtime's transport queues the bytes -- nothing of
+the sending VM's heap -- and the receiving VM's pump task (a task of its
+event loop, woken through its port: std::thread) decodes them in that VM,
+with its own constructors, and posts the value into the mailbox, in the
+order sent (FIFO per sender). A message is typed twice: statically, by the
+capability's type, and by the transport, which compares the bytes' schema
+fingerprint with the endpoint's before it queues them (a mismatch is
+TypeMismatch, never a delivery).
+
+CAPABILITIES. Remote[M], Service[Q, R] and Reply[R] name an endpoint (or a
+call) of the process's transport by its domain (this process's random
+identity), its slot and generation, and a random 64-bit key the runtime drew
+when it opened: a capability nobody was given names nothing (Stale), a
+closed endpoint's is Closed, another process's is Unavailable. They are
+sendable (each module's `sendable through` clause states how one is copied:
+its identity), so a thread's initialization value or a message carries them
+-- authority to send, never to receive or to act. They are no
+std::actor::Address[M], which stays local to its VM (not sendable).
+
+BACKPRESSURE. An endpoint queues at most CAPACITY messages in transit;
+beyond, send answers Full (nothing is dropped). deliver (an event-loop
+task's) and call (an actor's) wait for room instead -- their task or actor
+suspended, never their thread: the transport rings the waiting VM's port
+when a place frees, the first waiting sender first. The pump moves a message
+into the mailbox only while the mailbox has room (std::actor::post_waiting),
+so a slow actor fills its mailbox, then the endpoint, then its senders wait:
+the backpressure reaches them.
+
+CALLS. A service is a mailbox of Call[Q, R] values exported with
+serve_calls: each call's request Q and its Reply[R], a one-shot answer
+right. An actor calls (call) through a Caller[R] -- its own reply mailbox,
+fed by a reply endpoint of its VM -- and is suspended until the response
+arrives; the transport correlates each response with its call (its record's
+generation and key), so a duplicate or late answer (after the call was
+answered, cancelled or its caller gone) is Stale and reaches nobody. A call
+completes once: with the reply, or with the failure the transport saw -- the
+request undelivered (its endpoint closed with it queued: Undelivered), the
+service's VM ended owing it (ServiceEnded) -- never left waiting forever
+because its service went.
+
+The operations that move messages need this VM's Port (std::thread), served
+once on its event loop (std::thread::serve, which needs the driver's
+Doorbell): until then the port's notifications wait, never lost, and the
+first turn of its pump drains them.
+
+Native backends only (the runtime's transport): the Tcl backends refuse a
+program that starts a thread, and these operations refuse to run there.
+
+== SOURCE
+stdlib/actor/remote.bot (import std::actor::remote).
+
+== MEMBERS
+    std::actor::remote::Call       struct -- What a service's mailbox receives
+    std::actor::remote::CallFailed error -- A call that could not complete
+    std::actor::remote::Caller     opaque struct -- An actor's reply route
+    std::actor::remote::Identity   struct -- What a capability holds
+    std::actor::remote::Remote     opaque struct -- The send right of an en...
+    std::actor::remote::Replies    struct -- What replies opens
+    std::actor::remote::Reply      opaque struct -- The one-shot answer rig...
+    std::actor::remote::Response   opaque struct -- What a caller's reply m...
+    std::actor::remote::Sent       enum -- What a remote send did.
+    std::actor::remote::Service    opaque struct -- The call right of a ser...
+    std::actor::remote::Word       type -- A transport identity's word (a d...
+    std::actor::remote::call       function (nomethod) -- Calls SVC with Q ...
+    std::actor::remote::caller     function (nomethod) -- The Caller an act...
+    std::actor::remote::close      function (nomethod) -- Close R's endpoin...
+    std::actor::remote::close_service function (nomethod) -- Close S's endp...
+    std::actor::remote::deliver    function (nomethod) -- Send M through TO...
+    std::actor::remote::export     function (nomethod) -- Export TO's mailbox
+    std::actor::remote::in_transit function (nomethod) -- Messages queued o...
+    std::actor::remote::remote_in  function (nomethod)
+    std::actor::remote::remote_out function (nomethod)
+    std::actor::remote::replies    function (nomethod) -- Open the reply ro...
+    std::actor::remote::reply      function (nomethod) -- Answer the call R...
+    std::actor::remote::reply_in   function (nomethod)
+    std::actor::remote::reply_out  function (nomethod)
+    std::actor::remote::send       function (nomethod) -- Send M through TO...
+    std::actor::remote::serve_calls function (nomethod) -- Export TO's mail...
+    std::actor::remote::service_in function (nomethod)
+    std::actor::remote::service_out function (nomethod)
+
+Each member is a topic: -help NAME (e.g. -help std::actor::remote::Call).
 
 @topic stdlib.std::ascii::is_digit
 title: std::ascii::is_digit -- Function of module std::ascii
@@ -17523,6 +18164,704 @@ stdlib/test.bot (import std::test).
     std::test::value               function (nomethod) -- BODY's value must...
 
 Each member is a topic: -help NAME (e.g. -help std::test::Erased).
+
+@topic stdlib.std::thread::ThreadLimit
+title: std::thread::ThreadLimit -- Error of module std::thread
+summary: No thread can start now
+index: stdlib
+symbol: std::thread::ThreadLimit
+related: stdlib.module.std::thread
+
+== DECLARATION
+    error ThreadLimit
+
+== MODULE
+stdlib/thread.bot: import std::thread, then write
+std::thread::ThreadLimit.
+
+== DESCRIPTION
+No thread can start now: the Threads context's own limit, or every
+stack-overflow guard record of the process is in use.
+
+@topic stdlib.std::thread::ThreadStartFailed
+title: std::thread::ThreadStartFailed -- Error of module std::thread
+summary: A thread could not start
+index: stdlib
+symbol: std::thread::ThreadStartFailed
+related: stdlib.module.std::thread
+
+== DECLARATION
+    error ThreadStartFailed:
+        reason: str
+
+== MODULE
+stdlib/thread.bot: import std::thread, then write
+std::thread::ThreadStartFailed.
+
+== DESCRIPTION
+A thread could not start: the operating system refused the thread, or its VM
+could not be made or initialized (REASON says which).
+
+@topic stdlib.std::thread::ThreadFailed
+title: std::thread::ThreadFailed -- Error of module std::thread
+summary: The thread's entry failed
+index: stdlib
+symbol: std::thread::ThreadFailed
+related: stdlib.module.std::thread
+
+== DECLARATION
+    error ThreadFailed:
+        identity: str
+        message: str
+
+== MODULE
+stdlib/thread.bot: import std::thread, then write
+std::thread::ThreadFailed.
+
+== DESCRIPTION
+The thread's entry failed: IDENTITY is the identity of its error (a declared
+error's canonical name, or the runtime failure's code), MESSAGE its text.
+
+@topic stdlib.std::thread::Status
+title: std::thread::Status -- Enum of module std::thread
+summary: A thread's lifecycle state (status).
+index: stdlib
+symbol: std::thread::Status
+related: stdlib.module.std::thread
+
+== DECLARATION
+    enum Status:
+        Starting,
+        Running,
+        Returned,
+        Stopped,
+        Failed,
+        StartFailed,
+        Gone,
+
+== MODULE
+stdlib/thread.bot: import std::thread, then write std::thread::Status.
+
+== DESCRIPTION
+A thread's lifecycle state (status).
+
+@topic stdlib.std::thread::Threads
+title: std::thread::Threads -- Opaque context struct of module std::thread
+summary: The authority to start threads
+index: stdlib
+symbol: std::thread::Threads
+related: stdlib.module.std::thread
+
+== DECLARATION
+    opaque context struct Threads:
+        limit: Limit
+
+== MODULE
+stdlib/thread.bot: import std::thread, then write std::thread::Threads.
+
+== DESCRIPTION
+The authority to start threads: at most LIMIT of this context's own at once
+(a further start is ThreadLimit), whatever else the process runs.
+
+@topic stdlib.std::thread::Limit
+title: std::thread::Limit -- Type of module std::thread
+summary: How many threads one Threads context may run at once.
+index: stdlib
+symbol: std::thread::Limit
+related: stdlib.module.std::thread
+
+== DECLARATION
+    type Limit = Int in 1..4096
+
+== MODULE
+stdlib/thread.bot: import std::thread, then write std::thread::Limit.
+
+== DESCRIPTION
+How many threads one Threads context may run at once.
+
+@topic stdlib.std::thread::Entry
+title: std::thread::Entry -- Opaque struct of module std::thread
+summary: A thread entry, by its index among the program's entries and its name
+index: stdlib
+symbol: std::thread::Entry
+related: stdlib.module.std::thread
+
+== DECLARATION
+    opaque struct Entry[I satisfies Sendable, R satisfies Sendable]:
+        index: int
+        name: str
+
+== MODULE
+stdlib/thread.bot: import std::thread, then write std::thread::Entry.
+
+== DESCRIPTION
+A thread entry, by its index among the program's entries and its name: what
+std::thread::entry(NAME) makes (a constant). I is its initialization value's
+type, R its result's.
+
+@topic stdlib.std::thread::Thread
+title: std::thread::Thread -- Opaque struct of module std::thread
+summary: The join right of one thread whose entry returns an R
+index: stdlib
+symbol: std::thread::Thread
+related: stdlib.module.std::thread
+
+== DECLARATION
+    opaque struct Thread[R satisfies Sendable]:
+        id: int
+        right: Right
+
+== MODULE
+stdlib/thread.bot: import std::thread, then write std::thread::Thread.
+
+== DESCRIPTION
+The join right of one thread whose entry returns an R: affine, one owner.
+
+@topic stdlib.std::thread::ThreadId
+title: std::thread::ThreadId -- Opaque struct of module std::thread
+summary: The identity of one thread
+index: stdlib
+symbol: std::thread::ThreadId
+related: stdlib.module.std::thread
+
+== DECLARATION
+    opaque struct ThreadId:
+        id: int
+
+== MODULE
+stdlib/thread.bot: import std::thread, then write std::thread::ThreadId.
+
+== DESCRIPTION
+The identity of one thread: copyable; it names the thread for status, stop
+requests and waits, never for its outcome.
+
+@topic stdlib.std::thread::Started
+title: std::thread::Started -- Struct of module std::thread
+summary: What start makes
+index: stdlib
+symbol: std::thread::Started
+related: stdlib.module.std::thread
+
+== DECLARATION
+    struct Started[R satisfies Sendable]:
+        thread: Thread[R]
+        id: ThreadId
+
+== MODULE
+stdlib/thread.bot: import std::thread, then write std::thread::Started.
+
+== DESCRIPTION
+What start makes: the join right and the identity.
+
+@topic stdlib.std::thread::Stats
+title: std::thread::Stats -- Struct of module std::thread
+summary: The process's thread and transport counters (stats)
+index: stdlib
+symbol: std::thread::Stats
+related: stdlib.module.std::thread
+
+== DECLARATION
+    struct Stats:
+        started: int
+        running: int
+        ended: int
+        joined: int
+        detached: int
+        start_failures: int
+        limit_refusals: int
+        messages: int
+        full_refusals: int
+        undelivered: int
+        stale_replies: int
+
+== MODULE
+stdlib/thread.bot: import std::thread, then write std::thread::Stats.
+
+== DESCRIPTION
+The process's thread and transport counters (stats): threads started,
+running, ended, joined and detached, starts that failed or were refused for
+the limit; messages the transport queued, sends refused Full, messages
+dropped undelivered by a closing endpoint, and answers that reached no call
+(Stale).
+
+@topic stdlib.std::thread::create
+title: std::thread::create -- Function of module std::thread
+summary: The authority to start at most LIMIT (at least 1) threads at once.
+index: stdlib
+symbol: std::thread::create
+related: stdlib.module.std::thread
+
+== DECLARATION
+    fn create(limit: int) -> Threads:
+
+== MODULE
+stdlib/thread.bot: import std::thread, then write std::thread::create or,
+as a method, receiver.create(...).
+
+== DESCRIPTION
+The authority to start at most LIMIT (at least 1) threads at once.
+
+@topic stdlib.std::thread::start_sized
+title: std::thread::start_sized -- Function (nomethod) of module std::thread
+summary: Start a thread running entry E with the initialization value INIT (copied into the thread's VM), on a native stack of 64 MiB (start_sized
+index: stdlib
+symbol: std::thread::start_sized
+related: stdlib.module.std::thread
+
+== DECLARATION
+    nomethod fn start_sized(e: Entry[I, R], init: I, stack: int, context t: Threads) -> Started[R] errors ThreadLimit, ThreadStartFailed:
+
+== MODULE
+stdlib/thread.bot: import std::thread, then write
+std::thread::start_sized.
+
+== DESCRIPTION
+Start a thread running entry E with the initialization value INIT (copied
+into the thread's VM), on a native stack of 64 MiB (start_sized: of STACK
+bytes, at least 1 MiB). ThreadLimit when this authority's limit, or the
+process's guard records, are exhausted; ThreadStartFailed when the operating
+system refuses the thread. A thread whose VM cannot start is StartFailed,
+which join reports.
+
+@topic stdlib.std::thread::start
+title: std::thread::start -- Function (nomethod) of module std::thread
+summary: The function (nomethod) std::thread::start of the standard module std::thread.
+index: stdlib
+symbol: std::thread::start
+related: stdlib.module.std::thread
+
+== DECLARATION
+    nomethod fn start(e: Entry[I, R], init: I, context t: Threads) -> Started[R] errors ThreadLimit, ThreadStartFailed:
+
+== MODULE
+stdlib/thread.bot: import std::thread, then write std::thread::start.
+
+@topic stdlib.std::thread::status
+title: std::thread::status -- Function (nomethod) of module std::thread
+summary: THREAD's lifecycle state.
+index: stdlib
+symbol: std::thread::status
+related: stdlib.module.std::thread
+
+== DECLARATION
+    nomethod fn status(thread: ThreadId) -> Status:
+
+== MODULE
+stdlib/thread.bot: import std::thread, then write std::thread::status.
+
+== DESCRIPTION
+THREAD's lifecycle state.
+
+@topic stdlib.std::thread::request_stop
+title: std::thread::request_stop -- Function (nomethod) of module std::thread
+summary: Ask THREAD to stop
+index: stdlib
+symbol: std::thread::request_stop
+related: stdlib.module.std::thread
+
+== DECLARATION
+    nomethod fn request_stop(thread: ThreadId) -> bool:
+
+== MODULE
+stdlib/thread.bot: import std::thread, then write
+std::thread::request_stop.
+
+== DESCRIPTION
+Ask THREAD to stop: its stop_requested() answers true from now on and its
+port is woken (std::actor::remote). True when the thread had not ended.
+
+@topic stdlib.std::thread::stop_requested?
+title: std::thread::stop_requested? -- Function of module std::thread
+summary: Whether this thread was asked to stop (false on the main thread).
+index: stdlib
+symbol: std::thread::stop_requested?
+related: stdlib.module.std::thread
+
+== DECLARATION
+    fn stop_requested?() -> bool:
+
+== MODULE
+stdlib/thread.bot: import std::thread, then write
+std::thread::stop_requested? or, as a method,
+receiver.stop_requested?(...).
+
+== DESCRIPTION
+Whether this thread was asked to stop (false on the main thread).
+
+@topic stdlib.std::thread::await_end
+title: std::thread::await_end -- Function (nomethod) of module std::thread
+summary: Blocks this OS thread until THREAD has ended or TIMEOUT microseconds have passed (TIMEOUT < 0
+index: stdlib
+symbol: std::thread::await_end
+related: stdlib.module.std::thread
+
+== DECLARATION
+    nomethod fn await_end(thread: ThreadId, timeout: int) -> bool:
+
+== MODULE
+stdlib/thread.bot: import std::thread, then write std::thread::await_end.
+
+== DESCRIPTION
+Blocks this OS thread until THREAD has ended or TIMEOUT microseconds have
+passed (TIMEOUT < 0: no bound): whether it ended. A false answer means the
+thread is still running -- nothing was done to it.
+
+@topic stdlib.std::thread::join
+title: std::thread::join -- Function (nomethod) of module std::thread
+summary: THREAD's result
+index: stdlib
+symbol: std::thread::join
+related: stdlib.module.std::thread
+
+== DECLARATION
+    nomethod fn join(thread: Thread[R]) -> R errors ThreadFailed, ThreadStartFailed:
+
+== MODULE
+stdlib/thread.bot: import std::thread, then write std::thread::join.
+
+== DESCRIPTION
+THREAD's result: blocks this OS thread until it ends, then collects its
+outcome -- its entry's value, copied into this VM -- and releases it.
+ThreadFailed with the entry's error, ThreadStartFailed when it never
+started. (On an event loop, wait_end first: join then does not block.)
+
+@topic stdlib.std::thread::capacity
+title: std::thread::capacity -- Function of module std::thread
+summary: How many more threads the process can run guarded now (its free stack-overflow guard records).
+index: stdlib
+symbol: std::thread::capacity
+related: stdlib.module.std::thread
+
+== DECLARATION
+    fn capacity() -> int:
+
+== MODULE
+stdlib/thread.bot: import std::thread, then write std::thread::capacity
+or, as a method, receiver.capacity(...).
+
+== DESCRIPTION
+How many more threads the process can run guarded now (its free
+stack-overflow guard records).
+
+@topic stdlib.std::thread::stats
+title: std::thread::stats -- Function of module std::thread
+summary: The process's thread and transport counters.
+index: stdlib
+symbol: std::thread::stats
+related: stdlib.module.std::thread
+
+== DECLARATION
+    fn stats() -> Stats:
+
+== MODULE
+stdlib/thread.bot: import std::thread, then write std::thread::stats or,
+as a method, receiver.stats(...).
+
+== DESCRIPTION
+The process's thread and transport counters.
+
+@topic stdlib.std::thread::Doorbell
+title: std::thread::Doorbell -- Context trait of module std::thread
+summary: A driver's ability to watch the port's doorbell
+index: stdlib
+symbol: std::thread::Doorbell
+related: stdlib.module.std::thread
+
+== DECLARATION
+    context trait Doorbell:
+        fn watch_doorbell(fd: int, slot: int, gen: int) -> int
+        fn rearm_doorbell(watch: int, slot: int, gen: int) -> int
+        fn unwatch_doorbell(watch: int, slot: int, gen: int) -> int
+
+== MODULE
+stdlib/thread.bot: import std::thread, then write std::thread::Doorbell.
+
+== DESCRIPTION
+A driver's ability to watch the port's doorbell: watch descriptor FD
+delivering readiness records to the registration (SLOT, GEN) -- a watch id
+or a negated errno; rearm it after a record; stop watching.
+
+@topic stdlib.std::thread::Port
+title: std::thread::Port -- Opaque context struct of module std::thread
+summary: This VM's port
+index: stdlib
+symbol: std::thread::Port
+related: stdlib.module.std::thread
+
+== DECLARATION
+    opaque context struct Port:
+        state: MutableArray[int]
+        keys: MutableVector[int]
+        chans: MutableVector[std::event_loop::Reg]
+        doorbell: MutableVector[std::event_loop::Reg]
+
+== MODULE
+stdlib/thread.bot: import std::thread, then write std::thread::Port.
+
+== DESCRIPTION
+This VM's port: its doorbell's descriptor and watch, and the channels its
+notifications are routed to (KEYS[i]'s to CHANS[i]).
+
+@topic stdlib.std::thread::port
+title: std::thread::port -- Function of module std::thread
+summary: This VM's port, opened (its doorbell).
+index: stdlib
+symbol: std::thread::port
+related: stdlib.module.std::thread
+
+== DECLARATION
+    fn port() -> Port:
+
+== MODULE
+stdlib/thread.bot: import std::thread, then write std::thread::port or, as
+a method, receiver.port(...).
+
+== DESCRIPTION
+This VM's port, opened (its doorbell). A port that could not open (no
+descriptor) reports it when served (DriverFault).
+
+@topic stdlib.std::thread::route
+title: std::thread::route -- Function (nomethod) of module std::thread
+summary: Notifications of KIND for ID are posted to CHAN from now on (internal
+index: stdlib
+symbol: std::thread::route
+related: stdlib.module.std::thread
+
+== DECLARATION
+    nomethod fn route(kind: int, id: int, chan: std::event_loop::Reg, context p: Port):
+
+== MODULE
+stdlib/thread.bot: import std::thread, then write std::thread::route.
+
+== DESCRIPTION
+Notifications of KIND for ID are posted to CHAN from now on (internal:
+std::actor::remote's).
+
+@topic stdlib.std::thread::unroute
+title: std::thread::unroute -- Function (nomethod) of module std::thread
+summary: No notification of KIND for ID is posted any more.
+index: stdlib
+symbol: std::thread::unroute
+related: stdlib.module.std::thread
+
+== DECLARATION
+    nomethod fn unroute(kind: int, id: int, context p: Port) errors IndexNotFound:
+
+== MODULE
+stdlib/thread.bot: import std::thread, then write std::thread::unroute.
+
+== DESCRIPTION
+No notification of KIND for ID is posted any more.
+
+@topic stdlib.std::thread::serve
+title: std::thread::serve -- Function of module std::thread
+summary: Serve this VM's port on its event loop (once
+index: stdlib
+symbol: std::thread::serve
+related: stdlib.module.std::thread
+
+== DECLARATION
+    fn serve(context ev: std::event_loop::Loop, p: Port, d: Doorbell) errors std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+
+== MODULE
+stdlib/thread.bot: import std::thread, then write std::thread::serve or,
+as a method, receiver.serve(...).
+
+== DESCRIPTION
+Serve this VM's port on its event loop (once; later calls do nothing): the
+doorbell is watched through the driver, and a pump task routes its
+notifications. DriverFault with the negated errno when the doorbell cannot
+be opened or watched.
+
+@topic stdlib.std::thread::close_port
+title: std::thread::close_port -- Function of module std::thread
+summary: Close this VM's port
+index: stdlib
+symbol: std::thread::close_port
+related: stdlib.module.std::thread
+
+== DECLARATION
+    fn close_port(context ev: std::event_loop::Loop, p: Port, d: Doorbell) errors std::event_loop::SchedulerFault:
+
+== MODULE
+stdlib/thread.bot: import std::thread, then write std::thread::close_port
+or, as a method, receiver.close_port(...).
+
+== DESCRIPTION
+Close this VM's port: its endpoints close (the messages they held are
+dropped and counted; the calls among them fail), the calls it owes fail with
+ServiceEnded, its waiters wake, and its loop is no longer kept alive by it.
+What a VM does when it is done with the transport (its end does it too).
+
+@topic stdlib.std::thread::wait_end
+title: std::thread::wait_end -- Function of module std::thread
+summary: Waits, as an event-loop task -- suspended, never blocking this VM's thread -- until THREAD has ended (or this port closes)
+index: stdlib
+symbol: std::thread::wait_end
+related: stdlib.module.std::thread
+
+== DECLARATION
+    fn wait_end(thread: ThreadId, context ev: std::event_loop::Loop, p: Port, d: Doorbell) -> Status errors std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+
+== MODULE
+stdlib/thread.bot: import std::thread, then write std::thread::wait_end
+or, as a method, receiver.wait_end(...).
+
+== DESCRIPTION
+Waits, as an event-loop task -- suspended, never blocking this VM's thread
+-- until THREAD has ended (or this port closes): its status. Join it
+afterwards: join then does not block.
+
+@topic stdlib.std::thread::wait_stop
+title: std::thread::wait_stop -- Function of module std::thread
+summary: Waits, as an event-loop task, until this thread is asked to stop (its creator's request_stop, or the program's end)
+index: stdlib
+symbol: std::thread::wait_stop
+related: stdlib.module.std::thread
+
+== DECLARATION
+    fn wait_stop(context ev: std::event_loop::Loop, p: Port, d: Doorbell) -> bool errors std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+
+== MODULE
+stdlib/thread.bot: import std::thread, then write std::thread::wait_stop
+or, as a method, receiver.wait_stop(...).
+
+== DESCRIPTION
+Waits, as an event-loop task, until this thread is asked to stop (its
+creator's request_stop, or the program's end): true; false when the port
+closed first.
+
+@topic stdlib.std::thread::entry
+title: std::thread::entry -- intrinsic of namespace std::thread
+summary: std::thread::entry(NAME): the std::thread::Entry[I, R] of thread entry NAME (a module's `thread fn NAME(init: I) -> R`), the value std::thread::start starts, after `import std::thread`.
+index: stdlib
+symbol: std::thread::entry
+keywords: thread entry; thread fn; start a thread; Entry
+related: stdlib.module.std::thread concept.threads error.thread-entry-reference
+
+== SIGNATURE
+    std::thread::entry(any) -> struct
+
+== USE
+An intrinsic of namespace std::thread: import std::thread, then write
+std::thread::entry. Method syntax: receiver.entry(...) is the same call.
+
+== BACKENDS
+every backend (interp, compile, cranelift-generic, cranelift)
+
+== NOTES
+NAME is a thread entry itself, named directly (a qualified name of a
+module's `thread fn`): never a function value, a call or an ordinary
+function (THREAD-ENTRY-REFERENCE). The result is a constant -- the entry's
+index among the program's entries and its name -- typed by the entry's
+initialization and result types, so start and join are typed by it. The
+Tcl backends refuse a program that names an entry (THREAD-UNAVAILABLE).
+
+@topic stdlib.module.std::thread
+title: std::thread -- standard namespace
+summary: Botlish-owned threads: std::thread::start runs a module's `thread fn` on an OS thread in a VM of its own, with a copied initialization value; join copies its result back. With std::thread::port, the VM's place in the cross-thread transport (std::actor::remote).
+index: stdlib
+symbol: std::thread
+keywords: thread; threads; start a thread; spawn; join; parallel; worker; VM; stop request; port; Threads
+related: concept.threads concept.remote-actors stdlib.std::thread::entry stdlib.module.std::actor::remote capability.concurrency
+
+== DESCRIPTION
+  # worker.bot -- a module
+  thread fn crunch(n: int) -> int:             a thread entry
+      fib(n)
+
+  # main.bot
+  import std::thread
+  import worker
+  with context std::thread::create(4)          the authority to start threads
+  s = std::thread::start(std::thread::entry(worker::crunch), 30)
+  std::thread::join(s.thread)                  832040, from the other VM
+
+A THREAD is an OS thread with its own native stack and stack-overflow guard,
+running one VM: its own heap and collector, module statics, installed
+contexts and roots, made on that thread from the program's one compiled
+image. A thread runs one THREAD ENTRY (`thread fn` in a module,
+hir/threads.tcl): the runtime initializes the VM's module statics, copies
+the start's initialization value into it (std::transfer: the value is
+rebuilt there, nothing of the starting VM is kept), runs the entry -- which
+installs the contexts the thread needs, in its own body -- and copies its
+result back for whoever joins it. A thread never has its creator's contexts:
+they belong to another VM. The program's selection of each context trait is
+the same for every entry (CONTEXT-TRAIT-SELECTION- CONFLICT); each VM
+installs its own instance.
+
+AUTHORITY. Starting a thread needs the installed context Threads
+(std::thread::create), which an entry installs and restricted injection can
+withhold (`inject no context:` code cannot start one). Everything else here
+takes the value that names a thread: the affine join right Thread[R] (one
+owner: whoever may collect the outcome), or the unrestricted ThreadId
+(status, stop requests, bounded waits).
+
+LIFECYCLE. A thread is Starting, then Running, then ends Returned (its entry
+completed: the value is kept for join), Stopped (it completed after a stop
+was requested: likewise), Failed (its entry failed: the error's identity and
+message are kept) or StartFailed (no VM could start: the reason is kept).
+Its outcome stays until join collects it -- dropping the Thread without
+joining detaches it: its outcome is then dropped when it ends, and counted
+(stats). Stopping is cooperative: request_stop sets a flag the thread reads
+(stop_requested) and wakes its port (std::actor:: remote serves it), never
+interrupts it; nothing kills a thread. When the program's main VM completes,
+every thread still running is asked to stop and joined before the program's
+image is released.
+
+WAITING. join and await_end block the calling OS thread (a bounded await_end
+returns false when the thread has not ended; it never ends the thread). Code
+on an event loop waits without blocking its thread with wait_end
+(std::actor::remote's port: the runtime wakes the loop when the thread
+ends).
+
+LIMITS. At most 64 threads run guarded at once in a process -- the
+stack-overflow guard's table, the main thread's included -- and a start
+reserves its guard record before the thread exists: a start beyond it is
+ThreadLimit, never an unguarded thread. A native stack overflow on any
+thread ends the process (NATIVE LIMIT STACK), as on the main thread: no
+thread-only recovery.
+
+Native backends only: the Tcl backends refuse a program that starts a thread
+(THREAD-UNAVAILABLE), at compile time.
+
+== SOURCE
+stdlib/thread.bot (import std::thread).
+
+== MEMBERS
+    std::thread::Doorbell          context trait -- A driver's ability to w...
+    std::thread::Entry             opaque struct -- A thread entry, by its ...
+    std::thread::Limit             type -- How many threads one Threads con...
+    std::thread::Port              opaque context struct -- This VM's port
+    std::thread::Started           struct -- What start makes
+    std::thread::Stats             struct -- The process's thread and trans...
+    std::thread::Status            enum -- A thread's lifecycle state (stat...
+    std::thread::Thread            opaque struct -- The join right of one t...
+    std::thread::ThreadFailed      error -- The thread's entry failed
+    std::thread::ThreadId          opaque struct -- The identity of one thread
+    std::thread::ThreadLimit       error -- No thread can start now
+    std::thread::ThreadStartFailed error -- A thread could not start
+    std::thread::Threads           opaque context struct -- The authority t...
+    std::thread::await_end         function (nomethod) -- Blocks this OS th...
+    std::thread::capacity          function -- How many more threads the pr...
+    std::thread::close_port        function -- Close this VM's port
+    std::thread::create            function -- The authority to start at mo...
+    std::thread::entry             intrinsic -- std::thread::entry(NAME): t...
+    std::thread::join              function (nomethod) -- THREAD's result
+    std::thread::port              function -- This VM's port, opened (its ...
+    std::thread::request_stop      function (nomethod) -- Ask THREAD to stop
+    std::thread::route             function (nomethod) -- Notifications of ...
+    std::thread::serve             function -- Serve this VM's port on its ...
+    std::thread::start             function (nomethod)
+    std::thread::start_sized       function (nomethod) -- Start a thread ru...
+    std::thread::stats             function -- The process's thread and tra...
+    std::thread::status            function (nomethod) -- THREAD's lifecycl...
+    std::thread::stop_requested?   function -- Whether this thread was aske...
+    std::thread::unroute           function (nomethod) -- No notification o...
+    std::thread::wait_end          function -- Waits, as an event-loop task...
+    std::thread::wait_stop         function -- Waits, as an event-loop task...
+
+Each member is a topic: -help NAME (e.g. -help std::thread::Doorbell).
 
 @topic stdlib.std::transfer::decode
 title: std::transfer::decode -- intrinsic of namespace std::transfer

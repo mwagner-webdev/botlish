@@ -514,6 +514,6 @@ nomethod fn call(svc: Service[Q, R], q: Q, c: Caller[R], resume std::actor::Answ
         std::actor::receive(c.rx)
     if response.status != t_delivered:
         fail CallFailed {reason: reason_of(response.status)}
-    std::list::at(response.values, 0):
+    response.values.at(0):
         on IndexNotFound:
             fail CallFailed {reason: reason_of(t_type_mismatch)}

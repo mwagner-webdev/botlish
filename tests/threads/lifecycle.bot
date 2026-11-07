@@ -1,0 +1,72 @@
+# lifecycle.bot -- tests/threads.test: workers' results, a worker's failure,
+# per-VM contexts, the guard limit, bounded waits and stop requests.
+import crunch
+import ledger
+import std::int
+import std::list
+import std::mutable_vector
+import std::str
+import std::thread
+
+fn result(e: crunch::Job, context t: std::thread::Threads) -> str errors std::thread::ThreadLimit, std::thread::ThreadStartFailed, std::thread::ThreadFailed:
+    {thread} = std::thread::start(std::thread::entry(crunch::crunch), e)
+    a = std::thread::join(thread)
+    a.label.append_char('=').concat(std::int::to_string(a.value))
+
+fn ledgered(n: int, context t: std::thread::Threads) -> str:
+    {thread} = std::thread::start(std::thread::entry(ledger::job), n):
+        on std::thread::ThreadLimit:
+            return "limit"
+        on std::thread::ThreadStartFailed {reason}:
+            return "start failed"
+    std::thread::join(thread):
+        on std::thread::ThreadStartFailed {reason}:
+            "start failed"
+        on std::thread::ThreadFailed {identity, message}:
+            "failed: ".concat(identity)
+
+# Starts spinners until the process's guard records run out: how many ran,
+# whether a 1 ms bounded wait saw the first still running, and whether
+# every one ended once asked to stop.
+fn spinners(context t: std::thread::Threads) -> List[any] errors IndexNotFound:
+    ids = loop i from 0 to 100:
+        s = std::thread::start(std::thread::entry(crunch::spin), i):
+            on std::thread::ThreadLimit:
+                break
+            on std::thread::ThreadStartFailed {reason}:
+                break
+        {thread, id} = s
+        id
+    capacity = std::thread::capacity()
+    waited = std::thread::await_end(std::list::at(ids, 0), 1000)
+    status = std::thread::status(std::list::at(ids, 0)) == std::thread::Status::Running
+    asked = loop id in ids:
+        std::thread::request_stop(id)
+    ended = loop id in ids:
+        std::thread::await_end(id, -1)
+    stopped = std::thread::status(std::list::at(ids, 0)) == std::thread::Status::Stopped
+    count = fold e in ended with intermediate n 0:
+        if e:
+            n + 1
+        else:
+            n
+    [std::list::length(ids), capacity, waited, status, count, stopped]
+
+fn all(context t: std::thread::Threads, l: ledger::Ledger) -> List[any] errors std::thread::ThreadLimit, std::thread::ThreadStartFailed, std::thread::ThreadFailed, IndexNotFound:
+    a = result(crunch::Job {n: 20, label: "f20"})
+    b = result(crunch::Job {n: 21, label: "f21"})
+    good = ledgered(1)
+    bad = ledgered(-1)
+    [a, b, good, bad, ledger::owner(), ledger::note("main"), spinners()]
+
+with context ledger::Ledger {owner: 1, notes: std::mutable_vector::from_list([])}
+with context std::thread::create(200)
+all():
+    on std::thread::ThreadLimit:
+        ["limit"]
+    on std::thread::ThreadStartFailed {reason}:
+        ["start failed", reason]
+    on std::thread::ThreadFailed {identity, message}:
+        ["failed", identity, message]
+    on IndexNotFound:
+        ["index"]

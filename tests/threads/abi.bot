@@ -1,0 +1,78 @@
+# abi.bot -- tests/threads.test: the event-loop integration ABI version 2
+# with one loop open, then two (a worker VM's, abiworker.bot), then one
+# again. With one, the version 1 functions reach it; with two they are
+# refused (-EPIPE: never routed to either), and each loop is named by its
+# handle; once the worker's loop closed, its handle names nothing.
+import abiprobe
+import abiworker
+import event_loop_linux
+import std::actor
+import std::actor::remote
+import std::event_loop
+import std::list
+import std::thread
+
+# The worker's report, and the probe from here while both loops are open,
+# forwarded to RESULTS; then the worker is asked to stop.
+fn receiver(inbox: std::actor::Inbox[abiworker::Seen], own: int, worker: std::thread::ThreadId, results: std::actor::Address[List[int]], context pr: abiprobe::Probe, resume std::actor::Answer) -> std::actor::Exit:
+    rx = std::actor::listen(inbox):
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    seen = std::actor::receive(rx):
+        on std::actor::Closed:
+            return std::actor::exit(-2)
+    here = own.probe(seen.handle)
+    results.send([seen.probe, here, seen.handle])
+    std::thread::request_stop(worker)
+    std::actor::exit(0)
+
+# Waits for the worker to end, then closes the port: the loop ends.
+fn supervise(worker: std::thread::ThreadId, context ev: std::event_loop::Loop, p: std::thread::Port, db: std::thread::Doorbell) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    std::thread::wait_end(worker)
+    std::thread::close_port()
+    0
+
+fn go(context ev: std::event_loop::Loop, d: std::event_loop::Driver, ac: std::actor::Actors, t: std::thread::Threads, p: std::thread::Port, db: std::thread::Doorbell, n: event_loop_linux::Native, pr: abiprobe::Probe) -> List[any] errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered, std::thread::ThreadLimit, std::thread::ThreadStartFailed, std::thread::ThreadFailed:
+    std::thread::serve()
+    own = event_loop_linux::loop_handle()
+    alone = own.probe(own)
+    {to: home, inbox} = std::actor::open[abiworker::Seen](1)
+    {to: results, inbox: results_in} = std::actor::open[List[int]](1)
+    remote = std::actor::remote::export(home, 1)
+    {thread, id} = std::thread::start(std::thread::entry(abiworker::second_loop), abiworker::Plan {home: remote, main_handle: own})
+    r = inject context abiprobe::Probe:
+        coroutine {step, first} = receiver(inbox, own, id, results)
+        std::actor::spawned(step, first)
+    std::actor::start(r)
+    coroutine {step: sup, first: f} = supervise(id)
+    std::event_loop::adopt(sup, f)
+    std::event_loop::run()
+    worker = std::thread::join(thread)
+    both = std::actor::drain(results_in)
+    gone = loop b in both:
+        handle = b.at(2):
+            on IndexNotFound:
+                -1
+        own.probe(handle)
+    [alone, worker, both, gone]
+
+with context std::event_loop::create(16)
+with context event_loop_linux::create()
+with context event_loop_linux::native()
+with context std::actor::create()
+with context std::thread::create(2)
+with context std::thread::port()
+with context abiprobe::Probe {calls: 0}
+go():
+    on std::event_loop::SchedulerFault:
+        ["scheduler fault"]
+    on std::event_loop::DriverFault {code}:
+        ["driver fault", code]
+    on std::event_loop::LoopReentered:
+        ["reentered"]
+    on std::thread::ThreadLimit:
+        ["thread limit"]
+    on std::thread::ThreadStartFailed {reason}:
+        ["start failed", reason]
+    on std::thread::ThreadFailed {identity, message}:
+        ["failed", identity, message]

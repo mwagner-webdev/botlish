@@ -1,0 +1,266 @@
+# threads.topic -- Botlish-owned threads and actors across them
+# (BOTLISH-OWNED-THREADS-AND-CROSS-THREAD-ACTORS-MILESTONE-1.md): the
+# concepts and their diagnostics, one topic per code.
+
+@topic concept.threads
+title: Threads: isolated VMs started with std::thread
+summary: A `thread fn` of a module is a thread entry; std::thread::start runs it on an OS thread of its own, in a VM of its own (its own heap, statics and contexts), with a copied initialization value, and join copies its result back.
+index: concepts
+alias: thread; threads; start a thread; spawn a thread; worker thread; parallelism; run in parallel; multithreading; thread fn; join a thread; background thread
+keywords: thread, std::thread, thread fn, entry, start, join, await_end, request_stop, stop_requested, Threads, ThreadLimit, ThreadFailed, ThreadStartFailed, VM, isolation, guard, NATIVE LIMIT STACK, parallel
+related: concept.remote-actors concept.sendability concept.contexts concept.actors stdlib.module.std::thread error.thread-entry-placement error.thread-entry-signature error.thread-entry-environment error.thread-entry-reference error.context-trait-selection-conflict error.thread-unavailable capability.concurrency
+
+== WHAT IT IS
+A *thread entry* is a top-level function of a module declared `thread fn
+NAME(init: I) -> R`. `std::thread::start(std::thread::entry(NAME), init)`
+starts an OS thread running it: the runtime makes a new VM of the same
+compiled program on that thread -- its own heap and collector, its own
+module statics, its own installed contexts, its own native stack and
+stack-overflow guard -- copies `init` into it (std::transfer: I and R are
+sendable types), runs the entry, and keeps its result for
+`std::thread::join`, which copies it back. Nothing of one VM's heap is ever
+visible to another: threads share no value, only bytes the runtime copies.
+
+== RULES
+  * Starting needs the installed context std::thread::Threads
+    (`std::thread::create(LIMIT)`): the authority to start at most LIMIT
+    threads at once. Restricted injection withholds it.
+  * A worker has none of its creator's contexts. An entry installs what it
+    needs with `with context EXPR` statements of its own body; the
+    program's selection of each context trait is the same for every VM
+    (error.context-trait-selection-conflict).
+  * start gives a Started value: `thread`, the affine join right
+    (Thread[R]: join collects the outcome once), and `id`, an unrestricted
+    ThreadId (status, request_stop, a bounded await_end).
+  * join answers the entry's value, or fails with ThreadFailed (the
+    entry's error identity and message) or ThreadStartFailed.
+  * Stopping is cooperative: request_stop sets a flag the thread reads
+    (`std::thread::stop_requested?()`) and wakes its port; nothing kills a
+    thread. When the main VM completes, every thread still running is asked
+    to stop and joined.
+  * At most 64 threads run guarded in a process (the main one's included):
+    a start beyond is ThreadLimit, never an unguarded thread. A native
+    stack overflow on any thread ends the process (NATIVE LIMIT STACK).
+  * Native backends only: interp and compile refuse a program that starts
+    a thread (error.thread-unavailable).
+
+@example accept
+import worker
+import std::thread
+
+fn run(context t: std::thread::Threads) -> int errors std::thread::ThreadLimit, std::thread::ThreadStartFailed, std::thread::ThreadFailed:
+    {thread} = std::thread::start(std::thread::entry(worker::crunch), 20)
+    std::thread::join(thread)
+
+with context std::thread::create(4)
+run():
+    on std::thread::ThreadLimit:
+        -1
+    on std::thread::ThreadStartFailed {reason}:
+        -2
+    on std::thread::ThreadFailed {identity, message}:
+        -3
+@module worker
+fn fib(n: int) -> int:
+    if n < 2:
+        n
+    else:
+        fib(n - 1) + fib(n - 2)
+
+thread fn crunch(n: int) -> int:
+    fib(n)
+@caption fib(20) computed by another thread, in a VM of its own
+@backends cranelift
+@value 6765
+@end
+
+@topic concept.remote-actors
+title: Actors across threads: std::actor::remote
+summary: An exported mailbox (std::actor::remote::export) is a Remote[M] capability another VM's actors send to; serve_calls and call make typed request/reply calls between VMs; every message is copied as bytes, backpressure waits for room.
+index: concepts
+alias: remote actor; cross-thread actor; message another thread; send to another thread; channel between threads; request reply between threads; actor on another thread
+keywords: std::actor::remote, Remote, Service, Reply, Caller, export, send, deliver, serve_calls, call, reply, CallFailed, Full, Closed, Stale, TypeMismatch, Undelivered, ServiceEnded, port, std::thread::serve, backpressure
+related: concept.threads concept.actors concept.sendability stdlib.module.std::actor::remote stdlib.module.std::thread
+
+== WHAT IT IS
+An actor's mailbox stays local to its VM (an std::actor::Address is not
+sendable). `std::actor::remote::export(address, CAPACITY)` gives it an
+endpoint in the process's transport and answers a Remote[M]: a sendable
+capability -- put it in a thread's initialization value or a message -- to
+send M values into that mailbox from any VM. `send` answers at once
+(Delivered, Full, Closed, Stale, TooLarge, TypeMismatch); `deliver`, from
+an event-loop task, waits for room instead. Messages from one sender
+arrive in order.
+
+A service is a mailbox of Call[Q, R] values exported with serve_calls:
+each call carries its request and a Reply[R]. An actor calls a service
+with `call(service, q, caller)` and is suspended -- its thread is not --
+until the reply arrives or the call fails (CallFailed with the reason:
+Undelivered when the service closed with the request queued, ServiceEnded
+when its VM ended owing the answer). No call is left waiting because its
+service went.
+
+== RULES
+  * Each VM that moves remote messages installs its port
+    (`with context std::thread::port()`) and serves it once on its event
+    loop (`std::thread::serve()`, with the Linux driver's
+    event_loop_linux::Native, which implements std::thread::Doorbell).
+  * A capability names its endpoint by a random key and a generation: one
+    nobody was given cannot be made (an opaque struct), a closed endpoint's
+    is Closed, a reused slot's Stale.
+  * The transport checks each message's schema against the endpoint's: a
+    capability retyped through a copy is TypeMismatch, never a delivery.
+  * Capabilities carry authority to send, never to receive or act; a
+    worker that needs an operation of its creator's context gets a service
+    (a broker context of its own holding it), never the context.
+
+@topic error.thread-entry-placement
+title: THREAD-ENTRY-PLACEMENT: a thread entry that is no module's top level
+summary: `thread fn` is declared at the top level of a module, never in the entry program (whose top level no worker runs) and never nested in another function.
+index: errors
+alias: thread fn in main program; thread fn nested
+keywords: thread fn, entry program, module, top level, nested
+related: concept.threads error.thread-entry-signature
+code: CORE SEMANTIC THREAD-ENTRY-PLACEMENT
+
+== MEANING
+A worker VM initializes the program's modules and runs one entry; it never
+runs the entry program's top level, which installs the main VM's contexts
+and does its work. So an entry lives in a module, where everything it
+reaches is module code every VM initializes for itself.
+
+== WHAT TO DO
+Move the `thread fn` into a module the entry program imports.
+
+@example reject
+thread fn here(n: int) -> int:
+    n
+
+1
+@caption A thread entry in the entry program
+@error CORE SEMANTIC THREAD-ENTRY-PLACEMENT
+@end
+
+@topic error.thread-entry-signature
+title: THREAD-ENTRY-SIGNATURE: a thread entry's parameter or result
+summary: A thread entry has exactly one declared, sendable, concrete parameter (its initialization value) and a declared sendable result; no context parameters, flags, places or resume clause.
+index: errors
+alias: thread fn parameters; thread fn context parameter; thread fn not sendable
+keywords: thread fn, parameter, result, sendable, context parameter, initialization value
+related: concept.threads concept.sendability error.not-sendable
+code: CORE SEMANTIC THREAD-ENTRY-SIGNATURE
+
+== MEANING
+The initialization value is copied into the new VM and the result copied
+back (std::transfer), so both are declared sendable types; a struct holds
+several values. A context parameter would be a context of the creator's,
+which belongs to another VM: an entry installs its own contexts in its
+body instead.
+
+== WHAT TO DO
+Gather what the thread needs into one struct of sendable fields; declare
+the result type (`-> unit` for none); install contexts with `with context`
+in the entry's body.
+
+@example reject
+import worker
+
+1
+@module worker
+thread fn add(a: int, b: int) -> int:
+    a + b
+@caption Two parameters: put them in a struct
+@error CORE SEMANTIC THREAD-ENTRY-SIGNATURE
+@end
+
+@topic error.thread-entry-environment
+title: THREAD-ENTRY-ENVIRONMENT: a thread entry that captures or suspends
+summary: A thread entry is environment-free and runs to its end on its own thread's stack: it captures no value and never suspends (its coroutines are constructed in its body).
+index: errors
+alias: thread fn yields; thread fn captures
+keywords: thread fn, capture, yield, suspend, environment
+related: concept.threads concept.coroutines
+code: CORE SEMANTIC THREAD-ENTRY-ENVIRONMENT
+
+== MEANING
+A worker's VM shares nothing with its creator's, so an entry cannot refer
+to a value of another function's scope, and it is no coroutine body: a
+thread runs its entry once, to completion.
+
+== WHAT TO DO
+Pass what the entry needs in its initialization value; construct
+coroutines inside the entry and resume them there.
+
+@topic error.thread-entry-reference
+title: THREAD-ENTRY-REFERENCE: a thread entry used as a function
+summary: A thread entry is named only as std::thread::entry's argument; it is never called directly or taken as a value, and std::thread::entry takes only a thread entry.
+index: errors
+alias: call a thread fn; thread fn as value; std::thread::entry of a function
+keywords: thread fn, std::thread::entry, call, function value
+related: concept.threads error.thread-entry-placement
+code: CORE SEMANTIC THREAD-ENTRY-REFERENCE
+
+== MEANING
+An entry runs in a VM of its own, made for it by std::thread::start;
+calling it in the current VM, or holding it as a function value, would run
+it with the wrong VM's contexts and heap.
+
+== WHAT TO DO
+Start it: `std::thread::start(std::thread::entry(NAME), init)`. To run
+the same code in this VM, move it into an ordinary function the entry
+calls.
+
+@example reject
+import worker
+
+worker::crunch(3)
+@module worker
+thread fn crunch(n: int) -> int:
+    n * n
+@caption A thread entry called directly
+@error CORE SEMANTIC THREAD-ENTRY-REFERENCE
+@end
+
+@topic error.context-trait-selection-conflict
+title: CONTEXT-TRAIT-SELECTION-CONFLICT: two VMs select different implementations
+summary: The program selects one installed implementation of each context trait for every VM: the entry program and the thread entries that install one must install the same.
+index: errors
+alias: different drivers in threads; context trait per thread
+keywords: context trait, selection, thread entry, driver, implementation, monomorphization
+related: concept.threads concept.context-traits error.ambiguous-context-implementation
+code: CORE SEMANTIC CONTEXT-TRAIT-SELECTION-CONFLICT
+
+== MEANING
+A context trait's operations compile to direct calls of the one installed
+implementation, selected for the whole program (there is no run-time
+dispatch). Every VM runs the same compiled image, so a thread entry that
+installs another implementation than the entry program (or another entry)
+would need code the program does not have.
+
+== WHAT TO DO
+Install the same implementation in every VM that installs one (for
+std::event_loop::Driver: the same driver), or move the differing work into
+another program.
+
+@topic error.thread-unavailable
+title: THREAD-UNAVAILABLE: threads on the Tcl backends
+summary: interp and compile refuse a program that starts a Botlish thread before it runs, and the runtime operations of std::thread when reached: threads are OS threads each running a VM, which the Tcl backends do not have.
+index: errors backends
+alias: threads on interp; thread on compile backend
+keywords: interp, compile, thread, std::thread, native, backend
+related: concept.threads backend.native-only error.native-only
+code: BACKEND THREAD-UNAVAILABLE
+code: CORE SEMANTIC THREAD-UNAVAILABLE
+
+== MEANING
+Not an error of the program, but of the backend chosen for it. The Tcl
+backends run one interpreter per process, without OS threads; they never
+emulate threads. A program that names a thread entry
+(std::thread::entry) is refused before it runs (BACKEND
+THREAD-UNAVAILABLE); a program compiled for them that reaches one of the
+runtime's thread or transport operations anyway is refused there (CORE
+SEMANTIC THREAD-UNAVAILABLE).
+
+== WHAT TO DO
+Run the program on a native backend: `-backend cranelift`, or build an
+executable.

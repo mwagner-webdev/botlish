@@ -1,0 +1,303 @@
+# Mutants of Botlish-owned threads and the cross-thread transport
+# (audit/threads/tools/mutate.tcl; BOTLISH-OWNED-THREADS-AND-CROSS-THREAD-
+# ACTORS-MILESTONE-1.md, "Mutation testing"): the runtime's thread registry
+# and transport (native/src/runtime/thread.rs), the Linux driver's
+# per-loop state (packages/event_loop_linux/native/event_loop_linux.c), the
+# compiler's thread-entry rules (hir/threads.tcl, hir/contexts.tcl) and the
+# library (stdlib/thread.bot, stdlib/actor/remote.bot, core/transfer.tcl).
+#
+#   @@ NAME DESCRIPTION
+#   %% HOST ...        (optional) the host targets the mutant applies to
+#   !! DETECTOR ...    the detectors meant to kill it (one at least), each
+#                      KIND:NAME -- rust-lib:TEST (a Rust test whose path
+#                      contains TEST), FILE:TEST (tcltest TEST of
+#                      tests/FILE, a -match pattern)
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+#
+# A mutant is KILLED only when one of its own detectors fails (or does not
+# complete: a mutant that leaves a call or a loop waiting forever is killed
+# by the run's timeout). Lines starting with # outside an edit are comments.
+#
+# Not here, with the reason:
+#   * "Join returns before the OS thread exited" (wait_ended without its
+#     JoinHandle join): the window is a few microseconds after the entry's
+#     end, so th-abi-loops sees it only sometimes; a detector that kills it
+#     every time would need a hook in the runtime.
+#   * "Share a heap object between VMs": no code path hands one VM's value
+#     to another -- every crossing is transfer bytes (std::transfer's own
+#     mutants, audit/value-transfer, kill a codec that keeps a reference).
+
+# --- Lifecycle and the guard ---------------------------------------------
+
+@@ thread-unguarded a start beyond the stack-overflow guard's records runs its thread without a guard instead of refusing it (ThreadLimit)
+%% linux-x86_64 linux-aarch64
+!! threads.test:th-lifecycle
+## native/src/runtime/thread.rs
+<<<<
+    let Some(reservation) = super::platform::reserve_guard() else {
+        LIMIT_REFUSALS.fetch_add(1, Ordering::Relaxed);
+        return -1;
+    };
+====
+    let reservation = super::platform::reserve_guard().unwrap_or(usize::MAX);
+>>>>
+## native/src/runtime/thread.rs
+<<<<
+        Ok(guard) => guard,
+        Err(error) => {
+            super::platform::unreserve_guard(reservation);
+====
+        Ok(guard) => Some(guard),
+        Err(_) if reservation == usize::MAX => None,
+        Err(error) => {
+            super::platform::unreserve_guard(reservation);
+>>>>
+
+@@ start-ignores-limit std::thread::start ignores its Threads authority's own limit
+!! threads.test:th-limit
+## stdlib/thread.bot
+<<<<
+    id = if std::thread::rt_stat(8) >= t.limit:
+====
+    id = if std::thread::rt_stat(8) >= t.limit + 1000:
+>>>>
+
+@@ stop-unseen request_stop wakes the thread's port but sets no flag: stop_requested? never answers true
+%% linux-x86_64 linux-aarch64
+!! threads.test:th-limit
+## native/src/runtime/thread.rs
+<<<<
+    shared.stop.store(true, Ordering::Relaxed);
+    let own = lock(&shared.own).as_ref().and_then(Weak::upgrade);
+====
+    let own = lock(&shared.own).as_ref().and_then(Weak::upgrade);
+>>>>
+
+# --- Endpoint identity -----------------------------------------------------
+
+@@ key-unchecked an endpoint accepts a capability whatever its key: a capability nobody was given names it
+%% linux-x86_64 linux-aarch64
+!! rust-lib:endpoints_are_named_by_domain_generation_and_key
+## native/src/runtime/thread.rs
+<<<<
+            Some(e) if e.key == key => Ok(e),
+            Some(_) => Err(T_STALE),
+====
+            Some(e) => Ok(e),
+>>>>
+
+@@ generation-unchecked an endpoint ignores a capability's generation: an old capability with the right key reaches a reused slot's endpoint
+%% linux-x86_64 linux-aarch64
+!! rust-lib:endpoints_are_named_by_domain_generation_and_key
+## native/src/runtime/thread.rs
+<<<<
+        let Some(s) = self.endpoints.get_mut(slot) else { return Err(T_STALE) };
+        if s.generation != generation {
+            return Err(T_STALE);
+        }
+        match s.endpoint.as_mut() {
+====
+        let Some(s) = self.endpoints.get_mut(slot) else { return Err(T_STALE) };
+        let _ = generation;
+        match s.endpoint.as_mut() {
+>>>>
+
+@@ fingerprint-unchecked the transport queues bytes whatever their schema: a capability retyped through a copy delivers into a mailbox of another type
+%% linux-x86_64 linux-aarch64
+!! threads.test:th-endpoints
+## native/src/runtime/thread.rs
+<<<<
+        if message.data[5..13] != e.fingerprint {
+            return T_TYPE_MISMATCH;
+        }
+====
+>>>>
+
+@@ rebuild-public the rebuild of a copied Remote (its sendable clause's FROM) is no internal member: a program builds a capability from a made-up identity
+!! threads.test:th-reject-forgery
+## core/transfer.tcl
+<<<<
+    std::actor::remote::remote_out std::actor::remote::remote_in
+====
+    std::actor::remote::remote_out
+>>>>
+
+# --- Backpressure --------------------------------------------------------
+
+@@ grant-refused-in-line a woken waiter's retry is refused while another waits behind it: two waiters refuse each other forever once the queue drains
+%% linux-x86_64 linux-aarch64
+!! rust-lib:freed_places_are_granted_in_order
+## native/src/runtime/thread.rs
+<<<<
+        if !e.fits(message.data.len(), grant) || (grant.is_none() && !e.waiters.is_empty()) {
+====
+        if !e.fits(message.data.len(), grant) || !e.waiters.is_empty() {
+>>>>
+
+@@ grant-not-reserved a granted place is not held for its waiter: a sender that did not wait takes it first
+%% linux-x86_64 linux-aarch64
+!! rust-lib:freed_places_are_granted_in_order
+## native/src/runtime/thread.rs
+<<<<
+        let reserved = self.granted.len() - grant.is_some() as usize;
+====
+        let reserved = 0 * (self.granted.len() - grant.is_some() as usize);
+>>>>
+
+@@ deliver-polls deliver retries a Full endpoint after a scheduler yield instead of waiting for the port's room notification
+!! threads.test:th-backpressure
+## stdlib/actor/remote.bot
+<<<<
+        woke = if attempt == t_full:
+            std::event_loop::wait(chan).reason
+        else:
+            Wake::Ready
+====
+        woke = if attempt == t_full:
+            std::event_loop::yield_now()
+            Wake::Ready
+        else:
+            Wake::Ready
+>>>>
+
+@@ pump-drops-on-full the pump posts into a full mailbox without waiting for room: the post is refused and the endpoint closed
+!! threads.test:th-transport
+## stdlib/actor/remote.bot
+<<<<
+        values = decoded(r)
+        loop m in values:
+            if std::actor::post_waiting(to, m) != std::actor::Sent::Delivered:
+====
+        values = decoded(r)
+        loop m in values:
+            if to.send(m) != std::actor::Sent::Delivered:
+>>>>
+
+# --- Calls ---------------------------------------------------------------
+
+@@ owed-calls-forgotten a VM that ends owing calls leaves them pending: their callers wait forever instead of failing ServiceEnded
+%% linux-x86_64 linux-aarch64
+!! threads.test:th-calls
+## native/src/runtime/thread.rs
+<<<<
+    for call in owed {
+        transport.complete(call, T_SERVICE_ENDED, Vec::new());
+    }
+====
+    drop(owed);
+>>>>
+
+@@ undelivered-forgotten a closing endpoint drops the calls queued on it without completing them (Undelivered)
+%% linux-x86_64 linux-aarch64
+!! threads.test:th-calls
+## native/src/runtime/thread.rs
+<<<<
+                if m.status == T_DELIVERED && !self.is_response(call, id) {
+                    self.complete(call, T_UNDELIVERED, Vec::new());
+                }
+====
+                let _ = (call, m.status);
+>>>>
+
+# --- The event-loop integration ABI version 2 ---------------------------
+
+@@ v1-routed-to-first with several loops open, a version 1 call reaches the first of them instead of being refused
+!! threads.test:th-abi-loops
+## packages/event_loop_linux/native/event_loop_linux.c
+<<<<
+            if (found) return NULL;
+            found = &LOOPS[i];
+====
+            if (found) continue;
+            found = &LOOPS[i];
+>>>>
+
+@@ loop-left-open a loop is not closed when the thread that opened it exits: a worker VM's loop outlives it
+!! threads.test:th-abi-loops
+## packages/event_loop_linux/native/event_loop_linux.c
+<<<<
+    own(loop_handle(E));
+    return loop_handle(E);
+====
+    (void)own;
+    return loop_handle(E);
+>>>>
+
+# --- The compiler's thread-entry rules -----------------------------------
+
+@@ entry-call-allowed a thread entry called as a function is not diagnosed
+!! threads.test:th-reject-entries
+## hir/threads.tcl
+<<<<
+                if {[dict exists $callees $e]} {
+                    hir::Diagnose hir THREAD-ENTRY-REFERENCE \
+                        "thread entry $entry is called here;
+====
+                if {[dict exists $callees $e]} {
+                    continue
+                    hir::Diagnose hir THREAD-ENTRY-REFERENCE \
+                        "thread entry $entry is called here;
+>>>>
+
+@@ entry-types-unsent a thread entry's initialization value and result are not held to Sendable
+!! threads.test:th-reject-authority
+## hir/threads.tcl
+<<<<
+    lassign [hir::types::SendClass $type] class why
+    if {$class ne "total"} {
+====
+    lassign [hir::types::SendClass $type] class why
+    if {0 && $class ne "total"} {
+>>>>
+
+@@ entry-charged-requirements a thread entry requires its body's contexts of a caller, as an ordinary function does
+!! threads.test:th-requirements
+## hir/contexts.tcl
+<<<<
+    foreach b $blocks {
+        if {[hir::threads::isEntry $hir $b]} {
+            dict set required $b {}
+            dict unset reasons $b
+        }
+    }
+====
+>>>>
+
+@@ selection-conflict-allowed two thread entries selecting different implementations of a context trait are not diagnosed
+!! threads.test:th-reject-conflict
+## hir/contexts.tcl
+<<<<
+                    if {[dict exists $selected $trait] && [dict get $selected $trait] ne $w} {
+====
+                    if {0 && [dict exists $selected $trait] && [dict get $selected $trait] ne $w} {
+>>>>
+
+@@ install-anywhere-in-entry a context installed anywhere in a thread entry's body (a branch) is accepted as one of its installations
+!! threads.test:th-reject-entries
+## hir/contexts.tcl
+<<<<
+    return [expr {$p eq $t && [string match "seq *" $role]
+        && [hir::get $hir $c scope] eq [dict get $hir exprs $t bodyScope]}]
+====
+    return [expr {$p ne ""}]
+>>>>
+
+@@ tcl-runs-threads the Tcl backends lower a program that starts a thread instead of refusing it before it runs
+!! threads.test:th-tcl-refusal
+## hir/threads.tcl
+<<<<
+    set e [FirstStart $hir]
+    if {$e eq ""} {
+        return
+    }
+====
+    set e [FirstStart $hir]
+    if {$e eq "" || 1} {
+        return
+    }
+>>>>

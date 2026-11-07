@@ -3928,6 +3928,19 @@ proc native::lower::CleanupBlocks {hir} {
     return [lmap pair [lsort -integer -index 0 $blocks] {lindex $pair 1}]
 }
 
+# Whether the function being lowered is a resource's cleanup (the open
+# instance of one of CleanupBlocks).
+proc native::lower::InCleanup {} {
+    variable baseHir
+    variable spec
+    variable currentInstance
+    if {![info exists currentInstance] || $currentInstance eq ""} {
+        return 0
+    }
+    set block [dict get [hir::specialize::instance $spec $currentInstance] block]
+    return [expr {$block in [CleanupBlocks $baseHir]}]
+}
+
 # The run's cleanup table (runtime/affine.rs's rt_cleanup_table), installed
 # first thing in the program: what a drop descriptor's `rK` calls from a
 # runtime walk. Nothing for a program without resources.
@@ -4839,10 +4852,16 @@ proc native::lower::ContextDiagnostic {} {
 # A load (at E) of context ID, which the program never installs: only
 # possible in a program that failed verification (whose program function
 # raises the diagnostic before anything runs, Function), and then unreachable
-# code; anything else is a lowering bug.
+# code, or in a resource's cleanup (CleanupBlocks), which is a root whatever
+# the program releases: every release point is charged the cleanup's
+# context requirement (hir::contexts::ReleaseEdges), so a cleanup whose
+# context no region installs is one no verified code releases, and its
+# load is unreachable too (a module that declares a resource, imported by a
+# program that never makes one: std::event_loop's Owner). Anything else is
+# a lowering bug.
 proc native::lower::UninstalledContext {fnVar e id} {
     upvar 1 $fnVar fn
-    if {[ContextDiagnostic] eq ""} {
+    if {[ContextDiagnostic] eq "" && ![InCleanup]} {
         throw {NATIVE BUG} "native lowering: context load $e of context \"$id\", which the program does not install"
     }
     Emit fn "raise MISSING-CONTEXT [Quote "$id: no context of this type is installed"]" $e

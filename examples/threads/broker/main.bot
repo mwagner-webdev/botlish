@@ -39,7 +39,7 @@ fn service(inbox: std::actor::Inbox[std::actor::remote::Call[broker::DeviceOp, b
         value = if op.kind == 0:
             device::read(op.addr)
         else:
-            device::write(op.addr, op.value)
+            op.addr.write(op.value)
         device::finish()
         std::actor::remote::reply(call.reply, broker::DeviceReply {value: value, serial: n})
         n + 1

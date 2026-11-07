@@ -198,7 +198,9 @@ fn release_held(slot: int, context d: Linux) -> int:
 
 # Close the adapter: every endpoint refuses later posts (-EPIPE) and every
 # watch is dropped (descriptors stay the program's). For the end of a
-# program, after the loop's shutdown.
+# program, after the loop's shutdown. (A loop the program does not close
+# is closed when the thread that opened it exits: a worker VM's loop ends
+# with its thread.)
 fn close(context d: Linux) -> int:
     ci(handle()).evl_close()
 

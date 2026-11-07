@@ -52,12 +52,12 @@ fn handler(worker: int, h: int, jobs: int, r: std::actor::remote::Replies[broker
     addr = worker * 2 + h
     t = fold i from 0 to jobs with intermediate t Tally {calls: 0, confirmed: 0, failures: 0}:
         value = worker * 100000 + h * 10000 + i
-        w = broker::write_device(addr, value, c):
+        w = addr.write_device(value, c):
             on std::actor::remote::CallFailed {reason}:
                 break
             on std::actor::Closed:
                 break
-        back = broker::read_device(addr, c):
+        back = addr.read_device(c):
             on std::actor::remote::CallFailed {reason}:
                 break
             on std::actor::Closed:
@@ -66,7 +66,7 @@ fn handler(worker: int, h: int, jobs: int, r: std::actor::remote::Replies[broker
             Tally {calls: t.calls + 2, confirmed: t.confirmed + 1, failures: t.failures}
         else:
             Tally {calls: t.calls + 2, confirmed: t.confirmed, failures: t.failures + 1}
-    std::actor::send(report, Report {kind: 0, calls: t.calls, confirmed: t.confirmed, failures: t.failures})
+    report.send(Report {kind: 0, calls: t.calls, confirmed: t.confirmed, failures: t.failures})
     std::actor::exit(t.calls)
 
 # The ticker: TICKS sleeps of 200 microseconds, the loop free meanwhile.
@@ -76,7 +76,7 @@ fn ticker(ticks: int, report: std::actor::Address[Report], context ev: std::even
             on std::event_loop::SchedulerFault:
                 break
         n + 1
-    std::actor::send(report, Report {kind: 1, calls: n, confirmed: 0, failures: 0})
+    report.send(Report {kind: 1, calls: n, confirmed: 0, failures: 0})
     std::actor::exit(n)
 
 # The joiner: three reports, then the summary home, then the loop stops.
@@ -92,7 +92,7 @@ fn joiner(worker: int, reports: std::actor::Inbox[Report], home: std::actor::Add
             WorkerSummary {id: s.id, calls: s.calls, confirmed: s.confirmed, failures: s.failures, ticks: r.calls}
         else:
             WorkerSummary {id: s.id, calls: s.calls + r.calls, confirmed: s.confirmed + r.confirmed, failures: s.failures + r.failures, ticks: s.ticks}
-    std::actor::send(home, s)
+    home.send(s)
     std::event_loop::stop():
         on std::event_loop::SchedulerFault:
             return std::actor::exit(-2)
@@ -123,7 +123,7 @@ private fn handled(init: WorkerInit, context ev: std::event_loop::Loop, d: std::
     std::event_loop::run()
     std::thread::close_port()
     got = std::actor::drain(home_in)
-    std::list::at(got, 0):
+    got.at(0):
         on IndexNotFound:
             WorkerSummary {id: init.id, calls: 0, confirmed: 0, failures: -1, ticks: 0}
 

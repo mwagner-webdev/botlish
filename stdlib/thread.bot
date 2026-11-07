@@ -133,7 +133,11 @@ struct Started[R satisfies Sendable]:
     thread: Thread[R]
     id: ThreadId
 
-# The process's thread counters (stats).
+# The process's thread and transport counters (stats): threads started,
+# running, ended, joined and detached, starts that failed or were refused
+# for the limit; messages the transport queued, sends refused Full,
+# messages dropped undelivered by a closing endpoint, and answers that
+# reached no call (Stale).
 struct Stats:
     started: int
     running: int
@@ -142,6 +146,10 @@ struct Stats:
     detached: int
     start_failures: int
     limit_refusals: int
+    messages: int
+    full_refusals: int
+    undelivered: int
+    stale_replies: int
 
 # The default size of a thread's native stack: 64 MiB of address space
 # (reserved, committed as it is used).
@@ -186,12 +194,6 @@ private nomethod fn status_of(code: int) -> Status:
 private nomethod fn ended?(code: int) -> bool:
     code == st_returned or code == st_stopped or code == st_failed or code == st_start_failed or code == st_gone
 
-# Start a thread running entry E with the initialization value INIT (copied
-# into the thread's VM), on a native stack of 64 MiB (start_sized: of STACK
-# bytes, at least 1 MiB). ThreadLimit when this authority's limit, or the
-# process's guard records, are exhausted; ThreadStartFailed when the
-# operating system refuses the thread. A thread whose VM cannot start is
-# StartFailed, which join reports.
 # The runtime's start of entry E with INIT on a STACK-byte stack (at least
 # 1 MiB): the thread's id, or -1 (no guard record) or -2 - errno.
 private nomethod fn spawn(e: Entry[I, R], init: I, stack: int) -> int:
@@ -202,6 +204,12 @@ private nomethod fn spawn(e: Entry[I, R], init: I, stack: int) -> int:
         stack
     std::thread::rt_spawn(e.index, e.name, data, size)
 
+# Start a thread running entry E with the initialization value INIT (copied
+# into the thread's VM), on a native stack of 64 MiB (start_sized: of STACK
+# bytes, at least 1 MiB). ThreadLimit when this authority's limit, or the
+# process's guard records, are exhausted; ThreadStartFailed when the
+# operating system refuses the thread. A thread whose VM cannot start is
+# StartFailed, which join reports.
 nomethod fn start_sized(e: Entry[I, R], init: I, stack: int, context t: Threads) -> Started[R] errors ThreadLimit, ThreadStartFailed:
     # (This VM's own threads still running: one Threads context per VM.)
     id = if std::thread::rt_stat(8) >= t.limit:
@@ -273,12 +281,14 @@ nomethod fn join(thread: Thread[R]) -> R errors ThreadFailed, ThreadStartFailed:
 fn capacity() -> int:
     std::thread::rt_capacity()
 
-# The process's thread counters.
+# The process's thread and transport counters.
 fn stats() -> Stats:
     Stats {
         started: std::thread::rt_stat(0), running: std::thread::rt_stat(1), ended: std::thread::rt_stat(2),
         joined: std::thread::rt_stat(3), detached: std::thread::rt_stat(4),
-        start_failures: std::thread::rt_stat(5), limit_refusals: std::thread::rt_stat(6)
+        start_failures: std::thread::rt_stat(5), limit_refusals: std::thread::rt_stat(6),
+        messages: std::thread::rt_stat(10), full_refusals: std::thread::rt_stat(11),
+        undelivered: std::thread::rt_stat(9), stale_replies: std::thread::rt_stat(7)
     }
 
 # ---------------------------------------------------------------------------

@@ -157,6 +157,54 @@ static evl_loop *loop_of(int handle) {
     return E;
 }
 
+/* The loops a thread opened, closed when it exits (a key's destructor)
+ * unless the program closed them first (evl_close): a loop is its VM's,
+ * and a VM ends with its thread, so a worker VM that ends without closing
+ * its driver leaves no loop open -- none of its descriptors, and no second
+ * open loop refusing the version 1 functions for the rest of the process.
+ * (A handle already closed names nothing: closing it again does nothing.) */
+typedef struct {
+    int n;
+    int handles[MAX_LOOPS];
+} evl_owned;
+
+static pthread_key_t OWNED_KEY;
+static pthread_once_t OWNED_ONCE = PTHREAD_ONCE_INIT;
+static int owned_ready;
+
+int evl_close(int loop);
+
+static void close_owned(void *p) {
+    evl_owned *o = p;
+    for (int i = 0; i < o->n; i++) evl_close(o->handles[i]);
+    free(o);
+}
+
+static void owned_key(void) {
+    owned_ready = pthread_key_create(&OWNED_KEY, close_owned) == 0;
+}
+
+/* Remembers HANDLE as opened by this thread. */
+static void own(int handle) {
+    pthread_once(&OWNED_ONCE, owned_key);
+    if (!owned_ready) return;
+    evl_owned *o = pthread_getspecific(OWNED_KEY);
+    if (!o) {
+        o = calloc(1, sizeof *o);
+        if (!o || pthread_setspecific(OWNED_KEY, o) != 0) {
+            free(o);
+            return;
+        }
+    }
+    for (int i = 0; i < o->n; i++) {
+        if (!loop_of(o->handles[i])) {
+            o->handles[i] = handle;
+            return;
+        }
+    }
+    if (o->n < MAX_LOOPS) o->handles[o->n++] = handle;
+}
+
 /* ABI v1 (botlish_event_post, _wake, _add_pump, _remove_pump): the one open
  * loop, when exactly one is; NULL otherwise -- with several loops open a v1
  * call cannot say which loop it means, and is refused rather than routed
@@ -313,6 +361,7 @@ int evl_open(int flags) {
         return -e;
     }
     __atomic_store_n(&E->opened, 1, __ATOMIC_RELEASE);
+    own(loop_handle(E));
     return loop_handle(E);
 }
 

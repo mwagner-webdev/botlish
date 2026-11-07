@@ -605,6 +605,9 @@ foreach name {
     std::immutable_map::transfer_out std::immutable_map::transfer_in
     std::mutable_map::transfer_out std::mutable_map::transfer_in
     std::mutable_set::transfer_out std::mutable_set::transfer_in
+    std::actor::remote::remote_out std::actor::remote::remote_in
+    std::actor::remote::service_out std::actor::remote::service_in
+    std::actor::remote::reply_out std::actor::remote::reply_in
 } {
     core::native::declareInternalMember $name
 }

@@ -4816,6 +4816,28 @@ index: stdlib
 keywords: testing; unit tests; test framework; assertions; golden tests
 related: concept.testing concept.negative-tests
 
+@topic stdlib.module.std::thread
+title: -
+summary: Botlish-owned threads: std::thread::start runs a module's `thread fn` on an OS thread in a VM of its own, with a copied initialization value; join copies its result back. With std::thread::port, the VM's place in the cross-thread transport (std::actor::remote).
+index: stdlib
+keywords: thread; threads; start a thread; spawn; join; parallel; worker; VM; stop request; port; Threads
+related: concept.threads concept.remote-actors stdlib.std::thread::entry stdlib.module.std::actor::remote capability.concurrency
+
+@topic stdlib.std::thread::entry
+title: -
+summary: std::thread::entry(NAME): the std::thread::Entry[I, R] of thread entry NAME (a module's `thread fn NAME(init: I) -> R`), the value std::thread::start starts, after `import std::thread`.
+index: stdlib
+keywords: thread entry; thread fn; start a thread; Entry
+related: stdlib.module.std::thread concept.threads error.thread-entry-reference
+
+== NOTES
+NAME is a thread entry itself, named directly (a qualified name of a
+module's `thread fn`): never a function value, a call or an ordinary
+function (THREAD-ENTRY-REFERENCE). The result is a constant -- the entry's
+index among the program's entries and its name -- typed by the entry's
+initialization and result types, so start and join are typed by it. The
+Tcl backends refuse a program that names an entry (THREAD-UNAVAILABLE).
+
 @topic stdlib.module.std::transfer
 title: -
 summary: Copying a sendable value between Botlish VMs: std::transfer::encode(v) writes it into owned bytes, std::transfer::decode[T](data) rebuilds an independent T in this VM.

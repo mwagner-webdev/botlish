@@ -319,7 +319,10 @@ fn spawn(p: *mut Vm, entry: i64, name: &str, init: &[u8], stack: i64) -> i64 {
     RUNNING.fetch_add(1, Ordering::Relaxed);
     STARTED.fetch_add(1, Ordering::Relaxed);
     let label = format!("thread {name} ");
-    let builder = std::thread::Builder::new().name(format!("botlish {name}")).stack_size(stack.max(1 << 20) as usize);
+    // (The OS thread's name: the entry's own, the part a system's 15 bytes
+    // keep -- tools show it.)
+    let short = name.rsplit("::").next().unwrap_or(&name).to_string();
+    let builder = std::thread::Builder::new().name(short).stack_size(stack.max(1 << 20) as usize);
     match builder.spawn(move || body(start, label)) {
         Ok(handle) => {
             *lock(&shared.handle) = Some(handle);
@@ -468,7 +471,11 @@ fn request_stop(shared: &Arc<Shared>) -> bool {
 }
 
 /// Waits until SHARED's thread has ended or TIMEOUT microseconds passed
-/// (negative: no bound): its status code.
+/// (negative: no bound): its status code. An ended thread's OS thread is
+/// joined before this returns, so whatever its exit runs -- thread-local
+/// destructors, a native library's per-thread cleanup (event_loop_linux
+/// closes the loops the thread opened) -- has run when a waiter sees it
+/// ended.
 fn wait_ended(shared: &Arc<Shared>, timeout: i64) -> i64 {
     let deadline = (timeout >= 0).then(|| std::time::Instant::now() + std::time::Duration::from_micros(timeout as u64));
     let mut state = lock(&shared.state);
@@ -487,7 +494,14 @@ fn wait_ended(shared: &Arc<Shared>, timeout: i64) -> i64 {
             }
         }
     }
+    let ended = matches!(*state, State::Returned { .. } | State::Failed { .. } | State::StartFailed(_));
     drop(state);
+    if ended {
+        let handle = lock(&shared.handle).take();
+        if let Some(handle) = handle {
+            let _ = handle.join();
+        }
+    }
     shared.code()
 }
 
@@ -742,8 +756,37 @@ struct Endpoint {
     queue: VecDeque<Message>,
     bytes: usize,
     notified: bool,
-    /// Senders waiting for room: their ports and the token they wait with.
+    /// Senders waiting for room, first in line first: their ports and the
+    /// token they wait with.
     waiters: VecDeque<(Weak<Port>, i64)>,
+    /// Waiting senders told a place is theirs (N_ROOM), whose retry takes
+    /// it: a granted place counts as taken for everyone else, so neither a
+    /// sender that did not wait nor a later waiter takes it first.
+    granted: Vec<(Weak<Port>, i64)>,
+}
+
+impl Endpoint {
+    /// Whether one more message of LEN bytes fits beside the queue and the
+    /// granted places, not counting sender GRANT's own grant.
+    fn fits(&self, len: usize, grant: Option<usize>) -> bool {
+        let reserved = self.granted.len() - grant.is_some() as usize;
+        self.queue.len() + reserved < self.capacity && self.bytes + len <= MAX_QUEUED_BYTES
+    }
+
+    /// Grants every free place to the first waiting senders (pruning grants
+    /// of ports that closed), each told with N_ROOM on its port.
+    fn grant(&mut self, id: u64) {
+        self.granted.retain(|(port, _)| port.upgrade().is_some_and(|p| !p.closed.load(Ordering::Acquire)));
+        while self.queue.len() + self.granted.len() < self.capacity {
+            let Some((port, token)) = self.waiters.pop_front() else { break };
+            let Some(live) = port.upgrade() else { continue };
+            if live.closed.load(Ordering::Acquire) {
+                continue;
+            }
+            self.granted.push((port, token));
+            notify(&live, N_ROOM, id as i64, token, None);
+        }
+    }
 }
 
 struct EndpointSlot {
@@ -844,6 +887,7 @@ impl Transport {
             bytes: 0,
             notified: false,
             waiters: VecDeque::new(),
+            granted: Vec::new(),
         });
         pack(slot, s.generation)
     }
@@ -862,7 +906,7 @@ impl Transport {
         self.free.push(slot);
         let dropped = e.queue.len() as i64;
         UNDELIVERED.fetch_add(dropped, Ordering::Relaxed);
-        for (port, token) in e.waiters {
+        for (port, token) in e.waiters.into_iter().chain(e.granted) {
             if let Some(port) = port.upgrade() {
                 notify(&port, N_ROOM, id as i64, token, None);
             }
@@ -901,13 +945,27 @@ impl Transport {
         if message.data.len() > MAX_MESSAGE {
             return T_TOO_LARGE;
         }
-        if e.queue.len() >= e.capacity || e.bytes + message.data.len() > MAX_QUEUED_BYTES || !e.waiters.is_empty() {
-            // (A sender that did not wait never overtakes one that does.)
+        // A waiting sender's retry after N_ROOM: the place granted to it.
+        let grant = wait
+            .as_ref()
+            .and_then(|(port, token)| e.granted.iter().position(|(p, t)| t == token && p.ptr_eq(port)));
+        // (Nobody overtakes a sender in line: a free place is granted to
+        // the first waiting sender, and none is free while one waits.)
+        if !e.fits(message.data.len(), grant) || (grant.is_none() && !e.waiters.is_empty()) {
             FULL_REFUSALS.fetch_add(1, Ordering::Relaxed);
-            if let Some(waiter) = wait {
-                e.waiters.push_back(waiter);
+            if let Some(i) = grant {
+                // Granted but the bytes do not fit yet: first in line again.
+                let waiter = e.granted.swap_remove(i);
+                e.waiters.push_front(waiter);
+            } else if let Some(waiter) = wait {
+                if !e.waiters.iter().any(|(p, t)| *t == waiter.1 && p.ptr_eq(&waiter.0)) {
+                    e.waiters.push_back(waiter);
+                }
             }
             return T_FULL;
+        }
+        if let Some(i) = grant {
+            e.granted.swap_remove(i);
         }
         e.bytes += message.data.len();
         e.queue.push_back(message);
@@ -1229,12 +1287,8 @@ fn op(p: *mut Vm, code: i64, a: [Value; 6]) -> Result<Value, Value> {
             }
             let Some(m) = e.queue.pop_front() else { return Ok(n(0)) };
             e.bytes -= m.data.len().min(e.bytes);
-            // A place freed: the first waiting sender is told.
-            if let Some((port, token)) = e.waiters.pop_front() {
-                if let Some(port) = port.upgrade() {
-                    notify(&port, N_ROOM, id as i64, token, None);
-                }
-            }
+            // A place freed: granted to the first waiting sender, told.
+            e.grant(id);
             if let Some((call, _)) = m.call {
                 // A request taken: this VM owes its reply.
                 let (slot, generation) = unpack(call);
@@ -1397,5 +1451,88 @@ mod tests {
         notify(&port, N_MESSAGE, 4, 0, Some(&mut flag));
         notify(&port, N_MESSAGE, 4, 0, Some(&mut flag));
         assert_eq!(lock(&port.queue).len(), 2, "one pending notification per flag");
+    }
+
+    /// An endpoint is named by its domain, its slot and generation, and its
+    /// key: another process's domain is Unavailable, a wrong key or an old
+    /// generation Stale (nothing of the endpoint is reached), a closed
+    /// endpoint Closed until its slot is reused, then Stale.
+    #[cfg(unix)]
+    #[test]
+    fn endpoints_are_named_by_domain_generation_and_key() {
+        let owner = Arc::new(Port {
+            doorbell: Doorbell::open().expect("a doorbell"),
+            queue: Mutex::new(VecDeque::new()),
+            owed: Mutex::new(Vec::new()),
+            closed: AtomicBool::new(false),
+        });
+        let mut t = Transport { domain: 0, endpoints: Vec::new(), free: Vec::new(), calls: Vec::new(), free_calls: Vec::new() };
+        let domain = t.domain();
+        let id = t.open(owner.clone(), 4, [0; 8]);
+        let key = t.endpoint_mut(id).expect("open").key;
+        let refused = |t: &mut Transport, domain: i64, id: u64, key: u64| t.checked(domain, id, key).err();
+        assert_eq!(refused(&mut t, domain, id, key), None);
+        assert_eq!(refused(&mut t, domain ^ 2, id, key), Some(T_UNAVAILABLE));
+        assert_eq!(refused(&mut t, domain, id, key ^ 1), Some(T_STALE), "a key nobody was given names nothing");
+        assert_eq!(refused(&mut t, domain, pack(unpack(id).0, unpack(id).1 + 1), key), Some(T_STALE));
+        t.close_endpoint(id);
+        assert_eq!(refused(&mut t, domain, id, key), Some(T_CLOSED));
+        let again = t.open(owner, 4, [0; 8]);
+        assert_eq!(unpack(again).0, unpack(id).0, "the slot is reused");
+        assert_eq!(refused(&mut t, domain, id, key), Some(T_STALE), "the old capability names nothing of the new endpoint");
+    }
+
+    /// Backpressure is first come, first served without a deadlock: a place
+    /// freed on a full endpoint is granted to the first waiting sender
+    /// (told with N_ROOM), whose retry takes it while everyone else --
+    /// later waiters, senders that do not wait -- is refused; then the next.
+    /// (Refusing a woken waiter because another waited behind it let two
+    /// waiters refuse each other forever once the queue drained.)
+    #[cfg(unix)]
+    #[test]
+    fn freed_places_are_granted_in_order() {
+        let port = || {
+            Arc::new(Port {
+                doorbell: Doorbell::open().expect("a doorbell"),
+                queue: Mutex::new(VecDeque::new()),
+                owed: Mutex::new(Vec::new()),
+                closed: AtomicBool::new(false),
+            })
+        };
+        let (owner, a, b) = (port(), port(), port());
+        let mut t = Transport { domain: 0, endpoints: Vec::new(), free: Vec::new(), calls: Vec::new(), free_calls: Vec::new() };
+        let domain = t.domain();
+        let fingerprint = [7u8; 8];
+        let id = t.open(owner.clone(), 2, fingerprint);
+        let key = t.endpoint_mut(id).expect("open").key;
+        let message = || Message { data: [b"BOTX".as_slice(), &[1], &fingerprint, &[0]].concat(), call: None, status: T_DELIVERED };
+        let send = |t: &mut Transport, waiting: Option<(&Arc<Port>, i64)>| {
+            t.enqueue(domain, id, key, message(), waiting.map(|(p, token)| (Arc::downgrade(p), token)))
+        };
+        // What rt_take does: one message out, the freed place granted.
+        let take = |t: &mut Transport| {
+            let e = t.endpoint_mut(id).expect("open");
+            let m = e.queue.pop_front().expect("a message");
+            e.bytes -= m.data.len();
+            e.grant(id);
+        };
+        let rooms = |p: &Arc<Port>| lock(&p.queue).drain(..).filter(|n| n.0 == N_ROOM).count();
+        assert_eq!(send(&mut t, None), T_DELIVERED);
+        assert_eq!(send(&mut t, None), T_DELIVERED);
+        assert_eq!(send(&mut t, Some((&a, 1))), T_FULL);
+        assert_eq!(send(&mut t, Some((&b, 2))), T_FULL);
+        take(&mut t);
+        assert_eq!((rooms(&a), rooms(&b)), (1, 0), "the first waiter is told");
+        assert_eq!(send(&mut t, None), T_FULL, "a sender that does not wait never takes a granted place");
+        assert_eq!(send(&mut t, Some((&b, 2))), T_FULL, "nor a later waiter");
+        assert_eq!(t.endpoint_mut(id).expect("open").waiters.len(), 1, "a waiter's retry does not queue it twice");
+        assert_eq!(send(&mut t, Some((&a, 1))), T_DELIVERED, "the granted waiter's retry takes its place");
+        take(&mut t);
+        take(&mut t);
+        assert_eq!(rooms(&b), 1, "then the next waiter, even with the queue drained");
+        assert_eq!(send(&mut t, Some((&b, 2))), T_DELIVERED);
+        assert_eq!(send(&mut t, None), T_DELIVERED, "with nobody waiting, a free place is anyone's");
+        let e = t.endpoint_mut(id).expect("open");
+        assert!(e.waiters.is_empty() && e.granted.is_empty());
     }
 }

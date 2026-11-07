@@ -594,7 +594,11 @@ test sc-codes-one-to-one {items 20, 22: every DiagnosticCode case is the code of
 # static block's rejection, each for its reason (`syntax-recovery`: a
 # program with a syntax error has no static decision -- its blocks are holes
 # -- and SYNTAX-HOLE is never reported; SYNTAX-RECOVERED is a backend's
-# refusal of such a HIR, SYNTAX-RECOVERY-MILESTONE-1.md). Any other upper-case kind
+# refusal of such a HIR, SYNTAX-RECOVERY-MILESTONE-1.md; `backend`: a Tcl
+# backend's refusal of a program that starts a Botlish thread, never a front
+# end's diagnostic: BOTLISH-OWNED-THREADS-AND-CROSS-THREAD-ACTORS-MILESTONE-1.md;
+# a thread entry's declaration diagnostics are a top-level function's, and the
+# context-trait selection's are installations', which no block holds). Any other upper-case kind
 # token in that code is a new, unclassified kind: classify it (and give it a
 # case if a block can produce it).
 set scCensus {
@@ -605,9 +609,10 @@ set scCensus {
         DFA-ALPHABET DFA-AMBIGUOUS-TRANSITION DFA-BYTE-CHARACTER DFA-CALL-ALPHABET DFA-CALL-LOOKAHEAD
         DFA-DEAD-TRANSITION DFA-DUPLICATE DFA-EMPTY-RANGE DFA-END-CONSUMED DFA-MISSING-END DFA-NO-ACCEPT
         DFA-RECURSIVE-CALL DFA-UNKNOWN-CLASS DFA-UNKNOWN-DFA DFA-UNKNOWN-STATE DFA-UNREACHABLE-STATE
-        DFA-UNREAD-BEYOND-INPUT PRIVATE-TYPE-ESCAPE LINK-CONFLICT TREE-STRUCT-SHAPE TREE-STRUCT-COMBINATION}
+        DFA-UNREAD-BEYOND-INPUT PRIVATE-TYPE-ESCAPE LINK-CONFLICT TREE-STRUCT-SHAPE TREE-STRUCT-COMBINATION
+        THREAD-ENTRY-SIGNATURE THREAD-ENTRY-ENVIRONMENT}
     stdlib-internal {TREE-OPERAND}
-    top-level-install {CONTEXT-TYPE-NOT-EXACT DUPLICATE-CONTEXT}
+    top-level-install {CONTEXT-TYPE-NOT-EXACT DUPLICATE-CONTEXT CONTEXT-TRAIT-SELECTION-CONFLICT}
     not-from-source {LISTLOOP-BREAK-VALUE}
     header {CYCLE DUPLICATE-IMPORT DUPLICATE-NATIVE INVALID-TOPLEVEL MODULE-COLLISION NOT-A-TYPE SELF-IMPORT RESERVED-NAMESPACE
         TYPE-IMPORT-COLLISION UNKNOWN-TARGET AMBIGUOUS-MODULE UNSUPPORTED-ARCHITECTURE UNSUPPORTED-PLATFORM
@@ -619,6 +624,7 @@ set scCensus {
         ANONYMOUS-ENUM TRAIT-EMPTY TRAIT-REQUIREMENT-FLAGS TRAIT-CONTEXT-REQUIREMENT TRAIT-REQUIREMENT-BODY
         TRAIT-NESTED MALFORMED-VARIADIC-SECTION}
     runtime {NOT-CALLABLE NOT-BOOLEAN}
+    backend {THREAD-UNAVAILABLE}
     syntax-recovery {SYNTAX-HOLE SYNTAX-RECOVERED}
     other {MODULE-BINDINGS C-ABI-TYPES DIRECT-MODULES A-Z A-Z0-9}
 }

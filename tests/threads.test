@@ -1,0 +1,267 @@
+# threads.test -- Botlish-owned threads and the cross-thread transport
+# (BOTLISH-OWNED-THREADS-AND-CROSS-THREAD-ACTORS-MILESTONE-1.md): thread
+# entries, std::thread's lifecycle, std::actor::remote's messages and
+# calls between VMs, the event-loop integration ABI version 2 with several
+# loops open, the broker example, and what the compiler rejects.
+#
+# The programs are tests/threads/*.bot and tests/threads/reject/*.bot. They
+# run in a private application directory: the programs, the broker
+# example's modules, the C probes' archives (native/) and the Linux driver
+# package installed under .bot_modules by tools/event-loop-linux.tcl -- the
+# way an application installs it. The broker example itself is built in a
+# directory of its own as its build.sh does. Each program is compiled once
+# (-warnings error) and run on the native backend (cranelift); the Tcl
+# backends refuse a program that starts a thread, at compile time.
+#
+# The claims are exact where the programs make them deterministic (every
+# message counted per sender and in order, every call's outcome); the one
+# timing assumption -- that three calls reach a service within the 300 ms
+# its actor sleeps (calls.bot) -- has two orders of magnitude to spare.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+source [file join $::projectRoot tools event-loop-linux.tcl]
+
+interp recursionlimit {} 100000
+
+# Threads need the stack-overflow guard (a thread is never unguarded) and
+# the native backend; the transport tests the Linux driver and C calls.
+testConstraint botlishThreads [expr {[native::hostSupports jit] && [native::hostSupports stackGuard]}]
+testConstraint threadTransport [expr {[testConstraint botlishThreads] && $::tcl_platform(os) eq "Linux"
+    && $::tcl_platform(machine) in {x86_64 amd64 aarch64}
+    && [testConstraint nativeCCalls] && [testConstraint cLinker] && [auto_execok cc] ne "" && [auto_execok ar] ne ""}]
+
+set thSources [file join $::projectRoot tests threads]
+set thApp [file join [temporaryDirectory] threads-app]
+set thBroker [file join [temporaryDirectory] threads-broker]
+
+proc thArchive {dir name source} {
+    set object [file join $dir native $name.o]
+    exec [eventLoopLinux::cc] -O2 -Wall -Wextra -Werror -fPIC -pthread -I[eventLoopLinux::include] -c $source -o $object
+    set lib [file join $dir native lib$name.a]
+    file delete $lib
+    exec ar rcs $lib $object
+    file delete $object
+}
+
+# The application (and the broker example's directory), built once.
+proc thBuild {} {
+    if {[info exists ::thBuilt]} {
+        return $::thBuilt
+    }
+    set ::thBuilt [expr {![catch {
+        set broker [file join $::projectRoot examples threads broker]
+        file delete -force $::thApp $::thBroker
+        file mkdir [file join $::thApp native] [file join $::thBroker native]
+        foreach path [concat [glob -directory $::thSources *.bot] [glob -directory [file join $::thSources reject] *.bot]] {
+            file copy $path $::thApp
+        }
+        foreach f {broker.bot device.bot} {
+            file copy [file join $broker $f] $::thApp
+        }
+        eventLoopLinux::install $::thApp
+        thArchive $::thApp abiprobe [file join $::thSources abiprobe.c]
+        thArchive $::thApp device [file join $broker native device.c]
+        # The broker example, as its build.sh builds it.
+        foreach f {broker.bot device.bot main.bot worker.bot} {
+            file copy [file join $broker $f] $::thBroker
+        }
+        eventLoopLinux::install $::thBroker
+        thArchive $::thBroker device [file join $broker native device.c]
+    } ::thBuildError]}]
+    return $::thBuilt
+}
+
+# Program NAME of DIR compiled (-warnings error), its HIR cached.
+proc thHir {dir name} {
+    set key [list $dir $name]
+    if {![info exists ::thHirs($key)]} {
+        set ::thHirs($key) [surface::readProgramFile [file join $dir $name.bot] -warnings error]
+    }
+    return $::thHirs($key)
+}
+
+# Program NAME's outcome on cranelift, {value SHOWN} or {error CODE
+# MESSAGE}; ENVIRONMENT: variable pairs set for the run.
+proc thRun {name {environment {}} {dir ""}} {
+    if {$dir eq ""} {
+        set dir $::thApp
+    }
+    set key [list $dir $name $environment]
+    if {[info exists ::thRuns($key)]} {
+        return $::thRuns($key)
+    }
+    if {![thBuild]} {
+        return [list error BUILD $::thBuildError]
+    }
+    if {[catch {thHir $dir $name} message options]} {
+        return [list error COMPILE $message]
+    }
+    set o [withEnvironment $environment {outcomeUnderHir cranelift [thHir $dir $name]}]
+    set ::thRuns($key) [lrange $o 0 [expr {[lindex $o 0] eq "value" ? 1 : 2}]]
+    return $::thRuns($key)
+}
+
+# The diagnostics of rejected program NAME: {KIND FILE:LINE} pairs, sorted.
+proc thRejected {name} {
+    if {![thBuild]} {
+        return [list BUILD $::thBuildError]
+    }
+    if {[catch {surface::readProgramFile [file join $::thApp $name.bot] -warnings off} message options]} {
+        if {[dict exists $options -diagnostics]} {
+            return [lsort [lmap d [dict get $options -diagnostics] {
+                set loc [dict getdef $d location {}]
+                list [lindex [dict get $d errorcode] end] [file tail [dict getdef $loc file ?]]:[dict getdef $loc line 0]
+            }]]
+        }
+        return [list [lindex [dict get $options -errorcode] end] $message]
+    }
+    return ok
+}
+
+test th-build {the application builds: the driver package installs, the C probes' archives build with -Werror} -constraints threadTransport -body {
+    list [thBuild] [file exists [file join $::thApp .bot_modules event_loop_linux native libevent_loop_linux.a]] \
+        [file exists [file join $::thApp native libabiprobe.a]] [file exists [file join $::thBroker native libdevice.a]]
+} -result {1 1 1 1}
+
+# --------------------------------------------------------------------------
+# Lifecycle
+
+test th-lifecycle {workers return their entries' values (copied back into this VM), a worker's declared failure is joined as ThreadFailed with its identity, each VM has its own contexts (the worker's Ledger is not the main VM's), starts stop at the process's 64 guard records (the main VM's own and 63 workers': ThreadLimit, never an unguarded thread), a bounded wait returns while the thread runs, and every spinner ends once asked to stop} -constraints botlishThreads -body {
+    thRun lifecycle
+} -result {value {["f20=6765", "f21=10946", "7:3", "failed: ledger::Refused", 1, 1, [63, 0, false, true, 63, true]]}}
+
+test th-lifecycle-gc-stress {the same under GC stress: a collection at every allocation site of every VM, each walking only its own thread's stack} -constraints botlishThreads -body {
+    thRun lifecycle {BOTLISH_NATIVE_GC_STRESS 1}
+} -result {value {["f20=6765", "f21=10946", "7:3", "failed: ledger::Refused", 1, 1, [63, 0, false, true, 63, true]]}}
+
+test th-limit {a Threads authority's own limit: made with std::thread::create(1), a second start while its thread runs is ThreadLimit, and once the thread ended another starts} -constraints botlishThreads -body {
+    thRun limit
+} -result {value {[false, true, true]}}
+
+test th-overflow {a worker's native stack overflow ends the process (NATIVE LIMIT STACK), as the main thread's does: no thread-only recovery} -constraints botlishThreads -body {
+    thRun overflow
+} -result {error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}}
+
+test th-tcl-refusal {the Tcl backends refuse a program that starts a thread before it runs (BACKEND THREAD-UNAVAILABLE, from the lowering: nothing ran), on both; a program that only imports std::thread compiles there, and reaching one of its runtime operations is refused when it runs (CORE SEMANTIC THREAD-UNAVAILABLE), never emulated} -constraints botlishThreads -body {
+    set hir [thHir $::thSources lifecycle]
+    set refused [lmap b {interp compile} {
+        # (interp lowers the HIR before it runs anything: the refusal is
+        # raised there.)
+        if {[catch {outcomeUnderHir $b $hir} o options]} {
+            set o [list error [dict get $options -errorcode]]
+        }
+        lrange $o 0 1
+    }]
+    set dir [makeDirectory th-tcl]
+    set path [file join $dir plain.bot]
+    set f [open $path w]
+    puts $f "import std::thread\nt = std::thread::create(3)\nstd::thread::stop_requested?()"
+    close $f
+    set plain [surface::readProgramFile $path -warnings error]
+    list $refused [lmap b {interp compile cranelift} {
+        set o [outcomeUnderHir $b $plain]
+        lrange $o 0 1
+    }]
+} -cleanup {
+    removeDirectory th-tcl
+} -result {{{error {BACKEND THREAD-UNAVAILABLE}} {error {BACKEND THREAD-UNAVAILABLE}}} {{error {CORE SEMANTIC THREAD-UNAVAILABLE}} {error {CORE SEMANTIC THREAD-UNAVAILABLE}} {value false}}}
+
+# --------------------------------------------------------------------------
+# The transport
+
+test th-transport {four producer threads send 1000 numbered notes each through one Remote endpoint (capacity 16) into one mailbox (of 8) of this VM: two retry a Full send at once, two wait for room on their own loops (std::actor::remote::deliver, woken through their ports). All 4000 arrive, each sender's in order; the waiting producers deliver every note; the transport queued each note once and drops none} -constraints threadTransport -body {
+    thRun transport
+} -result {value {[[[1000, 1000, 1000, 1000, 0]], true, 2000, true, 4000, 0, 4, 0]}}
+
+test th-transport-gc-stress {the same under GC stress (every VM's collector, the bytes rebuilt in the receiving VM)} -constraints threadTransport -body {
+    thRun transport {BOTLISH_NATIVE_GC_STRESS 1}
+} -result {value {[[[1000, 1000, 1000, 1000, 0]], true, 2000, true, 4000, 0, 4, 0]}}
+
+test th-backpressure {two producer threads deliver 1000 notes each through an endpoint of capacity 4 into a slow collector's mailbox of 2: every note arrives, and the producers' tasks wait for room instead of retrying -- at most one refusal per note, never the thousands a polling sender meets} -constraints threadTransport -body {
+    thRun backpressure
+} -result {value {[[2000], 2000, true, true]}}
+
+test th-calls {typed calls into another VM whose service answers one call, holds one, leaves one taken by its pump and one queued in its endpoint, closes the service and ends: the first completes with its reply, the queued one fails Undelivered when the service closes, the two the VM owed fail ServiceEnded when it ends -- none is left waiting} -constraints threadTransport -body {
+    thRun calls
+} -result {value {[["answered", "Undelivered", "ServiceEnded", "ServiceEnded"], true, 1, 1]}}
+
+test th-endpoints {a Remote names one endpoint: Delivered while it is open, Closed once closed (its queued message dropped, counted), Stale once its slot is reused (it reaches nothing of the new endpoint); a capability copied as Remote[Note] and rebuilt as Remote[Other] is refused by the transport (TypeMismatch: the bytes' schema is not the endpoint's) and queues nothing; an Identity's bytes do not rebuild a capability} -constraints threadTransport -body {
+    thRun endpoints
+} -result {value {["Delivered", 1, 1, "Closed", "Stale", "Delivered", ["TypeMismatch"], 1, "refused"]}}
+
+test th-abi-loops {the event-loop integration ABI version 2 (abiprobe.c): with one loop open the version 1 functions reach it (1111); with a worker VM's loop open too they are refused -EPIPE in both VMs, never routed to either, while each loop's version 2 handle wakes it (2211); once the worker ended -- its thread closed the loop it opened -- its handle names nothing and version 1 reaches the one loop again (1112)} -constraints threadTransport -body {
+    set o [thRun abi]
+    if {[lindex $o 0] ne "value"} {
+        return $o
+    }
+    if {![regexp {^\[(\d+), (\d+), \[\[(\d+), (\d+), (\d+)\]\], \[(\d+)\]\]$} [lindex $o 1] -> alone worker theirs ours handle gone]} {
+        return $o
+    }
+    list $alone $worker $theirs $ours [expr {$handle >= 64}] $gone
+} -result {1111 1 2211 2211 1 1112}
+
+# --------------------------------------------------------------------------
+# The broker example
+
+# The broker's result: {acquired again {worker summaries} {device counters}}.
+proc thBrokerParts {o} {
+    if {[lindex $o 0] ne "value"} {
+        return $o
+    }
+    set n [regexp -all -inline -- {-?[0-9]+|true|false} [lindex $o 1]]
+    list [lrange $n 0 1] [lrange $n 2 9] [lrange $n end-2 end]
+}
+
+test th-broker {examples/threads/broker, built as its build.sh does: the owner acquires the process's one device (a second acquire is refused), two worker VMs each run two handlers making 60 writes and read-backs through the broker (typed calls to the owner's device-service actor) and a ticker that keeps running meanwhile; every call is confirmed, the device saw 480 operations, none overlapping, and the owner held it throughout} -constraints threadTransport -body {
+    thBrokerParts [thRun main {} $::thBroker]
+} -result {{true false} {240 120 0 20 240 120 0 20} {480 0 1}}
+
+test th-broker-gc-stress {the broker under GC stress} -constraints threadTransport -body {
+    thBrokerParts [thRun main {BOTLISH_NATIVE_GC_STRESS 1} $::thBroker]
+} -result {{true false} {240 120 0 20 240 120 0 20} {480 0 1}}
+
+# --------------------------------------------------------------------------
+# What the compiler rejects
+
+test th-reject-placement {a thread entry of the entry program: THREAD-ENTRY-PLACEMENT (a worker VM runs no entry program's top level)} -constraints threadTransport -body {
+    thRejected placement
+} -result {{THREAD-ENTRY-PLACEMENT placement.bot:3}}
+
+test th-reject-entries {thread entries with two parameters, no declared result, a function value or a context parameter: THREAD-ENTRY-SIGNATURE; a context installed in a branch of an entry: CONTEXT-INSTALLATION-UNSUPPORTED (with the call it leaves without the context, as in the entry program); an entry called, taken as a value, or a function that is no entry given to std::thread::entry: THREAD-ENTRY-REFERENCE} -constraints threadTransport -body {
+    thRejected entries
+} -result {{CONTEXT-INSTALLATION-UNSUPPORTED badentries.bot:28} {MISSING-CONTEXT badentries.bot:29} {THREAD-ENTRY-REFERENCE badentries.bot:35} {THREAD-ENTRY-REFERENCE badentries.bot:39} {THREAD-ENTRY-REFERENCE badentries.bot:43} {THREAD-ENTRY-SIGNATURE badentries.bot:10} {THREAD-ENTRY-SIGNATURE badentries.bot:14} {THREAD-ENTRY-SIGNATURE badentries.bot:18} {THREAD-ENTRY-SIGNATURE badentries.bot:22}}
+
+test th-reject-authority {authority a worker or an actor was not given: a worker calling the owner's device (MISSING-CONTEXT: it has no Device), a context or a coroutine handle as an initialization value (THREAD-ENTRY-SIGNATURE: not sendable), an actor allowed only the loop asking the broker, a thread started where Threads is withheld (CONTEXT-NOT-INJECTED), a forged capability (OPAQUE-CONSTRUCTION), a local address copied for another VM (NOT-SENDABLE) or a capability to send addresses (TRAIT-NOT-SATISFIED)} -constraints threadTransport -body {
+    thRejected authority
+} -result {{CONTEXT-NOT-INJECTED rogue.bot:43} {CONTEXT-NOT-INJECTED rogue.bot:68} {MISSING-CONTEXT rogue.bot:16} {NOT-SENDABLE rogue.bot:54} {OPAQUE-CONSTRUCTION rogue.bot:49} {THREAD-ENTRY-SIGNATURE rogue.bot:20} {THREAD-ENTRY-SIGNATURE rogue.bot:25} {TRAIT-NOT-SATISFIED rogue.bot:58}}
+
+test th-reject-forgery {a capability rebuilt from a made-up identity: the rebuild of a copied capability (Remote's sendable clause) is internal to the standard library (INTERNAL-NAMESPACE), so a program never holds a capability nobody gave it} -constraints threadTransport -body {
+    thRejected forgery
+} -result {{INTERNAL-NAMESPACE forgery.bot:11}}
+
+test th-reject-conflict {two thread entries selecting different implementations of std::event_loop::Driver: the program selects one per context trait for every VM (CONTEXT-TRAIT-SELECTION-CONFLICT)} -constraints threadTransport -body {
+    thRejected conflict
+} -result {{CONTEXT-TRAIT-SELECTION-CONFLICT drivers.bot:27}}
+
+test th-static-blocks {a thread entry declared inside a static compile block, and an entry called inside one, are the blocks' rejections -- std::compiler::CompilerError with ThreadEntryPlacement and ThreadEntryReference -- on every backend (the program starts no thread)} -constraints botlishThreads -body {
+    set hir [thHir $::thSources blocks]
+    lmap b {interp compile cranelift} {lrange [outcomeUnderHir $b $hir] 0 1}
+} -result [lrepeat 3 {value {[std::compiler::DiagnosticCode::ThreadEntryPlacement, std::compiler::DiagnosticCode::ThreadEntryReference]}}]
+
+test th-requirements {the compiler's context analysis (hir::contexts::required, which MISSING-CONTEXT and CONTEXT-NOT-INJECTED read): a thread entry requires nothing (it installs what it uses), the broker's operations and the worker's handler only the DeviceBroker -- never the owner's Device} -constraints threadTransport -body {
+    set hir [thHir $::thBroker main]
+    hir::activate $hir
+    set functions {worker::worker broker::read_device broker::write_device worker::handler}
+    set out {}
+    foreach b [dict get $hir contexts blocks] {
+        set fn [hir::contexts::BlockName $hir $b]
+        if {$fn in $functions && ![dict exists $out $fn]} {
+            dict set out $fn [lsort [hir::contexts::required $hir $b]]
+        }
+    }
+    lsort -stride 2 $out
+} -result {broker::read_device broker::DeviceBroker broker::write_device broker::DeviceBroker worker::handler broker::DeviceBroker worker::worker {}}
+
+file delete -force $thApp $thBroker
+cleanupTests

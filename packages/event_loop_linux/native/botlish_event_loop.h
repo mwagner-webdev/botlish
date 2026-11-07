@@ -7,8 +7,10 @@
  * driver, each on its own thread -- so every function names its LOOP, the
  * handle the program hands the library beside the endpoint
  * (event_loop_linux::loop_handle, an int). A handle names one loop for as
- * long as it is open; a closed loop's handle, or an earlier loop's in a
- * reused place, names nothing (-EPIPE). The version 1 functions, which name
+ * long as it is open -- until its program closes the driver
+ * (event_loop_linux::close) or the thread that opened it exits, whichever
+ * comes first; a closed loop's handle, or an earlier loop's in a reused
+ * place, names nothing (-EPIPE). The version 1 functions, which name
  * no loop, reach the one open loop while exactly one is, and are refused
  * while several are (never routed to one of them); a library that may run
  * beside Botlish threads uses version 2.

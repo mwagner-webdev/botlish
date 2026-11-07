@@ -1,0 +1,96 @@
+# transport.bot -- tests/threads.test: four producer threads send 1000
+# numbered notes each into one mailbox of this VM through one Remote
+# endpoint of capacity 16 (a mailbox of 8): two retry a Full send at once,
+# two wait for room on their own loops. The collector receives all 4000:
+# per sender in order, none lost.
+import event_loop_linux
+import producer
+import std::actor
+import std::actor::remote
+import std::event_loop
+import std::list
+import std::thread
+
+# Per sender, how many notes arrived; how many arrived out of order.
+struct Tally:
+    a: int
+    b: int
+    c: int
+    d: int
+    bad: int
+
+fn off(seq: int, expected: int) -> int:
+    if seq == expected:
+        0
+    else:
+        1
+
+fn counted(t: Tally, note: producer::Note) -> Tally:
+    if note.from == 1:
+        Tally {a: t.a + 1, b: t.b, c: t.c, d: t.d, bad: t.bad + note.seq.off(t.a)}
+    elif note.from == 2:
+        Tally {a: t.a, b: t.b + 1, c: t.c, d: t.d, bad: t.bad + note.seq.off(t.b)}
+    elif note.from == 3:
+        Tally {a: t.a, b: t.b, c: t.c + 1, d: t.d, bad: t.bad + note.seq.off(t.c)}
+    else:
+        Tally {a: t.a, b: t.b, c: t.c, d: t.d + 1, bad: t.bad + note.seq.off(t.d)}
+
+# Receives N notes, then reports their tally and stops the loop.
+fn collector(inbox: std::actor::Inbox[producer::Note], n: int, out: std::actor::Address[Tally], context ev: std::event_loop::Loop, resume std::actor::Answer) -> std::actor::Exit:
+    rx = std::actor::listen(inbox):
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    t = fold i from 0 to n with intermediate t Tally {a: 0, b: 0, c: 0, d: 0, bad: 0}:
+        note = std::actor::receive(rx):
+            on std::actor::Closed:
+                break
+        t.counted(note)
+    out.send(t)
+    std::event_loop::stop():
+        on std::event_loop::SchedulerFault:
+            return std::actor::exit(-3)
+    std::actor::exit(0)
+
+fn go(context ev: std::event_loop::Loop, d: std::event_loop::Driver, ac: std::actor::Actors, t: std::thread::Threads, p: std::thread::Port, db: std::thread::Doorbell) -> List[any] errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered, std::thread::ThreadLimit, std::thread::ThreadStartFailed, std::thread::ThreadFailed:
+    std::thread::serve()
+    {to, inbox} = std::actor::open[producer::Note](8)
+    {to: out, inbox: result} = std::actor::open[Tally](1)
+    remote = std::actor::remote::export(to, 16)
+    c = inject context std::event_loop::Loop:
+        coroutine {step, first} = collector(inbox, 4000, out)
+        std::actor::spawned(step, first)
+    std::actor::start(c)
+    before = std::thread::stats()
+    {thread: t1} = std::thread::start(std::thread::entry(producer::produce), producer::Plan {who: 1, count: 1000, to: remote})
+    {thread: t2} = std::thread::start(std::thread::entry(producer::produce), producer::Plan {who: 2, count: 1000, to: remote})
+    {thread: t3} = std::thread::start(std::thread::entry(producer::deliver_notes), producer::Plan {who: 3, count: 1000, to: remote})
+    {thread: t4} = std::thread::start(std::thread::entry(producer::deliver_notes), producer::Plan {who: 4, count: 1000, to: remote})
+    std::event_loop::run()
+    spun = std::thread::join(t1) + std::thread::join(t2)
+    delivered = std::thread::join(t3) + std::thread::join(t4)
+    after = std::thread::stats()
+    queued = std::actor::remote::in_transit(remote)
+    std::thread::close_port()
+    counts = loop t in std::actor::drain(result):
+        [t.a, t.b, t.c, t.d, t.bad]
+    [counts, spun > 0, delivered, after.full_refusals - before.full_refusals >= spun, after.messages - before.messages, queued, after.started - before.started, after.undelivered - before.undelivered]
+
+with context std::event_loop::create(64)
+with context event_loop_linux::create()
+with context event_loop_linux::native()
+with context std::actor::create()
+with context std::thread::create(8)
+with context std::thread::port()
+go():
+    on std::event_loop::SchedulerFault:
+        ["scheduler fault"]
+    on std::event_loop::DriverFault {code}:
+        ["driver fault", code]
+    on std::event_loop::LoopReentered:
+        ["reentered"]
+    on std::thread::ThreadLimit:
+        ["thread limit"]
+    on std::thread::ThreadStartFailed {reason}:
+        ["start failed", reason]
+    on std::thread::ThreadFailed {identity, message}:
+        ["failed", identity, message]
