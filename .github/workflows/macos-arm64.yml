@@ -393,7 +393,13 @@ jobs:
   # TOOLCHAIN and xcode-select --install).
   app-clean:
     name: Botlish.app without developer tools (macOS arm64)
-    needs: app
+    # After the application, so after the smoke job and its canary. Its own
+    # condition, as app's: a manual run with app_only skips the smoke job,
+    # and the implicit success() skips every job after a skipped one.
+    needs: [smoke, app]
+    if: >-
+      !cancelled() && (needs.smoke.result == 'success' || needs.smoke.result == 'skipped')
+      && needs.app.result == 'success'
     runs-on: macos-15
     timeout-minutes: 45
     steps:
