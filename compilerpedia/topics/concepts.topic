@@ -44,11 +44,10 @@ Arithmetic, `and` and `or` are left-associative. There is no `/`, `%`,
 
 Nesting has no limit of the language's: parentheses, List literals,
 constructions, calls, operator chains, conditions, destructuring patterns,
-written types and blocks nest as deep as a program writes them. The
-compiler's own walks over nesting do not use the Tcl interpreter's stack
-depth (DEPTH-SAFE-NESTED-EXPRESSION-FRONTEND-MILESTONE-1.md); only running
-a program on the interp backend evaluates its nesting as nested Tcl
-evaluations (backend.interp).
+written types and blocks nest as deep as a program writes them. How deep
+the compiler's own walks over the nesting go is not bounded by the Tcl
+interpreter's stack; only running a program on the interp backend
+evaluates its nesting as nested Tcl evaluations (backend.interp).
 
 == WHY
 One way to lay out a block and no implicit statement separators keep
