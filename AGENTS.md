@@ -6110,6 +6110,8 @@ generated editor grammars. The lexer and the parser stay in Tcl
   editors/neovim/syntax/botlish.vim or the fixture's sample.classes.json by
   hand. The lexer's keywords are each in one group, every registered word
   has a pattern and no pattern names another (generation fails otherwise).
+  A declared name (after `fn`, `struct`, `type`, `error`) is the syntax
+  tree's (`grammars::Declared`), never a name a pattern merely follows.
   A new contextual word is registered, consumed with Word, given a pattern
   (TextMate and Vim, matching it only where the parser reads it) and placed
   in the fixture (editors/vscode/test/fixtures/sample.bot) where it is read.

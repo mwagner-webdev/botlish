@@ -370,15 +370,19 @@ proc shVimGroups {path positions} {
     }
 }
 
-# The mismatches of Vim's GROUPS with CLASSES (tests/lsp-neovim.test's rule).
+# The mismatches of Vim's GROUPS with CLASSES (tests/lsp-neovim.test's rule):
+# a declared name (grammars::Declared) is a function's or a type's, and no
+# other name is a keyword, a constant or a declared name.
 proc shSyntaxMismatches {classes groups} {
     set want {keyword {botlishControl botlishDeclaration botlishOperatorWord} word botlishContextual
-        constant botlishConstant number botlishNumber string botlishString char botlishChar comment botlishComment}
+        constant botlishConstant number botlishNumber string botlishString char botlishChar comment botlishComment
+        declared {botlishFunction botlishType}}
     set mismatches {}
     foreach item $classes group $groups {
         lassign $item line column length class
         if {$class eq "identifier"} {
-            set ok [expr {$group ni {botlishControl botlishDeclaration botlishOperatorWord botlishContextual botlishConstant}}]
+            set ok [expr {$group ni {botlishControl botlishDeclaration botlishOperatorWord botlishContextual botlishConstant
+                botlishFunction botlishType}}]
         } else {
             set ok [expr {$group in [dict get $want $class]}]
         }
@@ -405,10 +409,14 @@ test sh-grammar-vim-corpus {the Vim syntax agrees with the token IR on real modu
         set path [file join $::projectRoot $file]
         set text [shRead $path]
         set starts [surface::tokens::LineStarts $text]
+        set declared [grammars::Declared $text $file]
         set classes {}
         foreach item [surface::tokens::classes [surface::syntaxTokens $text $file]] {
             lassign $item start end class
             if {$class eq "operator" || [regexp {[^\x00-\x7f]} [string range $text 0 $start]]} continue
+            if {$class eq "identifier" && $start in $declared} {
+                set class declared
+            }
             set line [lsearch -integer -bisect $starts $start]
             lappend classes [list $line [expr {$start - [lindex $starts $line]}] [expr {$end - $start}] $class]
         }
@@ -417,7 +425,7 @@ test sh-grammar-vim-corpus {the Vim syntax agrees with the token IR on real modu
         }]
     }
     set mismatches
-} -cleanup {unset -nocomplain mismatches file path text starts classes item start end class line m} -result {}
+} -cleanup {unset -nocomplain mismatches file path text starts declared classes item start end class line m} -result {}
 
 testConstraint nodeTextMate [expr {[auto_execok node] ne ""
     && [file isdirectory [file join $::projectRoot editors vscode node_modules vscode-textmate]]

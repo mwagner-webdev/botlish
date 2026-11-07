@@ -378,7 +378,7 @@
           ]
         },
         {
-          "match": "^\\s*(?:(private)\\s+)?(type)\\s+[A-Za-z_]\\w*\\s*=\\s*[A-Za-z_][\\w:]*\\s+(in)\\b",
+          "match": "^\\s*(?:(private)\\s+)?(type)\\s+([A-Za-z_]\\w*)\\s*=\\s*[A-Za-z_][\\w:]*\\s+(in)\\b",
           "captures": {
             "1": {
               "name": "keyword.other.contextual.botlish"
@@ -387,6 +387,9 @@
               "name": "keyword.other.botlish"
             },
             "3": {
+              "name": "entity.name.type.botlish"
+            },
+            "4": {
               "name": "keyword.other.contextual.botlish"
             }
           }
@@ -484,7 +487,7 @@
           }
         },
         {
-          "match": "\\b(struct|type|error)\\s+([A-Za-z_]\\w*)",
+          "match": "\\b(struct|type|error)\\s+([A-Za-z_]\\w*)\\b(?!\\s*::)",
           "captures": {
             "1": {
               "name": "keyword.other.botlish"

@@ -32,6 +32,9 @@ enum Color:
 refined type Even = int
 type Small = int in 0..9
 
+error Overflow:
+    limit: int
+
 context trait Clock:
     fn now() -> int
 

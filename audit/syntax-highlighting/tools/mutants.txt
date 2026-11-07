@@ -196,3 +196,85 @@ proc displayWidth {c} {
 ====
 "\\b(injects)\\s+(?:(no)\\s+)?(context)\\b"
 >>>>
+
+@@ declared-name-qualified the grammars take a qualified path after `type` for a declared type: `std` in `import type std::ffi::c::Int` (generated as generation writes it)
+!! sh-grammar-vim-fixture sh-grammar-textmate-fixture
+## tools/editor-grammars.tcl
+<<<<
+        [lsp::json::obj match {str {\b(struct|type|error)\s+([A-Za-z_]\w*)\b(?!\s*::)}} captures [lsp::json::obj \
+====
+        [lsp::json::obj match {str {\b(struct|type|error)\s+([A-Za-z_]\w*)}} captures [lsp::json::obj \
+>>>>
+## tools/editor-grammars.tcl
+<<<<
+        {syn match botlishType "\(\<\(struct\|type\|error\)\s\+\)\@<=\h\w*\>\(\s*::\)\@!"} \
+====
+        {syn match botlishType "\(\<\(struct\|type\|error\)\s\+\)\@<=\h\w*"} \
+>>>>
+## editors/vscode/syntaxes/botlish.tmLanguage.json
+<<<<
+          "match": "\\b(struct|type|error)\\s+([A-Za-z_]\\w*)\\b(?!\\s*::)",
+====
+          "match": "\\b(struct|type|error)\\s+([A-Za-z_]\\w*)",
+>>>>
+## editors/neovim/syntax/botlish.vim
+<<<<
+syn match botlishType "\(\<\(struct\|type\|error\)\s\+\)\@<=\h\w*\>\(\s*::\)\@!"
+====
+syn match botlishType "\(\<\(struct\|type\|error\)\s\+\)\@<=\h\w*"
+>>>>
+
+@@ vim-declared-name-claimed Vim's declared names start at their keyword (\zs): the keyword item claims it first, and no declared name is highlighted (generated as generation writes it)
+!! sh-grammar-vim-fixture sh-grammar-vim-corpus
+## tools/editor-grammars.tcl
+<<<<
+        {syn match botlishFunction "\(\<fn\s\+\)\@<=\h\w*?\="} \
+====
+        {syn match botlishFunction "\<fn\s\+\zs\h\w*?\="} \
+>>>>
+## editors/neovim/syntax/botlish.vim
+<<<<
+syn match botlishFunction "\(\<fn\s\+\)\@<=\h\w*?\="
+====
+syn match botlishFunction "\<fn\s\+\zs\h\w*?\="
+>>>>
+
+@@ domain-name-unmarked the contextual rule of a domain type's `in` swallows the declared name: `type Small = int in 0..9` leaves Small unscoped (generated as generation writes it)
+!! sh-grammar-textmate-fixture
+## tools/editor-grammars.tcl
+<<<<
+         textmate {match {^\s*(?:(private)\s+)?(type)\s+([A-Za-z_]\w*)\s*=\s*[A-Za-z_][\w:]*\s+(in)\b} captures {1 contextual 2 declaration 3 typeName 4 contextual}}
+====
+         textmate {match {^\s*(?:(private)\s+)?(type)\s+[A-Za-z_]\w*\s*=\s*[A-Za-z_][\w:]*\s+(in)\b} captures {1 contextual 2 declaration 3 contextual}}
+>>>>
+## editors/vscode/syntaxes/botlish.tmLanguage.json
+<<<<
+          "match": "^\\s*(?:(private)\\s+)?(type)\\s+([A-Za-z_]\\w*)\\s*=\\s*[A-Za-z_][\\w:]*\\s+(in)\\b",
+          "captures": {
+            "1": {
+              "name": "keyword.other.contextual.botlish"
+            },
+            "2": {
+              "name": "keyword.other.botlish"
+            },
+            "3": {
+              "name": "entity.name.type.botlish"
+            },
+            "4": {
+              "name": "keyword.other.contextual.botlish"
+            }
+          }
+====
+          "match": "^\\s*(?:(private)\\s+)?(type)\\s+[A-Za-z_]\\w*\\s*=\\s*[A-Za-z_][\\w:]*\\s+(in)\\b",
+          "captures": {
+            "1": {
+              "name": "keyword.other.contextual.botlish"
+            },
+            "2": {
+              "name": "keyword.other.botlish"
+            },
+            "3": {
+              "name": "keyword.other.contextual.botlish"
+            }
+          }
+>>>>

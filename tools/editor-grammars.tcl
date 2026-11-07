@@ -41,6 +41,8 @@ namespace eval grammars {
         operatorWord keyword.operator.word.botlish
         constant constant.language.botlish
         number constant.numeric.integer.botlish
+        functionName entity.name.function.botlish
+        typeName entity.name.type.botlish
     }
     # The contextual patterns: WORDS the words a pattern highlights,
     # TEXTMATE its TextMate rule (a `match` whose CAPTURES are the groups it
@@ -146,7 +148,7 @@ namespace eval grammars {
               {{\<fold\>.*\s} with {\s\+intermediate\>}}
               {{\<fold\>.*\swith\s\+} intermediate {}}}}
         {words {in}
-         textmate {match {^\s*(?:(private)\s+)?(type)\s+[A-Za-z_]\w*\s*=\s*[A-Za-z_][\w:]*\s+(in)\b} captures {1 contextual 2 declaration 3 contextual}}
+         textmate {match {^\s*(?:(private)\s+)?(type)\s+([A-Za-z_]\w*)\s*=\s*[A-Za-z_][\w:]*\s+(in)\b} captures {1 contextual 2 declaration 3 typeName 4 contextual}}
          vim {{{^\s*\(private\s\+\)\=type\s\+\h\w*\s*=\s*\h[[:alnum:]_:]*\s\+} in {}}}}
         {words {identity}
          textmate {match {^\s+(identity)\s+(?=[A-Za-z_])} captures {1 contextual}}
@@ -259,10 +261,10 @@ proc grammars::TextMate {} {
     set keywords [lsp::json::arrayOf [list \
         [lsp::json::obj match {str {\b(fn)\s+([A-Za-z_]\w*\??)}} captures [lsp::json::obj \
             1 [lsp::json::obj name [lsp::json::str [Scope declaration]]] \
-            2 [lsp::json::obj name {str entity.name.function.botlish}]]] \
-        [lsp::json::obj match {str {\b(struct|type|error)\s+([A-Za-z_]\w*)}} captures [lsp::json::obj \
+            2 [lsp::json::obj name [lsp::json::str [Scope functionName]]]]] \
+        [lsp::json::obj match {str {\b(struct|type|error)\s+([A-Za-z_]\w*)\b(?!\s*::)}} captures [lsp::json::obj \
             1 [lsp::json::obj name [lsp::json::str [Scope declaration]]] \
-            2 [lsp::json::obj name {str entity.name.type.botlish}]]] \
+            2 [lsp::json::obj name [lsp::json::str [Scope typeName]]]]] \
         [lsp::json::obj name [lsp::json::str [Scope control]] match [lsp::json::str [Words [dict get $groups control]]]] \
         [lsp::json::obj name [lsp::json::str [Scope declaration]] match [lsp::json::str [Words [dict get $groups declaration]]]] \
         [lsp::json::obj name [lsp::json::str [Scope operatorWord]] match [lsp::json::str [Words [dict get $groups operatorWord]]]]]]
@@ -341,8 +343,8 @@ proc grammars::Vim {} {
         }
     }
     lappend lines "" \
-        {syn match botlishFunction "\<fn\s\+\zs\h\w*?\="} \
-        {syn match botlishType "\<\(struct\|type\|error\)\s\+\zs\h\w*"} \
+        {syn match botlishFunction "\(\<fn\s\+\)\@<=\h\w*?\="} \
+        {syn match botlishType "\(\<\(struct\|type\|error\)\s\+\)\@<=\h\w*\>\(\s*::\)\@!"} \
         {syn match botlishNumber "\<\d\+\.\d\+\([eE][+-]\=\d\+\)\=\>"} \
         {syn match botlishNumber "\<0[xX]\x\+\>"} \
         {syn match botlishNumber "\<\d\+\>"} \
@@ -399,7 +401,8 @@ proc grammars::VimString {pattern} {
 # The highlight classes of the grammars' fixture (editors/vscode/test/
 # fixtures/sample.bot: every lexical class, every contextual word where the
 # parser reads it, and names of the same spellings), as the token IR says
-# (surface::tokens::classes): {LINE CHARACTER LENGTH CLASS} each, LINE and
+# (surface::tokens::classes), a name the grammars mark as declared (Declared)
+# classed `declared`: {LINE CHARACTER LENGTH CLASS} each, LINE and
 # CHARACTER 0-based, CHARACTER and LENGTH in UTF-16 code units (a JavaScript
 # string's indices). What the editor grammars' tests tokenize the fixture
 # against (editors/vscode/test/grammar.test.js, tests/syntax-highlighting.test).
@@ -411,9 +414,13 @@ proc grammars::FixtureClasses {} {
     set text [surface::source::normalize [read $channel]]
     close $channel
     set starts [surface::tokens::LineStarts $text]
+    set declared [Declared $text sample.bot]
     set items {}
     foreach item [surface::tokens::classes [surface::syntaxTokens $text sample.bot]] {
         lassign $item start end class
+        if {$class eq "identifier" && $start in $declared} {
+            set class declared
+        }
         set line [lsearch -integer -bisect $starts $start]
         set lineStart [lindex $starts $line]
         set before [string range $text $lineStart [expr {$start - 1}]]
@@ -422,6 +429,39 @@ proc grammars::FixtureClasses {} {
             [lsp::json::int [Units $before]] [lsp::json::int [Units $token]] [lsp::json::str $class]]]
     }
     return [lsp::json::arrayOf $items]
+}
+
+# The names the editor grammars mark as declared (TextMate's entity.name.
+# function and entity.name.type, Vim's botlishFunction and botlishType): the
+# offsets at which the syntax tree of TEXT has the name of a declaration that
+# `fn`, `struct`, `type` or `error` introduces -- a function (an extern's and
+# a trait's requirement's included), a struct, a type (a refinement's
+# included), an error. A grammar that marks a name anywhere else (`std` in
+# `import type std::ffi::c::Int`) disagrees with the parser.
+proc grammars::Declared {text file} {
+    set offsets {}
+    DeclaredIn [surface::parse $text $file] offsets
+    return [lsort -integer -unique $offsets]
+}
+
+proc grammars::DeclaredIn {node offsetsVar} {
+    upvar 1 $offsetsVar offsets
+    if {![dict exists $node kind]} {
+        return
+    }
+    set named {}
+    if {[dict get $node kind] in {function externfn structdecl typedecl errordecl}} {
+        lappend named $node
+    }
+    lappend named {*}[dict getdef $node requirements {}]
+    foreach item $named {
+        if {[dict getdef $item nameSpan ""] ne ""} {
+            lappend offsets [dict get $item nameSpan start]
+        }
+    }
+    foreach child [surface::ast::Children $node] {
+        DeclaredIn $child offsets
+    }
 }
 
 # TEXT's length in UTF-16 code units.

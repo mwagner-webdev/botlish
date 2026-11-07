@@ -35,8 +35,9 @@ const expected = {
   string: /^string\.quoted\.double\.botlish$/,
   char: /^string\.quoted\.single\.botlish$/,
   comment: /^comment\./,
+  declared: /^entity\.name\.(function|type)\.botlish$/,
 };
-const notAName = /^(keyword\.(control|other)|constant\.language)\./;
+const notAName = /^(keyword\.(control|other)|constant\.language|entity\.name)\./;
 
 async function tokenizer() {
   const { textmate, oniguruma } = engine();

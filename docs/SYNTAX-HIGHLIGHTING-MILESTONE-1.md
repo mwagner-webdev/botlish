@@ -204,6 +204,16 @@ committed file is not what generation writes.
   the parser reads it, so a name of the same spelling stays a name.
   Generation fails when a registered word has no pattern or a pattern names
   a word the parser does not register (`sh-grammars-refuse-drift`).
+- A declared name -- the name `fn`, `struct`, `type` or `error` introduces
+  -- is marked as a function's or a type's (TextMate's `entity.name.*`,
+  Vim's botlishFunction and botlishType); no other name is. What is declared
+  is the syntax tree's (`grammars::Declared`: the name spans of functions,
+  externs, trait requirements, structs, types and errors), so a name after
+  one of those keywords that the parser reads otherwise (`std` in `import
+  type std::ffi::c::Int`) is not, and a rule that hides the name (the
+  domain type's `in` rule) is caught. Vim's patterns look behind the
+  keyword: a `\zs` pattern would start at the keyword, which the keyword
+  item claims first.
 - A regular-expression grammar cannot be the parser: a word in a position no
   pattern foresees is not highlighted by the grammar, and the semantic
   tokens give it its class once the server answers.
@@ -219,9 +229,18 @@ examples/dfa/csv/csv_strict.bot, `sh-grammar-vim-corpus`), and in Neovim
 through its own configuration (`lsp-neovim-highlighting`: the syntax in
 force, every fixture token's group, and a semantic token received by
 Neovim's client). Every check: every keyword, contextual word, constant,
-number, string, character and comment has its class, and no name is a
-keyword or a constant. Vim's also agreed on icy-tower's sdl.bot during
-development.
+number, string, character, comment and declared name has its class, and no
+other name is a keyword, a constant or a declared name. Vim's also agreed
+on icy-tower's sdl.bot during development.
+
+The declared-name check was added after trying the grammar in VS Code: the
+first version compared keywords and lexical classes only, and let three
+mistakes through -- `std` of `import type std::...` marked as a declared
+type (both grammars), Vim marking no declared name at all (its `\zs`
+patterns started at the keyword), and TextMate leaving `Small` of `type
+Small = int in 0..9` unmarked. All three are fixed; each has a mutant
+(`declared-name-qualified`, `vim-declared-name-claimed`,
+`domain-name-unmarked`), killed.
 
 ## 9. Tests and what ran
 
@@ -259,7 +278,9 @@ Tcl backends: `tests/local.tcl -golden-backends "interp compile"`.
 - **Mutation testing:** `audit/syntax-highlighting/tools/mutate.tcl`, 17
   mutants, 17 killed, each by a test its `!!` line names. The two
   compiler-service mutants of main.tcl updated to the new code (section 9)
-  are killed again.
+  are killed again. The declared-name fix (section 8) added three mutants,
+  run with the two earlier grammar mutants: 5 of 5 killed (20 in the
+  catalog).
 - **Syntax recovery's fuzzer** (`audit/syntax-recovery/tools/fuzz.tcl`,
   seeds 1, 7 and 23; it injects tabs and line breaks, the lexer defect's
   ground): seeds 7 and 23 clean. Seed 1 reports two failures of one case,

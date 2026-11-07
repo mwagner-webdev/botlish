@@ -94,12 +94,14 @@ test lsp-neovim-session {Neovim's own client, configured by editors/neovim/botli
 # comparison tests/syntax-highlighting.test makes with Vim): the mismatches.
 proc ltSyntaxMismatches {classes groups} {
     set want {keyword {botlishControl botlishDeclaration botlishOperatorWord} word botlishContextual
-        constant botlishConstant number botlishNumber string botlishString char botlishChar comment botlishComment}
+        constant botlishConstant number botlishNumber string botlishString char botlishChar comment botlishComment
+        declared {botlishFunction botlishType}}
     set mismatches {}
     foreach item $classes group $groups {
         lassign $item line column length class
         if {$class eq "identifier"} {
-            set ok [expr {$group ni {botlishControl botlishDeclaration botlishOperatorWord botlishContextual botlishConstant}}]
+            set ok [expr {$group ni {botlishControl botlishDeclaration botlishOperatorWord botlishContextual botlishConstant
+                botlishFunction botlishType}}]
         } else {
             set ok [expr {$group in [dict get $want $class]}]
         }
