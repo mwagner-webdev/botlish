@@ -368,7 +368,7 @@ writing them, after the expression census was complete):
 | `loops` | collecting, counted and fold loops in turn | `surface::parser::Loop`, `surface::lower::LoopSyntax`, `hir::static::Sequence`, `hir::affine::Seq`, `hir::completions::EvalListloop`, `ExitsLoop`, `core::compiler::CompileListLoop`, `native::lower::ListLoop`, `IterationBody`, `DeferredNeeds` |
 | `cond` | one `if` condition of `and`, `or` and `not not` in turn, at the top level and in a collecting loop's body (an inlined region consumer) | native lowering's branch form: `native::lower::Condition`, `ConditionIf`, `ConditionBody`, `EmitRegionConsumerCondition`, `EmitRegionConsumerBody` |
 | `inject` | `inject no context:` blocks | the parser's `Injection`; the injection proof's provenance walk, `hir::injection::Seq`, `Tau` |
-| `layout` | a layout field `array 1 of array 1 of ... U8`, parsed from one byte | the parser's `ArrayTypeExpr`; `hir::layouts`' representation walks (`ResolveRepr`, `ResolveArrayTerm`, `ReprDescriptor`, `ReprText`, `CopyType`, `WordsFormats`, ...); native lowering's `ReprRead`, `ArrayRead` -- and, guarded with them, every other walk of a representation (writes, views, checks, the Tcl compiler's layout leaves), which parsing does not reach |
+| `layout` | a layout field `array 1 of array 1 of ... U8`, parsed from one byte | the parser's `ArrayTypeExpr`; `hir::layouts`' representation walks (`ResolveRepr`, `ResolveArrayTerm`, `ReprDescriptor`, `ReprText`, `CopyType`, `WordsFormats`, ...); native lowering's `ReprRead`, `ArrayRead`; the layout codec's descriptor walks, which the Tcl compiler reads at compile time (`core::binary::ReprPointerPath`, ...: found by the probe; the census traces `core::binary` since) -- and, guarded with them, every other walk of a representation (writes, views, checks, the Tcl compiler's layout leaves, the codec's encoding and decoding), which parsing does not reach |
 | `affine` | the struct chain built in one expression with a coroutine handle innermost: 1001 affine declarations | the drop descriptor, `hir::affine::Descriptor`, `DescriptorOf` |
 | (scenario `modbinding`) | a module binding's value | `hir::modulebinding::ContextExpr`, `ImmutableExpr` |
 
@@ -521,7 +521,10 @@ and 700, so no decision of the corpus changes.
   text. Each program must compile at the default limit and show the
   model's value on every backend asked, build the same HIR with segments of
   a random size (2 to 60 frames), and its one-token-malformed copy must be
-  the parser's syntax diagnostic. FIXME seeds.
+  the parser's syntax diagnostic. Seeds 1 to 6: 72 programs, spines 6 to
+  1,499 deep (median 598), each valid on interp and cranelift, the same
+  HIR with segments of 2 to 60 frames, its malformed copy the parser's
+  diagnostic: 0 failures.
 * **The probe** (`probe.tcl`): section 1's paths for every specimen 1000
   deep at the default limit. FIXME result; on the old tree every path
   fails.
