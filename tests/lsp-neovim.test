@@ -88,4 +88,68 @@ test lsp-neovim-session {Neovim's own client, configured by editors/neovim/botli
     "str {```botlish\nfn shapes::area(w: int, h: int) -> int\n```}" "str {```botlish\nb: int\n```}" {bool 1} \
     "str {```botlish\nfn shapes::area(w: int, h: int) -> int\n```}" {bool 1} {bool 1} 1]
 
+
+# The syntax item Neovim gives each classified token of the grammars'
+# fixture, against the token IR's class (sample.classes.json; the same
+# comparison tests/syntax-highlighting.test makes with Vim): the mismatches.
+proc ltSyntaxMismatches {classes groups} {
+    set want {keyword {botlishControl botlishDeclaration botlishOperatorWord} word botlishContextual
+        constant botlishConstant number botlishNumber string botlishString char botlishChar comment botlishComment}
+    set mismatches {}
+    foreach item $classes group $groups {
+        lassign $item line column length class
+        if {$class eq "identifier"} {
+            set ok [expr {$group ni {botlishControl botlishDeclaration botlishOperatorWord botlishContextual botlishConstant}}]
+        } else {
+            set ok [expr {$group in [dict get $want $class]}]
+        }
+        if {!$ok} {
+            lappend mismatches "[expr {$line + 1}]:[expr {$column + 1}] $class $group"
+        }
+    }
+    return $mismatches
+}
+
+test lsp-neovim-highlighting {Neovim's highlighting as editors/neovim/botlish.lua configures it (SYNTAX-HIGHLIGHTING-MILESTONE-1.md): the generated syntax on the runtime path gives every token of the grammars' fixture the token IR's class -- every keyword, contextual word, constant, number, string, character and comment, and no name a keyword -- and the server's semantic tokens reach Neovim's own client (a function's name, typed function)} -constraints neovim -body {
+    set dir [file join [temporaryDirectory] lsp-neovim-hl-[pid]]
+    file delete -force $dir
+    file mkdir $dir
+    set dir [file normalize $dir]
+    set fixtures [file join $::projectRoot editors vscode test fixtures]
+    set classes {}
+    foreach line [split [string trim [compilerpedia_ReadFile [file join $fixtures sample.classes.json]]] \n] {
+        set item [lmap v [lsp::json::elements [lsp::json::parse $line]] {lindex $v 1}]
+        if {[lindex $item 3] ne "operator"} {
+            lappend classes $item
+        }
+    }
+    file copy [file join $fixtures sample.bot] $dir/sample.bot
+    ltPut $dir/area.bot "fn area(w: int) -> int:\n    w\n\narea(2)\n"
+    set cmd [list [info nameofexecutable] [file join $::projectRoot main.tcl] -lsp -warnings off]
+    set results {}
+    foreach {file positions probe} [list sample.bot [lmap c $classes {lrange $c 0 1}] "" area.bot {} {[0, 3]}] {
+        set out [file join $dir out-$file.json]
+        withEnvironment [list BOTLISH_NVIM_OUT $out BOTLISH_NVIM_TOKEN_AT $probe \
+                BOTLISH_NVIM_POSITIONS [lsp::json::write [lsp::json::arrayOf [lmap p $positions {
+                    lsp::json::arrayOf [list [lsp::json::int [lindex $p 0]] [lsp::json::int [lindex $p 1]]]}]]] \
+                BOTLISH_NVIM_CMD [lsp::json::write [lsp::json::arrayOf [lmap a $cmd {lsp::json::str $a}]]]] {
+            exec [ltNvim] --headless --clean --cmd "lua vim.g.botlish_lsp_cmd = vim.json.decode(os.getenv('BOTLISH_NVIM_CMD'))" \
+                -u [file join $::projectRoot editors neovim botlish.lua] \
+                -c "luafile [file join $::projectRoot tests lsp-neovim-highlight.lua]" $dir/$file 2>@1
+        }
+        set r [lsp::json::parse [compilerpedia_ReadFile $out]]
+        if {[ltField $r ok] ne {bool 1}} {
+            error "the Neovim session on $file failed: [lsp::json::write $r]"
+        }
+        lappend results $r
+    }
+    lassign $results sample area
+    list [lsp::json::text [ltField $sample filetype]] [lsp::json::text [ltField $sample syntax]] \
+        [ltSyntaxMismatches $classes [lmap g [lsp::json::elements [ltField $sample groups]] {lsp::json::text $g}]] \
+        [lsp::json::text [ltField $area token]]
+} -setup {
+    proc compilerpedia_ReadFile {path} { set f [open $path]; fconfigure $f -encoding utf-8; set t [read $f]; close $f; return $t }
+} -cleanup {file delete -force $dir; unset -nocomplain dir fixtures classes line item cmd results file positions probe out r sample area} \
+    -result {botlish botlish {} function}
+
 cleanupTests

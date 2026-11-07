@@ -661,7 +661,7 @@ title: Every command-line option
 summary: The options of botlish (tclsh9.0 main.tcl): backend and warning selection, program arguments, building, checking, the language server, inspection output, and the reference.
 index: backends
 alias: options; flags of the command line; command-line options
-keywords: -backend, -warnings, -target, -L, -F, -runtime-path, -argv, -argv-hex, -argv-none, -emit-native-executable, -native-startup, -emit-hir-interchange, -emit-native-library, -export, -out, -check, -lsp, -lsp-scheduler, -lsp-worker, -code, -hir, -ast, -aot, -aot-data, -aot-spec, -contexts, -direct, -traits, -emit-nir, -emit-clif, -help, -version
+keywords: -backend, -warnings, -target, -L, -F, -runtime-path, -argv, -argv-hex, -argv-none, -emit-native-executable, -native-startup, -emit-hir-interchange, -emit-native-library, -export, -out, -check, -color, -excerpts, -lsp, -lsp-scheduler, -lsp-worker, -code, -hir, -ast, -aot, -aot-data, -aot-spec, -contexts, -direct, -traits, -emit-nir, -emit-clif, -help, -version
 related: cli.usage cli.output cli.exit-status cli.lsp lint.policy backend.targets backend.hir-interchange backend.native-executable backend.native-startup backend.native-library concept.argv
 
 == RUNNING
@@ -728,9 +728,25 @@ own process arguments.
                       it also reports the semantic errors the malformed
                       source cannot affect, which a run does not
                       (error.surface-syntax). Only -warnings and
-                      -target combine with it (they decide the analysis);
-                      any other option, or an input that is not a .bot
-                      file, is a malformed invocation.
+                      -target (they decide the analysis), -color and
+                      -excerpts combine with it; any other option, or an
+                      input that is not a .bot file, is a malformed
+                      invocation.
+
+== DIAGNOSTICS (how printed errors look; cli.output)
+    -color WHEN       color the printed diagnostics: the "error:",
+                      "note:" and "help:" labels, the location, the code,
+                      and the excerpt's source highlighted as an editor
+                      would. WHEN is auto (the default: on a terminal,
+                      unless NO_COLOR is set or TERM is dumb; never on
+                      Windows, whose console needs -color always), always
+                      or never
+    -excerpts WHEN    after each error, the source lines it names,
+                      underlined where it is ("^"). auto (the default: on
+                      a terminal), always or never
+Neither changes a diagnostic, its code or its order: output to a pipe or a
+file is the plain format below, unless always is asked for. Both combine
+with every run, `run` and -check.
 
 == LANGUAGE SERVER (cli.lsp; no input file)
     -lsp              run the language server: the Language Server
@@ -774,6 +790,8 @@ own process arguments.
     BOTLISH_NATIVE_LINKER=rustc|stub     how executables are linked
     BOTLISH_LSP_STATS=FILE               -lsp writes its measurements to
                                          FILE when it exits
+    NO_COLOR=anything                    -color auto colors nothing
+    TERM=dumb                            -color auto colors nothing
 
 == MALFORMED INVOCATIONS
 An unknown option, an option without its argument (`-backend` last), an
@@ -813,6 +831,16 @@ writes (cli.run).
 Every independent diagnostic gets its own line; each is followed by a help
 line naming the Compilerpedia topic of its rule or code, once per topic
 per file.
+
+On a terminal (or with -excerpts always) each error is followed by the
+source lines it names, underlined where it is, and the line is colored
+(or with -color always; cli.options, DIAGNOSTICS):
+       error: broken.bot:3:5: unbound name "x" (CORE SEMANTIC UNBOUND)
+         |
+       3 |     x + 1
+         |     ^
+       help: botlish -help error.unbound
+In a pipe or a file the output is exactly the plain form above.
 
 == WARNINGS
 Printed on stderr as they are found, `FILE:LINE:COL: warning: MESSAGE
@@ -880,8 +908,10 @@ Standard input is the program's (std::linux::io::read).
 
 == OPTIONS
 Before FILE: -backend NAME (default cranelift: the program runs natively,
-as its executable would), -warnings MODE, -target NAME, -L DIR and -F DIR.
-Any other option (inspection, building, -check, -argv) is a usage error.
+as its executable would), -warnings MODE, -target NAME, -L DIR, -F DIR,
+-color WHEN and -excerpts WHEN (how a rejection's diagnostics look on
+stderr). Any other option (inspection, building, -check, -argv) is a usage
+error.
 The Tcl backends run it too, but cannot print (backend.io).
 
 == WHAT IT PRINTS AND RETURNS

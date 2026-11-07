@@ -1,0 +1,198 @@
+# Mutants of syntax highlighting (audit/syntax-highlighting/tools/mutate.tcl;
+# SYNTAX-HIGHLIGHTING-MILESTONE-1.md): each a deliberate bug in the
+# parser's word recording, the lexer's comments and recovery metadata, the
+# token IR, the command line's presentation, the compiler service's tokens,
+# the language server's semantic tokens or the grammar generator.
+#
+#   @@ NAME DESCRIPTION
+#   !! TEST ...        the tests meant to detect it (one failing is a kill):
+#                      sh-* of tests/syntax-highlighting.test, lsp-* of
+#                      tests/lsp.test
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+#
+# A mutant may have several edits. Lines starting with # outside an edit
+# are comments.
+
+@@ word-not-recorded Word consumes a contextual word without recording it: the IR has no words
+!! sh-words-recorded sh-words-not-in-ast sh-grammars-current
+## surface/parser.tcl
+<<<<
+    WordAt p [dict get $p pos]
+    return [Advance p]
+====
+    return [Advance p]
+>>>>
+
+@@ word-registry-unchecked any identifier is recorded as a word, registered or not: the parser's own mistake goes unnoticed
+!! sh-word-unregistered-refused
+## surface/parser.tcl
+<<<<
+    if {[dict get $token kind] ne "IDENT" || [dict get $token value] ni $words} {
+====
+    if {[dict get $token kind] ne "IDENT"} {
+>>>>
+
+@@ fold-with-not-a-word one site reverts to Advance: a fold's `with` is consumed but not recorded (another construct's `with` still is)
+!! sh-grammars-current
+## surface/parser.tcl
+<<<<
+            from each iteration to the next"
+    }
+    Word p
+====
+            from each iteration to the next"
+    }
+    Advance p
+>>>>
+
+@@ comment-line-start-dropped a comment on a line of its own is not reported: only comments after code are
+!! sh-lexer-comments sh-grammars-current
+## surface/lexer.tcl
+<<<<
+                if {$c eq "#"} {
+                    lappend comments [list $j $i]
+                }
+====
+>>>>
+
+@@ indentation-clobbered the bracket recovery writes its match into the layout diagnostics' index list again
+!! sh-lexer-indentation-kept
+## surface/lexer.tcl
+<<<<
+                    regexp -start [expr {$i + 1}] {\A[ \t]*} $source lead
+                    set orphanIndent [string length $lead]
+====
+                    regexp -start [expr {$i + 1}] {\A[ \t]*} $source indentation
+                    set orphanIndent [string length $indentation]
+>>>>
+
+@@ ir-roles-dropped the IR keeps a lexical diagnostic but not how recovery weighs it
+!! sh-ir-roundtrip sh-ir-format
+## surface/tokens.tcl
+<<<<
+        set these {}
+        foreach role $roles {
+====
+        set these {}
+        foreach role {} {
+>>>>
+
+@@ validate-keyword-text-unchecked a keyword token is accepted whatever text it stands on
+!! sh-ir-validate-refuses
+## surface/tokens.tcl
+<<<<
+                    set ok [expr {$value eq $kind && $text eq $kind}]
+====
+                    set ok [expr {$value eq $kind}]
+>>>>
+
+@@ words-in-ast the parse's words stay in the AST surface::parse returns
+!! sh-words-not-in-ast
+## surface/parser.tcl
+<<<<
+    dict unset program words
+====
+>>>>
+
+@@ auto-color-in-pipe auto takes every channel for a terminal: a pipe gets excerpts and color
+!! sh-cli-plain-unchanged
+## main.tcl
+<<<<
+        set terminal [expr {$::tcl_platform(platform) ne "windows"
+            && ![catch {chan configure $channel -mode}]}]
+====
+        set terminal 1
+>>>>
+
+@@ excerpt-newline-span a span ending past its line's newline shows the next line too, underlined at its start
+!! sh-cli-syntax-excerpt
+## main.tcl
+<<<<
+        if {$end <= $lineEnd + 1 || $lineEnd >= [string length $text] || [llength $shown] == 4} {
+====
+        if {$end <= $lineEnd || $lineEnd >= [string length $text] || [llength $shown] == 4} {
+>>>>
+
+@@ excerpt-widths-ignored every character is one column: the underline slips left of a span after wide characters
+!! sh-cli-excerpt-widths
+## main.tcl
+<<<<
+proc displayWidth {c} {
+    set u [scan $c %c]
+====
+proc displayWidth {c} {
+    return 1
+    set u [scan $c %c]
+>>>>
+
+@@ tokens-no-functions no block is taken for a function's: a function's name is a variable
+!! sh-service-tokens sh-service-tokens-syntax-error lsp-tokens-document
+## service/service.tcl
+<<<<
+                    dict set functions $value $b
+====
+>>>>
+
+@@ import-refuses-tokens import refuses a revision carrying its tokens: the worker's revisions are lost
+!! sh-service-tokens-exported lsp-tokens-document lsp-tokens-wait
+## service/service.tcl
+<<<<
+    if {[catch {dict size $derived}] || [lsort -unique [concat [dict keys $derived] {lines syntax semantic declarations dfaNames tokens}]] ne {declarations dfaNames lines semantic syntax tokens}} {
+====
+    if {[catch {dict size $derived}] || [lsort -unique [concat [dict keys $derived] {lines syntax semantic declarations dfaNames}]] ne {declarations dfaNames lines semantic syntax}} {
+>>>>
+
+@@ tokens-never-wait a tokens request is answered at once from what there is: before the first analysis, null
+!! lsp-tokens-wait
+## lsp/server.tcl
+<<<<
+        if {!($old eq $text && [Fresh $rev]) && $pending} {
+            return wait
+        }
+        if {[catch {service::tokens $rev [dict get [RevInfo $rev] sources $path path]} tokens]} continue
+====
+        if {[catch {service::tokens $rev [dict get [RevInfo $rev] sources $path path]} tokens]} continue
+>>>>
+<<<<
+        return [list answer [lsp::json::obj data [EncodeTokens \
+            "request,$path,[dict get $where version]" $text $mapping $tokens]]]
+    }
+    if {$pending} {
+        return wait
+    }
+====
+        return [list answer [lsp::json::obj data [EncodeTokens \
+            "request,$path,[dict get $where version]" $text $mapping $tokens]]]
+    }
+>>>>
+
+@@ refresh-always every client is asked to refresh, whether it said it could or not
+!! lsp-tokens-refresh
+## lsp/server.tcl
+<<<<
+    if {$tokenRefresh} {
+====
+    if {1} {
+>>>>
+
+@@ generator-coverage-unchecked the generator writes grammars that leave a contextual word unhighlighted
+!! sh-grammars-refuse-drift
+## tools/editor-grammars.tcl
+<<<<
+        error "no pattern highlights the parser's contextual words [join $missing {, }]: add one (tools/editor-grammars.tcl)"
+====
+>>>>
+
+@@ grammar-hand-edited the committed TextMate grammar is edited by hand: `inject` no longer highlighted
+!! sh-grammars-current sh-grammar-textmate-fixture
+## editors/vscode/syntaxes/botlish.tmLanguage.json
+<<<<
+"\\b(inject)\\s+(?:(no)\\s+)?(context)\\b"
+====
+"\\b(injects)\\s+(?:(no)\\s+)?(context)\\b"
+>>>>

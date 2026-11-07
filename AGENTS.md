@@ -4126,10 +4126,10 @@ a shared library, a C header and a JSON manifest. Keep it so:
   message. Nothing unwinds across the boundary (`guarded`).
 * A library's every symbol but its public C names is local (`objcopy
   --keep-global-symbols`): each library carries a private runtime, and a
-  call makes its own program the thread's current one and restores the
-  previous one (`ProgramScope`). Never let two libraries share a symbol,
-  a static or the active program, and never fix a collision with a global
-  lock or a singleton.
+  call reads its own program through the Vm it runs in (`Vm::info`; no
+  thread's current program to swap: Per-VM and per-thread runtime state,
+  above). Never let two libraries share a symbol, a static or a program,
+  and never fix a collision with a global lock or a singleton.
 * Instances are explicit (`NAME_create`/`NAME_destroy`), thread-affine,
   one call at a time (WRONG-THREAD, REENTRANT-CALL), looked up by ticket
   (INVALID-INSTANCE). A library installs no signal handler, never `_exit`s
@@ -5949,7 +5949,8 @@ transport, scheduling and presentation, never semantics. Keep it so:
 
 * Every semantic answer is the service's: diagnostics are
   `service::diagnostics` re-encoded, hover, definition and references are
-  `service::at`'s facts, Compilerpedia topics `service::explain`'s and the
+  `service::at`'s facts, semantic tokens `service::tokens`' (Syntax
+  highlighting, below), Compilerpedia topics `service::explain`'s and the
   facts' own (by identity). Never match names, parse formatted CLI output,
   run a second analysis or resolver, or compute a type in `lsp/`. The one
   presentation choice: a program with no analysis (a loader error) also
@@ -6065,6 +6066,69 @@ mutation tools for a change to what they cover.
 programs and their repairs establish; `bench/syntax-recovery.tcl` regenerates
 the performance report, and `bench/lsp.tcl -malformed 1` the language
 server's editing session through syntax errors.
+
+## Syntax highlighting and the token IR
+
+Everything that highlights Botlish reads one statement of what each token
+is, or is checked against it (SYNTAX-HIGHLIGHTING-MILESTONE-1.md): the
+token IR (`surface/tokens.tcl`: tokens, comments, lexical diagnostics with
+their recovery roles, the inserted closers, and the identifiers a parse
+read as contextual words), its highlight classes
+(`surface::tokens::classes`), the command line's excerpts and color
+(main.tcl's "Diagnostic presentation"), the compiler service's tokens
+(`service::tokens`), the language server's semantic tokens, and the
+generated editor grammars. The lexer and the parser stay in Tcl
+(BOTLISH-LEXER-RATIONALE.md). Keep it so:
+
+* One IR: `surface::tokens::toLexed (fromLexed L)` is exactly the lexer's
+  result L, so the IR holds everything the parser reads; a later lexer in
+  another language produces the IR and is checked by `validate`. Never let
+  a highlighter read the lexer's or the parser's internals instead, and
+  never add a syntax-tree level to the IR without a design of its own (the
+  AST is no specified format).
+* Contextual words are the parser's: every identifier it consumes as a word
+  goes through `surface::parser::Word` (or `WordAt`), every such word is in
+  `surface::parser::words`, and a word compared only to refuse a construct
+  is in `refusedWords`. Never classify a word by its spelling anywhere
+  else, and never let the recording change the AST (`surface::parse` drops
+  the words; the AST of every file must stay what it was).
+* Presentation never changes a diagnostic: excerpts and color are on only
+  where `-color`/`-excerpts` say (auto: a terminal, a channel with Tcl's
+  `-mode`; never on Windows; NO_COLOR, TERM=dumb), and a pipe or a file
+  gets the plain format byte for byte. An excerpt reads the diagnostic's
+  structured location and the text the compilation read (the revision's,
+  else the source seam's), never the message text.
+* `service::tokens` adds no semantics: lexical classes are the IR's,
+  declarations and annotations the AST's spans, names the HIR's bindings; a
+  name with no binding gets no token. Tokens are a revision's query index
+  (prepare builds them, export and import carry them): a new derived kind
+  goes into `service::import`'s list too. The server answers them by its
+  stale rule (fresh; else wait for a pending analysis; else the unchanged
+  text's) and never invents one.
+* The editor grammars are generated (`tools/editor-grammars.tcl generate`):
+  never edit editors/vscode/syntaxes/botlish.tmLanguage.json,
+  editors/neovim/syntax/botlish.vim or the fixture's sample.classes.json by
+  hand. The lexer's keywords are each in one group, every registered word
+  has a pattern and no pattern names another (generation fails otherwise).
+  A new contextual word is registered, consumed with Word, given a pattern
+  (TextMate and Vim, matching it only where the parser reads it) and placed
+  in the fixture (editors/vscode/test/fixtures/sample.bot) where it is read.
+
+If you change the lexer's recording (`comments`) or recovery metadata, the
+parser's word recording, surface/tokens.tcl, main.tcl's presentation,
+`service::tokens`, the server's semantic tokens, the generator or the
+fixture, run tests/syntax-highlighting.test (its grammar tests need `vim`,
+and `npm ci` in editors/vscode for VS Code's engine), tests/lsp.test,
+tests/main-cli.test, tests/compiler-service.test, `tclsh9.0
+tools/editor-grammars.tcl check`, `npm test` in editors/vscode,
+`audit/syntax-highlighting/tools/mutate.tcl` (every mutant in its
+`mutants.txt` must still apply and be killed by a test its `!!` line names:
+update a mutant's text when you change the code it mutates, keeping it a
+mutant of the same rule), and on a branch tests.yml for
+tests/lsp-neovim.test (`lsp-neovim-highlighting`, which needs Neovim); a
+change to the lexer or the parser also compares the AST of every
+repository `.bot` file with the tree before the change, and runs the
+syntax-recovery and diagnostic-recovery harnesses (above).
 
 ## Compilerpedia (the built-in reference)
 
