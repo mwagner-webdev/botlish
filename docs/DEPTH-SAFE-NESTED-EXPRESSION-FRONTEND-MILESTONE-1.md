@@ -823,7 +823,27 @@ Locally (a 4-core container, Tcl 9.0.1), on the branch with main merged:
 
 `main` was green or still running at both ends of the work (no workflow
 failed on it): when the branch started, and when main (`f2787af`) was
-merged into it. On the branch's head, CIRESULT
+merged into it -- its latest finished test runs (`43f6869`) and
+static-decisions (`1d73754`) green, `f2787af`'s still running.
+
+CI on the branch, at the time of writing (the shared runners queue for
+hours; a run a newer push superseded says nothing either way):
+
+* **The head, `549071b`:** tests.yml and tests-arm64.yml dispatched (every
+  job), macos-arm64.yml and windows-x86_64.yml from the push -- pending.
+* **static-decisions.yml**, the batched scheduler against the sequential
+  one over the golden suites: passed on `c6cdd86` (before main was merged
+  and before the last twelve guards and the segment size); dispatched on
+  `a82e469`, whose front end is the head's (only tests and this report
+  changed since) -- pending.
+* **Earlier heads, superseded before they finished:** tests.yml on
+  `456f0d3` passed its canary (the mutant catalogs, the warning gate, the
+  changed test files and recent failures), the native Rust unit tests and
+  the method-call decision oracle; the two tests fixed in `456f0d3` and
+  `549071b` would have failed its later jobs. On `c6cdd86`, before the
+  merge: tests.yml's and tests-arm64.yml's push runs (their canaries)
+  passed. icy-tower's macOS and Windows workflows passed on `456f0d3`, ci
+  tools and the raven clean room on `a82e469`.
 
 ## 24. Remaining recursion: the final census
 
