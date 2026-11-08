@@ -282,12 +282,18 @@ sign --identifier "$identifier.native" "$contents/MacOS/botlish-native"
 sign --identifier "$identifier" "$contents/MacOS/botlish-native"
 >>>>
 
-@@ archive-names-unsigned-driver the compiler archive is not written again after the driver's signature: its native-bin/ID names another driver
+@@ archive-names-unsigned-driver the compiler archive is written before the driver's signature: its native-bin/ID names the driver as it was, not as the bundle holds it
 ## single/macos/sign.sh
 <<<<
-if [[ $got != "$want" ]]; then
+sign --identifier "$identifier.native" "$contents/MacOS/botlish-native"
 ====
-if [[ -z $got ]]; then
+>>>>
+## single/macos/sign.sh
+<<<<
+chmod 644 "$contents/Resources/botlish.zip"
+====
+chmod 644 "$contents/Resources/botlish.zip"
+sign --identifier "$identifier.native" "$contents/MacOS/botlish-native"
 >>>>
 
 @@ jit-refusal-removed main.tcl runs -backend cranelift whatever the native backend can do: the driver's own refusal, not the actionable one

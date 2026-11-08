@@ -17,7 +17,8 @@ makes the exit status 1. Before any mutant, every named test runs on the
 unmutated copy and must pass (a test that fails there kills nothing).
 
 TEST is FILE.CLASS.METHOD of audit/macos-release/tests/ (test_credentials,
-test_release, test_workflow). The real checkout is never modified.
+test_release, test_workflow, test_botlish_release, test_botlish_workflow).
+The real checkout is never modified.
 """
 import argparse
 import os
@@ -29,8 +30,13 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
-COPIED = ["examples/games/icy-tower/macos", "examples/games/icy-tower/package-macos.sh", "LICENSE",
-          ".github/workflows/icy-tower-macos.yml", "audit/macos-release"]
+COPIED = ["tools/macos-release", "examples/games/icy-tower/macos", "examples/games/icy-tower/package-macos.sh", "LICENSE",
+          ".github/workflows/icy-tower-macos.yml", "audit/macos-release",
+          # Botlish.app's release (single/macos/release.py, bundle.py, sign.sh)
+          # and what sign.sh's single/package.tcl packs from the tree.
+          "single/macos", "single/package.tcl", "single/main.tcl", "single/build.sh", "main.tcl", "core", "compiler", "hir", "surface",
+          "service", "lsp", "pm", "stdlib", "native/*.tcl", "compilerpedia/compilerpedia.tcl", "compilerpedia/topics",
+          "compilerpedia/generated", ".github/workflows/botlish-macos.yml"]
 
 
 def read_mutants(path):
@@ -64,7 +70,14 @@ def read_mutants(path):
 
 
 def tree(base):
+    import glob
+    copied = []
     for rel in COPIED:
+        if "*" in rel:
+            copied += sorted(os.path.relpath(p, ROOT) for p in glob.glob(os.path.join(ROOT, rel)))
+        elif os.path.exists(os.path.join(ROOT, rel)):
+            copied.append(rel)
+    for rel in copied:
         src, dst = os.path.join(ROOT, rel), os.path.join(base, rel)
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         if os.path.isdir(src):

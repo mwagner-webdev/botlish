@@ -353,6 +353,27 @@ jobs:
         if: always()
         run: bash single/macos/compare.sh "$(command -v tclsh9.0)" "$APP" 2>&1 | tee compare.log
 
+      # The release's own stages on a copy of the application, ad hoc
+      # (MACOS-BOTLISH-DISTRIBUTION-MILESTONE-1.md): the Developer ID path's
+      # signing order (single/macos/release.py sign: single/macos/sign.sh),
+      # every unit's signature (the hardened runtime, no entitlement), the
+      # tamper control, the release's acceptance of the signed bundle -- with
+      # no credential: this job has none, and nothing ad hoc is publishable.
+      - name: The release's signing stages and acceptance, ad hoc (single/macos/release.py)
+        if: always()
+        run: |
+          base="$RUNNER_TEMP/adhoc-release"
+          rm -rf "$base" && mkdir -p "$base"
+          copy="$base/Botlish.app"
+          ditto "$APP" "$copy"
+          rel() { python3 -I single/macos/release.py "$@" --work "$base/work"; }
+          rel sign --mode adhoc --app "$copy"
+          rel verify-signature --app "$copy"
+          rel tamper --app "$copy"
+          single/macos/verify.sh --checkout "$PWD" "$copy"
+          single/macos/acceptance.sh "$copy" "$base/accept" --only version,interpreter,check,jit-refused,aot-run,executable,cocoa-canary,finder-launch,signature 2>&1 | tee acceptance.log
+          if rel publishable --out "$base/dist" >/dev/null 2>&1; then echo "::error::an ad hoc build was judged publishable"; exit 1; fi
+
       - name: Sizes and startup times (bench/macos-app.tcl)
         if: always()
         run: tclsh9.0 bench/macos-app.tcl "$APP" dist/botlish-macos-aarch64.zip 2>&1 | tee measure.log

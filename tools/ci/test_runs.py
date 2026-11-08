@@ -813,6 +813,23 @@ class Workflows(unittest.TestCase):
         self.assertFalse(jobs["tested"]["name"].startswith("release"), "runs.deferred reads the release job by its name")
         self.assertTrue(jobs["release"]["name"].startswith("release"))
 
+    def test_botlish_release_waits_for_green(self):
+        """Botlish.app's tagged release (botlish-macos.yml) waits for its commit's tests as the game's does."""
+        w = workflow(runs.RELEASES["botlish-macos"].workflow)
+        jobs = w["jobs"]
+        tested = jobs["tested"]
+        self.assertEqual(tested["permissions"], {"contents": "read", "actions": "read"})
+        body = "\n".join(st.get("run") or "" for st in tested["steps"])
+        self.assertIn('tools/ci/runs.py check "$GITHUB_SHA" --for botlish-macos', body)
+        self.assertIn("tested", jobs["release"]["needs"])
+        self.assertIn("needs.tested.outputs.green == 'true'", jobs["release"]["if"])
+        self.assertFalse(jobs["tested"]["name"].startswith("release"), "runs.deferred reads the release job by its name")
+        self.assertTrue(jobs["release"]["name"].startswith("release"))
+        self.assertEqual(triggers(w)["push"]["tags"], ["botlish-macos-v*"])
+        self.assertNotIn("branches", triggers(w)["push"])
+        writers = [n for n, j in jobs.items() if (j.get("permissions") or {}).get("contents") == "write"]
+        self.assertEqual(writers, ["publish"])
+
     def test_gate_listens_to_every_requirement(self):
         w = workflow("release-gate.yml")
         names = set(triggers(w)["workflow_run"]["workflows"])

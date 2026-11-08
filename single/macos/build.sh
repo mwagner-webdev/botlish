@@ -3,6 +3,7 @@
 # compiler, Botlish.app (MACOS-AARCH64-MILESTONE-9.md).
 #
 #   single/macos/build.sh [-o DIR] [--tcl-framework DIR] [--native-dir DIR] [--no-verify]
+#                         [--version X.Y.Z]
 #
 # Runs on Apple Silicon macOS with Apple's command-line tools. DIR (default
 # single/out/macos) receives
@@ -72,6 +73,10 @@
 #      and verified -- unless --no-verify (audit/macos-app/tools/mutate.tcl
 #      runs the verification itself, as a detector).
 #
+# --version X.Y.Z is the application's version (CFBundleShortVersionString and
+# CFBundleVersion): a release's, its tag's (botlish-macos-vX.Y.Z,
+# MACOS-BOTLISH-DISTRIBUTION-MILESTONE-1.md); 0.0 and 0 otherwise.
+#
 # The deployment target is $MACOSX_DEPLOYMENT_TARGET, default 11.0: rustc's
 # for aarch64-apple-darwin, which the driver and the runtime archive are
 # built for (the system linker links executables for it too).
@@ -83,12 +88,14 @@ output="$root/single/out/macos"
 tcl_framework=""
 native_dir=""
 verify=1
+version=""
 while [[ $# -gt 0 ]]; do
   case $1 in
     -o) output=$2; shift 2 ;;
     --tcl-framework) tcl_framework=$2; shift 2 ;;
     --native-dir) native_dir=$2; shift 2 ;;
     --no-verify) verify=0; shift ;;
+    --version) version=$2; shift 2 ;;
     -h|--help) sed -n '2,/^set -euo/p' "$0" | sed 's/^# \{0,1\}//;$d'; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
@@ -96,6 +103,12 @@ done
 fail() { echo "single/macos/build.sh: $*" >&2; exit 1; }
 [[ $(uname -s) == Darwin && $(uname -m) == arm64 ]] || fail "the macOS application is built on Apple Silicon macOS (not $(uname -s) $(uname -m))"
 case $output in /*) ;; *) output="$PWD/$output" ;; esac
+if [[ -n $version ]]; then
+  [[ $version =~ ^(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})$ ]] || fail "--version $version is not X.Y.Z"
+  short_version=$version bundle_version=$version
+else
+  short_version=0.0 bundle_version=0
+fi
 export MACOSX_DEPLOYMENT_TARGET=${MACOSX_DEPLOYMENT_TARGET:-11.0}
 identifier=io.github.mwagner-webdev.botlish
 tcl_version=$(sed -n 's/^TCL_VERSION=\([0-9]*\.[0-9]*\).*/\1/p' "$root/single/build.sh")
@@ -170,9 +183,9 @@ cat >"$contents/Info.plist" <<EOF
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.0</string>
+	<string>$short_version</string>
 	<key>CFBundleVersion</key>
-	<string>0</string>
+	<string>$bundle_version</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>$MACOSX_DEPLOYMENT_TARGET</string>
 	<key>LSBackgroundOnly</key>

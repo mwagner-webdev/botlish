@@ -30,7 +30,7 @@ import fixtures as fx  # noqa: E402
 from cryptography.hazmat.primitives import serialization  # noqa: E402
 from cryptography.hazmat.primitives.asymmetric import ec, ed25519, rsa  # noqa: E402
 
-CREDENTIALS = os.path.join(ROOT, "examples", "games", "icy-tower", "macos", "credentials.py")
+CREDENTIALS = os.path.join(ROOT, "tools", "macos-release", "credentials.py")
 AUTHORITY = fx.Authority()
 NAMES = fx.leaf_names()
 
