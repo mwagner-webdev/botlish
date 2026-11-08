@@ -29,8 +29,8 @@
 # past maxPerBlock a request was declined and the call kept choose's generic
 # typing, so pickN.f was `any` and value's typed parameter refused it. Since,
 # there is no maxPerBlock (setting it changes nothing), and maxInstances fails
-# the compilation (HIR SEMANTIC LIMIT). Prints N, the outcome, the compile time, the semantic
-# counters and the process's peak resident size so far.
+# the compilation (HIR SEMANTIC LIMIT). Prints N, the outcome, the compile
+# time, the semantic counters and the process's peak resident size so far.
 
 set here [file dirname [file normalize [info script]]]
 set checkout [file dirname [file dirname [file dirname $here]]]
@@ -98,7 +98,6 @@ try {
         close $channel
         set t0 [clock microseconds]
         set failed [catch {surface::readProgramFile $path -warnings off -cache ""} hir errorOptions]
-        set walksNote 
         set seconds [format %.2f [expr {([clock microseconds] - $t0) / 1e6}]]
         if {$failed} {
             set message [string map [list $scratch/ ""] [lindex [split $hir \n] 0]]
