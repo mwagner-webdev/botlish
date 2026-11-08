@@ -31,13 +31,22 @@ proc digest {text} {
 # The census counters of a semantic table: how the analysis got there, not
 # what it found.
 set counters {requests hits walks deferred deep trivial declinedCount}
-# HIR without what differs from run to run without a difference in meaning:
-# the static decisions' wall-clock time (staticStats depMs) and the census
-# counters of the semantic table the pre-monomorphization HIR carries
-# (traitSource).
+# HIR without what differs from run to run, or between checkouts, without a
+# difference in meaning: the static decisions' wall-clock time (staticStats
+# depMs), the census counters of the semantic table the pre-monomorphization
+# HIR carries (traitSource) and the checker fingerprint and digest emission
+# certificates record.
 proc normalized {hir} {
     if {[dict exists $hir staticStats depMs]} {
         dict unset hir staticStats depMs
+    }
+    if {[dict exists $hir emissions]} {
+        # (A certificate records a fingerprint of the checker's own source,
+        # and a digest over it, hir::emission::Valid: another checkout's
+        # always differ.)
+        regsub -all {checker [0-9a-f]+-[0-9]+} [dict get $hir emissions] {checker CHECKER} emissions
+        regsub -all {digest [0-9a-f]+} $emissions {digest DIGEST} emissions
+        dict set hir emissions $emissions
     }
     if {[dict exists $hir traitSource semantic]} {
         foreach k $::counters {
