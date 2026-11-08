@@ -793,3 +793,12 @@ tclsh9.0 main.tcl -hir audit/construct-binding-mutation/corpus/a02-fold-push-ret
   tests, 0 failed; 2,607 sites outside the repository's files, 6 rooted in
   a construct binding (section 11.3).
 * `tools/fold-cost.tcl`: section 15's table.
+
+Re-checked after merging main at 715ce1e (76 commits, 66 compiler files
+changed, threads and remote actors among them): `tools/run.tcl` still 41
+programs, 0 failures, on all four backends; `tools/census.tcl` classifies
+the reproducers exactly as before; `tools/textscan.py` over the 1,089 files
+now tracked reports the same 46 lines in the same files, none in the 38
+`.bot` files main added; and the census of the new production modules
+(std::thread, std::actor::remote, examples/c-freestanding) finds 90
+mutation sites, all through context parameters.
