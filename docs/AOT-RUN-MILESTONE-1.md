@@ -358,7 +358,15 @@ The branch `ccr-7f920867-5n2fuj`:
   tests.yml's Rust unit-test job builds the JIT-less driver and runs
   aot-run.test with it, since the merge had broken that build (main's
   thread factory outside the `jit` feature) and only macOS's app job
-  built it. [pending] at the time of writing
+  built it. On `b5a649e` macOS's smoke job, its canary running aot-run.test
+  with `aotr-diagnostic-presentation`, was green [executed, macOS]; one
+  step of icy-tower-macos.yml failed, the release tooling's mutant
+  harness, whose private tree lacked main's `ccompile/` (fixed in
+  `1d6bc3a`, which passes it: 92 of 92 mutants killed [executed, macOS]).
+* `1d6bc3a`: macOS's smoke job and its canary green again [executed,
+  macOS]; the macOS acceptance tier and app jobs, Windows' jobs and the
+  full Linux suites (the Rust unit-test job's JIT-less driver build among
+  them) [pending] at the time of writing
   (MACOS-BOTLISH-DISTRIBUTION-MILESTONE-1.md, section 24, lists the runs).
 
 ## 10. Positive controls and mutants
