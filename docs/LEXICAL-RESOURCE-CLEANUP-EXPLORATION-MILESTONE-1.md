@@ -203,7 +203,9 @@ brief's questions:
   of its cleanup functions, one per resource *type*, installed once at
   startup (natively `cleanuptable`; on the Tcl backends registered where the
   cleanup is declared) so that a descriptor-driven drop inside a collection
-  can name cleanup K. It holds functions, never values.
+  can name cleanup K. It holds functions, never values; natively only those
+  some compiled code may release, the others unit
+  (NATIVE-UNUSED-CONTEXT-IMPORT-CORRECTNESS-MILESTONE-1.md).
 * *Duplicate cleanup*: prevented by the same move analysis as every affine
   value, plus `CleanupDischarges` (a cleanup whose parameter would be
   released inside it is RESOURCE-DECLARATION).
@@ -620,9 +622,14 @@ return code 5 into the propagating error.
 
 **Native** (`native/lower.tcl`, `native/src/`):
 
-* `cleanupcall F V` calls the cleanup function value F, which the program
-  roots (`hir::specialize -exports`: the cleanup blocks are program roots);
-  `cleanuptable` installs the table of cleanup values at startup;
+* `cleanupcall F V` calls the cleanup function value F, which every region
+  that may release the resource materializes (`hir::specialize -releases`,
+  the context analysis's release edges: `hir::contexts::releasedCleanups`;
+  NATIVE-UNUSED-CONTEXT-IMPORT-CORRECTNESS-MILESTONE-1.md -- this milestone
+  made every cleanup block a program root, which compiled the cleanup of a
+  resource nothing releases and failed on its uninstalled context);
+  `cleanuptable` installs the table of cleanup values at startup (unit for
+  a cleanup the program compiles nothing for);
   `coabandon H` unwinds a suspended coroutine (`rt_co_abandon`);
   `affinedroprun V D` and the `*droprun` forms of the collection drops
   (`mvcleardroprun`, `mvswapdroprun`, `mutarrayswapdroprun`,

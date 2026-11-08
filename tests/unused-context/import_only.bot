@@ -1,0 +1,5 @@
+# The reproducer: imports terminal, installs no Terminal, constructs no
+# resource and calls no cleanup.
+import terminal
+
+terminal::width() + 1

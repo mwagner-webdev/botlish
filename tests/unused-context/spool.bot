@@ -1,0 +1,25 @@
+# spool.bot -- a third module with a context requirement of its own
+# (tests/unused-context.test).
+import std::mutable_vector
+
+opaque context struct Spool:
+    jobs: MutableVector[int]
+
+opaque resource struct Job:
+    id: int
+
+cleanup fn finish(j: Job, context s: Spool):
+    {id} = j
+    s.jobs.push(id)
+
+fn create() -> Spool:
+    Spool {jobs: std::mutable_vector::from_list([])}
+
+fn submit(n: int) -> Job:
+    Job {id: n}
+
+fn done(context s: Spool) -> int:
+    s.jobs.length()
+
+fn pages() -> int:
+    3
