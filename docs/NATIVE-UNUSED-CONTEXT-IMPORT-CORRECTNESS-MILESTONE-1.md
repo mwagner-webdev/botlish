@@ -557,7 +557,7 @@ which touch this code (*code inspection* of the merge).
 | `tools/mutant-catalogs.tcl` | 91 catalogs, 3187 mutants, 0 problems |
 | `tools/compilerpedia.tcl check` | 1290 topics, 758 examples, 0 problems |
 | `audit/golden/migration/merge.tcl -check 1` | 0 problems |
-| `tests/local.tcl` over the related files of section 10.1, plus `sendability.test` | PENDING at this commit |
+| `tests/local.tcl -jobs 2` over the related files of section 10.1, plus `sendability.test` | 17 files, 717 passed on interp and 717 on compile (94 golden duplicates skipped each), 0 failed; their 6 golden suites 404/404 on each of the four backends |
 
 CI on the branch before the merge (`fa3598a`), every workflow green:
 `tests` and `tests (linux arm64)` (both dispatched in full), `tests (macos
