@@ -51,7 +51,40 @@ emulator.
 
 ## 1. Executive result
 
-@@EXECUTIVE@@
+`botlish_react_native` is implemented and packed as a tool package of its
+own. With the single-file compiler and three published packages, it turns
+a Botlish native library into an installable React Native 0.88 New
+Architecture npm package. It writes nothing for an input it cannot check;
+the generated code accepts no value it cannot convey exactly. Observed, locally and
+in a clean room:
+
+* React Native's own Codegen generates the package's native interface;
+* the generated C++ compiles and links into a React Native 0.88.1 Android
+  release build;
+* the APK carries the real arm64-v8a Botlish library, as the Android build
+  strips it, with 16 KiB pages and zip alignment.
+
+The 2048 rules run in Botlish, and the hook and the screen compute none of
+them. The generated C++ core's ownership, thread affinity, lifecycle and
+number and string rules hold on the host, also under GC stress, and the
+game played through it is the interpreter's, snapshot for snapshot. A
+second, unrelated library goes through the same generator into the same
+app.
+
+**Android execution is partially validated.** The app was not observed
+running in an Android application process in this session:
+
+* this host has no KVM, and Google's emulator refuses an arm64 guest on an
+  x86_64 host, also when its `qemu-system-aarch64` is run directly
+  (observed, section 16);
+* the workflow that runs the APK on GitHub's Android emulators
+  (`react-native-2048.yml`'s `android` jobs, two images) stayed queued
+  behind a saturated runner pool for the whole session, and never started.
+
+The Android acceptance is implemented and committed, with the oracle it
+compares against (section 16). Its result is CI evidence still to come.
+Until a run of it passes, what sections 15 and 16 say of the app on Android
+is designed and built, not observed.
 
 | | status |
 |---|---|
@@ -64,11 +97,11 @@ emulator.
 | the generated C++ compiles against React Native 0.88.1 and links into `libappmodules.so`; the APK carries the real arm64-v8a library | observed (local Gradle release builds; `inspect-apk.sh`) |
 | ownership, thread affinity, lifecycle, number and string rules of the generated core | observed on the host (34 + 24 checks, GC stress) |
 | the 2048 rules in Botlish (seeded spawns, scoring, the end, the win); the hook computes none | implemented, observed (401 snapshots equal to the interpreter's through the generated core on the host) |
-| `useBotlish2048()` and a playable 2048 screen (swipes, buttons, score, New game, game over, win) | implemented; Jest (12 hook tests) observed |
+| `useBotlish2048()` and a playable 2048 screen (swipes, buttons, score, New game, game over, win) | implemented; Jest observed (28 tests: 10 of the hook and the snapshot reader, 17 of the generated entry point, 1 without the native module) |
 | a second, unrelated library through the same generator, both packages in one app | observed (host harness, TypeScript, Jest, the APK) |
 | a clean room: the single-file compiler and packages only, then npm, Codegen and Gradle | observed (section 18) |
-| the app on Android: Hermes, the TurboModule, the Botlish library in an Android application process | @@ANDROID-STATUS@@ |
-| mutation testing | @@MUTATION-STATUS@@ |
+| the app on Android: Hermes, the TurboModule, the Botlish library in an Android application process | **partially validated**: the acceptance is implemented (section 16) but was not observed in this session (no KVM here; its CI runs stayed queued) |
+| mutation testing | 44/44 killed, each by a detector it names; observed (section 21) |
 | iOS, Android ABIs other than arm64-v8a, asynchronous workers | not supported (section 24) |
 
 The compiler, the runtime and the standard library are unchanged (static:
@@ -444,7 +477,8 @@ created, destroyed, orphaned and reaped. Observed:
   errorsReleased` after every scenario (game: 8 errors in the checks;
   stress: 4,020 results and 80 errors, under `BOTLISH_NATIVE_GC_STRESS=1`
   too);
-* on Android, the self-test checks the same equalities (section 16).
+* on Android, the self-test checks the same equalities (implemented, not
+  observed in this session: section 16).
 
 ## 11. Thread affinity and lifecycle
 
@@ -556,8 +590,9 @@ functions because an export is environment-free (EXPORT-ENVIRONMENT).
 Identical seeds and moves give identical snapshots everywhere they ran.
 Observed:
 
-* the interpreter (`tools/oracle.tcl`), the compile and native backends
-  (8 moves);
+* the interpreter, the compile backend and the native backend
+  (`tools/oracle.tcl 42 DIRECTIONS BACKEND`): the self-test's 400 moves of
+  seed 42, 401 identical snapshots;
 * the host library through the generated core: 401 snapshots of seed 42
   and the self-test's 400 moves, byte-identical to the interpreter's;
 * `rn-core-oracle`: 80 moves of seed 7.
@@ -577,7 +612,7 @@ over: move 251 is the last that changes the board, score 3,064.
 It holds the library's latest snapshot and computes nothing of the rules
 (`src/snapshot.ts` only reads the text). Its React contract, each part
 tested in Jest with the module replaced by a recorder
-(`__tests__/useBotlish2048.test.tsx`, 9 tests), the recorder throwing if
+(`__tests__/useBotlish2048.test.tsx`: 9 tests, and one of the snapshot reader), the recorder throwing if
 called while a test component renders:
 
 * No native call while rendering. The first game is made in an effect;
@@ -610,11 +645,120 @@ or an arrow reads one direction. The hook asks the library, React renders
 the new snapshot. Every input, snapshot and input-to-render latency is
 logged as `BOTLISH_RN ...` lines.
 
-@@APP-EVIDENCE@@
+What was observed of the app without an Android device:
+
+* TypeScript (`tsc --noEmit`) over the app and both generated entry points;
+* Jest: 28 tests (section 14; `results/jest.txt`);
+* Gradle release builds of the app with both packages, locally and in the
+  clean room (section 18). Codegen ran for both specs; the adapters were
+  compiled against React Native 0.88.1 with the NDK the app pins (r27.1)
+  and linked into `libappmodules.so`.
+* The APK (`tools/inspect-apk.sh`; `results/apk-report.txt`):
+  - it holds arm64-v8a libraries only;
+  - `libgame.so` and `libtextkit.so` are the generated packages' libraries
+    as the Android build strips them: `llvm-strip --strip-unneeded` of the
+    package's file gives the packaged file byte for byte, and `.text`,
+    `.rodata` and the dynamic symbols are the package's;
+  - `libappmodules.so` NEEDs both and defines no Botlish runtime symbol;
+  - every shared object's segments are 16 KiB-aligned, and
+    `zipalign -c -P 16` passes;
+  - the JavaScript bundle is Hermes bytecode (its magic, `c6 1f bc 03`)
+    holding both entry points (`BotlishGame`, `BotlishTextkit`), the hook
+    and the self-test.
+
+The screen itself (the board drawn, swipes on it, the overlay) is Android
+evidence: section 16.
 
 ## 16. Android execution
 
-@@ANDROID@@
+**Status: partially validated.** The acceptance below is implemented and
+committed. It was not observed in this session.
+
+`audit/react-native-2048/tools/android-acceptance.sh APK EXPECTED OUT` runs
+on whatever emulator or device `adb` sees. EXPECTED is `build.sh`'s output:
+the interpreter's oracles. It installs the release APK and passes or fails
+six phases:
+
+1. **selftest.** The JavaScript self-test (`src/SelfTest.tsx`) reports
+   `failures=0`. Its 401 module snapshots and 401 hook states must equal the
+   interpreter's (`oracle-42.txt`). The JavaScript engine must be Hermes.
+   Each Botlish instance must be created on React Native's JavaScript
+   thread (`mqt_v_js`, from `ps -T`, compared with the adapter's log line),
+   and every call must come from that thread (the module's own
+   `diagnostics()`). `libgame.so` and `libtextkit.so` must be mapped in the
+   app process (`/proc/PID/maps`, the paths recorded).
+   The self-test also checks, inside the app process:
+   - every error category and code;
+   - the win and the end;
+   - the number and string rules (unsafe integers, NaN, embedded NULs, a
+     mebibyte);
+   - the second library;
+   - the first-call and per-call times (section 22).
+2. **reload.** React Native is reloaded three times (`ReactHost.reload`,
+   the launch extra `reload`). Each time the runtime and its TurboModules
+   are made again, a new Botlish instance is created, and the old one is
+   destroyed on its own thread: at its thread's exit or its next call,
+   never by a foreign thread (the `BotlishRN` log's `destroyed on thread T
+   (...)`). The self-test must pass each time.
+3. **gc-stress.** The self-test under `BOTLISH_NATIVE_GC_STRESS=1`, set by
+   `Os.setenv` before any instance exists. It must give the same snapshots.
+4. **play.** The game is played by swipes on the screen (`input swipe`),
+   including a rapid burst, with the app sent to the background and
+   back, then New game. Each swipe must be applied exactly once, each
+   snapshot must be the interpreter's (`play-oracle.txt`,
+   `restart-oracle.txt`), and no second instance may appear. Every call's
+   thread is traced in this phase only (`debug.botlish.rn.trace`).
+5. **win, over.** The game is started one move from 2048, then one move
+   from the end. The screen's view hierarchy must show the win, then the
+   game-over overlay, with screenshots kept.
+6. **exit.** The back key finishes the activity, then the process stops.
+   No native crash may appear anywhere in the run (`DEBUG`,
+   `AndroidRuntime`, `libc` fatal lines).
+
+`tools/dev-reload.sh DEBUG-APK APP OUT` is React Native's development
+reload. The debug build gets its bundle from Metro on the runner (`adb
+reverse tcp:8081`) and is reloaded twice with the R key twice (React
+Native's `DoubleTapReloadRecognizer`). Each reload must make a new instance
+of both libraries and destroy the old ones on their own threads, and the
+self-test must pass again.
+
+**Where it runs.** The workflow's `android` jobs run it on GitHub's Linux
+runners, with KVM, on two emulator images:
+
+| job | images (`emulator.sh` boots the first that runs arm64-v8a code) | also |
+|---|---|---|
+| 4 KiB pages | API 34, 33, 30 `google_apis` x86_64 | the clean room's APK; the development reload with Metro |
+| 16 KiB pages | API 35, 36 `google_apis_ps16k` x86_64 | |
+
+Both images are x86_64. The arm64-v8a APK runs through Android's ARM
+native bridge, and `emulator.sh` requires the image to list arm64-v8a in
+`ro.product.cpu.abilist` (`ro.dalvik.vm.native.bridge`). So a passing run
+shows the app's arm64 code, Hermes, React Native, the adapters and Botlish,
+executing *translated* in a real Android application process: zygote, ART,
+the package manager's library loading, SELinux, the JavaScript thread and
+its reloads. It does not show native AArch64 execution (section 24).
+
+**What happened in this session.** Every push of the branch started the
+workflow, and each run stayed `queued`: the repository's runners were busy
+with other branches' runs that had been going for hours. Each newer push
+cancelled the queued run, as the workflow's concurrency group intends. The
+latest run is linked in section 23; its result is the Android evidence.
+
+**Locally**, this host has no `/dev/kvm`. Observed, with the emulator 37.2.13
+and `system-images;android-30;aosp_atd;arm64-v8a`:
+
+* `emulator -avd ... -accel off`: `FATAL | Avd's CPU Architecture 'arm64'
+  is not supported by the QEMU2 emulator on x86_64 host. System image must
+  match the host architecture.`
+* Its own `qemu-system-aarch64-headless`, run directly to skip the
+  launcher's check, starts. But the `ranchu` machine it builds has no PCI
+  bus on this host (`PCI bus not available for hda`, also with the AVD's
+  audio off), and the input devices it adds are PCI devices
+  (`virtio_input_multi_touch_pci_*`).
+
+So no Android userland ran here. QEMU-user runs of the library (the Android
+target milestone's) were not repeated: the milestone does not count them as
+Android execution.
 
 ## 17. Independent second library
 
@@ -661,7 +805,57 @@ inputs:
 * the application's own sources: `game.bot`, `textkit.bot`, and the app
   fixture without `node_modules`.
 
-@@CLEANROOM@@
+Observed locally (`audit/react-native-2048/results/cleanroom/`:
+`summary.txt`, `programs.txt`). The inputs, by SHA-256:
+
+| input | SHA-256 |
+|---|---|
+| the single-file compiler | `dce53168...e061` |
+| `botlish_react_native-0.1.0.botpkg` | `5ee66dc0...a37e` |
+| `botlish_target_android_aarch64-0.1.0.botpkg` | `89b32e84...f009` |
+| `game2048-0.1.0.botpkg` | `9c014780...53a5` |
+
+1. **Botlish, traced.** The steps ran with an empty environment (`env -i`:
+   HOME and TMPDIR in the room, the system's PATH, ANDROID_NDK_ROOT),
+   under `strace -f`:
+   - the packages installed as ordinary dependencies;
+   - the library built for android-aarch64;
+   - its manifest checked against its files;
+   - `botlish tools`, then `botlish tool ... react-native generate`.
+
+   They opened no file of this checkout and started no Tcl of the system.
+   The programs they started:
+   - the single executable (6 times) and its native driver, unpacked into
+     the room's cache (2);
+   - the NDK's `clang`, `ld.lld`, `llvm-ar` and `llvm-objcopy`;
+   - the tool's program, from a private directory (1) after `/bin/sh`'s
+     trampoline;
+   - `sha256sum` (26), `sed`, `cut` and `tr`.
+2. **npm and React Native**, with the room's npm and Gradle caches:
+   - `npm pack` of the generated package;
+   - `npm ci` of the app's locked dependencies;
+   - `npm install` of the tarball;
+   - the second library's package, generated and installed the same way;
+   - TypeScript, and Jest (28 passed);
+   - the Android release build: BUILD SUCCESSFUL in 5 min 6 s. Codegen ran
+     from the app, for both packages
+     (`generateReact_45_native_45_botlish_45_{game,textkit}Codegen*`); the
+     app's own Codegen tasks were skipped, as it has no spec of its own.
+
+   Neither the app nor the packages name this checkout.
+3. **The APK** (20,601,745 bytes) holds arm64-v8a libraries only.
+   `libgame.so` is the generated package's library as the Android build
+   strips it. Every segment is 16 KiB-aligned, and `zipalign -c -P 16`
+   passes.
+
+The external dependencies (React Native, Hermes, Gradle's plugins) come
+from npm's registry, Google's Maven and Maven Central: they are the app's,
+not Botlish's. This host reaches them through a proxy. Its variables pass
+into the room, and the run was given a Gradle properties file and a Maven
+Central mirror (`GRADLE_PROPERTIES`, `GRADLE_INIT_DIR`), which are
+environment, not inputs. The workflow's build job runs the same clean room
+after `single/build.sh`, without them, and its 4 KiB android job runs the
+acceptance on the clean room's APK (section 16; pending).
 
 ## 19. GC and lifecycle testing
 
@@ -669,8 +863,8 @@ inputs:
   moves, with failing calls among them (4,100 calls). Under
   `BOTLISH_NATIVE_GC_STRESS=1` it gives the same 20 final states as
   without, and every owned result and error is released (4,020 and 80).
-  Without GC stress the time in the C ABI is about 25 µs per call; with it,
-  about 207 µs.
+  Without GC stress the time in the C ABI is 30.7 µs per call; with it,
+  189.0 µs (section 22).
 * **Lifecycle, observed on the host:**
   - instance creation, at most one per module;
   - destruction on the owner thread;
@@ -680,8 +874,9 @@ inputs:
   - invalidation, double invalidation;
   - many instances on one thread;
   - repeated failures and releases.
-* **Android:** GC stress in the app process, three reloads and module
-  reconstruction, background and foreground (section 16).
+* **Android** (implemented, not observed in this session: section 16):
+  GC stress in the app process, three reloads and module reconstruction,
+  the development reload with Metro, background and foreground.
 
 ## 20. Negative testing
 
@@ -732,15 +927,110 @@ the tool's own checks is reached:
 each with the detector tests that must kill it. `tools/mutant-catalogs.tcl`
 applies all of them (95 catalogs, 0 problems).
 
-@@MUTATION@@
+Observed (`results/mutation.txt`): **44/44 killed**, each by a detector
+its `!!` line names. The harness runs each mutant in a private copy of the
+tree, against a baseline in which every detector passes unmutated.
+
+| what the mutants break | mutants | killed by |
+|---|---:|---|
+| the generator's checks: types, ownership, digests, target, runtime ABI, C ABI version, ELF (machine, libraries, 16 KiB), React Native version, names, output | 12 | the `rn-refuse-*` tests |
+| what the generator writes: methods from the manifest, distinct module names, the Codegen configuration, paths relative to the package, the library and its ABI directory, the CMake ABI and digest guards, no second runtime | 9 | `rn-generate-*`, `rn-two-libraries-apart`, `rn-cmake-guards` |
+| the generated C++ core: unsafe and fractional integers, strings by length both ways, error identity and categories, released results and errors, thread affinity, one instance per module, invalidation, destruction on the owner thread, reaping | 13 | `rn-core-game`, `rn-core-textkit`, `rn-core-gc-stress` |
+| the generated TypeScript entry point: unsafe integers, argument counts, error identity, no JavaScript fallback | 4 | `rn-js-jest` |
+| the hook: no call while rendering, the latest snapshot, no new game on rerender, one call per move, no rules in JavaScript, nothing native at unmount | 6 | `rn-js-jest` |
+
+Two mutants survived the first full run, and each exposed a weakness that
+was fixed:
+
+* **`guessed-param-type`** (a parameter of an unknown type guessed instead
+  of refused). Its first text guessed a string. The generator's C type
+  check then refused the parameter, whose C type is `int64_t`, with the
+  same code, so the mutant changed nothing observable. Rewritten to guess
+  what the C type suggests (an int), it is killed by `rn-refuse-param-type`.
+* **`any-thread`** (the core uses the instance from whichever thread
+  calls). Its detector, `wrong-thread-refused`, only checked for a
+  WRONG-THREAD failure, and the library's own thread-affinity refusal
+  gives the same code. The check now also requires the adapter's message
+  ("belongs to thread") and an unchanged call counter, so it proves that
+  the refusal comes before the C ABI is entered.
+
+Both were rerun (`-only guessed-param-type,any-thread`): killed.
+`tools/mutant-catalogs.tcl` applies every mutant of every catalog under
+`audit/` (95 catalogs, 0 problems).
 
 ## 22. Performance and footprint
 
-@@PERFORMANCE@@
+**Observed on the host** (x86-64, 4 cores):
+
+| measure | value |
+|---|---|
+| `botlish tool ... react-native generate` for `game`: the request, the checks (digests, ELF), the package written | 0.49 to 0.51 s (1.2 s the first time, with cold caches); two runs give identical trees |
+| a 2048 move through the generated core and the C ABI, Linux build of the library: the snapshot text parsed, the move, the spawn, the text written | 30.7 µs per call, the mean of 4,100 calls (`game_core stress 20`; `results/host/stress-diagnostics.txt`) |
+| the same under `BOTLISH_NATIVE_GC_STRESS=1` | 189.0 µs per call, the same 20 final states |
+
+The time is the core's own measurement of its C ABI calls (`nativeNanos`).
+The JSI conversion and the JavaScript side are Android measurements: the
+self-test logs the first call of each library and the mean of the timed
+moves (`BOTLISH_RN timing ...`), and the acceptance logs each launch's
+`TotalTime` and each played swipe's input-to-render latency. They are in
+the CI run's artifacts (pending, section 16).
+
+**Footprint, observed** (`results/footprint.txt`; local release builds,
+React Native 0.88.1, arm64-v8a only):
+
+| artifact | bytes |
+|---|---:|
+| `botlish_react_native-0.1.0.botpkg` (17 files, 956,028 unpacked) | 409,014 |
+| the tool's program (static, stripped) | 841,736 |
+| `react-native-botlish-game-0.1.0.tgz` (14 files, 1,151,883 unpacked) | 452,355 |
+| `react-native-botlish-textkit-0.1.0.tgz` | 425,017 |
+| `libgame.so`: the package's (the manifest's) / in the APK | 1,093,032 / 756,136 |
+| `libtextkit.so`: the package's / in the APK | 1,055,160 / 732,104 |
+| the React Native template's APK, arm64-v8a, no Botlish package | 19,028,306 |
+| the 2048 app's APK, both packages | 20,601,745 (+1,573,439, +8.3%) |
+| `libappmodules.so`: the template's / the app's (both adapters, both Codegen specs, the app) | 145,912 / 264,680 |
+| the JavaScript bundle: the template's / the app's (both entry points, the screens) | 1,012,412 / 1,031,056 |
+
+Each Botlish library carries its own localized runtime, about 0.7 MB
+stripped, so two libraries cost two runtimes. Sharing one runtime between
+libraries is not a goal of the native-library ABI
+(NATIVE-LIBRARY-MILESTONE-1.md: a library's symbols are private).
 
 ## 23. Regression and CI
 
-@@REGRESSION@@
+**Observed locally** (`LANG=C.utf8`, Tcl 9.0.1, the native backend built):
+
+| run | result |
+|---|---|
+| `tests/react-native-package.test` (ANDROID_NDK_ROOT, prebuilt Android packages, BOTLISH_RN_APP) | 47/47 |
+| `tests/external-tools.test` | 48/48 |
+| `tests/native-library.test` | 28/28 |
+| `tests/android-target.test` | 17 passed, 4 skipped (`androidRun`, `androidRun16k`: qemu-aarch64 and Android roots not set up here) |
+| `tests/package-manager.test` | 86/86 |
+| `tests/workload-2048.test` | 9 passed, 2 skipped (`darwinIO`, `windowsIO`) |
+| `audit/react-native-2048/tools/mutate.tcl` | 44/44 killed (section 21) |
+| `tools/compilerpedia.tcl check` | 0 problems |
+| `tools/mutant-catalogs.tcl` | 95 catalogs, 0 problems |
+| `python3 -I tools/ci/test_runs.py` (a new workflow) | OK |
+| `audit/react-native-2048/tools/build.sh`, checkout to APK | passed |
+| `cleanroom.sh` (section 18) | passed |
+
+The compiler, the runtime, the standard library and the single executable
+are unchanged, so no other test file's outcome can change. The change's
+own files are new, besides AGENTS.md and docs/INDEX.md (static: the
+branch's diff against `a6977d56`).
+
+**CI.** `.github/workflows/react-native-2048.yml` runs on every push that
+touches the integration, the example, the 2048 engine, the audit or the
+Android packaging script. It is a test workflow with the
+`react-native-2048-${{ github.ref }}` concurrency group (CI-RUNS.md);
+nothing in the release gate requires it. Its runs on this branch:
+
+@@CI-RUNS@@
+
+Main's own workflows were queued or in progress, none red among those
+completed, when this branch was made (`a6977d56`) and when it was last
+checked.
 
 ## 24. Remaining platform gaps
 
@@ -748,15 +1038,18 @@ applies all of them (95 catalogs, 0 problems).
   the arm64-v8a APK through Android's ARM native bridge. GitHub's Linux
   runners have KVM for x86_64 guests only, and Google's emulator runs arm64
   system images on arm64 hosts only (macOS, which GitHub's runners give no
-  nested virtualization). So every arm64 instruction of the app ran
-  translated: Hermes, React Native, the adapter and Botlish. Native AArch64
+  nested virtualization). So in those runs every arm64 instruction of the
+  app runs translated: Hermes, React Native, the adapter and Botlish. Native AArch64
   execution of the same library remains the Android target milestone's
-  (qemu-user, Bionic) evidence. A physical device or an arm64 emulator on
-  an arm64 host with KVM is the missing evidence for native execution
-  inside an app.
-* **Development reload with Metro.** React Native's development reload
-  calls `ReactHost.reload`, which the acceptance drives directly from a
-  release build. A debug build fetching its bundle from Metro was not run.
+  (qemu-user, Bionic) evidence. Software emulation of an arm64 Android on
+  this x86_64 host is refused by the emulator (section 16). A physical
+  device or an arm64 emulator on an arm64 host with KVM is the missing
+  evidence for native execution inside an app.
+* **Android execution itself** (section 16): the acceptance is
+  implemented, and was not observed in this session. Until a run of the
+  workflow's `android` jobs passes, the app on Android, the reloads (also
+  the development reload with Metro, `tools/dev-reload.sh`), GC stress in
+  the app process and the measurements on Android are unproven.
 * **iOS.** Not supported. The package declares `ios: null`, iOS
   autolinking is disabled, and no podspec or module provider is written.
   It needs:

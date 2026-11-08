@@ -136,9 +136,14 @@ static int checks() {
   check("ownership-errors-counted", counter(d, "errorsAcquired") == 8, d);
 
   // Thread affinity: the instance belongs to this thread.
+  // (Refused by the core before the C ABI is entered: no library call is
+  // made, and the message is the core's, naming the owner thread. The
+  // library's own refusal is a second line, never the first.)
   Failure other;
+  long long before = counter(core.diagnostics(), "calls");
   std::thread([&] { other = failureOf([&] { core.score(s); }); }).join();
-  check("wrong-thread-refused", other.category == "invocation" && other.identity == "WRONG-THREAD" && other.jsClass == "Error",
+  check("wrong-thread-refused", other.category == "invocation" && other.identity == "WRONG-THREAD" && other.jsClass == "Error" &&
+      other.message.find("belongs to thread") != std::string::npos && counter(core.diagnostics(), "calls") == before,
       describe(other));
   check("owner-thread-still-works", core.score(s) == 0.0);
 

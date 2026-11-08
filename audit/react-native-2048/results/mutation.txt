@@ -1,0 +1,55 @@
+# Mutation testing, observed: tclsh9.0 audit/react-native-2048/tools/mutate.tcl (44 mutants)
+# The full run (mutants.txt before guessed-param-type's text was corrected, the harness before
+# wrong-thread-refused named the refusal's message): 42/44.
+guessed-param-type           SURVIVES    
+guessed-result-type          KILLED      rn-refuse-result-type
+ignore-ownership             KILLED      rn-refuse-ownership
+ignore-digest                KILLED      rn-refuse-stale-shared, rn-refuse-header-digest
+ignore-target                KILLED      rn-refuse-linux-library, rn-refuse-request-target
+cmake-no-digest              KILLED      rn-cmake-guards
+fixed-method-list            KILLED      rn-generate-methods-from-manifest
+same-module-name             KILLED      rn-two-libraries-apart
+no-codegen-config            KILLED      rn-generate-package-json
+checkout-path                KILLED      rn-generate-no-host-path
+abi-version-ignored          KILLED      rn-refuse-abi-version
+glibc-library                KILLED      rn-refuse-glibc-library
+omit-library                 KILLED      rn-generate-files, rn-cmake-guards
+wrong-abi-dir                KILLED      rn-generate-files, rn-cmake-guards
+cmake-any-abi                KILLED      rn-cmake-guards
+incompatible-runtime-abi     KILLED      rn-refuse-runtime-abi
+second-runtime               KILLED      rn-generate-files
+lose-16k                     KILLED      rn-refuse-4k-alignment
+unknown-react-native         KILLED      rn-refuse-react-native
+reserved-names-unchecked     KILLED      rn-refuse-reserved-names, rn-refuse-duplicate-names
+output-overwritten           KILLED      rn-refuse-output-collision
+accept-unsafe-integer        KILLED      rn-core-game
+round-integer                KILLED      rn-core-game, rn-core-textkit
+nul-terminated-argument      KILLED      rn-core-textkit
+nul-terminated-result        KILLED      rn-core-textkit
+drop-identity                KILLED      rn-core-game, rn-core-textkit
+generic-errors               KILLED      rn-core-game
+leak-result                  KILLED      rn-core-game, rn-core-textkit, rn-core-gc-stress
+leak-error                   KILLED      rn-core-game, rn-core-textkit
+any-thread                   SURVIVES    
+instance-per-call            KILLED      rn-core-game
+reuse-invalidated            KILLED      rn-core-game
+foreign-destroy              KILLED      rn-core-game
+never-reaped                 KILLED      rn-core-game
+ts-accept-unsafe-integer     KILLED      rn-js-jest
+ts-no-count                  KILLED      rn-js-jest
+ts-drop-identity             KILLED      rn-js-jest
+ts-js-fallback               KILLED      rn-js-jest
+hook-render-call             KILLED      rn-js-jest
+hook-stale-snapshot          KILLED      rn-js-jest
+hook-reset-on-rerender       KILLED      rn-js-jest
+hook-double-move             KILLED      rn-js-jest
+hook-js-rules                KILLED      rn-js-jest
+hook-unmount-native          KILLED      rn-js-jest
+42/44 killed
+
+# The two survivors after their fixes (mutate.tcl -only guessed-param-type,any-thread):
+guessed-param-type           KILLED      rn-refuse-param-type
+any-thread                   KILLED      rn-core-game
+2/2 killed
+
+# Result: 44/44 killed, each by a detector its !! line names.
