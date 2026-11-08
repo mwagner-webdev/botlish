@@ -463,6 +463,26 @@ proc seDeepFirstRequest {} {
     return "${text}0\n"
 }
 
+# A consumer of the erased-callable contract (a call through a join of
+# callables) and the site whose form decides a contribution to it only
+# through an argument's type: `inspect(eraser)`, outside every site, passes
+# the function `eraser` to inspect's `body`, whose contract (it is called)
+# the exact callable refines, so the instance of inspect is keyed by eraser's
+# own type -- its result type, `errs` (declaring Boom) while eraser's site
+# stands -- and passes that result to describe's untyped parameter. The
+# contribution goes when the site is rejected (TYPE): the consumer waits for
+# it, written first or second (CONSUMER-FIRST 1 or 0).
+proc seErasedKeyArgument {consumerFirst} {
+    set head "import std::compiler\n\nerror Boom\n\nfn want(x: int) -> int:\n    x\n\nfn describe(v):\n    0\n\nfn inspect(body) -> int:\n    v = body():\n        on std::compiler::CompilerError:\n            return -1\n    describe(v)\n\n"
+    set consumer "fn consumer() errors std::compiler::CompilerError:\n    static compile:\n        fn one(a):\n            1\n        fn two(a, b):\n            2\n        fn choose(c):\n            if c:\n                one\n            else:\n                two\n        choose(true)(5)\n\n"
+    set eraser "fn eraser() errors std::compiler::CompilerError:\n    static compile:\n        fn errs(c: any) -> bool errors Boom:\n            if c == 1:\n                fail Boom\n            true\n        w = want(\"eraser\")\n        errs\n\n"
+    set tail "r1 = consumer():\n    on std::compiler::CompilerError:\n        -1\nr2 = inspect(eraser)\n\[r1, r2\]\n"
+    if {$consumerFirst} {
+        return "$head$consumer$eraser$tail"
+    }
+    return "$head$eraser$consumer$tail"
+}
+
 # K sibling functions, each with a checker-rejected site, nested in one
 # enclosing site (the golden framework's registration function, written as
 # a static block), or (NESTED 0) in a plain function.
@@ -1263,6 +1283,13 @@ test se-equal-plan-unplanned {a dead call of a trait-polymorphic function (no in
     set hir [seHir $::sePlanUnplanned]
     list [seSame $::sePlanUnplanned 0] [seOutcomes $::sePlanUnplanned] [dict get $hir staticStats mispredicted]
 } -result {{} {TYPE TYPE TYPE accepted} {}}
+
+test se-equal-erased-key-argument {a contribution to the erased-callable contract that a site decides only through an argument a semantic instance is keyed by -- at a parameter whose contract the argument's own type refines (hir::staticdeps::KeyArguments) -- makes the site a contributor: the consumer waits for it and is judged once it is rejected, accepted whether it is written first or second, by the batched and the sequential schedulers alike (it was rejected written first, and written second the batched scheduler rejected it where the sequential accepted it; golden callables.bot hid this while the per-function budget declined its requests: SEMANTIC-INSTANCE-SCALABILITY-MILESTONE-1.md)} -body {
+    lmap first {1 0} {
+        set text [seErasedKeyArgument $first]
+        list [seSame $text 0] [seOutcomes $text]
+    }
+} -result {{{} {accepted TYPE}} {{} {TYPE accepted}}}
 
 test se-equal-deep-first-request {a request deeper than the nesting limit is deferred, never declined, so whether `late`'s deep request is the first for its instance changes nothing: it was a cache hit while `early` stood and is the first once `early` is rejected, and `late` is accepted either way (it was once declined there, failing TYPE, and the instance budget had a channel, C:budget, so that `late` waited for `early`) -- the batched decisions are the sequential ones, with no build contradicting a prediction} -body {
     set text [seDeepFirstRequest]

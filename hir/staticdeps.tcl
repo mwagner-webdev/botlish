@@ -2068,12 +2068,7 @@ proc hir::staticdeps::Successors {hir stateVar v} {
                         foreach s [SiteChain $state $tb] {
                             dict set succ F:$s erasure
                         }
-                        set erased {}
-                        foreach entry [hir::signatures::entryTypes $hir $tb] arg $args {
-                            if {$entry eq "" && $arg ne ""} {
-                                lappend erased $arg
-                            }
-                        }
+                        set erased [KeyArguments $hir $tb $args]
                     }
                     foreach arg $erased {
                         if {[FixedCarrier $hir $state $arg]} {
@@ -2090,6 +2085,30 @@ proc hir::staticdeps::Successors {hir stateVar v} {
     }
     dict unset succ $v
     return $succ
+}
+
+# The arguments in ARGUMENTS (a call's of BLOCK) a semantic instance's key may be
+# made of (hir::semantic::Call, "The key"): an argument at a parameter with
+# no declared or trusted contract, and one at a parameter with a contract
+# whose static type is not that contract -- the instance is entered with the
+# argument's own type where it refines the contract (an exact callable for a
+# callable contract, a Dog for an Animal), so what that argument's type may
+# become (an exact function's result type, which a site in its body decides)
+# changes which instance the call has, and what that instance requests in
+# turn. (Only the arguments at parameters with no contract used to count: a
+# request a site decides only through such an argument's type went unseen,
+# and a consumer of the erased-callable contract was judged before the
+# contributor -- SEMANTIC-INSTANCE-SCALABILITY-MILESTONE-1.md, "A dependency
+# the budget hid".)
+proc hir::staticdeps::KeyArguments {hir block arguments} {
+    set keyed {}
+    foreach entry [hir::signatures::entryTypes $hir $block] arg $arguments {
+        if {$arg eq ""} continue
+        if {$entry eq "" || [hir::types::ForgetInferred [hir::typeOf $hir $arg]] ne $entry} {
+            lappend keyed $arg
+        }
+    }
+    return $keyed
 }
 
 # The sites (present ones) whose body holds expression E: the innermost one

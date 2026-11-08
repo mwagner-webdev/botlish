@@ -577,6 +577,14 @@ proc hir::static::Waits {key status deps} {
                         if {$w in {C:erased}} {
 >>>>
 
+@@ key-arguments-uncontracted-only an instance's key is taken to be made of the arguments at parameters with no contract only: a site that decides a contribution to the erased-callable contract through an argument refining a parameter's contract (an exact callable for a callable contract) is no contributor, so its consumer is judged first, and written second batched and sequential disagree
+## hir/staticdeps.tcl
+<<<<
+        if {$entry eq "" || [hir::types::ForgetInferred [hir::typeOf $hir $arg]] ne $entry} {
+====
+        if {$entry eq ""} {
+>>>>
+
 # ---------------------------------------------------------------------------
 # Economic
 
