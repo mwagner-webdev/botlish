@@ -86,7 +86,7 @@ After the change (observed):
 ```
 
 (The 64-type compile here ran with the rollback audit on, which copies the
-program at every walk: section 3.4.)
+program at every walk: section 3.5.)
 
 ## 2. Root causes
 
@@ -206,7 +206,45 @@ pressure computation (`pressured`, `budgetOf`) and its waiting edges are
 removed; the remaining waiting channels are `C:erased` and `C:unwind`.
 Declined requests (now only `no-env`) still count as erasure contributors.
 
-### 3.4 The rollback audit
+### 3.4 A dependency the budget hid
+
+The first full test run after the change failed one suite: golden
+`callables.bot`, 6 of 140 tests, on every backend, each with
+UNHANDLED-ERROR ("this call through a callable value the completion
+analysis cannot identify ... may produce the declared error NotFound").
+Observed, then reduced to a 40-line program (`se-equal-erased-key-argument`):
+
+* the suite's `errs_*` blocks, which expect to be rejected, end in a
+  callable `errs` declaring `NotFound`. In the build where their bodies are
+  present, `std::test::rejects_containing`'s instance for such a body (its
+  `body` parameter has a trusted callable contract, which the exact callable
+  refines, so the instance is keyed by that callable and its result type)
+  passes the result to `std::test::describe`'s untyped parameter: a
+  contribution of `NotFound` to the erased-callable contract;
+* the waiting rule should hold every consumer of that contract back until
+  the `errs_*` blocks are rejected, as it did before; but the contribution's
+  chain of requests lies outside every static block, and the dependency
+  analysis followed, at each call of the chain, only the arguments at
+  parameters with no contract. The argument the key is made of here sits at
+  a contracted parameter, so the blocks were no contributors, and the six
+  consumers were judged, and rejected, first.
+
+Before the change the budget hid it: the suite calls `rejects_containing`
+far more than 16 times, the requests were declined, and the analysis
+counted each declined request as a contributor of unknown errors through
+its call's arguments. The gap itself is older than the change (observed on
+the base): in the reduced program, written consumer first, both schedulers
+rejected the consumer; written eraser first, the batched scheduler rejected
+it where the sequential order accepted it -- a disagreement no golden suite
+happened to contain.
+
+`hir::staticdeps::KeyArguments` now follows every argument whose static
+type is not its parameter's contract, as `hir::semantic::Call` keys the
+instance by it. Both layouts give the same outcome, under both schedulers
+(the consumer accepted, the eraser rejected); `callables.bot` passes 140 of
+140; the mutant `key-arguments-uncontracted-only` restores the old rule.
+
+### 3.5 The rollback audit
 
 `hir::semantic::auditRollback` (`BOTLISH_SEMANTIC_ROLLBACK_AUDIT=1`) keeps
 a reference to the HIR at every `Save` and compares the whole HIR with it
@@ -218,7 +256,7 @@ the change removes -- and is for tests and audits only. AUDIT-RESULTS
 ## 4. Invariants and what bounds the analysis
 
 * The HIR is authoritative and unmodified by an instance walk: every walk
-  restores it exactly (audited, section 3.4).
+  restores it exactly (audited, section 3.5).
 * Isolation: each walk starts from the request-time HIR, with its own
   parameter and capture environment; facts of one instance never reach
   another or the generic program (`si-region-isolated`,
