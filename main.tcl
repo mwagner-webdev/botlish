@@ -1302,7 +1302,7 @@ proc emitC {path dir} {
         puts "c: $file"
     }
     set services [lsort -unique [concat [dict get $out services] [dict get $out display]]]
-    puts "runtime services: [expr {$services eq "" ? "none" : [join $services {, }]}]"
+    puts "runtime services: [if {$services eq ""} {string cat none} else {join $services {, }}]"
     return 0
 }
 

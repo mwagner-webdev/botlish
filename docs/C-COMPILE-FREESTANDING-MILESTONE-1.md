@@ -35,7 +35,7 @@ Implemented:
   system calls for x86-64, AArch64, RISC-V 64, s390x, ARMv7 and i386), a
   static-arena provider of the Int services, two example programs and
   `demo.sh`, which reproduces the demonstrations.
-* `tests/c-compile.test` (38 tests): parity with interp, compile and
+* `tests/c-compile.test` (40 tests): parity with interp, compile and
   cranelift; the link boundary; the manifest; no-libc builds and runs;
   cross-architecture compilation and emulated execution; the diagnostics; the
   command line.
@@ -698,8 +698,15 @@ Reproduce [run]:
 
 [run] on this branch, Linux x86-64, Tcl 9.0.1:
 
-* `tests/c-compile.test`: 38 tests, 38 passed (gcc 13.3.0, clang 18.1.3,
+* `tests/c-compile.test`: 40 tests, 40 passed (gcc 13.3.0, clang 18.1.3,
   ld.lld 18.1.3, qemu-user 8.2.2, the cross libgcc 13 packages installed).
+* `tests/numeric-looking-names.test`: its source check
+  `nl-no-string-ternary` now reads `ccompile/` too. It found ten `expr`
+  ternaries that select a string in the backend and in main.tcl's `emitC`
+  (AGENTS.md, "Tcl's expr reads a numeric-looking result as a number"): a
+  function named `nan` stopped `-emit-c` with `ARITH DOMAIN`, one named
+  `inf` became `Inf` in C. They are `if` now; `cc-parity-numeric-names` and
+  `cc-numeric-looking-names` pin it.
 * `tests/main-cli.test`: 72 passed (the option table, the usage width and
   the cli.options topic cover `-emit-c` and the new `-out`).
 * `tests/compilerpedia.test`: 43 passed; `tools/compilerpedia.tcl check`: 0

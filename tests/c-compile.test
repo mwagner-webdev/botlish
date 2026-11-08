@@ -460,6 +460,35 @@ fn far(x: int, k: int) -> int:
 [far(3, -1)]
 }
 
+# Botlish names Tcl's expr reads as numbers (inf, nan, infinity: AGENTS.md,
+# "Tcl's expr reads a numeric-looking result as a number") as functions,
+# bindings, fields and enum cases: before the backend wrote if for every
+# such selection, a function named nan stopped -emit-c with ARITH DOMAIN.
+dict set ::ccCorpus numeric-names {
+enum Kind:
+    Inf,
+    Nan
+
+struct Box:
+    inf: int
+    nan: int
+
+fn nan(x: int) -> int:
+    x + 1
+
+fn inf(x: int) -> int:
+    nan(x) * 2
+
+fn infinity(k: Kind) -> Kind:
+    if k == Kind::Inf:
+        Kind::Nan
+    else:
+        Kind::Inf
+
+NaN = Box {inf: inf(3), nan: nan(4)}
+[NaN, NaN.inf, infinity(Kind::Inf), infinity(Kind::Nan)]
+}
+
 foreach name [dict keys $::ccCorpus] {
     test cc-parity-$name "the C backend agrees with every other backend on the $name corpus program" \
         -constraints hostCC -body {
@@ -550,6 +579,14 @@ test cc-pure-needs-nothing "a program whose Ints are proven to fit int64_t needs
         [string match *botlish_rt_v1* [dict get $out files pure.h]] \
         [regexp {"required_services": \[\]\n} [dict get $out files pure.runtime.json]]
 } -result {{} {} {pure.c pure.h pure.runtime.json pure_display.c} 0 1}
+
+test cc-numeric-looking-names "a function named inf, nan or infinity keeps its name in C (no expr reads it as a number)" -body {
+    set gen [ccGenerate [dict get $::ccCorpus numeric-names] nums]
+    set c [dict get [dict get $gen out] files nums.c]
+    lsort -unique [lmap name [regexp -all -inline {nums_[0-9]+_[A-Za-z]+} $c] {
+        regsub {^nums_[0-9]+_} $name ""
+    }]
+} -result {inf infinity nan}
 
 test cc-manifest-lists-the-services "the manifest names exactly the services the generated C calls, per translation unit" -body {
     set gen [ccGenerate [dict get $::ccCorpus recursion] rec]
