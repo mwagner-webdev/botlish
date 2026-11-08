@@ -137,6 +137,10 @@ outside `docs/` starts with `../`.
   from (or read hand-written IR text into HIR); they are not production entry
   points.
 
+The C backend (`ccompile/`, below) also compiles analyzed HIR, and is only as
+precise as the analyses: every enhancement of type inference is analyzed for
+what it gives the C target too ("The C backend", below).
+
 ## Compilation isolation
 
 A compilation registers its declarations in process-wide registries that the
@@ -472,6 +476,23 @@ proofs, as native lowering does, and runs no C compiler. Keep it so:
   exactly the service symbols the C calls, per translation unit.
 * Harnesses and providers stay outside the backend
   (`examples/c-freestanding/`), as integration code of a target's.
+* **Every enhancement of type inference is also analyzed for what it gives
+  the C target.** The backend adds no analysis of its own, so its
+  precision is the analyses': a new or sharper fact -- a type or a Range
+  (hir/types.tcl, hir/range.tcl, a join's, a fold intermediate's, an
+  operation's result), a semantic instance (hir/specialize.tcl), a
+  function's contract (hir/signatures.tcl), a List length, an enum known
+  statically -- can make an Int an `int64_t`, take a runtime service out of
+  a program's manifest, or make a C UNSUPPORTED construct compile. Such a
+  fact is an enhancement of the analyses, made for every backend, never a
+  rule of the backend's. Run `main.tcl -emit-c` over the corpus of
+  C-COMPILE-FREESTANDING-MILESTONE-1.md, section 14, before and after the
+  change, and record in the change's report what it changes for C: which
+  programs now compile, which values change representation, which services
+  leave a manifest, which C UNSUPPORTED it removes -- or that it changes
+  nothing for C. A fact the C target cannot use yet (the backend reads
+  something else) is recorded too, as the backend's next step.
+  `tests/c-compile.test` must still pass.
 
 If you change `ccompile/`, `examples/c-freestanding/` or what the backend
 reads (`hir::specialize`'s instances, `hir::range`'s results, the HIR node
