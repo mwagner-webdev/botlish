@@ -1,0 +1,223 @@
+# Mutants of FOLD-VIRTUAL-LIST-CONSTRUCTION-MILESTONE-1.md
+# (audit/fold-virtual-construction/tools/mutate.tcl): each a deliberate bug
+# in carrying a fold's intermediate as a construction plan -- the optimizer
+# off, an append skipped or committed before a break, a continue carrying
+# the wrong intermediate, an earlier version modified by a later append, an
+# escaped List not materialized, a wrong materialization at exhaustion, a
+# missed GC root, a plan shared between nested folds, elements out of order,
+# the initial List mishandled, the eligibility rule's checks dropped, a
+# declined fold failing the compilation, an affine release lost -- in
+# hir/construction.tcl, native/lower.tcl or (one) the native backend.
+#
+#   @@ NAME DESCRIPTION
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+#
+# A mutant may have several edits. Lines starting with # outside an edit
+# are comments. Update a mutant's text when the code it mutates changes,
+# keeping it a mutant of the same rule.
+
+@@ optimizer-disabled no fold is ever a plan fold: every append copies the prefix again (values unchanged; only structure and cost show it)
+## hir/construction.tcl
+<<<<
+                if {$continues && $next ne "" && [Source $trial $id $next] eq $family} {
+====
+                if {0 && $continues && $next ne "" && [Source $trial $id $next] eq $family} {
+>>>>
+
+@@ break-not-a-use a bare break targeting the fold is not counted as a reference: an append computed before the break is extended in place and the break hands the extended List out
+## hir/construction.tcl
+<<<<
+                if {[hir::kind $view $e] eq "break"
+                        && [dict getdef $loops [hir::get $view $e target] ""] eq "fold"} {
+====
+                if {0 && [hir::kind $view $e] eq "break"
+                        && [dict getdef $loops [hir::get $view $e target] ""] eq "fold"} {
+>>>>
+
+@@ continue-not-a-use a continue targeting the fold is not counted as a reference: the next iteration sees a plan an abandoned append already extended
+## hir/construction.tcl
+<<<<
+            if {[dict getdef $loops [hir::get $view $e target] ""] eq "fold"} {
+                return {-1 1}
+            }
+            return {-1 0}
+====
+            return {-1 0}
+>>>>
+
+@@ linearity-ignored every fold intermediate is taken for linear: an observed or twice-used earlier version is extended in place
+## hir/construction.tcl
+<<<<
+    lassign [SeqUses $view $b [dict create $fold fold] [hir::get $view $fold body]] n a
+    return [expr {[Max $n $a] <= 1}]
+====
+    return 1
+>>>>
+
+@@ captured-accepted a captured intermediate may be a plan: the closure would see later appends
+## hir/construction.tcl
+<<<<
+            } elseif {[dict exists $captured $b]} {
+                set why "captured by a nested block (fork/alias)"
+            } elseif {[hir::escape::virtualArity $escape $id $b] ne ""
+====
+            } elseif {[hir::escape::virtualArity $escape $id $b] ne ""
+>>>>
+
+@@ continues-dropped a fold whose every use needs a flat value still carries a plan (a plan built only to be materialized)
+## hir/construction.tcl
+<<<<
+                if {$continues && $next ne "" && [Source $trial $id $next] eq $family} {
+====
+                if {$next ne "" && [Source $trial $id $next] eq $family} {
+>>>>
+
+@@ next-value-check-dropped a fold whose next intermediate is no construction still carries a plan register
+## hir/construction.tcl
+<<<<
+                if {$continues && $next ne "" && [Source $trial $id $next] eq $family} {
+====
+                if {$continues && $next ne ""} {
+>>>>
+
+@@ declined-fails a fold the analysis declines fails the compilation instead of keeping the eager lowering
+## hir/construction.tcl
+<<<<
+            if {$why ne ""} {
+                dict set s foldWhy $id $e $why
+                continue
+            }
+            dict set foldCandidates $id $e [list $b $family]
+====
+            if {$why ne ""} {
+                error "fold intermediate not virtual: $why"
+            }
+            dict set foldCandidates $id $e [list $b $family]
+>>>>
+
+@@ next-value-materialized the body's trailing value is lowered flat: the next intermediate is materialized (copied) every iteration
+## native/lower.tcl
+<<<<
+    if {$mode eq "fold"} {
+        return [SequenceTo fn $body [FoldFamily $e]]
+    }
+    return [Sequence fn $body]
+====
+    return [Sequence fn $body]
+>>>>
+
+@@ escaped-not-materialized the fold's value is the plan register itself: neither exhaustion nor a break materializes it
+## native/lower.tcl
+<<<<
+    if {[IsPlanReg fn $accReg]} {
+        return [Assign fn "construct [FoldFamily $e] flat $accReg" $e]
+    }
+    return $accReg
+====
+    return $accReg
+>>>>
+
+@@ exhaustion-wrong-family exhaustion and break materialize a List plan as a String
+## native/lower.tcl
+<<<<
+        return [Assign fn "construct [FoldFamily $e] flat $accReg" $e]
+====
+        return [Assign fn "construct str flat $accReg" $e]
+>>>>
+
+@@ binding-read-flat the intermediate is bound as an ordinary register although it holds a plan
+## native/lower.tcl
+<<<<
+        if {[IsPlanReg fn $accReg]} {
+            dict set fn locals [dict get $node foldBinding] [list plan $accReg [FoldFamily $e]]
+        } else {
+====
+        if {0} {
+>>>>
+
+@@ append-skipped an ordinary completion of a plan fold's body is not committed: the next iteration starts from the old register
+## native/lower.tcl
+<<<<
+        fold {
+            Emit fn "$accReg = move $value" $e
+            JoinKeepAddr fn $accReg $value
+        }
+====
+        fold {
+            if {![IsPlanReg fn $accReg]} {
+                Emit fn "$accReg = move $value" $e
+            }
+            JoinKeepAddr fn $accReg $value
+        }
+>>>>
+
+@@ initial-dropped a plan fold starts from an empty List whatever its initial value
+## native/lower.tcl
+<<<<
+            set accReg [NewReg fn]
+            MarkPlan fn $accReg
+            Emit fn "$accReg = move $initial" $e
+            return [list fold $accReg]
+====
+            set accReg [NewReg fn]
+            MarkPlan fn $accReg
+            Emit fn "$accReg = move [Assign fn "op listnew" $e]" $e
+            return [list fold $accReg]
+>>>>
+
+@@ nested-register-shared nested plan folds share one plan register: the inner fold's initial value overwrites the outer fold's intermediate
+## native/lower.tcl
+<<<<
+            set accReg [NewReg fn]
+            MarkPlan fn $accReg
+            Emit fn "$accReg = move $initial" $e
+====
+            if {![dict exists $fn sharedFoldReg]} {
+                dict set fn sharedFoldReg [NewReg fn]
+            }
+            set accReg [dict get $fn sharedFoldReg]
+            MarkPlan fn $accReg
+            Emit fn "$accReg = move $initial" $e
+>>>>
+
+@@ element-order a construction's pieces are concatenated in the wrong order (the appended element before the List it extends)
+## native/lower.tcl
+<<<<
+    dict lappend fn calls [list native $name]
+    return [concat $pa $pb]
+====
+    dict lappend fn calls [list native $name]
+    return [concat $pb $pa]
+>>>>
+
+@@ release-dropped SequenceTo drops the affine releases after its statements again (a coroutine that dies mid-body of a plan fold is never released)
+## native/lower.tcl
+<<<<
+        set r [Expr fn $e]
+        if {$r eq "never"} {
+            return never
+        }
+        ReleaseHandles fn [hir::affine::releasesAfter $hir $e] $e $r
+    }
+    set last [lindex $exprs end]
+====
+        set r [Expr fn $e]
+        if {$r eq "never"} {
+            return never
+        }
+    }
+    set last [lindex $exprs end]
+>>>>
+
+@@ construct-pieces-not-live the collector's liveness forgets a construction's pieces: the plan a fold carries across the back edge is no root at the allocating construct
+## native/src/codegen/roots.rs
+<<<<
+        Inst::Construct { dst, pieces, .. } => (vec![*dst], pieces.iter().flat_map(|p| p.regs()).collect()),
+====
+        Inst::Construct { dst, .. } => (vec![*dst], vec![]),
+>>>>

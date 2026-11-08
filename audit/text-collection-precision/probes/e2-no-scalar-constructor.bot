@@ -1,0 +1,8 @@
+# probe: std::char has no Int -> UnicodeChar conversion; its members are
+# scalar_value and the two classifiers (E).
+# outcome: reject
+# diagnostic: 7:5 namespace "std::char" has no definition "from_scalar_value"
+import std::char
+
+c = std::char::from_scalar_value(27)
+c

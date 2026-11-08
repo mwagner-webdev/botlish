@@ -1,0 +1,10 @@
+seed 1: programs 100 plan 33 flat 67 unreached 0 disagreements 0 mispredictions 0
+seed 2: programs 100 plan 32 flat 67 unreached 1 disagreements 0 mispredictions 0
+seed 3: programs 100 plan 38 flat 61 unreached 1 disagreements 0 mispredictions 0
+seed 4: programs 100 plan 39 flat 61 unreached 0 disagreements 0 mispredictions 0
+seed 5: programs 100 plan 37 flat 63 unreached 0 disagreements 0 mispredictions 0
+seed 6: programs 100 plan 38 flat 62 unreached 0 disagreements 0 mispredictions 0
+seed 7: programs 100 plan 35 flat 65 unreached 0 disagreements 0 mispredictions 0
+seed 17: programs 100 plan 30 flat 70 unreached 0 disagreements 0 mispredictions 0
+seed 41: programs 100 plan 44 flat 56 unreached 0 disagreements 0 mispredictions 0
+gc seed 8: programs 60 plan 19 flat 41 unreached 0 disagreements 0 mispredictions 0

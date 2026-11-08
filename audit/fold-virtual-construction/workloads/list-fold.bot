@@ -1,0 +1,28 @@
+# list-fold.bot -- FOLD-VIRTUAL-LIST-CONSTRUCTION-MILESTONE-1.md's direct
+# List fold: every iteration appends one element to the List the fold
+# carries. Before the milestone each append copied the whole prefix (N^2/2
+# elements copied for N iterations); with it the intermediate is a
+# construction plan extended in place and materialized once.
+#
+# Siblings: list-recursive.bot (the same List carried by a self tail call,
+# M8A-VIRTUAL-IMMUTABLE-CONSTRUCTION.md's plan parameter) and
+# list-vector.bot (a MutableVector pushed in place, turned into a List at the
+# end). tools/measure.tcl rewrites `n = ...` to measure other sizes.
+#
+# expect: [1024, 1572352]
+
+import std::list
+
+fn build(xs: List[int]) -> List[int]:
+    fold x in xs with intermediate acc []:
+        acc.append(x * 3 + 1)
+
+fn sum(ys: List[int]) -> int:
+    fold y in ys with intermediate s 0:
+        s + y
+
+n = 1024
+xs = loop i from 0 to n:
+    i
+ys = build(xs)
+[ys.length(), sum(ys)]

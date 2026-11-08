@@ -79,7 +79,9 @@ class FakeApi:
 
     def green(self, commit, gc="success", own=()):
         """Every CORE workflow green at commit (GC-stress jobs `gc`)."""
-        self.run("tests.yml", commit, jobs=[("tests (interp)", "success"), ("tests (native GC-stress)", gc)])
+        self.run("tests.yml", commit, jobs=[("tests (interp)", "success"),
+                                            ("tests (native GC-stress, interp)", gc),
+                                            ("tests (native GC-stress, compile)", gc)])
         self.run("tests-arm64.yml", commit, jobs=[("arm64 tests (interp)", "success"),
                                                   ("arm64 tests (native GC-stress, interp)", gc),
                                                   ("arm64 tests (native GC-stress, compile)", gc)])
@@ -216,7 +218,7 @@ class Check(unittest.TestCase):
         self.assertEqual(state["tests.yml"], "failed")
         self.assertEqual(state["tests-arm64.yml"], "failed")
         # a push run with GC stress makes it green, whichever run is newer
-        api.run("tests.yml", "b", jobs=[("tests (native GC-stress)", "success")])
+        api.run("tests.yml", "b", jobs=[("tests (native GC-stress, interp)", "success")])
         api.run("tests-arm64.yml", "b", jobs=[("arm64 tests (native GC-stress, interp)", "success")])
         self.assertTrue(runs.check(api, sha("b"), SE).green)
 

@@ -1,0 +1,16 @@
+# probe: an argument's TYPE diagnostic names the argument's type; a declared
+# result's names only the declared type, not the type inferred (J).
+# outcome: reject
+# diagnostic: 16:6 argument for parameter "xs" cannot be proven to satisfy List[int] (argument type: List[int[std::byte::Byte]])
+# diagnostic: 13:8 function result does not prove declared type List[int]
+import std::str
+import std::list
+import std::byte
+
+fn take(xs: List[int]) -> int:
+    std::list::length(xs)
+
+fn give(s: str) -> List[int]:
+    s.encode_utf8()
+
+take("a".encode_utf8())

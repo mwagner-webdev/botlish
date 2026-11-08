@@ -117,7 +117,7 @@ A commit's tests are **green** for a release when all of these hold:
 | requirement | why |
 |---|---|
 | the commit is main's head or an ancestor of it | only reviewed code is released |
-| `tests.yml`: a successful run whose GC-stress job (`tests (native GC-stress)`) succeeded | GC stress runs only on pushes: a manual run skips it, and a skipped job is no success |
+| `tests.yml`: a successful run whose GC-stress jobs (`tests (native GC-stress, interp/compile)`) succeeded | GC stress runs only on pushes: a manual run skips it, and a skipped job is no success |
 | `tests-arm64.yml`: a successful run whose GC-stress jobs (`arm64 tests (native GC-stress, interp/compile)`) succeeded | the same, on Linux AArch64 |
 | `macos-arm64.yml`: a successful run | macOS |
 | `windows-x86_64.yml`: a successful run | Windows |

@@ -1,0 +1,20 @@
+# probe: the checker's own type of a loop variable, printed by a TYPE
+# diagnostic, equals the indexed element's (C).
+# outcome: reject
+# diagnostic: 15:15 argument for parameter "t" cannot be proven to satisfy str (argument type: int[std::byte::Byte])
+# diagnostic: 18:11 argument for parameter "t" cannot be proven to satisfy str (argument type: int[std::byte::Byte])
+import std::str
+import std::list
+import std::byte
+
+fn probe(t: str) -> int:
+    1
+
+fn via_loop(s: str):
+    loop b in s.encode_utf8():
+        probe(b)
+
+fn via_at(s: str) -> int errors IndexNotFound:
+    probe(s.encode_utf8().at(0))
+
+via_loop("a")
