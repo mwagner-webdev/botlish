@@ -7,7 +7,9 @@ library or language behavior changed. The material is
 generator and a text-construction benchmark).
 
 Measured on main at f2787af0 (2026-11-07), Linux x86-64, Tcl 9.0.1, the
-native backend built in release mode.
+native backend built in release mode. Re-checked on the merge with main at
+2ca98b5c (the native backend rebuilt): the eighteen probes pass, the type
+matrix is identical, and the source locations cited are that tree's.
 
 **The motivating report.** The five observations come from the TUI
 clean-room package experiment (TUI-CLEANROOM-PACKAGE-MILESTONE-1.md). That
@@ -56,7 +58,7 @@ no conversion from an Int to a UnicodeChar"; UNICODE-CHAR-LITERALS.md,
 result type `list` and `-result-shape {typed std::byte::Byte 0 255}`
 (`core/strings.tcl:126`); the shape narrows the result to `List[Byte]` only
 when `std::byte::Byte` is registered in the compilation and proves 0..255
-(`hir/types.tcl:4150`, the `typed` case of `ShapeResult`), "never a false
+(`hir/types.tcl:4175`, the `typed` case of `ShapeResult`), "never a false
 claim". `std::abi::bytes::from_list(values: List[Byte]) -> Bytes`
 (`stdlib/abi/bytes.bot:112`) and `std::abi::bytes::decode_utf8(data: Bytes)
 -> str errors InvalidUtf8` (strict, `stdlib/abi/bytes.bot:138`) are the way
@@ -71,7 +73,7 @@ admits an argument by type or by range facts (STRICT-TYPED-PARAMETERS.md):
 int) -> Byte errors BelowRange, AboveRange` is the explicit conversion; a
 call whose argument is proven in range has no error obligation.
 
-**Literals (language, `surface/lexer.tcl:548` and `:612`).** String escapes
+**Literals (language, `surface/lexer.tcl:564` and `:628`).** String escapes
 `\\ \" \n \r \t`; character escapes `\\ \' \n \r \t`; anything else is
 `invalid escape "\X" in string` (or `in character literal`), a SURFACE
 SYNTAX error. A character literal must decode to exactly one scalar, not a
@@ -189,17 +191,17 @@ checks):
 This is the observed contrast exactly. The first point where the
 information is missing is HIR's binding table:
 
-* A `bind` records its value's type on its binding (`hir/types.tcl:5175`,
+* A `bind` records its value's type on its binding (`hir/types.tcl:5200`,
   `dict set hir bindings $b type ...`), and so does a fold's intermediate
   ("The intermediate's one type, for the analyses that read a binding's
-  (hir::bindingType)", `hir/types.tcl:4713`).
+  (hir::bindingType)", `hir/types.tcl:4738`).
 * A `listloop` types its element binding only as a flow fact of the walk
-  (`hir/types.tcl:4391`, `dict set ctx facts [dict get $node
+  (`hir/types.tcl:4416`, `dict set ctx facts [dict get $node
   elementBinding] $elemType`), which every `ref` reads, and never records it
-  on the binding. A `countloop`'s counter likewise (`:4455`, always `int`),
+  on the binding. A `countloop`'s counter likewise (`:4480`, always `int`),
   and a `lockloop`'s clauses.
-* `hir::bindingType` (`hir/hir.tcl:1184`) returns `any` for a binding with no
-  recorded type. The service's `BindingType` (`service/service.tcl:1347`)
+* `hir::bindingType` (`hir/hir.tcl:1185`) returns `any` for a binding with no
+  recorded type. The service's `BindingType` (`service/service.tcl:1628`)
   takes its parameter branch only for a function's parameters (the loop
   binding's scope owner is the `listloop` node, not a block) and falls
   through to `hir::bindingType`.
@@ -236,7 +238,7 @@ indexed element and the loop variable `any` in the checker itself:
 and `bs: list` on hover. This is the documented fallback of the `typed`
 result shape: "if the compiling program never declared NAME (e.g. it never
 loaded the library module that does), this falls back to the native's own
-plain declared -result-type, never a false claim" (`hir/types.tcl:4157`).
+plain declared -result-type, never a false claim" (`hir/types.tcl:4185`).
 It is sound, but it is a non-local effect: probes `c4` and `c5` are one
 program, a 256-entry table indexed by each byte of a String, that differ only
 in an `import std::byte` nothing names. Without it the index is not proven
@@ -478,7 +480,7 @@ Probe `f1-escapes.bot`:
 ```
 
 * Strings take `\\ \" \n \r \t`; characters `\\ \' \n \r \t`
-  (`surface/lexer.tcl:570`, `:636`). UNICODE-CHAR-LITERALS.md, "Escape
+  (`surface/lexer.tcl:586`, `:652`). UNICODE-CHAR-LITERALS.md, "Escape
   behavior", records the choice: "No new escape syntax was invented".
 * Every other escape is a syntax error, so **no valid program contains one**:
   extending the vocabulary cannot change the meaning of an existing program.
@@ -662,8 +664,8 @@ asymmetries are elsewhere:
 
 | asymmetry | first mechanism | precision loss or check? |
 |---|---|---|
-| loop clause binding recorded `any` (hover, `hir::bindingType`) | `hir/types.tcl:4391` records a flow fact, not a binding type | precision loss (presentation, conservative readers) |
-| `encode_utf8` element `any` without `std::byte` loaded | `ShapeResult`'s `typed` case, `hir/types.tcl:4183` | precision loss (documented fallback) |
+| loop clause binding recorded `any` (hover, `hir::bindingType`) | `hir/types.tcl:4416` records a flow fact, not a binding type | precision loss (presentation, conservative readers) |
+| `encode_utf8` element `any` without `std::byte` loaded | `ShapeResult`'s `typed` case, `hir/types.tcl:4208` | precision loss (documented fallback) |
 | `List[Byte]` refused for `List[int]`, though their lub is `List[int]` | `AggregateAdmits` (`hir/range.tcl:1739`) vs `hir::types::subtype` | intentional compatibility check |
 | `27` admitted as a Byte, `[27]` not as a `List[Byte]` | bottom-up literal typing plus `AggregateAdmits` | intentional (documented) |
 | a fold with a numeric literal initial value joins to `int` (`fold b in bs with intermediate acc 0: b` is `int`) | the literal `0` is an `int`; join | not a loss: `0`'s type is `int` |
@@ -957,9 +959,11 @@ work it unblocks. None combines a language change with another.
 * **Rule.** `\u{H...}`, one to six hex digits naming a scalar value, in
   String and character literals, with M5's validity rule; no `\x`, `\e`,
   `\0`.
-* **Components.** `surface/lexer.tcl`'s `String` and `Char`,
-  ONE-CHAR-STRING-LITERAL's examples, Compilerpedia's `concept.strings`,
-  UNICODE-CHAR-LITERALS.md's escape section.
+* **Components.** `surface/lexer.tcl`'s `String` and `Char`, the token IR
+  (`surface/tokens.tcl`) and the generated editor grammars, whose escape
+  pattern is `\\[\\"nrt]` (`tools/editor-grammars.tcl`, TextMate and Vim;
+  regenerate them), ONE-CHAR-STRING-LITERAL's examples, Compilerpedia's
+  `concept.strings`, UNICODE-CHAR-LITERALS.md's escape section.
 * **Compatibility.** Additive: every `\u` is a syntax error today.
 * **Tests.** Lexer tests for each diagnostic, the literal's value on four
   backends, HIR text and interchange round trips, the front-end cache,
