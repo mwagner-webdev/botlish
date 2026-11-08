@@ -213,7 +213,7 @@ at its top ("Superseded by ...", "Partially superseded by ...").
 - [LARGE-SCALE-GOLDEN-MIGRATION.md](LARGE-SCALE-GOLDEN-MIGRATION.md) -- porting the Tcl tests to golden suites
 - [GOLDEN-VS-TCL-BENCHMARK.md](GOLDEN-VS-TCL-BENCHMARK.md) -- golden suites against their Tcl originals
 - [TEST-SUITE-COST.md](TEST-SUITE-COST.md) -- where local test runs spend their time
-- [CI-RUNS.md](CI-RUNS.md) -- GitHub Actions housekeeping: a newer push cancels a running test workflow on the same ref, main included (main's merges come in bursts); `prune-runs.yml` cancels the runs of branches already in main; the release gate publishes `single-latest`, `icy-tower-windows-latest` and the macOS tag releases only once every test of the commit is green, GC stress included, by release runs a superseding push does not cancel (`tools/ci/runs.py`, its tests and dry runs)
+- [CI-RUNS.md](CI-RUNS.md) -- GitHub Actions housekeeping: a newer push cancels a running test workflow on the same ref, main included (main's merges come in bursts); `prune-runs.yml` cancels the runs of branches already in main; the release gate publishes `single-latest`, `icy-tower-windows-latest` and the macOS tag releases only once every test of the commit is green, GC stress included, by release runs a superseding push does not cancel; every test workflow runs its canary first, and a branch push only the canary, on every host; a branch push at a commit another run already tests defers to it (`tools/ci/runs.py`, `.github/actions/twin`, their tests and dry runs)
 
 ### Compiler warnings
 

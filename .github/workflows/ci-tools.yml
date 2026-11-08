@@ -1,10 +1,11 @@
 name: ci tools
 
 # The tests of the CI housekeeping (CI-RUNS.md): tools/ci/test_runs.py (the
-# release check, the gate and the pruning against a fake of the GitHub API,
-# and the workflows' side of the rules), then the gate and the pruning run
-# for real against this repository's runs, read-only (--dry-run: they
-# report what they would dispatch or cancel). A push that changes them runs
+# release check, the gate, the pruning and the deferral against a fake of
+# the GitHub API, and the workflows' side of the rules), then the gate, the
+# pruning and the deferral run for real against this repository's runs,
+# read-only (--dry-run: they report what they would dispatch, cancel or
+# defer to). A push that changes them runs
 # it, on any branch, so a branch gets their evidence before release-gate.yml
 # and prune-runs.yml run from main -- which is the only place workflow_run
 # and schedule triggers do. Last, tools/ci/history.py recomputes the
@@ -62,6 +63,19 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 -I tools/ci/runs.py prune --dry-run
+
+      # What a branch push at main's head would defer to, per test workflow
+      # (CI-RUNS.md, "A commit already tested"): the lookup against the real
+      # runs. Main's head may be a commit no workflow ran (scalar-asm-audit's).
+      - name: Deferral, read-only
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for w in tests.yml tests-arm64.yml macos-arm64.yml windows-x86_64.yml; do
+            python3 -I tools/ci/runs.py twin --dry-run --workflow "$w" --sha main \
+              --ref refs/heads/ci-tools-dry-run --event push --run-id 0
+          done
 
       - name: The canary's records, recomputed
         if: github.event_name != 'pull_request'
