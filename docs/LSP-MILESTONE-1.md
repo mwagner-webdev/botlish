@@ -244,6 +244,8 @@ Completion, signature help, rename, code actions, formatting, semantic
 tokens, inlay hints, document and workspace symbols, workspace-wide
 references, incremental (range) synchronization, pull diagnostics,
 `workspace/didChangeWatchedFiles`, progress reporting. None is advertised.
+(Semantic tokens were added later: `textDocument/semanticTokens/full` and
+`workspace/semanticTokens/refresh`, SYNTAX-HIGHLIGHTING-MILESTONE-1.md.)
 
 ## 4. Documents and revisions
 

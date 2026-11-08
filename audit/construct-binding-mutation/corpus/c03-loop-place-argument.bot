@@ -1,0 +1,22 @@
+# category: loop-element (List), given to a place parameter
+# class: C -- silently discarded write
+# intended: append 5 to every row through the `place` helper (lengths [2, 2])
+# actual: the helper updates its caller's place, which is the loop variable:
+#         its copy changes, `rows` does not. The loop collects the copies'
+#         lengths ([2, 2]) while `rows` keeps [1, 1]
+# expect: [[2, 2], [1, 1]]
+import std::mutable_vector
+
+fn append(place v: MutableVector[int], x: int) -> unit:
+    v.push(x)
+
+fn run() -> List[List[int]]:
+    rows = [std::mutable_vector::from_list([1]), std::mutable_vector::from_list([2])]
+    seen = loop row in rows:
+        append(row, 5)
+        row.length()
+    after = loop row in rows:
+        row.length()
+    [seen, after]
+
+run()

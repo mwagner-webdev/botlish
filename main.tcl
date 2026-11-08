@@ -36,6 +36,11 @@
 #   -emit-native-executable / -emit-hir-interchange    build, do not run
 #   -aot-run ?-aot-keep?   build the one input as a standalone executable and
 #                          run it as a command (-- ARG... its arguments)
+#   -emit-c ?-out DIR?     write each input as freestanding C11
+#                          (C-COMPILE-FREESTANDING-MILESTONE-1.md): FILE.c,
+#                          FILE.h, FILE_display.c, FILE.runtime.json and,
+#                          when it calls runtime services, botlish_rt_v1.h,
+#                          beside the input or in DIR; build, do not run
 #   -native-startup POLICY the executable's startup policy: worker (default)
 #                          or main-thread (macOS AArch64)
 #   -emit-native-library NAME ?-export FUNCTION...? ?-out DIR?    build the
@@ -46,6 +51,10 @@
 #                          functions -export names
 #   -check                 analyze each .bot input, report its diagnostics,
 #                          run and build nothing (the compiler service)
+#   -color WHEN / -excerpts WHEN    auto (a terminal), always or never: color
+#                          the printed diagnostics / show the source lines
+#                          each names, underlined (SYNTAX-HIGHLIGHTING-
+#                          MILESTONE-1.md); a pipe gets the plain format
 #   -lsp ?-lsp-scheduler worker|sync?    the language server, on stdin and
 #                          stdout (no input file); -lsp-worker is its
 #                          analysis worker, started by -lsp itself
@@ -151,6 +160,17 @@
 # same under both. It is an option of -emit-native-executable only (no
 # other invocation makes an executable); given twice, it must name the same
 # policy.
+# -emit-c writes each .bot, .hir or .hirx input as freestanding C11 (the C
+# backend, ccompile/ccompile.tcl; C-COMPILE-FREESTANDING-MILESTONE-1.md),
+# beside the input or in -out DIR, without evaluating it and without running
+# a C compiler: FILE.h (the program's types and its entry point FILE_run),
+# FILE.c (the program), FILE_display.c (optional: the value as text),
+# FILE.runtime.json (the runtime services the generated C calls, which a
+# provider must supply for it to link) and, when it calls any,
+# botlish_rt_v1.h (the runtime-service interface). FILE is the input's name
+# as a C identifier, which prefixes every public C name. A construct the
+# backend does not translate yet is the error C UNSUPPORTED; a missing
+# runtime service is never a compilation error, only a link error.
 # -emit-hir-interchange writes each .bot or .hir input's analyzed HIR in the
 # HIR interchange format (HIR-INTERCHANGE.md) beside it, as FILE.hirx, without
 # evaluating it; a .hirx input is run like any other, on any backend, with no
@@ -292,8 +312,11 @@ set cliOptions {
     -emit-hir-interchange {} build {write each input's analyzed HIR as FILE.hirx}
     -emit-native-library NAME build {build native library NAME from the one input}
     -export FUNCTION build {export a top-level function (default: exported c fns)}
-    -out DIR build {the library's directory (default: the input's)}
+    -out DIR build {where -emit-native-library and -emit-c write}
+    -emit-c {} build {write each input as freestanding C (FILE.c, FILE.h, ...)}
     -check {} check {report each .bot input's diagnostics; run nothing}
+    -color WHEN output {color diagnostics: auto (a terminal), always, never}
+    -excerpts WHEN output {show the lines a diagnostic names: auto, always, never}
     -lsp {} lsp {run the language server on stdin and stdout}
     -lsp-scheduler NAME lsp {where -lsp analyzes: worker (default) or sync}
     -lsp-worker {} lsp {(internal) the language server's analysis worker}
@@ -352,11 +375,12 @@ proc usage {} {
         "FILE.hirx (HIR interchange) or FILE.ir (core IR text; interp and compile only)." \
         "Each program's output is printed, then its value." \
         "run runs one program as a command: natively, with the ARGs as its arguments," \
-        "its output only, exit status 0 or 1 (-backend, -warnings, -target, -L, -F)." \
+        "its output only, exit status 0 or 1 (-backend, -warnings, -target, -L, -F," \
+        "-color, -excerpts)." \
         "-aot-run builds one program as a native executable and runs it as a command:" \
         "the ARGs after -- as its arguments, its output and exit status its own." "" \
         "Before writing a program, read: $me -help primer" ""]
-    foreach {group heading} {run Running argv {Program arguments} build Building check {Checking (with -warnings, -target)} lsp {Language server (with -warnings, -target; no FILE)} inspect {Inspecting (printed before the program runs)} help Reference} {
+    foreach {group heading} {run Running argv {Program arguments} build Building check {Checking (with -warnings, -target)} output {Diagnostics (on a terminal by default; never in a pipe)} lsp {Language server (with -warnings, -target; no FILE)} inspect {Inspecting (printed before the program runs)} help Reference} {
         lappend lines "$heading:"
         foreach {name argument optionGroup description} $cliOptions {
             if {$optionGroup ne $group} continue
@@ -547,8 +571,8 @@ switch -- [dict get $commandLine action] {
         # never ignored.
         foreach option [dict get $commandLine options] {
             set arg [lindex $option 0]
-            if {$arg ni {-backend -warnings -target -L -F}} {
-                usageError "run cannot be combined with $arg: it runs one program as a command, its standard output and error the program's own (it takes -backend, -warnings, -target, -L and -F; the program's arguments follow its file)"
+            if {$arg ni {-backend -warnings -target -L -F -color -excerpts}} {
+                usageError "run cannot be combined with $arg: it runs one program as a command, its standard output and error the program's own (it takes -backend, -warnings, -target, -L, -F, -color and -excerpts; the program's arguments follow its file)"
             }
         }
     }
@@ -609,19 +633,124 @@ if {[dict get $commandLine action] eq "version"} {
 # tclsh's default 1000, which ends an interpreted recursion ~140 calls deep.
 core::useProgramRecursionLimit
 
+# ---------------------------------------------------------------------------
+# Diagnostic presentation (SYNTAX-HIGHLIGHTING-MILESTONE-1.md, "Excerpts and
+# color")
+#
+# -color and -excerpts (auto, always or never) decide, for each output
+# channel, whether a printed diagnostic is colored (ANSI SGR sequences) and
+# whether the source lines it names follow it: underlined at its span and
+# highlighted with the token IR's classes (surface::tokens::classes, the one
+# classification every highlighter reads). `auto` is on only for a terminal
+# -- a channel Tcl gives a serial line's -mode, which no pipe or file has --
+# and, for color, only without NO_COLOR or TERM=dumb. Windows' console is
+# never taken for a terminal (its legacy host shows the sequences unless
+# virtual-terminal processing is on, which Tcl cannot switch on): -color
+# always there in a terminal that reads them. So output to a pipe or a file
+# -- every test's -- is the plain format, byte for byte. Presentation only:
+# no diagnostic, code, message or order changes.
+
+set presentationModes {-color auto -excerpts auto}
+# CHANNEL -> {color 0|1 excerpts 0|1}, decided once per channel.
+set presentation [dict create]
+# PATH -> {text TEXT classes CLASSES}: the sources excerpts quote, read once.
+set excerptSources [dict create]
+# The revision -check is printing (its sources are the texts it analyzed).
+set excerptRevision ""
+
+# How CHANNEL presents diagnostics: {color 0|1 excerpts 0|1}.
+proc presentationOf {channel} {
+    global presentation presentationModes env
+    if {![dict exists $presentation $channel]} {
+        set terminal [expr {$::tcl_platform(platform) ne "windows"
+            && ![catch {chan configure $channel -mode}]}]
+        set color [dict get $presentationModes -color]
+        if {$color eq "auto"} {
+            set color [expr {$terminal && [dict getdef [array get env NO_COLOR] NO_COLOR ""] eq ""
+                && [dict getdef [array get env TERM] TERM ""] ne "dumb"}]
+        } else {
+            set color [expr {$color eq "always"}]
+        }
+        set excerpts [dict get $presentationModes -excerpts]
+        if {$excerpts eq "auto"} {
+            set excerpts $terminal
+        } else {
+            set excerpts [expr {$excerpts eq "always"}]
+        }
+        dict set presentation $channel [dict create color $color excerpts $excerpts]
+    }
+    return [dict get $presentation $channel]
+}
+
+# The SGR sequences of each role a presentation colors, and of each highlight
+# class (surface::tokens::classNames; an identifier and an operator keep the
+# terminal's own color).
+set presentationStyles {
+    error {1;31} warning {1;33} note {1;36} help {1;32} location 1 code 2
+    gutter 34 marker-error {1;31} marker-warning {1;33}
+    keyword 35 word 35 constant 36 number 36 string 32 char 32 comment 90
+}
+
+# TEXT in the style of ROLE when COLOR is on.
+proc styled {color role text} {
+    global presentationStyles
+    if {!$color || $text eq "" || ![dict exists $presentationStyles $role]} {
+        return $text
+    }
+    return "\x1b\[[dict get $presentationStyles $role]m$text\x1b\[0m"
+}
+
+# PREFIX (the indentation and label a diagnostic line starts with: "   error: ",
+# "PATH: ") with its label styled.
+proc styledPrefix {color prefix} {
+    if {[regexp {^( *)(error|warning|note|help)(: )$} $prefix -> indent label colon]} {
+        return "$indent[styled $color $label "$label:"] "
+    }
+    return $prefix
+}
+
+# One printed diagnostic on CHANNEL: "PREFIXMESSAGE (CODE)", MESSAGE's
+# location (the text before SUMMARY, when MESSAGE is "LOCATION: SUMMARY")
+# and CODE styled when color is on, then the excerpt of LOCATION (a span
+# dict, or "") when excerpts are, its marker in SEVERITY's style.
+proc printDiagnostic {channel prefix message code summary location {severity error}} {
+    set how [presentationOf $channel]
+    set color [dict get $how color]
+    if {!$color} {
+        puts $channel "$prefix$message ($code)"
+    } else {
+        set head ""
+        set body $message
+        if {$summary ne "" && $summary ne $message
+                && [string range $message end-[expr {[string length $summary] - 1}] end] eq $summary} {
+            set head [string range $message 0 end-[string length $summary]]
+            set body $summary
+        }
+        puts $channel "[styledPrefix 1 $prefix][styled 1 location $head]$body [styled 1 code "($code)"]"
+    }
+    if {[dict get $how excerpts] && $location ne ""} {
+        regsub {[^ ].*$} $prefix "" indent
+        foreach line [excerpt $location $color $severity] {
+            puts $channel "$indent$line"
+        }
+    }
+}
+
 # Prints the error MESSAGE (OPTIONS: its return options) to CHANNEL as
 # "PREFIXMESSAGE (ERRORCODE)" -- one such line per diagnostic when a rejected
-# compilation reports several (core::raiseDiagnostics, DIAGNOSTIC-RECOVERY.md).
+# compilation reports several (core::raiseDiagnostics, DIAGNOSTIC-RECOVERY.md),
+# each followed by its excerpt where it is presented with one (above).
 proc printError {channel prefix message options} {
     if {[dict exists $options -diagnostics]} {
         foreach diagnostic [dict get $options -diagnostics] {
-            puts $channel "$prefix[dict get $diagnostic message] ([core::ShownCode $diagnostic])"
+            printDiagnostic $channel $prefix [dict get $diagnostic message] [core::ShownCode $diagnostic] \
+                [dict getdef $diagnostic summary ""] [dict getdef $diagnostic location ""]
             printNotes $channel $prefix [lmap n [dict getdef $diagnostic notes {}] {dict get $n message}]
             helpHint $channel $prefix [core::ShownCode $diagnostic] [dict get $diagnostic message]
         }
         return
     }
-    puts $channel "$prefix$message ([dict get $options -errorcode])"
+    printDiagnostic $channel $prefix $message [dict get $options -errorcode] "" ""
     helpHint $channel $prefix [dict get $options -errorcode] $message
 }
 
@@ -630,9 +759,166 @@ proc printError {channel prefix message options} {
 # word replaced, its indentation kept.
 proc printNotes {channel prefix texts} {
     regsub {[^ ].*$} $prefix "" indent
+    set color [dict get [presentationOf $channel] color]
     foreach text $texts {
-        puts $channel "${indent}note: $text"
+        puts $channel "[styledPrefix $color "${indent}note: "]$text"
     }
+}
+
+# The source of PATH an excerpt quotes, {text TEXT classes CLASSES} ("" when
+# it cannot be read): the text the analysis read (-check's revision), else
+# the file through the front end's source seam, normalized as every
+# compilation reads it (surface/source.tcl); its classes are its token IR's
+# (surface::syntaxTokens), computed only when color is on.
+proc excerptSource {path color} {
+    global excerptSources excerptRevision
+    if {![dict exists $excerptSources $path]} {
+        set text ""
+        if {$excerptRevision eq "" || [catch {service::sourceText $excerptRevision $path} text]} {
+            if {[catch {surface::source::text $path} text]} {
+                set text ""
+            }
+        }
+        dict set excerptSources $path [dict create text $text]
+    }
+    set source [dict get $excerptSources $path]
+    if {$color && ![dict exists $source classes] && [dict get $source text] ne ""} {
+        dict set source classes [surface::tokens::classes \
+            [surface::syntaxTokens [dict get $source text] $path]]
+        dict set excerptSources $path $source
+    }
+    return $source
+}
+
+# How many terminal columns character C takes: 0 for a combining mark or a
+# zero-width character, 2 for an East Asian wide or fullwidth one and an
+# emoji, 1 otherwise (an approximation of wcwidth: no table of Unicode's
+# widths ships with Tcl).
+proc displayWidth {c} {
+    set u [scan $c %c]
+    if {($u >= 0x300 && $u <= 0x36F) || ($u >= 0x1AB0 && $u <= 0x1AFF) || ($u >= 0x1DC0 && $u <= 0x1DFF)
+            || ($u >= 0x20D0 && $u <= 0x20FF) || ($u >= 0xFE00 && $u <= 0xFE0F) || ($u >= 0xFE20 && $u <= 0xFE2F)
+            || ($u >= 0x200B && $u <= 0x200F) || ($u >= 0x2060 && $u <= 0x2064)} {
+        return 0
+    }
+    if {($u >= 0x1100 && $u <= 0x115F) || ($u >= 0x2E80 && $u <= 0xA4CF) || ($u >= 0xAC00 && $u <= 0xD7A3)
+            || ($u >= 0xF900 && $u <= 0xFAFF) || ($u >= 0xFE30 && $u <= 0xFE4F) || ($u >= 0xFF00 && $u <= 0xFF60)
+            || ($u >= 0xFFE0 && $u <= 0xFFE6) || ($u >= 0x1F300 && $u <= 0x1F64F) || ($u >= 0x1F900 && $u <= 0x1F9FF)
+            || ($u >= 0x20000 && $u <= 0x3FFFD)} {
+        return 2
+    }
+    return 1
+}
+
+# The excerpt of LOCATION (a span dict: file start end line endLine) as
+# lines: a gutter, each source line the span covers (at most three; a fourth
+# says how many more), each underlined from where the span starts on it to
+# where it ends on it (one "^" for an empty span), highlighted when COLOR is
+# on, the underline in SEVERITY's style. A tab is shown as four spaces, and
+# the underline counts each character's display width. No lines when the
+# source cannot be read or the span lies outside it.
+proc excerpt {location color severity} {
+    if {![dict exists $location file] || ![dict exists $location start]} {
+        return {}
+    }
+    set source [excerptSource [dict get $location file] $color]
+    set text [dict get $source text]
+    set start [dict get $location start]
+    set end [dict getdef $location end $start]
+    if {$text eq "" || $start > [string length $text] || $end < $start} {
+        return {}
+    }
+    set classes [dict getdef $source classes {}]
+    set first [string range $text 0 [expr {$start - 1}]]
+    set lineStart [expr {[string last \n $first] + 1}]
+    set lineNumber [expr {[regexp -all \n $first] + 1}]
+    set shown {}
+    while 1 {
+        set lineEnd [string first \n $text $lineStart]
+        if {$lineEnd < 0} {
+            set lineEnd [string length $text]
+        }
+        lappend shown [list $lineNumber $lineStart $lineEnd]
+        # (A span that ends just past its line's newline -- a NEWLINE
+        # token's -- is that line's.)
+        if {$end <= $lineEnd + 1 || $lineEnd >= [string length $text] || [llength $shown] == 4} {
+            break
+        }
+        set lineStart [expr {$lineEnd + 1}]
+        incr lineNumber
+    }
+    set more 0
+    if {[llength $shown] == 4} {
+        set last [string range $text 0 [expr {$end - 1}]]
+        set more [expr {[regexp -all \n $last] + 1 - [lindex $shown 2 0]}]
+        set shown [lrange $shown 0 2]
+    }
+    set width [string length [lindex $shown end 0]]
+    set gutter [string repeat " " $width]
+    set lines [list "$gutter [styled $color gutter |]"]
+    foreach item $shown {
+        lassign $item number from to
+        set line ""
+        set marker ""
+        set column 0
+        set markFrom [expr {max($start, $from)}]
+        set markTo [expr {min($end, $to)}]
+        for {set i $from} {$i < $to} {incr i} {
+            set c [string index $text $i]
+            if {$c eq "\t"} {
+                set shownChar "    "
+                set w 4
+            } else {
+                set shownChar $c
+                set w [displayWidth $c]
+            }
+            append line $shownChar
+            if {$i >= $markFrom && $i < $markTo} {
+                append marker [string repeat ^ $w]
+            } elseif {$i < $markFrom} {
+                append marker [string repeat " " $w]
+            }
+        }
+        if {[string trim $marker] eq ""} {
+            # An empty span, or one at the end of its line: one "^" where
+            # it is.
+            append marker ^
+        }
+        if {$color} {
+            set line [highlightLine $text $from $to $classes]
+        }
+        lappend lines "[format %${width}s $number] [styled $color gutter |] $line"
+        lappend lines "$gutter [styled $color gutter |] [styled $color marker-$severity $marker]"
+    }
+    if {$more == 1} {
+        lappend lines "$gutter [styled $color gutter |] ... (1 more line)"
+    } elseif {$more > 1} {
+        lappend lines "$gutter [styled $color gutter |] ... ($more more lines)"
+    }
+    return $lines
+}
+
+# The source line TEXT[FROM, TO) highlighted with CLASSES (surface::tokens::
+# classes of the whole text), a tab shown as four spaces.
+proc highlightLine {text from to classes} {
+    set out ""
+    set at $from
+    foreach item $classes {
+        lassign $item start end class
+        if {$end <= $from || $start >= $to} {
+            continue
+        }
+        set start [expr {max($start, $from)}]
+        set end [expr {min($end, $to)}]
+        if {$start < $at} {
+            continue
+        }
+        append out [string map {\t "    "} [string range $text $at [expr {$start - 1}]]]
+        append out [styled 1 $class [string map {\t "    "} [string range $text $start [expr {$end - 1}]]]]
+        set at $end
+    }
+    append out [string map {\t "    "} [string range $text $at [expr {$to - 1}]]]
+    return $out
 }
 
 # After a printed diagnostic of error code CODE and MESSAGE, the line
@@ -653,7 +939,7 @@ proc helpHint {channel prefix code message} {
     }
     lappend hintsShown $topic
     regsub {[^ ].*$} $prefix "" indent
-    puts $channel "${indent}help: $::cliInvocation -help $topic"
+    puts $channel "[styledPrefix [dict get [presentationOf $channel] color] "${indent}help: "]$::cliInvocation -help $topic"
 }
 
 # After a compilation that printed warnings (on stderr), the topic of each
@@ -671,7 +957,7 @@ proc warningHints {codes} {
         set topic [compilerpedia::topicForDiagnostic $code ""]
         if {$topic ne "" && $topic ni $hintsShown} {
             lappend hintsShown $topic
-            puts stderr "help: $::cliInvocation -help $topic"
+            puts stderr "[styledPrefix [dict get [presentationOf stderr] color] "help: "]$::cliInvocation -help $topic"
         }
     }
 }
@@ -711,7 +997,9 @@ proc runFile {path showCode showHir showAst showAot showNative} {
         }
         if {[dict get $ast diagnostics] ne ""} {
             foreach diagnostic [dict get $ast diagnostics] {
-                puts "   error: [dict get $diagnostic file]:[dict get $diagnostic line]:[dict get $diagnostic column]: [dict get $diagnostic message] (SURFACE SYNTAX)"
+                printDiagnostic stdout "   error: " \
+                    "[dict get $diagnostic file]:[dict get $diagnostic line]:[dict get $diagnostic column]: [dict get $diagnostic message]" \
+                    {SURFACE SYNTAX} [dict get $diagnostic message] $diagnostic
                 helpHint stdout "   " {SURFACE SYNTAX} [dict get $diagnostic message]
             }
             return 1
@@ -735,8 +1023,11 @@ proc runFile {path showCode showHir showAst showAot showNative} {
         # interpreter. The Tcl compiler compiles the HIR once (below), for
         # running, -code and the printed types alike.
         set program ""
-        if {$backend eq "interp"} {
-            set program [hir::lower $hir]
+        if {$backend eq "interp" && [catch {hir::lower $hir} program options]} {
+            # (A program the interpreter refuses to compile: one that starts
+            # a Botlish thread, THREAD-UNAVAILABLE.)
+            printError stdout "   error: " $program $options
+            return 1
         }
         # A native run writes what the program prints to this process's own
         # standard output and error, before the value line below, as a
@@ -1008,26 +1299,32 @@ proc emitInterchange {path} {
 # program's, each warning on stderr as the compilation would, with the same
 # help lines; "ok" when it has no error. Returns 1 for a program with errors.
 proc checkFile {path} {
-    global checkWorkspace hintsShown
+    global checkWorkspace hintsShown excerptRevision excerptSources
     set hintsShown {}
     puts "== [file tail $path] (check)"
     if {[catch {service::analyze $checkWorkspace $path} revision options]} {
         printError stdout "   error: " $revision $options
         return 1
     }
+    # Excerpts quote the texts the analysis read.
+    set excerptRevision $revision
+    set excerptSources [dict create]
     try {
         set warnings [service::diagnostics $revision -severity warning]
         foreach warning $warnings {
-            puts stderr [dict get $warning text]
+            printWarning stderr [dict get $warning text] [ServiceLocation $warning]
         }
         warningHints [lmap w $warnings {dict get $w code}]
         set errors [service::diagnostics $revision -severity error]
         foreach error $errors {
-            puts "   error: [dict get $error text] ([dict get $error code])"
+            printDiagnostic stdout "   error: " [dict get $error text] [dict get $error code] \
+                [dict get $error message] [ServiceLocation $error]
             printNotes stdout "   " [lmap n [dict get $error notes] {dict get $n text}]
             helpHint stdout "   " [dict get $error code] [dict get $error text]
         }
     } finally {
+        set excerptRevision ""
+        set excerptSources [dict create]
         service::release $revision
     }
     if {$errors ne {}} {
@@ -1035,6 +1332,38 @@ proc checkFile {path} {
     }
     puts "   ok"
     return 0
+}
+
+# The location of a compiler service diagnostic (service::Record) as a span
+# dict, or "" for one with none.
+proc ServiceLocation {diagnostic} {
+    if {[dict get $diagnostic range] eq "none"} {
+        return ""
+    }
+    return [dict create file [dict get $diagnostic file] start [dict get $diagnostic start] \
+        end [dict get $diagnostic end]]
+}
+
+# A warning's TEXT (hir::warnings::render: "LOCATION: warning: MESSAGE
+# (CODE)", then a "LOCATION: note: ..." line per related location) on
+# CHANNEL, as the compilation prints it; with color its labels styled, with
+# excerpts the excerpt of LOCATION after its first line.
+proc printWarning {channel text location} {
+    set how [presentationOf $channel]
+    set color [dict get $how color]
+    set first 1
+    foreach line [split $text \n] {
+        if {$color && [regexp {^(.*?: )(warning|note)(: )(.*)$} $line -> head label colon rest]} {
+            set line "[styled 1 location $head][styled 1 $label "$label:"] $rest"
+        }
+        puts $channel $line
+        if {$first && [dict get $how excerpts] && $location ne ""} {
+            foreach excerptLine [excerpt $location $color warning] {
+                puts $channel "   $excerptLine"
+            }
+        }
+        set first 0
+    }
 }
 
 # Builds native library NAME from PATH into DIR (native::library): its
@@ -1069,6 +1398,42 @@ proc emitLibrary {path name exports dir} {
             puts "$artifact: [dict get $built $artifact]"
         }
     }
+    return 0
+}
+
+# Writes the .bot, .hir or .hirx file PATH as freestanding C into DIR
+# (beside PATH when DIR is ""): the C backend (ccompile::program).
+proc emitC {path dir} {
+    global warnings target hintsShown root
+    set hintsShown {}
+    if {[catch {
+        switch -- [file extension $path] {
+            .bot {
+                set hir [surface::readProgramFile $path -warnings $warnings -target $target]
+                warningHints [lmap w [hir::warnings::of $hir] {dict get $w code}]
+            }
+            .hir { set hir [hir::readFile $path] }
+            .hirx { set hir [hir::interchange::readFile $path -target [hir::cabi::ResolveTarget $target]] }
+            default { throw {C INPUT} "expected a .bot, .hir or .hirx input file (C is generated from HIR, never from core IR text): $path" }
+        }
+        if {[info commands ::ccompile::program] eq ""} {
+            source [file join $root ccompile ccompile.tcl]
+        }
+        set name [ccompile::PrefixOf $path]
+        set out [ccompile::program $hir -prefix $name -source [file tail $path]]
+        if {$dir eq ""} {
+            set dir [file dirname $path]
+        }
+        set written [ccompile::write $out $dir]
+    } message options]} {
+        printError stderr "$path: " $message $options
+        return 1
+    }
+    foreach file $written {
+        puts "c: $file"
+    }
+    set services [lsort -unique [concat [dict get $out services] [dict get $out display]]]
+    puts "runtime services: [if {$services eq ""} {string cat none} else {join $services {, }}]"
     return 0
 }
 
@@ -1133,8 +1498,8 @@ if {$check} {
     # inspects, which it never does: refused, never ignored.
     foreach option [dict get $commandLine options] {
         set arg [lindex $option 0]
-        if {$arg ni {-check -warnings -target}} {
-            usageError "-check cannot be combined with $arg: it analyzes the program and reports its diagnostics, without running, building or inspecting it (it takes -warnings and -target)"
+        if {$arg ni {-check -warnings -target -color -excerpts}} {
+            usageError "-check cannot be combined with $arg: it analyzes the program and reports its diagnostics, without running, building or inspecting it (it takes -warnings, -target, -color and -excerpts)"
         }
     }
     foreach path $files {
@@ -1185,6 +1550,7 @@ foreach option [dict get $commandLine options] {
         -aot-run { set aotRun 1 }
         -aot-keep { set aotKeep 1 }
         -emit-hir-interchange { set showNative interchange }
+        -emit-c { set showNative c }
         -emit-native-library {
             if {![regexp {^[A-Za-z_][A-Za-z0-9_]*$} $value]} {
                 usageError "-emit-native-library needs the library's name, a C identifier (it prefixes every public C name: NAME_create), found \"$value\""
@@ -1236,10 +1602,19 @@ foreach option [dict get $commandLine options] {
         -lsp-scheduler {
             usageError "-lsp-scheduler is an option of -lsp"
         }
+        -color - -excerpts {
+            if {$value ni {auto always never}} {
+                usageError "unknown $arg mode \"$value\" (known: auto always never)"
+            }
+            dict set presentationModes $arg $value
+        }
     }
 }
-if {$showNative ne "library" && ($libraryExports ne "" || $libraryDir ne "")} {
-    usageError "-export and -out are options of -emit-native-library"
+if {$showNative ne "library" && $libraryExports ne ""} {
+    usageError "-export is an option of -emit-native-library"
+}
+if {$showNative ni {library c} && $libraryDir ne ""} {
+    usageError "-out is an option of -emit-native-library and -emit-c"
 }
 if {$aotRun} {
     # -aot-run builds one program and runs it as a command: of the options
@@ -1320,6 +1695,8 @@ foreach path $files {
         incr failures [emitLibrary $path $libraryName $libraryExports $libraryDir]
     } elseif {$showNative eq "interchange"} {
         incr failures [emitInterchange $path]
+    } elseif {$showNative eq "c"} {
+        incr failures [emitC $path $libraryDir]
     } else {
         incr failures [runFile $path $showCode $showHir $showAst $showAot $showNative]
     }

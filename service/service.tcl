@@ -29,6 +29,7 @@
 # Queries
 #
 #   service::at REV PATH LINE COLUMN ?-version V?   the facts at a position
+#   service::tokens REV PATH             the highlight tokens of a source
 #   service::prepare REV ?-paths PATHS? ?-compilerpedia 0|1?
 #                                        build its query indexes now
 #   service::explain DIAGNOSTIC          its Compilerpedia topic
@@ -639,7 +640,7 @@ proc service::import {ws text args} {
     dict set revision workspace $ws
     dict set revision version [dict get $options -version]
     set derived [dict getdef $body derived [dict create]]
-    if {[catch {dict size $derived}] || [lsort -unique [concat [dict keys $derived] {lines syntax semantic declarations dfaNames}]] ne {declarations dfaNames lines semantic syntax}} {
+    if {[catch {dict size $derived}] || [lsort -unique [concat [dict keys $derived] {lines syntax semantic declarations dfaNames tokens}]] ne {declarations dfaNames lines semantic syntax tokens}} {
         Fail IMPORT "an exported revision whose derived data are not its query indexes"
     }
     dict set revision derived $derived
@@ -737,6 +738,7 @@ proc service::prepare {rev args} {
     foreach path $paths {
         Derived $rev lines $path [list service::Lines $path]
         Derived $rev syntax $path [list service::SyntaxIndex $path]
+        Derived $rev tokens $path [list service::TokenIndex $path]
     }
     if {[QueryHir $revision] ne ""} {
         set index [Derived $rev semantic all [list service::SemanticIndex]]
@@ -996,6 +998,285 @@ proc service::DfaNameIndex {path revision} {
         }
     }
     return [dict create index [IntervalIndex $items] all $all]
+}
+
+# ---------------------------------------------------------------------------
+# Highlight tokens (SYNTAX-HIGHLIGHTING-MILESTONE-1.md, "Semantic tokens")
+
+# The highlight tokens of source PATH of revision REV: {START END TYPE
+# MODIFIERS} for each, ordered by START, offsets in the text it analyzed. TYPE
+# is one of `tokenTypes`, MODIFIERS a list of `tokenModifiers`. Nothing is
+# computed for them that the compiler does not already say: every token's
+# lexical class is the token IR's (surface::syntaxTokens, a keyword the
+# parser read as one among them), a declaration's or an annotation's is the
+# AST's (the name spans and type spans its nodes record), and a name's is
+# the binding the HIR resolved it to -- a function, a parameter, a variable
+# (`defaultLibrary` for one of the standard library or the runtime), an enum
+# case a qualified name denotes. A name the analysis has no binding for (an
+# unresolved one, one whose meaning depends on malformed source) keeps only
+# what the syntax says, which for a plain name is nothing: it has no token.
+proc service::tokens {rev path} {
+    set revision [Use $rev]
+    set source [SourcePath $revision $path]
+    if {$source eq ""} {
+        Fail NOT-A-SOURCE "revision $rev read no source text at $path"
+    }
+    return [Derived $rev tokens $source [list service::TokenIndex $source]]
+}
+
+namespace eval service {
+    # The token types and modifiers tokens names, in the order a client's
+    # legend lists them (the Language Server Protocol's standard names).
+    variable tokenTypes {namespace type struct enum interface parameter variable property
+        enumMember function keyword comment string number operator}
+    variable tokenModifiers {declaration defaultLibrary}
+}
+
+proc service::TokenIndex {path revision} {
+    set text [dict get $revision sources $path text]
+    set ir [surface::syntaxTokens $text $path]
+    # The syntax facts: names the AST declares, and the spans of the types it
+    # annotates.
+    set facts [dict create]
+    set typeRanges {}
+    set namespaceRanges {}
+    set ast [Ast $path $revision]
+    foreach import [dict getdef $ast imports {}] {
+        TokenSyntax $import facts typeRanges namespaceRanges
+    }
+    TokenSyntax $ast facts typeRanges namespaceRanges
+    # The semantic facts: each name the HIR resolved, by where it ends (a
+    # qualified name's last segment is the name), and each binding's
+    # declaration site.
+    set names [dict create]
+    set qualifiers {}
+    set enumQualifiers {}
+    set hir [QueryHir $revision]
+    if {$hir ne ""} {
+        set index [Derived [dict get $revision id] semantic all [list service::SemanticIndex]]
+        set f [dict getdef [dict get $index ids] $path ""]
+        if {$f ne ""} {
+            # The blocks a binding declares (`fn NAME`: its `bind`'s value).
+            set functions [dict create]
+            dict for {b binding} [dict get $hir bindings] {
+                set by [dict getdef $binding declaredBy ""]
+                if {$by eq "" || ![dict exists $hir exprs $by]
+                        || [dict get $hir exprs $by kind] ne "bind"} continue
+                set value [dict getdef [dict get $hir exprs $by] value ""]
+                if {$value ne "" && [dict exists $hir exprs $value]
+                        && [dict get $hir exprs $value kind] eq "block"} {
+                    dict set functions $value $b
+                }
+            }
+            foreach e [hir::walk $hir] {
+                set node [dict get $hir exprs $e]
+                set origin [dict get $node origin]
+                if {[lindex $origin 0] ne "file" || [lindex $origin 1] ne $f} continue
+                set span [lrange $origin 2 end]
+                set start [dict get $span start]
+                set end [dict get $span end]
+                switch -- [dict get $node kind] {
+                    ref {
+                        if {[dict get $node binding] eq "" || [dict exists $hir syntaxDependent $e]} continue
+                        dict set names $end [TokenBinding $hir [dict get $node binding] $functions]
+                        lappend qualifiers $start $end
+                    }
+                    const {
+                        if {[lindex [dict get $node value] 0] eq "enum"} {
+                            # `Type::Case`: the case, and its enum before it.
+                            dict set names $end [list enumMember {}]
+                            lappend enumQualifiers $start $end
+                        }
+                    }
+                }
+            }
+            set declarations [Derived [dict get $revision id] declarations $f [list service::DeclarationIndex $f]]
+            dict for {b site} [dict get $declarations sites] {
+                lassign [TokenBinding $hir $b $functions] type modifiers
+                dict set facts [dict get $site start] [list $type [linsert $modifiers 0 declaration]]
+            }
+        }
+    }
+    set result {}
+    foreach item [surface::tokens::classes $ir] {
+        lassign $item start end class
+        switch -- $class {
+            keyword - word - constant { lappend result [list $start $end keyword {}] }
+            comment { lappend result [list $start $end comment {}] }
+            string - char { lappend result [list $start $end string {}] }
+            number { lappend result [list $start $end number {}] }
+            operator { lappend result [list $start $end operator {}] }
+            identifier {
+                if {[dict exists $facts $start]} {
+                    lassign [dict get $facts $start] type modifiers
+                } elseif {[dict exists $names $end] && ([TokenWithin $qualifiers $start $end]
+                        || [TokenWithin $enumQualifiers $start $end])} {
+                    lassign [dict get $names $end] type modifiers
+                } elseif {[TokenWithin $enumQualifiers $start $end]} {
+                    set type enum
+                    set modifiers {}
+                } elseif {[TokenWithin $typeRanges $start $end]} {
+                    set type type
+                    set modifiers {}
+                } elseif {[TokenWithin $namespaceRanges $start $end]} {
+                    set type namespace
+                    set modifiers {}
+                } elseif {[TokenWithin $qualifiers $start $end]} {
+                    # A segment before a resolved qualified name's last.
+                    set type namespace
+                    set modifiers {}
+                } else {
+                    continue
+                }
+                lappend result [list $start $end $type $modifiers]
+            }
+        }
+    }
+    return $result
+}
+
+# 1 if [START, END) lies within one of RANGES ({S E S E ...}).
+proc service::TokenWithin {ranges start end} {
+    foreach {s e} $ranges {
+        if {$s <= $start && $end <= $e} {
+            return 1
+        }
+    }
+    return 0
+}
+
+# The token type and modifiers of a name bound to binding B of HIR
+# (FUNCTIONS: block -> its binding, the blocks bindings declare): a function
+# (a binding of a block, a native), a parameter of a function, or a
+# variable (a local, or a parameter of a block no binding declares: a loop
+# variable, a handler's payload); `defaultLibrary` for the standard
+# library's and the runtime's.
+proc service::TokenBinding {hir b functions} {
+    set binding [dict get $hir bindings $b]
+    set kind [dict get $binding kind]
+    set modifiers {}
+    set origin [dict get $binding origin]
+    if {$kind in {root ambient}} {
+        return [list function defaultLibrary]
+    }
+    if {[lindex $origin 0] eq "file"} {
+        set file [dict get $hir files [lindex $origin 1] path]
+        set library [file normalize $::core::libraryDir]
+        if {[string first "$library/" [file normalize $file]] == 0} {
+            lappend modifiers defaultLibrary
+        }
+    }
+    set by [dict getdef $binding declaredBy ""]
+    if {$kind eq "local" && $by ne "" && [dict exists $hir exprs $by]
+            && [dict exists $functions [dict getdef [dict get $hir exprs $by] value ""]]} {
+        return [list function $modifiers]
+    }
+    if {$kind eq "param"} {
+        set owner [dict get $hir scopes [dict get $binding scope] owner]
+        if {$owner ne "" && [dict exists $functions $owner]} {
+            return [list parameter $modifiers]
+        }
+    }
+    return [list variable $modifiers]
+}
+
+# The token facts of AST NODE and its children into FACTSVAR (START ->
+# {TYPE MODIFIERS} at each name a declaration writes), RANGESVAR (the spans
+# of the types it annotates) and NAMESPACESVAR (the spans of the namespaces
+# it imports).
+proc service::TokenSyntax {node factsVar rangesVar namespacesVar} {
+    upvar 1 $factsVar facts $rangesVar ranges $namespacesVar namespaces
+    if {![dict exists $node kind]} {
+        return
+    }
+    set kind [dict get $node kind]
+    set declared [dict getdef {structdecl struct errordecl type enumdecl enum traitdecl interface
+        typedecl type layoutdecl struct} $kind ""]
+    if {$declared ne "" && [dict getdef $node nameSpan ""] ne ""} {
+        dict set facts [dict get $node nameSpan start] [list $declared declaration]
+    }
+    foreach key {fields cases requirements} {
+        foreach item [dict getdef $node $key {}] {
+            if {[catch {dict get $item nameSpan} span] || $span eq ""} continue
+            set type [dict get {fields property cases enumMember requirements function} $key]
+            dict set facts [dict get $span start] [list $type declaration]
+            foreach typeKey {typeSpan resultTypeSpan} {
+                set typeSpan [dict getdef $item $typeKey ""]
+                if {$typeSpan ne ""} {
+                    lappend ranges [dict get $typeSpan start] [dict get $typeSpan end]
+                }
+            }
+            foreach param [dict getdef $item params {}] {
+                TokenParamType $param ranges
+            }
+        }
+    }
+    switch -- $kind {
+        project {
+            if {[dict getdef $node nameSpan ""] ne ""} {
+                dict set facts [dict get $node nameSpan start] [list property {}]
+            }
+        }
+        methodcall {
+            if {[dict getdef $node nameSpan ""] ne ""} {
+                dict set facts [dict get $node nameSpan start] [list function {}]
+            }
+        }
+        namedstruct - anonstruct {
+            # (Its initializer is a payload, not a child: surface::ast::Children
+            # visits the values.)
+            if {$kind eq "namedstruct" && [dict getdef $node nameSpan ""] ne ""} {
+                lappend ranges [dict get $node nameSpan start] [dict get $node nameSpan end]
+            }
+            foreach field [dict getdef [dict getdef $node init {}] fields {}] {
+                dict set facts [dict get $field nameSpan start] [list property {}]
+            }
+        }
+        import - typeimport {
+            set span [dict get $node namespaceSpan]
+            lappend namespaces [dict get $span start] [dict get $span end]
+            if {$kind eq "typeimport"} {
+                dict set facts [dict get $node nameSpan start] [list type {}]
+            }
+        }
+        function - externfn {
+            foreach param [dict getdef $node params {}] {
+                TokenParamType $param ranges
+            }
+            foreach context [dict getdef $node contexts {}] {
+                if {[dict getdef $context typeSpan ""] ne ""} {
+                    lappend ranges [dict get $context typeSpan start] [dict get $context typeSpan end]
+                }
+            }
+        }
+    }
+    foreach typeKey {typeSpan resultTypeSpan carrierSpan parentSpan typeArgSpan representationSpan} {
+        set typeSpan [dict getdef $node $typeKey ""]
+        if {$typeSpan ne "" && [dict exists $typeSpan start]} {
+            lappend ranges [dict get $typeSpan start] [dict get $typeSpan end]
+        }
+    }
+    foreach typeSpan [dict getdef $node typeArgSpans {}] {
+        lappend ranges [dict get $typeSpan start] [dict get $typeSpan end]
+    }
+    foreach child [surface::ast::Children $node] {
+        TokenSyntax $child facts ranges namespaces
+    }
+}
+
+# The type span of PARAM into RANGESVAR: a function's {NAME SPAN TYPE
+# TYPESPAN ...} tuple, or an extern's {name nameSpan type typeSpan ...}
+# dict.
+proc service::TokenParamType {param rangesVar} {
+    upvar 1 $rangesVar ranges
+    if {[llength $param] % 2 == 0 && [dict exists $param typeSpan]} {
+        set typeSpan [dict get $param typeSpan]
+    } else {
+        set typeSpan [lindex $param 3]
+    }
+    if {$typeSpan ne "" && [llength $typeSpan] % 2 == 0 && [dict exists $typeSpan start]} {
+        lappend ranges [dict get $typeSpan start] [dict get $typeSpan end]
+    }
 }
 
 # The span in TEXT where binding B of HIR is declared by name (above), or "".

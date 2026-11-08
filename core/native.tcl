@@ -105,7 +105,9 @@
 #                                     names (std::binary::read of an array:
 #                                     LAYOUT-UNIONS.md); nothing for any
 #                                     other designator
-#   sending         "" or K or `result`: argument K's value, or the call's
+#   sending         "" or K or `result` or `imprint`: argument K's value, the
+#                   call's imprint variable T's binding (std::transfer::
+#                   fingerprint[T]), or the call's
 #                   (imprinted) result, crosses to another Botlish VM by
 #                   the transfer codec (core/transfer.tcl; SENDABILITY-AND-
 #                   VALUE-COPY-MILESTONE-1.md), so its static type must
@@ -797,8 +799,8 @@ proc core::native::register {name args} {
         error "core::native::register: bad -hashing \"$hashing\" for \"$name\" (K required|checked)"
     }
     set sending [dict get $options -sending]
-    if {$sending ne "" && !($sending eq "result" || ([string is digit -strict $sending] && $arity ne "*" && $sending < $arity))} {
-        error "core::native::register: bad -sending \"$sending\" for \"$name\" (K or result)"
+    if {$sending ne "" && !($sending in {result imprint} || ([string is digit -strict $sending] && $arity ne "*" && $sending < $arity))} {
+        error "core::native::register: bad -sending \"$sending\" for \"$name\" (K, result or imprint)"
     }
     set elementPlace [dict get $options -element-place]
     if {$elementPlace ni {0 1} || ($elementPlace && ($arity ne "2" || [lindex $ownership 0] ne "observe"
@@ -1046,6 +1048,15 @@ proc core::native::ValidShape {shape count} {
         # coroutine analysis (hir/coroutines.tcl) -- a handle's protocol, the
         # outward value of its segment, the resume message of a yield.
         return 1
+    }
+    if {[lindex $shape 0] eq {thread-entry}} {
+        # {thread-entry I}: the result is the std::thread::Entry of the
+        # thread entry (`thread fn`) argument I names, applied to its
+        # parameter and result types (std::thread::entry, BOTLISH-OWNED-
+        # THREADS-AND-CROSS-THREAD-ACTORS-MILESTONE-1.md), resolved by
+        # hir::types::ShapeResult.
+        return [expr {$length == 2 && [string is digit -strict [lindex $shape 1]]
+            && ($count eq "" || [lindex $shape 1] < $count)}]
     }
     if {[lindex $shape 0] eq {callback-pointer}} {
         # {callback-pointer I}: the result is the C function pointer of the

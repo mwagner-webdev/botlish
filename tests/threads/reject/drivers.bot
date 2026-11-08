@@ -1,0 +1,33 @@
+# drivers.bot -- tests/threads.test: two thread entries that select
+# different implementations of the context trait std::event_loop::Driver
+# (the deterministic driver, the Linux one). The program selects one
+# implementation of each context trait for every VM:
+# CONTEXT-TRAIT-SELECTION-CONFLICT.
+import event_loop_linux
+import std::event_loop
+import std::event_loop::deterministic
+
+fn ran(context ev: std::event_loop::Loop, d: std::event_loop::Driver) -> int errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    std::event_loop::run()
+
+thread fn scripted(n: int) -> int:
+    with context std::event_loop::create(4)
+    with context std::event_loop::deterministic::create()
+    ran():
+        on std::event_loop::SchedulerFault:
+            -1
+        on std::event_loop::DriverFault {code}:
+            -2
+        on std::event_loop::LoopReentered:
+            -3
+
+thread fn polled(n: int) -> int:
+    with context std::event_loop::create(4)
+    with context event_loop_linux::create()
+    ran():
+        on std::event_loop::SchedulerFault:
+            -1
+        on std::event_loop::DriverFault {code}:
+            -2
+        on std::event_loop::LoopReentered:
+            -3

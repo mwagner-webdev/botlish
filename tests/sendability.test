@@ -250,8 +250,8 @@ test sd-not-sendable-no-erasure-cascade {a function-bearing argument is NOT-SEND
     sdKinds [sdEncode Job $::sdDecls]
 } -result NOT-SENDABLE
 
-test sd-open-type {a transfer of an open type (an imprint variable, even one Sendable constrains) is TRANSFER-OPEN-TYPE: its schema is the static type's} -body {
-    lassign [sdRejection {import std::transfer
+test sd-open-type {a transfer of an imprint variable Sendable constrains is compiled once per binding of it (BOTLISH-OWNED-THREADS-AND-CROSS-THREAD-ACTORS-MILESTONE-1.md, "Generic Sendable transfer"): each copy writes its closed schema, so the generic encode is accepted and writes the bytes of the caller's type, on every backend} -body {
+    set hir [withPrivateLibrary {surface::compile {import std::transfer
 import std::abi::bytes
 
 struct Envelope[T satisfies Sendable]:
@@ -260,10 +260,10 @@ struct Envelope[T satisfies Sendable]:
 fn seal(e: Envelope[T]) -> std::abi::bytes::Bytes:
     std::transfer::encode(e)
 
-seal(Envelope[int] {body: 1})
-}] kind message
-    list $kind [string match "*has the open type*a transfer's schema is its static type*" $message]
-} -result {TRANSFER-OPEN-TYPE 1}
+[seal(Envelope[int] {body: 1}) == std::transfer::encode(Envelope[int] {body: 1}), seal(Envelope[str] {body: "x"}) == std::transfer::encode(Envelope[str] {body: "x"}), seal(Envelope[int] {body: 1}) == seal(Envelope[str] {body: "x"})]
+} t.bot -warnings off}]
+    lsort -unique [lmap b {interp compile cranelift} {lrange [outcomeUnderHir $b $hir] 0 1}]
+} -result {{value {[true, true, false]}}}
 
 test sd-trait-view-transfer {a value seen through a Sendable trait view is encoded: the trait monomorphization clones its function per witness before the schema is written, so each clone carries its concrete schema} -body {
     sdRejection {import std::transfer

@@ -69,6 +69,10 @@ releases honest; `tools/ci/runs.py` implements the second and the third,
   - Never publish from a push run, never rebuild in a release run, never
     give the gate a credential or more than `actions: write`, and never
     give it a way to dispatch a release twice or move a tag backwards.
+  - A release run holds `NAME-release`; its publish job's group is
+    `NAME-publish`. Never put a job in the group its own run holds: GitHub
+    fails such a job before it gets a runner (every release run did so
+    until 2026-11-08; `test_no_job_waits_for_its_own_run`).
 * **Every test workflow runs its host's canary first, and its expensive
   jobs wait for it** (CI-RUNS.md, "The canary"): tests.yml, tests-arm64.yml
   and windows-x86_64.yml a `canary` job, macos-arm64.yml the smoke job's
@@ -136,6 +140,10 @@ outside `docs/` starts with `../`.
   `tests/helpers.tcl` that hand the compiler the HIR the program was lowered
   from (or read hand-written IR text into HIR); they are not production entry
   points.
+
+The C backend (`ccompile/`, below) also compiles analyzed HIR, and is only as
+precise as the analyses: every enhancement of type inference is analyzed for
+what it gives the C target too ("The C backend", below).
 
 ## Compilation isolation
 
@@ -340,7 +348,8 @@ a static zipfs tclsh. `--basekit PATH` uses a prebuilt zipkit instead. To run
 the test suite, still install the `.deb`s.
 
 * `single/package.tcl` packs exactly main.tcl, LICENSE, `core/`,
-  `compiler/`, `hir/`, `surface/`, `service/`, `lsp/`, `native/*.tcl`, `stdlib/`,
+  `compiler/`, `hir/`, `surface/`, `service/`, `lsp/`, `pm/`, `ccompile/`,
+  `native/*.tcl`, `stdlib/`,
   `compilerpedia/compilerpedia.tcl`, `compilerpedia/topics/` and
   `compilerpedia/generated/`, plus a `BUILD` file naming the source
   revision. If the compiler starts reading another file at run time, add
@@ -433,6 +442,68 @@ the test suite, still install the `.deb`s.
   `single/package.tcl`) `audit/single-executable/tools/mutate.tcl` and both
   `single/smoke-test.sh` and `single/ffi-smoke-test.sh` after
   `single/build.sh`.
+
+## The C backend (main.tcl -emit-c)
+
+`ccompile/ccompile.tcl` (C-COMPILE-FREESTANDING-MILESTONE-1.md) writes an
+analyzed HIR as freestanding C11: `PREFIX.h`, `PREFIX.c`,
+`PREFIX_display.c`, `PREFIX.runtime.json` and, when the C uses it, a copy
+of `ccompile/botlish_rt_v1.h`, the runtime-service interface. It compiles
+one C function per instance of `hir::specialize` and reads `hir::range`'s
+proofs, as native lowering does, and runs no C compiler. Keep it so:
+
+* No semantics of its own: it consumes HIR and the existing analyses, adds
+  no range analysis, never reads NIR or core IR, and changes nothing in
+  `hir/`, `core/` or `surface/` for C's sake. A fact it needs and the
+  analyses lack is the Int path (correct, slower) or C UNSUPPORTED, never
+  an assumption.
+* An Int is an `int64_t` only on a proof (its Range, its domain, or a
+  representation chosen on one); `+ - *` are C arithmetic only when the
+  operands' and `hir::range::add/sub/mul` of them fit int64_t. Never emit C
+  signed arithmetic that can overflow, `<<` or `>>` of a negative, or `%`
+  with a divisor that may be 0 or `-1` with INT64_MIN. Narrowing an Int to
+  an `int64_t` reads `small`, on a proof only; the services' normalization
+  (botlish_rt_v1.h) is what makes it exact.
+* What C cannot implement is a call of a `botlish_rt_v1_*` service the
+  interface declares, listed in the manifest: a missing provider is a link
+  error, never a compilation error, a placeholder or a fake implementation.
+  What the backend cannot translate is `C UNSUPPORTED` at the construct,
+  never a symbol reference. A new service is a row of `ccompile::services`,
+  a declaration and contract in botlish_rt_v1.h (a v2 header for an
+  incompatible change), and the reference provider's implementation.
+* The generated C stays freestanding C11: `stdint.h`, `stdbool.h`,
+  `stddef.h` only; no allocation, I/O, `main`, extension or inline
+  assembly; every global name prefixed; helpers emitted only when used; it
+  compiles warning-free under tests/c-compile.test's flags (`-Wconversion`
+  included). Errors are statuses: never terminate the process.
+* The manifest and the C are deterministic and agree: the manifest names
+  exactly the service symbols the C calls, per translation unit.
+* Harnesses and providers stay outside the backend
+  (`examples/c-freestanding/`), as integration code of a target's.
+* **Every enhancement of type inference is also analyzed for what it gives
+  the C target.** The backend adds no analysis of its own, so its
+  precision is the analyses': a new or sharper fact -- a type or a Range
+  (hir/types.tcl, hir/range.tcl, a join's, a fold intermediate's, an
+  operation's result), a semantic instance (hir/specialize.tcl), a
+  function's contract (hir/signatures.tcl), a List length, an enum known
+  statically -- can make an Int an `int64_t`, take a runtime service out of
+  a program's manifest, or make a C UNSUPPORTED construct compile. Such a
+  fact is an enhancement of the analyses, made for every backend, never a
+  rule of the backend's. Run `main.tcl -emit-c` over the corpus of
+  C-COMPILE-FREESTANDING-MILESTONE-1.md, section 14, before and after the
+  change, and record in the change's report what it changes for C: which
+  programs now compile, which values change representation, which services
+  leave a manifest, which C UNSUPPORTED it removes -- or that it changes
+  nothing for C. A fact the C target cannot use yet (the backend reads
+  something else) is recorded too, as the backend's next step.
+  `tests/c-compile.test` must still pass.
+
+If you change `ccompile/`, `examples/c-freestanding/` or what the backend
+reads (`hir::specialize`'s instances, `hir::range`'s results, the HIR node
+kinds it compiles), run `tests/c-compile.test` (its cross tests need clang,
+ld.lld, qemu-user and the cross libgcc packages, and are skipped without
+them), `tests/main-cli.test` and `tools/compilerpedia.tcl check`, and
+`examples/c-freestanding/demo.sh`.
 
 ## The macOS application (Botlish.app)
 
@@ -1677,7 +1748,8 @@ owns its native stack, its guard record and its thread-local runtime state
   stays process-terminal: never end only the faulting thread, whatever its
   Vm's isolation.
 * `botlish-native vms N` (main.rs's `concurrent_vms`) is a test harness, not
-  a thread API: no Botlish program can start a thread. Its collection hook
+  a thread API: a Botlish program starts a thread with std::thread (next
+  sections but several: Botlish-owned threads). Its collection hook
   and the heap's ownership check (`Heap::set_ownership_check`) are test
   hooks, None and off unless it sets them.
 
@@ -2778,7 +2850,11 @@ install`, which builds its archive there). Keep it so:
   scheduler bug, ending `run`), never an application error; a task's own
   failure is a recorded outcome that ends only that task.
 * The native integration ABI (packages/event_loop_linux/native/
-  botlish_event_loop.h, version 1): a post copies four scalars and never runs
+  botlish_event_loop.h, version 2: one loop per VM, named by a
+  generation-checked handle; the version 1 functions reach the one open
+  loop and are refused while several are, never routed to one of them; a
+  loop closes with its driver or with the thread that opened it -- keep
+  it so: no process-wide loop state): a post copies four scalars and never runs
   Botlish code; pumps run on the loop's thread inside the wait and never call
   Botlish. Never add a C-to-Botlish callback or a pointer in a record. A
   library that wakes the loop before its data is where its check can take it
@@ -2850,8 +2926,10 @@ requirement analysis proves it needs nothing. Keep it so:
   does, and nothing ever polls a timer. Never drop an actor message.
 * No native, NIR instruction, runtime object or Tcl runtime of actors:
   `std::actor::recover` (`same` in native/lower.tcl) is the whole compiler
-  side (`actor-source-ordinary`). No OS threads, cross-thread transport,
-  sendability, actor-local installation or runtime permission check here.
+  side (`actor-source-ordinary`). No OS threads, sendability, actor-local
+  installation or runtime permission check here: the cross-thread transport
+  is std::actor::remote's (Botlish-owned threads, below), which reaches an
+  actor through its ordinary mailbox.
 
 If you change stdlib/actor.bot, core/actor.tcl, the `same` lowering or
 `std::event_loop::owned?`, run `tests/actor.test` (on both passes,
@@ -2910,11 +2988,14 @@ one (native/src/runtime/transfer.rs) read. Keep it so:
   TransferLimit) and never a panic or NATIVE BUG; both directions iterative.
 * The two codecs write the same bytes: change the format in both, with the
   version and tests/value-transfer.test's fixed vectors.
-* A transfer's type is closed where it is written (TRANSFER-OPEN-TYPE): a
-  body generic in an imprint variable has no schema to write (a later
-  milestone's plan), never a run-time schema guessed from a value. A
-  `Sendable` trait view is closed: the trait monomorphization clones its
-  function per witness before `hir::transfer::Elaborate` runs.
+* A transfer's type is closed where it is compiled (TRANSFER-OPEN-TYPE
+  otherwise), never a run-time schema guessed from a value. A body that
+  transfers an imprint variable its signature's struct slot constrains to
+  Sendable is planned per binding of it (`hir::traits::SelectingBinding`,
+  `SendsVariable`: BOTLISH-OWNED-THREADS-AND-CROSS-THREAD-ACTORS-
+  MILESTONE-1.md), and a `Sendable` trait view per witness, before
+  `hir::transfer::Elaborate` runs: each copy writes its closed schema.
+  decode of a trait view stays TRANSFER-OPEN-TYPE.
 * std::actor's same-VM messages stay ordinary values: never require
   Sendable of them.
 
@@ -2929,6 +3010,78 @@ mutant's text when you change the code it mutates, keeping it a mutant of
 the same rule), plus the trait, Hashable and collection harnesses for a
 change to code they share. `bench/value-transfer.tcl` is the performance
 report.
+
+## Botlish-owned threads and the cross-thread transport (std::thread, std::actor::remote)
+
+A `thread fn NAME(init: I) -> R:` of a module is a thread entry
+(BOTLISH-OWNED-THREADS-AND-CROSS-THREAD-ACTORS-MILESTONE-1.md);
+`std::thread::start(std::thread::entry(NAME), init)` runs it on an OS thread
+of its own in a VM of its own, made on that thread from the program's one
+image (native/src/runtime/thread.rs, the program function's dispatch in
+native/lower.tcl). `std::actor::remote` carries typed messages and calls
+between VMs as transfer bytes. Keep it so:
+
+* One image, one HIR, one selection: an entry is a block of the program
+  (`threadEntry`), compiled with every other; never a second compilation,
+  program or image per entry. The selection of each context trait is the
+  program's for every VM (CONTEXT-TRAIT-SELECTION-CONFLICT); each VM
+  installs its own instances in its entry's body, checked flow-sensitively
+  as the entry program's top level (hir/contexts.tcl's `entries`). Never
+  give a worker its creator's contexts, a context parameter or a context
+  in its initialization value, and never select per entry.
+* An entry is named only as std::thread::entry's argument
+  (THREAD-ENTRY-REFERENCE), declared at a module's top level
+  (THREAD-ENTRY-PLACEMENT), with one closed sendable parameter and result
+  (THREAD-ENTRY-SIGNATURE), environment-free and never suspending
+  (THREAD-ENTRY-ENVIRONMENT). It requires nothing of a caller; its calls are
+  its own obligations.
+* Starting needs the Threads context; a start reserves a guard record
+  before the thread exists (records.rs's `reserve`, `claim_as`): beyond the
+  64 records it is ThreadLimit, never an unguarded thread. A Vm is made,
+  run and dropped on its own thread (never Send); nothing of a heap crosses
+  threads -- outcomes and messages are byte vectors, rebuilt by the
+  receiving VM's constructors. A native fault on any thread stays
+  process-terminal.
+* Stopping is cooperative (a flag and a port notification): never kill,
+  interrupt or detach a running thread's VM from under it. A join of an
+  ended thread joins its OS thread (its exit's cleanup done). At the main
+  VM's end every thread is asked to stop and joined within a bound
+  (BOTLISH_THREAD_EXIT_JOIN_US); one still running keeps the image alive.
+* The transport: every message's schema fingerprint checked against its
+  endpoint's; endpoints and calls named by (domain, slot, generation, a
+  random key); bounded queues; a freed place granted to the first waiting
+  sender and held for its retry (never refuse a granted waiter, never let
+  anyone overtake one); no polling anywhere -- a producer pushes then
+  rings, the consumer resets before its last look. One mutex for the
+  transport's tables, never held while Botlish code runs.
+* Capabilities (Remote, Service, Reply) are opaque and sendable through
+  their Identity; the rebuild functions (`*_in`) are internal members
+  (core/transfer.tcl): never make one public or add a constructor of a
+  capability from an Identity. std::actor::Address stays unsendable.
+* A call completes once: with its reply, Undelivered (its endpoint closed
+  with it queued) or ServiceEnded (its service's VM ended owing it); a
+  second, late or unknown answer is Stale. Never leave a call waiting
+  because its service went.
+* The Tcl backends refuse a program that names an entry at lowering
+  (BACKEND THREAD-UNAVAILABLE) and every runtime operation when reached
+  (CORE SEMANTIC THREAD-UNAVAILABLE): never emulate threads there.
+
+If you change hir/threads.tcl, the entry cases of hir/contexts.tcl,
+hir/traits.tcl's Sendable selection, core/thread.tcl, the thread dispatch
+or entry roots in native/lower.tcl, native/src/runtime/thread.rs, the guard
+reservation (records.rs), stdlib/thread.bot, stdlib/actor/remote.bot,
+std::actor's post_waiting, or event_loop_linux's per-loop state, run
+`tests/threads.test` (its transport, ABI and broker tests need Linux, cc
+and ar; the GC-stress ones run inside it), `cargo test --release
+--manifest-path native/Cargo.toml --lib runtime::thread`,
+`tests/sendability.test`, `tests/contexts.test`, `tests/actor.test`,
+`tests/event-loop-linux.test`, `tests/concurrent-vms.test` and
+`audit/threads/tools/mutate.tcl` (every mutant in its `mutants.txt` that
+applies to the host must still apply and be killed by a detector its `!!`
+line names: update a mutant's text when you change the code it mutates,
+keeping it a mutant of the same rule), plus the per-thread runtime and
+event-loop harnesses for a change to code they share.
+`bench/threads.tcl` is the performance report.
 
 ## DecimalRounded and scalar refinements
 
@@ -4150,10 +4303,10 @@ a shared library, a C header and a JSON manifest. Keep it so:
   message. Nothing unwinds across the boundary (`guarded`).
 * A library's every symbol but its public C names is local (`objcopy
   --keep-global-symbols`): each library carries a private runtime, and a
-  call makes its own program the thread's current one and restores the
-  previous one (`ProgramScope`). Never let two libraries share a symbol,
-  a static or the active program, and never fix a collision with a global
-  lock or a singleton.
+  call reads its own program through the Vm it runs in (`Vm::info`; no
+  thread's current program to swap: Per-VM and per-thread runtime state,
+  above). Never let two libraries share a symbol, a static or a program,
+  and never fix a collision with a global lock or a singleton.
 * Instances are explicit (`NAME_create`/`NAME_destroy`), thread-affine,
   one call at a time (WRONG-THREAD, REENTRANT-CALL), looked up by ticket
   (INVALID-INSTANCE). A library installs no signal handler, never `_exit`s
@@ -6036,7 +6189,8 @@ transport, scheduling and presentation, never semantics. Keep it so:
 
 * Every semantic answer is the service's: diagnostics are
   `service::diagnostics` re-encoded, hover, definition and references are
-  `service::at`'s facts, Compilerpedia topics `service::explain`'s and the
+  `service::at`'s facts, semantic tokens `service::tokens`' (Syntax
+  highlighting, below), Compilerpedia topics `service::explain`'s and the
   facts' own (by identity). Never match names, parse formatted CLI output,
   run a second analysis or resolver, or compute a type in `lsp/`. The one
   presentation choice: a program with no analysis (a loader error) also
@@ -6152,6 +6306,71 @@ mutation tools for a change to what they cover.
 programs and their repairs establish; `bench/syntax-recovery.tcl` regenerates
 the performance report, and `bench/lsp.tcl -malformed 1` the language
 server's editing session through syntax errors.
+
+## Syntax highlighting and the token IR
+
+Everything that highlights Botlish reads one statement of what each token
+is, or is checked against it (SYNTAX-HIGHLIGHTING-MILESTONE-1.md): the
+token IR (`surface/tokens.tcl`: tokens, comments, lexical diagnostics with
+their recovery roles, the inserted closers, and the identifiers a parse
+read as contextual words), its highlight classes
+(`surface::tokens::classes`), the command line's excerpts and color
+(main.tcl's "Diagnostic presentation"), the compiler service's tokens
+(`service::tokens`), the language server's semantic tokens, and the
+generated editor grammars. The lexer and the parser stay in Tcl
+(BOTLISH-LEXER-RATIONALE.md). Keep it so:
+
+* One IR: `surface::tokens::toLexed (fromLexed L)` is exactly the lexer's
+  result L, so the IR holds everything the parser reads; a later lexer in
+  another language produces the IR and is checked by `validate`. Never let
+  a highlighter read the lexer's or the parser's internals instead, and
+  never add a syntax-tree level to the IR without a design of its own (the
+  AST is no specified format).
+* Contextual words are the parser's: every identifier it consumes as a word
+  goes through `surface::parser::Word` (or `WordAt`), every such word is in
+  `surface::parser::words`, and a word compared only to refuse a construct
+  is in `refusedWords`. Never classify a word by its spelling anywhere
+  else, and never let the recording change the AST (`surface::parse` drops
+  the words; the AST of every file must stay what it was).
+* Presentation never changes a diagnostic: excerpts and color are on only
+  where `-color`/`-excerpts` say (auto: a terminal, a channel with Tcl's
+  `-mode`; never on Windows; NO_COLOR, TERM=dumb), and a pipe or a file
+  gets the plain format byte for byte. An excerpt reads the diagnostic's
+  structured location and the text the compilation read (the revision's,
+  else the source seam's), never the message text.
+* `service::tokens` adds no semantics: lexical classes are the IR's,
+  declarations and annotations the AST's spans, names the HIR's bindings; a
+  name with no binding gets no token. Tokens are a revision's query index
+  (prepare builds them, export and import carry them): a new derived kind
+  goes into `service::import`'s list too. The server answers them by its
+  stale rule (fresh; else wait for a pending analysis; else the unchanged
+  text's) and never invents one.
+* The editor grammars are generated (`tools/editor-grammars.tcl generate`):
+  never edit editors/vscode/syntaxes/botlish.tmLanguage.json,
+  editors/neovim/syntax/botlish.vim or the fixture's sample.classes.json by
+  hand. The lexer's keywords are each in one group, every registered word
+  has a pattern and no pattern names another (generation fails otherwise).
+  A declared name (after `fn`, `struct`, `type`, `error`) is the syntax
+  tree's (`grammars::Declared`), never a name a pattern merely follows.
+  A new contextual word is registered, consumed with Word, given a pattern
+  (TextMate and Vim, matching it only where the parser reads it) and placed
+  in the fixture (editors/vscode/test/fixtures/sample.bot) where it is read.
+
+If you change the lexer's recording (`comments`) or recovery metadata, the
+parser's word recording, surface/tokens.tcl, main.tcl's presentation,
+`service::tokens`, the server's semantic tokens, the generator or the
+fixture, run tests/syntax-highlighting.test (its grammar tests need `vim`,
+and `npm ci` in editors/vscode for VS Code's engine), tests/lsp.test,
+tests/main-cli.test, tests/compiler-service.test, `tclsh9.0
+tools/editor-grammars.tcl check`, `npm test` in editors/vscode,
+`audit/syntax-highlighting/tools/mutate.tcl` (every mutant in its
+`mutants.txt` must still apply and be killed by a test its `!!` line names:
+update a mutant's text when you change the code it mutates, keeping it a
+mutant of the same rule), and on a branch tests.yml for
+tests/lsp-neovim.test (`lsp-neovim-highlighting`, which needs Neovim); a
+change to the lexer or the parser also compares the AST of every
+repository `.bot` file with the tree before the change, and runs the
+syntax-recovery and diagnostic-recovery harnesses (above).
 
 ## Compilerpedia (the built-in reference)
 

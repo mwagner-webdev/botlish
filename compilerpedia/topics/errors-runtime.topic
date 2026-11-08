@@ -1633,3 +1633,62 @@ On -emit-native-library (native::library), after the program compiled:
 Move a top-level constant or computation into a function, or into an
 imported module (where a top-level binding is a module static); rename a
 clashing export; install binutils and a C compiler for TOOL.
+
+@topic error.c-unsupported
+title: C UNSUPPORTED: a construct the C backend does not compile yet
+summary: C UNSUPPORTED reports, at compile time and at the construct, a valid program part that -emit-c cannot translate to C correctly yet; it is a limit of the backend, never a missing runtime service.
+index: errors backends
+alias: c backend does not support; cannot compile to c; emit-c unsupported
+keywords: -emit-c, C, freestanding, String, List, closure, Float64, function value, payload
+related: backend.c error.c-runtime-limit cli.options
+code: C UNSUPPORTED
+code: C INPUT
+
+== MEANING
+On -emit-c only (backend.c); the program is valid and runs on every other
+backend. The C backend compiles a subset of the language in milestone 1 --
+Ints, Bools, unit, enums, structs, a List literal as a value, functions
+called directly, if, loops and folds, declared errors and their handlers --
+and rejects the rest with this code, located at the construct (one
+diagnostic per construct the program reaches), rather than translate it
+approximately: Strings, Lists whose length is not known statically, loops
+over Lists, closures and function values, Float64, error payloads, Result
+values, contexts, coroutines, C calls, and the bitwise operations and
+shift_left of Ints the compiler cannot prove fit int64_t. Nothing is
+written.
+
+It is not a missing runtime service: what the generated C can call but
+not implement itself (arbitrary-precision arithmetic) compiles, and is
+listed in FILE.runtime.json for the link.
+
+C INPUT is an input -emit-c cannot read: a .ir file (core IR text).
+
+== WHAT TO DO
+Run the program on another backend, or keep the C-compiled part to the
+subset: a collecting loop's List becomes a fold, a String a enum, an
+unbounded Int a domain (`type Count = Int in 0..1000000`).
+
+@topic error.c-runtime-limit
+title: C RUNTIME LIMIT: a runtime service ran out of storage
+summary: A program -emit-c generated ends with C RUNTIME LIMIT when a runtime service's provider runs out of storage, and with C RUNTIME FAULT when a provider returns an undefined status.
+index: errors backends
+alias: runtime service failed; provider out of memory; botlish_rt_v1 limit
+keywords: -emit-c, provider, runtime service, BOTLISH_RT_V1_LIMIT, arena, storage
+related: backend.c error.c-unsupported error.native-limit-stack
+code: C RUNTIME LIMIT
+code: C RUNTIME FAULT
+
+== MEANING
+At run time, in a program -emit-c generated (backend.c), reported by
+FILE_status_code. A runtime service returns BOTLISH_RT_V1_LIMIT when the
+provider cannot hold a result -- a bigger Int than its storage holds --
+and the program ends with C RUNTIME LIMIT. A provider never returns a wrong
+value instead. Like running out of memory on any backend, it is a limit of
+the environment, not of the language: no Botlish handler catches it. C
+RUNTIME FAULT is a status of a provider the interface does not define (a
+provider's defect).
+
+== WHAT TO DO
+Give the provider more storage (the reference provider's
+BOTLISH_RT_INT_ARENA_LIMBS), or keep the program's Ints within int64_t with
+integer domains, which needs no service at all.

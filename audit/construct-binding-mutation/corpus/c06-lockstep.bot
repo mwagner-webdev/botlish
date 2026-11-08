@@ -1,0 +1,16 @@
+# category: lockstep-element (List)
+# class: C -- silently discarded write
+# intended: push each b onto the matching a (lengths [2, 2])
+# actual: the lockstep variable `a` is a copy per iteration; `as` keeps [1, 1]
+# expect: [1, 1]
+import std::mutable_vector
+
+fn run() -> List[int]:
+    as = [std::mutable_vector::from_list([1]), std::mutable_vector::from_list([2])]
+    bs = [10, 20]
+    loop a in as and b in bs:
+        a.push(b)
+    loop a in as:
+        a.length()
+
+run()

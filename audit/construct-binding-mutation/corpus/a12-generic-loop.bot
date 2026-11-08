@@ -1,0 +1,15 @@
+# category: loop-element in an untyped (generic) function
+# class: A -- productive: the specialization mutates and collects each copy
+# expect: [[3], [2]]
+import std::mutable_vector
+
+fn widen(rows):
+    loop row in rows:
+        row.push(0)
+        row.length()
+
+rows = [std::mutable_vector::from_list([1, 2])]
+w = widen(rows)
+after = loop row in rows:
+    row.length()
+[w, after]

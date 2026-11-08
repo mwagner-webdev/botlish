@@ -359,7 +359,7 @@ private fn turn_checked(context ev: Loop, d: Driver) -> int errors IndexNotFound
 %% el-linux-wake el-linux-lost-wakeup-control el-linux-idle
 ## packages/event_loop_linux/native/event_loop_linux.c
 <<<<
-        signal = E.npending == 1;
+        signal = E->npending == 1;
 ====
         signal = 0;
 >>>>
@@ -368,23 +368,23 @@ private fn turn_checked(context ev: Loop, d: Driver) -> int errors IndexNotFound
 %% el-linux-reset-window el-linux-wake
 ## packages/event_loop_linux/native/event_loop_linux.c
 <<<<
-            reset_wakefd();
-            E.reset_owed = 0;
-            drain_pending();
-            if (E.rot_count > 0 || __atomic_load_n(&E.wake_owed, __ATOMIC_SEQ_CST)) timeout = 0;
+            reset_wakefd(E);
+            E->reset_owed = 0;
+            drain_pending(E);
+            if (E->rot_count > 0 || __atomic_load_n(&E->wake_owed, __ATOMIC_SEQ_CST)) timeout = 0;
 ====
-            reset_wakefd();
-            E.reset_owed = 0;
-            if (__atomic_load_n(&E.wake_owed, __ATOMIC_SEQ_CST)) timeout = 0;
+            reset_wakefd(E);
+            E->reset_owed = 0;
+            if (__atomic_load_n(&E->wake_owed, __ATOMIC_SEQ_CST)) timeout = 0;
 >>>>
 
 @@ c-wake-not-owed a wake the eventfd's reset swallowed is not owed to the pumps: the loop sleeps with a pumped source's event waiting (the bug this milestone's race test found)
 %% el-linux-reset-window
 ## packages/event_loop_linux/native/event_loop_linux.c
 <<<<
-            if (E.rot_count > 0 || __atomic_load_n(&E.wake_owed, __ATOMIC_SEQ_CST)) timeout = 0;
+            if (E->rot_count > 0 || __atomic_load_n(&E->wake_owed, __ATOMIC_SEQ_CST)) timeout = 0;
 ====
-            if (E.rot_count > 0) timeout = 0;
+            if (E->rot_count > 0) timeout = 0;
 >>>>
 
 @@ c-hybrid-unannounced SDL's hybrid watch wakes the loop without announcing the event (SDL calls a watch before it queues the event): a check that runs first finds nothing and the event waits for an unrelated wake (the race tests/event-loop/native/sdl.c's mode 3 had)
@@ -403,14 +403,14 @@ private fn turn_checked(context ev: Loop, d: Driver) -> int errors IndexNotFound
 <<<<
             if (more) {
                 ep->rotating = 1;
-                rot_push(s);
+                rot_push(E, s);
             }
 ====
             if (more) {
                 ep->rotating = 1;
-                E.rot_head = (E.rot_head + MAX_SOURCES) % (MAX_SOURCES + 1);
-                E.rot[E.rot_head] = s;
-                E.rot_count++;
+                E->rot_head = (E->rot_head + MAX_SOURCES) % (MAX_SOURCES + 1);
+                E->rot[E->rot_head] = s;
+                E->rot_count++;
             }
 >>>>
 
@@ -419,11 +419,11 @@ private fn turn_checked(context ev: Loop, d: Driver) -> int errors IndexNotFound
 ## packages/event_loop_linux/native/event_loop_linux.c
 <<<<
             ep->held = 1;
-            ep->held_rec = E.cur;
+            ep->held_rec = E->cur;
             ep->paused = 1;
 ====
             ep->held = 0;
-            ep->held_rec = E.cur;
+            ep->held_rec = E->cur;
             ep->paused = 1;
 >>>>
 

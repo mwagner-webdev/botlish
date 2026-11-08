@@ -1,0 +1,27 @@
+# category: loop-element (MutableMap entry), a field path of the loop variable
+# class: C -- silently discarded write
+# intended: push 1 onto every vector the map holds (m.at("a") of length 1)
+# actual: the loop variable is an entry {key, value} built from the map's
+#         storage; its value is a copy, and the map keeps an empty vector
+# expect: [2, 0]
+import std::mutable_vector
+import std::mutable_map
+import std::list
+
+fn ints() -> MutableVector[int]:
+    std::mutable_vector::from_list([])
+
+fn run() -> List[int] errors std::mutable_map::KeyNotFound:
+    m = std::mutable_map::create[str, MutableVector[int]]()
+    m.set("a", ints())
+    m.set("b", ints())
+    r = loop e in m:
+        e.value.push(1)
+        e.value.length()
+    a = m.at("a")
+    [r.length(), a.length()]
+
+r = run():
+    on std::mutable_map::KeyNotFound:
+        []
+r

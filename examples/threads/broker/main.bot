@@ -1,0 +1,99 @@
+# main.bot -- the broker example's owner (BOTLISH-OWNED-THREADS-AND-CROSS-
+# THREAD-ACTORS-MILESTONE-1.md): a privileged VM that holds the process's
+# one exclusive device, serves it to two worker threads through a
+# device-service actor, and shuts everything down cooperatively.
+#
+#   owner VM                              worker VMs (2)
+#     Device (acquired once)                DeviceBroker {service}
+#     device-service actor  <-- calls --    handler actors (2 each)
+#       one call at a time   --> replies    ticker, joiner
+#     supervisor task: waits for both workers, closes the service
+#
+# Every request and reply crosses between VMs as transfer bytes; no context,
+# device handle, coroutine, local address or heap object crosses.
+import broker
+import device
+import event_loop_linux
+import std::actor
+import std::actor::remote
+import std::event_loop
+import std::list
+import std::thread
+import worker
+
+# The device-service actor: every call's operation on the owner's Device,
+# one at a time, until its mailbox closes. Each operation suspends inside
+# its device bracket (pause): a service that let another call in meanwhile
+# would show as an overlap in the device's own counters.
+fn service(inbox: std::actor::Inbox[std::actor::remote::Call[broker::DeviceOp, broker::DeviceReply]], context d: device::Device, resume std::actor::Answer) -> std::actor::Exit:
+    rx = std::actor::listen(inbox):
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    n = fold with intermediate n 0:
+        call = std::actor::receive(rx):
+            on std::actor::Closed:
+                break
+        op = call.body
+        device::begin()
+        std::actor::pause()
+        value = if op.kind == 0:
+            device::read(op.addr)
+        else:
+            op.addr.write(op.value)
+        device::finish()
+        std::actor::remote::reply(call.reply, broker::DeviceReply {value: value, serial: n})
+        n + 1
+    std::actor::exit(n)
+
+# Waits for both workers to end, then closes the service's mailbox (its
+# actor ends) and the port: the loop then ends.
+fn supervise(a: std::thread::ThreadId, b: std::thread::ThreadId, calls: std::actor::Address[std::actor::remote::Call[broker::DeviceOp, broker::DeviceReply]], context ev: std::event_loop::Loop, ac: std::actor::Actors, p: std::thread::Port, db: std::thread::Doorbell) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    std::thread::wait_end(a)
+    std::thread::wait_end(b)
+    std::actor::close(calls)
+    std::thread::close_port()
+    0
+
+fn owner(context ev: std::event_loop::Loop, drv: std::event_loop::Driver, ac: std::actor::Actors, t: std::thread::Threads, p: std::thread::Port, db: std::thread::Doorbell, d: device::Device) -> List[any] errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered, std::thread::ThreadLimit, std::thread::ThreadStartFailed, std::thread::ThreadFailed:
+    acquired = device::acquire()
+    again = device::acquire()
+    std::thread::serve()
+    {to: calls, inbox} = std::actor::open[std::actor::remote::Call[broker::DeviceOp, broker::DeviceReply]](16)
+    svc = std::actor::remote::serve_calls(calls, 16)
+    s = inject context device::Device:
+        coroutine {step, first} = service(inbox)
+        std::actor::spawned(step, first)
+    std::actor::start(s)
+    {thread: t1, id: i1} = std::thread::start(std::thread::entry(worker::worker), worker::WorkerInit {id: 1, jobs: 60, service: svc})
+    {thread: t2, id: i2} = std::thread::start(std::thread::entry(worker::worker), worker::WorkerInit {id: 2, jobs: 60, service: svc})
+    coroutine {step: sup, first: f} = supervise(i1, i2, calls)
+    std::event_loop::adopt(sup, f)
+    std::event_loop::run()
+    w1 = std::thread::join(t1)
+    w2 = std::thread::join(t2)
+    outcomes = loop o in std::event_loop::take_outcomes():
+        o.value
+    counters = device::stats()
+    device::release()
+    [acquired, again, w1.calls, w1.confirmed, w1.failures, w1.ticks, w2.calls, w2.confirmed, w2.failures, w2.ticks, outcomes, counters]
+
+with context std::event_loop::create(64)
+with context event_loop_linux::create()
+with context event_loop_linux::native()
+with context std::actor::create()
+with context std::thread::create(4)
+with context std::thread::port()
+with context device::create()
+owner():
+    on std::event_loop::SchedulerFault:
+        ["scheduler fault"]
+    on std::event_loop::DriverFault {code}:
+        ["driver fault", code]
+    on std::event_loop::LoopReentered:
+        ["reentered"]
+    on std::thread::ThreadLimit:
+        ["thread limit"]
+    on std::thread::ThreadStartFailed {reason}:
+        ["start failed", reason]
+    on std::thread::ThreadFailed {identity, message}:
+        ["failed", identity, message]

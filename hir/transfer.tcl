@@ -66,7 +66,7 @@
 namespace eval hir::transfer {
     # The natives whose calls this file elaborates, and the run-time
     # operations they become.
-    variable operations {std::transfer::encode transfer#encode std::transfer::decode transfer#decode}
+    variable operations {std::transfer::encode transfer#encode std::transfer::decode transfer#decode std::transfer::fingerprint ""}
     # The format version this compiler writes and reads (core/transfer.tcl).
     variable version 1
 }
@@ -444,6 +444,8 @@ proc hir::transfer::Elaborate {hirVar} {
         set args [dict get $node args]
         if {$name eq "std::transfer::encode"} {
             set type [hir::typeOf $hir [lindex $args 0]]
+        } elseif {$name eq "std::transfer::fingerprint"} {
+            set type [ImprintedType $hir $e]
         } else {
             set type [hir::typeOf $hir $e]
         }
@@ -456,6 +458,17 @@ proc hir::transfer::Elaborate {hirVar} {
             continue
         }
         set schema [Schema $type]
+        if {$name eq "std::transfer::fingerprint"} {
+            # The constant itself: the call becomes the String of T's
+            # fingerprint (the one its transfers' bytes carry).
+            set node [dict get $hir exprs $e]
+            set fingerprint [lindex [RuntimeText $schema] 1]
+            set literal [hir::syntax::constNode [dict get $node origin] str $fingerprint]
+            dict set hir exprs $e [dict merge $literal [dict create id $e \
+                scope [dict get $node scope] type [hir::types::intern hir str] reachable [dict get $node reachable] \
+                value [core::value::str $fingerprint]]]
+            continue
+        }
         set refs {}
         foreach f [dict get $schema fns] {
             if {$parent eq ""} {
@@ -470,6 +483,16 @@ proc hir::transfer::Elaborate {hirVar} {
         # specialization -- reads its result type from it.)
         dict set hir exprs $e args [list [lindex $args 0] [hir::mutvec::NewConst hir [RuntimeText $schema] $e] $fns]
     }
+}
+
+# The type the imprint variable T of call E is bound to (std::transfer::
+# fingerprint[T]), or "" when the call has no binding.
+proc hir::transfer::ImprintedType {hir e} {
+    set binding [hir::imprint::BindingOf $hir $e]
+    if {$binding eq "" || ![dict exists $binding T]} {
+        return ""
+    }
+    return [dict get $binding T]
 }
 
 # A reference, placed like expression AT, to the owner function QUALIFIED

@@ -154,6 +154,8 @@ enum DiagnosticCode:
     ResourceDeclaration,
     ReturnOutsideCallable,
     SendableDeclaration,
+    ThreadEntryPlacement,
+    ThreadEntryReference,
     TraitImplOrder,
     TraitInstanceBudget,
     TraitNestedPolymorphic,
