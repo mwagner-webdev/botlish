@@ -341,6 +341,36 @@ mod tests {
         assert_eq!(main_thread_startup(&Triple::host()), crate::runtime::aot::MAIN_THREAD_STARTUP);
     }
 
+    /// The table states this driver's own runtime: code generation reads
+    /// the constants, emission for another target compares the table's row
+    /// with them (ANDROID-AARCH64-TARGET-SUPPORT-MILESTONE-1.md). A
+    /// `fallback-roots` build's runtime is no row's.
+    #[test]
+    fn host_runtime_is_the_tables() {
+        if cfg!(feature = "fallback-roots") {
+            assert_ne!(runtime_capabilities(&Triple::host()), Some(host_runtime()));
+        } else {
+            assert_eq!(runtime_capabilities(&Triple::host()), Some(host_runtime()));
+        }
+    }
+
+    /// Android AArch64 is emitted for (its runtime is Linux AArch64's
+    /// capabilities over Bionic), never confused with Linux AArch64, and a
+    /// target with no Botlish runtime is emitted for by no driver.
+    #[test]
+    fn emission_is_the_targets_runtime() {
+        let android = parse_triple("aarch64-linux-android").unwrap();
+        let linux = parse_triple("aarch64-unknown-linux-gnu").unwrap();
+        assert!(!same_target(&android, &linux));
+        assert_eq!(runtime_capabilities(&android), runtime_capabilities(&linux));
+        assert_eq!(runtime_capabilities(&parse_triple("aarch64-unknown-linux-musl").unwrap()), None);
+        assert_eq!(runtime_capabilities(&parse_triple("x86_64-linux-android").unwrap()), None);
+        if !cfg!(feature = "fallback-roots") {
+            assert!(emits(&android).is_ok());
+        }
+        assert!(emits(&parse_triple("aarch64-unknown-linux-musl").unwrap()).unwrap_err().contains("no Botlish native runtime exists"));
+    }
+
     #[test]
     fn apple_aarch64_is_not_the_linux_aarch64_convention() {
         assert_ne!(conv("aarch64-apple-darwin"), conv("aarch64-unknown-linux-gnu"));

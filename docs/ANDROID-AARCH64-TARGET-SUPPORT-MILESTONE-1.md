@@ -624,7 +624,7 @@ Observed on this container, each with a private `-tmpdir`:
 | `tests/package-native.test` | 38 / 39, 1 skipped (its constraint) |
 | `tests/main-cli.test` | 72 / 72 |
 | `tests/system-linker.test` | 15 / 15 |
-| `cargo test --release --bin botlish-native -- target:: aot::` | 38 / 38 |
+| `cargo test --release --bin botlish-native -- target:: aot::` | 38 / 38; `codegen::target` 11 / 11 with the two new tests (`host_runtime_is_the_tables`, `emission_is_the_targets_runtime`) |
 | `tools/compilerpedia.tcl check` | 0 problems |
 | `tools/mutant-catalogs.tcl` | 93 catalogs, 0 problems |
 
