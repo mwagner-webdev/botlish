@@ -586,7 +586,7 @@ proc etEditSupport {app map} {
 
 test et-target-support-links {an explicitly named target support package's runtime archive links the executable (the driver's own is not used)} -constraints {nativeLibraries tools} -body {
     set app [etSupportProject]
-    set result [withEnvironment {BOTLISH_NATIVE_RUNTIME /nonexistent/libbotlish_runtime.a} {
+    set result [withEnvironment {BOTLISH_NATIVE_RUNTIME /nonexistent/libbotlish_runtime.a BOTLISH_NATIVE_LINKER system} {
         etRun $app -emit-native-executable -target-support botlish_target_linux hello.bot
     }]
     set value [withEnvironment [list BOTLISH_NATIVE_RESULT [file join $app result.txt]] {exec $app/hello}]
@@ -686,7 +686,7 @@ test et-target-support-archive-identity {an archive's identity record decides: a
 
 test et-target-support-toolchain {a missing host toolchain is the driver's own error, never a target support refusal} -constraints {nativeLibraries tools} -body {
     set app [etSupportProject]
-    set result [withEnvironment {BOTLISH_NATIVE_SYSTEM_LINKER /nonexistent/cc} {
+    set result [withEnvironment {BOTLISH_NATIVE_SYSTEM_LINKER /nonexistent/cc BOTLISH_NATIVE_LINKER system} {
         etRun $app -emit-native-executable -target-support botlish_target_linux hello.bot
     }]
     lassign $result status - err
@@ -864,7 +864,10 @@ test et-tool-output-self-contained {what the tools generate names nothing of thi
     etRun $app tool -out $gen/host -artifact lib/game.manifest.json host-module
     set found {}
     foreach file [lsort [glob -directory $gen -type f -- */* */*/*]] {
-        if {[string first $::projectRoot [readBinary $file]] >= 0} {
+        # The project's and the output's own paths mapped out first: they
+        # lie inside the checkout when the temporary directory does.
+        set text [string map [list [file normalize $app] APP [file normalize $gen] OUT $app APP $gen OUT] [readBinary $file]]
+        if {[string first $::projectRoot $text] >= 0} {
             lappend found [file tail $file]
         }
     }

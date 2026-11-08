@@ -109,7 +109,7 @@ refuses, before anything runs:
 | TOOL-INPUT | a required input kind has no `-artifact` |
 | TOOL-ARTIFACT | an `-artifact` is not a schema 2 native library manifest, describes a library of another target than `-target`, or a file it describes is missing or not the one it describes (SHA-256) |
 | TOOL-TARGET-SUPPORT | `-target-support NAME` names no installed dependency of the project with a support descriptor for the target |
-| TOOL-OUTPUT | `-out` lies inside the project's `.bot_modules` or the compiler's own files |
+| TOOL-OUTPUT | `-out` lies inside the project's `.bot_modules` (the installation, which no tool writes), or is no directory |
 | TOOL-EXEC | the program cannot be started (the temporary directory does not allow execution; no `/bin/sh`) |
 | TOOL-ARGUMENT | Windows only: a word Tcl's exec reads as a redirection (below) |
 

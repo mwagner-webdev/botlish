@@ -687,14 +687,17 @@ proc pm::tools::Support {ctx descriptor name target} {
 }
 
 # Refuses OUT as a tool's output directory when it lies inside the
-# project's .bot_modules (the installation, which no tool writes) or the
-# compiler's own files; makes it.
+# project's .bot_modules (the installation, which no tool writes: the
+# snapshot after the run checks it whatever OUT is); makes it. The
+# compiler's own directory is no refusal of its own: a packaged compiler's
+# files are an archive's mount, which no other process can write, and a
+# checkout's directory holds the developer's projects and test directories
+# beside the compiler (a tool runs with the user's permissions: this guards
+# against a mistake, never isolates).
 proc pm::tools::Output {ctx out} {
     set modules [file normalize [dict get $ctx modules]]
-    foreach {forbidden what} [list $modules "the project's installed packages" [file normalize $::pm::root] "the compiler's own files"] {
-        if {$out eq $forbidden || [string first $forbidden/ $out/] == 0} {
-            pm::Fail TOOL-OUTPUT "-out $out lies inside $what ($forbidden): a tool writes its output elsewhere"
-        }
+    if {$out eq $modules || [string first $modules/ $out/] == 0} {
+        pm::Fail TOOL-OUTPUT "-out $out lies inside the project's installed packages ($modules): a tool writes its output elsewhere"
     }
     if {[pm::Exists $out] && [file type $out] ne "directory"} {
         pm::Fail TOOL-OUTPUT "-out $out is a [file type $out], not a directory"

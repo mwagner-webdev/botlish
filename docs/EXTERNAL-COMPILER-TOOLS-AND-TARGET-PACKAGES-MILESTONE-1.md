@@ -583,6 +583,22 @@ tests.yml runs `tests/external-tools.test` with the whole Tcl suite (its
 tests need a Linux x86-64 host and cc; the AArch64 fixtures clang and lld,
 the TypeScript check a Node that strips types, else they are skipped).
 
+What the branch's first full CI run found (tests.yml dispatched on the
+merge of main): the stub-linked executables job, which runs the file with
+`BOTLISH_NATIVE_LINKER=stub` and no `-tmpdir` (its temporary directory is
+the checkout), failed 21 tests, for two reasons. First, `-out` was refused
+anywhere inside the compiler's directory, which in a checkout is the whole
+repository (its tests' directories, a developer's `examples/app/build`): the
+refusal is now `.bot_modules` only. A packaged compiler's files are an
+archive's mount, which no tool process can write, so that case never
+guarded anything there. Second, the two tests that link with
+`-target-support` inherited the job's stub linker, which a target support
+package's archive refuses by design (`et-target-support-linker`). They now
+name the system linker, and `et-tool-output-self-contained` maps the
+project's own paths out before looking for the checkout's. Both kinds of
+run pass: the checkout as the temporary directory, under the stub and the
+system linker, and a private `-tmpdir`.
+
 ## 15. Mutation testing
 
 `audit/external-tools/tools/mutate.tcl` applies each mutant of
