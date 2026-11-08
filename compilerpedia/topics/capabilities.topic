@@ -9,7 +9,7 @@ summary: Every facility other languages offer that Botlish lacks or offers only 
 index: concepts
 alias: capabilities; missing features; absent features; unsupported features; does it exist; what is missing; limitations of the language
 keywords: capability, absent, missing, unsupported, limitation, feature, exist, alternative
-related: capability.integer-division capability.string-formatting capability.input capability.files capability.process-exit-status capability.test-timeout capability.concurrency capability.exceptions capability.multi-error-handler capability.lambdas capability.match capability.map-filter capability.null capability.assignment capability.struct-type-import
+related: capability.integer-division capability.string-formatting capability.input capability.files capability.http capability.process-exit-status capability.test-timeout capability.concurrency capability.exceptions capability.multi-error-handler capability.lambdas capability.match capability.map-filter capability.null capability.assignment capability.struct-type-import
 
 == HOW TO FIND OUT WHETHER SOMETHING EXISTS
 Ask for it as you would name it elsewhere: `-help division`, `-help "exit
@@ -489,3 +489,35 @@ importable by short name.
 
 == NEAREST ALTERNATIVE
 Spell the struct qualified (`puzzle15::Board`) after `import puzzle15`.
+
+@topic capability.http
+title: HTTP and HTTPS: absent from the standard library (the http package)
+summary: The standard library has no HTTP, TLS or sockets; an HTTP/1.1 and HTTP/2 client with TLS is the Linux x86-64 package `http`, installed with `botlish add`.
+index: concepts
+alias: http; https; http client; tls; ssl; web request; fetch; download; rest api; curl; sockets; networking
+keywords: http, https, tls, ssl, client, request, response, fetch, url, uri, network, socket, download
+related: capability.concurrency capability.files
+
+== STATUS
+Nothing in `std` opens a network connection: no HTTP, TLS, DNS or socket
+function exists in the standard library or the compiler, and none is
+planned there: the engines are native code a package carries. An HTTP/1.1
+and HTTP/2 client with TLS verification is the official package `http`,
+for Linux x86-64 only. It has no server, no HTTP/3, no WebSocket, no
+redirects, cookies, proxies or decompression, and one thread of a process
+uses it at a time.
+
+== NEAREST ALTERNATIVE
+Install the package and its driver from a repository of released
+artifacts, then follow the README and the user's guide that come with the
+package (in .bot_modules/http):
+
+    botlish add http -repository REPO -target linux-x86_64
+    botlish add event_loop_linux -repository REPO -target linux-x86_64
+
+A program installs the loop, the Linux driver, its integration capability
+and the HTTP runtime as contexts, and sends requests from a task of the
+loop (`std::event_loop::adopt`): a request waits without blocking the
+loop's other tasks. Linking it needs the host's C compiler driver (`cc`),
+the C++ standard library's link name (`libstdc++.so`) and, for HTTPS, a
+trust bundle (`ca-certificates`).
