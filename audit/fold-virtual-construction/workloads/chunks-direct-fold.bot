@@ -1,0 +1,65 @@
+# chunks-direct-fold.bot -- FOLD-VIRTUAL-LIST-CONSTRUCTION-MILESTONE-1.md's
+# chunk workload reduced to a direct List[List[int]] intermediate (no
+# struct: FOLD-LOOPS-MILESTONE-1.md's chunks-fold.bot carries a struct, whose
+# List fields this milestone leaves alone). Every control shape of a fold
+# body extends, keeps or ends the intermediate:
+#
+#   a separator (0)        continue: the intermediate is kept
+#   a negative token t     two inner Lists appended, [t] then [-t]
+#   the token 1            an empty inner List appended
+#   the token 2            the intermediate itself: retained unchanged
+#   the end marker         break: the fold ends with the current intermediate
+#   any other token t      one inner List appended, [t, t + 1]
+#
+# Sibling: chunks-direct-recursive.bot (the same transitions as self tail
+# calls). tools/measure.tcl rewrites `n = ...` to measure other sizes.
+#
+# expect: [109, 170, 9380]
+
+import std::list
+
+marker = 1000000000
+
+fn token(i: int, n: int) -> int:
+    if i >= n:
+        return marker
+    if i.mod(5) == 4:
+        return 0
+    if i.mod(7) == 6:
+        return -i
+    if i.mod(11) == 10:
+        return 1
+    if i.mod(13) == 12:
+        return 2
+    i
+
+fn chunks(tokens: List[int]) -> List[List[int]]:
+    fold t in tokens with intermediate done []:
+        if t == 0:
+            continue
+        if t >= marker:
+            break
+        if t < 0:
+            done.append([t]).append([-t])
+        elif t == 1:
+            done.append([])
+        elif t == 2:
+            done
+        else:
+            done.append([t, t + 1])
+
+fn size(cs: List[List[int]]) -> int:
+    fold c in cs with intermediate k 0:
+        k + c.length()
+
+fn total(cs: List[List[int]]) -> int:
+    fold c in cs with intermediate s 0:
+        inner = fold x in c with intermediate t 0:
+            t + x
+        s + inner
+
+n = 128
+tokens = loop i from 0 to n + 3:
+    token(i, n)
+cs = chunks(tokens)
+[cs.length(), size(cs), total(cs)]

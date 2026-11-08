@@ -1,0 +1,111 @@
+# many-40.bot -- FOLD-VIRTUAL-LIST-CONSTRUCTION-MILESTONE-1.md's compile-cost
+# input: one function with 40 sequential folds, half of them plan folds and
+# half declined (an observation before the append), all summed at the end
+# (tools/economics.tcl). Generated.
+
+import std::list
+
+fn f(xs: List[int]) -> int:
+    r0 = fold x in xs with intermediate acc [0]:
+        acc.append(x * 1)
+    r1 = fold x in xs with intermediate acc [1]:
+        n = acc.length()
+        acc.append(x + n)
+    r2 = fold x in xs with intermediate acc [2]:
+        acc.append(x * 3)
+    r3 = fold x in xs with intermediate acc [3]:
+        n = acc.length()
+        acc.append(x + n)
+    r4 = fold x in xs with intermediate acc [4]:
+        acc.append(x * 5)
+    r5 = fold x in xs with intermediate acc [5]:
+        n = acc.length()
+        acc.append(x + n)
+    r6 = fold x in xs with intermediate acc [6]:
+        acc.append(x * 7)
+    r7 = fold x in xs with intermediate acc [7]:
+        n = acc.length()
+        acc.append(x + n)
+    r8 = fold x in xs with intermediate acc [8]:
+        acc.append(x * 9)
+    r9 = fold x in xs with intermediate acc [9]:
+        n = acc.length()
+        acc.append(x + n)
+    r10 = fold x in xs with intermediate acc [10]:
+        acc.append(x * 11)
+    r11 = fold x in xs with intermediate acc [11]:
+        n = acc.length()
+        acc.append(x + n)
+    r12 = fold x in xs with intermediate acc [12]:
+        acc.append(x * 13)
+    r13 = fold x in xs with intermediate acc [13]:
+        n = acc.length()
+        acc.append(x + n)
+    r14 = fold x in xs with intermediate acc [14]:
+        acc.append(x * 15)
+    r15 = fold x in xs with intermediate acc [15]:
+        n = acc.length()
+        acc.append(x + n)
+    r16 = fold x in xs with intermediate acc [16]:
+        acc.append(x * 17)
+    r17 = fold x in xs with intermediate acc [17]:
+        n = acc.length()
+        acc.append(x + n)
+    r18 = fold x in xs with intermediate acc [18]:
+        acc.append(x * 19)
+    r19 = fold x in xs with intermediate acc [19]:
+        n = acc.length()
+        acc.append(x + n)
+    r20 = fold x in xs with intermediate acc [20]:
+        acc.append(x * 21)
+    r21 = fold x in xs with intermediate acc [21]:
+        n = acc.length()
+        acc.append(x + n)
+    r22 = fold x in xs with intermediate acc [22]:
+        acc.append(x * 23)
+    r23 = fold x in xs with intermediate acc [23]:
+        n = acc.length()
+        acc.append(x + n)
+    r24 = fold x in xs with intermediate acc [24]:
+        acc.append(x * 25)
+    r25 = fold x in xs with intermediate acc [25]:
+        n = acc.length()
+        acc.append(x + n)
+    r26 = fold x in xs with intermediate acc [26]:
+        acc.append(x * 27)
+    r27 = fold x in xs with intermediate acc [27]:
+        n = acc.length()
+        acc.append(x + n)
+    r28 = fold x in xs with intermediate acc [28]:
+        acc.append(x * 29)
+    r29 = fold x in xs with intermediate acc [29]:
+        n = acc.length()
+        acc.append(x + n)
+    r30 = fold x in xs with intermediate acc [30]:
+        acc.append(x * 31)
+    r31 = fold x in xs with intermediate acc [31]:
+        n = acc.length()
+        acc.append(x + n)
+    r32 = fold x in xs with intermediate acc [32]:
+        acc.append(x * 33)
+    r33 = fold x in xs with intermediate acc [33]:
+        n = acc.length()
+        acc.append(x + n)
+    r34 = fold x in xs with intermediate acc [34]:
+        acc.append(x * 35)
+    r35 = fold x in xs with intermediate acc [35]:
+        n = acc.length()
+        acc.append(x + n)
+    r36 = fold x in xs with intermediate acc [36]:
+        acc.append(x * 37)
+    r37 = fold x in xs with intermediate acc [37]:
+        n = acc.length()
+        acc.append(x + n)
+    r38 = fold x in xs with intermediate acc [38]:
+        acc.append(x * 39)
+    r39 = fold x in xs with intermediate acc [39]:
+        n = acc.length()
+        acc.append(x + n)
+    r0.length() + r1.length() + r2.length() + r3.length() + r4.length() + r5.length() + r6.length() + r7.length() + r8.length() + r9.length() + r10.length() + r11.length() + r12.length() + r13.length() + r14.length() + r15.length() + r16.length() + r17.length() + r18.length() + r19.length() + r20.length() + r21.length() + r22.length() + r23.length() + r24.length() + r25.length() + r26.length() + r27.length() + r28.length() + r29.length() + r30.length() + r31.length() + r32.length() + r33.length() + r34.length() + r35.length() + r36.length() + r37.length() + r38.length() + r39.length()
+
+f([1, 2, 3])

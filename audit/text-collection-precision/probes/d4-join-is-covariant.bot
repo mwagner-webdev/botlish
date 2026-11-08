@@ -1,0 +1,45 @@
+# probe: the join (lub) of List[Byte] and List[int] is List[int] -- the
+# compiler's own lub treats the Byte List as a member of List[int] -- while
+# admission does not; nonnumeric refinements, nested Lists and ImmutableSet
+# are invariant the same way (D).
+# outcome: reject
+# diagnostic: 33:11 argument for parameter "t" cannot be proven to satisfy str (argument type: List[int])
+# diagnostic: 37:14 argument for parameter "xs" cannot be proven to satisfy List[str] (argument type: List[str[std::web::Emailish]])
+# diagnostic: 40:12 argument for parameter "xss" cannot be proven to satisfy List[List[int]] (argument type: List[List[int[std::byte::Byte]]])
+# diagnostic: 43:14 argument for parameter "s" cannot be proven to satisfy ImmutableSet[int] (argument type: ImmutableSet[int[std::byte::Byte]])
+import std::str
+import std::list
+import std::byte
+import std::web
+import std::immutable_set
+
+fn probe(t: str) -> int:
+    1
+
+fn strs(xs: List[str]) -> int:
+    std::list::length(xs)
+
+fn nested(xss: List[List[int]]) -> int:
+    std::list::length(xss)
+
+fn set_ints(s: ImmutableSet[int]) -> int:
+    1
+
+fn join(c: bool, s: str):
+    xs = if c:
+        s.encode_utf8()
+    else:
+        [1000]
+    probe(xs)
+
+fn emails(s: str):
+    if std::web::emailish?(s):
+        strs([s])
+
+fn nest(s: str):
+    nested([s.encode_utf8()])
+
+fn sets(s: str):
+    set_ints(std::immutable_set::from_list(s.encode_utf8()))
+
+join(true, "a")

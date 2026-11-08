@@ -820,6 +820,16 @@ It has no package-manager, React Native or plugin field. `nl-manifest`
 reads it with `lsp/json.tcl`'s parser and checks its facts against the
 header. `rnpackage.tcl` reads it the same way.
 
+> **Since EXTERNAL-COMPILER-TOOLS-AND-TARGET-PACKAGES-MILESTONE-1.md** the
+> manifest is schema 2: every schema 1 member, and `compiler` (the front
+> end's and the runtime ABI's fingerprints), `sha256` (each artifact file's
+> digest: the build it describes), `reentrancy`, `callbacks`, `ownership`
+> (the conventions as data) and, per export, each parameter's and result's
+> `ownership`, a str result's `release` and the `error` out-parameter's
+> (BOTLISH-TOOLS.md, section 8). Library mode links with
+> `libbotlish_runtime.a` when no `libbotlish_native.a` is beside the driver,
+> as in the single executable, which could not build a library before.
+
 ## 10. JSON/Tcl validation
 
 `audit/compiler-service/probes/export/` was migrated.

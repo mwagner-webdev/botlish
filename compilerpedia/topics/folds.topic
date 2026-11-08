@@ -53,6 +53,21 @@ nothing it does not compute, so a count or a sum needs no List and no
 mutable cell: natively the intermediate is one register carried around
 the loop.
 
+== COST OF A LIST OR STRING INTERMEDIATE
+A List (or String) intermediate that the body only extends --
+`acc.append(x)`, `s.concat(x)`, an `if` that appends or keeps it,
+`continue`, `break` -- is carried natively as a construction plan: each
+append extends it in place and the List is built once, when the fold
+yields it (exhaustion or a break), so appending N elements copies O(N)
+elements, as the same List carried by a self tail call does. The values
+are exactly the eager fold's. It applies when, on every path of an
+iteration, the intermediate is used at most once (a `continue` or
+`break` counts as a use: it passes the intermediate on) and is never
+captured by a function made in the body. Otherwise -- `n = acc.length()`
+before `acc.append(n)`, an append computed before a `break`, both `acc`
+and `acc.append(x)` kept -- the fold runs eagerly and each append copies
+the List so far. A struct intermediate's List fields are always copied.
+
 == EXAMPLES
 @example accept
 fn total(xs: List[int]) -> int:
@@ -89,6 +104,27 @@ fn state(text: List[int]) -> int:
 [first_run([4, 5, -1, 6]), state([1, 1, -1, 1, 1, -1])]
 @caption break ends a fold with its current intermediate; a struct intermediate carries several values
 @value [2, 3]
+@end
+
+@example accept
+import std::list
+
+fn evens_scaled(xs: List[int]) -> List[int]:
+    fold x in xs with intermediate acc []:
+        if x.mod(2) == 1:
+            continue
+        acc.append(x * 10)
+
+fn chunks(xs: List[int]) -> List[List[int]]:
+    fold x in xs with intermediate done []:
+        if x == 0:
+            done
+        else:
+            done.append([x, -x])
+
+[evens_scaled([1, 2, 3, 4]), std::list::flat(chunks([1, 0, 2]))]
+@caption Lists built by folds that only extend their intermediate: each append extends a construction plan, the List is built once
+@value [[20, 40], [1, -1, 2, -2]]
 @end
 
 @example reject

@@ -1,0 +1,19 @@
+# probe: the two accepted widenings of d2, run on every backend (D).
+# outcome: accept
+# value: [[97, 98], [97, 98]]
+import std::str
+import std::list
+import std::byte
+
+fn w_plus_zero(bs: List[std::byte::Byte]) -> List[int]:
+    loop b in bs:
+        b + 0
+
+fn as_int(b: int) -> int:
+    b
+
+fn w_call(bs: List[std::byte::Byte]) -> List[int]:
+    loop b in bs:
+        as_int(b)
+
+[w_plus_zero("ab".encode_utf8()), w_call("ab".encode_utf8())]

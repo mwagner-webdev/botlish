@@ -1,0 +1,23 @@
+# list-recursive.bot -- list-fold.bot's construction as a self tail call:
+# the List is a parameter, which the existing virtual construction pass
+# (M8A-VIRTUAL-IMMUTABLE-CONSTRUCTION.md) carries as a plan register across
+# the back edge. The reference the fold is compared with.
+#
+# expect: [1024, 1572352]
+
+import std::list
+
+fn build_from(xs: List[int], i: int, acc: List[int]) -> List[int]:
+    if i < 0 or i >= xs.length():
+        return acc
+    build_from(xs, i + 1, acc.append(xs.at(i) * 3 + 1))
+
+fn sum(ys: List[int]) -> int:
+    fold y in ys with intermediate s 0:
+        s + y
+
+n = 1024
+xs = loop i from 0 to n:
+    i
+ys = build_from(xs, 0, [])
+[ys.length(), sum(ys)]

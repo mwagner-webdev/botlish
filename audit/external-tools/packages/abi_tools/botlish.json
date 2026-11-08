@@ -1,0 +1,18 @@
+{
+  "schema": 4,
+  "name": "abi_tools",
+  "version": "0.1.0",
+  "dependencies": {},
+  "tools": {
+    "emit-caller": {
+      "protocol": 1,
+      "summary": "generates a C command-line caller of a Botlish native library from its manifest",
+      "programs": {
+        "linux-x86_64": "tools/linux-x86_64/emit-caller"
+      },
+      "inputs": [
+        "native-library"
+      ]
+    }
+  }
+}

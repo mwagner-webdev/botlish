@@ -1,4 +1,4 @@
-# descriptor.tcl -- botlish.json, schemas 1 and 2 (BOTLISH-JSON.md, the
+# descriptor.tcl -- botlish.json, schemas 1 to 4 (BOTLISH-JSON.md, the
 # normative specification; PACKAGE-MANAGER-MILESTONE-1.md and
 # PACKAGE-MANAGER-MILESTONE-2.md).
 #
@@ -28,6 +28,11 @@
 #                 (pm/targets.tcl, BOTLISH-JSON.md section 12)
 #   origins       (schema 2, projects) dict LIBRARY -> system|bundled: the
 #                 consumer's choice where a package offers both
+#   tools         (schema 4 only) dict NAME -> {protocol N summary S programs
+#                 {HOST PATH ...} inputs {KIND...} environment {VAR...}}: the
+#                 programs the package carries for a developer to run
+#                 explicitly (pm/tools.tcl, BOTLISH-TOOLS.md); never run by
+#                 any other operation
 #
 # CONTEXT says which rules apply:
 #
@@ -49,6 +54,9 @@
 namespace eval pm::descriptor {
     variable keys {schema name version dependencies lock sources}
     variable keys2 {schema name version dependencies lock sources targets origins}
+    # Schema 4 (EXTERNAL-COMPILER-TOOLS-AND-TARGET-PACKAGES-MILESTONE-1.md,
+    # BOTLISH-JSON.md section 14) is schema 3 with `tools`.
+    variable keys4 {schema name version dependencies lock sources targets origins tools}
     variable reserved {std}
     variable nameRule {^[a-z][a-z0-9_]{0,63}$}
 }
@@ -102,6 +110,7 @@ proc pm::descriptor::fromBytes {bytes context label} {
 proc pm::descriptor::Validate {value context label} {
     variable keys
     variable keys2
+    variable keys4
     set problems {}
     set result [new]
     if {[pm::json::type $value] ne "obj"} {
@@ -110,17 +119,17 @@ proc pm::descriptor::Validate {value context label} {
     set members [pm::json::payload $value]
     # schema
     if {![dict exists $members schema]} {
-        lappend problems "no \"schema\": a botlish.json starts with \"schema\": 1 (or 2, or 3)"
+        lappend problems "no \"schema\": a botlish.json starts with \"schema\": 1 (or 2, 3 or 4)"
         Raise $label $problems
     }
     set schema [dict get $members schema]
     if {[pm::json::type $schema] ne "num" || ![regexp {^[0-9]+$} [pm::json::payload $schema]]} {
-        lappend problems "\"schema\" must be the number 1, 2 or 3"
+        lappend problems "\"schema\" must be the number 1, 2, 3 or 4"
         Raise $label $problems
     }
     set number [pm::json::payload $schema]
-    if {$number ni {1 2 3}} {
-        lappend problems "unsupported schema $number: this package manager reads schemas 1, 2 and 3 (a newer one needs a newer Botlish)"
+    if {$number ni {1 2 3 4}} {
+        lappend problems "unsupported schema $number: this package manager reads schemas 1, 2, 3 and 4 (a newer one needs a newer Botlish)"
         Raise $label $problems
     }
     dict set result schema $number
@@ -128,10 +137,15 @@ proc pm::descriptor::Validate {value context label} {
         dict set result targets {}
         dict set result origins {}
     }
-    set allowed [expr {$number == 1 ? $keys : $keys2}]
+    if {$number >= 4} {
+        dict set result tools {}
+    }
+    set allowed [expr {$number == 1 ? $keys : ($number < 4 ? $keys2 : $keys4)}]
     foreach {key item} $members {
         if {$key ni $allowed} {
-            if {$number == 1 && $key in $keys2} {
+            if {$key eq "tools" && $number < 4} {
+                lappend problems "\"tools\" is a schema 4 key: a botlish.json declaring tools says \"schema\": 4 (a reader of an earlier schema would not know them)"
+            } elseif {$number == 1 && $key in $keys2} {
                 lappend problems "\"$key\" is a schema 2 key: a botlish.json using it says \"schema\": 2 (schema 1 has [join $keys {, }])"
             } else {
                 lappend problems "unknown key \"$key\" (schema $number has [join $allowed {, }]): a key a later schema adds is never silently ignored"
@@ -240,6 +254,10 @@ proc pm::descriptor::Validate {value context label} {
                 }
             }
         }
+    }
+    # tools (schema 4)
+    if {[dict exists $members tools] && $number >= 4} {
+        dict set result tools [pm::tools::Parse [dict get $members tools] problems]
     }
     # Relations.
     set own [dict get $result name]
@@ -378,6 +396,9 @@ proc pm::descriptor::encode {descriptor {withSources 1}} {
     }
     if {[dict getdef $descriptor targets {}] ne ""} {
         lappend members targets [pm::targets::Value [dict get $descriptor targets]]
+    }
+    if {[dict getdef $descriptor tools {}] ne ""} {
+        lappend members tools [pm::tools::Value [dict get $descriptor tools]]
     }
     if {$withSources && [dict getdef $descriptor origins {}] ne ""} {
         set object {}

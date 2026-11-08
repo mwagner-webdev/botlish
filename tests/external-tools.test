@@ -1,0 +1,880 @@
+# external-tools.test -- explicit compiler extensions through ordinary
+# packages (EXTERNAL-COMPILER-TOOLS-AND-TARGET-PACKAGES-MILESTONE-1.md):
+#
+#   * the artifact manifest: a native library's manifest (schema 2) binds
+#     its build (each file's SHA-256), names the compiler's runtime ABI and
+#     states ownership as data; library mode links with the runtime archive
+#     the single executable carries;
+#   * botlish.json schema 4's `tools`: validation, the canonical form, the
+#     pack's and the acquisition's checks of every tool program;
+#   * explicit activation: installing, verifying, updating, removing,
+#     importing, compiling and listing never run a tool, and an installed
+#     program is never executable; `tool` runs exactly the one it names;
+#   * resolution: unknown, ambiguous, qualified, only a transitive
+#     dependency's, an unsupported protocol, another host's program, the
+#     host's program whatever the compilation target;
+#   * the process boundary: every argument exactly (spaces, Unicode, shell
+#     metacharacters, words Tcl's exec would read as redirections, an empty
+#     one), the standard streams, exit statuses, a crash, structured
+#     diagnostics, the report, a tool that changes the installation;
+#   * inputs: a native library manifest checked against the files it
+#     describes, its schema, its target;
+#   * target support packages: an explicitly named package's runtime archive
+#     links the executable; every refusal (missing, no view, unknown target,
+#     another target, triple, linker, ABI, an archive of another OS ABI, no
+#     identity record, system libraries) before any linker runs; a missing
+#     host toolchain is the driver's own error; the compilation target's
+#     package tree, never the host's;
+#   * the experiments: a generated C caller of a real Botlish library, and a
+#     React-Native-shaped host module, both driving the 2048 engine, compared
+#     with the interpreter; generated output is deterministic.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+source [file join $::projectRoot native native.tcl]
+source [file join $::projectRoot pm pm.tcl]
+source [file join $::projectRoot lsp json.tcl]
+
+testConstraint nativeBuilt [expr {![catch {native::binary}]}]
+testConstraint unix [expr {$::tcl_platform(platform) eq "unix"}]
+testConstraint linuxX86_64Host [expr {[pm::target::host] eq "linux-x86_64"}]
+testConstraint cc [expr {[auto_execok cc] ne ""}]
+testConstraint nativeLibraries [expr {[native::hostSupports libraries] && [testConstraint nativeBuilt]
+    && [auto_execok cc] ne "" && [auto_execok ld] ne "" && [auto_execok objcopy] ne "" && [auto_execok ar] ne ""
+    && [file isfile [file join [file dirname [native::binary]] libbotlish_runtime.a]]}]
+testConstraint tools [expr {[testConstraint unix] && [testConstraint linuxX86_64Host] && [testConstraint cc]}]
+testConstraint aarch64Fixture [expr {[testConstraint tools] && [auto_execok clang] ne "" && [auto_execok ld.lld] ne ""}]
+# Node that strips TypeScript's types (22.6 and later): the host module's
+# spec is checked by loading it.
+testConstraint node [expr {[auto_execok node] ne "" && ![catch {exec node --experimental-strip-types --no-warnings -e 1 2>@1}]}]
+testConstraint nm [expr {[auto_execok nm] ne ""}]
+
+set ::etMain [file join $::projectRoot main.tcl]
+set ::etHere [file join $::projectRoot audit external-tools]
+set ::etCounter 0
+
+proc etDir {{tag t}} {
+    set dir [file join [temporaryDirectory] et-[pid]-$tag-[incr ::etCounter]]
+    file delete -force $dir
+    file mkdir $dir
+    return $dir
+}
+
+proc etWrite {path text} {
+    file mkdir [file dirname $path]
+    set channel [open $path w]
+    fconfigure $channel -encoding utf-8 -translation lf
+    puts -nonewline $channel $text
+    close $channel
+}
+
+proc etRead {path} {
+    set channel [open $path r]
+    fconfigure $channel -encoding utf-8
+    set text [read $channel]
+    close $channel
+    return $text
+}
+
+# Runs main.tcl ARGS in the directory CWD: {STATUS STDOUT STDERR}. STDIN, when
+# given, is the standard input.
+proc etRun {cwd args} {
+    set out [file join [temporaryDirectory] et-out-[pid]]
+    set err [file join [temporaryDirectory] et-err-[pid]]
+    set here [pwd]
+    cd $cwd
+    set status 0
+    try {
+        # Through /bin/sh, every word prefixed with "x" and stripped there:
+        # Tcl's exec reads a word starting with <, >, | or 2> as a
+        # redirection (pm/tools.tcl's trampoline, for the same reason).
+        set words [lmap word [list [info nameofexecutable] $::etMain {*}$args] {string cat x $word}]
+        if {[catch {exec /bin/sh -c $::pm::tools::trampoline sh {*}$words >$out 2>$err} message options]} {
+            set code [dict get $options -errorcode]
+            set status [expr {[lindex $code 0] eq "CHILDSTATUS" ? [lindex $code 2] : -1}]
+        }
+    } finally {
+        cd $here
+    }
+    return [list $status [string trimright [etRead $out] \n] [string trimright [etRead $err] \n]]
+}
+
+# The marker file every probe program appends to when it runs.
+set ::etMarker [file join [temporaryDirectory] et-[pid]-marker.txt]
+proc etRuns {} {
+    if {![file exists $::etMarker]} { return {} }
+    return [split [string trimright [etRead $::etMarker] \n] \n]
+}
+
+# A schema 4 descriptor's text: NAME VERSION, TOOLS {TOOL SPEC} where SPEC is
+# a dict {protocol N summary S programs {HOST PATH} inputs {...}}, DEPS.
+proc etDescriptor {name version tools {deps {}} {locks {}}} {
+    set object {}
+    foreach {tool spec} $tools {
+        set members [list protocol [list num [dict get $spec protocol]] summary [list str [dict getdef $spec summary "a probe tool"]]]
+        set programs {}
+        foreach {host path} [dict get $spec programs] { lappend programs $host [list str $path] }
+        lappend members programs [list obj $programs]
+        if {[dict exists $spec inputs]} {
+            lappend members inputs [list arr [lmap i [dict get $spec inputs] {list str $i}]]
+        }
+        if {[dict exists $spec environment]} {
+            lappend members environment [list arr [lmap i [dict get $spec environment] {list str $i}]]
+        }
+        lappend object $tool [list obj $members]
+    }
+    set members [list schema {num 4} name [list str $name] version [list str $version] \
+        dependencies [list obj [concat {*}[lmap {d r} $deps {list $d [list str $r]}]]]]
+    if {$locks ne ""} {
+        lappend members lock [list obj [concat {*}[lmap {d v} $locks {list $d [list str $v]}]]]
+    }
+    if {$object ne ""} {
+        lappend members tools [list obj $object]
+    }
+    return [encoding convertfrom utf-8 [pm::json::encode [list obj $members]]]
+}
+
+# The fixtures, built once: the probe program (and a tiny AArch64 one), the
+# probe packages, and the experiment's packages (packages.sh). A dict.
+proc etFixtures {} {
+    if {[info exists ::etFixtureCache]} { return $::etFixtureCache }
+    set dir [etDir fixtures]
+    set repo [file join $dir repo]
+    file mkdir $repo
+    set probe [file join $dir probe]
+    exec cc -O2 -DPROBE_MARKER="$::etMarker" -o $probe [file join $::etHere src probe-tool.c]
+    set a64 ""
+    if {[testConstraint aarch64Fixture]} {
+        set a64 [file join $dir a64]
+        etWrite $dir/a64.c "void _start(void) { for (;;) { } }\n"
+        exec clang --target=aarch64-linux-gnu -nostdlib -static -ffreestanding -fuse-ld=lld -o $a64 $dir/a64.c
+    }
+    proc stagePackage {dir name text programs} {
+        set pkg [file join $dir stage $name]
+        file delete -force $pkg
+        etWrite $pkg/botlish.json $text
+        etWrite $pkg/$name.bot "# $name.bot -- a probe package's module.\n\nfn answer() -> int:\n    42\n"
+        foreach {path from} $programs {
+            file mkdir [file dirname $pkg/$path]
+            file copy -force $from $pkg/$path
+        }
+        return $pkg
+    }
+    set tools [list probe {protocol 1 programs {linux-x86_64 tools/probe}} \
+        future {protocol 2 programs {linux-x86_64 tools/probe}} \
+        needs-library {protocol 1 programs {linux-x86_64 tools/probe} inputs native-library} \
+        reads-env {protocol 1 programs {linux-x86_64 tools/probe} environment {ET_SET ET_UNSET}}]
+    set programs [list tools/probe $probe]
+    if {$a64 ne ""} {
+        lappend tools elsewhere {protocol 1 programs {linux-aarch64 tools/a64}} \
+            either {protocol 1 programs {linux-x86_64 tools/probe linux-aarch64 tools/a64}}
+        lappend programs tools/a64 $a64
+    }
+    foreach {name text extra} [list \
+            probe_tools [etDescriptor probe_tools 0.1.0 $tools] $programs \
+            other_tools [etDescriptor other_tools 0.1.0 {probe {protocol 1 programs {linux-x86_64 tools/probe}}}] [list tools/probe $probe] \
+            wrapper [etDescriptor wrapper 0.1.0 {} {probe_tools 0.1} {probe_tools 0.1.0}] {} \
+            lock_tools [etDescriptor lock_tools 0.1.0 {lock-probe {protocol 1 programs {linux-x86_64 tools/probe}}} {shared_lib 0.1} {shared_lib 0.1.0}] [list tools/probe $probe]] {
+        set pkg [stagePackage $dir $name $text $extra]
+        exec [info nameofexecutable] $::etMain package pack $pkg -out $repo -force
+    }
+    foreach version {0.1.0 0.2.0} {
+        set pkg [file join $dir stage shared_lib-$version]
+        file delete -force $pkg
+        etWrite $pkg/botlish.json "\{\"schema\": 1, \"name\": \"shared_lib\", \"version\": \"$version\", \"dependencies\": \{\}\}\n"
+        etWrite $pkg/shared_lib.bot "fn version() -> int:\n    [string map {. {}} $version]\n"
+        exec [info nameofexecutable] $::etMain package pack $pkg -out $repo -force
+    }
+    if {[testConstraint nativeLibraries]} {
+        exec [file join $::etHere tools packages.sh] [file join $dir experiment] [file dirname [native::binary]] \
+            [info nameofexecutable] $::etMain
+        foreach file [glob -directory [file join $dir experiment repo] *.botpkg] {
+            file copy -force $file $repo
+        }
+    }
+    set ::etFixtureCache [dict create dir $dir repo $repo probe $probe a64 $a64]
+    return $::etFixtureCache
+}
+
+# A project directory with PACKAGES (names) added from the fixtures'
+# repository, and with TARGETS prepared.
+proc etProject {packages {targets {}}} {
+    set fixtures [etFixtures]
+    set app [etDir app]
+    etWrite $app/botlish.json "\{\"schema\": 1, \"dependencies\": \{\}\}\n"
+    foreach name $packages {
+        set args [list add $name -repository [dict get $fixtures repo]]
+        foreach target $targets { lappend args -target $target }
+        set result [etRun $app {*}$args]
+        if {[lindex $result 0] != 0} {
+            error "add $name failed: $result"
+        }
+    }
+    return $app
+}
+
+proc etHex {words} {
+    lmap word $words {binary encode hex [encoding convertto utf-8 $word]}
+}
+
+# The JSON value of the file PATH (pm's reader).
+proc etJson {path} {
+    return [pm::json::decode [readBinary $path]]
+}
+proc readBinary {path} {
+    set channel [open $path rb]
+    set bytes [read $channel]
+    close $channel
+    return $bytes
+}
+proc etGet {value args} {
+    foreach key $args {
+        set value [dict get [pm::json::payload $value] $key]
+    }
+    return $value
+}
+
+# ---------------------------------------------------------------- manifests
+
+test et-manifest-binds-build {a native library manifest is schema 2: each file's SHA-256, the runtime ABI, ownership as data} -constraints {nativeLibraries tools} -body {
+    set dir [etDir lib]
+    etWrite $dir/chk.bot "import std::str\n\nerror Rejected:\n    code: int\n\nexported c fn checked(n: int) -> int errors Rejected:\n    if n < 0:\n        fail Rejected \{code: n\}\n    n * 2\n\nexported c fn shout(s: str) -> str:\n    s.concat(\"!!\")\n"
+    lassign [etRun $dir -warnings off -emit-native-library chk -out lib chk.bot] status
+    set m [etJson $dir/lib/chk.manifest.json]
+    set digests [lmap key {static shared header} {
+        expr {[pm::json::payload [etGet $m sha256 $key]] eq [pm::sha256::file $dir/lib/[pm::json::payload [etGet $m artifacts $key]]]}
+    }]
+    set shout [lindex [pm::json::payload [etGet $m exports]] 1]
+    list $status [pm::json::payload [etGet $m schema]] $digests \
+        [expr {[pm::json::payload [etGet $m compiler runtimeAbi]] eq [native::runtimeAbi]}] \
+        [pm::json::payload [etGet $shout result ownership]] [pm::json::payload [etGet $shout result release]] \
+        [pm::json::payload [etGet $shout error release]] [pm::json::payload [etGet [lindex [pm::json::payload [etGet $shout params]] 0] ownership]] \
+        [pm::json::payload [etGet $m ownership str-result release]]
+} -result {0 2 {1 1 1} 1 owned chk_bytes_release chk_error_release borrowed chk_bytes_release}
+
+test et-library-runtime-archive {library mode links with libbotlish_runtime.a when that is the runtime beside the driver (the single executable's), and no main of it} -constraints {nativeLibraries tools nm} -body {
+    set dir [etDir rt]
+    set drivers [file join $dir drivers]
+    file mkdir $drivers
+    file link -symbolic $drivers/botlish-native [native::binary]
+    file link -symbolic $drivers/libbotlish_runtime.a [file join [file dirname [native::binary]] libbotlish_runtime.a]
+    etWrite $dir/one.bot "exported c fn one() -> int:\n    1\n"
+    set result [withEnvironment [list BOTLISH_NATIVE_BIN $drivers/botlish-native] {
+        etRun $dir -emit-native-library one -out lib one.bot
+    }]
+    set symbols [exec nm $dir/lib/libone.a]
+    etWrite $dir/c.c "#include <stdio.h>\n#include \"one.h\"\nint main(void) \{ one_instance *in; one_error *e = NULL; int64_t r = 0; one_create(&in, &e); one_one(in, &r, &e); printf(\"%lld\\n\", (long long)r); one_destroy(in); return 0; \}\n"
+    exec cc -I $dir/lib $dir/c.c $dir/lib/libone.a -lgcc_s -lutil -lrt -lpthread -lm -ldl -lc -o $dir/c
+    list [lindex $result 0] [regexp -line { T main$} $symbols] [exec $dir/c]
+} -result {0 0 1}
+
+# ------------------------------------------------------------ the declaration
+
+test et-schema4-tools-round-trip {schema 4's tools are read and written in the canonical form} -constraints tools -body {
+    set text [etDescriptor kit 1.0.0 {zeta {protocol 1 programs {linux-x86_64 bin/z}} alpha {protocol 1 summary "the first" programs {linux-aarch64 bin/a64 linux-x86_64 bin/a} inputs native-library environment ANDROID_HOME}}]
+    set descriptor [pm::descriptor::fromBytes [encoding convertto utf-8 $text] artifact text]
+    set again [pm::descriptor::encode $descriptor 0]
+    list [dict keys [dict get $descriptor tools]] [dict get $descriptor tools alpha inputs] \
+        [expr {$again eq [pm::descriptor::encode [pm::descriptor::fromBytes $again artifact again] 0]}] \
+        [lmap line [lsearch -all -inline -regexp [split [encoding convertfrom utf-8 $again] \n] {^    "[a-z]+": \{$}] {
+            lindex [regexp -inline {"([a-z]+)"} $line] 1
+        }]
+} -result {{zeta alpha} native-library 1 {alpha zeta}}
+
+test et-schema3-tools-refused {tools are a schema 4 key: an earlier schema's file using it is refused, never half-read} -body {
+    catch {pm::descriptor::fromBytes [encoding convertto utf-8 {{"schema": 3, "name": "kit", "version": "1.0.0", "tools": {}}}] artifact text} message
+    string match {*"tools" is a schema 4 key*} $message
+} -result 1
+
+test et-tools-invalid {every malformed tool declaration is refused, each problem named} -body {
+    set text {{"schema": 4, "name": "kit", "version": "1.0.0", "tools": {
+        "Bad": {"protocol": 1, "summary": "s", "programs": {"linux-x86_64": "a"}},
+        "a": {"protocol": 0, "summary": "s", "programs": {"linux-x86_64": "a"}},
+        "b": {"protocol": 1, "programs": {"linux-x86_64": "a"}},
+        "c": {"protocol": 1, "summary": "s", "programs": {}},
+        "d": {"protocol": 1, "summary": "s", "programs": {"linux-sparc": "a"}},
+        "e": {"protocol": 1, "summary": "s", "programs": {"linux-x86_64": "../a"}},
+        "f": {"protocol": 1, "summary": "s", "programs": {"linux-x86_64": "a"}, "script": "x"},
+        "g": {"protocol": 1, "summary": "s", "programs": {"linux-x86_64": "a"}, "environment": ["A", "A"]},
+        "h": {"protocol": 1, "summary": "s", "programs": {"linux-x86_64": "botlish.json"}}}}}
+    catch {pm::descriptor::fromBytes [encoding convertto utf-8 $text] artifact text} message
+    set lines [lrange [split $message \n] 1 end]
+    list [llength $lines] [lmap pattern {{*"Bad" is not a tool name*} {*"a": "protocol" must be a positive integer*} {*"b": no "summary"*}
+            {*"c": "programs" must be a non-empty object*} {*"linux-sparc" is not a host*} {*"e": programs: "linux-x86_64":*}
+            {*"f": unknown key "script"*} {*"g": environment: "A" is given twice*} {*"h": programs: "linux-x86_64": botlish.json is no program*}} {
+        expr {[lsearch -glob $lines $pattern] >= 0}
+    }]
+} -result {9 {1 1 1 1 1 1 1 1 1}}
+
+test et-tools-empty-refused {an empty tools object is refused: a package without tools leaves it out} -body {
+    catch {pm::descriptor::fromBytes [encoding convertto utf-8 {{"schema": 4, "name": "kit", "version": "1.0.0", "tools": {}}}] artifact text} message
+    string match {*"tools" is empty*} $message
+} -result 1
+
+test et-pack-checks-programs {a package is packed only when every tool program is a file and an executable of its host} -constraints tools -body {
+    set fixtures [etFixtures]
+    set dir [etDir pack]
+    set results {}
+    foreach {case programs files} [list \
+            missing {linux-x86_64 tools/none} {} \
+            text {linux-x86_64 tools/run} [list tools/run "#!/bin/sh\necho\n"] \
+            wronghost {linux-aarch64 tools/run} [list tools/run [readBinary [dict get $fixtures probe]]]] {
+        set pkg $dir/$case
+        etWrite $pkg/botlish.json [etDescriptor kit 1.0.0 [list t [dict create protocol 1 programs $programs]]]
+        foreach {path bytes} $files {
+            file mkdir [file dirname $pkg/$path]
+            set channel [open $pkg/$path wb]
+            puts -nonewline $channel $bytes
+            close $channel
+        }
+        lassign [etRun $dir package pack $pkg -out $dir/repo] status - err
+        lappend results $status [expr {[string match "*cannot be packed*" $err] && [string match "*tools: \"t\": its * program *" $err]}]
+    }
+    set results
+} -result {1 1 1 1 1 1}
+
+# ------------------------------------------------------- explicit activation
+
+test et-install-runs-nothing {installing, verifying, listing, importing and compiling never run a tool; the installed program is not executable} -constraints tools -body {
+    file delete $::etMarker
+    set app [etProject {probe_tools}]
+    set results [list [etRuns]]
+    lappend results [lindex [etRun $app verify] 0] [lindex [etRun $app install] 0] [lindex [etRun $app tools] 0]
+    etWrite $app/main.bot "import probe_tools\n\nprobe_tools::answer()\n"
+    lappend results [lindex [etRun $app main.bot] 1]
+    lappend results [lindex [etRun $app -check main.bot] 0]
+    lappend results [expr {[scan [file attributes $app/.bot_modules/probe_tools/tools/probe -permissions] %o] & 0o111}]
+    lappend results [etRuns]
+    lassign [etRun $app tool -out [etDir out] probe ok] status
+    lappend results $status [etRuns]
+    lappend results [lindex [etRun $app remove probe_tools] 0] [etRuns]
+} -match glob -result {{} 0 0 0 {*value: 42} 0 0 {} 0 {{ran ok}} 0 {{ran ok}}}
+
+test et-tool-runs-only-the-named-one {a tool command runs exactly the tool it names, never another as a fallback} -constraints tools -body {
+    file delete $::etMarker
+    set app [etProject {probe_tools other_tools}]
+    lassign [etRun $app tool -out [etDir out] other_tools:probe exit 0] status
+    lassign [etRun $app tool -out [etDir out] nonesuch ok] missing - err
+    list $status $missing [string match {*(PM TOOL-UNKNOWN)*} $err] [etRuns]
+} -result {0 1 1 {{ran exit}}}
+
+# ---------------------------------------------------------------- resolution
+
+test et-tool-ambiguous {a short name two direct dependencies declare is refused, naming each qualified spelling} -constraints tools -body {
+    file delete $::etMarker
+    set app [etProject {probe_tools other_tools}]
+    lassign [etRun $app tool -out [etDir out] probe ok] status - err
+    list $status [string match {*declared by 2 of the project's dependencies*other_tools:probe, probe_tools:probe*(PM TOOL-AMBIGUOUS)*} $err] [etRuns]
+} -result {1 1 {}}
+
+test et-tool-not-direct {a tool only a transitive dependency declares is refused, naming the package to add} -constraints tools -body {
+    file delete $::etMarker
+    set app [etProject {wrapper}]
+    lassign [etRun $app tool -out [etDir out] probe ok] s1 - e1
+    lassign [etRun $app tool -out [etDir out] probe_tools:probe ok] s2 - e2
+    list $s1 [string match {*declared only by probe_tools*add probe_tools*(PM TOOL-NOT-DIRECT)*} $e1] $s2 [string match {*(PM TOOL-NOT-DIRECT)*} $e2] [etRuns]
+} -result {1 1 1 1 {}}
+
+test et-tool-protocol {a tool of an unknown protocol is refused before anything runs} -constraints tools -body {
+    file delete $::etMarker
+    set app [etProject {probe_tools}]
+    lassign [etRun $app tool -out [etDir out] future ok] status - err
+    list $status [string match {*speaks tool protocol 2, and this Botlish speaks 1*(PM TOOL-PROTOCOL)*} $err] [etRuns]
+} -result {1 1 {}}
+
+test et-tool-host {a tool with no program for this host is refused, naming the hosts it runs on} -constraints aarch64Fixture -body {
+    file delete $::etMarker
+    set app [etProject {probe_tools}]
+    lassign [etRun $app tool -out [etDir out] elsewhere ok] status - err
+    list $status [string match {*runs on linux-aarch64, and this host is linux-x86_64*(PM TOOL-HOST)*} $err] [etRuns]
+} -result {1 1 {}}
+
+test et-tool-host-not-target {the host's program runs whatever the compilation target; the request names both} -constraints aarch64Fixture -body {
+    file delete $::etMarker
+    set app [etProject {probe_tools}]
+    set out [etDir out]
+    lassign [etRun $app tool -target linux-aarch64 -out $out either ok] status
+    set request [etJson $out/request.json]
+    list $status [etRuns] [pm::json::payload [etGet $request host]] [pm::json::payload [etGet $request target]]
+} -result {0 {{ran ok}} linux-x86_64 linux-aarch64}
+
+test et-tool-not-installed {a project without an installation has no tools} -constraints tools -body {
+    set app [etDir bare]
+    etWrite $app/botlish.json "\{\"schema\": 1, \"dependencies\": \{\}\}\n"
+    lassign [etRun $app tool -out [etDir out] probe] status - err
+    list $status [string match {*(PM TOOL-NOT-INSTALLED)*} $err]
+} -result {1 1}
+
+test et-tool-usage {tool's own options come before the name; without a name or -out it is a usage error} -constraints tools -body {
+    set app [etProject {probe_tools}]
+    list [lindex [etRun $app tool] 0] [lindex [etRun $app tool probe] 0] [lindex [etRun $app tool -bogus 1 probe] 0]
+} -result {2 2 2}
+
+# --------------------------------------------------------- the process boundary
+
+test et-tool-argv-exact {every argument arrives exactly: spaces, Unicode, quotes, shell metacharacters, redirection-like words, an empty one, the tool's own options} -constraints tools -body {
+    set app [etProject {probe_tools}]
+    set out [etDir out]
+    set words [list ok "a b" "ünï €" {"q" 'q'} {$(touch pwned)} {`id`} {;} {|x} {>y} {<z} {2>w} {} {-out} {--help} {*} {&}]
+    lassign [etRun $app tool -out $out probe {*}$words] status
+    set hex [split [string trimright [etRead $out/argv.hex] \n] \n]
+    set request [etJson $out/request.json]
+    list $status [expr {$hex eq [etHex $words]}] [file exists $app/pwned] \
+        [expr {[lmap a [pm::json::payload [etGet $request arguments]] {pm::json::payload $a}] eq $words}]
+} -result {0 1 0 1}
+
+test et-tool-unicode-paths {an output directory and a project path with spaces and Unicode reach the tool exactly} -constraints tools -body {
+    set app [etProject {probe_tools}]
+    set out [file join [etDir out] "Out dir ü €"]
+    lassign [etRun $app tool -out $out probe ok] status
+    set request [etJson $out/request.json]
+    list $status [expr {[pm::json::payload [etGet $request output]] eq [file normalize $out]}]
+} -result {0 1}
+
+test et-tool-streams {the tool's standard output and error are the command's own} -constraints tools -body {
+    set app [etProject {probe_tools}]
+    lassign [etRun $app tool -out [etDir out] probe say "hello there"] status out err
+    list $status $out $err
+} -result {0 {out: hello there} {err: hello there}}
+
+test et-tool-exit-status {a tool's exit status is the command's, with one line saying so; the report records it} -constraints tools -body {
+    set app [etProject {probe_tools}]
+    set report [file join [etDir r] report.json]
+    lassign [etRun $app tool -out [etDir out] -report $report probe exit 7] status - err
+    set r [etJson $report]
+    list $status [string match {tool probe_tools:probe (probe_tools 0.1.0) exited with status 7} $err] \
+        [pm::json::payload [etGet $r stage]] [pm::json::payload [etGet $r exit]] [pm::json::payload [etGet $r tool]]
+} -result {7 1 failed 7 probe_tools:probe}
+
+test et-tool-crash {a tool ended by a signal fails the command, named as a crash, never as success} -constraints tools -body {
+    set app [etProject {probe_tools}]
+    set report [file join [etDir r] report.json]
+    lassign [etRun $app tool -out [etDir out] -report $report probe abort] status - err
+    set r [etJson $report]
+    list $status [string match {*ended by the signal SIGABRT (PM TOOL-CRASHED)*} $err] [pm::json::payload [etGet $r stage]] [pm::json::payload [etGet $r signal]]
+} -result {1 1 crashed SIGABRT}
+
+test et-tool-diagnostics {a tool's structured diagnostics are reported with their locations, beside its own words} -constraints tools -body {
+    set app [etProject {probe_tools}]
+    set report [file join [etDir r] report.json]
+    lassign [etRun $app tool -out [etDir out] -report $report probe diagnose] status - err
+    set r [etJson $report]
+    list $status [split $err \n] [lmap d [pm::json::payload [etGet $r diagnostics]] {pm::json::payload [etGet $d code]}]
+} -result {3 {{probe: the input is broken (its own words)} {probe_tools:probe: error: in.txt:3:7: the input is broken (PROBE-BROKEN)} {probe_tools:probe: warning: something odd (PROBE-ODD)} {tool probe_tools:probe (probe_tools 0.1.0) exited with status 3}} {PROBE-BROKEN PROBE-ODD}}
+
+test et-tool-report-refusal {a refusal's report says the tool did not run, and why} -constraints tools -body {
+    set app [etProject {probe_tools other_tools}]
+    set report [file join [etDir r] report.json]
+    lassign [etRun $app tool -out [etDir out] -report $report probe ok] status
+    set r [etJson $report]
+    list $status [pm::json::payload [etGet $r stage]] [pm::json::payload [etGet $r code]] [pm::json::type [etGet $r exit]]
+} -result {1 refused TOOL-AMBIGUOUS null}
+
+test et-tool-modified {a tool that changes an installed package fails the command, whatever it returned} -constraints tools -body {
+    set app [etProject {probe_tools}]
+    lassign [etRun $app tool -out [etDir out] probe tamper [file join $app .bot_modules probe_tools probe_tools.bot]] status - err
+    list $status [string match {*changed the project's installed packages*probe_tools.bot was changed*(PM TOOL-MODIFIED)*} $err] \
+        [lindex [etRun $app verify] 0]
+} -result {1 1 1}
+
+test et-tool-program-changed {an installed program that differs from the record is never run} -constraints tools -body {
+    file delete $::etMarker
+    set app [etProject {probe_tools}]
+    set channel [open $app/.bot_modules/probe_tools/tools/probe ab]
+    puts -nonewline $channel x
+    close $channel
+    lassign [etRun $app tool -out [etDir out] probe ok] status - err
+    list $status [string match {*was changed since it was installed: it is not run*(PM TOOL-PROGRAM)*} $err] [etRuns]
+} -result {1 1 {}}
+
+test et-tool-program-missing {a tool whose installed program is missing is refused, never a silent success} -constraints tools -body {
+    file delete $::etMarker
+    set app [etProject {probe_tools}]
+    file delete $app/.bot_modules/probe_tools/tools/probe
+    lassign [etRun $app tool -out [etDir out] probe ok] status - err
+    list $status [string match {*program tools/probe is missing*(PM TOOL-PROGRAM)*} $err] [etRuns]
+} -result {1 1 {}}
+
+test et-tool-lock-binding {a tool package's dependencies are ordinary ones: its lock joins the one graph, and a conflicting one is refused, never resolved apart} -constraints tools -body {
+    set fixtures [etFixtures]
+    set app [etDir lock]
+    etWrite $app/botlish.json "\{\"schema\": 1, \"dependencies\": \{\}\}\n"
+    etRun $app add shared_lib -request 0.2 -repository [dict get $fixtures repo]
+    lassign [etRun $app add lock_tools -repository [dict get $fixtures repo]] conflict - err
+    set agreed [etDir agree]
+    etWrite $agreed/botlish.json "\{\"schema\": 1, \"dependencies\": \{\}\}\n"
+    etRun $agreed add shared_lib -request 0.1 -repository [dict get $fixtures repo]
+    lassign [etRun $agreed add lock_tools -repository [dict get $fixtures repo]] shared
+    lassign [etRun $agreed tool -out [etDir out] lock-probe ok] ran
+    list $conflict [string match {*shared_lib*0.1.0*lock_tools*0.2.0*(PM DEPENDENCY-CONFLICT)*} $err] [file exists $app/.bot_modules/lock_tools] \
+        $shared [lsort [glob -tails -directory $agreed/.bot_modules *]] $ran
+} -result {1 1 0 0 {lock_tools shared_lib} 0}
+
+test et-tool-output-refused {a tool's output directory is never inside the installation} -constraints tools -body {
+    set app [etProject {probe_tools}]
+    lassign [etRun $app tool -out [file join $app .bot_modules probe_tools gen] probe ok] status - err
+    list $status [string match {*lies inside the project's installed packages*(PM TOOL-OUTPUT)*} $err]
+} -result {1 1}
+
+test et-tool-environment {a tool's declared environment variables are reported, by name and whether set, never by value} -constraints tools -body {
+    set app [etProject {probe_tools}]
+    set out [etDir out]
+    set result [withEnvironment {ET_SET secret-value} {etRun $app tool -out $out reads-env ok}]
+    set request [readBinary $out/request.json]
+    set value [etJson $out/request.json]
+    list [lindex $result 0] [lmap e [pm::json::payload [etGet $value environment]] {list [pm::json::payload [etGet $e name]] [pm::json::payload [etGet $e set]]}] \
+        [string match *secret-value* $request]
+} -result {0 {{ET_SET 1} {ET_UNSET 0}} 0}
+
+test et-tool-request {the request names the protocol, the tool, the compiler's command, the host, the target, the output and the arguments} -constraints tools -body {
+    set app [etProject {probe_tools}]
+    set out [etDir out]
+    etRun $app tool -out $out probe ok
+    set r [etJson $out/request.json]
+    list [pm::json::payload [etGet $r protocol]] [pm::json::payload [etGet $r kind]] [pm::json::payload [etGet $r tool package]] \
+        [pm::json::payload [etGet $r tool version]] [expr {[pm::json::payload [etGet $r tool directory]] eq [file join $app .bot_modules probe_tools]}] \
+        [lmap w [pm::json::payload [etGet $r compiler command]] {file tail [pm::json::payload $w]}] \
+        [pm::json::payload [etGet $r host]] [pm::json::payload [etGet $r target]] [pm::json::type [etGet $r targetSupport]] \
+        [expr {[pm::json::payload [etGet $r project]] eq $app}]
+} -result [list 1 botlish-tool-request probe_tools 0.1.0 1 [list [file tail [info nameofexecutable]] main.tcl] linux-x86_64 linux-x86_64 null 1]
+
+# ------------------------------------------------------------------ inputs
+
+test et-tool-input-required {a tool that requires a native library is refused without one} -constraints tools -body {
+    file delete $::etMarker
+    set app [etProject {probe_tools}]
+    lassign [etRun $app tool -out [etDir out] needs-library ok] status - err
+    list $status [string match {*requires a native-library artifact*(PM TOOL-INPUT)*} $err] [etRuns]
+} -result {1 1 {}}
+
+test et-tool-artifact-checked {an artifact manifest is checked against the files it describes, its schema and its target} -constraints {nativeLibraries tools} -body {
+    set app [etProject {probe_tools}]
+    etWrite $app/a.bot "exported c fn a() -> int:\n    1\n"
+    etWrite $app/b.bot "exported c fn a() -> int:\n    2\n"
+    etRun $app -emit-native-library a -out liba a.bot
+    etRun $app -emit-native-library a -out libb b.bot
+    set results {}
+    lassign [etRun $app tool -out [etDir out] -artifact liba/a.manifest.json needs-library ok] status
+    lappend results $status
+    # The other build's archive under this manifest.
+    file copy -force $app/libb/liba.a $app/liba/liba.a
+    lassign [etRun $app tool -out [etDir out] -artifact liba/a.manifest.json needs-library ok] status - err
+    lappend results $status [string match {*is not the file*describes*belongs to another build of a*(PM TOOL-ARTIFACT)*} $err]
+    lassign [etRun $app tool -target linux-aarch64 -out [etDir out] -artifact libb/a.manifest.json needs-library ok] status - err
+    lappend results $status [string match {*built for linux-x86_64, and the tool runs for the target linux-aarch64*} $err]
+    set text [etRead $app/libb/a.manifest.json]
+    etWrite $app/libb/a.manifest.json [string map {{"schema": 2} {"schema": 1}} $text]
+    lassign [etRun $app tool -out [etDir out] -artifact libb/a.manifest.json needs-library ok] status - err
+    lappend results $status [string match {*schema 1 native library manifest*rebuild*} $err]
+} -result {0 1 1 1 1 1 1}
+
+# ----------------------------------------------------------- target support
+
+# A program and a project with the target support package installed, its
+# linux-x86_64 view prepared.
+proc etSupportProject {} {
+    set app [etProject {botlish_target_linux} linux-x86_64]
+    etWrite $app/hello.bot "fn twice(n: int) -> int:\n    n * 2\n\ntwice(21)\n"
+    return $app
+}
+
+# The view's support descriptor of APP, rewritten by MAP (string map pairs).
+proc etEditSupport {app map} {
+    set path [file join $app .bot_modules .targets linux-x86_64 botlish_target_linux botlish-target-support.json]
+    etWrite $path [string map $map [etRead $path]]
+}
+
+test et-target-support-links {an explicitly named target support package's runtime archive links the executable (the driver's own is not used)} -constraints {nativeLibraries tools} -body {
+    set app [etSupportProject]
+    set result [withEnvironment {BOTLISH_NATIVE_RUNTIME /nonexistent/libbotlish_runtime.a BOTLISH_NATIVE_LINKER system} {
+        etRun $app -emit-native-executable -target-support botlish_target_linux hello.bot
+    }]
+    set value [withEnvironment [list BOTLISH_NATIVE_RESULT [file join $app result.txt]] {exec $app/hello}]
+    list [lindex $result 0] [string match "target support: botlish_target_linux (linux-x86_64, runtime *.bot_modules/.targets/linux-x86_64/botlish_target_linux/runtime/libbotlish_runtime.a)*" [lindex $result 1]] \
+        [string trim [etRead [file join $app result.txt]]]
+} -result {0 1 {value {int 42}}}
+
+test et-target-support-explicit {an installed target support package changes nothing a compilation does not name it for} -constraints {nativeLibraries tools} -body {
+    set app [etSupportProject]
+    lassign [etRun $app -emit-native-executable hello.bot] status out
+    list $status [string match *target* $out]
+} -result {0 0}
+
+test et-target-support-option {-target-support is an option of -emit-native-executable only} -constraints tools -body {
+    set app [etDir opt]
+    etWrite $app/hello.bot "1\n"
+    list [lindex [etRun $app -target-support x hello.bot] 0] [lindex [etRun $app -emit-native-executable -target-support Bad hello.bot] 0]
+} -result {2 2}
+
+test et-target-support-missing {a target support package that is not installed is a precise refusal} -constraints {nativeLibraries tools} -body {
+    set app [etSupportProject]
+    lassign [etRun $app -emit-native-executable -target-support botlish_target_macos hello.bot] status - err
+    list $status [string match {*no package botlish_target_macos is installed for linux-x86_64*(NATIVE TARGET-SUPPORT MISSING)*} $err] [file exists $app/hello]
+} -result {1 1 0}
+
+test et-target-support-removed {a target support package removed is missing, never replaced by the driver's runtime} -constraints {nativeLibraries tools} -body {
+    set app [etSupportProject]
+    etRun $app remove botlish_target_linux -target linux-x86_64
+    lassign [etRun $app -emit-native-executable -target-support botlish_target_linux hello.bot] status - err
+    list $status [string match {*(NATIVE TARGET-SUPPORT MISSING)*} $err]
+} -result {1 1}
+
+test et-target-support-no-descriptor {a package that is no target support package is refused as one} -constraints {nativeLibraries tools} -body {
+    set app [etProject {probe_tools}]
+    etWrite $app/hello.bot "1\n"
+    lassign [etRun $app -emit-native-executable -target-support probe_tools hello.bot] status - err
+    list $status [string match {*has no botlish-target-support.json*(NATIVE TARGET-SUPPORT DESCRIPTOR)*} $err]
+} -result {1 1}
+
+test et-target-support-refusals {every incompatibility is refused before a linker runs, each with its own kind} -constraints {nativeLibraries tools} -body {
+    set results {}
+    foreach {case map kind} {
+        unknown-target {{"target": "linux-x86_64"} {"target": "android-aarch64"}} UNKNOWN-TARGET
+        other-target {{"target": "linux-x86_64"} {"target": "linux-aarch64"}} TARGET
+        triple {x86_64-unknown-linux-gnu x86_64-unknown-linux-musl} TRIPLE
+        linker {{"linker": "system"} {"linker": "rustc"}} LINKER
+        abi {} ABI
+        libraries {{"-lgcc_s", } {}} LIBRARIES
+        schema {{"schema": 1} {"schema": 2}} DESCRIPTOR
+        unknown-key {{"linker"} {"script": "x", "linker"}} DESCRIPTOR
+        archive-path {runtime/libbotlish_runtime.a ../runtime/libbotlish_runtime.a} RUNTIME
+    } {
+        set app [etSupportProject]
+        if {$case eq "abi"} {
+            set path [file join $app .bot_modules .targets linux-x86_64 botlish_target_linux botlish-target-support.json]
+            etWrite $path [regsub {"abi": "[0-9a-f]{16}"} [etRead $path] {"abi": "0000000000000000"}]
+        } else {
+            etEditSupport $app $map
+        }
+        lassign [etRun $app -emit-native-executable -target-support botlish_target_linux hello.bot] status - err
+        lappend results $case $status [string match "*(NATIVE TARGET-SUPPORT $kind)*" $err] [file exists $app/hello]
+    }
+    set results
+} -result {unknown-target 1 1 0 other-target 1 1 0 triple 1 1 0 linker 1 1 0 abi 1 1 0 libraries 1 1 0 schema 1 1 0 unknown-key 1 1 0 archive-path 1 1 0}
+
+# An ar archive of one ELF object for this host's architecture holding the
+# runtime identity record TEXT (or none), at the view's runtime path.
+proc etFakeArchive {app text} {
+    set dir [etDir fake]
+    if {$text eq ""} {
+        etWrite $dir/id.c "int botlish_fake = 1;\n"
+    } else {
+        etWrite $dir/id.c "__attribute__((used)) const char botlish_id\[160\] = \"$text\";\n"
+    }
+    exec cc -c -o $dir/id.o $dir/id.c
+    set archive [file join $app .bot_modules .targets linux-x86_64 botlish_target_linux runtime libbotlish_runtime.a]
+    file delete $archive
+    exec ar rcs $archive $dir/id.o
+}
+
+test et-target-support-archive-identity {an archive's identity record decides: another OS ABI of the same architecture, none, another ABI} -constraints {nativeLibraries tools} -body {
+    set results {}
+    foreach {case text kind} [list \
+            android "BOTLISH-RUNTIME-IDENTITY v1 x86_64-linux-android [native::runtimeAbi]" RUNTIME \
+            none "" RUNTIME \
+            abi "BOTLISH-RUNTIME-IDENTITY v1 x86_64-unknown-linux-gnu 0123456789abcdef" ABI] {
+        set app [etSupportProject]
+        etFakeArchive $app $text
+        lassign [etRun $app -emit-native-executable -target-support botlish_target_linux hello.bot] status - err
+        lappend results $case $status [string match "*(NATIVE TARGET-SUPPORT $kind)*" $err]
+        if {$case eq "android"} {
+            lappend results [string match {*built for x86_64-linux-android, not linux-x86_64's x86_64-unknown-linux-gnu: the same architecture, another operating system or C library ABI*} $err]
+        }
+    }
+    set results
+} -result {android 1 1 1 none 1 1 abi 1 1}
+
+test et-target-support-toolchain {a missing host toolchain is the driver's own error, never a target support refusal} -constraints {nativeLibraries tools} -body {
+    set app [etSupportProject]
+    set result [withEnvironment {BOTLISH_NATIVE_SYSTEM_LINKER /nonexistent/cc BOTLISH_NATIVE_LINKER system} {
+        etRun $app -emit-native-executable -target-support botlish_target_linux hello.bot
+    }]
+    lassign $result status - err
+    list $status [string match *TARGET-SUPPORT* $err] [string match {*(NATIVE * TOOLCHAIN)*} $err]
+} -result {1 0 1}
+
+test et-target-support-linker {a target support package's archive is the system linker's: another linker named is refused, never ignored} -constraints {nativeLibraries tools} -body {
+    set app [etSupportProject]
+    set result [withEnvironment {BOTLISH_NATIVE_LINKER rustc} {
+        etRun $app -emit-native-executable -target-support botlish_target_linux hello.bot
+    }]
+    lassign $result status - err
+    list $status [string match {*is linked by the system linker, and BOTLISH_NATIVE_LINKER names "rustc"*} $err]
+} -result {1 1}
+
+test et-target-support-target-tree {the compilation target's package tree is read, never the host's} -constraints {nativeLibraries aarch64Fixture} -body {
+    set app [etSupportProject]
+    # A linux-aarch64 tree of its own, holding an AArch64 archive with an
+    # AArch64 identity record, beside the host's linux-x86_64 one.
+    set tree [file join $app .bot_modules .targets linux-aarch64 botlish_target_linux]
+    file mkdir $tree/runtime
+    set dir [etDir a64]
+    etWrite $dir/id.c "__attribute__((used)) const char botlish_id\[160\] = \"BOTLISH-RUNTIME-IDENTITY v1 aarch64-unknown-linux-gnu [native::runtimeAbi]\";\n"
+    exec clang --target=aarch64-linux-gnu -c -o $dir/id.o $dir/id.c
+    exec ar rcs $tree/runtime/libbotlish_runtime.a $dir/id.o
+    set text [etRead [file join $app .bot_modules .targets linux-x86_64 botlish_target_linux botlish-target-support.json]]
+    etWrite $tree/botlish-target-support.json [string map {linux-x86_64 linux-aarch64 x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu} $text]
+    # The host's tree has none: reading it would be MISSING.
+    file delete -force [file join $app .bot_modules .targets linux-x86_64 botlish_target_linux]
+    lassign [etRun $app -target linux-aarch64 -emit-native-executable -target-support botlish_target_linux hello.bot] status - err
+    # Selected and accepted for linux-aarch64 -- then the driver, which makes
+    # machine code for this host only, refuses the target.
+    list $status [string match *TARGET-SUPPORT* $err] [string match {*(NATIVE TARGET)*} $err]
+} -result {1 0 1}
+
+# ------------------------------------------------------------ the experiments
+
+# The 2048 game the experiments play: STEPS {DIRECTION TILE} pairs from a
+# fixed linear congruential sequence.
+proc et2048Steps {count} {
+    set x 12345
+    set steps {}
+    for {set i 0} {$i < $count} {incr i} {
+        set x [expr {($x * 1103515245 + 12345) % 2147483648}]
+        lappend steps [list [expr {($x >> 16) % 4}] [expr {(($x >> 8) % 10) == 0 ? 4 : 2}]]
+    }
+    return $steps
+}
+
+# The states the interpreter plays STEPS to, with the engine.bot of APP:
+# the start, then each step's moved and spawned states.
+proc et2048Oracle {app steps} {
+    set literal "\[[join [lmap s $steps {string cat \[ [lindex $s 0] ", " [lindex $s 1] \]}] {, }]\]"
+    etWrite $app/oracle.bot [string map [list @STEPS@ $literal] {import std::list
+import engine
+
+fn play(state: str, steps: List[List[int]], i: int, states: List[str]) -> List[str] errors engine::InvalidState, engine::InvalidDirection, engine::InvalidSpawn:
+    if i >= std::list::length(steps):
+        return states
+    step = std::list::get(steps, i, [0, 2])
+    moved = engine::move(state, std::list::get(step, 0, 0))
+    next = engine::spawn_first(moved, std::list::get(step, 1, 2))
+    play(next, steps, i + 1, std::list::append(std::list::append(states, moved), next))
+
+fn game(steps: List[List[int]]) -> List[str] errors engine::InvalidState, engine::InvalidDirection, engine::InvalidSpawn:
+    start = engine::spawn_first(engine::spawn_first(engine::new_game(), 2), 4)
+    play(start, steps, 0, [start])
+
+states = game(@STEPS@):
+    on engine::InvalidState:
+        []
+    on engine::InvalidDirection:
+        []
+    on engine::InvalidSpawn:
+        []
+states
+}]
+    lassign [etRun $app -warnings off -backend interp oracle.bot] status out
+    if {$status != 0 || ![regexp -line {^   value: (.*)$} $out -> value]} {
+        error "the oracle failed: $out"
+    }
+    # The states hold digits and spaces only.
+    return [lmap {- state} [regexp -all -inline {"([0-9 ]*)"} $value] {set state}]
+}
+
+# The 2048 application: the engine package installed, engine.bot built as
+# the library `game`.
+proc et2048App {} {
+    set app [etProject {game2048 abi_tools hostgen}]
+    file copy [file join $::etHere 2048 engine.bot] $app/engine.bot
+    lassign [etRun $app -warnings error -emit-native-library game -out lib engine.bot] status out err
+    if {$status != 0} { error "the library failed: $err" }
+    return $app
+}
+
+proc et2048Script {steps} {
+    set lines [list new_game "spawn_first\t@\t2" "spawn_first\t@\t4"]
+    foreach step $steps {
+        lappend lines "move\t@\t[lindex $step 0]" "spawn_first\t@\t[lindex $step 1]"
+    }
+    lappend lines "score\t@" "over\t@" "first_empty\t@" "move\tnot a state\t0" "move\t@\t9" \
+        "spawn\t0 2 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\t0\t0\t2" "spawn\t0 2 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\t0\t1\t3"
+    return [join $lines \n]\n
+}
+
+test et-2048-caller {a generated C caller of the real 2048 library plays as the interpreter plays} -constraints {nativeLibraries tools} -body {
+    set app [et2048App]
+    set gen [etDir gen]
+    lassign [etRun $app tool -out $gen -artifact lib/game.manifest.json emit-caller] status
+    set build [etJson $gen/game_caller.build.json]
+    set link [lmap l [pm::json::payload [etGet $build link]] {pm::json::payload $l}]
+    set inputs [lmap l [pm::json::payload [etGet $build inputs]] {pm::json::payload $l}]
+    set includes [lmap l [pm::json::payload [etGet $build includeDirs]] {string cat -I [pm::json::payload $l]}]
+    exec cc -std=c99 -Wall -Wextra -Werror {*}$includes $gen/game_caller.c {*}$inputs {*}$link -o $gen/caller
+    set steps [et2048Steps 160]
+    set lines [split [string trimright [exec $gen/caller << [et2048Script $steps]] \n] \n]
+    set states [lmap line [lrange $lines 2 end-7] {lindex [split $line \t] 3}]
+    set oracle [et2048Oracle $app $steps]
+    set final [lindex $oracle end]
+    list $status [expr {$states eq $oracle}] [llength $oracle] \
+        [expr {[lindex [split [lindex $lines end-6] \t] 3] == [lindex $final 0]}] \
+        [lrange $lines end-3 end] [expr {[lindex $final 0] > 0}]
+} -result [list 0 1 321 1 [list "move\terror\tdeclared\tInvalidState" "move\terror\tdeclared\tInvalidDirection" "spawn\terror\tdeclared\tgame2048::CellOccupied" "spawn\terror\tdeclared\tInvalidSpawn"] 1]
+
+# A JavaScript-like host: the generated adapter called with host values.
+set ::etHostHarness [etRead [file join $::etHere cleanroom harness.c]]
+
+test et-2048-host-module {a React-Native-shaped host module over the real 2048 library plays as the interpreter plays, with the host's own errors} -constraints {nativeLibraries tools} -body {
+    set app [et2048App]
+    set gen [etDir hm]
+    lassign [etRun $app tool -out $gen -artifact lib/game.manifest.json host-module -name game-2048] status
+    etWrite $gen/harness.c $::etHostHarness
+    exec cc -std=c99 -Wall -Wextra -Werror -I $gen/adapter -I $gen/botlish $gen/harness.c $gen/adapter/game_host.c $gen/botlish/libgame.a \
+        -lgcc_s -lutil -lrt -lpthread -lm -ldl -lc -o $gen/host
+    set steps [et2048Steps 80]
+    set lines [split [string trimright [exec $gen/host << [join [lmap s $steps {join $s " "}] \n]\n] \n] \n]
+    set states [lmap line [lrange $lines 2 end-7] {string range $line 6 end}]
+    set package [etJson $gen/package.json]
+    list $status [expr {$states eq [et2048Oracle $app $steps]}] [lrange $lines end-5 end] \
+        [pm::json::payload [etGet $package name]] \
+        [expr {[pm::json::payload [etGet $package botlish manifestSha256]] eq [pm::sha256::file $app/lib/game.manifest.json]}] \
+        [lsort [glob -tails -directory $gen -type f -- * */*]]
+} -result {0 1 {{move BotlishError InvalidState} {move TypeError ARGUMENT-TYPE} {move RangeError NUMBER-NOT-SAFE-INTEGER} {move RangeError NUMBER-NOT-SAFE-INTEGER} {move TypeError ARGUMENT-COUNT} {eval TypeError NO-SUCH-METHOD}} game-2048 1 {CMakeLists.txt adapter/game_host.c adapter/game_host.h botlish/game.h botlish/libgame.a harness.c host package.json src/NativeGame.ts}}
+
+test et-2048-host-module-spec {the host module's TypeScript spec loads in a JavaScript runtime} -constraints {nativeLibraries tools node} -body {
+    set app [et2048App]
+    set gen [etDir hm]
+    etRun $app tool -out $gen -artifact lib/game.manifest.json host-module
+    set here [pwd]
+    cd $gen
+    try {
+        set out [exec node --experimental-strip-types --no-warnings -e {import("./src/NativeGame.ts").then(m => console.log(m.methods.join(" "), m.module))} 2>@1]
+    } finally {
+        cd $here
+    }
+    set out
+} -result {newGame move changes spawn firstEmpty spawnFirst score over Game}
+
+test et-tools-deterministic {the same manifest gives the same generated bytes} -constraints {nativeLibraries tools} -body {
+    set app [et2048App]
+    set a [etDir a]
+    set b [etDir b]
+    foreach dir [list $a $b] {
+        etRun $app tool -out $dir/caller -artifact lib/game.manifest.json emit-caller
+        etRun $app tool -out $dir/host -artifact lib/game.manifest.json host-module
+    }
+    set files [lsort [glob -tails -directory $a -type f -- */* */*/*]]
+    list [llength $files] [lmap file $files {expr {[readBinary $a/$file] eq [readBinary $b/$file]}}]
+} -result {9 {1 1 1 1 1 1 1 1 1}}
+
+test et-tool-output-self-contained {what the tools generate names nothing of this checkout: it depends on the manifest and the request only} -constraints {nativeLibraries tools} -body {
+    set app [et2048App]
+    set gen [etDir self]
+    etRun $app tool -out $gen/caller -artifact lib/game.manifest.json emit-caller
+    etRun $app tool -out $gen/host -artifact lib/game.manifest.json host-module
+    set found {}
+    foreach file [lsort [glob -directory $gen -type f -- */* */*/*]] {
+        # The project's and the output's own paths mapped out first: they
+        # lie inside the checkout when the temporary directory does.
+        set text [string map [list [file normalize $app] APP [file normalize $gen] OUT $app APP $gen OUT] [readBinary $file]]
+        if {[string first $::projectRoot $text] >= 0} {
+            lappend found [file tail $file]
+        }
+    }
+    list [llength [glob -directory $gen -type f -- */* */*/*]] $found
+} -result {9 {}}
+
+foreach path [glob -nocomplain -directory [temporaryDirectory] et-[pid]-* et-out-[pid] et-err-[pid]] {
+    file delete -force $path
+}
+cleanupTests

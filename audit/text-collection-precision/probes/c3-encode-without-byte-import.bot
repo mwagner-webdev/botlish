@@ -1,0 +1,23 @@
+# probe: without `import std::byte` anywhere in the program,
+# s.encode_utf8() is plain `list` (List[any]): both the indexed element and
+# the loop variable are `any` (hir/types.tcl's `typed` result shape falls
+# back when std::byte::Byte is not registered) (C).
+# outcome: reject
+# diagnostic: 17:11 argument for parameter "t" cannot be proven to satisfy str (argument type: any)
+# diagnostic: 21:15 argument for parameter "t" cannot be proven to satisfy str (argument type: any)
+# binding: 16 bs list
+import std::str
+import std::list
+
+fn probe(t: str) -> int:
+    1
+
+fn via_at(s: str) -> int errors IndexNotFound:
+    bs = s.encode_utf8()
+    probe(bs.at(0))
+
+fn via_loop(s: str):
+    loop b in s.encode_utf8():
+        probe(b)
+
+via_loop("ab")

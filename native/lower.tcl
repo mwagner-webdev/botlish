@@ -1610,7 +1610,7 @@ proc native::lower::Program {hirProgram args} {
     # Virtual construction (see "Virtual construction" below) runs last: it
     # leaves every binding/variant the analyses above claim to them, and
     # decides plan results from M7.c's closedness proof over blockescape.
-    set construction [if {$constructionOpt} {hir::construction::analyze $hirProgram $spec $escape $stringregion $blockescape} else {dict create params {} bindings {} locals {} results {} closed {} regions {}}]
+    set construction [if {$constructionOpt} {hir::construction::analyze $hirProgram $spec $escape $stringregion $blockescape} else {dict create params {} bindings {} locals {} results {} folds {} closed {} regions {}}]
     # The ShortString1 plan (SHORT-STRING.md) runs strictly after the
     # closedness, Range and virtual-construction analyses it composes with,
     # and before any lowering. It reads facts and decides a representation;
@@ -4083,8 +4083,9 @@ proc native::lower::Expr {fnVar e {want tagged}} {
             lassign [dict get $fn loops [dict get $node target]] head exit resultReg accReg mode
             if {$mode eq "fold"} {
                 # A fold (FOLD-LOOPS-MILESTONE-1.md): a bare break ends it
-                # with its current intermediate, the register it carries.
-                Emit fn "$resultReg = move $accReg" $e
+                # with its current intermediate, the register it carries (a
+                # plan fold's materialized: FoldValue).
+                Emit fn "$resultReg = move [FoldValue fn [dict get $node target] $accReg]" $e
                 Emit fn "jump $exit" $e
                 dict set fn broken [dict get $node target] 1
                 set result never
@@ -12330,12 +12331,42 @@ proc native::lower::CollectFinish {fnVar e accReg} {
 #            Nothing is collected or allocated for it: no List, no plan, no
 #            MutableArray -- what it holds is whatever the body computes.
 #
+#            A *plan fold* (hir::construction's fold carrier, FOLD-VIRTUAL-
+#            LIST-CONSTRUCTION-MILESTONE-1.md) keeps the same register as a
+#            maybe-plan register: its initial value is lowered in a plan
+#            position (PlanPieces), the intermediate is bound as `{plan REG
+#            FAMILY}` -- exactly a plan parameter's local, so a reference
+#            extends it in place or materializes it -- the body's trailing
+#            value (the next intermediate) is lowered in a plan position
+#            (SequenceTo), and exhaustion and a bare break materialize it
+#            once (FoldValue). Linearity per iteration (a continue or break
+#            is a reference: FoldLinear) is what makes the in-place extension
+#            invisible: no path extends the plan and then also passes the
+#            old intermediate on. -virtual-construction-opt 0 keeps the
+#            ordinary register.
+#
 # {MODE ACCREG} for loop E (node NODE), or never when a fold's initial value
 # never completes.
 proc native::lower::LoopResultStart {fnVar e node} {
     upvar 1 $fnVar fn
     variable context
     if {[hir::IsFoldNode $node]} {
+        set family [FoldFamily $e]
+        if {$family ne ""} {
+            # A plan fold: the initial value stays a construction if it is
+            # one (a plan local, a plan result, an append), else a flat
+            # value the first extension copies into a fresh plan.
+            set initialExpr [dict get $node foldInitial]
+            set pieces [PlanPieces fn $initialExpr $family]
+            if {$pieces eq "never"} {
+                return never
+            }
+            set initial [PiecesToPlan fn $pieces $family $initialExpr]
+            set accReg [NewReg fn]
+            MarkPlan fn $accReg
+            Emit fn "$accReg = move $initial" $e
+            return [list fold $accReg]
+        }
         set initial [Expr fn [dict get $node foldInitial]]
         if {$initial eq "never"} {
             return never
@@ -12363,12 +12394,47 @@ proc native::lower::LoopEntry {continueLabel exit resultReg mode accReg} {
     error "native::lower::LoopEntry: bad mode $mode"
 }
 
-# Binds a fold NODE's intermediate to its register ACCREG for the body.
-proc native::lower::LoopResultBind {fnVar node mode accReg} {
+# Binds fold E's (node NODE) intermediate to its register ACCREG for the
+# body: a plan fold's as a plan parameter's local is bound.
+proc native::lower::LoopResultBind {fnVar e node mode accReg} {
     upvar 1 $fnVar fn
     if {$mode eq "fold"} {
-        dict set fn locals [dict get $node foldBinding] [list reg $accReg]
+        if {[IsPlanReg fn $accReg]} {
+            dict set fn locals [dict get $node foldBinding] [list plan $accReg [FoldFamily $e]]
+        } else {
+            dict set fn locals [dict get $node foldBinding] [list reg $accReg]
+        }
     }
+}
+
+# The construction family ("" | str | list) of fold E's intermediate when
+# it is a plan fold (hir::construction::foldFamily) of the instance being
+# lowered.
+proc native::lower::FoldFamily {e} {
+    variable construction
+    variable currentInstance
+    return [hir::construction::foldFamily $construction $currentInstance $e]
+}
+
+# Fold E's intermediate in ACCREG as an ordinary flat register, where the
+# fold yields it (exhaustion, a bare break): a plan fold's one
+# materialization (`construct ... flat` passes a flat value through).
+proc native::lower::FoldValue {fnVar e accReg} {
+    upvar 1 $fnVar fn
+    if {[IsPlanReg fn $accReg]} {
+        return [Assign fn "construct [FoldFamily $e] flat $accReg" $e]
+    }
+    return $accReg
+}
+
+# The value of loop E's body BODY (Sequence): a plan fold's trailing value,
+# the next intermediate, is lowered in a plan position.
+proc native::lower::LoopBody {fnVar e mode body} {
+    upvar 1 $fnVar fn
+    if {$mode eq "fold"} {
+        return [SequenceTo fn $body [FoldFamily $e]]
+    }
+    return [Sequence fn $body]
 }
 
 # Accounts for an ordinary completion of loop E's body with VALUE.
@@ -12393,7 +12459,7 @@ proc native::lower::LoopResultFinish {fnVar e mode accReg resultReg} {
             Emit fn "$resultReg = move [CollectFinish fn $e $accReg]" $e
         }
         fold {
-            Emit fn "$resultReg = move $accReg" $e
+            Emit fn "$resultReg = move [FoldValue fn $e $accReg]" $e
         }
         discard {
             set unitConst [Assign fn unit $e]
@@ -12497,14 +12563,14 @@ proc native::lower::ListLoop {fnVar e node} {
     set saved [dict get $fn locals]
     set savedRaw [dict get $fn rawCache]
     dict set fn loops $e [LoopEntry $continueLabel $exit $resultReg $mode $accReg]
-    LoopResultBind fn $node $mode $accReg
+    LoopResultBind fn $e $node $mode $accReg
     if {$consuming} {
         set elemReg [Assign fn "op ${drain}takefront $iterReg" $e]
     } else {
         set elemReg [Assign fn "op listget $iterReg $idxReg" $e]
     }
     dict set fn locals [dict get $node elementBinding] [list reg $elemReg]
-    set bodyValue [IterationBody fn $e [dict get $node body]]
+    set bodyValue [IterationBody fn $e [dict get $node body] $mode]
     set usedContinue [dict exists $fn continued $e]
     if {$bodyValue ne "never"} {
         LoopResultAdd fn $e $mode $accReg $bodyValue
@@ -12535,14 +12601,14 @@ proc native::lower::ListLoop {fnVar e node} {
 # cases) is not lowered, exactly as a decided `if`'s dead arm is not (If):
 # HIR's analyses (the specialization's calls, the ownership releases) never
 # saw it as code that runs.
-proc native::lower::IterationBody {fnVar e body} {
+proc native::lower::IterationBody {fnVar e body mode} {
     upvar 1 $fnVar fn
     variable hir
     if {$body ne "" && ![hir::get $hir [lindex $body 0] reachable]} {
         Emit fn unreachable $e
         return never
     }
-    return [Sequence fn $body]
+    return [LoopBody fn $e $mode $body]
 }
 
 # 1 if the numeric loop domain START..END of instance ID gets a raw
@@ -12699,9 +12765,9 @@ proc native::lower::CountLoop {fnVar e node} {
     set saved [dict get $fn locals]
     set savedRaw [dict get $fn rawCache]
     dict set fn loops $e [LoopEntry $continueLabel $exit $resultReg $mode $accReg]
-    LoopResultBind fn $node $mode $accReg
+    LoopResultBind fn $e $node $mode $accReg
     dict set fn locals [dict get $node countBinding] [list [expr {$raw ? "rawreg" : "reg"}] $idxReg]
-    set bodyValue [Sequence fn [dict get $node body]]
+    set bodyValue [LoopBody fn $e $mode [dict get $node body]]
     set usedContinue [dict exists $fn continued $e]
     if {$bodyValue ne "never"} {
         LoopResultAdd fn $e $mode $accReg $bodyValue
@@ -12866,7 +12932,7 @@ proc native::lower::LockLoop {fnVar e node} {
     set saved [dict get $fn locals]
     set savedRaw [dict get $fn rawCache]
     dict set fn loops $e [LoopEntry $continueLabel $exit $resultReg $mode $accReg]
-    LoopResultBind fn $node $mode $accReg
+    LoopResultBind fn $e $node $mode $accReg
     foreach domain $domains state $states {
         if {[dict get $state kind] eq "list"} {
             set elemReg [Assign fn "op listget [dict get $state list] $posReg" $e]
@@ -12876,7 +12942,7 @@ proc native::lower::LockLoop {fnVar e node} {
                 [list [expr {[dict get $state raw] ? "rawreg" : "reg"}] [dict get $state idx]]
         }
     }
-    set bodyValue [IterationBody fn $e [dict get $node body]]
+    set bodyValue [IterationBody fn $e [dict get $node body] $mode]
     set usedContinue [dict exists $fn continued $e]
     if {$bodyValue ne "never"} {
         LoopResultAdd fn $e $mode $accReg $bodyValue
@@ -13128,11 +13194,11 @@ proc native::lower::Loop {fnVar e node} {
     set savedRaw [dict get $fn rawCache]
     if {$mode eq "fold"} {
         dict set fn loops $e [LoopEntry $head $exit $result $mode $accReg]
-        LoopResultBind fn $node $mode $accReg
+        LoopResultBind fn $e $node $mode $accReg
     } else {
         dict set fn loops $e [list $head $exit $result]
     }
-    set value [Sequence fn [dict get $node body]]
+    set value [LoopBody fn $e $mode [dict get $node body]]
     if {$value ne "never"} {
         if {$mode eq "fold"} {
             LoopResultAdd fn $e $mode $accReg $value
@@ -13505,22 +13571,30 @@ proc native::lower::SequenceShort {fnVar exprs kind} {
     return [Expr fn [lindex $exprs end] $kind]
 }
 
+# The affine values dead after each statement are released after it, as
+# Sequence releases them (AFFINE-VALUES.md): a plan or a flat String/List is
+# never affine itself, so the release never touches the construction.
 proc native::lower::SequenceTo {fnVar exprs family} {
     upvar 1 $fnVar fn
+    variable hir
     if {$family eq "" || $exprs eq ""} {
         return [Sequence fn $exprs]
     }
     foreach e [lrange $exprs 0 end-1] {
-        if {[Expr fn $e] eq "never"} {
+        set r [Expr fn $e]
+        if {$r eq "never"} {
             return never
         }
+        ReleaseHandles fn [hir::affine::releasesAfter $hir $e] $e $r
     }
     set last [lindex $exprs end]
     set pieces [PlanPieces fn $last $family]
     if {$pieces eq "never"} {
         return never
     }
-    return [PiecesToPlan fn $pieces $family $last]
+    set r [PiecesToPlan fn $pieces $family $last]
+    ReleaseHandles fn [hir::affine::releasesAfter $hir $last] $last $r
+    return $r
 }
 
 # ---------------------------------------------------------------------------

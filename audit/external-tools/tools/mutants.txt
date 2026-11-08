@@ -1,0 +1,213 @@
+# Mutants of explicit external tools, target support packages and the
+# artifact manifest (audit/external-tools/tools/mutate.tcl;
+# EXTERNAL-COMPILER-TOOLS-AND-TARGET-PACKAGES-MILESTONE-1.md, "Mutation
+# testing"): each a deliberate bug in what keeps an extension package
+# ordinary until it is explicitly run -- activation, resolution, the process
+# boundary, dependency correctness, artifact integrity and target
+# compatibility -- or in what the sample tools trust.
+#
+#   @@ NAME DESCRIPTION
+#   !! TEST ...        the tests of tests/external-tools.test meant to
+#                      detect it (one failing is a kill)
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+#
+# A mutant may have several edits. Lines starting with # outside an edit
+# are comments. No mutant edits Rust: the copy's native/target is a link to
+# this checkout's.
+
+@@ run-on-install an installed tool's program runs when the package is installed (a post-install hook)
+!! et-install-runs-nothing
+## pm/install.tcl
+<<<<
+    Commit $ctx $operations $newStateBytes $descriptorBytes $graphBytes
+    return [concat $notes [Report $plan $state $operations] $viewLines]
+====
+    Commit $ctx $operations $newStateBytes $descriptorBytes $graphBytes
+    foreach name [dict keys [pm::state::read [dict get $ctx meta]]] {
+        set dir [file join [dict get $ctx modules] $name]
+        if {[catch {pm::descriptor::read [file join $dir botlish.json] artifact} installed]} continue
+        dict for {tool spec} [dict getdef $installed tools {}] {
+            set program [file join [file tempdir] p]
+            file copy [file join $dir [dict get $spec programs linux-x86_64]] $program
+            file attributes $program -permissions 0755
+            catch {exec $program install}
+        }
+    }
+    return [concat $notes [Report $plan $state $operations] $viewLines]
+>>>>
+
+@@ run-on-import a package's tool runs when a program imports the package (the compiler activates what it loads)
+!! et-install-runs-nothing
+## surface/modules.tcl
+<<<<
+    dict set state appPackages $modules
+====
+    dict set state appPackages $modules
+    foreach program [glob -nocomplain [file join $modules * tools probe]] {
+        set copy [file join [file tempdir] p]
+        file copy $program $copy
+        file attributes $copy -permissions 0755
+        catch {exec $copy import}
+    }
+>>>>
+
+@@ ambiguous-first an ambiguous short tool name runs the first package's tool
+!! et-tool-ambiguous
+## pm/tools.tcl
+<<<<
+    if {[llength $direct] > 1} {
+====
+    if {[llength $direct] > 1} {
+        return [lindex $direct 0]
+>>>>
+
+@@ shell-concatenated the tool's words are joined into one shell command line
+!! et-tool-argv-exact
+## pm/tools.tcl
+<<<<
+        set command [list /bin/sh -c $trampoline sh {*}[lmap word [list $program {*}$args] {string cat x $word}]]
+====
+        set command [list /bin/sh -c [join [list $program {*}$args] " "]]
+>>>>
+
+@@ protocol-unchecked a tool of an unknown protocol is run as if it spoke this one
+!! et-tool-protocol
+## pm/tools.tcl
+<<<<
+        if {[dict get $entry protocol] ni $protocols} {
+====
+        if {0 && [dict get $entry protocol] ni $protocols} {
+>>>>
+
+@@ missing-program-succeeds a tool whose program is missing "runs" successfully, doing nothing
+!! et-tool-program-missing
+## pm/tools.tcl
+<<<<
+            pm::Fail TOOL-PROGRAM "the tool $qualified's $host program $relative is missing from [dict get $entry dir] (run verify)"
+====
+            return 0
+>>>>
+
+@@ exit-ignored a tool's exit status is replaced by success
+!! et-tool-exit-status
+## pm/tools.tcl
+<<<<
+        set status $exit
+====
+        set status 0
+>>>>
+
+@@ support-host-tree the target support package is looked up for the host, not for the compilation target
+!! et-target-support-target-tree
+## main.tcl
+<<<<
+            set compiled [hir::cabi::targetOf $hir]
+====
+            set compiled [core::cabi::hostTarget]
+>>>>
+
+@@ support-any-os an archive of another operating system's ABI, of the same architecture, is accepted (Linux's for Android, Android's for Linux)
+!! et-target-support-archive-identity
+## native/support.tcl
+<<<<
+    if {[dict get $record triple] ne $triple} {
+====
+    if {[lindex [split [dict get $record triple] -] 0] ne [lindex [split $triple -] 0]} {
+>>>>
+
+@@ support-abi-ignored the runtime ABI fingerprints, the descriptor's and the archive's, are not compared with the compiler's
+!! et-target-support-refusals et-target-support-archive-identity
+## native/support.tcl
+<<<<
+    if {$abi ne $mine} {
+====
+    if {0 && $abi ne $mine} {
+>>>>
+## native/support.tcl
+<<<<
+    if {[dict get $record abi] ne $abi} {
+====
+    if {0 && [dict get $record abi] ne $abi} {
+>>>>
+
+@@ support-fallback a target support package that is missing falls back to the driver's own runtime archive
+!! et-target-support-missing et-target-support-removed
+## main.tcl
+<<<<
+            set support [native::support::select [file dirname [file normalize $path]] $compiled $::targetSupport]
+            lappend extra -runtime-archive [dict get $support archive]
+====
+            if {[catch {native::support::select [file dirname [file normalize $path]] $compiled $::targetSupport} support]} {
+                set support ""
+            } else {
+                lappend extra -runtime-archive [dict get $support archive]
+            }
+>>>>
+
+@@ lock-weakened locks that disagree no longer conflict: one of the demanded versions is installed for all
+!! et-tool-lock-binding
+## pm/graph.tcl
+<<<<
+        if {[llength $versions] > 1 || ($editable && [llength $list] > 1)} {
+====
+        if {0 && ([llength $versions] > 1 || ($editable && [llength $list] > 1))} {
+>>>>
+
+@@ tool-deps-apart a tool package's dependencies are left to the tool, resolved apart from the application's graph
+!! et-tool-lock-binding
+## pm/graph.tcl
+<<<<
+    foreach dep [lsort [dict keys [dict get $artifactDescriptor dependencies]]] {
+====
+    foreach dep [expr {[dict getdef $artifactDescriptor tools {}] eq "" ? [lsort [dict keys [dict get $artifactDescriptor dependencies]]] : {}}] {
+>>>>
+
+@@ manifest-no-ownership the manifest states no ownership of a result: a tool must guess who releases it
+!! et-manifest-binds-build et-2048-caller
+## native/library.tcl
+<<<<
+            result [list obj [list type [S $result] c [S [string map [list NAME $name] $out]] {*}[ResultPassing $name $result]]] \
+====
+            result [list obj [list type [S $result] c [S [string map [list NAME $name] $out]]]] \
+>>>>
+
+@@ manifest-other-build a manifest is accepted for files of another build: their digests are not compared
+!! et-tool-artifact-checked
+## pm/tools.tcl
+<<<<
+        if {$actual ne [pm::json::payload $digest]} {
+====
+        if {0 && $actual ne [pm::json::payload $digest]} {
+>>>>
+
+@@ modification-unchecked a tool may change the project's installed packages: the installation is not checked after it runs
+!! et-tool-modified
+## pm/tools.tcl
+<<<<
+                if {$change ni $before} {
+====
+                if {0 && $change ni $before} {
+>>>>
+
+@@ helper-from-checkout the generated caller includes a helper from the generator's own source tree, not only the manifest's header
+!! et-tool-output-self-contained
+## audit/external-tools/src/emit-caller.c
+<<<<
+        "#include <stdlib.h>\n#include <string.h>\n\n#include \"%s\"\n\n", lib->header);
+====
+        "#include <stdlib.h>\n#include <string.h>\n\n#include \"%s\"\n#include \"%.*s/toolkit.h\"\n\n", lib->header, (int)(strrchr(__FILE__, '/') - __FILE__), __FILE__);
+>>>>
+
+@@ guessed-signature the generated caller guesses every result is an int64_t, never reading the manifest's result type
+!! et-2048-caller
+## audit/external-tools/src/toolkit.h
+<<<<
+        out->result = tk_type_named(path, tk_need_str(result, "type", path, "a result"), 1);
+====
+        out->result = tk_type_named(path, "int", 1);
+>>>>
