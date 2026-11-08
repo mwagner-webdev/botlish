@@ -390,10 +390,10 @@
 %% windows-x86_64
 ## native/src/runtime/platform/windows.rs
 <<<<
-        match records::claim(thread_token(), (stack.low_bound, stack.high_bound), executable, destination, label) {
+        match records::claim_as(reservation, thread_token(), (stack.low_bound, stack.high_bound), executable, destination, label) {
 ====
         let _ = destination;
-        match records::claim(thread_token(), (stack.low_bound, stack.high_bound), executable, 0, label) {
+        match records::claim_as(reservation, thread_token(), (stack.low_bound, stack.high_bound), executable, 0, label) {
 >>>>
 
 @@ win-result-file-ignored the driver's line goes to standard output, not the --result file (Windows)

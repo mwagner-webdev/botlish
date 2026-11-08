@@ -1,0 +1,37 @@
+# crunch.bot -- thread entries of tests/threads.test
+# (BOTLISH-OWNED-THREADS-AND-CROSS-THREAD-ACTORS-MILESTONE-1.md): a
+# contextless computation, one that spins until asked to stop, and one that
+# overflows its stack.
+import std::thread
+
+struct Job:
+    n: int
+    label: str
+
+struct Answer:
+    label: str
+    value: int
+
+fn fib(n: int) -> int:
+    if n < 2:
+        n
+    else:
+        fib(n - 1) + fib(n - 2)
+
+# A contextless computation.
+thread fn crunch(job: Job) -> Answer:
+    Answer {label: job.label, value: fib(job.n)}
+
+# Spins until asked to stop: how many checks it made.
+thread fn spin(n: int) -> int:
+    fold with intermediate count 0:
+        if std::thread::stop_requested?():
+            break
+        count + 1
+
+fn deep(n: int) -> int:
+    deep(n + 1) + 1
+
+# Recurses until its stack is exhausted.
+thread fn overflow(n: int) -> int:
+    deep(n)

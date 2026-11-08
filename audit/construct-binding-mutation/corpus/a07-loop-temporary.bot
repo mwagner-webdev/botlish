@@ -1,0 +1,18 @@
+# category: local of a loop body
+# class: B -- deliberately temporary mutation: each iteration builds a
+#        scratch vector, mutates it, and keeps only a number derived from it
+# expect: [3, 1, 0]
+import std::mutable_vector
+
+fn ints() -> MutableVector[int]:
+    std::mutable_vector::from_list([])
+
+fn positives(rows: List[List[int]]) -> List[int]:
+    loop row in rows:
+        scratch = ints()
+        loop x in row:
+            if x > 0:
+                scratch.push(x)
+        scratch.length()
+
+positives([[1, 2, 3], [-1, 4], []])

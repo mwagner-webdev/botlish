@@ -1,0 +1,10 @@
+# category: value parameter (for contrast: NONPLACE-PARAMETER-MUTATION)
+# class: rejected -- the previous milestone's rule
+# expect-diagnostics: NONPLACE-PARAMETER-MUTATION@7:5
+import std::mutable_vector
+
+fn widen(row: MutableVector[int]) -> int:
+    row.push(42)
+    row.length()
+
+widen(std::mutable_vector::from_list([1]))

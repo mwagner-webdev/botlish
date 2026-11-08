@@ -1,0 +1,15 @@
+# 30! (C-COMPILE-FREESTANDING-MILESTONE-1.md): an Int that does not fit
+# int64_t. Its C carries the product as a botlish_rt_v1_int and multiplies
+# inline while it fits, calling the runtime service int.mul
+# (botlish_rt_v1_int_mul) once it does not: the C compiles without a
+# provider, links only with one.
+#
+# expect: 265252859812191058636308480000000
+
+fn factorial(n: int) -> int:
+    if n <= 1:
+        1
+    else:
+        n * factorial(n - 1)
+
+factorial(30)

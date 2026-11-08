@@ -25,11 +25,11 @@
 !! uc-import-only uc-transitive uc-several uc-stdlib-imports uc-nir-import-only uc-nir-several uc-package-portable
 ## native/lower.tcl
 <<<<
-            [lmap callback [hir::callbacks::of $hirProgram] {dict get $callback block}]] \
+            [ThreadOwnerBlocks $hirProgram $threadRecords]] \
         -releases [hir::contexts::releasedCleanups $hirProgram]]
 ====
-            [CleanupBlocks $hirProgram] \
-            [lmap callback [hir::callbacks::of $hirProgram] {dict get $callback block}]] \
+            [ThreadOwnerBlocks $hirProgram $threadRecords] \
+            [CleanupBlocks $hirProgram]] \
         -releases [hir::contexts::releasedCleanups $hirProgram]]
 >>>>
 
@@ -119,4 +119,25 @@
     if {![info exists liveCleanups]} {
         set liveCleanups [LiveCleanups]
     }
+>>>>
+
+@@ cleanups-rooted-load-suppressed the workaround the brief rules out (main's InCleanup before this milestone): every cleanup a root again, and a load of a context the program does not install raises at run time instead of failing lowering -- programs run, but every declared cleanup is compiled with its uninstalled context loads
+!! uc-nir-import-only uc-nir-several uc-stdlib-imports uc-tags-table uc-nir-uses
+## native/lower.tcl
+<<<<
+            [ThreadOwnerBlocks $hirProgram $threadRecords]] \
+        -releases [hir::contexts::releasedCleanups $hirProgram]]
+====
+            [ThreadOwnerBlocks $hirProgram $threadRecords] \
+            [CleanupBlocks $hirProgram]] \
+        -releases [hir::contexts::releasedCleanups $hirProgram]]
+>>>>
+<<<<
+    upvar 1 $fnVar fn
+    if {[ContextDiagnostic] eq ""} {
+        throw {NATIVE BUG} "native lowering: context load $e of context \"$id\", which the program does not install"
+====
+    upvar 1 $fnVar fn
+    if {0} {
+        throw {NATIVE BUG} "native lowering: context load $e of context \"$id\", which the program does not install"
 >>>>

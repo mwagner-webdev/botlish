@@ -3,9 +3,9 @@
   "name": "beats",
   "version": "1.0.0",
   "dependencies": {
-    "event_loop_linux": "0.3"
+    "event_loop_linux": "0.5"
   },
   "lock": {
-    "event_loop_linux": "0.3.0"
+    "event_loop_linux": "0.5.0"
   }
 }

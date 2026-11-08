@@ -64,8 +64,22 @@
 # context effects in function types.)
 #
 # Where an install may be written: the entry program's top-level scope, as a
-# statement (CONTEXT-INSTALLATION-UNSUPPORTED anywhere else: a function, a loop,
-# a branch, a handler, a module, an expression).
+# statement, and the body of a thread entry (`thread fn`, hir/threads.tcl;
+# BOTLISH-OWNED-THREADS-AND-CROSS-THREAD-ACTORS-MILESTONE-1.md), as one of
+# its own statements (CONTEXT-INSTALLATION-UNSUPPORTED anywhere else: a
+# function, a loop, a branch, a handler, a module, an expression).
+#
+# Entries. A program has one entry computation per VM that may run it: the
+# entry program's top level (the main VM's) and each thread entry (a
+# worker VM's). Each is checked as the top level is, in evaluation order,
+# against what it has installed so far -- its own installations only: a
+# worker VM never has its creator's contexts. A thread entry requires
+# nothing of a caller (it has none: it is started, never called), so its
+# requirement is empty and its own calls are its obligations. The
+# selection of each context trait stays the program's, one implementation
+# for every entry: an entry that would select another provider of a
+# trait than an earlier one is CONTEXT-TRAIT-SELECTION-CONFLICT, never a
+# per-thread selection.
 #
 # What HIR keeps, after hir::check:
 #   block expr   contextParams    {{name NAME context ID} ...} as declared
@@ -669,6 +683,14 @@ proc hir::contexts::verify {hirVar} {
     set reasons [dict get $analysis reasons]
     set regionRoot [dict get $analysis regionRoot]
     set releases [dict get $analysis releases]
+    # The thread entries (hir/threads.tcl): installation scopes of their
+    # own, which require nothing of anyone (Requirements).
+    set entries [dict create]
+    foreach b $blocks {
+        if {[hir::threads::isEntry $hir $b]} {
+            dict set entries $b 1
+        }
+    }
     foreach b $blocks {
         dict set hir exprs $b directContexts [lsort [dict get $analysis direct $b]]
         dict set hir exprs $b requiredContexts [dict get $required $b]
@@ -702,9 +724,18 @@ proc hir::contexts::verify {hirVar} {
     set top [dict get $hir top]
     foreach c [concat {*}[dict values $calls]] {
         if {[isInstall $hir $c] && [dict get $owner $c] ne ""} {
-            Unsupported hir $c [Where $hir $c [dict get $owner $c]]
+            set o [dict get $owner $c]
+            if {[dict exists $entries $o] && [EntryStatement $hir $parent $o $c]} {
+                # One of a thread entry's own statements: checked with its
+                # entry below.
+                continue
+            }
+            Unsupported hir $c [Where $hir $c $o] [if {[dict exists $entries $o]} {set o} else {string cat ""}]
         }
     }
+    # Where each context trait's selection was first made (a call), for
+    # CONTEXT-TRAIT-SELECTION-CONFLICT's message.
+    set selectedAt [dict create]
     foreach r [dict get $hir roots] {
         if {![dict exists $callsOfRoot $r]} continue
         set pending {}
@@ -741,6 +772,9 @@ proc hir::contexts::verify {hirVar} {
                             "context trait $trait was provided by [dict get $selected $trait] at an earlier call and by $w here" $c
                     }
                     dict set selected $trait $w
+                    if {![dict exists $selectedAt $trait]} {
+                        dict set selectedAt $trait $c
+                    }
                 }
             }
         }
@@ -764,11 +798,103 @@ proc hir::contexts::verify {hirVar} {
             }
         }
     }
+    # Each thread entry, as the top level: its statements in order, each
+    # call's obligations against what the entry has installed so far (its
+    # own installations, never another entry's), then its installation.
+    set entryInstalls [dict create]
+    foreach t [dict keys $entries] {
+        set entryInstalled {}
+        set placed {}
+        set byStatement [dict create]
+        foreach c [dict getdef $calls $t {}] {
+            dict lappend byStatement [StatementOf $parent $t $c] $c
+        }
+        set byRelease [dict create]
+        foreach edge [dict getdef $releases $t {}] {
+            set s [StatementOf $parent $t [lindex $edge 0]]
+            if {$s ne ""} {
+                dict lappend byRelease $s $edge
+            }
+        }
+        foreach s [dict get $hir exprs $t body] {
+            set pending {}
+            foreach c [dict getdef $byStatement $s {}] {
+                if {![hir::get $hir $c reachable]} continue
+                if {[isInstall $hir $c]} {
+                    if {$c eq $s} {
+                        set pending $c
+                    }
+                    continue
+                }
+                if {[isLoad $hir $c]} continue
+                set targets [Targets $hir $graph $regionRoot "" $c]
+                if {$targets eq {}} continue
+                set selection [hir::CheckingCall $c {Obligations hir $c $targets $entryInstalled $required $reasons}]
+                if {[dict size $selection] == 0} continue
+                dict set selections $c $selection
+                dict for {trait w} $selection {
+                    if {[dict exists $selected $trait] && [dict get $selected $trait] ne $w} {
+                        set first [dict get $selectedAt $trait]
+                        hir::Diagnose hir CONTEXT-TRAIT-SELECTION-CONFLICT \
+                            "context trait $trait is provided here by $w, but the program selected [dict get $selected $trait] for it where it is first needed (at [hir::originLocation $hir [dict get $hir exprs $first origin]]): a program selects one implementation of each context trait, for every entry -- the entry program and each thread entry -- so install the same implementation of $trait in every entry that needs it (each VM installs its own instance of it)" $c
+                        continue
+                    }
+                    dict set selected $trait $w
+                    if {![dict exists $selectedAt $trait]} {
+                        dict set selectedAt $trait $c
+                    }
+                }
+            }
+            foreach edge [dict getdef $byRelease $s {}] {
+                lassign $edge c target
+                if {![dict exists $required $target]} continue
+                Obligations hir $c [list $target] $entryInstalled $required $reasons "the release of this value"
+            }
+            if {$pending ne ""} {
+                set id [InstalledType hir $pending $entryInstalled]
+                if {$id ne ""} {
+                    lappend entryInstalled $id
+                    lappend placed [list $pending $id]
+                    dict set hir exprs $pending context $id
+                }
+            }
+        }
+        dict set entryInstalls $t $placed
+    }
     dict set hir contexts [dict create blocks $blocks installs $installs reasons $reasons \
-        selections $selections selected $selected]
+        selections $selections selected $selected entries $entryInstalls]
     if {[dict size $specialized] > 0} {
         dict set hir contexts specialized $specialized
     }
+}
+
+# 1 if call C of thread entry T's region (PARENT Walk's parent map) is one
+# of T's own statements -- where an installation of T may be written.
+proc hir::contexts::EntryStatement {hir parent t c} {
+    lassign [dict get $parent $c] p role
+    return [expr {$p eq $t && [string match "seq *" $role]
+        && [hir::get $hir $c scope] eq [dict get $hir exprs $t bodyScope]}]
+}
+
+# The statement of block T's body that expression E (of T's region) is in,
+# by PARENT (Walk's parent map): E itself when it is one, "" when E is not
+# in T's body.
+proc hir::contexts::StatementOf {parent t e} {
+    set x $e
+    for {set depth 0} {$depth < 1000000} {incr depth} {
+        if {![dict exists $parent $x]} {
+            return ""
+        }
+        set p [lindex [dict get $parent $x] 0]
+        if {$p eq $t} {
+            return $x
+        }
+        if {$p eq ""} {
+            return ""
+        }
+        set x $p
+    }
+    return ""
 }
 
 # The context requirements of HIR (WALK hir::contexts::Walk's result) with
@@ -903,6 +1029,15 @@ proc hir::contexts::Requirements {hir walk graph} {
                     }
                 }
             }
+        }
+    }
+    # A thread entry requires nothing (hir/threads.tcl): it is started,
+    # never called, and installs what its code needs itself -- its calls
+    # are the obligations of its own entry (verify), as the top level's are.
+    foreach b $blocks {
+        if {[hir::threads::isEntry $hir $b]} {
+            dict set required $b {}
+            dict unset reasons $b
         }
     }
     return [dict create direct $direct edges $edges required $required reasons $reasons \
@@ -1277,7 +1412,7 @@ proc hir::contexts::CheckValues {hirVar parent required} {
 # Where installation C (owner block OWNER, "" at top level) is, for the
 # CONTEXT-INSTALLATION-UNSUPPORTED message.
 proc hir::contexts::Where {hir c owner} {
-    if {$owner ne ""} {
+    if {$owner ne "" && ![hir::threads::isEntry $hir $owner]} {
         return "inside a function"
     }
     if {[hir::mode $hir] ne "program"} {
@@ -1300,8 +1435,14 @@ proc hir::contexts::Where {hir c owner} {
     return "inside an expression"
 }
 
-proc hir::contexts::Unsupported {hirVar c where} {
+proc hir::contexts::Unsupported {hirVar c where {entry ""}} {
     upvar 1 $hirVar hir
+    if {$entry ne ""} {
+        # Inside a thread entry, but not one of its own statements.
+        hir::Diagnose hir CONTEXT-INSTALLATION-UNSUPPORTED \
+            "context installation is supported only in the entry program's top-level scope and in a thread entry's own body, as a statement (this one is $where, in thread entry [BlockName $hir $entry])" $c
+        return
+    }
     hir::Diagnose hir CONTEXT-INSTALLATION-UNSUPPORTED \
         "context installation is currently supported only in the entry program's top-level scope, as a statement (this one is $where)" $c
 }

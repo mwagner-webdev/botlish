@@ -1,0 +1,14 @@
+# category: loop-element, captured by a nested function
+# class: rejected -- MUTABLE-PLACE-CAPTURE (existing rule)
+# expect-diagnostics: MUTABLE-PLACE-CAPTURE@11:13
+import std::mutable_vector
+
+fn run() -> List[int]:
+    rows = [std::mutable_vector::from_list([1])]
+    loop row in rows:
+        row.push(2)
+        fn width() -> int:
+            row.length()
+        width()
+
+run()

@@ -1,0 +1,29 @@
+# category: local of a function (the working copy NONPLACE-PARAMETER-MUTATION
+#           suggests), never read after its mutation
+# class: C -- silently discarded write, outside any construct
+# NONPLACE-PARAMETER-MUTATION rejects `tiles.set(i, kind)` on a value
+# parameter and suggests two fixes. Taking the second -- "copy it into a
+# local first" -- without using the copy afterwards compiles, and loses the
+# write exactly as the rejected program did (its tests' "copied" variants
+# pin this behavior).
+# intended: zone tile 4 as 2
+# expect: 0
+import std::mutable_array
+
+struct Map:
+    tiles: MutableArray[int]
+    width: int
+
+fn zone(tiles: MutableArray[int], i: int, kind: int) -> unit errors IndexNotFound:
+    working = tiles
+    working.set(i, kind)
+
+fn run() -> int errors IndexNotFound:
+    m = Map {tiles: std::mutable_array::create(6, 0), width: 3}
+    zone(m.tiles, 4, 2)
+    m.tiles.at(4)
+
+r = run():
+    on IndexNotFound:
+        -1
+r

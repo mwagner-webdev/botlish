@@ -1,0 +1,26 @@
+# category: local bound by a coroutine binding (`first`)
+# class: B -- the first outward value is the consumer's own copy
+# expect: [2, 2]
+import std::coroutine
+import std::mutable_vector
+
+struct Go:
+    n: int
+
+fn ints() -> MutableVector[int]:
+    std::mutable_vector::from_list([])
+
+fn producer(resume Go) -> MutableVector[int]:
+    v = ints()
+    v.push(1)
+    m = yield v
+    v.push(m.n)
+    v
+
+fn run() -> List[int]:
+    coroutine {step, first} = producer()
+    first.push(99)
+    last = step(Go {n: 7})
+    [first.length(), last.length()]
+
+run()

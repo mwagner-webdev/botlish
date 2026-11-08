@@ -33,6 +33,7 @@ Throughout, *code inspection* means something read from the source,
 11. Mutation testing
 12. TUI workload
 13. Remaining limitations
+14. Merging main: threads and the C backend
 
 ## 1. Result
 
@@ -428,7 +429,9 @@ examples, 0 problems).
 `audit/unused-context-import/tools/mutate.tcl` applies each mutant of its
 `mutants.txt` to a private copy of the tree and runs
 `tests/unused-context.test`. A mutant counts as killed only by a test its
-`!!` line names. *Executed*: 9 of 9 killed, in 45 seconds.
+`!!` line names. *Executed*: 10 of 10 killed, on the branch and again on
+the tree merged with `main` (section 14); the whole catalog runs in about
+three quarters of a minute.
 
 | mutant | the break | killed by |
 |---|---|---|
@@ -441,6 +444,7 @@ examples, 0 problems).
 | `releases-top-level-dropped` | the top level's own releases are dropped | uc-toplevel |
 | `cleanup-table-compacted` | the table loses its placeholders, so entry K names another cleanup | uc-tags, uc-tags-table, uc-nir-uses, uc-gc-stress, uc-isolation, uc-executable |
 | `live-cleanups-stale` | stale metadata across compilations: the live set is decided once per process | uc-isolation and nine others |
+| `cleanups-rooted-load-suppressed` | the workaround the brief rules out, and `main`'s own before the merge (section 14): every cleanup a root again, an uninstalled context's load raising at run time instead of failing lowering. Every program runs, so only the tests of what is compiled catch it | uc-nir-import-only, uc-nir-several, uc-stdlib-imports, uc-tags-table, uc-nir-uses |
 
 One existing mutant applied to the text this milestone changed:
 `audit/c-callbacks/tools/mutants.txt`'s `root-not-specialized` (a callback
@@ -504,3 +508,59 @@ is the library's decision. Its public API was not touched.
   machine, so it is not precise enough to state more than "within a few
   percent".
 * **Other hosts.** Only Linux x86-64 was executed here (section 8).
+
+## 14. Merging main: threads and the C backend
+
+While this milestone was on its branch, `main` gained 50 commits, two of
+which touch this code (*code inspection* of the merge).
+
+* **Threads** (BOTLISH-OWNED-THREADS-AND-CROSS-THREAD-ACTORS-MILESTONE-1.md)
+  hit the same defect independently. Every thread program imports
+  `std::event_loop`. That milestone kept cleanups as roots and added
+  `native::lower::InCleanup`: inside a cleanup, a load of an uninstalled
+  context lowered to a run-time `raise MISSING-CONTEXT` instead of the
+  NATIVE BUG. That is the suppression this milestone's brief rules out.
+  The cleanup was still compiled, with a load of a context that no slot
+  holds. The merge keeps this milestone's rule and removes `InCleanup`, so
+  `UninstalledContext` is the backstop for every function again. The
+  threads report's paragraph now says it was superseded. The mutant
+  `cleanups-rooted-load-suppressed` reconstructs that workaround, and the
+  NIR tests kill it (section 11).
+* **Thread entries are roots** (`-exports` holds each thread entry and
+  its transfer owners' functions). The rule stays sound with them.
+  `hir::contexts::verify` checks each thread entry as it checks the top
+  level: in evaluation order, its own installations, and its calls *and
+  its release edges* as obligations (`byRelease`). So a cleanup that a
+  thread entry's code releases has its contexts proven installed in that
+  entry. The context area is the program's, so the slot exists.
+* **The C backend** (`ccompile/`, C-COMPILE-FREESTANDING-MILESTONE-1.md)
+  never had the defect. It calls `hir::specialize::analyze` with no roots
+  besides the program and refuses an affine struct only where compiled
+  code uses one, so an imported, unused resource compiles nothing there.
+  Nothing changed in it.
+* **Conflicts.** `native/lower.tcl`'s `-exports` (thread roots beside this
+  milestone's `-releases`) and `InCleanup` (removed);
+  `audit/c-callbacks/tools/mutants.txt`'s `root-not-specialized` (`main`
+  had rewritten it for the thread roots: it now deletes the callback line
+  of the merged `-exports` and is still a mutant of the same rule);
+  `audit/golden/migration/tcl-names.txt` (both sides' new names). The
+  regenerated golden manifest equals the automatic merge's.
+
+*Executed* on the merged tree, after rebuilding the native backend:
+
+| check | outcome |
+|---|---|
+| `tests/unused-context.test` | 27 passed |
+| `tests/threads.test` (`main`'s, the workaround removed) | 21 passed |
+| `audit/unused-context-import/tools/mutate.tcl` | 10 of 10 killed |
+| `cargo test ... --bin botlish-native cleanup_root_tests` | 2 passed |
+| `tools/mutant-catalogs.tcl` | 91 catalogs, 3187 mutants, 0 problems |
+| `tools/compilerpedia.tcl check` | 1290 topics, 758 examples, 0 problems |
+| `audit/golden/migration/merge.tcl -check 1` | 0 problems |
+| `tests/local.tcl` over the related files of section 10.1, plus `sendability.test` | PENDING at this commit |
+
+CI on the branch before the merge (`fa3598a`), every workflow green:
+`tests` and `tests (linux arm64)` (both dispatched in full), `tests (macos
+arm64)`, `tests (windows x86-64)`, `icy-tower (macos arm64)` and `icy-tower
+(windows x86-64)`. CI on the merged commit: PENDING.
+

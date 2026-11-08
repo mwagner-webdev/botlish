@@ -760,6 +760,17 @@ private nomethod fn deliver_for(slot: int, gen: int, payload: any, context ev: s
     enqueue(slot, payload)
     status_answer(a_delivered)
 
+# Send M to TO's mailbox from an event-loop task that is no actor (a
+# transport's pump: std::actor::remote), waiting -- that task suspended,
+# never its thread -- for room when it is full, as an actor's deliver does
+# (the senders waiting for room are served first-come first-served):
+# Delivered, Closed or Stale.
+nomethod fn post_waiting(to: Address[M], m: M, context ev: std::event_loop::Loop, ac: Actors) -> Sent errors std::event_loop::SchedulerFault:
+    a = deliver_for(to.slot, to.gen, m):
+        on IndexNotFound:
+            fail std::event_loop::SchedulerFault
+    sent_of(a.status)
+
 # Perform actor ME/MG's request R: the answer to resume it with.
 private nomethod fn serve(r: Exit, me: int, mg: int, context ev: std::event_loop::Loop, ac: Actors) -> Answer errors IndexNotFound, std::event_loop::SchedulerFault:
     op = r.op

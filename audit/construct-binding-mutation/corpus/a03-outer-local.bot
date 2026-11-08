@@ -1,0 +1,16 @@
+# category: local of the function, mutated from a loop body
+# class: A -- productive local mutation: the efficient idiom (no copy at all)
+# expect: 1000
+# alloc: mutableVector shares 0 detaches 0 detachElements 0
+import std::mutable_vector
+
+fn ints() -> MutableVector[int]:
+    std::mutable_vector::from_list([])
+
+fn f(n: int) -> int:
+    acc = ints()
+    loop i from 0 to n:
+        acc.push(i)
+    acc.length()
+
+f(1000)

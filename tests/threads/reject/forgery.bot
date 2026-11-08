@@ -1,0 +1,13 @@
+# forgery.bot -- tests/threads.test: a capability rebuilt from a made-up
+# identity. The rebuild of a copied capability is the transfer protocol's
+# (Remote's sendable clause), internal to the standard library:
+# INTERNAL-NAMESPACE.
+import std::actor::remote
+
+struct Note:
+    seq: int
+
+fn rebuilt() -> std::actor::remote::Remote[Note]:
+    std::actor::remote::remote_in(std::actor::remote::Identity {domain: 0, id: 0, key: 0})
+
+1

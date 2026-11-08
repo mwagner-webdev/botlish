@@ -1,0 +1,165 @@
+# workers.bot -- the thread entries of bench/threads.tcl
+# (BOTLISH-OWNED-THREADS-AND-CROSS-THREAD-ACTORS-MILESTONE-1.md,
+# "Performance").
+import event_loop_linux
+import std::actor
+import std::actor::remote
+import std::event_loop
+import std::thread
+
+struct Note:
+    from: int
+    seq: int
+
+struct Plan:
+    who: int
+    count: int
+    to: std::actor::remote::Remote[Note]
+
+struct Home:
+    home: std::actor::remote::Remote[std::actor::remote::Service[int, int]]
+
+fn fib(n: int) -> int:
+    if n < 2:
+        n
+    else:
+        fib(n - 1) + fib(n - 2)
+
+# A VM made, run and joined: nothing else.
+thread fn trivial(n: int) -> int:
+    n
+
+# CPU-bound work in a VM of its own.
+thread fn crunch(n: int) -> int:
+    fib(n)
+
+# A VM with its own event loop, Linux driver and port, served once.
+private fn looped(context ev: std::event_loop::Loop, d: std::event_loop::Driver, p: std::thread::Port, db: std::thread::Doorbell) -> int errors std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    std::thread::serve()
+    std::thread::close_port()
+    1
+
+thread fn with_loop(n: int) -> int:
+    with context std::event_loop::create(16)
+    with context event_loop_linux::create()
+    with context event_loop_linux::native()
+    with context std::thread::port()
+    looped():
+        on std::event_loop::SchedulerFault:
+            -1
+        on std::event_loop::DriverFault {code}:
+            code
+
+# An idle worker: its loop sleeps until it is asked to stop.
+private fn idling(context ev: std::event_loop::Loop, p: std::thread::Port, db: std::thread::Doorbell) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    std::thread::wait_stop()
+    std::thread::close_port()
+    0
+
+private fn idled(context ev: std::event_loop::Loop, d: std::event_loop::Driver, p: std::thread::Port, db: std::thread::Doorbell) -> int errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    std::thread::serve()
+    coroutine {step, first} = idling()
+    std::event_loop::adopt(step, first)
+    std::event_loop::run()
+
+thread fn idle(n: int) -> int:
+    with context std::event_loop::create(16)
+    with context event_loop_linux::create()
+    with context event_loop_linux::native()
+    with context std::thread::port()
+    idled():
+        on std::event_loop::SchedulerFault:
+            -1
+        on std::event_loop::DriverFault {code}:
+            code
+        on std::event_loop::LoopReentered:
+            -2
+
+# COUNT notes sent at once, a Full one retried: the refusals.
+thread fn spam(plan: Plan) -> int:
+    fold i from 0 to plan.count with intermediate full 0:
+        tries = fold with intermediate t 0:
+            sent = std::actor::remote::send(plan.to, Note {from: plan.who, seq: i})
+            if sent == std::actor::remote::Sent::Delivered:
+                break
+            t + 1
+        full + tries
+
+# The same notes from a task of this VM's loop, waiting for room.
+private fn delivering(plan: Plan, context ev: std::event_loop::Loop, p: std::thread::Port, db: std::thread::Doorbell) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    n = fold i from 0 to plan.count with intermediate n 0:
+        sent = std::actor::remote::deliver(plan.to, Note {from: plan.who, seq: i})
+        if sent != std::actor::remote::Sent::Delivered:
+            break
+        n + 1
+    std::thread::close_port()
+    n
+
+private fn delivered(plan: Plan, context ev: std::event_loop::Loop, d: std::event_loop::Driver, p: std::thread::Port, db: std::thread::Doorbell) -> int errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    std::thread::serve()
+    coroutine {step, first} = delivering(plan)
+    task = std::event_loop::adopt(step, first)
+    std::event_loop::run()
+    fold o in std::event_loop::take_outcomes() with intermediate n 0:
+        if o.task == task:
+            o.value
+        else:
+            n
+
+thread fn deliver(plan: Plan) -> int:
+    with context std::event_loop::create(16)
+    with context event_loop_linux::create()
+    with context event_loop_linux::native()
+    with context std::thread::port()
+    delivered(plan):
+        on std::event_loop::SchedulerFault:
+            -1
+        on std::event_loop::DriverFault {code}:
+            code
+        on std::event_loop::LoopReentered:
+            -2
+
+# A service answering each call with its request plus one, until the
+# worker is asked to stop.
+fn answering(inbox: std::actor::Inbox[std::actor::remote::Call[int, int]], resume std::actor::Answer) -> std::actor::Exit:
+    rx = inbox.listen():
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    n = fold with intermediate n 0:
+        call = rx.receive():
+            on std::actor::Closed:
+                break
+        std::actor::remote::reply(call.reply, call.body + 1)
+        n + 1
+    std::actor::exit(n)
+
+private fn stopping(calls: std::actor::Address[std::actor::remote::Call[int, int]], context ev: std::event_loop::Loop, ac: std::actor::Actors, p: std::thread::Port, db: std::thread::Doorbell) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    std::thread::wait_stop()
+    std::actor::close(calls)
+    std::thread::close_port()
+    0
+
+private fn served(init: Home, context ev: std::event_loop::Loop, d: std::event_loop::Driver, ac: std::actor::Actors, p: std::thread::Port, db: std::thread::Doorbell) -> int errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    std::thread::serve()
+    {to: calls, inbox} = std::actor::open[std::actor::remote::Call[int, int]](64)
+    svc = std::actor::remote::serve_calls(calls, 64)
+    coroutine {step, first} = answering(inbox)
+    std::actor::start(std::actor::spawned(step, first))
+    coroutine {step: s, first: f} = stopping(calls)
+    std::event_loop::adopt(s, f)
+    std::actor::remote::send(init.home, svc)
+    std::event_loop::run()
+
+thread fn service(init: Home) -> int:
+    with context std::event_loop::create(64)
+    with context event_loop_linux::create()
+    with context event_loop_linux::native()
+    with context std::actor::create()
+    with context std::thread::port()
+    served(init):
+        on std::event_loop::SchedulerFault:
+            -1
+        on std::event_loop::DriverFault {code}:
+            code
+        on std::event_loop::LoopReentered:
+            -2

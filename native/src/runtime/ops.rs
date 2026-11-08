@@ -107,6 +107,7 @@ use super::nview::{
     rt_native_load_ptr, rt_native_store, rt_native_store_ptr,
 };
 use super::syscall::{rt_linux_aarch64_syscall, rt_linux_x86_64_syscall};
+use super::thread::rt_thread_op;
 use super::transfer::{rt_transfer_decode, rt_transfer_encode};
 use super::value::*;
 use super::vm::{Identity, NativeInfo, ProgramInfo, Vm};
@@ -226,6 +227,9 @@ pub fn op_may_allocate(op: OpCode) -> bool {
             // Bytes, every decoded object; both run the owners' `through`
             // functions.
             | TransferEncode | TransferDecode
+            // Threads and the transport (runtime/thread.rs): an Int, a
+            // String or a byte storage result.
+            | ThreadOp
     )
 }
 
@@ -317,6 +321,9 @@ pub fn op_may_error(op: OpCode) -> bool {
         // owner's `through` function fails with, an encoding past the
         // storage ceiling (RANGE).
         | TransferEncode | TransferDecode
+        // Threads and the transport: only an operand of the wrong kind
+        // (TYPE), which a checked program never passes.
+        | ThreadOp
         | ResultValue | ResultError | RegionCheck | StrRegionIsTclAlpha | StrRegionIsTclAlnum
         // Construction (dedup) and membership (a linear equal-scan) can
         // both raise EQUALITY through the same pre-existing
@@ -4167,6 +4174,7 @@ pub fn apply_op(p: *mut Vm, op: OpCode, a: &[Value]) -> Value {
         MutArrayGenerate => rt_mutarray_generate(p, a[0], a[1]),
         MutArrayGenerateDrop => rt_mutarray_generate_drop(p, a[0], a[1], a[2]),
         TransferEncode => rt_transfer_encode(p, a[0], a[1], a[2]),
+        ThreadOp => rt_thread_op(p, a[0], a[1], a[2], a[3], a[4], a[5], a[6]),
         TransferDecode => rt_transfer_decode(p, a[0], a[1], a[2]),
         MutArraySwap => rt_mutarray_swap(p, a[0], a[1], a[2]),
         MutArraySwapDrop => rt_mutarray_swap_drop(p, a[0], a[1], a[2], a[3]),
@@ -4479,6 +4487,7 @@ runtime_helpers! {
     (rt_mutarray_empty, 2),
     (rt_mutarray_take_front, 2),
     (rt_transfer_encode, 4),
+    (rt_thread_op, 8),
     (rt_transfer_decode, 4),
     (rt_is_kind, 3),
     (rt_is_result, 3),

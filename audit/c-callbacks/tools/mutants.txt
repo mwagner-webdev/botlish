@@ -24,9 +24,9 @@
 ## native/lower.tcl
 <<<<
         -exports [concat [lmap export [dict get $options -exports] {dict get $export block}] \
-            [lmap callback [hir::callbacks::of $hirProgram] {dict get $callback block}]] \
+            [lmap callback [hir::callbacks::of $hirProgram] {dict get $callback block}] \
 ====
-        -exports [lmap export [dict get $options -exports] {dict get $export block}] \
+        -exports [concat [lmap export [dict get $options -exports] {dict get $export block}] \
 >>>>
 
 @@ root-dropped-by-fusion dead-code elimination after coroutine fusion keeps only what the program function and the exports reach: a callback's function, which only its entry point calls, is dropped

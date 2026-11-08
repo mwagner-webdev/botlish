@@ -3095,13 +3095,26 @@ proc hir::types::IsSendable {type} {
 
 # 1 if static TYPE is closed: it mentions no imprint variable and no trait
 # view, so its transfer schema is known where it is written
-# (hir/transfer.tcl). SEEN as SendClass's.
-proc hir::types::IsClosedType {type {seen {}}} {
+# (hir/transfer.tcl). SEEN as SendClass's. With SPECIALIZED 1, an imprint
+# variable constrained by Sendable counts as closed too: the trait
+# monomorphization specializes a function per binding of such a variable
+# (hir::traits::SelectingBinding; BOTLISH-OWNED-THREADS-AND-CROSS-THREAD-
+# ACTORS-MILESTONE-1.md, "Generic Sendable specialization"), so every
+# clone hir::transfer::Elaborate sees transfers a closed type.
+proc hir::types::IsClosedType {type {seen {}} {specialized 0}} {
     if {[IsTrait $type] && "send" in [hir::traits::intrinsicGuarantees [lindex $type 1]]} {
         # A view of Sendable: the trait monomorphization (TRAITS.md) clones
         # its function per witness before hir::transfer::Elaborate runs, so
         # every clone transfers a closed type.
         return 1
+    }
+    if {$specialized && [IsImprint $type]} {
+        foreach trait [ImprintConstraints $type] {
+            if {"send" in [hir::traits::intrinsicGuarantees $trait]} {
+                return 1
+            }
+        }
+        return 0
     }
     if {[IsImprint $type] || [IsTrait $type]} {
         return 0
@@ -3111,21 +3124,21 @@ proc hir::types::IsClosedType {type {seen {}}} {
             return 1
         }
         foreach arg [StructArgs $type] {
-            if {![IsClosedType $arg $seen]} {
+            if {![IsClosedType $arg $seen $specialized]} {
                 return 0
             }
         }
         return 1
     }
     if {[hir::refinements::IsRefined $type] && [hir::refinements::IsApplied [hir::refinements::Family $type]]} {
-        return [IsClosedType [hir::refinements::Base $type] $seen]
+        return [IsClosedType [hir::refinements::Base $type] $seen $specialized]
     }
     if {[IsList $type] || [IsSet $type] || [IsMutVec $type] || [IsMutArray $type]} {
-        return [IsClosedType [lindex $type 1] $seen]
+        return [IsClosedType [lindex $type 1] $seen $specialized]
     }
     if {[IsStruct $type]} {
         foreach {name t} [lindex $type 1] {
-            if {![IsClosedType $t $seen]} { return 0 }
+            if {![IsClosedType $t $seen $specialized]} { return 0 }
         }
     }
     return 1
@@ -3793,6 +3806,18 @@ proc hir::types::ShapeResult {hir shape argExprs argTypes result {ctx {}}} {
                     # statically and never becomes this binding's type.
                     return [list trait $id]
                 }
+            }
+            return $result
+        }
+        thread-entry {
+            # std::thread::entry(NAME) (core/thread.tcl, BOTLISH-OWNED-
+            # THREADS-AND-CROSS-THREAD-ACTORS-MILESTONE-1.md): the Entry of
+            # the `thread fn` NAME names, applied to its declared parameter
+            # and result types (hir/threads.tcl). Any other argument is
+            # THREAD-ENTRY-REFERENCE, and the call poison (Call).
+            set block [hir::threads::Referenced $hir [lindex $argExprs [lindex $shape 1]]]
+            if {$block ne "" && [hir::threads::Typed $hir $block]} {
+                return [hir::threads::EntryType $hir $block]
             }
             return $result
         }
@@ -5438,7 +5463,8 @@ proc hir::types::Call {hirVar ctxVar e} {
                             || ($shapeKind eq "layout-struct" && [hir::layouts::RoleOf [dict get $meta layout] op] eq "parse"
                                 && [LayoutParseRefused $hir $argExprs [dict get $meta resultShape]])
                             || ($shapeKind eq "layout-read" && [LayoutReadRefused $hir $argExprs [dict get $meta resultShape]])
-                            || ($shapeKind eq "callback-pointer" && ![IsCFnPtr $result]))} {
+                            || ($shapeKind eq "callback-pointer" && ![IsCFnPtr $result])
+                            || ($shapeKind eq "thread-entry" && ![IsNamedStruct $result]))} {
                     # std::binary::load of a value not statically a NativeView[L]
                     # (BINARY-OPERAND), or std::binary::parse of a native-only
                     # layout (LAYOUT-NATIVE-ONLY: hir::layouts::verify): no
