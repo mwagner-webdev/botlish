@@ -18,8 +18,13 @@
 set -euo pipefail
 apk=$(realpath "$1")
 out=$(realpath "$2")
-ndk=$(ls -d "$ANDROID_HOME"/ndk/* | sort -V | tail -1)
+# The NDK the app's build used (its ndkVersion): its llvm-strip is the one
+# whose output the APK holds.
+ndkVersion=$(sed -n 's/^ *ndkVersion *= *"\(.*\)"/\1/p' "$out/app/android/build.gradle" 2>/dev/null)
+ndk="$ANDROID_HOME/ndk/${ndkVersion:-missing}"
+[[ -d $ndk ]] || ndk=$(ls -d "$ANDROID_HOME"/ndk/* | sort -V | tail -1)
 bin="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin"
+echo "ndk $(basename "$ndk") (the app's build's)"
 build_tools=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT

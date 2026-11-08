@@ -171,7 +171,10 @@ apk="$room/app/android/app/build/outputs/apk/release/app-release.apk"
 if [[ -f $apk ]]; then
     cp "$apk" "$results/app-release.apk"
     note "apk $(stat -c %s "$apk") bytes sha256 $(sha256sum "$apk" | cut -d' ' -f1)"
-    ndk=$(ls -d "$ANDROID_HOME"/ndk/* | sort -V | tail -1)
+    # The NDK the app's build used (its ndkVersion): its llvm-strip's
+    # output is what the APK holds.
+    ndkVersion=$(sed -n 's/^ *ndkVersion *= *"\(.*\)"/\1/p' "$room/app/android/build.gradle")
+    ndk="$ANDROID_HOME/ndk/$ndkVersion"
     bin="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin"
     mkdir -p "$room/apk" && (cd "$room/apk" && unzip -q "$apk" 'lib/*')
     check "the APK holds arm64-v8a only" test "$(ls "$room/apk/lib")" = arm64-v8a

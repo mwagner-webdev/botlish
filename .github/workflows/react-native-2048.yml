@@ -102,10 +102,12 @@ jobs:
             ~/.gradle/wrapper
           key: rn2048-gradle-${{ hashFiles('examples/react-native/app/package-lock.json', 'examples/react-native/app/android/**/*.gradle', 'examples/react-native/app/android/gradle/wrapper/gradle-wrapper.properties') }}
 
+      # (ANDROID_HOME is the runner image's: the shell's, not the workflow's
+      # env context.)
       - name: Build (audit/react-native-2048/tools/build.sh)
-        env:
-          ANDROID_NDK_ROOT: ${{ env.ANDROID_HOME }}/ndk/29.0.14206865
-        run: audit/react-native-2048/tools/build.sh "$RUNNER_TEMP/rn2048"
+        run: |
+          export ANDROID_NDK_ROOT="$ANDROID_HOME/ndk/29.0.14206865"
+          audit/react-native-2048/tools/build.sh "$RUNNER_TEMP/rn2048"
 
       - name: The record of the generated 2048 package
         run: cat "$RUNNER_TEMP/rn2048/generated/react-native-botlish-game/botlish-react-native.json"
@@ -120,9 +122,8 @@ jobs:
         run: bash single/build.sh
 
       - name: Clean room (audit/react-native-2048/cleanroom/cleanroom.sh)
-        env:
-          ANDROID_NDK_ROOT: ${{ env.ANDROID_HOME }}/ndk/29.0.14206865
         run: |
+          export ANDROID_NDK_ROOT="$ANDROID_HOME/ndk/29.0.14206865"
           sudo apt-get install -y -qq strace > /dev/null
           audit/react-native-2048/cleanroom/cleanroom.sh single/out/botlish "$RUNNER_TEMP/rn2048/repo" "$RUNNER_TEMP/rn2048/cleanroom"
 

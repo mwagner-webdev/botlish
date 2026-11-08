@@ -166,11 +166,13 @@ versions:
 |---|---|
 | react-native, @react-native/codegen, @react-native/gradle-plugin, template | 0.88.1 |
 | react | 19.3.0 |
-| Hermes | React Native 0.88.1's (`hermes-android`, from its Maven artifacts) |
+| Hermes | `com.facebook.hermes:hermes-android` 260318099.0.5 (React Native 0.88.1's `HERMES_VERSION_NAME`) |
+| react-android | 0.88.1 |
 | @react-native-community/cli | 20.2.0 |
 | Node | 22 (22.22 here) |
 | Gradle | 9.4.1 (the template's wrapper) |
-| Android Gradle Plugin, Kotlin | the React Native Gradle plugin's (AGP from its version catalog; Kotlin 2.2.0) |
+| Android Gradle Plugin | 9.2.1 (the React Native Gradle plugin's version catalog) |
+| Kotlin | 2.2.0 |
 | compileSdk, targetSdk, minSdk, build tools | 37, 36, 24, 37.0.0 |
 | NDK | 27.1.12297006 for the app (the template's); r29 (29.0.14206865) for the Botlish libraries (target support requires 28.0+) |
 | CMake | 3.22.1 |
