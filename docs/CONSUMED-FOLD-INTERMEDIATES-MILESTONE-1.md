@@ -604,6 +604,15 @@ whole, a consumed fold's value not fresh, nested folds not demanded) by the
 HIR or the native copy counters. The cache key's mutant is the
 hir-interchange catalog's (`key-ignores-consumed-folds`, killed by `hc-key`).
 
+**The neighbouring catalogs.** The consumption joins the copy convention
+other harnesses guard, so every existing mutant that edits
+`hir/mutvec.tcl` ran again against the final tree, with its harness's own
+tests: MutableVector's 38 (`audit/mutable-vector/tools/mutate.tcl -only
+...`: among them `path-continue-as-break`, `path-break-copies`,
+`path-loop-iteration-ignored` and the other `NoLaterUse` mutants the walk
+relies on), MutableArray's 9 and MutableMap's 5 -- 52 mutants, 52 killed, 0
+survived (*observation*).
+
 ## 17. Compile-time cost
 
 *Implementation fact.* `Convention` walks the body of every reachable fold
@@ -697,6 +706,7 @@ tclsh9.0 audit/consumed-folds/tools/fuzz.tcl -seed 7 -count 100 -gc-stress 1
 tclsh9.0 audit/consumed-folds/tools/fuzz.tcl -seed 1 -count 150 -fault exits
 tclsh9.0 audit/consumed-folds/tools/mutate.tcl
 tclsh9.0 audit/hir-interchange/tools/mutate.tcl -only key-ignores-consumed-folds,key-ignores-dfa-lowering
+tclsh9.0 audit/mutable-vector/tools/mutate.tcl -only NAMES   (and mutable-array's, mutable-map's: the mutants editing hir/mutvec.tcl)
 tclsh9.0 audit/construct-binding-mutation/tools/run.tcl
 tclsh9.0 audit/construct-binding-mutation/tools/fold-cost.tcl
 tclsh9.0 bench/consumed-folds.tcl
