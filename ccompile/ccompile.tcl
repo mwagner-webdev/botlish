@@ -36,6 +36,23 @@
 #                   zero) is a status with Botlish's own code and message.
 #   control flow    if/else, for (;;) loops, goto for break, continue and
 #                   handlers.
+#   contexts        (C-CONTEXTS-FREESTANDING-MILESTONE-1.md) a context struct
+#                   is a C struct like any other; `with context EXPR` stores
+#                   its value in a `const` object of the program function's
+#                   own frame (PREFIX_program: one per run); a function whose
+#                   transitive requirement (hir/contexts.tcl's
+#                   requiredContexts) is not empty takes one `const T *`
+#                   parameter per context it requires, after its ordinary
+#                   parameters, and every call passes the callee's
+#                   requirement on from the caller's own parameters (or, in
+#                   the program function, the installed objects); a context
+#                   parameter `context io: T` is no C variable at all, its
+#                   uses read through that pointer. Context traits, their
+#                   selection and inject blocks are gone before any backend
+#                   (the trait plan's monomorphized program calls the
+#                   selected implementation directly; an inject block is an
+#                   `if true:`), so nothing of them reaches C: no registry,
+#                   no lookup, no global context, no dispatch.
 #
 # What the backend cannot translate correctly yet it reports as the
 # compile-time error C UNSUPPORTED, located at the construct: never a
@@ -105,6 +122,10 @@ namespace eval ccompile {
     variable staticBindings {}
     variable statics {}
     variable usesInt 0
+    # Context identities used, -> the C name of their installed object (in
+    # the program function) and of the pointer parameter carrying it (in
+    # every function that requires it): ContextName.
+    variable contextNames {}
 }
 
 # ---------------------------------------------------------------------------
@@ -209,10 +230,21 @@ proc ccompile::Program {hirProgram name source} {
     set statusIndex [dict create]
     set statics [dict create]
     set usesInt 0
+    variable contextNames
+    set contextNames [dict create]
     variable active
     variable fixedResults
     set active {}
     set fixedResults [dict create]
+    # A program that failed context verification (a lenient HIR) has
+    # context loads nothing proved are preceded by their installation: the C
+    # of it is never generated (native lowering refuses to run it too). Its
+    # first context diagnostic is the error, as the front end reports it.
+    foreach d [dict getdef $hirProgram diagnostics {}] {
+        if {[dict get $d kind] in [ContextDiagnosticKinds]} {
+            core::raiseDiagnostics [hir::recovery::entries $hirProgram [list $d] 1]
+        }
+    }
     set spec [hir::specialize::analyze $hirProgram]
     hir::specialize::memoizeViews $hirProgram $spec
     try {
@@ -559,16 +591,21 @@ proc ccompile::StructAggregate {type e} {
         if {[dict exists $aggregates $key]} {
             return $key
         }
-        if {[hir::structs::isContext $id]} {
-            Unsupported $e "the context struct [hir::structs::display $id]"
-        }
+        # (A context struct is an ordinary struct value: what makes it a
+        # context is where its value comes from, which the call graph says.)
         if {[hir::structs::treeField $id] ne ""} {
             Unsupported $e "the tree struct [hir::structs::display $id] (a recursive value)"
         }
         if {[hir::structs::identityOf $id] ne ""} {
             Unsupported $e "the struct [hir::structs::display $id], which declares an identity"
         }
+        set context [hir::structs::isContext $id]
         if {[hir::structs::IsAffine $id]} {
+            if {$context} {
+                # (An installed context owns its affine members:
+                # CONTEXT-OWNED-AFFINE-STATE-MILESTONE-1.md.)
+                Unsupported $e "the context struct [hir::structs::display $id], which owns affine state (a C pointer, a coroutine, or a struct or collection holding one)"
+            }
             Unsupported $e "the affine struct [hir::structs::display $id]"
         }
         # A struct that holds itself by value has no C representation; it is
@@ -576,8 +613,16 @@ proc ccompile::StructAggregate {type e} {
         dict set aggregates $key [dict create cname "" kind pending]
         set fields {}
         foreach {field fieldType} [hir::structs::fieldTypes $id] {
-            set repr [StorageRepr $fieldType $e]
+            if {[catch {StorageRepr $fieldType $e} repr options]} {
+                # Not registered: a later use is judged (and reported) again.
+                dict unset aggregates $key
+                if {$context && [dict get $options -errorcode] eq {C UNSUPPORTED}} {
+                    Unsupported $e "the context struct [hir::structs::display $id], whose field \"$field\" has type [hir::types::show $fieldType],"
+                }
+                return -options $options $repr
+            }
             if {$repr eq [list agg $key] || ([lindex $repr 0] eq "agg" && [dict get $aggregates [lindex $repr 1] kind] eq "pending")} {
+                dict unset aggregates $key
                 Unsupported $e "the recursive struct [hir::structs::display $id]"
             }
             lappend fields $field $repr
@@ -919,6 +964,152 @@ proc ccompile::HelperOrder {} {
 }
 
 # ---------------------------------------------------------------------------
+# Contexts (CONTEXTS.md; C-CONTEXTS-FREESTANDING-MILESTONE-1.md)
+#
+# A Botlish program has one execution environment: at most one installed
+# value per context-struct type, installed only at the entry program's top
+# level, in source order. hir/contexts.tcl proved every load is preceded by
+# its installation and computed each function's transitive requirement; the
+# trait plan replaced every context-trait operation by a direct call of the
+# selected implementation (CONTEXT-TRAITS.md, "Specialization and
+# lowering"). What is left is said in C with explicit dependencies:
+#
+#   installation  `with context EXPR` (bind context#N EXPR, then
+#                 context#install(context#N)) declares `const T ctx_T = ...;`
+#                 in the program function: the installed context is an
+#                 object of that run's own frame, never file-scope storage,
+#                 so two runs, or two programs, never share one.
+#   requirement   a function whose block requires contexts R (sorted
+#                 identities) takes one parameter `const T *ctx_T` per T of
+#                 R, after its ordinary ones: its C signature states its
+#                 authority, exactly what it and its callees may use.
+#   call          passes the callee block's requirement from the caller's own
+#                 parameters (required(caller) holds required(callee) for
+#                 every call its region makes) or, in the program function,
+#                 the installed objects' addresses.
+#   load          a context parameter `context io: T` binds io to `(*ctx_T)`
+#                 and declares no C variable: a projection reads
+#                 ctx_T->field, a use as a value copies the immutable
+#                 installed value, as any struct is passed.
+#
+# The pointer is `const`: nothing the backend compiles mutates a context (a
+# context member mutated in place is a MutableVector's or MutableArray's,
+# which C does not represent yet), and a context parameter is immutable.
+
+# The diagnostics of a program that failed context verification
+# (hir/contexts.tcl): such a program is never compiled.
+proc ccompile::ContextDiagnosticKinds {} {
+    return {MISSING-CONTEXT DUPLICATE-CONTEXT NOT-A-CONTEXT CONTEXT-TYPE-NOT-EXACT
+        CONTEXT-INSTALLATION-UNSUPPORTED CONTEXT-FUNCTION-VALUE CONTEXT-BINDING-COLLISION
+        DUPLICATE-CONTEXT-PARAMETER AMBIGUOUS-CONTEXT-IMPLEMENTATION CONTEXT-NOT-INJECTED
+        CONTEXT-RETAINED-AUTHORITY CONTEXT-TRAIT-SELECTION-CONFLICT}
+}
+
+# The C name of context ID's installed object and of the parameter that
+# carries a pointer to it: ctx_ and the identity as a C identifier, unique
+# in the program (two identities that read alike get a counter). Every
+# global name the backend emits starts with PREFIX_, so no context name may:
+# with the prefix `ctx` (a program file ctx.bot) the struct type ctx_Clock
+# and a parameter ctx_Clock would collide, so the stem is cx_ there.
+proc ccompile::ContextName {id} {
+    variable contextNames
+    variable prefix
+    if {![dict exists $contextNames $id]} {
+        foreach base {ctx cx context} {
+            set stem ${base}_[Sanitize $id]
+            if {![string match "${prefix}_*" $stem]} break
+        }
+        set name $stem
+        set k 1
+        while {$name in [dict values $contextNames]} {
+            incr k
+            set name ${stem}_$k
+        }
+        dict set contextNames $id $name
+    }
+    return [dict get $contextNames $id]
+}
+
+# The representation of context ID's value (E: where, for diagnostics): the
+# C struct of its context-struct declaration.
+proc ccompile::ContextRepr {id e} {
+    if {![hir::structs::declared $id] || ![hir::structs::isContext $id]} {
+        # (The monomorphized program requires context structs only.)
+        Unsupported $e "a requirement of $id, which is no context struct"
+    }
+    return [list agg [StructAggregate [list nstruct $id] $e]]
+}
+
+# The context identities block BLOCK requires (transitively, sorted): the
+# pointer parameters of each of its instances' C functions, in order.
+proc ccompile::ContextRequirement {block} {
+    variable baseHir
+    if {$block eq "program"} {
+        return {}
+    }
+    return [hir::contexts::required $baseHir $block]
+}
+
+# The C arguments call E of block BLOCK passes for BLOCK's requirement: the
+# calling function's own pointer to each context (its parameter, or the
+# program function's installed object's address).
+proc ccompile::ContextArgs {fnVar block e} {
+    upvar 1 $fnVar fn
+    set words {}
+    foreach id [ContextRequirement $block] {
+        if {![dict exists $fn contexts $id]} {
+            # Verification proved the caller requires (or, at the top level,
+            # has installed) every context its reachable calls need.
+            error "ccompile: internal error: call $e needs context $id, which the function compiling it does not have"
+        }
+        lappend words [dict get $fn contexts $id]
+    }
+    return $words
+}
+
+# `with context VALUE` (call E of context#install, NODE): VALUE becomes the
+# installed context of its verified identity, a `const` object of the
+# program function's frame, from here to the end of the run.
+proc ccompile::Install {fnVar e node} {
+    upvar 1 $fnVar fn
+    variable hir
+    if {[dict get $fn block] ne "program"} {
+        Unsupported $e "a context installation outside the entry program's top level (a thread entry's)"
+    }
+    set id [hir::contexts::installId $hir $e]
+    if {$id eq ""} {
+        error "ccompile: internal error: installation $e has no verified context identity"
+    }
+    set ops [Operands fn $node]
+    if {$ops eq ""} {
+        return [list never ""]
+    }
+    set repr [ContextRepr $id $e]
+    set c [ContextName $id]
+    Emit fn "const [CType $repr] $c = [Want fn [lindex $ops 0] $repr];"
+    # (An installed context nothing reaches is still installed: marked used.)
+    Emit fn "@@UNREAD:ctx:$c@@"
+    dict set fn contexts $id "&$c"
+    return [list unit 0]
+}
+
+# The operand of a load of context ID at E: the installed value, read
+# through the function's pointer to it.
+proc ccompile::ContextValue {fnVar e id} {
+    upvar 1 $fnVar fn
+    if {![dict exists $fn contexts $id]} {
+        error "ccompile: internal error: context load $e of $id, which the function compiling it does not have"
+    }
+    set pointer [dict get $fn contexts $id]
+    if {[string index $pointer 0] eq "&"} {
+        set code [string range $pointer 1 end]
+    } else {
+        set code "(*$pointer)"
+    }
+    return [list [ContextRepr $id $e] $code]
+}
+
+# ---------------------------------------------------------------------------
 # Instances and their C signatures
 
 # {NAME PARAM-REPRS} of instance ID's C function: its parameters carried as
@@ -1028,7 +1219,13 @@ proc ccompile::Function {id} {
     lappend active $id
     set fn [dict create instance $id block $block lines {} indent 1 temps 0 labels 0 \
         locals [dict create] loops [dict create] handlers {} usedLabels [dict create] \
-        result "" completions {} tail 0 joins 0]
+        result "" completions {} tail 0 joins 0 contexts [dict create]]
+    # The contexts it requires arrive as pointer parameters (ContextArgs
+    # passes them on; the program function's are its installations).
+    set contextIds [ContextRequirement $block]
+    foreach cid $contextIds {
+        dict set fn contexts $cid [ContextName $cid]
+    }
     if {$block eq "program"} {
         set body [hir::roots $hir]
         set params {}
@@ -1091,11 +1288,23 @@ proc ccompile::Function {id} {
     foreach b $params repr $paramReprs {
         lappend paramList "[CType $repr] [lindex [dict get $fn locals $b] 1]"
     }
+    # A required context no compiled code of this instance passes on or
+    # reads (its uses are in code the instance's facts rule out) is marked
+    # used, so no C compiler warns of the parameter.
+    set text [join [dict get $fn lines] \n]
+    set unused {}
+    foreach cid $contextIds {
+        set c [ContextName $cid]
+        lappend paramList "const [CType [ContextRepr $cid $block]] *$c"
+        if {![regexp "\\m$c\\M" $text]} {
+            lappend unused "    (void)$c;"
+        }
+    }
     lappend paramList "[CType $resultRepr] *out"
     set head "static ${prefix}_status $cname\([join $paramList {, }])"
     set name [if {$block eq "program"} {string cat "the program"} else {hir::aot::BlockName $baseHir $block}]
     set key [if {[dict get $instance generic]} {string cat generic} else {join [lmap t [dict get $instance args] {hir::specialize::ShowKey $t}] {, }}]
-    set lines [list "/* $name ([string trim "$id $key"]) */" $head "\{"]
+    set lines [list "/* $name ([string trim "$id $key"]) */" $head "\{" {*}$unused]
     if {[dict get $fn tail]} {
         lappend lines "top:;"
     }
@@ -1388,6 +1597,14 @@ proc ccompile::Bind {fnVar e node} {
     if {[dict get $node duplicate]} {
         Unsupported $e "a duplicate binding"
     }
+    set id [hir::contexts::loadId $hir $valueExpr]
+    if {$id ne ""} {
+        # A context parameter: no C variable, its uses read the installed
+        # context through the function's pointer to it.
+        set op [ContextValue fn $valueExpr $id]
+        dict set fn locals $b $op
+        return $op
+    }
     set value [Expr fn $valueExpr value]
     if {[lindex $value 0] eq "never"} {
         return $value
@@ -1474,6 +1691,7 @@ proc ccompile::BlockCall {fnVar e node target} {
         lassign $pair op repr
         Want fn $op $repr
     }]
+    lappend words {*}[ContextArgs fn [dict get [hir::specialize::instance $spec $callee] block] $e]
     set calleeResult [dict get [hir::specialize::instance $spec $callee] result]
     set t [Temp fn r]
     Emit fn "[CType $resultRepr] $t;"
@@ -1531,6 +1749,27 @@ proc ccompile::NativeCall {fnVar e node name} {
         }
         shift_right - shift_left {
             return [Shift fn $e $node $name]
+        }
+        context#install {
+            return [Install fn $e $node]
+        }
+        context#load {
+            return [ContextValue fn $e [hir::contexts::loadId [set ::ccompile::hir] $e]]
+        }
+        context#unreachable {
+            # Where the trait plan put an operation no installed context
+            # reaches (CONTEXT-TRAITS.md, "Dead code"): never run, as
+            # verification proved. Its arguments run first (a dead call of a
+            # trait-polymorphic function keeps them); should it run, it is the
+            # Tcl backends' error, as a status -- never a trap or an exit.
+            set ops [Operands fn $node]
+            if {$ops eq "" && $argExprs ne ""} {
+                return [list never ""]
+            }
+            Fail fn [StatusOf {semantic UNREACHABLE context} {CORE SEMANTIC UNREACHABLE} \
+                "context#unreachable: code that no installed context reaches was executed (a compiler bug: static verification proved it never runs)" \
+                UNREACHABLE_CONTEXT]
+            return [list never ""]
         }
         list {
             set ops [Operands fn $node]
@@ -1760,6 +1999,10 @@ proc ccompile::Project {fnVar e node} {
     set key [lindex $receiver 0 1]
     set name [dict get $node name]
     set repr [dict get $aggregates $key fields $name]
+    if {[regexp {^\(\*([A-Za-z_][A-Za-z0-9_]*)\)$} [lindex $receiver 1] -> pointer]} {
+        # A field of a context, read through its pointer.
+        return [Narrowed fn $e [list $repr "$pointer->[Member $name]"]]
+    }
     return [Narrowed fn $e [list $repr "([lindex $receiver 1]).[Member $name]"]]
 }
 
@@ -2250,9 +2493,17 @@ proc ccompile::Assemble {programId source} {
         lappend h "\} $cname;"
     }
     lappend h "" "/* The program's value. */" "typedef [CType $programResult] ${p}_value;" ""
-    lappend h "/* Runs the program: on ${p}_OK its value is in *value. Not reentrant (the" \
-        " * program's top-level values that functions read are file-scope objects). */" \
-        "${p}_status ${p}_run(${p}_value *value);" "" \
+    if {[dict size $statics]} {
+        lappend h "/* Runs the program: on ${p}_OK its value is in *value. Not reentrant (the" \
+            " * program's top-level values that functions read are file-scope objects). */"
+    } else {
+        # (Its installed contexts are objects of the run's own frame: a run
+        # writes nothing a second run, or another program, could see.)
+        lappend h "/* Runs the program: on ${p}_OK its value is in *value. Writes no object of" \
+            " * static storage duration: its installed contexts and values live in the" \
+            " * run's own frame (a runtime-service provider has its own rules). */"
+    }
+    lappend h "${p}_status ${p}_run(${p}_value *value);" "" \
         "/* The error code and message of STATUS, as every Botlish backend reports" \
         " * them (\"\" for ${p}_OK). */" \
         "const char *${p}_status_code(${p}_status status);" \

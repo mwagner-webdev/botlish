@@ -317,9 +317,9 @@ are not made yet.
 title: -emit-c: the program as freestanding C
 summary: -emit-c writes a program as freestanding C11 for a target's own C toolchain; what C cannot implement (big Int arithmetic) becomes runtime-service calls a provider links in.
 index: backends
-alias: c backend; emit c; generate c; c code; freestanding c; embedded; microcontroller; c compile; runtime services; botlish_rt_v1
-keywords: -emit-c, C11, freestanding, runtime service, provider, botlish_rt_v1.h, runtime.json, int64_t, link error, embedded
-related: backend.overview backend.native-library cli.options error.c-unsupported error.c-runtime-limit concept.integers
+alias: c backend; emit c; generate c; c code; freestanding c; embedded; microcontroller; c compile; runtime services; botlish_rt_v1; contexts in c
+keywords: -emit-c, C11, freestanding, runtime service, provider, botlish_rt_v1.h, runtime.json, int64_t, link error, embedded, context, inject
+related: backend.overview backend.native-library cli.options error.c-unsupported error.c-runtime-limit concept.integers concept.contexts
 
 == WHAT IT IS
 `-emit-c FILE.bot` (or a .hir or .hirx file) writes, beside the input or in
@@ -348,15 +348,36 @@ still compiles; it links only where a provider supplies the service, and
 the linker names the missing symbol. Declaring integer domains (`type
 Small = Int in 0..1000`) is how a program keeps its Ints in int64_t.
 
-== WHAT IT COMPILES (milestone 1)
+== WHAT IT COMPILES
 Functions, direct calls and self tail calls (loops), Int, Bool, unit,
 enums, named and anonymous structs, a List literal as a value, if/elif,
 bare loops, counted loops and folds, break, continue, return, declared
-errors with fail and handlers, the run-time errors of mod and the shifts.
-Anything else -- Strings, Lists of unknown length, closures, function
-values, Float64, contexts, coroutines, C calls, error payloads -- is
-rejected at compile time with C UNSUPPORTED (error.c-unsupported), never
-compiled approximately.
+errors with fail and handlers, the run-time errors of mod and the shifts,
+and contexts: context structs, `with context`, context parameters, context
+traits and inject blocks (next section). Anything else -- Strings, Lists
+of unknown length, closures, function values, Float64, coroutines, C
+calls, error payloads, a context holding one of those or affine state --
+is rejected at compile time with C UNSUPPORTED (error.c-unsupported),
+never compiled approximately.
+
+== CONTEXTS
+Nothing of a registry or a lookup reaches C. A context struct is an
+ordinary C struct. `with context EXPR` stores the value in a const object
+of FILE_run's own frame: each run has its own installed contexts, and no
+context is ever a file-scope object. A function whose requirement (its own
+context parameters and its callees', transitively: `-contexts` lists it) is
+not empty takes one `const T *` parameter per context it requires, after
+its ordinary parameters, and every call passes the callee's requirement on:
+a function's C signature is its authority, exactly the contexts it and its
+callees may use. A context parameter `context io: T` reads through that
+pointer. A context trait's implementation is selected before any backend
+runs, so a trait operation is a direct C call of the installed provider's
+implementation; an inject block is checked before any backend runs and
+needs no C at all (a call inside it passes only what its callee requires).
+Contexts need no runtime service: the program installs them itself, so the
+embedding supplies nothing, and FILE.runtime.json lists only what the
+code they reach calls. Two programs (one application installed two ways)
+link side by side, each with its own prefix and its own contexts.
 
 == THINGS TO KNOW
   * The C toolchain itself may call memcpy, memset, memmove and memcmp
@@ -366,7 +387,9 @@ compiled approximately.
   * FILE.runtime.json lists every service the generated C names; an
     optimizing C compiler may prove a call unreachable and need fewer.
   * FILE_run is not reentrant when functions read top-level values (those
-    are file-scope objects).
+    are file-scope objects); FILE.h says which a program is. A run that
+    reads none writes no object of static storage duration (its contexts
+    included). Nothing here claims thread safety.
 
 @topic backend.single-executable
 title: The single-file compiler

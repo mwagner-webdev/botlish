@@ -1632,7 +1632,7 @@ title: C UNSUPPORTED: a construct the C backend does not compile yet
 summary: C UNSUPPORTED reports, at compile time and at the construct, a valid program part that -emit-c cannot translate to C correctly yet; it is a limit of the backend, never a missing runtime service.
 index: errors backends
 alias: c backend does not support; cannot compile to c; emit-c unsupported
-keywords: -emit-c, C, freestanding, String, List, closure, Float64, function value, payload
+keywords: -emit-c, C, freestanding, String, List, closure, Float64, function value, payload, context
 related: backend.c error.c-runtime-limit cli.options
 code: C UNSUPPORTED
 code: C INPUT
@@ -1646,9 +1646,11 @@ and rejects the rest with this code, located at the construct (one
 diagnostic per construct the program reaches), rather than translate it
 approximately: Strings, Lists whose length is not known statically, loops
 over Lists, closures and function values, Float64, error payloads, Result
-values, contexts, coroutines, C calls, and the bitwise operations and
-shift_left of Ints the compiler cannot prove fit int64_t. Nothing is
-written.
+values, coroutines, C calls, and the bitwise operations and shift_left of
+Ints the compiler cannot prove fit int64_t. Contexts compile; a context
+struct that holds a value of those kinds, or affine state (a C pointer, a
+coroutine, a collection of them), is rejected at each use, naming the
+context and the field. Nothing is written.
 
 It is not a missing runtime service: what the generated C can call but
 not implement itself (arbitrary-precision arithmetic) compiles, and is

@@ -480,6 +480,20 @@ proofs, as native lowering does, and runs no C compiler. Keep it so:
   exactly the service symbols the C calls, per translation unit.
 * Harnesses and providers stay outside the backend
   (`examples/c-freestanding/`), as integration code of a target's.
+* Contexts (C-CONTEXTS-FREESTANDING-MILESTONE-1.md) are the front end's,
+  translated, never re-decided: an installation is a `const` object of the
+  program function's frame (per run); a function's C parameters after its
+  ordinary ones are one `const T *` per context of its block's
+  `requiredContexts`, in order, and a call passes exactly the callee's
+  requirement (`ContextArgs`): the signature is its authority. Never put a
+  context in file-scope storage, a global or thread-local pointer, a
+  registry, an environment struct handed to every function, a lookup or a
+  runtime service; never compute a requirement, a selection or an
+  injection in the backend (the trait plan and hir/contexts.tcl did), and
+  never compile a HIR that failed context verification. No context name
+  starts with `PREFIX_` (`ContextName`). A context the C subset cannot
+  represent (a member of an unsupported type, affine state) is C
+  UNSUPPORTED naming it.
 * **Every enhancement of type inference is also analyzed for what it gives
   the C target.** The backend adds no analysis of its own, so its
   precision is the analyses': a new or sharper fact -- a type or a Range
@@ -500,7 +514,8 @@ proofs, as native lowering does, and runs no C compiler. Keep it so:
 
 If you change `ccompile/`, `examples/c-freestanding/` or what the backend
 reads (`hir::specialize`'s instances, `hir::range`'s results, the HIR node
-kinds it compiles), run `tests/c-compile.test` (its cross tests need clang,
+kinds it compiles, the context facts `requiredContexts`, `installId` and
+`loadId`), run `tests/c-compile.test` (its cross tests need clang,
 ld.lld, qemu-user and the cross libgcc packages, and are skipped without
 them), `tests/main-cli.test` and `tools/compilerpedia.tcl check`, and
 `examples/c-freestanding/demo.sh`.

@@ -94,7 +94,11 @@ proc ccRun {exe} {
 # TEXT" (core::value::show's development view, as main.tcl prints it) or
 # "error: MESSAGE (CODE)" -- or a Tcl error naming each when they disagree.
 proc ccReference {source {backends {interp compile cranelift}}} {
-    set hir [surface::compile $source -warnings off]
+    return [ccReferenceOf [surface::compile $source -warnings off] $backends]
+}
+
+# The same, for the analyzed HIR program HIR (a program file with modules).
+proc ccReferenceOf {hir {backends {interp compile cranelift}}} {
     set lines {}
     foreach backend $backends {
         if {$backend eq "cranelift" && ![testConstraint nativeBuilt]} continue
@@ -487,6 +491,217 @@ fn infinity(k: Kind) -> Kind:
 
 NaN = Box {inf: inf(3), nan: nan(4)}
 [NaN, NaN.inf, infinity(Kind::Inf), infinity(Kind::Nan)]
+}
+
+# Contexts (C-CONTEXTS-FREESTANDING-MILESTONE-1.md): installation, context
+# parameters, transitive requirements, a constructor that needs an earlier
+# context, a context used as a value (stored, returned, displayed, opaque),
+# recursion (a self tail call keeps its contexts), a nested function, an
+# installed context nothing uses and a parameter its instance never reads.
+dict set ::ccCorpus contexts {
+type Small = Int in 0..1000
+type Port = Int in 0..15
+
+context struct Clock:
+    ticks: Small
+
+context struct Rates:
+    fee: Small
+
+context struct Unused:
+    flag: bool
+
+opaque context struct Bus:
+    port: Port
+
+context struct Gain:
+    k: Small
+
+struct Snapshot:
+    clock: Clock
+    note: Small
+
+fn open(port: Port) -> Bus:
+    Bus {port: port}
+
+fn gain_for(context b: Bus) -> Gain:
+    if b.port > 7:
+        Gain {k: 9}
+    else:
+        Gain {k: 2}
+
+fn now(context c: Clock) -> Small:
+    c.ticks
+
+fn fee(amount: Small, context r: Rates) -> int:
+    amount * r.fee + now()
+
+fn charge(amount: Small) -> int:
+    fee(amount) + 1
+
+fn ignore(n: Small, context c: Clock) -> Small:
+    n
+
+fn grab(context c: Clock) -> Clock:
+    c
+
+fn snap(note: Small) -> Snapshot:
+    Snapshot {clock: grab(), note: note}
+
+fn countdown(n: Small, acc: Small, context g: Gain) -> int:
+    if n < 1:
+        return acc + g.k
+    countdown(n - 1, now())
+
+fn tree(n: Small, context g: Gain) -> int:
+    if n <= 1:
+        g.k
+    else:
+        tree(n - 1) + tree(n - 2)
+
+fn outer(n: Small) -> int:
+    fn inner(m: Small, context r: Rates) -> int:
+        m + r.fee
+    inner(n) * 2
+
+with context Clock {ticks: 42}
+with context Rates {fee: 3}
+with context Unused {flag: true}
+with context open(11)
+with context gain_for()
+
+s = snap(9)
+[charge(10), now(), ignore(5), s, s.clock.ticks, countdown(3, 0), tree(10), outer(7), grab(), open(4)]
+}
+
+# Context traits (selected statically: the C calls the installed provider's
+# implementation), a provider declared but not installed, inject blocks,
+# a declared error failing inside an implementation and handled outside it,
+# and an ordinary trait's specialization whose implementation needs a
+# context (twice<Box> requires Fee only through Box's size).
+dict set ::ccCorpus context-traits {
+type Tick = Int in 0..1000000
+type Start = Int in 0..999999
+type Cents = Int in 0..100
+type Amount = Int in 0..1000
+
+context trait Clock:
+    fn now() -> Tick
+
+context struct SimClock:
+    start: Start
+
+fn now(context c: SimClock) -> Tick:
+    c.start + 1
+
+context struct OtherClock:
+    hour: Cents
+
+context struct Fee:
+    cents: Cents
+
+error Declined
+
+fn price(n: Amount, context clock: Clock, fee: Fee) -> int errors Declined:
+    t = clock.now()
+    if n > 500:
+        fail Declined
+    n * fee.cents + t
+
+fn checkout(n: Amount) -> int:
+    price(n):
+        on Declined:
+            -1
+
+fn stamp(context clock: Clock) -> Tick:
+    clock.now()
+
+fn charge_only(n: Amount, context fee: Fee) -> int:
+    n * fee.cents
+
+trait Thing:
+    fn size(t: Thing) -> int
+
+struct Box:
+    v: Amount
+
+fn size(t: Box) -> int:
+    charge_only(t.v)
+
+fn twice(t: Thing) -> int:
+    t.size() + t.size()
+
+with context SimClock {start: 99}
+with context Fee {cents: 7}
+
+a = inject context Fee, Clock:
+    checkout(10)
+b = inject no context:
+    3 + 4
+c = inject context Fee:
+    charge_only(6)
+[a, checkout(600), b, c, stamp(), twice(Box {v: 5})]
+}
+
+# Declared errors through context calls: two identities, handlers at the top
+# level selecting by identity, a handler in a function between them.
+dict set ::ccCorpus context-errors {
+type Small = Int in 0..1000
+
+error Overdrawn
+error Frozen
+
+context struct Account:
+    balance: Small
+    frozen: bool
+
+fn withdraw(n: Small, context a: Account) -> int errors Overdrawn, Frozen:
+    if a.frozen:
+        fail Frozen
+    if n > a.balance:
+        fail Overdrawn
+    a.balance - n
+
+fn spend(n: Small) -> int errors Overdrawn, Frozen:
+    withdraw(n) + withdraw(n)
+
+fn safe(n: Small) -> int errors Frozen:
+    spend(n):
+        on Overdrawn:
+            0
+
+with context Account {balance: 50, frozen: false}
+first = spend(20):
+    on Overdrawn:
+        -1
+    on Frozen:
+        -2
+second = spend(80):
+    on Overdrawn:
+        -1
+    on Frozen:
+        -2
+third = safe(90):
+    on Frozen:
+        -2
+[first, second, third]
+}
+
+# A run-time error of the language inside a context operation.
+dict set ::ccCorpus context-mod-zero {
+type Small = Int in 0..1000
+
+context struct Divisor:
+    d: Small
+
+fn split(n: Small, context c: Divisor) -> int:
+    n.mod(c.d)
+
+fn total(n: Small) -> int:
+    split(n) + 1
+
+with context Divisor {d: 0}
+total(17)
 }
 
 foreach name [dict keys $::ccCorpus] {
@@ -903,6 +1118,387 @@ f(3000000000000, 7)
 }]
     list [lindex $r 0] [string match "*bit_and*no bitwise services*" [lindex $r 1]]
 } -result {{C UNSUPPORTED} 1}
+
+# ---------------------------------------------------------------------------
+# Contexts (C-CONTEXTS-FREESTANDING-MILESTONE-1.md): a context struct is a C
+# struct, an installation a const object of the program function's own
+# frame, a function's transitive requirement its const pointer parameters,
+# a call passes the callee's requirement on. Beside the parity corpus
+# programs above: the example application installed two ways and both
+# configurations run in one executable, hosted and with no C library; the
+# signatures state the requirements; nothing is stored at file scope; the
+# manifest; what is C UNSUPPORTED; an unverified program refused.
+
+set ::ccContexts [file join $::projectRoot examples c-freestanding contexts]
+
+# The C translation of the program file PATH (an application with modules)
+# written into DIR (a fresh directory when ""): {dir DIR prefix PREFIX out
+# OUT hir HIR}, the prefix PATH's (ccompile::PrefixOf, as -emit-c names it).
+proc ccGenerateFile {path {dir ""}} {
+    set hir [surface::readProgramFile $path -warnings off]
+    set prefix [ccompile::PrefixOf $path]
+    set out [ccompile::program $hir -prefix $prefix -source [file tail $path]]
+    if {$dir eq ""} {
+        set dir [ccDir]
+    }
+    ccompile::write $out $dir
+    return [dict create dir $dir prefix $prefix out $out hir $hir]
+}
+
+# The `# expect:` value of the example program PATH, as the harness prints it.
+proc ccExpected {path} {
+    set channel [open $path]
+    set text [read $channel]
+    close $channel
+    regexp -line {^# expect: (.*)$} $text -> value
+    return "value: $value"
+}
+
+# Builds programs A and B (ccGenerateFile's, in one directory) into one
+# executable with harness/two_apps.c, by COMPILER under the strict flags:
+# hosted (FREE 0), or (FREE 1) with no C library, its _start
+# harness/linux_start.c's, for clang's TARGET when given (EXTRA: libgcc).
+# Returns the executable's path.
+proc ccTwoApps {a b compiler free {target ""} {extra {}}} {
+    set dir [dict get $a dir]
+    set pa [dict get $a prefix]
+    set pb [dict get $b prefix]
+    set defs [list -DBOTLISH_PROGRAM_A=$pa "-DBOTLISH_PROGRAM_A_HEADER=\"$pa.h\"" \
+        -DBOTLISH_PROGRAM_B=$pb "-DBOTLISH_PROGRAM_B_HEADER=\"$pb.h\""]
+    set units [list [file join $dir $pa.c] [file join $dir ${pa}_display.c] \
+        [file join $dir $pb.c] [file join $dir ${pb}_display.c]]
+    set exe [file join $dir two.$compiler.$free[expr {$target eq "" ? "" : ".$target"}]]
+    set command [list $compiler {*}$::ccStrict -O2 {*}$defs -I $dir]
+    if {$target ne ""} {
+        lappend command --target=$target -fuse-ld=lld -fno-pic
+    } elseif {$free} {
+        lappend command -fno-pie -no-pie
+    }
+    if {$free} {
+        lappend command -ffreestanding -nostdlib -static -fno-stack-protector \
+            -DBOTLISH_START_ENTRY=two_apps_main [file join $::ccHarness linux_start.c]
+    } else {
+        lappend command -DTWO_APPS_HOSTED
+    }
+    lappend command [file join $::ccHarness two_apps.c] {*}$units {*}$extra -o $exe
+    lassign [ccExec $command] status output
+    if {$status != 0} {
+        error "two-application build failed ($compiler $free $target):\n$output"
+    }
+    return $exe
+}
+
+# What two_apps.c must print for A and B: each run's line, interleaved A B B
+# A A B, every line the reference backends' outcome of its program.
+proc ccTwoAppsExpected {a b} {
+    set reference [dict create A [ccReferenceOf [dict get $a hir]] B [ccReferenceOf [dict get $b hir]]]
+    set name [dict create A [dict get $a prefix] B [dict get $b prefix]]
+    set runs [dict create A 0 B 0]
+    set lines {}
+    foreach which {A B B A A B} {
+        dict incr runs $which
+        lappend lines "[dict get $name $which] run [dict get $runs $which]: [dict get $reference $which]"
+    }
+    lappend lines "repeated runs: identical"
+    return [join $lines \n]
+}
+
+# The two example programs, generated into one directory once.
+proc ccStores {} {
+    if {![info exists ::ccStoresGen]} {
+        set dir [ccDir]
+        set ::ccStoresGen [lmap f {store_bench store_field} {
+            ccGenerateFile [file join $::ccContexts $f.bot] $dir
+        }]
+    }
+    return $::ccStoresGen
+}
+
+test cc-ctx-application "the example application, installed two ways, agrees with every backend and with its expect line; neither configuration needs a runtime service" -constraints hostCC -body {
+    set results {}
+    foreach gen [ccStores] f {store_bench store_field} {
+        set got [lmap compiler $::ccCompilers {
+            lmap opt {-O0 -O2} {ccRun [ccBuild $gen $compiler {} $opt]}
+        }]
+        set all [lsort -unique [concat {*}$got [list [ccReferenceOf [dict get $gen hir]]]]]
+        set out [dict get $gen out]
+        lappend results [expr {$all eq [list [ccExpected [file join $::ccContexts $f.bot]]]}] \
+            [dict get $out services] [dict get $out display] [dict exists $out files botlish_rt_v1.h]
+    }
+    set results
+} -result {1 {} {} 0 1 {} {} 0}
+
+test cc-ctx-two-apps "two configurations of one application coexist in one executable: interleaved runs give each its own contexts, and repeated runs the same value" -constraints hostCC -body {
+    lassign [ccStores] a b
+    set expected [ccTwoAppsExpected $a $b]
+    lsort -unique [lmap compiler $::ccCompilers {
+        lassign [ccExec [list [ccTwoApps $a $b $compiler 0]]] status output
+        list $status [expr {[string trim $output] eq $expected}]
+    }]
+} -result {{0 1}}
+
+test cc-ctx-two-apps-freestanding "the two configurations run in one static executable with no C library, no Botlish runtime and no provider" -constraints {gcc linuxX86_64 nm} -body {
+    lassign [ccStores] a b
+    set exe [ccTwoApps $a $b gcc 1]
+    lassign [ccExec [list $exe]] status output
+    list $status [expr {[string trim $output] eq [ccTwoAppsExpected $a $b]}] \
+        [string trim [lindex [ccExec [list nm -u $exe]] 1]]
+} -result {0 1 {}}
+
+test cc-ctx-two-apps-cross "the two-application executable, with no C library, runs on other architectures and agrees" -constraints ccCross -body {
+    lassign [ccStores] a b
+    set expected [ccTwoAppsExpected $a $b]
+    set mismatches {}
+    set runs 0
+    foreach {target emulator libgcc} $::ccCross {
+        set exe [ccTwoApps $a $b clang 1 $target $libgcc]
+        lassign [ccExec [concat $emulator [list $exe]]] status output
+        incr runs
+        if {$status != 0 || [string trim $output] ne $expected} {
+            lappend mismatches "$target: $status $output"
+        }
+    }
+    list [expr {$runs > 0}] $mismatches
+} -result {1 {}}
+
+test cc-ctx-freestanding-objects "a context program's objects reference nothing, freestanding, under gcc and clang" -constraints {hostCC nm} -body {
+    set undefined {}
+    set gen [ccGenerate [dict get $::ccCorpus contexts] app]
+    foreach g [concat [ccStores] [list $gen]] {
+        set dir [dict get $g dir]
+        set p [dict get $g prefix]
+        foreach compiler $::ccCompilers {
+            foreach unit [list $p ${p}_display] {
+                set object [file join $dir $unit.$compiler.o]
+                lassign [ccExec [list $compiler {*}$::ccStrict -O2 -ffreestanding -I $dir -c [file join $dir $unit.c] -o $object]] status output
+                if {$status} {
+                    error $output
+                }
+                lappend undefined {*}[lindex [ccExec [list nm -u $object]] 1]
+            }
+        }
+    }
+    set undefined
+} -result {}
+
+test cc-ctx-cross-targets "the context programs compile for other architectures, word sizes and byte orders (16-bit int and pointers included) and reference no Botlish service there" -constraints {clang llvmNm} -body {
+    set result {}
+    foreach target {thumbv6m-none-eabi thumbv7m-none-eabi riscv32-unknown-elf riscv64-unknown-elf msp430-none-elf
+            {avr -mmcu=atmega328p} mips-unknown-elf powerpc-unknown-elf aarch64-none-elf} {
+        set services {}
+        foreach gen [ccStores] {
+            set dir [dict get $gen dir]
+            set p [dict get $gen prefix]
+            foreach unit [list $p ${p}_display] {
+                set object [file join $dir $unit.[lindex $target 0].o]
+                lassign [ccExec [list clang --target=[lindex $target 0] {*}[lrange $target 1 end] {*}$::ccStrict \
+                    -ffreestanding -O2 -I $dir -c [file join $dir $unit.c] -o $object]] status output
+                if {$status} {
+                    error "$target: $output"
+                }
+                foreach line [split [lindex [ccExec [list llvm-nm -u $object]] 1] \n] {
+                    if {[string match *botlish* $line]} {
+                        lappend services [lindex $line end]
+                    }
+                }
+            }
+        }
+        lappend result $services
+    }
+    lsort -unique $result
+} -result {{}}
+
+# The C function of every instance takes exactly its block's transitive
+# requirement, one const pointer per context, after its ordinary parameters:
+# its signature states its authority. Calls pass on only what the callee
+# requires -- inside `inject context Fee:` only Fee.
+proc ccContextParams {c prefix} {
+    set result [dict create]
+    foreach {- name params} [regexp -all -inline -line "^static ${prefix}_status ${prefix}_(?:\[0-9\]+_)?(\[A-Za-z0-9_\]+)\\((.*)\\);$" $c] {
+        dict set result $name [regexp -all -inline {ctx_[A-Za-z0-9_]+(?=[,)])} $params]
+    }
+    return $result
+}
+
+test cc-ctx-requirements-are-signatures "each function's C parameters are its transitive context requirement; a call inside an inject block passes only the injected context" -body {
+    set c [dict get [dict get [ccGenerate [dict get $::ccCorpus contexts] app] out] files app.c]
+    set t [dict get [dict get [ccGenerate [dict get $::ccCorpus context-traits] tr] out] files tr.c]
+    list [lsort -stride 2 [ccContextParams $c app]] \
+        [regexp {tr_[0-9]+_charge_only\(INT64_C\(6\), &ctx_Fee, &r[0-9]+\)} $t] \
+        [lsort -stride 2 [ccContextParams $t tr]]
+} -result {{charge {ctx_Clock ctx_Rates} countdown {ctx_Clock ctx_Gain} fee {ctx_Clock ctx_Rates} gain_for ctx_Bus grab ctx_Clock ignore ctx_Clock inner ctx_Rates now ctx_Clock open {} outer ctx_Rates program {} snap ctx_Clock tree ctx_Gain} 1 {charge_only ctx_Fee checkout_Clock_SimClock {ctx_Fee ctx_SimClock} now ctx_SimClock price_Clock_SimClock {ctx_Fee ctx_SimClock} program {} size ctx_Fee stamp_Clock_SimClock ctx_SimClock twice_Box ctx_Fee}}
+
+test cc-ctx-names-avoid-the-prefix "a program named ctx (its types ctx_Clock, ...) names its contexts cx_: no context name starts with the prefix, so none collides with a type" -constraints hostCC -body {
+    set gen [ccGenerate [dict get $::ccCorpus contexts] ctx]
+    set c [dict get [dict get $gen out] files ctx.c]
+    list [regexp {const ctx_Clock \*cx_Clock} $c] [regexp {[^A-Za-z_]ctx_Clock [^=]*= \(\(ctx_Clock\)} $c] \
+        [expr {[ccRun [ccBuild $gen [lindex $::ccCompilers 0] {} -O2]] eq [ccReference [dict get $::ccCorpus contexts]]}]
+} -result {1 1 1}
+
+# Installed contexts are objects of the run's frame: no object of static
+# storage duration holds one, every installation is a const object of the
+# program function, and the header says what a run writes. (A program whose
+# functions read a top-level value keeps it at file scope, and says so.)
+proc ccFileScopeObjects {text} {
+    # Lines at column 0 that declare an object, not a function: what is not
+    # const there is writable static storage.
+    lmap line [split $text \n] {
+        if {![regexp {^static } $line] || [regexp {\(} $line] || [regexp {^static const } $line]} continue
+        set line
+    }
+}
+
+test cc-ctx-installed-in-the-run "no installed context is stored at file scope: each is a const object of the program function, and the header says the run writes no static storage" -body {
+    set gen [ccGenerate [dict get $::ccCorpus contexts] app]
+    set files [dict get $gen out files]
+    set statics [dict get [dict get [ccGenerate [dict get $::ccCorpus statics] st] out] files]
+    set program [lindex [regexp -inline {static app_status app_program\(app_list0 \*out\)\n\{.*?\n\}} [dict get $files app.c]] 0]
+    list [ccFileScopeObjects [dict get $files app.c]] [ccFileScopeObjects [dict get $files app_display.c]] \
+        [llength [regexp -all -inline {const app_[A-Za-z]+ ctx_[A-Za-z]+ = } $program]] \
+        [llength [regexp -all -inline {const app_[A-Za-z]+ ctx_[A-Za-z]+ = } [dict get $files app.c]]] \
+        [string match "*Writes no object of\n * static storage duration*" [dict get $files app.h]] \
+        [string match "*Not reentrant*" [dict get $statics st.h]]
+} -result {{} {} 5 5 1 1}
+
+test cc-ctx-big-int-field "a context whose field is an unbounded Int compiles to C (the run's frame holds it as an ordinary value; native lowering cannot slot it); its arithmetic needs the Int services" -constraints hostCC -body {
+    set source {type Small = Int in 0..1000
+
+context struct Ledger:
+    base: int
+    scale: Small
+
+fn big(context l: Ledger) -> int:
+    l.base * l.base * l.scale
+
+fn twice() -> int:
+    big() + big()
+
+with context Ledger {base: 123456789012, scale: 3}
+[twice(), big()]
+}
+    set native [expr {[testConstraint nativeBuilt] ? [catch {native::evalHir [surface::compile $source -warnings off]} m o] : 1}]
+    list [ccParity $source {interp compile}] [dict get [dict get [ccGenerate $source big] out] services] \
+        [expr {$native == 1}] [expr {![testConstraint nativeBuilt] || [lindex [dict get $o -errorcode] end] eq "CONTEXT-NATIVE-LOWERING-UNSUPPORTED"}]
+} -result {{{value: [91449472518920903616864, 45724736259460451808432]}} {int.add int.mul} 1 1}
+
+test cc-ctx-manifest-transitive "a service needed only inside a context implementation reached through a context trait is in the manifest, exactly as the C references it; the manifest has no context entry" -body {
+    set gen [ccGenerate {context trait Meter:
+    fn reading() -> int
+
+context struct Big:
+    base: int
+
+fn reading(context b: Big) -> int:
+    b.base * 1000000007
+
+fn report(context m: Meter) -> int:
+    m.reading()
+
+fn summary() -> int:
+    report()
+
+with context Big {base: 99999999999}
+summary()
+} meter]
+    set out [dict get $gen out]
+    set c [dict get $out files meter.c]
+    list [dict get $out services] [dict get $out display] \
+        [lsort -unique [regexp -all -inline {botlish_rt_v1_int_[a-z_]+(?=\()} $c]] \
+        [string match -nocase *context* [dict get $out files meter.runtime.json]]
+} -result {int.mul int.to_decimal botlish_rt_v1_int_mul 0}
+
+test cc-ctx-unsupported "a context the C backend cannot represent is C UNSUPPORTED, naming the context and why, at each use -- never malformed C or an internal error" -body {
+    set result {}
+    foreach source [list {context struct Named:
+    name: str
+
+fn greet(context n: Named) -> int:
+    7
+
+with context Named {name: "ab"}
+greet()
+} {import std::mutable_vector
+
+context struct Log:
+    lines: MutableVector[int]
+
+fn count(context l: Log) -> int:
+    l.lines.length()
+
+with context Log {lines: std::mutable_vector::from_list([1, 2])}
+count()
+} {import std::ffi::c
+
+context struct Dev:
+    handle: std::ffi::c::Ptr[std::ffi::c::Void]
+
+fn ok(context d: Dev) -> bool:
+    std::ffi::c::null?(d.handle)
+
+with context Dev {handle: std::ffi::c::null[std::ffi::c::Void]()}
+ok()
+}] {
+        set hir [surface::compile $source -warnings off]
+        catch {ccompile::program $hir -prefix u} message options
+        set entries [lmap d [dict getdef $options -diagnostics {}] {dict get $d message}]
+        lappend result [dict get $options -errorcode] [llength $entries] \
+            [regsub {^.*?:([0-9]+:[0-9]+): the C backend cannot compile (.*?) yet .*$} [lindex $entries 0] {\1: \2}]
+    }
+    set result
+} -result {{C UNSUPPORTED} 2 {7:14: the context struct Named, whose field "name" has type str,} {C UNSUPPORTED} 2 {9:14: the context struct Log, whose field "lines" has type MutableVector[int],} {C UNSUPPORTED} 2 {9:14: the context struct Dev, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one)}}
+
+test cc-ctx-unsupported-around-contexts "a program whose contexts are representable but which uses what C does not compile (the portable I/O over Linux system calls and Strings; a coroutine) is C UNSUPPORTED at those constructs" -body {
+    set hello [surface::compile {import std::io
+import std::linux::io
+
+fn hello() -> unit errors std::io::WriteFailed:
+    std::io::print_line("hello")
+
+with context std::linux::io::create()
+hello():
+    on std::io::WriteFailed:
+        unit
+} -warnings off]
+    set coro [surface::compile {type Small = Int in 0..100
+
+context struct Base:
+    k: Small
+
+fn gen(n: Small, context b: Base) -> int:
+    yield n + b.k
+    0
+
+with context Base {k: 1}
+coroutine {step: c} = gen(3)
+5
+} -warnings off]
+    lmap hir [list $hello $coro] {
+        catch {ccompile::program $hir -prefix u} message options
+        list [dict get $options -errorcode] [expr {[llength [dict getdef $options -diagnostics {}]] > 0}] \
+            [string match "*context*" [lindex [split $message \n] 0]]
+    }
+} -result {{{C UNSUPPORTED} 1 0} {{C UNSUPPORTED} 1 0}}
+
+test cc-ctx-unverified-refused "a lenient HIR that failed context verification is never compiled: its first context diagnostic is the error" -body {
+    set hir [surface::compile "type Small = Int in 0..100\ncontext struct Clock:\n    t: Small\nfn now(context c: Clock) -> Small:\n    c.t\nnow()\n" -warnings off -strict 0]
+    catch {ccompile::program $hir -prefix u} message options
+    list [dict get $options -errorcode] [lindex [split $message \n] 0]
+} -result {{CORE SEMANTIC MISSING-CONTEXT} {<input>:6:1: Clock is required by this call but is not installed here (install it with "with context EXPR" before the call):}}
+
+test cc-ctx-example-warning-clean "the example application's entry programs and modules compile under -warnings error" -body {
+    lmap f {store_bench store_field} {
+        if {[catch {surface::readProgramFile [file join $::ccContexts $f.bot] -warnings error} message]} {
+            set message
+        } else {
+            string cat clean
+        }
+    }
+} -result {clean clean}
+
+test cc-ctx-deterministic "a context program gives the same files, byte for byte" -body {
+    set path [file join $::ccContexts store_bench.bot]
+    expr {[dict get [ccGenerateFile $path] out files] eq [dict get [ccGenerateFile $path] out files]}
+} -result 1
 
 # ---------------------------------------------------------------------------
 # The command line
