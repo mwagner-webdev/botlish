@@ -420,7 +420,13 @@ The version is the tag's (`icy-tower-macos-v1.2.3` is 1.2.3, three integers
 or the release job refuses the tag); CFBundleVersion is the same string: a
 deterministic build identifier, the same for every rebuild of a tag and
 different for every release. Ordinary CI builds use `0.0.0` and their own
-identifier (`org.botlish.examples.icy-tower.ci`), never a release's.
+identifier (`org.botlish.examples.icy-tower.ci`), never a release's. The
+release's identifier, `com.avanticonic.botlishtower`, is the game's alone:
+the compiler's Botlish.app is `io.github.mwagner-webdev.botlish` (its
+driver `.native`), a different application to LaunchServices, its
+preferences and its permissions. One Developer ID certificate signs any
+number of applications: distribution outside the App Store registers no
+identifier with Apple.
 
 ## 10. GitHub configuration
 
@@ -1890,6 +1896,15 @@ runner and GitHub, on the release that is published.
   the dry run's signed branch, corrected since, has not met such a runner
   again (run 42416871949's refused). The release's own sign stage has run
   to a signature with the Developer ID (section 44).
+* **Botlish.app is not notarized, and this milestone does not make it
+  so.** The release path is the game's (one Mach-O, compiled ahead of
+  time, no JIT). The compiler's application needs a release job of its
+  own, the hardened runtime on its three Mach-Os and, for its driver's
+  JIT, an entitlement that only a Mac with SIP enabled can decide: no
+  GitHub-hosted runner can (MACOS-AARCH64-MILESTONE-9.md, section 41,
+  "Where this stands now"). The same Developer ID certificate and
+  notarization key serve it, in a second environment or with the
+  `macos-release` environment's tag rule widened.
 * **The release gate's re-dispatch of a deferred tag has not published.**
   1.0.3 was published by its tag push's run. A tag whose commit was not
   green when it was pushed is dispatched again by the release gate
