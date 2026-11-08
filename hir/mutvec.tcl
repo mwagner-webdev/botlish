@@ -92,8 +92,8 @@ namespace eval hir::mutvec {
     # The named structs ShareDescriptor is inside of, outermost first.
     variable shareVisiting {}
     # 1: a fold's intermediate may be consumed ("Consumed fold intermediates"
-    # below); 0: every fold is elaborated as before that existed, every
-    # mutated intermediate copied at its iteration's entry -- the oracle the
+    # below); 0: no fold's is, every mutated intermediate copied at its
+    # iteration's entry as before consumption existed -- the oracle the
     # tests and the fuzzer compare the consumed elaboration with. A
     # front-end input (surface::cache::Key), never set but by a test.
     variable consumedFolds 1
