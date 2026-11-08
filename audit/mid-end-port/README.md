@@ -662,6 +662,23 @@ Inside it (`results/instance-walks.txt`, `results/infer-profile.txt`):
 
 The warning gate never lowers to NIR, so BlockName is no part of its time.
 
+**Fixed in `5696909`:** native lowering's eight function builders and
+`hir::aot::VisitCall` now read the name from the region context's `names`
+map, which `hir::aot::context` builds once by the same rule (BlockName
+itself stays, for its other callers). The NIR is byte-identical before and
+after on 238 programs (every `examples/**/*.bot`, `tests/golden/*.bot` and
+`bench/*.bot`, and generated ones, specialized and unspecialized), and the
+native test files pass. Unspecialized lowering, one process at a time:
+
+| program | before | after |
+|---|---:|---:|
+| `synth.tcl -passes 32 -generic 0` (12,939 lines) | 32.1 s | 15.8 s |
+| `synth.tcl -passes 64 -generic 0` (25,736 lines) | 162.5 s | 39.1 s |
+
+A doubling of the program now costs about 2.5 times the lowering time,
+against about 5 times before: something superlinear is left, but no longer
+BlockName.
+
 ```sh
 S=$(mktemp -d); R=audit/mid-end-port/results
 git worktree add --detach $S/before eff6aea
