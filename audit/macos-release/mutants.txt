@@ -988,7 +988,7 @@ rm -rf "$out/Icy Tower.app"
 <<<<
 sign "$app"
 ====
-codesign --force --deep --sign "$identity" "${keychain[@]}" --options runtime "$timestamp" "$app"
+codesign --force --deep --sign "$identity" ${keychain[@]+"${keychain[@]}"} --options runtime "$timestamp" "$app"
 >>>>
 
 @@ botlish-layout-unchecked the compiler's bundle check takes any layout: an executable nothing builds signed and shipped

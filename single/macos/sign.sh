@@ -63,7 +63,7 @@ if [[ -n $tcl_framework ]]; then
 else
   tclsh() { "$tcl_shell" "$@"; }
 fi
-sign() { codesign --force --sign "$identity" "${keychain[@]}" --options runtime "$timestamp" "$@"; }
+sign() { codesign --force --sign "$identity" ${keychain[@]+"${keychain[@]}"} --options runtime "$timestamp" "$@"; }
 
 sign "$contents/Frameworks/Tcl.framework/Versions/$tcl_version"
 sign --identifier "$identifier.native" "$contents/MacOS/botlish-native"

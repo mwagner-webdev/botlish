@@ -260,9 +260,9 @@ printf 'x' >>"$contents/Resources/botlish.zip"
 @@ hardened-runtime-dropped the application is signed without the hardened runtime (notarization requires it)
 ## single/macos/sign.sh
 <<<<
-sign() { codesign --force --sign "$identity" "${keychain[@]}" --options runtime "$timestamp" "$@"; }
+sign() { codesign --force --sign "$identity" ${keychain[@]+"${keychain[@]}"} --options runtime "$timestamp" "$@"; }
 ====
-sign() { codesign --force --sign "$identity" "${keychain[@]}" "$timestamp" "$@"; }
+sign() { codesign --force --sign "$identity" ${keychain[@]+"${keychain[@]}"} "$timestamp" "$@"; }
 >>>>
 
 @@ jit-entitlement-added the driver is signed with the JIT's entitlement, which the application has no use for

@@ -71,10 +71,10 @@ both() {
   local extra=() which
   rm -f "$work/side.result"
   if [[ ${#both_env[@]} -gt 0 ]]; then extra=("${both_env[@]}"); streams+=(result); fi
-  status=0; "${env[@]}" "${extra[@]}" "$tclsh" "$root/main.tcl" "$@" >"$work/c.out" 2>"$work/c.err" || status=$?
+  status=0; "${env[@]}" ${extra[@]+"${extra[@]}"} "$tclsh" "$root/main.tcl" "$@" >"$work/c.out" 2>"$work/c.err" || status=$?
   echo "status $status" >>"$work/c.out"
   if [[ ${#extra[@]} -gt 0 ]]; then mv "$work/side.result" "$work/c.result" 2>/dev/null || : >"$work/c.result"; fi
-  status=0; "${env[@]}" "${extra[@]}" "$botlish" "$@" >"$work/a.out" 2>"$work/a.err" || status=$?
+  status=0; "${env[@]}" ${extra[@]+"${extra[@]}"} "$botlish" "$@" >"$work/a.out" 2>"$work/a.err" || status=$?
   echo "status $status" >>"$work/a.out"
   if [[ ${#extra[@]} -gt 0 ]]; then mv "$work/side.result" "$work/a.result" 2>/dev/null || : >"$work/a.result"; fi
   if [[ ${#extra[@]} -gt 0 && ! -s $work/a.result && $(tail -n 1 "$work/a.out") == "status 0" ]]; then

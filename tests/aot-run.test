@@ -425,8 +425,11 @@ test aotr-worker-default {without -native-startup the executable is the worker's
     set channel [open $report]
     set lines [split [string trim [read $channel]] \n]
     close $channel
-    list $status [lsearch -inline $lines {startup *}] [lsearch -inline $lines {process-main-thread *}]
-} -cleanup {file delete -force $dir} -result {0 {startup worker} {process-main-thread 0}}
+    # (Whether the worker is the process's main thread: 0, or unknown where
+    # the host cannot tell -- Windows; main-thread-startup.test's reading.)
+    list $status [lsearch -inline $lines {startup *}] \
+        [expr {[lindex [lsearch -inline $lines {process-main-thread *}] 1] in {0 unknown}}]
+} -cleanup {file delete -force $dir} -result {0 {startup worker} 1}
 
 # --- the private directory --------------------------------------------------------
 
@@ -445,7 +448,7 @@ test aotr-keep {-aot-keep keeps the private directory -- owner-only, the executa
         set mode [format %o [expr {$st(mode) & 0o777}]]
     }
     lassign [aotrProcess [list $executable one]] again
-    list [string equal $out [aotrPrinted one]] $status [llength $left] [string equal [file join $temp [lindex $left 0]] $kept] \
+    list [string equal $out [aotrPrinted one]] $status [llength $left] [string equal [file normalize [file join $temp [lindex $left 0]]] [file normalize $kept]] \
         $files $mode [string equal $again $out]
 } -cleanup {file delete -force $dir} -result [list 1 0 1 1 [lsort [list [file tail [native::executableFile printer]] printer.nir]] 700 1]
 
@@ -669,7 +672,8 @@ test aotr-jit-available {with a JIT, -version says so and run's default is the J
     set temp [aotrTemp $dir]
 } -body {
     lassign [aotrMain $temp -version] version
-    list [regexp -line {^native JIT: available$} $version] [native::jitAvailable]
+    # (main.tcl's own lines end in CRLF on Windows: read untranslated.)
+    list [regexp -line {^native JIT: available\r?$} $version] [native::jitAvailable]
 } -cleanup {file delete -force $dir} -result {1 1}
 
 test aotr-no-jit-driver {the driver built without its JIT: capabilities jit 0; its in-process commands refused (NATIVE UNSUPPORTED jit); -emit-clif from the object; -aot-run and -emit-native-executable as with the JIT} -constraints aotrNoJitDriver -setup {

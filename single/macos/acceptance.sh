@@ -154,7 +154,9 @@ for c in version interpreter check jit-refused aot-run executable ffi cocoa-cana
 done
 {
   echo "["
-  for i in "${!results[@]}"; do
+  # (No case may have run: --only names none. macOS's bash 3.2 takes an
+  # empty array for an unset one.)
+  (( ${#results[@]} )) && for i in "${!results[@]}"; do
     printf '  %s%s\n' "${results[$i]}" "$( (( i + 1 < ${#results[@]} )) && echo ,)"
   done
   echo "]"
