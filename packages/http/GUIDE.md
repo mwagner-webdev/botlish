@@ -74,6 +74,12 @@ called. The identity (`Client`) is what `send` and `start` take; after the
 release, an operation through it fails with `Released`, and the client's
 exchanges fail with `Closed`.
 
+Make a client once and reuse it. Making one parses the system's trust
+bundle into a store on the loop's thread (about 4 ms on the test machine;
+other tasks wait meanwhile), and each client keeps its own connection
+pools, so a client per request also pays a new connection -- and a TLS
+handshake, which runs on the loop's thread too -- every time.
+
 ## 3. Requests
 
 A request is an ordinary value:
