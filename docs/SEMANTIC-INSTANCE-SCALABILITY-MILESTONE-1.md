@@ -40,7 +40,18 @@ instantiated a helper.
   call got an instance depended on every other request; nothing depends on
   that now, so the channel, its pressure computation and its waiting edges
   are removed.
-* **The corpus builds the same HIR.** RESULTS-EQUIVALENCE
+* **The corpus builds the same programs.** All 239 programs of
+  `tests/golden/`, `examples/` and `bench/` have the same outcome under both
+  compilers; 125 build the same HIR and 46 fail with the same error. The
+  other 67 got instances the old budget
+  had declined (the golden framework's helpers hit it all along), and one,
+  `framework-semantics.bot`, decides its static blocks in one build fewer
+  (section 6.2).
+* **It exposed an older static-decision gap**, now closed: a site that
+  decides a contribution to the erased-callable contract only through an
+  argument an instance is keyed by was no contributor, so a consumer of the
+  contract could be judged before it -- rejected, or decided differently by
+  the batched and the sequential schedulers (section 3.4).
 
 ## 1. The original failure
 
@@ -251,7 +262,9 @@ a reference to the HIR at every `Save` and compares the whole HIR with it
 after `Restore`, entry by entry, failing the compilation on any difference
 (an entry added, removed or changed anywhere, below the outermost walk the
 growing tables excepted). It copies the program at every walk -- the cost
-the change removes -- and is for tests and audits only. AUDIT-RESULTS
+the change removes -- and is for tests and audits only. It found nothing in
+`tests/semantic-instances.test`, `tests/traits.test`, `tests/affine.test` and
+`tests/coroutines.test` (section 6.1).
 
 ## 4. Invariants and what bounds the analysis
 
@@ -289,20 +302,156 @@ the change removes -- and is for tests and audits only. AUDIT-RESULTS
 |---|---|
 | `hir/semantic.tcl` | in-place walks and verification (`Save`, `Capture`, `Rewind`, `Restore`, `AuditRestore`, `RegionScopes`, `ScopeKids`, `Apply`, `Nested`), deferral (`Defer`), the guard (`Exhausted`, `Drain`), `Abandon`; `maxPerBlock` removed; the header's "Budgets" and "Region-local walks" |
 | `hir/types.tcl` | `hir::types::Call` passes the variable's name; `hir::types::Walk` abandons the run on error |
-| `hir/staticdeps.tcl`, `hir/static.tcl` | `C:budget` removed |
+| `hir/staticdeps.tcl`, `hir/static.tcl` | `C:budget` removed; `KeyArguments` (section 3.4) |
 | `hir/traits.tcl`, `hir/affine.tcl` | two messages and a comment no longer blame a budget |
-| `tests/semantic-instances.test` | `si-rec-3/5/6` rewritten; 16 new tests |
-| `tests/static-economics.test` | `se-equal-deep-first-request` expects `late` accepted |
-| `audit/semantic-instance-scalability/tools/` | `equivalence.tcl` (the corpus HIR comparison), `scaling.tcl` (the measurement grid) |
+| `tests/semantic-instances.test` | `si-rec-3/5/6` rewritten; 15 new tests (95 in all) |
+| `tests/static-economics.test` | `se-equal-deep-first-request` expects `late` accepted; `se-equal-erased-key-argument` (new) |
+| `audit/semantic-instance-scalability/` | `tools/equivalence.tcl` (the corpus HIR comparison), `tools/scaling.tcl` (the measurement grid), `results/` (their recorded outputs) |
 | `audit/mid-end-port/tools/` | `instance-walks.tcl` reports instances, per-walk time and peak memory; `budget.tcl` and `measure.tcl` cope without `maxPerBlock` |
-| mutant catalogs | static-decisions: `budget-deep-ignored` removed, `channels-not-consumed` and `unwind-not-waiting` updated; native-view `untyped-receiver-accepted`, tree-struct `construction-outward-result-only` updated |
+| mutant catalogs | static-decisions: `budget-deep-ignored` removed, `key-arguments-uncontracted-only` added, `channels-not-consumed` and `unwind-not-waiting` updated; native-view `untyped-receiver-accepted`, tree-struct `construction-outward-result-only` updated |
 | Compilerpedia | `error.hir-semantic-limit` (new); `concept.specialization`, `error.affine-erasure-unsupported`, `error.affine-instance-budget`, `error.trait-instance-budget` corrected |
 | docs | OPPORTUNISTIC-SEMANTIC-INSTANCES.md, STATIC-COMPILE.md, STATIC-DECISION-ECONOMICS.md, SIMCITY-WORKLOAD-KNOWN-GAPS.md (gap 3.1 fixed), INDEX.md, AGENTS.md (the waiting channels) |
+| golden census and manifest | rows for the 16 new Tcl tests (`audit/golden/migration/census/`, `tcl-names.txt`, `tests/golden/manifest.tsv` regenerated) |
 
 ## 6. Evidence
 
-EVIDENCE
+Three kinds of evidence, kept apart: **observed** (a run on this
+machine, a shared 4-core Linux x86-64 container, Tcl 9.0.1, on 2026-11-08;
+times move by 10-25 % from run to run and several runs shared the cores,
+which the result files say), **CI** (GitHub Actions on the branch) and
+**projected** (what follows from the measured cost model, marked as such).
+"Before" is the branch's base, 53a0d1b; "after" is 5471d1e (this
+milestone's first commit, before `main` was merged in) for the comparisons,
+and the branch head for the tests.
+
+### 6.1 Correctness: tests and harnesses (observed)
+
+| run | result |
+|---|---|
+| `tests/semantic-instances.test` | 95 of 95; 93 of them again with `BOTLISH_SEMANTIC_ROLLBACK_AUDIT=1` (the two left out are the 1,024-type program and `si-region-no-copy`, which the audit's own copies would defeat) |
+| `tests/traits.test`, `tests/affine.test`, `tests/coroutines.test` under the rollback audit | 112, 48 and 81 of 81: no walk left a change behind |
+| `tests/static-economics.test`: `se-equal-deep-first-request`, `se-equal-plan-unplanned`, `se-equal-erased-key-argument` | pass |
+| golden `callables.bot` (section 3.4) | 134 of 140 before the fix, 140 of 140 after |
+| `tests/local.tcl` on the branch head (every Tcl test file on interp and compile, every golden suite on the four backends) | PENDING-LOCAL |
+| `audit/static-decisions/tools/fuzz.tcl -seed 17`, `-seed 41` | 0 failures (484 and 564 sites) |
+| mutants: static-decisions `channels-not-consumed`, `unwind-not-waiting`, `key-arguments-uncontracted-only`; native-view `untyped-receiver-accepted`; tree-struct `construction-outward-result-only` | 5 of 5 apply and are killed (by `se-equal-consumer-waits`, `se-equal-erased-witness`, `se-equal-unwind-channel`, `se-equal-erased-key-argument`, `nv-untyped-receiver`, `ts-generic-construction-typed`) |
+| `tools/mutant-catalogs.tcl` | 92 catalogs, 3,213 mutants, 0 problems |
+| `tools/compilerpedia.tcl check` | 1,291 topics, 758 examples, 0 problems |
+| `audit/golden/migration/merge.tcl -check 1` | 13,448 rows, consistent |
+
+### 6.2 The corpus builds the same programs (observed)
+
+`audit/semantic-instance-scalability/tools/equivalence.tcl` compiled all
+239 programs of `tests/golden/`, `examples/` and `bench/` with both
+compilers and compared, per program, the outcome, a digest of the checked
+HIR and a digest of the semantic-instance table
+(`results/equivalence.tsv`):
+
+| class | programs |
+|---|---:|
+| identical HIR and instance table | 74 |
+| identical once run-to-run variation is set aside (a wall-clock time in `staticStats`, the census counters of `traitSource`'s table, checkout paths) | 45 |
+| identical once the checker fingerprint emission certificates record is set aside (it hashes the checker's own source, which this change edits) | 6 |
+| failing in both, with the same error (modules compiled as programs, other platforms' programs) | 46 |
+| **more instances**: the base declined requests for its per-function budget; the new compiler analyzes them | 67 |
+| static decisions in fewer builds (`framework-semantics.bot`: 3 rounds and 6 builds before, 2 and 5 after; the removed `C:budget` channel had forced one) | 1 |
+| a different outcome | **0** |
+
+The 67 are mostly golden suites: the golden framework's helpers
+(`std::test::value`, `rejects_containing`, ...) are untyped functions
+called with a different body callable per test, so the budget was hit in
+the corpus all along (`flags.bot`: 108 declined requests, 140 instances
+before, 203 after; at most 464 instances in any program after). The
+opposite was believed (OPPORTUNISTIC-SEMANTIC-INSTANCES.md: "no budget was
+hit in the corpus"), true when it was written, before the golden
+framework.
+
+### 6.3 Cost of an instance walk (observed)
+
+On generated mid-end-shaped programs (`audit/mid-end-port/tools/synth.tcl
+-generic 0`; `results/instance-walks.txt`), one process each:
+
+| lines | expressions | walks | before: per walk | after: per walk | before: `signatures::infer` | after | front end before | after | peak MB before | after |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 3,344 | 20,778 | 48 | 8.1 ms | 1.5 ms | 4.5 s | 4.1 s | 23.0 s | 22.9 s | 524 | 524 |
+| 6,543 | 38,626 | 126 | 16.0 ms | 1.7 ms | 11.0 s | 8.4 s | 46.9 s | 43.5 s | 946 | 945 |
+| 12,939 | 74,322 | 258 | 33.0 ms | 1.5 ms | 29.8 s | 16.6 s | 97.3 s | 85.1 s | 1,783 | 1,782 |
+| 25,736 | 145,714 | PENDING-G64 |
+
+Before, a walk cost the program (8 to 33 ms, doubling with it: the copy
+of the expression table, 4.3, 10.1 and 25.8 ms at these sizes); after, it
+costs its function's region and stays flat. At 12,939 lines type inference
+takes 13 s less; the front end as a whole 12 % less (other analyses
+dominate it, and are unchanged).
+
+The grid of `tools/scaling.tcl` (`results/scaling.txt`; 3 of the 4 cores
+busy with other work, so times are inflated) separates the three sizes:
+
+* **The program grows, the helper and its 16 instances stay**: 782, 3,086,
+  6,158 and 12,302 lines. Per walk before 0.65, 1.78, 6.72 and 12.83 ms;
+  after 0.13, 0.16, 0.17 and 0.18 ms. Instance verification 0.02-0.38 s
+  before, 0.00-0.01 s after.
+* **The instances grow, the program stays** (6,158 lines): 1, 16, 64, 256
+  and 1,024 distinct types. Before, 64 and more are rejected (TYPE). After,
+  all compile; the walks of 1,024 instances take 0.11 s in all
+  (0.11 ms each), their verification 0.17 s, and the peak memory grows from
+  361 to 370 MB.
+* **The helper grows** (1,550 to 1,710 lines, 16 instances): 0, 40 and 160
+  extra statements. Per walk 1.1, 5.5 and 15.2 ms before, 0.17, 5.0 and
+  22.7 ms after. A walk now costs its region; for a large helper in a small
+  program the journal (saving and restoring about 1,500 entries) cost more
+  than the copy of a small program's table did. Profiled on that point,
+  saving took 1.9 ms and restoring 3.1 ms per walk; after storing the
+  journal as flat lists and restoring each table through one lookup per
+  entry, 1.5 and 2.4 ms (section 7).
+
+### 6.4 The shared helper at scale (observed)
+
+PENDING-H32
+
+### 6.5 CI
+
+PENDING-CI
 
 ## 7. Remaining limits and known problems
 
-REMAINING
+* **A walk still costs its whole region.** Save and Restore touch every
+  expression of the instance's block and nested closures, about 1.6 us per
+  entry: an instance of a large function costs a few milliseconds more than
+  its typing. In a small program with a large helper this exceeds what the
+  old table copy cost (section 6.3); in a large program it is far less.
+  Saving only what a walk writes needs every write to go through one place,
+  which `hir/types.tcl` and the procedures it calls do not.
+* **The trait plan still copies the program per trait-polymorphic
+  instance.** `hir::traits::PlanCalls` makes a `hir::semantic::View` (a copy
+  of the HIR with the snapshot applied) per trait-polymorphic instance
+  context it plans, and reads it through helpers that also read the
+  generic HIR; applying it in place would need those helpers to be told
+  which one they read. It scales with trait-polymorphic instances only, not
+  with instances in general. PENDING-TRAITVIEWS
+* **Native specialization still copies the program per codegen instance**
+  (`hir::specialize::memoizeViews`, audit/mid-end-port/README.md section 5:
+  the specialized native build of a 12,939-line program does not fit in 16
+  GB). Out of this milestone's scope (codegen instances, not semantic
+  ones), and the next wall for a large program on the specialized native
+  backend.
+* **The rest of type inference is still superlinear.**
+  PENDING-PROFILE
+* **The total guard stays.** `maxInstances` (2,000) bounds a finite but
+  possibly very large key space; nothing in the corpus comes near it (464
+  at most). A program past it fails with HIR SEMANTIC LIMIT rather than
+  compiling less precisely; the limit was not measured against a
+  port-sized program with many polymorphic helpers. Projected, from 6.3:
+  2,000 instances of small helpers cost well under a second of walks; of
+  160-statement helpers, about a minute.
+* **`passLimit`** still widens an instance whose result keeps growing to
+  `any` after 6 passes: a widening of one instance's own fixpoint (it
+  depends on that instance alone, never on other instances), unchanged.
+* **The `no-env` decline** remains for a closure whose creation environment
+  no walk has recorded yet; a later walk of the program serves it
+  (`maxRounds` 3).
+* **The static-decision gap of section 3.4** is closed for the arguments a
+  key is made of; whether other routes by which a site decides an
+  instance's existence exist is not known. The fuzzer's programs did not
+  find one (6.1), and the CI comparison of the batched and sequential
+  schedulers over every golden suite is the check (6.5).
