@@ -801,8 +801,27 @@ says why.
 Windows. It now compiles it for `linuxTarget`, as AGENTS.md asks of every
 test that compiles a Linux program.
 
-The push of the fix ran the same workflows again: its results are recorded
-below once they are read; until then they are **pending**, not passed.
+The push of the fix (1802ecb) ran the same workflows again, and the full
+`tests.yml` and `tests-arm64.yml` were dispatched on it:
+
+| workflow | result at 1802ecb |
+|---|---|
+| tests: the Linux x86-64 canary (`ubuntu-26.04`, gcc 15) | passed: cause 1 is fixed |
+| tests (windows x86-64): canary, root plans, smoke | passed: cause 2 is fixed |
+| tests (linux arm64), dispatched: canary, golden shard 1/4 | passed |
+| icy-tower (windows x86-64), icy-tower (macos arm64) | passed |
+| tests, dispatched (the full run); tests (macos arm64); Windows' acceptance shards and system linker; arm64's other jobs | never started: still queued for runners when main moved and the branch merged it (next paragraph), which superseded them |
+
+Main moved 20 commits meanwhile (FOLD-VIRTUAL-LIST-CONSTRUCTION-MILESTONE-1,
+which changes `hir/construction.tcl` and `native/lower.tcl`; censuses; a
+GC-stress job per Tcl backend pass in `tests.yml`). The branch merged it
+(no conflict); on the merged tree [run] `tests/c-compile.test` 61 of 61,
+`tests/main-cli.test` 72 of 72, `tests/golden.test` 9 of 9,
+`tests/numeric-looking-names.test` 5 of 5, the manifest regenerated equal,
+`tools/compilerpedia.tcl check` and `tools/mutant-catalogs.tcl` 0 problems.
+The merge's CI -- every workflow a push starts, and the full `tests.yml` and
+`tests-arm64.yml` dispatched on it -- is recorded here once read; until
+then it is **pending**, not passed.
 
 ## 17. Known limitations
 
