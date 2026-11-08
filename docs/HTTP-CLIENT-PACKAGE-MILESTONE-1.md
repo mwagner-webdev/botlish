@@ -27,6 +27,7 @@ single-file compiler.
 15. Consequences for the agent TUI
 16. Architectural questions
 17. Commands
+18. After merging main: http 0.2.0
 
 ## 1. Answer
 
@@ -51,7 +52,10 @@ WebSocket, redirects, cookies, proxies or decompression: section 14), and
 its releases (`http` 0.1.0, `boringssl` 0.20261020.0) are recorded in
 `packages/RELEASES.tsv` from the pinned author image, where two fresh
 containers built byte-identical artifacts that a host outside the image
-also reproduced (section 8).
+also reproduced (section 8). After main gained Botlish-owned threads and
+`event_loop_linux` 0.5.0 (one loop per VM), `http` 0.2.0 followed: its
+wakes name its own loop, one thread of a process has the runtime at a
+time, and it is recorded the same way (section 18).
 
 Compiler defects surfaced while testing (section 12). The one that leaked
 the client's resources was fixed here: natively, a function that owned a
@@ -71,7 +75,7 @@ import sets, a call of an Int accepted -- are recorded with reproducers.
 | `tools/http-package.tcl` | the author's builds: the pinned BoringSSL (CMake, Ninja), its one archive, the unit (cargo, link-only, localized), a test application's package graph |
 | `tools/package-repository.tcl` | `author::boringssl`, `author::http`: the release recipes (`native add`, `native require`, staged license files) |
 | `tools/package-build/` | the pinned author image gains Rust 1.97.0 (rustup-init 1.28.2 by SHA-256) and apt retries |
-| `tests/http-client.test`, `tests/http/` | 38 tests against independent peers (`server.py`, nghttpd), the PKI (`pki.sh`), the test client, the URI and header oracles |
+| `tests/http-client.test`, `tests/http/` | 40 tests against independent peers (`server.py`, nghttpd), the PKI (`pki.sh`), the test client, the URI and header oracles, the thread programs (`neighbor.bot`, `beside.bot`, `both.bot`: section 18) |
 | `tests/cffi/http.tcl` | builds the native files for the tests (the release recipe's builds) |
 | `audit/http-client/cleanroom/` | the clean room: its image, harness, consumer program, the `feeds` library, results |
 | `audit/http-client/tools/` | `syntax-fuzz.tcl` (URIs and header fields against their oracles), `mutate.tcl` and `mutants.txt`, `measure.tcl`, `attribute.py` (callgrind attribution) |
@@ -145,8 +149,10 @@ this milestone's brief, section 12):
   unit's deadlines, slept by the executor task with the loop's timer.
 * **Name resolution off the loop.** getaddrinfo blocks, so it runs on a
   pool of four threads with a bounded queue; an answer wakes the loop
-  through the driver's foreign post (`botlish_event_post`), the only thing
-  those threads do (the census's B12, for resolution).
+  through the driver's foreign post, the only thing those threads do (the
+  census's B12, for resolution). Since 0.2.0 the post names the runtime's
+  own loop (`botlish_event_post2`), and one thread of a process has the
+  runtime at a time (section 18).
 * **Handles stay inside.** Rust objects are reached by generation-checked
   handles (`generation << 32 | index`) the module keeps in its resources'
   fields; a handle whose object is gone, or whose slot was reused, is
@@ -257,6 +263,10 @@ SHA-256):
 | `event_loop_linux-0.3.0.botpkg` (the recorded release, rebuilt) | `3746cece124b660fa03bf018271e4d5bc6d25f2bf684da84bc9fd621a2bc453c` | 33,589 |
 | provenance records (boringssl, http) | `c6fb5d8e63d08fdcc7d5eac72a6dbf30ca99b048490666cd0d305ed61ec9a08b`, `5263823b8ed31aa903c82a3536679cb7a4da5b4795ead1f569a7ae5f46f6cbd8` | |
 | the unit `libbotlish_http.a` inside `http` | `26490165a9072ff1195ada72c2e64512bfd26fd540501c633663f4f2692f8e27` | 17,040,508 |
+| `http-0.2.0.botpkg` (section 18) | `d5ff6c1b35fc456415856c2232f676012fe60a350bd2bc787b7bc7b9202ac0f8` | 5,328,752 (95 files, 17,621,437 unpacked) |
+| `event_loop_linux-0.5.0.botpkg` (main's release, recorded with it) | `ecd9e8114fa5bc24c2d23a2068e96ec2932e9386ca0cdb79fc568b9662146f77` | 40,216 (8 files, 110,100 unpacked) |
+| provenance records (http 0.2.0, event_loop_linux 0.5.0) | `17b5a7d017e2ea6564657f8f4a78bb20bd633a265132fbe9f49dd3075ac2ef57`, `5342aff86398c22f3697584255a49d5ade7f569372b992416b8036088673e440` | |
+| the unit inside `http` 0.2.0 | `6f1f0649f21cb8edd7fbda6e5592185a2046f107ee32e7e9163c18cf0e0f8784` | 17,045,636 |
 
 **Reproducibility.** Two builds in fresh containers of the image produced
 byte-identical artifacts and provenance records; the same command on this
@@ -281,19 +291,23 @@ license files (`licenses/http/crates/`, `CRATES.md`).
 
 `audit/http-client/cleanroom/` (commands in section 17). The image is
 Ubuntu 24.04 with `gcc g++ libc6-dev ca-certificates` and nothing else;
-the harness copies in the single-file compiler (built from 6673eb8, which
-holds the fix of section 12), the recorded release artifacts and their
-provenance records, the consumer's source
+the harness copies in the single-file compiler (built from 13c7a4d, which
+holds the fix of section 12 and main's threads; 0.1.0's run used 6673eb8),
+the recorded release artifacts (`http` 0.2.0, `event_loop_linux` 0.5.0,
+`boringssl` 0.20261020.0: section 18) and their provenance records, the
+consumer's source
 (`app/main.bot`) and the test CA's certificate (the consumer's own anchor
 file). The peers run outside it: `tests/http/server.py` with a certificate
 the test CA signs, one signed by a CA nobody trusts, and a closed port.
 
-Results (`audit/http-client/cleanroom/results/`): **51 checks, all passed**
--- no Tcl, Rust, Cargo, CMake, Ninja, checkout or BoringSSL source;
-`botlish add` of `http`, `event_loop_linux` and `feeds`; one instance of
-each package; `verify` clean; both provenance records match; the program
-builds warning-free (48 s; a 7.2 MB executable depending on no shared
-BoringSSL or OpenSSL, holding the unit and the provider once); then:
+Results (`audit/http-client/cleanroom/results/`, the 0.2.0 run): **52
+checks, all passed** (0.1.0's run: 51 of 51; the 52nd is the driver's
+provenance record) -- no Tcl, Rust, Cargo, CMake, Ninja, checkout or
+BoringSSL source; `botlish add` of `http`, `event_loop_linux` and `feeds`;
+one instance of each package; `verify` clean; the three provenance records
+match; the program builds warning-free (55 s; a 6.9 MB executable depending
+on no shared BoringSSL or OpenSSL, holding the unit and the provider once);
+then:
 
 | workload | observed |
 |---|---|
@@ -308,7 +322,14 @@ BoringSSL or OpenSSL, holding the unit and the provider once); then:
 inspecting gateway whose root is in the host's system store, not in a
 stock container's. The harness installs it into the container's system
 store when `BOTLISH_CLEANROOM_SYSTEM_CA` names it (and says so in the
-transcript), as the operator of such a network would. Without it, workload
+transcript), as the operator of such a network would. The gateway changed
+between the two runs: 0.1.0's run installed the agent proxy's interception
+root, which direct connections presented then; by the 0.2.0 run they
+presented the egress gateway's chain instead, and with the old root
+installed workload A failed with `TlsVerifyFailed self signed certificate
+in certificate chain` (every other check passed). The run recorded here
+installed the egress gateway's two production roots, taken from the host's
+store. Without it, workload
 A fails exactly as it should -- `TlsVerifyFailed self signed certificate
 in certificate chain` -- and every other check passes
 (`results/checks-without-operator-ca.txt`, from the first run, with the
@@ -321,7 +342,7 @@ else.
 ### 10.1 tests/http-client.test
 
 38 tests, all passing (the last full run: 38 passed, 0 skipped, on this
-milestone's final code); the native files come from the release recipe's
+milestone's final code); 40 since 0.2.0 (section 18); the native files come from the release recipe's
 builds (`tests/cffi/http.tcl`); the client is `tests/http/client.bot`
 built with the test unit. The peers are independent of Hyper and BoringSSL:
 
@@ -346,6 +367,7 @@ servers.
 | protocol and TLS | `http-alpn`, `http-tls-verify` (62, 10, 20, and the test CA under system trust alone), `http-trust-config`, `http-transport-failures`, `http-timeouts` (the three limits), `http-protocol-failures` (a short HTTP/1.1 body, an HTTP/2 RST_STREAM, an invalid status line) |
 | flow control and scheduling | `http-backpressure` and its control, `http-executor-budget` and its control (64 requests at once: at most 32 polls per step; the control polls them all), `http-concurrency` (one HTTP/2 connection for 8 streams; at most 6 HTTP/1.1 connections), `http-keep-alive`, `http-resolver-control` |
 | lifetimes | `http-cancel`, `http-abandon` and its control, `http-stale-handle` and its control, `http-release-client`, `http-lifetime-fuzz` (twenty seeded orders of sends, reads, releases, cancellations and waits on both protocols: every outcome a value or a declared error, nothing left), `http-gc-stress` (`BOTLISH_NATIVE_GC_STRESS=1`) |
+| threads (0.2.0, section 18) | `http-beside-thread` (http on a worker thread beside the main VM's open loop; the main VM's runtime once the worker ended), `http-one-thread` (a second thread's runtime refused) |
 | interop and docs | `http-nghttpd` (3 MiB exactly; eight requests on one connection), `http-package-docs` (every example of README.md and GUIDE.md compiles under `-warnings error`; they reach public hosts, so they are compiled, not run), `http-uri` |
 
 The negative controls use the test unit's fault bits, each a rule the
@@ -376,7 +398,8 @@ the consumer (512).
 applied to a private copy of the tree, whose own cache rebuilds the
 provider archive and the units, and must be killed by the detectors its
 lines name. **16 mutants, 16 killed** -- the brief's nine kinds and seven
-more:
+more -- and since 0.2.0 three more, killed, with `graph-lock-drift` moved
+to the new lock (section 18):
 
 | mutant | the defect | killed by |
 |---|---|---|
@@ -396,6 +419,9 @@ more:
 | `uri-bad-escape` | `%` needs one hex digit, not two | `http-uri`, `syntax-fuzz.tcl` |
 | `provider-mismatch` | the provider archive identifies another BoringSSL | `http-provider-identity`, `http-get-h1` (the link fails) |
 | `graph-lock-drift` | http locks a driver release the repository does not hold | `http-package-metadata` |
+| `wake-v1-post` (0.2.0) | the resolver's wake posted through the version 1 ABI, which names no loop | `http-beside-thread` |
+| `owner-not-claimed` (0.2.0) | a second thread opens a runtime beside the owner's | `http-one-thread` |
+| `owner-never-released` (0.2.0) | a claim on the runtime never given up, also when its thread ends | `http-beside-thread` |
 
 Two lessons from the first run, both fixed before the second: the native
 check of a header *name* had a mutant that survived because no program can
@@ -629,8 +655,12 @@ fixture); B4 and B8 were not needed; B9 and B10 remain.
   verification runs inside the executor's step (about 2 ms of a cold
   request here: section 11); other tasks wait meanwhile. A program should
   make its clients once and reuse them (each also has its own connection
-  pools); GUIDE.md should say so in the next release (0.1.0's text is
-  fixed: it is the recorded artifact's).
+  pools); 0.2.0's guide says so (its section 2).
+* **Threads** (0.2.0): one thread of a process has the runtime at a time;
+  another thread's `http::create` is refused (`Fault`) until the owner's
+  runtime is shut down or its thread ends (section 18). Per-thread
+  runtimes need the name resolver's pool and the counters made per thread
+  first.
 * **CI**: no workflow runs `tests/http-client.test` yet (it needs the
   provider's and the unit's builds, Python's h2 and nghttpd); it runs
   locally.
@@ -775,3 +805,74 @@ BOTLISH_CLEANROOM_SYSTEM_CA=/path/to/operator-root.pem audit/http-client/cleanro
 
 (`repository.sh REPO OUT` copies the three releases from the directory
 `OUT` made above; `repository.sh REPO` builds them itself.)
+
+## 18. After merging main: http 0.2.0
+
+While this milestone was on its branch, main gained Botlish-owned threads
+(BOTLISH-OWNED-THREADS-AND-CROSS-THREAD-ACTORS-MILESTONE-1.md),
+`event_loop_linux` 0.5.0 with the event loop's integration ABI version 2
+(one loop per VM), and executables that print only what their program
+writes (PROGRAM-OUTPUT-MILESTONE-1.md). The merge itself was clean but for
+`packages/RELEASES.tsv` (both sides appended; every record kept), and the
+release fix of section 12 composes with main's thread-entry path, which
+sequences through the same `SequenceRaw`, `SequenceShort` and `SequenceTo`
+(`tests/resources.test` 42 of 42, `tests/threads.test` 21 of 21). `http`
+0.1.0 could not stay as it was:
+
+* **A wake lost beside another thread's loop.** 0.1.0's name resolver
+  posted through the version 1 function, which names no loop; version 2
+  refuses it (-EPIPE) while more than one loop is open, so in a program
+  where another Botlish thread runs a loop, a request to a name never
+  connected (its connect timeout failed it). 0.2.0 posts with
+  `botlish_event_post2`, naming the runtime's loop
+  (`event_loop_linux::loop_handle`, given to `bh_set_notify`).
+* **One runtime per process.** The unit's executor and handles are per
+  thread, but the resolver's pool and the process counters are the
+  process's, and `bh_close` stopped the pool for every thread: a second
+  thread's runtime opened beside the first and shared them silently. In
+  0.2.0 `bh_open` claims the process for its thread; another thread's is
+  refused (`ERR_OPEN_ELSEWHERE`, the module's `Fault` "the HTTP runtime is
+  open on another thread"), and the claim ends at `bh_close`
+  (`http::shutdown`) or with its thread (a thread-local guard holding the
+  thread's id). Runtimes per thread would need the pool and the counters
+  made per thread first.
+* **The lock.** 0.2.0 requests `event_loop_linux` 0.5 and locks 0.5.0;
+  0.3.0 can no longer be built from this tree, and `http-package-metadata`
+  failed on 0.1.0's lock after the merge, as it should.
+* **Documentation.** The README's and the guide's programs returned their
+  lines as the program's value, which an executable no longer prints: they
+  print them (`std::io::print_line`, `std::linux::io`), and the README runs
+  them with `botlish run`. The guide states the thread rule and that a
+  client should be made once and reused (section 14).
+* **How the tests read the client.** The test client reports through its
+  value; the tests, the syntax fuzzer and `measure.tcl` read it through the
+  driver protocol (`BOTLISH_NATIVE_RESULT`), whose `{list {{str ...} ...}}`
+  they decode, instead of the printed value. Three expectations had held
+  the printer's escaped `\n` and now hold the newline itself.
+
+**Evidence.** `http-beside-thread`: a worker thread runs `http` on a loop
+of its own while the main VM's loop is open (`two loops: status 200 bytes
+6`), and once the worker has ended -- its runtime never closed -- the main
+VM opens its own (`status 200 bytes 6`). `http-one-thread`: with the main
+VM's runtime open, the worker's is refused, and the main VM's request still
+succeeds. `tests/http-client.test`: 40 of 40. The mutants `wake-v1-post`,
+`owner-not-claimed` and `owner-never-released` are killed by those two
+tests and `graph-lock-drift` (moved to 0.5.0) by `http-package-metadata`;
+`tools/mutant-catalogs.tcl` applies every mutant of the 91 catalogs (3,196,
+0 problems); the warning gate passes; Compilerpedia's check passes
+(`capability.http` names no design document: main's rule that a page never
+does, since the reference ships without `docs/`); the syntax fuzzer (seed
+3, 1,000 URIs and 1,000 header fields) has 0 disagreements.
+
+**The release.** `tools/package-build/author.sh build OUT -release
+boringssl event_loop_linux http` in two fresh containers of the pinned
+image, from 5b40e02: byte-identical artifacts and provenance records;
+`boringssl` reproduced its recorded release; `http` 0.2.0 and
+`event_loop_linux` 0.5.0 are recorded in `packages/RELEASES.tsv` (section
+8's table). `event_loop_linux` 0.5.0 is main's release, which main had not
+recorded; it is recorded here because `http` 0.2.0 locks it and the clean
+room publishes it. `http` 0.1.0 stays recorded: a release is never removed.
+
+**The clean room** (section 9) with the single-file compiler of 13c7a4d and
+these artifacts: 52 of 52 checks.
+

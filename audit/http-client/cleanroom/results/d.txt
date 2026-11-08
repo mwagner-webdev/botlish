@@ -8,5 +8,4 @@ feeds: poll 2: status 200, 6 bytes
 feeds: poll 3: status 200, 6 bytes
 feeds: 3 polls, each followed by its pause: yes
 feeds task done: clients 0, exchanges 0, panics 0
-0
 exit 0

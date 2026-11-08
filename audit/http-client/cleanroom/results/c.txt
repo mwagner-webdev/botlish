@@ -1,9 +1,8 @@
 stream: 67108864 bytes in 4096 chunks over HTTP/2, the largest 16384
 stream: at most 16384 bytes held natively while the program did not read
-stream: peak memory grew by 3584 KiB while 65536 KiB passed through: bounded yes
+stream: peak memory grew by 3568 KiB while 65536 KiB passed through: bounded yes
 stream: utf-8 text in 27 chunks: héllo wörld ✓ 😀 end
 
 stream: uploaded 4194304 bytes in 64 writes; the peer saw content-length 4194304 and echoed 4194304
 end: clients 0, exchanges 0, panics 0
-0
 exit 0

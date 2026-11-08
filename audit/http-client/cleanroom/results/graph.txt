@@ -1,18 +1,18 @@
 the dependency graph of /home/dev/app: 4 packages, one instance of each
 application uses: event_loop_linux, feeds, http
 boringssl 0.20261020.0 (sha256 9124d0a25d4c): used by http; installed
-  locked by: http 0.1.0
-  path: the project -> http 0.1.0 -> boringssl 0.20261020.0
-event_loop_linux 0.3.0 (sha256 3746cece124b): used by the application, feeds, http; installed
-  locked by: the application (request "0.3"), feeds 1.0.0, http 0.1.0
+  locked by: http 0.2.0
+  path: the project -> http 0.2.0 -> boringssl 0.20261020.0
+event_loop_linux 0.5.0 (sha256 ecd9e8114fa5): used by the application, feeds, http; installed
+  locked by: the application (request "0.5"), feeds 1.0.0, http 0.2.0
   shared: one instance, event_loop_linux, for the application, feeds, http
-  path: the project -> event_loop_linux 0.3.0
-feeds 1.0.0 (sha256 100b878a99fe): used by the application; installed
+  path: the project -> event_loop_linux 0.5.0
+feeds 1.0.0 (sha256 435b2dfdf568): used by the application; installed
   locked by: the application (request "1.0")
-  uses: event_loop_linux 0.3.0, http 0.1.0
+  uses: event_loop_linux 0.5.0, http 0.2.0
   path: the project -> feeds 1.0.0
-http 0.1.0 (sha256 3d40620ee4be): used by the application, feeds; installed
-  locked by: the application (request "0.1"), feeds 1.0.0
-  uses: boringssl 0.20261020.0, event_loop_linux 0.3.0
+http 0.2.0 (sha256 d5ff6c1b35fc): used by the application, feeds; installed
+  locked by: the application (request "0.2"), feeds 1.0.0
+  uses: boringssl 0.20261020.0, event_loop_linux 0.5.0
   shared: one instance, http, for the application, feeds
-  path: the project -> http 0.1.0
+  path: the project -> http 0.2.0

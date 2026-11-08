@@ -7,37 +7,37 @@ cmake: none
 ninja: none
 python3: none
 git: none
-operator CA: 1 certificate(s) added to the system store
+operator CA: 2 certificate(s) added to the system store
 Botlish compiler (no release version; this is a development build)
-source revision: 6673eb8, packaged
-front end: 2618e63d10ebfb8e-5170579
+source revision: 13c7a4de (modified), packaged
+front end: 23dccb442a54377b-5312244
 Tcl: 9.0.1
-native backend: packaged (663d73be-10816976-82cde1d6-1474136-627b00bc-16797454)
+native backend: packaged (e48ea230-10917168-59b09d39-1560576-f18c6171-17004938)
 invocation: botlish
 9124d0a25d4c08579530d1d18fdafb0c92c27fe3f223b6227220503383edf453  ./boringssl-0.20261020.0.botpkg
-3746cece124b660fa03bf018271e4d5bc6d25f2bf684da84bc9fd621a2bc453c  ./event_loop_linux-0.3.0.botpkg
-100b878a99fe78636afeb0fe7fa8df1f66446f80e374382f18f05171e3f36636  ./feeds-1.0.0.botpkg
-3d40620ee4bead40c3df6c5e076ce7193ecbe73a5104f21bd62bf08d2b0bc436  ./http-0.1.0.botpkg
+ecd9e8114fa5bc24c2d23a2068e96ec2932e9386ca0cdb79fc568b9662146f77  ./event_loop_linux-0.5.0.botpkg
+435b2dfdf5682db0073c984ff68e066887706a6a45e825aa4637b8e6b1dfb516  ./feeds-1.0.0.botpkg
+d5ff6c1b35fc456415856c2232f676012fe60a350bd2bc787b7bc7b9202ac0f8  ./http-0.2.0.botpkg
 bafbeee24dcab4c46349886637a1b44056277e0c172b93642564c6433c851568  ./oldtls-1.0.0.botpkg
 cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0
 == botlish add
 boringssl 0.20261020.0 (sha256 9124d0a25d4c): installed, used by http
-event_loop_linux 0.3.0 (sha256 3746cece124b): installed, used by http
-http 0.1.0 (sha256 3d40620ee4be): installed
+event_loop_linux 0.5.0 (sha256 ecd9e8114fa5): installed, used by http
+http 0.2.0 (sha256 d5ff6c1b35fc): installed
 view linux-x86_64: derived (112 files, 4 native libraries)
-added http (request "0.1", lock 0.1.0)
+added http (request "0.2", lock 0.2.0)
 status 0
 boringssl 0.20261020.0: unchanged, used by http
-event_loop_linux 0.3.0: unchanged, used by the application, http
-http 0.1.0: unchanged
+event_loop_linux 0.5.0: unchanged, used by the application, http
+http 0.2.0: unchanged
 view linux-x86_64: derived again (112 files, 4 native libraries)
-note: event_loop_linux 0.3.0 is the version http 0.1.0 locks: the application shares that instance
-added event_loop_linux (request "0.3", lock 0.3.0)
+note: event_loop_linux 0.5.0 is the version http 0.2.0 locks: the application shares that instance
+added event_loop_linux (request "0.5", lock 0.5.0)
 status 0
 boringssl 0.20261020.0: unchanged, used by http
-event_loop_linux 0.3.0: unchanged, used by the application, feeds, http
-feeds 1.0.0 (sha256 100b878a99fe): installed
-http 0.1.0: unchanged, used by the application, feeds
+event_loop_linux 0.5.0: unchanged, used by the application, feeds, http
+feeds 1.0.0 (sha256 435b2dfdf568): installed
+http 0.2.0: unchanged, used by the application, feeds
 view linux-x86_64: derived again (114 files, 4 native libraries)
 added feeds (request "1.0", lock 1.0.0)
 status 0
@@ -51,21 +51,21 @@ package http boringssl event_loop_linux
 the dependency graph of /home/dev/app: 4 packages, one instance of each
 application uses: event_loop_linux, feeds, http
 boringssl 0.20261020.0 (sha256 9124d0a25d4c): used by http; installed
-  locked by: http 0.1.0
-  path: the project -> http 0.1.0 -> boringssl 0.20261020.0
-event_loop_linux 0.3.0 (sha256 3746cece124b): used by the application, feeds, http; installed
-  locked by: the application (request "0.3"), feeds 1.0.0, http 0.1.0
+  locked by: http 0.2.0
+  path: the project -> http 0.2.0 -> boringssl 0.20261020.0
+event_loop_linux 0.5.0 (sha256 ecd9e8114fa5): used by the application, feeds, http; installed
+  locked by: the application (request "0.5"), feeds 1.0.0, http 0.2.0
   shared: one instance, event_loop_linux, for the application, feeds, http
-  path: the project -> event_loop_linux 0.3.0
-feeds 1.0.0 (sha256 100b878a99fe): used by the application; installed
+  path: the project -> event_loop_linux 0.5.0
+feeds 1.0.0 (sha256 435b2dfdf568): used by the application; installed
   locked by: the application (request "1.0")
-  uses: event_loop_linux 0.3.0, http 0.1.0
+  uses: event_loop_linux 0.5.0, http 0.2.0
   path: the project -> feeds 1.0.0
-http 0.1.0 (sha256 3d40620ee4be): used by the application, feeds; installed
-  locked by: the application (request "0.1"), feeds 1.0.0
-  uses: boringssl 0.20261020.0, event_loop_linux 0.3.0
+http 0.2.0 (sha256 d5ff6c1b35fc): used by the application, feeds; installed
+  locked by: the application (request "0.2"), feeds 1.0.0
+  uses: boringssl 0.20261020.0, event_loop_linux 0.5.0
   shared: one instance, http, for the application, feeds
-  path: the project -> http 0.1.0
+  path: the project -> http 0.2.0
 == botlish verify
 note: target views: linux-x86_64 (verify -target T verifies one's native dependencies again)
 verify: 4 package instance(s) in /home/dev/app: as installed
@@ -73,41 +73,38 @@ verify: 4 package instance(s) in /home/dev/app: as installed
 == provenance records
 == native executable
 executable: main
-	linux-vdso.so.1 (0x00007f55de5fd000)
-	libstdc++.so.6 => /lib/x86_64-linux-gnu/libstdc++.so.6 (0x00007f55ddd94000)
-	libgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1 (0x00007f55ddd66000)
-	libm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007f55ddc7d000)
-	libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007f55dda6a000)
-	/lib64/ld-linux-x86-64.so.2 (0x00007f55de5ff000)
+	linux-vdso.so.1 (0x00007f1bdcd6d000)
+	libstdc++.so.6 => /lib/x86_64-linux-gnu/libstdc++.so.6 (0x00007f1bdae9e000)
+	libgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1 (0x00007f1bdae70000)
+	libm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007f1bdad87000)
+	libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007f1bdab74000)
+	/lib64/ld-linux-x86-64.so.2 (0x00007f1bdcd6f000)
 == A: a public HTTPS URL
 -- ./main public https://example.com/
 public: status 200, HTTP/2
 public: content-type text/html; charset=utf-8
 public: 577 bytes
 end: clients 0, exchanges 0, panics 0
-0
 exit 0
 == B: JSON over HTTPS, the program's own anchor
--- ./main post https://localhost:39231 /home/dev/inputs/test-ca.pem
+-- ./main post https://localhost:44675 /home/dev/inputs/test-ca.pem
 post: status 200, HTTP/2
 post: the peer saw method POST, content-type application/json, authorization Bearer cleanroom-token
 post: the echoed body is the body sent: yes: {"input": "héllo ✓", "stream": false}
 end: clients 0, exchanges 0, panics 0
-0
 exit 0
 == C: streaming, bounded memory, UTF-8 across chunks, a streamed upload
--- ./main stream https://localhost:39231 /home/dev/inputs/test-ca.pem
+-- ./main stream https://localhost:44675 /home/dev/inputs/test-ca.pem
 stream: 67108864 bytes in 4096 chunks over HTTP/2, the largest 16384
 stream: at most 16384 bytes held natively while the program did not read
-stream: peak memory grew by 3584 KiB while 65536 KiB passed through: bounded yes
+stream: peak memory grew by 3568 KiB while 65536 KiB passed through: bounded yes
 stream: utf-8 text in 27 chunks: héllo wörld ✓ 😀 end
 
 stream: uploaded 4194304 bytes in 64 writes; the peer saw content-length 4194304 and echoed 4194304
 end: clients 0, exchanges 0, panics 0
-0
 exit 0
 == D: a separately authored library under the same driver and runtime
--- ./main shared https://localhost:39231 /home/dev/inputs/test-ca.pem
+-- ./main shared https://localhost:44675 /home/dev/inputs/test-ca.pem
 app: request 1: status 200, HTTP/2, 6 bytes
 app: request 2: status 200, HTTP/2, 6 bytes
 app: request 3: status 200, HTTP/2, 6 bytes
@@ -118,25 +115,23 @@ feeds: poll 2: status 200, 6 bytes
 feeds: poll 3: status 200, 6 bytes
 feeds: 3 polls, each followed by its pause: yes
 feeds task done: clients 0, exchanges 0, panics 0
-0
 exit 0
 == E: failures
--- ./main failures https://localhost:39231 /home/dev/inputs/test-ca.pem https://localhost:45735 http://127.0.0.1:38321
+-- ./main failures https://localhost:44675 /home/dev/inputs/test-ca.pem https://localhost:38161 http://127.0.0.1:56151
 failures: name resolution: error ResolveFailed no-such-host.invalid: Name or service not known
 failures: untrusted certificate: error TlsVerifyFailed localhost: unable to get local issuer certificate
-failures: refused: error ConnectFailed 127.0.0.1 port 38321: Connection refused (os error 111) (127.0.0.1:38321)
+failures: refused: error ConnectFailed 127.0.0.1 port 56151: Connection refused (os error 111) (127.0.0.1:56151)
 failures: deadline: error Timeout deadline: the request's deadline passed
 failures: idle body: body error Timeout idle: the server sent nothing within the idle timeout
 failures: cancelled: error Cancelled
 failures: early release: first chunk 16384, a read after release: released, exchanges left 0
 failures: the client after it: status 200, HTTP/2, 6 bytes
 end: clients 0, exchanges 0, panics 0
-0
 exit 0
 == a library locking another BoringSSL release
 error: cannot select one version of boringssl for the application's dependency graph: 0.20250101.0 and 0.20261020.0 are demanded:
   oldtls 1.0.0 locks boringssl 0.20250101.0 (the project -> oldtls 1.0.0)
-  http 0.1.0 locks boringssl 0.20261020.0 (the project -> http 0.1.0)
+  http 0.2.0 locks boringssl 0.20261020.0 (the project -> http 0.2.0)
 A package of the application's dependency graph has one instance, at one version, used by every package that depends on it; a lock is the release its package was built and tested with, and is never changed, relaxed or overridden to make the graph agree, and no second instance is made. Choose versions whose locks agree (update, add -request), or ask the packages' authors for releases that lock the same version (PM DEPENDENCY-CONFLICT)
 == checks
 PASS no Tcl, Rust, Cargo, CMake or Ninja in the clean room
@@ -149,7 +144,8 @@ PASS every package is installed once, no package holds a .bot_modules of its own
 PASS the graph reports the driver shared
 PASS verify is clean
 PASS the provenance record of boringssl-0.20261020.0 matches its artifact
-PASS the provenance record of http-0.1.0 matches its artifact
+PASS the provenance record of event_loop_linux-0.5.0 matches its artifact
+PASS the provenance record of http-0.2.0 matches its artifact
 PASS the program builds as a native executable, warning-free
 PASS the executable holds the HTTP unit once
 PASS the executable holds one BoringSSL provider, the one http locks
@@ -191,12 +187,12 @@ PASS add oldtls fails
 PASS the failure is a DEPENDENCY-CONFLICT naming both locks
 PASS the installation is unchanged
 == facts
-compiler aa76822ca6daa695d4ab58575873d76510f6316154f9f80615e948c035d463c6 14815032 bytes
+compiler 398e8711f62edfdad6b76a9de035c17117596e3cccd6b962cdabe6150fd39e83 15055913 bytes
 9124d0a25d4c08579530d1d18fdafb0c92c27fe3f223b6227220503383edf453  ./boringssl-0.20261020.0.botpkg
-3746cece124b660fa03bf018271e4d5bc6d25f2bf684da84bc9fd621a2bc453c  ./event_loop_linux-0.3.0.botpkg
-100b878a99fe78636afeb0fe7fa8df1f66446f80e374382f18f05171e3f36636  ./feeds-1.0.0.botpkg
-3d40620ee4bead40c3df6c5e076ce7193ecbe73a5104f21bd62bf08d2b0bc436  ./http-0.1.0.botpkg
+ecd9e8114fa5bc24c2d23a2068e96ec2932e9386ca0cdb79fc568b9662146f77  ./event_loop_linux-0.5.0.botpkg
+435b2dfdf5682db0073c984ff68e066887706a6a45e825aa4637b8e6b1dfb516  ./feeds-1.0.0.botpkg
+d5ff6c1b35fc456415856c2232f676012fe60a350bd2bc787b7bc7b9202ac0f8  ./http-0.2.0.botpkg
 bafbeee24dcab4c46349886637a1b44056277e0c172b93642564c6433c851568  ./oldtls-1.0.0.botpkg
 cc: cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0
 libstdc++: /usr/lib/x86_64-linux-gnu/libstdc++.so.6 /usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.33 
-build: 48.2712 s, executable 7212600 bytes
+build: 54.9258 s, executable 6939128 bytes

@@ -6005,7 +6005,16 @@ identity symbol). `tools/package-repository.tcl`'s `author::boringssl` and
   scheduler: the unit's executor runs a bounded batch per `bh_step` (the
   module's budget) from a task of the loop, its timers are the loop's
   clock, its readiness the driver's watches; the only threads are the name
-  resolver's, which answer and wake the loop (`botlish_event_post`).
+  resolver's, which answer and wake the loop (`botlish_event_post2`, which
+  names the runtime's own loop: never the version 1 post, which another
+  Botlish thread's loop makes refused).
+* One thread of a process has the runtime at a time (std::thread: the
+  resolver's pool and the process counters are shared): `bh_open` claims
+  it, another thread's is refused (`ERR_OPEN_ELSEWHERE`, the module's
+  `Fault`), and the claim ends at `bh_close` or with its thread
+  (`http-one-thread`, `http-beside-thread`). Never let two threads' runtimes
+  share the pool silently; per-thread runtimes need the pool and counters
+  made per thread first.
 * The public interface is Botlish values, declared errors and resources:
   no handle integer, Rust type, BoringSSL object or raw status reaches a
   program (every `bh_*` is `private`); a client and an exchange are
@@ -6028,8 +6037,8 @@ identity symbol). `tools/package-repository.tcl`'s `author::boringssl` and
   the unit (boring-sys builds link-only against empty archives).
 * Releases are reproducible: `--locked`, one codegen unit, remapped paths,
   deterministic archives; the pinned author image (tools/package-build/)
-  carries the Rust toolchain. `http` 0.1.0 and `boringssl` 0.20261020.0
-  are recorded in packages/RELEASES.tsv: any change under
+  carries the Rust toolchain. `http` 0.1.0 and 0.2.0 and `boringssl`
+  0.20261020.0 are recorded in packages/RELEASES.tsv: any change under
   `packages/http` or `packages/boringssl` (its documentation included:
   the artifact holds it) is a new version, built and recorded as they
   were.

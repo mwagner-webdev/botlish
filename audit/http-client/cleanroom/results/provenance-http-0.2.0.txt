@@ -1,12 +1,12 @@
-http 0.1.0
-  sha256 3d40620ee4bead40c3df6c5e076ce7193ecbe73a5104f21bd62bf08d2b0bc436
-  5326480 bytes, 95 files
+http 0.2.0
+  sha256 d5ff6c1b35fc456415856c2232f676012fe60a350bd2bc787b7bc7b9202ac0f8
+  5328752 bytes, 95 files
   dependency boringssl "0.20261020", locked 0.20261020.0
-  dependency event_loop_linux "0.3", locked 0.3.0
-      21170  GUIDE.md
-       7180  README.md
+  dependency event_loop_linux "0.5", locked 0.5.0
+      22687  GUIDE.md
+       7819  README.md
         797  botlish.json
-      69295  http.bot
+      69489  http.bot
        1807  licenses/http/CRATES.md
        1073  licenses/http/LICENSE
       10847  licenses/http/crates/atomic-waker-1.1.2/LICENSE-APACHE
@@ -77,11 +77,11 @@ http 0.1.0
        1063  licenses/http/crates/want-0.3.2/LICENSE
       15215  native/Cargo.lock
        1413  native/Cargo.toml
-       1938  native/build.rs
-      15969  native/src/abi.rs
+       1972  native/build.rs
+      16228  native/src/abi.rs
        7453  native/src/body.rs
-      13839  native/src/bridge/exec.rs
-       3202  native/src/bridge/ffi.rs
+      14073  native/src/bridge/exec.rs
+       4519  native/src/bridge/ffi.rs
        6365  native/src/bridge/io.rs
        1775  native/src/bridge/mod.rs
        1467  native/src/bridge/notices.rs
@@ -92,19 +92,19 @@ http 0.1.0
        1633  native/src/faults.rs
        1186  native/src/lib.rs
       13944  native/src/net.rs
-        836  native/src/notify.c
+       1126  native/src/notify.c
        2694  native/src/rt.rs
        2821  native/src/stream.rs
        2067  native/src/testing.rs
       13326  native/src/tls.rs
-   17040508  targets/linux-x86_64/native/libbotlish_http.a
+   17045636  targets/linux-x86_64/native/libbotlish_http.a
   target linux-x86_64: 95 files in its view (targets/linux-x86_64 at the package root)
     library botlish_http: bundled static, native/libbotlish_http.a, license ((MIT OR Apache-2.0) AND Unicode-3.0) AND Apache-2.0 AND (Apache-2.0  OR  MIT) AND (Apache-2.0 OR MIT) AND MIT AND (MIT OR Apache-2.0) AND (MIT OR Apache-2.0) (the author's statement)
       notices: licenses/http/LICENSE, licenses/http/CRATES.md
   native closure of linux-x86_64: complete
-  provenance /home/dev/inputs/repo/http-0.1.0.provenance.json (sha256 5263823b8ed3, format 1)
+  provenance /home/dev/inputs/repo/http-0.2.0.provenance.json (sha256 17b5a7d017e2, format 1)
     describes this artifact: its subject's SHA-256 and every file's digest are the artifact's
     asserted by the author, unchecked unless a check below says so: 0 source(s), 1 build(s), 0 generator(s)
-    check made when the record was made: build http unit linux-x86_64 output targets/linux-x86_64/native/libbotlish_http.a: confirmed (26490165a907)
+    check made when the record was made: build http unit linux-x86_64 output targets/linux-x86_64/native/libbotlish_http.a: confirmed (6f1f0649f21c)
     unsigned: the record does not authenticate who made the artifact or its sources (PM-4 and PM-5)
 (a valid .botpkg, format 1, schema 3: one release for every target it names; nothing authenticates who made it)

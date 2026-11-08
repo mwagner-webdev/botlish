@@ -2,5 +2,4 @@ public: status 200, HTTP/2
 public: content-type text/html; charset=utf-8
 public: 577 bytes
 end: clients 0, exchanges 0, panics 0
-0
 exit 0
