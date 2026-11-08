@@ -18,6 +18,16 @@
 #
 # This script
 #
+#   0. keeps Tcl's script search inside the packaged Tcl library -- the
+#      archive's tcl_library in the single executable, the framework's in the
+#      application: auto_path and the Tcl module path hold that library's
+#      own directories only, never one of $TCLLIBPATH, of
+#      $TCL9.0_TM_PATH or $TCL9_0_TM_PATH, beside the executable (../lib) or
+#      of the installation prefix Tcl was configured with (tcl_pkgPath).
+#      Tcl itself never reads a library $TCL_LIBRARY names: the base kit
+#      (single/basekit.c) and the launcher (single/macos/launcher.c) see to
+#      that before this script runs. The variables stay in the environment,
+#      exactly as the user set them, for the programs the compiler runs.
 #   1. makes UTF-8 the system and standard-channel encoding (a checkout's
 #      canonical setup is LANG=C.utf8, AGENTS.md; a packaged compiler does not
 #      ask its user for a locale) -- the arguments and the environment Tcl
@@ -51,6 +61,16 @@
 #      and linked where they are, signed, in the bundle,
 #   3. runs the checkout's own main.tcl, unchanged, with the same arguments:
 #      every option main.tcl documents works the same way.
+
+# Step 0, before anything else runs: Tcl loads a library command that is not
+# defined yet (readFile, say) from every tclIndex on auto_path, and a package
+# a script requires from every pkgIndex.tcl there and from the module path.
+# init.tcl made auto_path from $TCLLIBPATH, and tm.tcl, which `path list`
+# loads, adds the TM_PATH variables' directories as it loads: both are
+# replaced by the packaged library's own.
+set ::auto_path [list $::tcl_library [file dirname $::tcl_library]]
+::tcl::tm::path remove {*}[::tcl::tm::path list]
+::tcl::tm::roots [list [file dirname $::tcl_library]]
 
 # Tcl decoded the arguments and the environment (and the launcher the
 # bundle's path) with the locale's encoding,

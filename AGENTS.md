@@ -341,11 +341,14 @@ containers (`single/smoke-test.sh`); once every test of the commit is green,
 the release gate's release run publishes that build as the
 `botlish-linux-x86_64` asset of the rolling `single-latest` prerelease
 (CI-RUNS.md). The README's download button links to that tag and asset
-name: rename either only together with the button. Its base kit is a static tclsh that the
-script builds once from the pinned Tcl 9.0.1 source release. That build is
-the one exception to "do not build Tcl 9 from source" above: no package ships
-a static zipfs tclsh. `--basekit PATH` uses a prebuilt zipkit instead. To run
-the test suite, still install the `.deb`s.
+name: rename either only together with the button. Its base kit is Tcl's
+static library, which `single/basekit.sh` builds once from the pinned Tcl
+9.0.1 source release and caches, linked with `single/basekit.c` as its main
+program. That build is the one exception to "do not build Tcl 9 from
+source" above: no package ships a static zipfs Tcl. `--basekit PATH` takes
+a base kit `single/basekit.sh` linked before; a stock tclsh or prebuilt
+zipkit is refused (next item). To run the test suite, still install the
+`.deb`s.
 
 * `single/package.tcl` packs exactly main.tcl, LICENSE, `core/`,
   `compiler/`, `hir/`, `surface/`, `service/`, `lsp/`, `pm/`, `ccompile/`,
@@ -356,6 +359,18 @@ the test suite, still install the `.deb`s.
   it there. Never make main.tcl or the compiler depend on the single
   executable: `single/main.tcl` only sets the environment and sources
   main.tcl unchanged.
+* The packaged compiler runs only its own Tcl library (SINGLE-EXECUTABLE.md,
+  "Its own Tcl library"). Tcl starts without the user's `TCL_LIBRARY`
+  (`single/basekit.c`; on macOS the launcher sets `tcl_library` first), and
+  `single/main.tcl` keeps `auto_path` and the module path inside the
+  packaged library: never `$TCLLIBPATH`, `$TCL9.0_TM_PATH` or the
+  directories beside the executable. The compiler's children see those
+  variables exactly as the user set them: put back after Tcl starts, never
+  unset, replaced or set by the compiler. Never give the base kit Tcl's
+  stock main (a stock tclsh or zipkit sources a decoy `TCL_LIBRARY`'s
+  `init.tcl` before `single/main.tcl` runs; `single/build.sh` refuses
+  one), and never create a Tcl interpreter in the compiler: `interp
+  create` (one not `-safe`) runs `tclInit` again, with `TCL_LIBRARY` back.
 * Standalone executables have three linkers, chosen by
   `BOTLISH_NATIVE_LINKER`: `rustc` (the default), `stub` (no toolchain:
   `botlish-aot-stub` with the program image appended,
@@ -438,8 +453,9 @@ the test suite, still install the `.deb`s.
   `.github/workflows/tests.yml` have the commands. Run them once more under
   `BOTLISH_NATIVE_GC_STRESS=1`. A change to the system linker also runs
   `audit/native-aot/tools/mutate.tcl` (its `sys-*` mutants), and one to the
-  single executable's packing or installation (`single/main.tcl`,
-  `single/package.tcl`) `audit/single-executable/tools/mutate.tcl` and both
+  single executable's packing, startup or installation (`single/main.tcl`,
+  `single/package.tcl`, `single/basekit.c`, `single/basekit.sh`)
+  `audit/single-executable/tools/mutate.tcl` and both
   `single/smoke-test.sh` and `single/ffi-smoke-test.sh` after
   `single/build.sh`.
 
