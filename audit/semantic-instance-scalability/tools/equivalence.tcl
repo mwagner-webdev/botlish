@@ -6,15 +6,17 @@
 # Sources the compiler of checkout ROOT, compiles each FILE (the front end,
 # warnings off, no cache) and prints one line per file:
 #
-#   FILE OUTCOME HIR SEMANTIC SNAPSHOTS
+#   FILE OUTCOME HIR SEMANTIC INSTANCES declined={...} walks=N deferred=N
 #
-# OUTCOME is `ok` or the error code and the first line of the message; HIR is
-# the CRC-32 and length of the checked HIR's text without its `semantic`
-# table (ROOT's path and the working directory's mapped out), SEMANTIC those of the semantic table without the run's census
-# counters (`requests`, `hits`, `walks`, `deferred`, `deep`, `trivial`,
-# `declinedCount`: how the analysis got there, not what it found), and
-# SNAPSHOTS the number of instances. Two checkouts that build the same
-# program the same way print the same line; run it with each and diff.
+# OUTCOME is `ok`, or `error`, the error code and a digest of the first line
+# of the message. HIR is the CRC-32 and length of the checked HIR's text
+# without its `semantic` table, SEMANTIC those of the semantic table without
+# the run's census counters (`requests`, `hits`, `walks`, `deferred`, `deep`,
+# `trivial`, `declinedCount`: how the analysis got there, not what it found),
+# both with ROOT's path and the working directory's mapped out. INSTANCES is
+# the number of instances; the census counters follow, for reading only.
+# Two checkouts that build a program the same way print the same first five
+# fields: run the tool with each and compare them.
 
 set root [file normalize [lindex $argv 0]]
 source [file join $root surface surface.tcl]
@@ -38,5 +40,7 @@ foreach path [lrange $argv 1 end] {
         dict unset semantic $k
     }
     set instances [expr {[dict exists $semantic instances] ? [dict size [dict get $semantic instances]] : 0}]
-    puts "$shown ok [digest [dict remove $hir semantic]] [digest $semantic] $instances"
+    set census [dict getdef $hir semantic {}]
+    set declined [lsort -stride 2 [dict getdef $census declinedCount {}]]
+    puts "$shown ok [digest [dict remove $hir semantic]] [digest $semantic] $instances declined={$declined} walks=[dict getdef $census walks 0] deferred=[dict getdef $census deferred 0]"
 }
