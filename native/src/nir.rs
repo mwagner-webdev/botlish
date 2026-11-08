@@ -687,6 +687,14 @@ pub enum OpCode {
     /// the transferred type's schema.
     TransferEncode,
     TransferDecode,
+    /// Botlish-owned threads and the cross-thread transport
+    /// (BOTLISH-OWNED-THREADS-AND-CROSS-THREAD-ACTORS-MILESTONE-1.md,
+    /// runtime/thread.rs): `threadop %code %a0 .. %a5`, the operation
+    /// whose code %code (a tagged Int constant: core/thread.tcl's table)
+    /// names, on up to six operands (unit-padded): an Int, a String or a
+    /// byte storage. Every one may allocate its result and is fallible only
+    /// on an operand a checked program never produces (TYPE).
+    ThreadOp,
     /// `ctxroot %h`: %h (a MutableVector or MutableArray header just
     /// installed in the context area, MUTABLE-VECTOR.md) is a GC root for the rest of the
     /// run. Never fails or allocates; result unit.
@@ -966,6 +974,7 @@ op_spellings! {
     "mutarraytakefront" => MutArrayTakeFront,
     "transferencode" => TransferEncode,
     "transferdecode" => TransferDecode,
+    "threadop" => ThreadOp,
     "listgetproven" => ListGetProven,
     "mutarraygetproven" => MutArrayGetProven,
     "mutarraysetproven" => MutArraySetProven,
@@ -1228,6 +1237,7 @@ impl OpCode {
             | NativeStore | NativeStorePtr | MBytesWrite | MBytesWritePtr
             | BinLoadArray | NativeLoadArray | BinStoreArray | NativeStoreArray | BinStorePtr => Some(4),
             MutArrayCopy | MutArrayCopyProven => Some(5),
+            ThreadOp => Some(7),
             _ => Some(2),
         }
     }

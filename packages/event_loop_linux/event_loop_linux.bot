@@ -44,25 +44,26 @@ import std::mutable_array
 
 extern c library "event_loop_linux" static at "native/libevent_loop_linux.a"
 
+extern c fn evl_abi() -> std::ffi::c::Int
 extern c fn evl_open(flags: std::ffi::c::Int) -> std::ffi::c::Int
-extern c fn evl_close() -> std::ffi::c::Int
+extern c fn evl_close(lp: std::ffi::c::Int) -> std::ffi::c::Int
 extern c fn evl_now() -> std::ffi::c::LongLong
 extern c fn evl_cpu_us() -> std::ffi::c::LongLong
-extern c fn evl_stat(i: std::ffi::c::Int) -> std::ffi::c::LongLong
-extern c fn evl_block(deadline: std::ffi::c::LongLong) -> std::ffi::c::Int
-extern c fn evl_take() -> std::ffi::c::Int
-extern c fn evl_gen() -> std::ffi::c::Int
-extern c fn evl_a() -> std::ffi::c::LongLong
-extern c fn evl_b() -> std::ffi::c::LongLong
-extern c fn evl_hold() -> std::ffi::c::Int
-extern c fn evl_release(slot: std::ffi::c::Int) -> std::ffi::c::Int
-extern c fn evl_endpoint_open(capacity: std::ffi::c::Int) -> std::ffi::c::Int
-extern c fn evl_endpoint_close(id: std::ffi::c::Int) -> std::ffi::c::Int
-extern c fn evl_endpoint_count(id: std::ffi::c::Int) -> std::ffi::c::Int
-extern c fn evl_watch(fd: std::ffi::c::Int, interest: std::ffi::c::Int, slot: std::ffi::c::Int, gen: std::ffi::c::Int) -> std::ffi::c::Int
-extern c fn evl_watch_rearm(id: std::ffi::c::Int, slot: std::ffi::c::Int, gen: std::ffi::c::Int) -> std::ffi::c::Int
-extern c fn evl_watch_close(id: std::ffi::c::Int, slot: std::ffi::c::Int, gen: std::ffi::c::Int) -> std::ffi::c::Int
-extern c fn botlish_event_wake() -> std::ffi::c::Int
+extern c fn evl_stat(lp: std::ffi::c::Int, i: std::ffi::c::Int) -> std::ffi::c::LongLong
+extern c fn evl_block(lp: std::ffi::c::Int, deadline: std::ffi::c::LongLong) -> std::ffi::c::Int
+extern c fn evl_take(lp: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn evl_gen(lp: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn evl_a(lp: std::ffi::c::Int) -> std::ffi::c::LongLong
+extern c fn evl_b(lp: std::ffi::c::Int) -> std::ffi::c::LongLong
+extern c fn evl_hold(lp: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn evl_release(lp: std::ffi::c::Int, slot: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn evl_endpoint_open(lp: std::ffi::c::Int, capacity: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn evl_endpoint_close(lp: std::ffi::c::Int, id: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn evl_endpoint_count(lp: std::ffi::c::Int, id: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn evl_watch(lp: std::ffi::c::Int, fd: std::ffi::c::Int, interest: std::ffi::c::Int, slot: std::ffi::c::Int, gen: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn evl_watch_rearm(lp: std::ffi::c::Int, id: std::ffi::c::Int, slot: std::ffi::c::Int, gen: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn evl_watch_close(lp: std::ffi::c::Int, id: std::ffi::c::Int, slot: std::ffi::c::Int, gen: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn botlish_event_wake2(lp: std::ffi::c::Int) -> std::ffi::c::Int
 
 # The adapter's counters (stats).
 struct Stats:
@@ -91,13 +92,22 @@ enum Interest:
     Writable,
     Both,
 
-# The driver: the adapter's open status (0, or -errno).
+# The driver: its loop's handle (> 0), or the negated errno opening it
+# failed with.
 opaque context struct Linux:
     state: MutableArray[int]
 
-# The integration capability (made by native, from an installed driver).
+# The integration capability (made by native, from an installed driver):
+# its loop's handle.
 opaque context struct Native:
-    open: bool
+    lh: Handle
+
+# A loop's handle (evl_open: GEN * 64 + INDEX), or a negated errno.
+type Handle = Int in -2147483648..2147483647
+
+# The integration ABI this module calls the adapter through
+# (botlish_event_loop.h): an archive of another is refused.
+private abi = 2
 
 # A cross-thread endpoint: native producers post records to it by its id.
 opaque struct Endpoint:
@@ -126,17 +136,36 @@ fn cll(x: int) -> std::ffi::c::LongLong:
     else:
         x
 
-# The Linux driver (one per process). The adapter opens here; a failure to
-# open is reported by the first wait (DriverFault with the negated errno).
+# The Linux driver of this VM: a loop of its own (ABI v2: one per VM that
+# installs the driver, each with its own epoll instance, eventfd,
+# endpoints, watches and pumps). The adapter opens here; a failure to open
+# is reported by the first wait (DriverFault with the negated errno), and
+# an adapter archive of another ABI opens nothing (-71, EPROTO).
 fn create() -> Linux:
-    opened = evl_open(0)
-    Linux {state: std::mutable_array::from_list([opened + 0])}
+    opened = if evl_abi() == abi:
+        evl_open(0) + 0
+    else:
+        -71
+    Linux {state: std::mutable_array::from_list([opened])}
 
-# The adapter's open status: 0, or the negated errno opening failed with.
-fn status(context d: Linux) -> int:
+# The loop's handle (> 0), or the negated errno opening it failed with.
+private fn handle(context d: Linux) -> int:
     d.state.at(0):
         on IndexNotFound:
             -1
+
+# The adapter's open status: 0, or the negated errno opening failed with.
+fn status(context d: Linux) -> int:
+    h = handle()
+    if h > 0:
+        0
+    else:
+        h
+
+# The handle of this VM's loop, which a native library posts with
+# (botlish_event_post2's LOOP).
+fn loop_handle(context n: Native) -> int:
+    n.lh + 0
 
 # --- std::event_loop::Driver
 
@@ -144,45 +173,47 @@ fn clock(context d: Linux) -> int:
     evl_now()
 
 fn block(deadline: int, context d: Linux) -> int errors std::event_loop::DriverFault:
-    n = evl_block(cll(deadline))
+    n = ci(handle()).evl_block(cll(deadline))
     if n < 0:
         fail std::event_loop::DriverFault {code: n}
     n
 
 fn take_record(context d: Linux) -> int:
-    evl_take()
+    ci(handle()).evl_take()
 
 fn record_gen(context d: Linux) -> int:
-    evl_gen()
+    ci(handle()).evl_gen()
 
 fn record_a(context d: Linux) -> int:
-    evl_a()
+    ci(handle()).evl_a()
 
 fn record_b(context d: Linux) -> int:
-    evl_b()
+    ci(handle()).evl_b()
 
 fn hold_record(context d: Linux) -> int:
-    evl_hold()
+    ci(handle()).evl_hold()
 
 fn release_held(slot: int, context d: Linux) -> int:
-    evl_release(ci(slot))
+    ci(handle()).evl_release(ci(slot))
 
 # Close the adapter: every endpoint refuses later posts (-EPIPE) and every
 # watch is dropped (descriptors stay the program's). For the end of a
-# program, after the loop's shutdown.
+# program, after the loop's shutdown. (A loop the program does not close
+# is closed when the thread that opened it exits: a worker VM's loop ends
+# with its thread.)
 fn close(context d: Linux) -> int:
-    evl_close()
+    ci(handle()).evl_close()
 
 # The integration capability of the installed driver.
 fn native(context d: Linux) -> Native:
-    Native {open: true}
+    Native {lh: ci(handle())}
 
 # --- Native: what event sources use
 
 # A new endpoint holding at most CAPACITY records. Hand endpoint_id(e) to
 # the native library that posts to it (botlish_event_loop.h).
 fn endpoint(capacity: int, context n: Native) -> Endpoint errors std::event_loop::DriverFault:
-    id = evl_endpoint_open(ci(capacity))
+    id = ci(n.lh).evl_endpoint_open(ci(capacity))
     if id < 0:
         fail std::event_loop::DriverFault {code: id}
     Endpoint {id: id}
@@ -193,12 +224,12 @@ fn endpoint_id(e: Endpoint) -> int:
 
 # Records waiting in E for the loop (held ones included).
 fn endpoint_count(e: Endpoint, context n: Native) -> int:
-    evl_endpoint_count(ci(e.id))
+    ci(n.lh).evl_endpoint_count(ci(e.id))
 
 # Close E: its undelivered records are discarded (how many is returned) and
 # later posts fail with -EPIPE. Tell the producer to stop first.
 fn close_endpoint(e: Endpoint, context n: Native) -> int:
-    evl_endpoint_close(ci(e.id))
+    ci(n.lh).evl_endpoint_close(ci(e.id))
 
 private fn interest_code(interest: Interest) -> int:
     if interest == Interest::Readable:
@@ -212,14 +243,14 @@ private fn interest_code(interest: Interest) -> int:
 # Coalesce source suits it). Armed at once: the first readiness is
 # reported without a call to readable.
 nomethod fn watch(fd: int, interest: Interest, reg: std::event_loop::Reg, context n: Native) -> Watch errors std::event_loop::DriverFault:
-    id = ci(fd).evl_watch(ci(interest_code(interest)), ci(std::event_loop::native_slot(reg)), ci(std::event_loop::native_generation(reg)))
+    id = ci(n.lh).evl_watch(ci(fd), ci(interest_code(interest)), ci(std::event_loop::native_slot(reg)), ci(std::event_loop::native_generation(reg)))
     if id < 0:
         fail std::event_loop::DriverFault {code: id}
     Watch {id: id, reg: reg}
 
 # Arm W again: the next readiness of its descriptor is reported.
 fn rearm(w: Watch, context n: Native) errors std::event_loop::DriverFault:
-    r = ci(w.id).evl_watch_rearm(ci(std::event_loop::native_slot(w.reg)), ci(std::event_loop::native_generation(w.reg)))
+    r = ci(n.lh).evl_watch_rearm(ci(w.id), ci(std::event_loop::native_slot(w.reg)), ci(std::event_loop::native_generation(w.reg)))
     if r < 0:
         fail std::event_loop::DriverFault {code: r}
 
@@ -238,11 +269,11 @@ fn watch_reg(w: Watch) -> std::event_loop::Reg:
 # Watch that was already stopped does nothing (-22): its id may name a newer
 # watch, which it never reaches.
 fn unwatch(w: Watch, context n: Native) -> int:
-    ci(w.id).evl_watch_close(ci(std::event_loop::native_slot(w.reg)), ci(std::event_loop::native_generation(w.reg)))
+    ci(n.lh).evl_watch_close(ci(w.id), ci(std::event_loop::native_slot(w.reg)), ci(std::event_loop::native_generation(w.reg)))
 
 # Wake the loop without a record (its pumps run).
 fn wake(context n: Native) -> int:
-    botlish_event_wake()
+    ci(n.lh).botlish_event_wake2()
 
 # The monotonic clock and the process's CPU time, microseconds (measurements).
 fn now_us(context n: Native) -> int:
@@ -251,8 +282,8 @@ fn now_us(context n: Native) -> int:
 fn cpu_us(context n: Native) -> int:
     evl_cpu_us()
 
-private nomethod fn st(i: int) -> int:
-    evl_stat(ci(i))
+private nomethod fn st(i: int, context n: Native) -> int:
+    ci(n.lh).evl_stat(ci(i))
 
 # The adapter's counters.
 fn stats(context n: Native) -> Stats:
@@ -263,3 +294,18 @@ fn stats(context n: Native) -> Stats:
         watch_events: st(12), eventfd_writes: st(13), endpoint_max: st(14),
         pump_checks: st(15), discarded: st(16), resets: st(17)
     }
+
+# --- std::thread::Doorbell: the runtime's transport doorbell
+# (BOTLISH-OWNED-THREADS-AND-CROSS-THREAD-ACTORS-MILESTONE-1.md). A VM's
+# port (std::thread) is rung by other threads -- a message, room, a thread's
+# end, a stop request -- through a descriptor this loop watches like any
+# other: one readiness record per arming, re-armed by the port's pump.
+
+fn watch_doorbell(fd: int, slot: int, gen: int, context n: Native) -> int:
+    ci(n.lh).evl_watch(ci(fd), 1, ci(slot), ci(gen)) + 0
+
+fn rearm_doorbell(watch: int, slot: int, gen: int, context n: Native) -> int:
+    ci(n.lh).evl_watch_rearm(ci(watch), ci(slot), ci(gen)) + 0
+
+fn unwatch_doorbell(watch: int, slot: int, gen: int, context n: Native) -> int:
+    ci(n.lh).evl_watch_close(ci(watch), ci(slot), ci(gen)) + 0

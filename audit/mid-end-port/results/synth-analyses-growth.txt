@@ -1,0 +1,52 @@
+# tools/synth.tcl -generic 0 at 16, 32 and 64 passes (6,543, 12,939 and 25,736 lines); tools/workload.tcl analyses
+synth.tcl -passes 16 -generic 0: main.bot: 44.62 s, 80 builds' procedures (exclusive seconds, share, calls)
+  10.34 s  23.2%      3  hir::signatures::infer
+   4.83 s  10.8%      3  hir::errorsets::verify
+   4.62 s  10.4%     25  surface::modules::Parse
+   3.12 s   7.0%      1  hir::mutvec::Elaborate
+   2.60 s   5.8%      3  hir::resolve::program
+   2.02 s   4.5%      3  hir::range::verifyDeclaredParams
+   1.51 s   3.4%      3  hir::check
+   1.45 s   3.3%      3  hir::contexts::verify
+   1.44 s   3.2%      3  hir::traits::verify
+   1.29 s   2.9%      3  hir::range::verifyDeclaredResults
+   1.28 s   2.9%     25  surface::modules::CollectAndLoad
+   1.13 s   2.5%      1  surface::lower::Finish
+   0.87 s   2.0%      3  hir::coroutines::verify
+   0.73 s   1.6%      3  hir::mutvec::verify
+   0.67 s   1.5%      3  hir::callables::verify
+
+synth.tcl -passes 32 -generic 0: main.bot: 94.17 s, 80 builds' procedures (exclusive seconds, share, calls)
+  26.86 s  28.5%      3  hir::signatures::infer
+   9.26 s   9.8%      3  hir::errorsets::verify
+   9.21 s   9.8%     41  surface::modules::Parse
+   6.16 s   6.5%      1  hir::mutvec::Elaborate
+   4.99 s   5.3%      3  hir::resolve::program
+   4.15 s   4.4%      3  hir::range::verifyDeclaredParams
+   3.01 s   3.2%      3  hir::check
+   2.98 s   3.2%      3  hir::contexts::verify
+   2.95 s   3.1%      3  hir::traits::verify
+   2.66 s   2.8%     41  surface::modules::CollectAndLoad
+   2.46 s   2.6%      3  hir::range::verifyDeclaredResults
+   2.13 s   2.3%      1  surface::lower::Finish
+   1.68 s   1.8%      3  hir::coroutines::verify
+   1.42 s   1.5%      3  hir::mutvec::verify
+   1.32 s   1.4%      3  hir::callables::verify
+
+synth.tcl -passes 64 -generic 0: main.bot: 232.53 s, 80 builds' procedures (exclusive seconds, share, calls)
+  95.44 s  41.0%      3  hir::signatures::infer
+  18.49 s   8.0%      3  hir::errorsets::verify
+  18.33 s   7.9%     73  surface::modules::Parse
+  12.84 s   5.5%      1  hir::mutvec::Elaborate
+  10.18 s   4.4%      3  hir::resolve::program
+   8.07 s   3.5%      3  hir::range::verifyDeclaredParams
+   6.19 s   2.7%      3  hir::contexts::verify
+   6.03 s   2.6%      3  hir::traits::verify
+   6.00 s   2.6%      3  hir::check
+   5.14 s   2.2%     73  surface::modules::CollectAndLoad
+   5.02 s   2.2%      3  hir::range::verifyDeclaredResults
+   4.49 s   1.9%      1  surface::lower::Finish
+   3.40 s   1.5%      3  hir::coroutines::verify
+   3.11 s   1.3%      3  hir::mutvec::verify
+   2.77 s   1.2%      3  hir::callables::verify
+

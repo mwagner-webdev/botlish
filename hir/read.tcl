@@ -1199,14 +1199,17 @@ proc hir::read::Expr {hirVar level s path block} {
             }
         }
         block {
-            if {![BlockHeader $head body params captures staticRefs declared errorsText binds nomethod contexts provesText cloneText resumeText variadic places exported callback emitsText cleanup]} {
-                Fail $number "expected \"block SCOPE (PARAMS) captures (BINDINGS) ?staticRefs (BINDINGS)? ?nomethod? ?exported c? ?callback c? ?cleanup? ?variadic N? ?places (N ...)? ?contexts (IDS) requires (IDS)? ?declares ...? ?proves BINDING NAME: TYPE? ?errors ...? ?binds ...?\""
+            if {![BlockHeader $head body params captures staticRefs declared errorsText binds nomethod contexts provesText cloneText resumeText variadic places exported callback emitsText cleanup threadEntry]} {
+                Fail $number "expected \"block SCOPE (PARAMS) captures (BINDINGS) ?staticRefs (BINDINGS)? ?nomethod? ?exported c? ?callback c? ?cleanup? ?thread? ?variadic N? ?places (N ...)? ?contexts (IDS) requires (IDS)? ?declares ...? ?proves BINDING NAME: TYPE? ?errors ...? ?binds ...?\""
             }
             if {$nomethod} {
                 SetField hir $e nomethod 1
             }
             if {$cleanup} {
                 SetField hir $e cleanup 1
+            }
+            if {$threadEntry} {
+                SetField hir $e threadEntry 1
             }
             if {$exported ne ""} {
                 SetField hir $e exported $exported
@@ -1703,7 +1706,7 @@ proc hir::read::Expr {hirVar level s path block} {
 # into the named variables; 0 if malformed. The optional parts are found
 # outside brackets, so a declared type may itself contain spaces, ", " or
 # the word "errors" (a structural function type's own "errors: [...]").
-proc hir::read::BlockHeader {head bodyVar paramsVar capturesVar staticRefsVar declaredVar errorsVar bindsVar {nomethodVar ""} {contextsVar ""} {provesVar ""} {cloneVar ""} {resumeVar ""} {variadicVar ""} {placesVar ""} {exportedVar ""} {callbackVar ""} {emitsVar ""} {cleanupVar ""}} {
+proc hir::read::BlockHeader {head bodyVar paramsVar capturesVar staticRefsVar declaredVar errorsVar bindsVar {nomethodVar ""} {contextsVar ""} {provesVar ""} {cloneVar ""} {resumeVar ""} {variadicVar ""} {placesVar ""} {exportedVar ""} {callbackVar ""} {emitsVar ""} {cleanupVar ""} {threadVar ""}} {
     foreach var {bodyVar paramsVar capturesVar staticRefsVar declaredVar errorsVar bindsVar} {
         upvar 1 [set $var] [string range $var 0 end-3]
     }
@@ -1752,6 +1755,16 @@ proc hir::read::BlockHeader {head bodyVar paramsVar capturesVar staticRefsVar de
         set cleanup 0
         if {[regexp {^ cleanup(.*)$} $rest -> after]} {
             set cleanup 1
+            set rest $after
+        }
+    }
+    # A thread entry (BOTLISH-OWNED-THREADS-AND-CROSS-THREAD-ACTORS-
+    # MILESTONE-1.md), as hir::format prints it.
+    if {$threadVar ne ""} {
+        upvar 1 $threadVar threadEntry
+        set threadEntry 0
+        if {[regexp {^ thread(.*)$} $rest -> after]} {
+            set threadEntry 1
             set rest $after
         }
     }

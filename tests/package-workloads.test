@@ -544,15 +544,15 @@ test pw-release-ledger {one version, one artifact: packages/RELEASES.tsv records
     set first [exec [info nameofexecutable] $::repositoryTool $out event_loop_linux 2>@1]
     regexp {sha256 ([0-9a-f]{64})} $first -> digest
     set ledger [file join [fresh ledger] RELEASES.tsv]
-    writeText $ledger "event_loop_linux\t0.3.0\t$digest\n"
+    writeText $ledger "event_loop_linux\t0.5.0\t$digest\n"
     set same [withEnvironment [list BOTLISH_RELEASE_LEDGER $ledger] {exec [info nameofexecutable] $::repositoryTool -release $out event_loop_linux 2>@1}]
-    writeText $ledger "event_loop_linux\t0.3.0\t[string repeat 0 64]\n"
+    writeText $ledger "event_loop_linux\t0.5.0\t[string repeat 0 64]\n"
     set noted [withEnvironment [list BOTLISH_RELEASE_LEDGER $ledger] {exec [info nameofexecutable] $::repositoryTool $out event_loop_linux 2>@1}]
     set refused [withEnvironment [list BOTLISH_RELEASE_LEDGER $ledger] {catch {exec [info nameofexecutable] $::repositoryTool -release $out event_loop_linux 2>@1} message}]
-    list $wellFormed [string match "*release: the recorded release of event_loop_linux 0.3.0*" $same] \
-        [string match "*CANDIDATE: the recorded release of event_loop_linux 0.3.0 is sha256 0000*" $noted] \
-        $refused [file exists [file join $out event_loop_linux-0.3.0.botpkg]] \
-        [llength [glob -nocomplain -directory $out event_loop_linux-0.3.0.candidate-*.botpkg]]
+    list $wellFormed [string match "*release: the recorded release of event_loop_linux 0.5.0*" $same] \
+        [string match "*CANDIDATE: the recorded release of event_loop_linux 0.5.0 is sha256 0000*" $noted] \
+        $refused [file exists [file join $out event_loop_linux-0.5.0.botpkg]] \
+        [llength [glob -nocomplain -directory $out event_loop_linux-0.5.0.candidate-*.botpkg]]
 } -cleanup cleanup -result {1 1 1 1 0 1}
 
 test pw-event-loop-linux-only {the event loop's driver is Linux's (x86-64 and AArch64 archives in one release): preparing a Windows or macOS view is UNSUPPORTED} -constraints {eventLoopPackage} -body {
@@ -605,7 +605,7 @@ proc linesOf {trace prefix} {
     }
 }
 
-test pw-shared-driver {beats and probes, written independently, each depend on event_loop_linux and lock 0.3.0: the application's graph holds one instance, which the application uses too, the libraries' own botlish.json locks are kept as they are, and the program -- installing the loop, the Linux driver and its Native capability once -- runs both libraries' tasks against epoll, the driver's adapter one archive in the link} -constraints {eventLoopRun} -body {
+test pw-shared-driver {beats and probes, written independently, each depend on event_loop_linux and lock 0.5.0: the application's graph holds one instance, which the application uses too, the libraries' own botlish.json locks are kept as they are, and the program -- installing the loop, the Linux driver and its Native capability once -- runs both libraries' tasks against epoll, the driver's adapter one archive in the link} -constraints {eventLoopRun} -body {
     set repo [sharedRepository]
     set app [fresh app]
     file copy [file join $::sharedDir app main.bot] $app
@@ -622,7 +622,7 @@ application beats event_loop_linux probes
 package beats event_loop_linux
 package event_loop_linux
 package probes event_loop_linux
-} {beats event_loop_linux probes} {{event_loop_linux VIEW/event_loop_linux}} {{event_loop_linux 0.3.0} {event_loop_linux 0.3.0}} {{beats: beat 1} {beats: beat 2} {beats: beat 3} {beats: the driver's clock never went back}} {{probes: opened 2 endpoints} {probes: the timer woke the probe} {probes: every endpoint was empty, and closed}}}
+} {beats event_loop_linux probes} {{event_loop_linux VIEW/event_loop_linux}} {{event_loop_linux 0.5.0} {event_loop_linux 0.5.0}} {{beats: beat 1} {beats: beat 2} {beats: beat 3} {beats: the driver's clock never went back}} {{probes: opened 2 endpoints} {probes: the timer woke the probe} {probes: every endpoint was empty, and closed}}}
 
 test pw-shared-driver-warning-clean {the workload's libraries and application compile under -warnings error: no package of the graph and no line of the application draws a warning} -constraints {eventLoopPackage} -body {
     set repo [sharedRepository]
@@ -635,7 +635,7 @@ test pw-shared-driver-warning-clean {the workload's libraries and application co
     list ok
 } -cleanup cleanup -result ok
 
-test pw-shared-driver-negatives {the shared driver keeps its rules: without the Native installation both libraries' requirement is the one MISSING-CONTEXT of event_loop_linux::Native; a third library locking 0.3.0 adds no instance; one locking another release is a conflict naming both locks, and nothing changes} -constraints {eventLoopPackage} -body {
+test pw-shared-driver-negatives {the shared driver keeps its rules: without the Native installation both libraries' requirement is the one MISSING-CONTEXT of event_loop_linux::Native; a third library locking 0.5.0 adds no instance; one locking another release is a conflict naming both locks, and nothing changes} -constraints {eventLoopPackage} -body {
     set repo [sharedRepository]
     set app [fresh app]
     file copy [file join $::sharedDir app main.bot] $app
@@ -647,25 +647,25 @@ test pw-shared-driver-negatives {the shared driver keeps its rules: without the 
     file copy [file join $app botlish.json] $bare
     pm install -project $bare -repository $repo
     set missing [catch {hirOf [file join $bare main.bot]} message options]
-    driverLibrary $repo pulses 1.0.0 0.3.0 "import event_loop_linux\n\nfn now(context n: event_loop_linux::Native) -> int:\n    event_loop_linux::now_us()\n"
+    driverLibrary $repo pulses 1.0.0 0.5.0 "import event_loop_linux\n\nfn now(context n: event_loop_linux::Native) -> int:\n    event_loop_linux::now_us()\n"
     set third [dict get [pm add pulses -project $app -repository $repo] out]
     set before [treeState $app]
     set src [fresh src]
     file copy [file join $::projectRoot packages event_loop_linux] $src
     set descriptor [file join $src event_loop_linux botlish.json]
-    writeText $descriptor [string map {0.3.0 0.4.0} [core::ReadFile $descriptor]]
+    writeText $descriptor [string map {0.5.0 0.6.0} [core::ReadFile $descriptor]]
     pm package pack [file join $src event_loop_linux] -out $repo
-    driverLibrary $repo future 1.0.0 0.4.0 "import event_loop_linux\n\nfn f() -> int:\n    1\n"
+    driverLibrary $repo future 1.0.0 0.6.0 "import event_loop_linux\n\nfn f() -> int:\n    1\n"
     set conflict [pm add future -project $app -repository $repo]
     list $missing [lindex [dict get $options -errorcode] end] [regexp -all {event_loop_linux::Native is required by this call} $message] \
         [lsearch -all -inline -glob [split $third \n] {event_loop_linux*}] [kindOf [dict get $conflict out]] \
         [lrange [split [dict get $conflict out] \n] 0 5] [expr {[treeState $app] eq $before}]
-} -cleanup cleanup -result {1 MISSING-CONTEXT 1 {{event_loop_linux 0.3.0: unchanged, used by the application, beats, probes, pulses}} DEPENDENCY-CONFLICT {{error: cannot select one version of event_loop_linux for the application's dependency graph: 0.3.0 and 0.4.0 are demanded:} {  the application's botlish.json locks event_loop_linux 0.3.0 (request "0.3")} {  beats 1.0.0 locks event_loop_linux 0.3.0 (the project -> beats 1.0.0)} {  probes 1.0.0 locks event_loop_linux 0.3.0 (the project -> probes 1.0.0)} {  pulses 1.0.0 locks event_loop_linux 0.3.0 (the project -> pulses 1.0.0)} {  future 1.0.0 locks event_loop_linux 0.4.0 (the project -> future 1.0.0)}} 1}
+} -cleanup cleanup -result {1 MISSING-CONTEXT 1 {{event_loop_linux 0.5.0: unchanged, used by the application, beats, probes, pulses}} DEPENDENCY-CONFLICT {{error: cannot select one version of event_loop_linux for the application's dependency graph: 0.5.0 and 0.6.0 are demanded:} {  the application's botlish.json locks event_loop_linux 0.5.0 (request "0.5")} {  beats 1.0.0 locks event_loop_linux 0.5.0 (the project -> beats 1.0.0)} {  probes 1.0.0 locks event_loop_linux 0.5.0 (the project -> probes 1.0.0)} {  pulses 1.0.0 locks event_loop_linux 0.5.0 (the project -> pulses 1.0.0)} {  future 1.0.0 locks event_loop_linux 0.6.0 (the project -> future 1.0.0)}} 1}
 
 test pw-shared-native-bridge {a package whose own native archive calls the shared provider's C API -- ticker, its C thread posting to the driver's endpoints through botlish_event_post -- links with the one event_loop_linux archive beside it, in either package's graph position: the native plan lists each library once, and the example's five ticks are handled under the driver the application installs} -constraints {eventLoopRun} -body {
     set repo [sharedRepository]
     set dir [file join [fresh src] ticker]
-    writeText [file join $dir botlish.json] "{\"schema\": 1, \"name\": \"ticker\", \"version\": \"1.0.0\", \"dependencies\": {\"event_loop_linux\": \"0.3\"}, \"lock\": {\"event_loop_linux\": \"0.3.0\"}}\n"
+    writeText [file join $dir botlish.json] "{\"schema\": 1, \"name\": \"ticker\", \"version\": \"1.0.0\", \"dependencies\": {\"event_loop_linux\": \"0.5\"}, \"lock\": {\"event_loop_linux\": \"0.5.0\"}}\n"
     writeText [file join $dir ticker.bot] [string map {{static at "libticker.a"} {static at "native/libticker.a"}} \
         [core::ReadFile [file join $::projectRoot examples event-loop native ticker.bot]]]
     set build [fresh build]

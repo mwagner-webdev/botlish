@@ -1,0 +1,33 @@
+# category: destructured-field of an affine struct
+# class: A -- destructuring moves the affine field out (the one way to take
+#        it), the local is mutated and returned: a transfer, not a copy
+# expect: 2
+# alloc: mutableVector shares 0 detaches 0
+import std::coroutine
+import std::mutable_vector
+
+struct Msg:
+    v: int
+struct Ev:
+    v: int
+
+fn w(acc: int, resume Msg) -> Ev:
+    m = yield Ev {v: acc}
+    Ev {v: acc + m.v}
+
+fn make(acc: int) -> Coroutine{args: [Msg], return: Ev}:
+    coroutine {step} = w(acc)
+    step
+
+struct Holder:
+    q: MutableVector[Coroutine{args: [Msg], return: Ev}]
+    label: str
+
+fn grown(h: Holder) -> MutableVector[Coroutine{args: [Msg], return: Ev}]:
+    {q} = h
+    q.push(make(2))
+    q
+
+h = Holder {q: std::mutable_vector::from_list([make(1)]), label: "h"}
+g = grown(h)
+g.length()

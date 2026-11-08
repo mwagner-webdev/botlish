@@ -165,6 +165,15 @@ push cancels only the push runs of the build workflow and of the tests.
 That is what makes the commit "superseded", and the superseding commit gets
 its own release once its tests are green.
 
+The job that publishes is in a group of its own too, `NAME-publish`, so
+that two release runs never move the tag and upload at once. It must never
+be `NAME-release`. A job that asks for the group its own run holds waits
+for its run, which waits for the job, and GitHub fails the job before it
+gets a runner. Every release run of single-executable.yml and
+icy-tower-windows.yml failed that way, from the gate's first dispatch
+(run 42208024676, 2026-11-06) until the publish jobs were renamed
+(2026-11-08): the gate dispatched them, but nothing was ever published.
+
 The gate holds no credential. Its token may only start workflows
 (`actions: write`). Gate runs never overlap: a newer one replaces one still
 waiting, and every run decides from the state as it is, so a replaced run
@@ -315,6 +324,8 @@ the workflows' side of the rules:
 * every workflow that tests a push cancels a superseded run, main's
   included;
 * only a release run publishes, after the check;
+* no job asks for the concurrency group its own run holds, in any kind of
+  run its workflow has (its groups' expressions are evaluated for each);
 * the gate listens to every workflow a release waits for;
 * only the two housekeeping workflows may start or cancel runs;
 * every test workflow runs the canary on every branch push, its other

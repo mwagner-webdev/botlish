@@ -1,0 +1,21 @@
+# category: destructured-field (a handler's pattern)
+# class: A -- the handler transforms its payload's vector into its result
+# expect: [2]
+import std::mutable_vector
+
+error Bad:
+    items: MutableVector[int]
+
+fn boom(n: int) -> int errors Bad:
+    if n > 0:
+        return n
+    fail Bad {items: std::mutable_vector::from_list([1])}
+
+fn run(n: int) -> List[int]:
+    r = boom(n):
+        on Bad {items}:
+            items.push(2)
+            items.length()
+    [r]
+
+run(0)

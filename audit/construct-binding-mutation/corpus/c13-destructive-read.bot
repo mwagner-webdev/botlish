@@ -1,0 +1,17 @@
+# category: loop-element (List), a mutation used for its result
+# class: ambiguous -- the popped element is used, the shortened copy is not
+# A loop that pops the last element of each queue's copy: a read of the last
+# element (heads [2, 3]) that leaves every queue as it was. Whether the
+# author wanted the queues shortened cannot be read from the code.
+# expect: [[2, 3], [2, 1]]
+import std::mutable_vector
+
+queues = [std::mutable_vector::from_list([1, 2]), std::mutable_vector::from_list([3])]
+heads = loop q in queues:
+    x = q.pop():
+        on IndexNotFound:
+            -1
+    x
+after = loop q in queues:
+    q.length()
+[heads, after]

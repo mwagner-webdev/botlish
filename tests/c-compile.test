@@ -1,0 +1,937 @@
+# c-compile.test -- the C backend (ccompile/ccompile.tcl, main.tcl -emit-c;
+# C-COMPILE-FREESTANDING-MILESTONE-1.md).
+#
+# Every parity test compiles one Botlish program to C, builds it with the
+# host's C compilers under strict diagnostics (-std=c11 -pedantic -Wall
+# -Wextra -Werror ...), runs it through the hosted harness
+# (examples/c-freestanding/harness/host_main.c) and requires the line it
+# prints -- "value: TEXT" or "error: MESSAGE (CODE)" -- to equal what the
+# interpreter, the Tcl compiler and (when built) the native backend give the
+# same HIR. The other tests check the runtime-service boundary itself: that
+# a program needing a service compiles, fails to link without a provider
+# (naming the service's symbol), links and runs with one; that the manifest
+# lists exactly the services the C references; that a program needing none
+# builds with no C library at all; and that what the backend cannot
+# translate is C UNSUPPORTED at compile time, never a link error.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+if {[info commands ::surface::compile] eq ""} {
+    source [file join $::projectRoot surface surface.tcl]
+}
+source [file join $::projectRoot ccompile ccompile.tcl]
+
+testConstraint nativeBuilt [expr {![catch {native::binary}]}]
+testConstraint gcc [expr {$::tcl_platform(platform) eq "unix" && [auto_execok gcc] ne ""}]
+testConstraint clang [expr {$::tcl_platform(platform) eq "unix" && [auto_execok clang] ne ""}]
+testConstraint hostCC [expr {[testConstraint gcc] || [testConstraint clang]}]
+testConstraint nm [expr {[auto_execok nm] ne ""}]
+testConstraint llvmNm [expr {[auto_execok llvm-nm] ne ""}]
+testConstraint linuxX86_64 [expr {$::tcl_platform(os) eq "Linux" && $::tcl_platform(machine) in {x86_64 amd64}}]
+
+set ::ccHarness [file join $::projectRoot examples c-freestanding harness]
+set ::ccProviders [file join $::projectRoot examples c-freestanding providers]
+set ::ccStrict {-std=c11 -pedantic-errors -Wall -Wextra -Werror -Wshadow -Wstrict-prototypes
+    -Wmissing-prototypes -Wconversion -Wsign-conversion -Wcast-qual -Wundef}
+set ::ccCompilers [lmap c {gcc clang} {expr {[testConstraint $c] ? $c : [continue]}}]
+set ::ccCount 0
+
+# A private directory in the tcltest temporary directory.
+proc ccDir {} {
+    return [makeDirectory cc-[incr ::ccCount]]
+}
+
+# The C translation of the Botlish source SOURCE as program PREFIX, written
+# into a fresh directory: {dir DIR prefix PREFIX out OUT}.
+proc ccGenerate {source {prefix prog}} {
+    set hir [surface::compile $source -warnings off]
+    set out [ccompile::program $hir -prefix $prefix -source $prefix.bot]
+    set dir [ccDir]
+    ccompile::write $out $dir
+    return [dict create dir $dir prefix $prefix out $out]
+}
+
+# Runs COMMAND (a list); returns {STATUS OUTPUT} (stdout and stderr).
+proc ccExec {command} {
+    set status [catch {exec {*}$command 2>@1} output options]
+    if {$status} {
+        # (exec appends this line to the output of a command that failed.)
+        regsub {\n?child process exited abnormally$} $output "" output
+        set code [dict get $options -errorcode]
+        if {[lindex $code 0] eq "CHILDSTATUS"} {
+            return [list [lindex $code 2] $output]
+        }
+        return [list -1 $output]
+    }
+    return [list 0 $output]
+}
+
+# Builds GEN (ccGenerate's) with the hosted harness, its display unit and
+# PROVIDERS (C files), by COMPILER at OPT under the strict flags (EXTRA
+# appended); returns the executable's path, or raises with the compiler's
+# output.
+proc ccBuild {gen {compiler gcc} {providers {}} {opt -O1} {extra {}}} {
+    set dir [dict get $gen dir]
+    set p [dict get $gen prefix]
+    set exe [file join $dir $p.$compiler[string map {- ""} $opt]]
+    set command [list $compiler {*}$::ccStrict $opt -DBOTLISH_PROGRAM=$p "-DBOTLISH_PROGRAM_HEADER=\"$p.h\"" \
+        -I $dir -I [file join $::projectRoot ccompile] {*}$extra \
+        [file join $::ccHarness host_main.c] [file join $dir $p.c] [file join $dir ${p}_display.c] \
+        {*}$providers -o $exe]
+    lassign [ccExec $command] status output
+    if {$status != 0} {
+        error "C build failed ($compiler $opt):\n$output"
+    }
+    return $exe
+}
+
+# The line the harness printed running EXE.
+proc ccRun {exe} {
+    lassign [ccExec [list $exe]] status output
+    return [string trim $output]
+}
+
+# What every other backend gives SOURCE, as the harness prints it: "value:
+# TEXT" (core::value::show's development view, as main.tcl prints it) or
+# "error: MESSAGE (CODE)" -- or a Tcl error naming each when they disagree.
+proc ccReference {source {backends {interp compile cranelift}}} {
+    set hir [surface::compile $source -warnings off]
+    set lines {}
+    foreach backend $backends {
+        if {$backend eq "cranelift" && ![testConstraint nativeBuilt]} continue
+        set script [dict get {
+            interp    {core::evalProgram [hir::lower $hir]}
+            compile   {core::compiler::evalHir $hir}
+            cranelift {native::evalHir $hir}
+        } $backend]
+        if {[catch $script value options]} {
+            lappend lines [list $backend "error: $value ([dict get $options -errorcode])"]
+        } else {
+            lappend lines [list $backend "value: [core::value::show $value 1]"]
+        }
+    }
+    if {[llength [lsort -unique [lmap l $lines {lindex $l 1}]]] != 1} {
+        error "the backends disagree: $lines"
+    }
+    return [lindex $lines 0 1]
+}
+
+# The C backend's outcome of SOURCE under each available compiler (with the
+# reference Int provider), followed by the reference's -- a list whose
+# elements must all be equal.
+proc ccParity {source {backends {interp compile cranelift}}} {
+    set gen [ccGenerate $source]
+    set provider [file join $::ccProviders botlish_rt_v1_int_arena.c]
+    set results {}
+    foreach compiler $::ccCompilers {
+        foreach opt {-O0 -O2} {
+            lappend results [ccRun [ccBuild $gen $compiler [list $provider] $opt]]
+        }
+    }
+    lappend results [ccReference $source $backends]
+    return [lsort -unique $results]
+}
+
+# ---------------------------------------------------------------------------
+# The corpus: one program per area, each compared with every other backend.
+
+set ::ccCorpus [dict create]
+
+dict set ::ccCorpus recursion {
+fn fib(n: int) -> int:
+    if n < 2:
+        n
+    else:
+        fib(n - 1) + fib(n - 2)
+
+fn gcd(a: int, b: int) -> int:
+    if b == 0:
+        a
+    else:
+        gcd(b, mod(a, b))
+
+fn fact(n: int) -> int:
+    if n <= 1:
+        1
+    else:
+        n * fact(n - 1)
+
+[fib(20), gcd(1071, 462), fact(20), fact(25)]
+}
+
+dict set ::ccCorpus loops {
+fn up_ex(n: int) -> int:
+    fold i from 0 to n with intermediate s 0:
+        s + i
+
+fn up_in(n: int) -> int:
+    fold i from 1 through n with intermediate s 1:
+        s * 2 + i
+
+fn down_ex(n: int) -> int:
+    fold i down from n to 0 with intermediate s 0:
+        if i == 3:
+            continue
+        s + i
+
+fn down_in(n: int) -> int:
+    fold i down from n through -2 with intermediate s 0:
+        if i == -1:
+            break
+        s * 10 + mod(i, 10)
+
+fn first_square_over(limit: int) -> int:
+    fold with intermediate k 0:
+        if k * k > limit:
+            break
+        k + 1
+
+fn empty(n: int) -> int:
+    fold i from n to 0 with intermediate s 42:
+        s + i
+
+fn counted(n: int) -> int:
+    loop i from 0 to n:
+        if i == 2:
+            return i * 100
+        i
+    -1
+
+fn forever(n: int) -> int:
+    loop:
+        if n > 0:
+            return n
+    0
+
+[up_ex(10), up_in(5), down_ex(6), down_in(4), first_square_over(1000), empty(3), up_ex(0), up_in(70), counted(5), counted(1), forever(9)]
+}
+
+dict set ::ccCorpus errors {
+error TooBig
+error Odd
+
+fn check(n: int) -> int errors TooBig, Odd:
+    if n > 100:
+        fail TooBig
+    if mod(n, 2) == 1:
+        fail Odd
+    n
+
+fn relay(n: int) -> int errors TooBig, Odd:
+    check(n) * 2
+
+fn classify(n: int) -> int:
+    r = relay(n):
+        on TooBig:
+            -1
+        on Odd:
+            relay(n + 1):
+                on TooBig:
+                    -2
+                on Odd:
+                    -3
+    r
+
+fn quiet(n: int) -> bool:
+    r = relay(n):
+        on TooBig:
+            0
+        on Odd:
+            1
+    r > 50
+
+[classify(4), classify(7), classify(101), classify(100), classify(99), quiet(3), quiet(1000)]
+}
+
+dict set ::ccCorpus bounds {
+fn add(a: int, b: int) -> int:
+    a + b
+
+fn mul(a: int, b: int) -> int:
+    a * b
+
+fn sub(a: int, b: int) -> int:
+    a - b
+
+fn cmp(a: int, b: int) -> bool:
+    a < b
+
+max = 9223372036854775807
+min = -9223372036854775808
+[add(max, 1), sub(min, 1), mul(max, max), mul(min, -1), add(min, max), mod(min, -1), mod(-7, 3), mod(7, -3), mod(min, 7), mod(max, min), cmp(max + 1, max), 100000000000000000000000 * 3, mod(100000000000000000000000, -7), mod(-100000000000000000000000, 7), mul(4294967296, 4294967296), mul(-4294967296, 2147483648), mul(3037000499, 3037000499), mul(3037000500, 3037000500), -9223372036854775809 + 1, max + 1 == min - 1, sub(mul(max, 2), max) == max]
+}
+
+dict set ::ccCorpus domains {
+type Byte = Int in 0..255
+
+fn mix(a: Byte, b: Byte) -> int:
+    bit_xor(bit_and(a, 15), shift_left(bit_or(a, b), 3))
+
+fn halve(x: int) -> int:
+    shift_right(x, 1)
+
+fn far(x: Byte, k: int) -> int:
+    shift_right(x - 128, k)
+
+[mix(200, 7), mix(255, 255), halve(-7), halve(7), halve(-9223372036854775807), far(3, 2), far(3, 100), far(200, 0), bit_and(-6, 3), bit_or(-8, 3), bit_xor(-1, 5)]
+}
+
+dict set ::ccCorpus statics {
+struct Config:
+    base: int
+    enabled: bool
+
+limit = 7 * 6
+config = Config {base: 1000, enabled: true}
+
+fn scaled(n: int) -> int:
+    if config.enabled:
+        n * config.base + limit
+    else:
+        n
+
+fn countdown(n: int, acc: int) -> int:
+    if n == 0:
+        return acc
+    countdown(n - 1, acc + 1)
+
+[scaled(3), countdown(100, 0), limit]
+}
+
+dict set ::ccCorpus structs {
+enum Dir:
+    North,
+    East,
+    South,
+    West
+
+struct Pos:
+    x: int
+    y: int
+
+struct Robot:
+    at: Pos
+    facing: Dir
+
+fn turn(d: Dir) -> Dir:
+    if d == Dir::North:
+        Dir::East
+    elif d == Dir::East:
+        Dir::South
+    elif d == Dir::South:
+        Dir::West
+    else:
+        Dir::North
+
+fn step(r: Robot) -> Robot:
+    p = r.at
+    np = if r.facing == Dir::North:
+        Pos {x: p.x, y: p.y + 1}
+    elif r.facing == Dir::East:
+        Pos {x: p.x + 1, y: p.y}
+    elif r.facing == Dir::South:
+        Pos {x: p.x, y: p.y - 1}
+    else:
+        Pos {x: p.x - 1, y: p.y}
+    Robot {at: np, facing: r.facing}
+
+fn walk(r: Robot, n: int) -> Robot:
+    fold i from 0 to n with intermediate cur r:
+        moved = step(cur)
+        if mod(i, 3) == 2:
+            Robot {at: moved.at, facing: turn(moved.facing)}
+        else:
+            moved
+
+end = walk(Robot {at: Pos {x: 0, y: 0}, facing: Dir::North}, 10)
+[end, end.facing == Dir::East, {sum: end.at.x + end.at.y, u: unit}, Dir::West == Dir::West, 3 == true, [], {}, true == false, unit == unit]
+}
+
+dict set ::ccCorpus pure {
+type Byte = Int in 0..255
+type Ticks = Int in 0..1000
+
+enum Light:
+    Red,
+    Green,
+    Yellow
+
+struct State:
+    light: Light
+    left: Ticks
+
+fn duration(l: Light) -> Ticks:
+    if l == Light::Red:
+        30
+    elif l == Light::Green:
+        25
+    else:
+        5
+
+fn next(l: Light) -> Light:
+    if l == Light::Red:
+        Light::Green
+    elif l == Light::Green:
+        Light::Yellow
+    else:
+        Light::Red
+
+fn tick(s: State) -> State:
+    left = s.left
+    if left < 1:
+        n = next(s.light)
+        State {light: n, left: duration(n)}
+    else:
+        State {light: s.light, left: left - 1}
+
+fn run(steps: Ticks) -> State:
+    fold i from 0 to steps with intermediate s State {light: Light::Red, left: 30}:
+        tick(s)
+
+fn crc_step(c: Byte) -> int:
+    if bit_and(c, 1) == 1:
+        bit_xor(shift_right(c, 1), 140)
+    else:
+        shift_right(c, 1)
+
+fn crc8(b: Byte) -> int:
+    fold i from 0 to 8 with intermediate c b:
+        crc_step(mod(c, 256))
+
+fn gcd(a: Ticks, b: Ticks) -> Ticks:
+    if b == 0:
+        return a
+    gcd(b, mod(a, b))
+
+[run(100), crc8(49), crc8(200), gcd(1000, 750), duration(Light::Yellow)]
+}
+
+dict set ::ccCorpus never-joins {
+error Bad
+
+fn pick(n: int) -> int errors Bad:
+    v = if n > 5:
+        return n * 2
+    else:
+        fail Bad
+    v + 1
+
+fn sure(n: int) -> int:
+    r = pick(n):
+        on Bad:
+            return -7
+    r
+
+fn both(n: int) -> int errors Bad:
+    x = pick(n):
+        on Bad:
+            fail Bad
+    x
+
+fn safe(n: int) -> int:
+    r = both(n):
+        on Bad:
+            -1
+    r
+
+[sure(10), sure(1), safe(9), safe(0)]
+}
+
+dict set ::ccCorpus mod-zero {
+fn g(a: int, b: int) -> int:
+    mod(a, b)
+[g(7, 3), g(7, 0)]
+}
+
+dict set ::ccCorpus mod-zero-big {
+fn g(a: int, b: int) -> int:
+    mod(a * a * a, b)
+[g(3000000000000, 0)]
+}
+
+dict set ::ccCorpus shift-range {
+fn far(x: int, k: int) -> int:
+    shift_right(x, k)
+[far(3, 2), far(3, 2000000)]
+}
+
+dict set ::ccCorpus shift-negative {
+fn far(x: int, k: int) -> int:
+    shift_right(x, k)
+[far(3, -1)]
+}
+
+# Botlish names Tcl's expr reads as numbers (inf, nan, infinity: AGENTS.md,
+# "Tcl's expr reads a numeric-looking result as a number") as functions,
+# bindings, fields and enum cases: before the backend wrote if for every
+# such selection, a function named nan stopped -emit-c with ARITH DOMAIN.
+dict set ::ccCorpus numeric-names {
+enum Kind:
+    Inf,
+    Nan
+
+struct Box:
+    inf: int
+    nan: int
+
+fn nan(x: int) -> int:
+    x + 1
+
+fn inf(x: int) -> int:
+    nan(x) * 2
+
+fn infinity(k: Kind) -> Kind:
+    if k == Kind::Inf:
+        Kind::Nan
+    else:
+        Kind::Inf
+
+NaN = Box {inf: inf(3), nan: nan(4)}
+[NaN, NaN.inf, infinity(Kind::Inf), infinity(Kind::Nan)]
+}
+
+foreach name [dict keys $::ccCorpus] {
+    test cc-parity-$name "the C backend agrees with every other backend on the $name corpus program" \
+        -constraints hostCC -body {
+        ccParity [dict get $::ccCorpus $name]
+    } -match regexp -result {^\{(value|error): [^\n]*\}$}
+}
+
+# The repository's own example programs the backend compiles: each agrees
+# with the reference (the gate against an unused variable or helper in the
+# C of a program written for other backends, such as a binding only a
+# discarded branch reads).
+test cc-parity-examples "the example programs the C backend compiles agree with every other backend" -constraints hostCC -body {
+    set provider [file join $::ccProviders botlish_rt_v1_int_arena.c]
+    set mismatches {}
+    foreach file {01-arithmetic 02-recursion 04-branch-value 05-shadowing 06-list 07-loop-break 08-return
+            11-boolean-operators 14-modules} {
+        set path [file join $::projectRoot examples surface $file.bot]
+        set hir [surface::readProgramFile $path -warnings off]
+        set out [ccompile::program $hir -prefix prog -source $file.bot]
+        set dir [ccDir]
+        ccompile::write $out $dir
+        set gen [dict create dir $dir prefix prog out $out]
+        set got [lsort -unique [lmap compiler $::ccCompilers {ccRun [ccBuild $gen $compiler [list $provider] -O2]}]]
+        set reference [list]
+        foreach script {{core::evalProgram [hir::lower $hir]} {core::compiler::evalHir $hir}} {
+            lappend reference "value: [core::value::show [eval $script] 1]"
+        }
+        if {[lsort -unique [concat $got $reference]] ne [lsort -unique $reference] || [llength [lsort -unique $reference]] != 1} {
+            lappend mismatches "$file: $got vs $reference"
+        }
+    }
+    set mismatches
+} -result {}
+
+test cc-unsupported-erased-enum "an instance called with cases of different enums is C UNSUPPORTED, not an internal error" -body {
+    set hir [surface::readProgramFile [file join $::projectRoot examples surface 15-enums.bot] -warnings off]
+    catch {ccompile::program $hir -prefix u} message options
+    list [dict get $options -errorcode] [string match "*an enum value whose enum is not known statically*" $message]
+} -result {{C UNSUPPORTED} 1}
+
+# The generated differential: arithmetic at the int64_t boundaries, in
+# functions whose operands the compiler proves fit (int64_t arithmetic) and
+# in folds, whose intermediates it does not (the Int path), against the
+# interpreter and the Tcl compiler.
+test cc-parity-generated "generated boundary arithmetic agrees with the reference backends" -constraints hostCC -body {
+    set values {0 1 -1 2 -2 3 7 -7 255 4294967295 4294967296 -4294967296 3037000499 3037000500
+        4611686018427387904 -4611686018427387904 9223372036854775807 -9223372036854775807
+        -9223372036854775808 9223372036854775808 18446744073709551616}
+    set lines {}
+    set calls {}
+    set seed 4242
+    for {set k 0} {$k < 60} {incr k} {
+        set seed [expr {($seed * 1103515245 + 12345) % 2147483648}]
+        set a [lindex $values [expr {$seed % [llength $values]}]]
+        set seed [expr {($seed * 1103515245 + 12345) % 2147483648}]
+        set b [lindex $values [expr {$seed % [llength $values]}]]
+        set seed [expr {($seed * 1103515245 + 12345) % 2147483648}]
+        set op [lindex {+ - * < mod ==} [expr {$seed % 6}]]
+        if {$op eq "mod" && $b == 0} {
+            set b 3
+        }
+        if {$op eq "mod"} {
+            set direct "mod(f$k\($a), $b)"
+            set folded "mod(s, $b)"
+        } else {
+            set direct "f$k\($a) $op $b"
+            set folded "s $op $b"
+        }
+        # f's parameter's Range is its one call's argument (int64_t where
+        # that fits); the fold's intermediate has no Range the analysis
+        # proves, so its Int operations take the botlish_rt_v1_int path.
+        lappend lines "fn f$k\(x: int) -> int:\n    x" \
+            "fn d$k\():\n    $direct" \
+            "fn g$k\():\n    s = fold i from 0 to 1 with intermediate s $a:\n        s + 0\n    $folded"
+        lappend calls "d$k\()" "g$k\()"
+    }
+    lappend lines "\[[join $calls {, }]\]"
+    ccParity [join $lines \n\n] {interp compile}
+} -match regexp -result {^\{value: \[[^\n]*\]\}$}
+
+# ---------------------------------------------------------------------------
+# The runtime-service boundary
+
+test cc-pure-needs-nothing "a program whose Ints are proven to fit int64_t needs no service and no runtime header" -body {
+    set gen [ccGenerate [dict get $::ccCorpus pure] pure]
+    set out [dict get $gen out]
+    list [dict get $out services] [dict get $out display] [lsort [dict keys [dict get $out files]]] \
+        [string match *botlish_rt_v1* [dict get $out files pure.h]] \
+        [regexp {"required_services": \[\]\n} [dict get $out files pure.runtime.json]]
+} -result {{} {} {pure.c pure.h pure.runtime.json pure_display.c} 0 1}
+
+test cc-numeric-looking-names "a function named inf, nan or infinity keeps its name in C (no expr reads it as a number)" -body {
+    set gen [ccGenerate [dict get $::ccCorpus numeric-names] nums]
+    set c [dict get [dict get $gen out] files nums.c]
+    lsort -unique [lmap name [regexp -all -inline {nums_[0-9]+_[A-Za-z]+} $c] {
+        regsub {^nums_[0-9]+_} $name ""
+    }]
+} -result {inf infinity nan}
+
+test cc-manifest-lists-the-services "the manifest names exactly the services the generated C calls, per translation unit" -body {
+    set gen [ccGenerate [dict get $::ccCorpus recursion] rec]
+    set out [dict get $gen out]
+    set manifest [dict get $out files rec.runtime.json]
+    set c [dict get $out files rec.c]
+    set d [dict get $out files rec_display.c]
+    set called [lsort -unique [regexp -all -inline {botlish_rt_v1_int_[a-z_]+(?=\()} $c]]
+    set shown [lsort -unique [regexp -all -inline {botlish_rt_v1_int_[a-z_]+(?=\()} $d]]
+    list [dict get $out services] [dict get $out display] $called $shown \
+        [regexp {"service": "int.mul",\s+"symbol": "botlish_rt_v1_int_mul",\s+"header": "botlish_rt_v1.h",[^\}]*"required_by": \["rec.c"\]} $manifest] \
+        [regexp {"service": "int.to_decimal",\s+"symbol": "botlish_rt_v1_int_to_decimal",[^\}]*"required_by": \["rec_display.c"\]} $manifest] \
+        [regexp {"runtime_abi": "1"} $manifest]
+} -result {{int.compare int.mod int.mul} int.to_decimal {botlish_rt_v1_int_compare botlish_rt_v1_int_mod botlish_rt_v1_int_mul} botlish_rt_v1_int_to_decimal 1 1 1}
+
+test cc-deterministic "the same program gives the same files, byte for byte" -body {
+    set a [dict get [ccGenerate [dict get $::ccCorpus structs] same] out]
+    set b [dict get [ccGenerate [dict get $::ccCorpus structs] same] out]
+    expr {[dict get $a files] eq [dict get $b files]}
+} -result 1
+
+test cc-missing-service-compiles "a program needing a service compiles to objects without its provider" -constraints {hostCC nm} -body {
+    set gen [ccGenerate {
+fn fact(n: int) -> int:
+    if n <= 1:
+        1
+    else:
+        n * fact(n - 1)
+fact(25)
+} fact]
+    set dir [dict get $gen dir]
+    set compiler [lindex $::ccCompilers 0]
+    set objects {}
+    foreach unit {fact fact_display} {
+        lassign [ccExec [list $compiler {*}$::ccStrict -ffreestanding -O0 -I $dir -c [file join $dir $unit.c] -o [file join $dir $unit.o]]] status output
+        lappend objects $status
+    }
+    set undefined [lsort [regexp -all -inline {botlish_rt_v1_[a-z_]+} [lindex [ccExec [list nm -u [file join $dir fact.o]]] 1]]]
+    set shown [lsort [regexp -all -inline {botlish_rt_v1_[a-z_]+} [lindex [ccExec [list nm -u [file join $dir fact_display.o]]] 1]]]
+    list $objects $undefined $shown [dict get $gen out services] [dict get $gen out display]
+} -result {{0 0} botlish_rt_v1_int_mul botlish_rt_v1_int_to_decimal int.mul int.to_decimal}
+
+test cc-missing-service-link-error "linking without the provider fails, the linker naming the service's symbol" -constraints hostCC -body {
+    set gen [ccGenerate {
+fn fact(n: int) -> int:
+    if n <= 1:
+        1
+    else:
+        n * fact(n - 1)
+fact(25)
+} fact]
+    catch {ccBuild $gen [lindex $::ccCompilers 0] {} -O0} message
+    list [regexp {undefined reference to [`']botlish_rt_v1_int_mul'|Undefined symbols|botlish_rt_v1_int_mul} $message] \
+        [string match "*C build failed*" $message] [string match *botlish_rt_v1_int_to_decimal* $message]
+} -result {1 1 1}
+
+test cc-supplied-service "with the reference provider linked in, the program runs and agrees" -constraints hostCC -body {
+    set source {
+fn fact(n: int) -> int:
+    if n <= 1:
+        1
+    else:
+        n * fact(n - 1)
+fact(30)
+}
+    set gen [ccGenerate $source fact]
+    set exe [ccBuild $gen [lindex $::ccCompilers 0] [list [file join $::ccProviders botlish_rt_v1_int_arena.c]] -O2]
+    list [ccRun $exe] [ccReference $source]
+} -result {{value: 265252859812191058636308480000000} {value: 265252859812191058636308480000000}}
+
+test cc-provider-limit "a provider out of storage ends the run with C RUNTIME LIMIT, never a wrong value" -constraints hostCC -body {
+    set gen [ccGenerate {
+fn fact(n: int) -> int:
+    if n <= 1:
+        1
+    else:
+        n * fact(n - 1)
+fact(60)
+} fact]
+    set exe [ccBuild $gen [lindex $::ccCompilers 0] [list [file join $::ccProviders botlish_rt_v1_int_arena.c]] -O1 \
+        {-DBOTLISH_RT_INT_ARENA_LIMBS=8}]
+    ccRun $exe
+} -result {error: a runtime service could not complete an operation: its provider's storage is exhausted (C RUNTIME LIMIT)}
+
+test cc-freestanding-objects "a service-free program's objects reference nothing, freestanding, at every optimization level" -constraints {hostCC nm} -body {
+    set gen [ccGenerate [dict get $::ccCorpus pure] pure]
+    set dir [dict get $gen dir]
+    set result {}
+    foreach compiler $::ccCompilers {
+        foreach opt {-O1 -O2 -Os} {
+            set undefined {}
+            foreach unit {pure pure_display} {
+                set object [file join $dir $unit.o]
+                # (-fno-stack-protector: the stack protector's
+                # __stack_chk_fail is a hosted C library's, which a
+                # freestanding build does without.)
+                lassign [ccExec [list $compiler {*}$::ccStrict -ffreestanding -fno-stack-protector $opt -I $dir \
+                    -c [file join $dir $unit.c] -o $object]] status output
+                if {$status} {
+                    error $output
+                }
+                lappend undefined {*}[lmap line [split [lindex [ccExec [list nm -u $object]] 1] \n] {
+                    if {[string trim $line] eq ""} continue
+                    lindex $line end
+                }]
+            }
+            lappend result "$compiler $opt: $undefined"
+        }
+    }
+    lsort -unique [lmap r $result {regsub {^\S+ \S+: } $r ""}]
+} -result {{}}
+
+test cc-freestanding-executable "a service-free program links with no C library and runs from a bare _start" -constraints {gcc linuxX86_64} -body {
+    set gen [ccGenerate [dict get $::ccCorpus pure] pure]
+    set dir [dict get $gen dir]
+    set exe [file join $dir pure.free]
+    lassign [ccExec [list gcc {*}$::ccStrict -O2 -ffreestanding -nostdlib -static -fno-stack-protector -fno-pie -no-pie \
+        -DBOTLISH_PROGRAM=pure "-DBOTLISH_PROGRAM_HEADER=\"pure.h\"" -I $dir \
+        [file join $::ccHarness linux_start.c] [file join $dir pure.c] [file join $dir pure_display.c] -o $exe]] status output
+    if {$status} {
+        error $output
+    }
+    list [ccRun $exe] [ccReference [dict get $::ccCorpus pure]]
+} -result {{value: [State {light: Light::Green, left: 19}, 224, 8, 250, 5]} {value: [State {light: Light::Green, left: 19}, 224, 8, 250, 5]}}
+
+test cc-public-names-prefixed "every global symbol a program defines carries its prefix, so programs link side by side" -constraints {hostCC nm} -body {
+    set gen [ccGenerate [dict get $::ccCorpus errors] errs]
+    set dir [dict get $gen dir]
+    set compiler [lindex $::ccCompilers 0]
+    set names {}
+    foreach unit {errs errs_display} {
+        set object [file join $dir $unit.o]
+        ccExec [list $compiler -std=c11 -O2 -I $dir -c [file join $dir $unit.c] -o $object]
+        foreach line [split [lindex [ccExec [list nm -g $object]] 1] \n] {
+            if {[llength $line] == 3 && [lindex $line 1] ne "U"} {
+                # (Mach-O spells a C name with a leading underscore.)
+                set name [lindex $line 2]
+                if {$::tcl_platform(os) eq "Darwin"} {
+                    regsub {^_} $name "" name
+                }
+                lappend names $name
+            }
+        }
+    }
+    list [lsort $names] [lsearch -all -inline -not -glob $names errs_*]
+} -result {{errs_run errs_show errs_status_code errs_status_message} {}}
+
+# Unoptimized, every object references exactly the manifest's services (an
+# optimizer may prove some calls unreachable and drop them: the manifest is
+# what the C references, an upper bound of what a link needs).
+test cc-cross-targets "the generated C compiles for other architectures, word sizes and byte orders" -constraints {clang llvmNm} -body {
+    set gen [ccGenerate [dict get $::ccCorpus recursion] rec]
+    set dir [dict get $gen dir]
+    set result {}
+    foreach target {thumbv6m-none-eabi thumbv7m-none-eabi riscv32-unknown-elf riscv64-unknown-elf msp430-none-elf
+            mips-unknown-elf powerpc-unknown-elf aarch64-none-elf} {
+        set undefined {}
+        foreach unit {rec rec_display} {
+            set object [file join $dir $unit.$target.o]
+            lassign [ccExec [list clang --target=$target {*}$::ccStrict -ffreestanding -O0 -I $dir \
+                -c [file join $dir $unit.c] -o $object]] status output
+            if {$status} {
+                error "$target: $output"
+            }
+            foreach line [split [lindex [ccExec [list llvm-nm -u $object]] 1] \n] {
+                if {[string match *botlish_rt_v1_* $line]} {
+                    lappend undefined [lindex $line end]
+                }
+            }
+        }
+        lappend result [lsort -unique $undefined]
+    }
+    lsort -unique $result
+} -result {{botlish_rt_v1_int_compare botlish_rt_v1_int_mod botlish_rt_v1_int_mul botlish_rt_v1_int_to_decimal}}
+
+# Executing it there: each corpus program built with no C library at all
+# (examples/c-freestanding/harness/linux_start.c's _start and system calls)
+# for other Linux architectures -- AArch64, RISC-V 64, big-endian s390x,
+# 32-bit ARM and i386 -- run under qemu-user (an emulator, not the hardware)
+# or natively (i386), against the reference. A 32-bit target links the
+# toolchain's own libgcc.a (64-bit % and * helpers): the toolchain's
+# obligation, met by the cross libgcc packages where installed.
+set ::ccCross {}
+foreach {target emulator libgcc} {
+    aarch64-linux-gnu qemu-aarch64 {}
+    riscv64-linux-gnu qemu-riscv64 {}
+    s390x-linux-gnu qemu-s390x {}
+    armv7a-linux-gnueabihf qemu-arm /usr/lib/gcc-cross/arm-linux-gnueabihf/13/libgcc.a
+    i686-linux-gnu {} /usr/lib/gcc-cross/i686-linux-gnu/13/libgcc.a
+} {
+    if {$emulator ne "" && [auto_execok $emulator] eq ""} continue
+    if {$libgcc ne "" && ![file exists $libgcc]} continue
+    if {$emulator eq "" && !([testConstraint linuxX86_64])} continue
+    lappend ::ccCross $target $emulator $libgcc
+}
+testConstraint ccCross [expr {[testConstraint clang] && [auto_execok ld.lld] ne "" && $::ccCross ne ""}]
+
+test cc-cross-execution "corpus programs built with no C library run on other architectures and agree" -constraints ccCross -body {
+    set mismatches {}
+    set runs 0
+    foreach name {recursion loops errors bounds domains structs pure mod-zero} {
+        set source [dict get $::ccCorpus $name]
+        set gen [ccGenerate $source]
+        set dir [dict get $gen dir]
+        set expected [ccReference $source {interp compile}]
+        foreach {target emulator libgcc} $::ccCross {
+            set exe [file join $dir prog.$target]
+            set command [list clang --target=$target -fuse-ld=lld {*}$::ccStrict -O2 -ffreestanding -nostdlib -static \
+                -fno-stack-protector -fno-pic -DBOTLISH_PROGRAM=prog "-DBOTLISH_PROGRAM_HEADER=\"prog.h\"" \
+                -I $dir -I [file join $::projectRoot ccompile] [file join $::ccHarness linux_start.c] \
+                [file join $dir prog.c] [file join $dir prog_display.c] \
+                [file join $::ccProviders botlish_rt_v1_int_arena.c] {*}$libgcc -o $exe]
+            lassign [ccExec $command] status output
+            if {$status} {
+                lappend mismatches "$name $target: build: $output"
+                continue
+            }
+            set got [string trim [lindex [ccExec [concat $emulator [list $exe]]] 1]]
+            incr runs
+            if {$got ne $expected} {
+                lappend mismatches "$name $target: $got (expected $expected)"
+            }
+        }
+    }
+    list [expr {$runs > 0}] $mismatches
+} -result {1 {}}
+
+# ---------------------------------------------------------------------------
+# What the backend does not translate: C UNSUPPORTED at compile time, at the
+# construct -- never a runtime-service reference.
+
+proc ccUnsupported {source} {
+    set hir [surface::compile $source -warnings off]
+    if {![catch {ccompile::program $hir -prefix u} message options]} {
+        return "compiled"
+    }
+    set entries [lmap d [dict getdef $options -diagnostics {}] {dict get $d message}]
+    return [list [dict get $options -errorcode] [regsub {^.*?:([0-9]+:[0-9]+): } [lindex $entries 0] {\1: }] [llength $entries]]
+}
+
+test cc-unsupported-string "a String is C UNSUPPORTED, located" -body {
+    ccUnsupported {
+fn greet(n: int) -> str:
+    "hello"
+greet(1)
+}
+} -result {{C UNSUPPORTED} {3:5: the C backend cannot compile a String yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service} 1}
+
+test cc-unsupported-list-parameter "a List of unknown length is C UNSUPPORTED" -body {
+    lrange [ccUnsupported {
+import std::list
+fn total(xs: List[int]) -> int:
+    fold x in xs with intermediate s 0:
+        s + x
+total([1, 2, 3])
+}] 0 0
+} -result {{C UNSUPPORTED}}
+
+test cc-unsupported-closure "a closure is C UNSUPPORTED" -body {
+    set r [ccUnsupported {
+fn adder(k: int) -> int:
+    fn add(x: int) -> int:
+        x + k
+    add(1) + add(2)
+adder(5)
+}]
+    list [lindex $r 0] [string match "*a closure*" [lindex $r 1]]
+} -result {{C UNSUPPORTED} 1}
+
+test cc-unsupported-payload "an error payload is C UNSUPPORTED" -body {
+    set r [ccUnsupported {
+error Bad:
+    code: int
+
+fn f(n: int) -> int errors Bad:
+    if n > 1:
+        fail Bad {code: n}
+    n
+
+r = f(0):
+    on Bad:
+        -1
+r
+}]
+    list [lindex $r 0] [string match "*payload*" [lindex $r 1]]
+} -result {{C UNSUPPORTED} 1}
+
+test cc-unsupported-float "a Float64 is C UNSUPPORTED" -body {
+    lindex [ccUnsupported {
+fn half(x: int) -> int:
+    x
+2.5 / 2.0
+}] 0
+} -result {C UNSUPPORTED}
+
+test cc-unsupported-several "every unsupported function is reported, each at its construct" -body {
+    set r [ccUnsupported {
+fn a(n: int) -> str:
+    "a"
+
+fn b(n: int) -> str:
+    "b"
+
+[a(1), b(2)]
+}]
+    list [lindex $r 0] [lindex $r 2]
+} -result {{C UNSUPPORTED} 2}
+
+test cc-unsupported-bitwise-unproven "bitwise operations on Ints not proven to fit int64_t are C UNSUPPORTED, not a service" -body {
+    set r [ccUnsupported {
+fn f(a: int, b: int) -> int:
+    bit_and(a * a, b)
+f(3000000000000, 7)
+}]
+    list [lindex $r 0] [string match "*bit_and*no bitwise services*" [lindex $r 1]]
+} -result {{C UNSUPPORTED} 1}
+
+# ---------------------------------------------------------------------------
+# The command line
+
+test cc-cli-emit-c "-emit-c writes the files into -out DIR and names the services; nothing runs" -constraints unixShell -body {
+    set dir [ccDir]
+    set source [file join $dir Fact-1.bot]
+    set channel [open $source w]
+    puts $channel "fn fact(n: int) -> int:\n    if n <= 1:\n        1\n    else:\n        n * fact(n - 1)\nfact(25)"
+    close $channel
+    set out [file join $dir out]
+    lassign [ccExec [list [info nameofexecutable] [file join $::projectRoot main.tcl] -warnings off -emit-c -out $out $source]] status output
+    list $status [lsort [glob -tails -directory $out *]] [lindex [split $output \n] end]
+} -result {0 {Fact_1.c Fact_1.h Fact_1.runtime.json Fact_1_display.c botlish_rt_v1.h} {runtime services: int.mul, int.to_decimal}}
+
+test cc-cli-unsupported "-emit-c of a program it cannot compile reports C UNSUPPORTED and exits 1, writing nothing" -constraints unixShell -body {
+    set dir [ccDir]
+    set source [file join $dir s.bot]
+    set channel [open $source w]
+    puts $channel "\"text\""
+    close $channel
+    lassign [ccExec [list [info nameofexecutable] [file join $::projectRoot main.tcl] -emit-c $source]] status output
+    list $status [string match "*(C UNSUPPORTED)*" $output] [glob -nocomplain -tails -directory $dir *.c *.h]
+} -result {1 1 {}}
+
+test cc-cli-out-needs-a-builder "-out without -emit-c or -emit-native-library is a usage error" -constraints unixShell -body {
+    set dir [ccDir]
+    lassign [ccExec [list [info nameofexecutable] [file join $::projectRoot main.tcl] -out $dir x.bot]] status output
+    list $status [string match "*-out is an option of -emit-native-library and -emit-c*" $output]
+} -result {2 1}
+
+cleanupTests

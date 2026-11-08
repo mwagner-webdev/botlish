@@ -581,6 +581,16 @@ core::native::register std::transfer::decode -arity 1 -impl core::transfer::Unel
     -param-types {struct} -result-type any -sending result \
     -errors {TransferMalformed TransferVersion TransferTypeMismatch TransferInvalidValue TransferLimit} \
     -imprint {vars {T} params {{nstruct std::abi::bytes::Bytes}} result {imprint T}}
+# std::transfer::fingerprint[T]() (BOTLISH-OWNED-THREADS-AND-CROSS-THREAD-
+# ACTORS-MILESTONE-1.md): the sixteen hex digits of T's schema fingerprint,
+# the one transfers of T carry in their bytes -- what a transport endpoint
+# compares a message's bytes with before it queues them. Written out by
+# hir::transfer::Elaborate as the constant itself; internal to the
+# standard library.
+core::native::register std::transfer::fingerprint -arity 0 -impl core::transfer::Unelaborated \
+    -param-types {} -result-type str -sending imprint -context-free 1 \
+    -imprint {vars {T} params {} result str}
+core::native::declareInternalMember std::transfer::fingerprint
 core::native::register transfer#encode -arity 3 -impl core::transfer::encode \
     -param-types {any str list} -result-type struct -completion 1 -ownership {observe observe observe} \
     -result-shape {named-struct std::abi::bytes::Bytes}
@@ -595,6 +605,9 @@ foreach name {
     std::immutable_map::transfer_out std::immutable_map::transfer_in
     std::mutable_map::transfer_out std::mutable_map::transfer_in
     std::mutable_set::transfer_out std::mutable_set::transfer_in
+    std::actor::remote::remote_out std::actor::remote::remote_in
+    std::actor::remote::service_out std::actor::remote::service_in
+    std::actor::remote::reply_out std::actor::remote::reply_in
 } {
     core::native::declareInternalMember $name
 }

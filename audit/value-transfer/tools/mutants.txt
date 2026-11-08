@@ -125,7 +125,7 @@ opaque struct Address[M]:
 !! sd-open-type sd-decode-trait-view
 ## hir/range.tcl
 <<<<
-    if {![hir::types::IsClosedType $type] || ($sending eq "result" && [hir::types::IsTrait $type])} {
+    if {![hir::types::IsClosedType $type {} 1] || ($sending eq "result" && [hir::types::IsTrait $type])} {
 ====
     if {0} {
 >>>>
