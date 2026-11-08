@@ -1,0 +1,25 @@
+# blocks.bot -- tests/threads.test: a thread entry declared inside a
+# static compile block, and an entry called inside one, are the blocks'
+# rejections (std::compiler::CompilerError with their codes), not the
+# program's.
+import crunch
+import std::compiler
+
+fn placed() -> int errors std::compiler::CompilerError:
+    static compile:
+        thread fn inner(n: int) -> int:
+            n
+        1
+
+fn referenced() -> int errors std::compiler::CompilerError:
+    static compile:
+        crunch::spin(1)
+
+# The code F's block was rejected with (Type when it was accepted).
+fn rejected(f: Fn{args: [], return: int, errors: [std::compiler::CompilerError]}) -> std::compiler::DiagnosticCode:
+    f():
+        on std::compiler::CompilerError {code}:
+            return code
+    std::compiler::DiagnosticCode::Type
+
+[rejected(placed), rejected(referenced)]

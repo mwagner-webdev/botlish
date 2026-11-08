@@ -24,7 +24,7 @@
 #      "target": "linux-x86_64", "triple": "x86_64-unknown-linux-gnu",
 #      "linker": "system",
 #      "runtime": {"archive": "runtime/libbotlish_runtime.a",
-#                  "abi": "d554d5ff4c234348"},
+#                  "abi": "FINGERPRINT"},
 #      "systemLibraries": ["-lgcc_s", "-lutil", ...]}
 #
 # which the compiler reads when -- and only when -- a compilation names the

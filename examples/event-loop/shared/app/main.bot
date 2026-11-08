@@ -6,7 +6,7 @@
 #   botlish add event_loop_linux -repository REPO
 #   botlish -backend cranelift main.bot
 #
-# beats and probes each depend on event_loop_linux and lock 0.3.0. The
+# beats and probes each depend on event_loop_linux and lock 0.5.0. The
 # package manager resolves the application's one dependency graph: one
 # event_loop_linux, used by beats, probes and the application, so the
 # Linux driver and its Native capability the application installs below --

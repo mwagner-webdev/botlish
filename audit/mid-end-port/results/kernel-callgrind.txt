@@ -1,0 +1,23 @@
+# kernel/ranges-structs.bot with run(300, 7) as a native executable
+# under valgrind --tool=callgrind; exclusive instruction counts of every function
+# (callgrind_annotate --threshold=100 --auto=no), summed by category.
+# audit/mid-end-port/README.md, section 2; tools/kernel-callgrind.tcl.
+# 477882229 instructions in the functions listed; PROGRAM TOTALS 477882229
+ 62.1%  glibc malloc and free
+ 18.0%  the runtime's allocation and collection (vm.rs, heap.rs, ops.rs, the frame walk)
+ 12.8%  generated code (botlish_fn_N)
+  7.1%  everything else (runtime helpers, start-up)
+
+# The 12 most expensive functions (exclusive):
+ 20.5%  ./malloc/./malloc/malloc.c:_int_malloc
+ 12.6%  ./malloc/./malloc/malloc.c:_int_free
+  8.8%  ./malloc/./malloc/malloc.c:malloc
+  8.8%  ???:botlish_fn_5'2
+  8.6%  ./malloc/./malloc/malloc.c:malloc_consolidate
+  4.2%  ./malloc/./malloc/malloc.c:free
+  3.4%  ./malloc/./malloc/malloc.c:unlink_chunk.isra.0
+  1.9%  rust:alloc/src/vec/mod.rs:<botlish_native::runtime::heap::Heap>::collect::<alloc::vec::into_iter::IntoIter<u64
+  1.8%  native/src/runtime/vm.rs:<botlish_native::runtime::vm::Vm>::new_struct
+  1.7%  native/src/runtime/heap.rs:botlish_native::runtime::heap::free_object
+  1.6%  ./malloc/./malloc/arena.c:free
+  1.6%  ./malloc/./malloc/arena.c:malloc

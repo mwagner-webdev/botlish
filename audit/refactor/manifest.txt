@@ -156,6 +156,7 @@ fails stdlib/mutable_map.bot SURFACE MODULE INTERNAL-NAMESPACE -- internal impor
 fails stdlib/mutable_set.bot SURFACE MODULE INTERNAL-NAMESPACE -- internal import: as for stdlib/mutable_map.bot (verified through `import std::mutable_set`)
 program stdlib/ordered_table.bot
 fails stdlib/test.bot CORE SEMANTIC CONTEXT-FUNCTION-VALUE -- entry-program value: as for stdlib/io.bot, the last declaration (report) requires a context (the test suite), so it cannot be a value (verified through `import std::test`)
+fails stdlib/thread.bot SURFACE MODULE INTERNAL-NAMESPACE -- internal member: thread.bot reaches the runtime's thread registry and transport through the standard library's internal std::thread::rt_* operations (core/thread.tcl), which an entry program may not name (verified through `import std::thread`)
 program stdlib/transfer.bot
 fails stdlib/tree.bot SURFACE MODULE INTERNAL-NAMESPACE -- internal member: tree.bot reads a tree's child field through the standard library's internal std::tree::children, which an entry program may not name (verified through `import std::tree`)
 program stdlib/web.bot
@@ -180,6 +181,7 @@ program stdlib/windows.bot
 program stdlib/abi/aarch64.bot
 fails stdlib/abi/bytes.bot SURFACE MODULE INTERNAL-NAMESPACE -- internal member: bytes.bot's utf16le_units calls the standard library's internal std::byte_store::utf16le_units (std::windows::fs's units bridge, UTF16-BYTE-STORAGE-MILESTONE-1.md), which an entry program may not name (verified through `import std::abi::bytes`)
 program stdlib/abi/x86_64.bot
+fails stdlib/actor/remote.bot SURFACE MODULE INTERNAL-NAMESPACE -- internal member: as for stdlib/thread.bot, remote.bot moves messages through std::thread's internal rt_* operations (verified through `import std::actor::remote`)
 fails stdlib/darwin/io.bot CORE SEMANTIC CONTEXT-FUNCTION-VALUE -- entry-program value: as for stdlib/linux/io.bot, the last declaration (write_error_text) requires a context (verified through `import std::darwin::io`)
 fails stdlib/darwin/fs.bot SURFACE MODULE INTERNAL-NAMESPACE -- internal import: fs.bot imports the standard library's internal std::io::bytepath (the byte-path syntax it shares with std::linux::fs), which only standard-library modules may import, never an entry program (verified through `import std::darwin::fs`)
 fails stdlib/darwin/path.bot SURFACE MODULE INTERNAL-NAMESPACE -- internal member: path.bot converts a validated DarwinPath with std::darwin::fs::of_valid_text, an internal member of the standard library that no entry program may name (verified through `import std::darwin::path`)

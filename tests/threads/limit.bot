@@ -1,0 +1,30 @@
+# limit.bot -- tests/threads.test: a Threads authority's own limit. Made
+# with std::thread::create(1), it starts one thread at a time: a second
+# start while the first runs is ThreadLimit; once the first has ended,
+# another starts.
+import crunch
+import std::thread
+
+fn started(context t: std::thread::Threads) -> bool:
+    s = std::thread::start(std::thread::entry(crunch::spin), 1):
+        on std::thread::ThreadLimit:
+            return false
+        on std::thread::ThreadStartFailed {reason}:
+            return false
+    {thread, id} = s
+    std::thread::request_stop(id)
+    std::thread::await_end(id, -1)
+
+fn go(context t: std::thread::Threads) -> List[bool] errors std::thread::ThreadLimit, std::thread::ThreadStartFailed:
+    {thread, id} = std::thread::start(std::thread::entry(crunch::spin), 0)
+    second = started()
+    std::thread::request_stop(id)
+    ended = std::thread::await_end(id, -1)
+    [second, ended, started()]
+
+with context std::thread::create(1)
+go():
+    on std::thread::ThreadLimit:
+        [false]
+    on std::thread::ThreadStartFailed {reason}:
+        [false]

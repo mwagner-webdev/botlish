@@ -216,7 +216,11 @@ test abi-mutable-bytes-natives-registered {the writable storage family is eight 
         [lmap n {zeroed from_storage count replace detach freeze freeze_prefix} {dict get [core::native::metadata std::mutable_byte_store::$n] contextFree}] \
         [dict get $bridge arity] [dict get $bridge paramTypes] [dict get $bridge resultShape] \
         [dict get $bridge contextFree] [dict get $bridge runtime] [dict get $bridge errors] \
-        [lsearch -all -inline -regexp [core::native::names] {(?i)read|keepalive|pointer|ptr}]
+        [lmap n [core::native::names] {
+        # (The operation's own name, not its namespace's: std::thread's
+        # operations say "thread".)
+        expr {[regexp {(?i)read|keepalive|pointer|ptr} [namespace tail $n]] ? $n : [continue]}
+    }]
 } -result {{std::mutable_byte_store::count std::mutable_byte_store::detach std::mutable_byte_store::freeze std::mutable_byte_store::freeze_prefix std::mutable_byte_store::from_storage std::mutable_byte_store::replace std::mutable_byte_store::zeroed} {std::byte_store::byte_count std::byte_store::decode_utf16le std::byte_store::decode_utf8 std::byte_store::encode_utf16le std::byte_store::from_list std::byte_store::join std::byte_store::slice std::byte_store::utf16le_units std::byte_store::utf16le_units_before_nul} {0 0 0 0 0 0 0} 1 struct {named-struct std::abi::x86_64::Register64} 0 raw-address {} std::binary::read}
 
 test abi-mutable-bytes-declaration {std::abi::bytes::MutableBytes is an opaque struct with one hidden field, owned by module std::abi::bytes (the one module that owns both byte types, so Bytes and MutableBytes convert without any public accessor): the existing opaque-struct mechanism, no new visibility rule} -body {

@@ -1,0 +1,107 @@
+direct module
+import std::list
+import type std::ffi::c::Int
+
+# Every lexical class and every contextual word of the grammar, each where
+# the parser reads it as a word (tests/syntax-highlighting.test checks the
+# token IR of this file; the editor grammars are checked against it).
+
+extern c library "m" static at "native/libm.a"
+extern c framework "Cocoa"
+extern c fn c_write named "write"(fd: Int, data: Ptr read noescape, out: Ptr write proven noescape, keep: Ptr captures, variadic) -> Ptr independent
+extern c fn c_same(p: Ptr) -> Ptr alias p
+
+private opaque context struct Session:
+    count: int
+
+tree struct Node[T satisfies Hashable]:
+    value: T
+    kids: List[Node[T]]
+
+opaque resource struct Handle:
+    fd: int
+
+opaque struct Bag:
+    items: List[int]
+    identity members(items)
+    sendable through(to_bag, from_bag) as int
+
+enum Color:
+    Red, Green
+
+refined type Even = int
+type Small = int in 0..9
+
+error Overflow:
+    limit: int
+
+context trait Clock:
+    fn now() -> int
+
+layout Pair:
+    size 8
+    align 4
+    field a: int32le at 0
+    field b: array 1 of int32le at 4
+
+union layout Word:
+    size 4
+    align 4
+    alternative whole: int32le
+
+class digit = '0'..'9'
+class high = 0x80..0xFF
+class other = any except digit
+
+dfa number over ascii:
+    start:
+        digit -> more
+    more:
+        digit -> more
+        '.' -> call fraction then accept
+        other -> accept before
+        end -> accept
+
+dfa fraction over ascii:
+    start:
+        digit -> start
+        end -> reject
+
+nomethod fn even?(n: int) -> bool proves n: Even:
+    n == 2
+
+cleanup fn close(h: Handle):
+    {fd} = h
+    fd
+
+exported c fn answer() -> int:
+    42
+
+callback c fn tick(n: int) -> int:
+    n
+
+thread fn worker(n: int) -> int:
+    n
+
+fn sum(place total: MutableVector[int], flags :quiet, context clock: Clock, variadic xs: List[int], resume int) -> int emits number:
+    0
+
+with context Session {count: 0}
+inject no context:
+    1
+inject context Session:
+    2
+static compile:
+    3
+coroutine {step: s} = counter()
+total = fold x in [1, 2] with intermediate acc 0:
+    acc + x
+loop i from 0 to 3:
+    i
+loop j down from 3 through 0:
+    j
+k = 31 + 1.5e3 + 'a'
+at = "words used as names stay names"
+size = at
+to = size
+true and not false

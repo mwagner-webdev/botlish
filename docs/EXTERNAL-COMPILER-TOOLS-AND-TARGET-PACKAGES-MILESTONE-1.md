@@ -530,10 +530,16 @@ separate authority decision before a tool runs remain PM-4's and PM-7's.
   pins schema 5 as unsupported and the messages' "1, 2, 3 and 4".
 * The native library's C ABI, header and library bytes are unchanged; the
   manifest is schema 2 (every schema 1 member kept; `nl-manifest` updated).
-* The runtime ABI fingerprint's value is unchanged (`d554d5ff4c234348`
-  before and after: a constant over the same words); the driver's
-  `runtime-abi` command and `--runtime-archive` option are new; the
-  runtime archive gained one 160-byte static.
+* The runtime ABI fingerprint's value is unchanged by this milestone
+  (`d554d5ff4c234348` before and after on the branch: a constant over the
+  same words). Merging main brought the thread milestone's runtime helpers,
+  which are fingerprint inputs: the merged driver reports
+  `e6c1492eceebb13c`, still the digest of its words
+  (`abi_fingerprint_constant_is_the_digest_of_its_words`). The observed
+  records in this report and in audit/external-tools/results/ are the
+  branch's, before that merge. The driver's `runtime-abi` command and
+  `--runtime-archive` option are new; the runtime archive gained one
+  160-byte static.
 * Existing packages (sdl3, sdlkit, raven, event_loop_linux) are schema 2/3
   and untouched.
 * The compiler gained no Android or React Native dependency.
