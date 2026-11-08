@@ -640,16 +640,32 @@ test_botlish_workflow.py); malformed credentials passed to Apple's tools
 The Linux single executable keeps its JIT and its default behavior; the
 Windows build keeps its JIT; the JIT is a default feature everywhere but
 the macOS application's build. [executed] `tests` (Linux x86-64) and
-`tests (linux arm64)` were green on the branch's push of `29bcbe2`; Windows'
-canary failed three aot-run.test tests' reading of Windows output, fixed
-in `a822905` (AOT-RUN-MILESTONE-1.md, section 9.1). [pending] the
-`single-executable` workflow (main pushes only: dispatched on the branch,
-section 24).
+`tests (linux arm64)` (their canaries, on a branch push) were green on
+`29bcbe2` and `a822905`, Icy Tower's Windows build on both; Windows'
+canary failed three aot-run.test tests' reading of Windows output on
+`29bcbe2`, fixed in `a822905` (AOT-RUN-MILESTONE-1.md, section 9.1).
+[executed, Linux x86-64, this sandbox] the Linux single executable built
+by single/build.sh (14,853,994 bytes) passes single/smoke-test.sh (the
+new `-aot-run` refusal without a C compiler included) and
+single/ffi-smoke-test.sh; audit/single-executable's mutants [pending] (a
+run in progress when this was written). [pending] the full suites dispatched on `460fcee` (tests.yml,
+tests-arm64.yml), Windows' workflow and single-executable.yml (section 24).
 
 ## 24. CI runs and artifacts
 
-[pending] The branch's runs at the time of writing: the commits and the
-workflows to read are listed in section 28; ordinary CI uploads the ad hoc
+The branch `ccr-7f920867-5n2fuj` (https://github.com/mwagner-webdev/botlish/actions?query=branch%3Accr-7f920867-5n2fuj):
+
+| commit | workflow | run | result |
+|---|---|---|---|
+| `29bcbe2` | icy-tower (macos arm64) | 42461857789 | failure: build.sh's signing stopped at sign.sh's empty `keychain` array (bash 3.2 under `set -u`: macOS's bash takes an empty array for an unset one); fixed in `a822905` |
+| `29bcbe2` | tests (windows x86-64) | 42461857832 | failure: three aot-run.test tests' reading of Windows output (AOT-RUN-MILESTONE-1.md, section 9.1); fixed in `a822905` |
+| `29bcbe2` | tests, tests (linux arm64), icy-tower (windows x86-64), raven clean room | 42461857793, 42461857916, 42461857885, 42461857808 | success |
+| `a822905` | icy-tower (macos arm64) | 42464261231 | **success** [executed, macOS]: Botlish.app built from the commit (the driver without its JIT, every unit ad hoc signed with the hardened runtime), Icy Tower built by it (static SDL3, Cocoa, `-native-startup main-thread`), the game's tests and the graphical acceptance, the release tooling's five suites and the 92-mutant harness (audit/macos-release/tools/mutate.py) on the runner, the game's ad hoc and dry-run release paths |
+| `a822905` | tests (macos arm64) | 42464261169 | smoke (Tier A, its canary running the changed files, aot-run.test among them, on Apple Silicon): **success** [executed, macOS]; the app jobs: superseded by the next push before a runner took them |
+| `a822905` | tests, tests (linux arm64), ci tools, icy-tower (windows x86-64), raven clean room | 42464261202, 42464261307, 42464261174, 42464261275, 42464261197 | success |
+| `460fcee` | every workflow of the branch, and tests.yml, tests-arm64.yml and single-executable.yml dispatched in full | 42466433458 (macOS), 42466433448 (Windows), 42466447733, 42466450059, 42466437468 | [pending] when this was written |
+
+Ordinary CI uploads the ad hoc
 bundle as the `botlish-macos-aarch64` artifact (macos-arm64.yml's `app`
 job), and a release run uploads `botlish-macos-release` (the ZIP,
 SHA256SUMS, provenance.json) and `botlish-macos-release-diagnostics` (the

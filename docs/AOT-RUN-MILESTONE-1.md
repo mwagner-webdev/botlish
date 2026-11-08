@@ -314,7 +314,7 @@ TerminateProcess and requires the program gone and the directory removed).
 | Linux x86-64 | `tests` workflow (ubuntu-latest), its canary | [executed] the changed file runs first on every push; see section 9.1 |
 | Linux AArch64 | `tests (linux arm64)` (ubuntu-24.04-arm) | [executed] canary on the branch push; see section 9.1 |
 | Windows x86-64 (MSVC) | `tests (windows x86-64)` (windows-2025), canary | [executed] see section 9.1 |
-| macOS AArch64 | `tests (macos arm64)` (macos-15), acceptance tier and the app jobs | [pending] see section 9.1 |
+| macOS AArch64 | `tests (macos arm64)` (macos-15): the smoke job's canary, the acceptance tier, the app jobs | [executed] the canary (section 9.1); the acceptance tier and the app jobs [pending] |
 
 The JIT build's own tests are unchanged and run as before on every host
 that has the JIT: the native backend's test files, the golden suites on
@@ -331,8 +331,14 @@ The branch `ccr-7f920867-5n2fuj`:
   startup report's `process-main-thread` is `unknown` on Windows (as
   main-thread-startup.test reads it), and the kept directory's path is
   Windows' spelling -- fixed in `a822905`, no change to the command.
-* `a822905` and later: [pending] at the time of writing; the reproduction
-  (section 14) names the workflows to read.
+* `a822905`: Linux x86-64 and Linux AArch64 (canaries) green; macOS
+  AArch64's smoke job, whose canary runs the changed test files first,
+  aot-run.test among them, green [executed, macOS]; Windows' and macOS's
+  later jobs superseded by the next push.
+* `460fcee` (adds `aotr-parent-killed-windows`): [pending] at the time of
+  writing -- Windows' canary runs aot-run.test there, the full Linux suites
+  were dispatched; MACOS-BOTLISH-DISTRIBUTION-MILESTONE-1.md, section 24,
+  lists the runs.
 
 ## 10. Positive controls and mutants
 
