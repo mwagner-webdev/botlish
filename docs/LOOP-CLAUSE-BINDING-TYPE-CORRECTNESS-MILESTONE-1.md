@@ -225,7 +225,36 @@ claim's verdict, the static-decision dependency analyses it ran
 the build counters and the loop clause records. Before (`88ca1e4`) against
 after:
 
-RESULTS-H
+| over the 138 programs (two rejected before HIR: probes `e2`, `f1`) | before | after |
+|---|---:|---:|
+| method-call decisions and choices | -- | identical |
+| static sites' outcomes and reified codes | -- | identical |
+| acceptance; reported diagnostics (20, kind and location) | -- | identical |
+| HIR text of every program | -- | identical (*) |
+| emission claims' verdicts | -- | identical |
+| whole-program builds / method trials / deviations / finals / reused | 413 / 68 / 13 / 3 / 50 | 413 / 68 / 13 / 3 / 50 |
+| dependency analyses run / graph nodes / labelled edges / site dependencies | 95 / 61,879 / 219,660 / 1,874 | 95 / 61,879 / 219,660 / 1,874 |
+| loop clause bindings (with their standard-library modules) | 4,473 | 4,473 |
+| ... recorded `any` | 4,408 | 710 |
+| ... a reference finer than the record | 3,571 | 5 |
+| ... a reference contradicting the record | 0 | 0 |
+| ... entries in semantic instances' snapshots | 0 | 951 |
+| front-end time, total | 1,048.6 s | 1,043.6 s |
+
+(*) One probe's text differs, `c6`, whose comments this change edits: the
+same file compiled by both front ends gives byte-identical HIR text.
+
+So over the corpus no decision, outcome, diagnostic, certificate, build or
+dependency edge changes: the conservative readers' more precise inputs
+(section G) never reached a decision there. The 710 records left `any`
+are genuinely unknown elements (generic walks of untyped parameters, bare
+`list`s); the five finer references are a guard's narrowing (section D).
+
+`audit/static-decisions/tools/fuzz.tcl` (seeds 17 and 41: 40 programs,
+1,048 sites, four layouts each, batched against sequential): 0 failures.
+Seed 41 reports two layout pairs taking a different number of rounds, an
+economy and no failure, which the tree before the change reports
+identically.
 
 Two targeted programs measure what the corpus does not exercise
 (`tests/loop-clause-binding-types.test`'s `lcb-staticdeps-*`):
@@ -285,7 +314,21 @@ loop clause binding of its programs, each checked against the service's
 presentation, its references' types and the first table's loop element
 type (a counter against `int`):
 
-RESULTS-I
+| loop clause bindings: recorded type | Byte | UnicodeChar | Small | int | Holder | str | List[int]{length: 2} | unknown |
+|---|---|---|---|---|---|---|---|---|
+| loop element | x: `int[std::byte::Byte]` | x: `UnicodeChar` | x: `int[Small]` | x: `int` | x: `Holder` | x: `str` | x: `List[int]{length: 2}` | x: `any` |
+| collecting loop, element | x: `int[std::byte::Byte]` | x: `UnicodeChar` | x: `int[Small]` | x: `int` | x: `Holder` | x: `str` | x: `List[int]{length: 2}` | x: `any` |
+| collecting loop, result | x: `int[std::byte::Byte]` | x: `UnicodeChar` | x: `int[Small]` | x: `int` | x: `Holder` | x: `str` | x: `List[int]{length: 2}` | x: `any` |
+| fold intermediate | x: `int[std::byte::Byte]` | x: `UnicodeChar` | x: `int[Small]` | x: `int` | x: `Holder` | x: `str` | x: `List[int]{length: 2}` | x: `any` |
+| lockstep loop element | x: `int[std::byte::Byte]`, i: `int` | x: `UnicodeChar`, i: `int` | x: `int[Small]`, i: `int` | x: `int`, i: `int` | x: `Holder`, i: `int` | x: `str`, i: `int` | x: `List[int]{length: 2}`, i: `int` | x: `any`, i: `int` |
+
+Every cell equals the service's presentation and its references' types
+(exit status 0). The checker's own table (the first) is unchanged from the
+census for the six original types; its new columns give `List[int]` (a
+TYPE diagnostic prints a List without its length) and `any` -- the record
+keeps the refinement the diagnostic does not print. The collection or
+result types of the first table (`collecting loop, result`,
+`List[int[std::byte::Byte]]`, ...) are unchanged.
 
 ## J. HIR and caches
 
@@ -319,15 +362,68 @@ C-COMPILE-FREESTANDING-MILESTONE-1.md's corpus (33 programs) writes
 byte-identical files (45 files of the 11 programs it compiles; the same 20
 C UNSUPPORTED and 2 front-end rejections) -- M1 changes nothing for C.
 
-RESULTS-K
+Executed, through `tests/local.tcl` (every golden suite on all four
+backends, through the front-end cache): interp 5,637 of 5,637 golden tests,
+compile 5,637 of 5,637, cranelift-generic 5,545 of 5,545, cranelift 5,647
+of 5,647 (the counts differ by the suites' declared exclusions). The census
+probes run every accepted probe on the four backends
+(`audit/text-collection-precision/tools/probes.tcl`: 18 of 18 as
+expected), and `lcb-backends` runs a program with every loop kind on the
+four with one outcome (`value 20`).
 
 ## L. Regression and mutation testing
 
-RESULTS-L
+| command | result |
+|---|---|
+| `tclsh9.0 tests/loop-clause-binding-types.test` (interp and compile passes) | 18 of 18 |
+| `tests/compiler-service.test` (new `cs-hover-loop-variable`) | 57 of 57 on both passes |
+| `tests/lsp.test` (new `lsp-lang-loop-variable-worker`, `-sync`) | 79 of 79 on both passes |
+| `tclsh9.0 tests/local.tcl` (275 Tcl test files on interp and compile, 118 golden suites on four backends) | 17,934 Tcl tests passed, 1 failed: `sh-grammar-vim-corpus` of `tests/syntax-highlighting.test` on the compile pass, `vim` exiting with status 1 under the run's four-way load (the lexer, the grammars and the two files it reads are unchanged); the file's rerun command passed (26 of 26, 1 skipped by `nodeTextMate`), as its interp pass did in the run itself. Golden: every test of every suite on every backend (section K) |
+| `audit/text-collection-precision/tools/probes.tcl` | 18 probes as expected (`c1`, `c6` flipped) |
+| `python3 -I audit/text-collection-precision/tools/matrix.py` | exit 0 (section I) |
+| `audit/loop-binding-types/tools/mutate.tcl` | 14 of 14 killed by the tests their `!!` lines name (below) |
+| `tclsh9.0 tools/mutant-catalogs.tcl` | 91 catalogs, 3,191 mutants, 0 problems |
+| `audit/static-decisions/tools/fuzz.tcl -seed 17`, `-seed 41` | 0 failures (section H) |
+| `audit/hir-interchange/tools/roundtrip.tcl -via interchange` / `-via cache` | 12 suites, 108 / 120 artifacts and outcomes, 0 differ |
+| `audit/hir-interchange/tools/mutate.tcl` | 28 of 28 killed |
+| `audit/affine/tools/fuzz.tcl -seed 1`, `7`, `23` | 270 programs, 0 disagreements |
+| `audit/affine/tools/mutate.tcl -only exit-raw-only,last-use-raw-only,partial-destructure-leak`; `audit/context-affine/tools/mutate.tcl -only context-binding-owns` | 4 of 4 killed (by tests and by the fuzzer) |
+| `tclsh9.0 tools/compilerpedia.tcl check` | 1,290 topics, 758 examples, 0 problems |
+| `main.tcl -emit-c` over the C corpus | byte-identical (section K) |
+| `audit/loop-binding-types/tools/compare.tcl` before / after | section H |
+
+The affine and coroutine catalogs were not run in full (121 mutants, hours
+here): no mutant of either edits the lines this change touches
+(`hir::affine::BindingType`'s order of cases), `tools/mutant-catalogs.tcl`
+shows every one still applies, and the four whose kill depends on what
+`BindingType` answers -- three affine, one context-affine -- were run and
+killed. The method-resolution oracle was not run: nothing of the decision
+changed, and its decisions over the corpus are identical (section H).
+
+The mutants (`audit/loop-binding-types/tools/mutants.txt`):
+
+| mutant | breaks | killed by |
+|---|---|---|
+| `lcb-element-unrecorded` | no listloop record | `lcb-reproducer`, `lcb-every-kind`, `lcb-service-declaration-reference`, `cs-hover-loop-variable`, `lsp-lang-loop-variable-worker`, `-sync` |
+| `lcb-counter-unrecorded` | no countloop record | `lcb-every-kind`, `lcb-generic-record`, `lcb-service-declaration-reference` |
+| `lcb-lockstep-unrecorded` | no lockstep record | `lcb-every-kind`, `lcb-service-declaration-reference`, both LSP tests |
+| `lcb-lockstep-first-clause` | every clause gets the first clause's type | `lcb-every-kind`, `lcb-service-declaration-reference` |
+| `lcb-poison-recorded-any` | a poisoned element recorded `any` | `lcb-poisoned-iterable` |
+| `lcb-refinement-forgotten` | a refined element recorded as its base | `lcb-refinements` |
+| `lcb-domain-carrier` | a domain element recorded as its carrier | `lcb-refinements`, `lcb-reproducer`, `lcb-service-declaration-reference`, both LSP tests |
+| `lcb-first-instance-global` | the first instance's type stored as the program's record | `lcb-generic-record`, `lcb-service-generic`, both LSP tests |
+| `lcb-later-instance-overwrites` | every instance overwrites the program's record | `lcb-generic-record`, `lcb-service-generic`, both LSP tests |
+| `lcb-snapshot-omits-clauses` | an instance's snapshot keeps no loop clause | `lcb-generic-record`, `lcb-instance-view` |
+| `lcb-service-declaration-any` | the service presents a declaration as `any`, references intact | `lcb-service-declaration-reference`, `cs-hover-loop-variable`, both LSP tests |
+| `lcb-interchange-loses` | decoding interchange forgets the records | `lcb-interchange`, `lcb-cache`, `lsp-lang-loop-variable-worker` |
+| `lcb-cache-strengthens` | a cache hit makes an `any` record precise | `lcb-cache` |
+| `lcb-hir-text-unrebuilt` | reading HIR text leaves the records out | `lcb-hir-text` |
+
+CI on the branch (`cad6bb7`): `icy-tower (windows x86-64)` and the `tests (linux arm64)` canary passed; `tests (macos arm64)`, `tests (windows x86-64)`, `icy-tower (macos arm64)` and the dispatched `tests`, `tests (linux arm64)` and `static-decisions` runs are pending (queued), not passed.
 
 ## M. Performance
 
-RESULTS-M
+Pending: `audit/loop-binding-types/tools/bench.tcl` (both trees, 5 runs each, without other load) is being measured.
 
 ## N. Remaining limitations
 
