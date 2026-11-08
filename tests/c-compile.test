@@ -467,6 +467,39 @@ foreach name [dict keys $::ccCorpus] {
     } -match regexp -result {^\{(value|error): [^\n]*\}$}
 }
 
+# The repository's own example programs the backend compiles: each agrees
+# with the reference (the gate against an unused variable or helper in the
+# C of a program written for other backends, such as a binding only a
+# discarded branch reads).
+test cc-parity-examples "the example programs the C backend compiles agree with every other backend" -constraints hostCC -body {
+    set provider [file join $::ccProviders botlish_rt_v1_int_arena.c]
+    set mismatches {}
+    foreach file {01-arithmetic 02-recursion 04-branch-value 05-shadowing 06-list 07-loop-break 08-return
+            11-boolean-operators 14-modules} {
+        set path [file join $::projectRoot examples surface $file.bot]
+        set hir [surface::readProgramFile $path -warnings off]
+        set out [ccompile::program $hir -prefix prog -source $file.bot]
+        set dir [ccDir]
+        ccompile::write $out $dir
+        set gen [dict create dir $dir prefix prog out $out]
+        set got [lsort -unique [lmap compiler $::ccCompilers {ccRun [ccBuild $gen $compiler [list $provider] -O2]}]]
+        set reference [list]
+        foreach script {{core::evalProgram [hir::lower $hir]} {core::compiler::evalHir $hir}} {
+            lappend reference "value: [core::value::show [eval $script] 1]"
+        }
+        if {[lsort -unique [concat $got $reference]] ne [lsort -unique $reference] || [llength [lsort -unique $reference]] != 1} {
+            lappend mismatches "$file: $got vs $reference"
+        }
+    }
+    set mismatches
+} -result {}
+
+test cc-unsupported-erased-enum "an instance called with cases of different enums is C UNSUPPORTED, not an internal error" -body {
+    set hir [surface::readProgramFile [file join $::projectRoot examples surface 15-enums.bot] -warnings off]
+    catch {ccompile::program $hir -prefix u} message options
+    list [dict get $options -errorcode] [string match "*an enum value whose enum is not known statically*" $message]
+} -result {{C UNSUPPORTED} 1}
+
 # The generated differential: arithmetic at the int64_t boundaries, in
 # functions whose operands the compiler proves fit (int64_t arithmetic) and
 # in folds, whose intermediates it does not (the Int path), against the

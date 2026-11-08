@@ -11394,6 +11394,8 @@ tests/c-compile.test cc-parity-mod-zero pass
 tests/c-compile.test cc-parity-mod-zero-big pass
 tests/c-compile.test cc-parity-shift-range pass
 tests/c-compile.test cc-parity-shift-negative pass
+tests/c-compile.test cc-parity-examples pass
+tests/c-compile.test cc-unsupported-erased-enum pass
 tests/c-compile.test cc-parity-generated pass
 tests/c-compile.test cc-pure-needs-nothing pass
 tests/c-compile.test cc-manifest-lists-the-services pass

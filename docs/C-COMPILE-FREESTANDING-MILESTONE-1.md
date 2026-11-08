@@ -35,7 +35,7 @@ Implemented:
   system calls for x86-64, AArch64, RISC-V 64, s390x, ARMv7 and i386), a
   static-arena provider of the Int services, two example programs and
   `demo.sh`, which reproduces the demonstrations.
-* `tests/c-compile.test` (36 tests): parity with interp, compile and
+* `tests/c-compile.test` (38 tests): parity with interp, compile and
   cranelift; the link boundary; the manifest; no-libc builds and runs;
   cross-architecture compilation and emulated execution; the diagnostics; the
   command line.
@@ -46,7 +46,7 @@ Acceptance criteria (brief, section 15), each with its evidence:
 
 | criterion | evidence |
 |---|---|
-| a real program compiles to valid, readable C | [test] 14 corpus programs; [run] section 4's excerpts |
+| a real program compiles to valid, readable C | [test] 13 corpus programs, a generated one and 9 repository examples; [run] section 4's excerpts |
 | a nontrivial subset executes with matching semantics | [test] `cc-parity-*` (gcc and clang, -O0 and -O2) against interp, compile, cranelift; `cc-parity-generated` (120 boundary expressions) |
 | a service-free program builds with no runtime and no hosted library | [test] `cc-freestanding-objects`, `cc-freestanding-executable`; [emulated] `cc-cross-execution` |
 | a program needing a service compiles without its provider | [test] `cc-missing-service-compiles` |
@@ -616,6 +616,22 @@ give the same HIR (which must agree among themselves):
 | mod-zero, mod-zero-big | the division-by-zero error, with and without a service |
 | shift-range, shift-negative | the shift-amount error |
 | generated | 60 random boundary operations (`+ - * < == mod`), each proven and on the Int path |
+| examples | the nine `examples/surface` programs the backend compiles (`cc-parity-examples`) |
+
+**The repository's corpus** [run]: of the 33 programs of
+`examples/surface`, `examples/stdlib`, `examples/refinement` and `bench`
+(the warning gate's corpus directories, minus the platform ones), 2 are
+rejected by the front end on purpose (`09-mutual-recursion`,
+`10-duplicate-binding`), 11 compile to C -- every one agrees with interp,
+compile and cranelift -- and 20 are C UNSUPPORTED: Lists of unknown length
+(6), values of no static type (4), Strings (2), ImmutableSet (3), a
+function or native as a value (2), `integer?` (1), an erased enum (1), a
+nested unsupported type (1). That census found three defects of the
+backend, fixed and now under test: a binding only a discarded branch read
+left an unused C variable, the display unit defined an unused helper (both
+fatal under -Werror), and an instance specialization keyed by the bare kind
+`enum` (`fn same(x)` called with cases of two enums) raised an internal
+error instead of C UNSUPPORTED (`cc-unsupported-erased-enum`).
 
 All pass (section 16). Interp is not compared on million-deep recursion
 (Tcl's recursion limit stops it first: `TCL LIMIT STACK`); a C self tail
@@ -682,7 +698,7 @@ Reproduce [run]:
 
 [run] on this branch, Linux x86-64, Tcl 9.0.1:
 
-* `tests/c-compile.test`: 36 tests, 36 passed (gcc 13.3.0, clang 18.1.3,
+* `tests/c-compile.test`: 38 tests, 38 passed (gcc 13.3.0, clang 18.1.3,
   ld.lld 18.1.3, qemu-user 8.2.2, the cross libgcc 13 packages installed).
 * `tests/main-cli.test`: 72 passed (the option table, the usage width and
   the cli.options topic cover `-emit-c` and the new `-out`).

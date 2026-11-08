@@ -434,6 +434,12 @@ proc ccompile::ReprOf {type r e} {
         unit { return unit }
         enum {
             set id [lindex $type 1]
+            if {$id eq ""} {
+                # A specialization key keeps an enum's kind, not its identity:
+                # an instance called with cases of several enums has no one C
+                # type for them.
+                Unsupported $e "an enum value whose enum is not known statically (a function called with cases of different enums)"
+            }
             if {[hir::enums::payloadTypes $id] ne "" && [lsearch -not [hir::enums::payloadTypes $id] {}] >= 0} {
                 Unsupported $e "an enum whose cases carry payloads ([hir::enums::display $id])"
             }
@@ -1069,7 +1075,17 @@ proc ccompile::Function {id} {
         lappend map "@@RESULT$k@@" [Want fn $op $resultRepr]
         incr k
     }
-    dict set fn lines [lmap line [dict get $fn lines] {string map $map $line}]
+    set lines [lmap line [dict get $fn lines] {string map $map $line}]
+    # A binding whose C variable nothing but its declaration names is used
+    # once, so no C compiler warns of it.
+    set text [join $lines \n]
+    dict set fn lines [lmap line $lines {
+        if {[regexp {^(\s*)@@UNREAD:([^:]+):(.*)@@$} $line -> indent b c]} {
+            if {[regexp -all "\\m$c\\M" $text] > 2} continue
+            set line "${indent}(void)$c;"
+        }
+        set line
+    }]
     set active [lrange $active 0 end-1]
     set paramList {}
     foreach b $params repr $paramReprs {
@@ -1385,6 +1401,9 @@ proc ccompile::Bind {fnVar e node} {
     }
     set c v_${name}_[string range $b 1 end]
     Emit fn "[CType [lindex $value 0]] $c = [lindex $value 1];"
+    # A binding nothing reads is still declared (a branch value may be
+    # assigned to it), and marked used: resolved once the body is known.
+    Emit fn "@@UNREAD:$b:$c@@"
     dict set fn locals $b [list [lindex $value 0] $c]
     return [list [lindex $value 0] $c]
 }
@@ -2334,37 +2353,41 @@ proc ccompile::Display {source} {
     set p $prefix
     set displayShown [dict create]
     set displayFns {}
+    variable displayI64 0
     set top [ShowCall $programResult "*value"]
     set lines [list [Banner ${p}_display.c $source "displaying the program's value"] "" "#include \"$p.h\"" "" \
         "typedef struct ${p}_text \{" "    char *buffer;" "    size_t capacity;" "    size_t length;" "\} ${p}_text;" "" \
         "static void ${p}_put(${p}_text *text, const char *s)" "\{" \
         "    for (; *s != '\\0'; s++) \{" \
         "        if (text->length < text->capacity) \{" "            text->buffer\[text->length\] = *s;" "        \}" \
-        "        text->length++;" "    \}" "\}" "" \
-        "/* Decimal digits by subtraction: no division (a library routine on many" \
-        " * 32-bit targets). */" \
-        "static void ${p}_put_i64(${p}_text *text, int64_t value)" "\{" \
-        "    static const uint64_t powers\[\] = \{" \
-        "        10000000000000000000u, 1000000000000000000u, 100000000000000000u," \
-        "        10000000000000000u, 1000000000000000u, 100000000000000u, 10000000000000u," \
-        "        1000000000000u, 100000000000u, 10000000000u, 1000000000u, 100000000u," \
-        "        10000000u, 1000000u, 100000u, 10000u, 1000u, 100u, 10u, 1u" \
-        "    \};" \
-        "    char digits\[2\] = \{0, 0\};" \
-        "    uint64_t magnitude = value < 0 ? (uint64_t)0 - (uint64_t)value : (uint64_t)value;" \
-        "    bool started = false;" \
-        "    size_t k;" \
-        "    if (value < 0) \{" "        ${p}_put(text, \"-\");" "    \}" \
-        "    for (k = 0; k < sizeof powers / sizeof powers\[0\]; k++) \{" \
-        "        char digit = '0';" \
-        "        while (magnitude >= powers\[k\]) \{" "            magnitude -= powers\[k\];" "            digit++;" "        \}" \
-        "        if (digit != '0' || started || powers\[k\] == 1u) \{" \
-        "            started = true;" "            digits\[0\] = digit;" "            ${p}_put(text, digits);" "        \}" \
-        "    \}" "\}"]
+        "        text->length++;" "    \}" "\}"]
+    if {$displayI64} {
+        lappend lines "" \
+            "/* Decimal digits by subtraction: no division (a library routine on many" \
+            " * 32-bit targets). */" \
+            "static void ${p}_put_i64(${p}_text *text, int64_t value)" "\{" \
+            "    static const uint64_t powers\[\] = \{" \
+            "        10000000000000000000u, 1000000000000000000u, 100000000000000000u," \
+            "        10000000000000000u, 1000000000000000u, 100000000000000u, 10000000000000u," \
+            "        1000000000000u, 100000000000u, 10000000000u, 1000000000u, 100000000u," \
+            "        10000000u, 1000000u, 100000u, 10000u, 1000u, 100u, 10u, 1u" \
+            "    \};" \
+            "    char digits\[2\] = \{0, 0\};" \
+            "    uint64_t magnitude = value < 0 ? (uint64_t)0 - (uint64_t)value : (uint64_t)value;" \
+            "    bool started = false;" \
+            "    size_t k;" \
+            "    if (value < 0) \{" "        ${p}_put(text, \"-\");" "    \}" \
+            "    for (k = 0; k < sizeof powers / sizeof powers\[0\]; k++) \{" \
+            "        char digit = '0';" \
+            "        while (magnitude >= powers\[k\]) \{" "            magnitude -= powers\[k\];" "            digit++;" "        \}" \
+            "        if (digit != '0' || started || powers\[k\] == 1u) \{" \
+            "            started = true;" "            digits\[0\] = digit;" "            ${p}_put(text, digits);" "        \}" \
+            "    \}" "\}"
+    }
     lappend lines {*}$displayFns
     lappend lines "" "size_t ${p}_show(const ${p}_value *value, char *buffer, size_t capacity)" "\{" \
         "    ${p}_text text;" "    text.buffer = buffer;" "    text.capacity = capacity;" "    text.length = 0;" \
-        "    $top;" "    return text.length;" "\}"
+        "    (void)value;" "    $top;" "    return text.length;" "\}"
     return "[join $lines \n]\n"
 }
 
@@ -2378,6 +2401,10 @@ proc ccompile::ShowCall {repr value {text &text}} {
     variable displayServices
     variable services
     set p $prefix
+    variable displayI64
+    if {[lindex $repr 0] in {i64 int}} {
+        set displayI64 1
+    }
     switch -- [lindex $repr 0] {
         i64  { return "${p}_put_i64($text, $value)" }
         bool { return "${p}_put($text, ($value) ? \"true\" : \"false\")" }
