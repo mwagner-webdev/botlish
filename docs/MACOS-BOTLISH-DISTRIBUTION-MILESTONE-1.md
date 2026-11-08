@@ -93,8 +93,8 @@ What exists and runs:
   job, for a trusted tag, in the protected environment, sees a credential,
   each only in the steps that read it; only the publish job writes.
 
-To make the first release (section 28): merge, set the environment's
-deployment rule (section 9), push the tag.
+To make the first release (section 28): merge, push the tag (the
+environment's deployment rule admits it since 2026-11-08: section 9).
 
 The milestone's acceptance criteria, as they stand:
 
@@ -336,11 +336,23 @@ point it called.
 
 The compiler's release uses the environment Icy Tower's uses,
 `macos-release`, so the credentials exist once. Its **deployment rule must
-admit the new tags**: Settings, Environments, macos-release, Deployment
-branches and tags, add the tag pattern `botlish-macos-v*` beside
-`icy-tower-macos-v*` (and keep "required reviewers" if set). Until then a
-release run's job is refused by GitHub before it starts, which is safe.
-Nothing else changes:
+admit the new tags, and only tags**: Settings, Environments, macos-release,
+Deployment branches and tags, "Selected branches and tags", the tag rules
+`botlish-macos-v*` and `icy-tower-macos-v*` and no branch rule (both jobs
+that enter the environment run only for those tags: botlish-macos.yml's
+and icy-tower-macos.yml's `release`, each `if` requiring
+`refs/tags/PREFIX`). With "No restriction" a workflow run of any branch
+could enter the environment and read its secrets, a branch's own edited
+workflow included. [inspected, the owner's settings page, 2026-11-08] it
+was "No restriction" and is now "Selected branches and tags", 0 branches
+and 2 tags: `botlish-macos-v*` (applying to 0 tags) and the Icy Tower rule
+(applying to its 2 release tags). Recommended beside it, as for Icy Tower
+(ICY-TOWER-MACOS-APP-MILESTONE-1.md, section 11): "Required reviewers"
+(the owner), so every release waits for an approval before the
+credentials reach it, and a tag ruleset for `botlish-macos-v*` restricting
+creation, update and deletion to administrators: a deployment rule admits
+any run of a matching tag, and whoever can push such a tag chooses the
+commit, and so the workflow file, that runs. Nothing else changes:
 
 | name | kind | read by |
 |---|---|---|
@@ -783,9 +795,10 @@ release.
   pinned environment (`audit/macos-release/requirements.txt`):
   `python3 -I audit/macos-release/tests/test_botlish_release.py`,
   `test_botlish_workflow.py`, and `audit/macos-release/tools/mutate.py`.
-* A release: merge to main; add `botlish-macos-v*` to the macos-release
-  environment's deployment rule; push the tag `botlish-macos-vX.Y.Z` on a
-  commit of main; the release gate runs it once the commit is green.
+* A release: merge to main; push the tag `botlish-macos-vX.Y.Z` on a
+  commit of main (the macos-release environment's deployment rule admits
+  `botlish-macos-v*`: section 9); the release gate runs it once the commit
+  is green.
 * CI on a branch: macos-arm64.yml (every push: `smoke`, `app`, `app-clean`,
   `link-plan-sdl3`, `main-thread-startup`; `[ci-app-mutants]` for the app's
   mutants), icy-tower-macos.yml (the game built with the application, the
