@@ -370,11 +370,11 @@ test lsp-uri-windows {Windows: a drive letter, written or escaped, upper or lowe
 # ===========================================================================
 # The protocol, over real pipes
 
-test lsp-proto-initialize {initialize answers with exactly the implemented capabilities -- full document synchronization with open, close and save, hover, definition, references -- and UTF-16 positions by default} -body {
+test lsp-proto-initialize {initialize answers with exactly the implemented capabilities -- full document synchronization with open, close and save, hover, definition, references, full semantic tokens with the service's legend -- and UTF-16 positions by default} -body {
     set c [lt::Start]
     set result [lt::Result [lspc::Get $c initialize]]
     list [lsp::json::write [lsp::json::get $result capabilities]] [lsp::json::get [lsp::json::get $result serverInfo] name] [lt::Stop $c]
-} -cleanup {unset -nocomplain c result} -result {{{"positionEncoding":"utf-16","textDocumentSync":{"openClose":true,"change":1,"save":{"includeText":false}},"hoverProvider":true,"definitionProvider":true,"referencesProvider":true}} {str botlish} 0}
+} -cleanup {unset -nocomplain c result} -result {{{"positionEncoding":"utf-16","textDocumentSync":{"openClose":true,"change":1,"save":{"includeText":false}},"hoverProvider":true,"definitionProvider":true,"referencesProvider":true,"semanticTokensProvider":{"legend":{"tokenTypes":["namespace","type","struct","enum","interface","parameter","variable","property","enumMember","function","keyword","comment","string","number","operator"],"tokenModifiers":["declaration","defaultLibrary"]},"full":true}}} {str botlish} 0}
 
 test lsp-proto-position-encoding {the position encoding is the first of the client's that the server implements (UTF-16, UTF-32), UTF-16 when it names none of them} -body {
     set out {}
@@ -1266,6 +1266,94 @@ test lsp-lang-topics {Compilerpedia is associated by identity: a diagnostic carr
         [string match "*-help stdlib.std::list::get)*" $std] [lt::Stop $c]
 } -cleanup {file delete -force $dir; unset -nocomplain dir program c main diagnostic own std} -result {{str error.unbound} {fn get(xs, index, default) -> any} 2 1 0}
 
+
+# ===========================================================================
+# Semantic tokens (SYNTAX-HIGHLIGHTING-MILESTONE-1.md)
+
+# The semantic tokens of URI (whose text is TEXT), decoded: "LINE:CHARACTER
+# TEXT TYPE MODIFIERS..." each, the legend's names, the operators left out.
+proc lt::Tokens {c uri text args} {
+    set response [lspc::request $c textDocument/semanticTokens/full \
+        [lsp::json::obj textDocument [lsp::json::obj uri [lsp::json::str $uri]]] {*}$args]
+    set result [lt::Result $response]
+    if {$result eq {null {}}} {
+        return null
+    }
+    set types {namespace type struct enum interface parameter variable property enumMember function keyword comment string number operator}
+    set modifiers {declaration defaultLibrary}
+    set lines [split $text \n]
+    set line 0
+    set character 0
+    set out {}
+    foreach {dl dc length type bits} [lmap v [lsp::json::elements [lsp::json::get $result data]] {lsp::json::integer $v}] {
+        if {$dl} {
+            set character 0
+        }
+        incr line $dl
+        incr character $dc
+        if {[lindex $types $type] eq "operator"} continue
+        # (UTF-16 units: the texts here are BMP but for one astral test.)
+        set lineText [lindex $lines $line]
+        set token [string range $lineText $character [expr {$character + $length - 1}]]
+        set names [lmap m $modifiers {if {!($bits & (1 << [lsearch $modifiers $m]))} continue; set m}]
+        lappend out [string trimright "$line:$character $token [lindex $types $type] [join $names]"]
+    }
+    return $out
+}
+
+test lsp-tokens-document {semantic tokens of an open program: its keywords, names, numbers, a module's function, a standard-library function (defaultLibrary), declarations -- the service's tokens (service::tokens), in the relative encoding} -body {
+    set dir [lt::Project tokens]
+    set c [lt::Start]
+    set main [lspc::uri $dir/main.bot]
+    lspc::didOpen $c $main $::ltMain
+    lt::Diagnostics $c $main 1
+    list [lt::Tokens $c $main $::ltMain] [lt::Stop $c]
+} -cleanup {file delete -force $dir; unset -nocomplain dir c main} -result {{{0:0 import keyword} {0:7 shapes namespace} {1:0 import keyword} {1:7 std namespace} {1:12 list namespace} {3:0 fn keyword} {3:3 double function declaration} {3:10 n parameter declaration} {3:13 int type} {3:21 int type} {4:4 n parameter} {4:8 2 number} {6:0 a variable declaration} {6:4 shapes namespace} {6:12 area function} {6:17 3 number} {6:20 4 number} {7:0 b variable declaration} {7:4 std namespace} {7:9 list namespace} {7:15 get function defaultLibrary} {7:20 1 number} {7:23 2 number} {7:27 5 number} {7:30 0 number} {8:0 double function} {8:7 a variable} {8:11 b variable}} 0}
+
+test lsp-tokens-wait {a tokens request made before the document's analysis has answered waits for it, never answers from nothing; an edit is answered from its own analysis} -body {
+    set dir [lt::Project tokens-wait]
+    set c [lt::Start]
+    set main [lspc::uri $dir/main.bot]
+    lspc::didOpen $c $main $::ltMain
+    set first [llength [lt::Tokens $c $main $::ltMain]]
+    set edited "$::ltMain\nzz = 7\n"
+    lspc::didChange $c $main 2 $edited
+    set second [lrange [lt::Tokens $c $main $edited] end-1 end]
+    list $first $second [lt::Stop $c]
+} -cleanup {file delete -force $dir; unset -nocomplain dir c main first second edited} -result {28 {{10:0 zz variable declaration} {10:5 7 number}} 0}
+
+test lsp-tokens-refresh {a fresh analysis asks a client that supports it to request its tokens again (workspace/semanticTokens/refresh, the server's one request); a client that does not is never asked} -body {
+    set out {}
+    foreach capabilities [list [lsp::json::obj workspace [lsp::json::obj semanticTokens [lsp::json::obj refreshSupport {bool 1}]]] [lsp::json::obj]] {
+        set dir [lt::Project tokens-refresh]
+        set c [lt::Start -capabilities $capabilities]
+        set main [lspc::uri $dir/main.bot]
+        lspc::didOpen $c $main $::ltMain
+        lt::Diagnostics $c $main 1
+        lt::Pump $c 500
+        lappend out [llength [lspc::notifications $c workspace/semanticTokens/refresh]] [lt::Stop $c]
+        file delete -force $dir
+    }
+    set out
+} -cleanup {unset -nocomplain out capabilities dir c main} -result {1 0 0 0}
+
+test lsp-tokens-utf16 {token positions are the negotiated encoding's: after an astral character, UTF-16 counts it twice} -body {
+    set dir [lt::Dir tokens-utf16]
+    set text "s = \"\U1F600\"\nt = s\n"
+    lt::Put $dir/main.bot $text
+    set c [lt::Start]
+    set main [lspc::uri $dir/main.bot]
+    lspc::didOpen $c $main $text
+    lt::Diagnostics $c $main 1
+    set response [lspc::request $c textDocument/semanticTokens/full [lsp::json::obj textDocument [lsp::json::obj uri [lsp::json::str $main]]]]
+    list [lrange [lmap v [lsp::json::elements [lsp::json::get [lt::Result $response] data]] {lsp::json::integer $v}] 0 14] [lt::Stop $c]
+} -cleanup {file delete -force $dir; unset -nocomplain dir text c main response} -result {{0 0 1 6 1 0 2 1 14 0 0 2 4 12 0} 0}
+
+test lsp-tokens-no-program {a document no analyzed program reads (a standard-library module the editor did not open from a program) has no tokens: null} -body {
+    set c [lt::Start]
+    set uri [lspc::uri [file join $::projectRoot stdlib list.bot]]
+    list [lt::Tokens $c $uri ""] [lt::Stop $c]
+} -cleanup {unset -nocomplain c uri} -result {null 0}
 
 test lsp-sched-supersede-responsive {stopping a superseded analysis never blocks the server: the worker is killed at once, not waited for, and a request sent right after is answered while the dead worker's analysis would still be running} -body {
     set dir [lt::Project supersede-responsive]

@@ -341,6 +341,8 @@ namespace eval hir::static {
         RESOURCE-DECLARATION                     ResourceDeclaration
         RETURN-OUTSIDE-CALLABLE                  ReturnOutsideCallable
         SENDABLE-DECLARATION                     SendableDeclaration
+        THREAD-ENTRY-PLACEMENT                   ThreadEntryPlacement
+        THREAD-ENTRY-REFERENCE                   ThreadEntryReference
         TRAIT-IMPL-ORDER                         TraitImplOrder
         TRAIT-INSTANCE-BUDGET                    TraitInstanceBudget
         TRAIT-NESTED-POLYMORPHIC                 TraitNestedPolymorphic

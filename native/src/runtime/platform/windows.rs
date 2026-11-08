@@ -319,11 +319,22 @@ impl OverflowGuard {
         Self::install_mode(stack, false, label)
     }
 
+    /// Installs the guard of a Botlish thread (runtime/thread.rs) in the
+    /// record its start reserved, in the starting thread's mode.
+    pub fn install_reserved(stack: &NativeStack, reservation: usize, executable: bool, destination: usize, label: &[u8]) -> io::Result<Self> {
+        Self::install_in(stack, executable, Some(destination), label, Some(reservation))
+    }
+
     fn install_mode(stack: &NativeStack, executable: bool, label: &[u8]) -> io::Result<Self> {
+        Self::install_in(stack, executable, None, label, None)
+    }
+
+    fn install_in(stack: &NativeStack, executable: bool, given: Option<usize>, label: &[u8], reservation: Option<usize>) -> io::Result<Self> {
         if records::mine().is_some() {
             return Err(io::Error::new(io::ErrorKind::AlreadyExists, "this thread's stack-overflow guard is already installed"));
         }
-        let destination = Self::prepare(stack, executable)?;
+        let prepared = Self::prepare(stack, executable)?;
+        let destination = given.unwrap_or(prepared);
         let mut installed = INSTALLED.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         if installed.guards == 0 {
             // SAFETY: a handler with the vectored handler's ABI, first in the
@@ -334,7 +345,7 @@ impl OverflowGuard {
             }
             installed.handler = handler as usize;
         }
-        match records::claim(thread_token(), (stack.low_bound, stack.high_bound), executable, destination, label) {
+        match records::claim_as(reservation, thread_token(), (stack.low_bound, stack.high_bound), executable, destination, label) {
             Ok(record) => {
                 installed.guards += 1;
                 Ok(OverflowGuard { record })

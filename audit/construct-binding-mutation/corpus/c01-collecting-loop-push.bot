@@ -1,0 +1,14 @@
+# category: loop-element (List)
+# class: C -- silently discarded write
+# intended: append 42 to every row of `rows` (lengths [2, 3])
+# actual: each push changes the loop variable's own copy; `rows` keeps its
+#         rows, and the loop collects units nobody reads
+# fixed: c01-collecting-loop-push-fixed.bot
+# expect: [1, 2]
+import std::mutable_vector
+
+rows = [std::mutable_vector::from_list([1]), std::mutable_vector::from_list([2, 3])]
+loop row in rows:
+    row.push(42)
+loop row in rows:
+    row.length()

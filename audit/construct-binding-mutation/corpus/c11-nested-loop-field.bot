@@ -1,0 +1,23 @@
+# category: loop-element (List of structs) mutated from a nested loop
+# class: B for the first loop (its lengths are read), C for `grid`
+# intended: append 7 and 8 to every row's cells
+# actual: the inner loop mutates the outer loop variable's copy (the outer
+#         binding is of the same function, so no capture rule applies); the
+#         collected lengths are 3, grid's rows keep 1
+# expect: [[3, 3], [1, 1]]
+import std::mutable_vector
+
+struct Row:
+    cells: MutableVector[int]
+
+fn run() -> List[List[int]]:
+    grid = [Row {cells: std::mutable_vector::from_list([1])}, Row {cells: std::mutable_vector::from_list([2])}]
+    seen = loop row in grid:
+        loop k in [7, 8]:
+            row.cells.push(k)
+        row.cells.length()
+    after = loop row in grid:
+        row.cells.length()
+    [seen, after]
+
+run()

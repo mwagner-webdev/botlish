@@ -710,6 +710,15 @@ proc hir::callables::ArgContexts {hir e} {
     set result [hir::typeOf $hir $e]
     set elem [hir::types::elementOf $result]
     switch -- [lindex $shape 0] {
+        thread-entry {
+            # std::thread::entry(NAME): the entry leaves as an Entry whose
+            # one call is a new VM's (hir/threads.tcl), with exactly its
+            # declared types, copied in and out (std::transfer).
+            lassign $shape _ f
+            set contexts $none
+            lset contexts $f [hir::typeOf $hir [lindex $args $f]]
+            return $contexts
+        }
         callback-pointer {
             # std::ffi::c::callback(NAME) (C-CALLBACK-MILESTONE-1.md): the
             # callback leaves as a C function pointer whose every call

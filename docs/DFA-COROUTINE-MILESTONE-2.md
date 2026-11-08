@@ -1008,7 +1008,9 @@ against 0.53-0.77 s, and 174 ms of driver compile against 33-46 ms.
   workloads still run on interp and compile. The tests that are about
   native code -- the native dispatch modes, fusion's report, the
   allocation count, interchange read by cranelift -- carry
-  `nativeCoroutines`.
+  `nativeCoroutines`. (Since WINDOWS-X86-64-MILESTONE-5.md Windows has
+  native coroutines, Windows fibers: `nativeCoroutines` holds there, and
+  these tests run on the native backends on Windows too.)
 
 ### What the regression run found
 

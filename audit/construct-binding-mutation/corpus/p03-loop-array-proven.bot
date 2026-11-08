@@ -1,0 +1,14 @@
+# category: loop-element (List of MutableArrays), set below its own capacity
+# class: proof interaction -- a loop variable's capacity is known like a
+#        local's: proven in bounds, as with an explicit working copy
+# expect: 0
+import std::mutable_array
+
+fn zero_all(rows: List[MutableArray[int]]) -> List[MutableArray[int]]:
+    loop row in rows:
+        loop i from 0 to row.capacity():
+            row.set(i, 0)
+        row
+
+r = zero_all([std::mutable_array::create(2, 7)])
+0

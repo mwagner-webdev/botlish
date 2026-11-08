@@ -13,7 +13,8 @@
 #   botlish/              main.tcl, LICENSE, core/, compiler/, hir/, surface/,
 #                         service/ (main.tcl -check), lsp/ (main.tcl -lsp),
 #                         pm/ (the package manager: main.tcl add, install,
-#                         ...), native/*.tcl, stdlib/, compilerpedia/ (the engine,
+#                         ...), ccompile/ (the C backend: main.tcl -emit-c),
+#                         native/*.tcl, stdlib/, compilerpedia/ (the engine,
 #                         topics/ and generated/: -help) -- the compiler
 #                         stack, at its checkout-relative paths -- and
 #                         BUILD, the source revision -version prints
@@ -66,7 +67,7 @@ if {[info commands zipfs] eq ""} {
 proc StageCompiler {app} {
     global root
     file mkdir $app
-    foreach item {main.tcl LICENSE core compiler hir surface service lsp pm stdlib} {
+    foreach item {main.tcl LICENSE core compiler hir surface service lsp pm ccompile stdlib} {
         file copy [file join $root $item] [file join $app $item]
     }
     file mkdir [file join $app native] [file join $app compilerpedia]

@@ -391,13 +391,13 @@ fn crt_args_for(flavor: LinkerFlavor, _program: &Program) -> Vec<String> {
             return 1;
         }
     };
-    run(startup, process_argv(), move || {
+    run(startup, process_argv(), Some(super::thread::linked_factory(linked)), move || {
 ====
             eprintln!("{error} (NATIVE STARTUP)");
             return 0;
         }
     };
-    run(startup, process_argv(), move || {
+    run(startup, process_argv(), Some(super::thread::linked_factory(linked)), move || {
 >>>>
 
 @@ sys-helper-unclassified a runtime archive without a helper the program calls is taken for an error of the program's link, not the archive's

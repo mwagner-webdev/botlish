@@ -1,0 +1,282 @@
+diff --git a/hir/emission.tcl b/hir/emission.tcl
+index d0a2071..2d02211 100644
+--- a/hir/emission.tcl
++++ b/hir/emission.tcl
+@@ -88,6 +88,10 @@ namespace eval hir::emission {
+     variable hir
+     variable names [dict create]
+     variable byName [dict create]
++    # Function names bound by more than one function block of the
++    # compilation (nested functions of one name in different scopes): a
++    # name that identifies no function.
++    variable ambiguous [dict create]
+     variable claimsOf [dict create]
+     variable guards [dict create]
+     variable guardKeys [dict create]
+@@ -97,6 +101,11 @@ namespace eval hir::emission {
+     variable certs [dict create]
+     variable fingerprints [dict create]
+     variable diagnosed [dict create]
++    # Recovery's unit graph (hir::recovery::Tainted) when the program has
++    # resolution diagnostics, and the provenance verdicts of the value
++    # bindings the walk read facts of (BindingDependent), memoized.
++    variable recovery {}
++    variable bindingDeps [dict create]
+     variable round 0
+     variable changed 0
+     variable touched {}
+@@ -199,8 +208,8 @@ proc hir::emission::reverify {hirVar} {
+ 
+ proc hir::emission::Reset {h} {
+     variable hir
+-    foreach v {names byName claimsOf guards guardKeys cache langCache contexts certs fingerprints
+-            diagnosed registeredUsed guardsUsed} {
++    foreach v {names byName ambiguous claimsOf guards guardKeys cache langCache contexts certs fingerprints
++            diagnosed registeredUsed guardsUsed bindingDeps} {
+         set ::hir::emission::$v [dict create]
+     }
+     set hir $h
+@@ -222,6 +231,8 @@ proc hir::emission::Reset {h} {
+         dict set ::hir::emission::names $v $name
+         if {![dict exists $::hir::emission::byName $name]} {
+             dict set ::hir::emission::byName $name $v
++        } elseif {[dict get $::hir::emission::byName $name] ne $v} {
++            dict set ::hir::emission::ambiguous $name 1
+         }
+     }
+     # Guards: recognizers none of whose transitions suspends -- an ordinary
+@@ -239,6 +250,111 @@ proc hir::emission::Reset {h} {
+             dict set ::hir::emission::diagnosed $e 1
+         }
+     }
++    set ::hir::emission::recovery {}
++    if {[dict getdef $hir resolutionDiagnostics {}] ne {}} {
++        set ::hir::emission::recovery [hir::recovery::Tainted $hir [dict get $hir resolutionDiagnostics]]
++    }
++}
++
++# 1 if the facts of value binding B -- its type, its exact value -- were
++# derived from code whose meaning the front end could not establish: B is
++# declared by a `bind` whose value is no function, and the reachable code of
++# that value holds a diagnostic of the program's own, poison or a hole, or
++# refers to a value binding of which this holds, or calls a function whose
++# result is inferred (so the value's type is what its body makes it) and
++# whose code depends on a resolution diagnostic (recovery's unit graph for a
++# top-level function; its own code for a nested one).
++proc hir::emission::BindingDependent {b} {
++    variable hir
++    variable bindingDeps
++    if {[dict exists $bindingDeps $b]} {
++        return [dict get $bindingDeps $b]
++    }
++    dict set bindingDeps $b 0
++    set value [BoundValue $b]
++    if {$value eq "" || [dict get $hir exprs $value kind] eq "block"} {
++        return 0
++    }
++    if {[dict exists $hir poisoned $b]} {
++        set out 1
++    } elseif {![dict get $hir exprs $value reachable]} {
++        # A declaration after code that never completes: the binding's type
++        # is inference's default, whatever stopped it -- an unresolved name's
++        # `never` among the possibilities, by recovery's unit graph (the
++        # declaring unit: a module binding's statement, an enclosing
++        # function's whole declaration).
++        variable recovery
++        set out 0
++        if {$recovery ne {}} {
++            if {[dict exists $recovery *]} {
++                set out 1
++            } else {
++                set bind [dict get $hir bindings $b declaredBy]
++                set unit [dict getdef [dict get $recovery unitOf] $bind ""]
++                set out [dict exists [dict get $recovery units] $unit]
++            }
++        }
++    } else {
++        set out [CodeDependent $value 1]
++    }
++    dict set bindingDeps $b $out
++    return $out
++}
++
++# The value expression of the `bind` declaring binding B, or "".
++proc hir::emission::BoundValue {b} {
++    variable hir
++    set binding [dict get $hir bindings $b]
++    set bind [dict get $binding declaredBy]
++    if {[dict get $binding kind] ne "local" || $bind eq "" || ![dict exists $hir exprs $bind]
++            || [dict get $hir exprs $bind kind] ne "bind"} {
++        return ""
++    }
++    return [dict get $hir exprs $bind value]
++}
++
++# 1 if the reachable code of expression E (a nested function's body only
++# when DEEP) is what BindingDependent says.
++proc hir::emission::CodeDependent {e deep} {
++    variable hir
++    variable diagnosed
++    variable recovery
++    set node [dict get $hir exprs $e]
++    if {![dict get $node reachable]} {
++        return 0
++    }
++    if {[dict exists $hir poisoned $e] || [dict exists $hir syntaxDependent $e] || [dict exists $diagnosed $e]} {
++        return 1
++    }
++    if {[dict get $node kind] eq "ref" && [dict get $node binding] ne ""} {
++        set x [dict get $node binding]
++        set v [BoundValue $x]
++        if {$v ne "" && [dict get $hir exprs $v kind] eq "block"} {
++            if {[dict get $hir exprs $v declaredResult] ne "" || $recovery eq {}} {
++                return 0
++            }
++            if {[dict exists $recovery *]} { return 1 }
++            set bind [dict get $hir bindings $x declaredBy]
++            set unit [dict getdef [dict get $recovery unitOf] $bind ""]
++            if {$unit eq $bind} {
++                return [dict exists [dict get $recovery units] $unit]
++            }
++            return [CodeDependent $v 1]
++        }
++        if {$v ne ""} {
++            return [BindingDependent $x]
++        }
++        return 0
++    }
++    if {[dict get $node kind] eq "block" && !$deep} {
++        return 0
++    }
++    foreach child [hir::children $hir $e] {
++        if {[CodeDependent $child 0]} {
++            return 1
++        }
++    }
++    return 0
+ }
+ 
+ # The claims of CLAIMBLOCKS checked, callees first: their records.
+@@ -957,6 +1073,12 @@ proc hir::emission::RefValue {e node} {
+     if {$b ne "" && [dict exists $env $b]} {
+         return [Meet [dict get $env $b] $type]
+     }
++    if {$b ne "" && [BindingDependent $b]} {
++        # Facts of a binding declared outside the walk, derived from code
++        # the front end could not establish (BindingDependent).
++        variable tainted
++        set tainted 1
++    }
+     if {$b ne ""} {
+         set k [hir::exact::BindingIntOf $hir $b]
+         if {$k ne ""} {
+@@ -1019,6 +1141,13 @@ proc hir::emission::EvalCall {e node s} {
+         if {$tk eq "block" && [hir::coroutines::MayYield $hir $t]} {
+             Apply $e $t $s $vals
+         } else {
++            if {$tk ne "block" && [Kind $callee] eq "ref" && [dict get [Node $callee] binding] ne ""
++                    && [BindingDependent [dict get [Node $callee] binding]]} {
++                # A value whose type says it never returns, bound from code
++                # the front end could not establish.
++                variable tainted
++                set tainted 1
++            }
+             if {$tk eq "block"} {
+                 # That it never completes is a fact of the function's code
+                 # (its inferred result), which the walk relies on here: the
+@@ -1344,6 +1473,7 @@ proc hir::emission::Facts {condition outcome} {
+     variable env
+     variable exprVal
+     set result ""
++    set any 0
+     foreach path [hir::range::Paths $hir $condition $outcome] {
+         set penv $env
+         set feasible 1
+@@ -1389,13 +1519,14 @@ proc hir::emission::Facts {condition outcome} {
+             if {!$feasible} break
+         }
+         if {!$feasible} continue
+-        if {$result eq ""} {
++        if {!$any} {
+             set result $penv
++            set any 1
+         } else {
+             set result [JoinEnv $result $penv]
+         }
+     }
+-    return $result
++    return [list $any $result]
+ }
+ 
+ proc hir::emission::JoinEnv {a b} {
+@@ -1428,8 +1559,8 @@ proc hir::emission::EvalIf {e node s} {
+     set value {}
+     set any 0
+     foreach outcome {1 0} body [list [dict get $node thenBody] [dict get $node elseBody]] {
+-        set facts [Facts $cond $outcome]
+-        if {$facts eq ""} continue
++        lassign [Facts $cond $outcome] feasible facts
++        if {!$feasible} continue
+         set env $facts
+         lassign [EvalBody $body $s] out v
+         if {$out ne {}} {
+@@ -1706,7 +1837,11 @@ proc hir::emission::EvalHandle {e node s} {
+ proc hir::emission::UsableCertificates {t} {
+     variable certs
+     variable claimsOf
++    variable ambiguous
+     set out {}
++    if {[dict exists $ambiguous [FunctionName $t]]} {
++        return $out
++    }
+     foreach key [dict getdef $claimsOf $t {}] {
+         set id [list [FunctionName $t] [KeyText $key]]
+         if {[dict exists $certs $id]} {
+@@ -1823,8 +1958,10 @@ proc hir::emission::Valid {cert} {
+     if {[dict get $deps checker] ne [hir::interchange::fingerprint]} {
+         return [list 0 "the checker or the front end changed"]
+     }
++    variable ambiguous
+     dict for {name fp} [dict get $deps functions] {
+         if {![dict exists $byName $name]} { return [list 0 "$name is gone"] }
++        if {[dict exists $ambiguous $name]} { return [list 0 "$name names more than one function"] }
+         if {[FunctionFingerprint [dict get $byName $name]] ne $fp} { return [list 0 "$name changed"] }
+     }
+     variable byQualified
+@@ -1840,6 +1977,9 @@ proc hir::emission::Valid {cert} {
+     }
+     foreach ref [dict get $deps certificates] {
+         lassign $ref fn r digest
++        if {[dict exists $ambiguous $fn]} {
++            return [list 0 "$fn names more than one function"]
++        }
+         set id [list $fn $r]
+         if {![dict exists $certs $id]} {
+             return [list 0 "the certificate of $fn for $r is gone"]
+@@ -1997,7 +2137,16 @@ proc hir::emission::CheckClaim {claim} {
+     set id [list [FunctionName $b] [KeyText $key]]
+     # A certificate this process proved in an earlier compilation, still
+     # valid here: reused, not proved again.
+-    if {$useMemo && [dict exists $memo $id]} {
++    variable ambiguous
++    set identified [expr {![dict exists $ambiguous [FunctionName $b]]}]
++    # A compilation with resolution diagnostics, poison or syntax holes
++    # reuses nothing and memoizes nothing: what the walk would find
++    # dependent there (BindingDependent) is no fingerprint a certificate
++    # records.
++    variable recovery
++    set trusted [expr {$recovery eq {} && [dict getdef $hir poisoned {}] eq {}
++        && [dict getdef $hir syntaxDependent {}] eq {}}]
++    if {$useMemo && $identified && $trusted && [dict exists $memo $id]} {
+         set t0 [clock microseconds]
+         lassign [Valid [dict get $memo $id]] ok why
+         dict incr ::hir::emission::stats validateMicroseconds [expr {[clock microseconds] - $t0}]
+@@ -2074,7 +2223,7 @@ proc hir::emission::CheckClaim {claim} {
+         set cert [Certificate $claim $readset $exits [dict get $rec visits] [dict get $rec fails] $value]
+         dict incr ::hir::emission::stats certifyMicroseconds [expr {[clock microseconds] - $t0}]
+         dict set certs $id $cert
+-        if {$useMemo} {
++        if {$useMemo && $identified && $trusted} {
+             dict set memo $id $cert
+         }
+         dict set record verdict proven

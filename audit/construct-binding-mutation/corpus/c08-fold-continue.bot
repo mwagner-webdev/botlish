@@ -1,0 +1,24 @@
+# category: fold-intermediate
+# class: C -- silently discarded write (fold-specific)
+# intended: record every value, and skip the rest of the body for negatives
+#           ([1, -2, 3])
+# actual: `continue` keeps the iteration's starting intermediate
+#         (FOLD-LOOPS-MILESTONE-1.md, rule 5); the body's `acc` is a copy of
+#         it, so the push of -2 is discarded
+# fixed: c08-fold-continue-fixed.bot
+# expect: [1, 3]
+import std::mutable_vector
+
+fn ints() -> MutableVector[int]:
+    std::mutable_vector::from_list([])
+
+fn f(xs: List[int]) -> List[int]:
+    w = fold x in xs with intermediate acc ints():
+        acc.push(x)
+        if x < 0:
+            continue
+        acc
+    loop y in w:
+        y
+
+f([1, -2, 3])

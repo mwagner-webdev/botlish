@@ -1,0 +1,30 @@
+# category: handler-payload, transformed into another error
+# class: A -- the handler mutates its payload's vector and fails with it as
+#        another error's payload: the mutation travels with the new error
+# expect: [3]
+import std::mutable_vector
+
+error Bad:
+    items: MutableVector[int]
+error Worse:
+    items: MutableVector[int]
+
+fn boom(n: int) -> int errors Bad:
+    if n > 0:
+        return n
+    fail Bad {items: std::mutable_vector::from_list([1])}
+
+fn escalate(n: int) -> int errors Worse:
+    boom(n):
+        on Bad details:
+            details.items.push(2)
+            details.items.push(3)
+            fail Worse {items: details.items}
+
+fn run(n: int) -> List[int]:
+    r = escalate(n):
+        on Worse details:
+            details.items.length()
+    [r]
+
+run(0)
