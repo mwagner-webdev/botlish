@@ -313,7 +313,7 @@ TerminateProcess and requires the program gone and the directory removed).
 | Linux x86-64, stub linker | this sandbox | [executed] 22 passed, 11 skipped (the C-calling tests: the stub links no C; the macOS and Windows tests) |
 | Linux x86-64 | `tests` workflow (ubuntu-latest), its canary | [executed] the changed file runs first on every push; see section 9.1 |
 | Linux AArch64 | `tests (linux arm64)` (ubuntu-24.04-arm) | [executed] canary on the branch push; see section 9.1 |
-| Windows x86-64 (MSVC) | `tests (windows x86-64)` (windows-2025), canary | [executed] see section 9.1 |
+| Windows x86-64 (MSVC) | `tests (windows x86-64)` (windows-2025), canary | [executed] green on `460fceea` (section 9.1) |
 | macOS AArch64 | `tests (macos arm64)` (macos-15): the smoke job's canary, the acceptance tier, the app jobs | [executed] the canary (section 9.1); the acceptance tier and the app jobs [pending] |
 
 The JIT build's own tests are unchanged and run as before on every host
@@ -335,10 +335,12 @@ The branch `ccr-7f920867-5n2fuj`:
   AArch64's smoke job, whose canary runs the changed test files first,
   aot-run.test among them, green [executed, macOS]; Windows' and macOS's
   later jobs superseded by the next push.
-* `460fcee` (adds `aotr-parent-killed-windows`): [pending] at the time of
-  writing -- Windows' canary runs aot-run.test there, the full Linux suites
-  were dispatched; MACOS-BOTLISH-DISTRIBUTION-MILESTONE-1.md, section 24,
-  lists the runs.
+* `460fcee` (adds `aotr-parent-killed-windows`): Windows x86-64's canary,
+  aot-run.test with the new test, **green** [executed, Windows]; macOS's
+  smoke job and its canary green [executed, macOS]; the macOS acceptance
+  tier, the rest of Windows' jobs and the full Linux suites [pending] at
+  the time of writing (MACOS-BOTLISH-DISTRIBUTION-MILESTONE-1.md, section
+  24, lists the runs).
 
 ## 10. Positive controls and mutants
 
@@ -441,13 +443,40 @@ What this says:
 * A run of an executable that is already built is milliseconds: a build
   cache would save the second; this milestone keeps none (section 12).
 
-### 11.2 macOS AArch64 and Windows x86-64
+### 11.2 macOS AArch64
 
-The `AOT-run costs` step of macos-arm64.yml's and windows-x86_64.yml's
-smoke jobs prints the same tables on those runners; bench/macos-app.tcl
-in the `app` job measures `-aot-run` from the JIT-less Botlish.app
-(MACOS-BOTLISH-DISTRIBUTION-MILESTONE-1.md, section 26). [pending] their
-figures at the time of writing.
+[executed] macos-arm64.yml's smoke job, run 42466433458 on `460fcee`: GitHub's
+`macos-15` runner, an Apple M1 (Virtual) with 3 processors, Darwin 24.6.0;
+the rustc linker (Apple's ld underneath); best of 3.
+
+| program | front end | NIR lowering | object | link | native::executable | native::aotRun | driver: linked / started |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| hello | 1583.6 | 197.3 | 10.6 | 118.6 | 286.0 | 351.9 | 138.0 / 138.3 |
+| 2048 | 229.4 | 379.1 | 21.6 | 196.5 | 582.1 | 702.4 | 192.2 / 192.5 |
+
+| program | interpreter | -emit-native-executable | the executable | emit + run | -aot-run | -backend cranelift (JIT) |
+|---|---:|---:|---:|---:|---:|---:|
+| hello | -- | 2323.9 | 4.3 | 2328.2 | 2296.1 | 2228.7 |
+| 2048 | 6054.4 | 836.7 | 8.6 | 845.3 | 818.4 | 588.9 |
+
+Time to hello's first line: `-aot-run` 2201.6 ms, the emitted executable
+3.7 ms, the JIT 2337.9 ms.
+
+On macOS hello's IO is libSystem's C (Darwin IO), so the program calls C:
+its front end compiles the C declarations (1.6 s against 0.4 s on Linux),
+and even the JIT build runs it as a linked executable (`run_linked`), which
+is why the JIT's time to first output is no better than `-aot-run`'s here.
+For 2048, which calls no C, the JIT is 230 ms faster end to end: Apple's ld
+links it in about 200 ms. As on Linux, `-aot-run` costs what compiling and
+then running costs (818 against 845 ms).
+
+### 11.3 Windows x86-64
+
+The `AOT-run costs` step of windows-x86_64.yml's smoke job ran and passed
+on `460fcee` (run 42466433448); its figures are in that job's log, not
+copied here. bench/macos-app.tcl in macos-arm64.yml's `app` job measures
+`-aot-run` from the JIT-less Botlish.app
+(MACOS-BOTLISH-DISTRIBUTION-MILESTONE-1.md, section 26): [pending].
 
 ## 12. Limitations
 

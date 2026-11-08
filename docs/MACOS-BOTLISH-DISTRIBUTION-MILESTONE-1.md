@@ -663,7 +663,11 @@ The branch `ccr-7f920867-5n2fuj` (https://github.com/mwagner-webdev/botlish/acti
 | `a822905` | icy-tower (macos arm64) | 42464261231 | **success** [executed, macOS]: Botlish.app built from the commit (the driver without its JIT, every unit ad hoc signed with the hardened runtime), Icy Tower built by it (static SDL3, Cocoa, `-native-startup main-thread`), the game's tests and the graphical acceptance, the release tooling's five suites and the 92-mutant harness (audit/macos-release/tools/mutate.py) on the runner, the game's ad hoc and dry-run release paths |
 | `a822905` | tests (macos arm64) | 42464261169 | smoke (Tier A, its canary running the changed files, aot-run.test among them, on Apple Silicon): **success** [executed, macOS]; the app jobs: superseded by the next push before a runner took them |
 | `a822905` | tests, tests (linux arm64), ci tools, icy-tower (windows x86-64), raven clean room | 42464261202, 42464261307, 42464261174, 42464261275, 42464261197 | success |
-| `460fcee` | every workflow of the branch, and tests.yml, tests-arm64.yml and single-executable.yml dispatched in full | 42466433458 (macOS), 42466433448 (Windows), 42466447733, 42466450059, 42466437468 | [pending] when this was written |
+| `460fcee` | icy-tower (macos arm64) | 42466433504 | **success** [executed, macOS]: as for `a822905`, on the bundle whose release step now also asks Gatekeeper's refusal, and the release tooling's 92 mutants |
+| `460fcee` | tests (macos arm64) | 42466433458 | smoke (its canary, `AOT-run costs`) **success** [executed, macOS]; the Botlish.app job (the ad hoc release stages, the Gatekeeper refusal, acceptance.sh), app-clean, link-plan-sdl3, main-thread-startup and the acceptance shards [pending] (queued for runners when this was written) |
+| `460fcee` | tests (windows x86-64) | 42466433448 | canary (aot-run.test with `aotr-parent-killed-windows`) **success** [executed, Windows]; smoke's `AOT-run costs` step success; the rest of smoke, the root plans and the acceptance shards [pending] |
+| `460fcee` | single executable (dispatched) | 42466437468 | the x86-64 and AArch64 builds and their build-machine smoke and C FFI smoke tests **success**; the stock-container smoke jobs [pending] |
+| `460fcee` | tests, tests (linux arm64) (dispatched in full) | 42466447733, 42466450059 | [pending] |
 
 Ordinary CI uploads the ad hoc
 bundle as the `botlish-macos-aarch64` artifact (macos-arm64.yml's `app`
@@ -691,7 +695,8 @@ release.
   times (the launcher, Tcl, the archive's mount, `-version`, `-help`,
   `-check`, the interpreter, the language server, the driver, and with no
   JIT `-aot-run` in its place, `-emit-native-executable`, a moved copy's
-  first start). [pending] the run's figures.
+  first start). [pending] the run's figures (the `app` job had not run
+  when this was written).
 * [executed, Linux x86-64] the JIT's share of the driver: −320,768 bytes
   stripped (3.6%) (section 3). The difference between a JIT-less binary and
   one that merely refuses is that difference plus the absence of the JIT's
