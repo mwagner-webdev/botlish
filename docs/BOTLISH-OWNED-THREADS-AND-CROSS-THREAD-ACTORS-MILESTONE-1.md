@@ -124,9 +124,12 @@ Evidence in short: tests/threads.test passes on Linux x86-64 on both
 passes, also its GC-stress tests (**observed**); 29 of 29 targeted mutants
 are killed (section 18); the measurements of section 19 were taken on a
 machine that two orphaned test processes kept partly busy, so its scaling
-figures are lower bounds; Linux AArch64, macOS and Windows results are
-**CI**, pending or (macOS, Windows) failed in a test-harness build step and
-fixed, awaiting their rerun (section 20).
+figures are lower bounds. In **CI**, tests/threads.test passed on Linux
+AArch64 (also under GC stress), and its six host-independent tests
+(lifecycle, its GC-stress run, the limit, a worker's stack overflow, the
+Tcl refusal, static blocks) on macOS AArch64 and Windows x86-64; the CI
+failures of the branch were tests this work broke elsewhere, each fixed
+(section 20).
 
 ## 2. Starting architecture
 
@@ -601,9 +604,9 @@ destination actor's ordinary mailbox through an ordinary task.
 | Host | Threads (lifecycle, limit, overflow) | Transport, remote actors, ABI v2, broker | Evidence |
 |---|---|---|---|
 | Linux x86-64 | runs | runs | **observed** (this machine) |
-| Linux AArch64 | expected to run (same code, the AArch64 guard) | expected to run | **CI** pending (tests-arm64.yml) |
-| macOS AArch64 | expected to run (the guard's macOS discovery) | needs a Doorbell driver: event_loop_linux is Linux's | **CI** pending (macos-arm64.yml) |
-| Windows x86-64 | expected to run (the guard's Windows records) | refused: no doorbell (port open fails, -2 - ENOSYS) | **CI** pending (windows-x86_64.yml) |
+| Linux AArch64 | runs | runs | **CI** (tests-arm64.yml: tests/threads.test passed on interp, compile and under GC stress) |
+| macOS AArch64 | runs | needs a Doorbell driver: event_loop_linux is Linux's | **CI** (macos-arm64.yml acceptance: lifecycle, its GC-stress run, limit, overflow, the Tcl refusal and the static-block test passed; the 15 transport tests are Linux's) |
+| Windows x86-64 | runs | refused: no doorbell (port open fails, -2 - ENOSYS) | **CI** (windows-x86_64.yml acceptance: the same six tests passed) |
 | interp, compile | refused at lowering (BACKEND THREAD-UNAVAILABLE) | the runtime operations refuse when reached | **observed** th-tcl-refusal |
 
 tests/threads.test gates its lifecycle tests on the host's stack guard and
@@ -805,25 +808,44 @@ tests/sendability.test, tests/actor.test's source fences,
 runtime::thread` and the mutation harnesses of section 18.
 
 **CI** (the branch `claude/inspiring-davinci-idqbr0`). The shared runner
-pool was congested throughout: main's own latest tests.yml run (f2787af,
-**success**) took over seven hours from push to completion.
+pool was congested throughout (main's own tests.yml run at f2787af took
+over seven hours from push to completion), so the full runs tested
+earlier commits than the final one:
 
 | Workflow | Commit | Result |
 |---|---|---|
-| tests.yml canary (mutant catalogs, warning gate, changed tests) | e0b45f0 | **success** |
-| tests.yml full (dispatched) | e0b45f0 | **pending** (queued for runners) |
-| tests-arm64.yml full (dispatched) | e0b45f0 | **pending** (queued for runners) |
-| static-decisions.yml (dispatched) | 4db90b0 | **pending** (queued for runners) |
-| macos-arm64.yml | e0b45f0 | **failure**: only threads.test's lifecycle, limit and overflow tests, which built the Linux package (sys/epoll.h); fixed in 748e182 |
-| windows-x86_64.yml | e0b45f0 | **failure**: the same four tests (clang refused -fPIC for MSVC: the same build); fixed in 748e182 |
-| macos-arm64.yml, windows-x86_64.yml (dispatched) | 748e182 | **pending** |
+| tests.yml (dispatched): interp, compile, cranelift and cranelift-generic coverage | e0b45f0 | **failure**: only actor-source-ordinary and three Compilerpedia tests, all fixed by the commits after e0b45f0 (the two rows above); every other job passed |
+| tests-arm64.yml (dispatched) | e0b45f0 | **failure**: the same four tests on every suite job, plus one Rust unit test (below); tests/threads.test passed, also under GC stress |
+| static-decisions.yml (dispatched) | 4db90b0 | **success** |
+| macos-arm64.yml (dispatched) | 748e182 | **failure**: one test, ns-fuzz-smoke (below); threads.test's six host-independent tests passed |
+| windows-x86_64.yml (dispatched) | 748e182 | **failure**: the same one test; threads.test's six passed |
 | icy-tower (macos arm64), icy-tower (windows x86-64) | e0b45f0 | **success** |
 
-The commits after e0b45f0 change the transport's argument-error labels
-and a Rust unit test (native/src/runtime/thread.rs), tests/threads.test
-and its lifecycle program, the mutation harness, the benchmark program and
-this report; the full Linux runs were left to finish on e0b45f0 rather
-than restarted behind the queue for them.
+Two failures were new and are fixed:
+
+* **`reservations_are_claimed_only_by_their_thread`** (Linux AArch64's Rust
+  unit tests): the test compared the guard table's free-record count
+  before and after, while other tests of the same process claimed and
+  released records in parallel (64 free where 63 was expected). The
+  runtime was right; the test now reads only its own records' states (only
+  it reserves records) and checks that a reservation given back cannot be
+  claimed as one. The Rust lib suite passed five runs in a row.
+* **ns-fuzz-smoke** (macOS and Windows, audit/stdlib-namespaces): its
+  "redefine an intrinsic" negative draws a random qualified native; its
+  filter of platform namespaces (`linux::*`) predated the std namespace,
+  and the new natives shifted its draws onto `std::linux::abi::aarch64`,
+  which another system's host refuses as UNSUPPORTED-PLATFORM before the
+  redefinition. The fuzzer now leaves out every platform's namespace by
+  the target table (`core::cabi::platformOf`), never by spelling. (A wider
+  seed than CI's shows the fuzzer's empty-List escapes, which main has
+  too; they are not this milestone's.)
+
+Merging main (its syntax-highlighting milestone) needed one more change:
+the parser now consumes declaration modifiers as registered contextual
+words (`surface::parser::words`), so `thread` is registered there, in the
+editor grammars' modifier pattern (tools/editor-grammars.tcl, the
+committed grammars regenerated) and in their fixture; without it every
+`thread fn` would have been an internal error of the parser.
 
 ## 21. Remaining limitations
 
