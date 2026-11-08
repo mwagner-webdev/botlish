@@ -1,0 +1,24 @@
+# bracket.bot -- prototype C as a library pattern (MUST BE REJECTED): a
+# "scoped registration" bracket, with_channel(body), that makes a
+# registration, runs BODY with its identity and revokes it after. The body
+# that needs it needs the Loop, and a function requiring a context is no
+# value (CONTEXT-FUNCTION-VALUE): the bracket cannot be written as a
+# function; it would have to be syntax (scoped_construct.bot).
+import std::event_loop
+import type std::event_loop::Delivery
+
+fn with_channel(body: Fn{args: [std::event_loop::Reg], return: bool}, context ev: std::event_loop::Loop) -> bool errors std::event_loop::SchedulerFault:
+    r = std::event_loop::channel(Delivery::Reliable, 4)
+    v = body(r)
+    std::event_loop::revoke(r)
+    v
+
+fn check(r: std::event_loop::Reg, context ev: std::event_loop::Loop) -> bool:
+    std::event_loop::live?(r):
+        on std::event_loop::SchedulerFault:
+            false
+
+with context std::event_loop::create(8)
+with_channel(check):
+    on std::event_loop::SchedulerFault:
+        false

@@ -3,9 +3,16 @@
 # artifacts (BOTPKG-FORMAT.md).
 #
 #   source pm/pm.tcl; pm::cli::main ARGV INVOCATION     the commands add,
-#       install, update, remove, verify, package pack|inspect and native
-#       inspect|plan|deploy; the exit status (0 success, 1 a failed
-#       operation, 2 a usage error)
+#       install, update, remove, verify, package pack|inspect|stage|compare
+#       and native inspect|plan|deploy|add|require|audit; the exit status
+#       (0 success, 1 a failed operation, 2 a usage error)
+#
+# Each package's own dependencies are part of the application's one
+# dependency graph (pm/graph.tcl, SHARED-PACKAGE-DEPENDENCIES-MILESTONE-1.md):
+# every package is installed once, at PROJECT/.bot_modules/NAME, shared by
+# every package that depends on it, and PROJECT/.bot_modules/.graph tells
+# the compiler which package uses which; locks that do not agree on one
+# version are a conflict, never two instances.
 #
 # main.tcl sources this file only when its first argument is one of those
 # command words, before it loads anything of the compiler: an ordinary
@@ -22,32 +29,56 @@
 #   version.tcl     versions, requests, their matching and order
 #   target.tcl      compilation targets (the compiler's table, read as data)
 #   binary.tcl      native file inspection (ELF, ar, Mach-O, PE/COFF), no execution
-#   targets.tcl     schema 2's targets: target files and native metadata
-#   descriptor.tcl  botlish.json, schemas 1 and 2
+#   targets.tcl     schema 2's and 3's targets: target files, native metadata,
+#                   run-time dependencies
+#   descriptor.tcl  botlish.json, schemas 1, 2 and 3
 #   archive.tcl     the .botpkg format: deterministic writer, validating reader
 #   catalog.tcl     where artifacts come from: archive sources, repositories
 #   state.tcl       the installation record: what the manager installed
 #   native.tcl      native verification, the native closure, the plan
+#   graph.tcl       the application's one dependency graph: resolution by
+#                   unification of exact locks, conflicts, the .graph file
 #   view.tcl        target views: one package tree per target
 #   deploy.tcl      placing a target's bundled shared libraries
 #   install.tcl     resolution, plans, staging and transactions
 #   commands.tcl    the commands and the command line
 #
+# and, loaded only by the operations of the author's side (pm::authoring:
+# native add, require and audit, package stage, compare and inspect, the
+# pack of a native package or one with evidence), so that no consumer's
+# command and no pure-Botlish pack pays for them:
+#
+#   author.tcl      the author's side: native add/require, staging, the audit
+#   sha1.tcl        SHA-1, for Git object identities only (provenance checks)
+#   release.tcl     provenance records and the comparison of release candidates
+#
 # Nothing here executes anything a package holds: no hook, no script, no
 # binary, no compilation. Installing a package is writing its files. The
-# only programs it ever starts are the host system's own SHA-256 tool, at a
-# fixed system path (pm/sha256.tcl), and `kill -0` (a lock holder's
-# liveness).
+# only programs it ever starts are the host system's own SHA-256 and SHA-1
+# tools, at fixed system paths (pm/sha256.tcl, pm/sha1.tcl), and `kill -0`
+# (a lock holder's liveness). The author's side (pm/author.tcl) reads the
+# native files an author built; whatever built them ran before, on the
+# author's side, by the author's choice.
 
 namespace eval pm {
     variable root [file dirname [file dirname [file normalize [info script]]]]
     variable here [file join $root pm]
 }
 
-foreach pm::file {json sha256 version target binary targets descriptor archive catalog state native view deploy install commands} {
+foreach pm::file {json sha256 version target binary targets descriptor archive catalog state graph native view deploy install commands} {
     source [file join $pm::here $pm::file.tcl]
 }
 unset pm::file
+
+# Loads the author's side (author.tcl, sha1.tcl, release.tcl) once, at the
+# global level, for the operations that use it.
+proc pm::authoring {} {
+    if {[info exists ::pm::authoringLoaded]} return
+    foreach file {sha1 author release} {
+        uplevel #0 [list source [file join $::pm::here $file.tcl]]
+    }
+    set ::pm::authoringLoaded 1
+}
 
 # Raises an operation error {PM KIND} with MESSAGE: the command reports it
 # and exits 1. (A plain error, raised here: never `return -level 2`, which a

@@ -936,13 +936,13 @@ test ne-plain-memory {a native edit performs ordinary loads and stores and nothi
 
 set neExecutableDir [makeDirectory native-edit-executables-[pid]]
 
-test ne-executable {a standalone executable (whichever linker BOTLISH_NATIVE_LINKER selects) writes native memory through edits and byte storage through layout writes exactly as the in-process backends do} -constraints executableAot -body {
+test ne-executable {a standalone executable (whichever linker BOTLISH_NATIVE_LINKER selects) writes native memory through edits and byte storage through layout writes exactly as the in-process backends do (its value read through the driver protocol)} -constraints executableAot -body {
     set source [neProgram "fn run() -> List\[any\] errors NativeEditNull, LayoutLengthMismatch:\n    p = memory(\[[join [lrepeat 32 165] {, }]\])\n    e = std::binary::native::edit(Scalars, p)\n[neStores e Scalars $::neScalarsA]\n    q = ffi_fixture::address\[Node\](4886718345)\n    d = std::binary::write_foreign(std::binary::write(std::abi::bytes::zeroed(std::abi::usize(32)), Linked.inner.x, -2), Linked.next, q)\n    \[dump(p, 32), frozen(d) == bytes_of([neRecord 32 0 {{4 -2 2} {8 4886718345 8}}])\]\n\nr = run():\n    on NativeEditNull:\n        \[\]\n    on LayoutLengthMismatch:\n        \[\]\nr\n"]
     set hir [surface::compile $source edit.bot -warnings off]
     set path [file join $::neExecutableDir edits]
     native::executable $hir $path
     set direct [neOutcome cranelift $hir]
-    list [expr {"value {[exec $path]}" eq $direct}] $direct
+    list [expr {"value {[standaloneValue $path]}" eq $direct}] $direct
 } -cleanup {unset -nocomplain source hir path direct} -result {1 {value {[[255, 128, 255, 255, 0, 0, 0, 128, 255, 255, 255, 255, 255, 255, 255, 255, 0, 0, 0, 0, 0, 0, 0, 128, 255, 255, 165, 165, 1, 0, 0, 128], true]}}}
 
 test ne-gc-stress {under BOTLISH_NATIVE_GC_STRESS=1 (a collection at every allocation site) the writes stay exact: stores of 64-bit values that are BigInts, a chain of byte writes each allocating a fresh storage while the previous one is live, the record read back through std::binary::load -- an edit is an immediate word, never a root to lose, and a write's operands stay rooted while its storage is made} -constraints {nativeBuilt nativeCoroutines} -body {

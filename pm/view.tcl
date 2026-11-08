@@ -4,8 +4,10 @@
 #   pm::view::Dir CTX TARGET           the view of TARGET
 #   pm::view::Aware STATE SOURCES      1 if an installed instance is
 #                                      target-aware
-#   pm::view::Derived TARGET STATE ORIGINS MANUAL   what a view is derived from
-#   pm::view::Build CTX STATE SOURCES TARGET ORIGINS DEST   stage a view
+#   pm::view::Derived TARGET STATE ORIGINS MANUAL APPLICATION   what a view is
+#                                      derived from
+#   pm::view::Build CTX STATE SOURCES TARGET ORIGINS MANUAL DEST APPLICATION
+#                                      stage a view
 #   pm::view::Instances DIR            a view's instances, read back
 #
 # A project's packages are installed once, as their artifacts are, in
@@ -30,18 +32,20 @@
 # change. Views of different targets are different directories: preparing
 # one never touches another.
 #
-# What a view holds, for each top-level package NAME:
+# What a view holds, for each package NAME of the application's dependency
+# graph (pm/graph.tcl: one instance of each, none inside another):
 #
 #   artifact     NAME/... -- the instance's files mapped for the target
-#                (pm/targets.tcl's Map), its dependencies under its own
-#                .bot_modules, recursively;
+#                (pm/targets.tcl's Map);
 #   editable     NAME -> the editable directory (a link: never copied);
 #   manual       NAME -> PROJECT/.bot_modules/NAME (a link to the package
 #                installed by hand, which stays the user's)
 #
-# and .lib/ the bundled libraries the native plan selected
-# (pm/native.tcl's Plan: `placed`), each under the name a linker searches
-# for and its loader identity.
+# and .graph, the graph's text (which package uses which: the compiler's
+# scopes, surface/modules.tcl's ReadGraph), the store's own; and .lib/ the
+# bundled libraries the native plan selected (pm/native.tcl's Plan:
+# `placed`), each under the name a linker searches for and its loader
+# identity.
 
 namespace eval pm::view {
     variable format 1
@@ -111,13 +115,14 @@ proc pm::view::Intersect {a b} {
 }
 
 # The digest of what the view of TARGET is derived from: the record of the
-# packages STATE, the origins choices ORIGINS and the manual packages MANUAL
-# (NAME -> DIRECTORY) it links.
-proc pm::view::Derived {target state origins manual} {
+# packages STATE and the application's dependencies APPLICATION (the graph),
+# the origins choices ORIGINS and the manual packages MANUAL (NAME ->
+# DIRECTORY) it links.
+proc pm::view::Derived {target state origins manual application} {
     variable format
     set text "botlish target view $format\ntarget $target\n"
     append text "origins [lsort -stride 2 $origins]\nmanual [lsort -stride 2 $manual]\n"
-    append text [pm::state::encode $state]
+    append text [pm::state::encode $state {} $application]
     return [pm::sha256::hex [encoding convertto utf-8 $text]]
 }
 
@@ -143,10 +148,11 @@ proc pm::view::Manual {ctx state} {
 # files F links L} and the native plan. A package that does not support
 # TARGET, a native problem or a collision is {PM ...}: nothing of DEST is
 # then left for the caller to keep.
-proc pm::view::Build {ctx state sources target origins manual dest} {
+proc pm::view::Build {ctx state sources target origins manual dest application} {
     set files [dict create]
     set links [dict create]
     set instances {}
+    set paths [pm::graph::PathsOfState $application $state]
     file mkdir $dest
     foreach name [lsort [dict keys $state]] {
         set record [dict get $state $name]
@@ -156,11 +162,17 @@ proc pm::view::Build {ctx state sources target origins manual dest} {
             dict set links $name $link
             continue
         }
-        Project [dict get $sources $name] $record $dest $name $name $target [list $name [dict get $record version]] files instances
+        Project [dict get $sources $name] $record $dest $name $name $target \
+            [dict getdef $paths $name [list $name [dict get $record version]]] files instances
     }
     dict for {name dir} $manual {
         file link -symbolic [file join $dest $name] $dir
         dict set links $name $dir
+    }
+    set graph [encoding convertto utf-8 [pm::graph::OfState $application $state]]
+    if {$graph ne ""} {
+        pm::WriteNew [file join $dest .graph] $graph
+        dict set files .graph [list [string length $graph] [format %08x [expr {[zlib crc32 $graph] & 0xffffffff}]]]
     }
     pm::Fault project
     set plan [pm::native::Plan $target $instances $origins]
@@ -175,7 +187,7 @@ proc pm::view::Build {ctx state sources target origins manual dest} {
         dict set files .lib/[dict get $placed file] [list [string length $bytes] [format %08x [expr {[zlib crc32 $bytes] & 0xffffffff}]]]
     }
     pm::Fault native-placed
-    return [dict create record [dict create derived [Derived $target $state $origins $manual] files $files links $links] plan $plan]
+    return [dict create record [dict create derived [Derived $target $state $origins $manual $application] files $files links $links] plan $plan]
 }
 
 # Writes the instance installed at SOURCE (record RECORD) into the view at

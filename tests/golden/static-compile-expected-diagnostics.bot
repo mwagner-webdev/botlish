@@ -1,0 +1,414 @@
+# static-compile-expected-diagnostics.bot -- negative compilation tests of
+# static semantic proofs, KNOWN-ERROR above all
+# (STATIC-COMPILE-EXPECTED-DIAGNOSTICS-MILESTONE-1.md), ported from
+# tests/static-compile-expected-diagnostics.test (manifest: category
+# static-compile).
+#
+# A test that expects a diagnostic puts the code in a `static compile:`
+# block and asserts the block's std::compiler::DiagnosticCode (and where it
+# is reported). Several Tcl theorems about a whole program -- "the program
+# is rejected with this diagnostic", "this rejection does not hide that
+# one" -- are written here as an outer block holding that program's code:
+# the outer block is rejected with the diagnostic the program would be,
+# while a block nested in it is decided first and keeps its own.
+import std::byte
+import std::compiler
+import std::dfa
+import std::int
+import std::list
+import std::mutable_map
+import std::mutable_set
+import std::test
+
+error ParseError
+error Negative
+error E
+
+type Small = Int in 0..10
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+fn reject() -> int errors ParseError:
+    fail ParseError
+
+fn reject_if_negative(n: int) -> int errors Negative:
+    if n < 0:
+        fail Negative
+    n
+
+fn fails_both_ways(n: int) -> int errors Negative:
+    if n > 0:
+        fail Negative
+    fail Negative
+
+fn want(x: Small) -> int:
+    x
+
+fn worker() -> int:
+    yield 1
+    2
+
+# K is a value the compiler cannot decide inside the bodies (the
+# registration function's parameter, 5): a call on it is decided only where
+# a narrowing decides it.
+fn register_static_compile_expected_diagnostics_tests(k: int):
+    # sced-known-error-forms: every form of a statically known failure is
+    # its block's KnownError at the failing call.
+    fn direct() -> int errors std::compiler::CompilerError:
+        static compile:
+            reject()
+    std::test::rejects_at("sced-known-error-forms/direct", std::compiler::DiagnosticCode::KnownError, 63, 13, direct)
+    fn handled() -> int errors std::compiler::CompilerError:
+        static compile:
+            r = reject():
+                on ParseError:
+                    42
+            r
+    std::test::rejects_at("sced-known-error-forms/handled", std::compiler::DiagnosticCode::KnownError, 67, 17, handled)
+    fn possible() -> int errors std::compiler::CompilerError:
+        static compile:
+            r = reject_if_negative(k):
+                on Negative:
+                    -1
+            r
+    std::test::value("sced-known-error-forms/possible", 5, possible)
+    fn branch() -> int errors std::compiler::CompilerError:
+        static compile:
+            if k > 0:
+                r = reject():
+                    on ParseError:
+                        1
+                return r
+            k
+    std::test::rejects_at("sced-known-error-forms/branch", std::compiler::DiagnosticCode::KnownError, 82, 21, branch)
+    fn unreachable_branch() -> int errors std::compiler::CompilerError:
+        static compile:
+            j = 5
+            if j < 0:
+                r = reject_if_negative(j):
+                    on Negative:
+                        1
+                return r
+            j
+    std::test::value("sced-known-error-forms/unreachable-branch", 5, unreachable_branch)
+    fn helper() -> int errors std::compiler::CompilerError:
+        static compile:
+            r = fails_both_ways(k):
+                on Negative:
+                    -1
+            r
+    std::test::rejects_at("sced-known-error-forms/helper", std::compiler::DiagnosticCode::KnownError, 100, 17, helper)
+    fn arithmetic() errors std::compiler::CompilerError:
+        static compile:
+            b = std::byte::from_int(250 + 10):
+                on std::byte::AboveRange:
+                    0
+                on std::byte::BelowRange:
+                    0
+            b
+    std::test::rejects_at("sced-known-error-forms/arithmetic", std::compiler::DiagnosticCode::KnownError, 107, 17, arithmetic)
+    fn narrowed() -> int errors std::compiler::CompilerError:
+        static compile:
+            m = k - 9
+            if m < 0:
+                r = reject_if_negative(m):
+                    on Negative:
+                        1
+                return r
+            m
+    std::test::rejects_at("sced-known-error-forms/narrowed", std::compiler::DiagnosticCode::KnownError, 118, 21, narrowed)
+    fn exact_mod() -> int errors std::compiler::CompilerError:
+        static compile:
+            r = reject_if_negative(mod(500, 11) - 6):
+                on Negative:
+                    -1
+            r
+    std::test::rejects_at("sced-known-error-forms/exact-mod", std::compiler::DiagnosticCode::KnownError, 126, 17, exact_mod)
+
+    # sced-assertion-distinguishes: what each block does that an assertion
+    # expecting KnownError must tell apart (the Tcl test pins the framework's
+    # mismatch reports themselves).
+    fn valid() -> int errors std::compiler::CompilerError:
+        static compile:
+            r = reject_if_negative(1):
+                on Negative:
+                    -1
+            r
+    std::test::value("sced-assertion-distinguishes/valid", 1, valid)
+    fn typed() -> int errors std::compiler::CompilerError:
+        static compile:
+            reject_if_negative("s")
+    std::test::rejects_at("sced-assertion-distinguishes/typed", std::compiler::DiagnosticCode::Type, 144, 32, typed)
+    fn unhandled() -> int errors std::compiler::CompilerError:
+        static compile:
+            reject_if_negative(k)
+    std::test::rejects_at("sced-assertion-distinguishes/unhandled", std::compiler::DiagnosticCode::UnhandledError, 148, 13, unhandled)
+    fn unbound() -> int errors std::compiler::CompilerError:
+        static compile:
+            r = reject():
+                on ParseError:
+                    missing
+            r
+    std::test::rejects_at("sced-assertion-distinguishes/unbound", std::compiler::DiagnosticCode::Unbound, 154, 21, unbound)
+    fn two_calls() -> int errors std::compiler::CompilerError:
+        static compile:
+            a = reject():
+                on ParseError:
+                    1
+            b = reject():
+                on ParseError:
+                    2
+            a + b
+    std::test::rejects_at("sced-assertion-distinguishes/first-call", std::compiler::DiagnosticCode::KnownError, 159, 17, two_calls)
+
+    # sced-exact-mod: g(mod(500, 11) - 5) is g(0), whose recursion always
+    # fails: the handled call is KnownError; on an input the compiler cannot
+    # decide, the same recursion runs.
+    fn literal_mod() errors std::compiler::CompilerError:
+        static compile:
+            fn f(n) errors Negative:
+                if n < 0:
+                    fail Negative
+                if n == 0:
+                    1
+                else:
+                    f(n - 1) + 1
+            fn g(m) errors Negative:
+                f(m - 3)
+            r1 = g(mod(500, 11)):
+                on Negative:
+                    -1
+            r2 = g(mod(500, 11) - 5):
+                on Negative:
+                    -1
+            [r1, r2]
+    std::test::rejects_at("sced-exact-mod/literal", std::compiler::DiagnosticCode::KnownError, 185, 18, literal_mod)
+    fn hidden_mod() errors std::compiler::CompilerError:
+        static compile:
+            fn f(n) errors Negative:
+                if n < 0:
+                    fail Negative
+                if n == 0:
+                    1
+                else:
+                    f(n - 1) + 1
+            fn g(m) errors Negative:
+                f(m - 3)
+            h = std::int::from_string("500"):
+                on InvalidIntegerText:
+                    0
+            r1 = g(mod(h, 11)):
+                on Negative:
+                    -1
+            r2 = g(mod(h, 11) - 5):
+                on Negative:
+                    -1
+            [r1, r2]
+    std::test::value("sced-exact-mod/hidden", [3, -1], hidden_mod)
+
+    # sced-ordinary-known-error-rejects, sced-independent-diagnostic-visible:
+    # a block nested in the outer one keeps its expected KnownError; the
+    # ordinary code beside it is the outer block's -- the same known failure,
+    # or an independent Type -- never hidden by the inner rejection.
+    fn ordinary_known() errors std::compiler::CompilerError:
+        static compile:
+            fn probe() -> int errors std::compiler::CompilerError:
+                static compile:
+                    r = reject():
+                        on ParseError:
+                            1
+                    r
+            q = reject():
+                on ParseError:
+                    2
+            q
+    std::test::rejects_at("sced-ordinary-known-error-rejects", std::compiler::DiagnosticCode::KnownError, 225, 17, ordinary_known)
+    fn independent_type() errors std::compiler::CompilerError:
+        static compile:
+            fn probe() -> int errors std::compiler::CompilerError:
+                static compile:
+                    r = reject():
+                        on ParseError:
+                            1
+                    r
+            want(20)
+    std::test::rejects_at("sced-independent-diagnostic-visible", std::compiler::DiagnosticCode::Type, 238, 18, independent_type)
+
+    # sced-outside-scope (sibling): a block is accepted whatever a sibling
+    # block's KnownError; the sibling is rejected with its own.
+    fn tested() -> int errors std::compiler::CompilerError:
+        static compile:
+            2
+    std::test::value("sced-outside-scope/tested", 2, tested)
+    fn sibling() -> int errors std::compiler::CompilerError:
+        static compile:
+            r = reject():
+                on ParseError:
+                    1
+            r
+    std::test::rejects_at("sced-outside-scope/sibling", std::compiler::DiagnosticCode::KnownError, 249, 17, sibling)
+
+    # sced-following-code-checked: the code after a rejected block (inner,
+    # Unbound) in its function keeps every diagnostic of its own -- the outer
+    # block's. (Before STATIC-COMPILE-EXPECTED-DIAGNOSTICS-MILESTONE-1.md the
+    # inner rejection made that code dead: every outer block but the
+    # violated range's was accepted, and the proven range's was a Type.)
+    fn following_known() errors std::compiler::CompilerError:
+        static compile:
+            fn t() -> int errors std::compiler::CompilerError:
+                static compile:
+                    missing
+                q = reject():
+                    on ParseError:
+                        1
+                q
+            0
+    std::test::rejects_at("sced-following-code-checked/known", std::compiler::DiagnosticCode::KnownError, 265, 21, following_known)
+    fn following_unhandled() errors std::compiler::CompilerError:
+        static compile:
+            fn t() -> int errors std::compiler::CompilerError:
+                static compile:
+                    missing
+                reject_if_negative(k)
+            0
+    std::test::rejects_at("sced-following-code-checked/unhandled", std::compiler::DiagnosticCode::UnhandledError, 276, 17, following_unhandled)
+    fn following_moved() errors std::compiler::CompilerError:
+        static compile:
+            fn t() -> int errors std::compiler::CompilerError:
+                coroutine {step, first} = worker()
+                static compile:
+                    missing
+                a = step
+                b = step
+                first
+            0
+    std::test::rejects_at("sced-following-code-checked/moved", std::compiler::DiagnosticCode::UseAfterMove, 286, 21, following_moved)
+    fn following_bounds() errors std::compiler::CompilerError:
+        static compile:
+            fn t(n: int) -> int errors std::compiler::CompilerError:
+                static compile:
+                    missing
+                std::list::at([1, 2], n)
+            0
+    std::test::rejects_at("sced-following-code-checked/bounds", std::compiler::DiagnosticCode::UnhandledError, 295, 17, following_bounds)
+    fn following_range_violated() errors std::compiler::CompilerError:
+        static compile:
+            fn t() -> int errors std::compiler::CompilerError:
+                static compile:
+                    missing
+                want(20)
+            0
+    std::test::rejects_at("sced-following-code-checked/range-violated", std::compiler::DiagnosticCode::Type, 303, 22, following_range_violated)
+    fn following_range_proven() errors std::compiler::CompilerError:
+        static compile:
+            fn t() -> int errors std::compiler::CompilerError:
+                static compile:
+                    missing
+                want(5)
+            r = t():
+                on std::compiler::CompilerError:
+                    -1
+            r
+    std::test::value("sced-following-code-checked/range-proven", -1, following_range_proven)
+    fn following_reorder() errors std::compiler::CompilerError:
+        static compile:
+            fn t() -> int errors std::compiler::CompilerError:
+                m = std::mutable_map::create[int, int]()
+                std::mutable_map::set(m, 1, 10)
+                static compile:
+                    missing
+                order = std::mutable_set::create[int]()
+                std::mutable_map::reorder(m, order)
+                0
+            0
+    std::test::rejects_at("sced-following-code-checked/reorder", std::compiler::DiagnosticCode::ReorderNotProven, 325, 17, following_reorder)
+
+    # sced-following-emission: a claim over a callee whose only yield
+    # follows a rejected block judges that yield as written.
+    fn following_emission() errors std::compiler::CompilerError:
+        static compile:
+            fn helper(d: int) -> unit errors std::compiler::CompilerError:
+                static compile:
+                    missing
+                yield 48 + d
+                unit
+            fn emit(d: int) -> unit errors std::compiler::CompilerError emits digit_token:
+                helper(d)
+            0
+    std::test::rejects_at("sced-following-emission", std::compiler::DiagnosticCode::EmitEndSymbol, 337, 17, following_emission)
+
+    # sced-value-position-unchanged: a rejected block whose value is used is
+    # that value's failure; the code reading the value is never checked
+    # against a value that does not exist, and never runs.
+    fn value_position() errors std::compiler::CompilerError:
+        static compile:
+            fn t() -> int errors std::compiler::CompilerError:
+                x = static compile:
+                    missing
+                std::list::at([1], x)
+            r = t():
+                on std::compiler::CompilerError:
+                    -1
+            r
+    std::test::value("sced-value-position-unchanged", -1, value_position)
+
+    # sced-following-code-never-runs: at run time the rejected block fails
+    # and nothing after it runs.
+    fn never_runs() errors std::compiler::CompilerError:
+        static compile:
+            fn t() -> int errors std::compiler::CompilerError:
+                coroutine {step, first} = worker()
+                static compile:
+                    missing
+                second = step()
+                first + second + 40
+            r = t():
+                on std::compiler::CompilerError {code}:
+                    if code == std::compiler::DiagnosticCode::Unbound:
+                        -1
+                    else:
+                        -2
+            r
+    std::test::value("sced-following-code-never-runs", -1, never_runs)
+
+    # sced-callee-dependency: h's block is rejected (Type), so a's handled
+    # call of h is no known failure (an intended outcome), and a's block is
+    # accepted: its value is h's CompilerError, handled.
+    fn callee_dependency() errors std::compiler::CompilerError:
+        static compile:
+            fn h() -> int errors E, std::compiler::CompilerError:
+                static compile:
+                    y = 1 + "s"
+                    fail E
+            fn a() -> int errors std::compiler::CompilerError:
+                static compile:
+                    r = h():
+                        on E:
+                            1
+                        on std::compiler::CompilerError:
+                            2
+                    r
+            r = a():
+                on std::compiler::CompilerError:
+                    -1
+            r
+    std::test::value("sced-callee-dependency", 2, callee_dependency)
+
+    # sced-resolution-first (in a block): a known failure before an unbound
+    # name is Unbound -- resolution is decided before any proof, whatever
+    # the order of the source.
+    fn resolution_first() -> int errors std::compiler::CompilerError:
+        static compile:
+            r = reject():
+                on ParseError:
+                    1
+            r + missing_name
+    std::test::rejects_at("sced-resolution-first", std::compiler::DiagnosticCode::Unbound, 409, 17, resolution_first)
+
+with context std::test::suite()
+register_static_compile_expected_diagnostics_tests(5)
+std::test::report()

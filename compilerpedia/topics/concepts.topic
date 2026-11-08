@@ -8,7 +8,6 @@ index: concepts
 alias: lexical syntax; comment syntax; operator precedence; source syntax
 keywords: indentation, spaces, tabs, comment, identifier, name, literal, operator, precedence, newline, brackets, trailing comma, escape
 related: concept.bindings concept.functions concept.strings concept.integers rule.indentation rule.names rule.comparison-chains error.surface-syntax
-docs: README.md ELIF.md
 
 == WHAT IT IS
 A Python-like surface language. Blocks are introduced by `:` and delimited
@@ -68,8 +67,7 @@ a < 2 < 3
 @end
 
 == MORE
-The complete grammar is at the top of surface/parser.tcl; docs/README.md
-section 17 describes the surface language.
+The complete grammar is at the top of surface/parser.tcl.
 
 @topic concept.values
 title: Values and immutability
@@ -78,7 +76,6 @@ index: concepts
 alias: immutable values; value semantics; immutable data
 keywords: value, immutable, mutable, copy, equality, ==, hash, reference, identity
 related: concept.bindings concept.lists concept.structs concept.mutable-vector concept.mutable-array principle.immutability rule.equality capability.assignment
-docs: README.md MUTABLE-VECTOR.md MUTABLE-ARRAY.md
 
 == WHAT IT IS
 The value kinds are Int, String, UnicodeChar, Bool, unit, List, struct
@@ -95,8 +92,10 @@ values of the systems layer). Operations never modify their operands:
     them fails at run time (EQUALITY).
   * MutableVector[T] and MutableArray[T] are the two mutable values. They
     are still values, not references: `w = v` is a logical copy, and a
-    mutation (`v.push(x)`) must name a place -- a local, a parameter or a
-    field path from one -- and changes only that place's value.
+    mutation (`v.push(x)`) must name a place -- a local, a place
+    parameter, a context parameter or a field path from one -- and changes
+    only that place's value. An ordinary parameter is the function's copy,
+    not a place it may mutate (NONPLACE-PARAMETER-MUTATION).
 
 == WHY
 Immutable values make every binding mean one thing for its whole scope, so
@@ -126,9 +125,6 @@ w.push(3)
 @value [2, 3]
 @end
 
-== MORE
-docs/README.md section 1 (values); MUTABLE-VECTOR.md, MUTABLE-ARRAY.md.
-
 @topic concept.bindings
 title: Bindings: `x = e` binds a name once
 summary: `x = e` is an immutable binding, not an assignment: a second binding of the same name in the same scope is DUPLICATE, while a nested scope may shadow the name without changing the outer binding.
@@ -136,7 +132,6 @@ index: concepts
 alias: let binding; variable binding; shadowing; immutable binding
 keywords: binding, variable, assign, rebind, shadow, scope, DUPLICATE, let, const
 related: concept.values concept.definition-order concept.destructuring rule.immutable-bindings capability.assignment principle.immutability error.duplicate
-docs: README.md STRICT-REFERENCE-DETERMINISM.md
 
 == WHAT IT IS
 `name = expression` evaluates the expression once and binds the name to
@@ -180,8 +175,7 @@ x
 @end
 
 == MORE
-docs/README.md section 17 ("Syntax"); capability.assignment for the
-alternatives to mutation.
+capability.assignment for the alternatives to mutation.
 
 @topic concept.definition-order
 title: Definition order: visible from the definition on, no hoisting
@@ -190,7 +184,6 @@ index: concepts
 alias: definition order; hoisting; declare before use; callee first; forward declaration
 keywords: forward reference, order, hoist, UNBOUND, declared later, recursion, callee, caller
 related: concept.bindings concept.mutual-recursion concept.functions rule.forward-references error.unbound principle.bind-before-use
-docs: STRICT-REFERENCE-DETERMINISM.md MUTUAL-RECURSION.md
 
 == WHAT IT IS
 Name resolution walks the source once, in order. A binding comes into
@@ -244,8 +237,7 @@ quadruple(5)
 
 == MORE
 Two functions that call each other cannot both see the other: see
-concept.mutual-recursion. STRICT-REFERENCE-DETERMINISM.md has the rule and
-its measurements.
+concept.mutual-recursion; rule.forward-references has the rule and why.
 
 @topic concept.types
 title: Types, inference and annotations
@@ -254,7 +246,6 @@ index: concepts
 alias: type annotation; type inference; static types; type system
 keywords: int, str, bool, unit, UnicodeChar, List, any, annotation, declared type, inferred, proven, contract, TYPE
 related: concept.integers concept.strings concept.lists concept.structs concept.enums concept.refinements concept.integer-domains concept.function-types concept.specialization proof.types rule.typed-parameters error.type
-docs: README.md STRICT-TYPED-PARAMETERS.md MINIMAL-APPLIED-LIST-TYPES.md
 
 == WHAT IT IS
 The built-in types are `int`, `str`, `bool`, `unit`, `UnicodeChar`,
@@ -309,9 +300,6 @@ twice("ten")
 @at 4:7
 @end
 
-== MORE
-docs/README.md sections 13 and 14; STRICT-TYPED-PARAMETERS.md.
-
 @topic concept.integers
 title: Integers: arbitrary precision, no integer division
 summary: Int is an arbitrary-precision integer with + - *, comparisons, mod (Euclidean) and bit operations; there is no integer division; std::int converts it to and from decimal text.
@@ -319,7 +307,6 @@ index: concepts
 alias: integers; arbitrary precision integers; bigint; bit operations; Int type
 keywords: int, integer, arithmetic, overflow, mod, remainder, bit_and, bit_or, bit_xor, shift_left, shift_right, ARITHMETIC, decimal
 related: concept.integer-domains concept.floats concept.types capability.integer-division task.number-text stdlib.mod stdlib.bit_and stdlib.shift_right stdlib.std::int::to_string stdlib.std::int::from_string proof.ranges error.arithmetic
-docs: README.md BYTE-NIBBLE-BIT-ARITHMETIC.md LANGUAGE-LIBRARY-DEFICIENCIES.md
 
 == WHAT IT IS
 `int` values are mathematical integers: they never overflow or wrap, on
@@ -369,9 +356,6 @@ x
 @at 1:5
 @end
 
-== MORE
-BYTE-NIBBLE-BIT-ARITHMETIC.md for the bit operations and byte domains.
-
 @topic concept.floats
 title: Float64: finite binary64 floating-point numbers
 summary: Float64 is a finite IEEE 754 binary64 number: literals such as 1.5, + - * / and comparisons; a result that is not finite (NaN or an infinity) fails with the declared error NonFiniteFloat.
@@ -379,7 +363,6 @@ index: concepts
 alias: float; floats; double; floating point; decimal number; real number; Float64; NonFiniteFloat; NaN; infinity; float division by zero
 keywords: float, double, decimal, fraction, real, divide, NaN, infinity, finite, NonFiniteFloat, from_int, truncate, round
 related: concept.integers stdlib./ stdlib.std::float64::from_int stdlib.std::float64::truncate stdlib.std::float64::round stdlib.module.std::float64 capability.integer-division error.known-error error.unhandled-error concept.errors concept.decimal-rounded
-docs: FLOAT64-MILESTONE-1.md README.md
 
 == WHAT IT IS
 A Float64 is a finite IEEE 754 binary64 number. NaN and the infinities
@@ -490,7 +473,6 @@ index: concepts
 alias: decimal rounded; DecimalRounded; minDecimalsPreserved; maxDecimalsPreserved; decimal places; money; currency; cents; precision guarantee; rounding guarantee; banker's rounding; round half to even; UnrepresentableDecimal
 keywords: decimal, rounding, round, half even, precision, places, guarantee, refinement, money, Float64, from_decimal_rounded, quantize, exact, ExactDecimal, observation, ceiling, to_string, text, display
 related: concept.scalar-refinements concept.floats stdlib.std::float64::from_decimal_rounded stdlib.std::decimal_rounded::round stdlib.std::decimal_rounded::to_string task.number-text stdlib.module.std::decimal_rounded error.decimal-precision error.decimal-guarantee-lost error.refinement-parameter error.equality error.known-error concept.static-compile
-docs: DECIMAL-ROUNDED-MILESTONE-1.md FLOAT64-MILESTONE-1.md
 match: CORE SEMANTIC EQUALITY | *of a DecimalRounded value needs the precision of its type*
 match: CORE SEMANTIC TYPE | *DecimalRounded*
 
@@ -668,7 +650,6 @@ index: concepts
 alias: scalar refinement; scalar refinements; refinement parameters; refinement in braces; refinement family
 keywords: refinement, braces, parameter, fact, guarantee, family, length, minDecimalsPreserved, decay, forget, subtype, join
 related: concept.decimal-rounded concept.list-length concept.refinements concept.integer-domains error.refinement-parameter proof.types
-docs: DECIMAL-ROUNDED-MILESTONE-1.md LIST-CARDINALITY-REFINEMENTS.md
 
 == WHAT IT IS
 A scalar refinement is a type of a compiler-known family with integer
@@ -704,8 +685,7 @@ guarantee needs a schema row, not a type system of its own, and every fact
 decays, joins and prints the same way.
 
 == MORE
-concept.decimal-rounded, concept.list-length;
-DECIMAL-ROUNDED-MILESTONE-1.md, LIST-CARDINALITY-REFINEMENTS.md.
+concept.decimal-rounded, concept.list-length.
 
 @topic concept.integer-domains
 title: Integer domains: `type Name = Int in LO..HI`
@@ -714,7 +694,6 @@ index: concepts
 alias: integer domain; bounded integer; ranged integer; int subrange
 keywords: type, in, interval, range, Byte, domain, converter, subset, refinement
 related: concept.integers concept.refinements concept.types proof.ranges rule.no-callable-types error.type
-docs: SOURCE-DEFINED-INTEGER-DOMAINS.md ELIMINATE-AUTOMATIC-TYPE-PREDICATES.md BYTE-NIBBLE-BIT-ARITHMETIC.md
 
 == WHAT IT IS
     type Digit = Int in 0..9          an inclusive interval
@@ -774,8 +753,7 @@ fn apply(n: int) -> int:
 @end
 
 == MORE
-SOURCE-DEFINED-INTEGER-DOMAINS.md; proof.ranges for what range facts the
-compiler derives.
+proof.ranges for what range facts the compiler derives.
 
 @topic concept.strings
 title: Strings and characters
@@ -784,7 +762,6 @@ index: concepts
 alias: str type; UnicodeChar; character literal; char literal; text values
 keywords: string, str, char, character, unicode, scalar, concat, append_char, char_at, substring, length, encode_utf8, escape
 related: concept.integers concept.types principle.characters-not-strings warning.one-char-string-literal capability.string-formatting task.number-text stdlib.module.std::str stdlib.std::str::concat stdlib.std::str::char_at stdlib.std::str::substring
-docs: README.md UNICODE-CHAR-LITERALS.md STDLIB-NAMESPACES.md
 
 == WHAT IT IS
 A `str` value is a sequence of Unicode scalar values: `std::str::length`
@@ -845,7 +822,7 @@ import std::char
 @end
 
 == MORE
-UNICODE-CHAR-LITERALS.md; stdlib.module.std::str lists every operation.
+stdlib.module.std::str lists every operation.
 
 @topic concept.booleans
 title: Booleans and conditions
@@ -854,7 +831,6 @@ index: concepts
 alias: booleans; bool type; boolean logic; truthiness
 keywords: true, false, and, or, not, condition, NOT-BOOLEAN, short-circuit, predicate
 related: concept.if-expressions concept.refinements principle.predicate-naming principle.options-are-flags warning.many-boolean-arguments error.not-boolean
-docs: README.md BRANCH-FORM-BOOLEAN-LOWERING.md
 
 == WHAT IT IS
 `true` and `false` are the values of type `bool`. `a and b`, `a or b` and
@@ -905,7 +881,6 @@ index: concepts
 alias: unit type; unit value; void
 keywords: unit, void, nothing, no value, -> unit, result
 related: concept.functions concept.if-expressions concept.loops concept.program-value
-docs: README.md
 
 == WHAT IT IS
 `unit` is a keyword denoting the unit value; in a type position it names
@@ -942,9 +917,6 @@ x
 @value unit
 @end
 
-== MORE
-docs/README.md section 17.
-
 @topic concept.lists
 title: Lists: immutable sequences
 summary: List[T] is an immutable sequence written [a, b]; its operations need `import std::list`, collecting loops transform it, and it is never destructured positionally.
@@ -952,7 +924,6 @@ index: concepts
 alias: List type; list literal; immutable list; sequence
 keywords: list, List, at, get, append, flat, length, find, any?, all?, IndexNotFound, element, index, empty list
 related: concept.loops concept.values concept.destructuring concept.list-length proof.list-bounds rule.no-list-destructuring principle.name-the-parts capability.map-filter task.list-element stdlib.module.std::list stdlib.std::list::at stdlib.std::list::get
-docs: README.md STDLIB-NAMESPACES.md RETURNING-ITERABLE-LOOPS.md MINIMAL-APPLIED-LIST-TYPES.md
 
 == WHAT IT IS
 `[1, 2, 3]` is a `List[int]`; `[]` is the empty List. After `import
@@ -1001,9 +972,6 @@ a
 @at 2:1
 @end
 
-== MORE
-STDLIB-NAMESPACES.md (at and get); RETURNING-ITERABLE-LOOPS.md.
-
 @topic concept.list-length
 title: List[T]{length: N}: a List of a proven exact length
 summary: List[T]{length: N} is an ordinary List whose length is proven to be exactly N: it decays to List[T] freely, is minted by proofs or std::list::with_length, and removes bounds and extent checks.
@@ -1011,7 +979,6 @@ index: concepts
 alias: list length refinement; exact length list; fixed length list; List length; length refinement; known length list; list cardinality; LengthMismatch
 keywords: List, length, exact, cardinality, refinement, with_length, LengthMismatch, decay, guard, fixed array, extent, bounds, tuple, IndexNotFound, LayoutExtentMismatch
 related: concept.scalar-refinements concept.lists stdlib.std::list::with_length stdlib.std::list::length proof.list-bounds concept.binary-layouts principle.name-the-parts warning.fixed-arity-list-return error.refinement-parameter
-docs: LIST-CARDINALITY-REFINEMENTS.md
 match: CORE SEMANTIC TYPE | *states no exact length*
 match: CORE SEMANTIC TYPE | *element(s) is never one of*
 match: CORE SEMANTIC TYPE | *std::list::with_length*
@@ -1150,7 +1117,7 @@ pair()
 @end
 
 == MORE
-LIST-CARDINALITY-REFINEMENTS.md; concept.scalar-refinements.
+concept.scalar-refinements.
 
 @topic concept.structs
 title: Structs: named and anonymous records of fields
@@ -1159,7 +1126,6 @@ index: concepts
 alias: struct; named struct; anonymous struct; record type; field projection
 keywords: struct, field, construction, projection, nominal, anonymous, MISSING-FIELD, UNKNOWN-FIELD, record, immutable
 related: concept.destructuring concept.opaque-structs concept.types concept.values concept.error-payloads principle.name-the-parts rule.struct-construction capability.struct-type-import error.missing-field error.unknown-field
-docs: STRUCTS.md README.md
 
 == WHAT IT IS
     struct Point:               a nominal type, declared at top level
@@ -1224,7 +1190,7 @@ p.x
 @end
 
 == MORE
-STRUCTS.md; concept.destructuring to bind several fields at once.
+concept.destructuring to bind several fields at once.
 
 @topic concept.parameterized-structs
 title: Parameterized structs: type slots, and slots constrained by a trait
@@ -1232,8 +1198,7 @@ summary: `struct Map[K satisfies Hashable, V]:` is a type constructor whose appl
 index: concepts
 alias: parameterized struct; generic struct; type slot; type parameter; satisfies; type constructor; struct type arguments; Map[K, V]
 keywords: slot, satisfies, Hashable, imprint, application, type constructor, constraint, obligation, generic, K, V, TRAIT-NOT-SATISFIED, IMPRINT
-related: concept.structs concept.traits concept.hashable error.imprint error.trait-not-satisfied error.type
-docs: TRAIT-CONSTRAINED-IMPRINTED-TYPES.md STRUCTS.md C-ABI-TYPES.md
+related: concept.structs concept.traits concept.hashable concept.declaration-summaries error.imprint error.trait-not-satisfied error.type
 
 == WHAT IT IS
     struct Pair[A, B]:                      slots A and B
@@ -1269,8 +1234,21 @@ type a `List[K]`, a field and a result may hold -- never a trait view.
     and is constrained by at most one trait: `satisfies TRAIT`, never `:`,
     `where`, `requires` or an expression.
   * An application gives one type per slot (TYPE otherwise); the bare
-    constructor `Pair` is no type. A slot takes an unrestricted concrete
-    type: no trait, context trait or affine type.
+    constructor `Pair` is no type. A slot takes a concrete type: no trait
+    or context trait. An affine type is an argument like any other: the
+    application is affine exactly when its fields, the arguments
+    substituted, are (`Box[Coroutine{...}]` of `value: T` is affine,
+    `Phantom[Coroutine{...}]` of `value: int` is not), written or inferred
+    alike; a recursive affine application (`Node[Coroutine{...}]` holding
+    `List[Node[T]]`) is AFFINE-CONTAINER-UNSUPPORTED wherever it is
+    written.
+  * A declaration may name itself or another with a larger argument
+    (`struct W[T]: next: List[W[List[T]]]`): it is still one finite
+    declaration, and every application of it is an ordinary type.
+    `W[Coroutine{...}]` holds no handle at any depth (no field holds a
+    value of T), so it is unrestricted, Hashable and sendable, as `W[int]`
+    is. The compiler answers such a type from its declaration, never by
+    expanding it (concept.declaration-summaries).
   * An invalid application -- a constrained slot's argument that does not
     satisfy the trait (a function for Hashable, `any`) -- is
     TRAIT-NOT-SATISFIED where it is written: a parameter, a result, a
@@ -1344,8 +1322,73 @@ struct Outer[T]:
 @end
 
 == MORE
-TRAIT-CONSTRAINED-IMPRINTED-TYPES.md; concept.structs; error.imprint for
-how a function's variables are established.
+concept.structs; error.imprint for how a function's variables are
+established.
+
+@topic concept.declaration-summaries
+title: Recursive parameterized types: answered from their declarations
+summary: A struct that names itself with a larger argument (`next: List[W[List[T]]]`) is one finite declaration; what its applications hold is decided from it, never by expanding them.
+index: concepts
+alias: declaration summary; non-uniform recursion; recursive generic type; W[List[T]]; infinite type expansion
+keywords: recursive, parameterized, application, summary, fixpoint, Hashable, affine, sendable, W, nested, expansion
+related: concept.parameterized-structs concept.hashable concept.structs
+
+== WHAT IT IS
+    struct W[T]:
+        next: List[W[List[T]]]
+
+Substituting W's argument into its field gives `W[List[T]]`, whose field
+gives `W[List[List[T]]]`, and so on without end: the applications are
+infinitely many, but the declaration is one. What a value of `W[X]` holds
+does not depend on how deep that sequence goes: no field of W holds a
+value of T at any depth, so `W[Coroutine{...}]` owns no handle, compares
+and hashes totally and can be sent, exactly as `W[int]` can.
+
+== RULES
+  * For each declaration the compiler computes once how each question --
+    is a value affine, is its equality and hash total, does it carry a
+    callable's obligation or declared errors, can it be sent, does it hold
+    a mutable value -- depends on each slot: the slot is held where a value
+    of it is a component, or not at all. An application's answer is the
+    declaration's own answer joined with its arguments' answers at the
+    slots that are held.
+  * The summaries are a least fixpoint over the program's declarations, so
+    they exist for every declaration, whatever applications substitution
+    would make; a declaration met again through its own fields adds
+    nothing.
+  * A slot is held differently for each question: a `Fn{args: [T], ...}`
+    field holds no value of T (no ownership, no equality), but its
+    argument type is a caller's obligation; a `Phantom[T]` holds nothing.
+  * A recursive affine application (`Node[Coroutine{...}]`: a value of T in
+    a List of its own applications) is still AFFINE-CONTAINER-UNSUPPORTED:
+    that is a rule of ownership, not of the compiler's analysis. It too is
+    decided from the declarations: on the finite graph of declaration
+    states (a declaration and which of its slots hold affine arguments),
+    never by expanding the type or by a depth, so a deep finite affine type
+    is an ordinary one (error.affine-container-unsupported).
+
+== EXAMPLES
+@example accept
+import std::list
+
+struct Message:
+    value: int
+
+struct W[T]:
+    next: List[W[List[T]]]
+
+fn count(w: W[Coroutine{args: [Message], return: Message}]) -> int:
+    std::list::length(w.next)
+
+w = W[Coroutine{args: [Message], return: Message}] {next: [W[List[Coroutine{args: [Message], return: Message}]] {next: []}]}
+v = w
+[count(w), count(v), w == v, hash(w) == hash(v)]
+@caption W[Coroutine{...}] holds no handle: it is copied, compared, hashed and passed like any unrestricted value
+@value [1, 1, true, true]
+@end
+
+== MORE
+concept.parameterized-structs.
 
 @topic concept.opaque-structs
 title: Opaque structs: representation owned by one module
@@ -1354,7 +1397,6 @@ index: concepts
 alias: opaque struct; opaque type; abstract data type; encapsulation
 keywords: opaque, representation, module, construct, inspect, authority, OPAQUE-CONSTRUCTION, OPAQUE-REPRESENTATION, Bytes
 related: concept.structs concept.modules concept.contexts concept.private rule.opaque-authority error.opaque-construction error.opaque-representation
-docs: OPAQUE-STRUCTS.md
 
 == WHAT IT IS
     opaque struct Token:
@@ -1407,9 +1449,6 @@ b.storage
 @at 5:3
 @end
 
-== MORE
-OPAQUE-STRUCTS.md.
-
 @topic concept.private
 title: Private declarations: `private` makes a declaration module-local
 summary: `private fn`, `private struct`, ... -- a top-level declaration only its own module may name or use; `private` decides who may access a declaration, `opaque` who may inspect a representation.
@@ -1417,7 +1456,6 @@ index: concepts
 alias: private; public; visibility; export; hide function; module privacy; private helper
 keywords: private, public, module, access, visibility, helper, opaque, PRIVATE-ACCESS, PRIVATE-TYPE-ESCAPE, airlock
 related: concept.opaque-structs concept.modules concept.contexts concept.direct-modules error.private-access error.private-type-escape warning.context-resource-escape
-docs: MODULE-PRIVACY-AND-CONTEXT-ESCAPE-MILESTONE-1.md OPAQUE-STRUCTS.md IMPORTS.md
 
 == WHAT IT IS
     private fn renderer(context sdl: Sdl) -> std::ffi::c::Ptr[SDL_Renderer]:
@@ -1529,9 +1567,6 @@ private fn scale(x: int) -> int:
 @at 3:1
 @end
 
-== MORE
-MODULE-PRIVACY-AND-CONTEXT-ESCAPE-MILESTONE-1.md.
-
 @topic concept.destructuring
 title: Struct destructuring: `{a, b: c} = value`
 summary: `{user, expires: expiry} = s` binds struct fields by name (renaming, omitting and nesting allowed); Lists are deliberately not destructured positionally.
@@ -1539,7 +1574,6 @@ index: concepts
 alias: struct destructuring; destructuring; unpack struct; destructure
 keywords: destructure, pattern, fields, rename, nested, bind, LIST-DESTRUCTURING, unpack, tuple
 related: concept.structs concept.bindings concept.error-payloads concept.lists rule.no-list-destructuring principle.name-the-parts error.list-destructuring
-docs: STRUCT-DESTRUCTURING.md MULTI-VALUE-RESULTS.md
 
 == WHAT IT IS
     {user, expires: expiry} = session
@@ -1593,9 +1627,6 @@ tail
 @at 5:2
 @end
 
-== MORE
-STRUCT-DESTRUCTURING.md; MULTI-VALUE-RESULTS.md ("name the parts").
-
 @topic concept.enums
 title: Enums: closed sets of named cases
 summary: `enum Color:` declares a nominal type with payload-free cases written `Color::Red`; cases compare with == and hash, and have no number, String form, ordering or bare-name visibility.
@@ -1603,7 +1634,6 @@ index: concepts
 alias: enum; enumeration; enum case; enumerated type
 keywords: enum, case, nominal, closed, ==, hash, import type, ordinal, match, switch, UNKNOWN-ENUM-CASE
 related: concept.structs concept.imports concept.types rule.import-type capability.match error.unknown-enum-case
-docs: ENUMS.md
 
 == WHAT IT IS
     enum Light:
@@ -1661,9 +1691,6 @@ Red
 @at 5:1
 @end
 
-== MORE
-ENUMS.md.
-
 @topic concept.refinements
 title: Refinement types: `refined type` and `proves`
 summary: `refined type T = Carrier` names a property that only the owning module's predicates and validators (`proves x: T`) establish; the compiler tracks it through control flow.
@@ -1671,7 +1698,6 @@ index: concepts
 alias: refinement type; refined type; proves clause; proof-producing predicate; validator function
 keywords: refined, proves, predicate, validator, carrier, Emailish, proof, flow, narrowing, validate_
 related: concept.integer-domains concept.types concept.booleans proof.refinements warning.proves-naming principle.predicate-naming rule.no-callable-types error.type
-docs: REFINEMENT-VALUES.md CROSS-MODULE-REFINED-SIGNATURES.md ELIMINATE-AUTOMATIC-TYPE-PREDICATES.md
 
 == WHAT IT IS
     refined type NonEmpty = str
@@ -1740,7 +1766,7 @@ shout("hi")
 @end
 
 == MORE
-REFINEMENT-VALUES.md; proof.refinements for what the compiler tracks.
+proof.refinements for what the compiler tracks.
 
 @topic concept.functions
 title: Functions: declarations, parameters, results and errors
@@ -1749,7 +1775,6 @@ index: concepts
 alias: function declaration; fn keyword; return statement; result type; parameter list
 keywords: fn, function, parameter, argument, return, result, errors, recursion, arity, typed parameter, default argument, ARITY
 related: concept.closures concept.function-types concept.flags concept.contexts concept.errors concept.method-sugar concept.nomethod concept.specialization concept.definition-order rule.typed-parameters principle.small-functions error.arity
-docs: README.md STRICT-TYPED-PARAMETERS.md EXPLICIT-ERROR-COMPLETIONS.md
 
 == WHAT IT IS
     fn clamp(n: int, low: int, high: int) -> int errors Inverted:
@@ -1823,7 +1848,7 @@ half_label(4)
 @end
 
 == MORE
-docs/README.md section 17; concept.closures for nested functions.
+concept.closures for nested functions.
 
 @topic concept.closures
 title: Closures: nested named functions
@@ -1832,7 +1857,6 @@ index: concepts
 alias: closure; closures; nested function; captured variable; inner function
 keywords: closure, capture, nested, fn, callback, lambda, anonymous, environment, higher-order, function value
 related: concept.functions concept.function-types concept.definition-order capability.lambdas concept.mutable-vector error.mutable-place-receiver
-docs: README.md STRUCTURAL-FUNCTION-TYPES.md
 
 == WHAT IT IS
 A `fn` declared in a function body is a closure: it sees the enclosing
@@ -1883,17 +1907,15 @@ fn has_above?(xs: List[int], limit: int) -> bool:
 @end
 
 == MORE
-docs/README.md section 17 (the make_adder example); concept.function-types
-for typing a callback parameter.
+concept.function-types for typing a callback parameter.
 
 @topic concept.mutual-recursion
 title: Mutual recursion: not supported today
-summary: Two functions cannot call each other: a function sees only what is defined before it, and the planned `mutual:` group (MUTUAL-RECURSION.md) is a design that is not implemented.
+summary: Two functions cannot call each other: a function sees only what is defined before it, and the planned `mutual:` group is a design that is not implemented.
 index: concepts
 alias: mutual recursion; mutually recursive functions; mutual group
 keywords: mutual, recursion, recursive, forward reference, UNBOUND, cycle, is_even, is_odd, mutual:
 related: concept.definition-order concept.functions concept.closures rule.forward-references error.unbound
-docs: MUTUAL-RECURSION.md STRICT-REFERENCE-DETERMINISM.md
 
 == WHAT IT IS
 Because bindings are visible only after their definition
@@ -1903,8 +1925,9 @@ itself.
 
 == RULES
   * `mutual:` is not part of the language yet: writing it is a syntax
-    error (expected end of line, found ":"). MUTUAL-RECURSION.md records
-    the design (a module-level group of functions with declared results).
+    error (expected end of line, found ":"). Its design, recorded but not
+    implemented, is a module-level group of functions with declared
+    results.
   * Ordinary bindings are never hoisted, so no ordering of two mutually
     recursive functions compiles.
 
@@ -1955,10 +1978,6 @@ is_even(10)
 @at 4:5
 @end
 
-== MORE
-MUTUAL-RECURSION.md (design, not implemented);
-STRICT-REFERENCE-DETERMINISM.md for why nothing is hoisted.
-
 @topic concept.method-sugar
 title: Method syntax: `x.f(a)` is `f(x, a)`
 summary: `value.f(a, b)` is another spelling of the call f(value, a, b), allowed when a function f is visible by that name; a namespace's functions become visible to method syntax only through `import NS`.
@@ -1966,7 +1985,6 @@ index: concepts
 alias: method call; method syntax; receiver syntax; dot call; method-call sugar
 keywords: method, receiver, dot, candidate, import, AMBIGUOUS-METHOD-CALL, NO-APPLICABLE-METHOD, MISSING-IMPORT, sugar, chaining, extension method
 related: concept.nomethod concept.imports concept.functions rule.method-requires-import rule.method-resolution warning.method-eligible principle.receiver-first error.missing-import error.ambiguous-method-call error.no-applicable-method
-docs: METHOD-SUGAR.md IMPORTS.md WARNINGS-METHOD-ELIGIBLE.md
 
 == WHAT IT IS
 `x.f(a)` does not ask what methods `x` has: it asks whether a function
@@ -2032,7 +2050,7 @@ fn at(xs: List[int], i: int) -> int:
 @end
 
 == MORE
-METHOD-SUGAR.md; rule.method-resolution for the full candidate rules.
+rule.method-resolution for the full candidate rules.
 
 @topic concept.nomethod
 title: `nomethod fn`: a function whose first parameter is no receiver
@@ -2041,7 +2059,6 @@ index: concepts
 alias: nomethod; nomethod fn; no method syntax
 keywords: nomethod, method syntax, receiver, interface, declaration, NOMETHOD-CALL, METHOD-ELIGIBLE, bit_and, suppression
 related: concept.method-sugar warning.method-eligible principle.receiver-first error.nomethod-call lint.policy
-docs: WARNINGS-METHOD-ELIGIBLE.md METHOD-SUGAR.md REFACTOR-WARNINGS-CLEAN.md
 
 == WHAT IT IS
     nomethod fn atan2(y: int, x: int) -> int:
@@ -2095,7 +2112,7 @@ nomethod fn distance(a: int, b: int) -> int:
 @end
 
 == MORE
-WARNINGS-METHOD-ELIGIBLE.md; warning.method-eligible.
+warning.method-eligible.
 
 @topic concept.flags
 title: Flag parameters: `flags :name`
@@ -2104,7 +2121,6 @@ index: concepts
 alias: flag parameter; flag parameters; boolean option; named flag
 keywords: flags, :name, option, bool, boolean, UNKNOWN-FLAG, DUPLICATE-FLAG, FLAG-FUNCTION-VALUE, keyword argument, MANY-BOOLEAN-ARGUMENTS
 related: concept.functions concept.booleans principle.options-are-flags warning.many-boolean-arguments rule.flags error.unknown-flag error.flag-function-value
-docs: FLAGS.md WARNINGS-MANY-BOOLEAN-ARGUMENTS.md
 
 == WHAT IT IS
     fn label(n: int, flags :loud, :signed) -> str:
@@ -2155,9 +2171,6 @@ label(1, :shout)
 @at 6:10
 @end
 
-== MORE
-FLAGS.md.
-
 @topic concept.variadics
 title: Variadic parameters: `variadic NAME: List[T]`
 summary: `fn sum(variadic xs: List[int])` takes any number of trailing arguments as one immutable List; `extern c fn f(fixed, variadic)` is a variadic C function.
@@ -2165,7 +2178,6 @@ index: concepts
 alias: variadic function; variadic parameter; varargs; variable arguments; rest parameter; C varargs; printf
 keywords: variadic, varargs, trailing arguments, List, imprint, extern c fn, va_arg, default argument promotions, MALFORMED-VARIADIC-SECTION
 related: concept.functions concept.flags concept.c-ffi error.malformed-variadic-section error.arity error.extern-syntax
-docs: VARIADICS-VERTICAL-SLICE-1.md FLAGS.md C-FFI.md
 
 == WHAT IT IS
     fn sum(variadic numbers: List[int]) -> int:
@@ -2296,9 +2308,6 @@ printf(cstring("%ld %.1f\n"), c_long(-7), 2.5)
 @value 7
 @end
 
-== MORE
-VARIADICS-VERTICAL-SLICE-1.md; FLAGS.md (the section order); C-FFI.md.
-
 @topic concept.function-types
 title: Function types: `Fn{args, return, errors}` and `Coroutine{...}`
 summary: A parameter, result or field may declare Fn{args: [T], return: R, errors: [E]}; any callable whose contract fits is accepted, and calls through it are checked against the contract.
@@ -2306,7 +2315,6 @@ index: concepts
 alias: Fn type; function type; callback type; Coroutine type; structural function type
 keywords: Fn, Coroutine, callable, callback, higher-order, args, return, errors, contract, function value, typed callback
 related: concept.functions concept.closures concept.coroutines concept.errors proof.callable-contracts concept.affine error.type
-docs: STRUCTURAL-FUNCTION-TYPES.md VERIFIED-CALLABLE-CONTRACT-BOUNDARY.md AFFINE-VALUES.md
 
 == WHAT IT IS
     Fn{args: [int, str], return: bool, errors: [NotFound]}
@@ -2372,7 +2380,7 @@ fn risky(n: int) -> int errors Bad:
 @end
 
 == MORE
-STRUCTURAL-FUNCTION-TYPES.md; proof.callable-contracts.
+proof.callable-contracts.
 
 @topic concept.imports
 title: Imports: explicit, exact, not transitive
@@ -2381,7 +2389,6 @@ index: concepts
 alias: import; imports; import statement; qualified name; namespace import
 keywords: import, import type, namespace, qualified, ::, header, MISSING-IMPORT, transitive, alias, wildcard, UNKNOWN-NAMESPACE
 related: concept.modules concept.method-sugar concept.enums rule.imports-not-transitive rule.import-type rule.method-requires-import capability.struct-type-import principle.explicit-dependencies error.missing-import error.unknown-namespace
-docs: IMPORTS.md METHOD-SUGAR.md STDLIB-NAMESPACES.md
 
 == WHAT IT IS
     import std::list            this file depends on namespace std::list
@@ -2440,7 +2447,7 @@ std::list::length([1, 2])
 @end
 
 == MORE
-IMPORTS.md; concept.modules for where a namespace's file is found.
+concept.modules for where a namespace's file is found.
 
 @topic concept.modules
 title: Modules: one file, one namespace
@@ -2449,7 +2456,6 @@ index: concepts
 alias: module; modules; namespace; module binding; application module; global constant
 keywords: module, namespace, file, stdlib, application root, module binding, MODULE-CONTEXT, MODULE-IMMUTABLE, RESERVED-NAMESPACE, SELF-IMPORT, global, constant
 related: concept.imports concept.standard-library concept.opaque-structs concept.direct-modules concept.contexts rule.module-bindings rule.application-modules rule.package-modules principle.explicit-dependencies error.module-context error.module-collision error.unknown-namespace
-docs: IMPORTS.md MODULE-BINDINGS.md NATIVE-MODULES.md POST-2048-PRODUCT-FIXES.md BOT-MODULES-MILESTONE-1.md
 
 == WHAT IT IS
 One file is one namespace: `stdlib/abi/bytes.bot` is `std::abi::bytes` (the
@@ -2505,9 +2511,6 @@ import geometry
 @at 1:8
 @end
 
-== MORE
-IMPORTS.md ("Application modules"); MODULE-BINDINGS.md.
-
 @topic concept.standard-library
 title: The standard library: the namespace std, and rooted names
 summary: Every standard namespace is under std (std::list, std::str, std::linux::io), read from stdlib/ beside the compiler; a leading :: roots any namespace path explicitly.
@@ -2515,7 +2518,6 @@ index: concepts
 alias: std; standard library; stdlib; ::std; absolute namespace; rooted name; root namespace; where is the standard library
 keywords: std, stdlib, standard library, ::, rooted, absolute, root, namespace, reserved, local module, list.bot
 related: concept.imports concept.modules rule.application-modules error.reserved-namespace error.rooted-name error.unknown-namespace
-docs: STD-NAMESPACE.md IMPORTS.md
 
 == WHAT IT IS
 The standard library is one namespace tree with the compiler-owned root
@@ -2563,7 +2565,7 @@ list::length([1])
 @end
 
 == MORE
-STD-NAMESPACE.md; `-help stdlib` lists the standard namespaces.
+`-help stdlib` lists the standard namespaces.
 
 @topic concept.if-expressions
 title: `if`, `elif`, `else` and `if` as a value
@@ -2572,7 +2574,6 @@ index: concepts
 alias: if statement; elif; else branch; if expression; conditional expression; ternary
 keywords: if, elif, else, condition, branch, value, ternary, operand, argument, placement, NOT-BOOLEAN
 related: concept.booleans concept.loops concept.unit rule.if-placement rule.else-if principle.guard-clauses principle.bind-before-use error.not-boolean error.surface-syntax
-docs: README.md ELIF.md
 
 == WHAT IT IS
     sign = if n < 0:
@@ -2635,7 +2636,7 @@ x
 @end
 
 == MORE
-ELIF.md; rule.if-placement.
+rule.if-placement.
 
 @topic concept.loops
 title: Loops: `loop:`, collecting loops, `break` and `continue`
@@ -2644,7 +2645,6 @@ index: concepts
 alias: loop; for loop; while loop; collecting loop; break and continue; counted loop; for; while; for x in xs; for i in range; while true
 keywords: loop, in, from, to, through, down from, break, continue, while, for, collect, map, filter, iteration, iterator, iterate, range, placement
 related: concept.folds concept.lockstep concept.lists concept.if-expressions concept.mutable-map concept.mutable-set rule.loop-placement rule.control-placement capability.map-filter proof.list-bounds task.iterate-with-index
-docs: COLLECTING-LOOPS.md RETURNING-ITERABLE-LOOPS.md PAYLOAD-FREE-BREAK.md
 
 == WHAT IT IS
     loop x in xs:                  every element of a List (or vector), or
@@ -2709,8 +2709,7 @@ n
 @end
 
 == MORE
-COLLECTING-LOOPS.md, RETURNING-ITERABLE-LOOPS.md; concept.lockstep for
-iterating several domains together.
+concept.lockstep for iterating several domains together.
 
 @topic concept.lockstep
 title: Lockstep loops: several domains with a proven common count
@@ -2719,7 +2718,6 @@ index: concepts
 alias: lockstep loop; zip lists; parallel iteration
 keywords: lockstep, and, zip, enumerate, index, LOCKSTEP-UNPROVEN, LOCKSTEP-UNEQUAL, cardinality, equal length
 related: concept.loops proof.lockstep proof.list-bounds task.iterate-with-index error.lockstep-unproven error.lockstep-unequal
-docs: COLLECTING-LOOPS.md
 
 == WHAT IT IS
 Loop clauses joined with `and` run in lockstep: one body execution per
@@ -2771,7 +2769,7 @@ fn sums(xs: List[int], ys: List[int]) -> List[int]:
 @end
 
 == MORE
-COLLECTING-LOOPS.md; proof.lockstep for the recognized forms.
+proof.lockstep for the recognized forms.
 
 @topic concept.errors
 title: Declared errors: `error`, `errors`, `fail` and `on` handlers
@@ -2780,7 +2778,6 @@ index: concepts
 alias: declared errors; error handling; on handler; fail statement; errors clause; error propagation
 keywords: error, errors, fail, on, handler, propagate, raise, exception, catch, try, throw, UNHANDLED-ERROR, KNOWN-ERROR, IndexNotFound, UNDECLARED-ERROR
 related: concept.error-payloads concept.known-errors concept.functions concept.function-types rule.unhandled-errors rule.one-handler-per-error rule.known-error proof.completions principle.errors-over-sentinels capability.exceptions capability.multi-error-handler task.handle-several-errors error.unhandled-error error.undeclared-error
-docs: EXPLICIT-ERROR-COMPLETIONS.md STATIC-COMPLETION-PROOFS.md ERROR-PAYLOADS.md
 
 == WHAT IT IS
     error Negative                         a declaration (top level)
@@ -2865,7 +2862,6 @@ fn doubled(n: int) -> int:
 @end
 
 == MORE
-EXPLICIT-ERROR-COMPLETIONS.md; STATIC-COMPLETION-PROOFS.md;
 task.handle-several-errors.
 
 @topic concept.error-payloads
@@ -2875,7 +2871,6 @@ index: concepts
 alias: error payload; error fields; error with data; error details
 keywords: payload, error, field, fail, on, details, destructure, MISSING-FIELD, module-qualified, identity
 related: concept.errors concept.destructuring concept.structs concept.enums capability.multi-error-handler error.missing-field
-docs: ERROR-PAYLOADS.md
 
 == WHAT IT IS
     error PageNotFound:
@@ -2943,9 +2938,6 @@ fn fetch(uri: str) -> str errors PageNotFound:
 @at 6:23
 @end
 
-== MORE
-ERROR-PAYLOADS.md.
-
 @topic concept.known-errors
 title: Statically known outcomes: proven success and proven failure
 summary: The compiler decides some calls' outcomes: a call proven to succeed needs no handler, and a call proven to always fail is KNOWN-ERROR -- rejected even when a handler would catch the error.
@@ -2953,7 +2945,6 @@ index: concepts
 alias: proven call outcome; call that cannot fail; call proven to fail
 keywords: KNOWN-ERROR, always fails, handler, proven, completion, literal, guard, impossible error, no handler needed, test
 related: concept.errors concept.negative-tests rule.known-error rule.unhandled-errors proof.completions proof.list-bounds proof.ranges error.known-error
-docs: STATIC-COMPLETION-PROOFS.md EXPLICIT-ERROR-COMPLETIONS.md
 
 == WHAT IT IS
 The completion analysis computes, for each call, which declared errors it
@@ -3005,8 +2996,8 @@ x
 @end
 
 == MORE
-To test a failing call on purpose, see concept.negative-tests.
-STATIC-COMPLETION-PROOFS.md.
+To test a failing call on purpose, see concept.negative-tests;
+proof.completions for what the completion analysis proves.
 
 @topic concept.contexts
 title: Contexts: execution-environment values without globals
@@ -3014,8 +3005,7 @@ summary: A `context struct` value installed with `with context EXPR` reaches eve
 index: concepts
 alias: context struct; with context; context parameter; dependency injection; environment value
 keywords: context, with, installed, requirement, MISSING-CONTEXT, DUPLICATE-CONTEXT, CONTEXT-FUNCTION-VALUE, global, singleton, LinuxIO, suite
-related: concept.context-traits concept.context-owned-state concept.opaque-structs concept.direct-modules concept.testing proof.contexts rule.context-installation error.missing-context error.duplicate-context error.context-function-value error.context-installation-unsupported
-docs: CONTEXTS.md CONTEXT-TRAITS.md CONTEXT-OWNED-AFFINE-STATE-MILESTONE-1.md
+related: concept.context-traits concept.context-owned-state concept.context-injection concept.opaque-structs concept.direct-modules concept.testing proof.contexts rule.context-installation error.missing-context error.duplicate-context error.context-function-value error.context-installation-unsupported
 
 == WHAT IT IS
     context struct Config:
@@ -3092,7 +3082,233 @@ x
 @end
 
 == MORE
-CONTEXTS.md; concept.context-traits for contexts named by what they do.
+concept.context-traits for contexts named by what they do.
+
+@topic concept.context-injection
+title: Inject blocks: a computation with only the contexts it is given
+summary: `inject context A, B:` runs its block with only the listed installed contexts (`inject no context:` with none), whatever its creator can use; checked statically, at no runtime cost.
+index: concepts
+alias: inject; inject context; inject no context; restricted context; restricted authority; context injection; capability restriction; sandbox; least privilege; request handler; actor authority
+keywords: inject, injection, authority, restricted, least privilege, actor, request handler, coroutine, CONTEXT-NOT-INJECTED, CONTEXT-RETAINED-AUTHORITY, installation, selection
+related: concept.contexts concept.context-traits concept.coroutines concept.direct-modules error.context-not-injected error.context-retained-authority error.duplicate-injected-context
+
+== WHAT IT IS
+    with context network::create()
+    with context storage::create()
+
+    report = inject context storage::Storage:
+        build_report(data)
+
+Three things stay apart: *installation* (`with context EXPR`, entry
+program, top level) makes an implementation available; *selection* picks
+the one implementation of a context trait, once per program; *injection*
+grants a computation permission to use some of what is installed. An
+inject block is a statement or a value (`x = inject ...:` is its last
+statement's value); its code may use exactly the contexts it lists -- a
+context struct or a context trait each -- and `inject no context:` none.
+
+== RULES
+  * Every call in the block -- direct, imported, method-style, a coroutine
+    construction, a trait operation -- requires only injected contexts,
+    transitively (CONTEXT-NOT-INJECTED, with the chain).
+  * The block may not read a context parameter of the function it is in,
+    nor call a nested function that does, unless it injects that context.
+  * A nested inject block injects a subset of the enclosing one: authority
+    never widens. A function containing an inject block requires what the
+    block injects, so its callers -- and their inject blocks -- must have
+    it too.
+  * At top level each injected context must be installed where the block
+    runs (a context trait: implemented by exactly one installed context).
+  * A coroutine resumed in the block must have been constructed within the
+    injected contexts (CONTEXT-RETAINED-AUTHORITY): a coroutine keeps its
+    creator's contexts.
+  * Values cross freely: data, a copy of a context value, a handle moved
+    through without being resumed, an address of a mailbox. Passing a
+    value is explicit delegation; what is restricted is direct use of
+    context authority.
+
+== WHY
+Availability is not authority. A request handler, a calculation task or a
+storage service can be given exactly the dependencies it needs, and the
+compiler proves it cannot reach the others through any call chain. There
+is no runtime cost: no permission table, no context copy, no second
+selection; the block compiles to its code.
+
+== EXAMPLES
+@example accept
+context struct Network:
+    id: int
+
+context struct Storage:
+    base: int
+
+fn store(n: int, context st: Storage) -> int:
+    n + st.base
+
+fn calculate(n: int) -> int:
+    n * 2
+
+with context Network {id: 7}
+with context Storage {base: 10}
+a = inject no context:
+    calculate(16)
+b = inject context Storage:
+    store(a)
+b
+@caption A contextless calculation and a Storage-only computation beside an installed Network
+@value 42
+@end
+
+@example reject
+context struct Network:
+    id: int
+
+fn send(n: int, context net: Network) -> int:
+    n + net.id
+
+fn handler(n: int) -> int:
+    send(n)
+
+with context Network {id: 1}
+inject no context:
+    handler(1)
+@caption handler reaches Network through send; the block grants none
+@error CORE SEMANTIC CONTEXT-NOT-INJECTED
+@at 12:5
+@end
+
+@topic concept.actors
+title: Actors: coroutines with typed mailboxes and only the authority they are given
+summary: `std::actor` runs coroutines as actors on the event loop with typed mailboxes; receiving and sending need no context, so an actor built inside `inject no context:` still communicates.
+index: concepts
+alias: actor; actors; mailbox; inbox; address; message passing; send a message; receive a message; supervisor; same-thread actors
+keywords: actor, mailbox, inbox, address, receiver, send, receive, deliver, listen, start, reap, backpressure, room, supervisor, inject, authority, event loop
+related: concept.context-injection concept.coroutines concept.affine concept.contexts stdlib.module.std::actor stdlib.module.std::event_loop
+
+== WHAT IT IS
+    with context std::event_loop::create(64)
+    with context std::event_loop::deterministic::create()
+    with context std::actor::create()
+
+    {to: work, inbox} = std::actor::open[Work](8)
+    s = inject no context:
+        coroutine {step, first} = calculator(inbox)
+        std::actor::spawned(step, first)
+    s.start()
+    std::actor::post(work, Work {...})
+    std::event_loop::run()
+
+An actor is one ordinary coroutine: its state is its own locals, it handles
+one message at a time, and the event loop schedules it like any task. Its
+authority is what its construction was given: the inject block's contexts
+and the values passed in. Three capabilities connect actors:
+
+  * `Address[M]` -- copyable, send-only: `to.send(m)`, `to.deliver(m)`;
+  * `Inbox[M]` -- the affine receive right of one mailbox, moved into the
+    actor at construction: `rx = inbox.listen()` binds the mailbox to it;
+  * `Receiver[M]` -- what the actor receives through: `rx.receive()`,
+    `rx.try_receive()`.
+
+== RULES
+  * listen, receive, try_receive, send, deliver and pause need no context:
+    they are requests the actor's coroutine yields to the task that hosts
+    it, which performs them and resumes it with the answer.
+  * The administration -- open, start, post (a send from outside actors),
+    close, drain, reap, stats -- requires the Loop and std::actor::Actors.
+  * An actor function's result type is std::actor::Exit and it ends with
+    std::actor::exit(VALUE); it may fail with TaskFailed or IndexNotFound.
+    Either way its host closes its mailboxes (queued messages counted
+    undelivered, senders waiting for room woken with Closed), and
+    take_outcomes reports the task under start's id.
+  * Messages are values of exactly the mailbox's type, copied at the send,
+    in order per mailbox. A full mailbox answers Full; deliver waits for
+    room, woken when a place frees, in the order senders began to wait.
+    After a close sends are Closed, after the slot's reuse Stale.
+
+== WHY
+The scheduler's authority is not the actor's: a calculation actor built
+inside `inject no context:` in a supervisor that holds the network, the
+storage, the clock and the event loop can still receive work and reply --
+and the compiler proves it can do nothing else.
+
+== EXAMPLES
+@example accept
+import std::actor
+import std::event_loop
+import std::event_loop::deterministic
+import std::list
+
+struct Work:
+    n: int
+    reply: std::actor::Address[int]
+
+fn calculator(inbox: std::actor::Inbox[Work]) -> std::actor::Exit:
+    rx = inbox.listen():
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    served = fold with intermediate k 0:
+        w = rx.receive():
+            on std::actor::Closed:
+                break
+        w.reply.send(w.n * w.n)
+        k + 1
+    std::actor::exit(served)
+
+fn main(context ev: std::event_loop::Loop, d: std::event_loop::Driver, ac: std::actor::Actors) -> List[int] errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    {to: work, inbox} = std::actor::open[Work](4)
+    {to: replies, inbox: reply_in} = std::actor::open[int](4)
+    s = inject no context:
+        coroutine {step, first} = calculator(inbox)
+        std::actor::spawned(step, first)
+    s.start()
+    std::actor::post(work, Work {n: 3, reply: replies})
+    std::actor::post(work, Work {n: 7, reply: replies})
+    std::event_loop::run()
+    std::actor::drain(reply_in)
+
+with context std::event_loop::create(16)
+with context std::event_loop::deterministic::create()
+with context std::actor::create()
+main():
+    on std::event_loop::SchedulerFault:
+        []
+    on std::event_loop::DriverFault:
+        []
+    on std::event_loop::LoopReentered:
+        []
+@caption A contextless actor receives work and replies
+@value [9, 49]
+@end
+
+@example reject
+import std::actor
+import std::event_loop
+import std::event_loop::deterministic
+
+fn calculator(inbox: std::actor::Inbox[int], context ev: std::event_loop::Loop) -> std::actor::Exit errors std::event_loop::SchedulerFault:
+    rx = inbox.listen():
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    std::event_loop::log("calculating")
+    std::actor::exit(0)
+
+fn main(context ev: std::event_loop::Loop, ac: std::actor::Actors) -> int errors std::event_loop::SchedulerFault:
+    {to, inbox} = std::actor::open[int](4)
+    s = inject no context:
+        coroutine {step, first} = calculator(inbox)
+        std::actor::spawned(step, first)
+    s.start()
+
+with context std::event_loop::create(16)
+with context std::event_loop::deterministic::create()
+with context std::actor::create()
+main():
+    on std::event_loop::SchedulerFault:
+        0
+@caption The actor would log through the Loop, which its inject block does not grant
+@error CORE SEMANTIC CONTEXT-NOT-INJECTED
+@at 15:9
+@end
 
 @topic concept.context-owned-state
 title: Context-owned state: an installed context owns its affine members
@@ -3101,7 +3317,6 @@ index: concepts
 alias: context holding a pointer; context owns a resource; airlock; acquire a resource after installation; element place
 keywords: context, affine, owned, place, element, observe, pointer, resource, open, close, airlock, push, pop, take, swap
 related: concept.contexts concept.affine concept.mutable-vector error.affine-context-copy-out stdlib.std::mutable_vector::element stdlib.std::mutable_array::element concept.private concept.opaque-structs
-docs: CONTEXT-OWNED-AFFINE-STATE-MILESTONE-1.md CONTEXTS.md AFFINE-VALUES.md
 
 == WHAT IT IS
 Three things are distinct:
@@ -3206,8 +3421,7 @@ with context Device {root: std::ffi::c::null[std::ffi::c::Void]()}
 @end
 
 == MORE
-CONTEXT-OWNED-AFFINE-STATE-MILESTONE-1.md; examples/games/icy-tower/sdl.bot
-keeps SDL's window and renderer this way.
+examples/games/icy-tower/sdl.bot keeps SDL's window and renderer this way.
 
 @topic concept.context-traits
 title: Context traits: environments named by their operations (std::io::IO)
@@ -3216,7 +3430,6 @@ index: concepts
 alias: context trait; portable io; std::io::IO trait
 keywords: context trait, io, IO, print_line, LinuxIO, portable, implementation, selection, AMBIGUOUS-CONTEXT-IMPLEMENTATION, MISSING-CONTEXT, write_text
 related: concept.contexts concept.traits task.print-output backend.io stdlib.module.std::io error.missing-context error.ambiguous-context-implementation
-docs: CONTEXT-TRAITS.md CONTEXTS.md TRAITS.md
 
 == WHAT IT IS
     context trait Clock:
@@ -3286,7 +3499,7 @@ hello():
 @end
 
 == MORE
-CONTEXT-TRAITS.md; task.print-output.
+task.print-output.
 
 @topic concept.traits
 title: Traits: static, structural views of values
@@ -3295,7 +3508,6 @@ index: concepts
 alias: trait; traits; interface; type class; protocol
 keywords: trait, interface, structural, conformance, view, witness, monomorphization, TRAIT-NOT-SATISFIED, TRAIT-VIEW-MISUSE, polymorphism, dispatch, vtable
 related: concept.context-traits concept.hashable concept.specialization concept.method-sugar error.trait-not-satisfied error.trait-view-misuse
-docs: TRAITS.md
 
 == WHAT IT IS
     trait Named:
@@ -3362,9 +3574,6 @@ describe(Pet {species: "cat"})
 @at 10:10
 @end
 
-== MORE
-TRAITS.md.
-
 @topic concept.hashable
 title: Hashable: values with total equality and total hashing
 summary: Hashable is a built-in trait, used like any trait, whose witnesses the language supplies: exactly the types whose every value has total equality and a hash.
@@ -3372,7 +3581,6 @@ index: concepts
 alias: Hashable; hashable; hashable trait; hash key; map key; set key; dictionary key
 keywords: Hashable, hash, ==, equality, total, witness, built-in trait, callable, function, key, collision, keyed hash, TRAIT-NOT-SATISFIED
 related: concept.traits concept.equatable concept.value-identity stdlib.hash stdlib.== error.trait-not-satisfied error.equality error.internal-namespace
-docs: HASHABLE-AND-KEYED-HASH.md TRAITS.md REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md
 
 == WHAT IT IS
     fn fingerprint(x: Hashable) -> int:
@@ -3461,7 +3669,7 @@ fingerprint(Handler {name: "double", run: twice})
 @end
 
 == MORE
-HASHABLE-AND-KEYED-HASH.md; concept.traits.
+concept.traits.
 
 @topic concept.affine
 title: Affine values: one owner, moved, released
@@ -3469,8 +3677,7 @@ summary: A coroutine handle, and any struct, List or vector that owns one, is af
 index: concepts
 alias: affine; affine value; ownership; move semantics; use after move
 keywords: affine, move, owner, release, drop, USE-AFTER-MOVE, coroutine handle, copy, duplicate, unrestricted, AFFINE-CAPTURE-UNSUPPORTED
-related: concept.coroutines concept.mutable-vector concept.mutable-array concept.function-types proof.ownership rule.affine-use error.use-after-move
-docs: AFFINE-VALUES.md COROUTINES.md
+related: concept.coroutines concept.mutable-vector concept.mutable-array concept.function-types concept.resources proof.ownership rule.affine-use error.use-after-move
 
 == WHAT IT IS
 Most values are unrestricted: they can be copied and used any number of
@@ -3478,6 +3685,10 @@ times. An affine value may have only one usable owner at a time. The
 coroutine handle is the one primitive affine value; a struct, anonymous
 struct, List, MutableVector or MutableArray that owns one is affine too,
 by its type. `other = step` moves the handle: `step` is dead afterwards.
+An application of a parameterized struct is affine exactly when its
+fields, its type arguments substituted, are: `Box[Coroutine{...}]` of
+`struct Box[T]: value: T` is affine, `Phantom[Coroutine{...}]` of
+`struct Phantom[T]: value: int` is not (no value of T is stored).
 
 == RULES
   * A use after a move is USE-AFTER-MOVE, naming where the value moved.
@@ -3486,7 +3697,9 @@ by its type. `other = step` moves the handle: `step` is dead afterwards.
     destructuring the struct.
   * An affine value may be dropped unused; it is released (a suspended
     coroutine's stack freed) right after its owner's last use, or when a
-    return, fail, break, continue or error leaves its scope first.
+    return, fail, break, continue or error leaves its scope first. A
+    resource (concept.resources) is released at the end of its owner's
+    scope instead, by its cleanup function.
   * Not supported: capturing one in a closure
     (AFFINE-CAPTURE-UNSUPPORTED) and `==` on it
     (AFFINE-EQUALITY-UNSUPPORTED); a second use such as `[step, step]` is
@@ -3538,8 +3751,165 @@ b = step
 @at 7:5
 @end
 
+@example reject
+fn ticks() -> int:
+    yield 1
+    2
+
+struct Box[T]:
+    value: T
+
+coroutine {step} = ticks()
+b = Box {value: step}
+c = b
+d = b
+0
+@caption Box[Coroutine{...}] owns the handle through its slot: b moved into c
+@error CORE SEMANTIC USE-AFTER-MOVE
+@at 11:5
+@end
+
 == MORE
-AFFINE-VALUES.md; proof.ownership.
+proof.ownership.
+
+@topic concept.resources
+title: Resources: `resource struct` and `cleanup fn`
+summary: An `opaque resource struct` carries a cleanup obligation: its module's `cleanup fn` runs once where its owner's lexical scope ends (not at its last use), unless the value moved on first.
+index: concepts
+alias: resource; resource struct; cleanup function; scope-bound cleanup; deterministic cleanup; release a resource; drop action
+keywords: resource, cleanup, cleanup fn, scope, lexical, release, RESOURCE-DECLARATION, AFFINE-PATH-RELEASE-UNSUPPORTED, move, abandon, owned registration, release order
+related: concept.affine concept.coroutines concept.opaque-structs concept.contexts error.resource-declaration error.affine-path-release-unsupported stdlib.module.std::event_loop
+
+== WHAT IT IS
+`opaque resource struct Handle:` declares, in a module, a struct whose
+values each carry an obligation, and `cleanup fn close(h: Handle, context
+...):` the one function of that module that discharges it. The compiler
+calls the cleanup where the owner of a value dies: at the end of the
+owning binding's sequence, or where a return, fail, break, continue or
+error leaves it. It is a lexical scope, not a last use: a value nobody reads
+after its binding still lives to its scope's end.
+
+== RULES
+  * A resource struct is declared in a module, `opaque`, with no type
+    slots, and is no context; it is affine whatever its fields.
+  * Its cleanup is a top-level function of the same module with exactly one
+    ordinary parameter of the resource type, contexts (structs, not context
+    traits) after it, no flags, no errors clause, a unit result, and no
+    yield; it takes its parameter apart. Anything else is
+    RESOURCE-DECLARATION, and so is a construction of a resource that has
+    no cleanup.
+  * One disposition per value: its scope ends (the cleanup runs), it moves
+    (a binding, an argument, a result, a field, an element, a coroutine's
+    frame, an installed context's collection: the obligation moves too), or
+    its module destructures it (discharged without the cleanup). Calling
+    the cleanup yourself is the early release: it moves the value in.
+  * A scope releases what it still owns in reverse acquisition order; a
+    struct its fields last to first, a collection its elements first to
+    last.
+  * A value moved on some paths of a statement and kept on others has no one
+    release point: AFFINE-PATH-RELEASE-UNSUPPORTED (move it on every path,
+    or release it explicitly where it is not moved). There is no run-time
+    ownership state to ask.
+  * A function that may release a resource requires its cleanup's contexts,
+    like a call (MISSING-CONTEXT where one is not installed); one that only
+    makes and returns it does not.
+  * A coroutine's frames keep what they own across suspension. Where a
+    function that may suspend owns a resource, coroutine handles are
+    released at the end of their scopes too, and releasing a suspended one
+    abandons it: its pending yield fails with an internal error no handler
+    names, so only its frames' releases run, innermost first.
+  * What an installed context holds lives as long as the run: nothing is
+    released at the program's end. There are no finalizers, destructors or
+    reference counts; the collector never runs a cleanup.
+
+== WHY
+A registration, a descriptor or a session is an obligation, not a value:
+forgetting to end it is a leak, and ending it at the last use would end it
+while code still depends on it (an event source a sleeping task means to
+keep). The lexical scope is the boundary a reader sees; the module that
+can make and take apart the value is the one that may end it.
+
+== EXAMPLES
+@example accept
+import log
+
+fn body() -> int:
+    a = log::open(1)
+    b = log::open(2)
+    log::note(9)
+    3
+
+with context log::create()
+body()
+log::lines():
+    on IndexNotFound:
+        []
+@module log
+import std::mutable_vector
+
+opaque resource struct Handle:
+    id: int
+
+opaque context struct Log:
+    lines: MutableVector[int]
+
+fn create() -> Log:
+    Log {lines: std::mutable_vector::from_list([])}
+
+cleanup fn close(h: Handle, context log: Log):
+    {id} = h
+    log.lines.push(id)
+
+fn open(n: int) -> Handle:
+    Handle {id: n}
+
+fn note(n: int, context log: Log):
+    log.lines.push(n)
+
+fn lines(context log: Log) -> List[int] errors IndexNotFound:
+    loop i from 0 to log.lines.length():
+        log.lines.at(i)
+@caption Released at the scope's end, after the later note, in reverse order
+@value [9, 2, 1]
+@end
+
+@example reject
+import log
+
+fn maybe(keep: bool) -> int:
+    h = log::open(1)
+    if keep:
+        log::close(h)
+    0
+
+with context log::create()
+maybe(true)
+@module log
+import std::mutable_vector
+
+opaque resource struct Handle:
+    id: int
+
+opaque context struct Log:
+    lines: MutableVector[int]
+
+fn create() -> Log:
+    Log {lines: std::mutable_vector::from_list([])}
+
+cleanup fn close(h: Handle, context log: Log):
+    {id} = h
+    log.lines.push(id)
+
+fn open(n: int) -> Handle:
+    Handle {id: n}
+@caption Released on one path, still owned on the other
+@error CORE SEMANTIC AFFINE-PATH-RELEASE-UNSUPPORTED
+@at 5:5
+@end
+
+== MORE
+std::event_loop's owned registrations (owned_source, ..., release) are
+resources.
 
 @topic concept.coroutines
 title: Coroutines: `yield`, eager start, resume
@@ -3548,7 +3918,6 @@ index: concepts
 alias: coroutines; yield; generator; resume a coroutine
 keywords: coroutine, yield, resume, step, first, done?, handle, generator, iterator, UNWRAPPED-YIELD, suspend, message, scheduler
 related: concept.affine concept.function-types concept.mutable-vector concept.testing stdlib.module.std::coroutine error.unwrapped-yield error.use-after-move
-docs: COROUTINES.md AFFINE-VALUES.md COROUTINE-FUSION-MILESTONE-1.md TRAIT-IMPLEMENTATION-YIELD-INFERENCE-MILESTONE-1.md
 
 == WHAT IT IS
 `coroutine {step, first} = counter(3)` starts the call: `first` is what it
@@ -3569,7 +3938,7 @@ protocol.
   * A trait operation may yield when the implementation it calls does:
     the installed context's for a context trait, the witness's for an
     ordinary trait -- per witness, so `drain(s)` may yield for one witness
-    and not for another (TRAIT-IMPLEMENTATION-YIELD-INFERENCE-MILESTONE-1.md).
+    and not for another.
   * After completion the handle keeps returning the final result; a failed
     coroutine raises its error again. `std::coroutine::done?(step)` (`import
     coroutine`) is true once it has done either.
@@ -3581,12 +3950,12 @@ protocol.
 Coroutines give schedulers, generators and test runners resumable
 computations without threads or callbacks; affine handles make "who may
 resume this" a compile-time fact. Native coroutines switch stacks on Linux
-x86-64 and AArch64 and macOS AArch64, except a coroutine whose handle never
-leaves the function that constructs it (and whose yielding helpers are
-neither recursive nor closures): the native compiler builds that one into
-the function itself -- no stack of its own, no switch, its suspended state
-a few registers -- with the same meaning (COROUTINE-FUSION-MILESTONE-1.md).
-The Tcl backends run coroutines everywhere.
+x86-64 and AArch64 and macOS AArch64, except a coroutine whose handle
+never leaves the function that constructs it (and whose yielding helpers
+are neither recursive nor closures): the native compiler builds that one
+into the function itself -- no stack of its own, no switch, its suspended
+state a few registers -- with the same meaning. The Tcl backends run
+coroutines everywhere.
 
 == EXAMPLES
 @example accept
@@ -3658,7 +4027,7 @@ x
 @end
 
 == MORE
-COROUTINES.md; stdlib/test.bot's runner is an ordinary coroutine.
+stdlib/test.bot's runner is an ordinary coroutine.
 
 @topic concept.mutable-vector
 title: MutableVector[T]: a growable mutable value
@@ -3667,7 +4036,6 @@ index: concepts
 alias: MutableVector; growable list; dynamic array; vector type
 keywords: mutable_vector, push, pop, take, swap, clear, at, length, place, copy-on-write, MUTABLE-PLACE-RECEIVER, MUTABLE-PLACE-CAPTURE, affine
 related: concept.mutable-array concept.values concept.affine concept.lists concept.place-parameters stdlib.module.std::mutable_vector capability.assignment error.mutable-place-receiver
-docs: MUTABLE-VECTOR.md MUTABLE-ARRAY.md
 
 == WHAT IT IS
     v = std::mutable_vector::from_list([1, 2])
@@ -3682,13 +4050,15 @@ elements copy-on-write, so copying is cheap.
   * A vector is a value, not a reference: `w = v` and passing `v` to a
     function make logical copies, and mutating one never changes another.
   * The receiver of a mutation must be a place of the function doing it
-    (MUTABLE-PLACE-RECEIVER): a local binding, a parameter, a context
-    parameter, or a field path from one. A call result or a temporary is
-    not a place, and a nested function cannot mutate an enclosing
-    function's vector (MUTABLE-PLACE-CAPTURE).
-  * A callee mutates its own copy: to give a caller the change, return the
-    vector, or declare the parameter a place (`place v: MutableVector[T]`,
-    concept.place-parameters): then the callee mutates the caller's own.
+    (MUTABLE-PLACE-RECEIVER): a local binding, a place parameter, a
+    context parameter, or a field path from one. A call result or a
+    temporary is not a place, and a nested function cannot mutate an
+    enclosing function's vector (MUTABLE-PLACE-CAPTURE).
+  * An ordinary parameter is the callee's own copy, never a place it may
+    mutate (NONPLACE-PARAMETER-MUTATION): to give a caller the change,
+    declare the parameter a place (`place v: MutableVector[T]`,
+    concept.place-parameters), then the callee mutates the caller's own;
+    or copy it into a local (`w = v`), mutate the local and return it.
   * pop, take and at fail with IndexNotFound unless proven safe.
   * A vector of affine elements is affine: it moves whole and elements
     leave it only through pop, take, swap or a consuming loop.
@@ -3704,8 +4074,9 @@ some other binding holds -- so value semantics still hold everywhere.
 import std::mutable_vector
 
 fn with_extra(v: MutableVector[int]) -> MutableVector[int]:
-    v.push(9)
-    v
+    extended = v
+    extended.push(9)
+    extended
 
 v = std::mutable_vector::from_list([1, 2])
 w = with_extra(v)
@@ -3713,7 +4084,7 @@ last = v.pop():
     on IndexNotFound:
         0
 [last, v.length(), w.length()]
-@caption The callee mutates and returns its own copy
+@caption The callee mutates and returns a local copy of its own
 @value [2, 1, 3]
 @end
 
@@ -3730,17 +4101,13 @@ fresh().push(1)
 @at 6:1
 @end
 
-== MORE
-MUTABLE-VECTOR.md.
-
 @topic concept.place-parameters
 title: Place parameters: `place m: T` updates the caller's collection
 summary: A parameter declared `place m: T` is the caller's place itself, so the function mutates the caller's collection (or struct of collections) in place, as the collection's own operations do.
 index: concepts
 alias: place parameter; place; in-out parameter; inout; mutable parameter; pass by reference; by-reference parameter; out parameter
-keywords: place, parameter, mutate, caller, MutableVector, MutableArray, MutableMap, MutableSet, struct, MUTABLE-PLACE-RECEIVER, MUTABLE-PLACE-CAPTURE, overlap
-related: concept.mutable-vector concept.mutable-array concept.mutable-map concept.values concept.functions error.mutable-place-receiver capability.assignment
-docs: PLACE-PARAMETERS.md MUTABLE-VECTOR.md ORDERED-MUTABLE-MAP-SET.md
+keywords: place, parameter, mutate, caller, MutableVector, MutableArray, MutableMap, MutableSet, struct, MUTABLE-PLACE-RECEIVER, MUTABLE-PLACE-CAPTURE, NONPLACE-PARAMETER-MUTATION, overlap
+related: concept.mutable-vector concept.mutable-array concept.mutable-map concept.values concept.functions error.mutable-place-receiver error.nonplace-parameter-mutation capability.assignment
 
 == WHAT IT IS
     fn push_twice(place v: MutableVector[int], x: int) -> unit:
@@ -3751,7 +4118,8 @@ docs: PLACE-PARAMETERS.md MUTABLE-VECTOR.md ORDERED-MUTABLE-MAP-SET.md
     push_twice(v, 7)               v now holds [1, 7, 7]
 
 An ordinary parameter is the function's own value (a logical copy of the
-argument), so pushing into it changes nothing the caller sees. A place
+argument), so pushing into it would change nothing the caller sees: the
+compiler rejects that (NONPLACE-PARAMETER-MUTATION). A place
 parameter is the caller's place: the caller passes a place of its own and
 every mutation the function makes through the parameter -- a collection
 operation on it or on a field path of it, or a call passing it on to
@@ -3762,10 +4130,11 @@ std::mutable_set's add are ordinary functions of this kind.
   * The parameter's type is written and holds a mutable collection: a
     MutableVector, a MutableArray, or a struct whose fields hold one (a
     MutableMap is one); it is not affine. Otherwise TYPE.
-  * The argument is a place of the caller: a local, a parameter, a context
-    parameter's member, or a field path from one -- not a temporary, a
-    module binding or an enclosing function's binding
-    (MUTABLE-PLACE-RECEIVER).
+  * The argument is a place of the caller: a local, a place parameter, a
+    context parameter's member, or a field path from one -- not a
+    temporary, a module binding or an enclosing function's binding
+    (MUTABLE-PLACE-RECEIVER), and not an ordinary parameter, which is the
+    caller's own copy (NONPLACE-PARAMETER-MUTATION).
   * One call gives one place to one place parameter only: `f(a, a)` or
     `f(h, h.items)` is MUTABLE-PLACE-RECEIVER.
   * A function with a place parameter is only called, never used as a
@@ -3818,9 +4187,6 @@ grow(std::mutable_vector::from_list([]))
 @at 6:6
 @end
 
-== MORE
-PLACE-PARAMETERS.md.
-
 @topic concept.collection-order
 title: Order, membership and identity of a map or set
 summary: A MutableMap's or MutableSet's iteration order is a permutation of its members that reorder may replace, never part of its contents: reorder changes the order only.
@@ -3828,7 +4194,6 @@ index: concepts
 alias: reorder; reordering; iteration order; collection order; permutation of keys
 keywords: reorder, reordered, order, validate_order, OrderMismatch, permutation, members, keys, insertion order, MutableMap, MutableSet, ImmutableMap, equality, ==
 related: concept.mutable-map concept.mutable-set concept.immutable-map concept.value-identity proof.same-members error.reorder-not-proven concept.place-parameters concept.values stdlib.std::mutable_map::reorder stdlib.std::mutable_set::reorder stdlib.std::mutable_map::order stdlib.std::mutable_map::validate_order stdlib.std::immutable_map::reordered
-docs: PROVEN-COLLECTION-REORDERING.md ORDERED-MUTABLE-MAP-SET.md REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md
 
 == WHAT IT IS
     o = m.order()                  the keys, in m's order: a MutableSet
@@ -3910,8 +4275,7 @@ loop x in s:
 @end
 
 == MORE
-PROVEN-COLLECTION-REORDERING.md; proof.same-members for what the
-compiler proves.
+proof.same-members for what the compiler proves.
 
 @topic concept.mutable-map
 title: MutableMap[K, V]: an insertion-ordered mutable map
@@ -3920,7 +4284,6 @@ index: concepts
 alias: MutableMap; hash map; dictionary; dict; associative array; ordered map; hashmap; lookup table
 keywords: mutable_map, create, with_capacity, set, at, contains, remove, clear, length, empty?, KeyNotFound, MutableMapEntry, insertion order, Hashable, key, value, reorder, freeze
 related: concept.collection-order concept.immutable-map concept.mutable-set concept.place-parameters concept.mutable-vector concept.values concept.loops concept.parameterized-structs stdlib.module.std::mutable_map stdlib.std::mutable_map::KeyNotFound
-docs: ORDERED-MUTABLE-MAP-SET.md PLACE-PARAMETERS.md HASHABLE-AND-KEYED-HASH.md
 
 == WHAT IT IS
     m = std::mutable_map::create[str, int]()
@@ -3961,9 +4324,8 @@ O(1) for contains, at, set and remove, O(n) for a loop and a freeze.
 
 == WHY
 The keyed hash that places a key is private and different in every
-process (HASHABLE-AND-KEYED-HASH.md); iteration follows insertion order so
-that no program can observe it, and a program's output is the same
-everywhere.
+process; iteration follows insertion order so that no program can observe
+it, and a program's output is the same everywhere.
 
 == EXAMPLES
 @example accept
@@ -3991,9 +4353,6 @@ m.at(1)
 @at 4:1
 @end
 
-== MORE
-ORDERED-MUTABLE-MAP-SET.md.
-
 @topic concept.mutable-set
 title: MutableSet[T]: an insertion-ordered mutable set
 summary: std::mutable_set::MutableSet[T] holds distinct Hashable values in insertion order: adding a present element changes nothing, removing and re-adding one moves it last.
@@ -4001,7 +4360,6 @@ index: concepts
 alias: MutableSet; ordered set; mutable set
 keywords: reorder, mutable_set, create, with_capacity, add, contains, remove, clear, length, empty?, insertion order, Hashable, membership, freeze
 related: concept.mutable-map concept.immutable-set concept.place-parameters concept.values concept.loops stdlib.module.std::mutable_set
-docs: ORDERED-MUTABLE-MAP-SET.md
 
 == WHAT IT IS
 After `import std::mutable_set`: create[T](), with_capacity[T](n), length,
@@ -4035,9 +4393,6 @@ order = loop x in s:
 @value [[true, true, false, true, false], [2, 9, 5]]
 @end
 
-== MORE
-ORDERED-MUTABLE-MAP-SET.md.
-
 @topic concept.value-identity
 title: Value identity: equality and hashing by contents, not representation
 summary: An opaque struct may declare `identity members(F)` or `identity associations(K, V)`: its values are then == when those List fields hold the same entries, in any order.
@@ -4045,7 +4400,6 @@ index: concepts
 alias: identity; value identity; semantic equality; representation-independent equality; identity members; identity associations; custom equality; equality by contents; order-independent equality
 keywords: identity, members, associations, opaque, ==, hash, Hashable, Equatable, representation, order, multiset, table hash, ImmutableMap, TYPE, TRAIT-NOT-SATISFIED
 related: concept.equatable concept.hashable concept.immutable-map concept.collection-order concept.opaque-structs concept.structs error.type error.trait-not-satisfied
-docs: REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md OPAQUE-STRUCTS.md HASHABLE-AND-KEYED-HASH.md
 
 == WHAT IT IS
     opaque struct Bag[T]:
@@ -4124,8 +4478,7 @@ Bag {items: [1]}
 @end
 
 == MORE
-REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md; concept.immutable-map for
-the standard library's map with an identity.
+concept.immutable-map for the standard library's map with an identity.
 
 @topic concept.equatable
 title: Equatable: values whose == is total
@@ -4134,7 +4487,6 @@ index: concepts
 alias: Equatable; equatable; total equality; comparable values; equality trait
 keywords: Equatable, ==, equality, total, witness, built-in trait, Hashable, refines, satisfies, TRAIT-NOT-SATISFIED
 related: concept.hashable concept.value-identity concept.traits concept.parameterized-structs error.trait-not-satisfied error.equality
-docs: REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md HASHABLE-AND-KEYED-HASH.md TRAITS.md
 
 == WHAT IT IS
     fn same(a: Equatable, b: Equatable) -> bool:
@@ -4193,9 +4545,6 @@ same(twice, twice)
 @at 7:6
 @end
 
-== MORE
-REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md.
-
 @topic concept.immutable-map
 title: ImmutableMap[K, V]: a frozen, comparable map
 summary: std::immutable_map::ImmutableMap[K, V] is a MutableMap frozen into an immutable value: O(1) lookups, iteration in the order it was frozen in, and == and hash by its associations whatever their order.
@@ -4203,7 +4552,6 @@ index: concepts
 alias: ImmutableMap; immutable map; frozen map; map as key; comparable map; hashable map; map equality; freeze a map
 keywords: immutable_map, freeze, at, contains, length, empty?, empty, order, validate_order, reordered, KeyNotFound, OrderMismatch, ImmutableMapEntry, ==, hash, Hashable, Equatable, insertion order
 related: concept.mutable-map concept.value-identity concept.collection-order concept.equatable concept.hashable concept.immutable-set stdlib.module.std::immutable_map stdlib.std::mutable_map::freeze
-docs: REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md ORDERED-MUTABLE-MAP-SET.md PROVEN-COLLECTION-REORDERING.md
 
 == WHAT IT IS
     m = std::mutable_map::create[str, int]()
@@ -4280,9 +4628,6 @@ fingerprint(m.freeze())
 @at 9:13
 @end
 
-== MORE
-REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md.
-
 @topic concept.mutable-array
 title: MutableArray[T]: a fixed-length mutable value
 summary: MutableArray[T] has a fixed capacity and indexed reads and writes (at, set, swap, copy, freeze); like MutableVector it is a copy-on-write value mutated only through places.
@@ -4290,7 +4635,6 @@ index: concepts
 alias: MutableArray; mutable array; fixed-size array
 keywords: mutable_array, create, from_list, generate, at, set, swap, copy, freeze, capacity, place, IndexNotFound, nomethod
 related: concept.mutable-vector concept.values concept.lists concept.nomethod proof.list-bounds proof.slices stdlib.module.std::mutable_array error.mutable-place-receiver
-docs: MUTABLE-ARRAY.md MUTABLE-VECTOR.md PARAMETERIZED-MUTABLEARRAY.md
 
 == WHAT IT IS
     a = std::mutable_array::create(3, 0)          [0, 0, 0]
@@ -4342,9 +4686,6 @@ a.capacity()
 @at 4:1
 @end
 
-== MORE
-MUTABLE-ARRAY.md.
-
 @topic concept.immutable-set
 title: ImmutableSet[T]: membership tests
 summary: ImmutableSet[T] is an immutable set built from a List with std::immutable_set::from_list and queried with contains; it deduplicates by value equality and has no iteration or update operations.
@@ -4352,7 +4693,6 @@ index: concepts
 alias: ImmutableSet; hash set; set membership; set type
 keywords: immutable_set, set, contains, from_list, membership, deduplicate, std::byte::set, equality
 related: concept.lists concept.values stdlib.module.std::immutable_set stdlib.std::immutable_set::contains
-docs: MINIMAL-IMMUTABLE-SET.md BYTE-SET.md
 
 == WHAT IT IS
 After `import std::immutable_set`: `std::immutable_set::from_list(xs)`
@@ -4384,9 +4724,6 @@ b = std::immutable_set::from_list([2, 1])
 @value [true, true, false]
 @end
 
-== MORE
-MINIMAL-IMMUTABLE-SET.md.
-
 @topic concept.static-compile
 title: `static compile:`: compiler diagnostics as values
 summary: A `static compile:` block the compiler accepts runs as written; one it rejects fails with std::compiler::CompilerError, carrying the diagnostic's code and location.
@@ -4394,7 +4731,6 @@ index: concepts
 alias: static compile; static compile block; compile-time rejection test; CompilerError
 keywords: static, compile, CompilerError, DiagnosticCode, compiler, rejects, diagnostic, test, compile-time, import std::compiler, STATIC-UNKNOWN-OPERATION
 related: concept.testing concept.negative-tests concept.errors concept.error-payloads stdlib.module.std::compiler stdlib.std::test::rejects error.static-unknown-operation
-docs: STATIC-COMPILE.md STATIC-DECISION-ECONOMICS.md GOLDEN-TEST-FRAMEWORK.md
 
 == WHAT IT IS
     fn probe() -> int errors std::compiler::CompilerError:
@@ -4419,7 +4755,23 @@ a `std::compiler::DiagnosticCode` case (Unbound, Type, KnownError, ...), and
   * It is not an assertion and not compile-time evaluation: the compiler
     never runs the block, it only decides whether it compiles. `compile`
     is the only operation (`static NAME:` with another name is
-    STATIC-UNKNOWN-OPERATION).
+    STATIC-UNKNOWN-OPERATION). The assertion is the test framework's
+    (std::test::rejects, rejects_at), which compares the reified code.
+  * A rejection is the block's result, never an exemption: the diagnostic
+    stays the compiler's, made by the ordinary rules, and only the block
+    holding its location takes it. The same code outside the block is
+    still rejected; a diagnostic outside the block (in a function the
+    block calls, in another block, in another file) is never the block's;
+    and a rejected block standing as a statement does not make the code
+    after it unreachable for the checks -- that code keeps its own
+    KNOWN-ERROR, UNHANDLED-ERROR or USE-AFTER-MOVE, as with the block
+    accepted. Where the block's value is used (a binding's value), the
+    code reading that value is unreachable, as after any failure.
+  * Four different things: asserting that compilation produces a
+    diagnostic (this block, with std::test::rejects); handling a run-time
+    error (a handler on a call that may fail); testing a run-time error's
+    value (a handler in the tested code, with std::test::value); and
+    suppressing a diagnostic, which Botlish has no way to do.
 
 == WHY
 It makes "this code is rejected with this diagnostic" testable from
@@ -4457,8 +4809,32 @@ adds()
 @value 42
 @end
 
+@example reject
+import std::compiler
+
+error Bad
+
+fn always() -> int errors Bad:
+    fail Bad
+
+fn probe() -> int errors std::compiler::CompilerError:
+    static compile:
+        always()
+    r = always():
+        on Bad:
+            1
+    r
+
+probe():
+    on std::compiler::CompilerError:
+        0
+@caption The block's expected KNOWN-ERROR does not hide the same failure after it
+@error CORE SEMANTIC KNOWN-ERROR
+@at 11:9
+@end
+
 == MORE
-STATIC-COMPILE.md; stdlib/compiler.bot lists every DiagnosticCode case.
+stdlib/compiler.bot lists every DiagnosticCode case.
 
 @topic concept.testing
 title: Testing with stdlib/test.bot: suites, cases, report
@@ -4467,7 +4843,6 @@ index: concepts stdlib
 alias: testing; unit test; test framework; golden test; test suite; assert; assertion
 keywords: test, suite, case, value, holds, rejects, rejects_at, report, PASS, FAIL, golden, assertion, expect, Match, run
 related: concept.negative-tests concept.static-compile concept.contexts concept.coroutines capability.test-timeout capability.process-exit-status stdlib.module.std::test stdlib.std::test::value stdlib.std::test::holds stdlib.std::test::rejects stdlib.std::test::case stdlib.std::test::report stdlib.std::int::to_string
-docs: GOLDEN-TEST-FRAMEWORK.md STATIC-COMPILE.md
 
 == WHAT IT IS
     import std::test
@@ -4539,8 +4914,8 @@ std::test::report()
 @end
 
 == MORE
-GOLDEN-TEST-FRAMEWORK.md; stdlib/test.bot's header; concept.negative-tests
-for testing failures and rejections.
+stdlib/test.bot's header; concept.negative-tests for testing failures and
+rejections.
 
 @topic concept.negative-tests
 title: Testing failing calls and compiler rejections
@@ -4549,7 +4924,6 @@ index: concepts
 alias: negative tests; negative test; testing failing calls; test an error; test a failure; test a failing call; expected failure test
 keywords: test, failure, error, handler, KNOWN-ERROR, rejects, static compile, parameter, negative, expect error, value, registration
 related: concept.testing concept.known-errors concept.static-compile concept.errors rule.known-error error.known-error stdlib.std::test::value stdlib.std::test::rejects
-docs: GOLDEN-TEST-FRAMEWORK.md STATIC-COMPLETION-PROOFS.md STATIC-COMPILE.md
 
 == WHAT IT IS
 How to test a call that fails on purpose. Writing the failing call with a
@@ -4571,6 +4945,12 @@ Two supported patterns:
     itself): put the code in a `static compile:` block and register it with
     std::test::rejects(name, std::compiler::DiagnosticCode::CASE, body) (or
     rejects_at to pin the location). The file imports compiler.
+  * The rejection is the test's result, not a permission: the same call
+    outside the block is still KNOWN-ERROR, and the block hides no
+    diagnostic of the code around it (concept.static-compile). Do not
+    hide an input the compiler can decide only to keep a test compiling:
+    test the decided failure as a rejection, and the run-time path with an
+    input the compiler cannot decide (a parameter).
 
 Choose a handler value the success path cannot produce (below, -1:
 checked never returns a negative number), so the comparison tells the
@@ -4661,7 +5041,7 @@ std::test::report()
 @end
 
 == MORE
-concept.testing; concept.known-errors; GOLDEN-TEST-FRAMEWORK.md.
+concept.testing; concept.known-errors.
 
 @topic concept.direct-modules
 title: Direct modules: raw authority declared at the module boundary
@@ -4670,7 +5050,6 @@ index: concepts
 alias: direct module; raw authority; capability safety; ambient authority
 keywords: direct, module, authority, capability, syscall, linux, context, DIRECT, STALE-DIRECT-MODULE, DIRECT-CALLABLE-VALUE, mediated
 related: concept.contexts concept.modules concept.c-ffi concept.opaque-structs error.direct error.stale-direct-module
-docs: DIRECT-MODULES.md CONTEXTS.md LINUX-SYSCALL-TRANSPORTS.md
 
 == WHAT IT IS
 Direct means raw, ambient authority not yet converted into a context: a
@@ -4736,8 +5115,7 @@ fn say(text: str) -> int:
 @end
 
 == MORE
-DIRECT-MODULES.md; `botlish -direct FILE` prints each module's
-directness.
+`botlish -direct FILE` prints each module's directness.
 
 @topic concept.c-callbacks
 title: C callbacks: `callback c fn` and std::ffi::c::callback
@@ -4746,7 +5124,6 @@ index: concepts
 alias: C callback; callback c fn; function pointer from Botlish; C calls back into Botlish; qsort comparator
 keywords: callback, FnPtr, std::ffi::c::callback, noescape, synchronous, re-entry, RawDouble, RawFloat, thread, retained
 related: concept.c-ffi stdlib.std::ffi::c::callback error.callback-signature error.callback-environment error.callback-placement error.callback-reference error.native-callback concept.raw-c-floats
-docs: C-CALLBACK-MILESTONE-1.md C-FFI.md C-ABI-TYPES.md
 
 == WHAT IT IS
     import std::ffi::c
@@ -4803,7 +5180,6 @@ index: concepts
 alias: C FFI; extern c; foreign function interface; call C function
 keywords: extern, c, ffi, foreign, library, link, std::ffi::c, Ptr, Int, noescape, borrow, NATIVE-ONLY, bindgen
 related: concept.direct-modules concept.binary-layouts concept.c-bindgen-layouts concept.c-floats concept.raw-c-floats concept.native-link-plan backend.native-only backend.native-executable error.native-only
-docs: C-FFI.md C-ABI-TYPES.md C-POINTER-BORROWING.md C-BINDGEN.md C-FLOAT-FFI-MILESTONE-1.md NATIVE-LINK-PLAN-MILESTONE-1.md
 
 == WHAT IT IS
     import std::ffi::c
@@ -4825,6 +5201,13 @@ or `write noescape`.
     by the system linker at link time, never at run time.
   * No fact comes from a name or a C type: an absent escape or access fact
     is unknown, which never admits a byte exposure.
+  * A C integer scalar's value is an int: a std::ffi::c::ULong goes
+    wherever an int is expected, with no conversion. An int goes into a
+    scalar only where its range is proven (a literal, a guard such as
+    `if n < 0 or n > 2147483647:` before the call, or a parameter declared
+    with the scalar's type). std::abi's sized values (std::abi::Usize, the
+    length of a std::abi::bytes::Bytes, ...) are structs: their int is
+    `.value`, and std::abi::usize(n) makes one.
   * Pointers are affine C ABI values: no arithmetic, dereference or integer
     conversion. The memory a data pointer addresses is read only through a
     layout's native view (std::binary::native::view, concept.binary-layouts)
@@ -4861,9 +5244,6 @@ abs(-5)
 @value 5
 @end
 
-== MORE
-C-FFI.md; C-ABI-TYPES.md; C-POINTER-BORROWING.md; C-BINDGEN.md.
-
 @topic concept.native-link-plan
 title: Native dependencies: static libraries, archive paths and Apple frameworks
 summary: `extern c library "NAME" static` requires a static archive, `static at "PATH"` names its file from the application root, and `extern c framework "NAME"` links an Apple framework.
@@ -4871,7 +5251,6 @@ index: concepts backends
 alias: static linking; link a static archive; static archive path; extern c framework; Apple framework; -framework; link plan; native dependencies
 keywords: extern c library, static, at, archive, .a, .lib, import library, framework, -framework, -F, -L, link plan, application root, LINK-CONFLICT, NATIVE LINK ARCHIVE, BOTLISH_NATIVE_LINK_LOG
 related: concept.c-ffi backend.native-executable backend.native-library error.native-link error.link-conflict error.unsupported-platform cli.options
-docs: NATIVE-LINK-PLAN-MILESTONE-1.md C-FFI.md SINGLE-EXECUTABLE-FFI-MILESTONE-1.md
 
 == WHAT IT IS
     extern c library "m"                                     the linker's choice
@@ -4956,9 +5335,6 @@ extern c library "SDL3" static at "vendor/libSDL3.a"
 @at binding.bot:2:35
 @end
 
-== MORE
-NATIVE-LINK-PLAN-MILESTONE-1.md; C-FFI.md, "Linking".
-
 @topic concept.c-floats
 title: C float and C double: std::ffi::c::Float and std::ffi::c::Double
 summary: C's float (binary32) and double (binary64) are C representations of Float64 values, rounded to a float on the way out and never NaN or an infinity on the way in.
@@ -4966,7 +5342,6 @@ index: concepts
 alias: C float; C double; std::ffi::c::Float; std::ffi::c::Double; float32; binary32; single precision
 keywords: float, double, std::ffi::c::Float, std::ffi::c::Double, binary32, binary64, NonFiniteFloat, round to nearest, ties to even, subnormal, negative zero, long double, layout, extern
 related: concept.floats concept.c-ffi concept.raw-c-floats concept.binary-layouts concept.c-bindgen-layouts error.known-error
-docs: C-FLOAT-FFI-MILESTONE-1.md RAW-C-FLOAT-FFI-MILESTONE-1.md C-FFI.md C-ABI-TYPES.md FLOAT64-MILESTONE-1.md
 
 == WHAT IT IS
     import std::ffi::c
@@ -5074,9 +5449,6 @@ takes(1.0e39)
 @at 5:1
 @end
 
-== MORE
-C-FLOAT-FFI-MILESTONE-1.md; C-FFI.md; FLOAT64-MILESTONE-1.md.
-
 @topic concept.raw-c-floats
 title: Raw C floating values: std::ffi::c::RawFloat and std::ffi::c::RawDouble
 summary: C's float and double carried exactly as C holds them -- NaN, the infinities, negative zero, subnormals -- as values of their own kind, admitted to a Float64 only explicitly.
@@ -5084,7 +5456,6 @@ index: concepts
 alias: raw float; raw double; RawFloat; RawDouble; std::ffi::c::RawFloat; std::ffi::c::RawDouble; NaN payload; signaling NaN; bit pattern
 keywords: raw, RawFloat, RawDouble, std::ffi::c::raw, bits, NaN, infinity, negative zero, subnormal, from_bits, to_bits, to_float64, from_float64, NonFiniteFloat, extern, layout
 related: concept.c-floats concept.c-ffi concept.binary-layouts concept.floats
-docs: RAW-C-FLOAT-FFI-MILESTONE-1.md C-FLOAT-FFI-MILESTONE-1.md C-FFI.md
 
 == WHAT IT IS
     import std::ffi::c
@@ -5175,7 +5546,6 @@ index: concepts
 alias: generated layout; C struct layout; c-bindgen layouts; layouts.bot; Win32 layouts; MinGW layouts
 keywords: bindgen, layout, struct, C record, sizeof, alignof, offsetof, padding, packed, target, toolchain, windows-x86_64-gnu, mingw, Win32
 related: concept.c-ffi concept.binary-layouts backend.targets error.layout-field-bounds
-docs: C-BINDGEN-LAYOUTS.md C-BINDGEN.md BINARY-LAYOUT.md NATIVE-LAYOUT-VIEWS.md NATIVE-LAYOUT-WRITES.md
 
 == WHAT IT IS
 A generated binding (generated/c/PROFILE/TARGET/) has a module NS::layouts
@@ -5245,8 +5615,8 @@ std::binary::layout_length(FILETIME)
 @end
 
 == MORE
-C-BINDGEN-LAYOUTS.md; C-BINDGEN.md; `tclsh9.0 tools/c-bindgen.tcl report
-PROFILE -target TARGET -why NAME` explains one record's layout or blockers.
+`tclsh9.0 tools/c-bindgen.tcl report PROFILE -target TARGET -why NAME`
+explains one record's layout or blockers.
 
 @topic concept.binary-layouts
 title: Binary layouts: `layout`, std::binary::parse and std::binary::emit
@@ -5255,7 +5625,6 @@ index: concepts
 alias: binary layout; layout declaration; parse bytes; byte format
 keywords: layout, binary, parse, emit, LayoutStruct, size, align, field, offset, bytes, LayoutLengthMismatch, little-endian, U32, LAYOUT-FIELD-BOUNDS, array, fixed array, LayoutExtentMismatch, union, union layout
 related: concept.structs concept.integer-domains concept.c-ffi stdlib.module.std::binary error.layout-field-bounds concept.layout-unions
-docs: BINARY-LAYOUT.md ABI-BYTES.md NATIVE-LAYOUT-VIEWS.md FIXED-LAYOUT-ARRAYS.md LAYOUT-UNIONS.md
 
 == WHAT IT IS
     layout Header:
@@ -5291,13 +5660,13 @@ also be built directly: `LayoutStruct[Header] {magic: 7, count: -2}`.
     p) is a read-only NativeView[L] whose fields are read when projected,
     and std::binary::load(v) its LayoutStruct[L]. A field may be a C
     pointer; such a layout is native-only (LAYOUT-NATIVE-ONLY): bytes never
-    become a pointer (NATIVE-LAYOUT-VIEWS.md).
+    become a pointer.
   * Writes name one field statically (L.field, L.inner.x):
     std::binary::write(data, L.f, v) is a new MutableBytes with the field
     written; std::binary::write_foreign encodes an existing pointer into a
     pointer field; std::binary::native::edit(L, p) is a NativeEdit[L] --
     live native memory read like a view and written by std::binary::store --
-    write authority, never ownership (NATIVE-LAYOUT-WRITES.md).
+    write authority, never ownership.
   * A field may be a fixed array, `field name: array 16 of std::ffi::c::Char
     at 8`, of any element representation (rows: `array 2 of array 3 of
     std::binary::U16`; records: `array 4 of Point`), element i at the offset
@@ -5307,12 +5676,12 @@ also be built directly: `LayoutStruct[Header] {magic: 7, count: -2}`.
     view it is a live array, NativeView[array N of E]:
     std::binary::element(a, i), std::binary::store_element(e.items, i, v)
     and std::binary::load(a); a designator names an element statically
-    (L.items[3]) (FIXED-LAYOUT-ARRAYS.md).
+    (L.items[3]).
   * Fields never overlap. Overlap is declared only by a union layout,
     `union layout U:`, several interpretations of the same bytes (every
     alternative at its first byte) held by value in one field; it has no
     copied value, so its alternatives are read and written one at a time
-    (concept.layout-unions, LAYOUT-UNIONS.md).
+    (concept.layout-unions).
 
 == WHY
 A layout owns representation and ordinary structs own meaning: reading
@@ -5354,9 +5723,6 @@ std::binary::layout_length(Header)
 @at 6:38
 @end
 
-== MORE
-BINARY-LAYOUT.md.
-
 @topic concept.layout-unions
 title: Union layouts: several interpretations of the same bytes
 summary: `union layout U:` declares alternatives that all start at its first byte: explicit overlap with no tag, active alternative or copied value, so each alternative is read and written alone.
@@ -5364,7 +5730,6 @@ index: concepts
 alias: union; union layout; overlay; overlapping fields; alternative; C union; anonymous union
 keywords: union, alternative, overlap, overlay, interpretation, punning, NativeView, NativeEdit, std::binary::read, LAYOUT-UNION, OVERLAPPED, LARGE_INTEGER, tagged union, sum type, active member
 related: concept.binary-layouts stdlib.std::binary::read error.layout-union concept.c-bindgen-layouts concept.enums concept.c-ffi
-docs: LAYOUT-UNIONS.md BINARY-LAYOUT.md FIXED-LAYOUT-ARRAYS.md NATIVE-LAYOUT-VIEWS.md NATIVE-LAYOUT-WRITES.md
 
 == WHAT IT IS
     union layout WORD:
@@ -5464,9 +5829,6 @@ fn f(w: LayoutStruct[WORD]) -> int:
 @error CORE SEMANTIC LAYOUT-UNION
 @end
 
-== MORE
-LAYOUT-UNIONS.md.
-
 @topic concept.specialization
 title: Generic functions, semantic instances and specialization
 summary: An untyped parameter makes a function generic; the compiler re-analyzes its body for each call's argument types (a semantic instance) and may compile specialized copies of it.
@@ -5474,7 +5836,6 @@ index: concepts
 alias: generic function; generics; semantic instance; call-site specialization; type parameters
 keywords: generic, untyped, instance, specialization, monomorphization, any, -aot-spec, cranelift-generic, type variable, template
 related: concept.types concept.functions concept.traits backend.cranelift backend.cranelift-generic backend.performance error.type
-docs: README.md OPPORTUNISTIC-SEMANTIC-INSTANCES.md STRICT-TYPED-PARAMETERS.md
 
 == WHAT IT IS
 Botlish has no type parameters (`fn f[T]` does not exist). A function
@@ -5538,17 +5899,13 @@ shout([1, 2].first_or(0))
 @at 9:7
 @end
 
-== MORE
-docs/README.md section 21; OPPORTUNISTIC-SEMANTIC-INSTANCES.md.
-
 @topic concept.program-value
 title: A program's value: its last statement
-summary: Running a program evaluates the entry file's statements in order; the value of the last one is the program's value, which the compiler prints after `value:` (and an executable prints).
+summary: A program's statements run in order; the last one's value is the program's value, which the development run prints after `value:` (an executable never prints it).
 index: concepts
 alias: program result; program value; last expression value
 keywords: value, result, last expression, print, main, output, entry program, top level, unit
-related: concept.unit concept.argv task.print-output cli.output cli.exit-status capability.process-exit-status
-docs: README.md
+related: concept.unit concept.argv task.print-output cli.output cli.run cli.exit-status capability.process-exit-status
 
 == WHAT IT IS
 An entry program is a sequence of top-level statements; module values are
@@ -5567,6 +5924,9 @@ with Strings quoted and Lists, structs and enum cases shown as values.
   * A program that wants to report several things returns a List or a
     struct of them as its value; printed text goes through io (native
     backends; task.print-output).
+  * The value is shown by the development run (`botlish FILE.bot`) only:
+    an executable and `botlish run` (cli.run) print what the program
+    writes and nothing else.
   * An error that escapes the top level is a compile-time UNHANDLED-ERROR
     for declared errors; run-time failures (ARITHMETIC, a native's TYPE
     check) stop the program with the error.
@@ -5595,7 +5955,6 @@ index: concepts
 alias: command-line arguments; process arguments; argument vector
 keywords: argv, arguments, command line, InvalidArgumentEncoding, UTF-8, -argv, input, parameters
 related: concept.errors concept.program-value task.read-arguments cli.options capability.input stdlib.argv
-docs: ARGV.md
 
 == WHAT IT IS
 `argv()` is a root native (no import): `argv() -> List[str] errors
@@ -5632,4 +5991,4 @@ argv()
 @end
 
 == MORE
-ARGV.md; task.read-arguments.
+task.read-arguments.

@@ -207,6 +207,59 @@ proc runStandalone {path args} {
     }
 }
 
+# The value of a run of the standalone executable linked for PATH, run as
+# runStandalone runs it (PATH empty, the extra environment NAME VALUE ...),
+# in the driver protocol (runtime/aot.rs: BOTLISH_NATIVE_RESULT names the
+# file its result lines go to): the value shown as Botlish shows a value
+# (core::value::show), or the program's error raised, as native::evalHir
+# raises it. An executable prints no value of its own
+# (PROGRAM-OUTPUT-MILESTONE-1.md): the protocol is how a test reads one.
+# What the program writes to its standard output is dropped (runStandalone
+# returns it); standard error must stay empty, as exec requires.
+proc standaloneValue {path args} {
+    set result [ProtocolResultFile]
+    try {
+        runStandalone $path {*}$args BOTLISH_NATIVE_RESULT $result
+        return [ProtocolValue $result]
+    } finally {
+        file delete $result
+    }
+}
+
+# The value of a run of the executable FILE as runBare runs it (no
+# environment, nothing on PATH), in the driver protocol: standaloneValue's.
+proc bareValue {file} {
+    if {$::tcl_platform(platform) eq "windows"} {
+        return [standaloneValue $file]
+    }
+    set result [ProtocolResultFile]
+    try {
+        exec env -i PATH=/nonexistent BOTLISH_NATIVE_RESULT=$result $file
+        return [ProtocolValue $result]
+    } finally {
+        file delete $result
+    }
+}
+
+# A fresh path for a protocol run's result file, in the tcltest temporary
+# directory (a private one per run: Running tests concurrently, AGENTS.md).
+proc ProtocolResultFile {} {
+    return [file join [temporaryDirectory] protocol-result-[pid]-[incr ::protocolRuns]]
+}
+
+# The value the result lines in FILE report, shown (core::value::show), or
+# their error raised (native::Outcome).
+proc ProtocolValue {file} {
+    if {![file exists $file]} {
+        error "the executable wrote no result file ($file)"
+    }
+    set channel [open $file r]
+    fconfigure $channel -encoding utf-8
+    set lines [split [string trimright [read $channel] \n] \n]
+    close $channel
+    return [core::value::show [native::Outcome $lines] 1]
+}
+
 # Evaluates SCRIPT in the caller with the environment variables NAME VALUE
 # ... of PAIRS set, as `env NAME=VALUE ... COMMAND` runs a command on Unix,
 # on any host (Windows has no env): its result; the environment is this

@@ -414,6 +414,16 @@ same native calls; it needed no change.
 
 ### Layout and slot assignment
 
+> **Superseded representation** (PER-THREAD-RUNTIME-STATE-MILESTONE-1.md,
+> "Context storage"): the program still defines one layout -- the same
+> slots, offsets and leaves, the same NIR -- but the storage is each Vm's
+> own (`Vm::context_ptr`, sized by the program, zero when the Vm is made),
+> and generated code loads its base from the Vm it runs on at
+> `VM_CONTEXT_OFFSET`, then the slot's constant offset. There is no
+> `botlish_context_area` data symbol and no GOT relaxation any more. What
+> this section says about the data object, PC-relative addressing and
+> `.bss` describes the first lowering, kept here as its history.
+
 One context area per program: a single zero-initialized, 8-byte-aligned,
 writable, linker-local data object, `botlish_context_area`
 (`codegen/clif.rs`'s `declare`; in `.bss` of a standalone executable). Every
@@ -685,6 +695,10 @@ has without any context (`contexts-native-clif`,
 
 ### Machine code and relocation
 
+(The first lowering's; since PER-THREAD-RUNTIME-STATE-MILESTONE-1.md the
+access is `mov 0x60(%rdi),%r9; mov 0x8(%r9),%rsi`: the base from the Vm
+argument, then the word: tests/contexts.test's `contexts-native-machine-code`.)
+
 ```
 botlish_fn_9 (std::linux::io::write):
    push   %rbp
@@ -809,6 +823,10 @@ context area, no header line and no different instruction.
 
 * Installation only at the entry program's top level; no nested, function-
   local, dynamic or overriding installation, no test doubles by replacement.
+  (Since RESTRICTED-CONTEXT-INJECTION-MILESTONE-1.md a computation can be
+  given *less* than what is installed: `inject context A, B:` runs a block
+  with exactly those contexts' authority, statically checked. It installs
+  and selects nothing.)
 * Exact nominal identity; no traits, no substitutable contexts.
   (Since CONTEXT-TRAITS.md: a context parameter may have a context-trait
   type, satisfied structurally by the one installed context that implements
@@ -824,7 +842,9 @@ context area, no header line and no different instruction.
   symbol into a load); the JIT uses absolute addresses.
 * `std::linux::io::create()` allocates its 7 objects once (§7).
 * The native area is process-wide for the main execution domain; there is no
-  TLS or actor-local base.
+  TLS or actor-local base. (Lifted by PER-THREAD-RUNTIME-STATE-MILESTONE-1.md:
+  the area is each Vm's, its base loaded from the Vm -- no TLS, and still no
+  actor-local base: an actor is a task of its thread's Vm.)
 
 ---
 
@@ -957,7 +977,9 @@ context area, no header line and no different instruction.
     statements; replacement semantics decided.
 55. **Before actor-local contexts.** The same compile-time layout addressed
     from an actor-local base (a register or TLS) instead of the PC-relative
-    process symbol -- a lowering change only; no source change.
+    process symbol -- a lowering change only; no source change. (Done per
+    Vm, not per actor, by PER-THREAD-RUNTIME-STATE-MILESTONE-1.md: the base
+    is a field of the running Vm.)
 56. **Before trait-based contexts.** Eager one-way traits, so a concrete
     context (`LinuxIO`) satisfies a weaker trait (`IO`), and identity by trait
     in requirements; substitutable contexts (fakes) then follow from

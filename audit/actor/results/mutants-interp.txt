@@ -1,0 +1,48 @@
+# tclsh9.0 audit/actor/tools/mutate.tcl -detectors-only 1 (CORE_BACKEND=interp: interp and cranelift), 2026-11-02
+KILLED inbox-copyable -- the receive right is no longer affine: its token holds an Int, so an Inbox can be copied to a second receiver
+    tests: 3 failed, the named actor-static-copy-inbox, actor-static-drain-twice, actor-static-listen-twice among them
+KILLED receiver-not-bound -- a host serves a receive for any open mailbox, not only one its actor listened to: a copied Receiver receives elsewhere
+    tests: 1 failed, the named actor-identity among them
+KILLED rebind-allowed -- listen binds a mailbox another actor already listened to
+    tests: 1 failed, the named actor-replay among them
+KILLED recover-unguarded -- the one recovery of a message no longer checks that the answer carries the receiver's own mailbox identity
+    tests: 1 failed, the named actor-source-recover among them
+KILLED receive-needs-loop -- receiving requires the event loop's Loop: a contextless actor can no longer receive
+    tests: 3 failed, the named actor-agree-authority, actor-authority-requirements, actor-authority-run among them
+KILLED send-needs-actors -- sending requires the mailbox administration (Actors): a contextless actor can no longer reply
+    tests: 3 failed, the named actor-agree-authority, actor-authority-requirements, actor-authority-run among them
+KILLED failure-not-reaped -- a host whose actor fails with TaskFailed ends without closing its mailboxes
+    tests: 2 failed, the named actor-lifecycle-accounting, actor-lifecycle-failure-reaped among them
+KILLED return-not-reaped -- a host whose actor returns ends without closing its mailboxes
+    tests: 3 failed, the named actor-authority-run, actor-lifecycle-accounting, actor-probe-a-accounting among them
+KILLED failed-construction-returned -- a host whose actor ended before it was started reports its first value instead of resuming it: a failed construction becomes a Returned task
+    tests: 1 failed, the named actor-lifecycle-construction among them
+KILLED reap-skips-abandoned -- reap leaves the mailboxes of actors the loop abandoned open
+    tests: 1 failed, the named actor-shutdown among them
+KILLED owned-always -- the event loop's owned? answers true for every task: reap never sees an abandoned actor
+    tests: 1 failed, the named actor-shutdown among them
+KILLED reaper-steals-outcomes -- retiring an actor consumes the loop's outcomes: unrelated tasks' outcomes are lost
+    tests: 2 failed, the named actor-coexist-outcomes, actor-lifecycle-failure-reaped among them
+KILLED generation-unchecked -- an address's generation is not compared: an old address reaches the mailbox that reuses its slot
+    tests: 3 failed, the named actor-identity, actor-lifecycle-construction, actor-probe-a-identity among them
+KILLED generation-not-bumped -- a reused slot keeps its generation: the old address is the new one's
+    tests: 3 failed, the named actor-identity, actor-lifecycle-construction, actor-probe-a-identity among them
+KILLED closed-accepts -- a closed mailbox still accepts messages
+    tests: 3 failed, the named actor-lifecycle-construction, actor-lifecycle-failure-reaped, actor-probe-a-identity among them
+KILLED lost-wakeup -- a send to a mailbox whose receiver waits does not wake it
+    tests: 3 failed, the named actor-authority-run, actor-probe-a-request-reply, actor-values-snapshot among them
+KILLED no-room-wake -- a freed place wakes no sender waiting for room
+    tests: 3 failed, the named actor-probe-a-backpressure, actor-room-events, actor-room-fifo among them
+KILLED reservation-ignored -- a place reserved for a woken sender may be taken by a send that did not wait, before the woken sender runs
+    tests: 1 failed, the named actor-room-reservation among them
+KILLED room-storm -- every message taken wakes a sender, whether or not one waits or the mailbox was full
+    tests: 1 failed, the named actor-room-events among them
+KILLED close-keeps-room-waiters -- a close leaves the senders waiting for room waiting
+    tests: 2 failed, the named actor-lifecycle-failure-reaped, actor-room-close among them
+KILLED reused-channels -- a reused slot keeps the closed mailbox's (revoked) channels instead of new ones
+    tests: 2 failed, the named actor-room-close, actor-room-reservation among them
+KILLED undelivered-uncounted -- a close drops the queued messages without counting them
+    tests: 3 failed, the named actor-lifecycle-accounting, actor-probe-a-accounting, actor-shutdown among them
+KILLED batch-per-dispatch -- a host hands its actor every queued message in one dispatch: a busy actor holds the turn
+    tests: 1 failed, the named actor-probe-a-request-reply among them
+23 mutants, 23 killed by a named detector

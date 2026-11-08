@@ -358,7 +358,7 @@ foreach {name source message} {
     nested      "fn f():\n    opaque struct T:\n        a: int\n    1\n" {a struct declaration is only allowed at the top level of a module, not nested in a function/if/loop}
     no-name     "opaque struct:\n    a: int\n"                   {expected a struct name after "struct", found ":"}
     no-fields   "opaque struct T:\n"                             {a struct declaration needs at least one "field: Type" line in an indented block (there is no empty-struct syntax), found end of file}
-    not-yet-2   "opaque resource struct T:\n    a: int\n"         {expected end of line, found name "resource"}
+    not-yet-2   "opaque linear struct T:\n    a: int\n"           {expected end of line, found name "linear"}
     after-name  "struct opaque T:\n    a: int\n"                  {expected ":" after the struct name "opaque", found name "T"}
 } {
     test opaque-syntax-$name {a malformed or unsupported opaque declaration is a located syntax error} -body {
@@ -1392,14 +1392,14 @@ test opaque-print-nir-shape-says-opaque {the native shape table marks an opaque 
     }
 } -result {{shape 0 named "std::mixed::Public" fields="value"} {shape 1 named "std::wrapped::Wrapped" opaque=1 fields="value label"}}
 
-test opaque-print-standalone-executable {a standalone executable prints the same nominal text (its runtime reads the shape table's opaque attribute), an ordinary struct in the same program printing in full} -constraints executableAot -body {
+test opaque-print-standalone-executable {a standalone executable's value keeps the opaque struct: read through the driver protocol it is shown by its nominal type, an ordinary struct in the same program in full (an executable prints no value: PROGRAM-OUTPUT-MILESTONE-1.md; the native printer's own opaque text is native/src/runtime/ops.rs's unit tests')} -constraints executableAot -body {
     withScratchLibrary {
         writeFixtures $dir
         set hir [hirOfSource "import std::wrapped\nimport std::mixed\n\[std::wrapped::create(1, \"a\"), std::mixed::Public {value: 4}\]\n"]
         set out [tcltest::makeDirectory opaque-exe-[pid]]
         try {
             set binary [native::executable $hir [file join $out program]]
-            runStandalone $binary
+            standaloneValue $binary
         } finally {
             tcltest::removeDirectory [file tail $out]
         }

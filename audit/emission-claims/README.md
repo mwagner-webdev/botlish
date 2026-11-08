@@ -20,6 +20,14 @@ against the integrated compiler; none of them is part of compilation.
     loops, early returns, helpers, recursion, failures, handlers, guards)
     against exhaustive execution of a bounded input range: no false proof,
     every rejection searched for its witness.
+  - `loops.tcl` -- the counted-loop entry differential (EMISSION-COUNTED-
+    LOOP-PRECISION-MILESTONE-1.md): generated emitters whose counted loops
+    are, or are not, entered by the facts before them, every claim checked
+    by the compiler and by the rule before that milestone, every argument
+    tuple of a box run (on several backends for a sample) and judged: no
+    false certificate, no regression.
+  - `loops-bench.tcl` -- what counted-loop entry costs the checker, against
+    the rule before it, on the CSV and JSON workloads.
   - `conformance.tcl` -- the checker's recognizer semantics (one symbol at
     a time, over core/dfa.tcl's outcome model and the tables the HIR
     carries) against the reference interpreter, on every case

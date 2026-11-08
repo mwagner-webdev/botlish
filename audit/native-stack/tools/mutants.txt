@@ -205,66 +205,62 @@
 %% linux-x86_64 linux-aarch64 macos-aarch64
 ## native/src/runtime/platform/guard.rs
 <<<<
-    SLOTS[next][0].store(stack.guard_low, Ordering::Relaxed);
-    SLOTS[next][1].store(stack.low_bound, Ordering::Relaxed);
+    records::publish((stack.guard_low, stack.low_bound));
 ====
-    SLOTS[next][0].store(stack.low_bound, Ordering::Relaxed);
-    SLOTS[next][1].store(stack.guard_low, Ordering::Relaxed);
+    records::publish((stack.low_bound, stack.guard_low));
 >>>>
 
 @@ guard-includes-stack the guard range runs up into the usable stack: a fault there is an overflow too
 %% linux-x86_64 linux-aarch64 macos-aarch64
 ## native/src/runtime/platform/guard.rs
 <<<<
-    address >= guard_low && address < low_bound
+    (address >= guard_low && address < low_bound).then_some(record)
 ====
-    address >= guard_low && address < low_bound + (64 << 20)
+    (address >= guard_low && address < low_bound + (64 << 20)).then_some(record)
 >>>>
 
 @@ every-fault-overflows every fault on the guarded thread is reported as an overflow
 %% linux-x86_64 linux-aarch64 macos-aarch64
 ## native/src/runtime/platform/guard.rs
 <<<<
-    address >= guard_low && address < low_bound
-}
+    (address >= guard_low && address < low_bound).then_some(record)
 ====
     let _ = (address, guard_low, low_bound);
-    true
-}
+    Some(record)
 >>>>
 
 @@ any-thread-overflows the faulting thread is not checked: another thread's fault in the guard is an overflow
 %% linux-x86_64 linux-aarch64 macos-aarch64
 ## native/src/runtime/platform/guard.rs
 <<<<
-    if guarded == UNGUARDED || guarded == BUSY || guarded != super::thread_token() {
+    let record = records::find(super::thread_token())?;
 ====
-    if guarded == UNGUARDED || guarded == BUSY {
+    let record = records::any()?;
 >>>>
 
 @@ no-alternate-stack the handler is installed without SA_ONSTACK: it runs on the stack that overflowed
 %% linux-x86_64 linux-aarch64 macos-aarch64
 ## native/src/runtime/platform/guard.rs
 <<<<
-            action.sa_flags = libc::SA_SIGINFO | libc::SA_ONSTACK;
+        action.sa_flags = libc::SA_SIGINFO | libc::SA_ONSTACK;
 ====
-            action.sa_flags = libc::SA_SIGINFO;
+        action.sa_flags = libc::SA_SIGINFO;
 >>>>
 
 @@ report-without-line the overflow ends the process without its result line
 %% linux-x86_64 linux-aarch64 macos-aarch64
 ## native/src/runtime/platform/guard.rs
 <<<<
-    let mut rest = OVERFLOW_LINE;
+    write_all(fd, OVERFLOW_LINE);
 ====
-    let mut rest: &[u8] = b"";
+    write_all(fd, b"");
 >>>>
 
 @@ report-ignores-result-fd the overflow line goes to standard output, not the --result descriptor
 %% linux-x86_64 linux-aarch64 macos-aarch64
 ## native/src/runtime/platform/guard.rs
 <<<<
-    let fd = if executable { libc::STDERR_FILENO } else { RESULT_FD.load(Ordering::Relaxed) };
+    let fd = if executable { libc::STDERR_FILENO } else { record.destination() as libc::c_int };
 ====
     let fd = if executable { libc::STDERR_FILENO } else { libc::STDOUT_FILENO };
 >>>>
@@ -283,16 +279,13 @@
         if !faulted {
 >>>>
 
-@@ drop-leaves-guard-busy a dropped guard never returns to UNGUARDED: no second guard installs
+@@ drop-leaves-guard-busy a dropped guard never releases its record: no second guard installs on its thread
 %% linux-x86_64 linux-aarch64 macos-aarch64
 ## native/src/runtime/platform/guard.rs
 <<<<
-            libc::sigaltstack(&self.old_stack, std::ptr::null_mut());
-        }
-        GUARDED.store(UNGUARDED, Ordering::Release);
+        records::release(self.record);
 ====
-            libc::sigaltstack(&self.old_stack, std::ptr::null_mut());
-        }
+        let _ = self.record;
 >>>>
 
 # ---------------------------------------------------------------------------
@@ -349,20 +342,20 @@
 %% windows-x86_64
 ## native/src/runtime/platform/windows.rs
 <<<<
-    if guarded == UNGUARDED || guarded == BUSY || guarded != thread {
+    let record = records::find(thread)?;
 ====
     let _ = thread;
-    if guarded == UNGUARDED || guarded == BUSY {
+    let record = records::any()?;
 >>>>
 
 @@ win-no-address-check STATUS_STACK_OVERFLOW is claimed whatever address its record names, or none (Windows)
 %% windows-x86_64
 ## native/src/runtime/platform/windows.rs
 <<<<
-    parameters.len() >= 2 && parameters[1] >= low && parameters[1] < high
+    (parameters.len() >= 2 && parameters[1] >= low && parameters[1] < high).then_some(record)
 ====
     let _ = (parameters, low, high);
-    true
+    Some(record)
 >>>>
 
 @@ win-no-guarantee the guard asks for no stack guarantee and checks none: the thread keeps whatever it had (Windows)
@@ -397,10 +390,10 @@
 %% windows-x86_64
 ## native/src/runtime/platform/windows.rs
 <<<<
-        DESTINATION.store(destination, Ordering::Relaxed);
+        match records::claim_as(reservation, thread_token(), (stack.low_bound, stack.high_bound), executable, destination, label) {
 ====
-        DESTINATION.store(0, Ordering::Relaxed);
         let _ = destination;
+        match records::claim_as(reservation, thread_token(), (stack.low_bound, stack.high_bound), executable, 0, label) {
 >>>>
 
 @@ win-result-file-ignored the driver's line goes to standard output, not the --result file (Windows)
@@ -417,38 +410,38 @@
 %% windows-x86_64
 ## native/src/runtime/platform/windows.rs
 <<<<
-    let mut rest = OVERFLOW_LINE;
+        write_all(out, OVERFLOW_LINE);
 ====
-    let mut rest: &[u8] = b"";
+        write_all(out, b"");
 >>>>
 
 @@ win-statuses-swapped the driver exits 1 and an executable 0 after an overflow (Windows)
 %% windows-x86_64
 ## native/src/runtime/platform/windows.rs
 <<<<
-    let status = if EXECUTABLE.load(Ordering::Relaxed) { 1 } else { 0 };
+    let status = if executable { 1 } else { 0 };
 ====
-    let status = if EXECUTABLE.load(Ordering::Relaxed) { 0 } else { 1 };
+    let status = if executable { 0 } else { 1 };
 >>>>
 
 @@ win-handler-returns the handler writes the line and returns instead of ending the process (Windows)
 %% windows-x86_64
 ## native/src/runtime/platform/windows.rs
 <<<<
-        write_overflow_line();
-        terminate();
+        write_all(out, OVERFLOW_LINE);
+        terminate(guard.executable());
 ====
-        write_overflow_line();
+        write_all(out, OVERFLOW_LINE);
+        let _ = guard.executable();
 >>>>
 
-@@ win-drop-leaves-guard-busy a dropped guard never returns to UNGUARDED: no second guard installs (Windows)
+@@ win-drop-leaves-guard-busy a dropped guard never releases its record: no second guard installs on its thread (Windows)
 %% windows-x86_64
 ## native/src/runtime/platform/windows.rs
 <<<<
-        unsafe { RemoveVectoredExceptionHandler(self.handler) };
-        GUARDED.store(UNGUARDED, Ordering::Release);
+        records::release(self.record);
 ====
-        unsafe { RemoveVectoredExceptionHandler(self.handler) };
+        let _ = self.record;
 >>>>
 
 @@ win-driver-unguarded the driver runs Botlish code without the guard (Windows)
@@ -523,16 +516,9 @@
 %% windows-x86_64
 ## native/src/runtime/platform/windows.rs
 <<<<
-pub fn set_active_stack(stack: &NativeStack) {
-    if GUARDED.load(Ordering::Relaxed) == UNGUARDED {
-        return;
-    }
-    publish(stack);
-}
+    records::publish((stack.low_bound, stack.high_bound));
 ====
-pub fn set_active_stack(stack: &NativeStack) {
     let _ = stack;
-}
 >>>>
 
 @@ win-fiber-without-guarantee a coroutine fiber is given no stack guarantee, and none is checked: its exhaustion's handler runs in whatever Windows leaves (Windows)

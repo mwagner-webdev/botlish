@@ -64,8 +64,22 @@
 # context effects in function types.)
 #
 # Where an install may be written: the entry program's top-level scope, as a
-# statement (CONTEXT-INSTALLATION-UNSUPPORTED anywhere else: a function, a loop,
-# a branch, a handler, a module, an expression).
+# statement, and the body of a thread entry (`thread fn`, hir/threads.tcl;
+# BOTLISH-OWNED-THREADS-AND-CROSS-THREAD-ACTORS-MILESTONE-1.md), as one of
+# its own statements (CONTEXT-INSTALLATION-UNSUPPORTED anywhere else: a
+# function, a loop, a branch, a handler, a module, an expression).
+#
+# Entries. A program has one entry computation per VM that may run it: the
+# entry program's top level (the main VM's) and each thread entry (a
+# worker VM's). Each is checked as the top level is, in evaluation order,
+# against what it has installed so far -- its own installations only: a
+# worker VM never has its creator's contexts. A thread entry requires
+# nothing of a caller (it has none: it is started, never called), so its
+# requirement is empty and its own calls are its obligations. The
+# selection of each context trait stays the program's, one implementation
+# for every entry: an entry that would select another provider of a
+# trait than an earlier one is CONTEXT-TRAIT-SELECTION-CONFLICT, never a
+# per-thread selection.
 #
 # What HIR keeps, after hir::check:
 #   block expr   contextParams    {{name NAME context ID} ...} as declared
@@ -668,6 +682,15 @@ proc hir::contexts::verify {hirVar} {
     set required [dict get $analysis required]
     set reasons [dict get $analysis reasons]
     set regionRoot [dict get $analysis regionRoot]
+    set releases [dict get $analysis releases]
+    # The thread entries (hir/threads.tcl): installation scopes of their
+    # own, which require nothing of anyone (Requirements).
+    set entries [dict create]
+    foreach b $blocks {
+        if {[hir::threads::isEntry $hir $b]} {
+            dict set entries $b 1
+        }
+    }
     foreach b $blocks {
         dict set hir exprs $b directContexts [lsort [dict get $analysis direct $b]]
         dict set hir exprs $b requiredContexts [dict get $required $b]
@@ -701,9 +724,18 @@ proc hir::contexts::verify {hirVar} {
     set top [dict get $hir top]
     foreach c [concat {*}[dict values $calls]] {
         if {[isInstall $hir $c] && [dict get $owner $c] ne ""} {
-            Unsupported hir $c [Where $hir $c [dict get $owner $c]]
+            set o [dict get $owner $c]
+            if {[dict exists $entries $o] && [EntryStatement $hir $parent $o $c]} {
+                # One of a thread entry's own statements: checked with its
+                # entry below.
+                continue
+            }
+            Unsupported hir $c [Where $hir $c $o] [if {[dict exists $entries $o]} {set o} else {string cat ""}]
         }
     }
+    # Where each context trait's selection was first made (a call), for
+    # CONTEXT-TRAIT-SELECTION-CONFLICT's message.
+    set selectedAt [dict create]
     foreach r [dict get $hir roots] {
         if {![dict exists $callsOfRoot $r]} continue
         set pending {}
@@ -740,8 +772,19 @@ proc hir::contexts::verify {hirVar} {
                             "context trait $trait was provided by [dict get $selected $trait] at an earlier call and by $w here" $c
                     }
                     dict set selected $trait $w
+                    if {![dict exists $selectedAt $trait]} {
+                        dict set selectedAt $trait $c
+                    }
                 }
             }
+        }
+        # The top level's own releases in this root (hir/resources.tcl): a
+        # value whose drop runs a cleanup needs the cleanup's contexts
+        # installed where it is held.
+        foreach edge [dict getdef $releases "" {}] {
+            lassign $edge c target
+            if {[dict get $rootOf $c] ne $r || ![dict exists $required $target]} continue
+            Obligations hir $c [list $target] $installed $required $reasons "the release of this value"
         }
         if {$pending ne ""} {
             # The installed value's own calls (the rest of this root) were
@@ -755,17 +798,109 @@ proc hir::contexts::verify {hirVar} {
             }
         }
     }
+    # Each thread entry, as the top level: its statements in order, each
+    # call's obligations against what the entry has installed so far (its
+    # own installations, never another entry's), then its installation.
+    set entryInstalls [dict create]
+    foreach t [dict keys $entries] {
+        set entryInstalled {}
+        set placed {}
+        set byStatement [dict create]
+        foreach c [dict getdef $calls $t {}] {
+            dict lappend byStatement [StatementOf $parent $t $c] $c
+        }
+        set byRelease [dict create]
+        foreach edge [dict getdef $releases $t {}] {
+            set s [StatementOf $parent $t [lindex $edge 0]]
+            if {$s ne ""} {
+                dict lappend byRelease $s $edge
+            }
+        }
+        foreach s [dict get $hir exprs $t body] {
+            set pending {}
+            foreach c [dict getdef $byStatement $s {}] {
+                if {![hir::get $hir $c reachable]} continue
+                if {[isInstall $hir $c]} {
+                    if {$c eq $s} {
+                        set pending $c
+                    }
+                    continue
+                }
+                if {[isLoad $hir $c]} continue
+                set targets [Targets $hir $graph $regionRoot "" $c]
+                if {$targets eq {}} continue
+                set selection [hir::CheckingCall $c {Obligations hir $c $targets $entryInstalled $required $reasons}]
+                if {[dict size $selection] == 0} continue
+                dict set selections $c $selection
+                dict for {trait w} $selection {
+                    if {[dict exists $selected $trait] && [dict get $selected $trait] ne $w} {
+                        set first [dict get $selectedAt $trait]
+                        hir::Diagnose hir CONTEXT-TRAIT-SELECTION-CONFLICT \
+                            "context trait $trait is provided here by $w, but the program selected [dict get $selected $trait] for it where it is first needed (at [hir::originLocation $hir [dict get $hir exprs $first origin]]): a program selects one implementation of each context trait, for every entry -- the entry program and each thread entry -- so install the same implementation of $trait in every entry that needs it (each VM installs its own instance of it)" $c
+                        continue
+                    }
+                    dict set selected $trait $w
+                    if {![dict exists $selectedAt $trait]} {
+                        dict set selectedAt $trait $c
+                    }
+                }
+            }
+            foreach edge [dict getdef $byRelease $s {}] {
+                lassign $edge c target
+                if {![dict exists $required $target]} continue
+                Obligations hir $c [list $target] $entryInstalled $required $reasons "the release of this value"
+            }
+            if {$pending ne ""} {
+                set id [InstalledType hir $pending $entryInstalled]
+                if {$id ne ""} {
+                    lappend entryInstalled $id
+                    lappend placed [list $pending $id]
+                    dict set hir exprs $pending context $id
+                }
+            }
+        }
+        dict set entryInstalls $t $placed
+    }
     dict set hir contexts [dict create blocks $blocks installs $installs reasons $reasons \
-        selections $selections selected $selected]
+        selections $selections selected $selected entries $entryInstalls]
     if {[dict size $specialized] > 0} {
         dict set hir contexts specialized $specialized
     }
 }
 
+# 1 if call C of thread entry T's region (PARENT Walk's parent map) is one
+# of T's own statements -- where an installation of T may be written.
+proc hir::contexts::EntryStatement {hir parent t c} {
+    lassign [dict get $parent $c] p role
+    return [expr {$p eq $t && [string match "seq *" $role]
+        && [hir::get $hir $c scope] eq [dict get $hir exprs $t bodyScope]}]
+}
+
+# The statement of block T's body that expression E (of T's region) is in,
+# by PARENT (Walk's parent map): E itself when it is one, "" when E is not
+# in T's body.
+proc hir::contexts::StatementOf {parent t e} {
+    set x $e
+    for {set depth 0} {$depth < 1000000} {incr depth} {
+        if {![dict exists $parent $x]} {
+            return ""
+        }
+        set p [lindex [dict get $parent $x] 0]
+        if {$p eq $t} {
+            return $x
+        }
+        if {$p eq ""} {
+            return ""
+        }
+        set x $p
+    }
+    return ""
+}
+
 # The context requirements of HIR (WALK hir::contexts::Walk's result) with
 # the selected implementation graph GRAPH (hir::coroutines::Implementations,
 # the feedback hir::check made the check with; {} for none): {direct D
-# edges E required R reasons S nodes N regionRoot T}.
+# edges E required R reasons S nodes N regionRoot T releases L}.
 #
 # The nodes are the program's blocks (each function as written) and, for
 # each specialization K of GRAPH (a trait-polymorphic or per-binding
@@ -778,7 +913,8 @@ proc hir::contexts::verify {hirVar} {
 # point; S why, per node and context: `direct`, or the first call
 # (breadth-first, so the shortest chain) through which it arrived, {call
 # CALL NODE}; T each block's region root (the top-level function whose
-# region it is in, itself when it is in none).
+# region it is in, itself when it is in none); L the release edges
+# (ReleaseEdges), which E holds too.
 #
 # A specialization requires exactly what the implementations its
 # operations bind require, and nothing from an implementation it does not
@@ -821,6 +957,30 @@ proc hir::contexts::Requirements {hir walk graph} {
             }
         }
     }
+    set loaded [dict create]
+    dict for {o ids} $direct {
+        foreach id $ids {
+            dict set loaded $o $id 1
+        }
+    }
+    # An inject block is a use of what it injects (RESTRICTED-CONTEXT-
+    # INJECTION-MILESTONE-1.md, hir/injection.tcl): the function whose code
+    # it is requires every context it injects -- its reason the block.
+    set grants [hir::injection::Grants $hir $owner]
+    dict for {o pairs} $grants {
+        dict for {id r} $pairs {
+            if {$id ni [dict get $direct $o]} {
+                dict lappend direct $o $id
+            }
+        }
+    }
+    # Releases (hir/resources.tcl): a function that may release a resource
+    # calls its cleanup there -- an edge from every region holding a value
+    # (or a parameter) whose drop runs a cleanup, to that cleanup, so the
+    # cleanup's context requirement is the region's like any callee's. (A
+    # cleanup is a module's top-level function, never in a specialization's
+    # region: its node is its block.)
+    set releases [ReleaseEdges $hir $owner $parent $blocks]
     # Call edges per node.
     set edges [dict create]
     foreach n $nodes {
@@ -833,6 +993,7 @@ proc hir::contexts::Requirements {hir walk graph} {
                 lappend list [list $c $target]
             }
         }
+        lappend list {*}[dict getdef $releases $b {}]
         dict set edges $n $list
     }
     # The transitive requirement: breadth-first rounds over the previous
@@ -844,7 +1005,12 @@ proc hir::contexts::Requirements {hir walk graph} {
         set ids [dict get $direct [lindex $n end]]
         dict set required $n [lsort $ids]
         foreach id $ids {
-            dict set reasons $n $id direct
+            if {[dict exists $grants [lindex $n end] $id]
+                    && ![dict exists $loaded [lindex $n end] $id]} {
+                dict set reasons $n $id [list inject [dict get $grants [lindex $n end] $id]]
+            } else {
+                dict set reasons $n $id direct
+            }
         }
     }
     set changed 1
@@ -865,8 +1031,99 @@ proc hir::contexts::Requirements {hir walk graph} {
             }
         }
     }
+    # A thread entry requires nothing (hir/threads.tcl): it is started,
+    # never called, and installs what its code needs itself -- its calls
+    # are the obligations of its own entry (verify), as the top level's are.
+    foreach b $blocks {
+        if {[hir::threads::isEntry $hir $b]} {
+            dict set required $b {}
+            dict unset reasons $b
+        }
+    }
     return [dict create direct $direct edges $edges required $required reasons $reasons \
-        nodes $nodes regionRoot $regionRoot]
+        nodes $nodes regionRoot $regionRoot releases $releases]
+}
+
+# The release edges of HIR (hir/resources.tcl): region (a block, "" for the
+# top level) -> {{E CLEANUP} ...}, an edge from expression E -- a value
+# whose drop runs cleanup function CLEANUP, or (E a block) a parameter of
+# that block whose drop does -- to the cleanup. OWNER, PARENT and BLOCKS are
+# Walk's. The context analysis runs before the ownership analysis decides
+# where values die, so this is a sound approximation of it: every value of
+# such a type may die in its region -- at its scope's end, on an exit, on an
+# error edge that interrupts the construction holding it -- except one whose
+# whole value is its function's result on every path that completes it
+# (Returned): the caller owns that, and a function that only makes and
+# returns a resource does not require its cleanup's contexts.
+proc hir::contexts::ReleaseEdges {hir owner parent blocks} {
+    set result [dict create]
+    if {![hir::resources::Used $hir]} {
+        return $result
+    }
+    # (The cleanups of a type, once per type: most expressions hold none.)
+    set cleanupsOf [dict create]
+    dict for {e o} $owner {
+        set node [dict get $hir exprs $e]
+        if {![dict get $node reachable] || [dict get $node kind] eq "block"} continue
+        set type [hir::typeOf $hir $e]
+        if {![dict exists $cleanupsOf $type]} {
+            dict set cleanupsOf $type [hir::resources::CleanupBlocks $hir $type]
+        }
+        set cleanups [dict get $cleanupsOf $type]
+        if {$cleanups eq {} || ($o ne "" && [Returned $hir $parent $e])} continue
+        foreach c $cleanups {
+            dict lappend result $o [list $e $c]
+        }
+    }
+    foreach b $blocks {
+        foreach p [dict get $hir exprs $b params] {
+            foreach c [hir::resources::CleanupBlocks $hir [hir::bindingType $hir $p]] {
+                if {$c ne $b} {
+                    dict lappend result $b [list $b $c]
+                }
+            }
+        }
+    }
+    return $result
+}
+
+# 1 if expression E's whole value is its function's result whenever E
+# completes: E is a `return`'s value, or the last statement of the function's
+# body, through the last statements of `if` branches and handler bodies and
+# the call a `handle` handles. (Not a loop's body: its iteration values are
+# collected into a new List, which may die in the function. Not an operand
+# of a construction or a call: a later operand's error edge may release it
+# there.)
+proc hir::contexts::Returned {hir parent e} {
+    set x $e
+    while {1} {
+        lassign [dict get $parent $x] p role
+        if {$p eq ""} {
+            return 0
+        }
+        set kind [dict get $hir exprs $p kind]
+        if {$kind eq "return"} {
+            return 1
+        }
+        if {$kind eq "handle" && $role eq "operand"} {
+            set x $p
+            continue
+        }
+        if {$role ne "seq 1"} {
+            return 0
+        }
+        switch -- $kind {
+            block {
+                return 1
+            }
+            if - handle {
+                set x $p
+            }
+            default {
+                return 0
+            }
+        }
+    }
 }
 
 # The nodes call C (reachable, no load) calls in context CTX ("" for the
@@ -922,7 +1179,7 @@ proc hir::contexts::Targets {hir graph regionRoot ctx c} {
 # makes too, so their own requirements are this call's obligations as well
 # (checked the same way, with the chain through the implementation). Returns
 # the selection, {TRAIT WITNESS ...}.
-proc hir::contexts::Obligations {hirVar c targets installed required reasons} {
+proc hir::contexts::Obligations {hirVar c targets installed required reasons {what "this call"}} {
     upvar 1 $hirVar hir
     set selection [dict create]
     set seen [dict create]
@@ -942,7 +1199,7 @@ proc hir::contexts::Obligations {hirVar c targets installed required reasons} {
         if {![isTrait $id]} {
             if {$id ni $installed} {
                 hir::Diagnose hir MISSING-CONTEXT \
-                    "$id is required by this call but is not installed here (install it with \"with context EXPR\" before the call):\n[join $chain \n]" $c
+                    "$id is required by $what but is not installed here (install it with \"with context EXPR\" before the call):\n[join $chain \n]" $c
             }
             continue
         }
@@ -1127,7 +1384,7 @@ proc hir::contexts::CheckValues {hirVar parent required} {
 # Where installation C (owner block OWNER, "" at top level) is, for the
 # CONTEXT-INSTALLATION-UNSUPPORTED message.
 proc hir::contexts::Where {hir c owner} {
-    if {$owner ne ""} {
+    if {$owner ne "" && ![hir::threads::isEntry $hir $owner]} {
         return "inside a function"
     }
     if {[hir::mode $hir] ne "program"} {
@@ -1137,6 +1394,12 @@ proc hir::contexts::Where {hir c owner} {
     if {[hir::isModuleScope $hir $s]} {
         return "inside a module"
     }
+    for {set x $s} {$x ne "" && [dict get $hir scopes $x kind] ne "block"} {set x [dict get $hir scopes $x parent]} {
+        set by [dict getdef $hir scopes $x owner ""]
+        if {$by ne "" && [dict exists $hir exprs $by] && [hir::injection::isInject $hir $by]} {
+            return "inside an inject block, which grants installed contexts and never installs one"
+        }
+    }
     switch -- [dict get $hir scopes $s kind] {
         branch { return "inside an if branch or error handler" }
         loop   { return "inside a loop" }
@@ -1144,8 +1407,14 @@ proc hir::contexts::Where {hir c owner} {
     return "inside an expression"
 }
 
-proc hir::contexts::Unsupported {hirVar c where} {
+proc hir::contexts::Unsupported {hirVar c where {entry ""}} {
     upvar 1 $hirVar hir
+    if {$entry ne ""} {
+        # Inside a thread entry, but not one of its own statements.
+        hir::Diagnose hir CONTEXT-INSTALLATION-UNSUPPORTED \
+            "context installation is supported only in the entry program's top-level scope and in a thread entry's own body, as a statement (this one is $where, in thread entry [BlockName $hir $entry])" $c
+        return
+    }
     hir::Diagnose hir CONTEXT-INSTALLATION-UNSUPPORTED \
         "context installation is currently supported only in the entry program's top-level scope, as a statement (this one is $where)" $c
 }
@@ -1228,6 +1497,11 @@ proc hir::contexts::ChainLines {hir b id reasons {continued 0}} {
         set reason [dict get $reasons $b $id]
         if {$reason eq "direct"} {
             lappend lines "        directly requires $id"
+            break
+        }
+        if {[lindex $reason 0] eq "inject"} {
+            # (An inject block uses what it injects: hir/injection.tcl.)
+            lappend lines "        injects $id (the inject block at [hir::originLocation $hir [dict get $hir exprs [lindex $reason 1] origin]])"
             break
         }
         set via [Via $hir $b [lindex $reason 1]]
@@ -1321,6 +1595,7 @@ proc hir::contexts::summary {hir} {
         if {$ids eq {}} continue
         lappend lines "specialization [NodeName $source [list $k [lindex $k 0]]] required-contexts ([join $ids {, }])"
     }
+    lappend lines {*}[hir::injection::summary $hir]
     set traits [TraitSummary $hir]
     if {$traits ne ""} {
         lappend lines $traits

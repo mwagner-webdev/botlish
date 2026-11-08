@@ -1,0 +1,87 @@
+# strict_emit.bot -- Profile A (csv_strict.bot) emitters: always-quoted
+# fields, three-column records, record streams (CSV-EMISSION-VALIDATION-
+# MILESTONE-1.md). Each is an ordinary function whose yields are the
+# output's ASCII codes; it runs inside whatever coroutine calls it (a deep
+# yield). Each claims its tokens (`emits R`, EMISSION-CLAIMS-MILESTONE-1.md):
+# the compiler certifies, from the declaration and the code alone, that
+# every normal completion has yielded exactly one token of R and that every
+# prefix it yields -- also when it fails or is abandoned -- is a viable
+# prefix of R's language.
+#
+# The policy: every field quoted, every quotation mark doubled, every
+# other character written as it is if the grammar's quoted class holds it
+# (csv_strict::quoted_char, the grammar's own guard); anything else fails
+# UnsupportedCSVCharacter -- never replaced, stripped or normalized.
+# Records end with CRLF.
+#
+# The record functions take a record's three fields; none of them is a
+# receiver, so they are `nomethod` (METHOD-ELIGIBLE would offer
+# a.record3(b, c)).
+
+import std::dfa
+import std::char
+import std::str
+import std::list
+import csv_strict
+import csv_common
+
+fn quoted_field(value: str) -> unit errors csv_common::UnsupportedCSVCharacter emits csv_strict::quoted_field, csv_strict::field:
+    yield 34
+    loop i from 0 to value.length():
+        c = value.char_at(i).scalar_value()
+        if c == 34:
+            yield 34
+            yield 34
+        else:
+            csv_strict::quoted_char(c):
+                on std::dfa::UnrecognizedInput:
+                    fail csv_common::UnsupportedCSVCharacter {at: i, value: c}
+                on std::dfa::UnexpectedEnd:
+                    fail csv_common::UnsupportedCSVCharacter {at: i, value: c}
+            yield c
+        continue
+    yield 34
+    unit
+
+nomethod fn record3(a: str, b: str, c: str) -> unit errors csv_common::UnsupportedCSVCharacter emits csv_strict::record3:
+    quoted_field(a)
+    yield 44
+    quoted_field(b)
+    yield 44
+    quoted_field(c)
+    unit
+
+nomethod fn line3(a: str, b: str, c: str) -> unit errors csv_common::UnsupportedCSVCharacter emits csv_strict::line3:
+    record3(a, b, c)
+    yield 13
+    yield 10
+    unit
+
+fn row_line(r: csv_common::Row) -> unit errors csv_common::UnsupportedCSVCharacter emits csv_strict::line3:
+    line3(r.a, r.b, r.c)
+    unit
+
+# Any number of records, each a CRLF-terminated line: zero records is the
+# empty output, the empty stream.
+fn stream(rows: List[csv_common::Row]) -> unit errors csv_common::UnsupportedCSVCharacter emits csv_strict::stream3, csv_strict::document3:
+    loop r in rows:
+        row_line(r)
+        continue
+    unit
+
+# The same records with CRLF between them and none after the last: RFC
+# 4180's other form, in stream3's language but not document3's.
+fn stream_unterminated(rows: List[csv_common::Row]) -> unit errors csv_common::UnsupportedCSVCharacter emits csv_strict::stream3:
+    loop r in rows and i from 0 to rows.length():
+        if i > 0:
+            yield 13
+            yield 10
+        record3(r.a, r.b, r.c)
+        continue
+    unit
+
+# A document: a header record, then any number of records.
+nomethod fn document(header: csv_common::Row, rows: List[csv_common::Row]) -> unit errors csv_common::UnsupportedCSVCharacter emits csv_strict::stream3, csv_strict::document3:
+    row_line(header)
+    stream(rows)
+    unit

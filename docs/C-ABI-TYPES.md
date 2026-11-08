@@ -468,7 +468,13 @@ The rules (hir/imprint.tcl):
   was accepted.
 * **Affinity.** A variable bound where values of it exist must not be an
   affine type (the body may copy its values); one that occurs only as a
-  pointee (`Ptr[T]`) may be any valid pointee, a pointer included.
+  pointee (`Ptr[T]`) may be any valid pointee, a pointer included. An
+  application's argument stands where its slot stands in the declaration's
+  fields (WRITTEN-AFFINE-APPLICATIONS-MILESTONE-1.md, `hir::structs::
+  SlotPositions`): `Box[T]` of `value: T` at a value, `Ref[T]` of `p:
+  std::ffi::c::Ptr[T]` at a pointee, `Phantom[T]` of `value: int` nowhere --
+  so a variable held only as a phantom slot's argument may be an affine
+  type.
 * **Not a value.** An imprinted callable is only called: `g = empty` and `g =
   std::ffi::c::null` are rejected (a function value has no call site to imprint
   at).

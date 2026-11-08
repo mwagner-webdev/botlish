@@ -13,8 +13,10 @@
 # A suite that is not AOT-ready (a region that needs a runtime-guarded
 # instance, from which AOT never falls back) reports its first blockers; a
 # ready one whose executable fails to build reports the failure. A
-# suite's report is its program's value: the executable prints it, and its
-# summary ("N passed, M failed") must equal the JIT run's. Needs the release
+# suite's report is its program's value: the executable reports it through
+# the driver protocol (BOTLISH_NATIVE_RESULT: an executable prints no value,
+# PROGRAM-OUTPUT-MILESTONE-1.md), and its summary ("N passed, M failed")
+# must equal the JIT run's. Needs the release
 # native backend (cargo build --release --manifest-path native/Cargo.toml).
 
 set root [file dirname [file dirname [file normalize [info script]]]]
@@ -48,8 +50,16 @@ if {[lindex $argv 0] eq "-one"} {
             }
         } else {
             set t2 [clock microseconds]
-            set output [exec $exe]
+            set resultFile [file join $dir result]
+            set ::env(BOTLISH_NATIVE_RESULT) $resultFile
+            try {
+                exec $exe
+            } finally {
+                unset ::env(BOTLISH_NATIVE_RESULT)
+            }
             set t3 [clock microseconds]
+            set report [native::Outcome [split [string trim [core::ReadFile $resultFile]] \n]]
+            set output [join [lmap line [core::value::items $report] {core::value::strOf $line}] \n]
             regexp {(\d+) passed, (\d+) failed} $output summary
             dict set result aot [dict create status ok seconds [seconds [expr {$t2 - $t1}]] \
                 run [seconds [expr {$t3 - $t2}]] summary [expr {[info exists summary] ? $summary : "no summary"}]]

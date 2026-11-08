@@ -51,6 +51,9 @@ namespace eval hir::lower {
 proc hir::lower {hir} {
     hir::activate $hir
     set hir [hir::recovery::runnable $hir]
+    # A program that starts a Botlish thread is the native backends' only
+    # (THREAD-UNAVAILABLE, hir/threads.tcl).
+    hir::threads::RefuseTcl $hir interp
     return [hir::lower::withTemporaries [hir::affine::temporaries $hir] {
         hir::lower::Seq $hir [dict get $hir roots]
     }]
@@ -321,6 +324,15 @@ proc hir::lower::Seq {hir ids} {
         }
         set lowered [expr $hir $id]
         set releases [hir::affine::releasesAfter $hir $id]
+        set registration [CleanupRegistration $hir $id]
+        if {$registration ne {}} {
+            # (A function declaration: it releases nothing.)
+            lappend result $lowered {*}$registration
+            if {$i == $n} {
+                lappend result [list ref [lindex $lowered 1]]
+            }
+            continue
+        }
         if {$releases eq ""} {
             lappend result $lowered
             continue
@@ -366,13 +378,44 @@ proc hir::lower::Releases {hir items {kept ""}} {
         } else {
             set value [list ref [TempName $item]]
         }
-        if {[lindex $plan 0] eq "coroutine"} {
-            lappend result [list call [list ref [core::coroutines::releaseNative]] $value]
-        } else {
-            lappend result [list call [list ref [hir::affine::DropNative]] $value [list const str [lindex $plan 1]]]
+        switch -- [lindex $plan 0] {
+            coroutine {
+                lappend result [list call [list ref [core::coroutines::releaseNative]] $value]
+            }
+            abandon {
+                # An unwinding program's coroutine (hir/affine.tcl's Unwinds).
+                lappend result [list call [list ref [core::coroutines::abandonNative]] $value]
+            }
+            cleanup {
+                # A resource (hir/resources.tcl): its cleanup, by its index in
+                # the run's cleanup table (CleanupRegistration).
+                lappend result [list call [list ref [hir::affine::CleanupNative]] \
+                    [list const int [hir::affine::CleanupIndex $hir [lindex $plan 1]]] $value]
+            }
+            default {
+                lappend result [list call [list ref [hir::affine::DropNative]] $value [list const str [lindex $plan 1]]]
+            }
         }
     }
     return $result
+}
+
+# The core IR that enters the cleanup function bound by binding statement E
+# (hir/resources.tcl) in the run's cleanup table, right after E: what
+# affine#cleanup and the `r` parts of a drop descriptor call (core/affine.tcl).
+# Empty for any other statement.
+proc hir::lower::CleanupRegistration {hir e} {
+    if {[dict get $hir exprs $e kind] ne "bind"} {
+        return {}
+    }
+    set b [dict get $hir exprs $e binding]
+    dict for {id record} [hir::resources::table $hir] {
+        if {[dict get $record binding] eq $b} {
+            return [list [list call [list ref [hir::affine::RegisterCleanupNative]] \
+                [list const int [dict get $record index]] [list ref [dict get $hir bindings $b name]]]]
+        }
+    }
+    return {}
 }
 
 # The Core IR name of pending temporary E: a construction operand a release

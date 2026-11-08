@@ -1,0 +1,16 @@
+# An actor request is std::actor's: Exit is opaque (OPAQUE-CONSTRUCTION).
+import std::actor
+import std::event_loop
+import std::event_loop::deterministic
+
+fn worker() -> std::actor::Exit:
+    std::actor::Exit {op: 4, slot: 0, gen: 1, value: 0, payload: 0}
+
+fn main(context ev: std::event_loop::Loop, ac: std::actor::Actors) -> int errors std::event_loop::SchedulerFault:
+    0
+with context std::event_loop::create(8)
+with context std::event_loop::deterministic::create()
+with context std::actor::create()
+main():
+    on std::event_loop::SchedulerFault:
+        0

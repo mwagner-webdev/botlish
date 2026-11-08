@@ -159,6 +159,61 @@ test app-module-diagnostic-location {a diagnostic in an application module is lo
     }]
 } -cleanup removeApps -match glob -result {UNBOUND: APP/broken.bot:2:5: *}
 
+# The loader's diagnostics of DIR/main.bot, each {CODE LOCATION NOTES}: its
+# code as shown, FILE:LINE:COLUMN (files by name) and its notes, each
+# {KIND TEXT}.
+proc appLoaderDiagnostics {dir {main main.bot}} {
+    if {![catch {appHir $dir $main} message options]} {
+        return accepted
+    }
+    return [lmap d [dict get $options -diagnostics] {
+        set l [dict get $d location]
+        list [core::ShownCode $d] "[file tail [dict get $l file]]:[dict get $l line]:[dict get $l column]" \
+            [lmap n [dict getdef $d notes {}] {
+                list [dict getdef $n kind ""] [string map [list $dir/ ""] [dict get $n message]]
+            }]
+    }]
+}
+
+test app-module-diagnostic-import-notes {a loader diagnostic in a module file names, in notes, the imports that load that file, the entry program's first -- for a reference error (reported once the program is loaded), a missing module a module imports (which ends the loading) and a module's syntax error alike; the diagnostic itself (code, location, message) is what it was} -body {
+    set reference [app {
+        main.bot "import a\n\na::f()\n"
+        a.bot "import b\n\nfn f() -> int:\n    b::g()\n"
+        b.bot "fn g() -> int:\n    nowhere::h()\n"
+    }]
+    set missing [app {
+        main.bot "import std::list\nimport a\n\na::f()\n"
+        a.bot "import b\n\nfn f() -> int:\n    1\n"
+        b.bot "import nothere\n\nfn g() -> int:\n    1\n"
+    }]
+    set syntax [app {
+        main.bot "import a\n\na::f()\n"
+        a.bot "fn f() -> int:\n    1 +\n"
+    }]
+    list [appLoaderDiagnostics $reference] [appRejection $reference] [appLoaderDiagnostics $missing] [appLoaderDiagnostics $syntax]
+} -cleanup removeApps -result [list \
+    {{{SURFACE MODULE UNKNOWN-NAMESPACE} b.bot:2:5 {{import {main.bot:1:8: the import of "a" here loads b.bot}} {import {a.bot:1:8: the import of "b" here loads b.bot}}}}} \
+    {UNKNOWN-NAMESPACE: APP/b.bot:2:5: unknown namespace "nowhere": no such module file APP/nowhere.bot (an application's own modules are the files beside its entry program) (nor is "nowhere" an enum type visible in this file: a case is written Enum::Case)} \
+    {{{SURFACE MODULE UNKNOWN-NAMESPACE} b.bot:1:8 {{import {main.bot:2:8: the import of "a" here loads b.bot}} {import {a.bot:1:8: the import of "b" here loads b.bot}}}}} \
+    {{{SURFACE SYNTAX} a.bot:2:8 {{import {main.bot:1:8: the import of "a" here loads a.bot}}}}}]
+
+test app-entry-diagnostic-no-import-notes {a loader diagnostic in the entry program's own file has no import notes: no import loads it} -body {
+    appLoaderDiagnostics [app {main.bot "import game\n\n1\n"}]
+} -cleanup removeApps -result {{{SURFACE MODULE UNKNOWN-NAMESPACE} main.bot:1:8 {}}}
+
+test app-check-import-notes {main.tcl -check prints a module's loader diagnostic with a note line for each import that loads its file, the entry program's first} -body {
+    set dir [app {
+        main.bot "import a\n\na::f()\n"
+        a.bot "import b\n\nfn f() -> int:\n    b::g()\n"
+        b.bot "import sdl3::ctypes\n\nfn g() -> int:\n    1\n"
+    }]
+    catch {exec [info nameofexecutable] $::mainScript -check [file join $dir main.bot] 2>@1} output
+    string map [list $dir APP] [lmap line [split $output \n] {
+        if {![regexp {^   (error|note):} $line]} continue
+        set line
+    }]
+} -cleanup removeApps -result {{   error: APP/b.bot:1:8: unknown namespace "sdl3::ctypes": no such module file APP/sdl3/ctypes.bot (an application's own modules are the files beside its entry program) (SURFACE MODULE UNKNOWN-NAMESPACE)} {   note: APP/main.bot:1:8: the import of "a" here loads b.bot} {   note: APP/a.bot:1:8: the import of "b" here loads b.bot}}
+
 # ---------------------------------------------------------------------------
 # Diagnostics
 
@@ -271,7 +326,7 @@ test app-root-inside-library {an entry file inside the library directory: the fi
 # HIR interchange (the front-end cache's application root and dependencies:
 # tests/hir-cache.test's hc-application-*)
 
-test app-interchange-without-sources {the analyzed HIR of an application (.hirx) runs on every backend, and becomes NIR and an executable, after its source directory is gone} -constraints {nativeBuilt executableAot} -body {
+test app-interchange-without-sources {the analyzed HIR of an application (.hirx) runs on every backend, and becomes NIR and an executable, after its source directory is gone: the executable prints nothing (no value of its own) and its value, through the driver protocol, is the program's} -constraints {nativeBuilt executableAot} -body {
     set dir [app [list main.bot "import counter\n\n\[counter::count_down(250), counter::doubled(21)\]\n" counter.bot $counterModule]]
     exec [info nameofexecutable] $::mainScript -warnings off -emit-hir-interchange [file join $dir main.bot]
     set elsewhere [makeDirectory app-interchange-[pid]]
@@ -284,11 +339,11 @@ test app-interchange-without-sources {the analyzed HIR of an application (.hirx)
         }]
         set nir [regexp {func } [exec [info nameofexecutable] $::mainScript -emit-nir $hirx]]
         exec [info nameofexecutable] $::mainScript -emit-native-executable $hirx
-        list $values $nir [exec [file join $elsewhere main]]
+        list $values $nir [exec [file join $elsewhere main]] [standaloneValue [file join $elsewhere main]]
     } finally {
         removeDirectory app-interchange-[pid]
     }
-} -cleanup removeApps -result {{{   value: [250, 42]} {   value: [250, 42]} {   value: [250, 42]} {   value: [250, 42]}} 1 {[250, 42]}}
+} -cleanup removeApps -result {{{   value: [250, 42]} {   value: [250, 42]} {   value: [250, 42]} {   value: [250, 42]}} 1 {} {[250, 42]}}
 
 # ---------------------------------------------------------------------------
 # main.tcl

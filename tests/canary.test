@@ -1,0 +1,165 @@
+# canary.test -- tests/canary.tcl, the canary's selection (CI-RUNS.md, "The
+# canary"): the test files and golden suites a push adds or changes, the
+# smallest first, then tests/canary.tsv's history for the host, the most
+# failing commits first, within a budget of estimated seconds; the changed
+# paths from git (the commits since the merge base, the working tree); the
+# records file itself (every item exists); tests/local.tcl's order.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot tests canary.tcl]
+
+testConstraint git [expr {[auto_execok git] ne ""}]
+
+proc canaryWrite {path text} {
+    file mkdir [file dirname $path]
+    set f [open $path w]
+    fconfigure $f -encoding utf-8 -translation lf
+    puts -nonewline $f $text
+    close $f
+}
+
+# A scratch tree with these items (relative paths) of SIZE bytes each.
+proc canaryTree {name items {size 1000}} {
+    set root [file join [temporaryDirectory] canary-[pid]-$name]
+    file delete -force $root
+    foreach item $items {
+        canaryWrite [file join $root $item] [string repeat x $size]
+    }
+    return $root
+}
+
+proc canaryRecords {history durations} {
+    return [dict create history $history durations $durations]
+}
+
+proc names {selection} { lmap entry $selection {lindex $entry 0} }
+
+test canary-select-changed-first {changed test files and suites first, the smallest first; then the host's history, the most failing commits first} -body {
+    set root [canaryTree order {tests/a.test tests/b.test tests/c.test tests/golden/s.bot tests/h1.test tests/h2.test tests/h3.test}]
+    set records [canaryRecords {
+        {tests/h1.test linux-x86_64 2 2026-11-01 one}
+        {tests/h2.test * 5 2026-11-02 two}
+        {tests/h3.test macos-aarch64 9 2026-11-03 three}
+    } {tests/a.test 30 tests/b.test 10 tests/golden/s.bot 20 tests/h1.test 1 tests/h2.test 1}]
+    lassign [canary::select {tests/a.test tests/golden/s.bot tests/b.test} $records linux-x86_64 0 $root] chosen left
+    list [names $chosen] [lmap entry $chosen {lindex $entry 1}] $left
+} -result {{tests/b.test tests/golden/s.bot tests/a.test tests/h2.test tests/h1.test} {changed changed changed {failed in 5 commits of main, last 2026-11-02: two} {failed in 2 commits of main, last 2026-11-01: one}} {}}
+
+test canary-select-host {a history entry applies to the hosts it names, or to every host with *} -body {
+    set root [canaryTree host {tests/h1.test tests/h2.test tests/h3.test}]
+    set records [canaryRecords {
+        {tests/h1.test linux-x86_64,linux-aarch64 2 2026-11-01 one}
+        {tests/h2.test * 1 2026-11-02 two}
+        {tests/h3.test windows-x86_64 3 2026-11-03 three}
+    } {}]
+    set hosts [lmap host {linux-aarch64 windows-x86_64 macos-aarch64} {
+        names [lindex [canary::select {} $records $host 0 $root] 0]
+    }]
+    list {*}$hosts [lindex [canary::select {} $records linux-x86_64 0 $root] 0 end 1]
+} -result {{tests/h1.test tests/h2.test} {tests/h3.test tests/h2.test} tests/h2.test {failed in 1 commit of main, last 2026-11-02: two}}
+
+test canary-select-budget {an item that does not fit the budget is left out, and a smaller later one still fits} -body {
+    set root [canaryTree budget {tests/a.test tests/b.test tests/c.test tests/h.test}]
+    set records [canaryRecords {{tests/h.test * 1 2026-11-01 one}} {tests/a.test 40 tests/b.test 50 tests/c.test 70 tests/h.test 5}]
+    lassign [canary::select {tests/a.test tests/b.test tests/c.test} $records linux-x86_64 100 $root] chosen left
+    list [names $chosen] [names $left]
+} -result {{tests/a.test tests/b.test tests/h.test} tests/c.test}
+
+test canary-select-only-items {only existing test files directly in tests/ and suites directly in tests/golden/ are items; a changed file is not repeated as history} -body {
+    set root [canaryTree items {tests/a.test tests/golden/s.bot tests/sub/x.test tests/golden/sub/y.bot tests/helpers.tcl}]
+    set records [canaryRecords {{tests/a.test * 3 2026-11-01 one} {tests/gone.test * 9 2026-11-01 gone}} {}]
+    names [lindex [canary::select {tests/a.test tests/golden/s.bot tests/sub/x.test tests/golden/sub/y.bot tests/helpers.tcl tests/deleted.test core/core.tcl} $records linux-x86_64 0 $root] 0]
+} -result {tests/a.test tests/golden/s.bot}
+
+test canary-select-estimate {an item without a measured duration is estimated from its size} -body {
+    set root [canaryTree estimate {tests/a.test tests/golden/s.bot} 10000]
+    set chosen [lindex [canary::select {tests/a.test tests/golden/s.bot} [canaryRecords {} {}] linux-x86_64 0 $root] 0]
+    set estimates [lmap entry $chosen {lindex $entry 2}]
+    list [names $chosen] [expr {[lindex $estimates 0] > 0 && [lindex $estimates 1] > [lindex $estimates 0]}]
+} -result {{tests/a.test tests/golden/s.bot} 1}
+
+test canary-records-format {the records file: history and duration lines, comments; anything else is an error naming the line} -body {
+    set path [file join [temporaryDirectory] canary-[pid]-records.tsv]
+    canaryWrite $path "# a comment\n\nhistory\ttests/a.test\t*\t3\t2026-11-01\twhy\nduration\ttests/a.test\t12.5\n"
+    set good [canary::records $path]
+    canaryWrite $path "history\ttests/a.test\t*\tthree\t2026-11-01\twhy\n"
+    set bad1 [catch {canary::records $path} m1]
+    canaryWrite $path "durations\ttests/a.test\t1\n"
+    set bad2 [catch {canary::records $path} m2]
+    list $good $bad1 [string match *:1:* $m1] $bad2 [string match "*not a history or duration line*" $m2]
+} -result {{history {{tests/a.test * 3 2026-11-01 why}} durations {tests/a.test 12.5}} 1 1 1 1}
+
+test canary-records-items-exist {every item tests/canary.tsv names is a test file or golden suite of this tree, and each history entry's hosts are targets} -body {
+    set records [canary::records]
+    set problems {}
+    foreach entry [dict get $records history] {
+        lassign $entry item hosts
+        if {![canary::IsItem $item] || ![file isfile [file join $::projectRoot $item]]} { lappend problems "history: $item" }
+        foreach host [split $hosts ,] {
+            if {$host ne "*" && $host ni {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64}} { lappend problems "host: $host" }
+        }
+    }
+    dict for {item seconds} [dict get $records durations] {
+        if {![canary::IsItem $item] || ![file isfile [file join $::projectRoot $item]]} { lappend problems "duration: $item" }
+    }
+    list [expr {[llength [dict get $records history]] > 0}] $problems
+} -result {1 {}}
+
+# A scratch repository: main with one commit, a branch with more.
+proc canaryRepo {name} {
+    set root [file join [temporaryDirectory] canary-[pid]-$name]
+    file delete -force $root
+    file mkdir $root
+    set git [list git -C $root -c user.name=canary -c user.email=canary@example.invalid -c commit.gpgsign=false]
+    exec {*}$git init -q -b main
+    canaryWrite [file join $root tests old.test] old
+    canaryWrite [file join $root tests gone.test] gone
+    canaryWrite [file join $root tests golden kept.bot] kept
+    exec {*}$git add -A
+    exec {*}$git commit -q -m one
+    exec {*}$git checkout -q -b topic
+    canaryWrite [file join $root tests new.test] new
+    canaryWrite [file join $root tests old.test] changed
+    canaryWrite [file join $root core core.tcl] core
+    exec {*}$git rm -q tests/gone.test
+    exec {*}$git add -A
+    exec {*}$git commit -q -m two
+    return [list $root $git]
+}
+
+test canary-changed-since-merge-base {the commits since the merge base with the base: added, changed and renamed paths; deletions left out} -constraints git -body {
+    lassign [canaryRepo committed] root git
+    exec {*}$git checkout -q main
+    canaryWrite [file join $root tests main-only.test] m
+    exec {*}$git add -A
+    exec {*}$git commit -q -m three
+    exec {*}$git checkout -q topic
+    canary::changed $root main 0
+} -result {core/core.tcl tests/new.test tests/old.test}
+
+test canary-changed-worktree {-worktree adds the working tree's changes: staged, unstaged, untracked tests} -constraints git -body {
+    lassign [canaryRepo worktree] root git
+    canaryWrite [file join $root tests golden kept.bot] edited
+    canaryWrite [file join $root tests untracked.test] u
+    canaryWrite [file join $root tests staged.test] s
+    exec {*}$git add tests/staged.test
+    list [canary::changed $root main 0] [canary::changed $root main 1]
+} -result {{core/core.tcl tests/new.test tests/old.test} {core/core.tcl tests/golden/kept.bot tests/new.test tests/old.test tests/staged.test tests/untracked.test}}
+
+test canary-changed-unknown-base {a base the history does not hold falls back to HEAD's parent; outside a checkout nothing changed} -constraints git -body {
+    lassign [canaryRepo fallback] root git
+    set outside [file join [temporaryDirectory] canary-[pid]-outside]
+    file mkdir $outside
+    list [canary::changed $root 0123456789abcdef0123456789abcdef01234567 0] [canary::changed $outside main 0]
+} -result {{core/core.tcl tests/new.test tests/old.test} {}}
+
+test canary-cli-list {-list 1 prints the selection and runs nothing} -body {
+    set out [exec [info nameofexecutable] [file join $::projectRoot tests canary.tcl] -list 1 -base HEAD -host linux-x86_64 -budget 0]
+    list [string match "canary on linux-x86_64: * items, about * s of a 0 s budget*" $out] [string match *######## $out]
+} -result {1 0}
+
+foreach scratch [glob -nocomplain -directory [temporaryDirectory] canary-[pid]-*] {
+    file delete -force $scratch
+}
+
+cleanupTests

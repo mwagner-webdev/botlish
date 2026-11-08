@@ -201,6 +201,182 @@ proc hir::emission::NativeMayFail {name} {
     for {set k 0} {$k < $count - 1 && $head ne {}} {incr k} {
 >>>>
 
+@@ entered-always counted-loop entry (EMISSION-COUNTED-LOOP-PRECISION-MILESTONE-1.md): every counted loop read as entered, its zero-iteration exit dropped
+%% match ec-loop-entered-* ec-loop-exact-count ec-loop-fixpoint
+## hir/emission.tcl
+<<<<
+    if {$vs in {* {}} || $ve in {* {}}} { return 0 }
+    return [hir::range::DomainEntered
+====
+    return 1
+    return [hir::range::DomainEntered
+>>>>
+
+@@ entered-unknown-bound counted-loop entry: a bound of no known Int set read as entered
+%% match ec-loop-entered-*
+## hir/emission.tcl
+<<<<
+    if {$vs in {* {}} || $ve in {* {}}} { return 0 }
+====
+    if {$vs in {* {}} || $ve in {* {}}} { return 1 }
+>>>>
+
+@@ entered-sentinel counted-loop entry: an unbounded side read as a finite sentinel (10^21) past which no value goes
+%% match ec-loop-entered-huge ec-loop-entered-*
+## hir/emission.tcl
+<<<<
+    return [hir::range::DomainEntered [hir::intset::HullRange $vs] [hir::intset::HullRange $ve] $direction $endKind]
+====
+    return [hir::range::DomainEntered [string map {+inf 1000000000000000000000 -inf -1000000000000000000000} [hir::intset::HullRange $vs]] [string map {+inf 1000000000000000000000 -inf -1000000000000000000000} [hir::intset::HullRange $ve]] $direction $endKind]
+>>>>
+
+@@ entered-exclusive-as-inclusive counted-loop entry: an ascending `to` loop entered when its start may equal its end (the `through` test)
+%% match iset-domain-entered-* ec-loop-entered-endpoints ec-loop-entered-*
+## hir/range.tcl
+<<<<
+        up/exclusive   { return [expr {$s < $z}] }
+====
+        up/exclusive   { return [expr {$s <= $z}] }
+>>>>
+
+@@ entered-inclusive-as-exclusive counted-loop entry: an ascending `through` loop not entered when its start may equal its end (the `to` test)
+%% match iset-domain-entered-* ec-loop-entered-endpoints ec-loop-entered-*
+## hir/range.tcl
+<<<<
+        up/inclusive   { return [expr {$s <= $z}] }
+====
+        up/inclusive   { return [expr {$s < $z}] }
+>>>>
+
+@@ entered-down-equal counted-loop entry: a descending `to` loop entered when its start may equal its end
+%% match iset-domain-entered-* ec-loop-entered-endpoints ec-loop-entered-*
+## hir/range.tcl
+<<<<
+        down/exclusive { return [expr {$s > $z}] }
+====
+        down/exclusive { return [expr {$s >= $z}] }
+>>>>
+
+@@ entered-direction-swapped counted-loop entry: a descending loop judged by the ascending extrema (its start's largest value, its end's smallest)
+%% match iset-domain-entered-* ec-loop-entered-endpoints ec-loop-entered-*
+## hir/range.tcl
+<<<<
+        set s [dict get $startR min]
+        set z [dict get $endR max]
+    }
+====
+        set s [dict get $startR max]
+        set z [dict get $endR min]
+    }
+>>>>
+
+@@ entered-some-pair counted-loop entry: an ascending loop entered when some start is below some end (its start's smallest value against its end's largest), not every pair
+%% match iset-domain-entered-* ec-loop-entered-endpoints ec-loop-entered-*
+## hir/range.tcl
+<<<<
+        set s [dict get $startR max]
+        set z [dict get $endR min]
+    } else {
+====
+        set s [dict get $startR min]
+        set z [dict get $endR max]
+    } else {
+>>>>
+
+@@ entered-no-value counted-loop entry: a Range of no Int (an infinity its only bound, or contradictory) read as an ordinary operand
+%% match iset-domain-entered-* ec-loop-entered-*
+## hir/range.tcl
+<<<<
+        if {$lo eq "+inf" || $hi eq "-inf"} {
+            return 0
+        }
+        if {$lo ne "-inf" && $hi ne "+inf" && $lo > $hi} {
+            return 0
+        }
+====
+>>>>
+
+@@ entered-drops-body-exits counted-loop entry: an entered loop's `break` exits dropped with its zero-iteration exit
+%% match ec-loop-entered-* ec-break-continue
+## hir/emission.tcl
+<<<<
+        lappend out {*}[dict get $breaks $e]
+        if {!$entered} {
+====
+        if {!$entered} {
+            lappend out {*}[dict get $breaks $e]
+>>>>
+<<<<
+    set env $before
+    lappend out {*}[dict get $breaks $e]
+    if {$kind ne "loop"} {
+====
+    set env $before
+    if {!$entered} { lappend out {*}[dict get $breaks $e] }
+    if {$kind ne "loop"} {
+>>>>
+
+@@ entered-first-break-ignored counted-loop entry: an entered loop's first-iteration `break` forgotten after that iteration
+%% match ec-loop-entered-* ec-break-continue
+## hir/emission.tcl
+<<<<
+        lappend out {*}[dict get $breaks $e]
+        if {!$entered} {
+====
+        dict set breaks $e {}
+        if {!$entered} {
+>>>>
+
+@@ entered-only-first counted-loop entry: an entered loop checked by its first iteration only, its later iterations never walked
+%% match ec-loop-entered-*
+## hir/emission.tcl
+<<<<
+    if {$head ne {}} {
+        while 1 {
+====
+    if {$head ne {} && !$entered} {
+        while 1 {
+>>>>
+
+@@ entered-first-failures-dropped counted-loop entry: the failure points of an entered loop's first iteration forgotten (a handler starts only where the later ones fail)
+%% match ec-loop-entered-*
+## hir/emission.tcl
+<<<<
+        dict set env $counter $first
+        lassign [EvalBody [dict get $node body] $s] after -
+====
+        dict set env $counter $first
+        variable fails
+        set savedFails $fails
+        lassign [EvalBody [dict get $node body] $s] after -
+        if {$entered} { set fails $savedFails }
+>>>>
+
+@@ entered-first-returns-dropped counted-loop entry: an entered loop's first-iteration `return` forgotten
+%% match ec-loop-entered-*
+## hir/emission.tcl
+<<<<
+        dict set env $counter $first
+        lassign [EvalBody [dict get $node body] $s] after -
+====
+        dict set env $counter $first
+        variable returns
+        set savedReturns $returns
+        lassign [EvalBody [dict get $node body] $s] after -
+        if {$entered} { set returns $savedReturns }
+>>>>
+
+@@ entered-first-continues-dropped counted-loop entry: an entered loop's first-iteration `continue` not carried to the next iteration's head nor to the exit
+%% match ec-loop-entered-*
+## hir/emission.tcl
+<<<<
+        set head [lsort -unique [concat $after [dict get $continues $e]]]
+        lappend out {*}[dict get $breaks $e]
+====
+        if {$entered} { set head [lsort -unique $after] } else { set head [lsort -unique [concat $after [dict get $continues $e]]] }
+        lappend out {*}[dict get $breaks $e]
+>>>>
+
 @@ join-first-state function-summary joins: a call's exits from its first entry state only
 %% match ec-join-states ec-boundary-* ec-loop-*
 ## hir/emission.tcl
@@ -224,7 +400,7 @@ proc hir::emission::NativeMayFail {name} {
 >>>>
 
 @@ summary-context-free function summaries keyed without their arguments: a helper's first argument context stands for every later one
-%% match ec-context-sensitive ec-arithmetic
+%% match ec-context-sensitive ec-arithmetic ec-loop-entered-contexts
 ## hir/emission.tcl
 <<<<
     if {[dict exists $seen $vals]} {
@@ -494,6 +670,182 @@ proc hir::emission::NativeMayFail {name} {
 <<<<
             hir::DiagnoseAt hir EMIT-RECOGNIZER $message $e $origin
 ====
+>>>>
+
+# ---------------------------------------------------------------------------
+# Unresolved callees (EMISSION-CALLEE-DEPENDENCY-CORRECTNESS-MILESTONE-1.md):
+# an unresolved name's call is typed `never` with no target, and a helper's
+# `never` may be one's; each mutant lets a claim read such a call and still
+# be proven, or makes a claim that reads none dependent.
+
+@@ callee-ref-untainted a call's callee reference is not read for the program's own diagnostics (the defect: an UNBOUND callee's never ends the walk, the claim proven)
+%% match ec-callee-unbound ec-callee-positions ec-callee-multiple-claims ec-callee-memo ec-callee-service ec-callee-interchange
+## hir/emission.tcl
+<<<<
+        # (EMISSION-CALLEE-DEPENDENCY-CORRECTNESS-MILESTONE-1.md).
+        Taint $callee
+====
+        # (EMISSION-CALLEE-DEPENDENCY-CORRECTNESS-MILESTONE-1.md).
+>>>>
+
+@@ callee-taint-after-never the callee is read only for a call that completes: an unresolved call's never has ended the walk first
+%% match ec-callee-unbound ec-callee-positions ec-callee-multiple-claims ec-callee-memo ec-callee-service
+## hir/emission.tcl
+<<<<
+        Taint $callee
+====
+        if {[TypeOf $e] ne "never"} {
+            Taint $callee
+        }
+>>>>
+
+@@ callee-nested-untainted the callee is read only for a call that is a statement of the function's own body, not one nested in an expression, a condition, a loop or a handled call
+%% match ec-callee-positions
+## hir/emission.tcl
+<<<<
+        Taint $callee
+====
+        if {$e in [dict get [Node $::hir::emission::block] body]} {
+            Taint $callee
+        }
+>>>>
+
+@@ never-helper-unread a call of a function whose result is never is believed from its type: its code is not read (its unresolved name unseen, its fingerprint no dependency)
+%% match ec-callee-helpers ec-callee-genuine-nonreturn ec-callee-memo
+## hir/emission.tcl
+<<<<
+                Read $t $vals
+            }
+            Failing $s
+====
+            }
+            Failing $s
+>>>>
+
+@@ never-helper-judged a never helper's code is judged, not only read: what it cannot follow (a trait operation, EMIT-UNSUPPORTED) rejects an accepted program's claim
+%% match ec-callee-genuine-nonreturn
+## hir/emission.tcl
+<<<<
+    set diags [Diagnostics $keyset $claim]
+====
+    set diags [Diagnostics $readset $claim]
+>>>>
+
+@@ reads-untainted a summary read for its code is no part of the claim's dependency: a never helper's unresolved name unseen
+%% match ec-callee-helpers ec-callee-memo
+## hir/emission.tcl
+<<<<
+    foreach k $readset {
+        if {[dict get $cache $k tainted]} {
+====
+    foreach k $keyset {
+        if {[dict get $cache $k tainted]} {
+>>>>
+
+@@ reads-not-certified a certificate depends on the code its proof judged, not on the code it read: a never helper's change keeps the memoized certificate
+%% match ec-callee-genuine-nonreturn ec-callee-memo
+## hir/emission.tcl
+<<<<
+        set cert [Certificate $claim $readset $exits
+====
+        set cert [Certificate $claim $keyset $exits
+>>>>
+
+@@ never-helper-dependent a call that genuinely never returns makes the claim dependent
+%% match ec-callee-genuine-nonreturn ec-callee-memo ec-callee-unreachable
+## hir/emission.tcl
+<<<<
+                Read $t $vals
+            }
+            Failing $s
+====
+                Read $t $vals
+                set ::hir::emission::tainted 1
+            }
+            Failing $s
+>>>>
+
+@@ handled-taint-scoped a handled call's taint is the handler's, dropped with its failure states
+%% match ec-callee-positions
+## hir/emission.tcl
+<<<<
+    set saved $fails
+    set fails {}
+    lassign [Eval [dict get $node call] $s] after v
+====
+    set saved $fails
+    set fails {}
+    set savedTaint $::hir::emission::tainted
+    lassign [Eval [dict get $node call] $s] after v
+    set ::hir::emission::tainted $savedTaint
+>>>>
+
+@@ reuse-drops-taint a final summary reused by a later claim is clean: a helper that calls an unresolved name taints only the first claim that reads it
+%% match ec-callee-independent
+## hir/emission.tcl
+<<<<
+        if {[dict get $rec final]} {
+            incr reused
+            return $rec
+        }
+====
+        if {[dict get $rec final]} {
+            incr reused
+            dict set cache $key tainted 0
+            return $rec
+        }
+>>>>
+
+@@ final-children-clean a solve's summaries but the root's are final and clean: a helper's taint is lost once its fixpoint converges
+%% match ec-callee-helpers ec-callee-independent
+## hir/emission.tcl
+<<<<
+        foreach key [lsort -unique $touched] {
+            dict set cache $key final 1
+        }
+====
+        foreach key [lsort -unique $touched] {
+            dict set cache $key final 1
+            if {$key ne [list $b $c $args_]} {
+                dict set cache $key tainted 0
+            }
+        }
+>>>>
+
+@@ taint-everything one diagnostic anywhere makes every claim of the program dependent
+%% match ec-callee-independent ec-callee-multiple-claims ec-callee-unreachable ec-recovery-dependent
+## hir/emission.tcl
+<<<<
+    set dependent 0
+    foreach k $readset {
+====
+    set dependent [expr {[dict size $::hir::emission::diagnosed] > 0}]
+    foreach k $readset {
+>>>>
+
+@@ dependent-certified a dependent claim still gets a certificate, which callers compose with and the memo keeps
+%% match ec-callee-unbound ec-callee-memo
+## hir/emission.tcl
+<<<<
+        dict set record verdict dependent
+        return $record
+====
+        dict set record verdict dependent
+        set cert [Certificate $claim $keyset [dict get $rec exits] [dict get $rec visits] [dict get $rec fails] [dict get $rec result]]
+        dict set certs $id $cert
+        if {$useMemo} {
+            dict set memo $id $cert
+        }
+        return $record
+>>>>
+
+@@ hover-dependent-certified the compiler service's hover says certified for a dependent claim
+%% match ec-callee-service ec-service
+## hir/emission.tcl
+<<<<
+        dependent { return "emits [dict get $record recognizer]: not checked -- its code holds another diagnostic" }
+====
+        dependent { return "emits [dict get $record recognizer]: certified to emit [dict get $record recognizer]: every normal completion has yielded exactly one token, every prefix it yields is viable; its token completes on its own last symbol" }
 >>>>
 
 # ---------------------------------------------------------------------------

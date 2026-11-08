@@ -337,16 +337,16 @@ test hx-main {main.tcl -emit-hir-interchange writes FILE.hirx beside FILE.bot wi
     removeDirectory hx-main
 } -result {1 1 {{value: [34, 3, 10, 110, "worker"]}} 1 {{value: [34, 3, 10, 110, "worker"]}} 1 {{value: [34, 3, 10, 110, "worker"]}} 1 {{value: [34, 3, 10, 110, "worker"]}} 1}
 
-test hx-executable {a standalone executable built from a .hirx file (main.tcl -emit-native-executable, the stub linker) prints the program's value} -constraints stubLinker -setup {
+test hx-executable {a standalone executable built from a .hirx file (main.tcl -emit-native-executable, the stub linker) has the program's value, read through the driver protocol; run plainly it prints nothing (an executable prints no value)} -constraints stubLinker -setup {
     set dir [makeDirectory hx-executable]
 } -body {
     set hir [hxCompile $::hxProgram]
     set path [hir::interchange::writeFile [file join $dir program.hirx] $hir]
     exec env BOTLISH_NATIVE_LINKER=stub [info nameofexecutable] [file join $::projectRoot main.tcl] \
         -emit-native-executable $path
-    exec env PATH= [file join $dir program]
+    list [exec env PATH= [file join $dir program]] [standaloneValue [file join $dir program]]
 } -cleanup {
     removeDirectory hx-executable
-} -result {[34, 3, 10, 110, "worker"]}
+} -result {{} {[34, 3, 10, 110, "worker"]}}
 
 cleanupTests

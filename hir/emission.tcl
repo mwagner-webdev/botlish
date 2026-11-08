@@ -32,7 +32,9 @@
 # A helper F calls is analyzed in the states and with the argument facts F's
 # own code establishes at the call (a summary, keyed by function, entry state
 # and argument facts, shared by every claim of the compilation); recursion
-# and loops by monotone fixpoints whose convergence is checked; a failure
+# and loops by monotone fixpoints whose convergence is checked (a counted
+# loop whose bounds' facts prove it runs has no zero-iteration exit: EMISSION-
+# COUNTED-LOOP-PRECISION-MILESTONE-1.md, EvalLoop); a failure
 # point records its states, where a handler starts; a guard (a call of a
 # recognizer that never suspends) narrows its binding argument on its normal
 # path; a helper with its own certificate is composed through the
@@ -44,13 +46,16 @@
 #
 # Verdicts. proven (a certificate); rejected (a violation the analysis
 # found: EMIT-REJECTED, -BEYOND-TOKEN, -AFTER-TOKEN, -INCOMPLETE,
-# -END-SYMBOL, -BOUNDARY, -TERMINAL-VALUE, -BYTE-CHARACTER: "may", because
+# -END-SYMBOL, -BOUNDARY, -BYTE-CHARACTER: "may", because
 # the facts over-approximate -- a concrete counterexample is the witness
 # tool's, audit/emission-claims/tools/witness.tcl, which runs the program);
 # not proved (EMIT-UNKNOWN-VALUE, -NOT-SYMBOL, -UNSUPPORTED, -BUDGET: the
-# analysis lacks the facts); dependent (the claim's code holds a diagnostic
-# of its own, poison or a syntax hole: nothing more is said, nothing
-# certified). Every verdict but proven is a diagnostic of the claim: an
+# analysis lacks the facts); dependent (the code the claim's walk reads --
+# its own, a call's callee reference, a helper's whose `never` result it
+# relies on -- holds a diagnostic of its own, poison or a syntax hole:
+# nothing more is said, nothing certified; an unresolved name is typed
+# `never`, which is no divergence: EMISSION-CALLEE-DEPENDENCY-CORRECTNESS-
+# MILESTONE-1.md). Every verdict but proven is a diagnostic of the claim: an
 # explicit claim is certified or the compilation is rejected.
 #
 # Certificates and trust. A proven claim's certificate states what a caller
@@ -113,6 +118,7 @@ namespace eval hir::emission {
     variable fails {}
     variable viol {}
     variable children {}
+    variable reads {}
     variable certUses {}
     variable tainted 0
 }
@@ -625,9 +631,10 @@ proc hir::emission::Within {s target} {
 # (exits), every state it is in between symbols (visits), every state it may
 # fail in (fails: at a `fail` or a call that may fail -- where a handler
 # around the call starts), its result value, the violations its own yields
-# commit, the summaries it uses (children), the certificates it composed
-# with, and whether its code holds what the program's own diagnostics are
-# about (tainted). Keyed by {B C ARGS}; computed in rounds to a fixpoint
+# commit, the summaries it uses (children), the summaries it reads only for
+# their code (reads: Read), the certificates it composed with, and whether
+# its code holds what the program's own diagnostics are about (tainted).
+# Keyed by {B C ARGS}; computed in rounds to a fixpoint
 # (Solve), each value only growing, so recursion is analyzed; a summary of a
 # converged solve is final and reused by every later claim of the
 # compilation.
@@ -654,7 +661,7 @@ proc hir::emission::Summary {b c args_} {
         }
     } else {
         set rec [dict create final 0 round 0 exits {} visits {} fails {} result {} violations {} \
-            children {} certUses {} changes 0 tainted 0]
+            children {} reads {} certUses {} changes 0 tainted 0]
     }
     if {$computed >= $maxSummaries} {
         set budgetHit 1
@@ -692,7 +699,7 @@ proc hir::emission::Summary {b c args_} {
     }
     set rec [dict create final 0 round $round exits $exits visits $visits fails $fails result $result \
         violations [dict get $computedRec violations] children [dict get $computedRec children] \
-        certUses [dict get $computedRec certUses] changes $changes \
+        reads [dict get $computedRec reads] certUses [dict get $computedRec certUses] changes $changes \
         tainted [expr {[dict get $rec tainted] || [dict get $computedRec tainted]}]]
     dict set cache $key $rec
     return $rec
@@ -745,9 +752,10 @@ proc hir::emission::Walk {b c args_} {
     variable fails
     variable viol
     variable children
+    variable reads
     variable certUses
     variable tainted
-    set saved [list $block $env $exprVal $returns $retval $breaks $continues $visits $fails $viol $children $certUses $tainted]
+    set saved [list $block $env $exprVal $returns $retval $breaks $continues $visits $fails $viol $children $reads $certUses $tainted]
     set block $b
     set env [dict create]
     set exprVal [dict create]
@@ -759,6 +767,7 @@ proc hir::emission::Walk {b c args_} {
     set fails {}
     set viol {}
     set children {}
+    set reads {}
     set certUses {}
     set tainted 0
     set node [Node $b]
@@ -767,8 +776,8 @@ proc hir::emission::Walk {b c args_} {
             Violation EMIT-UNSUPPORTED $b "[FunctionText $b] is a specialization of a trait-polymorphic or context-trait function: the implementations it calls were selected for the program it is in, so the checker does not follow them" "" {}
             set fails [list $c]
             set rec [dict create exits {} visits [list $c] fails [list $c] result * violations $viol \
-                children {} certUses {} tainted 0]
-            lassign $saved block env exprVal returns retval breaks continues visits fails viol children certUses tainted
+                children {} reads {} certUses {} tainted 0]
+            lassign $saved block env exprVal returns retval breaks continues visits fails viol children reads certUses tainted
             return $rec
         }
     }
@@ -786,8 +795,9 @@ proc hir::emission::Walk {b c args_} {
         set result $retval
     }
     set rec [dict create exits $exits visits [lsort -unique $visits] fails [lsort -unique $fails] result $result \
-        violations $viol children [lsort -unique $children] certUses [lsort -unique $certUses] tainted $tainted]
-    lassign $saved block env exprVal returns retval breaks continues visits fails viol children certUses tainted
+        violations $viol children [lsort -unique $children] reads [lsort -unique $reads] \
+        certUses [lsort -unique $certUses] tainted $tainted]
+    lassign $saved block env exprVal returns retval breaks continues visits fails viol children reads certUses tainted
     return $rec
 }
 
@@ -795,10 +805,21 @@ proc hir::emission::Walk {b c args_} {
 # The walk: Eval E from states S => {STATES VALUE}
 
 proc hir::emission::EvalBody {body s} {
+    variable hir
     set value unit
     foreach e $body {
+        set before $s
         lassign [Eval $e $s] s value
         if {$s eq {}} {
+            if {$before ne {} && [hir::static::reifiedStatement $hir $body $e]} {
+                # A rejected static block as a statement (STATIC-COMPILE.md,
+                # "Completions"): a failure point (Failing recorded it), and
+                # the walk goes on as if the block completed, from the states
+                # before it -- the code after it is checked as written.
+                set s $before
+                set value unit
+                continue
+            }
             return [list {} {}]
         }
     }
@@ -807,24 +828,32 @@ proc hir::emission::EvalBody {body s} {
 
 proc hir::emission::Eval {e s} {
     variable exprVal
-    variable hir
-    variable diagnosed
-    variable tainted
     if {$s eq {}} {
         return [list {} {}]
     }
     set node [Node $e]
-    if {[dict exists $hir poisoned $e] || [dict exists $hir syntaxDependent $e] || [dict exists $diagnosed $e]} {
-        # What the program's own diagnostics are about: the claim is
-        # dependent (verify).
-        set tainted 1
-    }
+    Taint $e
     if {![dict get $node reachable]} {
         return [list {} {}]
     }
     set r [EvalNode $e $node $s]
     dict set exprVal $e [lindex $r 1]
     return $r
+}
+
+# Marks the summary being walked tainted when the walk reads expression E
+# and E is what the program's own diagnostics are about -- poison, code
+# whose meaning depends on source the front end could not read, or a
+# diagnostic's own expression (an unresolved name's reference): the claim is
+# dependent (verify). Every expression the walk reads passes here, also one
+# it reads without evaluating it (a call's callee reference, EvalCall).
+proc hir::emission::Taint {e} {
+    variable hir
+    variable diagnosed
+    variable tainted
+    if {[dict exists $hir poisoned $e] || [dict exists $hir syntaxDependent $e] || [dict exists $diagnosed $e]} {
+        set tainted 1
+    }
 }
 
 proc hir::emission::EvalNode {e node s} {
@@ -947,6 +976,13 @@ proc hir::emission::EvalCall {e node s} {
     set callee [dict get $node callee]
     if {[Kind $callee] ne "ref"} {
         lassign [Eval $callee $s] s -
+    } else {
+        # A callee named by a reference has no value the walk needs, but
+        # what the call does is read through it: an unresolved name
+        # (UNBOUND, a forward reference) is typed `never` with no target,
+        # which is no divergence the walk may stop at
+        # (EMISSION-CALLEE-DEPENDENCY-CORRECTNESS-MILESTONE-1.md).
+        Taint $callee
     }
     set vals {}
     foreach a [dict get $node args] {
@@ -983,6 +1019,14 @@ proc hir::emission::EvalCall {e node s} {
         if {$tk eq "block" && [hir::coroutines::MayYield $hir $t]} {
             Apply $e $t $s $vals
         } else {
+            if {$tk eq "block"} {
+                # That it never completes is a fact of the function's code
+                # (its inferred result), which the walk relies on here: the
+                # code is read (Read) -- what of the program's own
+                # diagnostics it holds (an unresolved name, whose `never` is
+                # no divergence) and its fingerprint are part of the proof.
+                Read $t $vals
+            }
             Failing $s
         }
         return [list {} {}]
@@ -1069,6 +1113,21 @@ proc hir::emission::Child {t c vals} {
     set vals [Contextual $t $vals]
     lappend children [list $t $c $vals]
     return [Summary $t $c $vals]
+}
+
+# The summary of block T with VALS, read for its code alone: a call of T
+# the walk ends at because T's result is `never` and T yields nothing, so
+# nothing T does -- its exits, result, failures or what it cannot follow
+# (its violations, EMIT-UNSUPPORTED) -- is part of the trace. What its code
+# is, is: whether it holds the program's own diagnostics (its `never` may be
+# an unresolved name's, EvalCall) and its fingerprint, so the claim is
+# dependent on it, and its certificate on its code (CheckClaim: the read
+# set). A summary also reached as a child is judged as one.
+proc hir::emission::Read {t vals} {
+    variable reads
+    set vals [Contextual $t $vals]
+    lappend reads [list $t free $vals]
+    return [Summary $t free $vals]
 }
 
 # VALS, or the declared facts when function T has had too many argument
@@ -1454,6 +1513,7 @@ proc hir::emission::EvalLoop {e node s} {
         return [Unrolled $e $node $s $induction $count $before]
     }
     lassign [Peel $induction] counter all first later
+    set entered [Entered $induction]
     if {$counter ne ""} {
         dict set env $counter $all
     }
@@ -1462,6 +1522,13 @@ proc hir::emission::EvalLoop {e node s} {
     set out {}
     set head $s
     set loopEnv $env
+    if {$counter ne "" && $entered && $first eq ""} {
+        # An inexact start whose bounds still prove the body runs: the first
+        # iteration is walked on its own, with every value, so that the
+        # states before it are not among the loop's exits.
+        set first $all
+        set later $all
+    }
     if {$counter ne "" && $first ne ""} {
         # The first iteration of a counting domain with an exact start is
         # its own (the `if i > 0:` separator idiom); every later one is past
@@ -1470,7 +1537,14 @@ proc hir::emission::EvalLoop {e node s} {
         lassign [EvalBody [dict get $node body] $s] after -
         set head [lsort -unique [concat $after [dict get $continues $e]]]
         lappend out {*}[dict get $breaks $e]
-        lappend out {*}$s
+        if {!$entered} {
+            # The zero-iteration exit: the states before the loop, where
+            # its bounds may put nothing in the domain. Only it is dropped
+            # for an entered loop: every exit of its iterations -- a
+            # `break`, the head after any of them, a return or a failure
+            # recorded by the walk -- stays.
+            lappend out {*}$s
+        }
         set loopEnv [dict replace $loopEnv $counter $later]
         set env $loopEnv
     }
@@ -1536,6 +1610,20 @@ proc hir::emission::Unrolled {e node s induction count before} {
     set env $before
     set out [concat [dict get $breaks $e] $head]
     return [list [lsort -unique $out] *]
+}
+
+# 1 when counting domain INDUCTION ({BINDING STARTEXPR STARTVALUE ENDVALUE
+# DIRECTION ENDKIND}) runs its body at least once for every start and end
+# value its operands may have (hir::range::DomainEntered, on their hulls:
+# the extrema it reads are the hulls' own), else 0. A value of no known Int
+# set ("*") or none at all ({}) proves nothing. A lockstep loop's domains
+# have one iteration count (hir/lockstep.tcl's obligation, else the loop
+# raises before anything runs), so its first counting domain decides.
+proc hir::emission::Entered {induction} {
+    if {$induction eq {}} { return 0 }
+    lassign $induction b startExpr vs ve direction endKind
+    if {$vs in {* {}} || $ve in {* {}}} { return 0 }
+    return [hir::range::DomainEntered [hir::intset::HullRange $vs] [hir::intset::HullRange $ve] $direction $endKind]
 }
 
 # {COUNTER ALL FIRST LATER} for a counting domain INDUCTION ({BINDING
@@ -1637,8 +1725,10 @@ proc hir::emission::UseGuard {t} {
     dict set guardsUsed $t 1
 }
 
-# Every summary reachable from KEY, KEY included.
-proc hir::emission::Reachable {key} {
+# Every summary reachable from KEY, KEY included, over the edges FIELDS
+# names: `children` (the summaries a proof judges), and `reads` too (the
+# summaries whose code it read: Read).
+proc hir::emission::Reachable {key {fields children}} {
     variable cache
     set seen [dict create]
     set work [list $key]
@@ -1646,7 +1736,9 @@ proc hir::emission::Reachable {key} {
         set work [lassign $work k]
         if {[dict exists $seen $k] || ![dict exists $cache $k]} continue
         dict set seen $k 1
-        lappend work {*}[dict get $cache $k children]
+        foreach field $fields {
+            lappend work {*}[dict get $cache $k $field]
+        }
     }
     return [dict keys $seen]
 }
@@ -1939,8 +2031,12 @@ proc hir::emission::CheckClaim {claim} {
     set args_ [Declared $b]
     set rec [Solve $b $entry $args_]
     set keyset [Reachable [list $b $entry $args_]]
+    # The summaries whose code the proof read, those it judges among them:
+    # what decides whether the claim is dependent, and what its certificate
+    # depends on.
+    set readset [Reachable [list $b $entry $args_] {children reads}]
     set dependent 0
-    foreach k $keyset {
+    foreach k $readset {
         if {[dict get $cache $k tainted]} {
             set dependent 1
             break
@@ -1958,16 +2054,13 @@ proc hir::emission::CheckClaim {claim} {
     foreach v [Finish $exits $claim] {
         lappend diags [Message [dict replace $v expr $b] $claim]
     }
-    # A claimed emitter whose declared result is an Int is a symbol source:
-    # it must complete with -1, the end, never a value a consumer reading
-    # after the end would take for a symbol.
-    set declared [dict get [Node $b] declaredResult]
+    # The function's result is no symbol, whatever its type: the claim is
+    # about the yield trace alone. A coroutine root's final value -- a
+    # count, a status, the -1 a source protocol may use for its end -- is
+    # the consumer's to tell from a symbol (std::coroutine::done?), and
+    # what it is belongs to that protocol, not to the claim
+    # (CSV-EMISSION-VALIDATION-MILESTONE-1.md, section 18).
     set value [dict get $rec result]
-    if {$exits ne {} && $declared ne "" && [IsInt $declared] && $value ne [hir::intset::point -1]} {
-        lappend diags [dict create kind EMIT-TERMINAL-VALUE expr $b origin [dict get $claim origin] \
-            message "[ClaimPrefix $claim]: [FunctionText $b] returns an Int, so it is a symbol source, and its final value may be [ValueText $value], not -1: a consumer reading values after the end would read it as a symbol" \
-            related {} notes {}]
-    }
     if {$budgetHit} {
         # An analysis that did not converge: what it found is no finding
         # (its facts are a round's, not the fixpoint's) -- only the budget
@@ -1978,7 +2071,7 @@ proc hir::emission::CheckClaim {claim} {
     }
     if {$diags eq {}} {
         set t0 [clock microseconds]
-        set cert [Certificate $claim $keyset $exits [dict get $rec visits] [dict get $rec fails] $value]
+        set cert [Certificate $claim $readset $exits [dict get $rec visits] [dict get $rec fails] $value]
         dict incr ::hir::emission::stats certifyMicroseconds [expr {[clock microseconds] - $t0}]
         dict set certs $id $cert
         if {$useMemo} {

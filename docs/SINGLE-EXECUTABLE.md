@@ -28,19 +28,24 @@ its entry file (IMPORTS.md, "Application modules"), so in a directory holding
 only `botlish`, `main.bot` and `game.bot`, `main.bot`'s `import game` names
 `game.bot` -- the packed standard library is consulted first, and a missing
 module's diagnostic names the application path before the archive's. A native
-run shows what the program prints, then its value, as an executable would, and
+run shows what the program prints, then its value (an executable prints only
+what the program prints, and `botlish run FILE ARG...` runs a program that
+way: PROGRAM-OUTPUT-MILESTONE-1.md), and
 the interpreter runs ordinary recursion thousands of calls deep (main.tcl's
 recursion limit, core/core.tcl): main.tcl's own behavior, packed.
 
 CI builds it on every push to `main` (`.github/workflows/single-executable.yml`),
 smoke-tests it in stock `ubuntu:24.04` and `ubuntu:latest` containers, and
-uploads it as the run's `botlish-linux-x86_64` artifact. A build that passes
-every smoke test is then published as the `botlish-linux-x86_64` asset (with
-its `.sha256`) of the `single-latest` prerelease, whose tag follows `main`:
-the README's download button links to
+uploads it as the run's `botlish-linux-x86_64` artifact. Once every test of
+the commit is green (CI-RUNS.md, "The release gate": tests.yml and
+tests-arm64.yml with their GC-stress jobs, macOS, Windows, and these smoke
+tests), a release run publishes exactly that artifact as the
+`botlish-linux-x86_64` asset (with its `.sha256`) of the `single-latest`
+prerelease, whose tag follows main's newest green commit: the README's
+download button links to
 `https://github.com/mwagner-webdev/botlish/releases/download/single-latest/botlish-linux-x86_64`.
-Builds can finish out of order; one never replaces the build of a later
-commit.
+Release runs can finish out of order; one never replaces the build of a
+later commit.
 
 Only the compiler and its CLI are packed. The tests, benchmarks and audit
 tools stay checkout-only, and the executables the compiler emits were
@@ -176,7 +181,7 @@ Every linker's startup reads the policy from the record before it builds
 anything (`runtime::aot::start_linked`, the stub's loader) and `aot::run`
 runs one body on the thread it names: the Vm made there, the startup report,
 the argument snapshot, the driver protocol or the overflow guard, the
-program, its value or error -- so output, errors, statuses, the driver
+program, its status or error -- so output, errors, statuses, the driver
 protocol and every runtime guarantee are the same; a Rust panic is "native
 executable panicked (NATIVE BUG)", status 1, under both. The startup report
 ends in `startup POLICY`, `process-main-thread 1|0|unknown` and `stack

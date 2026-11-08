@@ -435,7 +435,7 @@ count) auxiliary nodes; BFS O(n) time and O(widest level) auxiliary nodes.
 |---|---|
 | TREE-STRUCT-SHAPE | no `List[Self]` field; a second one; Self as a field; nested deeper; inside another container, map, set, function or coroutine type; another application of the declaration; mutual recursion |
 | TREE-STRUCT-COMBINATION | `opaque tree struct`, `tree context struct`, an `identity` clause on a tree struct |
-| AFFINE-CONTAINER-UNSUPPORTED | a tree struct with an affine field; a tree struct applied to an affine type (a construction, a declared type) |
+| AFFINE-CONTAINER-UNSUPPORTED | a tree struct with an affine field; a tree struct applied to an affine type (a construction, a declared type) -- since AFFINE-PARAMETERIZED-APPLICATIONS-CORRECTNESS-MILESTONE-1.md, an application whose fields hold an affine value, by the general rule for every recursive affine application |
 | TREE-OPERAND | std::tree::walk of a value of a known type that is no tree struct's (seen by a program as its call's TYPE) |
 | UNPROVEN-FIELD | std::tree::walk of a value whose tree type is not known where the walk may run generically |
 | SYNTAX | `tree tree struct` (duplicate modifier) |
@@ -726,7 +726,11 @@ What the numbers establish:
   so `Pair[Coroutine...]` is treated as unrestricted. A tree struct's
   application is checked directly (`ApplicationProblem`); ordinary
   parameterized structs are not, and should be (AFFINE-VALUES.md's
-  discipline applies to applications).
+  discipline applies to applications). *Closed by
+  AFFINE-PARAMETERIZED-APPLICATIONS-CORRECTNESS-MILESTONE-1.md: every
+  application is classified by its applied fields, and the tree-only check
+  is gone -- a tree application is rejected by the general rule for a
+  recursive affine application.*
 * **Coroutine construction typing** takes the root instance's own yields;
   yields in other functions the coroutine reaches keep their generic types.
   `walk` yields only in itself. And it needs an instance: a call whose

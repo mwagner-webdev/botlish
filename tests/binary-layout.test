@@ -599,12 +599,12 @@ foreach stale [glob -nocomplain -directory $blExecutableDir *] {
     file delete -force $stale
 }
 
-test bl-executable {a standalone executable (whichever linker BOTLISH_NATIVE_LINKER selects) imprints and emits exactly as the in-process backends do} -constraints executableAot -body {
+test bl-executable {a standalone executable (whichever linker BOTLISH_NATIVE_LINKER selects) imprints and emits exactly as the in-process backends do (its value read through the driver protocol)} -constraints executableAot -body {
     set source "$::blPrelude${::blLayouts}o = LayoutStruct\[Outer\] \{count: 4294967295, inner: LayoutStruct\[Inner\] \{x: -32768, y: 65535\}, last: 255\}\nw = LayoutStruct\[Wide\] \{u: 18446744073709551615, i: -9223372036854775808\}\nback = std::binary::parse(Outer, std::binary::emit(o)):\n    on LayoutLengthMismatch:\n        o\nwide = std::binary::parse(Wide, std::binary::emit(w)):\n    on LayoutLengthMismatch:\n        w\n\[back == o, wide == w, wide.u, std::binary::emit(o) == bytes_of(\[255, 255, 255, 255, 0, 128, 255, 255, 0, 0, 0, 0, 255, 0, 0, 0\])\]\n"
     set hir [surface::compile $source layout.bot -warnings off]
     set path [file join $::blExecutableDir layouts]
     native::executable $hir $path
-    list [exec $path] [blOutcome cranelift $hir]
+    list [standaloneValue $path] [blOutcome cranelift $hir]
 } -cleanup {unset -nocomplain source hir path} -result {{[true, true, 18446744073709551615, true]} {value {[true, true, 18446744073709551615, true]}}}
 
 test bl-gc-stress {under BOTLISH_NATIVE_GC_STRESS=1 (a collection at every allocation site) imprinting and emitting stay exact: 64-bit fields that become BigInts mid-parse, nested objects and many records} -constraints nativeCoroutines -body {

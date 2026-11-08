@@ -1,0 +1,240 @@
+# lifecycle.bot -- SAME-THREAD-ACTORS-MILESTONE-1.md, "Actor lifecycle":
+# how actors end and what happens to their mailboxes.
+#
+#   * fragile fails with a declared error (TaskFailed 7) while messages are
+#     still queued and a sender waits for room: its host closes its mailbox
+#     at once -- the queued messages are counted undelivered, the waiting
+#     sender wakes with Closed, later sends are Closed -- and the task's
+#     outcome is Failed 7. Nobody reaps anything by hand.
+#   * clumsy fails with a recoverable runtime error (IndexNotFound): the
+#     same.
+#   * early fails in its first segment, during its construction (eager), so
+#     the failure reaches its constructor and it is never started; the
+#     administration closes its mailbox by address.
+#   * started anyway, a construction that failed is a Failed task, never a
+#     Returned one.
+#   * stopper stops itself on a Stop message; the pair is stopped together
+#     by the administration closing their mailboxes.
+#   * a plain event-loop task beside them is unaffected, and its outcome is
+#     reported with theirs.
+import std::actor
+import std::event_loop
+import std::event_loop::deterministic
+import std::int
+import std::list
+import std::str
+import type std::actor::Sent
+import type std::event_loop::Ending
+
+struct Num:
+    n: int
+
+struct Line:
+    text: str
+
+nomethod fn line(text: str, n: int) -> Line:
+    Line {text: text.concat(std::int::to_string(n))}
+
+fn sent_name(s: Sent) -> str:
+    if s == Sent::Delivered:
+        "Delivered"
+    elif s == Sent::Full:
+        "Full"
+    elif s == Sent::Closed:
+        "Closed"
+    else:
+        "Stale"
+
+# Sums its numbers; a negative one fails the actor with TaskFailed.
+fn fragile(inbox: std::actor::Inbox[Num], log: std::actor::Address[Line]) -> std::actor::Exit errors std::event_loop::TaskFailed:
+    rx = inbox.listen():
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    total = fold with intermediate t 0:
+        v = rx.receive():
+            on std::actor::Closed:
+                break
+        if v.n < 0:
+            log.send(line("fragile: failing with ", 7))
+            fail std::event_loop::TaskFailed {code: 7}
+        t + v.n
+    std::actor::exit(total)
+
+# Its second message makes it read past a List's end.
+fn clumsy(inbox: std::actor::Inbox[Num]) -> std::actor::Exit errors IndexNotFound:
+    rx = inbox.listen():
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    xs = [10, 20]
+    total = fold with intermediate t 0:
+        v = rx.receive():
+            on std::actor::Closed:
+                break
+        t + xs.at(v.n)
+    std::actor::exit(total)
+
+# Fails before its first yield: in its construction.
+fn early(inbox: std::actor::Inbox[Num], bad: bool) -> std::actor::Exit errors std::event_loop::TaskFailed:
+    if bad:
+        fail std::event_loop::TaskFailed {code: 3}
+    rx = inbox.listen():
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    v = rx.receive():
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    std::actor::exit(v.n)
+
+# Stops on 0; reports what it got and why it stopped.
+fn stopper(name: str, inbox: std::actor::Inbox[Num], log: std::actor::Address[Line]) -> std::actor::Exit:
+    rx = inbox.listen():
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    got = fold with intermediate k 0:
+        v = rx.receive():
+            on std::actor::Closed:
+                log.send(line(name.concat(": mailbox closed after messages "), k))
+                break
+        if v.n == 0:
+            log.send(line(name.concat(": stop message after messages "), k))
+            break
+        k + 1
+    std::actor::exit(got)
+
+# Waits for room in TO (full) and reports what deliver answered.
+fn waiter(to: std::actor::Address[Num], log: std::actor::Address[Line]) -> std::actor::Exit:
+    s = to.deliver(Num {n: 100})
+    log.send(Line {text: "waiter: deliver answered ".concat(sent_name(s))})
+    std::actor::exit(0)
+
+# A plain task of the loop (no actor).
+fn plain(context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    std::event_loop::yield_now()
+    std::event_loop::yield_now()
+    std::event_loop::log("plain: done")
+    42
+
+fn ending_name(e: Ending) -> str:
+    if e == Ending::Returned:
+        "Returned"
+    elif e == Ending::Failed:
+        "Failed"
+    elif e == Ending::IndexNotFound:
+        "IndexNotFound"
+    else:
+        "Fault"
+
+nomethod fn say(text: str, n: int, context ev: std::event_loop::Loop) errors std::event_loop::SchedulerFault:
+    std::event_loop::log(text.concat(std::int::to_string(n)))
+
+nomethod fn flag(b: bool) -> int:
+    if b:
+        1
+    else:
+        0
+
+fn main(context ev: std::event_loop::Loop, d: std::event_loop::Driver, ac: std::actor::Actors) -> List[str] errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    {to: log, inbox: log_in} = std::actor::open[Line](32)
+
+    # A failing actor with queued messages and a sender waiting for room:
+    # the waiter starts first and finds the mailbox full.
+    {to: frag, inbox: frag_in} = std::actor::open[Num](3)
+    std::actor::post(frag, Num {n: -1})
+    std::actor::post(frag, Num {n: 5})
+    std::actor::post(frag, Num {n: 6})
+    w = inject no context:
+        coroutine {step, first} = waiter(frag, log)
+        std::actor::spawned(step, first)
+    w.start()
+    f = inject no context:
+        coroutine {step, first} = fragile(frag_in, log):
+            on std::event_loop::TaskFailed:
+                std::actor::exit(-3)
+        std::actor::spawned(step, first)
+    f.start()
+
+    # A runtime error.
+    {to: cl, inbox: cl_in} = std::actor::open[Num](3)
+    c = inject no context:
+        coroutine {step, first} = clumsy(cl_in)
+        std::actor::spawned(step, first)
+    c.start()
+    std::actor::post(cl, Num {n: 1})
+    std::actor::post(cl, Num {n: 5})
+
+    # A plain task beside them.
+    coroutine {step: p, first: pf} = plain()
+    std::event_loop::adopt(p, pf)
+
+    # Two actors stopped together by the administration, one stopping
+    # itself.
+    {to: s1, inbox: s1_in} = std::actor::open[Num](3)
+    {to: s2, inbox: s2_in} = std::actor::open[Num](3)
+    {to: s3, inbox: s3_in} = std::actor::open[Num](3)
+    a1 = inject no context:
+        coroutine {step, first} = stopper("s1", s1_in, log)
+        std::actor::spawned(step, first)
+    a1.start()
+    a2 = inject no context:
+        coroutine {step, first} = stopper("s2", s2_in, log)
+        std::actor::spawned(step, first)
+    a2.start()
+    a3 = inject no context:
+        coroutine {step, first} = stopper("s3", s3_in, log)
+        std::actor::spawned(step, first)
+    a3.start()
+    std::actor::post(s1, Num {n: 1})
+    std::actor::post(s3, Num {n: 1})
+    std::actor::post(s3, Num {n: 0})
+    std::actor::post(s3, Num {n: 9})
+    std::event_loop::run()
+    say("main: after the run, a send to fragile answers Closed: ", flag(std::actor::post(frag, Num {n: 1}) == Sent::Closed))
+    say("main: closed s1, undelivered ", std::actor::close(s1))
+    say("main: closed s2, undelivered ", std::actor::close(s2))
+    std::event_loop::run()
+
+    # A construction that fails reaches its constructor (its handler runs);
+    # the actor is not started, and the administration closes its mailbox
+    # by address.
+    {to: e1, inbox: e1_in} = std::actor::open[Num](3)
+    std::actor::post(e1, Num {n: 4})
+    built = inject no context:
+        coroutine {step, first} = early(e1_in, true):
+            on std::event_loop::TaskFailed {code}:
+                std::actor::exit(-100 - code)
+        std::actor::spawned(step, first)
+    say("main: the construction failed; closed its mailbox by address, undelivered ", std::actor::close(e1))
+    say("main: then a send answers Closed: ", flag(std::actor::post(e1, Num {n: 1}) == Sent::Closed))
+    # Started anyway, a failed construction is a Failed task.
+    say("main: started the failed construction anyway as task ", built.start())
+    # The slot is reused: the old address is Stale.
+    {to: fresh, inbox: fresh_in} = std::actor::open[Num](3)
+    say("main: the old address after reuse is Stale: ", flag(std::actor::post(e1, Num {n: 1}) == Sent::Stale))
+    say("main: the new mailbox got nothing: ", std::actor::queued(fresh))
+    std::event_loop::run()
+    loop o in std::event_loop::take_outcomes():
+        std::event_loop::log("main: outcome task ".concat(std::int::to_string(o.task)).append_char(' ').concat(ending_name(o.ending)).append_char(' ').concat(std::int::to_string(o.value)))
+    loop l in std::actor::drain(log_in):
+        std::event_loop::log("log: ".concat(l.text))
+    st = std::actor::stats()
+    say("main: started ", st.started)
+    say("main: ended ", st.ended)
+    say("main: failed ", st.failed)
+    say("main: running ", st.running)
+    say("main: delivered ", st.delivered)
+    say("main: received ", st.received)
+    say("main: undelivered ", st.undelivered)
+    std::event_loop::trace()
+
+with context std::event_loop::create(64)
+with context std::event_loop::deterministic::create()
+with context std::actor::create()
+main():
+    on IndexNotFound:
+        ["IndexNotFound"]
+    on std::event_loop::SchedulerFault:
+        ["SchedulerFault"]
+    on std::event_loop::DriverFault:
+        ["DriverFault"]
+    on std::event_loop::LoopReentered:
+        ["LoopReentered"]

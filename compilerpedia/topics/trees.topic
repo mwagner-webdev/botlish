@@ -8,7 +8,6 @@ index: concepts
 alias: tree struct; tree; recursive struct; recursive value; children; subtree; depth-first; breadth-first; preorder; tree traversal
 keywords: tree, recursive, children, List[Self], subtree, walk, DepthFirst, BreadthFirst, preorder, traversal, ==, hash, Hashable, Equatable, TREE-STRUCT-SHAPE, TREE-STRUCT-COMBINATION
 related: concept.structs concept.coroutines concept.hashable concept.equatable error.tree-struct-shape error.tree-struct-combination error.tree-operand
-docs: TREE-STRUCT-MILESTONE-1.md STRUCTS.md
 
 == WHAT IT IS
     tree struct FileTree:
@@ -44,7 +43,9 @@ recursion is representation: nothing a program does observes it.
     general recursive type is an ordinary `struct` (concept.structs).
   * A tree struct is never opaque, a context or an identity struct
     (TREE-STRUCT-COMBINATION), and never affine: a tree of coroutines, or
-    a `Node[T]` applied to an affine type, is AFFINE-CONTAINER-UNSUPPORTED.
+    an application `Node[T]` that is affine (its fields, T substituted,
+    hold an affine value), is AFFINE-CONTAINER-UNSUPPORTED -- the rule for
+    every recursive affine type (error.affine-container-unsupported).
   * == compares the declaration, every field and the children in order,
     recursively; both hashes read the same, in order. Two trees built
     differently but equal as trees are equal and hash equally.
@@ -119,8 +120,7 @@ tree struct Node:
 @end
 
 == MORE
-TREE-STRUCT-MILESTONE-1.md; concept.coroutines for constructing and
-resuming a walk.
+concept.coroutines for constructing and resuming a walk.
 
 @topic error.tree-struct-shape
 title: TREE-STRUCT-SHAPE: exactly one recursive field, of type List[Self]
@@ -129,7 +129,6 @@ index: errors
 alias: tree struct shape; recursive field; List[Self]
 keywords: tree, recursive, children, List[Self], mutual recursion, Optional, map of Self
 related: concept.tree-structs concept.structs error.tree-struct-combination
-docs: TREE-STRUCT-MILESTONE-1.md
 code: CORE SEMANTIC TREE-STRUCT-SHAPE
 
 == MEANING
@@ -186,7 +185,6 @@ index: errors
 alias: opaque tree struct; context tree struct; tree identity
 keywords: tree, opaque, context, identity, combination
 related: concept.tree-structs concept.opaque-structs concept.value-identity error.tree-struct-shape
-docs: TREE-STRUCT-MILESTONE-1.md
 code: CORE SEMANTIC TREE-STRUCT-COMBINATION
 
 == MEANING
@@ -217,7 +215,6 @@ index: errors
 alias: tree operand
 keywords: tree, children, walk, operand
 related: concept.tree-structs error.type
-docs: TREE-STRUCT-MILESTONE-1.md
 code: CORE SEMANTIC TREE-OPERAND
 
 == MEANING

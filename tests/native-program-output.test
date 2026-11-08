@@ -209,7 +209,7 @@ test native-output-several-files {each file's output comes between its header an
     removeFile native-output-second.bot
 } -result "== native-output-first.bot (cranelift)\nfirst\n   value: unit\n== native-output-second.bot (cranelift)\nsecond\n   value: 2\n"
 
-test native-output-agrees-with-executable {the output main.tcl -backend cranelift shows is the standalone executable's, byte for byte (each then shows the value its own way)} -constraints {nativeLinux nativeBuilt} -setup {
+test native-output-agrees-with-executable {the output main.tcl -backend cranelift shows between its header and its value line is the standalone executable's whole output, byte for byte: an executable prints no value of its own (PROGRAM-OUTPUT-MILESTONE-1.md); its value, read through the driver protocol, which leaves its output as it is, is the one main.tcl shows} -constraints {nativeLinux nativeBuilt} -setup {
     set dir [makeDirectory native-output-executable]
     set path [file join $dir agree.bot]
     set channel [open $path w]
@@ -234,13 +234,14 @@ test native-output-agrees-with-executable {the output main.tcl -backend cranelif
     lassign [mainRun -backend cranelift $path] mainOut mainErr mainStatus
     lassign [mainRun -emit-native-executable $path] _ buildErr buildStatus
     lassign [processRun [list [file join $dir agree]]] exeOut exeErr exeStatus
+    set result [file join $dir agree.result]
+    set protocol [withEnvironment [list BOTLISH_NATIVE_RESULT $result] {processRun [list [file join $dir agree]]}]
     list $buildStatus $mainStatus $exeStatus \
-        [string equal [string range $mainOut [string length "== agree.bot (cranelift)\n"] end-[string length "   value: 3\n"]] \
-            [string range $exeOut 0 end-[string length "3\n"]]] \
-        [string equal $mainErr $exeErr] $exeOut
+        [string equal [string range $mainOut [string length "== agree.bot (cranelift)\n"] end-[string length "   value: 3\n"]] $exeOut] \
+        [string equal $mainErr $exeErr] $exeOut [expr {$protocol eq [list $exeOut $exeErr $exeStatus]}] [ProtocolValue $result]
 } -cleanup {
     removeDirectory native-output-executable
-} -result [list 0 0 0 1 1 "line\nline\nline\n3\n"]
+} -result [list 0 0 0 1 1 "line\nline\nline\n" 1 3]
 
 test native-output-driver-result-file {botlish-native run --result PATH: the program alone writes to standard output, the result line goes to PATH} -constraints {nativeLinux nativeBuilt} -setup {
     set nirPath [makeFile [native::nir [surface::readProgramFile [file join $::projectRoot examples io hello.bot] -warnings off]] native-output-hello.nir]

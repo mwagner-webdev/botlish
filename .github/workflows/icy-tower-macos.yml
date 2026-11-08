@@ -48,7 +48,12 @@ name: icy-tower (macos arm64)
 #
 # The release path is the release and publish jobs, for a tag
 # icy-tower-macos-vX.Y.Z of main's history only (pushed, or a manual run on
-# it): the release job, in the protected environment macos-release (the only
+# it), and only once every test of the tagged commit is green (the tested
+# job, CI-RUNS.md: tests.yml with its GC-stress job, tests-arm64.yml with
+# its, macOS, Windows, static-decisions when it ran). A tag run made before
+# they are is deferred -- its other jobs skip -- and the release gate
+# (release-gate.yml) runs the workflow on the tag again once they are. The
+# release job, in the protected environment macos-release (the only
 # holder of the Developer ID identity and the notarization key), builds the
 # bundle from the executable this run's game job built and tested (its
 # SHA-256 checked), validates the credentials locally and with Apple, signs
@@ -62,7 +67,8 @@ name: icy-tower (macos arm64)
 # Pushes to any branch run it, as the Windows game's workflow does; a pull
 # request from this repository's own branches skips (its push already ran),
 # one from a fork runs. Documentation-only pushes skip. A newer push to the
-# same branch cancels a running one, except on main.
+# same branch cancels a running one, on main too; a tag's run is never
+# cancelled.
 
 on:
   push:
@@ -98,16 +104,54 @@ permissions:
 
 concurrency:
   group: icy-tower-macos-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/') }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
 defaults:
   run:
     shell: bash
 
 jobs:
+  # A release waits for its commit's tests (CI-RUNS.md, "The release gate"):
+  # on a release tag this job runs first, and the game job -- so the
+  # release and publish jobs -- runs only when it finds every test of the
+  # tagged commit green. Otherwise the run is deferred: it says so here and
+  # skips the rest, and the release gate dispatches the workflow on the tag
+  # again once the tests are green. Elsewhere it is skipped. It reads runs
+  # only: no credential, no write.
+  tested:
+    name: the release commit's tests are green
+    if: >-
+      startsWith(github.ref, 'refs/tags/icy-tower-macos-v')
+      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      green: ${{ steps.check.outputs.green }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          sparse-checkout: tools/ci
+
+      - name: The tagged commit's tests
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 -I tools/ci/runs.py check "$GITHUB_SHA" --for icy-tower-macos
+          if ! grep -qx 'green=true' "$GITHUB_OUTPUT"; then
+            echo "::notice::the release of $GITHUB_REF_NAME is deferred: the tests of $GITHUB_SHA are not green yet (the summary lists them); the release gate runs this workflow on the tag again once they are"
+          fi
+
   game:
     name: icy-tower (Botlish.app, static SDL3, Cocoa; macOS arm64)
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    needs: tested
+    if: >-
+      !cancelled() && (needs.tested.result == 'skipped' || needs.tested.outputs.green == 'true')
+      && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository)
     runs-on: macos-15
     timeout-minutes: 180
     outputs:
@@ -273,6 +317,7 @@ jobs:
           b=$("$workspace.hidden/out/icy-tower-macos-aarch64/icy-tower" --headless --frames 600 --seed 7)
           echo "relocated: $a"
           [ "$a" = "$b" ]
+          case $a in frames=600\ *) ;; *) echo "::error::no summary line: $a"; exit 1 ;; esac
           codesign --verify --deep --strict "$APP"
 
       - name: The executable's tests (tests/workload-icy-tower.test, macOS section)
@@ -473,8 +518,15 @@ jobs:
           rm -rf "$dry"
           "$PY" -I audit/macos-release/tools/fixtures.py dry-run "$dry"
           set -a; . "$dry/env"; set +a
-          mkdir -p "$dry/app"
-          ditto "$APPDIR" "$dry/app/Icy Tower.app"
+          # the bundle assembled as the release job assembles its own: the
+          # tested executable with the environment's MACOS_BUNDLE_ID (the dry
+          # run's), so the signature names the identifier the stages check
+          # (a copy of the CI bundle, org.botlish.examples.icy-tower.ci, was
+          # refused the first time a runner's codesign signed: run
+          # 42377791764, ICY-TOWER-MACOS-APP-MILESTONE-1.md, section 25)
+          examples/games/icy-tower/package-macos.sh "$EXE" "$dry/app" --bundle-id "$MACOS_BUNDLE_ID" \
+            --version 0.0.0 --build 0.0.0 --sdl3-license "$SDLSRC/LICENSE.txt" >"$dry/package.log" 2>&1 \
+            || { cat "$dry/package.log"; echo "::error::the dry run's bundle was not assembled"; exit 1; }
           rel() { "$PY" -I examples/games/icy-tower/macos/release.py "$@"; }
           bounded() { perl -e '$t = shift; alarm $t; exec @ARGV or die "$ARGV[0]: $!\n"' 120 "$@"; }
           w="$dry/work"
@@ -738,10 +790,11 @@ jobs:
   # to run unless the ones before it passed.
   release:
     name: release (Developer ID, notarization, Gatekeeper)
-    needs: game
+    needs: [game, tested]
     if: >-
       always() && needs.game.result == 'success'
       && startsWith(github.ref, 'refs/tags/icy-tower-macos-v')
+      && needs.tested.outputs.green == 'true'
       && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: macos-15
     timeout-minutes: 240

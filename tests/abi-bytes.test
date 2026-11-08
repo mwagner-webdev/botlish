@@ -449,18 +449,25 @@ fn out(fd: int, data: std::abi::bytes::Bytes) -> int errors std::abi::AbiInteger
     std::linux::write(std::abi::i32(fd), data)
 }
 
-# {STDOUT FILE3 FILE4} of one run of EXECUTABLE with descriptor 3 (and 4)
-# redirected to scratch files; STDOUT is the program's result line (trimmed).
+# {VALUE FILE3 FILE4} of one run of EXECUTABLE with descriptor 3 (and 4)
+# redirected to scratch files; VALUE is the program's value, which the run
+# reports through the driver protocol (BOTLISH_NATIVE_RESULT, ProtocolValue):
+# an executable prints no value of its own (PROGRAM-OUTPUT-MILESTONE-1.md).
+# These programs write nothing to descriptor 1: anything there is an error.
 proc runExecutable {executable {gcStress 0}} {
     set f3 [file join $::outputDir fd3.[incr ::runCounter]]
     set f4 [file join $::outputDir fd4.$::runCounter]
+    set result [file join $::outputDir result.$::runCounter]
     set command [list sh -c {exec "$0" 3>"$1" 4>"$2"} $executable $f3 $f4]
+    set environment [list BOTLISH_NATIVE_RESULT $result]
     if {$gcStress} {
-        set stdout [withEnv BOTLISH_NATIVE_GC_STRESS 1 {exec {*}$command}]
-    } else {
-        set stdout [exec {*}$command]
+        lappend environment BOTLISH_NATIVE_GC_STRESS 1
     }
-    return [list $stdout [readBinary $f3] [readBinary $f4]]
+    set stdout [withEnvironment $environment {exec {*}$command}]
+    if {$stdout ne ""} {
+        error "the executable wrote to its standard output: $stdout"
+    }
+    return [list [ProtocolValue $result] [readBinary $f3] [readBinary $f4]]
 }
 set runCounter 0
 
@@ -478,14 +485,14 @@ proc utf8 {text} {
     return [encoding convertto utf-8 $text]
 }
 
-test abi-bytes-example-writes-hello-to-stdout {examples/linux/write.bot: the standalone executable writes exactly "Hello from Botlish!\n" to descriptor 1 through the raw syscall path; the executable's own result line (the 20 bytes written) follows it} -constraints {nativeLinux} -body {
+test abi-bytes-example-writes-hello-to-stdout {examples/linux/write.bot: the standalone executable writes exactly "Hello from Botlish!\n" to descriptor 1 through the raw syscall path, and nothing after it (an executable never prints its value); its value, the 20 bytes written, is read through the driver protocol} -constraints {nativeLinux} -body {
     set path [file join $::executableDir example]
     native::executable [surface::readProgramFile [file join $::projectRoot examples linux write.bot]] $path
     set channel [open |[list $path] rb]
     set output [read $channel]
     close $channel
-    set output
-} -result "Hello from Botlish!\n20\n"
+    list $output [standaloneValue $path]
+} -result [list "Hello from Botlish!\n" 20]
 
 test abi-bytes-example-file-on-every-backend {the example file's value is 20 on both native backends and NATIVE-ONLY on the Tcl backends (the syscall is never imitated)} -constraints {nativeLinux} -body {
     set hir [surface::readProgramFile [file join $::projectRoot examples linux write.bot]]
@@ -494,14 +501,14 @@ test abi-bytes-example-file-on-every-backend {the example file's value is 20 on 
 
 test abi-bytes-write-returns-the-count-and-the-bytes-arrive {a small write (static storage) and a dynamic one (heap storage) both go through the same wrapper and syscall: the kernel's result is the byte count, and descriptor 3 holds exactly the bytes} -constraints {nativeLinux posixShell} -body {
     set exe [buildExecutable basic "${::linuxPrelude}\nstatic = std::abi::bytes::from_list(std::str::encode_utf8(\"hello\\n\"))\ndynamic = mk(\"world\\n\")\n\[out(3, static), out(3, dynamic)\]"]
-    lassign [runExecutable $exe] stdout f3 f4
-    list $stdout $f3 [string length $f4]
+    lassign [runExecutable $exe] value f3 f4
+    list $value $f3 [string length $f4]
 } -result "{\[6, 6\]} {hello\nworld\n} 0"
 
 test abi-bytes-empty-write {std::linux::write of the empty Bytes performs the syscall with a zero count and returns 0, writing nothing -- whether the empty Bytes was built statically or dynamically, without relying on what address a zero-length payload has} -constraints {nativeLinux posixShell} -body {
     set exe [buildExecutable empty "${::linuxPrelude}\nstatic = std::abi::bytes::from_list(\[\])\ndynamic = mk(\"\")\n\[out(3, static), out(3, dynamic), out(4, static)\]"]
-    lassign [runExecutable $exe] stdout f3 f4
-    list $stdout [string length $f3] [string length $f4]
+    lassign [runExecutable $exe] value f3 f4
+    list $value [string length $f3] [string length $f4]
 } -result {{[0, 0, 0]} 0 0}
 
 test abi-bytes-empty-write-to-an-invalid-descriptor-is-still-the-syscall {a zero-length write to a bad descriptor is EBADF (-9): the descriptor is checked by the kernel even with a zero count, proving the empty write is a real syscall} -constraints {nativeLinux posixShell} -body {
@@ -511,32 +518,32 @@ test abi-bytes-empty-write-to-an-invalid-descriptor-is-still-the-syscall {a zero
 
 test abi-bytes-embedded-nul {a payload 41 00 42 is three bytes, not a C string: the kernel receives A, NUL, B -- from static storage and from heap storage alike, with the NUL at the start, in the middle and at the end} -constraints {nativeLinux posixShell} -body {
     set exe [buildExecutable nul "${::linuxPrelude}\nfn nul3(m: Byte):\n    std::abi::bytes::from_list(\[std::byte::from_int(65), m, std::byte::from_int(66)\])\nfn edges(z: Byte):\n    std::abi::bytes::from_list(\[z, std::byte::from_int(67), z\])\nzero = std::byte::from_int(0)\n\[out(3, std::abi::bytes::from_list(\[std::byte::from_int(65), std::byte::from_int(0), std::byte::from_int(66)\])), out(3, nul3(zero)), out(4, edges(zero)), out(4, std::abi::bytes::from_list(\[std::byte::from_int(0)\])), std::abi::bytes::length(nul3(zero)).value\]"]
-    lassign [runExecutable $exe] stdout f3 f4
-    list $stdout [binary encode hex $f3] [binary encode hex $f4]
+    lassign [runExecutable $exe] value f3 f4
+    list $value [binary encode hex $f3] [binary encode hex $f4]
 } -result {{[3, 3, 3, 1, 3]} 410042410042 00430000}
 
 test abi-bytes-utf8-write {a String with multi-byte scalars written through the existing encoder: the result is the encoded byte count (not the scalar count) and the kernel receives exactly the encoded bytes} -constraints {nativeLinux posixShell} -body {
     set text "héllo ☃ \U0001f600\n"
     set exe [buildExecutable utf8 "${::linuxPrelude}\ns = \"héllo ☃ \U0001f600\\n\"\n\[std::str::length(s), out(3, mk(s)), out(4, std::abi::bytes::from_list(std::str::encode_utf8(\"héllo ☃ \U0001f600\\n\")))\]"]
-    lassign [runExecutable $exe] stdout f3 f4
-    list $stdout [string length $text] [string length [utf8 $text]] [expr {$f3 eq [utf8 $text]}] [expr {$f4 eq [utf8 $text]}]
+    lassign [runExecutable $exe] value f3 f4
+    list $value [string length $text] [string length [utf8 $text]] [expr {$f3 eq [utf8 $text]}] [expr {$f4 eq [utf8 $text]}]
 } -result {{[10, 16, 16]} 10 16 1 1}
 
 test abi-bytes-large-heap-write {a heap-backed payload of 81920 bytes (1-, 2-, 3- and 4-byte UTF-8 scalars repeated 8192 times, built dynamically: a storage of header + 81920 bytes) written to a file: the result is 81920 and every byte arrives} -constraints {nativeLinux posixShell} -body {
     set seed "A\u00e9\u2603\U0001f600"
     set exe [buildExecutable large "${::linuxPrelude}\nbig = std::abi::bytes::from_list(std::str::encode_utf8(doubled(\"$seed\", 13)))\n\[std::abi::bytes::length(big).value, out(3, big)\]"]
-    lassign [runExecutable $exe] stdout f3 f4
-    list $stdout [expr {$f3 eq [string repeat [utf8 $seed] 8192]}] [string length $f3]
+    lassign [runExecutable $exe] value f3 f4
+    list $value [expr {$f3 eq [string repeat [utf8 $seed] 8192]}] [string length $f3]
 } -result {{[81920, 81920]} 1 81920}
 
 test abi-bytes-every-byte-value-heap-write {a dynamically built payload holding every byte value 0..255 (and then again, 3000 bytes) is a heap storage whose every byte arrives exactly: no value is truncated, signed, or treated as a terminator} -constraints {nativeLinux posixShell} -body {
     set exe [buildExecutable allvalues "${::linuxPrelude}\n\[out(3, std::abi::bytes::from_list(pattern(3000))), out(4, std::abi::bytes::from_list(pattern(256)))\]"]
-    lassign [runExecutable $exe] stdout f3 f4
+    lassign [runExecutable $exe] value f3 f4
     set expected3 {}
     for {set i 0} {$i < 3000} {incr i} { lappend expected3 [expr {$i % 256}] }
     set expected4 {}
     for {set i 0} {$i < 256} {incr i} { lappend expected4 $i }
-    list $stdout [expr {$f3 eq [binary format c* $expected3]}] [expr {$f4 eq [binary format c* $expected4]}]
+    list $value [expr {$f3 eq [binary format c* $expected3]}] [expr {$f4 eq [binary format c* $expected4]}]
 } -result {{[3000, 256]} 1 1}
 
 test abi-bytes-write-to-a-pipe {the same write to a real pipe (descriptor 3 is the read end Tcl holds): the large payload exceeds the pipe's buffer, so the kernel returns only when the reader has taken it all, and the reader receives every byte} -constraints {nativeLinux posixShell} -body {
@@ -550,14 +557,14 @@ test abi-bytes-write-to-a-pipe {the same write to a real pipe (descriptor 3 is t
 
 test abi-bytes-repeated-writes-of-one-value {one Bytes written again and again: producing a raw call pointer neither consumes nor invalidates the value (it is not a resource), so every write sees identical contents, from a static and a heap storage} -constraints {nativeLinux posixShell} -body {
     set exe [buildExecutable repeated "${::linuxPrelude}\nstatic = std::abi::bytes::from_list(std::str::encode_utf8(\"static\\n\"))\ndynamic = mk(\"dynamic\\n\")\nrs = \[out(3, static), out(3, static), out(3, dynamic), out(3, dynamic), out(3, dynamic), out(3, static)\]\nrs"]
-    lassign [runExecutable $exe] stdout f3 f4
-    list $stdout $f3
+    lassign [runExecutable $exe] value f3 f4
+    list $value $f3
 } -result "{\[7, 7, 8, 8, 8, 7\]} {static\nstatic\ndynamic\ndynamic\ndynamic\nstatic\n}"
 
 test abi-bytes-aliased-writes {a = std::abi::bytes::from_list(...); b = a: writing a and b writes the identical bytes (the physical representation may be shared or copied, and cannot be told apart), also through a List of aliases and a closure over the value} -constraints {nativeLinux posixShell} -body {
     set exe [buildExecutable alias "${::linuxPrelude}\na = mk(\"shared\\n\")\nb = a\nxs = \[a, b, a\]\nfn emit() -> int:\n    out(4, b)\nr1 = out(3, a)\nr2 = out(3, b)\nr3 = loop x in xs:\n    out(3, x)\nr4 = emit()\n\[r1, r2, r3, r4\]"]
-    lassign [runExecutable $exe] stdout f3 f4
-    list $stdout $f3 $f4
+    lassign [runExecutable $exe] value f3 f4
+    list $value $f3 $f4
 } -result "{\[7, 7, \[7, 7, 7\], 7\]} {shared\nshared\nshared\nshared\nshared\n} {shared\n}"
 
 test abi-bytes-write-error-is-the-raw-negative-result {a write the kernel refuses returns its raw negative -errno as an ordinary Int, preserved exactly (never reread as unsigned): an invalid descriptor is EBADF (-9) on Linux, for a static, a heap and an empty payload alike; a closed descriptor too} -constraints {nativeLinux posixShell} -body {
@@ -578,18 +585,21 @@ r3 = out(3, b)
 \[r0, r1, r2, r3\]"
     set exe [buildExecutable shortwrite $program]
     set resultFile [file join $::outputDir shortwrite.result]
-    set channel [open |[list sh -c {exec "$0" 3>&1 1>"$1"} $exe $resultFile] rb]
+    file delete $resultFile
+    set channel [open |[list env BOTLISH_NATIVE_RESULT=$resultFile sh -c {exec "$0" 3>&1 1>/dev/null} $exe] rb]
     # Nothing may read the pipe until the program has finished (its last act is
-    # printing the result list to descriptor 1): a reader draining it while the
-    # program writes would leave room for the whole second payload and the
-    # premise -- a pipe the kernel can only partly fill -- would be a race.
+    # writing its result line, which ends in a newline, to the driver
+    # protocol's result file: an executable prints no value of its own): a
+    # reader draining it while the program writes would leave room for the
+    # whole second payload and the premise -- a pipe the kernel can only
+    # partly fill -- would be a race.
     for {set waited 0} {$waited < 3000} {incr waited} {
-        if {[file exists $resultFile] && [regexp {\]\s*$} [readBinary $resultFile]]} break
+        if {[file exists $resultFile] && [string index [readBinary $resultFile] end] eq "\n"} break
         after 10
     }
     set data [read $channel]
     close $channel
-    set result [string trim [readBinary $resultFile]]
+    set result [ProtocolValue $resultFile]
     regexp {^\[0, 40960, ([0-9]+), (-?[0-9]+)\]$} $result -> short again
     set first [string repeat 0123456789 4096]
     set second [string repeat abcdefghij 8192]
@@ -718,7 +728,7 @@ dict for {shape body} $livenessShapes {
     test abi-bytes-liveness-$shape "a Bytes only the raw address refers to survives until the syscall returns, address reaching the syscall by the \"$shape\" route, even though a register word evaluated after the address allocates a same-sized Bytes (a collection at every allocation): the kernel receives the first storage's 2048 A bytes, 30 times, and the NIR keeps the storage alive after the syscall" -constraints {linuxX86_64 posixShell} -body [string map [list @SHAPE@ $shape] {
         set text "$::livenessHeader[dict get $::livenessShapes @SHAPE@]$::livenessFooter"
         set exe [buildExecutable liveness-@SHAPE@ $text]
-        lassign [runExecutable $exe 1] stdout f3 f4
+        lassign [runExecutable $exe 1] value f3 f4
         set nir [native::nir [bytesHir $text]]
         list [expr {$f3 eq [string repeat A 61440]}] [string length $f3] [expr {[regexp -all {op keepalive} [nirFunction $nir w]] >= 1}]
     }] -result {1 61440 1}
@@ -727,8 +737,8 @@ dict for {shape body} $livenessShapes {
 test abi-bytes-liveness-join-else-branch {the `if` route's other branch (no Bytes: a null address register word) still runs correctly -- the storage register is defined on only one path, and the keepalive after the join is then a use of the zero a conditionally defined register has -- and the kernel reports EFAULT for a null buffer with a nonzero count} -constraints {linuxX86_64 posixShell} -body {
     set text "$::livenessHeader[dict get $::livenessShapes join]\nrs = \[w(std::abi::i32(3), \"\", \"B\"), w(std::abi::i32(3), \"A\", \"B\")\]\nrs"
     set exe [buildExecutable liveness-join-else $text]
-    lassign [runExecutable $exe 1] stdout f3 f4
-    list $stdout $f3
+    lassign [runExecutable $exe 1] value f3 f4
+    list $value $f3
 } -result {{[-14, 1]} A}
 
 test abi-bytes-liveness-mutant-without-keepalive-is-detected {the inline program with the keepalive deleted from its NIR reads a reclaimed (and reused) buffer under GC stress: this test fails the mutant, so the liveness theorem is actually exercised} -constraints {linuxX86_64 posixShell} -body {
@@ -739,7 +749,7 @@ test abi-bytes-liveness-mutant-without-keepalive-is-detected {the inline program
     }] \n]
     set path [file join $::executableDir liveness-mutant]
     native::Driver executable $mutant $path
-    lassign [runExecutable $path 1] stdout f3 f4
+    lassign [runExecutable $path 1] value f3 f4
     list [expr {[regexp -all {op keepalive} $nir] > 0}] [expr {$f3 ne [string repeat A 61440]}] [string length $f3]
 } -result {1 1 61440}
 
@@ -953,13 +963,13 @@ proc straceOf {exe args} {
 }
 set straceCounter 0
 
-test abi-bytes-kernel-sees-the-write {strace of the standalone example: the kernel receives write(1, "Hello from Botlish!\n", 20) -- fd 1 in rdi, the payload's actual bytes at rsi, the exact count 20 in rdx -- issued from the raw boundary function botlish_linux_x86_64_syscall, called by the runtime helper, called by the Botlish function, with NO libc frame (no __write) in that call's stack; the only libc write in the process is the runner's own later "20" result line} -constraints {linuxX86_64 strace posixShell symbolLinker} -body {
+test abi-bytes-kernel-sees-the-write {strace of the standalone example: the kernel receives write(1, "Hello from Botlish!\n", 20) -- fd 1 in rdi, the payload's actual bytes at rsi, the exact count 20 in rdx -- issued from the raw boundary function botlish_linux_x86_64_syscall, called by the runtime helper, called by the Botlish function, with NO libc frame (no __write) in that call's stack; it is the only write to descriptor 1 (an executable never prints its value), and run under the driver protocol the process's only libc writes are the protocol's own, of its "value {int 20}" result line to its result file, whose stack holds __write (the detector sees a libc write)} -constraints {linuxX86_64 strace posixShell symbolLinker} -body {
     set exe [file join $::executableDir example]
     if {![file exists $exe]} {
         native::executable [surface::readProgramFile [file join $::projectRoot examples linux write.bot]] $exe
     }
     set log [file join $::outputDir strace.example]
-    exec strace -f -qq -k -e trace=write -o $log $exe >/dev/null 2>@1
+    exec env BOTLISH_NATIVE_RESULT=[file join $::outputDir strace.example.result] strace -f -qq -k -e trace=write -o $log $exe >/dev/null 2>@1
     set text [readBinary $log]
     # One syscall record per "write(" line, its stack the following " > " lines.
     set records {}
@@ -976,12 +986,12 @@ test abi-bytes-kernel-sees-the-write {strace of the standalone example: the kern
     if {$current ne ""} { lappend records $current }
     set ours [lsearch -inline -exact -index 0 $records {write(1, "Hello from Botlish!\n", 20) = 20}]
     set stack [join [lrange $ours 1 end] \n]
-    set runner [lsearch -inline -exact -index 0 $records {write(1, "20\n", 3) = 3}]
+    set protocol [lsearch -inline -regexp -index 0 $records {^write\([0-9]+, "value \{int 20\}"}]
     list [lindex $ours 0] \
         [regexp {botlish_linux_x86_64_syscall} $stack] [regexp {rt_linux_x86_64_syscall} $stack] \
         [regexp {botlish_fn_[0-9]+} $stack] [regexp {__write|libc\.so\.6\(write} $stack] \
-        [regexp {__write} [join [lrange $runner 1 end] \n]] [llength $records]
-} -result {{write(1, "Hello from Botlish!\n", 20) = 20} 1 1 1 0 1 2}
+        [regexp {__write} [join [lrange $protocol 1 end] \n]] [llength [lsearch -all -regexp -index 0 $records {^write\(1, }]]
+} -result {{write(1, "Hello from Botlish!\n", 20) = 20} 1 1 1 0 1 1}
 
 test abi-bytes-kernel-sees-the-nul-payload {strace of a write of 41 00 42: the kernel receives three bytes "A\0B" (NUL included, count 3), not a C string cut at the NUL -- the registers carry exactly the payload's address and count} -constraints {nativeLinux strace posixShell} -body {
     set exe [buildExecutable nulstrace "${::linuxPrelude}\nfn nul3(m: Byte):\n    std::abi::bytes::from_list(\[std::byte::from_int(65), m, std::byte::from_int(66)\])\nout(3, nul3(std::byte::from_int(0)))"]

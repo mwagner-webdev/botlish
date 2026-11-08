@@ -146,6 +146,7 @@ namespace eval native::lower {
         argv         {op argv} \
         std::list::length {op listlen} \
         std::tree::children {op treechildren} \
+        std::actor::recover {same} \
         std::list::at     {op listget} \
         std::list::append {op listappend} \
         std::list::flat   {op listflat} \
@@ -236,7 +237,9 @@ namespace eval native::lower {
         mutable_vector#to_list    {op mvtolist} \
         mutable_vector#take_front {op mvtakefront} \
         mutable_vector#clear_drop {op mvcleardrop} \
-        mutable_vector#swap_drop  {op mvswapdrop}]
+        mutable_vector#swap_drop  {op mvswapdrop} \
+        transfer#encode {op transferencode} \
+        transfer#decode {op transferdecode}]
     # The floating-point operations (core/float.tcl; FLOAT64-MILESTONE-1.md):
     # every type of the float family the native backend represents, its
     # operation prefix (FloatNatives) followed by the operation.
@@ -259,6 +262,14 @@ namespace eval native::lower {
     } {
         dict set natives $name [list op $op]
     }
+    # Botlish-owned threads and the cross-thread transport (core/thread.tcl,
+    # BOTLISH-OWNED-THREADS-AND-CROSS-THREAD-ACTORS-MILESTONE-1.md): one op
+    # family, `threadop CODE ...` (runtime/thread.rs), and the entry
+    # constant.
+    dict for {name spec} [core::thread::operations] {
+        dict set natives std::thread::$name [list threadop [lindex $spec 0]]
+    }
+    dict set natives std::thread::entry threadentry
     # The borrow test fixture's synthetic foreign operations (core/cabi.tcl's
     # installBorrowFixture; runtime/ffifixture.rs), one op per behavior.
     foreach {name behavior} [core::cabi::borrowFixture] {
@@ -283,6 +294,10 @@ namespace eval native::lower {
     variable captureLists {}
     variable pending {}
     variable usedNatives {}
+    # The program's thread entries (hir::threads::of) and each one's block ->
+    # {INDEX NAME}, INDEX 1-based (ThreadDispatch).
+    variable threadRecords {}
+    variable threadIndex [dict create]
     # NAME -> 1: the payload-bearing builtin errors (core::native::
     # declareErrorPayload: NonFiniteFloat) the native runtime itself may raise
     # in this program (RuntimeRaises). The runtime builds such a payload from
@@ -1546,13 +1561,27 @@ proc native::lower::Program {hirProgram args} {
         throw {NATIVE BUG} "native lowering: unknown fault \"$fault\" (the one fault injection is eager-foreign-result)"
     }
     set leafEligible [dict create]
+    # The program's thread entries (ThreadDispatch): each one's generic
+    # instance is a root, as an export's or a callback's.
+    variable threadRecords
+    variable threadIndex
+    set threadRecords [hir::threads::of $hirProgram]
+    set threadIndex [dict create]
+    set k 0
+    foreach record $threadRecords {
+        incr k
+        dict set threadIndex [dict get $record block] [list $k [dict get $record name]]
+    }
     set spec [hir::specialize::analyze $hirProgram -specialize [dict get $options -specialize] \
         -call-facts-opt [dict get $options -call-facts-opt] \
         -closed-caller-facts-opt [dict get $options -closed-caller-facts-opt] \
         -exact-callable-opt [dict get $options -exact-callable-opt] \
         -exact-callable-limit [dict get $options -exact-callable-limit] \
         -exports [concat [lmap export [dict get $options -exports] {dict get $export block}] \
-            [lmap callback [hir::callbacks::of $hirProgram] {dict get $callback block}]]]
+            [CleanupBlocks $hirProgram] \
+            [lmap callback [hir::callbacks::of $hirProgram] {dict get $callback block}] \
+            [lmap record $threadRecords {dict get $record block}] \
+            [ThreadOwnerBlocks $hirProgram $threadRecords]]]
     hir::specialize::memoizeViews $hirProgram $spec
     set ranges [hir::range::analyze $hirProgram $spec [dict get $options -call-facts-opt] 1 1 \
         [dict get $options -recursive-result-range-opt] [dict get $options -recursive-range-limit]]
@@ -2456,7 +2485,7 @@ proc native::lower::Function {id} {
         set scope [hir::top $hir]
         set body [hir::roots $hir]
     } else {
-        set name [hir::aot::BlockName $hir $region]
+        set name [dict getdef $context names $region ""]
         set params [hir::get $hir $region params]
         set env [expr {$region ni $envless}]
         set scope [hir::get $hir $region bodyScope]
@@ -2512,6 +2541,9 @@ proc native::lower::Function {id} {
     } else {
         set contextProblem ""
     }
+    if {$region eq "program" && $contextProblem eq ""} {
+        CleanupTable fn
+    }
     if {$contextProblem ne ""} {
         # A -strict 0 program that failed context verification (CONTEXTS.md):
         # its first context diagnostic is the run's failure; no code whose
@@ -2519,6 +2551,30 @@ proc native::lower::Function {id} {
         lassign $contextProblem kind message
         Emit fn "raise $kind [Quote $message]"
         set result never
+    } elseif {$region eq "program" && [ThreadEntryRoots $body] ne ""} {
+        # A program with thread entries: its module sections, the thread
+        # dispatch, then the entry program's own statements (ThreadDispatch).
+        lassign [ThreadEntryRoots $body] modules own
+        set result ""
+        foreach e $modules {
+            set result [Expr fn $e]
+            if {$result eq "never"} {
+                break
+            }
+            ReleaseHandles fn [hir::affine::releasesAfter $hir $e] $e $result
+        }
+        if {$result ne "never"} {
+            ThreadDispatch fn
+            if {$own eq {}} {
+                set result [Assign fn unit]
+            } elseif {[ResultRaw fn]} {
+                set result [SequenceRaw fn $own]
+            } elseif {[ResultShort fn] ne ""} {
+                set result [SequenceShort fn $own [ResultShort fn]]
+            } else {
+                set result [SequenceTo fn $own [PlanResultFamily fn]]
+            }
+        }
     } elseif {[ResultRaw fn]} {
         set result [SequenceRaw fn $body]
     } elseif {[ResultShort fn] ne ""} {
@@ -2624,7 +2680,7 @@ proc native::lower::CompanionFunction {id} {
         rawCache [dict create] rawRegs [dict create] rawUnboxes 0 rawBoxes 0 rawArith 0 rawCompare 0 \
         locals [dict create] loops [dict create] broken [dict create] continued [dict create] calls {} companion $arity regionCompanion 0 \
         traversal "" traversalByteReg ""]
-    set name [hir::aot::BlockName $hir $region]
+    set name [dict getdef $context names $region ""]
     set params [hir::get $hir $region params]
     set env [expr {$region ni $envless}]
     set scope [hir::get $hir $region bodyScope]
@@ -2720,7 +2776,7 @@ proc native::lower::RegionCompanionFunction {id} {
         rawCache [dict create] rawRegs [dict create] rawUnboxes 0 rawBoxes 0 rawArith 0 rawCompare 0 \
         locals [dict create] loops [dict create] broken [dict create] continued [dict create] calls {} companion "" regionCompanion 1 \
         traversal "" traversalByteReg ""]
-    set name [hir::aot::BlockName $hir $region]
+    set name [dict getdef $context names $region ""]
     set params [hir::get $hir $region params]
     set env [expr {$region ni $envless}]
     set scope [hir::get $hir $region bodyScope]
@@ -2833,7 +2889,7 @@ proc native::lower::InternalFunction {id} {
         rawCache [dict create] rawRegs [dict create] rawUnboxes 0 rawBoxes 0 rawArith 0 rawCompare 0 \
         locals [dict create] loops [dict create] broken [dict create] continued [dict create] calls {} companion "" regionCompanion 0 \
         traversal "" traversalByteReg ""]
-    set name [hir::aot::BlockName $hir $region]
+    set name [dict getdef $context names $region ""]
     set params [hir::get $hir $region params]
     set scope [hir::get $hir $region bodyScope]
     set body [hir::get $hir $region body]
@@ -2958,7 +3014,7 @@ proc native::lower::InternalRegionCompanionFunction {id} {
         rawCache [dict create] rawRegs [dict create] rawUnboxes 0 rawBoxes 0 rawArith 0 rawCompare 0 \
         locals [dict create] loops [dict create] broken [dict create] continued [dict create] calls {} companion "" regionCompanion 1 \
         traversal "" traversalByteReg ""]
-    set name [hir::aot::BlockName $hir $region]
+    set name [dict getdef $context names $region ""]
     set params [hir::get $hir $region params]
     set scope [hir::get $hir $region bodyScope]
     set body [hir::get $hir $region body]
@@ -3062,7 +3118,7 @@ proc native::lower::InternalCompanionFunction {id} {
         rawCache [dict create] rawRegs [dict create] rawUnboxes 0 rawBoxes 0 rawArith 0 rawCompare 0 \
         locals [dict create] loops [dict create] broken [dict create] continued [dict create] calls {} companion $arity regionCompanion 0 \
         traversal "" traversalByteReg ""]
-    set name [hir::aot::BlockName $hir $region]
+    set name [dict getdef $context names $region ""]
     set params [hir::get $hir $region params]
     set body [hir::get $hir $region body]
     set rawParams [RawParams $id $instance $params]
@@ -3199,7 +3255,7 @@ proc native::lower::FieldsFunction {id} {
         rawCache [dict create] rawRegs [dict create] rawUnboxes 0 rawBoxes 0 rawArith 0 rawCompare 0 \
         locals [dict create] loops [dict create] broken [dict create] continued [dict create] calls {} companion "" regionCompanion 0 \
         traversal "" traversalByteReg ""]
-    set name [hir::aot::BlockName $hir $region]
+    set name [dict getdef $context names $region ""]
     set params [hir::get $hir $region params]
     set env [expr {$region ni $envless}]
     set scope [hir::get $hir $region bodyScope]
@@ -3273,7 +3329,7 @@ proc native::lower::FieldsCompanionFunction {id} {
         rawCache [dict create] rawRegs [dict create] rawUnboxes 0 rawBoxes 0 rawArith 0 rawCompare 0 \
         locals [dict create] loops [dict create] broken [dict create] continued [dict create] calls {} companion $arity regionCompanion 0 \
         traversal "" traversalByteReg ""]
-    set name [hir::aot::BlockName $hir $region]
+    set name [dict getdef $context names $region ""]
     set params [hir::get $hir $region params]
     set env [expr {$region ni $envless}]
     set scope [hir::get $hir $region bodyScope]
@@ -3707,13 +3763,22 @@ proc native::lower::ReleaseHandles {fnVar items e {result ""}} {
     foreach item $items {
         set plan [hir::affine::DropPlan $hir $item]
         if {$plan eq ""} continue
-        if {[lindex $plan 0] eq "coroutine"} {
-            set descriptor "c"
-        } else {
-            set descriptor [lindex $plan 1]
+        switch -- [lindex $plan 0] {
+            coroutine { set descriptor "c" }
+            abandon { set descriptor "C" }
+            cleanup {
+                set descriptor "r[hir::affine::CleanupIndex $hir [lindex $plan 1]]."
+            }
+            default { set descriptor [lindex $plan 1] }
         }
         if {[string match b* $item]} {
             set access [Access fn $item]
+            if {[lindex $plan 0] eq "cleanup" && [lindex $access 0] eq "virtual"} {
+                # A resource the escape analysis kept in registers: its
+                # cleanup takes the value itself (LEXICAL-RESOURCE-CLEANUP-
+                # EXPLORATION-MILESTONE-1.md).
+                set access [list reg [MaterializeVirtual fn $item $e]]
+            }
         } elseif {$item eq $e && [hir::kind $hir $e] eq "struct"
                 || ($item eq $e && [hir::affine::NativeName $hir $e] eq "list")} {
             # A discarded construction (not built): its components.
@@ -3741,11 +3806,25 @@ proc native::lower::ReleaseHandles {fnVar items e {result ""}} {
 # (hir::affine::Descriptor), at expression E.
 proc native::lower::DropAccess {fnVar access descriptor e} {
     upvar 1 $fnVar fn
+    variable hir
     switch -- [lindex $access 0] {
         reg {
             set where [lindex $access 1]
             if {$descriptor eq "c"} {
                 Assign fn "op corelease $where" $e
+            } elseif {$descriptor eq "C"} {
+                # An unwinding program's coroutine (hir/affine.tcl's
+                # Unwinds): its suspended frames' releases run.
+                Assign fn "op coabandon $where" $e
+            } elseif {[regexp {^r([0-9]+)\.$} $descriptor -> k]} {
+                # A resource (hir/resources.tcl): a call of its cleanup
+                # function, which the program roots (CleanupBlocks).
+                set f [Assign fn "fnvalue [GenericRef [hir::affine::CleanupBlock $hir $k]]" $e]
+                Assign fn "op cleanupcall $f $where" $e
+            } elseif {[regexp {[rC]} $descriptor]} {
+                # A drop that runs code (a cleanup or an abandonment inside).
+                set d [Assign fn "str [Quote $descriptor]" $e]
+                Assign fn "op affinedroprun $where $d" $e
             } else {
                 set d [Assign fn "str [Quote $descriptor]" $e]
                 Assign fn "op affinedrop $where $d" $e
@@ -3754,15 +3833,31 @@ proc native::lower::DropAccess {fnVar access descriptor e} {
         virtual {
             # A virtualized construction (its fields in registers, never
             # materialized): the descriptor applied to its fields directly.
-            set fields [lindex $access 1]
-            set pos 0
+            # A struct's registers are its physical fields, an opened field's
+            # (CUT) contiguous among them: a descriptor slot is a layout
+            # field, found by FieldOffset, and an opened field's part applies
+            # to its own registers, as the virtual value of its own shape
+            # (`Outer {inner: Holder {...}}`, `Box {value: Box {...}}`: the
+            # inner struct's descriptor never reaches its fields' registers).
+            lassign $access - fields shape - - cut
+            set cuts [CutDict $cut]
             foreach {field inner} [DescriptorParts $descriptor] {
                 if {$field eq "*"} {
                     foreach r $fields {
                         DropAccess fn [list reg $r] $inner $e
                     }
-                } else {
+                } elseif {$shape eq ""} {
                     DropAccess fn [list reg [lindex $fields $field]] $inner $e
+                } else {
+                    set name [lindex $shape 1 $field]
+                    set offset [FieldOffset $shape $cut $name]
+                    if {[dict exists $cuts $name]} {
+                        lassign [dict get $cuts $name] sub subcut
+                        set width [hir::escape::CutFields $sub $subcut]
+                        DropAccess fn [list virtual [lrange $fields $offset [expr {$offset + $width - 1}]] $sub "" "" $subcut] $inner $e
+                    } else {
+                        DropAccess fn [list reg [lindex $fields $offset]] $inner $e
+                    }
                 }
             }
         }
@@ -3808,6 +3903,7 @@ proc native::lower::DescriptorSkip {descriptor posVar} {
     set c [string index $descriptor $pos]
     incr pos
     switch -- $c {
+        r { DescriptorNumber $descriptor pos }
         l - v - a { DescriptorSkip $descriptor pos }
         s {
             set n [DescriptorNumber $descriptor pos]
@@ -3816,6 +3912,47 @@ proc native::lower::DescriptorSkip {descriptor posVar} {
                 DescriptorSkip $descriptor pos
             }
         }
+    }
+}
+
+# The cleanup function blocks of HIR (hir/resources.tcl), in cleanup-table
+# order: roots of the program like a C export's (hir::specialize's
+# ProgramValues) -- the compiler calls each from any release point, with
+# any value its declared parameter type admits, whether or not Botlish code
+# calls it -- so each has its open generic instance and a function value.
+proc native::lower::CleanupBlocks {hir} {
+    set blocks {}
+    dict for {id record} [hir::resources::table $hir] {
+        lappend blocks [list [dict get $record index] [dict get $record block]]
+    }
+    return [lmap pair [lsort -integer -index 0 $blocks] {lindex $pair 1}]
+}
+
+# Whether the function being lowered is a resource's cleanup (the open
+# instance of one of CleanupBlocks).
+proc native::lower::InCleanup {} {
+    variable baseHir
+    variable spec
+    variable currentInstance
+    if {![info exists currentInstance] || $currentInstance eq ""} {
+        return 0
+    }
+    set block [dict get [hir::specialize::instance $spec $currentInstance] block]
+    return [expr {$block in [CleanupBlocks $baseHir]}]
+}
+
+# The run's cleanup table (runtime/affine.rs's rt_cleanup_table), installed
+# first thing in the program: what a drop descriptor's `rK` calls from a
+# runtime walk. Nothing for a program without resources.
+proc native::lower::CleanupTable {fnVar} {
+    upvar 1 $fnVar fn
+    variable hir
+    set regs {}
+    foreach block [CleanupBlocks $hir] {
+        lappend regs [Assign fn "fnvalue [GenericRef $block]"]
+    }
+    if {$regs ne {}} {
+        Assign fn "op cleanuptable [join $regs { }]"
     }
 }
 
@@ -4507,9 +4644,9 @@ proc native::lower::Project {fnVar e node {want tagged}} {
 # the simplest one for the common case -- a process installs its contexts at
 # startup, once each -- and is static all the way down:
 #
-#   * one context area per program: a single zero-initialized, 8-byte
-#     aligned, writable, linker-local data object (`botlish_context_area`,
-#     codegen/clif.rs), holding every context slot;
+#   * one context area layout per program, every Vm owning its own storage
+#     of it (runtime::vm's `context_ptr`, zero when the Vm is made:
+#     PER-THREAD-RUNTIME-STATE-MILESTONE-1.md), holding every context slot;
 #   * one slot per context-struct type the program installs, assigned at
 #     compile time in installation (program) order (ContextSlots), at a fixed
 #     byte offset, and laid out flattened: one 64-bit word per scalar leaf of
@@ -4526,11 +4663,12 @@ proc native::lower::Project {fnVar e node {want tagged}} {
 #     it) materializes one, from loads, with `structnew` -- exactly where an
 #     ordinary struct of the same shape would be materialized.
 #
-# Codegen turns OFFSET into the area's fixed address plus a constant
-# displacement: a PC-relative `lea` of the data symbol in the AOT object, an
-# absolute address in the JIT. No context pointer is passed, no register is
-# reserved, nothing is looked up, and there is no presence flag: hir/
-# contexts.tcl proved every load is preceded by its installation.
+# Codegen turns OFFSET into the running Vm's area plus a constant
+# displacement: one read-only load of the base from the Vm argument
+# (codegen/clif.rs's `context_addr`), then the word. No context pointer is
+# passed, no register is reserved, nothing is looked up, and there is no
+# presence flag: hir/contexts.tcl proved every load is preceded by its
+# installation.
 #
 # Eligibility (StaticContextEligible, ContextLeaves): a leaf must be a value
 # whose tagged word is never a heap pointer -- an Int whose declared domain
@@ -4621,7 +4759,16 @@ proc native::lower::ContextSlots {} {
     variable contextBytes
     set contextSlots [dict create]
     set contextBytes 0
-    foreach c [dict get $baseHir roots] {
+    # The entry program's installations, then each thread entry's (one
+    # layout for every VM of the program: a worker's area has the slots of
+    # the contexts every entry installs, its own filled).
+    set installs [dict get $baseHir roots]
+    dict for {t pairs} [dict getdef $baseHir contexts entries {}] {
+        foreach pair $pairs {
+            lappend installs [lindex $pair 0]
+        }
+    }
+    foreach c $installs {
         if {![hir::contexts::isInstall $baseHir $c]} continue
         set id [hir::contexts::installId $baseHir $c]
         if {$id eq "" || [dict exists $contextSlots $id]} continue
@@ -4706,10 +4853,16 @@ proc native::lower::ContextDiagnostic {} {
 # A load (at E) of context ID, which the program never installs: only
 # possible in a program that failed verification (whose program function
 # raises the diagnostic before anything runs, Function), and then unreachable
-# code; anything else is a lowering bug.
+# code, or in a resource's cleanup (CleanupBlocks), which is a root whatever
+# the program releases: every release point is charged the cleanup's
+# context requirement (hir::contexts::ReleaseEdges), so a cleanup whose
+# context no region installs is one no verified code releases, and its
+# load is unreachable too (a module that declares a resource, imported by a
+# program that never makes one: std::event_loop's Owner). Anything else is
+# a lowering bug.
 proc native::lower::UninstalledContext {fnVar e id} {
     upvar 1 $fnVar fn
-    if {[ContextDiagnostic] eq ""} {
+    if {[ContextDiagnostic] eq "" && ![InCleanup]} {
         throw {NATIVE BUG} "native lowering: context load $e of context \"$id\", which the program does not install"
     }
     Emit fn "raise MISSING-CONTEXT [Quote "$id: no context of this type is installed"]" $e
@@ -4723,8 +4876,8 @@ proc native::lower::ContextInstallCall {fnVar e node} {
     upvar 1 $fnVar fn
     variable hir
     variable contextSlots
-    if {[dict get $fn region] ne "program"} {
-        throw {NATIVE BUG} "native lowering: context installation outside the program function ($e)"
+    if {[dict get $fn region] ne "program" && ![hir::threads::isEntry $hir [dict get $fn region]]} {
+        throw {NATIVE BUG} "native lowering: context installation outside the program function and the thread entries ($e)"
     }
     set id [hir::contexts::installId $hir $e]
     if {$id eq "" || ![dict exists $contextSlots $id]} {
@@ -8687,7 +8840,18 @@ proc native::lower::CallInner {fnVar e node want {wantVirtual ""} {wantRegion 0}
             }
         }
         set argRegs {}
+        set position 0
         foreach arg $argExprs {
+            if {$position == 1 && $op in {transferencode transferdecode}} {
+                # A transfer's schema (core/transfer.tcl): the String
+                # constant the runtime codec reads is its plan, resolved to
+                # this program's tables here (TransferPlan); the schema
+                # text itself is never a run-time value.
+                incr position
+                lappend argRegs [TransferPlanConst fn $e $arg]
+                continue
+            }
+            incr position
             # An operand that is a C word is boxed once every operand is
             # evaluated: the operation is its first use that needs the Int.
             set r [Expr fn $arg [expr {$rawEligible ? "raw" : "cword"}]]
@@ -9912,6 +10076,19 @@ proc native::lower::NativeCallOp {e node} {
     set argExprs [dict get $node args]
     RuntimeRaises [dict get [core::native::metadata $name] errors]
     switch -- [lindex $impl 0] {
+        same {
+            # std::actor::recover (core/actor.tcl): its operand, unchanged;
+            # only its static type differs. No NIR operation.
+            return [list $name same]
+        }
+        threadop {
+            # A thread or transport operation (core/thread.tcl): its code.
+            return [list $name $impl]
+        }
+        threadentry {
+            # std::thread::entry(NAME): a constant (ThreadEntryValue).
+            return [list $name threadentry]
+        }
         equality {
             if {[llength $argExprs] != 2} {
                 return [list $name veq]
@@ -10036,9 +10213,358 @@ proc native::lower::NativeCallOp {e node} {
             if {[dict exists $provenOps $op] && [BoundsProven $e]} {
                 set op [dict get $provenOps $op]
             }
+            if {$op in {mvcleardrop mvswapdrop mutarrayswapdrop mutarraysetdrop}} {
+                # A collection's drop form whose descriptor (its last
+                # argument, a constant) runs code -- a resource's cleanup, an
+                # unwinding coroutine's abandonment: its safepoint variant
+                # (LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md).
+                set d [lindex $argExprs end]
+                if {[hir::kind $hir $d] eq "const"
+                        && [regexp {[rC]} [core::value::strOf [hir::get $hir $d value]]]} {
+                    append op run
+                }
+            }
             return [list $name $op]
         }
     }
+}
+
+# ---------------------------------------------------------------------------
+# Thread entries (BOTLISH-OWNED-THREADS-AND-CROSS-THREAD-ACTORS-MILESTONE-1.md)
+#
+# One program image, several entries: the entry program's top level runs in
+# the main VM, each thread entry (`thread fn`, hir/threads.tcl) in a worker
+# VM the runtime makes on a thread of its own (runtime/thread.rs). Every VM
+# runs the program function: its module sections first -- each VM's own
+# module statics -- and then, where the entry program's own statements
+# begin, the thread dispatch (ThreadDispatch): `threadop` asks the runtime
+# which entry this VM runs (0: the main one), and a worker VM jumps to its
+# entry's block, which decodes the initialization value in this VM
+# (transferdecode of the entry's parameter type, the value's bytes from
+# the runtime), calls the entry's generic instance (an exported root:
+# hir::specialize keeps it open, as a callback's) and encodes its result
+# (transferencode), the program function's result for that VM. The entry
+# program's own statements follow, for the main VM only.
+#
+# An entry is named at run time by its index, 1-based in hir::threads::of's
+# order: std::thread::entry(NAME) is the constant Entry {index, name}
+# (ThreadEntryValue), and the runtime starts index K by running the program
+# function with K as the VM's entry.
+
+# The Entry of std::thread::entry call E (NODE): `structnew` of its index
+# and name, constants.
+proc native::lower::ThreadEntryValue {fnVar e node} {
+    upvar 1 $fnVar fn
+    variable hir
+    variable threadIndex
+    set block [hir::threads::Referenced $hir [lindex [dict get $node args] 0]]
+    if {$block eq "" || ![dict exists $threadIndex $block]} {
+        throw {NATIVE BUG} "native lowering: std::thread::entry of no valid thread entry ($e)"
+    }
+    lassign [dict get $threadIndex $block] index name
+    set i [Assign fn "int $index" $e]
+    set n [Assign fn "str [Quote $name]" $e]
+    set sid std::thread::Entry
+    return [Assign fn "structnew [ShapeIndex $sid [hir::structs::names $sid]] $i $n" $e]
+}
+
+# The program roots BODY as {MODULES OWN} -- the module sections' and the
+# entry program's own -- when the program has thread entries, else "".
+proc native::lower::ThreadEntryRoots {body} {
+    variable threadRecords
+    variable hir
+    if {$threadRecords eq {}} {
+        return ""
+    }
+    set modules {}
+    set own {}
+    foreach e $body {
+        if {$own eq {} && [hir::isModuleScope $hir [hir::get $hir $e scope]]} {
+            lappend modules $e
+        } else {
+            lappend own $e
+        }
+    }
+    return [list $modules $own]
+}
+
+# The register of the shape of std::abi::bytes::Bytes (a threadop's last
+# operand: the operations that make byte storage wrap it in that struct).
+proc native::lower::ThreadBytesShape {fnVar {e ""}} {
+    upvar 1 $fnVar fn
+    set sid std::abi::bytes::Bytes
+    if {![hir::structs::declared $sid]} {
+        return [Assign fn unit $e]
+    }
+    return [Assign fn "int [ShapeIndex $sid [hir::structs::names $sid]]" $e]
+}
+
+# The thread dispatch of the program function FN (see above), emitted where
+# the entry program's own statements begin. Nothing for a program without
+# thread entries.
+proc native::lower::ThreadDispatch {fnVar} {
+    upvar 1 $fnVar fn
+    variable threadRecords
+    variable hir
+    if {$threadRecords eq {}} {
+        return
+    }
+    set code [Assign fn "int [core::thread::code rt_entry_index]"]
+    set operands [list $code]
+    while {[llength $operands] < 7} {
+        lappend operands [Assign fn unit]
+    }
+    set bytesShape [ThreadBytesShape fn]
+    set which [Assign fn "op threadop [join $operands { }]"]
+    set raw [AssignRaw fn "op runbox $which"]
+    set main [NewLabel fn]
+    set cases {}
+    set labels {}
+    set k 0
+    foreach record $threadRecords {
+        incr k
+        set l [NewLabel fn]
+        lappend cases "$k:$k:$l"
+        lappend labels $l $record
+    }
+    Emit fn "switch $raw $main [join $cases { }]"
+    foreach {l record} $labels {
+        EmitLabel fn $l
+        set init [list [Assign fn "int [core::thread::code rt_init]"]]
+        while {[llength $init] < 6} {
+            lappend init [Assign fn unit]
+        }
+        lappend init $bytesShape
+        set data [Assign fn "op threadop [join $init { }]"]
+        set param [hir::transfer::Schema [dict get $record param]]
+        set decodePlan [Assign fn "str [Quote [TransferPlan "thread-entry" [hir::transfer::RuntimeText $param]]]"]
+        set decodeFns [ThreadOwnerFns fn [dict get $param fns]]
+        set value [Assign fn "op transferdecode $data $decodePlan $decodeFns"]
+        set entry [Assign fn "fnvalue [GenericRef [dict get $record block]]"]
+        set result [Assign fn "callvalue $entry $value"]
+        set out [hir::transfer::Schema [dict get $record result]]
+        set encodePlan [Assign fn "str [Quote [TransferPlan "thread-entry" [hir::transfer::RuntimeText $out]]]"]
+        set encodeFns [ThreadOwnerFns fn [dict get $out fns]]
+        set bytes [Assign fn "op transferencode $result $encodePlan $encodeFns"]
+        Emit fn "ret $bytes"
+    }
+    EmitLabel fn $main
+}
+
+# The blocks of the `through` owner functions the thread dispatch's
+# transfers call (each entry's parameter and result schemas): roots, as
+# the entries are -- nothing else may make their generic instances.
+proc native::lower::ThreadOwnerBlocks {hirProgram records} {
+    set blocks {}
+    foreach record $records {
+        foreach type [list [dict get $record param] [dict get $record result]] {
+            foreach name [dict get [hir::transfer::Schema $type] fns] {
+                set i [string last :: $name]
+                if {$i < 0} {
+                    set scope [dict get $hirProgram top]
+                } else {
+                    set scope [dict get $hirProgram modules [string range $name 0 [expr {$i - 1}]]]
+                }
+                set block [hir::aot::BoundBlock $hirProgram [dict get $hirProgram scopes $scope names $name]]
+                if {$block ne "" && $block ni $blocks} {
+                    lappend blocks $block
+                }
+            }
+        }
+    }
+    return $blocks
+}
+
+# The List of the `through` owner functions QUALIFIED names (a transfer
+# schema's FNS), as function values of their generic instances.
+proc native::lower::ThreadOwnerFns {fnVar qualified} {
+    upvar 1 $fnVar fn
+    variable hir
+    set regs {}
+    foreach name $qualified {
+        set i [string last :: $name]
+        if {$i < 0} {
+            set scope [dict get $hir top]
+        } else {
+            set scope [dict get $hir modules [string range $name 0 [expr {$i - 1}]]]
+        }
+        set b [dict get $hir scopes $scope names $name]
+        set block [hir::aot::BoundBlock $hir $b]
+        if {$block eq ""} {
+            throw {NATIVE BUG} "native lowering: transfer owner function $name has no block"
+        }
+        lappend regs [Assign fn "fnvalue [GenericRef $block]"]
+    }
+    return [Assign fn [string trimright "op listnew [join $regs { }]"]]
+}
+
+# ---------------------------------------------------------------------------
+# Transfer (SENDABILITY-AND-VALUE-COPY-MILESTONE-1.md)
+#
+# transfer#encode(VALUE, SCHEMA, FNS) and transfer#decode(DATA, SCHEMA, FNS)
+# (core/transfer.tcl, after hir::transfer::Elaborate) carry the transferred
+# type's schema as a String constant: {VERSION FINGERPRINT NODES}, every
+# declaration named by its identity. The runtime codec
+# (runtime/transfer.rs) reads the same bytes core/transfer.tcl writes and
+# reads, but builds and inspects this program's objects, whose struct
+# shapes and enum words are numbers of this compilation's making
+# (ShapeIndex, EnumIndex): so the schema is resolved here, once, into a
+# *plan* -- the same nodes in the same order, each id replaced by its
+# number -- and the plan is the String constant the operation receives.
+# Nothing of the plan reaches the bytes: they hold the schema's
+# fingerprint, names' sorted order and positions only.
+#
+# The plan's text, one line per item:
+#
+#   plan VERSION FINGERPRINT BYTES          BYTES the shape of
+#                                           std::abi::bytes::Bytes (encode's
+#                                           result)
+#   MIN NODE                                one per schema node, in order:
+#                                           MIN its fewest bytes
+#                                           (core::transfer::MinSizes), NODE
+#
+#   unit | bool | char | float64 | decimal | raw32 | raw64 | str
+#   int D {i LO HI | e N V...}*D            the integer domains, decimal
+#   list E LENGTH                           LENGTH -1 when unstated
+#   set E | vector E | array E
+#   struct SHAPE SLOTS N {SLOT CHILD}*N     the wire order, each field's slot
+#                                           in the shape's layout
+#   enum ENUM N CASE...                     CASE the declaration position of
+#                                           the I-th sorted case name
+#   bytes SHAPE | mutbytes SHAPE            the one-field opaque struct
+#   through R K
+
+# The register of the plan constant of transfer call E's schema constant
+# SCHEMAEXPR.
+proc native::lower::TransferPlanConst {fnVar e schemaExpr} {
+    upvar 1 $fnVar fn
+    variable hir
+    if {[hir::kind $hir $schemaExpr] ne "const"
+            || [core::value::kind [hir::get $hir $schemaExpr value]] ne "str"} {
+        throw {NATIVE INVALID-HIR} "native lowering: transfer call $e has no constant schema"
+    }
+    set plan [TransferPlan $e [core::value::strOf [hir::get $hir $schemaExpr value]]]
+    return [Assign fn "str [Quote $plan]" $e]
+}
+
+# The plan (see above) of the run-time schema text SCHEMA of transfer call E.
+proc native::lower::TransferPlan {e schema} {
+    lassign $schema version fingerprint nodes
+    if {$version ne "1" || ![regexp {^[0-9a-f]{16}$} $fingerprint] || [llength $nodes] == 0} {
+        throw {NATIVE INVALID-HIR} "native lowering: transfer call $e has a malformed schema"
+    }
+    set min [core::transfer::MinSizes $nodes]
+    set bytesId std::abi::bytes::Bytes
+    set lines [list "plan $version $fingerprint [ShapeIndex $bytesId [hir::structs::names $bytesId]]"]
+    set count [llength $nodes]
+    set i 0
+    foreach node $nodes {
+        set kind [lindex $node 0]
+        switch -- $kind {
+            unit - bool - char - float64 - raw32 - raw64 - str - decimal {
+                set line $kind
+            }
+            int {
+                set domains [lindex $node 1]
+                set line "int [llength $domains]"
+                foreach domain $domains {
+                    switch -- [lindex $domain 0] {
+                        interval {
+                            append line " i [TransferInt $e [lindex $domain 1]] [TransferInt $e [lindex $domain 2]]"
+                        }
+                        exact {
+                            set values [lindex $domain 1]
+                            append line " e [llength $values]"
+                            foreach v $values {
+                                append line " [TransferInt $e $v]"
+                            }
+                        }
+                        default {
+                            throw {NATIVE INVALID-HIR} "native lowering: transfer call $e has an unknown integer domain \"$domain\""
+                        }
+                    }
+                }
+            }
+            list {
+                lassign $node _ elem length
+                if {$length eq ""} {
+                    set length -1
+                }
+                set line "list [TransferNodeRef $e $elem $count] [TransferInt $e $length]"
+            }
+            set - vector - array {
+                set line "$kind [TransferNodeRef $e [lindex $node 1] $count]"
+            }
+            struct {
+                lassign $node _ id slots wire
+                if {$id eq ""} {
+                    # An anonymous struct's shape is its canonical, sorted
+                    # field set (hir/resolve.tcl's construction layout).
+                    set layout [lsort -unique $slots]
+                } else {
+                    set layout [hir::structs::names $id]
+                }
+                if {[llength $wire] != [llength $layout]} {
+                    throw {NATIVE INVALID-HIR} "native lowering: transfer call $e: the schema of struct \"$id\" does not hold its fields"
+                }
+                set line "struct [ShapeIndex $id $layout] [llength $layout] [llength $wire]"
+                foreach w $wire {
+                    lassign $w field slot child
+                    set s [lsearch -exact $layout $field]
+                    if {$s < 0} {
+                        throw {NATIVE INVALID-HIR} "native lowering: transfer call $e: struct \"$id\" has no field \"$field\""
+                    }
+                    append line " $s [TransferNodeRef $e $child $count]"
+                }
+            }
+            enum {
+                lassign $node _ id cases
+                set declared [hir::enums::cases $id]
+                set line "enum [EnumIndex $id] [llength $cases]"
+                foreach c $cases {
+                    set k [lsearch -exact $declared $c]
+                    if {$k < 0} {
+                        throw {NATIVE INVALID-HIR} "native lowering: transfer call $e: enum \"$id\" has no case \"$c\""
+                    }
+                    append line " $k"
+                }
+            }
+            bytes - mutbytes {
+                lassign $node _ id field
+                set layout [hir::structs::names $id]
+                if {$layout ne [list $field]} {
+                    throw {NATIVE INVALID-HIR} "native lowering: transfer call $e: struct \"$id\" is no one-field byte storage of \"$field\""
+                }
+                set line "$kind [ShapeIndex $id $layout]"
+            }
+            through {
+                lassign $node _ id r k
+                set line "through [TransferNodeRef $e $r $count] [TransferInt $e $k]"
+            }
+            default {
+                throw {NATIVE INVALID-HIR} "native lowering: transfer call $e has an unknown schema node \"$node\""
+            }
+        }
+        lappend lines "[dict get $min $i] $line"
+        incr i
+    }
+    return [join $lines \n]
+}
+
+# The canonical decimal digits of the Int N of transfer call E's schema.
+proc native::lower::TransferInt {e n} {
+    if {![string is entier -strict $n]} {
+        throw {NATIVE INVALID-HIR} "native lowering: transfer call $e: \"$n\" is no integer"
+    }
+    return [expr {$n + 0}]
+}
+
+# The node index N of a schema of COUNT nodes (transfer call E).
+proc native::lower::TransferNodeRef {e n count} {
+    if {![string is digit -strict $n] || $n >= $count} {
+        throw {NATIVE INVALID-HIR} "native lowering: transfer call $e: \"$n\" is no node of its schema"
+    }
+    return [expr {$n + 0}]
 }
 
 # ---------------------------------------------------------------------------
@@ -10428,6 +10954,31 @@ proc native::lower::NativeCall {fnVar e node name argRegs rawEligible op want} {
     # it always has.
     set argExprs [dict get $node args]
     EmitArgGuards fn $e $argExprs $argRegs [dict get $meta paramTypes] $name
+    if {$op eq "same"} {
+        # The operand itself (std::actor::recover: NativeCallOp's `same`).
+        return [list [lindex $argRegs 0] tagged]
+    }
+    if {[lindex $op 0] eq "threadop"} {
+        # `threadop CODE A0 .. A5` (runtime/thread.rs's rt_thread_op): the
+        # operation's code, then its operands, unit-padded to six.
+        set operands [list [Assign fn "int [lindex $op 1]" $e]]
+        foreach r $argRegs {
+            lappend operands $r
+        }
+        if {[llength $operands] < 7} {
+            while {[llength $operands] < 6} {
+                lappend operands [Assign fn unit $e]
+            }
+            # The last operand, when the operation has fewer than six: the
+            # shape of std::abi::bytes::Bytes, which an operation whose
+            # result is byte storage builds.
+            lappend operands [ThreadBytesShape fn $e]
+        }
+        return [list [Assign fn "op threadop [join $operands { }]" $e] tagged]
+    }
+    if {$op eq "threadentry"} {
+        return [list [ThreadEntryValue fn $e $node] tagged]
+    }
     set big [BigConstantResult $e $argExprs $op]
     if {$big ne ""} {
         # An Int `+ - *` of integer constant expressions whose value BIG is
@@ -13069,6 +13620,12 @@ proc native::lower::Unsupported {e what detail} {
 # `errorIds`'s own doc.
 proc native::lower::ErrorId {name} {
     variable errorIds
+    if {$name eq [hir::affine::AbandonedError]} {
+        # The internal failure of an abandoned coroutine's pending yield
+        # (runtime/error.rs's ERR_COROUTINE_ABANDONED): no program declares
+        # or handles it; only the release edges match it.
+        return [expr {0x40000000 - 1}]
+    }
     if {[core::native::isBuiltinError $name]} {
         # The runtime's own builtin errors (core::native::declareError) have
         # fixed ids far above a program's dense 1-based ones: the runtime

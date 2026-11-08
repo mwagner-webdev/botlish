@@ -124,7 +124,9 @@ test workload-2048-application-module {S4: the engine is an application module -
         [file exists [file join $::core::libraryDir game2048.bot]]
 } -result {1 0}
 
-# The demo's whole output: a deterministic game from a fixed seed.
+# The demo's whole output: a deterministic game from a fixed seed (as exec
+# returns it, its last newline trimmed). It is the program's own text only:
+# an executable prints no value of its own (PROGRAM-OUTPUT-MILESTONE-1.md).
 set demoOutput {start
      .     .     .     .
      2     .     .     .
@@ -160,8 +162,7 @@ game over after 316 moves
     32    16     8     4
    128    64     2     8
    256     4   128    32
-score 3888, largest tile 256
-unit}
+score 3888, largest tile 256}
 
 # 2048-ENGINE-WORKLOAD.md, S19: under GC stress this executable crashed
 # (native/src/codegen/roots.rs shared a root slot between a call's result
@@ -169,7 +170,7 @@ unit}
 # root-def-interference-1 is the reduced case). It prints through
 # std::linux::io, whose syscalls go through the target architecture's own
 # transport (LINUX-SYSCALL-TRANSPORTS.md), hence nativeLinux.
-test workload-2048-demo-executable {the demo as a standalone executable prints the whole game, identically under GC stress} -constraints {executableAot nativeLinux} -body {
+test workload-2048-demo-executable {the demo as a standalone executable prints the whole game and nothing else, identically under GC stress} -constraints {executableAot nativeLinux} -body {
     set dir [makeDirectory workload-2048-demo]
     try {
         set hir [surface::readProgramFile [file join $gameDir demo.bot] -warnings off]
@@ -204,7 +205,7 @@ test workload-2048-demo-two-platforms {demo.bot, demo-darwin.bot and demo-window
     [list [list [file join $gameDir demo_play.bot]] {{std::io::IO std::darwin::io::DarwinIO}}] \
     [list [list [file join $gameDir demo_play.bot]] {{std::io::IO std::windows::io::WindowsIO}}]]]
 
-test workload-2048-demo-darwin-executable {(where Darwin I/O runs) demo-darwin.bot as a standalone executable prints the whole game through libSystem, the same bytes as the Linux demo, identically under GC stress} -constraints {executableAot darwinIO} -body {
+test workload-2048-demo-darwin-executable {(where Darwin I/O runs) demo-darwin.bot as a standalone executable prints the whole game through libSystem and nothing else, the same bytes as the Linux demo, identically under GC stress} -constraints {executableAot darwinIO} -body {
     set dir [makeDirectory workload-2048-demo-darwin]
     try {
         set hir [surface::readProgramFile [file join $gameDir demo-darwin.bot] -warnings off]
@@ -215,12 +216,12 @@ test workload-2048-demo-darwin-executable {(where Darwin I/O runs) demo-darwin.b
     }
 } -result {1 1}
 
-test workload-2048-demo-windows-executable {(where Windows I/O runs) demo-windows.bot as a standalone executable prints the whole game through kernel32's WriteFile, the same bytes as the Linux demo, identically under GC stress, with nothing on PATH; and main.tcl -backend cranelift (and cranelift-generic) runs it as a linked executable and prints the game before its value} -constraints {executableAot windowsIO} -body {
+test workload-2048-demo-windows-executable {(where Windows I/O runs) demo-windows.bot as a standalone executable prints the whole game through kernel32's WriteFile and nothing else, the same bytes as the Linux demo, identically under GC stress, with nothing on PATH; and main.tcl -backend cranelift (and cranelift-generic) runs it as a linked executable and prints the game before its value} -constraints {executableAot windowsIO} -body {
     set dir [makeDirectory workload-2048-demo-windows]
     try {
         set hir [surface::readProgramFile [file join $gameDir demo-windows.bot] -warnings off]
         set exe [native::executable $hir [file join $dir demo]]
-        set game [string range $demoOutput 0 end-[string length unit]]
+        set game $demoOutput\n
         set main [lmap backend {cranelift cranelift-generic} {
             string equal [string map {\r ""} [exec [info nameofexecutable] [file join $::projectRoot main.tcl] -warnings off \
                 -backend $backend [file join $gameDir demo-windows.bot]]] \
@@ -236,11 +237,14 @@ test workload-2048-demo-windows-executable {(where Windows I/O runs) demo-window
 # shipped: bench.bot and its application module game2048.bot copied out of
 # the checkout, compiled by main.tcl from another directory, the executable
 # moved away and the copy deleted -- no source, no checkout path, an empty
-# PATH -- and its 200-move checksum is the one every in-process backend
-# computes (workload-2048-bench-checksum), under GC stress too. bench.bot
-# imports no platform namespace, so every host that links executables runs
-# it (macOS too: MACOS-AARCH64-MILESTONE-5.md).
-test workload-2048-bench-executable {bench.bot and game2048.bot, copied out of the checkout and compiled from another directory, as a moved standalone executable whose application directory is gone: the checksum, under GC stress too} -constraints executableAot -body {
+# PATH -- and its 200-move checksum, its value read through the driver
+# protocol, is the one every in-process backend computes
+# (workload-2048-bench-checksum), under GC stress too; run plainly, it
+# prints nothing (the program writes nothing, and an executable prints no
+# value: PROGRAM-OUTPUT-MILESTONE-1.md). bench.bot imports no platform
+# namespace, so every host that links executables runs it (macOS too:
+# MACOS-AARCH64-MILESTONE-5.md).
+test workload-2048-bench-executable {bench.bot and game2048.bot, copied out of the checkout and compiled from another directory, as a moved standalone executable whose application directory is gone: it prints nothing, and its value is the checksum, under GC stress too} -constraints executableAot -body {
     set dir [makeDirectory {workload-2048 bench executable}]
     try {
         set app [file join $dir {application copy}]
@@ -265,18 +269,19 @@ test workload-2048-bench-executable {bench.bot and game2048.bot, copied out of t
         }
         file rename [native::executableFile [file join $app bench]] [native::executableFile [file join $run bench]]
         file delete -force $app
-        list $built [runStandalone [file join $run bench]] [runStandalone [file join $run bench] BOTLISH_NATIVE_GC_STRESS 1]
+        list $built [runStandalone [file join $run bench]] [standaloneValue [file join $run bench]] \
+            [standaloneValue [file join $run bench] BOTLISH_NATIVE_GC_STRESS 1]
     } finally {
         removeDirectory {workload-2048 bench executable}
     }
-} -result [list "executable: [native::executableFile {../application copy/bench}]" 2002720 2002720]
+} -result [list "executable: [native::executableFile {../application copy/bench}]" {} 2002720 2002720]
 
 # S4 and S15 together: `main.tcl -backend cranelift demo.bot` used to need the
 # private library to compile, and then showed only `value: unit`. Now it
 # compiles the demo as it is and shows the game the executable prints, then
 # the value.
 test workload-2048-demo-main-native {main.tcl -backend cranelift (and cranelift-generic) runs demo.bot as it is and prints its whole game before its value} -constraints {nativeLinux nativeBuilt} -body {
-    set game [string range $demoOutput 0 end-[string length unit]]
+    set game $demoOutput\n
     lmap backend {cranelift cranelift-generic} {
         string equal [exec [info nameofexecutable] [file join $::projectRoot main.tcl] -warnings off \
             -backend $backend [file join $gameDir demo.bot]] \

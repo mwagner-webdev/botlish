@@ -454,8 +454,9 @@ def redact(text):
 !! test_release.Stages.test_stapling_required
 ## examples/games/icy-tower/macos/release.py
 <<<<
-        work.require("staple", code="MACOS-GATEKEEPER")
+        work.require("staple", "verify-signature:stapled", code="MACOS-GATEKEEPER")
 ====
+        work.require("verify-signature:stapled", code="MACOS-GATEKEEPER")
 >>>>
 ## examples/games/icy-tower/macos/release.py
 <<<<
@@ -473,6 +474,40 @@ def redact(text):
 ====
         if False:
             work.add("gatekeeper", False, facts)
+>>>>
+
+@@ gatekeeper-origin-required Gatekeeper's acceptance needs an origin line, which macOS 15's spctl never prints (the first release run's false refusal)
+!! test_release.Stages.test_gatekeeper_without_origin_line
+## examples/games/icy-tower/macos/release.py
+<<<<
+        ok = code == 0 and re.search(r":\s*accepted\b", text) and "source=Notarized Developer ID" in text
+====
+        ok = code == 0 and re.search(r":\s*accepted\b", text) and "source=Notarized Developer ID" in text \
+            and re.search(r"origin=Developer ID Application: .*\(%s\)" % re.escape(team), text)
+>>>>
+
+@@ gatekeeper-origin-unchecked an origin line naming another team's Developer ID is accepted
+!! test_release.Stages.test_gatekeeper_origin_of_another_team_refused
+## examples/games/icy-tower/macos/release.py
+<<<<
+        if wrong:
+====
+        if False:
+>>>>
+
+@@ gatekeeper-team-unanchored Gatekeeper's acceptance is taken without the verified stapled signature of the same bundle
+!! test_release.Stages.test_gatekeeper_requires_the_stapled_signature_verified test_release.Stages.test_gatekeeper_of_another_bundle_than_the_verified_one_refused
+## examples/games/icy-tower/macos/release.py
+<<<<
+        work.require("staple", "verify-signature:stapled", code="MACOS-GATEKEEPER")
+====
+        work.require("staple", code="MACOS-GATEKEEPER")
+>>>>
+## examples/games/icy-tower/macos/release.py
+<<<<
+        if stapled["team"] != team or current_cdhash(app) != stapled["cdhash"]:
+====
+        if False:
 >>>>
 
 @@ tamper-not-tampered the tamper control changes nothing in its copy
@@ -688,6 +723,24 @@ rm -rf "$out/Icy Tower.app"
     runs-on: macos-15
 >>>>
 
+@@ release-before-green a release tag is built, signed and published before its commit's tests are green
+!! test_workflow.Workflow.test_release_waits_for_green_tests
+## .github/workflows/icy-tower-macos.yml
+<<<<
+      !cancelled() && (needs.tested.result == 'skipped' || needs.tested.outputs.green == 'true')
+      && (github.event_name != 'pull_request'
+====
+      !cancelled()
+      && (github.event_name != 'pull_request'
+>>>>
+## .github/workflows/icy-tower-macos.yml
+<<<<
+      && startsWith(github.ref, 'refs/tags/icy-tower-macos-v')
+      && needs.tested.outputs.green == 'true'
+====
+      && startsWith(github.ref, 'refs/tags/icy-tower-macos-v')
+>>>>
+
 @@ release-on-any-ref the release job runs for any branch, not only a release tag
 !! test_workflow.Workflow.test_release_job_is_protected
 ## .github/workflows/icy-tower-macos.yml
@@ -848,6 +901,18 @@ rm -rf "$out/Icy Tower.app"
           rel keychain --work "$w"
           sudo security authorizationdb write com.apple.trust-settings.admin allow
           sudo security add-trusted-cert -d -r trustRoot -p codeSign -k "$kc" "$dry/anchors/root.cer"
+>>>>
+
+@@ dry-run-signs-the-ci-bundle the dry run signs a copy of the CI bundle, whose identifier is not its environment's MACOS_BUNDLE_ID (the refusal of run 42377791764)
+!! test_workflow.Workflow.test_dry_run_bundle_is_assembled_as_a_release_s
+## .github/workflows/icy-tower-macos.yml
+<<<<
+          examples/games/icy-tower/package-macos.sh "$EXE" "$dry/app" --bundle-id "$MACOS_BUNDLE_ID" \
+            --version 0.0.0 --build 0.0.0 --sdl3-license "$SDLSRC/LICENSE.txt" >"$dry/package.log" 2>&1 \
+            || { cat "$dry/package.log"; echo "::error::the dry run's bundle was not assembled"; exit 1; }
+====
+          mkdir -p "$dry/app"
+          ditto "$APPDIR" "$dry/app/Icy Tower.app"
 >>>>
 
 @@ dry-run-blocked-as-passed any refusal of the dry run's signature counted as the environment's, a broken signing step hidden

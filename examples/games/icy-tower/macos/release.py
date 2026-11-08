@@ -34,7 +34,9 @@ release whose every stage passed from anything else:
     staple           stapler staple (bounded retries while Apple publishes
                      the ticket) and stapler validate
     gatekeeper       spctl's assessment (notarized: accepted, "Notarized
-                     Developer ID", the team; ad hoc: rejected)
+                     Developer ID", of the bundle whose stapled signature is
+                     the team's, and an origin spctl prints the team's
+                     Developer ID; ad hoc: rejected)
     tamper           a private copy with one byte changed must fail
                      verification; the original must still pass
     package          the final ZIP, made after stapling, extracted again
@@ -739,13 +741,29 @@ def stage_gatekeeper(work, args):
     print(text)
     facts = {"text": text, "status": code}
     if args.expect == "notarized":
-        work.require("staple", code="MACOS-GATEKEEPER")
+        work.require("staple", "verify-signature:stapled", code="MACOS-GATEKEEPER")
         team = work.last("preflight")["team"]
-        ok = code == 0 and re.search(r":\s*accepted\b", text) and "source=Notarized Developer ID" in text \
-            and re.search(r"origin=Developer ID Application: .*\(%s\)" % re.escape(team), text)
+        stapled = work.last("verify-signature:stapled")
+        ok = code == 0 and re.search(r":\s*accepted\b", text) and "source=Notarized Developer ID" in text
         if not ok:
             work.add("gatekeeper", False, facts)
             raise Failed("MACOS-GATEKEEPER", "Gatekeeper does not accept the bundle as a notarized Developer ID application: %s" % text)
+        # Whose application Gatekeeper accepted: spctl names it in an origin line only on some macOS
+        # versions (macOS 15's prints none: ICY-TOWER-MACOS-APP-MILESTONE-1.md, section 30). One it prints
+        # must be the team's Developer ID; the team is established either way by the stapled signature of
+        # this very bundle, which verify-signature checked against APPLE_TEAM_ID.
+        origins = re.findall(r"^origin=(.*)$", text, re.M)
+        facts["origin"] = origins
+        wrong = [o for o in origins if not re.fullmatch(r"Developer ID Application: .*\(%s\)" % re.escape(team), o.strip())]
+        if wrong:
+            work.add("gatekeeper", False, facts)
+            raise Failed("MACOS-GATEKEEPER", "Gatekeeper accepted the bundle as %s, not as team %s's Developer ID application"
+                         % ("; ".join(wrong), team))
+        if stapled["team"] != team or current_cdhash(app) != stapled["cdhash"]:
+            work.add("gatekeeper", False, facts)
+            raise Failed("MACOS-GATEKEEPER", "the bundle Gatekeeper assessed is not the one whose stapled signature "
+                         "verify-signature checked (team %s, CDHash %s)" % (stapled["team"], stapled["cdhash"]))
+        facts["team"] = team
     else:
         ok = code != 0 and "rejected" in text
         if not ok:

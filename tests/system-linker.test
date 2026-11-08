@@ -8,8 +8,9 @@
 #
 #   * Its startup builds the same Vm as the rustc linker's and the stub's
 #     (BOTLISH_NATIVE_STARTUP_REPORT, Vm::startup_report): the same report,
-#     byte for byte, and the same output, error and status, plain and under
-#     GC stress.
+#     byte for byte, and the same output, error, status and value (read
+#     through the driver protocol: an executable prints none), plain and
+#     under GC stress.
 #   * It links C: a system library, static archives (in either order,
 #     incorporated: the executable runs with them gone), byte borrowing,
 #     variadics, errno read right after the call; and runs it as the rustc
@@ -113,6 +114,30 @@ proc runCaptured {executable stdin args} {
     removeFile captured-stdout
     removeFile captured-stderr
     return $result
+}
+
+# The outcome of a run of EXECUTABLE with STDIN and ENV as runCaptured runs
+# it, in the driver protocol (BOTLISH_NATIVE_RESULT names the file its result
+# lines go to): {value V}, V shown as Botlish shows it, or {error CODE
+# MESSAGE}. An executable prints no value of its own
+# (PROGRAM-OUTPUT-MILESTONE-1.md): this is how a test reads one.
+proc runOutcome {executable stdin args} {
+    set result [ProtocolResultFile]
+    try {
+        runCaptured $executable $stdin {*}$args BOTLISH_NATIVE_RESULT=$result
+        if {[catch {ProtocolValue $result} value options]} {
+            return [list error [dict get $options -errorcode] $value]
+        }
+        return [list value $value]
+    } finally {
+        file delete $result
+    }
+}
+
+# {EXIT-STATUS STDOUT STDERR OUTCOME} of EXECUTABLE run with STDIN and ENV:
+# runCaptured's plain run, then runOutcome's.
+proc runValued {executable stdin args} {
+    return [list {*}[runCaptured $executable $stdin {*}$args] [runOutcome $executable $stdin {*}$args]]
 }
 
 # What EXECUTABLE's startup installed (Vm::startup_report).
@@ -220,7 +245,7 @@ proc otherLinkers {} {
     return $linkers
 }
 
-test system-linker-startup-parity {the system linker's executables install exactly what the rustc linker's and the stub's do -- the same startup report, program information, constants, function entries, module statics and stack maps -- and print, fail and exit as they do, plain and under GC stress} -constraints {systemLinker} -body {
+test system-linker-startup-parity {the system linker's executables install exactly what the rustc linker's and the stub's do -- the same startup report, program information, constants, function entries, module statics and stack maps -- and print, fail and exit as they do, with the same values (read through the driver protocol), plain and under GC stress} -constraints {systemLinker} -body {
     set dir [makeDirectory system-linker-parity]
     set differences {}
     set compared 0
@@ -240,6 +265,9 @@ test system-linker-startup-parity {the system linker's executables install exact
                 set a [runCaptured $system "some input\n" {*}$extra]
                 set b [runCaptured $other "some input\n" {*}$extra]
                 if {$a ne $b} { lappend differences [list $name $linker $extra $a $b] }
+                set a [runOutcome $system "some input\n" {*}$extra]
+                set b [runOutcome $other "some input\n" {*}$extra]
+                if {$a ne $b} { lappend differences [list $name $linker $extra value $a $b] }
                 incr compared
             }
         }
@@ -248,7 +276,7 @@ test system-linker-startup-parity {the system linker's executables install exact
     foreach linker [concat system [otherLinkers]] {
         set same [file join $dir same[file extension [native::executableFile x]]]
         file copy -force [native::executableFile [file join $dir argv.$linker]] $same
-        lappend results [lindex [runCaptured $same ""] 1]
+        lappend results [runOutcome $same ""]
         file delete $same
     }
     removeDirectory system-linker-parity
@@ -257,16 +285,18 @@ test system-linker-startup-parity {the system linker's executables install exact
     foreach {name text} $::programs { file delete [file join [temporaryDirectory] $name.bot] }
 } -result {{} 1 1}
 
-test system-linker-outcomes {a system-linked executable prints its value, reports a runtime error with a failing status, reads its own arguments and standard input, and its coroutines and collections run as everywhere} -constraints {systemLinker} -body {
+test system-linker-outcomes {a system-linked executable prints nothing of its own (its value, read through the driver protocol, is the program's), reports a runtime error with a failing status, reads its own arguments and standard input, and its coroutines and collections run as everywhere} -constraints {systemLinker} -body {
     set dir [makeDirectory system-linker-outcomes]
     set results {}
     foreach {name text} $::programs {
         if {$name ni {enums coroutines error argv}} continue
         set exe [linkWith system [surface::compile $text $name.bot] [file join $dir $name]]
         lassign [runCaptured $exe "" BOTLISH_NATIVE_GC_STRESS=1] status stdout stderr
+        set outcome [lrange [runOutcome $exe "" BOTLISH_NATIVE_GC_STRESS=1] 0 1]
         # Argument zero is the path exec ran, as the host spells it (on
         # Windows with backslashes, shown escaped).
-        lappend results $name $status [string map [list [string map {\\ \\\\} [file nativename $exe]] EXE] $stdout] [string match {*(CORE SEMANTIC RANGE)*} $stderr]
+        lappend results $name $status $stdout [string match {*(CORE SEMANTIC RANGE)*} $stderr] \
+            [string map [list [string map {\\ \\\\} [file nativename $exe]] EXE] $outcome]
         # A host without native coroutines refuses them when one is made,
         # as every native backend there does.
         if {$name eq "coroutines" && ![testConstraint nativeCoroutines]} {
@@ -275,24 +305,23 @@ test system-linker-outcomes {a system-linked executable prints its value, report
     }
     if {[string match linux-* $::hostTarget]} {
         set exe [linkWith system [surface::readProgramFile [file join $::projectRoot examples linux read-stdin.bot] -warnings off -cache ""] [file join $dir read-stdin]]
-        lappend results stdin [lrange [runCaptured $exe "hello from stdin\n"] 0 1]
+        lappend results stdin [lrange [runCaptured $exe "hello from stdin\n"] 0 1] [lrange [runOutcome $exe "hello from stdin\n"] 0 1]
     } else {
-        lappend results stdin {0 {hello from stdin
-17}}
+        lappend results stdin {0 {hello from stdin}} {value 17}
     }
     removeDirectory system-linker-outcomes
     set results
-} -result [list enums 0 {[Color::Green, Color::Red]} 0 coroutines {*}[if {[testConstraint nativeCoroutines]} {
-    list 0 {[[0, 0], 200, [199, 39601], "done"]} 0
+} -result [list enums 0 {} 0 {value {[Color::Green, Color::Red]}} coroutines {*}[if {[testConstraint nativeCoroutines]} {
+    list 0 {} 0 {value {[[0, 0], 200, [199, 39601], "done"]}}
 } else {
-    list 1 {} 0 1
-}] error 1 {} 1 argv 0 {["EXE"]} 0 stdin {0 {hello from stdin
-17}}]
+    list 1 {} 0 {error {NATIVE UNSUPPORTED value}} 1
+}] error 1 {} 1 {error {CORE SEMANTIC RANGE}} argv 0 {} 0 {value {["EXE"]}} stdin {0 {hello from stdin}} {value 17}]
 
 # How EXECUTABLE ends when what reads its standard output stops after a few
 # bytes: {CHILDSTATUS 1} when its write fails (EPIPE: SIGPIPE ignored, as a
-# Rust main ignores it; the program handles it, and its value cannot be
-# printed: NATIVE IO), {CHILDKILLED SIGPIPE} when the signal kills it.
+# Rust main ignores it; the program sees the failure, and its handler ends
+# the run in a runtime error), {CHILDKILLED SIGPIPE} when the signal kills
+# it, {NONE {}} when it completes (a write failure it never saw).
 proc closedPipe {executable} {
     set pipe [open |[list $executable 2>/dev/null] r]
     read $pipe 16
@@ -303,8 +332,13 @@ proc closedPipe {executable} {
 
 test system-linker-process-setup {a system-linked executable's process starts as a Rust main's does (aot::rust_process_setup): a write to a closed pipe is an error the program sees, never a SIGPIPE kill, and a standard descriptor the process was started without is /dev/null -- exactly as the rustc linker's and the stub's} -constraints {systemLinker linuxHost unixShell} -body {
     set dir [makeDirectory system-linker-process]
+    # The spam program's handler ends the run in a runtime error (a negative
+    # allocation): its exit status says whether it saw its write fail. (An
+    # executable prints no value of its own, PROGRAM-OUTPUT-MILESTONE-1.md:
+    # no write of the runtime's could fail in its place.)
     set text {import std::io
 import std::linux::io
+import std::mutable_array
 
 fn spam() errors std::io::WriteFailed:
     loop i from 0 to 200000:
@@ -315,14 +349,14 @@ with context std::linux::io::create()
 
 done = spam():
     on std::io::WriteFailed:
+        std::mutable_array::allocate(0 - 1)
         unit
 "finished"}
     set hir [surface::compile $text spam.bot]
     # One write whose failure ends the run in a runtime error (a negative
     # allocation): with descriptor 1 closed it fails (EBADF), with /dev/null
-    # in its place it succeeds. (The spam program cannot tell them apart:
-    # it handles the failure, and Rust's standard output takes EBADF for
-    # success when the result line is printed.)
+    # in its place it succeeds and the run completes, status 0 (it writes
+    # nothing else: the runtime prints no value).
     set once [surface::compile {import std::io
 import std::linux::io
 import std::mutable_array
@@ -464,19 +498,19 @@ test system-linker-c-acceptance {a program that calls C -- the system C library,
     writeFile [file join $dir acc.bot] [accModule]
     set hir [surface::readProgramFile [writeFile [file join $dir main.bot] $::accMain] -warnings off -cache ""]
     set exe [linkWith system $hir [file join $dir system] [list $libs]]
-    set plain [runCaptured $exe ""]
-    set stress [runCaptured $exe "" BOTLISH_NATIVE_GC_STRESS=1]
+    set plain [runValued $exe ""]
+    set stress [runValued $exe "" BOTLISH_NATIVE_GC_STRESS=1]
     set same {}
     foreach linker [otherLinkers] {
         if {$linker eq "stub"} continue
         set other [linkWith $linker $hir [file join $dir $linker] [list $libs]]
-        lappend same [expr {[runCaptured $other ""] eq $plain}] [expr {[startupReport $other] eq [startupReport $exe]}]
+        lappend same [expr {[runValued $other ""] eq $plain}] [expr {[startupReport $other] eq [startupReport $exe]}]
     }
     removeDirectory "system-linker c libs [pid]"
-    set gone [runCaptured $exe ""]
+    set gone [runValued $exe ""]
     removeDirectory system-linker-c
     list $plain [expr {$stress eq $plain}] [expr {$gone eq $plain}] [lsort -unique $same]
-} -result {{0 {[5, 42, 42, 37602, 1768, 888, 321, [16, 0, 1736], [-1, 34, 1736], [18446744073709551615, 5], [42, 0]]} {}} 1 1 1}
+} -result {{0 {} {} {value {[5, 42, 42, 37602, 1768, 888, 321, [16, 0, 1736], [-1, 34, 1736], [18446744073709551615, 5], [42, 0]]}}} 1 1 1}
 
 # The dynamic dependencies of EXECUTABLE, by the platform's own tool: the
 # shared libraries (readelf's NEEDED, otool -L's lines after the first) or
@@ -543,7 +577,7 @@ test system-linker-static-incorporation {static libraries and the runtime archiv
     removeDirectory system-linker-static-libs
     set elsewhere [file join [makeDirectory system-linker-elsewhere] [file tail $exe]]
     file copy $exe $elsewhere
-    set run [runCaptured $elsewhere ""]
+    set run [runValued $elsewhere ""]
     set needed [dependencies $elsewhere]
     set paths [searchPaths $elsewhere]
     removeDirectory system-linker-elsewhere
@@ -555,7 +589,7 @@ test system-linker-static-incorporation {static libraries and the runtime archiv
         windows-* { list kernel32.dll }
     }]
     list $run $foreign [expr {[lindex $expected 0] in $needed}] $paths
-} -result {{0 42 {}} {} 1 {}}
+} -result {{0 {} {} {value 42}} {} 1 {}}
 
 test system-linker-bundle-runtime {a driver in a macOS application bundle's Contents/MacOS links with the runtime archive in that bundle's Contents/Resources, found from the driver's own path whatever the working directory (MACOS-AARCH64-MILESTONE-9.md); on every other host, and anywhere else, the archive is the one beside the driver} -constraints {systemLinker unixShell} -body {
     set bundle [file join [makeDirectory "system-linker bündle"] "Bötlish Test.app" Contents]
@@ -575,12 +609,12 @@ test system-linker-bundle-runtime {a driver in a macOS application bundle's Cont
         set exe [withEnv [list BOTLISH_NATIVE_BIN $driver BOTLISH_NATIVE_RUNTIME {}] {
             linkWith system [surface::readProgramFile $main -warnings off -cache ""] [file join $dir program]
         }]
-        set linked [runCaptured $exe ""]
+        set linked [runValued $exe ""]
         removeDirectory system-linker-bundle-program
     }
     removeDirectory "system-linker bündle"
     set named [expr {$::hostTarget eq "macos-aarch64" ? [lindex $runtime 1] eq $expected : [string first "missing: $expected" $runtime] >= 0}]
-    list $named [expr {$::hostTarget ne "macos-aarch64" || $linked eq {0 42 {}}}]
+    list $named [expr {$::hostTarget ne "macos-aarch64" || $linked eq {0 {} {} {value 42}}}]
 } -result {1 1}
 
 test system-linker-ordinary-executable {a system-linked executable is the platform's own kind of executable: its format and architecture, its Botlish functions and the program record as symbols, the runtime archive's main, nothing appended} -constraints {systemLinker linuxHost} -body {
@@ -638,11 +672,11 @@ test system-linker-no-rust-toolchain {the system linker links with nothing but t
             file tail $path
         }]]
     }
-    set run [runCaptured $exe ""]
+    set run [runValued $exe ""]
     removeDirectory system-linker-bin
     removeDirectory system-linker-no-rust
     list $run [lsearch -all -inline -regexp $traced {rustc|cargo}] [expr {$traced eq "" || "cc" in $traced}]
-} -result {{0 7 {}} {} 1}
+} -result {{0 {} {} {value 7}} {} 1}
 
 # The offset in BYTES (an executable's) of its program record
 # (runtime::program::LinkedProgram: the magic, the fingerprint, the
@@ -684,7 +718,7 @@ test system-linker-auto {auto, the single executable's choice, links a program t
         set stub [expr {[string range $bytes end-7 end] eq "BOTLIMG1"}]
         # (Its lines after the resolved link plan's, NATIVE-LINK-PLAN-MILESTONE-1.md.)
         set system [expr {[file exists $log] && [regexp -line {^system linker: } [readFile $log]]}]
-        lappend results $name [lindex [runCaptured $exe ""] 1] [expr {$stub ? "stub" : $system ? "system" : "?"}]
+        lappend results $name [lindex [runOutcome $exe ""] 1] [expr {$stub ? "stub" : $system ? "system" : "?"}]
     }
     removeDirectory system-linker-auto
     set results

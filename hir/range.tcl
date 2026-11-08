@@ -976,13 +976,18 @@ proc hir::range::ExternalSeeds {hir spec} {
 # One region, under one assumption of its parameters' ranges
 
 # Types EXPRS in order (a block body, an if branch): the last one's range,
-# or never if some expression never completes normally.
+# or never if some expression never completes normally -- a rejected static
+# block standing as a statement excepted (hir::static::reifiedStatement:
+# what follows it is analyzed as if it could complete).
 proc hir::range::Sequence {hirVar ctxVar exprs} {
     upvar 1 $hirVar hir $ctxVar ctx
     set result [unknown]
     foreach e $exprs {
         set result [Expr hir ctx $e]
         if {$result eq "never"} {
+            if {[hir::static::reifiedStatement $hir $exprs $e]} {
+                continue
+            }
             break
         }
     }
@@ -1042,6 +1047,61 @@ proc hir::range::FoldInitial {hirVar ctxVar node} {
 # `intersect`, leaving the plain Int type fact, never an impossible Range.
 proc hir::range::InductionBinding {startR endR direction endKind} {
     return [intersect [TypeFact int] [InductionSeed $startR $endR $direction $endKind]]
+}
+
+# 1 when a numeric loop domain whose start/end operands have Ranges
+# STARTR/ENDR runs its body at least once for *every* start in STARTR and
+# every end in ENDR, else 0 (EMISSION-COUNTED-LOOP-PRECISION-MILESTONE-1.md).
+# A domain is entered exactly when its first value, START itself, passes the
+# loop's own test against END (core::forms::CountTest), so the rule is that
+# test at the worst pair of operands:
+#
+#   up   to       START <  END      START.max <  END.min
+#   up   through  START <= END      START.max <= END.min
+#   down to       START >  END      START.min >  END.max
+#   down through  START >= END      START.min >= END.max
+#
+# Non-relational: each operand's own Range, never a relation between them
+# (`from n - 1 to n` proves nothing here). Only a finite bound proves
+# anything: the side the test reads unbounded (a start that may be past
+# every end), `never` (no value reaches the loop) or an empty Range is 0 --
+# zero iterations stay possible. The other side may be unbounded (`n >= 1`
+# is END.min 1 whatever END.max is). The comparison is on arbitrary-
+# precision bounds, with no END+1 or END-1 formed. Who reads it: the
+# emission checker (hir::emission::EvalLoop drops a counted loop's
+# zero-iteration exit when it holds); no other analysis.
+proc hir::range::DomainEntered {startR endR direction endKind} {
+    foreach r [list $startR $endR] {
+        if {$r eq "never" || ![dict exists $r min] || ![dict exists $r max]} {
+            return 0
+        }
+        set lo [dict get $r min]
+        set hi [dict get $r max]
+        # No Int: an infinity is a bound, never a value.
+        if {$lo eq "+inf" || $hi eq "-inf"} {
+            return 0
+        }
+        if {$lo ne "-inf" && $hi ne "+inf" && $lo > $hi} {
+            return 0
+        }
+    }
+    if {$direction eq "up"} {
+        set s [dict get $startR max]
+        set z [dict get $endR min]
+    } else {
+        set s [dict get $startR min]
+        set z [dict get $endR max]
+    }
+    if {$s in {-inf +inf} || $z in {-inf +inf}} {
+        return 0
+    }
+    switch -- $direction/$endKind {
+        up/exclusive   { return [expr {$s < $z}] }
+        up/inclusive   { return [expr {$s <= $z}] }
+        down/exclusive { return [expr {$s > $z}] }
+        down/inclusive { return [expr {$s >= $z}] }
+    }
+    return 0
 }
 
 # The Range a walk whose own binding facts are BINDINGS reads for binding B:
@@ -1946,6 +2006,66 @@ proc hir::range::VerifyHashing {hirVar e node name} {
     hir::Diagnose hir TRAIT-NOT-SATISFIED [hir::semantic::NameCallables $hir $message] $arg
 }
 
+# The value of call E (NODE) of native NAME that crosses to another Botlish
+# VM (core/native.tcl's -sending; SENDABILITY-AND-VALUE-COPY-MILESTONE-1.md):
+# argument K, or the call's own (imprinted) result. Its static type must
+# satisfy the intrinsic trait Sendable (hir::types::SendClass): NOT-SENDABLE
+# otherwise, with the reason path, whether the type is statically not
+# sendable (a function, a context, an opaque struct whose owner states
+# nothing) or does not say (`any`). And it must be closed where the call is
+# written -- no imprint variable: the transfer's schema is the static
+# type's (hir/transfer.tcl), which a generic body does not know
+# (TRANSFER-OPEN-TYPE). A view of Sendable is admitted where a value is
+# encoded (its function is cloned per witness by the trait monomorphization
+# before the elaboration writes the schema), never as decode's type.
+# Checked in the program as written only, like VerifyHashing.
+proc hir::range::VerifySending {hirVar e node name} {
+    upvar 1 $hirVar hir
+    set sending [dict getdef [core::native::metadata $name] sending ""]
+    if {$sending eq "" || [dict exists $hir semanticContext] || [hir::traits::Planning]} {
+        return
+    }
+    if {$sending eq "result"} {
+        set at $e
+        set what "the value $name decodes"
+    } elseif {$sending eq "imprint"} {
+        set at $e
+        set what "the type $name names"
+    } else {
+        set at [lindex [dict get $node args] $sending]
+        set what "the argument of $name"
+        if {$at eq "" || [dict exists $hir poisoned $at]} {
+            return
+        }
+    }
+    if {$sending eq "imprint"} {
+        set type [hir::transfer::ImprintedType $hir $e]
+        if {$type eq ""} {
+            # (No binding: the imprint's own diagnostic.)
+            return
+        }
+    } else {
+        set type [hir::typeOf $hir $at]
+    }
+    if {$type eq "never"} {
+        # (No value, or poison: an earlier diagnostic's.)
+        return
+    }
+    lassign [hir::types::SendClass $type] class why
+    if {$class ne "total"} {
+        hir::Diagnose hir NOT-SENDABLE [hir::semantic::NameCallables $hir \
+            "$what is not sendable: [hir::types::show $type] cannot be reconstructed in another VM\n$why"] $at
+        return
+    }
+    if {![hir::types::IsClosedType $type {} 1] || ($sending eq "result" && [hir::types::IsTrait $type])} {
+        # (A view of Sendable is closed where it is a value -- its function
+        # is cloned per witness before the elaboration -- but never as the
+        # type a decode makes: that must be a concrete type.)
+        hir::Diagnose hir TRANSFER-OPEN-TYPE [hir::semantic::NameCallables $hir \
+            "$what has the open type [hir::types::show $type]: a transfer's schema is its static type, which must be known where the call is written (no imprint variable or trait view: call it where the concrete type is known)"] $at
+    }
+}
+
 # Walks every call reachable from E within its own block/program (spec #58:
 # a nested block's body is its own region, so this never descends into a
 # closure's own body -- that gets its own top-level call from
@@ -2017,6 +2137,7 @@ proc hir::range::VerifyCallChecks {hirVar ranges e node} {
         }
         hir::containers::VerifyNative hir $ranges $e $node $name
         VerifyHashing hir $e $node $name
+        VerifySending hir $e $node $name
         if {[dict get [core::native::metadata $name] foreign] ne ""} {
             # A foreign call contract is the native's whole signature: its
             # byte exposures and its typed C parameters (hir/borrow.tcl).

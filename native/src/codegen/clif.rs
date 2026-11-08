@@ -69,7 +69,7 @@ use crate::runtime::ops::helpers;
 use crate::runtime::value::*;
 use crate::runtime::vm::{
     VM_ALLOC_SITE_OFFSET, VM_CONSTS_OFFSET, VM_NATIVE_ROOTS_LEN_OFFSET, VM_NATIVE_ROOTS_PTR_OFFSET,
-    VM_SS_LIMIT_OFFSET, VM_SS_TOP_OFFSET, VM_STACK_LIMIT_OFFSET, VM_STATICS_OFFSET,
+    VM_CONTEXT_OFFSET, VM_SS_LIMIT_OFFSET, VM_SS_TOP_OFFSET, VM_STACK_LIMIT_OFFSET, VM_STATICS_OFFSET,
 };
 use cranelift_codegen::ir::condcodes::{FloatCC, IntCC};
 use cranelift_codegen::ir::{
@@ -131,20 +131,14 @@ pub struct Symbols {
     /// own rel32-range check on a real address this backend cannot vouch
     /// for the distance of.
     pub direct_helpers: bool,
-    /// The program's context area (CONTEXTS.md, nir::Program::context_bytes):
-    /// one linker-local, zero-initialized, writable data object, declared by
-    /// `declare` when the program has context slots. Generated code reaches it
-    /// through its symbol only -- no Vm field, no lookup, no extra argument.
-    pub context_area: Option<cranelift_module::DataId>,
-    /// Whether code addresses the context area PC-relatively (the AOT object,
-    /// where the symbol is linker-local and so "colocated": Cranelift emits
-    /// a GOT-relative load, which `mod.rs`'s `relax_context_got` marks
-    /// relaxable so the static linker rewrites it to `lea
-    /// botlish_context_area(%rip)`), or by its absolute address (`movabs`:
-    /// the JIT, which places data and code independently, so a rel32 reach
-    /// cannot be vouched for). Either way a fixed program address, never a
-    /// lookup.
-    pub context_pc_relative: bool,
+    /// Whether the program has a context area (CONTEXTS.md,
+    /// nir::Program::context_bytes > 0). The area is the running Vm's own
+    /// (runtime::vm's `context_ptr`, PER-THREAD-RUNTIME-STATE-MILESTONE-1.md):
+    /// the program defines its layout, each Vm owns its storage, and
+    /// generated code reaches it through the Vm it was called with -- one
+    /// load of the base at VM_CONTEXT_OFFSET, then the slot's constant
+    /// offset. No data symbol, no lookup, no extra argument.
+    pub contexts: bool,
     /// Per foreign function (nir::Program::foreigns, C-FFI.md): its imported
     /// symbol, declared with its C signature, and its declaration.
     pub foreigns: Vec<(ModuleFuncId, nir::ForeignDecl)>,
@@ -514,30 +508,13 @@ pub fn declare<M: Module>(module: &mut M, program: &nir::Program, export: bool, 
         helpers: HashMap::new(),
         names: HashMap::new(),
         direct_helpers,
-        context_area: None,
-        context_pc_relative: export,
+        contexts: program.context_bytes > 0,
         foreigns: vec![],
         va_stubs: HashMap::new(),
         shims: HashMap::new(),
         callbacks: vec![],
         callback_clif: vec![],
     };
-    if program.context_bytes > 0 {
-        // The context area (CONTEXTS.md): every context slot, at the offsets
-        // native/lower.tcl assigned, zero until the program function's own
-        // `contextstore`s install the values. Linker-local (`Linkage::Local`
-        // is "final", so the object backend may address it PC-relatively),
-        // writable, not thread-local: process-wide storage of the main
-        // execution domain.
-        let id = module
-            .declare_data("botlish_context_area", Linkage::Local, true, false)
-            .map_err(module_error)?;
-        let mut data = cranelift_module::DataDescription::new();
-        data.define_zeroinit(program.context_bytes as usize);
-        data.set_align(8);
-        module.define_data(id, &data).map_err(module_error)?;
-        symbols.context_area = Some(id);
-    }
     for (name, params, _) in helpers() {
         let id = module.declare_function(name, Linkage::Import, &signature(module, params)).map_err(module_error)?;
         symbols.helpers.insert(name, id);
@@ -898,9 +875,11 @@ struct Translator<'a, 'b, M: Module> {
     /// `error_exit` itself in `new`, never popped below that.
     error_exit_stack: Vec<ir::Block>,
     refs: HashMap<ModuleFuncId, ir::FuncRef>,
-    /// This function's global value for the context area (`context_addr`),
-    /// declared on first use.
-    context_gv: Option<ir::GlobalValue>,
+    /// The base of the running Vm's context area, loaded once in the entry
+    /// block of a function that accesses it (`context_addr`): it dominates
+    /// every block, self tail calls included, and is a raw address, never a
+    /// GC root.
+    context_base: Option<ir::Value>,
     terminated: bool,
     /// The hidden trailing pointer parameter of a `results > 2` function
     /// (signature_n): `RetMulti` writes fields 1.. through it instead of
@@ -1002,7 +981,7 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             error_exit,
             error_exit_stack: vec![error_exit],
             refs: HashMap::new(),
-            context_gv: None,
+            context_base: None,
             terminated: false,
             plan,
             result_buf: None,
@@ -1062,6 +1041,13 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             // the caller's own stack, not the heap), so it is read once here
             // and never stored to the shadow stack.
             self.result_buf = Some(params[next + f.params as usize]);
+        }
+        if f.body.iter().any(|inst| matches!(inst, Inst::ContextLoad { .. } | Inst::ContextStore { .. })) {
+            // The running Vm's context area (CONTEXTS.md, PER-THREAD-
+            // RUNTIME-STATE-MILESTONE-1.md), once per call: Cranelift does not
+            // hoist the load out of a loop by itself, and a load per access
+            // would put one more dependent load before every context read.
+            self.context_base = Some(self.load_context_base()?);
         }
         self.b.ins().jump(self.body, &[]);
 
@@ -1272,25 +1258,27 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
         self.b.use_var(self.vars[reg as usize])
     }
 
-    /// The address of the program's context area (CONTEXTS.md):
-    /// `symbol_value` of its data symbol -- PC-relative in the AOT object,
-    /// absolute in the JIT (Symbols::context_pc_relative).
+    /// The base of the running Vm's context area (CONTEXTS.md; runtime::vm's
+    /// `context_ptr`, PER-THREAD-RUNTIME-STATE-MILESTONE-1.md): one load from
+    /// the Vm this function was called with. Read-only for the function --
+    /// a Vm's area never moves once installed, and a `contextstore` writes
+    /// into the area, never the pointer -- so Cranelift may reuse one load
+    /// for every access of a function.
     fn context_addr(&mut self) -> Result<ir::Value, BackendError> {
-        let Some(id) = self.symbols.context_area else {
+        match self.context_base {
+            Some(base) => Ok(base),
+            None => self.load_context_base(),
+        }
+    }
+
+    /// One load of the running Vm's `context_ptr` (`context_addr`).
+    fn load_context_base(&mut self) -> Result<ir::Value, BackendError> {
+        if !self.symbols.contexts {
             return Err(BackendError::Bug("context access in a program without a context area".into()));
-        };
-        let gv = match self.context_gv {
-            Some(gv) => gv,
-            None => {
-                let gv = self.module.declare_data_in_func(id, self.b.func);
-                if let ir::GlobalValueData::Symbol { colocated, .. } = &mut self.b.func.global_values[gv] {
-                    *colocated = self.symbols.context_pc_relative;
-                }
-                self.context_gv = Some(gv);
-                gv
-            }
-        };
-        Ok(self.b.ins().symbol_value(I64, gv))
+        }
+        // Not `can_move`: Cranelift would place a movable load at its uses,
+        // back inside the loops that read the context.
+        Ok(self.b.ins().load(I64, MemFlagsData::trusted().with_readonly(), self.vm, VM_CONTEXT_OFFSET))
     }
 
     fn func_ref(&mut self, id: ModuleFuncId) -> ir::FuncRef {
@@ -2180,9 +2168,10 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                 self.b.ins().store(MemFlagsData::trusted(), v, table, (*index * 8) as i32);
             }
             Inst::ContextLoad { dst, offset } => {
-                // One scalar leaf of an installed context (CONTEXTS.md): the
-                // area's fixed address plus a constant offset; the word is a
-                // tagged immediate, never a pointer.
+                // One leaf of an installed context (CONTEXTS.md): the running
+                // Vm's area plus a constant offset; the word is a tagged
+                // immediate, a C address word or a collection header the Vm
+                // roots (`ctxroot`).
                 let area = self.context_addr()?;
                 let v = self.b.ins().load(I64, MemFlagsData::trusted(), area, *offset as i32);
                 self.def(*dst, v);
@@ -3019,6 +3008,13 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                         CoRelease => ("rt_co_release", None, false, None),
                         CoFailed => ("rt_co_failed", None, false, Some(("cofailed", KIND_COROUTINE))),
                         AffineDrop => ("rt_affine_drop", None, false, None),
+                        // Releases that run Botlish code (LEXICAL-RESOURCE-
+                        // CLEANUP-EXPLORATION-MILESTONE-1.md): safepoints
+                        // (ops.rs's op_may_allocate), fallible on a run-time
+                        // fault of that code.
+                        CoAbandon => ("rt_co_abandon", None, true, None),
+                        AffineDropRun => ("rt_affine_drop_run", None, true, None),
+                        CleanupCall => ("rt_cleanup_call", None, true, None),
                         // MutableVector (MUTABLE-VECTOR.md, runtime/mutvec.rs).
                         MvFromList => ("rt_mv_from_list", None, false, Some(("mvfromlist", KIND_MUTVEC))),
                         MvLen => ("rt_mv_len", None, false, None),
@@ -3033,6 +3029,13 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                         MvToList => ("rt_mv_to_list", None, false, Some(("mvtolist", KIND_LIST))),
                         MvTakeFront => ("rt_mv_take_front", None, false, None),
                         MvClearDrop => ("rt_mv_clear_drop", None, false, None),
+                        // The variants whose descriptor runs code
+                        // (LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md):
+                        // the same helpers, safepoints and fallible.
+                        MvClearDropRun => ("rt_mv_clear_drop", None, true, None),
+                        MvSwapDropRun => ("rt_mv_swap_drop", None, true, None),
+                        MutArraySwapDropRun => ("rt_mutarray_swap_drop", None, true, None),
+                        MutArraySetDropRun => ("rt_mutarray_set_drop", None, true, None),
                         MvSwapDrop => ("rt_mv_swap_drop", None, true, None),
                         CtxRoot => ("rt_context_root", None, false, None),
                         // MutableArray (MUTABLE-ARRAY.md, runtime/ops.rs).
@@ -3046,6 +3049,17 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                         MutArrayToList => ("rt_mutarray_to_list", None, false, Some(("mutarraytolist", KIND_LIST))),
                         MutArrayEmpty => ("rt_mutarray_empty", None, false, None),
                         MutArrayTakeFront => ("rt_mutarray_take_front", None, false, None),
+                        // Transfer (runtime/transfer.rs): both run the
+                        // owners' `through` functions and allocate (each a
+                        // safepoint, op_may_allocate); fallible with a
+                        // decode's declared refusals and an owner call's
+                        // failure.
+                        TransferEncode => ("rt_transfer_encode", None, true, None),
+                        // Threads and the transport (runtime/thread.rs): one
+                        // helper, the operation's code its first operand;
+                        // each may allocate its result (a safepoint).
+                        ThreadOp => ("rt_thread_op", None, true, None),
+                        TransferDecode => ("rt_transfer_decode", None, true, None),
                         // Never fallible (see ops.rs's rt_str_decode_char_at):
                         // a one-character String can never exceed
                         // MAX_COLLECTION_LENGTH. Still routed through
@@ -3228,6 +3242,10 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                             let v = self.call_allocating("rt_list_new", &[self.vm, n, ptr], "listnew", KIND_LIST);
                             self.check(v);
                             return v;
+                        }
+                        CleanupTable => {
+                            let (n, ptr) = self.array(args);
+                            return self.call_helper("rt_cleanup_table", &[self.vm, n, ptr]);
                         }
                         _ => unreachable!(),
                     };
@@ -4445,6 +4463,12 @@ mod win64_variadic_tests {
     /// (the fifth to eighth arguments).
     static mut CAPTURED: [u64; 12] = [0; 12];
 
+    /// Held from clearing CAPTURED to reading it back: the executed tests run
+    /// on parallel threads of the test harness and share the one buffer
+    /// `capture` writes (without it, one test read the other's arguments:
+    /// "argument 2 (l) in r8: 0xfffffffde78ee600", the other's -9000000000).
+    static CAPTURE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     /// Records the machine state a Win64 call arrives in before any compiled
     /// code runs, and returns 0.
     #[unsafe(naked)]
@@ -4527,9 +4551,12 @@ mod win64_variadic_tests {
         module.define_function(caller, &mut ctx).unwrap();
         module.finalize_definitions().unwrap();
         let entry: unsafe extern "win64" fn(*const u64) -> i64 = unsafe { std::mem::transmute(module.get_finalized_function(caller)) };
-        unsafe { std::ptr::addr_of_mut!(CAPTURED).write_volatile([0; 12]) };
-        assert_eq!(unsafe { entry(words.as_ptr()) }, 0);
-        let captured = unsafe { std::ptr::addr_of!(CAPTURED).read_volatile() };
+        let captured = {
+            let _held = CAPTURE_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            unsafe { std::ptr::addr_of_mut!(CAPTURED).write_volatile([0; 12]) };
+            assert_eq!(unsafe { entry(words.as_ptr()) }, 0);
+            unsafe { std::ptr::addr_of!(CAPTURED).read_volatile() }
+        };
         unsafe { module.free_memory() };
         captured
     }
@@ -4755,14 +4782,13 @@ mod switch_tests {
     use crate::runtime::metrics::AllocMode;
     use crate::runtime::value::{make_small, Value};
     use crate::runtime::vm::{ProgramInfo, Vm};
-    use std::rc::Rc;
 
     fn run(text: &str) -> Value {
         let program = nir::parse(text).unwrap_or_else(|e| panic!("{e}\n{text}"));
         let options = CompileOptions { clif: false, vcode: false, alloc_sites: false, count_accesses: false };
         let compiled = CraneliftJit.compile(&program, &options).expect("compiles");
         let mut vm = Vm::new(
-            Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new(), errors: Vec::new() }),
+            std::sync::Arc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new(), errors: Vec::new() }),
             AllocMode::Off,
         );
         compiled.install_constants(&mut vm);

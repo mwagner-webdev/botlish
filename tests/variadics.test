@@ -478,13 +478,13 @@ proc executableValue {text} {
         puts -nonewline $f $text
         close $f
         exec [info nameofexecutable] [file join $::projectRoot main.tcl] -warnings off -emit-native-executable $path
-        return [string trim [exec [file join $dir program]]]
+        return [standaloneValue [file join $dir program]]
     } finally {
         removeDirectory {variadics executable}
     }
 }
 
-test va-standalone-executable {the standalone native executable prints what every in-process backend computes} -constraints executableAot -body {
+test va-standalone-executable {the standalone native executable's value, read through the driver protocol, is what every in-process backend computes} -constraints executableAot -body {
     set program "${::sums}fn tag(name: str, variadic parts: List\[str\]) -> List\[str\]:\n    parts\n\[sum(), sum(1, 2, 3), weighted(2, 4, 5), tag(\"x\", \"a\", \"b\")\]\n"
     list [executableValue $program] [valueOf $program]
 } -cleanup {unset -nocomplain program} -result {{[0, 6, 18, ["a", "b"]]} {[0, 6, 18, ["a", "b"]]}}

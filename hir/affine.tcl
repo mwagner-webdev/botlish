@@ -123,8 +123,24 @@ namespace eval hir::affine {
     # Release points on infinite loops' breaks (PathReleases): break ->
     # bindings, merged into the exit table.
     variable pathExits {}
-    # The named structs Descriptor is inside of, outermost first.
+    # The named struct types (applications with their arguments) Descriptor
+    # is inside of, outermost first.
     variable descriptorVisiting {}
+    # {TYPE EXCLUDE RESOURCES} -> its descriptor, for the declarations in
+    # force: a type is walked once, not once per binding that owns one (the
+    # ownership analysis and every backend's release lowering ask for each)
+    # and not once per path through it (an application holding the next
+    # level of itself twice has 2^depth paths through a few dozen types).
+    # RESOURCES is what the walk reads of the HIR: whether its suspended
+    # coroutines unwind and its cleanup table (hir/resources.tcl), which
+    # hir::affine::verify sets after the analysis has asked for descriptors
+    # (`c` before, `C` after). Only an answer whose walk met no struct type it
+    # was already inside of is kept: that one depends on the walk it is part
+    # of (descriptorCut). hir::structs::ForgetAffinity empties it with the
+    # affinity facts it is derived from, at every change of the declarations.
+    variable descriptorMemo {}
+    # 1 once the current walk met a struct type it is inside of.
+    variable descriptorCut 0
 }
 
 # ---------------------------------------------------------------------------
@@ -451,9 +467,17 @@ proc hir::affine::Named {hir e} {
     return "this value"
 }
 
-# The type text a diagnostic gives affine value E.
+# The type text a diagnostic gives affine value E: its type, and for an
+# application of a parameterized struct that is affine through its
+# arguments, the field that makes it so (hir::structs::AffineThrough).
 proc hir::affine::TypeText {hir e} {
-    return [hir::types::show [hir::typeOf $hir $e]]
+    set type [hir::typeOf $hir $e]
+    set through [hir::structs::AffineThrough $type]
+    if {$through eq ""} {
+        return [hir::types::show $type]
+    }
+    lassign $through field fieldType
+    return "[hir::types::show $type] (affine: its field \"$field\" holds [hir::types::show $fieldType])"
 }
 
 # ---------------------------------------------------------------------------
@@ -849,6 +873,16 @@ proc hir::affine::verify {hirVar} {
     # that still runs, -strict 0, keeps every value until collected), and
     # never twice: HIR built from core IR text that spells them (what
     # hir/lower.tcl lowered, read back) already has every release written out.
+    if {[hir::resources::Used $hir]} {
+        # Resources (hir/resources.tcl): whether a suspended coroutine's
+        # release unwinds its frames, which every scoped binding's
+        # descriptor then says (Descriptor's `C`); and a name of its own
+        # for every binding a release must reach (Unshare).
+        dict set hir resources unwind [Unwinds $hir $owner]
+        if {$accepted && ![WrittenReleases $hir $parentMap]} {
+            Unshare hir
+        }
+    }
     if {!$accepted || [WrittenReleases $hir $parentMap]} {
         set scopes {}
     } else {
@@ -868,6 +902,10 @@ proc hir::affine::verify {hirVar} {
     }
     dict set hir affine exits $exits
     dict set hir affine errorExits $errorExits
+    if {[hir::resources::Used $hir]} {
+        OrderReleases hir
+        CleanupDischarges hir
+    }
 }
 
 # The affine parameters of block E (they start live in its body).
@@ -1140,7 +1178,16 @@ proc hir::affine::Seq {hirVar exprs state} {
         if {$state eq "dead"} {
             return dead
         }
+        set before $state
         set state [Flow hir $e $state]
+        if {$state eq "dead" && [hir::static::reifiedStatement $hir $exprs $e]} {
+            # A rejected static block as a statement (STATIC-COMPILE.md,
+            # "Completions"): its failure is an exit (Flow recorded its
+            # state, ExitReleases releases there what it leaves), and the
+            # code after it is analyzed as if the block completed, with
+            # what was owned before it -- its payload is constants.
+            set state $before
+        }
         # The state after each statement (a loop body's, at the fixed
         # point): where a release may go (Releases).
         dict set afterStates $e $state
@@ -1514,13 +1561,35 @@ proc hir::affine::DropNative {} {
     return affine#drop
 }
 
+# The Tcl runtimes' resource release (core/affine.tcl): affine#cleanup(K, V)
+# calls entry K of the run's cleanup table, which affine#register_cleanup(K,
+# F) fills when cleanup function F is declared.
+proc hir::affine::CleanupNative {} {
+    return affine#cleanup
+}
+
+proc hir::affine::RegisterCleanupNative {} {
+    return affine#register_cleanup
+}
+
+# The index of cleanup function block E in HIR's cleanup table.
+proc hir::affine::CleanupIndex {hir e} {
+    dict for {id record} [hir::resources::table $hir] {
+        if {[dict get $record block] eq $e} {
+            return [dict get $record index]
+        }
+    }
+    error "internal compiler error: block $e is no cleanup function"
+}
+
 # 1 if HIR already has releases written out: HIR built from core IR text
 # that spells them, e.g. what hir/lower.tcl lowered, read back (source
 # cannot spell `#`).
 proc hir::affine::WrittenReleases {hir parent} {
     dict for {e node} [dict get $hir exprs] {
         if {[dict get $node kind] eq "ref" && [dict exists $parent $e]
-                && [NativeName $hir [lindex [dict get $parent $e] 0]] in [list [core::coroutines::releaseNative] [DropNative]]} {
+                && [NativeName $hir [lindex [dict get $parent $e] 0]] in [list [core::coroutines::releaseNative] [DropNative] \
+                    [core::coroutines::abandonNative] [CleanupNative]]} {
             return 1
         }
     }
@@ -1590,9 +1659,180 @@ proc hir::affine::Scopes {hir parent} {
             set last [expr {max($last, $at)}]
         }
         if {!$found} continue
-        dict set scopes $b [dict create sequence $sequence key [lindex $sequence 0] last $last]
+        set info [dict create sequence $sequence key [lindex $sequence 0] last $last lastRef $last]
+        if {[Scoped $hir $b]} {
+            # A binding whose release runs a cleanup -- or, unwinding, may
+            # (a coroutine whose frames own one) -- owns its value to the end
+            # of its lexical scope, its last use or not
+            # (LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md): the
+            # release is after the sequence's last statement, and every exit
+            # after the binding statement releases it.
+            dict set info last [expr {[llength $sequence] - 1}]
+        }
+        dict set scopes $b $info
     }
     return $scopes
+}
+
+# 1 if binding B is scoped: released at the end of its lexical scope, never
+# at its last use, because its release runs a cleanup (hir/resources.tcl) or
+# unwinds a coroutine (Unwinds).
+proc hir::affine::Scoped {hir b} {
+    return [regexp {[rC]} [Descriptor $hir [BindingType $hir $b] [ItemExclude $hir $b]]]
+}
+
+# 1 if a function of HIR that may suspend (a coroutine's frame: the yield
+# analysis's capable functions) owns a value whose drop runs a cleanup -- a
+# parameter, a binding or any value its code holds (OWNER: expression ->
+# owning block, hir::contexts::Walk's). Then releasing a suspended coroutine
+# must run its frames' releases: it is unwound, never discarded (the
+# runtimes' `coroutine#abandon`, the descriptors' `C`), and every coroutine
+# handle owns its value to its scope's end like a resource.
+proc hir::affine::Unwinds {hir owner} {
+    set capable [dict getdef $hir coroutines blocks {}]
+    if {[dict size $capable] == 0} {
+        return 0
+    }
+    dict for {e node} [dict get $hir exprs] {
+        if {![dict get $node reachable] || ![dict exists $owner $e]} continue
+        set o [dict get $owner $e]
+        if {$o eq "" || ![dict exists $capable $o]} continue
+        if {[hir::resources::HasCleanup [hir::typeOf $hir $e]]} {
+            return 1
+        }
+    }
+    foreach o [dict keys $capable] {
+        if {![dict exists $hir exprs $o] || [dict get $hir exprs $o kind] ne "block"} continue
+        foreach b [dict get $hir exprs $o params] {
+            if {[hir::resources::HasCleanup [BindingType $hir $b]]} {
+                return 1
+            }
+        }
+    }
+    return 0
+}
+
+# Gives every scoped binding (Scoped) whose name another binding of HIR also
+# has a fresh name NAME#N (hir/hygiene.tcl's machinery; the spelling is
+# kept): a release names its binding (Core IR resolves names), and a
+# shadowed name would leave the value to the collector -- its cleanup never
+# run. The entry program's cleanup functions likewise (a module's have their
+# qualified names): a release calls the cleanup by name wherever it runs.
+proc hir::affine::Unshare {hirVar} {
+    upvar 1 $hirVar hir
+    set count [dict create]
+    dict for {b binding} [dict get $hir bindings] {
+        dict incr count [dict get $binding name]
+    }
+    set wanted {}
+    dict for {b binding} [dict get $hir bindings] {
+        if {[dict get $count [dict get $binding name]] < 2} continue
+        if {[IsAffineBinding $hir $b] && [Scoped $hir $b]} {
+            lappend wanted $b
+        }
+    }
+    dict for {id record} [hir::resources::table $hir] {
+        set b [dict get $record binding]
+        if {[dict get $count [dict get $hir bindings $b name]] >= 2 && $b ni $wanted} {
+            lappend wanted $b
+        }
+    }
+    if {$wanted eq {}} {
+        return
+    }
+    set used [dict create]
+    dict for {b binding} [dict get $hir bindings] {
+        dict set used [dict get $binding name] 1
+    }
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict exists $node name]} {
+            dict set used [dict get $node name] 1
+        }
+    }
+    foreach b [lsort -dictionary $wanted] {
+        set old [dict get $hir bindings $b name]
+        set n 1
+        while {[dict exists $used $old#$n]} {
+            incr n
+        }
+        dict set used $old#$n 1
+        hir::hygiene::RenameTo hir $b $old#$n 1
+    }
+}
+
+# The order of the release items at every release point of a program with
+# resources: the reverse of acquisition (a binding by its binding statement,
+# a parameter first of all, a value by its expression), so what was acquired
+# last is released first -- at a scope's end, on an exit, on an error edge
+# -- wherever a point releases a scoped item. (Elsewhere releases are
+# unobservable and keep their order.)
+proc hir::affine::OrderReleases {hirVar} {
+    upvar 1 $hirVar hir
+    foreach table {releases exits} {
+        dict for {e items} [dict get $hir affine $table] {
+            dict set hir affine $table $e [Acquisition $hir $items]
+        }
+    }
+    dict for {e byName} [dict get $hir affine errorExits] {
+        dict for {name items} $byName {
+            dict set hir affine errorExits $e $name [Acquisition $hir $items]
+        }
+    }
+}
+
+# ITEMS in reverse acquisition order when one of them is scoped, else as
+# they are.
+proc hir::affine::Acquisition {hir items} {
+    set scoped 0
+    foreach item $items {
+        lassign [ItemType $hir $item] type exclude
+        if {[regexp {[rC]} [Descriptor $hir $type $exclude]]} {
+            set scoped 1
+            break
+        }
+    }
+    if {!$scoped || [llength $items] < 2} {
+        return $items
+    }
+    set keyed {}
+    foreach item $items {
+        if {[string match b* $item]} {
+            set by [dict get $hir bindings $item declaredBy]
+            set key [if {$by eq ""} {string cat 0} else {string range $by 1 end}]
+        } else {
+            set key [string range $item 1 end]
+        }
+        lappend keyed [list $key $item]
+    }
+    return [lmap pair [lsort -integer -decreasing -index 0 $keyed] {lindex $pair 1}]
+}
+
+# A cleanup function discharges its parameter's obligation itself (takes it
+# apart, or moves it on): a release of the parameter inside its own cleanup
+# would run the cleanup again (RESOURCE-DECLARATION).
+proc hir::affine::CleanupDischarges {hirVar} {
+    upvar 1 $hirVar hir
+    dict for {id record} [hir::resources::table $hir] {
+        set e [dict get $record block]
+        set param [lindex [dict get $hir exprs $e params] 0]
+        set where ""
+        dict for {x items} [dict get $hir affine releases] {
+            if {$param in $items} { set where $x }
+        }
+        dict for {x items} [dict get $hir affine exits] {
+            if {$param in $items} { set where $x }
+        }
+        dict for {x byName} [dict get $hir affine errorExits] {
+            dict for {name items} $byName {
+                if {$param in $items} { set where $x }
+            }
+        }
+        if {$where ne ""} {
+            set name [hir::semantic::SourceName $hir [dict get $record binding]]
+            hir::Diagnose hir RESOURCE-DECLARATION \
+                "cleanup function $name would release its own parameter `[hir::semantic::SourceName $hir $param]` here, which runs $name again: a cleanup discharges the obligation itself -- take the value apart (\"{FIELD, ...} = [hir::semantic::SourceName $hir $param]\") on every path" $where
+        }
+    }
 }
 
 # 1 if binding B owns its value (live, or maybe moved) in liveness STATE.
@@ -1613,8 +1853,28 @@ proc hir::affine::Releases {hirVar parent scopes accepted} {
     set releases [dict create]
     dict for {b info} $scopes {
         set statement [lindex [dict get $info sequence] [dict get $info last]]
+        if {[dict get $info lastRef] < [dict get $info last]} {
+            # A scoped binding (Scoped): owned to its scope's end. Moved on
+            # some paths only, through its last reference, it is still owned
+            # at the end on the others -- and no statement there can tell
+            # which (there is no run-time ownership state).
+            set lastRef [lindex [dict get $info sequence] [dict get $info lastRef]]
+            if {[dict exists $afterStates $lastRef] && [dict get $afterStates $lastRef] ne "dead"
+                    && [dict exists $afterStates $lastRef $b] && [lindex [dict get $afterStates $lastRef $b] 0] eq "maybe"} {
+                set name [hir::semantic::SourceName $hir $b]
+                if {[hir::resources::HasCleanup [BindingType $hir $b]]} {
+                    set owned "runs a cleanup at the end of its scope"
+                } else {
+                    # A coroutine handle while the program unwinds (Unwinds).
+                    set owned "is released at the end of its scope (a suspending function of this program owns a value with a cleanup, so releasing a suspended coroutine unwinds it)"
+                }
+                hir::Diagnose hir AFFINE-PATH-RELEASE-UNSUPPORTED \
+                    "`$name` $owned, and is moved on some paths through this statement but still owned on others: the release at the scope's end could not tell the paths apart (move it on every path, or on none -- e.g. release it explicitly where it is not moved)" $lastRef
+                continue
+            }
+        }
         if {![dict exists $afterStates $statement] || ![Owns [dict get $afterStates $statement] $b]} continue
-        if {[Descriptor $hir [BindingType $hir $b] [ConsumedFields $hir $b]] eq ""} continue
+        if {[Descriptor $hir [BindingType $hir $b] [ItemExclude $hir $b]] eq ""} continue
         if {[lindex [dict get $afterStates $statement $b] 0] eq "maybe"} {
             # Moved on some paths only: released on each path that still
             # owns it, never after the join -- where a path that moved it
@@ -1899,7 +2159,7 @@ proc hir::affine::Leaving {hir scopes byKey pairs state x} {
         if {![dict exists $byKey $key]} continue
         foreach b [dict get $byKey $key] {
             if {$at <= [dict get $scopes $b last] && [Owns $state $b] && ![Shadowed $hir $x $b]
-                    && [Descriptor $hir [BindingType $hir $b] [ConsumedFields $hir $b]] ne ""} {
+                    && [Descriptor $hir [BindingType $hir $b] [ItemExclude $hir $b]] ne ""} {
                 lappend result $b
             }
         }
@@ -1959,6 +2219,15 @@ proc hir::affine::ExitReleases {hir parent scopes} {
     # never holds for it): the verified contract boundary, the same rule
     # the completion analysis uses.
     lassign [hir::completions::erasureFacts $hir] erased transparent
+    # Unwinding (Unwinds): a call at which the running coroutine may
+    # suspend has one more error edge, its abandonment -- the internal
+    # failure coroutine#abandon makes the pending yield fail with, which no
+    # handler handles: the edge releases everything the frame owns, as an
+    # error propagating to the function's top would.
+    set suspends [dict create]
+    if {[hir::resources::unwinds $hir]} {
+        set suspends [SuspensionCalls $hir]
+    }
     foreach entry $order {
         set x [lindex $entry 0]
         set state [dict get $exitStates $x]
@@ -2013,6 +2282,9 @@ proc hir::affine::ExitReleases {hir parent scopes} {
                         && [hir::completions::mayLetErasedThrough $hir $x $transparent]} {
                     set names [lsort -unique [concat $names $erased]]
                 }
+                if {[dict exists $suspends $x]} {
+                    lappend names [AbandonedError]
+                }
                 lassign [dict get $parent $x] p
                 if {$p ne "" && [dict get $hir exprs $p kind] eq "handle" && [dict get $hir exprs $p call] eq $x} {
                     # A handled call: what its handlers do not handle leaves
@@ -2042,6 +2314,35 @@ proc hir::affine::ExitReleases {hir parent scopes} {
         }
     }
     return [list $exits $errorExits]
+}
+
+# The internal failure a suspended coroutine's pending yield fails with when
+# it is abandoned (unwound): never a declared error, never handled, spelled
+# so that no program can name it (core/coroutines.tcl, runtime/coroutine.rs).
+proc hir::affine::AbandonedError {} {
+    return coroutine#abandoned
+}
+
+# The calls of HIR at which the running coroutine may suspend, as a set: a
+# yield, and a call of a function that may yield (the yield analysis's
+# capable functions, hir/coroutines.tcl).
+proc hir::affine::SuspensionCalls {hir} {
+    set result [dict create]
+    set capable [dict getdef $hir coroutines blocks {}]
+    dict for {b ys} [dict getdef $hir coroutines direct {}] {
+        foreach y $ys {
+            dict set result $y 1
+        }
+    }
+    dict for {n list} [dict getdef $hir coroutines edges {}] {
+        foreach edge $list {
+            lassign $edge c target
+            if {[dict exists $capable $target]} {
+                dict set result $c 1
+            }
+        }
+    }
+    return $result
 }
 
 # 1 if expression E is a projection that reads a C floating field through
@@ -2232,7 +2533,34 @@ proc hir::affine::temporaries {hir} {
 # Releases are unobservable, so the order changes no value; it is fixed so
 # runtime behavior is reproducible (AFFINE-VALUES.md, "Drop glue").
 proc hir::affine::Descriptor {hir type {exclude {}}} {
+    variable descriptorMemo
+    variable descriptorCut
+    set key [list $type $exclude [hir::resources::unwinds $hir] [hir::resources::table $hir]]
+    if {[dict exists $descriptorMemo $key]} {
+        return [dict get $descriptorMemo $key]
+    }
+    set outer $descriptorCut
+    set descriptorCut 0
+    try {
+        set d [DescriptorOf $hir $type $exclude]
+    } finally {
+        set cut $descriptorCut
+        set descriptorCut [expr {$outer || $cut}]
+    }
+    if {!$cut} {
+        dict set descriptorMemo $key $d
+    }
+    return $d
+}
+
+# Descriptor's walk.
+proc hir::affine::DescriptorOf {hir type exclude} {
     set type [hir::types::Unrefined $type]
+    if {![hir::types::IsAffine $type]} {
+        # An unrestricted value owns nothing affine (every component this
+        # walks is one hir::types::IsAffine reads).
+        return ""
+    }
     if {[hir::types::IsCAddress $type]} {
         # A C pointer (C-ABI-TYPES.md) is affine but owns nothing: its owner's
         # death releases nothing, so it has no descriptor (and an aggregate
@@ -2240,7 +2568,25 @@ proc hir::affine::Descriptor {hir type {exclude {}}} {
         return ""
     }
     if {[hir::types::AffineRoot $type]} {
+        # Unwinding (Unwinds): `C`, a release that runs the suspended
+        # frames' releases.
+        if {[hir::resources::unwinds $hir]} {
+            return C
+        }
         return c
+    }
+    if {[hir::types::IsNamedStruct $type] && [hir::structs::isResource [lindex $type 1]]
+            && "#destructured" ni $exclude} {
+        # A resource (hir/resources.tcl): `rK`, its cleanup K, which takes
+        # the value apart -- its own affine fields included. (A
+        # destructuring temporary's obligation was discharged: what it still
+        # owns is dropped below like any struct's.)
+        set record [hir::resources::Cleanup $hir [lindex $type 1]]
+        if {$record eq ""} {
+            # No cleanup (diagnosed at its constructions).
+            return ""
+        }
+        return "r[dict get $record index]."
     }
     if {[hir::types::IsList $type]} {
         set inner [Descriptor $hir [lindex $type 1]]
@@ -2268,28 +2614,48 @@ proc hir::affine::Descriptor {hir type {exclude {}}} {
         return "a$inner"
     }
     if {[hir::types::IsStructLike $type]} {
-        # A named struct may name itself (STRUCTS.md). Met again inside
-        # itself, it is one no finite value has -- held through fields alone
-        # (each value would hold a smaller one, without end) -- or an
-        # unrestricted one, which owns nothing to drop: either way that inner
-        # occurrence drops nothing. An affine struct holding itself in a
-        # container element is rejected at its declaration
-        # (hir::structs::OwnedRecursion): its values nest to any depth, past
-        # every finite descriptor.
+        # A named struct type may name itself (STRUCTS.md). Met again inside
+        # itself -- the same type: an application with the same arguments
+        # (another application of its declaration, Box[Box[C]]'s Box[C], is
+        # another type, walked on) -- it is one no finite value has, held
+        # through fields alone (each value would hold a smaller one, without
+        # end): that inner occurrence drops nothing. So is another
+        # application of a declaration the walk is inside of whose every
+        # value would hold itself through fields alone (hir::ownership::
+        # FieldCycle: `g: G[List[T]]` in G[T], which meets ever larger
+        # applications and would never end). A recursive affine type -- its
+        # values nest affine values to any depth in containers -- is
+        # rejected where it is declared, written or made
+        # (hir::structs::OwnedRecursion), so every type that reaches here
+        # has a finite descriptor: an infinite walk would meet a cycle of
+        # the finite declaration-state graph, which crosses an element (a
+        # recursive affine type) or crosses none (a field cycle, cut here).
         variable descriptorVisiting
         if {[hir::types::IsNamedStruct $type]} {
-            set id [lindex $type 1]
+            set key $type
         } else {
-            set id ""
+            set key ""
         }
-        if {$id ne ""} {
-            if {$id in $descriptorVisiting} {
-                if {[hir::types::IsAffine $type] && [hir::structs::OwnedRecursion $id] ne ""} {
-                    error "internal compiler error: the affine struct $id holds itself in a container: it has no finite drop descriptor (hir::structs::apply rejects its declaration)"
+        if {$key ne ""} {
+            set again [expr {$key in $descriptorVisiting}]
+            if {!$again && [lsearch -exact -index 1 $descriptorVisiting [lindex $type 1]] >= 0} {
+                if {[hir::ownership::FieldCycle [lindex $type 1]]} {
+                    set again 1
+                } elseif {[hir::structs::OwnedRecursion $type] ne ""} {
+                    # (Never left to walk on: a recursive affine type's
+                    # walk would not end.)
+                    set again 1
+                }
+            }
+            if {$again} {
+                variable descriptorCut
+                set descriptorCut 1
+                if {[hir::structs::OwnedRecursion $type] ne ""} {
+                    error "internal compiler error: the affine struct type [hir::types::show $type] is a recursive affine type: it has no finite drop descriptor (hir::structs::apply rejects such a declaration, hir::structs::ApplicationIssue and WrittenProblem such an application)"
                 }
                 return ""
             }
-            lappend descriptorVisiting $id
+            lappend descriptorVisiting $key
         }
         set parts {}
         set n 0
@@ -2309,7 +2675,7 @@ proc hir::affine::Descriptor {hir type {exclude {}}} {
                 }
             }
         } finally {
-            if {$id ne ""} {
+            if {$key ne ""} {
                 set descriptorVisiting [lrange $descriptorVisiting 0 end-1]
             }
         }
@@ -2349,21 +2715,61 @@ proc hir::affine::Components {hir e} {
 # fields: {TYPE EXCLUDE}.
 proc hir::affine::ItemType {hir item} {
     if {[string match b* $item]} {
-        return [list [BindingType $hir $item] [ConsumedFields $hir $item]]
+        return [list [BindingType $hir $item] [ItemExclude $hir $item]]
     }
     return [list [hir::typeOf $hir $item] {}]
+}
+
+# What Descriptor leaves out of binding B's value: a destructuring
+# temporary's consumed fields, and -- a resource's own obligation, which
+# taking it apart discharges (hir/resources.tcl) -- "#destructured".
+proc hir::affine::ItemExclude {hir b} {
+    set exclude [ConsumedFields $hir $b]
+    if {[IsDestructureTemp $hir $b]} {
+        lappend exclude #destructured
+    }
+    return $exclude
 }
 
 # How release item ITEM is released: {coroutine} (coroutine#release), {drop
 # DESCRIPTOR} (affine#drop), or "" (it owns nothing affine any more).
 proc hir::affine::DropPlan {hir item} {
     lassign [ItemType $hir $item] type exclude
-    set d [Descriptor $hir $type $exclude]
+    return [PlanOf $hir [Descriptor $hir $type $exclude]]
+}
+
+# The release plan of drop descriptor D (Descriptor's): "" (nothing to
+# release), {coroutine} (coroutine#release), {abandon} (coroutine#abandon:
+# a suspended coroutine unwound, its frames' releases run), {cleanup BLOCK}
+# (a resource: an ordinary call of its cleanup function, hir/resources.tcl),
+# {drop D} (affine#drop, which runs no code) or {droprun D} (affine#drop of a
+# descriptor with a cleanup or an unwinding coroutine inside: it runs code,
+# so natively a safepoint).
+proc hir::affine::PlanOf {hir d} {
     if {$d eq ""} {
         return ""
     }
     if {$d eq "c"} {
         return {coroutine}
     }
+    if {$d eq "C"} {
+        return {abandon}
+    }
+    if {[regexp {^r([0-9]+)\.$} $d -> k]} {
+        return [list cleanup [CleanupBlock $hir $k]]
+    }
+    if {[regexp {[rC]} $d]} {
+        return [list droprun $d]
+    }
     return [list drop $d]
+}
+
+# The cleanup block of index K of HIR's cleanup table (hir/resources.tcl).
+proc hir::affine::CleanupBlock {hir k} {
+    dict for {id record} [hir::resources::table $hir] {
+        if {[dict get $record index] == $k} {
+            return [dict get $record block]
+        }
+    }
+    error "internal compiler error: no cleanup of index $k"
 }

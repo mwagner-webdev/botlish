@@ -850,13 +850,20 @@ proc hir::resolve::ResolveApplied {name args ns imprints} {
             return -code error -errorcode {BOTLISH TRAIT-STORAGE-UNSUPPORTED} \
                 "$what cannot be the trait [hir::types::show $type]: a slot is the type of the values its fields hold, and there is no erased or heterogeneous trait representation (a constrained slot, $slot satisfies TRAIT, takes a concrete type that satisfies the trait)"
         }
-        if {[hir::types::IsAffine $type]} {
-            return -code error -errorcode {BOTLISH TYPE} \
-                "$what is the affine type [hir::types::show $type]: a type slot takes an unrestricted type (its values may be copied wherever the slot's type is used)"
-        }
         lappend types $type
     }
-    return [hir::types::MakeApplied $id $types]
+    # An affine argument is an argument like any other: the application is
+    # affine exactly when its fields, the arguments substituted, are
+    # (hir::structs::IsAffine), and every position a written type stands in
+    # judges it by that, as it judges the same type inferred
+    # (WRITTEN-AFFINE-APPLICATIONS-MILESTONE-1.md). A recursive affine type
+    # is no type a value can have.
+    set type [hir::types::MakeApplied $id $types]
+    set problem [hir::structs::WrittenProblem $type]
+    if {$problem ne ""} {
+        return -code error -errorcode [list BOTLISH [lindex $problem 0]] [lindex $problem 1]
+    }
+    return $type
 }
 
 # The diagnostic kind of a failed ResolveTypeExpr whose catch OPTIONS are
@@ -1163,6 +1170,10 @@ proc hir::resolve::Expr {hirVar node ctx} {
             if {[dict exists $node nomethod]} {
                 SetField hir $e nomethod 1
             }
+            if {[dict exists $node cleanup]} {
+                # A resource's cleanup (hir/resources.tcl).
+                SetField hir $e cleanup 1
+            }
             if {[dict exists $node exported]} {
                 # A C export (hir/exports.tcl): its foreign ABI.
                 SetField hir $e exported [dict get $node exported]
@@ -1170,6 +1181,10 @@ proc hir::resolve::Expr {hirVar node ctx} {
             if {[dict exists $node callback]} {
                 # A C callback (hir/callbacks.tcl): its foreign ABI.
                 SetField hir $e callback [dict get $node callback]
+            }
+            if {[dict exists $node threadEntry]} {
+                # A thread entry (hir/threads.tcl).
+                SetField hir $e threadEntry 1
             }
             set params {}
             set paramTypes [if {[dict exists $node paramTypes]} {dict get $node paramTypes} else {lrepeat [llength [dict get $node params]] {}}]
@@ -1595,6 +1610,12 @@ proc hir::resolve::Expr {hirVar node ctx} {
             SetField hir $e known ""
         }
         if {
+            if {[dict exists $node inject]} {
+                # An inject block (RESTRICTED-CONTEXT-INJECTION-MILESTONE-1.md):
+                # the context types it injects, as canonical identities
+                # (hir/injection.tcl checks what its code uses against them).
+                SetField hir $e injects [hir::injection::Resolve hir $e [dict get $node inject] [CtxNamespace $ctx]]
+            }
             SetField hir $e condition [Expr hir [dict get $node condition] $ctx]
             foreach {role outcome} {then 1 else 0} {
                 set body [dict get $node ${role}Body]

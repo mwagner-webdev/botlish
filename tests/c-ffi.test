@@ -935,6 +935,21 @@ proc linkedName {name} {
     return [expr {$::windowsHost ? "$name.lib" : "-l$name"}]
 }
 
+# The value of a run of executable EXE in this process's environment (its
+# PATH and loader variables kept: a shared fixture is found through them, on
+# Windows through PATH, which standaloneValue empties), in the driver
+# protocol: an executable prints no value of its own
+# (PROGRAM-OUTPUT-MILESTONE-1.md), BOTLISH_NATIVE_RESULT's file holds it.
+proc cfExeValue {exe} {
+    set result [ProtocolResultFile]
+    try {
+        withEnvironment [list BOTLISH_NATIVE_RESULT $result] {exec $exe}
+        return [ProtocolValue $result]
+    } finally {
+        file delete $result
+    }
+}
+
 test cf-missing-library {a library the linker cannot find compiles through the front end and fails at the native link, with the linker's own words, as NATIVE LINK -- never an UNKNOWN-NAMESPACE, a TYPE or a HIR error} -constraints {nativeBuilt cLinker nativeCCalls} -body {
     set dir [app [list main.bot "extern c library \"definitely_missing_botlish_lib\"\n1 + 1\n"]]
     set hir [appHir $dir]
@@ -964,15 +979,15 @@ test cf-link-order {the declared libraries link as one group, so their order nev
     appValues $dir {cranelift cranelift-generic}
 } -cleanup removeApps -result {42 42}
 
-test cf-executable {a program that calls C links as a standalone executable with the libraries it declares and runs with no Tcl, no rustc and no source: moved out of its build directory, its application deleted, with an empty environment} -constraints cfFixture -body {
+test cf-executable {a program that calls C links as a standalone executable with the libraries it declares and runs with no Tcl, no rustc and no source: moved out of its build directory, its application deleted, with an empty environment -- its value read through the driver protocol, and a plain run printing nothing (an executable never prints its value)} -constraints cfFixture -body {
     set dir [bcfApp "${::bytesPrelude}src = text(\"hello\")\nr = bcf::reverse(src, len(src), std::abi::bytes::zeroed(std::abi::usize(5)))\n\[bcf::add(40, 2), std::abi::bytes::freeze(r.out) == text(\"olleh\"), bcf::pick(15, -2, 253, -1234, 65244, -123456789, 4275878552, 1, -4, 247, -30000, -128, 48879, -2000000000, 127, $::cfPickLong, 128, -2, 2147483649, -1)\]\n"]
     set exe [native::withLinkDirs [fixtureDirs] {native::executable [appHir $dir] [file join $dir program]}]
     set elsewhere [makeDirectory cf-moved-[pid]]
     set moved [file join $elsewhere [file tail $exe]]
     file rename $exe $moved
     file delete -force $dir
-    list [binaryHeader $moved] [string trim [runBare $moved]]
-} -cleanup {removeApps; file delete -force [file join [temporaryDirectory] cf-moved-[pid]]} -result [list [hostBinaryHeader executable] "\[42, true, $::cfPickLong\]"]
+    list [binaryHeader $moved] [bareValue $moved] [runBare $moved]
+} -cleanup {removeApps; file delete -force [file join [temporaryDirectory] cf-moved-[pid]]} -result [list [hostBinaryHeader executable] "\[42, true, $::cfPickLong\]" {}]
 
 test cf-stub-linker {the stub linker links no native library: it refuses a program that calls C or declares a library, naming what it calls and links and the linker that can} -constraints {cfFixture} -body {
     set calls [bcfApp "import std::ffi::c\nimport bcf\n\nbcf::add(40, 2)\n"]
@@ -1148,7 +1163,7 @@ test cf-sha256-executable {the SHA-256 demo as a standalone executable: BoringSS
     native::withLinkDirs [list [cffi::boringsslDir]] {
         native::executable [surface::readProgramFile $path -warnings off -cache ""] $exe
     }
-    list [string trim [exec $exe]] [regexp {libcrypto} [dynamicLibraries $exe]]
+    list [cfExeValue $exe] [regexp {libcrypto} [dynamicLibraries $exe]]
 } -cleanup {file delete -force [file join [temporaryDirectory] cf-sha-exe-[pid]]} -result {{[true, true, true, true, true, true]} 0}
 
 test cf-gc-stress {under BOTLISH_NATIVE_GC_STRESS=1 (a collection attempt at every allocation site) the exposures survive real C calls: the read and write borrows, the Tcl script, the SHA-256 digests} -constraints cfFixture -body {
@@ -1412,7 +1427,7 @@ testConstraint nm [expr {[auto_execok nm] ne ""}]
 test cf-system-symbol-resolved {the intended system function is what the executable calls: labs is imported from the system C library (libSystem on macOS, glibc on Linux) by the platform's dynamic linker, never defined inside the executable by another object of the link} -constraints {nativeBuilt cLinker nativeCCalls nm dynamicSystemCLibrary} -body {
     set dir [app [list main.bot "import std::ffi::c\n\nextern c fn labs(x: std::ffi::c::Long) -> std::ffi::c::Long\n\nlabs(-42)\n"]]
     set exe [native::executable [appHir $dir] [file join $dir program]]
-    list [string trim [exec $exe]] [importedFrom $exe labs]
+    list [cfExeValue $exe] [importedFrom $exe labs]
 } -cleanup removeApps -result [list 42 [expr {$::tcl_platform(os) eq "Darwin" ? "libSystem" : "GLIBC"}]]
 
 # The DLL whose import directory entry of executable EXE names function
@@ -1430,7 +1445,7 @@ test cf-system-symbol-resolved-windows {Windows: a kernel32 function a program d
     set dir [app [list main.bot "import std::ffi::c\n\nextern c library \"kernel32\"\n\nextern c fn labs(x: std::ffi::c::Long) -> std::ffi::c::Long\nextern c fn GetCurrentProcessId() -> std::ffi::c::ULong\n\n\[labs(-42), GetCurrentProcessId() > 0\]\n"]]
     set exe [native::executable [appHir $dir] [file join $dir program]]
     set imports [dict get [peFacts $exe] imports]
-    list [string trim [exec $exe]] [string toupper [importedFromDll $exe GetCurrentProcessId]] [importedFromDll $exe labs] \
+    list [cfExeValue $exe] [string toupper [importedFromDll $exe GetCurrentProcessId]] [importedFromDll $exe labs] \
         [lsearch -all -inline -regexp -nocase $imports {^(vcruntime|msvcp|concrt|ucrtbase|api-ms-win-crt-)}]
 } -cleanup removeApps -result {{[42, true]} KERNEL32.DLL {} {}}
 
@@ -1466,7 +1481,7 @@ test cf-shared-library {a shared C library: linked by -lNAME (on Windows its imp
         }
         set ran [native::withLinkDirs [list $libDir] {lmap backend {cranelift cranelift-generic} {lindex [outcomeUnderHir $backend $hir] 1}}]
         set exe [native::withLinkDirs [list $libDir] {native::executable $hir [file join $dir program]}]
-        set standalone [string trim [exec $exe]]
+        set standalone [cfExeValue $exe]
         set recorded [regexp {botlish_cffi_shared} [dynamicLibraries $exe]]
         file rename $lib $lib.moved
         set missing [catch {exec $exe} message]
@@ -1569,7 +1584,7 @@ test cf-link-failure-keeps-executable {a failed link of a program that calls C p
     set out [makeDirectory cf-keep-[pid]]
     set exe [native::withLinkDirs [fixtureDirs] {native::executable [appHir $good] [file join $out program]}]
     set failed [catch {native::withLinkDirs [fixtureDirs] {native::executable [appHir $bad] [file join $out program]}} message options]
-    list $failed [lrange [dict get $options -errorcode] 0 1] [string trim [exec $exe]] [glob -nocomplain -tails -directory $out .botlish-aot-*]
+    list $failed [lrange [dict get $options -errorcode] 0 1] [cfExeValue $exe] [glob -nocomplain -tails -directory $out .botlish-aot-*]
 } -cleanup {removeApps; file delete -force [file join [temporaryDirectory] cf-keep-[pid]]} -result {1 {NATIVE LINK} 42 {}}
 
 test cf-availability-check {macOS: a C library compiled by Apple clang that checks the OS version at run time (`__builtin_available`, a call of __isPlatformVersionAtLeast) links and runs on both backends: the symbol resolves (Rust's standard library defines it, as clang's compiler runtime does)} -constraints {cfFixture appleAvailability} -body {
@@ -1579,33 +1594,33 @@ test cf-availability-check {macOS: a C library compiled by Apple clang that chec
 # ---------------------------------------------------------------------------
 # The collector, coroutines and the stack guard around C calls
 
-test cf-gc-calls {C calls inside allocation-heavy loops, under GC stress, on both backends and in an executable: Strings and Lists held across every call survive the collections between them, and C results stored into managed values stay exact} -constraints cfFixture -body {
+test cf-gc-calls {C calls inside allocation-heavy loops, under GC stress, on both backends and in an executable (its value through the driver protocol; a plain run completes and prints nothing): Strings and Lists held across every call survive the collections between them, and C results stored into managed values stay exact} -constraints cfFixture -body {
     set dir [bcfApp "import std::ffi::c\nimport std::list\nimport std::str\nimport bcf\n\nfn step(i: std::ffi::c::Int) -> int:\n    held = \"held\".concat(\"-\").concat(\"value\")\n    xs = \[bcf::add(i, 1), bcf::add(i, 2)\]\n    w = bcf::widen_schar(-1)\n    ys = \[xs, \[w\]\]\n    held.length() + xs.get(1, 0) + bcf::pick(19, -2, 253, -1234, 65244, -123456789, 4275878552, 1, -4, 247, -30000, -128, 48879, -2000000000, 127, $::cfPickLong, 128, -2, 2147483649, -1) + std::list::length(ys)\n\nsteps = loop i from 0 to 400:\n    step(i)\n\[std::list::length(steps), steps.get(0, 0), steps.get(399, 0)\]\n"]
     set saved [expr {[info exists ::env(BOTLISH_NATIVE_GC_STRESS)] ? $::env(BOTLISH_NATIVE_GC_STRESS) : ""}]
     set ::env(BOTLISH_NATIVE_GC_STRESS) 1
     try {
         set results [appValues $dir {cranelift cranelift-generic}]
         set exe [native::withLinkDirs [fixtureDirs] {native::executable [appHir $dir] [file join $dir program]}]
-        lappend results [string trim [exec $exe]]
+        lappend results [cfExeValue $exe] [exec $exe]
     } finally {
         if {$saved eq ""} { unset ::env(BOTLISH_NATIVE_GC_STRESS) } else { set ::env(BOTLISH_NATIVE_GC_STRESS) $saved }
     }
     set results
-} -cleanup removeApps -result [lrepeat 3 {[400, 13, 412]}]
+} -cleanup removeApps -result [list {*}[lrepeat 3 {[400, 13, 412]}] {}]
 
-test cf-coroutine-calls {C calls inside a coroutine, before its first yield and between later ones, with managed values held across the yields and the calls, under GC stress: on both backends and in an executable, as the C calls of the main program} -constraints {cfFixture nativeCoroutines} -body {
+test cf-coroutine-calls {C calls inside a coroutine, before its first yield and between later ones, with managed values held across the yields and the calls, under GC stress: on both backends and in an executable (its value through the driver protocol; a plain run completes and prints nothing), as the C calls of the main program} -constraints {cfFixture nativeCoroutines} -body {
     set dir [bcfApp "import std::ffi::c\nimport std::list\nimport bcf\n\nstruct Event:\n    value: int\n\nfn worker(n: std::ffi::c::Int) -> Event:\n    held = \[bcf::add(n, 1), n\]\n    yield Event {value: held.get(0, 0)}\n    t = bcf::stack_tail(1, 2, 3, 4, 5, 6, 7, 8, 9, -10, -11, -12)\n    yield Event {value: t + held.get(1, 0)}\n    return Event {value: bcf::pick(17, -2, 253, -1234, 65244, -123456789, 4275878552, 1, -4, 247, -30000, -128, 48879, -2000000000, 127, $::cfPickLong, 128, -2, 2147483649, -1) + std::list::length(held)}\n\nfn run(n: std::ffi::c::Int) -> List\[int\]:\n    coroutine {step, first} = worker(n)\n    second = step()\n    third = step()\n    \[first.value, second.value, third.value\]\n\nruns = loop i from 0 to 100:\n    run(i)\n\[run(5), std::list::length(runs), bcf::add(1, 1)\]\n"]
     set saved [expr {[info exists ::env(BOTLISH_NATIVE_GC_STRESS)] ? $::env(BOTLISH_NATIVE_GC_STRESS) : ""}]
     set ::env(BOTLISH_NATIVE_GC_STRESS) 1
     try {
         set results [appValues $dir {cranelift cranelift-generic}]
         set exe [native::withLinkDirs [fixtureDirs] {native::executable [appHir $dir] [file join $dir program]}]
-        lappend results [string trim [exec $exe]]
+        lappend results [cfExeValue $exe] [exec $exe]
     } finally {
         if {$saved eq ""} { unset ::env(BOTLISH_NATIVE_GC_STRESS) } else { set ::env(BOTLISH_NATIVE_GC_STRESS) $saved }
     }
     set results
-} -cleanup removeApps -result [lrepeat 3 {[[6, -75, 0], 100, 2]}]
+} -cleanup removeApps -result [list {*}[lrepeat 3 {[[6, -75, 0], 100, 2]}] {}]
 
 test cf-c-stack-overflow {C recursion that exhausts the worker thread's stack ends in the stack guard's NATIVE LIMIT STACK, in the native backends' linked run and as an executable's exit status 1 and line on standard error, never a crash; a finite C recursion returns} -constraints {cfFixture nativeStackGuard} -body {
     set deep [bcfApp "import std::ffi::c\nimport bcf\n\nbcf::deep(100000000)\n"]
@@ -1931,7 +1946,7 @@ test cf-va-crt-snprintf {the platform C runtime's own variadic snprintf (glibc's
     try {
         lappend results [snprintfTexts [lindex [appValues $dir {cranelift}] 0]]
         set exe [native::withLinkDirs [fixtureDirs] {native::executable [appHir $dir] [file join $dir program]}]
-        lappend results [snprintfTexts [string trim [exec $exe]]]
+        lappend results [snprintfTexts [cfExeValue $exe]]
     } finally {
         if {$saved eq ""} { unset ::env(BOTLISH_NATIVE_GC_STRESS) } else { set ::env(BOTLISH_NATIVE_GC_STRESS) $saved }
     }
@@ -1993,7 +2008,7 @@ co = close(other)
 test cf-va-dll-wsprintf {Windows: a variadic function of a system DLL through its import library -- user32's wsprintfA (WINAPIV: Win64's C convention) -- formats ints, an unsigned int, a hexadecimal one and a C string into a MutableBytes exposed for writing, on both native backends and in an executable, which imports it from USER32.dll} -constraints {cfFixture nativeCVariadics windowsHost} -body {
     set dir [bcfApp "direct module\n\nimport std::abi\nimport std::abi::bytes\nimport std::byte\nimport std::ffi::c\nimport std::list\nimport std::str\nimport bcf\n\nextern c library \"user32\"\nextern c fn wsprintf named \"wsprintfA\"(buffer: std::ffi::c::Ptr\[std::ffi::c::Char\] write noescape, format: std::ffi::c::Ptr\[std::ffi::c::Char\] read noescape, variadic) -> std::ffi::c::Int\n\nfn nul() -> std::byte::Byte:\n    0\n\nfn cstring(text: str) -> std::abi::bytes::Bytes:\n    std::abi::bytes::from_list(text.encode_utf8().append(nul()))\n\nfn written(buffer: std::abi::bytes::MutableBytes, size: std::ffi::c::Int):\n    data = std::abi::bytes::freeze(buffer)\n    loop i from 0 to size:\n        bcf::byte_at(data, i)\n\nw = bcf::vword()\nr = wsprintf(std::abi::bytes::zeroed(std::abi::usize(64)), cstring(\"%d %u %x %s %d\"), bcf::c_int(-42), bcf::c_uint(4000000000), bcf::c_uint(48879), w, bcf::c_int(7))\n\[\[r.result, written(r.buffer, 64)\]\]\n"]
     set exe [native::withLinkDirs [fixtureDirs] {native::executable [appHir $dir] [file join $dir program]}]
-    list {*}[lmap value [appValues $dir {cranelift cranelift-generic}] {snprintfTexts $value}] [snprintfTexts [string trim [exec $exe]]] \
+    list {*}[lmap value [appValues $dir {cranelift cranelift-generic}] {snprintfTexts $value}] [snprintfTexts [cfExeValue $exe]] \
         [string toupper [importedFromDll $exe wsprintfA]]
 } -cleanup removeApps -result [concat [lrepeat 3 {{29 {-42 4000000000 beef botlish 7\0}}}] USER32.DLL]
 
@@ -2282,19 +2297,19 @@ test cf-va-cache {the front-end cache keeps a variadic program as its build (a h
         [expr {[dict get [dict get $changed foreign] bcf::vsum contract params] ne [dict get [dict get $first foreign] bcf::vsum contract params]}]
 } -cleanup {removeApps; removeDirectory cf-va-cache-[pid]} -result {1 42 1}
 
-test cf-va-executable-gc-coroutine {variadic C calls with managed values held across them -- in the main program, in a loop, inside a coroutine between its yields -- under GC stress, on both backends and in a standalone executable} -constraints {cfFixture nativeCoroutines nativeCVariadics} -body {
+test cf-va-executable-gc-coroutine {variadic C calls with managed values held across them -- in the main program, in a loop, inside a coroutine between its yields -- under GC stress, on both backends and in a standalone executable (its value through the driver protocol; a plain run completes and prints nothing)} -constraints {cfFixture nativeCoroutines nativeCVariadics} -body {
     set dir [bcfApp "import std::ffi::c\nimport std::list\nimport bcf\n\nstruct Event:\n    value: int\n\nfn worker(n: std::ffi::c::Int) -> Event:\n    held = \[bcf::vsum(2, n, n), n\]\n    yield Event {value: held.get(0, 0)}\n    s = bcf::vscale(1.0, 9, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0):\n        on NonFiniteFloat:\n            -1.0\n    yield Event {value: bcf::vsum(9, n, n, n, n, n, n, n, n, n) + held.get(1, 0)}\n    return Event {value: bcf::vrecord(3, 881, 0, n, 0.5, bcf::c_long(-1)) + std::list::length(held)}\n\nfn run(n: std::ffi::c::Int) -> List\[int\]:\n    kept = \[n, n\]\n    coroutine {step, first} = worker(n)\n    second = step()\n    third = step()\n    \[first.value, second.value, third.value, std::list::length(kept)\]\n\nruns = loop i from 0 to 60:\n    run(i)\n\[run(5), std::list::length(runs), runs.get(59, \[\])\]\n"]
     set saved [expr {[info exists ::env(BOTLISH_NATIVE_GC_STRESS)] ? $::env(BOTLISH_NATIVE_GC_STRESS) : ""}]
     set ::env(BOTLISH_NATIVE_GC_STRESS) 1
     try {
         set results [appValues $dir {cranelift cranelift-generic}]
         set exe [native::withLinkDirs [fixtureDirs] {native::executable [appHir $dir] [file join $dir program]}]
-        lappend results [string trim [exec $exe]]
+        lappend results [cfExeValue $exe] [exec $exe]
     } finally {
         if {$saved eq ""} { unset ::env(BOTLISH_NATIVE_GC_STRESS) } else { set ::env(BOTLISH_NATIVE_GC_STRESS) $saved }
     }
     set results
-} -cleanup removeApps -result [lrepeat 3 {[[10, 50, 5, 2], 60, [118, 590, 5, 2]]}]
+} -cleanup removeApps -result [list {*}[lrepeat 3 {[[10, 50, 5, 2], 60, [118, 590, 5, 2]]}] {}]
 
 
 cleanupTests

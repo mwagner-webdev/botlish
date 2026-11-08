@@ -8,7 +8,6 @@ index: errors
 alias: used after it was moved; moved coroutine used again; use of a moved binding
 keywords: affine, move, moved, owner, coroutine, handle, argument, destructuring, dead binding
 related: rule.affine-use concept.affine proof.ownership concept.coroutines error.affine-not-definitely-live error.affine-field-move-requires-destructure
-docs: AFFINE-VALUES.md COROUTINES.md
 code: CORE SEMANTIC USE-AFTER-MOVE
 
 == MEANING
@@ -87,7 +86,6 @@ index: errors
 alias: moved on some path; maybe moved affine value; conditionally moved coroutine
 keywords: affine, move, branch, if, handler, loop, join, owner, liveness
 related: error.use-after-move rule.affine-use concept.affine proof.ownership error.affine-path-release-unsupported
-docs: AFFINE-VALUES.md COROUTINES.md
 code: CORE SEMANTIC AFFINE-NOT-DEFINITELY-LIVE
 
 == MEANING
@@ -172,7 +170,6 @@ index: errors
 alias: closure captures a coroutine; capture of an affine binding
 keywords: affine, closure, nested function, capture, coroutine, owner
 related: concept.closures concept.affine rule.affine-use proof.ownership error.mutable-place-capture
-docs: AFFINE-VALUES.md COROUTINES.md
 code: CORE SEMANTIC AFFINE-CAPTURE-UNSUPPORTED
 
 == MEANING
@@ -240,7 +237,6 @@ index: errors
 alias: set of coroutines; recursive affine struct
 keywords: affine, ImmutableSet, set, recursive struct, tree, container, release, descriptor
 related: concept.affine concept.immutable-set concept.structs concept.mutable-vector error.affine-equality-unsupported
-docs: AFFINE-VALUES.md MUTABLE-ARRAY.md
 code: CORE SEMANTIC AFFINE-CONTAINER-UNSUPPORTED
 
 == MEANING
@@ -252,12 +248,37 @@ Reported where the type is written, for two forms:
     (error.affine-equality-unsupported), so a set cannot own one. A List,
     a MutableVector and a MutableArray can: they are affine exactly when
     their element type is.
-  * an affine struct that holds values of its own type in a List,
-    MutableVector or MutableArray, directly or through other structs (a
-    tree of coroutines). This is a limit of the implementation: an affine
+  * a *recursive affine type*: an affine type whose values nest affine
+    values to any depth through List, MutableVector or MutableArray
+    elements -- a struct that holds values of its own type in a container,
+    directly or through other structs (a tree of coroutines). An affine
     value is released by a static, finite walk of its type, and such a
-    value nests to any depth. An unrestricted struct may hold itself in a
-    container, and an affine struct may name itself through plain fields.
+    value nests to any depth. The rule is about what values own, not about
+    how a type is spelled or how deep it is:
+      - an application of a parameterized struct is judged by its own
+        fields, its arguments substituted, wherever it is written or
+        constructed: `Node[Coroutine{...}]` of `struct Node[T]: value: T,
+        children: List[Node[T]]` (a tree struct's too) is one, `Node[int]`
+        is an ordinary recursive value;
+      - a type that holds such a type is one too (`Holder[Coroutine{...}]`
+        of `struct Holder[T]: t: Node[T]`), and so is one whose recursion
+        runs through other declarations or grows its argument at every
+        level (`b: List[GrowB[List[T]]]` in GrowA, `a: GrowA[T], value: T`
+        in GrowB);
+      - a type is not one because it is deep: a chain of a hundred structs
+        ending in a coroutine handle is an ordinary affine type, and so is
+        a type that holds its own declaration only through its arguments
+        (`Box[List[Box[Coroutine{...}]]]`: a box holding a List of boxed
+        handles), or whose affinity dies out along its recursion
+        (`next: List[Swap[U, int]]` in `struct Swap[T, U]: value: T`:
+        `Swap[int, Coroutine{...}]` holds handles two levels deep only);
+      - an argument that only grows and is never held
+        (`next: List[W[List[T]]]`) owns nothing: `W[Coroutine{...}]` is
+        unrestricted; and a recursion through plain fields alone describes
+        no finite value, so it is accepted.
+    The compiler decides it from the declarations, never by expanding the
+    type (concept.declaration-summaries); the diagnostic names the path
+    from the type to the recursion and once around it.
 
 == LIKELY CAUSES
   * a set of handles used to track "which workers are running";
@@ -297,6 +318,49 @@ struct Node:
 @at 3:15
 @end
 
+@example reject
+import std::coroutine
+
+struct Node[T]:
+    value: T
+    children: List[Node[T]]
+
+struct Holder[T]:
+    t: Node[T]
+
+fn count(h: Holder[Coroutine{args: [], return: int}]) -> int:
+    1
+
+0
+@caption A struct that holds another declaration's recursive affine type
+@error CORE SEMANTIC AFFINE-CONTAINER-UNSUPPORTED
+@at 10:9
+@end
+
+@example accept
+import std::coroutine
+import std::list
+
+struct Box[T]:
+    value: T
+
+fn counter() -> int:
+    yield 1
+    3
+
+fn make() -> Coroutine{args: [], return: int}:
+    coroutine {step} = counter()
+    step
+
+fn size(b: Box[List[Box[Coroutine{args: [], return: int}]]]) -> int:
+    {value} = b
+    std::list::length(value)
+
+size(Box {value: [Box {value: make()}, Box {value: make()}]})
+@caption A box holding a List of boxed handles nests finitely: an ordinary affine type
+@value 2
+@end
+
 @topic error.affine-duplication-unsupported
 title: AFFINE-DUPLICATION-UNSUPPORTED: one affine value in several slots
 summary: std::mutable_array::create(n, value) places one value in every slot; an affine value would get several owners, so it must be made once per slot with std::mutable_array::generate.
@@ -304,7 +368,6 @@ index: errors
 alias: std::mutable_array::create with a coroutine; affine value repeated in an array
 keywords: affine, MutableArray, create, generate, factory, repeat, slots, coroutine
 related: concept.mutable-array concept.affine stdlib.std::mutable_array::create stdlib.std::mutable_array::generate error.affine-erasure-unsupported
-docs: MUTABLE-ARRAY.md AFFINE-VALUES.md
 code: CORE SEMANTIC AFFINE-DUPLICATION-UNSUPPORTED
 
 == MEANING
@@ -371,7 +434,6 @@ index: errors
 alias: std::mutable_vector::at of a coroutine; copy an affine element out of a vector
 keywords: affine, MutableVector, MutableArray, at, freeze, copy, take, pop, swap, element
 related: concept.mutable-vector concept.mutable-array concept.affine stdlib.std::mutable_vector::take stdlib.std::mutable_vector::pop stdlib.std::mutable_vector::swap stdlib.std::mutable_array::swap error.affine-list-operation-unsupported
-docs: MUTABLE-VECTOR.md MUTABLE-ARRAY.md
 code: CORE SEMANTIC AFFINE-ELEMENT-COPY-OUT
 
 == MEANING
@@ -450,7 +512,6 @@ index: errors
 alias: compare two coroutines; equality of coroutine handles
 keywords: affine, equality, ==, !=, hash, ImmutableSet, coroutine, identity
 related: rule.equality concept.affine concept.coroutines error.affine-container-unsupported stdlib.std::immutable_set::from_list
-docs: AFFINE-VALUES.md COROUTINES.md
 code: CORE SEMANTIC AFFINE-EQUALITY-UNSUPPORTED
 
 == MEANING
@@ -492,7 +553,6 @@ index: errors
 alias: coroutine passed as any; affine value erased; coroutine as the program result
 keywords: affine, erasure, any, untyped, program result, module binding, factory, declined instance, coroutine
 related: concept.affine proof.ownership rule.affine-use concept.specialization error.affine-instance-budget error.affine-generic-nested-unsupported
-docs: AFFINE-VALUES.md MUTABLE-ARRAY.md
 code: CORE SEMANTIC AFFINE-ERASURE-UNSUPPORTED
 
 == MEANING
@@ -570,7 +630,6 @@ index: errors
 alias: move a pointer out of a context; read a context field into a binding; pass a context-owned pointer; destructure a context; element place as a value
 keywords: affine, context, installed, place, element place, observe, pointer, take, pop, swap, second owner
 related: concept.context-owned-state concept.contexts concept.affine error.affine-element-copy-out error.affine-field-move-requires-destructure stdlib.std::mutable_vector::element
-docs: CONTEXT-OWNED-AFFINE-STATE-MILESTONE-1.md CONTEXTS.md AFFINE-VALUES.md
 code: CORE SEMANTIC AFFINE-CONTEXT-COPY-OUT
 
 == MEANING
@@ -598,17 +657,16 @@ first.
   * returning a context-owned pointer from a contextual function.
 
 == WHAT TO DO
-Use the value where it is stored: hand `d.renderer` to the C call
-directly (a C call only observes its pointer arguments), test it with
-`null?`, or read an unrestricted field (`d.sessions.element(0).id`). Let
-the helper declare the context itself (`context d: Device`) instead of
-taking the pointer. Where another owner is genuinely needed, clone it
-explicitly (`d.root.clone()`, C-ABI-TYPES.md). To acquire and release a
-resource after installation, keep it in a collection member and move it in
-with push and out with take, pop or swap -- those clear the place it
-leaves. An element place fails with IndexNotFound when the element is
-missing: a function using one declares IndexNotFound, and its caller
-handles it.
+Use the value where it is stored: hand `d.renderer` to the C call directly
+(a C call only observes its pointer arguments), test it with `null?`, or
+read an unrestricted field (`d.sessions.element(0).id`). Let the helper
+declare the context itself (`context d: Device`) instead of taking the
+pointer. Where another owner is genuinely needed, clone it explicitly
+(`d.root.clone()`). To acquire and release a resource after installation,
+keep it in a collection member and move it in with push and out with take,
+pop or swap -- those clear the place it leaves. An element place fails
+with IndexNotFound when the element is missing: a function using one
+declares IndexNotFound, and its caller handles it.
 
 @example reject
 import std::ffi::c
@@ -651,7 +709,6 @@ index: errors
 alias: read a coroutine field of a struct; move a field out of a struct
 keywords: affine, field, projection, struct, destructuring, partial move, coroutine
 related: concept.destructuring concept.structs concept.affine error.use-after-move error.affine-temporary-unsupported
-docs: AFFINE-VALUES.md
 code: CORE SEMANTIC AFFINE-FIELD-MOVE-REQUIRES-DESTRUCTURE
 
 == MEANING
@@ -720,7 +777,6 @@ index: errors
 alias: nested generic function with a coroutine; untyped parameter of a nested function
 keywords: affine, generic, untyped parameter, nested function, specialization, context trait, clone
 related: concept.specialization concept.affine concept.functions error.affine-erasure-unsupported error.trait-nested-polymorphic
-docs: AFFINE-VALUES.md TRAITS.md
 code: CORE SEMANTIC AFFINE-GENERIC-NESTED-UNSUPPORTED
 
 == MEANING
@@ -790,7 +846,6 @@ index: errors
 alias: affine specialization budget; declined specialization of an affine call
 keywords: affine, generic, untyped parameter, specialization, budget, semantic instance, nesting limit
 related: error.affine-erasure-unsupported error.trait-instance-budget concept.specialization concept.affine
-docs: AFFINE-VALUES.md TRAITS.md
 code: CORE SEMANTIC AFFINE-INSTANCE-BUDGET
 
 == MEANING
@@ -826,7 +881,6 @@ index: errors
 alias: std::list::at of a coroutine; iterate a list of coroutines; collect coroutines in a loop
 keywords: affine, List, std::list::at, std::list::append, loop, iteration, collecting loop, MutableVector, coroutine
 related: concept.lists concept.mutable-vector concept.affine error.affine-element-copy-out stdlib.std::mutable_vector::from_list stdlib.std::list::at
-docs: AFFINE-VALUES.md MUTABLE-VECTOR.md
 code: CORE SEMANTIC AFFINE-LIST-OPERATION-UNSUPPORTED
 
 == MEANING
@@ -901,7 +955,6 @@ index: errors
 alias: moved in a handler but not on success; moved before break in a counting loop
 keywords: affine, release, path, handler, break, loop, join, move, coroutine
 related: error.affine-not-definitely-live concept.affine proof.ownership concept.loops concept.errors
-docs: AFFINE-VALUES.md MUTABLE-VECTOR.md
 code: CORE SEMANTIC AFFINE-PATH-RELEASE-UNSUPPORTED
 
 == MEANING
@@ -998,7 +1051,6 @@ index: errors
 alias: done? of a fresh coroutine; field of a fresh affine struct
 keywords: affine, temporary, owner, std::coroutine::done?, field, observe, bind first
 related: concept.affine rule.affine-use error.affine-field-move-requires-destructure stdlib.std::coroutine::done?
-docs: AFFINE-VALUES.md
 code: CORE SEMANTIC AFFINE-TEMPORARY-UNSUPPORTED
 
 == MEANING
@@ -1055,12 +1107,11 @@ std::coroutine::done?(step)
 
 @topic error.mutable-place-receiver
 title: MUTABLE-PLACE-RECEIVER: a mutation's receiver is not a place
-summary: A MutableVector or MutableArray operation that mutates must be applied to a place -- a local, parameter or context parameter of the same function, or a field path from one.
+summary: A MutableVector or MutableArray operation that mutates must be applied to a place -- a local, place parameter or context parameter of the same function, or a field path from one.
 index: errors
 alias: push to a temporary vector; mutate a captured vector; push as a function value
 keywords: MutableVector, MutableArray, push, set, swap, take, pop, place, receiver, temporary, nested function, module binding, function value
-related: concept.mutable-vector concept.mutable-array concept.values error.mutable-place-capture stdlib.std::mutable_vector::push
-docs: MUTABLE-VECTOR.md MUTABLE-ARRAY.md
+related: concept.mutable-vector concept.mutable-array concept.values error.mutable-place-capture error.nonplace-parameter-mutation stdlib.std::mutable_vector::push
 code: CORE SEMANTIC MUTABLE-PLACE-RECEIVER
 
 == MEANING
@@ -1068,10 +1119,12 @@ MutableVector[T] and MutableArray[T] are mutable VALUES, not references:
 a mutation (push, pop, take, swap, clear; set, swap, copy into) changes
 the header of the place it is applied to, in place, and never stores a
 new value anywhere else. So the receiver must be a place this function
-owns: a local binding, a parameter or a context parameter of the same
-function, or a chain of fields from one (`state.queue.push(x)`), whose
-binding's static type is the collection type. The message says which
-rule the receiver breaks:
+owns: a local binding, a place parameter or a context parameter of the
+same function, or a chain of fields from one (`state.queue.push(x)`),
+whose binding's static type is the collection type. (A parameter not
+declared `place` is the function's own copy: mutating it is
+NONPLACE-PARAMETER-MUTATION.) The message says which rule the receiver
+breaks:
 
   * a temporary value (a call's result, a List element): the update
     would be lost;
@@ -1097,7 +1150,9 @@ rule the receiver breaks:
 
 == WHAT TO DO
 Bind the value to a name, mutate the name, and use the name afterwards.
-For a helper, pass the collection in and return the updated one, or keep
+For a helper, declare its parameter `place` (concept.place-parameters), or
+pass the collection in, copy it into a local, and return the updated
+local, or keep
 it in a field of a context struct: a function mutates it through its
 context parameter (`log.lines.push(n)`), and every function sharing the
 installed context sees the change. To pass a mutation around, wrap it in a
@@ -1158,7 +1213,6 @@ index: errors
 alias: closure captures a mutated vector; capture of a mutable place
 keywords: MutableVector, MutableArray, closure, nested function, capture, place, value semantics
 related: concept.mutable-vector concept.mutable-array concept.closures error.mutable-place-receiver error.affine-capture-unsupported
-docs: MUTABLE-VECTOR.md MUTABLE-ARRAY.md
 code: CORE SEMANTIC MUTABLE-PLACE-CAPTURE
 
 == MEANING
@@ -1176,7 +1230,8 @@ into aliasing.
 == WHAT TO DO
 Pass the collection as an argument: the callee gets its own logical copy
 (copy-on-write, so passing is cheap). A nested function that must change
-it takes it as a parameter and returns the updated collection.
+it takes it as a place parameter (`place v: T`, concept.place-parameters),
+or copies its argument into a local and returns the updated local.
 
 @example reject
 import std::mutable_vector
@@ -1209,6 +1264,130 @@ fill()
 @value 2
 @end
 
+@topic error.nonplace-parameter-mutation
+title: NONPLACE-PARAMETER-MUTATION: mutating a parameter not declared `place`
+summary: A mutation's destination is rooted in a value parameter -- a parameter not declared `place` -- so it would change only the function's own copy, never the caller's storage.
+index: errors
+alias: mutating a parameter; modify a parameter; changes to a parameter are lost; caller does not see the change; update lost; write to an argument; out parameter without place
+keywords: place, parameter, value parameter, mutate, caller, copy, MutableVector, MutableArray, MutableMap, MutableSet, push, set, copy, swap, lost update
+related: concept.place-parameters concept.mutable-vector concept.mutable-array concept.values error.mutable-place-receiver
+code: CORE SEMANTIC NONPLACE-PARAMETER-MUTATION
+
+== MEANING
+A parameter that is not declared `place` is a value: on entry it is the
+function's own logical copy of its argument, not a reference to the
+caller's storage. A mutation through it -- a collection operation whose
+receiver is the parameter or a field path of it (`xs.push(x)`,
+`city.grid.tiles.set(i, t)`, `std::mutable_array::copy(dst, ...)`), or a
+call that gives it, or a path of it, to another function's place
+parameter -- would change that copy only. The caller, who wrote the call
+to see the change, would never observe it. That silently lost update is
+what this diagnostic rejects, at the mutation: the message names the
+parameter, its function and the operation.
+
+The rule reads the destination's root binding, never where its value
+came from: a local binding initialized from a parameter (`working = xs`)
+is a place of its own, an independent logical copy, and mutating it is
+legal. A context parameter, a loop variable, a fold's intermediate and a
+handler's payload are no parameters of a function: their places are
+unaffected.
+
+== WHY
+Botlish has no references: a collection is a value, mutated in place
+through places, and a place parameter is the one way a function updates
+its caller's collection (concept.place-parameters). Before this check,
+mutating an ordinary parameter compiled and ran: the function changed its
+own copy, returned normally, and the caller's collection stayed as it was.
+The function's signature already says which it means -- `place` or not --
+so the compiler holds the body to it, rather than let a natural-looking
+program drop a write without a word. It is an error, not a warning, and
+it is decided where the program is checked, before any backend runs, so
+every backend accepts and rejects the same programs.
+
+== LIKELY CAUSES
+  * a helper meant to fill its caller's vector or array, declared with an
+    ordinary parameter (`fn add(items: MutableVector[int], x: int)`);
+  * a struct holding collections passed by value and mutated through a
+    field path (`fn paint(city: City, ...)`, then
+    `city.grid.tiles.set(i, t)`);
+  * a value-style function that mutates its parameter and returns it.
+
+== WHAT TO DO
+Say which one you mean:
+
+  * the caller's storage must change: declare the parameter `place`
+    (`fn add(place items: MutableVector[int], x: int)`); the caller then
+    passes a place of its own and sees every update;
+  * a local working value is intended: copy the parameter into a local
+    first (`working = items`), mutate the local, and return it or use it.
+    The copy is logical and copy-on-write: when the parameter is not read
+    again, nothing is copied at run time.
+
+Declaring `place` gives the function write access to its caller's
+collection; prefer the local copy when the caller only needs the result.
+A parameter of an affine type cannot be a place: move it into a local
+(`working = items`) and return the local.
+
+@example reject
+import std::mutable_vector
+
+fn add(items: MutableVector[int], x: int) -> unit:
+    items.push(x)
+
+v = std::mutable_vector::from_list([1])
+add(v, 2)
+v.length()
+@caption `items` is the function's copy: the push would never reach `v`
+@error CORE SEMANTIC NONPLACE-PARAMETER-MUTATION
+@at 4:5
+@end
+
+@example accept
+import std::mutable_vector
+
+fn add(place items: MutableVector[int], x: int) -> unit:
+    items.push(x)
+
+v = std::mutable_vector::from_list([1])
+v.add(2)
+v.length()
+@caption A place parameter updates the caller's vector
+@value 2
+@end
+
+@example accept
+import std::mutable_vector
+
+fn with_item(items: MutableVector[int], x: int) -> MutableVector[int]:
+    working = items
+    working.push(x)
+    working
+
+v = std::mutable_vector::from_list([1])
+w = with_item(v, 2)
+[v.length(), w.length()]
+@caption A local copy is the function's own place: the caller keeps its value
+@value [1, 2]
+@end
+
+@example reject
+import std::mutable_vector
+
+fn add(place items: MutableVector[int], x: int) -> unit:
+    items.push(x)
+
+fn add_twice(items: MutableVector[int], x: int) -> unit:
+    add(items, x)
+    add(items, x)
+
+v = std::mutable_vector::from_list([1])
+add_twice(v, 2)
+v.length()
+@caption Passing a value parameter on to a place parameter mutates the copy only
+@error CORE SEMANTIC NONPLACE-PARAMETER-MUTATION
+@at 7:9
+@end
+
 @topic error.coroutine-binding-field
 title: COROUTINE-BINDING-FIELD: a malformed coroutine binding
 summary: A coroutine binding names its results in braces, `coroutine {step, first} = f(...)`; any other field, a nested pattern, a positional form or `coroutine NAME = ...` is a syntax error.
@@ -1216,7 +1395,6 @@ index: errors
 alias: coroutine binding syntax; coroutine step first fields
 keywords: coroutine, binding, step, first, braces, pattern, construction, syntax
 related: concept.coroutines error.surface-syntax error.duplicate-field error.coroutine-rhs-not-yielding
-docs: COROUTINES.md
 code: COROUTINE-BINDING-FIELD
 match: SURFACE SYNTAX | COROUTINE-BINDING-FIELD: *
 
@@ -1285,7 +1463,6 @@ index: errors
 alias: Coroutine type args; affine coroutine result; coroutine message must be a struct
 keywords: Coroutine type, args, message, struct, affine result, yield, error payload, protocol
 related: concept.coroutines concept.function-types concept.affine error.coroutine-resume-type error.coroutine-not-function
-docs: AFFINE-VALUES.md COROUTINES.md ERROR-PAYLOADS.md
 code: CORE SEMANTIC COROUTINE-CONTRACT
 
 == MEANING
@@ -1362,7 +1539,6 @@ index: errors
 alias: coroutine passed as a function value; Coroutine versus Fn
 keywords: coroutine, Fn, function type, callable kind, contract, parameter, handle
 related: concept.function-types concept.coroutines concept.affine error.coroutine-contract error.unwrapped-yield
-docs: AFFINE-VALUES.md COROUTINES.md STRUCTURAL-FUNCTION-TYPES.md
 code: CORE SEMANTIC COROUTINE-NOT-FUNCTION
 
 == MEANING
@@ -1426,7 +1602,6 @@ index: errors
 alias: coroutine outward type; yield type does not match the result
 keywords: coroutine, yield, return, outward type, declared result, segment, root function
 related: concept.coroutines concept.types error.coroutine-resume-conflict
-docs: COROUTINES.md
 code: CORE SEMANTIC COROUTINE-RESULT-MISMATCH
 
 == MEANING
@@ -1499,7 +1674,6 @@ index: errors
 alias: resume with an argument; wrong number of resume messages
 keywords: coroutine, resume, message, protocol, zero-message, argument count, step
 related: concept.coroutines error.coroutine-resume-type error.coroutine-resume-conflict error.arity
-docs: COROUTINES.md
 code: CORE SEMANTIC COROUTINE-RESUME-ARITY
 
 == MEANING
@@ -1541,7 +1715,6 @@ index: errors
 alias: two resume protocols; conflicting resume message types
 keywords: coroutine, resume, protocol, message type, inference, yield, helper, conflict
 related: concept.coroutines error.coroutine-resume-type error.coroutine-resume-underconstrained error.coroutine-resume-arity
-docs: COROUTINES.md
 code: CORE SEMANTIC COROUTINE-RESUME-CONFLICT
 
 == MEANING
@@ -1612,7 +1785,6 @@ index: errors
 alias: resume clause type; resume message of type int
 keywords: coroutine, resume clause, message, struct, protocol, parameter list
 related: concept.coroutines concept.structs error.coroutine-contract error.coroutine-resume-arity
-docs: COROUTINES.md
 code: CORE SEMANTIC COROUTINE-RESUME-TYPE
 
 == MEANING
@@ -1657,7 +1829,6 @@ index: errors
 alias: resume type not determined; field of a yield value
 keywords: coroutine, yield, resume clause, message type, field, inference, protocol
 related: concept.coroutines error.coroutine-resume-type error.coroutine-resume-conflict
-docs: COROUTINES.md
 code: CORE SEMANTIC COROUTINE-RESUME-UNDERCONSTRAINED
 
 == MEANING
@@ -1721,7 +1892,6 @@ index: errors
 alias: coroutine of a function that never yields; start a coroutine of a plain function
 keywords: coroutine, binding, construction, yield, direct call, function value
 related: concept.coroutines error.coroutine-binding-field error.unwrapped-yield
-docs: COROUTINES.md
 code: CORE SEMANTIC COROUTINE-RHS-NOT-YIELDING
 
 == MEANING
@@ -1747,8 +1917,7 @@ rejected:
     that function's own trait parameter, whose only yield is an operation
     on it: the function as written is checked against its traits alone,
     and a trait's requirements say nothing about suspending (start the
-    coroutine where the witness is known;
-    TRAIT-IMPLEMENTATION-YIELD-INFERENCE-MILESTONE-1.md);
+    coroutine where the witness is known);
   * `coroutine {step} = f` with `f` a function value or a parameter.
 
 == WHAT TO DO
@@ -1779,7 +1948,6 @@ index: errors
 alias: call a yielding function directly; may suspend but does not start a coroutine
 keywords: coroutine, yield, suspend, call chain, top level, function value, construction
 related: concept.coroutines error.yield-outside-function error.coroutine-rhs-not-yielding error.coroutine-not-function
-docs: COROUTINES.md
 code: CORE SEMANTIC UNWRAPPED-YIELD
 
 == MEANING
@@ -1840,7 +2008,6 @@ index: errors
 alias: yield at the top level; top-level yield
 keywords: coroutine, yield, top level, program, function
 related: concept.coroutines error.unwrapped-yield error.yield-outside-coroutine
-docs: COROUTINES.md
 code: CORE SEMANTIC YIELD-OUTSIDE-FUNCTION
 
 == MEANING
@@ -1873,7 +2040,6 @@ index: errors
 alias: trait declared inside a function; nested trait declaration
 keywords: trait, declaration, top level, nested, function
 related: concept.traits concept.context-traits error.surface-syntax error.trait-nested-polymorphic
-docs: TRAITS.md CONTEXT-TRAITS.md
 code: TRAIT-NESTED
 match: SURFACE SYNTAX | TRAIT-NESTED: *
 
@@ -1912,7 +2078,6 @@ index: errors
 alias: trait without requirements; marker trait
 keywords: trait, requirement, declaration, marker, empty
 related: concept.traits concept.context-traits error.surface-syntax
-docs: TRAITS.md CONTEXT-TRAITS.md
 code: TRAIT-EMPTY
 match: SURFACE SYNTAX | TRAIT-EMPTY: *
 
@@ -1950,7 +2115,6 @@ index: errors
 alias: trait requirement with a body; default method
 keywords: trait, requirement, body, signature, default method, implementation
 related: concept.traits error.surface-syntax error.trait-not-satisfied
-docs: TRAITS.md
 code: TRAIT-REQUIREMENT-BODY
 match: SURFACE SYNTAX | TRAIT-REQUIREMENT-BODY: *
 
@@ -1990,7 +2154,6 @@ index: errors
 alias: trait requirement with flags
 keywords: trait, requirement, flags, flag section, signature
 related: concept.traits concept.flags error.surface-syntax
-docs: TRAITS.md FLAGS.md
 code: TRAIT-REQUIREMENT-FLAGS
 match: SURFACE SYNTAX | TRAIT-REQUIREMENT-FLAGS: *
 
@@ -2027,7 +2190,6 @@ index: errors
 alias: trait requirement with a context parameter
 keywords: trait, context trait, requirement, context parameter, receiver
 related: concept.traits concept.context-traits concept.contexts error.surface-syntax
-docs: TRAITS.md CONTEXT-TRAITS.md
 code: TRAIT-CONTEXT-REQUIREMENT
 match: SURFACE SYNTAX | TRAIT-CONTEXT-REQUIREMENT: *
 
@@ -2076,7 +2238,6 @@ index: errors
 alias: trait requirement declared twice; overloaded trait requirement
 keywords: trait, requirement, duplicate, overloading, operation name
 related: concept.traits error.duplicate
-docs: TRAITS.md
 code: CORE SEMANTIC TRAIT-DUPLICATE-REQUIREMENT
 
 == MEANING
@@ -2111,7 +2272,6 @@ index: errors
 alias: trait name already declared; trait named like a struct
 keywords: trait, name, type namespace, struct, built-in type, collision, declaration
 related: concept.traits concept.types error.duplicate
-docs: TRAITS.md
 code: CORE SEMANTIC TRAIT-NAME-COLLISION
 
 == MEANING
@@ -2150,7 +2310,6 @@ index: errors
 alias: trait requirement without a receiver; static trait requirement
 keywords: trait, requirement, receiver, first parameter, static, constructor
 related: concept.traits error.trait-self-position concept.method-sugar
-docs: TRAITS.md
 code: CORE SEMANTIC TRAIT-REQUIREMENT-RECEIVER
 
 == MEANING
@@ -2189,7 +2348,6 @@ index: errors
 alias: relational trait requirement; trait type in a second parameter
 keywords: trait, requirement, self type, relational, parameter, witness, equality
 related: concept.traits error.trait-requirement-receiver
-docs: TRAITS.md
 code: CORE SEMANTIC TRAIT-SELF-POSITION
 
 == MEANING
@@ -2225,7 +2383,6 @@ index: errors
 alias: trait composition; requirement returning another trait
 keywords: trait, context trait, requirement, composition, supertrait, parameter, result
 related: concept.traits concept.context-traits error.trait-self-position
-docs: TRAITS.md CONTEXT-TRAITS.md
 code: CORE SEMANTIC TRAIT-OTHER-TRAIT
 
 == MEANING
@@ -2265,7 +2422,6 @@ index: errors
 alias: type does not implement the trait; missing trait implementation
 keywords: trait, satisfy, conformance, implementation, owner namespace, witness, requirement, signature
 related: concept.traits concept.hashable concept.modules error.trait-unknown-operation error.trait-view-misuse error.type
-docs: TRAITS.md HASHABLE-AND-KEYED-HASH.md
 code: CORE SEMANTIC TRAIT-NOT-SATISFIED
 
 == MEANING
@@ -2354,7 +2510,6 @@ index: errors
 alias: method not declared by the trait; unknown trait operation
 keywords: trait, context trait, view, operation, method call, requirement, duck typing
 related: concept.traits concept.context-traits error.trait-view-misuse error.no-applicable-method
-docs: TRAITS.md CONTEXT-TRAITS.md
 code: CORE SEMANTIC TRAIT-UNKNOWN-OPERATION
 
 == MEANING
@@ -2395,7 +2550,6 @@ index: errors
 alias: field of a trait view; downcast a trait view
 keywords: trait, view, field, type test, cast, downcast, condition, native, witness
 related: concept.traits error.trait-unknown-operation error.trait-not-satisfied
-docs: TRAITS.md
 code: CORE SEMANTIC TRAIT-VIEW-MISUSE
 
 == MEANING
@@ -2443,7 +2597,6 @@ index: errors
 alias: heterogeneous trait values; trait object
 keywords: trait, witness, join, if, result, heterogeneous, trait object, existential
 related: concept.traits error.trait-storage-unsupported error.trait-view-misuse
-docs: TRAITS.md
 code: CORE SEMANTIC TRAIT-WITNESS-JOIN
 
 == MEANING
@@ -2516,7 +2669,6 @@ index: errors
 alias: trait typed struct field; list of trait values
 keywords: trait, storage, field, List, container, element, payload, heterogeneous collection
 related: concept.traits error.trait-witness-join concept.structs concept.error-payloads
-docs: TRAITS.md ERROR-PAYLOADS.md
 code: CORE SEMANTIC TRAIT-STORAGE-UNSUPPORTED
 
 == MEANING
@@ -2557,7 +2709,6 @@ index: errors
 alias: trait function as a function value; Fn type over a trait
 keywords: trait, function value, higher-order, alias, Fn type, witness, dispatch
 related: concept.traits concept.function-types error.trait-nested-polymorphic
-docs: TRAITS.md
 code: CORE SEMANTIC TRAIT-POLYMORPHIC-FUNCTION-VALUE
 
 == MEANING
@@ -2629,7 +2780,6 @@ index: errors
 alias: nested trait polymorphic function; trait parameter in a nested function; nested function over a constrained slot
 keywords: trait, nested function, specialization, monomorphization, top level, satisfies, slot
 related: concept.traits concept.parameterized-structs error.affine-generic-nested-unsupported error.trait-nested
-docs: TRAITS.md TRAIT-CONSTRAINED-IMPRINTED-TYPES.md
 code: CORE SEMANTIC TRAIT-NESTED-POLYMORPHIC
 
 == MEANING
@@ -2688,7 +2838,6 @@ index: errors
 alias: polymorphic recursion; recursion across trait witnesses
 keywords: trait, recursion, witness, specialization, clone, cycle, mutual recursion
 related: concept.traits concept.mutual-recursion concept.definition-order error.trait-impl-order
-docs: TRAITS.md MUTUAL-RECURSION.md
 code: CORE SEMANTIC TRAIT-POLYMORPHIC-RECURSION
 
 == MEANING
@@ -2745,7 +2894,6 @@ index: errors
 alias: trait implementation declared too late
 keywords: trait, implementation, order, forward reference, specialization, definition order
 related: concept.traits concept.definition-order rule.forward-references error.trait-polymorphic-recursion
-docs: TRAITS.md STRICT-REFERENCE-DETERMINISM.md
 code: CORE SEMANTIC TRAIT-IMPL-ORDER
 
 == MEANING
@@ -2800,7 +2948,6 @@ index: errors
 alias: trait specialization budget
 keywords: trait, specialization, budget, semantic instance, nesting limit, monomorphization
 related: concept.traits concept.specialization error.affine-instance-budget
-docs: TRAITS.md STATIC-DECISION-ECONOMICS.md
 code: CORE SEMANTIC TRAIT-INSTANCE-BUDGET
 
 == MEANING
@@ -2829,7 +2976,6 @@ index: errors
 alias: trait specialization bug
 keywords: trait, internal, compiler bug, monomorphization, plan
 related: concept.traits error.context-trait-internal
-docs: TRAITS.md
 code: CORE SEMANTIC TRAIT-INTERNAL
 
 == MEANING
@@ -2850,7 +2996,6 @@ index: errors
 alias: internal compiler error; rejected with no diagnostic
 keywords: internal, compiler bug, monomorphized program, diagnostics, recovery, report
 related: error.trait-internal error.context-trait-internal concept.traits
-docs: DIAGNOSTIC-RECOVERY.md TRAIT-IMPLEMENTATION-CONTEXT-REQUIREMENTS-MILESTONE-1.md
 code: CORE SEMANTIC COMPILER-INTERNAL
 
 == MEANING
@@ -2878,7 +3023,6 @@ index: errors
 alias: two contexts implement the same context trait; ambiguous io provider
 keywords: context trait, installed context, provider, selection, with context, std::io::IO, LinuxIO, ranking
 related: concept.context-traits concept.contexts rule.context-installation error.missing-context rule.sfiae stdlib.module.std::io stdlib.module.std::linux::io
-docs: CONTEXT-TRAITS.md CONTEXTS.md
 code: CORE SEMANTIC AMBIGUOUS-CONTEXT-IMPLEMENTATION
 
 == MEANING
@@ -2972,7 +3116,6 @@ index: errors
 alias: pass a context trait binding; context trait binding is not a value
 keywords: context trait, context parameter, binding, value, operation, method call, std::io::IO
 related: concept.context-traits concept.contexts error.trait-unknown-operation error.context-trait-position
-docs: CONTEXT-TRAITS.md
 code: CORE SEMANTIC CONTEXT-TRAIT-MISUSE
 
 == MEANING
@@ -3035,7 +3178,6 @@ index: errors
 alias: context trait as a parameter type; context trait as a field type
 keywords: context trait, context parameter, value type, parameter, field, List element, function type
 related: concept.context-traits concept.contexts error.context-trait-misuse error.not-a-context
-docs: CONTEXT-TRAITS.md
 code: CORE SEMANTIC CONTEXT-TRAIT-POSITION
 
 == MEANING
@@ -3080,7 +3222,6 @@ index: errors
 alias: context trait selection bug
 keywords: context trait, selection, installed context, internal, compiler bug
 related: concept.context-traits error.ambiguous-context-implementation error.trait-internal
-docs: CONTEXT-TRAITS.md
 code: CORE SEMANTIC CONTEXT-TRAIT-INTERNAL
 
 == MEANING
@@ -3092,3 +3233,58 @@ CONTEXT-TRAIT-INTERNAL means two calls disagreed.
 == WHAT TO DO
 You should never see this: it is a compiler bug. Please report the
 program (as small as you can make it) with the full message.
+
+@topic error.resource-declaration
+title: RESOURCE-DECLARATION: a resource and its one cleanup, declared in its module
+summary: A resource struct is an `opaque resource struct` of a module, with exactly one `cleanup fn` in the same module taking it as its one ordinary parameter and failing, yielding and returning nothing.
+index: errors
+alias: resource struct in the entry program; cleanup function signature; two cleanup functions; resource without a cleanup
+keywords: resource, cleanup, cleanup fn, opaque, module, errors clause, yield, context trait, unit
+related: concept.resources concept.affine concept.opaque-structs
+code: CORE SEMANTIC RESOURCE-DECLARATION
+
+== MEANING
+The compiler calls a resource's cleanup where an owner's scope ends -- on
+every exit, error edges included -- inside whatever code is running there.
+So the cleanup must be a fixed function it can name (one per resource, in
+the module that owns the representation), take the value whole, and add
+nothing an earlier analysis did not see: no error to handle, no
+suspension, no result, no context trait to select. The resource itself is
+its module's: opaque, so no other code can make one or take one apart, and
+never a context, which lives for the whole run.
+
+== WHAT TO DO
+Move the struct into a module and mark it `opaque resource struct`;
+declare one `cleanup fn NAME(r: R, context ...):` there that takes `r`
+apart on every path; handle every error inside the cleanup (record what the
+program must see in a context); require context structs, not context
+traits.
+
+@example reject
+opaque resource struct Handle:
+    id: int
+
+cleanup fn close(h: Handle):
+    {id} = h
+    unit
+
+close(Handle {id: 1})
+@caption A resource of the entry program
+@error CORE SEMANTIC RESOURCE-DECLARATION
+@at 1:8
+@end
+
+@example reject
+import res
+
+res::open(1)
+@module res
+opaque resource struct Handle:
+    id: int
+
+fn open(n: int) -> Handle:
+    Handle {id: n}
+@caption A resource with no cleanup function
+@error CORE SEMANTIC RESOURCE-DECLARATION
+@end
+

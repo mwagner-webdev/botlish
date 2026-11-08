@@ -19,7 +19,8 @@ is notarized, nothing packaged before stapling, nothing published before
 the downloaded artifact was launched and the publishable check passed);
 nothing uploads the work directory's decoded credentials; only the publish
 job may write, and only after the release job succeeded, publishing the
-release job's own ZIP.
+release job's own ZIP; and nothing is released before every test of the
+tagged commit is green (CI-RUNS.md: the tested job, which only reads runs).
 """
 import os
 import re
@@ -167,6 +168,19 @@ class Workflow(unittest.TestCase):
         # Apple's check precedes the signature, as in a release
         self.assertLess(body.index("rel notary-auth"), body.index("rel sign"))
 
+    def test_dry_run_bundle_is_assembled_as_a_release_s(self):
+        """The dry run signs a bundle assembled as the release job assembles its own (package-macos.sh with the
+        environment's MACOS_BUNDLE_ID), so the signature's identifier is the one its stages check -- never a copy
+        of the CI bundle, whose identifier is another (run 42377791764: the first runner whose codesign signed
+        with the throwaway identity refused the copy)."""
+        game = self.jobs["game"]
+        body = game["steps"][step_index(game, "The release path's dry run")]["run"]
+        assembly = 'package-macos.sh "$EXE" "$dry/app" --bundle-id "$MACOS_BUNDLE_ID"'
+        self.assertIn(assembly, body)
+        self.assertNotIn('ditto "$APPDIR"', body)
+        self.assertLess(body.index('. "$dry/env"'), body.index(assembly))
+        self.assertLess(body.index(assembly), body.index("rel sign"))
+
     # --- the order of the release -----------------------------------------------------
 
     def test_stages_in_order(self):
@@ -241,6 +255,19 @@ class Workflow(unittest.TestCase):
     def test_release_runs_are_never_cancelled(self):
         self.assertIn("!startsWith(github.ref, 'refs/tags/')", self.w["concurrency"]["cancel-in-progress"])
         self.assertEqual(self.on["push"].get("tags"), ["icy-tower-macos-v*"])
+
+    def test_release_waits_for_green_tests(self):
+        tested = self.jobs.get("tested", {})
+        self.assertEqual(tested.get("permissions"), {"contents": "read", "actions": "read"})
+        self.assertIsNone(tested.get("environment"))
+        self.assertIn('tools/ci/runs.py check "$GITHUB_SHA" --for icy-tower-macos', "\n".join(runs(tested)))
+        self.assertIn("startsWith(github.ref, 'refs/tags/icy-tower-macos-v')", tested.get("if", ""))
+        needs = self.release.get("needs", [])
+        self.assertIn("tested", needs if isinstance(needs, list) else [needs])
+        self.assertIn("needs.tested.outputs.green == 'true'", self.release.get("if", ""))
+        # nothing of the release's is built or tested on a deferred run
+        self.assertEqual(self.jobs["game"].get("needs"), "tested")
+        self.assertIn("needs.tested.outputs.green == 'true'", self.jobs["game"].get("if", ""))
 
     def test_tested_executable_checked(self):
         body = "\n".join(runs(self.release))

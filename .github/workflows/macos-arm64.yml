@@ -12,12 +12,18 @@ name: tests (macos arm64)
 #                  the native build and its Rust unit tests, the native stack
 #                  bounds and overflow tests, the native status, native
 #                  objects and executables (tests/platform/aot-facts.tcl),
-#                  the smoke tier (tests/platform/tier.tcl smoke)
+#                  the smoke tier (tests/platform/tier.tcl smoke), then the
+#                  canary (tests/canary.tcl; CI-RUNS.md, "The canary"): the
+#                  test files and golden suites the push adds or changes,
+#                  then the ones that failed in recent CI runs on macOS,
+#                  within about ten minutes. system-linker, acceptance, app
+#                  and full wait for it: a push that breaks them costs one
+#                  macOS runner for minutes
 #   system-linker  every push: the system linker (SINGLE-EXECUTABLE-FFI-
 #                  MILESTONE-1.md) -- Apple clang and ld, the precompiled
 #                  runtime archive, no rustc -- its tests and the executable
 #                  and C test files linked by it
-#   acceptance     Tier B, every push, two shards: the acceptance tier --
+#   acceptance     Tier B, every push, four shards: the acceptance tier --
 #                  the test files and golden suites that pass on macOS
 #   app            every push: the macOS distribution, Botlish.app
 #                  (MACOS-AARCH64-MILESTONE-9.md) -- built, signed ad hoc,
@@ -60,14 +66,16 @@ name: tests (macos arm64)
 # Pushes to any branch run it, so a feature branch gets macOS results before
 # this file is on main; a pull request from this repository's own branches
 # skips (its push already ran), one from a fork runs. Documentation-only
-# pushes skip. A newer push to the same branch cancels a running one, except
-# on main. No macOS job waits for a Linux runner. A manual run with app_only
+# pushes skip, and so do tags (a tag's commit was tested where it was
+# pushed). A newer push to the same branch cancels a running one, on main
+# too (CI-RUNS.md). No macOS job waits for a Linux runner. A manual run with app_only
 # runs only the application's jobs. The runner label, macos-15
 # (an Apple Silicon image; the smoke job fails on anything else), is written
 # in the smoke, acceptance and full jobs: change all three together.
 
 on:
   push:
+    branches: ["**"]
     paths-ignore: ["**.md", "docs/**"]
   pull_request:
     paths-ignore: ["**.md", "docs/**"]
@@ -100,7 +108,7 @@ permissions:
 
 concurrency:
   group: macos-arm64-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  cancel-in-progress: true
 
 defaults:
   run:
@@ -114,9 +122,13 @@ jobs:
     # A same-repository pull request's push run already covers its commits.
     if: (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository) && !inputs.app_only
     runs-on: macos-15
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
+        with:
+          # The canary's history to the merge base, without file contents.
+          fetch-depth: 0
+          filter: blob:none
 
       - name: Host
         run: |
@@ -167,6 +179,14 @@ jobs:
       - name: Smoke tier
         run: tclsh9.0 tests/platform/tier.tcl smoke 2>&1 | tee tier.log
 
+      # The likeliest to fail, first (CI-RUNS.md, "The canary"): compared
+      # with main's previous head on a push to main, with the merge base
+      # with main otherwise. Its selection goes to the job summary.
+      - name: Canary
+        env:
+          BASE: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.event.before || 'origin/main' }}
+        run: tclsh9.0 tests/canary.tcl -base "$BASE"
+
       # A program object and a standalone executable as the host's tools see
       # them (file, nm, objdump, otool, lipo, codesign), the executable run
       # outside its build directory, the link command and timings
@@ -191,6 +211,7 @@ jobs:
   # and (the C ones) under GC stress.
   system-linker:
     name: system linker (macOS arm64)
+    needs: smoke
     if: (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository) && !inputs.app_only
     runs-on: macos-15
     timeout-minutes: 120
@@ -248,7 +269,12 @@ jobs:
   # ad-hoc signed, not notarized); the logs always are.
   app:
     name: Botlish.app (macOS arm64 distribution)
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    # After the smoke job and its canary; a manual run with app_only skips
+    # them.
+    needs: smoke
+    if: >-
+      !cancelled() && (needs.smoke.result == 'success' || needs.smoke.result == 'skipped')
+      && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository)
     runs-on: macos-15
     timeout-minutes: 120
     steps:
@@ -367,7 +393,13 @@ jobs:
   # TOOLCHAIN and xcode-select --install).
   app-clean:
     name: Botlish.app without developer tools (macOS arm64)
-    needs: app
+    # After the application, so after the smoke job and its canary. Its own
+    # condition, as app's: a manual run with app_only skips the smoke job,
+    # and the implicit success() skips every job after a skipped one.
+    needs: [smoke, app]
+    if: >-
+      !cancelled() && (needs.smoke.result == 'success' || needs.smoke.result == 'skipped')
+      && needs.app.result == 'success'
     runs-on: macos-15
     timeout-minutes: 45
     steps:
@@ -581,8 +613,14 @@ jobs:
           otool -l identity | grep -A4 'cmd LC_MAIN' | tee lc-main.txt
           grep -q 'stacksize 536870912' lc-main.txt
           otool -l worker | grep -A4 'cmd LC_MAIN' | grep -q 'stacksize 0'
-          [ "$(./identity)" = "[1, 1]" ]
-          [ "$(./worker)" = "[0, 0]" ]
+          # An executable prints no value (PROGRAM-OUTPUT-MILESTONE-1.md): its
+          # value is the driver protocol's (BOTLISH_NATIVE_RESULT), read here
+          # as the words of its "value V" line, V's quoting removed.
+          words() { rm -f "$kit/result"; BOTLISH_NATIVE_RESULT="$kit/result" "$@" >/dev/null && tr -d '\\{}' <"$kit/result" | tr -s ' \n' ' ' | sed 's/ $//'; }
+          [ -z "$(./identity)" ]
+          [ -z "$(./worker)" ]
+          [ "$(words ./identity)" = "value list int 1 int 1" ]
+          [ "$(words ./worker)" = "value list int 0 int 0" ]
           BOTLISH_NATIVE_STARTUP_REPORT="$kit/report" ./identity
           tail -n 3 "$kit/report" | tee "$kit/report.tail"
           grep -qx 'startup main-thread' "$kit/report.tail"
@@ -679,14 +717,21 @@ jobs:
           if-no-files-found: warn
 
   acceptance:
-    name: acceptance (Tier B, macOS arm64, shard ${{ matrix.shard }}/2)
+    name: acceptance (Tier B, macOS arm64, shard ${{ matrix.shard }}/4)
+    needs: smoke
     if: (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository) && !inputs.app_only
     runs-on: macos-15
     timeout-minutes: 75
+    # Four shards. Two had grown to 61-76 minutes each (Tcl test files
+    # 57-73 of them) and were cut off at the limit in the golden phase, so
+    # they became three; with SENDABILITY-AND-VALUE-COPY-MILESTONE-1.md's two
+    # test files shard 1 of three was cut off again at 75 minutes in its
+    # golden phase (MAIN-CI-FAILURES-2026-11.md, 3.4): tier.tcl shards
+    # round-robin by index, not by cost.
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2]
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v5
 
@@ -699,7 +744,7 @@ jobs:
       - name: Acceptance tier, this shard
         env:
           SHARD: ${{ matrix.shard }}
-        run: tclsh9.0 tests/platform/tier.tcl -shard "$SHARD/2" -backends interp acceptance 2>&1 | tee tier.log
+        run: tclsh9.0 tests/platform/tier.tcl -shard "$SHARD/4" -backends interp acceptance 2>&1 | tee tier.log
 
       - name: Publish summary
         if: always()
@@ -707,7 +752,7 @@ jobs:
           SHARD: ${{ matrix.shard }}
         run: |
           {
-            echo "## Acceptance (macOS arm64), shard $SHARD/2"
+            echo "## Acceptance (macOS arm64), shard $SHARD/4"
             echo '```'
             awk '/^######## .*: (ok|FAILED)/ {print} /^######## [0-9]+ commands/ {tail = 1} tail {print}' tier.log 2>/dev/null | grep -a . || echo "the acceptance tier did not run"
             echo '```'
@@ -747,6 +792,7 @@ jobs:
 
   full:
     name: full (Tier C, macOS arm64, shard ${{ matrix.shard }}/3)
+    needs: smoke
     if: >-
       (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository)
       && (contains(github.event.head_commit.message, '[ci-full]') || inputs.tier == 'full') && !inputs.app_only

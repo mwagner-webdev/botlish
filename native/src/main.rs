@@ -32,6 +32,11 @@
 //!                                        library's public C functions;
 //!                                        native/native.tcl's native::library
 //!                                        links it with the runtime
+//!   botlish-native vms N FILE.nir        compile (JIT) once and run the
+//!                                        program on N Vms at once, one per
+//!                                        thread (a test harness: PER-THREAD-
+//!                                        RUNTIME-STATE-MILESTONE-1.md; options
+//!                                        and output at `concurrent_vms`)
 //!   botlish-native check FILE.nir        parse and validate only
 //!   botlish-native link-plan FILE.nir    the program's link plan as this
 //!                                        host links it (codegen::aot's
@@ -159,7 +164,6 @@ use runtime::show::{tcl_list, tcl_value};
 use runtime::value::NO_VALUE;
 use runtime::vm::{ProgramInfo, Vm};
 use std::io::{Read, Write};
-use std::rc::Rc;
 use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
 
@@ -416,6 +420,54 @@ fn extract_startup(args: &[String]) -> Result<(Vec<String>, Option<runtime::prog
     Ok((out, startup))
 }
 
+/// The `vms` command's options (`concurrent_vms`), each anywhere on the
+/// line: `--rendezvous K` (hold every Vm at its K-th collection until all
+/// have reached theirs), `--rounds R` (each thread makes, runs and drops R
+/// Vms in turn), `--check-heaps` (every collection checks that it marks
+/// only its own heap's objects: Vm::check_heap_ownership), `--poison`
+/// (every List and Struct a collection frees is overwritten first:
+/// Heap::set_poison_for_test).
+#[derive(Clone, Copy, Default)]
+struct VmsOptions {
+    rendezvous: Option<usize>,
+    rounds: usize,
+    check_heaps: bool,
+    poison: bool,
+}
+
+/// Pulls the `vms` options out of ARGS: the remaining arguments, and the
+/// options. None if one has no valid value.
+fn extract_vms_options(args: &[String]) -> Option<(Vec<String>, VmsOptions)> {
+    let mut options = VmsOptions { rendezvous: None, rounds: 1, check_heaps: false, poison: false };
+    let mut out = Vec::with_capacity(args.len());
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--rendezvous" => {
+                options.rendezvous = Some(args.get(i + 1)?.parse::<usize>().ok().filter(|&k| k > 0)?);
+                i += 2;
+            }
+            "--rounds" => {
+                options.rounds = args.get(i + 1)?.parse::<usize>().ok().filter(|&r| r > 0)?;
+                i += 2;
+            }
+            "--check-heaps" => {
+                options.check_heaps = true;
+                i += 1;
+            }
+            "--poison" => {
+                options.poison = true;
+                i += 1;
+            }
+            _ => {
+                out.push(args[i].clone());
+                i += 1;
+            }
+        }
+    }
+    Some((out, options))
+}
+
 fn cli(args: &[String]) -> i32 {
     let usage = || {
         eprintln!("usage: botlish-native run|clif|vcode|size|roots|calls|check|fusion|fused FILE.nir [--alloc off|summary|sites] [--argv ARGS|--argv-file PATH] | bench RUNS FILE.nir [--alloc ...] | batch CALLS FILE.nir | object|executable OUT FILE.nir [--startup worker|main-thread] | library OUT NAME FILE.nir | link-plan FILE.nir | target TRIPLE | system-linker (each also [--result PATH], --link-dir DIR, --framework-dir DIR)");
@@ -437,6 +489,7 @@ fn cli(args: &[String]) -> i32 {
         }
     };
     let Some((args, snapshot)) = extract_argv(&args) else { return usage() };
+    let Some((args, vms_options)) = extract_vms_options(&args) else { return usage() };
     let Some((args, alloc_mode)) = extract_alloc_mode(&args) else { return usage() };
     let args = &args[..];
     let (command, rest) = match args.split_first() {
@@ -495,6 +548,10 @@ fn cli(args: &[String]) -> i32 {
         },
         ("object" | "executable", [_, file, ..]) => (1, file),
         ("library", [_, _, file, ..]) => (1, file),
+        ("vms", [n, file, ..]) => match n.parse::<usize>() {
+            Ok(n) if (1..=32).contains(&n) => (n, file),
+            _ => return usage(),
+        },
         ("run" | "clif" | "vcode" | "size" | "roots" | "calls" | "check" | "fusion" | "fused" | "link-plan", [file, ..]) => (1, file),
         _ => return usage(),
     };
@@ -526,7 +583,7 @@ fn cli(args: &[String]) -> i32 {
             }
         }
     }
-    if matches!(command, "run" | "bench" | "batch" | "object" | "executable" | "library" | "link-plan") {
+    if matches!(command, "run" | "bench" | "batch" | "vms" | "object" | "executable" | "library" | "link-plan") {
         // Machine code to run or to keep is the host's own target's only
         // (codegen/target.rs). The diagnostic commands (clif, vcode, size,
         // roots, calls, check) still show this host's view of any program.
@@ -657,6 +714,11 @@ fn cli(args: &[String]) -> i32 {
                 }
             }
         }
+        "vms" if codegen::aot::calls_c(&program) => {
+            emit_error(&["NATIVE", "UNSUPPORTED", "foreign"], "a program that calls C runs as a linked executable, one Vm per process: the concurrent-VM harness runs JIT-compiled programs only");
+            0
+        }
+        "vms" => concurrent_vms(&program, runs, &vms_options, snapshot),
         "run" | "bench" | "batch" if codegen::aot::calls_c(&program) => {
             run_linked(command, &program, runs, alloc_mode, snapshot, &link_dirs)
         }
@@ -883,6 +945,233 @@ fn sites_tcl(sites: &[Site], stats: &std::collections::HashMap<u32, SiteStats>) 
     tcl_list(&entries)
 }
 
+/// The rendezvous of `vms --rendezvous K`: every Vm of the first round
+/// waits at its K-th collection -- at a safepoint, mid-run, with its
+/// contexts installed and its heap live -- until every other has arrived at
+/// its own or finished without reaching one. When all N arrive, all N are
+/// running at once, which the harness reports (`rendezvous N`) with what it
+/// saw there: each Vm's context area and program, and how many threads were
+/// guarded.
+struct Rendezvous {
+    k: usize,
+    n: usize,
+    state: std::sync::Mutex<RendezvousState>,
+    all: std::sync::Condvar,
+}
+
+#[derive(Default)]
+struct RendezvousState {
+    arrived: usize,
+    finished: usize,
+    areas: Vec<usize>,
+    programs: Vec<usize>,
+    guarded: usize,
+}
+
+impl Rendezvous {
+    fn arrive(&self, vm: &Vm) {
+        let mut state = self.state.lock().unwrap();
+        state.arrived += 1;
+        state.areas.push(vm.context_area().as_ptr() as usize);
+        state.programs.push(std::sync::Arc::as_ptr(&vm.info) as usize);
+        self.all.notify_all();
+        while state.arrived + state.finished < self.n {
+            state = self.all.wait(state).unwrap();
+        }
+        #[cfg(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc")))]
+        {
+            state.guarded = state.guarded.max(runtime::platform::guarded_threads());
+        }
+    }
+
+    fn finish_without_arriving(&self) {
+        let mut state = self.state.lock().unwrap();
+        state.finished += 1;
+        self.all.notify_all();
+    }
+}
+
+/// `vms N FILE.nir` (a test harness, PER-THREAD-RUNTIME-STATE-MILESTONE-1.md):
+/// PROGRAM compiled once by the JIT, then run on N threads at once, each
+/// with Vms of its own -- one machine-code image, one immutable program
+/// metadata (one `ProgramInfo` every Vm shares), and per Vm its own heap,
+/// constants' objects, statics, context area, roots and stack guard. Thread
+/// I runs R rounds (`--rounds`), each a fresh Vm whose argument snapshot is
+/// SNAPSHOT (else the default one) followed by the decimal text of I, made,
+/// run and dropped on that thread. Prints, after every thread has ended,
+/// one result line per Vm, `vm I value VALUE` or `vm I error CODE MESSAGE`
+/// in thread then round order, and a summary:
+///
+/// ```text
+///   vms N rounds R rendezvous A areas D programs P guarded G overlap O foreign F collections {C...}
+/// ```
+///
+/// A: how many first-round Vms reached the rendezvous (`--rendezvous K`;
+/// N when all were mid-run at once, 0 without one); D: the distinct context
+/// areas of those Vms (N: none shared); P: the distinct program metadata
+/// objects they read (1: shared, never copied); G: the guarded threads seen
+/// there; O: 1 when every first-round Vm started before any ended (a
+/// global sequence, not a clock); F: the pointers the ownership check
+/// (`--check-heaps`) found reaching outside a Vm's own heap, every Vm
+/// summed (0 always without it); C: each first-round Vm's collections. A
+/// stack overflow on thread I ends the process with `vm I error {NATIVE
+/// LIMIT STACK} ...`, its own guard's labelled line.
+fn concurrent_vms(program: &nir::Program, n: usize, options: &VmsOptions, snapshot: Option<Vec<Vec<u8>>>) -> i32 {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    let compile = CompileOptions { clif: false, vcode: false, alloc_sites: false, count_accesses: false };
+    let compiled = match CraneliftJit.compile(program, &compile) {
+        Ok(c) => c,
+        Err(e) => {
+            emit_error(&e.error_code().split(' ').collect::<Vec<_>>(), e.message());
+            return 0;
+        }
+    };
+    // The one image and the one program metadata every Vm shares.
+    let image = compiled.image();
+    let info = std::sync::Arc::new(program_info(program));
+    let base: Vec<Vec<u8>> = snapshot.unwrap_or_else(|| runtime::vm::DEFAULT_ARGV.iter().map(|a| a.as_bytes().to_vec()).collect());
+    let rendezvous = options.rendezvous.map(|k| Rendezvous { k, n, state: Default::default(), all: Default::default() });
+    // A global sequence of the first round's starts and ends: every start
+    // before every end is an overlap no scheduling of sequential runs makes.
+    let sequence = AtomicU64::new(0);
+    let stack_size = std::env::var("BOTLISH_NATIVE_STACK_BYTES")
+        .ok()
+        .and_then(|text| text.parse::<usize>().ok())
+        .filter(|&size| size >= 1 << 20)
+        .unwrap_or(1 << 30);
+    struct Ran {
+        lines: Vec<String>,
+        span: (u64, u64),
+        collections: usize,
+        foreign: u64,
+    }
+    let ran: Vec<Ran> = std::thread::scope(|scope| {
+        let threads: Vec<_> = (0..n)
+            .map(|i| {
+                let (image, info, base, rendezvous, sequence) = (&image, &info, &base, &rendezvous, &sequence);
+                std::thread::Builder::new()
+                    .name(format!("vm {i}"))
+                    .stack_size(stack_size)
+                    .spawn_scoped(scope, move || {
+                        // This thread's own guard, its reports labelled.
+                        #[cfg(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc")))]
+                        let _guard = {
+                            let stack = runtime::native_stack::NativeStack::current().expect("the thread's stack bounds");
+                            runtime::platform::OverflowGuard::install_labelled(&stack, format!("vm {i} ").as_bytes()).expect("the stack-overflow guard")
+                        };
+                        let mut ran = Ran { lines: Vec::new(), span: (0, 0), collections: 0, foreign: 0 };
+                        for round in 0..options.rounds {
+                            let mut vm = Vm::new(info.clone(), AllocMode::Off);
+                            let mut argv = base.clone();
+                            argv.push(i.to_string().into_bytes());
+                            vm.set_argv(argv);
+                            image.install(&mut vm);
+                            vm.set_framemap(image.framemap.clone());
+                            if options.check_heaps {
+                                vm.check_heap_ownership();
+                            }
+                            vm.heap.set_poison_for_test(options.poison);
+                            let first = round == 0;
+                            if let (true, Some(_)) = (first, rendezvous) {
+                                let arrived = std::cell::Cell::new(false);
+                                let arrived = std::rc::Rc::new(arrived);
+                                let mine = arrived.clone();
+                                // SAFETY of the borrow: the hook lives in the
+                                // Vm, which this scope drops before RENDEZVOUS.
+                                let rv: &'static Rendezvous = unsafe { &*(rendezvous.as_ref().unwrap() as *const Rendezvous) };
+                                vm.collection_hook = Some(Box::new(move |number, vm| {
+                                    if number == rv.k && !mine.get() {
+                                        mine.set(true);
+                                        rv.arrive(vm);
+                                    }
+                                }));
+                                let start = sequence.fetch_add(1, Ordering::SeqCst);
+                                let result = (image.entry)(&mut *vm);
+                                let end = sequence.fetch_add(1, Ordering::SeqCst);
+                                vm.collection_hook = None;
+                                if !arrived.get() {
+                                    rendezvous.as_ref().unwrap().finish_without_arriving();
+                                }
+                                ran.span = (start, end);
+                                ran.lines.push(vm_line(i, &mut vm, result));
+                            } else {
+                                let start = sequence.fetch_add(1, Ordering::SeqCst);
+                                let result = (image.entry)(&mut *vm);
+                                let end = sequence.fetch_add(1, Ordering::SeqCst);
+                                if first {
+                                    ran.span = (start, end);
+                                }
+                                ran.lines.push(vm_line(i, &mut vm, result));
+                            }
+                            if first {
+                                ran.collections = vm.heap.collections;
+                            }
+                            ran.foreign += vm.heap.foreign_pointers;
+                        }
+                        ran
+                    })
+                    .expect("a VM thread")
+            })
+            .collect();
+        threads.into_iter().map(|t| t.join().expect("a VM thread ended")).collect()
+    });
+    for r in &ran {
+        for line in &r.lines {
+            emit(line);
+        }
+    }
+    let overlap = ran.iter().map(|r| r.span.0).max() < ran.iter().map(|r| r.span.1).min();
+    let (arrived, areas, programs, guarded) = match &rendezvous {
+        Some(rv) => {
+            let state = rv.state.lock().unwrap();
+            let distinct = |v: &[usize]| v.iter().collect::<std::collections::BTreeSet<_>>().len();
+            (state.arrived, distinct(&state.areas), distinct(&state.programs), state.guarded)
+        }
+        None => (0, 0, 0, 0),
+    };
+    let collections: Vec<String> = ran.iter().map(|r| r.collections.to_string()).collect();
+    emit(&tcl_list(&[
+        "vms".to_string(),
+        n.to_string(),
+        "rounds".to_string(),
+        options.rounds.to_string(),
+        "rendezvous".to_string(),
+        arrived.to_string(),
+        "areas".to_string(),
+        areas.to_string(),
+        "programs".to_string(),
+        programs.to_string(),
+        "guarded".to_string(),
+        guarded.to_string(),
+        "overlap".to_string(),
+        u8::from(overlap).to_string(),
+        "foreign".to_string(),
+        ran.iter().map(|r| r.foreign).sum::<u64>().to_string(),
+        "collections".to_string(),
+        tcl_list(&collections),
+    ]));
+    0
+}
+
+/// The result line of Vm I's run, whose entry returned RESULT: `vm I`, then
+/// the line `run` would print for it.
+fn vm_line(i: usize, vm: &mut Vm, result: runtime::value::Value) -> String {
+    let line = if result == NO_VALUE {
+        let error = vm.error.take().unwrap_or(runtime::error::RtError::Bug("native code failed without recording an error".to_string()));
+        let code: Vec<String> = error.error_code().iter().map(|w| w.to_string()).collect();
+        tcl_list(&["error".to_string(), tcl_list(&code), vm.describe_error(&error)])
+    } else {
+        match tcl_value(&vm.info, result) {
+            Ok(value) => tcl_list(&["value".to_string(), value]),
+            Err(error) => {
+                let code: Vec<String> = error.error_code().iter().map(|w| w.to_string()).collect();
+                tcl_list(&["error".to_string(), tcl_list(&code), error.message(&vm.info)])
+            }
+        }
+    };
+    format!("vm {i} {line}")
+}
+
 fn execute(command: &str, program: &nir::Program, runs: usize, alloc_mode: AllocMode, snapshot: Option<Vec<Vec<u8>>>) -> i32 {
     let started = Instant::now();
     let mut backend = CraneliftJit;
@@ -915,12 +1204,19 @@ fn execute(command: &str, program: &nir::Program, runs: usize, alloc_mode: Alloc
         return 0;
     }
 
-    let mut vm = Vm::new(Rc::new(program_info(program)), alloc_mode);
+    let info = std::sync::Arc::new(program_info(program));
+    let mut vm = Vm::new(info.clone(), alloc_mode);
     if let Some(snapshot) = snapshot {
         vm.set_argv(snapshot);
     }
     compiled.install_constants(&mut vm);
     vm.set_framemap(compiled.framemap.clone());
+    // What a Botlish thread's start makes its Vm with (runtime/thread.rs):
+    // a Vm of this compiled image, on the thread that will run it. The image
+    // outlives every thread: `finish_all` joins them before it is released,
+    // and one that does not end keeps it alive (forgotten) until the
+    // process exits.
+    vm.thread.factory = Some(jit_factory(&compiled, info));
     #[cfg(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc")))]
     let _overflow_guard = {
         let stack = runtime::native_stack::NativeStack::current().expect("the thread's stack bounds");
@@ -965,6 +1261,7 @@ fn execute(command: &str, program: &nir::Program, runs: usize, alloc_mode: Alloc
             emit(&format!("timing {compile_us} {best} {runs} {}", vm.heap.collections));
         }
     }
+    let threads_ended = runtime::thread::finish_all();
     if alloc_mode.enabled() {
         let sites = alloc_mode.sites().then(|| sites_tcl(&compiled.sites, &vm.metrics.sites)).unwrap_or_default();
         emit(&format!("alloc {}", vm.metrics.to_tcl(&sites)));
@@ -976,9 +1273,35 @@ fn execute(command: &str, program: &nir::Program, runs: usize, alloc_mode: Alloc
         emit_error(&error.error_code(), &vm.describe_error(&error));
         return 0;
     }
-    match tcl_value(result) {
+    match tcl_value(&vm.info, result) {
         Ok(value) => emit(&tcl_list(&["value".to_string(), value])),
-        Err(error) => emit_error(&error.error_code(), &error.message()),
+        Err(error) => emit_error(&error.error_code(), &error.message(&vm.info)),
+    }
+    if !threads_ended {
+        // A thread still running: its code stays mapped until the process
+        // exits.
+        std::mem::forget(compiled);
     }
     0
+}
+
+/// The factory of a JIT-compiled program (runtime/thread.rs): a Vm of
+/// COMPILED's image with INFO, made on the calling thread.
+fn jit_factory(compiled: &codegen::CompiledProgram, info: std::sync::Arc<runtime::vm::ProgramInfo>) -> std::sync::Arc<runtime::thread::VmFactory> {
+    struct Image(*const codegen::CompiledProgram);
+    // SAFETY: the compiled program is read-only after compilation (the
+    // image every Vm shares: PER-THREAD-RUNTIME-STATE-MILESTONE-1.md), and
+    // it outlives every thread that uses this factory (run's finish_all).
+    unsafe impl Send for Image {}
+    unsafe impl Sync for Image {}
+    let image = Image(compiled);
+    std::sync::Arc::new(move || {
+        let image = &image;
+        // SAFETY: see Image.
+        let compiled = unsafe { &*image.0 };
+        let mut vm = Vm::new(info.clone(), runtime::metrics::AllocMode::Off);
+        compiled.install_constants(&mut vm);
+        vm.set_framemap(compiled.framemap.clone());
+        Ok((vm, compiled.entry))
+    })
 }

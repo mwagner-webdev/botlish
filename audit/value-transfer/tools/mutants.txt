@@ -1,0 +1,396 @@
+# Mutants of sendability and the cross-VM value transfer
+# (audit/value-transfer/tools/mutate.tcl; SENDABILITY-AND-VALUE-COPY-
+# MILESTONE-1.md, "Mutation testing"): each a deliberate bug in one rule of
+# the static judgement, an owner's statement, the admission, the schema or a
+# codec.
+#
+#   @@ NAME DESCRIPTION
+#   !! TEST ...        the detectors meant to catch it: tests of
+#                      tests/sendability.test or tests/value-transfer.test
+#                      (tcltest -match patterns), or rust:FILTER for the
+#                      native crate's `cargo test --release --lib FILTER`
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+#
+# A mutant may have several edits. Lines starting with # outside an edit
+# are comments.
+
+# --- The static judgement --------------------------------------------------
+
+@@ opaque-structural an opaque struct without its owner's statement is judged by its fields: a Reg, an actor Address or a user Token becomes sendable
+!! sd-matrix-not-sendable-7 sd-matrix-not-sendable-8 sd-matrix-not-sendable-9
+## hir/types.tcl
+<<<<
+        set clause [hir::structs::sendableOf $id]
+        if {$clause eq ""} {
+====
+        set clause [hir::structs::sendableOf $id]
+        if {0} {
+>>>>
+
+@@ context-sendable a context struct is judged by its fields: installed authority becomes a value to send
+!! sd-matrix-not-sendable-6
+## hir/types.tcl
+<<<<
+    if {[hir::structs::isContext $id]} {
+        return [list none
+====
+    if {0} {
+        return [list none
+>>>>
+
+@@ address-stated std::actor's Address states `sendable fields`: a mailbox identity of one VM crosses to another
+!! sd-matrix-not-sendable-9 sd-stdlib-statements
+## stdlib/actor.bot
+<<<<
+opaque struct Address[M]:
+    slot: int
+    gen: int
+====
+opaque struct Address[M]:
+    slot: int
+    gen: int
+    sendable fields
+>>>>
+
+@@ function-sendable a function or closure is judged sendable
+!! sd-matrix-not-sendable-1 sd-matrix-not-sendable-2 sd-matrix-not-sendable-3
+## hir/types.tcl
+<<<<
+    if {[IsFn $type] || [IsExactBlock $type] || [IsExactNative $type]} {
+        return [list none [NoSending block]]
+    }
+====
+    if {[IsFn $type] || [IsExactBlock $type] || [IsExactNative $type]} {
+        return {total ""}
+    }
+>>>>
+
+@@ coroutine-sendable a coroutine handle -- an affine value owning a suspended computation -- is judged sendable, and so is an aggregate holding one
+!! sd-matrix-not-sendable-13
+## hir/types.tcl
+<<<<
+    if {[IsCoroutine $type]} {
+        return [list none [NoSending coroutine]]
+    }
+====
+    if {[IsCoroutine $type]} {
+        return {total ""}
+    }
+>>>>
+
+@@ element-ignored a List is sendable whatever its elements are
+!! sd-matrix-not-sendable-3 sd-matrix-not-sendable-13
+## hir/types.tcl
+<<<<
+        return [SendComponents [list [list "its elements" [lindex $type 1]]] $assumed $seen]
+    }
+    if {[IsSet $type]} {
+====
+        return {total ""}
+    }
+    if {[IsSet $type]} {
+>>>>
+
+@@ tree-fields-ignored a tree struct is judged by its recursion alone: a non-sendable field beside the child list is ignored
+!! sd-matrix-not-sendable-4
+## hir/types.tcl
+<<<<
+    set parts {}
+    foreach {name t} [hir::structs::AppliedFieldTypes $type] {
+        lappend parts [list "field \"$name\" of $shown"
+====
+    set parts {}
+    if {[hir::structs::treeField $id] ne ""} {
+        return {total ""}
+    }
+    foreach {name t} [hir::structs::AppliedFieldTypes $type] {
+        lappend parts [list "field \"$name\" of $shown"
+>>>>
+
+@@ variables-assumed every imprint variable is taken as sendable: an unconstrained generic body transfers a value of any type
+!! sd-unconstrained-variable sd-sendclass-classes
+## hir/types.tcl
+<<<<
+        if {[lindex $type 1] in $assumed} {
+====
+        if {1} {
+>>>>
+
+@@ open-type-admitted a transfer of an open type is admitted: its schema is not the caller's type
+!! sd-open-type sd-decode-trait-view
+## hir/range.tcl
+<<<<
+    if {![hir::types::IsClosedType $type {} 1] || ($sending eq "result" && [hir::types::IsTrait $type])} {
+====
+    if {0} {
+>>>>
+
+@@ declaration-parts-unchecked an owner's `sendable fields` and `through ... as R` are taken on trust: an any field or a function representation passes
+!! sd-clause-any-field sd-clause-fn-field sd-clause-through-not-sendable
+## hir/structs.tcl
+<<<<
+    ValidateSendableParts $decls
+====
+>>>>
+
+@@ through-unverified the functions of `sendable through` are never checked: a missing, mistyped, failing or context-requiring projection or rebuild is accepted
+!! sd-through-*
+## hir/hir.tcl
+<<<<
+    hir::transfer::verifyDeclarations hir
+====
+>>>>
+
+@@ application-arguments-dropped a struct is judged once, at its declaration's slots taken as sendable, for every application: one statement makes every instantiation sendable, Box[Fn] included
+!! sd-owner-generic-fields sd-matrix-not-sendable-11
+## hir/types.tcl
+<<<<
+    foreach {name t} [hir::structs::AppliedFieldTypes $type] {
+        lappend parts [list "field \"$name\" of $shown"
+====
+    foreach {name t} [hir::structs::fieldTypes $id] {
+        lappend parts [list "field \"$name\" of $shown"
+>>>>
+## hir/types.tcl
+<<<<
+    return [SendComponents $parts $assumed $seen]
+}
+====
+    return [SendComponents $parts [concat $assumed [hir::structs::slots $id]] $seen]
+}
+>>>>
+
+# --- The owners' statements -----------------------------------------------
+
+@@ map-table-copied a MutableMap is sent field by field: its table's stored keyed hashes and index cross, valid only under the sender's table-hash key
+!! vt-process-interp-compile vt-process-compile-interp
+## stdlib/mutable_map.bot
+<<<<
+    sendable through(transfer_out, transfer_in) as List[MutableMapEntry[K, V]]
+====
+    sendable fields
+>>>>
+## stdlib/ordered_table.bot
+<<<<
+    keys: MutableVector[K]
+    live: MutableArray[int]
+====
+    keys: MutableVector[K]
+    live: MutableArray[int]
+    sendable fields
+>>>>
+
+# --- The codec (core/transfer.tcl) -----------------------------------------
+
+@@ vector-reference a MutableVector is sent as its header's identity, which the receiver takes for its own: the copy aliases the source (the Tcl backends' heap pointer)
+!! vt-mutable-independent vt-vector-place
+## core/transfer.tcl
+<<<<
+            vector {
+                set items [core::mutvec::items $v]
+                append out [Varuint [llength $items]]
+                Push stack [lindex $node 1] $items
+            }
+====
+            vector {
+                append out [Varuint [lindex $v 1]]
+            }
+>>>>
+## core/transfer.tcl
+<<<<
+            list - set - vector - array {
+                set count [ReadVaruint $raw pos $end]
+====
+            list - set - vector - array {
+                set count [ReadVaruint $raw pos $end]
+                if {[lindex $node 0] eq "vector"} {
+                    lappend values [list mutvec $count]
+                    continue
+                }
+>>>>
+
+@@ source-drained encoding a MutableVector takes its elements out of the source: the sender's value changes
+!! vt-mutable-independent vt-vector-place
+## core/transfer.tcl
+<<<<
+            vector {
+                set items [core::mutvec::items $v]
+====
+            vector {
+                set items [core::mutvec::items $v]
+                set ::core::mutvec::store([lindex $v 1]) {}
+>>>>
+
+@@ decoded-vector-shared every decoded MutableVector of a process is the first one decoded: two copies alias each other, and a later decode returns the first one's elements
+!! vt-decode-twice vt-vector-place
+## core/transfer.tcl
+<<<<
+        vector {
+            return [core::mutvec::New $parts]
+        }
+====
+        vector {
+            variable sharedVector
+            if {![info exists sharedVector]} {
+                set sharedVector [core::mutvec::New $parts]
+            }
+            return $sharedVector
+        }
+>>>>
+
+@@ text-latin1 a String's bytes are decoded as ISO 8859-1, not UTF-8: every non-ASCII character is changed
+!! vt-roundtrip-strings vt-roundtrip-point vt-refuse-utf8
+## core/transfer.tcl
+<<<<
+                if {[catch {encoding convertfrom -profile strict utf-8 $utf8} text]} {
+====
+                if {[catch {encoding convertfrom iso8859-1 $utf8} text]} {
+>>>>
+
+@@ int-truncated an Int is written as its low 64 bits: a big Int loses its high bits
+!! vt-roundtrip-big vt-roundtrip-huge
+## core/transfer.tcl
+<<<<
+proc core::transfer::Int {n} {
+    if {$n == 0} {
+====
+proc core::transfer::Int {n} {
+    set n [expr {$n & 0xffffffffffffffff}]
+    if {$n >= 0x8000000000000000} {
+        set n [expr {$n - 0x10000000000000000}]
+    }
+    if {$n == 0} {
+>>>>
+
+@@ fingerprint-ignored the receiver does not compare the bytes' fingerprint with its type's: a value of another type, application or layout is decoded as this one
+!! vt-refuse-wrong-type vt-refuse-instantiation vt-refuse-fingerprint vt-program-layout vt-refuse-same-name-layout
+## core/transfer.tcl
+<<<<
+    if {[format %016llx $fp] ne $fingerprint} {
+====
+    if {0} {
+>>>>
+
+@@ zero-budget-unbounded elements of no size draw on no budget: a few bytes claim a List of millions of units
+!! vt-refuse-zero-budget
+## core/transfer.tcl
+<<<<
+    if {$budget < 0} {
+====
+    if {0} {
+>>>>
+
+@@ domain-unchecked an Int is decoded into its type without its integer domain: a Byte of 300
+!! vt-refuse-domain
+## core/transfer.tcl
+<<<<
+    foreach domain $domains {
+====
+    foreach domain {} {
+>>>>
+
+@@ bool-unchecked a Bool byte is not checked to be 0 or 1
+!! vt-refuse-bool-byte
+## core/transfer.tcl
+<<<<
+                if {$b > 1} {
+====
+                if {0} {
+>>>>
+
+@@ enum-unchecked a case index is not checked against the enum's cases
+!! vt-refuse-enum-case
+## core/transfer.tcl
+<<<<
+                if {$index >= [llength $cases]} {
+====
+                if {0} {
+>>>>
+
+@@ float-unchecked a non-finite binary64 is decoded into a Float64
+!! vt-refuse-infinite
+## core/transfer.tcl
+<<<<
+                if {(($u >> 52) & 0x7ff) == 0x7ff} {
+====
+                if {0} {
+>>>>
+
+@@ trailing-accepted bytes after the value are ignored
+!! vt-refuse-trailing
+## core/transfer.tcl
+<<<<
+    if {$pos != $end} {
+====
+    if {0} {
+>>>>
+
+@@ set-not-rebuilt an ImmutableSet is built from the bytes' members as they are: a member twice stays twice
+!! vt-set-rebuilt
+## core/transfer.tcl
+<<<<
+            return [core::value::immutableSet [core::immutableset::Dedup $parts]]
+====
+            return [core::value::immutableSet $parts]
+>>>>
+
+# --- The native codec (native/src/runtime/transfer.rs) ---------------------
+
+@@ native-vector-pointer a MutableVector is sent as its header's address, which the receiver takes for a value of its own: the copy aliases the source in one VM and dangles in another
+!! rust:transfer vt-mutable-independent vt-decode-twice vt-vector-place
+## native/src/runtime/transfer.rs
+<<<<
+            Node::Vector(elem) => {
+                expect(heap_kind(v) == KIND_MUTVEC, v, "MutableVector")?;
+                push_items(p, &mut out, &mut nodes, *elem, super::mutvec::mutvec_of(v).backing.iter().copied());
+            }
+====
+            Node::Vector(_elem) => {
+                expect(heap_kind(v) == KIND_MUTVEC, v, "MutableVector")?;
+                out.extend_from_slice(&v.to_le_bytes());
+            }
+>>>>
+## native/src/runtime/transfer.rs
+<<<<
+            Node::Set(elem) | Node::Vector(elem) | Node::Array(elem) => {
+                let count = r.varuint()?;
+====
+            Node::Vector(_) => {
+                let word = r.take8()?;
+                made(p, word)?;
+            }
+            Node::Set(elem) | Node::Array(elem) => {
+                let count = r.varuint()?;
+>>>>
+
+@@ native-unrooted a composite is allocated after its parts left the roots: a collection while it is made frees them
+!! rust:transfer vt-gc-stress
+## native/src/runtime/transfer.rs
+<<<<
+    let roots = &vm(p).temp_roots;
+    let parts: Vec<Value> = roots[roots.len() - k..].to_vec();
+====
+    let roots = &mut vm(p).temp_roots;
+    let parts: Vec<Value> = roots.split_off(roots.len() - k);
+>>>>
+## native/src/runtime/transfer.rs
+<<<<
+    roots.truncate(roots.len() - k);
+    roots.push(v);
+====
+    roots.push(v);
+>>>>
+
+@@ native-fingerprint-ignored the native receiver does not compare the bytes' fingerprint with its type's
+!! rust:transfer vt-refuse-wrong-type vt-refuse-instantiation vt-program-layout
+## native/src/runtime/transfer.rs
+<<<<
+    if u64::from_le_bytes(raw[5..HEADER].try_into().expect("eight bytes")) != plan.fingerprint {
+====
+    if false && u64::from_le_bytes(raw[5..HEADER].try_into().expect("eight bytes")) != plan.fingerprint {
+>>>>

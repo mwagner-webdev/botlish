@@ -8,6 +8,7 @@
 
 use super::show::show;
 use super::value::*;
+use super::vm::ProgramInfo;
 
 #[derive(Debug, Clone)]
 pub enum RtError {
@@ -47,6 +48,11 @@ pub enum RtError {
 /// these to the errors the runtime itself declares, far above the dense
 /// 1-based ids of a program's own `error` declarations.
 pub const BUILTIN_ERROR_ID_BASE: u32 = 0x4000_0000;
+/// The internal failure an abandoned coroutine's pending yield fails with
+/// (rt_co_abandon; hir::affine::AbandonedError, native/lower.tcl's ErrorId):
+/// no program declares it or can handle it -- only the compiler's release
+/// pads match it (LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md).
+pub const ERR_COROUTINE_ABANDONED: u32 = BUILTIN_ERROR_ID_BASE - 1;
 /// `InvalidArgumentEncoding`, the error of `argv()` (builtin error 0).
 pub const ERR_INVALID_ARGUMENT_ENCODING: u32 = BUILTIN_ERROR_ID_BASE;
 /// `IndexNotFound`, the error of `list::at`, `mutable_array::at` and
@@ -84,6 +90,16 @@ pub const ERR_INVALID_UTF8: u32 = BUILTIN_ERROR_ID_BASE + 12;
 /// bytes are not the UTF-16LE encoding of any String (runtime::ops's
 /// rt_bytes_decode_utf16le, UTF16-BYTE-STORAGE-MILESTONE-1.md).
 pub const ERR_INVALID_UTF16: u32 = BUILTIN_ERROR_ID_BASE + 13;
+/// The refusals of `std::transfer::decode` (builtin errors 14..18,
+/// core/transfer.tcl; runtime::transfer's rt_transfer_decode,
+/// SENDABILITY-AND-VALUE-COPY-MILESTONE-1.md): bytes that are no transfer,
+/// another format version, another type's fingerprint, a value outside its
+/// type, a decode beyond the runtime's limits.
+pub const ERR_TRANSFER_MALFORMED: u32 = BUILTIN_ERROR_ID_BASE + 14;
+pub const ERR_TRANSFER_VERSION: u32 = BUILTIN_ERROR_ID_BASE + 15;
+pub const ERR_TRANSFER_TYPE_MISMATCH: u32 = BUILTIN_ERROR_ID_BASE + 16;
+pub const ERR_TRANSFER_INVALID_VALUE: u32 = BUILTIN_ERROR_ID_BASE + 17;
+pub const ERR_TRANSFER_LIMIT: u32 = BUILTIN_ERROR_ID_BASE + 18;
 
 /// Semantic error kinds of core/errors.tcl that NIR may raise.
 pub const SEMANTIC_KINDS: &[&str] = &[
@@ -134,23 +150,26 @@ impl RtError {
         }
     }
 
-    pub fn message(&self) -> String {
+    /// The message, rendering the values it refers to with PROG's metadata:
+    /// the program of the Vm the error was recorded in (a value's shape and
+    /// enum numbers index its own program's tables, never another's).
+    pub fn message(&self, prog: &ProgramInfo) -> String {
         match self {
             RtError::Type { context, expected, got } => {
-                format!("{context}: expected {}, got {}", expected.name(), show(*got))
+                format!("{context}: expected {}, got {}", expected.name(), show(prog, *got))
             }
             RtError::ResultTag { context, expected_ok, got } => format!(
                 "{context}: expected {} Result, got {}",
                 if *expected_ok { "an ok" } else { "an error" },
-                show(*got)
+                show(prog, *got)
             ),
-            RtError::NotBoolean { got } => format!("if condition must be a Boolean, got {}", show(*got)),
-            RtError::NotCallable { got } => format!("cannot call non-callable value {}", show(*got)),
+            RtError::NotBoolean { got } => format!("if condition must be a Boolean, got {}", show(prog, *got)),
+            RtError::NotCallable { got } => format!("cannot call non-callable value {}", show(prog, *got)),
             RtError::Equality { a, b } => {
-                format!("== is not defined for callables: {} == {}", show(*a), show(*b))
+                format!("== is not defined for callables: {} == {}", show(prog, *a), show(prog, *b))
             }
             RtError::Unhashable { value } => {
-                format!("hash is not defined for callables: {}", show(*value))
+                format!("hash is not defined for callables: {}", show(prog, *value))
             }
             RtError::Semantic { message, .. } => message.clone(),
             RtError::StackOverflow => "native stack exhausted: too many nested calls".to_string(),

@@ -35,9 +35,9 @@
 #   std::byte::position_high(n) Nibble -> HighNibble: n<<4, positioned.
 #   std::byte::from_int(value: int)  Int -> Byte, errors BelowRange, AboveRange:
 #                          the ordinary explicitly-fallible Int -> Byte
-#                          conversion (EXPLICIT-ERROR-COMPLETIONS.md;
-#                          replaces the old callable-type-syntax Byte(x),
-#                          removed from source -- see that report for why).
+#                          conversion (EXPLICIT-ERROR-COMPLETIONS.md). It
+#                          replaces the old callable-type syntax Byte(x),
+#                          which is removed from source.
 #                          A statically provable in-range/out-of-range
 #                          argument needs no handler, or is a compile-time
 #                          KNOWN-ERROR, respectively -- see
@@ -59,8 +59,8 @@
 #
 # ASCII/encoding interpretation, `is_unreserved`, and URI grammar are
 # deliberately absent: `byte::` holds only operations intrinsic to byte/bit
-# representation (core/scalarbits.tcl's header, and the milestone's own
-# namespace discipline -- see BYTE-NIBBLE-BIT-ARITHMETIC.md).
+# representation, a namespace discipline (core/scalarbits.tcl's header;
+# BYTE-NIBBLE-BIT-ARITHMETIC.md).
 import std::char
 import std::immutable_set
 
@@ -74,7 +74,7 @@ import std::immutable_set
 error BelowRange
 error AboveRange
 
-# The four scalar domains this milestone's own byte/bit-domain operations
+# The four scalar domains this module's own byte/bit-domain operations
 # are typed over. These used to be compiler-side Tcl registrations
 # (core/scalarbits.tcl); they are ordinary Botlish source declarations now
 # (see SOURCE-DEFINED-INTEGER-DOMAINS.md) -- the compiler knows what a
@@ -94,7 +94,7 @@ error AboveRange
 #                                     to Nibble's domain, but a distinct,
 #                                     nominal type: LowNibble means "already
 #                                     positioned", Nibble means "logical
-#                                     value" -- see item 6/74 of the report)
+#                                     value" (BYTE-NIBBLE-BIT-ARITHMETIC.md))
 #   HighNibble  {0,16,32,...,240}     a nibble positioned in the high half of
 #                                     a Byte -- 16 exact values, not every
 #                                     integer in [0,240]
@@ -133,7 +133,7 @@ fn position_high(n) -> HighNibble:
 # parameter type demands *static* proof at every call site
 # (STRICT-TYPED-PARAMETERS.md) -- sound here because every actual call
 # site in this codebase now has a statically provable Int (or Byte, itself
-# a subtype) in hand, thanks to this same milestone's own producer-side
+# a subtype) in hand, thanks to the standard library's own producer-side
 # fixes (std::str::encode_utf8's truthful List[Byte] result, std::char::scalar_value's own
 # int result), rather than weakening this conversion back to an untyped
 # escape hatch to accommodate an under-typed caller.

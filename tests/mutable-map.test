@@ -258,7 +258,7 @@ test mm-one-keyed-hash {every operation computes the keyed hash of its key once 
 
 test mm-lookups-allocate-nothing {natively, once a map is built, contains, at (hit and miss) and replacing a value allocate nothing: 2000 of each allocate what 0 do} -constraints nativeBuilt -body {
     set rows [lmap n {0 2000} {
-        set hir [surface::compile "${::mmDecls}fn work(place m: std::mutable_map::MutableMap\[int, int\], acc: MutableArray\[int\], i: int, n: int) -> unit:\n    if i >= n:\n        return unit\n    if m.contains(i.mod(300) * 7):\n        acc.set(0, at_or(m, i.mod(600) * 7, 0)):\n            on IndexNotFound:\n                unit\n    m.set(i.mod(300) * 7, i)\n    work(m, acc, i + 1, n)\nm = int_map()\nloop i from 0 to 300:\n    m.set(i * 7, i)\nacc = std::mutable_array::create(1, 0)\nwork(m, acc, 0, $n)\nm.length()\n" -warnings off]
+        set hir [surface::compile "${::mmDecls}fn work(place m: std::mutable_map::MutableMap\[int, int\], place acc: MutableArray\[int\], i: int, n: int) -> unit:\n    if i >= n:\n        return unit\n    if m.contains(i.mod(300) * 7):\n        acc.set(0, at_or(m, i.mod(600) * 7, 0)):\n            on IndexNotFound:\n                unit\n    m.set(i.mod(300) * 7, i)\n    work(m, acc, i + 1, n)\nm = int_map()\nloop i from 0 to 300:\n    m.set(i * 7, i)\nacc = std::mutable_array::create(1, 0)\nwork(m, acc, 0, $n)\nm.length()\n" -warnings off]
         dict get [native::allocationReport $hir summary] total allocations
     }]
     expr {[lindex $rows 0] == [lindex $rows 1]}

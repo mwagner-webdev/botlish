@@ -377,6 +377,30 @@ proc surface::modules::NamespaceFile {dir name} {
 # native libraries are searched there when the program links
 # (`nativeDirs`: native/native.tcl).
 #
+# Package graphs (SHARED-PACKAGE-DEPENDENCIES-MILESTONE-1.md). When the
+# application's packages directory -- ROOT/.bot_modules, or the target's
+# tree -- holds a file .graph, the packages it names are one resolved
+# dependency graph instead of a tree: one instance of each, its directory
+# PACKAGES/NAME, shared by every scope that depends on it. The file says,
+# for the application and for each of its packages, which packages that
+# scope depends on (ReadGraph has the format), and nothing else: no
+# version, lock or source. A scope of the graph -- the application, or one
+# of its packages -- sees exactly the packages the graph says it uses
+# (Installed), each the graph's one instance, whose identity is its name
+# (Instance): lib_a's event_loop_linux and lib_b's and the application's
+# are one module, event_loop_linux, with one Native context type and one
+# archive declaration. A graph package never sees a package it does not use,
+# the application's modules or a package installed by hand, and its own
+# .bot_modules is not read (the graph is its whole scope). Every package of
+# the graph claims its root namespace in the application, used by it or not
+# (MODULE-COLLISION for an application file of that namespace): its
+# identity is its name. A directory of PACKAGES the graph does not name is
+# a package installed by hand, with the scope of its own .bot_modules as
+# above. A malformed graph is PACKAGE-GRAPH at every import the
+# application's packages decide. The package manager writes the graph from
+# the dependency graph it resolved (pm/graph.tcl); the compiler knows the
+# file's name and format, nothing of how it was made.
+#
 # Identity (BOT-MODULES-MILESTONE-1.md, "Semantic identity"). A module's
 # canonical identity -- the one every later stage keys it by (its section,
 # its types, structs, enums, errors, traits, layouts and contexts, its
@@ -457,7 +481,138 @@ proc surface::modules::ScopeText {state scope} {
         #std  { return "the standard library" }
         #text { return "program text with no application root" }
     }
+    if {[InGraph $state $scope]} {
+        return "package $scope (of the application's package graph, at [ScopeDir $state $scope])"
+    }
     return "package [PackageName $scope] (instance $scope, at [ScopeDir $state $scope])"
+}
+
+# 1 if SCOPE is a scope of STATE's package graph (header, "Package graphs"):
+# the application of a packages directory with a graph, or one of the
+# graph's packages.
+proc surface::modules::InGraph {state scope} {
+    if {![dict exists $state graph]} {
+        return 0
+    }
+    if {$scope eq ""} {
+        return 1
+    }
+    return [expr {[dict exists $state packages $scope] && [dict get $state packages $scope graph]}]
+}
+
+# 1 if NAME is a package of STATE's package graph.
+proc surface::modules::GraphPackage {state name} {
+    return [expr {[dict exists $state graph] && [dict exists $state graph packages $name]}]
+}
+
+# The packages the graph scope SCOPE uses (the application's, or a graph
+# package's).
+proc surface::modules::GraphUses {state scope} {
+    if {$scope eq ""} {
+        return [dict get $state graph application]
+    }
+    return [dict get $state graph packages $scope]
+}
+
+# The graph's scopes that use the package NAME, for messages: "the
+# application", "lib_a", ...
+proc surface::modules::GraphUsers {state name} {
+    set users {}
+    if {$name in [dict get $state graph application]} {
+        lappend users "the application"
+    }
+    dict for {package uses} [dict get $state graph packages] {
+        if {$name in $uses} {
+            lappend users $package
+        }
+    }
+    return $users
+}
+
+# The package graph of the text TEXT of the file PATH (header, "Package
+# graphs"): {application {NAME...} packages {NAME {DEP...} ...}}, or an
+# error {SURFACE GRAPH} saying which line breaks which rule. The format,
+# one line per scope, LF-terminated, single spaces, nothing else:
+#
+#   botlish package graph 1
+#   application NAME...            the packages the application uses
+#   package NAME DEP...            one line per package of the graph
+#
+# Names are namespace segments (identifiers), never std; each list is in
+# ascending order without repeats, and so are the package lines by name;
+# every name used is a package of the graph, and no package uses itself.
+# One graph has one text, so equal graphs compile, and cache, alike.
+proc surface::modules::ReadGraph {path text} {
+    if {$text eq "" || [string index $text end] ne "\n"} {
+        GraphProblem [llength [split $text \n]] "the file does not end with a newline"
+    }
+    set lines [split [string range $text 0 end-1] \n]
+    if {[lindex $lines 0] ne "botlish package graph 1"} {
+        GraphProblem 1 "the first line is not \"botlish package graph 1\" (a graph of another format needs another compiler)"
+    }
+    set graph [dict create application {} packages [dict create]]
+    set used {}
+    set previous ""
+    set n 1
+    foreach line [lrange $lines 1 end] {
+        incr n
+        if {$line eq "" || [string trim $line " "] ne $line || [string first "  " $line] >= 0
+                || [regexp {[^ -~]} $line]} {
+            GraphProblem $n "a line holds words separated by single spaces, with no other whitespace"
+        }
+        set words [split $line " "]
+        set kind [lindex $words 0]
+        if {$n == 2} {
+            if {$kind ne "application"} {
+                GraphProblem $n "the second line is the application's: \"application\" and the packages it uses"
+            }
+            set names [lrange $words 1 end]
+        } else {
+            if {$kind ne "package" || [llength $words] < 2} {
+                GraphProblem $n "a line after the application's is \"package NAME\" and the packages NAME uses"
+            }
+            set names [lrange $words 2 end]
+        }
+        foreach name [lrange $words 1 end] {
+            if {![regexp {^[A-Za-z_][A-Za-z0-9_]*$} $name]} {
+                GraphProblem $n "\"$name\" is not a package name (a namespace segment)"
+            }
+            if {$name eq $::surface::modules::standardRoot} {
+                GraphProblem $n "std is the standard library's, never a package"
+            }
+        }
+        if {$names ne [lsort -unique $names]} {
+            GraphProblem $n "the packages a scope uses are listed in ascending order, once each"
+        }
+        lappend used {*}[lmap name $names {list $n $name}]
+        if {$n == 2} {
+            dict set graph application $names
+            continue
+        }
+        set package [lindex $words 1]
+        if {$previous ne "" && [string compare $previous $package] >= 0} {
+            GraphProblem $n "the package lines are in ascending order of their names, one per package (\"$package\" after \"$previous\")"
+        }
+        if {$package in $names} {
+            GraphProblem $n "package $package uses itself"
+        }
+        set previous $package
+        dict set graph packages $package $names
+    }
+    if {[llength $lines] < 2} {
+        GraphProblem 2 "the file has no application line"
+    }
+    foreach entry $used {
+        lassign $entry n name
+        if {![dict exists $graph packages $name]} {
+            GraphProblem $n "$name is used, and the graph has no line \"package $name\""
+        }
+    }
+    return $graph
+}
+
+proc surface::modules::GraphProblem {line message} {
+    return -code error -errorcode {SURFACE GRAPH} "line $line: $message"
 }
 
 # The probes the loader made since the last compileProgramFile began: PATH ->
@@ -482,9 +637,10 @@ proc surface::modules::Probe {kind path} {
 }
 
 # The directory of the package NAME installed in SCOPE (DIR/.bot_modules/NAME,
-# or for the application, its packages directory: ApplicationTree).
+# or for the application, its packages directory: ApplicationTree; for a
+# package of the graph, the graph's PACKAGES/NAME from any of its scopes).
 proc surface::modules::PackageDir {state scope name} {
-    if {$scope eq "" && [dict exists $state appPackages]} {
+    if {($scope eq "" || [InGraph $state $scope]) && [dict exists $state appPackages]} {
         return [file join [dict get $state appPackages] $name]
     }
     return [file join [ScopeDir $state $scope] .bot_modules $name]
@@ -492,49 +648,77 @@ proc surface::modules::PackageDir {state scope name} {
 
 # Decides STATE's application packages directory (header, "Target package
 # trees"): `appPackages`, and `appTreeMissing` when .targets holds no tree
-# for the target; `nativeDirs` the tree's .lib when it has one.
+# for the target; `nativeDirs` the tree's .lib when it has one; and its
+# package graph (header, "Package graphs"): `graph` and `graphPath`, or
+# `graphProblem` when the file is malformed.
 proc surface::modules::ApplicationTree {stateVar} {
     upvar 1 $stateVar state
     set modules [file join [dict get $state root] .bot_modules]
     dict set state appPackages $modules
     set targets [file join $modules .targets]
-    if {![Probe directory $targets]} {
+    if {[Probe directory $targets]} {
+        set target [dict get $state target]
+        dict set state targetRead 1
+        set tree [file join $targets $target]
+        dict set state appPackages $tree
+        if {![Probe directory $tree]} {
+            dict set state appTreeMissing $tree
+            return
+        }
+        set lib [file join $tree .lib]
+        if {[Probe directory $lib]} {
+            dict set state nativeDirs [list [file normalize $lib]]
+        }
+    }
+    set path [file join [dict get $state appPackages] .graph]
+    if {![Probe file $path]} {
         return
     }
-    set target [dict get $state target]
-    dict set state targetRead 1
-    set tree [file join $targets $target]
-    dict set state appPackages $tree
-    if {![Probe directory $tree]} {
-        dict set state appTreeMissing $tree
+    dict set state graphPath $path
+    if {[catch {ReadGraph $path [surface::source::text $path]} graph options]} {
+        if {[dict get $options -errorcode] ne {SURFACE GRAPH}} {
+            return -options $options $graph
+        }
+        dict set state graphProblem "the package graph $path is malformed ($graph): the application's packages are not known; reinstall them (`install`), or repair the file"
         return
     }
-    set lib [file join $tree .lib]
-    if {[Probe directory $lib]} {
-        dict set state nativeDirs [list [file normalize $lib]]
-    }
+    dict set state graph $graph
 }
 
 # 1 if a package NAME is installed in SCOPE (one with a module tree): its
-# directory exists.
+# directory exists -- and, for a scope of the package graph and a package of
+# the graph, the graph says SCOPE uses it (header, "Package graphs").
 proc surface::modules::Installed {state scope name} {
+    if {[InGraph $state $scope] && ($scope ne "" || [GraphPackage $state $name])} {
+        if {$name ni [GraphUses $state $scope]} {
+            return 0
+        }
+    }
     return [Probe directory [PackageDir $state $scope $name]]
 }
 
 # The package instance NAME installed in SCOPE, recorded in STATE's
-# `packages` (instance -> {name NAME parent SCOPE dir DIR}) the first time it
-# is named. Its identity is SCOPE/NAME, or NAME in the application.
+# `packages` (instance -> {name NAME parent SCOPE dir DIR graph G}) the first
+# time it is named. Its identity is SCOPE/NAME, or NAME in the application;
+# a package of the graph is the graph's one instance NAME from every scope
+# of the graph (G 1).
 proc surface::modules::Instance {stateVar scope name} {
     upvar 1 $stateVar state
+    set graph [expr {[InGraph $state $scope] && [GraphPackage $state $name]}]
     # (Never expr's ?: over a name: `nan` and `inf` read as numbers there.)
-    if {$scope eq ""} {
+    if {$scope eq "" || $graph} {
         set instance $name
     } else {
         set instance $scope/$name
     }
     if {![dict exists $state packages $instance]} {
-        dict set state packages $instance [dict create name $name parent $scope \
-            dir [file normalize [PackageDir $state $scope $name]]]
+        if {$graph} {
+            set parent ""
+        } else {
+            set parent $scope
+        }
+        dict set state packages $instance [dict create name $name parent $parent \
+            dir [file normalize [PackageDir $state $scope $name]] graph $graph]
     }
     return $instance
 }
@@ -596,6 +780,10 @@ proc surface::modules::Locate {stateVar key name} {
         return $result
     }
     set head [Head $name]
+    if {$scope eq "" && [dict exists $state graphProblem]} {
+        dict set result problem [list PACKAGE-GRAPH [dict get $state graphProblem]]
+        return $result
+    }
     if {[IsPackageScope $scope] && $head eq [PackageName $scope]} {
         # The package's own module tree: its root namespace.
         if {[Installed $state $scope $head]} {
@@ -604,6 +792,14 @@ proc surface::modules::Locate {stateVar key name} {
         }
         set owner $scope
         set path [OwnFile $state $scope $name]
+    } elseif {$scope eq "" && [GraphPackage $state $head] && $head ni [GraphUses $state ""]} {
+        # A package of the graph the application does not use: still the
+        # graph's one instance of that name (header, "Package graphs").
+        set own [OwnFile $state "" $name]
+        if {$own ne "" && [file normalize $own] ne [dict get $state entry]} {
+            dict set result problem [list MODULE-COLLISION "application file $own would be the namespace \"$name\", but \"$head\" is the root namespace of the package $head of the application's package graph ([dict get $state graphPath]: used by [join [GraphUsers $state $head] {, }]): every package of the graph claims its root namespace in the application, whether the application uses it or not (one instance, whose identity is its name), and `import $name` never chooses between an application module and a package's; rename or move the application file"]
+        }
+        return $result
     } elseif {[Installed $state $scope $head]} {
         # A package installed in this scope claims its whole root namespace.
         set owner [Instance state $scope $head]
@@ -715,6 +911,31 @@ proc surface::modules::NoSuchNamespace {stateVar key ns} {
     set scope [Scope $state $key]
     if {[HasOwnTree $scope]} {
         set head [Head $ns]
+        if {[InGraph $state $scope] && ($scope ne "" || [GraphPackage $state $head])
+                && ($scope eq "" || $head ne [PackageName $scope]) && ![Installed $state $scope $head]} {
+            # A scope of the package graph (header, "Package graphs").
+            set graphPath [dict get $state graphPath]
+            if {$scope eq ""} {
+                set who "the application"
+                set short "the application"
+            } else {
+                set who "package $scope (of the application's package graph)"
+                set short "package $scope"
+            }
+            set uses [GraphUses $state $scope]
+            if {$uses eq ""} {
+                set uses "uses none"
+            } else {
+                set uses "uses [join $uses {, }]"
+            }
+            if {$head in [GraphUses $state $scope]} {
+                return "the package graph $graphPath says $who uses the package \"$head\", and its directory [PackageDir $state $scope $head] does not exist: the installation is incomplete (reinstall the packages)$hint"
+            }
+            if {[GraphPackage $state $head]} {
+                return "$who does not depend on the package \"$head\", which the package graph $graphPath installs for [join [GraphUsers $state $head] {, }] ($short $uses): a scope of the graph imports only the packages it depends on, never another package's dependencies$hint"
+            }
+            return "$who depends on no package \"$head\" ($short $uses, by the package graph $graphPath), and its own modules are its root namespace's, [PackageName $scope] and [PackageName $scope]::...: a package's modules see its own namespace, the packages it depends on and the standard library, never its consumer's modules or packages$hint"
+        }
         if {[IsPackageScope $scope] && $head ne [PackageName $scope] && ![Installed $state $scope $head]} {
             set stray [NamespaceFile [ScopeDir $state $scope] $ns]
             set note ""
@@ -1174,6 +1395,12 @@ proc surface::modules::Walk {node} {
                     set slot
                 }]
             }
+            # A sendable clause's representation type (SENDABILITY-AND-
+            # VALUE-COPY-MILESTONE-1.md) is a type like a field's.
+            if {[dict exists $node sendable representation]} {
+                Put node sendable representation [TypeRefs [dict get $node sendable representation] \
+                    [dict get $node sendable representationSpan]]
+            }
         }
         externfn {
             # An extern declaration's C types (C-FFI.md): `std::ffi::c::Ptr[...]`
@@ -1193,6 +1420,13 @@ proc surface::modules::Walk {node} {
                 dict set r errors [lmap pair [dict get $r errors] {
                     lreplace $pair 0 0 [ErrorRef {*}$pair]
                 }]
+            }]
+        }
+        inject {
+            # The injected context types (RESTRICTED-CONTEXT-INJECTION-
+            # MILESTONE-1.md): qualified types like any annotation.
+            Put node contexts [lmap c [dict get $node contexts] {
+                dict set c type [TypeRefs [dict get $c type] [dict get $c typeSpan]]
             }]
         }
         classdecl - dfadecl {
@@ -1573,6 +1807,10 @@ proc surface::modules::LoadNamespace {stateVar name usedAtSpan {path ""} {scope 
     if {$path eq ""} {
         set path [ModuleFile $name [dict get $state target] $usedAtSpan]
     }
+    # The import that loads the module (the first: a module is loaded once),
+    # for the notes of a diagnostic located in its file (ImportNotes).
+    dict set state importSites $name [dict create importer [lindex [dict get $state stack] end] \
+        span $usedAtSpan path $path spelling $spelling]
     if {![surface::source::exists $path]} {
         Error UNKNOWN-NAMESPACE $usedAtSpan "unknown namespace \"$name\": no such module file $path"
     }
@@ -2608,7 +2846,62 @@ proc surface::modules::NewState {files nextFile} {
         referenceErrors {} recover 0 syntaxEntries {} fileOf [dict create] open [dict create] \
         dependentRefs [dict create] typeKeys [dict create] dfaRegistry [dict create] dfaNames {} \
         scopeOf [dict create] spellingOf [dict create] packages [dict create] names [dict create] \
-        physical {}]
+        physical {} importSites [dict create]]
+}
+
+# The notes (core::raiseDiagnostics) that say how the program reaches FILE, a
+# module file STATE loaded: one per import of the chain that loaded it, the
+# entry program's first -- "the import of "NS" here loads FILE", located at
+# the import's namespace, kind `import`. None for a file no import loaded
+# (the entry program's own). They name where a module's diagnostic comes from
+# for a reader of the file that imports it (main.tcl's note lines; the
+# language server shows the diagnostic at each of them); never part of a
+# diagnostic's message, order or identity.
+proc surface::modules::ImportNotes {state file} {
+    set module ""
+    dict for {name site} [dict get $state importSites] {
+        if {[dict get $site path] eq $file} {
+            set module $name
+            break
+        }
+    }
+    set tail [file tail $file]
+    set notes {}
+    set seen {}
+    while {$module ne "" && $module ni $seen && [dict exists $state importSites $module]} {
+        lappend seen $module
+        set site [dict get $state importSites $module]
+        set span [dict get $site span]
+        if {$span eq ""} {
+            # Loaded by name (LoadNamespaces), not by an import.
+            break
+        }
+        set summary "the import of \"[dict get $site spelling]\" here loads $tail"
+        set notes [linsert $notes 0 [dict create message "[surface::ast::location $span]: $summary" \
+            summary $summary location $span kind import]]
+        set module [dict get $site importer]
+    }
+    return $notes
+}
+
+# ENTRIES (core::raiseDiagnostics') with the import notes of each one located
+# in a module file (ImportNotes) after its own notes; an entry that has them
+# already is kept as it is.
+proc surface::modules::ImportNoted {state entries} {
+    return [lmap entry $entries {
+        set location [dict getdef $entry location ""]
+        set notes [dict getdef $entry notes {}]
+        if {$location eq "" || ![dict exists $location file]
+                || [lsearch -exact [lmap n $notes {dict getdef $n kind ""}] import] >= 0} {
+            set entry
+        } else {
+            set imports [ImportNotes $state [dict get $location file]]
+            if {$imports ne {}} {
+                dict set entry notes [concat $notes $imports]
+            }
+            set entry
+        }
+    }]
 }
 
 # Raises the qualified references of every file STATE loaded that the file
@@ -2690,13 +2983,17 @@ proc surface::modules::BuildProgram {ast strict {target ""} {root ""} {recover 0
         set ast [CollectAndLoad state $ast ""]
         RaiseReferenceErrors $state
     } on error {message options} {
+        # A diagnostic in a module file names the imports that load it.
+        if {[dict exists $options -diagnostics]} {
+            dict set options -diagnostics [ImportNoted $state [dict get $options -diagnostics]]
+        }
         if {[dict get $state syntaxEntries] eq {}
                 || ([lrange [dict get $options -errorcode] 0 1] ne {SURFACE MODULE} && [lindex [dict get $options -errorcode] 0] ne "POSIX")} {
             return -options $options $message
         }
         # The syntax errors first, as a compilation without recovery
         # reports one of them first.
-        core::raiseDiagnostics [concat [dict get $state syntaxEntries] [dict getdef $options -diagnostics \
+        core::raiseDiagnostics [concat [ImportNoted $state [dict get $state syntaxEntries]] [dict getdef $options -diagnostics \
             [list [dict create errorcode [dict get $options -errorcode] message $message]]]]
     }
     lassign [surface::lower::SplitTypeDecls [dict get $ast body]] executable ownDecls ownErrorDecls ownStructDecls ownTraitDecls \
@@ -2714,6 +3011,7 @@ proc surface::modules::BuildProgram {ast strict {target ""} {root ""} {recover 0
     set sections [dict get $state sections]
     set recovery {}
     if {[dict get $state syntaxEntries] ne {}} {
+        dict set state syntaxEntries [ImportNoted $state [dict get $state syntaxEntries]]
         lassign [Recovery $state $nodes $sections] nodes sections recovery
     }
     # A strict compilation goes on past resolution failures: what checking

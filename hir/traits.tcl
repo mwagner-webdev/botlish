@@ -89,6 +89,12 @@ namespace eval hir::traits {
     #              every Hashable type is Equatable: Hashable's witnesses
     #              are its witnesses with total hashing too, and a view of
     #              Hashable is Equatable (its guarantees include equality).
+    #   Sendable   every value can be reconstructed, with the same meaning,
+    #              in another Botlish VM that shares nothing with this one
+    #              (SENDABILITY-AND-VALUE-COPY-MILESTONE-1.md): what
+    #              std::transfer::encode and decode require. It has no
+    #              operation; its guarantee `send` is no equality or hash,
+    #              so it neither refines nor is refined by the others.
     variable intrinsics [dict create \
         Hashable [dict create \
             requirements {{name hash nameSpan {} span {} params {{name value type {trait Hashable} self 1}} result {type int self 0} errors {}}} \
@@ -99,7 +105,12 @@ namespace eval hir::traits {
             requirements {} \
             impls {} \
             witness hir::types::EqualityClass \
-            guarantees {equality}]]
+            guarantees {equality}] \
+        Sendable [dict create \
+            requirements {} \
+            impls {} \
+            witness hir::types::SendClass \
+            guarantees {send}]]
 }
 
 # The names of the intrinsic traits.
@@ -1466,6 +1477,15 @@ proc hir::traits::OwnerBlock {hir parents e} {
     return program
 }
 
+# 1 if call E runs in an entry's own region -- the program's top level, or
+# a thread entry's body (hir/threads.tcl): where the installed contexts,
+# and so the context traits' selections, are known (hir::contexts::verify
+# checks each entry's calls against its own installations).
+proc hir::traits::EntryRegion {hir parents e} {
+    set owner [OwnerBlock $hir $parents $e]
+    return [expr {$owner eq "program" || [hir::threads::isEntry $hir $owner]}]
+}
+
 # Rejects operand E when it is a trait view: WHAT names the position.
 proc hir::traits::CheckOperand {hirVar e what} {
     upvar 1 $hirVar hir
@@ -2446,7 +2466,7 @@ proc hir::traits::PlanCalls {hir syntax} {
                             # calls).
                             set reaches [hir::get $hir $e reachable]
                             if {$reaches && $ckey eq "live"} {
-                                set reaches [expr {[OwnerBlock $hir $parents $e] eq "program"}]
+                                set reaches [EntryRegion $hir $parents $e]
                             } elseif {$reaches} {
                                 foreach c [dict get $fn contextTraits] {
                                     if {![dict exists $provided $c]} {
@@ -2672,7 +2692,7 @@ proc hir::traits::CallSpecialization {k j traits} {
         dict set bound [list $ckey $sid] [list redirect $k]
         set reaches [hir::get $hir $e reachable]
         if {$reaches && $ckey eq "live"} {
-            set reaches [expr {[OwnerBlock $hir $parents $e] eq "program"}]
+            set reaches [EntryRegion $hir $parents $e]
         } elseif {$reaches} {
             foreach c $traits {
                 if {![dict exists $provided $c]} {
@@ -2725,7 +2745,7 @@ proc hir::traits::CallImplementationClone {kind operation impl consult} {
     if {$consult} {
         set reaches [hir::get $hir $e reachable]
         if {$reaches && $ckey eq "live"} {
-            set reaches [expr {[OwnerBlock $hir $parents $e] eq "program"}]
+            set reaches [EntryRegion $hir $parents $e]
         } elseif {$reaches} {
             foreach c [dict get $fn contextTraits] {
                 if {![dict exists $provided $c]} {
@@ -3061,6 +3081,13 @@ proc hir::traits::ImprintPolyBlocks {hir candidates} {
                 dict set direct $block 1
                 continue
             }
+            if {[SendsVariable $hir $e $n $vars]} {
+                # A transfer of a type generic in the block's own variables:
+                # its schema is the binding's (SelectingBinding's Sendable
+                # case).
+                dict set direct $block 1
+                continue
+            }
             lassign [dict getdef $n target ""] tk tb
             if {$tk ne "block"} {
                 continue
@@ -3096,6 +3123,34 @@ proc hir::traits::ImprintPolyBlocks {hir candidates} {
         }
     }
     return $result
+}
+
+# 1 if call E (node N) is a transfer -- a native registered `-sending`
+# (std::transfer's encode and decode: core/transfer.tcl) -- whose
+# transferred type mentions one of the imprint variables VARS: the call
+# needs its function specialized per binding, so that the schema
+# hir::transfer::Elaborate writes is a closed type's.
+proc hir::traits::SendsVariable {hir e n vars} {
+    set name [hir::decimal::CalledNative $hir $e]
+    if {$name eq ""} {
+        return 0
+    }
+    set sending [dict getdef [core::native::metadata $name] sending ""]
+    if {$sending eq ""} {
+        return 0
+    }
+    if {$sending eq "result"} {
+        set type [hir::typeOf $hir $e]
+    } elseif {$sending eq "imprint"} {
+        set type [hir::transfer::ImprintedType $hir $e]
+    } else {
+        set arg [lindex [dict get $n args] $sending]
+        if {$arg eq ""} {
+            return 0
+        }
+        set type [hir::typeOf $hir $arg]
+    }
+    return [MentionsAny $type $vars]
 }
 
 # 1 if TYPE mentions one of the imprint variables VARS.
@@ -3171,7 +3226,14 @@ proc hir::traits::SelectingBinding {hir block binding} {
     set selecting [dict create]
     dict for {name traits} [hir::imprint::ConstraintsOf $sig] {
         foreach trait $traits {
-            if {![isIntrinsic $trait]} {
+            # A source trait's variable selects its operations' witnesses;
+            # Sendable's selects its transfers' schemas: a body generic in
+            # it is specialized per binding, so each clone transfers a
+            # closed type (hir::transfer::Elaborate; BOTLISH-OWNED-THREADS-
+            # AND-CROSS-THREAD-ACTORS-MILESTONE-1.md). Hashable and
+            # Equatable select nothing: their operations are total
+            # lowerings of the value's own kind.
+            if {![isIntrinsic $trait] || "send" in [intrinsicGuarantees $trait]} {
                 dict set selecting $name 1
             }
         }

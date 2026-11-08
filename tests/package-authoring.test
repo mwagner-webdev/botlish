@@ -1,0 +1,712 @@
+# package-authoring.test -- the author's side of the package manager
+# (PACKAGE-MANAGER-MILESTONE-3.md): native add, native require, package
+# stage, native audit and pack's audit, botlish.json schema 3 (run-time
+# dependencies, licenses and notices), provenance records (BOTPKG-
+# PROVENANCE.md) and the comparison of release candidates, the failed-
+# system-library diagnostic.
+#
+# Toy packages are made fresh in the tcltest temporary directory; their
+# native files are real ones, built here with the host's C compiler (and,
+# where installed, clang and lld for macOS and AArch64, MinGW-w64 for
+# Windows), never mocked. Everything runs through main.tcl, as an author
+# runs it. The repository's real packages are tests/package-workloads.test.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot pm pm.tcl]
+# The author's side, which pm.tcl leaves to the operations that use it.
+pm::authoring
+
+set mainScript [file join $::projectRoot main.tcl]
+set ::paCounter 0
+set hostTarget [pm::target::host]
+testConstraint linuxX86Host [expr {$hostTarget eq "linux-x86_64"}]
+testConstraint cc [expr {[auto_execok cc] ne "" && [auto_execok ar] ne ""}]
+testConstraint linuxCc [expr {[testConstraint linuxX86Host] && [testConstraint cc]}]
+testConstraint clang [expr {[auto_execok clang] ne "" && [testConstraint linuxX86Host]}]
+testConstraint machoTools [expr {[auto_execok clang] ne "" && ([auto_execok ld64.lld] ne "" || [auto_execok lld] ne "")}]
+# A library of another architecture is linked by LLVM's linker, which links
+# every target: the host's GNU ld links only its own (on the Ubuntu runners,
+# "unrecognised emulation mode: aarch64linux") unless that architecture's
+# cross binutils are installed.
+testConstraint lld [expr {[auto_execok ld.lld] ne ""}]
+testConstraint mingw [expr {[auto_execok x86_64-w64-mingw32-gcc] ne ""}]
+testConstraint git [expr {[auto_execok git] ne ""}]
+testConstraint dpkgZlib [expr {[testConstraint linuxX86Host] && [file isdirectory /var/lib/dpkg/info]
+    && [file exists /usr/lib/x86_64-linux-gnu/libz.so.1]}]
+testConstraint unixFiles [expr {$::tcl_platform(platform) eq "unix"}]
+
+# ---------------------------------------------------------------------------
+# Helpers
+
+proc fresh {{tag d}} {
+    return [makeDirectory pa-[pid]-$tag-[incr ::paCounter]]
+}
+
+proc cleanup {} {
+    foreach dir [glob -nocomplain -directory [temporaryDirectory] pa-[pid]-*] {
+        file delete -force $dir
+    }
+}
+
+proc writeText {path text} {
+    file mkdir [file dirname $path]
+    set channel [open $path w]
+    fconfigure $channel -encoding utf-8 -translation lf
+    puts -nonewline $channel $text
+    close $channel
+}
+
+proc readBytes {path} {
+    set channel [open $path rb]
+    set bytes [read $channel]
+    close $channel
+    return $bytes
+}
+
+# main.tcl ARGS: {status out err}.
+proc botlish {args} {
+    set errFile [file join [temporaryDirectory] pa-err-[pid]]
+    set status 0
+    if {[catch {exec [info nameofexecutable] $::mainScript {*}$args 2>$errFile} out options]} {
+        set status [lindex [dict get $options -errorcode] end]
+        if {[lindex [dict get $options -errorcode] 0] ne "CHILDSTATUS"} { set status 1 }
+    }
+    set err [encoding convertfrom utf-8 [readBytes $errFile]]
+    file delete $errFile
+    return [dict create status $status out [string trimright $out] err [string trimright $err]]
+}
+
+proc kindOf {err} {
+    if {[regexp {\(PM ([A-Z]+)\)\s*$} $err -> kind]} { return $kind }
+    return ""
+}
+
+# An authoring package directory NAME with the module text MODULE.
+proc authorPackage {name {module "fn n() -> int:\n    1\n"} {schema 1}} {
+    set dir [file join [fresh pkg] $name]
+    writeText [file join $dir botlish.json] "{\"schema\": $schema, \"name\": \"$name\", \"version\": \"1.0.0\"}\n"
+    writeText [file join $dir $name.bot] $module
+    return $dir
+}
+
+# Every file under DIR with its bytes, for "nothing changed" checks.
+proc treeState {dir} {
+    set out {}
+    foreach path [lsort [exec find $dir -type f]] {
+        lappend out [string range $path [string length $dir] end] [readBytes $path]
+    }
+    return $out
+}
+
+# A shared library FILE in DIR (soname SONAME) defining FUNCTION, with
+# extra linker arguments ARGS.
+proc sharedLibrary {dir file soname function {args {}}} {
+    set source [file join $dir $function.c]
+    writeText $source "int ${function}(void) { return 7; }\n"
+    exec cc -shared -fPIC -o [file join $dir $file] $source -Wl,-soname,$soname {*}$args
+    return [file join $dir $file]
+}
+
+proc staticArchive {dir file function {compiler cc}} {
+    set source [file join $dir $function.c]
+    writeText $source "int ${function}(void) { return 3; }\n"
+    set object [file join $dir $function.o]
+    exec {*}$compiler -c -fPIC -o $object $source
+    file delete [file join $dir $file]
+    exec ar rcs [file join $dir $file] $object
+    return [file join $dir $file]
+}
+
+# Writes DIR's artifact into REPO without pack's audit (a hand-made archive).
+proc packRaw {dir repo} {
+    set descriptor [pm::descriptor::read [file join $dir botlish.json] pack]
+    set files [pm::commands::Collect $dir]
+    dict set files botlish.json [pm::descriptor::encode $descriptor 0]
+    pm::WriteNew [file join $repo [dict get $descriptor name]-[dict get $descriptor version].botpkg] [pm::archive::bytes $files]
+}
+
+proc descriptorOf {dir} {
+    return [pm::descriptor::read [file join $dir botlish.json] project]
+}
+
+# ---------------------------------------------------------------------------
+# 1. native add
+
+test pa-add-shared-derives-metadata {native add reads a shared library's facts from its bytes -- loader identity, loader dependencies, exports -- places it at native/IDENTITY of its target's directory and writes them into botlish.json (schema 1 raised to 2, no further); the report says what the file established and what it could not; adding it again changes nothing} -constraints {linuxCc} -body {
+    set bin [fresh bin]
+    set lib [sharedLibrary $bin libfoo.so.1.2 libfoo.so.1 foo_value -Wl,--no-as-needed -lm -lc]
+    set pkg [authorPackage foo]
+    set r [botlish native add $lib -target linux-x86_64 -name foo -symbol foo_value -package $pkg]
+    set d [descriptorOf $pkg]
+    set library [lindex [dict get $d targets linux-x86_64 libraries] 0]
+    set state [treeState $pkg]
+    set again [botlish native add $lib -target linux-x86_64 -name foo -package $pkg]
+    list [dict get $r status] [dict get $d schema] [dict get $d targets linux-x86_64 files] \
+        [dict filter $library key name origin linkage file identity needs symbols] \
+        [file isfile [file join $pkg targets linux-x86_64 native libfoo.so.1]] \
+        [string match "*established from the file: ELF x86-64 shared object*" [dict get $r out]] \
+        [string match "*not established from the file: its license*" [dict get $r out]] \
+        [dict get $again status] [string match "*(unchanged)*" [dict get $again out]] [expr {[treeState $pkg] eq $state}]
+} -cleanup cleanup -result {0 2 targets/linux-x86_64 {name foo origin bundled linkage shared file native/libfoo.so.1 identity libfoo.so.1 needs {libm.so.6 libc.so.6} symbols foo_value} 1 1 1 0 1 1}
+
+test pa-add-static-archive {a static archive goes to native/libNAME.a (the name its linker searches for): no identity or needs; the original bytes are kept exactly} -constraints {linuxCc} -body {
+    set bin [fresh bin]
+    set archive [staticArchive $bin something-else.a q_value]
+    set pkg [authorPackage foo]
+    set r [botlish native add $archive -target linux-x86_64 -name q -package $pkg]
+    set library [lindex [dict get [descriptorOf $pkg] targets linux-x86_64 libraries] 0]
+    list [dict get $r status] [dict get $library linkage] [dict get $library file] [dict get $library identity] [dict get $library needs] \
+        [expr {[readBytes [file join $pkg targets linux-x86_64 native libq.a]] eq [readBytes $archive]}]
+} -cleanup cleanup -result {0 static native/libq.a {} {} 1}
+
+test pa-add-macho {a Mach-O dylib for macos-aarch64 (made by clang and lld) is placed under its install name's file name, its identity the install name; an x86-64 slice is refused for the AArch64 target} -constraints {machoTools} -body {
+    set bin [fresh bin]
+    writeText [file join $bin m.c] "int mac_value(void) { return 9; }\n"
+    exec clang --target=arm64-apple-macos11 -shared -nostdlib -fuse-ld=lld -Wl,-install_name,@rpath/libmac.1.dylib -o [file join $bin libmac.dylib] [file join $bin m.c]
+    exec clang --target=x86_64-apple-macos11 -shared -nostdlib -fuse-ld=lld -Wl,-install_name,@rpath/libmac.1.dylib -o [file join $bin libintel.dylib] [file join $bin m.c]
+    set pkg [authorPackage mac]
+    set r [botlish native add [file join $bin libmac.dylib] -target macos-aarch64 -name mac -package $pkg]
+    set wrong [botlish native add [file join $bin libintel.dylib] -target macos-aarch64 -name intel -package $pkg]
+    set library [lindex [dict get [descriptorOf $pkg] targets macos-aarch64 libraries] 0]
+    list [dict get $r status] [dict get $library file] [dict get $library identity] [dict get $wrong status] [kindOf [dict get $wrong err]]
+} -cleanup cleanup -result {0 native/libmac.1.dylib @rpath/libmac.1.dylib 1 NATIVE}
+
+test pa-add-windows {a MinGW-w64 DLL is added with its import library (-import): the DLL under its export name, the import library under the linker's name; a DLL without its import library, and an import library on its own, are refused with what to do instead} -constraints {mingw} -body {
+    set bin [fresh bin]
+    writeText [file join $bin w.c] "__declspec(dllexport) int w_value(void) { return 5; }\n"
+    exec x86_64-w64-mingw32-gcc -shared -o [file join $bin w.dll] [file join $bin w.c] -Wl,--out-implib,[file join $bin libw.dll.a]
+    set pkg [authorPackage win]
+    set alone [botlish native add [file join $bin w.dll] -target windows-x86_64-gnu -name w -package $pkg]
+    set implib [botlish native add [file join $bin libw.dll.a] -target windows-x86_64-gnu -name w -package $pkg]
+    set r [botlish native add [file join $bin w.dll] -target windows-x86_64-gnu -name w -import [file join $bin libw.dll.a] -package $pkg]
+    set library [lindex [dict get [descriptorOf $pkg] targets windows-x86_64-gnu libraries] 0]
+    list [dict get $alone status] [string match "*through its import library*" [dict get $alone err]] \
+        [dict get $implib status] [string match "*is an import library of w.dll*add the DLL*" [dict get $implib err]] \
+        [dict get $r status] [dict get $library file] [dict get $library import] [dict get $library identity]
+} -cleanup cleanup -result {1 1 1 1 0 native/w.dll native/libw.dll.a w.dll}
+
+test pa-add-refusals {what is no native library of the target is refused, saying what it is and writing nothing: another architecture's library, an object file, a library without a soname, a thin archive, a linker script, LLVM bitcode, a truncated file, a shared library declared static, a declared symbol it does not export} -constraints {linuxCc clang lld} -body {
+    set bin [fresh bin]
+    writeText [file join $bin f.c] "int f_value(void) { return 1; }\n"
+    exec clang --target=aarch64-linux-gnu -shared -fPIC -nostdlib -fuse-ld=lld -o [file join $bin libarm.so] -Wl,-soname,libarm.so.1 [file join $bin f.c]
+    exec cc -c -fPIC -o [file join $bin f.o] [file join $bin f.c]
+    exec cc -shared -fPIC -o [file join $bin libnosoname.so] [file join $bin f.c]
+    exec ar rcT [file join $bin libthin.a] [file join $bin f.o]
+    writeText [file join $bin libscript.so] "/* GNU ld script */\nGROUP ( /lib/libc.so.6 )\n"
+    exec clang -c -emit-llvm -o [file join $bin f.bc] [file join $bin f.c]
+    set good [sharedLibrary $bin libgood.so.1 libgood.so.1 good_value]
+    set truncated [file join $bin libtrunc.so.1]
+    set channel [open $truncated wb]; puts -nonewline $channel [string range [readBytes $good] 0 99]; close $channel
+    set pkg [authorPackage foo]
+    set before [treeState $pkg]
+    set out {}
+    foreach {file extra} [list libarm.so {} f.o {} libnosoname.so {} libthin.a {} libscript.so {} f.bc {} libtrunc.so.1 {} libgood.so.1 {-linkage static} libgood.so.1 {-symbol absent_value}] {
+        set r [botlish native add [file join $bin $file] -target linux-x86_64 -name x {*}$extra -package $pkg]
+        regexp {^error: \S+ (.*?) \(PM [A-Z]+\)$} [lindex [split [dict get $r err] \n] 0] -> text
+        lappend out [list [dict get $r status] [kindOf [dict get $r err]] [string range $text 0 40]]
+    }
+    list $out [expr {[treeState $pkg] eq $before}]
+} -cleanup cleanup -result {{{1 NATIVE {is ELF AArch64 shared object, and linux-x}} {1 NATIVE {is ELF x86-64 object: a native library is}} {1 NATIVE {has no soname (DT_SONAME): an executable }} {1 NATIVE {is a thin archive: it holds the paths of }} {1 NATIVE {is a GNU linker script: it names other fi}} {1 NATIVE {is LLVM bitcode: no target's linker links}} {1 BINARY {truncated (a 8-byte field at offset 96 of}} {1 NATIVE {is ELF x86-64 shared object: a shared lib}} {1 NATIVE {does not export the declared symbol absen}}} 1}
+
+test pa-add-conflicts {existing metadata is never silently replaced: different bytes at a library's destination, a declaration the new one contradicts, another library's file at the destination -- each a CONFLICT that changes nothing; -replace replaces the file and the declaration} -constraints {linuxCc} -body {
+    set bin [fresh bin]
+    foreach {sub text} {a "int foo_value(void) { return 1; }\nint foo_extra(void) { return 2; }\n" b "int foo_value(void) { return 3; }\nint foo_other(void) { return 4; }\n"} {
+        writeText [file join $bin $sub f.c] $text
+        exec cc -shared -fPIC -o [file join $bin $sub libfoo.so.1] [file join $bin $sub f.c] -Wl,-soname,libfoo.so.1
+    }
+    set one [file join $bin a libfoo.so.1]
+    set two [file join $bin b libfoo.so.1]
+    set pkg [authorPackage foo]
+    botlish native add $one -target linux-x86_64 -name foo -symbol foo_value -package $pkg
+    set state [treeState $pkg]
+    set bytes [botlish native add $two -target linux-x86_64 -name foo -package $pkg]
+    set symbols [botlish native add $one -target linux-x86_64 -name foo -symbol foo_value -symbol foo_extra -package $pkg]
+    set other [botlish native add $one -target linux-x86_64 -name bar -package $pkg]
+    set unchanged [expr {[treeState $pkg] eq $state}]
+    set replaced [botlish native add $two -target linux-x86_64 -name foo -symbol foo_other -replace -package $pkg]
+    set library [lindex [dict get [descriptorOf $pkg] targets linux-x86_64 libraries] 0]
+    list [kindOf [dict get $bytes err]] [kindOf [dict get $symbols err]] [kindOf [dict get $other err]] $unchanged \
+        [dict get $replaced status] [dict get $library symbols] \
+        [expr {[readBytes [file join $pkg targets linux-x86_64 native libfoo.so.1]] eq [readBytes $two]}]
+} -cleanup cleanup -result {CONFLICT CONFLICT CONFLICT 1 0 foo_other 1}
+
+test pa-add-never-runs {inspection never runs what it reads: a shared library whose constructor would write a marker file, and an executable file named like a library, are added, audited and packed (or refused) without either running} -constraints {linuxCc unixFiles} -body {
+    set bin [fresh bin]
+    set marker [file join $bin ran]
+    writeText [file join $bin c.c] "#include <stdio.h>\n__attribute__((constructor)) static void mark(void) { FILE *f = fopen(\"$marker\", \"w\"); if (f) fclose(f); }\nint c_value(void) { return 1; }\n"
+    exec cc -shared -fPIC -o [file join $bin libc1.so.1] [file join $bin c.c] -Wl,-soname,libc1.so.1
+    writeText [file join $bin libtrap.so] "#!/bin/sh\ntouch $marker\n"
+    file attributes [file join $bin libtrap.so] -permissions 0o755
+    set pkg [authorPackage foo]
+    set a [botlish native add [file join $bin libc1.so.1] -target linux-x86_64 -name c1 -package $pkg]
+    set t [botlish native add [file join $bin libtrap.so] -target linux-x86_64 -name trap -package $pkg]
+    set audit [botlish native audit $pkg]
+    set pack [botlish package pack $pkg -out [fresh repo]]
+    list [dict get $a status] [dict get $t status] [dict get $audit status] [dict get $pack status] [file exists $marker]
+} -cleanup cleanup -result {0 1 0 0 0}
+
+# ---------------------------------------------------------------------------
+# 2. native require
+
+test pa-require-system {a system library is the author's statement: botlish.json records what was stated (never this machine's version); on this host it is checked by the system's metadata and the observation reported as one; for another target it is reported unverifiable} -constraints {dpkgZlib} -body {
+    set pkg [authorPackage foo]
+    set r [botlish native require z -target linux-x86_64 -origin system -identity libz.so.1 -symbol inflate -package $pkg]
+    set arm [botlish native require z -target linux-aarch64 -origin system -identity libz.so.1 -package $pkg]
+    set library [lindex [dict get [descriptorOf $pkg] targets linux-x86_64 libraries] 0]
+    list [dict get $r status] [dict filter $library key origin identity version symbols] \
+        [regexp {this host: /usr/lib/x86_64-linux-gnu/libz\.so\.1, (dpkg package zlib1g|pkg-config)} [dict get $r out]] \
+        [string match "*never recorded as a requirement*" [dict get $r out]] \
+        [string match "*cannot be verified here*" [dict get $arm out]]
+} -cleanup cleanup -result {0 {origin system identity libz.so.1 version {} symbols inflate} 1 1 1}
+
+test pa-require-runtime {a run-time dependency raises the package to schema 3 and is no library of the link: a library opened by name (its identity), a facility (no file), each with when it is needed and why; the schema's rules refuse a library without an identity, a facility with one, a loaded-by naming no library and an identity the link already has} -constraints {linuxCc} -body {
+    set bin [fresh bin]
+    set lib [sharedLibrary $bin libr.so.1 libr.so.1 r_value -Wl,--no-as-needed -lz]
+    set pkg [authorPackage foo]
+    botlish native add $lib -target linux-x86_64 -name r -package $pkg
+    botlish native require z -target linux-x86_64 -origin system -identity libz.so.1 -package $pkg
+    set ok [botlish native require gl -target linux-x86_64 -runtime capability -capability drawing -identity libGL.so.1 -loaded-by r -purpose "the renderer" -package $pkg]
+    set facility [botlish native require gpu -target linux-x86_64 -runtime always -kind facility -purpose "a GPU driver" -package $pkg]
+    set noIdentity [botlish native require x -target linux-x86_64 -runtime optional -kind library -purpose "p" -package $pkg]
+    set unknown [botlish native require y -target linux-x86_64 -runtime optional -identity liby.so.1 -loaded-by nobody -purpose "p" -package $pkg]
+    set linked [botlish native require z2 -target linux-x86_64 -runtime optional -identity libz.so.1 -purpose "p" -package $pkg]
+    set d [descriptorOf $pkg]
+    list [dict get $ok status] [dict get $facility status] [dict get $d schema] \
+        [lmap x [dict get $d targets linux-x86_64 runtime] {list [dict get $x name] [dict get $x kind] [dict get $x requirement]}] \
+        [dict get $noIdentity status] [dict get $unknown status] [dict get $linked status] \
+        [string match "*is a library of linux-x86_64's link*" [dict get $linked err]]
+} -cleanup cleanup -result {0 0 3 {{gl library capability} {gpu facility always}} 1 1 1 1}
+
+test pa-runtime-never-mandatory {a package whose run-time dependencies this machine does not have (not even an "always" one) installs: they are never part of the loader's closure; native plan lists them apart, with what this host has} -constraints {linuxCc} -body {
+    set bin [fresh bin]
+    set lib [sharedLibrary $bin libr.so.1 libr.so.1 r_value]
+    set pkg [authorPackage rt "extern c library \"r\"\nextern c fn r_value() -> std::ffi::c::Int\n"]
+    botlish native add $lib -target linux-x86_64 -name r -package $pkg
+    botlish native require ghost -target linux-x86_64 -runtime always -identity libghost.so.9 -loaded-by r -purpose "a library no system has" -package $pkg
+    botlish native require phantom -target linux-x86_64 -runtime capability -capability extra -identity libphantom.so.2 -purpose "another" -package $pkg
+    set repo [fresh repo]
+    set p [botlish package pack $pkg -out $repo]
+    set app [fresh app]
+    set added [botlish add [file join $repo rt-1.0.0.botpkg] -project $app]
+    set plan [botlish native plan -project $app]
+    list [dict get $p status] [dict get $added status] [dict get $plan status] \
+        [regexp {library ghost \(libghost\.so\.9\): always needed \(instance rt, opened by r\)} [dict get $plan out]] \
+        [string match "*this host: none*the package's native code cannot run here*" [dict get $plan out]] \
+        [string match "*this host: none*programs that use it fail when they do*" [dict get $plan out]]
+} -cleanup cleanup -result {0 0 0 1 1 1}
+
+# ---------------------------------------------------------------------------
+# 3. package stage
+
+test pa-stage-modules {generated modules are staged at their namespace's path in the target's directory; staging the same again changes nothing; different files are a CONFLICT unless -replace, which makes the directory exactly the source (a stale module removed); modules outside the package's namespace, files that are no module and links are refused} -constraints {unixFiles} -body {
+    set gen [file join [fresh gen] foo]
+    writeText [file join $gen a.bot] "fn a() -> int:\n    1\n"
+    writeText [file join $gen sub b.bot] "fn b() -> int:\n    2\n"
+    writeText [file join $gen .hidden] "x"
+    set pkg [authorPackage foo]
+    set first [botlish package stage $pkg -target linux-x86_64 -target linux-aarch64 -modules $gen]
+    set again [botlish package stage $pkg -target linux-x86_64 -modules $gen]
+    file delete [file join $gen sub b.bot]
+    writeText [file join $gen a.bot] "fn a() -> int:\n    3\n"
+    set conflict [botlish package stage $pkg -target linux-x86_64 -modules $gen]
+    set replaced [botlish package stage $pkg -target linux-x86_64 -modules $gen -replace]
+    set other [file join [fresh gen] bar]
+    writeText [file join $other x.bot] "1\n"
+    set outside [botlish package stage $pkg -target linux-x86_64 -modules $other]
+    writeText [file join $gen notes.txt] "text\n"
+    set notModule [botlish package stage $pkg -target linux-x86_64 -modules $gen -replace]
+    file delete [file join $gen notes.txt]
+    file link -symbolic [file join $gen link.bot] [file join $gen a.bot]
+    set link [botlish package stage $pkg -target linux-x86_64 -modules $gen -replace]
+    list [dict get $first status] [string match "*skipped 1 hidden entry*" [dict get $first out]] [string match "*: unchanged*" [dict get $again out]] \
+        [kindOf [dict get $conflict err]] [dict get $replaced status] \
+        [lsort [glob -tails -directory [file join $pkg targets linux-x86_64 foo] -types f *]] \
+        [file isfile [file join $pkg targets linux-aarch64 foo sub b.bot]] [file exists [file join $pkg targets linux-x86_64 foo sub]] \
+        [kindOf [dict get $outside err]] [kindOf [dict get $notModule err]] [string match "*symbolic link*" [dict get $link err]] \
+        [lsort [dict keys [dict get [descriptorOf $pkg] targets]]]
+} -cleanup cleanup -result {0 1 1 CONFLICT 0 a.bot 1 0 AUTHOR AUTHOR 1 {linux-aarch64 linux-x86_64}}
+
+test pa-stage-headers-and-files {public headers go to each target's include/ and are declared its header directory (only C headers); common files are staged file by file into one directory, never into a target's directory} -body {
+    set src [fresh src]
+    writeText [file join $src api.h] "#define API 1\n"
+    writeText [file join $src api.c] "int x;\n"
+    writeText [file join $src LICENSE] "MIT\n"
+    writeText [file join $src NOTICE] "notice\n"
+    set pkg [authorPackage foo]
+    set mixed [botlish package stage $pkg -target linux-x86_64 -headers $src]
+    set header [botlish package stage $pkg -target linux-x86_64 -target linux-aarch64 -headers [file join $src api.h]]
+    set l [botlish package stage $pkg -files [file join $src LICENSE] -as licenses/foo]
+    set n [botlish package stage $pkg -files [file join $src NOTICE] -as licenses/foo]
+    set intoTarget [botlish package stage $pkg -files [file join $src NOTICE] -as targets/linux-x86_64/x]
+    set d [descriptorOf $pkg]
+    list [kindOf [dict get $mixed err]] [dict get $header status] [dict get $d targets linux-x86_64 headers] \
+        [file isfile [file join $pkg targets linux-aarch64 include api.h]] [dict get $l status] [dict get $n status] \
+        [lsort [glob -tails -directory [file join $pkg licenses foo] *]] [kindOf [dict get $intoTarget err]]
+} -cleanup cleanup -result {AUTHOR 0 include 1 0 0 {LICENSE NOTICE} AUTHOR}
+
+# ---------------------------------------------------------------------------
+# 4. The audit
+
+test pa-audit-statuses {the audit classifies each target: complete (every mandatory dependency accounted for, every check passed), partially verified (complete metadata with facts this host cannot verify: another target's system library), incomplete (a loader dependency nobody declares); native audit exits 1 only for an incomplete package} -constraints {linuxCc dpkgZlib} -body {
+    set bin [fresh bin]
+    set lib [sharedLibrary $bin libz2.so.1 libz2.so.1 z2_value -Wl,--no-as-needed -lz]
+    set pkg [authorPackage foo]
+    botlish native add $lib -target linux-x86_64 -name z2 -package $pkg
+    set incomplete [botlish native audit $pkg]
+    botlish native require z -target linux-x86_64 -origin system -identity libz.so.1 -package $pkg
+    set complete [botlish native audit $pkg]
+    writeText [file join $bin README.aarch64] "notes\n"
+    botlish package stage $pkg -target linux-aarch64 -files [file join $bin README.aarch64] -as doc
+    botlish native require z -target linux-aarch64 -origin system -identity libz.so.1 -package $pkg
+    set partial [botlish native audit $pkg]
+    list [dict get $incomplete status] [regexp {target linux-x86_64: INCOMPLETE} [dict get $incomplete out]] \
+        [string match "*z2                     needs libz.so.1                UNRESOLVED*" [dict get $incomplete out]] \
+        [dict get $complete status] [regexp {target linux-x86_64: complete} [dict get $complete out]] \
+        [string match "*z2                     needs libz.so.1                system (z)*" [dict get $complete out]] \
+        [dict get $partial status] [regexp {target linux-aarch64: partially verified} [dict get $partial out]] \
+        [string match "*unverified: system library z of linux-aarch64 cannot be verified on this host*" [dict get $partial out]]
+} -cleanup cleanup -result {1 1 1 0 1 1 0 1 1}
+
+test pa-audit-runtime-search-paths {a bundled library carrying the build machine's run-time search path (an absolute directory) or an empty entry (the current directory) is refused; one relative to its own directory ($ORIGIN) is noted} -constraints {linuxCc} -body {
+    set bin [fresh bin]
+    set absolute [sharedLibrary [file mkdir [file join $bin a]][file join $bin a] liba.so.1 liba.so.1 a_value -Wl,-rpath,/home/builder/cache/lib -Wl,--enable-new-dtags]
+    set empty [sharedLibrary [file mkdir [file join $bin e]][file join $bin e] libe.so.1 libe.so.1 e_value -Wl,-rpath,/opt/x: -Wl,--enable-new-dtags]
+    set origin [sharedLibrary [file mkdir [file join $bin o]][file join $bin o] libo.so.1 libo.so.1 o_value {-Wl,-rpath,$ORIGIN/../lib} -Wl,--enable-new-dtags]
+    set out {}
+    foreach lib [list $absolute $empty $origin] name {a e o} {
+        set pkg [authorPackage foo]
+        botlish native add $lib -target linux-x86_64 -name $name -package $pkg
+        set r [botlish native audit $pkg]
+        lappend out [list [dict get $r status] [llength [regexp -all -inline {problem: library \S+ carries} [dict get $r out]]] \
+            [regexp {note: library o searches \$ORIGIN/\.\./lib} [dict get $r out]] \
+            [regexp {problem: library e carries an empty run-time search path entry} [dict get $r out]]]
+    }
+    set out
+} -cleanup cleanup -result {{1 1 0 0} {1 2 0 1} {0 0 1 0}}
+
+test pa-audit-native-closure-errors {the audit catches what the closure cannot hold: a bundled library that is a platform library, two libraries with one loader identity, two static archives defining one symbol, a native binary no library declares} -constraints {linuxCc} -body {
+    set bin [fresh bin]
+    set libm [sharedLibrary [file mkdir [file join $bin m]][file join $bin m] libm.so.6 libm.so.6 m_value]
+    set one [sharedLibrary [file mkdir [file join $bin a]][file join $bin a] liba.so.1 libsame.so.1 a_value]
+    set two [sharedLibrary [file mkdir [file join $bin b]][file join $bin b] libb.so.1 libsame.so.1 b_value]
+    set s1 [staticArchive [file mkdir [file join $bin s1]][file join $bin s1] libs1.a dup]
+    set s2 [staticArchive [file mkdir [file join $bin s2]][file join $bin s2] libs2.a dup]
+    set out {}
+    set pkg [authorPackage p1]
+    botlish native add $libm -target linux-x86_64 -name m -package $pkg
+    lappend out [regexp {a library of linux-x86_64's platform} [dict get [botlish native audit $pkg] out]]
+    set pkg [authorPackage p2]
+    botlish native add $one -target linux-x86_64 -name a -package $pkg
+    botlish native add $two -target linux-x86_64 -name b -as native/libb.so.1 -package $pkg
+    lappend out [regexp {libraries a and b both load as libsame\.so\.1} [dict get [botlish native audit $pkg] out]]
+    set pkg [authorPackage p3]
+    botlish native add $s1 -target linux-x86_64 -name s1 -package $pkg
+    botlish native add $s2 -target linux-x86_64 -name s2 -package $pkg
+    lappend out [regexp {static libraries s1 and s2 both define dup} [dict get [botlish native audit $pkg] out]]
+    set pkg [authorPackage p4]
+    botlish native add $s1 -target linux-x86_64 -name s1 -package $pkg
+    file copy $one [file join $pkg targets linux-x86_64 native stray.so]
+    set r [botlish native audit $pkg]
+    lappend out [regexp {targets/linux-x86_64/native/stray\.so is a native binary .* no library declares} [dict get $r out]] [dict get $r status]
+} -cleanup cleanup -result {1 1 1 1 1}
+
+test pa-audit-source-and-api {the package's own source is checked against its metadata: a library it links that no metadata declares (a platform one, like m, excepted), a C function it declares that no library exports, and a target whose modules differ from another's (one public API per release)} -constraints {linuxCc} -body {
+    set bin [fresh bin]
+    set lib [sharedLibrary $bin libfoo.so.1 libfoo.so.1 foo_value]
+    set pkg [authorPackage foo "extern c library \"foo\"\nextern c library \"zz\"\nextern c library \"m\"\nextern c fn foo_value() -> std::ffi::c::Int\nextern c fn foo_missing() -> std::ffi::c::Int\nextern c fn cos(x: std::ffi::c::Double) -> std::ffi::c::Double\n"]
+    botlish native add $lib -target linux-x86_64 -name foo -package $pkg
+    writeText [file join [fresh gen] foo extra.bot] ""
+    set r [botlish native audit $pkg]
+    set gen [file join [fresh gen] foo]
+    writeText [file join $gen extra.bot] "fn e() -> int:\n    1\n"
+    botlish package stage $pkg -target linux-x86_64 -modules $gen
+    botlish package stage $pkg -target linux-aarch64 -files [file join $pkg foo.bot] -as data
+    set api [botlish native audit $pkg]
+    list [dict get $r status] [regexp {foo\.bot:2 links zz, which no library} [dict get $r out]] [regexp {links m,} [dict get $r out]] \
+        [regexp {1 C function the modules declare is exported by no library of linux-x86_64 -- bundled, system or platform \(foo_missing \(foo\.bot:5\)\)} [dict get $r out]] \
+        [regexp {C functions the modules declare: 3 \(1 bundled, 0 system, 1 platform, 1 not found here\)} [dict get $r out]] \
+        [regexp {linux-aarch64: INCOMPLETE.*its view lacks 1 module linux-x86_64's has \(foo/extra\.bot\)} [dict get $api out]]
+} -cleanup cleanup -result {1 1 0 1 1 1}
+
+test pa-pack-refuses-incomplete {pack runs the audit: an incomplete native package is refused before anything is written; a pure-Botlish package packs as in PM-1, with no audit and no native output} -constraints {linuxCc} -body {
+    set bin [fresh bin]
+    set lib [sharedLibrary $bin libz2.so.1 libz2.so.1 z2_value -Wl,--no-as-needed -lz]
+    set pkg [authorPackage foo]
+    botlish native add $lib -target linux-x86_64 -name z2 -package $pkg
+    set repo [fresh repo]
+    set r [botlish package pack $pkg -out $repo]
+    set written [lsort [glob -nocomplain -tails -directory $repo *]]
+    set pure [authorPackage purely]
+    set p [botlish package pack $pure -out $repo]
+    # A library PM-2's checks accept and the audit refuses: the build
+    # machine's run-time search path.
+    set rpath [sharedLibrary [file mkdir [file join $bin r]][file join $bin r] librp.so.1 librp.so.1 rp_value -Wl,-rpath,/home/builder/lib -Wl,--enable-new-dtags]
+    set rp [authorPackage rp]
+    botlish native add $rpath -target linux-x86_64 -name rp -package $rp
+    set audited [botlish package pack $rp -out $repo]
+    list [dict get $r status] [kindOf [dict get $r err]] [string match "*cannot be packed*needs libz.so.1*" [dict get $r err]] \
+        $written [dict get $p status] [regexp {audit|native} [string map [list $repo REPO] [dict get $p out]]] \
+        [dict get [descriptorOf $pure] schema] [dict get $audited status] \
+        [string match "*its native audit is incomplete*carries the run-time search path /home/builder/lib*" [dict get $audited err]] \
+        [file exists [file join $repo rp-1.0.0.botpkg]]
+} -cleanup cleanup -result {1 PACK 1 {} 0 0 1 1 1 0}
+
+# ---------------------------------------------------------------------------
+# 5. Schema 3
+
+test pa-schema3 {schema 3 is schema 2 with a target's runtime and a library's license and notices: a schema 2 file using them says so; a license is an SPDX expression; notices are files of the view (checked at packing); license and notices describe a bundled library only; schema 2 files read and write as before} -body {
+    proc problems {text} {
+        if {[catch {pm::descriptor::fromBytes $text project X} message]} { return [lrange [split $message \n] 1 end] }
+        return ok
+    }
+    set two "{\n  \"schema\": 2,\n  \"name\": \"a\",\n  \"version\": \"1.0.0\",\n  \"dependencies\": {},\n  \"targets\": {\n    \"linux-x86_64\": {\n      \"files\": \"t\"\n    }\n  }\n}\n"
+    list [problems {{"schema": 2, "targets": {"linux-x86_64": {"runtime": []}}}}] \
+        [problems {{"schema": 3, "targets": {"linux-x86_64": {"libraries": [{"name": "a", "origin": "bundled", "linkage": "static", "file": "a.a", "license": "MIT AND OR GPL"}]}}}}] \
+        [problems {{"schema": 3, "targets": {"linux-x86_64": {"libraries": [{"name": "a", "origin": "system", "linkage": "shared", "license": "MIT"}]}}}}] \
+        [problems {{"schema": 3, "targets": {"linux-x86_64": {"libraries": [{"name": "a", "origin": "bundled", "linkage": "static", "file": "a.a", "license": "(Apache-2.0 OR MIT) AND LicenseRef-x", "notices": ["l/LICENSE"]}]}}}}] \
+        [expr {[pm::descriptor::encode [pm::descriptor::fromBytes $two pack X] 0] eq $two}] \
+        [pm::targets::Problems [pm::descriptor::fromBytes {{"schema": 3, "name": "a", "version": "1.0.0", "targets": {"linux-x86_64": {"files": "t", "libraries": [{"name": "a", "origin": "bundled", "linkage": "static", "file": "a.a", "license": "MIT", "notices": ["l/LICENSE"]}]}}}} pack X] {botlish.json t/a.a}]
+} -result {{{  targets: "linux-x86_64": "runtime" is a schema 3 key: a botlish.json using it says "schema": 3}} {{  targets: "linux-x86_64": libraries: "a": "license": "MIT AND OR GPL" is not a license expression (SPDX: MIT, Apache-2.0 AND OFL-1.1, (MIT OR Unlicense), LicenseRef-NAME)}} {{  targets: "linux-x86_64": libraries: "a": "license" and "notices" describe a bundled library (what a consumer redistributes); a system library is the target's own}} ok 1 {{targets: "linux-x86_64": library "a": its notice l/LICENSE is no file of the target's view}}}
+
+test pa-schema-raised-only-when-needed {an operation raises botlish.json's schema only to what its contents need: native metadata 2, a license or a run-time dependency 3; an older reader refuses schema 3 as unsupported, never half-reading it} -constraints {linuxCc} -body {
+    set bin [fresh bin]
+    set archive [staticArchive $bin libq.a q_value]
+    set pkg [authorPackage foo]
+    set before [dict get [descriptorOf $pkg] schema]
+    botlish native add $archive -target linux-x86_64 -name q -package $pkg
+    set two [dict get [descriptorOf $pkg] schema]
+    botlish native add $archive -target linux-x86_64 -name q -license MIT -package $pkg
+    set three [dict get [descriptorOf $pkg] schema]
+    list $before $two $three
+} -cleanup cleanup -result {1 2 3}
+
+# ---------------------------------------------------------------------------
+# 6. The failed-system-library diagnostic
+
+test pa-failed-system-library-one-diagnostic {a declared system library this system lacks is one diagnostic naming the library and the package instance that declares it -- never followed by advice to declare the dependency the package already declares; an undeclared need beside it (a package another tool packed, without the audit) is still reported} -constraints {linuxCc} -body {
+    set bin [fresh bin]
+    set stubs [file join $bin stub]
+    file mkdir $stubs
+    sharedLibrary $stubs libzzghost.so.3 libzzghost.so.3 ghost_value
+    sharedLibrary $stubs libzznothere.so.4 libzznothere.so.4 nothere_value
+    # --no-as-needed first: the toolchain's default --as-needed would drop
+    # a library the code never calls, and there would be no need to test.
+    set lib [sharedLibrary $bin libuser.so.1 libuser.so.1 user_value -Wl,--no-as-needed -L$stubs -l:libzzghost.so.3]
+    set lib2 [sharedLibrary $bin libuser2.so.1 libuser2.so.1 user2_value -Wl,--no-as-needed -L$stubs -l:libzzghost.so.3 -l:libzznothere.so.4]
+    set needs [dict get [pm::binary::inspect [pm::ReadBytes $lib] $lib] needed]
+    set repo [fresh repo]
+    set pkg [authorPackage needy]
+    botlish native add $lib -target linux-x86_64 -name user -package $pkg
+    botlish native require zzghost -target linux-x86_64 -origin system -identity libzzghost.so.3 -package $pkg
+    set packed [botlish package pack $pkg -out $repo]
+    set app [fresh app]
+    set r [botlish add [file join $repo needy-1.0.0.botpkg] -project $app]
+    set lines [lsearch -all -inline [split [dict get $r err] \n] "  *"]
+    set pkg2 [authorPackage needy2]
+    botlish native add $lib2 -target linux-x86_64 -name user2 -package $pkg2
+    botlish native require zzghost -target linux-x86_64 -origin system -identity libzzghost.so.3 -package $pkg2
+    set refused [botlish package pack $pkg2 -out [fresh refused]]
+    packRaw $pkg2 $repo
+    set app2 [fresh app]
+    set r2 [botlish add [file join $repo needy2-1.0.0.botpkg] -project $app2]
+    set lines2 [lsearch -all -inline [split [dict get $r2 err] \n] "  *"]
+    list [expr {"libzzghost.so.3" in $needs}] [dict get $packed status] [dict get $r status] [llength $lines] \
+        [string match "*system library zzghost (libzzghost.so.3 or libzzghost.so) is not installed*(declared by instance needy)*" [lindex $lines 0]] \
+        [regexp {neither part of linux-x86_64's platform} [dict get $r err]] \
+        [dict get $refused status] [dict get $r2 status] [llength $lines2] \
+        [llength [lsearch -all $lines2 "*libzzghost.so.3*is not installed*(declared by instance needy2)*"]] \
+        [llength [lsearch -all $lines2 "*user2 needs libzznothere.so.4, which is neither part of linux-x86_64's platform*"]] \
+        [llength [lsearch -all $lines2 "*needs libzzghost.so.3*"]]
+} -cleanup cleanup -result {1 0 1 1 1 0 1 1 2 1 1 0}
+
+# ---------------------------------------------------------------------------
+# 7. Provenance records
+
+# A small Git repository (the author's git: this is the author's side) with
+# one commit; {dir D commit C tree T}.
+proc gitSource {} {
+    set dir [file join [fresh src] upstream]
+    writeText [file join $dir README] "upstream\n"
+    writeText [file join $dir src lib.c] "int f(void) { return 1; }\r\n"
+    writeText [file join $dir run.bat] "@echo off\r\n"
+    writeText [file join $dir .gitattributes] "*.bat text eol=crlf\n"
+    # An executable file where the host's files have an executable bit
+    # (`file attributes -permissions` is Unix's only). On Windows no file
+    # has one: GitTree reads every file as 100644 there, as Git for Windows
+    # (core.filemode false) adds a new file.
+    if {$::tcl_platform(platform) eq "unix"} {
+        file attributes [file join $dir README] -permissions 0o755
+    }
+    # Git's tree of exactly these bytes under the repository's own
+    # attributes: no line-ending conversion from the host's configuration
+    # (Git for Windows' installer sets core.autocrlf true).
+    foreach command {{init -q} {add .} {-c user.name=a -c user.email=a@b commit -q -m one}} {
+        exec git -c core.autocrlf=false -C $dir {*}$command
+    }
+    return [dict create dir $dir commit [exec git -C $dir rev-parse HEAD] tree [exec git -C $dir rev-parse HEAD^{tree}]]
+}
+
+proc evidenceFile {text} {
+    set path [file join [fresh ev] evidence.json]
+    writeText $path $text
+    return $path
+}
+
+proc packedPackage {} {
+    set bin [fresh bin]
+    set lib [staticArchive $bin libq.a q_value]
+    set pkg [authorPackage foo]
+    botlish native add $lib -target linux-x86_64 -name q -package $pkg
+    return $pkg
+}
+
+test pa-provenance-record {pack -evidence writes NAME-VERSION.provenance.json beside the artifact: bound to its SHA-256, every file's digest computed, each bundled native file's facts computed, the author's assertions copied (local paths never), and the checks made -- here the Git tree recomputed from the files given, without git; package inspect -provenance confirms the binding} -constraints {linuxCc git} -body {
+    set git [gitSource]
+    set pkg [packedPackage]
+    set ev [evidenceFile "{\"evidence\": 1, \"sources\": \[{\"name\": \"up\", \"repository\": \"https://example.org/up.git\", \"git\": {\"object-format\": \"sha1\", \"commit\": \"[dict get $git commit]\", \"tree\": \"[dict get $git tree]\"}, \"directory\": \"[dict get $git dir]\"}\], \"builds\": \[{\"name\": \"q\", \"targets\": \[\"linux-x86_64\"\], \"outputs\": \[\"targets/linux-x86_64/native/libq.a\"\], \"sources\": \[\"up\"\], \"toolchain\": {\"cc\": \"gcc\"}, \"flags\": \[\"-O2\"\]}\]}"]
+    set repo [fresh repo]
+    set r [botlish package pack $pkg -out $repo -evidence $ev]
+    set path [file join $repo foo-1.0.0.provenance.json]
+    set record [pm::release::readRecord $path]
+    set artifact [pm::catalog::Load [file join $repo foo-1.0.0.botpkg] X]
+    set inspect [botlish package inspect [file join $repo foo-1.0.0.botpkg] -provenance $path]
+    list [dict get $r status] [dict get [pm::release::check $record $artifact] matches] \
+        [expr {[dict get $record subject sha256] eq [dict get $artifact digest]}] \
+        [lmap c [dict get $record checks] {list [dict get $c fact] [dict get $c result]}] \
+        [string match "*[dict get $git dir]*" [readBytes $path]] [dict get $inspect status] \
+        [string match "*describes this artifact*unsigned*" [dict get $inspect out]]
+} -cleanup cleanup -result {0 1 1 {{files computed} {git-tree confirmed} {{output targets/linux-x86_64/native/libq.a} confirmed}} 0 0 1}
+
+test pa-provenance-contradictions {an assertion the files contradict stops the pack, and nothing is written: a Git tree the source directory does not have (a modified checkout), a source archive or patch whose SHA-256 is not the asserted one, a build output the artifact does not hold} -constraints {linuxCc git} -body {
+    set git [gitSource]
+    writeText [file join [dict get $git dir] README] "changed\n"
+    set pkg [packedPackage]
+    set archive [file join [fresh src] up.tar]
+    writeText $archive "an archive\n"
+    set out {}
+    foreach text [list \
+        "{\"evidence\": 1, \"sources\": \[{\"name\": \"up\", \"git\": {\"object-format\": \"sha1\", \"tree\": \"[dict get $git tree]\"}, \"directory\": \"[dict get $git dir]\"}\]}" \
+        "{\"evidence\": 1, \"sources\": \[{\"name\": \"up\", \"sha256\": \"[string repeat 0 64]\", \"archive\": \"$archive\"}\]}" \
+        "{\"evidence\": 1, \"sources\": \[{\"name\": \"up\", \"patches\": \[{\"name\": \"p\", \"sha256\": \"[string repeat 1 64]\", \"file\": \"$archive\"}\]}\]}" \
+        "{\"evidence\": 1, \"builds\": \[{\"name\": \"b\", \"outputs\": \[\"targets/linux-x86_64/native/libmissing.a\"\]}\]}"] {
+        set repo [fresh repo]
+        set r [botlish package pack $pkg -out $repo -evidence [evidenceFile $text]]
+        lappend out [list [dict get $r status] [kindOf [dict get $r err]] [glob -nocomplain -tails -directory $repo *]]
+    }
+    set out
+} -cleanup cleanup -result {{1 PROVENANCE {}} {1 PROVENANCE {}} {1 PROVENANCE {}} {1 PROVENANCE {}}}
+
+test pa-provenance-publishable {evidence is published: a host path (a home, temporary or cache directory), something shaped like a credential, an environment variable named like a secret and an unknown key are refused; a non-Git source's archive digest is computed and recorded as computed, not as an assertion} -constraints {linuxCc} -body {
+    set pkg [packedPackage]
+    set archive [file join [fresh src] up.tar]
+    writeText $archive "an archive\n"
+    set out {}
+    foreach text {
+        {{"evidence": 1, "builds": [{"name": "b", "outputs": ["targets/linux-x86_64/native/libq.a"], "flags": ["-I/home/alice/src/include"]}]}}
+        {{"evidence": 1, "builds": [{"name": "b", "outputs": ["targets/linux-x86_64/native/libq.a"], "environment": {"API_TOKEN": "x"}}]}}
+        {{"evidence": 1, "notes": ["ghp_abcdefghijklmnopqrstuvwxyz0123"]}}
+        {{"evidence": 1, "signature": "x"}}
+    } {
+        set r [botlish package pack $pkg -out [fresh repo] -evidence [evidenceFile $text]]
+        lappend out [list [dict get $r status] [kindOf [dict get $r err]]]
+    }
+    set repo [fresh repo]
+    set r [botlish package pack $pkg -out $repo -evidence [evidenceFile "{\"evidence\": 1, \"sources\": \[{\"name\": \"up\", \"repository\": \"https://example.org/up-1.0.tar\", \"archive\": \"$archive\"}\]}"]]
+    set record [pm::release::readRecord [file join $repo foo-1.0.0.provenance.json]]
+    lappend out [lmap c [dict get $record checks] {list [dict get $c fact] [dict get $c result] [dict get $c value]}]
+} -cleanup cleanup -result [list {1 EVIDENCE} {1 EVIDENCE} {1 EVIDENCE} {1 EVIDENCE} [list [list sha256 computed [pm::sha256::hex "an archive\n"]]]]
+
+test pa-provenance-deterministic {a record is canonical and deterministic: the same artifact and evidence give the same bytes; a changed native input changes the artifact, and the old record no longer describes it (MISMATCH); a record of another artifact under the release's name is refused (EXISTS) and a record not in canonical form is no record} -constraints {linuxCc} -body {
+    set pkg [packedPackage]
+    set ev [evidenceFile {{"evidence": 1, "builds": [{"name": "q", "outputs": ["targets/linux-x86_64/native/libq.a"]}]}}]
+    set a [fresh repo]
+    set b [fresh repo]
+    botlish package pack $pkg -out $a -evidence $ev
+    botlish package pack $pkg -out $b -evidence $ev
+    set same [expr {[readBytes [file join $a foo-1.0.0.provenance.json]] eq [readBytes [file join $b foo-1.0.0.provenance.json]]}]
+    set old [file join [fresh keep] old.json]
+    file copy [file join $a foo-1.0.0.provenance.json] $old
+    set bin [fresh bin]
+    botlish native add [staticArchive $bin libq.a other_value] -target linux-x86_64 -name q -replace -package $pkg
+    set refused [botlish package pack $pkg -out $a -evidence $ev -force]
+    set c [fresh repo]
+    botlish package pack $pkg -out $c
+    set mismatch [botlish package inspect [file join $c foo-1.0.0.botpkg] -provenance $old]
+    file copy [file join $c foo-1.0.0.botpkg] [file join $a foo-1.0.0.botpkg.new]
+    set stale [botlish package pack $pkg -out $c -evidence $ev]
+    writeText [file join [fresh x] bad.json] [string map {"  " " "} [readBytes $old]]
+    set reformatted [catch {pm::release::readRecord [glob [file join [temporaryDirectory] pa-[pid]-x-* bad.json]]} message]
+    list $same [dict get $refused status] [dict get $mismatch status] [string match "*MISMATCH*another file*" [dict get $mismatch out]] \
+        [dict get $stale status] $reformatted [string match "*canonical form*" $message]
+} -cleanup cleanup -result {1 0 1 1 0 1 1}
+
+test pa-authoring-loaded-on-demand {the author's side (author.tcl, sha1.tcl, release.tcl) is loaded only by the operations that use it: sourcing the package manager, as every consumer command does, defines none of it} -body {
+    exec [info nameofexecutable] << "source [list [file join $::projectRoot pm pm.tcl]]; puts \[list \[info exists ::pm::authoringLoaded\] \[llength \[info procs ::pm::author::*\]\] \[llength \[info procs ::pm::release::*\]\] \[llength \[info procs ::pm::sha1::*\]\]\]; pm::authoring; puts \[expr {\[llength \[info procs ::pm::author::*\]\] > 0 && \[llength \[info procs ::pm::release::*\]\] > 0 && \[llength \[info procs ::pm::sha1::*\]\] > 0}\]"
+} -result "0 0 0 0\n1"
+
+test pa-sha1-backends {SHA-1 (Git object identities only) agrees between the system's tool and the Tcl implementation around block boundaries and on FIPS 180-4's vectors; the tool is the system's, at its fixed path: a lying sha1sum first on PATH is never run} -constraints {unixFiles} -body {
+    set agree 1
+    foreach n {0 1 55 56 63 64 65 4095 4096 4097 100000} {
+        set input [string repeat "\x01b\xff" [expr {$n / 3 + 1}]]
+        set input [string range $input 0 [expr {$n - 1}]]
+        if {[pm::sha1::TclHex $input] ne [pm::sha1::hex $input]} { set agree 0 }
+    }
+    set dir [fresh path]
+    writeText [file join $dir sha1sum] "#!/bin/sh\ntouch [file join $dir ran]\necho 0000000000000000000000000000000000000000  -\n"
+    file attributes [file join $dir sha1sum] -permissions 0o755
+    set digest [withEnvironment [list PATH $dir:$::env(PATH)] {
+        exec [info nameofexecutable] << "source [list [file join $::projectRoot pm pm.tcl]]; pm::authoring; puts \[pm::sha1::hex \[string repeat a 1000000\]\]"
+    }]
+    list $agree [pm::sha1::TclHex abc] $digest [file exists [file join $dir ran]]
+} -cleanup cleanup -result {1 a9993e364706816aba3e25717850c26c9cd0d89d 34aa973cd4c4daa4f61eeb2bdbad27316534016f 0}
+
+# ---------------------------------------------------------------------------
+# 8. Comparing release candidates
+
+test pa-compare {package compare tells two candidates of one release apart: identical bytes are one artifact; for different ones it names the first differing file and, for a shared library, how it differs -- its run-time search path, build ID and the sections whose bytes differ -- and for an archive which member; it exits 1 and says at most one may be the release} -constraints {linuxCc} -body {
+    set bin [fresh bin]
+    set one [sharedLibrary [file mkdir [file join $bin a]][file join $bin a] libfoo.so.1 libfoo.so.1 foo_value -Wl,-rpath,/opt/a -Wl,--enable-new-dtags]
+    set two [sharedLibrary [file mkdir [file join $bin b]][file join $bin b] libfoo.so.1 libfoo.so.1 foo_value -Wl,-rpath,/opt/bbb -Wl,--enable-new-dtags]
+    set out {}
+    foreach lib [list $one $one $two] tag {a a2 b} {
+        set pkg [authorPackage foo]
+        writeText [file join $pkg botlish.json] "{\"schema\": 2, \"name\": \"foo\", \"version\": \"1.0.0\", \"targets\": {\"linux-x86_64\": {\"files\": \"t\", \"libraries\": \[{\"name\": \"foo\", \"origin\": \"bundled\", \"linkage\": \"shared\", \"file\": \"native/libfoo.so.1\", \"identity\": \"libfoo.so.1\", \"needs\": \[\"libc.so.6\"\]}\]}}}"
+        file mkdir [file join $pkg t native]
+        file copy $lib [file join $pkg t native libfoo.so.1]
+        set repo [fresh repo-$tag]
+        packRaw $pkg $repo
+        dict set out $tag [file join $repo foo-1.0.0.botpkg]
+    }
+    set same [botlish package compare [dict get $out a] [dict get $out a2]]
+    set different [botlish package compare [dict get $out a] [dict get $out b]]
+    list [dict get $same status] [string match "*identical: the same bytes*" [dict get $same out]] [dict get $different status] \
+        [string match "*differs: t/native/libfoo.so.1*RUNPATH: \"/opt/a\" and \"/opt/bbb\"*GNU build ID*sections whose bytes differ: *.dynstr*" [dict get $different out]] \
+        [string match "*at most one of them may be published as foo 1.0.0*" [dict get $different out]]
+} -cleanup cleanup -result {0 1 1 1 1}
+
+test pa-compare-records {compare reads the two records' declared inputs: identical artifacts described identically are only that; different artifacts described identically point at an input neither record states; a differing declared input is named} -body {
+    set r {value {obj {sources {arr {}} builds {arr {}} generators {arr {}} notes {arr {}} producer {obj {}}}}}
+    set r2 {value {obj {sources {arr {}} builds {arr {{obj {target {str linux-x86_64}}}}} generators {arr {}} notes {arr {}} producer {obj {}}}}}
+    list [pm::release::RecordDifferences $r $r 1] \
+        [string match "*described identically, so what differs is an input neither record states*" [pm::release::RecordDifferences $r $r 0]] \
+        [string match "*declared inputs differ in builds*" [pm::release::RecordDifferences $r $r2 0]]
+} -result {{{records: the same declared inputs (sources, builds, generators, notes)}} 1 1}
+
+test pa-compare-archive-members {for two static archives, compare names the member whose bytes differ and the section inside it} -constraints {linuxCc} -body {
+    set bin [fresh bin]
+    set a [staticArchive [file mkdir [file join $bin a]][file join $bin a] libq.a q_value]
+    set source [file join $bin b q_value.c]
+    writeText $source "int q_value(void) { return 4; }\n"
+    file mkdir [file join $bin b]
+    exec cc -c -fPIC -o [file join $bin b q_value.o] $source
+    exec ar rcs [file join $bin b libq.a] [file join $bin b q_value.o]
+    join [pm::release::FileDifferences [readBytes $a] [readBytes [file join $bin b libq.a]] libq.a] |
+} -cleanup cleanup -match glob -result {member q_value.o differs|  sections whose bytes differ: .text*}
+
+test pa-compare-git-tree-matches-git {the Git tree computed without git equals git's own for a tree with a subdirectory, an executable file (on Unix; Windows files have no executable bit, so there README is 100644 in both trees) and a .gitattributes text conversion (CRLF stored as LF)} -constraints {git} -body {
+    set git [gitSource]
+    list [expr {[dict get [pm::release::GitTree [dict get $git dir]] tree] eq [dict get $git tree]}] \
+        [lindex [exec git -C [dict get $git dir] ls-tree HEAD README] 0]
+} -cleanup cleanup -result [list 1 [if {$::tcl_platform(platform) eq "unix"} {string cat 100755} else {string cat 100644}]]
+
+cleanupTests

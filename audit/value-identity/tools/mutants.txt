@@ -363,9 +363,9 @@
 @@ native-identity-ignored-in-equality native == of two values of an identity shape compares every field
 ## native/src/runtime/ops.rs
 <<<<
-            if let Some(identity) = current_program(|prog| prog.shapes[x.shape as usize].identity) {
+            if let Some(identity) = program(p).shapes[x.shape as usize].identity {
 ====
-            if let Some(identity) = current_program(|prog| prog.shapes[x.shape as usize].identity).filter(|_| false) {
+            if let Some(identity) = program(p).shapes[x.shape as usize].identity.filter(|_| false) {
 >>>>
 
 @@ native-equality-by-order native == of two identity values compares the entries in order
@@ -484,21 +484,21 @@
 @@ witness-reads-representation Totality walks every field of an identity struct (its representation), not its identity's elements
 ## hir/types.tcl
 <<<<
-                set identity [hir::structs::identityOf $id]
-                if {$identity ne ""} {
-                    # A struct that declares its identity
+    set identity [hir::structs::identityOf $id]
+    if {$identity ne ""} {
+        # A struct that declares its identity is compared and hashed by it
 ====
-                set identity [hir::structs::identityOf $id]
-                if {0} {
-                    # A struct that declares its identity
+    set identity [hir::structs::identityOf $id]
+    if {0} {
+        # A struct that declares its identity is compared and hashed by it
 >>>>
 
 @@ conditional-witness-always an identity's elements are taken to be total whatever their type (Bag[MutableVector[int]] is Equatable)
 ## hir/types.tcl
 <<<<
-                        lappend parts [list "the $label of $shown" [if {$t eq {}} {string cat any} else {elementOf $t}]]
+            lappend parts [list "the $label of $shown" $element]
 ====
-                        lappend parts [list "the $label of $shown" int]
+            lappend parts [list "the $label of $shown" int]
 >>>>
 
 @@ refines-dropped Hashable no longer refines Equatable (a Hashable view is not Equatable)
@@ -525,11 +525,11 @@
 @@ decimal-guard-reads-representation == of an identity struct is refused for a DecimalRounded field of its representation
 ## hir/decimal.tcl
 <<<<
-        set identity [hir::structs::identityOf [lindex $type 1]]
-        if {$identity ne ""} {
+    set identity [hir::structs::identityOf $id]
+    if {$identity ne ""} {
 ====
-        set identity [hir::structs::identityOf [lindex $type 1]]
-        if {0} {
+    set identity [hir::structs::identityOf $id]
+    if {0} {
 >>>>
 
 # ---------------------------------------------------------------------------

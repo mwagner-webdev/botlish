@@ -168,6 +168,10 @@ test raven-timer {timers and resizes: a watched window's resize is Resized with 
     ravenValues timer
 } -result [lrepeat 2 {["Resized  200 150 0 []", "TimerElapsed  0 0 0 []", "true", "true", "0", "true", "0"]}]
 
+test raven-input {a watched window's raw input through the bridge, headless (tests/raven/input.bot): two pointer moves before a take are one MouseMoved (its movement their sum); a button held over three frames is one MousePressed and one MouseReleased, with mouse_button_down? true while held; the wheel; a key held with Shift (KeyPressed with the modifier, key_down?, modifiers_down) and released; an unwatched window, and the watched one once watch_input(false), report nothing; a button of the watched window still reports Clicked, after the raw events of the click (watching consumes nothing); mouse_position where the pointer went -- on both native backends} -constraints ravenRun -body {
+    ravenValues input
+} -result {{[["MouseMoved window 0 0 30 50 20 30"], ["MousePressed window 0 0 30 50 0 0", "MouseReleased window 0 0 30 50 0 0", "Wheel window 0 0 30 50 0 -3", "KeyPressed window 65 1 30 50 0 0", "KeyReleased window 65 0 30 50 0 0"], [], ["MouseMoved window 0 0 160 13 130 -37", "MousePressed window 0 0 160 13 0 0", "MouseReleased window 0 0 160 13 0 0", "Clicked button 0 0 0 []"], [], ["true", "false", "true", "1", "false", "30", "50", "0"]]} {[["MouseMoved window 0 0 30 50 20 30"], ["MousePressed window 0 0 30 50 0 0", "MouseReleased window 0 0 30 50 0 0", "Wheel window 0 0 30 50 0 -3", "KeyPressed window 65 1 30 50 0 0", "KeyReleased window 65 0 30 50 0 0"], [], ["MouseMoved window 0 0 160 13 130 -37", "MousePressed window 0 0 160 13 0 0", "MouseReleased window 0 0 160 13 0 0", "Clicked button 0 0 0 []"], [], ["true", "false", "true", "1", "false", "30", "50", "0"]]}}
+
 test raven-raw {a slider's C float and a spin box's C double through the binding's raw representation (Rslider_get_value, Rspin_box_get_value and their setters: RAW-C-FLOAT-FFI-MILESTONE-1.md), on the real library: every bit Raven holds is the bit read -- negative zero, a subnormal, a binary32 0.1, both infinities a spin box's infinite range admits -- beside the finite accessors' explicit admission (0.0 for -0.0, NonFiniteFloat for an infinity); a slider's raw setter refuses a NaN before Raven runs, a spin box ignores one as its C code says, and clamps to its range; a frame draws with an infinite value; the bits agree with a C program making the same calls (tests/raven/raw_oracle.c) -- on both native backends} -constraints ravenRun -body {
     set values [ravenValues raw]
     set oracle [file join [temporaryDirectory] raven-raw-oracle-[pid]]
@@ -194,7 +198,7 @@ test raven-bridge-abi {start checks the event bridge's ABI version before anythi
     set source [file join $pkg native raven_bridge.c]
     set text [readFile $source]
     set channel [open $source w]
-    puts -nonewline $channel [string map {"#define BOTLISH_RAVEN_BRIDGE_ABI 1" "#define BOTLISH_RAVEN_BRIDGE_ABI 2"} $text]
+    puts -nonewline $channel [string map {"#define BOTLISH_RAVEN_BRIDGE_ABI 2" "#define BOTLISH_RAVEN_BRIDGE_ABI 3"} $text]
     close $channel
     exec [ravenPackage::cc] -std=c11 -O2 -fPIC -pthread -I[ravenPackage::includeDir] -c $source -o [file join $pkg native raven_bridge.o]
     file delete [file join $pkg native libraven_bridge.a]
@@ -203,7 +207,7 @@ test raven-bridge-abi {start checks the event bridge's ABI version before anythi
     set hir [surface::readProgramFile [file join $app abi.bot] -warnings error -cache ""]
     set dir [cffi::ravenDir]
     lassign [withEnvironment [list LD_LIBRARY_PATH $dir] {native::withLinkDirs [list $dir] {outcomeUnderHir cranelift $hir}}] tag value
-    list [string match "*BOTLISH_RAVEN_BRIDGE_ABI 2*" [readFile $source]] $tag $value
+    list [string match "*BOTLISH_RAVEN_BRIDGE_ABI 3*" [readFile $source]] $tag $value
 } -cleanup {
     file delete -force $app
 } -result {1 value {["RavenFailed", "botlish_raven_bridge_abi"]}}
@@ -328,7 +332,7 @@ proc ravenDocsApp {} {
     return $app
 }
 
-test raven-package-docs {the package's documentation is checked: its example (examples/clicks: the program, the desktop entry, the headless test) and every complete program in README.md and GUIDE.md compile under -warnings error as installed, and the headless test and the guide's test give the values the documents state} -constraints {ravenRun} -setup {
+test raven-package-docs {the package's documentation is checked: its example (examples/clicks: the program, the desktop entry, the headless test) and every complete program in README.md and GUIDE.md compile under -warnings error as installed, and the headless test and the guide's two tests (keyboard and mouse, section 8; testing, section 10) give the values the documents state} -constraints {ravenRun} -setup {
     set app [ravenDocsApp]
 } -body {
     set compiled {}
@@ -337,14 +341,14 @@ test raven-package-docs {the package's documentation is checked: its example (ex
     }
     set dir [cffi::ravenDir]
     set values {}
-    foreach file {test.bot guide-2.bot} {
+    foreach file {test.bot guide-2.bot guide-3.bot} {
         set hir [surface::readProgramFile [file join $app $file] -warnings error -cache ""]
         lappend values [lindex [withEnvironment [list LD_LIBRARY_PATH $dir] {native::withLinkDirs [list $dir] {outcomeUnderHir cranelift $hir}}] 1]
     }
     list $compiled $values
 } -cleanup {
     file delete -force $app
-} -result {{clicks.bot ok guide-2.bot ok main.bot ok readme-1.bot ok test.bot ok} {{["2", "2 clicks", "0", "0 clicks"]} {["1", "1 click"]}}}
+} -result {{clicks.bot ok guide-2.bot ok guide-3.bot ok guide-4.bot ok main.bot ok readme-1.bot ok test.bot ok} {{["2", "2 clicks", "0", "0 clicks"]} {["2", "held"]} {["1", "1 click"]}}}
 
 test raven-build-configurations {tests/cffi/raven.tcl tells its configurations apart by what was built, never by a library merely present: the headless and the desktop configuration have their own directories, a build is recognized by the stamp its configuration writes, and a directory holding the other configuration's build (a stale headless libraven where the desktop one is expected, or under BOTLISH_RAVEN_DIR) or a library without a stamp is not built} -setup {
     set cache [file join [temporaryDirectory] raven-cache-[pid]]

@@ -18,7 +18,7 @@ The first two goals must not depend on completion of the last two.
 ### Architectural invariants
 
 - The compiler reads `.bot_modules`; it never reads `botlish.json`, resolves package versions or performs network access.
-- Package imports remain downward-only and package-instance identities remain distinct.
+- Package imports remain downward-only and package-instance identities remain distinct. (Since SHARED-PACKAGE-DEPENDENCIES-MILESTONE-1.md, a package of the application's resolved dependency graph is one instance, shared by every package that depends on it: its identity is canonical, and imports remain limited to declared dependencies.)
 - `std::` remains compiler-owned. Third-party packages receive no stdlib-specific privileges.
 - The package manager does not execute arbitrary installation scripts.
 - Native libraries come from system-managed installations or authenticated bundled artifacts.
@@ -48,15 +48,15 @@ The remaining problems are primarily distribution, resolution, authentication an
 
 ## 3. Milestone sequence
 
-| Milestone | Deliverable | Priority |
-|---|---|---|
-| PM-1 | Local package manager and `botlish.json` | Immediate |
-| PM-2 | Cross-platform native package consumption | Immediate |
-| PM-3 | Native package authoring and verified artifacts | High |
-| PM-4 | Signed publication and TUF-backed registry | Medium |
-| PM-5 | Upstream history continuity and native provenance | Medium |
-| PM-6 | Independent attestations and transparency | Long-term |
-| PM-7 | Compiler-plugin distribution experiment | Parallel research after PM-2 |
+| Milestone | Deliverable | Priority | Status |
+|---|---|---|---|
+| PM-1 | Local package manager and `botlish.json` | Immediate | done: PACKAGE-MANAGER-MILESTONE-1.md |
+| PM-2 | Cross-platform native package consumption | Immediate | done: PACKAGE-MANAGER-MILESTONE-2.md |
+| PM-3 | Native package authoring and verified artifacts | High | done: PACKAGE-MANAGER-MILESTONE-3.md (generic authoring commands, native audit, schema 3 run-time dependencies, unsigned provenance records, reproducible releases from a pinned author image) |
+| PM-4 | Signed publication and TUF-backed registry | Medium | not started |
+| PM-5 | Upstream history continuity and native provenance | Medium | not started (PM-3 records upstream Git identities, unchecked against history) |
+| PM-6 | Independent attestations and transparency | Long-term | not started |
+| PM-7 | Compiler-plugin distribution experiment | Parallel research after PM-2 | not started |
 
 PM-1 through PM-3 constitute the first practically useful package ecosystem. PM-4 is required before treating a public registry as a trusted distribution channel.
 
@@ -110,7 +110,9 @@ The package manager recursively validates a published package's locks before ins
 
 Allow nested instances of the same package at different dependency-tree positions. Discourage unnecessary duplication, but do not force global version unification.
 
-Optional consumer overrides of nested locks can be introduced later and must be explicit, narrowly scoped and recorded.
+*Superseded by SHARED-PACKAGE-DEPENDENCIES-MILESTONE-1.md* (LANGUAGE-DESIGN-PRINCIPLES.md, section 2): nested instances made independently authored libraries unable to share a dependency -- an event-loop driver whose context the application installs (HTTP-SHIPPING-CENSUS.md, section 6.2, decision D1). An application now has one dependency graph: one instance of each package, at the version every lock names, or a conflict. Global unification is the rule; the distributed locks stay binding, and a graph whose locks disagree is refused, never resolved by a second instance.
+
+Optional consumer overrides of nested locks can be introduced later and must be explicit, narrowly scoped and recorded. (Not introduced: SHARED-PACKAGE-DEPENDENCIES-MILESTONE-1.md keeps every author's lock binding, so an override would be a language-design decision of its own.)
 
 ### Operations
 

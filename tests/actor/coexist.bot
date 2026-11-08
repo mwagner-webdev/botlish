@@ -1,0 +1,144 @@
+# coexist.bot -- SAME-THREAD-ACTORS-MILESTONE-1.md, "Scheduler
+# compatibility": std::actor is a layer on std::event_loop, not its
+# replacement. One loop runs
+#
+#   * a ping-pong pair of actors exchanging messages as fast as they can,
+#     and an actor that fails (TaskFailed 4);
+#   * ordinary tasks adopted directly: a ticker on a repeating 10 us timer,
+#     a reader of a driver source (records scripted at t=12 and t=27), a
+#     quiet task posting once to a channel a waiter consumes, and a task
+#     that fails (TaskFailed 9).
+#
+# The timer and the source are served on time despite the actor traffic,
+# the quiet task's event is taken in the next turn, and take_outcomes
+# reports every task -- actors and ordinary tasks alike, the failures
+# included: the actor library neither consumes nor hides any outcome.
+import std::actor
+import std::event_loop
+import std::event_loop::deterministic
+import std::int
+import std::str
+import type std::event_loop::Delivery
+import type std::event_loop::Ending
+
+struct Ball:
+    n: int
+
+nomethod fn say(text: str, n: int, context ev: std::event_loop::Loop) errors std::event_loop::SchedulerFault:
+    std::event_loop::log(text.concat(std::int::to_string(n)))
+
+fn player(inbox: std::actor::Inbox[Ball], peer: std::actor::Address[Ball], serve: bool, rounds: int) -> std::actor::Exit:
+    rx = inbox.listen():
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    if serve:
+        peer.send(Ball {n: 1})
+    got = fold i from 0 to rounds with intermediate k 0:
+        b = rx.receive():
+            on std::actor::Closed:
+                break
+        peer.send(Ball {n: b.n + 1})
+        k + 1
+    std::actor::exit(got)
+
+fn doomed(inbox: std::actor::Inbox[Ball]) -> std::actor::Exit errors std::event_loop::TaskFailed:
+    rx = inbox.listen():
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    b = rx.receive():
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    fail std::event_loop::TaskFailed {code: b.n}
+
+fn ticker(context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    t = std::event_loop::every(10)
+    loop i from 0 to 5:
+        std::event_loop::wait(t)
+        say("ticker: tick at time ", std::event_loop::now())
+    t.revoke()
+    5
+
+fn reader(src: std::event_loop::Reg, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    total = fold i from 0 to 2 with intermediate s 0:
+        e = std::event_loop::wait(src)
+        say("reader: record at time ", std::event_loop::now())
+        s + e.a
+    total
+
+fn quiet(ch: std::event_loop::Reg, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    std::event_loop::yield_now()
+    std::event_loop::yield_now()
+    say("quiet: posts in turn ", std::event_loop::turn_number())
+    ch.post(7, 0)
+    0
+
+fn consumer(ch: std::event_loop::Reg, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    e = std::event_loop::wait(ch)
+    say("consumer: took the event in turn ", std::event_loop::turn_number())
+    e.a
+
+fn plain_failure(context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault, std::event_loop::TaskFailed:
+    std::event_loop::yield_now()
+    fail std::event_loop::TaskFailed {code: 9}
+
+fn ending_name(e: Ending) -> str:
+    if e == Ending::Returned:
+        "Returned"
+    elif e == Ending::Failed:
+        "Failed"
+    else:
+        "Fault"
+
+fn main(context ev: std::event_loop::Loop, d: std::event_loop::deterministic::Deterministic, ac: std::actor::Actors) -> List[str] errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered, std::event_loop::TaskFailed:
+    {to: p, inbox: p_in} = std::actor::open[Ball](2)
+    {to: q, inbox: q_in} = std::actor::open[Ball](2)
+    ping = inject no context:
+        coroutine {step, first} = player(p_in, q, true, 30)
+        std::actor::spawned(step, first)
+    say("main: ping is task ", ping.start())
+    pong = inject no context:
+        coroutine {step, first} = player(q_in, p, false, 30)
+        std::actor::spawned(step, first)
+    say("main: pong is task ", pong.start())
+    {to: dd, inbox: dd_in} = std::actor::open[Ball](2)
+    doom = inject no context:
+        coroutine {step, first} = doomed(dd_in)
+        std::actor::spawned(step, first)
+    say("main: doomed is task ", doom.start())
+    std::actor::post(dd, Ball {n: 4})
+
+    coroutine {step: tk, first: tkf} = ticker()
+    say("main: ticker is task ", std::event_loop::adopt(tk, tkf))
+    src = std::event_loop::source(Delivery::Reliable, 4, :keep_alive)
+    std::event_loop::deterministic::inject(12, src, 100, 0)
+    std::event_loop::deterministic::inject(27, src, 200, 0)
+    coroutine {step: rd, first: rdf} = reader(src)
+    say("main: reader is task ", std::event_loop::adopt(rd, rdf))
+    ch = std::event_loop::channel(Delivery::Reliable, 1)
+    coroutine {step: cs, first: csf} = consumer(ch)
+    say("main: consumer is task ", std::event_loop::adopt(cs, csf))
+    coroutine {step: qt, first: qtf} = quiet(ch)
+    say("main: quiet is task ", std::event_loop::adopt(qt, qtf))
+    coroutine {step: pf, first: pff} = plain_failure()
+    say("main: plain failure is task ", std::event_loop::adopt(pf, pff))
+    std::event_loop::run()
+    loop o in std::event_loop::take_outcomes():
+        std::event_loop::log("main: outcome task ".concat(std::int::to_string(o.task)).append_char(' ').concat(ending_name(o.ending)).append_char(' ').concat(std::int::to_string(o.value)))
+    st = std::actor::stats()
+    say("main: actors ended ", st.ended)
+    say("main: actors failed ", st.failed)
+    say("main: open mailboxes ", st.open)
+    std::event_loop::trace()
+
+with context std::event_loop::create(64)
+with context std::event_loop::deterministic::create()
+with context std::actor::create()
+main():
+    on std::event_loop::SchedulerFault:
+        ["SchedulerFault"]
+    on std::event_loop::DriverFault:
+        ["DriverFault"]
+    on std::event_loop::LoopReentered:
+        ["LoopReentered"]
+    on std::event_loop::TaskFailed:
+        ["TaskFailed"]

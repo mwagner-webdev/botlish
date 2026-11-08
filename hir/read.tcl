@@ -130,6 +130,10 @@ proc hir::read::TypeDecls {lines} {
         # Skeletons first, then the field types (which may name any struct
         # of the text, itself included).
         set skeleton [lmap entry $structEntries {
+            if {[dict exists $entry sendable]} {
+                # (A representation is parsed with the field types.)
+                dict set entry sendable representation ""
+            }
             dict set entry fields [concat {*}[lmap {fname ftype} [dict get $entry fields] {list $fname any}]]
         }]
         hir::structs::applyEntries $skeleton
@@ -145,6 +149,10 @@ proc hir::read::TypeDecls {lines} {
             set fields [concat {*}[lmap {fname ftype} [dict get $entry fields] {
                 list $fname [hir::imprint::ConstrainVariables [ParseType $ftype $number] $constraints]
             }]]
+            if {[dict exists $entry sendable] && [dict get $entry sendable representation] ne ""} {
+                dict set entry sendable representation [hir::imprint::ConstrainVariables \
+                    [ParseType [dict get $entry sendable representation] $number] $constraints]
+            }
             dict unset entry names
             dict unset entry line
             dict set entry fields $fields
@@ -286,8 +294,8 @@ proc hir::read::EnumDeclLine {content number} {
 # (hir::format::TypeDecl) states; field types are read with the structs
 # registered skeleton-first, so a field may name any struct of the text.
 proc hir::read::StructDeclLine {content number} {
-    if {![regexp {^struct (\S+) name (\S+) ns (\S+) (opaque )?(context )?(?:slots \[([^\]]*)\] )?(?:identity ([a-z]+)\(([^)]*)\) )?(?:tree (\S+) )?fields (.*)$} $content -> id name ns opaqueWord contextWord slotsText identityForm identityFields treeField fieldsText]} {
-        Fail $number "expected \"struct ID name NAME ns NS \[opaque\] \[context\] \[slots \[SLOT ?satisfies TRAIT?, ...\]\] \[identity FORM(FIELD,...)\] \[tree FIELD\] fields FIELD: TYPE, ...\""
+    if {![regexp {^struct (\S+) name (\S+) ns (\S+) (opaque )?(context )?(resource )?(?:slots \[([^\]]*)\] )?(?:identity ([a-z]+)\(([^)]*)\) )?(?:sendable ([a-z_]+)\(([^)]*)\) (?:as (.+?) )?)?(?:tree (\S+) )?fields (.*)$} $content -> id name ns opaqueWord contextWord resourceWord slotsText identityForm identityFields sendableForm sendableArgs sendableRep treeField fieldsText]} {
+        Fail $number "expected \"struct ID name NAME ns NS \[opaque\] \[context\] \[resource\] \[slots \[SLOT ?satisfies TRAIT?, ...\]\] \[identity FORM(FIELD,...)\] \[sendable FORM(NAME,...) ?as TYPE?\] \[tree FIELD\] fields FIELD: TYPE, ...\""
     }
     # A parameterized struct's slots (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md):
     # {SLOT {TRAIT ...}} pairs, as hir::format::TypeDecl printed them.
@@ -324,6 +332,9 @@ proc hir::read::StructDeclLine {content number} {
     if {$contextWord ne ""} {
         dict set decl context 1
     }
+    if {$resourceWord ne ""} {
+        dict set decl resource 1
+    }
     if {$slots ne {}} {
         dict set decl slots $slots
     }
@@ -332,6 +343,13 @@ proc hir::read::StructDeclLine {content number} {
         # the registry's {form FORM fields {FIELD ...}}, as the entry
         # hir::structs::apply returned held it.
         dict set decl identity [dict create form $identityForm fields [split $identityFields ,]]
+    }
+    if {$sendableForm ne ""} {
+        # The owner's sendability statement (SENDABILITY-AND-VALUE-COPY-
+        # MILESTONE-1.md): the registry's {form FORM args {NAME ...}
+        # representation R}, R's text parsed with the field types.
+        dict set decl sendable [dict create form $sendableForm \
+            args [if {$sendableArgs eq ""} {list} else {split $sendableArgs ,}] representation $sendableRep]
     }
     if {$treeField ne ""} {
         # A tree struct (TREE-STRUCT-MILESTONE-1.md): its child field, as
@@ -1181,11 +1199,17 @@ proc hir::read::Expr {hirVar level s path block} {
             }
         }
         block {
-            if {![BlockHeader $head body params captures staticRefs declared errorsText binds nomethod contexts provesText cloneText resumeText variadic places exported callback emitsText]} {
-                Fail $number "expected \"block SCOPE (PARAMS) captures (BINDINGS) ?staticRefs (BINDINGS)? ?nomethod? ?exported c? ?callback c? ?variadic N? ?places (N ...)? ?contexts (IDS) requires (IDS)? ?declares ...? ?proves BINDING NAME: TYPE? ?errors ...? ?binds ...?\""
+            if {![BlockHeader $head body params captures staticRefs declared errorsText binds nomethod contexts provesText cloneText resumeText variadic places exported callback emitsText cleanup threadEntry]} {
+                Fail $number "expected \"block SCOPE (PARAMS) captures (BINDINGS) ?staticRefs (BINDINGS)? ?nomethod? ?exported c? ?callback c? ?cleanup? ?thread? ?variadic N? ?places (N ...)? ?contexts (IDS) requires (IDS)? ?declares ...? ?proves BINDING NAME: TYPE? ?errors ...? ?binds ...?\""
             }
             if {$nomethod} {
                 SetField hir $e nomethod 1
+            }
+            if {$cleanup} {
+                SetField hir $e cleanup 1
+            }
+            if {$threadEntry} {
+                SetField hir $e threadEntry 1
             }
             if {$exported ne ""} {
                 SetField hir $e exported $exported
@@ -1382,7 +1406,12 @@ proc hir::read::Expr {hirVar level s path block} {
         }
         if {
             if {$head ne ""} {
-                Fail $number "expected \"if : TYPE\""
+                # An inject block's contexts (RESTRICTED-CONTEXT-INJECTION-
+                # MILESTONE-1.md).
+                if {![regexp {^injects \((.*)\)$} $head -> ids]} {
+                    Fail $number "expected \"if ?injects (IDS)? : TYPE\""
+                }
+                SetField hir $e injects [if {$ids eq ""} {list} else {split [string map {", " ,} $ids] ,}]
             }
             SetField hir $e condition [Expr hir $inner $s [concat $path 1] $block]
             set refinements [dict create 1 {} 0 {}]
@@ -1673,11 +1702,11 @@ proc hir::read::Expr {hirVar level s path block} {
 # Derives what the text implies: which bind declares each binding, binding
 # types, and id counters past every id in use.
 # Parses a block line's HEAD ("SCOPE (PARAMS) captures (BINDINGS)
-# ?staticRefs (BINDINGS)? ?nomethod? ?exported c? ?callback c? ?declares TYPE? ?errors E1, E2? ?binds ...?")
+# ?staticRefs (BINDINGS)? ?nomethod? ?exported c? ?callback c? ?cleanup? ?declares TYPE? ?errors E1, E2? ?binds ...?")
 # into the named variables; 0 if malformed. The optional parts are found
 # outside brackets, so a declared type may itself contain spaces, ", " or
 # the word "errors" (a structural function type's own "errors: [...]").
-proc hir::read::BlockHeader {head bodyVar paramsVar capturesVar staticRefsVar declaredVar errorsVar bindsVar {nomethodVar ""} {contextsVar ""} {provesVar ""} {cloneVar ""} {resumeVar ""} {variadicVar ""} {placesVar ""} {exportedVar ""} {callbackVar ""} {emitsVar ""}} {
+proc hir::read::BlockHeader {head bodyVar paramsVar capturesVar staticRefsVar declaredVar errorsVar bindsVar {nomethodVar ""} {contextsVar ""} {provesVar ""} {cloneVar ""} {resumeVar ""} {variadicVar ""} {placesVar ""} {exportedVar ""} {callbackVar ""} {emitsVar ""} {cleanupVar ""} {threadVar ""}} {
     foreach var {bodyVar paramsVar capturesVar staticRefsVar declaredVar errorsVar bindsVar} {
         upvar 1 [set $var] [string range $var 0 end-3]
     }
@@ -1716,6 +1745,26 @@ proc hir::read::BlockHeader {head bodyVar paramsVar capturesVar staticRefsVar de
         upvar 1 $callbackVar callback
         set callback ""
         if {[regexp {^ callback (c)(.*)$} $rest -> callback after]} {
+            set rest $after
+        }
+    }
+    # A resource's cleanup function (LEXICAL-RESOURCE-CLEANUP-EXPLORATION-
+    # MILESTONE-1.md), as hir::format prints it.
+    if {$cleanupVar ne ""} {
+        upvar 1 $cleanupVar cleanup
+        set cleanup 0
+        if {[regexp {^ cleanup(.*)$} $rest -> after]} {
+            set cleanup 1
+            set rest $after
+        }
+    }
+    # A thread entry (BOTLISH-OWNED-THREADS-AND-CROSS-THREAD-ACTORS-
+    # MILESTONE-1.md), as hir::format prints it.
+    if {$threadVar ne ""} {
+        upvar 1 $threadVar threadEntry
+        set threadEntry 0
+        if {[regexp {^ thread(.*)$} $rest -> after]} {
+            set threadEntry 1
             set rest $after
         }
     }

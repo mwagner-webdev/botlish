@@ -1027,13 +1027,13 @@ test la-registrations {the array operations are root natives whose -layout roles
 
 set laExecutableDir [makeDirectory layout-arrays-executables-[pid]]
 
-test la-executable {a standalone executable (whichever linker BOTLISH_NATIVE_LINKER selects) reads and writes live arrays -- elements, rows, records, whole loads and stores -- and arrays in byte storage exactly as the in-process backends do} -constraints executableAot -body {
+test la-executable {a standalone executable (whichever linker BOTLISH_NATIVE_LINKER selects) reads and writes live arrays -- elements, rows, records, whole loads and stores -- and arrays in byte storage exactly as the in-process backends do (its value read through the driver protocol)} -constraints executableAot -body {
     set source [laProgram "fn run(k: int) -> List\[any\] errors NativeEditNull, NativeViewNull, LayoutLengthMismatch, IndexNotFound:\n    p = memory(ramp(48))\n    e = std::binary::native::edit(SHAPES, p)\n    std::binary::store_element(e.first, k, 17)\n    std::binary::store_element(std::binary::element(e.m, k), 2, 513)\n    std::binary::store(e, SHAPES.tails, \[LayoutStruct\[TAILED\] {a: 4000000000, b: 5}, LayoutStruct\[TAILED\] {a: 1, b: 2}\])\n    v = std::binary::native::view(SHAPES, p)\n    d = std::binary::write(mutable(fill(48, 0)), SHAPES.pts\[1\].x, -2)\n    \[dump(p, 48), std::binary::load(v), std::binary::element(v.pts, k).y, frozen(d) == bytes_of([laList [laBytes 48 0 {{40 -2 2}}]])\]\n\nr = run(1):\n    on NativeEditNull:\n        \[\]\n    on NativeViewNull:\n        \[\]\n    on LayoutLengthMismatch:\n        \[\]\n    on IndexNotFound:\n        \[\]\nr\n"]
     set hir [surface::compile $source arrays.bot -warnings off]
     set path [file join $::laExecutableDir arrays]
     native::executable $hir $path
     set direct [laOutcome cranelift $hir]
-    list [expr {"value {[exec $path]}" eq $direct}] [lindex $direct 0]
+    list [expr {"value {[standaloneValue $path]}" eq $direct}] [lindex $direct 0]
 } -cleanup {unset -nocomplain source hir path direct} -result {1 value}
 
 test la-gc-stress {under BOTLISH_NATIVE_GC_STRESS=1 (a collection at every allocation site) live arrays stay exact: whole loads building Lists of Lists and of LayoutStructs, 64-bit elements that are BigInts stored and loaded, whole stores from Lists made in the same iteration, byte writes of arrays each allocating a fresh storage -- every operand stays rooted while the next allocation runs} -constraints {nativeBuilt nativeCoroutines} -body {

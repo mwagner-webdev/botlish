@@ -22,9 +22,23 @@ set mainScript [file join $::projectRoot main.tcl]
 set ::pnCounter 0
 set hostTarget [core::cabi::hostTarget]
 testConstraint linuxX86Host [expr {$hostTarget eq "linux-x86_64"}]
+# Whether this host can tell if a lock's holder still runs
+# (pm::install::ProcessAlive): where it cannot (Windows), an interrupted
+# operation is rolled back only by a command given -recover
+# (package-manager.test's afterInterruption).
+# Stated here for the host, not asked of pm, so that a defect of pm's own
+# answer cannot change what the tests expect.
+set lockLivenessKnown [expr {[file isdirectory /proc/self] || $::tcl_platform(platform) eq "unix"}]
+proc afterInterruption {} {
+    if {$::lockLivenessKnown} { return {} }
+    return -recover
+}
 testConstraint cc [expr {[auto_execok cc] ne "" && [auto_execok ar] ne ""}]
 testConstraint linuxCc [expr {[testConstraint linuxX86Host] && [testConstraint cc]}]
 testConstraint clangAarch64 [expr {[auto_execok clang] ne "" && [testConstraint linuxX86Host]}]
+# Linking a library of another architecture takes LLVM's linker (the host's
+# GNU ld links only its own); compiling objects and archiving them does not.
+testConstraint lld [expr {[auto_execok ld.lld] ne ""}]
 testConstraint mingw [expr {[auto_execok x86_64-w64-mingw32-gcc] ne "" && [auto_execok x86_64-w64-mingw32-dlltool] ne ""}]
 testConstraint llvmDlltool [expr {[auto_execok llvm-dlltool] ne "" || [auto_execok llvm-dlltool-18] ne ""}]
 testConstraint dpkgZlib [expr {[testConstraint linuxX86Host] && [file isdirectory /var/lib/dpkg/info]
@@ -82,8 +96,20 @@ proc pm {args} {
 }
 
 proc kindOf {err} {
-    if {[regexp {\(PM ([A-Z]+)\)\s*$} $err -> kind]} { return $kind }
+    if {[regexp {\(PM ([A-Z-]+)\)\s*$} $err -> kind]} { return $kind }
     return ""
+}
+
+# The artifact of DIR written into REPO without pack's checks (as an older
+# packer or a hand-made archive would): for the consumer side's own checks.
+proc packRaw {dir repo} {
+    set descriptor [pm::descriptor::read [file join $dir botlish.json] pack]
+    set files [pm::commands::Collect $dir]
+    dict set files botlish.json [pm::descriptor::encode $descriptor 0]
+    set path [file join $repo [dict get $descriptor name]-[dict get $descriptor version].botpkg]
+    file delete $path
+    pm::WriteNew $path [pm::archive::bytes $files]
+    return $path
 }
 
 # Packs DIR into REPO; raises with the error when it fails.
@@ -269,26 +295,25 @@ test pn-one-artifact-two-targets {one immutable geo 1.0.0 carries both targets' 
     list [dict get $added status] [lrange [split [dict get $added out] \n] 1 1] $a1 [lrange [split [dict get $b out] \n] 1 2] $b1 \
         [lrange [split [dict get $again out] \n] 1 2] $a2 [expr {[treeState [file join $app .bot_modules .targets linux-x86_64]] eq $before}] \
         [lsort [glob -tails -directory [file join $app .bot_modules .targets] *]]
-} -cleanup cleanup -result {0 {{view linux-x86_64: derived (3 files, 0 native libraries)}} {"linux-x86_64/1.0.0"} {{view linux-aarch64: derived (3 files, 0 native libraries)} {view linux-x86_64: unchanged}} {"linux-aarch64/1.0.0"} {{view linux-aarch64: unchanged} {view linux-x86_64: unchanged}} {"linux-x86_64/1.0.0"} 1 {linux-aarch64 linux-x86_64}}
+} -cleanup cleanup -result {0 {{view linux-x86_64: derived (4 files, 0 native libraries)}} {"linux-x86_64/1.0.0"} {{view linux-aarch64: derived (4 files, 0 native libraries)} {view linux-x86_64: unchanged}} {"linux-aarch64/1.0.0"} {{view linux-aarch64: unchanged} {view linux-x86_64: unchanged}} {"linux-x86_64/1.0.0"} 1 {linux-aarch64 linux-x86_64}}
 
 test pn-concurrent-target-compiles {two compilations for two targets, run at once in two processes, each read their own view: the results are what each gives alone} -body {
     set repo [fresh repo]
     pack [geoPackage [fresh src] 1.0.0] $repo
     set app [application "import geo\n\ngeo::which()\n"]
     pm add geo -project $app -repository $repo -target linux-x86_64 -target linux-aarch64
-    set outputs {}
-    set pids {}
-    foreach target {linux-x86_64 linux-aarch64 linux-x86_64 linux-aarch64} {
-        set out [file join $app out-[llength $pids]]
-        lappend outputs $out
-        lappend pids [exec [info nameofexecutable] $::mainScript -target $target [file join $app main.bot] > $out 2>@1 &]
+    # All four start before any is read. Each one's output is read to its
+    # end and its pipeline closed, which waits for the process: a portable
+    # wait (never a probe of /proc, which macOS and Windows do not have).
+    set channels [lmap target {linux-x86_64 linux-aarch64 linux-x86_64 linux-aarch64} {
+        open |[list [info nameofexecutable] $::mainScript -target $target [file join $app main.bot] 2>@1] r
+    }]
+    lmap channel $channels {
+        set output [read $channel]
+        catch {close $channel}
+        lindex [split [string trim $output] \n] end
     }
-    foreach pid $pids {
-        while {[file isdirectory /proc/$pid] && ![catch {exec ps -o stat= -p $pid} s] && ![string match Z* $s]} { after 50 }
-    }
-    after 200
-    lmap out $outputs {lindex [split [string trim [readBytes $out]] \n] end}
-} -constraints {unixFiles} -cleanup cleanup -result {{   value: "linux-x86_64/1.0.0"} {   value: "linux-aarch64/1.0.0"} {   value: "linux-x86_64/1.0.0"} {   value: "linux-aarch64/1.0.0"}}
+} -cleanup cleanup -result {{   value: "linux-x86_64/1.0.0"} {   value: "linux-aarch64/1.0.0"} {   value: "linux-x86_64/1.0.0"} {   value: "linux-aarch64/1.0.0"}}
 
 test pn-update-derives-every-view {an update replaces the store and derives every view again in the same transaction: both targets compile the new release} -body {
     set repo [fresh repo]
@@ -300,7 +325,7 @@ test pn-update-derives-every-view {an update replaces the store and derives ever
     pm install -project $app -repository $repo -target linux-x86_64 -target linux-aarch64
     set r [pm update -project $app -repository $repo]
     list [dict get $r status] [lrange [split [dict get $r out] \n] 1 2] [appValue $app linux-x86_64] [appValue $app linux-aarch64]
-} -cleanup cleanup -result {0 {{view linux-aarch64: derived again (3 files, 0 native libraries)} {view linux-x86_64: derived again (3 files, 0 native libraries)}} {"linux-x86_64/1.0.1"} {"linux-aarch64/1.0.1"}}
+} -cleanup cleanup -result {0 {{view linux-aarch64: derived again (4 files, 0 native libraries)} {view linux-x86_64: derived again (4 files, 0 native libraries)}} {"linux-x86_64/1.0.1"} {"linux-aarch64/1.0.1"}}
 
 test pn-unsupported-target {a package names the targets it supports, and nothing else is assumed: preparing another is UNSUPPORTED, naming the dependency path, and changes nothing; a nested dependency with less target support limits its consumer} -body {
     set repo [fresh repo]
@@ -308,7 +333,9 @@ test pn-unsupported-target {a package names the targets it supports, and nothing
     pack [geoPackage $src 1.0.0 {linux-x86_64}] $repo
     pack [packageDir $src outer 1.0.0 {{"schema": 1, "name": "outer", "version": "1.0.0", "dependencies": {"geo": "1.0"}, "lock": {"geo": "1.0.0"}}} [list outer.bot "import geo\n\nfn which() -> str:\n    geo::which()\n"]] $repo
     set app [application "import outer\n\nouter::which()\n"]
-    pm add outer -project $app -repository $repo
+    # The supported target is named: on a host of another target (Linux
+    # AArch64's CI) an add that prepares the host's would already refuse.
+    pm add outer -project $app -repository $repo -target linux-x86_64
     set before [treeState $app]
     set r [pm install -project $app -repository $repo -target linux-aarch64]
     list [dict get $r status] [kindOf [dict get $r err]] [string map [list $app APP] [dict get $r err]] [expr {[treeState $app] eq $before}] [appValue $app linux-x86_64]
@@ -322,39 +349,47 @@ test pn-unprepared-target-diagnostic {compiling for a target whose view was neve
     string map [list $app APP] [appValue $app linux-aarch64]
 } -cleanup cleanup -match glob -result {UNKNOWN-NAMESPACE: *APP/.bot_modules/.targets holds the application's packages by target, and none for linux-aarch64 (no directory APP/.bot_modules/.targets/linux-aarch64): its packages are not prepared for that target*}
 
-test pn-two-versions-in-views {two versions of one target-aware package on separate branches are two instances in every view, each with its own target files} -body {
+test pn-shared-in-views {a target-aware package two packages lock at one version is one instance in every view, each target's files once, its package graph beside it; two versions of it are a conflict, in no view} -body {
     set repo [fresh repo]
     set src [fresh src]
     pack [geoPackage $src 1.0.0] $repo
     pack [geoPackage $src 2.0.0] $repo
-    foreach {name v} {physics 1.0 rendering 2.0} {
+    foreach {name v} {physics 1.0 rendering 1.0 other 2.0} {
         pack [packageDir $src $name 1.0.0 "{\"schema\": 1, \"name\": \"$name\", \"version\": \"1.0.0\", \"dependencies\": {\"geo\": \"$v\"}, \"lock\": {\"geo\": \"$v.0\"}}" [list $name.bot "import geo\n\nfn which() -> str:\n    geo::which()\n"]] $repo
     }
     set app [application "import physics\nimport rendering\n\n\[physics::which(), rendering::which()\]\n"]
     pm add physics -project $app -repository $repo -target linux-x86_64 -target linux-aarch64
     pm add rendering -project $app -repository $repo
-    list [appValue $app linux-x86_64] [appValue $app linux-aarch64]
-} -cleanup cleanup -result {{["linux-x86_64/1.0.0", "linux-x86_64/2.0.0"]} {["linux-aarch64/1.0.0", "linux-aarch64/2.0.0"]}}
+    set r [pm add other -project $app -repository $repo]
+    list [appValue $app linux-x86_64] [appValue $app linux-aarch64] \
+        [lsort [glob -tails -types d -directory [file join $app .bot_modules .targets linux-aarch64] *]] \
+        [readBytes [file join $app .bot_modules .targets linux-aarch64 .graph]] [kindOf [dict get $r err]]
+} -cleanup cleanup -result {{["linux-x86_64/1.0.0", "linux-x86_64/1.0.0"]} {["linux-aarch64/1.0.0", "linux-aarch64/1.0.0"]} {geo physics rendering} {botlish package graph 1
+application physics rendering
+package geo
+package physics geo
+package rendering geo
+} DEPENDENCY-CONFLICT}
 
-test pn-pure-packages-no-views {target-independent packages never get views: no .targets, the record schema 1 as in PM-1, and -target asks for nothing to do} -body {
+test pn-pure-packages-no-views {target-independent packages never get views: no .targets, the record's views empty, and -target asks for nothing to do} -body {
     set repo [fresh repo]
     pack [packageDir [fresh src] web 1.0.0 {{"schema": 1, "name": "web", "version": "1.0.0"}} [list web.bot "fn hello() -> str:\n    \"hello\"\n"]] $repo
     set app [application "import web\n\nweb::hello()\n"]
     set r [pm add web -project $app -repository $repo]
     set t [pm install -project $app -repository $repo -target linux-aarch64]
     list [regexp {^web 1\.0\.0 \(sha256 [0-9a-f]+\): installed\nadded web} [dict get $r out]] [file exists [file join $app .bot_modules .targets]] \
-        [string range [readBytes [file join $app .bot_modules .botlish state.json]] 0 14] [dict get $t out] [appValue $app]
-} -cleanup cleanup -result [list 1 0 "{\n  \"state\": 1," "web 1.0.0: unchanged\nnote: no installed package is target-specific: every target compiles from .bot_modules itself, so there is no target view to keep" {"hello"}]
+        [string match {*"views": {}*} [readBytes [file join $app .bot_modules .botlish state.json]]] [dict get $t out] [appValue $app]
+} -cleanup cleanup -result [list 1 0 1 "web 1.0.0: unchanged\nnote: no installed package is target-specific: every target compiles from .bot_modules itself, so there is no target view to keep" {"hello"}]
 
-test pn-views-dropped-with-last-aware-package {removing the last target-aware package removes every view and .targets with them: the record is schema 1 again} -body {
+test pn-views-dropped-with-last-aware-package {removing the last target-aware package removes every view and .targets with them: the record has no view again} -body {
     set repo [fresh repo]
     pack [geoPackage [fresh src] 1.0.0] $repo
     set app [application "1\n"]
     pm add geo -project $app -repository $repo -target linux-x86_64 -target linux-aarch64
     set r [pm remove geo -project $app]
     list [dict get $r status] [lrange [split [dict get $r out] \n] 0 3] [file exists [file join $app .bot_modules .targets]] \
-        [string range [readBytes [file join $app .bot_modules .botlish state.json]] 0 14]
-} -cleanup cleanup -result [list 0 {{removed geo} {note: no installed package is target-specific any more: its target views are removed, and every target compiles from .bot_modules itself} {view linux-aarch64: removed} {view linux-x86_64: removed}} 0 "{\n  \"state\": 1,"]
+        [string match {*"views": {}*} [readBytes [file join $app .bot_modules .botlish state.json]]]
+} -cleanup cleanup -result [list 0 {{removed geo} {note: no installed package is target-specific any more: its target views are removed, and every target compiles from .bot_modules itself} {view linux-aarch64: removed} {view linux-x86_64: removed}} 0 1]
 
 test pn-drop-target {-drop-target removes one view and keeps the others} -body {
     set repo [fresh repo]
@@ -426,7 +461,7 @@ test pn-view-crash-recovery {a process killed while committing views leaves a jo
     set out {}
     foreach point {commit-view-old commit-view-new state-written committed} {
         set r [withEnvironment [list BOTLISH_PM_FAULT crash:$point] {pm update -project $app -repository $repo}]
-        set next [pm install -project $app -repository $repo]
+        set next [pm install -project $app -repository $repo {*}[afterInterruption]]
         set value [appValue $app linux-x86_64]
         lappend out [list $point [dict get $r status] [lindex [split [dict get $next err] \n] 0] $value \
             [expr {$value eq {"linux-x86_64/1.0.0"} ? [treeState $app] eq $before : 1}]]
@@ -499,7 +534,7 @@ proc fooLibrary {{extra ""}} {
     return "{\"name\": \"foo\", \"origin\": \"bundled\", \"linkage\": \"shared\", \"file\": \"native/libfoo.so.1\", \"identity\": \"libfoo.so.1\", \"needs\": \[\"libc.so.6\"\]$extra}"
 }
 
-test pn-bundled-checks {every declared fact of a bundled library is checked against the file before it is packed: identity, needs, architecture, kind, symbols; a musl-built library is refused for the GNU C library's target} -constraints {linuxCc clangAarch64} -body {
+test pn-bundled-checks {every declared fact of a bundled library is checked against the file before it is packed: identity, needs, architecture, kind, symbols; a musl-built library is refused for the GNU C library's target} -constraints {linuxCc clangAarch64 lld} -body {
     set dir [fresh bin]
     set good [sharedLibrary $dir libfoo.so.1 libfoo.so.1 foo_value 7]
     set wrongName [sharedLibrary $dir libbar.so libbar.so.9 foo_value 7]
@@ -555,7 +590,7 @@ test pn-native-conflicts {the native closure is the whole application's: two ins
     set app [application "1\n"]
     set r [pm add fneedy -project $app -repository $repo]
     lappend out [list needs [dict get $r status] [lindex [split [dict get $r err] \n] 1]]
-} -cleanup cleanup -result {{different 1 1 {  foo: instances fa and fb bundle different foo libraries (sha256 D and D): one process loads one foo, and the package manager never chooses between them (PM NATIVE)}} {same 0 1 {}} {origin 1 1 {  foo: instance fa uses a bundled shared foo and instance fsys a system shared one: one process links one foo (choose one origin with botlish.json's "origins", or use packages that agree) (PM NATIVE)}} {identity 1 1 {  the libraries foo and bar both load as libfoo.so.1: one loader identity is one library in a process}} {statics 1 1 {  the static libraries s1 and s2 both define dup: linking both into one executable is a duplicate definition (PM NATIVE)}} {needs 1 {  system library dep (libdep.so.2 or libdep.so) is not installed in linux-x86_64's system library directories (/usr/lib/x86_64-linux-gnu, /lib/x86_64-linux-gnu, /usr/lib, /lib, /usr/lib64, /usr/local/lib, /usr/local/lib/x86_64-linux-gnu)}}}
+} -cleanup cleanup -result {{different 1 1 {  foo: instances fa and fb bundle different foo libraries (sha256 D and D): one process loads one foo, and the package manager never chooses between them (PM NATIVE)}} {same 0 1 {}} {origin 1 1 {  foo: instance fa uses a bundled shared foo and instance fsys a system shared one: one process links one foo (choose one origin with botlish.json's "origins", or use packages that agree) (PM NATIVE)}} {identity 1 1 {  the libraries foo and bar both load as libfoo.so.1: one loader identity is one library in a process}} {statics 1 1 {  the static libraries s1 and s2 both define dup: linking both into one executable is a duplicate definition (PM NATIVE)}} {needs 1 {  system library dep (libdep.so.2 or libdep.so) is not installed in linux-x86_64's system library directories (/usr/lib/x86_64-linux-gnu, /lib/x86_64-linux-gnu, /usr/lib, /lib, /usr/lib64, /usr/local/lib, /usr/local/lib/x86_64-linux-gnu) (declared by instance fneedy) (PM NATIVE)}}}
 
 test pn-missing-transitive-dependency {a bundled library's loader dependency must resolve to the target's platform or a library a package declares: one nobody declares is refused when the package is packed} -constraints {linuxCc} -body {
     set dir [fresh bin]
@@ -566,19 +601,28 @@ test pn-missing-transitive-dependency {a bundled library's loader dependency mus
     list [dict get $r status] [lindex [split [dict get $r err] \n] 1]
 } -cleanup cleanup -result {1 {  linux-x86_64: library needy needs libdep.so.2, which is neither linux-x86_64's platform nor a library this package declares for linux-x86_64 (with its identity): a consumer could not resolve it (PM PACK)}}
 
-test pn-source-metadata-contradiction {a package whose link declaration contradicts its metadata -- source requires a static library the metadata bundles as shared, or links an archive path the metadata does not bundle -- is refused at installation with both locations named} -constraints {linuxCc} -body {
+test pn-source-metadata-contradiction {a package whose link declaration contradicts its metadata -- source requires a static library the metadata bundles as shared, or links an archive path the metadata does not bundle -- is refused by pack (PM-3's audit) and, made into an artifact another way, at installation with both locations named} -constraints {linuxCc} -body {
     set dir [fresh bin]
     set good [sharedLibrary $dir libfoo.so.1 libfoo.so.1 foo_value 7]
     set a [staticArchive $dir libq.a q_value 3]
     set src [fresh src]
     set repo [fresh repo]
-    pack [nativePackage $src cstatic 1.0.0 [list [fooLibrary]] [list native/libfoo.so.1 $good] "extern c library \"foo\" static\n\nfn n() -> int:\n    1\n"] $repo
-    pack [nativePackage $src cpath 1.0.0 [list {{"name": "q", "origin": "bundled", "linkage": "static", "file": "native/libq.a"}}] [list native/libq.a $a] "extern c library \"q\" static at \"native/other.a\"\n\nfn n() -> int:\n    1\n"] $repo
-    lmap name {cstatic cpath} {
+    set cstatic [nativePackage $src cstatic 1.0.0 [list [fooLibrary]] [list native/libfoo.so.1 $good] "extern c library \"foo\" static\n\nfn n() -> int:\n    1\n"]
+    set cpath [nativePackage $src cpath 1.0.0 [list {{"name": "q", "origin": "bundled", "linkage": "static", "file": "native/libq.a"}}] [list native/libq.a $a] "extern c library \"q\" static at \"native/other.a\"\n\nfn n() -> int:\n    1\n"]
+    # PM-3's pack refuses both (the native audit); an artifact made another
+    # way -- by an older packer, by hand -- is still refused at installation.
+    set refused [lmap dir [list $cstatic $cpath] {
+        set r [pm package pack $dir -out $repo]
+        list [dict get $r status] [kindOf [dict get $r err]]
+    }]
+    foreach dir [list $cstatic $cpath] {
+        packRaw $dir $repo
+    }
+    list $refused {*}[lmap name {cstatic cpath} {
         set r [pm add $name -project [application "1\n"] -repository $repo]
         list [dict get $r status] [lindex [split [dict get $r err] \n] 1]
-    }
-} -cleanup cleanup -result {{1 {  cstatic/cstatic.bot:1 requires a static foo, and the package metadata provides a bundled shared one: correct the metadata or the declaration (PM NATIVE)}} {1 {  cpath/cpath.bot:1 links q from native/other.a, and the package metadata bundles it as native/libq.a: correct the metadata or the declaration (PM NATIVE)}}}
+    }]
+} -cleanup cleanup -result {{{1 PACK} {1 PACK}} {1 {  cstatic/cstatic.bot:1 requires a static foo, and the package metadata provides a bundled shared one: correct the metadata or the declaration (PM NATIVE)}} {1 {  cpath/cpath.bot:1 links q from native/other.a, and the package metadata bundles it as native/libq.a: correct the metadata or the declaration (PM NATIVE)}}}
 
 # ---------------------------------------------------------------------------
 # 5. System libraries
@@ -609,7 +653,7 @@ test pn-system-library-needs-system-metadata {a library file in a library direct
     pack $pkg $repo
     set r [pm add pyuse -project [application "1\n"] -repository $repo]
     list [dict get $r status] [lindex [split [dict get $r err] \n] 1]
-} -cleanup cleanup -result {1 {  system library python3: /usr/local/lib/libpython3.so is installed, but no system metadata (the dpkg database, or a pkg-config file of the system's) records it: a file in a library directory is not a system-managed installation (PM NATIVE)}}
+} -cleanup cleanup -result {1 {  system library python3: /usr/local/lib/libpython3.so is installed, but no system metadata (the dpkg database, or a pkg-config file of the system's) records it: a file in a library directory is not a system-managed installation (declared by instance pyuse) (PM NATIVE)}}
 
 test pn-system-library-other-target {a system library of another target than the host's cannot be verified here: the view is made and the plan says so, never claiming it} -body {
     set src [fresh src]
@@ -647,7 +691,7 @@ test pn-bundled-libraries-link-and-run {a program over a package bundling a shar
     list [dict get $r status] [lsort [glob -tails -directory [file join $app .bot_modules .targets linux-x86_64 .lib] *]] $value
 } -cleanup cleanup -result {0 {libtoy.so libtoy.so.1 libtoystatic.a} 50}
 
-test pn-deploy-relocatable {native deploy places the bundled shared library, an executable linked with -runtime-path '$ORIGIN/lib' finds it there, and keeps running after the directory moves and the packages are deleted} -constraints {linkedRun} -body {
+test pn-deploy-relocatable {native deploy places the bundled shared library, an executable linked with -runtime-path '$ORIGIN/lib' finds it there, and keeps running after the directory moves and the packages are deleted: it prints nothing (an executable prints no value), and its value, through the driver protocol, is the program's} -constraints {linkedRun} -body {
     set repo [toyNative]
     set app [application "import toy\n\ntoy::total()\n"]
     pm add toy -project $app -repository $repo
@@ -658,9 +702,9 @@ test pn-deploy-relocatable {native deploy places the bundled shared library, an 
     set moved [file join [fresh moved] dist]
     file rename $dist $moved
     file delete -force [file join $app .bot_modules]
-    set run [withEnvironment {LD_LIBRARY_PATH {}} {exec [file join $moved main]}]
+    set run [withEnvironment {LD_LIBRARY_PATH {}} {list [exec [file join $moved main]] [standaloneValue [file join $moved main]]}]
     list [dict get $d status] [lindex [split [dict get $d out] \n] 0] [dict get $e status] $run [lsort [glob -tails -directory [file join $moved lib] *]]
-} -cleanup cleanup -result {0 {deployed lib/libtoy.so.1} 0 50 libtoy.so.1}
+} -cleanup cleanup -result {0 {deployed lib/libtoy.so.1} 0 {{} 50} libtoy.so.1}
 
 test pn-deploy-ownership-and-faults {a deployment replaces only what it placed: a file it did not place is MANUAL, one changed since is MODIFIED (without -force); a failure at any step, or a crash and the next deploy, leaves the previous deployment} -constraints {linuxCc} -body {
     set repo [toyNative]

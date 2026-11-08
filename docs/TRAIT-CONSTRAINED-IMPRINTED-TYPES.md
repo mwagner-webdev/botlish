@@ -177,10 +177,15 @@ ARGS}` is valid when:
 * it gives one type per slot (TYPE otherwise: `Pair[int]`, `Pair[int, str,
   bool]`, a bare `Pair`, `Point[int]` of a struct without slots;
   `tc-app-arity`);
-* every argument is a concrete, unrestricted type: a trait
-  (TRAIT-STORAGE-UNSUPPORTED: a struct stores one concrete representation),
-  a context trait (CONTEXT-TRAIT-POSITION) or an affine type (TYPE) is no
-  argument (`tc-app-slot-argument-kinds`);
+* every argument is a concrete type: a trait (TRAIT-STORAGE-UNSUPPORTED: a
+  struct stores one concrete representation) or a context trait
+  (CONTEXT-TRAIT-POSITION) is no argument (`tc-app-slot-argument-kinds`).
+  An affine type is an argument like any other
+  (WRITTEN-AFFINE-APPLICATIONS-MILESTONE-1.md): the application is affine
+  exactly when its applied fields are, and is judged by that wherever it is
+  written, as the same type inferred is; a recursive affine application, or
+  one that nests its affine argument in ever larger types, is no type
+  (AFFINE-CONTAINER-UNSUPPORTED, `hir::structs::WrittenProblem`);
 * every constrained slot's argument satisfies the slot's trait
   (`hir::structs::ApplicationProblem`): by `hir::traits::satisfies` for a
   concrete type, and for an imprint variable exactly when the variable's own
@@ -581,7 +586,8 @@ constraints are part of its entries.
 | wrong number of type arguments, a bare constructor, arguments to a struct without slots | TYPE | the application |
 | an argument that does not satisfy its slot's trait | TRAIT-NOT-SATISFIED | the application (parameter, result, field, construction, explicit imprint, the call whose binding makes it) |
 | a field's nested application over a slot that does not state the obligation | TRAIT-NOT-SATISFIED | the field |
-| a trait, context trait or affine type as an argument | TRAIT-STORAGE-UNSUPPORTED, CONTEXT-TRAIT-POSITION, TYPE | the application |
+| a trait or context trait as an argument | TRAIT-STORAGE-UNSUPPORTED, CONTEXT-TRAIT-POSITION | the application |
+| a written recursive affine application (one with no finite form was too, until PARAMETERIZED-DECLARATION-SUMMARIES-MILESTONE-1.md made it an ordinary type) | AFFINE-CONTAINER-UNSUPPORTED | the application |
 | a construction that establishes no single type for a slot | IMPRINT | the construction |
 | a variable a constraint would be needed to establish | IMPRINT | the call |
 | a bad slot declaration (name, duplicate, unknown trait, a type that is no trait, a context trait, a context struct with slots) | TYPE | the slot |
@@ -847,9 +853,11 @@ Tests that pinned the unary grammar were updated (above), and
   and contexts take no slots (a context struct's slots are rejected).
 * **No predicates, scalar constraints, higher-kinded types, associated
   types or parameterized traits.**
-* **A slot takes only concrete unrestricted types.** No trait view (a
-  struct stores one representation), no context trait, no affine type (an
-  application holding a coroutine is not yet an affine aggregate).
+* **A slot takes only concrete types.** No trait view (a struct stores one
+  representation), no context trait. (An affine type was refused too, until
+  an application holding a coroutine became an affine aggregate:
+  AFFINE-PARAMETERIZED-APPLICATIONS-CORRECTNESS-MILESTONE-1.md, then
+  WRITTEN-AFFINE-APPLICATIONS-MILESTONE-1.md, which admits it.)
 * **Bare-field establishment is unchanged.** `fn make(key: K, value: V)`
   still establishes nothing from a bare argument; functions establish K
   from `List[K]`, an application or an explicit imprint.

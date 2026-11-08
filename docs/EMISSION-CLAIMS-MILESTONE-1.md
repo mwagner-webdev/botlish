@@ -149,7 +149,10 @@ The trace is F's own yields and those of the functions it calls by an
 ordinary call (deep yields). A coroutine F constructs is another execution:
 its yields are its own, and what F resumes from it is an ordinary value.
 F's result is no symbol; a claimed function whose declared result is an Int
-is a symbol source and must complete with -1 (EMIT-TERMINAL-VALUE). The
+is a symbol source and must complete with -1 (EMIT-TERMINAL-VALUE). *(Since
+CSV-EMISSION-VALIDATION-MILESTONE-1.md, section 18: withdrawn. The result
+is no symbol whatever its value; -1 is the JSON sources' own protocol,
+which their code keeps, and EMIT-TERMINAL-VALUE no longer exists.)* The
 claim says nothing of termination, of the token's value (a valid number of
 the wrong value is valid), of rollback after a failure, or of a document's
 structure: `emits json_text` is the lexical stream -- valid tokens with valid
@@ -338,7 +341,9 @@ Summaries are shared by every claim of a compilation: the 22 JSON claims
 compute 140 and reuse 60, the prototype's counts exactly; checked one claim
 at a time from fresh state, 448 (section 17). Partial-token helpers need no
 claim. Loops peel a counted domain's first iteration, unroll exactly
-counted ones of at most 8, and otherwise iterate to a fixpoint;
+counted ones of at most 8, and otherwise iterate to a fixpoint (since
+EMISSION-COUNTED-LOOP-PRECISION-MILESTONE-1.md without a zero-iteration
+exit where the bounds' facts prove the loop runs);
 recursion's second round is checked (`ec-recursion-same-context`).
 
 ## 9. Failure paths and coroutine boundaries
@@ -447,7 +452,7 @@ re-proves every claim reading it.
 | EMIT-END-SYMBOL | rejected | a yield that may send -1 |
 | EMIT-BOUNDARY | rejected | a symbol that continues a helper's claimed token |
 | EMIT-BYTE-CHARACTER | rejected | a character's scalar value sent to a bytes recognizer |
-| EMIT-TERMINAL-VALUE | rejected | a symbol source completing with another value than -1 |
+| EMIT-TERMINAL-VALUE | rejected | a symbol source completing with another value than -1 (withdrawn: CSV-EMISSION-VALIDATION-MILESTONE-1.md, section 18) |
 | EMIT-NOT-SYMBOL | not proved | a yield of a value that is no Int |
 | EMIT-UNKNOWN-VALUE | not proved | a yield of a value of no known Int set |
 | EMIT-UNSUPPORTED | not proved | code the checker does not follow |

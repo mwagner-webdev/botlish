@@ -595,8 +595,8 @@ proc executableParity {text} {
         set relocated [file join $dir relocated]
         file rename [native::executableFile [file rootname $path]] [native::executableFile $relocated]
         file delete $path
-        set plain [runStandalone $relocated]
-        set stressed [runStandalone $relocated BOTLISH_NATIVE_GC_STRESS 1]
+        set plain [standaloneValue $relocated]
+        set stressed [standaloneValue $relocated BOTLISH_NATIVE_GC_STRESS 1]
         if {$plain ne $expected || $stressed ne $expected} {
             error "interp $expected, executable $plain, gc-stress $stressed"
         }

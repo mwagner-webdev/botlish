@@ -16,9 +16,10 @@
 #   cranelift) and the run-time replay of a -strict 0 program;
 # * std::linux::io: create, write, write_error, read, one LinuxIO;
 # * native evidence: the NIR context area and slots, no hidden argument, the
-#   CLIF data symbol, PC-relative machine code against a linker-local .bss
-#   symbol, strace, allocations, eligibility (CONTEXT-NATIVE-LOWERING-
-#   UNSUPPORTED), GC stress;
+#   running Vm's own area in CLIF and machine code (one load of its base from
+#   the Vm, no data symbol: PER-THREAD-RUNTIME-STATE-MILESTONE-1.md), strace,
+#   allocations, eligibility (CONTEXT-NATIVE-LOWERING-UNSUPPORTED), GC
+#   stress;
 # * a bounded run of the generated-program fuzzer (audit/contexts/tools).
 
 source [file join [file dirname [file normalize [info script]]] helpers.tcl]
@@ -217,21 +218,27 @@ proc buildExecutable {name text} {
     return $path
 }
 
-# {STDOUT STDERR} (binary) of one run of EXECUTABLE with standard input from
-# the bytes INPUT.
+# {STDOUT STDERR VALUE} (STDOUT and STDERR binary) of one run of EXECUTABLE
+# with standard input from the bytes INPUT, under the driver protocol
+# (BOTLISH_NATIVE_RESULT): an executable prints no value of its own
+# (PROGRAM-OUTPUT-MILESTONE-1.md), so its standard output and error are the
+# program's, and VALUE is the program's value, shown (ProtocolValue).
 proc runExecutable {executable {input ""} {gcStress 0}} {
     set n [incr ::runCounter]
     set in [file join $::outputDir in.$n]
     set out [file join $::outputDir out.$n]
     set err [file join $::outputDir err.$n]
+    set result [file join $::outputDir result.$n]
     writeBinary $in $input
     set command [list sh -c {exec "$0" <"$1" >"$2" 2>"$3"} $executable $in $out $err]
-    if {$gcStress} {
-        withEnv BOTLISH_NATIVE_GC_STRESS 1 {exec {*}$command}
-    } else {
-        exec {*}$command
+    withEnv BOTLISH_NATIVE_RESULT $result {
+        if {$gcStress} {
+            withEnv BOTLISH_NATIVE_GC_STRESS 1 {exec {*}$command}
+        } else {
+            exec {*}$command
+        }
     }
-    return [list [readBinary $out] [readBinary $err]]
+    return [list [readBinary $out] [readBinary $err] [ProtocolValue $result]]
 }
 set runCounter 0
 
@@ -285,7 +292,6 @@ foreach {name source message} {
     stray-fn        "context fn f():\n    1\n"                    {"context" only modifies a struct declaration ("context struct NAME:"), not a "fn" declaration}
     stray-type      "context type T = Int in 0..3\n"              {"context" only modifies a struct declaration ("context struct NAME:"), not a "type" declaration}
     nested          "fn f():\n    context struct T:\n        a: int\n    1\n" {a struct declaration is only allowed at the top level of a module, not nested in a function/if/loop}
-    resource        "context resource struct T:\n    a: int\n"   {expected end of line, found name "resource"}
 } {
     test contexts-syntax-modifier-$name {a malformed context struct declaration is a located syntax error} -body {
         catch {surface::parse $source} m
@@ -721,14 +727,27 @@ test contexts-native-no-hidden-argument {the three-level chain compiles to the c
         [nirBody [nirFunction $nir read_value]]
 } -result {{{params=0 env=0} {params=0 env=0} {params=0 env=0}} {{{%0 = call F} {ret %0}} {{%0 = call F} {ret %0}}} {{%0 = contextload 0} {ret %0}}}
 
-test contexts-native-clif {CLIF of std::linux::io::write: the signature is (vm, data) -> value, the context area is a data global value read at a constant offset; no extra parameter} -constraints nativeLinux -body {
+# The CLIF of std::linux::io::write: its (vm, data) signature, and the base
+# of the running Vm's context area as one read-only load from the Vm
+# argument (in the entry block, once per call), then stdout's word at +8
+# from it (PER-THREAD-RUNTIME-STATE-MILESTONE-1.md: the area is the Vm's,
+# never a program data symbol). The list: {matched OFFSET SIGNATURE
+# SYMBOLS} with OFFSET the Vm field's.
+proc contextClif {} {
     set clif [native::clif [ctxHir $::helloText]]
     set start [string first {"std::linux::io::write"} $clif]
     set end [string first "; function" $clif [expr {$start + 1}]]
     set f [string range $clif $start $end]
-    list [regexp {function u0:[0-9]+\(i64, i64\) -> i64} $f] [regexp {gv[0-9]+ = symbol (colocated )?userextname[0-9]+} $f] \
-        [regexp {symbol_value\.i64 gv[0-9]+} $f] [regexp {load\.i64 notrap aligned v[0-9]+\+8} $f]
-} -result {1 1 1 1}
+    set matched [regexp {(v[0-9]+) = load\.i64 notrap aligned readonly v0\+([0-9]+)\n} $f -> base offset]
+    set used [expr {$matched && [regexp "= load\\.i64 notrap aligned $base\\+8\n" $f]}]
+    list [expr {$matched && $used}] [expr {$matched ? $offset : ""}] \
+        [regexp {function u0:[0-9]+\(i64, i64\) -> i64} $f] [regexp -all {symbol_value|= symbol } $f]
+}
+
+test contexts-native-clif {CLIF of std::linux::io::write: the signature is (vm, data) -> value; the context area is the running Vm's, its base one read-only load from the Vm argument (never a data symbol), stdout's word read at a constant offset from it; no extra parameter} -constraints nativeLinux -body {
+    lassign [contextClif] chained offset signature symbols
+    list $chained [string is integer -strict $offset] $signature $symbols
+} -result {1 1 1 0}
 
 test contexts-native-eligibility {a context whose layout cannot live in fixed program data is CONTEXT-NATIVE-LOWERING-UNSUPPORTED, naming the reason; the Tcl backends run it; an eligible nested layout (Bool, bounded Int, nested struct) is flattened} -constraints nativeLinux -body {
     set unbounded "context struct Big:\n    n: int\nfn get(context b: Big):\n    b.n\nwith context Big {n: 99999999999999999999}\nget()\n"
@@ -761,10 +780,10 @@ test contexts-native-gc-stress {context programs under a collection at every all
     }
 } -result {2 {[Inner {a: 1, b: true}, Inner {a: 1, b: true}, [2]]}}
 
-test contexts-native-executable-hello {examples/linux/context-hello.bot as a standalone executable: descriptor 1 receives exactly "Hello, world!\n", followed by the runner's own result line (14, the bytes written); nothing on descriptor 2} -constraints {nativeLinux posixShell} -body {
+test contexts-native-executable-hello {examples/linux/context-hello.bot as a standalone executable: descriptor 1 receives exactly "Hello, world!\n", the program's own output and nothing of the executable's; nothing on descriptor 2; the program's value (through the driver protocol) is 14, the bytes written} -constraints {nativeLinux posixShell} -body {
     set exe [buildExecutable hello $::helloText]
     runExecutable $exe
-} -result [list "Hello, world!\n14\n" ""]
+} -result [list "Hello, world!\n" "" 14]
 
 test contexts-native-executable-descriptors {stdout, stderr and stdin come from the one installed LinuxIO: write goes to descriptor 1 only, write_error to descriptor 2 only, read reads descriptor 0 (one read(2), the caller's buffer unchanged, the result's detached buffer updated)} -constraints {nativeLinux posixShell} -body {
     set exe [buildExecutable descriptors "${::linuxPrelude}with context std::linux::io::create()
@@ -784,32 +803,35 @@ zero = std::abi::bytes::freeze_prefix(std::abi::bytes::zeroed(std::abi::usize(8)
 \[n1, n2, result.result, original == zero, got == mk(\"stdin-ok\")\]
 "]
     list [runExecutable $exe "stdin-ok and more"] [runExecutable $exe "stdin-ok" 1]
-} -result [list [list "normal\n\[7, 6, 8, true, true\]\n" "error\n"] [list "normal\n\[7, 6, 8, true, true\]\n" "error\n"]]
+} -result [list [list "normal\n" "error\n" {[7, 6, 8, true, true]}] [list "normal\n" "error\n" {[7, 6, 8, true, true]}]]
 
 proc machineCode {exe function} {
     exec objdump -d --no-show-raw-insn --disassemble=$function $exe
 }
 
-test contexts-native-machine-code {the machine code of std::linux::io::write in the standalone executable: stdout's descriptor is ONE load from the linker-local context area, addressed RIP-relatively (lea of botlish_context_area, then +8), with no GOT load, no helper call and no other call than std::linux::write; the area is a local 24-byte object in .bss} -constraints {linuxX86_64 objdump posixShell symbolLinker} -body {
+test contexts-native-machine-code {the machine code of std::linux::io::write in the standalone executable: stdout's descriptor is two loads -- the running Vm's context-area base from the Vm argument (%rdi) at the Vm field's offset, once in the function's entry, then the word at +8 from it -- with no RIP-relative or GOT access, no helper call and no other call than std::linux::write; the executable holds no context data symbol (PER-THREAD-RUNTIME-STATE-MILESTONE-1.md)} -constraints {linuxX86_64 objdump posixShell symbolLinker} -body {
     set exe [buildExecutable hello $::helloText]
     set id [nirFunctionId [native::nir [ctxHir $::helloText]] std::linux::io::write]
     set code [machineCode $exe botlish_fn_$id]
     set write [nirFunctionId [native::nir [ctxHir $::helloText]] std::linux::write]
+    set offset [lindex [contextClif] 1]
     set symbols [exec objdump -t $exe]
-    list [regexp {lea\s+0x[0-9a-f]+\(%rip\),%(\w+)\s+# [0-9a-f]+ <botlish_context_area>} $code] \
-        [regexp {mov\s+0x8\(%r\w+\),%rsi} $code] \
+    set base [regexp {mov\s+0x([0-9a-f]+)\(%rdi\),%(\w+)\n} $code -> hex loaded]
+    set used [expr {$base && [regexp "mov\\s+0x8\\(%$loaded\\),%rsi" $code]}]
+    list [expr {$base && $used}] [expr {$base && [scan $hex %x] == $offset}] \
         [regexp -all {\(%rip\)} $code] [regexp -all {GLOBAL_OFFSET|_DYNAMIC} $code] \
         [expr {[lmap line [regexp -all -inline {call\s+[0-9a-f]+ <[^>]+>} $code] {regsub {call\s+[0-9a-f]+ } $line {}}] eq [list <botlish_fn_$write>]}] \
-        [regexp {[0-9a-f]+ l\s+O \.bss\s+0+18\s+botlish_context_area} $symbols]
-} -result {1 1 1 0 1 1}
+        [regexp -all {context_area} $symbols]
+} -result {1 1 0 0 1 0}
 
-test contexts-native-object-relocation {the AOT object's reference to the context area is the relaxable R_X86_64_REX_GOTPCRELX against the local symbol, so the linker turns Cranelift's PIC GOT load into the direct lea seen above} -constraints {linuxX86_64 objdump} -body {
+test contexts-native-object-relocation {the AOT object has no context data symbol and no relocation against one: nothing a link makes can share a context area between two Vms of the program; its program record and descriptor are its data (PER-THREAD-RUNTIME-STATE-MILESTONE-1.md)} -constraints {linuxX86_64 objdump} -body {
     set obj [file join $::outputDir hello.o]
     native::object [ctxHir $::helloText] $obj
     set relocs [exec objdump -r $obj]
-    list [llength [regexp -all -inline {R_X86_64_REX_GOTPCRELX\s+botlish_context_area} $relocs]] \
-        [llength [regexp -all -inline {R_X86_64_GOTPCREL\s+botlish_context_area} $relocs]]
-} -result {2 0}
+    set symbols [exec objdump -t $obj]
+    list [regexp -all {context_area} $relocs] [regexp -all {context_area} $symbols] \
+        [regexp {botlish_program} $symbols] [regexp {botlish_descriptor} $symbols]
+} -result {0 0 1 1}
 
 test contexts-native-strace {the kernel receives write(1, "Hello, world!\n", 14) from the raw syscall boundary, called by the runtime helper, called by std::linux::write, called by std::linux::io::write, called by hello -- no libc write frame in that call's stack} -constraints {linuxX86_64 strace posixShell symbolLinker} -body {
     set exe [buildExecutable hello $::helloText]

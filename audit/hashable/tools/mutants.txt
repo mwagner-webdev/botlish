@@ -53,13 +53,26 @@
 @@ struct-ignores-non-hashable-field a struct ignores a field that is not Hashable
 ## hir/types.tcl
 <<<<
+        lassign [Totality $operation $t $seen] class why
         if {$class eq "none"} {
             return [list none "$what ([show $t]): $why"]
         }
 ====
+        lassign [Totality $operation $t $seen] class why
         if {$class eq "none" && ![string match field* $what]} {
             return [list none "$what ([show $t]): $why"]
         }
+>>>>
+## hir/types.tcl
+<<<<
+        set level [lsearch -exact {total unknown none} [TotalityClassOf $operation $t]]
+        if {$level > $worst} {
+====
+        set level [lsearch -exact {total unknown none} [TotalityClassOf $operation $t]]
+        if {$level == 2 && [string match field* [lindex $part 0]]} {
+            set level 0
+        }
+        if {$level > $worst} {
 >>>>
 
 @@ witness-ignores-equality-totality the Hashable witness predicate ignores equality totality (only the hash column)
@@ -80,16 +93,24 @@
     set hwhy ""
 >>>>
 
+# (A struct's class is its declaration summary's least fixpoint
+# (PARAMETERIZED-DECLARATION-SUMMARIES-MILESTONE-1.md): a declaration met
+# again through its own fields while its fixpoint runs reads its current
+# answer, which starts at total. Totality's `$type in $seen` check, which
+# this mutant edited before, now guards only the reason walk, where taking a
+# struct met again for unknown changes no class.)
 @@ recursive-struct-not-hashable a struct met again through its own fields is taken as not known, so a recursive Hashable struct is lost
-## hir/types.tcl
+## hir/summaries.tcl
 <<<<
-                if {$type in $seen} {
-                    return {total ""}
-                }
+    set row [lrepeat [llength [dict get $spec probes]] 0]
+    return [dict create own 0 values [lrepeat $n $row]]
 ====
-                if {$type in $seen} {
-                    return [list unknown "recursive"]
-                }
+    if {[string match totality.* $name]} {
+        set row [lrepeat [llength [dict get $spec probes]] 1]
+        return [dict create own 1 values [lrepeat $n $row]]
+    }
+    set row [lrepeat [llength [dict get $spec probes]] 0]
+    return [dict create own 0 values [lrepeat $n $row]]
 >>>>
 
 @@ public-hash-output-changes-tcl the public hash changes its output: texts are length-prefixed in the public walk too (Tcl runtimes)

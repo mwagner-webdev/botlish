@@ -4,7 +4,7 @@
 # tests/place-parameters.test and tests/vector-bounds.test.
 #
 # * A parameter declared `place b: T` is its caller's place itself: the
-#   caller passes a place of its own (a local, a parameter, a context
+#   caller passes a place of its own (a local, a place parameter, a context
 #   parameter's member, a field path from one), uncopied, and every update
 #   the function makes through it is the caller's place's -- through method
 #   syntax, recursion, a field path, a parameter passed on as a place.
@@ -206,13 +206,14 @@ fn register_place_tests():
             [h.bag.items.length(), h.other.length(), h.bag.label]
     std::test::value("pp-field-path", [2, 1, "b"], b_pp_field_path)
 
-    # a function's ordinary parameter is a place of its own (its logical copy): giving it to a place parameter updates the callee's copy, never its caller's
+    # a function's ordinary parameter is its own logical copy, never a place it may update (NONPLACE-PARAMETER-MUTATION): a local copy of it, given to a place parameter, updates that copy, never its caller's
     fn b_pp_parameter_as_place() errors std::compiler::CompilerError:
         static compile:
             fn grown(b: Bag) -> int:
-                add(b, 1)
-                add(b, 2)
-                b.items.length()
+                w = b
+                add(w, 1)
+                add(w, 2)
+                w.items.length()
             b = empty_bag()
             add(b, 0)
             n = grown(b)
@@ -320,12 +321,13 @@ fn register_place_diagnostic_tests():
             1
     std::test::rejects("pp-diag-temporary", std::compiler::DiagnosticCode::MutablePlaceReceiver, b_pp_diag_temporary)
 
-    # an untyped parameter passed to a place parameter is a place of its own function (its logical copy), held to the place parameter's type like any argument
+    # an untyped parameter's local copy, passed to a place parameter, is a place of its own function (a logical copy), held to the place parameter's type like any argument
     fn b_pp_diag_untyped_argument() errors std::compiler::CompilerError:
         static compile:
             fn f(x) -> int:
-                add(x, 1)
-                x.items.length()
+                y = x
+                add(y, 1)
+                y.items.length()
             b = empty_bag()
             [f(b), b.items.length()]
     std::test::value("pp-diag-untyped-argument", [1, 0], b_pp_diag_untyped_argument)
@@ -412,9 +414,10 @@ fn register_place_diagnostic_tests():
             fn clear_all(place b: Bag) -> unit:
                 b.items.clear()
             fn f(b: Bag, i: int) -> int:
-                if i >= 0 and i < b.items.length():
-                    clear_all(b)
-                    return b.items.at(i)
+                w = b
+                if i >= 0 and i < w.items.length():
+                    clear_all(w)
+                    return w.items.at(i)
                 0
             1
     std::test::rejects("pp-lengths-across-place-calls/inside", std::compiler::DiagnosticCode::UnhandledError, b_pp_lengths_across_place_calls_inside)
@@ -425,9 +428,10 @@ fn register_place_diagnostic_tests():
             fn clear_all(place b: Bag) -> unit:
                 b.items.clear()
             fn f(h: Holder, i: int) -> int:
-                if i >= 0 and i < h.other.length():
-                    clear_all(h.bag)
-                    return h.other.at(i)
+                w = h
+                if i >= 0 and i < w.other.length():
+                    clear_all(w.bag)
+                    return w.other.at(i)
                 0
             f(Holder {bag: empty_bag(), other: std::mutable_vector::from_list([])}, 0)
     std::test::value("pp-lengths-across-place-calls/outside", 0, b_pp_lengths_across_place_calls_outside)
@@ -481,11 +485,12 @@ fn register_vector_bound_tests():
     fn b_vb_keeps_length() errors std::compiler::CompilerError:
         static compile:
             fn f(v: MutableVector[int], i: int) -> int:
-                if i >= 0 and i < v.length():
-                    old = v.swap(0, 99):
+                w = v
+                if i >= 0 and i < w.length():
+                    old = w.swap(0, 99):
                         on IndexNotFound:
                             0
-                    return v.at(i)
+                    return w.at(i)
                 -1
             f(three(), 0)
     std::test::value("vb-keeps-length", 99, b_vb_keeps_length)
@@ -510,9 +515,10 @@ fn register_vector_unproven_tests():
     fn b_vb_unproven_resize_between_push() errors std::compiler::CompilerError:
         static compile:
             fn f(v: MutableVector[int], i: int) -> int:
-                if i >= 0 and i < v.length():
-                    v.push(1)
-                    return v.at(i)
+                w = v
+                if i >= 0 and i < w.length():
+                    w.push(1)
+                    return w.at(i)
                 -1
             1
     std::test::rejects("vb-unproven-resize-between/push", std::compiler::DiagnosticCode::UnhandledError, b_vb_unproven_resize_between_push)
@@ -521,11 +527,12 @@ fn register_vector_unproven_tests():
     fn b_vb_unproven_resize_between_pop() errors std::compiler::CompilerError:
         static compile:
             fn f(v: MutableVector[int], i: int) -> int:
-                if i >= 0 and i < v.length():
-                    x = v.pop():
+                w = v
+                if i >= 0 and i < w.length():
+                    x = w.pop():
                         on IndexNotFound:
                             0
-                    return v.at(i)
+                    return w.at(i)
                 -1
             1
     std::test::rejects("vb-unproven-resize-between/pop", std::compiler::DiagnosticCode::UnhandledError, b_vb_unproven_resize_between_pop)
@@ -534,9 +541,10 @@ fn register_vector_unproven_tests():
     fn b_vb_unproven_resize_between_clear() errors std::compiler::CompilerError:
         static compile:
             fn f(v: MutableVector[int], i: int) -> int:
-                if i >= 0 and i < v.length():
-                    v.clear()
-                    return v.at(i)
+                w = v
+                if i >= 0 and i < w.length():
+                    w.clear()
+                    return w.at(i)
                 -1
             1
     std::test::rejects("vb-unproven-resize-between/clear", std::compiler::DiagnosticCode::UnhandledError, b_vb_unproven_resize_between_clear)
@@ -545,9 +553,10 @@ fn register_vector_unproven_tests():
     fn b_vb_unproven_resize_after() errors std::compiler::CompilerError:
         static compile:
             fn f(v: MutableVector[int], i: int) -> int:
-                if i >= 0 and i < v.length():
-                    x = v.at(i)
-                    v.push(x)
+                w = v
+                if i >= 0 and i < w.length():
+                    x = w.at(i)
+                    w.push(x)
                     return x
                 -1
             1
@@ -559,9 +568,10 @@ fn register_vector_unproven_tests():
             fn grow(place b: VBag) -> unit:
                 b.items.push(1)
             fn f(b: VBag, i: int) -> int:
-                if i >= 0 and i < b.items.length():
-                    grow(b)
-                    return b.items.at(i)
+                w = b
+                if i >= 0 and i < w.items.length():
+                    grow(w)
+                    return w.items.at(i)
                 -1
             1
     std::test::rejects("vb-unproven-place-call/struct", std::compiler::DiagnosticCode::UnhandledError, b_vb_unproven_place_call_struct)
@@ -572,9 +582,10 @@ fn register_vector_unproven_tests():
             fn shrink(place v: MutableVector[int]) -> unit:
                 v.clear()
             fn f(b: VBag, i: int) -> int:
-                if i >= 0 and i < b.items.length():
-                    shrink(b.items)
-                    return b.items.at(i)
+                w = b
+                if i >= 0 and i < w.items.length():
+                    shrink(w.items)
+                    return w.items.at(i)
                 -1
             1
     std::test::rejects("vb-unproven-place-call/vector", std::compiler::DiagnosticCode::UnhandledError, b_vb_unproven_place_call_vector)
@@ -603,9 +614,10 @@ fn register_vector_unproven_tests():
     fn b_vb_unproven_other_copy() errors std::compiler::CompilerError:
         static compile:
             fn f(a: MutableVector[int], i: int) -> int:
-                c = a
-                a.push(1)
-                b = a
+                w = a
+                c = w
+                w.push(1)
+                b = w
                 if i >= 0 and i < b.length():
                     return c.at(i)
                 -1

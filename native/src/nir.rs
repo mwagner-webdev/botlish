@@ -463,6 +463,15 @@ pub enum OpCode {
     CoYield,
     CoDone,
     CoRelease,
+    /// `coabandon %h` (LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md):
+    /// %h's handle is dead, in an unwinding program (hir/affine.tcl's
+    /// Unwinds): a suspended coroutine is resumed with its pending yield
+    /// failing with the internal abandonment (runtime/error.rs's
+    /// ERR_COROUTINE_ABANDONED), so its frames' release pads run -- their
+    /// resources' cleanups, their coroutines' abandonments -- and nothing
+    /// else, then it is released; any other state is `corelease`. Runs
+    /// Botlish code: a safepoint, fallible on a run-time fault of that code.
+    CoAbandon,
     /// `%f = op cofailed` (COROUTINE-FUSION-MILESTONE-1.md): a terminal,
     /// failed coroutine object holding the pending error (taken from the
     /// Vm exactly as a coroutine body's unhandled failure is: the error, its
@@ -578,6 +587,30 @@ pub enum OpCode {
     /// static drop descriptor %d (a String, runtime/affine.rs). Result unit;
     /// never fails or allocates (no safepoint), like `corelease`.
     AffineDrop,
+    /// `affinedroprun %v %d`: `affinedrop` of a descriptor that runs code --
+    /// a resource's cleanup (`r` K), an unwinding coroutine's abandonment
+    /// (`C`): runtime/affine.rs. A safepoint, fallible on a run-time fault of
+    /// that code (LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md).
+    AffineDropRun,
+    /// `mvcleardroprun`, `mvswapdroprun`, `mutarrayswapdroprun`,
+    /// `mutarraysetdroprun`: the drop forms of a collection whose element
+    /// descriptor runs code (a resource's cleanup, an unwinding coroutine):
+    /// the same operations, safepoints and fallible on a run-time fault of
+    /// that code (LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md).
+    MvClearDropRun,
+    MvSwapDropRun,
+    MutArraySwapDropRun,
+    MutArraySetDropRun,
+    /// `cleanupcall %f %v`: the release of resource %v by its cleanup
+    /// function %f (a function value): the call, with the pending error --
+    /// a release on an error edge runs while one propagates -- preserved
+    /// across it. A safepoint, fallible on a run-time fault of the cleanup
+    /// (a cleanup declares no error).
+    CleanupCall,
+    /// `cleanuptable %f...`: the run's cleanup table, entry K the K-th
+    /// function value (hir/resources.tcl), which a drop descriptor's `r` K
+    /// calls; once, at the program's start.
+    CleanupTable,
     /// MutableVector (MUTABLE-VECTOR.md, runtime/mutvec.rs). A vector is a
     /// header over a copy-on-write backing; every mutation changes the
     /// header in place (its register never changes).
@@ -640,6 +673,28 @@ pub enum OpCode {
     MutArrayToList,
     MutArrayEmpty,
     MutArrayTakeFront,
+    /// Transfer (SENDABILITY-AND-VALUE-COPY-MILESTONE-1.md,
+    /// runtime/transfer.rs): the codec of `std::transfer`.
+    ///   `transferencode %v %plan %fns`   the std::abi::bytes::Bytes of %v's
+    ///                              encoding; runs the `through` owner
+    ///                              functions of %fns (allocates; a failing
+    ///                              call is the result's failure)
+    ///   `transferdecode %d %plan %fns`   the value the bytes of %d hold:
+    ///                              a fresh value of this program, or one of
+    ///                              the declared Transfer* errors; runs the
+    ///                              owners' rebuilds (allocates)
+    /// %plan is the String constant native/lower.tcl's TransferPlan made of
+    /// the transferred type's schema.
+    TransferEncode,
+    TransferDecode,
+    /// Botlish-owned threads and the cross-thread transport
+    /// (BOTLISH-OWNED-THREADS-AND-CROSS-THREAD-ACTORS-MILESTONE-1.md,
+    /// runtime/thread.rs): `threadop %code %a0 .. %a5`, the operation
+    /// whose code %code (a tagged Int constant: core/thread.tcl's table)
+    /// names, on up to six operands (unit-padded): an Int, a String or a
+    /// byte storage. Every one may allocate its result and is fallible only
+    /// on an operand a checked program never produces (TYPE).
+    ThreadOp,
     /// `ctxroot %h`: %h (a MutableVector or MutableArray header just
     /// installed in the context area, MUTABLE-VECTOR.md) is a GC root for the rest of the
     /// run. Never fails or allocates; result unit.
@@ -912,9 +967,14 @@ op_spellings! {
     "mutarrayswap" => MutArraySwap,
     "mutarrayswapdrop" => MutArraySwapDrop,
     "mutarraysetdrop" => MutArraySetDrop,
+    "mutarrayswapdroprun" => MutArraySwapDropRun,
+    "mutarraysetdroprun" => MutArraySetDropRun,
     "mutarraytolist" => MutArrayToList,
     "mutarrayempty" => MutArrayEmpty,
     "mutarraytakefront" => MutArrayTakeFront,
+    "transferencode" => TransferEncode,
+    "transferdecode" => TransferDecode,
+    "threadop" => ThreadOp,
     "listgetproven" => ListGetProven,
     "mutarraygetproven" => MutArrayGetProven,
     "mutarraysetproven" => MutArraySetProven,
@@ -1028,8 +1088,12 @@ op_spellings! {
     "ffifixturecopy" => FfiFixtureCopy,
     "ffifixturemixed" => FfiFixtureMixed,
     "corelease" => CoRelease,
+    "coabandon" => CoAbandon,
     "cofailed" => CoFailed,
     "affinedrop" => AffineDrop,
+    "affinedroprun" => AffineDropRun,
+    "cleanupcall" => CleanupCall,
+    "cleanuptable" => CleanupTable,
     "mvfromlist" => MvFromList,
     "mvlen" => MvLen,
     "mvempty" => MvEmpty,
@@ -1044,6 +1108,8 @@ op_spellings! {
     "mvtakefront" => MvTakeFront,
     "mvcleardrop" => MvClearDrop,
     "mvswapdrop" => MvSwapDrop,
+    "mvcleardroprun" => MvClearDropRun,
+    "mvswapdroprun" => MvSwapDropRun,
     "ctxroot" => CtxRoot,
     "mbytesnew" => MBytesNew,
     "mbytesfrom" => MBytesFrom,
@@ -1149,7 +1215,7 @@ impl OpCode {
     pub fn arity(self) -> Option<usize> {
         use OpCode::*;
         match self {
-            ListNew => None,
+            ListNew | CleanupTable => None,
             Argv | CPtrNull | CoFailed => Some(0),
             SyscallLinuxX86_64 | SyscallLinuxAarch64 => Some(7),
             StrLen | StrLower | ListLen | ListFlat | TreeChildren | MutArrayAllocate | MutArrayCapacity | IsInt | IsStr | IsList | IsMutArray
@@ -1160,15 +1226,18 @@ impl OpCode {
             | SetFromListTotal | StrToShort | ShortToStr | ShortLen | StrToAscii | AsciiToStr | AsciiLen
             | AsciiToShort | BytesFromList | BytesJoin | BytesDecodeUtf8 | StrEncodeUtf16Le | BytesDecodeUtf16Le | BytesUtf16LeUnits | BytesLen | BytesAddr | KeepAlive | BytesZeroed | MBytesNew | MBytesFrom | MBytesLen
             | MBytesClone | MBytesFreeze | MBytesAddr | CoCreate | CoStart | CoResume0 | CoYield | CoDone
-            | CoRelease | CPtrIsNull | CPtrSame | CPtrFixture | CPtrFixtureAddress | CPtrFixtureMemory | MvFromList | MvLen | MvEmpty | MvPop | MvClear | MvToList | MvTakeFront | CtxRoot
+            | CoRelease | CoAbandon | CPtrIsNull | CPtrSame | CPtrFixture | CPtrFixtureAddress | CPtrFixtureMemory | MvFromList | MvLen | MvEmpty | MvPop | MvClear | MvToList | MvTakeFront | CtxRoot
             | MutArrayFromList | MutArrayToList | MutArrayEmpty | MutArrayTakeFront => Some(1),
             D64Lt | D64Le | D64Gt | D64Ge | D64Eq => Some(3),
             Substr | SubstrProven | BytesSlice | BytesUtf16LeNul | MutArraySet | MutArraySetProven | MBytesSet | BinLoad | NativeLoad | NativeLoadPtr | RegionCheck | StrRegionIsTclAlpha | StrRegionIsTclAlnum | StrSliceShort
-            | MvSwap | MutArraySwap | MutArrayGenerateDrop | FfiFixtureFill | FfiFixtureFillChecked | FfiFixtureCopy => Some(3),
-            RegionEq | MvSwapDrop | MutArraySwapDrop | MutArraySetDrop | BinStore | FfiFixtureMixed
+            | MvSwap | MutArraySwap | MutArrayGenerateDrop | FfiFixtureFill | FfiFixtureFillChecked | FfiFixtureCopy
+            | TransferEncode | TransferDecode => Some(3),
+            RegionEq | MvSwapDrop | MutArraySwapDrop | MutArraySetDrop | MvSwapDropRun | MutArraySwapDropRun | MutArraySetDropRun
+            | BinStore | FfiFixtureMixed
             | NativeStore | NativeStorePtr | MBytesWrite | MBytesWritePtr
             | BinLoadArray | NativeLoadArray | BinStoreArray | NativeStoreArray | BinStorePtr => Some(4),
             MutArrayCopy | MutArrayCopyProven => Some(5),
+            ThreadOp => Some(7),
             _ => Some(2),
         }
     }

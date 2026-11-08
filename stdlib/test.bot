@@ -31,8 +31,8 @@
 # cases. The context value itself is an ordinary immutable struct, installed
 # once like any context (entry program top level only, at most one per
 # program, CONTEXTS.md); registration mutates the vector it holds
-# (`suite.cases.push(...)`), never the binding -- the place model of
-# MUTABLE-VECTOR.md. Calling a registration function where no suite is
+# (`suite.cases.push(...)`) in its place, never the binding
+# (MUTABLE-VECTOR.md). Calling a registration function where no suite is
 # installed is the ordinary MISSING-CONTEXT.
 #
 # Registration. `std::test::case(name, check)` records a TestCase {name, run}
@@ -327,6 +327,8 @@ fn code_name(code: std::compiler::DiagnosticCode) -> str:
         std::compiler::DiagnosticCode::ContextBindingCollision,
         std::compiler::DiagnosticCode::ContextFunctionValue,
         std::compiler::DiagnosticCode::ContextInstallationUnsupported,
+        std::compiler::DiagnosticCode::ContextNotInjected,
+        std::compiler::DiagnosticCode::ContextRetainedAuthority,
         std::compiler::DiagnosticCode::ContextTraitMisuse,
         std::compiler::DiagnosticCode::ContextTraitPosition,
         std::compiler::DiagnosticCode::ContinueOutsideLoop,
@@ -347,6 +349,7 @@ fn code_name(code: std::compiler::DiagnosticCode) -> str:
         std::compiler::DiagnosticCode::DuplicateField,
         std::compiler::DiagnosticCode::DuplicateFlag,
         std::compiler::DiagnosticCode::DuplicateFlagDeclaration,
+        std::compiler::DiagnosticCode::DuplicateInjectedContext,
         std::compiler::DiagnosticCode::DuplicateLoopVariable,
         std::compiler::DiagnosticCode::EmitAfterToken,
         std::compiler::DiagnosticCode::EmitBeyondToken,
@@ -358,7 +361,6 @@ fn code_name(code: std::compiler::DiagnosticCode) -> str:
         std::compiler::DiagnosticCode::EmitNotSymbol,
         std::compiler::DiagnosticCode::EmitRecognizer,
         std::compiler::DiagnosticCode::EmitRejected,
-        std::compiler::DiagnosticCode::EmitTerminalValue,
         std::compiler::DiagnosticCode::EmitUnknownValue,
         std::compiler::DiagnosticCode::EmitUnsupported,
         std::compiler::DiagnosticCode::ExportEnvironment,
@@ -395,9 +397,11 @@ fn code_name(code: std::compiler::DiagnosticCode) -> str:
         std::compiler::DiagnosticCode::MutablePlaceReceiver,
         std::compiler::DiagnosticCode::NoApplicableMethod,
         std::compiler::DiagnosticCode::NomethodCall,
+        std::compiler::DiagnosticCode::NonplaceParameterMutation,
         std::compiler::DiagnosticCode::NotAContext,
         std::compiler::DiagnosticCode::NotAStruct,
         std::compiler::DiagnosticCode::NotAnEnum,
+        std::compiler::DiagnosticCode::NotSendable,
         std::compiler::DiagnosticCode::OpaqueConstruction,
         std::compiler::DiagnosticCode::OpaqueRepresentation,
         std::compiler::DiagnosticCode::PrivateAccess,
@@ -405,7 +409,11 @@ fn code_name(code: std::compiler::DiagnosticCode) -> str:
         std::compiler::DiagnosticCode::RefinementMintAuthority,
         std::compiler::DiagnosticCode::RefinementParameter,
         std::compiler::DiagnosticCode::ReorderNotProven,
+        std::compiler::DiagnosticCode::ResourceDeclaration,
         std::compiler::DiagnosticCode::ReturnOutsideCallable,
+        std::compiler::DiagnosticCode::SendableDeclaration,
+        std::compiler::DiagnosticCode::ThreadEntryPlacement,
+        std::compiler::DiagnosticCode::ThreadEntryReference,
         std::compiler::DiagnosticCode::TraitImplOrder,
         std::compiler::DiagnosticCode::TraitInstanceBudget,
         std::compiler::DiagnosticCode::TraitNestedPolymorphic,
@@ -416,6 +424,7 @@ fn code_name(code: std::compiler::DiagnosticCode) -> str:
         std::compiler::DiagnosticCode::TraitUnknownOperation,
         std::compiler::DiagnosticCode::TraitViewMisuse,
         std::compiler::DiagnosticCode::TraitWitnessJoin,
+        std::compiler::DiagnosticCode::TransferOpenType,
         std::compiler::DiagnosticCode::Type,
         std::compiler::DiagnosticCode::Unbound,
         std::compiler::DiagnosticCode::UndeclaredError,
@@ -462,6 +471,8 @@ fn code_name(code: std::compiler::DiagnosticCode) -> str:
         "ContextBindingCollision",
         "ContextFunctionValue",
         "ContextInstallationUnsupported",
+        "ContextNotInjected",
+        "ContextRetainedAuthority",
         "ContextTraitMisuse",
         "ContextTraitPosition",
         "ContinueOutsideLoop",
@@ -482,6 +493,7 @@ fn code_name(code: std::compiler::DiagnosticCode) -> str:
         "DuplicateField",
         "DuplicateFlag",
         "DuplicateFlagDeclaration",
+        "DuplicateInjectedContext",
         "DuplicateLoopVariable",
         "EmitAfterToken",
         "EmitBeyondToken",
@@ -493,7 +505,6 @@ fn code_name(code: std::compiler::DiagnosticCode) -> str:
         "EmitNotSymbol",
         "EmitRecognizer",
         "EmitRejected",
-        "EmitTerminalValue",
         "EmitUnknownValue",
         "EmitUnsupported",
         "ExportEnvironment",
@@ -530,9 +541,11 @@ fn code_name(code: std::compiler::DiagnosticCode) -> str:
         "MutablePlaceReceiver",
         "NoApplicableMethod",
         "NomethodCall",
+        "NonplaceParameterMutation",
         "NotAContext",
         "NotAStruct",
         "NotAnEnum",
+        "NotSendable",
         "OpaqueConstruction",
         "OpaqueRepresentation",
         "PrivateAccess",
@@ -540,7 +553,11 @@ fn code_name(code: std::compiler::DiagnosticCode) -> str:
         "RefinementMintAuthority",
         "RefinementParameter",
         "ReorderNotProven",
+        "ResourceDeclaration",
         "ReturnOutsideCallable",
+        "SendableDeclaration",
+        "ThreadEntryPlacement",
+        "ThreadEntryReference",
         "TraitImplOrder",
         "TraitInstanceBudget",
         "TraitNestedPolymorphic",
@@ -551,6 +568,7 @@ fn code_name(code: std::compiler::DiagnosticCode) -> str:
         "TraitUnknownOperation",
         "TraitViewMisuse",
         "TraitWitnessJoin",
+        "TransferOpenType",
         "Type",
         "Unbound",
         "UndeclaredError",
@@ -678,7 +696,7 @@ nomethod fn rejects_any(name: str, body) -> unit:
 # message WANTED: for a test whose property is the diagnostic's wording (a
 # call chain, a name the message alone carries). Messages are otherwise
 # reported, never compared. (Promoted from the suite-local matchers four
-# suites wrote independently: LARGE-SCALE-GOLDEN-MIGRATION.md.)
+# suites wrote independently; LARGE-SCALE-GOLDEN-MIGRATION.md.)
 nomethod fn rejects_message(name: str, expected: std::compiler::DiagnosticCode, wanted: str, body) -> unit:
     fn check() -> Match:
         shown = "compiler diagnostic ".concat(expected.code_name()).concat(" with the message ").concat(wanted.quoted())

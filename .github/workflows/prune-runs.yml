@@ -1,0 +1,55 @@
+name: prune runs
+
+# Cancels the unfinished runs of branches that are fully in main
+# (CI-RUNS.md, "Pruning"): a branch whose tip is main's or one of its
+# ancestors -- merged, or never moved past main -- tests nothing main's own
+# runs do not, so its queued and running runs only hold runners
+# (tools/ci/runs.py prune). A deleted branch's run is cancelled when its
+# commit is in main. Never a run of main (each workflow's concurrency group
+# cancels main's superseded runs), of a tag or of a fork's pull request.
+#
+# Every push to main runs it, documentation-only merges included; the
+# hourly schedule catches runs started on a merged branch later. A manual
+# run with dry_run only reports.
+#
+# No concurrency group: a run waiting for a runner must keep its place in
+# the queue. In a group, the next push or the next hour replaced it, and
+# while the pool was full (when pruning matters) no run ever got a runner
+# (2026-11-05: three in a row replaced while queued). Runs that overlap are
+# harmless: each reads the state as it is, and cancelling a run already
+# cancelled only reports that it could not.
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Only report what would be cancelled
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  prune:
+    name: cancel the runs of branches already in main
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          sparse-checkout: tools/ci
+
+      - name: Prune
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRY_RUN: ${{ inputs.dry_run && '--dry-run' || '' }}
+        run: python3 -I tools/ci/runs.py prune $DRY_RUN

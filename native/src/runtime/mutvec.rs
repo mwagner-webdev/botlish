@@ -44,7 +44,6 @@
 //! Drop order (clear, whole-vector drop, a consuming loop's remaining
 //! suffix): lowest index first.
 
-use super::affine::drop_descriptor;
 use super::ops::fail_index_not_found;
 use super::value::*;
 use super::vm::Vm;
@@ -128,6 +127,15 @@ fn push_counted(p: *mut Vm, items: &mut VecDeque<Value>, x: Value) {
         vm.metrics.record_mutvec_growth((after - before) * 8);
         vm.heap.note_growth((after - before) * 8);
     }
+}
+
+/// A fresh vector of ITEMS, in order (a new, unique backing): a received
+/// vector (runtime/transfer.rs). ITEMS' referents must be rooted by the
+/// caller (the header's allocation may collect).
+pub(crate) fn new_vector_of(p: *mut Vm, items: Vec<Value>) -> Value {
+    let items: VecDeque<Value> = items.into();
+    let bytes = items.capacity() * 8;
+    new_header(p, Rc::new(items), bytes)
 }
 
 /// `mutable_vector::from_list(xs)`: a fresh vector of the List's elements.
@@ -222,12 +230,10 @@ pub extern "C" fn rt_mv_clear(_p: *mut Vm, v: Value) -> Value {
 /// is dropped, so each is dropped exactly once.
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_mv_clear_drop(p: *mut Vm, v: Value, d: Value) -> Value {
-    let items = std::mem::take(owned(v, "mutable_vector#clear_drop"));
-    let text = str_of(d).as_str().as_bytes();
-    for item in items {
-        drop_descriptor(p, item, text);
-    }
-    UNIT
+    let items: Vec<Value> = std::mem::take(owned(v, "mutable_vector#clear_drop")).into_iter().collect();
+    let text = str_of(d).as_str().as_bytes().to_vec();
+    let mut pos = 0;
+    if super::affine::drop_taken(p, &items, &text, 0, &mut pos) { UNIT } else { NO_VALUE }
 }
 
 /// `mutable_vector#swap_drop(v, i, x, d)`: swap of affine elements. When I is no
@@ -238,7 +244,10 @@ pub extern "C" fn rt_mv_swap_drop(p: *mut Vm, v: Value, i: Value, x: Value, d: V
     match index_of(i, mutvec_of(v).backing.len()) {
         Some(i) => std::mem::replace(&mut owned(v, "mutable_vector#swap_drop")[i], x),
         None => {
-            drop_descriptor(p, x, str_of(d).as_str().as_bytes());
+            let text = str_of(d).as_str().as_bytes().to_vec();
+            if !super::affine::drop_taken(p, &[x], &text, 0, &mut 0) {
+                return NO_VALUE;
+            }
             fail_index_not_found(p)
         }
     }
@@ -366,16 +375,10 @@ fn number(d: &[u8], pos: &mut usize) -> usize {
 /// The `v` drop of affine.rs: every live element of vector V by the element
 /// descriptor at POS of D, first to last, leaving V empty. Returns with POS
 /// past the element descriptor.
-pub fn drop_elements(p: *mut Vm, v: Value, d: &[u8], pos: &mut usize) {
+pub fn drop_elements(p: *mut Vm, v: Value, d: &[u8], pos: &mut usize) -> bool {
     let start = *pos;
-    let items = std::mem::take(owned(v, "affine#drop"));
-    if items.is_empty() {
-        super::affine::skip(d, pos);
-    }
-    for item in items {
-        *pos = start;
-        super::affine::drop_at(p, item, d, pos);
-    }
+    let items: Vec<Value> = std::mem::take(owned(v, "affine#drop")).into_iter().collect();
+    super::affine::drop_taken(p, &items, d, start, pos)
 }
 
 #[cfg(test)]
@@ -385,7 +388,7 @@ mod tests {
     use crate::runtime::vm::ProgramInfo;
 
     fn new_vm() -> Box<Vm> {
-        Vm::new(Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new(), errors: Vec::new() }), AllocMode::Summary)
+        Vm::new(std::sync::Arc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new(), errors: Vec::new() }), AllocMode::Summary)
     }
 
     /// A rooted vector of the Ints XS.

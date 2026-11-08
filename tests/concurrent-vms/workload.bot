@@ -1,0 +1,206 @@
+# workload.bot -- the concurrent-VM workload (PER-THREAD-RUNTIME-STATE-
+# MILESTONE-1.md, "The concurrent-VM experiment"): one program the driver's
+# harness (`botlish-native vms N`) runs on N Vms at once, one per OS thread,
+# each reading its index N from argv() (argument 1).
+#
+# Every Vm installs the same contexts -- the event loop's Loop, the
+# deterministic driver (the program's one selection of the Driver context
+# trait), the actors' Actors and the application's Node -- each Vm its own
+# values: Node's id is the Vm's index, its log and tally the run's mutable
+# context-owned collections. The run then
+#
+#   * notes and counts into its Node (context-owned MutableVector and
+#     MutableArray, mutated in place);
+#   * recurses to a depth of its own (400 * (index + 1));
+#   * builds a tree struct, strings, Lists and a MutableMap, enough to
+#     collect many times;
+#   * resumes a generator coroutine that requires Node (constructed under
+#     the installed contexts, so it keeps them);
+#   * runs a ping-pong of two actors on the loop, 20 + 5 * index rounds:
+#     their coroutines are owned by the Loop's vectors (context-owned affine
+#     state), suspended between turns.
+#
+# Its result is one text that depends on the index only, so a Vm whose
+# contexts, heap or program another Vm reached would be told apart from a
+# single Vm's run of the same index (the test's oracle).
+import std::actor
+import std::coroutine
+import std::event_loop
+import std::event_loop::deterministic
+import std::int
+import std::list
+import std::mutable_array
+import std::mutable_map
+import std::mutable_vector
+import std::str
+
+type Shard = Int in 0..63
+
+# The Vm's own application state: installed once, mutated by the run.
+context struct Node:
+    id: Shard
+    log: MutableVector[str]
+    tally: MutableArray[int]
+
+struct Ball:
+    n: int
+
+tree struct Tree:
+    value: int
+    kids: List[Tree]
+
+# WORDS joined with SEPARATOR between them.
+fn joined(words: List[str], separator: UnicodeChar) -> str:
+    fold w in words with intermediate text "":
+        if std::str::length(text) == 0:
+            w
+        else:
+            text.append_char(separator).concat(w)
+
+# The smaller of N and 3.
+fn upto3(n: int) -> int:
+    if n < 3:
+        n
+    else:
+        3
+
+fn shard_of(n: int) -> Shard:
+    if n >= 0 and n <= 63:
+        n
+    else:
+        0
+
+fn index() -> int errors InvalidArgumentEncoding, IndexNotFound, InvalidIntegerText:
+    args = argv()
+    std::int::from_string(args.at(1))
+
+fn note(text: str, context node: Node):
+    node.log.push("vm".concat(std::int::to_string(node.id)).append_char(':').concat(text))
+
+fn count(slot: int, context node: Node) errors IndexNotFound:
+    node.tally.set(slot, node.tally.at(slot) + 1)
+
+# A recursion as deep as the index says, each frame holding a List.
+fn deep(n: int, acc: List[int]) -> int:
+    if n == 0:
+        std::list::length(acc)
+    else:
+        deep(n - 1, [n, std::list::length(acc)]) + 1
+
+nomethod fn node(v: int, kids: List[Tree]) -> Tree:
+    Tree {value: v, kids: kids}
+
+# A tree of 3 * N + 1 nodes, two levels below its root.
+fn tree(n: int, seed: int) -> Tree:
+    kids = loop i from 0 to n:
+        node(seed + i, [node(i, []), node(seed, [])])
+    node(seed, kids)
+
+fn total(t: Tree) -> int:
+    fold k in t.kids with intermediate s t.value:
+        s + total(k)
+
+# A generator that requires Node: each value it yields is noted first.
+fn numbers(n: int, context node: Node) -> int:
+    loop i from 0 to n:
+        note("gen ".concat(std::int::to_string(i)))
+        yield i * i
+    -1
+
+fn generated(n: int, context node: Node) -> int errors IndexNotFound:
+    coroutine {step, first} = numbers(n)
+    sum = std::mutable_array::create(1, first)
+    loop:
+        value = step()
+        if std::coroutine::done?(step):
+            break
+        sum.set(0, sum.at(0) + value)
+        count(1)
+    sum.at(0)
+
+# Strings, Lists and a MutableMap: allocation enough to collect.
+fn churn(rounds: int, context node: Node) -> int errors IndexNotFound:
+    m = std::mutable_map::create[str, int]()
+    fold r from 0 to rounds with intermediate acc 0:
+        key = "key".concat(std::int::to_string(r))
+        m.set(key, r)
+        parts = [key, std::int::to_string(node.id), std::int::to_string(r)]
+        text = parts.joined('-')
+        count(2)
+        acc + std::str::length(text) + std::list::length(parts) + m.length()
+
+fn player(inbox: std::actor::Inbox[Ball], peer: std::actor::Address[Ball], serve: bool, rounds: int) -> std::actor::Exit:
+    rx = inbox.listen():
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    if serve:
+        peer.send(Ball {n: 1})
+    got = fold i from 0 to rounds with intermediate k 0:
+        b = rx.receive():
+            on std::actor::Closed:
+                break
+        peer.send(Ball {n: b.n + 1})
+        k + 1
+    std::actor::exit(got)
+
+fn ping_pong(rounds: int, context ev: std::event_loop::Loop, d: std::event_loop::Driver, ac: std::actor::Actors) -> int errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    {to: p, inbox: p_in} = std::actor::open[Ball](2)
+    {to: q, inbox: q_in} = std::actor::open[Ball](2)
+    ping = inject no context:
+        coroutine {step, first} = player(p_in, q, true, rounds)
+        std::actor::spawned(step, first)
+    ping.start()
+    pong = inject no context:
+        coroutine {step, first} = player(q_in, p, false, rounds)
+        std::actor::spawned(step, first)
+    pong.start()
+    std::event_loop::run()
+    fold o in std::event_loop::take_outcomes() with intermediate s 0:
+        s + o.value
+
+fn main(context node: Node, ev: std::event_loop::Loop, d: std::event_loop::Driver, ac: std::actor::Actors) -> str errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    id = node.id
+    note("start")
+    count(0)
+    dp = deep(400 * (id + 1), [])
+    t = total(tree(50 + 10 * upto3(id), id))
+    g = generated(5 + id)
+    c = churn(400 + 100 * id)
+    pp = ping_pong(20 + 5 * id)
+    note("end")
+    count(0)
+    log = node.log
+    tally = [node.tally.at(0), node.tally.at(1), node.tally.at(2)]
+    firsts = [log.at(0), log.at(1), log.at(log.length() - 1)]
+    fields = [
+        "vm ".concat(std::int::to_string(id)),
+        "deep ".concat(std::int::to_string(dp)),
+        "tree ".concat(std::int::to_string(t)),
+        "gen ".concat(std::int::to_string(g)),
+        "churn ".concat(std::int::to_string(c)),
+        "pingpong ".concat(std::int::to_string(pp)),
+        "log ".concat(std::int::to_string(log.length())).append_char(' ').concat(firsts.joined(',')),
+        "tally ".concat([std::int::to_string(tally.at(0)), std::int::to_string(tally.at(1)), std::int::to_string(tally.at(2))].joined(',')),
+    ]
+    fields.joined(';')
+
+n = index():
+    on InvalidArgumentEncoding:
+        0
+    on IndexNotFound:
+        0
+    on InvalidIntegerText:
+        0
+with context std::event_loop::create(64)
+with context std::event_loop::deterministic::create()
+with context std::actor::create()
+with context Node {id: shard_of(n), log: std::mutable_vector::from_list([]), tally: std::mutable_array::create(3, 0)}
+main():
+    on IndexNotFound:
+        "IndexNotFound"
+    on std::event_loop::SchedulerFault:
+        "SchedulerFault"
+    on std::event_loop::DriverFault:
+        "DriverFault"
+    on std::event_loop::LoopReentered:
+        "LoopReentered"

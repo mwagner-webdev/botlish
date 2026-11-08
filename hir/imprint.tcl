@@ -79,9 +79,20 @@ proc hir::imprint::IsVariableName {name} {
 # The occurrences of imprint variables in TYPE: a list of {NAME ESTABLISHING
 # POSITION}, in order, POSITION `value` (values of the variable's type exist
 # there), `pointee` (a pointer's pointee: an identity only), `cvalue` (a type
-# of a C signature) or `csignature` (a whole C signature, FnPtr[F]). ESTABLISHING is 1 inside an applied type, 0 for a
-# bare occurrence or one inside a Fn type (CONTEXT: whether TYPE itself is
-# inside an applied type).
+# of a C signature), `csignature` (a whole C signature, FnPtr[F]) or
+# `argument` (a type argument of a parameterized struct whose values hold no
+# value of it: Phantom[T] of `struct Phantom[T]: value: int`). ESTABLISHING
+# is 1 inside an applied type, 0 for a bare occurrence or one inside a Fn
+# type (CONTEXT: whether TYPE itself is inside an applied type).
+#
+# An application's argument stands where its slot stands in the
+# declaration's fields (hir::structs::SlotPositions,
+# WRITTEN-AFFINE-APPLICATIONS-MILESTONE-1.md): Box[T] of `value: T` holds T
+# at a value position, Ref[T] of `p: std::ffi::c::Ptr[T]` at a pointee one,
+# Phantom[T] at none -- the positions TYPE would give T with its arguments
+# substituted into its fields, read from the declaration's summary instead
+# of unfolding them (a recursive declaration's never end). A variable
+# occurring at several positions has an occurrence for each.
 proc hir::imprint::Occurrences {type {establishing 0} {position value}} {
     if {[hir::types::IsImprint $type]} {
         return [list [list [lindex $type 1] $establishing $position]]
@@ -104,9 +115,16 @@ proc hir::imprint::Occurrences {type {establishing 0} {position value}} {
         nstruct {
             # An application of a parameterized struct (TRAIT-CONSTRAINED-
             # IMPRINTED-TYPES.md): each argument is an applied type's, so a
-            # variable there is established by the argument's own.
-            foreach t [hir::types::StructArgs $type] {
-                lappend result {*}[Occurrences $t 1 value]
+            # variable there is established by the argument's own; it stands
+            # at its slot's positions (Placed).
+            set arguments [hir::types::StructArgs $type]
+            set slots [hir::structs::SlotPositions [lindex $type 1]]
+            if {[llength $slots] != [llength $arguments]} {
+                # (No declaration says: every argument a value.)
+                set slots [lrepeat [llength $arguments] value]
+            }
+            foreach t $arguments held $slots {
+                lappend result {*}[Placed $t $held]
             }
         }
         cptr {
@@ -128,6 +146,50 @@ proc hir::imprint::Occurrences {type {establishing 0} {position value}} {
                 lappend result {*}[Occurrences $t 0 value]
             }
             lappend result {*}[Occurrences [dict get $fields return] 0 value]
+        }
+    }
+    return $result
+}
+
+# The occurrences of imprint variables in TYPE, an argument of an
+# application whose slot stands at POSITIONS in its declaration's fields
+# (hir::structs::SlotPositions): as Occurrences of TYPE inside an applied
+# type, each at the position TYPE substituted at each of POSITIONS gives it
+# -- a variable TYPE itself is at the slot's position, one inside TYPE where
+# TYPE's own structure puts it there (a List's element is a value, also
+# when the List is a pointee) -- or, for a slot no value holds (POSITIONS
+# empty), every one at `argument`: no value of TYPE exists, so none of its
+# parts does. NAME and ESTABLISHING are TYPE's as written (what a call's
+# argument can establish is its own type's form, Match), once per
+# occurrence and position.
+proc hir::imprint::Placed {type positions} {
+    set written [Occurrences $type 1 value]
+    if {$positions eq {}} {
+        return [lmap o $written {lreplace $o 2 2 argument}]
+    }
+    set result {}
+    foreach position $positions {
+        switch -- $position {
+            value {
+                set placed $written
+            }
+            csignature {
+                # (A C signature's variable F, or a Fn type there: FnPtr[TYPE].)
+                if {[hir::types::IsImprint $type] || [hir::types::IsFn $type]} {
+                    set placed [Occurrences [list cfnptr $type] 1 value]
+                } else {
+                    set placed $written
+                }
+            }
+            default {
+                set placed [Occurrences $type 1 $position]
+            }
+        }
+        foreach o $written p $placed {
+            set occurrence [lreplace $o 2 2 [lindex $p 2]]
+            if {$occurrence ni $result} {
+                lappend result $occurrence
+            }
         }
     }
     return $result

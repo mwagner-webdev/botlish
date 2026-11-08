@@ -1,0 +1,20 @@
+# c1-last-use.bot -- an affine value is released after the last statement of
+# its sequence that refers to it, not at the end of its lexical scope
+# (COROUTINES.md, "Release at the last use").
+struct Tick:
+    n: int
+
+fn counter(resume Tick) -> int:
+    loop i from 0 to 3:
+        yield i
+    3
+
+fn body() -> int:
+    coroutine {step, first} = counter()
+    a = step(Tick {n: 1})
+    # step is not referred to below: it is released right after the line above.
+    b = a + 1
+    c = b + 1
+    c
+
+body()

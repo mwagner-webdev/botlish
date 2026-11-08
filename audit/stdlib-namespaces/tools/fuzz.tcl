@@ -379,9 +379,15 @@ proc outcomesOf {source {strict 1}} {
     }]
 }
 
+# The qualified intrinsics a negative program may redefine: never one of a
+# platform's namespace (std::linux::...), which a program compiled for
+# another system's host cannot import at all (UNSUPPORTED-PLATFORM before
+# the redefinition is read). The platform is the target table's
+# (core::cabi::platformOf), never a namespace's spelling.
 set ::protected {}
 foreach name [core::native::names] {
-    if {[string first :: $name] > 0 && ![string match linux::* $name]} {
+    set i [string last :: $name]
+    if {$i > 0 && [core::cabi::platformOf [string range $name 0 [expr {$i - 1}]]] eq ""} {
         lappend ::protected $name
     }
 }

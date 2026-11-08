@@ -213,7 +213,7 @@ proc surface::recover::Suites {node} {
         return {}
     }
     switch -- [dict get $node kind] {
-        function - static - loop {
+        function - static - inject - loop {
             return [list [dict get $node body]]
         }
         if {
@@ -310,7 +310,7 @@ proc surface::recover::Rebuild {node stateVar topLevel} {
             }
             dict set node body $body
         }
-        function - static - loop {
+        function - static - inject - loop {
             dict set node body [Rebuild [dict get $node body] state 0]
         }
         if {
@@ -443,8 +443,8 @@ proc surface::recover::Hole {statement at stateVar topLevel} {
         } elseif {$word eq "with" && [lindex $texts 1] eq "context"} {
             set installs $topLevel
         }
-        # Otherwise an expression statement (`f(`, `x.`, `a +`), a `with`
-        # or `static` statement: nothing it binds is visible after it.
+        # Otherwise an expression statement (`f(`, `x.`, `a +`), a `with`,
+        # `static` or `inject` statement: nothing it binds is visible after it.
     } elseif {[lindex $kinds 0] in {INT DECIMAL STRING CHAR ( \[ - true false unit not ::}} {
         # An expression statement.
     } elseif {[lindex $kinds 0] eq "\{"} {

@@ -1,0 +1,296 @@
+# resources.test -- lexical resource cleanup
+# (LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md): `opaque resource
+# struct` and `cleanup fn`.
+#
+# A resource is released by its module's cleanup function where its owner's
+# lexical scope ends -- never at its last use -- exactly once, on every exit
+# (a normal end, return, break, continue, a propagated or handled error), in
+# reverse acquisition order; moves transfer the obligation; destructuring
+# (its module's own) discharges it; an explicit call of the cleanup is the
+# early release. A coroutine's frames keep what they own across suspension
+# and release it when the coroutine completes, fails or is abandoned.
+#
+# The programs are tests/resources/*.bot (an application root: handle.bot,
+# the test resource, descriptor.bot, a Linux file (std::linux::fs::File), and
+# rawfd.bot, a raw descriptor number, beside them). Each is compiled once under -warnings error and run on this pass's
+# backends, which must agree; the values are the releases in the order they
+# ran (handle::Log), predicted by the rules in each program's comments. The
+# interpreter's cleanup probe (core::affine::cleanupTrace) and the native
+# runtime's counters (native::allocationReport's resources) show that each
+# release ran once. Rejected programs are written into the temporary
+# directory, a module and an entry program each.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+if {![info exists ::env(CORE_BACKEND)]} {
+    set rsBackends {interp compile cranelift-generic cranelift}
+} elseif {$::env(CORE_BACKEND) eq "interp"} {
+    set rsBackends {interp cranelift}
+} elseif {$::env(CORE_BACKEND) eq "compile"} {
+    set rsBackends {compile cranelift-generic}
+} else {
+    set rsBackends [list $::env(CORE_BACKEND)]
+}
+
+set rsDir [file join $::projectRoot tests resources]
+
+# Linux on x86-64 or AArch64 with the native backend: fds.bot's syscalls.
+testConstraint nativeBuilt [expr {![catch {native::binary}]}]
+testConstraint nativeLinux [expr {$::tcl_platform(os) eq "Linux" &&
+    $::tcl_platform(machine) in {x86_64 amd64 aarch64} && [testConstraint nativeBuilt]}]
+
+proc rsHir {name} {
+    if {![info exists ::rsHirs($name)]} {
+        set ::rsHirs($name) [surface::readProgramFile [file join $::rsDir $name.bot] -warnings error]
+    }
+    return $::rsHirs($name)
+}
+
+# Program NAME's outcome on every backend of the pass: {agree OUTCOME}.
+proc rsRun {name} {
+    if {[info exists ::rsRuns($name)]} {
+        return $::rsRuns($name)
+    }
+    set hir [rsHir $name]
+    set outcomes [lsort -unique [lmap b $::rsBackends {lrange [outcomeUnderHir $b $hir] 0 1}]]
+    set agree [expr {[llength $outcomes] == 1}]
+    if {!$agree} {
+        puts stderr "$name: [string range $outcomes 0 2000]"
+    }
+    set ::rsRuns($name) [list $agree [lindex $outcomes 0]]
+    return $::rsRuns($name)
+}
+
+proc rsValue {name} {
+    lindex [rsRun $name] 1 1
+}
+
+# The cleanups the interpreter ran for program NAME: {INDEX ID} per release,
+# in order.
+proc rsProbe {name} {
+    set hir [rsHir $name]
+    set core::affine::cleanupTrace {}
+    try {
+        outcomeUnderHir interp $hir
+        set trace $core::affine::cleanupTrace
+    } finally {
+        set core::affine::cleanupTrace none
+    }
+    lmap entry $trace {
+        lassign $entry k value
+        list $k [core::value::intOf [lindex [core::value::structValues $value] 0]]
+    }
+}
+
+# --------------------------------------------------------------------------
+# One outcome on every backend
+
+foreach name {scope flow coro collections} {
+    test rs-agree-$name "tests/resources/$name.bot compiles under -warnings error and gives one outcome on every backend of the pass" -body {
+        lindex [rsRun $name] 0
+    } -result 1
+}
+
+# --------------------------------------------------------------------------
+# Scope (scope.bot)
+
+test rs-scope-releases {scope.bot's releases and notes, in order: the body's Handles after its note, the later first (9 2 1); a move's at the new owner's end (4 3); the explicit release at once (6 7); a discarded value at its statement (8 10); a moved-in Handle at the callee's end (111 11 12); one taken apart never (13 absent); a nested binding of the same name at its own scope's end, the outer at the function's (33 32 34 31); two resource types each by its own cleanup, in reverse (42 -41); a binding whose Handle either branch of an if made, at the scope's end (53 51, 53 52); a result at the caller's end, after the value (5 absent)} -body {
+    rsValue scope
+} -result {[9, 2, 1, 4, 3, 6, 7, 8, 10, 111, 11, 12, 33, 32, 34, 31, 42, -41, 53, 51, 53, 52]}
+
+test rs-scope-exactly-once {every release of scope.bot runs once: the releases the compiler placed are exactly the Handles 2 1 3 8 11 32 31 42, the Tag 41 (cleanup 1), 51, 52 and then 5 (main's result binding, at main's end), each once -- 6's explicit release is an ordinary call of the cleanup, and 13 was taken apart} -body {
+    rsProbe scope
+} -result {{0 2} {0 1} {0 3} {0 8} {0 11} {0 32} {0 31} {0 42} {1 41} {0 51} {0 52} {0 5}}
+
+test rs-scope-not-last-use {the release is at the scope's end, not at the last use: in body(), neither Handle is read after its binding, and both are released after the note 9 the body makes later} -body {
+    lrange [string trim [rsValue scope] {[]}] 0 2
+} -result {9, 2, 1,}
+
+# --------------------------------------------------------------------------
+# Exits (flow.bot)
+
+test rs-flow-exits {flow.bot: an early return releases what the scope holds there (10), a normal end in reverse (11 10); a propagated error releases on its edge (20) before the handler's scope ends (30); the success path the same (20 30); every loop iteration's at its end, continue included (40 41 42), break too (50); a nested block's at its end (61), then the outer reverse (62 60); a struct's fields last to first (71 70); a construction an argument's error interrupts releases what it had built (80); an explicit release followed by a return, an error (the handler's 86) or the normal end releases once (85 85 86 85)} -body {
+    rsValue flow
+} -result {[10, 11, 10, 20, 30, 20, 30, 40, 41, 42, 50, 61, 62, 60, 71, 70, 80, 85, 85, 86, 85]}
+
+test rs-flow-exactly-once {every release of flow.bot runs once: 17 cleanups, one per acquisition that was not interrupted before its construction} -body {
+    llength [rsProbe flow]
+} -result 17
+
+# --------------------------------------------------------------------------
+# Coroutines (coro.bot)
+
+test rs-coro-lifecycle {coro.bot: a completed coroutine releases at its end (101 102 100); an abandoned one where its handle's scope ends, after the caller's later note (111 119 110), not at the handle's last use; an abandoned parent releases the child it holds, which releases its Handle (300; no note of either runs); suspended in a nested block, the inner first (401 400); a failing one on its error's way out, before the caller's handler (500 599); one suspended inside a nested call, innermost frame first (600 601; no note runs)} -body {
+    rsValue coro
+} -result {[101, 102, 100, 111, 119, 110, 300, 401, 400, 500, 599, 600, 601]}
+
+test rs-coro-native-counters {natively, coro.bot's runtime releases run 8 cleanups (100 110 300 401 400 500 600 601) and abandon 5 coroutines (abandon's, the nested parent and its child, inner's, deep's) -- each once; the interpreter's probe sees the same 8} -constraints nativeCoroutines -body {
+    list [dict get [native::allocationReport [rsHir coro] summary] resources] [lmap entry [rsProbe coro] {lindex $entry 1}]
+} -result {{cleanups 8 abandoned 5} {100 110 300 401 400 500 600 601}}
+
+test rs-coro-unwind-mode {a program whose yielding function owns a resource releases coroutine handles at their scopes' ends, by unwinding (the HIR's resources unwind 1); a program without one keeps the last-use release of AFFINE-VALUES.md (unwind 0)} -body {
+    list [dict get [rsHir coro] resources unwind] [dict get [rsHir scope] resources unwind] \
+        [dict getdef [surface::compile "struct Go:\n    n: int\nfn g(resume Go) -> int:\n    m = yield 1\n    m.n\ncoroutine \{step, first\} = g()\nfirst\n" -warnings off] resources unwind 0]
+} -result {1 0 0}
+
+# --------------------------------------------------------------------------
+# Collections and contexts (collections.bot)
+
+test rs-collections {collections.bot: a cleared vector releases its elements first to last (90 91), a popped element is its new owner's, released before the vector at the scope's end (93 92 94); a List first to last (97 95 96); a struct last to first (83 82 81); a Handle pushed into an installed context's collection is the context's -- never released, also not at the program's end -- and one popped out is released where its new owner's scope ends (72 71); the context still holds two (69 70, never released)} -body {
+    rsValue collections
+} -result {[90, 91, 93, 92, 94, 97, 95, 96, 83, 82, 81, 72, 71, 2]}
+
+test rs-collections-gc-stress {collections.bot and coro.bot under native GC stress: the same values} -constraints nativeCoroutines -body {
+    set had [info exists ::env(BOTLISH_NATIVE_GC_STRESS)]
+    set saved [expr {$had ? $::env(BOTLISH_NATIVE_GC_STRESS) : ""}]
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    try {
+        list [lindex [outcomeUnderHir cranelift [rsHir collections]] 1] [lindex [outcomeUnderHir cranelift [rsHir coro]] 1]
+    } finally {
+        if {$had} {
+            set ::env(BOTLISH_NATIVE_GC_STRESS) $saved
+        } else {
+            unset ::env(BOTLISH_NATIVE_GC_STRESS)
+        }
+    }
+} -cleanup {unset -nocomplain had saved} -result {{[90, 91, 93, 92, 94, 97, 95, 96, 83, 82, 81, 72, 71, 2]} {[101, 102, 100, 111, 119, 110, 300, 401, 400, 500, 599, 600, 601]}}
+
+# --------------------------------------------------------------------------
+# A native handle (fds.bot: Linux file descriptors, counted in /proc/self/fd)
+
+test rs-native-descriptors {fds.bot on both native backends (the Tcl backends have no syscalls: NATIVE-ONLY): two descriptors open in their scope, none after (2 0); a thousand iterations never hold more than one (1 0); an error exit (ENOENT) closes the first (2 0); an abandoned coroutine's descriptor is closed when its handle's scope ends (1 0); the explicit release closes at once (0); a cleared vector of ten closes all ten (10, then 0); no close failed; a raw descriptor whose number was closed behind its owner's back (rawfd::invalidate) is still released once, its close reporting EBADF (1 open during, 0 after; one release, -9)} -constraints nativeLinux -body {
+    set hir [surface::readProgramFile [file join $::rsDir fds.bot] -warnings error -target [linuxTarget]]
+    lsort -unique [lmap b {cranelift-generic cranelift} {lrange [outcomeUnderHir $b $hir] 0 1}]
+} -cleanup {unset -nocomplain hir} -result {{value {[2, 0, 1, 0, 2, 0, 1, 0, 0, 1000, 0, 0, 100, 0, 1, -9]}}}
+
+# --------------------------------------------------------------------------
+# HIR evidence
+
+test rs-hir-text {HIR text states a resource struct (resource) and its cleanup function (cleanup), and reads back to the same text} -body {
+    set hir [rsHir scope]
+    set text [hir::format $hir]
+    list [regexp {struct handle::Handle [^\n]* opaque resource fields } $text] [regexp {block [^\n]* cleanup} $text] \
+        [expr {[hir::format [hir::read::Program $text]] eq $text}]
+} -cleanup {unset -nocomplain hir text} -result {1 1 1}
+
+test rs-hir-lowering {a resource's release lowers to affine#cleanup of its entry in the program's cleanup table, registered right after the cleanup's declaration: body()'s two releases follow its note, g's before h's} -body {
+    set ir [hir::lower [rsHir scope]]
+    list [regexp {\{bind handle::close \{block [^\n]*?\}\}\}\} \{call \{ref affine#register_cleanup\} \{const int 0\} \{ref handle::close\}\}} $ir] \
+        [regexp {\{call \{ref handle::note\} \{const 9\}\} \{bind affine#kept#e[0-9]+ \{const 3\}\} \{call \{ref affine#cleanup\} \{const int 0\} \{ref g\}\} \{call \{ref affine#cleanup\} \{const int 0\} \{ref h#[0-9]+\}\}} $ir]
+} -cleanup {unset -nocomplain ir} -result {1 1}
+
+test rs-interchange {HIR interchange carries resources: coro.bot's and collections.bot's HIR written and read back (hir::interchange) run to the same values on every backend of the pass, the cleanup table and the unwinding flag included} -body {
+    set out {}
+    foreach name {coro collections} {
+        set back [hir::interchange::decode [hir::interchange::encode [rsHir $name]]]
+        lappend out [expr {[dict get $back resources] eq [dict get [rsHir $name] resources]}] \
+            [lsort -unique [lmap b $::rsBackends {expr {[lrange [outcomeUnderHir $b $back] 0 1] eq [lrange [outcomeUnderHir $b [rsHir $name]] 0 1]}}]]
+    }
+    set out
+} -cleanup {unset -nocomplain out name back} -result {1 1 1 1}
+
+# --------------------------------------------------------------------------
+# What the compiler rejects
+
+# Compiles a module m (MODULE) and an entry program importing it (MAIN, after
+# "import m"): the diagnostics' kinds and the first one's message, or ok.
+proc rsReject {module main} {
+    set dir [file join [temporaryDirectory] rs-reject-[incr ::rsRejectN]]
+    file delete -force $dir
+    file mkdir $dir
+    set f [open [file join $dir m.bot] w]; puts -nonewline $f $module; close $f
+    set f [open [file join $dir main.bot] w]; puts -nonewline $f "import m\n\n$main"; close $f
+    try {
+        if {[catch {surface::readProgramFile [file join $dir main.bot] -warnings off} message options]} {
+            if {[dict exists $options -diagnostics]} {
+                set ds [dict get $options -diagnostics]
+                return [list [lsort -unique [lmap d $ds {lindex [dict get $d errorcode] end}]] [dict get [lindex $ds 0] summary]]
+            }
+            return [list [lindex [dict get $options -errorcode] end] $message]
+        }
+        return ok
+    } finally {
+        file delete -force $dir
+    }
+}
+set rsRejectN 0
+
+set rsUse "fn f() -> int:\n    x = m::open(1)\n    2\n\nf()\n"
+set rsOpen "fn open(n: int) -> H:\n    H \{id: n\}\n"
+set rsClose "cleanup fn close(h: H):\n    \{id\} = h\n    unit\n"
+set rsUseLoop "fn f() -> int:\n    x = m::open(1)\n    2\n\nwith context std::event_loop::create(8)\nwith context std::event_loop::deterministic::create()\nf()\n"
+
+foreach {name module main kind fragment} [list \
+    not-opaque "resource struct H:\n    id: int\n$rsClose$rsOpen" $rsUse RESOURCE-DECLARATION "must be opaque" \
+    context-resource "opaque context resource struct H:\n    id: int\n$rsClose$rsOpen" $rsUse RESOURCE-DECLARATION "both a context and a resource" \
+    slots "opaque resource struct H\[T\]:\n    id: T\n" "1\n" RESOURCE-DECLARATION "type slots" \
+    no-cleanup "opaque resource struct H:\n    id: int\n$rsOpen" $rsUse RESOURCE-DECLARATION "no cleanup function" \
+    two-cleanups "opaque resource struct H:\n    id: int\n${rsClose}cleanup fn close2(h: H):\n    \{id\} = h\n    unit\n$rsOpen" $rsUse RESOURCE-DECLARATION "close2" \
+    wrong-parameter "opaque resource struct H:\n    id: int\ncleanup fn close(n: int):\n    unit\n$rsOpen" $rsUse RESOURCE-DECLARATION "cleanup function" \
+    two-parameters "opaque resource struct H:\n    id: int\ncleanup fn close(h: H, n: int):\n    \{id\} = h\n    unit\n$rsOpen" $rsUse RESOURCE-DECLARATION "exactly one ordinary parameter" \
+    errors-clause "error Boom\nopaque resource struct H:\n    id: int\ncleanup fn close(h: H) errors Boom:\n    \{id\} = h\n    fail Boom\n$rsOpen" $rsUse RESOURCE-DECLARATION "errors" \
+    result "opaque resource struct H:\n    id: int\ncleanup fn close(h: H) -> int:\n    \{id\} = h\n    id\n$rsOpen" $rsUse RESOURCE-DECLARATION "unit" \
+    yields "opaque resource struct H:\n    id: int\ncleanup fn close(h: H):\n    \{id\} = h\n    yield id\n    unit\n$rsOpen" $rsUse RESOURCE-DECLARATION "yield" \
+    self-release "opaque resource struct H:\n    id: int\ncleanup fn close(h: H):\n    unit\n$rsOpen" $rsUse RESOURCE-DECLARATION "would release its own parameter" \
+    nested "opaque resource struct H:\n    id: int\nfn outer() -> int:\n    cleanup fn close(h: H):\n        \{id\} = h\n        unit\n    1\n$rsOpen" $rsUse RESOURCE-DECLARATION "top-level" \
+    module-initializer "opaque resource struct H:\n    id: int\n$rsClose${rsOpen}fn drop_one() -> int:\n    open(4)\n    4\nearly = drop_one()\n" $rsUse MODULE-CONTEXT "context-free" \
+    some-paths "opaque resource struct H:\n    id: int\n$rsClose${rsOpen}fn take(h: H) -> int:\n    close(h)\n    1\nfn cond(c: bool) -> int:\n    h = open(1)\n    if c:\n        take(h)\n    5\n" $rsUse AFFINE-PATH-RELEASE-UNSUPPORTED "some paths" \
+    use-after-release "opaque resource struct H:\n    id: int\n$rsClose$rsOpen" "fn f() -> int:\n    h = m::open(1)\n    m::close(h)\n    m::close(h)\n    2\n\nf()\n" USE-AFTER-MOVE "used after" \
+    take-apart "opaque resource struct H:\n    id: int\n$rsClose$rsOpen" "fn f() -> int:\n    \{id\} = m::open(1)\n    id\n\nf()\n" OPAQUE-REPRESENTATION "opaque" \
+    cleanup-turns-loop "import std::event_loop\nopaque resource struct H:\n    id: int\ncleanup fn close(h: H, context ev: std::event_loop::Loop):\n    \{id\} = h\n    std::event_loop::turn():\n        on std::event_loop::SchedulerFault:\n            0\n        on std::event_loop::DriverFault:\n            0\n        on std::event_loop::LoopReentered:\n            0\n    unit\n$rsOpen" "import std::event_loop\nimport std::event_loop::deterministic\n\n$rsUseLoop" RESOURCE-DECLARATION "context trait std::event_loop::Driver" \
+    cleanup-yields-to-loop "import std::event_loop\nopaque resource struct H:\n    id: int\ncleanup fn close(h: H, context ev: std::event_loop::Loop):\n    \{id\} = h\n    std::event_loop::yield_now()\n    unit\n$rsOpen" "import std::event_loop\nimport std::event_loop::deterministic\n\n$rsUseLoop" RESOURCE-DECLARATION "may yield" \
+    capture "opaque resource struct H:\n    id: int\n$rsClose$rsOpen" "fn f() -> int:\n    h = m::open(1)\n    fn g() -> int:\n        m::close(h)\n        1\n    g()\n\nf()\n" AFFINE-CAPTURE-UNSUPPORTED "captur" \
+] {
+    test rs-reject-$name "rejected: $name ($kind)" -body {
+        set got [rsReject $module $main]
+        list [lindex $got 0] [expr {[string first $fragment [lindex $got 1]] >= 0}]
+    } -cleanup {unset -nocomplain got} -result [list $kind 1]
+}
+
+test rs-reject-entry-program {a resource struct of the entry program is RESOURCE-DECLARATION: a resource's authority is its module's} -body {
+    set dir [file join [temporaryDirectory] rs-entry]
+    file mkdir $dir
+    set f [open [file join $dir main.bot] w]
+    puts -nonewline $f "opaque resource struct H:\n    id: int\ncleanup fn close(h: H):\n    \{id\} = h\n    unit\nclose(H \{id: 1\})\n"
+    close $f
+    catch {surface::readProgramFile [file join $dir main.bot] -warnings off} message options
+    file delete -force $dir
+    list [lindex [dict get $options -errorcode] end] [string match "*must be declared in a module*" $message]
+} -cleanup {unset -nocomplain dir f message options} -result {RESOURCE-DECLARATION 1}
+
+test rs-reject-missing-context {a release where its cleanup's context is not installed is MISSING-CONTEXT, located at the statement that releases it ("the release of this value"); inside a function the requirement is the function's, charged to its calls ("this call")} -body {
+    set dir [file join [temporaryDirectory] rs-context]
+    file mkdir $dir
+    file copy -force [file join $::rsDir handle.bot] [file join $dir handle.bot]
+    set f [open [file join $dir main.bot] w]
+    puts -nonewline $f "import handle\n\nfn body() -> int:\n    h = handle::open(1)\n    2\n\nhandle::open(1)\nbody()\nwith context handle::create()\nbody()\n"
+    close $f
+    catch {surface::readProgramFile [file join $dir main.bot] -warnings off} message options
+    file delete -force $dir
+    set ds [dict get $options -diagnostics]
+    list [lmap d $ds {lindex [dict get $d errorcode] end}] [lmap d $ds {expr {[string match "*required by the release of this value*" [dict get $d summary]] ? "release" : [string match "*required by this call*" [dict get $d summary]] ? "call" : "other"}}]
+} -cleanup {unset -nocomplain dir f message options ds} -result {{MISSING-CONTEXT MISSING-CONTEXT} {release call}}
+
+# --------------------------------------------------------------------------
+# No runtime ownership state, no finalizer
+
+test rs-source-no-ownership-state {the runtimes add no ownership state for resources -- no moved flag, reference count, drop flag or finalizer -- and the collector never runs a cleanup (releases are compiled at their static points)} -body {
+    set hits {}
+    foreach path {core/affine.tcl native/src/runtime/affine.rs native/src/runtime/heap.rs native/src/runtime/vm.rs} {
+        set f [open [file join $::projectRoot $path]]
+        set text [read $f]
+        close $f
+        set text [string range $text 0 [expr {[string first "#\[cfg(test)\]" $text] < 0 ? "end" : [string first "#\[cfg(test)\]" $text] - 1}]]
+        regsub -all {(//|#)[^\n]*} $text "" text
+        foreach pattern {refcount ref_count drop_flag dropflag moved_flag finaliz} {
+            if {[string first $pattern [string tolower $text]] >= 0} {
+                lappend hits "$path: $pattern"
+            }
+        }
+    }
+    set heap [read [set f [open [file join $::projectRoot native src runtime heap.rs]]]][close $f]
+    lappend hits [regexp {cleanup} $heap]
+} -cleanup {unset -nocomplain hits path f text pattern heap} -result 0
+
+cleanupTests

@@ -138,14 +138,14 @@ test si-ro-4 {freeze through a wrapper keeps List[T]} -body {
 # invalid instances: rejected at the call, never globally, never by fallback
 
 test si-bad-1 {smash: an untyped writer of a wrong value into MutableArray[str] is rejected at the call} -body {
-    set src "import std::mutable_array\nfn smash(x):\n    std::mutable_array::set(x, 0, 123)\nm = std::mutable_array::create(2, \"x\")\nsmash(m)"
+    set src "import std::mutable_array\nfn smash(x):\n    w = x\n    std::mutable_array::set(w, 0, 123)\nm = std::mutable_array::create(2, \"x\")\nsmash(m)"
     list [siRejects $src "*call to smash with x : MutableArray\\\[str\\\] is invalid: value of type int is not admissible to element type str*"] \
-        [siRejects $src "*(in the body of smash, at 3:*"]
+        [siRejects $src "*(in the body of smash, at 4:*"]
 } -result {1 1}
 
 test si-bad-2 {the same function with a raw array (or a fitting value) is fine: one bad call does not condemn the function} -body {
-    list [siLast "import std::mutable_array\nfn smash(x):\n    if std::mutable_array::capacity(x) > 0:\n        std::mutable_array::set(x, 0, 123)\nsmash(std::mutable_array::allocate(1))"] \
-        [siLast "import std::mutable_array\nfn writer(x, v):\n    if std::mutable_array::capacity(x) > 0:\n        std::mutable_array::set(x, 0, v)\nwriter(std::mutable_array::create(1, \"x\"), \"ok\")"]
+    list [siLast "import std::mutable_array\nfn smash(x):\n    w = x\n    if std::mutable_array::capacity(w) > 0:\n        std::mutable_array::set(w, 0, 123)\nsmash(std::mutable_array::allocate(1))"] \
+        [siLast "import std::mutable_array\nfn writer(x, v):\n    w = x\n    if std::mutable_array::capacity(w) > 0:\n        std::mutable_array::set(w, 0, v)\nwriter(std::mutable_array::create(1, \"x\"), \"ok\")"]
 } -result {unit unit}
 
 test si-bad-3 {f<int> valid, f<str> invalid: the incompatible call is the one rejected} -body {
@@ -154,19 +154,19 @@ test si-bad-3 {f<int> valid, f<str> invalid: the incompatible call is the one re
 } -result {int 1 1}
 
 test si-bad-4 {a valid instance does not make every call valid: writer with the wrong value is rejected} -body {
-    set def "import std::mutable_array\nfn writer(x, v):\n    if std::mutable_array::capacity(x) > 0:\n        std::mutable_array::set(x, 0, v)\n"
+    set def "import std::mutable_array\nfn writer(x, v):\n    w = x\n    if std::mutable_array::capacity(w) > 0:\n        std::mutable_array::set(w, 0, v)\n"
     list [siRejects "${def}writer(std::mutable_array::create(1, \"x\"), 5)" "*call to writer with x : MutableArray\\\[str\\\], v : int is invalid*"] \
         [siLast "${def}writer(std::mutable_array::create(1, \"x\"), \"ok\")\nwriter(std::mutable_array::create(1, 1), 5)"]
 } -result {1 unit}
 
 test si-bad-5 {an invalid callee makes the calling instance invalid: the diagnostic names both calls} -body {
-    siRejects "import std::mutable_array\nfn a(x):\n    std::mutable_array::set(x, 0, 1)\nfn b(x):\n    a(x)\nb(std::mutable_array::create(1, \"x\"))" \
+    siRejects "import std::mutable_array\nfn a(x):\n    w = x\n    std::mutable_array::set(w, 0, 1)\nfn b(x):\n    a(x)\nb(std::mutable_array::create(1, \"x\"))" \
         "*call to b with x : MutableArray\\\[str\\\] is invalid: call to a with x : MutableArray\\\[str\\\] is invalid:*"
 } -result 1
 
 test si-bad-6 {the diagnostic is at the call and shows no synthetic names} -body {
-    set message [siMessage "import std::mutable_array\nfn smash(x):\n    std::mutable_array::set(x, 0, 123)\nm = std::mutable_array::create(2, \"x\")\nsmash(m)"]
-    list [string match "*:5:1: *" $message] [string match {*\$*} $message] [string match {*Instance*} $message]
+    set message [siMessage "import std::mutable_array\nfn smash(x):\n    w = x\n    std::mutable_array::set(w, 0, 123)\nm = std::mutable_array::create(2, \"x\")\nsmash(m)"]
+    list [string match "*:6:1: *" $message] [string match {*\$*} $message] [string match {*Instance*} $message]
 } -result {1 0 0}
 
 test si-bad-7 {an instance of a function whose body needs a declared contract cannot rescue an invalid definition} -body {
@@ -199,7 +199,7 @@ test si-brg-3 {a join with an erasing value is rejected} -body {
 } -result 1
 
 test si-brg-4 {a kind test does not recover a writable untyped alias inside the instance} -body {
-    siRejects "import std::mutable_array\nfn f(x):\n    if mutarray?(x):\n        std::mutable_array::set(x, 0, 123)\n    else:\n        unit\nm = std::mutable_array::from_list(\[\"a\"\])\nf(m)\nstd::mutable_array::at(m, 0)" \
+    siRejects "import std::mutable_array\nfn f(x):\n    w = x\n    if mutarray?(w):\n        std::mutable_array::set(w, 0, 123)\n    else:\n        unit\nm = std::mutable_array::from_list(\[\"a\"\])\nf(m)\nstd::mutable_array::at(m, 0)" \
         "*call to f with x : MutableArray\\\[str\\\] is invalid: value of type int is not admissible*"
 } -result 1
 
@@ -573,7 +573,7 @@ proc siParity {src} {
 }
 
 test si-run-1 {identity/first/find/writer run identically on every backend; a writer mutates its own copy} -body {
-    siParity "import std::list\nimport std::mutable_array\nfn identity(x):\n    x\nfn first(xs) errors IndexNotFound:\n    std::list::at(xs, 0)\nfn writer(x, v) errors IndexNotFound:\n    std::mutable_array::set(x, 0, v)\n    x\nm = std::mutable_array::create(2, \"x\")\nn = identity(m)\nw = writer(n, \"y\")\n\[first(\[\"p\", \"q\"\]), first(\[1, 2\]), std::mutable_array::at(w, 0), std::mutable_array::at(n, 0), std::mutable_array::capacity(identity(m))\]"
+    siParity "import std::list\nimport std::mutable_array\nfn identity(x):\n    x\nfn first(xs) errors IndexNotFound:\n    std::list::at(xs, 0)\nfn writer(x, v) errors IndexNotFound:\n    w = x\n    std::mutable_array::set(w, 0, v)\n    w\nm = std::mutable_array::create(2, \"x\")\nn = identity(m)\nw = writer(n, \"y\")\n\[first(\[\"p\", \"q\"\]), first(\[1, 2\]), std::mutable_array::at(w, 0), std::mutable_array::at(n, 0), std::mutable_array::capacity(identity(m))\]"
 } -result {value {["p", 1, "y", "x", 2]} {}}
 
 test si-run-2 {std::list::find with instances runs identically on every backend} -body {

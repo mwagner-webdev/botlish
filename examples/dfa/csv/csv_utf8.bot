@@ -1,0 +1,280 @@
+# csv_utf8.bot -- Profile B, CSV over UTF-8 text (CSV-EMISSION-VALIDATION-
+# MILESTONE-1.md): RFC 4180's structure -- comma separators, CRLF between
+# records, quotation-mark quoting with doubling -- unchanged, its text
+# alphabet extended to Unicode by one stated policy. Declared twice, over
+# Unicode scalar values and over UTF-8 bytes (the `_bytes` recognizers),
+# which recognize the same documents.
+#
+# The policy, per scalar value:
+#
+#   U+0020..U+0021, U+0023..U+002B,    text: written as it is, quoted or
+#   U+002D..U+007E, U+00A0..U+10FFFF   not -- every printable ASCII
+#   except U+2028, U+2029, U+FEFF      character but the quotation mark and
+#                                      the comma, and every non-ASCII scalar
+#                                      but the C1 controls and the three
+#                                      below (supplementary planes, combining
+#                                      marks and noncharacters included)
+#   ',' CR LF TAB,                     data only inside a quoted field: a
+#   U+2028 LINE SEPARATOR,             separator, a line break, a tab, a
+#   U+2029 PARAGRAPH SEPARATOR,        character some readers take for a line
+#   U+FEFF (BOM / ZWNBSP)              break, and the byte-order mark, which
+#                                      a BOM-aware reader would strip at the
+#                                      start of a file
+#   '"'                                inside a quoted field only, doubled
+#   NUL, U+0001..U+0008, U+000B,       unsupported: no CSV of this profile
+#   U+000C, U+000E..U+001F, U+007F,    holds them, and an emitter fails
+#   U+0080..U+009F (C1, NEL included) rather than write or change them
+#
+# A document never starts with a byte-order mark: U+FEFF is only ever quoted,
+# and an emitter writes none. Its encoding is strict UTF-8 (RFC 3629): no
+# overlong form, no surrogate, nothing past U+10FFFF. Text holding invalid
+# UTF-8 is no input of an emitter (a Botlish str holds scalar values; bytes
+# are decoded strictly first, std::abi::bytes::decode_utf8).
+#
+# Token boundaries and the empty forms are csv_strict.bot's.
+
+import std::dfa
+
+# --- over Unicode scalar values
+
+class textdata = 0x20..0x21 0x23..0x2B 0x2D..0x7E 0xA0..0x2027 0x202A..0xFEFE 0xFF00..0x10FFFF
+# Data a field may hold only quoted.
+class quoted_only = ',' '\r' '\n' '\t' 0x2028 0x2029 0xFEFF
+class qdata = textdata quoted_only
+class record_start = textdata '"' ','
+
+dfa quoted_field over unicode:
+    open:
+        '"' -> body
+    body:
+        qdata -> body
+        '"' -> quote
+    quote:
+        '"' -> body
+        ',' '\r' -> accept before
+        end -> accept
+
+dfa unquoted_field over unicode:
+    start:
+        textdata -> text
+    text:
+        textdata -> text
+        ',' '\r' -> accept before
+        end -> accept
+
+dfa field over unicode:
+    start:
+        '"' -> call quoted_field then accept
+        textdata -> call unquoted_field then accept
+
+dfa record3 over unicode:
+    f1:
+        '"' textdata -> call field then s1
+        ',' -> f2
+    s1:
+        ',' -> f2
+    f2:
+        '"' textdata -> call field then s2
+        ',' -> f3
+    s2:
+        ',' -> f3
+    f3:
+        '"' textdata -> call field then s3
+        '\r' -> accept before
+        end -> accept
+    s3:
+        '\r' -> accept before
+        end -> accept
+
+dfa line3 over unicode:
+    start:
+        record_start -> call record3 then cr
+    cr:
+        '\r' -> lf
+    lf:
+        '\n' -> accept
+
+dfa stream3 over unicode:
+    start:
+        record_start -> call record3 then eol
+        end -> accept
+    eol:
+        '\r' -> lf
+        end -> accept
+    lf:
+        '\n' -> next
+    next:
+        record_start -> call record3 then eol
+        end -> accept
+
+dfa document3 over unicode:
+    start:
+        record_start -> call line3 then next
+        end -> accept
+    next:
+        record_start -> call line3 then next
+        end -> accept
+
+# Guards (csv_strict.bot's).
+dfa quoted_char over unicode:
+    start:
+        qdata -> accept
+
+dfa text_char over unicode:
+    start:
+        textdata -> accept
+
+# --- over UTF-8 bytes
+
+# ASCII bytes are the characters they encode.
+class text_ascii = 0x20..0x21 0x23..0x2B 0x2D..0x7E
+class qdata_ascii = text_ascii ',' '\r' '\n' '\t'
+class lead = 0xC2..0xF4
+class record_start_bytes = text_ascii '"' ',' lead
+
+# One non-ASCII character a quoted field holds, its lead byte first: any
+# scalar value from U+00A0 on, in its RFC 3629 encoding (no overlong form,
+# no surrogate, nothing past U+10FFFF). C2 80..C2 9F, the C1 controls, are
+# not among them.
+dfa utf8_quoted over bytes:
+    lead:
+        0xC2 -> c2
+        0xC3..0xDF -> tail1
+        0xE0 -> e0
+        0xE1..0xEC 0xEE..0xEF -> tail2
+        0xED -> ed
+        0xF0 -> f0
+        0xF1..0xF3 -> tail3
+        0xF4 -> f4
+    c2:
+        0xA0..0xBF -> accept
+    e0:
+        0xA0..0xBF -> tail1
+    ed:
+        0x80..0x9F -> tail1
+    f0:
+        0x90..0xBF -> tail2
+    f4:
+        0x80..0x8F -> tail2
+    tail3:
+        0x80..0xBF -> tail2
+    tail2:
+        0x80..0xBF -> tail1
+    tail1:
+        0x80..0xBF -> accept
+
+# One non-ASCII character an unquoted field holds: utf8_quoted's, but for
+# U+2028 (E2 80 A8), U+2029 (E2 80 A9) and U+FEFF (EF BB BF).
+dfa utf8_text over bytes:
+    lead:
+        0xC2 -> c2
+        0xC3..0xDF -> tail1
+        0xE0 -> e0
+        0xE1 0xE3..0xEC 0xEE -> tail2
+        0xE2 -> e2
+        0xED -> ed
+        0xEF -> ef
+        0xF0 -> f0
+        0xF1..0xF3 -> tail3
+        0xF4 -> f4
+    c2:
+        0xA0..0xBF -> accept
+    e0:
+        0xA0..0xBF -> tail1
+    e2:
+        0x80 -> e2_80
+        0x81..0xBF -> tail1
+    e2_80:
+        0x80..0xA7 0xAA..0xBF -> accept
+    ed:
+        0x80..0x9F -> tail1
+    ef:
+        0x80..0xBA 0xBC..0xBF -> tail1
+        0xBB -> ef_bb
+    ef_bb:
+        0x80..0xBE -> accept
+    f0:
+        0x90..0xBF -> tail2
+    f4:
+        0x80..0x8F -> tail2
+    tail3:
+        0x80..0xBF -> tail2
+    tail2:
+        0x80..0xBF -> tail1
+    tail1:
+        0x80..0xBF -> accept
+
+dfa quoted_field_bytes over bytes:
+    open:
+        '"' -> body
+    body:
+        qdata_ascii -> body
+        lead -> call utf8_quoted then body
+        '"' -> quote
+    quote:
+        '"' -> body
+        ',' '\r' -> accept before
+        end -> accept
+
+dfa unquoted_field_bytes over bytes:
+    start:
+        text_ascii -> text
+        lead -> call utf8_text then text
+    text:
+        text_ascii -> text
+        lead -> call utf8_text then text
+        ',' '\r' -> accept before
+        end -> accept
+
+dfa field_bytes over bytes:
+    start:
+        '"' -> call quoted_field_bytes then accept
+        text_ascii lead -> call unquoted_field_bytes then accept
+
+dfa record3_bytes over bytes:
+    f1:
+        '"' text_ascii lead -> call field_bytes then s1
+        ',' -> f2
+    s1:
+        ',' -> f2
+    f2:
+        '"' text_ascii lead -> call field_bytes then s2
+        ',' -> f3
+    s2:
+        ',' -> f3
+    f3:
+        '"' text_ascii lead -> call field_bytes then s3
+        '\r' -> accept before
+        end -> accept
+    s3:
+        '\r' -> accept before
+        end -> accept
+
+dfa line3_bytes over bytes:
+    start:
+        record_start_bytes -> call record3_bytes then cr
+    cr:
+        '\r' -> lf
+    lf:
+        '\n' -> accept
+
+dfa stream3_bytes over bytes:
+    start:
+        record_start_bytes -> call record3_bytes then eol
+        end -> accept
+    eol:
+        '\r' -> lf
+        end -> accept
+    lf:
+        '\n' -> next
+    next:
+        record_start_bytes -> call record3_bytes then eol
+        end -> accept
+
+dfa document3_bytes over bytes:
+    start:
+        record_start_bytes -> call line3_bytes then next
+        end -> accept
+    next:
+        record_start_bytes -> call line3_bytes then next
+        end -> accept

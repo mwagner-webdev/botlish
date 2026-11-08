@@ -218,7 +218,7 @@
 @@ check-ignores-options -check silently ignores the options that run, build or inspect, instead of refusing them
 ## main.tcl
 <<<<
-        if {$arg ni {-check -warnings -target}} {
+        if {$arg ni {-check -warnings -target -color -excerpts}} {
 ====
         if {0} {
 >>>>
@@ -239,7 +239,35 @@
 @@ check-text-mismatch -check prints a diagnostic's message without the location a run prints
 ## main.tcl
 <<<<
-            puts "   error: [dict get $error text] ([dict get $error code])"
+            printDiagnostic stdout "   error: " [dict get $error text] [dict get $error code] \
 ====
-            puts "   error: [dict get $error message] ([dict get $error code])"
+            printDiagnostic stdout "   error: " [dict get $error message] [dict get $error code] \
+>>>>
+
+@@ import-notes-dropped a loader diagnostic in a module file is raised without its import notes: nothing names the imports that load the file
+## surface/modules.tcl
+<<<<
+        if {[dict exists $options -diagnostics]} {
+            dict set options -diagnostics [ImportNoted $state [dict get $options -diagnostics]]
+        }
+====
+>>>>
+
+@@ import-notes-reversed the import notes run from the module back to the entry program, not from the entry program's import
+## surface/modules.tcl
+<<<<
+        set notes [linsert $notes 0 [dict create message "[surface::ast::location $span]: $summary" \
+            summary $summary location $span kind import]]
+====
+        lappend notes [dict create message "[surface::ast::location $span]: $summary" \
+            summary $summary location $span kind import]
+>>>>
+
+@@ note-kind-dropped the service drops a note's kind: an import note is any note, and the language server cannot tell one
+## service/service.tcl
+<<<<
+        if {[dict exists $note kind]} {
+            dict set n kind [dict get $note kind]
+        }
+====
 >>>>

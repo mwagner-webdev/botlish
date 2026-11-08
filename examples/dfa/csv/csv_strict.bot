@@ -1,0 +1,140 @@
+# csv_strict.bot -- Profile A, strict ASCII-compatible CSV: RFC 4180's
+# section 2 ABNF as declared recognizers (CSV-EMISSION-VALIDATION-
+# MILESTONE-1.md). An ordinary module: the compiler checks every `class`
+# and `dfa` declaration below where it is written and lowers each
+# recognizer to a coroutine function of its first symbol.
+#
+#   file        = [header CRLF] record *(CRLF record) [CRLF]
+#   record      = field *(COMMA field)
+#   field       = (escaped / non-escaped)
+#   escaped     = DQUOTE *(TEXTDATA / COMMA / CR / LF / 2DQUOTE) DQUOTE
+#   non-escaped = *TEXTDATA
+#   TEXTDATA    = %x20-21 / %x23-2B / %x2D-7E
+#
+# Every symbol is an ASCII code. Nothing outside the ABNF's alphabet is
+# admitted: no TAB, no NUL or other control, no DEL, nothing past U+007E.
+# Records are separated by CRLF exactly; a lone CR or LF outside a quoted
+# field is no separator, and rejected.
+#
+# Token boundaries. A quoted field ends at its closing quotation mark, but
+# that is known only at the symbol after it: a quotation mark followed by
+# another is one quotation mark of data (2DQUOTE), followed by a comma, a CR
+# or the end it closes the field, followed by anything else it is an error
+# (`"ab"x`). So a field's token ends *before* the comma or CR that follows
+# it (`accept before`), which belongs to the enclosing record; at the end of
+# the input it simply ends. An unquoted field ends the same way. A field
+# never manufactures its own terminator: the record supplies it.
+#
+# A token is empty only when its recognizer is handed nothing and its start
+# state accepts the end (DFA-COROUTINE-MILESTONE-2.md, section 4). A field's
+# does not: an empty unquoted field is no `field` token but the record's --
+# two separators in a row, or a separator at the record's start or end --
+# and `field` recognizes the nonempty forms. A file's does: the empty file
+# is the stream of zero records. (RFC 4180's ABNF reads an empty file as one
+# record of one empty field; a file of three-column records has none such,
+# so this profile reads it as no record, as Python's csv module does.)
+
+import std::dfa
+
+class textdata = 0x20..0x21 0x23..0x2B 0x2D..0x7E
+# What a quoted field holds as it is: everything but the quotation mark,
+# which it holds doubled.
+class qdata = textdata ',' '\r' '\n'
+# The first symbol of a record: a field's, or the separator after an empty
+# first field.
+class record_start = textdata '"' ','
+
+# escaped = DQUOTE *(TEXTDATA / COMMA / CR / LF / 2DQUOTE) DQUOTE
+dfa quoted_field over ascii:
+    open:
+        '"' -> body
+    body:
+        qdata -> body
+        '"' -> quote
+    quote:
+        '"' -> body
+        ',' '\r' -> accept before
+        end -> accept
+
+# non-escaped = 1*TEXTDATA (the empty one is the record's)
+dfa unquoted_field over ascii:
+    start:
+        textdata -> text
+    text:
+        textdata -> text
+        ',' '\r' -> accept before
+        end -> accept
+
+# A nonempty field, quoted or not.
+dfa field over ascii:
+    start:
+        '"' -> call quoted_field then accept
+        textdata -> call unquoted_field then accept
+
+# Exactly three fields, any of them empty, separated by commas: the record
+# ends before the CR that follows it, or at the end.
+dfa record3 over ascii:
+    f1:
+        '"' textdata -> call field then s1
+        ',' -> f2
+    s1:
+        ',' -> f2
+    f2:
+        '"' textdata -> call field then s2
+        ',' -> f3
+    s2:
+        ',' -> f3
+    f3:
+        '"' textdata -> call field then s3
+        '\r' -> accept before
+        end -> accept
+    s3:
+        '\r' -> accept before
+        end -> accept
+
+# One record and the CRLF that ends its line.
+dfa line3 over ascii:
+    start:
+        record_start -> call record3 then cr
+    cr:
+        '\r' -> lf
+    lf:
+        '\n' -> accept
+
+# A file of three-column records: CRLF between records, the last one's
+# CRLF optional (both forms RFC 4180 permits); no record at all is the
+# empty file.
+dfa stream3 over ascii:
+    start:
+        record_start -> call record3 then eol
+        end -> accept
+    eol:
+        '\r' -> lf
+        end -> accept
+    lf:
+        '\n' -> next
+    next:
+        record_start -> call record3 then eol
+        end -> accept
+
+# The canonical form the exporters write: every record a whole line, its
+# CRLF included.
+dfa document3 over ascii:
+    start:
+        record_start -> call line3 then next
+        end -> accept
+    next:
+        record_start -> call line3 then next
+        end -> accept
+
+# Guards: a recognizer none of whose transitions suspends is an ordinary
+# function of its one symbol; a call of one narrows its argument to the
+# symbols it takes. An emitter checks a character against the grammar's
+# own class, never a list of its own.
+dfa quoted_char over ascii:
+    start:
+        qdata -> accept
+
+dfa text_char over ascii:
+    start:
+        textdata -> accept

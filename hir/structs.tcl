@@ -94,99 +94,326 @@ namespace eval hir::structs {
     # next compilation that brings declarations of any kind, before it
     # resolves one (hir::sourcetypes::Reset), or by one that brings none
     # (hir::BuildOnce).
-    # ID -> 1|0: whether struct ID is affine (IsAffine), for this registry.
+    # ID -> {BASE RELEVANT}: struct ID's affinity summary (AffinitySummary),
+    # for this registry -- a fact of the declaration, never of one of its
+    # applications: an application's affinity is computed from it and the
+    # application's own arguments (IsAffine).
     variable affinity [dict create]
+    # {ID ARGUMENTS} -> 1|0: IsAffine's answer for the whole type -- the
+    # application with its arguments, never a declaration -- for this
+    # registry: a walk over nested applications (a drop descriptor, the
+    # recursion check, MakeApplied's bound) asks again about every inner
+    # one, which would make it quadratic in the nesting depth. Cleared with
+    # the summaries (ForgetAffinity), never filled while a summary is being
+    # computed (its answers then are provisional).
+    variable applications [dict create]
+    # AffinitySummary's fixpoint in progress: 1 while it runs, and the
+    # declarations it summarizes, in the order it met them.
+    variable summarizing 0
+    variable summaryIds {}
+    # ID -> {{POSITION ...} ...}: struct ID's slot positions (SlotPositions),
+    # one list per slot in declared order, for this registry -- like the
+    # affinity summary a fact of the declaration, forgotten with it
+    # (ForgetAffinity), never of one application.
+    variable positions [dict create]
+    # SlotPositions' fixpoint in progress, as AffinitySummary's.
+    variable positioning 0
+    variable positionIds {}
+    # 1 while apply resolves the field types of its batch: a declaration's
+    # fields are not all known yet (WrittenProblem).
+    variable registering 0
 }
 
 proc hir::structs::Reset {} {
     variable registry
-    variable affinity
     set registry [dict create]
-    set affinity [dict create]
+    ForgetAffinity
 }
 
-# 1 if struct ID is affine (hir::types::Affinity, AFFINE-VALUES.md): a field
-# type is. Derived, never declared: there is no `affine struct`. SEEN guards
-# a struct whose fields mention itself (through a List): such a cycle adds no
-# affinity -- a struct is affine only if some field path reaches an affine
-# root. Cached per registration (Reset clears it).
-proc hir::structs::IsAffine {id {seen {}}} {
-    variable registry
+# Forgets every affinity fact of the registry -- the summaries, the
+# applications' answers and the drop descriptors derived from them
+# (hir::affine::Descriptor's table) -- the slots' positions (SlotPositions)
+# and every other declaration summary (hir::summaries::Forget), whenever the
+# declarations change: the one invalidation hook of every fact computed from
+# the registry's declarations.
+proc hir::structs::ForgetAffinity {} {
     variable affinity
-    if {[dict exists $affinity $id]} {
-        return [dict get $affinity $id]
+    variable applications
+    variable positions
+    set affinity [dict create]
+    set applications [dict create]
+    namespace eval ::hir::affine {}
+    set ::hir::affine::descriptorMemo [dict create]
+    set positions [dict create]
+    hir::summaries::Forget
+    hir::ownership::Forget
+}
+
+# Affinity of a named struct type (hir::types::Affinity, AFFINE-VALUES.md;
+# AFFINE-PARAMETERIZED-APPLICATIONS-CORRECTNESS-MILESTONE-1.md). Derived,
+# never declared: there is no `affine struct`. A struct type is affine
+# exactly when its fields are -- for an application of a parameterized
+# struct, the fields of that application: the declaration's with every slot
+# replaced by its argument (AppliedFieldTypes), as if that concrete struct
+# had been written directly:
+#
+#   struct Box[T]:        value: T     Box[int] unrestricted,
+#                                      Box[Coroutine{...}] affine
+#   struct Phantom[T]:    value: int   Phantom[Coroutine{...}] unrestricted
+#
+# never "an application with an affine argument": an argument's affinity
+# counts only where a field holds a value of it. A struct whose fields
+# mention itself (through a List) adds no affinity by that cycle: a struct
+# is affine only if some field path reaches an affine root (the least
+# fixpoint).
+#
+# hir::types::IsAffine is a disjunction over the components a value owns
+# (fields, elements, members, a view's witness, a refinement's base), each
+# ending in an affine root or in nothing. So substituting the arguments into
+# a declaration's fields gives
+#
+#   affine(S[A1, ..., An]) = base(S) or affine(Ai) for some i in relevant(S)
+#
+# base(S) the declaration's affinity with every slot unrestricted (its field
+# types as declared: a slot variable is unrestricted, as in a generic body),
+# relevant(S) the slots whose argument's affinity reaches a field: slot i is
+# relevant when S applied to an affine root at i (and to `any`, which holds
+# no affine value, at every other slot) is affine. The two are the
+# declaration's affinity summary, computed by AffinitySummary from
+# AppliedFieldTypes and hir::types::IsAffine themselves -- no second
+# statement of what is affine, and no second substitution -- and kept per
+# registration (ForgetAffinity clears it). Every application is answered
+# from the summary and its own arguments, and that answer is kept for the
+# whole application -- the declaration with its arguments, never the
+# declaration alone, so Box[int] and Box[Coroutine{...}] never share one --
+# because a walk over nested applications asks again about every inner one.
+# A recursive application is never unfolded (a non-uniform one, `next:
+# List[W[List[T]]]`, meets ever larger arguments and would never end).
+
+# 1 if the named struct type {nstruct ID ARGUMENTS} is affine: ARGUMENTS its
+# type arguments in slot order ("" for an ordinary struct; a missing
+# argument is `any`, which holds no affine value).
+proc hir::structs::IsAffine {id {arguments {}}} {
+    variable applications
+    variable summarizing
+    set key [list $id $arguments]
+    if {[dict exists $applications $key]} {
+        return [dict get $applications $key]
     }
-    if {$id in $seen || ![declared $id]} {
-        return 0
-    }
-    set result 0
-    # (fieldTypes answers for a LayoutStruct[L] too, from the layout: a
-    # layout with a pointer field makes an affine struct view,
-    # NATIVE-LAYOUT-VIEWS.md.)
-    foreach {name t} [fieldTypes $id] {
-        if {[hir::types::IsAffine $t [concat $seen [list $id]]]} {
-            set result 1
-            break
+    lassign [AffinitySummary $id] base relevant
+    set result $base
+    if {!$result} {
+        foreach index $relevant {
+            set argument [lindex $arguments $index]
+            if {$argument ne "" && [hir::types::IsAffine $argument]} {
+                set result 1
+                break
+            }
         }
     }
-    if {$seen eq {}} {
-        dict set affinity $id $result
+    if {!$summarizing} {
+        dict set applications $key $result
     }
     return $result
 }
 
-# The fields, as {STRUCT FIELD} pairs from struct ID on, by which struct ID
-# holds a value of its own type inside a List, MutableVector or MutableArray
-# element -- {Tree kids} for `kids: List[Tree]` in `struct Tree`, or a path
-# through other structs -- or "" if it holds none. The steps are exactly the
-# ones an affine drop descriptor walks (hir::affine::Descriptor: struct fields
-# and those elements). A struct that meets itself through fields alone is not
-# such a path: no finite value has that type. One that meets itself through a
-# container element has finite values nested to any depth, which no finite
-# descriptor reaches: if it is affine, it is AFFINE-CONTAINER-UNSUPPORTED at
-# its declaration (apply).
-proc hir::structs::OwnedRecursion {id} {
-    set visited [dict create]
-    return [OwnedRecursionFrom $id [list nstruct $id] 0 {} visited]
+# {BASE RELEVANT}: the affinity summary of struct ID (above; RELEVANT the
+# relevant slots' indices), {0 {}} for an identity no declaration has. The
+# summaries of every declaration it reaches are found together, as a least
+# fixpoint: each starts unrestricted with no relevant slot and grows while
+# the one its fields give, the others read at their current summaries,
+# does (AffinityOf). A declaration met inside the fixpoint joins it; only a
+# finished fixpoint's summaries are kept.
+proc hir::structs::AffinitySummary {id} {
+    variable affinity
+    if {[dict exists $affinity $id]} {
+        return [dict get $affinity $id]
+    }
+    if {![declared $id]} {
+        return {0 {}}
+    }
+    return [Fixpoint affinity summarizing summaryIds AffinityOf AffinityBottom $id]
 }
 
-# OwnedRecursion's walk of TYPE, reached from struct TARGET by the fields
-# PATH, CROSSED 1 once that path went through a container element. VISITED
-# (STRUCT,CROSSED -> 1) bounds it: a struct is explored at most once per
-# CROSSED. (An anonymous struct's fields have no declaring struct: "".)
-proc hir::structs::OwnedRecursionFrom {target type crossed path visitedVar} {
-    set type [hir::types::Unrefined $type]
-    upvar 1 $visitedVar visited
-    variable registry
-    if {[hir::types::IsNamedStruct $type]} {
-        set id [lindex $type 1]
-        if {$path ne {} && $id eq $target} {
-            if {$crossed} {
-                return $path
+# The affinity summary every declaration starts its fixpoint at.
+proc hir::structs::AffinityBottom {id} {
+    return {0 {}}
+}
+
+# The least fixpoint of a declaration fact (AffinitySummary, SlotPositions)
+# for declared struct ID and every declaration it reaches: TABLE (ID ->
+# fact), RUNNING (1 while a fixpoint runs) and MET (the declarations it met,
+# in order) the names of this namespace's variables that hold them, OF and
+# BOTTOM this namespace's commands that compute a declaration's fact from its
+# fields and give its starting fact. The fixpoint itself is the one every
+# declaration summary shares (hir::summaries::Fixpoint).
+proc hir::structs::Fixpoint {table running met of bottom id} {
+    return [hir::summaries::Fixpoint ::hir::structs::$table ::hir::structs::$running \
+        ::hir::structs::$met ::hir::structs::$of ::hir::structs::$bottom $id]
+}
+
+# The affinity summary {BASE RELEVANT} struct ID's fields give, every struct
+# they name read at its current summary (AffinitySummary's fixpoint).
+# (fieldTypes answers for a LayoutStruct[L] too, from the layout: a layout
+# with a pointer field makes an affine struct view, NATIVE-LAYOUT-VIEWS.md.)
+proc hir::structs::AffinityOf {id} {
+    if {[isResource $id]} {
+        # A resource struct is affine whatever its fields: its value carries
+        # a cleanup obligation, which one owner discharges once
+        # (LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md). It has no
+        # slots (ResourceDeclaration), so nothing else is relevant.
+        return {1 {}}
+    }
+    foreach {name t} [fieldTypes $id] {
+        if {[hir::types::IsAffine $t]} {
+            return {1 {}}
+        }
+    }
+    set slots [slots $id]
+    set relevant {}
+    for {set index 0} {$index < [llength $slots]} {incr index} {
+        set probe [lreplace [lrepeat [llength $slots] any] $index $index coroutine]
+        foreach {name t} [AppliedFieldTypes [list nstruct $id $probe]] {
+            if {[hir::types::IsAffine $t]} {
+                lappend relevant $index
+                break
             }
-            return ""
         }
-        if {[dict exists $visited $id,$crossed] || ![dict exists $registry $id]} {
-            return ""
+    }
+    return [list 0 $relevant]
+}
+
+# Slot positions (WRITTEN-AFFINE-APPLICATIONS-MILESTONE-1.md): where, in the
+# values of an application, values of each slot's argument exist. A
+# declaration's slot occurs in its field types at the positions
+# hir::imprint::Occurrences states for any type -- `value` (values of it are
+# stored, or obtained from a function: a Fn type over it), `pointee` (a C
+# pointer's pointee: an identity only), `cvalue` or `csignature` (a C
+# signature's) -- an application nested in a field contributing its own
+# slots' positions. A slot at none of them is held by no value of the
+# application: its argument is a type only (Occurrences' position
+# `argument`), as in
+#
+#   struct Box[T]:        value: T                   T: value
+#   struct Phantom[T]:    value: int                 T: none
+#   struct Ref[T]:        p: std::ffi::c::Ptr[T]     T: pointee
+#   struct Handler[T]:    f: Fn{args: [T], ...}      T: value (a Fn type's)
+#   struct Nested[T]:     inner: Box[T]              T: value (Box's)
+#
+# This is where an imprinted function's body can obtain values of a variable
+# (hir::imprint::Positions, BindingProblem): a body checked for every T may
+# copy T's values, so a variable is bound to an affine type only where no
+# value of it exists. It is not the affinity summary's relevance: an
+# application's affinity asks which arguments make its values own an affine
+# value (a Fn type over T owns none; a struct with an affine field of its own
+# is affine whatever its arguments, so none is relevant there, though its
+# other fields may hold values of T), positions ask where values of T can be
+# reached at all. Computed by the same least fixpoint (a slot reached only
+# through its own declaration, `next: List[W[List[T]]]`, has no position: no
+# finite value holds one), kept per registration and forgotten with the
+# affinity facts (ForgetAffinity).
+
+# {{POSITION ...} ...}: the positions of each slot of struct ID, in slot
+# order, each list sorted ({} for a slot no value holds); {} for an identity
+# no declaration has (Occurrences then takes every argument for a value).
+proc hir::structs::SlotPositions {id} {
+    variable positions
+    if {[dict exists $positions $id]} {
+        return [dict get $positions $id]
+    }
+    if {![declared $id]} {
+        return {}
+    }
+    return [Fixpoint positions positioning positionIds PositionsOf PositionsBottom $id]
+}
+
+# The slot positions every declaration starts its fixpoint at: none.
+proc hir::structs::PositionsBottom {id} {
+    return [lrepeat [llength [slots $id]] {}]
+}
+
+# The slot positions struct ID's fields give, every struct they name read at
+# its current slot positions (SlotPositions' fixpoint).
+proc hir::structs::PositionsOf {id} {
+    set slots [slots $id]
+    set result [lrepeat [llength $slots] {}]
+    foreach {name t} [fieldTypes $id] {
+        foreach occurrence [hir::imprint::Occurrences $t] {
+            lassign $occurrence variable establishing position
+            set index [lsearch -exact $slots $variable]
+            if {$index < 0 || $position eq "argument"} {
+                continue
+            }
+            set held [lindex $result $index]
+            if {$position ni $held} {
+                lset result $index [lsort [linsert $held end $position]]
+            }
         }
-        dict set visited $id,$crossed 1
-        set owner $id
-        set fields [dict get $registry $id types]
-    } elseif {[hir::types::IsStruct $type]} {
-        set owner ""
-        set fields [lindex $type 1]
-    } elseif {[hir::types::IsList $type] || [hir::types::IsMutVec $type] || [hir::types::IsMutArray $type]} {
-        return [OwnedRecursionFrom $target [lindex $type 1] 1 $path visited]
-    } else {
+    }
+    return $result
+}
+
+# The field by which the affine application TYPE is affine, when its
+# declaration is not (its affinity is its arguments', through that field):
+# {FIELD FIELDTYPE}, or "" for any other type. A diagnostic's account of why
+# a value of an application has one owner.
+proc hir::structs::AffineThrough {type} {
+    set type [hir::types::Unrefined $type]
+    if {![hir::types::IsAppliedStruct $type] || [lindex [AffinitySummary [lindex $type 1]] 0]} {
         return ""
     }
-    foreach {name t} $fields {
-        set found [OwnedRecursionFrom $target $t $crossed [linsert $path end [list $owner $name]] visited]
-        if {$found ne ""} {
-            return $found
+    foreach {name t} [AppliedFieldTypes $type] {
+        if {$t ne "" && [hir::types::IsAffine $t]} {
+            return [list $name $t]
         }
     }
     return ""
+}
+
+# Recursive affine ownership (OWNED-RECURSION-DECLARATION-SUMMARY-
+# MILESTONE-1.md): "" when the type TYPE is no recursive affine type, else
+# {recursive {STEP ...} HEAD}, each STEP {OWNER FIELD FIELDTYPE} (field
+# FIELD, of type FIELDTYPE, of the struct type OWNER, "" for an anonymous
+# struct) and HEAD the declaration whose affine values the path holds in a
+# container again.
+#
+# A recursive affine type's values nest affine values to any depth through
+# a List, MutableVector or MutableArray element, so no finite drop
+# descriptor (hir::affine::Descriptor) reaches them all. A declaration that
+# is one (`struct Tree: step: Coroutine{...}, kids: List[Tree]`) is
+# AFFINE-CONTAINER-UNSUPPORTED at its declaration (apply), an application
+# that is one (Node[Coroutine{...}] of `struct Node[T]: value: T, kids:
+# List[Node[T]]`, a tree struct's included) wherever it is written or made
+# (ApplicationIssue, WrittenProblem): one rule, about the values the type
+# owns. A type that holds such a type is one too (Holder[Coroutine{...}] of
+# `struct Holder[T]: t: Node[T]`). An application whose affinity dies out
+# along its recursion (`next: List[D[U, int]]` in D[T, U]: D[int, C] holds
+# D[C, int], which holds only unrestricted D[int, int]) is not, nor is a
+# recursion through fields alone (no finite value has it), nor one that
+# holds no affine value (`next: List[W[List[T]]]`: W[C] is unrestricted).
+#
+# Decided on the finite graph of declaration states, never by unfolding
+# applications or by a depth: hir/ownership.tcl.
+proc hir::structs::OwnedRecursion {type} {
+    return [hir::ownership::Recursion $type]
+}
+
+# The steps of an OwnedRecursion path, in source terms: "OWNER.FIELD: TYPE",
+# OWNER a declaration's name for the declaration itself (an ordinary
+# struct, or a parameterized one at its own slots), an application's type
+# for any other application.
+proc hir::structs::RecursionSteps {path} {
+    return [join [lmap step $path {
+        lassign $step owner name t
+        if {$owner eq ""} {
+            set shown "{...}"
+        } elseif {![hir::types::IsAppliedStruct $owner] || $owner eq [SelfType [lindex $owner 1]]} {
+            set shown [display [lindex $owner 1]]
+        } else {
+            set shown [hir::types::presented $owner]
+        }
+        format {%s.%s: %s} $shown $name [hir::types::show $t]
+    }] ", "]
 }
 
 proc hir::structs::Fail {span message {kind TYPE}} {
@@ -385,13 +612,26 @@ proc hir::structs::ApplicationIssue {type} {
                     $slot [hir::types::presented $type] $trait $why]]
             }
         }
-        if {[treeField $id] ne "" && [lsearch -exact [lmap arg [lindex $type 2] {hir::types::IsAffine $arg}] 1] >= 0} {
-            # A tree struct applied to an affine type (TREE-STRUCT-
-            # MILESTONE-1.md): its values would be affine trees, nested to
-            # any depth -- the recursive affine type a declaration may not
-            # be either (apply's AFFINE-CONTAINER-UNSUPPORTED).
-            return [list AFFINE-CONTAINER-UNSUPPORTED [format {%s applies tree struct "%s" to an affine type: a tree of affine values nests to any depth, and an affine value is released by a static, finite walk of its type (a tree struct holds unrestricted values)} \
-                [hir::types::presented $type] [display $id]]]
+        set recursion [OwnedRecursion $type]
+        if {$recursion ne ""} {
+            # An application that is a recursive affine type -- an affine
+            # tree (TREE-STRUCT-MILESTONE-1.md), any parameterized struct
+            # whose values nest affine values in containers to any depth:
+            # the one a declaration may not be either (apply's
+            # AFFINE-CONTAINER-UNSUPPORTED), judged by what the
+            # application's values own (OwnedRecursion). When the
+            # recursion is another declaration's (Holder[C] of `t:
+            # Node[T]`) and an argument is that recursive type itself
+            # (Box[Node[C]]), the argument is the one named.
+            if {[lindex $recursion 2] ne $id} {
+                foreach t [hir::imprint::Parts $type] {
+                    set issue [ApplicationIssue $t]
+                    if {$issue ne ""} {
+                        return $issue
+                    }
+                }
+            }
+            return [list AFFINE-CONTAINER-UNSUPPORTED [RecursionMessage $id $type $recursion]]
         }
     }
     foreach t [hir::imprint::Parts $type] {
@@ -399,6 +639,33 @@ proc hir::structs::ApplicationIssue {type} {
         if {$issue ne ""} {
             return $issue
         }
+    }
+    return ""
+}
+
+# Why the application TYPE, written in a type position
+# (hir::resolve::ResolveApplied), is no type a value can have: {KIND
+# MESSAGE}, or "". An argument's affinity is no reason (WRITTEN-AFFINE-
+# APPLICATIONS-MILESTONE-1.md): Box[Coroutine{...}] is an affine type like
+# any other and every position judges it by its affinity, as it judges the
+# same type inferred. A recursive affine type is one: no finite drop
+# descriptor releases its values, so it is AFFINE-CONTAINER-UNSUPPORTED
+# wherever it is written, by the rule a construction of it meets
+# (ApplicationIssue). An application whose fields nest its argument in ever
+# larger applications (W[Coroutine{...}] of `next: List[W[List[T]]]`) is an
+# ordinary type: every analysis of a type's components answers it from its
+# declaration's summary, never by unfolding it (hir/summaries.tcl,
+# PARAMETERIZED-DECLARATION-SUMMARIES-MILESTONE-1.md). Undecided ("") while
+# apply resolves field types (a declaration's fields are not all known yet):
+# a field's type is judged with the declaration (VerifyDeclarations).
+proc hir::structs::WrittenProblem {type} {
+    variable registering
+    if {$registering} {
+        return ""
+    }
+    set recursion [OwnedRecursion $type]
+    if {$recursion ne ""} {
+        return [list AFFINE-CONTAINER-UNSUPPORTED [RecursionMessage [lindex $type 1] $type $recursion]]
     }
     return ""
 }
@@ -528,6 +795,36 @@ proc hir::structs::AppliedFieldType {type name} {
 proc hir::structs::isOpaque {id} {
     variable registry
     return [expr {[dict exists $registry $id opaque] && [dict get $registry $id opaque]}]
+}
+
+# 1 if struct ID was declared `resource struct` (`opaque resource struct`):
+# its values carry a cleanup obligation its module's cleanup function
+# discharges (hir/resources.tcl; LEXICAL-RESOURCE-CLEANUP-EXPLORATION-
+# MILESTONE-1.md). Affine whatever its fields (IsAffine).
+proc hir::structs::isResource {id} {
+    variable registry
+    return [expr {[dict exists $registry $id resource] && [dict get $registry $id resource]}]
+}
+
+# Checks the declaration DECL (apply's) of a resource struct with the type
+# slots SLOTS: declared in a module, opaque (only its module makes, takes
+# apart and discharges a value of it), not a context (an installed context lives for the whole run
+# and is never released), and not parameterized (one cleanup function per
+# resource, of one parameter type).
+proc hir::structs::ResourceDeclaration {decl slots} {
+    set name [dict get $decl name]
+    if {[dict get $decl namespace] eq ""} {
+        Fail [dict get $decl resourceSpan] "resource struct \"$name\" must be declared in a module, not in the entry program: a resource's authority -- making, taking apart and releasing its values -- is its module's, and its cleanup is one of the module's functions (move the declaration and its cleanup into a module the program imports)" RESOURCE-DECLARATION
+    }
+    if {![dict exists $decl opaque] || ![dict get $decl opaque]} {
+        Fail [dict get $decl resourceSpan] "resource struct \"$name\" must be opaque (\"opaque resource struct $name:\"): only its own module may make a value of it, take one apart -- which discharges its cleanup obligation without running the cleanup -- or release it" RESOURCE-DECLARATION
+    }
+    if {[dict exists $decl context] && [dict get $decl context]} {
+        Fail [dict get $decl resourceSpan] "struct \"$name\" cannot be both a context and a resource: an installed context lives for the whole run and is never released, so it has no lexical scope to end (a context may own resources in its members instead)" RESOURCE-DECLARATION
+    }
+    if {$slots ne {}} {
+        Fail [dict get $decl nameSpan] "resource struct \"$name\" cannot have type slots: its cleanup is one function of one parameter type (declare a resource struct of the field types you need)" RESOURCE-DECLARATION
+    }
 }
 
 # 1 if struct ID was declared `context struct` (or `opaque context struct`):
@@ -700,10 +997,15 @@ proc hir::structs::apply {decls} {
         # The skeleton first: a field type may name any struct of the batch,
         # declared earlier, later, or this one itself (its slots too: an
         # application's arity is checked as its field types resolve).
+        set resource [expr {[dict exists $decl resource] && [dict get $decl resource]}]
+        if {$resource} {
+            ResourceDeclaration $decl $slotNames
+        }
         dict set registry $id [dict create id $id name $name namespace $ns \
             opaque [expr {[dict exists $decl opaque] && [dict get $decl opaque]}] \
             context [expr {[dict exists $decl context] && [dict get $decl context]}] names $names \
-            types {} spans $spans span [dict get $decl nameSpan] slots $slotNames constraints $constraints]
+            types {} spans $spans span [dict get $decl nameSpan] slots $slotNames constraints $constraints \
+            resource $resource]
     }
     foreach decl $decls {
         # A slot names no visible type (every type of the batch is
@@ -715,6 +1017,60 @@ proc hir::structs::apply {decls} {
             }
         }
     }
+    set entries {}
+    variable registering 1
+    try {
+        set entries [ResolveFields $decls]
+    } finally {
+        set registering 0
+    }
+    # Tree structs (TREE-STRUCT-MILESTONE-1.md), once every field type of
+    # the batch is resolved (a field reaches other declarations' fields):
+    # each one's recursive field, checked against the one shape there is.
+    set index 0
+    foreach decl $decls {
+        if {[dict exists $decl tree] && [dict get $decl tree]} {
+            set id [identity [dict get $decl name] [dict get $decl namespace]]
+            set field [ValidateTree $decl $id [dict get $registry $id types]]
+            dict set registry $id tree $field
+            lset entries $index [dict replace [lindex $entries $index] tree $field]
+        }
+        incr index
+    }
+    # (Affinity read while field types were still being resolved is stale.)
+    ForgetAffinity
+    # The parts of every sendable clause, now that every field type of the
+    # batch is known (a part may reach any declaration of it).
+    ValidateSendableParts $decls
+    foreach decl $decls {
+        set id [identity [dict get $decl name] [dict get $decl namespace]]
+        # (The declaration at its own slots, which are unrestricted here as
+        # in a generic body: an application of it is judged where it is
+        # written or made, ApplicationIssue.)
+        set recursion [OwnedRecursion [SelfType $id]]
+        # A recursive affine type: releasing a value of it would have to
+        # recurse as deep as the value nests, and an affine drop is a static
+        # descriptor -- a finite walk of the type (hir::affine::Descriptor).
+        # Here when the recursion returns to this declaration; a recursion of
+        # another declaration that a field holds is that field type's
+        # application's (VerifyDeclarations, ApplicationIssue).
+        if {$recursion eq "" || [lindex $recursion 2] ne $id} continue
+        lassign $recursion how path
+        set first [lindex $path 0 1]
+        foreach field [dict get $decl fields] {
+            if {[dict get $field name] eq $first} {
+                set span [dict get $field typeSpan]
+            }
+        }
+        Fail $span [RecursionMessage $id "" $recursion [dict get $decl name]] AFFINE-CONTAINER-UNSUPPORTED
+    }
+    return $entries
+}
+
+# The registry entries of DECLS (apply's batch, its skeleton registered):
+# every field type resolved, in declaration order.
+proc hir::structs::ResolveFields {decls} {
+    variable registry
     set entries {}
     foreach decl $decls {
         set name [dict get $decl name]
@@ -769,6 +1125,11 @@ proc hir::structs::apply {decls} {
             # declaration's entry is unchanged.
             dict set entry context 1
         }
+        if {[dict get $registry $id resource]} {
+            # Likewise only for a resource struct (LEXICAL-RESOURCE-CLEANUP-
+            # EXPLORATION-MILESTONE-1.md).
+            dict set entry resource 1
+        }
         if {[dict exists $decl identity]} {
             # Present only for a struct that declares its semantic identity
             # (REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md): {form FORM
@@ -777,45 +1138,43 @@ proc hir::structs::apply {decls} {
             dict set registry $id identity $identity
             dict set entry identity $identity
         }
+        if {[dict exists $decl sendable]} {
+            # Present only for a struct whose owner states its sendability
+            # (SENDABILITY-AND-VALUE-COPY-MILESTONE-1.md): {form FORM args
+            # {NAME ...} representation R} (the span stays in the registry
+            # for the checks that run once the program is built).
+            set sendable [ValidateSendable $decl $id $types $imprints]
+            dict set registry $id sendable $sendable
+            dict set entry sendable [dict remove $sendable span]
+        }
         lappend entries $entry
     }
-    # Tree structs (TREE-STRUCT-MILESTONE-1.md), once every field type of
-    # the batch is resolved (a field reaches other declarations' fields):
-    # each one's recursive field, checked against the one shape there is.
-    set index 0
-    foreach decl $decls {
-        if {[dict exists $decl tree] && [dict get $decl tree]} {
-            set id [identity [dict get $decl name] [dict get $decl namespace]]
-            set field [ValidateTree $decl $id [dict get $registry $id types]]
-            dict set registry $id tree $field
-            lset entries $index [dict replace [lindex $entries $index] tree $field]
-        }
-        incr index
-    }
-    # (Affinity read while field types were still being resolved is stale.)
-    set affinity [dict create]
-    foreach decl $decls {
-        set id [identity [dict get $decl name] [dict get $decl namespace]]
-        if {![IsAffine $id]} continue
-        set path [OwnedRecursion $id]
-        if {$path eq ""} continue
-        # A recursive affine type: releasing a value of it would have to
-        # recurse as deep as the value nests, and an affine drop is a static
-        # descriptor -- a finite walk of the type (hir::affine::Descriptor).
-        set first [lindex $path 0 1]
-        foreach field [dict get $decl fields] {
-            if {[dict get $field name] eq $first} {
-                set span [dict get $field typeSpan]
-            }
-        }
-        set steps [lmap step $path {
-            lassign $step owner name
-            format {%s.%s: %s} [display $owner] $name [hir::types::show [fieldType $owner $name]]
-        }]
-        Fail $span [format {struct "%s" is affine and holds values of its own type in a List, MutableVector or MutableArray (%s): a recursive affine type is not supported -- its release would have to recurse as deep as the value nests, and an affine value is released by a static, finite walk of its type (an unrestricted struct may hold itself in a container)} \
-            [dict get $decl name] [join $steps ", "]] AFFINE-CONTAINER-UNSUPPORTED
-    }
     return $entries
+}
+
+# The AFFINE-CONTAINER-UNSUPPORTED message of a recursive affine type of
+# declaration ID whose OwnedRecursion is RECURSION: the declaration itself
+# (TYPE "": `struct "NAME" is affine ...`, NAME its written name) or the
+# application TYPE (named by its type, with the field that makes it affine
+# when its declaration is not: AffineThrough). The path is the witness:
+# from the type to the declaration whose values recur, once around the
+# recursion (hir::ownership::Witness).
+proc hir::structs::RecursionMessage {id type recursion {name ""}} {
+    lassign $recursion how path head
+    set steps [RecursionSteps $path]
+    if {$type eq ""} {
+        set subject "struct \"$name\" is affine"
+        set what "values of its own type"
+    } else {
+        set subject "[hir::types::presented $type] is affine"
+        set through [AffineThrough $type]
+        if {$through ne ""} {
+            append subject [format { (its field "%s" holds %s)} [lindex $through 0] [hir::types::show [lindex $through 1]]]
+        }
+        set what "affine values of struct \"[display $head]\""
+    }
+    return [format {%s and holds %s in a List, MutableVector or MutableArray (%s): a recursive affine type is not supported -- its release would have to recurse as deep as the value nests, and an affine value is released by a static, finite walk of its type (an unrestricted struct may hold itself in a container)} \
+        $subject $what $steps]
 }
 
 # Re-registers the struct entries of a HIR's own `sourceTypes` (hir/read.tcl:
@@ -838,15 +1197,19 @@ proc hir::structs::applyEntries {entries} {
             name [dict get $entry name] namespace [dict get $entry namespace] \
             opaque [expr {[dict exists $entry opaque] && [dict get $entry opaque]}] \
             context [expr {[dict exists $entry context] && [dict get $entry context]}] names $names \
-            types [dict get $entry fields] spans {} span {} slots $slotNames constraints $constraints]
+            types [dict get $entry fields] spans {} span {} slots $slotNames constraints $constraints \
+            resource [expr {[dict exists $entry resource] && [dict get $entry resource]}]]
         if {[dict exists $entry identity]} {
             dict set registry [dict get $entry id] identity [dict get $entry identity]
         }
         if {[dict exists $entry tree]} {
             dict set registry [dict get $entry id] tree [dict get $entry tree]
         }
+        if {[dict exists $entry sendable]} {
+            dict set registry [dict get $entry id] sendable [dict get $entry sendable]
+        }
     }
-    set affinity [dict create]
+    ForgetAffinity
 }
 
 # ---------------------------------------------------------------------------
@@ -1205,6 +1568,184 @@ proc hir::structs::ValidateIdentity {decl id types} {
     return [dict create form $form fields $fields]
 }
 
+# ---------------------------------------------------------------------------
+# Sendability (SENDABILITY-AND-VALUE-COPY-MILESTONE-1.md)
+#
+# A value is sendable when an equivalent value can be reconstructed in
+# another Botlish VM (hir::types::SendClass, the intrinsic trait Sendable).
+# The compiler derives it from a type's structure, except for an opaque
+# struct, whose fields are its owner's representation: two Ints may be a
+# value, or a slot and a generation of one VM's table (std::event_loop::Reg).
+# So an opaque struct is sendable only when its owning module states how, by
+# one clause of its declaration:
+#
+#   sendable fields                       a field-wise copy is the value:
+#                                         every field is copied as its
+#                                         declared type, and must be
+#                                         sendable for every application
+#   sendable bytes(F)                     its one field F holds immutable
+#   sendable mutable_bytes(F)             (mutable) byte storage, whose
+#                                         bytes are the value (std::abi::
+#                                         bytes::Bytes, MutableBytes)
+#   sendable through(TO, FROM) as R       the value is projected by TO, a
+#                                         function of the owner module
+#                                         taking the struct's application
+#                                         and returning R, which is copied,
+#                                         and rebuilt in the receiver by
+#                                         FROM (R -> the application): a
+#                                         collection whose index and stored
+#                                         hashes are derived state the
+#                                         receiver computes again
+#
+# The clause is a statement of the owner, never a proof: the compiler checks
+# that its parts are sendable (every field of `fields`, R of `through`) and
+# that TO and FROM are total, context-free functions of exactly those types,
+# and trusts the owner that what it names is the value's meaning -- the trust
+# opacity already places in the owner. Nothing outside the declaration can
+# make a type sendable, and a context or resource struct cannot say so.
+
+# The sendable forms: name -> the number of names each takes.
+namespace eval hir::structs {
+    variable sendableForms {fields 0 bytes 1 mutable_bytes 1 through 2}
+}
+
+# The sendable clause of struct ID, {form FORM args {NAME ...}
+# representation R}, or "" when its declaration states none.
+proc hir::structs::sendableOf {id} {
+    variable registry
+    if {![dict exists $registry $id sendable]} {
+        return ""
+    }
+    return [dict get $registry $id sendable]
+}
+
+# The unit that owns struct ID, as a diagnostic names it: "module NS" or
+# "the entry program".
+proc hir::structs::ownerOf {id} {
+    set ns [owner $id]
+    if {$ns eq ""} {
+        return "the entry program"
+    }
+    return "module $ns"
+}
+
+# The representation of `through` struct application TYPE: its clause's R
+# with every slot replaced by its argument.
+proc hir::structs::AppliedRepresentation {type} {
+    set r [dict get [sendableOf [lindex $type 1]] representation]
+    set binding [SlotBinding $type]
+    if {$binding eq ""} {
+        return $r
+    }
+    return [hir::types::canonical [hir::imprint::Substitute $r $binding]]
+}
+
+# The sendable clause of struct declaration DECL (apply's; ID its identity,
+# TYPES its resolved field types {FIELD TYPE ...}, IMPRINTS its slot names or
+# 0), checked as far as the declaration alone decides: {form FORM args
+# {NAME ...} representation R span SPAN} (R "" unless `through`). Only an
+# opaque struct may state one (a transparent struct's sendability is its
+# fields', derived), never a context struct (authority) or a resource (an
+# affine obligation); the form is one of sendableForms with its number of
+# names. The parts' sendability is checked once the batch is registered
+# (ValidateSendableParts); TO and FROM once the program is built
+# (hir::transfer::verifyDeclarations).
+proc hir::structs::ValidateSendable {decl id types imprints} {
+    variable sendableForms
+    variable registry
+    set name [dict get $decl name]
+    set clause [dict get $decl sendable]
+    set span [dict get $clause span]
+    if {!([dict exists $decl opaque] && [dict get $decl opaque])} {
+        Fail $span "struct \"$name\" states its sendability but is not opaque: a struct whose fields are its public meaning is sendable exactly when its fields are, which the compiler derives (only an opaque struct's owner states how its hidden representation is reconstructed)" SENDABLE-DECLARATION
+    }
+    if {[dict exists $decl context] && [dict get $decl context]} {
+        Fail $span "context struct \"$name\" cannot be sendable: an installed context is authority, selected by each program's own installation, never a value one VM hands another" SENDABLE-DECLARATION
+    }
+    if {[dict exists $decl resource] && [dict get $decl resource]} {
+        Fail $span "resource struct \"$name\" cannot be sendable: a resource is affine (one owner, whose scope runs its cleanup), and sending copies a value" SENDABLE-DECLARATION
+    }
+    set form [dict get $clause form]
+    if {![dict exists $sendableForms $form]} {
+        Fail [dict get $clause formSpan] "unknown sendable form \"$form\" in struct \"$name\": the forms are fields (a field-wise copy is the value), bytes(FIELD) and mutable_bytes(FIELD) (the byte storage of the struct's one field is the value) and through(TO, FROM) as R (the owner's functions project the value to R and rebuild it from R)" SENDABLE-DECLARATION
+    }
+    set args [dict get $clause args]
+    set want [dict get $sendableForms $form]
+    if {[llength $args] != $want} {
+        set what [expr {$want == 0 ? "no names" : ($want == 1 ? "one field" : "two functions, TO and FROM")}]
+        Fail $span "sendable $form takes $what, got [llength $args] in struct \"$name\"" SENDABLE-DECLARATION
+    }
+    set representation ""
+    if {$form eq "through"} {
+        if {![dict exists $clause representation]} {
+            Fail $span "sendable through(TO, FROM) of struct \"$name\" needs its representation type: \"sendable through(TO, FROM) as R\", R what TO returns and FROM takes" SENDABLE-DECLARATION
+        }
+        set typeExpr [dict get $clause representation]
+        if {[catch {hir::imprint::ConstrainVariables \
+                [hir::resolve::ResolveTypeExpr $typeExpr [dict get $decl namespace] $imprints] \
+                [dict get $registry $id constraints]} representation options]} {
+            Fail [dict get $clause representationSpan] \
+                [format {unknown or invalid representation type %s in the sendable clause of struct "%s": %s} \
+                    [hir::resolve::ShowTypeExpr $typeExpr] $name $representation] \
+                [hir::resolve::TypeErrorKind $options TYPE]
+        }
+    } elseif {[dict exists $clause representation]} {
+        Fail [dict get $clause representationSpan] "sendable $form of struct \"$name\" takes no representation type: only through(TO, FROM) names one" SENDABLE-DECLARATION
+    }
+    if {$form in {bytes mutable_bytes}} {
+        set field [lindex $args 0]
+        if {![dict exists $types $field]} {
+            Fail [lindex [dict get $clause argSpans] 0] "sendable $form of struct \"$name\" names \"$field\", which is not a field of it" SENDABLE-DECLARATION
+        }
+        if {[dict size $types] != 1} {
+            Fail $span "sendable $form of struct \"$name\" requires \"$field\" to be its only field: the byte storage is the whole value" SENDABLE-DECLARATION
+        }
+        set ns [dict get $decl namespace]
+        if {$ns ne "std" && ![string match std::* $ns]} {
+            # Only the standard library's byte types make byte storage:
+            # nothing else can promise what an `any` field holds.
+            Fail $span "sendable $form is the standard library's byte storage (std::abi::bytes): a field of struct \"$name\" holds no byte storage the compiler can vouch for (state \"sendable fields\" over fields of sendable types, or \"sendable through(TO, FROM) as R\")" SENDABLE-DECLARATION
+        }
+    }
+    return [dict create form $form args $args representation $representation span $span]
+}
+
+# The parts of every sendable clause of DECLS (apply's), checked once the
+# batch's field types are all registered: every field of a `fields` struct,
+# and the representation of a `through` one, sendable whatever the slots are
+# applied to (each slot taken as sendable: an application's own arguments
+# are judged where it is used, SendClass). A part that is not -- `any`, a
+# function, an opaque struct that states nothing -- would make the owner's
+# statement a marker on a representation the copy cannot rebuild.
+proc hir::structs::ValidateSendableParts {decls} {
+    variable registry
+    foreach decl $decls {
+        if {![dict exists $decl sendable]} continue
+        set id [identity [dict get $decl name] [dict get $decl namespace]]
+        set clause [dict get $registry $id sendable]
+        set name [dict get $decl name]
+        set slots [dict get $registry $id slots]
+        switch -- [dict get $clause form] {
+            fields {
+                foreach field [dict get $decl fields] {
+                    set t [dict get $registry $id types [dict get $field name]]
+                    lassign [hir::types::SendClass $t $slots [list [SelfType $id]]] class why
+                    if {$class ne "total"} {
+                        Fail [dict get $field typeSpan] "struct \"$name\" states \"sendable fields\", but field \"[dict get $field name]\" ([hir::types::show $t]) is not sendable: $why" SENDABLE-DECLARATION
+                    }
+                }
+            }
+            through {
+                set r [dict get $clause representation]
+                lassign [hir::types::SendClass $r $slots [list [SelfType $id]]] class why
+                if {$class ne "total"} {
+                    Fail [dict get $decl sendable representationSpan] "struct \"$name\" states \"sendable through\" with representation [hir::types::show $r], which is not sendable: $why" SENDABLE-DECLARATION
+                }
+            }
+        }
+    }
+}
+
 # The first mutable or affine component of TYPE, described ("" for none): a
 # MutableVector, a MutableArray, a coroutine handle, a C pointer or native
 # view or edit, or a struct holding one. A type slot or `any` is no
@@ -1252,23 +1793,113 @@ proc hir::structs::MutableComponent {type {seen {}}} {
         if {$type in $seen || ![declared $id] || [identityOf $id] ne ""} {
             return ""
         }
-        if {[catch {AppliedFieldTypes $type} fields]} {
+        # Whether it holds one is its declaration summary's answer
+        # (hir/summaries.tcl): an argument is read only where a value of it
+        # is held, and only by whether it holds one. The fields are walked
+        # only to say which (summaries.tcl's reason walk).
+        set classes [lmap a [hir::summaries::Arguments $type] {MutableComponentClass $a}]
+        set level [hir::summaries::Level mutableComponent $type $classes]
+        if {$level eq "" || $level == 0} {
             return ""
         }
-        foreach {name t} $fields {
-            if {$t eq {}} continue
-            set why [MutableComponent $t [concat $seen [list $type]]]
-            if {$why ne ""} {
-                if {[isOpaque $id]} {
-                    # (An opaque struct's representation is its owner's.)
-                    return "[hir::types::show $type], a mutable value"
-                }
-                return "[hir::types::show $type], whose field \"$name\" holds $why"
+        variable mutableClassOnly
+        if {$mutableClassOnly} {
+            # (A class alone was asked: MutableComponentClass.)
+            return "a mutable value"
+        }
+        if {[hir::summaries::Walked [list mutableComponent $type] why]} {
+            return $why
+        }
+        if {[hir::summaries::Whistle $type $seen]} {
+            return ""
+        }
+        set why [hir::summaries::Walk [list mutableComponent $type] {
+            MutableComponentParts $type [concat $seen [list $type]]
+        }]
+        if {$why ne ""} {
+            return $why
+        }
+        if {$seen eq {}} {
+            # (The walk stopped short of every such component: the reason
+            # walk's account, hir/summaries.tcl. The argument the summary
+            # says holds one, uncut, is named; else the recursion.)
+            hir::summaries::Count fallbacks
+            set i [hir::summaries::Contributor mutableComponent $type $classes 1]
+            if {$i ne ""} {
+                set a [lindex [hir::summaries::Arguments $type] $i]
+                return "[hir::types::show $type], whose fields hold values of its type argument [hir::types::show $a], which holds [MutableComponent $a]"
             }
+            return "[hir::types::show $type], whose fields hold, through a non-uniformly recursive declaration, a mutable value"
         }
     }
     return ""
 }
+
+# Why a value of the named struct type TYPE holds a mutable or affine value:
+# its first field, in order, that holds one (MutableComponent's reason walk;
+# SEEN already holds TYPE), or "".
+proc hir::structs::MutableComponentParts {type seen} {
+    if {[catch {AppliedFieldTypes $type} fields]} {
+        return ""
+    }
+    foreach {name t} $fields {
+        if {$t eq {}} continue
+        set why [MutableComponent $t $seen]
+        if {$why ne ""} {
+            if {[isOpaque [lindex $type 1]]} {
+                # (An opaque struct's representation is its owner's.)
+                return "[hir::types::show $type], a mutable value"
+            }
+            return "[hir::types::show $type], whose field \"$name\" holds $why"
+        }
+    }
+    return ""
+}
+
+# 1 if TYPE holds a mutable or affine value (MutableComponent's class
+# alone: no reason is looked for, so a named struct's class is its
+# summary's and nothing walks its fields -- an argument's classification
+# never starts a reason walk of its own).
+proc hir::structs::MutableComponentClass {type} {
+    variable mutableClassOnly
+    set saved $mutableClassOnly
+    set mutableClassOnly 1
+    try {
+        return [expr {[MutableComponent $type] ne ""}]
+    } finally {
+        set mutableClassOnly $saved
+    }
+}
+
+namespace eval hir::structs {
+    # 1 while MutableComponent is asked for a class alone
+    # (MutableComponentClass).
+    variable mutableClassOnly 0
+}
+
+# MutableComponent of {nstruct ID ARGUMENTS} from its applied fields (the
+# summary's node): 1 if one holds a mutable or affine value.
+proc hir::structs::MutableComponentNode {id arguments} {
+    set type [list nstruct $id]
+    if {$arguments ne {}} {
+        lappend type $arguments
+    }
+    if {[hir::types::IsAffine $type]} {
+        return 1
+    }
+    if {[catch {AppliedFieldTypes $type} fields]} {
+        return 0
+    }
+    foreach {name t} $fields {
+        if {$t ne {} && [MutableComponentClass $t]} {
+            return 1
+        }
+    }
+    return 0
+}
+
+hir::summaries::define mutableComponent -algebra classes -neutral int \
+    -probes [list int [list mutvec int]] -node hir::structs::MutableComponentNode
 
 # {SLOTS CONSTRAINTS}: the type slots of struct declaration DECL (apply's)
 # and the trait identities each one's `satisfies` names, {SLOT {TRAIT ...}
@@ -1332,7 +1963,7 @@ proc hir::structs::addDecls {decls} {
             dict set registry $id $entry
         }
     }
-    set affinity [dict create]
+    ForgetAffinity
     return $entries
 }
 

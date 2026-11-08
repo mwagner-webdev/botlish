@@ -550,7 +550,7 @@ test dr-native-representation {natively a DecimalRounded value is a boxed binary
         [regexp {op d64neg} $nir] [regexp {op d64tof64} $nir] [regexp {Float64} [regexp -inline {op d64add[^\n]*} $nir]]
 } -result {1 1 1 1 1 0}
 
-test dr-native-executable {a standalone executable computes and decides DecimalRounded values like the JIT; its type-blind result printing shows no digits of one} -constraints {nativeBuilt executableAot} -body {
+test dr-native-executable {a standalone executable computes and decides DecimalRounded values like the JIT; it prints nothing of its own (no value, so no digits of one), and its value, read through the driver protocol, carries a DecimalRounded value's representation, which the type-blind show displays with no digits} -constraints {nativeBuilt executableAot} -body {
     set dir [makeDirectory dr-exe-[pid]]
     set path [file join $dir prog.bot]
     set channel [open $path w]
@@ -564,9 +564,10 @@ test dr-native-executable {a standalone executable computes and decides DecimalR
     close $channel
     set hir [surface::readProgramFile $path -warnings off -cache ""]
     set exe [native::executable $hir [file join $dir prog]]
-    set output [exec $exe]
+    set output [standaloneValue $exe]
+    set printed [runStandalone $exe]
     file delete -force $dir
-    list [expr {$output eq [core::value::show [lindex [drRun compile $hir] 1] 1]}] $output
-} -result {1 {[true, false, true, 0.3, 1.0, <DecimalRounded>]}}
+    list [expr {$output eq [core::value::show [lindex [drRun compile $hir] 1] 1]}] $output $printed
+} -result {1 {[true, false, true, 0.3, 1.0, <DecimalRounded>]} {}}
 
 cleanupTests

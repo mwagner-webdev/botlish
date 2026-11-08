@@ -1,0 +1,162 @@
+# room.bot -- SAME-THREAD-ACTORS-MILESTONE-1.md, "Mailbox delivery and
+# backpressure": waiting for room is event-driven.
+#
+#   * A full mailbox (capacity 2): senders AA, BB and CC deliver and wait; DD
+#     first tries send (Full: it may not overtake the waiting senders) and
+#     then delivers. The receiver frees one place at a time; each freed
+#     place wakes exactly one waiting sender, in the order they began to
+#     wait: the receiver gets p1 p2 AA BB CC DD.
+#   * A full mailbox nobody receives from: E and F wait; the
+#     administration closes it, and both wake with Closed. Its slot is
+#     reused; G, holding the old address, is Stale at once.
+#   * Receiving from a mailbox that was never full wakes nobody.
+#   * A freed place is reserved for the sender it wakes: in the turn the
+#     receiver takes from a full mailbox of capacity 1 and wakes WW, SS's
+#     send (it did not wait) is Full; WW's message follows t0.
+#
+# No timer is involved: the loop's stats show none fired.
+import std::actor
+import std::event_loop
+import std::event_loop::deterministic
+import std::int
+import std::str
+import type std::actor::Sent
+
+struct Msg:
+    tag: str
+
+struct Line:
+    text: str
+
+fn sent_name(s: Sent) -> str:
+    if s == Sent::Delivered:
+        "Delivered"
+    elif s == Sent::Full:
+        "Full"
+    elif s == Sent::Closed:
+        "Closed"
+    else:
+        "Stale"
+
+# Sends TAG with deliver (waiting for room) after PAUSES turns.
+fn patient(tag: str, pauses: int, to: std::actor::Address[Msg], log: std::actor::Address[Line]) -> std::actor::Exit:
+    loop i from 0 to pauses:
+        std::actor::pause()
+    s = to.deliver(Msg {tag: tag})
+    log.send(Line {text: tag.concat(" delivered: ").concat(sent_name(s))})
+    std::actor::exit(0)
+
+# Tries send first; delivers when Full.
+fn impatient(tag: str, pauses: int, to: std::actor::Address[Msg], log: std::actor::Address[Line]) -> std::actor::Exit:
+    loop i from 0 to pauses:
+        std::actor::pause()
+    first = to.send(Msg {tag: tag})
+    log.send(Line {text: tag.concat(" send: ").concat(sent_name(first))})
+    if first == Sent::Full:
+        s = to.deliver(Msg {tag: tag})
+        log.send(Line {text: tag.concat(" delivered: ").concat(sent_name(s))})
+    std::actor::exit(0)
+
+# Waits WAIT turns, then receives N messages, one per turn, reporting their
+# order.
+fn receiver(inbox: std::actor::Inbox[Msg], wait: int, n: int, log: std::actor::Address[Line]) -> std::actor::Exit:
+    rx = inbox.listen():
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    loop i from 0 to wait:
+        std::actor::pause()
+    order = fold i from 0 to n with intermediate seen "":
+        m = rx.receive():
+            on std::actor::Closed:
+                break
+        seen.concat(m.tag).append_char(' ')
+    log.send(Line {text: "receiver got ".concat(order)})
+    std::actor::exit(0)
+
+nomethod fn say(text: str, n: int, context ev: std::event_loop::Loop) errors std::event_loop::SchedulerFault:
+    std::event_loop::log(text.concat(std::int::to_string(n)))
+
+nomethod fn spawn_patient(tag: str, pauses: int, to: std::actor::Address[Msg], log: std::actor::Address[Line], context ev: std::event_loop::Loop, ac: std::actor::Actors) errors std::event_loop::SchedulerFault:
+    a = inject no context:
+        coroutine {step, first} = patient(tag, pauses, to, log)
+        std::actor::spawned(step, first)
+    a.start()
+
+fn main(context ev: std::event_loop::Loop, d: std::event_loop::Driver, ac: std::actor::Actors) -> List[str] errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    {to: log, inbox: log_in} = std::actor::open[Line](32)
+
+    # FIFO among waiting senders, no overtaking.
+    {to: box, inbox: box_in} = std::actor::open[Msg](2)
+    std::actor::post(box, Msg {tag: "p1"})
+    std::actor::post(box, Msg {tag: "p2"})
+    r = inject no context:
+        coroutine {step, first} = receiver(box_in, 4, 6, log)
+        std::actor::spawned(step, first)
+    r.start()
+    spawn_patient("AA", 0, box, log)
+    spawn_patient("BB", 0, box, log)
+    spawn_patient("CC", 1, box, log)
+    d_actor = inject no context:
+        coroutine {step, first} = impatient("DD", 2, box, log)
+        std::actor::spawned(step, first)
+    d_actor.start()
+    std::event_loop::run()
+    st1 = std::actor::stats()
+    say("main: room waits ", st1.room_waits)
+    say("main: room wakes ", st1.room_wakes)
+
+    # A close wakes every waiting sender with Closed; the reused slot's old
+    # address is Stale.
+    {to: dead, inbox: dead_in} = std::actor::open[Msg](1)
+    std::actor::post(dead, Msg {tag: "qq"})
+    spawn_patient("EE", 0, dead, log)
+    spawn_patient("FF", 0, dead, log)
+    std::event_loop::turn()
+    std::event_loop::turn()
+    say("main: closed the full mailbox, undelivered ", std::actor::close(dead))
+    {to: again, inbox: again_in} = std::actor::open[Msg](1)
+    spawn_patient("GG", 0, dead, log)
+    std::event_loop::run()
+    say("main: the reused mailbox holds ", std::actor::queued(again))
+
+    # Receiving from a mailbox that was never full posts no room wake.
+    {to: roomy, inbox: roomy_in} = std::actor::open[Msg](4)
+    std::actor::post(roomy, Msg {tag: "xx"})
+    std::actor::post(roomy, Msg {tag: "yy"})
+    q = inject no context:
+        coroutine {step, first} = receiver(roomy_in, 0, 2, log)
+        std::actor::spawned(step, first)
+    q.start()
+    std::event_loop::run()
+    st2 = std::actor::stats()
+    say("main: room wakes after the roomy mailbox ", st2.room_wakes)
+
+    # The reservation: R2 and SS both act in turn 3, R2 first; WW, woken
+    # by R2's take, runs in turn 4.
+    {to: tight, inbox: tight_in} = std::actor::open[Msg](1)
+    std::actor::post(tight, Msg {tag: "t0"})
+    r2 = inject no context:
+        coroutine {step, first} = receiver(tight_in, 2, 2, log)
+        std::actor::spawned(step, first)
+    r2.start()
+    spawn_patient("WW", 0, tight, log)
+    ss = inject no context:
+        coroutine {step, first} = impatient("SS", 2, tight, log)
+        std::actor::spawned(step, first)
+    ss.start()
+    std::event_loop::run()
+    say("main: timers fired ", std::event_loop::stats().timers_fired)
+    loop l in std::actor::drain(log_in):
+        std::event_loop::log("log: ".concat(l.text))
+    std::event_loop::trace()
+
+with context std::event_loop::create(64)
+with context std::event_loop::deterministic::create()
+with context std::actor::create()
+main():
+    on std::event_loop::SchedulerFault:
+        ["SchedulerFault"]
+    on std::event_loop::DriverFault:
+        ["DriverFault"]
+    on std::event_loop::LoopReentered:
+        ["LoopReentered"]

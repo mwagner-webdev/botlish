@@ -37,9 +37,13 @@
 #                                        "= true"/"= false" when decided;
 #                                        "installs ID" on a verified context
 #                                        installation (CONTEXTS.md)
-#   eN if                                followed by "then SCOPE ..." and
+#   eN if ?injects (IDS)?                followed by "then SCOPE ..." and
 #                                        "else SCOPE ..." lines with the
-#                                        refinements proven on entry
+#                                        refinements proven on entry;
+#                                        "injects" on an inject block, the
+#                                        contexts its code may use
+#                                        (RESTRICTED-CONTEXT-INJECTION-
+#                                        MILESTONE-1.md)
 #   eN loop SCOPE
 #   eN listloop SCOPE (ELEM)             children: the iterable, then the body
 #   eN countloop SCOPE (I) ?DIR KIND?    DIR up|down, KIND exclusive|inclusive,
@@ -233,7 +237,8 @@ proc hir::format::TypeDecl {entry} {
     }
     if {[dict exists $entry kind] && [dict get $entry kind] eq "struct"} {
         # A struct declaration (hir/structs.tcl): "struct ID name NAME ns NS
-        # [opaque] [context] [slots [S, ...]] fields F1: T1, F2: T2" (NS "-"
+        # [opaque] [context] [resource] [slots [S, ...]] fields F1: T1, F2:
+        # T2" (NS "-"
         # for the entry program), the
         # fields in declared (slot) order with their resolved types. The
         # `opaque` word is printed only for an opaque struct
@@ -246,6 +251,11 @@ proc hir::format::TypeDecl {entry} {
         set opaque [expr {[dict exists $entry opaque] && [dict get $entry opaque] ? "opaque " : ""}]
         if {[dict exists $entry context] && [dict get $entry context]} {
             append opaque "context "
+        }
+        if {[dict exists $entry resource] && [dict get $entry resource]} {
+            # A resource struct (LEXICAL-RESOURCE-CLEANUP-EXPLORATION-
+            # MILESTONE-1.md); printed only for one.
+            append opaque "resource "
         }
         if {[dict exists $entry slots]} {
             # A parameterized struct's type slots (TRAIT-CONSTRAINED-
@@ -267,6 +277,16 @@ proc hir::format::TypeDecl {entry} {
             # IDENTITY.md): "identity FORM(F1,F2) ", printed only for one.
             set identity [dict get $entry identity]
             append opaque "identity [dict get $identity form]([join [dict get $identity fields] ,]) "
+        }
+        if {[dict exists $entry sendable]} {
+            # The owner's sendability statement (SENDABILITY-AND-VALUE-
+            # COPY-MILESTONE-1.md): "sendable FORM(A,B) [as R] ", printed
+            # only for one.
+            set sendable [dict get $entry sendable]
+            append opaque "sendable [dict get $sendable form]([join [dict get $sendable args] ,]) "
+            if {[dict get $sendable representation] ne ""} {
+                append opaque "as [hir::types::show [dict get $sendable representation]] "
+            }
         }
         if {[dict exists $entry tree]} {
             # A tree struct (TREE-STRUCT-MILESTONE-1.md): "tree FIELD ", its
@@ -567,6 +587,16 @@ proc hir::format::Expr {hir e indent origins linesVar} {
                 # A C callback (C-CALLBACK-MILESTONE-1.md): its foreign ABI.
                 append text " callback [dict get $node callback]"
             }
+            if {[dict exists $node cleanup]} {
+                # A resource's cleanup (LEXICAL-RESOURCE-CLEANUP-EXPLORATION-
+                # MILESTONE-1.md).
+                append text " cleanup"
+            }
+            if {[dict exists $node threadEntry]} {
+                # A thread entry (BOTLISH-OWNED-THREADS-AND-CROSS-THREAD-
+                # ACTORS-MILESTONE-1.md).
+                append text " thread"
+            }
             if {[dict exists $node variadic]} {
                 # A variadic function (VARIADICS-VERTICAL-SLICE-1.md): its
                 # first N parameters are the fixed ones, parameter N the List
@@ -686,7 +716,13 @@ proc hir::format::Expr {hir e indent origins linesVar} {
             }
         }
         if {
-            Line $hir $e if $indent $origins lines
+            set text if
+            if {[dict exists $node injects]} {
+                # An inject block (RESTRICTED-CONTEXT-INJECTION-
+                # MILESTONE-1.md): the contexts its code may use.
+                append text " injects ([join [dict get $node injects] {, }])"
+            }
+            Line $hir $e $text $indent $origins lines
             Expr $hir [dict get $node condition] $inner $origins lines
             foreach {role outcome} {then 1 else 0} {
                 set s [dict get $node ${role}Scope]

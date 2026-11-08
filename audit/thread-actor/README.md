@@ -14,7 +14,7 @@ these probes as scenarios.
 | `probe-a/failure.bot` | a failing actor's mailbox stays open; reaping closes it |
 | `probe-a/reject-*.bot` | programs the compiler must reject (wrong message type, forged address, reading a queue, handler as a value, resuming an adopted task, an affine message) |
 | `probe-b/` | Probe B: producer threads (C) posting records with copied payloads through the Linux event loop's ABI v1; the loop's actors copy them into their own heap |
-| `probe-c/matrix.bot`, `tools/sendability.tcl` | Probe C: a sendability classifier over real checked types |
+| `probe-c/matrix.bot`, `tools/sendability.tcl` | Probe C: a sendability classifier over real checked types (a prototype; the compiler's judgement is `hir::types::SendClass`, SENDABILITY-AND-VALUE-COPY-MILESTONE-1.md) |
 | `probe-d/` | Probe D: a native library served on a Botlish-owned thread of a C host; `reject-*.bot`: what library mode cannot hold between calls |
 | `probe-e/` | Probe E: two library instances (two VMs) on two threads exchanging copied messages, also under GC stress |
 | `probe-f/` | Probe F: costs of same-thread actors on the Linux driver |

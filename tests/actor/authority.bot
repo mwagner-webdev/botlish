@@ -1,0 +1,232 @@
+# authority.bot -- SAME-THREAD-ACTORS-MILESTONE-1.md, "Restricted injection":
+# one application installs Network, Storage, Clock, the event loop (Loop and
+# its deterministic driver) and the mailbox administration (Actors). Its
+# supervisor actor uses all of them; it starts
+#
+#   * a calculation actor constructed inside `inject no context:` -- it
+#     receives Calculation messages and replies with Results, and asks the
+#     supervisor (through an address the supervisor delegated to it in each
+#     message) to perform the one privileged operation it cannot: a
+#     transmission over the Network;
+#   * a storage actor constructed inside `inject context Storage:`.
+#
+# All three run on one thread, one VM, one heap, one std::event_loop, and
+# the same installed context implementations. The negative tests
+# (tests/actor.test, actor-authority-*) put one forbidden operation in
+# calc_probe, storage_probe or the supervisor's inject block of THIS
+# program -- with every context still installed -- and the compiler
+# rejects it at the inject boundary.
+import std::actor
+import std::event_loop
+import std::event_loop::deterministic
+import std::int
+import std::mutable_array
+import std::mutable_vector
+import std::str
+import type std::actor::Sent
+
+context struct Network:
+    sent: MutableVector[int]
+
+context struct Storage:
+    records: MutableVector[int]
+
+context struct Clock:
+    ticks: MutableArray[int]
+
+fn transmit(n: int, context net: Network) -> int:
+    net.sent.push(n)
+    net.sent.length()
+
+fn store(n: int, context st: Storage) -> int:
+    st.records.push(n)
+    st.records.length()
+
+fn read_clock(context c: Clock) -> int errors IndexNotFound:
+    t = c.ticks.at(0) + 1
+    c.ticks.set(0, t)
+    t
+
+enum Op:
+    Square,
+    Fib,
+    Upload,
+    Stop,
+
+struct Result:
+    id: int
+    value: int
+    by: str
+
+# A request for a privileged operation (to the supervisor).
+struct Request:
+    n: int
+    id: int
+    reply: std::actor::Address[Result]
+
+struct Calculation:
+    op: Op
+    n: int
+    id: int
+    reply: std::actor::Address[Result]
+    privileged: std::actor::Address[Request]
+
+struct Record:
+    n: int
+    id: int
+    reply: std::actor::Address[Result]
+
+fn fib(n: int) -> int:
+    if n < 2:
+        n
+    else:
+        fib(n - 1) + fib(n - 2)
+
+# What the calculation actor does besides its work: nothing here; the
+# negative tests put a privileged operation in its place.
+fn calc_probe() -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    0
+
+# The same, for the storage actor.
+fn storage_probe() -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    0
+
+# The calculation actor: no context. Its inbox, the reply addresses and the
+# supervisor's request address are values it was given.
+fn calculator(inbox: std::actor::Inbox[Calculation]) -> std::actor::Exit errors IndexNotFound, std::event_loop::SchedulerFault:
+    rx = inbox.listen():
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    served = fold with intermediate k 0:
+        c = rx.receive():
+            on std::actor::Closed:
+                break
+        if c.op == Op::Stop:
+            break
+        p = calc_probe()
+        if c.op == Op::Square:
+            c.reply.send(Result {id: c.id, value: c.n * c.n + p, by: "calculator"})
+        elif c.op == Op::Fib:
+            c.reply.send(Result {id: c.id, value: fib(c.n) + p, by: "calculator"})
+        else:
+            c.privileged.deliver(Request {n: c.n * 2, id: c.id, reply: c.reply})
+        k + 1
+    std::actor::exit(served)
+
+# A variant the laundering test constructs instead: it resumes a coroutine
+# it is given.
+fn courier(inbox: std::actor::Inbox[Calculation], helper: Coroutine{args: [], return: int, errors: []}) -> std::actor::Exit:
+    rx = inbox.listen():
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    c = rx.receive():
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    c.reply.send(Result {id: c.id, value: helper(), by: "courier"})
+    std::actor::exit(0)
+
+# A privileged coroutine (it needs the Network): the laundering test
+# constructs it in the supervisor and hands it to an actor.
+fn uploader(n: int, context net: Network) -> int:
+    yield 0
+    transmit(n)
+
+# The storage actor: Storage only.
+fn archivist(inbox: std::actor::Inbox[Record], context st: Storage) -> std::actor::Exit errors IndexNotFound, std::event_loop::SchedulerFault:
+    rx = inbox.listen():
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    stored = fold with intermediate k 0:
+        r = rx.receive():
+            on std::actor::Closed:
+                break
+        count = store(r.n + storage_probe())
+        r.reply.send(Result {id: r.id, value: count, by: "archivist"})
+        k + 1
+    std::actor::exit(stored)
+
+nomethod fn note(text: str, n: int, context ev: std::event_loop::Loop) errors std::event_loop::SchedulerFault:
+    std::event_loop::log(text.concat(std::int::to_string(n)))
+
+# The supervisor actor: every context of the application. ME is its own
+# address, which it delegates to the calculator.
+fn supervisor(inbox: std::actor::Inbox[Request], me: std::actor::Address[Request], context ev: std::event_loop::Loop, ac: std::actor::Actors, net: Network, st: Storage, clock: Clock) -> std::actor::Exit errors IndexNotFound, std::event_loop::SchedulerFault:
+    rx = inbox.listen():
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    {to: calc, inbox: calc_in} = std::actor::open[Calculation](4)
+    {to: arch, inbox: arch_in} = std::actor::open[Record](4)
+    {to: results, inbox: results_in} = std::actor::open[Result](16)
+    c = inject no context:
+        marker = 0
+        coroutine {step, first} = calculator(calc_in)
+        std::actor::spawned(step, first)
+    calc_id = c.start()
+    a = inject context Storage:
+        coroutine {step, first} = archivist(arch_in)
+        std::actor::spawned(step, first)
+    arch_id = a.start()
+    note("supervisor: started the calculator, task ", calc_id)
+    note("supervisor: started the archivist, task ", arch_id)
+    got = results_in.listen():
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    calc.deliver(Calculation {op: Op::Square, n: 7, id: 1, reply: results, privileged: me})
+    calc.deliver(Calculation {op: Op::Fib, n: 20, id: 2, reply: results, privileged: me})
+    calc.deliver(Calculation {op: Op::Upload, n: 21, id: 3, reply: results, privileged: me})
+    arch.deliver(Record {n: 5, id: 4, reply: results})
+    # The calculator's request for a privileged operation: the supervisor
+    # performs it with its own authority, and replies to the address the
+    # request names.
+    req = rx.receive():
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    sent = transmit(req.n)
+    note("supervisor: transmitted for calculation ".concat(std::int::to_string(req.id)).concat(" at clock "), read_clock())
+    req.reply.send(Result {id: req.id, value: sent, by: "supervisor"})
+    loop i from 0 to 4:
+        r = got.receive():
+            on std::actor::Closed:
+                Result {id: -1, value: -1, by: "nobody"}
+        note("supervisor: result ".concat(std::int::to_string(r.id)).concat(" by ").concat(r.by).concat(" = "), r.value)
+    # Lifecycle: the calculator is asked to stop; the archivist's mailbox is
+    # closed by the administration (its receive then answers Closed).
+    calc.deliver(Calculation {op: Op::Stop, n: 0, id: 0, reply: results, privileged: me})
+    note("supervisor: closed the archivist's mailbox, undelivered ", std::actor::close(arch))
+    std::actor::exit(sent)
+
+fn main(context ev: std::event_loop::Loop, d: std::event_loop::Driver, ac: std::actor::Actors, net: Network, st: Storage, clock: Clock) -> List[str] errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    {to: sup, inbox: sup_in} = std::actor::open[Request](8)
+    s = inject context Network, Storage, Clock, std::event_loop::Loop, std::actor::Actors:
+        coroutine {step, first} = supervisor(sup_in, sup)
+        std::actor::spawned(step, first)
+    note("main: started the supervisor, task ", s.start())
+    std::event_loop::run()
+    loop o in std::event_loop::take_outcomes():
+        note("main: task ".concat(std::int::to_string(o.task)).concat(" ended with "), o.value)
+    loop i from 0 to net.sent.length():
+        note("main: the network carried ", net.sent.at(i))
+    loop i from 0 to st.records.length():
+        note("main: storage holds ", st.records.at(i))
+    stats = std::actor::stats()
+    note("main: actors started ", stats.started)
+    note("main: actors ended ", stats.ended)
+    note("main: actors running ", stats.running)
+    note("main: open mailboxes ", stats.open)
+    std::event_loop::trace()
+
+with context std::event_loop::create(64)
+with context std::event_loop::deterministic::create()
+with context std::actor::create()
+with context Network {sent: std::mutable_vector::from_list([])}
+with context Storage {records: std::mutable_vector::from_list([])}
+with context Clock {ticks: std::mutable_array::create(1, 100)}
+main():
+    on IndexNotFound:
+        ["IndexNotFound"]
+    on std::event_loop::SchedulerFault:
+        ["SchedulerFault"]
+    on std::event_loop::DriverFault:
+        ["DriverFault"]
+    on std::event_loop::LoopReentered:
+        ["LoopReentered"]

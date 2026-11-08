@@ -128,8 +128,12 @@
 @@ bare-case-accepted a bare case name resolves to the one enum that declares it (cases injected into the scope)
 ## hir/resolve.tcl
 <<<<
+        dict lappend hir rootRefs $e
+    } else {
         set b [Lookup hir $scope $name]
 ====
+        dict lappend hir rootRefs $e
+    } else {
         set b [Lookup hir $scope $name]
         if {$b eq ""} {
             set owners [lmap id [dict keys $::hir::enums::registry] {
@@ -253,9 +257,9 @@ proc core::primitives::add {a b} {
 @@ hash-ignores-enum-native the hash ignores the enum's identity (native runtime)
 ## native/src/runtime/ops.rs
 <<<<
-                sink.text(info.name.as_bytes());
+            sink.text(info.name.as_bytes());
 ====
-                let _ = &info.name;
+            let _ = &info.name;
 >>>>
 
 @@ hash-uses-position-tcl the hash reads a case's position instead of its name (Tcl runtimes): reordering changes it
@@ -269,9 +273,9 @@ proc core::primitives::add {a b} {
 @@ hash-uses-position-native the hash reads a case's number instead of its name (native runtime): reordering changes it
 ## native/src/runtime/ops.rs
 <<<<
-                sink.text(info.cases[c as usize].as_bytes());
+            sink.text(info.cases[c as usize].as_bytes());
 ====
-                sink.text(c.to_string().as_bytes());
+            sink.text(c.to_string().as_bytes());
 >>>>
 
 @@ enum-affine an enum is accidentally affine

@@ -6,6 +6,99 @@ Push finished work directly to `main`. This project does not use a
 feature-branch-plus-pull-request review cycle: don't open a PR unless
 explicitly asked to.
 
+When you work on a branch instead (a session's own instructions can require
+one), check `main`'s CI at both ends of the work
+(MAIN-CI-FAILURES-2026-11.md, "Why they reached main and why they stayed"):
+
+* **Before you branch off,** read the latest run of every workflow on
+  `main` (the GitHub MCP server's `actions_list`, method
+  `list_workflow_runs`, branch `main`). A run that is queued or in progress
+  is acceptable. A red one is never branched off silently: tell the user
+  which workflows and tests fail on `main` before you build on it, and keep
+  that list, so your branch's failures are compared with it rather than
+  dismissed as "main's own".
+* **Before you merge a finished milestone into `main`,** check again:
+  `main`'s latest runs and your branch's own. `macos-arm64.yml` and
+  `windows-x86_64.yml` run on every branch push; `tests.yml` and
+  `tests-arm64.yml` run only their canary on a branch push (next section)
+  and the rest only when dispatched (`workflow_dispatch` with the branch as
+  the ref), so dispatch them. Don't merge onto a red
+  `main` without telling the user. A failure on your branch that `main`'s
+  latest run does not have is yours to fix before the merge. Pending runs
+  are acceptable: report them as pending, never as passed.
+
+A newer push cancels a running test workflow on the same ref, on `main`
+too, so a run of `main` may end `cancelled`: it was superseded, and says
+nothing either way. Read the latest run of the workflow instead. Merging a
+branch makes its unfinished runs obsolete, and `prune-runs.yml` cancels
+them (CI-RUNS.md; next section).
+
+## CI housekeeping (cancellation, pruning, the release gate, the canary)
+
+The runners are a shared, limited pool, and main's merges come in bursts
+(CI-RUNS.md). Four rules keep obsolete and doomed runs off them and keep
+releases honest; `tools/ci/runs.py` implements the second and the third,
+`tests/canary.tcl` the fourth. Keep it so:
+
+* **A newer push cancels a running test workflow on the same ref, on main
+  too:** a workflow that tests a push has `concurrency: group:
+  NAME-${{ github.ref }}` and `cancel-in-progress: true`. Never exempt main
+  again: a burst's last push gets the complete run. The only exceptions are
+  a tag's run, a release run, scalar-asm-audit.yml (it writes back to
+  main), react-native-probe.yml (census evidence) and release-gate.yml.
+* **`prune-runs.yml` cancels the unfinished runs of branches fully in
+  main** (the tip is main's or an ancestor; a deleted branch's run whose
+  commit is in main). It never cancels a run of main, a tag or a fork, or
+  of a branch with a commit main lacks; never give it such a rule. Main's
+  head may be a commit no workflow ran (scalar-asm-audit's).
+* **A release is published only once every test of its commit is green**,
+  by a run nothing cancels. `CORE`: tests.yml and tests-arm64.yml with their
+  GC-stress jobs *succeeded* (skipped is no success), macos-arm64.yml,
+  windows-x86_64.yml, static-decisions.yml when it ran, and the release's
+  own build workflow. Any run at the commit counts.
+  - `release-gate.yml` (workflow_run of those workflows on main) dispatches
+    single-executable.yml or icy-tower-windows.yml on main with
+    `release=SHA` for main's newest green commit (`run-name: release SHA`,
+    a concurrency group of its own, never cancelled). That release run
+    builds nothing: it checks again (`runs.py check --require`) and
+    publishes the artifact of the commit's green push run. A push that
+    supersedes the commit meanwhile does not stop it.
+  - A release tag's run waits for icy-tower-macos.yml's `tested` job. Until
+    the commit's tests are green it is deferred, and the gate dispatches it
+    on the tag again.
+  - Never publish from a push run, never rebuild in a release run, never
+    give the gate a credential or more than `actions: write`, and never
+    give it a way to dispatch a release twice or move a tag backwards.
+  - A release run holds `NAME-release`; its publish job's group is
+    `NAME-publish`. Never put a job in the group its own run holds: GitHub
+    fails such a job before it gets a runner (every release run did so
+    until 2026-11-08; `test_no_job_waits_for_its_own_run`).
+* **Every test workflow runs its host's canary first, and its expensive
+  jobs wait for it** (CI-RUNS.md, "The canary"): tests.yml, tests-arm64.yml
+  and windows-x86_64.yml a `canary` job, macos-arm64.yml the smoke job's
+  last step. It runs, within about ten minutes, the test files and golden
+  suites the push adds or changes, then the ones `tests/canary.tsv`'s
+  history says failed recently on that host; tests.yml's runs the mutant
+  catalogs and the warning gate first, as steps (a job of its own would
+  wait for a runner before the expensive jobs could start: keep them steps).
+  On a branch push tests.yml and tests-arm64.yml run only the canary. The
+  canary orders, it never skips: never drop a job or
+  a test because the canary passed, never let an expensive job start
+  before it (a job that runs after a failed need checks the canary's
+  result itself), and never give it an item list of its own beside its
+  selection. `tools/ci/test_runs.py` checks the workflows' side. A new
+  test workflow, or a new expensive job, waits for its host's canary.
+
+If you change `tools/ci/`, a workflow's concurrency or triggers, a release
+job, or the name of a workflow or of a GC-stress job a requirement names,
+run `python3 -I tools/ci/test_runs.py` (it also checks the workflows' side
+of these rules), `python3 -I audit/macos-release/tests/test_workflow.py`
+and that audit's mutants for icy-tower-macos.yml, and
+`tclsh9.0 tools/mutant-catalogs.tcl`. Then push and read the `ci tools`
+run, which runs the gate and the pruning read-only against the
+repository's runs. A new required workflow goes into `CORE` and into
+release-gate.yml's `workflow_run` list together (the tests check it).
+
 ## Documentation layout
 
 The root `README.md` is the project overview. Everything else is in `docs/`:
@@ -47,6 +140,10 @@ outside `docs/` starts with `../`.
   `tests/helpers.tcl` that hand the compiler the HIR the program was lowered
   from (or read hand-written IR text into HIR); they are not production entry
   points.
+
+The C backend (`ccompile/`, below) also compiles analyzed HIR, and is only as
+precise as the analyses: every enhancement of type inference is analyzed for
+what it gives the C target too ("The C backend", below).
 
 ## Compilation isolation
 
@@ -240,17 +337,19 @@ zipkit holding main.tcl, the compiler stack, both native executables and the
 runtime archive, needing only glibc (and, to link a program that calls C,
 the host's C compiler driver: SINGLE-EXECUTABLE-FFI-MILESTONE-1.md). The workflow `.github/workflows/single-executable.yml`
 builds it on every push to `main` and smoke-tests it in stock Ubuntu
-containers (`single/smoke-test.sh`), then publishes it as the
-`botlish-linux-x86_64` asset of the rolling `single-latest` prerelease. The
-README's download button links to that tag and asset name: rename either
-only together with the button. Its base kit is a static tclsh that the
+containers (`single/smoke-test.sh`); once every test of the commit is green,
+the release gate's release run publishes that build as the
+`botlish-linux-x86_64` asset of the rolling `single-latest` prerelease
+(CI-RUNS.md). The README's download button links to that tag and asset
+name: rename either only together with the button. Its base kit is a static tclsh that the
 script builds once from the pinned Tcl 9.0.1 source release. That build is
 the one exception to "do not build Tcl 9 from source" above: no package ships
 a static zipfs tclsh. `--basekit PATH` uses a prebuilt zipkit instead. To run
 the test suite, still install the `.deb`s.
 
 * `single/package.tcl` packs exactly main.tcl, LICENSE, `core/`,
-  `compiler/`, `hir/`, `surface/`, `service/`, `lsp/`, `native/*.tcl`, `stdlib/`,
+  `compiler/`, `hir/`, `surface/`, `service/`, `lsp/`, `pm/`, `ccompile/`,
+  `native/*.tcl`, `stdlib/`,
   `compilerpedia/compilerpedia.tcl`, `compilerpedia/topics/` and
   `compilerpedia/generated/`, plus a `BUILD` file naming the source
   revision. If the compiler starts reading another file at run time, add
@@ -344,6 +443,68 @@ the test suite, still install the `.deb`s.
   `single/smoke-test.sh` and `single/ffi-smoke-test.sh` after
   `single/build.sh`.
 
+## The C backend (main.tcl -emit-c)
+
+`ccompile/ccompile.tcl` (C-COMPILE-FREESTANDING-MILESTONE-1.md) writes an
+analyzed HIR as freestanding C11: `PREFIX.h`, `PREFIX.c`,
+`PREFIX_display.c`, `PREFIX.runtime.json` and, when the C uses it, a copy
+of `ccompile/botlish_rt_v1.h`, the runtime-service interface. It compiles
+one C function per instance of `hir::specialize` and reads `hir::range`'s
+proofs, as native lowering does, and runs no C compiler. Keep it so:
+
+* No semantics of its own: it consumes HIR and the existing analyses, adds
+  no range analysis, never reads NIR or core IR, and changes nothing in
+  `hir/`, `core/` or `surface/` for C's sake. A fact it needs and the
+  analyses lack is the Int path (correct, slower) or C UNSUPPORTED, never
+  an assumption.
+* An Int is an `int64_t` only on a proof (its Range, its domain, or a
+  representation chosen on one); `+ - *` are C arithmetic only when the
+  operands' and `hir::range::add/sub/mul` of them fit int64_t. Never emit C
+  signed arithmetic that can overflow, `<<` or `>>` of a negative, or `%`
+  with a divisor that may be 0 or `-1` with INT64_MIN. Narrowing an Int to
+  an `int64_t` reads `small`, on a proof only; the services' normalization
+  (botlish_rt_v1.h) is what makes it exact.
+* What C cannot implement is a call of a `botlish_rt_v1_*` service the
+  interface declares, listed in the manifest: a missing provider is a link
+  error, never a compilation error, a placeholder or a fake implementation.
+  What the backend cannot translate is `C UNSUPPORTED` at the construct,
+  never a symbol reference. A new service is a row of `ccompile::services`,
+  a declaration and contract in botlish_rt_v1.h (a v2 header for an
+  incompatible change), and the reference provider's implementation.
+* The generated C stays freestanding C11: `stdint.h`, `stdbool.h`,
+  `stddef.h` only; no allocation, I/O, `main`, extension or inline
+  assembly; every global name prefixed; helpers emitted only when used; it
+  compiles warning-free under tests/c-compile.test's flags (`-Wconversion`
+  included). Errors are statuses: never terminate the process.
+* The manifest and the C are deterministic and agree: the manifest names
+  exactly the service symbols the C calls, per translation unit.
+* Harnesses and providers stay outside the backend
+  (`examples/c-freestanding/`), as integration code of a target's.
+* **Every enhancement of type inference is also analyzed for what it gives
+  the C target.** The backend adds no analysis of its own, so its
+  precision is the analyses': a new or sharper fact -- a type or a Range
+  (hir/types.tcl, hir/range.tcl, a join's, a fold intermediate's, an
+  operation's result), a semantic instance (hir/specialize.tcl), a
+  function's contract (hir/signatures.tcl), a List length, an enum known
+  statically -- can make an Int an `int64_t`, take a runtime service out of
+  a program's manifest, or make a C UNSUPPORTED construct compile. Such a
+  fact is an enhancement of the analyses, made for every backend, never a
+  rule of the backend's. Run `main.tcl -emit-c` over the corpus of
+  C-COMPILE-FREESTANDING-MILESTONE-1.md, section 14, before and after the
+  change, and record in the change's report what it changes for C: which
+  programs now compile, which values change representation, which services
+  leave a manifest, which C UNSUPPORTED it removes -- or that it changes
+  nothing for C. A fact the C target cannot use yet (the backend reads
+  something else) is recorded too, as the backend's next step.
+  `tests/c-compile.test` must still pass.
+
+If you change `ccompile/`, `examples/c-freestanding/` or what the backend
+reads (`hir::specialize`'s instances, `hir::range`'s results, the HIR node
+kinds it compiles), run `tests/c-compile.test` (its cross tests need clang,
+ld.lld, qemu-user and the cross libgcc packages, and are skipped without
+them), `tests/main-cli.test` and `tools/compilerpedia.tcl check`, and
+`examples/c-freestanding/demo.sh`.
+
 ## The macOS application (Botlish.app)
 
 On macOS the packaged compiler is an application bundle, not one file
@@ -424,8 +585,14 @@ per test file or suite, each with a private `-tmpdir`):
 * **every golden suite on all four backends**, in their place, **through the
   front-end cache** (`.hirx` entries; HIR-INTERCHANGE.md).
 
-It prints a line per file and suite, then every failure with the command
-that reruns it, and exits 1 on any.
+It starts the likeliest to fail first (`-priority 1`, the default): the
+files and suites this checkout changes against origin/main, its working
+tree included, then those that failed recently in CI on this host
+(`tests/canary.tsv`), as the CI canary selects them (CI-RUNS.md, "The
+canary"). `-fail-fast 1` starts nothing more after the first failure and
+reports the rest as not run. It prints a line per file and suite, then
+every failure with the command that reruns it, and exits 1 on any (or on
+anything not run).
 
 What it costs, measured on a 4-core container (2026-10-15):
 
@@ -498,8 +665,10 @@ What it costs, measured on a 4-core container (2026-10-15):
   - on Linux arm64 (`.github/workflows/tests-arm64.yml`, ubuntu-24.04-arm):
     the Tcl suite on interp and compile, its cranelift and cranelift-generic
     coverage, the golden suites, the native Rust unit tests (also under GC
-    stress) and, except on pull requests, the GC-stress run. Run it on a
-    branch with workflow_dispatch.
+    stress) and, on pushes to main and manual runs, the GC-stress run. Run
+    it on a branch with workflow_dispatch;
+  - first, on every push to any branch and on every host, the canary
+    (CI-RUNS.md, "The canary"), which the jobs above wait for.
 
   A push or pull request that changes only Markdown files and `docs/` starts
   no workflow (their `paths-ignore`). Renaming or removing a design document
@@ -583,6 +752,33 @@ name; new tests and tools must keep it that way:
   (or under a name with `[pid]`) and removes it when it finishes, never under a
   fixed name in the working directory or the repository; one that runs a test
   file passes it a private `-tmpdir`.
+
+## Tests that hold on every host, and mutants that still apply
+
+A test is written on one machine and run on four hosts and in several
+temporary directories (MAIN-TEST-DEFECTS-2026-11.md has the cases). Keep
+what it depends on in its code or its constraints:
+
+* Wait for a child process by closing its pipeline (`open |[list ...] r`,
+  read to the end, `close`) or by a plain `exec`: never by probing `/proc`,
+  `ps` or a delay, which hold on Linux only, or only on a fast machine.
+* Every tool a test runs is in its constraint. A library of another
+  architecture is linked with `-fuse-ld=lld` (GNU ld links only its own) and
+  the test carries an `lld` constraint.
+* Never match a word against output that names a host path (the temporary
+  directory, the checkout): map the paths out first (`string map [list $dir
+  DIR]`). The native coverage jobs' temporary directory is
+  `/tmp/native-coverage_XXXXXX`.
+
+A change can break another audit's mutant: rewrite or duplicate the text it
+replaces, and that mutant guards nothing until its own harness next runs.
+`tclsh9.0 tools/mutant-catalogs.tcl` applies every mutant of every catalog
+under `audit/` to the tree in memory (seconds; a step of `tests.yml`'s
+canary job). Run it before pushing a change to code. A mutant it reports is
+updated in the same change, kept a mutant of the same rule, and run through
+its own harness (`-only NAME`). A new catalog whose files are not relative
+to the repository root, or not named by `## FILE` lines, gets a row in the
+tool's `Catalogs` table.
 
 ## Native GC-stress validation
 
@@ -725,7 +921,7 @@ lists, each with the obstruction that keeps it open (REFACTOR-WARNINGS-CLEAN.md)
 `audit/refactor/tools/gate.tcl` checks it -- every corpus program and a one-line
 loader per library module, the observed warnings equal to the manifest (code
 and location), and every program and loader without an entry compiling under
-`-warnings error` -- and the `warning-gate` job of `.github/workflows/tests.yml`
+`-warnings error` -- and a step of `.github/workflows/tests.yml`'s canary job
 runs it on every push and pull request (`tests/warning-gate.test` pins that it
 passes and that it fails on a planted warning).
 
@@ -746,7 +942,14 @@ If you add or change a program in `examples/`, `bench/` or `stdlib/`, run
 * A new corpus program must be listed (with its entries, if any).
 * Do not edit `audit/refactor/kickoff-corpus/`: it is the frozen,
   warning-bearing fixture the backend-independence CLI tests (and one
-  String-region test of the `peek()` idiom) read, not corpus.
+  String-region test of the `peek()` idiom) read, not corpus. Never clean a
+  warning out of it. The one exception is a language change that makes one
+  of its programs stop compiling: migrate that program in the same change,
+  only as far as compiling again takes. Every warning must keep its code
+  and its text (only positions may move), and every program its results on
+  every backend: compare against the tree before the change. Then list the
+  edit in its README.md, beside the first one
+  (NONPLACE-PARAMETER-MUTATION-CORRECTNESS-MILESTONE-1.md's).
 
 ## Refinement values
 
@@ -1165,6 +1368,63 @@ text when you change the code it mutates, keeping it a mutant of the same
 rule). Changing `hir::traits::Plan` also means re-checking the trait mutants
 (`audit/traits/tools/mutants.txt`).
 
+## Restricted context injection (inject blocks)
+
+`inject context A, B:` and `inject no context:`
+(RESTRICTED-CONTEXT-INJECTION-MILESTONE-1.md) run a block with exactly the
+listed installed contexts' authority. Installation (entry top level),
+selection (one implementation per context trait per program) and injection
+(a computation's permission) are three things: an inject block never
+installs, selects, constructs or copies a context. Keep it so:
+
+* One representation: the block is the ordinary `if true:` (surface/
+  lower.tcl's `inject` case) carrying `injects` (resolved identities) on the
+  `if` expression; only hir/injection.tcl and hir/contexts.tcl read it, and
+  HIR text prints it (`if injects (IDS)`). Never add a HIR or core IR node, a
+  runtime operation, a permission table, a context copy, an actor-local
+  context area or a per-coroutine context table for it, and never compile a
+  function again per authority subset: the restriction is a proof, not code.
+* One requirement analysis: a block's calls are judged by
+  `hir::contexts::Requirements` (the transitive requirement over the same
+  edges, `Targets`); a block is a use of what it injects (its function's
+  grants), so nesting and callers are checked by the ordinary rule. Never
+  add a second reachability, never read a requirement from a name, and never
+  satisfy a missing injected context from the installed set.
+* A context trait injected grants its operations through the selected
+  implementation, never the implementing context's other functions; the
+  monomorphized build is judged as written (`hir::injection::Judged`).
+* Retained authority is followed, never assumed: every handle origin is a
+  construction (`{auth IDS C}`), a parameter (substituted at calls) or
+  foreign (installed context state, an affine payload); anything the
+  provenance analysis cannot follow rejects a resume in a block
+  (CONTEXT-RETAINED-AUTHORITY), never accepts it. Its soundness rests on the
+  channels COROUTINE-CONTRACT, AFFINE-CAPTURE-UNSUPPORTED and
+  AFFINE-ERASURE-UNSUPPORTED close: if one of those opens (an affine
+  message, a capture of a handle, an erased handle), extend the analysis in
+  the same change. Moving a handle without resuming it is no use of its
+  authority: never reject that.
+* CONTEXT-NOT-INJECTED and CONTEXT-RETAINED-AUTHORITY are obligations
+  (`hir::methods::ObligationKinds`): an injection never selects a method
+  candidate (SFIAE).
+* Values cross freely (data, a copy of a context value, a function value,
+  a mailbox address): passing a value is explicit delegation. Never extend
+  the restriction to values without a design of its own.
+
+If you change hir/injection.tcl, the grants or chain lines of
+hir/contexts.tcl, the inject grammar (surface/parser.tcl's `Injection`,
+surface/ast.tcl, surface/recover.tcl, surface/modules.tcl's `Walk`), its
+lowering, its HIR text (hir/format.tcl, hir/read.tcl), the coroutine
+contract rules above, or what a call's targets are, run
+`tests/restricted-injection.test`, `tests/contexts.test`,
+`tests/context-traits.test`, `tests/coroutines.test`,
+`tests/static-compile.test`, `tests/method-resolution.test` and
+`audit/restricted-injection/tools/mutate.tcl` (every mutant in its
+`mutants.txt` must still apply and be killed by a test its `!!` line names:
+update a mutant's text when you change the code it mutates, keeping it a
+mutant of the same rule), plus `tools/compilerpedia.tcl check` for its
+topics (`concept.context-injection`, `error.context-not-injected`,
+`error.context-retained-authority`, `error.duplicate-injected-context`).
+
 ## Direct modules
 
 Raw, ambient authority is acknowledged at the module boundary
@@ -1291,7 +1551,12 @@ completion proofs. A release must stay unobservable -- it never runs
 Botlish code (a released suspended Tcl coroutine is unwound by an error no
 handler catches) and never changes a value -- and must never release a
 coroutine some live binding still owns. The affine-values milestone
-extended it to every affine value, keeping both properties.
+extended it to every affine value, keeping both properties. The one
+exception is a resource's (next sections but one: Resources): its release
+runs its module's cleanup function, and in a program where a suspending
+function owns one, releasing a suspended coroutine unwinds it so that its
+frames' releases run -- the program's own release code, never anything
+else.
 
 If you change the coroutine grammar (`yield`, the coroutine binding, the
 resume clause), `hir/coroutines.tcl` (protocols, the yield effect),
@@ -1402,12 +1667,18 @@ thread's stack and guard are found and how a thread is named
 bounds, the usable low bound and the guard confirmed with `mach_vm_region`);
 and Windows' STATUS_STACK_OVERFLOW, `runtime/platform/windows.rs` (a
 vectored exception handler first in the chain, run in the thread's stack
-guarantee). Keep it so:
+guarantee). Any number of threads may be guarded at once, each with its own
+record (`runtime/platform/records.rs`, PER-THREAD-RUNTIME-STATE-MILESTONE-1.md:
+its token, its published stack, its mode, destination and label); the
+process's handler is installed with the first guard and removed after the
+last. Keep it so:
 
 * The handler only classifies and reports: an address in the guard of the
-  stack *published* as running, on the guarded thread (POSIX), or
-  STATUS_STACK_OVERFLOW on the guarded thread at an address of the stack
-  published as running (Windows), writes the result line and ends the process (`_exit`;
+  stack the faulting thread *published* as running, on a guarded thread
+  (POSIX), or STATUS_STACK_OVERFLOW on a guarded thread at an address of the
+  stack it published as running (Windows) -- the record found by the
+  faulting thread's token, never another thread's -- writes the record's
+  label and the result line and ends the process (`_exit`;
   TerminateProcess). It never resumes, unwinds, allocates or touches the
   runtime, and it uses nothing but lock-free atomics stored before the
   fault and calls that take no lock (async-signal-safe ones; WriteFile and
@@ -1462,6 +1733,64 @@ checks, and `[ci-full]` with `CI-Tests: native-stack-mutants` the
 mutants). `bench/native-stack-guard.tcl` compares a driver against a
 baseline build (`-baseline-rev main`; the tier item `native-stack-bench`
 on a macOS runner).
+
+## Per-VM and per-thread runtime state
+
+Several Vms of one compiled program may run at once, on threads of their
+own (PER-THREAD-RUNTIME-STATE-MILESTONE-1.md). A compiled program (its
+machine code, its descriptor, `ProgramInfo` and the frame map, `Arc`-shared)
+defines the environment; each Vm owns its instance of it -- heap, constants'
+objects, statics, context area, roots, pending error -- and each OS thread
+owns its native stack, its guard record and its thread-local runtime state
+(callback transitions, the coroutine stack pool). Keep it so:
+
+* The context area is the Vm's (`Vm::context_ptr`, `install_context_area`,
+  zero when made, cleared by `reset`): generated code loads its base from the
+  Vm at `VM_CONTEXT_OFFSET`, once in the entry block of a function that reads
+  or writes the area (read-only, not `can_move`: Cranelift would sink a
+  movable load back into loops), then the slot's constant offset. Never a data symbol, a process-wide or recycled buffer, a
+  TLS base or a lookup; never an area per actor or coroutine. The layout and
+  which implementation each requirement calls stay the program's: a Vm's
+  construction selects nothing.
+* Program metadata is the Vm's (`Vm::info`; ops.rs's `program(p)`): every
+  runtime read of a shape, an enum, a native or a function's parameter names
+  goes through the running Vm, and every renderer takes the program
+  explicitly (`show`, `tcl_value`, `RtError::message`). Never a thread-local
+  or process-wide current program, a swap per call, or the most recently
+  made Vm's.
+* A Vm stays on the thread that made it (its stack bounds, non-atomic
+  backings, coroutine frames): never `Send` a Vm or its objects, never share
+  a backing or a heap object between Vms, and never let thread-local state
+  keep a Vm pointer past its transition (`callback.rs`'s ACTIVE) or a pooled
+  coroutine stack its previous Vm (`prepare` writes the Vm per start).
+* The guard's records are per thread (`records.rs`): a thread publishes only
+  into its own (through a destructor-free thread-local holding its record's
+  address; never a record cached in a Vm, whose guard may drop first), the
+  handlers find a record by the faulting thread's token with atomic loads
+  only (no thread-local, lock or allocation in a handler), and a record is
+  released when its guard drops or its thread ends. A native stack overflow
+  stays process-terminal: never end only the faulting thread, whatever its
+  Vm's isolation.
+* `botlish-native vms N` (main.rs's `concurrent_vms`) is a test harness, not
+  a thread API: a Botlish program starts a thread with std::thread (next
+  sections but several: Botlish-owned threads). Its collection hook
+  and the heap's ownership check (`Heap::set_ownership_check`) are test
+  hooks, None and off unless it sets them.
+
+If you change any of that (vm.rs's context area or program, ops.rs's
+`program`, show.rs, error.rs, platform/records.rs, guard.rs, windows.rs,
+codegen/clif.rs's `context_addr`, the descriptor's context size, the harness),
+run `tests/concurrent-vms.test` (also with `BOTLISH_NATIVE_GC_STRESS=1` set
+for the whole file only when diagnosing: its GC-stress tests set it
+themselves), `tests/contexts.test`, `tests/platform/aot-facts.tcl`,
+`cargo test --release --manifest-path native/Cargo.toml --lib --bins` and
+`--test native_stack`, `tests/native-library.test`, `tests/c-callbacks.test`
+and `audit/per-thread-runtime/tools/mutate.tcl` (every mutant in its
+`mutants.txt` that applies to the host must still apply and be killed by a
+detector its `!!` line names: update a mutant's text when you change the
+code it mutates, keeping it a mutant of the same rule), plus the native
+stack guard's checks above for a change to the guard. `bench/per-thread-runtime.tcl
+-baseline BIN` compares the costs against a driver built before a change.
 
 ## Executable startup policy (worker, main-thread)
 
@@ -1565,7 +1894,7 @@ and no acceptance depends on one.
   backends' Unicode 16 semantics -- `tests/platform/cabi-facts.tcl`, the
   native build and its Rust unit tests, `tests/platform/native-status.tcl`,
   `tests/platform/aot-facts.tcl` (the program object and an executable as
-  the host's tools see them), `tests/platform/tier.tcl smoke`), Tier B (`tier.tcl acceptance`, two
+  the host's tools see them), `tests/platform/tier.tcl smoke`), Tier B (`tier.tcl acceptance`, four
   shards) and the same smoke on ubuntu as a control. Locally, `tclsh9.0
   tests/platform/tier.tcl smoke` takes seconds, and `tier.tcl X.test
   Y.bot` runs any file or suite the way CI does.
@@ -2136,23 +2465,89 @@ affine, move, release/drop, callable contract and callable kind; an affine
 value is not a reference, a borrow or a linear value, and may be dropped
 unused.
 
+An application of a parameterized struct is affine exactly when its fields,
+its type arguments substituted, are
+(AFFINE-PARAMETERIZED-APPLICATIONS-CORRECTNESS-MILESTONE-1.md):
+`Box[Coroutine{...}]` of `struct Box[T]: value: T` is affine,
+`Phantom[Coroutine{...}]` of `struct Phantom[T]: value: int` is not. Keep it
+so:
+
+* Never decide an application by its arguments ("any affine argument"), by
+  its declaration's unsubstituted fields, or by a tree-, collection- or
+  name-specific rule. `hir::structs::IsAffine ID ARGUMENTS` answers it from
+  the declaration's summary (`AffinitySummary`: its affinity with every slot
+  unrestricted and its relevant slots, a least fixpoint computed from
+  `AppliedFieldTypes` and `hir::types::IsAffine`) and the application's own
+  arguments. Keep the summary per declaration and an answer per whole
+  application (`{ID ARGUMENTS}`), per registration (`ForgetAffinity`: every
+  registry change clears both, and the drop descriptors derived from them);
+  never an answer per declaration, never one computed while a summary is
+  still provisional, and never unfold a recursive application to classify
+  it.
+* A walk of a struct type's components (drop descriptors) reads an
+  application's applied fields and identifies a struct by its whole type,
+  never by its declaration alone (`Box[Box[C]]`'s inner Box is another
+  type). A recursive affine application is AFFINE-CONTAINER-UNSUPPORTED by
+  the one declaration rule, judged by what its values own
+  (`ApplicationIssue`; Recursive affine ownership, below), trees included.
+* An affine application is never cut to `any` by a bound
+  (`hir::types::MakeApplied`), as an affine List element is never cut.
+
+A written application is the type the same application is inferred as
+(WRITTEN-AFFINE-APPLICATIONS-MILESTONE-1.md): an affine argument is an
+argument like any other, and every position judges the application by its
+affinity. Keep it so:
+
+* Never reject a written application for an affine argument, and never let
+  writing a type change what it is (`hir::resolve::ResolveApplied` builds
+  the one canonical application). What makes a written application no type
+  is `hir::structs::WrittenProblem`: a recursive affine application
+  (`OwnedRecursion`), AFFINE-CONTAINER-UNSUPPORTED wherever it is written
+  -- also as a phantom slot's argument. One that nests its affine argument
+  in ever larger types (W[Coroutine{...}] of `next: List[W[List[T]]]`) is
+  an ordinary type: every analysis of its components answers it from its
+  declaration's summary (Declaration summaries, below). Never bring back a
+  rejection of it.
+* Imprinting reads where values of an argument exist:
+  `hir::imprint::Occurrences` places an application's argument at its
+  slot's positions (`hir::structs::SlotPositions`: the positions
+  Occurrences gives the slot in the declaration's fields, a least fixpoint
+  through `hir::structs::Fixpoint`, kept per registration and forgotten
+  with the affinity facts). A variable is bound to an affine type only
+  where no value of it exists (`Phantom[T]`, a pointee). Never take the
+  affinity summary's relevant slots for positions (a struct affine by its
+  own field holds values of its slots too; a function type's variable is a
+  value position, as in a signature), never count a phantom slot as a value
+  or a function type's variable as none.
+
 If you change the affinity query (`hir/types.tcl`, `hir/structs.tcl`),
-`hir/affine.tcl`, contract-based call typing of `Fn`/`Coroutine` callees
+written applications' admission (`ResolveApplied`, `WrittenProblem`) or
+slot positions (`SlotPositions`, `Occurrences`' application
+case, `Placed`), `hir/affine.tcl`, contract-based call typing of
+`Fn`/`Coroutine` callees
 (`hir/types.tcl`'s `Call`, `hir/range.tcl`'s `VerifyStructuralCall`,
 `hir/completions.tcl`), `hir::coroutines::ElaborateResumes`, the affine
 specialization (`hir/traits.tcl`, `hir/semantic.tcl`'s affine instances,
 `hir::signatures::CallableAdmits`), release or pending-temporary lowering in
 any backend, or the drop runtimes (`core/affine.tcl`,
 `native/src/runtime/affine.rs`), run `tests/affine.test`,
-`tests/coroutines.test`, `audit/affine/tools/fuzz.tcl` (several seeds),
+`tests/affine-applications.test`, `tests/written-affine-applications.test`,
+`tests/coroutines.test`,
+`audit/affine/tools/fuzz.tcl` (several seeds; its application programs,
+`-applications N`, against their substitution oracle, and its written
+programs, `-written N`),
 `audit/affine/tools/mutate.tcl` and `audit/coroutines/tools/mutate.tcl`
 (every mutant in both `mutants.txt` files must still apply and be killed;
 the coroutine mutants of ownership and release edit `hir/affine.tcl` too).
 A change to `hir::traits::Plan` for affine witnesses also means re-checking
 the trait and context-trait mutants. A change to native drop or release
 lowering also needs a `BOTLISH_NATIVE_GC_STRESS=1` run of
-`tests/affine.test` and `cargo test --release --manifest-path
-native/Cargo.toml --lib affine`. `bench/affine.tcl` regenerates the
+`tests/affine.test` and `tests/affine-applications.test` (its
+`aa-native-nested-drop`: a scalar-replaced struct's opened affine field) and
+`cargo test --release --manifest-path native/Cargo.toml --lib affine`. A
+change to how an application's affinity is decided also runs
+`tests/tree-struct.test`, `tests/trait-constrained-types.test` and their
+mutation tools. `bench/affine.tcl` regenerates the
 performance report. `hir::affine::verify` computes release scopes (and so
 `AFFINE-PATH-RELEASE-UNSUPPORTED`) only for a program its whole-program
 analysis accepts, a program-wide channel of the static decisions
@@ -2160,6 +2555,212 @@ analysis accepts, a program-wide channel of the static decisions
 kinds): a change to that gate, to those kinds or to which joins can hold a
 path-release diagnostic also needs `tests/static-economics.test` and the
 static-decision harnesses (Static intrinsics, below).
+
+
+## Declaration summaries (component analyses of parameterized types)
+
+A parameterized nominal type is finite even where substituting its
+arguments again and again is not: `struct W[T]: next: List[W[List[T]]]`
+reaches W[C], W[List[C]], ... (PARAMETERIZED-DECLARATION-SUMMARIES-
+MILESTONE-1.md). An analysis that answers for a value of a type from its
+components -- Bearing, CarriedInto, Totality (HashClass, Hashable, the
+total lowerings), SendClass, MentionsMutable, MayHoldVector, CanCarry,
+the DecimalRounded guard, MutableComponent, ValueStability, the affinity
+summary, the slot positions -- answers a named struct from its
+declaration's summary (hir/summaries.tcl: one least fixpoint over the
+declarations, `hir::summaries::Fixpoint`) and its own arguments' answers,
+never by unfolding the application's fields. Keep it so:
+
+* **Component analyses of parameterized nominal types must prefer
+  declaration summaries over recursive substitution walks.** A new
+  analysis that recursively unfolds applied struct fields
+  (`hir::structs::AppliedFieldTypes` of what it meets, again and again)
+  must justify, in its comment and in the report's census, why a finite
+  declaration summary cannot express its result. Define it as a property
+  of hir/summaries.tcl (`hir::summaries::define`: the classes algebra --
+  levels joined over the slots' entries, one probe per class of argument
+  -- or the union algebra), whose node is the walk of one declaration's
+  applied fields, and read it with `Level` or `Union`.
+* A property's classes are its own: what it reads at a slot position (a
+  value held, a Fn argument type's `any`-ness, a callable's errors) decides
+  its probes and its neutral argument. Never share one property's
+  relevance or answers with another, and never assume one universal
+  neutral.
+* The summaries are facts of the registry: computed lazily, forgotten with
+  the affinity facts (`hir::structs::ForgetAffinity` calls
+  `hir::summaries::Forget`), never stored in HIR, interchange text or the
+  cache, never keyed by a name.
+* No depth limit or application count decides a semantic answer. The one
+  bounded walk left in a migrated analysis is the reason text of a class
+  that is not total (Totality, SendClass, MutableComponent,
+  ValueStability): the class is the summary's; the walk follows field order
+  and stops a non-uniform recursion grown twice (`hir::summaries::Whistle`,
+  declarations on an expansive cycle only). Never decide a class by it.
+  One question walks an application's parts once (`hir::summaries::Walk`;
+  a later path reads that walk): never let a reason walk revisit an
+  application once per path, which is exponential in a declaration with
+  several recursive fields, and never keep a walk's result past its
+  question.
+* A genuine ownership rule is not a compiler guard: a recursive affine
+  application stays AFFINE-CONTAINER-UNSUPPORTED (`OwnedRecursion`, next
+  section).
+
+If you change hir/summaries.tcl, a property's node, probes or classes, or
+one of the analyses above, run `tests/parameterized-declaration-summaries.test`,
+`tests/written-affine-applications.test`, `tests/hashable.test`,
+`tests/value-identity.test`, `tests/typed-callable-escape.test`,
+`tests/structural-contract-completions.test`, `tests/sendability.test`,
+`tests/tree-struct.test`, `python3 -I audit/declaration-summaries/tools/oracle.py
+selftest`, `audit/declaration-summaries/tools/fuzz.tcl` (several seeds; it
+compares the compiler with the independent oracle and with the old walks,
+audit/declaration-summaries/tools/reference.tcl, which
+`extract-reference.py` regenerates from the revision before the summaries)
+and `audit/declaration-summaries/tools/mutate.tcl` (every mutant in its
+`mutants.txt` must still apply and be killed: update a mutant's text when
+you change the code it mutates, keeping it a mutant of the same rule), plus
+the affine, tree-struct, value-identity and hashable mutation harnesses for
+a change to code they mutate. `bench/declaration-summaries.tcl` regenerates
+the scaling report.
+
+## Recursive affine ownership (hir/ownership.tcl)
+
+A recursive affine type -- one whose values nest affine values to any depth
+through List, MutableVector or MutableArray elements -- has no finite drop
+descriptor and is AFFINE-CONTAINER-UNSUPPORTED
+(OWNED-RECURSION-DECLARATION-SUMMARY-MILESTONE-1.md). `hir::structs::
+OwnedRecursion` asks `hir::ownership::Recursion`, which decides it on the
+finite graph of declaration states (a declaration and which of its slots
+hold affine arguments): through facts (which slots a declaration holds, by
+fields alone or through an element: a least fixpoint), edges (the
+applications a declaration's frame holds), the state graph's strongly
+connected components; a type is recursive exactly when it reaches a
+component with an internal edge that crosses an element. Keep it so:
+
+* **Recursive affine ownership is decided from finite declaration-level
+  ownership analysis. Do not determine it by recursively unfolding applied
+  type terms or by a traversal depth or budget.** No depth, budget, type
+  size or applied-type bound decides a verdict: a chain of a thousand
+  finite affine declarations is accepted, and a recursion is found however
+  deep it starts.
+* **Non-uniform type growth is not itself invalid.** It matters only where
+  the growing recurrence participates in actual value ownership: `next:
+  List[W[List[T]]]` with no value of T held is unrestricted, `GrowA[T]`/
+  `GrowB[T]` with T held is recursive. Never reject an application for
+  growing, for being expansive (`hir::summaries::Expansive`), or for
+  meeting its own declaration again through its arguments
+  (`Box[List[Box[C]]]`, `Many[Many[C]]`: finite nesting); an application
+  whose affinity dies out along its recursion (`Swap[int, C]` of `next:
+  List[Swap[U, int]]`) is no recursion of affine values.
+* A recursion of another declaration counts (`Holder[C]` of `t:
+  Node[T]`): the verdict is any bad component reachable, the witness
+  prefers one of the type's own declaration (its message wording). A
+  declaration's own check (`apply`) reports a recursion that returns to
+  it; one it only holds is its field type's application's
+  (`VerifyDeclarations`, `ApplicationIssue`, which names an argument that
+  is itself the recursive type first).
+* A recursion through fields alone describes no finite value and is
+  accepted; the drop descriptor walk cuts such a declaration where it meets
+  it again (`hir::ownership::FieldCycle`), so every accepted type has a
+  finite descriptor. Never let Descriptor decide recursion by failing or
+  not ending; its assertion stays an internal error.
+* The ownership edges are the drop descriptor's: struct fields (applied),
+  anonymous struct fields, List, MutableVector and MutableArray elements, a
+  refinement's base. A C pointer's pointee, a function or coroutine type's
+  signature and an ImmutableSet are not edges. Never add an edge without
+  the descriptor owning it.
+* The facts are the registry's (`hir::ownership::Forget`, from
+  `ForgetAffinity`), keyed by declaration identity, never stored in HIR,
+  interchange text or the cache. A witness is built from the events'
+  provenance after the verdict, along its own path only: never let a reason
+  decide a verdict, and never instantiate a witness's growing arguments
+  without its size cap (presentation only).
+
+If you change hir/ownership.tcl, the descriptor's cut (hir/affine.tcl's
+`DescriptorOf`), the struct checks that read it (`apply`,
+`ApplicationIssue`, `WrittenProblem`, `RecursionMessage`) or the shared
+fixpoint (`hir::summaries::Fixpoint`), run `tests/owned-recursion.test`,
+`tests/affine-applications.test`, `tests/written-affine-applications.test`,
+`tests/parameterized-declaration-summaries.test`, `tests/affine.test`,
+`tests/tree-struct.test`, `python3 -I audit/owned-recursion/tools/oracle.py
+selftest`, `audit/owned-recursion/tools/fuzz.tcl` (several seeds, with a
+memory cap: `ulimit -v`; it compares the compiler with the independent
+model and classifies every difference from the old walk,
+audit/owned-recursion/tools/reference.tcl) and
+`audit/owned-recursion/tools/mutate.tcl` (every mutant in its `mutants.txt`
+must still apply and be killed: update a mutant's text when you change the
+code it mutates, keeping it a mutant of the same rule), plus the affine,
+tree-struct and declaration-summaries mutation harnesses for a change to
+code they mutate. `bench/owned-recursion.tcl` regenerates the scaling
+report.
+
+## Resources (scope-bound cleanup)
+
+`opaque resource struct R:` and `cleanup fn NAME(r: R, context ...):`
+(LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md) make a value's
+ownership operational: a resource is affine whatever its fields, and the
+compiler calls its module's one cleanup function where its owner's lexical
+scope ends -- at the end of the owning binding's sequence, never at its last
+use -- and on every exit that leaves it (`hir::affine::Scoped`: the binding's
+scope `last` is its sequence's end), in reverse acquisition order
+(`OrderReleases`). A move transfers the obligation, the module's
+destructuring discharges it, an explicit call of the cleanup is the early
+release. The drop descriptor of a resource is `rK.` (entry K of the
+program's cleanup table, hir/resources.tcl); the runtimes call the cleanup
+(`affine#cleanup`, natively `cleanupcall` of the rooted cleanup block,
+`affinedroprun` for an aggregate holding one). Where a suspending function
+owns a resource (`hir::affine::Unwinds`, the HIR's `resources unwind`),
+coroutine handles are scoped too and released by `coroutine#abandon`
+(natively `coabandon`, descriptor `C`): the pending yield fails with the
+internal `coroutine#abandoned`, which every suspension call's error edge
+carries, so only the frames' release pads run. Keep it so:
+
+* No general destructor: a resource is a module's opaque struct with exactly
+  one cleanup, which takes it as its one ordinary parameter, declares no
+  errors, returns unit, never yields, requires context structs only (never
+  a context trait) and takes its parameter apart (RESOURCE-DECLARATION).
+  Never add a destructor on another type, a drop trait, a per-value or
+  run-time-chosen cleanup, `defer`, a finalizer, a reference count, a drop
+  flag or any run-time ownership state; the collector never runs a cleanup.
+* Lexical, not last use: never release a resource -- or, unwinding, a
+  coroutine handle -- before its binding's sequence ends. A binding moved on
+  some paths of a statement and kept on others is
+  AFFINE-PATH-RELEASE-UNSUPPORTED, never released by a flag.
+* The cleanup's context requirement is charged to every function that may
+  release one (`hir::contexts::ReleaseEdges`; a value whose whole value is
+  its function's result is exempt, `Returned`), so MISSING-CONTEXT reports a
+  release where the context is not installed ("the release of this value").
+* Release code runs with the pending error set aside and put back
+  (native `preserving_pending`; the Tcl backends' handler-shaped catch), and
+  a collection's drop roots what it took out while code runs (`drop_taken`).
+  The plain drop forms stay allocation-free; the code-running ones are
+  separate operations (`affinedroprun`, `mvcleardroprun`, ...), chosen by
+  descriptor (NativeCallOp).
+* Ordinary affine values keep last-use release: a program without resources
+  is lowered as before (its HIR has no `resources` table).
+* Scoping is a fact the static decisions read (Static intrinsics, below):
+  a scoped binding's joins -- an `if` too -- are consumers of the ownership
+  verdict (`hir::staticdeps::ScopedBy`, `PathJoins`), and whether the
+  program unwinds is the waiting channel `C:unwind`. A new way for code to
+  make a binding scoped, or for the program to unwind, goes into them.
+
+If you change any of that (hir/resources.tcl, the resource cases of
+hir/affine.tcl, hir/structs.tcl and hir/contexts.tcl, the cleanup and
+abandonment runtimes in core/affine.tcl, core/coroutines.tcl,
+native/src/runtime/{affine,coroutine,mutvec}.rs, native/lower.tcl's release
+lowering, or std::event_loop's Owner), run `tests/resources.test`,
+`tests/event-loop.test` (its `el-owned-*`), `tests/event-loop-linux.test`
+(`el-linux-owned`), `tests/affine.test`, `tests/coroutines.test`,
+`audit/lexical-cleanup/tools/fuzz.tcl` (several seeds) and
+`audit/lexical-cleanup/tools/mutate.tcl` (every mutant in its `mutants.txt`
+must still apply and be killed: update a mutant's text when you change the
+code it mutates, keeping it a mutant of the same rule; run it in batches with
+`-only` when the whole list would exceed a background task's limit), plus
+the affine and coroutine harnesses for a change to `hir/affine.tcl`,
+`tests/static-economics.test` and `audit/static-decisions/tools/mutate.tcl`
+for a change to scoping or unwinding, and a
+`BOTLISH_NATIVE_GC_STRESS=1` run of `tests/resources.test` for a change to
+the native release paths. `bench/lexical-cleanup.tcl` regenerates the
+performance report.
 
 ## Context-owned affine state
 
@@ -2254,12 +2855,16 @@ install`, which builds its archive there). Keep it so:
   an observer twice in a turn or in an empty turn, and never let an
   observer, a channel or a timer nobody waits on keep the loop alive or
   awake.
-* Revocation is explicit and generation-checked: a `Reg` is an identity,
-  never an owner. Nothing revokes implicitly -- no drop action until the
-  lexical-scope cleanup milestone, and never one faked with last-use
-  release -- and shutdown revokes every registration. Never deliver a record
-  of an old generation, let a reused slot inherit events, or cancel a task as
-  a side effect of revocation.
+* Revocation is generation-checked: a `Reg` is an identity, never an owner.
+  A registration made by an `owned_*` operation has an `Owner`, a resource
+  (Resources, below) whose cleanup `release` revokes it where the Owner's
+  lexical scope ends (or explicitly); its Reg cannot revoke it (`revoke`
+  answers false). Nothing else revokes implicitly -- never a drop action on
+  a Reg, never one faked with last-use release -- and shutdown revokes every
+  registration. Never deliver a record of an old generation, let a reused
+  slot inherit events, or cancel a task as a side effect of revocation (an
+  Owner's release wakes its waiters with Wake::Revoked and runs nothing
+  else).
 * Delivery is a registration's declared policy (Lossy, Coalesce, Reliable).
   Reliable never drops: a record without room is held by the driver
   (`hold_record`, `release_held`) and the backpressure reaches the producer
@@ -2269,7 +2874,11 @@ install`, which builds its archive there). Keep it so:
   scheduler bug, ending `run`), never an application error; a task's own
   failure is a recorded outcome that ends only that task.
 * The native integration ABI (packages/event_loop_linux/native/
-  botlish_event_loop.h, version 1): a post copies four scalars and never runs
+  botlish_event_loop.h, version 2: one loop per VM, named by a
+  generation-checked handle; the version 1 functions reach the one open
+  loop and are refused while several are, never routed to one of them; a
+  loop closes with its driver or with the thread that opened it -- keep
+  it so: no process-wide loop state): a post copies four scalars and never runs
   Botlish code; pumps run on the loop's thread inside the wait and never call
   Botlish. Never add a C-to-Botlish callback or a pointer in a record. A
   library that wakes the loop before its data is where its check can take it
@@ -2291,6 +2900,212 @@ manifest), `tools/compilerpedia.tcl generate` and `check`, and
 still apply and be killed: update a mutant's text when you change the code
 it mutates, keeping it a mutant of the same rule). `bench/event-loop.tcl` is
 the performance report against the prototype.
+
+## Same-thread actors (std::actor)
+
+`std::actor` (stdlib/actor.bot; SAME-THREAD-ACTORS-MILESTONE-1.md) is
+ordinary Botlish over `std::event_loop`: an actor is one ordinary
+coroutine, hosted by a task the library adopts into the loop (`start`),
+with typed mailboxes in the application-installed context `Actors`.
+Communicating takes no context: `listen`, `receive`, `try_receive`, `send`,
+`deliver` and `pause` are requests the actor's coroutine yields to its host
+(protocol `resume Answer`, outward `Exit`), which performs them with the
+Loop and Actors and resumes it with the answer. So an actor constructed
+inside `inject no context:` receives and replies, and the compiler's own
+requirement analysis proves it needs nothing. Keep it so:
+
+* The actor-side operations require no context, ever (`actor-authority-
+  requirements` pins them): never give `receive`, `send` or `listen` a
+  context parameter, never make an actor hold the Loop or Actors to talk,
+  and never replace the protocol with a context trait. What needs the
+  scheduler's authority (open, start, post, close, drain, reap, stats,
+  `sleep`'s timer) requires it, and stays the supervisor's.
+* Restriction is construction's: an actor's authority is what its
+  construction's inject block (or its constructor) had. Never claim `start`
+  restricts anything, and never resume an actor inside an inject block (the
+  host resumes it outside every block).
+* Messages cross the non-generic mailbox table and protocol as `any` and are
+  recovered with the one internal intrinsic `std::actor::recover[M]`
+  (core/actor.tcl: the identity), called only by `recovered`, after
+  checking that the answer carries the identity (slot, generation) of the
+  receiver's own mailbox (`actor-source-recover`). Never call it anywhere
+  else, never make it public, never add a second unchecked conversion, and
+  never let an Answer carry a message of another mailbox.
+* `Inbox[M]` is affine (an opaque token holding a null C pointer, as
+  `std::io::fs::Owner`); `listen` consumes it and binds the mailbox to the
+  actor's task for good, and a host serves only its own actor's bound
+  mailboxes (a copied `Receiver` receives nothing elsewhere). `Address[M]`
+  is unrestricted and send-only. Identity is (slot, generation): a close
+  keeps the generation (Closed), a reuse bumps it (Stale), each mailbox
+  incarnation has its own wake and room channels.
+* Lifecycle: a host retires its actor (closes its mailboxes, counting what
+  was queued undelivered, waking its room waiters with Closed) when the
+  actor returns or fails, before its task ends with the actor's outcome;
+  `reap` closes what the loop abandoned (`std::event_loop::owned?`). The
+  library never consumes `take_outcomes`, keeps no scheduler of its own, and
+  takes at most one message per actor per dispatch.
+* Backpressure is event-driven: a full mailbox answers Full, `deliver`
+  waits on the mailbox's room channel, each freed place wakes one waiting
+  sender in FIFO order, a sender that did not wait cannot overtake one that
+  does, and nothing ever polls a timer. Never drop an actor message.
+* No native, NIR instruction, runtime object or Tcl runtime of actors:
+  `std::actor::recover` (`same` in native/lower.tcl) is the whole compiler
+  side (`actor-source-ordinary`). No OS threads, sendability, actor-local
+  installation or runtime permission check here: the cross-thread transport
+  is std::actor::remote's (Botlish-owned threads, below), which reaches an
+  actor through its ordinary mailbox.
+
+If you change stdlib/actor.bot, core/actor.tcl, the `same` lowering or
+`std::event_loop::owned?`, run `tests/actor.test` (on both passes,
+`CORE_BACKEND=interp` and `compile`; directly, all four backends; also under
+`BOTLISH_NATIVE_GC_STRESS=1`), `tests/event-loop.test`,
+`tests/restricted-injection.test`, `tests/coroutines.test`,
+`tests/affine.test`, the warning gate, `tools/compilerpedia.tcl generate`
+and `check`, and `audit/actor/tools/mutate.tcl` (every mutant in its
+`mutants.txt` must still apply and be killed by a test its `!!` line names:
+update a mutant's text when you change the code it mutates, keeping it a
+mutant of the same rule). `bench/actor.tcl` is the performance report
+against the census's Probe F.
+
+## Sendability and the cross-VM value transfer (std::transfer)
+
+`Sendable` (SENDABILITY-AND-VALUE-COPY-MILESTONE-1.md) is the third
+intrinsic trait (hir/traits.tcl's intrinsics, beside Hashable and
+Equatable): a type is a witness when every value of it can be
+reconstructed, with the same meaning, in another Botlish VM that shares
+nothing with this one (`hir::types::SendClass`, with Totality's three
+classes and reason paths). `std::transfer::encode(v)` writes such a value
+into owned Bytes and `std::transfer::decode[T](data)` rebuilds a T in this
+VM; both are written out after the checks (`hir::transfer::Elaborate`) as
+`transfer#encode`/`transfer#decode` carrying the type's *schema*
+(hir/transfer.tcl), which the Tcl codec (core/transfer.tcl) and the native
+one (native/src/runtime/transfer.rs) read. Keep it so:
+
+* Sendability is derived from checked types, never declared by a caller:
+  no impl, registration or name makes a type Sendable. The one exception is
+  an opaque struct's owner statement, its declaration's `sendable` clause
+  (`fields`, `through(TO, FROM) as R`; the standard library's byte
+  storage's `bytes(F)`/`mutable_bytes(F)`), whose parts the compiler checks
+  (`hir::structs::ValidateSendable`, `ValidateSendableParts`,
+  `hir::transfer::verifyDeclarations`). Never let an opaque struct without
+  a clause be judged by its fields (a Reg's slot and generation are two
+  Ints), never accept `any` (a clause over an `any` field is
+  SENDABLE-DECLARATION), and never let one declaration make every
+  application of a generic type sendable: an application is judged with
+  its own arguments.
+* Not sendable, ever: functions, coroutine handles and every affine value,
+  C pointers and native views or edits, context structs (authority),
+  refinements (a proof of this program), VM-relative identities
+  (std::event_loop::Reg, std::actor's Address, Inbox and Receiver), `any`.
+  Affinity is not sendability; never add an affine move between VMs here.
+* The bytes hold no address, no shape or enum number and no Rc backing:
+  values by canonical names (the schema's fingerprint, fields and enum
+  cases sorted), every object rebuilt by the receiver's own constructors,
+  a map's or set's derived state recomputed under the receiver's
+  table-hash key (`through`). Never copy stored hashes, an index or a
+  header between VMs, and never key compatibility by a program-relative
+  number.
+* Decoding never trusts the bytes: bounded reads, checked arithmetic, every
+  value validated against the receiver's schema (domains, UTF-8, finite
+  Float64, enum indices, stated lengths), declared errors (TransferMalformed,
+  TransferVersion, TransferTypeMismatch, TransferInvalidValue,
+  TransferLimit) and never a panic or NATIVE BUG; both directions iterative.
+* The two codecs write the same bytes: change the format in both, with the
+  version and tests/value-transfer.test's fixed vectors.
+* A transfer's type is closed where it is compiled (TRANSFER-OPEN-TYPE
+  otherwise), never a run-time schema guessed from a value. A body that
+  transfers an imprint variable its signature's struct slot constrains to
+  Sendable is planned per binding of it (`hir::traits::SelectingBinding`,
+  `SendsVariable`: BOTLISH-OWNED-THREADS-AND-CROSS-THREAD-ACTORS-
+  MILESTONE-1.md), and a `Sendable` trait view per witness, before
+  `hir::transfer::Elaborate` runs: each copy writes its closed schema.
+  decode of a trait view stays TRANSFER-OPEN-TYPE.
+* std::actor's same-VM messages stay ordinary values: never require
+  Sendable of them.
+
+If you change any of that (SendClass, the clause, `-sending`,
+hir/transfer.tcl, either codec, the owners' TO and FROM functions), run
+`tests/sendability.test`, `tests/value-transfer.test` (also under
+`BOTLISH_NATIVE_GC_STRESS=1`), `cargo test --release --manifest-path
+native/Cargo.toml --lib transfer`, `tools/compilerpedia.tcl check` and
+`audit/value-transfer/tools/mutate.tcl` (every mutant in its `mutants.txt`
+must still apply and be killed by a detector its `!!` line names: update a
+mutant's text when you change the code it mutates, keeping it a mutant of
+the same rule), plus the trait, Hashable and collection harnesses for a
+change to code they share. `bench/value-transfer.tcl` is the performance
+report.
+
+## Botlish-owned threads and the cross-thread transport (std::thread, std::actor::remote)
+
+A `thread fn NAME(init: I) -> R:` of a module is a thread entry
+(BOTLISH-OWNED-THREADS-AND-CROSS-THREAD-ACTORS-MILESTONE-1.md);
+`std::thread::start(std::thread::entry(NAME), init)` runs it on an OS thread
+of its own in a VM of its own, made on that thread from the program's one
+image (native/src/runtime/thread.rs, the program function's dispatch in
+native/lower.tcl). `std::actor::remote` carries typed messages and calls
+between VMs as transfer bytes. Keep it so:
+
+* One image, one HIR, one selection: an entry is a block of the program
+  (`threadEntry`), compiled with every other; never a second compilation,
+  program or image per entry. The selection of each context trait is the
+  program's for every VM (CONTEXT-TRAIT-SELECTION-CONFLICT); each VM
+  installs its own instances in its entry's body, checked flow-sensitively
+  as the entry program's top level (hir/contexts.tcl's `entries`). Never
+  give a worker its creator's contexts, a context parameter or a context
+  in its initialization value, and never select per entry.
+* An entry is named only as std::thread::entry's argument
+  (THREAD-ENTRY-REFERENCE), declared at a module's top level
+  (THREAD-ENTRY-PLACEMENT), with one closed sendable parameter and result
+  (THREAD-ENTRY-SIGNATURE), environment-free and never suspending
+  (THREAD-ENTRY-ENVIRONMENT). It requires nothing of a caller; its calls are
+  its own obligations.
+* Starting needs the Threads context; a start reserves a guard record
+  before the thread exists (records.rs's `reserve`, `claim_as`): beyond the
+  64 records it is ThreadLimit, never an unguarded thread. A Vm is made,
+  run and dropped on its own thread (never Send); nothing of a heap crosses
+  threads -- outcomes and messages are byte vectors, rebuilt by the
+  receiving VM's constructors. A native fault on any thread stays
+  process-terminal.
+* Stopping is cooperative (a flag and a port notification): never kill,
+  interrupt or detach a running thread's VM from under it. A join of an
+  ended thread joins its OS thread (its exit's cleanup done). At the main
+  VM's end every thread is asked to stop and joined within a bound
+  (BOTLISH_THREAD_EXIT_JOIN_US); one still running keeps the image alive.
+* The transport: every message's schema fingerprint checked against its
+  endpoint's; endpoints and calls named by (domain, slot, generation, a
+  random key); bounded queues; a freed place granted to the first waiting
+  sender and held for its retry (never refuse a granted waiter, never let
+  anyone overtake one); no polling anywhere -- a producer pushes then
+  rings, the consumer resets before its last look. One mutex for the
+  transport's tables, never held while Botlish code runs.
+* Capabilities (Remote, Service, Reply) are opaque and sendable through
+  their Identity; the rebuild functions (`*_in`) are internal members
+  (core/transfer.tcl): never make one public or add a constructor of a
+  capability from an Identity. std::actor::Address stays unsendable.
+* A call completes once: with its reply, Undelivered (its endpoint closed
+  with it queued) or ServiceEnded (its service's VM ended owing it); a
+  second, late or unknown answer is Stale. Never leave a call waiting
+  because its service went.
+* The Tcl backends refuse a program that names an entry at lowering
+  (BACKEND THREAD-UNAVAILABLE) and every runtime operation when reached
+  (CORE SEMANTIC THREAD-UNAVAILABLE): never emulate threads there.
+
+If you change hir/threads.tcl, the entry cases of hir/contexts.tcl,
+hir/traits.tcl's Sendable selection, core/thread.tcl, the thread dispatch
+or entry roots in native/lower.tcl, native/src/runtime/thread.rs, the guard
+reservation (records.rs), stdlib/thread.bot, stdlib/actor/remote.bot,
+std::actor's post_waiting, or event_loop_linux's per-loop state, run
+`tests/threads.test` (its transport, ABI and broker tests need Linux, cc
+and ar; the GC-stress ones run inside it), `cargo test --release
+--manifest-path native/Cargo.toml --lib runtime::thread`,
+`tests/sendability.test`, `tests/contexts.test`, `tests/actor.test`,
+`tests/event-loop-linux.test`, `tests/concurrent-vms.test` and
+`audit/threads/tools/mutate.tcl` (every mutant in its `mutants.txt` that
+applies to the host must still apply and be killed by a detector its `!!`
+line names: update a mutant's text when you change the code it mutates,
+keeping it a mutant of the same rule), plus the per-thread runtime and
+event-loop harnesses for a change to code they share.
+`bench/threads.tcl` is the performance report.
 
 ## DecimalRounded and scalar refinements
 
@@ -2746,6 +3561,56 @@ array harnesses (above) for a change to hir/mutvec.tcl or hir/cardinality.tcl,
 the Hashable and trait-constrained-type harnesses for a change to how keys
 are constrained or hashed, and the warning gate (the three modules are
 warning-clean). `bench/mutable-map.tcl` regenerates the performance report.
+
+## Value parameters are never mutated (NONPLACE-PARAMETER-MUTATION)
+
+A function's parameter not declared `place` is a value: the function's
+own logical copy of its argument (NONPLACE-PARAMETER-MUTATION-CORRECTNESS-
+MILESTONE-1.md). A mutation whose destination is rooted in one -- a
+collection operation's receiver path, or the argument of another
+function's place parameter (std::mutable_map's and std::mutable_set's
+operations among them) -- is NONPLACE-PARAMETER-MUTATION, the call's own
+problem (`hir::CheckingCall`), at the mutation, relating the parameter's
+declaration (`hir::mutvec::IsValueParam`, `ValueParamMutation`, their two
+uses in `hir::mutvec::verify`). Keep it so:
+
+* The rule reads the destination's root binding only: a parameter of a
+  function block (its `params`) that is not one of its `places`. Never
+  read whether the parameter is returned or used later, its type, its
+  callers, a name or an operation's spelling; never exempt an untyped, an
+  imprinted, an affine or a nested function's parameter, a field path or a
+  call through method syntax.
+* A local is a place of its own whatever it was bound from: `w = v`, a
+  field's copy, a destructured field are independent logical copies, and
+  mutating them is legal. Never taint a value by its origin, and never
+  turn the local copy into an alias (`hir::mutvec::Moved` moves a header
+  only out of a binding the copy convention holds; a parameter of a
+  function also called through a value never is).
+* A context parameter, a loop variable, a fold's intermediate and a
+  handler's payload binding are no value parameters (their scope is a
+  construct's, or they are locals bound to the installed context).
+* An error, never a warning or a lint; checked before any backend; no
+  runtime check, no backend special case. The existing receiver rules
+  (MUTABLE-PLACE-RECEIVER: a temporary, an enclosing function's binding, a
+  module binding) report first.
+* The fix is the program's: `place` for the caller's storage, a local copy
+  for a local working value. Never recommend `place` for an affine
+  parameter (a place parameter is never affine).
+
+If you change any of that (hir/mutvec.tcl's value parameters or receiver
+and place-argument checks, what a place path is, the copy convention's
+`Moved`), run `tests/nonplace-parameter-mutation.test`, its golden suite
+(`tclsh9.0 tests/local.tcl tests/golden/nonplace-parameter-mutation.bot`),
+`tests/place-parameters.test`, `tests/mutable-vector.test`,
+`tests/mutable-array.test`, `audit/mutable-vector/tools/fuzz.tcl` and
+`audit/mutable-array/tools/fuzz.tcl` (several seeds: their
+`valueparam` faults), and `audit/nonplace-parameter-mutation/tools/mutate.tcl`
+(every mutant in its `mutants.txt` must still apply and be killed by a
+test its `!!` line names: update a mutant's text when you change the code
+it mutates, keeping it a mutant of the same rule), plus the vector, array
+and map harnesses (MutableVector, MutableArray, MutableMap above) for a
+change to code they share. `tools/compilerpedia.tcl check` keeps the
+topic (`error.nonplace-parameter-mutation`) and its examples true.
 
 ## Collection order and relational facts
 
@@ -3462,10 +4327,10 @@ a shared library, a C header and a JSON manifest. Keep it so:
   message. Nothing unwinds across the boundary (`guarded`).
 * A library's every symbol but its public C names is local (`objcopy
   --keep-global-symbols`): each library carries a private runtime, and a
-  call makes its own program the thread's current one and restores the
-  previous one (`ProgramScope`). Never let two libraries share a symbol,
-  a static or the active program, and never fix a collision with a global
-  lock or a singleton.
+  call reads its own program through the Vm it runs in (`Vm::info`; no
+  thread's current program to swap: Per-VM and per-thread runtime state,
+  above). Never let two libraries share a symbol, a static or a program,
+  and never fix a collision with a global lock or a singleton.
 * Instances are explicit (`NAME_create`/`NAME_destroy`), thread-affine,
   one call at a time (WRONG-THREAD, REENTRANT-CALL), looked up by ticket
   (INVALID-INSTANCE). A library installs no signal handler, never `_exit`s
@@ -3988,11 +4853,26 @@ in its message text. The tests' and the fuzzer's expectations spell their
 `DiagnosticCode` cases themselves (`scPayloadOf`, the fuzzer's `codeCases`):
 never derive an expected code from `hir::static::codes` or `CodeOf`.
 
+A rejection is the block's result, never an exemption
+(STATIC-COMPILE-EXPECTED-DIAGNOSTICS-MILESTONE-1.md): a block takes only the
+diagnostics located in its own body, and a rejected block standing as a
+statement ends no sequence for the checks (`hir::static::reifiedStatement`:
+the types' reachability, the range, completion, ownership, relational and
+emission walks), so it never hides a diagnostic of the code after it. Never
+add an exemption, a suppression or a demotion for an expected diagnostic,
+and a new analysis that stops at a statement that never completes reads
+`reifiedStatement` too. Run-time decisions (the backends, exit releases,
+`hir::mutvec::LaterIn`) keep the failure's control flow.
+
 If you change the static grammar, `hir/static.tcl`, the loader's deferral of a
 block's qualified references (`surface/modules.tcl`), how `fail` resolves or
-lowers, the completion walk's `fail` case (`intended`), `hir::Diagnose`'s
+lowers, the completion walk's `fail` case (`intended`), an analysis's
+handling of a statement that never completes, `hir::Diagnose`'s
 fields, `hir::BuildFull`, or SAME-FAILURE's fail sites, run
-`tests/static-compile.test`, `audit/static-compile/tools/fuzz.tcl` (several
+`tests/static-compile.test`, `tests/static-compile-expected-diagnostics.test`,
+its golden suite (`tclsh9.0 tests/local.tcl
+tests/golden/static-compile-expected-diagnostics.bot`),
+`audit/static-compile/tools/fuzz.tcl` (several
 seeds, once with `-gc-stress 1`) and `audit/static-compile/tools/mutate.tcl`
 (every mutant in `audit/static-compile/tools/mutants.txt` must still apply and
 be killed: update a mutant's text when you change the code it mutates, keeping
@@ -4012,7 +4892,8 @@ difference from `BOTLISH_STATIC_SCHEDULER=sequential`: add its edge to
 `hir/staticdeps.tcl`, not a special case to the scheduler. The sequential
 order's waiting rule (STATIC-COMPILE.md, "The waiting rule";
 `hir::staticdeps::Waiting`) reads that analysis's waiting channels
-(`C:erased`, `C:budget:B`; never the gates `C:verdict` and `C:plan`): a
+(`C:erased`, `C:budget:B`, `C:unwind`; never the gates `C:verdict` and
+`C:plan`): a
 failing block consuming one waits while a failing block contributes to it,
 so a consumer's verdict does not depend on where its contributors are
 written. An edge into a waiting channel's part of the graph, or a new link
@@ -4076,8 +4957,8 @@ starves everything else on the machine. So:
     run static-decisions.yml --ref BRANCH`). The optional `suites` input (file
     names, separated by spaces or commas) narrows it.
 * **Read its result.** A run takes about 30 minutes, mutable-array.bot's job
-  (the shards finish within it), and on main it may first wait for the run
-  before it. Don't wait idle for it: carry on, and before you call the change
+  (the shards finish within it); a newer push to the same ref, on main too,
+  cancels it (CI-RUNS.md), so read the latest run. Don't wait idle for it: carry on, and before you call the change
   done read the run's jobs. Each job's summary lists every suite's rounds and
   builds under both schedulers, and any `DISAGREE` or `DOES NOT COMPILE`. If
   the run has not finished, report it as pending, never as passed.
@@ -4330,9 +5211,15 @@ backend compiles, or reports why not (EMIT-*). Keep it so:
   tool, audit/emission-claims/tools/witness.tcl), never from the compiler.
 * One value analysis: the facts are hir/intset.tcl over hir::range's own
   transfers (add, sub, mul, `ModParts`, `BitOp`, `Narrowed`, `TypeFact`,
-  `InductionBinding`, `RegisteredSet`, `Paths`); the one rule only a set can
-  state is `!=`'s hole. Never add a second arithmetic, comparison or domain
-  rule in the checker. A native's result set is its registration
+  `InductionBinding`, `DomainEntered`, `RegisteredSet`, `Paths`); the one
+  rule only a set can state is `!=`'s hole. Never add a second arithmetic,
+  comparison or domain rule in the checker.
+* A counted loop drops only its zero-iteration exit, and only where
+  `hir::range::DomainEntered` proves every start and end its operands may
+  have enters it (EMISSION-COUNTED-LOOP-PRECISION-MILESTONE-1.md): never an
+  exit of an iteration (a `break`, a `continue`, a `return`, a failure, the
+  head after any iteration), never from a relation between the bounds, a
+  caller's facts or an infinity read as a bound. A native's result set is its registration
   (`-result-range {intervals ...}`, std::char::scalar_value's surrogate
   gap), a contract of the implementation both runtimes uphold -- never a
   table beside the checker, never inferred from runs.
@@ -4353,8 +5240,22 @@ backend compiles, or reports why not (EMIT-*). Keep it so:
 * Diagnostics anchor at the claimed function (its unit: recovery, static
   sites) and are located at the yield or call; a claim whose code holds
   another diagnostic, poison or a hole is `dependent` and says nothing.
+  Its code is what the walk reads, also without evaluating it: a call's
+  callee reference (an unresolved name is typed `never`, which is no
+  divergence) and the code of a helper whose `never` result the walk
+  relies on (`hir::emission::Taint`; `Read`, a summary read for its code:
+  its taint and fingerprint the claim's, never its violations;
+  EMISSION-CALLEE-DEPENDENCY-CORRECTNESS-MILESTONE-1.md). Never stop the
+  walk at a `never` it has not read, and never make a claim dependent on
+  code its walk does not read.
   Messages never print an internal id. Every EMIT-* kind has a
   `std::compiler::DiagnosticCode` case and a Compilerpedia topic.
+* A claim is about the yield trace, never the result: a claimed function
+  may complete with any value of its declared result (a coroutine source's
+  record count, the -1 a protocol uses for its end). Never bring back a rule
+  on a claimed function's result; a consumer tells a symbol from the end by
+  `std::coroutine::done?` (CSV-EMISSION-VALIDATION-MILESTONE-1.md, section
+  18; `ec-result-not-symbol`).
 
 If you change hir/emission.tcl, hir/emitdfa.tcl, hir/intset.tcl, the
 hir::range transfers above, core/dfa.tcl's outcome model or what Lower
@@ -4363,14 +5264,47 @@ lowering, loader walk or resolution, or the `emissions` table's trust
 (interchange, the cache), run `tests/emission-claims.test`,
 `tests/interval-sets.test`, `tests/dfa.test`, `audit/emission-claims/tools/
 census.tcl` (no false proof; every case as expected),
-`audit/emission-claims/tools/fuzz.tcl` (several seeds; 0 false proofs) and
+`audit/emission-claims/tools/fuzz.tcl` (several seeds; 0 false proofs),
+`audit/emission-claims/tools/loops.tcl` for a change to loops or their
+bounds' facts (several seeds; 0 false certificates, 0 regressions) and
 `audit/emission-claims/tools/mutate.tcl` (every mutant in its `mutants.txt`
 must still apply and be killed: update a mutant's text when you change the
 code it mutates, keeping it a mutant of the same rule), plus
 `tests/hir-range.test` for a transfer, `tests/static-compile.test` and
 `tools/compilerpedia.tcl check` for a diagnostic kind, and the
 hir-interchange and compiler-service harnesses for a change to what they
-cover. `audit/emission-claims/tools/bench.tcl` regenerates the costs.
+cover, and `tests/csv-emission.test` (the CSV workload's claims, below).
+`audit/emission-claims/tools/bench.tcl` regenerates the costs.
+
+## Workloads (examples/dfa/csv)
+
+`examples/dfa/csv/` (CSV-EMISSION-VALIDATION-MILESTONE-1.md) is production
+`emits` on a second protocol: RFC 4180's strict ASCII profile
+(`csv_strict.bot`) and a UTF-8 profile over scalar values and bytes
+(`csv_utf8.bot`) as declared recognizers, always-quoted and selective
+emitters certified against them, coroutine sources, sinks and an export
+application. Keep it so:
+
+* The profiles stay two modules with one stated policy each (the report's
+  section 2); an emitter checks a character with the grammar's own guard
+  (`quoted_char`, `text_char`), never a list of its own, and fails
+  `UnsupportedCSVCharacter` rather than replace, strip or normalize.
+* Every claim of the example is certified; a rejected variant (selective
+  quoting's natural spelling, the census's mutants) lives in a test or
+  `audit/csv-emission/census/mutants.txt`, never in the example. The
+  example is not standard library, and no CSV package is published from it.
+* Nothing claims formula safety: a formula-like value is written as it is.
+
+If you change the example, the profiles or the emission checker, run
+`tests/csv-emission.test`, and for the example or the profiles also
+`audit/csv-emission/tools/differential.tcl` (`-part all`; every backend, the
+reference interpreter and `oracle.py`: 0 disagreements, 0 failures),
+`audit/csv-emission/tools/census.tcl` (every mutant as its class states;
+update a mutant's text when you change the code it mutates, keeping it a
+mutant of the same mistake) and `python3 -I audit/csv-emission/tools/
+oracle.py selftest`; for `export.bot`, `audit/csv-emission/tools/
+cleanroom.sh` after `single/build.sh`. `audit/csv-emission/tools/bench.tcl`
+regenerates the native costs.
 
 ## Workloads (examples/games/2048)
 
@@ -4499,13 +5433,15 @@ The Windows executable (`build-windows.sh`, the Windows section of
 tests/workload-icy-tower.test, which needs SDL3.dll built by
 `tests/cffi/sdl3.tcl` on Windows) is built and tested only by the
 `icy-tower (windows x86-64)` workflow (`.github/workflows/icy-tower-windows.yml`,
-every push to any branch), which also publishes main's build as the
-`icy-tower-windows-latest` release the README's Windows button links to:
+every push to any branch); once every test of a commit of main is green,
+its release run publishes that commit's tested build as the
+`icy-tower-windows-latest` release the README's Windows button links to
+(CI-RUNS.md):
 run it on the branch for any change to the game, `tests/cffi/sdl3.tcl`,
 the generator's MSVC target or `tools/cheader/`.
 Its signing (ICY-TOWER-WINDOWS.md, "Signing") is the `sign` job's alone:
-only that job, on main or a manual run, in the `windows-signing`
-environment, sees signing credentials -- never give them to the build job,
+only that job, in a manual run (a release run of main among them), in the
+`windows-signing` environment, sees signing credentials -- never give them to the build job,
 a pull request or another workflow, never store a signing key or password
 in GitHub (Azure Artifact Signing through OpenID Connect), and never let the
 release publish an unsigned build while `WINDOWS_SIGNING` is set. Every
@@ -4585,8 +5521,10 @@ three modes, `adhoc` and `dry-run` for ordinary CI, `release` for the
 
 * Credentials live only in the `macos-release` environment and reach only
   the `release` job of icy-tower-macos.yml, for an `icy-tower-macos-vX.Y.Z`
-  tag of main's history, pushed or run by hand -- never a branch, a pull
-  request, a fork, `pull_request_target`, another job or another workflow;
+  tag of main's history, pushed, run by hand or dispatched again by the
+  release gate, and only once every test of the tagged commit is green (the
+  `tested` job, CI-RUNS.md) -- never a branch, a pull request, a fork,
+  `pull_request_target`, another job or another workflow;
   each secret only in the `env` of the step that reads it, never in a
   script, a `with` or a job's `env`; no step holding one traces commands.
   Nothing is committed: no certificate but Apple's public ones
@@ -4618,6 +5556,10 @@ three modes, `adhoc` and `dry-run` for ordinary CI, `release` for the
   `resume_submission`), never upload another copy for it.
 * Apple's tools are found on PATH (release.py never names their paths), so
   `audit/macos-release/`'s stand-ins can run every stage on any host.
+* The README's macOS download button and link name a release by its tag
+  (`icy-tower-macos-vX.Y.Z`; there is no rolling macOS tag): a newer
+  published release updates them, in a change of its own after the release
+  exists. Never point them at a tag whose release is not published.
 
 If you change `package-macos.sh`, `macos/`, `macos_app.bot`, the release
 jobs or `macos-session.py app`, run `audit/macos-release/tests/`
@@ -4630,6 +5572,46 @@ the same rule) with the pinned environment of
 `audit/macos-release/requirements.txt`, and push to read the game job's
 bundle, LaunchServices and dry-run steps; the release path itself runs only
 for a release tag.
+
+## Program output: executables and `run` (PROGRAM-OUTPUT-MILESTONE-1.md)
+
+A program's value is the language's (its last top-level statement) and the
+test infrastructure's oracle; printing it is main.tcl's development view
+only (PROGRAM-RESULT-PRINTING-CENSUS.md). Keep it so:
+
+* A standalone executable writes nothing of its own when its program
+  completes: status 0, standard output and error the program's alone
+  (`runtime::aot::run`). Never print the value, a trailing line or a
+  status there, and never add a switch that brings one back. A run-time
+  error stays `MESSAGE (CODE)` on standard error with status 1.
+* The driver protocol (`BOTLISH_NATIVE_RESULT=FILE`) is the one way to read
+  an executable's value: tests use tests/helpers.tcl's `standaloneValue`
+  and `bareValue`; shell scripts without Tcl compare the words of the
+  result file's `value V` line, its quoting removed (the `value_words`
+  idiom of single/ffi-smoke-test.sh). Never parse an executable's standard
+  output for its value, and never strip a "last line" from it.
+* `main.tcl run [OPTION...] FILE [ARG...]` runs one program as a command:
+  no header, no value line, every word after FILE the program's argument,
+  natively unless `-backend` says otherwise, status 0 (completed) or 1
+  (rejected, failed: the diagnostics or the error on stderr), 2 for a
+  malformed invocation; only `-backend`, `-warnings`, `-target`, `-L` and
+  `-F` combine with it. single/main.tcl's `MayLink` knows its native
+  default. main.tcl's default run keeps its `== FILE (BACKEND)` header and
+  `value:` line: it is the Tcl backends' only output, Compilerpedia's
+  `@output` check and many tests' observable.
+* The exit status is planned as the program's top-level value -- an Int,
+  or `unit` for 0 (success) -- with no early exit by design: never add an
+  exit function, a top-level `return`, or a status from anything else.
+  Until that milestone a completed program's status is 0. Icy Tower's
+  declared C `exit` is a workaround of the game's, not a pattern.
+
+If you change any of that, run `tests/native-executable.test`,
+`tests/main-cli.test`, `tests/native-program-output.test`,
+`tests/workload-2048.test`, `tests/workload-icy-tower.test`,
+`audit/native-aot/tools/mutate.tcl` (its `result-printed` mutant) and, for
+single/main.tcl, `audit/single-executable/tools/mutate.tcl` (its
+`run-command-not-linking` mutant) and both smoke tests after
+`single/build.sh`.
 
 ## Application modules, native program output, the recursion limit
 
@@ -4756,6 +5738,19 @@ so:
   Dependencies`): a new resolution input goes there too. The physical
   package directories on the loading stack stop a symbolic-link cycle
   (CYCLE); never drop that guard.
+* A package graph (`PACKAGES/.graph`; SHARED-PACKAGE-DEPENDENCIES-MILESTONE-1.md,
+  surface/modules.tcl's "Package graphs") makes the packages it names one
+  instance each, shared by every scope that uses them: a graph package's instance and identity are its name, from every
+  scope (`Instance`); a scope of the graph sees exactly the packages the
+  graph says it uses (`Installed`), never another package's dependency, the
+  application's modules or a hand-installed package; a graph package's own
+  `.bot_modules` is never read; every graph package claims its root
+  namespace in the application. The graph names scopes and packages and
+  nothing else: never put a version, a lock or a source in it, never let
+  the compiler choose or repair one, and read it through the seam
+  (`Probe file`, a cache dependency). A malformed graph is PACKAGE-GRAPH,
+  never a tree read instead. Hand-made nested trees (no graph) keep
+  instance-by-place identities.
 
 If you change resolution, identity, the rewrite, the seam's directory
 question or the cache's probes, run `tests/bot-modules.test`,
@@ -4775,13 +5770,15 @@ c-bindgen.tcl stage -package 1`); `tests/workload-icy-tower.test` and the
 
 ## The package manager (pm/, botlish.json, .botpkg)
 
-`pm/` (PACKAGE-MANAGER-MILESTONE-1.md, PACKAGE-MANAGER-MILESTONE-2.md) is
-the package manager: `main.tcl add|install|update|remove|verify|package|native`
-(`botlish add ...` in the single executable), over local `.botpkg`
-artifacts (BOTPKG-FORMAT.md) and `botlish.json` (BOTLISH-JSON.md, schemas 1
-and 2). It builds the `.bot_modules` trees the compiler already reads
-(previous section) -- and, for target-aware packages, their target views --
-and nothing else. Keep it so:
+`pm/` (PACKAGE-MANAGER-MILESTONE-1.md, PACKAGE-MANAGER-MILESTONE-2.md,
+PACKAGE-MANAGER-MILESTONE-3.md) is the package manager: `main.tcl
+add|install|update|remove|verify|package|native` (`botlish add ...` in the
+single executable), over local `.botpkg` artifacts (BOTPKG-FORMAT.md),
+`botlish.json` (BOTLISH-JSON.md, schemas 1, 2 and 3) and, on the author's
+side, provenance records (BOTPKG-PROVENANCE.md). It builds the
+`.bot_modules` trees the compiler already reads (previous section) -- and,
+for target-aware packages, their target views -- and, for an author, a
+package directory and its release; nothing else. Keep it so:
 
 * The compiler never reads `botlish.json`, a version, a lock, an artifact
   or `.bot_modules/.botlish`, and never loads `pm/`: main.tcl sources
@@ -4794,12 +5791,26 @@ and nothing else. Keep it so:
   compilation, no `exec` but `kill -0` (a lock holder's liveness), no
   socket, no network (`pm-no-network-in-sources`). Native archives travel
   as opaque files built on the author's side (`tools/package-repository.tcl`).
-* Each package owns its direct requests and exact locks; a package's
-  dependencies go in its own `.bot_modules`, never its consumer's. Never
-  write a transitive lock into an application, deduplicate instances by
-  name, or let a lock change without `add`/`update` (install never moves
-  one). A request's precision is its components (`1`, `1.2`, `1.2.3`): no
-  operators, prereleases or ranges.
+* Each package owns its direct requests and exact locks, and the
+  application has one dependency graph (pm/graph.tcl;
+  SHARED-PACKAGE-DEPENDENCIES-MILESTONE-1.md; LANGUAGE-DESIGN-PRINCIPLES.md,
+  section 2): every package once, at `.bot_modules/NAME` (no package has a
+  `.bot_modules` of its own), at the one version every lock of it names,
+  and `.bot_modules/.graph` (and each view's) written from it in the same
+  transaction. Resolution is unification, never search: every demanded
+  release is explored, and two demanded versions are a
+  DEPENDENCY-CONFLICT naming every lock and its path. Never relax, move or
+  override a lock -- the application's or an author's -- to make the graph
+  agree, never make a second instance as a fallback, never select the
+  first version visited, never let an editable directory satisfy a
+  package's lock, never write a transitive lock into an application, and
+  never let a lock change without `add`/`update` (install never moves one;
+  `add` and `update` choose, within a request, the version the graph's
+  locks hold, and say so). No peer dependencies and no override syntax: a
+  departure is a language-design decision. Results and messages depend on
+  no order (declarations, repositories, traversal: the catalog keeps its
+  repositories sorted). A request's precision is its components (`1`,
+  `1.2`, `1.2.3`): no operators, prereleases or ranges.
 * Artifacts are immutable and validated whole before anything is written:
   the restricted ZIP profile, the path rules, the limits, streamed capped
   decompression, every CRC, and the descriptor in the artifact context
@@ -4857,12 +5868,61 @@ and nothing else. Keep it so:
   `/usr/bin/sha256sum`, `/usr/bin/shasum`, `%SystemRoot%\System32\certutil.exe`),
   given the exact bytes, after a known-answer probe, else the Tcl
   implementation: never a tool found on PATH, never OpenSSL's command line,
-  and never the native backend.
+  and never the native backend. SHA-1 (pm/sha1.tcl, the same rules) exists
+  only to compute Git object identities for provenance checks: never an
+  integrity digest of the package manager's own.
+* The author's side (pm/author.tcl: `native add`, `native require`,
+  `package stage`, `native audit`; PACKAGE-MANAGER-MILESTONE-3.md) builds
+  nothing and runs nothing: an author builds native files with their own
+  tools first, and the commands read them as bytes. Every fact a file can
+  establish (format, architecture, loader identity, loader dependencies,
+  exports, RUNPATH) is taken from the file, never typed by hand; what it
+  cannot (which needs the system provides, what is opened at run time, a
+  license) is the author's statement, and the reports say which is which.
+  Never infer a library's name, origin or linkage intent from a file name,
+  never auto-declare exports as required symbols, never record an observed
+  system version as a requirement. Existing metadata or a file that
+  differs is a CONFLICT unless `-replace`; staging copies regular files
+  only (never follows a link), and `-replace` makes a directory exactly its
+  source. An operation raises botlish.json's schema only to what its
+  contents need. The author's side (author.tcl, sha1.tcl, release.tcl)
+  is loaded by `pm::authoring`, only for the operations that use it: never
+  source it with the rest of `pm/`, which every consumer command loads.
+* Run-time dependencies (schema 3's `runtime`: a library opened by name, a
+  facility) are never loader dependencies: never in `needs`, never in the
+  link, never a problem of the native plan, never a reason an installation
+  fails. A loader dependency is never declared as one.
+* `package pack` of a target-aware package runs the audit and refuses an
+  incomplete one (an unresolved loader dependency, a declared fact the
+  file contradicts, an absolute or empty RUNPATH entry, an undeclared
+  native binary, a platform library bundled, targets with different
+  modules, a link or a C function no library provides); "partially
+  verified" (facts this host cannot check) packs. A pure-Botlish package
+  never runs the audit. Never add a way to skip it.
+* Provenance (pm/release.tcl, BOTPKG-PROVENANCE.md) is evidence, never
+  authentication: a record beside the artifact, bound to its SHA-256, never
+  inside it; computed facts, the author's assertions and the checks made
+  stay apart; a check an assertion fails stops the pack (nothing written);
+  a record never holds a local path, a host path or a credential. Never
+  describe a record as a signature or as verified provenance, never run git
+  or another tool to "check" an assertion (the Git tree is recomputed from
+  the files), and never put a time or a host fact in a record.
+* One version, one artifact: `packages/RELEASES.tsv` records each release
+  of this repository's packages by its SHA-256, once, never changed;
+  `tools/package-repository.tcl` reports a rebuild that does not reproduce
+  a recorded release as a CANDIDATE, and with `-release` refuses it (never
+  publish a candidate). A change to a package's contents is a new version.
+  The releases are built in the pinned author image
+  (tools/package-build/: a base image by digest, Ubuntu's snapshot at one
+  instant, Tcl 9 by SHA-256), whose independent builds reproduce them;
+  never pin a tool by a mutable name there.
 
 If you change `pm/`, the formats, `tools/package-repository.tcl`,
-`packages/*/botlish.json` or main.tcl's dispatch, run
-`tests/package-manager.test`, `tests/package-native.test` (its foreign
+`tools/package-build/`, `packages/*/botlish.json` or main.tcl's dispatch, run
+`tests/package-manager.test` (its `pm-shared-*` tests: the one graph), `tests/package-native.test` (its foreign
 formats need clang and MinGW-w64; its linked runs the native backend),
+`tests/package-authoring.test` (clang, lld and MinGW-w64 for its foreign
+formats, git for its Git trees),
 `tests/package-workloads.test` (its packages are packed for linux-x86_64 and
 linux-aarch64: it needs the AArch64 GNU cross compiler, clang, cmake and
 ninja, and the package-owned libSDL3 and libraven: `tests/cffi/sdl3.tcl`,
@@ -4870,8 +5930,24 @@ ninja, and the package-owned libSDL3 and libraven: `tests/cffi/sdl3.tcl`,
 and `audit/package-manager/tools/mutate.tcl` (every mutant in its
 `mutants.txt` must still apply and be killed: update a mutant's text when
 you change the code it mutates, keeping it a mutant of the same rule; a
-mutant's `%%` line names the test files that kill it).
-`bench/package-manager.tcl` measures its costs. A change to the single
+mutant's `%%` line names the test files that kill it). A change to
+resolution, the graph file or what reads it (pm/graph.tcl, the graph parts
+of pm/install.tcl, pm/view.tcl, pm/commands.tcl's `add`, `update` and
+`package graph`, surface/modules.tcl's package graphs) also runs
+`audit/shared-dependencies/tools/fuzz.tcl` (several seeds: the package
+manager against its independent resolver, `oracle.py`, whose `selftest`
+runs too), `audit/bot-modules/tools/mutate.tcl` (its `graph-*` mutants),
+`tests/package-workloads.test`'s `pw-shared-*` (two libraries over one
+event_loop_linux, run against epoll) and, after `single/build.sh`, the clean
+room (`audit/shared-dependencies/cleanroom/cleanroom.sh image`, then
+`repository.sh OUT` and `cleanroom.sh run single/out/botlish OUT RESULTS`:
+the single-file compiler and published artifacts only, no network).
+`bench/shared-dependencies.tcl` measures resolution against a baseline
+checkout (`-root`). A change to a package's recipe or the author image also runs
+`tools/package-build/author.sh build OUT -release` twice (two fresh
+containers: their artifacts and records must be identical and equal the
+recorded releases) and, on a branch, `package-reproducibility.yml`
+(two runners). `bench/package-manager.tcl` measures its costs. A change to the single
 executable's dispatch (`single/main.tcl`'s package commands) also runs the
 single-executable checks above. A change to the compiler's target package
 trees (`ApplicationTree`, `nativeDirs`) also runs the package-scoped-module
@@ -4888,14 +5964,26 @@ checks of the previous section and `tests/hir-cache.test`,
 Linux target, the generated binding, the bridge's archive and Raven's
 *desktop* build (X11 and the Vulkan renderer), which also runs headless; its
 common files are the module, README.md and GUIDE.md (the consumer's
-documentation) and `examples/clicks`. `tools/package-repository.tcl OUT
-raven` is its author's one operation. Keep it so:
+documentation), `examples/clicks` and Raven's license notices.
+`tools/package-repository.tcl OUT raven` is its author's one operation
+(`tools/package-build/author.sh build OUT -release raven` in the pinned
+author image, for a release). Keep it so:
 
 * One library for both configurations: never pack the headless build, and
   never add a second artifact, a feature flag or a variant of one release
   for headless use. A `raven` change of contents is a new version: the tool
   refuses to overwrite a different `NAME-VERSION.botpkg` (`-force` only
   for a local file the author means to replace).
+* The event bridge (native/raven_bridge.c, RAVEN-BINDINGS.md section 5)
+  only records: it never calls Botlish, never keeps a pointer Raven gave
+  it, and its one input hook (`watch_input`) answers "not consumed" to
+  every event, so watching a window changes nothing Raven does
+  (`raven-input`). A press is an event of its own (KeyPressed,
+  MousePressed), never derived from state; consecutive moves are one
+  record. Every number a record holds is finite, so `events()`, `rect()`
+  and `mouse_position()` declare no error: never make them fallible again
+  for a value Raven cannot produce. A change to the record or its kinds
+  bumps the bridge's ABI and raven.bot's check together.
 * Builds are recognized by their configuration's stamp
   (tests/cffi/raven.tcl: `headless`, `desktop`), never by a library merely
   present; the desktop build's Vulkan headers are the pinned Khronos commit
@@ -4903,12 +5991,23 @@ raven` is its author's one operation. Keep it so:
   SHA-256-checked Ubuntu packages (author side only, never packed). Never
   download an unpinned input to make a build pass.
 * libX11 is a declared *system* library (the bundled libraven's DT_NEEDED,
-  verified by the system's metadata); the Vulkan loader and driver and the
-  display are loaded at run time and are no metadata: never bundle a
-  graphics driver, the loader or X11, and never declare the loader as a
+  verified by the system's metadata); the Vulkan loader and driver, the
+  display, libX11-xcb and libdbus are opened at run time: schema 3
+  run-time dependencies (the desktop and accessibility capabilities,
+  PACKAGE-MANAGER-MILESTONE-3.md), never loader dependencies. Never bundle
+  a graphics driver, the loader or X11, and never declare the loader as a
   system library (it would make headless use require it). A missing one is
   reported by `start`'s RavenFailed, whose detail lists every error Raven
   reported while it started (`startup_reasons`).
+* The release's metadata is derived, never written in packages/raven:
+  the recipe (`tools/package-repository.tcl`'s `author::raven`) imports
+  each target's built files with `native add` and states the rest with
+  `native require`; Raven's license and notices (licenses/raven/) travel
+  in the artifact. The AArch64 cross build is configured with
+  `-DCMAKE_SKIP_RPATH=ON`: without it CMake records the build machine's
+  cache path (and an empty, current-directory entry) as the library's
+  RUNPATH, which made raven 0.3.1 differ between machines and which the
+  audit refuses.
 * The package's documentation is checked: every ```botlish block of its
   README.md and GUIDE.md is a complete program (`raven-package-docs`
   compiles them and runs the test ones); a fragment goes in a plain fence.
@@ -5016,7 +6115,12 @@ no semantics of its own. Keep it so:
   `surface::syntaxEntries`, the loader's `Error`, `hir::recovery::entries`,
   `hir::warnings::Rejection` and `entry` (core::raiseDiagnostics' `summary`,
   `location`, `related`) -- never parsed out of its text. A new producer of
-  raised diagnostics gives them too.
+  raised diagnostics gives them too. So is the way to a module file: every
+  diagnostic the loader reports from one (a load error, a reference error,
+  a syntax error) carries `import` notes, the chain of imports that loaded
+  it, the entry program's first (`surface::modules::ImportNotes`, recorded
+  as each module is first loaded); notes are never part of a diagnostic's
+  message, order or identity, and the service keeps their `kind`.
 * The service reports the strict compilation's diagnostics -- the very
   entries it raises, in its order, `hir::recovery::reported` deciding what
   is dependent -- and the warnings the compilation attached: never filter,
@@ -5050,9 +6154,15 @@ transport, scheduling and presentation, never semantics. Keep it so:
 
 * Every semantic answer is the service's: diagnostics are
   `service::diagnostics` re-encoded, hover, definition and references are
-  `service::at`'s facts, Compilerpedia topics `service::explain`'s and the
+  `service::at`'s facts, semantic tokens `service::tokens`' (Syntax
+  highlighting, below), Compilerpedia topics `service::explain`'s and the
   facts' own (by identity). Never match names, parse formatted CLI output,
-  run a second analysis or resolver, or compute a type in `lsp/`.
+  run a second analysis or resolver, or compute a type in `lsp/`. The one
+  presentation choice: a program with no analysis (a loader error) also
+  shows each diagnostic at its `import` notes, the loader's chain of imports
+  to the module file it is in (`ImportMirror`); an analyzed program's
+  module diagnostics stay in their own file. Never find an import yourself
+  (by name or by parsing): only the loader's notes say which one.
 * Layers: `transport.tcl` (bytes, Content-Length framing, nothing else),
   `json.tcl` (typed values: a category is never guessed from a Tcl
   string), `jsonrpc.tcl` (messages, no LSP method knowledge), then
@@ -5095,6 +6205,13 @@ mutates, keeping it a mutant of the same rule); for a scheduling change
 also `bench/lsp.tcl` (both schedulers, the census's workloads), and for
 packaging `single/smoke-test.sh` after `single/build.sh` (its `-lsp`
 session).
+
+`editors/vscode/` is a VS Code extension for the same server: a client
+like the Neovim configuration, starting `main.tcl -lsp` (its server.js
+works out the command) and adding nothing semantic. If you change it, or
+the server's capabilities, options or URIs, run its `npm test` and
+`xvfb-run -a npm run test:vscode` (VS Code itself; CI runs neither) in
+`editors/vscode` after `npm ci`, and package it (`npm run package`).
 
 ## Syntax recovery
 
@@ -5155,6 +6272,71 @@ programs and their repairs establish; `bench/syntax-recovery.tcl` regenerates
 the performance report, and `bench/lsp.tcl -malformed 1` the language
 server's editing session through syntax errors.
 
+## Syntax highlighting and the token IR
+
+Everything that highlights Botlish reads one statement of what each token
+is, or is checked against it (SYNTAX-HIGHLIGHTING-MILESTONE-1.md): the
+token IR (`surface/tokens.tcl`: tokens, comments, lexical diagnostics with
+their recovery roles, the inserted closers, and the identifiers a parse
+read as contextual words), its highlight classes
+(`surface::tokens::classes`), the command line's excerpts and color
+(main.tcl's "Diagnostic presentation"), the compiler service's tokens
+(`service::tokens`), the language server's semantic tokens, and the
+generated editor grammars. The lexer and the parser stay in Tcl
+(BOTLISH-LEXER-RATIONALE.md). Keep it so:
+
+* One IR: `surface::tokens::toLexed (fromLexed L)` is exactly the lexer's
+  result L, so the IR holds everything the parser reads; a later lexer in
+  another language produces the IR and is checked by `validate`. Never let
+  a highlighter read the lexer's or the parser's internals instead, and
+  never add a syntax-tree level to the IR without a design of its own (the
+  AST is no specified format).
+* Contextual words are the parser's: every identifier it consumes as a word
+  goes through `surface::parser::Word` (or `WordAt`), every such word is in
+  `surface::parser::words`, and a word compared only to refuse a construct
+  is in `refusedWords`. Never classify a word by its spelling anywhere
+  else, and never let the recording change the AST (`surface::parse` drops
+  the words; the AST of every file must stay what it was).
+* Presentation never changes a diagnostic: excerpts and color are on only
+  where `-color`/`-excerpts` say (auto: a terminal, a channel with Tcl's
+  `-mode`; never on Windows; NO_COLOR, TERM=dumb), and a pipe or a file
+  gets the plain format byte for byte. An excerpt reads the diagnostic's
+  structured location and the text the compilation read (the revision's,
+  else the source seam's), never the message text.
+* `service::tokens` adds no semantics: lexical classes are the IR's,
+  declarations and annotations the AST's spans, names the HIR's bindings; a
+  name with no binding gets no token. Tokens are a revision's query index
+  (prepare builds them, export and import carry them): a new derived kind
+  goes into `service::import`'s list too. The server answers them by its
+  stale rule (fresh; else wait for a pending analysis; else the unchanged
+  text's) and never invents one.
+* The editor grammars are generated (`tools/editor-grammars.tcl generate`):
+  never edit editors/vscode/syntaxes/botlish.tmLanguage.json,
+  editors/neovim/syntax/botlish.vim or the fixture's sample.classes.json by
+  hand. The lexer's keywords are each in one group, every registered word
+  has a pattern and no pattern names another (generation fails otherwise).
+  A declared name (after `fn`, `struct`, `type`, `error`) is the syntax
+  tree's (`grammars::Declared`), never a name a pattern merely follows.
+  A new contextual word is registered, consumed with Word, given a pattern
+  (TextMate and Vim, matching it only where the parser reads it) and placed
+  in the fixture (editors/vscode/test/fixtures/sample.bot) where it is read.
+
+If you change the lexer's recording (`comments`) or recovery metadata, the
+parser's word recording, surface/tokens.tcl, main.tcl's presentation,
+`service::tokens`, the server's semantic tokens, the generator or the
+fixture, run tests/syntax-highlighting.test (its grammar tests need `vim`,
+and `npm ci` in editors/vscode for VS Code's engine), tests/lsp.test,
+tests/main-cli.test, tests/compiler-service.test, `tclsh9.0
+tools/editor-grammars.tcl check`, `npm test` in editors/vscode,
+`audit/syntax-highlighting/tools/mutate.tcl` (every mutant in its
+`mutants.txt` must still apply and be killed by a test its `!!` line names:
+update a mutant's text when you change the code it mutates, keeping it a
+mutant of the same rule), and on a branch tests.yml for
+tests/lsp-neovim.test (`lsp-neovim-highlighting`, which needs Neovim); a
+change to the lexer or the parser also compares the AST of every
+repository `.bot` file with the tree before the change, and runs the
+syntax-recovery and diagnostic-recovery harnesses (above).
+
 ## Compilerpedia (the built-in reference)
 
 `main.tcl -help` (COMPILERPEDIA.md) reads `compilerpedia/`: the engine
@@ -5184,12 +6366,50 @@ runs it); it fails when:
 * an example no longer compiles, runs or is rejected as stated: when the
   compiler learns to prove a pattern a proof page lists as a limitation, or
   changes a rule, update the page, never the example's expectation alone;
-* a reference, alias or matcher is broken.
+* a reference, alias or matcher is broken;
+* a page names a design document (`docs/NAME.md`, a README): the reference
+  ships without `docs/` (the single executable, Botlish.app), so a page says
+  what it means itself and points at other topics. There is no `docs:`
+  header key. A standard-library comment may cite a document for its
+  maintainers; the generator drops a citation it can (`cpt::Unreferenced`:
+  a parenthetical of citations, a citation leading or ending one, a
+  "-- see DOC", a sentence that is only citations), and a citation it
+  cannot fails the check until the comment is reworded (keep the file's
+  line count: the warning gate's manifest pins locations);
+* a capability page's alias names an existing standard-library operation
+  (a function or intrinsic, not a predicate: "read file" and
+  std::linux::fs::read_file) and the page does not relate its topic or its
+  module's (next paragraph).
 
 State only what the compiler does today; document an absent facility as
 absent (`capability.*`) with the nearest alternative. A change to the
 command line updates `cliOptions` (main.tcl), the `cli.options` topic and
 main.tcl's header comment (`tests/main-cli.test` checks all three).
+
+**Cross-check the capability pages against the standard library's
+registry.** `capability.*` pages say what Botlish lacks, and the stdlib
+grows under them: `capability.files` said "no open exists" for months after
+std::io::fs and std::linux::fs shipped, and sent a user to hand-written C
+calls. So whenever you add, rename or remove a public standard-library
+module, function or intrinsic (a new `stdlib/` module, a registered
+native, a public declaration):
+
+* list the capability pages (`tclsh9.0 main.tcl -help capability.overview`)
+  and read every one whose subject the change touches -- by its title and
+  STATUS, not only its aliases -- and run `-help` with the names a user
+  would type for the new facility (`-help "read file"`, `-help timer`):
+  each must lead to the real documentation;
+* a page the change makes wrong is rewritten in the same change: the real
+  documentation, its ID kept (other topics and help lines name it), its
+  title saying "limited" or describing what exists, its `related:` naming
+  the new modules' and operations' topics, an example that compiles;
+* a page that stays right but whose alias now names an operation of the
+  same spelling relates that operation's topic (`capability.null` relates
+  std::ffi::c::null) or drops the alias.
+
+The check catches only the mechanical case (an alias that is an
+operation's name); a broader claim -- "no tasks" while std::event_loop
+schedules them -- is found only by reading the pages, so read them.
 
 ## Golden tests (Botlish-native test framework)
 

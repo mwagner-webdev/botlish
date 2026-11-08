@@ -92,6 +92,17 @@ proc runCaptured {args} {
 }
 set runCounter 0
 
+# {STDOUT STDERR VALUE} of one run of COMMAND as runCaptured runs it, under
+# the driver protocol (BOTLISH_NATIVE_RESULT, which the executable inherits,
+# under strace too): an executable prints no value of its own
+# (PROGRAM-OUTPUT-MILESTONE-1.md), so its standard output and error are the
+# program's; VALUE is the program's value, shown (ProtocolValue).
+proc runValued {args} {
+    set result [file join $::scratch result.[incr ::runCounter]]
+    set run [withEnvironment [list BOTLISH_NATIVE_RESULT $result] {runCaptured {*}$args}]
+    return [concat $run [list [ProtocolValue $result]]]
+}
+
 # The write(2) calls of an strace log: {FD DATA RESULT} each, as strace
 # printed them.
 proc writesOf {log} {
@@ -296,12 +307,11 @@ test io-implementation-context-missing {without an installation the call of the 
     list [dict get $options -errorcode] [lrange [split [regsub -all {[^ ]*/p[0-9]+\.bot} $message p.bot] \n] 0 4]
 } -cleanup {unset -nocomplain message options} -result {{CORE SEMANTIC MISSING-CONTEXT} {{p.bot:18:1: std::io::IO is required by this call, but no installed context implements it (install one with "with context EXPR" before the call):} {    twice (for A)} {     -> show, the implementation of Thing's operation show for A, called at p.bot:7:5} {     -> std::io::print_line} {        directly requires std::io::IO}}}
 
-test io-implementation-context-executable {the entry-io reproducer as a standalone executable over std::linux::io: the operation's implementation prints through the installed LinuxIO's write(2), twice} -constraints {nativeLinux posixShell} -body {
-    runCaptured [buildExecutable impl-context "import std::io\nimport std::linux::io\n\n${::ioThingTrait}\n[ioThing A v A]\nwith context std::linux::io::create()\ntwice(A {v: 1})\n"]
+test io-implementation-context-executable {the entry-io reproducer as a standalone executable over std::linux::io: the operation's implementation prints through the installed LinuxIO's write(2), twice, and the program's value (through the driver protocol) is their sum} -constraints {nativeLinux posixShell} -body {
+    runValued [buildExecutable impl-context "import std::io\nimport std::linux::io\n\n${::ioThingTrait}\n[ioThing A v A]\nwith context std::linux::io::create()\ntwice(A {v: 1})\n"]
 } -result {{A
 A
-2
-} {}}
+} {} 2}
 
 # ---------------------------------------------------------------------------
 # The line operations' newline (S16, 2048-ENGINE-WORKLOAD.md): print_line and
@@ -369,7 +379,7 @@ test io-line-newline-is-a-character {NIR: print_line's and write_error_line's cl
 # ---------------------------------------------------------------------------
 # Real output (standalone executables)
 
-test io-hello-executable {examples/io/hello.bot as a standalone executable: descriptor 1 receives exactly "Hello, world!\n" (then the runner's own result line); nothing on descriptor 2; the same under GC stress} -constraints {nativeLinux posixShell} -body {
+test io-hello-executable {examples/io/hello.bot as a standalone executable: descriptor 1 receives exactly "Hello, world!\n", the program's own output, and nothing of the executable's (no value line); nothing on descriptor 2; the same under GC stress} -constraints {nativeLinux posixShell} -body {
     set exe [buildExecutable hello $::helloText]
     set plain [runCaptured $exe]
     set ::env(BOTLISH_NATIVE_GC_STRESS) 1
@@ -380,17 +390,15 @@ test io-hello-executable {examples/io/hello.bot as a standalone executable: desc
     }
     list $plain [expr {$plain eq $stressed}]
 } -result {{{Hello, world!
-unit
 } {}} 1}
 
-test io-routing-utf8 {print and print_line write to descriptor 1, write_error and write_error_line to descriptor 2, as UTF-8 (a two-byte and a four-byte scalar), each line ending in exactly one newline} -constraints {nativeLinux posixShell} -body {
+test io-routing-utf8 {print and print_line write to descriptor 1, write_error and write_error_line to descriptor 2, as UTF-8 (a two-byte and a four-byte scalar), each line ending in exactly one newline; no WriteFailed reached the program} -constraints {nativeLinux posixShell} -body {
     set exe [buildExecutable routing $::routingText]
-    lassign [runCaptured $exe] out err
-    list [encoding convertfrom utf-8 $out] [encoding convertfrom utf-8 $err] [string length $out]
+    lassign [runValued $exe] out err value
+    list [encoding convertfrom utf-8 $out] [encoding convertfrom utf-8 $err] [string length $out] $value
 } -result {{out: é 𝄞
-"ok"
 } {err: done
-} 18}
+} 13 {"ok"}}
 
 test io-strace {each portable operation is one write(2) of the complete text on the right descriptor; the Hello World's write comes from the raw syscall boundary through std::linux::sys::write (std::linux::write's x86-64 transport), std::linux::write, std::linux::io::write_all, std::linux::io::write_text, print_line's clone and hello's clone -- no libc frame} -constraints {linuxX86_64 strace posixShell symbolLinker} -body {
     set exe [buildExecutable routing $::routingText]
@@ -430,22 +438,19 @@ test io-strace {each portable operation is one write(2) of the complete text on 
 test io-short-write-completed {a short write is completed: when the kernel accepts 5 of the 14 bytes (strace-injected), the remaining 9 bytes are written next, and the caller sees success -- never a byte count} -constraints {nativeLinux straceInject posixShell} -body {
     set exe [buildExecutable status $::statusText]
     set log [file join $::scratch strace.short]
-    lassign [runCaptured strace -f -qq -o $log -e trace=write -e inject=write:retval=5:when=1 $exe] out err
-    list [lrange [writesOf $log] 0 1] $out
+    lassign [runValued strace -f -qq -o $log -e trace=write -e inject=write:retval=5:when=1 $exe] out err value
+    list [lrange [writesOf $log] 0 1] $out $value
 } -result {{{1 {Hello, world!\n} 5} {1 {, world!\n} 9}} {, world!
-"ok"
-}}
+} {"ok"}}
 
-test io-write-failed {a negative write result (the kernel's -errno, here an injected EBADF) and a write that makes no progress (0 bytes) are std::io::WriteFailed: the portable caller's handler runs; the errno never reaches it} -constraints {nativeLinux straceInject posixShell} -body {
+test io-write-failed {a negative write result (the kernel's -errno, here an injected EBADF) and a write that makes no progress (0 bytes) are std::io::WriteFailed: the portable caller's handler runs (its value, through the driver protocol), after one write on descriptor 1, never retried; the errno never reaches it} -constraints {nativeLinux straceInject posixShell} -body {
     set exe [buildExecutable status $::statusText]
     lmap inject {write:error=EBADF:when=1 write:retval=0:when=1} {
         set log [file join $::scratch strace.fail]
-        lassign [runCaptured strace -f -qq -o $log -e trace=write -e inject=$inject $exe] out err
-        list [llength [writesOf $log]] $out
+        lassign [runValued strace -f -qq -o $log -e trace=write -e inject=$inject $exe] out err value
+        list [llength [lsearch -all -exact -index 0 [writesOf $log] 1]] $out $value
     }
-} -result {{2 {"failed"
-}} {2 {"failed"
-}}}
+} -result {{1 {} {"failed"}} {1 {} {"failed"}}}
 
 test io-allocations {allocation evidence: the context-trait path adds nothing -- std::io::print_line(text) allocates exactly what the direct std::linux::io::write_text(std::str::append_char(text, '\n')) does: the line String, the UTF-8 byte List and the Bytes (the operation's own), plus std::linux::io::create's 7 structs and the one struct std::linux::write builds} -constraints {nativeLinux} -body {
     set pre "import std::io\nimport std::linux::io\nimport std::str\nwith context std::linux::io::create()\n"

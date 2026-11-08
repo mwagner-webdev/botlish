@@ -1,8 +1,8 @@
 # web.bot -- the "std::web" namespace: ordinary Botlish library functions used
 # from other files as std::web::NAME (surface/modules.tcl).
 #
-# uri_escape_text is the executable percent-encoding algorithm NATIVE-URI-
-# ESCAPE.md moved out of stdlib/web.tcl's uriEscape native -native-body (raw
+# uri_escape_text is the executable percent-encoding algorithm once moved
+# (NATIVE-URI-ESCAPE.md) out of the uriEscape native -native-body (raw
 # core IR, pasted into every call site) and into this ordinary cross-file
 # Botlish module definition, so it is resolved and compiled once, like any
 # other function, instead of copied. It is the same algorithm as the
@@ -23,17 +23,17 @@
 # the logical 0..15 value hex_pair/hex_digits index with.
 #
 # is_unreserved (ASCII-AND-URI-UNRESERVED.md) is now the compositional form
-# the earlier milestones' own comments already anticipated: ASCII letters
+# this module's earlier comments already anticipated: ASCII letters
 # or digits (std::ascii::is_alphanumeric, stdlib/ascii.bot -- structural fact,
 # owned by the "std::ascii" namespace) OR membership in
 # additional_unreserved_chars, the four-byte '-' '.' '_' '~' set RFC 3986
 # additionally exempts from percent-encoding (URI *policy*, owned here,
 # never folded into ascii::'s own structural classes). The set is built
-# once, from std::byte::set(['-', '.', '_', '~']) (stdlib/byte.bot,
-# BYTE-SET.md/MINIMAL-IMMUTABLE-SET.md's retained-module-value machinery),
+# once, from std::byte::set(['-', '.', '_', '~']) (a retained module value;
+# BYTE-SET.md, MINIMAL-IMMUTABLE-SET.md),
 # and reused by every is_unreserved call -- never reconstructed per call.
-# This is now the clean, handler-free initializer STATIC-COMPLETION-PROOFS.md
-# restores: the call-specific completion proof (hir/completions.tcl) proves
+# This is a clean, handler-free initializer (STATIC-COMPLETION-PROOFS.md):
+# the call-specific completion proof (hir/completions.tcl) proves
 # every element of this literal list is statically in Byte's own domain, so
 # std::byte::set's own declared AboveRange error is proven impossible for this
 # exact call -- no handler, no placeholder fallback set, no `on` clause.
@@ -100,8 +100,8 @@ refined type Emailish = str
 # UNICODECHAR-CLASSIFIERS.md) -- never UTF-8 bytes, unlike
 # additional_unreserved_chars's std::byte::set below. Retained once at module
 # scope, exactly like additional_unreserved_chars: constructed once at module
-# initialization, never per emailish? call (R2A1-MODULE-FN-BRIDGE-
-# REACHABILITY.md fixed the defect that once forced building this per call).
+# initialization, never per emailish? call (a defect once forced building
+# it per call; R2A1-MODULE-FN-BRIDGE-REACHABILITY.md).
 local_extra_chars = std::immutable_set::from_list(['.', '_', '%', '+', '-'])
 
 fn emailish?(v: str) -> bool proves v: Emailish:

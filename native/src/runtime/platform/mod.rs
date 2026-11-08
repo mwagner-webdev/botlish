@@ -19,15 +19,56 @@ pub mod macos;
 pub mod windows;
 #[cfg(unix)]
 mod guard;
+#[cfg(any(unix, all(windows, target_arch = "x86_64", target_env = "msvc")))]
+mod records;
 
 #[cfg(unix)]
-pub use guard::{published_stack, report_fatal, set_active_stack, set_result_file, OverflowGuard};
+pub use guard::{guarded_threads, published_stack, report_fatal, set_active_stack, set_result_file, OverflowGuard};
 #[cfg(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")))]
 pub use linux::{current_stack, thread_token};
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 pub use macos::{current_stack, thread_token};
 #[cfg(all(windows, target_arch = "x86_64", target_env = "msvc"))]
-pub use windows::{current_stack, published_stack, set_active_stack, set_result_file, thread_token, OverflowGuard};
+pub use windows::{current_stack, guarded_threads, published_stack, set_active_stack, set_result_file, thread_token, OverflowGuard};
+
+/// A guard record reserved for a Botlish thread that does not run yet
+/// (runtime/thread.rs, BOTLISH-OWNED-THREADS-AND-CROSS-THREAD-ACTORS-
+/// MILESTONE-1.md): its index, or None when every record is in use or
+/// reserved -- the start is refused, never run unguarded.
+#[cfg(any(unix, all(windows, target_arch = "x86_64", target_env = "msvc")))]
+pub fn reserve_guard() -> Option<usize> {
+    records::reserve()
+}
+
+#[cfg(any(unix, all(windows, target_arch = "x86_64", target_env = "msvc")))]
+pub fn unreserve_guard(index: usize) {
+    records::unreserve(index)
+}
+
+/// How many guard records are free (std::thread::capacity).
+#[cfg(any(unix, all(windows, target_arch = "x86_64", target_env = "msvc")))]
+pub fn free_guards() -> usize {
+    records::free_count()
+}
+
+/// The calling thread's guard mode, which a thread it starts installs too:
+/// (an executable's, its report's destination); a thread with no guard's
+/// is an executable's on standard error.
+#[cfg(any(unix, all(windows, target_arch = "x86_64", target_env = "msvc")))]
+pub fn guard_mode() -> (bool, usize) {
+    records::mine().map(|r| (r.executable(), r.destination())).unwrap_or((true, 2))
+}
+
+/// Installs the calling thread's guard in reservation RESERVATION.
+#[cfg(any(unix, all(windows, target_arch = "x86_64", target_env = "msvc")))]
+pub fn install_reserved_guard(reservation: usize, executable: bool, destination: usize, label: &[u8]) -> std::io::Result<OverflowGuard> {
+    let stack = super::native_stack::NativeStack::current()?;
+    // The driver's result file takes its result lines unlabelled; an
+    // executable's report on standard error names the thread.
+    let label = if executable { label } else { b"" };
+    let label = &label[..label.len().min(records::LABEL_BYTES)];
+    OverflowGuard::install_reserved(&stack, reservation, executable, destination, label)
+}
 
 /// What every host's guard writes for an exhausted stack: the driver's
 /// result line for RtError::StackOverflow (runtime/error.rs), so that the
@@ -44,7 +85,7 @@ mod tests {
         use crate::runtime::show::tcl_list;
         let error = RtError::StackOverflow;
         let code: Vec<String> = error.error_code().iter().map(|w| w.to_string()).collect();
-        let line = tcl_list(&["error".to_string(), tcl_list(&code), error.message()]) + "\n";
+        let line = tcl_list(&["error".to_string(), tcl_list(&code), error.message(&crate::runtime::vm::ProgramInfo::empty())]) + "\n";
         assert_eq!(line.as_bytes(), super::OVERFLOW_LINE);
     }
 }

@@ -16,12 +16,10 @@
 #
 # A mutant with no %% line applies on every host that links executables.
 #
-# Not here, because it is equivalent: the ELF context-area relaxation
-# (codegen/mod.rs's context_relocations) without its ELF magic check. On
-# Linux every object is ELF; a Mach-O object read as ELF has zeros where ELF
-# keeps its section headers' offset and count (0x28, 0x3c: inside the first
-# LC_SEGMENT_64's empty segment name and its vmaddr), so no section is found
-# and nothing is rewritten (MACOS-AARCH64-MILESTONE-5.md, "Mutation results").
+# (The ELF context-area relaxation, codegen/mod.rs's context_relocations, is
+# gone: since PER-THREAD-RUNTIME-STATE-MILESTONE-1.md a context area is each
+# Vm's own, reached from the Vm, and the object has no context symbol to
+# relax. Its one equivalent mutant went with it.)
 # One that changes nothing a host compiles (macOS's gate on Linux) is
 # skipped there, never counted as killed. Lines starting with # outside an
 # edit are comments.
@@ -161,7 +159,7 @@ const C_CALLS: bool = cfg!(any(
 ## native/src/runtime/program.rs
 <<<<
     map.finish();
-    vm.set_framemap(Rc::new(map));
+    vm.set_framemap(std::sync::Arc::new(map));
 ====
     map.finish();
     let _ = map;
@@ -187,12 +185,15 @@ const C_CALLS: bool = cfg!(any(
         let _ = argv;
 >>>>
 
-@@ result-not-printed a standalone executable prints no value
+@@ result-printed a standalone executable prints its program's value again
 ## native/src/runtime/aot.rs
 <<<<
-        match writeln!(std::io::stdout().lock(), "{}", show(result)) {
+        // std::io. Tooling that wants the value runs the driver protocol.
+        0
 ====
-        match write!(std::io::stdout().lock(), "") {
+        // std::io. Tooling that wants the value runs the driver protocol.
+        let _ = writeln!(std::io::stdout().lock(), "{}", super::show::show(&vm.info, result));
+        0
 >>>>
 
 # ---------------------------------------------------------------------------
@@ -390,13 +391,13 @@ fn crt_args_for(flavor: LinkerFlavor, _program: &Program) -> Vec<String> {
             return 1;
         }
     };
-    run(startup, process_argv(), move || {
+    run(startup, process_argv(), Some(super::thread::linked_factory(linked)), move || {
 ====
             eprintln!("{error} (NATIVE STARTUP)");
             return 0;
         }
     };
-    run(startup, process_argv(), move || {
+    run(startup, process_argv(), Some(super::thread::linked_factory(linked)), move || {
 >>>>
 
 @@ sys-helper-unclassified a runtime archive without a helper the program calls is taken for an error of the program's link, not the archive's

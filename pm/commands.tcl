@@ -9,11 +9,22 @@
 #   botlish update [NAME...]
 #   botlish remove NAME...
 #   botlish verify
-#   botlish package pack [DIR] [-out DIR] [-force]
-#   botlish package inspect FILE.botpkg [-target T]
+#   botlish package pack [DIR] [-out DIR] [-force] [-evidence FILE.json]
+#   botlish package inspect FILE.botpkg [-target T] [-provenance FILE.json]
+#   botlish package stage [DIR] -target T... -modules|-headers|-files SRC [-as PATH] [-replace]
+#   botlish package compare A.botpkg B.botpkg [-provenance A.json -provenance B.json]
+#   botlish package graph [-project DIR] [-repository DIR]...   the project's
+#                                                dependency graph, resolved
 #   botlish native inspect FILE [-target T]       what a native file is
 #   botlish native plan [-target T]               the project's native plan
 #   botlish native deploy -target T -out DIR      its shared libraries, placed
+#   botlish native add FILE -target T -name N     import a built native library
+#   botlish native require NAME -target T (-origin system | -runtime WHEN -purpose TEXT)
+#   botlish native audit [DIR] [-target T]        a package's native closure
+#
+# (PACKAGE-MANAGER-MILESTONE-3.md: the author's commands -- native add,
+# require and audit, package stage, compare and pack's -evidence -- take the
+# package directory as -package DIR or DIR, default the current directory.)
 #
 # add, install, update and remove take -target T (prepare the target view
 # of T: any number) and -drop-target T (remove that view); verify takes
@@ -39,11 +50,18 @@ namespace eval pm::cli {
         update {-project DIR -repository DIR -force {} -recover {} -target T -drop-target T}
         remove {-project DIR -force {} -recover {} -target T -drop-target T}
         verify {-project DIR -repository DIR -target T}
-        pack {-out DIR -force {}}
-        inspect {-target T}
+        pack {-out DIR -force {} -evidence FILE}
+        inspect {-target T -provenance FILE}
+        stage {-target T -modules DIR -headers DIR -files DIR -as PATH -replace {}}
+        compare {-provenance FILE}
+        graph {-project DIR -repository DIR}
         native-inspect {-target T}
         native-plan {-project DIR -target T -include {}}
         native-deploy {-project DIR -target T -out DIR -force {}}
+        native-add {-package DIR -target T -name N -linkage L -as PATH -import FILE -symbol S -license EXPR -notice PATH -replace {}}
+        native-require {-package DIR -target T -origin O -linkage L -identity I -version V -pkg-config M -symbol S
+            -runtime WHEN -capability C -purpose TEXT -kind K -loaded-by L -replace {}}
+        native-audit {-target T}
     }
     variable commands {add install update remove verify package native}
 }
@@ -57,11 +75,24 @@ proc pm::cli::usage {} {
         "       $me update \[NAME...\] \[OPTION...\]" \
         "       $me remove NAME... \[OPTION...\]" \
         "       $me verify \[-project DIR\] \[-repository DIR\]..." \
-        "       $me package pack \[DIR\] \[-out DIR\] \[-force\]" \
-        "       $me package inspect FILE.botpkg \[-target T\]" \
+        "       $me package pack \[DIR\] \[-out DIR\] \[-force\] \[-evidence FILE\]" \
+        "       $me package inspect FILE.botpkg \[-target T\] \[-provenance FILE\]" \
+        "       $me package stage \[DIR\] -target T -modules|-headers|-files SRC" \
+        "                     \[-as PATH\] \[-replace\]" \
+        "       $me package compare A.botpkg B.botpkg \[-provenance FILE\]..." \
+        "       $me package graph \[-project DIR\] \[-repository DIR\]..." \
         "       $me native inspect FILE \[-target T\]" \
         "       $me native plan \[-project DIR\] \[-target T\] \[-include\]" \
         "       $me native deploy -target T -out DIR \[-project DIR\] \[-force\]" \
+        "       $me native add FILE -target T -name N \[-linkage L\] \[-as PATH\]" \
+        "                     \[-import FILE\] \[-symbol S\]... \[-license EXPR\]" \
+        "                     \[-notice PATH\]... \[-replace\] \[-package DIR\]" \
+        "       $me native require NAME -target T -origin system \[-identity I\]" \
+        "                     \[-version V\] \[-pkg-config M\] \[-symbol S\]..." \
+        "       $me native require NAME -target T -runtime always|capability|optional" \
+        "                     -purpose TEXT \[-capability C\] \[-identity I\]" \
+        "                     \[-kind library|facility\] \[-loaded-by LIB\]" \
+        "       $me native audit \[DIR\] \[-target T\]" \
         "" \
         "Options of add, install, update and remove:" \
         "  -project DIR       the project (the directory of its botlish.json);" \
@@ -75,9 +106,11 @@ proc pm::cli::usage {} {
         "  -force             replace installed packages that were changed" \
         "  -recover           roll back an interrupted operation" \
         "" \
-        "Packages are installed under PROJECT/.bot_modules, each package's own" \
-        "dependencies in its own .bot_modules. Nothing is downloaded and nothing a" \
-        "package holds is run. Reference: $me -help packages"] \n]
+        "Packages are installed under PROJECT/.bot_modules as the application's one" \
+        "dependency graph: each package once, shared by every package that depends on" \
+        "it, its version the one every lock in the graph names (locks that disagree" \
+        "are a conflict). Nothing is downloaded and nothing a package holds is run." \
+        "Reference: $me -help packages"] \n]
 }
 
 proc pm::cli::UsageError {message} {
@@ -113,22 +146,22 @@ proc pm::cli::Run {argv} {
     if {$command eq "package"} {
         set command [lindex $rest 0]
         set rest [lrange $rest 1 end]
-        if {$command ni {pack inspect}} {
+        if {$command ni {pack inspect stage compare graph}} {
             if {$command in {"" -help --help -h}} {
                 puts [usage]
                 return 0
             }
-            UsageError "unknown package command \"$command\" (known: pack, inspect)"
+            UsageError "unknown package command \"$command\" (known: pack, inspect, stage, compare, graph)"
         }
     } elseif {$command eq "native"} {
         set command [lindex $rest 0]
         set rest [lrange $rest 1 end]
-        if {$command ni {inspect plan deploy}} {
+        if {$command ni {inspect plan deploy add require audit}} {
             if {$command in {"" -help --help -h}} {
                 puts [usage]
                 return 0
             }
-            UsageError "unknown native command \"$command\" (known: inspect, plan, deploy)"
+            UsageError "unknown native command \"$command\" (known: inspect, plan, deploy, add, require, audit)"
         }
         set command native-$command
     }
@@ -137,7 +170,7 @@ proc pm::cli::Run {argv} {
         return 0
     }
     lassign [Parse $command $rest [dict get $options $command]] words given
-    if {$command in {verify inspect native-inspect native-plan native-deploy}
+    if {$command in {verify inspect native-inspect native-plan native-deploy native-add native-require native-audit}
             && [dict exists $given -target] && [llength [dict get $given -target]] > 1} {
         UsageError "-target is given twice: $command checks one target"
     }
@@ -176,7 +209,8 @@ proc pm::cli::Parse {command args table} {
         }
         lappend words $arg
     }
-    foreach option {-project -request -out} {
+    foreach option {-project -request -out -package -name -linkage -as -import -license -origin -identity -version
+            -pkg-config -runtime -capability -purpose -kind -loaded-by -evidence -modules -headers -files} {
         if {[dict exists $given $option] && [llength [dict get $given $option]] > 1} {
             UsageError "$option is given twice"
         }
@@ -250,23 +284,30 @@ proc pm::commands::install {words given} {
         set descriptor [pm::install::Descriptor $ctx]
         set plan [pm::install::Resolve $ctx $descriptor $state [Flag $given -force]]
         Print [pm::install::Apply $ctx $plan $state [Flag $given -force] "" [ViewSpec $given $descriptor]]
-        Notes $ctx $plan
     }
     return 0
 }
 
-# Notes about editable dependencies whose own dependencies are not
-# installed (the manager never writes into an editable directory).
-proc pm::commands::Notes {ctx plan} {
-    dict for {name node} $plan {
-        if {[dict get $node kind] ne "editable"} continue
-        set descriptor [dict get $node descriptor]
-        foreach dep [lsort [dict keys [dict get $descriptor dependencies]]] {
-            if {![file isdirectory [file join [dict get $node target] .bot_modules $dep]]} {
-                puts "note: the editable package $name needs $dep, which is not installed in [dict get $node target]/.bot_modules: run install there (the package manager never writes into an editable directory)"
-            }
-        }
+# The version of NAME the dependency graph of the project CTX already holds
+# -- DESCRIPTOR's graph without NAME as one of its own dependencies (STATE
+# its record) -- as {VERSION LOCKERS}, LOCKERS the releases ("lib_a 1.0.0")
+# whose locks name it; "" when no package of the graph depends on NAME, and
+# {"" LOCKERS} when they lock several versions (the graph is in conflict
+# already: its resolution says so).
+proc pm::commands::Held {ctx descriptor state name} {
+    foreach key {dependencies lock sources} {
+        dict unset descriptor $key $name
     }
+    set found [pm::graph::Demands $ctx $descriptor $state]
+    if {![dict exists $found demands $name]} {
+        return ""
+    }
+    set versions [lsort -unique [lmap d [dict get $found demands $name] {dict get $d version}]]
+    set lockers [lsort -unique [lmap d [dict get $found demands $name] {join [dict get $d by]}]]
+    if {[llength $versions] != 1} {
+        return [list "" $lockers]
+    }
+    return [list [lindex $versions 0] $lockers]
 }
 
 proc pm::commands::add {words given} {
@@ -283,6 +324,7 @@ proc pm::commands::add {words given} {
         set state [pm::state::read [dict get $ctx meta]]
         set descriptor [pm::install::Descriptor $ctx 1]
         set source ""
+        set heldNote ""
         if {[string match *.botpkg $spec]} {
             set path [file normalize $spec]
             set artifact [pm::catalog::Load $path "the archive $spec"]
@@ -318,7 +360,16 @@ proc pm::commands::add {words given} {
             if {$versions eq ""} {
                 pm::Fail UNAVAILABLE "no repository holds a version of $name"
             }
-            if {$request ne ""} {
+            # A package the graph already holds is added at the version its
+            # packages lock: the graph has one instance of it.
+            set held [Held $ctx $descriptor $state $name]
+            lassign $held version lockers
+            if {$held ne "" && $version ne ""} {
+                if {$request ne "" && ![pm::version::satisfies $version $request]} {
+                    pm::Fail DEPENDENCY-CONFLICT "cannot add $name with the request \"$request\": [join $lockers {, }] lock[expr {[llength $lockers] == 1 ? "s" : ""}] $name $version, which the request does not accept. The application's dependency graph has one instance of $name, used by every package that depends on it, and a package's lock is never changed to make the graph agree: request a version $version satisfies (or none), or use releases of [join [lmap l $lockers {lindex $l 0}] {, }] that lock another"
+                }
+                set heldNote "note: $name $version is the version [join $lockers {, }] lock[expr {[llength $lockers] == 1 ? "s" : ""}]: the application shares that instance"
+            } elseif {$request ne ""} {
                 set version [pm::version::newest $versions $request]
                 if {$version eq ""} {
                     pm::Fail REQUEST "no version of $name the repositories hold ([join $versions {, }]) satisfies the request \"$request\""
@@ -358,12 +409,14 @@ proc pm::commands::add {words given} {
         set descriptor [pm::descriptor::fromBytes $bytes project botlish.json]
         set plan [pm::install::Resolve $ctx $descriptor $state [Flag $given -force]]
         Print [pm::install::Apply $ctx $plan $state [Flag $given -force] $bytes [ViewSpec $given $descriptor]]
+        if {$heldNote ne ""} {
+            puts $heldNote
+        }
         if {$source ne "" && [dict get $source kind] eq "directory"} {
             puts "added $name (request \"$request\"), editable: a link to [dict get $source path], not an immutable release"
         } else {
             puts "added $name (request \"$request\", lock $version)"
         }
-        Notes $ctx $plan
     }
     return 0
 }
@@ -389,40 +442,79 @@ proc pm::commands::update {words given} {
                 pm::Fail UNKNOWN "$name is not a dependency of [dict get $ctx project]"
             }
         }
-        set lines {}
+        set lines [dict create]
+        set movable {}
+        set newest [dict create]
         foreach name $names {
             set request [dict get $deps $name]
             set source [dict getdef [dict get $descriptor sources] $name ""]
             if {$source ne "" && [dict get $source kind] eq "directory"} {
-                lappend lines "$name: editable ([dict get $source path]): nothing to update"
+                dict set lines $name "$name: editable ([dict get $source path]): nothing to update"
                 continue
             }
             if {$source ne ""} {
-                lappend lines "$name: pinned to the archive [dict get $source path]: add a newer archive with -replace to update it"
+                dict set lines $name "$name: pinned to the archive [dict get $source path]: add a newer archive with -replace to update it"
                 continue
             }
             if {[pm::catalog::RepositoryCount] == 0} {
                 pm::Fail UNAVAILABLE "update $name needs a repository to look in: pass -repository DIR"
             }
             set versions [pm::catalog::Versions $name]
-            set newest [pm::version::newest $versions $request]
-            if {$newest eq ""} {
+            set version [pm::version::newest $versions $request]
+            if {$version eq ""} {
                 pm::Fail UNAVAILABLE "no version of $name the repositories hold ([join [Or $versions none] {, }]) satisfies the request \"$request\""
             }
-            set locked [dict getdef [dict get $descriptor lock] $name ""]
-            if {$locked eq $newest} {
-                lappend lines "$name: $newest is the newest version \"$request\" accepts"
-            } elseif {$locked eq ""} {
-                lappend lines "$name: locked to $newest"
-            } else {
-                lappend lines "$name: $locked -> $newest"
+            dict set newest $name $version
+            lappend movable $name
+        }
+        set before [dict get $descriptor lock]
+        foreach name $movable {
+            dict set descriptor lock $name [dict get $newest $name]
+        }
+        # A dependency some package of the graph locks is held at the
+        # version they lock, when its request accepts it: the graph has one
+        # instance of it, and their locks are theirs (pm/graph.tcl). One
+        # pass per dependency at most: a held lock stays held.
+        set held [dict create]
+        for {set round 0} {$round <= [llength $movable]} {incr round} {
+            set changed 0
+            foreach name $movable {
+                if {[dict exists $held $name]} continue
+                lassign [Held $ctx $descriptor $state $name] version lockers
+                if {$version eq "" || $version eq [dict get $descriptor lock $name]
+                        || ![pm::version::satisfies $version [dict get $deps $name]]} continue
+                dict set descriptor lock $name $version
+                dict set held $name $lockers
+                set changed 1
             }
-            dict set descriptor lock $name $newest
+            if {!$changed} break
+        }
+        foreach name $movable {
+            set request [dict get $deps $name]
+            set locked [dict getdef $before $name ""]
+            set now [dict get $descriptor lock $name]
+            if {[dict exists $held $name]} {
+                set lockers [dict get $held $name]
+                set why "held at $now: [join $lockers {, }] lock[expr {[llength $lockers] == 1 ? "s" : ""}] it, and the graph shares one instance (the newest \"$request\" accepts is [dict get $newest $name])"
+                if {$locked eq $now} {
+                    dict set lines $name "$name: $why"
+                } elseif {$locked eq ""} {
+                    dict set lines $name "$name: locked to $now, $why"
+                } else {
+                    dict set lines $name "$name: $locked -> $now, $why"
+                }
+            } elseif {$locked eq $now} {
+                dict set lines $name "$name: $now is the newest version \"$request\" accepts"
+            } elseif {$locked eq ""} {
+                dict set lines $name "$name: locked to $now"
+            } else {
+                dict set lines $name "$name: $locked -> $now"
+            }
         }
         set bytes [DescriptorBytes $descriptor]
         set plan [pm::install::Resolve $ctx $descriptor $state [Flag $given -force]]
         Print [pm::install::Apply $ctx $plan $state [Flag $given -force] $bytes [ViewSpec $given $descriptor]]
-        Print $lines
+        Print [lmap name $names {dict get $lines $name}]
     }
     return 0
 }
@@ -456,8 +548,76 @@ proc pm::commands::remove {words given} {
         set bytes [DescriptorBytes $descriptor]
         set plan [pm::install::Resolve $ctx $descriptor $state [Flag $given -force]]
         Print [pm::install::Apply $ctx $plan $state [Flag $given -force] $bytes [ViewSpec $given $descriptor]]
+        foreach name $words {
+            if {[dict exists $plan packages $name]} {
+                lappend notes "note: $name stays installed: [join [dict get $plan users $name] {, }] depend[expr {[llength [dict get $plan users $name]] == 1 ? "s" : ""}] on it"
+            }
+        }
         Print $notes
         puts "removed [join $words {, }] from botlish.json"
+    }
+    return 0
+}
+
+# ---------------------------------------------------------------------------
+# package graph
+
+# Prints the project's dependency graph as resolution makes it (pm/graph.tcl):
+# every package, the version every lock of it names, which scopes use it,
+# and whether it is installed so; a conflict is reported as resolution
+# reports it. Nothing is written: the graph an install would make.
+proc pm::commands::graph {words given} {
+    if {$words ne ""} {
+        pm::cli::UsageError "package graph takes no package names (it shows the project's whole graph)"
+    }
+    set ctx [pm::install::Project [Option $given -project [pwd]]]
+    pm::catalog::configure [dict getdef $given -repository {}]
+    set descriptor [pm::install::Descriptor $ctx]
+    set state [pm::state::read [dict get $ctx meta]]
+    set plan [pm::graph::Resolve $ctx $descriptor $state]
+    set packages [dict get $plan packages]
+    set demands [dict get $plan demands]
+    puts "the dependency graph of [dict get $ctx project]: [dict size $packages] package[expr {[dict size $packages] == 1 ? "" : "s"}], one instance of each"
+    puts "application uses: [join [Or [dict get $plan application] none] {, }]"
+    foreach name [lsort [dict keys $packages]] {
+        set node [dict get $packages $name]
+        set users [lmap user [dict get $plan users $name] {
+            if {$user eq ""} { set user "the application" } else { set user }
+        }]
+        set where "installed"
+        if {![dict get $node reuse]} {
+            if {[dict get $node kind] eq "editable"} {
+                set where "not linked yet (run install)"
+            } else {
+                set where "not installed so yet (run install): [dict get $node artifact path]"
+            }
+        }
+        if {[dict get $node kind] eq "editable"} {
+            puts "$name [dict get $node version] (editable [dict get $node directory]): used by [join $users {, }]; $where"
+        } else {
+            puts "$name [dict get $node version] (sha256 [pm::Short [dict get $node digest]]): used by [join $users {, }]; $where"
+        }
+        set mine {}
+        set locks {}
+        foreach demand [dict get $demands $name] {
+            set by [dict get $demand by]
+            if {$by ne ""} {
+                lappend locks [join $by]
+            } elseif {[dict get $demand kind] eq "lock"} {
+                lappend mine "the application (request \"[dict get $demand request]\")"
+            } else {
+                lappend mine "the application (editable [dict get $demand directory])"
+            }
+        }
+        puts "  locked by: [join [concat $mine [lsort -unique $locks]] {, }]"
+        set uses [dict get $node uses]
+        if {$uses ne ""} {
+            puts "  uses: [join [lmap {dep version} $uses {string cat $dep " " $version}] {, }]"
+        }
+        if {[llength [dict get $plan users $name]] > 1} {
+            puts "  shared: one instance, $name, for [join $users {, }]"
+        }
+        puts "  path: [pm::catalog::Chain [dict get $plan paths $name]]"
     }
     return 0
 }
@@ -478,8 +638,13 @@ proc pm::commands::verify {words given} {
         lappend problems "a package operation is running, or was interrupted (the next add, install, update or remove recovers it)"
     }
     set descriptor [pm::install::Descriptor $ctx]
-    set state [pm::state::read [dict get $ctx meta]]
+    set meta [dict get $ctx meta]
+    set state [pm::state::read $meta]
+    set layout [pm::state::layout $meta]
     set modules [dict get $ctx modules]
+    if {$layout eq "nested" && [dict size $state] > 0} {
+        lappend problems "the packages are installed one copy per dependency path, by an earlier package manager: run install to install them as the application's one dependency graph"
+    }
     foreach name [lsort [dict keys [dict get $descriptor dependencies]]] {
         set record [dict getdef $state $name ""]
         set active [file join $modules $name]
@@ -524,15 +689,52 @@ proc pm::commands::verify {words given} {
         }
         VerifyNode $ctx $name $record $active .bot_modules/$name $artifactSource [list $name [dict get $record version]] problems notes checked
     }
-    foreach name [lsort [dict keys $state]] {
-        if {![dict exists $descriptor dependencies $name]} {
-            lappend problems "$name: installed by the package manager, and no longer a dependency (install removes it)"
+    if {$layout eq "graph"} {
+        # The rest of the graph: every package a package uses, reached from
+        # the application's dependencies; the graph file the compiler reads.
+        set reached [dict create]
+        set queue [dict get $descriptor dependencies]
+        set queue [lsort [dict keys $queue]]
+        while {$queue ne ""} {
+            set queue [lassign $queue name]
+            if {[dict exists $reached $name] || ![dict exists $state $name]} continue
+            dict set reached $name 1
+            lappend queue {*}[dict keys [dict getdef [dict get $state $name] uses {}]]
+        }
+        foreach name [lsort [dict keys $state]] {
+            set record [dict get $state $name]
+            if {[dict exists $descriptor dependencies $name]} continue
+            if {![dict exists $reached $name]} {
+                lappend problems "$name: installed by the package manager, and no package of the graph depends on it (install removes it)"
+                continue
+            }
+            if {[dict get $record kind] ne "artifact"} {
+                lappend problems "$name: an editable link is installed where the graph needs a release (run install)"
+                continue
+            }
+            VerifyNode $ctx $name $record [file join $modules $name] .bot_modules/$name "" [list $name [dict get $record version]] problems notes checked
+        }
+        set application [pm::state::application $meta]
+        set expected [pm::graph::OfState $application $state]
+        set graphPath [pm::install::GraphPath $ctx]
+        if {$expected ne ""} {
+            if {![pm::Exists $graphPath] || [file type $graphPath] ne "file"} {
+                lappend problems ".bot_modules/.graph, the package graph the compiler reads, is missing (run install)"
+            } elseif {[encoding convertfrom utf-8 [pm::ReadBytes $graphPath]] ne $expected} {
+                lappend problems ".bot_modules/.graph is not the graph of the installation (run install)"
+            }
+        }
+    } else {
+        foreach name [lsort [dict keys $state]] {
+            if {![dict exists $descriptor dependencies $name]} {
+                lappend problems "$name: installed by the package manager, and no longer a dependency (install removes it)"
+            }
         }
     }
     VerifyViews $ctx $state $descriptor [Option $given -target] problems notes
     if {[file isdirectory $modules]} {
         foreach entry [pm::state::Entries $modules] {
-            if {$entry in {.botlish .targets} || [dict exists $state $entry] || [dict exists $descriptor dependencies $entry]} continue
+            if {$entry in {.botlish .targets .graph} || [dict exists $state $entry] || [dict exists $descriptor dependencies $entry]} continue
             lappend notes "$entry: .bot_modules/$entry was installed by hand: not managed, not verified"
         }
     }
@@ -555,8 +757,8 @@ proc pm::commands::VerifyNode {ctx name record dir shown source chain problemsVa
     foreach change $changes {
         lappend problems "$name $version: $change"
     }
-    # The installed descriptor: the artifact's, with the record's children as
-    # its locks.
+    # The installed descriptor: the artifact's, with the record's uses (or,
+    # nested, its children) as its locks.
     set descriptorPath [file join $dir botlish.json]
     if {[file isfile $descriptorPath]} {
         if {[catch {pm::descriptor::read $descriptorPath artifact} descriptor]} {
@@ -566,9 +768,13 @@ proc pm::commands::VerifyNode {ctx name record dir shown source chain problemsVa
                 lappend problems "$name $version: its installed botlish.json says [dict get $descriptor name] [dict get $descriptor version]"
             }
             set locks [lsort -stride 2 [dict get $descriptor lock]]
-            set installed [lsort -stride 2 [concat {*}[lmap {child childRecord} [dict get $record children] {
-                list $child [dict get $childRecord version]
-            }]]]
+            if {[dict exists $record uses]} {
+                set installed [lsort -stride 2 [dict get $record uses]]
+            } else {
+                set installed [lsort -stride 2 [concat {*}[lmap {child childRecord} [dict get $record children] {
+                    list $child [dict get $childRecord version]
+                }]]]
+            }
             if {$locks ne $installed} {
                 lappend problems "$name $version: its dependencies installed ([Pairs $installed]) are not the ones its botlish.json locks ([Pairs $locks])"
             }
@@ -618,12 +824,13 @@ proc pm::commands::VerifyViews {ctx state descriptor target problemsVar notesVar
     set views [pm::state::views [dict get $ctx meta]]
     set origins [dict getdef $descriptor origins {}]
     set manual [pm::view::Manual $ctx $state]
+    set application [pm::state::application [dict get $ctx meta]]
     dict for {name view} $views {
         set changes [pm::state::ViewChanges [pm::view::Dir $ctx $name] $view .bot_modules/.targets/$name]
         foreach change $changes {
             lappend problems "view $name: $change (run install)"
         }
-        if {[dict get $view derived] ne [pm::view::Derived $name $state $origins $manual]} {
+        if {[dict get $view derived] ne [pm::view::Derived $name $state $origins $manual $application]} {
             lappend problems "view $name: derived from another installation than the current one (run install)"
         }
     }
@@ -679,6 +886,36 @@ proc pm::commands::pack {words given} {
     set files [Collect $dir]
     dict set files botlish.json [pm::descriptor::encode $descriptor 0]
     set targetNotes [PackTargets $descriptor $files $dir]
+    # The native audit (PACKAGE-MANAGER-MILESTONE-3.md): a target-aware
+    # package is packed only when every target's mandatory native closure
+    # is complete; a pure-Botlish package goes on as in PM-1.
+    set evidence ""
+    if {[Option $given -evidence] ne "" || [pm::targets::Aware $descriptor]} {
+        pm::authoring
+    }
+    if {[Option $given -evidence] ne ""} {
+        set evidence [pm::release::readEvidence [file normalize [Option $given -evidence]]]
+    }
+    if {[pm::targets::Aware $descriptor]} {
+        set audit [pm::author::Audit $files $descriptor]
+        if {![pm::author::Packable $audit]} {
+            set problems [dict get $audit problems]
+            dict for {target report} [dict get $audit targets] {
+                foreach problem [dict get $report problems] {
+                    lappend problems "$target: $problem"
+                }
+            }
+            pm::Fail PACK "$dir cannot be packed: its native audit is incomplete:\n  [join $problems "\n  "]\n(native audit $dir shows the whole audit)"
+        }
+        dict for {target report} [dict get $audit targets] {
+            set status [dict get {complete complete partial "partially verified" incomplete incomplete} [dict get $report status]]
+            set line "  audit $target: $status"
+            if {[dict get $report status] eq "partial"} {
+                append line " ([llength [dict get $report partial]] fact[expr {[llength [dict get $report partial]] == 1 ? "" : "s"}] unverifiable from this host: native audit lists them)"
+            }
+            lappend targetNotes $line
+        }
+    }
     set bytes [pm::archive::bytes $files]
     # The reader must accept what the writer made.
     set archive [pm::archive::fromBytes $bytes "the new artifact"]
@@ -687,6 +924,14 @@ proc pm::commands::pack {words given} {
     file mkdir $out
     set target [file join $out $name-$version.botpkg]
     set digest [pm::sha256::hex $bytes]
+    # The provenance record, made (and its checks run) before anything is
+    # written: evidence the files contradict stops the pack.
+    set provenance ""
+    if {$evidence ne ""} {
+        set made [pm::release::record $bytes [file tail $target] $files $descriptor $evidence]
+        set provenance [pm::release::encode [dict get $made record]]
+        set recordPath [file join $out $name-$version.provenance.json]
+    }
     if {[pm::Exists $target]} {
         if {[file type $target] ne "file"} {
             pm::Fail PACK "$target is a [file type $target], not an artifact file"
@@ -694,11 +939,21 @@ proc pm::commands::pack {words given} {
         if {[pm::ReadBytes $target] eq $bytes} {
             puts "packed $name $version: $target (unchanged)"
             puts "  sha256 $digest"
+            if {$provenance ne ""} {
+                WriteRecord $recordPath $provenance $digest [Flag $given -force]
+                Print [dict get $made lines]
+            }
+            Print [lsearch -all -inline $targetNotes "  audit *"]
             return 0
         }
         if {![Flag $given -force]} {
             pm::Fail EXISTS "$target already holds a different $name $version: a release is immutable. Raise the version, or pass -force to overwrite this local file"
         }
+    }
+    if {$provenance ne ""} {
+        # Checked before the artifact is written: a record of another
+        # artifact under this name is refused as the artifact is.
+        RecordReplaceable $recordPath $provenance $digest [Flag $given -force]
     }
     pm::ReplaceFile $target $bytes
     set size 0
@@ -708,6 +963,10 @@ proc pm::commands::pack {words given} {
     puts "packed $name $version: $target"
     puts "  sha256 $digest"
     puts "  [dict size $files] files, [string length $bytes] bytes ($size bytes unpacked)"
+    if {$provenance ne ""} {
+        WriteRecord $recordPath $provenance $digest [Flag $given -force]
+        Print [dict get $made lines]
+    }
     set paths [dict keys $files]
     if {[pm::targets::Aware $descriptor]} {
         foreach target [dict keys [dict get $descriptor targets]] {
@@ -725,6 +984,34 @@ proc pm::commands::pack {words given} {
     }
     Print $targetNotes
     return 0
+}
+
+# Refuses to replace the provenance record PATH unless it holds BYTES
+# already, or a record of this same artifact (DIGEST), or FORCE: a record
+# of another artifact under this release's name is a release conflict.
+proc pm::commands::RecordReplaceable {path bytes digest force} {
+    if {![pm::Exists $path] || $force} {
+        return
+    }
+    if {[file type $path] ne "file"} {
+        pm::Fail PACK "$path is a [file type $path], not a provenance record"
+    }
+    if {[catch {pm::release::readRecord $path} old]} {
+        pm::Fail EXISTS "$path exists and is no provenance record: it is left as it is (pass -force to replace it)"
+    }
+    if {[dict get $old subject sha256] ne $digest} {
+        pm::Fail EXISTS "$path records the artifact with SHA-256 [dict get $old subject sha256], not this one ([pm::Short $digest]): the release it describes is another file (pass -force to replace this local record)"
+    }
+}
+
+proc pm::commands::WriteRecord {path bytes digest force} {
+    RecordReplaceable $path $bytes $digest $force
+    if {[pm::Exists $path] && [pm::ReadBytes $path] eq $bytes} {
+        puts "  provenance $path (unchanged)"
+        return
+    }
+    pm::ReplaceFile $path $bytes
+    puts "  provenance $path (sha256 [pm::Short [pm::sha256::hex $bytes]]; bound to the artifact's sha256 [pm::Short $digest]; unsigned)"
 }
 
 # The checks of a target-aware package's FILES (dict PATH -> BYTES) before
@@ -824,6 +1111,7 @@ proc pm::commands::inspect {words given} {
     if {[llength $words] != 1} {
         pm::cli::UsageError "package inspect takes one FILE.botpkg"
     }
+    pm::authoring
     set artifact [pm::catalog::Load [lindex $words 0] [lindex $words 0]]
     set descriptor [dict get $artifact descriptor]
     puts "[dict get $artifact name] [dict get $artifact version]"
@@ -844,7 +1132,21 @@ proc pm::commands::inspect {words given} {
                 if {[dict get $library file] ne ""} { append text ", [dict get $library file]" }
                 if {[dict get $library identity] ne ""} { append text ", loads as [dict get $library identity]" }
                 if {[dict get $library version] ne ""} { append text ", version \"[dict get $library version]\"" }
+                if {[dict getdef $library license ""] ne ""} { append text ", license [dict get $library license] (the author's statement)" }
                 puts $text
+                if {[dict getdef $library notices {}] ne ""} {
+                    puts "      notices: [join [dict get $library notices] {, }]"
+                }
+            }
+            foreach dependency [dict getdef $entry runtime {}] {
+                set when [dict get $dependency requirement]
+                if {$when eq "capability"} { set when "for \"[dict get $dependency capability]\"" }
+                puts "    run time: [dict get $dependency kind] [dict get $dependency name][expr {[dict get $dependency identity] ne "" ? " ([dict get $dependency identity])" : ""}], $when[expr {[dict get $dependency loaded-by] ne "" ? ", opened by [dict get $dependency loaded-by]" : ""}]: [dict get $dependency purpose]"
+            }
+            set modules [lsearch -all -inline -glob [dict keys $view] *.bot]
+            set own [lsearch -all -inline -glob [lmap {v p} $view {if {[string match *.bot $v] && $v ne $p} {set v} else continue}] *]
+            if {$own ne ""} {
+                puts "    bindings: [llength $own] module[expr {[llength $own] == 1 ? "" : "s"}] of the target's own ([join [lsort -unique [lmap m $own {lindex [split $m /] 0}]] {, }]/...), [expr {[llength $modules] - [llength $own]}] common"
             }
             foreach framework [dict get $entry frameworks] {
                 puts "    framework $framework (system)"
@@ -871,12 +1173,79 @@ proc pm::commands::inspect {words given} {
                 puts "  $target: [dict get $library name]: [dict get $facts description]: as declared"
             }
         }
-        puts "(a valid .botpkg, format 1, schema 2: one release for every target it names; nothing authenticates who made it)"
+        # The audit of the release as it is (read, never run).
+        set audit [pm::author::Audit [dict create {*}[dict get $artifact files]] $descriptor]
+        dict for {target report} [dict get $audit targets] {
+            set status [dict get {complete complete partial "partially verified" incomplete INCOMPLETE} [dict get $report status]]
+            puts "  native closure of $target: $status"
+            foreach problem [dict get $report problems] {
+                puts "    problem: $problem"
+            }
+            foreach item [dict get $report partial] {
+                puts "    unverified from this host: $item"
+            }
+        }
+        InspectProvenance $given $artifact
+        puts "(a valid .botpkg, format 1, schema [dict get $descriptor schema]: one release for every target it names; nothing authenticates who made it)"
+        return 0
     } else {
         puts "  target-independent: every target"
+        InspectProvenance $given $artifact
         puts "(a valid .botpkg, format 1; its digest is computed here, and nothing authenticates who made it)"
     }
     return 0
+}
+
+# The provenance record GIVEN names (-provenance), against ARTIFACT.
+proc pm::commands::InspectProvenance {given artifact} {
+    set path [Option $given -provenance]
+    if {$path eq ""} {
+        return
+    }
+    set record [pm::release::readRecord $path]
+    set relation [pm::release::check $record $artifact]
+    puts "  provenance $path (sha256 [pm::Short [pm::sha256::file $path]], format 1)"
+    if {![dict get $relation matches]} {
+        foreach problem [dict get $relation problems] {
+            puts "    MISMATCH: $problem"
+        }
+        pm::Fail PROVENANCE "$path is not a record of [dict get $artifact path]"
+    }
+    puts "    describes this artifact: its subject's SHA-256 and every file's digest are the artifact's"
+    puts "    asserted by the author, unchecked unless a check below says so: [dict get $record sources] source(s), [dict get $record builds] build(s), [dict get $record generators] generator(s)"
+    foreach check [dict get $record checks] {
+        puts "    check made when the record was made: [dict get $check subject] [dict get $check fact]: [dict get $check result] ([pm::Short [dict get $check value]])"
+    }
+    puts "    unsigned: the record does not authenticate who made the artifact or its sources (PM-4 and PM-5)"
+}
+
+proc pm::commands::compare {words given} {
+    if {[llength $words] != 2} {
+        pm::cli::UsageError "package compare takes two FILE.botpkg: two candidates of one release"
+    }
+    pm::authoring
+    set records [dict getdef $given -provenance {}]
+    if {[llength $records] ni {0 2}} {
+        pm::cli::UsageError "-provenance is given twice or not at all: the records of A and of B"
+    }
+    lassign $words pa pb
+    set a [pm::catalog::Load $pa $pa]
+    set b [pm::catalog::Load $pb $pb]
+    set ra ""
+    set rb ""
+    if {$records ne ""} {
+        set ra [pm::release::readRecord [lindex $records 0]]
+        set rb [pm::release::readRecord [lindex $records 1]]
+        foreach {record artifact name} [list $ra $a A $rb $b B] {
+            set relation [pm::release::check $record $artifact]
+            if {![dict get $relation matches]} {
+                pm::Fail PROVENANCE "the record given for $name is not $name's: [lindex [dict get $relation problems] 0]"
+            }
+        }
+    }
+    set result [pm::release::compare $a $b $ra $rb]
+    Print [dict get $result lines]
+    return [expr {[dict get $result identical] ? 0 : 1}]
 }
 
 # ---------------------------------------------------------------------------
@@ -1014,6 +1383,31 @@ proc pm::commands::native_plan {words given} {
     foreach framework [dict get $plan frameworks] {
         puts "  framework [dict get $framework name]: system ([join [dict get $framework instances] {, }])"
     }
+    if {[dict getdef $plan runtime {}] ne ""} {
+        puts "  run time (opened by the program, never linked or loaded by the loader; installing never requires them):"
+        foreach dependency [dict get $plan runtime] {
+            set when [dict get $dependency requirement]
+            switch -- $when {
+                always { set when "always needed" }
+                capability { set when "needed for \"[dict get $dependency capability]\"" }
+                optional { set when "optional, used when present" }
+            }
+            puts "    [dict get $dependency kind] [dict get $dependency name][expr {[dict get $dependency identity] ne "" ? " ([dict get $dependency identity])" : ""}]: $when (instance [dict get $dependency instance][expr {[dict get $dependency loaded-by] ne "" ? ", opened by [dict get $dependency loaded-by]" : ""}])"
+            puts "      [dict get $dependency purpose]"
+            set candidate [dict get $dependency candidate]
+            if {$candidate ne ""} {
+                if {[dict get $candidate found]} {
+                    puts "      this host: [dict get $candidate text] -- a candidate; whether it works is known only when the program uses it"
+                } else {
+                    puts "      this host: none ([dict get $candidate text]): [expr {[dict get $dependency requirement] eq "always" ? "the package's native code cannot run here" : "programs that use it fail when they do, and the others run"}]"
+                }
+            } elseif {[dict get $dependency kind] eq "facility"} {
+                puts "      not a file: the package manager cannot verify it"
+            } else {
+                puts "      unverified on this host: $target's system must provide it where it is needed"
+            }
+        }
+    }
     foreach header [dict get $plan headers] {
         puts "  headers ([dict get $header instance]): [dict get $header dir]"
     }
@@ -1085,5 +1479,139 @@ proc pm::commands::native_deploy {words given} {
     if {[dict get [pm::target::facts $target] os] eq "macos"} {
         puts "note: sign the deployed libraries with the application (codesign): macOS arm64 loads only signed code, and the package manager signs nothing"
     }
+    return 0
+}
+
+# ---------------------------------------------------------------------------
+# The author's commands (PACKAGE-MANAGER-MILESTONE-3.md): native add,
+# require and audit, package stage and compare
+
+# The package directory an author's command works in: DIR (WORDS), else
+# -package, else the current directory.
+proc pm::commands::AuthorPackage {words given {positional 0}} {
+    pm::authoring
+    set dir [Option $given -package [pwd]]
+    if {$positional && $words ne ""} {
+        if {[llength $words] > 1 || [dict exists $given -package]} {
+            pm::cli::UsageError "one package directory: DIR or -package DIR"
+        }
+        set dir [lindex $words 0]
+    }
+    return [pm::author::Open $dir]
+}
+
+proc pm::commands::OneTarget {given command} {
+    set target [Option $given -target]
+    if {$target eq ""} {
+        pm::cli::UsageError "$command needs -target T: the target the file or dependency is"
+    }
+    return $target
+}
+
+proc pm::commands::native_add {words given} {
+    if {[llength $words] != 1} {
+        pm::cli::UsageError "native add takes one FILE: the built library to import"
+    }
+    set target [OneTarget $given "native add"]
+    if {[Option $given -name] eq ""} {
+        pm::cli::UsageError "native add needs -name N: the library's name as the package's extern c library \"N\" writes it (never read from a file name)"
+    }
+    if {[Option $given -linkage] ni {"" static shared}} {
+        pm::cli::UsageError "-linkage is static or shared"
+    }
+    set license [Option $given -license -]
+    set notices [expr {[dict exists $given -notice] ? [dict get $given -notice] : "-"}]
+    if {$notices ne "-" && $license eq "-"} {
+        pm::cli::UsageError "-notice names the files of a license: give -license too"
+    }
+    set pkg [AuthorPackage {} $given]
+    set options [dict create target $target name [Option $given -name] linkage [Option $given -linkage] \
+        as [Option $given -as] import [Option $given -import] \
+        symbols [expr {[dict exists $given -symbol] ? [dict get $given -symbol] : "-"}] \
+        license $license notices $notices replace [Flag $given -replace]]
+    Print [pm::author::AddNative $pkg [file normalize [lindex $words 0]] $options]
+    return 0
+}
+
+proc pm::commands::native_require {words given} {
+    if {[llength $words] != 1} {
+        pm::cli::UsageError "native require takes one NAME: the dependency's name"
+    }
+    set target [OneTarget $given "native require"]
+    set origin [Option $given -origin]
+    set runtime [Option $given -runtime]
+    if {($origin eq "") == ($runtime eq "")} {
+        pm::cli::UsageError "native require declares either a system library (-origin system) or a run-time dependency (-runtime always|capability|optional)"
+    }
+    if {$origin ne "" && $origin ne "system"} {
+        pm::cli::UsageError "-origin is system here (a bundled library is a file: native add)"
+    }
+    if {$origin ne ""} {
+        foreach option {-capability -purpose -kind -loaded-by} {
+            if {[dict exists $given $option]} {
+                pm::cli::UsageError "$option describes a run-time dependency (-runtime)"
+            }
+        }
+    } else {
+        foreach option {-linkage -version -pkg-config -symbol} {
+            if {[dict exists $given $option]} {
+                pm::cli::UsageError "$option describes a system library (-origin system); a run-time dependency is opened by the program, never linked"
+            }
+        }
+    }
+    set pkg [AuthorPackage {} $given]
+    set name [lindex $words 0]
+    if {[set problem [pm::targets::LibraryNameProblem $name]] ne ""} {
+        pm::cli::UsageError $problem
+    }
+    set options [dict create target $target linkage [Option $given -linkage] identity [Option $given -identity] \
+        version [Option $given -version] pkg-config [Option $given -pkg-config] \
+        symbols [expr {[dict exists $given -symbol] ? [dict get $given -symbol] : "-"}] \
+        runtime $runtime capability [Option $given -capability] purpose [Option $given -purpose] \
+        kind [Option $given -kind] loaded-by [Option $given -loaded-by] replace [Flag $given -replace]]
+    Print [pm::author::Require $pkg $name $options]
+    return 0
+}
+
+proc pm::commands::native_audit {words given} {
+    set pkg [AuthorPackage $words $given 1]
+    set descriptor [dict get $pkg descriptor]
+    set dir [dict get $pkg dir]
+    if {![pm::targets::Aware $descriptor]} {
+        puts "native audit of [dict get $descriptor name] ($dir): target-independent, no native metadata: nothing to audit"
+        return 0
+    }
+    set target [Option $given -target]
+    if {$target ne "" && ![dict exists $descriptor targets $target]} {
+        pm::Fail UNSUPPORTED "[dict get $descriptor name] declares [join [pm::targets::Supported $descriptor] {, }], not $target"
+    }
+    set files [Collect $dir]
+    set result [pm::author::Audit $files $descriptor [expr {$target eq "" ? "" : [list $target]}]]
+    puts "native audit of [dict get $descriptor name] [dict get $descriptor version] ($dir), from this host ([pm::native::Or [pm::target::host]])"
+    Print [pm::author::AuditLines $result]
+    set packable [pm::author::Packable $result]
+    puts [expr {$packable ? "audit: no problem that blocks packing (read, never run: the files' own headers and the author's statements)" : "audit: INCOMPLETE: package pack refuses it until the problems are resolved"}]
+    return [expr {$packable ? 0 : 1}]
+}
+
+proc pm::commands::stage {words given} {
+    set pkg [AuthorPackage $words $given 1]
+    set kinds {}
+    foreach kind {modules headers files} {
+        if {[dict exists $given -$kind]} {
+            lappend kinds $kind
+        }
+    }
+    if {[llength $kinds] != 1} {
+        pm::cli::UsageError "package stage stages one thing: -modules DIR, -headers DIR or -files DIR"
+    }
+    set kind [lindex $kinds 0]
+    set targets [lsort -unique [dict getdef $given -target {}]]
+    if {$targets eq "" && $kind ne "files"} {
+        pm::cli::UsageError "-$kind needs -target T (any number): target modules and headers are staged per target; common files are the package's own (-files without -target)"
+    }
+    set options [dict create targets $targets kind $kind source [Option $given -$kind] as [Option $given -as] \
+        replace [Flag $given -replace]]
+    Print [pm::author::Stage $pkg $options]
     return 0
 }

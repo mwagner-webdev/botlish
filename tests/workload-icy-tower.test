@@ -362,13 +362,36 @@ test workload-icy-tower-app-module-shared-sources-untouched {the application's a
 # The macOS release tooling's own tests (audit/macos-release/): the
 # credential preflight against synthetic credentials, the release's stages
 # against recording stand-ins of Apple's tools, the bundle's negative
-# controls and the workflow's trust boundary -- on any host with Python's
-# cryptography and PyYAML packages (audit/macos-release/requirements.txt).
-# BOTLISH_RELEASE_PYTHON names the interpreter of a private environment
-# holding them (CI's icy-tower workflows), else python3.
+# controls and the workflow's trust boundary -- on any host whose Python has
+# the pinned environment of audit/macos-release/requirements.txt (with the
+# tooling's own examples/games/icy-tower/macos/requirements.txt): every
+# package at its pinned version. Another version is not that environment
+# and is no evidence either way: Ubuntu 24.04's system cryptography (41.x,
+# what a GitHub arm64 runner's python3 imports) has no
+# Certificate.not_valid_before_utc, so the tooling fails there for a reason
+# no release would meet. BOTLISH_RELEASE_PYTHON names the interpreter of a
+# private environment holding them (CI's icy-tower workflows), else python3.
 set releasePython [if {[info exists ::env(BOTLISH_RELEASE_PYTHON)]} {set ::env(BOTLISH_RELEASE_PYTHON)} else {set python3 python3}]
-testConstraint releaseTooling [expr {[auto_execok $releasePython] ne "" &&
-    ![catch {exec $releasePython -I -c "import cryptography, yaml"}]}]
+proc releasePins {} {
+    set pins {}
+    foreach file {{audit macos-release requirements.txt} {examples games icy-tower macos requirements.txt}} {
+        foreach line [split [core::ReadFile [file join $::projectRoot {*}$file]] \n] {
+            if {[regexp {^([A-Za-z0-9_.-]+)==([^\s\\]+)} $line -> name version]} {
+                dict set pins $name $version
+            }
+        }
+    }
+    return $pins
+}
+proc releaseEnvironmentPinned {python} {
+    if {[auto_execok $python] eq ""} { return 0 }
+    set pins [releasePins]
+    if {[dict size $pins] == 0} { return 0 }
+    set script "import importlib.metadata as m, sys\nfor n in sys.argv\[1:\]: print(n, m.version(n))"
+    if {[catch {exec $python -I -c $script {*}[dict keys $pins]} found]} { return 0 }
+    return [expr {[lsort -stride 2 -index 0 $found] eq [lsort -stride 2 -index 0 $pins]}]
+}
+testConstraint releaseTooling [releaseEnvironmentPinned $releasePython]
 
 test workload-icy-tower-release-tooling {the macOS release tooling's suites pass (audit/macos-release/tests: test_credentials, test_release, test_workflow): every malformed credential refused with its code and remedy and no secret printed, every stage refusing what an earlier one did not establish, the workflow's trust boundary} -constraints releaseTooling -body {
     set results {}
@@ -445,11 +468,11 @@ test workload-icy-tower-executable-builds {build.sh stages the game with the gen
 
 test workload-icy-tower-executable-headless {the executable's --headless run prints seed 7's summary, the oracle's, and exits 0} -constraints icyTowerExecutable -body {
     icyRun {} --headless --frames 600 --seed 7
-} -result [list 0 "\"$seed7\"" {}]
+} -result [list 0 $seed7 {}]
 
 test workload-icy-tower-executable-dummy-driver {the real SDL loop on SDL's dummy video driver -- SDL_Init, a window, a renderer, events, the keyboard state, every frame drawn (rectangles, lines, debug text through C floats) and presented, then everything released -- plays the same 600 frames as the headless run, with the autopilot and fixed steps} -constraints icyTowerExecutable -body {
     icyRun {} --autopilot --fixed-step --frames 600 --seed 7
-} -result [list 0 "\"$seed7\"" {}]
+} -result [list 0 $seed7 {}]
 
 test workload-icy-tower-executable-gc-stress {the dummy-driver run under BOTLISH_NATIVE_GC_STRESS=1 (a collection at every allocation): 120 frames, the same state as without} -constraints icyTowerExecutable -body {
     set plain [icyRun {} --autopilot --fixed-step --frames 120 --seed 11]
@@ -481,7 +504,7 @@ test workload-icy-tower-executable-no-leaks {valgrind's memcheck over a whole du
     set text [core::ReadFile $log]
     file delete $log
     list $code [string trim $output] [regexp {definitely lost: 0 bytes} $text] [regexp {indirectly lost: 0 bytes} $text] [regexp {ERROR SUMMARY: 0 errors} $text]
-} -result [list 0 "\"frames=30 round=1 floor=0 score=0 best=1.9 time=0.5 over=no x=375 y=222 camera=0 platforms=10 rng=768150900\"" 1 1 1]
+} -result [list 0 "frames=30 round=1 floor=0 score=0 best=1.9 time=0.5 over=no x=375 y=222 camera=0 platforms=10 rng=768150900" 1 1 1]
 
 test workload-icy-tower-executable-usage {an unknown option is a usage error, status 2; --help prints the usage, status 0} -constraints icyTowerExecutable -body {
     lassign [icyRun {} --fly] code1 out1 err1
@@ -562,11 +585,11 @@ test workload-icy-tower-windows-builds {build-windows.sh generates the MSVC SDL3
 
 test workload-icy-tower-windows-headless {the Windows executable's --headless run prints seed 7's summary, the oracle's, and exits 0} -constraints icyTowerWindowsExecutable -body {
     icyRunWindows {} --headless --frames 600 --seed 7
-} -result [list 0 "\"$seed7\"" {}]
+} -result [list 0 $seed7 {}]
 
 test workload-icy-tower-windows-dummy-driver {the real SDL loop on Windows, on SDL's dummy video driver -- SDL_Init, a window, a renderer, events, the keyboard state, every frame drawn (rectangles, lines, debug text through C floats) and presented, then everything released -- plays the same 600 frames as the headless run} -constraints icyTowerWindowsExecutable -body {
     icyRunWindows {} --autopilot --fixed-step --frames 600 --seed 7
-} -result [list 0 "\"$seed7\"" {}]
+} -result [list 0 $seed7 {}]
 
 test workload-icy-tower-windows-gc-stress {the Windows dummy-driver run under BOTLISH_NATIVE_GC_STRESS=1: 120 frames, the same state as without} -constraints icyTowerWindowsExecutable -body {
     set plain [icyRunWindows {} --autopilot --fixed-step --frames 120 --seed 11]
@@ -634,11 +657,11 @@ test workload-icy-tower-macos-builds {build-macos.sh stages the game with the ma
 
 test workload-icy-tower-macos-headless {the macOS executable's --headless run prints seed 7's summary, the oracle's, and exits 0} -constraints icyTowerMacosExecutable -body {
     icyRunMacos {} --headless --frames 600 --seed 7
-} -result [list 0 "\"$seed7\"" {}]
+} -result [list 0 $seed7 {}]
 
 test workload-icy-tower-macos-dummy-driver {the real SDL loop on macOS, on SDL's dummy video driver, on the process's main thread -- SDL_Init, a window, a renderer, events, the keyboard state, every frame drawn and presented, everything released -- plays the same 600 frames as the headless run} -constraints icyTowerMacosExecutable -body {
     icyRunMacos {} --autopilot --fixed-step --frames 600 --seed 7
-} -result [list 0 "\"$seed7\"" {}]
+} -result [list 0 $seed7 {}]
 
 test workload-icy-tower-macos-gc-stress {the macOS dummy-driver run under BOTLISH_NATIVE_GC_STRESS=1 (a collection at every allocation, the main thread's stack walked): 120 frames, the same state as without} -constraints icyTowerMacosExecutable -body {
     set plain [icyRunMacos {} --autopilot --fixed-step --frames 120 --seed 11]

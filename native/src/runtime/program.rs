@@ -32,14 +32,15 @@ use super::metrics::AllocMode;
 use super::value::{FloatType, Kind};
 use super::vm::{EnumInfo, FunctionInfo, Identity, NativeInfo, ProgramInfo, ShapeInfo, Vm};
 use crate::nir::{self, Boundary, ExportDecl, OpCode};
-use std::rc::Rc;
 
 /// The first word of a `LinkedProgram`.
 pub const LINKED_MAGIC: u64 = u64::from_le_bytes(*b"BOTLPRG1");
 /// The descriptor's own format revision, its first word. 2: a shape carries
 /// its identity (REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md). 3: and its
-/// tree struct's child slot (TREE-STRUCT-MILESTONE-1.md).
-const FORMAT: u32 = 3;
+/// tree struct's child slot (TREE-STRUCT-MILESTONE-1.md). 4: the context
+/// area's size, which every Vm made from the descriptor gets an area of its
+/// own of (PER-THREAD-RUNTIME-STATE-MILESTONE-1.md).
+const FORMAT: u32 = 4;
 
 /// The record the compiler emits as `botlish_program` (module doc). Its
 /// layout is a contract between codegen (which writes it as data) and this
@@ -137,9 +138,13 @@ pub struct FunctionShape {
 }
 
 pub struct ProgramDescriptor {
-    pub info: Rc<ProgramInfo>,
+    pub info: std::sync::Arc<ProgramInfo>,
     pub constants: Vec<Const>,
     pub statics: u32,
+    /// The size of the program's context area (nir::Program's
+    /// `context_bytes`): each Vm made from this descriptor owns an area of
+    /// this many bytes (`instantiate`), none shared.
+    pub context_bytes: u32,
     /// Indexed by NIR function id; function 0 is the program's entry.
     pub functions: Vec<FunctionShape>,
     /// A native library's exports (NIR's `export` declarations); empty for
@@ -363,6 +368,7 @@ impl ProgramDescriptor {
             }
         }
         w.u32(self.statics);
+        w.u32(self.context_bytes);
         w.len(self.functions.len());
         for f in &self.functions {
             w.u32(f.direct_size);
@@ -468,6 +474,10 @@ impl ProgramDescriptor {
             });
         }
         let statics = r.u32()?;
+        let context_bytes = r.u32()?;
+        if context_bytes % 8 != 0 {
+            return Err("program descriptor context area of a partial word".to_string());
+        }
         let mut functions = Vec::new();
         for _ in 0..r.len()? {
             let direct_size = r.u32()?;
@@ -497,7 +507,7 @@ impl ProgramDescriptor {
         if exports.iter().any(|e| e.func as usize >= functions.len() || e.func == 0) {
             return Err("program descriptor export out of range".to_string());
         }
-        Ok(ProgramDescriptor { info: Rc::new(info), constants, statics, functions, exports })
+        Ok(ProgramDescriptor { info: std::sync::Arc::new(info), constants, statics, context_bytes, functions, exports })
     }
 }
 
@@ -510,13 +520,14 @@ pub fn instantiate(descriptor: &ProgramDescriptor, code: &[(usize, usize)]) -> (
     let mut vm = Vm::new(descriptor.info.clone(), AllocMode::Off);
     let entries: Vec<usize> = code.iter().map(|&(_, entry)| entry).collect();
     constants::install(&mut vm, &descriptor.constants, &entries, descriptor.statics);
+    vm.install_context_area(descriptor.context_bytes);
     let mut map = ProgramMap::new();
     for (f, &(direct, entry)) in descriptor.functions.iter().zip(code) {
         map.push(FunctionMap { code_start: direct, code_end: direct + f.direct_size as usize, safepoints: f.safepoints.clone() });
         map.push(FunctionMap { code_start: entry, code_end: entry + f.entry_size as usize, safepoints: vec![] });
     }
     map.finish();
-    vm.set_framemap(Rc::new(map));
+    vm.set_framemap(std::sync::Arc::new(map));
     // SAFETY: code[0].0 is function 0's direct entry, which the compiler
     // emits with the ProgramEntry signature.
     let entry: ProgramEntry = unsafe { std::mem::transmute(code[0].0) };
@@ -587,7 +598,7 @@ mod tests {
 
     fn sample() -> ProgramDescriptor {
         ProgramDescriptor {
-            info: Rc::new(ProgramInfo {
+            info: std::sync::Arc::new(ProgramInfo {
                 functions: vec![FunctionInfo { arity: 0, pnames: String::new() }, FunctionInfo { arity: 2, pnames: "a b".into() }],
                 natives: vec![
                     NativeInfo { name: "std::str::length".into(), arity: Some(1), params: vec![Some(Kind::Str)], op: OpCode::StrLen },
@@ -630,6 +641,7 @@ mod tests {
                 Const::FnValue(1),
             ],
             statics: 3,
+            context_bytes: 24,
             functions: vec![
                 FunctionShape { direct_size: 16, entry_size: 8, safepoints: vec![(5, vec![0, 8])] },
                 FunctionShape { direct_size: 4, entry_size: 4, safepoints: vec![] },

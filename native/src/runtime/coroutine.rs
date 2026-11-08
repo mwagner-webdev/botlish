@@ -781,7 +781,60 @@ pub extern "C" fn rt_co_yield(p: *mut Vm, value: Value) -> Value {
         if let Some(stack) = &(*co).stack {
             (*p).publish_active_stack(Some(stack.bounds()));
         }
+        // NO_VALUE: abandoned (rt_co_abandon), the abandonment pending in the
+        // Vm -- the yield fails with it, and the frames unwind through their
+        // release pads.
         (*co).value
+    }
+}
+
+/// Abandons coroutine HANDLE, whose handle is dead, in an unwinding program
+/// (`coabandon`; hir/affine.tcl's Unwinds,
+/// LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md): a suspended
+/// coroutine is resumed with its pending yield failing with the internal
+/// abandonment (ERR_COROUTINE_ABANDONED), which no handler handles -- every
+/// frame's release pad for it runs (the cleanups of the resources the frames
+/// own, the abandonment of the coroutines they own) and nothing else does --
+/// and then it is released (`rt_co_release`). The releaser's own pending
+/// failure, if it releases on an error edge, is set aside meanwhile. A
+/// run-time fault of the release code is the abandonment's failure. Any
+/// other state is a plain release. Idempotent.
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_co_abandon(p: *mut Vm, handle: Value) -> Value {
+    let co = handle as *mut CoroutineObj;
+    // SAFETY: as in rt_co_start: HANDLE is a live coroutine object, touched
+    // through the raw pointer around the switch; it is rooted meanwhile.
+    unsafe {
+        if (*co).state != CO_SUSPENDED || (*co).stack.is_none() {
+            return rt_co_release(p, handle);
+        }
+        vm(p).metrics.record_coroutine_abandoned();
+        let rooted = vm(p).temp_roots.len();
+        vm(p).temp_roots.push(handle);
+        let unwound = super::affine::preserving_pending(p, || {
+            vm(p).declared_error = super::error::ERR_COROUTINE_ABANDONED;
+            vm(p).declared_payload.clear();
+            vm(p).fail(RtError::Semantic { kind: "COROUTINE-ABANDONED", message: "a coroutine was abandoned".to_string() });
+            (*co).value = NO_VALUE;
+            let outcome = segment(p, co);
+            if outcome != NO_VALUE {
+                // A body that completed instead: it caught nothing (no
+                // handler can name the abandonment), so it cannot have.
+                return vm(p).fail(RtError::Bug("an abandoned coroutine completed".to_string())) != NO_VALUE;
+            }
+            if vm(p).declared_error == super::error::ERR_COROUTINE_ABANDONED {
+                // Unwound to its end: the abandonment is spent.
+                vm(p).error = None;
+                vm(p).declared_error = 0;
+                vm(p).declared_payload.clear();
+                return true;
+            }
+            // A run-time fault of a release on the way out.
+            false
+        });
+        vm(p).temp_roots.truncate(rooted);
+        rt_co_release(p, handle);
+        if unwound { UNIT } else { NO_VALUE }
     }
 }
 
@@ -883,7 +936,7 @@ mod tests {
     use crate::runtime::vm::ProgramInfo;
 
     fn new_vm() -> Box<Vm> {
-        Vm::new(std::rc::Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new(), errors: Vec::new() }), AllocMode::Summary)
+        Vm::new(std::sync::Arc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new(), errors: Vec::new() }), AllocMode::Summary)
     }
 
     /// A zero-argument Block whose code is the Rust function CODE (the
@@ -1002,7 +1055,7 @@ mod tests {
         let co = rt_co_create(&mut *vm, t);
         vm.temp_roots.push(co);
         assert_eq!(rt_co_start(&mut *vm, co), NO_VALUE);
-        assert_eq!(vm.error.take().map(|e| e.message()), Some("boom".to_string()));
+        assert_eq!(vm.error.take().map(|e| e.message(&vm.info)), Some("boom".to_string()));
         assert_eq!(rt_co_done(&mut *vm, co), TRUE);
         assert_eq!(rt_co_resume0(&mut *vm, co), NO_VALUE);
         assert_eq!(vm.error.take().map(|e| e.error_code()), Some(vec!["CORE", "SEMANTIC", "RANGE"]));
@@ -1031,7 +1084,7 @@ mod tests {
             assert_eq!(rt_co_resume0(&mut *vm, co), NO_VALUE);
             assert_eq!(vm.declared_error, 3);
             assert_eq!(vm.declared_payload.len(), 2);
-            assert_eq!(super::super::show::show(vm.declared_payload[0]), (num_bigint::BigInt::from(5u8) << 90u32).to_string());
+            assert_eq!(super::super::show::show(&vm.info, vm.declared_payload[0]), (num_bigint::BigInt::from(5u8) << 90u32).to_string());
             assert_eq!(str_of(vm.declared_payload[1]).as_str(), "payload");
             assert_eq!(crate::runtime::ops::rt_clear_declared_error(&mut *vm), 0);
             assert!(vm.declared_payload.is_empty());
@@ -1920,7 +1973,7 @@ mod fallback_tests {
     #[test]
     fn the_fallback_plan_refuses_native_coroutines() {
         assert!(!STACK_SWITCHING);
-        let mut vm = Vm::new(std::rc::Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new(), errors: Vec::new() }), AllocMode::Summary);
+        let mut vm = Vm::new(std::sync::Arc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new(), errors: Vec::new() }), AllocMode::Summary);
         let caps: Box<[Value]> = Vec::new().into_boxed_slice();
         let t = vm.alloc(
             ClosureObj { hdr: Header::new(KIND_CLOSURE, false), func: 0, arity: 0, code: never as *const () as usize, ncaps: 0, caps: Box::into_raw(caps) as *mut Value },

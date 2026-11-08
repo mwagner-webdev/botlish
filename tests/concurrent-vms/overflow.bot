@@ -1,0 +1,31 @@
+# overflow.bot -- PER-THREAD-RUNTIME-STATE-MILESTONE-1.md, "Stack guards":
+# the concurrent-VM harness runs it on several Vms at once. The Vm of index 1
+# recurses without bound and exhausts its thread's stack; every other Vm
+# allocates on (so it collects and, under the harness's rendezvous, waits
+# mid-run for Vm 1, which never arrives). The overflow is reported by Vm 1's
+# own guard record -- its labelled line -- and ends the process, as a native
+# stack overflow always does.
+import std::int
+import std::list
+
+fn index() -> int errors InvalidArgumentEncoding, IndexNotFound, InvalidIntegerText:
+    std::int::from_string(argv().at(1))
+
+fn forever(n: int) -> int:
+    forever(n + 1) + 1
+
+fn busy(n: int) -> int:
+    fold i from 0 to n with intermediate acc 0:
+        acc + std::list::length([i, i + 1, acc])
+
+i = index():
+    on InvalidArgumentEncoding:
+        0
+    on IndexNotFound:
+        0
+    on InvalidIntegerText:
+        0
+if i == 1:
+    forever(0)
+else:
+    busy(200000)

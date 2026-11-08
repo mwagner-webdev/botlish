@@ -1,0 +1,13 @@
+first pass, every unit: 97.4 s
+   85.9 s  88.3%  surface::modules::BuildProgram
+   10.8 s  11.1%  surface::modules::CollectAndLoad
+    8.7 s   9.0%  surface::modules::Parse
+   74.3 s  76.4%  hir::buildSyntax
+   65.8 s  67.6%  hir::BuildOnce
+   55.6 s  57.1%  hir::check
+   19.8 s  20.3%  hir::DecideMethodCalls
+   18.0 s  18.5%  hir::traits::monomorphize
+   11.6 s  11.9%  hir::signatures::infer
+    8.2 s   8.5%  hir::resolve::program
+    2.9 s   2.9%  surface::lower::Finish
+    2.7 s   2.8%  hir::warnings::collect

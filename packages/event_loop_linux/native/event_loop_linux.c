@@ -33,8 +33,16 @@
  * Botlish code ever runs in this file, and nothing it hands Botlish refers
  * to memory of its own.
  *
- * One driver per process (Botlish's scheduler is thread-local and a program
- * has one main thread).
+ * One loop per VM that installs the driver (ABI v2, BOTLISH-OWNED-THREADS-
+ * AND-CROSS-THREAD-ACTORS-MILESTONE-1.md): every loop has its own epoll
+ * instance, eventfd, endpoints, watches, pumps, rotation and counters, and
+ * is named by its handle (evl_open's result), which every function takes.
+ * Botlish threads each install their own driver, so a process holds as
+ * many loops as it has VMs running one; nothing of one loop is shared with
+ * another. The ABI v1 entry points (botlish_event_post, _wake, _add_pump,
+ * _remove_pump) name no loop: they reach the one open loop while exactly
+ * one is, and are refused (-EPIPE, -ENOSPC) while several are -- never
+ * routed to one of them.
  *
  * Stress (tests only): BOTLISH_EVENT_LOOP_STRESS=reset-window widens the
  * window between the loop's first look at the posted endpoints and its
@@ -74,7 +82,7 @@ typedef struct {
 } evl_rec;
 
 typedef struct {
-    /* guarded by E.lock */
+    /* guarded by E->lock */
     int open;
     evl_rec *items;
     int cap, head, count, max;
@@ -107,7 +115,10 @@ enum {
     ST_EVENTFD_WRITES, ST_RING_MAX, ST_PUMP_CHECKS, ST_DISCARDED, ST_RESETS, ST_COUNT
 };
 
-static struct {
+typedef struct evl_loop {
+    int gen;
+    int lock_ready;
+    int gen_claimed;             /* opening or open (guarded by LOOPS_LOCK) */                     /* the handle's generation (guarded by LOOPS_LOCK) */
     int opened, epfd, wakefd, fault_lost_wakeup, stress_reset_window;
     pthread_mutex_t lock;
     evl_endpoint eps[MAX_ENDPOINTS];
@@ -124,7 +135,95 @@ static struct {
     evl_rec cur;
     int cur_source;
     long long stats[ST_COUNT];
-} E = { .epfd = -1, .wakefd = -1, .lock = PTHREAD_MUTEX_INITIALIZER, .cur_source = -1 };
+} evl_loop;
+
+/* The loops of the process: one per Botlish VM that installs the driver
+ * (BOTLISH-OWNED-THREADS-AND-CROSS-THREAD-ACTORS-MILESTONE-1.md, ABI v2).
+ * A loop is addressed by its handle, GEN * MAX_LOOPS + INDEX: a handle of a
+ * closed loop, or of an earlier loop in a reused entry, names nothing. The
+ * table is static (a loop's state is never freed), so a thread posting to a
+ * loop that is closing locks memory that stays valid and sees it closed. */
+#define MAX_LOOPS 64
+static evl_loop LOOPS[MAX_LOOPS];
+static pthread_mutex_t LOOPS_LOCK = PTHREAD_MUTEX_INITIALIZER;
+
+/* The open loop HANDLE names, or NULL. Any thread may ask; the loop's own
+ * thread is the only one that uses what it gets beyond the endpoints. */
+static evl_loop *loop_of(int handle) {
+    if (handle < MAX_LOOPS) return NULL;
+    int index = handle % MAX_LOOPS, gen = handle / MAX_LOOPS;
+    evl_loop *E = &LOOPS[index];
+    if (__atomic_load_n(&E->gen, __ATOMIC_ACQUIRE) != gen || !__atomic_load_n(&E->opened, __ATOMIC_ACQUIRE)) return NULL;
+    return E;
+}
+
+/* The loops a thread opened, closed when it exits (a key's destructor)
+ * unless the program closed them first (evl_close): a loop is its VM's,
+ * and a VM ends with its thread, so a worker VM that ends without closing
+ * its driver leaves no loop open -- none of its descriptors, and no second
+ * open loop refusing the version 1 functions for the rest of the process.
+ * (A handle already closed names nothing: closing it again does nothing.) */
+typedef struct {
+    int n;
+    int handles[MAX_LOOPS];
+} evl_owned;
+
+static pthread_key_t OWNED_KEY;
+static pthread_once_t OWNED_ONCE = PTHREAD_ONCE_INIT;
+static int owned_ready;
+
+int evl_close(int loop);
+
+static void close_owned(void *p) {
+    evl_owned *o = p;
+    for (int i = 0; i < o->n; i++) evl_close(o->handles[i]);
+    free(o);
+}
+
+static void owned_key(void) {
+    owned_ready = pthread_key_create(&OWNED_KEY, close_owned) == 0;
+}
+
+/* Remembers HANDLE as opened by this thread. */
+static void own(int handle) {
+    pthread_once(&OWNED_ONCE, owned_key);
+    if (!owned_ready) return;
+    evl_owned *o = pthread_getspecific(OWNED_KEY);
+    if (!o) {
+        o = calloc(1, sizeof *o);
+        if (!o || pthread_setspecific(OWNED_KEY, o) != 0) {
+            free(o);
+            return;
+        }
+    }
+    for (int i = 0; i < o->n; i++) {
+        if (!loop_of(o->handles[i])) {
+            o->handles[i] = handle;
+            return;
+        }
+    }
+    if (o->n < MAX_LOOPS) o->handles[o->n++] = handle;
+}
+
+/* ABI v1 (botlish_event_post, _wake, _add_pump, _remove_pump): the one open
+ * loop, when exactly one is; NULL otherwise -- with several loops open a v1
+ * call cannot say which loop it means, and is refused rather than routed
+ * to one of them. */
+static evl_loop *only_loop(void) {
+    evl_loop *found = NULL;
+    for (int i = 0; i < MAX_LOOPS; i++) {
+        if (__atomic_load_n(&LOOPS[i].opened, __ATOMIC_ACQUIRE)) {
+            if (found) return NULL;
+            found = &LOOPS[i];
+        }
+    }
+    return found;
+}
+
+static int loop_handle(evl_loop *E) {
+    return E->gen * MAX_LOOPS + (int)(E - LOOPS);
+}
+
 
 long long botlish_event_now(void) {
     struct timespec ts;
@@ -142,109 +241,161 @@ long long evl_cpu_us(void) {
     return (long long)(u.ru_utime.tv_sec + u.ru_stime.tv_sec) * 1000000LL + u.ru_utime.tv_usec + u.ru_stime.tv_usec;
 }
 
-long long evl_stat(int i) {
-    if (i < 0 || i >= ST_COUNT) return -1;
-    return __atomic_load_n(&E.stats[i], __ATOMIC_RELAXED);
+long long evl_stat(int loop, int i) {
+    evl_loop *E = loop_of(loop);
+    if (!E || i < 0 || i >= ST_COUNT) return -1;
+    return __atomic_load_n(&E->stats[i], __ATOMIC_RELAXED);
 }
 
-static void count(int i) {
-    __atomic_add_fetch(&E.stats[i], 1, __ATOMIC_RELAXED);
+static void count(evl_loop *E, int i) {
+    __atomic_add_fetch(&E->stats[i], 1, __ATOMIC_RELAXED);
 }
 
 /* ---------------------------------------------------------------------
  * The rotation (the loop's thread). */
 
-static void rot_push(int source) {
-    E.rot[(E.rot_head + E.rot_count) % (MAX_SOURCES + 1)] = source;
-    E.rot_count++;
+static void rot_push(evl_loop *E, int source) {
+    E->rot[(E->rot_head + E->rot_count) % (MAX_SOURCES + 1)] = source;
+    E->rot_count++;
 }
 
-static int rot_pop(void) {
-    if (E.rot_count == 0) return -1;
-    int s = E.rot[E.rot_head];
-    E.rot_head = (E.rot_head + 1) % (MAX_SOURCES + 1);
-    E.rot_count--;
+static int rot_pop(evl_loop *E) {
+    if (E->rot_count == 0) return -1;
+    int s = E->rot[E->rot_head];
+    E->rot_head = (E->rot_head + 1) % (MAX_SOURCES + 1);
+    E->rot_count--;
     return s;
 }
 
 /* Move the endpoints producers marked into the rotation. */
-static void drain_pending(void) {
-    pthread_mutex_lock(&E.lock);
-    for (int i = 0; i < E.npending; i++) {
-        evl_endpoint *ep = &E.eps[E.pending[i]];
+static void drain_pending(evl_loop *E) {
+    pthread_mutex_lock(&E->lock);
+    for (int i = 0; i < E->npending; i++) {
+        evl_endpoint *ep = &E->eps[E->pending[i]];
         if (ep->open && !ep->paused && !ep->rotating) {
             ep->rotating = 1;
-            rot_push(E.pending[i]);
+            rot_push(E, E->pending[i]);
         }
     }
-    E.npending = 0;
-    pthread_mutex_unlock(&E.lock);
+    E->npending = 0;
+    pthread_mutex_unlock(&E->lock);
 }
 
-static void signal_wakefd(void) {
+static void signal_wakefd(evl_loop *E) {
     uint64_t one = 1;
-    if (E.wakefd >= 0 && write(E.wakefd, &one, sizeof one) == sizeof one) count(ST_EVENTFD_WRITES);
+    if (E->wakefd >= 0 && write(E->wakefd, &one, sizeof one) == sizeof one) count(E, ST_EVENTFD_WRITES);
 }
 
-static void reset_wakefd(void) {
+static void reset_wakefd(evl_loop *E) {
     uint64_t n;
-    if (read(E.wakefd, &n, sizeof n) == sizeof n) count(ST_WAKEUPS);
+    if (read(E->wakefd, &n, sizeof n) == sizeof n) count(E, ST_WAKEUPS);
 }
 
 /* ---------------------------------------------------------------------
  * Opening and closing */
 
-/* Open the driver. 0, or -errno (-EBUSY: already open). */
+/* The adapter's integration ABI version (botlish_event_loop.h): what the
+ * package's Botlish module checks before it uses any other function, so a
+ * stale archive of another ABI is refused rather than called with another
+ * signature. */
+int evl_abi(void) {
+    return BOTLISH_EVENT_LOOP_ABI;
+}
+
+/* Open a loop: its handle (> 0), or -errno (-EMFILE: every one of the
+ * MAX_LOOPS loops is open). One per VM that installs the driver. */
 int evl_open(int flags) {
     (void)flags;
-    if (E.opened) return -EBUSY;
+    pthread_mutex_lock(&LOOPS_LOCK);
+    evl_loop *E = NULL;
+    for (int i = 0; i < MAX_LOOPS; i++) {
+        if (!LOOPS[i].opened && !LOOPS[i].gen_claimed) {
+            E = &LOOPS[i];
+            break;
+        }
+    }
+    if (!E) {
+        pthread_mutex_unlock(&LOOPS_LOCK);
+        return -EMFILE;
+    }
+    if (!E->lock_ready) {
+        pthread_mutex_init(&E->lock, NULL);
+        E->lock_ready = 1;
+    }
+    /* A fresh state, under a generation no earlier handle carries. */
+    int gen = E->gen + 1;
+    if (gen <= 0 || gen > 30000000) gen = 1;
+    pthread_mutex_t lock = E->lock;
+    memset(E, 0, sizeof *E);
+    E->lock = lock;
+    E->lock_ready = 1;
+    E->gen = gen;
+    E->gen_claimed = 1;
+    E->epfd = E->wakefd = -1;
+    E->cur_source = -1;
+    pthread_mutex_unlock(&LOOPS_LOCK);
     const char *fault = getenv("BOTLISH_EVENT_LOOP_FAULT");
-    E.fault_lost_wakeup = fault && strcmp(fault, "lost-wakeup") == 0;
+    E->fault_lost_wakeup = fault && strcmp(fault, "lost-wakeup") == 0;
     const char *stress = getenv("BOTLISH_EVENT_LOOP_STRESS");
-    E.stress_reset_window = stress && strcmp(stress, "reset-window") == 0;
-    E.epfd = epoll_create1(EPOLL_CLOEXEC);
-    if (E.epfd < 0) return -errno;
-    E.wakefd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
-    if (E.wakefd < 0) {
+    E->stress_reset_window = stress && strcmp(stress, "reset-window") == 0;
+    E->epfd = epoll_create1(EPOLL_CLOEXEC);
+    if (E->epfd < 0) {
+        E->gen_claimed = 0;
+        return -errno;
+    }
+    E->wakefd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+    if (E->wakefd < 0) {
         int e = errno;
-        close(E.epfd);
-        E.epfd = -1;
+        close(E->epfd);
+        E->epfd = -1;
+        E->gen_claimed = 0;
         return -e;
     }
     struct epoll_event ev = { .events = EPOLLIN, .data.u64 = UINT64_MAX };
-    if (epoll_ctl(E.epfd, EPOLL_CTL_ADD, E.wakefd, &ev) < 0) {
+    if (epoll_ctl(E->epfd, EPOLL_CTL_ADD, E->wakefd, &ev) < 0) {
         int e = errno;
-        close(E.wakefd);
-        close(E.epfd);
-        E.wakefd = E.epfd = -1;
+        close(E->wakefd);
+        close(E->epfd);
+        E->wakefd = E->epfd = -1;
+        E->gen_claimed = 0;
         return -e;
     }
-    E.opened = 1;
-    return 0;
+    __atomic_store_n(&E->opened, 1, __ATOMIC_RELEASE);
+    own(loop_handle(E));
+    return loop_handle(E);
 }
 
 /* Close the driver: every endpoint refuses later posts (-EPIPE), every
  * watch is dropped (its descriptor stays the program's). 0. */
-int evl_close(void) {
-    if (!E.opened) return 0;
-    pthread_mutex_lock(&E.lock);
+int evl_close(int loop) {
+    evl_loop *E = loop_of(loop);
+    if (!E) return 0;
+    pthread_mutex_lock(&E->lock);
     for (int i = 0; i < MAX_ENDPOINTS; i++) {
-        evl_endpoint *ep = &E.eps[i];
+        evl_endpoint *ep = &E->eps[i];
         if (ep->open) {
-            E.stats[ST_DISCARDED] += ep->count;
+            E->stats[ST_DISCARDED] += ep->count;
             free(ep->items);
             memset(ep, 0, sizeof *ep);
         }
     }
-    E.npending = 0;
-    E.opened = 0;
-    pthread_mutex_unlock(&E.lock);
-    memset(E.watches, 0, sizeof E.watches);
-    E.nwatches = E.armed_watches = 0;
-    E.rot_head = E.rot_count = 0;
-    close(E.wakefd);
-    close(E.epfd);
-    E.wakefd = E.epfd = -1;
+    E->npending = 0;
+    __atomic_store_n(&E->opened, 0, __ATOMIC_RELEASE);
+    /* Closed under the loop's lock: a post that holds it either queued
+     * before the close or sees the loop closed, and never writes to a
+     * closed eventfd (posts signal under the lock). */
+    close(E->wakefd);
+    E->wakefd = -1;
+    pthread_mutex_unlock(&E->lock);
+    memset(E->watches, 0, sizeof E->watches);
+    E->nwatches = E->armed_watches = 0;
+    E->rot_head = E->rot_count = 0;
+    memset(E->pumps, 0, sizeof E->pumps);
+    close(E->epfd);
+    E->epfd = -1;
+    pthread_mutex_lock(&LOOPS_LOCK);
+    E->gen_claimed = 0;
+    pthread_mutex_unlock(&LOOPS_LOCK);
     return 0;
 }
 
@@ -253,40 +404,42 @@ int evl_close(void) {
 
 /* A new endpoint holding at most CAPACITY records. Its id (>= 0), or
  * -errno (-ENOSPC: every endpoint is in use). */
-int evl_endpoint_open(int capacity) {
-    if (!E.opened) return -EPIPE;
+int evl_endpoint_open(int loop, int capacity) {
+    evl_loop *E = loop_of(loop);
+    if (!E) return -EPIPE;
     if (capacity < 1) capacity = 1;
     evl_rec *items = calloc((size_t)capacity, sizeof(evl_rec));
     if (!items) return -ENOMEM;
-    pthread_mutex_lock(&E.lock);
+    pthread_mutex_lock(&E->lock);
     for (int i = 0; i < MAX_ENDPOINTS; i++) {
-        evl_endpoint *ep = &E.eps[i];
+        evl_endpoint *ep = &E->eps[i];
         if (!ep->open && !ep->rotating) {
             memset(ep, 0, sizeof *ep);
             ep->open = 1;
             ep->items = items;
             ep->cap = capacity;
-            pthread_mutex_unlock(&E.lock);
+            pthread_mutex_unlock(&E->lock);
             return i;
         }
     }
-    pthread_mutex_unlock(&E.lock);
+    pthread_mutex_unlock(&E->lock);
     free(items);
     return -ENOSPC;
 }
 
 /* Close endpoint ID: its undelivered records are discarded (the number is
- * returned), later posts fail with -EPIPE. */
-int evl_endpoint_close(int id) {
-    if (id < 0 || id >= MAX_ENDPOINTS) return -EINVAL;
-    pthread_mutex_lock(&E.lock);
-    evl_endpoint *ep = &E.eps[id];
+ * returned), later posts fail with -EPIPE-> */
+int evl_endpoint_close(int loop, int id) {
+    evl_loop *E = loop_of(loop);
+    if (!E || id < 0 || id >= MAX_ENDPOINTS) return -EINVAL;
+    pthread_mutex_lock(&E->lock);
+    evl_endpoint *ep = &E->eps[id];
     if (!ep->open) {
-        pthread_mutex_unlock(&E.lock);
+        pthread_mutex_unlock(&E->lock);
         return -EINVAL;
     }
     int discarded = ep->count + (ep->held ? 1 : 0);
-    E.stats[ST_DISCARDED] += discarded;
+    E->stats[ST_DISCARDED] += discarded;
     free(ep->items);
     ep->items = NULL;
     ep->open = 0;
@@ -294,64 +447,97 @@ int evl_endpoint_close(int id) {
     ep->held = 0;
     ep->paused = 0;
     ep->marked = 0;
-    pthread_mutex_unlock(&E.lock);
+    pthread_mutex_unlock(&E->lock);
     return discarded;
 }
 
 /* Records waiting in endpoint ID (held ones included), or -EINVAL. */
-int evl_endpoint_count(int id) {
-    if (id < 0 || id >= MAX_ENDPOINTS) return -EINVAL;
-    pthread_mutex_lock(&E.lock);
-    evl_endpoint *ep = &E.eps[id];
+int evl_endpoint_count(int loop, int id) {
+    evl_loop *E = loop_of(loop);
+    if (!E || id < 0 || id >= MAX_ENDPOINTS) return -EINVAL;
+    pthread_mutex_lock(&E->lock);
+    evl_endpoint *ep = &E->eps[id];
     int n = ep->open ? ep->count + (ep->held ? 1 : 0) : -EINVAL;
-    pthread_mutex_unlock(&E.lock);
+    pthread_mutex_unlock(&E->lock);
     return n;
 }
 
-int botlish_event_post(int endpoint, int slot, int gen, long long a, long long b) {
+static int post_to(evl_loop *E, int loop, int endpoint, int slot, int gen, long long a, long long b) {
+    if (!E) return -EPIPE;
     if (endpoint < 0 || endpoint >= MAX_ENDPOINTS) return -EINVAL;
-    pthread_mutex_lock(&E.lock);
-    evl_endpoint *ep = &E.eps[endpoint];
+    pthread_mutex_lock(&E->lock);
+    if (!E->opened || (loop >= 0 && E->gen != loop / MAX_LOOPS)) {
+        /* Closed meanwhile, or reopened under another handle. */
+        pthread_mutex_unlock(&E->lock);
+        return -EPIPE;
+    }
+    evl_endpoint *ep = &E->eps[endpoint];
     if (!ep->open) {
-        pthread_mutex_unlock(&E.lock);
-        return E.opened ? -EINVAL : -EPIPE;
+        pthread_mutex_unlock(&E->lock);
+        return -EINVAL;
     }
     if (ep->count == ep->cap) {
         ep->refused++;
-        pthread_mutex_unlock(&E.lock);
-        count(ST_REFUSED);
+        pthread_mutex_unlock(&E->lock);
+        count(E, ST_REFUSED);
         return -EAGAIN;
     }
     ep->items[(ep->head + ep->count) % ep->cap] = (evl_rec){ slot, gen, a, b };
     ep->count++;
     ep->posts++;
     if (ep->count > ep->max) ep->max = ep->count;
-    if (ep->count > E.stats[ST_RING_MAX]) E.stats[ST_RING_MAX] = ep->count;
+    if (ep->count > E->stats[ST_RING_MAX]) E->stats[ST_RING_MAX] = ep->count;
     int signal = 0;
     if (!ep->marked) {
         ep->marked = 1;
-        E.pending[E.npending++] = endpoint;
+        E->pending[E->npending++] = endpoint;
         /* One wakeup per batch: the empty -> non-empty edge of the list. */
-        signal = E.npending == 1;
+        signal = E->npending == 1;
     }
-    int sleeping = E.sleeping;
-    pthread_mutex_unlock(&E.lock);
-    count(ST_POSTS);
-    if (E.fault_lost_wakeup) {
-        if (sleeping) signal_wakefd();       /* WRONG: misses the race window */
+    int sleeping = E->sleeping;
+    count(E, ST_POSTS);
+    if (E->fault_lost_wakeup) {
+        if (sleeping) signal_wakefd(E);       /* WRONG: misses the race window */
     } else if (signal) {
-        signal_wakefd();
+        signal_wakefd(E);
     }
+    pthread_mutex_unlock(&E->lock);
     return 0;
 }
 
-int botlish_event_wake(void) {
-    if (!E.opened) return -EPIPE;
+int botlish_event_post2(int loop, int endpoint, int slot, int gen, long long a, long long b) {
+    if (loop < MAX_LOOPS) return -EINVAL;
+    return post_to(&LOOPS[loop % MAX_LOOPS], loop, endpoint, slot, gen, a, b);
+}
+
+int botlish_event_post(int endpoint, int slot, int gen, long long a, long long b) {
+    evl_loop *E = only_loop();
+    if (!E) return -EPIPE;
+    return post_to(E, -1, endpoint, slot, gen, a, b);
+}
+
+static int wake_loop(evl_loop *E, int loop) {
+    if (!E) return -EPIPE;
+    pthread_mutex_lock(&E->lock);
+    if (!E->opened || (loop >= 0 && E->gen != loop / MAX_LOOPS)) {
+        pthread_mutex_unlock(&E->lock);
+        return -EPIPE;
+    }
     /* Owed until the pumps' checks run: a reset of the eventfd (below) can
      * swallow the signal, and a wake has no endpoint to find. */
-    __atomic_store_n(&E.wake_owed, 1, __ATOMIC_SEQ_CST);
-    signal_wakefd();
+    __atomic_store_n(&E->wake_owed, 1, __ATOMIC_SEQ_CST);
+    signal_wakefd(E);
+    pthread_mutex_unlock(&E->lock);
     return 0;
+}
+
+int botlish_event_wake2(int loop) {
+    if (loop < MAX_LOOPS) return -EPIPE;
+    return wake_loop(&LOOPS[loop % MAX_LOOPS], loop);
+}
+
+int botlish_event_wake(void) {
+    return wake_loop(only_loop(), -1);
 }
 
 /* ---------------------------------------------------------------------
@@ -367,22 +553,23 @@ static uint32_t interest_bits(int interest) {
 /* Watch descriptor FD for INTEREST (1 readable, 2 writable, 3 both): one
  * readiness record (SLOT, GEN, events, fd) per arming; armed now. Its id,
  * or -errno. The descriptor stays the caller's: never closed here. */
-int evl_watch(int fd, int interest, int slot, int gen) {
-    if (!E.opened) return -EPIPE;
+int evl_watch(int loop, int fd, int interest, int slot, int gen) {
+    evl_loop *E = loop_of(loop);
+    if (!E) return -EPIPE;
     for (int i = 0; i < MAX_WATCHES; i++) {
-        evl_watch_t *w = &E.watches[i];
+        evl_watch_t *w = &E->watches[i];
         if (!w->used && !w->rotating) {
             memset(w, 0, sizeof *w);
             struct epoll_event ev = { .events = interest_bits(interest), .data.u64 = (uint64_t)i };
-            if (epoll_ctl(E.epfd, EPOLL_CTL_ADD, fd, &ev) < 0) return -errno;
+            if (epoll_ctl(E->epfd, EPOLL_CTL_ADD, fd, &ev) < 0) return -errno;
             w->used = 1;
             w->fd = fd;
             w->slot = slot;
             w->gen = gen;
             w->interest = interest;
             w->armed = 1;
-            E.nwatches++;
-            E.armed_watches++;
+            E->nwatches++;
+            E->armed_watches++;
             return i;
         }
     }
@@ -391,23 +578,25 @@ int evl_watch(int fd, int interest, int slot, int gen) {
 
 /* Whether watch ID is the one tagged (SLOT, GEN): a stale Watch value never
  * reaches a watch that reused its id. */
-static evl_watch_t *watch_of(int id, int slot, int gen) {
+static evl_watch_t *watch_of(evl_loop *E, int id, int slot, int gen) {
     if (id < 0 || id >= MAX_WATCHES) return NULL;
-    evl_watch_t *w = &E.watches[id];
+    evl_watch_t *w = &E->watches[id];
     if (!w->used || w->slot != slot || w->gen != gen) return NULL;
     return w;
 }
 
 /* Arm watch ID (tagged SLOT, GEN) again, after its readiness record was
  * taken. 0, or -errno (-EINVAL: no such watch). */
-int evl_watch_rearm(int id, int slot, int gen) {
-    evl_watch_t *w = watch_of(id, slot, gen);
+int evl_watch_rearm(int loop, int id, int slot, int gen) {
+    evl_loop *E = loop_of(loop);
+    if (!E) return -EINVAL;
+    evl_watch_t *w = watch_of(E, id, slot, gen);
     if (!w) return -EINVAL;
     if (w->armed || w->ready) return 0;
     struct epoll_event ev = { .events = interest_bits(w->interest), .data.u64 = (uint64_t)id };
-    if (epoll_ctl(E.epfd, EPOLL_CTL_MOD, w->fd, &ev) < 0) return -errno;
+    if (epoll_ctl(E->epfd, EPOLL_CTL_MOD, w->fd, &ev) < 0) return -errno;
     w->armed = 1;
-    E.armed_watches++;
+    E->armed_watches++;
     return 0;
 }
 
@@ -415,12 +604,14 @@ int evl_watch_rearm(int id, int slot, int gen) {
  * epoll set (it stays open: close it after this, never before -- a closed
  * descriptor's number may already name another file) and a readiness record
  * not yet taken is dropped. 0, or -EINVAL. */
-int evl_watch_close(int id, int slot, int gen) {
-    evl_watch_t *w = watch_of(id, slot, gen);
+int evl_watch_close(int loop, int id, int slot, int gen) {
+    evl_loop *E = loop_of(loop);
+    if (!E) return -EINVAL;
+    evl_watch_t *w = watch_of(E, id, slot, gen);
     if (!w) return -EINVAL;
-    epoll_ctl(E.epfd, EPOLL_CTL_DEL, w->fd, NULL);
-    if (w->armed) E.armed_watches--;
-    E.nwatches--;
+    epoll_ctl(E->epfd, EPOLL_CTL_DEL, w->fd, NULL);
+    if (w->armed) E->armed_watches--;
+    E->nwatches--;
     w->used = 0;
     w->ready = 0;
     w->held = 0;
@@ -431,37 +622,61 @@ int evl_watch_close(int id, int slot, int gen) {
 /* ---------------------------------------------------------------------
  * Pumps */
 
-int botlish_event_add_pump(botlish_event_prepare_fn prepare, botlish_event_check_fn check, void *user) {
+static int add_pump(evl_loop *E, botlish_event_prepare_fn prepare, botlish_event_check_fn check, void *user) {
+    if (!E) return -EPIPE;
     for (int i = 0; i < MAX_PUMPS; i++) {
-        if (!E.pumps[i].used) {
-            E.pumps[i] = (evl_pump){ prepare, check, user, 1 };
+        if (!E->pumps[i].used) {
+            E->pumps[i] = (evl_pump){ prepare, check, user, 1 };
             return i;
         }
     }
     return -ENOSPC;
 }
 
-int botlish_event_remove_pump(int pump) {
-    if (pump < 0 || pump >= MAX_PUMPS || !E.pumps[pump].used) return -EINVAL;
-    E.pumps[pump].used = 0;
+static int remove_pump(evl_loop *E, int pump) {
+    if (!E || pump < 0 || pump >= MAX_PUMPS || !E->pumps[pump].used) return -EINVAL;
+    E->pumps[pump].used = 0;
     return 0;
 }
 
-static void run_checks(void) {
+int botlish_event_add_pump2(int loop, botlish_event_prepare_fn prepare, botlish_event_check_fn check, void *user) {
+    return add_pump(loop_of(loop), prepare, check, user);
+}
+
+int botlish_event_remove_pump2(int loop, int pump) {
+    return remove_pump(loop_of(loop), pump);
+}
+
+int botlish_event_add_pump(botlish_event_prepare_fn prepare, botlish_event_check_fn check, void *user) {
+    return add_pump(only_loop(), prepare, check, user);
+}
+
+int botlish_event_remove_pump(int pump) {
+    return remove_pump(only_loop(), pump);
+}
+
+/* The handle of the loop the calling thread may post to through ABI v1
+ * (the one open loop), or -EPIPE: what a v1 library may hand on. */
+int botlish_event_loop(void) {
+    evl_loop *E = only_loop();
+    return E ? loop_handle(E) : -EPIPE;
+}
+
+static void run_checks(evl_loop *E) {
     /* Every wake so far is answered by the checks about to run. */
-    __atomic_store_n(&E.wake_owed, 0, __ATOMIC_SEQ_CST);
+    __atomic_store_n(&E->wake_owed, 0, __ATOMIC_SEQ_CST);
     for (int i = 0; i < MAX_PUMPS; i++) {
-        if (E.pumps[i].used && E.pumps[i].check) {
-            count(ST_PUMP_CHECKS);
-            E.pumps[i].check(E.pumps[i].user);
+        if (E->pumps[i].used && E->pumps[i].check) {
+            count(E, ST_PUMP_CHECKS);
+            E->pumps[i].check(E->pumps[i].user);
         }
     }
 }
 
-static long long run_prepares(long long deadline) {
+static long long run_prepares(evl_loop *E, long long deadline) {
     for (int i = 0; i < MAX_PUMPS; i++) {
-        if (E.pumps[i].used && E.pumps[i].prepare) {
-            long long d = E.pumps[i].prepare(E.pumps[i].user, deadline);
+        if (E->pumps[i].used && E->pumps[i].prepare) {
+            long long d = E->pumps[i].prepare(E->pumps[i].user, deadline);
             if (d >= 0 && (deadline < 0 || d < deadline)) deadline = d;
         }
     }
@@ -471,17 +686,17 @@ static long long run_prepares(long long deadline) {
 /* ---------------------------------------------------------------------
  * Waiting */
 
-static int any_pumps(void) {
-    for (int i = 0; i < MAX_PUMPS; i++) if (E.pumps[i].used) return 1;
+static int any_pumps(evl_loop *E) {
+    for (int i = 0; i < MAX_PUMPS; i++) if (E->pumps[i].used) return 1;
     return 0;
 }
 
-static void ready_watch(int id, uint32_t events) {
-    evl_watch_t *w = &E.watches[id];
+static void ready_watch(evl_loop *E, int id, uint32_t events) {
+    evl_watch_t *w = &E->watches[id];
     if (!w->used) return;
     if (w->armed) {
         w->armed = 0;
-        E.armed_watches--;
+        E->armed_watches--;
     }
     long long bits = 0;
     if (events & EPOLLIN) bits |= 1;
@@ -490,25 +705,25 @@ static void ready_watch(int id, uint32_t events) {
     if (events & EPOLLERR) bits |= 8;
     w->ready = 1;
     w->ready_events |= bits;
-    count(ST_WATCH_EVENTS);
+    count(E, ST_WATCH_EVENTS);
     if (!w->paused && !w->rotating) {
         w->rotating = 1;
-        rot_push(MAX_ENDPOINTS + id);
+        rot_push(E, MAX_ENDPOINTS + id);
     }
 }
 
-static int epoll_wait_us(struct epoll_event *events, long long timeout_us) {
+static int epoll_wait_us(evl_loop *E, struct epoll_event *events, long long timeout_us) {
     struct timespec ts, *tp = NULL;
     if (timeout_us >= 0) {
         ts.tv_sec = timeout_us / 1000000;
         ts.tv_nsec = (timeout_us % 1000000) * 1000;
         tp = &ts;
     }
-    int n = epoll_pwait2(E.epfd, events, EPOLL_BATCH, tp, NULL);
+    int n = epoll_pwait2(E->epfd, events, EPOLL_BATCH, tp, NULL);
     if (n < 0 && errno == ENOSYS) {
         /* Before Linux 5.11: milliseconds, rounded up (never early). */
         int ms = timeout_us < 0 ? -1 : (int)((timeout_us + 999) / 1000);
-        n = epoll_wait(E.epfd, events, EPOLL_BATCH, ms);
+        n = epoll_wait(E->epfd, events, EPOLL_BATCH, ms);
     }
     return n;
 }
@@ -517,85 +732,86 @@ static int epoll_wait_us(struct epoll_event *events, long long timeout_us) {
  * (microseconds of evl_now's clock) passes; -1: no deadline; a deadline
  * not in the future, or records already available: do not sleep. Returns
  * the number of sources with a record, or -errno. */
-int evl_block(long long deadline) {
-    if (!E.opened) return -EPIPE;
-    count(ST_BLOCKS);
-    run_checks();
-    deadline = run_prepares(deadline);
+int evl_block(int loop, long long deadline) {
+    evl_loop *E = loop_of(loop);
+    if (!E) return -EPIPE;
+    count(E, ST_BLOCKS);
+    run_checks(E);
+    deadline = run_prepares(E, deadline);
     long long timeout = -1;
-    if (E.rot_count > 0) {
+    if (E->rot_count > 0) {
         timeout = 0;
     } else if (deadline >= 0) {
         timeout = deadline - botlish_event_now();
         if (timeout < 0) timeout = 0;
     }
-    drain_pending();
-    if (E.rot_count > 0) timeout = 0;
+    drain_pending(E);
+    if (E->rot_count > 0) timeout = 0;
     if (timeout != 0) {
-        if (E.fault_lost_wakeup) {
+        if (E->fault_lost_wakeup) {
             /* WRONG: the endpoints were checked above; announce the sleep
              * only now, so a post in between signals nobody. */
             struct timespec gap = { 0, 200000 };   /* the race window, widened */
             nanosleep(&gap, NULL);
-            pthread_mutex_lock(&E.lock);
-            E.sleeping = 1;
-            pthread_mutex_unlock(&E.lock);
-        } else if (E.reset_owed) {
+            pthread_mutex_lock(&E->lock);
+            E->sleeping = 1;
+            pthread_mutex_unlock(&E->lock);
+        } else if (E->reset_owed) {
             /* The eventfd may hold signals from polls that skipped the
              * kernel: reset it, THEN look at the posted endpoints again, so
              * a post after the reset wakes the sleep below. A wake the
              * reset swallowed has no endpoint to find: it is still owed to
              * the pumps, so the loop polls instead of sleeping, and their
              * checks run after the poll. */
-            count(ST_RESETS);
-            if (E.stress_reset_window) {
+            count(E, ST_RESETS);
+            if (E->stress_reset_window) {
                 /* Tests only: the race window between the endpoints' first
                  * look and the reset, widened (no protocol change). */
                 struct timespec window = { 0, 2000000 };
                 nanosleep(&window, NULL);
             }
-            reset_wakefd();
-            E.reset_owed = 0;
-            drain_pending();
-            if (E.rot_count > 0 || __atomic_load_n(&E.wake_owed, __ATOMIC_SEQ_CST)) timeout = 0;
+            reset_wakefd(E);
+            E->reset_owed = 0;
+            drain_pending(E);
+            if (E->rot_count > 0 || __atomic_load_n(&E->wake_owed, __ATOMIC_SEQ_CST)) timeout = 0;
         }
     }
     int n = 0;
     struct epoll_event events[EPOLL_BATCH];
-    if (timeout == 0 && E.armed_watches == 0 && !E.fault_lost_wakeup) {
+    if (timeout == 0 && E->armed_watches == 0 && !E->fault_lost_wakeup) {
         /* A poll with nothing the kernel could report but the eventfd: the
          * posted endpoints were just looked at in memory. */
-        count(ST_POLLS_SKIPPED);
-        E.reset_owed = 1;
+        count(E, ST_POLLS_SKIPPED);
+        E->reset_owed = 1;
     } else {
-        if (timeout == 0) count(ST_POLL_SYSCALLS); else count(ST_SLEEPS);
-        n = epoll_wait_us(events, timeout);
-        if (E.fault_lost_wakeup) {
-            pthread_mutex_lock(&E.lock);
-            E.sleeping = 0;
-            pthread_mutex_unlock(&E.lock);
+        if (timeout == 0) count(E, ST_POLL_SYSCALLS); else count(E, ST_SLEEPS);
+        n = epoll_wait_us(E, events, timeout);
+        if (E->fault_lost_wakeup) {
+            pthread_mutex_lock(&E->lock);
+            E->sleeping = 0;
+            pthread_mutex_unlock(&E->lock);
         }
         if (n < 0) {
             if (errno != EINTR) return -errno;
             n = 0;
         }
-        if (n == 0 && timeout > 0) count(ST_TIMEOUTS);
+        if (n == 0 && timeout > 0) count(E, ST_TIMEOUTS);
     }
-    int before = E.rot_count;
+    int before = E->rot_count;
     for (int i = 0; i < n; i++) {
         if (events[i].data.u64 == UINT64_MAX) {
-            reset_wakefd();
+            reset_wakefd(E);
         } else {
-            ready_watch((int)events[i].data.u64, events[i].events);
+            ready_watch(E, (int)events[i].data.u64, events[i].events);
         }
     }
-    drain_pending();
-    if (any_pumps()) {
-        run_checks();
-        drain_pending();
+    drain_pending(E);
+    if (any_pumps(E)) {
+        run_checks(E);
+        drain_pending(E);
     }
-    if (n > 0 && E.rot_count == before) count(ST_SPURIOUS);
-    return E.rot_count;
+    if (n > 0 && E->rot_count == before) count(E, ST_SPURIOUS);
+    return E->rot_count;
 }
 
 /* ---------------------------------------------------------------------
@@ -603,19 +819,21 @@ int evl_block(long long deadline) {
 
 /* Make the next record current, round-robin over the sources that have
  * one; its slot, or -1 when none is available. */
-int evl_take(void) {
+int evl_take(int loop) {
+    evl_loop *E = loop_of(loop);
+    if (!E) return -1;
     for (;;) {
-        int s = rot_pop();
+        int s = rot_pop(E);
         if (s < 0) return -1;
         if (s < MAX_ENDPOINTS) {
-            evl_endpoint *ep = &E.eps[s];
+            evl_endpoint *ep = &E->eps[s];
             ep->rotating = 0;
             if (ep->paused) continue;
             evl_rec rec;
             int more;
-            pthread_mutex_lock(&E.lock);
+            pthread_mutex_lock(&E->lock);
             if (!ep->open) {
-                pthread_mutex_unlock(&E.lock);
+                pthread_mutex_unlock(&E->lock);
                 continue;
             }
             if (ep->held) {
@@ -627,102 +845,106 @@ int evl_take(void) {
                 ep->count--;
             } else {
                 ep->marked = 0;
-                pthread_mutex_unlock(&E.lock);
+                pthread_mutex_unlock(&E->lock);
                 continue;
             }
             more = ep->count > 0;
             if (!more) ep->marked = 0;
-            pthread_mutex_unlock(&E.lock);
+            pthread_mutex_unlock(&E->lock);
             if (more) {
                 ep->rotating = 1;
-                rot_push(s);
+                rot_push(E, s);
             }
-            E.cur = rec;
-            E.cur_source = s;
-            count(ST_TAKEN);
+            E->cur = rec;
+            E->cur_source = s;
+            count(E, ST_TAKEN);
             return rec.slot;
         }
-        evl_watch_t *w = &E.watches[s - MAX_ENDPOINTS];
+        evl_watch_t *w = &E->watches[s - MAX_ENDPOINTS];
         w->rotating = 0;
         if (!w->used || w->paused) continue;
         if (w->held) {
-            E.cur = w->held_rec;
+            E->cur = w->held_rec;
             w->held = 0;
         } else if (w->ready) {
-            E.cur = (evl_rec){ w->slot, w->gen, w->ready_events, w->fd };
+            E->cur = (evl_rec){ w->slot, w->gen, w->ready_events, w->fd };
             w->ready = 0;
             w->ready_events = 0;
         } else {
             continue;
         }
-        E.cur_source = s;
-        count(ST_TAKEN);
-        return E.cur.slot;
+        E->cur_source = s;
+        count(E, ST_TAKEN);
+        return E->cur.slot;
     }
 }
 
-int evl_gen(void) { return E.cur.gen; }
-long long evl_a(void) { return E.cur.a; }
-long long evl_b(void) { return E.cur.b; }
+int evl_gen(int loop) { evl_loop *E = loop_of(loop); return E ? E->cur.gen : -1; }
+long long evl_a(int loop) { evl_loop *E = loop_of(loop); return E ? E->cur.a : 0; }
+long long evl_b(int loop) { evl_loop *E = loop_of(loop); return E ? E->cur.b : 0; }
 
 /* The current record could not be accepted (a Reliable registration has
  * no room): keep it first in its source and take nothing more from that
  * source until evl_release(its slot). 0, or -EINVAL. */
-int evl_hold(void) {
-    int s = E.cur_source;
+int evl_hold(int loop) {
+    evl_loop *E = loop_of(loop);
+    if (!E) return -EINVAL;
+    int s = E->cur_source;
     if (s < 0) return -EINVAL;
-    count(ST_HOLDS);
+    count(E, ST_HOLDS);
     if (s < MAX_ENDPOINTS) {
-        evl_endpoint *ep = &E.eps[s];
-        pthread_mutex_lock(&E.lock);
+        evl_endpoint *ep = &E->eps[s];
+        pthread_mutex_lock(&E->lock);
         if (ep->open) {
             ep->held = 1;
-            ep->held_rec = E.cur;
+            ep->held_rec = E->cur;
             ep->paused = 1;
             ep->marked = 1;     /* producers leave it alone until released */
         }
-        pthread_mutex_unlock(&E.lock);
+        pthread_mutex_unlock(&E->lock);
     } else {
-        evl_watch_t *w = &E.watches[s - MAX_ENDPOINTS];
+        evl_watch_t *w = &E->watches[s - MAX_ENDPOINTS];
         if (w->used) {
             w->held = 1;
-            w->held_rec = E.cur;
+            w->held_rec = E->cur;
             w->paused = 1;
         }
     }
-    E.cur_source = -1;
+    E->cur_source = -1;
     return 0;
 }
 
 /* Sources holding a record for SLOT may deliver again. The number of
  * sources released. */
-int evl_release(int slot) {
+int evl_release(int loop, int slot) {
+    evl_loop *E = loop_of(loop);
+    if (!E) return 0;
     int released = 0;
-    pthread_mutex_lock(&E.lock);
+    pthread_mutex_lock(&E->lock);
     for (int i = 0; i < MAX_ENDPOINTS; i++) {
-        evl_endpoint *ep = &E.eps[i];
+        evl_endpoint *ep = &E->eps[i];
         if (ep->open && ep->paused && ep->held && ep->held_rec.slot == slot) {
             ep->paused = 0;
             ep->marked = 1;
             if (!ep->rotating) {
                 ep->rotating = 1;
-                rot_push(i);
+                rot_push(E, i);
             }
             released++;
         }
     }
-    pthread_mutex_unlock(&E.lock);
+    pthread_mutex_unlock(&E->lock);
     for (int i = 0; i < MAX_WATCHES; i++) {
-        evl_watch_t *w = &E.watches[i];
+        evl_watch_t *w = &E->watches[i];
         if (w->used && w->paused && w->held && w->held_rec.slot == slot) {
             w->paused = 0;
             if (!w->rotating) {
                 w->rotating = 1;
-                rot_push(MAX_ENDPOINTS + i);
+                rot_push(E, MAX_ENDPOINTS + i);
             }
             released++;
         }
     }
-    if (released) __atomic_add_fetch(&E.stats[ST_RELEASES], released, __ATOMIC_RELAXED);
+    if (released) __atomic_add_fetch(&E->stats[ST_RELEASES], released, __ATOMIC_RELAXED);
     return released;
 }

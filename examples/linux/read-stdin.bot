@@ -18,12 +18,16 @@
 # 4096 bytes) is normal, end of file is a result of 0 (nothing is written),
 # and a negative result is the kernel's raw -errno, returned as the program's
 # value. Native backend only (a standalone executable from
-# `tclsh9.0 main.tcl -emit-native-executable examples/linux/read-stdin.bot`);
-# the Tcl backends refuse the syscall with NATIVE-ONLY.
+# `tclsh9.0 main.tcl -emit-native-executable examples/linux/read-stdin.bot`,
+# or `tclsh9.0 main.tcl run examples/linux/read-stdin.bot`); the Tcl backends
+# refuse the syscall with NATIVE-ONLY.
 #
 #   printf 'hello from stdin\n' | ./read-stdin
 #   hello from stdin
-#   17                      <- the bytes written (the runner prints the result)
+#
+# The value (17, the bytes written) is not printed: an executable prints
+# only what its program writes (PROGRAM-OUTPUT-MILESTONE-1.md). main.tcl's
+# development run shows it (`-backend cranelift`: "   value: 17").
 
 # A direct module (DIRECT-MODULES.md): the program calls std::linux::read, a
 # callable of the direct module linux, at its top level -- a deliberately

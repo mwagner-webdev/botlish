@@ -317,9 +317,20 @@ proc surface::lower::StructDeclOf {node namespace} {
         # TYPES.md), as written: hir/structs.tcl resolves their traits.
         dict set decl slots [dict get $node slots]
     }
+    if {[dict getdef $node resource 0]} {
+        # A resource struct (LEXICAL-RESOURCE-CLEANUP-EXPLORATION-
+        # MILESTONE-1.md): hir/structs.tcl checks the declaration.
+        dict set decl resource 1
+        dict set decl resourceSpan [dict get $node resourceSpan]
+    }
     if {[dict exists $node identity]} {
         # Its semantic identity, as written: hir/structs.tcl validates it.
         dict set decl identity [dict get $node identity]
+    }
+    if {[dict exists $node sendable]} {
+        # Its owner's sendability statement, as written (SENDABILITY-AND-
+        # VALUE-COPY-MILESTONE-1.md): hir/structs.tcl validates it.
+        dict set decl sendable [dict get $node sendable]
     }
     if {[dict exists $node tree]} {
         # A tree struct (TREE-STRUCT-MILESTONE-1.md): hir/structs.tcl finds
@@ -919,11 +930,17 @@ proc surface::lower::Node {node} {
             if {[dict exists $node nomethod] && [dict get $node nomethod]} {
                 set block [hir::syntax::withNoMethod $block]
             }
+            if {[dict getdef $node cleanup 0]} {
+                set block [hir::syntax::withCleanup $block]
+            }
             if {[dict getdef $node exported ""] ne ""} {
                 set block [hir::syntax::withExported $block [dict get $node exported]]
             }
             if {[dict getdef $node callback ""] ne ""} {
                 set block [hir::syntax::withCallback $block [dict get $node callback]]
+            }
+            if {[dict getdef $node thread 0]} {
+                set block [hir::syntax::withThread $block]
             }
             if {$variadic ne ""} {
                 set block [hir::syntax::withVariadic $block \
@@ -1054,6 +1071,27 @@ proc surface::lower::Node {node} {
                 [Origin [dict get $node operationSpan] [dict get $node id]/operation] \
                 [Origin [dict get $body span] [dict get $body id]/body] \
                 [Sequence [dict get $body body]] $deferred]
+        }
+        inject {
+            # An inject block (RESTRICTED-CONTEXT-INJECTION-MILESTONE-1.md):
+            # its body is the ordinary block `if true:` (the form an
+            # accepted static block takes, hir/static.tcl's Accepted), which
+            # scopes what the body binds and in a value position is its last
+            # statement's value, so every analysis and backend reads it as
+            # what it is -- code that runs once, right there. The `inject`
+            # field is the restriction: the written context types, each
+            # with its origin, which resolution reads into the expression's
+            # `injects` and hir/injection.tcl checks. No runtime operation,
+            # no new node kind.
+            set body [dict get $node body]
+            set injected [lmap c [dict get $node contexts] {
+                list [dict get $c type] [Origin [dict get $c typeSpan] "[dict get $node id]/inject([dict get $c typeSpan start])"]
+            }]
+            set block [hir::syntax::ifNode $origin [hir::syntax::rootRef [OriginOf $node inject] true] \
+                [Origin [dict get $body span] [dict get $body id]/body] [Sequence [dict get $body body]] \
+                [OriginOf $node else] {}]
+            dict set block inject $injected
+            return $block
         }
     }
     error "surface::lowerToHir: cannot lower a \"[dict get $node kind]\" node"

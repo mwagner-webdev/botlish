@@ -5,12 +5,13 @@ name: tests (linux arm64)
 # architecture its Cranelift code generator and runtime target. The Tcl
 # backends are architecture-independent, but the Tcl test files run every
 # corpus program on the Cranelift backend too, so the interp and compile jobs
-# are native coverage as well. Run it on another branch with "Run workflow"
-# (workflow_dispatch).
+# are native coverage as well. A push to another branch runs its canary
+# only; run the rest there with "Run workflow" (workflow_dispatch).
 
 on:
   push:
-    branches: [main]
+    # Every branch: a branch push runs the canary only (below).
+    branches: ["**"]
     paths-ignore: ["**.md", "docs/**"]
   pull_request:
     paths-ignore: ["**.md", "docs/**"]
@@ -19,9 +20,51 @@ on:
 permissions:
   contents: read
 
+# A newer push (or run on the same ref) cancels the running one, on main
+# too (CI-RUNS.md).
+concurrency:
+  group: tests-arm64-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  canary:
+    name: canary (linux arm64)
+    # The likeliest to fail, first (CI-RUNS.md, "The canary"): the test files
+    # and golden suites the push adds or changes, smallest first, then the
+    # ones that failed in recent CI runs on this host (tests/canary.tsv),
+    # within about ten minutes (tests/canary.tcl). Every other job waits for
+    # it, so a push that breaks them costs one runner for minutes, not every
+    # runner for hours. On a branch push it is all that runs: dispatch the
+    # workflow on the branch for the rest. It compares HEAD with main's
+    # previous head on a push to main, with its merge base with main
+    # otherwise.
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 40
+    env:
+      LANG: C.utf8
+      LC_ALL: C.utf8
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # The history to the merge base, without file contents.
+          fetch-depth: 0
+          filter: blob:none
+
+      - name: Install project prerequisites
+        run: bash .devcontainer/setup.sh
+
+      - name: Build native (Cranelift) backend
+        uses: ./.github/actions/build-native
+
+      - name: Canary
+        env:
+          BASE: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.event.before || 'origin/main' }}
+        run: tclsh9.0 tests/canary.tcl -base "$BASE"
+
   test:
     name: arm64 tests (${{ matrix.backend }})
+    needs: canary
+    if: github.event_name != 'push' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04-arm
     strategy:
       fail-fast: false
@@ -69,6 +112,8 @@ jobs:
 
   native:
     name: arm64 tests (${{ matrix.backend }} coverage)
+    needs: canary
+    if: github.event_name != 'push' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04-arm
     strategy:
       fail-fast: false
@@ -109,6 +154,8 @@ jobs:
 
   rust:
     name: arm64 tests (native Rust unit tests)
+    needs: canary
+    if: github.event_name != 'push' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v5
@@ -136,6 +183,8 @@ jobs:
   # system-linker and C tests again under GC stress.
   system-linker:
     name: arm64 tests (system-linked executables)
+    needs: canary
+    if: github.event_name != 'push' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04-arm
     env:
       LANG: C.utf8
@@ -173,6 +222,8 @@ jobs:
 
   golden:
     name: arm64 golden suites (shard ${{ matrix.shard }}/4)
+    needs: canary
+    if: github.event_name != 'push' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04-arm
     strategy:
       fail-fast: false
@@ -194,15 +245,25 @@ jobs:
         run: tclsh9.0 audit/golden/tools/check.tcl -shard ${{ matrix.shard }}/4 -jobs 2
 
   gc-stress:
-    name: arm64 tests (native GC-stress)
-    # As in tests.yml, not on pull requests (it is the slowest job); a manual
-    # run includes it, since that is how a branch gets its arm64 check.
-    if: github.event_name != 'pull_request'
+    name: arm64 tests (native GC-stress, ${{ matrix.backend }})
+    needs: canary
+    # As in tests.yml, not on pull requests or branch pushes (it is the
+    # slowest job); a manual run includes it, since that is how a branch
+    # gets its arm64 check.
+    # One job per Tcl backend: both passes in one job took 5 h 40 min on
+    # main (run 41787767204) and a branch's crossed GitHub's 6-hour job
+    # limit (run 41795374693, cancelled in the second pass's last files).
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-24.04-arm
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: [interp, compile]
     env:
       LANG: C.utf8
       LC_ALL: C.utf8
       BOTLISH_NATIVE_GC_STRESS: "1"
+      CORE_BACKEND: ${{ matrix.backend }}
     steps:
       - uses: actions/checkout@v5
 

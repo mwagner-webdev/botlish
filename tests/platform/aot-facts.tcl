@@ -12,11 +12,13 @@
 #
 #   object      its format, architecture and kind (`file`, and the header
 #               read here), its symbols (`nm -P`: every botlish_fn_N and
-#               botlish_entry_N defined, the runtime helpers undefined, the
-#               context area local, each with the object format's own
-#               decoration and nothing else), its relocations (`objdump -r`:
-#               the context area and a runtime helper reached through the
-#               GOT, no relocation of another format) and, on macOS, its
+#               botlish_entry_N defined, the runtime helpers undefined, no
+#               context area symbol -- the area is each Vm's own,
+#               PER-THREAD-RUNTIME-STATE-MILESTONE-1.md -- each with the
+#               object format's own decoration and nothing else), its
+#               relocations (`objdump -r`: a runtime helper reached through
+#               the GOT, none against a context area, no relocation of
+#               another format) and, on macOS, its
 #               LC_BUILD_VERSION (`otool -l`)
 #   executable  its format, architecture and kind; on macOS one
 #               architecture (`lipo -archs`), a valid signature (`codesign
@@ -39,7 +41,10 @@
 #               refusal (NATIVE UNSUPPORTED startup)
 #   standalone  the executable moved out of its build directory, its source
 #               deleted, run with an empty environment from another
-#               directory: its value, also under BOTLISH_NATIVE_GC_STRESS=1;
+#               directory: status 0 and nothing written (an executable
+#               prints no value of its own: PROGRAM-OUTPUT-MILESTONE-1.md),
+#               and its value, read through the driver protocol
+#               (BOTLISH_NATIVE_RESULT), also under BOTLISH_NATIVE_GC_STRESS=1;
 #               a coroutine program's value; a runtime error's status and
 #               standard error; a stack overflow of the thread's stack and of
 #               a coroutine's (exit status 1, exactly the NATIVE LIMIT STACK
@@ -96,26 +101,25 @@ foreach {option value} $argv {
 # What the host's tools must report, per host target: the object's and the
 # executable's {FORMAT ARCHITECTURE KIND} (from the header), the `file`
 # pattern of each, the symbol decoration (the object format's user label
-# prefix), and the relocation types of a GOT access to the context area and
-# to a runtime helper.
+# prefix), and the relocation types of a GOT access to a runtime helper.
 set expected [dict create \
     linux-x86_64 {
         object {elf x86_64 relocatable} objectFile {ELF 64-bit LSB relocatable, x86-64*}
         executable {elf x86_64 shared} executableFile {ELF 64-bit LSB pie executable, x86-64*}
-        prefix "" contextReloc {R_X86_64_REX_GOTPCRELX} helperReloc {R_X86_64_GOTPCREL R_X86_64_PLT32}
+        prefix "" helperReloc {R_X86_64_GOTPCREL R_X86_64_PLT32}
         foreignRelocs {ARM64_RELOC_* R_AARCH64_*}
     } \
     linux-aarch64 {
         object {elf aarch64 relocatable} objectFile {ELF 64-bit LSB relocatable, ARM aarch64*}
         executable {elf aarch64 shared} executableFile {ELF 64-bit LSB pie executable, ARM aarch64*}
-        prefix "" contextReloc {R_AARCH64_ADR_GOT_PAGE R_AARCH64_LD64_GOT_LO12_NC}
+        prefix ""
         helperReloc {R_AARCH64_ADR_GOT_PAGE R_AARCH64_LD64_GOT_LO12_NC}
         foreignRelocs {ARM64_RELOC_* R_X86_64_*}
     } \
     macos-aarch64 {
         object {macho arm64 object} objectFile {Mach-O 64-bit object arm64*}
         executable {macho arm64 execute} executableFile {Mach-O 64-bit executable arm64*}
-        prefix _ contextReloc {ARM64_RELOC_GOT_LOAD_PAGE21 ARM64_RELOC_GOT_LOAD_PAGEOFF12}
+        prefix _
         helperReloc {ARM64_RELOC_GOT_LOAD_PAGE21 ARM64_RELOC_GOT_LOAD_PAGEOFF12}
         foreignRelocs {R_X86_64_* R_AARCH64_*}
     } \
@@ -133,8 +137,8 @@ set facts [dict get $expected $host]
 set prefix [dict get $facts prefix]
 set macos [string match macos-* $host]
 
-# The program: a context (the object's one data symbol, botlish_context_area),
-# a recursion, String building and a List.
+# The program: a context (installed in each Vm's own area, never in a data
+# symbol of the object), a recursion, String building and a List.
 set program {import std::str
 
 type Small = Int in 0..1000
@@ -302,11 +306,54 @@ proc run {args} {
     }
 }
 
-# A run's {STATUS STDOUT STDERR} on one line.
+# A run's {STATUS STDOUT STDERR ?VALUE?} on one line.
 proc shown {outcome} {
-    lassign $outcome status stdout stderr
+    lassign $outcome status stdout stderr value
     set escape {apply {{text} {string map [list \n \\n] $text}}}
-    return "exit $status, stdout \"[{*}$escape $stdout]\", stderr \"[{*}$escape $stderr]\""
+    set text "exit $status, stdout \"[{*}$escape $stdout]\", stderr \"[{*}$escape $stderr]\""
+    if {[llength $outcome] > 3} { append text ", value $value" }
+    return $text
+}
+
+# The value a run of the command ARGS -- `env ...` starting an executable, as
+# the checks run one -- reports in the driver protocol (runtime/aot.rs:
+# BOTLISH_NATIVE_RESULT, added to env's assignments, names the file the
+# executable writes its result lines to): protocolOutcome's. An executable
+# prints no value of its own (PROGRAM-OUTPUT-MILESTONE-1.md): this is how a
+# check reads one.
+proc protocolValue {args} {
+    global work
+    if {[lindex $args 0] ne "env"} {
+        error "protocolValue starts the executable through env: $args"
+    }
+    set result [file join $work result.txt]
+    file delete $result
+    set at [expr {[lindex $args 1] eq "-i" ? 2 : 1}]
+    return [protocolOutcome [run {*}[linsert $args $at BOTLISH_NATIVE_RESULT=$result]] $result]
+}
+
+# The value the result lines in FILE report, after a protocol run whose
+# outcome (run's) is OUTCOME: shown as Botlish shows a value
+# (core::value::show), "error CODE MESSAGE" for the program's error, or the
+# run itself when it did not leave status 0, an empty standard output and
+# the file. FILE is removed.
+proc protocolOutcome {outcome file} {
+    if {[lrange $outcome 0 1] ne [list 0 ""] || ![file exists $file]} {
+        return "protocol run: [shown $outcome][expr {[file exists $file] ? "" : ", no result file"}]"
+    }
+    set lines [split [string trimright [readText $file] \n] \n]
+    file delete $file
+    if {[catch {native::Outcome $lines} value options]} {
+        return "error [dict get $options -errorcode] $value"
+    }
+    return [core::value::show $value 1]
+}
+
+# {STATUS STDOUT STDERR VALUE}: run's outcome of ARGS -- the executable's
+# ordinary run, which writes nothing of its own -- and the VALUE a second
+# run of ARGS reports in the driver protocol (protocolValue).
+proc valued {args} {
+    return [list {*}[run {*}$args] [protocolValue {*}$args]]
 }
 
 # A host tool's standard output (and error), or "" with the reason in
@@ -335,13 +382,18 @@ proc machoFlags {path} {
 
 # Links source TEXT (named NAME.bot) into runDir/NAME and runs it as
 # standalone runs it: an empty environment but ENVIRONMENT, another working
-# directory.
-proc standalone {name text environment} {
+# directory. With VALUED 1, valued's outcome: the run's and the value a
+# second run reports in the driver protocol.
+proc standalone {name text environment {valued 0}} {
     global runDir cwdDir
     set hir [surface::compile $text $name.bot -warnings off]
     set path [file join $runDir $name]
     native::executable $hir $path
-    return [run env -i PATH=/nonexistent {*}$environment /bin/sh -c {cd "$1" && exec "$2"} sh $cwdDir $path]
+    set command [list env -i PATH=/nonexistent {*}$environment /bin/sh -c {cd "$1" && exec "$2"} sh $cwdDir $path]
+    if {$valued} {
+        return [valued {*}$command]
+    }
+    return [run {*}$command]
 }
 
 # {FAILED MESSAGE COMMAND NAMED} of linking HIR into PATH while rustc prints
@@ -405,12 +457,12 @@ proc cCalls {} {
     set decls "import std::ffi::c\n\nextern c library \"botlish_aot_facts\"\n\nextern c fn labs(x: std::ffi::c::Long) -> std::ffi::c::Long\nextern c fn widen named \"bcfx_widen\"(c: std::ffi::c::SChar, s: std::ffi::c::UShort, l: std::ffi::c::Long) -> std::ffi::c::Long\n"
     set text "$decls\n\[labs(-42), widen(-1, 65535, 7)\]\n"
     set started [clock microseconds]
-    if {[catch {native::withLinkDirs [list $lib] {standalone c-call $text {}}} outcome options]} {
+    if {[catch {native::withLinkDirs [list $lib] {standalone c-call $text {} 1}} outcome options]} {
         check c-call-run 0 "the link failed: [lrange [dict get $options -errorcode] 0 1]" $outcome
         return
     }
     set ms [expr {([clock microseconds] - $started) / 1000}]
-    check c-call-run [expr {$outcome eq [list 0 "\[42, -34458\]\n" ""]}] "[shown $outcome] ($ms ms, link included)"
+    check c-call-run [expr {$outcome eq [list 0 "" "" "\[42, -34458\]"]}] "[shown $outcome] ($ms ms, link and both runs included)"
 
     set exe [file join $runDir c-call]
     if {$macos} {
@@ -489,11 +541,11 @@ proc checks {} {
     set decorated [lsearch -all -inline -regexp [concat $defined $undefined $local] {botlish_|rt_}]
     set misdecorated [lsearch -all -inline -not -regexp $decorated "^${prefix}(botlish_|rt_)"]
     set helpers [lsearch -all -inline -regexp $undefined "^${prefix}rt_"]
-    set context [lsearch -all -inline -exact $local ${prefix}botlish_context_area]
+    set context [lsearch -all -inline -glob [concat $defined $undefined $local] *context_area*]
     check object-symbols [expr {$::toolError eq "" && [llength $wanted] >= 8 && [llength $wanted] % 2 == 0
-            && [llength $helpers] > 0 && [llength $context] == 1 && $misdecorated eq ""
+            && [llength $helpers] > 0 && [llength $context] == 0 && $misdecorated eq ""
             && [lsearch -regexp $defined "^${prefix}botlish_fn_0\$"] >= 0}] \
-        "[expr {[llength $wanted] / 2}] functions defined (${prefix}botlish_fn_N and ${prefix}botlish_entry_N), [llength $helpers] runtime helpers undefined (${prefix}rt_*), context area local: [expr {$context ne {}}], misdecorated: [expr {$misdecorated eq {} ? "none" : $misdecorated}]" \
+        "[expr {[llength $wanted] / 2}] functions defined (${prefix}botlish_fn_N and ${prefix}botlish_entry_N), [llength $helpers] runtime helpers undefined (${prefix}rt_*), context area symbols: [llength $context], misdecorated: [expr {$misdecorated eq {} ? "none" : $misdecorated}]" \
         "$::toolError$symbols"
 
     set relocations [tool objdump -r $object]
@@ -507,17 +559,17 @@ proc checks {} {
     set contextTypes {}
     set helperTypes {}
     dict for {type values} $types {
-        if {"${prefix}botlish_context_area" in $values} { lappend contextTypes $type }
+        if {[lsearch -glob $values *context_area*] >= 0} { lappend contextTypes $type }
         if {[lsearch -glob $values "${prefix}rt_*"] >= 0} { lappend helperTypes $type }
     }
     set foreign {}
     foreach pattern [dict get $facts foreignRelocs] {
         lappend foreign {*}[lsearch -all -inline -glob [dict keys $types] $pattern]
     }
-    set contextOk [expr {[llength [lmap t [dict get $facts contextReloc] {expr {$t in $contextTypes ? $t : [continue]}}]] > 0}]
+    set contextOk [expr {$contextTypes eq ""}]
     set helperOk [expr {[llength [lmap t [dict get $facts helperReloc] {expr {$t in $helperTypes ? $t : [continue]}}]] > 0}]
     check object-relocations [expr {$::toolError eq "" && $contextOk && $helperOk && $foreign eq ""}] \
-        "types [lsort [dict keys $types]]; context area: [lsort $contextTypes]; helpers: [lsort $helperTypes]" \
+        "types [lsort [dict keys $types]]; against a context area: [expr {$contextTypes eq {} ? "none" : [lsort $contextTypes]}]; helpers: [lsort $helperTypes]" \
         "$::toolError$relocations"
 
     if {$macos} {
@@ -609,8 +661,8 @@ proc checks {} {
         check main-thread-lc-main [expr {$::toolError eq "" && $lcMain eq {worker 0 main-thread 536870912}}] "LC_MAIN stacksize: $lcMain" $::toolError
         set verified [tool codesign -v $mainExecutable]
         check main-thread-signature [expr {$::toolError eq ""}] "codesign -v: [expr {$::toolError eq "" ? "valid" : "invalid"}]" "$::toolError$verified"
-        set outcome [run env -i PATH=/nonexistent $mainExecutable]
-        check main-thread-run [expr {$outcome eq [list 0 "$programValue\n" ""]}] [shown $outcome]
+        set outcome [valued env -i PATH=/nonexistent $mainExecutable]
+        check main-thread-run [expr {$outcome eq [list 0 "" "" $programValue]}] [shown $outcome]
     }
 
     # The platform linker's command line, as rustc runs it for this link
@@ -632,20 +684,21 @@ proc checks {} {
     set started [clock microseconds]
     set outcome [run env -i PATH=/nonexistent /bin/sh -c {cd "$1" && exec "$2"} sh $cwdDir $moved]
     set runMs [expr {([clock microseconds] - $started) / 1000}]
-    check standalone-run [expr {$outcome eq [list 0 "$programValue\n" ""]}] "[shown $outcome] ($runMs ms)"
-    set outcome [run env -i PATH=/nonexistent BOTLISH_NATIVE_GC_STRESS=1 /bin/sh -c {cd "$1" && exec "$2"} sh $cwdDir $moved]
-    check standalone-gc-stress [expr {$outcome eq [list 0 "$programValue\n" ""]}] [shown $outcome]
+    lappend outcome [protocolValue env -i PATH=/nonexistent /bin/sh -c {cd "$1" && exec "$2"} sh $cwdDir $moved]
+    check standalone-run [expr {$outcome eq [list 0 "" "" $programValue]}] "[shown $outcome] ($runMs ms)"
+    set outcome [valued env -i PATH=/nonexistent BOTLISH_NATIVE_GC_STRESS=1 /bin/sh -c {cd "$1" && exec "$2"} sh $cwdDir $moved]
+    check standalone-gc-stress [expr {$outcome eq [list 0 "" "" $programValue]}] [shown $outcome]
 
     # The other programs, each linked and run likewise.
-    set outcome [standalone coroutine $coroutineProgram {}]
-    check standalone-coroutine [expr {$outcome eq [list 0 "\[10, 7\]\n" ""]}] [shown $outcome]
-    set outcome [run env -i BOTLISH_NATIVE_GC_STRESS=1 [file join $runDir coroutine]]
-    check standalone-coroutine-gc [expr {$outcome eq [list 0 "\[10, 7\]\n" ""]}] [shown $outcome]
+    set outcome [standalone coroutine $coroutineProgram {} 1]
+    check standalone-coroutine [expr {$outcome eq [list 0 "" "" "\[10, 7\]"]}] [shown $outcome]
+    set outcome [valued env -i BOTLISH_NATIVE_GC_STRESS=1 [file join $runDir coroutine]]
+    check standalone-coroutine-gc [expr {$outcome eq [list 0 "" "" "\[10, 7\]"]}] [shown $outcome]
     set outcome [standalone error $errorProgram {}]
     check standalone-error [expr {[lindex $outcome 0] eq "1" && [lindex $outcome 1] eq ""
         && [string match "*(CORE SEMANTIC RANGE)\n" [lindex $outcome 2]]}] [shown $outcome]
-    set outcome [standalone down [string map {DEPTH 100000} $downProgram] {}]
-    check standalone-deep-finite [expr {$outcome eq [list 0 "100000\n" ""]}] [shown $outcome]
+    set outcome [standalone down [string map {DEPTH 100000} $downProgram] {} 1]
+    check standalone-deep-finite [expr {$outcome eq [list 0 "" "" 100000]}] [shown $outcome]
     set started [clock microseconds]
     set outcome [standalone overflow [string map {DEPTH 100000000} $downProgram] {BOTLISH_NATIVE_STACK_BYTES=16777216}]
     set overflowMs [expr {([clock microseconds] - $started) / 1000}]
@@ -693,8 +746,9 @@ proc checks {} {
         lappend walls [expr {([clock microseconds] - $started) / 1000.0}]
     }
     set median [lindex [lsort -real $walls] 2]
-    check performance-startup [expr {$status eq "0" && $stdout eq "42\n"}] \
-        [format "a trivial executable's whole process: median %.1f ms of five (%s)" $median [join [lmap w $walls {format %.1f $w}] {, }]]
+    set value [protocolValue env [file join $runDir trivial]]
+    check performance-startup [expr {$status eq "0" && $stdout eq "" && $value eq "42"}] \
+        [format "a trivial executable's whole process: median %.1f ms of five (%s); its value %s" $median [join [lmap w $walls {format %.1f $w}] {, }] $value]
 }
 
 # The checks on Windows (this file's header). The system directory, read
@@ -732,10 +786,10 @@ proc windowsChecks {} {
     set functions [lsearch -all -inline -regexp $defined {^botlish_(fn|entry)_[0-9]+$}]
     set helpers [lsearch -all -inline -regexp $undefined {^rt_}]
     set misdecorated [lsearch -all -inline -regexp [concat $defined $undefined] {^_+(botlish|rt)_}]
-    set context [lsearch -all -inline -exact [lmap s [dict get $coff symbols] {lindex $s 0}] botlish_context_area]
+    set context [lsearch -all -inline -glob [lmap s [dict get $coff symbols] {lindex $s 0}] *context_area*]
     check object-symbols [expr {[llength $functions] >= 8 && [llength $functions] % 2 == 0 && [llength $helpers] > 0
-            && "botlish_fn_0" in $defined && $misdecorated eq "" && [llength $context] == 1}] \
-        "[expr {[llength $functions] / 2}] functions defined (botlish_fn_N, botlish_entry_N), [llength $helpers] runtime helpers undefined (rt_*), context area: [llength $context], decorated: [expr {$misdecorated eq {} ? "none" : $misdecorated}]" \
+            && "botlish_fn_0" in $defined && $misdecorated eq "" && [llength $context] == 0}] \
+        "[expr {[llength $functions] / 2}] functions defined (botlish_fn_N, botlish_entry_N), [llength $helpers] runtime helpers undefined (rt_*), context area symbols: [llength $context], decorated: [expr {$misdecorated eq {} ? "none" : $misdecorated}]" \
         [join [dict get $coff symbols] \n]
     set types [lsort -unique [lmap r [dict get $coff relocations] {lindex $r 1}]]
     set foreign [lmap t $types {expr {$t in [dict get $facts relocTypes] ? [continue] : $t}}]
@@ -791,27 +845,31 @@ proc windowsChecks {} {
     set started [clock microseconds]
     set outcome [windowsRun $cwdDir $moved {}]
     set runMs [expr {([clock microseconds] - $started) / 1000}]
-    check standalone-run [expr {$outcome eq [list 0 "$programValue\n" ""]}] "[shown $outcome] ($runMs ms)"
-    set outcome [windowsRun $cwdDir $moved {BOTLISH_NATIVE_GC_STRESS 1}]
-    check standalone-gc-stress [expr {$outcome eq [list 0 "$programValue\n" ""]}] [shown $outcome]
+    lappend outcome [windowsValue $cwdDir $moved {}]
+    check standalone-run [expr {$outcome eq [list 0 "" "" $programValue]}] "[shown $outcome] ($runMs ms)"
+    set outcome [windowsValued $cwdDir $moved {BOTLISH_NATIVE_GC_STRESS 1}]
+    check standalone-gc-stress [expr {$outcome eq [list 0 "" "" $programValue]}] [shown $outcome]
     # The linked executable's unwind information as Windows' own unwinder
     # reads it (runtime::framewalk's BOTLISH_NATIVE_UNWIND_CHECK): every
     # function's .pdata entry spans exactly its code, and under GC stress
     # every Botlish frame of every collection unwinds by it exactly as by its
     # frame record, restoring callee-saved registers from inside the frame.
-    set outcome [windowsRun $cwdDir $moved {BOTLISH_NATIVE_GC_STRESS 1 BOTLISH_NATIVE_UNWIND_CHECK 1}]
+    set outcome [windowsValued $cwdDir $moved {BOTLISH_NATIVE_GC_STRESS 1 BOTLISH_NATIVE_UNWIND_CHECK 1}]
     set checked [regexp {^native unwind check: (\d+) functions, (\d+) Botlish frames, every one as Windows unwinds it; \d+ walks unwound \d+ other frames\n$} [lindex $outcome 2] - functionsChecked framesChecked]
-    check standalone-unwind-check [expr {[lrange $outcome 0 1] eq [list 0 "$programValue\n"] && $checked
+    check standalone-unwind-check [expr {[lrange $outcome 0 1] eq [list 0 ""] && [lindex $outcome 3] eq $programValue && $checked
             && $functionsChecked == [llength $functions] && $framesChecked > 0}] [shown $outcome]
-    set standalone {apply {{runDir cwdDir name text environment} {
+    set standalone {apply {{runDir cwdDir name text environment {valued 0}} {
         set path [native::executable [surface::compile $text $name.bot -warnings off] [file join $runDir $name]]
+        if {$valued} {
+            return [windowsValued $cwdDir $path $environment]
+        }
         return [windowsRun $cwdDir $path $environment]
     }}}
     set outcome [{*}$standalone $runDir $cwdDir error $errorProgram {}]
     check standalone-error [expr {[lindex $outcome 0] eq "1" && [lindex $outcome 1] eq ""
         && [string match "*(CORE SEMANTIC RANGE)\n" [lindex $outcome 2]]}] [shown $outcome]
-    set outcome [{*}$standalone $runDir $cwdDir down [string map {DEPTH 100000} $downProgram] {}]
-    check standalone-deep-finite [expr {$outcome eq [list 0 "100000\n" ""]}] [shown $outcome]
+    set outcome [{*}$standalone $runDir $cwdDir down [string map {DEPTH 100000} $downProgram] {} 1]
+    check standalone-deep-finite [expr {$outcome eq [list 0 "" "" 100000]}] [shown $outcome]
     # Botlish recursion exhausting the thread's stack, on the default 1 GiB
     # stack and on a 16 MiB one: the stack guard's own line on standard error
     # and exit status 1, as on every host (WINDOWS-X86-64-MILESTONE-4.md).
@@ -839,10 +897,10 @@ proc windowsChecks {} {
     # guard's line for the coroutine stack's exhaustion. Until then a
     # coroutine was refused (NATIVE UNSUPPORTED, "native coroutines need
     # stack switching").
-    set outcome [{*}$standalone $runDir $cwdDir coroutine $coroutineProgram {}]
-    check standalone-coroutine [expr {$outcome eq [list 0 "\[10, 7\]\n" ""]}] [shown $outcome]
-    set outcome [windowsRun $cwdDir [file join $runDir coroutine.exe] {BOTLISH_NATIVE_GC_STRESS 1}]
-    check standalone-coroutine-gc [expr {$outcome eq [list 0 "\[10, 7\]\n" ""]}] [shown $outcome]
+    set outcome [{*}$standalone $runDir $cwdDir coroutine $coroutineProgram {} 1]
+    check standalone-coroutine [expr {$outcome eq [list 0 "" "" "\[10, 7\]"]}] [shown $outcome]
+    set outcome [windowsValued $cwdDir [file join $runDir coroutine.exe] {BOTLISH_NATIVE_GC_STRESS 1}]
+    check standalone-coroutine-gc [expr {$outcome eq [list 0 "" "" "\[10, 7\]"]}] [shown $outcome]
     set ::env(BOTLISH_NATIVE_COROUTINE_FUSION) 0
     try {
         set general [native::executable [surface::compile $coroutineProgram coroutine-general.bot -warnings off] [file join $runDir coroutine-general]]
@@ -850,11 +908,11 @@ proc windowsChecks {} {
     } finally {
         unset ::env(BOTLISH_NATIVE_COROUTINE_FUSION)
     }
-    set outcome [windowsRun $cwdDir $general {}]
-    check standalone-coroutine-general [expr {$outcome eq [list 0 "\[10, 7\]\n" ""]}] "fusion off: [shown $outcome]"
-    set outcome [windowsRun $cwdDir $general {BOTLISH_NATIVE_GC_STRESS 1 BOTLISH_NATIVE_UNWIND_CHECK 1}]
+    set outcome [windowsValued $cwdDir $general {}]
+    check standalone-coroutine-general [expr {$outcome eq [list 0 "" "" "\[10, 7\]"]}] "fusion off: [shown $outcome]"
+    set outcome [windowsValued $cwdDir $general {BOTLISH_NATIVE_GC_STRESS 1 BOTLISH_NATIVE_UNWIND_CHECK 1}]
     set checked [regexp {^native unwind check: (\d+) functions, (\d+) Botlish frames, every one as Windows unwinds it; \d+ walks unwound \d+ other frames\n$} [lindex $outcome 2] - - framesChecked]
-    check standalone-coroutine-unwind-check [expr {[lrange $outcome 0 1] eq [list 0 "\[10, 7\]\n"] && $checked && $framesChecked > 0}] \
+    check standalone-coroutine-unwind-check [expr {[lrange $outcome 0 1] eq [list 0 ""] && [lindex $outcome 3] eq "\[10, 7\]" && $checked && $framesChecked > 0}] \
         "fusion off, GC stress, unwind check: [shown $outcome]"
     set outcome [windowsRun $cwdDir $overflowing {}]
     check standalone-co-overflow [expr {$outcome eq [list 1 "" "$overflowLine\n"]}] "fusion off: [shown $outcome]"
@@ -882,8 +940,9 @@ proc windowsChecks {} {
         lappend walls [expr {([clock microseconds] - $started) / 1000.0}]
     }
     set median [lindex [lsort -real $walls] 2]
-    check performance-startup [expr {$status eq "0" && $stdout eq "42\n"}] \
-        [format "a trivial executable's whole process: median %.1f ms of five (%s)" $median [join [lmap w $walls {format %.1f $w}] {, }]]
+    set value [windowsValue $cwdDir $trivial {}]
+    check performance-startup [expr {$status eq "0" && $stdout eq "" && $value eq "42"}] \
+        [format "a trivial executable's whole process: median %.1f ms of five (%s); its value %s" $median [join [lmap w $walls {format %.1f $w}] {, }] $value]
 }
 
 # C calls on Windows (WINDOWS-X86-64-MILESTONE-2.md, "MSVC linking" and "The
@@ -929,8 +988,8 @@ proc windowsCCalls {runDir cwdDir} {
         return
     }
     set ms [expr {([clock microseconds] - $started) / 1000}]
-    set outcome [windowsRun $cwdDir $exe {}]
-    check c-call-run [expr {$outcome eq [list 0 "\[42, -34458\]\n" ""]}] "[shown $outcome] ($ms ms, link included)"
+    set outcome [windowsValued $cwdDir $exe {}]
+    check c-call-run [expr {$outcome eq [list 0 "" "" "\[42, -34458\]"]}] "[shown $outcome] ($ms ms, link included)"
     set pe [peFacts $exe]
     set from [windowsImporter $pe labs]
     set crt [windowsRuntimeDlls $pe]
@@ -1013,10 +1072,10 @@ proc windowsCCalls {runDir cwdDir} {
             check $check 0 "[lrange [dict get $options -errorcode] 0 1]: [lindex [split $exe \n] 0]" $exe
             continue
         }
-        set outcome [windowsRun $cwdDir $exe [list PATH "[file nativename $dir];[file nativename $::systemDir]"]]
+        set outcome [windowsValued $cwdDir $exe [list PATH "[file nativename $dir];[file nativename $::systemDir]"]]
         set crtDlls [windowsRuntimeDlls [peFacts $exe]]
         set summary "[shown $outcome]; the executable's C runtime DLLs: [expr {$crtDlls eq "" ? "none" : $crtDlls}]"
-        set ok [expr {$outcome eq [list 0 "1238\n" ""] && $crtDlls eq ""}]
+        set ok [expr {$outcome eq [list 0 "" "" 1238] && $crtDlls eq ""}]
         if {$kind eq "dll"} {
             set imported [expr {[string tolower $name.dll] in [lmap d [dict get [peFacts $exe] imports] {string tolower $d}]}]
             set own [windowsRuntimeDlls [peFacts $built]]
@@ -1069,6 +1128,23 @@ proc windowsLinkCommand {hir path} {
     }
     set command [expr {[file exists $printed] ? [string trim [readText $printed]] : ""}]
     return [list $relinked $message $command]
+}
+
+# The value a run of the executable PATH as windowsRun runs it reports in
+# the driver protocol (BOTLISH_NATIVE_RESULT added to ENVIRONMENT):
+# protocolOutcome's, protocolValue's on Windows.
+proc windowsValue {cwd path environment} {
+    global work
+    set result [file join $work result.txt]
+    file delete $result
+    return [protocolOutcome [windowsRun $cwd $path [list {*}$environment BOTLISH_NATIVE_RESULT $result]] $result]
+}
+
+# {STATUS STDOUT STDERR VALUE}: windowsRun's outcome -- the executable's
+# ordinary run, which writes nothing of its own -- and windowsValue's VALUE
+# of a second run: valued's on Windows.
+proc windowsValued {cwd path environment} {
+    return [list {*}[windowsRun $cwd $path $environment] [windowsValue $cwd $path $environment]]
 }
 
 # Runs the executable PATH in the directory CWD with only the system

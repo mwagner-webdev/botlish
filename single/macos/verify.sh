@@ -105,8 +105,11 @@ if (( tools )); then
       esac
     done <<<"$(loads "$c/$path")"
   done
+  # (awk reads to the end, printing the first minos: an awk that exited there
+  # would leave otool writing into a closed pipe, which pipefail makes this
+  # assignment's failure.)
   minos=$(for path in MacOS/botlish MacOS/botlish-native "Frameworks/Tcl.framework/Versions/$v/Tcl"; do
-    otool -l "$c/$path" | awk '/LC_BUILD_VERSION/{b=1} b && /minos/{print $2; exit}'
+    otool -l "$c/$path" | awk '/LC_BUILD_VERSION/{b=1} b && /minos/ && !m {print $2; m=1}'
   done | sort -u | tr '\n' ' ')
   echo "   dependencies: ok (arm64; deployment target $minos)"
 else
@@ -138,7 +141,7 @@ for entry in main.tcl botlish/main.tcl botlish/BUILD botlish/LICENSE botlish/cor
     botlish/compilerpedia/compilerpedia.tcl native-bin/ID; do
   grep -qx "$entry" <<<"$entries" || fail archive "botlish.zip has no $entry"
 done
-if grep -E '^(tcl_library/|native-bin/(botlish-native|botlish-aot-stub|libbotlish_runtime\.a))' <<<"$entries" | head -3 | grep -q .; then
+if grep -qE '^(tcl_library/|native-bin/(botlish-native|botlish-aot-stub|libbotlish_runtime\.a))' <<<"$entries"; then
   fail archive "botlish.zip holds a Tcl library or a native file: $(grep -E '^(tcl_library/|native-bin/[^I])' <<<"$entries" | head -3 | tr '\n' ' ')"
 fi
 crc() { printf '%08x-%s' "$(cksum -o 3 <"$1" | cut -d' ' -f1)" "$(wc -c <"$1" | tr -d ' ')"; }

@@ -1,0 +1,403 @@
+
+### the system
+$ bash -c grep PRETTY_NAME /etc/os-release; uname -m; id -un; ldd --version | head -1
+PRETTY_NAME="Ubuntu 24.04.5 LTS"
+x86_64
+dev
+ldd (Ubuntu GLIBC 2.39-0ubuntu8.9) 2.39
+[exit 0]
+
+### no network
+$ bash -c cat /proc/net/route | wc -l; ls /sys/class/net
+1
+lo
+[exit 0]
+
+### development tools that must be absent
+$ bash -c for t in tclsh tclsh9.0 cargo rustc cmake ninja git curl wget clang; do printf "%s: %s\n" $t "$(command -v $t || echo absent)"; done
+tclsh: absent
+tclsh9.0: absent
+cargo: absent
+rustc: absent
+cmake: absent
+ninja: absent
+git: absent
+curl: absent
+wget: absent
+clang: absent
+[exit 0]
+
+### no Botlish or Raven checkout anywhere
+$ bash -c find / -xdev \( -name main.tcl -o -name tests -path "*botlish*" -o -name "c-bindgen.tcl" -o -name "raven-package.tcl" -o -name "package-repository.tcl" -o -name Raven.h -o -name "raven_core.h" -o -name CMakeLists.txt -path "*aven*" \) -print 2>/dev/null | head; ls /home; echo "LD_LIBRARY_PATH=${LD_LIBRARY_PATH:-unset}"
+dev
+ubuntu
+LD_LIBRARY_PATH=unset
+[exit 0]
+
+### the operating system's graphics facilities
+$ bash -c ls /usr/lib/x86_64-linux-gnu/libX11.so.6 /usr/lib/x86_64-linux-gnu/libvulkan.so.1; ls /usr/share/vulkan/icd.d; command -v Xvfb cc
+/usr/lib/x86_64-linux-gnu/libX11.so.6
+/usr/lib/x86_64-linux-gnu/libvulkan.so.1
+asahi_icd.json
+gfxstream_vk_icd.json
+intel_hasvk_icd.json
+intel_icd.json
+lvp_icd.json
+nouveau_icd.json
+radeon_icd.json
+virtio_icd.json
+/usr/bin/Xvfb
+/usr/bin/cc
+[exit 0]
+
+### the two inputs
+$ bash -c ls -l /home/dev/inputs/botlish /home/dev/inputs/raven-0.3.2.botpkg; sha256sum /home/dev/inputs/botlish /home/dev/inputs/raven-0.3.2.botpkg
+-rwxr-xr-x 1 dev dev 14570230 Nov  2 21:25 /home/dev/inputs/botlish
+-rw-r--r-- 1 dev dev  1749196 Nov  2 21:25 /home/dev/inputs/raven-0.3.2.botpkg
+139183044abb143c32b2dfce7493b14a9992220ed8258bc729c712061a423396  /home/dev/inputs/botlish
+9d94f18733ce2e0b8019abaa2b7810f5e2351699469ca27b2b7af7e38af6007b  /home/dev/inputs/raven-0.3.2.botpkg
+[exit 0]
+
+### the compiler
+$ /home/dev/inputs/botlish -version
+Botlish compiler (no release version; this is a development build)
+source revision: bb99687 (modified), packaged
+front end: da2b7b7bdac0cc6a-4989935
+Tcl: 9.0.1
+native backend: packaged (83a793d7-10675768-00ef3186-1384048-a973ac76-16625282)
+invocation: botlish
+[exit 0]
+
+### install the package from the artifact
+$ /home/dev/inputs/botlish add /home/dev/inputs/raven-0.3.2.botpkg
+raven 0.3.2 (sha256 9d94f18733ce): installed
+view linux-x86_64: derived (41 files, 3 native libraries)
+added raven (request "0.3", lock 0.3.2)
+[exit 0]
+
+### what was written
+$ bash -c cat botlish.json; find .bot_modules -maxdepth 2 | sort | head -20; find .bot_modules -name "*.o" -o -name "*.c" -newer botlish.json | grep -v raven_bridge.c | head
+{
+  "schema": 1,
+  "dependencies": {
+    "raven": "0.3"
+  },
+  "lock": {
+    "raven": "0.3.2"
+  },
+  "sources": {
+    "raven": {
+      "archive": "../inputs/raven-0.3.2.botpkg",
+      "sha256": "9d94f18733ce2e0b8019abaa2b7810f5e2351699469ca27b2b7af7e38af6007b"
+    }
+  }
+}
+.bot_modules
+.bot_modules/.botlish
+.bot_modules/.botlish/state.json
+.bot_modules/.targets
+.bot_modules/.targets/linux-x86_64
+.bot_modules/raven
+.bot_modules/raven/GUIDE.md
+.bot_modules/raven/README.md
+.bot_modules/raven/botlish.json
+.bot_modules/raven/examples
+.bot_modules/raven/licenses
+.bot_modules/raven/native
+.bot_modules/raven/raven.bot
+.bot_modules/raven/targets
+[exit 0]
+
+### verify the installation
+$ /home/dev/inputs/botlish verify
+note: target views: linux-x86_64 (verify -target T verifies one's native dependencies again)
+verify: 1 package instance(s) in /home/dev/app: as installed
+(integrity only: installed bytes against local artifacts and the installation record; no artifact carries a publisher signature to authenticate)
+[exit 0]
+
+### the native plan
+$ /home/dev/inputs/botlish native plan
+native plan for linux-x86_64 (this host), project /home/dev/app
+  library raven_bridge: bundled static (instance raven)
+    an ar archive of 1 ELF x86-64 object; bundled file, sha256 e8ae88a48c16
+    /home/dev/app/.bot_modules/.targets/linux-x86_64/raven/native/libraven_bridge.a
+  library raven: bundled shared (instance raven)
+    ELF x86-64 shared object; bundled file, sha256 15493f54f772
+    /home/dev/app/.bot_modules/.targets/linux-x86_64/raven/native/libraven.so.0
+    loads as libraven.so.0, needs libm.so.6, libX11.so.6, libc.so.6, ld-linux-x86-64.so.2
+    requires GLIBC_2.38 or newer on the target system
+  library X11: system shared (instance raven)
+    ELF x86-64 shared object; dpkg package libx11-6:amd64, version 2:1.8.7-1ubuntu0.1
+    /usr/lib/x86_64-linux-gnu/libX11.so.6
+    loads as libX11.so.6
+  run time (opened by the program, never linked or loaded by the loader; installing never requires them):
+    library vulkan (libvulkan.so.1): needed for "desktop" (instance raven, opened by raven)
+      the Vulkan loader, opened by Raven's renderer when a program starts raven::desktop(); a headless program never opens it
+      this host: /usr/lib/x86_64-linux-gnu/libvulkan.so.1 (dpkg package libvulkan1:amd64, version 1.3.275.0-1build1) -- a candidate; whether it works is known only when the program uses it
+    facility vulkan-driver: needed for "desktop" (instance raven, opened by raven)
+      a Vulkan driver (a GPU's, or Mesa's lavapipe) the loader finds, able to present to an X11 window: no file a package can name
+      not a file: the package manager cannot verify it
+    facility x11-display: needed for "desktop" (instance raven)
+      an X11 display (DISPLAY): an X server or Xvfb, for raven::desktop() windows
+      not a file: the package manager cannot verify it
+    library x11-xcb (libX11-xcb.so.1): optional, used when present (instance raven, opened by raven)
+      opened by the renderer only for a Vulkan driver that presents through XCB alone
+      this host: /usr/lib/x86_64-linux-gnu/libX11-xcb.so.1 (dpkg package libx11-xcb1:amd64, version 2:1.8.7-1ubuntu0.1) -- a candidate; whether it works is known only when the program uses it
+    library dbus (libdbus-1.so.3): needed for "accessibility" (instance raven, opened by raven)
+      D-Bus, opened by Raven's AT-SPI accessibility bridge when a program enables accessibility
+      this host: none (system library dbus (libdbus-1.so.3 or libdbus.so) is not installed in linux-x86_64's system library directories (/usr/lib/x86_64-linux-gnu, /lib/x86_64-linux-gnu, /usr/lib, /lib, /usr/lib64, /usr/local/lib, /usr/local/lib/x86_64-linux-gnu)): programs that use it fail when they do, and the others run
+link: the compiler links these from the target package tree (.bot_modules/.targets/linux-x86_64, its .lib): no -L is needed for bundled libraries
+deploy: linux-x86_64's loader must find libraven.so.0 at run time:
+  botlish native deploy -target linux-x86_64 -out DIR    places them in DIR/lib
+  and link the executable with -runtime-path '$ORIGIN/lib' (the compiler's option), so it finds them wherever DIR is moved
+  (a native backend's own run finds them in the target package tree without either)
+[exit 0]
+
+### an unsupported target is refused
+$ /home/dev/inputs/botlish install -target macos-aarch64
+error: the project -> raven 0.3.2: raven 0.3.2 supports linux-aarch64, linux-x86_64, not macos-aarch64: its package has no bindings or native files for macos-aarch64 (the package's own metadata says so; nothing is assumed portable) (PM UNSUPPORTED)
+[exit 1]
+
+### the other Linux target's view (its binding and AArch64 libraries, from the same artifact)
+$ /home/dev/inputs/botlish install -target linux-aarch64
+raven 0.3.2: unchanged
+view linux-aarch64: derived (41 files, 3 native libraries)
+note: linux-aarch64: X11: a system library of linux-aarch64, not verified (this host is linux-x86_64): the target system must provide it
+view linux-x86_64: unchanged
+[exit 0]
+
+### its native plan (system libX11 of another target: unverified)
+$ /home/dev/inputs/botlish native plan -target linux-aarch64
+native plan for linux-aarch64 (not this host: system libraries unverified), project /home/dev/app
+  library raven_bridge: bundled static (instance raven)
+    an ar archive of 1 ELF AArch64 object; bundled file, sha256 b3b6d5d296b0
+    /home/dev/app/.bot_modules/.targets/linux-aarch64/raven/native/libraven_bridge.a
+  library raven: bundled shared (instance raven)
+    ELF AArch64 shared object; bundled file, sha256 e566d5ee5460
+    /home/dev/app/.bot_modules/.targets/linux-aarch64/raven/native/libraven.so.0
+    loads as libraven.so.0, needs libm.so.6, libX11.so.6, libc.so.6, ld-linux-aarch64.so.1
+    requires GLIBC_2.38 or newer on the target system
+  library X11: system shared (instance raven)
+    unverified on this host: linux-aarch64's system must provide it
+    loads as libX11.so.6
+  run time (opened by the program, never linked or loaded by the loader; installing never requires them):
+    library vulkan (libvulkan.so.1): needed for "desktop" (instance raven, opened by raven)
+      the Vulkan loader, opened by Raven's renderer when a program starts raven::desktop(); a headless program never opens it
+      unverified on this host: linux-aarch64's system must provide it where it is needed
+    facility vulkan-driver: needed for "desktop" (instance raven, opened by raven)
+      a Vulkan driver (a GPU's, or Mesa's lavapipe) the loader finds, able to present to an X11 window: no file a package can name
+      not a file: the package manager cannot verify it
+    facility x11-display: needed for "desktop" (instance raven)
+      an X11 display (DISPLAY): an X server or Xvfb, for raven::desktop() windows
+      not a file: the package manager cannot verify it
+    library x11-xcb (libX11-xcb.so.1): optional, used when present (instance raven, opened by raven)
+      opened by the renderer only for a Vulkan driver that presents through XCB alone
+      unverified on this host: linux-aarch64's system must provide it where it is needed
+    library dbus (libdbus-1.so.3): needed for "accessibility" (instance raven, opened by raven)
+      D-Bus, opened by Raven's AT-SPI accessibility bridge when a program enables accessibility
+      unverified on this host: linux-aarch64's system must provide it where it is needed
+note: X11: a system library of linux-aarch64, not verified (this host is linux-x86_64): the target system must provide it
+link: the compiler links these from the target package tree (.bot_modules/.targets/linux-aarch64, its .lib): no -L is needed for bundled libraries
+deploy: linux-aarch64's loader must find libraven.so.0 at run time:
+  botlish native deploy -target linux-aarch64 -out DIR    places them in DIR/lib
+  and link the executable with -runtime-path '$ORIGIN/lib' (the compiler's option), so it finds them wherever DIR is moved
+  (a native backend's own run finds them in the target package tree without either)
+[exit 0]
+
+### drop it again
+$ /home/dev/inputs/botlish install -drop-target linux-aarch64
+raven 0.3.2: unchanged
+view linux-x86_64: unchanged
+view linux-aarch64: removed
+[exit 0]
+
+### the example's headless test (no DISPLAY)
+$ env -u DISPLAY /home/dev/inputs/botlish -warnings error -backend cranelift test.bot
+== test.bot (cranelift)
+   value: ["2", "2 clicks", "0", "0 clicks"]
+[exit 0]
+
+### the same on cranelift-generic
+$ env -u DISPLAY /home/dev/inputs/botlish -warnings error -backend cranelift-generic test.bot
+== test.bot (cranelift-generic)
+   value: ["2", "2 clicks", "0", "0 clicks"]
+[exit 0]
+
+### the desktop entry compiles
+$ /home/dev/inputs/botlish -check -warnings error main.bot
+== main.bot (check)
+   ok
+[exit 0]
+
+### the Tcl backends refuse a C call
+$ /home/dev/inputs/botlish -backend interp test.bot
+== test.bot (interp)
+   error: raven::botlish_raven_bridge_abi is a C function (extern c fn): calling it runs only on the native backends (cranelift, cranelift-generic, a native executable), which link and call the C library; the Tcl backends have no machine to call it on (CORE SEMANTIC NATIVE-ONLY)
+   help: botlish -help error.native-only
+[exit 1]
+
+### desktop with no display
+$ env -u DISPLAY /home/dev/inputs/botlish -backend cranelift window.bot
+== window.bot (cranelift)
+   value: "RavenFailed Rinit_ex: X11: cannot open the display (is DISPLAY set?); Rinit: cannot initialize the X11 window system"
+[exit 0]
+
+### a display, but no Vulkan driver (an empty driver list)
+$ env DISPLAY=:0 VK_ICD_FILENAMES=/nonexistent.json /home/dev/inputs/botlish -backend cranelift window.bot
+== window.bot (cranelift)
+   value: "RavenFailed Rinit_ex: Vulkan: the driver cannot present to a window (no surface extension); Rinit: cannot initialize the Vulkan backend"
+[exit 0]
+
+### desktop session, cranelift (the program compiled and linked by the native backend)
+$ /home/dev/harness/desktop-session.sh /home/dev/out/session-cranelift /home/dev/inputs/botlish -backend cranelift window.bot
+ok    ready frame 360 180
+ok    window id 2097165 at 0,0 size 360x180
+ok    rendered the window's pixels hold 307 colors (360x180)
+ok    click-add -> state 1 false 1 clicks true
+ok    pixels-changed 1637 pixels differ after the first click
+ok    click-shout -> state 1 true 1 clicks! true
+ok    click-add -> state 2 true 2 clicks! true
+ok    click-reset -> state 0 true 0 clicks! true
+ok    closed exit status 0, closed 0
+PASS
+[exit 0]
+
+### desktop session, cranelift-generic
+$ /home/dev/harness/desktop-session.sh /home/dev/out/session-generic /home/dev/inputs/botlish -backend cranelift-generic window.bot
+ok    ready frame 360 180
+ok    window id 2097165 at 0,0 size 360x180
+ok    rendered the window's pixels hold 307 colors (360x180)
+ok    click-add -> state 1 false 1 clicks true
+ok    pixels-changed 1945 pixels differ after the first click
+ok    click-shout -> state 1 true 1 clicks! true
+ok    click-add -> state 2 true 2 clicks! true
+ok    click-reset -> state 0 true 0 clicks! true
+ok    closed exit status 0, closed 0
+PASS
+[exit 0]
+
+### deploy the bundled shared libraries
+$ /home/dev/inputs/botlish native deploy -target linux-x86_64 -out dist
+deployed lib/libraven.so.0
+link the executable into /home/dev/app/dist with -runtime-path '$ORIGIN/lib'
+[exit 0]
+
+### emit the executable with a relative runtime path
+$ /home/dev/inputs/botlish -emit-native-executable -runtime-path $ORIGIN/lib window.bot
+executable: window
+[exit 0]
+
+### emit the headless test as an executable too
+$ /home/dev/inputs/botlish -emit-native-executable -runtime-path $ORIGIN/lib test.bot
+executable: test
+[exit 0]
+
+### the executable's dynamic section
+$ bash -c cd dist && LC_ALL=C readelf -d window | grep -E "NEEDED|RUNPATH"
+ 0x0000000000000001 (NEEDED)             Shared library: [libraven.so.0]
+ 0x0000000000000001 (NEEDED)             Shared library: [libgcc_s.so.1]
+ 0x0000000000000001 (NEEDED)             Shared library: [libm.so.6]
+ 0x0000000000000001 (NEEDED)             Shared library: [libc.so.6]
+ 0x0000000000000001 (NEEDED)             Shared library: [ld-linux-x86-64.so.2]
+ 0x000000000000001d (RUNPATH)            Library runpath: [$ORIGIN/lib]
+[exit 0]
+
+### remove the package from the project
+$ /home/dev/inputs/botlish remove raven
+removed raven
+note: no installed package is target-specific any more: its target views are removed, and every target compiles from .bot_modules itself
+view linux-x86_64: removed
+removed raven from botlish.json
+[exit 0]
+
+### nothing of the package is left
+$ bash -c ls -a /home/dev/app; find / -xdev -name "libraven.so*" 2>/dev/null
+.
+..
+.bot_modules
+botlish.json
+clicks.bot
+main.bot
+test.bot
+window.bot
+/home/dev/elsewhere/deep/moved/lib/libraven.so.0
+[exit 1]
+
+### which libraven the moved executable resolves (the loader's own trace)
+$ bash -c cd /tmp && ldd /home/dev/elsewhere/deep/moved/window | grep -E "raven|X11"
+	libraven.so.0 => /home/dev/elsewhere/deep/moved/lib/libraven.so.0 (0x00007f2d82296000)
+	libX11.so.6 => /lib/x86_64-linux-gnu/libX11.so.6 (0x00007f2d81e2b000)
+[exit 0]
+
+### the moved headless test runs
+$ env -u DISPLAY /home/dev/elsewhere/deep/moved/test
+["2", "2 clicks", "0", "0 clicks"]
+[exit 0]
+
+### the moved desktop program on a real window
+$ /home/dev/harness/desktop-session.sh /home/dev/out/session-moved /home/dev/elsewhere/deep/moved/window
+ok    ready frame 360 180
+ok    window id 2097165 at 0,0 size 360x180
+ok    rendered the window's pixels hold 307 colors (360x180)
+ok    click-add -> state 1 false 1 clicks true
+ok    pixels-changed 1943 pixels differ after the first click
+ok    click-shout -> state 1 true 1 clicks! true
+ok    click-add -> state 2 true 2 clicks! true
+ok    click-reset -> state 0 true 0 clicks! true
+ok    closed exit status 0, closed 0
+PASS
+[exit 0]
+
+### the libraries the running program mapped
+$ cat /home/dev/out/session-moved/mapped
+/home/dev/elsewhere/deep/moved/lib/libraven.so.0
+/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2
+/usr/lib/x86_64-linux-gnu/libLLVM.so.20.1
+/usr/lib/x86_64-linux-gnu/libVkLayer_MESA_device_select.so
+/usr/lib/x86_64-linux-gnu/libX11-xcb.so.1.0.0
+/usr/lib/x86_64-linux-gnu/libX11.so.6.4.0
+/usr/lib/x86_64-linux-gnu/libXau.so.6.0.0
+/usr/lib/x86_64-linux-gnu/libXdmcp.so.6.0.0
+/usr/lib/x86_64-linux-gnu/libbsd.so.0.12.1
+/usr/lib/x86_64-linux-gnu/libc.so.6
+/usr/lib/x86_64-linux-gnu/libdrm.so.2.125.0
+/usr/lib/x86_64-linux-gnu/libdrm_amdgpu.so.1.125.0
+/usr/lib/x86_64-linux-gnu/libedit.so.2.0.72
+/usr/lib/x86_64-linux-gnu/libelf-0.190.so
+/usr/lib/x86_64-linux-gnu/libexpat.so.1.9.1
+/usr/lib/x86_64-linux-gnu/libffi.so.8.1.4
+/usr/lib/x86_64-linux-gnu/libgcc_s.so.1
+/usr/lib/x86_64-linux-gnu/libicudata.so.74.2
+/usr/lib/x86_64-linux-gnu/libicuuc.so.74.2
+/usr/lib/x86_64-linux-gnu/liblzma.so.5.4.5
+/usr/lib/x86_64-linux-gnu/libm.so.6
+/usr/lib/x86_64-linux-gnu/libmd.so.0.1.0
+/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.33
+/usr/lib/x86_64-linux-gnu/libtinfo.so.6.4
+/usr/lib/x86_64-linux-gnu/libvulkan.so.1.3.275
+/usr/lib/x86_64-linux-gnu/libvulkan_asahi.so
+/usr/lib/x86_64-linux-gnu/libvulkan_gfxstream.so
+/usr/lib/x86_64-linux-gnu/libvulkan_intel.so
+/usr/lib/x86_64-linux-gnu/libvulkan_intel_hasvk.so
+/usr/lib/x86_64-linux-gnu/libvulkan_lvp.so
+/usr/lib/x86_64-linux-gnu/libvulkan_nouveau.so
+/usr/lib/x86_64-linux-gnu/libvulkan_radeon.so
+/usr/lib/x86_64-linux-gnu/libvulkan_virtio.so
+/usr/lib/x86_64-linux-gnu/libwayland-client.so.0.22.0
+/usr/lib/x86_64-linux-gnu/libxcb-dri3.so.0.1.0
+/usr/lib/x86_64-linux-gnu/libxcb-present.so.0.0.0
+/usr/lib/x86_64-linux-gnu/libxcb-randr.so.0.1.0
+/usr/lib/x86_64-linux-gnu/libxcb-shm.so.0.0.0
+/usr/lib/x86_64-linux-gnu/libxcb-sync.so.1.0.0
+/usr/lib/x86_64-linux-gnu/libxcb-xfixes.so.0.0.0
+/usr/lib/x86_64-linux-gnu/libxcb.so.1.1.0
+/usr/lib/x86_64-linux-gnu/libxml2.so.2.9.14
+/usr/lib/x86_64-linux-gnu/libxshmfence.so.1.0.0
+/usr/lib/x86_64-linux-gnu/libz.so.1.3
+/usr/lib/x86_64-linux-gnu/libzstd.so.1.5.5
+[exit 0]
+
+### loader precedence: LD_LIBRARY_PATH is searched before RUNPATH
+$ bash -c cd /tmp && LD_LIBRARY_PATH=/tmp/decoy ldd /home/dev/elsewhere/deep/moved/window | grep raven
+	libraven.so.0 => /tmp/decoy/libraven.so.0 (0x00007f5327813000)
+[exit 0]

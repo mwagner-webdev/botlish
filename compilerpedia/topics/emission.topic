@@ -8,7 +8,6 @@ index: concepts proofs
 alias: emits; emission claim; emitter; certified emitter; yield trace; output grammar; token emitter
 keywords: emits, emitter, yield, trace, recognizer, dfa, token, certificate, certified, prefix, boundary, guard, domain, json, lexical
 related: concept.recognizers concept.coroutines error.emit-rejected error.emit-boundary error.emit-unsupported
-docs: EMISSION-CLAIMS-MILESTONE-1.md MODULAR-EMISSION-PROOFS-MILESTONE-1.md EMITTER-COROUTINE-EXPLORATION.md DFA-COROUTINE-MILESTONE-2.md
 
 == WHAT IT IS
 A clause of a function declaration, after its `errors`:
@@ -41,9 +40,10 @@ brackets match (that language is not regular).
 == WHAT IS EMITTED
 The outward yield trace: the values the function yields, and those its
 ordinary calls yield (deep yields). A function's result is no symbol, and
-neither is a coroutine root's final value: a function claiming R whose
-declared result is an Int is a symbol source, and must complete with -1,
-the end (error.emit-terminal-value). A coroutine the function constructs is
+neither is a coroutine root's final value, whatever its type: a source
+claiming R may complete with any value (a count, a status, the -1 a
+protocol uses for its end), which its consumer tells from a symbol with
+std::coroutine::done?. A coroutine the function constructs is
 another execution: its yields are its own, and the values the function
 receives from it are ordinary values, of whatever the analysis knows of
 them.
@@ -121,7 +121,6 @@ index: errors proofs
 alias: emitter rejected; invalid symbol; emission rejected
 keywords: emits, emitter, yield, reject, recognizer, symbol, state, claim
 related: concept.emission-claims concept.recognizers
-docs: EMISSION-CLAIMS-MILESTONE-1.md
 code: CORE SEMANTIC EMIT-REJECTED
 
 == MEANING
@@ -166,7 +165,6 @@ index: errors proofs
 alias: beyond the token; past the token
 keywords: emits, accept before, lookahead, token, boundary, unread
 related: concept.emission-claims error.emit-after-token
-docs: EMISSION-CLAIMS-MILESTONE-1.md
 code: CORE SEMANTIC EMIT-BEYOND-TOKEN
 
 == MEANING
@@ -209,7 +207,6 @@ index: errors proofs
 alias: after the token
 keywords: emits, token, complete, accept, after
 related: concept.emission-claims error.emit-beyond-token
-docs: EMISSION-CLAIMS-MILESTONE-1.md
 code: CORE SEMANTIC EMIT-AFTER-TOKEN
 
 == MEANING
@@ -250,7 +247,6 @@ index: errors proofs
 alias: incomplete token; early completion; empty token
 keywords: emits, end, complete, incomplete, return, prefix
 related: concept.emission-claims
-docs: EMISSION-CLAIMS-MILESTONE-1.md
 code: CORE SEMANTIC EMIT-INCOMPLETE
 
 == MEANING
@@ -259,9 +255,78 @@ yielded a whole token: the recognizer must accept the end of the input
 there. A prefix is allowed only before a failure or while the function is
 still running.
 
+A counted loop may run zero times unless its bounds prove otherwise: the
+checker drops a loop's zero-iteration exit only where the facts before it
+show that every start and end it may have put the start in the domain
+(`from 0 to n` once `n >= 1` is known, a declared domain of positive
+values). An entered loop still completes empty on a path its iterations
+take without a symbol (a `break`, `continue` or `return` before the
+yield).
+
 == WHAT TO DO
 Yield the rest of the token on every path that completes, or fail on the
-path that cannot.
+path that cannot. For a loop that may run zero times, establish that it
+runs before it (fail on the counts that would put nothing in it, or declare
+the parameter's domain), or yield the token's first symbol before it.
+
+@example reject
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digits over ascii:
+    start:
+        digit -> more
+    more:
+        digit -> more
+        end -> accept
+
+fn sevens(n: int) -> unit emits digits:
+    loop i from 0 to n:
+        yield 55
+        continue
+    unit
+
+0
+@caption for n <= 0 the loop runs zero times: no digit at all
+@error CORE SEMANTIC EMIT-INCOMPLETE
+@at 12:33
+@end
+
+@example accept
+import std::dfa
+import std::coroutine
+
+class digit = '0'..'9'
+
+dfa digits over ascii:
+    start:
+        digit -> more
+    more:
+        digit -> more
+        end -> accept
+
+error NoDigits
+
+fn sevens(n: int) -> unit errors NoDigits emits digits:
+    if n < 1:
+        fail NoDigits
+    loop i from 0 to n:
+        yield 55
+        continue
+    unit
+
+fn source() -> int:
+    sevens(3):
+        on NoDigits:
+            return -2
+    -1
+
+coroutine {step, first} = source()
+first
+@caption past the guard n >= 1, so the loop runs at least once: certified
+@value 55
+@end
 
 @example reject
 import std::dfa
@@ -295,7 +360,6 @@ index: errors proofs
 alias: minus one; end of input yielded
 keywords: emits, end, -1, symbol, protocol
 related: concept.emission-claims concept.recognizers
-docs: EMISSION-CLAIMS-MILESTONE-1.md
 code: CORE SEMANTIC EMIT-END-SYMBOL
 
 == MEANING
@@ -334,7 +398,6 @@ index: errors proofs
 alias: not a symbol; string yielded
 keywords: emits, yield, symbol, int, string, type
 related: concept.emission-claims
-docs: EMISSION-CLAIMS-MILESTONE-1.md
 code: CORE SEMANTIC EMIT-NOT-SYMBOL
 
 == MEANING
@@ -371,7 +434,6 @@ index: errors proofs
 alias: unknown value; any yielded
 keywords: emits, yield, unknown, any, type, not proved
 related: concept.emission-claims error.emit-unsupported
-docs: EMISSION-CLAIMS-MILESTONE-1.md
 code: CORE SEMANTIC EMIT-UNKNOWN-VALUE
 
 == MEANING
@@ -410,7 +472,6 @@ index: errors proofs
 alias: character as byte; scalar value as byte
 keywords: emits, bytes, character, scalar value, utf8, encoding
 related: concept.emission-claims concept.recognizers
-docs: EMISSION-CLAIMS-MILESTONE-1.md
 code: CORE SEMANTIC EMIT-BYTE-CHARACTER
 
 == MEANING
@@ -441,43 +502,6 @@ fn first_char(text: str) -> unit errors IndexNotFound emits byte_token:
 @at 10:5
 @end
 
-@topic error.emit-terminal-value
-title: EMIT-TERMINAL-VALUE: a symbol source whose final value is not -1
-summary: A claimed function whose declared result is an Int is a symbol source -- a coroutine root a consumer may read past its end -- and must complete with -1, the end.
-index: errors proofs
-alias: terminal value; final value; symbol source result
-keywords: emits, result, coroutine, root, terminal, -1, source
-related: concept.emission-claims concept.coroutines
-docs: EMISSION-CLAIMS-MILESTONE-1.md COROUTINES.md
-code: CORE SEMANTIC EMIT-TERMINAL-VALUE
-
-== MEANING
-A completed coroutine's result is stable: every later resume answers it
-again. A consumer that reads values after the end would take any other
-Int for a symbol.
-
-== WHAT TO DO
-Complete with -1, or declare the result `unit` (not a symbol source).
-
-@example reject
-import std::dfa
-
-class digit = '0'..'9'
-
-dfa digit_token over ascii:
-    start:
-        digit -> accept
-
-fn digit_source() -> int emits digit_token:
-    yield 55
-    0
-
-0
-@caption 0 after the end would read as a symbol
-@error CORE SEMANTIC EMIT-TERMINAL-VALUE
-@at 9:32
-@end
-
 @topic error.emit-boundary
 title: EMIT-BOUNDARY: a symbol that would continue a helper's token
 summary: After a call of a helper that claims to emit one whole token of a recognizer, the caller may yield a symbol that recognizer's token would take: the helper's token would absorb it.
@@ -485,7 +509,6 @@ index: errors proofs
 alias: token boundary; glued tokens; adjacent tokens; missing separator
 keywords: emits, boundary, token, helper, separator, adjacent, composition
 related: concept.emission-claims error.emit-beyond-token
-docs: EMISSION-CLAIMS-MILESTONE-1.md MODULAR-EMISSION-PROOFS-MILESTONE-1.md
 code: CORE SEMANTIC EMIT-BOUNDARY
 
 == MEANING
@@ -540,7 +563,6 @@ index: errors proofs
 alias: unsupported; not modelled; trait operation in an emitter
 keywords: emits, trait, unsupported, not proved, context trait, implementation
 related: concept.emission-claims error.emit-unknown-value error.emit-budget
-docs: EMISSION-CLAIMS-MILESTONE-1.md TRAITS.md
 code: CORE SEMANTIC EMIT-UNSUPPORTED
 
 == MEANING
@@ -594,7 +616,6 @@ index: errors proofs
 alias: budget; analysis limit
 keywords: emits, budget, fixpoint, rounds, recursion, limit, not proved
 related: concept.emission-claims error.emit-unsupported
-docs: EMISSION-CLAIMS-MILESTONE-1.md
 code: CORE SEMANTIC EMIT-BUDGET
 
 == MEANING
@@ -616,7 +637,6 @@ index: errors proofs
 alias: emits names no recognizer; emits names a function; not a recognizer
 keywords: emits, recognizer, dfa, unknown, name, claim, import
 related: concept.emission-claims concept.recognizers
-docs: EMISSION-CLAIMS-MILESTONE-1.md
 code: CORE SEMANTIC EMIT-RECOGNIZER
 
 == MEANING

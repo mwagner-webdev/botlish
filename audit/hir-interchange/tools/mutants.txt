@@ -25,11 +25,11 @@
         core::loadLibrary $name
     }
     hir::activate $hir
-    return $hir
+    # Emission certificates (EMISSION-CLAIMS-MILESTONE-1.md, "Trust"): text
 ====
         core::loadLibrary $name
     }
-    return $hir
+    # Emission certificates (EMISSION-CLAIMS-MILESTONE-1.md, "Trust"): text
 >>>>
 
 @@ encode-drops-declarations the text leaves out the HIR's declaration state: a process that did not build it cannot install it

@@ -1,0 +1,393 @@
+# The CSV emitters' mutation census (CSV-EMISSION-VALIDATION-MILESTONE-1.md,
+# section 12): each mutation applied alone to a private copy of
+# examples/dfa/csv, every emitter module compiled, then run
+# (audit/csv-emission/tools/census.tcl). A mutation changes an emitter,
+# never a declared recognizer.
+#
+#   @@ NAME FILE EXPECT CLASS DESCRIPTION
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+#   (more blocks, applied in order)
+#
+# EXPECT is the static verdict: the diagnostic kinds the compiler must
+# report (EMIT-..., comma-separated; it may report more, for the claims that
+# compose with the mutated one), or `accepted`. CLASS is what the census
+# must find:
+#
+#   static          rejected, and a run shows an invalid trace (the
+#                   ordinary examples already do)
+#   static-latent   rejected, the ordinary examples' runs are valid, an
+#                   adversarial run shows an invalid trace
+#   unprovable      rejected, and no run finds an invalid or wrong output:
+#                   correct code the checker cannot certify (a precision
+#                   limit, never reported as a bug)
+#   guard           accepted; a run fails with the emitter's declared error
+#                   where the reference completes: a run-time guard stops
+#                   the mistake before it writes anything wrong
+#   guard-latent    the same, the ordinary examples unaffected
+#   semantic        accepted; every trace is grammatical, but outputs are
+#                   the wrong values (the independent oracle's round trips)
+#   outside         accepted; every trace is grammatical and every value
+#                   right, but something outside the claim is wrong (here:
+#                   a source's final value)
+@@ no-doubling strict_emit.bot EMIT-REJECTED static missing quote doubling: an embedded quotation mark written once, so it may close the field
+<<<<
+        if c == 34:
+            yield 34
+            yield 34
+        else:
+            csv_strict::quoted_char(c):
+====
+        if c == 34:
+            yield 34
+        else:
+            csv_strict::quoted_char(c):
+>>>>
+
+@@ tripled-quote strict_emit.bot EMIT-INCOMPLETE static a quotation mark written three times: the third reopens nothing and the field never closes
+<<<<
+        if c == 34:
+            yield 34
+            yield 34
+        else:
+            csv_strict::quoted_char(c):
+====
+        if c == 34:
+            yield 34
+            yield 34
+            yield 34
+        else:
+            csv_strict::quoted_char(c):
+>>>>
+
+@@ no-closing-quote strict_emit.bot EMIT-INCOMPLETE static the closing quotation mark omitted: every completion leaves the field open
+<<<<
+        continue
+    yield 34
+    unit
+
+nomethod fn record3(
+====
+        continue
+    unit
+
+nomethod fn record3(
+>>>>
+
+@@ no-opening-quote strict_emit.bot EMIT-REJECTED static the opening quotation mark omitted: the field's first symbol is data
+<<<<
+emits csv_strict::quoted_field, csv_strict::field:
+    yield 34
+
+====
+emits csv_strict::quoted_field, csv_strict::field:
+
+>>>>
+
+@@ quote-after-close strict_emit.bot EMIT-INCOMPLETE static an extra quotation mark after the closing one: the two read as one quotation mark of data, the field still open
+<<<<
+        continue
+    yield 34
+    unit
+
+nomethod fn record3(
+====
+        continue
+    yield 34
+    yield 34
+    unit
+
+nomethod fn record3(
+>>>>
+
+@@ comma-outside strict_emit.bot EMIT-BEYOND-TOKEN static a comma written outside the quotes (close, comma, reopen): the injection bug -- a value's comma becomes a column separator
+<<<<
+        if c == 34:
+            yield 34
+            yield 34
+        else:
+            csv_strict::quoted_char(c):
+====
+        if c == 34:
+            yield 34
+            yield 34
+        elif c == 44:
+            yield 34
+            yield 44
+            yield 34
+        else:
+            csv_strict::quoted_char(c):
+>>>>
+
+@@ crlf-outside strict_emit.bot EMIT-BEYOND-TOKEN static-latent a line feed written as an unquoted CRLF (close, CR LF, reopen): a value's line break becomes a record separator (latent: the ordinary table has no line break)
+<<<<
+        if c == 34:
+            yield 34
+            yield 34
+        else:
+            csv_strict::quoted_char(c):
+====
+        if c == 34:
+            yield 34
+            yield 34
+        elif c == 10:
+            yield 34
+            yield 13
+            yield 10
+            yield 34
+        else:
+            csv_strict::quoted_char(c):
+>>>>
+
+@@ missing-separator strict_emit.bot EMIT-BOUNDARY static the second field separator omitted: two quoted fields written back to back read as one field holding a quotation mark
+<<<<
+    quoted_field(b)
+    yield 44
+    quoted_field(c)
+
+====
+    quoted_field(b)
+    quoted_field(c)
+
+>>>>
+
+@@ extra-separator strict_emit.bot EMIT-REJECTED static a separator written twice: an empty fourth column
+<<<<
+    quoted_field(b)
+    yield 44
+    quoted_field(c)
+
+====
+    quoted_field(b)
+    yield 44
+    yield 44
+    quoted_field(c)
+
+>>>>
+
+@@ trailing-separator strict_emit.bot EMIT-REJECTED static a separator after the last field: a fourth, empty column on every line
+<<<<
+    record3(a, b, c)
+    yield 13
+    yield 10
+
+====
+    record3(a, b, c)
+    yield 44
+    yield 13
+    yield 10
+
+>>>>
+
+@@ handwritten-ascii strict_emit.bot EMIT-REJECTED static-latent the grammar's guard replaced by a handwritten check that forgets the upper bound: any character from U+0020 on is written raw, past ASCII too (latent: ordinary ASCII data never shows it)
+<<<<
+            csv_strict::quoted_char(c):
+                on std::dfa::UnrecognizedInput:
+                    fail csv_common::UnsupportedCSVCharacter {at: i, value: c}
+                on std::dfa::UnexpectedEnd:
+                    fail csv_common::UnsupportedCSVCharacter {at: i, value: c}
+            yield c
+====
+            if c >= 32 or c == 10 or c == 13:
+                yield c
+            else:
+                fail csv_common::UnsupportedCSVCharacter {at: i, value: c}
+>>>>
+
+@@ guard-caught-continues strict_emit.bot EMIT-REJECTED static-latent the guard's failure caught and execution continued: the rejected character is written anyway (latent: ordinary data has no control character)
+<<<<
+                on std::dfa::UnrecognizedInput:
+                    fail csv_common::UnsupportedCSVCharacter {at: i, value: c}
+                on std::dfa::UnexpectedEnd:
+                    fail csv_common::UnsupportedCSVCharacter {at: i, value: c}
+            yield c
+====
+                on std::dfa::UnrecognizedInput:
+                    0
+                on std::dfa::UnexpectedEnd:
+                    fail csv_common::UnsupportedCSVCharacter {at: i, value: c}
+            yield c
+>>>>
+
+@@ guard-strips strict_emit.bot accepted semantic the guard's failure caught and the character skipped: unsupported input silently stripped -- every output is valid CSV of the wrong value
+<<<<
+        else:
+            csv_strict::quoted_char(c):
+                on std::dfa::UnrecognizedInput:
+                    fail csv_common::UnsupportedCSVCharacter {at: i, value: c}
+====
+        else:
+            csv_strict::quoted_char(c):
+                on std::dfa::UnrecognizedInput:
+                    continue
+>>>>
+
+@@ drop-first-char strict_emit.bot accepted semantic the loop starts at index 1: every field loses its first character -- grammatical, wrong
+<<<<
+    yield 34
+    loop i from 0 to value.length():
+
+====
+    yield 34
+    loop i from 1 to value.length():
+
+>>>>
+
+@@ field-order strict_emit.bot accepted semantic the record's second and third fields swapped: three valid fields in the wrong columns
+<<<<
+    quoted_field(a)
+    yield 44
+    quoted_field(b)
+    yield 44
+    quoted_field(c)
+
+====
+    quoted_field(a)
+    yield 44
+    quoted_field(c)
+    yield 44
+    quoted_field(b)
+
+>>>>
+
+@@ header-twice strict_emit.bot accepted semantic the header written twice: a valid document with one record too many
+<<<<
+    row_line(header)
+    stream(rows)
+
+====
+    row_line(header)
+    row_line(header)
+    stream(rows)
+
+>>>>
+
+@@ bytes-unguarded utf8_emit.bot EMIT-REJECTED static-latent the byte emitter's guard removed: NUL, controls and the C1 controls (C2 80..C2 9F) encoded and written (latent: ordinary data has none)
+<<<<
+            csv_utf8::quoted_char(c):
+                on std::dfa::UnrecognizedInput:
+                    fail csv_common::UnsupportedCSVCharacter {at: i, value: c}
+                on std::dfa::UnexpectedEnd:
+                    fail csv_common::UnsupportedCSVCharacter {at: i, value: c}
+            utf8(c)
+====
+            utf8(c)
+>>>>
+
+@@ utf8-bad-lead utf8_emit.bot EMIT-REJECTED static-latent a two-byte lead computed from the wrong shift (v >> 7): C1, an overlong lead, for U+00C0..U+00FF, and a wrong character beyond (latent: ordinary ASCII data never reaches it)
+<<<<
+    elif v < 2048:
+        yield 192 + v.shift_right(6)
+
+====
+    elif v < 2048:
+        yield 192 + v.shift_right(7)
+
+>>>>
+
+@@ utf8-no-e0-split utf8_emit.bot EMIT-REJECTED unprovable the E0 branch merged into E1..EC's: the bytes are the same (v >> 6 mod 64 is A0..BF below U+1000), but the constraint E0 puts on the next byte is a relation the checker's sets do not carry -- correct, not certifiable
+<<<<
+    elif v < 4096:
+        # E0's second byte is A0..BF (no overlong form).
+        yield 224
+        yield 128 + v.shift_right(6)
+        yield 128 + v.mod(64)
+    elif v < 53248:
+====
+    elif v < 53248:
+>>>>
+
+@@ selective-natural-claimed selective_emit.bot EMIT-REJECTED unprovable the natural selective emitter claimed: correct, but that needs_quotes returned false is a fact about the whole string, not about each character the unquoted branch yields
+<<<<
+fn field_natural(value: str) -> unit errors csv_common::UnsupportedCSVCharacter:
+
+====
+fn field_natural(value: str) -> unit errors csv_common::UnsupportedCSVCharacter emits csv_utf8::field:
+
+>>>>
+
+@@ selective-count-unknown selective_emit.bot EMIT-INCOMPLETE unprovable the unquoted branch without the decision's `n == 0`: correct (needs_quotes is true for the empty value), but nothing the checker knows bounds the loop's count away from zero, so it keeps the loop's zero-iteration exit (EMISSION-COUNTED-LOOP-PRECISION-MILESTONE-1.md)
+<<<<
+    if n == 0 or needs_quotes_strict(value):
+====
+    if needs_quotes_strict(value):
+>>>>
+
+@@ selective-empty-unquoted selective_emit.bot EMIT-INCOMPLETE static the empty value judged unquotable (needs_quotes false for it, the UTF-8 field's decision without `n == 0`): the unquoted branch's loop runs zero times and the field is empty, which is no field token
+<<<<
+    if n == 0 or needs_quotes(value):
+====
+    if needs_quotes(value):
+>>>>
+<<<<
+fn needs_quotes(value: str) -> bool:
+    if value.length() == 0:
+        return true
+====
+fn needs_quotes(value: str) -> bool:
+    if value.length() == 0:
+        return false
+>>>>
+
+@@ selective-guard-weakened selective_emit.bot EMIT-BEYOND-TOKEN unprovable the unquoted branch's guard admits the quoted class (a comma, CR, LF): unreachable while needs_quotes is right, so no run shows it -- the checker rejects the code whose safety rests on that relation
+<<<<
+        loop i from 0 to n:
+            c = value.char_at(i).scalar_value()
+            csv_strict::text_char(c):
+====
+        loop i from 0 to n:
+            c = value.char_at(i).scalar_value()
+            csv_strict::quoted_char(c):
+>>>>
+
+@@ selective-wrong-decision selective_emit.bot accepted guard needs_quotes_strict reads the quoted class: a value with a comma is judged unquotable -- the unquoted branch's guard stops it (QuotingDecision) before the comma is written
+<<<<
+        c = value.char_at(i).scalar_value()
+        csv_strict::text_char(c):
+            on std::dfa::UnrecognizedInput:
+                return true
+====
+        c = value.char_at(i).scalar_value()
+        csv_strict::quoted_char(c):
+            on std::dfa::UnrecognizedInput:
+                return true
+>>>>
+
+@@ selective-classic-rule selective_emit.bot accepted guard-latent needs_quotes written as the classic rule (quote if the value holds a comma, a quotation mark, CR or LF): it forgets TAB, U+2028, U+2029 and U+FEFF -- the guard stops them at run time (latent: ordinary data has none), and an unsupported character now fails QuotingDecision instead of UnsupportedCSVCharacter
+<<<<
+fn needs_quotes(value: str) -> bool:
+    if value.length() == 0:
+        return true
+    loop i from 0 to value.length():
+        c = value.char_at(i).scalar_value()
+        csv_utf8::text_char(c):
+            on std::dfa::UnrecognizedInput:
+                return true
+            on std::dfa::UnexpectedEnd:
+                return true
+        continue
+    false
+====
+fn needs_quotes(value: str) -> bool:
+    if value.length() == 0:
+        return true
+    loop i from 0 to value.length():
+        c = value.char_at(i).scalar_value()
+        if c == 44 or c == 34 or c == 13 or c == 10:
+            return true
+        continue
+    false
+>>>>
+
+@@ final-value sources.bot accepted outside a source's final value off by one (the records counted without the header): no symbol, so no claim is about it -- only the consumer's check of the count sees it
+<<<<
+    utf8_emit::document_bytes(header, rows)
+    rows.length() + 1
+====
+    utf8_emit::document_bytes(header, rows)
+    rows.length()
+>>>>
+

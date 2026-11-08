@@ -1,0 +1,13 @@
+# erased-struct.bot -- an `any` payload passed where a concrete struct is expected: rejected (TYPE).
+struct Holder:
+    payload: any
+
+struct Pt:
+    x: int
+    y: int
+
+fn get(p: Pt) -> int:
+    p.x + p.y
+
+h = Holder {payload: Pt {x: 1, y: 2}}
+get(h.payload)

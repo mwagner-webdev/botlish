@@ -152,14 +152,24 @@ proc ::single::Install {dir linking} {
 
 # Whether the invocation ARGV may link a native executable: it emits one, or
 # runs a native backend (which links a program that calls C to run it). The
-# runtime archive is installed for those only.
+# runtime archive is installed for those only. `run [OPTION...] FILE
+# [ARG...]` (main.tcl) runs natively unless -backend says otherwise, and every
+# word after its FILE is the program's own, never an option of this run.
 proc ::single::MayLink {argv} {
     set backend ""
     if {[info exists ::env(CORE_BACKEND)]} { set backend $::env(CORE_BACKEND) }
-    for {set i 0} {$i < [llength $argv]} {incr i} {
+    set run [expr {[lindex $argv 0] eq "run"}]
+    if {$run} {
+        set backend cranelift
+    }
+    for {set i $run} {$i < [llength $argv]} {incr i} {
         switch -- [lindex $argv $i] {
             -emit-native-executable { return 1 }
             -backend { set backend [lindex $argv [incr i]] }
+            -warnings - -target - -L - -F { incr i }
+            default {
+                if {$run && ![string match -* [lindex $argv $i]]} break
+            }
         }
     }
     return [expr {$backend in {cranelift cranelift-generic}}]

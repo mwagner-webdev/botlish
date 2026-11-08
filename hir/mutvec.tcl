@@ -13,9 +13,12 @@
 # table), and "collection" means either:
 #
 #   receivers   the first argument of a mutating operation must be a place
-#               path: a reference to a local, parameter or context parameter
-#               of the same function, or a chain of field projections from
-#               one (`v.push(x)`, `state.queue.pop()`, `io.output.push(t)`),
+#               path: a reference to a local, place parameter or context
+#               parameter of the same function, or a chain of field
+#               projections from one (`v.push(x)`, `state.queue.pop()`,
+#               `io.output.push(t)`; a parameter not declared `place` is
+#               the function's own copy, never a place it mutates:
+#               NONPLACE-PARAMETER-MUTATION, "Value parameters" below),
 #               whose binding's own static type makes the path a
 #               MutableVector[T] or MutableArray[T] (a binding of type `any`
 #               narrowed by a kind test is not a place: bind the narrowed
@@ -265,6 +268,72 @@ proc hir::mutvec::IsPlaceParam {hir b} {
     return [expr {$places ne {} && [lsearch -exact [dict get $hir exprs $f params] $b] in $places}]
 }
 
+# ---------------------------------------------------------------------------
+# Value parameters (NONPLACE-PARAMETER-MUTATION-CORRECTNESS-MILESTONE-1.md)
+#
+# A function's parameter that is not declared `place` is a *value
+# parameter*: the function's own logical copy of its argument (its entry
+# shares the argument, or moves it at the argument's last use), never its
+# caller's storage. A mutation through a place path rooted in one -- a
+# collection operation's receiver, or the argument of a place parameter --
+# would change that copy only, and the caller, who wrote the call to see the
+# change, would never observe it: the silently lost update. Such a mutation
+# is NONPLACE-PARAMETER-MUTATION, the call's own problem (hir::CheckingCall).
+# The program says which it means: `place NAME: T` for the caller's storage,
+# or a local binding (`working = NAME`, a logical copy of its own) for a
+# local working value. The rule reads the destination's root binding only --
+# never how its value was computed: a local initialized from a parameter is
+# an independent place, mutated freely.
+#
+# A loop variable, a fold's intermediate and a handler's payload binding are
+# bindings of their construct (a loop or branch scope), not of a function,
+# and no context parameter is a parameter binding (CONTEXTS.md: a local
+# bound to the installed context): none of them is a value parameter.
+
+# 1 if binding B is a value parameter: a parameter of a function block (one
+# of the block's own `params`) that is not one of its place parameters.
+proc hir::mutvec::IsValueParam {hir b} {
+    if {$b eq "" || ![dict exists $hir bindings $b]} {
+        return 0
+    }
+    set binding [dict get $hir bindings $b]
+    if {[dict get $binding kind] ne "param"} {
+        return 0
+    }
+    set f [dict get $hir scopes [dict get $binding scope] owner]
+    if {$f eq "" || ![dict exists $hir exprs $f] || [dict get $hir exprs $f kind] ne "block"} {
+        return 0
+    }
+    set index [lsearch -exact [dict get $hir exprs $f params] $b]
+    return [expr {$index >= 0 && $index ni [dict getdef $hir exprs $f places {}]}]
+}
+
+# Reports NONPLACE-PARAMETER-MUTATION for call E, whose argument R -- WHAT,
+# "the receiver of OP" or "the argument for place parameter ..." -- is
+# place path PATH, rooted in a value parameter of the calling function. The
+# diagnostic is located at R (the mutation site) and relates the
+# parameter's declaration.
+proc hir::mutvec::ValueParamMutation {hirVar e r path what} {
+    upvar 1 $hirVar hir
+    set b [lindex $path 0]
+    set name [hir::semantic::SourceName $hir $b]
+    set f [dict get $hir scopes [dict get $hir bindings $b scope] owner]
+    set index [lsearch -exact [dict getdef $hir exprs $f params {}] $b]
+    set type [lindex [dict getdef $hir exprs $f declaredParamTypes {}] $index]
+    set shown [PathText $hir $path]
+    set at [if {$shown eq $name} {string cat "`$name`"} else {string cat "`$shown`, a path of `$name`"}]
+    set message "$what is $at, which is value parameter \"$name\" of [FunctionName $hir $f], not a place parameter: a parameter not declared `place` is the function's own copy of its argument, not its caller's storage, so this mutation would change only that copy, and the caller would never see it"
+    if {$type ne {} && [hir::types::IsAffine $type]} {
+        # A place parameter is never affine (PlaceParamProblem): the one way
+        # to work on such a value is to own it in a local.
+        append message " (to work on the value, move it into a local first -- `working = $name` -- mutate the local, and return it)"
+    } else {
+        set declared [if {$type eq {}} {string cat T} else {hir::types::show $type}]
+        append message " (declare `place $name: $declared` if the caller's storage must change; if a local working value is intended, copy it into a local first -- `working = $shown` -- and mutate the copy)"
+    }
+    hir::Diagnose hir NONPLACE-PARAMETER-MUTATION $message $r [list [dict get $hir bindings $b origin]]
+}
+
 # The block with place parameters binding B names -- a function binding,
 # bound once to a block that declares some (PlaceIndices) -- or "".
 proc hir::mutvec::PlaceFunctionOf {hir b} {
@@ -355,6 +424,14 @@ proc hir::mutvec::verify {hirVar} {
                     hir::CheckingCall $e {hir::Diagnose hir MUTABLE-PLACE-RECEIVER $problem $arg}
                     continue
                 }
+                set path [Path $hir $arg]
+                if {[IsValueParam $hir [lindex $path 0]]} {
+                    # A place of this function, but one rooted in a value
+                    # parameter: the update would be the function's own
+                    # copy's, never its caller's (NONPLACE-PARAMETER-MUTATION).
+                    hir::CheckingCall $e {ValueParamMutation hir $e $arg $path [PlaceArgumentWhat $hir $e $index]}
+                    continue
+                }
                 lappend given $path $index
                 dict set roots [lindex $path 0] place
             }
@@ -383,7 +460,14 @@ proc hir::mutvec::verify {hirVar} {
             hir::CheckingCall $e {hir::Diagnose hir MUTABLE-PLACE-RECEIVER $problem $receiver}
             continue
         }
-        set root [lindex [Path $hir $receiver] 0]
+        set path [Path $hir $receiver]
+        if {[IsValueParam $hir [lindex $path 0]]} {
+            # The call's own problem: its mutating callee is given a place
+            # rooted in a value parameter (NONPLACE-PARAMETER-MUTATION).
+            hir::CheckingCall $e {ValueParamMutation hir $e $receiver $path "the receiver of [hir::affine::NativeName $hir $e]"}
+            continue
+        }
+        set root [lindex $path 0]
         if {![dict exists $roots $root]} {
             dict set roots $root [Kind [hir::typeOf $hir $receiver]]
         }
@@ -1871,16 +1955,13 @@ proc hir::mutvec::MayHoldVector {type {seen {}}} {
     }
     if {[hir::types::IsNamedStruct $type]} {
         # (An application's fields, its slots replaced by the arguments:
-        # TRAIT-CONSTRAINED-IMPRINTED-TYPES.md.)
-        if {$type in $seen} {
-            return 0
-        }
-        foreach {name t} [hir::structs::AppliedFieldTypes $type] {
-            if {[MayHoldVector $t [concat $seen [list $type]]]} {
-                return 1
-            }
-        }
-        return 0
+        # TRAIT-CONSTRAINED-IMPRINTED-TYPES.md -- answered from the
+        # declaration's summary, hir/summaries.tcl, by whether each argument
+        # may hold one where a field holds a value of it: a struct met again
+        # adds nothing, the least fixpoint.)
+        set classes [lmap a [hir::summaries::Arguments $type] {MayHoldVector $a $seen}]
+        set level [hir::summaries::Level mayHoldVector $type $classes]
+        return [expr {$level ne "" && $level > 0}]
     }
     if {[hir::types::IsEnum $type]} {
         # An enum (ENUMS.md) holds what its case payloads hold: nothing,
@@ -1902,6 +1983,24 @@ proc hir::mutvec::MayHoldVector {type {seen {}}} {
     return [expr {[lindex $type 0] ni {int str bool unit UnicodeChar never list immutableSet block native fn coroutine result}
         && ![core::type::isFloat [lindex $type 0]]}]
 }
+
+# MayHoldVector of {nstruct ID ARGUMENTS} from its applied fields (the
+# summary's node).
+proc hir::mutvec::MayHoldVectorNode {id arguments} {
+    set type [list nstruct $id]
+    if {$arguments ne {}} {
+        lappend type $arguments
+    }
+    foreach {name t} [hir::structs::AppliedFieldTypes $type] {
+        if {[MayHoldVector $t]} {
+            return 1
+        }
+    }
+    return 0
+}
+
+hir::summaries::define mayHoldVector -algebra classes -neutral int \
+    -probes [list int [list mutvec int]] -node hir::mutvec::MayHoldVectorNode
 
 # The function blocks of BLOCKS whose every result (Results) cannot hold a
 # vector (MayHoldVector), or is fresh: a new vector, a share, a struct

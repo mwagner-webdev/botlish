@@ -1,0 +1,64 @@
+# producer.bot -- tests/threads.test: thread entries that send numbered
+# notes to a mailbox of another VM through a Remote capability
+# (transport.bot). produce retries a Full send itself; deliver_notes waits
+# for room on its own event loop, woken through its port.
+import event_loop_linux
+import std::actor::remote
+import std::event_loop
+import std::thread
+
+struct Note:
+    from: int
+    seq: int
+
+struct Plan:
+    who: int
+    count: int
+    to: std::actor::remote::Remote[Note]
+
+# Sends COUNT notes to the plan's mailbox, retrying a Full one at once:
+# how many were refused for room.
+thread fn produce(plan: Plan) -> int:
+    fold i from 0 to plan.count with intermediate full 0:
+        tries = fold with intermediate t 0:
+            sent = std::actor::remote::send(plan.to, Note {from: plan.who, seq: i})
+            if sent == std::actor::remote::Sent::Delivered:
+                break
+            t + 1
+        full + tries
+
+# The plan's notes from a task of this VM's loop: a Full endpoint suspends
+# the task until the transport rings the port with room. How many were
+# delivered; the port closed after the last.
+fn delivering(plan: Plan, context ev: std::event_loop::Loop, p: std::thread::Port, db: std::thread::Doorbell) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    n = fold i from 0 to plan.count with intermediate n 0:
+        sent = std::actor::remote::deliver(plan.to, Note {from: plan.who, seq: i})
+        if sent != std::actor::remote::Sent::Delivered:
+            break
+        n + 1
+    std::thread::close_port()
+    n
+
+private fn delivered(plan: Plan, context ev: std::event_loop::Loop, d: std::event_loop::Driver, p: std::thread::Port, db: std::thread::Doorbell) -> int errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    std::thread::serve()
+    coroutine {step, first} = delivering(plan)
+    task = std::event_loop::adopt(step, first)
+    std::event_loop::run()
+    fold o in std::event_loop::take_outcomes() with intermediate n 0:
+        if o.task == task:
+            o.value
+        else:
+            n
+
+thread fn deliver_notes(plan: Plan) -> int:
+    with context std::event_loop::create(16)
+    with context event_loop_linux::create()
+    with context event_loop_linux::native()
+    with context std::thread::port()
+    delivered(plan):
+        on std::event_loop::SchedulerFault:
+            -1
+        on std::event_loop::DriverFault {code}:
+            code
+        on std::event_loop::LoopReentered:
+            -2

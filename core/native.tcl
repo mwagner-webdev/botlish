@@ -105,6 +105,17 @@
 #                                     names (std::binary::read of an array:
 #                                     LAYOUT-UNIONS.md); nothing for any
 #                                     other designator
+#   sending         "" or K or `result` or `imprint`: argument K's value, the
+#                   call's imprint variable T's binding (std::transfer::
+#                   fingerprint[T]), or the call's
+#                   (imprinted) result, crosses to another Botlish VM by
+#                   the transfer codec (core/transfer.tcl; SENDABILITY-AND-
+#                   VALUE-COPY-MILESTONE-1.md), so its static type must
+#                   satisfy the intrinsic trait Sendable
+#                   (hir::types::SendClass: NOT-SENDABLE otherwise) and be
+#                   closed where the call is written (TRANSFER-OPEN-TYPE):
+#                   its schema is the type's. Read by registration, never by
+#                   name (hir::range::VerifySending, hir/transfer.tcl).
 #   hashing         "" or {K MODE}: argument K is hashed -- compared by the
 #                   hash's equality and walked by its canonical encoding
 #                   (core/hashing.tcl; HASHABLE-AND-KEYED-HASH.md) -- so its
@@ -602,7 +613,7 @@ proc core::native::register {name args} {
         -param-types "" -result-type any -tests-type "" -runtime {} -result-shape {} -result-range {} \
         -context-free 0 -errors {} -bounds {} -nomethod 0 -completion 0 -ownership {} -errors-from {} \
         -result-length {} -keeps-length 0 -drop-form {} -layout {} -imprint {} -foreign {} -extern {} \
-        -mutation-stable 0 -fold {} -measures {} -hashing {} -element-place 0 -element-kinds {}]
+        -mutation-stable 0 -fold {} -measures {} -hashing {} -element-place 0 -element-kinds {} -sending {}]
     foreach {option value} $args {
         if {![dict exists $options $option]} {
             error "core::native::register: unknown option \"$option\""
@@ -787,6 +798,10 @@ proc core::native::register {name args} {
             || $arity eq "*" || [lindex $hashing 0] >= $arity || [lindex $hashing 1] ni {required checked})} {
         error "core::native::register: bad -hashing \"$hashing\" for \"$name\" (K required|checked)"
     }
+    set sending [dict get $options -sending]
+    if {$sending ne "" && !($sending in {result imprint} || ([string is digit -strict $sending] && $arity ne "*" && $sending < $arity))} {
+        error "core::native::register: bad -sending \"$sending\" for \"$name\" (K, result or imprint)"
+    }
     set elementPlace [dict get $options -element-place]
     if {$elementPlace ni {0 1} || ($elementPlace && ($arity ne "2" || [lindex $ownership 0] ne "observe"
             || [core::type::base [lindex $paramTypes 0]] ni {mutvec mutarray}))} {
@@ -813,7 +828,8 @@ proc core::native::register {name args} {
         keepsLength [dict get $options -keeps-length] dropForm $dropForm \
         layout $layout imprint $imprint foreign $foreign extern [dict get $options -extern] \
         mutationStable [dict get $options -mutation-stable] fold [dict get $options -fold] \
-        measures $measures hashing $hashing elementPlace $elementPlace elementKinds $elementKinds]
+        measures $measures hashing $hashing elementPlace $elementPlace elementKinds $elementKinds \
+        sending $sending]
     return [core::value::native $name]
 }
 
@@ -1032,6 +1048,15 @@ proc core::native::ValidShape {shape count} {
         # coroutine analysis (hir/coroutines.tcl) -- a handle's protocol, the
         # outward value of its segment, the resume message of a yield.
         return 1
+    }
+    if {[lindex $shape 0] eq {thread-entry}} {
+        # {thread-entry I}: the result is the std::thread::Entry of the
+        # thread entry (`thread fn`) argument I names, applied to its
+        # parameter and result types (std::thread::entry, BOTLISH-OWNED-
+        # THREADS-AND-CROSS-THREAD-ACTORS-MILESTONE-1.md), resolved by
+        # hir::types::ShapeResult.
+        return [expr {$length == 2 && [string is digit -strict [lindex $shape 1]]
+            && ($count eq "" || [lindex $shape 1] < $count)}]
     }
     if {[lindex $shape 0] eq {callback-pointer}} {
         # {callback-pointer I}: the result is the C function pointer of the
@@ -1423,7 +1448,15 @@ proc core::native::invoke {nativeValue argValues} {
             return [core::completion::propagatingError [core::value::errorId $error {*}[lrange $code 3 end]]]
         }
     } else {
-        set result [{*}[dict get $meta impl] {*}$argValues]
+        try {
+            set result [{*}[dict get $meta impl] {*}$argValues]
+        } on 5 failure {
+            # Compiled code's propagate-error (core/completion.tcl's code 5)
+            # from an implementation that delivers one: an abandoned
+            # coroutine's pending yield (core/coroutines.tcl), which compiled
+            # code calls directly and which fails there with this code.
+            return [core::completion::propagatingError $failure]
+        }
     }
     core::value::check $result
     if {$testsType ne ""} {

@@ -241,10 +241,10 @@ test ts-decl-combinations {a tree struct declares no identity, is no context and
     } {tsRejection $body}
 } -result {{TREE-STRUCT-COMBINATION {tree struct "Node" cannot declare an identity: a tree's equality and hashing are its structure -- its fields and its ordered children, recursively -- and an identity clause would give it a second meaning}} {TREE-STRUCT-COMBINATION {context struct "Node" cannot be a tree struct: a context is installed and required by its type, never a recursive value}} {TREE-STRUCT-COMBINATION {tree struct "Node" cannot be opaque: std::tree::walk takes any tree apart into its subtrees, and taking an opaque struct's value apart is its owning module's alone (wrap the tree in an opaque struct of its own to hide it)}} {SYNTAX {duplicate modifier "tree" in this struct declaration}}}
 
-test ts-decl-affine {a tree of affine values is AFFINE-CONTAINER-UNSUPPORTED: an affine field, and an application of a parameterized tree struct to an affine type where a value of it is constructed} -body {
+test ts-decl-affine {a tree of affine values is AFFINE-CONTAINER-UNSUPPORTED: an affine field, and an application of a parameterized tree struct that is affine where a value of it is constructed -- the general rule for a recursive affine application (AFFINE-PARAMETERIZED-APPLICATIONS-CORRECTNESS-MILESTONE-1.md), no tree-only check} -body {
     list [tsKind "fn gen() -> int:\n    yield 1\n    2\ntree struct Node:\n    co: Coroutine{args: \[\], return: int, errors: \[\]}\n    children: List\[Node\]\n1\n"] \
         [tsRejection "fn gen() -> int:\n    yield 1\n    2\ntree struct Node\[T\]:\n    v: T\n    children: List\[Node\[T\]\]\nfn mk() -> int:\n    coroutine {step, first} = gen()\n    n = Node {v: step, children: \[\]}\n    first\nmk()\n"]
-} -result {AFFINE-CONTAINER-UNSUPPORTED {AFFINE-CONTAINER-UNSUPPORTED {the construction is invalid: Node[Coroutine{args: [], return: int, errors: []}] applies tree struct "Node" to an affine type: a tree of affine values nests to any depth, and an affine value is released by a static, finite walk of its type (a tree struct holds unrestricted values)}}}
+} -result {AFFINE-CONTAINER-UNSUPPORTED {AFFINE-CONTAINER-UNSUPPORTED {the construction is invalid: Node[Coroutine{args: [], return: int, errors: []}] is affine (its field "v" holds Coroutine{args: [], return: int, errors: []}) and holds affine values of struct "Node" in a List, MutableVector or MutableArray (Node[Coroutine{args: [], return: int, errors: []}].children: List[Node[Coroutine{args: [], return: int, errors: []}]]): a recursive affine type is not supported -- its release would have to recurse as deep as the value nests, and an affine value is released by a static, finite walk of its type (an unrestricted struct may hold itself in a container)}}}
 
 test ts-decl-module-private {a module's tree struct is an ordinary type of it: private tree structs and their walks stay inside the module, and a public one is walked by importers} -body {
     withPrivateLibrary {
@@ -610,7 +610,7 @@ root = FileTree {path: "/", children: [src, file("/README.md")]}
 # ---------------------------------------------------------------------------
 # Standalone executables
 
-test ts-executable {a standalone executable compares, hashes, walks and prints trees as the JIT does: the program descriptor carries each tree shape's child slot, so a chain 300,000 deep compares on a 1 MiB stack, and the executable prints its result with the native printer} -constraints executableAot -setup {
+test ts-executable {a standalone executable compares, hashes and walks trees as the JIT does: the program descriptor carries each tree shape's child slot, so a chain 300,000 deep compares on a 1 MiB stack; the executable prints no value of its own, so its result is read through the driver protocol} -constraints executableAot -setup {
     set dir [makeDirectory {ts aot}]
 } -body {
     set hir [tsHir "$::tsDecls\na = chain(300000, 1)\n\[a == chain(300000, 1), a == chain(300000, 2), hash(node(1, \[leaf(2)\])), values(node(1, \[node(2, \[leaf(4)\]), leaf(3)\]), std::tree::Order::BreadthFirst), node(1, \[node(2, \[leaf(4)\]), leaf(3)\])\]\n"]
@@ -618,7 +618,7 @@ test ts-executable {a standalone executable compares, hashes, walks and prints t
     set saved [expr {[info exists ::env(BOTLISH_NATIVE_STACK_BYTES)] ? $::env(BOTLISH_NATIVE_STACK_BYTES) : ""}]
     set ::env(BOTLISH_NATIVE_STACK_BYTES) 1048576
     try {
-        tsWithoutGcStress {list [exec $binary] [core::formatValue [native::evalHir $hir]]}
+        tsWithoutGcStress {list [standaloneValue $binary] [core::formatValue [native::evalHir $hir]]}
     } finally {
         if {$saved eq ""} { unset ::env(BOTLISH_NATIVE_STACK_BYTES) } else { set ::env(BOTLISH_NATIVE_STACK_BYTES) $saved }
     }

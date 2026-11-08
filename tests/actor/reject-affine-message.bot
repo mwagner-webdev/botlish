@@ -1,0 +1,20 @@
+# An affine message type: a mailbox of one can be opened (an Address or an Inbox holds no message, so open's M stands where no value of it exists: WRITTEN-AFFINE-APPLICATIONS-MILESTONE-1.md), but no message of it ever crosses -- post, send and receive hold values of M, so M is never imprinted affine there (IMPRINT).
+import std::actor
+import std::event_loop
+import std::event_loop::deterministic
+
+fn ticker() -> int:
+    yield 1
+    0
+
+fn main(context ev: std::event_loop::Loop, ac: std::actor::Actors) -> int errors std::event_loop::SchedulerFault:
+    {to, inbox} = std::actor::open[Coroutine{args: [], return: int, errors: []}](4)
+    coroutine {step} = ticker()
+    std::actor::post(to, step)
+    0
+with context std::event_loop::create(8)
+with context std::event_loop::deterministic::create()
+with context std::actor::create()
+main():
+    on std::event_loop::SchedulerFault:
+        0

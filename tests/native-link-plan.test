@@ -475,9 +475,11 @@ proc nlpExecutable {hir dir name {dirs {}} {frameworks {}}} {
     return [eval $run]
 }
 
-# The standard output of executable EXE, run alone (runBare), trimmed.
+# The value of executable EXE, run alone (bareValue: no environment, and
+# its value read through the driver protocol, since an executable prints no
+# value of its own: PROGRAM-OUTPUT-MILESTONE-1.md).
 proc nlpRun {exe args} {
-    return [string trim [runBare $exe]]
+    return [bareValue $exe]
 }
 
 # The error code's last words and message of HIR's link plan, resolved by
@@ -517,7 +519,7 @@ test nlp-static-beats-shared {a static declaration takes the archive where the s
                 set value [nlpRun $exe]
             } else {
                 set value [withEnvironment [list LD_LIBRARY_PATH [lindex $dirs 0] DYLD_LIBRARY_PATH [lindex $dirs 0]] {
-                    string trim [exec $exe]
+                    standaloneValue $exe
                 }]
             }
             lappend results shared $value
@@ -690,7 +692,7 @@ test nlp-static-missing-symbol {a C function no archive of the plan defines fail
     list [dict get $options -errorcode] [string match "*native/[ctool::staticName nlp] (static)*nlp_no_such_function*" $message]
 } -cleanup {file delete -force $dir} -result {{NATIVE LINK} 1}
 
-test nlp-static-borrowing {C byte borrowing and a C sentinel result through a statically linked archive behave as through any library: read and write exposures, the result checked right after the call} -constraints {nlpFixture} -body {
+test nlp-static-borrowing {C byte borrowing and a C sentinel result through a statically linked archive behave as through any library: read and write exposures, the result checked right after the call -- also under GC stress, where a plain run completes printing nothing (an executable never prints its value)} -constraints {nlpFixture} -body {
     set dir [nlpApp [nlpDir] [list main.bot {import std::abi
 import std::abi::bytes
 import std::ffi::c
@@ -707,8 +709,8 @@ filled = fill(std::abi::bytes::zeroed(std::abi::usize(4)), 4, 10)
     file mkdir [file join $dir native]
     file copy [nlpFixturePath static [ctool::staticName nlp]] [file join $dir native]
     set exe [nlpExecutable [nlpHir $dir] $dir prog]
-    list [nlpRun $exe] [string trim [lindex [withEnvironment {BOTLISH_NATIVE_GC_STRESS 1} {list [exec $exe]}] 0]]
-} -cleanup {file delete -force $dir} -result {{[294, 46, -1, 3]} {[294, 46, -1, 3]}}
+    list [nlpRun $exe] [standaloneValue $exe BOTLISH_NATIVE_GC_STRESS 1] [withEnvironment {BOTLISH_NATIVE_GC_STRESS 1} {exec $exe}]
+} -cleanup {file delete -force $dir} -result {{[294, 46, -1, 3]} {[294, 46, -1, 3]} {}}
 
 test nlp-static-imported-module-backends {an imported module's static declaration reaches the program's link on the native backends (a linked run) and the Tcl backends refuse the C call as ever} -constraints {nlpFixture} -body {
     set dir [nlpApp [nlpDir] [list main.bot "import nlp\nnlp::add(1, 1)\n" \
