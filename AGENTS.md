@@ -69,6 +69,10 @@ releases honest; `tools/ci/runs.py` implements the second and the third,
   - Never publish from a push run, never rebuild in a release run, never
     give the gate a credential or more than `actions: write`, and never
     give it a way to dispatch a release twice or move a tag backwards.
+  - A release run holds `NAME-release`; its publish job's group is
+    `NAME-publish`. Never put a job in the group its own run holds: GitHub
+    fails such a job before it gets a runner (every release run did so
+    until 2026-11-08; `test_no_job_waits_for_its_own_run`).
 * **Every test workflow runs its host's canary first, and its expensive
   jobs wait for it** (CI-RUNS.md, "The canary"): tests.yml, tests-arm64.yml
   and windows-x86_64.yml a `canary` job, macos-arm64.yml the smoke job's
