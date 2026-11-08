@@ -18,14 +18,15 @@ name: react-native 2048
 #            and Gradle with the app's own dependencies)
 #   android  the APK on an Android emulator, per image: the self-test
 #            against the interpreter, reloads, GC stress, swipes, the win and
-#            the end, a clean exit (tools/android-acceptance.sh); on API 34
-#            the clean room's APK too, and the debug build's development
+#            the end, a clean exit (tools/android-acceptance.sh); with 4 KiB
+#            pages the clean room's APK too, and the debug build's development
 #            reload with Metro (tools/dev-reload.sh). The images
 #            are x86_64 (GitHub's Linux runners have KVM for x86_64 guests
 #            only, and Google's emulator runs arm64 images on arm64 hosts
 #            only): the arm64-v8a APK runs through Android's ARM native
-#            bridge, which emulator.sh requires the image to have. One image
-#            has 4 KiB pages, one 16 KiB pages.
+#            bridge, which emulator.sh requires the image to have (trying
+#            the next image of the list otherwise). One job's images have
+#            4 KiB pages, the other's 16 KiB pages.
 
 on:
   push:
@@ -150,12 +151,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: API 34, 4 KiB pages
-            image: "system-images;android-34;google_apis;x86_64"
+          - name: 4 KiB pages
+            images: "system-images;android-34;google_apis;x86_64 system-images;android-33;google_apis;x86_64 system-images;android-30;google_apis;x86_64"
             cleanroom: true
             development: true
-          - name: API 35, 16 KiB pages
-            image: "system-images;android-35;google_apis_ps16k;x86_64"
+          - name: 16 KiB pages
+            images: "system-images;android-35;google_apis_ps16k;x86_64 system-images;android-36;google_apis_ps16k;x86_64"
             cleanroom: false
             development: false
     steps:
@@ -172,8 +173,12 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
-      - name: Boot the emulator
-        run: audit/react-native-2048/tools/emulator.sh "${{ matrix.image }}"
+      - name: Boot the emulator (the first image that runs arm64-v8a code)
+        env:
+          IMAGES: ${{ matrix.images }}
+        run: |
+          read -r -a images <<< "$IMAGES"
+          audit/react-native-2048/tools/emulator.sh "${images[@]}"
 
       - name: Acceptance (audit/react-native-2048/tools/android-acceptance.sh)
         run: |
