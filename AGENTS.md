@@ -481,11 +481,16 @@ proofs, as native lowering does, and runs no C compiler. Keep it so:
 * Harnesses and providers stay outside the backend
   (`examples/c-freestanding/`), as integration code of a target's.
 * Contexts (C-CONTEXTS-FREESTANDING-MILESTONE-1.md) are the front end's,
-  translated, never re-decided: an installation is a `const` object of the
+  translated, never re-decided: an installation is an object of the
   program function's frame (per run); a function's C parameters after its
-  ordinary ones are one `const T *` per context of its block's
+  ordinary ones are one `T *` per context of its block's
   `requiredContexts`, in order, and a call passes exactly the callee's
-  requirement (`ContextArgs`): the signature is its authority. Never put a
+  requirement (`ContextArgs`): the signature is its authority. Nothing
+  writes through the pointer, but neither it nor the object is
+  `const`-qualified: GCC 15 reports an initialized object passed to a
+  pointer-to-const parameter "may be used uninitialized" after cloning a
+  recursive function with its constant contents
+  (`cc-ctx-no-const-context-pointers`). Never put a
   context in file-scope storage, a global or thread-local pointer, a
   registry, an environment struct handed to every function, a lookup or a
   runtime service; never compute a requirement, a selection or an

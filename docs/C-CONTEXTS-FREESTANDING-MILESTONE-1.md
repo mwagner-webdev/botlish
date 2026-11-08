@@ -4,8 +4,8 @@ Completion report. The C backend (`main.tcl -emit-c`,
 C-COMPILE-FREESTANDING-MILESTONE-1.md) now compiles Botlish programs that use
 contexts, context traits, injected capabilities and context composition to
 freestanding C11. A context struct is an ordinary C struct; `with context
-EXPR` stores the value in a `const` object of the run's own frame; every
-function whose requirement is not empty takes one `const T *` parameter per
+EXPR` stores the value in an object of the run's own frame; every
+function whose requirement is not empty takes one `T *` parameter per
 context it requires; every call passes the callee's requirement on. There is
 no registry, no lookup, no global context, no dispatch and no new runtime
 service, and the generated C of an application's two configurations links
@@ -52,9 +52,9 @@ Nothing here was run on embedded hardware.
 `surface/`, `compiler/` or `native/` changed):
 
 * context structs as C structs (the backend refused them before);
-* `context#install` as a `const` object of the program function's frame;
+* `context#install` as an object of the program function's frame;
 * the transitive requirement (`requiredContexts`, computed by
-  `hir/contexts.tcl`) as `const T *` parameters of every instance's C
+  `hir/contexts.tcl`) as `T *` parameters of every instance's C
   function, passed on at every call (`ContextArgs`);
 * `context#load` (a context parameter) as no C variable at all: its uses read
   through the pointer, a projection is `ctx_T->field`;
@@ -71,7 +71,7 @@ dependencies are contexts (`contexts/`, section 5), a harness that runs two
 generated programs interleaved in one executable (`harness/two_apps.c`), an
 entry hook in the freestanding startup (`harness/linux_start.c`
 `-DBOTLISH_START_ENTRY`), and a fourth demonstration in `demo.sh`.
-`tests/c-compile.test` has 20 new tests (60 in all; section 14).
+`tests/c-compile.test` has 21 new tests (61 in all; section 14).
 
 | # | acceptance criterion | status | evidence |
 |---|---|---|---|
@@ -191,7 +191,7 @@ What the C backend reads [inspection]:
 
 | HIR fact | read by | C |
 |---|---|---|
-| `hir::contexts::installId` of a `context#install` call | `Install` | `const T ctx_T = VALUE;` in the program function |
+| `hir::contexts::installId` of a `context#install` call | `Install` | `T ctx_T = VALUE;` in the program function |
 | `hir::contexts::loadId` of a `context#load` call bound to a context parameter | `Bind`, `ContextValue` | the local names `(*ctx_T)`; no C variable |
 | `requiredContexts` of the callee instance's block (`hir::contexts::required`) | `ContextArgs`, `Function` | the callee's pointer parameters and the arguments passed |
 | `hir::structs::isContext`, `IsAffine`, `fieldTypes` | `StructAggregate`, `ContextRepr` | a C struct, or C UNSUPPORTED naming the context |
@@ -206,10 +206,10 @@ block, and the C backend compiles it as the ordinary direct call it is.
 
 | | interp, compile (Tcl) | cranelift (native) | C (this milestone) |
 |---|---|---|---|
-| installed storage | `core::contexts::installed`, a dict keyed by identity, per run (`core::contexts::fresh`) | the running Vm's context area: one fixed slot per installed type, flattened to 64-bit leaves | a `const` object of `PREFIX_program`'s frame, per run |
-| install | `dict set installed ID VALUE` | `contextstore OFFSET %leaf` per leaf | `const T ctx_T = VALUE;` |
+| installed storage | `core::contexts::installed`, a dict keyed by identity, per run (`core::contexts::fresh`) | the running Vm's context area: one fixed slot per installed type, flattened to 64-bit leaves | an object of `PREFIX_program`'s frame, per run |
+| install | `dict set installed ID VALUE` | `contextstore OFFSET %leaf` per leaf | `T ctx_T = VALUE;` |
 | load | `dict get installed ID` | `contextload OFFSET` per projected leaf; an object built only where needed | the pointer parameter; a projection is `ctx_T->f` |
-| how a function reaches it | the process-wide dict | the Vm argument every native function already receives | an explicit `const T *` parameter per required context |
+| how a function reaches it | the process-wide dict | the Vm argument every native function already receives | an explicit `T *` parameter per required context |
 | a function's authority visible in its signature | no | no | yes: exactly `requiredContexts` |
 | context traits, inject blocks | gone before the backend (monomorphized program; `if true:`) | gone | gone |
 | unverified program | the semantic error when the load runs | the first context diagnostic at start | refused at compile time with the first context diagnostic |
@@ -261,9 +261,9 @@ functions, unedited:
 static store_bench_status store_bench_program(store_bench_shop_Day *out)
 {
     store_bench_simclock_SimClock v_context_503_9 = ((store_bench_simclock_SimClock){.f_start = INT64_C(30000), .f_offset = INT64_C(600)});
-    const store_bench_simclock_SimClock ctx_simclock_SimClock = v_context_503_9;
+    store_bench_simclock_SimClock ctx_simclock_SimClock = v_context_503_9;
     store_bench_terminal_Terminal v_context_563_11 = ((store_bench_terminal_Terminal){.f_limit = INT64_C(500), .f_fee = INT64_C(3)});
-    const store_bench_terminal_Terminal ctx_terminal_Terminal = v_context_563_11;
+    store_bench_terminal_Terminal ctx_terminal_Terminal = v_context_563_11;
     store_bench_shop_Day r1;
     store_bench_status st2 = store_bench_1_shop_day_payment_Payment_terminal_Terminal(INT64_C(120), INT64_C(900), INT64_C(480), &ctx_simclock_SimClock, &ctx_terminal_Terminal, &r1);
     if (st2 != store_bench_OK) {
@@ -274,7 +274,7 @@ static store_bench_status store_bench_program(store_bench_shop_Day *out)
 }
 
 /* shop::sell<payment::Payment=terminal::Terminal> (i2 int) */
-static store_bench_status store_bench_2_shop_sell_payment_Payment_terminal_Terminal(int64_t p_price_18, const store_bench_simclock_SimClock *ctx_simclock_SimClock, const store_bench_terminal_Terminal *ctx_terminal_Terminal, store_bench_shop_Sale *out)
+static store_bench_status store_bench_2_shop_sell_payment_Payment_terminal_Terminal(int64_t p_price_18, store_bench_simclock_SimClock *ctx_simclock_SimClock, store_bench_terminal_Terminal *ctx_terminal_Terminal, store_bench_shop_Sale *out)
 {
     store_bench_payment_Receipt j1 = store_bench_payment_Receipt_zero;
     store_bench_status hst2 = store_bench_OK;
@@ -300,7 +300,7 @@ static store_bench_status store_bench_2_shop_sell_payment_Payment_terminal_Termi
 }
 
 /* terminal::authorize<clock::Clock=simclock::SimClock> (i3 int) */
-static store_bench_status store_bench_3_terminal_authorize_clock_Clock_simclock_SimClock(int64_t p_amount_14, const store_bench_simclock_SimClock *ctx_simclock_SimClock, const store_bench_terminal_Terminal *ctx_terminal_Terminal, store_bench_payment_Receipt *out)
+static store_bench_status store_bench_3_terminal_authorize_clock_Clock_simclock_SimClock(int64_t p_amount_14, store_bench_simclock_SimClock *ctx_simclock_SimClock, store_bench_terminal_Terminal *ctx_terminal_Terminal, store_bench_payment_Receipt *out)
 {
     if (p_amount_14 > ctx_terminal_Terminal->f_limit) {
         return store_bench_E_payment_Declined;
@@ -315,7 +315,7 @@ static store_bench_status store_bench_3_terminal_authorize_clock_Clock_simclock_
 }
 
 /* simclock::now (i5 generic) */
-static store_bench_status store_bench_5_simclock_now(const store_bench_simclock_SimClock *ctx_simclock_SimClock, int64_t *out)
+static store_bench_status store_bench_5_simclock_now(store_bench_simclock_SimClock *ctx_simclock_SimClock, int64_t *out)
 {
     *out = (ctx_simclock_SimClock->f_start + ctx_simclock_SimClock->f_offset);
     return store_bench_OK;
@@ -338,7 +338,7 @@ The rules [inspection] `ccompile::ContextName`, `ContextRepr`,
   global name the backend emits starts with `PREFIX_`, so no context name
   may: for a program named `ctx` (`ctx.bot`, whose types are `ctx_Clock`...)
   the stem is `cx_` (`cc-ctx-names-avoid-the-prefix` [test]; writing that
-  test found the collision, `const ctx_Clock *ctx_Clock`, before any code
+  test found the collision, `ctx_Clock *ctx_Clock`, before any code
   shipped);
 * the parameters come after the ordinary ones, in the requirement's sorted
   identity order, before the result pointer;
@@ -352,7 +352,7 @@ The rules [inspection] `ccompile::ContextName`, `ContextRepr`,
 What an optimizer makes of it [run] (`gcc -std=c11 -O2 -ffreestanding -c
 store_bench.c`): `store_bench_run` is 78 bytes of constant stores into
 `*value` (`movq $0x7788,0x18(%rdi)`: the stamp 30600); every call, pointer
-and context disappeared. Explicit `const` dependencies and direct calls are
+and context disappeared. Explicit dependencies and direct calls are
 transparent to the C compiler; a registry, a function-pointer table or a
 global environment pointer would have hidden them.
 
@@ -361,7 +361,7 @@ global environment pointer would have hidden them.
 * **Construction** is ordinary: a struct literal, or any function returning
   the context struct (`device::open(11)` in `cc-parity-contexts`), compiled
   like every other call [test].
-* **Installation** declares `const T ctx_T = VALUE;` where the top-level
+* **Installation** declares `T ctx_T = VALUE;` where the top-level
   statement is, so the object exists from its `with context` line on --
   exactly the language's order (CONTEXTS.md, "Order"). A later constructor
   may use an earlier context: `with context gain_for()` after `with context
@@ -485,13 +485,13 @@ are the two clocks' (30000 + 600; 14 h 34 min = 52440 s).
 |---|---|
 | each application receives its own dependencies | [test] `cc-ctx-two-apps`: every line equals the reference backends' value of its own program |
 | state does not leak between instances | [test] every run equals its program's first run; `cc-ctx-installed-in-the-run`: no object of static storage duration in the generated C |
-| injected implementations do not overwrite one another | [inspection] each installed context is a `const` object of its own run's frame; the two programs share no symbol (`cc-public-names-prefixed`) |
+| injected implementations do not overwrite one another | [inspection] each installed context is an object of its own run's frame, never written after its installation; the two programs share no symbol (`cc-public-names-prefixed`) |
 | call order does not change which context an application uses | [test] A after B, B after A and A after A all give each program's value |
 | repeated invocation preserves the semantics | [test] three runs of each, identical |
 | coexistence in one program image, not runs in isolation | [test] one executable, `cc-ctx-two-apps` (hosted, gcc and clang), `cc-ctx-two-apps-freestanding` (no libc, no undefined symbol), `cc-ctx-two-apps-cross` [emulated] |
 
 The structural guarantee is the stronger one: an installed context is a
-`const` object of `PREFIX_program`'s frame, never file-scope storage, so no
+object of `PREFIX_program`'s frame, never file-scope storage, so no
 second run and no other program can observe or replace it (the test reads
 the generated C's file-scope declarations and finds no writable object).
 
@@ -549,17 +549,22 @@ Contexts are authority, and the C makes it concrete [inspection, test]:
   CONTEXT-RETAINED-AUTHORITY, CONTEXT-FUNCTION-VALUE, ...) stays the front
   end's, before C.
 
-The pointers are `const`: nothing the backend compiles mutates a context.
-For the actor and embedded event-loop work this matters: a coroutine frame
-or an actor that is handed `const Clock *` and nothing else cannot reach a
-display [design].
+Nothing writes through the pointers: the backend emits only reads of a
+context. They are not `const`-qualified for one practical reason (section
+16): GCC treats the address of an object passed to a pointer-to-const
+parameter as a read of it, and GCC 15 reported an initialized installed
+context "may be used uninitialized" there. For the actor and embedded
+event-loop work the property that matters holds either way: a coroutine
+frame or an actor handed `Clock *` and nothing else cannot reach a display
+[design].
 
 ## 11. Value, ownership, `place` and error semantics
 
 [inspection; test where named]
 
 * **Value semantics.** A context is an immutable value. The installed object
-  is `const`; a context parameter is the pointee read in place; a use as a
+  is never written after its installation; a context parameter is the
+  pointee read in place; a use as a
   value (`grab()` returns `c`; `snap` stores it in a Snapshot; the program's
   value displays it) copies the struct, which is exactly Botlish's value
   semantics for an immutable struct: `cc-parity-contexts` returns and stores
@@ -574,8 +579,8 @@ display [design].
 * **`place`, mutation, affine state.** The C subset has no MutableVector,
   MutableArray or affine values, so a context that holds one -- the
   language's only mutable or owned context state -- is C UNSUPPORTED, naming
-  the context and its member (`cc-ctx-unsupported`); the pointer stays
-  `const` until a milestone represents in-place collection mutation.
+  the context and its member (`cc-ctx-unsupported`); nothing writes through
+  the pointer until a milestone represents in-place collection mutation.
 * **Declared errors** cross context boundaries as every status does: a
   `fail` inside an implementation two modules away (`terminal::authorize`'s
   `Declined`) is the status the application's handler tests
@@ -649,7 +654,7 @@ Reproduce:
 
 ## 14. Cross-backend parity tests
 
-`tests/c-compile.test`, 20 new tests [test]:
+`tests/c-compile.test`, 21 new tests [test]:
 
 | test | what |
 |---|---|
@@ -666,6 +671,7 @@ Reproduce:
 | `cc-ctx-requirements-are-signatures` | every function's pointer parameters equal its requirement; inject passes only the injected |
 | `cc-ctx-names-avoid-the-prefix` | a program named `ctx` builds (contexts named `cx_`) |
 | `cc-ctx-installed-in-the-run` | no writable file-scope object; five installations, all in the program function; the header's statement; "Not reentrant" where a function reads a top-level value |
+| `cc-ctx-no-const-context-pointers` | no context pointer parameter or installed context is `const`-qualified (the GCC 15 diagnostic of section 16) |
 | `cc-ctx-big-int-field` | an unbounded Int context field: C and the Tcl backends agree, native refuses (CONTEXT-NATIVE-LOWERING-UNSUPPORTED), services `int.add int.mul` |
 | `cc-ctx-manifest-transitive` | a service needed only inside a context-trait implementation is listed; no context entry |
 | `cc-ctx-unsupported` | String, MutableVector and C-pointer members: C UNSUPPORTED naming the context, at each use |
@@ -686,7 +692,7 @@ expressible as golden tests).
 | construct | C |
 |---|---|
 | `context struct`, `opaque context struct` of representable members | supported: a C struct |
-| `with context EXPR` at the entry program's top level | supported: a `const` object of the run's frame |
+| `with context EXPR` at the entry program's top level | supported: an object of the run's frame |
 | a constructor that needs an earlier context | supported |
 | context parameters, several per function | supported |
 | transitive requirements, recursion, nested functions | supported |
@@ -726,9 +732,9 @@ lists contexts as unsupported (`tools/compilerpedia.tcl check`: 0 problems).
 ld.lld 18.1.3, qemu-user 8.2.2, the cross libgcc 13 packages, the native
 backend built from this checkout:
 
-* `tests/c-compile.test`: 60 tests, 60 passed, none skipped -- the 40
+* `tests/c-compile.test`: 61 tests, 61 passed, none skipped -- the 40
   milestone-1 tests (40 of 40 on the same machine before the change) and the
-  20 new ones.
+  21 new ones (also after the CI fixes below).
 * `tests/main-cli.test`: 72 passed.
 * `tests/numeric-looking-names.test`: 5 passed (its `nl-no-string-ternary`
   reads `ccompile/`: no `expr` ternary of the new code selects a name).
@@ -736,19 +742,74 @@ backend built from this checkout:
 * `tests/compilerpedia.test`: 43 passed; `tools/compilerpedia.tcl check`:
   1290 topics, 758 examples run, 0 problems.
 * `tools/mutant-catalogs.tcl`: 90 catalogs, 3177 mutants, 0 problems.
-* `audit/golden/migration/merge.tcl -check 1`: passes (13346 rows).
+* `audit/golden/migration/merge.tcl -check 1`: passes (13347 rows).
 * `examples/c-freestanding/demo.sh`: all four demonstrations.
 
 No file of `core/`, `hir/`, `surface/`, `compiler/` or `native/` changed, so
 the other backends' behavior is untouched by construction; the parity tests
 ran them on every context program.
 
+### CI on the branch
+
+[run] main's latest runs when the branch was made (715ce1e, the branch's
+base): every test workflow of that commit was queued or in progress; the
+latest completed `tests.yml` run of main (f2787af) and `static-decisions`
+(163ed13) had passed, `ci tools` of 715ce1e passed. None of the tests below
+exists on main, so no failure below is main's.
+
+The first push of the branch (e5196aa) ran what a branch push starts:
+
+| workflow | result |
+|---|---|
+| tests: the Linux x86-64 canary (`ubuntu-26.04`: the mutant catalogs, the warning gate, then the changed test files) | **failed**: 3 tests of `tests/c-compile.test` (cause 1) |
+| tests (linux arm64): its canary (`ubuntu-24.04-arm`), `tests/c-compile.test` included | passed |
+| tests (macos arm64): the smoke tier with its canary | **failed**: 1 test (cause 2); every other test of `tests/c-compile.test` passed on macOS |
+| tests (windows x86-64): its canary | **failed**: the same test (cause 2) |
+| icy-tower (windows x86-64), icy-tower (macos arm64) | passed |
+
+**Cause 1: GCC 15's `-Wmaybe-uninitialized` of pointer-to-const
+arguments.** `cc-parity-contexts`, `cc-ctx-freestanding-objects` and
+`cc-ctx-names-avoid-the-prefix` -- three builds of one corpus program at
+-O2 -- failed with
+
+    prog.c:207:27: error: 'ctx_Gain' may be used uninitialized [-Werror=maybe-uninitialized]
+      207 |         prog_status st3 = prog_10_tree((p_n_30 - INT64_C(1)), ctx_Gain, &r2);
+    prog.c:200:20: note: by argument 2 of type 'const prog_Gain *' to 'prog_10_tree.constprop' declared here
+    prog.c:50:21: note: 'ctx_Gain' declared here
+       50 |     const prog_Gain ctx_Gain = v_context_1279_44;
+
+in the recursive `tree`, whose context GCC had inlined three levels deep and
+then called through a clone made for the context's constant contents
+(`.constprop`). The object is initialized. [inspection] GCC's
+`maybe_warn_pass_by_reference` (gcc/tree-ssa-uninit.cc, the GCC 15 branch)
+takes the address of an object passed to a pointer-to-const parameter for
+a read of it and checks no other pointer parameter (`else if
+(!TYPE_READONLY (TREE_TYPE (argtype))) continue;`); after the propagation
+it found no initializing store reaching the clone's call. [run] gcc 13.3.0
+and 14.2.0 do not report it at any optimization level, and gcc 15 could not
+be installed in this container, so the canary is the evidence. The fix:
+neither the pointer parameters nor the installed objects are
+`const`-qualified (`T *ctx_T`, `T ctx_T = ...;`). Nothing writes through
+them -- the backend emits only reads -- so the qualifier documented an
+invariant the backend keeps anyway; `cc-ctx-no-const-context-pointers`
+pins the representation, and the comment of ccompile.tcl's Contexts section
+says why.
+
+**Cause 2: a Linux program compiled for the host's target.**
+`cc-ctx-unsupported-around-contexts` compiled a program importing
+`std::linux::io` for the host target, `UNSUPPORTED-PLATFORM` on macOS and
+Windows. It now compiles it for `linuxTarget`, as AGENTS.md asks of every
+test that compiles a Linux program.
+
+The push of the fix ran the same workflows again: its results are recorded
+below once they are read; until then they are **pending**, not passed.
+
 ## 17. Known limitations
 
 * **The C subset bounds the contexts.** A context is compiled when its
   members are: no String, List of unknown length, Float64, function or
   affine member; no MutableVector or MutableArray, so no in-place context
-  state (the pointer stays `const`).
+  state (nothing writes through the pointer).
 * **One environment per program** is the language's model: a second
   configuration is a second entry program, compiled with its own prefix, its
   shared modules compiled again into it (no separate compilation).
@@ -772,7 +833,7 @@ recommended, now with contexts available to them. A fusable coroutine
 live locals and a state enum, `resume` a `switch`. The context design
 carries over directly [design]:
 
-* a coroutine's frame keeps the `const T *` pointers its construction's
+* a coroutine's frame keeps the `T *` pointers its construction's
   requirement names -- the language already fixes a coroutine's providers
   at its construction (COROUTINES.md, section 39: "a coroutine's code runs
   with the providers its construction selected") and keeps a coroutine
@@ -787,8 +848,9 @@ carries over directly [design]:
   shape `store_bench.bot` and `store_field.bot` already have.
 
 Smaller, independent steps that would widen the context subset first:
-MutableVector/MutableArray in C (in-place context state, the pointer then
-non-const for those members), and Strings with an allocation service.
+MutableVector/MutableArray in C (in-place context state: writes through the
+pointer the backend already passes), and Strings with an allocation
+service.
 
 ## 19. Files, and what to run when changing this
 

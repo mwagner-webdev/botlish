@@ -11452,6 +11452,7 @@ tests/c-compile.test cc-ctx-cross-targets pass
 tests/c-compile.test cc-ctx-requirements-are-signatures pass
 tests/c-compile.test cc-ctx-names-avoid-the-prefix pass
 tests/c-compile.test cc-ctx-installed-in-the-run pass
+tests/c-compile.test cc-ctx-no-const-context-pointers pass
 tests/c-compile.test cc-ctx-big-int-field pass
 tests/c-compile.test cc-ctx-manifest-transitive pass
 tests/c-compile.test cc-ctx-unsupported pass

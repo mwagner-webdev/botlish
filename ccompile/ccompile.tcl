@@ -38,10 +38,10 @@
 #                   handlers.
 #   contexts        (C-CONTEXTS-FREESTANDING-MILESTONE-1.md) a context struct
 #                   is a C struct like any other; `with context EXPR` stores
-#                   its value in a `const` object of the program function's
-#                   own frame (PREFIX_program: one per run); a function whose
+#                   its value in an object of the program function's own
+#                   frame (PREFIX_program: one per run); a function whose
 #                   transitive requirement (hir/contexts.tcl's
-#                   requiredContexts) is not empty takes one `const T *`
+#                   requiredContexts) is not empty takes one `T *`
 #                   parameter per context it requires, after its ordinary
 #                   parameters, and every call passes the callee's
 #                   requirement on from the caller's own parameters (or, in
@@ -975,12 +975,12 @@ proc ccompile::HelperOrder {} {
 # lowering"). What is left is said in C with explicit dependencies:
 #
 #   installation  `with context EXPR` (bind context#N EXPR, then
-#                 context#install(context#N)) declares `const T ctx_T = ...;`
+#                 context#install(context#N)) declares `T ctx_T = ...;`
 #                 in the program function: the installed context is an
 #                 object of that run's own frame, never file-scope storage,
 #                 so two runs, or two programs, never share one.
 #   requirement   a function whose block requires contexts R (sorted
-#                 identities) takes one parameter `const T *ctx_T` per T of
+#                 identities) takes one parameter `T *ctx_T` per T of
 #                 R, after its ordinary ones: its C signature states its
 #                 authority, exactly what it and its callees may use.
 #   call          passes the callee block's requirement from the caller's own
@@ -992,9 +992,17 @@ proc ccompile::HelperOrder {} {
 #                 ctx_T->field, a use as a value copies the immutable
 #                 installed value, as any struct is passed.
 #
-# The pointer is `const`: nothing the backend compiles mutates a context (a
-# context member mutated in place is a MutableVector's or MutableArray's,
-# which C does not represent yet), and a context parameter is immutable.
+# Nothing writes through the pointer: the backend emits only reads of a
+# context (a member mutated in place would be a MutableVector's or
+# MutableArray's, which C does not represent yet), and a context parameter
+# is immutable. Neither the pointer nor the object is const-qualified all
+# the same: GCC takes the address of an object passed to a pointer-to-const
+# parameter for a read of it (tree-ssa-uninit.cc's
+# maybe_warn_pass_by_reference, which checks no other pointer parameter),
+# and GCC 15, propagating a constant installed context into a clone of a
+# recursive function, reported the initialized object "may be used
+# uninitialized" (-Wmaybe-uninitialized, an error under -Werror;
+# C-CONTEXTS-FREESTANDING-MILESTONE-1.md, section 16).
 
 # The diagnostics of a program that failed context verification
 # (hir/contexts.tcl): such a program is never compiled.
@@ -1068,8 +1076,8 @@ proc ccompile::ContextArgs {fnVar block e} {
 }
 
 # `with context VALUE` (call E of context#install, NODE): VALUE becomes the
-# installed context of its verified identity, a `const` object of the
-# program function's frame, from here to the end of the run.
+# installed context of its verified identity, an object of the program
+# function's frame, from here to the end of the run (never written again).
 proc ccompile::Install {fnVar e node} {
     upvar 1 $fnVar fn
     variable hir
@@ -1086,7 +1094,7 @@ proc ccompile::Install {fnVar e node} {
     }
     set repr [ContextRepr $id $e]
     set c [ContextName $id]
-    Emit fn "const [CType $repr] $c = [Want fn [lindex $ops 0] $repr];"
+    Emit fn "[CType $repr] $c = [Want fn [lindex $ops 0] $repr];"
     # (An installed context nothing reaches is still installed: marked used.)
     Emit fn "@@UNREAD:ctx:$c@@"
     dict set fn contexts $id "&$c"
@@ -1295,7 +1303,7 @@ proc ccompile::Function {id} {
     set unused {}
     foreach cid $contextIds {
         set c [ContextName $cid]
-        lappend paramList "const [CType [ContextRepr $cid $block]] *$c"
+        lappend paramList "[CType [ContextRepr $cid $block]] *$c"
         if {![regexp "\\m$c\\M" $text]} {
             lappend unused "    (void)$c;"
         }

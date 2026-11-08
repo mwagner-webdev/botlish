@@ -361,23 +361,23 @@ is rejected at compile time with C UNSUPPORTED (error.c-unsupported),
 never compiled approximately.
 
 == CONTEXTS
-Nothing of a registry or a lookup reaches C. A context struct is an
-ordinary C struct. `with context EXPR` stores the value in a const object
-of FILE_run's own frame: each run has its own installed contexts, and no
-context is ever a file-scope object. A function whose requirement (its own
-context parameters and its callees', transitively: `-contexts` lists it) is
-not empty takes one `const T *` parameter per context it requires, after
-its ordinary parameters, and every call passes the callee's requirement on:
-a function's C signature is its authority, exactly the contexts it and its
-callees may use. A context parameter `context io: T` reads through that
-pointer. A context trait's implementation is selected before any backend
-runs, so a trait operation is a direct C call of the installed provider's
-implementation; an inject block is checked before any backend runs and
-needs no C at all (a call inside it passes only what its callee requires).
+Nothing of a registry or a lookup reaches C. A context struct is an ordinary
+C struct. `with context EXPR` stores the value in an object of FILE_run's
+own frame: each run has its own installed contexts, and no context is ever a
+file-scope object. A function whose requirement (its own context parameters
+and its callees', transitively: `-contexts` lists it) is not empty takes one
+`T *` parameter per context it requires, after its ordinary parameters, and
+every call passes the callee's requirement on: a function's C signature is
+its authority, exactly the contexts it and its callees may use. A context
+parameter `context io: T` reads through that pointer; nothing writes through
+it. A context trait's implementation is selected before any backend runs, so
+a trait operation is a direct C call of the installed provider's
+implementation; an inject block is checked before any backend runs and needs
+no C at all (a call inside it passes only what its callee requires).
 Contexts need no runtime service: the program installs them itself, so the
-embedding supplies nothing, and FILE.runtime.json lists only what the
-code they reach calls. Two programs (one application installed two ways)
-link side by side, each with its own prefix and its own contexts.
+embedding supplies nothing, and FILE.runtime.json lists only what the code
+they reach calls. Two programs (one application installed two ways) link
+side by side, each with its own prefix and its own contexts.
 
 == THINGS TO KNOW
   * The C toolchain itself may call memcpy, memset, memmove and memcmp

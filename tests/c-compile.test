@@ -1121,8 +1121,8 @@ f(3000000000000, 7)
 
 # ---------------------------------------------------------------------------
 # Contexts (C-CONTEXTS-FREESTANDING-MILESTONE-1.md): a context struct is a C
-# struct, an installation a const object of the program function's own
-# frame, a function's transitive requirement its const pointer parameters,
+# struct, an installation an object of the program function's own frame, a
+# function's transitive requirement its pointer parameters,
 # a call passes the callee's requirement on. Beside the parity corpus
 # programs above: the example application installed two ways and both
 # configurations run in one executable, hosted and with no C library; the
@@ -1309,7 +1309,7 @@ test cc-ctx-cross-targets "the context programs compile for other architectures,
 } -result {{}}
 
 # The C function of every instance takes exactly its block's transitive
-# requirement, one const pointer per context, after its ordinary parameters:
+# requirement, one pointer per context, after its ordinary parameters:
 # its signature states its authority. Calls pass on only what the callee
 # requires -- inside `inject context Fee:` only Fee.
 proc ccContextParams {c prefix} {
@@ -1331,12 +1331,12 @@ test cc-ctx-requirements-are-signatures "each function's C parameters are its tr
 test cc-ctx-names-avoid-the-prefix "a program named ctx (its types ctx_Clock, ...) names its contexts cx_: no context name starts with the prefix, so none collides with a type" -constraints hostCC -body {
     set gen [ccGenerate [dict get $::ccCorpus contexts] ctx]
     set c [dict get [dict get $gen out] files ctx.c]
-    list [regexp {const ctx_Clock \*cx_Clock} $c] [regexp {[^A-Za-z_]ctx_Clock [^=]*= \(\(ctx_Clock\)} $c] \
+    list [regexp {[(,] ctx_Clock \*cx_Clock} $c] [regexp {[^A-Za-z_]ctx_Clock [^=]*= \(\(ctx_Clock\)} $c] \
         [expr {[ccRun [ccBuild $gen [lindex $::ccCompilers 0] {} -O2]] eq [ccReference [dict get $::ccCorpus contexts]]}]
 } -result {1 1 1}
 
 # Installed contexts are objects of the run's frame: no object of static
-# storage duration holds one, every installation is a const object of the
+# storage duration holds one, every installation is an object of the
 # program function, and the header says what a run writes. (A program whose
 # functions read a top-level value keeps it at file scope, and says so.)
 proc ccFileScopeObjects {text} {
@@ -1348,17 +1348,30 @@ proc ccFileScopeObjects {text} {
     }
 }
 
-test cc-ctx-installed-in-the-run "no installed context is stored at file scope: each is a const object of the program function, and the header says the run writes no static storage" -body {
+test cc-ctx-installed-in-the-run "no installed context is stored at file scope: each is an object of the program function, and the header says the run writes no static storage" -body {
     set gen [ccGenerate [dict get $::ccCorpus contexts] app]
     set files [dict get $gen out files]
     set statics [dict get [dict get [ccGenerate [dict get $::ccCorpus statics] st] out] files]
     set program [lindex [regexp -inline {static app_status app_program\(app_list0 \*out\)\n\{.*?\n\}} [dict get $files app.c]] 0]
     list [ccFileScopeObjects [dict get $files app.c]] [ccFileScopeObjects [dict get $files app_display.c]] \
-        [llength [regexp -all -inline {const app_[A-Za-z]+ ctx_[A-Za-z]+ = } $program]] \
-        [llength [regexp -all -inline {const app_[A-Za-z]+ ctx_[A-Za-z]+ = } [dict get $files app.c]]] \
+        [llength [regexp -all -inline {\n    app_[A-Za-z]+ ctx_[A-Za-z]+ = } $program]] \
+        [llength [regexp -all -inline {\n *app_[A-Za-z]+ ctx_[A-Za-z]+ = } [dict get $files app.c]]] \
         [string match "*Writes no object of\n * static storage duration*" [dict get $files app.h]] \
         [string match "*Not reentrant*" [dict get $statics st.h]]
 } -result {{} {} 5 5 1 1}
+
+# No context pointer or installed object is const-qualified: GCC 15 (CI's
+# ubuntu-26.04 image) took the address of an initialized installed context,
+# passed to a pointer-to-const parameter of a recursive function it had
+# cloned with the context's constant contents, for a read of an
+# uninitialized object (-Wmaybe-uninitialized, an error under -Werror); GCC
+# checks only pointer-to-const parameters that way (tree-ssa-uninit.cc's
+# maybe_warn_pass_by_reference). The backend writes through none of them.
+test cc-ctx-no-const-context-pointers "no context pointer parameter or installed context is const-qualified (GCC 15's -Wmaybe-uninitialized of pointer-to-const arguments)" -body {
+    set c [dict get [dict get [ccGenerate [dict get $::ccCorpus contexts] app] out] files app.c]
+    list [regexp {const app_[A-Za-z]+ \*ctx_} $c] [regexp {const app_[A-Za-z]+ ctx_[A-Za-z]+ = } $c] \
+        [expr {[llength [regexp -all -inline {app_[A-Za-z]+ \*ctx_[A-Za-z]+[,)]} $c]] > 0}]
+} -result {0 0 1}
 
 test cc-ctx-big-int-field "a context whose field is an unbounded Int compiles to C (the run's frame holds it as an ordinary value; native lowering cannot slot it); its arithmetic needs the Int services" -constraints hostCC -body {
     set source {type Small = Int in 0..1000
@@ -1447,6 +1460,8 @@ ok()
     set result
 } -result {{C UNSUPPORTED} 2 {7:14: the context struct Named, whose field "name" has type str,} {C UNSUPPORTED} 2 {9:14: the context struct Log, whose field "lines" has type MutableVector[int],} {C UNSUPPORTED} 2 {9:14: the context struct Dev, which owns affine state (a C pointer, a coroutine, or a struct or collection holding one)}}
 
+# (The Linux program is compiled for a Linux target, the host's own on Linux:
+# std::linux is the Linux platform's, UNSUPPORTED-PLATFORM for any other.)
 test cc-ctx-unsupported-around-contexts "a program whose contexts are representable but which uses what C does not compile (the portable I/O over Linux system calls and Strings; a coroutine) is C UNSUPPORTED at those constructs" -body {
     set hello [surface::compile {import std::io
 import std::linux::io
@@ -1458,7 +1473,7 @@ with context std::linux::io::create()
 hello():
     on std::io::WriteFailed:
         unit
-} -warnings off]
+} -warnings off -target [linuxTarget]]
     set coro [surface::compile {type Small = Int in 0..100
 
 context struct Base:
