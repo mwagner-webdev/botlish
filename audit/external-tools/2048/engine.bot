@@ -1,0 +1,158 @@
+# engine.bot -- a C ABI over the 2048 engine
+# (EXTERNAL-COMPILER-TOOLS-AND-TARGET-PACKAGES-MILESTONE-1.md, "The 2048
+# experiment"): the engine of examples/games/2048, unchanged and installed as
+# the package game2048, as a native library a host that holds no Botlish
+# value can drive.
+#
+# A game crosses the boundary as its state text: "SCORE C0 C1 ... C15",
+# the score, then the sixteen cells row by row (0 an empty cell, else its
+# tile), single spaces between them. Every export reads a state and returns
+# a new one (or a fact of it): the engine's rules are the engine's.
+#
+# A library's entry file holds declarations only: this is one.
+import std::int
+import std::list
+import std::str
+import game2048
+
+# A state that is not seventeen numbers, or whose cells are not a board.
+error InvalidState
+
+# A direction other than 0 (left), 1 (right), 2 (up) and 3 (down).
+error InvalidDirection
+
+# A spawn of a tile other than 2 or 4, or outside the board.
+error InvalidSpawn
+
+# The number TEXT holds between START and END.
+fn number(text: str, start: int, end: int) -> int errors InvalidState:
+    # (An invalid slice is no number: "" is no integer's text.)
+    digits = text.substring(start, end):
+        on LowerUnderrun:
+            ""
+        on UpperOverrun:
+            ""
+    value = std::int::from_string(digits):
+        on InvalidIntegerText:
+            fail InvalidState
+    value
+
+# The numbers of TEXT, separated by single spaces.
+fn numbers(text: str) -> List[int] errors InvalidState:
+    n = std::str::length(text)
+    # The numbers from position I on, the current one starting at START,
+    # after FOUND. (nomethod: I is a position, not a receiver.)
+    nomethod fn from(i: int, start: int, found: List[int]) -> List[int] errors InvalidState:
+        if i >= n:
+            return found.append(text.number(start, i))
+        # (A position past the end is no space.)
+        c = text.char_at(i):
+            on IndexNotFound:
+                'x'
+        if c == ' ':
+            from(i + 1, i + 1, found.append(text.number(start, i)))
+        else:
+            from(i + 1, start, found)
+    from(0, 0, [])
+
+# The game STATE states.
+fn game(state: str) -> game2048::Game errors InvalidState:
+    values = numbers(state)
+    score = values.get(0, -1)
+    # Rows that are no board unless STATE holds seventeen numbers, the first
+    # a score: game2048::board refuses them.
+    rows = loop r from 0 to 4:
+        loop c from 0 to 4:
+            if std::list::length(values) == 17 and score >= 0:
+                values.get(1 + r * 4 + c, -1)
+            else:
+                -1
+    board = game2048::board(rows):
+        on game2048::InvalidBoard:
+            fail InvalidState
+    game2048::Game {board: board, score: score}
+
+# The cells of ROWS from row R on, as text after TEXT.
+fn cells(rows: List[List[int]], r: int, text: str) -> str:
+    if r >= std::list::length(rows):
+        return text
+    line = fold cell in rows.get(r, []) with intermediate acc text:
+        acc.append_char(' ').concat(cell.to_string())
+    rows.cells(r + 1, line)
+
+# The state text of GAME.
+fn text(game: game2048::Game) -> str:
+    game2048::rows(game.board).cells(0, game.score.to_string())
+
+fn direction(n: int) -> game2048::Direction errors InvalidDirection:
+    if n == 0:
+        return game2048::Direction::Left
+    if n == 1:
+        return game2048::Direction::Right
+    if n == 2:
+        return game2048::Direction::Up
+    if n == 3:
+        return game2048::Direction::Down
+    fail InvalidDirection
+
+# A new game: an empty board, score 0.
+exported c fn new_game() -> str:
+    text(game2048::new_game())
+
+# STATE after a move toward DIRECTION.
+exported c fn move(state: str, direction_code: int) -> str errors InvalidState, InvalidDirection:
+    text(game2048::move(game(state), direction(direction_code)).game)
+
+# Whether a move toward DIRECTION changes STATE's board.
+exported c fn changes(state: str, direction_code: int) -> bool errors InvalidState, InvalidDirection:
+    game2048::move(game(state), direction(direction_code)).changed
+
+# STATE with TILE (2 or 4) placed on the empty cell at ROW and COLUMN.
+exported c fn spawn(state: str, row: int, column: int, tile: int) -> str errors InvalidState, InvalidSpawn, game2048::CellOccupied:
+    g = game(state)
+    if (tile == 2 or tile == 4) and row >= 0 and row <= 3 and column >= 0 and column <= 3:
+        at = game2048::Position {row: row, column: column}
+        if tile == 2:
+            return text(g.spawn(at, game2048::SpawnTile::Two))
+        return text(g.spawn(at, game2048::SpawnTile::Four))
+    fail InvalidSpawn
+
+# The index (row * 4 + column) of STATE's first empty cell, or -1.
+exported c fn first_empty(state: str) -> int errors InvalidState:
+    cells = std::list::flat(game2048::rows(game(state).board))
+    # The first empty cell's index from I on. (nomethod: I is a position.)
+    nomethod fn from(i: int) -> int:
+        if i >= std::list::length(cells):
+            return -1
+        if cells.get(i, -1) == 0:
+            return i
+        from(i + 1)
+    from(0)
+
+# STATE with TILE (2 or 4) placed on its first empty cell; STATE itself
+# when no cell is empty. (What a deterministic game spawns after a move.)
+exported c fn spawn_first(state: str, tile: int) -> str errors InvalidState, InvalidSpawn:
+    at = first_empty(state)
+    if at < 0:
+        return text(game(state))
+    # (The cell is empty: spawn never finds it occupied.)
+    row = if at < 4:
+        0
+    elif at < 8:
+        1
+    elif at < 12:
+        2
+    else:
+        3
+    spawned = state.spawn(row, at - row * 4, tile):
+        on game2048::CellOccupied:
+            state
+    spawned
+
+# STATE's score.
+exported c fn score(state: str) -> int errors InvalidState:
+    game(state).score
+
+# Whether the game STATE states is over.
+exported c fn over(state: str) -> bool errors InvalidState:
+    game2048::game_over?(game(state))

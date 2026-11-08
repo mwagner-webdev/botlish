@@ -14,7 +14,7 @@
 #                       the default)
 #   NAME.h              the C interface: the types, statuses, lifecycle, error
 #                       and result accessors, and one function per export
-#   NAME.manifest.json  the same interface as data (manifest schema 1), from
+#   NAME.manifest.json  the same interface as data (manifest schema 2), from
 #                       the compiler's facts: what a binding generator or a
 #                       package tool reads instead of the HIR, and the
 #                       program's native dependencies (`dependencies`: the
@@ -65,7 +65,7 @@ namespace eval native::library {
     # runtime archive). A shared library is linked with them already.
     variable systemLibraries {-lgcc_s -lutil -lrt -lpthread -lm -ldl -lc}
     # The manifest's schema revision (its "schema" member).
-    variable schema 1
+    variable schema 2
     # The C ABI version (runtime::library's ABI_VERSION, NAME_ABI_VERSION).
     variable abiVersion 1
     # The runtime API's public function suffixes (runtime::library's
@@ -168,10 +168,7 @@ proc native::library {hir args} {
         foreach line $lines {
             if {[lindex $line 0] eq "error"} { Outcome $lines }
         }
-        set runtime [file join [file dirname [binary]] libbotlish_native.a]
-        if {![file exists $runtime]} {
-            throw {NATIVE NOT-BUILT} "native runtime archive missing: $runtime; run cargo build --release --manifest-path native/Cargo.toml"
-        }
+        set runtime [library::RuntimeArchive]
         set keep [file join $work $name.keep]
         set public [library::PublicNames $name $records]
         library::Write $keep [join $public \n]\n
@@ -191,11 +188,51 @@ proc native::library {hir args} {
         set header [file join $out $name.h]
         library::Write $header [library::Header $hir $name $records]
         set manifest [file join $out $name.manifest.json]
-        library::Write $manifest [library::Manifest $hir $name $records [expr {$shared ne ""}] $dependencies]
+        set digests [dict create static [library::Sha256 $static] header [library::Sha256 $header]]
+        if {$shared ne ""} {
+            dict set digests shared [library::Sha256 $shared]
+        }
+        library::Write $manifest [library::Manifest $hir $name $records [expr {$shared ne ""}] $dependencies $digests]
     } finally {
         file delete -force $work
     }
     return [dict create static $static shared $shared header $header manifest $manifest exports $records]
+}
+
+# The native runtime archive a library's object is linked with: the
+# driver's libbotlish_native.a beside it (a checkout's build), else the
+# system linker's runtime archive, libbotlish_runtime.a, which holds the same
+# runtime and an executable's C `main` that a library's relocatable link
+# never pulls in (nothing a library's object calls is in its member): the
+# one the single executable carries (EXTERNAL-COMPILER-TOOLS-AND-TARGET-
+# PACKAGES-MILESTONE-1.md, "Native libraries from the single executable").
+proc native::library::RuntimeArchive {} {
+    set dir [file dirname [native::binary]]
+    foreach name {libbotlish_native.a libbotlish_runtime.a} {
+        set runtime [file join $dir $name]
+        if {[file isfile $runtime]} {
+            return $runtime
+        }
+    }
+    throw {NATIVE NOT-BUILT} "native runtime archive missing: [file join $dir libbotlish_native.a] (or libbotlish_runtime.a); run cargo build --release --manifest-path native/Cargo.toml"
+}
+
+# The SHA-256 of the file PATH, lowercase hexadecimal, from GNU coreutils'
+# sha256sum at its system path (libraries are made on Linux glibc only,
+# whose coreutils has it; never a program found on PATH): the manifest's
+# record of which build's files it describes.
+proc native::library::Sha256 {path} {
+    foreach tool {/usr/bin/sha256sum /bin/sha256sum} {
+        if {![file executable $tool]} continue
+        if {[catch {exec $tool -b -- $path} output]} {
+            throw {NATIVE LIBRARY TOOL sha256sum} "native::library: $tool failed: $output"
+        }
+        if {![regexp {^([0-9a-f]{64}) } $output -> digest]} {
+            throw {NATIVE LIBRARY TOOL sha256sum} "native::library: $tool gave no digest: $output"
+        }
+        return $digest
+    }
+    throw {NATIVE LIBRARY TOOL sha256sum} "native::library: no sha256sum at /usr/bin or /bin (GNU coreutils): the manifest records each artifact's SHA-256"
 }
 
 # The entry program's top-level statements that are no declaration: a list
@@ -483,7 +520,16 @@ proc native::library::Dependency {dependency} {
     }
 }
 
-proc native::library::Manifest {hir name records shared {dependencies {}}} {
+# The manifest (schema 2, EXTERNAL-COMPILER-TOOLS-AND-TARGET-PACKAGES-
+# MILESTONE-1.md, "The artifact manifest") of the library NAME with the
+# export RECORDS: schema 1's interface as data, and what makes it an artifact
+# contract a tool can rely on without the HIR -- the build it describes
+# (`sha256`: each file's digest, DIGESTS), the compiler that made it
+# (`compiler`: the front end's fingerprint and the runtime ABI's), and the
+# ownership of every value that crosses the boundary as data (each
+# parameter's and result's `ownership`, the release function of what the
+# caller owns, each export's `error` out-parameter).
+proc native::library::Manifest {hir name records shared {dependencies {}} {digests {}}} {
     variable schema
     variable abiVersion
     variable systemLibraries
@@ -498,7 +544,7 @@ proc native::library::Manifest {hir name records shared {dependencies {}}} {
             if {$type eq "str"} {
                 lappend c [S size_t]
             }
-            lappend params [list obj [list name [S $param] type [S $type] c [list arr $c]]]
+            lappend params [list obj [list name [S $param] type [S $type] c [list arr $c] {*}[ParamPassing $type]]]
         }
         set result [dict get $record result]
         lassign [CTypes $result] - out
@@ -514,23 +560,31 @@ proc native::library::Manifest {hir name records shared {dependencies {}}} {
             symbol [S ${name}_[dict get $record name]] \
             botlish [S [Signature $record]] \
             params [list arr $params] \
-            result [list obj [list type [S $result] c [S [string map [list NAME $name] $out]]]] \
+            result [list obj [list type [S $result] c [S [string map [list NAME $name] $out]] {*}[ResultPassing $name $result]]] \
+            error [list obj [list c [S "${name}_error **"] nullable [list bool 1] ownership [S owned] release [S ${name}_error_release]]] \
             errors [list arr $errors]]]
     }
     set api [lmap suffix $reserved {S ${name}_$suffix}]
+    set sha256 [list static [S [dict getdef $digests static ""]]]
+    lappend sha256 shared [if {$shared} {S [dict getdef $digests shared ""]} else {list null {}}]
+    lappend sha256 header [S [dict getdef $digests header ""]]
     set value [list obj [list \
         schema [N $schema] \
         kind [S botlish-native-library] \
         library [S $name] \
         abi [N $abiVersion] \
         target [list obj [list name [S $target] triple [S [dict get [core::cabi::target $target] triple]]]] \
+        compiler [list obj [list frontEnd [S [hir::interchange::fingerprint]] runtimeAbi [S [native::runtimeAbi]]]] \
         artifacts [list obj [list \
             static [S lib$name.a] \
             shared [if {$shared} {S lib$name.so} else {list null {}}] \
             header [S $name.h]]] \
+        sha256 [list obj $sha256] \
         link [list arr [lmap l $systemLibraries {S $l}]] \
         dependencies [list arr [lmap d $dependencies {Dependency $d}]] \
         threading [S thread-affine] \
+        reentrancy [S refused] \
+        callbacks [list arr {}] \
         statuses [list obj [list ok [N 0] declared [N 1] runtime [N 2] boundary [N 3] invocation [N 4] internal [N 5]]] \
         fieldTypes [list obj [list int [N 1] bool [N 2] float64 [N 3] str [N 4] other [N 5]]] \
         types [list obj [list \
@@ -538,9 +592,34 @@ proc native::library::Manifest {hir name records shared {dependencies {}}} {
             bool [list obj [list c [S bool]]] \
             float64 [list obj [list c [S double] rule [S "a NaN or infinite argument is a BOUNDARY error ARGUMENT-NOT-FINITE; -0.0 enters as 0.0"]]] \
             str [list obj [list c [S "const uint8_t *, size_t"] result [S ${name}_bytes] rule [S "UTF-8, validated and copied; NULL allowed for length 0; embedded NULs allowed; a result is an owned buffer, NUL-terminated after len bytes, released with ${name}_bytes_release"]]]]] \
+        ownership [list obj [list \
+            instance [list obj [list owner [S caller] create [S ${name}_create] release [S ${name}_destroy]]] \
+            str-argument [list obj [list owner [S caller] lifetime [S call] copied [list bool 1] null [S length-zero]]] \
+            str-result [list obj [list owner [S caller] release [S ${name}_bytes_release] terminated [S nul-after-length] survives [S "later calls, collections, the instance's destruction"]]] \
+            error [list obj [list owner [S caller] release [S ${name}_error_release] survives [S "later calls, collections, the instance's destruction"]]]]] \
         lifecycle [list obj [list create [S ${name}_create] destroy [S ${name}_destroy] \
             initialization [S "module static initialization only: the entry file holds declarations"]]] \
         api [list arr $api] \
         exports [list arr $exports]]]
     return "[Json $value]\n"
+}
+
+# The manifest's ownership members of a parameter of boundary TYPE: a str is
+# borrowed for the call (copied before it returns), a scalar passed by value.
+proc native::library::ParamPassing {type} {
+    if {$type eq "str"} {
+        return [list ownership [S borrowed] lifetime [S call]]
+    }
+    return [list ownership [S value]]
+}
+
+# The manifest's ownership members of the result of boundary TYPE of library
+# NAME: a str result is an owned buffer the caller releases with
+# NAME_bytes_release; a scalar is a value; unit has none.
+proc native::library::ResultPassing {name type} {
+    switch -- $type {
+        str { return [list ownership [S owned] release [S ${name}_bytes_release]] }
+        unit { return [list ownership [S none]] }
+        default { return [list ownership [S value]] }
+    }
 }

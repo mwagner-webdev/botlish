@@ -98,7 +98,7 @@
 @@ native-break-yields-unit native lowering's break out of a fold yields unit
 ## native/lower.tcl
 <<<<
-                Emit fn "$resultReg = move $accReg" $e
+                Emit fn "$resultReg = move [FoldValue fn [dict get $node target] $accReg]" $e
                 Emit fn "jump $exit" $e
                 dict set fn broken [dict get $node target] 1
 ====
@@ -111,7 +111,7 @@
 ## native/lower.tcl
 <<<<
         fold {
-            Emit fn "$resultReg = move $accReg" $e
+            Emit fn "$resultReg = move [FoldValue fn $e $accReg]" $e
         }
 ====
         fold {

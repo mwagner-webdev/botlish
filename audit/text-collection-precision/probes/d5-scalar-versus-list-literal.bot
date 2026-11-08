@@ -1,0 +1,21 @@
+# probe: a scalar Byte parameter admits the literal 27 by its range facts;
+# a List[Byte] parameter does not admit the literal [27], which is a
+# List[int] (D, E: std::abi::bytes::from_list declares List[Byte]).
+# outcome: reject
+# diagnostic: 19:32 argument for parameter "values" cannot be proven to satisfy List[int[std::byte::Byte]] (argument type: List[int])
+import std::abi::bytes
+import std::byte
+
+fn need(b: std::byte::Byte) -> int:
+    b
+
+fn one() -> int:
+    need(27)
+
+fn from_scalars() -> std::abi::bytes::Bytes:
+    std::abi::bytes::from_list([std::byte::from_int(27)])
+
+fn from_literal() -> std::abi::bytes::Bytes:
+    std::abi::bytes::from_list([27])
+
+one()

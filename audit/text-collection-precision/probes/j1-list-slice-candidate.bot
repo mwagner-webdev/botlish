@@ -1,0 +1,11 @@
+# probe: a method-style .slice on a List names std::byte_store::slice (a
+# byte-storage operation) as the candidate to import (J).
+# outcome: reject
+# diagnostic: 9:21 namespace "std::byte_store" is not imported; add `import std::byte_store` to use `std::byte_store::slice`
+import std::str
+import std::list
+
+fn f(s: str) errors LowerUnderrun, UpperOverrun:
+    s.encode_utf8().slice(0, 1)
+
+f("ab")

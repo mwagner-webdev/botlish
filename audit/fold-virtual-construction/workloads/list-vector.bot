@@ -1,0 +1,26 @@
+# list-vector.bot -- list-fold.bot's construction in the mutable idiom: a
+# MutableVector pushed in place (amortized growth), turned into a List by a
+# collecting loop at the end. The imperative reference.
+#
+# expect: [1024, 1572352]
+
+import std::list
+import std::mutable_vector
+
+fn build(xs: List[int]) -> List[int]:
+    v = std::mutable_vector::from_list([0])
+    v.clear()
+    loop x in xs:
+        v.push(x * 3 + 1)
+    loop y in v:
+        y
+
+fn sum(ys: List[int]) -> int:
+    fold y in ys with intermediate s 0:
+        s + y
+
+n = 1024
+xs = loop i from 0 to n:
+    i
+ys = build(xs)
+[ys.length(), sum(ys)]
