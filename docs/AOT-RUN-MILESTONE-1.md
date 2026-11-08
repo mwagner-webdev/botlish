@@ -93,7 +93,9 @@ main.tcl -aot-run [OPTION...] FILE [-- ARG...]
   every backend's run.
 * The options are those that decide how the program compiles and links:
   `-warnings`, `-target` (the host's only: section 7), `-L`, `-F`,
-  `-native-startup worker|main-thread` and `-aot-keep`. Anything that runs,
+  `-native-startup worker|main-thread` and `-aot-keep`, and how a
+  rejection's diagnostics look on standard error, `-color` and `-excerpts`
+  (as for `run`; `aotr-diagnostic-presentation`). Anything that runs,
   inspects or builds another way (`-backend`, `-check`, `-emit-*`, a second
   FILE, ...) is a usage error, status 2, before anything compiles
   (`aotr-usage`) -- never silently ignored.
@@ -118,7 +120,7 @@ topic of its codes (`NATIVE UNSUPPORTED jit`, `NATIVE UNSUPPORTED
 aot-run`).
 
 [executed, Linux x86-64] `tests/aot-run.test`'s `aotr-usage`,
-`aotr-arguments`, `aotr-no-arguments`, `aotr-no-jit-refused`,
+`aotr-diagnostic-presentation`, `aotr-arguments`, `aotr-no-arguments`, `aotr-no-jit-refused`,
 `aotr-no-jit-run-default`, `aotr-jit-available`.
 
 ## 3. AOT pipeline reuse
@@ -296,7 +298,7 @@ missing library.
 
 ## 9. Tests on each target
 
-`tests/aot-run.test`: 34 tests -- 31 of behavior, 3 positive controls.
+`tests/aot-run.test`: 35 tests -- 32 of behavior, 3 positive controls.
 Their constraints name capabilities, never an operating system: `aotRun`
 (the host links executables), `unixSignals`, `aotrPython` (the interrupt
 helper, tests/aot-run-interrupt.py, sends signals to process groups),
@@ -308,13 +310,13 @@ TerminateProcess and requires the program gone and the directory removed).
 
 | host | where | result |
 |---|---|---|
-| Linux x86-64, rustc linker | this sandbox | [executed] 32 passed, 2 skipped (`aotr-main-thread`, macOS's; `aotr-parent-killed-windows`) |
-| Linux x86-64, system linker | this sandbox | [executed] 31 passed, 2 skipped |
-| Linux x86-64, stub linker | this sandbox | [executed] 22 passed, 11 skipped (the C-calling tests: the stub links no C; the macOS and Windows tests) |
+| Linux x86-64, rustc linker | this sandbox | [executed] 33 passed, 2 skipped (`aotr-main-thread`, macOS's; `aotr-parent-killed-windows`), with the JIT-less driver built (`aotr-no-jit-driver` runs) |
+| Linux x86-64, system linker | this sandbox | [executed] 33 passed, 2 skipped |
+| Linux x86-64, stub linker | this sandbox | [executed] 24 passed, 11 skipped (the C-calling tests: the stub links no C; the macOS and Windows tests) |
 | Linux x86-64 | `tests` workflow (ubuntu-latest), its canary | [executed] the changed file runs first on every push; see section 9.1 |
 | Linux AArch64 | `tests (linux arm64)` (ubuntu-24.04-arm) | [executed] canary on the branch push; see section 9.1 |
 | Windows x86-64 (MSVC) | `tests (windows x86-64)` (windows-2025), canary | [executed] green on `460fceea` (section 9.1) |
-| macOS AArch64 | `tests (macos arm64)` (macos-15): the smoke job's canary, the acceptance tier, the app jobs | [executed] the canary (section 9.1); the acceptance tier and the app jobs [pending] |
+| macOS AArch64 | `tests (macos arm64)` (macos-15): the smoke job's canary, the acceptance tier, the app jobs | [executed] the canary on `a822905`, `460fcee` and `c3cd83c` (section 9.1); the acceptance tier and the app jobs [pending] on the merge of main |
 
 The JIT build's own tests are unchanged and run as before on every host
 that has the JIT: the native backend's test files, the golden suites on
@@ -338,9 +340,26 @@ The branch `ccr-7f920867-5n2fuj`:
 * `460fcee` (adds `aotr-parent-killed-windows`): Windows x86-64's canary,
   aot-run.test with the new test, **green** [executed, Windows]; macOS's
   smoke job and its canary green [executed, macOS]; the macOS acceptance
-  tier, the rest of Windows' jobs and the full Linux suites [pending] at
-  the time of writing (MACOS-BOTLISH-DISTRIBUTION-MILESTONE-1.md, section
-  24, lists the runs).
+  tier, the rest of Windows' jobs and the full Linux suites were
+  superseded by the next push. Its Botlish.app job ran past signing for
+  the first time and found two failures, fixed in `c3cd83c`: native::aotRun
+  wrote a packaged compiler's restored variables with `binary`, which
+  inside the namespace `native` is native::binary, the driver's path (now
+  `::binary`; `aotr-child-environment` and the mutant
+  `child-environment-dropped`); and single/smoke-test.sh's no-JIT branch
+  required all 23 samples to run as executables, though 5 are not
+  AOT-ready (section 12).
+* `c3cd83c`: macOS's smoke job, its canary running aot-run.test with
+  `aotr-child-environment`, and `AOT-run costs` green [executed, macOS];
+  Windows' canary green [executed, Windows]; the full suites' canaries
+  green; everything else superseded by the merge of main.
+* `4ece288` (the merge of main) and the commit after it: `-aot-run` takes
+  main's `-color` and `-excerpts` (`aotr-diagnostic-presentation`), and
+  tests.yml's Rust unit-test job builds the JIT-less driver and runs
+  aot-run.test with it, since the merge had broken that build (main's
+  thread factory outside the `jit` feature) and only macOS's app job
+  built it. [pending] at the time of writing
+  (MACOS-BOTLISH-DISTRIBUTION-MILESTONE-1.md, section 24, lists the runs).
 
 ## 10. Positive controls and mutants
 
@@ -534,6 +553,7 @@ lists the distribution's):
 | `audit/aot-run/tools/mutants.txt`, `mutate.tcl` | new: section 10's mutants and harness |
 | `bench/aot-run.tcl` | new: section 11's measurements |
 | `.github/workflows/macos-arm64.yml`, `windows-x86_64.yml` | the smoke jobs' `AOT-run costs` step |
+| `.github/workflows/tests.yml` | the Rust unit-test job builds the driver without its JIT and runs aot-run.test with it |
 | `audit/native-aot/tools/mutants.txt`, `audit/single-executable/tools/mutants.txt`, `audit/target-model/tools/mutants.txt` | mutant texts updated where the code they mutate moved |
 
 ## 14. What to run when changing this

@@ -755,7 +755,7 @@ related: cli.usage cli.output cli.exit-status cli.lsp cli.run cli.aot-run lint.p
                       `--` its arguments, its output and exit status its
                       own; nothing is left behind (cli.aot-run). It takes
                       only -warnings, -target (the host's), -L, -F,
-                      -native-startup and -aot-keep
+                      -native-startup, -aot-keep, -color and -excerpts
     -aot-keep         keep -aot-run's build directory (the executable and
                       its NIR) and name it on stderr
     --                ends -aot-run's options: every word after it is the
@@ -1046,7 +1046,8 @@ comes before the program starts stops the run there.
 
 == OPTIONS
 -warnings, -target (only the host's: the program runs here), -L, -F,
--native-startup and -aot-keep. -aot-keep keeps the build directory, with
+-native-startup, -aot-keep, -color and -excerpts (how a rejection's
+diagnostics look on stderr). -aot-keep keeps the build directory, with
 the executable and the program's NIR, and names it on stderr. Any other
 option is a malformed invocation (status 2), as is a second input file or
 `--` without -aot-run.

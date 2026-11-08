@@ -1623,8 +1623,8 @@ if {$aotRun} {
     # never ignored.
     foreach option [dict get $commandLine options] {
         set arg [lindex $option 0]
-        if {$arg ni {-aot-run -aot-keep -warnings -target -L -F -native-startup}} {
-            usageError "-aot-run cannot be combined with $arg: it builds one program as a standalone executable and runs it as a command, its standard output and error the program's own (it takes -warnings, -target, -L, -F, -native-startup and -aot-keep; the program's arguments follow --)"
+        if {$arg ni {-aot-run -aot-keep -warnings -target -L -F -native-startup -color -excerpts}} {
+            usageError "-aot-run cannot be combined with $arg: it builds one program as a standalone executable and runs it as a command, its standard output and error the program's own (it takes -warnings, -target, -L, -F, -native-startup, -aot-keep, -color and -excerpts; the program's arguments follow --)"
         }
     }
     if {[llength $files] != 1} {

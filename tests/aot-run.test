@@ -788,6 +788,22 @@ test aotr-usage {-aot-run's usage errors (status 2, nothing compiled): two files
     }
 } -cleanup {file delete -force $dir} -result {{2 1} {2 1} {2 1} {2 1} {2 1} {2 1} {2 1}}
 
+test aotr-diagnostic-presentation {-color and -excerpts decide how a rejection's diagnostics look, as for run: colored with the source line under -color always -excerpts always, plain under never; status 1 and nothing run either way} -constraints aotRun -setup {
+    set dir [aotrDir presentation]
+    set temp [aotrTemp $dir]
+    set program [file join $dir rejected.bot]
+    set channel [open $program w]
+    puts $channel "x = 1 + \"two\""
+    close $channel
+} -body {
+    lassign [aotrMain $temp -warnings off -aot-run -color always -excerpts always $program] out err status
+    lassign [aotrMain $temp -warnings off -aot-run -color never -excerpts never $program] pout perr pstatus
+    regsub -all {\x1b\[[0-9;]*m} $err "" plain
+    list $status $out [string match "*\x1b\\\[*" $err] [string match "*| x = 1 + \"two\"*" $plain] \
+        $pstatus $pout [string match "*\x1b*" $perr] [string match "*x = 1 + \"two\"*" $perr] \
+        [string match "$program: *" $perr] [aotrLeft $temp]
+} -cleanup {file delete -force $dir} -result {1 {} 1 1 1 {} 0 0 1 {}}
+
 # --- positive controls ----------------------------------------------------------------
 
 test aotr-control-arguments {positive control: the argument comparison fails for arguments the program was not given} -constraints aotRun -setup {

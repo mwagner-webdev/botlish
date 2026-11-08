@@ -657,8 +657,11 @@ canary failed three aot-run.test tests' reading of Windows output on
 by single/build.sh (14,853,994 bytes) passes single/smoke-test.sh (the
 new `-aot-run` refusal without a C compiler included) and
 single/ffi-smoke-test.sh, and audit/single-executable/tools/mutate.tcl
-kills its 11 mutants (none survived). [pending] the full suites dispatched on `460fcee` (tests.yml,
-tests-arm64.yml), Windows' workflow and single-executable.yml (section 24).
+kills its 11 mutants (none survived). [pending] the full suites
+(tests.yml, tests-arm64.yml) and Windows' acceptance shards on the merge
+of main (`4ece288` and the commit after it, section 24): the runs
+dispatched on `460fcee` and on `c3cd83c` were superseded by the next
+push before their expensive jobs had a runner.
 
 ## 24. CI runs and artifacts
 
@@ -678,7 +681,12 @@ The branch `ccr-7f920867-5n2fuj` (https://github.com/mwagner-webdev/botlish/acti
 | `460fcee` | tests (windows x86-64) | 42466433448 | canary (aot-run.test with `aotr-parent-killed-windows`), smoke (the smoke tier and the Windows-relevant test files, `AOT-run costs`, GC workloads) and root plans **success** [executed, Windows]; the acceptance shards and the system linker [pending] |
 | `460fcee` | single executable (dispatched) | 42466437468 | the x86-64 and AArch64 builds and their build-machine smoke and C FFI smoke tests **success**; no job failed; the stock-container smoke jobs [pending] |
 | `460fcee` | tests (dispatched in full) | 42466447733 | one job failed before any test ran: `tests (compile)` could not download Neovim from github.com (`curl: (22)`, HTTP 504) -- infrastructure, to be re-run when the run ends; the other jobs no failure, several [pending] |
-| `460fcee` | tests (linux arm64) (dispatched in full) | 42466450059 | no job failed; [pending] |
+| `460fcee` | tests (linux arm64) (dispatched in full) | 42466450059 | no job failed; superseded by `c3cd83c` before it finished |
+| `c3cd83c` | tests (macos arm64) | 42480168990 | smoke (Tier A, its canary running the changed aot-run.test with `aotr-child-environment`, `AOT-run costs`) and the linux control **success** [executed, macOS]; the Botlish.app job, the acceptance shards and the system linker were still waiting for a macOS runner when the merge of main was pushed, which superseded them |
+| `c3cd83c` | tests (windows x86-64) | 42480168979 | canary (aot-run.test) and root plans **success** [executed, Windows]; smoke still queued when superseded |
+| `c3cd83c` | single executable (dispatched), icy-tower (macos arm64), icy-tower (windows x86-64), raven clean room | 42480179860, 42480169020, 42480168944, 42480168980 | success |
+| `c3cd83c` | tests, tests (linux arm64) (dispatched in full) | 42480175061, 42480177266 | the canary success, no job failed; every expensive job still queued when superseded |
+| `4ece288` | (merge of main at `d4aebf1`) | -- | conflicts in main.tcl and backends.topic, both sides kept; the merged tree did not build without the JIT (main's thread factory, `jit_factory`, named the JIT's types outside the `jit` feature): gated, found by building the JIT-less driver locally [executed, Linux x86-64]; the next commit adds that build to tests.yml's Rust unit-test job so Linux finds such a break, not only macOS's app job. Locally on the merged tree: mutant-catalogs (3,224 mutants, 0 problems), test_runs.py, compilerpedia check, main-cli.test and aot-run.test (also with the JIT-less driver: `aotr-no-jit-driver`), the driver's aot_run tests, native-executable, native-program-output, compilerpedia, main-thread-startup, system-linker, aot-stub-linker and native-library tests on interp and compile, and a thread program (tests/threads/lifecycle.bot) through `-aot-run` with the JIT's value [executed, Linux x86-64]; CI [pending] |
 
 Ordinary CI uploads the ad hoc
 bundle as the `botlish-macos-aarch64` artifact (macos-arm64.yml's `app`
@@ -706,8 +714,37 @@ release.
   times (the launcher, Tcl, the archive's mount, `-version`, `-help`,
   `-check`, the interpreter, the language server, the driver, and with no
   JIT `-aot-run` in its place, `-emit-native-executable`, a moved copy's
-  first start). [pending] the run's figures (the `app` job had not run
-  when this was written).
+  first start). Measured on `460fcee` (job 128698763992; `c3cd83c`
+  changed no sizes):
+
+  | part | MB |
+  |---|---:|
+  | Tcl.framework | 4.03 |
+  | launcher (MacOS/botlish) | 0.07 |
+  | compiler archive (Resources/botlish.zip) | 2.42 |
+  | native driver (MacOS/botlish-native, no JIT) | 5.82 |
+  | runtime archive (Resources/libbotlish_runtime.a) | 13.99 |
+  | Botlish.app | 26.33 |
+  | download (botlish-macos-aarch64.zip) | 10.86 |
+
+  | startup, best of 7 | ms |
+  |---|---:|
+  | the launcher alone (process) | 5.0 |
+  | Tcl.framework loaded and initialized | 14.6 |
+  | the compiler archive mounted | 17.0 |
+  | `-version` | 123.6 |
+  | `-help` | 205.8 |
+  | `-check` | 191.1 |
+  | a program on the interpreter | 147.6 |
+  | the compiler service | 91.4 |
+  | the driver (`capabilities`) | 5.3 |
+  | `-aot-run` of a printing program | 239.4 |
+  | `-emit-native-executable`, then the executable | 234.7 |
+
+  Of `-aot-run`'s 239 ms, 92 ms are native (lowering, the driver, the
+  object, the link and the run) over the interpreter's run of the same
+  program. A moved copy's first `-version` took 97-106 ms, its second
+  98-111 ms: no first-start penalty in a new location.
 * [executed, Linux x86-64] the JIT's share of the driver: −320,768 bytes
   stripped (3.6%) (section 3). The difference between a JIT-less binary and
   one that merely refuses is that difference plus the absence of the JIT's
