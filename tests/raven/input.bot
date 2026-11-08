@@ -1,0 +1,75 @@
+# input.bot -- a window's raw input through the bridge (tests/raven.test,
+# raven-input), headless: a watched window's pointer moves (two moves before
+# a take are one MouseMoved, its movement their sum), a button held over
+# several frames (one MousePressed, then one MouseReleased), the wheel, a
+# key held with Shift (KeyPressed, key_down?, modifiers_down) and released;
+# a button of the watched window still reports Clicked (watching consumes
+# nothing); an unwatched window, and the watched one after watch_input(false),
+# report no raw input; mouse_position is where the pointer went.
+import raven
+import raven::window
+import show
+import std::float64
+import std::list
+
+with context raven::create()
+
+fn who(e: raven::Event, w: raven::Window, b: raven::Widget) -> str:
+    if e.from_window?(w):
+        return "window"
+    if e.from?(b):
+        return "button"
+    "other"
+
+fn shown(events: List[raven::Event], w: raven::Window, b: raven::Widget) -> List[str]:
+    loop e in events:
+        if e.kind == raven::EventKind::Clicked:
+            e.event(e.who(w, b))
+        else:
+            e.input(e.who(w, b))
+
+fn main(context ui: raven::Ui) -> List[List[str]] errors raven::RavenFailed, NonFiniteFloat:
+    raven::start(raven::headless())
+    w = raven::window("Map", 320, 240)
+    b = raven::button("Build")
+    w.set_content(raven::vbox().add(b))
+    u = raven::window("Other", 200, 100)
+    laid_out = [raven::draw_frame(), raven::draw_frame()]
+    before = raven::events()
+    w.watch_input(true)
+    w.inject_move(10.0, 20.0)
+    w.inject_move(30.0, 50.0)
+    moved = raven::events()
+    position = w.mouse_position()
+    w.inject_button(raven::window::R_MOUSE_LEFT, true)
+    held = [raven::draw_frame(), raven::draw_frame(), raven::draw_frame()]
+    down = w.mouse_button_down?(raven::window::R_MOUSE_LEFT)
+    w.inject_button(raven::window::R_MOUSE_LEFT, false)
+    up = w.mouse_button_down?(raven::window::R_MOUSE_LEFT)
+    w.inject_wheel(0.0, -3.0)
+    w.inject_key_down(raven::window::R_KEY_A, raven::window::R_MOD_SHIFT)
+    key_held = w.key_down?(raven::window::R_KEY_A)
+    shift = w.modifiers_down()
+    w.inject_key_up(raven::window::R_KEY_A, 0)
+    key_after = w.key_down?(raven::window::R_KEY_A)
+    pressed = raven::events()
+    u.inject_key(raven::window::R_KEY_SPACE, 0)
+    u.inject_move(5.0, 5.0)
+    unwatched = raven::events()
+    w.click(b)
+    drawn = raven::draw_frame()
+    clicked = raven::events()
+    w.watch_input(false)
+    w.inject_key(raven::window::R_KEY_A, 0)
+    stopped = raven::events()
+    raven::stop()
+    state = [show::flag(down), show::flag(up), show::flag(key_held), show::int(shift), show::flag(key_after),
+        show::int(std::float64::round(position.x)), show::int(std::float64::round(position.y)), show::int(before.length())]
+    [moved.shown(w, b), pressed.shown(w, b), unwatched.shown(w, b), clicked.shown(w, b), stopped.shown(w, b), state]
+
+result = main():
+    on raven::RavenFailed failure:
+        [["RavenFailed", failure.call, failure.detail]]
+    on NonFiniteFloat:
+        [["NonFiniteFloat"]]
+result

@@ -4,6 +4,8 @@
 #
 #   surface::lex SOURCE ?FILENAME?          tokens                (lexer.tcl)
 #   surface::parse SOURCE ?FILENAME? ?-recover 1?      surface AST (parser.tcl)
+#   surface::syntaxTokens SOURCE ?FILENAME?  the token IR: tokens, comments,
+#       lexical diagnostics, contextual words (tokens.tcl)
 #   surface::formatAst AST ?-spans 1? ?-ids 1?         readable AST (ast.tcl)
 #   surface::findNode AST ID                the node with a structural id
 #   surface::lowerToHir AST ?-strict 1|0?   HIR                   (lower.tcl)
@@ -64,7 +66,7 @@ proc surface::readProgramFile {path args} {
 }
 
 apply {{dir} {
-    foreach name {ast lexer parser recover lower dfa source modules cache} {
+    foreach name {ast lexer parser tokens recover lower dfa source modules cache} {
         uplevel #0 [list source [file join $dir $name.tcl]]
     }
 }} $surface::home

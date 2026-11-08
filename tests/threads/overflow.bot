@@ -1,0 +1,17 @@
+# overflow.bot -- tests/threads.test: a worker's stack overflow ends the
+# process (NATIVE LIMIT STACK), as the main thread's does.
+import crunch
+import std::thread
+
+fn go(context t: std::thread::Threads) -> int errors std::thread::ThreadLimit, std::thread::ThreadStartFailed, std::thread::ThreadFailed:
+    {thread} = std::thread::start_sized(std::thread::entry(crunch::overflow), 1, 4194304)
+    std::thread::join(thread)
+
+with context std::thread::create(2)
+go():
+    on std::thread::ThreadLimit:
+        -1
+    on std::thread::ThreadStartFailed {reason}:
+        -2
+    on std::thread::ThreadFailed {identity, message}:
+        -3

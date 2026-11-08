@@ -334,6 +334,10 @@ pub struct Vm {
     /// RUNTIME-STATE-MILESTONE-1.md), which holds every VM of a run there
     /// until all of them are mid-run at once. None but in that harness.
     pub collection_hook: Option<Box<dyn FnMut(usize, &Vm)>>,
+    /// This Vm's part in Botlish threads and the transport (runtime/
+    /// thread.rs): the program's factory, its entry and initialization, its
+    /// thread's record, its port. Never a GC root: it holds no heap object.
+    pub thread: super::thread::VmThread,
 }
 
 pub const VM_SS_TOP_OFFSET: i32 = offset_of!(Vm, ss_top) as i32;
@@ -402,6 +406,7 @@ impl Vm {
             co_current: std::ptr::null_mut(),
             transfer_plans: std::collections::HashMap::new(),
             collection_hook: None,
+            thread: super::thread::VmThread::default(),
         })
     }
 
@@ -1114,6 +1119,9 @@ impl Vm {
 
 impl Drop for Vm {
     fn drop(&mut self) {
+        // Its endpoints close and the calls it owes fail (runtime/thread.rs):
+        // nothing of the transport outlives the Vm that owned it.
+        self.thread.close_port();
         for &object in &self.statics {
             unsafe { super::heap::free_object(object) };
         }

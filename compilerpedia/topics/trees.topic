@@ -8,7 +8,6 @@ index: concepts
 alias: tree struct; tree; recursive struct; recursive value; children; subtree; depth-first; breadth-first; preorder; tree traversal
 keywords: tree, recursive, children, List[Self], subtree, walk, DepthFirst, BreadthFirst, preorder, traversal, ==, hash, Hashable, Equatable, TREE-STRUCT-SHAPE, TREE-STRUCT-COMBINATION
 related: concept.structs concept.coroutines concept.hashable concept.equatable error.tree-struct-shape error.tree-struct-combination error.tree-operand
-docs: TREE-STRUCT-MILESTONE-1.md STRUCTS.md
 
 == WHAT IT IS
     tree struct FileTree:
@@ -121,8 +120,7 @@ tree struct Node:
 @end
 
 == MORE
-TREE-STRUCT-MILESTONE-1.md; concept.coroutines for constructing and
-resuming a walk.
+concept.coroutines for constructing and resuming a walk.
 
 @topic error.tree-struct-shape
 title: TREE-STRUCT-SHAPE: exactly one recursive field, of type List[Self]
@@ -131,7 +129,6 @@ index: errors
 alias: tree struct shape; recursive field; List[Self]
 keywords: tree, recursive, children, List[Self], mutual recursion, Optional, map of Self
 related: concept.tree-structs concept.structs error.tree-struct-combination
-docs: TREE-STRUCT-MILESTONE-1.md
 code: CORE SEMANTIC TREE-STRUCT-SHAPE
 
 == MEANING
@@ -188,7 +185,6 @@ index: errors
 alias: opaque tree struct; context tree struct; tree identity
 keywords: tree, opaque, context, identity, combination
 related: concept.tree-structs concept.opaque-structs concept.value-identity error.tree-struct-shape
-docs: TREE-STRUCT-MILESTONE-1.md
 code: CORE SEMANTIC TREE-STRUCT-COMBINATION
 
 == MEANING
@@ -219,7 +215,6 @@ index: errors
 alias: tree operand
 keywords: tree, children, walk, operand
 related: concept.tree-structs error.type
-docs: TREE-STRUCT-MILESTONE-1.md
 code: CORE SEMANTIC TREE-OPERAND
 
 == MEANING

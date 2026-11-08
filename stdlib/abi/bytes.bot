@@ -179,9 +179,9 @@ nomethod fn utf16le_units(data: Bytes) -> List[int]:
 nomethod fn utf16le_units_before_nul(data: Bytes, start: int, end: int) -> int errors LowerUnderrun, UpperOverrun:
     data.storage.utf16le_units_before_nul(start, end)
 
-# The exact byte count of DATA, as the ABI size domain. The runtime's
-# collection-length ceiling (below 2^62) already guarantees the count is a
-# valid native buffer extent, so no caller re-proves 0 <= n <= 2^64 - 1.
+# The exact byte count of DATA, as the ABI size domain; its int is
+# `length(data).value`. The runtime's collection-length ceiling (below 2^62)
+# guarantees a valid native buffer extent: no caller re-proves the range.
 fn length(data: Bytes) -> std::abi::Usize:
     std::abi::Usize {value: std::byte_store::byte_count(data.storage)}
 

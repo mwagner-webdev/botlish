@@ -51,6 +51,9 @@ namespace eval hir::lower {
 proc hir::lower {hir} {
     hir::activate $hir
     set hir [hir::recovery::runnable $hir]
+    # A program that starts a Botlish thread is the native backends' only
+    # (THREAD-UNAVAILABLE, hir/threads.tcl).
+    hir::threads::RefuseTcl $hir interp
     return [hir::lower::withTemporaries [hir::affine::temporaries $hir] {
         hir::lower::Seq $hir [dict get $hir roots]
     }]

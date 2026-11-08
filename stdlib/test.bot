@@ -31,8 +31,8 @@
 # cases. The context value itself is an ordinary immutable struct, installed
 # once like any context (entry program top level only, at most one per
 # program, CONTEXTS.md); registration mutates the vector it holds
-# (`suite.cases.push(...)`), never the binding -- the place model of
-# MUTABLE-VECTOR.md. Calling a registration function where no suite is
+# (`suite.cases.push(...)`) in its place, never the binding
+# (MUTABLE-VECTOR.md). Calling a registration function where no suite is
 # installed is the ordinary MISSING-CONTEXT.
 #
 # Registration. `std::test::case(name, check)` records a TestCase {name, run}
@@ -412,6 +412,8 @@ fn code_name(code: std::compiler::DiagnosticCode) -> str:
         std::compiler::DiagnosticCode::ResourceDeclaration,
         std::compiler::DiagnosticCode::ReturnOutsideCallable,
         std::compiler::DiagnosticCode::SendableDeclaration,
+        std::compiler::DiagnosticCode::ThreadEntryPlacement,
+        std::compiler::DiagnosticCode::ThreadEntryReference,
         std::compiler::DiagnosticCode::TraitImplOrder,
         std::compiler::DiagnosticCode::TraitInstanceBudget,
         std::compiler::DiagnosticCode::TraitNestedPolymorphic,
@@ -554,6 +556,8 @@ fn code_name(code: std::compiler::DiagnosticCode) -> str:
         "ResourceDeclaration",
         "ReturnOutsideCallable",
         "SendableDeclaration",
+        "ThreadEntryPlacement",
+        "ThreadEntryReference",
         "TraitImplOrder",
         "TraitInstanceBudget",
         "TraitNestedPolymorphic",
@@ -692,7 +696,7 @@ nomethod fn rejects_any(name: str, body) -> unit:
 # message WANTED: for a test whose property is the diagnostic's wording (a
 # call chain, a name the message alone carries). Messages are otherwise
 # reported, never compared. (Promoted from the suite-local matchers four
-# suites wrote independently: LARGE-SCALE-GOLDEN-MIGRATION.md.)
+# suites wrote independently; LARGE-SCALE-GOLDEN-MIGRATION.md.)
 nomethod fn rejects_message(name: str, expected: std::compiler::DiagnosticCode, wanted: str, body) -> unit:
     fn check() -> Match:
         shown = "compiler diagnostic ".concat(expected.code_name()).concat(" with the message ").concat(wanted.quoted())

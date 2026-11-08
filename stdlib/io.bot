@@ -31,9 +31,9 @@
 # call of that context's implementation: no dispatch, no hidden argument, no
 # provider table at run time.
 #
-# Not here (deliberately): input, files, paths, buffering, a byte-count or
-# errno API. Buffering, batching and scratch storage can live behind these
-# operations later without any caller changing.
+# Not here (deliberately): input, buffering, a byte-count or errno API; files
+# and paths are std::io::fs's and std::io::path's. Buffering, batching and
+# scratch storage can live behind these operations later unchanged for callers.
 import std::str
 
 # A portable output operation did not complete: the environment could not

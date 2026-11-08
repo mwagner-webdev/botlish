@@ -1,0 +1,44 @@
+# badentries.bot -- tests/threads.test: thread entries the compiler
+# rejects, and references to entries that are no thread start. Every
+# function is one rejection.
+import crunch
+import ledger
+import std::mutable_vector
+import std::thread
+
+# Two parameters: THREAD-ENTRY-SIGNATURE.
+thread fn two(a: int, b: int) -> int:
+    a + b
+
+# No declared result: THREAD-ENTRY-SIGNATURE.
+thread fn unstated(a: int):
+    a
+
+# A function value as its initialization value: THREAD-ENTRY-SIGNATURE.
+thread fn called(f: Fn{args: [int], return: int}) -> int:
+    f(1)
+
+# A context parameter: THREAD-ENTRY-SIGNATURE.
+thread fn borrowed(n: int, context l: ledger::Ledger) -> int:
+    n
+
+# A context installed in a branch: CONTEXT-INSTALLATION-UNSUPPORTED.
+thread fn branchy(n: int) -> int:
+    if n > 0:
+        with context ledger::Ledger {owner: 1, notes: std::mutable_vector::from_list([])}
+        ledger::owner()
+    else:
+        0
+
+# An entry called as a function: THREAD-ENTRY-REFERENCE.
+fn called_directly(n: int) -> int:
+    crunch::spin(n)
+
+# An entry taken as a value: THREAD-ENTRY-REFERENCE.
+fn taken() -> Fn{args: [int], return: int}:
+    crunch::spin
+
+# A function that is no entry made an Entry: THREAD-ENTRY-REFERENCE.
+fn not_an_entry(context t: std::thread::Threads) -> int errors std::thread::ThreadLimit, std::thread::ThreadStartFailed:
+    s = std::thread::start(std::thread::entry(crunch::fib), 1)
+    0

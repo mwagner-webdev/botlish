@@ -44,9 +44,9 @@
 @@ fixpoint-never-revisits later rounds recompute only the last declaration met: a declaration met early never sees what its dependencies settled to
 ## hir/summaries.tcl
 <<<<
-            for {set i [expr {[llength $ids] - 1}]} {$i >= 0} {incr i -1} {
+            for {set i [expr {$count - 1}]} {$i >= 0} {incr i -1} {
 ====
-            for {set i [expr {[llength $ids] - 1}]} {$i >= [expr {[llength $ids] - 1}]} {incr i -1} {
+            for {set i [expr {$count - 1}]} {$i >= [expr {$count - 1}]} {incr i -1} {
 >>>>
 
 @@ summary-keyed-by-name a summary is found by its declaration's spelling (the last name component), not its identity: a module's Box answers for the entry program's Box

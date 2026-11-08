@@ -220,8 +220,8 @@ std::actor::a_message	binding	std::actor	private	source	stdlib/actor.bot:181
 std::actor::a_ok	binding	std::actor	private	source	stdlib/actor.bot:180			
 std::actor::a_refused	binding	std::actor	private	source	stdlib/actor.bot:186			
 std::actor::a_stale	binding	std::actor	private	source	stdlib/actor.bot:187			
-std::actor::actor_gen	function	std::actor	private	source	stdlib/actor.bot:831			
-std::actor::actor_row	function	std::actor	private	source	stdlib/actor.bot:826			
+std::actor::actor_gen	function	std::actor	private	source	stdlib/actor.bot:842			
+std::actor::actor_row	function	std::actor	private	source	stdlib/actor.bot:837			
 std::actor::as	binding	std::actor	private	source	stdlib/actor.bot:207			
 std::actor::bind	function	std::actor	private	source	stdlib/actor.bot:696			
 std::actor::c_actor_rows	binding	std::actor	private	source	stdlib/actor.bot:236			
@@ -254,7 +254,7 @@ std::actor::drained_as	function	std::actor	private	source	stdlib/actor.bot:591
 std::actor::enqueue	function	std::actor	private	source	stdlib/actor.bot:488			
 std::actor::exit	function	std::actor	api	source	stdlib/actor.bot:285			
 std::actor::grant_room	function	std::actor	private	source	stdlib/actor.bot:530			
-std::actor::host	function	std::actor	private	source	stdlib/actor.bot:795			
+std::actor::host	function	std::actor	private	source	stdlib/actor.bot:806			
 std::actor::ints	function	std::actor	private	source	stdlib/actor.bot:260			
 std::actor::listen	function	std::actor	api	source	stdlib/actor.bot:292			
 std::actor::m_cap	binding	std::actor	private	source	stdlib/actor.bot:193			
@@ -292,29 +292,95 @@ std::actor::open_checked	function	std::actor	private	source	stdlib/actor.bot:387
 std::actor::opened	function	std::actor	private	source	stdlib/actor.bot:424			
 std::actor::pause	function	std::actor	api	source	stdlib/actor.bot:347			
 std::actor::post	function	std::actor	api	source	stdlib/actor.bot:560			
+std::actor::post_waiting	function	std::actor	api	source	stdlib/actor.bot:768			
 std::actor::put	function	std::actor	private	source	stdlib/actor.bot:511			
 std::actor::queued	function	std::actor	api	source	stdlib/actor.bot:616			
 std::actor::queued_checked	function	std::actor	private	source	stdlib/actor.bot:608			
-std::actor::reap	function	std::actor	api	source	stdlib/actor.bot:886			
-std::actor::reap_checked	function	std::actor	private	source	stdlib/actor.bot:863			
+std::actor::reap	function	std::actor	api	source	stdlib/actor.bot:897			
+std::actor::reap_checked	function	std::actor	private	source	stdlib/actor.bot:874			
 std::actor::receive	function	std::actor	api	source	stdlib/actor.bot:310			
 std::actor::receive_for	function	std::actor	private	source	stdlib/actor.bot:721			
-std::actor::record_task	function	std::actor	private	source	stdlib/actor.bot:836			
+std::actor::record_task	function	std::actor	private	source	stdlib/actor.bot:847			
 std::actor::recover	intrinsic	std::actor	api	intrinsic	core/actor.tcl:35			
 std::actor::recovered	function	std::actor	private	source	stdlib/actor.bot:302			
 std::actor::regs	function	std::actor	private	source	stdlib/actor.bot:263			
+std::actor::remote	namespace		api	source	stdlib/actor/remote.bot			
+std::actor::remote::Call	struct	std::actor::remote	api	source	stdlib/actor/remote.bot:150			
+std::actor::remote::CallFailed	error	std::actor::remote	api	source	stdlib/actor/remote.bot:86			
+std::actor::remote::Caller	opaque-struct	std::actor::remote	api	source	stdlib/actor/remote.bot:168			
+std::actor::remote::Identity	struct	std::actor::remote	api	source	stdlib/actor/remote.bot:122			
+std::actor::remote::Remote	opaque-struct	std::actor::remote	api	source	stdlib/actor/remote.bot:129			
+std::actor::remote::Replies	struct	std::actor::remote	api	source	stdlib/actor/remote.bot:162			
+std::actor::remote::Reply	opaque-struct	std::actor::remote	api	source	stdlib/actor/remote.bot:143			
+std::actor::remote::Response	opaque-struct	std::actor::remote	api	source	stdlib/actor/remote.bot:155			
+std::actor::remote::Sent	enum	std::actor::remote	api	source	stdlib/actor/remote.bot:75			
+std::actor::remote::Sent::Closed	enum-case	std::actor::remote::Sent	api	source	stdlib/actor/remote.bot:75			
+std::actor::remote::Sent::Delivered	enum-case	std::actor::remote::Sent	api	source	stdlib/actor/remote.bot:75			
+std::actor::remote::Sent::Full	enum-case	std::actor::remote::Sent	api	source	stdlib/actor/remote.bot:75			
+std::actor::remote::Sent::Stale	enum-case	std::actor::remote::Sent	api	source	stdlib/actor/remote.bot:75			
+std::actor::remote::Sent::TooLarge	enum-case	std::actor::remote::Sent	api	source	stdlib/actor/remote.bot:75			
+std::actor::remote::Sent::TypeMismatch	enum-case	std::actor::remote::Sent	api	source	stdlib/actor/remote.bot:75			
+std::actor::remote::Sent::Unavailable	enum-case	std::actor::remote::Sent	api	source	stdlib/actor/remote.bot:75			
+std::actor::remote::Service	opaque-struct	std::actor::remote	api	source	stdlib/actor/remote.bot:136			
+std::actor::remote::Word	type	std::actor::remote	api	source	stdlib/actor/remote.bot:110			
+std::actor::remote::call	function	std::actor::remote	api	source	stdlib/actor/remote.bot:499			
+std::actor::remote::call_deliveries	function	std::actor::remote	private	source	stdlib/actor/remote.bot:374			
+std::actor::remote::caller	function	std::actor::remote	api	source	stdlib/actor/remote.bot:487			
+std::actor::remote::close	function	std::actor::remote	api	source	stdlib/actor/remote.bot:290			
+std::actor::remote::close_service	function	std::actor::remote	api	source	stdlib/actor/remote.bot:400			
+std::actor::remote::decoded	function	std::actor::remote	private	source	stdlib/actor/remote.bot:233			
+std::actor::remote::decoded_call	function	std::actor::remote	private	source	stdlib/actor/remote.bot:348			
+std::actor::remote::decoded_response	function	std::actor::remote	private	source	stdlib/actor/remote.bot:417			
+std::actor::remote::deliver	function	std::actor::remote	api	source	stdlib/actor/remote.bot:337			
+std::actor::remote::delivered	function	std::actor::remote	private	source	stdlib/actor/remote.bot:250			
+std::actor::remote::delivered_calls	function	std::actor::remote	private	source	stdlib/actor/remote.bot:364			
+std::actor::remote::delivered_waiting	function	std::actor::remote	private	source	stdlib/actor/remote.bot:313			
+std::actor::remote::deliveries	function	std::actor::remote	private	source	stdlib/actor/remote.bot:263			
+std::actor::remote::export	function	std::actor::remote	api	source	stdlib/actor/remote.bot:277			
+std::actor::remote::in_transit	function	std::actor::remote	api	source	stdlib/actor/remote.bot:295			
+std::actor::remote::in_transit_calls	function	std::actor::remote	api	source	stdlib/actor/remote.bot:405			
+std::actor::remote::n_message	binding	std::actor::remote	private	source	stdlib/actor/remote.bot:104			
+std::actor::remote::n_room	binding	std::actor::remote	private	source	stdlib/actor/remote.bot:105			
+std::actor::remote::opened	function	std::actor::remote	private	source	stdlib/actor/remote.bot:227			
+std::actor::remote::reason_of	function	std::actor::remote	private	source	stdlib/actor/remote.bot:206			
+std::actor::remote::remote_in	function	std::actor::remote	std-internal	source	stdlib/actor/remote.bot:175			
+std::actor::remote::remote_out	function	std::actor::remote	std-internal	source	stdlib/actor/remote.bot:172			
+std::actor::remote::replies	function	std::actor::remote	api	source	stdlib/actor/remote.bot:470			
+std::actor::remote::reply	function	std::actor::remote	api	source	stdlib/actor/remote.bot:411			
+std::actor::remote::reply_in	function	std::actor::remote	std-internal	source	stdlib/actor/remote.bot:187			
+std::actor::remote::reply_out	function	std::actor::remote	std-internal	source	stdlib/actor/remote.bot:184			
+std::actor::remote::response_deliveries	function	std::actor::remote	private	source	stdlib/actor/remote.bot:445			
+std::actor::remote::responses_delivered	function	std::actor::remote	private	source	stdlib/actor/remote.bot:436			
+std::actor::remote::room_deliveries	function	std::actor::remote	private	source	stdlib/actor/remote.bot:458			
+std::actor::remote::room_status	binding	std::actor::remote	private	source	stdlib/actor/remote.bot:101			
+std::actor::remote::send	function	std::actor::remote	api	source	stdlib/actor/remote.bot:306			
+std::actor::remote::sent_of	function	std::actor::remote	private	source	stdlib/actor/remote.bot:190			
+std::actor::remote::serve_calls	function	std::actor::remote	api	source	stdlib/actor/remote.bot:387			
+std::actor::remote::service_in	function	std::actor::remote	std-internal	source	stdlib/actor/remote.bot:181			
+std::actor::remote::service_out	function	std::actor::remote	std-internal	source	stdlib/actor/remote.bot:178			
+std::actor::remote::t_closed	binding	std::actor::remote	private	source	stdlib/actor/remote.bot:92			
+std::actor::remote::t_delivered	binding	std::actor::remote	private	source	stdlib/actor/remote.bot:90			
+std::actor::remote::t_full	binding	std::actor::remote	private	source	stdlib/actor/remote.bot:91			
+std::actor::remote::t_service_ended	binding	std::actor::remote	private	source	stdlib/actor/remote.bot:97			
+std::actor::remote::t_stale	binding	std::actor::remote	private	source	stdlib/actor/remote.bot:93			
+std::actor::remote::t_too_large	binding	std::actor::remote	private	source	stdlib/actor/remote.bot:95			
+std::actor::remote::t_type_mismatch	binding	std::actor::remote	private	source	stdlib/actor/remote.bot:96			
+std::actor::remote::t_unavailable	binding	std::actor::remote	private	source	stdlib/actor/remote.bot:94			
+std::actor::remote::t_undelivered	binding	std::actor::remote	private	source	stdlib/actor/remote.bot:98			
+std::actor::remote::token_of	function	std::actor::remote	private	source	stdlib/actor/remote.bot:310			
+std::actor::remote::word	function	std::actor::remote	private	source	stdlib/actor/remote.bot:114			
 std::actor::request	function	std::actor	private	source	stdlib/actor.bot:281			
 std::actor::retire	function	std::actor	private	source	stdlib/actor.bot:675			
 std::actor::retired	function	std::actor	private	source	stdlib/actor.bot:690			
 std::actor::running?	function	std::actor	private	source	stdlib/actor.bot:670			
 std::actor::send	function	std::actor	api	source	stdlib/actor.bot:334			
 std::actor::sent_of	function	std::actor	private	source	stdlib/actor.bot:322			
-std::actor::serve	function	std::actor	private	source	stdlib/actor.bot:764			
-std::actor::served	function	std::actor	private	source	stdlib/actor.bot:787			
+std::actor::serve	function	std::actor	private	source	stdlib/actor.bot:775			
+std::actor::served	function	std::actor	private	source	stdlib/actor.bot:798			
 std::actor::shut	function	std::actor	private	source	stdlib/actor.bot:461			
 std::actor::sleep	function	std::actor	api	source	stdlib/actor.bot:353			
 std::actor::spawned	function	std::actor	api	source	stdlib/actor.bot:647			
-std::actor::start	function	std::actor	api	source	stdlib/actor.bot:844			
+std::actor::start	function	std::actor	api	source	stdlib/actor.bot:855			
 std::actor::stats	function	std::actor	api	source	stdlib/actor.bot:635			
 std::actor::stats_checked	function	std::actor	private	source	stdlib/actor.bot:621			
 std::actor::status_answer	function	std::actor	private	source	stdlib/actor.bot:555			
@@ -391,7 +457,7 @@ std::char::is_tcl_alnum	intrinsic	std::char	api	intrinsic	core/tclcompat.tcl:150
 std::char::is_tcl_alpha	intrinsic	std::char	api	intrinsic	core/tclcompat.tcl:148			
 std::char::scalar_value	intrinsic	std::char	api	intrinsic	core/unicodechar.tcl:38			
 std::compiler	namespace		api	source	stdlib/compiler.bot			
-std::compiler::CompilerError	error	std::compiler	api	source	stdlib/compiler.bot:192			
+std::compiler::CompilerError	error	std::compiler	api	source	stdlib/compiler.bot:195			
 std::compiler::DiagnosticCode	enum	std::compiler	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::AffineCaptureUnsupported	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::AffineContainerUnsupported	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
@@ -491,6 +557,7 @@ std::compiler::DiagnosticCode::MutablePlaceCapture	enum-case	std::compiler::Diag
 std::compiler::DiagnosticCode::MutablePlaceReceiver	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::NoApplicableMethod	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::NomethodCall	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
+std::compiler::DiagnosticCode::NonplaceParameterMutation	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::NotAContext	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::NotAStruct	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::NotAnEnum	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
@@ -505,6 +572,8 @@ std::compiler::DiagnosticCode::ReorderNotProven	enum-case	std::compiler::Diagnos
 std::compiler::DiagnosticCode::ResourceDeclaration	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::ReturnOutsideCallable	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::SendableDeclaration	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
+std::compiler::DiagnosticCode::ThreadEntryPlacement	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
+std::compiler::DiagnosticCode::ThreadEntryReference	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::TraitImplOrder	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::TraitInstanceBudget	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::TraitNestedPolymorphic	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
@@ -532,7 +601,7 @@ std::compiler::DiagnosticCode::UnprovenField	enum-case	std::compiler::Diagnostic
 std::compiler::DiagnosticCode::UnwrappedYield	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::UseAfterMove	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::YieldOutsideFunction	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
-std::compiler::SourceLocation	struct	std::compiler	api	source	stdlib/compiler.bot:186			
+std::compiler::SourceLocation	struct	std::compiler	api	source	stdlib/compiler.bot:189			
 std::coroutine	namespace		api	intrinsic				
 std::coroutine::done?	intrinsic	std::coroutine	api	intrinsic	core/coroutines.tcl:399			
 std::darwin	namespace		api	source	stdlib/darwin.bot	macos		1
@@ -1403,38 +1472,144 @@ std::test::code_name	function	std::test	api	source	stdlib/test.bot:300
 std::test::contains_text?	function	std::test	api	source	stdlib/test.bot:256			
 std::test::count	function	std::test	api	source	stdlib/test.bot:152			
 std::test::describe	function	std::test	api	source	stdlib/test.bot:282			
-std::test::diagnostic	function	std::test	api	source	stdlib/test.bot:626			
-std::test::diagnostic_text	function	std::test	api	source	stdlib/test.bot:593			
-std::test::equal	function	std::test	api	source	stdlib/test.bot:610			
+std::test::diagnostic	function	std::test	api	source	stdlib/test.bot:628			
+std::test::diagnostic_text	function	std::test	api	source	stdlib/test.bot:595			
+std::test::equal	function	std::test	api	source	stdlib/test.bot:612			
 std::test::escape_of	function	std::test	api	source	stdlib/test.bot:189			
 std::test::escaped	function	std::test	api	source	stdlib/test.bot:205			
 std::test::glyph	function	std::test	api	source	stdlib/test.bot:160			
-std::test::holds	function	std::test	api	source	stdlib/test.bot:650			
+std::test::holds	function	std::test	api	source	stdlib/test.bot:652			
 std::test::joined	function	std::test	api	source	stdlib/test.bot:173			
-std::test::mismatch	function	std::test	api	source	stdlib/test.bot:606			
-std::test::no_results	function	std::test	api	source	stdlib/test.bot:731			
+std::test::mismatch	function	std::test	api	source	stdlib/test.bot:608			
+std::test::no_results	function	std::test	api	source	stdlib/test.bot:733			
 std::test::no_texts	function	std::test	api	source	stdlib/test.bot:168			
-std::test::passed	function	std::test	api	source	stdlib/test.bot:600			
+std::test::passed	function	std::test	api	source	stdlib/test.bot:602			
 std::test::quoted	function	std::test	api	source	stdlib/test.bot:223			
 std::test::registered	function	std::test	api	source	stdlib/test.bot:147			
-std::test::rejects	function	std::test	api	source	stdlib/test.bot:659			
-std::test::rejects_any	function	std::test	api	source	stdlib/test.bot:681			
-std::test::rejects_at	function	std::test	api	source	stdlib/test.bot:669			
-std::test::rejects_containing	function	std::test	api	source	stdlib/test.bot:707			
-std::test::rejects_message	function	std::test	api	source	stdlib/test.bot:694			
-std::test::report	function	std::test	api	source	stdlib/test.bot:792			
-std::test::result_lines	function	std::test	api	source	stdlib/test.bot:760			
-std::test::results	function	std::test	api	source	stdlib/test.bot:735			
-std::test::run	function	std::test	api	source	stdlib/test.bot:725			
-std::test::satisfies	function	std::test	api	source	stdlib/test.bot:618			
+std::test::rejects	function	std::test	api	source	stdlib/test.bot:661			
+std::test::rejects_any	function	std::test	api	source	stdlib/test.bot:683			
+std::test::rejects_at	function	std::test	api	source	stdlib/test.bot:671			
+std::test::rejects_containing	function	std::test	api	source	stdlib/test.bot:709			
+std::test::rejects_message	function	std::test	api	source	stdlib/test.bot:696			
+std::test::report	function	std::test	api	source	stdlib/test.bot:794			
+std::test::result_lines	function	std::test	api	source	stdlib/test.bot:762			
+std::test::results	function	std::test	api	source	stdlib/test.bot:737			
+std::test::run	function	std::test	api	source	stdlib/test.bot:727			
+std::test::satisfies	function	std::test	api	source	stdlib/test.bot:620			
 std::test::suite	function	std::test	api	source	stdlib/test.bot:136			
-std::test::summarize	function	std::test	api	source	stdlib/test.bot:750			
-std::test::summary_line	function	std::test	api	source	stdlib/test.bot:783			
+std::test::summarize	function	std::test	api	source	stdlib/test.bot:752			
+std::test::summary_line	function	std::test	api	source	stdlib/test.bot:785			
 std::test::text_lines	function	std::test	api	source	stdlib/test.bot:229			
-std::test::value	function	std::test	api	source	stdlib/test.bot:641			
+std::test::value	function	std::test	api	source	stdlib/test.bot:643			
+std::thread	namespace		api	source+intrinsic	stdlib/thread.bot			
+std::thread::Doorbell	context-trait	std::thread	api	source	stdlib/thread.bot:313			
+std::thread::Entry	opaque-struct	std::thread	api	source	stdlib/thread.bot:111			
+std::thread::Limit	type	std::thread	api	source	stdlib/thread.bot:106			
+std::thread::Port	context-struct	std::thread	api	source	stdlib/thread.bot:335			
+std::thread::Right	opaque-struct	std::thread	private	source	stdlib/thread.bot:118			
+std::thread::Started	struct	std::thread	api	source	stdlib/thread.bot:132			
+std::thread::Stats	struct	std::thread	api	source	stdlib/thread.bot:141			
+std::thread::Status	enum	std::thread	api	source	stdlib/thread.bot:91			
+std::thread::Status::Failed	enum-case	std::thread::Status	api	source	stdlib/thread.bot:91			
+std::thread::Status::Gone	enum-case	std::thread::Status	api	source	stdlib/thread.bot:91			
+std::thread::Status::Returned	enum-case	std::thread::Status	api	source	stdlib/thread.bot:91			
+std::thread::Status::Running	enum-case	std::thread::Status	api	source	stdlib/thread.bot:91			
+std::thread::Status::StartFailed	enum-case	std::thread::Status	api	source	stdlib/thread.bot:91			
+std::thread::Status::Starting	enum-case	std::thread::Status	api	source	stdlib/thread.bot:91			
+std::thread::Status::Stopped	enum-case	std::thread::Status	api	source	stdlib/thread.bot:91			
+std::thread::Thread	opaque-struct	std::thread	api	source	stdlib/thread.bot:122			
+std::thread::ThreadFailed	error	std::thread	api	source	stdlib/thread.bot:86			
+std::thread::ThreadId	opaque-struct	std::thread	api	source	stdlib/thread.bot:128			
+std::thread::ThreadLimit	error	std::thread	api	source	stdlib/thread.bot:76			
+std::thread::ThreadStartFailed	error	std::thread	api	source	stdlib/thread.bot:80			
+std::thread::Threads	context-struct	std::thread	api	source	stdlib/thread.bot:102			
+std::thread::await_end	function	std::thread	api	source	stdlib/thread.bot:244			
+std::thread::capacity	function	std::thread	api	source	stdlib/thread.bot:281			
+std::thread::close_port	function	std::thread	api	source	stdlib/thread.bot:464			
+std::thread::closed	function	std::thread	private	source	stdlib/thread.bot:446			
+std::thread::create	function	std::thread	api	source	stdlib/thread.bot:168			
+std::thread::default_stack	binding	std::thread	private	source	stdlib/thread.bot:156			
+std::thread::dispatch	function	std::thread	private	source	stdlib/thread.bot:382			
+std::thread::drain	function	std::thread	private	source	stdlib/thread.bot:394			
+std::thread::ended?	function	std::thread	private	source	stdlib/thread.bot:194			
+std::thread::entry	intrinsic	std::thread	api	intrinsic	core/thread.tcl:86			
+std::thread::find_route	function	std::thread	private	source	stdlib/thread.bot:356			
+std::thread::ints	function	std::thread	private	source	stdlib/thread.bot:341			
+std::thread::join	function	std::thread	api	source	stdlib/thread.bot:251			
+std::thread::key_of	function	std::thread	private	source	stdlib/thread.bot:352			
+std::thread::n_ended	binding	std::thread	private	source	stdlib/thread.bot:321			
+std::thread::n_message	binding	std::thread	private	source	stdlib/thread.bot:319			
+std::thread::n_room	binding	std::thread	private	source	stdlib/thread.bot:320			
+std::thread::n_stop	binding	std::thread	private	source	stdlib/thread.bot:322			
+std::thread::p_closed	binding	std::thread	private	source	stdlib/thread.bot:331			
+std::thread::p_fd	binding	std::thread	private	source	stdlib/thread.bot:328			
+std::thread::p_served	binding	std::thread	private	source	stdlib/thread.bot:330			
+std::thread::p_watch	binding	std::thread	private	source	stdlib/thread.bot:329			
+std::thread::port	function	std::thread	api	source	stdlib/thread.bot:349			
+std::thread::pump	function	std::thread	private	source	stdlib/thread.bot:405			
+std::thread::regs	function	std::thread	private	source	stdlib/thread.bot:344			
+std::thread::request_stop	function	std::thread	api	source	stdlib/thread.bot:234			
+std::thread::route	function	std::thread	api	source	stdlib/thread.bot:366			
+std::thread::route_unit	binding	std::thread	private	source	stdlib/thread.bot:325			
+std::thread::rt_await	intrinsic	std::thread	api	intrinsic				
+std::thread::rt_cancel	intrinsic	std::thread	api	intrinsic				
+std::thread::rt_capacity	intrinsic	std::thread	api	intrinsic				
+std::thread::rt_domain	intrinsic	std::thread	api	intrinsic				
+std::thread::rt_endpoint_close	intrinsic	std::thread	api	intrinsic				
+std::thread::rt_endpoint_key	intrinsic	std::thread	api	intrinsic				
+std::thread::rt_endpoint_open	intrinsic	std::thread	api	intrinsic				
+std::thread::rt_endpoint_queued	intrinsic	std::thread	api	intrinsic				
+std::thread::rt_entry_index	intrinsic	std::thread	api	intrinsic				
+std::thread::rt_error	intrinsic	std::thread	api	intrinsic				
+std::thread::rt_error_message	intrinsic	std::thread	api	intrinsic				
+std::thread::rt_init	intrinsic	std::thread	api	intrinsic				
+std::thread::rt_port_a	intrinsic	std::thread	api	intrinsic				
+std::thread::rt_port_b	intrinsic	std::thread	api	intrinsic				
+std::thread::rt_port_close	intrinsic	std::thread	api	intrinsic				
+std::thread::rt_port_open	intrinsic	std::thread	api	intrinsic				
+std::thread::rt_port_take	intrinsic	std::thread	api	intrinsic				
+std::thread::rt_release	intrinsic	std::thread	api	intrinsic				
+std::thread::rt_reply	intrinsic	std::thread	api	intrinsic				
+std::thread::rt_request	intrinsic	std::thread	api	intrinsic				
+std::thread::rt_result	intrinsic	std::thread	api	intrinsic				
+std::thread::rt_send	intrinsic	std::thread	api	intrinsic				
+std::thread::rt_spawn	intrinsic	std::thread	api	intrinsic				
+std::thread::rt_stat	intrinsic	std::thread	api	intrinsic				
+std::thread::rt_status	intrinsic	std::thread	api	intrinsic				
+std::thread::rt_stop	intrinsic	std::thread	api	intrinsic				
+std::thread::rt_stop_requested	intrinsic	std::thread	api	intrinsic				
+std::thread::rt_take	intrinsic	std::thread	api	intrinsic				
+std::thread::rt_take_bytes	intrinsic	std::thread	api	intrinsic				
+std::thread::rt_take_call	intrinsic	std::thread	api	intrinsic				
+std::thread::rt_take_call_key	intrinsic	std::thread	api	intrinsic				
+std::thread::rt_take_status	intrinsic	std::thread	api	intrinsic				
+std::thread::rt_take_text	intrinsic	std::thread	api	intrinsic				
+std::thread::rt_watch	intrinsic	std::thread	api	intrinsic				
+std::thread::serve	function	std::thread	api	source	stdlib/thread.bot:439			
+std::thread::served	function	std::thread	private	source	stdlib/thread.bot:414			
+std::thread::spawn	function	std::thread	private	source	stdlib/thread.bot:199			
+std::thread::st_failed	binding	std::thread	private	source	stdlib/thread.bot:163			
+std::thread::st_gone	binding	std::thread	private	source	stdlib/thread.bot:165			
+std::thread::st_returned	binding	std::thread	private	source	stdlib/thread.bot:161			
+std::thread::st_running	binding	std::thread	private	source	stdlib/thread.bot:160			
+std::thread::st_start_failed	binding	std::thread	private	source	stdlib/thread.bot:164			
+std::thread::st_starting	binding	std::thread	private	source	stdlib/thread.bot:159			
+std::thread::st_stopped	binding	std::thread	private	source	stdlib/thread.bot:162			
+std::thread::start	function	std::thread	api	source	stdlib/thread.bot:225			
+std::thread::start_sized	function	std::thread	api	source	stdlib/thread.bot:213			
+std::thread::stats	function	std::thread	api	source	stdlib/thread.bot:285			
+std::thread::status	function	std::thread	api	source	stdlib/thread.bot:229			
+std::thread::status_of	function	std::thread	private	source	stdlib/thread.bot:177			
+std::thread::stop_requested?	function	std::thread	api	source	stdlib/thread.bot:238			
+std::thread::unroute	function	std::thread	api	source	stdlib/thread.bot:371			
+std::thread::wait_end	function	std::thread	api	source	stdlib/thread.bot:487			
+std::thread::wait_stop	function	std::thread	api	source	stdlib/thread.bot:513			
+std::thread::waited_end	function	std::thread	private	source	stdlib/thread.bot:469			
+std::thread::waited_stop	function	std::thread	private	source	stdlib/thread.bot:494			
 std::transfer	namespace		api	source+intrinsic	stdlib/transfer.bot			
 std::transfer::decode	intrinsic	std::transfer	api	intrinsic	core/transfer.tcl:580			
 std::transfer::encode	intrinsic	std::transfer	api	intrinsic	core/transfer.tcl:577			
+std::transfer::fingerprint	intrinsic	std::transfer	api	intrinsic	core/transfer.tcl:590			
 std::tree	namespace		api	source+intrinsic	stdlib/tree.bot			
 std::tree::Order	enum	std::tree	api	source	stdlib/tree.bot:47			
 std::tree::Order::BreadthFirst	enum-case	std::tree::Order	api	source	stdlib/tree.bot:47			
@@ -1609,5 +1784,5 @@ std::windows::standard_handle	function	std::windows	api	source	stdlib/windows.bo
 std::windows::write_file	function	std::windows	api	source	stdlib/windows.bot:143	windows		
 std::windows::written	function	std::windows	api	source	stdlib/windows.bot:134	windows		
 string?	intrinsic		primitive	intrinsic				
-transfer#decode	intrinsic		internal	intrinsic	core/transfer.tcl:587			
-transfer#encode	intrinsic		internal	intrinsic	core/transfer.tcl:584			
+transfer#decode	intrinsic		internal	intrinsic	core/transfer.tcl:597			
+transfer#encode	intrinsic		internal	intrinsic	core/transfer.tcl:594			

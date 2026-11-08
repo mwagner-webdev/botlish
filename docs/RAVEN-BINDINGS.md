@@ -332,10 +332,17 @@ adds. It has one callback per Raven callback signature the wrapper uses:
 * `br_action`, which handles both `Raction_bind` and the default action
   handler;
 * `br_close` and `br_resized`;
-* `br_timer` and `br_error`.
+* `br_timer` and `br_error`;
+* `br_input`, a window's event hook (`Rwindow_set_event_hook`), installed
+  only for a window the program watches for input (`watch_input`, raven
+  0.4.0, ABI 2; SIMCITY-WORKLOAD-KNOWN-GAPS.md): keys, mouse buttons,
+  pointer moves and the wheel.
 
 Each callback copies its arguments into a record: kind, source, two ints,
-a double, and a `malloc`'d copy of any text. Records go into a growing
+a double, the pointer's position and a movement (raw input), and a
+`malloc`'d copy of any text. Every number a record holds is finite (a
+spin box's infinity is recorded as `value` 1 and `number` 0.0), so the
+wrapper's `events()` declares no error. Records go into a growing
 ring buffer, and none is overwritten. A record that memory cannot hold is
 counted (`botlish_raven_lost`). The program registers what it wants to
 hear about (`botlish_raven_watch_button(Rid)`, ...), which the wrapper does
@@ -352,8 +359,15 @@ The rules it keeps:
 * **It decides nothing for the program but the answer a callback must give
   at once.** A close request is answered by the policy the program stated
   when it watched the window (`keep_open`). The record then says what was
-  answered.
-* **It is ABI-versioned.** `start` checks `botlish_raven_bridge_abi() == 1`
+  answered. The input hook's answer is always "not consumed" (`R_FALSE`):
+  Raven delivers every key and click to its widgets as it would without
+  the hook (`raven-input`); consuming input stays a program's decision no
+  bridge can make in advance (section 7.1).
+* **Consecutive pointer moves are one record.** A move right after a move
+  of the same window with the same modifiers updates that record (the new
+  position, the summed movement), so a queue drained once a frame holds one
+  move per frame.
+* **It is ABI-versioned.** `start` checks `botlish_raven_bridge_abi() == 2`
   before anything else (`raven-bridge-abi`).
 * **The queue is locked.** All callbacks run on the UI thread, except the
   error callback, which Raven calls on the thread that raised the error.
@@ -448,7 +462,7 @@ frame:
 |---|---|---|
 | `RPaintCallback`, `RMeasureCallback` | custom widgets (`R_WIDGET_CUSTOM`): painting with `Rdraw_rect`/`Rdraw_text`, springs, measuring | impossible: drawing happens inside the paint |
 | `RListItemTextCallback`, `RTileItemCallback`, `RTileDragDataCallback` | virtual lists and tile views of any size: Raven asks for the rows it draws | only non-virtual lists (`Rlist_view_add_item` for every row) |
-| `RWidgetEventCallback`, `RWindowEventHook` return values | raw input that consumes an event (`return R_TRUE`) or lets it bubble | could be recorded, but the consume/bubble decision must be fixed in C in advance |
+| `RWidgetEventCallback`, `RWindowEventHook` return values | raw input that consumes an event (`return R_TRUE`) or lets it bubble | observing it is recorded (raven 0.4.0: `watch_input`, the hook's answer fixed to "bubble"); consuming it needs the answer from the program |
 | `RDropCallback` return value | accepting or refusing a drop by its type or content | same: a fixed policy at most |
 | `RWindowCloseCallback` return value | "Discard the changes?" decided when the close is asked | the bridge's fixed policy (`keep_open`) and a CloseRequested event: the program then closes the window itself or not |
 | `RTaskCallback`, `RParallelRangeCallback` | `Rtask_run_async`, `Rparallel_for`, `Rtask_post` | none: Botlish programs have no threads of their own, so code on Raven's workers would be C |

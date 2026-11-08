@@ -28,6 +28,20 @@ fn kind_name(kind: raven::EventKind) -> str:
         return "Resized"
     if kind == raven::EventKind::TimerElapsed:
         return "TimerElapsed"
+    if kind == raven::EventKind::KeyPressed:
+        return "KeyPressed"
+    if kind == raven::EventKind::KeyRepeated:
+        return "KeyRepeated"
+    if kind == raven::EventKind::KeyReleased:
+        return "KeyReleased"
+    if kind == raven::EventKind::MousePressed:
+        return "MousePressed"
+    if kind == raven::EventKind::MouseReleased:
+        return "MouseReleased"
+    if kind == raven::EventKind::MouseMoved:
+        return "MouseMoved"
+    if kind == raven::EventKind::Wheel:
+        return "Wheel"
     "Error"
 
 fn flag(value: bool) -> str:
@@ -50,3 +64,8 @@ fn non_finite(result: NonFiniteResult) -> str:
 # source among the handles the scenario made.
 fn event(e: raven::Event, who: str) -> str:
     kind_name(e.kind).append_char(' ').concat(who).append_char(' ').concat(int(e.value)).append_char(' ').concat(int(e.extra)).append_char(' ').concat(int(std::float64::round(e.number))).concat(" [").concat(e.text).append_char(']')
+
+# A raw input EVENT as "KIND value extra x y dx dy" (numbers rounded); WHO
+# names its source.
+fn input(e: raven::Event, who: str) -> str:
+    kind_name(e.kind).append_char(' ').concat(who).append_char(' ').concat(int(e.value)).append_char(' ').concat(int(e.extra)).append_char(' ').concat(int(std::float64::round(e.x))).append_char(' ').concat(int(std::float64::round(e.y))).append_char(' ').concat(int(std::float64::round(e.dx))).append_char(' ').concat(int(std::float64::round(e.dy)))

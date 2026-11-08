@@ -1,0 +1,27 @@
+import std::str
+import std::int
+import std::mutable_vector
+
+error Refused:
+    why: str
+
+type Who = Int in 0..9
+
+context struct Ledger:
+    owner: Who
+    notes: MutableVector[str]
+
+fn note(text: str, context l: Ledger) -> int:
+    l.notes.push(text)
+    l.notes.length()
+
+fn owner(context l: Ledger) -> int:
+    l.owner
+
+thread fn job(n: int) -> str errors Refused:
+    with context Ledger {owner: 7, notes: std::mutable_vector::from_list([])}
+    note("one")
+    note("two")
+    if n < 0:
+        fail Refused {why: "negative"}
+    std::int::to_string(owner()).append_char(':').concat(std::int::to_string(note("three")))

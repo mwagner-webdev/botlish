@@ -18,20 +18,28 @@
  * Raven's are; the queue is locked anyway, because Raven calls the error
  * callback on the thread that raised the error.
  *
- * The ABI (botlish_raven_bridge_abi, version 1): scalars and NUL-terminated
+ * The ABI (botlish_raven_bridge_abi, version 2): scalars and NUL-terminated
  * strings only. The text of the current record and every string the
  * program reads from Raven reach Botlish through botlish_raven_text_copy,
  * and a buffer of a size known only at run time (a captured frame) through
  * botlish_raven_bytes_copy: each copies bytes into storage the program
- * lends for that call.
+ * lends for that call. Every number a record holds is finite: Botlish's
+ * Float64 has no NaN or infinity, and a record that would carry one says
+ * so instead (BR_VALUE's value 1).
+ *
+ * Version 2 adds raw input: a window the program watches for input
+ * (botlish_raven_watch_input) has its event hook here, which records keys,
+ * mouse buttons, pointer moves and the wheel and never consumes an event,
+ * so Raven handles every one exactly as it would without the hook.
  */
 #include <Raven.h>
 
+#include <math.h>
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
 
-#define BOTLISH_RAVEN_BRIDGE_ABI 1
+#define BOTLISH_RAVEN_BRIDGE_ABI 2
 
 /* The kinds of record. raven.bot's EventKind maps them one to one. */
 enum {
@@ -47,7 +55,16 @@ enum {
     BR_CLOSE = 9,          /* a window asked to close: value = allowed */
     BR_RESIZED = 10,       /* a window: value = width, extra = height */
     BR_TIMER = 11,         /* a timer elapsed: source = timer */
-    BR_ERROR = 12          /* value = RError, extra = RSeverity, text = detail */
+    BR_ERROR = 12,         /* value = RError, extra = RSeverity, text = detail */
+    /* Raw input of a window watched for it (source = the window; x, y =
+     * the pointer, in the window's logical units; extra = the modifiers). */
+    BR_KEY_PRESSED = 13,   /* value = RKey, the first press */
+    BR_KEY_REPEATED = 14,  /* value = RKey, an auto-repeat while held */
+    BR_KEY_RELEASED = 15,  /* value = RKey */
+    BR_MOUSE_PRESSED = 16, /* value = RMouseButton */
+    BR_MOUSE_RELEASED = 17,/* value = RMouseButton */
+    BR_MOUSE_MOVED = 18,   /* dx, dy = the movement (consecutive moves are one record) */
+    BR_WHEEL = 19          /* dx, dy = the scroll, in lines (positive: left, up) */
 };
 
 typedef struct {
@@ -56,6 +73,8 @@ typedef struct {
     int value;
     int extra;
     double number;
+    double x, y;           /* the pointer (raw input) */
+    double dx, dy;         /* a move's movement, the wheel's scroll */
     char* text;            /* malloc'd, or NULL */
 } br_record;
 
@@ -77,30 +96,21 @@ static char* br_copy(const char* text) {
     return copy;
 }
 
-/* Appends a record (its text copied). Grows the ring; a record no memory
- * can hold is counted as lost, never written over another. */
-static void br_push(int kind, Rid source, int value, int extra, double number, const char* text) {
-    br_record r;
-    r.kind = kind;
-    r.source = source;
-    r.value = value;
-    r.extra = extra;
-    r.number = number;
-    r.text = br_copy(text);
-    if (text && !r.text) {
-        pthread_mutex_lock(&br_lock);
-        br_lost++;
-        pthread_mutex_unlock(&br_lock);
-        return;
-    }
-    pthread_mutex_lock(&br_lock);
+/* NUMBER, or 0.0 when it is no finite number (a record never holds one). */
+static double br_finite(double number) {
+    return isfinite(number) ? number : 0.0;
+}
+
+/* Appends R (its text already copied, or NULL). Grows the ring; a record no
+ * memory can hold is counted as lost, never written over another. The
+ * caller holds br_lock. */
+static void br_append_locked(br_record r) {
     if (br_count == br_capacity) {
         size_t capacity = br_capacity ? br_capacity * 2 : 64;
         br_record* grown = (br_record*)malloc(capacity * sizeof(br_record));
         size_t i;
         if (!grown) {
             br_lost++;
-            pthread_mutex_unlock(&br_lock);
             free(r.text);
             return;
         }
@@ -112,6 +122,57 @@ static void br_push(int kind, Rid source, int value, int extra, double number, c
     }
     br_queue[(br_head + br_count) % br_capacity] = r;
     br_count++;
+}
+
+/* Appends a record (its text copied). */
+static void br_push(int kind, Rid source, int value, int extra, double number, const char* text) {
+    br_record r;
+    memset(&r, 0, sizeof r);
+    r.kind = kind;
+    r.source = source;
+    r.value = value;
+    r.extra = extra;
+    r.number = br_finite(number);
+    r.text = br_copy(text);
+    if (text && !r.text) {
+        pthread_mutex_lock(&br_lock);
+        br_lost++;
+        pthread_mutex_unlock(&br_lock);
+        return;
+    }
+    pthread_mutex_lock(&br_lock);
+    br_append_locked(r);
+    pthread_mutex_unlock(&br_lock);
+}
+
+/* Appends a raw input record of WINDOW. A pointer move right after another
+ * move of the same window with the same modifiers is merged into it (its
+ * position the new one, its movement the sum): a program that drains the
+ * queue once a frame sees one move per frame, never hundreds. */
+static void br_push_input(int kind, Rid window, int value, int extra, double x, double y, double dx, double dy) {
+    br_record r;
+    memset(&r, 0, sizeof r);
+    r.kind = kind;
+    r.source = window;
+    r.value = value;
+    r.extra = extra;
+    r.x = br_finite(x);
+    r.y = br_finite(y);
+    r.dx = br_finite(dx);
+    r.dy = br_finite(dy);
+    pthread_mutex_lock(&br_lock);
+    if (kind == BR_MOUSE_MOVED && br_count) {
+        br_record* last = &br_queue[(br_head + br_count - 1) % br_capacity];
+        if (last->kind == BR_MOUSE_MOVED && last->source == window && last->extra == extra) {
+            last->x = r.x;
+            last->y = r.y;
+            last->dx = br_finite(last->dx + r.dx);
+            last->dy = br_finite(last->dy + r.dy);
+            pthread_mutex_unlock(&br_lock);
+            return;
+        }
+    }
+    br_append_locked(r);
     pthread_mutex_unlock(&br_lock);
 }
 
@@ -132,9 +193,12 @@ static void br_slider(Rid source, float value, void* user_data) {
     br_push(BR_VALUE, source, 0, 0, (double)value, NULL);
 }
 
+/* A spin box given an infinite range (raven.bot's set_spin_box_raw_range)
+ * can hold an infinity: its record says so (value 1, number 0.0), and the
+ * program reads the value itself (spin_box_raw_value). */
 static void br_spin_box(Rid source, double value, void* user_data) {
     (void)user_data;
-    br_push(BR_VALUE, source, 0, 0, value, NULL);
+    br_push(BR_VALUE, source, isfinite(value) ? 0 : 1, 0, value, NULL);
 }
 
 static void br_text_changed(Rid source, const char* text, void* user_data) {
@@ -182,6 +246,40 @@ static void br_timer(Rid timer, void* user_data) {
 
 static void br_error(RError code, RSeverity severity, const char* detail) {
     br_push(BR_ERROR, R_INVALID_ID, (int)code, (int)severity, 0.0, detail ? detail : "");
+}
+
+/* A watched window's raw input, seen before its widgets. The answer is
+ * always R_FALSE: the event is recorded, never consumed, so Raven goes on
+ * to deliver it to its widgets, shortcuts and dialogs as it would without
+ * the hook. Text (R_EVENT_TEXT) is a text input's TextChanged; focus and
+ * enter/leave are not recorded. */
+static int br_input(Rid window, const REvent* event, void* user_data) {
+    (void)user_data;
+    if (!event) return R_FALSE;
+    switch (event->type) {
+    case R_EVENT_KEY_DOWN:
+        br_push_input(event->repeat ? BR_KEY_REPEATED : BR_KEY_PRESSED, window, (int)event->key,
+            (int)event->modifiers, event->x, event->y, 0.0, 0.0);
+        break;
+    case R_EVENT_KEY_UP:
+        br_push_input(BR_KEY_RELEASED, window, (int)event->key, (int)event->modifiers, event->x, event->y, 0.0, 0.0);
+        break;
+    case R_EVENT_MOUSE_DOWN:
+        br_push_input(BR_MOUSE_PRESSED, window, (int)event->button, (int)event->modifiers, event->x, event->y, 0.0, 0.0);
+        break;
+    case R_EVENT_MOUSE_UP:
+        br_push_input(BR_MOUSE_RELEASED, window, (int)event->button, (int)event->modifiers, event->x, event->y, 0.0, 0.0);
+        break;
+    case R_EVENT_MOUSE_MOVE:
+        br_push_input(BR_MOUSE_MOVED, window, 0, (int)event->modifiers, event->x, event->y, event->delta_x, event->delta_y);
+        break;
+    case R_EVENT_MOUSE_WHEEL:
+        br_push_input(BR_WHEEL, window, 0, (int)event->modifiers, event->x, event->y, event->wheel_x, event->wheel_y);
+        break;
+    default:
+        break;
+    }
+    return R_FALSE;
 }
 
 /* ---- Registration: the program names what it wants to hear about. ---- */
@@ -246,6 +344,12 @@ void botlish_raven_watch_window(Rid window, int allow_close) {
     Rwindow_set_resize_callback(window, br_resized, NULL);
 }
 
+/* WINDOW's raw input (keys, mouse buttons, pointer moves, the wheel) as
+ * records, from now on; WATCH 0 stops it. */
+void botlish_raven_watch_input(Rid window, int watch) {
+    Rwindow_set_event_hook(window, watch ? br_input : NULL, NULL);
+}
+
 /* A timer whose every tick is a record: Rtimer_create's own handle. */
 Rid botlish_raven_timer(double interval_seconds, int repeat) {
     return Rtimer_create(interval_seconds, repeat, br_timer, NULL);
@@ -272,6 +376,10 @@ Rid botlish_raven_source(void) { return br_current.kind ? br_current.source : R_
 int botlish_raven_value(void) { return br_current.value; }
 int botlish_raven_extra(void) { return br_current.extra; }
 double botlish_raven_number(void) { return br_current.number; }
+double botlish_raven_x(void) { return br_current.x; }
+double botlish_raven_y(void) { return br_current.y; }
+double botlish_raven_dx(void) { return br_current.dx; }
+double botlish_raven_dy(void) { return br_current.dy; }
 
 /* The current record's text ("" when it has none), valid until the next
  * botlish_raven_next. */

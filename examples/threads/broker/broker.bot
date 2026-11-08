@@ -1,0 +1,36 @@
+# broker.bot -- the worker side's authority to request device operations
+# from the owner (the broker example, BOTLISH-OWNED-THREADS-AND-CROSS-
+# THREAD-ACTORS-MILESTONE-1.md). A worker VM installs a DeviceBroker
+# holding the owner's device service -- a capability it received in its
+# initialization value -- and injects it into the handlers that may ask for
+# device operations. Each operation is a typed call to the owner's
+# device-service actor, which performs it under the owner's Device; the
+# worker never has the Device, its handle or its context.
+import std::actor
+import std::actor::remote
+
+# One device operation: read (KIND 0) or write (KIND 1) register ADDR.
+struct DeviceOp:
+    kind: int
+    addr: int
+    value: int
+
+# Its answer: the register's value (a write: the previous one), and the
+# owner's operation count when it was performed.
+struct DeviceReply:
+    value: int
+    serial: int
+
+# The worker's authority to request device operations: the owner's
+# service.
+context struct DeviceBroker:
+    service: std::actor::remote::Service[DeviceOp, DeviceReply]
+
+# Register ADDR, read by the owner's device (an actor's call: the actor
+# waits, its thread does not).
+fn read_device(addr: int, c: std::actor::remote::Caller[DeviceReply], context b: DeviceBroker, resume std::actor::Answer) -> DeviceReply errors std::actor::remote::CallFailed, std::actor::Closed:
+    std::actor::remote::call(b.service, DeviceOp {kind: 0, addr: addr, value: 0}, c)
+
+# Register ADDR set to VALUE by the owner's device: the previous value.
+fn write_device(addr: int, value: int, c: std::actor::remote::Caller[DeviceReply], context b: DeviceBroker, resume std::actor::Answer) -> DeviceReply errors std::actor::remote::CallFailed, std::actor::Closed:
+    std::actor::remote::call(b.service, DeviceOp {kind: 1, addr: addr, value: value}, c)

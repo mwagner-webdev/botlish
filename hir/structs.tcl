@@ -122,13 +122,6 @@ namespace eval hir::structs {
     # 1 while apply resolves the field types of its batch: a declaration's
     # fields are not all known yet (WrittenProblem).
     variable registering 0
-    # The deepest path, and the most (type, crossed) pairs, OwnedRecursion
-    # follows before it calls its walk unbounded: no struct type a program
-    # writes nests 64 fields deep, and a walk past that meets ever larger
-    # applications (a non-uniform recursion with an affine argument, which
-    # an affine argument's type is never cut for).
-    variable recursionDepth 64
-    variable recursionBudget 4096
 }
 
 proc hir::structs::Reset {} {
@@ -153,6 +146,7 @@ proc hir::structs::ForgetAffinity {} {
     set ::hir::affine::descriptorMemo [dict create]
     set positions [dict create]
     hir::summaries::Forget
+    hir::ownership::Forget
 }
 
 # Affinity of a named struct type (hir::types::Affinity, AFFINE-VALUES.md;
@@ -376,88 +370,32 @@ proc hir::structs::AffineThrough {type} {
     return ""
 }
 
-# How a value of the affine named struct type TYPE holds, inside a List,
-# MutableVector or MutableArray element, an affine value of an application
-# of its own declaration: {recursive {STEP ...}}, each STEP {OWNER FIELD
-# FIELDTYPE} (field FIELD, of type FIELDTYPE, of the struct type OWNER, ""
-# for an anonymous struct), or {unbounded {STEP ...}} when its fields nest
-# applications in ever larger types; "" when it holds none (and for any type
-# that is no affine named struct).
+# Recursive affine ownership (OWNED-RECURSION-DECLARATION-SUMMARY-
+# MILESTONE-1.md): "" when the type TYPE is no recursive affine type, else
+# {recursive {STEP ...} HEAD}, each STEP {OWNER FIELD FIELDTYPE} (field
+# FIELD, of type FIELDTYPE, of the struct type OWNER, "" for an anonymous
+# struct) and HEAD the declaration whose affine values the path holds in a
+# container again.
 #
-# Such a type is a recursive affine type: its values nest to any depth, each
-# level owning an affine value, and no finite drop descriptor
-# (hir::affine::Descriptor) reaches them all. A declaration that is one
-# (`struct Tree: step: Coroutine{...}, kids: List[Tree]`) is
+# A recursive affine type's values nest affine values to any depth through
+# a List, MutableVector or MutableArray element, so no finite drop
+# descriptor (hir::affine::Descriptor) reaches them all. A declaration that
+# is one (`struct Tree: step: Coroutine{...}, kids: List[Tree]`) is
 # AFFINE-CONTAINER-UNSUPPORTED at its declaration (apply), an application
 # that is one (Node[Coroutine{...}] of `struct Node[T]: value: T, kids:
 # List[Node[T]]`, a tree struct's included) wherever it is written or made
-# (ApplicationIssue): one rule, about the type's own fields. Another
-# application of the declaration counts (`next: List[W[List[T]]]` nests W's
-# values as deep), an unrestricted one does not (`kids: List[D[int]]` owns
-# nothing), and the walk goes into affine types only: an unrestricted one
-# holds no affine value. Its steps are the ones an affine drop descriptor
-# walks: struct fields -- an application's AppliedFieldTypes -- and those
-# elements. Its own type met again through fields alone is one no finite
-# value has: no path. Another application of the declaration met through
-# fields alone (Box[Box[C]]'s value, a Box[C]) is walked on: a finite value
-# holds it. A path past recursionDepth fields (or more than
-# recursionBudget types visited) is a non-uniform recursion whose arguments
-# grow, reported unbounded (never accepted).
+# (ApplicationIssue, WrittenProblem): one rule, about the values the type
+# owns. A type that holds such a type is one too (Holder[Coroutine{...}] of
+# `struct Holder[T]: t: Node[T]`). An application whose affinity dies out
+# along its recursion (`next: List[D[U, int]]` in D[T, U]: D[int, C] holds
+# D[C, int], which holds only unrestricted D[int, int]) is not, nor is a
+# recursion through fields alone (no finite value has it), nor one that
+# holds no affine value (`next: List[W[List[T]]]`: W[C] is unrestricted).
+#
+# Decided on the finite graph of declaration states, never by unfolding
+# applications or by a depth: hir/ownership.tcl.
 proc hir::structs::OwnedRecursion {type} {
-    set type [hir::types::Unrefined $type]
-    if {![hir::types::IsNamedStruct $type] || ![hir::types::IsAffine $type]} {
-        return ""
-    }
-    set visited [dict create]
-    return [OwnedRecursionFrom [lindex $type 1] $type $type 0 {} visited]
-}
-
-# OwnedRecursion's walk of TYPE, reached from the struct type START (of
-# declaration TARGET) by the steps PATH, CROSSED 1 once that path went
-# through a container element. VISITED (TYPE,CROSSED -> 1) bounds it: an
-# application is explored at most once per CROSSED.
-proc hir::structs::OwnedRecursionFrom {target start type crossed path visitedVar} {
-    upvar 1 $visitedVar visited
-    variable recursionDepth
-    variable recursionBudget
-    set type [hir::types::Unrefined $type]
-    if {![hir::types::IsAffine $type]} {
-        return ""
-    }
-    if {[hir::types::IsNamedStruct $type]} {
-        set id [lindex $type 1]
-        if {$path ne {} && $id eq $target} {
-            if {$crossed} {
-                return [list recursive $path]
-            }
-            if {$type eq $start} {
-                return ""
-            }
-        }
-        if {[dict exists $visited $type,$crossed] || ![declared $id]} {
-            return ""
-        }
-        if {[llength $path] >= $recursionDepth || [dict size $visited] >= $recursionBudget} {
-            return [list unbounded $path]
-        }
-        dict set visited $type,$crossed 1
-        set owner $type
-        set fields [AppliedFieldTypes $type]
-    } elseif {[hir::types::IsStruct $type]} {
-        set owner ""
-        set fields [lindex $type 1]
-    } elseif {[hir::types::IsList $type] || [hir::types::IsMutVec $type] || [hir::types::IsMutArray $type]} {
-        return [OwnedRecursionFrom $target $start [lindex $type 1] 1 $path visited]
-    } else {
-        return ""
-    }
-    foreach {name t} $fields {
-        set found [OwnedRecursionFrom $target $start $t $crossed [linsert $path end [list $owner $name $t]] visited]
-        if {$found ne ""} {
-            return $found
-        }
-    }
-    return ""
+    return [hir::ownership::Recursion $type]
 }
 
 # The steps of an OwnedRecursion path, in source terms: "OWNER.FIELD: TYPE",
@@ -678,10 +616,21 @@ proc hir::structs::ApplicationIssue {type} {
         if {$recursion ne ""} {
             # An application that is a recursive affine type -- an affine
             # tree (TREE-STRUCT-MILESTONE-1.md), any parameterized struct
-            # that holds an affine application of itself in a container:
+            # whose values nest affine values in containers to any depth:
             # the one a declaration may not be either (apply's
-            # AFFINE-CONTAINER-UNSUPPORTED), judged by the application's
-            # own fields (OwnedRecursion).
+            # AFFINE-CONTAINER-UNSUPPORTED), judged by what the
+            # application's values own (OwnedRecursion). When the
+            # recursion is another declaration's (Holder[C] of `t:
+            # Node[T]`) and an argument is that recursive type itself
+            # (Box[Node[C]]), the argument is the one named.
+            if {[lindex $recursion 2] ne $id} {
+                foreach t [hir::imprint::Parts $type] {
+                    set issue [ApplicationIssue $t]
+                    if {$issue ne ""} {
+                        return $issue
+                    }
+                }
+            }
             return [list AFFINE-CONTAINER-UNSUPPORTED [RecursionMessage $id $type $recursion]]
         }
     }
@@ -1099,10 +1048,13 @@ proc hir::structs::apply {decls} {
         # in a generic body: an application of it is judged where it is
         # written or made, ApplicationIssue.)
         set recursion [OwnedRecursion [SelfType $id]]
-        if {$recursion eq ""} continue
         # A recursive affine type: releasing a value of it would have to
         # recurse as deep as the value nests, and an affine drop is a static
         # descriptor -- a finite walk of the type (hir::affine::Descriptor).
+        # Here when the recursion returns to this declaration; a recursion of
+        # another declaration that a field holds is that field type's
+        # application's (VerifyDeclarations, ApplicationIssue).
+        if {$recursion eq "" || [lindex $recursion 2] ne $id} continue
         lassign $recursion how path
         set first [lindex $path 0 1]
         foreach field [dict get $decl fields] {
@@ -1204,9 +1156,11 @@ proc hir::structs::ResolveFields {decls} {
 # declaration ID whose OwnedRecursion is RECURSION: the declaration itself
 # (TYPE "": `struct "NAME" is affine ...`, NAME its written name) or the
 # application TYPE (named by its type, with the field that makes it affine
-# when its declaration is not: AffineThrough).
+# when its declaration is not: AffineThrough). The path is the witness:
+# from the type to the declaration whose values recur, once around the
+# recursion (hir::ownership::Witness).
 proc hir::structs::RecursionMessage {id type recursion {name ""}} {
-    lassign $recursion how path
+    lassign $recursion how path head
     set steps [RecursionSteps $path]
     if {$type eq ""} {
         set subject "struct \"$name\" is affine"
@@ -1217,13 +1171,7 @@ proc hir::structs::RecursionMessage {id type recursion {name ""}} {
         if {$through ne ""} {
             append subject [format { (its field "%s" holds %s)} [lindex $through 0] [hir::types::show [lindex $through 1]]]
         }
-        set what "affine values of struct \"[display $id]\""
-    }
-    if {$how eq "unbounded"} {
-        # (Its first steps: the path goes on as long as the walk did.)
-        set steps [RecursionSteps [lrange $path 0 2]]
-        return [format {%s and its fields nest applications of parameterized structs in ever larger types (%s, ...): a recursive affine type is not supported -- its release would have to walk unboundedly many types, and an affine value is released by a static, finite walk of its type} \
-            $subject $steps]
+        set what "affine values of struct \"[display $head]\""
     }
     return [format {%s and holds %s in a List, MutableVector or MutableArray (%s): a recursive affine type is not supported -- its release would have to recurse as deep as the value nests, and an affine value is released by a static, finite walk of its type (an unrestricted struct may hold itself in a container)} \
         $subject $what $steps]

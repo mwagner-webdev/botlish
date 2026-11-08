@@ -1,0 +1,92 @@
+# endpoints.bot -- tests/threads.test: what a Remote names. A closed
+# endpoint's capability is Closed; once its slot is reused it is Stale and
+# reaches nothing of the new endpoint; a capability copied as one type and
+# rebuilt as another is refused by the transport (TypeMismatch), and an
+# Identity's bytes do not rebuild a capability at all.
+import event_loop_linux
+import std::actor
+import std::actor::remote
+import std::event_loop
+import std::list
+import std::thread
+import std::transfer
+
+struct Note:
+    seq: int
+
+struct Other:
+    text: str
+
+fn shown(s: std::actor::remote::Sent) -> str:
+    if s == std::actor::remote::Sent::Delivered:
+        "Delivered"
+    elif s == std::actor::remote::Sent::Full:
+        "Full"
+    elif s == std::actor::remote::Sent::Closed:
+        "Closed"
+    elif s == std::actor::remote::Sent::Stale:
+        "Stale"
+    elif s == std::actor::remote::Sent::TypeMismatch:
+        "TypeMismatch"
+    else:
+        "other"
+
+# R's capability copied (std::transfer) and rebuilt as a Remote[Other].
+fn retyped(r: std::actor::remote::Remote[Note]) -> List[std::actor::remote::Remote[Other]]:
+    copy = std::transfer::decode[std::actor::remote::Remote[Other]](std::transfer::encode(r)):
+        on TransferMalformed:
+            return []
+        on TransferVersion:
+            return []
+        on TransferTypeMismatch:
+            return []
+        on TransferInvalidValue:
+            return []
+        on TransferLimit:
+            return []
+    [copy]
+
+# An Identity's bytes rebuilt as a Remote: "refused" when they do not.
+fn forged() -> str:
+    i = std::actor::remote::Identity {domain: 1, id: 1, key: 1}
+    std::transfer::decode[std::actor::remote::Remote[Note]](std::transfer::encode(i)):
+        on TransferMalformed:
+            return "refused"
+        on TransferVersion:
+            return "refused"
+        on TransferTypeMismatch:
+            return "refused"
+        on TransferInvalidValue:
+            return "refused"
+        on TransferLimit:
+            return "refused"
+    "forged"
+
+fn go(context ev: std::event_loop::Loop, d: std::event_loop::Driver, ac: std::actor::Actors, p: std::thread::Port, db: std::thread::Doorbell) -> List[any] errors std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    std::thread::serve()
+    {to: a} = std::actor::open[Note](4)
+    {to: b} = std::actor::open[Note](4)
+    r1 = std::actor::remote::export(a, 4)
+    first = shown(std::actor::remote::send(r1, Note {seq: 1}))
+    queued = std::actor::remote::in_transit(r1)
+    dropped = std::actor::remote::close(r1)
+    closed = shown(std::actor::remote::send(r1, Note {seq: 2}))
+    r2 = std::actor::remote::export(b, 4)
+    stale = shown(std::actor::remote::send(r1, Note {seq: 3}))
+    fresh = shown(std::actor::remote::send(r2, Note {seq: 4}))
+    other = loop o in retyped(r2):
+        shown(std::actor::remote::send(o, Other {text: "not a note"}))
+    after = std::actor::remote::in_transit(r2)
+    std::thread::close_port()
+    [first, queued, dropped, closed, stale, fresh, other, after, forged()]
+
+with context std::event_loop::create(16)
+with context event_loop_linux::create()
+with context event_loop_linux::native()
+with context std::actor::create()
+with context std::thread::port()
+go():
+    on std::event_loop::SchedulerFault:
+        ["scheduler fault"]
+    on std::event_loop::DriverFault {code}:
+        ["driver fault", code]

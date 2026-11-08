@@ -72,6 +72,10 @@
 #                              lexer could not see it: dropped, not reported
 #                              as unmatched (DIAGNOSTIC-RECOVERY.md)
 #
+# The result's `comments` are the comments' {START END} offsets, in order:
+# the one thing the lexer reads and no token stands for (the token IR keeps
+# them, surface/tokens.tcl).
+#
 # Besides the tokens and diagnostics, the result says how the parser's
 # recovery may weigh each diagnostic (surface::parse, DIAGNOSTIC-RECOVERY.md):
 # `structural` lists the indices of the bracket diagnostics (never closed,
@@ -125,6 +129,10 @@ proc surface::lexer::tokenize {source file} {
     set synthetic {}
     set indentation {}
     set unclosed {}
+    # Every comment, {START END}: from its "#" to the end of its line (the
+    # newline excluded). No token stands for one; the token IR keeps them
+    # (surface/tokens.tcl).
+    set comments {}
     # Where an unterminated literal started: its line's rest, closers
     # included, is in it.
     set absorbing {}
@@ -162,6 +170,9 @@ proc surface::lexer::tokenize {source file} {
                 set i $j
                 while {$i < $n && [string index $source $i] ne "\n"} {
                     incr i
+                }
+                if {$c eq "#"} {
+                    lappend comments [list $j $i]
                 }
                 if {$i >= $n} {
                     break
@@ -226,8 +237,10 @@ proc surface::lexer::tokenize {source file} {
                         set orphans [linsert $orphans 0 [Closer $opener]]
                     }
                     set orphanLine [expr {$line + 1}]
-                    regexp -start [expr {$i + 1}] {\A[ \t]*} $source indentation
-                    set orphanIndent [string length $indentation]
+                    # (Its own variable: `indentation` holds the indices of
+                    # the layout diagnostics.)
+                    regexp -start [expr {$i + 1}] {\A[ \t]*} $source lead
+                    set orphanIndent [string length $lead]
                     set brackets {}
                 }
                 if {$brackets eq ""} {
@@ -241,9 +254,11 @@ proc surface::lexer::tokenize {source file} {
                 set lineStart $i
             }
             "#" {
+                set j $i
                 while {$i < $n && [string index $source $i] ne "\n"} {
                     incr i
                 }
+                lappend comments [list $j $i]
             }
             {"} - {'} {
                 set unterminated 0
@@ -442,7 +457,8 @@ proc surface::lexer::tokenize {source file} {
     }
     lappend tokens [Token EOF "" "" $here]
     return [dict create tokens $tokens diagnostics $diagnostics structural $structural \
-        skipped $skipped synthetic $synthetic indentation $indentation unclosed $unclosed]
+        skipped $skipped synthetic $synthetic indentation $indentation unclosed $unclosed \
+        comments $comments]
 }
 
 # True if the physical line starting at offset START cannot continue an
