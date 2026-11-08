@@ -5097,13 +5097,18 @@ candidate whose ordinary call is valid. Keep it so:
   candidate is excluded only when the receiver the build gives makes the
   ordinary call invalid by kind (a native's first parameter, a module
   function's declared or inferred first-parameter contract, the plain value
-  kinds only) or by a named struct's declaration (a *declared* first
+  kinds only), by a named struct's declaration (a *declared* first
   parameter of another named struct declaration than the receiver's:
-  `NominalMismatch`). Never exclude a lexical name, by a domain or a
+  `NominalMismatch`) or by a trait's conformance (a *declared* first
+  parameter that is a trait the receiver does not satisfy:
+  `TraitMismatch`). Never exclude a lexical name, by a domain or a
   refinement, by a struct's type arguments, by an inferred contract's struct
-  or by a type's spelling. The native rule is stated once
-  (`NativeMismatch`, which a call's problems and the kind proofs both ask).
-  Certification never reads a waves' guess (`DefinedType`).
+  or by a type's spelling, and never for a receiver of no kind (`any`, a
+  trait view, an imprint variable, a function). The native rule is
+  stated once (`NativeMismatch`, which a call's problems and the kind proofs
+  both ask), and so is the trait rule (`hir::traits::Accept`, which a call's
+  own admission check and `TraitMismatch` both ask). Certification never
+  reads a waves' guess (`DefinedType`).
 * **Checked, not trusted.** `hir::methodKindProofs 0`
   (`BOTLISH_METHOD_KIND_PROOFS=0`) is the reference rule: every candidate
   judged by its own build. `hir::methodReferenceAudit 1`

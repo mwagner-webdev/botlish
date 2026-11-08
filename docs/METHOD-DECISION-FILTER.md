@@ -6,8 +6,9 @@ decides it (METHOD-RESOLUTION-CORRECTNESS-MILESTONE-1.md): a candidate is
 judged by the call's own checks (the diagnostics whose `subject` is the
 call), relative to the decided configuration itself -- in the decided build,
 in a single deviation of it, or by a *kind proof*. This document is about the
-kind proofs: a candidate the receiver's kind (or a named struct's declaration)
-rules out is not applicable without a build of its own.
+kind proofs: a candidate the receiver's kind (or a named struct's declaration,
+or a trait the receiver does not satisfy) rules out is not applicable without
+a build of its own.
 
 They began as the **kind filter** (`hir/methodfilter.tcl`), a second decision
 procedure beside the exact one, which handed every call it could not settle
@@ -21,8 +22,8 @@ Most method calls are settled by the kind of the receiver. `xs.length()` on a
 List cannot be `std::str::length`, because the native's first parameter is a
 String -- exactly the problem the candidate's own build would report. A
 candidate is *excluded* for a call (`hir::methods::Excluded`) when the
-receiver's type already makes the ordinary call invalid by kind alone, or by
-a named struct's declaration:
+receiver's type already makes the ordinary call invalid by kind alone, by a
+named struct's declaration, or by a trait's conformance:
 
 * a qualified native (`std::list::at`) whose first parameter has another known
   kind than the receiver's -- `hir::methods::NativeMismatch`, which asks the
@@ -50,7 +51,22 @@ a named struct's declaration:
   struct are judged by their builds); only a declared parameter counts, never
   an inferred contract; and only a receiver that is itself a named struct:
   `any`, an imprint variable, a trait view or an anonymous struct excludes
-  nothing by it.
+  nothing by it;
+* a trait-polymorphic module function (`std::io::path::concat`) whose
+  *declared* first parameter is a trait (`path: Path`) the receiver does not
+  satisfy -- `hir::methods::TraitMismatch`. A trait-typed parameter admits a
+  view of its trait or a concrete type that satisfies it, and whether a
+  concrete type does is decided by its owner namespace's own declarations
+  (`hir::traits::satisfies`; TRAITS.md), never by the call: the ordinary
+  call's own check of the argument (`hir::range::ProvesValueAcceptedBy`,
+  which asks `hir::traits::Accept`) reports TRAIT-NOT-SATISFIED, and the
+  kind proof asks the same `hir::traits::Accept`. Every receiver with a kind
+  is judged, whatever the kind: a String (whose owner, `std::str`, has no
+  `text`, so it is no `Path`), a struct or enum, a List or a C pointer is
+  rejected by the check unless it satisfies the trait; `any`, a trait view,
+  an imprint variable or a function has no kind and excludes nothing, as for
+  every kind proof. A receiver that satisfies the trait (a
+  `std::linux::path::LinuxPath`) leaves the candidate a survivor.
 
 A candidate that is not excluded is a *survivor*. Nothing excludes a lexical
 candidate (a bare name: a function of the file, a parameter, a binding), and
@@ -85,7 +101,9 @@ An exclusion states the problem the candidate's own build reports for the
 call: a native's kind mismatch is exactly what `CallProblems` reports in that
 build, and a module function's first-parameter contract of another plain kind,
 or declared named struct of another declaration, is an argument its own
-admission check rejects (TYPE, with the call as its subject). The receiver's
+admission check rejects (TYPE, with the call as its subject), as a declared
+trait the receiver does not satisfy is (TRAIT-NOT-SATISFIED, with the call as
+its subject: no obligation kind, `hir::methods::ObligationKinds`). The receiver's
 type in a single deviation is the decided build's whenever the call's own
 decision does not change its own receiver (the acyclic case; the milestone's
 "Remaining limitations" has the other).
@@ -104,8 +122,8 @@ fingerprint beyond `hir/`'s own text.
 ## What it touches
 
 * `hir/methods.tcl`: `NativeMismatch`, `Excluded`, `ParamKinds`,
-  `DeclaredParam`, `CandidateBlock`, `NominalMismatch`, `DefinedType`,
-  `Survivors`; `hir::methods::maxWaves`; a trace
+  `DeclaredParam`, `CandidateBlock`, `NominalMismatch`, `TraitMismatch`,
+  `DefinedType`, `Survivors`; `hir::methods::maxWaves`; a trace
   (`BOTLISH_METHOD_TRACE=1`: the waves, the trial rounds and the
   certification steps, on stderr).
 * `hir/hir.tcl`: `hir::DecideMethodCalls` and `hir::ReferenceAudit`; the
@@ -130,14 +148,19 @@ fingerprint beyond `hir/`'s own text.
   contract; MutableMap and MutableSet) -- modules that also define `length`,
   `at` and `get` over their structs beside the standard collections', the
   trigger EXACT-METHOD-DECISION-MISATTRIBUTION.md describes, which the fuzzer
-  had to leave out while the exact decision misattributed it. Each program is
+  had to leave out while the exact decision misattributed it -- and, in half
+  the programs, a fourth module over a trait (std::fzt: the trait-polymorphic
+  `length` and `at`, which only one of the structs satisfies). Each program is
   compiled under the reference audit, under the audit of build reuse
   (`hir::methodBuildAudit`) and plainly, and the outcomes must be equal.
 * `audit/method-filter/tools/mutate.tcl`: mutants of the kind proofs and of
   the reference audit (an exclusion rule weakened or reversed, a lexical name
   excluded, a contract source ignored, the nominal rule dropped, comparing
   type arguments, excluding the same declaration, trusting an inferred
-  contract or a receiver that is no named struct, the waves, the seeds and
+  contract or a receiver that is no named struct, the trait rule dropped,
+  ignoring satisfaction or applying it to a parameter that is no trait, the
+  waves,
+  the seeds and
   trait decisions, the audit's comparisons); each must be killed by the unit
   tests or the fuzzer. The decision's own mutants are
   `audit/method-resolution/tools/mutate.tcl`'s.
@@ -179,3 +202,16 @@ METHOD-RESOLUTION-CORRECTNESS-MILESTONE-1.md replaced both procedures with one
 whose verdicts are a call's own checks, certified relative to the decided
 configuration; the filter's exclusion rule survived unchanged as the kind
 proofs described above, and its audit became the reference audit.
+
+The trait rule came last (HTTP-CLIENT-PACKAGE-MILESTONE-1.md, F3). With
+`std::io::path` imported, every `concat` on a String had the
+trait-polymorphic `std::io::path::concat` as a candidate no kind proof ruled
+out -- a trait has no kind -- and, sorting first, it was every call's
+initial stand-in, whose Path result left the next call of a chain on a view.
+Every such call was judged by single deviations: the finding's four `concat`
+calls took 15 builds (9 deviations), against 5 builds (none) once a String
+receiver rules the candidate out by the trait it does not satisfy -- the
+same 5 the program takes without `std::io::path`. A lexical candidate is
+still never ruled out (a bare name may be a parameter or a binding), so a
+module function named like a method still costs a deviation per call of it
+in that module.

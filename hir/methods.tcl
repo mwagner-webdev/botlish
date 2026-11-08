@@ -56,9 +56,10 @@
 #
 # 1. Kind waves (search). A candidate the receiver's kind rules out
 #    (Excluded: a native whose first parameter has another known kind, a
-#    module function whose first-parameter contract has another plain kind
-#    or whose declared first parameter is a named struct of another
-#    declaration) cannot be applicable: its build would report exactly
+#    module function whose first-parameter contract has another plain kind,
+#    whose declared first parameter is a named struct of another
+#    declaration, or whose declared first parameter is a trait the receiver
+#    does not satisfy) cannot be applicable: its build would report exactly
 #    that. A call with one survivor stands at it; a receiver that is a
 #    reference to a binding is read as the binding's defined type, a guess
 #    that settles a receiver chain in one build (the default candidates of
@@ -267,9 +268,9 @@ proc hir::methods::ParamKinds {hir ns cand} {
 
 # The declared type of the first parameter of module function CAND (display
 # "NS::NAME") in HIR, "" when it declares none or is no module function. Only
-# a declaration: NominalMismatch is stated for declared types, and an
-# inferred contract's struct stays the kind rule's (which compares no
-# declarations).
+# a declaration: NominalMismatch and TraitMismatch are stated for declared
+# types, and an inferred contract's struct stays the kind rule's (which
+# compares no declarations).
 proc hir::methods::DeclaredParam {hir ns cand} {
     variable declaredParams
     if {[dict exists $declaredParams $cand]} {
@@ -318,11 +319,24 @@ proc hir::methods::NominalMismatch {declared R} {
         && [lindex $declared 1] ne [lindex $R 1]}
 }
 
+# 1 if a receiver of type R rules out a first parameter declared DECLARED by
+# trait conformance: DECLARED is a trait ({trait ID}, a trait-polymorphic
+# function's parameter) and R is not admitted to it. The admission is the
+# call's own check's (hir::range::VerifyCallChecks: hir::range::
+# ProvesValueAcceptedBy, which asks hir::traits::Accept for a trait), stated
+# once: a concrete type satisfies the trait or not by its owner namespace's
+# declarations (hir::traits::satisfies), whatever its kind and whatever the
+# call's other arguments are. (Excluded asks only for a receiver of a kind:
+# `any`, a trait view, an imprint variable or a function excludes nothing.)
+proc hir::methods::TraitMismatch {declared R} {
+    expr {[hir::types::IsTraitConstraint $declared] && ![hir::traits::Accept $R $declared]}
+}
+
 # 1 if candidate CAND (a display of a methodCalls entry) is not applicable to
-# a receiver of type R by kind alone, or by a named struct's identity
-# (NominalMismatch): its build would report exactly that problem. A bare
-# name is a lexical candidate (a function of the file, a parameter, a
-# binding): never excluded.
+# a receiver of type R by kind alone, by a named struct's identity
+# (NominalMismatch) or by a trait's conformance (TraitMismatch): its build
+# would report exactly that problem. A bare name is a lexical candidate (a
+# function of the file, a parameter, a binding): never excluded.
 proc hir::methods::Excluded {hir cand R} {
     variable comparableKinds
     if {$R eq "never"} {
@@ -343,7 +357,8 @@ proc hir::methods::Excluded {hir cand R} {
             return 1
         }
     }
-    return [NominalMismatch [DeclaredParam $hir $ns $cand] $R]
+    set declared [DeclaredParam $hir $ns $cand]
+    return [expr {[NominalMismatch $declared $R] || [TraitMismatch $declared $R]}]
 }
 
 # The type binding B was defined with: a parameter's declared type, else the
