@@ -1,0 +1,576 @@
+# Mutants of the React Native integration (audit/react-native-2048/tools/
+# mutate.tcl; BOTLISH-REACT-NATIVE-2048-PACKAGE-MILESTONE-1.md, "Mutation
+# testing"): each a deliberate defect in the generator, in what it generates
+# (the C++ core, the TurboModule, the TypeScript entry point, CMake), in the
+# app's hook, or in what keeps the package Android's and the library's own.
+#
+#   @@ NAME DESCRIPTION
+#   !! TEST ...        the tests of tests/react-native-package.test meant to
+#                      detect it (one failing is a kill)
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+#
+# Lines starting with # outside an edit are comments.
+
+# ---------------------------------------------------------------- generator
+
+@@ guessed-param-type an export parameter of an unknown type is guessed to be a string instead of refused
+!! rn-refuse-param-type
+## integrations/react-native/src/main.c
+<<<<
+    if (matches(name, "str")) return B_STR;
+    if (result && matches(name, "unit")) return B_UNIT;
+====
+    if (matches(name, "str")) return B_STR;
+    if (result && matches(name, "unit")) return B_UNIT;
+    if (!result) return B_STR;
+>>>>
+## integrations/react-native/src/main.c
+<<<<
+            if (!c || c->kind != J_ARR || c->count != count || c->items[0]->kind != J_STR || strcmp(c->items[0]->text, want0)
+====
+            if (0 && (!c || c->kind != J_ARR || c->count != count || c->items[0]->kind != J_STR || strcmp(c->items[0]->text, want0))
+>>>>
+## integrations/react-native/src/main.c
+<<<<
+                || (count == 2 && (c->items[1]->kind != J_STR || strcmp(c->items[1]->text, "size_t"))))
+====
+                && (count == 2 && (c->items[1]->kind != J_STR || strcmp(c->items[1]->text, "size_t"))))
+>>>>
+
+@@ guessed-result-type an export result of an unknown type is guessed to be a number
+!! rn-refuse-result-type
+## integrations/react-native/src/main.c
+<<<<
+    if (result && matches(name, "unit")) return B_UNIT;
+    die(1, "RN-UNSUPPORTED"
+====
+    if (result && matches(name, "unit")) return B_UNIT;
+    if (result) return B_INT;
+    die(1, "RN-UNSUPPORTED"
+>>>>
+## integrations/react-native/src/main.c
+<<<<
+        case B_INT: if (!matches(rc, "int64_t *") || !matches(rown, "value")) die(1, "RN-UNSUPPORTED", path, "%s is not an int64_t * value", where); break;
+====
+        case B_INT: break;
+>>>>
+
+@@ ignore-ownership the manifest's ownership of str results is not checked
+!! rn-refuse-ownership
+## integrations/react-native/src/main.c
+<<<<
+    if (!matches(json_str(json_get(ownership, "str-result"), "owner"), "caller") || !matches(json_str(json_get(ownership, "str-result"), "release"), bytesRelease))
+====
+    if (!matches(json_str(json_get(ownership, "str-result"), "release"), bytesRelease))
+>>>>
+
+@@ ignore-digest an artifact whose SHA-256 is not the manifest's is packaged
+!! rn-refuse-stale-shared rn-refuse-header-digest
+## integrations/react-native/src/main.c
+<<<<
+        if (strcmp(hex, recorded))
+            die(1, "RN-ARTIFACT"
+====
+        if (0)
+            die(1, "RN-ARTIFACT"
+>>>>
+## integrations/react-native/src/main.c
+<<<<
+    if (strcmp(hex, lib.shaShared)) die(1, "RN-ARTIFACT", sharedFile, "changed while it was being packaged");
+====
+>>>>
+
+@@ ignore-target a library of another target than android-aarch64 is packaged
+!! rn-refuse-linux-library rn-refuse-request-target
+## integrations/react-native/src/main.c
+<<<<
+    if (strcmp(lib.target, "android-aarch64") || strcmp(lib.triple, "aarch64-linux-android"))
+====
+    if (0)
+>>>>
+## integrations/react-native/src/main.c
+<<<<
+    if (strcmp(target, lib.target))
+====
+    if (0)
+>>>>
+
+@@ cmake-no-digest the generated CMake file links whatever library is in the package, a stale one included
+!! rn-cmake-guards
+## integrations/react-native/templates/CMakeLists.txt.in
+<<<<
+if(NOT BOTLISH_LIBRARY_SHA256 STREQUAL "@SHARED_SHA@")
+====
+if(FALSE)
+>>>>
+
+@@ fixed-method-list the generator writes the methods of a fixed (2048) list, not the manifest's exports
+!! rn-generate-methods-from-manifest
+## integrations/react-native/src/main.c
+<<<<
+    for (size_t e = 0; e < lib.nexports; e++) {
+        const export_ *x = &lib.exports[e];
+        /* Spec. */
+====
+    for (size_t e = 0; e < lib.nexports; e++) {
+        const export_ *x = &lib.exports[e];
+        if (strcmp(x->name, "new_game") && strcmp(x->name, "move") && strcmp(x->name, "score") && strcmp(x->name, "place")) continue;
+        /* Spec. */
+>>>>
+
+@@ same-module-name every package gets the same module name, whatever its library
+!! rn-two-libraries-apart
+## integrations/react-native/src/main.c
+<<<<
+        char *p = pascal(lib->library);
+        o.module = xprintf("Botlish%s", p);
+====
+        char *p = pascal(lib->library);
+        o.module = xprintf("Botlish%s", "Module");
+>>>>
+
+@@ no-codegen-config package.json carries no Codegen configuration (the app would generate no native interface)
+!! rn-generate-package-json
+## integrations/react-native/src/main.c
+<<<<
+    printf_(&t, "  \"codegenConfig\": {\n    \"name\": \"%s\",\n    \"type\": \"modules\",\n    \"jsSrcsDir\": \"src\",\n    \"android\": {\n      \"javaPackageName\": \"%s\"\n    },\n    \"includesGeneratedCode\": false\n  },\n", spec, javaPackage);
+====
+>>>>
+
+@@ checkout-path the generated CMake file reaches the library through the path it was generated from (a checkout, a project), not the package's own directory
+!! rn-generate-no-host-path
+## integrations/react-native/templates/CMakeLists.txt.in
+<<<<
+set(BOTLISH_LIBRARY "${CMAKE_CURRENT_LIST_DIR}/../native/android/arm64-v8a/lib@LIBRARY@.so")
+====
+set(BOTLISH_LIBRARY "@ARTIFACT_DIR@/lib@LIBRARY@.so")
+>>>>
+## integrations/react-native/src/main.c
+<<<<
+    bind("RN_TESTED", reactNatives[o.rn].tested);
+====
+    bind("RN_TESTED", reactNatives[o.rn].tested);
+    bind("ARTIFACT_DIR", lib.dir);
+>>>>
+
+@@ abi-version-ignored a C ABI version the adapter does not know is accepted
+!! rn-refuse-abi-version
+## integrations/react-native/src/main.c
+<<<<
+    if (!json_int(m, "abi", &abi) || abi != 1)
+====
+    if (!json_int(m, "abi", &abi))
+>>>>
+
+@@ glibc-library the shared object's machine and libraries are not read: a Linux/glibc library is packaged
+!! rn-refuse-glibc-library
+## integrations/react-native/src/main.c
+<<<<
+    if (f.machine != 183)
+====
+    if (0)
+>>>>
+## integrations/react-native/src/main.c
+<<<<
+        if (!ok)
+            die(1, "RN-ELF", file, "needs %s, which is none of Android's system libraries
+====
+        if (0)
+            die(1, "RN-ELF", file, "needs %s, which is none of Android's system libraries
+>>>>
+## integrations/react-native/src/main.c
+<<<<
+        if (!strncmp(f.versions[i], "GLIBC_", 6))
+====
+        if (0)
+>>>>
+
+@@ omit-library the package does not carry the library (the app would link nothing, or the wrong file)
+!! rn-generate-files rn-cmake-guards
+## integrations/react-native/src/main.c
+<<<<
+    name = xprintf("native/android/arm64-v8a/%s", lib.sharedName);
+    writeFile(out, name, data, len);
+====
+>>>>
+
+@@ wrong-abi-dir the library is packaged for another Android ABI's directory
+!! rn-generate-files rn-cmake-guards
+## integrations/react-native/src/main.c
+<<<<
+    name = xprintf("native/android/arm64-v8a/%s", lib.sharedName);
+====
+    name = xprintf("native/android/x86_64/%s", lib.sharedName);
+>>>>
+
+@@ cmake-any-abi the generated CMake file builds for every ABI the app asks for
+!! rn-cmake-guards
+## integrations/react-native/templates/CMakeLists.txt.in
+<<<<
+if(NOT ANDROID_ABI STREQUAL "arm64-v8a")
+====
+if(FALSE)
+>>>>
+
+@@ incompatible-runtime-abi a library whose runtime ABI is not its target support package's is packaged
+!! rn-refuse-runtime-abi
+## integrations/react-native/src/main.c
+<<<<
+    if (strcmp(supportAbi, lib.runtimeAbi))
+====
+    if (0)
+>>>>
+## integrations/react-native/src/main.c
+<<<<
+    if (!isHex(lib.runtimeAbi, 16))
+====
+    if (0)
+>>>>
+
+@@ second-runtime the package links the library's static archive (a second copy of the Botlish runtime) beside its shared object
+!! rn-generate-files
+## integrations/react-native/src/main.c
+<<<<
+    name = xprintf("botlish/%s.manifest.json", L);
+====
+    {
+        size_t alen;
+        char *afile = xprintf("%s/%s", lib.dir, lib.staticName);
+        char *archive = readFile(afile, &alen);
+        if (archive) writeFile(out, xprintf("native/android/arm64-v8a/%s", lib.staticName), archive, alen);
+    }
+    name = xprintf("botlish/%s.manifest.json", L);
+>>>>
+
+@@ lose-16k a shared object aligned for 4 KiB pages is packaged
+!! rn-refuse-4k-alignment
+## integrations/react-native/src/main.c
+<<<<
+    if (f.minAlign < 16384)
+====
+    if (f.minAlign < 4096)
+>>>>
+
+@@ unknown-react-native any React Native version is generated for
+!! rn-refuse-react-native
+## integrations/react-native/src/main.c
+<<<<
+    if (o.rn < 0) {
+        text known = {0};
+====
+    if (o.rn < 0) o.rn = 0;
+    if (o.rn < 0) {
+        text known = {0};
+>>>>
+
+@@ reserved-names-unchecked an export whose JavaScript name is reserved or taken is generated
+!! rn-refuse-reserved-names rn-refuse-duplicate-names
+## integrations/react-native/src/main.c
+<<<<
+        if (bad)
+            die(1, "RN-NAME", path, "export %s: its JavaScript name %s is reserved
+====
+        if (0)
+            die(1, "RN-NAME", path, "export %s: its JavaScript name %s is reserved
+>>>>
+## integrations/react-native/src/main.c
+<<<<
+            if (!strcmp(lib.exports[o].js, out->js))
+                die(1, "RN-NAME"
+====
+            if (0)
+                die(1, "RN-NAME"
+>>>>
+
+@@ output-overwritten a non-empty output directory the tool did not make is written into
+!! rn-refuse-output-collision rn-generate-replace
+## integrations/react-native/src/main.c
+<<<<
+    if (access(marker, F_OK) != 0)
+        die(1, "RN-OUTPUT", out, "is not empty and holds no package this generator made: choose an empty directory");
+====
+    if (access(marker, F_OK) != 0) return;
+>>>>
+
+# ------------------------------------------------------- the generated core
+
+@@ accept-unsafe-integer an int argument beyond Number.MAX_SAFE_INTEGER (or not finite) is passed to the library
+!! rn-core-game
+## integrations/react-native/templates/Core.cpp.in
+<<<<
+  if (!std::isfinite(x) || std::trunc(x) != x || std::fabs(x) > kMaxSafe) {
+====
+  if (std::trunc(x) != x) {
+>>>>
+
+@@ round-integer a fractional int argument is rounded to the nearest integer instead of refused
+!! rn-core-game rn-core-textkit
+## integrations/react-native/templates/Core.cpp.in
+<<<<
+  if (!std::isfinite(x) || std::trunc(x) != x || std::fabs(x) > kMaxSafe) {
+====
+  x = std::round(x);
+  if (!std::isfinite(x) || std::trunc(x) != x || std::fabs(x) > kMaxSafe) {
+>>>>
+
+@@ nul-terminated-argument a str argument's length is read up to its first NUL instead of from its size
+!! rn-core-game rn-core-textkit
+## integrations/react-native/src/main.c
+<<<<
+            case B_STR: printf_(&coreDefs, ", bytesOf(a%zu), a%zu.size()", p, p); break;
+====
+            case B_STR: printf_(&coreDefs, ", bytesOf(a%zu), std::strlen(a%zu.c_str())", p, p); break;
+>>>>
+
+@@ nul-terminated-result a str result is read up to its first NUL instead of its length
+!! rn-core-textkit
+## integrations/react-native/templates/Core.cpp.in
+<<<<
+  return ptr == nullptr ? std::string() : std::string(reinterpret_cast<const char *>(ptr), len);
+====
+  (void)len;
+  return ptr == nullptr ? std::string() : std::string(reinterpret_cast<const char *>(ptr));
+>>>>
+
+@@ drop-identity a declared error loses its canonical Botlish identity
+!! rn-core-game rn-core-textkit
+## integrations/react-native/templates/Core.cpp.in
+<<<<
+  if (@PREFIX@_error_identity(error, &ptr, &len) == @PREFIX@_STATUS_OK) identity = text(ptr, len);
+====
+  if (@PREFIX@_error_identity(error, &ptr, &len) == @PREFIX@_STATUS_OK) identity = "BotlishError";
+>>>>
+
+@@ generic-errors every failure becomes one generic error: no category, no code but one
+!! rn-core-game
+## integrations/react-native/templates/Core.cpp.in
+<<<<
+    if (kind.status == status) {
+      code = kind.code;
+      category = kind.category;
+    }
+====
+    (void)kind;
+>>>>
+
+@@ leak-result an owned str result is never released
+!! rn-core-game rn-core-textkit rn-core-gc-stress
+## integrations/react-native/templates/Core.cpp.in
+<<<<
+    if (held) {
+      @PREFIX@_bytes_release(&value);
+      totals().resultsReleased++;
+    }
+====
+    (void)held;
+>>>>
+
+@@ leak-error an owned error is never released
+!! rn-core-game rn-core-textkit
+## integrations/react-native/templates/Core.cpp.in
+<<<<
+    if (value != nullptr) {
+      @PREFIX@_error_release(&value);
+      totals().errorsReleased++;
+    }
+====
+    (void)value;
+>>>>
+
+@@ any-thread the instance is used from whichever thread calls
+!! rn-core-game
+## integrations/react-native/templates/Core.cpp.in
+<<<<
+  if (s.created && std::this_thread::get_id() != s.owner) {
+====
+  if (false) {
+>>>>
+
+@@ instance-per-call a new instance is made at every call, the old one left behind
+!! rn-core-game
+## integrations/react-native/templates/Core.cpp.in
+<<<<
+  if (!s.created) {
+    OwnedError error;
+====
+  if (true) {
+    OwnedError error;
+>>>>
+
+@@ reuse-invalidated an invalidated module keeps calling its instance
+!! rn-core-game
+## integrations/react-native/templates/Core.cpp.in
+<<<<
+  if (s.invalidated) {
+    throw invocation(method, "INVALIDATED", "the module was invalidated: its Botlish instance is gone");
+  }
+====
+>>>>
+
+@@ foreign-destroy a module destroyed on another thread destroys its instance there
+!! rn-core-game
+## integrations/react-native/templates/Core.cpp.in
+<<<<
+  if (std::this_thread::get_id() == s.owner) {
+    s.destroyLocked("its module was invalidated on its thread");
+====
+  if (true) {
+    s.destroyLocked("its module was invalidated on its thread");
+>>>>
+
+@@ never-reaped an instance whose module went on another thread is never destroyed
+!! rn-core-game
+## integrations/react-native/templates/Core.cpp.in
+<<<<
+      if (!slot->destroyed && slot->invalidated && !slot->busy) {
+====
+      if (false) {
+>>>>
+
+# ---------------------------------------------------- the generated entry point
+
+@@ ts-accept-unsafe-integer the entry point passes an unsafe integer on
+!! rn-js-jest
+## integrations/react-native/templates/index.ts.in
+<<<<
+  if (!Number.isSafeInteger(value)) {
+====
+  if (!Number.isFinite(value)) {
+>>>>
+
+@@ ts-no-count the entry point ignores missing and extra arguments
+!! rn-js-jest
+## integrations/react-native/templates/index.ts.in
+<<<<
+  if (actual !== expected) {
+====
+  if (actual < 0 && actual !== expected) {
+>>>>
+
+@@ ts-drop-identity the entry point rethrows a native failure without its identity
+!! rn-js-jest
+## integrations/react-native/templates/index.ts.in
+<<<<
+      identity: raw.identity ?? '',
+====
+      identity: '',
+>>>>
+
+@@ ts-js-fallback without the native module the entry point answers in JavaScript instead of failing
+!! rn-js-jest
+## integrations/react-native/templates/index.ts.in
+<<<<
+  if (Native@MODULE@ == null) {
+    throw new BotlishError(
+====
+  if (Native@MODULE@ == null) {
+    return { newGame: () => '' } as unknown as Spec;
+    throw new BotlishError(
+>>>>
+
+# ---------------------------------------------------------------- the hook
+
+@@ hook-render-call the hook makes the first game while rendering
+!! rn-js-jest
+## examples/react-native/app/src/useBotlish2048.ts
+<<<<
+  const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
+====
+  const [snapshot, setSnapshot] = useState<Snapshot | null>(() => readSnapshot(Game.newGame(options.seed ?? 2048)));
+>>>>
+
+@@ hook-stale-snapshot a move continues from the snapshot React last rendered, not the latest
+!! rn-js-jest
+## examples/react-native/app/src/useBotlish2048.ts
+<<<<
+      const current = latest.current;
+      if (current === null) {
+        return null;
+      }
+====
+      const current = snapshot;
+      if (current === null) {
+        return null;
+      }
+>>>>
+## examples/react-native/app/src/useBotlish2048.ts
+<<<<
+    [publish],
+  );
+
+  return {
+====
+    [publish, snapshot],
+  );
+
+  return {
+>>>>
+
+@@ hook-reset-on-rerender every render makes a new game
+!! rn-js-jest
+## examples/react-native/app/src/useBotlish2048.ts
+<<<<
+    if (latest.current === null) {
+      if (start.current !== undefined) {
+====
+    if (true) {
+      if (start.current !== undefined) {
+>>>>
+## examples/react-native/app/src/useBotlish2048.ts
+<<<<
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+====
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  });
+>>>>
+
+@@ hook-double-move a move asks the library twice, the second from the first's result
+!! rn-js-jest
+## examples/react-native/app/src/useBotlish2048.ts
+<<<<
+        return publish(readSnapshot(Game.move(current.text, directionCodes[direction])), `move ${direction}`);
+====
+        const once = readSnapshot(Game.move(current.text, directionCodes[direction]));
+        return publish(readSnapshot(Game.move(once.text, directionCodes[direction])), `move ${direction}`);
+>>>>
+
+@@ hook-js-rules the hook decides a move in JavaScript instead of asking the library
+!! rn-js-jest
+## examples/react-native/app/src/useBotlish2048.ts
+<<<<
+      try {
+        return publish(readSnapshot(Game.move(current.text, directionCodes[direction])), `move ${direction}`);
+====
+      try {
+        if (direction === 'left') {
+          return publish(current, `move ${direction}`);
+        }
+        return publish(readSnapshot(Game.move(current.text, directionCodes[direction])), `move ${direction}`);
+>>>>
+
+@@ hook-unmount-native unmounting a consumer calls into the library (a shared module's teardown)
+!! rn-js-jest
+## examples/react-native/app/src/useBotlish2048.ts
+<<<<
+    if (latest.current === null) {
+      if (start.current !== undefined) {
+====
+    const teardown = () => {
+      Game.newGame(0);
+    };
+    if (latest.current === null) {
+      if (start.current !== undefined) {
+>>>>
+## examples/react-native/app/src/useBotlish2048.ts
+<<<<
+    // The first game only: later seeds come from restart().
+====
+    return teardown;
+    // The first game only: later seeds come from restart().
+>>>>

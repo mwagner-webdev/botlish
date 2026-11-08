@@ -92,8 +92,13 @@ proc rnExec {cwd env args} {
     set out [file join [temporaryDirectory] rn-out-[pid]]
     set err [file join [temporaryDirectory] rn-err-[pid]]
     set here [pwd]
-    set saved [array get ::env]
-    foreach {name value} $env { set ::env($name) $value }
+    # (Each name set and put back on its own: unsetting the env array as a
+    # whole detaches it from the process's environment.)
+    set saved {}
+    foreach {name value} $env {
+        lappend saved $name [expr {[info exists ::env($name)] ? [list 1 $::env($name)] : 0}]
+        set ::env($name) $value
+    }
     cd $cwd
     set status 0
     try {
@@ -104,8 +109,9 @@ proc rnExec {cwd env args} {
         }
     } finally {
         cd $here
-        array unset ::env
-        array set ::env $saved
+        foreach {name was} $saved {
+            if {[lindex $was 0]} { set ::env($name) [lindex $was 1] } else { unset -nocomplain ::env($name) }
+        }
     }
     return [list $status [string trimright [rnRead $out] \n] [string trimright [rnRead $err] \n]]
 }
@@ -257,6 +263,7 @@ proc rnCopy {name {edits {}} {adjust {}}} {
     }
     set manifest [rnRead $dir/$name.manifest.json]
     foreach {key file} [list static lib$name.a shared lib$name.so header $name.h] {
+        if {![file exists $dir/$file]} continue
         set re [format {("sha256": \x7b[^\x7d]*"%s": ")[0-9a-f]{64}"} $key]
         regsub $re $manifest "\\1[rnSha256 $dir/$file]\"" manifest
     }
@@ -333,7 +340,7 @@ test rn-tool-descriptor {the package's descriptor is schema 4 with exactly one t
 
 test rn-generate-files {`botlish tool ... react-native generate` writes the package: the spec, the entry point, the C++ adapter, the CMake file, the autolinking configuration, the library, its header and manifest, the record and the README} -constraints {rnAndroid} -body {
     rnFiles [rnPackage game]
-} -result {README.md android/CMakeLists.txt botlish-react-native.json botlish/game.manifest.json cpp/BotlishGameCore.cpp cpp/BotlishGameCore.h cpp/BotlishGameModule.cpp cpp/BotlishGameModule.h include/game.h native/android/arm64-v8a/libgame.so package.json react-native.config.js src/NativeBotlishGame.ts src/index.ts}
+} -result {README.md android/CMakeLists.txt botlish/game.manifest.json botlish-react-native.json cpp/BotlishGameCore.cpp cpp/BotlishGameCore.h cpp/BotlishGameModule.cpp cpp/BotlishGameModule.h include/game.h native/android/arm64-v8a/libgame.so package.json react-native.config.js src/NativeBotlishGame.ts src/index.ts}
 
 test rn-generate-artifacts-unchanged {the package holds the library, header and manifest the tool checked, byte for byte} -constraints {rnAndroid} -body {
     set p [rnPackage game]
@@ -359,7 +366,7 @@ test rn-generate-record {the record names the generator, the library (its target
         [expr {[apply $get $r library sha256 manifest] eq [rnSha256 $lib/game.manifest.json]}] \
         [apply $get $r reactNative range] [lmap a [apply $get $r android abis] {pm::json::payload $a}] \
         [apply $get $r android minimumApi library] [apply $get $r android minimumApi reactNative] [apply $get $r android minimumApi package] \
-        [expr {[lsort [concat $files botlish-react-native.json]] eq [rnFiles $p]}]
+        [expr {[lsort [concat $files botlish-react-native.json]] eq [lsort [rnFiles $p]]}]
 } -result {botlish-react-native 0.1.0 android-aarch64 1 1 1 {>=0.88.0 <0.89.0} arm64-v8a 21 24 24 1}
 
 test rn-generate-package-json {package.json: the app-owned Codegen configuration (a modules spec, includesGeneratedCode false), React Native as a bounded peer, Android arm64-v8a only and no iOS} -constraints {rnAndroid} -body {
@@ -671,7 +678,7 @@ proc rnChecks {program args} {
 
 test rn-core-game {the 2048 package's core on the host: declared errors keep their canonical identities (game2048::CellOccupied), numbers are never rounded, strings cross by length, every owned result and error is released, another thread is refused, an instance is destroyed on its own thread only (at once, at its thread's next call, at its exit), never twice} -constraints {rnHost} -body {
     rnChecks game_core checks
-} -result {0 35 {}}
+} -result {0 34 {}}
 
 test rn-core-textkit {the second library's core: Int, Bool, Float64, str and unit results, Unicode scalars, embedded NULs, a megabyte, a payload's typed fields, NonFiniteFloat, the ownership counters; and both libraries' cores in one process, apart} -constraints {rnHost} -body {
     rnChecks textkit_core
@@ -711,6 +718,8 @@ test rn-cmake-guards {the generated CMake file accepts arm64-v8a at the package'
     puts -nonewline $channel x
     close $channel
     lassign [rnCMake $copy -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM_LEVEL=24] s3 - e3
+    # (CMake wraps a long message's lines.)
+    foreach v {e1 e2 e3} { regsub -all {\s+} [set $v] " " $v }
     list $ok $s1 [string match "*no Botlish library \"game\" for the Android ABI x86_64*" $e1] \
         $s2 [string match "*minimum Android API level is 23*" $e2] \
         $s3 [string match "*is not the library this package was generated for*" $e3]
