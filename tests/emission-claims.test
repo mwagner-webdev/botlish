@@ -2049,6 +2049,814 @@ test ec-callee-service {the compiler service's hover shows the current verdict: 
     set out
 } -result {{UNBOUND {emits digit_token: certified to emit digit_token: every normal completion has yielded exactly one token, every prefix it yields is viable; its token completes on its own last symbol} {emits digit_token: not checked -- its code holds another diagnostic}} {{} {emits digit_token: certified to emit digit_token: every normal completion has yielded exactly one token, every prefix it yields is viable; its token completes on its own last symbol} {emits digit_token: certified to emit digit_token: every normal completion has yielded exactly one token, every prefix it yields is viable; its token completes on its own last symbol}} {UNBOUND {emits digit_token: certified to emit digit_token: every normal completion has yielded exactly one token, every prefix it yields is viable; its token completes on its own last symbol} {emits digit_token: not checked -- its code holds another diagnostic}} {{SYNTAX UNBOUND} {emits digit_token: certified to emit digit_token: every normal completion has yielded exactly one token, every prefix it yields is viable; its token completes on its own last symbol} {emits digit_token: not checked -- its code holds another diagnostic}}}
 
+# ---------------------------------------------------------------------------
+# Function identity and branch feasibility (EMISSION-IDENTITY-AND-
+# FEASIBILITY-CORRECTNESS-MILESTONE-1.md)
+#
+# Two representation ambiguities made accepted programs carry false
+# certificates (EMISSION-BINDING-AND-SIGNATURE-DEPENDENCY-CENSUS-
+# MILESTONE-1.md, sections 13.3, 13.4, 15.3):
+#
+# * a function's name identified it in the memo, the certificate table and
+#   a certificate's dependencies -- two functions of one name in different
+#   lexical scopes shared a certificate. A name that identifies no function
+#   now selects nothing: the claim is proved from its own code, a call
+#   walks the body it names, a proof that read such a name is not
+#   memoized;
+# * `Facts` answered "" both for an infeasible branch and for a feasible
+#   one through an environment with no binding -- a function without
+#   parameters lost both branches of its first `if`. It now answers a
+#   feasibility flag beside the environment.
+#
+# The census's programs are named after its cases (N1 ... N6, F1 ... F4).
+
+# The run of TEXT with every claim erased, on the Tcl backends and, with
+# native coroutines, the native ones (one outcome on all of them): {SYMBOLS
+# JUDGMENT}, the program's value (a List of symbols) judged against
+# RECOGNIZER by the reference interpreter -- `ok` or `invalid`.
+proc erasedRun {text {recognizer digit_token}} {
+    set stripped [emit::strip $text]
+    set dir [emit::workspace main.bot $stripped]
+    set model [emit::reference $dir]
+    set backends {interp compile}
+    if {[testConstraint nativeCoroutines]} {
+        lappend backends cranelift-generic cranelift
+    }
+    lassign [sourceAgree $stripped $backends] tag value
+    if {$tag ne "value"} {
+        return [list $tag $value]
+    }
+    set symbols [lmap x [split [string trim $value {[]}] ,] {string trim $x}]
+    return [list $symbols [lindex [emit::judge $model [list "" $recognizer] complete $symbols] 0]]
+}
+
+# The value of a function whose coroutine is CALL: [first], [first, second]
+# or [first, second, -9] (more than two symbols), as a block of
+# statements indented by INDENT.
+proc collector {call {indent ""}} {
+    set lines [list "coroutine {step: k, first} = $call" "second = k()" "if std::coroutine::done?(k):" \
+        "    \[first\]" "else:" "    third = k()" "    if std::coroutine::done?(k):" "        \[first, second\]" \
+        "    else:" "        \[first, second, -9\]"]
+    return [join [lmap l $lines {string cat $indent $l}] \n]\n
+}
+
+# {NAME VERDICT CERTIFIED}... of TEXT's claims, compiled in memory with the
+# memo as it is.
+proc identity {text} {
+    set hir [surface::compile $text -warnings off -strict 0]
+    return [lmap r [hir::emission::claims $hir] {
+        list [dict get $r function] [dict get $r verdict] [dict exists $r certificate]
+    }]
+}
+
+# The strict outcome of TEXT: accepted, or the kind it raises.
+proc strictOf {text} {
+    if {[catch {surface::compile $text -warnings off} message options]} {
+        return [lindex [dict get $options -errorcode] end]
+    }
+    return accepted
+}
+
+set coDfa "import std::coroutine\n$digitDfa"
+set ::idN1 [string cat $digitDfa {fn outer1() -> int:
+    fn inner() -> unit emits digit_token:
+        yield 49
+        unit
+    3
+
+fn outer2() -> int:
+    fn inner() -> unit emits digit_token:
+        yield 65
+        unit
+    4
+
+0
+}]
+set ::idN2 [string cat $coDfa {fn emitter() -> int emits digit_token:
+    yield 49
+    0
+
+fn outer() -> List[int]:
+    fn emitter() -> int emits digit_token:
+        yield 65
+        0
+} [collector emitter() "    "] {
+outer()
+}]
+set ::idN3 [string cat $digitDfa {fn outer() -> int:
+    fn inner() -> unit emits digit_token:
+        yield 49
+        unit
+    if true:
+        fn inner() -> unit emits digit_token:
+            yield 65
+            unit
+        2
+    3
+
+0
+}]
+# N4a/N4b: two nested helpers of one name; the claimed function calls
+# outer2's, which N4b edits.
+proc idN4 {symbol {otherName helper}} {
+    return [string cat $::coDfa "fn outer1() -> int:\n    fn $otherName\(d: int) -> unit:\n        yield 49\n        unit\n    3\n\n" \
+        "fn outer2() -> List\[int\]:\n    fn helper(d: int) -> unit:\n        yield $symbol\n        unit\n" \
+        "    fn emitter() -> int emits digit_token:\n        helper(0)\n        0\n" [collector emitter() "    "] "\nouter2()\n"]
+}
+# N6a/N6b: one proof reads the nested `step` and, through g, the top-level
+# one; N6b removes the nested one.
+proc idN6 {nested} {
+    set text [string cat "import std::coroutine\nimport std::dfa\n\nclass digit = '0'..'9'\nclass letter = 'A'..'Z'\n\n" \
+        "dfa pair_token over ascii:\n    start:\n        digit -> second\n    second:\n        letter -> accept\n\n" \
+        "fn step() -> unit:\n    yield 65\n    unit\n\nfn g() -> unit:\n    step()\n    unit\n\nfn outer() -> List\[int\]:\n"]
+    if {$nested} {
+        append text "    fn step() -> unit:\n        yield 49\n        unit\n"
+    }
+    return [string cat $text "    fn emitter() -> int emits pair_token:\n        step()\n        g()\n        0\n" \
+        [collector emitter() "    "] "\nouter()\n"]
+}
+
+test ec-identity-same-name {two claimed functions of one name in different lexical scopes -- two nested ones, a top-level and a nested one, one shadowing another -- are each checked from their own code, with the memo on or off: the second, which yields 'A', is rejected (this reused the first's certificate, and the programs were accepted), and the top-level/nested pair's run, claims erased, is the invalid trace the rejection predicts} -setup {
+    set ::hir::emission::memo [dict create]
+} -body {
+    set out {}
+    foreach memo {1 0} {
+        set ::hir::emission::useMemo $memo
+        foreach text [list $::idN1 $::idN2 $::idN3] {
+            set ::hir::emission::memo [dict create]
+            lappend out [identity $text]
+        }
+    }
+    set ::hir::emission::useMemo 1
+    lappend out [lmap text [list $::idN1 $::idN2 $::idN3] {strictOf $text}] [erasedRun $::idN2]
+} -cleanup {set ::hir::emission::useMemo 1} -result {{{inner proven 1} {inner rejected 0}} {{emitter proven 1} {emitter rejected 0}} {{inner proven 1} {inner rejected 0}} {{inner proven 1} {inner rejected 0}} {{emitter proven 1} {emitter rejected 0}} {{inner proven 1} {inner rejected 0}} {EMIT-REJECTED EMIT-REJECTED EMIT-REJECTED} {65 invalid}}
+
+test ec-identity-memo-sequence {N4a then N4b in one process, the memo kept: N4b's edit of the helper its claim calls is proved again, and rejected (this validated the certificate against the other helper of the name, reused it, and accepted a program whose run yields 'A'); with unique helper names the certificate is memoized and reused, and validates against neither helper once the name is shared again (the first of the name has the code it recorded), nor the edited one} -setup {
+    set ::hir::emission::memo [dict create]
+} -body {
+    set dir [emit::workspace]
+    set path [file join $dir main.bot]
+    set out {}
+    foreach text [list [idN4 49] [idN4 65] [idN4 49 other] [idN4 49 other] [idN4 65] [idN4 65 other]] {
+        emit::writeText $path $text
+        lappend out [reuse $path]
+    }
+    lappend out [erasedRun [idN4 49]] [erasedRun [idN4 65]] [strictOf [idN4 65]]
+} -result {{{emitter proven 0}} {{emitter rejected 0}} {{emitter proven 0}} {{emitter proven 1}} {{emitter rejected 0}} {{emitter rejected 0}} {49 ok} {65 invalid} EMIT-REJECTED}
+
+test ec-identity-read-set {a proof that read two functions of one name -- the nested `step` and, through g, the top-level one -- is certified, but never memoized: its certificate records one fingerprint for the name, and a later compilation in which the name identifies the other function would validate it. N6b, without the nested step, is proved again and rejected; its run yields two letters (the census's prototype reused N6a's certificate here)} -setup {
+    set ::hir::emission::memo [dict create]
+} -body {
+    set dir [emit::workspace]
+    set path [file join $dir main.bot]
+    set out {}
+    emit::writeText $path [idN6 1]
+    lappend out [reuse $path] [dict keys $::hir::emission::memo]
+    emit::writeText $path [idN6 0]
+    lappend out [reuse $path] [erasedRun [idN6 1] pair_token] [erasedRun [idN6 0] pair_token]
+} -result {{{emitter proven 0}} {} {{emitter rejected 0}} {{49 65} ok} {{65 65} invalid}}
+
+set ::idCompose [string cat "import std::coroutine\nimport std::dfa\n\nclass digit = '0'..'9'\n\n" \
+    "dfa digit_token over ascii:\n    start:\n        digit -> accept\n\n" \
+    "dfa two_digits over ascii:\n    start:\n        digit -> second\n    second:\n        digit -> accept\n\n" {fn h() -> unit emits digit_token:
+    yield 49
+    unit
+
+fn plain() -> unit:
+    yield 49
+    unit
+
+fn stop():
+    loop:
+        continue
+
+fn g() -> unit:
+    h()
+    unit
+
+fn outer1() -> int:
+    fn h() -> unit emits digit_token:
+        yield 50
+        unit
+    fn a() -> unit emits digit_token:
+        h()
+        unit
+    3
+
+fn outer2() -> int:
+    fn h() -> unit emits digit_token:
+        yield 65
+        unit
+    fn b() -> unit emits digit_token:
+        h()
+        unit
+    4
+
+fn outer3() -> int:
+    fn plain() -> unit:
+        yield 66
+        unit
+    fn c() -> unit emits digit_token:
+        plain()
+        unit
+    5
+
+fn outer4() -> int:
+    fn h() -> unit emits digit_token:
+        yield 50
+        unit
+    fn both() -> unit emits two_digits:
+        h()
+        g()
+        unit
+    6
+
+fn outer5() -> int:
+    fn stop() -> unit:
+        unit
+    fn d() -> unit emits digit_token:
+        yield 49
+        stop()
+        yield 50
+        unit
+    7
+
+fn e() -> unit emits digit_token:
+    yield 49
+    stop()
+    yield 50
+    unit
+
+fn solo() -> unit emits digit_token:
+    yield 49
+    unit
+
+0
+}]
+
+test ec-identity-composition {a call of a claimed helper whose name four functions share walks the body the call names, never the certificate the name finds: outer2's b, calling a helper yielding 'A', is rejected (it composed with another h's certificate and was proven); a helper without a claim is walked by block whatever its name (c); a proof reading both a nested and the top-level h is certified (both) but not memoized; a function that genuinely never returns still ends the walk (e: certified, not memoized, its proof read `stop`, a name of two functions), and its same-named returning sibling does not (d); a claim whose proof read only identified functions is memoized (solo)} -setup {
+    set ::hir::emission::memo [dict create]
+} -body {
+    list [identity $::idCompose] [lsort [lmap k [dict keys $::hir::emission::memo] {lindex $k 0}]]
+} -result {{{h proven 1} {h proven 1} {h rejected 0} {c rejected 0} {h proven 1} {d rejected 0} {e proven 1} {solo proven 1} {a proven 1} {b rejected 0} {both proven 1}} solo}
+
+# A claimed d composing with a top-level h's certificate; then a nested h
+# of the same name, yielding SYMBOL, beside d (d's call means it).
+proc idComposed {nested} {
+    set text [string cat $::coDfa "fn h() -> unit emits digit_token:\n    yield 49\n    unit\n\nfn outer() -> List\[int\]:\n"]
+    if {$nested} {
+        append text "    fn h() -> unit emits digit_token:\n        yield 65\n        unit\n"
+    }
+    return [string cat $text "    fn d() -> int emits digit_token:\n        h()\n        0\n" [collector d() "    "] "\nouter()\n"]
+}
+
+test ec-identity-certificate-dependency {a memoized certificate that composed with a helper's certificate is not validated through the helper's name once it is shared: d composed with the top-level h's certificate and was memoized; a nested h of the name, yielding 'A', now beside d (its call means it) -- d is proved again from the nested h's body, and rejected; its run yields 'A'} -setup {
+    set ::hir::emission::memo [dict create]
+} -body {
+    set dir [emit::workspace]
+    set path [file join $dir main.bot]
+    set out {}
+    foreach nested {0 1} {
+        emit::writeText $path [idComposed $nested]
+        lappend out [reuse $path] [lsort [lmap k [dict keys $::hir::emission::memo] {lindex $k 0}]]
+    }
+    lappend out [erasedRun [idComposed 0]] [erasedRun [idComposed 1]]
+} -result {{{h proven 0} {d proven 0}} {d h} {{h proven 0} {h rejected 0} {d rejected 0}} {d h} {49 ok} {65 invalid}}
+
+test ec-identity-qualified-reuse {functions of one name in different modules are qualified (a::emitter, b::emitter): identified, memoized and reused as ever; and duplicate names elsewhere in a program -- unclaimed, unread -- leave a uniquely named claim's reuse alone} -setup {
+    set ::hir::emission::memo [dict create]
+} -body {
+    set dir [emit::workspace digits.bot "import std::dfa\n\nclass digit = '0'..'9'\n\ndfa digit_token over ascii:\n    start:\n        digit -> accept\n" \
+        a.bot "import digits\n\nfn emitter() -> unit emits digits::digit_token:\n    yield 49\n    unit\n" \
+        b.bot "import digits\n\nfn emitter() -> unit emits digits::digit_token:\n    yield 50\n    unit\n" \
+        main.bot "import a\nimport b\n\n0\n" \
+        dup.bot [string cat $::digitDfa "fn good() -> unit emits digit_token:\n    yield 49\n    unit\n\n" \
+            "fn outer1() -> int:\n    fn tmp() -> int:\n        1\n    tmp()\n\nfn outer2() -> int:\n    fn tmp() -> int:\n        2\n    tmp()\n\n0\n"]]
+    list [reuse [file join $dir main.bot]] [reuse [file join $dir main.bot]] \
+        [reuse [file join $dir dup.bot]] [reuse [file join $dir dup.bot]]
+} -result {{{emitter proven 0} {emitter proven 0}} {{emitter proven 1} {emitter proven 1}} {{good proven 0}} {{good proven 1}}}
+
+# The programs of the memo-history test: a uniquely named claim beside two
+# claims of one name (outer1's emitter, and outer2's, yielding SYMBOL); the
+# program's value is outer2's emitter's run.
+proc historyProgram {symbol {good "yield 48 + d"}} {
+    return [string cat $::coDfa "type Digit = Int in 0..9\n\nfn good(d: Digit) -> unit emits digit_token:\n    $good\n    unit\n\n" \
+        "fn outer1() -> int:\n    fn emitter() -> int emits digit_token:\n        yield 49\n        0\n    3\n\n" \
+        "fn outer2() -> List\[int\]:\n    fn emitter() -> int emits digit_token:\n        yield $symbol\n        0\n" \
+        [collector emitter() "    "] "\nouter2()\n"]
+}
+
+# What a compilation of the program at PATH decides, as data: each claim's
+# record (verdict, certificate), the diagnostics' kinds, locations and
+# messages, and the strict outcome.
+proc decided {path} {
+    set memo $::hir::emission::memo
+    set hir [emit::compile $path]
+    set records [hir::emission::claims $hir]
+    set diags [lmap d [dict get $hir diagnostics] {list [dict get $d kind] [dict get $d origin] [dict get $d message]}]
+    set ::hir::emission::memo $memo
+    set strict accepted
+    if {[catch {surface::readProgramFile $path -warnings off} message options]} {
+        set strict [lindex [dict get $options -errorcode] end]
+    }
+    return [list $records $diags $strict]
+}
+
+# The verdicts of the program at PATH compiled by a fresh process.
+proc freshProcess {path} {
+    set script [file join [file dirname $path] fresh.tcl]
+    emit::writeText $script {
+set root [lindex $argv 0]
+set path [lindex $argv 1]
+set argv {}
+source [file join $root tests helpers.tcl]
+source [file join $root surface surface.tcl]
+set hir [surface::readProgramFile $path -warnings off -strict 0]
+puts [lmap r [hir::emission::claims $hir] {list [dict get $r function] [dict get $r verdict] [dict exists $r certificate]}]
+}
+    return [string trim [exec [info nameofexecutable] $script $::projectRoot $path]]
+}
+
+test ec-identity-memo-history {a compilation's verdicts, certificates, diagnostics and strict outcome are the same whatever this process compiled before -- a fresh process; an empty memo; a memo holding a certificate of the name from another program, whose function is top-level and has the code of the first of the two (a name's first function is what a validation by name compares), or is nested in another scope with other code; the program's earlier version; a version whose code differs elsewhere (another claim's body, a helper's name); an unrelated program -- for a rejected program with two claims of one name, its accepted version, whose run is valid, and N4b, whose verdict depended on the history (proven after N4a or after a version with unique helper names; rejected otherwise)} -setup {
+    set ::hir::emission::memo [dict create]
+} -body {
+    set dir [emit::workspace]
+    set path [file join $dir main.bot]
+    set history [file join $dir history.bot]
+    set unique [string cat $::digitDfa "type Digit = Int in 0..9\n\nfn good(d: Digit) -> unit emits digit_token:\n    yield 48 + d\n    unit\n\n" \
+        "fn emitter() -> int emits digit_token:\n    yield 49\n    0\n\n0\n"]
+    set scoped [string cat $::digitDfa "fn outer9() -> int:\n    fn emitter() -> int emits digit_token:\n        yield 51\n        0\n    9\n\n0\n"]
+    set out {}
+    foreach {final earlier changed} [list [historyProgram 65] [historyProgram 50] [historyProgram 65 "yield 47 + d + 1"] \
+            [historyProgram 50] [historyProgram 65] [historyProgram 50 "yield 47 + d + 1"] \
+            [idN4 65] [idN4 49] [idN4 49 other]] {
+        emit::writeText $path $final
+        set results {}
+        set ::hir::emission::memo [dict create]
+        lappend results fresh-memo [decided $path]
+        foreach {name program} [list unique $unique another-scope $scoped earlier $earlier changed $changed \
+                unrelated "import emitlib\n\n0\n"] {
+            set ::hir::emission::memo [dict create]
+            emit::writeText $history $program
+            emit::compile $history
+            lappend results $name [decided $path]
+        }
+        set reference [dict get $results fresh-memo]
+        lappend out [lmap {name r} $results {expr {$r eq $reference}}] \
+            [lmap r [lindex $reference 0] {list [dict get $r verdict] [dict exists $r certificate]}] [lindex $reference 2] \
+            [expr {[freshProcess $path] eq [lmap r [lindex $reference 0] {list [dict get $r function] [dict get $r verdict] [dict exists $r certificate]}]}] \
+            [erasedRun $final]
+    }
+    set out
+} -result {{1 1 1 1 1 1} {{proven 1} {proven 1} {rejected 0}} EMIT-REJECTED 1 {65 invalid} {1 1 1 1 1 1} {{proven 1} {proven 1} {proven 1}} accepted 1 {50 ok} {1 1 1 1 1 1} {{rejected 0}} EMIT-REJECTED 1 {65 invalid}}
+
+# The 1-based line and column of the name of the Nth (1-based) function
+# declaration `fn NAME(` in TEXT.
+proc declarationOf {text name {nth 1}} {
+    set n 0
+    set i 0
+    foreach line [split $text \n] {
+        incr i
+        if {[regexp -indices "^\\s*fn ($name)\\(" $line -> span] && [incr n] == $nth} {
+            return [list $i [expr {[lindex $span 0] + 1}]]
+        }
+    }
+    error "no declaration $nth of $name"
+}
+
+test ec-identity-service {the compiler service across revisions, the process's memo kept: two valid claims of one name, one made invalid, repaired, the other edited, a third of the name added, the ambiguity removed, an unrelated edit -- at every revision the hovers say what a fresh compilation of the revision decides, a uniquely named claim stays certified (and is reused), and no certificate is reused for a name of two functions} -setup {
+    set ::hir::emission::memo [dict create]
+} -body {
+    set dir [emit::workspace main.bot "0\n"]
+    set path [file join $dir main.bot]
+    set fresh [file join $dir fresh.bot]
+    set ws [service::workspace -root $dir]
+    set good "fn good() -> unit emits digit_token:\n    yield 48\n    unit\n\n"
+    proc scope {outer symbol {name emitter}} {
+        return "fn $outer\() -> int:\n    fn $name\() -> unit emits digit_token:\n        yield $symbol\n        unit\n    3\n\n"
+    }
+    set revisions [list \
+        [string cat $::digitDfa $good [scope outer1 49] [scope outer2 50] 0\n] \
+        [string cat $::digitDfa $good [scope outer1 49] [scope outer2 65] 0\n] \
+        [string cat $::digitDfa $good [scope outer1 49] [scope outer2 50] 0\n] \
+        [string cat $::digitDfa $good [scope outer1 51] [scope outer2 50] 0\n] \
+        [string cat $::digitDfa $good [scope outer1 51] [scope outer2 50] [scope outer3 65] 0\n] \
+        [string cat $::digitDfa $good [scope outer1 51] [scope outer2 50 emitter2] 0\n] \
+        [string cat $::digitDfa $good [scope outer1 51] [scope outer2 50 emitter2] "fn unrelated() -> int:\n    7\n\n" 0\n]]
+    set out {}
+    foreach text $revisions {
+        service::setDocument $ws $path $text
+        set rev [service::analyze $ws $path]
+        set reused [dict getdef $::hir::emission::stats reusedClaims {}]
+        set hovers {}
+        foreach name {good emitter emitter2} {
+            for {set nth 1} {![catch {declarationOf $text $name $nth} at]} {incr nth} {
+                set hover [lindex [split [dict get [service::at $rev $path {*}$at] hover] \n] 1]
+                lappend hovers [lindex [split $hover :] 1]
+            }
+        }
+        # A fresh compilation of the revision's text.
+        emit::writeText $fresh $text
+        set memo $::hir::emission::memo
+        set ::hir::emission::memo [dict create]
+        set ::hir::emission::useMemo 0
+        set verdicts [lmap r [hir::emission::claims [emit::compile $fresh]] {dict get $r verdict}]
+        set ::hir::emission::useMemo 1
+        set ::hir::emission::memo $memo
+        set expected [lmap v $verdicts {dict get {proven " certified to emit digit_token" rejected " rejected -- the analysis found a trace the recognizer does not accept (see its diagnostics)"} $v}]
+        lappend out [list [lmap d [service::diagnostics $rev] {lindex [dict get $d code] end}] \
+            [lsort -unique [lmap h $hovers {string trim [lindex [split $h ,] 0]}]] [expr {[lsort $hovers] eq [lsort $expected]}] \
+            [lmap id $reused {lindex $id 0}]]
+    }
+    service::closeWorkspace $ws
+    set out
+} -cleanup {set ::hir::emission::useMemo 1; rename scope {}} -result {{{} {{certified to emit digit_token}} 1 {}} {EMIT-REJECTED {{certified to emit digit_token} {rejected -- the analysis found a trace the recognizer does not accept (see its diagnostics)}} 1 good} {{} {{certified to emit digit_token}} 1 good} {{} {{certified to emit digit_token}} 1 good} {EMIT-REJECTED {{certified to emit digit_token} {rejected -- the analysis found a trace the recognizer does not accept (see its diagnostics)}} 1 good} {{} {{certified to emit digit_token}} 1 good} {{} {{certified to emit digit_token}} 1 {good emitter emitter2}}}
+
+test ec-identity-interchange {interchange text of programs whose claims share a name, or whose parameterless claims begin with an if, is verified again by its reader to the writer's records, with the reader's memo on or off (with it on, N2's false certificate was repeated; with it off, the text was refused); a reader in another process agrees; a forged or stale certificate for the invalid claim -- the valid one's, or N4a's for N4b -- is refused} -setup {
+    set ::hir::emission::memo [dict create]
+} -body {
+    set f1 [string cat $::digitDfa "fn flip() -> bool:\n    true\n\nfn emitter() -> unit emits digit_token:\n    if flip():\n        yield 65\n    else:\n        yield 66\n    unit\n\nfn good() -> unit emits digit_token:\n    if flip():\n        yield 49\n    else:\n        yield 50\n    unit\n\n0\n"]
+    set out {}
+    set dir [emit::workspace]
+    foreach text [list $::idN2 $f1 [idN4 65]] {
+        set ::hir::emission::memo [dict create]
+        set hir [surface::compile $text -warnings off -strict 0]
+        set encoded [hir::interchange::encode $hir]
+        set row {}
+        foreach memo {1 0} {
+            set ::hir::emission::useMemo $memo
+            lappend row [expr {[catch {hir::interchange::decode $encoded} back] ? "refused" : [expr {$back eq $hir ? "kept" : "differs"}]}]
+        }
+        set ::hir::emission::useMemo 1
+        # Another process reads the text.
+        set file [file join $dir hir.hirx]
+        emit::writeText $file $encoded
+        set script [file join $dir read.tcl]
+        emit::writeText $script {
+set root [lindex $argv 0]
+set file [lindex $argv 1]
+set argv {}
+source [file join $root tests helpers.tcl]
+source [file join $root surface surface.tcl]
+set f [open $file]
+fconfigure $f -encoding utf-8
+set text [read $f]
+close $f
+if {[catch {hir::interchange::decode $text} back]} {
+    puts refused
+} else {
+    puts [lmap r [hir::emission::claims $back] {dict get $r verdict}]
+}
+}
+        lappend row [string trim [exec [info nameofexecutable] $script $::projectRoot $file]]
+        # Forged: every claim that is not proven gets a proven claim's
+        # certificate (N4b: N4a's, a stale one).
+        set records [dict get $hir emissions]
+        set proven [lsearch -inline -index 9 $records proven]
+        if {$text eq [idN4 65]} {
+            set ::hir::emission::memo [dict create]
+            set proven [lindex [dict get [surface::compile [idN4 49] -warnings off -strict 0] emissions] 0]
+        }
+        set forged [lmap r $records {
+            if {[dict get $r verdict] ne "proven"} {
+                dict set r verdict proven
+                dict set r certificate [dict get $proven certificate]
+            }
+            set r
+        }]
+        foreach memo {1 0} {
+            set ::hir::emission::useMemo $memo
+            lappend row [expr {[catch {hir::interchange::decode [hir::interchange::encode [dict replace $hir emissions $forged]]} m o] ? [lindex [dict get $o -errorcode] end] : "accepted"}]
+        }
+        set ::hir::emission::useMemo 1
+        lappend out $row
+    }
+    set out
+} -cleanup {set ::hir::emission::useMemo 1} -result {{kept kept {proven rejected} EMISSION EMISSION} {kept kept {rejected proven} EMISSION EMISSION} {kept kept rejected EMISSION EMISSION}}
+
+test ec-identity-native-erasure {the milestone's accepted programs -- two claims of one name (N4a; two nested emitters, one beside a uniquely named claim), parameterless claims that begin with an if -- lower to the same fused native code with their claims and without them: a correction of the checker changes no code} -constraints nativeCoroutines -body {
+    set ::hir::emission::memo [dict create]
+    set both [string cat $::coDfa "fn flip() -> bool:\n    true\n\nfn emitter() -> int emits digit_token:\n    if flip():\n        yield 49\n    else:\n        yield 50\n    0\n\n" \
+        "fn run() -> List\[int\]:\n" [collector emitter() "    "] "\nrun()\n"]
+    lmap text [list [idN4 49] [historyProgram 50] $both] {
+        set claimed [native::fusedNir [surface::compile $text -warnings off]]
+        set bare [native::fusedNir [surface::compile [emit::strip $text] -warnings off]]
+        list [expr {$claimed eq $bare}] [regexp -all {dfa#transition} $claimed]
+    }
+} -result {{1 0} {1 0} {1 0}}
+
+set ::feasibilityBase [string cat $coDfa {error Oops:
+    at: int
+
+fn flip() -> bool:
+    true
+
+fn flop() -> bool:
+    false
+
+fn pick() -> int:
+    7
+
+fn emitter() -> int emits digit_token:
+    if flip():
+        yield 65
+    else:
+        yield 66
+    0
+
+fn after_token() -> unit emits digit_token:
+    yield 49
+    if true:
+        yield 65
+    unit
+
+fn helper() -> unit:
+    if true:
+        yield 65
+    unit
+
+fn calls_helper(n: int) -> int emits digit_token:
+    helper()
+    0
+
+fn with_parameter(n: int) -> unit emits digit_token:
+    if n > 0:
+        yield 65
+    else:
+        yield 66
+    unit
+
+fn decided_false() -> int emits digit_token:
+    if false:
+        yield 65
+    else:
+        yield 49
+    0
+
+fn both_valid() -> int emits digit_token:
+    if flip():
+        yield 49
+    else:
+        yield 50
+    0
+
+}]
+# The feasibility program, its value the run of CALL's coroutine.
+proc feasibility {call} {
+    return [string cat $::feasibilityBase "fn run() -> List\[int\]:\n" [collector $call "    "] "\nrun()\n"]
+}
+
+test ec-feasibility-empty-environment {a function without parameters whose walk reaches an if before any binding is decided on both branches: the census's F1 (letters on both branches), F2 (a second symbol in a branch decided true) and F3 (a parameterless helper's if, through its caller) rejected -- each was certified, the walk ending at the if, and F1's and F3's runs yield 'A' -- F4 (the same if with a parameter) as before; a parameterless claim decided false, or with a digit on both branches, certified, with its normal completion (exits done; they were none)} -setup {
+    set ::hir::emission::memo [dict create]
+} -body {
+    set text [feasibility emitter()]
+    set hir [surface::compile $text -warnings off -strict 0]
+    set records [hir::emission::claims $hir]
+    list [lmap r $records {
+            set kinds [lsort -unique [lmap d [dict get $hir diagnostics] {
+                if {[dict getdef $d expr ""] ne [dict get $r block]} continue
+                dict get $d kind
+            }]]
+            list [dict get $r function] [dict get $r verdict] $kinds \
+                [expr {[dict exists $r certificate] ? [dict get $r certificate exits] : "-"}]
+        }] [strictOf $text] [erasedRun $text] [erasedRun [feasibility calls_helper(0)]]
+} -result {{{emitter rejected EMIT-REJECTED -} {after_token rejected EMIT-AFTER-TOKEN -} {calls_helper rejected EMIT-REJECTED -} {with_parameter rejected EMIT-REJECTED -} {decided_false proven {} done} {both_valid proven {} done}} EMIT-REJECTED {65 invalid} {65 invalid}}
+
+set ::shapes [string cat $digitDfa {type Small = Int in 0..20
+
+error Oops:
+    at: int
+
+fn flip() -> bool:
+    true
+
+fn flop() -> bool:
+    false
+
+fn pick() -> int:
+    if flip():
+        7
+    else:
+        70
+
+fn decided_true() -> unit emits digit_token:
+    if true:
+        yield 49
+    unit
+
+fn decided_true_dead_else() -> unit emits digit_token:
+    if true:
+        yield 49
+    else:
+        yield 65
+    unit
+
+fn decided_false_no_else() -> unit emits digit_token:
+    if false:
+        yield 65
+    yield 49
+    unit
+
+fn unknown_differ() -> unit emits digit_token:
+    if flip():
+        yield 49
+    else:
+        yield 65
+    unit
+
+fn unknown_no_else() -> unit emits digit_token:
+    if flip():
+        yield 49
+    unit
+
+fn nested_valid() -> unit emits digit_token:
+    if flip():
+        if flop():
+            yield 49
+        else:
+            yield 50
+    else:
+        yield 51
+    unit
+
+fn nested_invalid() -> unit emits digit_token:
+    if flip():
+        if flop():
+            yield 49
+        else:
+            yield 65
+    else:
+        yield 51
+    unit
+
+fn one_fails() -> unit errors Oops emits digit_token:
+    if flip():
+        fail Oops {at: 0}
+    else:
+        yield 49
+    unit
+
+fn fails_after_letter() -> unit errors Oops emits digit_token:
+    if flip():
+        yield 65
+        fail Oops {at: 0}
+    else:
+        yield 49
+    unit
+
+fn one_returns() -> int emits digit_token:
+    if flip():
+        yield 49
+        return 1
+    yield 50
+    0
+
+fn returns_empty() -> int emits digit_token:
+    if flip():
+        return 1
+    yield 50
+    0
+
+fn then_yield() -> unit emits digit_token:
+    if flip():
+        unit
+    else:
+        unit
+    yield 65
+    unit
+
+fn after_yield() -> unit emits digit_token:
+    yield 49
+    if flip():
+        yield 50
+    unit
+
+fn digit_helper() -> unit:
+    if flip():
+        yield 49
+    else:
+        yield 50
+    unit
+
+fn letter_helper() -> unit:
+    if flop():
+        yield 49
+    else:
+        yield 65
+    unit
+
+fn via_digit_helper(n: int) -> int emits digit_token:
+    digit_helper()
+    0
+
+fn via_letter_helper(n: int) -> int emits digit_token:
+    letter_helper()
+    0
+
+fn may_fail() -> unit errors Oops:
+    if flip():
+        fail Oops {at: 0}
+    unit
+
+fn after_handled_join() -> unit emits digit_token:
+    may_fail():
+        on Oops:
+            unit
+    if flop():
+        yield 49
+    else:
+        yield 65
+    unit
+
+fn after_if_join() -> unit emits digit_token:
+    if flip():
+        unit
+    else:
+        unit
+    if flop():
+        yield 49
+    else:
+        yield 65
+    unit
+
+fn local_bound() -> unit emits digit_token:
+    x = pick()
+    if x > 5:
+        yield 49
+    else:
+        yield 50
+    unit
+
+fn local_unbounded() -> unit emits digit_token:
+    x = pick()
+    if x > 5:
+        yield 48 + x
+    else:
+        yield 50
+    unit
+
+fn parameter_bound(n: int) -> unit emits digit_token:
+    if n > 0:
+        yield 49
+    else:
+        yield 50
+    unit
+
+fn either_second_path(d: Small) -> unit emits digit_token:
+    if d < 3 or d > 12:
+        yield 48 + d
+    else:
+        yield 49
+    unit
+
+fn either_first_path(d: Small) -> unit emits digit_token:
+    if d > 12 or d < 3:
+        yield 48 + d
+    else:
+        yield 49
+    unit
+
+0
+}]
+
+test ec-feasibility-shapes {the shapes a walk through an empty environment takes, each decided from its code: an if decided true or false (the dead branch excluded, with or without an else), unknown with a letter on one branch or no else (incomplete), nested, failing, returning, followed by a yield, after a yield, in a parameterless helper (valid and not), after a handled call's join and after an if's join (both leave the environment empty); and with a local or a parameter in the environment, as before -- an `or`'s two feasible paths joined, whichever holds the out-of-range symbols} -setup {
+    set ::hir::emission::memo [dict create]
+} -body {
+    claims $::shapes
+} -result {{decided_true proven {}} {decided_true_dead_else proven {}} {decided_false_no_else proven {}} {unknown_differ rejected EMIT-REJECTED} {unknown_no_else rejected EMIT-INCOMPLETE} {nested_valid proven {}} {nested_invalid rejected EMIT-REJECTED} {one_fails proven {}} {fails_after_letter rejected EMIT-REJECTED} {one_returns proven {}} {returns_empty rejected EMIT-INCOMPLETE} {then_yield rejected EMIT-REJECTED} {after_yield rejected EMIT-AFTER-TOKEN} {via_digit_helper proven {}} {via_letter_helper rejected EMIT-REJECTED} {after_handled_join rejected EMIT-REJECTED} {after_if_join rejected EMIT-REJECTED} {local_bound proven {}} {local_unbounded rejected EMIT-REJECTED} {parameter_bound proven {}} {either_second_path rejected EMIT-REJECTED} {either_first_path rejected EMIT-REJECTED}}
+
+test ec-feasibility-flag {Facts answers a feasibility flag beside the environment: a feasible path through an environment with no binding is {1 {}}, an outcome a known condition excludes {0 ...}, a comparison its binding's facts contradict {0 ...}, a binding with no value at all infeasible on both outcomes (no completion manufactured), and the union of an `or`'s feasible paths, each narrowing its binding} -body {
+    set hir [surface::compile [string cat $::digitDfa "type Small = Int in 0..20\n\nfn flip() -> bool:\n    true\n\nfn f(d: Small) -> unit emits digit_token:\n    if flip():\n        yield 49\n    if true:\n        yield 50\n    if d < 0:\n        yield 51\n    if d < 3 or d > 12:\n        yield 52\n    unit\n\n0\n"] -warnings off -strict 0]
+    hir::emission::Reset $hir
+    set f [lindex [hir::emission::claims $hir] 0 1]
+    set conditions [lmap x [dict get $hir exprs $f body] {
+        if {[dict get $hir exprs $x kind] ne "if"} continue
+        dict get $hir exprs $x condition
+    }]
+    set d [lindex [dict get $hir exprs $f params] 0]
+    set ::hir::emission::exprVal [dict create]
+    # The operands' values, as the walk computes them before Facts.
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict get $node kind] eq "ref" && [dict get $node binding] eq $d} {
+            dict set ::hir::emission::exprVal $e {{0 20}}
+        } elseif {[dict get $node kind] eq "const" && [core::value::kind [dict get $node value]] eq "int"} {
+            set k [core::value::intOf [dict get $node value]]
+            dict set ::hir::emission::exprVal $e [list [list $k $k]]
+        }
+    }
+    lassign $conditions call known compare either
+    set out {}
+    set ::hir::emission::env [dict create]
+    lappend out [hir::emission::Facts $call 1] [hir::emission::Facts $call 0] \
+        [hir::emission::Facts $known 1] [lindex [hir::emission::Facts $known 0] 0]
+    set ::hir::emission::env [dict create $d {{0 20}}]
+    lappend out [lindex [hir::emission::Facts $compare 1] 0] [hir::emission::Facts $compare 0] \
+        [hir::emission::Facts $either 1] [hir::emission::Facts $either 0]
+    set ::hir::emission::env [dict create $d {}]
+    lappend out [lindex [hir::emission::Facts $compare 1] 0] [lindex [hir::emission::Facts $compare 0] 0]
+    string map [list $d D] $out
+} -cleanup {set ::hir::emission::hir ""; set ::hir::emission::env [dict create]; set ::hir::emission::exprVal [dict create]} -result {{1 {}} {1 {}} {1 {}} 0 0 {1 {D {{0 20}}}} {1 {D {{0 2} {13 20}}}} {1 {D {{3 12}}}} 0 0}
+
 test ec-result-not-symbol {a claimed function's result is no symbol, whatever its type: an Int-returning source emits its token and completes with any Int -- its argument, 0, -1 -- certified alike (CSV-EMISSION-VALIDATION-MILESTONE-1.md, section 18; this was EMIT-TERMINAL-VALUE's -1 rule)} -body {
     set hir [surface::compile "${digitDfa}fn s(n: int) -> int emits digit_token:\n    yield 55\n    n\n\nfn z() -> int emits digit_token:\n    yield 55\n    0\n\nfn e() -> int emits digit_token:\n    yield 55\n    -1\n\n0\n" -warnings off -strict 0]
     list [lmap d [dict get $hir diagnostics] {dict get $d kind}] \
