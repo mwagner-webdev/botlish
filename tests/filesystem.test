@@ -912,7 +912,7 @@ fn portable(dir: std::io::fs::FilePath) -> List[any] errors std::io::fs::FileErr
     string map [list $dir DIR] $value
 } -result {[2, [std::io::fs::Reason::AlreadyExists, 17], true, "DIR/saves"]}
 
-test fs-linux-executable {a standalone executable does the same round trip (and under GC stress): writes, lists and reads back a file through the raw syscalls, no libc call of its own} -constraints nativeLinux -body {
+test fs-linux-executable {a standalone executable does the same round trip (and under GC stress): writes, lists and reads back a file through the raw syscalls, no libc call of its own -- its value read through the driver protocol, and a plain run under GC stress printing nothing (an executable never prints its value)} -constraints nativeLinux -body {
     set dir [fsDir]
     set text [fsProgram linux $dir {    path = nroot.concat("exe.txt")
     path.write_file(bytes_of("from an executable"))
@@ -920,11 +920,13 @@ test fs-linux-executable {a standalone executable does the same round trip (and 
         e.name.display()
     [names, text_of(path.read_file())]}]
     set exe [native::executable [fsHir $text [linuxTarget]] [file join $::fsScratch fsexe[incr ::fsCounter]]]
-    set first [exec $exe]
+    set first [standaloneValue $exe]
     file delete [file join $dir exe.txt]
-    set stressed [withEnvironment {BOTLISH_NATIVE_GC_STRESS 1} {exec $exe}]
-    list $first $stressed
-} -result {{[["exe.txt"], "from an executable"]} {[["exe.txt"], "from an executable"]}}
+    set stressed [standaloneValue $exe BOTLISH_NATIVE_GC_STRESS 1]
+    file delete [file join $dir exe.txt]
+    set plain [withEnvironment {BOTLISH_NATIVE_GC_STRESS 1} {exec $exe}]
+    list $first $stressed $plain
+} -result {{[["exe.txt"], "from an executable"]} {[["exe.txt"], "from an executable"]} {}}
 
 test fs-linux-gc-stress {the native backends under GC stress: a directory of files written, listed and read, every operation allocating, with a collection at every allocation} -constraints nativeLinux -body {
     set dir [fsDir]
@@ -943,14 +945,23 @@ test fs-linux-gc-stress {the native backends under GC stress: a directory of fil
 # ===========================================================================
 # Linux: faults the kernel does not give on demand (strace's injection)
 
-# EXE's output and strace's log of its file syscalls on PATH with INJECT
+# EXE's value and strace's log of its file syscalls on PATH with INJECT
 # injected: only the calls that access PATH (or a descriptor opened for it)
 # are traced and counted (-P: the dynamic loader's reads are not the
 # program's), full strings (-s), one line per call, the thread ids -f
 # prefixes removed (the runtime runs Botlish code on a thread of its own).
+# An executable prints no value of its own (PROGRAM-OUTPUT-MILESTONE-1.md):
+# the value is read through the driver protocol, whose result file no
+# traced call touches (its path is not PATH).
 proc fsStraced {exe inject path} {
     set log [file join $::fsScratch strace[incr ::fsCounter].log]
-    catch {exec strace -f -qq -s 4096 -o $log -P $path -e trace=openat,getdents64,read,write,close -e inject=$inject $exe} out
+    set result [file join $::fsScratch result[incr ::fsCounter]]
+    catch {withEnvironment [list BOTLISH_NATIVE_RESULT $result] {
+        exec strace -f -qq -s 4096 -o $log -P $path -e trace=openat,getdents64,read,write,close -e inject=$inject $exe
+    }} out
+    if {[file exists $result]} {
+        catch {ProtocolValue $result} out
+    }
     regsub -all -line {^[0-9]+ +} [fsReadBinary $log] {} text
     return [list $out $text]
 }
@@ -1228,14 +1239,16 @@ test fs-windows-long-path {a path longer than MAX_PATH works through \\?\ (NTFS'
     fsValue [fsWindowsProgram long-path [fsDir]]
 } -result {["deep", "3"]}
 
-test fs-windows-executable {a standalone Windows executable does the round trip (and under GC stress)} -constraints windowsIO -body {
+test fs-windows-executable {a standalone Windows executable does the round trip (and under GC stress) -- its value read through the driver protocol, and a plain run under GC stress printing nothing} -constraints windowsIO -body {
     set dir [fsDir]
     set exe [native::executable [fsHir [fsWindowsProgram executable $dir]] [file join $::fsScratch fsexe[incr ::fsCounter]]]
-    set first [exec $exe]
+    set first [standaloneValue $exe]
     file delete [file join $dir exe.txt]
-    set stressed [withEnvironment {BOTLISH_NATIVE_GC_STRESS 1} {exec $exe}]
-    list $first $stressed
-} -result {{[["exe.txt"], "from an executable"]} {[["exe.txt"], "from an executable"]}}
+    set stressed [standaloneValue $exe BOTLISH_NATIVE_GC_STRESS 1]
+    file delete [file join $dir exe.txt]
+    set plain [withEnvironment {BOTLISH_NATIVE_GC_STRESS 1} {exec $exe}]
+    list $first $stressed $plain
+} -result {{[["exe.txt"], "from an executable"]} {[["exe.txt"], "from an executable"]} {}}
 
 test fs-windows-portable {portable code over FilePath, given a WindowsPath: the same program as fs-linux-portable's} -constraints windowsIO -body {
     fsValue [fsWindowsProgram portable [fsDir]]
@@ -1425,13 +1438,15 @@ test fs-darwin-portable {portable code over FilePath, given a DarwinPath: the sa
     fsValue [fsDarwinProgram portable [fsDir]]
 } -result {[["one.txt"], true]}
 
-test fs-darwin-executable {a standalone macOS executable does the round trip (and under GC stress)} -constraints darwinIO -body {
+test fs-darwin-executable {a standalone macOS executable does the round trip (and under GC stress) -- its value read through the driver protocol, and a plain run under GC stress printing nothing} -constraints darwinIO -body {
     set dir [fsDir]
     set exe [native::executable [fsHir [fsDarwinProgram executable $dir]] [file join $::fsScratch fsexe[incr ::fsCounter]]]
-    set first [exec $exe]
+    set first [standaloneValue $exe]
     file delete [file join $dir exe.txt]
-    set stressed [withEnvironment {BOTLISH_NATIVE_GC_STRESS 1} {exec $exe}]
-    list $first $stressed
-} -result {{[["exe.txt"], "from an executable"]} {[["exe.txt"], "from an executable"]}}
+    set stressed [standaloneValue $exe BOTLISH_NATIVE_GC_STRESS 1]
+    file delete [file join $dir exe.txt]
+    set plain [withEnvironment {BOTLISH_NATIVE_GC_STRESS 1} {exec $exe}]
+    list $first $stressed $plain
+} -result {{[["exe.txt"], "from an executable"]} {[["exe.txt"], "from an executable"]} {}}
 
 cleanupTests

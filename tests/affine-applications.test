@@ -312,12 +312,12 @@ test aa-deep-application-kept {an affine application nested past the applied-typ
 # ---------------------------------------------------------------------------
 # Recursive applications
 
-test aa-recursion-white-box {an affine application that holds an affine application of its own declaration in a List is a recursive affine type (Node[Coroutine{...}], V[Coroutine{...}] through a non-uniform argument); an unrestricted application, one reached through fields alone, and one whose recursive field is unrestricted (D's List[D[int]]) are not; a walk that meets ever larger applications stops at its budget as unbounded} -body {
+test aa-recursion-white-box {an affine application that holds an affine application of its own declaration in a List is a recursive affine type (Node[Coroutine{...}], V[Coroutine{...}] through a non-uniform argument); an unrestricted application, one reached through fields alone, and one whose recursive field is unrestricted (D's List[D[int]]) are not; an application that holds another declaration's growing recursive affine type (Wrap[C] of `g: Grow[T]`) is one too, decided on the declaration graph (it used to be the walk's budget, "unbounded": OWNED-RECURSION-DECLARATION-SUMMARY-MILESTONE-1.md)} -body {
     aaHir "${aaTypeImports}${aaTypeDecls}"
     lmap t [list [aaApp Node int] [aaApp Node $aaC] [aaApp V $aaC] [aaApp Box [aaApp Box $aaC]] [aaApp D $aaC] [aaApp Wrap $aaC] [aaApp Wrap int]] {
         lindex [hir::structs::OwnedRecursion $t] 0
     }
-} -result {{} recursive recursive {} {} unbounded {}}
+} -result {{} recursive recursive {} {} recursive {}}
 
 test aa-recursive-application-rejected {a construction whose application is a recursive affine type is AFFINE-CONTAINER-UNSUPPORTED, with the field that makes it affine and the path that recurses; the same declaration applied to an unrestricted type is an ordinary recursive value} -body {
     list [aaMessage "${aaDecls}n = Node {value: make(1), children: \[\]}\n0\n"] \

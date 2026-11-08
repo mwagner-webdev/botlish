@@ -9,11 +9,14 @@
 # native code), then on cranelift and cranelift-generic once as an
 # ordinary run and N times (default 5) under GC stress, and -- with
 # -executables 1, the default -- its standalone executable (native::
-# executable) run once as it is and N times under GC stress. Every outcome
-# must be the oracle's value; the census's two workloads also their recorded
-# values (uri 29500, 2048 2002720). The collector's roots are the host's
-# (runtime::framewalk's NATIVE_FRAME_ROOTS): native frames where they can be
-# walked (on Windows across Rust frames by Windows' unwinder:
+# executable) run once as it is and N times under GC stress: each time an
+# ordinary run, which must exit 0 and print nothing (an executable prints
+# no value of its own: PROGRAM-OUTPUT-MILESTONE-1.md), and a run whose
+# value the driver protocol reads (BOTLISH_NATIVE_RESULT). Every outcome
+# must be the oracle's value; the census's two workloads also their
+# recorded values (uri 29500, 2048 2002720). The collector's roots are the
+# host's (runtime::framewalk's NATIVE_FRAME_ROOTS): native frames where
+# they can be walked (on Windows across Rust frames by Windows' unwinder:
 # WINDOWS-X86-64-MILESTONE-3.md), the fallback plan's shadow stack
 # elsewhere (a `fallback-roots` driver), and a missed root shows here as a
 # wrong value, an error or a crash -- on real Windows a frame-pointer walk
@@ -100,9 +103,42 @@ proc outcome {stress script} {
 
 set work [file tempdir botlish-gc-workloads]
 
+# The value of a run of EXECUTABLE, as main.tcl shows a value
+# (core::formatValue), or the program's error raised (native::Outcome): an
+# ordinary run first, which must exit 0 and print nothing (an executable
+# prints no value of its own: PROGRAM-OUTPUT-MILESTONE-1.md), then a run in
+# the driver protocol (runtime/aot.rs: BOTLISH_NATIVE_RESULT names the file
+# its result lines go to), whose standard output, the program's, must be
+# empty too. Standard error as ExecutableOutput requires it of each.
+proc runExecutable {executable} {
+    global work
+    set printed [ExecutableOutput $executable]
+    if {$printed ne ""} {
+        error "the executable printed something of its own: $printed"
+    }
+    set result [file join $work result.txt]
+    file delete $result
+    set saved [array get ::env BOTLISH_NATIVE_RESULT]
+    set ::env(BOTLISH_NATIVE_RESULT) $result
+    try {
+        set printed [ExecutableOutput $executable]
+    } finally {
+        unset ::env(BOTLISH_NATIVE_RESULT)
+        if {$saved ne {}} { set ::env(BOTLISH_NATIVE_RESULT) [lindex $saved 1] }
+    }
+    if {$printed ne ""} {
+        error "the executable printed in the driver protocol: $printed"
+    }
+    set channel [open $result r]
+    fconfigure $channel -encoding utf-8
+    set lines [split [string trimright [read $channel] \n] \n]
+    close $channel
+    return [core::formatValue [native::Outcome $lines]]
+}
+
 # EXECUTABLE's standard output, its standard error empty -- or, with
 # -unwind-check 1, the unwind check's account naming at least one function.
-proc runExecutable {executable} {
+proc ExecutableOutput {executable} {
     global work unwindCheck
     set errors [file join $work stderr.txt]
     set value [string trimright [exec $executable 2> $errors] \n]

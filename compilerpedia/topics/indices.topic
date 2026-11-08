@@ -12,9 +12,8 @@ index: concepts
 Entry points to Botlish's distinctive mechanisms: values and bindings, types
 and refinements, functions and method syntax, imports and modules, declared
 errors, contexts, affine values and coroutines, static compile and the test
-framework. Each is a short page with the rules that matter and a pointer to
-the design document behind it; the complete specification is docs/README.md
-in a repository checkout.
+framework. Each is a short page with the rules that matter, why they are
+so, examples the compiler checks, and the related topics to read next.
 
 @topic index.rules
 title: Language rules and semantic guarantees

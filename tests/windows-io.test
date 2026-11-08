@@ -139,9 +139,10 @@ proc wiRun {command {environment {}}} {
 }
 
 # One run of COMMAND under the driver protocol (BOTLISH_NATIVE_RESULT: the
-# program's value goes to a file, never to its standard output, which a test
-# may have broken): {VALUE STDOUT STDERR STATUS}, VALUE the program's value as
-# Botlish shows it, or the protocol's error line.
+# program's value goes to a file -- an executable prints no value of its own
+# (PROGRAM-OUTPUT-MILESTONE-1.md), and its standard output, which a test may
+# have broken, is the program's): {VALUE STDOUT STDERR STATUS}, VALUE the
+# program's value as Botlish shows it, or the protocol's error line.
 proc wiProtocolRun {command {environment {}}} {
     set result [file join $::scratch result.[incr ::runCounter]]
     file delete -force $result
@@ -447,7 +448,7 @@ test wi-execution-programs-compile {every program the Windows execution tests be
 # ---------------------------------------------------------------------------
 # Standard output and error (Windows)
 
-test wi-hello-executable {examples/io/hello-windows.bot as a standalone executable, moved out of the source tree, the source deleted, run with nothing on PATH (no Tcl, no compiler, no source): standard output receives exactly "Hello, world!\n", then the executable's own result line (unit: printed by the runner after the program); nothing on standard error; the same under GC stress; its imports are the system's DLLs only, KERNEL32.dll among them, and no C runtime DLL} -constraints windowsIO -body {
+test wi-hello-executable {examples/io/hello-windows.bot as a standalone executable, moved out of the source tree, the source deleted, run with nothing on PATH (no Tcl, no compiler, no source): standard output receives exactly "Hello, world!\n", the program's own output, and nothing of the executable's (no value line); nothing on standard error; the same under GC stress; its imports are the system's DLLs only, KERNEL32.dll among them, and no C runtime DLL} -constraints windowsIO -body {
     set dir [file join $::scratch hello-src]
     file mkdir $dir
     writeText [file join $dir hello.bot] $::helloWindows
@@ -461,36 +462,38 @@ test wi-hello-executable {examples/io/hello-windows.bot as a standalone executab
     list $plain [expr {$stressed eq $plain}] [binaryHeader $moved] \
         [expr {"KERNEL32.DLL" in [lmap i $imports {string toupper $i}]}] \
         [lsearch -all -inline -regexp -nocase $imports {^(vcruntime|msvcp|concrt|ucrtbase|api-ms-win-crt-)}]
-} -result [list [list "Hello, world!\nunit\n" "" 0] 1 {pe x86_64 executable} 1 {}]
+} -result [list [list "Hello, world!\n" "" 0] 1 {pe x86_64 executable} 1 {}]
 
-test wi-routing-utf8 {print, print_line, write_error and write_error_line route to standard output and error as UTF-8 bytes, exactly -- é in two bytes, 𝄞 in four, the newline one LF byte, no code page applied and no CRLF translation -- into files} -constraints windowsIO -body {
-    lassign [wiRun [list [wiExecutable $::routingText]]] out err status
-    list [expr {$out eq [utf8 "out: é 𝄞\n\"ok\"\n"]}] [expr {$err eq [utf8 "err: done\n"]}] $status [string length $out] [string length $err]
-} -result {1 1 0 18 10}
+test wi-routing-utf8 {print, print_line, write_error and write_error_line route to standard output and error as UTF-8 bytes, exactly -- é in two bytes, 𝄞 in four, the newline one LF byte, no code page applied and no CRLF translation -- into files; no WriteFailed reached the program} -constraints windowsIO -body {
+    lassign [wiProtocolRun [list [wiExecutable $::routingText]]] value out err status
+    list $value [expr {$out eq [utf8 "out: é 𝄞\n"]}] [expr {$err eq [utf8 "err: done\n"]}] $status [string length $out] [string length $err]
+} -result {{"ok"} 1 1 0 13 10}
 
 test wi-text-edges {the empty String writes nothing (no WriteFile at all), a carriage return and a tab are ordinary bytes (a CR LF the program writes stays one, an LF alone is never made one), an empty line is one newline, on both streams} -constraints windowsIO -body {
     set text "import std::io\nimport std::windows::io\n\nfn edges() -> str errors std::io::WriteFailed:\n    std::io::print(\"\")\n    std::io::print(\"a\\r\\nb\\n\")\n    std::io::print_line(\"\")\n    std::io::print_line(\"line\")\n    std::io::write_error(\"\")\n    std::io::write_error_line(\"e\\t\")\n    \"ok\"\n\nwith context std::windows::io::create()\n\nedges():\n    on std::io::WriteFailed:\n        \"failed\"\n"
-    lassign [wiRun [list [wiExecutable $text]]] out err status
-    list [binary encode hex $out] [binary encode hex $err] $status
-} -result [list [binary encode hex "a\r\nb\n\nline\n\"ok\"\n"] [binary encode hex "e\t\n"] 0]
+    lassign [wiProtocolRun [list [wiExecutable $text]]] value out err status
+    list $value [binary encode hex $out] [binary encode hex $err] $status
+} -result [list {"ok"} [binary encode hex "a\r\nb\n\nline\n"] [binary encode hex "e\t\n"] 0]
 
-test wi-pipes {output through pipes: a program's standard output read by its parent through an anonymous pipe (Tcl's exec captures it so), and a 256 KiB write through a pipe whose reader takes it in pieces -- WriteFile blocks until the reader has room, so every byte arrives, in order} -constraints windowsIO -body {
-    set small [exec [wiExecutable $::statusText] 2>@1]
+test wi-pipes {output through pipes: a program's standard output read by its parent through an anonymous pipe (Tcl's exec captures it so), and a 256 KiB write through a pipe whose reader takes it in pieces -- WriteFile blocks until the reader has room, so every byte arrives, in order; neither write failed (the values, through the driver protocol)} -constraints windowsIO -body {
+    set hello [wiExecutable $::statusText]
     set exe [wiExecutable [string map {COUNT 14} $::bigText]]
-    set channel [open |[list $exe] rb]
+    set results [list [file join $::scratch pipes-small.result] [file join $::scratch pipes-big.result]]
+    set small [withEnvironment [list BOTLISH_NATIVE_RESULT [lindex $results 0]] {exec $hello 2>@1}]
+    set channel [withEnvironment [list BOTLISH_NATIVE_RESULT [lindex $results 1]] {open |[list $exe] rb}]
     set data ""
     while {![eof $channel]} {
         append data [read $channel 4096]
     }
     set ok [expr {![catch {close $channel}]}]
     set expected [string repeat 0123456789abcdef [expr {2 ** 14}]]
-    list $small [string length $data] [expr {$data eq "$expected\"ok\"\n"}] $ok
-} -result [list "Hello, world!\n\"ok\"" [expr {16 * 2 ** 14 + 5}] 1 1]
+    list $small [string length $data] [expr {$data eq $expected}] $ok [lmap result $results {ProtocolValue $result}]
+} -result [list "Hello, world!" [expr {16 * 2 ** 14}] 1 1 {{"ok"} {"ok"}}]
 
 test wi-large-write {a 1 MiB text is one portable print: one WriteFile of all of it into a file, byte for byte} -constraints windowsIO -body {
-    lassign [wiRun [list [wiExecutable [string map {COUNT 16} $::bigText]]]] out err status
-    list [string length $out] [expr {$out eq "[string repeat 0123456789abcdef [expr {2 ** 16}]]\"ok\"\n"}] $err $status
-} -result [list [expr {2 ** 20 + 5}] 1 {} 0]
+    lassign [wiProtocolRun [list [wiExecutable [string map {COUNT 16} $::bigText]]]] value out err status
+    list $value [string length $out] [expr {$out eq [string repeat 0123456789abcdef [expr {2 ** 16}]]}] $err $status
+} -result [list {"ok"} [expr {2 ** 20}] 1 {} 0]
 
 test wi-repeated-writes {two thousand consecutive print_line calls are two thousand WriteFiles, each a whole line, in order: the file holds exactly the lines} -constraints {windowsIO wiFixtures} -body {
     set text "import std::ffi::c\nimport std::io\nimport std::list\nimport std::windows::io\n\nextern c library \"botlish_writefile_inject\"\n\nextern c fn install named \"bcfw_install\"() -> std::ffi::c::Int\n\nfn lines(n: int) -> int errors std::io::WriteFailed:\n    done = loop i from 0 to n:\n        std::io::print_line(\"line\")\n    std::list::length(done)\n\nwith context std::windows::io::create()\n\ninstall()\nlines(2000):\n    on std::io::WriteFailed:\n        -1\n"

@@ -83,7 +83,7 @@
 # module's design, not the direct-module analysis's: every public function
 # that names a path requires WindowsFS, and no public function takes a raw
 # handle. (A module that declares kernel32's CreateFileW itself has the
-# authority any C declaration has: the report, "Contexts".)
+# authority any C declaration has; WINDOWS-X86-64-MILESTONE-7.md, "Contexts".)
 #
 # A File is an opened file: an opaque struct of its HANDLE, a C pointer, and
 # so AFFINE -- one owner, moved by use, never copied (USE-AFTER-MOVE),

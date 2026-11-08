@@ -44,6 +44,17 @@ proc ::single::MayLink {argv} {
     return 1
 >>>>
 
+@@ run-command-not-linking run's native default is not taken for a run that may link: a program run as a command that calls C finds no runtime archive
+## single/main.tcl
+<<<<
+    if {$run} {
+        set backend cranelift
+    }
+====
+    if {$run} {
+    }
+>>>>
+
 @@ backend-run-not-linking a native backend's run is not taken for one that may link: a program that calls C finds no runtime archive
 ## single/main.tcl
 <<<<

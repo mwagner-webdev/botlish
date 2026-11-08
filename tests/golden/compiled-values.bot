@@ -296,8 +296,9 @@ fn register_instance_result_tests():
             fn first(xs) errors IndexNotFound:
                 std::list::at(xs, 0)
             fn writer(x, v) errors IndexNotFound:
-                std::mutable_array::set(x, 0, v)
-                x
+                y = x
+                std::mutable_array::set(y, 0, v)
+                y
             m = std::mutable_array::create(2, "x")
             n = identity(m)
             w = writer(n, "y"):
@@ -348,12 +349,13 @@ fn register_invalid_instance_tests():
     fn b_smash() errors std::compiler::CompilerError:
         static compile:
             fn smash(x):
-                std::mutable_array::set(x, 0, 123)
+                y = x
+                std::mutable_array::set(y, 0, 123)
             m = std::mutable_array::create(2, "x")
             smash(m)
     std::test::rejects_containing("si-bad-1/names-the-instance-call", std::compiler::DiagnosticCode::Type, "call to smash with x : MutableArray[str] is invalid: value of type int is not admissible to element type str", b_smash)
-    std::test::rejects_containing("si-bad-1/names-the-body-location", std::compiler::DiagnosticCode::Type, "(in the body of smash, at 351:", b_smash)
-    std::test::rejects_at("si-bad-6/at-the-call", std::compiler::DiagnosticCode::Type, 353, 13, b_smash)
+    std::test::rejects_containing("si-bad-1/names-the-body-location", std::compiler::DiagnosticCode::Type, "(in the body of smash, at 353:", b_smash)
+    std::test::rejects_at("si-bad-6/at-the-call", std::compiler::DiagnosticCode::Type, 355, 13, b_smash)
     rejects_without("si-bad-6/no-synthetic-names", std::compiler::DiagnosticCode::Type, ["$", "Instance"], b_smash)
 
     # si-bad-2: the same function with a raw array, or a writer given a
@@ -362,8 +364,9 @@ fn register_invalid_instance_tests():
     fn b_smash_raw() errors std::compiler::CompilerError:
         static compile:
             fn smash(x):
-                if std::mutable_array::capacity(x) > 0:
-                    std::mutable_array::set(x, 0, 123)
+                y = x
+                if std::mutable_array::capacity(y) > 0:
+                    std::mutable_array::set(y, 0, 123)
             fn need_unit(u: unit) -> unit:
                 u
             need_unit(smash(std::mutable_array::allocate(1)))
@@ -372,8 +375,9 @@ fn register_invalid_instance_tests():
     fn b_writer_fitting() errors std::compiler::CompilerError:
         static compile:
             fn writer(x, v):
-                if std::mutable_array::capacity(x) > 0:
-                    std::mutable_array::set(x, 0, v)
+                y = x
+                if std::mutable_array::capacity(y) > 0:
+                    std::mutable_array::set(y, 0, v)
             fn need_unit(u: unit) -> unit:
                 u
             need_unit(writer(std::mutable_array::create(1, "x"), "ok"))
@@ -395,7 +399,7 @@ fn register_invalid_instance_tests():
             fn f(x):
                 x + 1
             f("a")
-    std::test::rejects_at("si-bad-3/str-call", std::compiler::DiagnosticCode::Type, 397, 15, b_f_str)
+    std::test::rejects_at("si-bad-3/str-call", std::compiler::DiagnosticCode::Type, 401, 15, b_f_str)
 
     fn b_f_both() errors std::compiler::CompilerError:
         static compile:
@@ -403,7 +407,7 @@ fn register_invalid_instance_tests():
                 x + 1
             f(1)
             f("a")
-    std::test::rejects_at("si-bad-3/str-call-after-int-call", std::compiler::DiagnosticCode::Type, 405, 15, b_f_both)
+    std::test::rejects_at("si-bad-3/str-call-after-int-call", std::compiler::DiagnosticCode::Type, 409, 15, b_f_both)
 
     # si-bad-4: a valid instance does not make every call valid: writer
     # with the wrong value is rejected, naming the call's types; each call
@@ -411,16 +415,18 @@ fn register_invalid_instance_tests():
     fn b_writer_wrong() errors std::compiler::CompilerError:
         static compile:
             fn writer(x, v):
-                if std::mutable_array::capacity(x) > 0:
-                    std::mutable_array::set(x, 0, v)
+                y = x
+                if std::mutable_array::capacity(y) > 0:
+                    std::mutable_array::set(y, 0, v)
             writer(std::mutable_array::create(1, "x"), 5)
     std::test::rejects_containing("si-bad-4/wrong-value", std::compiler::DiagnosticCode::Type, "call to writer with x : MutableArray[str], v : int is invalid", b_writer_wrong)
 
     fn b_writer_two_instances() errors std::compiler::CompilerError:
         static compile:
             fn writer(x, v):
-                if std::mutable_array::capacity(x) > 0:
-                    std::mutable_array::set(x, 0, v)
+                y = x
+                if std::mutable_array::capacity(y) > 0:
+                    std::mutable_array::set(y, 0, v)
             fn need_unit(u: unit) -> unit:
                 u
             writer(std::mutable_array::create(1, "x"), "ok")
@@ -432,7 +438,8 @@ fn register_invalid_instance_tests():
     fn b_chain() errors std::compiler::CompilerError:
         static compile:
             fn a(x):
-                std::mutable_array::set(x, 0, 1)
+                y = x
+                std::mutable_array::set(y, 0, 1)
             fn b(x):
                 a(x)
             b(std::mutable_array::create(1, "x"))
@@ -445,14 +452,14 @@ fn register_invalid_instance_tests():
             fn f(x: int) -> str:
                 x
             f(5)
-    std::test::rejects_at("si-bad-7/called", std::compiler::DiagnosticCode::Type, 445, 17, b_invalid_called)
+    std::test::rejects_at("si-bad-7/called", std::compiler::DiagnosticCode::Type, 452, 17, b_invalid_called)
 
     fn b_invalid_uncalled() errors std::compiler::CompilerError:
         static compile:
             fn f(x: int) -> str:
                 x
             unit
-    std::test::rejects_at("si-bad-7/uncalled", std::compiler::DiagnosticCode::Type, 452, 17, b_invalid_uncalled)
+    std::test::rejects_at("si-bad-7/uncalled", std::compiler::DiagnosticCode::Type, 459, 17, b_invalid_uncalled)
 
     # si-decl-2: a declared parameter is never narrowed away: a call that
     # does not prove it is rejected.
@@ -615,8 +622,9 @@ fn register_bearing_tests():
     fn b_kind_test() errors std::compiler::CompilerError:
         static compile:
             fn f(x):
-                if mutarray?(x):
-                    std::mutable_array::set(x, 0, 123)
+                y = x
+                if mutarray?(y):
+                    std::mutable_array::set(y, 0, 123)
                 else:
                     unit
             m = std::mutable_array::from_list(["a"])
@@ -732,7 +740,7 @@ fn register_definition_order_tests():
                 else:
                     ping(xs, n - 1)
             ping(["a"], 3)
-    std::test::rejects_at("si-rec-2c", std::compiler::DiagnosticCode::Unbound, 728, 21, b_ping_pong)
+    std::test::rejects_at("si-rec-2c", std::compiler::DiagnosticCode::Unbound, 736, 21, b_ping_pong)
 
     fn b_even_odd_forward() errors std::compiler::CompilerError:
         static compile:
@@ -745,7 +753,7 @@ fn register_definition_order_tests():
                     return false
                 even(n - 1)
             even(10)
-    std::test::rejects_at("hir-specialize-9b", std::compiler::DiagnosticCode::Unbound, 742, 17, b_even_odd_forward)
+    std::test::rejects_at("hir-specialize-9b", std::compiler::DiagnosticCode::Unbound, 750, 17, b_even_odd_forward)
 
     # opt-env-5: examples/surface/09-mutual-recursion.bot.
     fn b_mutual_recursion_example() errors std::compiler::CompilerError:
@@ -759,7 +767,7 @@ fn register_definition_order_tests():
                     return false
                 is_even(n - 1)
             [is_even(10), is_even(7)]
-    std::test::rejects_at("opt-env-5", std::compiler::DiagnosticCode::Unbound, 756, 17, b_mutual_recursion_example)
+    std::test::rejects_at("opt-env-5", std::compiler::DiagnosticCode::Unbound, 764, 17, b_mutual_recursion_example)
 
     # opt-env-5b: a forward call before the later function is bound is
     # rejected at the reference, not at run time.
@@ -771,7 +779,7 @@ fn register_definition_order_tests():
             fn late():
                 1
             x
-    std::test::rejects_at("opt-env-5b", std::compiler::DiagnosticCode::Unbound, 769, 17, b_forward_call)
+    std::test::rejects_at("opt-env-5b", std::compiler::DiagnosticCode::Unbound, 777, 17, b_forward_call)
 
     # si-dyn-3 (rejected half): a call before the definition.
     fn b_caller_first() errors std::compiler::CompilerError:
@@ -781,7 +789,7 @@ fn register_definition_order_tests():
             fn b(y):
                 y
             a("s")
-    std::test::rejects_at("si-dyn-3/caller-first", std::compiler::DiagnosticCode::Unbound, 780, 17, b_caller_first)
+    std::test::rejects_at("si-dyn-3/caller-first", std::compiler::DiagnosticCode::Unbound, 788, 17, b_caller_first)
 
     # si-det-1 (the illegal order): a caller declared before its callees.
     fn b_both_first() errors std::compiler::CompilerError:
@@ -799,7 +807,7 @@ fn register_definition_order_tests():
                 on IndexNotFound:
                     0
             identity(std::mutable_array::create(1, "x"))
-    std::test::rejects_at("si-det-1/caller-before-callees", std::compiler::DiagnosticCode::Unbound, 790, 17, b_both_first)
+    std::test::rejects_at("si-det-1/caller-before-callees", std::compiler::DiagnosticCode::Unbound, 798, 17, b_both_first)
 
 # ---------------------------------------------------------------------------
 # value-transport.test (the programs every backend lowers; the rest are in

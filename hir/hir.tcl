@@ -1074,6 +1074,7 @@ proc hir::CheckOnce {hirVar demote {roundsVar ""}} {
     hir::semantic::verify hir
     hir::exports::verify hir
     hir::callbacks::verify hir
+    hir::threads::verify hir
     # {FROM TO}: the diagnostics at indices FROM to TO - 1 were reported
     # before the completion walk -- by resolution and the checks above --
     # and so are no contract-boundary report (hir::completions::Subsume),
@@ -1442,7 +1443,7 @@ proc hir::exprsAt {hir origin} {
 }
 
 apply {{dir} {
-    foreach file {syntax static staticdeps imports resolve flags variadic contexts injection direct privacy coroutines affine resources mutvec iteration relations transfer refcheck hygiene sourcetypes structs enums layouts cabi imprint traits syscall internal borrow foreign errordecls refinements types operators decimal listlength exactvalue signatures modulebinding refine repeatable lower condition format read aot specialize range intset emitdfa emission rangerec callables containers semantic exports callbacks completions errorsets induction transport escape blockescape stringregion traversal construction cardinality lockstep fold resourceescape warnings recovery methods declarations interchange} {
+    foreach file {summaries ownership syntax static staticdeps imports resolve flags variadic contexts injection direct privacy coroutines affine resources mutvec iteration relations transfer refcheck hygiene sourcetypes structs enums layouts cabi imprint traits syscall internal borrow foreign errordecls refinements types operators decimal listlength exactvalue signatures modulebinding refine repeatable lower condition format read aot specialize range intset emitdfa emission rangerec callables containers semantic exports callbacks threads completions errorsets induction transport escape blockescape stringregion traversal construction cardinality lockstep fold resourceescape warnings recovery methods declarations interchange} {
         uplevel #0 [list source [file join $dir $file.tcl]]
     }
 }} $hir::home

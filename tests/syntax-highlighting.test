@@ -1,0 +1,445 @@
+# syntax-highlighting.test -- the token IR, the contextual words the parser
+# records, the command line's excerpts and color, the compiler service's
+# highlight tokens and the editor grammars (SYNTAX-HIGHLIGHTING-MILESTONE-
+# 1.md). The language server's semantic tokens are tests/lsp.test's; Neovim's
+# highlighting tests/lsp-neovim.test's.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot service service.tcl]
+source [file join $::projectRoot lsp json.tcl]
+
+proc shRead {path} {
+    set channel [open $path]
+    fconfigure $channel -encoding utf-8
+    set text [read $channel]
+    close $channel
+    return $text
+}
+
+proc shWrite {path text} {
+    set channel [open $path w]
+    fconfigure $channel -encoding utf-8 -translation lf
+    puts -nonewline $channel $text
+    close $channel
+}
+
+set ::shFixture [file join $::projectRoot editors vscode test fixtures sample.bot]
+
+# The text of each token at the IR's word indices.
+proc shWords {ir} {
+    return [lmap index [dict get $ir words] {lindex [dict get $ir tokens] $index 3}]
+}
+
+# Every literal word parser.tcl compares an identifier's text or value with
+# (and the words of its modifier lists).
+proc shComparedWords {} {
+    set source [shRead [file join $::projectRoot surface parser.tcl]]
+    set words {}
+    foreach {- word} [regexp -all -inline {(?:text|value)\] (?:eq|ne) "([a-z_]+)"} $source] {
+        lappend words $word
+    }
+    foreach {- list} [regexp -all -inline {(?:text|value)\] (?:in|ni) \{([a-z_ ]+)\}} $source] {
+        lappend words {*}$list
+    }
+    foreach {- word} [regexp -all -inline {IsWord p -?\d+ ([a-z_]+)} $source] {
+        lappend words $word
+    }
+    foreach name {structModifiers functionModifiers typeModifiers staticOperations dfaReserved} {
+        lappend words {*}[set ::surface::parser::$name]
+    }
+    return [lsort -unique $words]
+}
+
+# ---------------------------------------------------------------------------
+# Contextual words
+
+test sh-words-registered {every word the parser compares an identifier with, and every word of its modifier lists, is a registered contextual word (surface::parser::words) or one it reads only to refuse a construct (refusedWords); no word is both} -body {
+    list [lmap word [shComparedWords] {
+        if {$word in $::surface::parser::words || $word in $::surface::parser::refusedWords} continue
+        set word
+    }] [lmap word $::surface::parser::refusedWords {
+        if {$word ni $::surface::parser::words} continue
+        set word
+    }]
+} -cleanup {unset -nocomplain word} -result {{} {}}
+
+test sh-words-recorded {the grammars' fixture parses without a diagnostic and its parse records every registered contextual word, each where it is read as one; a name of a word's spelling (at, size, to) is no word} -body {
+    set text [shRead $::shFixture]
+    set ast [surface::parse $text sample.bot -recover 1]
+    set ir [surface::syntaxTokens $text sample.bot]
+    set names {}
+    foreach token [dict get $ir tokens] {
+        lassign $token kind start end value
+        if {$kind eq "IDENT" && $value in {at size to}} {
+            lappend names $start
+        }
+    }
+    set wordStarts [lmap index [dict get $ir words] {lindex [dict get $ir tokens] $index 1}]
+    list [dict get $ast diagnostics] [lsort -unique [shWords $ir]] \
+        [lmap start [lrange $names end-3 end] {expr {$start in $wordStarts}}]
+} -cleanup {unset -nocomplain text ast ir names token kind start end value wordStarts} \
+    -result [list {} [lsort -unique $::surface::parser::words] {0 0 0 0}]
+
+test sh-words-not-in-ast {the words a parse records are no part of the AST surface::parse returns: they reach only the token IR} -body {
+    set text "fold x in \[1\] with intermediate acc 0:\n    acc + x\n"
+    list [dict exists [surface::parse $text t.bot] words] [shWords [surface::syntaxTokens $text t.bot]]
+} -cleanup {unset -nocomplain text} -result {0 {fold in with intermediate}}
+
+test sh-words-in-malformed-construct {a word read before a construct's syntax error is recorded, as read: recovery skips the construct, not the words it read} -body {
+    set ir [surface::syntaxTokens "inject context:\n    1\nx = 2\n" t.bot]
+    shWords $ir
+} -cleanup {unset -nocomplain ir} -result {inject context}
+
+test sh-word-unregistered-refused {an identifier read as a word must be registered: Word refuses another (the parser's own mistake, never a diagnostic)} -body {
+    set p [dict create tokens [surface::lex "frobnicate" t.bot] pos 0 last {} recover 0 diagnostics {} topLevel 1]
+    list [catch {surface::parser::Word p} message] $message
+} -cleanup {unset -nocomplain p message} -result {1 {surface::parser::Word: name "frobnicate" is no contextual word (surface::parser::words)}}
+
+# ---------------------------------------------------------------------------
+# The lexer's comments and recovery metadata
+
+test sh-lexer-comments {the lexer reports every comment, a comment-only line's and one after code, never a "#" in a string; to the end of its line, the newline excluded} -body {
+    set text "# head\nx = \"a # b\"  # tail\n    # indented\ny = 1 #\n"
+    set comments [dict get [surface::lexer::tokenize $text t.bot] comments]
+    lmap comment $comments {string range $text [lindex $comment 0] [expr {[lindex $comment 1] - 1}]}
+} -cleanup {unset -nocomplain text comments comment} -result {{# head} {# tail} {# indented} #}
+
+test sh-lexer-indentation-kept {a layout diagnostic before a bracket never closed keeps its role (`indentation`): the bracket's recovery no longer overwrites the list with the next line's indentation} -body {
+    set text "if true:\n\tx = 1\ny = f(1,\nz = 2\n"
+    set lexed [surface::lexer::tokenize $text t.bot]
+    list [dict get $lexed indentation] [lmap d [dict get $lexed diagnostics] {dict get $d message}]
+} -cleanup {unset -nocomplain text lexed} -result {0 {{tab used for indentation} {"(" is never closed}}}
+
+# ---------------------------------------------------------------------------
+# The token IR
+
+test sh-ir-roundtrip {the token IR holds everything the parser reads of a lexer's result: toLexed rebuilds it exactly, and the IR validates, for the grammars' fixture, every standard-library module and texts with lexical errors} -body {
+    set texts [list [shRead $::shFixture] "x = \"open\ny = (1,\n\tz = 2\nw = 0x1F + 007 + 1.5e + 'ab'\nf(]\n"]
+    foreach path [lsort [glob -directory [file join $::projectRoot stdlib] -types f *.bot]] {
+        lappend texts [surface::source::normalize [shRead $path]]
+    }
+    set problems {}
+    foreach text $texts {
+        set lexed [surface::lexer::tokenize $text f.bot]
+        set ir [surface::syntaxTokens $text f.bot]
+        if {[catch {surface::tokens::validate $ir $text} message]} {
+            lappend problems $message
+        } elseif {[surface::tokens::toLexed $ir $text f.bot] ne $lexed} {
+            lappend problems "the round trip differs for [string range $text 0 40]"
+        }
+    }
+    list [expr {[llength $texts] > 10}] $problems
+} -cleanup {unset -nocomplain texts path problems text lexed ir message} -result {1 {}}
+
+test sh-ir-format {the token IR, version 1: the text's length, {KIND START END VALUE} tokens ending in EOF, comments, diagnostics with their recovery roles, the inserted closers and the words} -body {
+    set text "x = (1  # c\n"
+    set ir [surface::syntaxTokens $text t.bot]
+    list [dict get $ir version] [dict get $ir length] [dict get $ir tokens] [dict get $ir comments] \
+        [dict get $ir diagnostics] [dict get $ir synthetic] [dict get $ir words]
+} -cleanup {unset -nocomplain text ir} -result {1 12 {{IDENT 0 1 x} {= 2 3 {}} {( 4 5 {}} {INT 5 6 1} {) 12 12 {}} {NEWLINE 12 12 {}} {EOF 12 12 {}}} {{8 11}} {{4 5 {"(" is never closed} {structural unclosed}}} 12 {}}
+
+test sh-ir-validate-refuses {validate refuses a malformed IR, each at its first problem: a wrong length, a token out of order, a kind of no version, a keyword not its text, a token past the text, no EOF last, a comment not a "#" to its line's end, an unknown role, a word that is no contextual word} -body {
+    set text "fn f(x):\n    x  # c\n"
+    set ir [surface::syntaxTokens $text t.bot]
+    set tokens [dict get $ir tokens]
+    set cases [list \
+        [dict replace $ir length 3] \
+        [dict replace $ir tokens [lreplace $tokens 1 2 [lindex $tokens 2] [lindex $tokens 1]]] \
+        [dict replace $ir tokens [lreplace $tokens 0 0 {WORD 0 2 {}}]] \
+        [dict replace $ir tokens [lreplace $tokens 0 0 {if 0 2 if}]] \
+        [dict replace $ir tokens [lreplace $tokens end end {EOF 40 40 {}}]] \
+        [dict replace $ir tokens [lrange $tokens 0 end-1]] \
+        [dict replace $ir comments {{14 17}}] \
+        [dict replace $ir diagnostics {{0 1 oops {sideways}}}] \
+        [dict replace $ir words {1}]]
+    lmap case $cases {
+        catch {surface::tokens::validate $case $text} message options
+        list [dict get $options -errorcode] [regsub {^token IR: } [lindex [split $message ","] 0] {}]
+    }
+} -cleanup {unset -nocomplain text ir tokens cases case message options} -result {{{SURFACE TOKEN-IR} {length 3 for a text of 20}} {{SURFACE TOKEN-IR} {token 2 (IDENT) at [3}} {{SURFACE TOKEN-IR} {token 0 has no kind of version 1: "WORD"}} {{SURFACE TOKEN-IR} {token 0 (if "if") does not match its text "fn" at [0}} {{SURFACE TOKEN-IR} {token 11 (EOF) at [40}} {{SURFACE TOKEN-IR} {the last token is not EOF}} {{SURFACE TOKEN-IR} {comment [14}} {{SURFACE TOKEN-IR} {diagnostic "oops" has an unknown role "sideways"}} {{SURFACE TOKEN-IR} {word 1 ("f") is no identifier the parser reads as a contextual word}}}
+
+test sh-classes {the highlight classes of a text: keywords, contextual words, constants, numbers, strings, characters, comments, operators and names, in order, layout and inserted closers left out} -body {
+    set text "with context S {n: 1}\nfn f?(x) -> bool:\n    \"s\" == 'c'  # done\ntrue and 2.5\n"
+    lmap item [surface::tokens::classes [surface::syntaxTokens $text t.bot]] {
+        lassign $item start end class
+        list [string range $text $start [expr {$end - 1}]] $class
+    }
+} -cleanup {unset -nocomplain text item start end class} -result {{with word} {context word} {S identifier} {\{ operator} {n identifier} {: operator} {1 number} {\} operator} {fn keyword} {f? identifier} {( operator} {x identifier} {) operator} {-> operator} {bool identifier} {: operator} {{"s"} string} {== operator} {'c' char} {{# done} comment} {true constant} {and keyword} {2.5 number}}
+
+# ---------------------------------------------------------------------------
+# The compiler service's highlight tokens
+
+proc shTokens {text} {
+    set dir [file tempdir sh-tokens]
+    set path [file join $dir t.bot]
+    shWrite $path $text
+    set ws [service::workspace -warnings off -cache ""]
+    try {
+        set rev [service::analyze $ws $path]
+        set source [service::sourceText $rev $path]
+        return [lmap token [service::tokens $rev $path] {
+            lassign $token start end type modifiers
+            if {$type in {operator}} continue
+            list [string range $source $start [expr {$end - 1}]] $type {*}$modifiers
+        }]
+    } finally {
+        service::closeWorkspace $ws
+        file delete -force $dir
+    }
+}
+
+test sh-service-tokens {service::tokens: each token's type, from the token IR's class, the AST's declarations and annotations and the HIR's resolution -- a function, a parameter, a loop variable, a struct, a field, an enum and its cases, a type, a namespace, a standard-library function -- with the declaration modifier where a name is declared} -body {
+    shTokens "import std::list\n\nstruct P:\n    x: int\n\nenum Color:\n    Red, Green\n\nfn add(a: int) -> int:\n    a + 1\n\nloop i in \[1\]:\n    add(i)\np = P {x: 1}\nc = Color::Red\nstd::list::length(\[p.x\])\n"
+} -result {{import keyword} {std namespace} {list namespace} {struct keyword} {P struct declaration} {x property declaration} {int type} {enum keyword} {Color enum declaration} {Red enumMember declaration} {Green enumMember declaration} {fn keyword} {add function declaration} {a parameter declaration} {int type} {int type} {a parameter} {1 number} {loop keyword} {i variable declaration} {in keyword} {1 number} {add function} {i variable} {p variable declaration} {P type} {x property} {1 number} {c variable declaration} {Color enum} {Red enumMember} {std namespace} {list namespace} {length function defaultLibrary} {p variable} {x property}}
+
+test sh-service-tokens-syntax-error {a program with a syntax error has tokens all the same: every lexical class, and the names its partial analysis resolved -- none in the malformed statement, whose names may depend on what it would have said (SYNTAX-RECOVERY-MILESTONE-1.md)} -body {
+    shTokens "fn f(a: int) -> int:\n    a +\nf(1)  # c\n"
+} -result {{fn keyword} {f function declaration} {a parameter declaration} {int type} {int type} {f function} {1 number} {{# c} comment}}
+
+test sh-service-tokens-exported {a revision's highlight tokens are one of its query indexes: prepare builds them, export carries them and import accepts them, so a revision analyzed elsewhere (the language server's worker) answers at once} -body {
+    set dir [file tempdir sh-export]
+    set path [file join $dir t.bot]
+    shWrite $path "x = 1\n"
+    set ws [service::workspace -warnings off -cache ""]
+    set rev [service::analyze $ws $path]
+    service::prepare $rev -paths [list $path] -compilerpedia 0
+    set copy [service::import $ws [service::export $rev -derived 1]]
+    list [service::tokens $copy $path] [expr {[service::tokens $copy $path] eq [service::tokens $rev $path]}]
+} -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain dir path ws rev copy} \
+    -result {{{0 1 variable declaration} {2 3 operator {}} {4 5 number {}}} 1}
+
+# ---------------------------------------------------------------------------
+# The command line's excerpts and color
+
+# Runs main.tcl with ARGS in DIR; {status out err}.
+proc shMain {dir args} {
+    set errFile [file join $dir stderr.txt]
+    set status 0
+    set here [pwd]
+    cd $dir
+    try {
+        if {[catch {exec [info nameofexecutable] [file join $::projectRoot main.tcl] {*}$args 2> $errFile} out options]} {
+            set status [lindex [dict get $options -errorcode] 2]
+            regsub {\n?child process exited abnormally$} $out {} out
+        }
+    } finally {
+        cd $here
+    }
+    set err [shRead $errFile]
+    file delete $errFile
+    return [list $status $out [string trimright $err]]
+}
+
+proc shProgram {name text} {
+    set dir [file join [temporaryDirectory] sh-cli-[pid]]
+    file mkdir $dir
+    shWrite [file join $dir $name] $text
+    return $dir
+}
+
+set ::shBroken "# adds\nfn add(a: int, b: int) -> int:\n    a + bb   # oops\n\nadd(1, 2)\n"
+# How main.tcl names itself in its messages (its cliInvocation): the
+# interpreter's name as typed, so without Windows' .exe.
+set ::shInvocation [file tail [info nameofexecutable]]
+if {$::tcl_platform(platform) eq "windows" && [string equal -nocase [file extension $::shInvocation] .exe]} {
+    set ::shInvocation [file rootname $::shInvocation]
+}
+set ::shInvocation "$::shInvocation main.tcl"
+set ::shHelp "$::shInvocation -help error.unbound"
+
+test sh-cli-plain-unchanged {in a pipe a rejected program's output is the plain format, byte for byte as before excerpts and color existed: -color auto and -excerpts auto are off where no terminal is} -setup {
+    set dir [shProgram b.bot $::shBroken]
+} -body {
+    shMain $dir b.bot
+} -cleanup {file delete -force $dir; unset -nocomplain dir} -result [list 1 "== b.bot (interp)\n   error: b.bot:3:9: unbound name \"bb\" (CORE SEMANTIC UNBOUND)\n   help: $::shHelp" {}]
+
+test sh-cli-excerpt {-excerpts always: the error line, then its source line under a gutter, underlined where it is, then the help line} -setup {
+    set dir [shProgram b.bot $::shBroken]
+} -body {
+    shMain $dir -excerpts always b.bot
+} -cleanup {file delete -force $dir; unset -nocomplain dir} -result [list 1 "== b.bot (interp)\n   error: b.bot:3:9: unbound name \"bb\" (CORE SEMANTIC UNBOUND)\n     |\n   3 |     a + bb   # oops\n     |         ^^\n   help: $::shHelp" {}]
+
+test sh-cli-color {-color always -excerpts always: the label, location and code styled, the source line highlighted with the token IR's classes (keyword, number, comment...), the underline in the error's style} -setup {
+    set dir [shProgram b.bot "fn f(a: int) -> int:\n    return a + \"s\"   # mix\nf(1)\n"]
+} -body {
+    lindex [shMain $dir -color always -excerpts always b.bot] 1
+} -cleanup {file delete -force $dir; unset -nocomplain dir} -result "== b.bot (interp)\n   \x1b\[1;31merror:\x1b\[0m \x1b\[1mb.bot:2:16: \x1b\[0margument 2 of native + requires int, but this operand has type str: the call could only fail when it runs \x1b\[2m(CORE SEMANTIC TYPE)\x1b\[0m\n     \x1b\[34m|\x1b\[0m\n   2 \x1b\[34m|\x1b\[0m     \x1b\[35mreturn\x1b\[0m a + \x1b\[32m\"s\"\x1b\[0m   \x1b\[90m# mix\x1b\[0m\n     \x1b\[34m|\x1b\[0m \x1b\[1;31m               ^^^\x1b\[0m\n   \x1b\[1;32mhelp:\x1b\[0m $::shInvocation -help error.type"
+
+test sh-cli-syntax-excerpt {a syntax error's excerpt: an error at the end of a line underlines just past it} -setup {
+    set dir [shProgram s.bot "fn f(a: int) -> int:\n    a +\n"]
+} -body {
+    lindex [shMain $dir -excerpts always s.bot] 1
+} -cleanup {file delete -force $dir; unset -nocomplain dir} -result "== s.bot (interp)\n   error: s.bot:2:8: expected an expression, found end of line (SURFACE SYNTAX)\n     |\n   2 |     a +\n     |        ^\n   help: $::shInvocation -help error.surface-syntax"
+
+test sh-cli-excerpt-widths {an excerpt shows a tab as four spaces and counts a wide character as two columns, so the underline stays under the span} -setup {
+    set dir [shProgram w.bot "x = \"\t\u4e16\u754c\" + zz\n"]
+} -body {
+    lrange [split [lindex [shMain $dir -excerpts always w.bot] 1] \n] 2 4
+} -cleanup {file delete -force $dir; unset -nocomplain dir} -result [list "     |" "   1 | x = \"    \u4e16\u754c\" + zz" "     |                  ^^"]
+
+test sh-cli-check-excerpt {-check shows the excerpt of the text the analysis read, each error's, and its warnings' after their first line} -setup {
+    set dir [shProgram c.bot "fn f(x: int) -> int:\n    if x > 0:\n        return 1\n    1\nf(2) + nope\n"]
+} -body {
+    shMain $dir -check -excerpts always -warnings default c.bot
+} -cleanup {file delete -force $dir; unset -nocomplain dir} -result [list 1 "== c.bot (check)\n   error: c.bot:5:8: unbound name \"nope\" (CORE SEMANTIC UNBOUND)\n     |\n   5 | f(2) + nope\n     |        ^^^^\n   help: $::shHelp" {}]
+
+test sh-cli-usage {-color and -excerpts take auto, always or never; -lsp takes neither} -setup {
+    set dir [shProgram b.bot $::shBroken]
+} -body {
+    list [lrange [shMain $dir -color sometimes b.bot] 0 0] [lindex [split [lindex [shMain $dir -color sometimes b.bot] 2] \n] 0] \
+        [lindex [shMain $dir -lsp -color always] 0]
+} -cleanup {file delete -force $dir; unset -nocomplain dir} \
+    -result [list 2 "$::shInvocation: unknown -color mode \"sometimes\" (known: auto always never)" 2]
+
+testConstraint scriptCommand [expr {$::tcl_platform(os) eq "Linux" && [auto_execok script] ne ""}]
+
+test sh-cli-auto-terminal {on a terminal -color auto and -excerpts auto are on, and NO_COLOR turns color off and keeps the excerpt} -constraints scriptCommand -setup {
+    set dir [shProgram b.bot $::shBroken]
+} -body {
+    set command "[info nameofexecutable] [file join $::projectRoot main.tcl] b.bot"
+    set here [pwd]
+    cd $dir
+    try {
+        set colored [catch {exec script -qec $command /dev/null} on]
+        set plain [withEnvironment {NO_COLOR 1} {catch {exec script -qec $command /dev/null} off}]
+    } finally {
+        cd $here
+    }
+    list [string match "*\x1b\\\[1;31merror:*" $on] [string match "*3 *|*a + bb*" $on] \
+        [string match "*\x1b*" $off] [string match "*3 | *a + bb*" $off]
+} -cleanup {file delete -force $dir; unset -nocomplain dir command here colored plain on off} -result {1 1 0 1}
+
+# ---------------------------------------------------------------------------
+# The editor grammars
+
+test sh-grammars-current {the committed editor grammars and the fixture's classes are what tools/editor-grammars.tcl generates from the compiler's word lists} -body {
+    exec [info nameofexecutable] [file join $::projectRoot tools editor-grammars.tcl] check
+} -result {}
+
+test sh-grammars-refuse-drift {the generator refuses a contextual word no pattern highlights, a pattern naming no word of the parser, and a lexer keyword no group places} -setup {
+    namespace eval ::grammars {}
+    set ::argv0 sh
+    source [file join $::projectRoot tools editor-grammars.tcl]
+    set words $::surface::parser::words
+    set keywords $::surface::lexer::keywords
+} -body {
+    lappend ::surface::parser::words zzword
+    set unhighlighted [catch {grammars::Contextual} m1]
+    set ::surface::parser::words [lsearch -all -inline -not $words accept]
+    set unknown [catch {grammars::Contextual} m2]
+    set ::surface::parser::words $words
+    lappend ::surface::lexer::keywords zzkeyword
+    set unplaced [catch {grammars::Keywords} m3]
+    list $unhighlighted $m1 $unknown $m2 $unplaced [string range $m3 0 53]
+} -cleanup {
+    set ::surface::parser::words $words
+    set ::surface::lexer::keywords $keywords
+    unset -nocomplain words keywords unhighlighted unknown unplaced m1 m2 m3
+} -result {1 {no pattern highlights the parser's contextual words zzword: add one (tools/editor-grammars.tcl)} 1 {a pattern names "accept", no contextual word of the parser (surface::parser::words)} 1 {the keyword groups are not the lexer's keywords: place}}
+
+# The fixture's classes (sample.classes.json): {LINE CHARACTER LENGTH CLASS}
+# each, the operators left out.
+proc shFixtureClasses {} {
+    set classes {}
+    set path [file join $::projectRoot editors vscode test fixtures sample.classes.json]
+    foreach line [split [string trim [shRead $path]] \n] {
+        set item [lmap v [lsp::json::elements [lsp::json::parse $line]] {lindex $v 1}]
+        if {[lindex $item 3] ne "operator"} {
+            lappend classes $item
+        }
+    }
+    return $classes
+}
+
+# The Vim syntax item at each {LINE CHARACTER} of POSITIONS in PATH, with the
+# generated syntax (editors/neovim/syntax/botlish.vim) in force.
+proc shVimGroups {path positions} {
+    set dir [file tempdir sh-vim]
+    try {
+        set script [open [file join $dir check.vim] w]
+        puts $script "set rtp^=[file join $::projectRoot editors neovim]\nsyntax on\nedit [file normalize $path]\nset ft=botlish\nredir! > [file join $dir out.txt]"
+        foreach p $positions {
+            puts $script "silent echo synIDattr(synID([expr {[lindex $p 0] + 1}], [expr {[lindex $p 1] + 1}], 1), 'name')"
+        }
+        puts $script "redir END\nqa!"
+        close $script
+        exec vim -Nu NONE -i NONE -es -S [file join $dir check.vim] << ""
+        return [lrange [split [string trim [shRead [file join $dir out.txt]]] \n] 0 end]
+    } finally {
+        file delete -force $dir
+    }
+}
+
+# The mismatches of Vim's GROUPS with CLASSES (tests/lsp-neovim.test's rule):
+# a declared name (grammars::Declared) is a function's or a type's, and no
+# other name is a keyword, a constant or a declared name.
+proc shSyntaxMismatches {classes groups} {
+    set want {keyword {botlishControl botlishDeclaration botlishOperatorWord} word botlishContextual
+        constant botlishConstant number botlishNumber string botlishString char botlishChar comment botlishComment
+        declared {botlishFunction botlishType}}
+    set mismatches {}
+    foreach item $classes group $groups {
+        lassign $item line column length class
+        if {$class eq "identifier"} {
+            set ok [expr {$group ni {botlishControl botlishDeclaration botlishOperatorWord botlishContextual botlishConstant
+                botlishFunction botlishType}}]
+        } else {
+            set ok [expr {$group in [dict get $want $class]}]
+        }
+        if {!$ok} {
+            lappend mismatches "[expr {$line + 1}]:[expr {$column + 1}] $class $group"
+        }
+    }
+    return $mismatches
+}
+
+# (Not on Windows, where the vim on PATH is Git's, with its own path rules:
+# the syntax file is the same on every host.)
+testConstraint vimEditor [expr {$::tcl_platform(platform) ne "windows" && [auto_execok vim] ne ""
+    && ![catch {exec vim --version} version] && [regexp {VIM - Vi IMproved (\d+)} $version -> major] && $major >= 8}]
+
+test sh-grammar-vim-fixture {the Vim syntax gives every token of the fixture the token IR's class: every keyword, contextual word, constant, number, string, character and comment, and no name a keyword or a constant (Neovim's: tests/lsp-neovim.test)} -constraints vimEditor -body {
+    set classes [shFixtureClasses]
+    shSyntaxMismatches $classes [shVimGroups $::shFixture [lmap c $classes {lrange $c 0 1}]]
+} -cleanup {unset -nocomplain classes} -result {}
+
+test sh-grammar-vim-corpus {the Vim syntax agrees with the token IR on real modules, beyond the fixture written for it} -constraints vimEditor -body {
+    set mismatches {}
+    foreach file {stdlib/actor.bot examples/dfa/csv/csv_strict.bot} {
+        set path [file join $::projectRoot $file]
+        set text [shRead $path]
+        set starts [surface::tokens::LineStarts $text]
+        set declared [grammars::Declared $text $file]
+        set classes {}
+        foreach item [surface::tokens::classes [surface::syntaxTokens $text $file]] {
+            lassign $item start end class
+            if {$class eq "operator" || [regexp {[^\x00-\x7f]} [string range $text 0 $start]]} continue
+            if {$class eq "identifier" && $start in $declared} {
+                set class declared
+            }
+            set line [lsearch -integer -bisect $starts $start]
+            lappend classes [list $line [expr {$start - [lindex $starts $line]}] [expr {$end - $start}] $class]
+        }
+        lappend mismatches {*}[lmap m [shSyntaxMismatches $classes [shVimGroups $path [lmap c $classes {lrange $c 0 1}]]] {
+            string cat "$file:" $m
+        }]
+    }
+    set mismatches
+} -cleanup {unset -nocomplain mismatches file path text starts declared classes item start end class line m} -result {}
+
+testConstraint nodeTextMate [expr {[auto_execok node] ne ""
+    && [file isdirectory [file join $::projectRoot editors vscode node_modules vscode-textmate]]
+    && [file isdirectory [file join $::projectRoot editors vscode node_modules vscode-oniguruma]]}]
+
+test sh-grammar-textmate-fixture {VS Code's engine (vscode-textmate over vscode-oniguruma) scopes the fixture as the token IR classifies it: editors/vscode/test/grammar.test.js (npm ci in editors/vscode first)} -constraints nodeTextMate -body {
+    set here [pwd]
+    cd [file join $::projectRoot editors vscode]
+    try {
+        set status [catch {exec node --test test/grammar.test.js 2>@1} output]
+    } finally {
+        cd $here
+    }
+    list $status [regexp {# fail 0} $output]
+} -cleanup {unset -nocomplain here status output} -result {0 1}
+
+cleanupTests

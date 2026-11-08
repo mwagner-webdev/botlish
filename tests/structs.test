@@ -718,7 +718,7 @@ else:
     list [expr {$plain eq $stressed}] [structOutcomes $hir]
 } -result {1 {same: [40, 1, 40, ["ab", "cd"]]}}
 
-test struct-executable-parity {a standalone executable prints the same struct values, under GC stress too} -constraints executableAot -body {
+test struct-executable-parity {a standalone executable computes the same struct values (read through the driver protocol: an executable prints none), under GC stress too} -constraints executableAot -body {
     set dir [makeDirectory struct-exe]
     set path [file join $dir program.bot]
     writeFile $path "struct Person:
@@ -735,8 +735,8 @@ q = \{team: t, names: \[\"a\", \"b\"\], anon: \{z: 1, a: 2\}\}
         set hir [surface::readProgramFile $path]
         set expected [lindex [outcomeUnderHir interp $hir] 1]
         native::executable $hir [file rootname $path]
-        set plain [runStandalone [file rootname $path]]
-        set stressed [runStandalone [file rootname $path] BOTLISH_NATIVE_GC_STRESS 1]
+        set plain [standaloneValue [file rootname $path]]
+        set stressed [standaloneValue [file rootname $path] BOTLISH_NATIVE_GC_STRESS 1]
         list [expr {$plain eq $stressed}] [expr {$plain eq $expected}] $plain
     } finally {
         removeDirectory struct-exe
@@ -749,7 +749,7 @@ test struct-executable-module {a module-declared struct works in a standalone ex
         writeFile [file join $dir main.bot] "import geo\np = geo::Point \{x: 3, y: 4\}\n\[p, geo::origin(), p.x + p.y\]\n"
         set hir [surface::readProgramFile [file join $dir main.bot]]
         native::executable $hir [file join $dir main]
-        list [runStandalone [file join $dir main]] [lindex [outcomeUnderHir interp $hir] 1]
+        list [standaloneValue [file join $dir main]] [lindex [outcomeUnderHir interp $hir] 1]
     }
 } -result {{[geo::Point {x: 3, y: 4}, geo::Point {x: 0, y: 0}, 7]} {[geo::Point {x: 3, y: 4}, geo::Point {x: 0, y: 0}, 7]}}
 

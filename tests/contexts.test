@@ -218,21 +218,27 @@ proc buildExecutable {name text} {
     return $path
 }
 
-# {STDOUT STDERR} (binary) of one run of EXECUTABLE with standard input from
-# the bytes INPUT.
+# {STDOUT STDERR VALUE} (STDOUT and STDERR binary) of one run of EXECUTABLE
+# with standard input from the bytes INPUT, under the driver protocol
+# (BOTLISH_NATIVE_RESULT): an executable prints no value of its own
+# (PROGRAM-OUTPUT-MILESTONE-1.md), so its standard output and error are the
+# program's, and VALUE is the program's value, shown (ProtocolValue).
 proc runExecutable {executable {input ""} {gcStress 0}} {
     set n [incr ::runCounter]
     set in [file join $::outputDir in.$n]
     set out [file join $::outputDir out.$n]
     set err [file join $::outputDir err.$n]
+    set result [file join $::outputDir result.$n]
     writeBinary $in $input
     set command [list sh -c {exec "$0" <"$1" >"$2" 2>"$3"} $executable $in $out $err]
-    if {$gcStress} {
-        withEnv BOTLISH_NATIVE_GC_STRESS 1 {exec {*}$command}
-    } else {
-        exec {*}$command
+    withEnv BOTLISH_NATIVE_RESULT $result {
+        if {$gcStress} {
+            withEnv BOTLISH_NATIVE_GC_STRESS 1 {exec {*}$command}
+        } else {
+            exec {*}$command
+        }
     }
-    return [list [readBinary $out] [readBinary $err]]
+    return [list [readBinary $out] [readBinary $err] [ProtocolValue $result]]
 }
 set runCounter 0
 
@@ -774,10 +780,10 @@ test contexts-native-gc-stress {context programs under a collection at every all
     }
 } -result {2 {[Inner {a: 1, b: true}, Inner {a: 1, b: true}, [2]]}}
 
-test contexts-native-executable-hello {examples/linux/context-hello.bot as a standalone executable: descriptor 1 receives exactly "Hello, world!\n", followed by the runner's own result line (14, the bytes written); nothing on descriptor 2} -constraints {nativeLinux posixShell} -body {
+test contexts-native-executable-hello {examples/linux/context-hello.bot as a standalone executable: descriptor 1 receives exactly "Hello, world!\n", the program's own output and nothing of the executable's; nothing on descriptor 2; the program's value (through the driver protocol) is 14, the bytes written} -constraints {nativeLinux posixShell} -body {
     set exe [buildExecutable hello $::helloText]
     runExecutable $exe
-} -result [list "Hello, world!\n14\n" ""]
+} -result [list "Hello, world!\n" "" 14]
 
 test contexts-native-executable-descriptors {stdout, stderr and stdin come from the one installed LinuxIO: write goes to descriptor 1 only, write_error to descriptor 2 only, read reads descriptor 0 (one read(2), the caller's buffer unchanged, the result's detached buffer updated)} -constraints {nativeLinux posixShell} -body {
     set exe [buildExecutable descriptors "${::linuxPrelude}with context std::linux::io::create()
@@ -797,7 +803,7 @@ zero = std::abi::bytes::freeze_prefix(std::abi::bytes::zeroed(std::abi::usize(8)
 \[n1, n2, result.result, original == zero, got == mk(\"stdin-ok\")\]
 "]
     list [runExecutable $exe "stdin-ok and more"] [runExecutable $exe "stdin-ok" 1]
-} -result [list [list "normal\n\[7, 6, 8, true, true\]\n" "error\n"] [list "normal\n\[7, 6, 8, true, true\]\n" "error\n"]]
+} -result [list [list "normal\n" "error\n" {[7, 6, 8, true, true]}] [list "normal\n" "error\n" {[7, 6, 8, true, true]}]]
 
 proc machineCode {exe function} {
     exec objdump -d --no-show-raw-insn --disassemble=$function $exe

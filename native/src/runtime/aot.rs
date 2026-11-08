@@ -26,12 +26,20 @@
 //! running that, with `BOTLISH_NATIVE_RESULT` naming a file: the executable
 //! then reports exactly as `botlish-native run` does (result lines `value
 //! V` / `error CODE MESSAGE` in the host value format, the overflow guard's
-//! report among them) to that file instead of printing its value, and
-//! leaves its standard output and error to the program. With
+//! report among them) to that file, and leaves its standard output and
+//! error to the program. The protocol is the one way to read a standalone
+//! run's value: an ordinary run prints none (below). With
 //! `BOTLISH_NATIVE_RUNS=N` it runs the program N times, as `bench` does,
 //! reporting `times` and `timing` lines (`BOTLISH_NATIVE_COMPILE_US`, the
 //! driver's compile and link time, is the timing line's first field). An
 //! ordinary run of the executable, with neither variable, is unchanged.
+//!
+//! An ordinary run's outcome (PROGRAM-OUTPUT-MILESTONE-1.md): standard
+//! output and error are the program's alone. A program that completes
+//! leaves with status 0 and writes nothing of the runtime's -- its value is
+//! never printed; one that fails leaves its error, `MESSAGE (CODE)`, on
+//! standard error with status 1 (a native stack overflow: the guard's
+//! `OVERFLOW_LINE`).
 //!
 //! `BOTLISH_NATIVE_STARTUP_REPORT=PATH` makes the executable write what its
 //! startup installed to PATH (`Vm::startup_report`, then `startup_lines`:
@@ -51,7 +59,7 @@
 use super::error::RtError;
 use super::metrics::AllocMode;
 use super::program::{LinkedProgram, Startup};
-use super::show::{show, tcl_list, tcl_value};
+use super::show::{tcl_list, tcl_value};
 use super::value::{NO_VALUE, Value};
 use super::vm::Vm;
 use std::io::Write;
@@ -249,7 +257,7 @@ pub unsafe fn start_linked(linked: &'static LinkedProgram) -> i32 {
             return 1;
         }
     };
-    run(startup, process_argv(), move || {
+    run(startup, process_argv(), Some(super::thread::linked_factory(linked)), move || {
         // SAFETY: the caller's contract.
         match unsafe { super::program::instantiate_linked(linked) } {
             Ok(started) => started,
@@ -265,7 +273,7 @@ pub unsafe fn start_linked(linked: &'static LinkedProgram) -> i32 {
 /// thread STARTUP names, and returns the exit status. Both policies run one
 /// body: INIT (the Vm made on the thread that runs the program: it records
 /// that thread's stack), the startup report, the snapshot, the driver
-/// protocol or the overflow guard, the program, its value or error. Under
+/// protocol or the overflow guard, the program, its status or error. Under
 /// `worker` the body runs on a thread of BOTLISH_NATIVE_STACK_BYTES (1 GiB
 /// by default) that this one starts and joins; under `main-thread` on this
 /// thread -- the process's main thread, which entered the executable's
@@ -274,7 +282,12 @@ pub unsafe fn start_linked(linked: &'static LinkedProgram) -> i32 {
 /// panicked (NATIVE BUG)", status 1, under both: the worker's join reports
 /// it, and on the main thread `catch_unwind` does, before it could reach
 /// the caller's C `main` (`linked_main`) or Rust's startup (status 101).
-pub fn run(startup: Startup, argv: Vec<Vec<u8>>, init: impl FnOnce() -> (Box<Vm>, ProgramEntry) + Send + 'static) -> i32 {
+pub fn run(
+    startup: Startup,
+    argv: Vec<Vec<u8>>,
+    factory: Option<std::sync::Arc<super::thread::VmFactory>>,
+    init: impl FnOnce() -> (Box<Vm>, ProgramEntry) + Send + 'static,
+) -> i32 {
     if startup == Startup::MainThread && !MAIN_THREAD_STARTUP {
         eprintln!(
             "this executable asks to run its program on the process's main thread (startup policy main-thread), which only macOS AArch64 executables do (MAIN-THREAD-STARTUP-MILESTONE-1.md) (NATIVE STARTUP)"
@@ -285,6 +298,8 @@ pub fn run(startup: Startup, argv: Vec<Vec<u8>>, init: impl FnOnce() -> (Box<Vm>
     let report = std::env::var_os("BOTLISH_NATIVE_STARTUP_REPORT").filter(|p| !p.is_empty());
     let body = move || -> i32 {
         let (mut vm, entry) = init();
+        // What a Botlish thread's start makes its Vm with (runtime/thread.rs).
+        vm.thread.factory = factory;
         if let Some(path) = report {
             // What the startup installed (Vm::startup_report, startup_lines),
             // before any of the program runs: the evidence that every
@@ -306,6 +321,9 @@ pub fn run(startup: Startup, argv: Vec<Vec<u8>>, init: impl FnOnce() -> (Box<Vm>
             super::platform::OverflowGuard::install_executable(&stack).expect("the stack-overflow guard")
         };
         let result = entry(&mut *vm);
+        // The program's threads still running are asked to stop and joined
+        // before its image is released (runtime/thread.rs).
+        super::thread::finish_all();
         if result == NO_VALUE {
             let error = vm
                 .error
@@ -314,13 +332,11 @@ pub fn run(startup: Startup, argv: Vec<Vec<u8>>, init: impl FnOnce() -> (Box<Vm>
             eprintln!("{} ({})", vm.describe_error(&error), error.error_code().join(" "));
             return 1;
         }
-        match writeln!(std::io::stdout().lock(), "{}", show(&vm.info, result)) {
-            Ok(()) => 0,
-            Err(error) => {
-                eprintln!("{error} (NATIVE IO)");
-                1
-            }
-        }
+        // The program completed: status 0, and nothing written. The
+        // program's value is not printed (PROGRAM-OUTPUT-MILESTONE-1.md):
+        // standard output is the program's own, what it writes through
+        // std::io. Tooling that wants the value runs the driver protocol.
+        0
     };
     let status = match startup {
         Startup::Worker => {
@@ -436,6 +452,7 @@ fn driver_protocol(path: &std::path::Path, vm: &mut Vm, entry: ProgramEntry) -> 
         }
         let started = std::time::Instant::now();
         result = entry(&mut *vm);
+        super::thread::finish_all();
         let elapsed = started.elapsed();
         nanos.push(elapsed.as_nanos().to_string());
         best = best.min(elapsed.as_micros());

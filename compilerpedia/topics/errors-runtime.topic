@@ -8,7 +8,6 @@ index: errors
 alias: mod by zero; division by zero; modulo by zero
 keywords: mod, zero, divisor, remainder, euclidean, run time
 related: stdlib.mod capability.integer-division concept.integers error.range
-docs: README.md
 code: CORE SEMANTIC ARITHMETIC
 
 == MEANING
@@ -53,7 +52,6 @@ index: errors
 alias: shift amount out of range; capacity out of range; argument out of range
 keywords: shift_left, shift_right, capacity, mutable_array, is_tcl_alpha, std::binary::emit, length, ceiling, run time
 related: stdlib.shift_left stdlib.shift_right stdlib.std::mutable_array::create proof.list-bounds error.arithmetic concept.integers
-docs: README.md MUTABLE-ARRAY.md BINARY-LAYOUT.md
 code: CORE SEMANTIC RANGE
 
 == MEANING
@@ -109,7 +107,6 @@ index: errors
 alias: == on functions; function equality; equality of functions; hash of a function
 keywords: ==, hash, callable, block, function, mutable array, mutable vector, immutable_set, contains
 related: rule.equality stdlib.== stdlib.hash concept.hashable concept.function-types concept.mutable-array concept.mutable-vector error.not-callable
-docs: README.md MUTABLE-ARRAY.md M3-EQUALITY-TOTAL-SETCONTAINS-EFFECT.md
 code: CORE SEMANTIC EQUALITY
 
 == MEANING
@@ -166,7 +163,6 @@ index: errors backends
 alias: native-only error; refused on the Tcl backends; print on interp
 keywords: interp, compile, syscall, address, from_bytes, extern c, io, print_line, LinuxIO
 related: backend.native-only backend.io task.print-output backend.cranelift concept.c-ffi stdlib.module.std::io
-docs: CONTEXT-TRAITS.md LINUX-X86-64-SYSCALL.md ABI-BYTES.md C-FFI.md
 code: CORE SEMANTIC NATIVE-ONLY
 
 == MEANING
@@ -210,7 +206,8 @@ prints "Hello, world!" on cranelift; on interp and compile it stops with
 Run it with -backend cranelift (or cranelift-generic), or build an
 executable (-emit-native-executable). To keep a program runnable
 everywhere, compute its result in portable code and return it as the
-program's value, which every backend prints; print only at a native edge
+program's value, which the compiler's development run prints on every
+backend (an executable never prints it); print only at a native edge
 (backend.io).
 
 @topic error.not-boolean
@@ -220,7 +217,6 @@ index: errors
 alias: condition is not a Boolean; non-Boolean condition
 keywords: if, condition, bool, true, false, any, truthy, run time
 related: concept.booleans concept.if-expressions concept.types error.not-callable
-docs: README.md
 code: CORE SEMANTIC NOT-BOOLEAN
 
 == MEANING
@@ -259,7 +255,6 @@ index: errors
 alias: call a non-function; non-callable value; calling a number
 keywords: call, callee, function value, untyped parameter, any, Fn
 related: concept.functions concept.function-types concept.types error.not-boolean error.equality
-docs: README.md
 code: CORE SEMANTIC NOT-CALLABLE
 
 == MEANING
@@ -292,7 +287,6 @@ index: errors
 alias: struct initializer fields mismatch
 keywords: struct, initializer, fields, core IR, ir, interp
 related: concept.structs rule.struct-construction error.core-malformed backend.interp
-docs: README.md STRUCTS.md
 code: CORE SEMANTIC STRUCT
 
 == MEANING
@@ -325,7 +319,6 @@ index: errors
 alias: uncaught propagated error; error escaped the program
 keywords: fail, propagate, top level, unhandled, core IR, strict, completion
 related: concept.errors rule.unhandled-errors proof.completions error.unhandled-error error.known-error
-docs: EXPLICIT-ERROR-COMPLETIONS.md STATIC-COMPLETION-PROOFS.md ARGV.md
 code: CORE SEMANTIC UNCAUGHT-ERROR
 
 == MEANING
@@ -365,7 +358,6 @@ index: errors
 alias: context#unreachable
 keywords: context trait, dead code, monomorphization, placeholder, compiler bug
 related: concept.context-traits concept.traits proof.reachability error.native-bug
-docs: CONTEXT-TRAITS.md TRAITS.md
 code: CORE SEMANTIC UNREACHABLE
 
 == MEANING
@@ -390,19 +382,17 @@ index: errors
 alias: coroutine resumes itself
 keywords: coroutine, resume, running, affine, handle
 related: concept.coroutines concept.affine error.coroutine-state error.yield-outside-coroutine
-docs: COROUTINES.md AFFINE-VALUES.md
 code: CORE SEMANTIC COROUTINE-RUNNING
 
 == MEANING
 Run time, on every backend; a compiler bug if a checked program reaches
 it. The message is "coroutine N is already running: a coroutine cannot
 resume itself" ("the coroutine is already running: ..." natively). A
-coroutine handle is an affine value with one owner, and
-the body that is running cannot own its own handle (concept.coroutines),
-so the runtimes keep this check only as a safety net, as the native
-runtime's source says: "Coroutine lifecycle states a checked program
-cannot reach (the affine discipline, COROUTINES.md), kept as defensive
-runtime checks."
+coroutine handle is an affine value with one owner, and the body that is
+running cannot own its own handle (concept.coroutines), so the runtimes
+keep this check only as a safety net, as the native runtime's source says:
+"Coroutine lifecycle states a checked program cannot reach (the affine
+discipline), kept as defensive runtime checks."
 
 == WHAT TO DO
 Report the program, with the backend it failed on.
@@ -414,7 +404,6 @@ index: errors
 alias: coroutine already started; resume a released coroutine
 keywords: coroutine, start, resume, release, done?, handle, state, affine
 related: concept.coroutines concept.affine error.coroutine-running stdlib.std::coroutine::done?
-docs: COROUTINES.md AFFINE-VALUES.md
 code: CORE SEMANTIC COROUTINE-STATE
 
 == MEANING
@@ -435,11 +424,10 @@ that has completed is not this error: it returns the same final result
 again.
 
 One form is a resource limit instead, on the native backends only: "cannot
-map a N-byte coroutine stack: ...". Each live native coroutine the compiler
-did not fuse into its consumer (COROUTINE-FUSION-MILESTONE-1.md) has its own
-stack, 8 MiB of address space by default
-(BOTLISH_NATIVE_COROUTINE_STACK_BYTES sets it, at least 64 KiB), and the
-system refused another one.
+map a N-byte coroutine stack: ...". Each live native coroutine the
+compiler did not fuse into its consumer has its own stack, 8 MiB of
+address space by default (BOTLISH_NATIVE_COROUTINE_STACK_BYTES sets it, at
+least 64 KiB), and the system refused another one.
 
 == WHAT TO DO
 For the stack form, keep fewer coroutines alive at once or give them
@@ -453,7 +441,6 @@ index: errors
 alias: yield with no coroutine running
 keywords: yield, coroutine, effect, run time
 related: concept.coroutines error.coroutine-running error.coroutine-state
-docs: COROUTINES.md
 code: CORE SEMANTIC YIELD-OUTSIDE-COROUTINE
 
 == MEANING
@@ -474,7 +461,6 @@ index: errors
 alias: trusted native broke its contract; contract violation of a native
 keywords: native, contract, registry, result type, implementation bug, Tcl runtime
 related: stdlib.module.root backend.interp backend.compile error.native-bug
-docs: README.md
 code: CORE CONTRACT TYPE
 
 == MEANING
@@ -501,7 +487,6 @@ index: errors
 alias: failDeclared escaped
 keywords: native, declared error, IndexNotFound, compile backend, direct call, bounds proof
 related: proof.list-bounds proof.completions backend.compile error.uncaught-error
-docs: EXPLICIT-ERROR-COMPLETIONS.md STATIC-COMPLETION-PROOFS.md
 code: CORE DECLARED-ERROR
 
 == MEANING
@@ -529,7 +514,6 @@ index: errors
 alias: malformed IR; malformed core IR
 keywords: .ir, core IR, node, operation, literal, interp, compile
 related: backend.interp backend.compile error.native-aot-input error.hir-parse error.struct
-docs: README.md DIRECT-HIR-NATIVE-PATH.md
 code: CORE MALFORMED
 
 == MEANING
@@ -549,9 +533,8 @@ A .bot program lowers to core IR only on interp (hir::lower); a malformed
 node there would be a compiler bug.
 
 == WHAT TO DO
-Fix the node the message quotes; README.md section 4 lists every form.
-Prefer writing Botlish source: .bot files are checked, and they run on
-every backend.
+Fix the node the message quotes. Prefer writing Botlish source: .bot
+files are checked, and they run on every backend.
 
 @topic error.core-process-argv
 title: CORE PROCESS ARGV: an invalid injected argument vector
@@ -560,7 +543,6 @@ index: errors
 alias: injected argv; argv NUL byte
 keywords: argv, -argv, -argv-hex, NUL, bytes, arguments, process, snapshot
 related: concept.argv stdlib.argv cli.options task.read-arguments
-docs: ARGV.md
 code: CORE PROCESS ARGV
 
 == MEANING
@@ -587,7 +569,6 @@ index: errors backends
 alias: built by another front end; stale hirx file
 keywords: hirx, interchange, fingerprint, front end, stale, revision, rebuild
 related: backend.hir-interchange error.hir-interchange-format error.hir-interchange-input cli.options
-docs: HIR-INTERCHANGE.md COMPILATION-ISOLATION.md
 code: HIR INTERCHANGE COMPILER
 
 == MEANING
@@ -617,16 +598,15 @@ index: errors backends
 alias: forged certificate; stale certificate; emission certificate in hirx
 keywords: hirx, interchange, emits, certificate, trust, proof, cache
 related: backend.hir-interchange concept.emission-claims error.hir-interchange-compiler
-docs: EMISSION-CLAIMS-MILESTONE-1.md HIR-INTERCHANGE.md
 code: HIR INTERCHANGE EMISSION
 
 == MEANING
 When a .hirx file is read; not an error of the program. A HIR carries the
-certificates of its emission claims (EMISSION-CLAIMS-MILESTONE-1.md), but a
-file proves nothing however plausible its contents: reading HIR text
-verifies every claim again from the HIR, and refuses text whose claims'
-verdicts, certificates or diagnostics differ from what that verification
-finds. A cache entry that differs is a miss, rebuilt from the source.
+certificates of its emission claims, but a file proves nothing however
+plausible its contents: reading HIR text verifies every claim again from
+the HIR, and refuses text whose claims' verdicts, certificates or
+diagnostics differ from what that verification finds. A cache entry that
+differs is a miss, rebuilt from the source.
 
 == WHAT TO DO
 Regenerate the .hirx file from its source with this compiler.
@@ -638,7 +618,6 @@ index: errors backends
 alias: not HIR interchange text; hirx version
 keywords: hirx, interchange, header, version, corrupt, truncated
 related: backend.hir-interchange error.hir-interchange-compiler error.hir-interchange-input error.hir-parse
-docs: HIR-INTERCHANGE.md
 code: HIR INTERCHANGE FORMAT
 
 == MEANING
@@ -665,7 +644,6 @@ index: errors backends
 alias: emit-hir-interchange input
 keywords: -emit-hir-interchange, .ir, .hirx, input file, extension
 related: backend.hir-interchange error.hir-interchange-format error.native-aot-input cli.options
-docs: HIR-INTERCHANGE.md
 code: HIR INTERCHANGE INPUT
 
 == MEANING
@@ -686,7 +664,6 @@ index: errors backends
 alias: hirx for another target
 keywords: hirx, interchange, target, -target, operating system, architecture, C ABI
 related: backend.hir-interchange backend.targets error.hir-interchange-compiler error.native-target cli.options
-docs: HIR-INTERCHANGE.md MACOS-AARCH64-MILESTONE-2.md
 code: HIR INTERCHANGE TARGET
 
 == MEANING
@@ -718,7 +695,6 @@ index: errors
 alias: malformed HIR text; .hir file error
 keywords: .hir, HIR text, hir::parse, hir::readFile, header, binding id, scope
 related: error.hir-interchange-format error.core-malformed backend.hir-interchange cli.usage
-docs: README.md
 code: HIR PARSE
 
 == MEANING
@@ -752,7 +728,6 @@ index: errors backends
 alias: closed-call facts did not converge
 keywords: range analysis, fixpoint, convergence, budget, native lowering, cranelift
 related: error.hir-specialize-limit concept.specialization backend.cranelift backend.interp proof.ranges error.native-bug
-docs: README.md CRANELIFT-WASM.md
 code: HIR RANGE LIMIT
 
 == MEANING
@@ -777,7 +752,6 @@ index: errors backends
 alias: specialization did not converge
 keywords: specialization, instances, fixpoint, convergence, budget, cranelift, aot-spec
 related: concept.specialization error.hir-range-limit backend.cranelift backend.cranelift-generic backend.native-executable error.native-bug
-docs: README.md
 code: HIR SPECIALIZE LIMIT
 
 == MEANING
@@ -800,7 +774,6 @@ index: errors backends
 alias: callback on another thread; callback after the call returned; callback failed; retained callback
 keywords: callback c fn, std::ffi::c::callback, FnPtr, noescape, thread, retained, fail-closed, C callback
 related: concept.c-callbacks error.native-address error.native-bool error.native-limit-stack
-docs: C-CALLBACK-MILESTONE-1.md
 code: NATIVE CALLBACK
 
 == MEANING
@@ -822,8 +795,8 @@ standard error of a standalone executable (exit status 1).
 == WHAT TO DO
 Declare a callback parameter noescape only for a C function that calls it
 during the call and keeps it no longer; a library that keeps a callback
-past the call is a retained registration, which this milestone does not
-provide. Handle failures inside the callback's body.
+past the call is a retained registration, which Botlish does not provide
+yet. Handle failures inside the callback's body.
 
 @topic error.native-address
 title: NATIVE ADDRESS: a C function returned an address Botlish cannot hold
@@ -832,7 +805,6 @@ index: errors backends
 alias: C pointer too wide; tagged pointer result
 keywords: extern c fn, pointer, address, std::ffi::c::Ptr, top byte, tagged pointer, aarch64
 related: concept.c-ffi backend.native-only error.native-bool error.native-contract-violation
-docs: C-FFI.md C-ABI-TYPES.md
 code: NATIVE ADDRESS
 
 == MEANING
@@ -856,7 +828,6 @@ index: errors backends
 alias: not AOT-ready; program is not AOT-ready
 keywords: -emit-native-executable, -aot-spec, closed, guarded, open, annotation, parameter type, blocker
 related: backend.native-executable concept.specialization backend.cranelift error.native-link
-docs: README.md SINGLE-EXECUTABLE.md
 code: NATIVE AOT NOT-READY
 
 == MEANING
@@ -903,7 +874,6 @@ index: errors backends
 alias: core IR on a native backend; ir file with cranelift
 keywords: .ir, core IR, cranelift, -emit-native-executable, -emit-nir, HIR, .hir, .hirx
 related: error.core-malformed backend.cranelift backend.native-executable error.hir-interchange-input cli.options
-docs: DIRECT-HIR-NATIVE-PATH.md
 code: NATIVE AOT INPUT
 
 == MEANING
@@ -931,7 +901,6 @@ index: errors backends
 alias: _Bool result neither 0 nor 1
 keywords: extern c fn, bool, _Bool, result, ffi, declaration
 related: concept.c-ffi error.native-address error.native-contract-violation
-docs: C-FFI.md
 code: NATIVE BOOL
 
 == MEANING
@@ -953,7 +922,6 @@ index: errors backends
 alias: native backend panicked; native backend failed
 keywords: panic, crash, internal error, lowering, driver, invariant, report, cranelift
 related: error.native-codegen error.native-invalid-nir error.native-invalid-hir backend.cranelift backend.cranelift-generic backend.interp
-docs: README.md DIRECT-HIR-NATIVE-PATH.md
 code: NATIVE BUG
 
 == MEANING
@@ -984,7 +952,6 @@ index: errors backends
 alias: Cranelift verifier error; Cranelift rejected the code
 keywords: cranelift, verifier, codegen, CLIF, ISA, host, machine code
 related: error.native-bug error.native-invalid-nir backend.cranelift backend.platforms
-docs: README.md CRANELIFT-WASM.md
 code: NATIVE CODEGEN
 
 == MEANING
@@ -1011,7 +978,6 @@ index: errors backends
 alias: alias contract is false; extern alias result mismatch
 keywords: extern c fn, alias, contract, pointer result, provenance, ffi
 related: concept.c-ffi error.native-address error.native-bool
-docs: C-FFI.md C-POINTER-BORROWING.md
 code: NATIVE CONTRACT-VIOLATION
 
 == MEANING
@@ -1027,7 +993,7 @@ and are never checked; a false one is undefined behaviour.
 == WHAT TO DO
 Read the C function's documentation: if it may return another pointer
 (into the buffer, a new allocation), declare the result `independent` or
-leave its provenance unknown (C-FFI.md, "Pointer results").
+leave its provenance unknown.
 
 @topic error.native-invalid-hir
 title: NATIVE INVALID-HIR: native lowering met HIR it cannot interpret
@@ -1036,7 +1002,6 @@ index: errors backends
 alias: native lowering invalid HIR
 keywords: HIR, native lowering, .hir, enum, extern c fn, constant, front end
 related: error.hir-parse error.native-bug error.native-invalid-nir backend.cranelift
-docs: DIRECT-HIR-NATIVE-PATH.md README.md
 code: NATIVE INVALID-HIR
 
 == MEANING
@@ -1059,7 +1024,6 @@ index: errors backends
 alias: invalid NIR; stale native build
 keywords: NIR, botlish-native, validator, rebuild, cargo build, version
 related: error.native-not-built error.native-bug error.native-codegen backend.cranelift
-docs: README.md DIRECT-HIR-NATIVE-PATH.md
 code: NATIVE INVALID-NIR
 
 == MEANING
@@ -1082,7 +1046,6 @@ index: errors backends
 alias: executable cannot write its value
 keywords: io, file, stdout, disk full, temporary directory, result file, executable
 related: error.native-startup error.native-link backend.native-executable cli.output
-docs: C-FFI.md SINGLE-EXECUTABLE.md
 code: NATIVE IO
 
 == MEANING
@@ -1110,7 +1073,6 @@ index: errors backends
 alias: stack overflow; recursion too deep; deep recursion; native stack exhausted
 keywords: recursion, stack, depth, BOTLISH_NATIVE_STACK_BYTES, BOTLISH_NATIVE_COROUTINE_STACK_BYTES, coroutine, too many nested evaluations, limit, tail call
 related: backend.cranelift backend.interp backend.compile backend.performance concept.loops backend.native-library
-docs: NATIVE-STACK-OVERFLOW.md MACOS-AARCH64-MILESTONE-4.md WINDOWS-X86-64-MILESTONE-4.md COROUTINES.md NATIVE-LIBRARY-MILESTONE-1.md README.md
 code: NATIVE LIMIT STACK
 code: TCL LIMIT STACK
 
@@ -1120,7 +1082,7 @@ backends stop at different depths:
   * native backends and executables: native code runs on a 1 GiB stack,
     and a coroutine's body on an 8 MiB stack of its own (one the native
     compiler fused into the function that drives it on that function's
-    stack: COROUTINE-FUSION-MILESTONE-1.md); overflowing either
+    stack); overflowing either
     stops the run with "native stack exhausted: too many nested calls"
     (NATIVE LIMIT STACK), never a crash, on Linux x86-64 and AArch64,
     macOS AArch64 and Windows x86-64 -- in Botlish code, inside the
@@ -1169,7 +1131,6 @@ summary: NATIVE LINK (a program that calls C) and NATIVE AOT (any other) report 
 index: errors backends
 alias: link failed; undefined symbol; cannot find library; executable link failed
 keywords: linker, rustc, cc, ld, -l, -L, -F, extern c library, extern c framework, static, archive, import library, BOTLISH_NATIVE_LINKER, stub, system, auto, libbotlish_native, libbotlish_runtime, BOTLISH_NATIVE_RUNTIME, BOTLISH_NATIVE_SYSTEM_LINKER, BOTLISH_NATIVE_LINK_LOG, TOOLCHAIN, RUNTIME, ARCHIVE
-docs: C-FFI.md SINGLE-EXECUTABLE.md SINGLE-EXECUTABLE-FFI-MILESTONE-1.md NATIVE-LINK-PLAN-MILESTONE-1.md
 related: concept.c-ffi concept.native-link-plan backend.native-executable backend.single-executable error.native-aot-not-ready error.native-not-built
 code: NATIVE LINK
 code: NATIVE LINK ARCHIVE
@@ -1248,19 +1209,18 @@ links the static release C runtime (/MT, cl's default), so build a static
 C library with /MT: a /MD one calls the C runtime through `__imp_` imports
 the static runtime does not define, and link.exe reports them unresolved
 ("error LNK2019: unresolved external symbol __imp_NAME"; the message then
-says so). A DLL may use either runtime (WINDOWS-X86-64-MILESTONE-2.md, "The
-C runtime"). The Tcl backends never call C. For NATIVE AOT:
-the default (rustc) linker needs rustc and a built native backend in the
-checkout, and on macOS the Xcode command line tools (the system linker);
-the stub linker needs neither but is Linux x86-64 only and links no C; the
-system linker needs a C compiler driver (Debian, Ubuntu: apt install gcc;
-macOS: xcode-select --install; Windows: a Developer Command Prompt) or one
-named by BOTLISH_NATIVE_SYSTEM_LINKER, and the runtime archive built with
-the compiler (the single executable carries its own).
-For NATIVE LINK ARCHIVE: build the library's static archive for the
-target (`ar rcs`, `lib.exe`, CMake's static build), name its directory with
--L DIR or its file with `static at "PATH"`, or declare the library without
-`static` when a shared library is what the program means.
+says so). A DLL may use either runtime. The Tcl backends never call C. For
+NATIVE AOT: the default (rustc) linker needs rustc and a built native
+backend in the checkout, and on macOS the Xcode command line tools (the
+system linker); the stub linker needs neither but is Linux x86-64 only and
+links no C; the system linker needs a C compiler driver (Debian, Ubuntu:
+apt install gcc; macOS: xcode-select --install; Windows: a Developer
+Command Prompt) or one named by BOTLISH_NATIVE_SYSTEM_LINKER, and the
+runtime archive built with the compiler (the single executable carries its
+own). For NATIVE LINK ARCHIVE: build the library's static archive for the
+target (`ar rcs`, `lib.exe`, CMake's static build), name its directory
+with -L DIR or its file with `static at "PATH"`, or declare the library
+without `static` when a shared library is what the program means.
 BOTLISH_NATIVE_LINK_LOG=FILE appends each link's resolved plan (which
 archive each static library is, and why: "link plan: static NAME: PATH
 (declared at ...)"), each system link's command line and the linker's
@@ -1273,7 +1233,6 @@ index: errors backends
 alias: native backend not built; build the native backend
 keywords: cargo build, rustc, native/target/release, botlish-native, BOTLISH_NATIVE_BIN, rustup
 related: backend.cranelift backend.single-executable backend.macos-application error.native-invalid-nir error.native-link backend.interp
-docs: README.md SINGLE-EXECUTABLE.md MACOS-AARCH64-MILESTONE-9.md
 code: NATIVE NOT-BUILT
 
 == MEANING
@@ -1309,7 +1268,6 @@ index: errors backends
 alias: no program image; bare botlish-aot-stub
 keywords: executable, stub linker, system linker, program image, program record, botlish-aot-stub, libbotlish_runtime, startup, thread, format
 related: backend.native-executable backend.native-startup backend.single-executable error.native-io error.native-link
-docs: SINGLE-EXECUTABLE.md MAIN-THREAD-STARTUP-MILESTONE-1.md
 code: NATIVE STARTUP
 
 == MEANING
@@ -1357,7 +1315,6 @@ index: errors backends
 alias: built for another target; native code for another target
 keywords: target, -target, triple, host, macOS, Linux, aarch64, cross compile, native
 related: backend.targets backend.platforms error.unsupported-platform error.hir-interchange-target backend.interp backend.native-executable
-docs: MACOS-AARCH64-MILESTONE-2.md C-ABI-TYPES.md
 code: NATIVE TARGET
 
 == MEANING
@@ -1396,7 +1353,6 @@ index: errors backends
 alias: native lowering does not support; not supported natively
 keywords: struct-shape, CONTEXT-NATIVE-LOWERING-UNSUPPORTED, value, foreign, sequence-mode, validator contract, cranelift-generic, context struct
 related: backend.cranelift backend.cranelift-generic backend.native-only backend.native-startup concept.contexts concept.specialization error.native-bug
-docs: README.md CONTEXTS.md DIRECT-HIR-NATIVE-PATH.md MAIN-THREAD-STARTUP-MILESTONE-1.md
 code: NATIVE UNSUPPORTED
 code: NATIVE UNSUPPORTED CONTEXT-NATIVE-LOWERING-UNSUPPORTED
 code: NATIVE UNSUPPORTED struct-shape
@@ -1477,7 +1433,6 @@ index: errors rules
 alias: syntax error; parse error; does not parse; unexpected token
 keywords: parser, lexer, expected, found, unterminated string, never closed, unexpected character, indentation, colon, recovery, syntax recovery, -check, hole
 related: concept.syntax rule.if-placement rule.loop-placement rule.one-handler-per-error rule.comparison-chains rule.indentation rule.names rule.no-list-destructuring error.list-destructuring error.syntax-hole cli.options cli.lsp
-docs: DIAGNOSTIC-RECOVERY.md SYNTAX-RECOVERY-MILESTONE-1.md README.md
 code: SURFACE SYNTAX
 
 == MEANING
@@ -1506,8 +1461,7 @@ Every independent error is reported, in source order, in one compilation:
     construct are not reported;
   * two malformed constructs are two errors, and two brackets left open
     are two.
-Recovery is by grammar boundaries, never by comparing messages
-(DIAGNOSTIC-RECOVERY.md, section 5).
+Recovery is by grammar boundaries, never by comparing messages.
 
 == THE MAIN FAMILIES
   expected X, found Y        the commonest form, from the parser: Y is
@@ -1539,14 +1493,13 @@ help line printed under a syntax error names its rule's page when there is
 one.
 
 == CHECKING AROUND A SYNTAX ERROR
--check and the language server analyze a program with syntax errors
-(SYNTAX-RECOVERY-MILESTONE-1.md). Each malformed statement or declaration
-becomes a hole: source that has no value, no type and never runs. Its
-first tokens, before the point where the text goes wrong, say what it is:
-`total = add(1, 2` binds total (to a value nobody knows), `fn area(` may
-declare area, a malformed `with context` may install a context, a
-malformed `struct` may declare a type. Everything else is analyzed as
-usual, so:
+-check and the language server analyze a program with syntax errors. Each
+malformed statement or declaration becomes a hole: source that has no
+value, no type and never runs. Its first tokens, before the point where
+the text goes wrong, say what it is: `total = add(1, 2` binds total (to a
+value nobody knows), `fn area(` may declare area, a malformed `with
+context` may install a context, a malformed `struct` may declare a type.
+Everything else is analyzed as usual, so:
   * a reference to a name a hole binds is known to exist, but its value
     and type are not; a hover there says so;
   * a diagnostic that could depend on a hole is not reported -- a name a
@@ -1589,7 +1542,6 @@ index: errors
 alias: hole; malformed statement; no meaning is known
 keywords: syntax recovery, hole, malformed, -check, language server, hover, unknown, partial analysis
 related: error.surface-syntax error.hir-syntax-recovered cli.options cli.lsp
-docs: SYNTAX-RECOVERY-MILESTONE-1.md DIAGNOSTIC-RECOVERY.md
 code: CORE SEMANTIC SYNTAX-HOLE
 
 == MEANING
@@ -1618,7 +1570,6 @@ index: errors backends
 alias: recovered HIR; run a program with syntax errors
 keywords: syntax recovery, backend, runnable, hole, -check, language server, tool
 related: error.surface-syntax error.syntax-hole backend.hir-interchange cli.options
-docs: SYNTAX-RECOVERY-MILESTONE-1.md DIAGNOSTIC-RECOVERY.md
 code: HIR SYNTAX-RECOVERED
 
 == MEANING
@@ -1646,7 +1597,6 @@ index: errors backends
 alias: library build failed; native library refused; declarations only
 keywords: -emit-native-library, native::library, exported c fn, top-level statement, ld, objcopy, ar, cc
 related: backend.native-library error.export-signature cli.options
-docs: NATIVE-LIBRARY-MILESTONE-1.md
 code: NATIVE LIBRARY
 code: NATIVE LIBRARY LIBRARY-TOP-LEVEL
 code: NATIVE LIBRARY LIBRARY-NO-EXPORTS
@@ -1676,3 +1626,62 @@ On -emit-native-library (native::library), after the program compiled:
 Move a top-level constant or computation into a function, or into an
 imported module (where a top-level binding is a module static); rename a
 clashing export; install binutils and a C compiler for TOOL.
+
+@topic error.c-unsupported
+title: C UNSUPPORTED: a construct the C backend does not compile yet
+summary: C UNSUPPORTED reports, at compile time and at the construct, a valid program part that -emit-c cannot translate to C correctly yet; it is a limit of the backend, never a missing runtime service.
+index: errors backends
+alias: c backend does not support; cannot compile to c; emit-c unsupported
+keywords: -emit-c, C, freestanding, String, List, closure, Float64, function value, payload
+related: backend.c error.c-runtime-limit cli.options
+code: C UNSUPPORTED
+code: C INPUT
+
+== MEANING
+On -emit-c only (backend.c); the program is valid and runs on every other
+backend. The C backend compiles a subset of the language in milestone 1 --
+Ints, Bools, unit, enums, structs, a List literal as a value, functions
+called directly, if, loops and folds, declared errors and their handlers --
+and rejects the rest with this code, located at the construct (one
+diagnostic per construct the program reaches), rather than translate it
+approximately: Strings, Lists whose length is not known statically, loops
+over Lists, closures and function values, Float64, error payloads, Result
+values, contexts, coroutines, C calls, and the bitwise operations and
+shift_left of Ints the compiler cannot prove fit int64_t. Nothing is
+written.
+
+It is not a missing runtime service: what the generated C can call but
+not implement itself (arbitrary-precision arithmetic) compiles, and is
+listed in FILE.runtime.json for the link.
+
+C INPUT is an input -emit-c cannot read: a .ir file (core IR text).
+
+== WHAT TO DO
+Run the program on another backend, or keep the C-compiled part to the
+subset: a collecting loop's List becomes a fold, a String a enum, an
+unbounded Int a domain (`type Count = Int in 0..1000000`).
+
+@topic error.c-runtime-limit
+title: C RUNTIME LIMIT: a runtime service ran out of storage
+summary: A program -emit-c generated ends with C RUNTIME LIMIT when a runtime service's provider runs out of storage, and with C RUNTIME FAULT when a provider returns an undefined status.
+index: errors backends
+alias: runtime service failed; provider out of memory; botlish_rt_v1 limit
+keywords: -emit-c, provider, runtime service, BOTLISH_RT_V1_LIMIT, arena, storage
+related: backend.c error.c-unsupported error.native-limit-stack
+code: C RUNTIME LIMIT
+code: C RUNTIME FAULT
+
+== MEANING
+At run time, in a program -emit-c generated (backend.c), reported by
+FILE_status_code. A runtime service returns BOTLISH_RT_V1_LIMIT when the
+provider cannot hold a result -- a bigger Int than its storage holds --
+and the program ends with C RUNTIME LIMIT. A provider never returns a wrong
+value instead. Like running out of memory on any backend, it is a limit of
+the environment, not of the language: no Botlish handler catches it. C
+RUNTIME FAULT is a status of a provider the interface does not define (a
+provider's defect).
+
+== WHAT TO DO
+Give the provider more storage (the reference provider's
+BOTLISH_RT_INT_ARENA_LIMBS), or keep the program's Ints within int64_t with
+integer domains, which needs no service at all.

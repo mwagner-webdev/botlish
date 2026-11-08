@@ -10,12 +10,14 @@ runs and job logs of the fake; the requests themselves against a fake
 urlopen; and, when PyYAML is installed, the workflows' side of the rules
 (.github/workflows/: every test workflow cancels a superseded run, main's
 included; a release is published only by a release run, after the check;
-the gate listens to every workflow a release waits for; every test
+no job asks for the concurrency group its own run holds; the gate listens to every workflow a release waits for; every test
 workflow's expensive jobs wait for its canary).
 """
 import io
+import itertools
 import json
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -722,7 +724,100 @@ def triggers(w):
     return on if isinstance(on, dict) else {k: None for k in ([on] if isinstance(on, str) else on)}
 
 
-RELEASE_RUN_NAME = "${{ inputs.release && format('release {0}', inputs.release) || '' }}"
+# A concurrency group's value in a run, its ${{ }} expressions evaluated as
+# GitHub does: string literals, context paths, !, && and || with
+# JavaScript's values (a && b || c is b when a and b are truthy, else c).
+# An expression it cannot read, or a context it is not given, is an error:
+# teach it the form rather than skip the group.
+EXPRESSION = re.compile(r"\$\{\{(.*?)\}\}", re.S)
+TOKEN = re.compile(r"\s*(?:('(?:[^']|'')*')|(&&|\|\||!|\(|\))|([A-Za-z_][A-Za-z0-9_.-]*))")
+KEYWORDS = {"true": True, "false": False, "null": None}
+
+
+def truthy(v):
+    return v not in ("", None, False, 0)
+
+
+def evaluate(expr, context):
+    tokens, pos, expr = [], 0, expr.strip()
+    while pos < len(expr):
+        m = TOKEN.match(expr, pos)
+        if not m:
+            raise ValueError("an expression this test cannot read: %r" % expr)
+        lit, op, path = m.groups()
+        tokens.append(("lit", lit[1:-1].replace("''", "'")) if lit else ("op", op) if op else ("path", path))
+        pos = m.end()
+
+    def primary(i):
+        kind, v = tokens[i]
+        if kind == "lit":
+            return v, i + 1
+        if kind == "path":
+            if v in KEYWORDS:
+                return KEYWORDS[v], i + 1
+            if v not in context:
+                raise ValueError("%s in %r: no such context in this test's runs" % (v, expr))
+            return context[v], i + 1
+        if v == "!":
+            val, i = primary(i + 1)
+            return not truthy(val), i
+        if v == "(":
+            val, i = disjunction(i + 1)
+            if tokens[i:i + 1] != [("op", ")")]:
+                raise ValueError("unbalanced parentheses in %r" % expr)
+            return val, i + 1
+        raise ValueError("an expression this test cannot read: %r" % expr)
+
+    def conjunction(i):
+        val, i = primary(i)
+        while tokens[i:i + 1] == [("op", "&&")]:
+            rhs, i = primary(i + 1)
+            val = rhs if truthy(val) else val
+        return val, i
+
+    def disjunction(i):
+        val, i = conjunction(i)
+        while tokens[i:i + 1] == [("op", "||")]:
+            rhs, i = conjunction(i + 1)
+            val = val if truthy(val) else rhs
+        return val, i
+
+    val, i = disjunction(0)
+    if i != len(tokens):
+        raise ValueError("an expression this test cannot read: %r" % expr)
+    return val
+
+
+def group_value(group, context):
+    def text(m):
+        v = evaluate(m.group(1), context)
+        return "true" if v is True else "false" if v is False else "" if v is None else str(v)
+    return EXPRESSION.sub(text, group)
+
+
+def group_of(concurrency):
+    return concurrency.get("group") if isinstance(concurrency, dict) else concurrency
+
+
+def run_contexts(w):
+    """A context per kind of run the workflow has: on main, on another
+    branch and on a tag, each with every combination of its dispatch
+    inputs given and left empty."""
+    inputs = ((triggers(w).get("workflow_dispatch") or {}).get("inputs") or {})
+    choices = []
+    for name, spec in inputs.items():
+        kind = (spec or {}).get("type")
+        values = (False, True) if kind == "boolean" else \
+            tuple(spec.get("options") or ()) if kind == "choice" else ("", "a-value")
+        choices.append(["inputs." + name] + list(values))
+    for ref in ("refs/heads/main", "refs/heads/a-branch", "refs/tags/a-tag"):
+        for combination in itertools.product(*(c[1:] for c in choices)):
+            context = {"github.ref": ref}
+            context.update({c[0]: v for c, v in zip(choices, combination)})
+            yield context
+
+
+RELEASE_RUN_NAME ="${{ inputs.release && format('release {0}', inputs.release) || '' }}"
 # Workflows whose runs are never cancelled by a newer one: a writer whose
 # commit back to main must not be cut off, census probes whose every run is
 # evidence, the release gate (each run sees the state as it is).
@@ -750,6 +845,38 @@ class Workflows(unittest.TestCase):
             self.assertNotIn("refs/heads/main", str(cancel), "%s keeps main's superseded runs" % name)
             self.assertTrue(cancel is True or (isinstance(cancel, str) and cancel.startswith("${{")),
                             "%s: cancel-in-progress is %r" % (name, cancel))
+
+    def test_group_values(self):
+        g = "x-${{ inputs.release && 'release' || github.ref }}"
+        self.assertEqual(group_value(g, {"inputs.release": "abc", "github.ref": "refs/heads/main"}), "x-release")
+        self.assertEqual(group_value(g, {"inputs.release": "", "github.ref": "refs/heads/main"}), "x-refs/heads/main")
+        self.assertEqual(group_value("y-${{ !inputs.dry && 'a' || 'b' }}", {"inputs.dry": True}), "y-b")
+        self.assertEqual(group_value("z-${{ (inputs.dry) }}", {"inputs.dry": False}), "z-false")
+        self.assertEqual(group_value("q-${{ 'it''s' }}", {}), "q-it's")
+        with self.assertRaises(ValueError):
+            group_value("${{ github.workflow }}", {"github.ref": "refs/heads/main"})
+        with self.assertRaises(ValueError):
+            group_value("${{ format('{0}', github.ref) }}", {"github.ref": "refs/heads/main"})
+
+    def test_no_job_waits_for_its_own_run(self):
+        """A job in the concurrency group its own run holds waits for the
+        run, which waits for the job: GitHub fails the job before it gets a
+        runner. Every release run of single-executable.yml and
+        icy-tower-windows.yml failed so -- the run in NAME-release, its
+        publishing job too -- from the release gate's first dispatch (run
+        42208024676) until those jobs got groups of their own."""
+        for name, w in all_workflows().items():
+            run = group_of(w.get("concurrency"))
+            jobs = {n: group_of(j.get("concurrency")) for n, j in (w.get("jobs") or {}).items()}
+            jobs = {n: g for n, g in jobs.items() if g}
+            if not run or not jobs:
+                continue
+            for context in run_contexts(w):
+                held = group_value(run, context)
+                for n, g in jobs.items():
+                    self.assertNotEqual(group_value(g, context), held,
+                                        "%s: job %s asks for its own run's group %r (a run with %s)"
+                                        % (name, n, held, context))
 
     def test_release_workflows(self):
         for release in (SE, WIN):

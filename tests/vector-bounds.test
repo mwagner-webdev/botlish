@@ -67,7 +67,7 @@ test vb-field-path {a field path is one place however often it is written: the g
 } -result {value 30}
 
 test vb-keeps-length {a swap between the guard and the read only replaces an element: the length is the same, the read proven} -body {
-    vbRun "fn f(v: MutableVector\[int\], i: int) -> int:\n    if i >= 0 and i < v.length():\n        old = v.swap(0, 99):\n            on IndexNotFound:\n                0\n        return v.at(i)\n    -1\nf(three(), 0)\n"
+    vbRun "fn f(v0: MutableVector\[int\], i: int) -> int:\n    v = v0\n    if i >= 0 and i < v.length():\n        old = v.swap(0, 99):\n            on IndexNotFound:\n                0\n        return v.at(i)\n    -1\nf(three(), 0)\n"
 } -result {value 99}
 
 test vb-copy-pushed {a copy of the vector pushed into is another value: the original's length is unchanged and its read still proven} -body {
@@ -79,18 +79,18 @@ test vb-copy-pushed {a copy of the vector pushed into is another value: the orig
 
 test vb-unproven-resize-between {a push, pop or clear of the vector anywhere in its function leaves the read unproven (UNHANDLED-ERROR), wherever it sits} -body {
     lmap op {"v.push(1)" "x = v.pop():\n            on IndexNotFound:\n                0" "v.clear()"} {
-        vbDiagnostics "fn f(v: MutableVector\[int\], i: int) -> int:\n    if i >= 0 and i < v.length():\n        $op\n        return v.at(i)\n    -1\n1\n"
+        vbDiagnostics "fn f(v0: MutableVector\[int\], i: int) -> int:\n    v = v0\n    if i >= 0 and i < v.length():\n        $op\n        return v.at(i)\n    -1\n1\n"
     }
-} -result {{{UNHANDLED-ERROR 4}} {{UNHANDLED-ERROR 6}} {{UNHANDLED-ERROR 4}}}
+} -result {{{UNHANDLED-ERROR 5}} {{UNHANDLED-ERROR 7}} {{UNHANDLED-ERROR 5}}}
 
 test vb-unproven-resize-after {a resize after the read in the same function counts too: a place resized anywhere is no stable length (the guard may have been read in an earlier iteration)} -body {
-    vbDiagnostics "fn f(v: MutableVector\[int\], i: int) -> int:\n    if i >= 0 and i < v.length():\n        x = v.at(i)\n        v.push(x)\n        return x\n    -1\n1\n"
-} -result {{UNHANDLED-ERROR 3}}
+    vbDiagnostics "fn f(v0: MutableVector\[int\], i: int) -> int:\n    v = v0\n    if i >= 0 and i < v.length():\n        x = v.at(i)\n        v.push(x)\n        return x\n    -1\n1\n"
+} -result {{UNHANDLED-ERROR 4}}
 
 test vb-unproven-place-call {a call giving the vector, or a struct holding it, to a place parameter may resize it} -body {
-    list [vbDiagnostics "fn grow(place b: Bag) -> unit:\n    b.items.push(1)\nfn f(b: Bag, i: int) -> int:\n    if i >= 0 and i < b.items.length():\n        grow(b)\n        return b.items.at(i)\n    -1\n1\n"] \
-        [vbDiagnostics "fn shrink(place v: MutableVector\[int\]) -> unit:\n    v.clear()\nfn f(b: Bag, i: int) -> int:\n    if i >= 0 and i < b.items.length():\n        shrink(b.items)\n        return b.items.at(i)\n    -1\n1\n"]
-} -result {{{UNHANDLED-ERROR 6}} {{UNHANDLED-ERROR 6}}}
+    list [vbDiagnostics "fn grow(place b: Bag) -> unit:\n    b.items.push(1)\nfn f(b0: Bag, i: int) -> int:\n    b = b0\n    if i >= 0 and i < b.items.length():\n        grow(b)\n        return b.items.at(i)\n    -1\n1\n"] \
+        [vbDiagnostics "fn shrink(place v: MutableVector\[int\]) -> unit:\n    v.clear()\nfn f(b0: Bag, i: int) -> int:\n    b = b0\n    if i >= 0 and i < b.items.length():\n        shrink(b.items)\n        return b.items.at(i)\n    -1\n1\n"]
+} -result {{{UNHANDLED-ERROR 7}} {{UNHANDLED-ERROR 7}}}
 
 test vb-unproven-context-member {a context parameter's vector may change in any function sharing the context: its reads are never proven by a length} -body {
     vbDiagnostics "context struct Log:\n    lines: MutableVector\[int\]\nfn f(i: int, context log: Log) -> int:\n    if i >= 0 and i < log.lines.length():\n        return log.lines.at(i)\n    -1\n1\n"
@@ -101,8 +101,8 @@ test vb-unproven-other-vector {a guard against one vector proves nothing about a
 } -result {{UNHANDLED-ERROR 3}}
 
 test vb-unproven-other-copy {two copies of a vector taken around a push have their own lengths: a guard against the longer one proves nothing about the shorter (both are stable places whose source was resized, so each length is its own place's)} -body {
-    vbDiagnostics "fn f(a: MutableVector\[int\], i: int) -> int:\n    c = a\n    a.push(1)\n    b = a\n    if i >= 0 and i < b.length():\n        return c.at(i)\n    -1\n1\n"
-} -result {{UNHANDLED-ERROR 6}}
+    vbDiagnostics "fn f(a0: MutableVector\[int\], i: int) -> int:\n    a = a0\n    c = a\n    a.push(1)\n    b = a\n    if i >= 0 and i < b.length():\n        return c.at(i)\n    -1\n1\n"
+} -result {{UNHANDLED-ERROR 7}}
 
 test vb-unproven-mask-without-guard {a mask by the length minus one needs the length proven nonzero} -body {
     vbDiagnostics "fn f(v: MutableVector\[int\], h: int) -> int:\n    v.at(bit_and(h, v.length() - 1))\n1\n"

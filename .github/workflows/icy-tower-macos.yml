@@ -317,6 +317,7 @@ jobs:
           b=$("$workspace.hidden/out/icy-tower-macos-aarch64/icy-tower" --headless --frames 600 --seed 7)
           echo "relocated: $a"
           [ "$a" = "$b" ]
+          case $a in frames=600\ *) ;; *) echo "::error::no summary line: $a"; exit 1 ;; esac
           codesign --verify --deep --strict "$APP"
 
       - name: The executable's tests (tests/workload-icy-tower.test, macOS section)
@@ -517,8 +518,15 @@ jobs:
           rm -rf "$dry"
           "$PY" -I audit/macos-release/tools/fixtures.py dry-run "$dry"
           set -a; . "$dry/env"; set +a
-          mkdir -p "$dry/app"
-          ditto "$APPDIR" "$dry/app/Icy Tower.app"
+          # the bundle assembled as the release job assembles its own: the
+          # tested executable with the environment's MACOS_BUNDLE_ID (the dry
+          # run's), so the signature names the identifier the stages check
+          # (a copy of the CI bundle, org.botlish.examples.icy-tower.ci, was
+          # refused the first time a runner's codesign signed: run
+          # 42377791764, ICY-TOWER-MACOS-APP-MILESTONE-1.md, section 25)
+          examples/games/icy-tower/package-macos.sh "$EXE" "$dry/app" --bundle-id "$MACOS_BUNDLE_ID" \
+            --version 0.0.0 --build 0.0.0 --sdl3-license "$SDLSRC/LICENSE.txt" >"$dry/package.log" 2>&1 \
+            || { cat "$dry/package.log"; echo "::error::the dry run's bundle was not assembled"; exit 1; }
           rel() { "$PY" -I examples/games/icy-tower/macos/release.py "$@"; }
           bounded() { perl -e '$t = shift; alarm $t; exec @ARGV or die "$ARGV[0]: $!\n"' 120 "$@"; }
           w="$dry/work"

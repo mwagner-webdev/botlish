@@ -14,7 +14,6 @@ import std::linux::io
 with context std::linux::io::create()
 with context sdl::create()
 
-result = game::main(game::arguments()):
+game::main(game::arguments()):
     on std::io::WriteFailed:
-        "failed: writing to the terminal"
-result
+        unit

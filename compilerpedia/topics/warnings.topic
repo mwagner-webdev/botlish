@@ -12,7 +12,6 @@ index: lint warnings backends
 alias: warning modes; -warnings; warnings off; warnings as errors; Werror; disable warnings; suppress warning; lint policy
 keywords: policy, mode, BOTLISH_WARNINGS, stderr, suppression, pragma
 related: lint.warnings-vs-errors principle.lint-precision principle.investigate-warnings cli.options
-docs: WARNINGS-SAME-RETURN.md REFACTOR-WARNINGS-CLEAN.md
 
 == THE MODES
     -warnings default   warnings are found and printed on stderr; the
@@ -101,7 +100,6 @@ code: CORE SEMANTIC SAME-RETURN-VALUE
 alias: same return value; repeated return value; returned from distinct exits
 keywords: return, exit, sentinel, guard, early return, redundant branch
 related: warning.same-failure principle.guard-clauses principle.errors-over-sentinels principle.lint-precision proof.exact-values
-docs: WARNINGS-SAME-RETURN.md
 
 == WHAT IT DETECTS
 A function whose exits -- its `return`s and the value its body ends with
@@ -239,7 +237,6 @@ code: CORE SEMANTIC SAME-FAILURE
 alias: same failure; repeated fail
 keywords: fail, error, exit, guard, translate errors
 related: warning.same-return-value concept.errors concept.error-payloads principle.errors-over-sentinels rule.one-handler-per-error
-docs: WARNINGS-SAME-FAILURE.md
 
 == WHAT IT DETECTS
 A function whose own body contains two or more reachable `fail NAME`
@@ -254,7 +251,7 @@ two different situations fail with the same error and nothing that tells
 them apart, the caller -- and the person reading a report -- cannot know
 which one happened. Either the guards could be one guard, or the failures
 deserve names (two errors, or one error with a payload field saying which
-problem it was: ERROR-PAYLOADS.md).
+problem it was: concept.error-payloads).
 
 == RECOMMENDED PRACTICE
 Ask whether a caller would want to tell the situations apart. If yes, give
@@ -334,7 +331,6 @@ code: CORE SEMANTIC METHOD-ELIGIBLE
 alias: method eligible; eligible for method syntax; method syntax warning
 keywords: method, receiver, sugar, functional call, nomethod
 related: concept.method-sugar concept.nomethod rule.method-resolution principle.receiver-first principle.lint-precision
-docs: WARNINGS-METHOD-ELIGIBLE.md METHOD-SUGAR.md REFACTOR-WARNINGS-CLEAN.md
 
 == WHAT IT DETECTS
 A call written in functional form, `f(x, y)` or `std::list::at(xs, i)`,
@@ -347,13 +343,13 @@ declared `nomethod`. One warning per call:
 
 == WHY IT MATTERS
 Receiver-oriented calls make the relationship between an operation and its
-primary value visible: `cells.at(i)`, `name.concat(suffix)`, `board.move(d)`
-read as "this value, this operation", chain left to right
+primary value visible: `cells.at(i)`, `name.concat(suffix)`,
+`board.move(d)` read as "this value, this operation", chain left to right
 (`text.trim().concat(x)` instead of nested calls read inside out), and put
 the subject first where the eye starts. Botlish chose method syntax as its
-preferred call form (METHOD-SUGAR.md) and made it exact sugar -- the same
-function, the same HIR -- so writing it costs nothing and the warning can
-promise that the rewrite changes nothing but the spelling.
+preferred call form and made it exact sugar -- the same function, the same
+HIR -- so writing it costs nothing and the warning can promise that the
+rewrite changes nothing but the spelling.
 
 == RECOMMENDED PRACTICE
 Prefer the method spelling when the first argument is the value the
@@ -452,7 +448,6 @@ code: CORE SEMANTIC FIXED-ARITY-LIST-RETURN
 alias: fixed arity list return; tuple return; positional result
 keywords: list, tuple, struct, multi-value, result, named parts
 related: principle.name-the-parts concept.structs concept.destructuring rule.no-list-destructuring concept.lists
-docs: WARNINGS-FIXED-ARITY-LIST-RETURN.md MULTI-VALUE-RESULTS.md
 
 == WHAT IT DETECTS
 A function none of whose value exits is anything but a written list literal
@@ -538,7 +533,6 @@ code: CORE SEMANTIC PROVES-NAMING
 alias: proves naming; predicate name; validator name
 keywords: proves, refinement, predicate, validator, naming, question mark
 related: concept.refinements principle.predicate-naming
-docs: WARNINGS-PROVES-NAMING.md REFINEMENT-VALUES.md
 
 == WHAT IT DETECTS
 A function whose declaration carries a `proves PARAM: Type` clause and has
@@ -608,7 +602,6 @@ code: CORE SEMANTIC ONE-CHAR-STRING-LITERAL
 alias: one char string literal; one character string; single character string
 keywords: character, UnicodeChar, char literal, String, append_char, char_at
 related: principle.characters-not-strings concept.strings stdlib.std::str::append_char stdlib.std::str::char_at
-docs: WARNINGS-ONE-CHAR-STRING-LITERAL.md ENCODE-UTF8-ALLOCATION-RESEARCH.md
 
 == WHAT IT DETECTS
 Every written String literal whose exact value is one character, measured as
@@ -737,7 +730,6 @@ code: CORE SEMANTIC MANY-BOOLEAN-ARGUMENTS
 alias: many boolean arguments; boolean literals arguments; boolean trap
 keywords: bool, true, false, flags, options, arguments
 related: concept.flags principle.options-are-flags rule.flags
-docs: WARNINGS-MANY-BOOLEAN-ARGUMENTS.md FLAGS.md
 
 == WHAT IT DETECTS
 A written call that passes two or more `true`/`false` literals at ordinary
@@ -803,7 +795,6 @@ code: CORE SEMANTIC CONTEXT-RESOURCE-ESCAPE
 alias: context resource escape; airlock leak; raw pointer escape; resource escape; leaked handle
 keywords: airlock, context, pointer, Ptr, FnPtr, NativeView, NativeEdit, opaque, private, raw, foreign, resource, contextualized, SDL
 related: concept.private concept.contexts concept.direct-modules concept.opaque-structs concept.c-ffi warning.many-boolean-arguments
-docs: MODULE-PRIVACY-AND-CONTEXT-ESCAPE-MILESTONE-1.md ICY-TOWER-CONTEXT-REFACTOR-CENSUS.md DIRECT-MODULES.md
 
 == WHAT IT DETECTS
 A module is an *airlock* when the compiler proves it contextualized

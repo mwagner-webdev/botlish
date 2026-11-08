@@ -955,7 +955,8 @@ fn reads?(s: str, a: MutableArray[int]) -> bool proves s: M:
     n > 0
 
 fn writes?(s: str, a: MutableArray[int]) -> bool proves s: M:
-    std::mutable_array::set(a, 0, 1):
+    w = a
+    std::mutable_array::set(w, 0, 1):
         on IndexNotFound:
             return false
     true

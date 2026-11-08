@@ -66,7 +66,7 @@
 namespace eval hir::transfer {
     # The natives whose calls this file elaborates, and the run-time
     # operations they become.
-    variable operations {std::transfer::encode transfer#encode std::transfer::decode transfer#decode}
+    variable operations {std::transfer::encode transfer#encode std::transfer::decode transfer#decode std::transfer::fingerprint ""}
     # The format version this compiler writes and reads (core/transfer.tcl).
     variable version 1
 }
@@ -89,6 +89,7 @@ proc hir::transfer::Node {stateVar type} {
     if {[hir::cabi::IsFiniteFloating $type]} {
         set type [hir::cabi::Carrier $type]
     }
+    set type [Erased $type]
     if {[dict exists $state keys $type]} {
         return [dict get $state keys $type]
     }
@@ -102,6 +103,37 @@ proc hir::transfer::Node {stateVar type} {
     lset nodes $index $made
     dict set state nodes $nodes
     return $index
+}
+
+# TYPE with every affine argument of an application at a slot no value
+# holds (hir::structs::SlotPositions: a phantom slot) replaced by `never`.
+# A value's schema cannot depend on such an argument -- no value of the
+# application holds a value of it, and an affine value is never sendable, so
+# only a phantom slot of a sendable type takes one -- and an affine argument
+# is never cut by the type bound, so a declaration that nests it in ever
+# larger applications (W[Coroutine{...}] of `next: List[W[List[T]]]`) would
+# make the schema's applications grow without end
+# (PARAMETERIZED-DECLARATION-SUMMARIES-MILESTONE-1.md). Unrestricted
+# arguments are kept as written: the bound keeps them finite, and the schema
+# of every type that could be transferred before is unchanged.
+proc hir::transfer::Erased {type} {
+    if {![hir::types::IsAppliedStruct $type]} {
+        return $type
+    }
+    set positions [hir::structs::SlotPositions [lindex $type 1]]
+    set arguments [lindex $type 2]
+    set changed 0
+    for {set i 0} {$i < [llength $arguments]} {incr i} {
+        if {[lindex $positions $i] eq {} && [llength $positions] == [llength $arguments]
+                && [hir::types::IsAffine [lindex $arguments $i]]} {
+            lset arguments $i never
+            set changed 1
+        }
+    }
+    if {!$changed} {
+        return $type
+    }
+    return [hir::types::MakeApplied [lindex $type 1] $arguments]
 }
 
 # The node of TYPE (Node's).
@@ -412,6 +444,8 @@ proc hir::transfer::Elaborate {hirVar} {
         set args [dict get $node args]
         if {$name eq "std::transfer::encode"} {
             set type [hir::typeOf $hir [lindex $args 0]]
+        } elseif {$name eq "std::transfer::fingerprint"} {
+            set type [ImprintedType $hir $e]
         } else {
             set type [hir::typeOf $hir $e]
         }
@@ -424,6 +458,17 @@ proc hir::transfer::Elaborate {hirVar} {
             continue
         }
         set schema [Schema $type]
+        if {$name eq "std::transfer::fingerprint"} {
+            # The constant itself: the call becomes the String of T's
+            # fingerprint (the one its transfers' bytes carry).
+            set node [dict get $hir exprs $e]
+            set fingerprint [lindex [RuntimeText $schema] 1]
+            set literal [hir::syntax::constNode [dict get $node origin] str $fingerprint]
+            dict set hir exprs $e [dict merge $literal [dict create id $e \
+                scope [dict get $node scope] type [hir::types::intern hir str] reachable [dict get $node reachable] \
+                value [core::value::str $fingerprint]]]
+            continue
+        }
         set refs {}
         foreach f [dict get $schema fns] {
             if {$parent eq ""} {
@@ -438,6 +483,16 @@ proc hir::transfer::Elaborate {hirVar} {
         # specialization -- reads its result type from it.)
         dict set hir exprs $e args [list [lindex $args 0] [hir::mutvec::NewConst hir [RuntimeText $schema] $e] $fns]
     }
+}
+
+# The type the imprint variable T of call E is bound to (std::transfer::
+# fingerprint[T]), or "" when the call has no binding.
+proc hir::transfer::ImprintedType {hir e} {
+    set binding [hir::imprint::BindingOf $hir $e]
+    if {$binding eq "" || ![dict exists $binding T]} {
+        return ""
+    }
+    return [dict get $binding T]
 }
 
 # A reference, placed like expression AT, to the owner function QUALIFIED

@@ -125,29 +125,44 @@ proc hir::decimal::Mentions {type {seen {}}} {
     }
     if {[hir::types::IsNamedStruct $type]} {
         # (An application's fields, its slots replaced by the arguments:
-        # TRAIT-CONSTRAINED-IMPRINTED-TYPES.md. SEEN guards a struct that
-        # holds itself.)
-        if {$type in $seen} {
-            return 0
-        }
-        set fields [hir::structs::AppliedFieldTypes $type]
-        set identity [hir::structs::identityOf [lindex $type 1]]
-        if {$identity ne ""} {
-            # A struct that declares its identity (REPRESENTATION-
-            # INDEPENDENT-VALUE-IDENTITY.md) is compared by it alone: what
-            # its equality reads are its identity fields, never the rest.
-            set fields [concat {*}[lmap field [dict get $identity fields] {
-                list $field [dict get $fields $field]
-            }]]
-        }
-        foreach {name t} $fields {
-            if {[Mentions $t [concat $seen [list $type]]]} {
-                return 1
-            }
+        # TRAIT-CONSTRAINED-IMPRINTED-TYPES.md -- answered from the
+        # declaration's summary, hir/summaries.tcl, by whether each argument
+        # mentions one where equality reads a value of it: a struct met again
+        # adds nothing, the least fixpoint.)
+        set classes [lmap a [hir::summaries::Arguments $type] {Mentions $a $seen}]
+        set level [hir::summaries::Level decimalMentions $type $classes]
+        return [expr {$level ne "" && $level > 0}]
+    }
+    return 0
+}
+
+# Mentions of {nstruct ID ARGUMENTS} from the fields equality reads (the
+# summary's node).
+proc hir::decimal::MentionsNode {id arguments} {
+    set type [list nstruct $id]
+    if {$arguments ne {}} {
+        lappend type $arguments
+    }
+    set fields [hir::structs::AppliedFieldTypes $type]
+    set identity [hir::structs::identityOf $id]
+    if {$identity ne ""} {
+        # A struct that declares its identity (REPRESENTATION-
+        # INDEPENDENT-VALUE-IDENTITY.md) is compared by it alone: what
+        # its equality reads are its identity fields, never the rest.
+        set fields [concat {*}[lmap field [dict get $identity fields] {
+            list $field [dict get $fields $field]
+        }]]
+    }
+    foreach {name t} $fields {
+        if {[Mentions $t]} {
+            return 1
         }
     }
     return 0
 }
+
+hir::summaries::define decimalMentions -algebra classes -neutral int \
+    -probes [list int $::core::decimal::kind] -node hir::decimal::MentionsNode
 
 # ---------------------------------------------------------------------------
 # Decimal constant expressions

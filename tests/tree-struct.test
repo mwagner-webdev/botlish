@@ -610,7 +610,7 @@ root = FileTree {path: "/", children: [src, file("/README.md")]}
 # ---------------------------------------------------------------------------
 # Standalone executables
 
-test ts-executable {a standalone executable compares, hashes, walks and prints trees as the JIT does: the program descriptor carries each tree shape's child slot, so a chain 300,000 deep compares on a 1 MiB stack, and the executable prints its result with the native printer} -constraints executableAot -setup {
+test ts-executable {a standalone executable compares, hashes and walks trees as the JIT does: the program descriptor carries each tree shape's child slot, so a chain 300,000 deep compares on a 1 MiB stack; the executable prints no value of its own, so its result is read through the driver protocol} -constraints executableAot -setup {
     set dir [makeDirectory {ts aot}]
 } -body {
     set hir [tsHir "$::tsDecls\na = chain(300000, 1)\n\[a == chain(300000, 1), a == chain(300000, 2), hash(node(1, \[leaf(2)\])), values(node(1, \[node(2, \[leaf(4)\]), leaf(3)\]), std::tree::Order::BreadthFirst), node(1, \[node(2, \[leaf(4)\]), leaf(3)\])\]\n"]
@@ -618,7 +618,7 @@ test ts-executable {a standalone executable compares, hashes, walks and prints t
     set saved [expr {[info exists ::env(BOTLISH_NATIVE_STACK_BYTES)] ? $::env(BOTLISH_NATIVE_STACK_BYTES) : ""}]
     set ::env(BOTLISH_NATIVE_STACK_BYTES) 1048576
     try {
-        tsWithoutGcStress {list [exec $binary] [core::formatValue [native::evalHir $hir]]}
+        tsWithoutGcStress {list [standaloneValue $binary] [core::formatValue [native::evalHir $hir]]}
     } finally {
         if {$saved eq ""} { unset ::env(BOTLISH_NATIVE_STACK_BYTES) } else { set ::env(BOTLISH_NATIVE_STACK_BYTES) $saved }
     }

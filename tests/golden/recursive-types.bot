@@ -165,8 +165,9 @@ fn register_mutable_vector_tests():
     fn b_copies_list() errors std::compiler::CompilerError:
         static compile:
             fn add(t: Tree, x: int) -> Tree:
-                t.items.push(x)
-                t
+                w = t
+                w.items.push(x)
+                w
 
             leaf = Tree {items: std::mutable_vector::from_list([1]), kids: []}
             root = Tree {items: std::mutable_vector::from_list([0]), kids: [leaf]}
@@ -181,9 +182,10 @@ fn register_mutable_vector_tests():
                 Forest {items: std::mutable_vector::from_list([x]), kids: std::mutable_vector::from_list([])}
 
             fn graft(t: Forest, x: int) -> Forest:
-                t.kids.push(leaf(x))
-                t.items.push(x)
-                t
+                w = t
+                w.kids.push(leaf(x))
+                w.items.push(x)
+                w
 
             root = leaf(0)
             copy = root
@@ -197,8 +199,9 @@ fn register_mutable_vector_tests():
                 n.next
 
             fn record(c: Capture, e: str) -> Capture:
-                c.events.push(e)
-                c
+                w = c
+                w.events.push(e)
+                w
 
             cap = Capture {events: std::mutable_vector::from_list(["x0"]), n: 1}
             cap2 = cap

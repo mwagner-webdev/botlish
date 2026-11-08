@@ -9,7 +9,10 @@
 #   2. shows the resolved graph (`botlish package graph`) and verifies the
 #      installation;
 #   3. builds the program as a native executable and runs it: both
-#      libraries' tasks under the one driver the program installs;
+#      libraries' tasks under the one driver the program installs (the
+#      executable prints nothing of its own: its value, the trace, is read
+#      through the driver protocol, BOTLISH_NATIVE_RESULT;
+#      PROGRAM-OUTPUT-MILESTONE-1.md);
 #   4. adds `future`, which locks another release of the driver: a
 #      DEPENDENCY-CONFLICT, and the installation unchanged.
 #
@@ -51,7 +54,8 @@ echo "== botlish verify"
 "$botlish" verify -repository "$repo"; check "verify is clean" test $? -eq 0
 echo "== native executable"
 "$botlish" -warnings error -emit-native-executable main.bot; check "the program builds as a native executable" test -x ./main
-./main | tee "$out/run.txt"
+BOTLISH_NATIVE_RESULT="$out/result.txt" ./main
+tr -d '\\{}' <"$out/result.txt" | tr -s ' \n' ' ' | sed 's/ $//' | tee "$out/run.txt"; echo
 check "beats ran under the shared driver" grep -q 'beats: the driver.s clock never went back' "$out/run.txt"
 check "probes ran under the shared driver" grep -q 'probes: every endpoint was empty, and closed' "$out/run.txt"
 echo "== a library locking another release of the driver"
@@ -60,7 +64,7 @@ before=$(find .bot_modules -type f -exec sha256sum {} + | sort | sha256sum)
 cat "$out/conflict.txt"
 check "add future fails" test $status -eq 1
 check "the failure is a DEPENDENCY-CONFLICT" grep -q '(PM DEPENDENCY-CONFLICT)' "$out/conflict.txt"
-check "it names future's lock" grep -q 'future 1.0.0 locks event_loop_linux 0.4.0 (the project -> future 1.0.0)' "$out/conflict.txt"
+check "it names future's lock" grep -q 'future 1.0.0 locks event_loop_linux 0.6.0 (the project -> future 1.0.0)' "$out/conflict.txt"
 after=$(find .bot_modules -type f -exec sha256sum {} + | sort | sha256sum)
 check "the installation is unchanged" test "$before" = "$after"
 echo "== checks"

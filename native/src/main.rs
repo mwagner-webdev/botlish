@@ -1204,12 +1204,19 @@ fn execute(command: &str, program: &nir::Program, runs: usize, alloc_mode: Alloc
         return 0;
     }
 
-    let mut vm = Vm::new(std::sync::Arc::new(program_info(program)), alloc_mode);
+    let info = std::sync::Arc::new(program_info(program));
+    let mut vm = Vm::new(info.clone(), alloc_mode);
     if let Some(snapshot) = snapshot {
         vm.set_argv(snapshot);
     }
     compiled.install_constants(&mut vm);
     vm.set_framemap(compiled.framemap.clone());
+    // What a Botlish thread's start makes its Vm with (runtime/thread.rs):
+    // a Vm of this compiled image, on the thread that will run it. The image
+    // outlives every thread: `finish_all` joins them before it is released,
+    // and one that does not end keeps it alive (forgotten) until the
+    // process exits.
+    vm.thread.factory = Some(jit_factory(&compiled, info));
     #[cfg(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc")))]
     let _overflow_guard = {
         let stack = runtime::native_stack::NativeStack::current().expect("the thread's stack bounds");
@@ -1254,6 +1261,7 @@ fn execute(command: &str, program: &nir::Program, runs: usize, alloc_mode: Alloc
             emit(&format!("timing {compile_us} {best} {runs} {}", vm.heap.collections));
         }
     }
+    let threads_ended = runtime::thread::finish_all();
     if alloc_mode.enabled() {
         let sites = alloc_mode.sites().then(|| sites_tcl(&compiled.sites, &vm.metrics.sites)).unwrap_or_default();
         emit(&format!("alloc {}", vm.metrics.to_tcl(&sites)));
@@ -1269,5 +1277,31 @@ fn execute(command: &str, program: &nir::Program, runs: usize, alloc_mode: Alloc
         Ok(value) => emit(&tcl_list(&["value".to_string(), value])),
         Err(error) => emit_error(&error.error_code(), &error.message(&vm.info)),
     }
+    if !threads_ended {
+        // A thread still running: its code stays mapped until the process
+        // exits.
+        std::mem::forget(compiled);
+    }
     0
+}
+
+/// The factory of a JIT-compiled program (runtime/thread.rs): a Vm of
+/// COMPILED's image with INFO, made on the calling thread.
+fn jit_factory(compiled: &codegen::CompiledProgram, info: std::sync::Arc<runtime::vm::ProgramInfo>) -> std::sync::Arc<runtime::thread::VmFactory> {
+    struct Image(*const codegen::CompiledProgram);
+    // SAFETY: the compiled program is read-only after compilation (the
+    // image every Vm shares: PER-THREAD-RUNTIME-STATE-MILESTONE-1.md), and
+    // it outlives every thread that uses this factory (run's finish_all).
+    unsafe impl Send for Image {}
+    unsafe impl Sync for Image {}
+    let image = Image(compiled);
+    std::sync::Arc::new(move || {
+        let image = &image;
+        // SAFETY: see Image.
+        let compiled = unsafe { &*image.0 };
+        let mut vm = Vm::new(info.clone(), runtime::metrics::AllocMode::Off);
+        compiled.install_constants(&mut vm);
+        vm.set_framemap(compiled.framemap.clone());
+        Ok((vm, compiled.entry))
+    })
 }

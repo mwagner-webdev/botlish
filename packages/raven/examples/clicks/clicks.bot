@@ -42,7 +42,7 @@ fn next_count(screen: Screen, count: int, event: raven::Event) -> int:
 
 # COUNT after every event waiting (raven::events(), oldest first); the
 # label shows the new count.
-fn step(screen: Screen, count: int) -> int errors NonFiniteFloat:
+fn step(screen: Screen, count: int) -> int:
     counted = fold event in raven::events() with intermediate total count:
         screen.next_count(total, event)
     screen.status.set_text(caption(counted))
@@ -51,7 +51,7 @@ fn step(screen: Screen, count: int) -> int errors NonFiniteFloat:
 # The frame loop: a frame whenever something happens (wait_frame sleeps
 # until then), its events handled after it, until the window closes (the
 # frame is false); the count.
-fn run(screen: Screen, count: int) -> int errors NonFiniteFloat:
+fn run(screen: Screen, count: int) -> int:
     if not raven::wait_frame(-1.0):
         return count
     screen.run(screen.step(count))

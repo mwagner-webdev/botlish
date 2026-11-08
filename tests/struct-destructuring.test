@@ -1936,7 +1936,7 @@ proc executableValue {text} {
     close $channel
     try {
         exec [info nameofexecutable] [file join $::projectRoot main.tcl] -emit-native-executable $path
-        return [runStandalone [file rootname $path]]
+        return [standaloneValue [file rootname $path]]
     } finally {
         removeDirectory {destructuring executable}
     }
@@ -1999,7 +1999,7 @@ fn run(n: int) -> int:
 with context Log {digits: std::mutable_array::create(1, 0)}
 [run(1), run(20)]}
 
-test destructure-standalone-executable {the standalone executables of both spellings print the value every in-process backend computes} -constraints executableAot -body {
+test destructure-standalone-executable {the standalone executables of both spellings compute the value every in-process backend computes (read through the driver protocol)} -constraints executableAot -body {
     list [executableValue $::typedDestructured] [executableValue $::typedExplicit] [parity $::typedDestructured] [parity $::typedExplicit]
 } -result {{[2112, 42012]} {[2112, 42012]} {value {[2112, 42012]}} {value {[2112, 42012]}}}
 

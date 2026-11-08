@@ -95,6 +95,7 @@ tclsh9.0 tests/all.tcl                         # test suite, interp and compile 
 cargo build --release --manifest-path native/Cargo.toml   # build the native backend (§20)
 tclsh9.0 tests/native-coverage.tcl             # test suite on cranelift, classified (§20; -backend cranelift-generic)
 tclsh9.0 main.tcl -backend cranelift FILE.bot  # run natively: what it prints, then its value
+tclsh9.0 main.tcl run FILE.bot ARG...          # run it as a command: its own output only, its arguments
 tclsh9.0 main.tcl -emit-native-executable FILE.bot  # compile to ./FILE (Linux glibc, macOS arm64)
 tclsh9.0 main.tcl -emit-nir -emit-clif FILE.bot   # show NIR, then Cranelift IR, of every function
 tclsh9.0 main.tcl -emit-hir-interchange FILE.bot   # write the analyzed HIR as FILE.hirx (HIR-INTERCHANGE.md)
@@ -2658,12 +2659,17 @@ tclsh9.0 main.tcl -emit-native-executable examples/stdlib/csv.bot
 The output is a native executable beside the source, named by removing its
 extension: an ELF executable on Linux (x86-64, AArch64), a Mach-O arm64
 executable on macOS (MACOS-AARCH64-MILESTONE-5.md), for the host's own
-target. It prints the program's final value followed by a newline
-(for example, `42`, `"text"`, or `[1, 2]`). Compilation never executes the
-program. Runtime errors go to stderr and return a nonzero exit status.
+target. It prints what the program prints and nothing of its own: the
+program's value is never printed, and a program that completes exits 0
+(PROGRAM-OUTPUT-MILESTONE-1.md). Compilation never executes the program.
+Runtime errors go to stderr and return exit status 1. Tooling that needs
+the value (the test suite, CI) runs the executable in the driver protocol:
+with `BOTLISH_NATIVE_RESULT=FILE` it writes its `value V` (or `error CODE
+MESSAGE`) line to FILE. `tclsh9.0 main.tcl run FILE.bot ARG...` runs a
+program the same way without building it.
 
 The executable's `argv()` is the real process argument vector of each run
-(`./program one two` gives `["./program", "one", "two"]`, argument zero as the
+(`./program one two` reads `["./program", "one", "two"]`, argument zero as the
 launcher supplied it), validated as UTF-8 only if and when the program calls
 it; one executable serves any number of different runs. See ARGV.md.
 
@@ -2760,8 +2766,11 @@ no precision travels with it. `d64add` ... `d64neg` are the binary64
 operations; `d64lt` ... `d64eq`, `d64tof64` and `d64round` take the
 precision as an operand and call the runtime's exact helpers
 (`runtime/decimal.rs`, `num-bigint`), which agree with `core/decimal.tcl` bit
-for bit. A standalone executable prints its result without types, so a
-DecimalRounded value prints `<DecimalRounded>` there.
+for bit. A standalone executable prints no result at all
+(PROGRAM-OUTPUT-MILESTONE-1.md); its value, read through the driver
+protocol, carries no types either, so a DecimalRounded value shows as
+`<DecimalRounded>` there: a program that wants its digits writes them with
+`std::decimal_rounded::to_string`.
 
 **Strings** are UTF-8 with a cached character count and an ASCII flag.
 `std::str::length` and `std::str::substring` count Unicode scalar values, including
@@ -2891,9 +2900,13 @@ with main.tcl's standard output and standard error (native::evalHir's
 `-output inherit`), so what it writes (`std::io::print_line`, `std::linux::io::write`)
 appears as it writes it, byte for byte, between main.tcl's `== FILE
 (BACKEND)` line and its `value:` (or `error:`) line, exactly as a
-standalone executable writes it before printing its value; the driver's
+standalone executable writes it (an executable prints nothing after it:
+it prints no value, PROGRAM-OUTPUT-MILESTONE-1.md); the driver's
 result comes back through a file of its own (`--result`), never through the
-program's output. A program that fails after printing keeps what it printed.
+program's output. `main.tcl run FILE ARG...` runs a program as a command:
+the program's output only -- no header, no value line -- its ARGs as its
+arguments, exit status 0 when it completes and 1 when it is rejected or
+fails (the message on standard error). A program that fails after printing keeps what it printed.
 `native::evalHir` without `-output` (the test suite, the tools) drops what a
 program writes. Printing needs the native backend: the only `std::io::IO`
 context, `std::linux::io::LinuxIO`, makes raw syscalls, which the Tcl backends

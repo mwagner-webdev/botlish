@@ -61,7 +61,23 @@ cleanup() { chmod -R u+w "$work" 2>/dev/null || true; rm -rf "$work"; }
 trap cleanup EXIT
 group=setup
 fail() { echo "FAIL[$group]: $*" >&2; exit 1; }
+# The value a run of an executable reports through the driver protocol
+# (BOTLISH_NATIVE_RESULT=FILE: an executable prints no value of its own,
+# PROGRAM-OUTPUT-MILESTONE-1.md), run as `env -i ARGS...`: the words of its
+# "value V" line, V's quoting (braces, backslashes) removed -- a list of
+# Ints [0, -1] is "value list int 0 int -1", a String "str TEXT".
+value_words() {
+  local result="$work/value-words.result"
+  rm -f "$result"
+  env -i BOTLISH_NATIVE_RESULT="$result" "$@" >/dev/null || return 1
+  tr -d '\\{}' <"$result" | tr -s ' \n' ' ' | sed 's/ $//'
+}
 section() { group=$1; echo "== $1"; }
+# A check of a command's output captures the output, then matches it, never
+# `COMMAND | grep -q PATTERN`: grep -q stops reading at its first match, and
+# a command still writing then dies of the broken pipe, which pipefail makes
+# the check's verdict (a failure, or in an `if` the silent pass of a check
+# that should have failed).
 # A private copy of the application in DIR (created), as its path.
 copy_app() { mkdir -p "$1"; cp -R "$source_app" "$1/"; echo "$1/Botlish.app"; }
 # APP's launcher with ARGS..., in an environment of HOME (default
@@ -150,7 +166,7 @@ done
 [[ $(cd "$work/sources dir" && bl "$app" -backend cranelift "./ünï cödé/main.bot") == *'value: 42' ]] || fail "a relative path"
 [[ $(cd "$src" && bl "$app" -backend cranelift -argv 'ü' -argv 'two words' args.bot) == *'value: ["ü", "two words"]' ]] || fail "-argv with non-ASCII text"
 (cd "$src" && bl "$app" -warnings off -emit-native-executable args.bot >/dev/null) || fail "an executable in the non-ASCII directory"
-[[ $(cd / && "$src/args" 'ü' 'two words') == '['*'"ü", "two words"]' ]] || fail "the executable's non-ASCII arguments: $("$src/args" 'ü' 'two words')"
+[[ $(cd / && value_words "$src/args" 'ü' 'two words') == *'str ü str two words' ]] || fail "the executable's non-ASCII arguments: $(cd / && value_words "$src/args" 'ü' 'two words')"
 echo "   spaces and non-ASCII characters in sources, arguments and executables: ok"
 
 # --- processes ------------------------------------------------------------------
@@ -216,7 +232,7 @@ done
 for pid in $pids; do wait "$pid" || fail "a concurrent run failed"; done
 for i in 1 2 3 4; do
   grep -qF 'value: [[0, [1, 4, -1]], [4, 5, 6, 7, -1]]' "$work/c$i/run.out" || fail "concurrent run $i: $(cat "$work/c$i/run.out")"
-  [[ $(env -i "$work/c$i/hello-darwin") == $'Hello, world!\nunit' ]] || fail "concurrent link $i"
+  [[ $(env -i "$work/c$i/hello-darwin") == 'Hello, world!' ]] || fail "concurrent link $i"
 done
 echo "   four concurrent native runs (coroutines on their own stacks) and links: ok"
 
@@ -377,24 +393,27 @@ for program in coroutine coroutine-kept context overflow args; do
 done
 for program in coroutine coroutine-kept context overflow args; do
   exe="$work/exe/$program"
-  file "$exe" | grep -q 'Mach-O 64-bit executable arm64' || fail "$program: $(file "$exe")"
-  otool -l "$exe" | grep -q 'cmd LC_MAIN' || fail "$program has no LC_MAIN entry point"
+  out=$(file "$exe") && grep -q 'Mach-O 64-bit executable arm64' <<<"$out" || fail "$program: $(file "$exe")"
+  out=$(otool -l "$exe") && grep -q 'cmd LC_MAIN' <<<"$out" || fail "$program has no LC_MAIN entry point"
   for library in $(otool -L "$exe" | tail -n +2 | awk '{print $1}'); do
     case $library in /usr/lib/*|/System/Library/*) ;; *) fail "$program needs $library" ;; esac
   done
-  if strings -a "$exe" | grep -q -e 'Botlish.app' -e "$work/builder"; then fail "$program names the application"; fi
-  if otool -l "$exe" | grep -q 'cmd LC_RPATH'; then fail "$program has an LC_RPATH"; fi
+  if out=$(strings -a "$exe") && grep -q -e 'Botlish.app' -e "$work/builder" <<<"$out"; then fail "$program names the application"; fi
+  if out=$(otool -l "$exe") && grep -q 'cmd LC_RPATH' <<<"$out"; then fail "$program has an LC_RPATH"; fi
 done
 rm -rf "$work/builder"
 cd /
-[[ $(env -i "$work/exe/coroutine") == '[0, 1, 4, -1]' ]] || fail "coroutine: $(env -i "$work/exe/coroutine")"
-[[ $(env -i BOTLISH_NATIVE_GC_STRESS=1 "$work/exe/coroutine") == '[0, 1, 4, -1]' ]] || fail "coroutine under GC stress"
+# An executable prints no value (PROGRAM-OUTPUT-MILESTONE-1.md): its stdout is
+# empty, and its value is read through the driver protocol (value_words).
+[[ -z $(env -i "$work/exe/coroutine") ]] || fail "coroutine printed: $(env -i "$work/exe/coroutine")"
+[[ $(value_words "$work/exe/coroutine") == 'value list int 0 int 1 int 4 int -1' ]] || fail "coroutine: $(value_words "$work/exe/coroutine")"
+[[ $(value_words BOTLISH_NATIVE_GC_STRESS=1 "$work/exe/coroutine") == 'value list int 0 int 1 int 4 int -1' ]] || fail "coroutine under GC stress"
 # (Kept on the general runtime: coroutine objects, their own stacks.)
-kept='[[0, [1, 4, -1]], [4, 5, 6, 7, -1]]'
-[[ $(env -i "$work/exe/coroutine-kept") == "$kept" ]] || fail "coroutine-kept: $(env -i "$work/exe/coroutine-kept")"
-[[ $(env -i BOTLISH_NATIVE_GC_STRESS=1 "$work/exe/coroutine-kept") == "$kept" ]] || fail "coroutine-kept under GC stress"
-[[ $(env -i "$work/exe/context") == '[3, 42, -6]' ]] || fail "context: $(env -i "$work/exe/context")"
-[[ $(env -i "$work/exe/args" a 'b c' ü) == *'"a", "b c", "ü"]' ]] || fail "args: $(env -i "$work/exe/args" a 'b c' ü)"
+kept='value list list int 0 list int 1 int 4 int -1 list int 4 int 5 int 6 int 7 int -1'
+[[ $(value_words "$work/exe/coroutine-kept") == "$kept" ]] || fail "coroutine-kept: $(value_words "$work/exe/coroutine-kept")"
+[[ $(value_words BOTLISH_NATIVE_GC_STRESS=1 "$work/exe/coroutine-kept") == "$kept" ]] || fail "coroutine-kept under GC stress"
+[[ $(value_words "$work/exe/context") == 'value list int 3 int 42 int -6' ]] || fail "context: $(value_words "$work/exe/context")"
+[[ $(value_words "$work/exe/args" a 'b c' ü) == *'str a str b c str ü' ]] || fail "args: $(value_words "$work/exe/args" a 'b c' ü)"
 status=0; env -i "$work/exe/overflow" >"$work/exe.out" 2>&1 || status=$?
 [[ $status == 1 ]] && grep -q 'NATIVE LIMIT STACK' "$work/exe.out" || fail "overflow: status $status, $(cat "$work/exe.out")"
 cd "$work/p"
@@ -410,8 +429,8 @@ write_text=$(sed -nE 's/^func ([0-9]+) "std::darwin::io::write_text".*/\1/p' "$w
 [[ -n $write_text ]] && awk -v want="call $write_text" '/^func/{inside = ($0 ~ /print_line<std::io::IO=std::darwin::io::DarwinIO>/)} inside && index($0, want) {found = 1} END {exit !found}' "$work/nir.out" ||
   fail "print_line does not call std::darwin::io::write_text directly"
 bl "$app" -warnings off -emit-native-executable hello-darwin.bot >/dev/null || fail "emit hello-darwin"
-otool -L hello-darwin | grep -q '/usr/lib/libSystem.B.dylib' || fail "hello-darwin does not link libSystem"
-[[ $(env -i ./hello-darwin) == $'Hello, world!\nunit' ]] || fail "hello-darwin: $(env -i ./hello-darwin)"
+out=$(otool -L hello-darwin) && grep -q '/usr/lib/libSystem.B.dylib' <<<"$out" || fail "hello-darwin does not link libSystem"
+[[ $(env -i ./hello-darwin) == 'Hello, world!' ]] || fail "hello-darwin: $(env -i ./hello-darwin)"
 echo "   checked, std::io::IO selected statically (print_line<...DarwinIO> calls write_text), libSystem, run: ok"
 
 echo "== app-test passed"

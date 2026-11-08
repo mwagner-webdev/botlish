@@ -899,7 +899,7 @@ proc executableValue {text} {
     close $channel
     try {
         exec [info nameofexecutable] [file join $::projectRoot main.tcl] -emit-native-executable $path
-        return [runStandalone [file rootname $path]]
+        return [standaloneValue [file rootname $path]]
     } finally {
         removeDirectory {elif executable}
     }
@@ -979,7 +979,7 @@ proc fileParity {text} {
     }
 }
 
-test elif-standalone-executable {the standalone executables of the elif and nested spellings print the value (and evaluation log) every in-process backend computes} -constraints executableAot -body {
+test elif-standalone-executable {the standalone executables of the elif and nested spellings compute the value (and evaluation log) every in-process backend computes (read through the driver protocol)} -constraints executableAot -body {
     set calls {[run(true, true, true), run(false, true, true), run(false, false, true), run(false, false, false)]}
     set elif $::typedPreamble$::typedElif$calls
     set nested $::typedPreamble$::typedNested$calls

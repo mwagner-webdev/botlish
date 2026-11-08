@@ -9,7 +9,6 @@ index: concepts
 alias: sendable; Sendable; send a value to another VM; copy a value between VMs; serialize for another thread; transfer; value copy; cross-VM message
 keywords: Sendable, sendable, std::transfer, encode, decode, transfer, copy, VM, heap, NOT-SENDABLE, TRANSFER-OPEN-TYPE, SENDABLE-DECLARATION, sendable clause, opaque, through, TransferMalformed, TransferTypeMismatch
 related: error.not-sendable error.transfer-open-type error.sendable-declaration concept.opaque-structs concept.affine concept.contexts
-docs: SENDABILITY-AND-VALUE-COPY-MILESTONE-1.md THREAD-ACTOR-ARCHITECTURE-CENSUS.md
 
 == WHAT IT IS
 A Botlish VM owns its heap, its runtime resources (coroutine stacks,
@@ -41,10 +40,13 @@ value is checked against T as it is read.
     proof is this program's), an opaque struct whose owner states nothing
     (std::event_loop::Reg, std::actor::Address: identities of one VM), and
     `any` or an unconstrained imprint variable (the type does not say).
-  * A transfer's type must be closed where it is called: no imprint
-    variable (TRANSFER-OPEN-TYPE). A value seen through a `Sendable` trait
-    view is encoded: its function is cloned per witness type before the
-    schema is written. decode's type is always a concrete type.
+  * A transfer's schema is its static type, closed where the transfer is
+    compiled. A generic body transferring a value of a variable its
+    signature constrains to Sendable (`Box[T]` of `struct Box[T satisfies
+    Sendable]`) is compiled once per binding of the variable, each copy
+    writing its closed schema; a value seen through a `Sendable` trait view
+    is encoded the same way (its function cloned per witness type). decode's
+    type is a concrete type, never a trait view (TRANSFER-OPEN-TYPE).
   * A copy is a new value: mutating a received MutableVector or MutableMap
     changes nothing in the sender, and the reverse. A map's or set's index
     and stored hashes are computed again by the receiver.
@@ -87,7 +89,6 @@ index: errors
 alias: not sendable; cannot send a function; cannot send a context; value cannot cross VMs; Sendable not satisfied
 keywords: Sendable, sendable, transfer, encode, decode, function, closure, coroutine, pointer, context, opaque, any, reason path
 related: concept.sendability error.sendable-declaration error.transfer-open-type
-docs: SENDABILITY-AND-VALUE-COPY-MILESTONE-1.md
 code: CORE SEMANTIC NOT-SENDABLE
 
 == MEANING
@@ -142,29 +143,28 @@ fn send(r: std::event_loop::Reg) -> std::abi::bytes::Bytes:
 
 @topic error.transfer-open-type
 title: TRANSFER-OPEN-TYPE: a transfer whose type is not known where it is written
-summary: A transfer's static type mentions an imprint variable (or decode's is a trait view): the transfer's schema is its static type, which a generic body does not know.
+summary: A transfer's static type does not name its values' type: decode of a trait view (decode[Sendable]), whose bytes could be of any witness; the transfer's schema is its static type.
 index: errors
-alias: transfer in a generic function; encode of an imprint variable; open type
-keywords: transfer, encode, decode, imprint variable, generic, schema, Sendable, satisfies
+alias: transfer in a generic function; encode of an imprint variable; open type; decode a trait view
+keywords: transfer, encode, decode, imprint variable, generic, schema, Sendable, satisfies, trait view
 related: concept.sendability error.not-sendable
-docs: SENDABILITY-AND-VALUE-COPY-MILESTONE-1.md
 code: CORE SEMANTIC TRANSFER-OPEN-TYPE
 
 == MEANING
 The bytes a transfer writes describe the value's static type (its schema
-and fingerprint), which the compiler writes into the call. Inside a body
-whose parameter is `Box[T]` with `T satisfies Sendable`, every value is
-sendable, but which schema to write depends on the caller's T. This
-milestone writes schemas only where the type is closed.
+and fingerprint), which the compiler writes into the call. Inside a
+generic body whose parameter is `Box[T]` with `T satisfies Sendable`, the
+schema depends on the caller's T: the compiler compiles such a body once
+per binding of T (as it clones a trait-polymorphic function per witness),
+so each copy encodes and decodes a closed type. What stays open is a
+transfer whose type names no type at all: `decode[Sendable]` would rebuild
+a value of whichever witness wrote the bytes.
 
 == WHAT TO DO
-Call std::transfer::encode or decode where the concrete type is known --
-in the caller -- and pass the Bytes into or out of the generic code. Or
-take the value as a `Sendable` trait view (`fn seal(x: Sendable)`): a
-trait-polymorphic function is cloned per witness type, so each clone
-encodes a closed type.
+Decode as the concrete type the bytes were written as (`decode[Job]`);
+to accept several, send an enum or a struct that says which.
 
-@example reject
+@example accept
 import std::transfer
 import std::abi::bytes
 
@@ -174,8 +174,20 @@ struct Box[T satisfies Sendable]:
 fn seal(b: Box[T]) -> std::abi::bytes::Bytes:
     std::transfer::encode(b)
 
-seal(Box[int] {value: 1})
-@caption Box[T]'s schema depends on the caller's T
+seal(Box[int] {value: 1}).length().value > 0
+@caption A generic encode of a Sendable-constrained slot: compiled per binding of T
+@value true
+@end
+
+@example reject
+import std::transfer
+import std::abi::bytes
+
+fn open(data: std::abi::bytes::Bytes) -> Sendable errors TransferMalformed, TransferVersion, TransferTypeMismatch, TransferInvalidValue, TransferLimit:
+    std::transfer::decode[Sendable](data)
+
+1
+@caption decode of a trait view: the bytes could be of any witness
 @error CORE SEMANTIC TRANSFER-OPEN-TYPE
 @end
 
@@ -186,7 +198,6 @@ index: errors
 alias: sendable clause; sendable fields; sendable through; owner statement of sendability
 keywords: sendable, opaque, owner, fields, through, representation, projection, rebuild, context, resource, any
 related: concept.sendability error.not-sendable concept.opaque-structs
-docs: SENDABILITY-AND-VALUE-COPY-MILESTONE-1.md
 code: CORE SEMANTIC SENDABLE-DECLARATION
 
 == MEANING

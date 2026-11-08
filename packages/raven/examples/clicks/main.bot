@@ -12,7 +12,7 @@ import std::str
 
 with context raven::create()
 
-fn main(context ui: raven::Ui) -> str errors raven::RavenFailed, NonFiniteFloat:
+fn main(context ui: raven::Ui) -> str errors raven::RavenFailed:
     raven::start(raven::desktop())
     count = clicks::build().run(0)
     raven::stop()
@@ -21,6 +21,4 @@ fn main(context ui: raven::Ui) -> str errors raven::RavenFailed, NonFiniteFloat:
 result = main():
     on raven::RavenFailed failure:
         "Raven did not start: ".concat(failure.detail)
-    on NonFiniteFloat:
-        "Raven reported a number that is no Float64"
 result

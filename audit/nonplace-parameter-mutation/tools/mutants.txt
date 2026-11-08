@@ -1,0 +1,171 @@
+# Mutants of NONPLACE-PARAMETER-MUTATION-CORRECTNESS-MILESTONE-1.md
+# (audit/nonplace-parameter-mutation/tools/mutate.tcl): deliberate breaks of
+# the rule that a mutation's destination is never rooted in a value
+# parameter (hir/mutvec.tcl's IsValueParam, ValueParamMutation and their two
+# uses in verify: a collection operation's receiver and a place parameter's
+# argument). Each must be killed by tests/nonplace-parameter-mutation.test,
+# by one of the tests its `!!` line names -- the test that states the rule
+# it breaks, never an unrelated failure.
+#
+#   @@ NAME DESCRIPTION
+#   !! TEST ...
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+
+# ---------------------------------------------------------------------------
+# The rule itself
+
+@@ npm-no-value-parameters no binding is a value parameter: every mutation of an ordinary parameter compiles again and silently changes the callee's copy (the SimCity defect)
+!! npm-direct npm-every-mutating-operation npm-simcity-field-helper npm-simcity-copy-destination npm-simcity-byte-module
+## hir/mutvec.tcl
+<<<<
+    set index [lsearch -exact [dict get $hir exprs $f params] $b]
+    return [expr {$index >= 0 && $index ni [dict getdef $hir exprs $f places {}]}]
+====
+    set index [lsearch -exact [dict get $hir exprs $f params] $b]
+    return 0
+>>>>
+
+@@ npm-receivers-unchecked only place arguments are checked: a collection operation on a value parameter compiles again
+!! npm-direct npm-every-mutating-operation npm-call-spelling
+## hir/mutvec.tcl
+<<<<
+        set path [Path $hir $receiver]
+        if {[IsValueParam $hir [lindex $path 0]]} {
+====
+        set path [Path $hir $receiver]
+        if {0 && [IsValueParam $hir [lindex $path 0]]} {
+>>>>
+
+@@ npm-place-arguments-unchecked only receivers are checked: a value parameter given to another function's place parameter -- the standard library's MutableMap and MutableSet operations among them -- compiles again
+!! npm-place-argument npm-stdlib-collections npm-cross-module
+## hir/mutvec.tcl
+<<<<
+                set path [Path $hir $arg]
+                if {[IsValueParam $hir [lindex $path 0]]} {
+====
+                set path [Path $hir $arg]
+                if {0 && [IsValueParam $hir [lindex $path 0]]} {
+>>>>
+
+@@ npm-whole-binding-only a field path of a value parameter is exempt: only the parameter itself is held to the rule (a struct's collections mutate the callee's copy again)
+!! npm-field-paths npm-place-argument
+## hir/mutvec.tcl
+<<<<
+        set path [Path $hir $receiver]
+        if {[IsValueParam $hir [lindex $path 0]]} {
+====
+        set path [Path $hir $receiver]
+        if {[lindex $path 1] eq {} && [IsValueParam $hir [lindex $path 0]]} {
+>>>>
+<<<<
+                set path [Path $hir $arg]
+                if {[IsValueParam $hir [lindex $path 0]]} {
+====
+                set path [Path $hir $arg]
+                if {[lindex $path 1] eq {} && [IsValueParam $hir [lindex $path 0]]} {
+>>>>
+
+@@ npm-typed-only an untyped parameter is exempt (a generic function's copy is mutated again): the rule read from the declared type instead of the declaration's `place`
+!! npm-untyped-parameter
+## hir/mutvec.tcl
+<<<<
+    set index [lsearch -exact [dict get $hir exprs $f params] $b]
+    return [expr {$index >= 0 && $index ni [dict getdef $hir exprs $f places {}]}]
+====
+    set index [lsearch -exact [dict get $hir exprs $f params] $b]
+    return [expr {$index >= 0 && $index ni [dict getdef $hir exprs $f places {}]
+        && [lindex [dict getdef $hir exprs $f declaredParamTypes {}] $index] ne {}}]
+>>>>
+
+# ---------------------------------------------------------------------------
+# What is not a value parameter
+
+@@ npm-place-parameters-too a place parameter counts as a value parameter: the caller's own storage can no longer be updated through one
+!! npm-mixed-parameters npm-imprinted npm-cross-module-accepted npm-simcity-field-helper
+## hir/mutvec.tcl
+<<<<
+    set index [lsearch -exact [dict get $hir exprs $f params] $b]
+    return [expr {$index >= 0 && $index ni [dict getdef $hir exprs $f places {}]}]
+====
+    set index [lsearch -exact [dict get $hir exprs $f params] $b]
+    return [expr {$index >= 0}]
+>>>>
+
+@@ npm-construct-bindings-too every parameter binding counts, not only a function's: a loop variable and a handler's payload binding (parameters of their construct's scope) are rejected
+!! npm-construct-bindings
+## hir/mutvec.tcl
+<<<<
+    if {$f eq "" || ![dict exists $hir exprs $f] || [dict get $hir exprs $f kind] ne "block"} {
+        return 0
+    }
+    set index [lsearch -exact [dict get $hir exprs $f params] $b]
+====
+    if {$f eq "" || ![dict exists $hir exprs $f] || [dict get $hir exprs $f kind] ne "block"} {
+        return 1
+    }
+    set index [lsearch -exact [dict get $hir exprs $f params] $b]
+>>>>
+
+@@ npm-context-parameters-too a context parameter counts as a value parameter: the installed context's members can no longer be mutated
+!! npm-context-parameter npm-reads-and-other-effects
+## hir/mutvec.tcl
+<<<<
+proc hir::mutvec::IsValueParam {hir b} {
+    if {$b eq "" || ![dict exists $hir bindings $b]} {
+        return 0
+    }
+====
+proc hir::mutvec::IsValueParam {hir b} {
+    if {$b eq "" || ![dict exists $hir bindings $b]} {
+        return 0
+    }
+    if {[IsContextParam $hir $b]} {
+        return 1
+    }
+>>>>
+
+# ---------------------------------------------------------------------------
+# The diagnostic
+
+@@ npm-not-the-calls-problem the rejection is reported outside the call's own check (no subject): the method decision no longer sees it as the mutating candidate's problem, and selects that candidate
+!! npm-method-several-candidates
+## hir/mutvec.tcl
+<<<<
+            hir::CheckingCall $e {ValueParamMutation hir $e $receiver $path "the receiver of [hir::affine::NativeName $hir $e]"}
+====
+            ValueParamMutation hir $e $receiver $path "the receiver of [hir::affine::NativeName $hir $e]"
+>>>>
+
+@@ npm-place-advice-for-affine an affine parameter is told to declare `place`, which no affine parameter can be
+!! npm-affine-parameter
+## hir/mutvec.tcl
+<<<<
+    if {$type ne {} && [hir::types::IsAffine $type]} {
+        # A place parameter is never affine (PlaceParamProblem): the one way
+====
+    if {0} {
+        # A place parameter is never affine (PlaceParamProblem): the one way
+>>>>
+
+@@ npm-related-dropped the diagnostic no longer relates the parameter's declaration
+!! npm-related-declaration
+## hir/mutvec.tcl
+<<<<
+    hir::Diagnose hir NONPLACE-PARAMETER-MUTATION $message $r [list [dict get $hir bindings $b origin]]
+====
+    hir::Diagnose hir NONPLACE-PARAMETER-MUTATION $message $r
+>>>>
+
+@@ npm-generic-advice the message no longer names the parameter's function: it says only that a parameter is mutated
+!! npm-direct
+## hir/mutvec.tcl
+<<<<
+    set message "$what is $at, which is value parameter \"$name\" of [FunctionName $hir $f], not a place parameter:
+====
+    set message "$what is $at, which is a value parameter, not a place parameter:
+>>>>

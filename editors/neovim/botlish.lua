@@ -16,8 +16,19 @@
 -- imports it. Then the usual keys apply: K (hover), gd or
 -- vim.lsp.buf.definition(), grr or vim.lsp.buf.references(), and the
 -- diagnostics as Neovim shows them.
+--
+-- Highlighting: syntax/botlish.vim beside this file (generated from the
+-- compiler's word lists by tools/editor-grammars.tcl) highlights a buffer
+-- at once, and the server's semantic tokens refine it once its analysis
+-- answers (Neovim requests them by itself; SYNTAX-HIGHLIGHTING-MILESTONE-
+-- 1.md). This file puts its own directory on the runtime path for that.
 
 vim.filetype.add({ extension = { bot = 'botlish' } })
+
+local here = vim.fs.dirname(debug.getinfo(1, 'S').source:sub(2))
+if here and vim.uv.fs_stat(here .. '/syntax/botlish.vim') then
+  vim.opt.runtimepath:append(here)
+end
 
 vim.api.nvim_create_autocmd('FileType', {
   pattern = 'botlish',

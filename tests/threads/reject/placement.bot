@@ -1,0 +1,6 @@
+# A thread entry of the entry program, whose top level no worker VM runs:
+# THREAD-ENTRY-PLACEMENT.
+thread fn here(n: int) -> int:
+    n
+
+1

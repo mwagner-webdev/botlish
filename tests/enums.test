@@ -683,15 +683,15 @@ test enum-native-gc-stress {case values survive collection at every allocation} 
     list [expr {$plain eq $stressed}] [enumOutcomes $hir]
 } -result {1 {same: [30, true, {VehicleType::Boat, VehicleType::Car}]}}
 
-test enum-executable-parity {a standalone executable carries the enum table and prints, compares and hashes cases identically} -constraints executableAot -body {
+test enum-executable-parity {a standalone executable carries the enum table and computes, compares and hashes cases identically (its value read through the driver protocol)} -constraints executableAot -body {
     withEnumModules {
         set path [file join $lib program.bot]
         writeFile $path "import geo\nimport std::immutable_set\nenum Local:\n    A,\n    B,\nfn same(x):\n    x\n\[Local::B, geo::VehicleType::Car, same(Local::A) == Local::A, same(Local::A) == same(Local::B), hash(Local::A), std::immutable_set::from_list(\[Local::A, Local::A\])\]\n"
         set hir [surface::readProgramFile $path]
         set expected [lindex [outcomeUnderHir interp $hir] 1]
         native::executable $hir [file rootname $path]
-        set plain [runStandalone [file rootname $path]]
-        set stressed [runStandalone [file rootname $path] BOTLISH_NATIVE_GC_STRESS 1]
+        set plain [standaloneValue [file rootname $path]]
+        set stressed [standaloneValue [file rootname $path] BOTLISH_NATIVE_GC_STRESS 1]
         list [expr {$plain eq $stressed}] [expr {$plain eq $expected}] $plain
     }
 } -result {1 1 {[Local::B, geo::VehicleType::Car, true, false, 816411275445553281, {Local::A}]}}

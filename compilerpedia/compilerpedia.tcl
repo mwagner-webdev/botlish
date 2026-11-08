@@ -31,7 +31,7 @@
 #   @topic ID                     starts a topic
 #   KEY: VALUE                    header lines, up to the first blank line:
 #                                   title summary (one each), index related
-#                                   docs symbol (words), alias keywords (";"-
+#                                   symbol (words), alias keywords (";"-
 #                                   separated phrases), code (one diagnostic
 #                                   or warning code per line), match ("CODE |
 #                                   GLOB": a printed diagnostic of CODE whose
@@ -81,7 +81,7 @@ namespace eval compilerpedia {
     # (words), of ";"-separated phrases (phrases), repeatable whole lines
     # (lines), or one line (line).
     variable keys {
-        title line summary line index words related words docs words symbol words
+        title line summary line index words related words symbol words
         alias phrases keywords phrases code lines match lines
     }
     variable exampleDirectives {value warn nowarn quiet backends output error at message caption target module}
@@ -94,7 +94,7 @@ namespace eval compilerpedia {
 # Reading topic files
 
 # The topics of the topic-file TEXT (named FILE in errors), in order, each a
-# dict {id file line title summary index related docs symbol alias keywords
+# dict {id file line title summary index related symbol alias keywords
 # code match body examples}: BODY a list of {heading ITEMS} sections (each
 # item {text LINE} or {example N}), EXAMPLES a list of example dicts
 # {id kind lines value warn nowarn quiet backends output error at message
@@ -877,12 +877,6 @@ proc compilerpedia::render {id} {
     if {$related ne ""} {
         lappend out "" RELATED
         lappend out {*}[EntryLines $related]
-    }
-    if {[dict get $topic docs] ne ""} {
-        lappend out "" "DESIGN DOCUMENTS (in a repository checkout; optional)"
-        foreach doc [dict get $topic docs] {
-            lappend out "    docs/$doc"
-        }
     }
     return [join $out \n]
 }

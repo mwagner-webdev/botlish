@@ -50,9 +50,12 @@
 # the facts over-approximate -- a concrete counterexample is the witness
 # tool's, audit/emission-claims/tools/witness.tcl, which runs the program);
 # not proved (EMIT-UNKNOWN-VALUE, -NOT-SYMBOL, -UNSUPPORTED, -BUDGET: the
-# analysis lacks the facts); dependent (the claim's code holds a diagnostic
-# of its own, poison or a syntax hole: nothing more is said, nothing
-# certified). Every verdict but proven is a diagnostic of the claim: an
+# analysis lacks the facts); dependent (the code the claim's walk reads --
+# its own, a call's callee reference, a helper's whose `never` result it
+# relies on -- holds a diagnostic of its own, poison or a syntax hole:
+# nothing more is said, nothing certified; an unresolved name is typed
+# `never`, which is no divergence: EMISSION-CALLEE-DEPENDENCY-CORRECTNESS-
+# MILESTONE-1.md). Every verdict but proven is a diagnostic of the claim: an
 # explicit claim is certified or the compilation is rejected.
 #
 # Certificates and trust. A proven claim's certificate states what a caller
@@ -115,6 +118,7 @@ namespace eval hir::emission {
     variable fails {}
     variable viol {}
     variable children {}
+    variable reads {}
     variable certUses {}
     variable tainted 0
 }
@@ -627,9 +631,10 @@ proc hir::emission::Within {s target} {
 # (exits), every state it is in between symbols (visits), every state it may
 # fail in (fails: at a `fail` or a call that may fail -- where a handler
 # around the call starts), its result value, the violations its own yields
-# commit, the summaries it uses (children), the certificates it composed
-# with, and whether its code holds what the program's own diagnostics are
-# about (tainted). Keyed by {B C ARGS}; computed in rounds to a fixpoint
+# commit, the summaries it uses (children), the summaries it reads only for
+# their code (reads: Read), the certificates it composed with, and whether
+# its code holds what the program's own diagnostics are about (tainted).
+# Keyed by {B C ARGS}; computed in rounds to a fixpoint
 # (Solve), each value only growing, so recursion is analyzed; a summary of a
 # converged solve is final and reused by every later claim of the
 # compilation.
@@ -656,7 +661,7 @@ proc hir::emission::Summary {b c args_} {
         }
     } else {
         set rec [dict create final 0 round 0 exits {} visits {} fails {} result {} violations {} \
-            children {} certUses {} changes 0 tainted 0]
+            children {} reads {} certUses {} changes 0 tainted 0]
     }
     if {$computed >= $maxSummaries} {
         set budgetHit 1
@@ -694,7 +699,7 @@ proc hir::emission::Summary {b c args_} {
     }
     set rec [dict create final 0 round $round exits $exits visits $visits fails $fails result $result \
         violations [dict get $computedRec violations] children [dict get $computedRec children] \
-        certUses [dict get $computedRec certUses] changes $changes \
+        reads [dict get $computedRec reads] certUses [dict get $computedRec certUses] changes $changes \
         tainted [expr {[dict get $rec tainted] || [dict get $computedRec tainted]}]]
     dict set cache $key $rec
     return $rec
@@ -747,9 +752,10 @@ proc hir::emission::Walk {b c args_} {
     variable fails
     variable viol
     variable children
+    variable reads
     variable certUses
     variable tainted
-    set saved [list $block $env $exprVal $returns $retval $breaks $continues $visits $fails $viol $children $certUses $tainted]
+    set saved [list $block $env $exprVal $returns $retval $breaks $continues $visits $fails $viol $children $reads $certUses $tainted]
     set block $b
     set env [dict create]
     set exprVal [dict create]
@@ -761,6 +767,7 @@ proc hir::emission::Walk {b c args_} {
     set fails {}
     set viol {}
     set children {}
+    set reads {}
     set certUses {}
     set tainted 0
     set node [Node $b]
@@ -769,8 +776,8 @@ proc hir::emission::Walk {b c args_} {
             Violation EMIT-UNSUPPORTED $b "[FunctionText $b] is a specialization of a trait-polymorphic or context-trait function: the implementations it calls were selected for the program it is in, so the checker does not follow them" "" {}
             set fails [list $c]
             set rec [dict create exits {} visits [list $c] fails [list $c] result * violations $viol \
-                children {} certUses {} tainted 0]
-            lassign $saved block env exprVal returns retval breaks continues visits fails viol children certUses tainted
+                children {} reads {} certUses {} tainted 0]
+            lassign $saved block env exprVal returns retval breaks continues visits fails viol children reads certUses tainted
             return $rec
         }
     }
@@ -788,8 +795,9 @@ proc hir::emission::Walk {b c args_} {
         set result $retval
     }
     set rec [dict create exits $exits visits [lsort -unique $visits] fails [lsort -unique $fails] result $result \
-        violations $viol children [lsort -unique $children] certUses [lsort -unique $certUses] tainted $tainted]
-    lassign $saved block env exprVal returns retval breaks continues visits fails viol children certUses tainted
+        violations $viol children [lsort -unique $children] reads [lsort -unique $reads] \
+        certUses [lsort -unique $certUses] tainted $tainted]
+    lassign $saved block env exprVal returns retval breaks continues visits fails viol children reads certUses tainted
     return $rec
 }
 
@@ -820,24 +828,32 @@ proc hir::emission::EvalBody {body s} {
 
 proc hir::emission::Eval {e s} {
     variable exprVal
-    variable hir
-    variable diagnosed
-    variable tainted
     if {$s eq {}} {
         return [list {} {}]
     }
     set node [Node $e]
-    if {[dict exists $hir poisoned $e] || [dict exists $hir syntaxDependent $e] || [dict exists $diagnosed $e]} {
-        # What the program's own diagnostics are about: the claim is
-        # dependent (verify).
-        set tainted 1
-    }
+    Taint $e
     if {![dict get $node reachable]} {
         return [list {} {}]
     }
     set r [EvalNode $e $node $s]
     dict set exprVal $e [lindex $r 1]
     return $r
+}
+
+# Marks the summary being walked tainted when the walk reads expression E
+# and E is what the program's own diagnostics are about -- poison, code
+# whose meaning depends on source the front end could not read, or a
+# diagnostic's own expression (an unresolved name's reference): the claim is
+# dependent (verify). Every expression the walk reads passes here, also one
+# it reads without evaluating it (a call's callee reference, EvalCall).
+proc hir::emission::Taint {e} {
+    variable hir
+    variable diagnosed
+    variable tainted
+    if {[dict exists $hir poisoned $e] || [dict exists $hir syntaxDependent $e] || [dict exists $diagnosed $e]} {
+        set tainted 1
+    }
 }
 
 proc hir::emission::EvalNode {e node s} {
@@ -960,6 +976,13 @@ proc hir::emission::EvalCall {e node s} {
     set callee [dict get $node callee]
     if {[Kind $callee] ne "ref"} {
         lassign [Eval $callee $s] s -
+    } else {
+        # A callee named by a reference has no value the walk needs, but
+        # what the call does is read through it: an unresolved name
+        # (UNBOUND, a forward reference) is typed `never` with no target,
+        # which is no divergence the walk may stop at
+        # (EMISSION-CALLEE-DEPENDENCY-CORRECTNESS-MILESTONE-1.md).
+        Taint $callee
     }
     set vals {}
     foreach a [dict get $node args] {
@@ -996,6 +1019,14 @@ proc hir::emission::EvalCall {e node s} {
         if {$tk eq "block" && [hir::coroutines::MayYield $hir $t]} {
             Apply $e $t $s $vals
         } else {
+            if {$tk eq "block"} {
+                # That it never completes is a fact of the function's code
+                # (its inferred result), which the walk relies on here: the
+                # code is read (Read) -- what of the program's own
+                # diagnostics it holds (an unresolved name, whose `never` is
+                # no divergence) and its fingerprint are part of the proof.
+                Read $t $vals
+            }
             Failing $s
         }
         return [list {} {}]
@@ -1082,6 +1113,21 @@ proc hir::emission::Child {t c vals} {
     set vals [Contextual $t $vals]
     lappend children [list $t $c $vals]
     return [Summary $t $c $vals]
+}
+
+# The summary of block T with VALS, read for its code alone: a call of T
+# the walk ends at because T's result is `never` and T yields nothing, so
+# nothing T does -- its exits, result, failures or what it cannot follow
+# (its violations, EMIT-UNSUPPORTED) -- is part of the trace. What its code
+# is, is: whether it holds the program's own diagnostics (its `never` may be
+# an unresolved name's, EvalCall) and its fingerprint, so the claim is
+# dependent on it, and its certificate on its code (CheckClaim: the read
+# set). A summary also reached as a child is judged as one.
+proc hir::emission::Read {t vals} {
+    variable reads
+    set vals [Contextual $t $vals]
+    lappend reads [list $t free $vals]
+    return [Summary $t free $vals]
 }
 
 # VALS, or the declared facts when function T has had too many argument
@@ -1679,8 +1725,10 @@ proc hir::emission::UseGuard {t} {
     dict set guardsUsed $t 1
 }
 
-# Every summary reachable from KEY, KEY included.
-proc hir::emission::Reachable {key} {
+# Every summary reachable from KEY, KEY included, over the edges FIELDS
+# names: `children` (the summaries a proof judges), and `reads` too (the
+# summaries whose code it read: Read).
+proc hir::emission::Reachable {key {fields children}} {
     variable cache
     set seen [dict create]
     set work [list $key]
@@ -1688,7 +1736,9 @@ proc hir::emission::Reachable {key} {
         set work [lassign $work k]
         if {[dict exists $seen $k] || ![dict exists $cache $k]} continue
         dict set seen $k 1
-        lappend work {*}[dict get $cache $k children]
+        foreach field $fields {
+            lappend work {*}[dict get $cache $k $field]
+        }
     }
     return [dict keys $seen]
 }
@@ -1981,8 +2031,12 @@ proc hir::emission::CheckClaim {claim} {
     set args_ [Declared $b]
     set rec [Solve $b $entry $args_]
     set keyset [Reachable [list $b $entry $args_]]
+    # The summaries whose code the proof read, those it judges among them:
+    # what decides whether the claim is dependent, and what its certificate
+    # depends on.
+    set readset [Reachable [list $b $entry $args_] {children reads}]
     set dependent 0
-    foreach k $keyset {
+    foreach k $readset {
         if {[dict get $cache $k tainted]} {
             set dependent 1
             break
@@ -2017,7 +2071,7 @@ proc hir::emission::CheckClaim {claim} {
     }
     if {$diags eq {}} {
         set t0 [clock microseconds]
-        set cert [Certificate $claim $keyset $exits [dict get $rec visits] [dict get $rec fails] $value]
+        set cert [Certificate $claim $readset $exits [dict get $rec visits] [dict get $rec fails] $value]
         dict incr ::hir::emission::stats certifyMicroseconds [expr {[clock microseconds] - $t0}]
         dict set certs $id $cert
         if {$useMemo} {

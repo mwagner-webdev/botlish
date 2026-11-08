@@ -6,7 +6,7 @@
 
 <br />
 
-<img src="https://readme-typing-svg.demolab.com?font=JetBrains+Mono&weight=600&size=20&pause=1400&color=0891b2&center=true&vCenter=true&width=900&lines=Reads+like+a+scripting+language.;The+compiler+explains+the+language.;Every+error+is+explicitly+handled+unless+proven+not+to+occur.;Every+dependency+is+explicit,+including+I/O+and+time.;Compiles+to+fast+native+code.;Actor-like+concurrency+model,+no+borrow+checker.;Runs+everywhere,+but+adopts+to+local+conventions." alt="Reads like a scripting language. The compiler explains the language. Every error is explicitly handled unless proven not to occur. Every dependency is explicit, including I/O and time. Compiles to fast native code. Actor-like concurrency model, no borrow checker. Runs everywhere, but adopts to local conventions." />
+<img src="https://readme-typing-svg.demolab.com?font=JetBrains+Mono&weight=600&size=20&pause=1400&color=0891b2&center=true&vCenter=true&width=900&lines=Reads+like+a+scripting+language.;The+compiler+explains+the+language.;Every+error+is+explicitly+handled+unless+proven+not+to+occur.;Every+dependency+is+explicit,+including+I/O+and+time.;Compiles+to+fast+native+code.;Actor-like+concurrency+model,+no+borrow+checker.;Runs+everywhere,+but+adapts+to+local+conventions." alt="Reads like a scripting language. The compiler explains the language. Every error is explicitly handled unless proven not to occur. Every dependency is explicit, including I/O and time. Compiles to fast native code. Actor-like concurrency model, no borrow checker. Runs everywhere, but adapts to local conventions." />
 
 <br />
 
@@ -52,8 +52,9 @@ and changed only through a binding the compiler can see.
 
 The same program runs on a reference interpreter, on a compiler to Tcl, and
 on a native backend that compiles through [Cranelift](https://cranelift.dev)
-to machine code, either just in time or as a standalone Linux x86-64
-executable.
+to machine code, either just in time or as a standalone executable for
+Linux, for macOS on Apple Silicon ([below](#botlish-on-macos)) or for
+Windows.
 
 ```botlish
 import std::io
@@ -73,10 +74,13 @@ hello():
 $ tclsh9.0 main.tcl -emit-native-executable examples/io/hello.bot
 $ examples/io/hello
 Hello, world!
-unit
+$ tclsh9.0 main.tcl run examples/io/hello.bot
+Hello, world!
 ```
 
-(An executable prints its program's value last: here `unit`.) `hello` never
+(An executable prints what its program writes and nothing else, and `run`
+runs a program the same way without building it:
+[PROGRAM-OUTPUT-MILESTONE-1.md](docs/PROGRAM-OUTPUT-MILESTONE-1.md).) `hello` never
 says where its output goes. `std::io::print_line` needs an `std::io::IO` context; the
 program installs one, `std::linux::io::LinuxIO`; and the compiler turns the call
 into a direct call of `std::linux::io::write_text`, which is one `write(2)` system
@@ -134,12 +138,15 @@ the [generated SDL3 binding](docs/C-BINDGEN.md). It opens a window, reads the
 keyboard, bounces the player off platforms under gravity, generates the
 tower forever, scrolls the camera up, keeps the score, and restarts. It
 compiles to one native executable of under 1 MB, with no assets beside it,
-for Linux x86-64 and for Windows x86-64.
+for Linux x86-64 and for Windows x86-64, and to a notarized application
+for macOS on Apple Silicon.
 
 <p align="center">
   <a href="https://github.com/mwagner-webdev/botlish/raw/main/audit/icy-tower/artifacts/icy-tower"><img src="./docs/assets/download-icy-tower.svg" alt="Download Icy Tower: a game written in Botlish, for Linux x86-64" width="460" /></a>
   <br />
   <a href="https://github.com/mwagner-webdev/botlish/releases/download/icy-tower-windows-latest/icy-tower-windows-x86_64.zip"><img src="./docs/assets/download-icy-tower-windows.svg" alt="Download Icy Tower: a game written in Botlish, for Windows x86-64" width="460" /></a>
+  <br />
+  <a href="https://github.com/mwagner-webdev/botlish/releases/download/icy-tower-macos-v1.0.3/icy-tower-macos-aarch64.zip"><img src="./docs/assets/download-icy-tower-macos.svg" alt="Download Icy Tower: a game written in Botlish, for macOS on Apple Silicon" width="460" /></a>
 </p>
 
 ```sh
@@ -164,9 +171,77 @@ artifact; `examples/games/icy-tower/build-windows.sh` builds it on Windows
 code-signed yet, so SmartScreen says "Windows protected your PC": choose
 "More info", then "Run anyway". The workflow signs it with Azure Artifact
 Signing once that is configured (ICY-TOWER-WINDOWS.md, "Signing").
+
+On a Mac with Apple Silicon (macOS 11 or later), download
+[`icy-tower-macos-aarch64.zip`](https://github.com/mwagner-webdev/botlish/releases/download/icy-tower-macos-v1.0.3/icy-tower-macos-aarch64.zip)
+from the [Icy Tower 1.0.3 release](https://github.com/mwagner-webdev/botlish/releases/tag/icy-tower-macos-v1.0.3),
+open it, move `Icy Tower.app` to Applications and open it from the Finder.
+It is signed with a Developer ID, notarized by Apple and its ticket is
+stapled, so macOS asks only the usual question about an application
+downloaded from the Internet. SDL 3 is linked into it, so there is nothing
+else to install; the release's `SHA256SUMS` and `provenance.json` say what
+it was built from ([below](#botlish-on-macos)).
+
 Its rules run headless on all four backends, the executable agrees with an
 independent oracle, and valgrind finds no leaks
 ([ICY-TOWER-VERTICAL-SLICE-1.md](docs/ICY-TOWER-VERTICAL-SLICE-1.md)).
+
+## Botlish on macOS
+
+Botlish runs on macOS as a citizen of the platform, not as a Linux program
+in disguise: the same source adapts to the host's conventions, and the
+compiler keeps its own guarantees inside them. Or, as the census that
+shaped the macOS graphical work puts it
+([MACOS-GRAPHICAL-MAIN-THREAD-CENSUS.md](docs/MACOS-GRAPHICAL-MAIN-THREAD-CENSUS.md)):
+
+> Botlish must be able to run as a citizen of a host-owned graphical
+> environment. The process main thread, native stack and event lifecycle
+> belong to the host's contracts; Botlish's GC, coroutines and safety
+> guarantees belong to its own.
+
+On Apple Silicon that means:
+
+* **The native backend.** The JIT, standalone Mach-O executables linked by
+  Apple's own linker, C calls in Apple's arm64 calling convention, native
+  coroutines, and a stack guard that turns an exhausted stack into
+  `NATIVE LIMIT STACK` instead of a crash
+  ([MACOS-AARCH64-PORT-AUDIT.md](docs/MACOS-AARCH64-PORT-AUDIT.md)).
+* **The system's interfaces, not the kernel's.** On Linux, `std::linux::io`
+  makes system calls itself. Darwin's system-call interface is private, so
+  on macOS `std::darwin::io` calls libSystem's `write` and `read` through
+  the C FFI instead, reading errno right after a failed call. The `hello`
+  function above is the same on both systems: only the context the entry
+  program installs differs
+  ([MACOS-AARCH64-MILESTONE-8.md](docs/MACOS-AARCH64-MILESTONE-8.md)).
+* **The host's threads and stacks.** Cocoa wants a window on the process's
+  main thread, so a graphical program is built with `-native-startup
+  main-thread` and runs there, on a main-thread stack the link reserves
+  ([MAIN-THREAD-STARTUP-MILESTONE-1.md](docs/MAIN-THREAD-STARTUP-MILESTONE-1.md)).
+* **Apple's linking.** A program states its native dependencies in source,
+  including static archives and Apple frameworks (`extern c library "SDL3"
+  static at "native/macos/libSDL3.a"`, `extern c framework "Cocoa"`), and
+  Apple's linker links them
+  ([NATIVE-LINK-PLAN-MILESTONE-1.md](docs/NATIVE-LINK-PLAN-MILESTONE-1.md)).
+* **Applications, not binaries.** `Icy Tower.app` is a regular application
+  that LaunchServices starts from the Finder; launched that way, a failure
+  the game reports on standard error is also shown in an alert, because
+  nobody is reading a terminal. Its release is signed
+  with a Developer ID under the hardened runtime, notarized and stapled.
+  Before anything is published, every release is checked end to end on a
+  macOS runner: the credentials are validated before any Apple tool sees
+  them, and the downloaded ZIP is opened through Gatekeeper's real
+  first-launch dialog and played
+  ([ICY-TOWER-MACOS-APP-MILESTONE-1.md](docs/ICY-TOWER-MACOS-APP-MILESTONE-1.md)).
+
+The compiler itself is `Botlish.app` on macOS, an application bundle with
+its own Tcl framework, because a signed Mach-O cannot carry an appended
+archive the way the Linux single file does
+([MACOS-AARCH64-MILESTONE-9.md](docs/MACOS-AARCH64-MILESTONE-9.md)). It is
+signed ad hoc and not notarized yet, and it is published only as the macOS
+workflow's `botlish-macos-aarch64` artifact, not as a release. Notarizing it
+needs the hardened runtime around its JIT, and which entitlement that needs
+must first be measured on a Mac with System Integrity Protection enabled
+(that report, section 41).
 
 ## Botlish and Rust
 
@@ -239,8 +314,9 @@ built for rich debugging.
 
 ## A tour
 
-Every program below runs, with the value shown, on the interpreter, the Tcl
-compiler and the native backend.
+Every program below runs, with the value shown (`tclsh9.0 main.tcl
+FILE.bot`: its development run prints the program's value), on the
+interpreter, the Tcl compiler and the native backend.
 
 ### Loops are expressions
 

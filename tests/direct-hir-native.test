@@ -48,12 +48,13 @@ proc nativeValue {hir args} {
     core::value::show [native::evalHir $hir {*}$args]
 }
 
-# A standalone executable of HIR, run with an empty PATH; returns its output.
+# A standalone executable of HIR, run with an empty PATH; returns its value,
+# read through the driver protocol (standaloneValue: an executable prints none).
 proc executableValue {hir {options {}}} {
     set dir [makeDirectory {direct hir executable}]
     try {
         native::executable $hir [file join $dir program] {*}$options
-        return [runStandalone [file join $dir program]]
+        return [standaloneValue [file join $dir program]]
     } finally {
         removeDirectory {direct hir executable}
     }

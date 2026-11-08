@@ -393,7 +393,13 @@ jobs:
   # TOOLCHAIN and xcode-select --install).
   app-clean:
     name: Botlish.app without developer tools (macOS arm64)
-    needs: app
+    # After the application, so after the smoke job and its canary. Its own
+    # condition, as app's: a manual run with app_only skips the smoke job,
+    # and the implicit success() skips every job after a skipped one.
+    needs: [smoke, app]
+    if: >-
+      !cancelled() && (needs.smoke.result == 'success' || needs.smoke.result == 'skipped')
+      && needs.app.result == 'success'
     runs-on: macos-15
     timeout-minutes: 45
     steps:
@@ -607,8 +613,14 @@ jobs:
           otool -l identity | grep -A4 'cmd LC_MAIN' | tee lc-main.txt
           grep -q 'stacksize 536870912' lc-main.txt
           otool -l worker | grep -A4 'cmd LC_MAIN' | grep -q 'stacksize 0'
-          [ "$(./identity)" = "[1, 1]" ]
-          [ "$(./worker)" = "[0, 0]" ]
+          # An executable prints no value (PROGRAM-OUTPUT-MILESTONE-1.md): its
+          # value is the driver protocol's (BOTLISH_NATIVE_RESULT), read here
+          # as the words of its "value V" line, V's quoting removed.
+          words() { rm -f "$kit/result"; BOTLISH_NATIVE_RESULT="$kit/result" "$@" >/dev/null && tr -d '\\{}' <"$kit/result" | tr -s ' \n' ' ' | sed 's/ $//'; }
+          [ -z "$(./identity)" ]
+          [ -z "$(./worker)" ]
+          [ "$(words ./identity)" = "value list int 1 int 1" ]
+          [ "$(words ./worker)" = "value list int 0 int 0" ]
           BOTLISH_NATIVE_STARTUP_REPORT="$kit/report" ./identity
           tail -n 3 "$kit/report" | tee "$kit/report.tail"
           grep -qx 'startup main-thread' "$kit/report.tail"

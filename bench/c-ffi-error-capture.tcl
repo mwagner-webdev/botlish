@@ -394,8 +394,14 @@ fn mlen(d: std::abi::bytes::MutableBytes) -> std::ffi::c::ULong:
             if {$counting} {
                 set count [format %.1f [expr {([instructions [lindex [build $dir [mainOf $wrapper $body 2000] $options] 1]] - $emptyCount) / 2000.0}]]
             }
-            set plain [exec $exe]
-            set stress [expr {[exec env BOTLISH_NATIVE_GC_STRESS=1 $exe] eq $plain ? "same" : "DIFFERS"}]
+            # The value each run reports through the driver protocol (an
+            # executable prints none: PROGRAM-OUTPUT-MILESTONE-1.md).
+            set reported [file join $dir reported]
+            exec env BOTLISH_NATIVE_RESULT=$reported $exe
+            set plain [core::ReadFile $reported]
+            exec env BOTLISH_NATIVE_RESULT=$reported BOTLISH_NATIVE_GC_STRESS=1 $exe
+            set stress [expr {[core::ReadFile $reported] eq $plain && [string match "value *" $plain] ? "same" : "DIFFERS"}]
+            file delete $reported
             # The allocation sites of the wrapper (a static count: the driver
             # makes no allocation report of a program that calls C, which
             # runs as an executable; the in-process `allocations` part above

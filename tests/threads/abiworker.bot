@@ -1,0 +1,51 @@
+# abiworker.bot -- tests/threads.test: a worker VM with an event loop of
+# its own (abi.bot). It probes the ABI with both loops open, sends its
+# handle and its probe home, and keeps its loop open until asked to stop.
+import abiprobe
+import event_loop_linux
+import std::actor::remote
+import std::event_loop
+import std::thread
+
+struct Seen:
+    handle: int
+    probe: int
+
+struct Plan:
+    home: std::actor::remote::Remote[Seen]
+    main_handle: int
+
+fn stays(plan: Plan, context ev: std::event_loop::Loop, p: std::thread::Port, db: std::thread::Doorbell, n: event_loop_linux::Native, pr: abiprobe::Probe) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    own = event_loop_linux::loop_handle()
+    sent = std::actor::remote::deliver(plan.home, Seen {handle: own, probe: own.probe(plan.main_handle)})
+    std::thread::wait_stop()
+    std::thread::close_port()
+    if sent == std::actor::remote::Sent::Delivered:
+        1
+    else:
+        0
+
+private fn looped(plan: Plan, context ev: std::event_loop::Loop, d: std::event_loop::Driver, p: std::thread::Port, db: std::thread::Doorbell, n: event_loop_linux::Native, pr: abiprobe::Probe) -> int errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    std::thread::serve()
+    coroutine {step, first} = stays(plan)
+    task = std::event_loop::adopt(step, first)
+    std::event_loop::run()
+    fold o in std::event_loop::take_outcomes() with intermediate v -1:
+        if o.task == task:
+            o.value
+        else:
+            v
+
+thread fn second_loop(plan: Plan) -> int:
+    with context std::event_loop::create(16)
+    with context event_loop_linux::create()
+    with context event_loop_linux::native()
+    with context std::thread::port()
+    with context abiprobe::Probe {calls: 0}
+    looped(plan):
+        on std::event_loop::SchedulerFault:
+            -1
+        on std::event_loop::DriverFault {code}:
+            code
+        on std::event_loop::LoopReentered:
+            -2

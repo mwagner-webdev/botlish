@@ -381,12 +381,12 @@ test vi-intrinsic-set-collision {a set of more than eight members keeps two memb
 \]\n"
 } -result {value {[false, true, false]}}
 
-test vi-executable {a standalone executable compares and hashes by identity: the program descriptor carries each shape's identity} -constraints executableAot -setup {
+test vi-executable {a standalone executable compares and hashes by identity: the program descriptor carries each shape's identity (its value read through the driver protocol)} -constraints executableAot -setup {
     set dir [makeDirectory {vi aot}]
 } -body {
     set hir [viHir "$::viDecls\[bag(\[1, 2, 3\], \"a\") == bag(\[3, 1, 2\], \"b\"), dict(\[\"a\", \"b\"\], \[1, 2\], 1) == dict(\[\"b\", \"a\"\], \[2, 1\], 2), hash(bag(\[1, 2, 3\], \"x\"))\]\n"]
     set binary [native::executable $hir [file join $dir program]]
-    list [exec $binary] [core::formatValue [native::evalHir $hir]]
+    list [standaloneValue $binary] [core::formatValue [native::evalHir $hir]]
 } -cleanup {
     removeDirectory {vi aot}
 } -result {{[true, true, 2303140193253857579]} {[true, true, 2303140193253857579]}}

@@ -351,7 +351,7 @@ test nt-native-error-id {InvalidIntegerText's builtin index is the native runtim
         [core::native::builtinErrorIndex LengthMismatch]
 } -result {11 1 10}
 
-test nt-native-executable {a standalone executable converts like the JIT: Int text both ways, rounding and DecimalRounded text} -constraints {nativeBuilt executableAot} -body {
+test nt-native-executable {a standalone executable converts like the JIT: Int text both ways, rounding and DecimalRounded text (its value read through the driver protocol)} -constraints {nativeBuilt executableAot} -body {
     set dir [makeDirectory nt-exe-[pid]]
     set path [file join $dir prog.bot]
     set channel [open $path w]
@@ -364,7 +364,7 @@ test nt-native-executable {a standalone executable converts like the JIT: Int te
     close $channel
     set hir [surface::readProgramFile $path -warnings off -cache ""]
     set exe [native::executable $hir [file join $dir prog]]
-    set output [exec $exe]
+    set output [standaloneValue $exe]
     file delete -force $dir
     list [expr {$output eq [core::value::show [lindex [ntRun compile $hir] 1] 1]}] $output
 } -result {1 {["-1234567890123456789012345", 98765432109876543210, -1, "0.30", "0.00", 2, -100000000000000000000]}}

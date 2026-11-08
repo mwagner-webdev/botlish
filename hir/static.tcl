@@ -326,6 +326,7 @@ namespace eval hir::static {
         MUTABLE-PLACE-RECEIVER                   MutablePlaceReceiver
         NO-APPLICABLE-METHOD                     NoApplicableMethod
         NOMETHOD-CALL                            NomethodCall
+        NONPLACE-PARAMETER-MUTATION              NonplaceParameterMutation
         NOT-A-CONTEXT                            NotAContext
         NOT-A-STRUCT                             NotAStruct
         NOT-AN-ENUM                              NotAnEnum
@@ -340,6 +341,8 @@ namespace eval hir::static {
         RESOURCE-DECLARATION                     ResourceDeclaration
         RETURN-OUTSIDE-CALLABLE                  ReturnOutsideCallable
         SENDABLE-DECLARATION                     SendableDeclaration
+        THREAD-ENTRY-PLACEMENT                   ThreadEntryPlacement
+        THREAD-ENTRY-REFERENCE                   ThreadEntryReference
         TRAIT-IMPL-ORDER                         TraitImplOrder
         TRAIT-INSTANCE-BUDGET                    TraitInstanceBudget
         TRAIT-NESTED-POLYMORPHIC                 TraitNestedPolymorphic

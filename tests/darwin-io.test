@@ -114,6 +114,17 @@ proc diRun {command {input /dev/null}} {
 }
 set runCounter 0
 
+# One run of COMMAND as diRun runs it, under the driver protocol
+# (BOTLISH_NATIVE_RESULT, which COMMAND's process inherits: an executable
+# prints no value of its own, PROGRAM-OUTPUT-MILESTONE-1.md, and its
+# standard output and error stay the program's): {STDOUT STDERR STATUS
+# VALUE}, VALUE the program's value as Botlish shows it (ProtocolValue).
+proc diValueRun {command {input /dev/null}} {
+    set result [file join $::scratch result.[incr ::runCounter]]
+    set run [withEnvironment [list BOTLISH_NATIVE_RESULT $result] {diRun $command $input}]
+    return [concat $run [list [ProtocolValue $result]]]
+}
+
 # A file of BYTES (a binary string) in the scratch directory: its path.
 proc diInput {bytes} {
     set path [file join $::scratch in[incr ::runCounter]]
@@ -401,7 +412,7 @@ test di-sdk-facts {the constants and types stdlib/darwin.bot states are the host
 # ---------------------------------------------------------------------------
 # Real output: standalone Mach-O executables
 
-test di-hello-executable {examples/io/hello-darwin.bot as a standalone executable, moved out of the source tree, the source deleted, run with an empty environment (no Tcl, no compiler, no source): descriptor 1 receives exactly "Hello, world!\n", then the executable's own result line (the program's value, unit: printed by the runner after the program, not by std::io::print_line); nothing on descriptor 2; the same under GC stress; it loads only system libraries, libSystem among them} -constraints {darwinIO posixShell} -body {
+test di-hello-executable {examples/io/hello-darwin.bot as a standalone executable, moved out of the source tree, the source deleted, run with an empty environment (no Tcl, no compiler, no source): descriptor 1 receives exactly "Hello, world!\n", the program's own output, and nothing of the executable's (no value line); nothing on descriptor 2; the same under GC stress; it loads only system libraries, libSystem among them} -constraints {darwinIO posixShell} -body {
     set exe [diExecutable $::helloDarwin]
     set elsewhere [makeDirectory darwin-io-moved-[pid]]
     file rename $exe [file join $elsewhere hello]
@@ -411,26 +422,25 @@ test di-hello-executable {examples/io/hello-darwin.bot as a standalone executabl
     set libraries [lmap line [lrange [split [string trim [exec otool -L $exe]] \n] 1 end] {lindex [string trim $line] 0}]
     list $plain [expr {$plain eq $stressed}] [expr {[lsearch -glob $libraries /usr/lib/libSystem*] >= 0}] \
         [lsearch -all -inline -not -glob $libraries /usr/lib/*] [binaryHeader $exe]
-} -cleanup {file delete -force [file join [temporaryDirectory] darwin-io-moved-[pid]]} -result [list [list "Hello, world!\nunit\n" {} 0] 1 1 {} [hostBinaryHeader executable]]
+} -cleanup {file delete -force [file join [temporaryDirectory] darwin-io-moved-[pid]]} -result [list [list "Hello, world!\n" {} 0] 1 1 {} [hostBinaryHeader executable]]
 
-test di-routing-utf8 {print and print_line write to descriptor 1, write_error and write_error_line to descriptor 2, as UTF-8 (a two-byte and a four-byte scalar), each line ending in exactly one newline} -constraints {darwinIO posixShell} -body {
-    lassign [diRun [diExecutable $::routingText]] out err status
-    list [encoding convertfrom utf-8 $out] [encoding convertfrom utf-8 $err] [string length $out] $status
+test di-routing-utf8 {print and print_line write to descriptor 1, write_error and write_error_line to descriptor 2, as UTF-8 (a two-byte and a four-byte scalar), each line ending in exactly one newline; no WriteFailed reached the program} -constraints {darwinIO posixShell} -body {
+    lassign [diValueRun [diExecutable $::routingText]] out err status value
+    list [encoding convertfrom utf-8 $out] [encoding convertfrom utf-8 $err] [string length $out] $status $value
 } -result {{out: é 𝄞
-"ok"
 } {err: done
-} 18 0}
+} 13 0 {"ok"}}
 
 test di-text-edges {the empty String writes nothing (no write call), a String holding U+0000 writes its NUL byte like any other (bytes, not a C string), several writes in order, line endings exactly one newline each -- on both streams} -constraints {darwinIO posixShell} -body {
     set text "import std::io\nimport std::darwin::io\n\nfn emit() -> str errors std::io::WriteFailed:\n    std::io::print(\"\")\n    std::io::print(\"a\x00b\")\n    std::io::print_line(\"\")\n    std::io::print_line(\"line\")\n    std::io::write_error(\"\")\n    std::io::write_error_line(\"e\x00\")\n    \"ok\"\n\nwith context std::darwin::io::create()\n\nemit():\n    on std::io::WriteFailed:\n        \"failed\"\n"
-    diRun [diExecutable $text]
-} -result [list "a\x00b\nline\n\"ok\"\n" "e\x00\n" 0]
+    diValueRun [diExecutable $text]
+} -result [list "a\x00b\nline\n" "e\x00\n" 0 {"ok"}]
 
 test di-deep-and-modules {DarwinIO selected through application modules and deep call chains: an application module's functions require std::io::IO (declaring no context), the entry program installs DarwinIO, and output from forty levels down arrives in order} -constraints {darwinIO posixShell} -body {
     set report "import std::io\nimport std::str\n\nfn line(text: str, depth: int) -> unit errors std::io::WriteFailed:\n    if depth == 0:\n        std::io::print_line(text)\n        return unit\n    line(text, depth - 1)\n\nfn both(text: str) -> unit errors std::io::WriteFailed:\n    line(text, 40)\n    std::io::write_error_line(std::str::concat(text, \"!\"))\n"
     set main "import std::io\nimport std::darwin::io\nimport report\n\nwith context std::darwin::io::create()\n\nreport::both(\"first\"):\n    on std::io::WriteFailed:\n        unit\nreport::both(\"second\"):\n    on std::io::WriteFailed:\n        unit\n"
     diRun [diExecutable $main [list report.bot $report]]
-} -result [list "first\nsecond\nunit\n" "first!\nsecond!\n" 0]
+} -result [list "first\nsecond\n" "first!\nsecond!\n" 0]
 
 set coroutineText {import std::coroutine
 import std::io
@@ -472,12 +482,12 @@ run():
         []
 }
 
-test di-coroutines-gc-stress {output from coroutine bodies -- before the first yield, after resumes, with two coroutines suspended at once holding managed values -- through the portable API and DarwinIO, in a standalone executable, and the same under GC stress} -constraints {darwinIO posixShell nativeCoroutines} -body {
+test di-coroutines-gc-stress {output from coroutine bodies -- before the first yield, after resumes, with two coroutines suspended at once holding managed values -- through the portable API and DarwinIO, in a standalone executable, and the same under GC stress; the coroutines' values, through the driver protocol} -constraints {darwinIO posixShell nativeCoroutines} -body {
     set exe [diExecutable $::coroutineText]
-    set plain [diRun $exe]
-    set stressed [diRun [list env BOTLISH_NATIVE_GC_STRESS=1 $exe]]
+    set plain [diValueRun $exe]
+    set stressed [diValueRun [list env BOTLISH_NATIVE_GC_STRESS=1 $exe]]
     list $plain [expr {$plain eq $stressed}]
-} -result [list [list "ant starts\nbee starts\nbee resumes\nant resumes\n\[1, 2, 3, 1, 2, 3\]\n" "ant ends\nbee ends\n" 0] 1]
+} -result [list [list "ant starts\nbee starts\nbee resumes\nant resumes\n" "ant ends\nbee ends\n" 0 {[1, 2, 3, 1, 2, 3]}] 1]
 
 test di-native-backends {the native backends run a Darwin program as an executable linked for the run (C-FFI.md: no dlopen, no in-process symbol resolution): its value on cranelift and cranelift-generic, and main.tcl -backend cranelift passes the program's own output through to its standard output} -constraints {darwinIO} -body {
     set hir [diHir $::statusText $::hostTarget]
@@ -500,14 +510,15 @@ proc injectLibrary {} {
     return $::injectLibrary
 }
 
-# {STDOUT STDERR STATUS LOG} of EXE run with the interposer's PLAN on
-# descriptor FD; LOG the planned calls, {ASKED RESULT ERRNO} each.
+# {STDOUT STDERR STATUS LOG VALUE} of EXE run with the interposer's PLAN on
+# descriptor FD; LOG the planned calls, {ASKED RESULT ERRNO} each; VALUE the
+# program's value, through the driver protocol (diValueRun).
 proc injected {exe plan {fd 1} {stress 0}} {
     set log [file join $::scratch inject[incr ::runCounter].log]
-    set run [diRun [list env DYLD_INSERT_LIBRARIES=[injectLibrary] BCF_WRITE_FD=$fd BCF_WRITE_PLAN=$plan BCF_WRITE_LOG=$log \
-        BOTLISH_NATIVE_GC_STRESS=$stress $exe]]
+    lassign [diValueRun [list env DYLD_INSERT_LIBRARIES=[injectLibrary] BCF_WRITE_FD=$fd BCF_WRITE_PLAN=$plan BCF_WRITE_LOG=$log \
+        BOTLISH_NATIVE_GC_STRESS=$stress $exe]] out err status value
     set calls [expr {[file exists $log] ? [lmap line [split [string trim [readBinary $log]] \n] {set line}] : {}}]
-    return [concat $run [list $calls]]
+    return [list $out $err $status $calls $value]
 }
 
 # INJECTED with its log cut to its first N calls.
@@ -518,31 +529,26 @@ proc firstCalls {injected n} {
 
 test di-short-write-completed {a short write is completed: when libSystem's write accepts 5 of the 14 bytes, the remaining 9 are written next, and the portable caller sees success, never a count; three short writes in a row complete the same way, also under GC stress} -constraints {writeInject posixShell} -body {
     set exe [diExecutable $::statusText]
-    list [firstCalls [injected $exe 5] 2] [firstCalls [injected $exe 3,4,2] 4] [lrange [injected $exe 5 1 1] 0 2]
-} -result [list [list "Hello, world!\n\"ok\"\n" {} 0 {{14 5 0} {9 9 0}}] \
-    [list "Hello, world!\n\"ok\"\n" {} 0 {{14 3 0} {11 4 0} {7 2 0} {5 5 0}}] [list "Hello, world!\n\"ok\"\n" {} 0]]
+    list [firstCalls [injected $exe 5] 2] [firstCalls [injected $exe 3,4,2] 4] [lreplace [injected $exe 5 1 1] 3 3]
+} -result [list [list "Hello, world!\n" {} 0 {{14 5 0} {9 9 0}} {"ok"}] \
+    [list "Hello, world!\n" {} 0 {{14 3 0} {11 4 0} {7 2 0} {5 5 0}} {"ok"}] [list "Hello, world!\n" {} 0 {"ok"}]]
 
 test di-write-failures {a failed write (-1 with EBADF, EINTR or EAGAIN: no retry, the Linux contract's), a write that makes no progress (0), and a failure after some bytes were written are std::io::WriteFailed: the portable caller's handler runs, the errno never reaches it, nothing is written again} -constraints {writeInject posixShell} -body {
     set exe [diExecutable $::statusText]
     lmap {plan n} {-9 1 -4 1 -35 1 0 1 5,-9 2 5,0 2} {
-        lassign [injected $exe $plan] out err status calls
-        list $plan $out [lrange $calls 0 [expr {$n - 1}]]
+        lassign [injected $exe $plan] out err status calls value
+        list $plan $out [lrange $calls 0 [expr {$n - 1}]] $value
     }
-} -result [list {-9 {"failed"
-} {{14 -1 9}}} {-4 {"failed"
-} {{14 -1 4}}} {-35 {"failed"
-} {{14 -1 35}}} {0 {"failed"
-} {{14 0 0}}} {5,-9 {Hello"failed"
-} {{14 5 0} {9 -1 9}}} {5,0 {Hello"failed"
-} {{14 5 0} {9 0 0}}}]
+} -result [list {-9 {} {{14 -1 9}} {"failed"}} {-4 {} {{14 -1 4}} {"failed"}} {-35 {} {{14 -1 35}} {"failed"}} \
+    {0 {} {{14 0 0}} {"failed"}} {5,-9 Hello {{14 5 0} {9 -1 9}} {"failed"}} {5,0 Hello {{14 5 0} {9 0 0}} {"failed"}}]
 
 test di-stderr-failure {the standard error stream's completion is the same policy on descriptor 2} -constraints {writeInject posixShell} -body {
     set exe [diExecutable $::routingText]
     lmap {plan n} {3 3 -9 1} {
-        lassign [injected $exe $plan 2] out err status calls
-        list [encoding convertfrom utf-8 $out] [encoding convertfrom utf-8 $err] [lrange $calls 0 [expr {$n - 1}]]
+        lassign [injected $exe $plan 2] out err status calls value
+        list [encoding convertfrom utf-8 $out] [encoding convertfrom utf-8 $err] [lrange $calls 0 [expr {$n - 1}]] $value
     }
-} -result [list [list "out: é 𝄞\n\"ok\"\n" "err: done\n" {{4 3 0} {1 1 0} {6 6 0}}] [list "out: é 𝄞\n\"failed\"\n" {} {{4 -1 9}}]]
+} -result [list [list "out: é 𝄞\n" "err: done\n" {{4 3 0} {1 1 0} {6 6 0}} {"ok"}] [list "out: é 𝄞\n" {} {{4 -1 9}} {"failed"}]]
 
 # ---------------------------------------------------------------------------
 # errno
@@ -606,12 +612,12 @@ test di-errno {a failed libSystem call reports the errno it left, read right aft
     set text $::errnoText
     append text "\nall(\"$dir\"):\n    on std::io::path::NotAPath:\n        \[\]\n"
     set exe [diExecutable $text]
-    set plain [lindex [diRun $exe] 0]
-    set stressed [lindex [diRun [list env BOTLISH_NATIVE_GC_STRESS=1 $exe]] 0]
+    set plain [lindex [diValueRun $exe] 3]
+    set stressed [lindex [diValueRun [list env BOTLISH_NATIVE_GC_STRESS=1 $exe]] 3]
     set hir [diHir $text $::hostTarget]
     set backends [lmap backend {cranelift cranelift-generic} {lindex [outcomeUnderHir $backend $hir] 1}]
-    list $plain [expr {$stressed eq $plain}] [expr {"[lindex $backends 0]\n" eq $plain && [lindex $backends 0] eq [lindex $backends 1]}]
-} -cleanup {file delete -force [file join [temporaryDirectory] darwin-io-errno-[pid]]} -result [list "\[\[-1, 2, -1, 9, 8, 0, -1, 17, -1, 21, 0, 0, -1, 9, -1, 9\], 20, true, 2, 17\]\n" 1 1]
+    list $plain [expr {$stressed eq $plain}] [expr {[lindex $backends 0] eq $plain && [lindex $backends 0] eq [lindex $backends 1]}]
+} -cleanup {file delete -force [file join [temporaryDirectory] darwin-io-errno-[pid]]} -result [list "\[\[-1, 2, -1, 9, 8, 0, -1, 17, -1, 21, 0, 0, -1, 9, -1, 9\], 20, true, 2, 17\]" 1 1]
 
 # The allocator that changes errno on every allocation (tests/cffi/
 # errno-clobber.c, C-FFI-ERROR-CAPTURE-MILESTONE-1.md), built once.
@@ -624,20 +630,20 @@ proc clobberLibrary {} {
     return $::clobberLibrary
 }
 
-test di-errno-allocator {nothing allocates between a libSystem call and its errno read: di-errno's program prints the same with an allocator that sets errno to 77 on every allocation (DYLD_INSERT_LIBRARIES), also under GC stress, and so does it with struct scalar replacement off (-struct-opt 0: the write-back value's transport is no optimization, C-FFI-ERROR-CAPTURE-MILESTONE-2.md) -- while the lowering before C-FFI-ERROR-CAPTURE-MILESTONE-1.md (the eager-foreign-result fault injection with -struct-opt 0: read's write-back value built right after the call) reports that 77 as read's errno, and only read's: write, open and close never allocated there} -constraints {writeInject posixShell nativeCoroutines} -body {
+test di-errno-allocator {nothing allocates between a libSystem call and its errno read: di-errno's program has the same value (read through the driver protocol) with an allocator that sets errno to 77 on every allocation (DYLD_INSERT_LIBRARIES), also under GC stress, and so does it with struct scalar replacement off (-struct-opt 0: the write-back value's transport is no optimization, C-FFI-ERROR-CAPTURE-MILESTONE-2.md) -- while the lowering before C-FFI-ERROR-CAPTURE-MILESTONE-1.md (the eager-foreign-result fault injection with -struct-opt 0: read's write-back value built right after the call) reports that 77 as read's errno, and only read's: write, open and close never allocated there} -constraints {writeInject posixShell nativeCoroutines} -body {
     set dir [makeDirectory darwin-io-allocator-[pid]]
     set text $::errnoText
     append text "\nall(\"$dir\"):\n    on std::io::path::NotAPath:\n        \[\]\n"
     set exe [diExecutable $text]
     set unoptimized [diExecutable $text {} {-struct-opt 0}]
     set eager [diExecutable $text {} {-struct-opt 0 -fault eager-foreign-result}]
-    set plain [lindex [diRun $exe] 0]
+    set plain [lindex [diValueRun $exe] 3]
     set clobber [list DYLD_INSERT_LIBRARIES=[clobberLibrary] BCF_ERRNO_CLOBBER=77]
-    list [expr {[lindex [diRun [list env {*}$clobber $exe]] 0] eq $plain}] \
-        [expr {[lindex [diRun [list env {*}$clobber BOTLISH_NATIVE_GC_STRESS=1 $exe]] 0] eq $plain}] \
-        [expr {[lindex [diRun [list env {*}$clobber $unoptimized]] 0] eq $plain}] \
-        [expr {[lindex [diRun $eager] 0] eq $plain}] [lindex [diRun [list env {*}$clobber $eager]] 0]
-} -cleanup {file delete -force [file join [temporaryDirectory] darwin-io-allocator-[pid]]} -result [list 1 1 1 1 "\[\[-1, 2, -1, 9, 8, 0, -1, 17, -1, 21, 0, 0, -1, 9, -1, 77\], 20, true, 2, 17\]\n"]
+    list [expr {[lindex [diValueRun [list env {*}$clobber $exe]] 3] eq $plain}] \
+        [expr {[lindex [diValueRun [list env {*}$clobber BOTLISH_NATIVE_GC_STRESS=1 $exe]] 3] eq $plain}] \
+        [expr {[lindex [diValueRun [list env {*}$clobber $unoptimized]] 3] eq $plain}] \
+        [expr {[lindex [diValueRun $eager] 3] eq $plain}] [lindex [diValueRun [list env {*}$clobber $eager]] 3]
+} -cleanup {file delete -force [file join [temporaryDirectory] darwin-io-allocator-[pid]]} -result [list 1 1 1 1 "\[\[-1, 2, -1, 9, 8, 0, -1, 17, -1, 21, 0, 0, -1, 9, -1, 77\], 20, true, 2, 17\]"]
 
 # ---------------------------------------------------------------------------
 # Standard input (std::darwin::io::read)
@@ -666,15 +672,15 @@ test di-stdin {std::darwin::io::read from the process's standard input into a 16
     set a [string repeat A 16]
     set result {}
     foreach input [list [diInput hello] [diInput 0123456789abcdef] /dev/null [diInput "\x00\xff\x80\xc3\x28"]] {
-        lassign [diRun $exe $input] out err status
-        lappend result [list $out [expr {$err eq $a}]]
+        lassign [diValueRun $exe $input] out err status value
+        lappend result [list $out [expr {$err eq $a}] $value]
     }
     set writeOnly [diInput ""]
-    lassign [diRun [list sh -c "\"\$0\" 0>\"\$1\"" $exe $writeOnly]] out err status
-    lappend result [list $out [expr {$err eq $a}]]
-} -result [list [list "helloAAAAAAAAAAA\[0, 0, 5, 0, 16, 16\]\n" 1] [list "0123456789abcdef\[0, 0, 16, 0, 16, 16\]\n" 1] \
-    [list "AAAAAAAAAAAAAAAA\[0, 0, 0, 0, 16, 16\]\n" 1] [list "\x00\xff\x80\xc3\x28AAAAAAAAAAA\[0, 0, 5, 0, 16, 16\]\n" 1] \
-    [list "AAAAAAAAAAAAAAAA\[-1, 9, -1, 9, 16, 16\]\n" 1]]
+    lassign [diValueRun [list sh -c "\"\$0\" 0>\"\$1\"" $exe $writeOnly]] out err status value
+    lappend result [list $out [expr {$err eq $a}] $value]
+} -result [list [list "helloAAAAAAAAAAA" 1 {[0, 0, 5, 0, 16, 16]}] [list "0123456789abcdef" 1 {[0, 0, 16, 0, 16, 16]}] \
+    [list "AAAAAAAAAAAAAAAA" 1 {[0, 0, 0, 0, 16, 16]}] [list "\x00\xff\x80\xc3\x28AAAAAAAAAAA" 1 {[0, 0, 5, 0, 16, 16]}] \
+    [list "AAAAAAAAAAAAAAAA" 1 {[-1, 9, -1, 9, 16, 16]}]]
 
 # ---------------------------------------------------------------------------
 # Files: open (variadic), create, read, close
@@ -752,20 +758,20 @@ test di-files {open(2)'s genuine variadic prototype through std::darwin::create 
     try {
         # Under a known umask (022, which leaves 0640 as it is): the mode
         # checked is the one open(2) received, not the runner's umask.
-        lassign [diRun [list sh -c {umask 022; exec "$0"} $exe]] out err status
+        lassign [diValueRun [list sh -c {umask 022; exec "$0"} $exe]] out err status value
     } finally {
         cd $here
     }
     set made [file join $base "fïlé 🙂.txt"]
-    list [encoding convertfrom utf-8 $out] $err $status [file attributes $made -permissions] [readBinary $made]
-} -cleanup {file delete -force [file join [temporaryDirectory] darwin-io-files-[pid]]} -result [list "first line\n\[true, 0, 11, 1, 0, 0, 0, true, 11, 0, 0, 11, 0, true, 3, 0\]\n" {} 0 0o640 "first line\n"]
+    list [encoding convertfrom utf-8 $out] $err $status [file attributes $made -permissions] [readBinary $made] $value
+} -cleanup {file delete -force [file join [temporaryDirectory] darwin-io-files-[pid]]} -result [list "first line\n" {} 0 0o640 "first line\n" {[true, 0, 11, 1, 0, 0, 0, true, 11, 0, 0, 11, 0, true, 3, 0]}]
 
 test di-file-errors {the file operations' failures, each its own errno: a missing file (ENOENT), a path through a file (ENOTDIR), a directory opened for writing (EISDIR), an existing file created exclusively (EEXIST), a closed descriptor closed again and an invalid one (EBADF)} -constraints {darwinIO posixShell} -body {
     set dir [makeDirectory darwin-io-file-errors-[pid]]
     writeText [file join $dir present.txt] "x"
     set text "direct module\nimport std::darwin\nimport std::darwin::path\nimport std::io::path\n\nfn run(d: str) -> List\[int\] errors std::io::path::NotAPath:\n    std::darwin::path::validate(d)\n    a = std::darwin::open(std::darwin::path::concat(d, \"absent.txt\"), std::darwin::Access::ReadOnly)\n    b = std::darwin::open(std::darwin::path::concat(d, \"present.txt/x\"), std::darwin::Access::ReadOnly)\n    c = std::darwin::open(d, std::darwin::Access::ReadWrite)\n    e = std::darwin::create_new(std::darwin::path::concat(d, \"present.txt\"), std::darwin::Access::WriteOnly, 384)\n    f = std::darwin::open(std::darwin::path::concat(d, \"present.txt\"), std::darwin::Access::ReadOnly)\n    g = std::darwin::close(f.fd)\n    h = std::darwin::close(f.fd)\n    i = std::darwin::close(-1)\n    \[a.fd, a.errno, b.fd, b.errno, c.fd, c.errno, e.fd, e.errno, g.status, g.errno, h.status, h.errno, i.status, i.errno\]\n\nrun(\"$dir\"):\n    on std::io::path::NotAPath:\n        \[\]\n"
-    lindex [diRun [diExecutable $text]] 0
-} -cleanup {file delete -force [file join [temporaryDirectory] darwin-io-file-errors-[pid]]} -result "\[-1, 2, -1, 20, -1, 21, -1, 17, 0, 0, -1, 9, -1, 9\]\n"
+    lindex [diValueRun [diExecutable $text]] 3
+} -cleanup {file delete -force [file join [temporaryDirectory] darwin-io-file-errors-[pid]]} -result "\[-1, 2, -1, 20, -1, 21, -1, 17, 0, 0, -1, 9, -1, 9\]"
 
 removeDirectory darwin-io-[pid]
 cleanupTests

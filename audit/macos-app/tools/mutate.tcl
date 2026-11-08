@@ -155,7 +155,8 @@ set only [split [dict get $options -only] ,]
 set tree [file tempdir botlish-app-mutants]
 set out [file join [file tempdir botlish-app-mutants-out] build]
 try {
-    foreach item {main.tcl LICENSE core compiler hir surface service lsp stdlib single examples} {
+    # (StageCompiler's items, single/package.tcl, and what the detectors read.)
+    foreach item {main.tcl LICENSE core compiler hir surface service lsp pm ccompile stdlib single examples} {
         file copy [file join $root $item] [file join $tree $item]
     }
     file mkdir [file join $tree native runtime-archive] [file join $tree compilerpedia] [file join $tree tests cffi] [file join $tree audit macos-app]

@@ -410,18 +410,21 @@ fn register_operation_tests(at_bad: int, take_bad: int, swap_bad: int):
 # Logical copies of unrestricted vectors (items 39, 43-46, 49, 69)
 
 fn register_copy_tests():
-    # A function mutating its parameter changes its own copy only; returning
-    # a vector and storing it in a List copy it logically.
+    # A function mutating a local copy of its parameter changes that copy
+    # only (a parameter not declared `place` is never mutated itself);
+    # returning a vector and storing it in a List copy it logically.
     fn b_calls() errors std::compiler::CompilerError:
         static compile:
             fn modify(v: MutableVector[int]) -> int:
-                v.push(4)
-                v.length()
+                w = v
+                w.push(4)
+                w.length()
             fn keep(v: MutableVector[int]) -> List[MutableVector[int]]:
                 [v]
             fn grow(v: MutableVector[int]) -> MutableVector[int]:
-                v.push(9)
-                v
+                w = v
+                w.push(9)
+                w
             a = std::mutable_vector::from_list([1, 2, 3])
             n = modify(a)
             xs = keep(a)
@@ -535,8 +538,9 @@ fn register_fresh_result_tests():
     fn id(v: MutableVector[int]) -> MutableVector[int]:
         v
     fn keep(v: MutableVector[int]) -> MutableVector[int]:
-        v.push(1)
-        v
+        w = v
+        w.push(1)
+        w
     fn pick(c: bool, v: MutableVector[int]) -> MutableVector[int]:
         w = build(2)
         if c:
@@ -621,8 +625,9 @@ fn register_indirect_callee_tests():
             fn v3() -> MutableVector[int]:
                 std::mutable_vector::from_list([1, 2, 3])
             fn grow(xs: MutableVector[int]) -> int:
-                xs.push(9)
-                xs.length()
+                w = xs
+                w.push(9)
+                w.length()
             fn apply(g: Fn{args: [MutableVector[int]], return: int}, v: MutableVector[int]) -> int:
                 g(v)
             fn f() -> List[int]:
@@ -657,8 +662,9 @@ fn register_indirect_callee_tests():
     fn b_hire() errors std::compiler::CompilerError:
         static compile:
             fn hire(q: MutableVector[Coroutine{args: [Command], return: Event}]) -> MutableVector[Coroutine{args: [Command], return: Event}]:
-                q.push(make(5))
-                q
+                w = q
+                w.push(make(5))
+                w
             fn via(g: Fn{args: [MutableVector[Coroutine{args: [Command], return: Event}]], return: MutableVector[Coroutine{args: [Command], return: Event}]}, q: MutableVector[Coroutine{args: [Command], return: Event}]) -> MutableVector[Coroutine{args: [Command], return: Event}]:
                 g(q)
             fn f() -> int:
@@ -672,14 +678,16 @@ fn register_indirect_callee_tests():
 # Places (items 13-15, 76)
 
 fn register_receiver_tests():
-    # Locals, parameters and struct field paths are places; the binding
-    # stays usable after each mutation.
+    # Locals (a parameter's local copy among them: a parameter not
+    # declared `place` is never mutated itself) and struct field paths are
+    # places; the binding stays usable after each mutation.
     fn b_places() errors std::compiler::CompilerError:
         static compile:
             fn param(v: MutableVector[int]) -> int:
-                v.push(1)
-                v.push(2)
-                v.length()
+                w = v
+                w.push(1)
+                w.push(2)
+                w.length()
             o = Outer {inner: Inner {v: std::mutable_vector::from_list([])}}
             o.inner.v.push(5)
             o.inner.v.push(6)

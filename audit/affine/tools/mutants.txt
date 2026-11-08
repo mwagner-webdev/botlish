@@ -289,26 +289,27 @@
         } else {
 >>>>
 
-@@ app-recursion-declared-fields the recursive-affine walk reads a struct's declared fields, not an application's: Node[Coroutine{...}] and a declaration holding itself through Box[D] are accepted
-## hir/structs.tcl
+@@ app-recursion-declared-fields the recursive-affine analysis reads a struct's declared fields, not an application's: what an application holds through its slots (its arguments' values) is never followed, so a declaration holding itself through Box[D] is accepted
+## hir/ownership.tcl
 <<<<
-        dict set visited $type,$crossed 1
-        set owner $type
-        set fields [AppliedFieldTypes $type]
+            set binding [Binding $id $arguments]
+            set j 0
+            foreach entry [Through $id] {
 ====
-        dict set visited $type,$crossed 1
-        set owner $type
-        set fields [fieldTypes $id]
+            set binding [Binding $id $arguments]
+            set j 0
+            foreach entry {} {
 >>>>
 
-@@ app-recursion-same-type-only the recursive-affine walk finds only the very same application again: V[Coroutine{...}] (next: List[V[List[T]]]) is accepted
-## hir/structs.tcl
+@@ app-recursion-same-type-only the recursive-affine analysis finds only the very same application again: a declaration's application of itself to other arguments is no edge, so V[Coroutine{...}] (next: List[V[List[T]]]) is accepted
+## hir/ownership.tcl
 <<<<
-        if {$path ne {} && $id eq $target} {
-            if {$crossed} {
+        lassign $edge target arguments c
+        Count edges
 ====
-        if {$path ne {} && $type eq $start} {
-            if {$crossed} {
+        lassign $edge target arguments c
+        if {$target eq $id && $arguments ne [Arguments [hir::structs::SelfType $id]]} continue
+        Count edges
 >>>>
 
 @@ app-recursion-tree-only a recursive affine application is rejected only for a tree struct (the tree milestone's special case): Node[Coroutine{...}] of an ordinary struct is accepted
@@ -730,7 +731,7 @@ core::native::register coroutine#release -arity 1 -impl core::coroutines::releas
     set problem [hir::structs::WrittenProblem $type]
 >>>>
 
-@@ written-accepts-everything a written application is admitted with no further check: a recursive affine application (Node[Coroutine{...}]) or one with no finite form (W[Coroutine{...}]) written as a type is accepted
+@@ written-accepts-everything a written application is admitted with no further check: a recursive affine application (Node[Coroutine{...}]) written as a type is accepted
 ## hir/resolve.tcl
 <<<<
     set problem [hir::structs::WrittenProblem $type]
@@ -747,34 +748,24 @@ core::native::register coroutine#release -arity 1 -impl core::coroutines::releas
     if {$recursion ne ""} {
         return [list AFFINE-CONTAINER-UNSUPPORTED [RecursionMessage [lindex $type 1] $type $recursion]]
     }
-    set growth
+    return ""
+}
 ====
     set recursion ""
     if {$recursion ne ""} {
         return [list AFFINE-CONTAINER-UNSUPPORTED [RecursionMessage [lindex $type 1] $type $recursion]]
     }
-    set growth
+    return ""
+}
 >>>>
 
-@@ written-unbounded-unchecked a written application with no finite form is accepted: W[Coroutine{...}] (its argument nested in ever larger applications, never cut) is a parameter's type
-## hir/structs.tcl
-<<<<
-        set growth [Unfolding $type]
-    }
-    if {$growth ne ""} {
-====
-        set growth ""
-    }
-    if {$growth ne ""} {
->>>>
-
-@@ imprint-unbounded-unchecked an imprint that makes an application with no finite form is accepted: mk[Coroutine{...}]() of `fn mk() -> W[T]` (W's slot holds no value: the binding passes BindingProblem)
-## hir/imprint.tcl
-<<<<
-            set problem [UnfoldingProblem $sig $binding]
-====
-            set problem ""
->>>>
+# (Retired with the rejection they mutated, PARAMETERIZED-DECLARATION-
+# SUMMARIES-MILESTONE-1.md: `written-unbounded-unchecked` and
+# `imprint-unbounded-unchecked` accepted a written or imprinted application
+# with no finite form -- W[Coroutine{...}] -- which is now an ordinary type,
+# every component analysis answering it from its declaration's summary. The
+# inverse defect, keeping the rejection, is audit/declaration-summaries/
+# tools/mutants.txt's `unfolding-retained`.)
 
 @@ written-erases-affine-argument written and inferred follow different classifiers: a written application's affine argument is taken for any (the declaration's affinity, a slot unrestricted), so a declared Box[Coroutine{...}] parameter, result or field is unrestricted -- copied freely, never released -- while the same type inferred is affine
 ## hir/resolve.tcl
@@ -912,18 +903,19 @@ core::native::register coroutine#release -arity 1 -impl core::coroutines::releas
     set ::hir::affine::descriptorMemo [dict create]
 >>>>
 
-@@ written-walk-per-path MentionsMutable remembers only its own path, as it did: every path through a deep application whose fields reach one type twice is walked -- exponential in the nesting of an affine argument, which the type bound never cuts (a written L16[Coroutine{...}, int] parameter)
+@@ written-walk-per-path MentionsMutable walks the application's fields again, remembering only its own path, as it did before the declaration summaries: every path through a deep application whose fields reach one type twice is walked -- exponential in the nesting of an affine argument, which the type bound never cuts (a written L16[Coroutine{...}, int] parameter)
 ## hir/types.tcl
 <<<<
-        dict set visited $type 1
-        foreach {name t} [hir::structs::AppliedFieldTypes $type] {
-            if {[MentionsMutableFrom $t visited]} { return 1 }
-        }
+        dict set visited $type 0
+        set classes [lmap a [hir::summaries::Arguments $type] {MentionsMutableFrom $a visited}]
+        set level [hir::summaries::Level mentionsMutable $type $classes]
+        set result [expr {$level ne "" && $level > 0}]
 ====
-        dict set visited $type 1
+        dict set visited $type 0
+        set result 0
         foreach {name t} [hir::structs::AppliedFieldTypes $type] {
             set saved $visited
-            if {[MentionsMutableFrom $t visited]} { return 1 }
+            if {[MentionsMutableFrom $t visited]} { set result 1; break }
             set visited $saved
         }
 >>>>

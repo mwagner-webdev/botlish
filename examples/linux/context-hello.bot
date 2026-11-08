@@ -22,7 +22,8 @@
 # everything up to the syscall, which they refuse with NATIVE-ONLY.
 #
 # stdout (native): Hello, world!
-# value  (native): 14, the bytes written
+# value  (native): 14, the bytes written (main.tcl's "value:" line; an
+#                  executable prints no value)
 
 import std::abi::bytes
 import std::linux::io

@@ -1,6 +1,6 @@
 # fs.bot -- the "std::darwin::fs" namespace: macOS's native paths and its
 # synchronous filesystem, through libSystem's C functions
-# (WINDOWS-X86-64-MILESTONE-7.md; MACOS-AARCH64-MILESTONE-8.md for the
+# (WINDOWS-X86-64-MILESTONE-7.md; MACOS-AARCH64-MILESTONE-8.md, the
 # boundary).
 #
 #   with context std::darwin::fs::create()          install it (entry program)

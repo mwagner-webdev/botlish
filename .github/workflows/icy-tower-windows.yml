@@ -191,6 +191,8 @@ jobs:
           play "$tmp/signed" >"$tmp/signed.txt"
           diff "$tmp/unsigned.txt" "$tmp/signed.txt"
           cat "$tmp/signed.txt"
+          # Two summary lines, the game's own (an executable prints no value).
+          [ "$(grep -c '^frames=600 ' "$tmp/signed.txt")" = 2 ]
 
       - name: Add the README and the licenses
         run: |
@@ -421,9 +423,12 @@ jobs:
       contents: write
       actions: read
     # One publication at a time, never cancelled, so two release runs in
-    # quick succession cannot interleave their tag move and upload.
+    # quick succession cannot interleave their tag move and upload. A group
+    # of its own, never its run's: a release run holds
+    # icy-tower-windows-release, and a job that asks for its own run's group
+    # fails before it gets a runner.
     concurrency:
-      group: icy-tower-windows-release
+      group: icy-tower-windows-publish
       cancel-in-progress: false
     env:
       GH_TOKEN: ${{ github.token }}

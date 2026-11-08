@@ -23,7 +23,6 @@ import std::io
 with context macos_app::create()
 with context sdl::create()
 
-result = game::main(game::arguments()):
+game::main(game::arguments()):
     on std::io::WriteFailed:
-        "failed: writing to the terminal"
-result
+        unit

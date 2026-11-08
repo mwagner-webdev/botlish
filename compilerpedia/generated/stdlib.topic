@@ -1083,9 +1083,8 @@ Address/size-width domains: TARGET-DEPENDENT.
 
 Isize is the signed, and Usize the unsigned, integer domain whose ABI width
 equals the target's address size. The only supported target today is Linux
-x86-64 (LINUX-X86-64-SYSCALL.md: the native backend refuses to generate the
-syscall transport for any other), whose address size is 64 bits, so here and
-now
+x86-64 (the native backend refuses to generate the syscall transport for any
+other), whose address size is 64 bits, so here and now
 
   IsizeValue == I64Value's domain     -2^63 .. 2^63 - 1
   UsizeValue == U64Value's domain     0 .. 2^64 - 1
@@ -1507,22 +1506,21 @@ nothing compiler-defined:
   Int and either return the ABI value representing exactly that Int, or fail
   with AbiIntegerBelowRange (value < the domain's minimum) or
   AbiIntegerAboveRange (value > its maximum). Never truncation. The
-  call-specific completion proof (STATIC-COMPLETION-PROOFS.md) makes a
-  provably in-range argument (std::abi::u8(42)) need no handler and a
-  provably out-of-range constant (std::abi::u8(256)) a compile-time
-  KNOWN-ERROR; a dynamic Int keeps the ordinary obligation to handle or
-  declare them. Direct construction (`std::abi::U8 {value: x}`) is equally
-  sound with no privacy: a named construction must statically prove each
-  field in its declared domain (STRUCTS.md), so no ABI value outside its
-  domain exists.
+  call-specific completion proof makes a provably in-range argument
+  (std::abi::u8(42)) need no handler and a provably out-of-range constant
+  (std::abi::u8(256)) a compile-time KNOWN-ERROR; a dynamic Int keeps the
+  ordinary obligation to handle or declare them. Direct construction
+  (`std::abi::U8 {value: x}`) is equally sound with no privacy: a named
+  construction must statically prove each field in its declared domain, so
+  no ABI value outside its domain exists.
 * Back to Int. `x.value` is the mathematical Int x represents, exactly (U8
   255 -> 255, I8 -1 -> -1, U64 2^64 - 1 -> 18446744073709551615): an
   ordinary field projection, uniform over the whole family, statically typed
   with the domain (so `std::byte::from_int(x.value)` needs no handler for
   `x: std::abi::U8`). It never sign-extends, truncates or reinterprets bits.
-  There is no std::abi::to_int: Botlish has no overloading, and one function
-  over ten nominal types would need it (or ten *_to_int functions that only
-  repeat the projection).
+  So `n.value` is the conversion: a std::abi::Usize length n is the int
+  n.value. It is a field, not a function (Botlish has no overloading, and
+  ten *_to_int functions would only repeat the projection).
 * Nominal. std::abi::I32 and std::abi::U32 are distinct types even where
   their values overlap; so are std::abi::I64 and std::abi::Isize, and
   std::abi::U64 and std::abi::Usize, whose domains are identical on today's
@@ -1541,16 +1539,16 @@ nothing compiler-defined:
   ordinary Int; Isize/Usize are for foreign ABI boundaries only.
 
 Memory values are not numbers and live in their own module, std::abi::bytes
-(stdlib/abi/bytes.bot; ABI-BYTES.md, MUTABLE-BYTES.md): `Bytes`, an
-immutable, owned, contiguous sequence of bytes, and `MutableBytes`, its
-writable counterpart (a value, not a reference).
+(stdlib/abi/bytes.bot): `Bytes`, an immutable, owned, contiguous sequence of
+bytes, and `MutableBytes`, its writable counterpart (a value, not a
+reference).
 
 The domain types (I8Value ... UsizeValue) are members of namespace abi, like
-the structs and creators: std::abi::U8Value (IMPORTS.md). A consumer either
-spells one qualified after `import std::abi` (`x: std::abi::U8Value`) or
-binds the short name with `import type std::abi::U8Value`; the two errors
-stay program-global names, as every `error` declaration is
-(hir/errordecls.tcl), hence their Abi prefix.
+the structs and creators: std::abi::U8Value. A consumer either spells one
+qualified after `import std::abi` (`x: std::abi::U8Value`) or binds the
+short name with `import type std::abi::U8Value`; the two errors stay
+program-global names, as every `error` declaration is (hir/errordecls.tcl),
+hence their Abi prefix.
 
 == SOURCE
 stdlib/abi.bot (import std::abi).
@@ -1972,8 +1970,7 @@ related: stdlib.std::linux::abi::aarch64::syscall stdlib.module.std::abi stdlib.
 == DESCRIPTION
 This is stdlib/abi/x86_64.bot's AArch64 sibling, and deliberately the same
 source with the architecture's own names: each architecture's transport
-layer owns its register type and its conversions (LINUX-X86-64-SYSCALL.md,
-"Why std::abi::x86_64::to_int, not std::abi::to_int"), so a
+layer owns its register type and its conversions, so a
 std::abi::aarch64::Register64 is never a std::abi::x86_64::Register64 -- a
 register word of one architecture cannot reach the other's transport
 (hir/syscall.tcl: TYPE).
@@ -1985,10 +1982,9 @@ and its x0 result). It is ordinary Botlish: a nominal struct whose one field
 holds the register's contents under the signed (two's-complement) reading,
 typed with the source-defined domain Register64Word below. That field type
 is what keeps the value sound with no privileged code at all: a construction
-`Register64 {word: x}` anywhere must statically prove x in the domain
-(STRUCTS.md, "Named struct construction": no implicit runtime cast, no
-guard), so no Register64 can hold anything but exactly one of the 2^64
-register bit patterns.
+`Register64 {word: x}` anywhere must statically prove x in the domain (no
+implicit runtime cast, no guard), so no Register64 can hold anything but
+exactly one of the 2^64 register bit patterns.
 
 It is transport, not a machine-integer programming model: Register64 is a
 struct, so it has no arithmetic, ordering, bitwise or pointer operations, no
@@ -2068,8 +2064,8 @@ stdlib/abi/bytes.bot: import std::abi::bytes, then write
 std::abi::bytes::Bytes.
 
 == DESCRIPTION
-Both are sendable (SENDABILITY-AND-VALUE-COPY-MILESTONE-1.md): a copy in
-another VM is a byte storage of its own holding the same bytes.
+Both are sendable: a copy in another VM is a byte storage of its own holding
+the same bytes.
 
 == NOTES
 Its one field is private to module std::abi::bytes (a projection or a
@@ -2149,12 +2145,12 @@ std::abi::bytes::join or, as a method, receiver.join(...).
 
 == DESCRIPTION
 The bytes of every Bytes of PARTS, in order, as one Bytes: one copy of their
-total length (WINDOWS-X86-64-MILESTONE-7.md: a file read in chunks becomes
-one value). The empty List, or one of empty parts, gives the empty Bytes.
+total length (a file read in chunks becomes one value). The empty List, or
+one of empty parts, gives the empty Bytes.
 
 @topic stdlib.std::abi::bytes::slice
 title: std::abi::bytes::slice -- Function of module std::abi::bytes
-summary: DATA's bytes START..END-1, as a new Bytes (WINDOWS-X86-64-MILESTONE-7.md
+summary: DATA's bytes START..END-1, as a new Bytes (the bytes a short write left unwritten)
 index: stdlib
 symbol: std::abi::bytes::slice
 related: stdlib.module.std::abi::bytes
@@ -2167,10 +2163,10 @@ stdlib/abi/bytes.bot: import std::abi::bytes, then write
 std::abi::bytes::slice or, as a method, receiver.slice(...).
 
 == DESCRIPTION
-DATA's bytes START..END-1, as a new Bytes (WINDOWS-X86-64-MILESTONE-7.md:
-the bytes a short write left unwritten): the one slice rule of
-std::str::substring -- LowerUnderrun or UpperOverrun unless 0 <= START <=
-END <= length(DATA). An empty slice is the empty Bytes.
+DATA's bytes START..END-1, as a new Bytes (the bytes a short write left
+unwritten): the one slice rule of std::str::substring -- LowerUnderrun or
+UpperOverrun unless 0 <= START <= END <= length(DATA). An empty slice is the
+empty Bytes.
 
 @topic stdlib.std::abi::bytes::decode_utf8
 title: std::abi::bytes::decode_utf8 -- Function of module std::abi::bytes
@@ -2187,17 +2183,17 @@ stdlib/abi/bytes.bot: import std::abi::bytes, then write
 std::abi::bytes::decode_utf8 or, as a method, receiver.decode_utf8(...).
 
 == DESCRIPTION
-The String whose UTF-8 encoding is DATA: std::str::encode_utf8's inverse
-(WINDOWS-X86-64-MILESTONE-7.md). Strict -- an overlong form, an encoded
-surrogate (WTF-8's form of an unpaired UTF-16 surrogate), a value above
-U+10FFFF, a truncated sequence or a stray continuation byte is the declared
-error InvalidUtf8, never a replacement character -- so
-decode_utf8(from_list(s.encode_utf8())) == s for every String s. A 0 byte is
-the character U+0000. No byte-order mark is skipped, nothing normalized.
+The String whose UTF-8 encoding is DATA: std::str::encode_utf8's inverse.
+Strict -- an overlong form, an encoded surrogate (WTF-8's form of an
+unpaired UTF-16 surrogate), a value above U+10FFFF, a truncated sequence or
+a stray continuation byte is the declared error InvalidUtf8, never a
+replacement character -- so decode_utf8(from_list(s.encode_utf8())) == s for
+every String s. A 0 byte is the character U+0000. No byte-order mark is
+skipped, nothing normalized.
 
 @topic stdlib.std::abi::bytes::encode_utf16le
 title: std::abi::bytes::encode_utf16le -- Function of module std::abi::bytes
-summary: TEXT's UTF-16LE encoding (UTF16-BYTE-STORAGE-MILESTONE-1.md)
+summary: TEXT's UTF-16LE encoding
 index: stdlib
 symbol: std::abi::bytes::encode_utf16le
 related: stdlib.module.std::abi::bytes
@@ -2211,13 +2207,13 @@ std::abi::bytes::encode_utf16le or, as a method,
 receiver.encode_utf16le(...).
 
 == DESCRIPTION
-TEXT's UTF-16LE encoding (UTF16-BYTE-STORAGE-MILESTONE-1.md): each Unicode
-scalar value of TEXT as UTF-16 code units -- one unit, or for a scalar above
-U+FFFF its surrogate pair, high unit first -- and each unit as two bytes,
-low byte first, whatever the host's byte order: exactly two bytes per unit,
-in one contiguous Bytes. No byte-order mark is added, no terminator (a Win32
-call adds its own NUL unit: std::windows::fs), nothing normalized; U+0000 is
-the bytes 00 00, an ordinary character. Total.
+TEXT's UTF-16LE encoding: each Unicode scalar value of TEXT as UTF-16 code
+units -- one unit, or for a scalar above U+FFFF its surrogate pair, high
+unit first -- and each unit as two bytes, low byte first, whatever the
+host's byte order: exactly two bytes per unit, in one contiguous Bytes. No
+byte-order mark is added, no terminator (a Win32 call adds its own NUL unit:
+std::windows::fs), nothing normalized; U+0000 is the bytes 00 00, an
+ordinary character. Total.
 
 @topic stdlib.std::abi::bytes::decode_utf16le
 title: std::abi::bytes::decode_utf16le -- Function of module std::abi::bytes
@@ -2246,7 +2242,7 @@ Nothing normalized.
 
 @topic stdlib.std::abi::bytes::length
 title: std::abi::bytes::length -- Function of module std::abi::bytes
-summary: The exact byte count of DATA, as the ABI size domain.
+summary: The exact byte count of DATA, as the ABI size domain
 index: stdlib
 symbol: std::abi::bytes::length
 related: stdlib.module.std::abi::bytes
@@ -2259,9 +2255,9 @@ stdlib/abi/bytes.bot: import std::abi::bytes, then write
 std::abi::bytes::length or, as a method, receiver.length(...).
 
 == DESCRIPTION
-The exact byte count of DATA, as the ABI size domain. The runtime's
-collection-length ceiling (below 2^62) already guarantees the count is a
-valid native buffer extent, so no caller re-proves 0 <= n <= 2^64 - 1.
+The exact byte count of DATA, as the ABI size domain; its int is
+`length(data).value`. The runtime's collection-length ceiling (below 2^62)
+guarantees a valid native buffer extent: no caller re-proves the range.
 
 @topic stdlib.std::abi::bytes::zeroed
 title: std::abi::bytes::zeroed -- Function of module std::abi::bytes
@@ -2408,7 +2404,7 @@ related: stdlib.std::str::encode_utf8 stdlib.module.std::binary stdlib.module.st
 
 == DESCRIPTION
 ---------------------------------------------------------------------------
-Bytes: the first owned ABI memory value (ABI-BYTES.md).
+Bytes: the first owned ABI memory value.
 
 A Bytes is an immutable, finite sequence of bytes with an exact length,
 whose contiguous ABI representation exists whenever a foreign boundary needs
@@ -2442,7 +2438,7 @@ pointer, a borrow, a resource, a mutable buffer or an iterator.
   from the Bytes itself.
 
 ---------------------------------------------------------------------------
-MutableBytes: the writable counterpart (MUTABLE-BYTES.md).
+MutableBytes: the writable counterpart.
 
 A MutableBytes is a finite sequence of bytes of one fixed length whose
 CONTENTS can change, and it is a VALUE: mutable storage does not imply
@@ -2492,12 +2488,12 @@ Not here, deliberately: indexing, capacity, resizing, NUL-terminated strings
 stdlib/abi/bytes.bot (import std::abi::bytes).
 
 == MEMBERS
-    std::abi::bytes::Bytes         opaque struct -- Both are sendable (SEND...
+    std::abi::bytes::Bytes         opaque struct -- Both are sendable
     std::abi::bytes::MutableBytes  opaque struct
     std::abi::bytes::decode_utf16le function -- The String whose UTF-16LE e...
     std::abi::bytes::decode_utf8   function -- The String whose UTF-8 encod...
     std::abi::bytes::detach        function -- DATA itself, as a value (a l...
-    std::abi::bytes::encode_utf16le function -- TEXT's UTF-16LE encoding (U...
+    std::abi::bytes::encode_utf16le function -- TEXT's UTF-16LE encoding
     std::abi::bytes::freeze        function -- An immutable snapshot of all...
     std::abi::bytes::freeze_prefix function -- An immutable snapshot of the...
     std::abi::bytes::from_bytes    function -- An independent writable copy...
@@ -2912,10 +2908,9 @@ is ordinary Botlish: a nominal struct whose one field holds the register's
 contents under the signed (two's-complement) reading, typed with the
 source-defined domain Register64Word below. That field type is what keeps
 the value sound with no privileged code at all: a construction `Register64
-{word: x}` anywhere must statically prove x in the domain (STRUCTS.md,
-"Named struct construction": no implicit runtime cast, no guard), so no
-Register64 can hold anything but exactly one of the 2^64 register bit
-patterns.
+{word: x}` anywhere must statically prove x in the domain (no implicit
+runtime cast, no guard), so no Register64 can hold anything but exactly one
+of the 2^64 register bit patterns.
 
 It is transport, not a machine-integer programming model: Register64 is a
 struct, so it has no arithmetic, ordering, bitwise or pointer operations (`r
@@ -2931,10 +2926,10 @@ way out is to_int.
                         -1 is 0xffffffffffffffff). Anything else is the
                         declared error Register64BelowRange /
                         Register64AboveRange -- never truncation. The
-                        call-specific completion proof (STATIC-COMPLETION-
-                        PROOFS.md) makes a provably in-range argument
-                        (register64(39)) need no handler, and a provably
-                        out-of-range literal a compile-time KNOWN-ERROR.
+                        call-specific completion proof makes a provably
+                        in-range argument (register64(39)) need no
+                        handler, a provably out-of-range literal a
+                        compile-time KNOWN-ERROR.
   std::abi::x86_64::to_int(register)         Register64 -> Int: the register
                         contents read as a signed 64-bit two's-complement
                         integer (0x27 -> 39, 0xffffffffffffffff -> -1), an
@@ -2943,8 +2938,8 @@ way out is to_int.
                         errno or other meaning is read into it.
 
   std::abi::x86_64::from_i8(value) ... from_usize(value)
-                        ABI numeric value -> Register64 (ABI-NUMERIC-
-                        DOMAINS.md): total, no error, no check. Signed
+                        ABI numeric value -> Register64: total, no error,
+                        no check. Signed
                         values (std::abi::I8 I16 I32 I64 Isize) are sign-
                         extended to 64 bits, unsigned ones (std::abi::U8 U16
                         U32 U64 Usize) zero-extended -- see "Encoding ABI
@@ -2962,7 +2957,7 @@ are all here, in source. The only privileged operation is the kernel
 transition itself, std::linux::abi::x86_64::syscall (core/linuxabi.tcl, the
 native backend's helper in native/src/runtime/syscall.rs), which takes and
 returns Register64 values and nothing else. stdlib/abi/aarch64.bot is the
-same layer for AArch64 (LINUX-SYSCALL-TRANSPORTS.md).
+same layer for AArch64.
 
 == SOURCE
 stdlib/abi/x86_64.bot (import std::abi::x86_64).
@@ -3509,6 +3504,26 @@ An actor ready to start: STEP is its coroutine, FIRST what its construction
 returned (its first request). No context: an actor is constructed under the
 authority it is given (an inject block) and handed out of it this way.
 
+@topic stdlib.std::actor::post_waiting
+title: std::actor::post_waiting -- Function (nomethod) of module std::actor
+summary: Send M to TO's mailbox from an event-loop task that is no actor (a transport's pump
+index: stdlib
+symbol: std::actor::post_waiting
+related: stdlib.module.std::actor
+
+== DECLARATION
+    nomethod fn post_waiting(to: Address[M], m: M, context ev: std::event_loop::Loop, ac: Actors) -> Sent errors std::event_loop::SchedulerFault:
+
+== MODULE
+stdlib/actor.bot: import std::actor, then write std::actor::post_waiting.
+
+== DESCRIPTION
+Send M to TO's mailbox from an event-loop task that is no actor (a
+transport's pump: std::actor::remote), waiting -- that task suspended, never
+its thread -- for room when it is full, as an actor's deliver does (the
+senders waiting for room are served first-come first-served): Delivered,
+Closed or Stale.
+
 @topic stdlib.std::actor::start
 title: std::actor::start -- Function of module std::actor
 summary: Start actor A
@@ -3553,7 +3568,7 @@ wants are drained.
 
 @topic stdlib.module.std::actor
 title: std::actor -- standard namespace
-summary: Same-thread actors over std::event_loop (SAME-THREAD-ACTORS-MILESTONE-1.md).
+summary: Same-thread actors over std::event_loop.
 index: stdlib
 symbol: std::actor
 
@@ -3573,9 +3588,8 @@ symbol: std::actor
 An ACTOR is one ordinary coroutine: its private state is its own locals, it
 handles one message at a time, and it is scheduled by std::event_loop like
 every other task. What it may do is what its code may do: the contexts it
-was constructed with (an `inject` block states them;
-RESTRICTED-CONTEXT-INJECTION-MILESTONE-1.md) and the capabilities it was
-given as values. Communicating takes no context at all:
+was constructed with (an `inject` block states them) and the capabilities it
+was given as values. Communicating takes no context at all:
 
 * Address[M]  an opaque, unrestricted send right: copy it, pass it in a
               message; it sends M to one mailbox and does nothing else.
@@ -3658,6 +3672,7 @@ stdlib/actor.bot (import std::actor).
     std::actor::open               function (nomethod) -- A new, empty mail...
     std::actor::pause              function -- Let the other ready tasks ru...
     std::actor::post               function (nomethod) -- Send M to TO's ma...
+    std::actor::post_waiting       function (nomethod) -- Send M to TO's ma...
     std::actor::queued             function (nomethod) -- Messages queued i...
     std::actor::reap               function -- Close the mailboxes of every...
     std::actor::receive            function -- The next message of RX's mai...
@@ -3669,6 +3684,555 @@ stdlib/actor.bot (import std::actor).
     std::actor::try_receive        function -- The next message of RX's mai...
 
 Each member is a topic: -help NAME (e.g. -help std::actor::Actors).
+
+@topic stdlib.std::actor::remote::Sent
+title: std::actor::remote::Sent -- Enum of module std::actor::remote
+summary: What a remote send did.
+index: stdlib
+symbol: std::actor::remote::Sent
+related: stdlib.module.std::actor::remote
+
+== DECLARATION
+    enum Sent:
+        Delivered,
+        Full,
+        Closed,
+        Stale,
+        Unavailable,
+        TooLarge,
+        TypeMismatch,
+
+== MODULE
+stdlib/actor/remote.bot: import std::actor::remote, then write
+std::actor::remote::Sent.
+
+== DESCRIPTION
+What a remote send did.
+
+@topic stdlib.std::actor::remote::CallFailed
+title: std::actor::remote::CallFailed -- Error of module std::actor::remote
+summary: A call that could not complete
+index: stdlib
+symbol: std::actor::remote::CallFailed
+related: stdlib.module.std::actor::remote
+
+== DECLARATION
+    error CallFailed:
+        reason: str
+
+== MODULE
+stdlib/actor/remote.bot: import std::actor::remote, then write
+std::actor::remote::CallFailed.
+
+== DESCRIPTION
+A call that could not complete: REASON says why (Closed, Stale, Unavailable,
+Undelivered, ServiceEnded, TooLarge, TypeMismatch).
+
+@topic stdlib.std::actor::remote::Word
+title: std::actor::remote::Word -- Type of module std::actor::remote
+summary: A transport identity's word (a domain, an endpoint or call id, a key)
+index: stdlib
+symbol: std::actor::remote::Word
+related: stdlib.module.std::actor::remote
+
+== DECLARATION
+    type Word = Int in -4611686018427387904..4611686018427387903
+
+== MODULE
+stdlib/actor/remote.bot: import std::actor::remote, then write
+std::actor::remote::Word.
+
+== DESCRIPTION
+A transport identity's word (a domain, an endpoint or call id, a key): a
+small Int, so a capability fits a context's fixed slot (a broker context
+holds one).
+
+@topic stdlib.std::actor::remote::Identity
+title: std::actor::remote::Identity -- Struct of module std::actor::remote
+summary: What a capability holds
+index: stdlib
+symbol: std::actor::remote::Identity
+related: stdlib.module.std::actor::remote
+
+== DECLARATION
+    struct Identity:
+        domain: Word
+        id: Word
+        key: Word
+
+== MODULE
+stdlib/actor/remote.bot: import std::actor::remote, then write
+std::actor::remote::Identity.
+
+== DESCRIPTION
+What a capability holds: the transport's identity of its endpoint or call.
+
+@topic stdlib.std::actor::remote::Remote
+title: std::actor::remote::Remote -- Opaque struct of module std::actor::remote
+summary: The send right of an endpoint delivering M into one mailbox, of this VM or another.
+index: stdlib
+symbol: std::actor::remote::Remote
+related: stdlib.module.std::actor::remote
+
+== DECLARATION
+    opaque struct Remote[M satisfies Sendable]:
+        domain: Word
+        id: Word
+        key: Word
+        sendable through(remote_out, remote_in) as Identity
+
+== MODULE
+stdlib/actor/remote.bot: import std::actor::remote, then write
+std::actor::remote::Remote.
+
+== DESCRIPTION
+The send right of an endpoint delivering M into one mailbox, of this VM or
+another.
+
+@topic stdlib.std::actor::remote::Service
+title: std::actor::remote::Service -- Opaque struct of module std::actor::remote
+summary: The call right of a service answering requests Q with an R.
+index: stdlib
+symbol: std::actor::remote::Service
+related: stdlib.module.std::actor::remote
+
+== DECLARATION
+    opaque struct Service[Q satisfies Sendable, R satisfies Sendable]:
+        domain: Word
+        id: Word
+        key: Word
+        sendable through(service_out, service_in) as Identity
+
+== MODULE
+stdlib/actor/remote.bot: import std::actor::remote, then write
+std::actor::remote::Service.
+
+== DESCRIPTION
+The call right of a service answering requests Q with an R.
+
+@topic stdlib.std::actor::remote::Reply
+title: std::actor::remote::Reply -- Opaque struct of module std::actor::remote
+summary: The one-shot answer right of one call.
+index: stdlib
+symbol: std::actor::remote::Reply
+related: stdlib.module.std::actor::remote
+
+== DECLARATION
+    opaque struct Reply[R satisfies Sendable]:
+        domain: Word
+        call: Word
+        key: Word
+        sendable through(reply_out, reply_in) as Identity
+
+== MODULE
+stdlib/actor/remote.bot: import std::actor::remote, then write
+std::actor::remote::Reply.
+
+== DESCRIPTION
+The one-shot answer right of one call.
+
+@topic stdlib.std::actor::remote::Call
+title: std::actor::remote::Call -- Struct of module std::actor::remote
+summary: What a service's mailbox receives
+index: stdlib
+symbol: std::actor::remote::Call
+related: stdlib.module.std::actor::remote
+
+== DECLARATION
+    struct Call[Q satisfies Sendable, R satisfies Sendable]:
+        body: Q
+        reply: Reply[R]
+
+== MODULE
+stdlib/actor/remote.bot: import std::actor::remote, then write
+std::actor::remote::Call.
+
+== DESCRIPTION
+What a service's mailbox receives: a request and its answer right.
+
+@topic stdlib.std::actor::remote::Response
+title: std::actor::remote::Response -- Opaque struct of module std::actor::remote
+summary: What a caller's reply mailbox receives (the protocol's).
+index: stdlib
+symbol: std::actor::remote::Response
+related: stdlib.module.std::actor::remote
+
+== DECLARATION
+    opaque struct Response[R satisfies Sendable]:
+        call: int
+        status: int
+        values: List[R]
+
+== MODULE
+stdlib/actor/remote.bot: import std::actor::remote, then write
+std::actor::remote::Response.
+
+== DESCRIPTION
+What a caller's reply mailbox receives (the protocol's).
+
+@topic stdlib.std::actor::remote::Replies
+title: std::actor::remote::Replies -- Struct of module std::actor::remote
+summary: What replies opens
+index: stdlib
+symbol: std::actor::remote::Replies
+related: stdlib.module.std::actor::remote
+
+== DECLARATION
+    struct Replies[R satisfies Sendable]:
+        inbox: std::actor::Inbox[Response[R]]
+        endpoint: int
+
+== MODULE
+stdlib/actor/remote.bot: import std::actor::remote, then write
+std::actor::remote::Replies.
+
+== DESCRIPTION
+What replies opens: the reply mailbox's receive right (the caller's actor's)
+and its reply endpoint.
+
+@topic stdlib.std::actor::remote::Caller
+title: std::actor::remote::Caller -- Opaque struct of module std::actor::remote
+summary: An actor's reply route
+index: stdlib
+symbol: std::actor::remote::Caller
+related: stdlib.module.std::actor::remote
+
+== DECLARATION
+    opaque struct Caller[R satisfies Sendable]:
+        endpoint: int
+        rx: std::actor::Receiver[Response[R]]
+
+== MODULE
+stdlib/actor/remote.bot: import std::actor::remote, then write
+std::actor::remote::Caller.
+
+== DESCRIPTION
+An actor's reply route: its reply endpoint, and what it receives the
+responses through.
+
+@topic stdlib.std::actor::remote::export
+title: std::actor::remote::export -- Function (nomethod) of module std::actor::remote
+summary: Export TO's mailbox
+index: stdlib
+symbol: std::actor::remote::export
+related: stdlib.module.std::actor::remote
+
+== DECLARATION
+    nomethod fn export(to: std::actor::Address[M], capacity: int, context ev: std::event_loop::Loop, ac: std::actor::Actors, p: std::thread::Port) -> Remote[M] errors std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+
+== MODULE
+stdlib/actor/remote.bot: import std::actor::remote, then write
+std::actor::remote::export.
+
+== DESCRIPTION
+Export TO's mailbox: an endpoint of this VM whose messages (at most CAPACITY
+in transit) are delivered into it, in order. The capability is sendable; the
+mailbox's actor receives as from any sender.
+
+@topic stdlib.std::actor::remote::close
+title: std::actor::remote::close -- Function (nomethod) of module std::actor::remote
+summary: Close R's endpoint, if it is this VM's
+index: stdlib
+symbol: std::actor::remote::close
+related: stdlib.module.std::actor::remote
+
+== DECLARATION
+    nomethod fn close(r: Remote[M]) -> int:
+
+== MODULE
+stdlib/actor/remote.bot: import std::actor::remote, then write
+std::actor::remote::close.
+
+== DESCRIPTION
+Close R's endpoint, if it is this VM's: later sends are Closed, and the
+messages it held in transit are dropped -- how many.
+
+@topic stdlib.std::actor::remote::in_transit
+title: std::actor::remote::in_transit -- Function (nomethod)
+summary: Messages queued on R's endpoint in transit (this VM's endpoint
+index: stdlib
+symbol: std::actor::remote::in_transit
+related: stdlib.module.std::actor::remote
+
+== DECLARATION
+    nomethod fn in_transit(r: Remote[M]) -> int:
+
+== MODULE
+stdlib/actor/remote.bot: import std::actor::remote, then write
+std::actor::remote::in_transit.
+
+== DESCRIPTION
+Messages queued on R's endpoint in transit (this VM's endpoint; 0
+otherwise).
+
+@topic stdlib.std::actor::remote::send
+title: std::actor::remote::send -- Function (nomethod) of module std::actor::remote
+summary: Send M through TO now
+index: stdlib
+symbol: std::actor::remote::send
+related: stdlib.module.std::actor::remote
+
+== DECLARATION
+    nomethod fn send(to: Remote[M], m: M) -> Sent:
+
+== MODULE
+stdlib/actor/remote.bot: import std::actor::remote, then write
+std::actor::remote::send.
+
+== DESCRIPTION
+Send M through TO now: Delivered, or why not -- Full (its endpoint holds its
+capacity in transit, or senders wait for room before this one), Closed,
+Stale (no endpoint has this identity now), Unavailable (another process's),
+TooLarge. It never waits and needs no context: an actor sends with it.
+
+@topic stdlib.std::actor::remote::deliver
+title: std::actor::remote::deliver -- Function (nomethod)
+summary: Send M through TO from an event-loop task, waiting -- the task suspended, never its thread -- for room while it is Full
+index: stdlib
+symbol: std::actor::remote::deliver
+related: stdlib.module.std::actor::remote
+
+== DECLARATION
+    nomethod fn deliver(to: Remote[M], m: M, context ev: std::event_loop::Loop, p: std::thread::Port) -> Sent errors std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+
+== MODULE
+stdlib/actor/remote.bot: import std::actor::remote, then write
+std::actor::remote::deliver.
+
+== DESCRIPTION
+Send M through TO from an event-loop task, waiting -- the task suspended,
+never its thread -- for room while it is Full: Delivered, Closed, Stale,
+Unavailable or TooLarge.
+
+@topic stdlib.std::actor::remote::serve_calls
+title: std::actor::remote::serve_calls -- Function (nomethod)
+summary: Export TO's mailbox as a service
+index: stdlib
+symbol: std::actor::remote::serve_calls
+related: stdlib.module.std::actor::remote
+
+== DECLARATION
+    nomethod fn serve_calls(to: std::actor::Address[Call[Q, R]], capacity: int, context ev: std::event_loop::Loop, ac: std::actor::Actors, p: std::thread::Port) -> Service[Q, R] errors std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+
+== MODULE
+stdlib/actor/remote.bot: import std::actor::remote, then write
+std::actor::remote::serve_calls.
+
+== DESCRIPTION
+Export TO's mailbox as a service: its actor receives a Call[Q, R] per
+request (at most CAPACITY in transit) and answers each with reply.
+
+@topic stdlib.std::actor::remote::close_service
+title: std::actor::remote::close_service -- Function (nomethod)
+summary: Close S's endpoint (this VM's)
+index: stdlib
+symbol: std::actor::remote::close_service
+related: stdlib.module.std::actor::remote
+
+== DECLARATION
+    nomethod fn close_service(s: Service[Q, R]) -> int:
+
+== MODULE
+stdlib/actor/remote.bot: import std::actor::remote, then write
+std::actor::remote::close_service.
+
+== DESCRIPTION
+Close S's endpoint (this VM's): later calls fail Closed, and the calls it
+held in transit fail Undelivered -- how many.
+
+@topic stdlib.std::actor::remote::in_transit_calls
+title: std::actor::remote::in_transit_calls -- Function (nomethod)
+summary: Requests queued on S's endpoint in transit, not yet taken by its pump (this VM's service
+index: stdlib
+symbol: std::actor::remote::in_transit_calls
+related: stdlib.module.std::actor::remote
+
+== DECLARATION
+    nomethod fn in_transit_calls(s: Service[Q, R]) -> int:
+
+== MODULE
+stdlib/actor/remote.bot: import std::actor::remote, then write
+std::actor::remote::in_transit_calls.
+
+== DESCRIPTION
+Requests queued on S's endpoint in transit, not yet taken by its pump (this
+VM's service; 0 otherwise).
+
+@topic stdlib.std::actor::remote::reply
+title: std::actor::remote::reply -- Function (nomethod) of module std::actor::remote
+summary: Answer the call R with VALUE
+index: stdlib
+symbol: std::actor::remote::reply
+related: stdlib.module.std::actor::remote
+
+== DECLARATION
+    nomethod fn reply(r: Reply[R], value: R) -> Sent:
+
+== MODULE
+stdlib/actor/remote.bot: import std::actor::remote, then write
+std::actor::remote::reply.
+
+== DESCRIPTION
+Answer the call R with VALUE: Delivered, or Stale when it was answered
+already, cancelled, or its caller is gone (the answer reaches nobody),
+Unavailable. Needs no context: the answer right is the authority.
+
+@topic stdlib.std::actor::remote::replies
+title: std::actor::remote::replies -- Function (nomethod)
+summary: Open the reply route of one calling actor
+index: stdlib
+symbol: std::actor::remote::replies
+related: stdlib.module.std::actor::remote
+
+== DECLARATION
+    nomethod fn replies(capacity: int, context ev: std::event_loop::Loop, ac: std::actor::Actors, p: std::thread::Port) -> Replies[R] errors std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+
+== MODULE
+stdlib/actor/remote.bot: import std::actor::remote, then write
+std::actor::remote::replies.
+
+== DESCRIPTION
+Open the reply route of one calling actor: a mailbox of responses (at most
+CAPACITY queued), fed by a reply endpoint of this VM. Hand the result to the
+actor, which makes its Caller of it (caller).
+
+@topic stdlib.std::actor::remote::caller
+title: std::actor::remote::caller -- Function (nomethod) of module std::actor::remote
+summary: The Caller an actor calls through, made of its Replies
+index: stdlib
+symbol: std::actor::remote::caller
+related: stdlib.module.std::actor::remote
+
+== DECLARATION
+    nomethod fn caller(r: Replies[R], resume std::actor::Answer) -> Caller[R] errors std::actor::Closed:
+
+== MODULE
+stdlib/actor/remote.bot: import std::actor::remote, then write
+std::actor::remote::caller.
+
+== DESCRIPTION
+The Caller an actor calls through, made of its Replies: the reply mailbox is
+bound to the actor (std::actor::listen).
+
+@topic stdlib.std::actor::remote::call
+title: std::actor::remote::call -- Function (nomethod) of module std::actor::remote
+summary: Calls SVC with Q from an actor and waits -- the actor suspended, its thread free -- for the reply
+index: stdlib
+symbol: std::actor::remote::call
+related: stdlib.module.std::actor::remote
+
+== DECLARATION
+    nomethod fn call(svc: Service[Q, R], q: Q, c: Caller[R], resume std::actor::Answer) -> R errors CallFailed, std::actor::Closed:
+
+== MODULE
+stdlib/actor/remote.bot: import std::actor::remote, then write
+std::actor::remote::call.
+
+== DESCRIPTION
+Calls SVC with Q from an actor and waits -- the actor suspended, its thread
+free -- for the reply: an R. While the service's endpoint is full, the call
+waits for room. CallFailed with the reason when the call cannot complete:
+the service is Closed (or its request Undelivered when it closed),
+ServiceEnded (its VM ended before answering), Stale, Unavailable, TooLarge,
+TypeMismatch. Closed when C's own reply mailbox closed.
+
+@topic stdlib.module.std::actor::remote
+title: std::actor::remote -- standard namespace
+summary: Typed messages and calls between actors of different Botlish threads.
+index: stdlib
+symbol: std::actor::remote
+
+== DESCRIPTION
+  # the receiving VM: an ordinary mailbox, exported
+  {to: jobs, inbox} = std::actor::open[Job](16)
+  r = std::actor::remote::export(jobs, 64)       # Remote[Job]: a capability
+  # ... give r to another thread (it is sendable: a thread's
+  # initialization value, a message) ...
+
+  # the sending VM
+  std::actor::remote::send(r, Job {...})         # Delivered, Full, Closed, ...
+
+An exported mailbox stays an ordinary std::actor mailbox: its actor receives
+with std::actor::receive, under its own restricted authority, on its own
+thread; this module adds no scheduler. Between the threads the message is
+BYTES: the sender encodes it in its VM (std::transfer, its Sendable type
+checked statically), the runtime's transport queues the bytes -- nothing of
+the sending VM's heap -- and the receiving VM's pump task (a task of its
+event loop, woken through its port: std::thread) decodes them in that VM,
+with its own constructors, and posts the value into the mailbox, in the
+order sent (FIFO per sender). A message is typed twice: statically, by the
+capability's type, and by the transport, which compares the bytes' schema
+fingerprint with the endpoint's before it queues them (a mismatch is
+TypeMismatch, never a delivery).
+
+CAPABILITIES. Remote[M], Service[Q, R] and Reply[R] name an endpoint (or a
+call) of the process's transport by its domain (this process's random
+identity), its slot and generation, and a random 64-bit key the runtime drew
+when it opened: a capability nobody was given names nothing (Stale), a
+closed endpoint's is Closed, another process's is Unavailable. They are
+sendable (each module's `sendable through` clause states how one is copied:
+its identity), so a thread's initialization value or a message carries them
+-- authority to send, never to receive or to act. They are no
+std::actor::Address[M], which stays local to its VM (not sendable).
+
+BACKPRESSURE. An endpoint queues at most CAPACITY messages in transit;
+beyond, send answers Full (nothing is dropped). deliver (an event-loop
+task's) and call (an actor's) wait for room instead -- their task or actor
+suspended, never their thread: the transport rings the waiting VM's port
+when a place frees, the first waiting sender first. The pump moves a message
+into the mailbox only while the mailbox has room (std::actor::post_waiting),
+so a slow actor fills its mailbox, then the endpoint, then its senders wait:
+the backpressure reaches them.
+
+CALLS. A service is a mailbox of Call[Q, R] values exported with
+serve_calls: each call's request Q and its Reply[R], a one-shot answer
+right. An actor calls (call) through a Caller[R] -- its own reply mailbox,
+fed by a reply endpoint of its VM -- and is suspended until the response
+arrives; the transport correlates each response with its call (its record's
+generation and key), so a duplicate or late answer (after the call was
+answered, cancelled or its caller gone) is Stale and reaches nobody. A call
+completes once: with the reply, or with the failure the transport saw -- the
+request undelivered (its endpoint closed with it queued: Undelivered), the
+service's VM ended owing it (ServiceEnded) -- never left waiting forever
+because its service went.
+
+The operations that move messages need this VM's Port (std::thread), served
+once on its event loop (std::thread::serve, which needs the driver's
+Doorbell): until then the port's notifications wait, never lost, and the
+first turn of its pump drains them.
+
+Native backends only (the runtime's transport): the Tcl backends refuse a
+program that starts a thread, and these operations refuse to run there.
+
+== SOURCE
+stdlib/actor/remote.bot (import std::actor::remote).
+
+== MEMBERS
+    std::actor::remote::Call       struct -- What a service's mailbox receives
+    std::actor::remote::CallFailed error -- A call that could not complete
+    std::actor::remote::Caller     opaque struct -- An actor's reply route
+    std::actor::remote::Identity   struct -- What a capability holds
+    std::actor::remote::Remote     opaque struct -- The send right of an en...
+    std::actor::remote::Replies    struct -- What replies opens
+    std::actor::remote::Reply      opaque struct -- The one-shot answer rig...
+    std::actor::remote::Response   opaque struct -- What a caller's reply m...
+    std::actor::remote::Sent       enum -- What a remote send did.
+    std::actor::remote::Service    opaque struct -- The call right of a ser...
+    std::actor::remote::Word       type -- A transport identity's word (a d...
+    std::actor::remote::call       function (nomethod) -- Calls SVC with Q ...
+    std::actor::remote::caller     function (nomethod) -- The Caller an act...
+    std::actor::remote::close      function (nomethod) -- Close R's endpoin...
+    std::actor::remote::close_service function (nomethod) -- Close S's endp...
+    std::actor::remote::deliver    function (nomethod) -- Send M through TO...
+    std::actor::remote::export     function (nomethod) -- Export TO's mailbox
+    std::actor::remote::in_transit function (nomethod) -- Messages queued o...
+    std::actor::remote::in_transit_calls function (nomethod) -- Requests qu...
+    std::actor::remote::replies    function (nomethod) -- Open the reply ro...
+    std::actor::remote::reply      function (nomethod) -- Answer the call R...
+    std::actor::remote::send       function (nomethod) -- Send M through TO...
+    std::actor::remote::serve_calls function (nomethod) -- Export TO's mail...
+
+Each member is a topic: -help NAME (e.g. -help std::actor::remote::Call).
 
 @topic stdlib.std::ascii::is_digit
 title: std::ascii::is_digit -- Function of module std::ascii
@@ -3786,13 +4350,12 @@ false for it, never an error (a Byte is always a valid Byte; classifying it
 is total).
 
 Byte is the parameter type, never Int/UnicodeChar/str: this namespace
-classifies byte *values*, not Unicode scalars or source characters (see
-ASCII-AND-URI-UNRESERVED.md). The boundary constants below (48, 57, 65, 90,
-97, 122) are ordinary Int literals compared directly against the Byte
-parameter -- Byte is `Int in 0..255` (stdlib/byte.bot), so an Int-typed
-comparison operand needs no conversion; wrapping every boundary in its own
-runtime Byte(...) checked construction would add nothing but nominal
-symmetry (see the report's "Boundary representation choice").
+classifies byte *values*, not Unicode scalars or source characters. The
+boundary constants below (48, 57, 65, 90, 97, 122) are ordinary Int literals
+compared directly against the Byte parameter -- Byte is `Int in 0..255`
+(stdlib/byte.bot), so an Int-typed comparison operand needs no conversion;
+wrapping every boundary in its own runtime Byte(...) checked construction
+would add nothing but nominal symmetry.
 
 This namespace deliberately owns only ASCII *structure*: is_digit, is_upper,
 is_lower, is_alphabetic, is_alphanumeric, and nothing else -- no
@@ -3805,7 +4368,7 @@ duplicated or folded into an ASCII class here.
 The one dependency of this leaf module is the type of its parameters:
 `import type std::byte::Byte` (stdlib/byte.bot's `type Byte = Int in
 0..255`) binds the short type name Byte in this file, and no other name of
-namespace byte (IMPORTS.md). Every consumer of `ascii::` that needs to
+namespace byte. Every consumer of `ascii::` that needs to
 *construct* a Byte already names the byte namespace itself.
 
 == SOURCE
@@ -3975,13 +4538,12 @@ NativeEdit[array N of E] (an array field read through a view or an edit,
 v.items, or an element of one); anything else is BINARY-OPERAND. One
 access at the array's address plus i times the element's width: a scalar
 element is one load, a pointer element is read fresh (observed, affine
-like any pointer), and a record or row element is its own live view
-(edit, through an edit) at its address, nothing read. The whole array is
-never copied. An index the compiler proves in 0..N-1 (a constant, a loop
-over the extent, a branch) needs no handler; one proven outside is
-KNOWN-ERROR. It reads native memory only on the native backends (a view
-of a non-null pointer is refused on interp and compile). Declared
-nomethod. FIXED-LAYOUT-ARRAYS.md.
+like any pointer), and a record or row element is its own live view (edit,
+through an edit) at its address, nothing read. The whole array is never
+copied. An index the compiler proves in 0..N-1 (a constant, a loop over
+the extent, a branch) needs no handler; one proven outside is KNOWN-ERROR.
+It reads native memory only on the native backends (a view of a non-null
+pointer is refused on interp and compile). Declared nomethod.
 
 == EXAMPLES
 @example accept
@@ -4261,18 +4823,18 @@ std::binary::read. Declared nomethod: method syntax does not apply
 every backend (interp, compile, cranelift-generic, cranelift)
 
 == NOTES
-data must statically be a std::abi::bytes::Bytes (std::abi::bytes::freeze a
-MutableBytes); the designator is written L.FIELD, a path through nested
+data must statically be a std::abi::bytes::Bytes (std::abi::bytes::freeze
+a MutableBytes); the designator is written L.FIELD, a path through nested
 layouts and unions (L.u.alt.field) and element indices (L.items[3]),
-resolved statically to one constant offset. It is std::binary::write's read
-twin, and how a union is read from bytes: a union has no copied value
+resolved statically to one constant offset. It is std::binary::write's
+read twin, and how a union is read from bytes: a union has no copied value
 (LAYOUT-UNION), so a program reads the alternative it means
-(std::binary::read(data, U.whole)), each alternative by its own encoding. It
-may name a nested layout (its LayoutStruct) or a fixed array (a List of
+(std::binary::read(data, U.whole)), each alternative by its own encoding.
+It may name a nested layout (its LayoutStruct) or a fixed array (a List of
 exactly its extent, which the compiler knows); never a union itself
 (LAYOUT-OPERAND: name an alternative), a C pointer, or anything holding
 one (LAYOUT-NATIVE-ONLY: bytes never become a pointer). Runs on every
-backend. Declared nomethod. LAYOUT-UNIONS.md.
+backend. Declared nomethod.
 
 == EXAMPLES
 @example accept
@@ -4329,16 +4891,16 @@ nested layouts (L.origin.x), naming a field of e's own layout
 (LAYOUT-OPERAND otherwise). The value is held to the field's type the way
 a construction's field values are: a scalar proven in its integer domain
 (no conversion, truncation or run-time guard), a pointer field exactly its
-declared std::ffi::c::Ptr or FnPtr type. A pointer stored is observed, never
-moved: its address bits are copied, the memory does not own the pointee,
-and nothing keeps it alive. Padding and every other field are untouched.
-A designator may name an array element statically (L.items[3]) or a
-whole fixed array, whose value is a List of exactly its extent: every
+declared std::ffi::c::Ptr or FnPtr type. A pointer stored is observed,
+never moved: its address bits are copied, the memory does not own the
+pointee, and nothing keeps it alive. Padding and every other field are
+untouched. A designator may name an array element statically (L.items[3])
+or a whole fixed array, whose value is a List of exactly its extent: every
 extent is checked before the first byte is written (LayoutExtentMismatch,
 declared only when the compiler cannot prove the extents). Otherwise it
-declares no error and returns unit. A store is an ordinary native
-store: not volatile, atomic or ordered; another thread's synchronization
-is the program's protocol. Declared nomethod. NATIVE-LAYOUT-WRITES.md.
+declares no error and returns unit. A store is an ordinary native store:
+not volatile, atomic or ordered; another thread's synchronization is the
+program's protocol. Declared nomethod.
 
 @topic stdlib.std::binary::store_element
 title: std::binary::store_element -- intrinsic of namespace std::binary
@@ -4366,14 +4928,14 @@ apply (NOMETHOD-CALL); call it as std::binary::store_element(...).
 every backend (interp, compile, cranelift-generic, cranelift)
 
 == NOTES
-The array must statically be NativeEdit[array N of E] (an array read through
-a view is read-only: BINARY-OPERAND) and its element a scalar or a pointer
-(a record or row element is LAYOUT-OPERAND: write its fields through
-std::binary::element(a, i), the element's own edit). The value is held to
-the element's type as std::binary::store's is. Exactly the element's bytes
-are written; a store outside 0..N-1 writes nothing. A static index is also a
-designator: std::binary::store(e, L.items[3], v). Declared nomethod.
-FIXED-LAYOUT-ARRAYS.md.
+The array must statically be NativeEdit[array N of E] (an array read
+through a view is read-only: BINARY-OPERAND) and its element a scalar or a
+pointer (a record or row element is LAYOUT-OPERAND: write its fields
+through std::binary::element(a, i), the element's own edit). The value is
+held to the element's type as std::binary::store's is. Exactly the
+element's bytes are written; a store outside 0..N-1 writes nothing. A
+static index is also a designator: std::binary::store(e, L.items[3], v).
+Declared nomethod.
 
 @topic stdlib.std::binary::write
 title: std::binary::write -- intrinsic of namespace std::binary
@@ -4470,15 +5032,15 @@ The explicit foreign encoding: the field must be a C pointer field, or a
 fixed array of them written from a List of pointers of exactly its extent
 (LAYOUT-FOREIGN-WRITE otherwise: an array of records holding pointers is
 filled a field at a time, L.rs[1].p), and p exactly its declared
-std::ffi::c::Ptr or FnPtr type (an Int is TYPE). p is observed, never moved:
-the bytes do not own it, keep it alive, or know whether C keeps it after a
-call -- a wrapper models that protocol. The record built this way is exposed
-to C by the existing borrowing contract (a read noescape pointer parameter).
-The law is one-way: std::binary::parse of a layout with a pointer field
-stays LAYOUT-NATIVE-ONLY whatever the bytes hold, and a pointer is read back
-only from native memory, through a view or an edit. Runs on every backend (a
-C pointer's address is its value there too). Declared nomethod.
-NATIVE-LAYOUT-WRITES.md.
+std::ffi::c::Ptr or FnPtr type (an Int is TYPE). p is observed, never
+moved: the bytes do not own it, keep it alive, or know whether C keeps it
+after a call -- a wrapper models that protocol. The record built this way
+is exposed to C by the existing borrowing contract (a read noescape
+pointer parameter). The law is one-way: std::binary::parse of a layout
+with a pointer field stays LAYOUT-NATIVE-ONLY whatever the bytes hold, and
+a pointer is read back only from native memory, through a view or an edit.
+Runs on every backend (a C pointer's address is its value there too).
+Declared nomethod.
 
 @topic stdlib.module.std::binary
 title: std::binary -- standard namespace
@@ -4527,13 +5089,13 @@ the encoding follows from the interval, never from a name --
 `std::byte::Byte` or `std::abi::U32Value` is as good a field type as
 `std::binary::U32`). Every byte order is the target's, little-endian.
 
-A layout read from live native memory instead of bytes is a native view
-(NATIVE-LAYOUT-VIEWS.md): `std::binary::native::view(L, p)` (namespace
-std::binary::native, direct authority) is a NativeView[L] whose fields are
-read when projected, and `std::binary::load(v)` the LayoutStruct[L] of all
-of them. A field may then also be a C pointer (std::ffi::c::Ptr[T],
-std::ffi::c::FnPtr[F]): such a layout is native-only -- bytes never become a
-pointer, so std::binary::parse and std::binary::emit of it are rejected.
+A layout read from live native memory instead of bytes is a native view:
+`std::binary::native::view(L, p)` (namespace std::binary::native, direct
+authority) is a NativeView[L] whose fields are read when projected, and
+`std::binary::load(v)` the LayoutStruct[L] of all of them. A field may then
+also be a C pointer (std::ffi::c::Ptr[T], std::ffi::c::FnPtr[F]): such a
+layout is native-only -- bytes never become a pointer, so std::binary::parse
+and std::binary::emit of it are rejected.
 
 Nothing here knows about C: a C layer maps its target-dependent types
 (`unsigned long` on Windows, on Linux) to these domains and emits resolved
@@ -4569,15 +5131,15 @@ Each member is a topic: -help NAME (e.g. -help std::binary::I16).
 `import std::binary` for the ten intrinsics and the scalar field types
 std::binary::U8 ... std::binary::I64. A `layout` declaration names a fixed
 number of bytes with explicit size, alignment and field offsets; every
-multi-byte field is little-endian (the target's order), and padding is never
-a field. The layout is static: it is named at a parse or a query and read
-from the value's type at an emit, never a runtime value. A field may be a
-fixed array, `field name: array 16 of std::ffi::c::Char at 8`: N elements of
-any representation (a scalar, a pointer, a nested layout, another array),
-element i at the field's offset plus i times the element's width; its
-copied value is a List of exactly N elements (FIXED-LAYOUT-ARRAYS.md).
-There are no bitfields, variable-length tails or zero-length arrays in a
-layout; overlapping interpretations are a union layout's (LAYOUT-UNIONS.md).
+multi-byte field is little-endian (the target's order), and padding is
+never a field. The layout is static: it is named at a parse or a query and
+read from the value's type at an emit, never a runtime value. A field may
+be a fixed array, `field name: array 16 of std::ffi::c::Char at 8`: N
+elements of any representation (a scalar, a pointer, a nested layout,
+another array), element i at the field's offset plus i times the element's
+width; its copied value is a List of exactly N elements. There are no
+bitfields, variable-length tails or zero-length arrays in a layout;
+overlapping interpretations are a union layout's.
 
 A field may be C's float or double (std::ffi::c::Float, 4 bytes;
 std::ffi::c::Double, 8), its value a Float64. A read of one --
@@ -4600,11 +5162,11 @@ std::binary::load).
 Writes name their field statically, LAYOUT.FIELD or a path through nested
 layouts (Header.origin.x). A record in byte storage the program owns is
 filled a field at a time: std::binary::write(data, L.f, v) is a new
-std::abi::bytes::MutableBytes with that field written (data unchanged), and
-a pointer field takes an existing pointer only through the explicit
+std::abi::bytes::MutableBytes with that field written (data unchanged),
+and a pointer field takes an existing pointer only through the explicit
 std::binary::write_foreign. Live native memory foreign code handed out is
 written through a NativeEdit[L] (std::binary::native::edit, then
-std::binary::store). NATIVE-LAYOUT-WRITES.md.
+std::binary::store).
 
 A fixed array read through a view or an edit (v.items) is a live array,
 NativeView[array N of E] or NativeEdit[array N of E]:
@@ -4643,22 +5205,23 @@ every backend (interp, compile, cranelift-generic, cranelift)
 
 == NOTES
 L is a layout name written at the call; p must statically be an
-std::ffi::c::Ptr[T] (a data pointer), observed, never moved. Nothing is read
-or written when the edit is made. An edit reads exactly as a NativeView does
-(v.field, destructuring, std::binary::load) except that a nested layout's
-field is a NativeEdit of the inner layout, and std::binary::store writes
-through it. It is write authority, never ownership: no lifetime, no
-exclusive access (copies, other edits and views of the same address, and
-foreign code all alias the memory). A NativeView never becomes an edit and
-an edit is not a view: neither is the other's subtype. Making one is raw
-authority like a view: std::binary::native is a direct namespace, so the
-calling module must be a `direct module` (or mediate the call through a
-context of its own); writing through an edit someone else made is not. It
-touches memory only on the native backends: interp and compile refuse an
-edit of a non-null pointer with NATIVE-ONLY. A null pointer is the builtin
-declared error NativeEditNull on every backend. The memory must be live,
-writable and at least std::binary::layout_length(L) bytes for as long as the
-edit is used; nothing checks it. Declared nomethod. NATIVE-LAYOUT-WRITES.md.
+std::ffi::c::Ptr[T] (a data pointer), observed, never moved. Nothing is
+read or written when the edit is made. An edit reads exactly as a
+NativeView does (v.field, destructuring, std::binary::load) except that a
+nested layout's field is a NativeEdit of the inner layout, and
+std::binary::store writes through it. It is write authority, never
+ownership: no lifetime, no exclusive access (copies, other edits and views
+of the same address, and foreign code all alias the memory). A NativeView
+never becomes an edit and an edit is not a view: neither is the other's
+subtype. Making one is raw authority like a view: std::binary::native is a
+direct namespace, so the calling module must be a `direct module` (or
+mediate the call through a context of its own); writing through an edit
+someone else made is not. It touches memory only on the native backends:
+interp and compile refuse an edit of a non-null pointer with NATIVE-ONLY.
+A null pointer is the builtin declared error NativeEditNull on every
+backend. The memory must be live, writable and at least
+std::binary::layout_length(L) bytes for as long as the edit is used;
+nothing checks it. Declared nomethod.
 
 == EXAMPLES
 @example accept
@@ -4714,9 +5277,9 @@ every backend (interp, compile, cranelift-generic, cranelift)
 
 == NOTES
 L is a layout name written at the call; p must statically be an
-std::ffi::c::Ptr[T] (a data pointer), observed, never moved. Nothing is read
-when the view is made: each field is read when it is projected (v.field,
-one load at the layout's offset), a nested layout's field is a
+std::ffi::c::Ptr[T] (a data pointer), observed, never moved. Nothing is
+read when the view is made: each field is read when it is projected
+(v.field, one load at the layout's offset), a nested layout's field is a
 NativeView of the inner layout, and a pointer field is the exact pointer
 the memory holds. A view is read-only, never a pointer, a LayoutStruct or
 another layout's view, and has no equality. Making one is raw authority:
@@ -4726,8 +5289,8 @@ reading a view someone else made is not. It reads memory only on the
 native backends: interp and compile refuse a view of a non-null pointer
 with NATIVE-ONLY. A null pointer is the builtin declared error
 NativeViewNull on every backend. The memory must hold at least
-std::binary::layout_length(L) bytes for as long as the view is read; nothing
-checks it. Declared nomethod. NATIVE-LAYOUT-VIEWS.md.
+std::binary::layout_length(L) bytes for as long as the view is read;
+nothing checks it. Declared nomethod.
 
 == EXAMPLES
 @example accept
@@ -4786,12 +5349,11 @@ stdlib/byte.bot: import std::byte, then write std::byte::BelowRange.
 
 == DESCRIPTION
 The two declared errors std::byte::from_int's Int -> Byte conversion may
-produce (EXPLICIT-ERROR-COMPLETIONS.md item 23): application code
-meaningfully benefits from distinguishing "too small" from "too large" (a
-caller can clamp each direction differently, or report which bound was
-violated), so this chooses the two-error granularity over a single generic
-OutOfRange -- the smallest useful distinction, not the smallest possible
-one.
+produce: application code meaningfully benefits from distinguishing "too
+small" from "too large" (a caller can clamp each direction differently, or
+report which bound was violated), so this chooses the two-error granularity
+over a single generic OutOfRange -- the smallest useful distinction, not the
+smallest possible one.
 
 @topic stdlib.std::byte::AboveRange
 title: std::byte::AboveRange -- Error of module std::byte
@@ -4822,13 +5384,13 @@ related: stdlib.module.std::byte stdlib.std::byte::from_int concept.integer-doma
 stdlib/byte.bot: import std::byte, then write std::byte::Byte.
 
 == DESCRIPTION
-The four scalar domains this milestone's own byte/bit-domain operations are
+The four scalar domains this module's own byte/bit-domain operations are
 typed over. These used to be compiler-side Tcl registrations
-(core/scalarbits.tcl); they are ordinary Botlish source declarations now
-(see SOURCE-DEFINED-INTEGER-DOMAINS.md) -- the compiler knows what a bounded
-integer refinement *is* (a named subtype of Int, or of another such subtype,
-whose values are exactly an inclusive interval or a finite set of integers);
-this file is what says Byte/Nibble/LowNibble/HighNibble
+(core/scalarbits.tcl); they are ordinary Botlish source declarations now --
+the compiler knows what a bounded integer refinement *is* (a named subtype
+of Int, or of another such subtype, whose values are exactly an inclusive
+interval or a finite set of integers); this file is what says
+Byte/Nibble/LowNibble/HighNibble
 *are* ones, and what their own domains are. No downstream machinery
 (result-contract verification, range/exact-set analysis, checked
 constructors, native lowering) treats these four names specially: everything
@@ -4842,7 +5404,7 @@ Parent in Domain" declaration gets.
                                     to Nibble's domain, but a distinct,
                                     nominal type: LowNibble means "already
                                     positioned", Nibble means "logical
-                                    value" -- see item 6/74 of the report)
+                                    value")
   HighNibble  {0,16,32,...,240}     a nibble positioned in the high half of
                                     a Byte -- 16 exact values, not every
                                     integer in [0,240]
@@ -5029,11 +5591,10 @@ method, receiver.from_int(...).
 
 == DESCRIPTION
 Int -> Byte: the ordinary explicitly-fallible conversion. VALUE is declared
-"value: int" (STATIC-COMPLETION-PROOFS.md item 3): a declared parameter type
-demands *static* proof at every call site (STRICT-TYPED-PARAMETERS.md) --
-sound here because every actual call site in this codebase now has a
-statically provable Int (or Byte, itself a subtype) in hand, thanks to this
-same milestone's own producer-side fixes (std::str::encode_utf8's truthful
+"value: int": a declared parameter type demands *static* proof at every call
+site -- sound here because every actual call site in this codebase now has a
+statically provable Int (or Byte, itself a subtype) in hand, thanks to the
+standard library's own producer-side fixes (std::str::encode_utf8's truthful
 List[Byte] result, std::char::scalar_value's own int result), rather than
 weakening this conversion back to an untyped escape hatch to accommodate an
 under-typed caller.
@@ -5093,16 +5654,16 @@ List[UnicodeChar] -> ImmutableSet[Byte]: each char's own Unicode scalar
 value (std::char::scalar_value), converted via from_int above. Never UTF-8:
 a scalar value outside 0..255 propagates from_int's own declared error (no
 handler needed here -- it simply propagates, item 28), not truncation,
-masking, or encoding into more than one Byte -- see BYTE-SET.md. No partial
-set: the first invalid element's error ends the loop immediately.
+masking, or encoding into more than one Byte. No partial set: the first
+invalid element's error ends the loop immediately.
 
-Declares only AboveRange, not BelowRange (STATIC-COMPLETION-PROOFS.md item
-23): std::char::scalar_value's own result is a Unicode scalar value, always
-nonnegative, so from_int's BelowRange branch can never actually be reached
-from here -- the call-specific completion proof (hir/completions.tcl)
-verifies this generically from std::char::scalar_value's own static facts
-and from_int's own body, not from any Byte-specific rule, every time this
-function's own body is checked against its declaration.
+Declares only AboveRange, not BelowRange: std::char::scalar_value's own
+result is a Unicode scalar value, always nonnegative, so from_int's
+BelowRange branch can never actually be reached from here -- the
+call-specific completion proof (hir/completions.tcl) verifies this
+generically from std::char::scalar_value's own static facts and from_int's
+own body, not from any Byte-specific rule, every time this function's own
+body is checked against its declaration.
 
 == NOTES
 Each character becomes the one byte equal to its scalar value, so 'é'
@@ -5163,32 +5724,31 @@ semantic type without reanalyzing this body at call sites.
   std::byte::position_high(n) Nibble -> HighNibble: n<<4, positioned.
   std::byte::from_int(value: int)  Int -> Byte, errors BelowRange, AboveRange:
                          the ordinary explicitly-fallible Int -> Byte
-                         conversion (EXPLICIT-ERROR-COMPLETIONS.md;
-                         replaces the old callable-type-syntax Byte(x),
-                         removed from source -- see that report for why).
+                         conversion. It
+                         replaces the old callable-type syntax Byte(x),
+                         which is removed from source.
                          A statically provable in-range/out-of-range
                          argument needs no handler, or is a compile-time
                          KNOWN-ERROR, respectively -- see
-                         STATIC-COMPLETION-PROOFS.md.
+
   std::byte::set(chars)       List[UnicodeChar] -> ImmutableSet[Byte], errors
                          AboveRange: each char's own Unicode scalar value
                          (std::char::scalar_value), converted via from_int above
                          -- never UTF-8 encoding, so 'é' (U+00E9) becomes
                          the one Byte 233, not the two UTF-8 bytes 0xC3
-                         0xA9 -- see BYTE-SET.md. Propagates from_int's
+                         0xA9. Propagates from_int's
                          own declared error for any char outside Byte's
                          domain (e.g. 'Ā', U+0100, or any astral
                          character): no partial set. BelowRange is not
                          declared: std::char::scalar_value's own result is always
                          nonnegative, so from_int's BelowRange branch is
                          statically proven unreachable from here, generically
-                         (STATIC-COMPLETION-PROOFS.md), not by a Byte-
+                         , not by a Byte-
                          specific rule.
 
 ASCII/encoding interpretation, `is_unreserved`, and URI grammar are
 deliberately absent: `byte::` holds only operations intrinsic to byte/bit
-representation (core/scalarbits.tcl's header, and the milestone's own
-namespace discipline -- see BYTE-NIBBLE-BIT-ARITHMETIC.md).
+representation, a namespace discipline (core/scalarbits.tcl's header).
 
 == SOURCE
 stdlib/byte.bot (import std::byte).
@@ -5196,7 +5756,7 @@ stdlib/byte.bot (import std::byte).
 == MEMBERS
     std::byte::AboveRange          error
     std::byte::BelowRange          error -- The two declared errors std::by...
-    std::byte::Byte                type -- The four scalar domains this mil...
+    std::byte::Byte                type -- The four scalar domains this mod...
     std::byte::HighNibble          type
     std::byte::LowNibble           type
     std::byte::Nibble              type
@@ -5278,13 +5838,12 @@ every backend (interp, compile, cranelift-generic, cranelift)
 
 == NOTES
 The substrate of std::abi::bytes::decode_utf16le, which is what programs
-call (it takes a std::abi::bytes::Bytes). Strict: an odd byte count, or code
-units that are not well-formed UTF-16 -- an unpaired high or low surrogate,
-in any position -- is the declared error InvalidUtf16, never a replacement
-character. FF FE is the character U+FEFF, never a byte-order mark: the byte
-order is always little-endian, never detected. A UTF-16 code unit is not a
-character: a surrogate pair is one scalar.
-UTF16-BYTE-STORAGE-MILESTONE-1.md.
+call (it takes a std::abi::bytes::Bytes). Strict: an odd byte count, or
+code units that are not well-formed UTF-16 -- an unpaired high or low
+surrogate, in any position -- is the declared error InvalidUtf16, never a
+replacement character. FF FE is the character U+FEFF, never a byte-order
+mark: the byte order is always little-endian, never detected. A UTF-16
+code unit is not a character: a surrogate pair is one scalar.
 
 == EXAMPLES
 @example accept
@@ -5325,9 +5884,9 @@ every backend (interp, compile, cranelift-generic, cranelift)
 The substrate of std::abi::bytes::decode_utf8, which is what programs call
 (it takes a std::abi::bytes::Bytes). Strict: an overlong form, an encoded
 surrogate (WTF-8's form of an unpaired UTF-16 surrogate), a value above
-U+10FFFF, a truncated sequence or a stray continuation byte is the declared
-error InvalidUtf8, never a replacement character. A 0 byte is U+0000.
-WINDOWS-X86-64-MILESTONE-7.md.
+U+10FFFF, a truncated sequence or a stray continuation byte is the
+declared error InvalidUtf8, never a replacement character. A 0 byte is
+U+0000.
 
 == EXAMPLES
 @example accept
@@ -5361,12 +5920,11 @@ every backend (interp, compile, cranelift-generic, cranelift)
 
 == NOTES
 The substrate of std::abi::bytes::encode_utf16le, which is what programs
-call (it returns a std::abi::bytes::Bytes). Each Unicode scalar value is one
-UTF-16 code unit, or for a scalar above U+FFFF its surrogate pair, high unit
-first; each unit is stored low byte first whatever the host's byte order.
-U+0000 is the bytes 00 00; nothing is added (no byte-order mark, no NUL
-terminator) and nothing normalized. Total.
-UTF16-BYTE-STORAGE-MILESTONE-1.md.
+call (it returns a std::abi::bytes::Bytes). Each Unicode scalar value is
+one UTF-16 code unit, or for a scalar above U+FFFF its surrogate pair,
+high unit first; each unit is stored low byte first whatever the host's
+byte order. U+0000 is the bytes 00 00; nothing is added (no byte-order
+mark, no NUL terminator) and nothing normalized. Total.
 
 == EXAMPLES
 @example accept
@@ -5438,7 +5996,7 @@ The substrate of std::abi::bytes::join, which is what programs call (it
 takes a List[std::abi::bytes::Bytes]). One copy of the total length; the
 empty List, or only empty parts, gives the empty storage. An element that
 is not a byte storage is the TYPE error when the call runs. It reads no
-byte into a Botlish value. WINDOWS-X86-64-MILESTONE-7.md.
+byte into a Botlish value.
 
 == EXAMPLES
 @example accept
@@ -5482,8 +6040,7 @@ byte indices, valid exactly when 0 <= start <= end <= the byte count, with
 std::str::substring's rule for the two errors: start below 0, or end below
 start, is LowerUnderrun; end past the count is UpperOverrun. It copies the
 range into a new storage and reads no byte into a Botlish value. The file
-writers use it to continue after a short write
-(WINDOWS-X86-64-MILESTONE-7.md).
+writers use it to continue after a short write.
 
 == EXAMPLES
 @example accept
@@ -5525,15 +6082,15 @@ std::byte_store::byte_count).
 == NOTES
 Intrinsics, no module file. A byte storage is a runtime value kind of its
 own: an immutable, finite sequence of bytes with an exact length, no
-terminator, compared and hashed by its bytes. No source type spells it (its
-static type is any); std::abi::bytes::Bytes is the opaque struct whose one
-field holds one, and only module std::abi::bytes can construct or open a
-Bytes. So programs use std::abi::bytes::from_list, std::abi::bytes::length
-and the rest of that module; these intrinsics are what it is written in.
-There is deliberately no operation that indexes or iterates the bytes: they
-are combined and cut whole (join, slice) and converted to and from text
-(decode_utf8; encode_utf16le and decode_utf16le,
-UTF16-BYTE-STORAGE-MILESTONE-1.md).
+terminator, compared and hashed by its bytes. No source type spells it
+(its static type is any); std::abi::bytes::Bytes is the opaque struct
+whose one field holds one, and only module std::abi::bytes can construct
+or open a Bytes. So programs use std::abi::bytes::from_list,
+std::abi::bytes::length and the rest of that module; these intrinsics are
+what it is written in. There is deliberately no operation that indexes or
+iterates the bytes: they are combined and cut whole (join, slice) and
+converted to and from text (decode_utf8; encode_utf16le and
+decode_utf16le).
 
 @topic stdlib.std::char::is_tcl_alnum
 title: std::char::is_tcl_alnum -- intrinsic of namespace std::char
@@ -5596,13 +6153,13 @@ numeral (Nl), a combining mark or punctuation. It decides what
 std::str::is_tcl_alpha decides for the one-character String of the same
 character, but it is total -- every UnicodeChar is one character, so there
 is no RANGE case -- and it never makes a String: read the characters of a
-text with std::str::char_at and classify them as they are
-(UNICODECHAR-CLASSIFIERS.md). Like the std::str form, it reproduces Tcl's
-class rather than being Botlish's eventual character-classification API.
-Its parameter is a UnicodeChar: a one-character String is the TYPE error,
-and a method-style call x.is_tcl_alpha() with both std::char and std::str
-imported needs x's type to choose (with an untyped x it is
-AMBIGUOUS-METHOD-CALL: call the one you mean).
+text with std::str::char_at and classify them as they are. Like the
+std::str form, it reproduces Tcl's class rather than being Botlish's
+eventual character-classification API. Its parameter is a UnicodeChar: a
+one-character String is the TYPE error, and a method-style call
+x.is_tcl_alpha() with both std::char and std::str imported needs x's type
+to choose (with an untyped x it is AMBIGUOUS-METHOD-CALL: call the one you
+mean).
 
 == EXAMPLES
 @example accept
@@ -6248,8 +6805,8 @@ a method, receiver.read(...).
 
 == DESCRIPTION
 read(2) from descriptor FD into a logical copy of DATA, by one libSystem
-call: DATA itself never changes (MUTABLE-BYTES.md); the bytes read are in
-the result's `data`, which keeps DATA's length. Take the bytes read with
+call: DATA itself never changes; the bytes read are in the result's `data`,
+which keeps DATA's length. Take the bytes read with
 std::abi::bytes::freeze_prefix(result.data, std::abi::usize(result.count)).
 
 @topic stdlib.std::darwin::terminator
@@ -6410,7 +6967,7 @@ close(2) of descriptor FD.
 
 @topic stdlib.module.std::darwin
 title: std::darwin -- standard namespace
-summary: The macOS (Darwin) platform's low-level I/O operations, thin ordinary-Botlish wrappers over Apple's public C library, libSystem (MACOS-AARCH64-MILE.
+summary: The macOS (Darwin) platform's low-level I/O operations, thin ordinary-Botlish wrappers over Apple's public C library, libSystem.
 index: stdlib
 symbol: std::darwin
 
@@ -6432,10 +6989,10 @@ symbol: std::darwin
 libSystem is the boundary. Darwin's kernel interface is private and changes
 between releases; its stable interface is the C library, so this module
 calls the C functions -- write, read, open, close and __error -- through
-ordinary `extern c fn` declarations of their prototypes (C-FFI.md), linked
-from the system library every macOS executable links: no syscall number, no
-`svc #0x80`, no transport of its own, and no compiler knowledge of I/O. It
-is the Linux module's sibling in shape (stdlib/linux.bot: one call, the raw
+ordinary `extern c fn` declarations of their prototypes, linked from the
+system library every macOS executable links: no syscall number, no `svc
+#0x80`, no transport of its own, and no compiler knowledge of I/O. It is the
+Linux module's sibling in shape (stdlib/linux.bot: one call, the raw
 outcome, a logical copy for read) but not in convention:
 
 * Darwin reports a failure as C does -- the call returns -1 and the reason
@@ -6445,40 +7002,37 @@ outcome, a logical copy for read) but not in convention:
   errno a failed call left (0 when it succeeded: errno is never read after a
   success, where its value means nothing).
 * errno is per thread: the C macro is `(*__error())`, a function returning
-  the address of the calling thread's int. errno() reads it through a
-  native view of a one-field layout (NATIVE-LAYOUT-VIEWS.md) of that
-  address: no pointer arithmetic, no dereference operator, the pointer
-  never kept. A wrapper reads it right after the failed call returns,
-  before it calls anything else (a later C call could change it), on the
-  same thread (a Botlish program runs on one native thread: coroutines
-  switch stacks, never threads) and with no possible suspension between
-  (a yield is a statement of the coroutine's own body, never inside these
-  functions). Nothing the compiler inserts runs between the call and the
-  read either: read's write-back value is fields, its MutableBytes built
-  only after errno() (C-FFI-ERROR-CAPTURE-MILESTONE-1.md), so no
-  allocation, collection or runtime call can disturb errno there.
+  the address of the calling thread's int. errno() reads it through a native
+  view of a one-field layout of that address: no pointer arithmetic, no
+  dereference operator, the pointer never kept. A wrapper reads it right
+  after the failed call returns, before it calls anything else (a later C
+  call could change it), on the same thread (a Botlish program runs on one
+  native thread: coroutines switch stacks, never threads) and with no
+  possible suspension between (a yield is a statement of the coroutine's own
+  body, never inside these functions). Nothing the compiler inserts runs
+  between the call and the read either: read's write-back value is fields,
+  its MutableBytes built only after errno(), so no allocation, collection or
+  runtime call can disturb errno there.
 
-Byte storage reaches C only through the borrowing contract
-(C-POINTER-BORROWING.md): write's buffer is `read noescape` (exposed as it
-is, no copy), read's `write noescape` (a private copy C writes, returned as
-the result's `data`; the caller's MutableBytes never changes). Address and
-count come from the ONE value -- there is no count parameter -- and the
-count is proven a size_t (a std::abi::Usize's value is a std::ffi::c::ULong
-on macOS, LP64) with no run-time check. A path is a
-std::darwin::path::DarwinPath (non-empty, no U+0000), given to open(2) as
-its UTF-8 bytes and a terminating NUL, built for the call and exposed for it
-alone.
+Byte storage reaches C only through the borrowing contract: write's buffer
+is `read noescape` (exposed as it is, no copy), read's `write noescape` (a
+private copy C writes, returned as the result's `data`; the caller's
+MutableBytes never changes). Address and count come from the ONE value --
+there is no count parameter -- and the count is proven a size_t (a
+std::abi::Usize's value is a std::ffi::c::ULong on macOS, LP64) with no
+run-time check. A path is a std::darwin::path::DarwinPath (non-empty, no
+U+0000), given to open(2) as its UTF-8 bytes and a terminating NUL, built
+for the call and exposed for it alone.
 
 open(2) is a genuine C variadic function, `int open(const char *, int,
-...)`, and is declared so (VARIADICS-VERTICAL-SLICE-1.md: on Apple arm64 a
-variadic call's trailing arguments travel on the stack, so a fixed
-three-parameter declaration would pass the mode where open never reads it).
-The creation mode is its one trailing argument, a std::ffi::c::UShort --
-macOS's mode_t is unsigned 16 bits -- which C's default argument promotion
-passes as an int (what open's va_arg reads). Only create and create_new pass
-it, and they always do: a creation (O_CREAT) can never omit its mode, and
-open passes no flag that would need one. Every descriptor is opened
-close-on-exec (O_CLOEXEC).
+...)`, and is declared so (on Apple arm64 a variadic call's trailing
+arguments travel on the stack, so a fixed three-parameter declaration would
+pass the mode where open never reads it). The creation mode is its one
+trailing argument, a std::ffi::c::UShort -- macOS's mode_t is unsigned 16
+bits -- which C's default argument promotion passes as an int (what open's
+va_arg reads). Only create and create_new pass it, and they always do: a
+creation (O_CREAT) can never omit its mode, and open passes no flag that
+would need one. Every descriptor is opened close-on-exec (O_CLOEXEC).
 
 Thin by design: ONE C call per operation, no loop, no retry (EINTR is a
 failure like any other: std::io::IO's completion policy, std::darwin::io,
@@ -6486,17 +7040,17 @@ decides), no buffering, no descriptor ownership (closing is the caller's;
 nothing is closed for it), no text. The standard streams as a context and
 the portable std::io::IO implementation are std::darwin::io's.
 
-A direct module (DIRECT-MODULES.md): its operations take any descriptor and
-any path -- raw process authority -- with no context, and errno() makes a
-native view (std::binary::native, designated direct). Code that calls them
-is calling into a direct module and either mediates them through a context
-of its own (std::darwin::io's DarwinIO does) or is declared direct itself.
-The constants below are the macOS SDK's (<fcntl.h>), never Linux's:
+A direct module: its operations take any descriptor and any path -- raw
+process authority -- with no context, and errno() makes a native view
+(std::binary::native, designated direct). Code that calls them is calling
+into a direct module and either mediates them through a context of its own
+(std::darwin::io's DarwinIO does) or is declared direct itself. The
+constants below are the macOS SDK's (<fcntl.h>), never Linux's:
 tests/darwin-io.test compares each with the host's headers on macOS.
 
 == SOURCE
 stdlib/darwin.bot (import std::darwin). A direct module
-(DIRECT-MODULES.md): it exercises raw authority.
+(concept.direct-modules): it exercises raw authority.
 
 == MEMBERS
     std::darwin::Access            enum -- How a descriptor open(2) makes m...
@@ -7018,7 +7572,7 @@ Removes the empty directory PATH.
 
 @topic stdlib.module.std::darwin::fs
 title: std::darwin::fs -- standard namespace
-summary: MacOS's native paths and its synchronous filesystem, through libSystem's C functions (WINDOWS-X86-64-MILESTONE-7.md.
+summary: MacOS's native paths and its synchronous filesystem, through libSystem's C functions (the boundary).
 index: stdlib
 symbol: std::darwin::fs
 
@@ -7226,8 +7780,8 @@ std::io::WriteFailed; no count or errno escapes.
 
 It requires DarwinIO although it reads only FD: it makes the direct call
 (std::darwin::write, a callable of the direct module darwin), and a direct
-call is mediated by a context of this module in the function that makes it
-(DIRECT-MODULES.md), never by its callers' contexts. Its callers have it.
+call is mediated by a context of this module in the function that makes it,
+never by its callers' contexts. Its callers have it.
 
 @topic stdlib.std::darwin::io::write_text
 title: std::darwin::io::write_text -- Function of module std::darwin::io
@@ -7268,7 +7822,7 @@ All of TEXT, UTF-8 encoded, on the context's standard error.
 
 @topic stdlib.module.std::darwin::io
 title: std::darwin::io -- standard namespace
-summary: The process's standard I/O on macOS as one execution-environment context (CONTEXTS.md.
+summary: The process's standard I/O on macOS as one execution-environment context.
 index: stdlib
 symbol: std::darwin::io
 
@@ -7285,35 +7839,32 @@ ordinary arguments; code between the entry program and it declares nothing
 (the compiler derives the requirement), and a call before `with context
 std::darwin::io::create()` is MISSING-CONTEXT at compile time.
 
-Capability boundary (DIRECT-MODULES.md). `darwin` is a direct module: its
-write and read take any descriptor. This module is not: every function here
-that calls into `darwin` requires DarwinIO, the context it defines itself,
-so the raw authority reaches its callers only as that capability -- and
-nothing above std::darwin::io is direct for using it. Every external effect
-flows
+Capability boundary. `darwin` is a direct module: its write and read take
+any descriptor. This module is not: every function here that calls into
+`darwin` requires DarwinIO, the context it defines itself, so the raw
+authority reaches its callers only as that capability -- and nothing above
+std::darwin::io is direct for using it. Every external effect flows
 
   std::darwin::io::write --> std::darwin::write --> libSystem's write(3)
 
-through ordinary C calls (C-FFI.md): no syscall, no compiler knowledge of
-I/O. The low-level layer stays as it is: code that wants an explicit
-descriptor calls std::darwin::write(fd, data) / std::darwin::read(fd,
-buffer).
+through ordinary C calls: no syscall, no compiler knowledge of I/O. The
+low-level layer stays as it is: code that wants an explicit descriptor calls
+std::darwin::write(fd, data) / std::darwin::read(fd, buffer).
 
-Representation authority. FileDescriptor and DarwinIO are opaque
-(OPAQUE-STRUCTS.md): only this module may construct them or look inside; a
-DarwinIO a function receives as its context can be held and passed but not
-taken apart. The descriptor token is a std::ffi::c::Int, the C int every
-libSystem descriptor is; create() mints the three standard ones, 0, 1 and 2.
-The token does not claim the descriptor is open or stays open.
+Representation authority. FileDescriptor and DarwinIO are opaque: only this
+module may construct them or look inside; a DarwinIO a function receives as
+its context can be held and passed but not taken apart. The descriptor token
+is a std::ffi::c::Int, the C int every libSystem descriptor is; create()
+mints the three standard ones, 0, 1 and 2. The token does not claim the
+descriptor is open or stays open.
 
-DarwinIO implements the portable std::io::IO context trait
-(CONTEXT-TRAITS.md) with write_text and write_error_text below: ordinary
-functions of this module whose one context parameter is a DarwinIO and whose
-signatures match std::io::IO's requirements. Nothing registers them: where a
-call needs std::io::IO and DarwinIO is the one installed context that
-implements it, the compiler binds `io.write_text(...)` to a direct call of
-std::darwin::io::write_text -- no dispatch, no hidden argument, no provider
-table at run time.
+DarwinIO implements the portable std::io::IO context trait with write_text
+and write_error_text below: ordinary functions of this module whose one
+context parameter is a DarwinIO and whose signatures match std::io::IO's
+requirements. Nothing registers them: where a call needs std::io::IO and
+DarwinIO is the one installed context that implements it, the compiler binds
+`io.write_text(...)` to a direct call of std::darwin::io::write_text -- no
+dispatch, no hidden argument, no provider table at run time.
 
 The completion policy is LinuxIO's, so std::io::IO means the same on both
 platforms: all of the text, or std::io::WriteFailed. A short positive write
@@ -7609,7 +8160,7 @@ Removes the empty directory PATH.
 
 @topic stdlib.module.std::darwin::path
 title: std::darwin::path -- standard namespace
-summary: Textual macOS (Darwin) paths (CONTEXT-TRAITS.md, "Paths".
+summary: Textual macOS (Darwin) paths.
 index: stdlib
 symbol: std::darwin::path
 
@@ -7620,12 +8171,12 @@ symbol: std::darwin::path
   std::darwin::path::concat(path, part)  PATH joined with PART: a DarwinPath
   std::darwin::path::text(path)          PATH's String form (the carrier)
 
-DarwinPath is a refinement of str (REFINEMENT-VALUES.md): a value proven to
-be a non-empty String without U+0000 -- text that may be handed to libSystem
-as an ordinary C pathname once it is encoded as UTF-8 and given its
-terminating NUL (std::darwin::open and std::darwin::create do that, for the
-one call). It is the same String, with the String's representation, so a
-validated value keeps being used as text with no conversion. It is
+DarwinPath is a refinement of str: a value proven to be a non-empty String
+without U+0000 -- text that may be handed to libSystem as an ordinary C
+pathname once it is encoded as UTF-8 and given its terminating NUL
+(std::darwin::open and std::darwin::create do that, for the one call). It is
+the same String, with the String's representation, so a validated value
+keeps being used as text with no conversion. It is
 std::linux::path::LinuxPath's sibling, not a shared type: each platform owns
 its textual path, and std::io::path::Path is what portable code names.
 
@@ -7641,15 +8192,13 @@ a lower-level abstraction. Validation does not normalize: ".", "..", "./a",
 "../a", "a//b" and "/a/b" are valid exactly as written.
 
 DarwinPath satisfies the portable std::io::path::Path trait through this
-module's own `concat` and `text` (TRAITS.md: the owner's declarations,
-nothing else), so a function over std::io::path::Path specializes to direct
-calls of them.
+module's own `concat` and `text` (the owner's declarations, nothing else),
+so a function over std::io::path::Path specializes to direct calls of them.
 
-A DarwinPath is also a std::io::fs::FilePath
-(WINDOWS-X86-64-MILESTONE-7.md): its native path is its UTF-8 bytes
-(`native`), and its filesystem operations below are std::darwin::fs's on
-that native path, which require std::darwin::fs::DarwinFS (so every caller
-does: the requirement is derived).
+A DarwinPath is also a std::io::fs::FilePath: its native path is its UTF-8
+bytes (`native`), and its filesystem operations below are std::darwin::fs's
+on that native path, which require std::darwin::fs::DarwinFS (so every
+caller does: the requirement is derived).
 
 == SOURCE
 stdlib/darwin/path.bot (import std::darwin::path).
@@ -7876,7 +8425,7 @@ The end of the input in a state of RECOGNIZER that does not accept there.
 
 @topic stdlib.module.std::dfa
 title: std::dfa -- standard namespace
-summary: The protocol every declared recognizer speaks (DFA-COROUTINE-MILESTONE-2.md).
+summary: The protocol every declared recognizer speaks.
 index: stdlib
 symbol: std::dfa
 
@@ -8116,9 +8665,9 @@ std::event_loop::Owner.
 
 == DESCRIPTION
 The owner of an owned registration (owned_source, owned_channel, ...): a
-resource (LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md). Its cleanup,
-`release`, revokes the registration where the owner's lexical scope ends, or
-where it is called explicitly; moving the owner moves that obligation.
+resource. Its cleanup, `release`, revokes the registration where the owner's
+lexical scope ends, or where it is called explicitly; moving the owner moves
+that obligation.
 
 @topic stdlib.std::event_loop::Owned
 title: std::event_loop::Owned -- Struct of module std::event_loop
@@ -9085,7 +9634,7 @@ abandon what is left. Returns how many tasks were abandoned.
 
 @topic stdlib.module.std::event_loop
 title: std::event_loop -- standard namespace
-summary: One thread-local scheduler of ordinary Botlish coroutines and native event sources (EVENT-LOOP-MILESTONE-1.md.
+summary: One thread-local scheduler of ordinary Botlish coroutines and native event sources (the evidence it promotes).
 index: stdlib
 symbol: std::event_loop
 
@@ -9182,11 +9731,10 @@ woke or started keep their own lifetimes; revoking twice, or through a stale
 copy, does nothing. A Reg is an identity, not an owner; shutdown revokes
 every registration.
 
-OWNERSHIP (LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md). A
-registration made by owned_source, owned_channel, owned_timer, owned_after,
-owned_every or owned_observer has an Owner: a resource, affine, whose
-cleanup (`release`) revokes it. The owner holds the registration live until
-its lexical scope ends -- after its last use or not -- or until it is
+OWNERSHIP. A registration made by owned_source, owned_channel, owned_timer,
+owned_after, owned_every or owned_observer has an Owner: a resource, affine,
+whose cleanup (`release`) revokes it. The owner holds the registration live
+until its lexical scope ends -- after its last use or not -- or until it is
 released explicitly (`release(owner)`); moving it (into a function, a
 result, a struct, a coroutine, a context's collection) moves that
 obligation, and a coroutine that holds it keeps it across suspension and
@@ -9566,7 +10114,7 @@ receiver.release_held(...).
 
 @topic stdlib.module.std::event_loop::deterministic
 title: std::event_loop::deterministic -- standard namespace
-summary: A deterministic driver for std::event_loop (EVENT-LOOP-MILESTONE-1.md, "Deterministic testing").
+summary: A deterministic driver for std::event_loop.
 index: stdlib
 symbol: std::event_loop::deterministic
 
@@ -9854,8 +10402,8 @@ related: concept.c-ffi concept.affine
 == DESCRIPTION
 These are the values a C boundary carries, modeled as C's ABI sees them, not
 as C's source language spells them. Nothing here calls C: C calls are
-`extern c fn` declarations (C-FFI.md), and C calling Botlish back is a
-`callback c fn` (C-CALLBACK-MILESTONE-1.md, below).
+`extern c fn` declarations, and C calling Botlish back is a `callback c fn`
+(below).
 
 C integer scalars (intrinsic types of this namespace):
 
@@ -9872,8 +10420,8 @@ promotion, no wrapping); an Int becomes one only where its range proves it
 fits. std::ffi::c::Int and std::ffi::c::Long stay two types where their
 ranges agree.
 
-C floating types (intrinsic types of this namespace,
-C-FLOAT-FFI-MILESTONE-1.md): C representations whose values are Float64s.
+C floating types (intrinsic types of this namespace): C representations
+whose values are Float64s.
 
   std::ffi::c::Double       C's double, IEEE 754 binary64 (8 bytes): every
                             Float64 is one, exactly
@@ -9892,8 +10440,8 @@ zero is zero. Where a value type is written, std::ffi::c::Double means
 Float64 and std::ffi::c::Float is an error: Botlish has no binary32 number.
 C long double has no type.
 
-Raw C floating values (intrinsic types of this namespace,
-RAW-C-FLOAT-FFI-MILESTONE-1.md): the same two C types, carried as they are.
+Raw C floating values (intrinsic types of this namespace): the same two C
+types, carried as they are.
 
   std::ffi::c::RawFloat     C's float, every binary32 bit pattern
   std::ffi::c::RawDouble    C's double, every binary64 bit pattern
@@ -9937,15 +10485,15 @@ Pointers (intrinsic types and operations of this namespace):
                                              `callback c fn` NAME, of its
                                              declared C signature
 
-Callbacks (C-CALLBACK-MILESTONE-1.md). A top-level, environment-free
-function declared `callback c fn NAME(...) -> T:` with C types whose
-conversions are total (the C integer scalars, Bool, RawFloat, RawDouble,
-Ptr, FnPtr; for the result also Float64, C's double, and unit) and no errors
-has a C entry point; std::ffi::c::callback(NAME) is its address. C may call
-it during a call of a C function whose FnPtr parameter is declared noescape,
-synchronously, on that call's thread: it then runs in the Botlish execution
-environment waiting in the call. Anywhere else -- another thread, after the
-call returned, during a call whose contract does not let C call back -- the
+Callbacks. A top-level, environment-free function declared `callback c fn
+NAME(...) -> T:` with C types whose conversions are total (the C integer
+scalars, Bool, RawFloat, RawDouble, Ptr, FnPtr; for the result also Float64,
+C's double, and unit) and no errors has a C entry point;
+std::ffi::c::callback(NAME) is its address. C may call it during a call of a
+C function whose FnPtr parameter is declared noescape, synchronously, on
+that call's thread: it then runs in the Botlish execution environment
+waiting in the call. Anywhere else -- another thread, after the call
+returned, during a call whose contract does not let C call back -- the
 runtime refuses it before any Botlish code runs, and ends the process
 (NATIVE CALLBACK). Native backends only.
 
@@ -9955,12 +10503,12 @@ pointer owns, frees and retains nothing, and is never dereferenced here. It
 is not an Int: no arithmetic, ordering, equality or integer conversion
 exists, in either direction.
 
-Temporary byte exposure (C-POINTER-BORROWING.md). A C pointer parameter of a
-foreign call may admit existing Botlish byte storage for that one call --
-never as a pointer value -- when the call's contract says, for that
-parameter, that C does not keep the pointer (noescape) and whether C reads
-or writes through it, and its pointee is a byte-sized C type
-(std::ffi::c::Char, SChar, UChar) or std::ffi::c::Void:
+Temporary byte exposure. A C pointer parameter of a foreign call may admit
+existing Botlish byte storage for that one call -- never as a pointer value
+-- when the call's contract says, for that parameter, that C does not keep
+the pointer (noescape) and whether C reads or writes through it, and its
+pointee is a byte-sized C type (std::ffi::c::Char, SChar, UChar) or
+std::ffi::c::Void:
 
   std::abi::bytes::Bytes         read access only: C sees the bytes
   std::abi::bytes::MutableBytes  read: its bytes as they are; write: a
@@ -10294,7 +10842,7 @@ receiver.double_negative?(...).
 
 @topic stdlib.module.std::ffi::c::raw
 title: std::ffi::c::raw -- standard namespace
-summary: The explicit operations of the raw C floating values std::ffi::c::RawFloat and std::ffi::c::RawDouble (RAW-C-FLOAT-FFI-MILESTONE-1.md.
+summary: The explicit operations of the raw C floating values std::ffi::c::RawFloat and std::ffi::c::RawDouble (stdlib/ffi/c.bot's "Raw C floating values").
 index: stdlib
 symbol: std::ffi::c::raw
 
@@ -10595,11 +11143,10 @@ related: concept.floats stdlib./ concept.decimal-rounded stdlib.std::float64::ro
 == DESCRIPTION
 The namespace's intrinsics are root natives registered under their qualified
 names -- std::float64::from_int, std::float64::truncate,
-std::float64::from_decimal_rounded (core/float.tcl, FLOAT64-MILESTONE-1.md)
--- and this module may never define a member of the same name
-(surface/modules.tcl, DUPLICATE-NATIVE; STDLIB-NAMESPACES.md). Below are the
-comparisons every program that bounds a Float64 writes, added by the Icy
-Tower workload (ICY-TOWER-VERTICAL-SLICE-1.md, "Stdlib additions"):
+std::float64::from_decimal_rounded (core/float.tcl) -- and this module may
+never define a member of the same name (surface/modules.tcl,
+DUPLICATE-NATIVE). Below are the comparisons every program that bounds a
+Float64 writes, added by the Icy Tower workload:
 
   std::float64::min(a, b)            the smaller of A and B (A when they
                                      are equal)
@@ -10614,7 +11161,7 @@ Each is a comparison and at most a negation, so none can fail: there is no
 arithmetic that could leave the finite Float64s (no NonFiniteFloat), and a
 Float64 has no NaN for a comparison to be unordered with. min and max are
 `nomethod`: their operands are symmetric, and neither is a receiver (the
-bit_and precedent, REFACTOR-WARNINGS-CLEAN.md).
+bit_and precedent).
 
 == SOURCE
 stdlib/float64.bot (import std::float64).
@@ -10845,7 +11392,7 @@ hashed again.
 
 @topic stdlib.module.std::immutable_map
 title: std::immutable_map -- standard namespace
-summary: ImmutableMap[K, V], an immutable, insertion-ordered map of Hashable keys whose equality and hashes are its associations' (REPRESENTATION-INDEPENDEN.
+summary: ImmutableMap[K, V], an immutable, insertion-ordered map of Hashable keys whose equality and hashes are its associations'.
 index: stdlib
 symbol: std::immutable_map
 
@@ -11234,7 +11781,7 @@ summary: Portable text output -- std::io::print, print_line, write_error and wri
 index: stdlib
 symbol: std::io
 keywords: print; output; stdout; stderr; write text; console
-related: task.print-output backend.io concept.context-traits
+related: task.print-output backend.io concept.context-traits stdlib.module.std::io::fs stdlib.module.std::io::path capability.files
 
 == DESCRIPTION
   std::io::print(text)              TEXT on the environment's standard output
@@ -11268,9 +11815,10 @@ AMBIGUOUS-CONTEXT-IMPLEMENTATION, none MISSING-CONTEXT), and compiles
 implementation: no dispatch, no hidden argument, no provider table at run
 time.
 
-Not here (deliberately): input, files, paths, buffering, a byte-count or
-errno API. Buffering, batching and scratch storage can live behind these
-operations later without any caller changing.
+Not here (deliberately): input, buffering, a byte-count or errno API; files
+and paths are std::io::fs's and std::io::path's. Buffering, batching and
+scratch storage can live behind these operations later unchanged for
+callers.
 
 == SOURCE
 stdlib/io.bot (import std::io).
@@ -11292,8 +11840,9 @@ satisfies by installing a context that implements it, normally
 with raw Linux syscalls, so printing runs only on the native backends
 (cranelift, cranelift-generic, executables); on interp and compile the
 first write fails with NATIVE-ONLY. On every backend the program's final
-value is still printed by main.tcl. There is no input, file or
-formatting API here.
+value is still printed by main.tcl. Files and directories are
+std::io::fs's (capability.files); there is no text input or formatting
+API here (capability.input, capability.string-formatting).
 
 @topic stdlib.std::io::fs::Reason
 title: std::io::fs::Reason -- Enum of module std::io::fs
@@ -11461,13 +12010,12 @@ stdlib/io/fs.bot: import std::io::fs, then write std::io::fs::Owner.
 
 == DESCRIPTION
 An affine token that owns nothing: one word, a null C pointer that no C call
-ever receives. Botlish has no declaration that makes a struct affine
-(AFFINE-VALUES.md: a struct is affine when it holds an affine value), so a
-platform's File that holds no affine value of its own -- Linux's and macOS's
-hold an Int descriptor -- holds an Owner: the File can then be moved but
-never copied (WINDOWS-X86-64-MILESTONE-7.md, "Affine ownership"). Dropping
-it runs nothing. Made only by the standard library (`owner`, an internal
-member).
+ever receives. Botlish has no declaration that makes a struct affine (a
+struct is affine when it holds an affine value), so a platform's File that
+holds no affine value of its own -- Linux's and macOS's hold an Int
+descriptor -- holds an Owner: the File can then be moved but never copied.
+Dropping it runs nothing. Made only by the standard library (`owner`, an
+internal member).
 
 @topic stdlib.std::io::fs::FilePath
 title: std::io::fs::FilePath -- Trait of module std::io::fs
@@ -11510,7 +12058,7 @@ A textual path its platform's filesystem can operate on.
 
 @topic stdlib.module.std::io::fs
 title: std::io::fs -- standard namespace
-summary: The portable synchronous filesystem (WINDOWS-X86-64-MILESTONE-7.md).
+summary: The portable synchronous filesystem.
 index: stdlib
 symbol: std::io::fs
 
@@ -11518,24 +12066,23 @@ symbol: std::io::fs
   fn save(dir: std::io::fs::FilePath, data: std::abi::bytes::Bytes) errors std::io::path::NotAPath, std::io::fs::FileError:
       dir.concat("save.dat").write_file(data)
 
-FilePath is an eager trait (TRAITS.md) of the textual paths whose platform
-can operate on them: std::linux::path::LinuxPath and
-std::windows::path::WindowsPath satisfy it through their own modules'
-functions, so `save` above is specialized per witness and its `write_file`
-compiles to a direct call of the witness's own (for a LinuxPath,
-std::linux::path::write_file), with no wrapper, dispatch or conversion of
-the path to anything but its platform's own native form.
+FilePath is an eager trait of the textual paths whose platform can operate
+on them: std::linux::path::LinuxPath and std::windows::path::WindowsPath
+satisfy it through their own modules' functions, so `save` above is
+specialized per witness and its `write_file` compiles to a direct call of
+the witness's own (for a LinuxPath, std::linux::path::write_file), with no
+wrapper, dispatch or conversion of the path to anything but its platform's
+own native form.
 
 The path's type decides its filesystem. Each witness's operations require
 its own platform's filesystem context -- LinuxPath's
 std::linux::fs::LinuxFS, WindowsPath's std::windows::fs::WindowsFS --
-through the functions they call (CONTEXTS.md: requirements are derived), so
-a program that hands `save` a LinuxPath and installs no LinuxFS is
-MISSING-CONTEXT at compile time, and a WindowsPath never reaches a Linux
-filesystem: compiled for Linux, std::windows is UNSUPPORTED-PLATFORM, and a
-WindowsFS is the only context its operations accept. Nothing selects a
-filesystem at run time, and no installed context changes which function a
-call means.
+through the functions they call (requirements are derived), so a program
+that hands `save` a LinuxPath and installs no LinuxFS is MISSING-CONTEXT at
+compile time, and a WindowsPath never reaches a Linux filesystem: compiled
+for Linux, std::windows is UNSUPPORTED-PLATFORM, and a WindowsFS is the only
+context its operations accept. Nothing selects a filesystem at run time, and
+no installed context changes which function a call means.
 
 Portable code receives its paths: the entry program, which installs the
 platform's context, validates the text it starts from as the platform's path
@@ -11564,8 +12111,7 @@ every name losslessly as a native path.
 Not here (deliberately): handles. An opened file is an affine value of its
 platform's own type (std::linux::fs::File, std::windows::fs::File), and a
 trait requirement cannot return a type that differs by witness: streaming
-reads and writes are the platform modules' (WINDOWS-X86-64-MILESTONE-7.md,
-"Contexts and portable composition"). Nor: metadata, links, renaming,
+reads and writes are the platform modules'. Nor: metadata, links, renaming,
 permissions, watching, asynchronous I/O.
 
 == SOURCE
@@ -11619,8 +12165,7 @@ std::io::path::NotText.
 == DESCRIPTION
 A native path or name is valid, but has no String: Linux bytes that are not
 UTF-8, a Windows name holding an unpaired UTF-16 surrogate. Never a
-replacement character: the native path keeps the name
-(WINDOWS-X86-64-MILESTONE-7.md).
+replacement character: the native path keeps the name.
 
 @topic stdlib.std::io::path::Path
 title: std::io::path::Path -- Trait of module std::io::path
@@ -11694,10 +12239,10 @@ related: stdlib.module.std::linux::path concept.traits capability.files
   fn child(path: Path) -> Path errors NotAPath:
       path.concat("child")
 
-Path is an ordinary eager trait (TRAITS.md): a value of any concrete path
-type whose own namespace implements `concat` and `text` may enter it, and a
-function over Path is specialized per concrete type, so `path.concat` above
-compiles to a direct call of the concrete type's own concat (for a
+Path is an ordinary eager trait: a value of any concrete path type whose own
+namespace implements `concat` and `text` may enter it, and a function over
+Path is specialized per concrete type, so `path.concat` above compiles to a
+direct call of the concrete type's own concat (for a
 std::linux::path::LinuxPath, std::linux::path::concat), with no wrapper or
 dispatch. The concrete types live with their platforms --
 std::linux::path::LinuxPath, a future Windows path -- and this namespace
@@ -11711,7 +12256,7 @@ Linux's bytes, Windows' UTF-16 code units -- are a different, lower-level
 abstraction, each platform's own (std::linux::fs::NativePath,
 std::windows::fs::NativePath): every textual path has one, losslessly, but
 not every native path has a text (NotText). std::io::fs::FilePath is the
-textual paths a filesystem can operate on (WINDOWS-X86-64-MILESTONE-7.md).
+textual paths a filesystem can operate on.
 
 == SOURCE
 stdlib/io/path.bot (import std::io::path).
@@ -11993,7 +12538,7 @@ what each wrapper takes, returns and guarantees.
   std::linux::write(fd, data)    write(2): ONE syscall, the kernel's raw
                             signed result as an ordinary Int.
   std::linux::read(fd, data)     read(2): ONE syscall into the caller's
-                            std::abi::bytes::MutableBytes (MUTABLE-BYTES.md); the
+                            std::abi::bytes::MutableBytes; the
                             kernel's raw signed result and the updated
                             buffer come back in a std::linux::ReadResult.
 
@@ -12008,7 +12553,7 @@ the portable std::io::print) is one source on every architecture, and
 nothing here names a register or a number.
 
 write is the first syscall that moves memory, so it is also the first that
-needs the memory boundary of ABI-BYTES.md: its buffer is an
+needs the owned-bytes memory boundary: its buffer is an
 std::abi::bytes::Bytes -- an immutable, owned, contiguous byte value -- and
 both the address and the byte count are derived from that ONE value. The
 wrapper deliberately has no `count` parameter: a separate count could
@@ -12041,16 +12586,16 @@ Syscall-level semantics, deliberately thin (no errno layer yet):
   syscall (NATIVE-ONLY) exactly as they refuse getpid; nothing imitates a
   write with puts or a Tcl channel.
 
-A direct module (DIRECT-MODULES.md). write and read take any descriptor and
-call std::linux::sys -- the architecture's transport layer, a direct module
-itself -- with no context: they expose raw process authority, which is this
-module's point, the explicit low-level layer. Code that calls them is
-calling into a direct module and either mediates them through a context of
-its own (std::linux::io's LinuxIO does) or is declared direct itself.
+A direct module. write and read take any descriptor and call std::linux::sys
+-- the architecture's transport layer, a direct module itself -- with no
+context: they expose raw process authority, which is this module's point,
+the explicit low-level layer. Code that calls them is calling into a direct
+module and either mediates them through a context of its own
+(std::linux::io's LinuxIO does) or is declared direct itself.
 
 == SOURCE
-stdlib/linux.bot (import std::linux). A direct module (DIRECT-MODULES.md):
-it exercises raw authority.
+stdlib/linux.bot (import std::linux). A direct module
+(concept.direct-modules): it exercises raw authority.
 
 == MEMBERS
     std::linux::ReadResult         struct -- What read(2) did, with both ha...
@@ -12184,10 +12729,10 @@ Each member is a topic: -help NAME (e.g. -help
 std::linux::abi::x86_64::syscall).
 
 == NOTES
-An intrinsic namespace declared direct (DIRECT-MODULES.md): a module that
-calls into it must itself be a `direct module` or mediate the call through a
-context it declares. stdlib/linux/sys.x86_64.bot and stdlib/linux.bot wrap
-it; programs use std::linux::write, std::linux::read, std::linux::io or io.
+An intrinsic namespace declared direct: a module that calls into it must
+itself be a `direct module` or mediate the call through a context it
+declares. stdlib/linux/sys.x86_64.bot and stdlib/linux.bot wrap it;
+programs use std::linux::write, std::linux::read, std::linux::io or io.
 
 @topic stdlib.std::linux::fs::NativePath
 title: std::linux::fs::NativePath -- Opaque struct of module std::linux::fs
@@ -12697,7 +13242,7 @@ NotADirectory when it is no directory.
 
 @topic stdlib.module.std::linux::fs
 title: std::linux::fs -- standard namespace
-summary: Linux's native paths and its synchronous filesystem, through the raw syscalls of stdlib/linux.bot (WINDOWS-X86-64-MILESTONE-7.md).
+summary: Linux's native paths and its synchronous filesystem, through the raw syscalls of stdlib/linux.bot.
 index: stdlib
 symbol: std::linux::fs
 
@@ -12740,28 +13285,27 @@ Authority and ownership.
 LinuxFS is the filesystem context: the authority to open names, create and
 remove entries and list directories, relative to the process's working
 directory (AT_FDCWD). `linux` is a direct module, so every function here
-that makes a syscall requires LinuxFS (DIRECT-MODULES.md): the raw authority
-reaches callers only as that context, and nothing above std::linux::fs is
-direct for using it. A path is a request, never authority.
+that makes a syscall requires LinuxFS: the raw authority reaches callers
+only as that context, and nothing above std::linux::fs is direct for using
+it. A path is a request, never authority.
 
 A File is an opened file: an opaque token of its descriptor, AFFINE -- its
 one owner may use it, give it away (move it into a call, a result, a struct
 field) and close it; it cannot be copied (USE-AFTER-MOVE), and a closed File
 no longer exists. Its affinity comes from its one other field, a
 std::io::fs::Owner, an affine token that owns nothing and costs one word:
-Botlish has no declaration that makes a struct affine (the report, "Affine
-ownership"). Operations that use a File take it and give it back: `read`
-returns a Read {file, data}, `write` a Written {file, count}, write_all the
-File.
+Botlish has no declaration that makes a struct affine. Operations that use a
+File take it and give it back: `read` returns a Read {file, data}, `write` a
+Written {file, count}, write_all the File.
 
 Ownership is not cleanup. Nothing closes a File for its owner: a File
 dropped unclosed, by an owner that returns, fails or ends without closing
 it, leaks its descriptor until the process ends (the language releases an
-affine value without running code: AFFINE-VALUES.md). Close every File you
-open; the whole-file operations below do it on every path. One rule closes
-for you: a read or write that FAILS closes its File (close's own result
-ignored) and fails with the operation's error, so a failed operation never
-leaves an owner holding a broken File, and an error path never leaks.
+affine value without running code). Close every File you open; the
+whole-file operations below do it on every path. One rule closes for you: a
+read or write that FAILS closes its File (close's own result ignored) and
+fails with the operation's error, so a failed operation never leaves an
+owner holding a broken File, and an error path never leaks.
 
 Operations on a File require LinuxFS too: the descriptor is used by syscalls
 of the direct module `linux`, which only a context of this module mediates.
@@ -12954,8 +13498,8 @@ that makes no progress are std::io::WriteFailed; no count or errno escapes.
 
 It requires LinuxIO although it reads only FD: it makes the direct call
 (std::linux::write, a callable of the direct module linux), and a direct
-call is mediated by a context of this module in the function that makes it
-(DIRECT-MODULES.md), never by its callers' contexts. Its callers have it.
+call is mediated by a context of this module in the function that makes it,
+never by its callers' contexts. Its callers have it.
 
 @topic stdlib.std::linux::io::write_text
 title: std::linux::io::write_text -- Function of module std::linux::io
@@ -13017,12 +13561,11 @@ that it requires LinuxIO -- and a call made before `with context
 std::linux::io::create()` is rejected at compile time (MISSING-CONTEXT, with
 the call chain).
 
-Capability boundary (DIRECT-MODULES.md). `linux` is a direct module: its
-write and read take any descriptor, raw process authority. This module is
-not: every function here that calls into `linux` requires LinuxIO, the
-context it defines itself, so the raw authority reaches its callers only as
-that explicit capability -- and nothing above std::linux::io is direct for
-using it.
+Capability boundary. `linux` is a direct module: its write and read take any
+descriptor, raw process authority. This module is not: every function here
+that calls into `linux` requires LinuxIO, the context it defines itself, so
+the raw authority reaches its callers only as that explicit capability --
+and nothing above std::linux::io is direct for using it.
 
 This module is one level above `linux` (stdlib/linux.bot): every operation
 here is the existing raw-thin wrapper applied to a descriptor taken from the
@@ -13036,13 +13579,13 @@ with no libc, no compiler knowledge of write(2) and no new syscall code. The
 low-level layer stays as it is: code that wants an explicit descriptor calls
 std::linux::write(fd, data) / std::linux::read(fd, buffer) directly.
 
-Representation authority. FileDescriptor and LinuxIO are opaque
-(OPAQUE-STRUCTS.md): only this module may construct them or look inside.
-Outside it a LinuxIO -- even one a function receives as its context -- can
-be held and passed but not taken apart (`io.stdout` is
-OPAQUE-REPRESENTATION): being a context grants no representation authority.
-Inside, the consumers below project `io.stdout.raw` directly; there are
-deliberately no public descriptor accessors.
+Representation authority. FileDescriptor and LinuxIO are opaque: only this
+module may construct them or look inside. Outside it a LinuxIO -- even one a
+function receives as its context -- can be held and passed but not taken
+apart (`io.stdout` is OPAQUE-REPRESENTATION): being a context grants no
+representation authority. Inside, the consumers below project
+`io.stdout.raw` directly; there are deliberately no public descriptor
+accessors.
 
 FileDescriptor's theorem is narrow: "this value is a Linux file-descriptor
 token minted by the owning Linux I/O abstraction". It does not claim the
@@ -13054,15 +13597,14 @@ that can build one, so create() mints the three standard tokens 0, 1, 2 --
 constants the existing completion proofs show are in std::abi::I32's domain,
 with no run-time range check.
 
-LinuxIO implements the portable std::io::IO context trait
-(CONTEXT-TRAITS.md) with write_text and write_error_text below: ordinary
-functions of this module whose one context parameter is a LinuxIO -- the
-implicit receiver -- and whose signatures match std::io::IO's requirements.
-Nothing registers them: where a call needs std::io::IO and LinuxIO is the
-one installed context that implements it, the compiler binds
-`io.write_text(...)` to a direct call of std::linux::io::write_text, which
-loads its descriptor from LinuxIO's own context slot as every function here
-does.
+LinuxIO implements the portable std::io::IO context trait with write_text
+and write_error_text below: ordinary functions of this module whose one
+context parameter is a LinuxIO -- the implicit receiver -- and whose
+signatures match std::io::IO's requirements. Nothing registers them: where a
+call needs std::io::IO and LinuxIO is the one installed context that
+implements it, the compiler binds `io.write_text(...)` to a direct call of
+std::linux::io::write_text, which loads its descriptor from LinuxIO's own
+context slot as every function here does.
 
 Not here (deliberately): errno mapping beyond std::io::WriteFailed (the raw
 write/read below return the kernel's signed values), buffering,
@@ -13365,11 +13907,10 @@ related: stdlib.module.std::io::path capability.files concept.refinements
   std::linux::path::concat(path, part)    PATH joined with PART: a LinuxPath
   std::linux::path::text(path)            PATH's String form (the carrier)
 
-LinuxPath is a refinement of str (REFINEMENT-VALUES.md): a value proven to
-be a non-empty String without U+0000 -- text that may be handed to Linux as
-an ordinary pathname. It is the same String, with the String's
-representation, so a validated value keeps being used as text with no
-conversion:
+LinuxPath is a refinement of str: a value proven to be a non-empty String
+without U+0000 -- text that may be handed to Linux as an ordinary pathname.
+It is the same String, with the String's representation, so a validated
+value keeps being used as text with no conversion:
 
   fn show(value: str):
       std::linux::path::validate(value):
@@ -13390,17 +13931,16 @@ not normalize: ".", "..", "./a", "../a", "a//b" and "/a/b" are valid exactly
 as written.
 
 LinuxPath satisfies the portable std::io::path::Path trait through this
-module's own `concat` and `text` (TRAITS.md: the owner's declarations,
-nothing else), so a function over std::io::path::Path specializes to direct
-calls of them.
+module's own `concat` and `text` (the owner's declarations, nothing else),
+so a function over std::io::path::Path specializes to direct calls of them.
 
-A LinuxPath is also a std::io::fs::FilePath (WINDOWS-X86-64-MILESTONE-7.md):
-its native path is its UTF-8 bytes (`native`, total: a LinuxPath holds no
-U+0000), and its filesystem operations below are std::linux::fs's on that
-native path. They declare no context; std::linux::fs's functions require
-std::linux::fs::LinuxFS, so every caller of these does too (the requirement
-is derived), and a program that uses a LinuxPath's file operations without
-installing a LinuxFS is MISSING-CONTEXT at compile time.
+A LinuxPath is also a std::io::fs::FilePath: its native path is its UTF-8
+bytes (`native`, total: a LinuxPath holds no U+0000), and its filesystem
+operations below are std::linux::fs's on that native path. They declare no
+context; std::linux::fs's functions require std::linux::fs::LinuxFS, so
+every caller of these does too (the requirement is derived), and a program
+that uses a LinuxPath's file operations without installing a LinuxFS is
+MISSING-CONTEXT at compile time.
 
   std::linux::path::native(path)            PATH's std::linux::fs::NativePath
   std::linux::path::read_file(path), write_file(path, data),
@@ -13641,16 +14181,17 @@ bridges.
 stdlib/linux.bot states the semantics (one syscall, the raw result, the
 logical copy); this file only performs them on x86-64.
 
-A direct module (DIRECT-MODULES.md): write and read call the raw transport,
+A direct module: write and read call the raw transport,
 std::linux::abi::x86_64::syscall, for any descriptor, with no context -- raw
 process authority, which stdlib/linux.bot exposes as its explicit low-level
 layer and std::linux::io mediates through LinuxIO.
 
 == SOURCE
 stdlib/linux/sys.x86_64.bot (import std::linux::sys). A direct module
-(DIRECT-MODULES.md): it exercises raw authority. Architecture-specific:
-stdlib/linux/sys.x86_64.bot and stdlib/linux/sys.aarch64.bot, chosen by
-the compilation's target, have one surface.
+(concept.direct-modules): it exercises raw authority.
+Architecture-specific: stdlib/linux/sys.x86_64.bot and
+stdlib/linux/sys.aarch64.bot, chosen by the compilation's target, have one
+surface.
 
 == MEMBERS
     std::linux::sys::close         function -- close(2)
@@ -14135,8 +14676,8 @@ related: concept.lists concept.list-length task.list-element capability.map-filt
 The namespace's intrinsics are root natives registered under their qualified
 names -- std::list::length, std::list::at, std::list::append
 (core/lists.tcl) -- and this module may never define a member of the same
-name (surface/modules.tcl, DUPLICATE-NATIVE; STDLIB-NAMESPACES.md).
-Everything below is ordinary Botlish over them:
+name (surface/modules.tcl, DUPLICATE-NATIVE). Everything below is ordinary
+Botlish over them:
 
   std::list::get(xs, i, default)   the element at i, or DEFAULT when i does
                                not designate an element: exactly
@@ -14150,12 +14691,11 @@ Everything below is ordinary Botlish over them:
                                propagates unchanged.
 
 and the search/reduction idioms built directly on the returning iterable
-loop (`loop x in xs:`, RETURNING-ITERABLE-LOOPS.md), Botlish's fundamental
-collection-transformation primitive. Deliberately no map/filter/filter_map:
-the returning loop already subsumes them (`loop x in xs: if not
-predicate(x): continue \n x` is the filtering idiom; the search/reduction
-helpers below are exactly the case where a genuine callback still pays
-rent).
+loop (`loop x in xs:`), Botlish's fundamental collection-transformation
+primitive. Deliberately no map/filter/filter_map: the returning loop already
+subsumes them (`loop x in xs: if not predicate(x): continue \n x` is the
+filtering idiom; the search/reduction helpers below are exactly the case
+where a genuine callback still pays rent).
 
   std::list::any?(xs, predicate)   true iff some element satisfies predicate,
                                left to right, short-circuiting at the
@@ -14169,8 +14709,8 @@ rent).
                                Written directly (not merely "not any?(...)
                                "): a genuinely independent higher-order
                                idiom, and another honest predicate call
-                               site for the next milestone's callvalue
-                               corpus -- not special-cased against any?.
+                               site for a callvalue corpus -- not
+                               special-cased against any?.
   std::list::find(xs, predicate)   the first element satisfying predicate,
                                left to right, short-circuiting at the
                                first match. No match (including an empty
@@ -14180,29 +14720,26 @@ rent).
 Each function's own returning-loop result is deliberately unused: every body
 short-circuits via `return` (or, for find, `fail`) before the loop would
 ever exhaust normally with a meaningful collected List. The native backend's
-discarded-result lowering (RETURNING-ITERABLE-LOOPS.md items 20-22, 28-29)
-applies at every one of these call sites, so none of these four helpers
-causes an output-List allocation the caller never asked for -- see that
-report's allocation census.
+discarded-result lowering applies at every one of these call sites, so none
+of these four helpers causes an output-List allocation the caller never
+asked for.
 
 No `continue` appears below, deliberately: it would only ever change what a
 *discarded* iteration contributes to a List none of these four functions
 ever reads (a skipped iteration's own `if`, with no `else` and nothing after
 it, already completes normally with `unit` -- ordinary Botlish
-`if`-without-`else` typing, ASCII-AND-URI-UNRESERVED.md's own `if not
-label_char?(...): return false` shape among many others -- so omitting
-`continue` here costs nothing observable and keeps the shape of each
-function to its one real decision). A `continue` remains load- bearing
-wherever a returning loop's own collected List *is* read -- see item 4's own
-filtering idiom, `loop x in xs: if not predicate(x): continue \n x`, in
-RETURNING-ITERABLE-LOOPS.md.
+`if`-without-`else` typing, the shape of `if not label_char?(...): return
+false` among many others) -- so omitting `continue` here costs nothing
+observable and keeps the shape of each function to its one real decision). A
+`continue` remains load- bearing wherever a returning loop's own collected
+List *is* read, as in the filtering idiom `loop x in xs: if not
+predicate(x): continue \n x`.
 
 `predicate(x)` is an ordinary dynamic call through an untyped parameter
 (`callvalue` at the interpreter/native level, exactly like stdlib/web.bot's
-own `scan_while`'s `predicate(char_at(i))`): this milestone intentionally
-does not add finite callable-target provenance, devirtualization, or any
-other optimization of that call -- see the report's higher-order callvalue
-census, and RETURNING-ITERABLE-LOOPS.md items 47/81.
+own `scan_while`'s `predicate(char_at(i))`): this module intentionally does
+not add finite callable-target provenance, devirtualization, or any other
+optimization of that call (its higher-order callvalue census).
 
 == SOURCE
 stdlib/list.bot (import std::list).
@@ -14771,7 +15308,7 @@ names -- std::mutable_array::allocate, ::create, ::from_list, ::generate,
 ::capacity, ::at, ::set, ::swap, ::copy, ::freeze (core/mutarray.tcl) -- and
 this module may never define a member of the same name (surface/modules.tcl,
 DUPLICATE-NATIVE). The one member below is an ordinary function over those
-intrinsics (STDLIB-NAMESPACES.md):
+intrinsics:
 
   std::mutable_array::get(array, i, d)     the element at i, or D when i does
                                       not designate an element: exactly
@@ -14797,7 +15334,7 @@ precomputed container rule (hir/containers.tcl) that hid their bodies from
 the ownership discipline: `create(2, make_coroutine())` compiled and stored
 one coroutine in two slots. An intrinsic's roles are what the discipline
 reads, so no library body can do what the same body written in a program
-could not (MUTABLE-ARRAY.md, "Library ownership").
+could not.
 
 get's DEFAULT is an ordinary argument, evaluated before the call like any
 other (no lazy default), and it is not an optional/null result: a present
@@ -15399,7 +15936,7 @@ the result is never changed. O(n + slots).
 
 @topic stdlib.module.std::mutable_map
 title: std::mutable_map -- standard namespace
-summary: MutableMap[K, V], a mutable, insertion-ordered map of Hashable keys (ORDERED-MUTABLE-MAP-SET.md).
+summary: MutableMap[K, V], a mutable, insertion-ordered map of Hashable keys.
 index: stdlib
 symbol: std::mutable_map
 
@@ -15444,9 +15981,9 @@ symbol: std::mutable_map
 A MutableMap is a mutable VALUE, like MutableVector: `n = m` (or passing m,
 returning it, storing it in a struct) makes a logical copy, and mutating one
 copy never changes another. The mutating operations take the map as a place
-parameter (PLACE-PARAMETERS.md): `m.set(k, v)` updates the caller's own map
-in place. A loop iterates the map as it was when the loop began: mutating
-the map in the body changes the map, never what the loop visits.
+parameter: `m.set(k, v)` updates the caller's own map in place. A loop
+iterates the map as it was when the loop began: mutating the map in the body
+changes the map, never what the loop visits.
 
 Keys are compared by Botlish equality (`==`) and placed by a keyed hash the
 program cannot observe: the iteration order is insertion order, whatever the
@@ -15455,12 +15992,12 @@ again adds it last. Expected cost: O(1) amortized for contains, at, set and
 remove; O(1) for length; O(n) for a loop; a growth or compaction is O(n),
 amortized over the operations before it.
 
-A map's identity is its associations; its order is a permutation of its keys
-(PROVEN-COLLECTION-REORDERING.md). reorder changes the order only: every key
-keeps its stored key and its value. Its order must be known, at the call, to
-hold exactly the map's keys (REORDER-NOT-PROVEN otherwise): from order(), or
-from validate_order, which checks a candidate once. A proven reorder checks
-nothing; it is O(n) and hashes nothing again.
+A map's identity is its associations; its order is a permutation of its
+keys. reorder changes the order only: every key keeps its stored key and its
+value. Its order must be known, at the call, to hold exactly the map's keys
+(REORDER-NOT-PROVEN otherwise): from order(), or from validate_order, which
+checks a candidate once. A proven reorder checks nothing; it is O(n) and
+hashes nothing again.
 
 The representation is std::ordered_table's, opaque: no program sees a slot,
 a hash, a capacity or a removed entry.
@@ -15717,7 +16254,7 @@ are distinct already).
 
 @topic stdlib.module.std::mutable_set
 title: std::mutable_set -- standard namespace
-summary: MutableSet[T], a mutable, insertion-ordered set of Hashable elements (ORDERED-MUTABLE-MAP-SET.md).
+summary: MutableSet[T], a mutable, insertion-ordered set of Hashable elements.
 index: stdlib
 symbol: std::mutable_set
 
@@ -15756,19 +16293,18 @@ symbol: std::mutable_set
 
 A MutableSet is a mutable VALUE, like MutableVector: a copy is a logical
 copy, and mutating one copy never changes another. The mutating operations
-take the set as a place parameter (PLACE-PARAMETERS.md); a loop iterates the
-set as it was when the loop began. Membership is Botlish equality (`==`),
-exactly a MutableMap key's; elements are placed by a keyed hash the program
-cannot observe, and iterated in insertion order. Removing an element and
-adding it again adds it last. Expected cost: O(1) amortized for contains,
-add and remove; O(1) for length; O(n) for a loop.
+take the set as a place parameter; a loop iterates the set as it was when
+the loop began. Membership is Botlish equality (`==`), exactly a MutableMap
+key's; elements are placed by a keyed hash the program cannot observe, and
+iterated in insertion order. Removing an element and adding it again adds it
+last. Expected cost: O(1) amortized for contains, add and remove; O(1) for
+length; O(n) for a loop.
 
-Order is not membership (PROVEN-COLLECTION-REORDERING.md): reorder changes
-the iteration order only, never which elements the set holds, and its order
-is a permutation of the set's elements -- which the compiler must know at
-the call (REORDER-NOT-PROVEN otherwise), from order(), a copy of the set, or
-validate_order. A proven reorder checks nothing; it is O(n) and hashes
-nothing again.
+Order is not membership: reorder changes the iteration order only, never
+which elements the set holds, and its order is a permutation of the set's
+elements -- which the compiler must know at the call (REORDER-NOT-PROVEN
+otherwise), from order(), a copy of the set, or validate_order. A proven
+reorder checks nothing; it is O(n) and hashes nothing again.
 
 The representation is std::ordered_table's alone (the elements are its
 keys): a set stores no value per element.
@@ -16086,7 +16622,8 @@ v.empty?() first if that is clearer, but the handler is still needed).
 import std::mutable_vector
 
 fn last_or_zero(v: MutableVector[int]) -> int:
-    x = v.pop():
+    rest = v
+    x = rest.pop():
         on IndexNotFound:
             0
     x
@@ -16772,9 +17309,8 @@ cases, in registration order. Exactly two functions declare it as their
 context parameter -- `case` (registration) and `registered` (the snapshot
 the runner reads) -- and every other function's requirement is derived: a
 context implements, structurally, any context trait whose operations its
-owner's functions with that context parameter spell (CONTEXT-TRAITS.md), so
-the fewer such functions, the fewer application traits the suite could
-satisfy by accident.
+owner's functions with that context parameter spell, so the fewer such
+functions, the fewer application traits the suite could satisfy by accident.
 
 == NOTES
 A context struct whose one field is a MutableVector of the registered cases.
@@ -17048,8 +17584,7 @@ to take one apart, and a test that compares such values and wants them shown
 writes a custom check. The value goes through an `any` field first:
 describe's instance for an Int argument otherwise checks the string?
 branch's calls with the argument still typed int (a semantic- instance check
-does not narrow under a type test it decides false;
-GOLDEN-TEST-FRAMEWORK.md, "Compiler findings").
+does not narrow under a type test it decides false).
 
 @topic stdlib.std::test::code_name
 title: std::test::code_name -- Function of module std::test
@@ -17273,7 +17808,7 @@ BODY's block must be rejected with diagnostic code EXPECTED and exactly the
 message WANTED: for a test whose property is the diagnostic's wording (a
 call chain, a name the message alone carries). Messages are otherwise
 reported, never compared. (Promoted from the suite-local matchers four
-suites wrote independently: LARGE-SCALE-GOLDEN-MIGRATION.md.)
+suites wrote independently.)
 
 @topic stdlib.std::test::rejects_containing
 title: std::test::rejects_containing -- Function (nomethod) of module std::test
@@ -17462,30 +17997,28 @@ their results.
 The suite. `std::test::suite()` is the value a program installs with `with
 context`: a Suite whose one field is the MutableVector of registered cases.
 The context value itself is an ordinary immutable struct, installed once
-like any context (entry program top level only, at most one per program,
-CONTEXTS.md); registration mutates the vector it holds
-(`suite.cases.push(...)`), never the binding -- the place model of
-MUTABLE-VECTOR.md. Calling a registration function where no suite is
+like any context (entry program top level only, at most one per program);
+registration mutates the vector it holds (`suite.cases.push(...)`) in its
+place, never the binding. Calling a registration function where no suite is
 installed is the ordinary MISSING-CONTEXT.
 
 Registration. `std::test::case(name, check)` records a TestCase {name, run}
 whose `run` is a function value of the one uniform type Fn{args: [], return:
 Match}: registration stores it and never calls it. A function value is the
 deferred representation because Botlish coroutines start eagerly --
-`coroutine {step, first} = f()` runs f to its first yield at once
-(COROUTINES.md 15) -- so storing a started coroutine would run the test
-while registering it. The value helpers below (`std::test::value`,
-`std::test::holds`, `std::test::rejects`, ...) wrap a test body into such a
-check while its concrete types are known: they call the body, turn the one
-error a body may complete with, std::compiler::CompilerError, into a
-mismatch, compare, and return a Match. A body is a function of no arguments
-whose only declared error is std::compiler::CompilerError: any other error
-the body may raise must be handled inside it (the compiler rejects the
-registration otherwise, at the call: the body's error set does not fit the
-parameter contract `Fn{args: [], return: any, errors:
-[std::compiler::CompilerError]}` the helper's code infers). Botlish has no
-catch-all handler, so this is how an arbitrary test outcome becomes data
-without one.
+`coroutine {step, first} = f()` runs f to its first yield at once -- so
+storing a started coroutine would run the test while registering it. The
+value helpers below (`std::test::value`, `std::test::holds`,
+`std::test::rejects`, ...) wrap a test body into such a check while its
+concrete types are known: they call the body, turn the one error a body may
+complete with, std::compiler::CompilerError, into a mismatch, compare, and
+return a Match. A body is a function of no arguments whose only declared
+error is std::compiler::CompilerError: any other error the body may raise
+must be handled inside it (the compiler rejects the registration otherwise,
+at the call: the body's error set does not fit the parameter contract
+`Fn{args: [], return: any, errors: [std::compiler::CompilerError]}` the
+helper's code infers). Botlish has no catch-all handler, so this is how an
+arbitrary test outcome becomes data without one.
 
 Matchers. A Match is the verdict of one comparison, as data: {matched,
 expected, actual, detail}, the three texts saying what was expected, what
@@ -17509,10 +18042,10 @@ check exactly once. `std::test::results()` drains a run,
 "FAIL name" line and its indented "expected:", "actual:" and "detail:" lines
 per failing one, then "P passed, F failed".
 
-Text. An Int's text is std::int::to_string's (NUMERIC-TEXT-BOUNDARY-
-MILESTONE-1.md); a value's is this module's own (`describe`, slices of one
-table for its punctuation), and an enum has no String form (ENUMS.md), so
-`code_name` spells every std::compiler::DiagnosticCode case itself.
+Text. An Int's text is std::int::to_string's; a value's is this module's own
+(`describe`, slices of one table for its punctuation), and an enum has no
+String form, so `code_name` spells every std::compiler::DiagnosticCode case
+itself.
 
 == SOURCE
 stdlib/test.bot (import std::test).
@@ -17560,6 +18093,704 @@ stdlib/test.bot (import std::test).
     std::test::value               function (nomethod) -- BODY's value must...
 
 Each member is a topic: -help NAME (e.g. -help std::test::Erased).
+
+@topic stdlib.std::thread::ThreadLimit
+title: std::thread::ThreadLimit -- Error of module std::thread
+summary: No thread can start now
+index: stdlib
+symbol: std::thread::ThreadLimit
+related: stdlib.module.std::thread
+
+== DECLARATION
+    error ThreadLimit
+
+== MODULE
+stdlib/thread.bot: import std::thread, then write
+std::thread::ThreadLimit.
+
+== DESCRIPTION
+No thread can start now: the Threads context's own limit, or every
+stack-overflow guard record of the process is in use.
+
+@topic stdlib.std::thread::ThreadStartFailed
+title: std::thread::ThreadStartFailed -- Error of module std::thread
+summary: A thread could not start
+index: stdlib
+symbol: std::thread::ThreadStartFailed
+related: stdlib.module.std::thread
+
+== DECLARATION
+    error ThreadStartFailed:
+        reason: str
+
+== MODULE
+stdlib/thread.bot: import std::thread, then write
+std::thread::ThreadStartFailed.
+
+== DESCRIPTION
+A thread could not start: the operating system refused the thread, or its VM
+could not be made or initialized (REASON says which).
+
+@topic stdlib.std::thread::ThreadFailed
+title: std::thread::ThreadFailed -- Error of module std::thread
+summary: The thread's entry failed
+index: stdlib
+symbol: std::thread::ThreadFailed
+related: stdlib.module.std::thread
+
+== DECLARATION
+    error ThreadFailed:
+        identity: str
+        message: str
+
+== MODULE
+stdlib/thread.bot: import std::thread, then write
+std::thread::ThreadFailed.
+
+== DESCRIPTION
+The thread's entry failed: IDENTITY is the identity of its error (a declared
+error's canonical name, or the runtime failure's code), MESSAGE its text.
+
+@topic stdlib.std::thread::Status
+title: std::thread::Status -- Enum of module std::thread
+summary: A thread's lifecycle state (status).
+index: stdlib
+symbol: std::thread::Status
+related: stdlib.module.std::thread
+
+== DECLARATION
+    enum Status:
+        Starting,
+        Running,
+        Returned,
+        Stopped,
+        Failed,
+        StartFailed,
+        Gone,
+
+== MODULE
+stdlib/thread.bot: import std::thread, then write std::thread::Status.
+
+== DESCRIPTION
+A thread's lifecycle state (status).
+
+@topic stdlib.std::thread::Threads
+title: std::thread::Threads -- Opaque context struct of module std::thread
+summary: The authority to start threads
+index: stdlib
+symbol: std::thread::Threads
+related: stdlib.module.std::thread
+
+== DECLARATION
+    opaque context struct Threads:
+        limit: Limit
+
+== MODULE
+stdlib/thread.bot: import std::thread, then write std::thread::Threads.
+
+== DESCRIPTION
+The authority to start threads: at most LIMIT of this context's own at once
+(a further start is ThreadLimit), whatever else the process runs.
+
+@topic stdlib.std::thread::Limit
+title: std::thread::Limit -- Type of module std::thread
+summary: How many threads one Threads context may run at once.
+index: stdlib
+symbol: std::thread::Limit
+related: stdlib.module.std::thread
+
+== DECLARATION
+    type Limit = Int in 1..4096
+
+== MODULE
+stdlib/thread.bot: import std::thread, then write std::thread::Limit.
+
+== DESCRIPTION
+How many threads one Threads context may run at once.
+
+@topic stdlib.std::thread::Entry
+title: std::thread::Entry -- Opaque struct of module std::thread
+summary: A thread entry, by its index among the program's entries and its name
+index: stdlib
+symbol: std::thread::Entry
+related: stdlib.module.std::thread
+
+== DECLARATION
+    opaque struct Entry[I satisfies Sendable, R satisfies Sendable]:
+        index: int
+        name: str
+
+== MODULE
+stdlib/thread.bot: import std::thread, then write std::thread::Entry.
+
+== DESCRIPTION
+A thread entry, by its index among the program's entries and its name: what
+std::thread::entry(NAME) makes (a constant). I is its initialization value's
+type, R its result's.
+
+@topic stdlib.std::thread::Thread
+title: std::thread::Thread -- Opaque struct of module std::thread
+summary: The join right of one thread whose entry returns an R
+index: stdlib
+symbol: std::thread::Thread
+related: stdlib.module.std::thread
+
+== DECLARATION
+    opaque struct Thread[R satisfies Sendable]:
+        id: int
+        right: Right
+
+== MODULE
+stdlib/thread.bot: import std::thread, then write std::thread::Thread.
+
+== DESCRIPTION
+The join right of one thread whose entry returns an R: affine, one owner.
+
+@topic stdlib.std::thread::ThreadId
+title: std::thread::ThreadId -- Opaque struct of module std::thread
+summary: The identity of one thread
+index: stdlib
+symbol: std::thread::ThreadId
+related: stdlib.module.std::thread
+
+== DECLARATION
+    opaque struct ThreadId:
+        id: int
+
+== MODULE
+stdlib/thread.bot: import std::thread, then write std::thread::ThreadId.
+
+== DESCRIPTION
+The identity of one thread: copyable; it names the thread for status, stop
+requests and waits, never for its outcome.
+
+@topic stdlib.std::thread::Started
+title: std::thread::Started -- Struct of module std::thread
+summary: What start makes
+index: stdlib
+symbol: std::thread::Started
+related: stdlib.module.std::thread
+
+== DECLARATION
+    struct Started[R satisfies Sendable]:
+        thread: Thread[R]
+        id: ThreadId
+
+== MODULE
+stdlib/thread.bot: import std::thread, then write std::thread::Started.
+
+== DESCRIPTION
+What start makes: the join right and the identity.
+
+@topic stdlib.std::thread::Stats
+title: std::thread::Stats -- Struct of module std::thread
+summary: The process's thread and transport counters (stats)
+index: stdlib
+symbol: std::thread::Stats
+related: stdlib.module.std::thread
+
+== DECLARATION
+    struct Stats:
+        started: int
+        running: int
+        ended: int
+        joined: int
+        detached: int
+        start_failures: int
+        limit_refusals: int
+        messages: int
+        full_refusals: int
+        undelivered: int
+        stale_replies: int
+
+== MODULE
+stdlib/thread.bot: import std::thread, then write std::thread::Stats.
+
+== DESCRIPTION
+The process's thread and transport counters (stats): threads started,
+running, ended, joined and detached, starts that failed or were refused for
+the limit; messages the transport queued, sends refused Full, messages
+dropped undelivered by a closing endpoint, and answers that reached no call
+(Stale).
+
+@topic stdlib.std::thread::create
+title: std::thread::create -- Function of module std::thread
+summary: The authority to start at most LIMIT (at least 1) threads at once.
+index: stdlib
+symbol: std::thread::create
+related: stdlib.module.std::thread
+
+== DECLARATION
+    fn create(limit: int) -> Threads:
+
+== MODULE
+stdlib/thread.bot: import std::thread, then write std::thread::create or,
+as a method, receiver.create(...).
+
+== DESCRIPTION
+The authority to start at most LIMIT (at least 1) threads at once.
+
+@topic stdlib.std::thread::start_sized
+title: std::thread::start_sized -- Function (nomethod) of module std::thread
+summary: Start a thread running entry E with the initialization value INIT (copied into the thread's VM), on a native stack of 64 MiB (start_sized
+index: stdlib
+symbol: std::thread::start_sized
+related: stdlib.module.std::thread
+
+== DECLARATION
+    nomethod fn start_sized(e: Entry[I, R], init: I, stack: int, context t: Threads) -> Started[R] errors ThreadLimit, ThreadStartFailed:
+
+== MODULE
+stdlib/thread.bot: import std::thread, then write
+std::thread::start_sized.
+
+== DESCRIPTION
+Start a thread running entry E with the initialization value INIT (copied
+into the thread's VM), on a native stack of 64 MiB (start_sized: of STACK
+bytes, at least 1 MiB). ThreadLimit when this authority's limit, or the
+process's guard records, are exhausted; ThreadStartFailed when the operating
+system refuses the thread. A thread whose VM cannot start is StartFailed,
+which join reports.
+
+@topic stdlib.std::thread::start
+title: std::thread::start -- Function (nomethod) of module std::thread
+summary: The function (nomethod) std::thread::start of the standard module std::thread.
+index: stdlib
+symbol: std::thread::start
+related: stdlib.module.std::thread
+
+== DECLARATION
+    nomethod fn start(e: Entry[I, R], init: I, context t: Threads) -> Started[R] errors ThreadLimit, ThreadStartFailed:
+
+== MODULE
+stdlib/thread.bot: import std::thread, then write std::thread::start.
+
+@topic stdlib.std::thread::status
+title: std::thread::status -- Function (nomethod) of module std::thread
+summary: THREAD's lifecycle state.
+index: stdlib
+symbol: std::thread::status
+related: stdlib.module.std::thread
+
+== DECLARATION
+    nomethod fn status(thread: ThreadId) -> Status:
+
+== MODULE
+stdlib/thread.bot: import std::thread, then write std::thread::status.
+
+== DESCRIPTION
+THREAD's lifecycle state.
+
+@topic stdlib.std::thread::request_stop
+title: std::thread::request_stop -- Function (nomethod) of module std::thread
+summary: Ask THREAD to stop
+index: stdlib
+symbol: std::thread::request_stop
+related: stdlib.module.std::thread
+
+== DECLARATION
+    nomethod fn request_stop(thread: ThreadId) -> bool:
+
+== MODULE
+stdlib/thread.bot: import std::thread, then write
+std::thread::request_stop.
+
+== DESCRIPTION
+Ask THREAD to stop: its stop_requested() answers true from now on and its
+port is woken (std::actor::remote). True when the thread had not ended.
+
+@topic stdlib.std::thread::stop_requested?
+title: std::thread::stop_requested? -- Function of module std::thread
+summary: Whether this thread was asked to stop (false on the main thread).
+index: stdlib
+symbol: std::thread::stop_requested?
+related: stdlib.module.std::thread
+
+== DECLARATION
+    fn stop_requested?() -> bool:
+
+== MODULE
+stdlib/thread.bot: import std::thread, then write
+std::thread::stop_requested? or, as a method,
+receiver.stop_requested?(...).
+
+== DESCRIPTION
+Whether this thread was asked to stop (false on the main thread).
+
+@topic stdlib.std::thread::await_end
+title: std::thread::await_end -- Function (nomethod) of module std::thread
+summary: Blocks this OS thread until THREAD has ended or TIMEOUT microseconds have passed (TIMEOUT < 0
+index: stdlib
+symbol: std::thread::await_end
+related: stdlib.module.std::thread
+
+== DECLARATION
+    nomethod fn await_end(thread: ThreadId, timeout: int) -> bool:
+
+== MODULE
+stdlib/thread.bot: import std::thread, then write std::thread::await_end.
+
+== DESCRIPTION
+Blocks this OS thread until THREAD has ended or TIMEOUT microseconds have
+passed (TIMEOUT < 0: no bound): whether it ended. A false answer means the
+thread is still running -- nothing was done to it.
+
+@topic stdlib.std::thread::join
+title: std::thread::join -- Function (nomethod) of module std::thread
+summary: THREAD's result
+index: stdlib
+symbol: std::thread::join
+related: stdlib.module.std::thread
+
+== DECLARATION
+    nomethod fn join(thread: Thread[R]) -> R errors ThreadFailed, ThreadStartFailed:
+
+== MODULE
+stdlib/thread.bot: import std::thread, then write std::thread::join.
+
+== DESCRIPTION
+THREAD's result: blocks this OS thread until it ends, then collects its
+outcome -- its entry's value, copied into this VM -- and releases it.
+ThreadFailed with the entry's error, ThreadStartFailed when it never
+started. (On an event loop, wait_end first: join then does not block.)
+
+@topic stdlib.std::thread::capacity
+title: std::thread::capacity -- Function of module std::thread
+summary: How many more threads the process can run guarded now (its free stack-overflow guard records).
+index: stdlib
+symbol: std::thread::capacity
+related: stdlib.module.std::thread
+
+== DECLARATION
+    fn capacity() -> int:
+
+== MODULE
+stdlib/thread.bot: import std::thread, then write std::thread::capacity
+or, as a method, receiver.capacity(...).
+
+== DESCRIPTION
+How many more threads the process can run guarded now (its free
+stack-overflow guard records).
+
+@topic stdlib.std::thread::stats
+title: std::thread::stats -- Function of module std::thread
+summary: The process's thread and transport counters.
+index: stdlib
+symbol: std::thread::stats
+related: stdlib.module.std::thread
+
+== DECLARATION
+    fn stats() -> Stats:
+
+== MODULE
+stdlib/thread.bot: import std::thread, then write std::thread::stats or,
+as a method, receiver.stats(...).
+
+== DESCRIPTION
+The process's thread and transport counters.
+
+@topic stdlib.std::thread::Doorbell
+title: std::thread::Doorbell -- Context trait of module std::thread
+summary: A driver's ability to watch the port's doorbell
+index: stdlib
+symbol: std::thread::Doorbell
+related: stdlib.module.std::thread
+
+== DECLARATION
+    context trait Doorbell:
+        fn watch_doorbell(fd: int, slot: int, gen: int) -> int
+        fn rearm_doorbell(watch: int, slot: int, gen: int) -> int
+        fn unwatch_doorbell(watch: int, slot: int, gen: int) -> int
+
+== MODULE
+stdlib/thread.bot: import std::thread, then write std::thread::Doorbell.
+
+== DESCRIPTION
+A driver's ability to watch the port's doorbell: watch descriptor FD
+delivering readiness records to the registration (SLOT, GEN) -- a watch id
+or a negated errno; rearm it after a record; stop watching.
+
+@topic stdlib.std::thread::Port
+title: std::thread::Port -- Opaque context struct of module std::thread
+summary: This VM's port
+index: stdlib
+symbol: std::thread::Port
+related: stdlib.module.std::thread
+
+== DECLARATION
+    opaque context struct Port:
+        state: MutableArray[int]
+        keys: MutableVector[int]
+        chans: MutableVector[std::event_loop::Reg]
+        doorbell: MutableVector[std::event_loop::Reg]
+
+== MODULE
+stdlib/thread.bot: import std::thread, then write std::thread::Port.
+
+== DESCRIPTION
+This VM's port: its doorbell's descriptor and watch, and the channels its
+notifications are routed to (KEYS[i]'s to CHANS[i]).
+
+@topic stdlib.std::thread::port
+title: std::thread::port -- Function of module std::thread
+summary: This VM's port, opened (its doorbell).
+index: stdlib
+symbol: std::thread::port
+related: stdlib.module.std::thread
+
+== DECLARATION
+    fn port() -> Port:
+
+== MODULE
+stdlib/thread.bot: import std::thread, then write std::thread::port or, as
+a method, receiver.port(...).
+
+== DESCRIPTION
+This VM's port, opened (its doorbell). A port that could not open (no
+descriptor) reports it when served (DriverFault).
+
+@topic stdlib.std::thread::route
+title: std::thread::route -- Function (nomethod) of module std::thread
+summary: Notifications of KIND for ID are posted to CHAN from now on (internal
+index: stdlib
+symbol: std::thread::route
+related: stdlib.module.std::thread
+
+== DECLARATION
+    nomethod fn route(kind: int, id: int, chan: std::event_loop::Reg, context p: Port):
+
+== MODULE
+stdlib/thread.bot: import std::thread, then write std::thread::route.
+
+== DESCRIPTION
+Notifications of KIND for ID are posted to CHAN from now on (internal:
+std::actor::remote's).
+
+@topic stdlib.std::thread::unroute
+title: std::thread::unroute -- Function (nomethod) of module std::thread
+summary: No notification of KIND for ID is posted any more.
+index: stdlib
+symbol: std::thread::unroute
+related: stdlib.module.std::thread
+
+== DECLARATION
+    nomethod fn unroute(kind: int, id: int, context p: Port) errors IndexNotFound:
+
+== MODULE
+stdlib/thread.bot: import std::thread, then write std::thread::unroute.
+
+== DESCRIPTION
+No notification of KIND for ID is posted any more.
+
+@topic stdlib.std::thread::serve
+title: std::thread::serve -- Function of module std::thread
+summary: Serve this VM's port on its event loop (once
+index: stdlib
+symbol: std::thread::serve
+related: stdlib.module.std::thread
+
+== DECLARATION
+    fn serve(context ev: std::event_loop::Loop, p: Port, d: Doorbell) errors std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+
+== MODULE
+stdlib/thread.bot: import std::thread, then write std::thread::serve or,
+as a method, receiver.serve(...).
+
+== DESCRIPTION
+Serve this VM's port on its event loop (once; later calls do nothing): the
+doorbell is watched through the driver, and a pump task routes its
+notifications. DriverFault with the negated errno when the doorbell cannot
+be opened or watched.
+
+@topic stdlib.std::thread::close_port
+title: std::thread::close_port -- Function of module std::thread
+summary: Close this VM's port
+index: stdlib
+symbol: std::thread::close_port
+related: stdlib.module.std::thread
+
+== DECLARATION
+    fn close_port(context ev: std::event_loop::Loop, p: Port, d: Doorbell) errors std::event_loop::SchedulerFault:
+
+== MODULE
+stdlib/thread.bot: import std::thread, then write std::thread::close_port
+or, as a method, receiver.close_port(...).
+
+== DESCRIPTION
+Close this VM's port: its endpoints close (the messages they held are
+dropped and counted; the calls among them fail), the calls it owes fail with
+ServiceEnded, its waiters wake, and its loop is no longer kept alive by it.
+What a VM does when it is done with the transport (its end does it too).
+
+@topic stdlib.std::thread::wait_end
+title: std::thread::wait_end -- Function of module std::thread
+summary: Waits, as an event-loop task -- suspended, never blocking this VM's thread -- until THREAD has ended (or this port closes)
+index: stdlib
+symbol: std::thread::wait_end
+related: stdlib.module.std::thread
+
+== DECLARATION
+    fn wait_end(thread: ThreadId, context ev: std::event_loop::Loop, p: Port, d: Doorbell) -> Status errors std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+
+== MODULE
+stdlib/thread.bot: import std::thread, then write std::thread::wait_end
+or, as a method, receiver.wait_end(...).
+
+== DESCRIPTION
+Waits, as an event-loop task -- suspended, never blocking this VM's thread
+-- until THREAD has ended (or this port closes): its status. Join it
+afterwards: join then does not block.
+
+@topic stdlib.std::thread::wait_stop
+title: std::thread::wait_stop -- Function of module std::thread
+summary: Waits, as an event-loop task, until this thread is asked to stop (its creator's request_stop, or the program's end)
+index: stdlib
+symbol: std::thread::wait_stop
+related: stdlib.module.std::thread
+
+== DECLARATION
+    fn wait_stop(context ev: std::event_loop::Loop, p: Port, d: Doorbell) -> bool errors std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+
+== MODULE
+stdlib/thread.bot: import std::thread, then write std::thread::wait_stop
+or, as a method, receiver.wait_stop(...).
+
+== DESCRIPTION
+Waits, as an event-loop task, until this thread is asked to stop (its
+creator's request_stop, or the program's end): true; false when the port
+closed first.
+
+@topic stdlib.std::thread::entry
+title: std::thread::entry -- intrinsic of namespace std::thread
+summary: std::thread::entry(NAME): the std::thread::Entry[I, R] of thread entry NAME (a module's `thread fn NAME(init: I) -> R`), the value std::thread::start starts, after `import std::thread`.
+index: stdlib
+symbol: std::thread::entry
+keywords: thread entry; thread fn; start a thread; Entry
+related: stdlib.module.std::thread concept.threads error.thread-entry-reference
+
+== SIGNATURE
+    std::thread::entry(any) -> struct
+
+== USE
+An intrinsic of namespace std::thread: import std::thread, then write
+std::thread::entry. Method syntax: receiver.entry(...) is the same call.
+
+== BACKENDS
+every backend (interp, compile, cranelift-generic, cranelift)
+
+== NOTES
+NAME is a thread entry itself, named directly (a qualified name of a
+module's `thread fn`): never a function value, a call or an ordinary
+function (THREAD-ENTRY-REFERENCE). The result is a constant -- the entry's
+index among the program's entries and its name -- typed by the entry's
+initialization and result types, so start and join are typed by it. The
+Tcl backends refuse a program that names an entry (THREAD-UNAVAILABLE).
+
+@topic stdlib.module.std::thread
+title: std::thread -- standard namespace
+summary: Botlish-owned threads: start runs a module's `thread fn` on an OS thread in a VM of its own, join copies its result back; port is the VM's place in the cross-thread transport.
+index: stdlib
+symbol: std::thread
+keywords: thread; threads; start a thread; spawn; join; parallel; worker; VM; stop request; port; Threads
+related: concept.threads concept.remote-actors stdlib.std::thread::entry stdlib.module.std::actor::remote capability.concurrency
+
+== DESCRIPTION
+  # worker.bot -- a module
+  thread fn crunch(n: int) -> int:             a thread entry
+      fib(n)
+
+  # main.bot
+  import std::thread
+  import worker
+  with context std::thread::create(4)          the authority to start threads
+  s = std::thread::start(std::thread::entry(worker::crunch), 30)
+  std::thread::join(s.thread)                  832040, from the other VM
+
+A THREAD is an OS thread with its own native stack and stack-overflow guard,
+running one VM: its own heap and collector, module statics, installed
+contexts and roots, made on that thread from the program's one compiled
+image. A thread runs one THREAD ENTRY (`thread fn` in a module,
+hir/threads.tcl): the runtime initializes the VM's module statics, copies
+the start's initialization value into it (std::transfer: the value is
+rebuilt there, nothing of the starting VM is kept), runs the entry -- which
+installs the contexts the thread needs, in its own body -- and copies its
+result back for whoever joins it. A thread never has its creator's contexts:
+they belong to another VM. The program's selection of each context trait is
+the same for every entry (CONTEXT-TRAIT-SELECTION- CONFLICT); each VM
+installs its own instance.
+
+AUTHORITY. Starting a thread needs the installed context Threads
+(std::thread::create), which an entry installs and restricted injection can
+withhold (`inject no context:` code cannot start one). Everything else here
+takes the value that names a thread: the affine join right Thread[R] (one
+owner: whoever may collect the outcome), or the unrestricted ThreadId
+(status, stop requests, bounded waits).
+
+LIFECYCLE. A thread is Starting, then Running, then ends Returned (its entry
+completed: the value is kept for join), Stopped (it completed after a stop
+was requested: likewise), Failed (its entry failed: the error's identity and
+message are kept) or StartFailed (no VM could start: the reason is kept).
+Its outcome stays until join collects it -- dropping the Thread without
+joining detaches it: its outcome is then dropped when it ends, and counted
+(stats). Stopping is cooperative: request_stop sets a flag the thread reads
+(stop_requested) and wakes its port (std::actor:: remote serves it), never
+interrupts it; nothing kills a thread. When the program's main VM completes,
+every thread still running is asked to stop and joined before the program's
+image is released.
+
+WAITING. join and await_end block the calling OS thread (a bounded await_end
+returns false when the thread has not ended; it never ends the thread). Code
+on an event loop waits without blocking its thread with wait_end
+(std::actor::remote's port: the runtime wakes the loop when the thread
+ends).
+
+LIMITS. At most 64 threads run guarded at once in a process -- the
+stack-overflow guard's table, the main thread's included -- and a start
+reserves its guard record before the thread exists: a start beyond it is
+ThreadLimit, never an unguarded thread. A native stack overflow on any
+thread ends the process (NATIVE LIMIT STACK), as on the main thread: no
+thread-only recovery.
+
+Native backends only: the Tcl backends refuse a program that starts a thread
+(THREAD-UNAVAILABLE), at compile time.
+
+== SOURCE
+stdlib/thread.bot (import std::thread).
+
+== MEMBERS
+    std::thread::Doorbell          context trait -- A driver's ability to w...
+    std::thread::Entry             opaque struct -- A thread entry, by its ...
+    std::thread::Limit             type -- How many threads one Threads con...
+    std::thread::Port              opaque context struct -- This VM's port
+    std::thread::Started           struct -- What start makes
+    std::thread::Stats             struct -- The process's thread and trans...
+    std::thread::Status            enum -- A thread's lifecycle state (stat...
+    std::thread::Thread            opaque struct -- The join right of one t...
+    std::thread::ThreadFailed      error -- The thread's entry failed
+    std::thread::ThreadId          opaque struct -- The identity of one thread
+    std::thread::ThreadLimit       error -- No thread can start now
+    std::thread::ThreadStartFailed error -- A thread could not start
+    std::thread::Threads           opaque context struct -- The authority t...
+    std::thread::await_end         function (nomethod) -- Blocks this OS th...
+    std::thread::capacity          function -- How many more threads the pr...
+    std::thread::close_port        function -- Close this VM's port
+    std::thread::create            function -- The authority to start at mo...
+    std::thread::entry             intrinsic -- std::thread::entry(NAME): t...
+    std::thread::join              function (nomethod) -- THREAD's result
+    std::thread::port              function -- This VM's port, opened (its ...
+    std::thread::request_stop      function (nomethod) -- Ask THREAD to stop
+    std::thread::route             function (nomethod) -- Notifications of ...
+    std::thread::serve             function -- Serve this VM's port on its ...
+    std::thread::start             function (nomethod)
+    std::thread::start_sized       function (nomethod) -- Start a thread ru...
+    std::thread::stats             function -- The process's thread and tra...
+    std::thread::status            function (nomethod) -- THREAD's lifecycl...
+    std::thread::stop_requested?   function -- Whether this thread was aske...
+    std::thread::unroute           function (nomethod) -- No notification o...
+    std::thread::wait_end          function -- Waits, as an event-loop task...
+    std::thread::wait_stop         function -- Waits, as an event-loop task...
+
+Each member is a topic: -help NAME (e.g. -help std::thread::Doorbell).
 
 @topic stdlib.std::transfer::decode
 title: std::transfer::decode -- intrinsic of namespace std::transfer
@@ -17767,7 +18998,7 @@ std::tree::walk(root, order)`.
 
 @topic stdlib.module.std::tree
 title: std::tree -- standard namespace
-summary: Order and walk, the depth-first (preorder) and breadth-first traversal of tree struct values (TREE-STRUCT-MILESTONE-1.md).
+summary: Order and walk, the depth-first (preorder) and breadth-first traversal of tree struct values.
 index: stdlib
 symbol: std::tree
 
@@ -17848,14 +19079,13 @@ related: stdlib.module.std::web stdlib.std::web::emailish?
 stdlib/web.bot: import std::web, then write std::web::local_extra_chars.
 
 == DESCRIPTION
-local_extra_chars is the established immutable-set membership idiom
-(MINIMAL-IMMUTABLE-SET.md) for the local part's punctuation class ('.' '_'
-'%' '+' plus '-'), over UnicodeChars (char_at's own result type,
-UNICODECHAR-CLASSIFIERS.md) -- never UTF-8 bytes, unlike
+local_extra_chars is the established immutable-set membership idiom for the
+local part's punctuation class ('.' '_' '%' '+' plus '-'), over UnicodeChars
+(char_at's own result type) -- never UTF-8 bytes, unlike
 additional_unreserved_chars's std::byte::set below. Retained once at module
 scope, exactly like additional_unreserved_chars: constructed once at module
-initialization, never per emailish? call (R2A1-MODULE-FN-BRIDGE-
-REACHABILITY.md fixed the defect that once forced building this per call).
+initialization, never per emailish? call (a defect once forced building it
+per call).
 
 @topic stdlib.std::web::emailish?
 title: std::web::emailish? -- Function of module std::web
@@ -17940,7 +19170,7 @@ stdlib/web.bot: import std::web, then write std::web::UriQueryValue.
 
 @topic stdlib.std::web::uri_query_value?
 title: std::web::uri_query_value? -- Function of module std::web
-summary: uri_query_value?(value) decides whether VALUE is safe to embed as a URI query value, and when true proves it a UriQueryValue (REFINEMENT- VALUES.md)
+summary: uri_query_value?(value) decides whether VALUE is safe to embed as a URI query value, and when true proves it a UriQueryValue
 index: stdlib
 symbol: std::web::uri_query_value?
 related: stdlib.module.std::web
@@ -17954,14 +19184,14 @@ as a method, receiver.uri_query_value?(...).
 
 == DESCRIPTION
 uri_query_value?(value) decides whether VALUE is safe to embed as a URI
-query value, and when true proves it a UriQueryValue (REFINEMENT-
-VALUES.md): every UTF-8 byte is an RFC 3986 unreserved character
-(is_unreserved) or begins a percent-encoded triplet "%XX" of two uppercase
-hexadecimal digits -- exactly the alphabet uri_escape_text writes, so every
-string it produces passes. The refinement used to be "opaque": a value was a
-UriQueryValue only when a trusted native had attached runtime evidence to it
-(stdlib/web.tcl's uriEscape). Refinements carry no runtime evidence, so the
-proposition is now this structural check, owned and defined here.
+query value, and when true proves it a UriQueryValue: every UTF-8 byte is an
+RFC 3986 unreserved character (is_unreserved) or begins a percent-encoded
+triplet "%XX" of two uppercase hexadecimal digits -- exactly the alphabet
+uri_escape_text writes, so every string it produces passes. The refinement
+used to be "opaque": a value was a UriQueryValue only when a trusted native
+had attached runtime evidence to it (stdlib/web.tcl's uriEscape).
+Refinements carry no runtime evidence, so the proposition is now this
+structural check, owned and defined here.
 
 @topic stdlib.std::web::uri_escape_text
 title: std::web::uri_escape_text -- Function of module std::web
@@ -17993,42 +19223,39 @@ keywords: url encoding; percent encoding; uri escape; email validation; web
 related: concept.refinements stdlib.module.std::str
 
 == DESCRIPTION
-uri_escape_text is the executable percent-encoding algorithm NATIVE-URI-
-ESCAPE.md moved out of stdlib/web.tcl's uriEscape native -native-body (raw
-core IR, pasted into every call site) and into this ordinary cross-file
-Botlish module definition, so it is resolved and compiled once, like any
-other function, instead of copied. It is the same algorithm as the removed
-stdlib/web.tcl native's Tcl implementation: percent-encode every UTF-8 byte
-of s except the RFC 3986 unreserved characters (A-Za-z0-9._~-), as uppercase
-%XX. It reads s one character at a time with std::str::char_at
-(core/strings.tcl: str -> UnicodeChar, no allocation) and
-std::char::scalar_value, and writes a non-ASCII scalar's UTF-8 bytes from
-the scalar with bit arithmetic (esc_scalar), so it builds neither a
-one-character String per position nor a std::str::encode_utf8 List per
-character (ENCODE-UTF8-ALLOCATION-RESEARCH.md).
+uri_escape_text is the executable percent-encoding algorithm once moved out
+of the uriEscape native -native-body (raw core IR, pasted into every call
+site) and into this ordinary cross-file Botlish module definition, so it is
+resolved and compiled once, like any other function, instead of copied. It
+is the same algorithm as the removed stdlib/web.tcl native's Tcl
+implementation: percent-encode every UTF-8 byte of s except the RFC 3986
+unreserved characters (A-Za-z0-9._~-), as uppercase %XX. It reads s one
+character at a time with std::str::char_at (core/strings.tcl: str ->
+UnicodeChar, no allocation) and std::char::scalar_value, and writes a
+non-ASCII scalar's UTF-8 bytes from the scalar with bit arithmetic
+(esc_scalar), so it builds neither a one-character String per position nor a
+std::str::encode_utf8 List per character.
 
 high_nibble extracts the high half of a byte and normalizes it to a logical
 nibble via the Byte/Nibble/HighNibble scalar domains and typed bit
-arithmetic (core/scalarbits.tcl, stdlib/byte.bot; see
-BYTE-NIBBLE-BIT-ARITHMETIC.md): std::byte::high_nibble(b) is the position-
-preserving extraction (b & 0xF0), and std::byte::nibble(...) normalizes that
-to the logical 0..15 value hex_pair/hex_digits index with.
+arithmetic (core/scalarbits.tcl, stdlib/byte.bot): std::byte::high_nibble(b)
+is the position- preserving extraction (b & 0xF0), and
+std::byte::nibble(...) normalizes that to the logical 0..15 value
+hex_pair/hex_digits index with.
 
-is_unreserved (ASCII-AND-URI-UNRESERVED.md) is now the compositional form
-the earlier milestones' own comments already anticipated: ASCII letters or
-digits (std::ascii::is_alphanumeric, stdlib/ascii.bot -- structural fact,
-owned by the "std::ascii" namespace) OR membership in
-additional_unreserved_chars, the four-byte '-' '.' '_' '~' set RFC 3986
-additionally exempts from percent-encoding (URI *policy*, owned here, never
-folded into ascii::'s own structural classes). The set is built once, from
-std::byte::set(['-', '.', '_', '~']) (stdlib/byte.bot,
-BYTE-SET.md/MINIMAL-IMMUTABLE-SET.md's retained-module-value machinery), and
-reused by every is_unreserved call -- never reconstructed per call. This is
-now the clean, handler-free initializer STATIC-COMPLETION-PROOFS.md
-restores: the call-specific completion proof (hir/completions.tcl) proves
-every element of this literal list is statically in Byte's own domain, so
-std::byte::set's own declared AboveRange error is proven impossible for this
-exact call -- no handler, no placeholder fallback set, no `on` clause.
+is_unreserved is now the compositional form this module's earlier comments
+already anticipated: ASCII letters or digits (std::ascii::is_alphanumeric,
+stdlib/ascii.bot -- structural fact, owned by the "std::ascii" namespace) OR
+membership in additional_unreserved_chars, the four-byte '-' '.' '_' '~' set
+RFC 3986 additionally exempts from percent-encoding (URI *policy*, owned
+here, never folded into ascii::'s own structural classes). The set is built
+once, from std::byte::set(['-', '.', '_', '~']) (a retained module value),
+and reused by every is_unreserved call -- never reconstructed per call. This
+is a clean, handler-free initializer: the call-specific completion proof
+(hir/completions.tcl) proves every element of this literal list is
+statically in Byte's own domain, so std::byte::set's own declared AboveRange
+error is proven impossible for this exact call -- no handler, no placeholder
+fallback set, no `on` clause.
 
 is_unreserved's callers pass it an ASCII scalar value as a Byte with no
 conversion: std::char::scalar_value's result is nonnegative and each call is
@@ -18040,17 +19267,16 @@ esc_from/esc_scalar accumulate their result by repeated concat, the same
 recursive idiom examples/stdlib/string_reverse.bot's reverse_from and
 examples/stdlib/ai_text_clean.bot's clean_from already use.
 
-Emailish and UriQueryValue are this module's refinement types
-(REFINEMENT-VALUES.md): ordinary Botlish declarations, `refined type NAME =
-str`, each a new nominal type whose values are exactly Strings proven to
-satisfy its proposition, with the exact runtime representation of str (no
-wrapper, tag or allocation). This module is their owner: only its own
-functions may declare a proof of them (`proves`), and each has exactly one
-such function here, emailish? and uri_query_value?. Code anywhere may call
-them, pass a proven value where the refinement is required, and use a
-refined value wherever a str is expected; nothing outside this module can
-forge the proof. The compiler knows neither name: every fact it derives
-about them comes from these declarations.
+Emailish and UriQueryValue are this module's refinement types: ordinary
+Botlish declarations, `refined type NAME = str`, each a new nominal type
+whose values are exactly Strings proven to satisfy its proposition, with the
+exact runtime representation of str (no wrapper, tag or allocation). This
+module is their owner: only its own functions may declare a proof of them
+(`proves`), and each has exactly one such function here, emailish? and
+uri_query_value?. Code anywhere may call them, pass a proven value where the
+refinement is required, and use a refined value wherever a str is expected;
+nothing outside this module can forge the proof. The compiler knows neither
+name: every fact it derives about them comes from these declarations.
 
 == SOURCE
 stdlib/web.bot (import std::web).
@@ -18304,7 +19530,7 @@ overlapped structure).
 
 @topic stdlib.module.std::windows
 title: std::windows -- standard namespace
-summary: The Windows platform's low-level output operations, thin ordinary-Botlish wrappers over kernel32 (WINDOWS-X86-64-MILESTONE-2.md).
+summary: The Windows platform's low-level output operations, thin ordinary-Botlish wrappers over kernel32.
 index: stdlib
 symbol: std::windows
 
@@ -18320,9 +19546,9 @@ symbol: std::windows
 
 kernel32 is the boundary: the Windows system interface is its DLLs' exports,
 which this module calls through ordinary `extern c fn` declarations of their
-documented prototypes (C-FFI.md), linked through kernel32's import library
-(`extern c library "kernel32"`): no system call number, no C runtime
-function, and no compiler knowledge of I/O.
+documented prototypes, linked through kernel32's import library (`extern c
+library "kernel32"`): no system call number, no C runtime function, and no
+compiler knowledge of I/O.
 
 A HANDLE is an opaque pointer-sized value, `void *` -- a std::ffi::c::Ptr[
 std::ffi::c::Void] here, never an integer or a POSIX descriptor. A standard
@@ -18332,28 +19558,28 @@ no CloseHandle. GetStdHandle documents two results that are no usable
 handle: NULL when the process has no handle for the device (a process
 started without one), and INVALID_HANDLE_VALUE when the call itself failed.
 NULL is told apart (`null?`); INVALID_HANDLE_VALUE is a pointer value
-Botlish cannot compare with (a C pointer has no equality, C-ABI-TYPES.md),
-and is left to WriteFile, which refuses it with ERROR_INVALID_HANDLE (6),
-the error a WriteResult then carries.
+Botlish cannot compare with (a C pointer has no equality), and is left to
+WriteFile, which refuses it with ERROR_INVALID_HANDLE (6), the error a
+WriteResult then carries.
 
 Windows reports a failure as its API does: the call returns FALSE and the
 reason is the thread's last-error code (GetLastError), which a later call
 may change. write_file reads it right after WriteFile returns, before any
 other call: nothing runs between the two but the test of WriteFile's BOOL,
-and the byte count's write-back value is built only after it
-(C-FFI-ERROR-CAPTURE-MILESTONE-1.md); neither the allocator nor the
-collector makes a Win32 call that sets the code. A result never encodes the
-code in its count: it holds WriteFile's own success, the count it reported,
-and, separately, the code a failed call left (`last_error`) (0 when it
-succeeded: the code is never read after a success, where it means nothing).
+and the byte count's write-back value is built only after it; neither the
+allocator nor the collector makes a Win32 call that sets the code. A result
+never encodes the code in its count: it holds WriteFile's own success, the
+count it reported, and, separately, the code a failed call left
+(`last_error`) (0 when it succeeded: the code is never read after a success,
+where it means nothing).
 
-Byte storage reaches C only through the borrowing contract
-(C-POINTER-BORROWING.md): the buffer is `read noescape` (exposed as it is,
-no copy) and its count derived from the ONE value -- there is no count
-parameter; the DWORD WriteFile writes its count into is a 4-byte
-MutableBytes, `write noescape` (a private copy C writes, read back as a
-binary layout). A DWORD holds at most 4294967295, so a larger Bytes is asked
-for in part: a short write by construction, which the count says.
+Byte storage reaches C only through the borrowing contract: the buffer is
+`read noescape` (exposed as it is, no copy) and its count derived from the
+ONE value -- there is no count parameter; the DWORD WriteFile writes its
+count into is a 4-byte MutableBytes, `write noescape` (a private copy C
+writes, read back as a binary layout). A DWORD holds at most 4294967295, so
+a larger Bytes is asked for in part: a short write by construction, which
+the count says.
 
 Thin by design: ONE kernel32 call per operation, no loop, no retry, no
 console mode, code page or UTF-16 conversion (the bytes are written as they
@@ -18361,10 +19587,10 @@ are: WriteFile writes bytes to a console, a file or a pipe alike), no
 buffering, no overlapped I/O, no handle ownership. The standard streams as a
 context and the portable std::io::IO implementation are std::windows::io's.
 
-An ordinary module (DIRECT-MODULES.md): every C call here retains nothing --
-every pointer parameter is noescape -- so none is a direct edge. Any code
-may ask the process for its standard handles; a handle authorizes only the
-writes its device takes.
+An ordinary module: every C call here retains nothing -- every pointer
+parameter is noescape -- so none is a direct edge. Any code may ask the
+process for its standard handles; a handle authorizes only the writes its
+device takes.
 
 == SOURCE
 stdlib/windows.bot (import std::windows).
@@ -18939,7 +20165,7 @@ entries, NotADirectory when it is a file.
 
 @topic stdlib.module.std::windows::fs
 title: std::windows::fs -- standard namespace
-summary: Windows' native paths and its synchronous filesystem, through the wide Win32 functions of kernel32 (WINDOWS-X86-64-MILESTONE-7.md).
+summary: Windows' native paths and its synchronous filesystem, through the wide Win32 functions of kernel32.
 index: stdlib
 symbol: std::windows::fs
 
@@ -18977,13 +20203,12 @@ one file, W4), Win32 rewrites some (below), and nothing here asks the
 filesystem.
 
 A NativePath holds its units as their UTF-16LE bytes, two per unit, low byte
-first (UTF16-BYTE-STORAGE-MILESTONE-1.md): exactly what a wide function
-reads, without the terminator. Text and native paths convert by
-std::abi::bytes's UTF-16LE codec -- encode_utf16le (total), decode_utf16le
-(strict: an unpaired surrogate is NotText) -- one runtime operation each, on
-contiguous storage; a Win32 call's LPCWSTR is the bytes and one NUL unit
-joined for that call (`wide`), the NUL never part of the path; and the path
-syntax below reads the units, unvalidated, through
+first: exactly what a wide function reads, without the terminator. Text and
+native paths convert by std::abi::bytes's UTF-16LE codec -- encode_utf16le
+(total), decode_utf16le (strict: an unpaired surrogate is NotText) -- one
+runtime operation each, on contiguous storage; a Win32 call's LPCWSTR is the
+bytes and one NUL unit joined for that call (`wide`), the NUL never part of
+the path; and the path syntax below reads the units, unvalidated, through
 std::abi::bytes::utf16le_units (internal to the standard library). The units
 a path holds are exactly the units it was made of, an unpaired surrogate
 included: the bytes are a representation, never a decoding.
@@ -19020,12 +20245,11 @@ Authority and ownership.
 WindowsFS is the filesystem context: the authority to open names, create and
 remove entries and list directories, relative to the process's current
 directories. The Win32 functions are declared here privately: a Win32 call
-whose pointer parameters are all noescape is no direct edge
-(DIRECT-MODULES.md, "Foreign is not direct"), so the context is this
-module's design, not the direct-module analysis's: every public function
-that names a path requires WindowsFS, and no public function takes a raw
-handle. (A module that declares kernel32's CreateFileW itself has the
-authority any C declaration has: the report, "Contexts".)
+whose pointer parameters are all noescape is no direct edge, so the context
+is this module's design, not the direct-module analysis's: every public
+function that names a path requires WindowsFS, and no public function takes
+a raw handle. (A module that declares kernel32's CreateFileW itself has the
+authority any C declaration has.)
 
 A File is an opened file: an opaque struct of its HANDLE, a C pointer, and
 so AFFINE -- one owner, moved by use, never copied (USE-AFTER-MOVE), gone
@@ -19268,7 +20492,7 @@ All of TEXT, UTF-8 encoded, on the context's standard error.
 
 @topic stdlib.module.std::windows::io
 title: std::windows::io -- standard namespace
-summary: The process's standard output and error on Windows as one execution-environment context (CONTEXTS.md.
+summary: The process's standard output and error on Windows as one execution-environment context.
 index: stdlib
 symbol: std::windows::io
 
@@ -19289,25 +20513,23 @@ std::windows::io::create()` is MISSING-CONTEXT at compile time.
 What the context holds is the process's standard *devices* -- its output and
 its error -- never a handle: a Windows standard handle is the process's
 slot, read with GetStdHandle when a write needs it (windows::
-standard_handle): a context may own a C pointer (CONTEXT-OWNED-AFFINE-
-STATE-MILESTONE-1.md), but a cached standard handle would outlive the
-process replacing it (SetStdHandle). So every write uses the handle the
-process has at that moment -- a console, a file or a pipe, whatever the
-launcher redirected it to -- and the context owns nothing: no handle is
-opened, duplicated or closed here.
+standard_handle): a context may own a C pointer, but a cached standard
+handle would outlive the process replacing it (SetStdHandle). So every write
+uses the handle the process has at that moment -- a console, a file or a
+pipe, whatever the launcher redirected it to -- and the context owns
+nothing: no handle is opened, duplicated or closed here.
 
-Representation authority. WindowsIO is opaque (OPAQUE-STRUCTS.md): only this
-module may construct it or look inside; a WindowsIO a function receives as
-its context can be held and passed but not taken apart.
+Representation authority. WindowsIO is opaque: only this module may
+construct it or look inside; a WindowsIO a function receives as its context
+can be held and passed but not taken apart.
 
-WindowsIO implements the portable std::io::IO context trait
-(CONTEXT-TRAITS.md) with write_text and write_error_text below: ordinary
-functions of this module whose one context parameter is a WindowsIO and
-whose signatures match std::io::IO's requirements. Nothing registers them:
-where a call needs std::io::IO and WindowsIO is the one installed context
-that implements it, the compiler binds `io.write_text(...)` to a direct call
-of std::windows::io:: write_text -- no dispatch, no hidden argument, no
-provider table at run time.
+WindowsIO implements the portable std::io::IO context trait with write_text
+and write_error_text below: ordinary functions of this module whose one
+context parameter is a WindowsIO and whose signatures match std::io::IO's
+requirements. Nothing registers them: where a call needs std::io::IO and
+WindowsIO is the one installed context that implements it, the compiler
+binds `io.write_text(...)` to a direct call of std::windows::io:: write_text
+-- no dispatch, no hidden argument, no provider table at run time.
 
 The completion policy is LinuxIO's and DarwinIO's, so std::io::IO means the
 same on every platform: all of the text, or std::io::WriteFailed. A short
@@ -19317,8 +20539,7 @@ device the process has no handle for (GetStdHandle's NULL) are
 std::io::WriteFailed; no count, handle or error code escapes. The text is
 written as its UTF-8 bytes, exactly: no UTF-16 conversion, no console code
 page applied, no newline translation (a redirected output receives the
-bytes; a console shows them through its output code page, which
-WINDOWS-X86-64-MILESTONE-2.md's "Text and encoding" describes).
+bytes; a console shows them through its output code page).
 
 Not here (deliberately): input, files, the error code beyond
 std::io::WriteFailed (the raw std::windows::write_file and
@@ -19372,10 +20593,10 @@ std::windows::path::nul_free? or, as a method, receiver.nul_free?(...).
 == DESCRIPTION
 true when no character of VALUE is U+0000: when no byte of its UTF-8
 encoding is 0 (U+0000 is the one character whose encoding holds one). One
-pass over the bytes (UTF16-BYTE-STORAGE-MILESTONE-1.md, "Performance"): a
-loop over std::str::char_at locates every non-ASCII character from the start
-of the String again, so it was quadratic in the path's length -- 9.0 ms for
-4096 mixed characters -- where this is linear (36 us).
+pass over the bytes: a loop over std::str::char_at locates every non-ASCII
+character from the start of the String again, so it was quadratic in the
+path's length -- 9.0 ms for 4096 mixed characters -- where this is linear
+(36 us).
 
 @topic stdlib.std::windows::path::valid?
 title: std::windows::path::valid? -- Function of module std::windows::path
@@ -19613,7 +20834,7 @@ Removes the empty directory PATH.
 
 @topic stdlib.module.std::windows::path
 title: std::windows::path -- standard namespace
-summary: Textual Windows paths (CONTEXT-TRAITS.md, "Paths".
+summary: Textual Windows paths.
 index: stdlib
 symbol: std::windows::path
 
@@ -19628,11 +20849,11 @@ symbol: std::windows::path
                                             (std::windows::fs::PathKind)
   std::windows::path::native(path)          its std::windows::fs::NativePath
 
-WindowsPath is a refinement of str (REFINEMENT-VALUES.md): a value proven to
-be a non-empty String without U+0000 -- text that may be handed to a wide
-Win32 function once it is encoded as UTF-16 and given its terminating NUL
-(std::windows::fs does that, for the one call). It is the same String, with
-the String's representation. It is std::linux::path::LinuxPath's and
+WindowsPath is a refinement of str: a value proven to be a non-empty String
+without U+0000 -- text that may be handed to a wide Win32 function once it
+is encoded as UTF-16 and given its terminating NUL (std::windows::fs does
+that, for the one call). It is the same String, with the String's
+representation. It is std::linux::path::LinuxPath's and
 std::darwin::path::DarwinPath's sibling, not a shared type: a Windows path
 is not a Unix path with backslashes, and nothing converts one into another.
 
