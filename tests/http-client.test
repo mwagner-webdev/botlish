@@ -375,14 +375,14 @@ test http-abandon-control {the negative control: with releases leaving their tas
     lindex [httpRun fault 128 abandon [httpPlainUrl "/stream?n=100&size=1000&delay=10"] "" [httpPlainUrl /conns]] 2
 } -result {after abandon: exchanges 0 idle 0 http2 0 tasks 2}
 
-test http-stale-handle {a released exchange whose native slot another exchange took: its reads are Released, never the other exchange's body (the handle's generation), on both protocols} -constraints {httpBuilt httpPeer} -body {
+test http-stale-handle {a released exchange whose native slot another, live exchange took: its reads are Released, never the other exchange's (the handle's generation), on both protocols} -constraints {httpBuilt httpPeer} -body {
     list [httpRun stale [httpTlsUrl "/stream?n=50&size=1000&delay=10"] [httpCa] [httpTlsUrl /hello]] \
         [httpRun stale [httpPlainUrl "/stream?n=50&size=1000&delay=10"] "" [httpPlainUrl /hello]]
-} -result [lrepeat 2 [list {first chunk 1000} {stale read: <released>} "fresh read: hello\n" {final: clients 0 exchanges 0 panics 0}]]
+} -result [lrepeat 2 [list {first chunk 1000} "fresh read: hello\n" {stale read: <released>} {final: clients 0 exchanges 0 panics 0}]]
 
-test http-stale-handle-control {the negative control: with an index-only handle lookup (fault 256) the released exchange's read reaches the exchange that reused its slot} -constraints {httpBuilt httpPeer} -body {
-    lindex [httpRun fault 256 stale [httpTlsUrl "/stream?n=50&size=1000&delay=10"] [httpCa] [httpTlsUrl /hello]] 1
-} -result "stale read: hello\n"
+test http-stale-handle-control {the negative control: with an index-only handle lookup (fault 256) the released exchange's read reaches the exchange that reused its slot, and finds its end (that exchange was read to its end first: a stale read that found it waiting would wait on its own handle, which no notice names, and never return)} -constraints {httpBuilt httpPeer} -body {
+    lindex [httpRun fault 256 stale [httpTlsUrl "/stream?n=50&size=1000&delay=10"] [httpCa] [httpTlsUrl /hello]] 2
+} -result "stale read: "
 
 test http-header-validation {request header validation in both layers: http::header refuses a control character, a trailing space, a name that is no token and a connection-specific name where the program builds the header; a Header built by hand is refused natively when sent (a CR LF value, a framing header), and obs-text bytes pass} -constraints {httpBuilt httpPeer} -body {
     httpRun headers [httpTlsUrl /echo] [httpCa] [httpPlainUrl /echo]

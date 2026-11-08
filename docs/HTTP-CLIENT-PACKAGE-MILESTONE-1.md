@@ -876,3 +876,22 @@ room publishes it. `http` 0.1.0 stays recorded: a release is never removed.
 **The clean room** (section 9) with the single-file compiler of 13c7a4d and
 these artifacts: 52 of 52 checks.
 
+**A negative control that could hang.** On the tree merged with main's
+external tools (580336b1), `http-stale-handle-control` hung once: its
+client waited for good in the event loop's wait. The control (fault 256,
+an index-only handle lookup) reads the released exchange's handle after
+another exchange took its slot; the read reaches that exchange, and when
+its body had not arrived yet (it comes after the response head, rarely in
+a later read of the socket) the read waits -- on the released handle,
+which no notice names (notices name the live exchange's handle, and the
+module wakes only waiters of the very handle a notice names). Nothing can
+wake it. Without the fault the read is refused at once (`Released`) and
+never waits, so released code has no such wait; the hang was the
+control's. The scenario now reads the live exchange to its end first and
+then tries the stale read: unfaulted it is `Released`, as before; the
+control's reaches the live exchange's end (an empty read, returned at
+once). Both tests changed with it (`http-stale-handle` expects the fresh
+read before the stale one; its control the empty stale read), and
+`slab-index-only` is killed by the new expectation. The package is
+unchanged.
+

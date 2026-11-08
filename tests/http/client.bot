@@ -440,8 +440,11 @@ fn abandon(args: List[str], context h: http::Http, ev: std::event_loop::Loop, na
 
 # A released exchange's identity after another exchange took its native
 # slot: args url pem url2. Its reads must be Released, never the other
-# exchange's body (the handles' generation check; fault 256 is the
-# index-only control).
+# exchange's (the handles' generation check; fault 256 is the index-only
+# control). The other exchange is read to its end first, so a stale read
+# that reaches it (the control) finds its end and returns at once: one
+# that found it waiting for data would wait on its own handle, which no
+# notice names, for ever.
 fn stale(args: List[str], context h: http::Http, ev: std::event_loop::Loop, nat: event_loop_linux::Native, o: Out) errors http::InvalidUri, http::InvalidRequest, http::ResolveFailed, http::ConnectFailed, http::TlsVerifyFailed, http::TlsHandshakeFailed, http::ProtocolError, http::Timeout, http::Cancelled, http::Closed, http::Unsupported, http::TrustFailed, http::Released, http::Fault, http::BodyTooLarge, std::event_loop::SchedulerFault:
     {owner, client} = http::client(config_for(arg(args, 2)))
     {owner: xa, response: a} = client.send(http::get(http::uri(arg(args, 1))))
@@ -449,12 +452,12 @@ fn stale(args: List[str], context h: http::Http, ev: std::event_loop::Loop, nat:
     say("first chunk ".concat(n(size(first))))
     http::close(xa)
     {owner: xb, response: b} = client.send(http::get(http::uri(arg(args, 3))))
+    fresh = b.exchange.read_all(1048576)
+    say("fresh read: ".concat(text_of(fresh)))
     old = a.exchange.read():
         on http::Released:
             utf8("<released>")
     say("stale read: ".concat(text_of(old)))
-    fresh = b.exchange.read_all(1048576)
-    say("fresh read: ".concat(text_of(fresh)))
 
 # Request header validation, in both layers: the constructors (http::header)
 # refuse a bad name or value where the program builds it; a Header the
