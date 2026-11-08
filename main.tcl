@@ -30,6 +30,11 @@
 #   -code -hir -ast -aot -aot-data -aot-spec -contexts -direct -traits
 #   -emit-nir -emit-clif   inspection output, before the program runs
 #   -emit-native-executable / -emit-hir-interchange    build, do not run
+#   -emit-c ?-out DIR?     write each input as freestanding C11
+#                          (C-COMPILE-FREESTANDING-MILESTONE-1.md): FILE.c,
+#                          FILE.h, FILE_display.c, FILE.runtime.json and,
+#                          when it calls runtime services, botlish_rt_v1.h,
+#                          beside the input or in DIR; build, do not run
 #   -native-startup POLICY the executable's startup policy: worker (default)
 #                          or main-thread (macOS AArch64)
 #   -emit-native-library NAME ?-export FUNCTION...? ?-out DIR?    build the
@@ -145,6 +150,17 @@
 # same under both. It is an option of -emit-native-executable only (no
 # other invocation makes an executable); given twice, it must name the same
 # policy.
+# -emit-c writes each .bot, .hir or .hirx input as freestanding C11 (the C
+# backend, ccompile/ccompile.tcl; C-COMPILE-FREESTANDING-MILESTONE-1.md),
+# beside the input or in -out DIR, without evaluating it and without running
+# a C compiler: FILE.h (the program's types and its entry point FILE_run),
+# FILE.c (the program), FILE_display.c (optional: the value as text),
+# FILE.runtime.json (the runtime services the generated C calls, which a
+# provider must supply for it to link) and, when it calls any,
+# botlish_rt_v1.h (the runtime-service interface). FILE is the input's name
+# as a C identifier, which prefixes every public C name. A construct the
+# backend does not translate yet is the error C UNSUPPORTED; a missing
+# runtime service is never a compilation error, only a link error.
 # -emit-hir-interchange writes each .bot or .hir input's analyzed HIR in the
 # HIR interchange format (HIR-INTERCHANGE.md) beside it, as FILE.hirx, without
 # evaluating it; a .hirx input is run like any other, on any backend, with no
@@ -261,7 +277,8 @@ set cliOptions {
     -emit-hir-interchange {} build {write each input's analyzed HIR as FILE.hirx}
     -emit-native-library NAME build {build native library NAME from the one input}
     -export FUNCTION build {export a top-level function (default: exported c fns)}
-    -out DIR build {the library's directory (default: the input's)}
+    -out DIR build {where -emit-native-library and -emit-c write}
+    -emit-c {} build {write each input as freestanding C (FILE.c, FILE.h, ...)}
     -check {} check {report each .bot input's diagnostics; run nothing}
     -lsp {} lsp {run the language server on stdin and stdout}
     -lsp-scheduler NAME lsp {where -lsp analyzes: worker (default) or sync}
@@ -941,6 +958,42 @@ proc emitLibrary {path name exports dir} {
     return 0
 }
 
+# Writes the .bot, .hir or .hirx file PATH as freestanding C into DIR
+# (beside PATH when DIR is ""): the C backend (ccompile::program).
+proc emitC {path dir} {
+    global warnings target hintsShown root
+    set hintsShown {}
+    if {[catch {
+        switch -- [file extension $path] {
+            .bot {
+                set hir [surface::readProgramFile $path -warnings $warnings -target $target]
+                warningHints [lmap w [hir::warnings::of $hir] {dict get $w code}]
+            }
+            .hir { set hir [hir::readFile $path] }
+            .hirx { set hir [hir::interchange::readFile $path -target [hir::cabi::ResolveTarget $target]] }
+            default { throw {C INPUT} "expected a .bot, .hir or .hirx input file (C is generated from HIR, never from core IR text): $path" }
+        }
+        if {[info commands ::ccompile::program] eq ""} {
+            source [file join $root ccompile ccompile.tcl]
+        }
+        set name [ccompile::PrefixOf $path]
+        set out [ccompile::program $hir -prefix $name -source [file tail $path]]
+        if {$dir eq ""} {
+            set dir [file dirname $path]
+        }
+        set written [ccompile::write $out $dir]
+    } message options]} {
+        printError stderr "$path: " $message $options
+        return 1
+    }
+    foreach file $written {
+        puts "c: $file"
+    }
+    set services [lsort -unique [concat [dict get $out services] [dict get $out display]]]
+    puts "runtime services: [expr {$services eq "" ? "none" : [join $services {, }]}]"
+    return 0
+}
+
 proc emitExecutable {path} {
     global warnings target hintsShown
     set hintsShown {}
@@ -1048,6 +1101,7 @@ foreach option [dict get $commandLine options] {
         -emit-clif { set showNative clif }
         -emit-native-executable { set showNative executable }
         -emit-hir-interchange { set showNative interchange }
+        -emit-c { set showNative c }
         -emit-native-library {
             if {![regexp {^[A-Za-z_][A-Za-z0-9_]*$} $value]} {
                 usageError "-emit-native-library needs the library's name, a C identifier (it prefixes every public C name: NAME_create), found \"$value\""
@@ -1101,8 +1155,11 @@ foreach option [dict get $commandLine options] {
         }
     }
 }
-if {$showNative ne "library" && ($libraryExports ne "" || $libraryDir ne "")} {
-    usageError "-export and -out are options of -emit-native-library"
+if {$showNative ne "library" && $libraryExports ne ""} {
+    usageError "-export is an option of -emit-native-library"
+}
+if {$showNative ni {library c} && $libraryDir ne ""} {
+    usageError "-out is an option of -emit-native-library and -emit-c"
 }
 if {$nativeStartup ne "" && $showNative ne "executable"} {
     # The policy is fixed into an executable when it is built: no other
@@ -1137,6 +1194,8 @@ foreach path $files {
         incr failures [emitLibrary $path $libraryName $libraryExports $libraryDir]
     } elseif {$showNative eq "interchange"} {
         incr failures [emitInterchange $path]
+    } elseif {$showNative eq "c"} {
+        incr failures [emitC $path $libraryDir]
     } else {
         incr failures [runFile $path $showCode $showHir $showAst $showAot $showNative]
     }

@@ -664,7 +664,8 @@ proc cpt::Generate {} {
 #   * the module loader's kinds: `Error KIND` in surface/modules.tcl
 #   * the parser's coded syntax errors: `FailCode SPAN KIND`
 #   * run-time kinds: core::semanticError KIND in core/, compiler/, native/
-#   * every other literal error code a `throw` raises there
+#   * every other literal error code a `throw` raises there (and in
+#     ccompile/, the C backend)
 #   * the registered warnings (hir::warnings::passes)
 proc cpt::Inventory {} {
     variable root
@@ -706,7 +707,8 @@ proc cpt::Inventory {} {
     }
     lappend inventory [list "SURFACE SYNTAX" exact surface/parser.tcl]
     set runtimeFiles [concat [glob [file join $root core *.tcl]] [glob [file join $root compiler *.tcl]] \
-        [glob [file join $root native *.tcl]] [glob [file join $root hir *.tcl]] [glob [file join $root surface *.tcl]]]
+        [glob [file join $root native *.tcl]] [glob [file join $root hir *.tcl]] [glob [file join $root surface *.tcl]] \
+        [glob [file join $root ccompile *.tcl]]]
     set kinds [dict create]
     set codes [dict create]
     foreach path [lsort $runtimeFiles] {

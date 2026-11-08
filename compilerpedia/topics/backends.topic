@@ -313,6 +313,61 @@ stack still ends the process. No callbacks, no Lists, structs or other
 values at the boundary, no asynchronous calls; macOS and Windows libraries
 are not made yet.
 
+@topic backend.c
+title: -emit-c: the program as freestanding C
+summary: -emit-c writes a program as freestanding C11 for a target's own C toolchain; what C cannot implement (big Int arithmetic) becomes runtime-service calls a provider links in.
+index: backends
+alias: c backend; emit c; generate c; c code; freestanding c; embedded; microcontroller; c compile; runtime services; botlish_rt_v1
+keywords: -emit-c, C11, freestanding, runtime service, provider, botlish_rt_v1.h, runtime.json, int64_t, link error, embedded
+related: backend.overview backend.native-library cli.options error.c-unsupported error.c-runtime-limit concept.integers
+
+== WHAT IT IS
+`-emit-c FILE.bot` (or a .hir or .hirx file) writes, beside the input or in
+`-out DIR`, and without running any C compiler:
+    FILE.h              the program's types and its interface:
+                        FILE_run(&value), FILE_status_code(status),
+                        FILE_status_message(status), FILE_show(...)
+    FILE.c              the program: one C function per specialized
+                        function instance, no allocation, no I/O, no main
+    FILE_display.c      optional: the program's value as text, the way
+                        a run prints it
+    FILE.runtime.json   the runtime services the generated C calls
+    botlish_rt_v1.h     the runtime-service interface (only when needed)
+FILE is the input's name as a C identifier; it prefixes every public name,
+so several programs link into one image. The C needs only stdint.h,
+stdbool.h and stddef.h: compile it with the target's compiler (-std=c11
+-ffreestanding works), call FILE_run from the target's startup code.
+
+== INTEGERS
+An Int whose range the compiler proves fits int64_t is an int64_t, and its
++ - * < == mod run as C arithmetic that cannot overflow. Any other Int is a
+botlish_rt_v1_int: the value inline while it fits int64_t, with portable
+overflow checks, and a call of a runtime service (botlish_rt_v1_int_mul,
+...) only when a result does not fit. A program that needs such a service
+still compiles; it links only where a provider supplies the service, and
+the linker names the missing symbol. Declaring integer domains (`type
+Small = Int in 0..1000`) is how a program keeps its Ints in int64_t.
+
+== WHAT IT COMPILES (milestone 1)
+Functions, direct calls and self tail calls (loops), Int, Bool, unit,
+enums, named and anonymous structs, a List literal as a value, if/elif,
+bare loops, counted loops and folds, break, continue, return, declared
+errors with fail and handlers, the run-time errors of mod and the shifts.
+Anything else -- Strings, Lists of unknown length, closures, function
+values, Float64, contexts, coroutines, C calls, error payloads -- is
+rejected at compile time with C UNSUPPORTED (error.c-unsupported), never
+compiled approximately.
+
+== THINGS TO KNOW
+  * The C toolchain itself may call memcpy, memset, memmove and memcmp
+    (GCC and Clang require them of a freestanding environment), and on a
+    32-bit target a 64-bit % may call a library routine: the target's, not
+    Botlish's, obligations.
+  * FILE.runtime.json lists every service the generated C names; an
+    optimizing C compiler may prove a call unreachable and need fewer.
+  * FILE_run is not reentrant when functions read top-level values (those
+    are file-scope objects).
+
 @topic backend.single-executable
 title: The single-file compiler
 summary: The packed `botlish` executable is this compiler, its command line, the standard library, Compilerpedia and both native executables in one Linux x86-64 file that needs only glibc.
@@ -661,8 +716,8 @@ title: Every command-line option
 summary: The options of botlish (tclsh9.0 main.tcl): backend and warning selection, program arguments, building, checking, the language server, inspection output, and the reference.
 index: backends
 alias: options; flags of the command line; command-line options
-keywords: -backend, -warnings, -target, -L, -F, -runtime-path, -argv, -argv-hex, -argv-none, -emit-native-executable, -native-startup, -emit-hir-interchange, -emit-native-library, -export, -out, -check, -lsp, -lsp-scheduler, -lsp-worker, -code, -hir, -ast, -aot, -aot-data, -aot-spec, -contexts, -direct, -traits, -emit-nir, -emit-clif, -help, -version
-related: cli.usage cli.output cli.exit-status cli.lsp lint.policy backend.targets backend.hir-interchange backend.native-executable backend.native-startup backend.native-library concept.argv
+keywords: -backend, -warnings, -target, -L, -F, -runtime-path, -argv, -argv-hex, -argv-none, -emit-native-executable, -native-startup, -emit-hir-interchange, -emit-native-library, -export, -out, -emit-c, -check, -lsp, -lsp-scheduler, -lsp-worker, -code, -hir, -ast, -aot, -aot-data, -aot-spec, -contexts, -direct, -traits, -emit-nir, -emit-clif, -help, -version
+related: cli.usage cli.output cli.exit-status cli.lsp lint.policy backend.targets backend.hir-interchange backend.native-executable backend.native-startup backend.native-library backend.c concept.argv
 
 == RUNNING
     -backend NAME     interp (default), compile, cranelift,
@@ -717,8 +772,13 @@ own process arguments.
     -export FUNCTION          export the entry program's top-level FUNCTION
                               (repeatable; without it the library exports
                               the program's `exported c fn`s)
-    -out DIR                  where -emit-native-library writes (default:
-                              the input's directory)
+    -out DIR                  where -emit-native-library or -emit-c writes
+                              (default: the input's directory)
+    -emit-c                   each input as freestanding C11: FILE.c,
+                              FILE.h, FILE_display.c, FILE.runtime.json
+                              (the runtime services it needs) and, when
+                              it needs one, botlish_rt_v1.h; no C compiler
+                              runs (backend.c)
 
 == CHECKING (nothing runs, nothing is built or written)
     -check            analyze each .bot input and report what compiling it
