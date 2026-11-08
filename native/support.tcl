@@ -2,12 +2,21 @@
 # (EXTERNAL-COMPILER-TOOLS-AND-TARGET-PACKAGES-MILESTONE-1.md, "Target
 # support packages").
 #
-#   native::support::select ROOT TARGET NAME
+#   native::support::select ROOT TARGET NAME ?ARTIFACT?
 #       the target support package NAME of the application whose root is
 #       ROOT (the directory of its entry file), for the compilation target
-#       TARGET, checked: a dict {package NAME directory DIR descriptor PATH
-#       target T triple TRIPLE archive PATH abi HEX libraries {-l...}}, or
-#       a {NATIVE TARGET-SUPPORT KIND} error before anything is linked
+#       TARGET and the artifact kind ARTIFACT (native-executable, the
+#       default, or native-library), checked: a dict {package NAME directory
+#       DIR descriptor PATH target T triple TRIPLE archive PATH abi HEX
+#       libraries {-l...} schema 1|2 artifact KIND} (schema 2 adds platform
+#       {MEMBER VERSION}, toolchain DECLARATION and relocation), or a
+#       {NATIVE TARGET-SUPPORT KIND} error before anything is linked
+#   native::support::toolchain SUPPORT
+#       the schema 2 package SUPPORT's declared toolchain found on this host
+#       (ANDROID-AARCH64-TARGET-SUPPORT-MILESTONE-1.md): {name root revision
+#       cc ld objcopy ar platformLibraries api}, or {NATIVE LIBRARY
+#       TOOLCHAIN} (the host's toolchain is missing or too old) or {NATIVE
+#       TARGET-SUPPORT API} (it has no libraries of the package's API level)
 #   native::support::identity PATH
 #       the identity record of the runtime archive PATH: {triple T abi HEX},
 #       or "" when it holds none
@@ -58,7 +67,38 @@
 #   ABI             the descriptor's or the archive's runtime ABI
 #                   fingerprint is not this driver's
 #   LIBRARIES       the system libraries it states are not the ones the
-#                   system linker links for the target
+#                   system linker links for the target (for another target
+#                   than the host's, `targetLibraries`)
+#   ARTIFACT        it does not supply the artifact kind being built
+#   PIC             (schema 2) its runtime archive is not stated
+#                   position-independent ("relocation": "pic")
+#   API             (schema 2) the platform version it states is below
+#                   this compiler's runtime's floor for the target
+#
+# Schema 2 (ANDROID-AARCH64-TARGET-SUPPORT-MILESTONE-1.md; BOTLISH-TOOLS.md,
+# section 9) is how a native library of another target than the host's is
+# linked -- android-aarch64's from Linux x86-64:
+#
+#   {"schema": 2, "kind": "botlish-target-support",
+#    "target": "android-aarch64", "triple": "aarch64-linux-android",
+#    "artifacts": ["native-library"],
+#    "platform": {"minimumApi": 21},
+#    "runtime": {"archive": "runtime/libbotlish_runtime.a",
+#                "abi": "FINGERPRINT", "relocation": "pic"},
+#    "systemLibraries": ["-ldl", "-llog", "-lunwind", "-ldl", "-lm", "-lc"],
+#    "toolchain": {"name": "Android NDK", "root": "ANDROID_NDK_ROOT",
+#                  "revision": {"file": "source.properties",
+#                               "key": "Pkg.Revision", "minimum": "28.0"},
+#                  "hosts": {"linux-x86_64": "toolchains/llvm/prebuilt/linux-x86_64"},
+#                  "tools": {"cc": "bin/clang", "ld": "bin/ld.lld",
+#                            "objcopy": "bin/llvm-objcopy", "ar": "bin/llvm-ar"},
+#                  "platformLibraries": "sysroot/usr/lib/aarch64-linux-android/{api}"}}
+#
+# The toolchain is data: where it is (an environment variable: nothing is
+# searched), its minimum revision and its tools' relative paths. The
+# compiler composes every argument itself (native::library's
+# LinkWithToolchain): a descriptor adds no flag, and its system libraries
+# are compared with the target's, never added.
 #
 # The driver checks the archive's object format and architecture again when
 # it links (codegen/aot.rs's runtime_archive), and the executable's startup
@@ -499,8 +539,10 @@ proc native::support::CompareVersions {a b} {
     set bs [split $b .]
     set n [expr {max([llength $as], [llength $bs])}]
     for {set i 0} {$i < $n} {incr i} {
-        set x [expr {[lindex $as $i] eq "" ? 0 : [scan [lindex $as $i] %d]}]
-        set y [expr {[lindex $bs $i] eq "" ? 0 : [scan [lindex $bs $i] %d]}]
+        set x 0
+        set y 0
+        scan [lindex $as $i] %d x
+        scan [lindex $bs $i] %d y
         if {$x != $y} {
             return [expr {$x < $y ? -1 : 1}]
         }

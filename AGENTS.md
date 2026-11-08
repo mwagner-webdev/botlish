@@ -2228,6 +2228,70 @@ Compilerpedia topics that state these rules true (`backend.targets`,
 the macOS row in every macOS smoke job (`tests/platform/cabi-facts.tcl`),
 and `tests/platform/native-status.tcl` the native target boundary.
 
+## Android AArch64 (android-aarch64) and emitting for another target
+
+android-aarch64 is a target of its own (ANDROID-AARCH64-TARGET-SUPPORT-
+MILESTONE-1.md): Android on AArch64, Bionic's C library, the NDK's
+`aarch64-linux-android` -- never linux-aarch64, whose instruction set, data
+model and plain char it shares and whose C library, loader, system
+libraries and runtime archive it does not. Its one artifact is a native
+library, made on a Linux x86-64 host with the NDK and its target support
+package. Keep it so:
+
+* Emitting is not running: the driver emits machine code for another
+  target only as a native library's object (`library --target TRIPLE`,
+  `codegen::target::check_emit`): the program built for that target or for
+  none, Cranelift's backend for its instruction set (the driver is built
+  with `x86` and `arm64`), and the target's runtime with exactly the
+  capabilities this driver's code generation reads from its own runtime
+  (`runtime_capabilities` against `host_runtime`: frame roots, the stack
+  guard, stack switching). Never run or JIT code of another target, never
+  accept --target on another command, never emit for a target whose runtime
+  the table does not state, and never let a host-only constant decide a
+  target's code without that check.
+* The runtime is Botlish's one runtime built for aarch64-linux-android
+  (`tools/package.sh`): Android AArch64 joins Linux AArch64's platform layer,
+  coroutine switch and frame walk where Bionic gives the same contract
+  (pthread_getattr_np, POSIX signals, MAP_STACK); the Linux syscall
+  transports stay Linux's. Never touch x18 (Android's shadow call stack),
+  never assume a 4 KiB page, and never make a 2048-only runtime.
+* A library of another target than the host's is linked with its target
+  support package's runtime (schema 2: `artifacts`, `platform.minimumApi`,
+  `runtime.relocation`, `toolchain`; native/support.tcl), never with the
+  driver's own archive, by the toolchain the package declares as data (the
+  NDK found through ANDROID_NDK_ROOT: nothing is searched). The compiler
+  composes every argument (`LinkWithToolchain`: `--target=TRIPLE` + the
+  minimum API, `-z defs`, `-z text`, 16 KiB segment alignment); a
+  descriptor adds no flag, and its system libraries must equal the target's
+  (`targetLibraries`). A missing toolchain is {NATIVE LIBRARY TOOLCHAIN},
+  never a target support refusal.
+* The shared object is checked from its bytes before it is reported
+  (`ValidateShared`, native/elf.tcl): machine, type, alignment, no text
+  relocation, no glibc symbol version, only the stated system libraries,
+  exactly the public functions. A failed link leaves no earlier build's file
+  under the new names. The manifest names the target and the package.
+* No Android application knowledge in the compiler: no Activity, JNI
+  generation, Gradle, APK, React Native, UI or event loop. The Android host
+  under audit/android-aarch64-target/host is test infrastructure.
+
+If you change any of that (codegen/target.rs's emission rules, codegen's
+`isa_for_target`, codegen/library.rs's `supports`, the driver's --target,
+native/library.tcl's toolchain link or `ValidateShared`, native/elf.tcl,
+native/support.tcl's schema 2, the android row of core/cabi.tcl or
+pm/target.tcl, the Android cfgs of the runtime), run
+`tests/android-target.test` (its link half needs ANDROID_NDK_ROOT and the
+Android runtime archive, `audit/android-aarch64-target/tools/package.sh`;
+its execution half qemu-aarch64 and BOTLISH_ANDROID_ROOTS,
+`tools/sysroot.sh`), `tests/target-model.test`, `tests/native-library.test`,
+`tests/external-tools.test`, `cargo test --release --manifest-path
+native/Cargo.toml --bin botlish-native target::` and
+`audit/android-aarch64-target/tools/mutate.tcl` (every mutant in its
+`mutants.txt` must still apply and be killed by a test its `!!` line names:
+update a mutant's text when you change the code it mutates, keeping it a
+mutant of the same rule), and, after `single/build.sh`, its clean room
+(`audit/android-aarch64-target/cleanroom/cleanroom.sh BOTLISH REPO NDK ROOTS
+RESULTS`).
+
 ## Linux syscall transports
 
 A raw Linux syscall is one architecture's transport

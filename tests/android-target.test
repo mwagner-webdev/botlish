@@ -59,6 +59,7 @@ proc atNdk {} {
     return $root
 }
 testConstraint androidNdk [expr {[testConstraint nativeBuilt] && [testConstraint linuxX86_64Host] && [atNdk] ne ""}]
+testConstraint androidRuntimeBuilt [expr {[testConstraint androidNdk] && [file isfile $::atRuntime]}]
 testConstraint androidRuntime [expr {[testConstraint androidNdk] && [file isfile $::atRuntime]
     && [native::support::identity $::atRuntime] eq [list triple aarch64-linux-android abi [native::runtimeAbi]]}]
 proc atRoots {} {
@@ -316,8 +317,13 @@ test at-support-refusals {every schema 2 refusal comes before anything is linked
         lassign [atLibrary $app] status out
         lappend results $case [expr {$status == 1 && [string match "*(NATIVE TARGET-SUPPORT $kind)*" $out]}] [file exists $app/out]
     }
+    # API's reason is the runtime's floor, judged before any toolchain is
+    # looked at (an NDK without API 19's libraries would be API too).
+    set app [atSupportApp [atDescriptor $abi {{"minimumApi": 21} {"minimumApi": 19}}]]
+    lassign [atLibrary $app] status out
+    lappend results floor [string match {*states minimumApi 19, and this compiler's Android runtime needs at least 21*(NATIVE TARGET-SUPPORT API)*} $out]
     set results
-} -result {schema1 1 0 static 1 0 api 1 0 noplatform 1 0 unknown 1 0 executable 1 0 libraries 1 0 abi 1 0 target 1 0 triple 1 0 toolroot 1 0 toolpath 1 0}
+} -result {schema1 1 0 static 1 0 api 1 0 noplatform 1 0 unknown 1 0 executable 1 0 libraries 1 0 abi 1 0 target 1 0 triple 1 0 toolroot 1 0 toolpath 1 0 floor 1}
 
 test at-support-linux-archive {an archive whose identity record names Linux/glibc AArch64 is never Android's runtime, whatever its descriptor states: the same architecture, another operating system and C library ABI} -constraints {nativeBuilt linuxX86_64Host clang} -body {
     set app [atSupportApp [atDescriptor [native::runtimeAbi]] "" aarch64-unknown-linux-gnu]
@@ -361,6 +367,11 @@ test at-toolchain-failures {a link that fails leaves no library or manifest behi
 } -result {1 1 {} 1 1}
 
 # ------------------------------------------------------------ the link (the NDK)
+
+test at-runtime-identity {the Android runtime archive built from this source is this driver's runtime: its identity record names aarch64-linux-android and the driver's runtime ABI (the root plan, the Vm's layout, the helpers) -- a runtime built differently is never linked} -constraints {androidRuntimeBuilt} -body {
+    set record [native::support::identity $::atRuntime]
+    list [dict getdef $record triple ""] [expr {[dict getdef $record abi ""] eq [native::runtimeAbi]}]
+} -result {aarch64-linux-android 1}
 
 # The fixtures: the experiment's packages (tools/package.sh: the Android
 # runtime archive and its descriptor, the 2048 engine), built once.
@@ -420,6 +431,16 @@ test at-library-deterministic {two builds of the Android library give the same s
         expr {[atRead $app/lib/$f] eq [atRead $app/again/$f]}
     }]
 } -result {0 1 1 1 1}
+
+test at-library-package-runtime {the library is linked with the installed package's runtime archive and no other: replaced by an archive holding only its identity record, the link fails on the runtime's missing symbols} -constraints {androidRuntime} -body {
+    set app [atGameApp]
+    set archive [file join $app .bot_modules .targets android-aarch64 botlish_target_android_aarch64 runtime libbotlish_runtime.a]
+    file attributes $archive -permissions 0644
+    atFakeArchive $archive aarch64-linux-android [native::runtimeAbi]
+    lassign [atRun $app -warnings error -target android-aarch64 -target-support botlish_target_android_aarch64 \
+        -emit-native-library game -out other engine.bot] status out
+    list $status [string match {*undefined symbol*(NATIVE LIBRARY TOOL *)*} $out] [file exists $app/other/libgame.so]
+} -result {1 1 0}
 
 test at-library-alignment-checked {a shared object with 4 KiB-aligned segments is no Android library: the check refuses it and removes it} -constraints {androidRuntime} -body {
     set app [atGameApp]

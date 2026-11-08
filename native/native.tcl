@@ -213,7 +213,9 @@ proc native::WithProgramDirs {hir run script} {
 #   stackGuard   NATIVE LIMIT STACK for any exhausted native stack
 #   libraries    native libraries (native::library, NATIVE-LIBRARY-MILESTONE-1.md:
 #                codegen/library.rs's SUPPORTED; the archive's partial link
-#                and symbol localization are GNU binutils')
+#                and symbol localization are GNU binutils') of this host's
+#                own target; a library of another target is made through its
+#                target support package (`targetCapabilities`, below)
 #   mainThreadStartup  executables started on the process's main thread
 #                (native::executable -startup main-thread, MAIN-THREAD-
 #                STARTUP-MILESTONE-1.md: runtime/aot.rs's MAIN_THREAD_STARTUP,

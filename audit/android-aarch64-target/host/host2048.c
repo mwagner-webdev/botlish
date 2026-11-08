@@ -20,6 +20,9 @@
  *   host2048 LIB.so thread        an instance called from another thread
  *                                 than the one that created it is refused
  *                                 (WRONG-THREAD), and still works on its own
+ *   host2048 LIB.so bench N       times (CLOCK_MONOTONIC) the library's load,
+ *                                 an instance's creation, its first call, N
+ *                                 moves, N score calls and its destruction
  *
  * Every str result is released with game_bytes_release and every error
  * with game_error_release, as the manifest's ownership says; a leak or a
@@ -30,6 +33,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "game.h"
 
@@ -253,12 +257,48 @@ static int thread(void) {
     return p_game_destroy(shared) == game_STATUS_OK ? 0 : 1;
 }
 
+static double now(void) {
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    return t.tv_sec * 1e6 + t.tv_nsec / 1e3;
+}
+
+static int bench(int n, double loaded) {
+    double t0 = now();
+    game_instance *g = create();
+    double t1 = now();
+    game_bytes bytes = {0};
+    game_error *err = NULL;
+    if (p_game_new_game(g, &bytes, &err) != game_STATUS_OK) { report_error(err); return 1; }
+    double t2 = now();
+    p_game_bytes_release(&bytes);
+    const char *board = "8 2 4 8 2 4 2 0 0 0 2 0 2 2 0 0 4";
+    for (int i = 0; i < n; i++) {
+        if (p_game_move(g, (const uint8_t *)board, strlen(board), i % 4, &bytes, &err) != game_STATUS_OK) { report_error(err); return 1; }
+        p_game_bytes_release(&bytes);
+    }
+    double t3 = now();
+    for (int i = 0; i < n; i++) {
+        int64_t score = 0;
+        if (p_game_score(g, (const uint8_t *)board, strlen(board), &score, &err) != game_STATUS_OK) { report_error(err); return 1; }
+    }
+    double t4 = now();
+    if (p_game_destroy(g) != game_STATUS_OK) return 1;
+    double t5 = now();
+    printf("BENCH\tload_us %.0f\tcreate_us %.0f\tfirst_call_us %.0f\tmove_us %.2f\tscore_us %.2f\tdestroy_us %.0f\tn %d\n",
+           loaded, t1 - t0, t2 - t1, (t3 - t2) / n, (t4 - t3) / n, t5 - t4, n);
+    return 0;
+}
+
 int main(int argc, char **argv) {
     if (argc < 3) {
-        fprintf(stderr, "usage: host2048 LIB.so play|lifecycle N|thread\n");
+        fprintf(stderr, "usage: host2048 LIB.so play|lifecycle N|thread|bench N\n");
         return 2;
     }
+    double before = now();
     load(argv[1]);
+    double loaded = now() - before;
+    if (strcmp(argv[2], "bench") == 0 && argc > 3) return bench(atoi(argv[3]), loaded);
     if (strcmp(argv[2], "play") == 0) {
         game_instance *g = create();
         int status = play(g, stdin);
