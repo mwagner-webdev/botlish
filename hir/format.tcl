@@ -593,6 +593,11 @@ proc hir::format::Expr {hir e indent origins linesVar} {
                 # MILESTONE-1.md).
                 append text " cleanup"
             }
+            if {[dict exists $node threadEntry]} {
+                # A thread entry (BOTLISH-OWNED-THREADS-AND-CROSS-THREAD-
+                # ACTORS-MILESTONE-1.md).
+                append text " thread"
+            }
             if {[dict exists $node variadic]} {
                 # A variadic function (VARIADICS-VERTICAL-SLICE-1.md): its
                 # first N parameters are the fixed ones, parameter N the List

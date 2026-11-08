@@ -206,6 +206,9 @@ proc core::compiler::Define {unit} {
 proc core::compiler::compileHir {hir} {
     hir::activate $hir
     set hir [hir::recovery::runnable $hir]
+    # A program that starts a Botlish thread is the native backends' only
+    # (THREAD-UNAVAILABLE, hir/threads.tcl).
+    hir::threads::RefuseTcl $hir compile
     # Compiling recurses as deep as the program nests (a left-deep `and`
     # chain: BRANCH-FORM-BOOLEAN-LOWERING.md), in segments under a driver
     # (hir::Deep, core/deep.tcl); the unit then runs under the caller's

@@ -1,0 +1,15 @@
+# category: count (a counted loop's variable)
+# class: rejected -- an Int holds no collection: no counted-loop variable is
+#        ever a place (TYPE and MUTABLE-PLACE-RECEIVER)
+# expect-diagnostics: TYPE@12:14 MUTABLE-PLACE-RECEIVER@12:14
+import std::mutable_vector
+
+fn bump(place v: MutableVector[int]) -> unit:
+    v.push(0)
+
+fn run() -> int:
+    loop i from 0 to 3:
+        bump(i)
+    0
+
+run()

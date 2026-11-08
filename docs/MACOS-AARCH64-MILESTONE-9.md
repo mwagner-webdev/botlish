@@ -1460,7 +1460,11 @@ every artifact, they expire.
 * **Not notarized; Gatekeeper rejects it.** Ad-hoc signatures only
   (`spctl --assess`: `rejected`). A copy downloaded by a browser is
   quarantined and needs the user's explicit permission to open (section
-  41); `curl`, `unzip` and CI artifacts are not quarantined.
+  41); `curl`, `unzip` and CI artifacts are not quarantined. The
+  repository's Developer ID credentials now exist (Icy Tower's release),
+  but a Developer ID Botlish.app waits for the JIT's entitlement to be
+  measured on a Mac with SIP enabled (section 41, "Where this stands
+  now"). It is not published as a release: only as a CI artifact.
 * **Apple Silicon only.** One architecture, arm64, deployment target 11.0:
   no universal binary, no Intel Mac (the native backend's macOS port is
   AArch64's, MACOS-AARCH64-PORT-AUDIT.md).
@@ -1566,6 +1570,63 @@ Developer ID distribution needs, beyond this milestone:
    loaded, only read by the linker).
 4. **The deployment target** stays 11.0, the driver's and the runtime
    archive's.
+
+**Where this stands now** (2026-11-08, after Icy Tower 1.0.3,
+ICY-TOWER-MACOS-APP-MILESTONE-1.md). There is no notarized Botlish.app,
+and none can be made by running a workflow: no job signs it with a
+Developer ID, and `single/macos/build.sh` signs every part `--sign -`.
+Botlish.app is not published as a release either: macos-arm64.yml uploads
+it as the run's `botlish-macos-aarch64` artifact, and the README's
+compiler download is Linux's. What the game's release established, and
+what it did not:
+
+* **Established, and reusable.** The repository's Developer ID
+  Application certificate (team 2QN7D8A7NA) and App Store Connect API key
+  sign, notarize (Accepted), staple and pass Gatekeeper on a macos-15
+  runner (ICY-TOWER-MACOS-APP-MILESTONE-1.md, section 44). Its stages --
+  the credential preflight (`examples/games/icy-tower/macos/credentials.py`),
+  the temporary keychain, Apple's validation of the notarization key,
+  notarize, staple, Gatekeeper, the tamper control, the ZIP and its
+  provenance (`examples/games/icy-tower/macos/release.py`) -- are written
+  against one bundle; they are the starting point for the compiler's, not
+  its implementation (the game's acceptance cases, its provenance and its
+  single Mach-O are the game's).
+* **Not established: the hardened runtime with the JIT.** Notarization
+  requires the hardened runtime on every Mach-O of the bundle (item 2),
+  and the driver JITs. The game needed no decision: it is compiled ahead
+  of time and generates no code at run time. Which entitlement the
+  driver's JIT needs under an *enforced* hardened runtime --
+  `com.apple.security.cs.allow-jit`, `allow-unsigned-executable-memory`,
+  or none -- is not known: the census (C6) ran all three on runners whose
+  System Integrity Protection is disabled, where the hardened runtime is
+  not enforced, so it decides nothing. No GitHub-hosted runner can
+  measure it. It must be measured on an Apple Silicon Mac with SIP
+  enabled, with the Developer ID-signed driver, before any entitlement or
+  the hardened runtime is added (AGENTS.md, "The macOS application").
+
+So a Developer ID Botlish.app is a milestone of its own, not a dispatch:
+
+1. a protected release job of its own (a tag scheme such as
+   `botlish-macos-vX.Y.Z`, its own publish step, `tested` and the release
+   gate as for the game; docs/CI-RUNS.md), which the `macos-release`
+   environment admits only after its deployment rule names that tag
+   pattern too (it admits `icy-tower-macos-v*` today), or a second
+   environment holding the same seven values;
+2. the Developer ID signature with `--timestamp` and `--options runtime`
+   in item 1's order (the framework's version, the driver, the
+   application), the identifiers unchanged
+   (`io.github.mwagner-webdev.botlish`, `.native`, `com.tcltk.tcllibrary`:
+   no conflict with the game's `com.avanticonic.botlishtower`);
+3. the entitlement, if any, chosen from the SIP-enabled measurement above:
+   the gate before the first release;
+4. notarization, stapling and the archive made again (item 3), with the
+   app's own acceptance (single/macos/app-test.sh, compare.sh, the smoke
+   tests) run on the signed bundle under the hardened runtime, and the
+   quarantined download opened through Gatekeeper's dialog as the game's
+   release does.
+
+Executables the compiler links stay the linker's ad hoc signatures
+(item 2): notarizing the compiler signs nothing a user builds with it.
 
 ## 42. Prerequisites for native Icy Tower distribution
 

@@ -1252,6 +1252,9 @@ proc surface::ast::StatementLines {node indent show linesVar} {
             if {[dict getdef $node callback ""] ne ""} {
                 append modifier "callback [dict get $node callback] "
             }
+            if {[dict getdef $node thread 0]} {
+                append modifier "thread "
+            }
             set line "${pad}${modifier}fn [dict get $node name] ([join $params { }])"
             if {[dict exists $node resultType] && [dict get $node resultType] ne ""} {
                 append line " -> [showType [dict get $node resultType]]"

@@ -359,7 +359,7 @@ proc hir::aot::analyzeRegion {hir region {context ""}} {
             }]]
     }
     set state [dict create regions [dict create $region $r] reported {} \
-        positions [dict get $context positions]]
+        positions [dict get $context positions] names [dict get $context names]]
     set tails [dict get $context tails]
     foreach e [dict get $context exprs $region] {
         if {![hir::get $hir $e reachable]} {
@@ -671,7 +671,7 @@ proc hir::aot::VisitCall {hir stateVar region e node tails statics} {
         return
     }
     if {$targetKind eq "block"} {
-        set name [BlockName $hir $target]
+        set name [dict getdef $state names $target ""]
         if {[llength [hir::get $hir $target params]] != [llength $args]} {
             Fact state $region [dict merge [FactOf $hir known-error $e] [dict create error ARITY]]
             return

@@ -412,7 +412,9 @@ pub fn main() -> i32 {
             return 1;
         }
     };
-    super::aot::run(startup, argv, move || match loaded.instantiate() {
+    // (The record lies in the mapped image, which is never unmapped.)
+    let record: &'static LinkedProgram = unsafe { &*((loaded.base + loaded.program) as *const LinkedProgram) };
+    super::aot::run(startup, argv, Some(super::thread::linked_factory(record)), move || match loaded.instantiate() {
         Ok(started) => started,
         Err(error) => {
             eprintln!("{error} (NATIVE STARTUP)");

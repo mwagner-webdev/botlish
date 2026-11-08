@@ -64,7 +64,7 @@ before=$(find .bot_modules -type f -exec sha256sum {} + | sort | sha256sum)
 cat "$out/conflict.txt"
 check "add future fails" test $status -eq 1
 check "the failure is a DEPENDENCY-CONFLICT" grep -q '(PM DEPENDENCY-CONFLICT)' "$out/conflict.txt"
-check "it names future's lock" grep -q 'future 1.0.0 locks event_loop_linux 0.4.0 (the project -> future 1.0.0)' "$out/conflict.txt"
+check "it names future's lock" grep -q 'future 1.0.0 locks event_loop_linux 0.6.0 (the project -> future 1.0.0)' "$out/conflict.txt"
 after=$(find .bot_modules -type f -exec sha256sum {} + | sort | sha256sum)
 check "the installation is unchanged" test "$before" = "$after"
 echo "== checks"

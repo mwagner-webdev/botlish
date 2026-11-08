@@ -481,8 +481,10 @@ namespace eval surface::parser {
     # `callback`, always followed by its foreign ABI (`callback c fn`,
     # C-CALLBACK-MILESTONE-1.md) -> `callback c`, `callbackSpan`; `cleanup`
     # -> `cleanup 1`, `cleanupSpan`, present only on a resource's cleanup
-    # (LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md).
-    variable functionModifiers {nomethod exported callback cleanup}
+    # (LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md); `thread` ->
+    # `thread 1`, `threadSpan`, present only on a thread entry
+    # (BOTLISH-OWNED-THREADS-AND-CROSS-THREAD-ACTORS-MILESTONE-1.md).
+    variable functionModifiers {nomethod exported callback cleanup thread}
     # The contextual words that may precede `type` in a type declaration
     # (REFINEMENT-VALUES.md): `refined type NAME = CARRIER`.
     variable typeModifiers {refined}
@@ -496,6 +498,31 @@ namespace eval surface::parser {
     # the program binds. A future `static parse:` is one more entry here
     # (and its own meaning in hir/static.tcl), never a new node kind.
     variable staticOperations {compile}
+    # Every contextual word of the grammar: an identifier the parser reads,
+    # where it is written, as a word of the syntax and never as a name
+    # (Word). Each list above is part of it, and so is every word a dfa
+    # body reserves (dfaReserved). A parse records the identifiers it read
+    # so -- the token IR's `words` (surface/tokens.tcl,
+    # SYNTAX-HIGHLIGHTING-MILESTONE-1.md) -- and the editor grammars are
+    # checked against this list (tests/syntax-highlighting.test, which also
+    # requires every word the parser compares an identifier with to be
+    # here). A new contextual word goes here and is consumed with Word.
+    variable words {
+        accept alias align alternative any array as at before
+        c call callback captures class cleanup compile context coroutine
+        dfa direct down emits end enum except exported extern field flags
+        fold framework from identity import in independent inject
+        intermediate layout library module named no noescape
+        nomethod of opaque over place private proven proves read refined
+        reject resource resume satisfies sendable size static then through
+        thread to trait tree union variadic with write
+    }
+    # The words the parser compares an identifier with only to refuse a
+    # construct that does not exist (`import ... as`, `namespace NAME`, a
+    # loop's `by`, a handler's or a type slot's `where`, `requires`,
+    # `implements`, `extends`): never consumed as words, so never recorded
+    # and never highlighted as one.
+    variable refusedWords {by extends implements namespace requires where}
 }
 
 proc surface::parse {source args} {
@@ -530,6 +557,7 @@ proc surface::parse {source args} {
         dict set program damage [surface::parser::Damage $lexed $program]
     }
     dict unset program failed
+    dict unset program words
     dict set program diagnostics $diagnostics
     return [core::deep::run {surface::ast::assignIds $program}]
 }
@@ -682,6 +710,10 @@ proc surface::parseTokens {tokens args} {
         # surface::parse; never part of the AST.
         dict set program failed [dict get $p failed]
     }
+    # The indices of the identifiers read as contextual words
+    # (surface::parser::Word), for the token IR (surface::syntaxTokens);
+    # never part of the AST either.
+    dict set program words [lsort -integer -unique [dict getdef $p words {}]]
     return $program
 }
 
@@ -727,6 +759,31 @@ proc surface::parser::Describe {token} {
         CHAR    { return "character [dict get $token text]" }
         default { return "\"[dict get $token text]\"" }
     }
+}
+
+# Consumes the current token, an identifier the grammar reads here as one of
+# its contextual words (`words`): a word of the syntax, never a name. Records
+# its index (the token IR's `words`, surface/tokens.tcl) and returns it, as
+# Advance does. Recorded where it is consumed, so a word of a construct
+# recovery later skips is still recorded: it was read as a word. An
+# identifier outside `words` is the parser's own mistake.
+proc surface::parser::Word {pVar} {
+    upvar 1 $pVar p
+    WordAt p [dict get $p pos]
+    return [Advance p]
+}
+
+# Records the token at INDEX, already consumed, as a contextual word (Word):
+# for a construct whose identifier is known to be a word only after it was
+# read (a dfa item's `any`, a path of one segment).
+proc surface::parser::WordAt {pVar index} {
+    upvar 1 $pVar p
+    variable words
+    set token [lindex [dict get $p tokens] $index]
+    if {[dict get $token kind] ne "IDENT" || [dict get $token value] ni $words} {
+        error "surface::parser::Word: [Describe $token] is no contextual word (surface::parser::words)"
+    }
+    dict lappend p words $index
 }
 
 proc surface::parser::Fail {token message} {
@@ -873,8 +930,8 @@ proc surface::parser::DirectModule {pVar} {
     if {![AtDirectModule p]} {
         return ""
     }
-    set start [dict get [Advance p] span]
-    set span [surface::ast::cover $start [dict get [Advance p] span]]
+    set start [dict get [Word p] span]
+    set span [surface::ast::cover $start [dict get [Word p] span]]
     dict set p directSpan $span
     set token [Peek p]
     if {[dict get $token kind] eq "IDENT" || [dict get $token kind] eq "::"} {
@@ -962,7 +1019,7 @@ proc surface::parser::Imports {pVar} {
 # wildcard or selective form exists: each is a specific syntax error.
 proc surface::parser::Import {pVar} {
     upvar 1 $pVar p
-    set start [dict get [Advance p] span]
+    set start [dict get [Word p] span]
     set isType 0
     if {[Kind p] eq "type"} {
         Advance p
@@ -1075,7 +1132,7 @@ proc surface::parser::AnonymousEnumError {token} {
 # ENUM-EMPTY here.
 proc surface::parser::EnumDecl {pVar} {
     upvar 1 $pVar p
-    set start [dict get [Advance p] span]
+    set start [dict get [Word p] span]
     set token [Peek p]
     if {[dict get $token kind] ne "IDENT"} {
         Fail $token "expected an enum name after \"enum\", found [Describe $token] (an enum is a named declaration: \"enum Name:\")"
@@ -1186,12 +1243,12 @@ proc surface::parser::AtLayoutDecl {pVar} {
 proc surface::parser::LayoutDecl {pVar} {
     upvar 1 $pVar p
     set union 0
-    set first [Advance p]
+    set first [Word p]
     set start [dict get $first span]
     if {[dict get $first text] eq "union"} {
         # (AtLayoutDecl: "layout" follows.)
         set union 1
-        Advance p
+        Word p
     }
     set name [Advance p]
     set layoutName [dict get $name value]
@@ -1232,7 +1289,7 @@ proc surface::parser::LayoutDecl {pVar} {
         if {[dict get $word kind] ne "IDENT" || $text ni [list size align $itemWord]} {
             Fail $word "expected \"size N\", \"align N\" or \"$itemForm\" in $what \"$layoutName\", found [Describe $word]"
         }
-        Advance p
+        Word p
         if {$text in {size align}} {
             if {[dict exists $items $text]} {
                 Fail $word "$what \"$layoutName\" already has a \"$text\" line (at [surface::ast::location [dict get $items ${text}Span]]): each is written exactly once"
@@ -1270,7 +1327,7 @@ proc surface::parser::LayoutDecl {pVar} {
             if {[dict get $at kind] ne "IDENT" || [dict get $at text] ne "at"} {
                 Fail $at "expected \"at OFFSET\" after the type of layout field \"$fieldName\" (every field states its byte offset), found [Describe $at]"
             }
-            Advance p
+            Word p
             set offset [Expect p INT "a byte offset after \"at\""]
             lappend fields [dict create name $fieldName nameSpan [dict get $fieldToken span] \
                 type $type typeSpan $typeSpan offset [dict get $offset value] offsetSpan [dict get $offset span]]
@@ -1345,7 +1402,7 @@ proc surface::parser::AtDfaDecl {pVar} {
 proc surface::parser::ClassDecl {pVar} {
     upvar 1 $pVar p
     variable dfaReserved
-    set start [dict get [Advance p] span]
+    set start [dict get [Word p] span]
     set name [Peek p]
     if {[dict get $name kind] ne "IDENT" || [dict get $name text] in $dfaReserved} {
         Fail $name "expected a class name after \"class\", found [Describe $name] (a class is declared as \"class NAME = SYMBOLS\")"
@@ -1358,7 +1415,7 @@ proc surface::parser::ClassDecl {pVar} {
     set items [DfaItems p {except} class]
     set except {}
     if {[Kind p] eq "IDENT" && [dict get [Peek p] text] eq "except"} {
-        Advance p
+        Word p
         set except [DfaItems p {} class]
         if {$except eq {}} {
             Fail [Peek p] "expected the symbols \"except\" removes, found [Describe [Peek p]]"
@@ -1478,6 +1535,7 @@ proc surface::parser::DfaItems {pVar stopWords where} {
                     Fail [Peek p] "expected a namespace after \"::\", found [Describe [Peek p]]"
                 }
             }
+            set first [dict get $p pos]
             set segments [list [dict get [Advance p] value]]
             while {[Kind p] eq "::"} {
                 Advance p
@@ -1488,6 +1546,7 @@ proc surface::parser::DfaItems {pVar stopWords where} {
             }
             set span [SpanFrom p $start]
             if {[llength $segments] == 1 && !$rooted && [lindex $segments 0] in {any end}} {
+                WordAt p $first
                 if {[lindex $segments 0] eq "end" && $where ne "transition"} {
                     Fail $token "`end` is the end of the input, not a symbol: a class cannot hold it"
                 }
@@ -1531,7 +1590,7 @@ proc surface::parser::DfaItems {pVar stopWords where} {
 proc surface::parser::DfaDecl {pVar} {
     upvar 1 $pVar p
     variable dfaReserved
-    set start [dict get [Advance p] span]
+    set start [dict get [Word p] span]
     set name [Advance p]
     if {[dict get $name value] in $dfaReserved} {
         Fail $name "\"[dict get $name value]\" is a word of the dfa syntax and cannot name a recognizer"
@@ -1540,7 +1599,7 @@ proc surface::parser::DfaDecl {pVar} {
     if {[dict get $over kind] ne "IDENT" || [dict get $over text] ne "over"} {
         Fail $over "expected \"over\" and an alphabet after \"dfa [dict get $name value]\", found [Describe $over] (a recognizer is declared as \"dfa NAME over ALPHABET:\", the alphabet bytes, ascii or unicode)"
     }
-    Advance p
+    Word p
     set alphabet [Peek p]
     if {[dict get $alphabet kind] ne "IDENT"} {
         Fail $alphabet "expected an alphabet after \"over\" (bytes, ascii or unicode), found [Describe $alphabet]"
@@ -1651,7 +1710,11 @@ proc surface::parser::DfaTransition {pVar} {
     if {[dict get $token kind] ne "IDENT"} {
         Fail $token "expected an action after \"->\" (a state, `accept`, `accept before N`, `call DFA then ...`, or `reject` for `end`), found [Describe $token]"
     }
-    Advance p
+    if {[dict get $token value] in {accept reject call}} {
+        Word p
+    } else {
+        Advance p
+    }
     set word [dict get $token value]
     set t [dict create items $items arrowSpan $arrowSpan actionSpan [dict get $token span]]
     switch -- $word {
@@ -1661,7 +1724,7 @@ proc surface::parser::DfaTransition {pVar} {
             if {[Kind p] eq "IDENT" && [dict get [Peek p] text] eq "before"} {
                 set unread 1
                 # (From the word "accept": the phrase says how many.)
-                set unreadSpan [surface::ast::cover [dict get $token span] [dict get [Advance p] span]]
+                set unreadSpan [surface::ast::cover [dict get $token span] [dict get [Word p] span]]
                 if {[Kind p] eq "INT"} {
                     set count [Advance p]
                     set unread [dict get $count value]
@@ -1703,11 +1766,15 @@ proc surface::parser::DfaTransition {pVar} {
             if {[Kind p] ne "IDENT" || [dict get [Peek p] text] ne "then"} {
                 Fail [Peek p] "expected \"then\" after \"call [join $segments ::]\", found [Describe [Peek p]] (\"-> call DFA then STATE\" continues in STATE once it completes, \"-> call DFA then accept\" completes with it)"
             }
-            Advance p
+            Word p
             if {[Kind p] ne "IDENT"} {
                 Fail [Peek p] "expected a state or `accept` after \"then\", found [Describe [Peek p]]"
             }
-            set then [Advance p]
+            if {[dict get [Peek p] value] eq "accept"} {
+                set then [Word p]
+            } else {
+                set then [Advance p]
+            }
             if {[dict get $then value] ne "accept" && [dict get $then value] in $dfaReserved} {
                 Fail $then "expected a state or `accept` after \"then\", found [Describe $then]"
             }
@@ -1782,7 +1849,7 @@ proc surface::parser::TraitDecl {pVar} {
     set seen {}
     set start ""
     while {[Kind p] eq "IDENT" && [dict get [Peek p] text] in $structModifiers} {
-        set token [Advance p]
+        set token [Word p]
         if {$start eq ""} {
             set start [dict get $token span]
         }
@@ -1797,7 +1864,7 @@ proc surface::parser::TraitDecl {pVar} {
         set context 1
         set contextSpan [dict get $token span]
     }
-    set keyword [dict get [Advance p] span]
+    set keyword [dict get [Word p] span]
     if {$start eq ""} {
         set start $keyword
     }
@@ -2015,7 +2082,7 @@ proc surface::parser::AtPrivate {pVar} {
 proc surface::parser::PrivateDecl {pVar} {
     variable privateKinds
     upvar 1 $pVar p
-    set word [Advance p]
+    set word [Word p]
     set span [dict get $word span]
     if {![dict get $p topLevel]} {
         Fail $word "\"private\" is only allowed on a declaration at the top level of a module: privacy is module-local, so a function, loop or branch has no private declarations"
@@ -2062,7 +2129,7 @@ proc surface::parser::AtWith {pVar} {
 # may appear is decided by HIR (CONTEXT-INSTALLATION-UNSUPPORTED), not here.
 proc surface::parser::WithDecl {pVar} {
     upvar 1 $pVar p
-    set start [dict get [Advance p] span]
+    set start [dict get [Word p] span]
     set form [Peek p]
     if {[dict get $form text] ne "context"} {
         if {[Kind p 1] eq "="} {
@@ -2070,7 +2137,7 @@ proc surface::parser::WithDecl {pVar} {
         }
         Fail $form "expected \"context\" after \"with\" (the only \"with\" declaration is \"with context EXPR\"), found [Describe $form]"
     }
-    Advance p
+    Word p
     if {[Kind p] in {NEWLINE EOF DEDENT}} {
         Fail [Peek p] "expected an expression after \"with context\" (the value to install), found [Describe [Peek p]]"
     }
@@ -2137,7 +2204,7 @@ proc surface::parser::AtExternDecl {pVar} {
 # an ABI; every word after `extern` is contextual. No body, no `errors`.
 proc surface::parser::ExternDecl {pVar} {
     upvar 1 $pVar p
-    set start [dict get [Advance p] span]
+    set start [dict get [Word p] span]
     set abi [Peek p]
     if {[dict get $abi kind] eq "fn"} {
         FailCode [dict get $abi span] EXTERN-SYNTAX \
@@ -2147,7 +2214,7 @@ proc surface::parser::ExternDecl {pVar} {
         FailCode [dict get $abi span] EXTERN-SYNTAX \
             "unknown foreign ABI \"[dict get $abi text]\": the only extern declarations are \"extern c fn\", \"extern c library\" and \"extern c framework\""
     }
-    Advance p
+    Word p
     set what [Peek p]
     if {[dict get $what kind] eq "IDENT" && [dict get $what text] in {library framework}} {
         return [LinkDecl p $start [dict get $what text]]
@@ -2161,7 +2228,7 @@ proc surface::parser::ExternDecl {pVar} {
     set symbol ""
     set symbolSpan ""
     while {[Kind p] eq "IDENT" && [dict get [Peek p] text] eq "named"} {
-        set word [Advance p]
+        set word [Word p]
         if {$symbolSpan ne ""} {
             FailCode [dict get $word span] EXTERN-SYNTAX \
                 "duplicate \"named\": an extern c fn has one link symbol (at [surface::ast::location $symbolSpan])"
@@ -2194,7 +2261,7 @@ proc surface::parser::ExternDecl {pVar} {
                 "\"variadic\" ends the parameter list of extern c fn \"$fn\": the trailing arguments it stands for come after every fixed parameter, so nothing follows it (found [Describe [Peek p]])"
         }
         if {[ExternVariadicMarker p]} {
-            set token [Advance p]
+            set token [Word p]
             set variadicSpan [dict get $token span]
             if {$params eq {}} {
                 FailCode $variadicSpan EXTERN-SYNTAX \
@@ -2241,7 +2308,7 @@ proc surface::parser::ExternDecl {pVar} {
             FailCode [dict get $word span] EXTERN-SYNTAX \
                 "extern c fn \"[dict get $name value]\" states its result's provenance once (at [surface::ast::location $provenanceSpan])"
         }
-        Advance p
+        Word p
         if {$text eq "independent"} {
             set provenance independent
             set provenanceSpan [dict get $word span]
@@ -2309,21 +2376,21 @@ proc surface::parser::ExternParam {pVar fn} {
                         "parameter \"$pname\" of extern c fn \"$fn\" states its access twice (\"$access\" and \"$text\"): it is read or write"
                 }
                 set access $text
-                Advance p
+                Word p
             }
             noescape - captures - proven {
                 if {$escape ne ""} {
                     FailCode $span EXTERN-SYNTAX \
                         "parameter \"$pname\" of extern c fn \"$fn\" states its escape twice: it is noescape, proven noescape or captures"
                 }
-                Advance p
+                Word p
                 if {$text eq "proven"} {
                     set next [Peek p]
                     if {[dict get $next kind] ne "IDENT" || [dict get $next text] ne "noescape"} {
                         FailCode [dict get $next span] EXTERN-SYNTAX \
                             "expected \"noescape\" after \"proven\" (parameter \"$pname\" of extern c fn \"$fn\"): \"proven noescape\" records that a tool proved the pointer does not escape"
                     }
-                    Advance p
+                    Word p
                     set span [surface::ast::cover $span [dict get $next span]]
                     set escape proven-noescape
                 } elseif {$text eq "noescape"} {
@@ -2359,7 +2426,7 @@ proc surface::parser::ExternParam {pVar fn} {
 # the declaration is computed, and nothing in it is a linker option.
 proc surface::parser::LinkDecl {pVar start link} {
     upvar 1 $pVar p
-    Advance p
+    Word p
     set token [Peek p]
     if {[dict get $token kind] ne "STRING"} {
         if {$link eq "library"} {
@@ -2384,12 +2451,12 @@ proc surface::parser::LinkDecl {pVar start link} {
     if {$link eq "library"} {
         set word [Peek p]
         if {[dict get $word kind] eq "IDENT" && [dict get $word text] eq "static"} {
-            Advance p
+            Word p
             dict set node linkage static
             dict set node linkageSpan [dict get $word span]
             set word [Peek p]
             if {[dict get $word kind] eq "IDENT" && [dict get $word text] eq "at"} {
-                Advance p
+                Word p
                 set token [Peek p]
                 if {[dict get $token kind] ne "STRING"} {
                     FailCode [dict get $token span] EXTERN-SYNTAX \
@@ -2968,9 +3035,13 @@ proc surface::parser::StaticWithoutOperationError {pVar} {
 proc surface::parser::StaticIntrinsic {pVar} {
     variable staticOperations
     upvar 1 $pVar p
-    set staticToken [Advance p]
+    set staticToken [Word p]
     set start [dict get $staticToken span]
-    set operation [Advance p]
+    if {[dict get [Peek p] value] in $staticOperations} {
+        set operation [Word p]
+    } else {
+        set operation [Advance p]
+    }
     set name [dict get $operation value]
     if {$name ni $staticOperations} {
         FailCode [dict get $operation span] STATIC-UNKNOWN-OPERATION \
@@ -3019,26 +3090,26 @@ proc surface::parser::AtInject {pVar} {
 proc surface::parser::Injection {pVar} {
     if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $pVar p
-    set injectToken [Advance p]
+    set injectToken [Word p]
     set start [dict get $injectToken span]
     set word [Peek p]
     set none 0
     set contexts {}
     switch -- [dict get $word text] {
         no {
-            Advance p
+            Word p
             set next [Peek p]
             if {[dict get $next kind] ne "IDENT" || [dict get $next text] ne "context"} {
                 Fail $next "expected \"context\" after \"inject no\" (\"inject no context:\" runs its block with no context), found [Describe $next]"
             }
-            Advance p
+            Word p
             set none 1
             if {[Kind p] eq "IDENT"} {
                 Fail [Peek p] "\"inject no context\" injects nothing, so it names no context: write \"inject no context:\", or \"inject context [dict get [Peek p] text]:\" to inject it"
             }
         }
         context {
-            Advance p
+            Word p
             if {[Kind p] eq ":"} {
                 Fail [Peek p] "an inject block names the contexts it injects: write \"inject context T1, T2:\", or \"inject no context:\" to run the block with none"
             }
@@ -3286,13 +3357,13 @@ proc surface::parser::ScalarRefinement {pVar name {base ""}} {
 proc surface::parser::ArrayTypeExpr {pVar} {
     if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $pVar p
-    Advance p
+    Word p
     set extent [Advance p]
     set of [Peek p]
     if {[dict get $of kind] ne "IDENT" || [dict get $of text] ne "of"} {
         Fail $of "expected \"of\" and the element representation after \"array [dict get $extent value]\" (array N of TYPE), found [Describe $of]"
     }
-    Advance p
+    Word p
     set element [TypeExpr p "an element type after \"of\""]
     return [list array [dict get $extent value] $element]
 }
@@ -3450,11 +3521,11 @@ proc surface::parser::Function {pVar} {
     set abi ""
     set callbackAbi ""
     while {[Kind p] eq "IDENT"} {
-        set word [Advance p]
-        set text [dict get $word text]
+        set text [dict get [Peek p] text]
         if {$text ni $functionModifiers} {
-            Fail $word "expected \"fn\" after the declaration modifiers, found [Describe $word]"
+            Fail [Peek p] "expected \"fn\" after the declaration modifiers, found [Describe [Peek p]]"
         }
+        set word [Word p]
         if {[dict exists $modifiers $text]} {
             Fail $word "duplicate modifier \"$text\" in this function declaration"
         }
@@ -3466,7 +3537,7 @@ proc surface::parser::Function {pVar} {
             if {[dict get $what kind] ne "IDENT" || [dict get $what text] ne "c"} {
                 Fail $what "an exported function names its foreign ABI: write \"exported c fn NAME(...) -> T:\" (the only foreign ABI is c), found [Describe $what]"
             }
-            Advance p
+            Word p
             set abi c
             set span [SpanFrom p $span]
         }
@@ -3477,7 +3548,7 @@ proc surface::parser::Function {pVar} {
             if {[dict get $what kind] ne "IDENT" || [dict get $what text] ne "c"} {
                 Fail $what "a callback names its foreign ABI: write \"callback c fn NAME(...) -> T:\" (the only foreign ABI is c), found [Describe $what]"
             }
-            Advance p
+            Word p
             set callbackAbi c
             set span [SpanFrom p $span]
         }
@@ -3507,6 +3578,15 @@ proc surface::parser::Function {pVar} {
         # ordinary declaration's node is unchanged.
         dict set node cleanup 1
         dict set node cleanupSpan [dict get $modifiers cleanup]
+    }
+    if {[dict exists $modifiers thread]} {
+        # A thread entry (BOTLISH-OWNED-THREADS-AND-CROSS-THREAD-ACTORS-
+        # MILESTONE-1.md, hir/threads.tcl): present only then.
+        if {$abi ne "" || $callbackAbi ne "" || [dict exists $modifiers cleanup]} {
+            Fail [dict create span [dict get $modifiers thread]] "a thread entry is no C export, C callback or cleanup: it runs only as the first computation of a Botlish thread (std::thread::start)"
+        }
+        dict set node thread 1
+        dict set node threadSpan [dict get $modifiers thread]
     }
     return $node
 }
@@ -3585,23 +3665,23 @@ proc surface::parser::ParamSections {pVar} {
                 "the variadic parameter \"[dict get $variadic name]\" must be the last parameter of the list, found [Describe $token] after it (a parameter list is ordinary parameters, then flags, then context, then the variadic parameter)"
         }
         if {[ResumeMarker p]} {
-            Advance p
+            Word p
             EnterSection p section resume [dict get $token span]
             set typeStart [dict get [Peek p] span]
             set type [TypeExpr p "the resume message type after \"resume\""]
             set resume [dict create type $type typeSpan [SpanFrom p $typeStart] \
                 span [SpanFrom p [dict get $token span]]]
         } elseif {[VariadicMarker p]} {
-            Advance p
+            Word p
             EnterSection p section variadic [dict get $token span]
             set variadic [VariadicEntry p [dict get $token span]]
         } elseif {[ContextMarker p]} {
-            Advance p
+            Word p
             EnterSection p section context [dict get $token span]
             lappend contexts [ContextEntry p]
         } elseif {[Kind p] eq ":" || [FlagsMarker p]} {
             if {[Kind p] ne ":"} {
-                Advance p
+                Word p
                 set markerSpan [dict get $token span]
                 EnterSection p section flags $markerSpan
             } elseif {$section eq "context"} {
@@ -3619,7 +3699,7 @@ proc surface::parser::ParamSections {pVar} {
         } else {
             set place ""
             if {[PlaceMarker p]} {
-                set place [dict get [Advance p] span]
+                set place [dict get [Word p] span]
             }
             set param [Expect p IDENT "a parameter name"]
             if {$section ne "ordinary"} {
@@ -3917,7 +3997,7 @@ proc surface::parser::TypeDecl {pVar} {
         }
         Fail $inToken "expected \"in\" after the parent type name, found [Describe $inToken]"
     }
-    Advance p
+    Word p
     set domain [Domain p]
     set node [surface::ast::node typedecl [SpanFrom p $start] \
         name [dict get $name value] nameSpan [dict get $name span] \
@@ -3940,7 +4020,7 @@ proc surface::parser::TypeDecl {pVar} {
 # syntactic one.
 proc surface::parser::RefinedTypeDecl {pVar} {
     upvar 1 $pVar p
-    set modifier [Advance p]
+    set modifier [Word p]
     Advance p
     set name [Expect p IDENT "a type name after \"refined type\""]
     Expect p = "\"=\" after the type name (\"refined type [dict get $name value] = CARRIER\")"
@@ -4222,7 +4302,7 @@ proc surface::parser::IsWord {pVar offset word} {
 proc surface::parser::Fold {pVar} {
     if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $pVar p
-    set start [dict get [Advance p] span]
+    set start [dict get [Word p] span]
     set clauses {}
     if {!([IsWord p 0 with] && [IsWord p 1 intermediate])} {
         set clauses [LoopClauses p]
@@ -4232,11 +4312,11 @@ proc surface::parser::Fold {pVar} {
             clauses, found [Describe [Peek p]]: a fold carries one value, its intermediate,\
             from each iteration to the next"
     }
-    Advance p
+    Word p
     if {![IsWord p 0 intermediate]} {
         Fail [Peek p] "expected \"intermediate\" after a fold's \"with\", found [Describe [Peek p]]"
     }
-    Advance p
+    Word p
     set nameToken [Peek p]
     if {[dict get $nameToken kind] ne "IDENT"} {
         Fail $nameToken "expected the name of the fold's intermediate binding after\
@@ -4268,21 +4348,21 @@ proc surface::parser::LoopClause {pVar} {
     }
     switch -- $dispatchWord {
         in {
-            Advance p
+            Word p
             return [dict create kind list name $name nameSpan $nameSpan \
                 iterable [LoopOperand p] start "" end "" direction "" endKind ""]
         }
         from {
-            Advance p
+            Word p
             return [LoopCount p $name $nameSpan up]
         }
         down {
-            Advance p
+            Word p
             set fromToken [Peek p]
             if {[dict get $fromToken kind] ne "IDENT" || [dict get $fromToken value] ne "from"} {
                 Fail $fromToken "expected \"from\" after \"down\", found [Describe $fromToken]"
             }
-            Advance p
+            Word p
             return [LoopCount p $name $nameSpan down]
         }
         default {
@@ -4317,7 +4397,7 @@ proc surface::parser::LoopCount {pVar name nameSpan direction} {
                 found [Describe $keywordToken]"
         }
     }
-    Advance p
+    Word p
     set second [LoopOperand p]
     return [dict create kind count name $name nameSpan $nameSpan iterable "" \
         start $first end $second direction $direction endKind $endKind]
@@ -4357,7 +4437,7 @@ proc surface::parser::Suite {pVar after} {
     # declared result to exactly `bool` or `unit`).
     set proves {}
     if {$allowResult && [Kind p] eq "IDENT" && [dict get [Peek p] text] eq "proves"} {
-        set provesToken [Advance p]
+        set provesToken [Word p]
         set paramToken [Expect p IDENT "the name of the proven parameter after \"proves\""]
         Expect p : "\":\" after the proven parameter's name (\"proves [dict get $paramToken value]: TYPE\")"
         set typeStart [dict get [Peek p] span]
@@ -4399,7 +4479,7 @@ proc surface::parser::Suite {pVar after} {
     # here, so `emits` stays an ordinary name everywhere else.
     set emits {}
     if {$allowResult && [Kind p] eq "IDENT" && [dict get [Peek p] text] eq "emits"} {
-        Advance p
+        Word p
         while 1 {
             lappend emits [EmitsName p]
             if {[Kind p] ne ","} {
@@ -5023,7 +5103,7 @@ proc surface::parser::CoroutineAhead {pVar} {
 # COROUTINE-RHS-NOT-YIELDING -- any other expression).
 proc surface::parser::CoroutineBind {pVar} {
     upvar 1 $pVar p
-    set start [dict get [Advance p] span]
+    set start [dict get [Word p] span]
     set open [Peek p]
     set pattern [Pattern p]
     foreach field [dict get $pattern fields] {
@@ -5193,11 +5273,11 @@ proc surface::parser::StructDecl {pVar} {
     set start [dict get [Peek p] span]
     set modifiers [dict create]
     while {[Kind p] eq "IDENT"} {
-        set word [Advance p]
-        set text [dict get $word text]
+        set text [dict get [Peek p] text]
         if {$text ni $structModifiers} {
-            Fail $word "expected \"struct\" after the declaration modifiers, found [Describe $word]"
+            Fail [Peek p] "expected \"struct\" after the declaration modifiers, found [Describe [Peek p]]"
         }
+        set word [Word p]
         if {[dict exists $modifiers $text]} {
             Fail $word "duplicate modifier \"$text\" in this struct declaration"
         }
@@ -5321,7 +5401,7 @@ proc surface::parser::StructDecl {pVar} {
 # formSpan SPAN fields {FIELD ...} fieldSpans {SPAN ...} span SPAN}.
 proc surface::parser::IdentityClause {pVar name} {
     upvar 1 $pVar p
-    set start [dict get [Advance p] span]
+    set start [dict get [Word p] span]
     set form [Expect p IDENT "an identity form after \"identity\" (members or associations)"]
     if {[Kind p] ne "("} {
         Fail [Peek p] "expected \"(\" and the fields of identity [dict get $form value] in struct \"$name\", found [Describe [Peek p]]"
@@ -5361,7 +5441,7 @@ proc surface::parser::IdentityClause {pVar name} {
 # hir/structs.tcl's.
 proc surface::parser::SendableClause {pVar name} {
     upvar 1 $pVar p
-    set start [dict get [Advance p] span]
+    set start [dict get [Word p] span]
     set form [Expect p IDENT "a sendable form after \"sendable\" (fields, bytes, mutable_bytes or through)"]
     set args {}
     set argSpans {}
@@ -5385,7 +5465,7 @@ proc surface::parser::SendableClause {pVar name} {
     set clause [dict create form [dict get $form value] formSpan [dict get $form span] \
         args $args argSpans $argSpans]
     if {[Kind p] eq "IDENT" && [dict get [Peek p] value] eq "as"} {
-        Advance p
+        Word p
         set typeStart [dict get [Peek p] span]
         dict set clause representation [TypeExpr p "a representation type after \"as\""]
         dict set clause representationSpan [SpanFrom p $typeStart]
@@ -5413,7 +5493,7 @@ proc surface::parser::TypeSlots {pVar name} {
         set trait ""
         set traitSpan ""
         if {[Kind p] eq "IDENT" && [dict get [Peek p] value] eq "satisfies"} {
-            Advance p
+            Word p
             set start [dict get [Peek p] span]
             set token [Expect p IDENT "a trait name after \"satisfies\""]
             set trait [dict get $token value]

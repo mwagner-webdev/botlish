@@ -1,0 +1,20 @@
+# category: loop-element (MutableVector, a member of an installed context)
+# class: C -- silently discarded write
+# intended: push 9 onto every row the installed Store holds
+# actual: a loop over a MutableVector iterates a snapshot; each element is a
+#         copy, so the context's rows keep length 1 -- although a mutation
+#         through the context parameter itself (s.rows.push) would persist
+# expect: [1]
+import std::mutable_vector
+
+context struct Store:
+    rows: MutableVector[MutableVector[int]]
+
+fn touch(context s: Store) -> List[int]:
+    loop row in s.rows:
+        row.push(9)
+    loop row in s.rows:
+        row.length()
+
+with context Store {rows: std::mutable_vector::from_list([std::mutable_vector::from_list([1])])}
+touch()

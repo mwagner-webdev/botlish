@@ -25,7 +25,7 @@ PACKAGE-MANAGER-MILESTONE-2.md, PACKAGE-MANAGER-MILESTONE-3.md),
 `tools/package-repository.tcl REPO` builds the archive for linux-x86_64 and
 linux-aarch64 on the author's side, imports each (`botlish native add`),
 stages the public header into each target's `include/` (`botlish package
-stage -headers`) and packs one release, `REPO/event_loop_linux-0.3.0.botpkg`;
+stage -headers`) and packs one release, `REPO/event_loop_linux-0.5.0.botpkg`;
 an application installs it with `botlish add event_loop_linux -repository
 REPO`, nothing is compiled on the consumer's side, and `botlish native plan
 -include` names the installed `include/` directory of

@@ -1185,6 +1185,10 @@ proc hir::resolve::Expr {hirVar node ctx} {
                 # A C callback (hir/callbacks.tcl): its foreign ABI.
                 SetField hir $e callback [dict get $node callback]
             }
+            if {[dict exists $node threadEntry]} {
+                # A thread entry (hir/threads.tcl).
+                SetField hir $e threadEntry 1
+            }
             set params {}
             set paramTypes [if {[dict exists $node paramTypes]} {dict get $node paramTypes} else {lrepeat [llength [dict get $node params]] {}}]
             set declaredParamTypes {}

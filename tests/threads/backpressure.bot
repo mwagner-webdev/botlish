@@ -1,0 +1,68 @@
+# backpressure.bot -- tests/threads.test: two producer threads deliver
+# 1000 notes each through an endpoint of capacity 4 into a mailbox of 2
+# whose collector sleeps 200 microseconds after each note. A full endpoint
+# suspends a producer's task until the transport rings its port with room:
+# each refusal is one wait, never a retry loop, so the refusals are at most
+# the notes (a sender polling would be refused thousands of times).
+import event_loop_linux
+import producer
+import std::actor
+import std::actor::remote
+import std::event_loop
+import std::thread
+
+fn collector(inbox: std::actor::Inbox[producer::Note], n: int, out: std::actor::Address[int], context ev: std::event_loop::Loop, resume std::actor::Answer) -> std::actor::Exit:
+    rx = std::actor::listen(inbox):
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    got = fold i from 0 to n with intermediate got 0:
+        note = std::actor::receive(rx):
+            on std::actor::Closed:
+                break
+        std::actor::sleep(200):
+            on std::event_loop::SchedulerFault:
+                break
+        got + 1
+    out.send(got)
+    std::event_loop::stop():
+        on std::event_loop::SchedulerFault:
+            return std::actor::exit(-3)
+    std::actor::exit(0)
+
+fn go(context ev: std::event_loop::Loop, d: std::event_loop::Driver, ac: std::actor::Actors, t: std::thread::Threads, p: std::thread::Port, db: std::thread::Doorbell) -> List[any] errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered, std::thread::ThreadLimit, std::thread::ThreadStartFailed, std::thread::ThreadFailed:
+    std::thread::serve()
+    {to, inbox} = std::actor::open[producer::Note](2)
+    {to: out, inbox: result} = std::actor::open[int](1)
+    remote = std::actor::remote::export(to, 4)
+    c = inject context std::event_loop::Loop:
+        coroutine {step, first} = collector(inbox, 2000, out)
+        std::actor::spawned(step, first)
+    std::actor::start(c)
+    before = std::thread::stats()
+    {thread: t1} = std::thread::start(std::thread::entry(producer::deliver_notes), producer::Plan {who: 1, count: 1000, to: remote})
+    {thread: t2} = std::thread::start(std::thread::entry(producer::deliver_notes), producer::Plan {who: 2, count: 1000, to: remote})
+    std::event_loop::run()
+    delivered = std::thread::join(t1) + std::thread::join(t2)
+    refusals = std::thread::stats().full_refusals - before.full_refusals
+    std::thread::close_port()
+    [std::actor::drain(result), delivered, refusals > 0, refusals <= delivered]
+
+with context std::event_loop::create(64)
+with context event_loop_linux::create()
+with context event_loop_linux::native()
+with context std::actor::create()
+with context std::thread::create(4)
+with context std::thread::port()
+go():
+    on std::event_loop::SchedulerFault:
+        ["scheduler fault"]
+    on std::event_loop::DriverFault {code}:
+        ["driver fault", code]
+    on std::event_loop::LoopReentered:
+        ["reentered"]
+    on std::thread::ThreadLimit:
+        ["thread limit"]
+    on std::thread::ThreadStartFailed {reason}:
+        ["start failed", reason]
+    on std::thread::ThreadFailed {identity, message}:
+        ["failed", identity, message]

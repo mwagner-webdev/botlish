@@ -1,0 +1,21 @@
+# category: loop-element (List of structs), a field path of the loop variable
+# class: A -- productive local mutation
+# The correction of c02: the closed shapes are the loop's collected List.
+# expect: 4
+import std::mutable_vector
+
+struct Shape:
+    points: MutableVector[int]
+    name: str
+
+fn make(k: int) -> Shape:
+    Shape {points: std::mutable_vector::from_list([k]), name: "s"}
+
+fn close_all(shapes: List[Shape]) -> int:
+    closed = loop s in shapes:
+        s.points.push(0)
+        s
+    fold s in closed with intermediate n 0:
+        n + s.points.length()
+
+close_all([make(1), make(2)])
