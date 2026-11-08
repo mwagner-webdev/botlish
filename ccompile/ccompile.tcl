@@ -265,7 +265,7 @@ proc ccompile::Unsupported {e what} {
     if {$e ne "" && [dict exists $baseHir exprs $e]} {
         set where "[hir::originLocation $baseHir [hir::get $baseHir $e origin]]: "
     }
-    throw {C UNSUPPORTED} "${where}the C backend cannot compile $what yet (C-COMPILE-FREESTANDING-MILESTONE-1.md lists what it compiles); this is a limit of the backend, not a missing runtime service"
+    throw {C UNSUPPORTED} "${where}the C backend cannot compile $what yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service"
 }
 
 # ---------------------------------------------------------------------------
@@ -1780,6 +1780,18 @@ proc ccompile::JoinAssign {fnVar joinVar op} {
     dict lappend join ops $op
     Emit fn "[dict get $join var] = @@JV[dict get $join n]_$k@@;"
 }
+# The join JOIN no branch completes into: its declaration is removed.
+proc ccompile::JoinDrop {fnVar join} {
+    upvar 1 $fnVar fn
+    if {$join eq ""} {
+        return
+    }
+    set token @@JT[dict get $join n]@@
+    dict set fn lines [lmap line [dict get $fn lines] {
+        if {[string first $token $line] >= 0} continue
+        set line
+    }]
+}
 proc ccompile::JoinClose {fnVar join} {
     upvar 1 $fnVar fn
     set repr [dict get $join repr]
@@ -1850,6 +1862,7 @@ proc ccompile::If {fnVar e node want} {
         Indent fn -1
         Emit fn "\}"
         if {!$live} {
+            JoinDrop fn $join
             return [list never ""]
         }
         if {$join eq ""} {
@@ -1883,6 +1896,7 @@ proc ccompile::If {fnVar e node want} {
     }
     Emit fn "\}"
     if {!$live} {
+        JoinDrop fn $join
         return [list never ""]
     }
     if {$join eq ""} {
@@ -2105,6 +2119,7 @@ proc ccompile::Handle {fnVar e node want} {
         Emit fn "$done:;"
     }
     if {!$live} {
+        JoinDrop fn $join
         return [list never ""]
     }
     if {$join eq ""} {
@@ -2288,6 +2303,13 @@ proc ccompile::Assemble {programId source} {
     dict set files $p.h "[join $h \n]\n"
     dict set files $p.c "[string trimright [join $c \n]]\n"
     dict set files ${p}_display.c $d
+    dict for {file text} $files {
+        if {[string first @@ $text] >= 0} {
+            # A representation left open (a join or a result never closed):
+            # the backend's own defect, never C to hand anyone.
+            error "ccompile: internal error: $file holds an unresolved placeholder"
+        }
+    }
     dict set files $p.runtime.json [Manifest $source]
     if {$usesInt} {
         set channel [open [file join $home botlish_rt_v1.h]]

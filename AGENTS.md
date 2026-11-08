@@ -340,7 +340,8 @@ a static zipfs tclsh. `--basekit PATH` uses a prebuilt zipkit instead. To run
 the test suite, still install the `.deb`s.
 
 * `single/package.tcl` packs exactly main.tcl, LICENSE, `core/`,
-  `compiler/`, `hir/`, `surface/`, `service/`, `lsp/`, `native/*.tcl`, `stdlib/`,
+  `compiler/`, `hir/`, `surface/`, `service/`, `lsp/`, `pm/`, `ccompile/`,
+  `native/*.tcl`, `stdlib/`,
   `compilerpedia/compilerpedia.tcl`, `compilerpedia/topics/` and
   `compilerpedia/generated/`, plus a `BUILD` file naming the source
   revision. If the compiler starts reading another file at run time, add
@@ -433,6 +434,51 @@ the test suite, still install the `.deb`s.
   `single/package.tcl`) `audit/single-executable/tools/mutate.tcl` and both
   `single/smoke-test.sh` and `single/ffi-smoke-test.sh` after
   `single/build.sh`.
+
+## The C backend (main.tcl -emit-c)
+
+`ccompile/ccompile.tcl` (C-COMPILE-FREESTANDING-MILESTONE-1.md) writes an
+analyzed HIR as freestanding C11: `PREFIX.h`, `PREFIX.c`,
+`PREFIX_display.c`, `PREFIX.runtime.json` and, when the C uses it, a copy
+of `ccompile/botlish_rt_v1.h`, the runtime-service interface. It compiles
+one C function per instance of `hir::specialize` and reads `hir::range`'s
+proofs, as native lowering does, and runs no C compiler. Keep it so:
+
+* No semantics of its own: it consumes HIR and the existing analyses, adds
+  no range analysis, never reads NIR or core IR, and changes nothing in
+  `hir/`, `core/` or `surface/` for C's sake. A fact it needs and the
+  analyses lack is the Int path (correct, slower) or C UNSUPPORTED, never
+  an assumption.
+* An Int is an `int64_t` only on a proof (its Range, its domain, or a
+  representation chosen on one); `+ - *` are C arithmetic only when the
+  operands' and `hir::range::add/sub/mul` of them fit int64_t. Never emit C
+  signed arithmetic that can overflow, `<<` or `>>` of a negative, or `%`
+  with a divisor that may be 0 or `-1` with INT64_MIN. Narrowing an Int to
+  an `int64_t` reads `small`, on a proof only; the services' normalization
+  (botlish_rt_v1.h) is what makes it exact.
+* What C cannot implement is a call of a `botlish_rt_v1_*` service the
+  interface declares, listed in the manifest: a missing provider is a link
+  error, never a compilation error, a placeholder or a fake implementation.
+  What the backend cannot translate is `C UNSUPPORTED` at the construct,
+  never a symbol reference. A new service is a row of `ccompile::services`,
+  a declaration and contract in botlish_rt_v1.h (a v2 header for an
+  incompatible change), and the reference provider's implementation.
+* The generated C stays freestanding C11: `stdint.h`, `stdbool.h`,
+  `stddef.h` only; no allocation, I/O, `main`, extension or inline
+  assembly; every global name prefixed; helpers emitted only when used; it
+  compiles warning-free under tests/c-compile.test's flags (`-Wconversion`
+  included). Errors are statuses: never terminate the process.
+* The manifest and the C are deterministic and agree: the manifest names
+  exactly the service symbols the C calls, per translation unit.
+* Harnesses and providers stay outside the backend
+  (`examples/c-freestanding/`), as integration code of a target's.
+
+If you change `ccompile/`, `examples/c-freestanding/` or what the backend
+reads (`hir::specialize`'s instances, `hir::range`'s results, the HIR node
+kinds it compiles), run `tests/c-compile.test` (its cross tests need clang,
+ld.lld, qemu-user and the cross libgcc packages, and are skipped without
+them), `tests/main-cli.test` and `tools/compilerpedia.tcl check`, and
+`examples/c-freestanding/demo.sh`.
 
 ## The macOS application (Botlish.app)
 

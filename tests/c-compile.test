@@ -405,6 +405,37 @@ fn gcd(a: Ticks, b: Ticks) -> Ticks:
 [run(100), crc8(49), crc8(200), gcd(1000, 750), duration(Light::Yellow)]
 }
 
+dict set ::ccCorpus never-joins {
+error Bad
+
+fn pick(n: int) -> int errors Bad:
+    v = if n > 5:
+        return n * 2
+    else:
+        fail Bad
+    v + 1
+
+fn sure(n: int) -> int:
+    r = pick(n):
+        on Bad:
+            return -7
+    r
+
+fn both(n: int) -> int errors Bad:
+    x = pick(n):
+        on Bad:
+            fail Bad
+    x
+
+fn safe(n: int) -> int:
+    r = both(n):
+        on Bad:
+            -1
+    r
+
+[sure(10), sure(1), safe(9), safe(0)]
+}
+
 dict set ::ccCorpus mod-zero {
 fn g(a: int, b: int) -> int:
     mod(a, b)
@@ -579,7 +610,11 @@ test cc-freestanding-objects "a service-free program's objects reference nothing
             set undefined {}
             foreach unit {pure pure_display} {
                 set object [file join $dir $unit.o]
-                lassign [ccExec [list $compiler {*}$::ccStrict -ffreestanding $opt -I $dir -c [file join $dir $unit.c] -o $object]] status output
+                # (-fno-stack-protector: the stack protector's
+                # __stack_chk_fail is a hosted C library's, which a
+                # freestanding build does without.)
+                lassign [ccExec [list $compiler {*}$::ccStrict -ffreestanding -fno-stack-protector $opt -I $dir \
+                    -c [file join $dir $unit.c] -o $object]] status output
                 if {$status} {
                     error $output
                 }
@@ -600,7 +635,7 @@ test cc-freestanding-executable "a service-free program links with no C library 
     set exe [file join $dir pure.free]
     lassign [ccExec [list gcc {*}$::ccStrict -O2 -ffreestanding -nostdlib -static -fno-stack-protector -fno-pie -no-pie \
         -DBOTLISH_PROGRAM=pure "-DBOTLISH_PROGRAM_HEADER=\"pure.h\"" -I $dir \
-        [file join $::ccHarness linux_x86_64_start.c] [file join $dir pure.c] [file join $dir pure_display.c] -o $exe]] status output
+        [file join $::ccHarness linux_start.c] [file join $dir pure.c] [file join $dir pure_display.c] -o $exe]] status output
     if {$status} {
         error $output
     }
@@ -615,9 +650,14 @@ test cc-public-names-prefixed "every global symbol a program defines carries its
     foreach unit {errs errs_display} {
         set object [file join $dir $unit.o]
         ccExec [list $compiler -std=c11 -O2 -I $dir -c [file join $dir $unit.c] -o $object]
-        foreach line [split [lindex [ccExec [list nm -g --defined-only $object]] 1] \n] {
-            if {[llength $line] == 3} {
-                lappend names [lindex $line 2]
+        foreach line [split [lindex [ccExec [list nm -g $object]] 1] \n] {
+            if {[llength $line] == 3 && [lindex $line 1] ne "U"} {
+                # (Mach-O spells a C name with a leading underscore.)
+                set name [lindex $line 2]
+                if {$::tcl_platform(os) eq "Darwin"} {
+                    regsub {^_} $name "" name
+                }
+                lappend names $name
             }
         }
     }
@@ -652,6 +692,58 @@ test cc-cross-targets "the generated C compiles for other architectures, word si
     lsort -unique $result
 } -result {{botlish_rt_v1_int_compare botlish_rt_v1_int_mod botlish_rt_v1_int_mul botlish_rt_v1_int_to_decimal}}
 
+# Executing it there: each corpus program built with no C library at all
+# (examples/c-freestanding/harness/linux_start.c's _start and system calls)
+# for other Linux architectures -- AArch64, RISC-V 64, big-endian s390x,
+# 32-bit ARM and i386 -- run under qemu-user (an emulator, not the hardware)
+# or natively (i386), against the reference. A 32-bit target links the
+# toolchain's own libgcc.a (64-bit % and * helpers): the toolchain's
+# obligation, met by the cross libgcc packages where installed.
+set ::ccCross {}
+foreach {target emulator libgcc} {
+    aarch64-linux-gnu qemu-aarch64 {}
+    riscv64-linux-gnu qemu-riscv64 {}
+    s390x-linux-gnu qemu-s390x {}
+    armv7a-linux-gnueabihf qemu-arm /usr/lib/gcc-cross/arm-linux-gnueabihf/13/libgcc.a
+    i686-linux-gnu {} /usr/lib/gcc-cross/i686-linux-gnu/13/libgcc.a
+} {
+    if {$emulator ne "" && [auto_execok $emulator] eq ""} continue
+    if {$libgcc ne "" && ![file exists $libgcc]} continue
+    if {$emulator eq "" && !([testConstraint linuxX86_64])} continue
+    lappend ::ccCross $target $emulator $libgcc
+}
+testConstraint ccCross [expr {[testConstraint clang] && [auto_execok ld.lld] ne "" && $::ccCross ne ""}]
+
+test cc-cross-execution "corpus programs built with no C library run on other architectures and agree" -constraints ccCross -body {
+    set mismatches {}
+    set runs 0
+    foreach name {recursion loops errors bounds domains structs pure mod-zero} {
+        set source [dict get $::ccCorpus $name]
+        set gen [ccGenerate $source]
+        set dir [dict get $gen dir]
+        set expected [ccReference $source {interp compile}]
+        foreach {target emulator libgcc} $::ccCross {
+            set exe [file join $dir prog.$target]
+            set command [list clang --target=$target -fuse-ld=lld {*}$::ccStrict -O2 -ffreestanding -nostdlib -static \
+                -fno-stack-protector -fno-pic -DBOTLISH_PROGRAM=prog "-DBOTLISH_PROGRAM_HEADER=\"prog.h\"" \
+                -I $dir -I [file join $::projectRoot ccompile] [file join $::ccHarness linux_start.c] \
+                [file join $dir prog.c] [file join $dir prog_display.c] \
+                [file join $::ccProviders botlish_rt_v1_int_arena.c] {*}$libgcc -o $exe]
+            lassign [ccExec $command] status output
+            if {$status} {
+                lappend mismatches "$name $target: build: $output"
+                continue
+            }
+            set got [string trim [lindex [ccExec [concat $emulator [list $exe]]] 1]]
+            incr runs
+            if {$got ne $expected} {
+                lappend mismatches "$name $target: $got (expected $expected)"
+            }
+        }
+    }
+    list [expr {$runs > 0}] $mismatches
+} -result {1 {}}
+
 # ---------------------------------------------------------------------------
 # What the backend does not translate: C UNSUPPORTED at compile time, at the
 # construct -- never a runtime-service reference.
@@ -671,7 +763,7 @@ fn greet(n: int) -> str:
     "hello"
 greet(1)
 }
-} -result {{C UNSUPPORTED} {3:5: the C backend cannot compile a String yet (C-COMPILE-FREESTANDING-MILESTONE-1.md lists what it compiles); this is a limit of the backend, not a missing runtime service} 1}
+} -result {{C UNSUPPORTED} {3:5: the C backend cannot compile a String yet (Compilerpedia's backend.c lists what it compiles); this is a limit of the backend, not a missing runtime service} 1}
 
 test cc-unsupported-list-parameter "a List of unknown length is C UNSUPPORTED" -body {
     lrange [ccUnsupported {

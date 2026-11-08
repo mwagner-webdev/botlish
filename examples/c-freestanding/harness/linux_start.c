@@ -1,18 +1,21 @@
 /*
- * linux_x86_64_start.c -- a freestanding startup harness for Linux x86-64
+ * linux_start.c -- a freestanding startup harness for Linux
  * (C-COMPILE-FREESTANDING-MILESTONE-1.md, "Freestanding and toolchain
  * validation"). It replaces the C library's startup: the process begins at
  * _start, runs the generated program, writes "value: TEXT" or
  * "error: MESSAGE (CODE)" to standard output through the write system
- * call, and exits through the exit system call. It is the one
- * target-specific file of the demonstration (inline assembly for the two
- * system calls), and it supplies the four memory functions the C
- * toolchain itself requires of a freestanding environment; the generated
- * program contains neither.
+ * call, and exits through the exit system call. Its one target-specific
+ * part is the system call (inline assembly per architecture: x86-64,
+ * AArch64, RISC-V 64, s390x, 32-bit ARM, i386); it also supplies the four
+ * memory functions
+ * the C toolchain itself requires of a freestanding environment. The
+ * generated program contains neither.
  *
  *     cc -std=c11 -ffreestanding -nostdlib -static -fno-stack-protector \
  *        -DBOTLISH_PROGRAM=PREFIX -DBOTLISH_PROGRAM_HEADER='"PREFIX.h"' \
- *        -I OUT linux_x86_64_start.c OUT/PREFIX.c OUT/PREFIX_display.c
+ *        -I OUT linux_start.c OUT/PREFIX.c OUT/PREFIX_display.c
+ *
+ * (a cross build: clang --target=aarch64-linux-gnu -fuse-ld=lld ...)
  */
 #include BOTLISH_PROGRAM_HEADER
 
@@ -88,6 +91,9 @@ int memcmp(const void *a, const void *b, size_t n)
     return 0;
 }
 
+#if defined(__x86_64__)
+#define SYS_WRITE 1
+#define SYS_EXIT 60
 static long sys3(long number, long a, long b, long c)
 {
     long result;
@@ -97,11 +103,90 @@ static long sys3(long number, long a, long b, long c)
         : "rcx", "r11", "memory");
     return result;
 }
+#elif defined(__aarch64__)
+#define SYS_WRITE 64
+#define SYS_EXIT 93
+static long sys3(long number, long a, long b, long c)
+{
+    register long x8 __asm__("x8") = number;
+    register long x0 __asm__("x0") = a;
+    register long x1 __asm__("x1") = b;
+    register long x2 __asm__("x2") = c;
+    __asm__ volatile ("svc #0" : "+r"(x0) : "r"(x8), "r"(x1), "r"(x2) : "memory");
+    return x0;
+}
+#elif defined(__riscv) && __riscv_xlen == 64
+#define SYS_WRITE 64
+#define SYS_EXIT 93
+static long sys3(long number, long a, long b, long c)
+{
+    register long a7 __asm__("a7") = number;
+    register long a0 __asm__("a0") = a;
+    register long a1 __asm__("a1") = b;
+    register long a2 __asm__("a2") = c;
+    __asm__ volatile ("ecall" : "+r"(a0) : "r"(a7), "r"(a1), "r"(a2) : "memory");
+    return a0;
+}
+#elif defined(__s390x__)
+#define SYS_WRITE 4
+#define SYS_EXIT 1
+static long sys3(long number, long a, long b, long c)
+{
+    register long r1 __asm__("r1") = number;
+    register long r2 __asm__("r2") = a;
+    register long r3 __asm__("r3") = b;
+    register long r4 __asm__("r4") = c;
+    __asm__ volatile ("svc 0" : "+r"(r2) : "r"(r1), "r"(r3), "r"(r4) : "memory");
+    return r2;
+}
+#elif defined(__arm__)
+#define SYS_WRITE 4
+#define SYS_EXIT 1
+static long sys3(long number, long a, long b, long c)
+{
+    register long r7 __asm__("r7") = number;
+    register long r0 __asm__("r0") = a;
+    register long r1 __asm__("r1") = b;
+    register long r2 __asm__("r2") = c;
+    __asm__ volatile ("svc #0" : "+r"(r0) : "r"(r7), "r"(r1), "r"(r2) : "memory");
+    return r0;
+}
+#elif defined(__i386__)
+#define SYS_WRITE 4
+#define SYS_EXIT 1
+static long sys3(long number, long a, long b, long c)
+{
+    long result;
+    __asm__ volatile ("int $0x80"
+        : "=a"(result)
+        : "a"(number), "b"(a), "c"(b), "d"(c)
+        : "memory");
+    return result;
+}
+#else
+#error "linux_start.c: no system call stub for this architecture"
+#endif
 
+#if defined(__arm__)
+/*
+ * Linux ARM's libgcc (whose __aeabi_uldivmod a 64-bit % calls) reports a
+ * division by zero through the C library's raise: another obligation of
+ * the toolchain's, which a C library would meet. The generated program
+ * never divides by zero (it checks the divisor first), so this only ends the
+ * process should a toolchain routine ever call it.
+ */
+int raise(int signal);
+int raise(int signal)
+{
+    sys3(SYS_EXIT, 128 + signal, 0, 0);
+    return 0;
+}
+
+#endif
 static void put(const char *s, size_t n)
 {
     while (n > 0) {
-        long written = sys3(1 /* write */, 1, (long)s, (long)n);
+        long written = sys3(SYS_WRITE, 1, (long)s, (long)n);
         if (written <= 0) {
             return;
         }
@@ -125,7 +210,10 @@ static void put_text(const char *s)
 }
 
 void _start(void);
-__attribute__((force_align_arg_pointer, noreturn)) void _start(void)
+#if defined(__x86_64__) || defined(__i386__)
+__attribute__((force_align_arg_pointer))
+#endif
+__attribute__((noreturn)) void _start(void)
 {
     P(_value) value;
     P(_status) status = P(_run)(&value);
@@ -143,7 +231,7 @@ __attribute__((force_align_arg_pointer, noreturn)) void _start(void)
         put_text(")\n");
         code = 1;
     }
-    sys3(60 /* exit */, code, 0, 0);
+    sys3(SYS_EXIT, code, 0, 0);
     for (;;) {
     }
 }
