@@ -230,6 +230,40 @@ that links them may run on the worker. -native-startup is an option of
 -emit-native-executable only: a native run (-backend cranelift) keeps the
 driver's worker, and a native library runs on its host's thread.
 
+@topic backend.target-support
+title: Target support packages: a target's runtime artifacts from a package
+summary: -target-support NAME links an executable with the runtime archive an installed target support package supplies for the program's target, after checking it is the target's and this compiler's.
+index: backends
+alias: target support package; target pack; runtime archive package; -target-support; target runtime
+keywords: botlish-target-support.json, runtime archive, libbotlish_runtime.a, system linker, runtime ABI, fingerprint, identity record, triple, target view, .targets, Android, Bionic
+related: cli.options cli.packages cli.tools backend.targets backend.native-executable error.native-target-support
+
+== WHAT IT IS
+An ordinary package that supplies, for a target the compiler already
+generates code for, the runtime an executable of that target is linked
+with: today the native runtime archive the system linker links. It says so
+in botlish-target-support.json at its package root (its target view's, for
+a target-aware package): the target, its triple, the linker (system), the
+archive's path in the package with its runtime ABI fingerprint, and the
+system libraries the archive needs. It adds no code generation, no
+language feature and no compiler pass: a target the compiler cannot
+generate code for stays unknown.
+
+== WHEN IT IS USED
+Only when a compilation names it:
+    botlish -emit-native-executable -target-support NAME FILE.bot
+Installing one selects nothing and changes no target. The package is
+looked up in the application's package tree of the program's target
+(.bot_modules/.targets/TARGET/NAME, else .bot_modules/NAME), never the
+host's, and checked before any linker runs: its target is a known one and
+the compilation's, its triple the target's, its linker the system linker,
+its fingerprint this compiler's, its system libraries the system linker's;
+and the archive's own identity record -- the triple and the fingerprint the
+runtime was built with, read from its bytes without running it -- agrees.
+An archive built for another operating system or C library of the same
+architecture is refused. A missing C compiler driver is the link's own
+error, not the package's.
+
 @topic backend.native-library
 title: Native libraries: Botlish functions a C host calls
 summary: `exported c fn` declares a C export; -emit-native-library NAME builds libNAME.a, libNAME.so, NAME.h and a manifest that any C host can link and call.
@@ -258,7 +292,11 @@ aarch64):
                          public C functions are global symbols
     libNAME.so           the same as a shared library
     NAME.h               the C interface
-    NAME.manifest.json   the same interface as data, for tools
+    NAME.manifest.json   the same interface as data, for tools (schema 2:
+                         also each file's SHA-256, the compiler's runtime
+                         ABI, and who owns and releases every value that
+                         crosses: what an external tool reads instead of
+                         the program, cli.tools)
 
 C calls `NAME_checked(instance, int64_t n, int64_t *result, NAME_error
 **error)`. An exported c fn is an ordinary function to Botlish code and to
@@ -716,8 +754,8 @@ title: Every command-line option
 summary: The options of botlish (tclsh9.0 main.tcl): backend and warning selection, program arguments, building, checking, the language server, inspection output, and the reference.
 index: backends
 alias: options; flags of the command line; command-line options
-keywords: -backend, -warnings, -target, -L, -F, -runtime-path, -argv, -argv-hex, -argv-none, -emit-native-executable, -native-startup, -emit-hir-interchange, -emit-native-library, -export, -out, -emit-c, -check, -color, -excerpts, -lsp, -lsp-scheduler, -lsp-worker, -code, -hir, -ast, -aot, -aot-data, -aot-spec, -contexts, -direct, -traits, -emit-nir, -emit-clif, -help, -version
-related: cli.usage cli.output cli.exit-status cli.lsp lint.policy backend.targets backend.hir-interchange backend.native-executable backend.native-startup backend.native-library backend.c concept.argv
+keywords: -backend, -warnings, -target, -L, -F, -runtime-path, -target-support, -argv, -argv-hex, -argv-none, -emit-native-executable, -native-startup, -emit-hir-interchange, -emit-native-library, -export, -out, -emit-c, -check, -color, -excerpts, -lsp, -lsp-scheduler, -lsp-worker, -code, -hir, -ast, -aot, -aot-data, -aot-spec, -contexts, -direct, -traits, -emit-nir, -emit-clif, -help, -version
+related: cli.usage cli.output cli.exit-status cli.lsp lint.policy backend.targets backend.hir-interchange backend.native-executable backend.native-startup backend.native-library backend.target-support backend.c concept.argv
 
 == RUNNING
     -backend NAME     interp (default), compile, cranelift,
@@ -764,6 +802,12 @@ own process arguments.
                               512 MiB stack; macOS AArch64 only), fixed
                               into the executable (backend.native-startup);
                               an option of -emit-native-executable only
+    -target-support NAME      link the executable with the runtime archive
+                              of the target support package NAME, installed
+                              in the application's package tree of the
+                              program's target, checked first
+                              (backend.target-support); an option of
+                              -emit-native-executable only
     -emit-hir-interchange     each input's analyzed HIR as FILE.hirx
                               (backend.hir-interchange)
     -emit-native-library NAME the native library NAME from the one input:
@@ -985,13 +1029,72 @@ The program cannot choose its exit status (capability.process-exit-status).
 To see a program's value, run it the development way (botlish FILE.bot,
 cli.output).
 
+@topic cli.tools
+title: External tools: a package's program, run explicitly
+summary: botlish tool runs a tool an installed package declares (botlish.json schema 4's "tools"), in a process of its own, with a versioned request; installing, importing or compiling never runs one.
+index: backends
+alias: external tool; botlish tool; package tool; compiler extension; compiler plugin; build tool; code generator; integration tool
+keywords: tool, tools, schema 4, protocol, request, BOTLISH_TOOL_REQUEST, -artifact, -out, -report, -target-support, host, target, ambiguous, qualified, TOOL-AMBIGUOUS, TOOL-NOT-DIRECT, TOOL-PROTOCOL, TOOL-HOST, TOOL-MODIFIED, manifest, native library, generator
+related: cli.packages backend.native-library backend.target-support backend.targets
+
+== THE COMMANDS
+    botlish tools [-project DIR]
+    botlish tool [-project DIR] -out DIR [-artifact LIB.manifest.json]...
+                 [-target T] [-target-support NAME] [-report FILE] TOOL [ARG...]
+tool's own options come before TOOL; every word after it is the tool's,
+exactly as given (spaces, quotes, an empty word, a word starting with < or
+| alike). TOOL is a short name (emit-caller) or a qualified one
+(abi_tools:emit-caller).
+
+== WHAT A TOOL IS
+A package of botlish.json schema 4 may declare tools: for each, the tool
+protocol it speaks, a one-line summary, its program for each host it runs
+on (a native executable in the package, checked when the package is packed
+and when it is installed), the input kinds it requires (native-library) and
+the environment variables it reads. A tool is a program a developer runs to
+build or integrate something outside Botlish -- a C caller, an Android
+project, a React Native module -- from what the compiler produces. It is
+not a compiler pass: it cannot change what a program means, and it runs in
+a process of its own, never inside the compiler.
+
+== WHEN IT RUNS
+Only when `tool` names it. Installing, updating, verifying or removing the
+package, importing its modules, compiling a program that uses them and
+listing the tools never run any program of a package, and an installed
+program is never an executable file: `tool` checks it against the
+installation record, copies it into a private temporary directory and
+makes it executable there. Only the project's own dependencies provide
+tools it runs: a short name two of them declare is TOOL-AMBIGUOUS (name
+one: PACKAGE:TOOL), one only another package's dependency declares
+TOOL-NOT-DIRECT; a tool of a newer protocol is TOOL-PROTOCOL, one with no
+program for this host TOOL-HOST. The program for this host runs, whatever
+-target names: the host runs the tool, the target runs what it builds.
+
+== THE REQUEST AND THE OUTCOME
+The tool gets BOTLISH_TOOL_REQUEST, a JSON file: protocol 1, the tool and
+its package's directory, the compiler's command (to compile with), the
+project, the host and the target, the output directory, every -artifact
+(a native library manifest, checked against the files it describes: a
+manifest of another build is TOOL-ARTIFACT), the target support package
+named, its declared environment variables (whether set, never their
+values), the arguments and where it may write structured diagnostics. Its
+standard streams are the command's own, and its exit status the
+command's; one ended by a signal fails the command (TOOL-CRASHED), and one
+that changed the project's installed packages fails it whatever it
+returned (TOOL-MODIFIED). -report FILE writes the outcome as JSON.
+
+== WHAT IT IS NOT
+No sandbox: a tool runs with the user's own permissions, as any program
+the user starts. What is guaranteed is that nothing but `tool` runs it.
+There are no compiler plugins, hooks, grammar extensions or passes.
+
 @topic cli.packages
 title: The package manager: botlish.json, .botpkg artifacts, add and install
 summary: botlish add, install, update, remove and verify manage a project's packages -- one shared dependency graph -- from local .botpkg artifacts and botlish.json. Nothing is downloaded or run.
 index: backends
 alias: package manager; botlish.json; .botpkg; botlish add; botlish install; package artifact; lock file; dependency versions
-keywords: add, install, update, remove, verify, pack, inspect, graph, package graph, shared dependency, DEPENDENCY-CONFLICT, held, native, plan, deploy, botlish.json, lock, request, repository, artifact, editable, sha256, .bot_modules, targets, target view, .targets, bundled, system library, origins, -target, -drop-target, native add, native require, native audit, package stage, package compare, provenance, evidence, runtime, run-time dependency, license, notices, schema 3, authoring
-related: rule.package-modules concept.modules concept.native-link-plan cli.usage cli.exit-status backend.targets
+keywords: add, install, update, remove, verify, pack, inspect, graph, tool, tools, package graph, shared dependency, DEPENDENCY-CONFLICT, held, native, plan, deploy, botlish.json, lock, request, repository, artifact, editable, sha256, .bot_modules, targets, target view, .targets, bundled, system library, origins, -target, -drop-target, native add, native require, native audit, package stage, package compare, provenance, evidence, runtime, run-time dependency, license, notices, schema 3, authoring
+related: rule.package-modules concept.modules concept.native-link-plan cli.usage cli.exit-status backend.targets cli.tools backend.target-support
 
 == THE COMMANDS
     botlish add NAME|FILE.botpkg|DIR [-request R] [-replace]
@@ -1005,7 +1108,10 @@ related: rule.package-modules concept.modules concept.native-link-plan cli.usage
     botlish native inspect FILE [-target T]
     botlish native plan [-target T] [-include]
     botlish native deploy -target T -out DIR [-force]
-and, for a package's author (AUTHORING A NATIVE PACKAGE, below):
+    botlish tool [-project DIR] -out DIR [-artifact M]... TOOL [ARG...]
+    botlish tools [-project DIR]
+(tool runs a package's external tool, explicitly, in a process of its own:
+cli.tools) and, for a package's author (AUTHORING A NATIVE PACKAGE, below):
     botlish native add FILE -target T -name N [-symbol S]... [-license EXPR]
     botlish native require NAME -target T -origin system [-identity I]
     botlish native require NAME -target T -runtime always|capability|optional -purpose TEXT

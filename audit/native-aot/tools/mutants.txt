@@ -313,9 +313,9 @@ fn crt_args_for(flavor: LinkerFlavor, _program: &Program) -> Vec<String> {
 @@ sys-runtime-variable-ignored BOTLISH_NATIVE_RUNTIME is not read: the archive beside the driver is always linked
 ## native/src/codegen/aot.rs
 <<<<
-    let (path, built) = match std::env::var_os("BOTLISH_NATIVE_RUNTIME").filter(|p| !p.is_empty()) {
+        None => match std::env::var_os("BOTLISH_NATIVE_RUNTIME").filter(|p| !p.is_empty()) {
 ====
-    let (path, built) = match std::env::var_os("BOTLISH_NATIVE_RUNTIME_IGNORED").filter(|p| !p.is_empty()) {
+        None => match std::env::var_os("BOTLISH_NATIVE_RUNTIME_IGNORED").filter(|p| !p.is_empty()) {
 >>>>
 
 @@ sys-runtime-bundle-ignored a driver in a macOS application bundle looks for the runtime archive beside itself, in Contents/MacOS, never in the bundle's Contents/Resources (MACOS-AARCH64-MILESTONE-9.md)
@@ -453,11 +453,11 @@ fn crt_args_for(flavor: LinkerFlavor, _program: &Program) -> Vec<String> {
 @@ sys-failed-link-replaces a system link removes the previous executable before it knows the link succeeds
 ## native/src/codegen/aot.rs
 <<<<
-    let runtime = runtime_archive()?;
+    let runtime = runtime_archive(search.runtime_archive.as_deref())?;
     let tool = system_linker(LINKER)?;
 ====
     let _ = std::fs::remove_file(destination);
-    let runtime = runtime_archive()?;
+    let runtime = runtime_archive(search.runtime_archive.as_deref())?;
     let tool = system_linker(LINKER)?;
 >>>>
 
@@ -513,9 +513,9 @@ fn crt_args_for(flavor: LinkerFlavor, _program: &Program) -> Vec<String> {
 @@ cli-drops-main-thread main.tcl's -native-startup main-thread is dropped: the executable is the worker's
 ## main.tcl
 <<<<
-        set executable [native::executable $hir [file rootname $path] -startup $::nativeStartup]
+        set executable [native::executable $hir [file rootname $path] -startup $::nativeStartup {*}$extra]
 ====
-        set executable [native::executable $hir [file rootname $path] -startup worker]
+        set executable [native::executable $hir [file rootname $path] -startup worker {*}$extra]
 >>>>
 
 @@ cli-default-main-thread main.tcl's default policy is the main thread's, not the worker's
@@ -533,9 +533,9 @@ if {$nativeStartup eq ""} {
 @@ api-replaces-main-with-worker native::executable hands the driver the worker's policy whatever -startup says
 ## native/native.tcl
 <<<<
-    set lines [WithProgramDirs $hir 0 {Driver executable $text [file normalize $path] --startup $startup}]
+    set lines [WithProgramDirs $hir 0 {Driver executable $text [file normalize $path] --startup $startup {*}$runtimeArchive}]
 ====
-    set lines [WithProgramDirs $hir 0 {Driver executable $text [file normalize $path] --startup worker}]
+    set lines [WithProgramDirs $hir 0 {Driver executable $text [file normalize $path] --startup worker {*}$runtimeArchive}]
 >>>>
 
 @@ api-default-main-thread native::executable's default policy is the main thread's
@@ -611,11 +611,19 @@ if {$nativeStartup eq ""} {
 @@ fingerprint-ignores-record the ABI fingerprint leaves the program record's layout out: a runtime reads another layout's startup word
 ## native/src/runtime/aotimage.rs
 <<<<
+const ABI_SCALAR_WORDS: [u64; 26] = {
+====
+const ABI_SCALAR_WORDS: [u64; 24] = {
+>>>>
+## native/src/runtime/aotimage.rs
+<<<<
         std::mem::size_of::<LinkedProgram>() as u64,
         std::mem::offset_of!(LinkedProgram, startup) as u64,
-    ];
+    ]
+};
 ====
-    ];
+    ]
+};
 >>>>
 
 @@ system-link-no-stack-size the system linker links a main-thread executable without LC_MAIN's stack size: the 8 MiB default main stack

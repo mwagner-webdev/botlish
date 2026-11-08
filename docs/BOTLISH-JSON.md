@@ -1,9 +1,11 @@
-# botlish.json, schemas 1, 2 and 3
+# botlish.json, schemas 1 to 4
 
 The normative specification of `botlish.json`, the package manager's
 metadata file (PACKAGE-MANAGER-MILESTONE-1.md; schema 2's targets and native
 dependencies: PACKAGE-MANAGER-MILESTONE-2.md; schema 3's run-time
-dependencies, licenses and notices: PACKAGE-MANAGER-MILESTONE-3.md). The implementation is
+dependencies, licenses and notices: PACKAGE-MANAGER-MILESTONE-3.md; schema
+4's tools: EXTERNAL-COMPILER-TOOLS-AND-TARGET-PACKAGES-MILESTONE-1.md and
+BOTLISH-TOOLS.md). The implementation is
 `pm/descriptor.tcl` (the rules), `pm/targets.tcl` (schema 2's `targets`),
 `pm/json.tcl` (the encoding) and `pm/version.tcl` (versions and requests);
 `tests/package-manager.test`'s `pm-json-*`, `pm-version-*` and
@@ -30,6 +32,7 @@ Contents:
 * [11. Evolution](#11-evolution)
 * [12. Schema 2: targets and native dependencies](#12-schema-2-targets-and-native-dependencies)
 * [13. Schema 3: run-time dependencies, licenses and notices](#13-schema-3-run-time-dependencies-licenses-and-notices)
+* [14. Schema 4: tools](#14-schema-4-tools)
 
 ## 1. Where it is, and who reads it
 
@@ -72,6 +75,7 @@ The value is an object whose keys are drawn from exactly these:
 | `sources` | object | direct dependency name -> where it comes from (section 7) |
 | `targets` | object | schema 2 only: the targets a package supports, each with its target-specific files and native dependencies (section 12) |
 | `origins` | object | schema 2 only, projects: native library name -> `"system"` or `"bundled"`, the consumer's choice where a package offers both (section 12) |
+| `tools` | object | schema 4 only: the programs the package carries for a developer to run explicitly (section 14) |
 
 Any other key is an error, never ignored: a key a later schema adds must not
 be half-understood by this one, and there is no `scripts`, `main`, `exports`,
@@ -240,7 +244,9 @@ artifact (section 8).
 The package manager writes a `botlish.json` in one form:
 
 * keys in the order `schema`, `name`, `version`, `dependencies`, `lock`,
-  `sources`, `targets`, `origins`; an absent `name` or `version`, an empty
+  `sources`, `targets`, `tools`, `origins`; in `tools`, the tools sorted by
+  name, each tool's keys in the order `protocol`, `summary`, `programs`
+  (its hosts sorted), `inputs`, `environment` (empty ones left out); an absent `name` or `version`, an empty
   `lock`, empty `sources`, `targets` and `origins` are left out, and
   `dependencies` is always written (`{}` when there is none); `schema` is
   the file's own (a schema 1 file stays schema 1);
@@ -598,3 +604,80 @@ Refused, with the reason given:
 | `"license": "MIT AND"` | not a license expression |
 | `license` or `notices` on a system library | a system library is the target's own |
 | `notices` without `license` | the license the notices belong to |
+
+## 14. Schema 4: tools
+
+`"schema": 4` is schema 3 with one key more, `tools`, and nothing else. A
+schema 1, 2 or 3 file using it is refused, saying it is a schema 4 key; a
+reader of schemas 1 to 3 (PM-3's) refuses schema 4 as an unsupported
+schema, so a file that declares tools is never half-read as one without
+them. The author's commands raise a package's schema to 4 only when it
+declares a tool.
+
+    "tools": {
+      TOOL: {
+        "protocol": N,                    required
+        "summary": TEXT,                  required
+        "programs": {HOST: PATH, ...},    required, at least one
+        "inputs": [KIND, ...],            optional
+        "environment": [VARIABLE, ...]    optional
+      }, ...
+    }
+
+| key | | meaning |
+|---|---|---|
+| TOOL | | the tool's name: a lowercase letter, then lowercase letters, digits and `-`, at most 64 characters |
+| `protocol` | required | the tool protocol it speaks (BOTLISH-TOOLS.md): a positive integer; any is accepted here, a tool command runs only a protocol it speaks |
+| `summary` | required | one line, 1 to 300 characters |
+| `programs` | required | each host the tool runs on (a compilation target's name) -> the archive path of its program, a native executable of that host: checked against the file when the package is packed and whenever its artifact is acquired, never run by either |
+| `inputs` | optional | the artifact kinds it requires (`native-library`) |
+| `environment` | optional | environment variables it reads, by name (reported, never their values) |
+
+A tool runs only when `botlish tool` names it (BOTLISH-TOOLS.md, sections 3
+to 5): installing the package, importing its modules or compiling a program
+that uses them runs nothing, and an installed program is never executable.
+`tools` is an artifact's like `targets`: packed, validated again at every
+installation. A tool program is a declared native file of the package, so
+the native audit of a target-aware package does not report it.
+
+Refused, with the reason given:
+
+| text (in `tools`) | why |
+|---|---|
+| `"tools"` in a schema 3 file | a schema 4 key |
+| `{}` | a package without tools leaves `tools` out |
+| `{"Bad": ...}` | not a tool name |
+| a tool without `protocol`, `summary` or `programs` | each is stated |
+| `"protocol": 0` | a positive integer |
+| `"programs": {}` | at least one host |
+| `"programs": {"linux-sparc": ...}` | not a host |
+| `"programs": {"linux-x86_64": "../tool"}` | not an archive path |
+| `"script": ...` (any other key) | unknown key: no script, hook or install step exists |
+| an `environment` name given twice | each once |
+
+At packing and acquisition: a program that is no file of the package, or
+not a native executable of its host (a script, a library, another
+architecture's), refuses the package.
+
+### Example
+
+```json
+{
+  "schema": 4,
+  "name": "abi_tools",
+  "version": "0.1.0",
+  "dependencies": {},
+  "tools": {
+    "emit-caller": {
+      "protocol": 1,
+      "summary": "generates a C command-line caller of a Botlish native library from its manifest",
+      "programs": {
+        "linux-x86_64": "tools/linux-x86_64/emit-caller"
+      },
+      "inputs": [
+        "native-library"
+      ]
+    }
+  }
+}
+```

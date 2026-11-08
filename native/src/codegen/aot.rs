@@ -312,6 +312,17 @@ pub struct LinkSearch {
     pub libraries: Vec<String>,
     pub frameworks: Vec<String>,
     pub runtime: Vec<String>,
+    /// A target support package's runtime archive (main.rs's
+    /// `--runtime-archive`; main.tcl's -target-support,
+    /// EXTERNAL-COMPILER-TOOLS-AND-TARGET-PACKAGES-MILESTONE-1.md): the
+    /// archive the system linker links instead of the driver's own, which
+    /// only the system linker links.
+    pub runtime_archive: Option<PathBuf>,
+}
+
+/// This driver's compilation target's name (core/cabi.tcl's names).
+pub fn host_target() -> &'static str {
+    HOST_TARGET
 }
 
 #[cfg(test)]
@@ -365,7 +376,25 @@ pub fn emit_executable(program: &Program, destination: &Path, search: &LinkSearc
         }
     }
     let destination = std::path::absolute(executable_path(destination)).map_err(|e| e.to_string())?;
-    match chosen_linker(program)? {
+    let linker = match &search.runtime_archive {
+        // A target support package's runtime archive is the system linker's
+        // to link: chosen for it unless BOTLISH_NATIVE_LINKER names another,
+        // which is refused, never ignored.
+        Some(archive) => match std::env::var("BOTLISH_NATIVE_LINKER").ok().as_deref() {
+            None | Some("" | "system" | "auto") => Linker::System,
+            Some(other) => {
+                return Err(LinkError {
+                    detail: Some("RUNTIME"),
+                    message: format!(
+                        "native link failed: the runtime archive {} (a target support package's) is linked by the system linker, and BOTLISH_NATIVE_LINKER names {other:?}: unset it or name system",
+                        archive.display()
+                    ),
+                });
+            }
+        },
+        None => chosen_linker(program)?,
+    };
+    match linker {
         Linker::Rustc => link_rustc(program, &destination, search, startup)?,
         Linker::Stub if calls_c(program) => {
             return Err(format!(
@@ -1368,16 +1397,20 @@ fn system_linker(flavor: LinkerFlavor) -> Result<PathBuf, LinkError> {
     Ok(tool)
 }
 
-/// The runtime archive the system linker links: `BOTLISH_NATIVE_RUNTIME`
-/// when set, else the driver's own (`packaged_runtime_archive`). Checked
+/// The runtime archive the system linker links: CHOSEN (a target support
+/// package's, `LinkSearch::runtime_archive`) when given, else
+/// `BOTLISH_NATIVE_RUNTIME` when set, else the driver's own
+/// (`packaged_runtime_archive`). Checked
 /// before anything is linked: a file, a static archive, of this host's
 /// object format and architecture (`archive_machine`). That it holds the
 /// helpers the program's code calls is the linker's to find
 /// (`undefined_helper`), and the ABI it was built for the executable's own,
 /// when it starts (the program record's fingerprint,
 /// `runtime::program::read_linked`).
-fn runtime_archive() -> Result<PathBuf, LinkError> {
-    let (path, built) = match std::env::var_os("BOTLISH_NATIVE_RUNTIME").filter(|p| !p.is_empty()) {
+fn runtime_archive(chosen: Option<&Path>) -> Result<PathBuf, LinkError> {
+    let (path, built) = match chosen {
+        Some(path) => (path.to_path_buf(), RUNTIME_SUPPORTED),
+        None => match std::env::var_os("BOTLISH_NATIVE_RUNTIME").filter(|p| !p.is_empty()) {
         Some(path) => (PathBuf::from(path), RUNTIME_BUILT),
         None => {
             let driver = std::env::current_exe().map_err(|e| e.to_string())?;
@@ -1385,6 +1418,7 @@ fn runtime_archive() -> Result<PathBuf, LinkError> {
             let path = packaged_runtime_archive(&driver, bundles).ok_or("cannot locate native runtime")?;
             (path, runtime_remedy(&driver, bundles))
         }
+        },
     };
     if !path.is_file() {
         return Err(runtime_error(format!(
@@ -1405,6 +1439,8 @@ fn runtime_archive() -> Result<PathBuf, LinkError> {
 /// Where a missing or unusable runtime archive comes from: a checkout's
 /// build, or the distribution that carries one.
 const RUNTIME_BUILT: &str = "the runtime archive is built with the compiler (cargo build --release --manifest-path native/Cargo.toml in a checkout; the single executable carries its own, and the macOS application its Contents/Resources/libbotlish_runtime.a)";
+/// The same for a target support package's archive (`--runtime-archive`).
+const RUNTIME_SUPPORTED: &str = "it is the runtime archive of the target support package the compilation names (-target-support): reinstall the package, or name another";
 /// The same for a driver in the macOS application, whose user has no
 /// checkout to build in: the application is damaged.
 const RUNTIME_BUNDLED: &str = "the macOS application carries it as Contents/Resources/libbotlish_runtime.a: the application is incomplete or damaged (reinstall it)";
@@ -1647,7 +1683,7 @@ pub fn system_linker_facts() -> Vec<(&'static str, Result<Vec<String>, LinkError
     vec![
         ("flavor", Ok(vec![flavor.to_string(), HOST_TARGET.to_string()])),
         ("tool", system_linker(LINKER).map(|tool| vec![tool.display().to_string()])),
-        ("runtime", runtime_archive().map(|path| vec![path.display().to_string(), HOST_MACHINE.to_string()])),
+        ("runtime", runtime_archive(None).map(|path| vec![path.display().to_string(), HOST_MACHINE.to_string()])),
         ("libraries", Ok(runtime_system_libraries(LINKER).iter().map(|l| l.to_string()).collect())),
     ]
 }
@@ -1695,7 +1731,7 @@ fn undefined_helper(output: &str) -> Option<&'static str> {
 /// runtime archive (`runtime_archive`) and the libraries the program
 /// declares.
 fn link_system(program: &Program, destination: &Path, search: &LinkSearch, startup: Startup) -> Result<(), LinkError> {
-    let runtime = runtime_archive()?;
+    let runtime = runtime_archive(search.runtime_archive.as_deref())?;
     let tool = system_linker(LINKER)?;
     let inputs = resolve_link_plan(program, search)?;
     log_plan(&inputs);

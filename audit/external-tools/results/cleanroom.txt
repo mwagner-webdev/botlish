@@ -1,0 +1,64 @@
+# The clean room of EXTERNAL-COMPILER-TOOLS-AND-TARGET-PACKAGES-MILESTONE-1.md, section 10:
+# audit/external-tools/cleanroom/cleanroom.sh with the single executable built from
+# f2787af plus this change (14855736 bytes) and the packages audit/external-tools/tools/
+# packages.sh packed with it. Room paths are /tmp/botlish-cleanroom.XXXXXX.
+
+== summary
+PASS A ordinary package imported and run
+PASS B installing, verifying, compiling and listing ran no tool
+PASS B the installed program is not executable
+PASS B tool ran exactly the named tool once
+PASS B arguments arrived exactly
+PASS B a tool's exit status is the command's
+PASS C an executable linked with the target support package's runtime
+PASS C a removed target support package is refused, precisely
+PASS D a generated C caller of the real library compiled and ran
+PASS E a host module's adapter compiled into a host and ran
+PASS 2048 the C caller played as the interpreter
+PASS 2048 the host module played as the interpreter
+PASS the run reached nothing of the checkout (/home/user/botlish)
+PASS the run used no Tcl but the single file's own
+
+== B: botlish tools
+abi_tools:emit-caller (abi_tools 0.1.0), protocol 1, hosts linux-x86_64, inputs native-library
+    generates a C command-line caller of a Botlish native library from its manifest
+hostgen:host-module (hostgen 0.1.0), protocol 1, hosts linux-x86_64, inputs native-library
+    generates a JavaScript-like host module (spec, adapter, package and build manifests) over a Botlish native library
+probe_tools:probe (probe_tools 0.1.0), protocol 1, hosts linux-x86_64
+    records how it was run
+
+== B: botlish tool probe exit 7 (stderr)
+tool probe_tools:probe (probe_tools 0.1.0) exited with status 7
+
+== C: botlish -emit-native-executable -target-support botlish_target_linux hello.bot
+target support: botlish_target_linux (linux-x86_64, runtime ROOM/app/.bot_modules/.targets/linux-x86_64/botlish_target_linux/runtime/libbotlish_runtime.a)
+executable: hello
+value {int 42}
+
+== C: the same after botlish remove botlish_target_linux
+hello.bot: target support: no package botlish_target_linux is installed for linux-x86_64 (ROOM/app/.bot_modules/botlish_target_linux does not exist): install the target support package (add it to the application), or name another (NATIVE TARGET-SUPPORT MISSING)
+help: botlish -help error.native-target-support
+
+== D: botlish tool -out gen -artifact lib/game.manifest.json emit-caller
+emit-caller: ROOM/gen/game_caller.c, 8 exports of game
+
+== D: the generated caller, its first and last lines (of 323)
+new_game	ok	str	0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+spawn_first	ok	str	0 2 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+spawn_first	ok	str	0 2 4 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+move	ok	str	0 2 4 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+...
+move	ok	str	744 8 32 8 2 64 16 2 16 8 32 16 8 2 4 8 2
+spawn_first	ok	str	744 8 32 8 2 64 16 2 16 8 32 16 8 2 4 8 2
+
+== E: botlish tool ... host-module -name game-2048
+host-module: ROOM/hm (game-2048, module Game), 8 methods
+
+== E: the host harness's last lines
+score 744
+move BotlishError InvalidState
+move TypeError ARGUMENT-TYPE
+move RangeError NUMBER-NOT-SAFE-INTEGER
+move RangeError NUMBER-NOT-SAFE-INTEGER
+move TypeError ARGUMENT-COUNT
+eval TypeError NO-SUCH-METHOD

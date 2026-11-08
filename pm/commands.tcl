@@ -62,8 +62,9 @@ namespace eval pm::cli {
         native-require {-package DIR -target T -origin O -linkage L -identity I -version V -pkg-config M -symbol S
             -runtime WHEN -capability C -purpose TEXT -kind K -loaded-by L -replace {}}
         native-audit {-target T}
+        tools {-project DIR}
     }
-    variable commands {add install update remove verify package native}
+    variable commands {add install update remove verify package native tool tools}
 }
 
 proc pm::cli::usage {} {
@@ -93,6 +94,9 @@ proc pm::cli::usage {} {
         "                     -purpose TEXT \[-capability C\] \[-identity I\]" \
         "                     \[-kind library|facility\] \[-loaded-by LIB\]" \
         "       $me native audit \[DIR\] \[-target T\]" \
+        "       $me tool \[-project DIR\] -out DIR \[-artifact MANIFEST\]... \[-target T\]" \
+        "                     \[-target-support NAME\] \[-report FILE\] TOOL \[ARG...\]" \
+        "       $me tools \[-project DIR\]" \
         "" \
         "Options of add, install, update and remove:" \
         "  -project DIR       the project (the directory of its botlish.json);" \
@@ -109,7 +113,8 @@ proc pm::cli::usage {} {
         "Packages are installed under PROJECT/.bot_modules as the application's one" \
         "dependency graph: each package once, shared by every package that depends on" \
         "it, its version the one every lock in the graph names (locks that disagree" \
-        "are a conflict). Nothing is downloaded and nothing a package holds is run." \
+        "are a conflict). Nothing is downloaded and nothing a package holds is run," \
+        "except a tool `tool` names, explicitly, in a process of its own." \
         "Reference: $me -help packages"] \n]
 }
 
@@ -143,6 +148,11 @@ proc pm::cli::Run {argv} {
     variable options
     set command [lindex $argv 0]
     set rest [lrange $argv 1 end]
+    if {$command eq "tool"} {
+        # Every word after the tool's name is the tool's own, options
+        # included: tool parses its own options, before the name.
+        return [pm::commands::tool $rest {}]
+    }
     if {$command eq "package"} {
         set command [lindex $rest 0]
         set rest [lrange $rest 1 end]
@@ -886,6 +896,15 @@ proc pm::commands::pack {words given} {
     set files [Collect $dir]
     dict set files botlish.json [pm::descriptor::encode $descriptor 0]
     set targetNotes [PackTargets $descriptor $files $dir]
+    if {[dict getdef $descriptor tools {}] ne ""} {
+        set problems [pm::tools::Problems $descriptor $files]
+        if {$problems ne ""} {
+            pm::Fail PACK "$dir cannot be packed:\n  [join $problems "\n  "]"
+        }
+        dict for {tool spec} [dict get $descriptor tools] {
+            lappend targetNotes "  tool $tool: protocol [dict get $spec protocol], hosts [join [lsort [dict keys [dict get $spec programs]]] {, }] (run only by tool)"
+        }
+    }
     # The native audit (PACKAGE-MANAGER-MILESTONE-3.md): a target-aware
     # package is packed only when every target's mandatory native closure
     # is complete; a pure-Botlish package goes on as in PM-1.

@@ -34,3 +34,14 @@ pub extern "C" fn main(_argc: c_int, _argv: *const *const c_char) -> c_int {
     // record, the one object that defines it, relocated by this link.
     unsafe { aot::linked_main(&*std::ptr::addr_of!(botlish_program)) }
 }
+
+/// The archive's identity record (runtime::aotimage::identity_record): the
+/// target triple it was built for and the runtime ABI fingerprint of the
+/// runtime it holds, as bytes the compiler reads from the archive without
+/// running it -- a target support package's runtime archive is accepted only
+/// for its own target and the driver's own ABI
+/// (EXTERNAL-COMPILER-TOOLS-AND-TARGET-PACKAGES-MILESTONE-1.md). Kept by
+/// `#[used]`; nothing reads it at run time.
+#[used]
+static BOTLISH_RUNTIME_IDENTITY: [u8; botlish_native::runtime::aotimage::IDENTITY_LEN] =
+    botlish_native::runtime::aotimage::identity_record(env!("BOTLISH_RUNTIME_TRIPLE"));
