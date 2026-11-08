@@ -327,8 +327,17 @@ The one highlighting check CI does not run is `sh-grammar-textmate-fixture`
 packages); it runs locally with `npm ci` in editors/vscode.
 
 The declared-name fix of the grammars (section 8) came after these runs,
-from trying the grammar in VS Code; its commit's runs are the branch's
-next.
+from trying the grammar in VS Code. Its commit (170741c, and 0aff616,
+documentation only beyond it): every run of every workflow passed again,
+on 2026-11-07 and 08.
+
+| workflow | run | result |
+|---|---|---|
+| tests.yml (dispatched) | 42415277212 | every job passed; compile: 11,595 tests, 0 failed, no `neovim` or `vimEditor` skip (`lsp-neovim-highlighting` and the Vim checks ran with the declared-name rule) |
+| tests-arm64.yml (dispatched) | 42415280027 | every job passed |
+| windows-x86_64.yml | 42415272536 | every job passed |
+| macos-arm64.yml | 42415272443 | every job passed |
+| icy-tower (Windows, macOS) | 42415272470, 42415272447 | passed |
 
 ## 10. Limitations
 
