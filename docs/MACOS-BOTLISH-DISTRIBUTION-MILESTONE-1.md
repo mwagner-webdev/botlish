@@ -647,8 +647,8 @@ canary failed three aot-run.test tests' reading of Windows output on
 [executed, Linux x86-64, this sandbox] the Linux single executable built
 by single/build.sh (14,853,994 bytes) passes single/smoke-test.sh (the
 new `-aot-run` refusal without a C compiler included) and
-single/ffi-smoke-test.sh; audit/single-executable's mutants [pending] (a
-run in progress when this was written). [pending] the full suites dispatched on `460fcee` (tests.yml,
+single/ffi-smoke-test.sh, and audit/single-executable/tools/mutate.tcl
+kills its 11 mutants (none survived). [pending] the full suites dispatched on `460fcee` (tests.yml,
 tests-arm64.yml), Windows' workflow and single-executable.yml (section 24).
 
 ## 24. CI runs and artifacts

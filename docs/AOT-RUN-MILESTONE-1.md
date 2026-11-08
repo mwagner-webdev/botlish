@@ -308,9 +308,9 @@ TerminateProcess and requires the program gone and the directory removed).
 
 | host | where | result |
 |---|---|---|
-| Linux x86-64, rustc linker | this sandbox | [executed] 31 passed, 1 skipped (`aotr-main-thread`, macOS's) |
-| Linux x86-64, system linker | this sandbox | [executed] 31 passed, 1 skipped |
-| Linux x86-64, stub linker | this sandbox | [executed] 18 passed, 10 skipped (the C-calling tests: the stub links no C), 4 not applicable |
+| Linux x86-64, rustc linker | this sandbox | [executed] 31 passed, 2 skipped (`aotr-main-thread`, macOS's; `aotr-parent-killed-windows`) |
+| Linux x86-64, system linker | this sandbox | [executed] 31 passed, 2 skipped |
+| Linux x86-64, stub linker | this sandbox | [executed] 22 passed, 11 skipped (the C-calling tests: the stub links no C; the macOS and Windows tests) |
 | Linux x86-64 | `tests` workflow (ubuntu-latest), its canary | [executed] the changed file runs first on every push; see section 9.1 |
 | Linux AArch64 | `tests (linux arm64)` (ubuntu-24.04-arm) | [executed] canary on the branch push; see section 9.1 |
 | Windows x86-64 (MSVC) | `tests (windows x86-64)` (windows-2025), canary | [executed] see section 9.1 |
@@ -395,9 +395,59 @@ alone, both together, `-aot-run`, the JIT), and the time from starting a
 command to the program's first line of output. The macOS and Windows smoke
 jobs run it (`AOT-run costs`), so those numbers come from those hosts.
 
-The figures are filled in from runs on an otherwise idle machine
-(section 11.1); they are evidence of what the command costs, not grounds
-for another pipeline.
+They are evidence of what the command costs, not grounds for another
+pipeline.
+
+### 11.1 Linux x86-64
+
+[executed] This sandbox, otherwise idle: an Intel Xeon @ 2.10 GHz, 4
+processors, Linux 6.18; the rustc linker (a checkout's default); best of 7
+(`tclsh9.0 bench/aot-run.tcl -runs 7`). `hello` is a line through
+std::linux::io; `2048` the engine's benchmark (365 lines, 200 moves).
+
+Phases in one process, ms:
+
+| program | front end | NIR lowering | object (driver, Cranelift) | link | native::executable | native::aotRun | driver: linked / started |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| hello | 414.7 | 107.9 | 6.6 | 139.9 | 284.6 | 252.3 | 132.1 / 132.4 |
+| 2048 | 264.0 | 337.6 | 23.9 | 126.1 | 552.2 | 559.2 | 156.3 / 156.7 |
+
+Commands, each a fresh process (main.tcl's own startup included), ms:
+
+| program | interpreter | -emit-native-executable | the executable | emit + run | -aot-run | -backend cranelift (JIT) |
+|---|---:|---:|---:|---:|---:|---:|
+| hello | -- (native IO only) | 1076.8 | 2.5 | 1079.3 | 966.0 | 858.9 |
+| 2048 | 7634.9 | 980.8 | 7.2 | 988.0 | 1009.4 | 867.6 |
+
+Time from starting the command to the program's first line of output
+(hello), ms: `-aot-run` 924.0; the emitted executable alone 1.6; the JIT
+913.5.
+
+What this says:
+
+* **The front end and lowering are most of it.** The driver's own share --
+  Cranelift, the object, the link and starting the child -- is 130-160 ms
+  of an `-aot-run` of about a second; Cranelift itself 7-24 ms, the rustc
+  link about 130 ms. Starting the child after the link costs well under a
+  millisecond (linked / started).
+* **`-aot-run` costs what compiling and then running costs**: 966 against
+  1079 ms for hello and 1009 against 988 for 2048 -- the same work, within
+  the runs' spread (the separate commands pay main.tcl's startup twice for
+  hello's, once less for -aot-run's single process).
+* **Against the JIT**: `-aot-run` is 100-140 ms slower end to end (the
+  link), and its time to the first output is within 1% of the JIT's on
+  hello (924 against 914 ms): the JIT also compiles the whole program
+  first, and both are dominated by the front end.
+* A run of an executable that is already built is milliseconds: a build
+  cache would save the second; this milestone keeps none (section 12).
+
+### 11.2 macOS AArch64 and Windows x86-64
+
+The `AOT-run costs` step of macos-arm64.yml's and windows-x86_64.yml's
+smoke jobs prints the same tables on those runners; bench/macos-app.tcl
+in the `app` job measures `-aot-run` from the JIT-less Botlish.app
+(MACOS-BOTLISH-DISTRIBUTION-MILESTONE-1.md, section 26). [pending] their
+figures at the time of writing.
 
 ## 12. Limitations
 
