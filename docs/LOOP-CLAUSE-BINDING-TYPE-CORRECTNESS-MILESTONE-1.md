@@ -428,7 +428,7 @@ The mutants (`audit/loop-binding-types/tools/mutants.txt`):
 | `lcb-cache-strengthens` | a cache hit makes an `any` record precise | `lcb-cache` |
 | `lcb-hir-text-unrebuilt` | reading HIR text leaves the records out | `lcb-hir-text` |
 
-CI on the branch (`cad6bb7`): `icy-tower (windows x86-64)` and the `tests (linux arm64)` canary passed; `tests (macos arm64)`, `tests (windows x86-64)`, `icy-tower (macos arm64)` and the dispatched `tests`, `tests (linux arm64)` and `static-decisions` runs are pending (queued), not passed.
+CI on the branch. On the first version (`cad6bb7`): `icy-tower (windows x86-64)` and the `tests (linux arm64)` canary passed; the other runs were superseded by the final version's push (cancelled, which says nothing either way). On the final version (`41bdfa6`; `e6b089f` adds only this report): `tests (macos arm64)`, `tests (windows x86-64)`, `icy-tower (macos arm64)`, `icy-tower (windows x86-64)` and the dispatched `tests`, `tests (linux arm64)` and `static-decisions` runs were queued when this was written -- pending, not passed. `main`'s own latest runs (`88ca1e4`) were queued when the work began; their predecessors were superseded by newer pushes before finishing.
 
 ## M. Performance
 
