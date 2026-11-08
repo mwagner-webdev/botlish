@@ -18,7 +18,7 @@
 
 # ---------------------------------------------------------------- generator
 
-@@ guessed-param-type an export parameter of an unknown type is guessed to be a string instead of refused
+@@ guessed-param-type an export parameter of an unknown type is guessed from its C type (an int64_t is an int)
 !! rn-refuse-param-type
 ## integrations/react-native/src/main.c
 <<<<
@@ -27,19 +27,7 @@
 ====
     if (matches(name, "str")) return B_STR;
     if (result && matches(name, "unit")) return B_UNIT;
-    if (!result) return B_STR;
->>>>
-## integrations/react-native/src/main.c
-<<<<
-            if (!c || c->kind != J_ARR || c->count != count || c->items[0]->kind != J_STR || strcmp(c->items[0]->text, want0)
-====
-            if (0 && (!c || c->kind != J_ARR || c->count != count || c->items[0]->kind != J_STR || strcmp(c->items[0]->text, want0))
->>>>
-## integrations/react-native/src/main.c
-<<<<
-                || (count == 2 && (c->items[1]->kind != J_STR || strcmp(c->items[1]->text, "size_t"))))
-====
-                && (count == 2 && (c->items[1]->kind != J_STR || strcmp(c->items[1]->text, "size_t"))))
+    if (!result) return B_INT;
 >>>>
 
 @@ guessed-result-type an export result of an unknown type is guessed to be a number

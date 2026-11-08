@@ -100,7 +100,9 @@ adb logcat -G 16M >/dev/null 2>&1 || true
 note "device $(shellp getprop ro.product.model) sdk $(shellp getprop ro.build.version.sdk) abilist $(shellp getprop ro.product.cpu.abilist) native.bridge $(shellp getprop ro.dalvik.vm.native.bridge) page-size $(shellp getconf PAGE_SIZE)"
 note "apk $(sha256sum "$apk" | cut -d' ' -f1)"
 adb install -r "$apk" | tail -1 | tee -a "$summary"
-shellp setprop debug.botlish.rn.trace 1
+# Every call's thread is traced in the played phase only (debug.botlish.rn.
+# trace, read once per process): the self-test's timings stay untraced.
+shellp setprop debug.botlish.rn.trace 0
 note "installed abi $(shellp dumpsys package $pkg | sed -n 's/ *primaryCpuAbi=//p' | head -1)"
 
 # ---------------------------------------------------------------- selftest
@@ -133,10 +135,11 @@ for lib in game textkit; do
     else
         fail "selftest: the $lib instance was created on thread ${owner:-?}, the JavaScript thread is ${js:-?}"
     fi
-    calls=$(grep -c "BotlishRN: $lib: [a-zA-Z]* on thread $js\$" "$log" || true)
-    other=$(grep "BotlishRN: $lib: [a-zA-Z]* on thread " "$log" | grep -v -c "on thread $js\$" || true)
-    note "  $lib: $calls traced calls on the JavaScript thread, $other on any other"
-    (( other == 0 && calls > 0 )) || fail "selftest: $lib calls on another thread than the JavaScript thread"
+    diag=$(sed -n "s/.*BOTLISH_RN diagnostics $lib //p" "$log" | tail -1)
+    caller=$(echo "$diag" | sed -n 's/^{"library": *"[a-z]*", *"thread": *\([0-9]*\),.*/\1/p')
+    calls=$(echo "$diag" | sed -n 's/.*"module": *{[^}]*"calls": *\([0-9]*\)}.*/\1/p')
+    note "  $lib: the module's $calls calls made on thread ${caller:-?}"
+    [[ -n $js && $caller == "$js" ]] || fail "selftest: $lib was called on thread ${caller:-?}, not the JavaScript thread ${js:-?}"
 done
 shellp cat "/proc/$pid/maps" | grep -E "libgame|libtextkit|libhermes|libappmodules" | awk '{ print $NF }' | sort -u >"$out/maps.txt"
 sed 's/^/  mapped /' "$out/maps.txt" | tee -a "$summary"
@@ -177,6 +180,7 @@ snapshots "$log" oracle | cmp -s - "$expected/oracle-42.txt" && pass "gc-stress:
 
 # -------------------------------------------------------------------- play
 shellp am force-stop $pkg
+shellp setprop debug.botlish.rn.trace 1
 launch play "snapshot restart 42" 1 120
 shellp uiautomator dump /sdcard/ui.xml >/dev/null
 adb pull /sdcard/ui.xml "$out/play-start.xml" >/dev/null
@@ -218,6 +222,12 @@ else
         { fail "play: the snapshots differ from the interpreter's"; diff "$out/play-snapshots.txt" "$expected/play-oracle.txt" | head -4 | tee -a "$summary"; }
     restarted=$(sed -n 's/.*BOTLISH_RN snapshot restart 43 \(2048\/1 .*\)$/\1/p' "$log")
     [[ "$restarted" == "$(cat "$expected/restart-oracle.txt")" ]] && pass "play: New game made the interpreter's game of seed 43" || fail "play: New game"
+    playPid=$(shellp pidof $pkg)
+    playJs=$(shellp ps -T -p "$playPid" | awk '$NF == "mqt_v_js" { print $3 }' | head -1)
+    traced=$(grep -c "BotlishRN: game: [a-zA-Z]* on thread $playJs\$" "$log" || true)
+    elsewhere=$(grep "BotlishRN: game: [a-zA-Z]* on thread " "$log" | grep -v -c "on thread $playJs\$" || true)
+    note "  play: $traced traced calls on the JavaScript thread mqt_v_js ($playJs), $elsewhere on any other"
+    (( traced > 0 && elsewhere == 0 )) && pass "play: every call on React Native's JavaScript thread" || fail "play: calls on another thread"
     created=$(grep -c "BotlishRN: game: instance [0-9]* created" "$log" || true)
     [[ $created == 1 ]] && pass "play: one instance across background and foreground" || fail "play: $created instances created"
     grep -E "BOTLISH_RN latency" "$log" | awk '{ s += $(NF-1); n++ } END { if (n) printf "  input to render: %d swipes, mean %.2f ms\n", n, s / n }' | tee -a "$summary"
@@ -249,6 +259,7 @@ for case in win over; do
 done
 
 # -------------------------------------------------------------------- exit
+shellp setprop debug.botlish.rn.trace 0
 adb logcat -c
 shellp input keyevent KEYCODE_BACK
 sleep 3

@@ -12,10 +12,14 @@ name: react-native 2048
 #            BOTLISH_NATIVE_GC_STRESS=1), the interpreter's oracles, the app
 #            (npm ci, the packages from their tarballs, TypeScript, Jest, the
 #            Android release build) and what its APK holds
-#            (audit/react-native-2048/tools/build.sh)
+#            (audit/react-native-2048/tools/build.sh); then the single-file
+#            compiler and the clean room (cleanroom/cleanroom.sh: the
+#            single executable and the packages only, traced; npm, Codegen
+#            and Gradle with the app's own dependencies)
 #   android  the APK on an Android emulator, per image: the self-test
 #            against the interpreter, reloads, GC stress, swipes, the win and
-#            the end, a clean exit (tools/android-acceptance.sh). The images
+#            the end, a clean exit (tools/android-acceptance.sh); on API 34
+#            the clean room's APK too. The images
 #            are x86_64 (GitHub's Linux runners have KVM for x86_64 guests
 #            only, and Google's emulator runs arm64 images on arm64 hosts
 #            only): the arm64-v8a APK runs through Android's ARM native
@@ -104,6 +108,16 @@ jobs:
       - name: The record of the generated 2048 package
         run: cat "$RUNNER_TEMP/rn2048/generated/react-native-botlish-game/botlish-react-native.json"
 
+      - name: The single-file compiler (single/build.sh)
+        run: bash single/build.sh
+
+      - name: Clean room (audit/react-native-2048/cleanroom/cleanroom.sh)
+        env:
+          ANDROID_NDK_ROOT: ${{ env.ANDROID_HOME }}/ndk/29.0.14206865
+        run: |
+          sudo apt-get install -y -qq strace > /dev/null
+          audit/react-native-2048/cleanroom/cleanroom.sh single/out/botlish "$RUNNER_TEMP/rn2048/repo" "$RUNNER_TEMP/rn2048/cleanroom"
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -115,6 +129,9 @@ jobs:
             ${{ runner.temp }}/rn2048/npm/*.tgz
             ${{ runner.temp }}/rn2048/host/*.txt
             ${{ runner.temp }}/rn2048/repo/*.botpkg
+            ${{ runner.temp }}/rn2048/cleanroom/summary.txt
+            ${{ runner.temp }}/rn2048/cleanroom/app-release.apk
+            ${{ runner.temp }}/rn2048/cleanroom/programs.txt
 
   android:
     name: android (${{ matrix.name }})
@@ -127,8 +144,10 @@ jobs:
         include:
           - name: API 34, 4 KiB pages
             image: "system-images;android-34;google_apis;x86_64"
+            cleanroom: true
           - name: API 35, 16 KiB pages
             image: "system-images;android-35;google_apis_ps16k;x86_64"
+            cleanroom: false
     steps:
       - uses: actions/checkout@v5
 
@@ -151,9 +170,18 @@ jobs:
           export PATH="$ANDROID_HOME/platform-tools:$PATH"
           audit/react-native-2048/tools/android-acceptance.sh "$RUNNER_TEMP/rn2048/app-release.apk" "$RUNNER_TEMP/rn2048" "$RUNNER_TEMP/acceptance"
 
+      - name: Acceptance of the clean room's APK
+        if: matrix.cleanroom
+        run: |
+          export PATH="$ANDROID_HOME/platform-tools:$PATH"
+          adb uninstall com.botlish2048 || true
+          audit/react-native-2048/tools/android-acceptance.sh "$RUNNER_TEMP/rn2048/cleanroom/app-release.apk" "$RUNNER_TEMP/rn2048" "$RUNNER_TEMP/acceptance/cleanroom"
+
       - name: Summary
         if: always()
-        run: cat "$RUNNER_TEMP/acceptance/summary.txt" || true
+        run: |
+          cat "$RUNNER_TEMP/acceptance/summary.txt" || true
+          cat "$RUNNER_TEMP/acceptance/cleanroom/summary.txt" 2> /dev/null || true
 
       - uses: actions/upload-artifact@v4
         if: always()

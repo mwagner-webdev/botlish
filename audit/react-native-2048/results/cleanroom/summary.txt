@@ -1,0 +1,34 @@
+room ROOM
+botlish dce531682b46b0940dc95750fdd91b7e9518b5f0780fd3c93e3a09168067e061
+package botlish_react_native-0.1.0.botpkg 5ee66dc04c8a3415ebf9a81128fe21d79d98ad5e82bc3d33730cc280078ca37e
+package botlish_target_android_aarch64-0.1.0.botpkg 89b32e8465898a080027a85c3d13be5f29204ec5c54a9f6acc07fc996008f009
+package game2048-0.1.0.botpkg 9c0147801f9e40733376c93691f51c5d7b60feb7c163f16b25ed6ec269f053a5
+ok the Botlish steps touched nothing of this checkout
+ok no Tcl of the system: the compiler is the single file
+  botlish_react_native:react-native (botlish_react_native 0.1.0), protocol 1, hosts linux-x86_64, inputs native-library
+  manifest: lib/game.manifest.json
+  manifest: libgame.a 398e3e602c41e9e393bd4da7d282d1d91cef7a367a7456bb506a798fb7bb8671
+  manifest: libgame.so b0f61943e2fae9eb545f673d8e17f7b146fb8fef3803d9424f1ab9c2d61d0ba9
+  manifest: game.h 7923f1f197def02b97f8936cee376b5fe76ec9859a1a28c18f1aad014651fd4c
+  react-native: generated react-native-botlish-game 0.1.0 (module BotlishGame, 4 functions) from game
+ok the tool wrote the package
+ok npm pack: react-native-botlish-game-0.1.0.tgz
+ok npm ci (the app's locked dependencies)
+ok npm install of the generated package's tarball
+ok the second library's package generated and installed
+ok TypeScript
+ok Jest: Tests:       28 passed, 28 total
+ok the Android release build (BUILD SUCCESSFUL in 5m 6s)
+  > Task :app:generateReact_45_native_45_botlish_45_gameCodegenSchemaFromJavaScript
+  > Task :app:generateReact_45_native_45_botlish_45_gameCodegenArtifactsFromSchema
+  > Task :app:generateReact_45_native_45_botlish_45_textkitCodegenSchemaFromJavaScript
+  > Task :app:generateReact_45_native_45_botlish_45_textkitCodegenArtifactsFromSchema
+  > Task :app:generateCodegenSchemaFromJavaScript SKIPPED
+  > Task :app:generateCodegenArtifactsFromSchema SKIPPED
+ok neither the app nor the packages name this checkout
+apk 20601745 bytes sha256 406e3457b9b2320dbe770d0180eee89bba0514b74e5cddb4a9673f3077d79161
+ok the APK holds arm64-v8a only
+ok libgame.so is the generated package's library, as the Android build strips it
+ok every shared object's segments are 16 KiB-aligned
+ok zipalign -c -P 16
+result: passed
