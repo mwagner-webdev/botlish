@@ -75,6 +75,33 @@ namespace eval native::support {
     variable schema 1
     variable keys {schema kind target triple linker runtime systemLibraries}
     variable runtimeKeys {archive abi}
+    # Schema 2 (ANDROID-AARCH64-TARGET-SUPPORT-MILESTONE-1.md): the artifact
+    # kinds a package supports, a platform's minimum version, and the C
+    # toolchain that links them, declared as data. A member a schema lists is
+    # required; `platform` only where the target's operating system has a
+    # platform version (`platformVersions`).
+    variable keys2 {schema kind target triple artifacts runtime systemLibraries toolchain}
+    variable optional2 {platform}
+    variable runtimeKeys2 {archive abi relocation}
+    variable toolchainKeys {name root revision hosts tools platformLibraries}
+    variable revisionKeys {file key minimum}
+    variable toolKeys {cc ld objcopy ar}
+    # The artifact kinds a schema-2 package's toolchain links (only native
+    # libraries so far: an executable of another target is no artifact this
+    # compiler makes). Schema 1's one artifact is the system linker's
+    # executable.
+    variable artifactKinds {native-library}
+    # The operating systems whose targets name a minimum platform version,
+    # its member in `platform`, and the lowest this compiler's runtime
+    # supports: android, the Android API level of the NDK's
+    # aarch64-linux-androidN (the runtime calls nothing of Bionic newer than
+    # it: the report's section 7).
+    variable platformVersions [dict create android {member minimumApi floor 21}]
+    # The system libraries a target's runtime archive is linked with, for a
+    # target this host does not run (rustc's native-static-libs of the
+    # runtime archive built for the target): what a descriptor must state,
+    # never what it may add.
+    variable targetLibraries [dict create android-aarch64 {-ldl -llog -lunwind -ldl -lm -lc}]
 }
 
 proc native::support::Fail {kind message} {
@@ -90,11 +117,8 @@ proc native::support::PackagesDir {root target} {
     return $modules
 }
 
-proc native::support::select {root target name} {
+proc native::support::select {root target name {artifact native-executable}} {
     variable descriptorName
-    variable schema
-    variable keys
-    variable runtimeKeys
     if {![regexp {^[a-z][a-z0-9_]{0,63}$} $name]} {
         Fail MISSING "\"$name\" is not a package name"
     }
@@ -120,59 +144,18 @@ proc native::support::select {root target name} {
     if {[lsp::json::type $value] ne "obj"} {
         Fail DESCRIPTOR "$path is not a JSON object"
     }
-    foreach {key -} [lsp::json::members $value] {
-        if {$key ni $keys} {
-            Fail DESCRIPTOR "$path: unknown member \"$key\" (schema $schema has [join $keys {, }]): a member a later schema adds is never ignored"
-        }
+    if {![lsp::json::has $value schema]} {
+        Fail DESCRIPTOR "$path: no \"schema\""
     }
-    foreach key $keys {
-        if {![lsp::json::has $value $key]} {
-            Fail DESCRIPTOR "$path: no \"$key\""
-        }
+    set version [lsp::json::get $value schema]
+    if {$version eq {num 1}} {
+        set fields [Schema1 $path $value]
+    } elseif {$version eq {num 2}} {
+        set fields [Schema2 $path $value $target]
+    } else {
+        Fail DESCRIPTOR "$path: unsupported schema [lindex $version 1] (this compiler reads schemas 1 and 2: a newer one needs a newer Botlish)"
     }
-    if {[lsp::json::type [lsp::json::get $value schema]] ne "num" || [lsp::json::get $value schema] ne {num 1}} {
-        Fail DESCRIPTOR "$path: unsupported schema [lindex [lsp::json::get $value schema] 1] (this compiler reads schema $schema: a newer one needs a newer Botlish)"
-    }
-    set fields [dict create]
-    foreach key {kind target triple linker} {
-        set item [lsp::json::get $value $key]
-        if {[lsp::json::type $item] ne "str"} {
-            Fail DESCRIPTOR "$path: \"$key\" must be a string"
-        }
-        dict set fields $key [lsp::json::text $item]
-    }
-    if {[dict get $fields kind] ne "botlish-target-support"} {
-        Fail DESCRIPTOR "$path: \"kind\" is \"[dict get $fields kind]\", not \"botlish-target-support\""
-    }
-    set runtime [lsp::json::get $value runtime]
-    if {[lsp::json::type $runtime] ne "obj"} {
-        Fail DESCRIPTOR "$path: \"runtime\" must be an object {\"archive\": PATH, \"abi\": FINGERPRINT}"
-    }
-    foreach {key item} [lsp::json::members $runtime] {
-        if {$key ni $runtimeKeys} {
-            Fail DESCRIPTOR "$path: runtime: unknown member \"$key\""
-        }
-        if {[lsp::json::type $item] ne "str"} {
-            Fail DESCRIPTOR "$path: runtime: \"$key\" must be a string"
-        }
-        dict set fields $key [lsp::json::text $item]
-    }
-    foreach key $runtimeKeys {
-        if {![dict exists $fields $key]} {
-            Fail DESCRIPTOR "$path: runtime: no \"$key\""
-        }
-    }
-    set libraries [lsp::json::get $value systemLibraries]
-    if {[lsp::json::type $libraries] ne "arr"} {
-        Fail DESCRIPTOR "$path: \"systemLibraries\" must be an array of linker library arguments"
-    }
-    set stated {}
-    foreach item [lsp::json::elements $libraries] {
-        if {[lsp::json::type $item] ne "str"} {
-            Fail DESCRIPTOR "$path: \"systemLibraries\" holds a non-string"
-        }
-        lappend stated [lsp::json::text $item]
-    }
+    set stated [dict get $fields libraries]
 
     set declared [dict get $fields target]
     if {![dict exists $::core::cabi::targets $declared]} {
@@ -185,7 +168,17 @@ proc native::support::select {root target name} {
     if {[dict get $fields triple] ne $triple} {
         Fail TRIPLE "the package $name states the triple [dict get $fields triple] for $target, whose triple is $triple"
     }
-    if {[dict get $fields linker] ne "system"} {
+    if {[dict exists $fields platformItem]} {
+        dict set fields platform [Platform $path $target [dict get $fields platformItem]]
+    }
+    if {$artifact ni [dict get $fields artifacts]} {
+        set how [dict get {
+            native-library "a native library is linked by a package's declared toolchain (schema 2, artifacts native-library)"
+            native-executable "an executable is linked by the system linker with a schema 1 package's runtime"
+        } $artifact]
+        Fail ARTIFACT "the package $name supplies [join [dict get $fields artifacts] {, }] for $target, not a $artifact: $how"
+    }
+    if {$version eq {num 1} && [dict get $fields linker] ne "system"} {
         Fail LINKER "the package $name's runtime is for the [dict get $fields linker] linker: a target support package's runtime archive is linked by the system linker"
     }
     set abi [dict get $fields abi]
@@ -193,9 +186,7 @@ proc native::support::select {root target name} {
         Fail DESCRIPTOR "$path: runtime: \"abi\" must be a runtime ABI fingerprint, 16 lowercase hexadecimal digits"
     }
     set relative [dict get $fields archive]
-    if {$relative eq "" || [string match /* $relative] || [regexp {^[A-Za-z]:} $relative]
-            || [string first \\ $relative] >= 0 || [lsearch -exact [split $relative /] ..] >= 0
-            || [lsearch -exact [split $relative /] .] >= 0 || [lsearch -exact [split $relative /] ""] >= 0} {
+    if {![RelativePath $relative]} {
         Fail RUNTIME "the package $name names its runtime archive \"$relative\": a path inside the package, relative, with \"/\" separators and no \".\", \"..\" or empty segment"
     }
     set archive [file join $dir {*}[split $relative /]]
@@ -216,14 +207,305 @@ proc native::support::select {root target name} {
     if {[dict get $record abi] ne $abi} {
         Fail ABI "the package $name's runtime archive $relative holds the runtime ABI [dict get $record abi], and its descriptor states $abi"
     }
+    variable targetLibraries
     if {$target eq [core::cabi::hostTarget]} {
         set expected [SystemLibraries]
-        if {$expected ne "" && $stated ne $expected} {
-            Fail LIBRARIES "the package $name states the system libraries [join $stated { }], and the system linker links $target's runtime with [join $expected { }]: its runtime archive was built differently"
+    } else {
+        set expected [dict getdef $targetLibraries $target ""]
+    }
+    if {$expected ne "" && $stated ne $expected} {
+        Fail LIBRARIES "the package $name states the system libraries [join $stated { }], and $target's runtime is linked with [join $expected { }]: its runtime archive was built differently"
+    }
+    return [dict merge [dict create package $name directory $dir descriptor $path target $target triple $triple \
+        archive $archive abi $abi libraries $stated schema [lindex $version 1] artifact $artifact] \
+        [dict filter $fields key platform toolchain relocation]]
+}
+
+# 1 if RELATIVE is a path inside a package: relative, "/"-separated, with no
+# ".", ".." or empty segment, no drive and no backslash.
+proc native::support::RelativePath {relative} {
+    return [expr {!($relative eq "" || [string match /* $relative] || [regexp {^[A-Za-z]:} $relative]
+        || [string first \\ $relative] >= 0 || [lsearch -exact [split $relative /] ..] >= 0
+        || [lsearch -exact [split $relative /] .] >= 0 || [lsearch -exact [split $relative /] ""] >= 0)}]
+}
+
+# The strings of the JSON object VALUE's members KEYS, into a dict; WHERE
+# names the object in a refusal.
+proc native::support::Strings {path where value keys} {
+    set fields [dict create]
+    foreach key $keys {
+        if {![lsp::json::has $value $key]} {
+            Fail DESCRIPTOR "$path: ${where}no \"$key\""
+        }
+        set item [lsp::json::get $value $key]
+        if {[lsp::json::type $item] ne "str"} {
+            Fail DESCRIPTOR "$path: ${where}\"$key\" must be a string"
+        }
+        dict set fields $key [lsp::json::text $item]
+    }
+    return $fields
+}
+
+# Refuses a member of the JSON object VALUE not in KEYS.
+proc native::support::OnlyMembers {path where value keys} {
+    foreach {key -} [lsp::json::members $value] {
+        if {$key ni $keys} {
+            Fail DESCRIPTOR "$path: ${where}unknown member \"$key\" (the schema has [join $keys {, }]): a member a later schema adds is never ignored"
         }
     }
-    return [dict create package $name directory $dir descriptor $path target $target triple $triple \
-        archive $archive abi $abi libraries $stated]
+}
+
+# The strings of the JSON array ITEM.
+proc native::support::StringArray {path what item} {
+    if {[lsp::json::type $item] ne "arr"} {
+        Fail DESCRIPTOR "$path: \"$what\" must be an array of strings"
+    }
+    set out {}
+    foreach element [lsp::json::elements $item] {
+        if {[lsp::json::type $element] ne "str"} {
+            Fail DESCRIPTOR "$path: \"$what\" holds a non-string"
+        }
+        lappend out [lsp::json::text $element]
+    }
+    return $out
+}
+
+# A schema 1 descriptor VALUE (the system linker's executables): its fields.
+proc native::support::Schema1 {path value} {
+    variable keys
+    variable runtimeKeys
+    OnlyMembers $path "" $value $keys
+    foreach key $keys {
+        if {![lsp::json::has $value $key]} {
+            Fail DESCRIPTOR "$path: no \"$key\""
+        }
+    }
+    set fields [Strings $path "" $value {kind target triple linker}]
+    if {[dict get $fields kind] ne "botlish-target-support"} {
+        Fail DESCRIPTOR "$path: \"kind\" is \"[dict get $fields kind]\", not \"botlish-target-support\""
+    }
+    set runtime [lsp::json::get $value runtime]
+    if {[lsp::json::type $runtime] ne "obj"} {
+        Fail DESCRIPTOR "$path: \"runtime\" must be an object {\"archive\": PATH, \"abi\": FINGERPRINT}"
+    }
+    OnlyMembers $path "runtime: " $runtime $runtimeKeys
+    set fields [dict merge $fields [Strings $path "runtime: " $runtime $runtimeKeys]]
+    dict set fields libraries [StringArray $path systemLibraries [lsp::json::get $value systemLibraries]]
+    dict set fields artifacts {native-executable}
+    return $fields
+}
+
+# A schema 2 descriptor VALUE for TARGET (artifacts linked by a declared
+# toolchain): its fields, with `platform` (a dict MEMBER VERSION),
+# `toolchain` (the declared toolchain, a dict) and `relocation`.
+proc native::support::Schema2 {path value target} {
+    variable keys2
+    variable optional2
+    variable runtimeKeys2
+    variable toolchainKeys
+    variable revisionKeys
+    variable toolKeys
+    variable artifactKinds
+    OnlyMembers $path "" $value [concat $keys2 $optional2]
+    foreach key $keys2 {
+        if {![lsp::json::has $value $key]} {
+            Fail DESCRIPTOR "$path: no \"$key\""
+        }
+    }
+    set fields [Strings $path "" $value {kind target triple}]
+    if {[dict get $fields kind] ne "botlish-target-support"} {
+        Fail DESCRIPTOR "$path: \"kind\" is \"[dict get $fields kind]\", not \"botlish-target-support\""
+    }
+    dict set fields linker toolchain
+    set artifacts [StringArray $path artifacts [lsp::json::get $value artifacts]]
+    if {![llength $artifacts]} {
+        Fail DESCRIPTOR "$path: \"artifacts\" names no artifact kind"
+    }
+    foreach kind $artifacts {
+        if {$kind ni $artifactKinds} {
+            Fail DESCRIPTOR "$path: \"artifacts\" names \"$kind\", which no declared toolchain links (this compiler's: [join $artifactKinds {, }])"
+        }
+    }
+    dict set fields artifacts $artifacts
+    set runtime [lsp::json::get $value runtime]
+    if {[lsp::json::type $runtime] ne "obj"} {
+        Fail DESCRIPTOR "$path: \"runtime\" must be an object {\"archive\": PATH, \"abi\": FINGERPRINT, \"relocation\": \"pic\"}"
+    }
+    OnlyMembers $path "runtime: " $runtime $runtimeKeys2
+    set fields [dict merge $fields [Strings $path "runtime: " $runtime $runtimeKeys2]]
+    if {[dict get $fields relocation] ne "pic"} {
+        Fail PIC "the package's runtime archive is built for the \"[dict get $fields relocation]\" relocation model: a shared library's code is position-independent, and so is every archive linked into one (\"relocation\": \"pic\")"
+    }
+    dict set fields libraries [StringArray $path systemLibraries [lsp::json::get $value systemLibraries]]
+
+    # The platform's minimum version, judged once the target is known to be
+    # the compilation's (`Platform`).
+    dict set fields platformItem {}
+    if {[lsp::json::has $value platform]} {
+        dict set fields platformItem [list [lsp::json::get $value platform]]
+    }
+
+    # The toolchain: where it is (an environment variable naming its root:
+    # nothing is searched), which revision it must be at least, its
+    # directory for each host, and its tools, relative paths each.
+    set item [lsp::json::get $value toolchain]
+    if {[lsp::json::type $item] ne "obj"} {
+        Fail DESCRIPTOR "$path: \"toolchain\" must be an object"
+    }
+    OnlyMembers $path "toolchain: " $item $toolchainKeys
+    set toolchain [Strings $path "toolchain: " $item {name root platformLibraries}]
+    if {![regexp {^[A-Z][A-Z0-9_]{0,63}$} [dict get $toolchain root]]} {
+        Fail DESCRIPTOR "$path: toolchain: \"root\" must name an environment variable (uppercase letters, digits and \"_\")"
+    }
+    foreach sub {revision hosts tools} {
+        if {![lsp::json::has $item $sub] || [lsp::json::type [lsp::json::get $item $sub]] ne "obj"} {
+            Fail DESCRIPTOR "$path: toolchain: \"$sub\" must be an object"
+        }
+    }
+    set revision [lsp::json::get $item revision]
+    OnlyMembers $path "toolchain: revision: " $revision $revisionKeys
+    dict set toolchain revision [Strings $path "toolchain: revision: " $revision $revisionKeys]
+    if {![regexp {^[0-9]+(\.[0-9]+)*$} [dict get $toolchain revision minimum]]} {
+        Fail DESCRIPTOR "$path: toolchain: revision: \"minimum\" must be a dotted version (28.0)"
+    }
+    set hosts [dict create]
+    foreach {host dirItem} [lsp::json::members [lsp::json::get $item hosts]] {
+        if {![dict exists $::core::cabi::targets $host] || [lsp::json::type $dirItem] ne "str" || ![RelativePath [lsp::json::text $dirItem]]} {
+            Fail DESCRIPTOR "$path: toolchain: hosts: \"$host\" must be a compilation target naming a relative directory"
+        }
+        dict set hosts $host [lsp::json::text $dirItem]
+    }
+    dict set toolchain hosts $hosts
+    set tools [lsp::json::get $item tools]
+    OnlyMembers $path "toolchain: tools: " $tools $toolKeys
+    dict set toolchain tools [Strings $path "toolchain: tools: " $tools $toolKeys]
+    foreach paths [list [dict values [dict get $toolchain tools]] [list [string map {{{api}} 1} [dict get $toolchain platformLibraries]]]] {
+        foreach relative $paths {
+            if {![RelativePath $relative]} {
+                Fail DESCRIPTOR "$path: toolchain: \"$relative\" is no relative path inside the toolchain"
+            }
+        }
+    }
+    dict set fields toolchain $toolchain
+    return $fields
+}
+
+# The platform version a schema 2 descriptor at PATH states for TARGET in
+# ITEM (a one-element list holding the JSON value of its `platform`, or an
+# empty list): required exactly where TARGET's operating system has one,
+# never below the runtime's floor. A dict MEMBER VERSION (empty for a target
+# with none).
+proc native::support::Platform {path target item} {
+    variable platformVersions
+    set os [dict get [core::cabi::target $target] os]
+    if {![dict exists $platformVersions $os]} {
+        if {[llength $item]} {
+            Fail DESCRIPTOR "$path: \"platform\" is a member of a target with a platform version, and $target has none"
+        }
+        return {}
+    }
+    set member [dict get $platformVersions $os member]
+    if {![llength $item]} {
+        Fail DESCRIPTOR "$path: no \"platform\" (a [core::cabi::systemName $os] target states its \"$member\")"
+    }
+    set item [lindex $item 0]
+    if {[lsp::json::type $item] ne "obj"} {
+        Fail DESCRIPTOR "$path: \"platform\" must be an object {\"$member\": N}"
+    }
+    OnlyMembers $path "platform: " $item [list $member]
+    if {![lsp::json::has $item $member] || [lsp::json::type [lsp::json::get $item $member]] ne "num"
+            || ![regexp {^[1-9][0-9]{0,3}$} [lindex [lsp::json::get $item $member] 1]]} {
+        Fail DESCRIPTOR "$path: platform: \"$member\" must be a positive integer"
+    }
+    set version [lindex [lsp::json::get $item $member] 1]
+    set floor [dict get $platformVersions $os floor]
+    if {$version < $floor} {
+        Fail API "the package's runtime states $member $version, and this compiler's [core::cabi::systemName $os] runtime needs at least $floor: it calls Bionic functions an older platform lacks"
+    }
+    return [dict create $member $version]
+}
+
+# The declared toolchain of target support SUPPORT (select's result, schema
+# 2) on this host: {name N root DIR revision R cc PATH ld PATH objcopy PATH
+# ar PATH platformLibraries DIR}, or a {NATIVE LIBRARY TOOLCHAIN} error --
+# the host's toolchain, never the package's fault: the root's variable unset
+# or not a directory, a revision older than the minimum, no directory for
+# this host, a missing tool -- or {NATIVE TARGET-SUPPORT API} when the
+# toolchain has no libraries of the package's platform version. Nothing is
+# run: the revision is read from the file the declaration names.
+proc native::support::toolchain {support} {
+    set declared [dict get $support toolchain]
+    set name [dict get $declared name]
+    set variable [dict get $declared root]
+    set package [dict get $support package]
+    if {![info exists ::env($variable)] || $::env($variable) eq ""} {
+        ToolchainFail "the target support package $package links with the $name, found through the environment variable $variable, which is not set: install the $name and set $variable to its directory"
+    }
+    set root [file normalize $::env($variable)]
+    if {![file isdirectory $root]} {
+        ToolchainFail "$variable names $root, which is no directory (the $name)"
+    }
+    set revisionFile [file join $root {*}[split [dict get $declared revision file] /]]
+    set revision ""
+    if {[file isfile $revisionFile]} {
+        set channel [open $revisionFile r]
+        set text [read $channel]
+        close $channel
+        set key [dict get $declared revision key]
+        foreach line [split $text \n] {
+            if {[regexp {^\s*([^=]+?)\s*=\s*(\S+)\s*$} $line -> k v] && $k eq $key} {
+                set revision $v
+            }
+        }
+    }
+    if {![regexp {^[0-9]+(\.[0-9]+)*$} $revision]} {
+        ToolchainFail "the $name at $root states no revision ([dict get $declared revision key] in [dict get $declared revision file]): it is no $name, or an incomplete one"
+    }
+    set minimum [dict get $declared revision minimum]
+    if {[CompareVersions $revision $minimum] < 0} {
+        ToolchainFail "the $name at $root is revision $revision, and the target support package $package needs at least $minimum"
+    }
+    set host [core::cabi::hostTarget]
+    if {![dict exists $declared hosts $host]} {
+        ToolchainFail "the $name has no toolchain for this host ($host) that the target support package $package knows (its hosts: [join [dict keys [dict get $declared hosts]] {, }])"
+    }
+    set base [file join $root {*}[split [dict get $declared hosts $host] /]]
+    set result [dict create name $name root $root revision $revision]
+    dict for {tool relative} [dict get $declared tools] {
+        set file [file join $base {*}[split $relative /]]
+        if {![file isfile $file]} {
+            ToolchainFail "the $name at $root has no $tool ($file is missing)"
+        }
+        dict set result $tool $file
+    }
+    set api [lindex [dict values [dict get $support platform]] 0]
+    set libraries [file join $base {*}[split [string map [list "{api}" $api] [dict get $declared platformLibraries]] /]]
+    if {$api ne "" && ![file isdirectory $libraries]} {
+        Fail API "the $name at $root (revision $revision) has no platform libraries of API level $api ($libraries is missing): the package's runtime needs that level, and this toolchain does not support it"
+    }
+    dict set result platformLibraries $libraries
+    dict set result api $api
+    return $result
+}
+
+proc native::support::ToolchainFail {message} {
+    return -code error -errorcode {NATIVE LIBRARY TOOLCHAIN} "native::library: $message"
+}
+
+# -1, 0 or 1 as the dotted version A is older than, the same as or newer
+# than B (missing components are 0).
+proc native::support::CompareVersions {a b} {
+    set as [split $a .]
+    set bs [split $b .]
+    set n [expr {max([llength $as], [llength $bs])}]
+    for {set i 0} {$i < $n} {incr i} {
+        set x [expr {[lindex $as $i] eq "" ? 0 : [scan [lindex $as $i] %d]}]
+        set y [expr {[lindex $bs $i] eq "" ? 0 : [scan [lindex $bs $i] %d]}]
+        if {$x != $y} {
+            return [expr {$x < $y ? -1 : 1}]
+        }
+    }
+    return 0
 }
 
 # Why an archive built for FOUND is not one for WANTED, both triples.

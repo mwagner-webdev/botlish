@@ -106,8 +106,10 @@
 !! et-target-support-target-tree
 ## main.tcl
 <<<<
+            # package it imports.
             set compiled [hir::cabi::targetOf $hir]
 ====
+            # package it imports.
             set compiled [core::cabi::hostTarget]
 >>>>
 

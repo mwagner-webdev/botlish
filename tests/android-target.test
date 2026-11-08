@@ -1,0 +1,529 @@
+# android-target.test -- the android-aarch64 target
+# (ANDROID-AARCH64-TARGET-SUPPORT-MILESTONE-1.md):
+#
+#   * the target: a row of its own (Android's OS, Bionic, the NDK's triple),
+#     never linux-aarch64; the package manager's facts of it;
+#   * emitting is not running: the driver emits a native library's object
+#     for aarch64-linux-android from this host (`library --target`), never
+#     runs it, refuses a program built for another target, a target without
+#     a Botlish runtime, and --target on any other command;
+#   * target support for libraries: a library of another target than the
+#     host's needs its target support package, whose schema 2 descriptor
+#     declares the artifacts, the platform's minimum API, the relocation
+#     model and the toolchain; every refusal before anything is linked, and
+#     a missing or wrong host toolchain is the toolchain's error, never the
+#     package's;
+#   * the link (the NDK; constraint androidNdk): an AArch64 ELF shared
+#     object, 16 KiB-aligned, position-independent, needing Bionic's
+#     libraries only, exporting exactly the library's public functions, its
+#     manifest the target's and bound to the files; deterministic; a failed
+#     link leaves nothing behind; a link that is not position-independent
+#     is PIC;
+#   * execution (constraint androidRun: qemu-aarch64 and the Android
+#     userspaces of audit/android-aarch64-target/tools/sysroot.sh, named by
+#     BOTLISH_ANDROID_ROOTS): the 2048 library in an Android process plays
+#     as the interpreter plays; instances, thread affinity, the runtime
+#     workloads, GC stress, 16 KiB pages.
+#
+# Environment: ANDROID_NDK_ROOT (an NDK of revision 28 or later) for the
+# link; the Android runtime archive built by audit/android-aarch64-target/
+# tools/package.sh (native/target/aarch64-linux-android); BOTLISH_ANDROID_ROOTS
+# (sysroot.sh's OUT) for execution.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+source [file join $::projectRoot native native.tcl]
+source [file join $::projectRoot pm pm.tcl]
+source [file join $::projectRoot lsp json.tcl]
+
+testConstraint nativeBuilt [expr {![catch {native::binary}]}]
+testConstraint linuxX86_64Host [expr {[core::cabi::hostTarget] eq "linux-x86_64"}]
+testConstraint clang [expr {[auto_execok clang] ne "" && [auto_execok ar] ne ""}]
+
+set ::atMain [file join $::projectRoot main.tcl]
+set ::atHere [file join $::projectRoot audit android-aarch64-target]
+set ::atCounter 0
+set ::atRuntime [file join $::projectRoot native target aarch64-linux-android release libbotlish_runtime.a]
+
+# The NDK: ANDROID_NDK_ROOT naming one of revision 28 or later for this host.
+proc atNdk {} {
+    if {![info exists ::env(ANDROID_NDK_ROOT)]} { return "" }
+    set root $::env(ANDROID_NDK_ROOT)
+    set props [file join $root source.properties]
+    if {![file isfile $props]} { return "" }
+    set channel [open $props]
+    set text [read $channel]
+    close $channel
+    if {![regexp -line {^Pkg\.Revision\s*=\s*([0-9]+)} $text -> major] || $major < 28} { return "" }
+    if {![file executable [file join $root toolchains llvm prebuilt linux-x86_64 bin clang]]} { return "" }
+    return $root
+}
+testConstraint androidNdk [expr {[testConstraint nativeBuilt] && [testConstraint linuxX86_64Host] && [atNdk] ne ""}]
+testConstraint androidRuntime [expr {[testConstraint androidNdk] && [file isfile $::atRuntime]
+    && [native::support::identity $::atRuntime] eq [list triple aarch64-linux-android abi [native::runtimeAbi]]}]
+proc atRoots {} {
+    if {![info exists ::env(BOTLISH_ANDROID_ROOTS)]} { return {} }
+    return [lsort [glob -nocomplain -directory $::env(BOTLISH_ANDROID_ROOTS) -types d api-*]]
+}
+testConstraint androidRun [expr {[testConstraint androidRuntime] && [auto_execok qemu-aarch64] ne "" && [llength [atRoots]]}]
+# Android 15's linker, whose 16 KiB page-size mode the page-size control
+# needs (Android 14 and earlier load 4 KiB-aligned libraries only).
+testConstraint androidRun16k [expr {[testConstraint androidRun] && [lsearch -glob [atRoots] */api-35] >= 0}]
+
+proc atDir {{tag t}} {
+    set dir [file join [temporaryDirectory] at-[pid]-$tag-[incr ::atCounter]]
+    file delete -force $dir
+    file mkdir $dir
+    return $dir
+}
+
+proc atWrite {path text} {
+    file mkdir [file dirname $path]
+    set channel [open $path w]
+    fconfigure $channel -encoding utf-8 -translation lf
+    puts -nonewline $channel $text
+    close $channel
+}
+
+proc atRead {path} {
+    set channel [open $path rb]
+    set bytes [read $channel]
+    close $channel
+    return $bytes
+}
+
+# Runs main.tcl ARGS in CWD: {STATUS STDOUT STDERR}.
+proc atRun {cwd args} {
+    set here [pwd]
+    cd $cwd
+    set status 0
+    try {
+        if {[catch {exec [info nameofexecutable] $::atMain {*}$args 2>@1} output options]} {
+            set code [dict get $options -errorcode]
+            set status [expr {[lindex $code 0] eq "CHILDSTATUS" ? [lindex $code 2] : -1}]
+        }
+    } finally {
+        cd $here
+    }
+    return [list $status $output]
+}
+
+# The driver's lines for COMMAND ARGS (botlish-native), and its exit status.
+proc atDriver {args} {
+    set status 0
+    if {[catch {exec [native::binary] {*}$args 2>@1} output options]} {
+        set status [lindex [dict get $options -errorcode] 2]
+    }
+    return [list $status $output]
+}
+
+set ::atLibrarySource {import std::str
+
+exported c fn twice(n: int) -> int:
+    n * 2
+
+exported c fn greet(name: str) -> str:
+    name.concat(", hello")
+}
+
+# The NIR of SOURCE as native::library lowers it, with its exports as
+# library NAME's (`library` in the driver reads exactly this), compiled
+# with OPTIONS (surface::compile's: -target).
+proc atLibraryNir {source name args} {
+    set hir [surface::compile $source -warnings off {*}$args]
+    hir::activate $hir
+    set lowered [lmap record [hir::exports::of $hir] {
+        dict create symbol ${name}_[dict get $record name] block [dict get $record block] \
+            params [lmap {p t} [dict get $record params] {set t}] result [dict get $record result]
+    }]
+    return [native::nir $hir -exports $lowered]
+}
+
+# The ELF header's machine and type of the file PATH.
+proc atElfHeader {path} {
+    binary scan [atRead $path] @16susu type machine
+    return [list $machine [dict getdef {1 rel 2 exec 3 dyn} $type other]]
+}
+
+# A schema 2 descriptor, the experiment's, with EDITS (string map pairs).
+proc atDescriptor {abi {edits {}}} {
+    set text [string map [list @ABI@ $abi] {{
+  "schema": 2,
+  "kind": "botlish-target-support",
+  "target": "android-aarch64",
+  "triple": "aarch64-linux-android",
+  "artifacts": ["native-library"],
+  "platform": {"minimumApi": 21},
+  "runtime": {"archive": "runtime/libbotlish_runtime.a", "abi": "@ABI@", "relocation": "pic"},
+  "systemLibraries": ["-ldl", "-llog", "-lunwind", "-ldl", "-lm", "-lc"],
+  "toolchain": {
+    "name": "Android NDK",
+    "root": "ANDROID_NDK_ROOT",
+    "revision": {"file": "source.properties", "key": "Pkg.Revision", "minimum": "28.0"},
+    "hosts": {"linux-x86_64": "toolchains/llvm/prebuilt/linux-x86_64"},
+    "tools": {"cc": "bin/clang", "ld": "bin/ld.lld", "objcopy": "bin/llvm-objcopy", "ar": "bin/llvm-ar"},
+    "platformLibraries": "sysroot/usr/lib/aarch64-linux-android/{api}"
+  }
+}
+}]
+    return [string map $edits $text]
+}
+
+# A runtime archive holding only an identity record TRIPLE ABI: what the
+# compiler reads of an archive before anything is linked.
+proc atFakeArchive {path triple abi} {
+    set dir [atDir id]
+    atWrite $dir/id.c "__attribute__((used)) const char botlish_id\[160\] = \"BOTLISH-RUNTIME-IDENTITY v1 $triple $abi\";\n"
+    exec clang --target=aarch64-linux-android21 -c -o $dir/id.o $dir/id.c
+    file mkdir [file dirname $path]
+    file delete $path
+    exec ar rcs $path $dir/id.o
+}
+
+# An application holding SOURCE as lib.bot and the support package NAME
+# (DESCRIPTOR, and ARCHIVE as its runtime: "" for a fake one of TRIPLE).
+proc atSupportApp {descriptor {archive ""} {triple aarch64-linux-android} {name android_rt}} {
+    set app [atDir app]
+    atWrite $app/lib.bot $::atLibrarySource
+    set pkg [file join $app .bot_modules $name]
+    atWrite $pkg/botlish-target-support.json $descriptor
+    if {$archive eq ""} {
+        atFakeArchive $pkg/runtime/libbotlish_runtime.a $triple [native::runtimeAbi]
+    } else {
+        file mkdir $pkg/runtime
+        file copy -force $archive $pkg/runtime/libbotlish_runtime.a
+    }
+    return $app
+}
+
+# A directory shaped like an NDK of REVISION: source.properties, the host's
+# toolchain directory with TOOLS (name -> a program path, linked; "fail" a
+# script that fails, "pic" one that fails as lld does for a relocation that
+# is not position-independent) and the platform libraries of APIS.
+proc atFakeNdk {revision tools apis} {
+    set ndk [atDir ndk]
+    atWrite $ndk/source.properties "Pkg.Desc = Android NDK\nPkg.Revision = $revision\n"
+    set bin [file join $ndk toolchains llvm prebuilt linux-x86_64 bin]
+    file mkdir $bin
+    dict for {tool program} $tools {
+        set tool [dict get {cc clang ld ld.lld objcopy llvm-objcopy ar llvm-ar} $tool]
+        switch -- $program {
+            fail { atWrite $bin/$tool "#!/bin/sh\necho 'clang: error: the fake toolchain fails' >&2\nexit 1\n"; file attributes $bin/$tool -permissions 0755 }
+            pic { atWrite $bin/$tool "#!/bin/sh\necho 'ld.lld: error: relocation R_AARCH64_ADR_PREL_PG_HI21 cannot be used against symbol x; recompile with -fPIC' >&2\nexit 1\n"; file attributes $bin/$tool -permissions 0755 }
+            default { file link -symbolic $bin/$tool $program }
+        }
+    }
+    foreach api $apis {
+        file mkdir [file join $ndk toolchains llvm prebuilt linux-x86_64 sysroot usr lib aarch64-linux-android $api]
+    }
+    return $ndk
+}
+
+proc atLibrary {app args} {
+    return [atRun $app -warnings error -target android-aarch64 -target-support android_rt \
+        -emit-native-library lib -out out {*}$args lib.bot]
+}
+
+# ------------------------------------------------------------ the target
+
+test at-target-row {android-aarch64 is a target of its own: Android's operating system, AArch64, LP64, unsigned plain char, the NDK's triple -- never linux-aarch64's row} -body {
+    set row [core::cabi::target android-aarch64]
+    list [dict get $row os] [dict get $row arch] [dict get $row model] [dict get $row charSigned] [dict get $row triple] \
+        [expr {[dict get $row triple] ne [dict get [core::cabi::target linux-aarch64] triple]}] \
+        [core::cabi::systemName android] [core::cabi::hostTarget] [core::cabi::platformOf std::linux::io]
+} -match glob -result {android aarch64 LP64 0 aarch64-linux-android 1 Android * linux}
+
+test at-target-pm-facts {the package manager knows the target as an ELF AArch64 target of Bionic, its libraries named as Linux's, Bionic's own platform libraries never bundled} -body {
+    set facts [pm::target::facts android-aarch64]
+    list [dict get $facts format] [dict get $facts machine] [dict get $facts libc] \
+        [pm::target::linkFiles android-aarch64 z static] [pm::target::platformLibrary android-aarch64 liblog.so] \
+        [pm::target::platformLibrary android-aarch64 libc.so.6] [pm::target::platformLibrary linux-aarch64 liblog.so]
+} -result {elf 183 bionic libz.a 1 0 0}
+
+test at-driver-target-report {the driver reads aarch64-linux-android as Cranelift does, and says it emits code for it and never runs it here; a target with no Botlish runtime is emitted for by no driver} -constraints {nativeBuilt linuxX86_64Host} -body {
+    set android [dict create {*}[lrange [exec [native::binary] target aarch64-linux-android] 0 end]]
+    set musl [dict create {*}[lrange [exec [native::binary] target aarch64-unknown-linux-musl] 0 end]]
+    list [dict get $android arch] [dict get $android format] [dict get $android c-call-conv] \
+        [dict get $android runs] [dict get $android emits] [dict get $musl emits]
+} -result {aarch64 elf system_v 0 1 0}
+
+# ------------------------------------------------------------ emitting is not running
+
+test at-driver-library-object {a library's object is emitted for aarch64-linux-android from this host: an AArch64 ELF relocatable object; without --target the same program's object is the host's} -constraints {nativeBuilt linuxX86_64Host} -body {
+    set dir [atDir obj]
+    set nir [file join $dir lib.nir]
+    atWrite $nir [atLibraryNir $::atLibrarySource lib]
+    lassign [atDriver library $dir/android.o lib $nir --target aarch64-linux-android] s1 out1
+    lassign [atDriver library $dir/host.o lib $nir] s2 out2
+    list $s1 [lindex $out1 0] [atElfHeader $dir/android.o] $s2 [atElfHeader $dir/host.o]
+} -result {0 library {183 rel} 0 {62 rel}}
+
+test at-driver-refusals {emitting for another target never runs it: --target is a library's option only; a program built for another target, and a target with no Botlish runtime, are NATIVE TARGET before any code is made} -constraints {nativeBuilt linuxX86_64Host} -body {
+    set dir [atDir refuse]
+    set nir [file join $dir lib.nir]
+    atWrite $nir [atLibraryNir $::atLibrarySource lib]
+    lassign [atDriver run $nir --target aarch64-linux-android] runStatus runOut
+    lassign [atDriver library $dir/musl.o lib $nir --target aarch64-unknown-linux-musl] muslStatus muslOut
+    # A program built for linux-x86_64 (it imports std::ffi::c, whose
+    # scalars are the target's: its NIR names its target).
+    set built [file join $dir built.nir]
+    atWrite $built [atLibraryNir "import std::ffi::c\n\n$::atLibrarySource" lib -target linux-x86_64]
+    lassign [atDriver library $dir/built.o lib $built --target aarch64-linux-android] builtStatus builtOut
+    # A program built for android-aarch64 never runs here.
+    set android [file join $dir android.nir]
+    atWrite $android [atLibraryNir "import std::ffi::c\n\n$::atLibrarySource\ntwice(3)\n" lib -target android-aarch64]
+    lassign [atDriver run $android] androidStatus androidOut
+    list $runStatus [string match {*--target is an option of library*} $runOut] \
+        $muslStatus [string match {*NATIVE TARGET*no Botlish native runtime exists for aarch64-unknown-linux-musl*} $muslOut] \
+        $builtStatus [string match {*NATIVE TARGET*built for target linux-x86_64*} $builtOut] [file exists $dir/built.o] \
+        [string match {*NATIVE TARGET*built for target android-aarch64*runs only on its own target's host*} $androidOut]
+} -result {2 1 1 1 1 1 0 1}
+
+test at-library-needs-support {a library of android-aarch64 is linked with Android's runtime: without its target support package it is refused, never linked with this host's runtime; an installed package is never selected unasked} -constraints {nativeBuilt linuxX86_64Host clang} -body {
+    set app [atSupportApp [atDescriptor [native::runtimeAbi]]]
+    lassign [atRun $app -target android-aarch64 -emit-native-library lib -out out lib.bot] status out
+    list $status [string match {*a library of android-aarch64 is linked with android-aarch64's runtime*-target-support NAME*(NATIVE TARGET)*} $out] \
+        [file exists $app/out/liblib.so]
+} -result {1 1 0}
+
+test at-executable-refused {an Android executable is no artifact this compiler makes: the driver refuses another host's executable, and the Android package supplies native libraries only} -constraints {nativeBuilt linuxX86_64Host clang} -body {
+    set app [atSupportApp [atDescriptor [native::runtimeAbi]]]
+    atWrite $app/hello.bot "import std::ffi::c\n42\n"
+    lassign [atRun $app -target android-aarch64 -emit-native-executable -target-support android_rt hello.bot] status out
+    list $status [string match {*supplies native-library for android-aarch64, not a native-executable*(NATIVE TARGET-SUPPORT ARTIFACT)*} $out]
+} -result {1 1}
+
+# ------------------------------------------------------------ target support refusals
+
+test at-support-refusals {every schema 2 refusal comes before anything is linked, each its own kind} -constraints {nativeBuilt linuxX86_64Host clang} -body {
+    set abi [native::runtimeAbi]
+    set cases [list \
+        schema1 [string map [list @ABI@ $abi] {{"schema": 1, "kind": "botlish-target-support", "target": "android-aarch64", "triple": "aarch64-linux-android", "linker": "system", "runtime": {"archive": "runtime/libbotlish_runtime.a", "abi": "@ABI@"}, "systemLibraries": []}}] ARTIFACT \
+        static [atDescriptor $abi {{"relocation": "pic"} {"relocation": "static"}}] PIC \
+        api [atDescriptor $abi {{"minimumApi": 21} {"minimumApi": 19}}] API \
+        noplatform [atDescriptor $abi {{"platform": {"minimumApi": 21},} {}}] DESCRIPTOR \
+        unknown [atDescriptor $abi {{"artifacts":} {"hooks": [], "artifacts":}}] DESCRIPTOR \
+        executable [atDescriptor $abi {{["native-library"]} {["native-executable"]}}] DESCRIPTOR \
+        libraries [atDescriptor $abi {{"-llog", } {}}] LIBRARIES \
+        abi [atDescriptor 0123456789abcdef] ABI \
+        target [atDescriptor $abi {{"target": "android-aarch64"} {"target": "linux-aarch64"}}] TARGET \
+        triple [atDescriptor $abi {{"triple": "aarch64-linux-android"} {"triple": "aarch64-unknown-linux-gnu"}}] TRIPLE \
+        toolroot [atDescriptor $abi {{"ANDROID_NDK_ROOT"} {"../ndk"}}] DESCRIPTOR \
+        toolpath [atDescriptor $abi {{"bin/clang"} {"../../bin/clang"}}] DESCRIPTOR]
+    set results {}
+    foreach {case descriptor kind} $cases {
+        set app [atSupportApp $descriptor]
+        lassign [atLibrary $app] status out
+        lappend results $case [expr {$status == 1 && [string match "*(NATIVE TARGET-SUPPORT $kind)*" $out]}] [file exists $app/out]
+    }
+    set results
+} -result {schema1 1 0 static 1 0 api 1 0 noplatform 1 0 unknown 1 0 executable 1 0 libraries 1 0 abi 1 0 target 1 0 triple 1 0 toolroot 1 0 toolpath 1 0}
+
+test at-support-linux-archive {an archive whose identity record names Linux/glibc AArch64 is never Android's runtime, whatever its descriptor states: the same architecture, another operating system and C library ABI} -constraints {nativeBuilt linuxX86_64Host clang} -body {
+    set app [atSupportApp [atDescriptor [native::runtimeAbi]] "" aarch64-unknown-linux-gnu]
+    lassign [atLibrary $app] status out
+    list $status [string match {*built for aarch64-unknown-linux-gnu, not android-aarch64's aarch64-linux-android: the same architecture, another operating system or C library ABI*(NATIVE TARGET-SUPPORT RUNTIME)*} $out]
+} -result {1 1}
+
+test at-toolchain-refusals {a missing or unusable host toolchain is the toolchain's error, never the package's: the root's variable unset, an older revision, no directory for this host, a missing tool; an NDK without the package's API level is API} -constraints {nativeBuilt linuxX86_64Host clang} -body {
+    set abi [native::runtimeAbi]
+    set real [list cc /bin/true ld /bin/true objcopy /bin/true ar /bin/true]
+    set results {}
+    set app [atSupportApp [atDescriptor $abi]]
+    lassign [withEnvironment {ANDROID_NDK_ROOT {}} { atLibrary $app }] status out
+    lappend results unset [expr {[string match {*ANDROID_NDK_ROOT, which is not set*(NATIVE LIBRARY TOOLCHAIN)*} $out] && ![string match *TARGET-SUPPORT* $out]}]
+    set old [atFakeNdk 27.2.12479018 $real 21]
+    lassign [withEnvironment [list ANDROID_NDK_ROOT $old] { atLibrary $app }] status out
+    lappend results old [string match {*is revision 27.2.12479018, and the target support package android_rt needs at least 28.0*(NATIVE LIBRARY TOOLCHAIN)*} $out]
+    set notool [atFakeNdk 29.0.1 [list cc /bin/true ld /bin/true objcopy /bin/true] 21]
+    lassign [withEnvironment [list ANDROID_NDK_ROOT $notool] { atLibrary $app }] status out
+    lappend results notool [string match {*has no ar*(NATIVE LIBRARY TOOLCHAIN)*} $out]
+    set noapi [atFakeNdk 29.0.1 $real 24]
+    lassign [withEnvironment [list ANDROID_NDK_ROOT $noapi] { atLibrary $app }] status out
+    lappend results noapi [string match {*has no platform libraries of API level 21*(NATIVE TARGET-SUPPORT API)*} $out]
+    set nohost [atSupportApp [atDescriptor $abi {{"linux-x86_64": "toolchains} {"macos-aarch64": "toolchains}}]]
+    lassign [withEnvironment [list ANDROID_NDK_ROOT $noapi] { atLibrary $nohost }] status out
+    lappend results nohost [string match {*has no toolchain for this host (linux-x86_64)*(NATIVE LIBRARY TOOLCHAIN)*} $out]
+    set results
+} -result {unset 1 old 1 notool 1 noapi 1 nohost 1}
+
+test at-toolchain-failures {a link that fails leaves no library or manifest behind (not even an earlier build's), and one whose archive is not position-independent is PIC} -constraints {nativeBuilt linuxX86_64Host clang} -body {
+    set app [atSupportApp [atDescriptor [native::runtimeAbi]]]
+    file mkdir $app/out
+    foreach f {liblib.a liblib.so lib.manifest.json} { atWrite $app/out/$f "an earlier build\n" }
+    set fails [atFakeNdk 29.0.1 [list cc fail ld fail objcopy /bin/true ar /bin/true] 21]
+    lassign [withEnvironment [list ANDROID_NDK_ROOT $fails] { atLibrary $app }] status out
+    set left [lsort [glob -nocomplain -tails -directory $app/out *]]
+    set pic [atFakeNdk 29.0.1 [list cc pic ld pic objcopy /bin/true ar /bin/true] 21]
+    lassign [withEnvironment [list ANDROID_NDK_ROOT $pic] { atLibrary $app }] picStatus picOut
+    list $status [string match {*Android NDK ld failed*the fake toolchain fails*(NATIVE LIBRARY TOOL ld)*} $out] $left \
+        $picStatus [string match {*not position-independent*(NATIVE LIBRARY PIC)*} $picOut]
+} -result {1 1 {} 1 1}
+
+# ------------------------------------------------------------ the link (the NDK)
+
+# The fixtures: the experiment's packages (tools/package.sh: the Android
+# runtime archive and its descriptor, the 2048 engine), built once.
+proc atFixtures {} {
+    if {[info exists ::atFixtureCache]} { return $::atFixtureCache }
+    set dir [atDir fixtures]
+    exec [file join $::atHere tools package.sh] $dir [info nameofexecutable] $::atMain 2>@1
+    set ::atFixtureCache [file join $dir repo]
+    return $::atFixtureCache
+}
+
+# The 2048 application with both packages installed for android-aarch64,
+# and its library built into lib/.
+proc atGameApp {{out lib}} {
+    set app [atDir game]
+    atWrite $app/botlish.json "\{\"schema\": 1, \"dependencies\": \{\}\}\n"
+    file copy [file join $::projectRoot audit external-tools 2048 engine.bot] $app/engine.bot
+    foreach package {game2048 botlish_target_android_aarch64} {
+        lassign [atRun $app add $package -repository [atFixtures] -target android-aarch64] status output
+        if {$status != 0} { error "add $package: $output" }
+    }
+    lassign [atRun $app -warnings error -target android-aarch64 -target-support botlish_target_android_aarch64 \
+        -emit-native-library game -out $out engine.bot] status output
+    if {$status != 0} { error "the library: $output" }
+    return $app
+}
+
+test at-library-elf {the 2048 library made for android-aarch64 from installed packages: an AArch64 ELF shared object, every loadable segment 16 KiB-aligned, no text relocation, needing Bionic's libc, libm, libdl and liblog only, with Bionic's symbol versions (LIBC) and no glibc one, exporting exactly the library's public functions} -constraints {androidRuntime} -body {
+    set app [atGameApp]
+    set facts [native::elf::facts $app/lib/libgame.so]
+    set public [lsort [native::library::PublicNames game [lmap n {new_game move changes spawn first_empty spawn_first score over} {dict create name $n}]]]
+    list [dict get $facts machine] [dict get $facts type] [lsort -unique [lmap l [dict get $facts loads] {dict get $l align}]] \
+        [dict get $facts textrel] [lsort [dict get $facts needed]] [lsort -unique [concat {*}[dict values [dict get $facts verneed]]]] \
+        [expr {[dict get $facts exports] eq $public}] [llength $public] [dict get $facts soname] [dict get $facts stackExec]
+} -result {183 dyn 16384 0 {libc.so libdl.so liblog.so libm.so} LIBC 1 23 libgame.so 0}
+
+test at-library-manifest {the library's manifest names android-aarch64, the runtime's system libraries, the target support package, its platform version and the toolchain, and binds the files it describes} -constraints {androidRuntime} -body {
+    set app [atGameApp]
+    set m [pm::json::decode [atRead $app/lib/game.manifest.json]]
+    set get {{value args} {
+        foreach k $args { set value [dict get [pm::json::payload $value] $k] }
+        pm::json::payload $value
+    }}
+    set digests [lmap f {static shared header} file {libgame.a libgame.so game.h} {
+        expr {[apply $get $m sha256 $f] eq [native::library::Sha256 $app/lib/$file]}
+    }]
+    list [apply $get $m target name] [apply $get $m target triple] [lmap l [apply $get $m link] {pm::json::payload $l}] \
+        [apply $get $m targetSupport package] [apply $get $m targetSupport platform minimumApi] \
+        [apply $get $m targetSupport toolchain name] [expr {[apply $get $m targetSupport runtimeAbi] eq [native::runtimeAbi]}] $digests
+} -result {android-aarch64 aarch64-linux-android {-ldl -llog -lunwind -ldl -lm -lc} botlish_target_android_aarch64 21 {Android NDK} 1 {1 1 1}}
+
+test at-library-deterministic {two builds of the Android library give the same static library, shared library, header and manifest, byte for byte} -constraints {androidRuntime} -body {
+    set app [atGameApp]
+    lassign [atRun $app -warnings error -target android-aarch64 -target-support botlish_target_android_aarch64 \
+        -emit-native-library game -out again engine.bot] status
+    list $status {*}[lmap f {libgame.a libgame.so game.h game.manifest.json} {
+        expr {[atRead $app/lib/$f] eq [atRead $app/again/$f]}
+    }]
+} -result {0 1 1 1 1}
+
+test at-library-alignment-checked {a shared object with 4 KiB-aligned segments is no Android library: the check refuses it and removes it} -constraints {androidRuntime} -body {
+    set app [atGameApp]
+    set dir [atDir align]
+    set bin [file join [atNdk] toolchains llvm prebuilt linux-x86_64 bin]
+    set here [pwd]
+    cd $dir
+    exec $bin/llvm-ar x $app/lib/libgame.a
+    cd $here
+    exec $bin/clang --target=aarch64-linux-android21 -shared -o $dir/libgame.so {*}[glob $dir/*.o] -Wl,-z,max-page-size=4096 \
+        -Wl,--gc-sections -ldl -llog -lunwind -lm -lc
+    set support [dict create libraries {-ldl -llog -lunwind -ldl -lm -lc}]
+    set public [native::library::PublicNames game [lmap n {new_game move changes spawn first_empty spawn_first score over} {dict create name $n}]]
+    set failed [catch {native::library::ValidateShared $dir/libgame.so android-aarch64 $support $public game {}} message options]
+    list $failed [dict get $options -errorcode] [string match {*aligned to 4096, not 16384*} $message] [file exists $dir/libgame.so]
+} -result {1 {NATIVE LIBRARY ELF} 1 0}
+
+# ------------------------------------------------------------ execution
+
+# The hosts (host/host2048.c, host/stress.c) built by the NDK for API 21
+# against the library of APP.
+proc atHost {app source lib} {
+    set out [file join $app lib [file rootname [file tail $source]]]
+    exec [file join [atNdk] toolchains llvm prebuilt linux-x86_64 bin clang] --target=aarch64-linux-android21 \
+        -std=c11 -O2 -Wall -Wextra -Werror -I [file join $app lib] -o $out $source -ldl
+    return $out
+}
+
+proc atAndroid {root args} {
+    set filtered {}
+    catch {exec [file join $::atHere tools android-run.sh] {*}$args 2>@1} output options
+    set status [expr {[dict get $options -code] == 0 ? 0 : [lindex [dict get $options -errorcode] 2]}]
+    set lines [lmap line [split $output \n] {if {[string match *linker* $line]} continue; set line}]
+    return [list $status $lines]
+}
+
+test at-android-2048 {the 2048 library made by this compiler plays in an Android process -- Android's linker64 and Bionic of every installed API level, at the minimum and the newest -- exactly as the interpreter plays: 321 states, the score, over, first_empty and the declared errors} -constraints {androidRun} -body {
+    set app [atGameApp]
+    set host [atHost $app [file join $::atHere host host2048.c] $app/lib/libgame.so]
+    set results {}
+    foreach root [atRoots] {
+        set code [catch {exec [info nameofexecutable] [file join $::atHere tools parity.tcl] -app $app \
+            -botlish [list [info nameofexecutable] $::atMain] -run [file join $::atHere tools android-run.sh] \
+            $root/root $host $app/lib/libgame.so play 2>@1} output]
+        lappend results [file tail $root] $code [regexp -all {(?n)^PASS } $output]
+    }
+    lsort -unique [lmap {api code passes} $results {list $code $passes}]
+} -result {{0 4}}
+
+test at-android-lifecycle {instances in an Android process: fifty created, played and destroyed; two interleaved, one destroyed and the other still working; a destroyed one refused; another thread refused (WRONG-THREAD), the owner's still working; the same under GC stress and with 16 KiB pages} -constraints {androidRun} -body {
+    set app [atGameApp]
+    set host [atHost $app [file join $::atHere host host2048.c] $app/lib/libgame.so]
+    set root [lindex [atRoots] end]/root
+    lassign [atAndroid $root $root $host $app/lib/libgame.so lifecycle 50] s1 l1
+    lassign [atAndroid $root $root $host $app/lib/libgame.so thread] s2 l2
+    lassign [withEnvironment {BOTLISH_NATIVE_GC_STRESS 1} { atAndroid $root $root $host $app/lib/libgame.so lifecycle 3 }] s3 l3
+    lassign [atAndroid $root -p 16384 $root $host $app/lib/libgame.so thread] s4 l4
+    list $s1 $l1 $s2 $l2 $s3 [lindex $l3 1] $s4 [lindex $l4 0]
+} -result [list 0 [list "LIFECYCLE\t50 instances, each scored 28" "INTERLEAVED\t28 28 28" "ERROR\t4\tINVALID-INSTANCE"] \
+    0 [list "OTHER-THREAD\t4\tWRONG-THREAD" "OWN-THREAD\t28"] 0 "INTERLEAVED\t28 28 28" 0 "OTHER-THREAD\t4\tWRONG-THREAD"]
+
+test at-android-16k-control {16 KiB pages discriminate: Android's linker in its 16 KiB mode loads the compiler's library and refuses the same code linked 4 KiB-aligned} -constraints {androidRun16k} -body {
+    set app [atGameApp]
+    set host [atHost $app [file join $::atHere host host2048.c] $app/lib/libgame.so]
+    set dir [atDir k4]
+    set bin [file join [atNdk] toolchains llvm prebuilt linux-x86_64 bin]
+    set here [pwd]
+    cd $dir
+    exec $bin/llvm-ar x $app/lib/libgame.a
+    cd $here
+    exec $bin/clang --target=aarch64-linux-android21 -shared -o $dir/libgame.so {*}[glob $dir/*.o] -Wl,-z,max-page-size=4096 \
+        -Wl,--gc-sections -ldl -llog -lunwind -lm -lc
+    file copy $host $dir/host2048
+    set root [lindex [atRoots] [lsearch -glob [atRoots] */api-35]]/root
+    lassign [atAndroid $root -p 16384 $root $host $app/lib/libgame.so thread] ours
+    lassign [atAndroid $root -p 16384 $root $dir/host2048 $dir/libgame.so thread] theirs theirLines
+    lassign [atAndroid $root $root $dir/host2048 $dir/libgame.so thread] small
+    list $ours $theirs [string match {*dlopen failed*} $theirLines] $small
+} -result {0 3 1 0}
+
+test at-android-stress {the runtime's workloads in an Android process -- large and astral-plane strings, nested Lists of structs, a growing MutableVector, many allocations, a declared error with its payload -- equal the interpreter's, on two instances in turn, and under GC stress} -constraints {androidRun} -body {
+    set app [atGameApp]
+    file copy [file join $::atHere stress stress.bot] $app/stress.bot
+    lassign [atRun $app -warnings error -target android-aarch64 -target-support botlish_target_android_aarch64 \
+        -emit-native-library stress -out lib stress.bot] status output
+    if {$status != 0} { error $output }
+    set host [atHost $app [file join $::atHere host stress.c] $app/lib/libstress.so]
+    set root [lindex [atRoots] 0]/root
+    lassign [atAndroid $root $root $host $app/lib/libstress.so 6] s1 l1
+    lassign [withEnvironment {BOTLISH_NATIVE_GC_STRESS 1} { atAndroid $root $root $host $app/lib/libstress.so 2 }] s2 l2
+    atWrite $app/oracle.bot {import stress
+r = stress::repeated("aé😀", 2000)
+back = stress::reversed("aé😀bß"):
+    on IndexNotFound:
+        "?"
+v = stress::vector(5000):
+    on IndexNotFound:
+        -1
+[stress::characters(r), back, stress::nested(500), v]
+}
+    lassign [atRun $app -warnings off -backend interp -target android-aarch64 oracle.bot] - oracle
+    regexp {value: \[(\d+), "([^"]*)", (\d+), (\d+)\]} $oracle -> chars back nested vector
+    list $s1 [expr {[lrange $l1 0 4] eq [list "characters\t$chars\t14000" "reversed\t$back" "nested\t$nested" "vector\t$vector" "boom\t1\tBoom\t300\titem-299"]}] \
+        $s2 [expr {[lrange $l2 0 4] eq [lrange $l1 0 4]}]
+} -result {0 1 0 1}
+
+cleanupTests

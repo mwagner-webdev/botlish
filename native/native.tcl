@@ -132,6 +132,7 @@ source [file join [file dirname [file normalize [info script]]] lower.tcl]
 source [file join [file dirname [file normalize [info script]]] prepare.tcl]
 source [file join [file dirname [file normalize [info script]]] library.tcl]
 source [file join [file dirname [file normalize [info script]]] support.tcl]
+source [file join [file dirname [file normalize [info script]]] elf.tcl]
 
 namespace eval native {
     variable home [file dirname [file normalize [info script]]]
@@ -252,6 +253,21 @@ namespace eval native {
         frameRoots {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
         libraries {linux-x86_64 linux-aarch64} \
         mainThreadStartup {macos-aarch64}]
+    # What the native backend makes *for* a target, on any host that has the
+    # target's support package and toolchain (ANDROID-AARCH64-TARGET-
+    # SUPPORT-MILESTONE-1.md): code kept, never run here. `libraries`: a
+    # native library's object is emitted for the target (botlish-native
+    # library --target, codegen/library.rs's `supports`) and linked with its
+    # target support package's runtime by the package's declared toolchain.
+    variable targetCapabilities [dict create \
+        libraries {linux-x86_64 linux-aarch64 android-aarch64}]
+}
+
+# Whether the native backend makes CAPABILITY (native::targetCapabilities)
+# for TARGET, whatever this host is.
+proc native::targetSupports {capability target} {
+    variable targetCapabilities
+    return [expr {$target in [dict get $targetCapabilities $capability]}]
 }
 
 # Whether the native backend has CAPABILITY (native::capabilities) on this

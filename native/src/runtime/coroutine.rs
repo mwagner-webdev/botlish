@@ -103,7 +103,7 @@
 use super::error::RtError;
 #[cfg(not(all(windows, target_arch = "x86_64", target_env = "msvc")))]
 use super::native_stack::{NativeStack, StackState};
-#[cfg(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc")))]
+#[cfg(any(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "android", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc")))]
 use super::ops::GenericEntry;
 use super::value::*;
 use super::vm::Vm;
@@ -119,7 +119,7 @@ use std::cell::RefCell;
 /// runs only where it is true, so fusing a coroutine never makes a program
 /// run that the general runtime refuses.
 pub const STACK_SWITCHING: bool = cfg!(any(
-    all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")),
+    any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "android", target_arch = "aarch64")),
     all(target_os = "macos", target_arch = "aarch64"),
     all(windows, target_arch = "x86_64", target_env = "msvc")
 )) && super::framewalk::NATIVE_FRAME_ROOTS;
@@ -216,10 +216,10 @@ pub struct CoStack {
 /// Below a stack's usable bytes: on the POSIX hosts its PROT_NONE guard; on
 /// Windows the room its reservation keeps below them for the stack's
 /// guarantee, its guard page and the page Windows never commits.
-#[cfg(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc")))]
+#[cfg(any(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "android", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc")))]
 const GUARD_BYTES: usize = 64 * 1024;
 const POOL_LIMIT: usize = 32;
-#[cfg(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc")))]
+#[cfg(any(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "android", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc")))]
 const DEFAULT_STACK_BYTES: usize = 8 << 20;
 
 thread_local! {
@@ -236,7 +236,7 @@ thread_local! {
 /// that starts the coroutine, which made a pooled start need more than 2 KiB
 /// of it where a resume needs 350 bytes (WINDOWS-X86-64-MILESTONE-5.md,
 /// section 8.2).
-#[cfg(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc")))]
+#[cfg(any(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "android", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc")))]
 fn stack_bytes() -> usize {
     static BYTES: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
     *BYTES.get_or_init(|| {
@@ -252,7 +252,7 @@ fn stack_bytes() -> usize {
 /// SIZE rounded up to a multiple of the host's page size, which is not 4 KiB
 /// everywhere (16 KiB on Apple Silicon). Read once per call: it is a few
 /// instructions, and a stack is mapped rarely.
-#[cfg(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64")))]
+#[cfg(any(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "android", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64")))]
 fn round_to_page(size: usize) -> usize {
     // SAFETY: sysconf has no preconditions.
     let page = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
@@ -270,7 +270,7 @@ fn round_to_page(size: usize) -> usize {
 /// swap; Darwin has no MAP_STACK (its stack-ness is only in the thread
 /// library) and MAP_NORESERVE is a no-op there, so a stack is a plain private
 /// anonymous mapping. Both commit pages as they are touched.
-#[cfg(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")))]
+#[cfg(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "android", target_arch = "aarch64")))]
 const MAP_FLAGS: libc::c_int = libc::MAP_PRIVATE | libc::MAP_ANONYMOUS | libc::MAP_NORESERVE | libc::MAP_STACK;
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 const MAP_FLAGS: libc::c_int = libc::MAP_PRIVATE | libc::MAP_ANONYMOUS;
@@ -287,14 +287,14 @@ impl CoStack {
         }
     }
 
-    #[cfg_attr(not(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"))), allow(dead_code))]
+    #[cfg_attr(not(any(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "android", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"))), allow(dead_code))]
     fn top(&self) -> usize {
         self.base + self.size
     }
 
     /// A stack, and whether it came from the pool (rather than a fresh
     /// mapping).
-    #[cfg(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64")))]
+    #[cfg(any(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "android", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64")))]
     fn new() -> Result<(CoStack, bool), RtError> {
         let usable = stack_bytes();
         if let Some(stack) = POOL.with(|pool| {
@@ -323,7 +323,7 @@ impl CoStack {
         }
     }
 
-    #[cfg(not(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"))))]
+    #[cfg(not(any(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "android", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"))))]
     fn new() -> Result<(CoStack, bool), RtError> {
         Err(RtError::Unsupported(
             "native coroutines need stack switching, implemented for Linux x86-64 and AArch64, macOS AArch64 and Windows x86-64 only (COROUTINES.md)".to_string(),
@@ -344,7 +344,7 @@ impl Drop for CoStack {
             }
         });
         if returned != Ok(true) {
-            #[cfg(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64")))]
+            #[cfg(any(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "android", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64")))]
             // SAFETY: the mapping this stack owns; no frame on it is live.
             unsafe {
                 libc::munmap(self.base as *mut libc::c_void, self.size);
@@ -466,7 +466,7 @@ macro_rules! aarch64_trampoline {
     };
 }
 
-#[cfg(all(target_arch = "aarch64", target_os = "linux"))]
+#[cfg(all(target_arch = "aarch64", any(target_os = "linux", target_os = "android")))]
 std::arch::global_asm!(
     ".text",
     ".p2align 4",
@@ -500,7 +500,7 @@ std::arch::global_asm!(
     body = sym co_body,
 );
 
-#[cfg(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64")))]
+#[cfg(any(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "android", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64")))]
 unsafe extern "C" {
     /// Saves the current context, storing its stack pointer through SAVE,
     /// and continues the context whose stack pointer is LOAD, which sees
@@ -509,7 +509,7 @@ unsafe extern "C" {
     fn bl_co_trampoline();
 }
 
-#[cfg(not(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc"))))]
+#[cfg(not(any(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "android", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc"))))]
 unsafe fn bl_co_switch(_save: *mut usize, _load: usize, _transfer: usize) -> usize {
     unreachable!("no coroutine stack exists on this host")
 }
@@ -518,7 +518,7 @@ unsafe fn bl_co_switch(_save: *mut usize, _load: usize, _transfer: usize) -> usi
 /// on Windows from a fiber's restart, coroutine/windows.rs): runs the body
 /// to its end, records the terminal state, and switches back to the resumer
 /// of the final segment for good.
-#[cfg(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc")))]
+#[cfg(any(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "android", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc")))]
 extern "C" fn co_body(p: *mut Vm, co: *mut CoroutineObj) -> ! {
     // SAFETY: CO is the running coroutine (rooted through Vm::co_current for
     // as long as it runs); P is the Vm every frame shares.
@@ -665,7 +665,7 @@ unsafe fn prepare(stack: &CoStack, p: *mut Vm, co: *mut CoroutineObj) -> usize {
     sp
 }
 
-#[cfg(not(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc"))))]
+#[cfg(not(any(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "android", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc"))))]
 unsafe fn prepare(_stack: &CoStack, _p: *mut Vm, _co: *mut CoroutineObj) -> usize {
     0
 }
@@ -927,7 +927,7 @@ pub fn suspended_rbp(saved_sp: SwitchPoint) -> super::framewalk::windows::Frame 
 
 #[cfg(all(
     test,
-    any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc")),
+    any(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "android", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc")),
     not(feature = "fallback-roots")
 ))]
 mod tests {

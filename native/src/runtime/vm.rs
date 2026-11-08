@@ -359,9 +359,9 @@ impl Vm {
         let mut shadow = if super::framewalk::NATIVE_FRAME_ROOTS { Vec::new() } else { vec![0u64; SHADOW_STACK_SLOTS] };
         // Typed: on a host outside the list the block is a bare `None`.
         let native_stack: Option<NativeStack> = {
-            #[cfg(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc")))]
+            #[cfg(any(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "android", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc")))]
             { Some(NativeStack::current().expect("the thread's stack bounds")) }
-            #[cfg(not(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc"))))]
+            #[cfg(not(any(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "android", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc"))))]
             { None }
         };
         let base = if shadow.is_empty() { std::ptr::null_mut() } else { shadow.as_mut_ptr() };
@@ -425,7 +425,7 @@ impl Vm {
     /// adds no frame to the stack it runs on (runtime::platform's guard).
     #[inline(always)]
     pub fn publish_active_stack(&mut self, stack: Option<NativeStack>) {
-        #[cfg(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc")))]
+        #[cfg(any(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "android", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc")))]
         {
             let stack = stack.or(self.native_stack);
             if let Some(stack) = stack {
@@ -435,7 +435,7 @@ impl Vm {
                 self.stack_limit = stack.map_or(0, |s| s.stack_limit());
             }
         }
-        #[cfg(not(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc"))))]
+        #[cfg(not(any(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "android", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc"))))]
         let _ = stack;
     }
 
