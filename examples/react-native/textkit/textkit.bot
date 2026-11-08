@@ -1,0 +1,79 @@
+# textkit.bot -- a small text library a React Native app calls
+# (BOTLISH-REACT-NATIVE-2048-PACKAGE-MILESTONE-1.md, "An independent second
+# library"): nothing of 2048 in it. Its exports cover the boundary types the
+# React Native generator maps -- Int, Bool, Float64 and str results and
+# arguments, a declared error without and one with a typed payload -- so the
+# same generator, given its manifest, makes a second module beside the
+# game's.
+#
+# Text is a sequence of Unicode scalar values, as every Botlish String is:
+# lengths and reversals count scalars, never bytes or UTF-16 units.
+#
+# A library's entry file holds declarations only: this is one.
+import std::char
+import std::float64
+import std::str
+
+# A text with no characters where one is required.
+error EmptyText
+
+# A result longer than the caller allowed: the limit and the length the
+# result would have had.
+error TooLong:
+    limit: int
+    length: int
+
+# The number of Unicode scalar values of TEXT.
+exported c fn scalar_count(text: str) -> int:
+    std::str::length(text)
+
+# TEXT with its scalar values in reverse order.
+exported c fn reversed(text: str) -> str:
+    n = std::str::length(text)
+    fold i from 0 to n with intermediate acc "":
+        c = text.char_at(n - 1 - i):
+            on IndexNotFound:
+                ' '
+        acc.append_char(c)
+
+# Whether TEXT reads the same backwards, scalar by scalar.
+exported c fn palindrome(text: str) -> bool:
+    text == reversed(text)
+
+# TEXT repeated TIMES times, refused when that would be longer than LIMIT
+# scalar values (TooLong, with the limit and the length) or TEXT is empty.
+exported c fn repeated(text: str, times: int, limit: int) -> str errors EmptyText, TooLong:
+    n = std::str::length(text)
+    if n == 0:
+        fail EmptyText
+    if n * times > limit:
+        fail TooLong {limit: limit, length: n * times}
+    fold i from 0 to times with intermediate acc "":
+        acc.concat(text)
+
+# The mean of A and B: NonFiniteFloat when their sum is beyond Float64's
+# range.
+exported c fn mean(a: Float64, b: Float64) -> Float64 errors NonFiniteFloat:
+    (a + b) / 2.0
+
+# The share of TEXT's scalar values that are letters or digits, as a
+# fraction of its length: an empty TEXT has none (EmptyText). (A count
+# beyond Float64's range would be NonFiniteFloat.)
+exported c fn alnum_share(text: str) -> Float64 errors EmptyText, NonFiniteFloat:
+    n = std::str::length(text)
+    if n == 0:
+        fail EmptyText
+    count = fold i from 0 to n with intermediate acc 0:
+        c = text.char_at(i):
+            on IndexNotFound:
+                ' '
+        if std::char::is_tcl_alnum(c):
+            acc + 1
+        else:
+            acc
+    std::float64::from_int(count) / std::float64::from_int(n)
+
+# Nothing, when TEXT holds a character; EmptyText when it holds none.
+exported c fn require_text(text: str) -> unit errors EmptyText:
+    if std::str::length(text) == 0:
+        fail EmptyText

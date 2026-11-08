@@ -1,0 +1,235 @@
+# game.bot -- the 2048 game a React Native app plays
+# (BOTLISH-REACT-NATIVE-2048-PACKAGE-MILESTONE-1.md, "The 2048 facade"): the
+# unchanged engine of examples/games/2048 (installed as the package
+# game2048) with the rules a played game adds -- a seeded, deterministic
+# spawn after every move that changes the board, two tiles to start, the
+# end and the win -- as the native library `game`.
+#
+# A game crosses the boundary as its snapshot, a versioned text of 23
+# single-space-separated fields:
+#
+#     2048/1 RNG SCORE MOVES CHANGED OVER WON C0 C1 ... C15
+#
+# RNG is the spawn generator's state (0 <= RNG < 2^32), SCORE the score,
+# MOVES the number of moves that changed the board, CHANGED whether the
+# last move did (1) or not (0; a new game's is 0), OVER whether no move can
+# change the board any more, WON whether a tile of 2048 or more is on it,
+# then the sixteen cells row by row (0 an empty cell, else its tile).
+# Every export reads a snapshot and returns a new one, or a fact of it: a
+# host keeps no game of its own and computes nothing of the rules.
+#
+# A library's entry file holds declarations only: this is one.
+import std::int
+import std::list
+import std::str
+import game2048
+
+# A snapshot that is not 23 fields of the version 2048/1, or whose fields
+# are not a game.
+error InvalidSnapshot
+
+# A direction other than 0 (left), 1 (right), 2 (up) and 3 (down).
+error InvalidDirection
+
+# A tile other than 2 or 4, or a cell outside the board.
+error InvalidPlacement
+
+# The version a snapshot starts with. (Functions, not top-level values: an
+# export is environment-free.)
+fn version() -> str:
+    "2048/1"
+
+# The modulus of the spawn generator (a 32-bit linear congruential
+# generator: Numerical Recipes' multiplier and increment).
+fn modulus() -> int:
+    4294967296
+
+# A game between two moves: the engine's game, the generator's state, the
+# number of changing moves, and whether the last move changed the board.
+struct Played:
+    game: game2048::Game
+    rng: int
+    moves: int
+    changed: bool
+
+# The generator's state after STATE.
+fn next(state: int) -> int:
+    (state * 1664525 + 1013904223).mod(modulus())
+
+# A number below N drawn from STATE (its high 16 bits: an LCG's low bits
+# repeat with short periods).
+fn below(state: int, n: int) -> int:
+    state.shift_right(16).mod(n)
+
+# The number TEXT holds between START and END.
+fn number(text: str, start: int, end: int) -> int errors InvalidSnapshot:
+    # (An invalid slice is no number: "" is no integer's text.)
+    digits = text.substring(start, end):
+        on LowerUnderrun:
+            ""
+        on UpperOverrun:
+            ""
+    value = std::int::from_string(digits):
+        on InvalidIntegerText:
+            fail InvalidSnapshot
+    value
+
+# The fields of TEXT after its version, as numbers.
+fn numbers(text: str) -> List[int] errors InvalidSnapshot:
+    n = std::str::length(text)
+    head = std::str::length(version())
+    prefix = text.substring(0, head):
+        on LowerUnderrun:
+            ""
+        on UpperOverrun:
+            ""
+    # The numbers from position I on, the current one starting at START,
+    # after FOUND. (nomethod: I is a position, not a receiver.)
+    nomethod fn from(i: int, start: int, found: List[int]) -> List[int] errors InvalidSnapshot:
+        if i >= n:
+            return found.append(text.number(start, i))
+        # (A position past the end is no space.)
+        c = text.char_at(i):
+            on IndexNotFound:
+                'x'
+        if c == ' ':
+            from(i + 1, i + 1, found.append(text.number(start, i)))
+        else:
+            from(i + 1, start, found)
+    # The version is followed by exactly one space.
+    gap = text.char_at(head):
+        on IndexNotFound:
+            'x'
+    if prefix != version() or gap != ' ':
+        fail InvalidSnapshot
+    from(head + 1, head + 1, [])
+
+# Whether VALUE is a flag (0 or 1).
+fn flag?(value: int) -> bool:
+    value == 0 or value == 1
+
+# Whether GAME's board holds 2048 or more.
+fn won?(game: game2048::Game) -> bool:
+    loop row in game2048::rows(game.board):
+        loop cell in row:
+            if cell >= 2048:
+                return true
+    false
+
+# The game TEXT states. Its OVER and WON fields must be the facts of its
+# board: a snapshot this library did not make is checked, never trusted.
+fn played(text: str) -> Played errors InvalidSnapshot:
+    values = numbers(text)
+    rng = values.get(0, -1)
+    score = values.get(1, -1)
+    moves = values.get(2, -1)
+    flags = loop i from 3 to 6:
+        values.get(i, -1)
+    rows = loop r from 0 to 4:
+        loop c from 0 to 4:
+            values.get(6 + r * 4 + c, -1)
+    # (Rows that are no board give the empty board, whose rows differ.)
+    board = game2048::board(rows):
+        on game2048::InvalidBoard:
+            game2048::new_game().board
+    game = game2048::Game {board: board, score: score}
+    shaped = std::list::length(values) == 22 and rng >= 0 and rng < modulus() and score >= 0 and moves >= 0
+    flagged = flags.get(0, -1).flag?() and flags.get(1, -1).flag?() and flags.get(2, -1).flag?()
+    facts = (flags.get(1, -1) == 1) == game2048::game_over?(game) and (flags.get(2, -1) == 1) == won?(game)
+    if not (shaped and flagged and game2048::rows(board) == rows and facts):
+        fail InvalidSnapshot
+    Played {game: game, rng: rng, moves: moves, changed: flags.get(0, -1) == 1}
+
+fn bit(b: bool) -> int:
+    if b:
+        return 1
+    0
+
+# The cells of ROWS from row R on, as text after TEXT.
+fn cells(rows: List[List[int]], r: int, text: str) -> str:
+    if r >= std::list::length(rows):
+        return text
+    line = fold cell in rows.get(r, []) with intermediate acc text:
+        acc.append_char(' ').concat(cell.to_string())
+    rows.cells(r + 1, line)
+
+# The snapshot of PLAYED.
+fn snapshot(p: Played) -> str:
+    fields = [p.rng.to_string(), p.game.score.to_string(), p.moves.to_string(), bit(p.changed).to_string(),
+        bit(game2048::game_over?(p.game)).to_string(), bit(won?(p.game)).to_string()]
+    head = fold field in fields with intermediate acc version():
+        acc.append_char(' ').concat(field)
+    game2048::rows(p.game.board).cells(0, head)
+
+# GAME with one tile spawned from the generator state RNG on one of its
+# empty cells, and the generator's next state; GAME itself when no cell is
+# empty. The cell is drawn first, then the tile: a 4 one time in ten.
+struct Spawned:
+    game: game2048::Game
+    rng: int
+
+fn spawned(game: game2048::Game, rng: int) -> Spawned:
+    empties = game2048::empty_positions(game.board)
+    count = std::list::length(empties)
+    if count == 0:
+        return Spawned {game: game, rng: rng}
+    first = next(rng)
+    at = empties.get(first.below(count), game2048::Position {row: 0, column: 0})
+    second = next(first)
+    tile = if second.below(10) == 0:
+        game2048::SpawnTile::Four
+    else:
+        game2048::SpawnTile::Two
+    # (The cell is empty: spawn never finds it occupied.)
+    placed = game.spawn(at, tile):
+        on game2048::CellOccupied:
+            game
+    Spawned {game: placed, rng: second}
+
+fn direction(n: int) -> game2048::Direction errors InvalidDirection:
+    if n == 0:
+        return game2048::Direction::Left
+    if n == 1:
+        return game2048::Direction::Right
+    if n == 2:
+        return game2048::Direction::Up
+    if n == 3:
+        return game2048::Direction::Down
+    fail InvalidDirection
+
+# A new game from SEED (any Int: reduced to the generator's range): an empty
+# board with two tiles spawned, score 0.
+exported c fn new_game(seed: int) -> str:
+    one = game2048::new_game().spawned(seed.mod(modulus()))
+    two = one.game.spawned(one.rng)
+    snapshot(Played {game: two.game, rng: two.rng, moves: 0, changed: false})
+
+# STATE after a move toward DIRECTION (0 left, 1 right, 2 up, 3 down):
+# a move that changes the board scores its merges and spawns a tile; one
+# that does not changes nothing but CHANGED (0).
+exported c fn move(state: str, direction_code: int) -> str errors InvalidSnapshot, InvalidDirection:
+    p = played(state)
+    m = game2048::move(p.game, direction(direction_code))
+    if not m.changed:
+        return snapshot(Played {game: p.game, rng: p.rng, moves: p.moves, changed: false})
+    s = m.game.spawned(p.rng)
+    snapshot(Played {game: s.game, rng: s.rng, moves: p.moves + 1, changed: true})
+
+# STATE's score.
+exported c fn score(state: str) -> int errors InvalidSnapshot:
+    played(state).game.score
+
+# STATE with TILE (2 or 4) placed at ROW and COLUMN by hand (a puzzle's
+# setup, or a test's): the engine refuses an occupied cell
+# (game2048::CellOccupied).
+exported c fn place(state: str, row: int, column: int, tile: int) -> str errors InvalidSnapshot, InvalidPlacement, game2048::CellOccupied:
+    p = played(state)
+    if (tile == 2 or tile == 4) and row >= 0 and row <= 3 and column >= 0 and column <= 3:
+        at = game2048::Position {row: row, column: column}
+        spawn = if tile == 2:
+            game2048::SpawnTile::Two
+        else:
+            game2048::SpawnTile::Four
+        game = game2048::spawn(p.game, at, spawn)
+        return snapshot(Played {game: game, rng: p.rng, moves: p.moves, changed: false})
+    fail InvalidPlacement
