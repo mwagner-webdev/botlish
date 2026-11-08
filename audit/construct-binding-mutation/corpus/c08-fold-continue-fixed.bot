@@ -1,0 +1,18 @@
+# category: fold-intermediate
+# class: A -- productive local mutation
+# The correction of c08: the iteration completes with the mutated
+# intermediate on every path that means to keep its push.
+# expect: [1, -2, 3]
+import std::mutable_vector
+
+fn ints() -> MutableVector[int]:
+    std::mutable_vector::from_list([])
+
+fn f(xs: List[int]) -> List[int]:
+    w = fold x in xs with intermediate acc ints():
+        acc.push(x)
+        acc
+    loop y in w:
+        y
+
+f([1, -2, 3])
