@@ -124,6 +124,7 @@ use super::value::Value;
 pub const NATIVE_FRAME_ROOTS: bool = cfg!(all(
     any(
         all(any(target_arch = "x86_64", target_arch = "aarch64"), any(all(target_os = "linux", target_env = "gnu"), target_os = "macos")),
+        all(target_arch = "aarch64", target_os = "android"),
         all(target_arch = "x86_64", target_os = "windows", target_env = "msvc")
     ),
     not(feature = "fallback-roots")
@@ -678,7 +679,7 @@ mod tests {
         assert_eq!(
             NATIVE_FRAME_ROOTS,
             cfg!(all(
-                any(all(target_os = "linux", target_env = "gnu"), target_os = "macos", all(windows, target_env = "msvc", target_arch = "x86_64")),
+                any(all(target_os = "linux", target_env = "gnu"), target_os = "macos", all(target_os = "android", target_arch = "aarch64"), all(windows, target_env = "msvc", target_arch = "x86_64")),
                 not(feature = "fallback-roots")
             ))
         );

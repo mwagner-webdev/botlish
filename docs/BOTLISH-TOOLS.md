@@ -224,6 +224,7 @@ without the HIR:
 | each export's `params[i].ownership` | `value` (a scalar) or `borrowed` (a str, `lifetime: "call"`) |
 | each export's `result.ownership` | `value`, `none` (unit) or `owned` with its `release` function |
 | each export's `error` | `{c: "NAME_error **", nullable: true, ownership: "owned", release: "NAME_error_release"}` |
+| `targetSupport` | present only for a library linked with a target support package (section 9, schema 2): `{package, runtimeAbi, platform, toolchain}` -- the package, its runtime ABI fingerprint, the platform version it states (`{minimumApi: 21}` for android-aarch64) and the toolchain that linked it (`{name, revision}`). `target` is then the library's target, `link` the system libraries its runtime is linked with (ANDROID-AARCH64-TARGET-SUPPORT-MILESTONE-1.md) |
 
 Its keys are written in a fixed order and two builds of one program give
 the same bytes. A consumer checks `schema` (a schema 1 manifest records
@@ -278,6 +279,61 @@ fingerprint. A missing C compiler driver is the link's own error
 (`NATIVE ... TOOLCHAIN`), never a target support refusal. A tool given
 `-target-support NAME` receives the package's directory in its request and
 passes `-target-support NAME` to the compiler it runs.
+
+### Schema 2: a native library's runtime and its toolchain
+
+A schema 2 descriptor (ANDROID-AARCH64-TARGET-SUPPORT-MILESTONE-1.md) states
+the artifact kinds it supplies and links them with a toolchain it declares
+as data -- the way a native library of another target than the host's is
+made (`main.tcl -target android-aarch64 -target-support NAME
+-emit-native-library LIB FILE.bot`):
+
+    {"schema": 2, "kind": "botlish-target-support",
+     "target": "android-aarch64", "triple": "aarch64-linux-android",
+     "artifacts": ["native-library"],
+     "platform": {"minimumApi": 21},
+     "runtime": {"archive": "runtime/libbotlish_runtime.a", "abi": FINGERPRINT,
+                 "relocation": "pic"},
+     "systemLibraries": ["-ldl", "-llog", "-lunwind", "-ldl", "-lm", "-lc"],
+     "toolchain": {"name": "Android NDK", "root": "ANDROID_NDK_ROOT",
+       "revision": {"file": "source.properties", "key": "Pkg.Revision", "minimum": "28.0"},
+       "hosts": {"linux-x86_64": "toolchains/llvm/prebuilt/linux-x86_64"},
+       "tools": {"cc": "bin/clang", "ld": "bin/ld.lld", "objcopy": "bin/llvm-objcopy", "ar": "bin/llvm-ar"},
+       "platformLibraries": "sysroot/usr/lib/aarch64-linux-android/{api}"}}
+
+* `artifacts`: what the package supplies; only `native-library` (a schema 1
+  package supplies the system linker's `native-executable`). Asking a
+  package for another kind is ARTIFACT.
+* `platform`: required exactly for a target whose operating system has a
+  platform version (Android: `minimumApi`, the API level the library is
+  linked for, `--target=TRIPLE` + `N`), never below the compiler's floor
+  for its runtime (21): API.
+* `runtime.relocation`: `"pic"`, the only model a shared library's archive
+  may have: PIC. A link that still fails for a relocation that is not
+  position-independent is `{NATIVE LIBRARY PIC}`.
+* `systemLibraries`: must equal the target's (the compiler's statement of
+  rustc's `native-static-libs` for the runtime built for it): LIBRARIES.
+  Never an added flag.
+* `toolchain`: where the host's toolchain is -- the environment variable
+  `root` names its directory (nothing is searched), `revision` the file and
+  key of its revision and the minimum, `hosts` its directory per host, `tools`
+  a C driver, an LLVM linker, objcopy and archiver relative to it, and
+  `platformLibraries` the directory of an API level's libraries. Paths are
+  relative, `/`-separated, without `.`, `..` or an empty segment. The
+  compiler composes the arguments itself; the descriptor adds none.
+
+The checks of schema 1 apply unchanged (TARGET, TRIPLE, RUNTIME with the
+identity record, ABI), and none of them runs anything. A toolchain that is
+missing, older than the minimum, without this host's directory or a tool is
+`{NATIVE LIBRARY TOOLCHAIN}` -- the host's, never the package's -- and one
+without the package's API level is API. The library is linked as the host's
+is (a relocatable link with the runtime archive, symbols localized, the
+archive, the shared library: `-z defs`, `-z text`, `--gc-sections`, 16 KiB
+segment alignment on Android) and its shared object is checked from its
+bytes (`native/elf.tcl`: machine, type, alignment, no text relocation, no
+glibc symbol version, only the stated system libraries needed, exactly the
+public functions exported), or removed (`{NATIVE LIBRARY ELF}`). A failed
+link leaves no file of an earlier build under the new names.
 
 ## 10. Security
 

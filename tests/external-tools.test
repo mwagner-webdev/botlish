@@ -629,7 +629,7 @@ test et-target-support-no-descriptor {a package that is no target support packag
 test et-target-support-refusals {every incompatibility is refused before a linker runs, each with its own kind} -constraints {nativeLibraries tools} -body {
     set results {}
     foreach {case map kind} {
-        unknown-target {{"target": "linux-x86_64"} {"target": "android-aarch64"}} UNKNOWN-TARGET
+        unknown-target {{"target": "linux-x86_64"} {"target": "ios-aarch64"}} UNKNOWN-TARGET
         other-target {{"target": "linux-x86_64"} {"target": "linux-aarch64"}} TARGET
         triple {x86_64-unknown-linux-gnu x86_64-unknown-linux-musl} TRIPLE
         linker {{"linker": "system"} {"linker": "rustc"}} LINKER

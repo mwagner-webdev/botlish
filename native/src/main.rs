@@ -80,6 +80,17 @@
 //! never runs on macOS arm64). The other commands show this host's view of
 //! any program.
 //!
+//! `--target TRIPLE` (anywhere on the line, `library` only) emits the
+//! library's object for TRIPLE instead of the host's target
+//! (ANDROID-AARCH64-TARGET-SUPPORT-MILESTONE-1.md): code to keep, never to
+//! run here, so the question is whether this driver may emit it
+//! (codegen::target::check_emit: the program built for TRIPLE or for no
+//! target, Cranelift's backend for its instruction set, and TRIPLE's runtime
+//! with the capabilities this driver's code generation assumes) -- never
+//! whether it runs here. A library of another target is linked by
+//! native::library with that target's runtime, from a target support
+//! package, never with this driver's.
+//!
 //! `run`/`bench`/`batch` accept `--argv ARGS` or `--argv-file PATH` (anywhere
 //! on the line; the file holds ARGS, for vectors too large for one command-line
 //! argument -- Linux caps a single argument at 128 KiB): the
@@ -409,6 +420,32 @@ fn extract_link_dirs(args: &[String]) -> Result<(Vec<String>, codegen::aot::Link
     Ok((out, search))
 }
 
+/// Pulls "--target TRIPLE" out of ARGS (anywhere; once, or repeated with the
+/// same triple): the remaining arguments in order, and the triple's text
+/// (None if absent). Err if it has no value or two name different targets.
+fn extract_emit_target(args: &[String]) -> Result<(Vec<String>, Option<String>), String> {
+    let mut target: Option<String> = None;
+    let mut out = Vec::with_capacity(args.len());
+    let mut i = 0;
+    while i < args.len() {
+        if args[i] == "--target" {
+            let triple = args.get(i + 1).ok_or("--target needs a target triple")?;
+            if triple.is_empty() {
+                return Err("--target needs a target triple (found an empty one)".to_string());
+            }
+            if target.as_ref().is_some_and(|given| given != triple) {
+                return Err("--target given twice with different triples".to_string());
+            }
+            target = Some(triple.clone());
+            i += 2;
+            continue;
+        }
+        out.push(args[i].clone());
+        i += 1;
+    }
+    Ok((out, target))
+}
+
 /// Pulls every "--startup POLICY" out of ARGS (anywhere): the remaining
 /// arguments in order, and the policy (None if absent). Err if one has no
 /// value or names no policy, or two name different ones: an explicit
@@ -485,7 +522,7 @@ fn extract_vms_options(args: &[String]) -> Option<(Vec<String>, VmsOptions)> {
 
 fn cli(args: &[String]) -> i32 {
     let usage = || {
-        eprintln!("usage: botlish-native run|clif|vcode|size|roots|calls|check|fusion|fused FILE.nir [--alloc off|summary|sites] [--argv ARGS|--argv-file PATH] | bench RUNS FILE.nir [--alloc ...] | batch CALLS FILE.nir | object|executable OUT FILE.nir [--startup worker|main-thread] | library OUT NAME FILE.nir | link-plan FILE.nir | target TRIPLE | runtime-abi | system-linker (each also [--result PATH], --link-dir DIR, --framework-dir DIR; executable also --runtime-archive FILE)");
+        eprintln!("usage: botlish-native run|clif|vcode|size|roots|calls|check|fusion|fused FILE.nir [--alloc off|summary|sites] [--argv ARGS|--argv-file PATH] | bench RUNS FILE.nir [--alloc ...] | batch CALLS FILE.nir | object|executable OUT FILE.nir [--startup worker|main-thread] | library OUT NAME FILE.nir [--target TRIPLE] | link-plan FILE.nir | target TRIPLE | runtime-abi | system-linker (each also [--result PATH], --link-dir DIR, --framework-dir DIR; executable also --runtime-archive FILE)");
         2
     };
     let Some(args) = extract_table_hash_key(args) else { return usage() };
@@ -497,6 +534,13 @@ fn cli(args: &[String]) -> i32 {
         }
     };
     let (args, link_dirs) = match extract_link_dirs(&args) {
+        Ok(split) => split,
+        Err(message) => {
+            eprintln!("botlish-native: {message}");
+            return usage();
+        }
+    };
+    let (args, emit_target) = match extract_emit_target(&args) {
         Ok(split) => split,
         Err(message) => {
             eprintln!("botlish-native: {message}");
@@ -518,6 +562,13 @@ fn cli(args: &[String]) -> i32 {
         return usage();
     }
     let startup = startup.unwrap_or(runtime::program::Startup::Worker);
+    if emit_target.is_some() && command != "library" {
+        // Code for another target is kept, never run: only a native
+        // library's object is emitted so (ANDROID-AARCH64-TARGET-SUPPORT-
+        // MILESTONE-1.md), and an explicit target is never ignored.
+        eprintln!("botlish-native: --target is an option of library (the target a native library's object is emitted for), not of {command}");
+        return usage();
+    }
     if link_dirs.runtime_archive.is_some() && command != "executable" {
         // Only an executable is linked with a runtime archive of a target
         // support package; nothing else this driver does links one.
@@ -613,7 +664,26 @@ fn cli(args: &[String]) -> i32 {
             }
         }
     }
-    if matches!(command, "run" | "bench" | "batch" | "vms" | "object" | "executable" | "library" | "link-plan") {
+    // The target code is emitted for: --target's, else the host's. Emitting
+    // code to keep for another target is not running it
+    // (codegen::target::check_emit); everything else the driver makes runs
+    // here or is linked here, for the host's own target only.
+    let emit_triple = match &emit_target {
+        Some(text) => match codegen::target::parse_triple(text) {
+            Ok(triple) => triple,
+            Err(message) => {
+                emit_error(&["NATIVE", "TARGET"], &message);
+                return 1;
+            }
+        },
+        None => target_lexicon::Triple::host(),
+    };
+    if emit_target.is_some() {
+        if let Err(message) = codegen::target::check_emit(&program, &emit_triple) {
+            emit_error(&["NATIVE", "TARGET"], &message);
+            return 1;
+        }
+    } else if matches!(command, "run" | "bench" | "batch" | "vms" | "object" | "executable" | "library" | "link-plan") {
         // Machine code to run or to keep is the host's own target's only
         // (codegen/target.rs). The diagnostic commands (clif, vcode, size,
         // roots, calls, check) still show this host's view of any program.
@@ -690,8 +760,12 @@ fn cli(args: &[String]) -> i32 {
         }
         "library" => {
             let (out, name) = (&rest[0], &rest[1]);
-            if !codegen::library::SUPPORTED {
+            if emit_target.is_none() && !codegen::library::SUPPORTED {
                 emit_error(&["NATIVE", "UNSUPPORTED", "library"], "native libraries are made on Linux glibc (x86_64, aarch64) only (NATIVE-LIBRARY-MILESTONE-1.md)");
+                return 1;
+            }
+            if !codegen::library::supports(&emit_triple) {
+                emit_error(&["NATIVE", "UNSUPPORTED", "library"], &format!("native libraries are made for Linux glibc (x86_64, aarch64) and Android (aarch64) only, not {emit_triple}"));
                 return 1;
             }
             if !nir::is_c_identifier(name) {
@@ -702,7 +776,7 @@ fn cli(args: &[String]) -> i32 {
             // stack guard of ours (NATIVE-LIBRARY-MILESTONE-1.md, "Stack
             // safety").
             nir::check_stack_limit(&mut program);
-            match codegen::emit_library_object(&program, name) {
+            match codegen::emit_library_object(&program, name, &emit_triple) {
                 Ok(object) => {
                     if let Err(e) = std::fs::write(out, &object.bytes) {
                         emit_error(&["NATIVE", "IO"], &e.to_string());

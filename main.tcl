@@ -32,11 +32,14 @@
 #                          framework
 #   -runtime-path PATH     a directory an emitted executable's loader searches
 #                          for shared libraries ($ORIGIN/lib)
-#   -target-support NAME   link an emitted executable with the runtime
-#                          archive of the target support package NAME
-#                          (EXTERNAL-COMPILER-TOOLS-AND-TARGET-PACKAGES-
-#                          MILESTONE-1.md), installed in the application's
-#                          package tree of the program's target
+#   -target-support NAME   link an emitted executable (or native library)
+#                          with the runtime archive of the target support
+#                          package NAME (EXTERNAL-COMPILER-TOOLS-AND-TARGET-
+#                          PACKAGES-MILESTONE-1.md), installed in the
+#                          application's package tree of the program's
+#                          target; a library of another target than the
+#                          host's (-target android-aarch64) needs one
+#                          (ANDROID-AARCH64-TARGET-SUPPORT-MILESTONE-1.md)
 #   -argv TEXT / -argv-hex HEX / -argv-none    the program's argv()
 #   -code -hir -ast -aot -aot-data -aot-spec -contexts -direct -traits
 #   -emit-nir -emit-clif   inspection output, before the program runs
@@ -1266,14 +1269,32 @@ proc emitLibrary {path name exports dir} {
         if {$dir eq ""} {
             set dir [file dirname $path]
         }
-        set options [list -name $name -out $dir]
+        set options [list -name $name -out $dir -target [hir::cabi::ResolveTarget $target]]
         if {[llength $exports]} {
             lappend options -exports $exports
+        }
+        set support ""
+        if {$::targetSupport ne ""} {
+            # The application's target support package for the library's
+            # target (ANDROID-AARCH64-TARGET-SUPPORT-MILESTONE-1.md): from
+            # the entry file's package tree of that target, supplying a
+            # native library's runtime.
+            set compiled [hir::cabi::targetOf $hir]
+            if {$target ne ""} {
+                set compiled [hir::cabi::ResolveTarget $target]
+            } elseif {$compiled eq ""} {
+                set compiled [core::cabi::hostTarget]
+            }
+            set support [native::support::select [file dirname [file normalize $path]] $compiled $::targetSupport native-library]
+            lappend options -support $support
         }
         set built [native::library $hir {*}$options]
     } message options]} {
         printError stderr "$path: " $message $options
         return 1
+    }
+    if {$support ne ""} {
+        puts "target support: [dict get $support package] ([dict get $support target], runtime [dict get $support archive])"
     }
     foreach artifact {static shared header manifest} {
         if {[dict get $built $artifact] ne ""} {
@@ -1523,12 +1544,13 @@ if {$nativeStartup ne "" && $showNative ne "executable"} {
     # invocation makes one, and an explicit choice is never ignored.
     usageError "-native-startup is an option of -emit-native-executable: it chooses the thread a built executable runs its program on, and nothing else this invocation does makes one (a native library runs on its host's thread; -backend cranelift runs a program on the driver's own)"
 }
-if {$targetSupport ne "" && $showNative ne "executable"} {
-    # A target support package's runtime is what an emitted executable is
-    # linked with: nothing else this invocation does links one, and naming a
-    # package is never ignored (EXTERNAL-COMPILER-TOOLS-AND-TARGET-PACKAGES-
+if {$targetSupport ne "" && $showNative ni {executable library}} {
+    # A target support package's runtime is what an emitted executable or
+    # native library is linked with: nothing else this invocation does links
+    # one, and naming a package is never ignored (EXTERNAL-COMPILER-TOOLS-
+    # AND-TARGET-PACKAGES-MILESTONE-1.md, ANDROID-AARCH64-TARGET-SUPPORT-
     # MILESTONE-1.md).
-    usageError "-target-support is an option of -emit-native-executable: it names the target support package whose runtime archive the executable is linked with"
+    usageError "-target-support is an option of -emit-native-executable and -emit-native-library: it names the target support package whose runtime archive the executable or library is linked with"
 }
 if {$nativeStartup eq ""} {
     set nativeStartup worker
