@@ -12,3 +12,10 @@ g32: 74322 exprs; front end 97.3 s; signatures::infer 29.8 s; 1 semantic instanc
 g8: 20778 exprs; front end 22.9 s; signatures::infer 4.1 s; 1 semantic instances, 48 instance walks, 0.1 s in them (1.51 ms each); one exprs copy 3.3 ms; walks x copy = 0.2 s; peak 524 MB
 g16: 38626 exprs; front end 43.5 s; signatures::infer 8.4 s; 1 semantic instances, 126 instance walks, 0.2 s in them (1.72 ms each); one exprs copy 11.7 ms; walks x copy = 1.5 s; peak 945 MB
 g32: 74322 exprs; front end 85.1 s; signatures::infer 16.6 s; 1 semantic instances, 258 instance walks, 0.4 s in them (1.51 ms each); one exprs copy 22.5 ms; walks x copy = 5.8 s; peak 1782 MB
+# audit/mid-end-port/tools/instance-walks.tcl ROOT synth/main.bot for synth.tcl -passes 64 -generic 0
+# (25,736 lines), the base (53a0d1b) and 5471d1e, the two processes at once on a quiet machine.
+
+== before
+g64: 145714 exprs; front end 239.1 s; signatures::infer 102.4 s; 1 semantic instances, 477 instance walks, 38.9 s in them (81.62 ms each); one exprs copy 56.0 ms; walks x copy = 26.7 s; peak 3094 MB
+== after
+g64: 145714 exprs; front end 176.8 s; signatures::infer 41.9 s; 1 semantic instances, 477 instance walks, 0.8 s in them (1.68 ms each); one exprs copy 48.5 ms; walks x copy = 23.1 s; peak 3090 MB

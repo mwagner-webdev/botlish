@@ -1,7 +1,5 @@
 # SEMANTIC-INSTANCE-SCALABILITY-MILESTONE-1
 
-(Draft: the evidence sections are filled in by the commit that completes the milestone.)
-
 **Semantic instances as a reusable analysis, not a scarce resource.** An
 instance's walk now types the program's own HIR in place and restores it
 exactly, so it costs the function it analyzes instead of the whole
@@ -22,10 +20,11 @@ instantiated a helper.
   gone too (`si-budget-holds`).
 * **An instance walk no longer copies the program.** It used to start from
   a copy of the HIR whose first type write copied the whole expression
-  table (Tcl's copy-on-write): 8.1, 16.0 and 33.0 ms per walk at 20,778,
-  38,626 and 74,322 expressions. It now writes the generic walk's own HIR
-  and undoes exactly what it wrote: 1.5, 1.7 and 1.5 ms per walk on the
-  same programs. Verification applies each snapshot in place the same way.
+  table (Tcl's copy-on-write): 8.1, 16.0, 33.0 and 81.6 ms per walk at
+  20,778, 38,626, 74,322 and 145,714 expressions. It now writes the
+  generic walk's own HIR and undoes exactly what it wrote: 1.5, 1.7, 1.5
+  and 1.7 ms per walk on the same programs; type inference of the largest
+  (25,736 lines) takes 41.9 s instead of 102.4 s. Verification applies each snapshot in place the same way.
   `si-region-no-copy` checks structurally that no walk replaces the
   expression table.
 * **No budget changes a program's meaning.** The per-function budget
@@ -43,8 +42,8 @@ instantiated a helper.
 * **The corpus builds the same programs.** All 239 programs of
   `tests/golden/`, `examples/` and `bench/` have the same outcome under both
   compilers; 125 build the same HIR and 46 fail with the same error. The
-  other 67 got instances the old budget
-  had declined (the golden framework's helpers hit it all along), and one,
+  other 67 got instances the old budget had declined (the golden
+  framework's helpers hit it all along), and one,
   `framework-semantics.bot`, decides its static blocks in one build fewer
   (section 6.2).
 * **It exposed an older static-decision gap**, now closed: a site that
@@ -88,16 +87,18 @@ with N struct types. On this branch's base (53a0d1b, observed):
 64 types: rejected TYPE in 0.44 s: budget-64.bot:302:27: argument for parameter "f" cannot be proven to satisfy Fact (argument type: any)
 ```
 
-After the change (observed):
+After the change (observed, `results/budget.txt`; one process, so the peak
+is the process's so far):
 
 ```
-16 types: accepted in 0.18 s; 16 semantic instances, at most 16 of one function; declined: ; peak 29 MB
-17 types: accepted in 0.16 s; 17 semantic instances, at most 17 of one function; declined: ; peak 33 MB
-64 types: accepted in 0.58 s; 64 semantic instances, at most 64 of one function; declined: ; peak 51 MB
+16 types: accepted in 0.14 s; 16 semantic instances, at most 16 of one function; declined: ; peak 29 MB
+17 types: accepted in 0.13 s; 17 semantic instances, at most 17 of one function; declined: ; peak 33 MB
+64 types: accepted in 0.44 s; 64 semantic instances, at most 64 of one function; declined: ; peak 51 MB
+256 types: accepted in 2.01 s; 256 semantic instances, at most 256 of one function; declined: ; peak 126 MB
+1024 types: accepted in 8.83 s; 1024 semantic instances, at most 1024 of one function; declined: ; peak 430 MB
 ```
 
-(The 64-type compile here ran with the rollback audit on, which copies the
-program at every walk: section 3.5.)
+The base rejects 256 and 1,024 types the same way, at the 17th call.
 
 ## 2. Root causes
 
@@ -188,14 +189,16 @@ holding the region's saved nodes and their types.
   marked as assuming -- the mechanism recursive requests already used. The
   worklist (`Drain`, which every top-level request runs) analyzes it once
   the analyses in progress return, and re-analyzes its readers when its
-  result grows. Depth costs walks, never precision, and no outcome depends
-  on which request came first (`si-defer-1`, `si-defer-2`,
-  `se-equal-deep-first-request`).
+  result grows. Depth costs walks, never precision, and whether a call
+  gets its instance no longer depends on which request came first
+  (`si-defer-1`, `si-defer-2`, `se-equal-deep-first-request`).
 * `maxInstances` (2,000) and the worklist's length (5,000 analyses plus
   4 x (passLimit + 3) per instance) are the resource guards left. Reaching
-  either throws `HIR SEMANTIC LIMIT` (`Exhausted`): "the semantic-instance
-  limit was reached: 2000 instances were analyzed, and a call needs another
-  one: inner (y : int), requested while analyzing outer (x : int); ..."
+  either throws `HIR SEMANTIC LIMIT` (`Exhausted`), for example (with the
+  limit set to 1, `si-rec-6b`): "the semantic-instance limit was reached:
+  1 instances were analyzed, and a call needs another one: inner (y : int),
+  requested while analyzing outer (x : int); the compiler does not fall
+  back to the untyped analysis, which could reject a valid program ..."
   (`si-rec-6`, `si-rec-6b`). The trait-polymorphic and affine exemption
   (past the budget such a call got an instance keyed by its views alone)
   is gone with the fallback it worked around. A failed walk abandons the
@@ -223,7 +226,7 @@ The first full test run after the change failed one suite: golden
 `callables.bot`, 6 of 140 tests, on every backend, each with
 UNHANDLED-ERROR ("this call through a callable value the completion
 analysis cannot identify ... may produce the declared error NotFound").
-Observed, then reduced to a 40-line program (`se-equal-erased-key-argument`):
+Observed, then reduced to a 45-line program (`se-equal-erased-key-argument`):
 
 * the suite's `errs_*` blocks, which expect to be rejected, end in a
   callable `errs` declaring `NotFound`. In the build where their bodies are
@@ -332,7 +335,7 @@ and the branch head for the tests.
 | `tests/traits.test`, `tests/affine.test`, `tests/coroutines.test` under the rollback audit | 112, 48 and 81 of 81: no walk left a change behind |
 | `tests/static-economics.test`: `se-equal-deep-first-request`, `se-equal-plan-unplanned`, `se-equal-erased-key-argument` | pass |
 | golden `callables.bot` (section 3.4) | 134 of 140 before the fix, 140 of 140 after |
-| `tests/local.tcl` on the branch head (every Tcl test file on interp and compile, every golden suite on the four backends) | PENDING-LOCAL |
+| `tests/local.tcl` on the branch head (every Tcl test file on interp and compile, every golden suite on the four backends, 4 jobs, 6,694 s) | 0 failures: Tcl tests 9,071 passed on interp and 9,066 on compile (214 and 219 skipped by constraint, 2,493 golden duplicates each); 119 golden suites, 5,682 / 5,682 / 5,590 / 5,692 tests passed on interp / compile / cranelift-generic / cranelift |
 | `audit/static-decisions/tools/fuzz.tcl -seed 17`, `-seed 41` | 0 failures (484 and 564 sites) |
 | mutants: static-decisions `channels-not-consumed`, `unwind-not-waiting`, `key-arguments-uncontracted-only`; native-view `untyped-receiver-accepted`; tree-struct `construction-outward-result-only` | 5 of 5 apply and are killed (by `se-equal-consumer-waits`, `se-equal-erased-witness`, `se-equal-unwind-channel`, `se-equal-erased-key-argument`, `nv-untyped-receiver`, `ts-generic-construction-typed`) |
 | `tools/mutant-catalogs.tcl` | 92 catalogs, 3,213 mutants, 0 problems |
@@ -376,13 +379,16 @@ On generated mid-end-shaped programs (`audit/mid-end-port/tools/synth.tcl
 | 3,344 | 20,778 | 48 | 8.1 ms | 1.5 ms | 4.5 s | 4.1 s | 23.0 s | 22.9 s | 524 | 524 |
 | 6,543 | 38,626 | 126 | 16.0 ms | 1.7 ms | 11.0 s | 8.4 s | 46.9 s | 43.5 s | 946 | 945 |
 | 12,939 | 74,322 | 258 | 33.0 ms | 1.5 ms | 29.8 s | 16.6 s | 97.3 s | 85.1 s | 1,783 | 1,782 |
-| 25,736 | 145,714 | PENDING-G64 |
+| 25,736 | 145,714 | 477 | 81.6 ms | 1.7 ms | 102.4 s | 41.9 s | 239.1 s | 176.8 s | 3,094 | 3,090 |
 
-Before, a walk cost the program (8 to 33 ms, doubling with it: the copy
-of the expression table, 4.3, 10.1 and 25.8 ms at these sizes); after, it
-costs its function's region and stays flat. At 12,939 lines type inference
-takes 13 s less; the front end as a whole 12 % less (other analyses
-dominate it, and are unchanged).
+Before, a walk cost the program (8 to 82 ms, doubling with it: the copy
+of the expression table, 4.3, 10.1, 25.8 and 56.0 ms at these sizes);
+after, it costs its function's region and stays flat (1.5-1.7 ms). The
+instance walks of the 25,736-line program took 38.9 s and take 0.8 s; its
+type inference (`hir::signatures::infer`) 102.4 s and 41.9 s, its front end
+239 s and 177 s, with the same peak memory. (The first three rows ran
+one at a time while other jobs shared the cores, the last two side by side
+on an otherwise quiet machine.)
 
 The grid of `tools/scaling.tcl` (`results/scaling.txt`; 3 of the 4 cores
 busy with other work, so times are inflated) separates the three sizes:
@@ -397,21 +403,40 @@ busy with other work, so times are inflated) separates the three sizes:
   (0.11 ms each), their verification 0.17 s, and the peak memory grows from
   361 to 370 MB.
 * **The helper grows** (1,550 to 1,710 lines, 16 instances): 0, 40 and 160
-  extra statements. Per walk 1.1, 5.5 and 15.2 ms before, 0.17, 5.0 and
-  22.7 ms after. A walk now costs its region; for a large helper in a small
-  program the journal (saving and restoring about 1,500 entries) cost more
-  than the copy of a small program's table did. Profiled on that point,
-  saving took 1.9 ms and restoring 3.1 ms per walk; after storing the
-  journal as flat lists and restoring each table through one lookup per
-  entry, 1.5 and 2.4 ms (section 7).
+  extra statements. A walk now costs its region. In the first grid
+  (5471d1e, cores shared) the 160-statement helper's walk took 22.7 ms
+  against 15.2 ms before: the journal (saving and restoring about 1,500
+  entries) cost more than copying a 1,710-line program's table. Profiled,
+  saving took 1.9 ms and restoring 3.1 ms per walk; stored as flat lists,
+  each table restored through one lookup per entry (9dca40a), 1.5 and
+  2.4 ms. Measured again on a quiet machine: per walk 1.0, 4.9 and 20.6 ms
+  before, 0.17, 4.6 and 20.1 ms after; and the same 160-statement helper in
+  a 12,462-line program 40.9 ms before, 28.0 ms after.
 
 ### 6.4 The shared helper at scale (observed)
 
-PENDING-H32
+With the shared untyped helper of the scale experiment (`synth.tcl
+-passes 32 -generic 1`, 13,899 lines: every tier-1 handler calls
+`lattice::choose` with its pass's own struct, one more instance per pass;
+`results/shared-helper.txt`), the base rejects the program after 96.9 s
+(`pass_17.bot:103:23: argument for parameter "x" cannot be proven to
+satisfy lattice::Fact (argument type: any)`, peak 1,935 MB). The branch
+accepts it in 113.2 s with 33 instances, 32 of them of `choose`, none
+declined (peak 1,972 MB). The 16 s difference is compiling the rest of the
+program, which the rejected compilation did not finish.
+
+The reproducer itself (`results/budget.txt`, one process, quiet machine):
+the base accepts 16 types and rejects 17, 64, 256 and 1,024 (TYPE, at the
+17th call); the branch accepts all five, 1,024 types in 8.8 s with 1,024
+instances.
 
 ### 6.5 CI
 
-PENDING-CI
+Dispatched on the branch: `static-decisions.yml` (the batched against
+the sequential scheduler on every golden suite: the check of section 3.4
+and of `framework-semantics.bot`'s fewer builds), `tests.yml` and
+`tests-arm64.yml` (the whole suite, its native coverage, GC stress); and
+the push workflows (macOS arm64, Windows x86-64, the canaries). PENDING-CI
 
 ## 7. Remaining limits and known problems
 
@@ -428,15 +453,33 @@ PENDING-CI
   context it plans, and reads it through helpers that also read the
   generic HIR; applying it in place would need those helpers to be told
   which one they read. It scales with trait-polymorphic instances only, not
-  with instances in general. PENDING-TRAITVIEWS
+  with instances in general: golden `traits.bot` (5,799 expressions)
+  makes 186 such views, 0.29 s of a 23 s compilation
+  (`results/remaining-copies.txt`).
 * **Native specialization still copies the program per codegen instance**
   (`hir::specialize::memoizeViews`, audit/mid-end-port/README.md section 5:
   the specialized native build of a 12,939-line program does not fit in 16
   GB). Out of this milestone's scope (codegen instances, not semantic
   ones), and the next wall for a large program on the specialized native
   backend.
-* **The rest of type inference is still superlinear.**
-  PENDING-PROFILE
+* **The rest of type inference is still superlinear, in one place.** With
+  the copies gone, the statement walkers the audit suspected cost the same
+  per call at every size (`results/infer-profile.txt`; exclusive time per
+  call at 6,543, 12,939 and 25,736 lines): `hir::types::Sequence` 0.031,
+  0.039, 0.037 ms (before: 0.105, 0.264, 0.47 -- the copies were charged to
+  it, the wrapper being the walk's), `Bind` 0.022, 0.028, 0.030, `If`
+  0.065, 0.084, 0.074, `Call` 0.060, 0.073, 0.065. `hir::types::Block`
+  does not: 0.16, 0.31, 0.57 ms. It starts each function body's context
+  from the creating context's `types`, every binding typed so far on the
+  path (at a module's top level, every earlier top-level binding), and the
+  body's first write copies that dict: 227 entries on average at 3,344
+  lines, 399 at 6,543, so 0.62 and 1.92 million entries copied in all
+  (`remaining-copies.txt`) -- quadratic, the same copy-on-write pattern at
+  a smaller scale. Starting the body from its captures' types alone (an
+  outer local a body refers to is a capture; a module binding is typed
+  once, outside the context) is the likely fix, if nothing reads the rest
+  of the creating context there (not verified: its facts and implications
+  would need the same check); not changed here.
 * **The total guard stays.** `maxInstances` (2,000) bounds a finite but
   possibly very large key space; nothing in the corpus comes near it (464
   at most). A program past it fails with HIR SEMANTIC LIMIT rather than
@@ -455,3 +498,51 @@ PENDING-CI
   instance's existence exist is not known. The fuzzer's programs did not
   find one (6.1), and the CI comparison of the batched and sequential
   schedulers over every golden suite is the check (6.5).
+
+## 8. Reproducing
+
+```sh
+export LANG=C.utf8 LC_ALL=C.utf8
+S=$(mktemp -d); R=audit/semantic-instance-scalability/results
+T=audit/semantic-instance-scalability/tools
+git worktree add --detach $S/before 53a0d1b
+git worktree add --detach $S/after 5471d1e
+
+# the reproducer (section 1, 6.4)
+(cd $S/before && tclsh9.0 audit/mid-end-port/tools/budget.tcl -types "16 17 64 256 1024")
+tclsh9.0 audit/mid-end-port/tools/budget.tcl -types "16 17 64 256 1024"
+
+# the corpus (6.2): one line per program, then compare the first five fields
+ls tests/golden/*.bot examples/*/*.bot examples/*/*/*.bot examples/*/*/*/*.bot bench/*.bot 2>/dev/null | sort -u > $S/files
+tclsh9.0 $T/equivalence.tcl $S/before $(cat $S/files) > $S/before.txt
+tclsh9.0 $T/equivalence.tcl $S/after $(cat $S/files) > $S/after.txt
+
+# instance walks (6.3): one process per program
+for p in 8 16 32 64; do tclsh9.0 audit/mid-end-port/tools/synth.tcl -out $S/g$p -passes $p -generic 0; done
+for p in 8 16 32 64; do for r in before after; do
+    tclsh9.0 audit/mid-end-port/tools/instance-walks.tcl $S/$r $S/g$p/main.bot
+done; done
+
+# the grid (6.3)
+for r in before after; do
+    tclsh9.0 $T/scaling.tcl $S/$r 128:16:0 512:16:0 1024:16:0 2048:16:0 \
+        1024:1:0 1024:64:0 1024:256:0 1024:1024:0 256:16:0 256:16:40 256:16:160 2048:16:160
+done
+
+# the shared helper (6.4) and the profile (7)
+tclsh9.0 audit/mid-end-port/tools/synth.tcl -out $S/h32 -passes 32 -generic 1
+for r in before after; do
+    tclsh9.0 audit/mid-end-port/tools/instance-walks.tcl $S/$r $S/h32/main.bot   # fails on before: TYPE
+    tclsh9.0 audit/mid-end-port/tools/infer-profile.tcl $S/$r $S/g32/main.bot audit/mid-end-port/results/infer-procs.txt
+done
+
+# the remaining copies (7)
+tclsh9.0 $T/remaining-copies.tcl views tests/golden/traits.bot
+tclsh9.0 $T/remaining-copies.tcl contexts $S/g8/main.bot $S/g16/main.bot
+
+# the rollback audit over a test file
+BOTLISH_SEMANTIC_ROLLBACK_AUDIT=1 tclsh9.0 tests/semantic-instances.test -tmpdir $S/t
+```
+
+The result files record which runs shared the machine; times move by 10-25 %
+between runs, counts do not.

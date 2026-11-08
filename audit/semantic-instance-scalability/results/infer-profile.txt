@@ -1,0 +1,131 @@
+# audit/mid-end-port/tools/infer-profile.tcl ROOT synth/main.bot audit/mid-end-port/results/infer-procs.txt:
+# exclusive seconds and calls of the wrapped procedures, the largest first (wrapping inflates the totals).
+# 12,939 lines for the base and the branch head; 6,543 and 25,736 lines for the branch head.
+
+== profile.before
+/tmp/claude-0/sis/g32/main.bot: front end 146.6 s (wrapped), hir::signatures::infer inclusive 48.7 s
+   12.50 s          1  hir::traits::monomorphize
+    9.83 s      37300  hir::types::Sequence
+    6.47 s      88524  hir::types::Call
+    4.46 s      86043  hir::range::Call
+    4.38 s        258  hir::semantic::Analyze
+    2.91 s       8934  hir::types::Block
+    1.98 s      33426  hir::types::Bind
+    1.90 s      13456  hir::types::If
+    1.84 s          6  hir::types::infer
+    1.72 s      85896  hir::signatures::Call
+    1.56 s          3  hir::traits::verify
+    1.41 s      50478  hir::semantic::Call
+    1.40 s          6  hir::callables::verifyBlocks
+    1.34 s      36026  hir::types::Project
+    1.33 s          3  hir::traits::VerifyFunctionValues
+    1.21 s          9  hir::signatures::Install
+    1.12 s      42969  hir::range::VerifyCallChecks
+    1.01 s      85872  hir::signatures::ArgSinks
+    0.96 s      36235  hir::range::Sequence
+    0.95 s      98334  hir::types::MentionsMutableFrom
+    0.92 s      66569  hir::range::ProvesValueAcceptedBy
+    0.91 s     109273  hir::types::NativeKindMismatch
+    0.87 s          4  hir::traits::Parents
+    0.85 s      36408  hir::signatures::Seq
+    0.84 s     116232  hir::callables::CheckPreserved
+    0.82 s      60921  hir::cardinality::IntForm
+    0.82 s          3  hir::imprint::verify
+    0.80 s      74281  hir::traits::StampNode
+    0.79 s      71219  hir::semantic::CallableName
+
+== profile.after
+/tmp/claude-0/sis/g32/main.bot: front end 130.0 s (wrapped), hir::signatures::infer inclusive 35.6 s
+   11.39 s          1  hir::traits::monomorphize
+    6.41 s      88524  hir::types::Call
+    4.54 s      86043  hir::range::Call
+    2.74 s       8934  hir::types::Block
+    2.13 s      85896  hir::signatures::Call
+    1.74 s          6  hir::types::infer
+    1.55 s          3  hir::traits::VerifyFunctionValues
+    1.49 s      50478  hir::semantic::Call
+    1.45 s      37300  hir::types::Sequence
+    1.43 s          3  hir::traits::verify
+    1.42 s      36026  hir::types::Project
+    1.39 s          9  hir::signatures::Install
+    1.23 s      85872  hir::signatures::ArgSinks
+    1.13 s      13456  hir::types::If
+    1.06 s      42969  hir::range::VerifyCallChecks
+    1.06 s          6  hir::callables::verifyBlocks
+    1.04 s      36408  hir::signatures::Seq
+    1.00 s      71219  hir::semantic::CallableName
+    0.95 s      33426  hir::types::Bind
+    0.94 s      36235  hir::range::Sequence
+    0.93 s      98334  hir::types::MentionsMutableFrom
+    0.93 s          4  hir::traits::Parents
+    0.92 s     109273  hir::types::NativeKindMismatch
+    0.86 s      66569  hir::range::ProvesValueAcceptedBy
+    0.81 s      60921  hir::cardinality::IntForm
+    0.80 s          3  hir::imprint::verify
+    0.78 s      53148  hir::range::OutcomeFacts
+    0.76 s      90486  hir::range::Normalize
+    0.75 s      74281  hir::traits::StampNode
+
+== profile16.after
+/tmp/claude-0/sis/g16/main.bot: front end 59.3 s (wrapped), hir::signatures::infer inclusive 14.8 s
+    5.77 s          1  hir::traits::monomorphize
+    2.74 s      45828  hir::types::Call
+    2.10 s      44627  hir::range::Call
+    0.86 s      44520  hir::signatures::Call
+    0.76 s       4806  hir::types::Block
+    0.74 s          6  hir::types::infer
+    0.69 s          3  hir::traits::verify
+    0.66 s          3  hir::traits::VerifyFunctionValues
+    0.62 s      20008  hir::types::Sequence
+    0.59 s      25722  hir::semantic::Call
+    0.57 s      22281  hir::range::VerifyCallChecks
+    0.57 s      18530  hir::types::Project
+    0.55 s          6  hir::callables::verifyBlocks
+    0.53 s      44496  hir::signatures::ArgSinks
+    0.53 s          9  hir::signatures::Install
+    0.46 s       7084  hir::types::If
+    0.46 s      19407  hir::range::Sequence
+    0.45 s          3  hir::imprint::verify
+    0.45 s      34157  hir::range::ProvesValueAcceptedBy
+    0.44 s      19512  hir::signatures::Seq
+    0.42 s      57641  hir::types::NativeKindMismatch
+    0.41 s          4  hir::traits::Parents
+    0.41 s      36691  hir::semantic::CallableName
+    0.39 s      50442  hir::types::MentionsMutableFrom
+    0.39 s      32233  hir::cardinality::IntForm
+    0.38 s      28204  hir::range::OutcomeFacts
+    0.38 s      17346  hir::types::Bind
+    0.36 s      38585  hir::traits::StampNode
+    0.35 s      48357  hir::range::Normalize
+
+== profile64.after
+/tmp/claude-0/sis/g64/main.bot: front end 238.7 s (wrapped), hir::signatures::infer inclusive 66.4 s
+   24.27 s          1  hir::traits::monomorphize
+   11.23 s     173466  hir::types::Call
+    9.78 s      17190  hir::types::Block
+    8.26 s     168847  hir::range::Call
+    3.57 s     168648  hir::signatures::Call
+    2.84 s          6  hir::types::infer
+    2.77 s          3  hir::traits::verify
+    2.64 s      71749  hir::types::Sequence
+    2.46 s      99765  hir::semantic::Call
+    2.43 s      70748  hir::types::Project
+    2.34 s          3  hir::traits::VerifyFunctionValues
+    2.21 s          6  hir::callables::verifyBlocks
+    2.20 s          9  hir::signatures::Install
+    2.15 s     168624  hir::signatures::ArgSinks
+    2.02 s      84345  hir::range::VerifyCallChecks
+    1.94 s      26155  hir::types::If
+    1.94 s      65406  hir::types::Bind
+    1.79 s      70200  hir::signatures::Seq
+    1.77 s     140275  hir::semantic::CallableName
+    1.75 s      69849  hir::range::Sequence
+    1.72 s          4  hir::traits::Parents
+    1.65 s     194226  hir::types::MentionsMutableFrom
+    1.63 s          3  hir::imprint::verify
+    1.61 s     131351  hir::range::ProvesValueAcceptedBy
+    1.59 s     212537  hir::types::NativeKindMismatch
+    1.37 s     117527  hir::cardinality::IntForm
+    1.36 s     102578  hir::range::OutcomeFacts
+    1.34 s     228168  hir::callables::CheckPreserved
+    1.34 s     145673  hir::traits::StampNode

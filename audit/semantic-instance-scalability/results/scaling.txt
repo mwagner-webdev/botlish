@@ -29,3 +29,18 @@
 256 16 0 1550 ok 1.78 0.13 16 0.00 0.17 0.00 16 107
 256 16 40 1590 ok 2.31 0.23 16 0.08 5.00 0.19 16 114
 256 16 160 1710 ok 3.72 0.57 16 0.36 22.71 0.83 16 135
+# scaling.tcl, the helper's body size B on a quiet machine, the base (53a0d1b) and the branch head
+# (the journal stored as lists: 9dca40a and later).
+
+== /tmp/claude-0/sis/before
+# N K B lines outcome front-end-s infer-s walks walk-s walk-ms verify-s instances peak-MB
+256 16 0 1550 ok 1.85 0.16 16 0.02 1.01 0.03 16 107
+256 16 40 1590 ok 2.46 0.25 16 0.08 4.90 0.24 16 114
+256 16 160 1710 ok 3.78 0.67 16 0.33 20.58 0.95 16 137
+2048 16 160 12462 ok 18.90 2.10 16 0.65 40.88 1.43 16 730
+== /home/user/botlish
+# N K B lines outcome front-end-s infer-s walks walk-s walk-ms verify-s instances peak-MB
+256 16 0 1550 ok 1.99 0.15 16 0.00 0.17 0.00 16 107
+256 16 40 1590 ok 2.20 0.20 16 0.07 4.60 0.13 16 114
+256 16 160 1710 ok 3.28 0.50 16 0.32 20.09 0.77 16 135
+2048 16 160 12462 ok 18.67 1.65 16 0.45 27.95 0.87 16 730

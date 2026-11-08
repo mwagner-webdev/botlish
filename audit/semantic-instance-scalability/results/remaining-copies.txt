@@ -1,0 +1,11 @@
+# audit/semantic-instance-scalability/tools/remaining-copies.tcl on the branch head (2026-11-08):
+# the two program-sized copies left (the report's section 7).
+
+== views tests/golden/traits.bot trait-constrained-types.bot traits-path.bot
+traits.bot: 5799 exprs, front end 23.3 s; View 186 calls 0.29 s (1.6 ms each); PlanCalls 3 calls 0.63 s; instance walks 2342, 1.60 s
+trait-constrained-types.bot: 3616 exprs, front end 8.2 s; View 1 calls 0.00 s (1.9 ms each); PlanCalls 1 calls 0.04 s; instance walks 662, 0.75 s
+traits-path.bot: 4068 exprs, front end 6.3 s; View 3 calls 0.01 s (1.8 ms each); PlanCalls 1 calls 0.05 s; instance walks 126, 0.08 s
+
+== contexts synth.tcl -passes 8, 16 -generic 0 (3,344 and 6,543 lines)
+synth -passes 8: 2696 bindings; 2742 block typings; creating context's types: mean 227, max 455 entries; entries copied in all (at most): 622560
+synth -passes 16: 4704 bindings; 4806 block typings; creating context's types: mean 399, max 799 entries; entries copied in all (at most): 1917720
