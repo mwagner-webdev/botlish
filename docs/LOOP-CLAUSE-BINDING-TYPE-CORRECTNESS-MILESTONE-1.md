@@ -244,10 +244,13 @@ after:
 | ... a reference finer than the record | 3,571 | 5 |
 | ... a reference contradicting the record | 0 | 0 |
 | ... entries in semantic instances' snapshots | 0 | 951 |
-| front-end time, total | 1,048.6 s | 1,043.6 s |
+| front-end time, total | 1,048.6 s | 966.9 s |
 
 (*) One probe's text differs, `c6`, whose comments this change edits: the
-same file compiled by both front ends gives byte-identical HIR text.
+same file compiled by both front ends gives byte-identical HIR text. The
+"after" column is the final version (section E); the first version, which
+recorded an instance walk's clauses in its copy's binding table, gave every
+row the same values but the time (1,043.6 s).
 
 So over the corpus no decision, outcome, diagnostic, certificate, build or
 dependency edge changes: the conservative readers' more precise inputs
@@ -383,7 +386,8 @@ four with one outcome (`value 20`).
 | `tclsh9.0 tests/loop-clause-binding-types.test` (interp and compile passes) | 18 of 18 |
 | `tests/compiler-service.test` (new `cs-hover-loop-variable`) | 57 of 57 on both passes |
 | `tests/lsp.test` (new `lsp-lang-loop-variable-worker`, `-sync`) | 79 of 79 on both passes |
-| `tclsh9.0 tests/local.tcl` (275 Tcl test files on interp and compile, 118 golden suites on four backends) | 17,934 Tcl tests passed, 1 failed: `sh-grammar-vim-corpus` of `tests/syntax-highlighting.test` on the compile pass, `vim` exiting with status 1 under the run's four-way load (the lexer, the grammars and the two files it reads are unchanged); the file's rerun command passed (26 of 26, 1 skipped by `nodeTextMate`), as its interp pass did in the run itself. Golden: every test of every suite on every backend (section K) |
+| `tclsh9.0 tests/local.tcl` (275 Tcl test files on interp and compile, 118 golden suites on four backends; the first version) | 17,934 Tcl tests passed, 1 failed: `sh-grammar-vim-corpus` of `tests/syntax-highlighting.test` on the compile pass, `vim` exiting with status 1 under the run's four-way load (the lexer, the grammars and the two files it reads are unchanged); the file's rerun command passed (26 of 26, 1 skipped by `nodeTextMate`), as its interp pass did in the run itself. Golden: every test of every suite on every backend (section K) |
+| `tclsh9.0 tests/local.tcl -parts tcl` over the 31 files the final version's recording touches (the new file, semantic instances, affine and its applications, coroutines, static economics and static compile, emission claims, interchange, cache, isolation, compiler service, LSP, folds and loops, MutableVector and MutableArray, method resolution and filter, completions, context affine state, resources, traits, CSV emission, DFAs) | 1,199 of 1,199 on interp, 1,199 of 1,199 on compile |
 | `audit/text-collection-precision/tools/probes.tcl` | 18 probes as expected (`c1`, `c6` flipped) |
 | `python3 -I audit/text-collection-precision/tools/matrix.py` | exit 0 (section I) |
 | `audit/loop-binding-types/tools/mutate.tcl` | 14 of 14 killed by the tests their `!!` lines name (below) |
@@ -476,7 +480,8 @@ bound):
 
 all within the runs' spread (Icy Tower's before runs span 34.8-36.6 s).
 The corpus as a whole (section H's 138 compilations, four at a time) took
-1,048.6 s before and 1,043.6 s after. The number of semantic instances
+1,048.6 s before, 1,043.6 s with the first version and 966.9 s with the
+final one. The number of semantic instances
 analyzed is unchanged everywhere; the static-decision dependency counts are
 section H's (identical); a cache hit is unchanged.
 
