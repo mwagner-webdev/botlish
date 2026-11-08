@@ -13,9 +13,10 @@ name: release gate
 #     and no release run for it exists yet -- single-executable.yml or
 #     icy-tower-windows.yml on main with release=SHA, a release run that
 #     publishes what the commit's push run built and tested;
-#   * an icy-tower-macos-vX.Y.Z tag whose runs were all deferred (its tests
-#     were not green when it was pushed) and whose commit's tests are green
-#     now -- icy-tower-macos.yml on the tag.
+#   * an icy-tower-macos-vX.Y.Z or botlish-macos-vX.Y.Z tag whose runs were
+#     all deferred (its tests were not green when it was pushed) and whose
+#     commit's tests are green now -- icy-tower-macos.yml or
+#     botlish-macos.yml on the tag.
 #
 # It publishes nothing itself and holds no credential: its token may only
 # start workflows (actions: write). A release run checks the commit's tests

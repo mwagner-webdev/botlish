@@ -572,6 +572,53 @@ test aotr-parent-killed {main.tcl killed alone (SIGKILL): the program does not o
     list [dict get $r ready] [dict get $r alive] [dict get $r left]
 } -cleanup {file delete -force $dir} -result {1 0 {}}
 
+# Windows: main.tcl killed alone (taskkill /F: TerminateProcess) while its
+# program runs. The driver waits on main.tcl's process handle beside the
+# program's (launch.rs's wait_watching) and terminates the program.
+testConstraint aotrWindowsKill [expr {[testConstraint aotrCCalls] && $::tcl_platform(platform) eq "windows"
+    && [auto_execok taskkill] ne "" && [auto_execok tasklist] ne ""}]
+proc aotrWindowsAlive {pid} {
+    return [string match "*\"$pid\"*" [exec tasklist /FI "PID eq $pid" /NH /FO CSV]]
+}
+test aotr-parent-killed-windows {main.tcl killed alone on Windows (TerminateProcess): the program does not outlive the command that ran it, and the private directory is removed} -constraints aotrWindowsKill -setup {
+    set dir [aotrDir parentwin]
+    set temp [aotrTemp $dir]
+    set sleeper [aotrProgram $dir sleeper.bot {
+        "import std::ffi::c"
+        "extern c library \"kernel32\""
+        "extern c fn GetCurrentProcessId() -> std::ffi::c::ULong"
+        "extern c fn Sleep(milliseconds: std::ffi::c::ULong) -> unit"
+        "fn ready() -> unit errors std::io::WriteFailed:"
+        "    std::io::print_line(\"ready \".concat(std::int::to_string(GetCurrentProcessId())))"
+        "ready():"
+        "    on std::io::WriteFailed:"
+        "        unit"
+        "Sleep(60000)"
+        "unit"
+    }]
+} -body {
+    withEnvironment [aotrTempEnvironment $temp] {
+        set pipe [open |[list [info nameofexecutable] $::mainScript -warnings off -aot-run $sleeper 2>@1] r]
+    }
+    set child ""
+    while {$child eq "" && [gets $pipe line] >= 0} {
+        regexp {^ready (\d+)} $line -> child
+    }
+    exec taskkill /F /PID [lindex [pid $pipe] 0]
+    set deadline [expr {[clock milliseconds] + 20000}]
+    while {$child ne "" && [aotrWindowsAlive $child] && [clock milliseconds] < $deadline} {
+        after 100
+    }
+    set alive [expr {$child ne "" && [aotrWindowsAlive $child]}]
+    if {$alive} { catch {exec taskkill /F /PID $child} }
+    catch {close $pipe}
+    # (The driver removes its directory once the program has ended.)
+    while {[aotrLeft $temp] ne {} && [clock milliseconds] < $deadline + 10000} {
+        after 100
+    }
+    list [expr {$child ne ""}] $alive [aotrLeft $temp]
+} -cleanup {file delete -force $dir} -result {1 0 {}}
+
 # --- the same as the emitted executable ---------------------------------------------
 
 test aotr-equals-emitted {the program run by -aot-run and its -emit-native-executable executable run directly: the same output, error and status, plainly and under GC stress} -constraints aotrCoroutines -setup {

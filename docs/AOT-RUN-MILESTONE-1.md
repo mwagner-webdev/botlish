@@ -279,13 +279,15 @@ missing library.
 
 ## 9. Tests on each target
 
-`tests/aot-run.test`: 32 tests -- 29 of behavior, 3 positive controls.
+`tests/aot-run.test`: 33 tests -- 30 of behavior, 3 positive controls.
 Their constraints name capabilities, never an operating system: `aotRun`
 (the host links executables), `unixSignals`, `aotrPython` (the interrupt
 helper, tests/aot-run-interrupt.py, sends signals to process groups),
 `aotrCCalls`, `aotrMainThread` / `aotrNoMainThread`, `aotrStackGuard`,
 `aotrCoroutines`, `aotrNoJitDriver` (a driver built without its JIT in
-`native/target/no-jit`).
+`native/target/no-jit`), `aotrWindowsKill` (Windows' `taskkill` and
+`tasklist`: `aotr-parent-killed-windows` kills main.tcl alone with
+TerminateProcess and requires the program gone and the directory removed).
 
 | host | where | result |
 |---|---|---|
@@ -383,9 +385,10 @@ for another pipeline.
   stub (Linux x86-64, no C). On macOS that is Apple's Command Line Tools;
   nothing here bundles a linker or an SDK.
 * **Windows**: the signal semantics are Windows' (no 128+N; the console
-  events reach every process); no Windows test kills main.tcl alone
-  (`aotr-parent-killed` needs POSIX process groups), so the Windows parent
-  watch is [inspected] only.
+  events reach every process). The parent watch is tested there by
+  `aotr-parent-killed-windows` (taskkill of main.tcl alone); Ctrl+C to the
+  console is not tested on Windows (a CI runner has no console to send it
+  to).
 * **Ctrl-C on Windows** while the program runs is the program's to handle;
   the driver only ignores it.
 * **One program per command.** No REPL, no watch mode, no build of several
