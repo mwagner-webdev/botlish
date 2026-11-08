@@ -75,7 +75,8 @@ name: tests (windows x86-64)
 #
 # Pushes to any branch run it, so a branch gets Windows results before this
 # file is on main: a branch push the canary and the opt-in jobs its head
-# commit asks for; "Run workflow" on the branch (workflow_dispatch) runs the
+# commit asks for (a marker counts anywhere in the message, prose
+# included); "Run workflow" on the branch (workflow_dispatch) runs the
 # rest, which every push to main runs. A pull request from this
 # repository's own branches skips (its push already ran), one from a fork
 # runs. Documentation-only pushes

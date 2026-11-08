@@ -272,7 +272,12 @@ GC stress only on pushes to main (and arm64's in a manual run).
 A branch push still runs the opt-in jobs its head commit's message asks
 for: `[ci-full]` (macOS's and Windows' `full`, with its `CI-Tests:` and
 `CI-GC-Stress:` trailers), `[ci-app-mutants]` (macOS's `app-mutants`) and
-`[ci-probes]` (Windows' `roots`, with its probes).
+`[ci-probes]` (Windows' `roots`, with its probes). A marker counts
+anywhere in the message, prose included (`contains()`): the commit that
+introduced this rule named all three in its description and so queued
+every opt-in job on its branch, hours of macOS and Windows runners, until
+the next push cancelled them. Write a marker in a commit message only to
+ask for its jobs.
 
 Until 2026-11-08 macOS and Windows ran everything on every push. Their
 runners are the pool's scarcest, and most of those runs tested a commit a

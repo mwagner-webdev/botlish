@@ -88,7 +88,8 @@ third and the fifth, `tests/canary.tcl` the fourth. Keep it so:
   wait for a runner before the expensive jobs could start: keep them steps).
   A branch push runs only the canary job, on every host (macOS: the smoke
   job and its Linux control), plus the opt-in jobs its head commit's message
-  asks for; every other job runs on pushes to main, on pull requests and
+  asks for (a marker counts anywhere in the message, prose included: write
+  one only to ask for its jobs); every other job runs on pushes to main, on pull requests and
   when dispatched (its `if` holds `github.event_name != 'push' ||
   github.ref == 'refs/heads/main'`). Where this file asks for a workflow,
   or one of its jobs, "on the branch", dispatch it there, unless it is the
