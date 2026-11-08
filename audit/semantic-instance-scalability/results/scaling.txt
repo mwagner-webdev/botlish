@@ -1,0 +1,31 @@
+# audit/semantic-instance-scalability/tools/scaling.tcl ROOT POINT..., the base (53a0d1b) and
+# 5471d1e, each point in a process of its own, while tests/local.tcl used 3 of the 4 cores (times
+# are inflated and noisy; counts and per-walk ratios are each one process's). N struct types and
+# calls of one untyped helper, K distinct instances, B extra statements in its body.
+
+== before
+# N K B lines outcome front-end-s infer-s walks walk-s walk-ms verify-s instances peak-MB
+128 16 0 782 ok 1.23 0.11 16 0.01 0.65 0.02 16 65
+512 16 0 3086 ok 4.23 0.31 16 0.03 1.78 0.05 16 191
+1024 16 0 6158 ok 8.27 0.69 16 0.11 6.72 0.14 16 361
+2048 16 0 12302 ok 16.66 1.43 16 0.21 12.83 0.38 16 702
+1024 1 0 6158 ok 7.66 0.56 1 0.01 7.65 0.01 1 361
+1024 64 0 6158 TYPE 8.20 0.64 16 0.08 4.80 0.13 - 363
+1024 256 0 6158 TYPE 8.47 0.68 16 0.06 3.97 0.12 - 364
+1024 1024 0 6158 TYPE 8.43 0.74 16 0.11 6.70 0.14 - 365
+256 16 0 1550 ok 1.94 0.17 16 0.02 1.10 0.02 16 107
+256 16 40 1590 ok 2.36 0.27 16 0.09 5.51 0.19 16 114
+256 16 160 1710 ok 3.28 0.50 16 0.24 15.15 0.80 16 137
+== after
+# N K B lines outcome front-end-s infer-s walks walk-s walk-ms verify-s instances peak-MB
+128 16 0 782 ok 0.78 0.05 16 0.00 0.13 0.00 16 65
+512 16 0 3086 ok 3.79 0.27 16 0.00 0.16 0.00 16 191
+1024 16 0 6158 ok 7.76 0.49 16 0.00 0.17 0.00 16 361
+2048 16 0 12302 ok 15.99 1.06 16 0.00 0.18 0.01 16 702
+1024 1 0 6158 ok 8.28 0.55 1 0.00 0.85 0.00 1 361
+1024 64 0 6158 ok 8.12 0.59 64 0.01 0.19 0.01 64 362
+1024 256 0 6158 ok 7.88 0.55 256 0.03 0.13 0.04 256 363
+1024 1024 0 6158 ok 8.44 0.71 1024 0.11 0.11 0.17 1024 370
+256 16 0 1550 ok 1.78 0.13 16 0.00 0.17 0.00 16 107
+256 16 40 1590 ok 2.31 0.23 16 0.08 5.00 0.19 16 114
+256 16 160 1710 ok 3.72 0.57 16 0.36 22.71 0.83 16 135
