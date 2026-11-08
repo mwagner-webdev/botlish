@@ -3,8 +3,9 @@
 # artifacts (BOTPKG-FORMAT.md).
 #
 #   source pm/pm.tcl; pm::cli::main ARGV INVOCATION     the commands add,
-#       install, update, remove, verify, package pack|inspect|stage|compare
-#       and native inspect|plan|deploy|add|require|audit; the exit status
+#       install, update, remove, verify, package pack|inspect|stage|compare,
+#       native inspect|plan|deploy|add|require|audit, and tool and tools
+#       (EXTERNAL-COMPILER-TOOLS-AND-TARGET-PACKAGES-MILESTONE-1.md); the exit status
 #       (0 success, 1 a failed operation, 2 a usage error)
 #
 # Each package's own dependencies are part of the application's one
@@ -41,6 +42,8 @@
 #   view.tcl        target views: one package tree per target
 #   deploy.tcl      placing a target's bundled shared libraries
 #   install.tcl     resolution, plans, staging and transactions
+#   tools.tcl       schema 4's tools; the tool and tools commands: a tool a
+#                   package carries, run only when `tool` names it
 #   commands.tcl    the commands and the command line
 #
 # and, loaded only by the operations of the author's side (pm::authoring:
@@ -52,11 +55,12 @@
 #   sha1.tcl        SHA-1, for Git object identities only (provenance checks)
 #   release.tcl     provenance records and the comparison of release candidates
 #
-# Nothing here executes anything a package holds: no hook, no script, no
-# binary, no compilation. Installing a package is writing its files. The
-# only programs it ever starts are the host system's own SHA-256 and SHA-1
-# tools, at fixed system paths (pm/sha256.tcl, pm/sha1.tcl), and `kill -0`
-# (a lock holder's liveness). The author's side (pm/author.tcl) reads the
+# Nothing here executes anything a package holds -- no hook, no script, no
+# binary, no compilation -- but the one tool `tool` names, explicitly
+# (pm/tools.tcl). Installing a package is writing its files, none of them
+# executable. The only other programs it ever starts are the host system's
+# own SHA-256 and SHA-1 tools, at fixed system paths (pm/sha256.tcl,
+# pm/sha1.tcl), and `kill -0` (a lock holder's liveness). The author's side (pm/author.tcl) reads the
 # native files an author built; whatever built them ran before, on the
 # author's side, by the author's choice.
 
@@ -65,7 +69,7 @@ namespace eval pm {
     variable here [file join $root pm]
 }
 
-foreach pm::file {json sha256 version target binary targets descriptor archive catalog state graph native view deploy install commands} {
+foreach pm::file {json sha256 version target binary targets tools descriptor archive catalog state graph native view deploy install commands} {
     source [file join $pm::here $pm::file.tcl]
 }
 unset pm::file

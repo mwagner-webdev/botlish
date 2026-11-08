@@ -369,6 +369,21 @@ fn extract_link_dirs(args: &[String]) -> Result<(Vec<String>, codegen::aot::Link
     let mut out = Vec::with_capacity(args.len());
     let mut i = 0;
     while i < args.len() {
+        if args[i] == "--runtime-archive" {
+            // A target support package's runtime archive
+            // (EXTERNAL-COMPILER-TOOLS-AND-TARGET-PACKAGES-MILESTONE-1.md):
+            // the one the system linker links instead of the driver's own.
+            let path = args.get(i + 1).ok_or("--runtime-archive needs a file")?;
+            if path.is_empty() {
+                return Err("--runtime-archive needs a file (found an empty name)".to_string());
+            }
+            if search.runtime_archive.is_some() {
+                return Err("--runtime-archive is given twice: an executable links one runtime".to_string());
+            }
+            search.runtime_archive = Some(std::path::PathBuf::from(path));
+            i += 2;
+            continue;
+        }
         if args[i] == "--link-dir" || args[i] == "--framework-dir" || args[i] == "--runtime-path" {
             let option = args[i].as_str();
             let dir = args.get(i + 1).ok_or_else(|| format!("{option} needs a directory"))?;
@@ -470,7 +485,7 @@ fn extract_vms_options(args: &[String]) -> Option<(Vec<String>, VmsOptions)> {
 
 fn cli(args: &[String]) -> i32 {
     let usage = || {
-        eprintln!("usage: botlish-native run|clif|vcode|size|roots|calls|check|fusion|fused FILE.nir [--alloc off|summary|sites] [--argv ARGS|--argv-file PATH] | bench RUNS FILE.nir [--alloc ...] | batch CALLS FILE.nir | object|executable OUT FILE.nir [--startup worker|main-thread] | library OUT NAME FILE.nir | link-plan FILE.nir | target TRIPLE | system-linker (each also [--result PATH], --link-dir DIR, --framework-dir DIR)");
+        eprintln!("usage: botlish-native run|clif|vcode|size|roots|calls|check|fusion|fused FILE.nir [--alloc off|summary|sites] [--argv ARGS|--argv-file PATH] | bench RUNS FILE.nir [--alloc ...] | batch CALLS FILE.nir | object|executable OUT FILE.nir [--startup worker|main-thread] | library OUT NAME FILE.nir | link-plan FILE.nir | target TRIPLE | runtime-abi | system-linker (each also [--result PATH], --link-dir DIR, --framework-dir DIR; executable also --runtime-archive FILE)");
         2
     };
     let Some(args) = extract_table_hash_key(args) else { return usage() };
@@ -503,6 +518,21 @@ fn cli(args: &[String]) -> i32 {
         return usage();
     }
     let startup = startup.unwrap_or(runtime::program::Startup::Worker);
+    if link_dirs.runtime_archive.is_some() && command != "executable" {
+        // Only an executable is linked with a runtime archive of a target
+        // support package; nothing else this driver does links one.
+        eprintln!("botlish-native: --runtime-archive is an option of executable (the runtime archive the system linker links), not of {command}");
+        return usage();
+    }
+    if command == "runtime-abi" && rest.is_empty() {
+        // This driver's runtime ABI and target
+        // (EXTERNAL-COMPILER-TOOLS-AND-TARGET-PACKAGES-MILESTONE-1.md): the
+        // fingerprint a target support package's runtime archive must state
+        // in its identity record, and a native library's manifest records.
+        emit(&tcl_list(&["runtime-abi".to_string(), format!("{:016x}", runtime::aotimage::ABI_FINGERPRINT)]));
+        emit(&tcl_list(&["target".to_string(), codegen::aot::host_target().to_string()]));
+        return 0;
+    }
     if command == "system-linker" && rest.is_empty() {
         // What the system linker would link with here (codegen::aot's
         // `system_linker_facts`): inspectable discovery, and the runtime
