@@ -351,12 +351,13 @@ mod tests {
 
     /// A reserved record is nobody's: no claim or lookup takes it, only the
     /// reserving start claims it (`claim_as`), and an unclaimed reservation
-    /// goes back free.
+    /// goes back free. (Other tests of this process claim and release
+    /// records meanwhile, so this one reads its own records' states, never
+    /// a count of the table's: only this test reserves.)
     #[test]
     fn reservations_are_claimed_only_by_their_thread() {
-        let before = free_count();
         let r = reserve().expect("a free record");
-        assert_eq!(free_count(), before - 1);
+        assert_eq!(TABLE[r].owner.load(Ordering::Acquire), RESERVED);
         assert!(find(RESERVED).is_none());
         let index = std::thread::spawn(move || {
             let index = claim_as(Some(r), 0x6262_0000, (1, 2), false, 1, b"thread t ").expect("claims its reservation");
@@ -369,8 +370,12 @@ mod tests {
         .unwrap();
         assert_eq!(index, (r, Some((1, 2))));
         let s = reserve().expect("a free record");
+        assert_eq!(TABLE[s].owner.load(Ordering::Acquire), RESERVED);
         unreserve(s);
-        assert_eq!(free_count(), before);
+        // Free again (or since claimed by another test's thread): never
+        // still reserved, so it can no longer be claimed as a reservation.
+        assert_ne!(TABLE[s].owner.load(Ordering::Acquire), RESERVED, "an unclaimed reservation goes back free");
+        assert!(claim_as(Some(s), 0x6262_0010, (1, 2), false, 1, b"").is_err(), "a reservation given back is no reservation");
     }
 
     /// A token a dead thread's record still carries is reclaimed, never
