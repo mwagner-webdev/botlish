@@ -19,7 +19,8 @@ name: react-native 2048
 #   android  the APK on an Android emulator, per image: the self-test
 #            against the interpreter, reloads, GC stress, swipes, the win and
 #            the end, a clean exit (tools/android-acceptance.sh); on API 34
-#            the clean room's APK too. The images
+#            the clean room's APK too, and the debug build's development
+#            reload with Metro (tools/dev-reload.sh). The images
 #            are x86_64 (GitHub's Linux runners have KVM for x86_64 guests
 #            only, and Google's emulator runs arm64 images on arm64 hosts
 #            only): the arm64-v8a APK runs through Android's ARM native
@@ -108,6 +109,12 @@ jobs:
       - name: The record of the generated 2048 package
         run: cat "$RUNNER_TEMP/rn2048/generated/react-native-botlish-game/botlish-react-native.json"
 
+      - name: The app's debug build (its JavaScript from Metro, for the development reload)
+        working-directory: ${{ runner.temp }}/rn2048/app/android
+        run: |
+          ./gradlew --no-daemon --console=plain assembleDebug
+          cp app/build/outputs/apk/debug/app-debug.apk "$RUNNER_TEMP/rn2048/app-debug.apk"
+
       - name: The single-file compiler (single/build.sh)
         run: bash single/build.sh
 
@@ -124,6 +131,7 @@ jobs:
           name: rn2048-build
           path: |
             ${{ runner.temp }}/rn2048/app-release.apk
+            ${{ runner.temp }}/rn2048/app-debug.apk
             ${{ runner.temp }}/rn2048/*.txt
             ${{ runner.temp }}/rn2048/*.json
             ${{ runner.temp }}/rn2048/npm/*.tgz
@@ -145,9 +153,11 @@ jobs:
           - name: API 34, 4 KiB pages
             image: "system-images;android-34;google_apis;x86_64"
             cleanroom: true
+            development: true
           - name: API 35, 16 KiB pages
             image: "system-images;android-35;google_apis_ps16k;x86_64"
             cleanroom: false
+            development: false
     steps:
       - uses: actions/checkout@v5
 
@@ -177,11 +187,27 @@ jobs:
           adb uninstall com.botlish2048 || true
           audit/react-native-2048/tools/android-acceptance.sh "$RUNNER_TEMP/rn2048/cleanroom/app-release.apk" "$RUNNER_TEMP/rn2048" "$RUNNER_TEMP/acceptance/cleanroom"
 
+      - uses: actions/setup-node@v4
+        if: matrix.development
+        with:
+          node-version: 22
+
+      - name: Development reload (the debug build, Metro; tools/dev-reload.sh)
+        if: matrix.development
+        run: |
+          export PATH="$ANDROID_HOME/platform-tools:$PATH"
+          app="$RUNNER_TEMP/dev-app"
+          cp -r examples/react-native/app "$app"
+          (cd "$app" && npm ci --no-audit --no-fund && npm install --no-audit --no-fund "$RUNNER_TEMP"/rn2048/npm/*.tgz)
+          adb uninstall com.botlish2048 || true
+          audit/react-native-2048/tools/dev-reload.sh "$RUNNER_TEMP/rn2048/app-debug.apk" "$app" "$RUNNER_TEMP/acceptance/development"
+
       - name: Summary
         if: always()
         run: |
           cat "$RUNNER_TEMP/acceptance/summary.txt" || true
           cat "$RUNNER_TEMP/acceptance/cleanroom/summary.txt" 2> /dev/null || true
+          cat "$RUNNER_TEMP/acceptance/development/summary.txt" 2> /dev/null || true
 
       - uses: actions/upload-artifact@v4
         if: always()
