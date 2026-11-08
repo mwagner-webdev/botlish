@@ -26,6 +26,23 @@ Every claim below is marked:
   report was written (section 9 says which);
 * **[not implemented]** absent, by design or for now.
 
+The milestone's acceptance criteria:
+
+| # | criterion | where |
+|---|---|---|
+| 1 | one public AOT-run command on the four native targets | section 2; tested on each (section 9) |
+| 2 | the normal AOT compiler and linker | section 3 (`native::ExecutableText`, `emit_executable`); `aotr-equals-emitted` |
+| 3 | no JIT dependency | section 3: the driver built without its JIT runs it (`aotr-no-jit-driver`) |
+| 4 | arguments forwarded exactly | section 4 (`aotr-arguments`) |
+| 5 | standard streams behave normally | section 4 (`aotr-streams`, `aotr-stdin`, `aotr-broken-pipe`) |
+| 6 | exit status preserved by platform convention | section 5 |
+| 7 | failures never execute stale binaries | section 6 (`aotr-rejected-never-runs`, `aotr-link-failure-never-runs`; the mutant `stale-executable-run`) |
+| 8 | temporary artifacts safely managed | section 6 |
+| 9 | concurrent invocations do not collide | section 6 (`aotr-concurrent`) |
+| 10 | target and startup-policy limitations enforced | section 7 |
+| 11 | macOS Cocoa through AOT-run on the main thread | section 7; MACOS-BOTLISH-DISTRIBUTION-MILESTONE-1.md, section 18 |
+| 12 | existing AOT and JIT-capable builds unchanged | section 9 (the JIT build's tests on every host) |
+
 ## Contents
 
 1. [Existing native execution modes](#1-existing-native-execution-modes)
@@ -330,33 +347,37 @@ the driver, and runs the driver's `aot_run` unit tests and
 tests/aot-run.test; the unmutated tree must pass both first). Each is one of
 the failures the milestone names:
 
-| mutant | the bug | [executed, Linux x86-64] |
+| mutant | the bug | [executed, Linux x86-64] killed by |
 |---|---|---|
-| `shared-directory` | one fixed directory for every run | killed: the unit test `aot_run_private_directories_are_new_and_private`; `aotr-concurrent`, `aotr-keep`, `aotr-control-left` |
-| `existing-directory-reused` | a name that exists already is used | killed: the unit test |
-| `directory-not-private` | mode 0755 | killed |
-| `directory-left` | never removed | (see the run's report below) |
-| `exit-status-lost` | nonzero status replaced with success | |
-| `signal-death-as-exit` | a signal death reported as exit 1 | |
-| `termination-not-forwarded` | SIGTERM/SIGHUP not sent on | |
-| `parent-not-watched` | the program outlives main.tcl | |
-| `argv0-is-the-executable` | argv()[0] the private path | |
-| `stdin-not-forwarded` | standard input not the command's | |
-| `stdout-captured` | the program's output captured | |
-| `startup-policy-dropped` | main-thread silently ignored | |
-| `signal-status-not-128` | main.tcl's status for a signal 1 | |
-| `foreign-target-accepted` | another host's target compiled | |
-| `jit-refusal-removed` | `-backend cranelift` without a JIT not refused | |
-| `stale-executable-run` | a failed build runs what an earlier run left | |
-| `arguments-split` | an argument with a space becomes two | |
-| `arguments-reordered` | the arguments reversed | |
-| `argument-dropped` | the last argument lost | |
-| `wrong-working-directory` | the program runs in its build directory | |
-| `stderr-captured` | the program's standard error captured | |
-| `jit-route` | the driver asked to run the program in-process (the JIT's `run`) | |
+| `shared-directory` | one fixed directory for every run | the unit test `aot_run_private_directories_are_new_and_private`; `aotr-concurrent`, `aotr-keep`, `aotr-control-left` |
+| `existing-directory-reused` | a name that exists already is used | the unit test |
+| `directory-not-private` | mode 0755 | the unit test; `aotr-keep` |
+| `directory-left` | never removed | the unit test; 16 tests that check nothing is left |
+| `exit-status-lost` | nonzero status replaced with success | `aotr-exit-status`, `aotr-runtime-error`, `aotr-control-status` |
+| `signal-death-as-exit` | a signal death reported as exit 1 | `aotr-signal-status` |
+| `termination-not-forwarded` | SIGTERM/SIGHUP not sent on | `aotr-terminate-command` |
+| `parent-not-watched` | the program outlives main.tcl | `aotr-parent-killed` |
+| `argv0-is-the-executable` | argv()[0] the private path | `aotr-arguments` |
+| `stdin-not-forwarded` | standard input not the command's | `aotr-stdin` |
+| `stdout-captured` | the program's output captured | 18 tests (`aotr-arguments`, `aotr-streams`, `aotr-equals-emitted`, ...) |
+| `startup-policy-dropped` | main-thread silently ignored | `aotr-main-thread-refused` |
+| `signal-status-not-128` | main.tcl's status for a signal 1 | `aotr-signal-status` |
+| `foreign-target-accepted` | another host's target compiled | `aotr-usage` |
+| `jit-refusal-removed` | `-backend cranelift` without a JIT not refused | `aotr-no-jit-refused`, `aotr-no-jit-driver` |
+| `stale-executable-run` | a failed build runs what an earlier run left | the unit test; 16 tests (the mutant needs a directory that outlives its run, so every test that checks nothing is left fails too; `aotr-link-failure-never-runs` is among them by construction: the earlier run's executable prints the new run's arguments) |
+| `arguments-split` | an argument with a space becomes two | `aotr-arguments`, `aotr-control-arguments`, `aotr-no-jit-run-default` |
+| `arguments-reordered` | the arguments reversed | `aotr-arguments`, `aotr-no-jit-run-default` |
+| `argument-dropped` | the last argument lost | 10 tests (`aotr-arguments`, `aotr-exit-status`, `aotr-keep`, ...) |
+| `wrong-working-directory` | the program runs in its build directory | `aotr-working-directory` |
+| `stderr-captured` | the program's standard error captured | `aotr-arguments`, `aotr-no-arguments`, `aotr-runtime-error`, `aotr-streams` |
+| `jit-route` | the driver asked to run the program in-process (the JIT's `run`) | 26 tests (`aotr-arguments`, `aotr-equals-emitted`, `aotr-control-left`, ...: the JIT's run reports no status, and takes none of aot-run's options) |
 
-The table's last column is completed from the harness's report (below);
-a mutant counts as killed only when it built and a detector failed on it.
+[executed, Linux x86-64] `tclsh9.0 audit/aot-run/tools/mutate.tcl`: the
+unmutated tree passed both detectors first; 22 mutants, 22 killed, none
+survived, none skipped (in two runs: the first fifteen, then the seven
+added with `-only`). A mutant counts as killed only when it built and a
+detector failed on it. Six change Unix code only (their `%%` line names
+the Unix hosts); none has been judged on Windows or macOS.
 
 ## 11. Performance measurements
 

@@ -96,6 +96,36 @@ What exists and runs:
 To make the first release (section 28): merge, set the environment's
 deployment rule (section 9), push the tag.
 
+The milestone's acceptance criteria, as they stand:
+
+| # | criterion | status |
+|---|---|---|
+| 13 | the packaged compiler exposes no working native JIT | [executed, macOS] the driver is built without it (verify.sh's `no JIT` group, every build) |
+| 14 | `-backend cranelift` fails with an actionable diagnostic | [executed, macOS] app-test.sh, acceptance.sh's `jit-refused` |
+| 15 | native Cranelift AOT remains fully functional | [executed, macOS] the app jobs, link-plan-sdl3, main-thread-startup, Icy Tower built by the application |
+| 16 | the interpreter remains functional | [executed, macOS] smoke-test.sh, acceptance.sh |
+| 17 | relocated, self-contained | [executed, macOS] app-test.sh's relocation, `app-clean` |
+| 18 | validated structure and stable identity | [executed, macOS] verify.sh's layout; bundle.py's check and the identity stage |
+| 19 | every executable component signed correctly | [executed, macOS] ad hoc with the hardened runtime, each unit verified; [credential-blocked] with the Developer ID |
+| 20 | Developer ID signature with the hardened runtime and a secure timestamp | [stand-in] the stages and checks; [credential-blocked] the real signature |
+| 21 | no unnecessary JIT entitlement | [executed, macOS] no entitlement at all (verify.sh) |
+| 22 | compilation and AOT-run do not invalidate the signature | [executed, macOS] acceptance.sh's `signature`, app-test.sh's tree comparison |
+| 23 | the Developer ID-signed compiler passes functional tests | [credential-blocked]; the same acceptance passes on the ad hoc hardened-runtime bundle [executed, macOS] |
+| 24 | notarized by Apple | [credential-blocked] |
+| 25 | ticket stapled and verified | [credential-blocked] |
+| 26 | Gatekeeper accepts the application | [credential-blocked]; Gatekeeper's refusal of the ad hoc bundle [executed, macOS] |
+| 27 | the final ZIP preserves every signature and ticket | [stand-in] the package stage's checks; [credential-blocked] the ticket |
+| 28 | a quarantined extraction is assessed and launched | [credential-blocked] in release mode (synthetic quarantine, section 14) |
+| 29 | the compiler works from that extracted artifact | [credential-blocked]; the ad hoc download's toolchain-free smoke test [executed, macOS: `app-clean`] |
+| 30 | AOT-run works from that extracted artifact | [credential-blocked] (the final acceptance's `aot-run` case) |
+| 31 | the AOT-compiled SDL3/Cocoa canary works | [executed, macOS] the AppKit and Metal canary through `-aot-run -native-startup main-thread`; SDL3 through the application (main-thread-startup's census, Icy Tower) |
+| 32 | developer-tool requirements documented and tested | [executed, macOS] section 19 (`app-clean` without them, the app jobs with them) |
+| 33 | the release publishes the exact verified ZIP with SHA-256 and provenance | [inspected] the publish job; [stand-in] `publishable`; [credential-blocked] a real release |
+| 34 | credentials unavailable to untrusted jobs | [inspected] test_botlish_workflow.py (15 tests) and its mutants |
+| 35 | malformed credentials fail before Apple tools | [stand-in] the shared preflight's 63 tests (test_credentials.py) and its mutants |
+| 36 | negative controls and mutants reject broken artifacts | [stand-in, and executed on macOS by icy-tower-macos.yml] audit/macos-release's 92 mutants; [executed, macOS with `[ci-app-mutants]`] audit/macos-app's |
+| 37 | Linux and Windows regressions pass | section 23 |
+
 ## 2. Starting Botlish.app layout
 
 [inspected] MACOS-AARCH64-MILESTONE-9.md's bundle, unchanged in its files:
