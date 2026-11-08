@@ -126,7 +126,24 @@ pub enum LaunchError {
 /// redirected output reaches the same file or pipe; a missing one (null, or
 /// `INVALID_HANDLE_VALUE`) is passed as it is.
 #[cfg(windows)]
+#[cfg_attr(not(feature = "jit"), allow(dead_code))]
 pub fn run(executable: &std::path::Path, argv: &[Vec<u8>]) -> Result<u32, LaunchError> {
+    let spawned = spawn(executable, argv)?;
+    // SAFETY: the process handle spawn returned, open until exit_code.
+    unsafe { win32::WaitForSingleObject(spawned.process, win32::INFINITE) };
+    exit_code(spawned)
+}
+
+/// A started process (`spawn`), its handle open until `exit_code`.
+#[cfg(windows)]
+pub struct Spawned {
+    process: win32::Handle,
+    name: String,
+}
+
+/// Starts EXECUTABLE as `run` does, without waiting for it.
+#[cfg(windows)]
+pub fn spawn(executable: &std::path::Path, argv: &[Vec<u8>]) -> Result<Spawned, LaunchError> {
     use std::os::windows::ffi::OsStrExt;
     use win32::*;
     let units = utf16_arguments(argv).map_err(LaunchError::Arguments)?;
@@ -182,20 +199,71 @@ pub fn run(executable: &std::path::Path, argv: &[Vec<u8>]) -> Result<u32, Launch
             )));
         }
         CloseHandle(information.thread);
-        WaitForSingleObject(information.process, INFINITE);
+        Ok(Spawned { process: information.process, name: executable.display().to_string() })
+    }
+}
+
+/// The exit code of SPAWNED, which has ended; its handle closed.
+#[cfg(windows)]
+fn exit_code(spawned: Spawned) -> Result<u32, LaunchError> {
+    use win32::*;
+    // SAFETY: the process handle spawn returned, closed here once.
+    unsafe {
         let mut code = 0u32;
-        let got = GetExitCodeProcess(information.process, &mut code);
+        let got = GetExitCodeProcess(spawned.process, &mut code);
         let error = GetLastError();
-        CloseHandle(information.process);
+        CloseHandle(spawned.process);
         if got == 0 {
             return Err(LaunchError::System(format!(
                 "GetExitCodeProcess of {} failed: {}",
-                executable.display(),
+                spawned.name,
                 std::io::Error::from_raw_os_error(error as i32)
             )));
         }
         Ok(code)
     }
+}
+
+/// The console control handler of a wait for a program run as a command
+/// (aotrun.rs): Ctrl+C and Ctrl+Break reach every process attached to the
+/// console, the child's included, which decides what they mean; this
+/// process waits on. Handlers are not inherited (an ignored Ctrl+C would
+/// be: SetConsoleCtrlHandler(NULL, TRUE)), so the child starts with its
+/// default handling.
+#[cfg(windows)]
+unsafe extern "system" fn ignore_interrupt(event: u32) -> i32 {
+    i32::from(event == win32::CTRL_C_EVENT || event == win32::CTRL_BREAK_EVENT)
+}
+
+/// Waits for SPAWNED as a program run as a command waits (aotrun.rs):
+/// Ctrl+C and Ctrl+Break left to the child, and, with PARENT, the process
+/// that started this one watched -- if it ends first, GONE is called and the
+/// child is terminated (exit code 1) and waited for. Its exit code.
+#[cfg(windows)]
+pub fn wait_watching(spawned: Spawned, parent: Option<u32>, gone: impl FnOnce()) -> Result<u32, LaunchError> {
+    use win32::*;
+    // SAFETY: Win32 calls on the child's handle (open until exit_code) and
+    // on a handle of the parent's opened and closed here.
+    unsafe {
+        SetConsoleCtrlHandler(Some(ignore_interrupt), 1);
+        let watched = parent.map(|pid| OpenProcess(SYNCHRONIZE, 0, pid)).filter(|h| !h.is_null());
+        match watched {
+            Some(parent) => {
+                let handles = [spawned.process, parent];
+                if WaitForMultipleObjects(2, handles.as_ptr(), 0, INFINITE) == WAIT_OBJECT_0 + 1 {
+                    gone();
+                    TerminateProcess(spawned.process, 1);
+                    WaitForSingleObject(spawned.process, INFINITE);
+                }
+                CloseHandle(parent);
+            }
+            None => {
+                WaitForSingleObject(spawned.process, INFINITE);
+            }
+        }
+        SetConsoleCtrlHandler(Some(ignore_interrupt), 0);
+    }
+    exit_code(spawned)
 }
 
 /// The kernel32 functions and structures `run` uses, declared by hand from
@@ -212,6 +280,10 @@ mod win32 {
     pub const DUPLICATE_SAME_ACCESS: u32 = 2;
     pub const CREATE_UNICODE_ENVIRONMENT: u32 = 0x400;
     pub const INFINITE: u32 = 0xFFFF_FFFF;
+    pub const SYNCHRONIZE: u32 = 0x0010_0000;
+    pub const WAIT_OBJECT_0: u32 = 0;
+    pub const CTRL_C_EVENT: u32 = 0;
+    pub const CTRL_BREAK_EVENT: u32 = 1;
 
     /// STARTUPINFOW.
     #[repr(C)]
@@ -271,6 +343,10 @@ mod win32 {
             options: u32,
         ) -> i32;
         pub fn WaitForSingleObject(handle: Handle, milliseconds: u32) -> u32;
+        pub fn WaitForMultipleObjects(count: u32, handles: *const Handle, wait_all: i32, milliseconds: u32) -> u32;
+        pub fn OpenProcess(desired_access: u32, inherit: i32, process_id: u32) -> Handle;
+        pub fn TerminateProcess(process: Handle, exit_code: u32) -> i32;
+        pub fn SetConsoleCtrlHandler(handler: Option<unsafe extern "system" fn(u32) -> i32>, add: i32) -> i32;
         pub fn GetExitCodeProcess(process: Handle, code: *mut u32) -> i32;
         pub fn CloseHandle(handle: Handle) -> i32;
         pub fn GetLastError() -> u32;

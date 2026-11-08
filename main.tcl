@@ -3,6 +3,10 @@
 #   tclsh9.0 main.tcl [OPTION...] FILE.bot|FILE.hir|FILE.hirx|FILE.ir ...
 #   tclsh9.0 main.tcl run [OPTION...] FILE [ARG...]
 #                                         one program run as a command (below)
+#   tclsh9.0 main.tcl -aot-run [OPTION...] FILE [-- ARG...]
+#                                         one program built as a standalone
+#                                         executable and run as a command
+#                                         (below; AOT-RUN-MILESTONE-1.md)
 #   tclsh9.0 main.tcl -help [QUERY...]
 #   tclsh9.0 main.tcl -version
 #   tclsh9.0 main.tcl                     (no arguments: the usage summary)
@@ -30,6 +34,8 @@
 #   -code -hir -ast -aot -aot-data -aot-spec -contexts -direct -traits
 #   -emit-nir -emit-clif   inspection output, before the program runs
 #   -emit-native-executable / -emit-hir-interchange    build, do not run
+#   -aot-run ?-aot-keep?   build the one input as a standalone executable and
+#                          run it as a command (-- ARG... its arguments)
 #   -native-startup POLICY the executable's startup policy: worker (default)
 #                          or main-thread (macOS AArch64)
 #   -emit-native-library NAME ?-export FUNCTION...? ?-out DIR?    build the
@@ -164,6 +170,29 @@
 # options only -warnings, -target, -L and -F combine with it. The program
 # cannot choose its exit status yet.
 #
+# -aot-run FILE [-- ARG...] (AOT-RUN-MILESTONE-1.md) is the native
+# development cycle without a JIT: it builds the one input as the standalone
+# executable -emit-native-executable links -- the same compilation, link plan,
+# linker and startup policy (-native-startup) -- in a private directory of
+# its own under the system's temporary directory, runs it, and removes the
+# directory when it has ended. The program runs as a command, as `run` runs
+# one: its standard input, output and error are this process's, unchanged;
+# its working directory and environment are the user's; argv() is FILE as
+# typed and the words after `--` (every one of them the program's, `--` and
+# option-like words included); and the exit status is the program's own --
+# its process's exit status (a C `exit`, 0 when it completes, 1 when it
+# fails at run time), or 128+N when signal N ended it (POSIX shells' $?; a
+# line on stderr names the signal, except SIGINT and SIGPIPE). A program
+# that is rejected, not AOT-ready, or cannot be linked is never run: its
+# diagnostics go to stderr after "FILE: " and the status is 1. A
+# compilation or link that fails after an earlier success never runs the
+# earlier executable: every run builds anew. -aot-keep keeps the
+# directory, with the program's NIR beside the executable, and names it on
+# stderr. Of the other options only -warnings, -L, -F, -native-startup and
+# -target (which must be the host's: the program runs here) combine with
+# it. It needs no native JIT: a distribution without one (the macOS
+# application) runs `run`'s native default this way too.
+#
 # -check analyzes each .bot input as a compilation does and reports what it
 # reports -- the same diagnostics, in the same words, the same "note:" and
 # "help:" lines,
@@ -256,6 +285,8 @@ set cliOptions {
     -argv TEXT argv {append the argument TEXT to argv()}
     -argv-hex HEX argv {append an argument given as hex bytes}
     -argv-none {} argv {run the program with an empty argv()}
+    -aot-run {} run {build and run one input as an executable (-- ARG...)}
+    -aot-keep {} run {keep -aot-run's build directory and name it}
     -emit-native-executable {} build {build a standalone executable beside each input}
     -native-startup POLICY build {the executable's thread: worker (default) or main-thread}
     -emit-hir-interchange {} build {write each input's analyzed HIR as FILE.hirx}
@@ -313,6 +344,7 @@ proc usage {} {
     set me $cliInvocation
     set lines [list "usage: $me \[OPTION...\] FILE..." \
         "       $me run \[OPTION...\] FILE \[ARG...\]" \
+        "       $me -aot-run \[OPTION...\] FILE \[-- ARG...\]" \
         "       $me -help \[QUERY...\]" \
         "       $me -version" \
         "       $me add|install|update|remove|verify|package ..." "" \
@@ -320,7 +352,9 @@ proc usage {} {
         "FILE.hirx (HIR interchange) or FILE.ir (core IR text; interp and compile only)." \
         "Each program's output is printed, then its value." \
         "run runs one program as a command: natively, with the ARGs as its arguments," \
-        "its output only, exit status 0 or 1 (-backend, -warnings, -target, -L, -F)." "" \
+        "its output only, exit status 0 or 1 (-backend, -warnings, -target, -L, -F)." \
+        "-aot-run builds one program as a native executable and runs it as a command:" \
+        "the ARGs after -- as its arguments, its output and exit status its own." "" \
         "Before writing a program, read: $me -help primer" ""]
     foreach {group heading} {run Running argv {Program arguments} build Building check {Checking (with -warnings, -target)} lsp {Language server (with -warnings, -target; no FILE)} inspect {Inspecting (printed before the program runs)} help Reference} {
         lappend lines "$heading:"
@@ -338,6 +372,7 @@ proc usage {} {
     lappend lines "Examples:" \
         "  $me -backend cranelift game.bot" \
         "  $me run tool.bot -n 3 < input   the program as a command" \
+        "  $me -aot-run tool.bot -- -n 3   the same, as a native executable" \
         "  $me -lsp                      the language server, for an editor" \
         "  $me -help                     the indices of Compilerpedia" \
         "  $me -help cli.options         every option in detail" \
@@ -360,7 +395,7 @@ proc usageError {message} {
 # flag), files, query (the words after -help).
 proc parseCommandLine {argv} {
     global cliOptions cliAliases
-    set result [dict create action run options {} files {} query {} arguments {}]
+    set result [dict create action run options {} files {} query {} arguments {} separator 0]
     if {$argv eq ""} {
         dict set result action usage
         return $result
@@ -404,6 +439,12 @@ proc parseCommandLine {argv} {
             }
             dict lappend result options [list $arg [lindex $argv [incr i]]]
             continue
+        }
+        if {$arg eq "--" && [dict get $result action] ne "program"} {
+            # -aot-run FILE -- ARG...: every word after -- is the program's.
+            dict set result separator 1
+            dict set result arguments [lrange $argv [expr {$i + 1}] end]
+            break
         }
         if {[string match -* $arg] && $arg ne "-"} {
             usageError "unknown option \"$arg\""
@@ -848,6 +889,90 @@ proc runProgram {path} {
     return 0
 }
 
+# The analyzed HIR of the program file PATH (.bot, .hir or .hirx) for a
+# native build: a .bot file's warnings printed as a compilation prints them.
+# Core IR text has no native path: {NATIVE AOT INPUT}.
+proc nativeProgramHir {path} {
+    global warnings target
+    switch -- [file extension $path] {
+        .bot {
+            set hir [surface::readProgramFile $path -warnings $warnings -target $target]
+            warningHints [lmap w [hir::warnings::of $hir] {dict get $w code}]
+            return $hir
+        }
+        .hir { return [hir::readFile $path] }
+        .hirx { return [hir::interchange::readFile $path -target [hir::cabi::ResolveTarget $target]] }
+        default { throw {NATIVE AOT INPUT} "expected a .bot, .hir or .hirx input file (native executables are built from HIR, never from core IR text): $path" }
+    }
+}
+
+# The environment a program run as a command gets that this process does
+# not have (native::aotRun's -environment): a packaged compiler's own
+# settings (single/main.tcl's ::single::userEnvironment: the variables it
+# set for its native backend, as the user had them), nothing in a checkout.
+proc childEnvironment {} {
+    if {[info exists ::single::userEnvironment]} {
+        return $::single::userEnvironment
+    }
+    return {}
+}
+
+# The exit status of this process for a child's exit code CODE: on Windows
+# an exit code is 32 bits, which Tcl's exit takes as a signed integer.
+proc childExitStatus {code} {
+    if {$code > 0x7fffffff} {
+        return [expr {$code - 0x100000000}]
+    }
+    return $code
+}
+
+# Builds the program PATH as a standalone executable and runs it as a
+# command (-aot-run, native::aotRun, AOT-RUN-MILESTONE-1.md): its argv() the
+# injected vector (PATH and the arguments after --), its standard streams,
+# working directory and environment the user's. Returns the program's exit
+# status -- its process's exit code, or 128+N for signal N (a line on stderr
+# names the signal, unless it is SIGINT or SIGPIPE, as a shell says nothing
+# of those) -- or 1 when it is rejected, not AOT-ready, cannot be linked or
+# cannot be started (each diagnostic on stderr after "PATH: "), and then
+# nothing ran. With -aot-keep a line on stderr names the build directory.
+proc aotRunProgram {path} {
+    global hintsShown nativeStartup aotKeep
+    set hintsShown {}
+    if {[catch {
+        set hir [nativeProgramHir $path]
+        set result [core::process::withArgv $::injectedArgv {
+            native::aotRun $hir [file rootname [file tail $path]] -startup $nativeStartup -keep $aotKeep \
+                -environment [childEnvironment]
+        }]
+    } message options]} {
+        printError stderr "$path: " $message $options
+        return 1
+    }
+    if {[dict exists $result kept]} {
+        puts stderr "$path: -aot-keep: the build directory [dict get $result kept] is kept (the executable [dict getdef $result executable {(none: it was not linked)}])"
+    }
+    set status [dict get $result status]
+    switch -- [lindex $status 0] {
+        exit {
+            return [childExitStatus [lindex $status 1]]
+        }
+        signal {
+            lassign $status - number name
+            if {$name ni {SIGINT SIGPIPE}} {
+                puts stderr "$path: the program was ended by signal $number ($name)"
+            }
+            return [expr {128 + $number}]
+        }
+        interrupted {
+            lassign $status - number name
+            puts stderr "$path: interrupted ([if {$name eq "parent"} {set _ "its command ended"} else {set name}]) before the program started: nothing ran"
+            return [if {$number > 0} {expr {128 + $number}} else {set _ 1}]
+        }
+    }
+    puts stderr "$path: the native backend reported an unknown status: $status (NATIVE BUG)"
+    return 1
+}
+
 # Writes the analyzed HIR of the .bot or .hir file PATH in the HIR
 # interchange format, as PATH without its extension plus .hirx.
 proc emitInterchange {path} {
@@ -987,6 +1112,9 @@ set libraryName ""
 set libraryExports {}
 set libraryDir ""
 set nativeStartup ""
+set aotRun 0
+set aotKeep 0
+set backendGiven 0
 set check 0
 foreach option [dict get $commandLine options] {
     lassign $option arg value
@@ -1014,6 +1142,7 @@ foreach option [dict get $commandLine options] {
     switch -- $arg {
         -backend {
             set backend $value
+            set backendGiven 1
             if {$backend in $nativeBackends} {
                 # Native backends are not core::registerBackend backends:
                 # they compile HIR (native::evalHir), never core IR.
@@ -1047,6 +1176,8 @@ foreach option [dict get $commandLine options] {
         -emit-nir { set showNative nir }
         -emit-clif { set showNative clif }
         -emit-native-executable { set showNative executable }
+        -aot-run { set aotRun 1 }
+        -aot-keep { set aotKeep 1 }
         -emit-hir-interchange { set showNative interchange }
         -emit-native-library {
             if {![regexp {^[A-Za-z_][A-Za-z0-9_]*$} $value]} {
@@ -1104,10 +1235,33 @@ foreach option [dict get $commandLine options] {
 if {$showNative ne "library" && ($libraryExports ne "" || $libraryDir ne "")} {
     usageError "-export and -out are options of -emit-native-library"
 }
-if {$nativeStartup ne "" && $showNative ne "executable"} {
+if {$aotRun} {
+    # -aot-run builds one program and runs it as a command: of the options
+    # only those that decide how it compiles and links. Anything else runs
+    # it another way, inspects, builds something else or checks: refused,
+    # never ignored.
+    foreach option [dict get $commandLine options] {
+        set arg [lindex $option 0]
+        if {$arg ni {-aot-run -aot-keep -warnings -target -L -F -native-startup}} {
+            usageError "-aot-run cannot be combined with $arg: it builds one program as a standalone executable and runs it as a command, its standard output and error the program's own (it takes -warnings, -target, -L, -F, -native-startup and -aot-keep; the program's arguments follow --)"
+        }
+    }
+    if {[llength $files] != 1} {
+        usageError "-aot-run runs one program (found [llength $files] input files: the program's arguments follow --, as in -aot-run FILE -- ARG...)"
+    }
+    if {$target ne "" && $target ne [core::cabi::hostTarget]} {
+        usageError "-aot-run runs the program here, on [core::cabi::hostTarget]: -target $target builds for another host (build there, with -emit-native-executable or -aot-run)"
+    }
+} elseif {$aotKeep} {
+    usageError "-aot-keep is an option of -aot-run"
+}
+if {[dict get $commandLine separator] && !$aotRun} {
+    usageError "-- ends -aot-run's options: the words after it are the program's arguments (-aot-run FILE -- ARG...; run FILE ARG... takes them after its FILE)"
+}
+if {$nativeStartup ne "" && $showNative ne "executable" && !$aotRun} {
     # The policy is fixed into an executable when it is built: no other
     # invocation makes one, and an explicit choice is never ignored.
-    usageError "-native-startup is an option of -emit-native-executable: it chooses the thread a built executable runs its program on, and nothing else this invocation does makes one (a native library runs on its host's thread; -backend cranelift runs a program on the driver's own)"
+    usageError "-native-startup is an option of -emit-native-executable and -aot-run: it chooses the thread a built executable runs its program on, and nothing else this invocation does makes one (a native library runs on its host's thread; -backend cranelift runs a program on the driver's own)"
 }
 if {$nativeStartup eq ""} {
     set nativeStartup worker
@@ -1115,12 +1269,35 @@ if {$nativeStartup eq ""} {
 if {$showNative eq "library" && [llength $files] != 1} {
     usageError "-emit-native-library builds one library from one input file (found [llength $files])"
 }
-if {[dict get $commandLine action] eq "program"} {
+if {[dict get $commandLine action] eq "program" || $aotRun} {
     # The program's own argv(): its file as typed, then its arguments, each
     # as its UTF-8 bytes.
     set injectedArgv [lmap word [concat [lrange $files 0 0] [dict get $commandLine arguments]] {
         core::process::bytesOfText $word
     }]
+}
+# Native JIT execution (-backend cranelift, cranelift-generic: the driver's
+# in-process code generator) where the native backend has none
+# (native::jitAvailable: the macOS application's, built without it,
+# MACOS-BOTLISH-DISTRIBUTION-MILESTONE-1.md): refused before anything is
+# compiled, naming what runs instead -- the interpreter, or the program as
+# an executable (-aot-run). `run`'s native default, which the user did not
+# choose, runs as -aot-run does: as the program's executable would.
+set runsNatively [expr {$backend in $nativeBackends && !$check && !$aotRun
+    && $showNative ni {executable library interchange}}]
+if {$runsNatively && [lspMode $commandLine] eq "" && ![native::jitAvailable]} {
+    if {[dict get $commandLine action] eq "program" && !$backendGiven} {
+        exit [aotRunProgram [lindex $files 0]]
+    }
+    set message "native JIT execution (-backend $backend) is unavailable in this distribution: its native backend has no JIT. Run the program natively as a standalone executable with -aot-run FILE \[-- ARG...\], or on the interpreter (-backend interp, the default)"
+    puts stderr "$cliInvocation: $message (NATIVE UNSUPPORTED jit)"
+    helpHint stderr "" {NATIVE UNSUPPORTED jit} $message
+    exit 1
+}
+if {$aotRun} {
+    exit [aotRunProgram [lindex $files 0]]
+}
+if {[dict get $commandLine action] eq "program"} {
     exit [runProgram [lindex $files 0]]
 }
 set failures 0

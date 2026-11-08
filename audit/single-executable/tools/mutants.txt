@@ -74,17 +74,17 @@ proc ::single::MayLink {argv} {
 @@ linker-stub the single executable links every program with the stub, as before the milestone: C is refused
 ## single/main.tcl
 <<<<
-    set ::env(BOTLISH_NATIVE_LINKER) auto
+    ::single::SetEnv BOTLISH_NATIVE_LINKER auto
 ====
-    set ::env(BOTLISH_NATIVE_LINKER) stub
+    ::single::SetEnv BOTLISH_NATIVE_LINKER stub
 >>>>
 
 @@ linker-system the single executable links every program with the system linker: one that calls no C needs a C compiler
 ## single/main.tcl
 <<<<
-    set ::env(BOTLISH_NATIVE_LINKER) auto
+    ::single::SetEnv BOTLISH_NATIVE_LINKER auto
 ====
-    set ::env(BOTLISH_NATIVE_LINKER) system
+    ::single::SetEnv BOTLISH_NATIVE_LINKER system
 >>>>
 
 @@ linker-choice-overridden an explicit BOTLISH_NATIVE_LINKER is replaced by auto

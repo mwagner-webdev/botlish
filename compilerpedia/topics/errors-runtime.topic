@@ -1357,11 +1357,18 @@ code: NATIVE UNSUPPORTED
 code: NATIVE UNSUPPORTED CONTEXT-NATIVE-LOWERING-UNSUPPORTED
 code: NATIVE UNSUPPORTED struct-shape
 code: NATIVE UNSUPPORTED startup
+code: NATIVE UNSUPPORTED jit
+code: NATIVE UNSUPPORTED aot-run
 
 == MEANING
 On the native backends; the program is valid and runs on interp and
 compile, but the native backend cannot handle part of it. The third word
 of the code says what:
+  * jit: an in-process native run (-backend cranelift or cranelift-generic)
+    by a native backend that has no JIT: the macOS application's. Run the
+    program as an executable (-aot-run, cli.aot-run) or on the interpreter.
+  * aot-run: a program run as a command (-aot-run) with an argument vector
+    its process cannot be given: none at all, or one Windows cannot pass.
   * struct-shape: a field projection whose receiver's struct type is not
     known statically, in unspecialized code (cranelift-generic); native
     code reads a field from a known slot, never by name.

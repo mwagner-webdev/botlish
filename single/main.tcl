@@ -49,6 +49,12 @@
 #      and linked where they are, signed, in the bundle,
 #   3. runs the checkout's own main.tcl, unchanged, with the same arguments:
 #      every option main.tcl documents works the same way.
+#
+# The variables it sets for the native backend (BOTLISH_NATIVE_BIN,
+# BOTLISH_NATIVE_AOT_STUB, BOTLISH_NATIVE_LINKER) are recorded as the user
+# had them, in ::single::userEnvironment (NAME -> {VALUE}, or {} for one the
+# user had not set): a program main.tcl runs as a command (-aot-run,
+# AOT-RUN-MILESTONE-1.md) gets the user's environment, not this compiler's.
 
 # Tcl decoded the arguments and the environment (and the launcher the
 # bundle's path) with the locale's encoding,
@@ -82,6 +88,7 @@ foreach channel {stdin stdout stderr} {
 set ::tcl::zipfs::wrmax 0
 
 namespace eval ::single {
+    variable userEnvironment [dict create]
     variable app [file dirname [file normalize [info script]]]
     variable executables {botlish-native botlish-aot-stub}
     # The runtime archive the system linker links (native/runtime-archive):
@@ -164,9 +171,10 @@ proc ::single::MayLink {argv} {
     }
     for {set i $run} {$i < [llength $argv]} {incr i} {
         switch -- [lindex $argv $i] {
-            -emit-native-executable { return 1 }
+            -emit-native-executable - -aot-run { return 1 }
             -backend { set backend [lindex $argv [incr i]] }
-            -warnings - -target - -L - -F { incr i }
+            -warnings - -target - -L - -F - -native-startup { incr i }
+            -- { break }
             default {
                 if {$run && ![string match -* [lindex $argv $i]]} break
             }
@@ -200,12 +208,22 @@ proc ::single::NativeDir {linking} {
     return $dir
 }
 
+# Sets the environment variable NAME to VALUE for the native backend,
+# recording the user's own value first (::single::userEnvironment).
+proc ::single::SetEnv {name value} {
+    variable userEnvironment
+    if {![dict exists $userEnvironment $name]} {
+        dict set userEnvironment $name [if {[info exists ::env($name)]} {list $::env($name)} else {list}]
+    }
+    set ::env($name) $value
+}
+
 if {[info exists ::single::bundle]} {
     # The macOS application: the bundle's own driver, whatever the
     # environment names (never another build's), run where it is. The driver
     # finds the runtime archive in Contents/Resources (codegen::aot's
     # runtime_archive), and there is no stub: `auto` is the system linker.
-    set ::env(BOTLISH_NATIVE_BIN) [file join $::single::bundle MacOS botlish-native]
+    ::single::SetEnv BOTLISH_NATIVE_BIN [file join $::single::bundle MacOS botlish-native]
 } elseif {$::argv ne "" && [lindex $::argv 0] ni {-help --help -h -version --version}
         && [lindex $::argv 0] ni {add install update remove verify package native}
         && "-lsp" ni $::argv && "-lsp-worker" ni $::argv} {
@@ -219,13 +237,13 @@ if {[info exists ::single::bundle]} {
         puts stderr "botlish: cannot install the native backend: $::single::nativeDir"
         exit 2
     }
-    set ::env(BOTLISH_NATIVE_BIN) [file join $::single::nativeDir botlish-native]
-    set ::env(BOTLISH_NATIVE_AOT_STUB) [file join $::single::nativeDir botlish-aot-stub]
+    ::single::SetEnv BOTLISH_NATIVE_BIN [file join $::single::nativeDir botlish-native]
+    ::single::SetEnv BOTLISH_NATIVE_AOT_STUB [file join $::single::nativeDir botlish-aot-stub]
 }
 # The packaged compiler's linker. An explicit choice (BOTLISH_NATIVE_LINKER=
 # stub, system) is kept: for diagnostics and tests.
 if {![info exists ::env(BOTLISH_NATIVE_LINKER)] || $::env(BOTLISH_NATIVE_LINKER) eq ""} {
-    set ::env(BOTLISH_NATIVE_LINKER) auto
+    ::single::SetEnv BOTLISH_NATIVE_LINKER auto
 }
 
 set ::argv0 [info nameofexecutable]

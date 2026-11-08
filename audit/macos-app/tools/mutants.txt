@@ -134,10 +134,10 @@ codesign --force --sign - "$app"
 @@ backend-from-environment the application takes BOTLISH_NATIVE_BIN from the environment when it is set: another build's driver
 ## single/main.tcl
 <<<<
-    set ::env(BOTLISH_NATIVE_BIN) [file join $::single::bundle MacOS botlish-native]
+    ::single::SetEnv BOTLISH_NATIVE_BIN [file join $::single::bundle MacOS botlish-native]
 ====
     if {![info exists ::env(BOTLISH_NATIVE_BIN)]} {
-        set ::env(BOTLISH_NATIVE_BIN) [file join $::single::bundle MacOS botlish-native]
+        ::single::SetEnv BOTLISH_NATIVE_BIN [file join $::single::bundle MacOS botlish-native]
     }
 >>>>
 
@@ -153,18 +153,18 @@ codesign --force --sign - "$app"
 @@ runtime-relative the application names the runtime archive by a path relative to the working directory
 ## single/main.tcl
 <<<<
-    set ::env(BOTLISH_NATIVE_BIN) [file join $::single::bundle MacOS botlish-native]
+    ::single::SetEnv BOTLISH_NATIVE_BIN [file join $::single::bundle MacOS botlish-native]
 ====
-    set ::env(BOTLISH_NATIVE_BIN) [file join $::single::bundle MacOS botlish-native]
+    ::single::SetEnv BOTLISH_NATIVE_BIN [file join $::single::bundle MacOS botlish-native]
     set ::env(BOTLISH_NATIVE_RUNTIME) Botlish.app/Contents/Resources/libbotlish_runtime.a
 >>>>
 
 @@ linker-rustc the application's linker is rustc, not auto (the system linker)
 ## single/main.tcl
 <<<<
-    set ::env(BOTLISH_NATIVE_LINKER) auto
+    ::single::SetEnv BOTLISH_NATIVE_LINKER auto
 ====
-    set ::env(BOTLISH_NATIVE_LINKER) rustc
+    ::single::SetEnv BOTLISH_NATIVE_LINKER rustc
 >>>>
 
 @@ argument-dropped the launcher drops the first argument

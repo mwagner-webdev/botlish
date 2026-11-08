@@ -16,6 +16,13 @@
 //!   botlish-native calls FILE.nir        print settled exact-call effects
 //!                                        without compiling
 //!   botlish-native object OUT FILE.nir   write a relocatable program object
+//!   botlish-native aot-run NAME FILE.nir  link the program as a standalone
+//!                                        executable in a private directory
+//!                                        and run it as a command, its
+//!                                        status its own (aotrun.rs,
+//!                                        AOT-RUN-MILESTONE-1.md; --startup,
+//!                                        --keep, --parent-pid PID,
+//!                                        --child-env FILE, --argv-file)
 //!   botlish-native executable OUT FILE.nir  link a standalone executable
 //!                                        (--startup worker|main-thread: its
 //!                                        startup policy, below)
@@ -65,6 +72,12 @@
 //!   botlish-native fused FILE.nir        the NIR the program is after fusion
 //!                                        (codegen::nirtext), what every other
 //!                                        command compiles
+//!   botlish-native capabilities          what this build of the driver
+//!                                        can do: `jit 1|0` (whether it has
+//!                                        the in-process code generator,
+//!                                        the `jit` cargo feature:
+//!                                        MACOS-BOTLISH-DISTRIBUTION-
+//!                                        MILESTONE-1.md) and `aot-run 1`
 //!   botlish-native target TRIPLE         how this driver reads a target
 //!                                        triple: architecture, operating
 //!                                        system, pointer width, object format,
@@ -154,18 +167,33 @@
 //! a signal handler, on Windows x86-64 a vectored exception handler
 //! (WINDOWS-X86-64-MILESTONE-4.md).
 
+mod aotrun;
 mod codegen;
 mod launch;
 use botlish_native::{nir, runtime};
 
+#[cfg(feature = "jit")]
 use codegen::{Backend, CompileOptions, CraneliftJit, Site};
-use runtime::metrics::{kind_name, AllocMode, SiteStats};
-use runtime::show::{tcl_list, tcl_value};
+use runtime::metrics::AllocMode;
+#[cfg(feature = "jit")]
+use runtime::metrics::{kind_name, SiteStats};
+use runtime::show::tcl_list;
+#[cfg(feature = "jit")]
+use runtime::show::tcl_value;
+#[cfg(feature = "jit")]
 use runtime::value::NO_VALUE;
+#[cfg(feature = "jit")]
 use runtime::vm::{ProgramInfo, Vm};
 use std::io::{Read, Write};
 use std::sync::{Mutex, OnceLock};
+#[cfg(feature = "jit")]
 use std::time::Instant;
+
+/// Why every in-process run is refused by a driver built without its JIT
+/// (`--no-default-features`: the macOS application's,
+/// MACOS-BOTLISH-DISTRIBUTION-MILESTONE-1.md).
+#[cfg(not(feature = "jit"))]
+const JIT_UNAVAILABLE: &str = "native JIT execution is not part of this native backend (it was built without its JIT, the `jit` feature): it compiles, links and runs standalone executables -- run the program as one (main.tcl -aot-run FILE [-- ARG...], or -emit-native-executable), or on the interpreter";
 
 /// The file `--result PATH` names: where emit writes instead of standard
 /// output.
@@ -420,6 +448,51 @@ fn extract_startup(args: &[String]) -> Result<(Vec<String>, Option<runtime::prog
     Ok((out, startup))
 }
 
+/// `aot-run`'s own options, each anywhere on the line (aotrun.rs):
+/// `--keep`, `--parent-pid PID`, `--child-env FILE`.
+#[derive(Default)]
+struct AotRunOptions {
+    given: bool,
+    keep: bool,
+    parent: Option<u32>,
+    environment: Vec<(String, Option<std::ffi::OsString>)>,
+}
+
+/// Pulls `aot-run`'s options out of ARGS: the remaining arguments, and the
+/// options. Err if one has no valid value.
+fn extract_aot_run_options(args: &[String]) -> Result<(Vec<String>, AotRunOptions), String> {
+    let mut options = AotRunOptions::default();
+    let mut out = Vec::with_capacity(args.len());
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--keep" => {
+                options.given = true;
+                options.keep = true;
+                i += 1;
+            }
+            "--parent-pid" => {
+                let pid = args.get(i + 1).and_then(|p| p.parse::<u32>().ok()).filter(|&p| p > 0).ok_or("--parent-pid needs a process ID")?;
+                options.given = true;
+                options.parent = Some(pid);
+                i += 2;
+            }
+            "--child-env" => {
+                let path = args.get(i + 1).ok_or("--child-env needs a file")?;
+                let text = std::fs::read_to_string(path).map_err(|e| format!("--child-env {path}: {e}"))?;
+                options.given = true;
+                options.environment = aotrun::parse_environment(&text)?;
+                i += 2;
+            }
+            _ => {
+                out.push(args[i].clone());
+                i += 1;
+            }
+        }
+    }
+    Ok((out, options))
+}
+
 /// The `vms` command's options (`concurrent_vms`), each anywhere on the
 /// line: `--rendezvous K` (hold every Vm at its K-th collection until all
 /// have reached theirs), `--rounds R` (each thread makes, runs and drops R
@@ -470,7 +543,7 @@ fn extract_vms_options(args: &[String]) -> Option<(Vec<String>, VmsOptions)> {
 
 fn cli(args: &[String]) -> i32 {
     let usage = || {
-        eprintln!("usage: botlish-native run|clif|vcode|size|roots|calls|check|fusion|fused FILE.nir [--alloc off|summary|sites] [--argv ARGS|--argv-file PATH] | bench RUNS FILE.nir [--alloc ...] | batch CALLS FILE.nir | object|executable OUT FILE.nir [--startup worker|main-thread] | library OUT NAME FILE.nir | link-plan FILE.nir | target TRIPLE | system-linker (each also [--result PATH], --link-dir DIR, --framework-dir DIR)");
+        eprintln!("usage: botlish-native run|clif|vcode|size|roots|calls|check|fusion|fused FILE.nir [--alloc off|summary|sites] [--argv ARGS|--argv-file PATH] | bench RUNS FILE.nir [--alloc ...] | batch CALLS FILE.nir | object|executable OUT FILE.nir [--startup worker|main-thread] | aot-run NAME FILE.nir [--startup ...] [--keep] [--parent-pid PID] [--child-env FILE] [--argv-file PATH] | library OUT NAME FILE.nir | link-plan FILE.nir | target TRIPLE | system-linker (each also [--result PATH], --link-dir DIR, --framework-dir DIR)");
         2
     };
     let Some(args) = extract_table_hash_key(args) else { return usage() };
@@ -491,15 +564,26 @@ fn cli(args: &[String]) -> i32 {
     let Some((args, snapshot)) = extract_argv(&args) else { return usage() };
     let Some((args, vms_options)) = extract_vms_options(&args) else { return usage() };
     let Some((args, alloc_mode)) = extract_alloc_mode(&args) else { return usage() };
+    let (args, aot) = match extract_aot_run_options(&args) {
+        Ok(split) => split,
+        Err(message) => {
+            eprintln!("botlish-native: {message}");
+            return usage();
+        }
+    };
     let args = &args[..];
     let (command, rest) = match args.split_first() {
         Some((c, rest)) => (c.as_str(), rest),
         None => return usage(),
     };
-    if startup.is_some() && !matches!(command, "executable" | "object") {
+    if startup.is_some() && !matches!(command, "executable" | "object" | "aot-run") {
         // The policy is an executable's: no other command makes one, and an
         // explicit choice is never ignored.
-        eprintln!("botlish-native: --startup is an option of executable and object (an executable's startup policy), not of {command}");
+        eprintln!("botlish-native: --startup is an option of executable, object and aot-run (an executable's startup policy), not of {command}");
+        return usage();
+    }
+    if aot.given && command != "aot-run" {
+        eprintln!("botlish-native: --keep, --parent-pid and --child-env are options of aot-run, not of {command}");
         return usage();
     }
     let startup = startup.unwrap_or(runtime::program::Startup::Worker);
@@ -519,6 +603,13 @@ fn cli(args: &[String]) -> i32 {
             }
         }
         return i32::from(failed);
+    }
+    if command == "capabilities" && rest.is_empty() {
+        // What this build can do (native::jitAvailable): the JIT is a cargo
+        // feature, so a build without it says so instead of being probed.
+        emit(&format!("jit {}", u8::from(cfg!(feature = "jit"))));
+        emit("aot-run 1");
+        return 0;
     }
     if command == "target" {
         // `target TRIPLE`: how this driver reads a target triple
@@ -546,7 +637,7 @@ fn cli(args: &[String]) -> i32 {
             Ok(n) if n > 0 => (n, file),
             _ => return usage(),
         },
-        ("object" | "executable", [_, file, ..]) => (1, file),
+        ("object" | "executable" | "aot-run", [_, file, ..]) => (1, file),
         ("library", [_, _, file, ..]) => (1, file),
         ("vms", [n, file, ..]) => match n.parse::<usize>() {
             Ok(n) if (1..=32).contains(&n) => (n, file),
@@ -583,7 +674,7 @@ fn cli(args: &[String]) -> i32 {
             }
         }
     }
-    if matches!(command, "run" | "bench" | "batch" | "vms" | "object" | "executable" | "library" | "link-plan") {
+    if matches!(command, "run" | "bench" | "batch" | "vms" | "object" | "executable" | "aot-run" | "library" | "link-plan") {
         // Machine code to run or to keep is the host's own target's only
         // (codegen/target.rs). The diagnostic commands (clif, vcode, size,
         // roots, calls, check) still show this host's view of any program.
@@ -626,6 +717,19 @@ fn cli(args: &[String]) -> i32 {
                 }
             }
             0
+        }
+        "aot-run" => {
+            // The program built and run as a command (aotrun.rs): the
+            // executable `executable` links, in a private directory.
+            let options = aotrun::Options {
+                name: rest[0].clone(),
+                startup,
+                argv: snapshot.unwrap_or_else(|| runtime::vm::DEFAULT_ARGV.iter().map(|a| a.as_bytes().to_vec()).collect()),
+                keep: aot.keep,
+                environment: aot.environment,
+                parent: aot.parent,
+            };
+            aotrun::run(&program, &text, options, &link_dirs)
         }
         "link-plan" => {
             // The program's link plan as this host links it
@@ -714,15 +818,32 @@ fn cli(args: &[String]) -> i32 {
                 }
             }
         }
+        #[cfg(feature = "jit")]
         "vms" if codegen::aot::calls_c(&program) => {
             emit_error(&["NATIVE", "UNSUPPORTED", "foreign"], "a program that calls C runs as a linked executable, one Vm per process: the concurrent-VM harness runs JIT-compiled programs only");
             0
         }
+        #[cfg(feature = "jit")]
         "vms" => concurrent_vms(&program, runs, &vms_options, snapshot),
+        #[cfg(feature = "jit")]
         "run" | "bench" | "batch" if codegen::aot::calls_c(&program) => {
             run_linked(command, &program, runs, alloc_mode, snapshot, &link_dirs)
         }
+        #[cfg(feature = "jit")]
         _ => execute(command, &program, runs, alloc_mode, snapshot),
+        // A driver without its JIT: no in-process run of any program (a
+        // program that calls C too: `run` is -backend cranelift's, and its
+        // linked run that backend's way of running one), and the
+        // inspections of the code from the object an executable is linked
+        // from (codegen::inspect).
+        #[cfg(not(feature = "jit"))]
+        "run" | "bench" | "batch" | "vms" => {
+            let _ = (runs, alloc_mode, &vms_options);
+            emit_error(&["NATIVE", "UNSUPPORTED", "jit"], JIT_UNAVAILABLE);
+            0
+        }
+        #[cfg(not(feature = "jit"))]
+        _ => inspect(command, &program),
     }
 }
 
@@ -733,6 +854,7 @@ fn cli(args: &[String]) -> i32 {
 /// output and error are this driver's, and its argument vector is the
 /// run's snapshot (`--argv`, else the default one). Returns the driver's
 /// exit status.
+#[cfg(feature = "jit")]
 fn run_linked(
     command: &str,
     program: &nir::Program,
@@ -822,6 +944,7 @@ fn run_linked(
 /// None) in its environment, and waits for it: how it ended, for messages.
 /// Its standard input, output and error are this driver's.
 #[cfg(unix)]
+#[cfg(feature = "jit")]
 fn run_linked_executable(
     executable: &std::path::Path,
     argv: &[Vec<u8>],
@@ -847,6 +970,7 @@ fn run_linked_executable(
 /// (ARGV.md, "Windows"). The environment is this driver's, with
 /// ENVIRONMENT's variables set or removed first.
 #[cfg(windows)]
+#[cfg(feature = "jit")]
 fn run_linked_executable(
     executable: &std::path::Path,
     argv: &[Vec<u8>],
@@ -868,6 +992,30 @@ fn run_linked_executable(
     }
     let code = launch::run(executable, argv)?;
     Ok(format!("exit code: {code} ({code:#010x})"))
+}
+
+/// `clif`, `vcode` and `size` of a driver without its JIT: the code of the
+/// object an executable is linked from (codegen::inspect), which nothing
+/// here runs.
+#[cfg(not(feature = "jit"))]
+fn inspect(command: &str, program: &nir::Program) -> i32 {
+    let inspected = match codegen::inspect(program, command == "clif", command == "vcode") {
+        Ok(inspected) => inspected,
+        Err(e) => {
+            emit_error(&e.error_code().split(' ').collect::<Vec<_>>(), e.message());
+            return 0;
+        }
+    };
+    match command {
+        "clif" => emit(inspected.clif.as_deref().unwrap_or("")),
+        "vcode" => emit(inspected.vcode.as_deref().unwrap_or("")),
+        _ => {
+            let sizes: Vec<String> = inspected.code_sizes.iter().map(|n| n.to_string()).collect();
+            let total: u32 = inspected.code_sizes.iter().sum();
+            emit(&tcl_list(&["size".to_string(), total.to_string(), tcl_list(&sizes)]));
+        }
+    }
+    0
 }
 
 fn call_effect_report(program: &nir::Program) -> String {
@@ -904,6 +1052,7 @@ fn call_effect_report(program: &nir::Program) -> String {
     lines.join("\n")
 }
 
+#[cfg(feature = "jit")]
 pub fn program_info(program: &nir::Program) -> ProgramInfo {
     runtime::program::program_info(program)
 }
@@ -914,6 +1063,7 @@ pub fn program_info(program: &nir::Program) -> ProgramInfo {
 /// but not SITES (impossible unless the two are mismatched) are skipped
 /// rather than panicking, since this is only ever assembled internally
 /// right after compiling and running the same program.
+#[cfg(feature = "jit")]
 fn sites_tcl(sites: &[Site], stats: &std::collections::HashMap<u32, SiteStats>) -> String {
     let mut ids: Vec<&u32> = stats.keys().collect();
     ids.sort();
@@ -952,6 +1102,7 @@ fn sites_tcl(sites: &[Site], stats: &std::collections::HashMap<u32, SiteStats>) 
 /// running at once, which the harness reports (`rendezvous N`) with what it
 /// saw there: each Vm's context area and program, and how many threads were
 /// guarded.
+#[cfg(feature = "jit")]
 struct Rendezvous {
     k: usize,
     n: usize,
@@ -960,6 +1111,7 @@ struct Rendezvous {
 }
 
 #[derive(Default)]
+#[cfg(feature = "jit")]
 struct RendezvousState {
     arrived: usize,
     finished: usize,
@@ -968,6 +1120,7 @@ struct RendezvousState {
     guarded: usize,
 }
 
+#[cfg(feature = "jit")]
 impl Rendezvous {
     fn arrive(&self, vm: &Vm) {
         let mut state = self.state.lock().unwrap();
@@ -1016,6 +1169,7 @@ impl Rendezvous {
 /// summed (0 always without it); C: each first-round Vm's collections. A
 /// stack overflow on thread I ends the process with `vm I error {NATIVE
 /// LIMIT STACK} ...`, its own guard's labelled line.
+#[cfg(feature = "jit")]
 fn concurrent_vms(program: &nir::Program, n: usize, options: &VmsOptions, snapshot: Option<Vec<Vec<u8>>>) -> i32 {
     use std::sync::atomic::{AtomicU64, Ordering};
     let compile = CompileOptions { clif: false, vcode: false, alloc_sites: false, count_accesses: false };
@@ -1155,6 +1309,7 @@ fn concurrent_vms(program: &nir::Program, n: usize, options: &VmsOptions, snapsh
 
 /// The result line of Vm I's run, whose entry returned RESULT: `vm I`, then
 /// the line `run` would print for it.
+#[cfg(feature = "jit")]
 fn vm_line(i: usize, vm: &mut Vm, result: runtime::value::Value) -> String {
     let line = if result == NO_VALUE {
         let error = vm.error.take().unwrap_or(runtime::error::RtError::Bug("native code failed without recording an error".to_string()));
@@ -1172,6 +1327,7 @@ fn vm_line(i: usize, vm: &mut Vm, result: runtime::value::Value) -> String {
     format!("vm {i} {line}")
 }
 
+#[cfg(feature = "jit")]
 fn execute(command: &str, program: &nir::Program, runs: usize, alloc_mode: AllocMode, snapshot: Option<Vec<Vec<u8>>>) -> i32 {
     let started = Instant::now();
     let mut backend = CraneliftJit;
