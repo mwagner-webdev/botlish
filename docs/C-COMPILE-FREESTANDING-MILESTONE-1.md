@@ -714,8 +714,19 @@ Reproduce [run]:
 The other backends are untouched: no file of `core/`, `hir/`, `surface/`,
 `compiler/` or `native/` changed. main.tcl gained `emitC` and the option;
 `-out` is now accepted by `-emit-c` as well as `-emit-native-library`. The
-full local suite (`tests/local.tcl`) was not run here; CI's results for
-this branch are the workflow runs of its commits.
+full local suite (`tests/local.tcl`) was not run here.
+
+CI on the branch (commit 58b222c, the workflows a branch push starts): the
+Linux x86-64 canary -- the mutant catalogs, the warning gate, then the test
+files the push changes, `tests/c-compile.test` among them -- passed, as did
+the Linux arm64 canary, the macOS smoke tier (with its canary step) and
+acceptance shard 3 of 4, the Windows canary and root-plan jobs, and both
+Icy Tower workflows (Windows and macOS). When this report was written the
+remaining macOS acceptance shards, the macOS system-linker and Botlish.app
+jobs and the Windows smoke job were still queued: pending, not passed. On a
+branch push the full Linux suites (tests.yml and tests-arm64.yml beyond
+their canaries) do not run; they run on main, or when dispatched on the
+branch before a merge (AGENTS.md, "Git workflow").
 
 ## 17. Known limitations
 
