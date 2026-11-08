@@ -1,0 +1,24 @@
+# abiprobe.bot -- tests/threads.test: the C probe of the event-loop ABI
+# (abiprobe.c), behind a context of its own (a C call is mediated by its
+# module's context).
+import std::ffi::c
+
+extern c library "abiprobe" static at "native/libabiprobe.a"
+extern c fn abi_probe(own: std::ffi::c::Int, other: std::ffi::c::Int) -> std::ffi::c::Int
+
+context struct Probe:
+    calls: Count
+
+type Count = Int in 0..1
+
+fn ci(x: int) -> std::ffi::c::Int:
+    if x < -2147483648:
+        -2147483648
+    elif x > 2147483647:
+        2147483647
+    else:
+        x
+
+# The probe's four digits for loop handles OWN and OTHER.
+fn probe(own: int, other: int, context p: Probe) -> int:
+    ci(own).abi_probe(ci(other)) + 0

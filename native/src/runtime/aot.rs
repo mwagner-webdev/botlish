@@ -257,7 +257,7 @@ pub unsafe fn start_linked(linked: &'static LinkedProgram) -> i32 {
             return 1;
         }
     };
-    run(startup, process_argv(), move || {
+    run(startup, process_argv(), Some(super::thread::linked_factory(linked)), move || {
         // SAFETY: the caller's contract.
         match unsafe { super::program::instantiate_linked(linked) } {
             Ok(started) => started,
@@ -282,7 +282,12 @@ pub unsafe fn start_linked(linked: &'static LinkedProgram) -> i32 {
 /// panicked (NATIVE BUG)", status 1, under both: the worker's join reports
 /// it, and on the main thread `catch_unwind` does, before it could reach
 /// the caller's C `main` (`linked_main`) or Rust's startup (status 101).
-pub fn run(startup: Startup, argv: Vec<Vec<u8>>, init: impl FnOnce() -> (Box<Vm>, ProgramEntry) + Send + 'static) -> i32 {
+pub fn run(
+    startup: Startup,
+    argv: Vec<Vec<u8>>,
+    factory: Option<std::sync::Arc<super::thread::VmFactory>>,
+    init: impl FnOnce() -> (Box<Vm>, ProgramEntry) + Send + 'static,
+) -> i32 {
     if startup == Startup::MainThread && !MAIN_THREAD_STARTUP {
         eprintln!(
             "this executable asks to run its program on the process's main thread (startup policy main-thread), which only macOS AArch64 executables do (MAIN-THREAD-STARTUP-MILESTONE-1.md) (NATIVE STARTUP)"
@@ -293,6 +298,8 @@ pub fn run(startup: Startup, argv: Vec<Vec<u8>>, init: impl FnOnce() -> (Box<Vm>
     let report = std::env::var_os("BOTLISH_NATIVE_STARTUP_REPORT").filter(|p| !p.is_empty());
     let body = move || -> i32 {
         let (mut vm, entry) = init();
+        // What a Botlish thread's start makes its Vm with (runtime/thread.rs).
+        vm.thread.factory = factory;
         if let Some(path) = report {
             // What the startup installed (Vm::startup_report, startup_lines),
             // before any of the program runs: the evidence that every
@@ -314,6 +321,9 @@ pub fn run(startup: Startup, argv: Vec<Vec<u8>>, init: impl FnOnce() -> (Box<Vm>
             super::platform::OverflowGuard::install_executable(&stack).expect("the stack-overflow guard")
         };
         let result = entry(&mut *vm);
+        // The program's threads still running are asked to stop and joined
+        // before its image is released (runtime/thread.rs).
+        super::thread::finish_all();
         if result == NO_VALUE {
             let error = vm
                 .error
@@ -442,6 +452,7 @@ fn driver_protocol(path: &std::path::Path, vm: &mut Vm, entry: ProgramEntry) -> 
         }
         let started = std::time::Instant::now();
         result = entry(&mut *vm);
+        super::thread::finish_all();
         let elapsed = started.elapsed();
         nanos.push(elapsed.as_nanos().to_string());
         best = best.min(elapsed.as_micros());

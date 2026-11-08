@@ -1,0 +1,69 @@
+# rogue.bot -- tests/threads.test: what a worker and its actors cannot do
+# with authority they were not given (the broker example's modules beside
+# it). Every function is one rejection.
+import broker
+import device
+import std::actor
+import std::actor::remote
+import std::event_loop
+import std::abi::bytes
+import std::thread
+import std::transfer
+
+# The owner's device, reached by a worker that has no Device: its creator's
+# Device belongs to another VM. MISSING-CONTEXT.
+thread fn rogue(n: int) -> int:
+    device::read(n)
+
+# The device handed over as a worker's initialization value: a context is
+# authority, never sendable. THREAD-ENTRY-SIGNATURE.
+thread fn handed(d: device::Device) -> int:
+    0
+
+# A coroutine handle as a worker's initialization value: affine, never
+# sendable. THREAD-ENTRY-SIGNATURE.
+thread fn resumed(c: Coroutine{args: [], return: int}) -> int:
+    0
+
+# An actor allowed the loop only, asking the broker for a device read:
+# CONTEXT-NOT-INJECTED.
+fn sneaky(r: std::actor::remote::Replies[broker::DeviceReply], context b: broker::DeviceBroker, resume std::actor::Answer) -> std::actor::Exit:
+    c = std::actor::remote::caller(r):
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    v = broker::read_device(0, c):
+        on std::actor::remote::CallFailed {reason}:
+            return std::actor::exit(-2)
+        on std::actor::Closed:
+            return std::actor::exit(-3)
+    std::actor::exit(v.value)
+
+fn start_sneaky(r: std::actor::remote::Replies[broker::DeviceReply], context ev: std::event_loop::Loop, ac: std::actor::Actors, b: broker::DeviceBroker) errors std::event_loop::SchedulerFault:
+    s = inject context std::event_loop::Loop:
+        coroutine {step, first} = sneaky(r)
+        std::actor::spawned(step, first)
+    std::actor::start(s)
+
+# A capability made up rather than given: OPAQUE-CONSTRUCTION.
+fn forged() -> std::actor::remote::Remote[broker::DeviceOp]:
+    std::actor::remote::Remote[broker::DeviceOp] {domain: 0, id: 0, key: 0}
+
+# A local mailbox address copied for another VM: an Address names a
+# mailbox of this VM only, never sendable. NOT-SENDABLE.
+fn leaked(a: std::actor::Address[int]) -> std::abi::bytes::Bytes:
+    std::transfer::encode(a)
+
+# A capability to send addresses: TRAIT-NOT-SATISFIED (Remote's message
+# type satisfies Sendable).
+fn carrier(r: std::actor::remote::Remote[std::actor::Address[int]]) -> int:
+    0
+
+thread fn fine(n: int) -> int:
+    n
+
+# A thread started where the Threads authority is withheld:
+# CONTEXT-NOT-INJECTED.
+fn withheld(context t: std::thread::Threads) -> int errors std::thread::ThreadLimit, std::thread::ThreadStartFailed:
+    inject no context:
+        s = std::thread::start(std::thread::entry(fine), 1)
+        0

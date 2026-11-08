@@ -218,7 +218,7 @@
 @@ check-ignores-options -check silently ignores the options that run, build or inspect, instead of refusing them
 ## main.tcl
 <<<<
-        if {$arg ni {-check -warnings -target}} {
+        if {$arg ni {-check -warnings -target -color -excerpts}} {
 ====
         if {0} {
 >>>>
@@ -239,9 +239,9 @@
 @@ check-text-mismatch -check prints a diagnostic's message without the location a run prints
 ## main.tcl
 <<<<
-            puts "   error: [dict get $error text] ([dict get $error code])"
+            printDiagnostic stdout "   error: " [dict get $error text] [dict get $error code] \
 ====
-            puts "   error: [dict get $error message] ([dict get $error code])"
+            printDiagnostic stdout "   error: " [dict get $error message] [dict get $error code] \
 >>>>
 
 @@ import-notes-dropped a loader diagnostic in a module file is raised without its import notes: nothing names the imports that load the file

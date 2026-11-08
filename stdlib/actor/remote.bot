@@ -1,0 +1,524 @@
+# remote.bot -- the "std::actor::remote" namespace: typed messages and
+# calls between actors of different Botlish threads
+# (BOTLISH-OWNED-THREADS-AND-CROSS-THREAD-ACTORS-MILESTONE-1.md).
+#
+#   # the receiving VM: an ordinary mailbox, exported
+#   {to: jobs, inbox} = std::actor::open[Job](16)
+#   r = std::actor::remote::export(jobs, 64)       # Remote[Job]: a capability
+#   # ... give r to another thread (it is sendable: a thread's
+#   # initialization value, a message) ...
+#
+#   # the sending VM
+#   std::actor::remote::send(r, Job {...})         # Delivered, Full, Closed, ...
+#
+# An exported mailbox stays an ordinary std::actor mailbox: its actor
+# receives with std::actor::receive, under its own restricted authority, on
+# its own thread; this module adds no scheduler. Between the threads the
+# message is BYTES: the sender encodes it in its VM (std::transfer, its
+# Sendable type checked statically), the runtime's transport queues the
+# bytes -- nothing of the sending VM's heap -- and the receiving VM's pump
+# task (a task of its event loop, woken through its port: std::thread)
+# decodes them in that VM, with its own constructors, and posts the value
+# into the mailbox, in the order sent (FIFO per sender). A message is
+# typed twice: statically, by the capability's type, and by the transport,
+# which compares the bytes' schema fingerprint with the endpoint's before
+# it queues them (a mismatch is TypeMismatch, never a delivery).
+#
+# CAPABILITIES. Remote[M], Service[Q, R] and Reply[R] name an endpoint (or
+# a call) of the process's transport by its domain (this process's random
+# identity), its slot and generation, and a random 64-bit key the runtime
+# drew when it opened: a capability nobody was given names nothing
+# (Stale), a closed endpoint's is Closed, another process's is Unavailable.
+# They are sendable (each module's `sendable through` clause states how one
+# is copied: its identity), so a thread's initialization value or a message
+# carries them -- authority to send, never to receive or to act. They are
+# no std::actor::Address[M], which stays local to its VM (not sendable).
+#
+# BACKPRESSURE. An endpoint queues at most CAPACITY messages in transit;
+# beyond, send answers Full (nothing is dropped). deliver (an event-loop
+# task's) and call (an actor's) wait for room instead -- their task or
+# actor suspended, never their thread: the transport rings the waiting
+# VM's port when a place frees, the first waiting sender first. The pump
+# moves a message into the mailbox only while the mailbox has room
+# (std::actor::post_waiting), so a slow actor fills its mailbox, then the
+# endpoint, then its senders wait: the backpressure reaches them.
+#
+# CALLS. A service is a mailbox of Call[Q, R] values exported with
+# serve_calls: each call's request Q and its Reply[R], a one-shot answer
+# right. An actor calls (call) through a Caller[R] -- its own reply
+# mailbox, fed by a reply endpoint of its VM -- and is suspended until the
+# response arrives; the transport correlates each response with its call
+# (its record's generation and key), so a duplicate or late answer (after
+# the call was answered, cancelled or its caller gone) is Stale and
+# reaches nobody. A call completes once: with the reply, or with the
+# failure the transport saw -- the request undelivered (its endpoint closed
+# with it queued: Undelivered), the service's VM ended owing it
+# (ServiceEnded) -- never left waiting forever because its service went.
+#
+# The operations that move messages need this VM's Port (std::thread),
+# served once on its event loop (std::thread::serve, which needs the
+# driver's Doorbell): until then the port's notifications wait, never
+# lost, and the first turn of its pump drains them.
+#
+# Native backends only (the runtime's transport): the Tcl backends refuse
+# a program that starts a thread, and these operations refuse to run there.
+import std::abi::bytes
+import std::actor
+import std::event_loop
+import std::list
+import std::thread
+import std::transfer
+import type std::event_loop::Delivery
+import type std::event_loop::Wake
+
+# What a remote send did.
+enum Sent:
+    Delivered,
+    Full,
+    Closed,
+    Stale,
+    Unavailable,
+    TooLarge,
+    TypeMismatch,
+
+# A call that could not complete: REASON says why (Closed, Stale,
+# Unavailable, Undelivered, ServiceEnded, TooLarge, TypeMismatch).
+error CallFailed:
+    reason: str
+
+# The transport's codes (native/src/runtime/thread.rs).
+private t_delivered = 0
+private t_full = -1
+private t_closed = -2
+private t_stale = -3
+private t_unavailable = -4
+private t_too_large = -5
+private t_type_mismatch = -6
+private t_service_ended = -8
+private t_undelivered = -9
+
+# A response's status meaning "room freed": a waiting caller retries.
+private room_status = 1
+
+# Port notification kinds (std::thread's).
+private n_message = 1
+private n_room = 2
+
+# A transport identity's word (a domain, an endpoint or call id, a key):
+# a small Int, so a capability fits a context's fixed slot (a broker
+# context holds one).
+type Word = Int in -4611686018427387904..4611686018427387903
+
+# X as a Word (the runtime's identities always are one; anything else is
+# 0, which names nothing).
+private nomethod fn word(x: int) -> Word:
+    if x < -4611686018427387904 or x > 4611686018427387903:
+        0
+    else:
+        x
+
+# What a capability holds: the transport's identity of its endpoint or
+# call.
+struct Identity:
+    domain: Word
+    id: Word
+    key: Word
+
+# The send right of an endpoint delivering M into one mailbox, of this VM
+# or another.
+opaque struct Remote[M satisfies Sendable]:
+    domain: Word
+    id: Word
+    key: Word
+    sendable through(remote_out, remote_in) as Identity
+
+# The call right of a service answering requests Q with an R.
+opaque struct Service[Q satisfies Sendable, R satisfies Sendable]:
+    domain: Word
+    id: Word
+    key: Word
+    sendable through(service_out, service_in) as Identity
+
+# The one-shot answer right of one call.
+opaque struct Reply[R satisfies Sendable]:
+    domain: Word
+    call: Word
+    key: Word
+    sendable through(reply_out, reply_in) as Identity
+
+# What a service's mailbox receives: a request and its answer right.
+struct Call[Q satisfies Sendable, R satisfies Sendable]:
+    body: Q
+    reply: Reply[R]
+
+# What a caller's reply mailbox receives (the protocol's).
+opaque struct Response[R satisfies Sendable]:
+    call: int
+    status: int
+    values: List[R]
+
+# What replies opens: the reply mailbox's receive right (the caller's
+# actor's) and its reply endpoint.
+struct Replies[R satisfies Sendable]:
+    inbox: std::actor::Inbox[Response[R]]
+    endpoint: int
+
+# An actor's reply route: its reply endpoint, and what it receives the
+# responses through.
+opaque struct Caller[R satisfies Sendable]:
+    endpoint: int
+    rx: std::actor::Receiver[Response[R]]
+
+nomethod fn remote_out(r: Remote[M]) -> Identity:
+    Identity {domain: r.domain, id: r.id, key: r.key}
+
+nomethod fn remote_in(i: Identity) -> Remote[M]:
+    Remote[M] {domain: i.domain, id: i.id, key: i.key}
+
+nomethod fn service_out(s: Service[Q, R]) -> Identity:
+    Identity {domain: s.domain, id: s.id, key: s.key}
+
+nomethod fn service_in(i: Identity) -> Service[Q, R]:
+    Service[Q, R] {domain: i.domain, id: i.id, key: i.key}
+
+nomethod fn reply_out(r: Reply[R]) -> Identity:
+    Identity {domain: r.domain, id: r.call, key: r.key}
+
+nomethod fn reply_in(i: Identity) -> Reply[R]:
+    Reply[R] {domain: i.domain, call: i.id, key: i.key}
+
+private nomethod fn sent_of(code: int) -> Sent:
+    if code == t_delivered:
+        Sent::Delivered
+    elif code == t_full:
+        Sent::Full
+    elif code == t_closed or code == t_undelivered:
+        Sent::Closed
+    elif code == t_unavailable:
+        Sent::Unavailable
+    elif code == t_too_large:
+        Sent::TooLarge
+    elif code == t_type_mismatch:
+        Sent::TypeMismatch
+    else:
+        Sent::Stale
+
+private nomethod fn reason_of(code: int) -> str:
+    if code == t_closed:
+        "Closed"
+    elif code == t_unavailable:
+        "Unavailable"
+    elif code == t_too_large:
+        "TooLarge"
+    elif code == t_type_mismatch:
+        "TypeMismatch"
+    elif code == t_service_ended:
+        "ServiceEnded"
+    elif code == t_undelivered:
+        "Undelivered"
+    else:
+        "Stale"
+
+# ---------------------------------------------------------------------------
+# Endpoints and their pumps (the receiving VM's tasks)
+
+# A new endpoint of this VM for messages whose schema fingerprint is
+# FINGERPRINT, at most CAPACITY in transit: its id, or a negated errno.
+private nomethod fn opened(capacity: int, fingerprint: str) -> int:
+    std::thread::rt_endpoint_open(capacity, fingerprint)
+
+# The bytes the transport made current, decoded as an M: none when they do
+# not decode (the transport checked their fingerprint: never in a checked
+# program).
+private nomethod fn decoded(r: Remote[M]) -> List[M]:
+    data = std::thread::rt_take_bytes()
+    m = std::transfer::decode[M](data):
+        on TransferMalformed:
+            return []
+        on TransferVersion:
+            return []
+        on TransferTypeMismatch:
+            return []
+        on TransferInvalidValue:
+            return []
+        on TransferLimit:
+            return []
+    [m]
+
+# Moves every message queued on R's endpoint into TO's mailbox, waiting for
+# room there: how many, or -1 when the mailbox is gone (closed, reused).
+private nomethod fn delivered(r: Remote[M], to: std::actor::Address[M], context ev: std::event_loop::Loop, ac: std::actor::Actors) -> int errors std::event_loop::SchedulerFault:
+    fold with intermediate n 0:
+        if std::thread::rt_take(r.id) != 1:
+            break
+        values = decoded(r)
+        loop m in values:
+            if std::actor::post_waiting(to, m) != std::actor::Sent::Delivered:
+                return -1
+        n + 1
+
+# The pump of R's endpoint: woken by the port when a message waits, it
+# moves them into TO's mailbox; when the mailbox is gone, it closes the
+# endpoint (its senders then see Closed).
+private nomethod fn deliveries(r: Remote[M], to: std::actor::Address[M], chan: std::event_loop::Reg, context ev: std::event_loop::Loop, ac: std::actor::Actors) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    fold with intermediate n 0:
+        e = std::event_loop::wait(chan)
+        if e.reason == Wake::Revoked:
+            break
+        k = delivered(r, to)
+        if k < 0:
+            std::thread::rt_endpoint_close(r.id)
+            break
+        n + k
+
+# Export TO's mailbox: an endpoint of this VM whose messages (at most
+# CAPACITY in transit) are delivered into it, in order. The capability is
+# sendable; the mailbox's actor receives as from any sender.
+nomethod fn export(to: std::actor::Address[M], capacity: int, context ev: std::event_loop::Loop, ac: std::actor::Actors, p: std::thread::Port) -> Remote[M] errors std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    id = opened(capacity, std::transfer::fingerprint[M]())
+    if id < 0:
+        fail std::event_loop::DriverFault {code: id}
+    r = Remote[M] {domain: word(std::thread::rt_domain()), id: word(id), key: word(std::thread::rt_endpoint_key(id))}
+    chan = std::event_loop::channel(Delivery::Coalesce, 1)
+    std::thread::route(n_message, id, chan)
+    coroutine {step, first} = deliveries(r, to, chan)
+    std::event_loop::adopt(step, first)
+    r
+
+# Close R's endpoint, if it is this VM's: later sends are Closed, and the
+# messages it held in transit are dropped -- how many.
+nomethod fn close(r: Remote[M]) -> int:
+    std::thread::rt_endpoint_close(r.id)
+
+# Messages queued on R's endpoint in transit (this VM's endpoint; 0
+# otherwise).
+nomethod fn in_transit(r: Remote[M]) -> int:
+    std::thread::rt_endpoint_queued(r.id)
+
+# ---------------------------------------------------------------------------
+# Sending
+
+# Send M through TO now: Delivered, or why not -- Full (its endpoint holds
+# its capacity in transit, or senders wait for room before this one),
+# Closed, Stale (no endpoint has this identity now), Unavailable (another
+# process's), TooLarge. It never waits and needs no context: an actor
+# sends with it.
+nomethod fn send(to: Remote[M], m: M) -> Sent:
+    sent_of(std::thread::rt_send(to.domain, to.id, to.key, std::transfer::encode(m), 0))
+
+# The token a waiting sender's route has: its channel's identity.
+private nomethod fn token_of(chan: std::event_loop::Reg) -> int:
+    std::event_loop::native_slot(chan) * 1073741824 + std::event_loop::native_generation(chan)
+
+private nomethod fn delivered_waiting(to: Remote[M], m: M, context ev: std::event_loop::Loop, p: std::thread::Port) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    data = std::transfer::encode(m)
+    chan = std::event_loop::channel(Delivery::Coalesce, 1)
+    token = token_of(chan)
+    std::thread::route(n_room, token, chan)
+    code = fold with intermediate c t_full:
+        if c != t_full:
+            break
+        attempt = std::thread::rt_send(to.domain, to.id, to.key, data, token)
+        woke = if attempt == t_full:
+            std::event_loop::wait(chan).reason
+        else:
+            Wake::Ready
+        if woke == Wake::Revoked:
+            t_closed
+        else:
+            attempt
+    std::thread::unroute(n_room, token)
+    chan.revoke()
+    code
+
+# Send M through TO from an event-loop task, waiting -- the task suspended,
+# never its thread -- for room while it is Full: Delivered, Closed, Stale,
+# Unavailable or TooLarge.
+nomethod fn deliver(to: Remote[M], m: M, context ev: std::event_loop::Loop, p: std::thread::Port) -> Sent errors std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    code = delivered_waiting(to, m):
+        on IndexNotFound:
+            fail std::event_loop::SchedulerFault
+    sent_of(code)
+
+# ---------------------------------------------------------------------------
+# Services
+
+# The bytes the transport made current, decoded as a Q, with the call's
+# answer right: none when they do not decode.
+private nomethod fn decoded_call(s: Service[Q, R]) -> List[Call[Q, R]]:
+    data = std::thread::rt_take_bytes()
+    reply = Reply[R] {domain: s.domain, call: word(std::thread::rt_take_call()), key: word(std::thread::rt_take_call_key())}
+    q = std::transfer::decode[Q](data):
+        on TransferMalformed:
+            return []
+        on TransferVersion:
+            return []
+        on TransferTypeMismatch:
+            return []
+        on TransferInvalidValue:
+            return []
+        on TransferLimit:
+            return []
+    [Call[Q, R] {body: q, reply: reply}]
+
+private nomethod fn delivered_calls(s: Service[Q, R], to: std::actor::Address[Call[Q, R]], context ev: std::event_loop::Loop, ac: std::actor::Actors) -> int errors std::event_loop::SchedulerFault:
+    fold with intermediate n 0:
+        if std::thread::rt_take(s.id) != 1:
+            break
+        calls = decoded_call(s)
+        loop c in calls:
+            if std::actor::post_waiting(to, c) != std::actor::Sent::Delivered:
+                return -1
+        n + 1
+
+private nomethod fn call_deliveries(s: Service[Q, R], to: std::actor::Address[Call[Q, R]], chan: std::event_loop::Reg, context ev: std::event_loop::Loop, ac: std::actor::Actors) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    fold with intermediate n 0:
+        e = std::event_loop::wait(chan)
+        if e.reason == Wake::Revoked:
+            break
+        k = delivered_calls(s, to)
+        if k < 0:
+            std::thread::rt_endpoint_close(s.id)
+            break
+        n + k
+
+# Export TO's mailbox as a service: its actor receives a Call[Q, R] per
+# request (at most CAPACITY in transit) and answers each with reply.
+nomethod fn serve_calls(to: std::actor::Address[Call[Q, R]], capacity: int, context ev: std::event_loop::Loop, ac: std::actor::Actors, p: std::thread::Port) -> Service[Q, R] errors std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    id = opened(capacity, std::transfer::fingerprint[Q]())
+    if id < 0:
+        fail std::event_loop::DriverFault {code: id}
+    s = Service[Q, R] {domain: word(std::thread::rt_domain()), id: word(id), key: word(std::thread::rt_endpoint_key(id))}
+    chan = std::event_loop::channel(Delivery::Coalesce, 1)
+    std::thread::route(n_message, id, chan)
+    coroutine {step, first} = call_deliveries(s, to, chan)
+    std::event_loop::adopt(step, first)
+    s
+
+# Close S's endpoint (this VM's): later calls fail Closed, and the calls it
+# held in transit fail Undelivered -- how many.
+nomethod fn close_service(s: Service[Q, R]) -> int:
+    std::thread::rt_endpoint_close(s.id)
+
+# Requests queued on S's endpoint in transit, not yet taken by its pump
+# (this VM's service; 0 otherwise).
+nomethod fn in_transit_calls(s: Service[Q, R]) -> int:
+    std::thread::rt_endpoint_queued(s.id)
+
+# Answer the call R with VALUE: Delivered, or Stale when it was answered
+# already, cancelled, or its caller is gone (the answer reaches nobody),
+# Unavailable. Needs no context: the answer right is the authority.
+nomethod fn reply(r: Reply[R], value: R) -> Sent:
+    sent_of(std::thread::rt_reply(r.domain, r.call, r.key, 0, std::transfer::encode(value)))
+
+# ---------------------------------------------------------------------------
+# Callers
+
+private nomethod fn decoded_response(endpoint: int) -> Response[R]:
+    status = std::thread::rt_take_status()
+    call = std::thread::rt_take_call()
+    if status != t_delivered:
+        return Response[R] {call: call, status: status, values: []}
+    data = std::thread::rt_take_bytes()
+    value = std::transfer::decode[R](data):
+        on TransferMalformed:
+            return Response[R] {call: call, status: t_type_mismatch, values: []}
+        on TransferVersion:
+            return Response[R] {call: call, status: t_type_mismatch, values: []}
+        on TransferTypeMismatch:
+            return Response[R] {call: call, status: t_type_mismatch, values: []}
+        on TransferInvalidValue:
+            return Response[R] {call: call, status: t_type_mismatch, values: []}
+        on TransferLimit:
+            return Response[R] {call: call, status: t_type_mismatch, values: []}
+    Response[R] {call: call, status: status, values: [value]}
+
+private nomethod fn responses_delivered(endpoint: int, to: std::actor::Address[Response[R]], context ev: std::event_loop::Loop, ac: std::actor::Actors) -> int errors std::event_loop::SchedulerFault:
+    fold with intermediate n 0:
+        if std::thread::rt_take(endpoint) != 1:
+            break
+        if std::actor::post_waiting(to, decoded_response[R](endpoint)) != std::actor::Sent::Delivered:
+            return -1
+        n + 1
+
+# The reply endpoint's pump: responses into the caller's mailbox.
+private nomethod fn response_deliveries(endpoint: int, to: std::actor::Address[Response[R]], chan: std::event_loop::Reg, context ev: std::event_loop::Loop, ac: std::actor::Actors) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    fold with intermediate n 0:
+        e = std::event_loop::wait(chan)
+        if e.reason == Wake::Revoked:
+            break
+        k = responses_delivered[R](endpoint, to)
+        if k < 0:
+            std::thread::rt_endpoint_close(endpoint)
+            break
+        n + k
+
+# The reply endpoint's room pump: a Room response into the caller's
+# mailbox each time a service endpoint its actor waits for frees a place.
+private nomethod fn room_deliveries(to: std::actor::Address[Response[R]], chan: std::event_loop::Reg, context ev: std::event_loop::Loop, ac: std::actor::Actors) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    fold with intermediate n 0:
+        e = std::event_loop::wait(chan)
+        if e.reason == Wake::Revoked:
+            break
+        if std::actor::post_waiting(to, Response[R] {call: 0, status: room_status, values: []}) != std::actor::Sent::Delivered:
+            break
+        n + 1
+
+# Open the reply route of one calling actor: a mailbox of responses (at
+# most CAPACITY queued), fed by a reply endpoint of this VM. Hand the
+# result to the actor, which makes its Caller of it (caller).
+nomethod fn replies(capacity: int, context ev: std::event_loop::Loop, ac: std::actor::Actors, p: std::thread::Port) -> Replies[R] errors std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    {to, inbox} = std::actor::open[Response[R]](capacity)
+    id = opened(capacity, std::transfer::fingerprint[R]())
+    if id < 0:
+        fail std::event_loop::DriverFault {code: id}
+    chan = std::event_loop::channel(Delivery::Coalesce, 1)
+    std::thread::route(n_message, id, chan)
+    coroutine {step, first} = response_deliveries[R](id, to, chan)
+    std::event_loop::adopt(step, first)
+    room = std::event_loop::channel(Delivery::Coalesce, 1)
+    std::thread::route(n_room, id, room)
+    coroutine {step: rstep, first: rfirst} = room_deliveries[R](to, room)
+    std::event_loop::adopt(rstep, rfirst)
+    Replies[R] {inbox: inbox, endpoint: id}
+
+# The Caller an actor calls through, made of its Replies: the reply
+# mailbox is bound to the actor (std::actor::listen).
+nomethod fn caller(r: Replies[R], resume std::actor::Answer) -> Caller[R] errors std::actor::Closed:
+    {inbox, endpoint} = r
+    rx = std::actor::listen(inbox)
+    Caller[R] {endpoint: endpoint, rx: rx}
+
+# Calls SVC with Q from an actor and waits -- the actor suspended, its
+# thread free -- for the reply: an R. While the service's endpoint is
+# full, the call waits for room. CallFailed with the reason when the call
+# cannot complete: the service is Closed (or its request Undelivered when
+# it closed), ServiceEnded (its VM ended before answering), Stale,
+# Unavailable, TooLarge, TypeMismatch. Closed when C's own reply mailbox
+# closed.
+nomethod fn call(svc: Service[Q, R], q: Q, c: Caller[R], resume std::actor::Answer) -> R errors CallFailed, std::actor::Closed:
+    data = std::transfer::encode(q)
+    id = fold with intermediate code t_full:
+        if code != t_full:
+            break
+        attempt = std::thread::rt_request(svc.domain, svc.id, svc.key, data, c.endpoint, c.endpoint)
+        if attempt == t_full:
+            # Wait for room: responses until a room one (others are stale:
+            # a call this actor gave up).
+            fold with intermediate got Response[R] {call: -1, status: t_stale, values: []}:
+                if got.status == room_status:
+                    break
+                std::actor::receive(c.rx)
+        attempt
+    if id < 0:
+        fail CallFailed {reason: reason_of(id)}
+    # Responses until this call's: another call's is stale, a room one late.
+    response = fold with intermediate got Response[R] {call: -1, status: t_stale, values: []}:
+        if got.call == id:
+            break
+        std::actor::receive(c.rx)
+    if response.status != t_delivered:
+        fail CallFailed {reason: reason_of(response.status)}
+    response.values.at(0):
+        on IndexNotFound:
+            fail CallFailed {reason: reason_of(t_type_mismatch)}

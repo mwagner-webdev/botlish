@@ -107,35 +107,40 @@ limit, a step count) and test the bound's behavior too; run suites under an
 external timeout (the shell's `timeout`).
 
 @topic capability.concurrency
-title: Threads and parallelism: absent (cooperative tasks and actors exist)
-summary: A program runs on one thread, with no async/await or locks; std::event_loop schedules coroutines as cooperative tasks, and std::actor runs actors with typed mailboxes on it.
+title: Threads and parallelism: limited (isolated VMs, no shared memory)
+summary: Native programs start OS threads with std::thread, each a VM sharing no value with another, talking through std::actor::remote; no async/await, locks or shared mutable memory.
 index: concepts
-alias: threads; concurrency; parallelism; async; await; async await; multithreading; tasks; scheduler
-keywords: thread, concurrent, parallel, async, await, task, lock, channel, mutex, event loop, actor, mailbox, timer
-related: concept.coroutines concept.actors stdlib.module.std::event_loop stdlib.module.std::actor concept.mutable-vector capability.test-timeout backend.overview
+alias: threads; concurrency; parallelism; async; await; async await; multithreading; tasks; scheduler; locks; mutex; shared memory
+keywords: thread, concurrent, parallel, async, await, task, lock, channel, mutex, event loop, actor, mailbox, timer, std::thread, std::actor::remote, VM, isolation
+related: concept.threads concept.remote-actors concept.coroutines concept.actors stdlib.module.std::thread stdlib.module.std::actor::remote stdlib.module.std::event_loop stdlib.module.std::actor concept.mutable-vector capability.test-timeout backend.overview
 
 == STATUS
-No construct or standard-library function starts a second thread of
-control, and nothing runs two pieces of Botlish code at once: there is no
-thread, async/await, lock or shared mutable memory. A coroutine is not a
-thread: `step(message)` runs the coroutine until its next `yield` while
-the caller waits (concept.coroutines).
+On the native backends a program can run in parallel: a `thread fn` of a
+module is started with std::thread::start on an OS thread of its own, in a
+VM of its own -- its own heap, module statics and installed contexts
+(concept.threads). VMs share no value: an initialization value, a result
+and every message between them are copied (std::transfer), so there is no
+lock, no shared mutable memory, no data race and no async/await. Actors of
+different threads talk through std::actor::remote: exported mailboxes,
+sendable capabilities, typed calls with replies, bounded queues whose
+backpressure waits instead of dropping (concept.remote-actors). At most 64
+threads run at once in a process. The Tcl backends (interp, compile) refuse
+a program that starts a thread (error.thread-unavailable).
 
-Cooperative concurrency on that one thread exists. std::event_loop is a
-scheduler of ordinary coroutines: tasks adopted into its context, ready
-queues, channels, timers and native event sources, driven by a driver
-context the entry program installs (std::event_loop::deterministic on
-every backend; a Linux epoll driver as the package event_loop_linux).
-std::actor runs actors on it: coroutines with typed mailboxes that
-receive and send without any context of their own (concept.actors). A
-task runs until it yields; nothing preempts it.
+Within one VM, concurrency is cooperative: std::event_loop schedules
+ordinary coroutines as tasks, with channels, timers and native event
+sources, driven by a driver context the program installs; std::actor runs
+actors on it (concept.actors). A task runs until it yields; nothing
+preempts it. A coroutine is not a thread: `step(message)` runs the
+coroutine until its next `yield` while the caller waits.
 
 == NEAREST ALTERNATIVE
-Interleave work with std::event_loop's tasks or std::actor's actors, or
-with a scheduler loop of your own resuming several coroutine handles; run
-several processes from outside for parallelism. The native runtime runs a
-program on a worker thread of its own (for its stack guard): an
-implementation detail, not something a program can use.
+For parallel work, start threads and exchange copied values (a worker per
+job, joined; or actors exchanging messages). For shared state, keep it in
+one VM and give other threads a service to call (a broker: the state's
+owner answers requests one at a time). On interp and compile, interleave
+work with std::event_loop's tasks or std::actor's actors, or run several
+processes from outside.
 
 @topic capability.multi-error-handler
 title: One handler for several errors: absent

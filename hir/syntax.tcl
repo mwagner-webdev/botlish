@@ -338,6 +338,15 @@ proc hir::syntax::withExported {block abi} {
     return $block
 }
 
+# BLOCK (a `block` node) declared `thread fn`: a thread entry, the first
+# computation of a Botlish thread's VM, which installs that VM's contexts
+# (BOTLISH-OWNED-THREADS-AND-CROSS-THREAD-ACTORS-MILESTONE-1.md;
+# hir/threads.tcl).
+proc hir::syntax::withThread {block} {
+    dict set block threadEntry 1
+    return $block
+}
+
 # BLOCK (a `block` node) declared `callback ABI fn` (ABI: c): a function C
 # may call back synchronously through the C function pointer
 # std::ffi::c::callback makes of it (C-CALLBACK-MILESTONE-1.md;
