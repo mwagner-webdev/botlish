@@ -13,7 +13,8 @@
 # without its `semantic` table, SEMANTIC those of the semantic table without
 # the run's census counters (`requests`, `hits`, `walks`, `deferred`, `deep`,
 # `trivial`, `declinedCount`: how the analysis got there, not what it found),
-# both with ROOT's path and the working directory's mapped out. INSTANCES is
+# both with ROOT's path and the working directory's mapped out, and the HIR
+# without what varies from run to run (normalized). INSTANCES is
 # the number of instances; the census counters follow, for reading only.
 # Two checkouts that build a program the same way print the same first five
 # fields: run the tool with each and compare them.
@@ -27,6 +28,26 @@ proc digest {text} {
     set text [string map [list $::root/ ROOT/ [pwd]/ ROOT/] $text]
     return [format %08x/%d [zlib crc32 [encoding convertto utf-8 $text]] [string length $text]]
 }
+# The census counters of a semantic table: how the analysis got there, not
+# what it found.
+set counters {requests hits walks deferred deep trivial declinedCount}
+# HIR without what differs from run to run without a difference in meaning:
+# the static decisions' wall-clock time (staticStats depMs) and the census
+# counters of the semantic table the pre-monomorphization HIR carries
+# (traitSource).
+proc normalized {hir} {
+    if {[dict exists $hir staticStats depMs]} {
+        dict unset hir staticStats depMs
+    }
+    if {[dict exists $hir traitSource semantic]} {
+        foreach k $::counters {
+            if {[dict exists $hir traitSource semantic $k]} {
+                dict unset hir traitSource semantic $k
+            }
+        }
+    }
+    return $hir
+}
 foreach path [lrange $argv 1 end] {
     set shown $path
     if {[catch {surface::readProgramFile $path -warnings off -cache ""} hir options]} {
@@ -36,11 +57,11 @@ foreach path [lrange $argv 1 end] {
         continue
     }
     set semantic [dict getdef $hir semantic {}]
-    foreach k {requests hits walks deferred deep trivial declinedCount} {
+    foreach k $counters {
         dict unset semantic $k
     }
     set instances [expr {[dict exists $semantic instances] ? [dict size [dict get $semantic instances]] : 0}]
     set census [dict getdef $hir semantic {}]
     set declined [lsort -stride 2 [dict getdef $census declinedCount {}]]
-    puts "$shown ok [digest [dict remove $hir semantic]] [digest $semantic] $instances declined={$declined} walks=[dict getdef $census walks 0] deferred=[dict getdef $census deferred 0]"
+    puts "$shown ok [digest [dict remove [normalized $hir] semantic]] [digest $semantic] $instances declined={$declined} walks=[dict getdef $census walks 0] deferred=[dict getdef $census deferred 0]"
 }
