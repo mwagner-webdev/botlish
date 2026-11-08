@@ -75,13 +75,29 @@ The macOS evidence is GitHub's macos-15 runners' (Apple Silicon), through
 
 ## 1. Result
 
-**Ready for a credentialed release; the release itself has not run.** The
-seven GitHub values (section 10) are not configured, so the Developer ID
-signature, notarization, stapling, Gatekeeper's notarized verdict, the
-notarized download played and the GitHub Release are **Credential-blocked**
-(section 44). Everything before them, and every check after them, is
-implemented, tested against recording stand-ins of Apple's tools, and as
-far as a runner allows, run on macOS:
+**Released.** `icy-tower-macos-v1.0.3` (commit f2787af0, run 42416871949)
+is the first published release:
+https://github.com/mwagner-webdev/botlish/releases/tag/icy-tower-macos-v1.0.3,
+"Icy Tower 1.0.3 for macOS (Apple Silicon)", with
+`icy-tower-macos-aarch64.zip` (1,507,100 bytes, SHA-256
+698195cee9984325b2fba987a7c79a1da5c1409ca80b3046bf153137a6da7a34),
+`SHA256SUMS` and `provenance.json` (section 44):
+
+* **Executed, the release** (run 42416871949, every job green): the
+  preflight of the seven GitHub values; Apple's validation of the
+  notarization credentials; the Developer ID signature (team 2QN7D8A7NA,
+  hardened runtime, secure timestamp); the Developer ID-signed
+  application played under the hardened runtime (8 of 8 cases);
+  notarization **Accepted** (submission
+  46b6b0f6-141d-41ce-a9dc-5a5ada60bb6e, 25 s); stapling; Gatekeeper's
+  `accepted` with `source=Notarized Developer ID`; the tamper control of
+  the notarized bundle; the ZIP and its provenance; the quarantined
+  download launched through Gatekeeper's real first-launch dialog, which
+  offered Open ("Apple checked it for malicious software and none was
+  detected"), and played; publication. The assets downloaded from the
+  release match SHA256SUMS.
+
+Before the release, and in every ordinary run since:
 
 * **Executed** (run 41224177467, every step green; and runs 41201527696
   to 41224177467): `Icy Tower.app` assembled from build-macos.sh's
@@ -801,9 +817,9 @@ read request got Apple's answer and classified it --
    ... Trace/BPT trap: 5`). The dry run requires MACOS-NOTARY-AUTH or
    MACOS-NOTARY-SERVICE here, and fails on anything else.
 
-**Credential-blocked**: Apple's acceptance of the release's real key
-(`notary-auth: Apple validated the Key ID, the Issuer ID and the key
-together`).
+**Executed** with the release's real key (runs 42290405708, attempt 2, and
+42416871949): `notary-auth: Apple validated the Key ID, the Issuer ID and
+the key together (profile icy-tower-notary of the temporary keychain)`.
 
 ## 21. Synthetic credential fixtures
 
@@ -1027,10 +1043,20 @@ dry-run signature held there (the hardened runtime, arm64, no
 entitlement, the throwaway identity as its signer). Whether a runner's
 codesign signs with an untrusted chain is the runner's, and the step
 takes either answer: ENVIRONMENT-BLOCKED, or a signature verified and
-launched.
+launched. The runner image does not decide it: run 42377791764's runner
+and the refusing ones around it ran the same image (macos-15-arm64
+20261104.0514.1, macOS 15.8.2 24H232); the next, run 42416871949's game
+job, refused again, so the corrected signed branch has not run yet.
 
-**Credential-blocked, the Developer ID signature**: `--timestamp`, the
-authority chain, the team, the secure timestamp (section 44).
+**Executed, the Developer ID signature** (run 42416871949; and 42290405708,
+attempt 2):
+
+    $ codesign --force --sign 27DE9442845DF1CBF98A4DC1141D10FE4047159B --keychain .../icy-tower-signing.keychain-db --options runtime --timestamp '.../Icy Tower.app'
+    verify-signature: valid (codesign --verify --deep --strict); Developer ID Application: Markus Wagner (2QN7D8A7NA) < Developer ID Certification Authority < Apple Root CA; team 2QN7D8A7NA; identifier com.avanticonic.botlishtower; flags runtime; timestamp Nov 8, 2026 at 3:48:30 AM
+
+-- the identity selected by its SHA-1 in the temporary keychain, the
+authority chain, the team, the hardened runtime and Apple's secure
+timestamp, CDHash da0f4bc3110269da5984377b64e41db144260f8b (section 44).
 
 ## 26. Signature inspection and entitlements
 
@@ -1061,7 +1087,12 @@ bundle before it is submitted (`app-bundle`, `app-launch`,
 `app-terminal-failure`), and `record
 hardened-runtime` ties their result to the CDHash notarization checks
 (`test_failed_acceptance_blocks_notarization`; mutant
-`acceptance-not-required`). That run is **Credential-blocked**. SIP is
+`acceptance-not-required`). **Executed** (run 42416871949, on the
+Developer ID-signed bundle, before submission): 8 of 8 cases EXECUTED --
+`env` 2 of 2, `app-bundle` 9 of 9, `app-launch` 15 of 15, `app-keyboard`
+4 of 4, `app-relaunch` 5 of 5, `app-gc-stress` 3 of 3,
+`app-alert-renderer` 8 of 8, `app-terminal-failure` 4 of 4 -- and
+`record hardened-runtime: 8 case(s) EXECUTED`. SIP is
 disabled on the runner (section 46): the runtime's enforcement there is not
 proven equal to a user's Mac.
 
@@ -1096,8 +1127,15 @@ submission; the ticket's CDHash ties the two
 
 **Executed** against the stand-ins only (test_release.py: accepted,
 Invalid, Rejected, another artifact's ticket, the log's issues, a timeout
-then a resume, an adopted bundle); **Credential-blocked** against Apple's
-service: no submission ID exists yet (section 44).
+then a resume, an adopted bundle); **Executed** against Apple's service
+(section 44): submission ca9336f5-c461-4f04-8c4b-9b7c37cefc60 (run
+42290405708) and the release's, run 42416871949:
+
+    notarize: submission ID 46b6b0f6-141d-41ce-a9dc-5a5ada60bb6e (recorded in .../notary-submission.json)
+    notarize: 46b6b0f6-141d-41ce-a9dc-5a5ada60bb6e Accepted (0 warning(s)); its ticket holds CDHash da0f4bc3110269da5984377b64e41db144260f8b
+    notarization (upload and Apple's processing): 25 s
+
+A timeout and its resume have not happened against Apple's service.
 
 ## 29. Stapling
 
@@ -1109,6 +1147,12 @@ failures) are retried, at most six times with a doubling wait (15 s to
 at once (`test_staple_fatal_is_not_retried`; stapler ends every failure
 with "Error 65", which therefore decides nothing). The final ZIP is made
 after stapling, of the stapled bundle (section 32).
+
+**Executed** (run 42416871949; and 42290405708, attempt 2): `staple: the
+ticket is stapled and validates` (1 s, no retry needed), then the stapled
+signature verified again (`verify-signature (stapled): valid ...; team
+2QN7D8A7NA; ... stapled`). The ticket travels in the bundle as
+`Contents/CodeResources` (1,653 bytes in the released ZIP).
 
 ## 30. Gatekeeper
 
@@ -1149,6 +1193,11 @@ MACOS-GATEKEEPER on that acceptance, and the release stopped before its
 tamper control, its ZIP and publication (section 44). The rule above is
 the correction.
 
+**Executed** with the correction (run 42416871949, the release, macOS
+15.8.2): the same `accepted` and `source=Notarized Developer ID`, again
+with no `origin=` line, of the bundle whose stapled signature named team
+2QN7D8A7NA with the same CDHash; the stage passed and the release went on.
+
 ## 31. Quarantine and the downloaded artifact
 
 `macos-session.py app --zip ZIP` (the `app-gatekeeper` case) treats the
@@ -1180,7 +1229,21 @@ Gatekeeper's real decision on this runner, and it refuses an application
 that is not notarized. The positive case -- the notarized release's dialog
 offering Open, the game played after it (the same case with `--gatekeeper
 notarized`, in the release job, App Translocation followed) -- is
-**Credential-blocked**.
+**Executed** (run 42416871949, the released ZIP itself, 8 of 8 checks):
+
+    PASS the extracted bundle carries a quarantine attribute (0083;6aeff142;Safari;BA8A5A91-934F-4ECB-A17B-5D0AA854F494)
+    PASS Gatekeeper's assessments are enabled (assessments enabled)
+    PASS spctl accepts it as a notarized Developer ID application: .../session-final/downloaded/Icy Tower.app: accepted
+    PASS Gatekeeper's first-launch dialog offers Open: “Icy Tower” is an app downloaded from the Internet. Are you sure you want to open it? Safari downloaded this file today at 3:49 AM. Apple checked it for malicious software and none was detected. / ['Cancel', 'Open']
+    PASS the downloaded application opens its window (run by App Translocation from /private/var/folders/.../AppTranslocation/.../d/Icy Tower.app/Contents/MacOS/icy-tower)
+    PASS Right: the player moved +122 units (wanted +20)
+    PASS Left: the player moved -102 units (wanted -20)
+    PASS Escape quits (exited): frames=361 round=1 floor=2 score=20 best=3.6 time=6.0 over=no x=247 y=284 camera=9 platforms=10 rng=768150900
+
+`record final-artifact: 2 case(s) EXECUTED` (10 s for the extraction and
+the launch). The quarantine was set by the harness as Safari sets it, on a
+runner; a download by a person's browser on their own Mac is the same
+attribute, not the same machine.
 
 ## 32. The ZIP: packaging and extraction
 
@@ -1205,9 +1268,16 @@ published: only a release (Developer ID, notarized, stapled)`. The bundle's
 CDHash is the same in every run built from the same executable
 (`1f23171577e9eff6a828260316426784dfd7e825` in runs 41201527696 and 41212691891),
 while the ZIP's SHA-256 differs run to run (ditto records the files' times):
-the release claims a traceable artifact, never a byte-identical one. The
-release's ZIP of the stapled, notarized bundle and its `stapler validate`
-after extraction are **Credential-blocked**.
+the release claims a traceable artifact, never a byte-identical one.
+
+**Executed** for the release (run 42416871949): `package:
+.../icy-tower-macos-aarch64.zip (1507100 bytes), sha256
+698195cee9984325b2fba987a7c79a1da5c1409ca80b3046bf153137a6da7a34`, of the
+stapled, notarized bundle, extracted and checked as above, its ticket
+validated after extraction. The published ZIP holds 11 entries: the
+bundle's directories, `Info.plist`, the executable (3,906,480 bytes), the
+two licenses, `_CodeSignature/CodeResources` and the stapled ticket
+(`Contents/CodeResources`).
 
 ## 33. Tamper control
 
@@ -1223,8 +1293,10 @@ unchanged. The released copy is never touched.
     tamper: one byte of the copy's resource changed: codesign refuses it (.../resource/Icy Tower.app: a sealed resource is missing or invalid)
 
 and the original still verified with its CDHash, `1f23171577e9eff6a828260316426784dfd7e825`.
-For the Developer ID-signed bundle the same stage runs in the release job
-(**Credential-blocked**).
+For the Developer ID-signed bundle the same stage runs in the release job:
+**Executed** (run 42416871949, on the notarized, stapled bundle), both
+copies refused with the same two lines, the original's CDHash
+(da0f4bc3110269da5984377b64e41db144260f8b) unchanged.
 
 ## 34. The game: graphical and keyboard regression
 
@@ -1271,7 +1343,7 @@ runs 41197431104, 41201527696, 41207619549, 41210576736, 41212691891,
 session), and in 41235898277's baseline: it is recorded as a pre-existing
 intermittent failure, about one run in three of this milestone's, cause
 not established. The Developer ID-signed application played under the
-hardened runtime (section 27) is **Credential-blocked**.
+hardened runtime: **Executed** (section 27, run 42416871949).
 
 ## 35. Clean-environment independence
 
@@ -1340,10 +1412,22 @@ stapler, spctl) -- no notarization action.
 
 The publish job (section 36) is **Inspected** (test_workflow.py's
 publish tests, the mutants `publish-before-release`,
-`release-assets-unchecked`, `release-writes`) and has never run: no
-release tag exists. **Credential-blocked**: no release, release URL or
-published SHA-256 exists yet; the first release tag's run publishes
-"Icy Tower X.Y.Z for macOS (Apple Silicon)" with the three assets.
+`release-assets-unchecked`, `release-writes`) and **Executed** (run
+42416871949, job 128619923849, 7 s once it had a runner): the release
+https://github.com/mwagner-webdev/botlish/releases/tag/icy-tower-macos-v1.0.3,
+"Icy Tower 1.0.3 for macOS (Apple Silicon)", not a draft or a
+prerelease, published 2026-11-08T04:46:04Z, with exactly the three
+assets:
+
+| asset | bytes |
+|---|---:|
+| icy-tower-macos-aarch64.zip | 1,507,100 |
+| SHA256SUMS | 176 |
+| provenance.json | 853 |
+
+Downloaded from the release afterwards, `sha256sum -c SHA256SUMS` passes
+for both files it lists. The publication was a tag push's run; the release
+gate's dispatch of a deferred tag has not published one (section 46).
 
 ## 38. SHA-256 and provenance
 
@@ -1358,6 +1442,27 @@ timestamp, the signature, the ticket): the release claims reproducible
 inputs and traceable provenance, never byte-identical signed artifacts.
 The game's compilation is the same operation with or without credentials:
 the release job compiles nothing; the executable is the game job's.
+
+**Executed**, the published `provenance.json` of 1.0.3 (SHA-256
+510851113c823f45b756749faac99d011fc2665b02fce0450649a97a4ada74d4, listed
+in SHA256SUMS):
+
+    {"botlish": "Botlish compiler (no release version; this is a development build)",
+     "bundle_id": "com.avanticonic.botlishtower",
+     "cdhash": "da0f4bc3110269da5984377b64e41db144260f8b",
+     "macos_runner": "15.8.2", "minimum_macos": "11.0", "mode": "release",
+     "notarization_submission": "46b6b0f6-141d-41ce-a9dc-5a5ada60bb6e",
+     "sdk": "15.5", "sdl3_revision": "829a65d769d935c4852f8159e964312c0957260a",
+     "source_commit": "f2787af0f92ab44d8ac37f06c1c632d60310186a",
+     "tag": "icy-tower-macos-v1.0.3", "target": "macos-aarch64 (arm64)",
+     "team": "2QN7D8A7NA",
+     "toolchain": "Apple clang version 17.0.0 (clang-1700.0.13.5)",
+     "version": "1.0.3",
+     "workflow_run": "https://github.com/mwagner-webdev/botlish/actions/runs/42416871949",
+     "zip": "icy-tower-macos-aarch64.zip",
+     "zip_sha256": "698195cee9984325b2fba987a7c79a1da5c1409ca80b3046bf153137a6da7a34"}
+
+(its keys, one per line in the file). No certificate, key or password.
 
 ## 39. Mutation results
 
@@ -1559,10 +1664,24 @@ start and end times, and the job's own measurements):
 | Icy Tower.app | 3,772 KiB |
 | icy-tower-macos-aarch64.zip (ditto) | 1,483,514 bytes |
 
-The release-only stages (the Developer ID signature with its timestamp,
-notarization, stapling, the notarized download played) have no timing:
-**Credential-blocked**. Each records its time in the release job's
-`timings.txt` (a diagnostics artifact) when it runs.
+The release-only stages, **Executed** (run 42416871949, the release job's
+own measurements and its steps' times):
+
+| what | time |
+|---|---:|
+| the whole release job | 1 min 45 s |
+| preflight; keychain and import; sign; Gatekeeper | 0 s each |
+| the hardened-runtime acceptance (8 cases) | 23 s |
+| notarization (upload and Apple's processing) | 25 s |
+| staple | 1 s |
+| the downloaded release: extraction and launch | 10 s |
+| the publish job | 7 s |
+
+Most of the release's wall-clock time was waiting for runners, not
+work: the tag was pushed at 21:39 UTC and published at 04:46. The account's
+20 concurrent jobs were held by other branches' test runs; the `tested`
+job waited 2 h 46 min for a Linux runner, the release job 2 h 47 min for
+a macOS one, the publish job 56 min.
 
 ## 43. macOS CI runs
 
@@ -1591,6 +1710,7 @@ run was superseded by the next push unless said otherwise.
 | 42290405708 | 1f076e1 (the tag icy-tower-macos-v1.0.0) | failure | the first release run (section 44): attempt 1 MACOS-CERTIFICATE-DECRYPT (the stored password did not open the stored .p12); attempt 2 signed with the Developer ID, played under the hardened runtime, notarized (Accepted), stapled, Gatekeeper `accepted` -- and refused by the stage for a missing `origin=` line (section 30) |
 | 42376915608 | 011a536 (the tag icy-tower-macos-v1.0.1) | deferred | `tested` found 011a536 not green: every required run at it cancelled by later pushes to main (section 44) |
 | 42377791764 | 43f6869e (the tag icy-tower-macos-v1.0.2) | failure | green; every check of the game job passed but the dry run, whose runner's codesign signed with the throwaway identity and whose copied CI bundle then failed its identifier check (section 25); the release job skipped |
+| **42416871949** | **f2787af0 (the tag icy-tower-macos-v1.0.3)** | **success** | the release (section 44): `tested` green; the game job green, its dry run's signature ENVIRONMENT-BLOCKED again on that runner; the release job every stage (Developer ID, the hardened-runtime cases 8 of 8, notarization Accepted, stapling, Gatekeeper, tamper control, ZIP, the downloaded release played, publishable, cleanup); the GitHub Release published |
 
 The general workflows started by the same pushes: `icy-tower (windows
 x86-64)` passed at c0f3165 (41205557419), e0231c4 (41207619531), ba18cda
@@ -1654,15 +1774,47 @@ game job passed -- the build, the tests, the oracle, the 12 graphical and
 run, which signed with the throwaway identity on that runner for the first
 time, refused the copied CI bundle's identifier (section 25), and the
 release job did not run. Nothing was signed with the Developer ID, sent to
-Apple or published. Tag a green commit that holds the dry run's correction
-next.
+Apple or published.
 
-Sections 25 to 30 are therefore Executed by Apple's service and the
-runner. Section 31 (the notarized download launched), the tamper control
-of a notarized bundle (33), the release ZIP (32), its provenance (38) and
-publication (37) are **not verified yet**: they need a release tag on a
-green commit that holds the corrected Gatekeeper stage (a new version: a
-tag names one commit, once).
+The fourth, **`icy-tower-macos-v1.0.3` on f2787af0** (the dry run's
+correction; green: tests.yml and tests-arm64.yml with their GC-stress
+jobs, macos-arm64.yml and windows-x86_64.yml, static-decisions.yml not run
+at that commit), ran as run 42416871949 and **published the first
+release**, every job green:
+
+* `tested`: the commit green (`runs.py check --require`);
+* the game job (17 min): the build, the tests, the oracle, the graphical
+  and LaunchServices acceptance, the release tooling's tests and mutants;
+  its dry run's signature ENVIRONMENT-BLOCKED on that runner (section 25),
+  never publishable, the cleanup verified;
+* the release job (1 min 45 s), **Executed**, every stage:
+  - the preflight: `Developer ID Application: Markus Wagner (2QN7D8A7NA),
+    SHA-1 27DE9442845DF1CBF98A4DC1141D10FE4047159B, issued by Developer
+    ID Certification Authority, team 2QN7D8A7NA; notary key CY69M5ZFVG`;
+    the identity: `com.avanticonic.botlishtower, the first release`;
+  - the temporary keychain holding exactly that identity; Apple's
+    validation of the notarization credentials;
+  - the Developer ID signature and its strict verification (section 25),
+    CDHash da0f4bc3110269da5984377b64e41db144260f8b;
+  - the hardened-runtime acceptance of that bundle, 8 of 8 cases (27);
+  - notarization: submission 46b6b0f6-141d-41ce-a9dc-5a5ada60bb6e,
+    **Accepted**, 0 warnings, its ticket holding the CDHash, 25 s (28);
+  - stapling and the stapled signature verified again (29);
+  - Gatekeeper: `accepted`, `source=Notarized Developer ID`, no `origin=`
+    line, the stapled signature the team's (30);
+  - the tamper control of the notarized bundle (33);
+  - the ZIP, SHA256SUMS and the provenance (32, 38);
+  - the downloaded release launched: quarantined, accepted, Gatekeeper's
+    first-launch dialog offering Open, played (31);
+  - publishable: `every stage of the release passed on CDHash
+    da0f4bc3110269da5984377b64e41db144260f8b; icy-tower-macos-aarch64.zip
+    sha256 698195cee9984325b2fba987a7c79a1da5c1409ca80b3046bf153137a6da7a34`;
+  - the cleanup: `the temporary keychain deleted, the search list
+    restored, the decoded credentials removed`;
+* the publish job (37): the GitHub Release with the three assets.
+
+Sections 20 and 25 to 38 are therefore Executed by Apple's service, the
+runner and GitHub, on the release that is published.
 
 ## 45. Troubleshooting a release
 
@@ -1723,21 +1875,33 @@ tag names one commit, once).
 
 ## 46. Remaining limitations
 
-* **No real Developer ID release has run (Credential-blocked).** The
-  Developer ID signature, its authority chain, team and secure timestamp,
-  the Developer ID-signed application played, notarization, stapling,
-  Gatekeeper's notarized verdict, the notarized download launched and the
-  publication are implemented, tested against stand-ins of Apple's tools
-  and rehearsed on the runner with a throwaway identity up to Apple's
-  service (section 20), and not yet run by Apple (section 44).
-* **The rehearsal cannot sign (Environment-blocked).** codesign refuses an
-  identity whose root the system does not trust, and a GitHub-hosted
-  runner cannot trust a throwaway root without a person (SecurityAgent's
-  dialog; the admin trust settings' rule refuses root, `NO (-60005)`). So
-  codesign with a keychain identity -- the release's own sign stage, its
-  `--keychain` and SHA-1 selection on a real keychain -- has run against
-  the stand-ins and as far as codesign's chain check on the runner, never
-  to a signature; the first release is its first run.
+* **The release ran on a runner, not on a person's Mac.** Release 1.0.3
+  was signed, notarized, stapled, accepted by Gatekeeper and played from
+  its quarantined download on a GitHub-hosted macos-15 runner (macOS
+  15.8.2, SIP disabled: section 27), the quarantine attribute set as
+  Safari sets it (section 31). Opening the published ZIP on a person's
+  own Mac -- another macOS version, SIP enabled, a real browser's
+  download -- is not part of this run's evidence.
+* **The rehearsal cannot sign on most runners (Environment-blocked).**
+  codesign refuses an identity whose root the system does not trust, and
+  a GitHub-hosted runner cannot trust a throwaway root without a person
+  (SecurityAgent's dialog; the admin trust settings' rule refuses root,
+  `NO (-60005)`). One runner signed anyway (run 42377791764, section 25);
+  the dry run's signed branch, corrected since, has not met such a runner
+  again (run 42416871949's refused). The release's own sign stage has run
+  to a signature with the Developer ID (section 44).
+* **The release gate's re-dispatch of a deferred tag has not published.**
+  1.0.3 was published by its tag push's run. A tag whose commit was not
+  green when it was pushed is dispatched again by the release gate
+  (docs/CI-RUNS.md, "The tagged release"); no such run has reached the
+  publish job. Every release run the gate has dispatched for the Linux
+  single executable and the Windows game (single-executable.yml runs
+  42375827767 and 42417696132, icy-tower-windows.yml runs 42208037734,
+  42375836255 and 42417704305) failed at its publish job before any step
+  ran, with no log or annotation; icy-tower-macos.yml's publish job has
+  the same shape (job-level `contents: write`, a concurrency group of its
+  own, ubuntu-latest). The cause is not established; until it is, a
+  deferred macOS tag may need the same fix.
 * **notarytool's dependence on the key's layout** was observed with
   notarytool 1.0.0 (38) (Xcode 16.4). The preflight refuses the layout
   that version traps on; a later notarytool may accept it, and the rule
