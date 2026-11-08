@@ -65,7 +65,7 @@ What the record shows:
 | | before | after |
 |---|---:|---:|
 | false certificates, the census corpus (`audit/emission-dependencies/tools/census.tcl`) | 4 | 0 |
-| false certificates, the milestone's own N6 sequence | 1 (the census's prototype; the original too) | 0 |
+| false certificates, the milestone's own N6 sequence | 1 (on the parent and under the census's prototype) | 0 |
 | false certificates, the structural audit, 40 seeds | 43 (and 10 programs whose verdicts depend on history) | 0 (0) |
 | JSON workload claims certified | 22 of 22 | 22 of 22, certificates identical but for the front-end fingerprint |
 | CSV workload claims certified | 52 of 52 | 52 of 52, likewise |
@@ -90,7 +90,7 @@ cranelift-generic and cranelift, one trace on all four:
 | N2 | a top-level `emitter` ('1') and `outer.emitter` ('A') | proven, proven | accepted | `[65]` | invalid | observed |
 | N3 | `outer.inner` and `outer.if.inner`, shadowing | proven, proven | accepted | -- | (no run) | observed (compilation), tested |
 | N4b after N4a | an edit of `outer2.helper` ('1' to 'A'), compiled after the unedited program, the memo kept | proven, reused | accepted (fresh: EMIT-REJECTED) | `[65]` | invalid | observed |
-| N6b after N6a | the census's prototype only (section 4): a proof that read the nested and the top-level `step` | proven, reused | accepted (fresh: EMIT-REJECTED) | `[65, 65]` | invalid | observed |
+| N6b after N6a | the milestone's own (section 4): a proof that read the nested and the top-level `step`, then the nested one removed; false on the parent and under the census's prototype | proven, reused | accepted (fresh: EMIT-REJECTED) | `[65, 65]` | invalid | observed |
 | F1 | `if flip(): yield 65 else: yield 66`, no parameters | proven | accepted | `[65]` | invalid | observed |
 | F2 | `yield 49` then `if true: yield 65` | proven | accepted | -- | (no run) | observed (compilation), tested |
 | F3 | a caller of the parameterless helper `if true: yield 65` | proven | accepted | `[65]` | invalid | observed |
@@ -112,7 +112,7 @@ What the checker decided on the way (`results/repro-before.md`):
   `helper` up in `byName`, gets outer1's, finds it unchanged, and reuses
   the certificate.
 * **F1 to F3.** Every `Facts` call ran in an environment of 0 bindings and
-  returned ``, with hir::range's paths `{e43=1 (unknown)}` and `{e43=0
+  returned the empty string, with hir::range's paths `{e43=1 (unknown)}` and `{e43=0
   (unknown)}` (F1) or the known outcome of `true` (F2, F3). `EvalIf` read
   `""` as "no path is feasible" on both outcomes and returned no states:
   the walk ended at the `if`, every certificate stating `exits {}` ("never
@@ -510,8 +510,8 @@ committed results):
 | `audit/emission-claims/tools/census.tcl -part all` | every row identical to the committed `results/census.md` (no false proof; 31 of 31 mistakes decided as the exploratory checker did); only the committed file's hand-written last sentence differs |
 | `audit/emission-claims/tools/fuzz.tcl -seeds 1-40` | byte-identical to the committed `results/fuzz.md`: 320 claims, 41,600 runs, 0 false proofs |
 | `audit/emission-claims/tools/loops.tcl -count 150 -seed 11 -cross 10` | the committed seed-11 summary exactly: 150 cases, proven 32, 25,350 runs, 0 false certificates, 0 regressions, 4 precision limits, 45 cross-backend checks agreeing |
-| `audit/csv-emission/tools/differential.tcl -part all` | (running) |
-| `audit/csv-emission/tools/census.tcl` | (running) |
+| `audit/csv-emission/tools/differential.tcl -part all` | identical to the committed `results/differential.md` but for its timings: every part, 0 backend disagreements, 0 recognizer rejections, 0 failures |
+| `audit/csv-emission/tools/census.tcl` | byte-identical to the committed `results/census.md`: 26 mutants, 26 as stated |
 
 ## 14. Mutation evidence
 
@@ -691,13 +691,46 @@ feasibility, and none is a false certificate:
 
 Merge. The two class C defects and the read-set gap are closed by
 conservative rules that decline reuse and composition, never prove anything
-new, and cost nothing on the workloads; every accepted program of the
-suites, the workloads and the census keeps its verdict and its certificate.
+new, and cost nothing on the workloads; every claim of the suites, the
+workloads and the census whose certificate was true keeps its verdict and
+its certificate, and only the false and the vacuous ones change.
 The next emission milestone should be the census's binding provenance
 (21.3), with the V2 structural-`never` case first: it is the only one in
 which a certificate (in a rejected program) still rests on a placeholder.
 
-CI: pending (section 20 is completed when the branch's runs are read).
+**What was run, locally** (a 4-core container, the native backend built):
+
+* `tests/local.tcl -jobs 3`, the whole local suite: every Tcl test file on
+  interp (8,962 passed, 0 failed, 214 skipped) and compile (8,957 passed,
+  0 failed, 219 skipped), 2,493 golden duplicates skipped on each; all 118
+  golden suites on interp, compile, cranelift-generic and cranelift, 0
+  failed;
+* each file the brief names, run on its own: tests/emission-claims.test
+  (123 of 123), csv-emission (36), dfa (85), dfa-workloads (21),
+  interval-sets (37), hir-range (74), diagnostic-recovery (57),
+  syntax-recovery (33), static-compile (83),
+  static-compile-expected-diagnostics (21), compiler-service (56),
+  hir-interchange (11), hir-cache (19), coroutine-fusion (17), lsp (77),
+  main-cli (72): every test passed;
+* the audits of section 13, the mutation catalog of section 14,
+  `tools/mutant-catalogs.tcl` (90 catalogs, 3,192 mutants, 0 problems) and
+  `tools/compilerpedia.tcl check` (1,290 topics, 758 examples, 0 problems).
+
+**Not run**: `tests/lsp-neovim.test` with a real Neovim (it is skipped
+without one; CI's tests.yml installs one); the GC-stress runs (CI's); the
+static-decisions comparison (it runs on main for a front-end change; this
+change moves no static decision of the golden suites -- the one suite with
+a claim, static-compile-expected-diagnostics.bot, passes on all four
+backends -- and was not dispatched on the branch).
+
+**CI on the branch** (64611f8): the canaries of tests.yml (dispatched),
+tests-arm64.yml (dispatched) and windows-x86_64.yml, and macos-arm64.yml's
+smoke job (Tier A, with its canary) and Linux control, passed. Every other
+job of the four workflows, and both Icy Tower workflows, was still queued
+behind the shared runner pool when this report was written: pending, not
+passed. `main` moved on from the branch's base while it ran (53a0d1b to
+d74d5ef); its latest tests run (d2421af) is queued, the earlier ones
+superseded, none failed.
 
 ## 21. Final evaluation questions
 
