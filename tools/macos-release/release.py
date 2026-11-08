@@ -843,12 +843,16 @@ def stage_tamper(work, args):
 # package, publishable
 
 def tree(root):
+    """ROOT's files as {PATH: (MODE, SHA-256)} and its symbolic links as {PATH: ("link", TARGET)}: a link is
+    compared as a link (a framework's Versions/Current, Tcl and Resources), never as what it points to."""
     out = {}
     for dirpath, dirnames, filenames in os.walk(root):
-        for n in filenames:
+        for n in dirnames + filenames:
             p = os.path.join(dirpath, n)
-            st = os.lstat(p)
-            out[os.path.relpath(p, root)] = (st.st_mode & 0o777, sha256(p))
+            if os.path.islink(p):
+                out[os.path.relpath(p, root)] = ("link", os.readlink(p))
+            elif n in filenames:
+                out[os.path.relpath(p, root)] = (os.lstat(p).st_mode & 0o777, sha256(p))
     return out
 
 

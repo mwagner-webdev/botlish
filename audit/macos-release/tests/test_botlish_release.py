@@ -22,10 +22,12 @@ import json
 import os
 import plistlib
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
 import unittest
+import zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
@@ -67,6 +69,10 @@ def make_app(directory, bundle_id=BUNDLE_ID):
             f.write(data)
     for name in ("botlish", "botlish-native"):
         os.chmod(os.path.join(c, "MacOS", name), 0o755)
+    # (The framework's standard links, as Tcl's framework build makes them.)
+    fw = os.path.join(c, "Frameworks", "Tcl.framework")
+    for link, target in (("Versions/Current", "9.0"), ("Tcl", "Versions/Current/Tcl"), ("Resources", "Versions/Current/Resources")):
+        os.symlink(target, os.path.join(fw, link))
     # (build.sh's archive, which sign.sh writes again for the driver it signs.)
     import zipfile
     with zipfile.ZipFile(os.path.join(c, "Resources", "botlish.zip"), "w") as z:
@@ -277,6 +283,21 @@ class BotlishRelease(unittest.TestCase):
             f.write(machofake.make())
         self.fake_apple_preflight()
         self.refused("sign", "MACOS-BUNDLE-LAYOUT", "--app", self.app)
+
+    def test_zip_that_changes_links_refused(self):
+        # A ZIP whose framework links came back as copies of what they point to, or pointing at the build
+        # machine's files (absolute targets: the bundle works only where it was built), is not the bundle
+        # that was signed: the package stage compares links as links, by their targets.
+        self.ok("sign", "--mode", "adhoc", "--app", self.app)
+        self.ok("verify-signature", "--app", self.app)
+        for fault in ("deref_links", "absolute_links"):
+            self.configure(**{fault: True})
+            self.refused("package", "MACOS-PUBLISH", "--app", self.app, "--out", self.out)
+        self.configure()
+        self.ok("package", "--app", self.app, "--out", self.out)
+        with zipfile.ZipFile(os.path.join(self.out, ZIP)) as z:
+            links = sorted(i.filename for i in z.infolist() if stat.S_ISLNK(i.external_attr >> 16))
+        self.assertEqual(links, ["Botlish.app/Contents/Frameworks/Tcl.framework/" + n for n in ("Resources", "Tcl", "Versions/Current")])
 
     def test_adhoc_build_signs_and_verifies_but_is_never_published(self):
         self.ok("sign", "--mode", "adhoc", "--app", self.app)

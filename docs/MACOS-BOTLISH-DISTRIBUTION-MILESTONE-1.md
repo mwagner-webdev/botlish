@@ -87,7 +87,7 @@ What exists and runs:
   notarytool's validation, the Developer ID signature, notarization and its
   resumption, stapling, Gatekeeper, the tamper control, the ZIP, the
   acceptances and the publishable check (`audit/macos-release/tests/
-  test_botlish_release.py`, 10 tests, beside Icy Tower's suites);
+  test_botlish_release.py`, 11 tests, beside Icy Tower's suites);
 * [inspected] the release workflow (`.github/workflows/botlish-macos.yml`),
   read as data by `test_botlish_workflow.py` (15 tests): only the release
   job, for a trusted tag, in the protected environment, sees a credential,
@@ -392,7 +392,11 @@ writes SHA256SUMS and provenance.json, and checks the ZIP (in release
 mode only after the staple, Gatekeeper and tamper stages passed on the
 notarized CDHash): `unzip -t`, then extracted with `ditto -x -k` into a
 fresh directory, the extracted tree must equal the bundle's file for file
-(names, modes, bytes), the launcher keep mode 755, the signature verify and,
+(names, modes, bytes) and link for link (the framework's three symbolic
+links, by their targets: a ZIP that stores them as copies, or as absolute
+paths into the build machine's tree, is refused --
+`test_zip_that_changes_links_refused`, the mutant `zip-links-followed`),
+the launcher keep mode 755, the signature verify and,
 in release mode, the stapled ticket validate. The release job then extracts the ZIP into
 `$HOME/Prögram Files` (a space and a non-ASCII letter), sets
 `com.apple.quarantine` on every file -- **synthetic**: the attribute a
@@ -556,7 +560,10 @@ language server's standard library copy to `~/Library/Caches/botlish`.
   before the driver's signature, run the release for branch pushes, give
   the preflight `MACOS_BUNDLE_ID`, put a secret in the job's env, let the
   release job write, release before the commit is green, accept the final
-  ZIP unquarantined, publish an unchecked ZIP. [stand-in] each is killed by
+  ZIP unquarantined, publish an unchecked ZIP, compare the ZIP's symbolic
+  links by what they point to (`zip-links-followed`: the shared core's
+  package stage now records a link as a link, which the game's bundle, with
+  no link, never needed). [stand-in] each is killed by
   the test its `!!` line names (`audit/macos-release/tools/mutate.py`: the
   baseline first; a mutant that does not apply is no kill).
 * **audit/macos-app/tools/mutants.txt**: seven moved into sign.sh with the

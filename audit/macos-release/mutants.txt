@@ -1104,3 +1104,14 @@ sign --identifier "$identifier.native" "$contents/MacOS/botlish-native"
 ====
 >>>>
 
+
+@@ zip-links-followed the package stage compares the ZIP's bundle by what its symbolic links point to, not by their targets: a ZIP whose framework links point at the build machine's files is packaged as the bundle that was signed
+!! test_botlish_release.BotlishRelease.test_zip_that_changes_links_refused
+## tools/macos-release/release.py
+<<<<
+            if os.path.islink(p):
+                out[os.path.relpath(p, root)] = ("link", os.readlink(p))
+            elif n in filenames:
+====
+            if n in filenames:
+>>>>

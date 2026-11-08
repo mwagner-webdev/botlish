@@ -30,7 +30,9 @@ a small model of the real one, configured by $STUB_STATE/config.json:
                text)
   xcrun        notarytool (store-credentials, submit, wait, info, log) and
                stapler (staple, validate), their answers from the config
-  ditto/unzip  ZIP archives with the files' modes (zipfile); copies
+  ditto/unzip  ZIP archives with the files' modes and symbolic links (zipfile;
+               deref_links: stored as what they point to; absolute_links:
+               their targets' absolute paths); copies
   xattr        nothing
 """
 import hashlib
@@ -543,12 +545,24 @@ def ditto():
     if ARGS[:2] == ["-c", "-k"]:
         src, dst = ARGS[-2], ARGS[-1]
         parent = os.path.dirname(os.path.abspath(src)) if "--keepParent" in ARGS else os.path.abspath(src)
+        # (A symbolic link is an entry of its own, its target the data, as
+        # ditto keeps it; deref_links stores what it points to instead, as a
+        # tool that follows links would; absolute_links stores the absolute
+        # path of its target, as a tool that resolves links would: a bundle
+        # that works only where it was built.)
+        deref = bool(CFG.get("deref_links"))
         with zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as z:
-            for dirpath, dirnames, filenames in os.walk(src):
+            for dirpath, dirnames, filenames in os.walk(src, followlinks=deref):
                 dirnames.sort()
-                for n in sorted(filenames):
+                for n in sorted(dirnames + filenames):
                     p = os.path.join(dirpath, n)
                     info = zipfile.ZipInfo(os.path.relpath(p, parent))
+                    if os.path.islink(p) and not deref:
+                        info.external_attr = (stat.S_IFLNK | 0o755) << 16
+                        z.writestr(info, os.path.realpath(p) if CFG.get("absolute_links") else os.readlink(p))
+                        continue
+                    if n not in filenames:
+                        continue
                     mode = os.stat(p).st_mode & 0o777
                     if CFG.get("drop_modes"):
                         mode = 0o644
@@ -562,6 +576,9 @@ def ditto():
             for info in z.infolist():
                 out = os.path.join(dst, info.filename)
                 os.makedirs(os.path.dirname(out), exist_ok=True)
+                if stat.S_ISLNK(info.external_attr >> 16):
+                    os.symlink(z.read(info).decode(), out)
+                    continue
                 with open(out, "wb") as f:
                     f.write(z.read(info))
                 os.chmod(out, (info.external_attr >> 16) & 0o777)
