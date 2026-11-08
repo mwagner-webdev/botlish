@@ -244,3 +244,11 @@ if {$runsNatively && [lspMode $commandLine] eq "" && ![native::jitAvailable] && 
 ====
         set lines [WithProgramDirs $hir 1 {RunDriver run-command run $text [list $name {*}$options]}]
 >>>>
+
+@@ child-environment-dropped a packaged compiler's own settings are never put back for the program: it sees BOTLISH_NATIVE_BIN, BOTLISH_NATIVE_LINKER and the rest as the compiler set them, not as the user had them
+## native/native.tcl
+<<<<
+    if {[llength $environment]} {
+====
+    if {[llength $environment] && 0} {
+>>>>

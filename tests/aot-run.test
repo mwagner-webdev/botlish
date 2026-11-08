@@ -745,6 +745,30 @@ test aotr-no-jit-driver {the driver built without its JIT: capabilities jit 0; i
 
 # --- the command line ---------------------------------------------------------------
 
+# A packaged compiler's own settings put back for the program
+# (native::aotRun -environment, which single/main.tcl's userEnvironment
+# feeds: the driver's --child-env): a variable set to the user's value, one
+# unset. BOTLISH_NATIVE_RESULT is the variable an executable reads itself
+# (the driver protocol), so the program's own result file says whether it
+# saw it.
+test aotr-child-environment {native::aotRun -environment: a variable the compiler changed is the user's value again for the program, one the user had not set is unset} -constraints aotRun -setup {
+    set dir [aotrDir childenv]
+    set temp [aotrTemp $dir]
+    set program [aotrProgram $dir value.bot {"40 + 2"}]
+    set restored [file join $dir restored.result]
+    set compilers [file join $dir compilers.result]
+} -body {
+    set hir [surface::readProgramFile $program -warnings off]
+    withEnvironment [concat [aotrTempEnvironment $temp] [list BOTLISH_NATIVE_RESULT $compilers]] {
+        set a [native::aotRun $hir value -environment [list BOTLISH_NATIVE_RESULT [list $restored]]]
+        set b [native::aotRun $hir value -environment [list BOTLISH_NATIVE_RESULT {}]]
+    }
+    set channel [open $restored]
+    set lines [split [string trim [read $channel]] \n]
+    close $channel
+    list [dict get $a status] [dict get $b status] [expr {{value {int 42}} in $lines}] [file exists $compilers] [aotrLeft $temp]
+} -cleanup {file delete -force $dir} -result {{exit 0} {exit 0} 1 0 {}}
+
 test aotr-usage {-aot-run's usage errors (status 2, nothing compiled): two files, an option that runs or builds another way, -aot-keep or -- without it, a -target of another host} -constraints aotRun -setup {
     set dir [aotrDir usage]
     set temp [aotrTemp $dir]

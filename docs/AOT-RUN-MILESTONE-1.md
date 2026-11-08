@@ -296,7 +296,7 @@ missing library.
 
 ## 9. Tests on each target
 
-`tests/aot-run.test`: 33 tests -- 30 of behavior, 3 positive controls.
+`tests/aot-run.test`: 34 tests -- 31 of behavior, 3 positive controls.
 Their constraints name capabilities, never an operating system: `aotRun`
 (the host links executables), `unixSignals`, `aotrPython` (the interrupt
 helper, tests/aot-run-interrupt.py, sends signals to process groups),
@@ -308,7 +308,7 @@ TerminateProcess and requires the program gone and the directory removed).
 
 | host | where | result |
 |---|---|---|
-| Linux x86-64, rustc linker | this sandbox | [executed] 31 passed, 2 skipped (`aotr-main-thread`, macOS's; `aotr-parent-killed-windows`) |
+| Linux x86-64, rustc linker | this sandbox | [executed] 32 passed, 2 skipped (`aotr-main-thread`, macOS's; `aotr-parent-killed-windows`) |
 | Linux x86-64, system linker | this sandbox | [executed] 31 passed, 2 skipped |
 | Linux x86-64, stub linker | this sandbox | [executed] 22 passed, 11 skipped (the C-calling tests: the stub links no C; the macOS and Windows tests) |
 | Linux x86-64 | `tests` workflow (ubuntu-latest), its canary | [executed] the changed file runs first on every push; see section 9.1 |
@@ -349,7 +349,7 @@ The branch `ccr-7f920867-5n2fuj`:
 `aotr-control-left` (what a kept run leaves is seen: the cleanup check is no
 tautology), `aotr-control-status` (the status check tells 3 from 0).
 
-**Mutants** (`audit/aot-run/tools/mutants.txt`, 22; the harness
+**Mutants** (`audit/aot-run/tools/mutants.txt`, 23; the harness
 `audit/aot-run/tools/mutate.tcl` builds each in a private copy, rebuilds
 the driver, and runs the driver's `aot_run` unit tests and
 tests/aot-run.test; the unmutated tree must pass both first). Each is one of
@@ -379,11 +379,12 @@ the failures the milestone names:
 | `wrong-working-directory` | the program runs in its build directory | `aotr-working-directory` |
 | `stderr-captured` | the program's standard error captured | `aotr-arguments`, `aotr-no-arguments`, `aotr-runtime-error`, `aotr-streams` |
 | `jit-route` | the driver asked to run the program in-process (the JIT's `run`) | 26 tests (`aotr-arguments`, `aotr-equals-emitted`, `aotr-control-left`, ...: the JIT's run reports no status, and takes none of aot-run's options) |
+| `child-environment-dropped` | a packaged compiler's own settings never put back for the program | `aotr-child-environment` |
 
 [executed, Linux x86-64] `tclsh9.0 audit/aot-run/tools/mutate.tcl`: the
-unmutated tree passed both detectors first; 22 mutants, 22 killed, none
-survived, none skipped (in two runs: the first fifteen, then the seven
-added with `-only`). A mutant counts as killed only when it built and a
+unmutated tree passed both detectors first; 23 mutants, 23 killed, none
+survived, none skipped (in three runs: the first fifteen, then seven and
+one added with `-only`). A mutant counts as killed only when it built and a
 detector failed on it. Six change Unix code only (their `%%` line names
 the Unix hosts); none has been judged on Windows or macOS.
 
@@ -480,6 +481,19 @@ copied here. bench/macos-app.tcl in macos-arm64.yml's `app` job measures
 
 ## 12. Limitations
 
+* **A program the AOT compiler cannot close does not run natively.** An
+  executable needs every function instance closed -- every value of a
+  static kind (`-aot-spec`; otherwise NATIVE AOT NOT-READY, naming the
+  value). The JIT ran such a program with run-time guards. So where there
+  is no JIT -- Botlish.app -- it runs on the interpreter only: of the 23
+  programs the smoke test runs, 18 run as executables and 5 are not
+  AOT-ready (examples/surface/03-closure.bot and examples/hir/02-closures.hir,
+  an untyped closure parameter; examples/stdlib/csv_chunked.bot,
+  csv_records.bot and hashtable.bot, a value of no static kind) [executed,
+  Linux x86-64, a single executable built with the JIT-less driver;
+  macOS's app job]. With a JIT, `run` and `-backend cranelift` still run
+  them. Annotating the value's type makes such a program AOT-ready; nothing
+  here relaxes the requirement.
 * **[not implemented] No cache.** Every run compiles and links again. A
   cache of executables would be a cache of *trusted* executables -- what
   this milestone rules out ("never run a stale executable") -- and the

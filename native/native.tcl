@@ -716,7 +716,7 @@ proc native::aotRun {hir name args} {
             if {$value eq {}} {
                 puts $envChannel "unset $variable"
             } else {
-                puts $envChannel "set $variable [binary encode hex [encoding convertto utf-8 [lindex $value 0]]]"
+                puts $envChannel "set $variable [::binary encode hex [encoding convertto utf-8 [lindex $value 0]]]"
             }
         }
         close $envChannel

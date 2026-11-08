@@ -201,6 +201,15 @@ passes on to the program), and compare.sh compares the application's
 plainly and under GC stress. The Linux single executable keeps its JIT; the
 shared smoke tests branch on `-version`'s JIT line.
 
+What the application loses with the JIT: a program whose functions the
+AOT compiler cannot close (an untyped closure parameter, a value of no
+static kind: NATIVE AOT NOT-READY) ran natively on the JIT, with run-time
+guards, and now runs on the interpreter only. Of the smoke test's 23
+programs, 18 run as executables and 5 are not AOT-ready; the smoke test
+names them and accepts exactly that refusal (AOT-RUN-MILESTONE-1.md,
+"Limitations"). Every program that is AOT-ready -- which every
+`-emit-native-executable` build needed already -- runs as before.
+
 ## 5. Mach-O and nested-code signing census
 
 [inspected, from build.sh's output and verify.sh's checks] The bundle holds
@@ -664,6 +673,7 @@ The branch `ccr-7f920867-5n2fuj` (https://github.com/mwagner-webdev/botlish/acti
 | `a822905` | tests (macos arm64) | 42464261169 | smoke (Tier A, its canary running the changed files, aot-run.test among them, on Apple Silicon): **success** [executed, macOS]; the app jobs: superseded by the next push before a runner took them |
 | `a822905` | tests, tests (linux arm64), ci tools, icy-tower (windows x86-64), raven clean room | 42464261202, 42464261307, 42464261174, 42464261275, 42464261197 | success |
 | `460fcee` | icy-tower (macos arm64) | 42466433504 | **success** [executed, macOS]: as for `a822905`, on the bundle whose release step now also asks Gatekeeper's refusal, and the release tooling's 92 mutants |
+| `460fcee` | tests (macos arm64), the Botlish.app job | 42466433458 (job 128698763992) | **failure**, the first time the job ran past the signing step: (1) single/smoke-test.sh's no-JIT branch required every sample to run as an executable, and 5 of 23 are not AOT-ready (section 4: the smoke test now accepts exactly that refusal and names them); (2) app-test.sh's relocation check: with a user's `BOTLISH_NATIVE_BIN` in the environment, `-aot-run` failed with `wrong # args: should be "binary"` -- `native::aotRun`'s child-environment writer called `binary` inside the namespace `native`, whose own `native::binary` (the driver's path) shadows Tcl's; fixed (`::binary`), with `aotr-child-environment` and the mutant `child-environment-dropped`. compare.sh, single/ffi-smoke-test.sh, the ad hoc release stages (Gatekeeper's refusal included) and bench/macos-app.tcl passed in the same job [executed, macOS] |
 | `460fcee` | tests (macos arm64) | 42466433458 | smoke (its canary, `AOT-run costs`) and acceptance shard 3/4 **success** [executed, macOS]; the system linker's executable and C tests success (its GC-stress step running); the Botlish.app job (the ad hoc release stages, the Gatekeeper refusal, acceptance.sh), app-clean, link-plan-sdl3, main-thread-startup and shards 1, 2, 4 [pending] (waiting for macOS runners when this was written) |
 | `460fcee` | tests (windows x86-64) | 42466433448 | canary (aot-run.test with `aotr-parent-killed-windows`), smoke (the smoke tier and the Windows-relevant test files, `AOT-run costs`, GC workloads) and root plans **success** [executed, Windows]; the acceptance shards and the system linker [pending] |
 | `460fcee` | single executable (dispatched) | 42466437468 | the x86-64 and AArch64 builds and their build-machine smoke and C FFI smoke tests **success**; no job failed; the stock-container smoke jobs [pending] |
@@ -720,6 +730,8 @@ release.
 * Apple Silicon only (arm64); macOS 11 or later. No Intel or universal
   build, no DMG, no installer package, no Homebrew formula.
 * Native executables need Apple's Command Line Tools (section 19).
+* Programs that are not AOT-ready run on the interpreter only in the
+  application (section 4).
 
 ## 28. Reproduction
 

@@ -172,14 +172,27 @@ else
   [[ $status == 1 ]] && grep -q 'NATIVE UNSUPPORTED jit' "$work/nojit.out" || fail "run -backend cranelift without a JIT: status $status"
   echo "   -backend cranelift, cranelift-generic, run -backend cranelift: refused (NATIVE UNSUPPORTED jit)"
   if (( toolchain )); then
-    # Natively, as executables: each sample's value, through its driver protocol.
+    # Natively, as executables: each sample's value, through its driver
+    # protocol -- or, for a program whose functions the AOT compiler cannot
+    # close (an untyped closure's parameter, a value of no static kind),
+    # NATIVE AOT NOT-READY: the JIT ran those with run-time guards, and
+    # without one they run on the interpreter (AOT-RUN-MILESTONE-1.md,
+    # "Limitations"). Any other failure fails.
     count=0
+    notready=""
     for sample in samples/*; do
-      aot_value "$sample" >/dev/null || fail "-aot-run $sample"
-      count=$((count + 1))
+      if [[ -n $(aot_value "$sample") ]]; then
+        count=$((count + 1))
+        continue
+      fi
+      status=0
+      env -i HOME="$work/home" PATH=/usr/bin:/bin "$botlish" -warnings off -aot-run "$sample" >"$work/aot.out" 2>&1 || status=$?
+      [[ $status == 1 ]] && grep -q '(NATIVE AOT NOT-READY)$' "$work/aot.out" ||
+        { cat "$work/aot.out" >&2; fail "-aot-run $sample: status $status"; }
+      notready="$notready ${sample#samples/}"
     done
     [[ $(aot_value samples/01-arithmetic.bot) == 'int 50' ]] || fail "-aot-run 01-arithmetic.bot: $(aot_value samples/01-arithmetic.bot)"
-    echo "   -aot-run: $count samples run as executables"
+    echo "   -aot-run: $count samples run as executables; not AOT-ready (the interpreter runs them):${notready:- none}"
   fi
 fi
 
