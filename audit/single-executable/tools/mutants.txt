@@ -116,7 +116,7 @@ if {1} {
 @@ package-commands-install-native a package command installs the native backend like a compiler run (it compiles nothing)
 ## single/main.tcl
 <<<<
-        && [lindex $::argv 0] ni {add install update remove verify package native}
+        && [lindex $::argv 0] ni {add install update remove verify package native tool tools}
 ====
 >>>>
 

@@ -39,6 +39,23 @@ use cranelift_module::{DataId, Linkage, Module};
 /// frames by frame pointer up to the call's ceiling.
 pub const SUPPORTED: bool = cfg!(all(target_os = "linux", target_env = "gnu", any(target_arch = "x86_64", target_arch = "aarch64")));
 
+/// Whether a native library of TARGET is made: Linux glibc on x86-64 and
+/// AArch64, and Android on AArch64 (ANDROID-AARCH64-TARGET-SUPPORT-
+/// MILESTONE-1.md: an ELF shared object of the NDK's link, whose runtime --
+/// Bionic's, from the target support package -- walks frames as Linux
+/// AArch64's does). The library's own target, never this host's: an
+/// Android library is made on a Linux x86-64 host.
+pub fn supports(target: &target_lexicon::Triple) -> bool {
+    use target_lexicon::{Architecture, Environment, OperatingSystem};
+    let aarch64 = matches!(target.architecture, Architecture::Aarch64(_));
+    target.operating_system == OperatingSystem::Linux
+        && match target.environment {
+            Environment::Gnu => aarch64 || target.architecture == Architecture::X86_64,
+            Environment::Android => aarch64,
+            _ => false,
+        }
+}
+
 fn module_error(e: cranelift_module::ModuleError) -> BackendError {
     BackendError::Codegen(format!("{e:?}"))
 }

@@ -114,7 +114,7 @@ test tm-windows-gnu-identity {windows-x86_64-gnu is MinGW-w64's GNU ABI on Windo
         [expr {[surface::cache::Key p.bot "1\n" default 1 windows-x86_64] ne [surface::cache::Key p.bot "1\n" default 1 windows-x86_64-gnu]}]
 } -cleanup {unset -nocomplain g m hir text} -result {{windows x86_64 LLP64 64 1 x86_64-pc-windows-gnu} {1 1 1 1 1} 0 windows-x86_64-gnu 1 1}
 
-test tm-target-table {every target's identity and C scalar facts, pinned: Linux x86-64, Linux AArch64 and Windows unchanged, macOS AArch64 distinct from Linux AArch64 by plain char only among the scalars} -body {
+test tm-target-table {every target's identity and C scalar facts, pinned: Linux x86-64, Linux AArch64 and Windows unchanged, macOS AArch64 distinct from Linux AArch64 by plain char only among the scalars, Android AArch64 (Bionic) with Linux AArch64's scalars and its own operating system and triple} -body {
     lmap t [core::cabi::targetNames] {
         set m [core::cabi::target $t]
         list $t [dict get $m os] [dict get $m arch] [dict get $m model] [dict get $m triple] \
@@ -123,7 +123,7 @@ test tm-target-table {every target's identity and C scalar facts, pinned: Linux 
                 string cat [dict get $info bits] [expr {[dict get $info signed] ? "s" : "u"}]
             }]
     }
-} -cleanup {unset -nocomplain m} -result {{linux-aarch64 linux aarch64 LP64 aarch64-unknown-linux-gnu {8u 8s 8u 16s 16u 32s 32u 64s 64u 64s 64u}} {linux-x86_64 linux x86_64 LP64 x86_64-unknown-linux-gnu {8s 8s 8u 16s 16u 32s 32u 64s 64u 64s 64u}} {macos-aarch64 macos aarch64 LP64 aarch64-apple-darwin {8s 8s 8u 16s 16u 32s 32u 64s 64u 64s 64u}} {macos-x86_64 macos x86_64 LP64 x86_64-apple-darwin {8s 8s 8u 16s 16u 32s 32u 64s 64u 64s 64u}} {windows-aarch64 windows aarch64 LLP64 aarch64-pc-windows-msvc {8s 8s 8u 16s 16u 32s 32u 32s 32u 64s 64u}} {windows-x86_64 windows x86_64 LLP64 x86_64-pc-windows-msvc {8s 8s 8u 16s 16u 32s 32u 32s 32u 64s 64u}} {windows-x86_64-gnu windows x86_64 LLP64 x86_64-pc-windows-gnu {8s 8s 8u 16s 16u 32s 32u 32s 32u 64s 64u}}}
+} -cleanup {unset -nocomplain m} -result {{android-aarch64 android aarch64 LP64 aarch64-linux-android {8u 8s 8u 16s 16u 32s 32u 64s 64u 64s 64u}} {linux-aarch64 linux aarch64 LP64 aarch64-unknown-linux-gnu {8u 8s 8u 16s 16u 32s 32u 64s 64u 64s 64u}} {linux-x86_64 linux x86_64 LP64 x86_64-unknown-linux-gnu {8s 8s 8u 16s 16u 32s 32u 64s 64u 64s 64u}} {macos-aarch64 macos aarch64 LP64 aarch64-apple-darwin {8s 8s 8u 16s 16u 32s 32u 64s 64u 64s 64u}} {macos-x86_64 macos x86_64 LP64 x86_64-apple-darwin {8s 8s 8u 16s 16u 32s 32u 64s 64u 64s 64u}} {windows-aarch64 windows aarch64 LLP64 aarch64-pc-windows-msvc {8s 8s 8u 16s 16u 32s 32u 32s 32u 64s 64u}} {windows-x86_64 windows x86_64 LLP64 x86_64-pc-windows-msvc {8s 8s 8u 16s 16u 32s 32u 32s 32u 64s 64u}} {windows-x86_64-gnu windows x86_64 LLP64 x86_64-pc-windows-gnu {8s 8s 8u 16s 16u 32s 32u 32s 32u 64s 64u}}}
 
 test tm-macos-aarch64-scalars {macOS AArch64's C scalars: char signed 8, signed char 8, unsigned char 8, short 16, int 32, long 64, long long 64 (each signed or unsigned as spelled), and their exact domains} -body {
     lmap n [core::cabi::scalarNames] {
@@ -169,7 +169,7 @@ test tm-c-call-conv-of-each-target {the driver reads each target's triple as Cra
         list $t [dict get $facts arch] [dict get $facts os] [expr {[dict get $facts pointer] == [dict get $m pointer]}] \
             [dict get $facts format] [dict get $facts c-call-conv] [expr {[dict get $facts runs] == ($t eq [core::cabi::hostTarget])}]
     }
-} -cleanup {unset -nocomplain m facts} -result {{linux-aarch64 aarch64 linux 1 elf system_v 1} {linux-x86_64 x86_64 linux 1 elf system_v 1} {macos-aarch64 aarch64 darwin 1 macho apple_aarch64 1} {macos-x86_64 x86_64 darwin 1 macho system_v 1} {windows-aarch64 aarch64 windows 1 coff windows_fastcall 1} {windows-x86_64 x86_64 windows 1 coff windows_fastcall 1} {windows-x86_64-gnu x86_64 windows 1 coff windows_fastcall 1}}
+} -cleanup {unset -nocomplain m facts} -result {{android-aarch64 aarch64 linux 1 elf system_v 1} {linux-aarch64 aarch64 linux 1 elf system_v 1} {linux-x86_64 x86_64 linux 1 elf system_v 1} {macos-aarch64 aarch64 darwin 1 macho apple_aarch64 1} {macos-x86_64 x86_64 darwin 1 macho system_v 1} {windows-aarch64 aarch64 windows 1 coff windows_fastcall 1} {windows-x86_64 x86_64 windows 1 coff windows_fastcall 1} {windows-x86_64-gnu x86_64 windows 1 coff windows_fastcall 1}}
 
 # {SYMBOL CONVENTION ...}: the calling convention of every foreign C
 # function's signature in CLIF text (tests/platform/native-status.tcl's

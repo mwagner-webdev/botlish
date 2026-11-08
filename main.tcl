@@ -6,13 +6,19 @@
 #   tclsh9.0 main.tcl -help [QUERY...]
 #   tclsh9.0 main.tcl -version
 #   tclsh9.0 main.tcl                     (no arguments: the usage summary)
-#   tclsh9.0 main.tcl add|install|update|remove|verify|package ...
+#   tclsh9.0 main.tcl add|install|update|remove|verify|package|native ...
 #                                         the package manager (pm/pm.tcl,
 #                                         PACKAGE-MANAGER-MILESTONE-1.md):
 #                                         a first argument naming one of
 #                                         its commands runs it, without the
 #                                         compiler (no other invocation
 #                                         loads it or reads a botlish.json)
+#   tclsh9.0 main.tcl tool|tools ...      the package manager's commands
+#                                         that run a package's external
+#                                         tool, explicitly and in a process
+#                                         of its own (pm/tools.tcl,
+#                                         EXTERNAL-COMPILER-TOOLS-AND-
+#                                         TARGET-PACKAGES-MILESTONE-1.md)
 #
 # The options, one table (cliOptions below) that the parser, the usage
 # summary and Compilerpedia's cli.options topic (tests/main-cli.test checks
@@ -26,6 +32,14 @@
 #                          framework
 #   -runtime-path PATH     a directory an emitted executable's loader searches
 #                          for shared libraries ($ORIGIN/lib)
+#   -target-support NAME   link an emitted executable (or native library)
+#                          with the runtime archive of the target support
+#                          package NAME (EXTERNAL-COMPILER-TOOLS-AND-TARGET-
+#                          PACKAGES-MILESTONE-1.md), installed in the
+#                          application's package tree of the program's
+#                          target; a library of another target than the
+#                          host's (-target android-aarch64) needs one
+#                          (ANDROID-AARCH64-TARGET-SUPPORT-MILESTONE-1.md)
 #   -argv TEXT / -argv-hex HEX / -argv-none    the program's argv()
 #   -code -hir -ast -aot -aot-data -aot-spec -contexts -direct -traits
 #   -emit-nir -emit-clif   inspection output, before the program runs
@@ -273,6 +287,7 @@ set cliOptions {
     -L DIR run {a library directory, for a program that calls C}
     -F DIR run {a framework directory (macOS), for a program linking one}
     -runtime-path PATH build {where an executable loads shared libraries from}
+    -target-support NAME build {link with target support package NAME's runtime}
     -argv TEXT argv {append the argument TEXT to argv()}
     -argv-hex HEX argv {append an argument given as hex bytes}
     -argv-none {} argv {run the program with an empty argv()}
@@ -325,7 +340,7 @@ set cliInvocation [cliInvocation]
 # a first argument naming one runs the package manager, and nothing of the
 # compiler is loaded. No other invocation loads the package manager or reads
 # a botlish.json: compiling reads .bot_modules as it is.
-set pmCommands {add install update remove verify package native}
+set pmCommands {add install update remove verify package native tool tools}
 if {[lindex $argv 0] in $pmCommands} {
     source [file join $root pm pm.tcl]
     exit [pm::cli::main $argv $cliInvocation]
@@ -338,7 +353,8 @@ proc usage {} {
         "       $me run \[OPTION...\] FILE \[ARG...\]" \
         "       $me -help \[QUERY...\]" \
         "       $me -version" \
-        "       $me add|install|update|remove|verify|package ..." "" \
+        "       $me add|install|update|remove|verify|package ..." \
+        "       $me tool \[OPTION...\] TOOL \[ARG...\]" "" \
         "Compiles and runs Botlish programs: FILE.bot (source), FILE.hir (HIR text)," \
         "FILE.hirx (HIR interchange) or FILE.ir (core IR text; interp and compile only)." \
         "Each program's output is printed, then its value." \
@@ -1253,14 +1269,32 @@ proc emitLibrary {path name exports dir} {
         if {$dir eq ""} {
             set dir [file dirname $path]
         }
-        set options [list -name $name -out $dir]
+        set options [list -name $name -out $dir -target [hir::cabi::ResolveTarget $target]]
         if {[llength $exports]} {
             lappend options -exports $exports
+        }
+        set support ""
+        if {$::targetSupport ne ""} {
+            # The application's target support package for the library's
+            # target (ANDROID-AARCH64-TARGET-SUPPORT-MILESTONE-1.md): from
+            # the entry file's package tree of that target, supplying a
+            # native library's runtime.
+            set compiled [hir::cabi::targetOf $hir]
+            if {$target ne ""} {
+                set compiled [hir::cabi::ResolveTarget $target]
+            } elseif {$compiled eq ""} {
+                set compiled [core::cabi::hostTarget]
+            }
+            set support [native::support::select [file dirname [file normalize $path]] $compiled $::targetSupport native-library]
+            lappend options -support $support
         }
         set built [native::library $hir {*}$options]
     } message options]} {
         printError stderr "$path: " $message $options
         return 1
+    }
+    if {$support ne ""} {
+        puts "target support: [dict get $support package] ([dict get $support target], runtime [dict get $support archive])"
     }
     foreach artifact {static shared header manifest} {
         if {[dict get $built $artifact] ne ""} {
@@ -1319,10 +1353,26 @@ proc emitExecutable {path} {
             .hirx { set hir [hir::interchange::readFile $path -target [hir::cabi::ResolveTarget $target]] }
             default { throw {NATIVE AOT INPUT} "expected a .bot, .hir or .hirx input file (native executables are built from HIR, never from core IR text): $path" }
         }
-        set executable [native::executable $hir [file rootname $path] -startup $::nativeStartup]
+        set extra {}
+        set support ""
+        if {$::targetSupport ne ""} {
+            # The application's target support package for the program's
+            # target: the root is the entry file's directory, as for every
+            # package it imports.
+            set compiled [hir::cabi::targetOf $hir]
+            if {$compiled eq ""} {
+                set compiled [core::cabi::hostTarget]
+            }
+            set support [native::support::select [file dirname [file normalize $path]] $compiled $::targetSupport]
+            lappend extra -runtime-archive [dict get $support archive]
+        }
+        set executable [native::executable $hir [file rootname $path] -startup $::nativeStartup {*}$extra]
     } message options]} {
         printError stderr "$path: " $message $options
         return 1
+    }
+    if {$support ne ""} {
+        puts "target support: [dict get $support package] ([dict get $support target], runtime [dict get $support archive])"
     }
     puts "executable: $executable"
     return 0
@@ -1352,6 +1402,7 @@ set libraryName ""
 set libraryExports {}
 set libraryDir ""
 set nativeStartup ""
+set targetSupport ""
 set check 0
 foreach option [dict get $commandLine options] {
     lassign $option arg value
@@ -1421,6 +1472,15 @@ foreach option [dict get $commandLine options] {
             set showNative library
             set libraryName $value
         }
+        -target-support {
+            if {![regexp {^[a-z][a-z0-9_]{0,63}$} $value]} {
+                usageError "-target-support needs a package's name (a lowercase identifier: the target support package installed in the application's .bot_modules), found \"$value\""
+            }
+            if {$targetSupport ne "" && $targetSupport ne $value} {
+                usageError "-target-support is given twice (\"$targetSupport\" and \"$value\"): an executable links one runtime"
+            }
+            set targetSupport $value
+        }
         -native-startup {
             if {$value ni {worker main-thread}} {
                 usageError "unknown native startup policy \"$value\" (known: worker main-thread)"
@@ -1483,6 +1543,14 @@ if {$nativeStartup ne "" && $showNative ne "executable"} {
     # The policy is fixed into an executable when it is built: no other
     # invocation makes one, and an explicit choice is never ignored.
     usageError "-native-startup is an option of -emit-native-executable: it chooses the thread a built executable runs its program on, and nothing else this invocation does makes one (a native library runs on its host's thread; -backend cranelift runs a program on the driver's own)"
+}
+if {$targetSupport ne "" && $showNative ni {executable library}} {
+    # A target support package's runtime is what an emitted executable or
+    # native library is linked with: nothing else this invocation does links
+    # one, and naming a package is never ignored (EXTERNAL-COMPILER-TOOLS-
+    # AND-TARGET-PACKAGES-MILESTONE-1.md, ANDROID-AARCH64-TARGET-SUPPORT-
+    # MILESTONE-1.md).
+    usageError "-target-support is an option of -emit-native-executable and -emit-native-library: it names the target support package whose runtime archive the executable or library is linked with"
 }
 if {$nativeStartup eq ""} {
     set nativeStartup worker

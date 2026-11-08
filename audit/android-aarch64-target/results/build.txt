@@ -1,0 +1,7 @@
+rustc rustc 1.97.0 (2d8144b78 2026-07-07)
+cargo cargo 1.97.0 (c980f4866 2026-06-30)
+rust-target aarch64-linux-android
+ndk 29.0.14206865
+api 21
+runtime-abi e6c1492eceebb13c
+archive-sha256 ce09b46b89a0f357a9eb1f564da49bca55e9be418c6bf2cbc146e9f5d9b1592c
