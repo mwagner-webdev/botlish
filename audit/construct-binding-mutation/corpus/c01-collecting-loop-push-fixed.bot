@@ -1,0 +1,13 @@
+# category: loop-element (List)
+# class: A -- productive local mutation
+# The correction of c01: the loop collects each updated row, and the
+# program goes on with the collected List, not with the original one.
+# expect: [2, 3]
+import std::mutable_vector
+
+rows = [std::mutable_vector::from_list([1]), std::mutable_vector::from_list([2, 3])]
+updated = loop row in rows:
+    row.push(42)
+    row
+loop row in updated:
+    row.length()

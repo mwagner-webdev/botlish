@@ -1,0 +1,18 @@
+# probe: following j1's advice compiles -- std::byte_store is an ordinary
+# public namespace whose natives take `any` -- and the call fails when it
+# runs, on every backend (J; outside this census's scope: recorded only).
+# outcome: runtime-error
+# error: std::byte_store::slice: expected bytestore, got [97, 98]
+import std::str
+import std::list
+import std::byte_store
+
+fn f(s: str) errors LowerUnderrun, UpperOverrun:
+    s.encode_utf8().slice(0, 1)
+
+r = f("ab"):
+    on LowerUnderrun:
+        0
+    on UpperOverrun:
+        0
+r

@@ -1,0 +1,16 @@
+# category: fold-intermediate (nested folds: the inner one carries the outer's)
+# class: A -- productive local mutation
+# expect: 6
+import std::mutable_vector
+
+fn ints() -> MutableVector[int]:
+    std::mutable_vector::from_list([])
+
+fn f(rows: List[List[int]]) -> int:
+    w = fold row in rows with intermediate acc ints():
+        fold x in row with intermediate inner acc:
+            inner.push(x)
+            inner
+    w.length()
+
+f([[1, 2], [3], [4, 5, 6]])

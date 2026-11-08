@@ -1,0 +1,31 @@
+# probe: the binding table (hir::bindingType, what the compiler service and
+# the language server show) records no type for any loop clause variable --
+# element, counter or lockstep -- while locals, fold intermediates and
+# destructured fields are recorded (C, H).
+# outcome: accept
+# value: 204
+# binding: 23 bs List[int[std::byte::Byte]]
+# binding: 24 i any
+# binding: 24 acc int
+# binding: 26 b any
+# binding: 26 j any
+# binding: 28 first int[std::byte::Byte]
+# binding: 28 rest List[int[std::byte::Byte]]
+import std::str
+import std::list
+import std::byte
+
+struct Pair:
+    first: std::byte::Byte
+    rest: List[std::byte::Byte]
+
+fn f(s: str) -> int:
+    bs = s.encode_utf8()
+    n = fold i from 0 to std::list::length(bs) with intermediate acc 0:
+        acc + i
+    m = fold b in bs and j from 0 to std::list::length(bs) with intermediate acc 0:
+        acc + b + j
+    {first, rest} = Pair {first: std::byte::from_int(7), rest: bs}
+    n + m + first
+
+f("ab")

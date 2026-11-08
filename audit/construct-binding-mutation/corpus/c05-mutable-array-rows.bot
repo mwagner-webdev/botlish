@@ -1,0 +1,19 @@
+# category: loop-element (List of MutableArrays)
+# class: C -- silently discarded write
+# intended: set the first cell of every row to 7
+# actual: each set changes the loop variable's copy; grid's rows stay 0
+# expect: [0]
+import std::mutable_array
+import std::list
+
+fn run() -> List[int] errors IndexNotFound:
+    grid = [std::mutable_array::create(2, 0), std::mutable_array::create(2, 0)]
+    loop row in grid:
+        row.set(0, 7)
+    first = std::list::at(grid, 0)
+    [first.at(0)]
+
+r = run():
+    on IndexNotFound:
+        []
+r
