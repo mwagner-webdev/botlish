@@ -337,7 +337,13 @@ if run -warnings off -emit-native-executable labs.bot >"$work/labs.out" 2>&1; th
 grep -q "needs a C compiler driver to link an executable for $target, and there is none: no cc on PATH.*(NATIVE LINK TOOLCHAIN)" "$work/labs.out" ||
   { cat "$work/labs.out" >&2; fail "a C program's link without a C compiler said no NATIVE LINK TOOLCHAIN"; }
 [[ ! -e labs ]] || fail "a refused link left an executable"
-echo "   a C program without a C compiler: NATIVE LINK TOOLCHAIN"
+# -aot-run alike (AOT-RUN-MILESTONE-1.md): the same link refused, the program
+# never run, status 1.
+status=0; run -warnings off -aot-run labs.bot >"$work/labs-aot.out" 2>&1 || status=$?
+[[ $status == 1 ]] || { cat "$work/labs-aot.out" >&2; fail "-aot-run of a C program without a C compiler: status $status"; }
+grep -q "labs.bot: .*needs a C compiler driver to link an executable for $target, and there is none: no cc on PATH.*(NATIVE LINK TOOLCHAIN)" "$work/labs-aot.out" ||
+  { cat "$work/labs-aot.out" >&2; fail "-aot-run of a C program without a C compiler said no NATIVE LINK TOOLCHAIN"; }
+echo "   a C program without a C compiler: NATIVE LINK TOOLCHAIN (-emit-native-executable and -aot-run)"
 
 # The language server: an editor's session, framed by hand. The hover and
 # the definition are asked before the analysis is done and answered when it

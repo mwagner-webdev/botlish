@@ -1,0 +1,246 @@
+# Mutants of -aot-run (AOT-RUN-MILESTONE-1.md): the driver's aot-run
+# command (native/src/aotrun.rs), native::aotRun (native/native.tcl) and
+# main.tcl's -aot-run and JIT boundary. Each is a deliberate bug, written as
+# exact source replacements (the replaced text occurs exactly once);
+# audit/aot-run/tools/mutate.tcl applies each to a private copy, rebuilds
+# the driver and runs the detectors: the driver's aot_run unit tests and
+# tests/aot-run.test. A %% line names the hosts whose code a mutant
+# changes (none: every host).
+#
+# The format: "@@ NAME DESCRIPTION", an optional "%% HOST ...", then for
+# each edit "## FILE" and "<<<<" OLD "====" NEW ">>>>".
+
+@@ shared-directory every run builds in one fixed directory, and a name that exists already is taken: concurrent runs share it, one's cleanup removes another's executable
+## native/src/aotrun.rs
+<<<<
+        let dir = base.join(format!("botlish-aot-run-{}-{nonce:x}-{count}", std::process::id()));
+====
+        let _ = (nonce, count);
+        let dir = base.join("botlish-aot-run");
+>>>>
+## native/src/aotrun.rs
+<<<<
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => last = Some(e),
+====
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => return Ok(dir),
+>>>>
+
+@@ existing-directory-reused a directory name that exists already is used: someone else's directory, and what it holds, is where the executable is written and run
+## native/src/aotrun.rs
+<<<<
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => last = Some(e),
+====
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => { last = Some(e); return Ok(dir) }
+>>>>
+## native/src/aotrun.rs
+<<<<
+        let dir = base.join(format!("botlish-aot-run-{}-{nonce:x}-{count}", std::process::id()));
+====
+        let dir = base.join(format!("botlish-aot-run-{}-{}", std::process::id(), (nonce & 0, count & 0).1));
+>>>>
+
+@@ directory-not-private the private directory is made readable and searchable by everyone (another user could read the program, and on a shared temporary directory race for its contents)
+%% linux-x86_64 linux-aarch64 macos-aarch64
+## native/src/aotrun.rs
+<<<<
+            builder.mode(0o700);
+====
+            builder.mode(0o755);
+>>>>
+
+@@ directory-left the private directory is never removed: every run leaves its executable behind
+## native/src/aotrun.rs
+<<<<
+        if !self.keep {
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+====
+        let _ = (self.keep, &self.dir);
+>>>>
+
+@@ exit-status-lost the program's exit code is reported as 0: a failing program's command succeeds
+## native/src/aotrun.rs
+<<<<
+            emit(&format!("status exit {code}"));
+====
+            emit(&format!("status exit {}", code & 0));
+>>>>
+
+@@ signal-death-as-exit a program ended by a signal is reported as exit 1: no 128+N, no line naming the signal
+## native/src/aotrun.rs
+<<<<
+            emit(&tcl_list(&["status".to_string(), "signal".to_string(), n.to_string(), signal_name(n)]));
+====
+            let _ = n;
+            emit("status exit 1");
+>>>>
+
+@@ termination-not-forwarded SIGTERM and SIGHUP to the driver are recorded, never sent on: the program outlives the request to end it
+%% linux-x86_64 linux-aarch64 macos-aarch64
+## native/src/aotrun.rs
+<<<<
+        if signal == libc::SIGTERM || signal == libc::SIGHUP {
+            let child = CHILD.load(Ordering::SeqCst);
+====
+        if signal == libc::SIGTERM && signal == libc::SIGHUP {
+            let child = CHILD.load(Ordering::SeqCst);
+>>>>
+
+@@ parent-not-watched the driver never notices that its command ended: the program outlives main.tcl killed alone
+%% linux-x86_64 linux-aarch64 macos-aarch64
+## native/src/aotrun.rs
+<<<<
+                        if unsafe { libc::getppid() } != original {
+====
+                        if unsafe { libc::getppid() } != original && original == 0 {
+>>>>
+
+@@ argv0-is-the-executable argv()[0] is the private executable's path, not FILE as the user typed it
+%% linux-x86_64 linux-aarch64 macos-aarch64
+## native/src/aotrun.rs
+<<<<
+        command.arg0(std::ffi::OsStr::from_bytes(first)).args(rest.iter().map(|a| std::ffi::OsStr::from_bytes(a)));
+====
+        let _ = first;
+        command.args(rest.iter().map(|a| std::ffi::OsStr::from_bytes(a)));
+>>>>
+
+@@ stdin-not-forwarded the program's standard input is empty, not the command's
+## native/native.tcl
+<<<<
+                set failed [catch {exec $binary $command --result $resultPath {*}$args $path <@stdin >@stdout 2>@stderr} closeMessage]
+====
+                set failed [catch {exec $binary $command --result $resultPath {*}$args $path << {} >@stdout 2>@stderr} closeMessage]
+>>>>
+
+@@ stdout-captured the program's standard output is captured by the compiler, not the command's
+## native/native.tcl
+<<<<
+                set failed [catch {exec $binary $command --result $resultPath {*}$args $path <@stdin >@stdout 2>@stderr} closeMessage]
+====
+                set failed [catch {exec $binary $command --result $resultPath {*}$args $path <@stdin 2>@stderr} closeMessage]
+>>>>
+
+@@ startup-policy-dropped -native-startup is not passed on: every executable is the worker's, a main-thread request silently ignored
+## native/native.tcl
+<<<<
+    set options [list --startup $startup --parent-pid [pid]]
+====
+    set options [list --startup worker --parent-pid [pid]]
+>>>>
+
+@@ signal-status-not-128 main.tcl's status for a program ended by a signal is 1, not 128+N
+## main.tcl
+<<<<
+            if {$name ni {SIGINT SIGPIPE}} {
+                puts stderr "$path: the program was ended by signal $number ($name)"
+            }
+            return [expr {128 + $number}]
+====
+            if {$name ni {SIGINT SIGPIPE}} {
+                puts stderr "$path: the program was ended by signal $number ($name)"
+            }
+            return 1
+>>>>
+
+@@ foreign-target-accepted -aot-run -target of another host is no usage error: it compiles before anything refuses it
+## main.tcl
+<<<<
+    if {$target ne "" && $target ne [core::cabi::hostTarget]} {
+        usageError "-aot-run runs the program here
+====
+    if {$target ne "" && $target ne [core::cabi::hostTarget] && 0} {
+        usageError "-aot-run runs the program here
+>>>>
+
+@@ jit-refusal-removed where the native backend has no JIT, -backend cranelift is not refused: it reaches the driver, which cannot run it
+## main.tcl
+<<<<
+if {$runsNatively && [lspMode $commandLine] eq "" && ![native::jitAvailable]} {
+====
+if {$runsNatively && [lspMode $commandLine] eq "" && ![native::jitAvailable] && !$backendGiven} {
+>>>>
+
+@@ stale-executable-run a build that fails runs what an earlier run left at the executable's path: one fixed directory, never removed, its old executable started when the new build fails
+## native/src/aotrun.rs
+<<<<
+        let dir = base.join(format!("botlish-aot-run-{}-{nonce:x}-{count}", std::process::id()));
+====
+        let _ = (nonce, count);
+        let dir = base.join("botlish-aot-run-stale");
+>>>>
+## native/src/aotrun.rs
+<<<<
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => last = Some(e),
+====
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => return Ok(dir),
+>>>>
+## native/src/aotrun.rs
+<<<<
+        if !self.keep {
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+====
+        let _ = (self.keep, &self.dir);
+>>>>
+## native/src/aotrun.rs
+<<<<
+    let executable = match built {
+        Ok(executable) => executable,
+====
+    let executable = match built {
+        Ok(executable) => executable,
+        Err(_) if destination.exists() => destination.clone(),
+>>>>
+
+@@ arguments-split the arguments after -- are joined and split again at spaces: an argument holding a space becomes two
+## main.tcl
+<<<<
+    set injectedArgv [lmap word [concat [lrange $files 0 0] [dict get $commandLine arguments]] {
+====
+    set injectedArgv [lmap word [concat [lrange $files 0 0] [split [join [dict get $commandLine arguments]]]] {
+>>>>
+
+@@ arguments-reordered the arguments after -- reach the program in reverse order
+## main.tcl
+<<<<
+    set injectedArgv [lmap word [concat [lrange $files 0 0] [dict get $commandLine arguments]] {
+====
+    set injectedArgv [lmap word [concat [lrange $files 0 0] [lreverse [dict get $commandLine arguments]]] {
+>>>>
+
+@@ argument-dropped the last argument after -- never reaches the program
+## main.tcl
+<<<<
+    set injectedArgv [lmap word [concat [lrange $files 0 0] [dict get $commandLine arguments]] {
+====
+    set injectedArgv [lmap word [concat [lrange $files 0 0] [lrange [dict get $commandLine arguments] 0 end-1]] {
+>>>>
+
+@@ wrong-working-directory the program runs in its private build directory, not the user's working directory
+%% linux-x86_64 linux-aarch64 macos-aarch64
+## native/src/aotrun.rs
+<<<<
+        command.arg0(std::ffi::OsStr::from_bytes(first)).args(rest.iter().map(|a| std::ffi::OsStr::from_bytes(a)));
+====
+        command.arg0(std::ffi::OsStr::from_bytes(first)).args(rest.iter().map(|a| std::ffi::OsStr::from_bytes(a)));
+        if let Some(dir) = executable.parent() {
+            command.current_dir(dir);
+        }
+>>>>
+
+@@ stderr-captured the program's standard error is captured by the compiler, not the command's
+## native/native.tcl
+<<<<
+                set failed [catch {exec $binary $command --result $resultPath {*}$args $path <@stdin >@stdout 2>@stderr} closeMessage]
+====
+                set failed [catch {exec $binary $command --result $resultPath {*}$args $path <@stdin >@stdout} closeMessage]
+>>>>
+
+@@ jit-route native::aotRun asks the driver to run the program in its own process (the JIT's run), not as its executable
+## native/native.tcl
+<<<<
+        set lines [WithProgramDirs $hir 1 {RunDriver run-command aot-run $text [list $name {*}$options]}]
+====
+        set lines [WithProgramDirs $hir 1 {RunDriver run-command run $text [list $name {*}$options]}]
+>>>>
