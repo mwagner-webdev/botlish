@@ -330,6 +330,7 @@ namespace eval hir::static {
         NOT-A-CONTEXT                            NotAContext
         NOT-A-STRUCT                             NotAStruct
         NOT-AN-ENUM                              NotAnEnum
+        NOT-CALLABLE                             NotCallable
         NOT-SENDABLE                             NotSendable
         OPAQUE-CONSTRUCTION                      OpaqueConstruction
         OPAQUE-REPRESENTATION                    OpaqueRepresentation

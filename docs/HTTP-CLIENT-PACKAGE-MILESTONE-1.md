@@ -603,11 +603,39 @@ the module named like a method (`at`) cost 69 builds and seven minutes:
 renamed and marked `nomethod` (`http-warning-clean` keeps a program
 importing http at three builds).
 
-**F4. Calling an Int is accepted (open).** A local Int binding that
-shadows a function of the same name is called without a diagnostic and
-fails at run time with NOT-CALLABLE, naming the value
+**F4. Calling an Int was accepted (fixed).** A local Int binding that
+shadows a function of the same name was called without a diagnostic and
+failed at run time with NOT-CALLABLE, naming the value
 (`findings/call-of-shadowing-int.bot`); with a declared result type the
-program is instead rejected by an unrelated-looking TYPE diagnostic.
+program was instead rejected by an unrelated-looking TYPE diagnostic. The
+shadowing was incidental: no call of a value of a known non-callable type
+(an Int, a String, a List, a struct, an enum case, a field, a call's
+result) was checked, and so a non-callable local named like a function
+also stayed an applicable candidate of a method-style call
+(AMBIGUOUS-METHOD-CALL: RAVEN-CLEANROOM-DESKTOP-MILESTONE-1.md, follow-up
+3). Now the call's own check rejects a callee whose kind is known and no
+callable kind (`hir::types::NotCallable`, the one statement of the rule;
+`hir::range::VerifyCallable`), as a native's argument kinds are held
+(METHOD-RECEIVER-TYPE-CORRECTNESS-MILESTONE-1.md): a compile-time
+`CORE SEMANTIC NOT-CALLABLE` at the callee, `std::compiler::
+DiagnosticCode::NotCallable` in a `static compile:` block. It names the
+function a binding hides, as its related location:
+
+    call-of-shadowing-int.bot:16:5: cannot call "n", a value of type int:
+    only a function can be called, so this call could only fail when it
+    runs; this binding of "n" hides the function "n", which a call of "n"
+    here never reaches (rename the binding)
+
+The call is poison (no TYPE of the declared result follows), and, being
+the call's own problem, it makes the local no applicable method candidate:
+`s.length()` beside `length = 3` applies `std::str::length`. A callee of no
+fixed kind (an untyped parameter, `any`, a trait view, an imprint
+variable) is still checked when the call runs, and neither a semantic
+instance's view nor core IR text is judged. Validated by
+`tests/not-callable.test` (16 tests) and `audit/not-callable/tools/
+mutate.tcl` (its mutants all killed), with `tests/enums.test`'s and
+`tests/method-sugar.test`'s run-time expectations of such calls now the
+compile-time diagnostic.
 
 **F5. The native audit counts a weak definition twice.** BoringSSL's
 libcrypto and libssl each define some symbols weakly; as two archives of

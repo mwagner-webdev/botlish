@@ -1,9 +1,9 @@
-# A finding of HTTP-CLIENT-PACKAGE-MILESTONE-1.md ("Findings"): a local
-# binding N (an Int) shadows the function n; the call n(3) is accepted by
-# the checks and fails only when it runs: NOT-CALLABLE ("cannot call
-# non-callable value 3", every backend), although its callee's type is
-# statically an Int. With a declared result the program is rejected instead
-# by an unrelated-looking TYPE diagnostic on the function's result.
+# A finding of HTTP-CLIENT-PACKAGE-MILESTONE-1.md (F4, fixed): a local Int n
+# shadows the function n. The call n(3) was accepted and failed only when it
+# ran (NOT-CALLABLE, "cannot call non-callable value 3"), or, with a declared
+# result, the program was rejected by an unrelated-looking TYPE diagnostic. It
+# is now rejected at compile time, at 16:5, by the call's own NOT-CALLABLE,
+# which names the function n the binding hides (tests/not-callable.test).
 #
 #   tclsh9.0 main.tcl audit/http-client/findings/call-of-shadowing-int.bot
 import std::str

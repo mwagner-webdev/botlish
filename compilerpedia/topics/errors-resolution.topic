@@ -1846,10 +1846,12 @@ callable, and a function `f` is also visible:
     field, or greet(receiver, ...) to call the function
 
 == LIKELY CAUSES
-  * A local binding or parameter with the method's name: with
-    `import std::list`, a parameter `length: int` makes `xs.length()`
-    ambiguous. Today a local of any type counts as a candidate, even an
-    Int that could never be called.
+  * A local binding or parameter with the method's name that may be
+    called: with `import std::list`, a parameter `length` that is a
+    function value (or untyped) makes `xs.length()` ambiguous. A binding
+    whose type is known to be no function (`length: int`) is no
+    candidate: its call is not valid (error.not-callable), so the
+    imported function applies.
   * A helper function of your own named like an imported function
     (`fn length(...)` beside `import std::list`).
   * Two imported namespaces with a function of that name that both
@@ -1871,11 +1873,14 @@ this file, or a namespace this file imports.
 @example reject
 import std::list
 
-fn count(xs: List[int], length: int) -> int:
-    xs.length() + length
+fn count(xs: List[int], length: Fn{args: [List[int]], return: int}) -> int:
+    xs.length()
 
-count([1, 2], 3)
-@caption A parameter named like std::list::length
+fn twice(ys: List[int]) -> int:
+    2 * std::list::length(ys)
+
+count([1, 2], twice)
+@caption A function parameter named like std::list::length
 @error CORE SEMANTIC AMBIGUOUS-METHOD-CALL
 @at 4:8
 @end
@@ -1883,11 +1888,25 @@ count([1, 2], 3)
 @example accept
 import std::list
 
-fn count(xs: List[int], limit: int) -> int:
-    xs.length() + limit
+fn count(xs: List[int], measure: Fn{args: [List[int]], return: int}) -> int:
+    xs.length() + measure(xs)
+
+fn twice(ys: List[int]) -> int:
+    2 * std::list::length(ys)
+
+[1, 2].count(twice)
+@caption Renamed: std::list::length is the only candidate
+@value 6
+@end
+
+@example accept
+import std::list
+
+fn count(xs: List[int], length: int) -> int:
+    xs.length() + length
 
 [1, 2].count(3)
-@caption Renamed: std::list::length is the only candidate
+@caption An int parameter named length is no candidate: it cannot be called
 @value 5
 @end
 

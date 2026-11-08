@@ -5181,6 +5181,37 @@ If you change any of that, or a native's `-param-types`, run
 update a mutant's text when you change the code it mutates, keeping it a
 mutant of the same rule), plus the method-call decision's harnesses (above).
 
+## Callee kinds (NOT-CALLABLE)
+
+A call whose callee's static type is of a known kind no call accepts -- an
+Int, a String, a Bool, a List, a struct, an enum case, a C address -- is a
+compile-time NOT-CALLABLE of the call (HTTP-CLIENT-PACKAGE-MILESTONE-1.md,
+F4): the call's own check (`hir::range::VerifyCallable`, inside
+`hir::CheckingCall`), located at the callee, naming the function a binding
+hides as its related location, and the call is poison (`hir::types::Call`).
+The rule is stated once (`hir::types::NotCallable`: the callable kinds are
+a Block, a native and a coroutine handle); the check, the poison and
+region inference's dead call ask it. Keep it so:
+
+* A callee of no fixed kind -- `any`, an untyped parameter's value, a
+  structural function type, a trait view, an imprint variable -- stays
+  dynamic, checked when the call runs. Never judge a call in a semantic
+  instance's view, or a call the program did not write (`written`; core IR
+  text), and never add a run-time check for a static one.
+* The method decision reads it like any problem of the call: a
+  non-callable binding named like a function is no applicable candidate.
+  Never give it a method rule of its own, and never let it add, rank or
+  retry a candidate (SFIAE, METHOD-SUGAR.md).
+
+If you change any of that, run `tests/not-callable.test`,
+`tests/method-sugar.test`, `tests/enums.test`, `tests/method-resolution.test`,
+`tests/method-filter.test`, `tests/diagnostic-recovery.test`,
+`tests/static-compile.test` and `audit/not-callable/tools/mutate.tcl` (every
+mutant in its `mutants.txt` must still apply and be killed by a test its
+`!!` line names: update a mutant's text when you change the code it
+mutates, keeping it a mutant of the same rule), plus the method-call
+decision's harnesses (above).
+
 ## Declared recognizers (dfa and class)
 
 `class NAME = ITEMS` and `dfa NAME over bytes|ascii|unicode:`

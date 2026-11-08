@@ -2107,6 +2107,8 @@ proc hir::range::VerifyCallChecks {hirVar ranges e node} {
         set calleeType [hir::typeOf $hir [dict get $node callee]]
         if {[hir::types::IsFn $calleeType] || [hir::types::IsCoroutine $calleeType]} {
             VerifyStructuralCall hir $ranges $e $node $calleeType [dict get $node callee] [dict get $node args]
+        } else {
+            VerifyCallable hir $e $node $calleeType
         }
         return
     }
@@ -2271,6 +2273,108 @@ proc hir::range::VerifyCallChecks {hirVar ranges e node} {
             [hir::semantic::ShowType $hir [ShownArgType $argType $checkedType]] [FactsClause $argType $checkedType $argRange] \
             [hir::signatures::because $hir $targetBlock $i]] $arg
     }
+}
+
+# Checks that the callee of call E (NODE), of static type CALLEETYPE, may be
+# called at all: a callee of a known kind no call accepts -- an Int, a String,
+# a Bool, a List, a struct, a C address, ... (hir::types::NotCallable, the
+# one statement of the rule) -- is a compile-time NOT-CALLABLE of the call,
+# never the run-time NOT-CALLABLE it would raise
+# (HTTP-CLIENT-PACKAGE-MILESTONE-1.md, F4). A callee of no fixed kind (`any`,
+# an untyped parameter's value, a trait view, an imprint variable) is still
+# checked when the call runs. Like every check of a call against its callee
+# it is the call's own (hir::CheckingCall: the method-call decision reads it
+# as a candidate's problem, so a non-callable binding named like a function
+# is no applicable candidate of a method-style call), it judges the call as
+# written, reachable or not, never in a semantic instance's view, nor a call
+# the program did not write (`written`, hir/syntax.tcl), and it is located at
+# the callee (a method-style call's method name). The call is poison where
+# it is reached (hir::types::Call), so nothing that uses its result restates
+# it.
+proc hir::range::VerifyCallable {hirVar e node calleeType} {
+    upvar 1 $hirVar hir
+    if {![hir::types::NotCallable $calleeType]
+            || ![dict exists $node written] || [dict exists $hir semanticContext]} {
+        return
+    }
+    set callee [dict get $node callee]
+    set calleeNode [dict get $hir exprs $callee]
+    set related {}
+    set hint ""
+    set type [hir::semantic::ShowType $hir $calleeType]
+    switch -- [dict get $calleeNode kind] {
+        ref {
+            set name [hir::semantic::RefName $hir $callee]
+            set what "\"$name\", a value of type $type"
+            set shadowed [ShadowedFunction $hir [dict get $calleeNode binding]]
+            if {$shadowed ne ""} {
+                lassign $shadowed noun origin
+                set hint "; this binding of \"$name\" hides $noun, which a call of \"$name\" here never reaches (rename the binding)"
+                if {$origin ne ""} {
+                    lappend related $origin
+                }
+            }
+        }
+        project {
+            set what "the field \"[dict get $calleeNode name]\", a value of type $type"
+        }
+        const {
+            # (An enum case, `VehicleType::Car()`, or a literal: the constant
+            # as the program spells it.)
+            set what "[core::value::show [dict get $calleeNode value]], a value of type $type"
+        }
+        default {
+            set what "a value of type $type"
+        }
+    }
+    hir::Diagnose hir NOT-CALLABLE \
+        "cannot call $what: only a function can be called, so this call could only fail when it runs$hint" \
+        $callee $related
+}
+
+# What binding B (a callee's) hides of a function of the same name visible
+# where B is declared, as {NOUN ORIGIN} -- the function's declaration ("the
+# function \"f\"", its origin) or a root native's ("the native \"f\"", no
+# origin) -- or "" when the name B hides is no function (or B hides
+# nothing).
+proc hir::range::ShadowedFunction {hir b} {
+    if {$b eq "" || ![dict exists $hir bindings $b]} {
+        return ""
+    }
+    set scope [dict get $hir bindings $b scope]
+    if {$scope eq "" || ![dict exists $hir scopes $scope]} {
+        return ""
+    }
+    set parent [dict get $hir scopes $scope parent]
+    if {$parent eq ""} {
+        return ""
+    }
+    set name [dict get $hir bindings $b name]
+    set target [hir::resolve::LexicalTarget hir $parent $name]
+    if {$target eq "" || $target eq "ambient"} {
+        return ""
+    }
+    set source [hir::semantic::SourceName $hir $b]
+    if {[lindex $target 0] eq "root" && [llength $target] == 2} {
+        if {[core::native::exists [lindex $target 1]]} {
+            return [list "the native \"$source\"" ""]
+        }
+        return ""
+    }
+    if {![dict exists $hir bindings $target]} {
+        return ""
+    }
+    set declaredBy [dict get $hir bindings $target declaredBy]
+    if {$declaredBy eq "" || ![dict exists $hir exprs $declaredBy]
+            || [dict get $hir exprs $declaredBy kind] ne "bind"} {
+        return ""
+    }
+    set value [dict get $hir exprs $declaredBy value]
+    if {$value eq "" || [dict get $hir exprs $value kind] ne "block"} {
+        return ""
+    }
+    return [list "the function \"[hir::semantic::SourceName $hir $target]\"" \
+        [dict get $hir bindings $target origin]]
 }
 
 # Checks every argument of call E (NODE) of native NAME whose static type has

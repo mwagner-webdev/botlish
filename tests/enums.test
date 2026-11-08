@@ -331,11 +331,11 @@ test enum-declaration-order {an enum is a type declaration: usable before its de
         [enumRun "fn Color():\n    1\nenum Color:\n    Red,\n\[Color(), Color::Red\]\n"]
 } -result {{same: [E::A, E::B]} {same: [1, Color::Red]}}
 
-test enum-case-is-not-a-constructor {a payload-free case is written without parentheses or braces} -body {
+test enum-case-is-not-a-constructor {a payload-free case is written without parentheses or braces: a call of one is a compile-time NOT-CALLABLE (a case is a value, no function), braces NOT-A-STRUCT} -body {
     list \
-        [enumRun "${vehicle}VehicleType::Car()\n"] \
+        [enumError "${vehicle}VehicleType::Car()\n"] \
         [enumError "${vehicle}VehicleType::Car {}\n"]
-} -result {{same error: CORE SEMANTIC NOT-CALLABLE: cannot call non-callable value VehicleType::Car} {NOT-A-STRUCT: enum.bot:8:1: "VehicleType::Car" names a case of the enum VehicleType, not a struct: a payload-free case is written VehicleType::Car, without braces (payload-bearing cases are not supported)}}
+} -result {{NOT-CALLABLE: enum.bot:8:1: cannot call VehicleType::Car, a value of type VehicleType: only a function can be called, so this call could only fail when it runs} {NOT-A-STRUCT: enum.bot:8:1: "VehicleType::Car" names a case of the enum VehicleType, not a struct: a payload-free case is written VehicleType::Car, without braces (payload-bearing cases are not supported)}}
 
 test enum-rename-case {renaming a case is an API rename: a reference to the old name fails resolution} -body {
     enumError "enum E:\n    Automobile,\n    Boat,\nE::Car\n"
