@@ -1026,7 +1026,13 @@ Android packaging script. It is a test workflow with the
 `react-native-2048-${{ github.ref }}` concurrency group (CI-RUNS.md);
 nothing in the release gate requires it. Its runs on this branch:
 
-@@CI-RUNS@@
+* runs 1 to 7 (`4d1fc581` to `d25b5c0d`): each stayed queued until the
+  next push cancelled it, with no runner assigned;
+* run 8, at `be3d4018`, the tested commit of this report:
+  [react-native 2048 #8](https://github.com/mwagner-webdev/botlish/actions/runs/42533820805),
+  queued when this report was written. Its build job's clean room and its
+  `android` jobs' `summary.txt` files are the Android evidence. Until it
+  passes, read section 16's status as partially validated.
 
 Main's own workflows were queued or in progress, none red among those
 completed, when this branch was made (`a6977d56`) and when it was last
