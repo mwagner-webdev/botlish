@@ -562,5 +562,61 @@ which touch this code (*code inspection* of the merge).
 CI on the branch before the merge (`fa3598a`), every workflow green:
 `tests` and `tests (linux arm64)` (both dispatched in full), `tests (macos
 arm64)`, `tests (windows x86-64)`, `icy-tower (macos arm64)` and `icy-tower
-(windows x86-64)`. CI on the merged commit: PENDING.
+(windows x86-64)`.
+
+CI on the merged commit (`54add51`), every workflow green: `tests` (run
+42492440880) and `tests (linux arm64)` (run 42492443138), both dispatched in
+full; `tests (macos arm64)` (42492436402); `tests (windows x86-64)`
+(42492436421); `icy-tower (macos arm64)`; `icy-tower (windows x86-64)`;
+`ci tools`; `package reproducibility`; `raven clean room`. The push runs of
+`tests` and `tests (linux arm64)` were cancelled by the dispatched runs of
+the same ref, as CI-RUNS.md intends.
+
+### 14.1 The second merge (`main` at 04c9493)
+
+While that CI ran, `main` moved again. Three of the new changes touch files
+this milestone edits or rules it depends on:
+
+* **The http package** (HTTP-CLIENT-PACKAGE-MILESTONE-1.md), with commit
+  5c810a7: native lowering now releases what dies after the statements of
+  every sequence form, not only `Sequence`. These releases come from
+  `hir::affine::releasesAfter`, the same release scopes that
+  `hir::contexts::ReleaseEdges` already charges. So each cleanup they call
+  is in `LiveCleanups`, and `LiveCleanup`'s backstop never fires for them.
+  *Executed:* the http package's test client (`tests/http/client.bot`, in
+  its package graph) compiles to NIR on the merged tree. Its NIR has one
+  cleanup table and 937 cleanup calls, with no NATIVE BUG. The client's own
+  tests (`tests/http-client.test`) are skipped locally: they need the
+  package's native build. CI runs them where it builds the package.
+* **Consumed fold intermediates** (`hir/affine.tcl`). Release scopes of
+  fold intermediates; the context analysis reads them through the same
+  `ReleaseEdges`.
+* **Android AArch64 target support.** Only `cfg` gates in
+  `native/src/runtime/affine.rs`'s tests and the ISA flags in
+  `native/src/codegen/mod.rs`, beside this milestone's
+  `cleanup_root_tests`. Nothing in them touches the cleanup table or the
+  runtime's refusal.
+
+The merge had no conflicts. *Executed* on the merged tree, after
+rebuilding the native backend:
+
+| check | outcome |
+|---|---|
+| `tests/unused-context.test` | 27 passed |
+| `tests/resources.test` (with `main`'s sequence-form test) | 42 passed |
+| `tests/threads.test` | 21 passed |
+| `tests/event-loop.test` | 109 passed |
+| `tests/event-loop-linux.test` | 16 passed, 10 skipped (`eventLoopSdl`: no SDL3 build here) |
+| `tests/actor.test` | 67 passed |
+| `tests/affine.test`, `tests/coroutines.test`, `tests/fold-loops.test` | 48, 81 and 104 passed |
+| `audit/unused-context-import/tools/mutate.tcl` | 10 of 10 killed |
+| `cargo test ... --bin botlish-native cleanup` | 2 passed |
+| `tools/mutant-catalogs.tcl` | 97 catalogs, 3308 mutants, 0 problems |
+| `tools/compilerpedia.tcl check` | 1294 topics, 760 examples, 0 problems |
+| `audit/golden/migration/merge.tcl -check 1` | 0 problems |
+
+`main`'s own state at the merge: its last completed test runs (`tests`,
+`tests (linux arm64)`, `tests (macos arm64)` and `tests (windows x86-64)`,
+at f2787af) all succeeded. The runs of every later push were cancelled by
+the push after it, and those on 04c9493 were pending.
 
