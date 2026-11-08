@@ -1,0 +1,75 @@
+{
+  "schema": 1,
+  "kind": "botlish-react-native-package",
+  "generator": {
+    "name": "botlish-react-native",
+    "version": "0.1.0",
+    "protocol": 1
+  },
+  "package": {
+    "name": "react-native-botlish-game",
+    "version": "0.1.0",
+    "module": "BotlishGame",
+    "spec": "BotlishGameSpec",
+    "cxxModule": "BotlishGameModule",
+    "cmakeTarget": "botlish_rn_botlishgame"
+  },
+  "library": {
+    "name": "game",
+    "manifestSchema": 2,
+    "abi": 1,
+    "target": "android-aarch64",
+    "triple": "aarch64-linux-android",
+    "frontEnd": "f59ed9acbd5f3771-5320453",
+    "runtimeAbi": "e6c1492eceebb13c",
+    "targetSupport": "botlish_target_android_aarch64",
+    "toolchain": "Android NDK 29.0.14206865",
+    "sha256": {
+      "manifest": "60f9113d687093e7657faf6dcf65f58c44306cc9aa9d19330cce8318910c80d6",
+      "shared": "b0f61943e2fae9eb545f673d8e17f7b146fb8fef3803d9424f1ab9c2d61d0ba9",
+      "header": "7923f1f197def02b97f8936cee376b5fe76ec9859a1a28c18f1aad014651fd4c",
+      "static": "398e3e602c41e9e393bd4da7d282d1d91cef7a367a7456bb506a798fb7bb8671"
+    },
+    "exports": [
+      "new_game",
+      "move",
+      "score",
+      "place"
+    ]
+  },
+  "reactNative": {
+    "range": ">=0.88.0 <0.89.0",
+    "tested": "0.88.1",
+    "architecture": "new",
+    "engine": "hermes",
+    "module": "pure-cxx-turbomodule",
+    "codegen": "app"
+  },
+  "android": {
+    "abis": [
+      "arm64-v8a"
+    ],
+    "minimumApi": {
+      "library": 21,
+      "reactNative": 24,
+      "package": 24
+    },
+    "pageSize": 16384
+  },
+  "ios": null,
+  "files": [
+    "package.json",
+    "react-native.config.js",
+    "src/NativeBotlishGame.ts",
+    "src/index.ts",
+    "cpp/BotlishGameCore.h",
+    "cpp/BotlishGameCore.cpp",
+    "cpp/BotlishGameModule.h",
+    "cpp/BotlishGameModule.cpp",
+    "android/CMakeLists.txt",
+    "README.md",
+    "include/game.h",
+    "native/android/arm64-v8a/libgame.so",
+    "botlish/game.manifest.json"
+  ]
+}

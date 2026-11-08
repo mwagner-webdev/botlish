@@ -64,6 +64,15 @@ function environment() {
   log(`env textkit ${JSON.stringify(Text_.library)}`);
   expect('env-hermes', hermes);
   expect('env-native-module', NativeGame != null);
+  // The first call creates the module's Botlish instance on this thread.
+  const t0 = now();
+  Game.newGame(1);
+  const t1 = now();
+  Game.newGame(1);
+  const t2 = now();
+  Text_.scalarCount('a');
+  const t3 = now();
+  log(`timing first call ${(t1 - t0).toFixed(3)} ms (the game instance created), second ${(t2 - t1).toFixed(3)} ms; textkit's first ${(t3 - t2).toFixed(3)} ms`);
 }
 
 function oracle(): string[] {

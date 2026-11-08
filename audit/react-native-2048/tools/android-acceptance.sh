@@ -56,7 +56,8 @@ launch() { # NAME PATTERN COUNT LIMIT EXTRAS...
     local name=$1 pattern=$2 count=$3 limit=$4
     shift 4
     adb logcat -c
-    shellp am start -W -n "$activity" "$@" | tee "$out/$name.start" | grep -E "TotalTime|WaitTime|Status" || true
+    shellp am start -W -n "$activity" "$@" >"$out/$name.start"
+    note "  $name: launch $(grep -E "TotalTime|WaitTime" "$out/$name.start" | tr -s ' \n' ' ')"
     waitFor "$name" "$pattern" "$count" "$limit"
 }
 
