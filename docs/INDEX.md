@@ -161,6 +161,7 @@ at its top ("Superseded by ...", "Partially superseded by ...").
 - [NATIVE-TCL-UNICODE.md](NATIVE-TCL-UNICODE.md) -- Tcl-compatible Unicode character classification
 - [UNICODECHAR-CLASSIFIERS.md](UNICODECHAR-CLASSIFIERS.md) -- `std::char::is_tcl_alpha`/`is_tcl_alnum`: character classes of a `UnicodeChar`
 - [EQUALITY-SEMANTICS.md](EQUALITY-SEMANTICS.md) -- type-blind `==`, the one-character-literal warning's hazard, and a checked equality (its semantic census, which revises the proposal, is `../audit/equality-semantics/EQUALITY-SEMANTIC-CENSUS.md`)
+- [TEXT-AND-COLLECTION-PRECISION-CENSUS.md](TEXT-AND-COLLECTION-PRECISION-CENSUS.md) -- text construction and collection type precision, from the TUI clean-room findings: the checker keeps a loop element's type in every context tested, but HIR's binding table never records loop clause bindings (the hover's `any`); `encode_utf8`'s `List[Byte]` depends on `std::byte` being loaded; invariant collection admission beside a covariant lub; no Int-to-UnicodeChar conversion, the five-escape literal grammar, no linear String join (folds of `concat` copy O(n²) natively; the recommended `std::test::joined` too); probes, a type matrix, a benchmark and eight separate follow-up milestones (census; no implementation; material: `../audit/text-collection-precision/`)
 
 ### Systems boundary: ABI, Linux and process I/O
 
