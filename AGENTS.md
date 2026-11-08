@@ -4844,8 +4844,7 @@ difference from `BOTLISH_STATIC_SCHEDULER=sequential`: add its edge to
 `hir/staticdeps.tcl`, not a special case to the scheduler. The sequential
 order's waiting rule (STATIC-COMPILE.md, "The waiting rule";
 `hir::staticdeps::Waiting`) reads that analysis's waiting channels
-(`C:erased`, `C:budget:B`, `C:unwind`; never the gates `C:verdict` and
-`C:plan`): a
+(`C:erased`, `C:unwind`; never the gates `C:verdict` and `C:plan`): a
 failing block consuming one waits while a failing block contributes to it,
 so a consumer's verdict does not depend on where its contributors are
 written. An edge into a waiting channel's part of the graph, or a new link
@@ -4854,8 +4853,7 @@ count: check the fuzzer's layout claim on several seeds (17 and 41 among
 them). If you change the
 schedulers, the dependency analysis, the method-call seeds or build reuse
 (`hir/hir.tcl`), or add a fact an analysis reads across functions (a summary,
-an inferred contract, the erased-callable contract, an instance budget, a
-yield type, a diagnostic suppressed by reachability or by a whole-program
+an inferred contract, the erased-callable contract, a yield type, a diagnostic suppressed by reachability or by a whole-program
 verdict such as the ownership analysis's, which withholds release scopes and
 `AFFINE-PATH-RELEASE-UNSUPPORTED` from a program it rejects, or the trait
 plan's gate, which reports its diagnostics only for a program with no other;

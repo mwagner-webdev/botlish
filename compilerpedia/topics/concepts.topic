@@ -5835,7 +5835,7 @@ summary: An untyped parameter makes a function generic; the compiler re-analyzes
 index: concepts
 alias: generic function; generics; semantic instance; call-site specialization; type parameters
 keywords: generic, untyped, instance, specialization, monomorphization, any, -aot-spec, cranelift-generic, type variable, template
-related: concept.types concept.functions concept.traits backend.cranelift backend.cranelift-generic backend.performance error.type
+related: concept.types concept.functions concept.traits backend.cranelift backend.cranelift-generic backend.performance error.type error.hir-semantic-limit
 
 == WHAT IT IS
 Botlish has no type parameters (`fn f[T]` does not exist). A function
@@ -5858,7 +5858,14 @@ more under those types:
   * Typed parameters are contracts checked at the call; untyped ones are
     checked through the instance's analysis, so a wrong argument type is
     still a compile-time TYPE error where the instance proves it.
-  * Bounded: at most 8 specialized instances per function.
+  * Semantic instances are not rationed: a function called with a
+    thousand distinct argument types is analyzed a thousand times, each
+    call as precisely as the first, whatever other calls exist. Past the
+    compiler's one resource guard (2,000 instances) compilation stops
+    with error.hir-semantic-limit rather than check a call less
+    precisely.
+  * Specialized code is bounded: at most 8 specialized instances per
+    function, then its generic code (slower, never an error).
   * `botlish -aot-spec FILE` shows the instances and their types.
 
 == WHY

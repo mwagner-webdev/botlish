@@ -116,26 +116,50 @@
 # only grow (lub) in the finite lattice of hir::types (aggregate nesting is
 # bounded), with a pass limit as a guard.
 #
-# Budgets (never a false error): at most `maxPerBlock` instances of one block,
-# `maxInstances` in all and `maxDepth` nested analyses; a request beyond is
-# DECLINED and the call keeps its ordinary generic typing. That fallback is
-# sound only because it is the pre-existing behavior: a declined call gives its
-# parameters no instance context, so hir::callables still rejects a bearing
-# argument (a MutableArray[T], a typed callable) that would cross an untyped
-# parameter -- a budget never accepts an erasure. A real type error found in an
-# instance is never turned into a fallback. Only a first request is declined
-# for nesting (a cache hit never is), so which request is declined depends on
-# the requests before it: every request made at half the nesting limits or
-# deeper is recorded (`deep`), for the static decisions' dependency analysis
-# (hir/staticdeps.tcl, C:budget).
+# Budgets (SEMANTIC-INSTANCE-SCALABILITY-MILESTONE-1.md)
+# -------
+# Whether a program is valid must not depend on how many unrelated types have
+# instantiated a helper, so no request is ever declined for a budget: a call
+# whose instance is not analyzed would keep its generic result, which a typed
+# use rejects as a TYPE error the program did not commit (the per-function
+# budget of 16 instances did exactly that, at the 17th distinct type). What
+# bounds the analysis instead:
+#
+#   * the key space is finite: an entry type is a type of the finite lattice
+#     of hir::types (aggregate nesting is bounded, appliedDepth for
+#     applications; minted List lengths are forgotten, ForgetInferred), so a
+#     function has finitely many instances, and type-changing recursion
+#     (wrap([x], n - 1)) reaches `any` at the aggregate bound;
+#   * an instance's result only grows (lub), with passLimit as a widening:
+#     past it a still-growing result is `any` -- a function of the instance
+#     alone, never of other requests;
+#   * nesting: a request made with maxDepth analyses in progress (or Tcl's
+#     stack near levelLimit) is deferred to the worklist (Defer), which
+#     analyzes it once they return; it costs walks, never precision, and does
+#     not depend on which request came first;
+#   * the worklist's length (Drain) and the number of instances
+#     (maxInstances) are the resource guards left: reaching either fails the
+#     compilation with HIR SEMANTIC LIMIT, naming the function and the chain
+#     of instances being analyzed (Exhausted). A compiler failure, never a
+#     TYPE error of the program and never a fallback that could accept an
+#     erasure.
+#
+# The one request still declined is a closure's whose creation environment
+# no walk has recorded yet (no-env, "Captures"), which a later walk of the
+# program serves. A declined call gives its parameters no instance context, so
+# hir::callables still rejects a bearing argument (a MutableArray[T], a typed
+# callable) that would cross an untyped parameter -- a decline never accepts
+# an erasure. A real type error found in an instance is never turned into a
+# fallback.
 #
 # Validity
 # --------
 # Analysis (Walk) and verification are separate. Walk types the body under the
-# entry environment and yields the result; each instance's final walk is
-# snapshotted (the volatile per-expression facts of its region, not a HIR
-# clone). verify then runs, on a view of the HIR carrying that snapshot, the
-# same checks every function body gets for its own definition: the typed-call
+# entry environment, in the program's HIR in place ("Region-local walks"),
+# and yields the result; each instance's final walk is snapshotted (the
+# volatile per-expression facts of its region, not a HIR clone). verify then
+# runs, on the HIR carrying that snapshot (applied in place and taken back),
+# the same checks every function body gets for its own definition: the typed-call
 # admissibility proofs and MutableArray store/copy rules
 # (hir::range::verifyBlocks) and the bearing/non-erasure audit
 # (hir::callables::verifyBlocks). A diagnostic there means "this function is
@@ -151,15 +175,17 @@
 # still derived from declaration + body alone, and hir::moduleSignatures never
 # reports an instance.
 #
-# Status: analyzing -> analyzed; then verify: valid | invalid. A request that is
-# not instantiated is `declined` with a reason (no-env, budget-block,
-# budget-total, nesting).
+# Status: (deferred ->) analyzing -> analyzed; then verify: valid | invalid. A
+# request that is not instantiated is `declined` with its reason, no-env.
 
 namespace eval hir::semantic {
     # 0 disables the whole layer (measurement and tests only).
     variable enabled 1
-    variable maxPerBlock 16
+    # The one budget (header, "Budgets"): reaching it fails the compilation
+    # (HIR SEMANTIC LIMIT). There is no per-function budget.
     variable maxInstances 2000
+    # Nested analyses: a request deeper is deferred to the worklist, never
+    # declined (Defer).
     variable maxDepth 24
     variable passLimit 6
     # hir::types::infer re-runs the walk (once the creation environments of
@@ -185,8 +211,9 @@ proc hir::semantic::Enabled {} {
 proc hir::semantic::Begin {envs} {
     variable state
     set state [dict create envs $envs pendingEnv {} instances {} keys {} byBlock {} \
-        calls {} declined {} deep {} stack {} queue {} deps {} base "" next 0 regions {} instsOf {} \
-        requests 0 trivial 0 hits 0 walks 0 declinedCount {}]
+        calls {} declined {} stack {} queue {} deps {} txns {} next 0 regions {} \
+        regionScopes {} scopeKids "" instsOf {} \
+        requests 0 trivial 0 hits 0 walks 0 deferred 0 declinedCount {}]
 }
 
 # Ends the run: the state a HIR keeps as its `semantic` field (instances,
@@ -215,10 +242,23 @@ proc hir::semantic::End {} {
         }
     }
     dict set s used [lsort -dictionary $used]
-    foreach key {base stack queue regions} {
+    foreach id $used {
+        if {[dict get $s instances $id status] ne "analyzed"} {
+            # (Every request that defers an instance drains the worklist
+            # before it returns: Call.)
+            error "hir::semantic: instance $id was never analyzed"
+        }
+    }
+    foreach key {stack queue txns regions regionScopes scopeKids} {
         dict unset s $key
     }
     return $s
+}
+
+# Ends the run in progress without a result (a walk that failed).
+proc hir::semantic::Abandon {} {
+    variable state
+    set state {}
 }
 
 # The record {block B args ENTRY ...} of instance ID of the run in progress,
@@ -279,14 +319,15 @@ proc hir::semantic::RecordEnv {hir outer e self selfType} {
 # Requests
 
 # The result type of the exact call E of BLOCK with ARGTYPES seen by
-# context CTX of HIR (the generic walk, or a semantic instance's walk):
-# BLOCKRESULT (the call's ordinary generic result) unless a semantic instance
-# proves a more precise one. Records the call -> instance edge that
-# hir::callables and hir::range::VerifyCall consult.
-proc hir::semantic::Call {hir ctx e block argTypes blockResult} {
+# context CTX of the HIR in variable HIRVAR (the generic walk's, which an
+# instance's walk types in place: "Region-local walks"): BLOCKRESULT (the
+# call's ordinary generic result) unless a semantic instance proves a more
+# precise one. Records the call -> instance edge that hir::callables and
+# hir::range::VerifyCall consult.
+proc hir::semantic::Call {hirVar ctx e block argTypes blockResult} {
+    upvar 1 $hirVar hir
     variable state
     variable enabled
-    variable maxPerBlock
     variable maxInstances
     variable maxDepth
     variable levelLimit
@@ -306,7 +347,6 @@ proc hir::semantic::Call {hir ctx e block argTypes blockResult} {
     # Entry types (header, "The key").
     set declared [hir::signatures::entryTypes $hir $block]
     set entry {}
-    set generics {}
     set trivial 1
     set index 0
     foreach t $argTypes d $declared {
@@ -353,7 +393,6 @@ proc hir::semantic::Call {hir ctx e block argTypes blockResult} {
             set trivial 0
         }
         lappend entry $x
-        lappend generics $generic
     }
     if {$trivial} {
         dict incr state trivial
@@ -364,83 +403,47 @@ proc hir::semantic::Call {hir ctx e block argTypes blockResult} {
     if {$caller eq "generic" && [dict get $state queue] ne {} && [dict get $state stack] eq {}} {
         # Instances whose environment changed since the last request are
         # settled before this walk reads any answer.
-        dict set state base $hir
-        try {
-            Drain
-        } finally {
-            dict set state base ""
-        }
+        Drain hir
     }
     set callKey [list $caller $e]
-    if {2 * [llength [dict get $state stack]] >= $maxDepth || 2 * [info level] > $levelLimit} {
-        # A request at half the nesting limits or deeper, answered or not: a
-        # cache hit is never declined, but once a rejection removes the
-        # request that created its instance, this one may be the first and
-        # be declined (`deep`: hir/staticdeps.tcl reads it as pressure on the
-        # instance budget, C:budget).
-        dict set state deep $callKey 1
-    }
     if {[dict exists $state keys $key]} {
         dict incr state hits
         set id [dict get $state keys $key]
     } else {
         set reason [Declined $hir $block]
-        if {$reason eq "" && [dict exists $state instances] } {
-            if {[dict size [dict get $state instances]] >= $maxInstances} {
-                set reason budget-total
-            } elseif {[dict exists $state byBlock $block] && [dict get $state byBlock $block] >= $maxPerBlock} {
-                set reason budget-block
-            } elseif {[llength [dict get $state stack]] >= $maxDepth || [info level] > $levelLimit} {
-                set reason nesting
-            }
-        }
-        if {$reason in {budget-total budget-block}
-                && ([hir::traits::IsPolymorphic $hir $block] || [hir::types::AnyAffine $entry])} {
-            # A trait-polymorphic function's call has no generic fallback:
-            # its witnesses decide which specialization it is (TRAITS.md).
-            # Past the budget it gets the instance keyed by its trait
-            # parameters' views alone, every other parameter at its generic
-            # type -- at most one per witness combination. So does a call
-            # that gives an affine argument (AFFINE-VALUES.md), keyed by its
-            # affine entry types.
-            set entry [lmap x $entry g $generics {
-                if {[hir::types::IsView $x] || [hir::types::IsAffine $x]} {set x} else {set g}
-            }]
-            set key [list $block $entry]
-            set reason ""
-        }
-        if {$reason eq "" && [dict exists $state keys $key]} {
-            dict incr state hits
-            set id [dict get $state keys $key]
-        } elseif {$reason ne ""} {
+        if {$reason ne ""} {
+            # (Only for want of a creation environment, which a later walk
+            # of the program records: never a budget.)
             dict set state declined $callKey $reason
             Bump declinedCount $reason
-            if {$reason eq "no-env"} {
-                dict set state pendingEnv $block 1
-            }
+            dict set state pendingEnv $block 1
             return $blockResult
+        }
+        if {[dict size [dict get $state instances]] >= $maxInstances} {
+            # The one resource guard left: a compiler failure, never a
+            # fallback a typed use could turn into a TYPE error (header,
+            # "Budgets").
+            Exhausted $hir $block $entry
+        }
+        set id [Create $block $entry $key]
+        if {[dict get $state stack] eq {}} {
+            Analyze hir $id
+            Drain hir
+        } elseif {[llength [dict get $state stack]] >= $maxDepth || [info level] > $levelLimit} {
+            # Deep enough: analyzed by the worklist once the analyses in
+            # progress return (Defer), never declined.
+            Defer $id
         } else {
-            set id [Create $block $entry $key]
-            if {[dict get $state stack] eq {}} {
-                dict set state base $hir
-                try {
-                    Analyze $id
-                    Drain
-                } finally {
-                    dict set state base ""
-                }
-            } else {
-                Analyze $id
-            }
+            Nested hir $id
         }
     }
     dict set state calls $callKey $id
     if {$caller ne "generic"} {
         dict set state deps $id $caller 1
-        if {[dict get $state instances $id status] eq "analyzing"} {
+        if {[dict get $state instances $id status] in {analyzing deferred}} {
             # The caller read an answer that is still being computed (a
-            # recursive request): its own result is an assumption until the
-            # fixpoint settles.
+            # recursive or deferred request): its own result is an
+            # assumption until the fixpoint settles.
             dict set state instances $caller assumes 1
         }
     }
@@ -456,6 +459,41 @@ proc hir::semantic::Call {hir ctx e block argTypes blockResult} {
         return $blockResult
     }
     return $result
+}
+
+# Fails the compilation: a new instance of BLOCK under ENTRY is needed, and
+# maxInstances exist already. The resource guard's report names the
+# function, its entry types and the chain of instances being analyzed when
+# the request was made (header, "Budgets"): never a TYPE error at a later
+# use of the generic result the call would otherwise have kept.
+proc hir::semantic::Exhausted {hir block entry} {
+    variable state
+    variable maxInstances
+    set chain [lmap id [lreverse [dict get $state stack]] {
+        set inst [dict get $state instances $id]
+        format {%s (%s)} [Named $hir [dict get $inst block]] [EntryText $hir [dict get $inst block] [dict get $inst args]]
+    }]
+    set text [format {%s (%s)} [Named $hir $block] [EntryText $hir $block $entry]]
+    if {$chain ne {}} {
+        append text ", requested while analyzing [join $chain {, called from }]"
+    }
+    throw {HIR SEMANTIC LIMIT} "hir::semantic: the semantic-instance limit was reached: $maxInstances instances were analyzed, and a call needs another one: $text; the compiler does not fall back to the untyped analysis, which could reject a valid program (declare the parameter types of a function called with very many argument types)"
+}
+
+# The source name of function BLOCK, or `function eN`.
+proc hir::semantic::Named {hir block} {
+    set name [CallableName $hir $block]
+    if {$name eq ""} {
+        return "function $block"
+    }
+    return $name
+}
+
+# "x : MutableArray[str], y : int": BLOCK's parameters at ENTRY.
+proc hir::semantic::EntryText {hir block entry} {
+    return [join [lmap b [dict get $hir exprs $block params] t $entry {
+        format {%s : %s} [SourceName $hir $b] [ShowType $hir $t]
+    }] {, }]
 }
 
 # 1 if call E, typed in CTX, is answered by an instance whose result is
@@ -550,20 +588,26 @@ proc hir::semantic::Bump {field {key ""}} {
     }
 }
 
-# Analyzes instance ID to its fixpoint. Self recursion re-walks until the
-# result stops growing; a change that other analyzing instances already read
-# marks them dirty, one that finished instances read queues them.
-proc hir::semantic::Analyze {id} {
+# Analyzes instance ID to its fixpoint, walking it on the HIR in variable
+# HIRVAR (Walk). Self recursion re-walks until the result stops growing; a
+# change that other analyzing instances already read marks them dirty, one
+# that finished instances read queues them.
+proc hir::semantic::Analyze {hirVar id} {
+    upvar 1 $hirVar hir
     variable state
     variable passLimit
     dict lappend state stack $id
+    if {[dict get $state instances $id status] eq "deferred"} {
+        # (Its first analysis, as a fresh instance's: Create.)
+        dict set state instances $id status analyzing
+    }
     try {
         set passes 0
         while 1 {
             incr passes
             dict set state instances $id dirty 0
             dict set state instances $id assumes 0
-            lassign [Walk $id] walked scratch outward
+            lassign [Walk hir $id] walked snapshot outward
             dict incr state walks
             dict set state instances $id outward \
                 [hir::types::lub [dict get $state instances $id outward] $outward]
@@ -589,12 +633,12 @@ proc hir::semantic::Analyze {id} {
             }
             if {![dict get $state instances $id assumes]
                     || ($new eq $old && ![dict get $state instances $id dirty])} {
-                dict set state instances $id snapshot [Snapshot $scratch $id]
+                dict set state instances $id snapshot $snapshot
                 break
             }
             if {$passes >= $passLimit + 3} {
                 dict set state instances $id result any
-                dict set state instances $id snapshot [Snapshot $scratch $id]
+                dict set state instances $id snapshot $snapshot
                 break
             }
         }
@@ -605,6 +649,43 @@ proc hir::semantic::Analyze {id} {
     }
 }
 
+# Instance ID, requested deeper than the nesting limits (maxDepth analyses
+# in progress, or Tcl's own stack near levelLimit): not analyzed now but
+# queued, so that the worklist analyzes it once the analyses in progress
+# return (Drain, at the request that started them). Until then it answers
+# with its current result, never, as a recursive request does: whoever reads
+# it assumes (Call) and is analyzed again when the answer grows. So depth
+# costs walks, never precision, and never depends on which request came
+# first.
+proc hir::semantic::Defer {id} {
+    variable state
+    dict set state instances $id status deferred
+    Bump deferred
+    Requeue $id
+}
+
+# Instance ID, requested from inside another instance's walk: analyzed now,
+# from the HIR as the request that started the walks in progress found it.
+# Only the innermost walk's changes are in HIRVAR (every walk starts from
+# that HIR: Walk), so it is put aside for the nested analysis and back after.
+proc hir::semantic::Nested {hirVar id} {
+    upvar 1 $hirVar hir
+    variable state
+    set txns [dict get $state txns]
+    if {$txns eq {}} {
+        Analyze hir $id
+        return
+    }
+    set inner [lindex $txns end]
+    set current [Capture $hir $inner]
+    Rewind hir $inner
+    try {
+        Analyze hir $id
+    } finally {
+        Rewind hir $current
+    }
+}
+
 proc hir::semantic::Requeue {id} {
     variable state
     if {$id ni [dict get $state queue]} {
@@ -612,10 +693,16 @@ proc hir::semantic::Requeue {id} {
     }
 }
 
-# Re-analyzes instances whose inputs grew, oldest first, until none is
-# queued (a top-level request returns only settled answers).
-proc hir::semantic::Drain {} {
+# Re-analyzes queued instances -- those whose inputs grew, and those
+# deferred -- oldest first, until none is queued (a top-level request
+# returns only settled answers). The guard is a compiler resource failure:
+# each instance's result only grows in a finite lattice, so the worklist
+# converges, and its length is bounded by the instances' count and the
+# passes each may take.
+proc hir::semantic::Drain {hirVar} {
+    upvar 1 $hirVar hir
     variable state
+    variable passLimit
     set guard 0
     while {[dict get $state queue] ne {}} {
         set id [lindex [dict get $state queue] 0]
@@ -623,62 +710,76 @@ proc hir::semantic::Drain {} {
         if {$id in [dict get $state stack]} {
             continue
         }
-        if {[incr guard] > 5000} {
-            error "hir::semantic: instance worklist did not converge"
+        set limit [expr {5000 + 4 * ($passLimit + 3) * [dict size [dict get $state instances]]}]
+        if {[incr guard] > $limit} {
+            throw {HIR SEMANTIC LIMIT} "hir::semantic: the semantic-instance worklist did not converge after $limit analyses"
         }
-        Analyze $id
+        Analyze hir $id
     }
 }
 
 # One walk of instance ID's block body under its entry environment: the
-# ordinary semantic inference (hir::types::Sequence) over a scratch copy of
-# the request-time HIR, with the block's parameters seeded by the entry types
-# and its captures by the recorded creation environment. Returns {RESULT
-# SCRATCH}.
-proc hir::semantic::Walk {id} {
+# ordinary semantic inference (hir::types::Sequence) of the HIR in variable
+# HIRVAR -- the generic walk's own, typed in place: no copy of it is made --
+# with the block's parameters seeded by the entry types and its captures by
+# the recorded creation environment. Every change the walk makes is undone
+# before it returns (Save, Restore: "Region-local walks"), after the
+# region's facts are read into the instance's snapshot. Returns {RESULT
+# SNAPSHOT OUTWARD}.
+proc hir::semantic::Walk {hirVar id} {
+    upvar 1 $hirVar hir
     variable state
-    set scratch [dict get $state base]
     set inst [dict get $state instances $id]
     set block [dict get $inst block]
-    set node [dict get $scratch exprs $block]
-    set ctx [hir::types::NewContext]
-    dict set ctx inst $id
-    set types [dict get $inst env]
-    foreach b [dict get $node params] t [dict get $inst args] {
-        dict set types $b $t
+    set journal [Save hir $block]
+    dict lappend state txns $journal
+    set outermost [expr {[llength [dict get $state txns]] == 1}]
+    try {
+        set node [dict get $hir exprs $block]
+        set ctx [hir::types::NewContext]
+        dict set ctx inst $id
+        set types [dict get $inst env]
+        foreach b [dict get $node params] t [dict get $inst args] {
+            dict set types $b $t
+        }
+        dict set ctx types $types
+        set body [hir::types::Sequence hir ctx [dict get $node body]]
+        set result [hir::types::lub $body [dict get $ctx returnType]]
+        if {$result eq "never" && [dict get $ctx poisonResult]} {
+            # Every normal completion of this walk is poison (hir/types.tcl,
+            # "Poison"): so is the call of the instance (PoisonedCall).
+            dict set state instances $id poisoned 1
+        } elseif {[dict exists $state instances $id poisoned]} {
+            dict unset state instances $id poisoned
+        }
+        dict set hir exprs $block inferredResultType [hir::types::intern hir $result]
+        set declared [dict get $node declaredResult]
+        if {$declared ne {}} {
+            set result [hir::traits::ViewResult $declared $result]
+        }
+        dict set hir exprs $block resultType [hir::types::intern hir $result]
+        set snapshot [Snapshot $hir $id]
+        set outward [Outward $hir $block $result]
+    } finally {
+        dict set state txns [lrange [dict get $state txns] 0 end-1]
+        Restore hir $journal $outermost
     }
-    dict set ctx types $types
-    set body [hir::types::Sequence scratch ctx [dict get $node body]]
-    set result [hir::types::lub $body [dict get $ctx returnType]]
-    if {$result eq "never" && [dict get $ctx poisonResult]} {
-        # Every normal completion of this walk is poison (hir/types.tcl,
-        # "Poison"): so is the call of the instance (PoisonedCall).
-        dict set state instances $id poisoned 1
-    } elseif {[dict exists $state instances $id poisoned]} {
-        dict unset state instances $id poisoned
-    }
-    dict set scratch exprs $block inferredResultType [hir::types::intern scratch $result]
-    set declared [dict get $node declaredResult]
-    if {$declared ne {}} {
-        set result [hir::traits::ViewResult $declared $result]
-    }
-    dict set scratch exprs $block resultType [hir::types::intern scratch $result]
-    return [list $result $scratch [Outward $scratch $block $result]]
+    return [list $result $snapshot $outward]
 }
 
 # The outward type of a coroutine rooted at BLOCK, as this instance walk
-# typed it (SCRATCH, its result RESULT): the join of the result and of every
+# typed it (HIR, its result RESULT): the join of the result and of every
 # value one of BLOCK's own yields sends (hir::coroutines::Outward's join,
 # with the instance's types). A construction whose root call has an
 # instance is typed with it (ConstructionOutward).
-proc hir::semantic::Outward {scratch block result} {
-    if {![dict exists $scratch coroutines direct $block]} {
+proc hir::semantic::Outward {hir block result} {
+    if {![dict exists $hir coroutines direct $block]} {
         return $result
     }
-    foreach y [dict get $scratch coroutines direct $block] {
-        set value [lindex [dict get $scratch exprs $y args] 0]
-        if {$value eq "" || [dict get $scratch exprs $value type] eq ""} continue
-        set result [hir::types::lub $result [hir::typeOf $scratch $value]]
+    foreach y [dict get $hir coroutines direct $block] {
+        set value [lindex [dict get $hir exprs $y args] 0]
+        if {$value eq "" || [dict get $hir exprs $value type] eq ""} continue
+        set result [hir::types::lub $result [hir::typeOf $hir $value]]
     }
     return $result
 }
@@ -729,17 +830,17 @@ proc hir::semantic::Region {hir e} {
     return $result
 }
 
-# The volatile facts of instance ID's final walk over its region (a small
+# The volatile facts instance ID's walk left in HIR over its region (a small
 # per-instance side table; the HIR is never cloned).
-proc hir::semantic::Snapshot {scratch id} {
+proc hir::semantic::Snapshot {hir id} {
     variable state
     variable fields
     variable typeFields
     set block [dict get $state instances $id block]
     set exprs [dict create]
     set bindings [dict create]
-    foreach e [Region $scratch $block] {
-        set node [dict get $scratch exprs $e]
+    foreach e [Region $hir $block] {
+        set node [dict get $hir exprs $e]
         set rec [dict create]
         foreach f $fields {
             if {![dict exists $node $f]} {
@@ -750,7 +851,7 @@ proc hir::semantic::Snapshot {scratch id} {
                 if {$v eq ""} {
                     set v ""
                 } else {
-                    set v [dict get $scratch types $v]
+                    set v [dict get $hir types $v]
                 }
             }
             dict set rec $f $v
@@ -758,9 +859,9 @@ proc hir::semantic::Snapshot {scratch id} {
         dict set exprs $e $rec
         if {[dict get $node kind] eq "bind" && ![dict get $node duplicate]} {
             set b [dict get $node binding]
-            if {$b ne "" && [dict exists $scratch bindings $b type]
-                    && [dict get $scratch bindings $b type] ne ""} {
-                dict set bindings $b [dict get $scratch types [dict get $scratch bindings $b type]]
+            if {$b ne "" && [dict exists $hir bindings $b type]
+                    && [dict get $hir bindings $b type] ne ""} {
+                dict set bindings $b [dict get $hir types [dict get $hir bindings $b type]]
             }
         }
     }
@@ -768,8 +869,16 @@ proc hir::semantic::Snapshot {scratch id} {
 }
 
 # HIR viewed as instance ID's final walk left it: the region's facts replaced
-# by the snapshot, calls resolved in the instance's own context.
+# by the snapshot, calls resolved in the instance's own context. A copy of
+# the whole HIR: verify applies the snapshot in place instead (Apply).
 proc hir::semantic::View {hir id} {
+    Apply hir $id
+    return $hir
+}
+
+# Makes the HIR in variable HIRVAR the view of instance ID (View), in place.
+proc hir::semantic::Apply {hirVar id} {
+    upvar 1 $hirVar hir
     variable typeFields
     set snapshot [dict get $hir semantic instances $id snapshot]
     dict for {e rec} [dict get $snapshot exprs] {
@@ -789,7 +898,265 @@ proc hir::semantic::View {hir id} {
     if {[dict exists $hir violatedContracts]} {
         dict unset hir violatedContracts
     }
-    return $hir
+}
+
+# ---------------------------------------------------------------------------
+# Region-local walks (SEMANTIC-INSTANCE-SCALABILITY-MILESTONE-1.md)
+#
+# An instance's walk types its block's region in the HIR the generic walk is
+# typing -- that variable itself (Call, Analyze and Walk take its name) -- and
+# verification applies an instance's snapshot to the checked HIR the same way
+# (verify). Neither copies the program: Tcl copies a table on its first
+# write only when another value shares it, and a scratch copy of the HIR
+# shared every table with the program, so its first type write copied the
+# whole expression table -- O(program) per instance walk, quadratic in all.
+# A walk in place writes only what it types, O(its region).
+#
+# The HIR is authoritative, and an instance's walk must leave it exactly as
+# it found it. Save records, before the walk, everything the walk may
+# change:
+#
+#   * every top-level entry but the tables below, as it is (one reference
+#     each: a table a walk writes -- `poisoned`, `foldConflicts` -- is copied
+#     at its first write, which costs that table's size, small and non-empty
+#     only where it is about a diagnostic);
+#   * of `exprs`, every expression of the block's region (Region: the block,
+#     its body, the closures it creates);
+#   * of `scopes` and `bindings`, every scope nested in the block's body
+#     scope (RegionScopes) and every binding declared in one: a walk types
+#     the bindings it binds and refines the scopes it branches into;
+#   * of `types` and `typeIds`, the interning counter: interning only adds.
+#
+# Restore puts every recorded value back and drops what was added (a
+# top-level entry, the types interned since the mark). What a walk computes
+# survives only in the instance's snapshot, read before Restore (Snapshot,
+# Outward), exactly as when it was typed in a copy.
+#
+# Every walk starts from the HIR as the request that started the analyses in
+# progress found it: a walk requested from inside another (Nested) puts the
+# changes of the one in progress aside first (Capture, Rewind) and puts them
+# back after. Interning, the id counters and `symbols` only grow, so they are
+# never put aside: the ids an enclosing walk holds stay valid, and the one
+# outermost walk drops them at its end.
+#
+# auditRollback 1 (BOTLISH_SEMANTIC_ROLLBACK_AUDIT=1; tests) compares the
+# whole HIR after every Restore with the HIR before the walk, and fails the
+# compilation on any difference: a walk that writes outside what Save
+# records. It costs a copy of the program per walk (the reference shares its
+# tables): a check, not a mode to run.
+
+namespace eval hir::semantic {
+    # Tables restored entry by entry (the rest as a whole).
+    variable sparse {exprs bindings scopes types typeIds}
+    # Tables that only grow during a run: never put aside.
+    variable appendOnly {counters symbols}
+    variable auditRollback [expr {[info exists ::env(BOTLISH_SEMANTIC_ROLLBACK_AUDIT)]
+        && $::env(BOTLISH_SEMANTIC_ROLLBACK_AUDIT) eq "1"}]
+}
+
+# Scope -> the scopes whose parent it is, of HIR.
+proc hir::semantic::ScopeKids {hir} {
+    set kids [dict create]
+    dict for {s rec} [dict get $hir scopes] {
+        set parent [dict get $rec parent]
+        if {$parent ne ""} {
+            dict lappend kids $parent $s
+        }
+    }
+    return $kids
+}
+
+# The scopes of block E's region: its body scope and every scope nested in
+# it. KIDS is ScopeKids of HIR; during a run it is the run's own (scopes are
+# made by resolution, never by a walk) and so are the answers.
+proc hir::semantic::RegionScopes {hir e {kids ""}} {
+    variable state
+    if {$state ne "" && [dict exists $state regionScopes $e]} {
+        return [dict get $state regionScopes $e]
+    }
+    if {$kids eq "" && $state ne ""} {
+        if {[dict get $state scopeKids] eq ""} {
+            dict set state scopeKids [list [ScopeKids $hir]]
+        }
+        set kids [lindex [dict get $state scopeKids] 0]
+    } elseif {$kids eq ""} {
+        set kids [ScopeKids $hir]
+    }
+    set result {}
+    set work [list [dict get $hir exprs $e bodyScope]]
+    while {$work ne {}} {
+        set s [lindex $work end]
+        set work [lrange $work 0 end-1]
+        lappend result $s
+        lappend work {*}[dict getdef $kids $s {}]
+    }
+    if {$state ne ""} {
+        dict set state regionScopes $e $result
+    }
+    return $result
+}
+
+# The journal of a walk of block E's region in the HIR in variable HIRVAR
+# (header, above): what Restore puts back.
+proc hir::semantic::Save {hirVar e {kids ""}} {
+    upvar 1 $hirVar hir
+    variable sparse
+    variable auditRollback
+    set tops [dict create]
+    dict for {k v} $hir {
+        if {$k ni $sparse} {
+            dict set tops $k $v
+        }
+    }
+    set exprs [dict create]
+    foreach x [Region $hir $e] {
+        dict set exprs $x [dict get $hir exprs $x]
+    }
+    set scopes [dict create]
+    set bindings [dict create]
+    foreach s [RegionScopes $hir $e $kids] {
+        set rec [dict get $hir scopes $s]
+        dict set scopes $s $rec
+        foreach b [dict get $rec bindings] {
+            dict set bindings $b [dict get $hir bindings $b]
+        }
+    }
+    set journal [dict create tops $tops exprs $exprs scopes $scopes bindings $bindings \
+        mark [dict getdef $hir counters type 0] order [dict keys $hir]]
+    if {$auditRollback} {
+        dict set journal reference $hir
+    }
+    return $journal
+}
+
+# JOURNAL's entries as HIR holds them now (Nested: the changes of the walk in
+# progress, put aside and back).
+proc hir::semantic::Capture {hir journal} {
+    variable sparse
+    variable appendOnly
+    set tops [dict create]
+    dict for {k v} $hir {
+        if {$k ni $sparse && $k ni $appendOnly} {
+            dict set tops $k $v
+        }
+    }
+    set captured [dict create tops $tops]
+    foreach table {exprs scopes bindings} {
+        set now [dict create]
+        foreach id [dict keys [dict get $journal $table]] {
+            dict set now $id [dict get $hir $table $id]
+        }
+        dict set captured $table $now
+    }
+    return $captured
+}
+
+# Puts JOURNAL's entries (Save's, or Capture's) back into the HIR in variable
+# HIRVAR, the growing tables aside: a top-level entry it does not hold is
+# removed.
+proc hir::semantic::Rewind {hirVar journal} {
+    upvar 1 $hirVar hir
+    variable sparse
+    variable appendOnly
+    set tops [dict get $journal tops]
+    foreach k [dict keys $hir] {
+        if {$k in $sparse || $k in $appendOnly || [dict exists $tops $k]} continue
+        dict unset hir $k
+    }
+    dict for {k v} $tops {
+        if {$k in $appendOnly} continue
+        dict set hir $k $v
+    }
+    foreach table {exprs scopes bindings} {
+        dict for {id value} [dict get $journal $table] {
+            dict set hir $table $id $value
+        }
+    }
+}
+
+# Ends the walk JOURNAL is Save's of: the HIR in variable HIRVAR as it was
+# before it. The OUTERMOST walk (no other in progress) also drops what the
+# growing tables gained: the types interned since its mark, the id counters
+# and symbols made.
+proc hir::semantic::Restore {hirVar journal outermost} {
+    upvar 1 $hirVar hir
+    variable appendOnly
+    set now [dict getdef $hir counters type 0]
+    Rewind hir $journal
+    if {$outermost} {
+        set tops [dict get $journal tops]
+        foreach k $appendOnly {
+            if {[dict exists $tops $k]} {
+                dict set hir $k [dict get $tops $k]
+            } elseif {[dict exists $hir $k]} {
+                dict unset hir $k
+            }
+        }
+        set prefix [dict get $::hir::prefixes type]
+        for {set n [expr {[dict get $journal mark] + 1}]} {$n <= $now} {incr n} {
+            if {[dict exists $hir types $prefix$n]} {
+                dict unset hir typeIds [dict get $hir types $prefix$n]
+                dict unset hir types $prefix$n
+            }
+        }
+    }
+    if {[dict keys $hir] ne [dict get $journal order]} {
+        # A top-level entry the walk removed and Rewind put back went last:
+        # the entries in their order again (what the HIR holds is unchanged).
+        set ordered [dict create]
+        foreach k [dict get $journal order] {
+            if {[dict exists $hir $k]} {
+                dict set ordered $k [dict get $hir $k]
+            }
+        }
+        dict for {k v} $hir {
+            if {![dict exists $ordered $k]} {
+                dict set ordered $k $v
+            }
+        }
+        set hir $ordered
+        unset ordered
+    }
+    if {[dict exists $journal reference]} {
+        AuditRestore [dict get $journal reference] $hir $outermost
+    }
+}
+
+# Fails unless AFTER (a HIR Restore put back) is BEFORE (the HIR Save saw):
+# auditRollback's check (header, above). Below the OUTERMOST walk, the growing
+# tables may have grown.
+proc hir::semantic::AuditRestore {before after outermost} {
+    variable sparse
+    variable appendOnly
+    set growing [if {$outermost} {list} else {list {*}$appendOnly types typeIds}]
+    set problems {}
+    foreach k [lsort -unique [concat [dict keys $before] [dict keys $after]]] {
+        if {![dict exists $before $k] || ![dict exists $after $k]} {
+            if {$k in $growing && [dict exists $after $k]} continue
+            lappend problems "the top-level entry `$k` was [if {[dict exists $before $k]} {string cat removed} else {string cat added}]"
+            continue
+        }
+        if {$k eq "counters" && !$outermost} continue
+        set b [dict get $before $k]
+        set a [dict get $after $k]
+        if {$k in $sparse || $k in $growing} {
+            if {$k ni $growing && [dict size $a] != [dict size $b]} {
+                lappend problems "`$k` had [dict size $b] entries and has [dict size $a]"
+            }
+            dict for {id v} $b {
+                if {![dict exists $a $id]} {
+                    lappend problems "`$k` lost $id"
+                } elseif {[dict get $a $id] ne $v} {
+                    lappend problems "`$k` $id changed"
+                }
+            }
+        } elseif {$a ne $b} {
+            lappend problems "the top-level entry `$k` changed"
+        }
+    }
+    if {$problems ne {}} {
+        error "hir::semantic: a region-local walk did not restore the HIR: [join [lrange $problems 0 9] {; }]"
+    }
 }
 
 # ---------------------------------------------------------------------------
@@ -845,40 +1212,58 @@ proc hir::semantic::verify {hirVar} {
         dict set definitional [list [dict get $d expr] [dict get $d message]] 1
     }
     set own [dict create]
+    # Each instance is verified in the checked HIR itself, its snapshot
+    # applied in place and taken back (Save, Apply, Restore: "Region-local
+    # walks"), never in a copy of the program.
+    set kids [ScopeKids $hir]
     foreach id $used {
-        set view [View $hir $id]
         set block [dict get $semantic instances $id block]
-        set blocks [lmap e [Region $view $block] {
-            if {[dict get $view exprs $e kind] ne "block"} continue
-            set e
-        }]
-        hir::range::verifyBlocks view $blocks
-        hir::callables::verifyBlocks view $blocks
-        hir::structs::verifyExprs view [Region $view $block]
-        hir::layouts::verifyInstance view $hir [Region $view $block]
-        if {[hir::types::AnyAffine [dict get $semantic instances $id args]]} {
-            # An instance that owns an affine argument (AFFINE-VALUES.md):
-            # the ownership discipline, with the instance's own types -- a
-            # generic function that would duplicate or erase the value it
-            # was given is invalid for the call that gives it one.
-            hir::affine::verifyInstance view $block [Region $view $block]
-        }
-        dict set own $id [lmap d [dict get $view diagnostics] {
-            if {[dict exists $definitional [list [dict get $d expr] [dict get $d message]]]} continue
-            # Nor is a problem in code this instance proves unreachable (an
-            # empty domain's loop body, an arm its types decide against):
-            # the call never runs it. Its typing there describes values that
-            # cannot exist (a loop element of type `never`). The definition's
-            # own verification still checks that code as written.
-            if {[dict exists $view exprs [dict get $d expr]]
-                    && ![dict get $view exprs [dict get $d expr] reachable]} continue
-            dict set d curable [expr {[dict get $d kind] eq "UNPROVEN-FIELD"}]
-            set d
-        }]
-        if {[dict exists $view violatedContracts]} {
-            dict for {p arg} [dict get $view violatedContracts] {
-                dict set hir violatedContracts $p $arg
+        set region [Region $hir $block]
+        set journal [Save hir $block $kids]
+        # The generic program as hir::layouts::verifyInstance reads it: the
+        # region's own expressions, with their generic types.
+        set generic [dict create exprs [dict get $journal exprs] types [dict create]]
+        dict for {e node} [dict get $journal exprs] {
+            set t [dict get $node type]
+            if {$t ne ""} {
+                dict set generic types $t [dict get $hir types $t]
             }
+        }
+        try {
+            Apply hir $id
+            set blocks [lmap e $region {
+                if {[dict get $hir exprs $e kind] ne "block"} continue
+                set e
+            }]
+            hir::range::verifyBlocks hir $blocks
+            hir::callables::verifyBlocks hir $blocks
+            hir::structs::verifyExprs hir $region
+            hir::layouts::verifyInstance hir $generic $region
+            if {[hir::types::AnyAffine [dict get $semantic instances $id args]]} {
+                # An instance that owns an affine argument (AFFINE-VALUES.md):
+                # the ownership discipline, with the instance's own types -- a
+                # generic function that would duplicate or erase the value it
+                # was given is invalid for the call that gives it one.
+                hir::affine::verifyInstance hir $block $region
+            }
+            dict set own $id [lmap d [dict get $hir diagnostics] {
+                if {[dict exists $definitional [list [dict get $d expr] [dict get $d message]]]} continue
+                # Nor is a problem in code this instance proves unreachable (an
+                # empty domain's loop body, an arm its types decide against):
+                # the call never runs it. Its typing there describes values that
+                # cannot exist (a loop element of type `never`). The definition's
+                # own verification still checks that code as written.
+                if {[dict exists $hir exprs [dict get $d expr]]
+                        && ![dict get $hir exprs [dict get $d expr] reachable]} continue
+                dict set d curable [expr {[dict get $d kind] eq "UNPROVEN-FIELD"}]
+                set d
+            }]
+            set violated [dict getdef $hir violatedContracts {}]
+        } finally {
+            Restore hir $journal 1
+        }
+        dict for {p arg} $violated {
+            dict set hir violatedContracts $p $arg
         }
     }
     # 2. A call to an invalid instance makes the calling instance invalid.

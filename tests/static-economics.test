@@ -442,9 +442,12 @@ r3 = use():
 # A chain c1 .. cN of untyped functions, N one past the semantic layer's
 # nesting limit (hir::semantic's maxDepth): `late`'s call c1(1) requests cN's
 # int instance that deep, a cache hit while `early`'s body requests it
-# directly first, declined for nesting once `early` is rejected -- then
-# c1(1) keeps its generic result, `any`, a TYPE failure at want(...).
-# `other` is a second, independent failure.
+# directly first. It was declined for nesting once `early` was rejected,
+# so that c1(1) kept its generic result, `any`, a TYPE failure at want(...),
+# and the instance budget had a channel of its own (C:budget). A deep request
+# is now deferred to the worklist, never declined
+# (SEMANTIC-INSTANCE-SCALABILITY-MILESTONE-1.md): `late` is accepted whether
+# `early` stands or not. `other` is a second, independent failure.
 proc seDeepFirstRequest {} {
     set n [expr {$hir::semantic::maxDepth + 1}]
     set text "import std::compiler\n\nfn want(x: int) -> int:\n    x\n\nfn c$n\(x):\n    x\n\n"
@@ -1261,11 +1264,11 @@ test se-equal-plan-unplanned {a dead call of a trait-polymorphic function (no in
     list [seSame $::sePlanUnplanned 0] [seOutcomes $::sePlanUnplanned] [dict get $hir staticStats mispredicted]
 } -result {{} {TYPE TYPE TYPE accepted} {}}
 
-test se-equal-deep-first-request {the semantic layer declines a request for nesting only when it is the first for its instance (a cache hit never is), so rejecting the site that made the first request can make a deep one the first, and declined: `late`'s deep request is a hit until `early` is rejected, then declined, and `late` fails (TYPE: the call keeps its generic result). Every request at half the nesting limits or deeper is recorded (hir::semantic's `deep`) and puts the instance budget under pressure (C:budget), so `late` waits for `early` -- it was once predicted ok beside the two rejections, and the next build contradicted it} -body {
+test se-equal-deep-first-request {a request deeper than the nesting limit is deferred, never declined, so whether `late`'s deep request is the first for its instance changes nothing: it was a cache hit while `early` stood and is the first once `early` is rejected, and `late` is accepted either way (it was once declined there, failing TYPE, and the instance budget had a channel, C:budget, so that `late` waited for `early`) -- the batched decisions are the sequential ones, with no build contradicting a prediction} -body {
     set text [seDeepFirstRequest]
     set hir [seHir $text]
     list [seSame $text 0] [seOutcomes $text] [dict get $hir staticStats mispredicted]
-} -result {{} {TYPE TYPE TYPE} {}}
+} -result {{} {TYPE accepted TYPE} {}}
 
 test se-equal-internal-ids-exact {only a message naming an internal id the way the compiler prints one (`block(e12)`) waits for the sequential order's own build: a USE-AFTER-MOVE naming the binding `s1` after an earlier rejection is committed beside it (it was once held back as if `s1` were a scope id)} -body {
     set text "import std::compiler\n\nfn needs_int(v: int) -> int:\n    v\n\nfn producer():\n    yield 1\n    2\n\n"

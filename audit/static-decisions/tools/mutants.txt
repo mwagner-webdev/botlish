@@ -465,7 +465,7 @@ proc hir::static::Waits {key status deps} {
 @@ channels-not-consumed the dependency analysis records no site as a channel's consumer: nothing waits, in either scheduler
 ## hir/staticdeps.tcl
 <<<<
-                        if {$w in {C:erased C:unwind} || [string match C:budget:* $w]} {
+                        if {$w in {C:erased C:unwind}} {
 ====
                         if {0} {
 >>>>
@@ -514,18 +514,18 @@ proc hir::static::Waits {key status deps} {
 # function in the generic program to have its instance, was killed by
 # se-equal-plan-unplanned while the plan reported TRAIT-INSTANCE-BUDGET at a
 # dead call. It no longer does (COMPILER-BOTTLENECKS.md, 4.2): such a call
-# now lacks an instance only through a nesting decline, which no
-# deterministic test builds, so the mutant changes no outcome and was
-# removed. Unplanned keeps counting a dead call as a consumer: sound, and it
+# then lacked an instance only through a nesting decline, which no
+# deterministic test built, and since SEMANTIC-INSTANCE-SCALABILITY-
+# MILESTONE-1.md no request is declined for nesting; the mutant changes no
+# outcome and was removed. Unplanned keeps counting a dead call as a consumer: sound, and it
 # costs se-equal-plan-unplanned nothing.)
 
-@@ budget-deep-ignored a request at half the nesting limits puts no pressure on the instance budget: a deep request that is a cache hit is predicted to stay one, though rejecting the site that made the first request makes it the first, declined for nesting
-## hir/staticdeps.tcl
-<<<<
-        if {[dict exists $hir semantic deep] && [dict size [dict get $hir semantic deep]] > 0} {
-====
-        if {0} {
->>>>
+# (budget-deep-ignored, which put no pressure on the instance budget for a
+# request at half the nesting limits, was removed with that budget's channel,
+# C:budget: no request is declined for nesting or for a per-function budget
+# any more (a deep one is deferred to the worklist), so no outcome depends on
+# which request came first -- SEMANTIC-INSTANCE-SCALABILITY-MILESTONE-1.md.
+# se-equal-deep-first-request now pins that the deep request is analyzed.)
 
 @@ recheck-round-by-number the check after a demotion reuses the first check's signature rounds by their number, not by their seeds: its second round is the first check's, seeded with the contract it demotes
 ## hir/signatures.tcl
@@ -572,9 +572,9 @@ proc hir::static::Waits {key status deps} {
 @@ unwind-not-waiting whether the program unwinds is read as an ordinary dependency, not a waiting channel: a failing consumer written before the failing site that makes the program unwind is judged first, while it stands
 ## hir/staticdeps.tcl
 <<<<
-                        if {$w in {C:erased C:unwind} || [string match C:budget:* $w]} {
+                        if {$w in {C:erased C:unwind}} {
 ====
-                        if {$w in {C:erased} || [string match C:budget:* $w]} {
+                        if {$w in {C:erased}} {
 >>>>
 
 # ---------------------------------------------------------------------------

@@ -767,6 +767,37 @@ stops with "hir::specialize: the fixpoint did not converge".
 Run the program with -backend cranelift-generic, which does not
 specialize, or on interp or compile. Report the program.
 
+@topic error.hir-semantic-limit
+title: HIR SEMANTIC LIMIT: too many semantic instances to analyze
+summary: HIR SEMANTIC LIMIT is a compiler limit: type checking needed more semantic instances than its resource guard allows, and stops rather than check a call less precisely.
+index: errors
+alias: semantic-instance limit was reached; semantic-instance worklist did not converge
+keywords: semantic instance, generic, untyped parameter, limit, budget, maxInstances, type checking, resource guard
+related: concept.specialization error.hir-specialize-limit error.hir-range-limit error.type
+code: HIR SEMANTIC LIMIT
+
+== MEANING
+At compile time, on every backend; a limit of the compiler, not an error
+of the program. A function with untyped parameters is analyzed once more
+for each distinct combination of argument types its calls pass (a
+semantic instance: concept.specialization), so that its result is as
+precise as the arguments. Nothing limits how many instances one function
+may have, and analyses nested deeper than about two dozen levels are
+queued rather than refused; the one guard is the total number of
+instances in a compilation (2,000) and the length of the queue of
+instances analyzed again. Reaching it stops compilation with "the
+semantic-instance limit was reached", naming the function, the argument
+types the call needed it for and the instances being analyzed when it
+was requested. The compiler never falls back to the untyped analysis of
+the call instead: that result could make a valid program look like a
+type error.
+
+== WHAT TO DO
+Declare the parameter types of the functions called with very many
+distinct argument types (a typed parameter needs no instance), and report
+the program: ordinary programs, even of tens of thousands of lines, stay
+far below the limit.
+
 @topic error.native-callback
 title: NATIVE CALLBACK: a C callback could not run, or failed
 summary: NATIVE CALLBACK ends the process when C calls a callback where nothing permits it (another thread, after the call), with an invalid value, or when the callback fails.

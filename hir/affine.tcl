@@ -803,8 +803,9 @@ proc hir::affine::MoveInto {native} {
 }
 
 # 1 if call P of a block had its semantic instance declined (hir/semantic.tcl:
-# a budget, or no creation environment yet): the only way an affine argument
-# of an untyped parameter would reach a body no analysis saw with it.
+# no creation environment yet -- no request is declined for a budget): the
+# only way an affine argument of an untyped parameter would reach a body no
+# analysis saw with it.
 proc hir::affine::Unanalyzed {hir p} {
     if {![hir::semantic::Enabled] || ![dict exists $hir semantic declined]} {
         return 0

@@ -25,9 +25,11 @@
 # and compiles it (front end only, in this process), with
 # hir::semantic::maxPerBlock and maxInstances set as given. Each call of
 # choose with a new TI asks for a semantic instance of choose
-# (hir/semantic.tcl); past maxPerBlock a request is declined and the call
-# keeps choose's generic typing, so pickN.f is `any` and value's typed
-# parameter refuses it. Prints N, the outcome, the compile time, the semantic
+# (hir/semantic.tcl); before SEMANTIC-INSTANCE-SCALABILITY-MILESTONE-1.md,
+# past maxPerBlock a request was declined and the call kept choose's generic
+# typing, so pickN.f was `any` and value's typed parameter refused it. Since,
+# there is no maxPerBlock (setting it changes nothing), and maxInstances fails
+# the compilation (HIR SEMANTIC LIMIT). Prints N, the outcome, the compile time, the semantic
 # counters and the process's peak resident size so far.
 
 set here [file dirname [file normalize [info script]]]
@@ -96,6 +98,7 @@ try {
         close $channel
         set t0 [clock microseconds]
         set failed [catch {surface::readProgramFile $path -warnings off -cache ""} hir errorOptions]
+        set walksNote 
         set seconds [format %.2f [expr {([clock microseconds] - $t0) / 1e6}]]
         if {$failed} {
             set message [string map [list $scratch/ ""] [lindex [split $hir \n] 0]]

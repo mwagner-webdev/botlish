@@ -3600,8 +3600,15 @@ proc hir::types::Walk {hirVar} {
     for {set round 1} {$round <= [set ::hir::semantic::maxRounds]} {incr round} {
         set typed $base
         hir::semantic::Begin $envs
-        set ctx [NewContext]
-        Sequence typed ctx [dict get $typed roots]
+        try {
+            set ctx [NewContext]
+            Sequence typed ctx [dict get $typed roots]
+        } on error {message options} {
+            # (A compiler failure -- HIR SEMANTIC LIMIT among them -- leaves
+            # no run in progress behind for the next compilation.)
+            hir::semantic::Abandon
+            return -options $options $message
+        }
         set snapshot [hir::semantic::End]
         dict set snapshot rounds $round
         if {$round == [set ::hir::semantic::maxRounds] || ![hir::semantic::WantsRerun $snapshot]} {
@@ -5579,7 +5586,7 @@ proc hir::types::Call {hirVar ctxVar e} {
                     # this call's concrete argument types. The call is
                     # typed with what that analysis proves; the callee's own
                     # contract and generic result are untouched.
-                    set result [hir::semantic::Call $hir $ctx $e $block $argTypes $result]
+                    set result [hir::semantic::Call hir $ctx $e $block $argTypes $result]
                     if {$result eq "never" && [hir::semantic::PoisonedCall $ctx $e]} {
                         # The instance's every normal completion is poison.
                         set dead 1

@@ -576,9 +576,10 @@ value would be duplicated or lost there. The message names the position:
   * an untyped parameter of a function whose specialization for this
     argument was declined ("its semantic instance was declined"). This is
     a limit of the implementation: a generic (untyped) function given an
-    affine argument is specialized for it, and that analysis has a
-    nesting limit -- a chain of about two dozen untyped functions handing
-    the value on reaches it.
+    affine argument is specialized for it, which needs the environment
+    the function was created in; a nested function called from its own
+    recursive caller before that environment is known can lack it. No
+    count of instances or depth of nesting declines one.
 
 == LIKELY CAUSES
   * ending the program (or a test) with a handle;
@@ -845,7 +846,7 @@ summary: A call gives an affine argument to an untyped parameter, but the compil
 index: errors
 alias: affine specialization budget; declined specialization of an affine call
 keywords: affine, generic, untyped parameter, specialization, budget, semantic instance, nesting limit
-related: error.affine-erasure-unsupported error.trait-instance-budget concept.specialization concept.affine
+related: error.affine-erasure-unsupported error.trait-instance-budget concept.specialization concept.affine error.hir-semantic-limit
 code: CORE SEMANTIC AFFINE-INSTANCE-BUDGET
 
 == MEANING
@@ -853,9 +854,11 @@ A call that gives an affine value to an untyped parameter needs a
 specialization of the callee for the value's type (a clone that owns it);
 there is no run-time ownership tracking and no run-time dispatch between
 callable kinds to fall back on. The compiler makes these specializations
-with its semantic-instance analysis, which has budgets (a nesting limit).
-When the analysis declined such a call, the specialization plan reports
-AFFINE-INSTANCE-BUDGET.
+with its semantic-instance analysis. That analysis declines no call for
+a budget or a nesting depth (past its one resource guard it stops the
+compilation with HIR SEMANTIC LIMIT instead); when it declined such a
+call anyway -- only for want of the environment a nested function was
+created in -- the specialization plan reports AFFINE-INSTANCE-BUDGET.
 
 In practice a declined instance is reported earlier, by the ownership
 check, as AFFINE-ERASURE-UNSUPPORTED ("its semantic instance was
@@ -865,14 +868,11 @@ not a language rule.
 
 == LIKELY CAUSES
   * those of the declined-instance case of AFFINE-ERASURE-UNSUPPORTED,
-    which reports them first: a long chain of untyped (generic)
-    functions handing an affine value on, each specialized inside the
-    previous one.
+    which reports them first.
 
 == WHAT TO DO
 Declare the type of the parameter that receives the affine value (a
-typed parameter needs no specialization), or shorten the chain of untyped
-functions the value passes through.
+typed parameter needs no specialization).
 
 @topic error.affine-list-operation-unsupported
 title: AFFINE-LIST-OPERATION-UNSUPPORTED: elements of an affine List accessed
@@ -2947,27 +2947,28 @@ summary: A call of a trait-polymorphic function has no static specialization bec
 index: errors
 alias: trait specialization budget
 keywords: trait, specialization, budget, semantic instance, nesting limit, monomorphization
-related: concept.traits concept.specialization error.affine-instance-budget
+related: concept.traits concept.specialization error.affine-instance-budget error.hir-semantic-limit
 code: CORE SEMANTIC TRAIT-INSTANCE-BUDGET
 
 == MEANING
 Every call of a trait-polymorphic function must be specialized for its
 witnesses: there is no generic, dynamically dispatched version to call
 instead. Specializations are made by the semantic-instance analysis,
-which has budgets; past the instance-count budgets a trait call still
-gets an instance keyed by its witnesses alone, so only the analysis's
-nesting limit can leave one without. This is a limit of the compiler,
-not a language rule, and ordinary programs do not reach it: a chain of
-150 trait-polymorphic functions calling each other still compiles. A
+which declines no call for a budget or a nesting depth (past its one
+resource guard it stops the compilation with HIR SEMANTIC LIMIT
+instead), so only a call it could not analyze for want of a nested
+function's creation environment can lack one. This is a limit of the
+compiler, not a language rule, and ordinary programs do not reach it. A
 call that can never run (an argument that always fails) is not reported:
 it gets no specialization and needs none.
 
 == LIKELY CAUSES
-  * very deep nesting of calls between trait-polymorphic functions.
+  * a trait-polymorphic nested function called from its enclosing
+    function's own recursive call.
 
 == WHAT TO DO
-Reduce the nesting of trait-polymorphic calls (give inner helpers
-concrete parameter types), and report the program if it is small.
+Give the inner helper concrete parameter types, and report the program
+if it is small.
 
 @topic error.trait-internal
 title: TRAIT-INTERNAL: an internal failure of trait specialization

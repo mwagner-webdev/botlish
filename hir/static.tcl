@@ -91,7 +91,7 @@
 #      program.
 #
 # The waiting rule (Next, Waits). A program-wide channel -- the
-# erased-callable contract, a semantic-instance budget under pressure -- is
+# erased-callable contract, whether the program unwinds -- is
 # one fact every site reading it shares, and its contributors may be written
 # anywhere: a site's diagnostic may come from a contribution that a site
 # written after it, rejected later, removes. So a failing site that may read
@@ -122,8 +122,8 @@
 # statement sequence, the summaries a body reads, the facts of the bindings
 # it captures, and the backward and program-wide channels: an untyped
 # parameter's inferred contract, the callable inputs of an only-called
-# function, yields, the erased-callable contract, the semantic-instance
-# budget; STATIC-COMPILE.md, "Decision economics", has each one and why).
+# function, yields, the erased-callable contract; STATIC-COMPILE.md,
+# "Decision economics", has each one and why).
 #
 # The *batched* scheduler (the default) runs the sequential order on one
 # build for as long as that build already answers it (Simulate): it rejects

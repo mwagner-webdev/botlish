@@ -132,8 +132,8 @@ would sit below it; the two stay distinct.
    first block in post-order with a diagnostic of its own that does not
    *wait* is rejected, and the blocks before it without one are accepted. A
    block waits while it may read a program-wide channel -- the
-   erased-callable contract, a semantic-instance budget under pressure,
-   whether the program unwinds suspended coroutines --
+   erased-callable contract, or whether the program unwinds suspended
+   coroutines --
    that another block with a diagnostic of its own may change: the
    contributors to a channel are judged before its consumers, so a
    consumer's verdict does not depend on where its contributors are written
@@ -312,8 +312,7 @@ Part of the definition, not of the economics. A *program-wide channel* is a
 fact every site reading it shares and every site feeding it may change, from
 anywhere in the program: the erased-callable contract (what every callable
 passed into an untyped parameter can raise, charged to every call through an
-uncontracted value), a semantic-instance budget under pressure, and whether
-the program unwinds suspended coroutines (while a suspending function owns a
+uncontracted value) and whether the program unwinds suspended coroutines (while a suspending function owns a
 resource, every coroutine handle is owned to its scope's end:
 LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md). Without
 the rule, the sequential order judged a consumer of such a channel against
@@ -372,8 +371,7 @@ complete it:
 
 Two cases are left to layout, and pinned as such. A *cycle*: two blocks that
 both erase and both call through an uncontracted value
-(`se-equal-channel-cycle`), every call of an instance budget under pressure
-(first-come first-served), or two blocks the conservative analysis cannot
+(`se-equal-channel-cycle`), or two blocks the conservative analysis cannot
 tell apart from such. And an ok contributor that a later rejection makes
 fail -- an erasing block whose nested block is rejected with a
 `CompilerError` the function around it does not admit
@@ -514,7 +512,7 @@ extra one only costs a build. Its header lists every edge; in short:
     function, its place only: what a function carries is its declared
     errors, never its body; the positions where a callable with an
     uncontracted parameter acquires a structural type (contravariant
-    erasure); and the requests the budget declined. A request that erases
+    erasure); and the declined requests (no creation environment yet). A request that erases
     nothing never will (a rejection only turns a type into `never`) and is
     none. The contract depends, per error, on one *witness* -- the
     contribution last in post-order -- since another contributor's
@@ -533,14 +531,12 @@ extra one only costs a build. Its header lists every edge; in short:
     erases through the same channel (its construction is a call of a root
     native with the callable as an argument) and its yield type is the
     separate yield edge above;
-  * **the semantic-instance budget** of a function: open only under
-    pressure (a request declined, or half the per-block budget used), and
-    then every call of the function is both contributor and consumer --
-    every function's at once when half of all instances exist, or a request
-    was made at half the nesting limits or deeper: only a first request is
-    declined for nesting, and rejecting the site that made the first request
-    for an instance can make a deep one the first, which a cache hit hid
-    before (`se-equal-deep-first-request`);
+  * (there is no semantic-instance budget channel: no request is declined
+    for a budget or for nesting -- a deep one is deferred to the worklist --
+    and the one total-instance guard fails the compilation, so which call
+    gets an instance depends on its own key alone:
+    SEMANTIC-INSTANCE-SCALABILITY-MILESTONE-1.md,
+    `se-equal-deep-first-request`);
   * **the ownership verdict** (`hir::affine::verify`'s `accepted`): release
     scopes, and with them `AFFINE-PATH-RELEASE-UNSUPPORTED`, are computed
     only while the ownership analysis finds nothing anywhere in the
@@ -1443,7 +1439,7 @@ If you change the decision schedulers (`hir/static.tcl`'s `decide`,
 the method-call decisions' seeds or build reuse (`hir/hir.tcl`), or any fact
 an analysis reads across functions -- a new summary, a new backward or
 program-wide channel (an inferred contract, the erased-callable contract,
-an instance budget, a yield type, the ownership verdict), a new diagnostic
+a yield type, the ownership verdict), a new diagnostic
 suppressed by reachability or by a whole-program verdict (as
 `hir::affine::verify` withholds release scopes from a program its analysis
 rejects) -- run `tests/static-economics.test`,

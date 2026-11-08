@@ -2519,7 +2519,7 @@ proc hir::traits::PlanCalls {hir syntax} {
                                 continue
                             }
                             if {![dict exists $calls [list $caller $e]]} {
-                                lappend diagnostics [list TRAIT-INSTANCE-BUDGET [format {this call of the trait-polymorphic function %s has no static specialization (the compiler's semantic-instance budget declined it), and there is no runtime trait dispatch to fall back to} \
+                                lappend diagnostics [list TRAIT-INSTANCE-BUDGET [format {this call of the trait-polymorphic function %s has no static specialization (the compiler's semantic-instance analysis declined it), and there is no runtime trait dispatch to fall back to} \
                                     [dict get $polys $tb name]] $e]
                                 continue
                             }
@@ -2554,7 +2554,7 @@ proc hir::traits::PlanCalls {hir syntax} {
                             # specialization, if its instance has one.
                             if {![dict exists $calls [list $caller $e]]} {
                                 if {[AffineArgumentsUntyped $view $e $tb]} {
-                                    lappend diagnostics [list AFFINE-INSTANCE-BUDGET [format {this call gives an affine argument to an untyped parameter of %s but has no static specialization (the compiler's semantic-instance budget declined it), and there is no runtime ownership or callable-kind dispatch to fall back to (declare the parameter's type)} \
+                                    lappend diagnostics [list AFFINE-INSTANCE-BUDGET [format {this call gives an affine argument to an untyped parameter of %s but has no static specialization (the compiler's semantic-instance analysis declined it), and there is no runtime ownership or callable-kind dispatch to fall back to (declare the parameter's type)} \
                                         [dict get $polys $tb name]] $e]
                                 }
                                 continue

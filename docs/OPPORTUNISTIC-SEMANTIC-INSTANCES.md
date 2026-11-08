@@ -1,5 +1,11 @@
 # Opportunistic semantic function instances
 
+Partially superseded by SEMANTIC-INSTANCE-SCALABILITY-MILESTONE-1.md: an
+instance's walk types the program's HIR in place instead of a scratch copy,
+there is no per-function budget, a deep request is deferred rather than
+declined, and the total-instance budget fails the compilation ("Termination /
+budgets" below is updated).
+
 ## Outcome
 
 **Delivered:** a compiler-internal *semantic instance* layer (`hir/semantic.tcl`,
@@ -216,19 +222,30 @@ instance that read no in-progress answer needs one walk.
 
 ## Termination / budgets
 
+(Revised by SEMANTIC-INSTANCE-SCALABILITY-MILESTONE-1.md: the per-function
+budget and the nesting decline are gone, and the total budget is a compiler
+failure. Earlier, a request past `maxPerBlock` (16), `maxInstances` (2000)
+or `maxDepth` (24) was declined and kept its generic typing, which a typed
+use rejected as a TYPE error: the 17th distinct type through one helper
+made a valid program invalid.)
+
 * The type lattice is finite: aggregate nesting is bounded (depth 3,
   `hir::types::MakeList`/`MakeMutArray`), so `f(T) -> f(List[T]) -> ...` stops at
-  the bound (`si-rec-3`: the chain `wrap("a", 5)` produces at most the per-block
-  budget of instances and is `any`).
+  the bound (`si-rec-3`: the chain `wrap("a", 5)` produces at most
+  2 x (aggregate depth + 2) instances and is `any`).
 * Results only grow; more than `passLimit` (6) growing passes give `any`.
-* Budgets: `maxPerBlock` 16, `maxInstances` 2000, `maxDepth` 24 nested
-  analyses (and a stack-depth guard). A request beyond a budget is **declined**
-  and keeps its ordinary generic typing.
-* *A budget never turns into a false error and never accepts an erasure*: the
-  fallback is the pre-existing behavior. A declined call gives its parameters no
-  instance context, so `hir::callables` still rejects a bearing argument that
-  would cross an untyped parameter (`si-rec-5/6`); a non-bearing call simply gets
-  the generic result. No budget was hit in the corpus.
+* No per-function budget: every distinct entry-type combination is its own
+  instance (`si-rec-5`, `si-budget-17`, `si-budget-1024`).
+* Nesting: a request made with `maxDepth` (24) analyses in progress, or near
+  Tcl's stack limit, is **deferred** to the worklist and analyzed once they
+  return; it answers like a recursive request meanwhile (`si-defer-1/2`).
+* `maxInstances` (2000) in all, and the worklist's length, are the resource
+  guards left: reaching one fails the compilation with `HIR SEMANTIC LIMIT`,
+  naming the function, its entry types and the chain of instances being
+  analyzed (`si-rec-6`, `si-rec-6b`). Never a fallback that could turn into a
+  false TYPE error or accept an erasure.
+* The one request still declined is a closure's whose creation environment no
+  walk has recorded yet (no-env, below), which a later walk serves.
 
 ## Definition validity vs call-instance validity
 
@@ -795,9 +812,9 @@ there is nothing to compare.
   recorded environment (sound, less precise).
 * **Compile time** grows with the number of instances (see above).
 * **Forward-called functions with captures** need a second walk; three walks at most.
-* **Budgets** (`maxPerBlock` 16, total 2000, depth 24) never triggered on the
-  corpus; a declined call keeps generic typing and rejects bearing arguments
-  exactly as before.
+* **Budgets**: only the total (2000) is left, and it fails the compilation
+  (SEMANTIC-INSTANCE-SCALABILITY-MILESTONE-1.md); there is no per-function
+  budget and no nesting decline.
 * Exact callables are keyed by code target and result; a `predicate` whose result
   revises changes the key (a distinct instance).
 * `-strict 0`: an invalid instance is an ordinary TYPE diagnostic at the call and

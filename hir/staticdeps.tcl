@@ -7,8 +7,8 @@
 #                 DECISIONS) whose form the site's own diagnostics may
 #                 depend on, never the site itself
 #       channels  the program-wide channels of the build, for the trace
-#       consumes  key -> the waiting channels (C:erased, C:budget:B,
-#                 C:unwind) the site's diagnostics read (Waiting)
+#       consumes  key -> the waiting channels (C:erased, C:unwind) the
+#                 site's diagnostics read (Waiting)
 #       contributors  channel -> the keys of the sites (present as bodies)
 #                 whose decision may change the channel's value (Waiting;
 #                 hir/static.tcl's waiting rule reads both)
@@ -126,7 +126,8 @@
 #                       an instance; each position where a callable with an
 #                       uncontracted parameter acquires a structural type
 #                       whose argument could carry errors (Contravariant);
-#                       and each request the budget declined. A request
+#                       and each declined request (no creation environment
+#                       yet: hir/semantic.tcl, "Captures"). A request
 #                       that erases nothing now (CarriedErrors of its
 #                       arguments there empty: none declares an error) never
 #                       will -- what a value carries is a function of its
@@ -162,25 +163,11 @@
 #                       contract is no consumer (VERIFIED-CALLABLE-CONTRACT-
 #                       BOUNDARY.md: the contract bounds it whatever it
 #                       holds).
-#   C:budget:B          the semantic-instance budget of block B
-#                       (hir/semantic.tcl): which call gets one of B's
-#                       instances depends on every other call requesting one.
-#                       Open only under pressure -- a request declined, or B
-#                       holding half its per-block budget -- and then every
-#                       call of B is both; every B at once when half of all
-#                       instances exist, or a request was made at half the
-#                       nesting limits or deeper (hir::semantic's `deep`):
-#                       only a first request is declined for nesting, and a
-#                       rejection removing the first request for an
-#                       instance makes a deep one the first, which a cache
-#                       hit before hid (tests/static-economics.test,
-#                       se-equal-deep-first-request). What the allocation reads is the
-#                       number of distinct instances requested: B's own body,
-#                       each call's place, and the facts of its arguments --
-#                       of an argument naming a function only its place, since
-#                       an instance's key keeps a function's identity and
-#                       erases its result (hir::specialize::KeyType): its body
-#                       is no part of it (FunctionRef).
+#   (No channel is a semantic-instance budget: no request is declined for
+#   one, so which call gets an instance depends on its own key alone --
+#   hir/semantic.tcl, "Budgets"; SEMANTIC-INSTANCE-SCALABILITY-MILESTONE-1.md.
+#   The total-instance guard fails the compilation instead: no site's
+#   outcome depends on it.)
 #   C:verdict           the ownership analysis's verdict on the whole
 #                       program (hir::affine::verify's `accepted`: no
 #                       diagnostic of its whole-program analysis anywhere).
@@ -224,7 +211,7 @@
 #                       erasure diagnostic -- so a diagnostic can appear
 #                       only where a call's argument contract can widen: an
 #                       affine argument at an untyped parameter (its
-#                       inferred contract, its instance's budget) or of a
+#                       inferred contract, its instance) or of a
 #                       callable value (its type's contract); C:verdict ->
 #                       R of each region making one.
 #   C:unwind            whether the program unwinds suspended coroutines
@@ -268,11 +255,10 @@
 #                       its instance changes with the call's own facts (an
 #                       argument's type `never`: a dead call is never
 #                       requested), which its site's edges read, or with a
-#                       decline: a budget never declines such a request (it
-#                       is re-keyed and granted), a top-level function's
-#                       environment is recorded at its definition, and a
-#                       nesting decline is C:budget's (the pressure of a
-#                       deep request); a context a rejection creates walks
+#                       decline: no budget declines a request, a top-level
+#                       function's environment is recorded at its
+#                       definition, and a deep request is deferred, never
+#                       declined; a context a rejection creates walks
 #                       the function's body afresh, requesting each call of
 #                       it. Its successors, while the build has a
 #                       diagnostic the plan does not report (the gate is
@@ -296,7 +282,7 @@
 #
 # The waiting rule (hir/static.tcl, Waits; STATIC-COMPILE.md) reads the
 # channels whose contributors' *presence* can cause a consumer's diagnostic --
-# C:erased, C:budget:B and C:unwind -- for the definition as well as for the
+# C:erased and C:unwind -- for the definition as well as for the
 # economics: a failing site that reads one (`consumes`: its node reaches the
 # channel over every edge but a contributor's link and a gate's, and not the
 # erased contract when its first diagnostic precedes the completion walk,
@@ -547,8 +533,8 @@ proc hir::staticdeps::Deps {hir sites decisions {methods 0}} {
 # forms each reaches) and SITES (Deps' result, whose keys are the sites
 # present as bodies).
 #
-#   CONSUMES      key -> the waiting channels (C:erased, C:budget:B,
-#                 C:unwind) the site's diagnostics read: those its node
+#   CONSUMES      key -> the waiting channels (C:erased, C:unwind) the
+#                 site's diagnostics read: those its node
 #                 reaches over every
 #                 edge but a link (a contributor's edge to what it
 #                 contributes to, which orders but reads nothing) or a
@@ -635,7 +621,7 @@ proc hir::staticdeps::Waiting {state G labels sccOf sccSites sites} {
                     }
                     set found [dict create]
                     foreach w $members {
-                        if {$w in {C:erased C:unwind} || [string match C:budget:* $w]} {
+                        if {$w in {C:erased C:unwind}} {
                             dict set found $w 1
                         }
                         foreach x [dict get $fsucc $w] {
@@ -669,7 +655,7 @@ proc hir::staticdeps::Waiting {state G labels sccOf sccSites sites} {
     }
     set contributors [dict create]
     dict for {v _} $G {
-        if {$v ni {C:erased C:unwind} && ![string match C:budget:* $v]} continue
+        if {$v ni {C:erased C:unwind}} continue
         set base [lsearch -all -inline -not -glob [dict get $sccSites [dict get $sccOf $v]] M:*]
         if {$v eq "C:erased"} {
             lappend base {*}[dict keys [dict get $state erasureSites]]
@@ -1179,8 +1165,9 @@ proc hir::staticdeps::Prepare {hir sites decisions} {
                 }
             }
         }
-        # A request the budget declined may be granted once a site is
-        # rejected: one that could carry errors is a potential contributor.
+        # A declined request (a closure without a creation environment yet,
+        # hir/semantic.tcl) may be granted once a site is rejected: one that
+        # could carry errors is a potential contributor.
         dict for {callKey reason} [dict get $hir semantic declined] {
             set call [lindex $callKey 1]
             if {![dict exists $regionOf $call]} continue
@@ -1231,53 +1218,6 @@ proc hir::staticdeps::Prepare {hir sites decisions} {
     dict set state erasureWitnesses $witnesses
     dict set state erasureSites $holding
     dict set state erasedConsumers $consumers
-    # The semantic-instance budget: the blocks under pressure.
-    set pressured [dict create]
-    set global 0
-    if {[dict exists $hir semantic byBlock]} {
-        set half [expr {$::hir::semantic::maxPerBlock / 2}]
-        set total 0
-        dict for {b n} [dict get $hir semantic byBlock] {
-            incr total $n
-            if {$n >= $half} {
-                dict set pressured $b 1
-            }
-        }
-        if {$total >= $::hir::semantic::maxInstances / 2} {
-            set global 1
-        }
-        if {[dict exists $hir semantic deep] && [dict size [dict get $hir semantic deep]] > 0} {
-            # A request at half the nesting limits: a rejection removing the
-            # request before it can make it the first one, declined for nesting.
-            set global 1
-        }
-        dict for {callKey reason} [dict get $hir semantic declined] {
-            if {$reason in {budget-total nesting}} {
-                set global 1
-            } elseif {$reason eq "budget-block"} {
-                set e [lindex $callKey 1]
-                if {[dict exists $exprs $e target] && [lindex [dict get $exprs $e target] 0] eq "block"} {
-                    dict set pressured [lindex [dict get $exprs $e target] 1] 1
-                } else {
-                    set global 1
-                }
-            }
-        }
-    }
-    if {$global} {
-        dict for {b _} $callsOf {
-            dict set pressured $b 1
-        }
-    }
-    set budgetOf [dict create]
-    dict for {b _} $pressured {
-        if {![dict exists $callsOf $b]} continue
-        foreach call [dict get $callsOf $b] {
-            dict set budgetOf [dict get $regionOf $call] $b 1
-        }
-    }
-    dict set state pressured $pressured
-    dict set state budgetOf $budgetOf
     # The ownership analysis's verdict (C:verdict).
     lassign [Ownership $hir $state] pathRelease verdict linked diagnosed unwinding
     dict set state pathRelease $pathRelease
@@ -1312,7 +1252,7 @@ proc hir::staticdeps::Prepare {hir sites decisions} {
     dict set state planConsumers $planConsumers
     dict set state plan $plan
     dict set state channels [dict create erasurePoints [llength $points] \
-        erasedConsumers [dict size $consumers] budgetPressure [dict size $pressured] \
+        erasedConsumers [dict size $consumers] \
         yieldingFunctions [dict size $yielding] constructions [llength $creates] \
         ownershipDiagnostics $diagnosed pathReleaseSites [dict size $pathRelease] \
         unwindingSites [dict size $unwinding] \
@@ -2147,33 +2087,6 @@ proc hir::staticdeps::Successors {hir stateVar v} {
                 }
             }
         }
-        C:budget:* {
-            set b [string range $v 9 end]
-            dict set state names $v "the semantic-instance budget of [BlockName $hir $b]"
-            # Which call gets one of B's instances depends on how many
-            # distinct instances its calls request: B's own body (which
-            # requests more of them), each call (rejecting a site it is in
-            # removes it) and the arguments its key is made of -- of an
-            # argument naming a function, only its identity is in the key
-            # (hir::specialize::KeyType erases its result), which nothing but
-            # the argument's own removal changes (FunctionRef).
-            dict set succ R:$b budget
-            foreach call [dict get $state callsOf $b] {
-                foreach s [SiteChain $state $call] {
-                    dict set succ F:$s budget
-                }
-                foreach arg [dict get $hir exprs $call args] {
-                    if {$arg eq ""} continue
-                    if {[FunctionRef $hir $arg]} {
-                        foreach s [SiteChain $state $arg] {
-                            dict set succ F:$s budget
-                        }
-                    } else {
-                        AddSubtree $hir state $arg succ budget
-                    }
-                }
-            }
-        }
     }
     dict unset succ $v
     return $succ
@@ -2573,11 +2486,6 @@ proc hir::staticdeps::RegionSuccessors {hir stateVar q succVar} {
             if {![dict exists $succ $n]} {
                 dict set succ $n method-trial
             }
-        }
-    }
-    if {[dict exists $state budgetOf $q]} {
-        foreach b [dict keys [dict get $state budgetOf $q]] {
-            dict set succ C:budget:$b budget
         }
     }
     if {$q eq "program"} {

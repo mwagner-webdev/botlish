@@ -168,7 +168,7 @@ missed a channel. None occurs in any suite, fuzz program or test.
 | `R:region` (a function literal or a program's top-level code) | everything its own code mentions: bindings, the functions it defines and calls (their summaries), every method-call candidate, its parameters and captures, the forms of the sites its code is in, the control operands around its literal, the narrowings of each capture between its definition and the region -- *not* the rest of the enclosing function: a function is analyzed from its own entry |
 | `B:binding` | its definition, every narrowing mention in its own region ([every mention](#every-mention)); an untyped parameter also every reachable use in its function and the functions nested in it (its inferred contract); an affine or mutable binding -- never one holding a callable -- every region mentioning it |
 | `C:erased` (the erased-callable contract, a set of errors) | per error, one *witness* contribution -- the one the sequential order removes last -- among the instance requests erasing it (the chain of requests keeping the instance, its function, its arguments but a function's body), the contravariant erasures erasing it; every request the budget declined. A request erasing nothing contributes nothing ([below](#forms-the-plans-gate-and-the-witnesses)) |
-| `C:budget:B` | B's body, the place of every call requesting one of B's instances and the facts of its arguments (of an argument naming a function, its place only), only under pressure |
+| `C:budget:B` | B's body, the place of every call requesting one of B's instances and the facts of its arguments (of an argument naming a function, its place only), only under pressure (removed by SEMANTIC-INSTANCE-SCALABILITY-MILESTONE-1.md: no request is declined for a budget or for nesting any more) |
 | `C:unwind` (whether the program unwinds suspended coroutines: a suspending function owns a resource; LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md) | the region of every yield-capable function owning a value whose drop runs a cleanup, and the forms of the sites its literal is in |
 | `P:input` (what an uncontracted input may hold at the contract boundary: a set of errors and whether every value is quiet) | per error and for not being quiet one witness value among what the calls of its function pass in its position, every value whose part is not fixed, its value, or `C:erased` |
 | `C:plan` (the gate of the trait monomorphization's plan; [below](#forms-the-plans-gate-and-the-witnesses)) | while a diagnostic the plan does not report stays, one witness: the site of the last in post-order (else the region of each); while every diagnostic may be the plan's, the form of every site holding one |
@@ -820,7 +820,8 @@ parameter into a structural `Fn`, and each one's contract-boundary check
 read every other's `raise` (`se-builds-possible-witness`: 3 and 6 such
 sites, 2 rounds).
 
-The **semantic-instance budget** (`C:budget:B`) was a third route into
+(SEMANTIC-INSTANCE-SCALABILITY-MILESTONE-1.md removed this channel with the
+budget it tracked.) The **semantic-instance budget** (`C:budget:B`) was a third route into
 function bodies: it depended on every fact of every call requesting one of
 B's instances. An instance's key keeps an argument function's identity and
 erases its result (`hir::specialize::KeyType`), so of an argument naming a
