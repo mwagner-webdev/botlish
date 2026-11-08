@@ -5355,6 +5355,10 @@ three modes, `adhoc` and `dry-run` for ordinary CI, `release` for the
   `resume_submission`), never upload another copy for it.
 * Apple's tools are found on PATH (release.py never names their paths), so
   `audit/macos-release/`'s stand-ins can run every stage on any host.
+* The README's macOS download button and link name a release by its tag
+  (`icy-tower-macos-vX.Y.Z`; there is no rolling macOS tag): a newer
+  published release updates them, in a change of its own after the release
+  exists. Never point them at a tag whose release is not published.
 
 If you change `package-macos.sh`, `macos/`, `macos_app.bot`, the release
 jobs or `macos-session.py app`, run `audit/macos-release/tests/`
