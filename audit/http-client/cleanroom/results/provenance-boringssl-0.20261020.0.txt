@@ -1,0 +1,23 @@
+boringssl 0.20261020.0
+  sha256 9124d0a25d4c08579530d1d18fdafb0c92c27fe3f223b6227220503383edf453
+  1821938 bytes, 7 files
+       1170  PIN
+       1643  README.md
+       1327  boringssl.bot
+        708  botlish.json
+      13115  licenses/boringssl/LICENSE
+        908  native/identity.c
+    5786272  targets/linux-x86_64/native/libbotlish_boringssl.a
+  target linux-x86_64: 7 files in its view (targets/linux-x86_64 at the package root)
+    library botlish_boringssl: bundled static, native/libbotlish_boringssl.a, license Apache-2.0 (the author's statement)
+      notices: licenses/boringssl/LICENSE
+    library stdc++: system shared, loads as libstdc++.so.6
+  native closure of linux-x86_64: complete
+  provenance /home/dev/inputs/repo/boringssl-0.20261020.0.provenance.json (sha256 c6fb5d8e63d0, format 1)
+    describes this artifact: its subject's SHA-256 and every file's digest are the artifact's
+    asserted by the author, unchecked unless a check below says so: 1 source(s), 1 build(s), 0 generator(s)
+    check made when the record was made: source boringssl files: computed (37f2ad0e0a0c)
+    check made when the record was made: source boringssl git-tree: confirmed (92ce790e497f)
+    check made when the record was made: build boringssl linux-x86_64 output targets/linux-x86_64/native/libbotlish_boringssl.a: confirmed (05b15296f2c1)
+    unsigned: the record does not authenticate who made the artifact or its sources (PM-4 and PM-5)
+(a valid .botpkg, format 1, schema 3: one release for every target it names; nothing authenticates who made it)

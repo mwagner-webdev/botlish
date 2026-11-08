@@ -1,0 +1,454 @@
+{
+  "schema": 2,
+  "kind": "botlish-native-library",
+  "library": "game",
+  "abi": 1,
+  "target": {
+    "name": "linux-x86_64",
+    "triple": "x86_64-unknown-linux-gnu"
+  },
+  "compiler": {
+    "frontEnd": "2eaaf73f78781403-5254432",
+    "runtimeAbi": "d554d5ff4c234348"
+  },
+  "artifacts": {
+    "static": "libgame.a",
+    "shared": "libgame.so",
+    "header": "game.h"
+  },
+  "sha256": {
+    "static": "9ee650ad35e71f6be112be754bcfa29e40849b3afed1a4d8cbd3ca35fc44d2f2",
+    "shared": "6df10d0acf07649aa06ea4cf66acb3d5bd057c08a0f853b4a8638c819c357afe",
+    "header": "3b7b66c4a007bf44d56db14e9dfe4e7cd4ea319dab2ee71394c512e4293f0870"
+  },
+  "link": [
+    "-lgcc_s",
+    "-lutil",
+    "-lrt",
+    "-lpthread",
+    "-lm",
+    "-ldl",
+    "-lc"
+  ],
+  "dependencies": [],
+  "threading": "thread-affine",
+  "reentrancy": "refused",
+  "callbacks": [],
+  "statuses": {
+    "ok": 0,
+    "declared": 1,
+    "runtime": 2,
+    "boundary": 3,
+    "invocation": 4,
+    "internal": 5
+  },
+  "fieldTypes": {
+    "int": 1,
+    "bool": 2,
+    "float64": 3,
+    "str": 4,
+    "other": 5
+  },
+  "types": {
+    "int": {
+      "c": "int64_t",
+      "rule": "every int64_t is an Int; an Int result outside int64_t is a BOUNDARY error RESULT-OUT-OF-RANGE"
+    },
+    "bool": {
+      "c": "bool"
+    },
+    "float64": {
+      "c": "double",
+      "rule": "a NaN or infinite argument is a BOUNDARY error ARGUMENT-NOT-FINITE; -0.0 enters as 0.0"
+    },
+    "str": {
+      "c": "const uint8_t *, size_t",
+      "result": "game_bytes",
+      "rule": "UTF-8, validated and copied; NULL allowed for length 0; embedded NULs allowed; a result is an owned buffer, NUL-terminated after len bytes, released with game_bytes_release"
+    }
+  },
+  "ownership": {
+    "instance": {
+      "owner": "caller",
+      "create": "game_create",
+      "release": "game_destroy"
+    },
+    "str-argument": {
+      "owner": "caller",
+      "lifetime": "call",
+      "copied": true,
+      "null": "length-zero"
+    },
+    "str-result": {
+      "owner": "caller",
+      "release": "game_bytes_release",
+      "terminated": "nul-after-length",
+      "survives": "later calls, collections, the instance's destruction"
+    },
+    "error": {
+      "owner": "caller",
+      "release": "game_error_release",
+      "survives": "later calls, collections, the instance's destruction"
+    }
+  },
+  "lifecycle": {
+    "create": "game_create",
+    "destroy": "game_destroy",
+    "initialization": "module static initialization only: the entry file holds declarations"
+  },
+  "api": [
+    "game_create",
+    "game_destroy",
+    "game_abi_version",
+    "game_error_release",
+    "game_error_status",
+    "game_error_identity",
+    "game_error_message",
+    "game_error_field_count",
+    "game_error_field_name",
+    "game_error_field_type",
+    "game_error_field_int",
+    "game_error_field_bool",
+    "game_error_field_float64",
+    "game_error_field_str",
+    "game_bytes_release"
+  ],
+  "exports": [
+    {
+      "name": "new_game",
+      "module": "",
+      "symbol": "game_new_game",
+      "botlish": "new_game() -> str",
+      "params": [],
+      "result": {
+        "type": "str",
+        "c": "game_bytes *",
+        "ownership": "owned",
+        "release": "game_bytes_release"
+      },
+      "error": {
+        "c": "game_error **",
+        "nullable": true,
+        "ownership": "owned",
+        "release": "game_error_release"
+      },
+      "errors": []
+    },
+    {
+      "name": "move",
+      "module": "",
+      "symbol": "game_move",
+      "botlish": "move(state: str, direction_code: int) -> str errors InvalidDirection, InvalidState",
+      "params": [
+        {
+          "name": "state",
+          "type": "str",
+          "c": [
+            "const uint8_t *",
+            "size_t"
+          ],
+          "ownership": "borrowed",
+          "lifetime": "call"
+        },
+        {
+          "name": "direction_code",
+          "type": "int",
+          "c": [
+            "int64_t"
+          ],
+          "ownership": "value"
+        }
+      ],
+      "result": {
+        "type": "str",
+        "c": "game_bytes *",
+        "ownership": "owned",
+        "release": "game_bytes_release"
+      },
+      "error": {
+        "c": "game_error **",
+        "nullable": true,
+        "ownership": "owned",
+        "release": "game_error_release"
+      },
+      "errors": [
+        {
+          "name": "InvalidDirection",
+          "fields": []
+        },
+        {
+          "name": "InvalidState",
+          "fields": []
+        }
+      ]
+    },
+    {
+      "name": "changes",
+      "module": "",
+      "symbol": "game_changes",
+      "botlish": "changes(state: str, direction_code: int) -> bool errors InvalidDirection, InvalidState",
+      "params": [
+        {
+          "name": "state",
+          "type": "str",
+          "c": [
+            "const uint8_t *",
+            "size_t"
+          ],
+          "ownership": "borrowed",
+          "lifetime": "call"
+        },
+        {
+          "name": "direction_code",
+          "type": "int",
+          "c": [
+            "int64_t"
+          ],
+          "ownership": "value"
+        }
+      ],
+      "result": {
+        "type": "bool",
+        "c": "bool *",
+        "ownership": "value"
+      },
+      "error": {
+        "c": "game_error **",
+        "nullable": true,
+        "ownership": "owned",
+        "release": "game_error_release"
+      },
+      "errors": [
+        {
+          "name": "InvalidDirection",
+          "fields": []
+        },
+        {
+          "name": "InvalidState",
+          "fields": []
+        }
+      ]
+    },
+    {
+      "name": "spawn",
+      "module": "",
+      "symbol": "game_spawn",
+      "botlish": "spawn(state: str, row: int, column: int, tile: int) -> str errors InvalidSpawn, InvalidState, game2048::CellOccupied",
+      "params": [
+        {
+          "name": "state",
+          "type": "str",
+          "c": [
+            "const uint8_t *",
+            "size_t"
+          ],
+          "ownership": "borrowed",
+          "lifetime": "call"
+        },
+        {
+          "name": "row",
+          "type": "int",
+          "c": [
+            "int64_t"
+          ],
+          "ownership": "value"
+        },
+        {
+          "name": "column",
+          "type": "int",
+          "c": [
+            "int64_t"
+          ],
+          "ownership": "value"
+        },
+        {
+          "name": "tile",
+          "type": "int",
+          "c": [
+            "int64_t"
+          ],
+          "ownership": "value"
+        }
+      ],
+      "result": {
+        "type": "str",
+        "c": "game_bytes *",
+        "ownership": "owned",
+        "release": "game_bytes_release"
+      },
+      "error": {
+        "c": "game_error **",
+        "nullable": true,
+        "ownership": "owned",
+        "release": "game_error_release"
+      },
+      "errors": [
+        {
+          "name": "InvalidSpawn",
+          "fields": []
+        },
+        {
+          "name": "InvalidState",
+          "fields": []
+        },
+        {
+          "name": "game2048::CellOccupied",
+          "fields": []
+        }
+      ]
+    },
+    {
+      "name": "first_empty",
+      "module": "",
+      "symbol": "game_first_empty",
+      "botlish": "first_empty(state: str) -> int errors InvalidState",
+      "params": [
+        {
+          "name": "state",
+          "type": "str",
+          "c": [
+            "const uint8_t *",
+            "size_t"
+          ],
+          "ownership": "borrowed",
+          "lifetime": "call"
+        }
+      ],
+      "result": {
+        "type": "int",
+        "c": "int64_t *",
+        "ownership": "value"
+      },
+      "error": {
+        "c": "game_error **",
+        "nullable": true,
+        "ownership": "owned",
+        "release": "game_error_release"
+      },
+      "errors": [
+        {
+          "name": "InvalidState",
+          "fields": []
+        }
+      ]
+    },
+    {
+      "name": "spawn_first",
+      "module": "",
+      "symbol": "game_spawn_first",
+      "botlish": "spawn_first(state: str, tile: int) -> str errors InvalidSpawn, InvalidState",
+      "params": [
+        {
+          "name": "state",
+          "type": "str",
+          "c": [
+            "const uint8_t *",
+            "size_t"
+          ],
+          "ownership": "borrowed",
+          "lifetime": "call"
+        },
+        {
+          "name": "tile",
+          "type": "int",
+          "c": [
+            "int64_t"
+          ],
+          "ownership": "value"
+        }
+      ],
+      "result": {
+        "type": "str",
+        "c": "game_bytes *",
+        "ownership": "owned",
+        "release": "game_bytes_release"
+      },
+      "error": {
+        "c": "game_error **",
+        "nullable": true,
+        "ownership": "owned",
+        "release": "game_error_release"
+      },
+      "errors": [
+        {
+          "name": "InvalidSpawn",
+          "fields": []
+        },
+        {
+          "name": "InvalidState",
+          "fields": []
+        }
+      ]
+    },
+    {
+      "name": "score",
+      "module": "",
+      "symbol": "game_score",
+      "botlish": "score(state: str) -> int errors InvalidState",
+      "params": [
+        {
+          "name": "state",
+          "type": "str",
+          "c": [
+            "const uint8_t *",
+            "size_t"
+          ],
+          "ownership": "borrowed",
+          "lifetime": "call"
+        }
+      ],
+      "result": {
+        "type": "int",
+        "c": "int64_t *",
+        "ownership": "value"
+      },
+      "error": {
+        "c": "game_error **",
+        "nullable": true,
+        "ownership": "owned",
+        "release": "game_error_release"
+      },
+      "errors": [
+        {
+          "name": "InvalidState",
+          "fields": []
+        }
+      ]
+    },
+    {
+      "name": "over",
+      "module": "",
+      "symbol": "game_over",
+      "botlish": "over(state: str) -> bool errors InvalidState",
+      "params": [
+        {
+          "name": "state",
+          "type": "str",
+          "c": [
+            "const uint8_t *",
+            "size_t"
+          ],
+          "ownership": "borrowed",
+          "lifetime": "call"
+        }
+      ],
+      "result": {
+        "type": "bool",
+        "c": "bool *",
+        "ownership": "value"
+      },
+      "error": {
+        "c": "game_error **",
+        "nullable": true,
+        "ownership": "owned",
+        "release": "game_error_release"
+      },
+      "errors": [
+        {
+          "name": "InvalidState",
+          "fields": []
+        }
+      ]
+    }
+  ]
+}

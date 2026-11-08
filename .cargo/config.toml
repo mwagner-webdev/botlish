@@ -57,3 +57,11 @@ rustflags = ["-C", "force-frame-pointers=yes"]
 # makes the walker's dependence explicit and covers leaf functions too.
 [target.aarch64-apple-darwin]
 rustflags = ["-C", "force-frame-pointers=yes"]
+
+# Android on AArch64 (ANDROID-AARCH64-TARGET-SUPPORT-MILESTONE-1.md): the
+# runtime archive of the android-aarch64 target support package, built with
+# `--target aarch64-linux-android`. The same frame-record chain (x29), for
+# the same walker: Android's AArch64 ABI keeps frame records, and this states
+# the walker's dependence for this crate's own frames, leaf ones included.
+[target.aarch64-linux-android]
+rustflags = ["-C", "force-frame-pointers=yes"]

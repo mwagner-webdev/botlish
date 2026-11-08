@@ -89,6 +89,17 @@ jobs:
           sudo apt-get install -y strace >/dev/null
           single/ffi-smoke-test.sh dist/botlish
 
+      # External tools and target support packages
+      # (EXTERNAL-COMPILER-TOOLS-AND-TARGET-PACKAGES-MILESTONE-1.md): the
+      # experiment's packages packed by this executable from this build's
+      # native backend, then the clean room -- the executable and the
+      # artifacts only, an empty environment, strace showing nothing of the
+      # checkout and no system Tcl is touched.
+      - name: External tools clean room
+        run: |
+          audit/external-tools/tools/packages.sh "$RUNNER_TEMP/external-tools" native/target/release dist/botlish
+          audit/external-tools/cleanroom/cleanroom.sh dist/botlish "$RUNNER_TEMP/external-tools/repo" "$RUNNER_TEMP/external-tools-results"
+
       - uses: actions/upload-artifact@v4
         with:
           name: botlish-linux-x86_64

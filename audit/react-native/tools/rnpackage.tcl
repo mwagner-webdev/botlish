@@ -113,8 +113,8 @@ set f [open [dict get $opts -manifest]]
 fconfigure $f -encoding utf-8
 set manifest [lsp::json::parse [read $f]]
 close $f
-if {[lsp::json::integer [lsp::json::get $manifest schema]] != 1} {
-    error "[dict get $opts -manifest]: manifest schema [lsp::json::text [lsp::json::get $manifest schema]], this generator reads schema 1"
+if {[lsp::json::integer [lsp::json::get $manifest schema]] ni {1 2}} {
+    error "[dict get $opts -manifest]: manifest schema [lsp::json::text [lsp::json::get $manifest schema]], this generator reads schemas 1 and 2"
 }
 # One export per entry: NAME C-SYMBOL {PARAM TYPE ...} RESULT {ERRORS}, TYPE
 # the manifest's boundary types (int bool float64 str unit).

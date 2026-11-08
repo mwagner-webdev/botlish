@@ -28,7 +28,7 @@ impl NativeStack {
     /// it; on Windows the whole reservation the system made for it, which
     /// grows by Windows' own guard page (no guard range: `guard_low ==
     /// low_bound`, platform/windows.rs).
-    #[cfg(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc")))]
+    #[cfg(any(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "android", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc")))]
     pub fn current() -> std::io::Result<Self> { super::platform::current_stack() }
 
     /// The lowest stack pointer a library's checked frame may run at on this
@@ -57,7 +57,7 @@ impl NativeStack {
 /// stack's depth check (codegen::roots's `depth_reservation` needs both).
 pub const fn native_stack_overflow_supported() -> bool {
     cfg!(any(
-        all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")),
+        any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "android", target_arch = "aarch64")),
         all(target_os = "macos", target_arch = "aarch64"),
         all(windows, target_arch = "x86_64", target_env = "msvc")
     ))

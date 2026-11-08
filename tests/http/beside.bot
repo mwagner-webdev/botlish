@@ -1,0 +1,64 @@
+# beside.bot -- tests/http-client.test's http-beside-thread: the main VM
+# keeps its own loop open while neighbor.bot's worker thread runs the http
+# package on a loop of its own (two loops in one process). The name
+# resolver's wake must name the worker's loop (the integration ABI's
+# version 2): a version 1 post is refused while two loops are open.
+# Once the worker has ended -- its http runtime still open, never closed --
+# its claim on the runtime is gone with its thread, and the main VM opens
+# one of its own.
+#
+#   beside URL CA     its value: the worker's line, then the main VM's
+import event_loop_linux
+import http
+import neighbor
+import std::event_loop
+import std::list
+import std::str
+import std::thread
+
+fn supervise(worker: std::thread::ThreadId, context ev: std::event_loop::Loop, p: std::thread::Port, db: std::thread::Doorbell) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    std::thread::wait_end(worker)
+    std::thread::close_port()
+    0
+
+fn worker(url: str, ca: str, context ev: std::event_loop::Loop, d: std::event_loop::Driver, t: std::thread::Threads, p: std::thread::Port, db: std::thread::Doorbell, nat: event_loop_linux::Native) -> str errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered, std::thread::ThreadLimit, std::thread::ThreadStartFailed, std::thread::ThreadFailed:
+    std::thread::serve()
+    {thread, id} = std::thread::start(std::thread::entry(neighbor::fetch_beside), neighbor::Plan {url: url, ca: ca, main_loop: event_loop_linux::loop_handle()})
+    coroutine {step, first} = supervise(id)
+    std::event_loop::adopt(step, first)
+    std::event_loop::run()
+    std::thread::join(thread)
+
+raw = argv():
+    on InvalidArgumentEncoding:
+        ["beside"]
+url = std::list::get(raw, 1, "")
+ca = std::list::get(raw, 2, "")
+with context std::event_loop::create(16)
+with context event_loop_linux::create()
+with context event_loop_linux::native()
+with context std::thread::create(2)
+with context std::thread::port()
+first = worker(url, ca):
+    on std::event_loop::SchedulerFault:
+        "SchedulerFault"
+    on std::event_loop::DriverFault:
+        "DriverFault"
+    on std::event_loop::LoopReentered:
+        "LoopReentered"
+    on std::thread::ThreadLimit:
+        "ThreadLimit"
+    on std::thread::ThreadStartFailed:
+        "ThreadStartFailed"
+    on std::thread::ThreadFailed:
+        "ThreadFailed"
+with context http::create()
+with context neighbor::out()
+second = neighbor::ran(url, ca, ""):
+    on std::event_loop::SchedulerFault:
+        "SchedulerFault"
+    on std::event_loop::DriverFault:
+        "DriverFault"
+    on std::event_loop::LoopReentered:
+        "LoopReentered"
+["worker: ".concat(first), "main after it: ".concat(second)]

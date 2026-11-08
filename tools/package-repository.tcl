@@ -73,7 +73,7 @@ foreach arg $argv {
 }
 if {$out eq ""} usage
 if {$names eq ""} {
-    set names {sdl3 sdlkit raven event_loop_linux}
+    set names {sdl3 sdlkit raven event_loop_linux boringssl http}
 }
 
 namespace eval author {
@@ -536,6 +536,132 @@ proc author::event_loop_linux {dir targets} {
     file delete [file join $dir native botlish_event_loop.h]
 }
 
+# The BoringSSL provider (HTTP-CLIENT-PACKAGE-MILESTONE-1.md, "The
+# provider"): the pinned release built by tools/http-package.tcl (upstream's
+# CMake, unpatched, unprefixed), its two archives' members in one archive
+# of its own name with the identity member; BoringSSL's license staged as a notice;
+# libstdc++ (libssl is C++) stated as the system's.
+proc author::boringssl {dir targets} {
+    variable root
+    source [file join $root tools http-package.tcl]
+    set pin [httppkg::Pin]
+    set commit [dict get $pin commit]
+    set src [file join [httppkg::CacheDir] src boringssl-$commit]
+    foreach target $targets {
+        set archives [httppkg::ProviderArchives $target]
+        if {![file isdirectory [file join $src .git]]} {
+            error "the BoringSSL checkout is missing ($src)"
+        }
+        if {![file exists [file join $dir licenses boringssl LICENSE]]} {
+            upstream boringssl [dict get $pin url] [gitIdentity $src [dict get $pin tag]] $src
+            botlish package stage $dir -files [file join $src LICENSE] -as licenses/boringssl
+        }
+        set provider [httppkg::Provider $target]
+        set record [pm::ReadBytes [file join $provider PROVENANCE]]
+        botlish native add [file join $archives libbotlish_boringssl.a] -target $target \
+            -name botlish_boringssl -license Apache-2.0 -notice licenses/boringssl/LICENSE -package $dir
+        build "boringssl $target" [list $target] [list targets/$target/native/libbotlish_boringssl.a] \
+            {boringssl} release \
+            [dict create cc [dict get $record compiler] cxx [dict get $record cxx] cmake [dict get $record cmake] ninja [version ninja --version] ar [version ar --version]] \
+            [concat [dict get $pin cmake] {-GNinja -ffile-prefix-map=$SRC=/boringssl}] \
+            [list "cmake -GNinja" "ninja crypto ssl" "cc -c native/identity.c -DBOTLISH_BORINGSSL_ID=[httppkg::ProviderId]" \
+                "ar qcsD libbotlish_boringssl.a (libcrypto.a's and libssl.a's members, identity.o)"]
+        botlish native require stdc++ -target $target -origin system -identity libstdc++.so.6 -symbol __cxa_begin_catch -package $dir
+    }
+}
+
+# The licenses of the http unit's Rust dependencies: every crate of its
+# normal-dependency closure for the target (cargo metadata --locked), each
+# crate's license files staged under licenses/http/crates/NAME-VERSION, and
+# licenses/http/CRATES.md listing them. The SPDX expression of them all.
+proc author::httpCrates {dir triple} {
+    variable root
+    variable stage
+    set crate [file join $root packages http native]
+    set json [exec cargo metadata --format-version 1 --locked --filter-platform $triple --manifest-path [file join $crate Cargo.toml] 2>@stderr]
+    set meta [pm::json::decode [encoding convertto utf-8 $json] -limit [expr {16 * 1024 * 1024}]]
+    set field {apply {{object key} {
+        foreach {k v} [lindex $object 1] { if {$k eq $key} { return $v } }
+        return {null {}}
+    }}}
+    set packages [dict create]
+    foreach p [lindex [{*}$field $meta packages] 1] {
+        dict set packages [lindex [{*}$field $p id] 1] $p
+    }
+    set nodes [dict create]
+    foreach n [lindex [{*}$field [{*}$field $meta resolve] nodes] 1] {
+        set deps {}
+        foreach d [lindex [{*}$field $n deps] 1] {
+            foreach k [lindex [{*}$field $d dep_kinds] 1] {
+                if {[lindex [{*}$field $k kind] 0] eq "null"} {
+                    lappend deps [lindex [{*}$field $d pkg] 1]
+                    break
+                }
+            }
+        }
+        dict set nodes [lindex [{*}$field $n id] 1] $deps
+    }
+    set rootId [lindex [{*}$field [{*}$field $meta resolve] root] 1]
+    set seen [dict create]
+    set todo [list $rootId]
+    while {[llength $todo]} {
+        set todo [lassign $todo id]
+        if {[dict exists $seen $id]} continue
+        dict set seen $id 1
+        lappend todo {*}[dict get $nodes $id]
+    }
+    set lines [list "# The Rust crates in libbotlish_http.a" "" \
+        "The http package's native unit links these crates (its normal dependencies, as Cargo.lock resolves them for $triple). Each crate's own license files are beside this file, under crates/NAME-VERSION/." "" \
+        "| crate | version | license |" "|---|---|---|"]
+    set licenses {}
+    foreach id [lsort [dict keys $seen]] {
+        set p [dict get $packages $id]
+        set name [lindex [{*}$field $p name] 1]
+        set ver [lindex [{*}$field $p version] 1]
+        set lic [lindex [{*}$field $p license] 1]
+        lappend lines "| $name | $ver | $lic |"
+        if {$lic ni $licenses} { lappend licenses $lic }
+        if {$id eq $rootId} continue
+        set manifest [file dirname [lindex [{*}$field $p manifest_path] 1]]
+        set files [lsort [glob -nocomplain -tails -directory $manifest -types f LICENSE* LICENCE* COPYING* NOTICE* COPYRIGHT*]]
+        if {$files eq ""} {
+            error "crate $name $ver has no license file to ship"
+        }
+        foreach f $files {
+            botlish package stage $dir -files [file join $manifest $f] -as licenses/http/crates/$name-$ver
+        }
+    }
+    set summary [file join $stage http-CRATES.md]
+    file delete $summary
+    pm::WriteNew $summary [encoding convertto utf-8 "[join $lines \n]\n"]
+    botlish package stage $dir -files $summary -as licenses/http
+    file rename -force [file join $dir licenses http http-CRATES.md] [file join $dir licenses http CRATES.md]
+    return [join [lmap l [lsort $licenses] {expr {[string match "* OR *" $l] || [string match "*/*" $l] ? "([string map {/ " OR "} $l])" : $l}}] " AND "]
+}
+
+# The http client (HTTP-CLIENT-PACKAGE-MILESTONE-1.md): the localized
+# botlish_http unit, built by tools/http-package.tcl against the provider's
+# headers in link-only mode (no BoringSSL inside it); its Rust crates'
+# licenses; the project's license for the unit's own code.
+proc author::http {dir targets} {
+    variable root
+    source [file join $root tools http-package.tcl]
+    botlish package stage $dir -files [file join $root LICENSE] -as licenses/http
+    set rustc [version rustc --version]
+    set cargo [version cargo --version]
+    foreach target $targets {
+        set triple [dict get {linux-x86_64 x86_64-unknown-linux-gnu linux-aarch64 aarch64-unknown-linux-gnu} $target]
+        set expression [httpCrates $dir $triple]
+        set unit [httppkg::Unit $target 0]
+        set notices [list -notice licenses/http/LICENSE -notice licenses/http/CRATES.md]
+        botlish native add $unit -target $target -name botlish_http -license $expression {*}$notices -package $dir
+        build "http unit $target" [list $target] [list targets/$target/native/libbotlish_http.a] {} release \
+            [dict create rustc $rustc cargo $cargo cc [version cc --version] ld [version ld --version] objcopy [version objcopy --version]] \
+            [list --locked --release "codegen-units=1" "--remap-path-prefix (crate, registry, target, checkout)" "BORING_BSSL_PATH=(empty archives: link-only)" "BOTLISH_BORINGSSL_PROVIDER=[httppkg::ProviderId]"] \
+            [list "cargo build --release --locked (packages/http/native)" "ld -r --whole-archive" "objcopy --strip-debug --keep-global-symbols=bh_* (COMDAT groups renamed)" "ar rcsD libbotlish_http.a"]
+    }
+}
+
 # The release directory of the package NAME, prepared in STAGE: packages/NAME
 # copied (its own files and authoring botlish.json), then its recipe run.
 # The evidence the recipe gathered is written beside it.
@@ -552,7 +678,7 @@ proc author::prepare {name stage} {
     }
     set descriptor [pm::descriptor::read [file join $dir botlish.json] pack]
     set targets [dict getdef [dict create sdl3 {linux-aarch64 linux-x86_64} raven {linux-aarch64 linux-x86_64} \
-        event_loop_linux {linux-aarch64 linux-x86_64}] $name {}]
+        event_loop_linux {linux-aarch64 linux-x86_64} boringssl {linux-x86_64} http {linux-x86_64}] $name {}]
     if {$targets eq ""} {
         return [list $dir ""]
     }

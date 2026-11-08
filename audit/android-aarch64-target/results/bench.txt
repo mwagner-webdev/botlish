@@ -1,0 +1,6 @@
+api-21 BENCH	load_us 698	create_us 9848	first_call_us 3049	move_us 202.82	score_us 46.03	destroy_us 5963	n 2000
+api-21 BENCH	load_us 655	create_us 9592	first_call_us 3086	move_us 200.44	score_us 43.97	destroy_us 4515	n 2000
+api-21 BENCH	load_us 659	create_us 9043	first_call_us 2931	move_us 193.71	score_us 47.06	destroy_us 4419	n 2000
+api-35 BENCH	load_us 1353	create_us 11639	first_call_us 2555	move_us 286.47	score_us 52.28	destroy_us 5515	n 2000
+api-35 BENCH	load_us 1596	create_us 12239	first_call_us 3021	move_us 287.29	score_us 61.55	destroy_us 5428	n 2000
+api-35 BENCH	load_us 1575	create_us 13064	first_call_us 2894	move_us 277.20	score_us 53.94	destroy_us 5843	n 2000

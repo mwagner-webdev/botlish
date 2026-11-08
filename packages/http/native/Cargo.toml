@@ -1,0 +1,47 @@
+# botlish_http: the native unit of the `http` package
+# (HTTP-CLIENT-PACKAGE-MILESTONE-1.md): Hyper's HTTP/1.1 and HTTP/2 client
+# and BoringSSL (through `boring`) under the Botlish event loop, with no
+# Tokio runtime. Built on the author's side only (tools/package-repository.tcl
+# author::http, tests/cffi/http.tcl): a consumer links the localized static
+# archive and compiles nothing of it.
+#
+#   default    the released unit: the bh_* C ABI and nothing else
+#   testing    the test unit: fault injection, counters, a counting
+#              allocator (bh_t_*); never released
+[package]
+name = "botlish_http"
+version = "0.2.0"
+edition = "2021"
+publish = false
+license = "MIT"
+description = "The native unit of Botlish's http package"
+
+[lib]
+crate-type = ["staticlib", "rlib"]
+path = "src/lib.rs"
+
+[features]
+testing = []
+
+[dependencies]
+hyper = { version = "=1.12.0", default-features = false, features = ["client", "http1", "http2"] }
+http = "=1.5.0"
+h2 = "=0.4.20"
+http-body = "1"
+http-body-util = "0.1"
+bytes = "1"
+boring = "=5.4.0"
+boring-sys = "=5.4.0"
+libc = "0.2"
+
+[build-dependencies]
+cc = "1"
+
+[profile.release]
+# Unwinding stays on: every export catches panics (bridge::ffi::guard).
+panic = "unwind"
+debug = false
+# One codegen unit: the archive's bytes do not depend on how cargo
+# partitions the crate (HTTP-CLIENT-PACKAGE-MILESTONE-1.md, "Reproducibility").
+codegen-units = 1
+incremental = false

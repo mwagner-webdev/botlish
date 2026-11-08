@@ -1,0 +1,68 @@
+# audit/http-client/tools/measure.tcl -runs 3 (HTTP-CLIENT-PACKAGE-MILESTONE-1.md, section 11), on a 4-core shared container.
+| measurement | value | unit |
+|---|---:|---|
+| front end, a program importing http (no cache) | 29.4 | s |
+| front end + code generation + system link | 48.5 | s |
+| executable size (bench, not stripped) | 17018032 | bytes |
+| executable size, stripped | 6080080 | bytes |
+| libbotlish_http.a (the unit) | 17040508 | bytes |
+| libbotlish_boringssl.a (the provider) | 5786272 | bytes |
+| latency, HTTP/1.1, plaintext: one GET, warm connection | 217 | us |
+|   curl on the same peer (201 URLs, one process) | 151 | us |
+|   guarded C calls per request | 14.2 | calls |
+| latency, HTTP/2, TLS: one GET, warm connection | 460 | us |
+|   curl on the same peer (201 URLs, one process) | 376 | us |
+|   guarded C calls per request | 17.7 | calls |
+| cold request, HTTP/1.1, plaintext: new client | 4517 | us |
+| cold request, HTTP/2, TLS (handshake): new client | 6370 | us |
+|   of which making the client (system bundle and anchors parsed) | 3981 | us |
+| download 64 MiB, HTTP/2, TLS, nghttpd | 258 | MiB/s |
+|   curl, the same URL (to /dev/null) | 931 | MiB/s |
+|   chunks the program read | 4096 | chunks |
+|   guarded C calls per chunk | 3.21 | calls |
+|   peak memory growth while 64 MiB passed | 3904 | KiB |
+|   most bytes held natively | 16384 | bytes |
+| download 64 MiB, HTTP/1.0, plaintext, Python http.server | 1280 | MiB/s |
+|   curl, the same URL (to /dev/null) | 1800 | MiB/s |
+|   chunks the program read | 1175 | chunks |
+|   guarded C calls per chunk | 2.02 | calls |
+|   peak memory growth while 64 MiB passed | 1824 | KiB |
+|   most bytes held natively | 114688 | bytes |
+| slow consumer (2 ms per chunk), 64 MiB over HTTP/2: peak memory growth | 3812 | KiB |
+|   most bytes held natively | 16384 | bytes |
+|   its throughput | 7.4 | MiB/s |
+| upload 16 MiB and read it back, HTTP/1.1, plaintext, writes of 1024 bytes | 60 | MiB/s |
+|   guarded C calls per write | 3.04 | calls |
+| upload 16 MiB and read it back, HTTP/1.1, plaintext, writes of 16384 bytes | 399 | MiB/s |
+|   guarded C calls per write | 3.60 | calls |
+| upload 16 MiB and read it back, HTTP/1.1, plaintext, writes of 65536 bytes | 477 | MiB/s |
+|   guarded C calls per write | 5.56 | calls |
+| upload 16 MiB and read it back, HTTP/1.1, plaintext, writes of 1048576 bytes | 427 | MiB/s |
+|   guarded C calls per write | 42.19 | calls |
+|   curl, the same upload to the same peer | 31 | MiB/s | (this run predates the -H "Expect:" fix: curl waited 1 s for a 100 Continue the peer never sends; without the wait, three runs: 727, 794, 1070 MiB/s)
+| upload 16 MiB and read it back, HTTP/2, TLS, writes of 1024 bytes | 3 | MiB/s |
+|   guarded C calls per write | 3.45 | calls |
+| upload 16 MiB and read it back, HTTP/2, TLS, writes of 16384 bytes | 17 | MiB/s |
+|   guarded C calls per write | 10.11 | calls |
+| upload 16 MiB and read it back, HTTP/2, TLS, writes of 65536 bytes | 19 | MiB/s |
+|   guarded C calls per write | 30.65 | calls |
+| upload 16 MiB and read it back, HTTP/2, TLS, writes of 1048576 bytes | 20 | MiB/s |
+|   guarded C calls per write | 424.50 | calls |
+|   curl, the same upload to the same peer | 20 | MiB/s |
+| HTTP/1.1, plaintext, per request (test unit) | calls 14.3, steps 5.1, runs 5.1, polls 6.2, notices 3.0, readiness 1.1, out 395.8, in 18.0, allocs 45.3, alloc_bytes 45533.6 |  |
+| HTTP/1.1, plaintext, per 4 KiB chunk (test unit) | calls 3.0, steps 1.0, runs 1.0, polls 2.0, notices 1.0, readiness 0.0, out 3993.1, in 0.1, allocs 2.2, alloc_bytes 2919.0 |  |
+| HTTP/2, TLS, per request (test unit) | calls 16.3, steps 7.0, runs 7.0, polls 9.2, notices 3.0, readiness 1.2, out 421.7, in 18.0, allocs 51.3, alloc_bytes 44107.1 |  |
+| HTTP/2, TLS, per 4 KiB chunk (test unit) | calls 3.4, steps 1.0, runs 1.0, polls 1.8, notices 1.0, readiness 0.4, out 4174.5, in 0.1, allocs 4.6, alloc_bytes 10977.9 |  |
+| 64 concurrent HTTP/2 requests of 16 KiB on one connection (whole process) | 102 | ms |
+
+# callgrind attribution (audit/http-client/tools/attribute.py): warm HTTP/2 GETs, 201 minus 1
+per request: 1900816 instructions
+copying and zeroing (libc)                 550210   28.9%
+allocation (libc malloc)                   538016   28.3%
+Botlish runtime: layout decoding           301065   15.8%
+Botlish runtime: other                     285340   15.0%
+Botlish code (compiled)                    142893    7.5%
+other                                       35239    1.9%
+Hyper, h2 and the bridge (Rust)             31796    1.7%
+BoringSSL                                   12931    0.7%
+libc and others                              3326    0.2%

@@ -1,0 +1,27 @@
+# fold-flat.bot -- FOLD-VIRTUAL-LIST-CONSTRUCTION-MILESTONE-1.md's
+# composition with std::list::flat (LIST-FLAT-MILESTONE-1.md): a fold builds
+# a List[List[int]] (one expanded inner List per token), and flat removes
+# one level of nesting afterwards. The two stay separate operations: the
+# fold's own construction may be virtual, flat receives an ordinary
+# completed List, and nothing fuses them.
+#
+# expect: [384, 32640]
+
+import std::list
+
+fn expand(x: int) -> List[int]:
+    [x, x + 1, x * 2]
+
+fn chunks(xs: List[int]) -> List[List[int]]:
+    fold x in xs with intermediate acc []:
+        acc.append(expand(x))
+
+fn sum(ys: List[int]) -> int:
+    fold y in ys with intermediate s 0:
+        s + y
+
+n = 128
+xs = loop i from 0 to n:
+    i
+flat = std::list::flat(chunks(xs))
+[flat.length(), sum(flat)]

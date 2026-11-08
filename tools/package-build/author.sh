@@ -68,7 +68,8 @@ case ${1:-} in
     env=(-e "BOTLISH_AUTHOR_IMAGE=$(spec)" -e "BOTLISH_SOURCE_REVISION=$revision")
     if [[ -n ${HTTPS_PROXY:-} ]]; then
       env+=(-e "HTTPS_PROXY=$HTTPS_PROXY" -e "https_proxy=$HTTPS_PROXY"
-            -e SSL_CERT_FILE=/tmp/proxy-ca.crt -e GIT_SSL_CAINFO=/tmp/proxy-ca.crt -e CURL_CA_BUNDLE=/tmp/proxy-ca.crt)
+            -e SSL_CERT_FILE=/tmp/proxy-ca.crt -e GIT_SSL_CAINFO=/tmp/proxy-ca.crt -e CURL_CA_BUNDLE=/tmp/proxy-ca.crt
+            -e CARGO_HTTP_CAINFO=/tmp/proxy-ca.crt)
     fi
     docker rm -f "$name" >/dev/null 2>&1 || true
     docker create --name "$name" --network host "${env[@]}" "$image" sleep infinity >/dev/null

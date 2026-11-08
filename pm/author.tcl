@@ -71,6 +71,9 @@ proc pm::author::Open {dir} {
 # The lowest schema DESCRIPTOR's contents need: 1 without targets, 3 with a
 # runtime dependency or a library's license or notices, else 2.
 proc pm::author::NeededSchema {descriptor} {
+    if {[dict getdef $descriptor tools {}] ne ""} {
+        return 4
+    }
     set targets [dict getdef $descriptor targets {}]
     if {$targets eq "" && [dict getdef $descriptor origins {}] eq ""} {
         return 1
@@ -95,6 +98,9 @@ proc pm::author::Upgrade {descriptor schema} {
         return $descriptor
     }
     dict set descriptor schema $schema
+    if {$schema >= 4 && ![dict exists $descriptor tools]} {
+        dict set descriptor tools {}
+    }
     if {$schema >= 2} {
         if {![dict exists $descriptor targets]} { dict set descriptor targets {} }
         if {![dict exists $descriptor origins]} { dict set descriptor origins {} }
@@ -1020,8 +1026,9 @@ proc pm::author::Audit {files descriptor {targets ""}} {
                 lappend problems "its view lacks [llength $missing] module[expr {[llength $missing] == 1 ? "" : "s"}] $other's has ([join [lrange $missing 0 2] {, }][expr {[llength $missing] > 3 ? ", ..." : ""}]): a release offers one set of modules on every target it names (stage the target's binding, or drop the target)"
             }
         }
-        # Every native file of the view is declared.
-        set declaredFiles {}
+        # Every native file of the view is declared (a library's, or a
+        # tool's program: pm/tools.tcl).
+        set declaredFiles [pm::tools::Programs $descriptor]
         foreach library [dict get $entry libraries] {
             foreach key {file import} {
                 if {[dict get $library $key] ne ""} { lappend declaredFiles [dict get $library $key] }

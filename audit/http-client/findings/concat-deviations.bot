@@ -1,0 +1,29 @@
+# A finding of HTTP-CLIENT-PACKAGE-MILESTONE-1.md ("Findings"): with
+# std::str and std::linux::fs both imported, each method-style
+# "...".concat(...) is a whole-program trial build of the method-call
+# decision: std::linux::fs::concat (its first parameter an opaque
+# NativePath) is a candidate the kind proofs do not exclude for a str
+# receiver. This program's six concat calls cost 15 builds (9 deviations,
+# 11 s) where the same program without std::linux::fs costs 2 (0.8 s).
+# Measured with hir::buildStats (tests/helpers.tcl loaded): see the report.
+import std::io
+import std::io::fs
+import std::io::path
+import std::linux::fs
+import std::linux::io
+import std::int
+import std::str
+
+nomethod fn say(text: str, context io: std::io::IO):
+    std::io::print_line(text):
+        on std::io::WriteFailed:
+            unit
+
+fn main(context io: std::io::IO, fs: std::linux::fs::LinuxFS) -> int:
+    say("aa".concat("bb").concat("cc").concat(std::int::to_string(3)))
+    say("xx".concat("yy"))
+    0
+
+with context std::linux::io::create()
+with context std::linux::fs::create()
+main()
