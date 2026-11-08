@@ -3382,6 +3382,40 @@ native tracing, growth or drops also needs a `BOTLISH_NATIVE_GC_STRESS=1`
 run of `tests/mutable-vector.test`. `bench/mutable-vector.tcl` regenerates
 the performance report.
 
+### Consumed fold intermediates
+
+A fold's intermediate holding a collection is consumed like a directly
+called function's parameter -- no entry copy, the carried header mutated in
+place -- only where no `continue` or bare `break` of its fold can run after
+the iteration may have given the header away
+(CONSUMED-FOLD-INTERMEDIATES-MILESTONE-1.md; hir/mutvec.tcl's
+`FoldExitsClean`, `FoldWalk`, `GivesHeader`, `FoldIncoming`). Keep it so:
+
+* An exit after a give-away keeps the entry copy: such an exit carries the
+  iteration's starting value (FOLD-LOOPS-MILESTONE-1.md, rules 5 and 6),
+  which only the copy keeps. The give-aways are the convention's own facts
+  (`PlaceArgument`, `ByReference`, `NoLaterUse`): never decide one by an
+  operation's or a function's name, and never stop the walk short (an
+  `if`'s branches join, a handler starts after any part of its call, an
+  inner loop's body repeats).
+* Every value a consumed fold binds its intermediate to -- its initial
+  value, each normal completion -- is an exclusive position, wrapped in a
+  share unless fresh or a move: never let one alias a live binding.
+* It is an optimization: no diagnostic, rule or proof changes, no runtime
+  state and no backend special case. `hir::mutvec::consumedFolds 0` is the
+  copying elaboration, the tests' and the fuzzer's oracle (a front-end
+  input: `surface::cache::Key`); never set it outside tests.
+
+If you change any of that, or the copy convention it joins (`Eligible`,
+`ExclusivePositions`, `Fresh`, `NoLaterUse`, `Moved`), run
+`tests/consumed-fold-intermediates.test`, `tests/fold-loops.test`,
+`tests/mutable-vector.test`, `audit/consumed-folds/tools/fuzz.tcl` (several
+seeds, once with `-gc-stress 1`) and `audit/consumed-folds/tools/mutate.tcl`
+(every mutant in its `mutants.txt` must still apply and be killed by a test
+its `!!` line names: update a mutant's text when you change the code it
+mutates, keeping it a mutant of the same rule). `bench/consumed-folds.tcl`
+is the performance report.
+
 ## MutableArray
 
 `MutableArray[T]` (MUTABLE-ARRAY.md) is MutableVector's fixed-length

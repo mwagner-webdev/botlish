@@ -109,11 +109,15 @@ proc surface::cache::Key {path source mode strict {target ""} {root ""}} {
     # same PATH as given names another directory from another working
     # directory). DFA-LOWERING is how a declared recognizer's table is
     # written (surface/dfa.tcl's `lowering`: the measurements' choice).
+    # CONSUMED-FOLDS is whether a fold's intermediate may be consumed
+    # (hir/mutvec.tcl's `consumedFolds`, a test hook): the elaboration a
+    # build writes into its HIR follows it.
     return [list version $version front-end [hir::interchange::fingerprint] \
         path $path source $source library $::core::libraryDir \
         libraries $::core::loadedLibraries strict $strict warnings $mode target $target \
         root $root \
         scheduler [if {[info exists ::env(BOTLISH_STATIC_SCHEDULER)]} {set ::env(BOTLISH_STATIC_SCHEDULER)} else {string cat ""}] \
+        consumed-folds $::hir::mutvec::consumedFolds \
         dfa-lowering $::surface::dfa::lowering]
 }
 
