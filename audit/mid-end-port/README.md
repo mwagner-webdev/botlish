@@ -544,3 +544,131 @@ tclsh9.0 main.tcl -warnings off -backend cranelift-generic /tmp/synth-g32/main.b
 12 GiB of address space (`-memory-mb`, `ulimit -v`): Linux only. The
 callgrind figures need valgrind; `kernel-callgrind.tcl` builds the
 300-function kernel itself.
+
+## 8. Follow-up: the semantic-instance budget, and the two superlinear procedures
+
+Measured on 2026-11-08 at `eff6aea` (in worktrees of that commit, so a
+change on the branch could not affect them), while other jobs shared the
+cores: absolute times are inflated by up to about a quarter; shares, counts
+and ratios are each one process's.
+
+### 8.1 Is the per-function budget of 16 justified? Can it be raised?
+
+**Where it comes from.** OPPORTUNISTIC-SEMANTIC-INSTANCES.md ("Termination
+/ budgets") set `maxPerBlock` 16, `maxInstances` 2,000 and `maxDepth` 24 as
+guards, with "No budget was hit in the corpus". Nothing measured what 16
+costs or needs, and termination does not depend on it: the type lattice is
+finite (aggregate nesting is bounded), results only grow, a `passLimit`
+caps re-walks, and the total and depth budgets bound the whole run.
+
+**What a decline does.** The call keeps the callee's generic typing: sound,
+but a valid program is rejected when the generic result reaches a typed
+parameter (section 5's TYPE) or when a typed callable crosses the untyped
+parameter (SIMCITY-WORKLOAD-KNOWN-GAPS.md, 3.1: `std::test::holds` at its
+17th call, an open defect). Neither message names the budget.
+EQUALITY-SEMANTICS.md states the rule both break: "Whether a program is
+rejected must not depend on budgets."
+
+**What an instance costs** (`results/budget.txt`; `tools/budget.tcl` with
+`-distinct K`: a program of fixed size whose calls use K distinct types):
+
+| program | 1 instance | K instances | per extra instance |
+|---|---:|---:|---:|
+| 1,549 lines, a 2-line helper, K = 256 | 1.89 s | 2.37 s | 1.9 ms |
+| 1,549 lines, a 40-statement helper, K = 256 | 1.86 s | 7.06 s | 20 ms |
+| 6,157 lines, a 2-line helper, K = 1,024 | 8.00 s | 22.21 s | 14 ms |
+
+Memory barely moves (106 to 109 MB; 361 to 370 MB). An instance costs its
+callee's walk, plus something that grows with the program: every instance
+walk copies the program's expression table (8.2).
+
+**Raised to 256** (a worktree of `eff6aea` with `maxPerBlock 256`):
+
+* `tests/semantic-instances.test` (80 tests), `tests/static-compile.test`
+  (83), `tests/static-economics.test` (93) and `tests/golden-framework.test`
+  (42) all pass. No test pins 16: `si-rec-3` compares with the variable,
+  `si-rec-5` and `si-rec-6` set their own budgets.
+* The programs with the shared helper that 16 rejects compile
+  (`results/scale-budget.txt`): 32 passes (13,899 lines) in 131 s, 64 passes
+  (27,656 lines) in 348 s, with 32 and 64 instances of `lattice::choose`.
+  The same sizes without the helper took 93.5 and 233.0 s on a quieter
+  machine; at 2-14 ms an instance, the 32 or 64 instances explain under a
+  second of the difference, the rest is the helper's extra code and the
+  load.
+* The static decisions read the budget, not a constant: a function with at
+  least half its budget of instances is "under pressure"
+  (`hir/staticdeps.tcl`, C:budget), so the threshold moves with it. A real
+  change still needs AGENTS.md's static-decision checks, the CI comparison
+  of batched and sequential decisions included.
+
+**Verdict.** 16 is a guard nobody measured, and it already rejects valid
+programs. It can be raised a long way: 256 passes every test above, and the
+work stays bounded by the total budget of 2,000 instances. That bound is
+then what costs: at 25,736 lines an instance walk costs about 76 ms, 53 ms
+of it the copy (8.2), so 2,000 instances could add a few minutes to a
+port-sized compilation. Raising it moves the cliff to the total budget; it
+does not remove it. Removing it takes two changes: walk an instance on an
+overlay of its region instead of a copy of the whole table, so an instance
+costs about its callee's size; and when a request is declined anyway, say
+so, naming the budget and the callee (the minimum fix
+SIMCITY-WORKLOAD-KNOWN-GAPS.md asks for). With both, the per-function
+budget could go, the total budget staying as the guard.
+
+### 8.2 The shares of `hir::signatures::infer` and `hir::aot::BlockName`
+
+**`hir::signatures::infer`** (type inference, semantic instances included)
+as a share of the front end:
+
+| program | lines | seconds | share | source |
+|---|---:|---:|---:|---|
+| the warning gate's first pass, 128 units | -- | 11.6 | 11.9 % (inclusive) | `results/gate-phases.txt` |
+| `import std::event_loop` | 1,851 and its imports | 0.78 | 12.9 % | `results/event-loop-analyses.txt` |
+| `synth.tcl -passes 4` | 1,867 | 2.72 | 20.3 % | `results/synth-analyses.txt` |
+| `synth.tcl -passes 16` | 7,023 | 13.46 | 25.2 % | `results/synth-analyses.txt` |
+| `synth.tcl -passes 16 -generic 0` | 6,543 | 10.34 | 23.2 % | `results/synth-analyses-growth.txt` |
+| `synth.tcl -passes 32 -generic 0` | 12,939 | 26.86 | 28.5 % | `results/synth-analyses-growth.txt` |
+| `synth.tcl -passes 64 -generic 0` | 25,736 | 95.44 | 41.0 % | `results/synth-analyses-growth.txt` |
+
+Inside it (`results/instance-walks.txt`, `results/infer-profile.txt`):
+
+| passes (lines) | `signatures::infer` | instance walks (count) | of which copying `exprs` | the rest |
+|---|---:|---:|---:|---:|
+| 16 (6,543) | 10.6 s | 1.9 s (126) | 1.0 s (8.3 ms each) | 8.7 s |
+| 32 (12,939) | 30.1 s | 8.9 s (258) | 4.9 s (19.1 ms each) | 21.2 s |
+| 64 (25,736) | 96.8 s | 36.2 s (477) | 25.1 s (52.7 ms each) | 60.6 s |
+
+* **The instance walks are quadratic:** about 4.4 times per doubling,
+  because there are more of them and each copies a larger table.
+  `hir::semantic::Walk` starts from the program's HIR (`set scratch [dict
+  get $state base]`), so its first type write (`hir::types::SetType`)
+  copies the whole shared `exprs` table: 8.3 ms at 38,626 expressions, 52.7
+  ms at 145,714. That is a quarter of type inference at 25,736 lines.
+* **The rest grows superlinearly too** (2.4 and 2.9 times per doubling), and
+  is not located yet. The statement walkers (`hir::types::Sequence`,
+  `Block`, `Bind`) get 3-5 times slower per call from 16 to 64 passes,
+  minus the copies they make, while `hir::types::Call` and
+  `hir::range::Call` stay constant per call.
+
+**`hir::aot::BlockName`** as a share of lowering to NIR, before its fix
+(`results/blockname-share.txt`, `tools/blockname-share.tcl`):
+
+| program | lowering | lowering s | BlockName s (calls) | of lowering | of front end and lowering |
+|---|---|---:|---:|---:|---:|
+| `examples/games/2048/demo.bot` | specialized | 0.5 | 0.0 (168) | 2.0 % | 0.5 % |
+| `synth.tcl -passes 16 -generic 0` (6,543 lines) | unspecialized | 13.1 | 5.2 (3,989) | 39.7 % | 8.7 % |
+| `synth.tcl -passes 32 -generic 0` (12,939 lines) | unspecialized | 35.5 | 17.5 (7,863) | 49.4 % | 13.2 % |
+| `synth.tcl -passes 64 -generic 0` (25,736 lines) | unspecialized | 180.2 | 124.4 (15,615) | 69.0 % | 29.2 % |
+| `synth.tcl -passes 16 -generic 0` (6,543 lines) | specialized | 67.7 | 5.3 (4,770) | 7.8 % | 4.7 % |
+
+The warning gate never lowers to NIR, so BlockName is no part of its time.
+
+```sh
+S=$(mktemp -d); R=audit/mid-end-port/results
+git worktree add --detach $S/before eff6aea
+tclsh9.0 audit/mid-end-port/tools/budget.tcl -types 256 -distinct 256 -max-per-block 100000 -max-instances 100000
+tclsh9.0 audit/mid-end-port/tools/scale.tcl -out $R/scale-budget.txt -passes "32 64" -native 0 -semantic-per-block 256
+tclsh9.0 audit/mid-end-port/tools/synth.tcl -out $S/g32 -passes 32 -generic 0
+tclsh9.0 audit/mid-end-port/tools/instance-walks.tcl $S/before $S/g32/main.bot
+tclsh9.0 audit/mid-end-port/tools/blockname-share.tcl $S/before 0 $S/g32/main.bot
+tclsh9.0 audit/mid-end-port/tools/infer-profile.tcl $S/before $S/g32/main.bot audit/mid-end-port/results/infer-procs.txt
+```

@@ -5,10 +5,11 @@
 # and the link) and a run of the executable.
 #
 #   tclsh9.0 audit/mid-end-port/tools/measure.tcl FILE ?-native 0|1? ?-run 0|1?
-#       ?-specialize 0|1?
+#       ?-specialize 0|1? ?-semantic-per-block N?
 #
 # -specialize 0 lowers every function once, unspecialized (cranelift-
 # generic's lowering), instead of the specialized program.
+# -semantic-per-block N sets hir::semantic::maxPerBlock (16) for this run.
 #
 # Prints `frontend DICT` once the front end is done, `stage NAME RSS-KB`
 # after each step of the native path, then `final DICT` (the
@@ -20,7 +21,7 @@
 set here [file dirname [file normalize [info script]]]
 set checkout [file dirname [file dirname [file dirname $here]]]
 set path [file normalize [lindex $argv 0]]
-set options [dict create -native 1 -run 1 -specialize 1]
+set options [dict create -native 1 -run 1 -specialize 1 -semantic-per-block ""]
 foreach {option value} [lrange $argv 1 end] {
     if {![dict exists $options $option]} { error "measure.tcl: unknown option $option" }
     dict set options $option $value
@@ -28,6 +29,9 @@ foreach {option value} [lrange $argv 1 end] {
 source [file join $checkout surface surface.tcl]
 source [file join $checkout compiler compiler.tcl]
 source [file join $checkout native native.tcl]
+if {[dict get $options -semantic-per-block] ne ""} {
+    set ::hir::semantic::maxPerBlock [dict get $options -semantic-per-block]
+}
 
 proc peakKb {} {
     if {[catch {open /proc/self/status} channel]} { return "" }

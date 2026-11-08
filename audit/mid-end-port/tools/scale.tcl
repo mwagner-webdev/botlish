@@ -5,6 +5,7 @@
 #   tclsh9.0 audit/mid-end-port/tools/scale.tcl -out FILE ?-passes {2 4 8 ...}?
 #       ?-handlers F? ?-generic 0|1? ?-untyped PERCENT? ?-cap SECONDS?
 #       ?-native 0|1? ?-specialize 0|1? ?-memory-mb MB? ?-seed S?
+#       ?-semantic-per-block N?
 #
 # Appends one line per size to FILE (a Tcl dict per line: the synth options,
 # synth's counts and measure.tcl's dict), as each finishes, so a long run
@@ -18,7 +19,8 @@
 
 set here [file dirname [file normalize [info script]]]
 set options [dict create -out "" -passes {2 4 8 16 32 64 128} -handlers 40 -generic 1 \
-    -untyped 25 -cap 3600 -memory-mb 12288 -native 1 -specialize 1 -seed 1 -kinds 24 -nodes 400]
+    -untyped 25 -cap 3600 -memory-mb 12288 -native 1 -specialize 1 -seed 1 -kinds 24 -nodes 400 \
+    -semantic-per-block ""]
 foreach {option value} $argv {
     if {![dict exists $options $option]} { error "scale.tcl: unknown option $option" }
     dict set options $option $value
@@ -35,10 +37,16 @@ try {
             -kinds [dict get $options -kinds] -nodes [dict get $options -nodes]]
         set record [dict create passes $passes handlers [dict get $options -handlers] \
             generic [dict get $options -generic] untyped [dict get $options -untyped] {*}$synth]
+        if {[dict get $options -semantic-per-block] ne ""} {
+            dict set record semanticPerBlock [dict get $options -semantic-per-block]
+        }
         set t0 [clock seconds]
         set command [list ulimit -v [expr {[dict get $options -memory-mb] * 1024}] && exec timeout \
             [dict get $options -cap] $tclsh [file join $here measure.tcl] [file join $dir main.bot] \
             -native [dict get $options -native] -specialize [dict get $options -specialize]]
+        if {[dict get $options -semantic-per-block] ne ""} {
+            lappend command -semantic-per-block [dict get $options -semantic-per-block]
+        }
         set code [catch {exec sh -c [join $command " "] 2>@1} output]
         # How the child ended: an exit status or the signal that killed it.
         if {$code == 0} {

@@ -1,4 +1,26 @@
-15 types: accepted; 15 semantic instances, at most 15 of one function; declined: 
-16 types: accepted; 16 semantic instances, at most 16 of one function; declined: 
-17 types: rejected TYPE: budget-17.bot:114:17: argument for parameter "f" cannot be proven to satisfy Fact (argument type: any)
-18 types: rejected TYPE: budget-18.bot:118:17: argument for parameter "f" cannot be proven to satisfy Fact (argument type: any)
+## The default budget (maxPerBlock 16)
+# budget: maxPerBlock 16, maxInstances 2000; choose's body: 0 extra statements; distinct types: N
+15 types: accepted in 0.18 s; 15 semantic instances, at most 15 of one function; declined: ; peak 28 MB
+16 types: accepted in 0.11 s; 16 semantic instances, at most 16 of one function; declined: ; peak 32 MB
+17 types: rejected TYPE in 0.12 s: budget-17.bot:114:27: argument for parameter "f" cannot be proven to satisfy Fact (argument type: any)
+18 types: rejected TYPE in 0.14 s: budget-18.bot:118:27: argument for parameter "f" cannot be proven to satisfy Fact (argument type: any)
+
+## The budget lifted: N types, N instances (the program grows with N)
+# budget: maxPerBlock 100000, maxInstances 100000; choose's body: 0 extra statements; distinct types: N
+16 types: accepted in 0.13 s; 16 semantic instances, at most 16 of one function; declined: ; peak 28 MB
+64 types: accepted in 0.43 s; 64 semantic instances, at most 64 of one function; declined: ; peak 48 MB
+256 types: accepted in 2.82 s; 256 semantic instances, at most 256 of one function; declined: ; peak 123 MB
+
+## A fixed program (256 structs and calls), K distinct types: the cost of K instances
+K=1: 256 types: accepted in 1.89 s; 1 semantic instances, at most 1 of one function; declined: ; peak 106 MB
+K=16: 256 types: accepted in 1.87 s; 16 semantic instances, at most 16 of one function; declined: ; peak 106 MB
+K=64: 256 types: accepted in 1.89 s; 64 semantic instances, at most 64 of one function; declined: ; peak 107 MB
+K=256: 256 types: accepted in 2.37 s; 256 semantic instances, at most 256 of one function; declined: ; peak 109 MB
+
+## The same with a 40-statement helper
+K=1: 256 types: accepted in 1.86 s; 1 semantic instances, at most 1 of one function; declined: ; peak 110 MB
+K=256: 256 types: accepted in 7.06 s; 256 semantic instances, at most 256 of one function; declined: ; peak 180 MB
+
+## A larger fixed program (1,024 structs and calls)
+K=1: 1024 types: accepted in 8.00 s; 1 semantic instances, at most 1 of one function; declined: ; peak 361 MB
+K=1024: 1024 types: accepted in 22.21 s; 1024 semantic instances, at most 1024 of one function; declined: ; peak 370 MB
