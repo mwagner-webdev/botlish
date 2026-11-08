@@ -1008,19 +1008,25 @@ proc hir::semantic::Save {hirVar e {kids ""}} {
             dict set tops $k $v
         }
     }
-    set exprs [dict create]
+    # (Each table's entries as a list of ID VALUE pairs: what Rewind puts
+    # back in order, without hashing them twice.)
+    set table [dict get $hir exprs]
+    set exprs {}
     foreach x [Region $hir $e] {
-        dict set exprs $x [dict get $hir exprs $x]
+        lappend exprs $x [dict get $table $x]
     }
-    set scopes [dict create]
-    set bindings [dict create]
+    set scopeTable [dict get $hir scopes]
+    set bindingTable [dict get $hir bindings]
+    set scopes {}
+    set bindings {}
     foreach s [RegionScopes $hir $e $kids] {
-        set rec [dict get $hir scopes $s]
-        dict set scopes $s $rec
+        set rec [dict get $scopeTable $s]
+        lappend scopes $s $rec
         foreach b [dict get $rec bindings] {
-            dict set bindings $b [dict get $hir bindings $b]
+            lappend bindings $b [dict get $bindingTable $b]
         }
     }
+    unset table scopeTable bindingTable
     set journal [dict create tops $tops exprs $exprs scopes $scopes bindings $bindings \
         mark [dict getdef $hir counters type 0] order [dict keys $hir]]
     if {$auditRollback} {
@@ -1042,9 +1048,10 @@ proc hir::semantic::Capture {hir journal} {
     }
     set captured [dict create tops $tops]
     foreach table {exprs scopes bindings} {
-        set now [dict create]
-        foreach id [dict keys [dict get $journal $table]] {
-            dict set now $id [dict get $hir $table $id]
+        set entries [dict get $hir $table]
+        set now {}
+        foreach {id -} [dict get $journal $table] {
+            lappend now $id [dict get $entries $id]
         }
         dict set captured $table $now
     }
@@ -1068,9 +1075,17 @@ proc hir::semantic::Rewind {hirVar journal} {
         dict set hir $k $v
     }
     foreach table {exprs scopes bindings} {
-        dict for {id value} [dict get $journal $table] {
-            dict set hir $table $id $value
+        set pairs [dict get $journal $table]
+        if {$pairs eq {}} continue
+        # The table taken out while its entries are put back, so that each
+        # write is one lookup in a table nothing else holds.
+        set entries [dict get $hir $table]
+        dict set hir $table {}
+        foreach {id value} $pairs {
+            dict set entries $id $value
         }
+        dict set hir $table $entries
+        unset entries
     }
 }
 
@@ -1222,8 +1237,8 @@ proc hir::semantic::verify {hirVar} {
         set journal [Save hir $block $kids]
         # The generic program as hir::layouts::verifyInstance reads it: the
         # region's own expressions, with their generic types.
-        set generic [dict create exprs [dict get $journal exprs] types [dict create]]
-        dict for {e node} [dict get $journal exprs] {
+        set generic [dict create exprs [dict create {*}[dict get $journal exprs]] types [dict create]]
+        foreach {e node} [dict get $journal exprs] {
             set t [dict get $node type]
             if {$t ne ""} {
                 dict set generic types $t [dict get $hir types $t]
