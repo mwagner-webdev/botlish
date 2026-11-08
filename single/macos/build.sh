@@ -7,7 +7,8 @@
 # Runs on Apple Silicon macOS with Apple's command-line tools. DIR (default
 # single/out/macos) receives
 #
-#   Botlish.app/                      the application, ad-hoc signed
+#   Botlish.app/                      the application, ad-hoc signed with
+#                                     the hardened runtime
 #   botlish-macos-aarch64.zip         the download: the application archived
 #                                     by ditto (symbolic links and modes
 #                                     kept; no extended attribute needed)
@@ -22,7 +23,10 @@
 #                                     linked to the bundled Tcl.framework
 #                                     through LC_RPATH
 #                                     @executable_path/../Frameworks
-#     MacOS/botlish-native            the native backend's driver
+#     MacOS/botlish-native            the native backend's driver, built
+#                                     without its JIT (no in-process code
+#                                     generator: MACOS-BOTLISH-
+#                                     DISTRIBUTION-MILESTONE-1.md)
 #     Frameworks/Tcl.framework/       Tcl 9 (single/macos/tcl-framework.sh)
 #     Resources/botlish.zip           the compiler: single/package.tcl
 #                                     -archive (single/main.tcl, main.tcl and
@@ -39,19 +43,28 @@
 #      built once by tcl-framework.sh and cached in
 #      ${BOTLISH_APP_CACHE:-~/Library/Caches/botlish-app}, keyed by its
 #      recipe (that script, the Tcl pin, the deployment target).
-#   2. The native backend: `cargo build --release` (the build the test suite
-#      uses), its runtime archive's system libraries checked against rustc's
-#      (native/runtime-archive/libraries.tcl) -- or --native-dir DIR's
-#      botlish-native and libbotlish_runtime.a. Their debug symbols are
-#      stripped (strip -S). No botlish-aot-stub: the stub linker is Linux
-#      x86-64's; `auto` links every macOS executable with the system linker.
+#   2. The native backend: the distribution's build, `cargo build --release
+#      --no-default-features` (the driver without its `jit` feature: it
+#      compiles, links and runs executables, -aot-run among them, and
+#      refuses every in-process run with NATIVE UNSUPPORTED jit) into its
+#      own target directory, native/target/macos-app, so the test suite's
+#      build (native/target/release, with the JIT) is left as it is; the
+#      runtime archive's system libraries checked against rustc's
+#      (native/runtime-archive/libraries.tcl, on the test suite's build) --
+#      or --native-dir DIR's botlish-native and libbotlish_runtime.a, which
+#      must be a build without the JIT (`botlish-native capabilities`).
+#      Their debug symbols are stripped (strip -S). No botlish-aot-stub: the
+#      stub linker is Linux x86-64's; `auto` links every macOS executable
+#      with the system linker.
 #   3. The launcher: clang, against the framework's headers, the framework
 #      weakly linked (a missing or damaged one is the launcher's diagnostic).
-#   4. Signing, ad hoc (codesign --sign -: no Developer ID, no hardened
-#      runtime, no notarization), inner code first, never --deep: the
-#      framework's version directory, the driver, then -- after the compiler
-#      archive is written, whose native-bin/ID names the driver as signed --
-#      the application: its main executable and the seal of its resources.
+#   4. Signing, ad hoc with the hardened runtime and no entitlement
+#      (single/macos/sign.sh --identity -: no Developer ID, no notarization;
+#      a release signs the same bundle again with its Developer ID, the
+#      same script), inner code first, never --deep: the framework's
+#      version directory, the driver, then -- after the compiler archive is
+#      written, whose native-bin/ID names the driver as signed -- the
+#      application: its main executable and the seal of its resources.
 #      Nothing is changed after it is signed.
 #   5. single/macos/verify.sh on the application (layout, architectures,
 #      dynamic dependencies and load paths, signatures, archive contents
@@ -112,17 +125,22 @@ trap 'rm -rf "$work"' EXIT
 
 # --- 2. the native backend ----------------------------------------------------
 if [[ -z $native_dir ]]; then
-  echo "== building the native backend"
+  echo "== building the native backend (the test suite's, for its runtime archive's check)"
   (cd "$root" && cargo build --release --manifest-path native/Cargo.toml)
   tclsh "$root/native/runtime-archive/libraries.tcl"
-  native_dir="$root/native/target/release"
+  echo "== building the distribution's native backend (no JIT)"
+  (cd "$root" && cargo build --release --no-default-features --manifest-path native/Cargo.toml --target-dir native/target/macos-app)
+  native_dir="$root/native/target/macos-app/release"
 fi
 mkdir -p "$work/native"
 for name in botlish-native libbotlish_runtime.a; do
-  [[ -f $native_dir/$name ]] || fail "missing $native_dir/$name: build the native backend first (cargo build --release --manifest-path native/Cargo.toml)"
+  [[ -f $native_dir/$name ]] || fail "missing $native_dir/$name: build the native backend first (cargo build --release --no-default-features --manifest-path native/Cargo.toml --target-dir native/target/macos-app)"
   cp "$native_dir/$name" "$work/native/$name"
   strip -S "$work/native/$name"
 done
+# The distribution's driver has no JIT: it says so itself.
+[[ $("$work/native/botlish-native" capabilities | sed -n 's/^jit //p') == 0 ]] ||
+  fail "$native_dir/botlish-native has a JIT: the application ships a driver built without it (--no-default-features)"
 
 # --- 3. the bundle, unsigned --------------------------------------------------
 app="$output/Botlish.app"
@@ -178,16 +196,8 @@ clang -O2 -arch arm64 -mmacosx-version-min="$MACOSX_DEPLOYMENT_TARGET" -Wall -We
   -o "$contents/MacOS/botlish" "$here/launcher.c"
 
 # --- 4. signing, inner to outer -----------------------------------------------
-echo "== signing (ad hoc)"
-codesign --force --sign - "$contents/Frameworks/Tcl.framework/Versions/$tcl_version"
-codesign --force --sign - --identifier "$identifier.native" "$contents/MacOS/botlish-native"
-# The compiler archive; its native-bin/ID names the native files as the
-# bundle holds them (the driver signed).
-mkdir -p "$work/bundled-native"
-cp "$contents/MacOS/botlish-native" "$contents/Resources/libbotlish_runtime.a" "$work/bundled-native/"
-tclsh "$root/single/package.tcl" -archive "$contents/Resources/botlish.zip" "$work/bundled-native"
-chmod 644 "$contents/Resources/botlish.zip"
-codesign --force --sign - "$app"
+echo "== signing (ad hoc, hardened runtime)"
+"$here/sign.sh" --identity - --tcl-framework "$tcl_framework" "$app"
 
 # --- 5. verification and the download -----------------------------------------
 (( verify )) && "$here/verify.sh" --checkout "$root" "$app"

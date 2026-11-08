@@ -507,6 +507,12 @@ proc versionText {} {
     } else {
         lappend lines "native backend: $path"
     }
+    # Whether the native backend runs programs in-process (native::
+    # jitAvailable): a distribution without the JIT runs them natively as
+    # executables (-aot-run).
+    if {![catch {native::jitAvailable} jit]} {
+        lappend lines "native JIT: [if {$jit} {set _ available} else {set _ {unavailable (programs run natively as executables: -aot-run)}}]"
+    }
     lappend lines "invocation: $::cliInvocation"
     return [join $lines \n]
 }

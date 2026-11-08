@@ -618,6 +618,80 @@ test aotr-no-jit-route {-aot-run runs nothing in the driver's process: the drive
         [regexp {CraneliftJit|execute\(} [core::ReadFile [file join $::projectRoot native src aotrun.rs]]]
 } -result {1 0 0}
 
+# --- a native backend without a JIT ------------------------------------------------
+
+# The driver built without its JIT (cargo build --release --no-default-features
+# --target-dir native/target/no-jit; the macOS application's,
+# MACOS-BOTLISH-DISTRIBUTION-MILESTONE-1.md): its tests run where one is built.
+set aotrNoJitDriver [file join $::projectRoot native target no-jit release botlish-native[expr {$::tcl_platform(platform) eq "windows" ? ".exe" : ""}]]
+testConstraint aotrNoJitDriver [expr {[testConstraint aotRun] && [file executable $aotrNoJitDriver]}]
+
+# A driver that says it has no JIT (botlish-native capabilities: jit 0) and
+# is the real one for everything else: main.tcl's side of the boundary.
+proc aotrJitlessWrapper {dir} {
+    set path [file join $dir botlish-native-jitless]
+    set channel [open $path w]
+    puts $channel "#!/bin/sh"
+    puts $channel {if [ "$1" = capabilities ]; then echo "jit 0"; echo "aot-run 1"; exit 0; fi}
+    puts $channel "exec [list [native::binary]] \"\$@\""
+    close $channel
+    file attributes $path -permissions 0755
+    return $path
+}
+
+test aotr-no-jit-refused {a native backend without a JIT: -backend cranelift, cranelift-generic and run -backend cranelift refused before anything compiles -- status 1, NATIVE UNSUPPORTED jit and -aot-run named on stderr, nothing on stdout} -constraints {aotRun unixSignals} -setup {
+    set dir [aotrDir nojit]
+    set temp [aotrTemp $dir]
+    set program [aotrPrinter $dir]
+    set driver [aotrJitlessWrapper $dir]
+} -body {
+    lmap invocation {{-backend cranelift} {-backend cranelift-generic} {run -backend cranelift}} {
+        lassign [aotrMainEnv $temp [list BOTLISH_NATIVE_BIN $driver] {*}$invocation $program] out err status
+        list $status [expr {$out eq ""}] [string match "*(NATIVE UNSUPPORTED jit)*" $err] [string match "*-aot-run FILE*" $err]
+    }
+} -cleanup {file delete -force $dir} -result {{1 1 1 1} {1 1 1 1} {1 1 1 1}}
+
+test aotr-no-jit-run-default {without a JIT, run's native default runs the program as its executable: its output, arguments and status, as -aot-run's} -constraints {aotRun unixSignals} -setup {
+    set dir [aotrDir nojitrun]
+    set temp [aotrTemp $dir]
+    set program [aotrPrinter $dir]
+    set driver [aotrJitlessWrapper $dir]
+} -body {
+    lassign [aotrMainEnv $temp [list BOTLISH_NATIVE_BIN $driver] run -warnings off $program one "two words"] out err status
+    lassign [aotrMainEnv $temp [list BOTLISH_NATIVE_BIN $driver] -warnings off -aot-run $program -- one "two words"] aout aerr astatus
+    lassign [aotrMainEnv $temp [list BOTLISH_NATIVE_BIN $driver] -version] version
+    list [string equal $out [aotrPrinted [list one "two words"]]] $status [string equal $out $aout] $astatus \
+        [regexp -line {^native JIT: unavailable} $version] [aotrLeft $temp]
+} -cleanup {file delete -force $dir} -result {1 0 1 0 1 {}}
+
+test aotr-jit-available {with a JIT, -version says so and run's default is the JIT's (the program's value in the driver's result, not an executable's)} -constraints aotRun -setup {
+    set dir [aotrDir jit]
+    set temp [aotrTemp $dir]
+} -body {
+    lassign [aotrMain $temp -version] version
+    list [regexp -line {^native JIT: available$} $version] [native::jitAvailable]
+} -cleanup {file delete -force $dir} -result {1 1}
+
+test aotr-no-jit-driver {the driver built without its JIT: capabilities jit 0; its in-process commands refused (NATIVE UNSUPPORTED jit); -emit-clif from the object; -aot-run and -emit-native-executable as with the JIT} -constraints aotrNoJitDriver -setup {
+    set dir [aotrDir nojitdriver]
+    set temp [aotrTemp $dir]
+    set program [aotrPrinter $dir]
+    set nir [file join $dir p.nir]
+    set channel [open $nir w]
+    puts -nonewline $channel [native::nir [surface::compile "1 + 2"]]
+    close $channel
+} -body {
+    set capabilities [exec $aotrNoJitDriver capabilities]
+    set refused [lmap command {{run} {bench 3} {batch 3} {vms 2}} {
+        string match "error {NATIVE UNSUPPORTED jit} *" [exec $aotrNoJitDriver {*}$command $nir]
+    }]
+    set clif [exec $aotrNoJitDriver clif $nir]
+    lassign [aotrMainEnv $temp [list BOTLISH_NATIVE_BIN $aotrNoJitDriver] -warnings off -aot-run $program -- x] out err status
+    lassign [aotrMainEnv $temp [list BOTLISH_NATIVE_BIN $aotrNoJitDriver] -backend cranelift $program] - jerr jstatus
+    list $capabilities $refused [string match "*function *" $clif] [string equal $out [aotrPrinted x]] $status \
+        $jstatus [string match "*(NATIVE UNSUPPORTED jit)*" $jerr] [aotrLeft $temp]
+} -cleanup {file delete -force $dir} -result [list "jit 0\naot-run 1" {1 1 1 1} 1 1 0 1 1 {}]
+
 # --- the command line ---------------------------------------------------------------
 
 test aotr-usage {-aot-run's usage errors (status 2, nothing compiled): two files, an option that runs or builds another way, -aot-keep or -- without it, a -target of another host} -constraints aotRun -setup {

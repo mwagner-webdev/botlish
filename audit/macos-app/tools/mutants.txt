@@ -70,11 +70,12 @@
 >>>>
 
 @@ zip-omitted the compiler archive is left out of the bundle
-## single/macos/build.sh
+## single/macos/sign.sh
 <<<<
-chmod 644 "$contents/Resources/botlish.zip"
+sign "$app"
 ====
 rm "$contents/Resources/botlish.zip"
+sign "$app"
 >>>>
 
 @@ zip-wrong-mount the launcher mounts the compiler archive elsewhere than //zipfs:/app
@@ -123,12 +124,12 @@ if {[file isfile @CHECKOUT@/main.tcl]} {
 >>>>
 
 @@ backend-omitted the native backend is left out of the bundle
-## single/macos/build.sh
+## single/macos/sign.sh
 <<<<
-codesign --force --sign - "$app"
+sign "$app"
 ====
 rm "$contents/MacOS/botlish-native"
-codesign --force --sign - "$app"
+sign "$app"
 >>>>
 
 @@ backend-from-environment the application takes BOTLISH_NATIVE_BIN from the environment when it is set: another build's driver
@@ -142,12 +143,12 @@ codesign --force --sign - "$app"
 >>>>
 
 @@ runtime-omitted the runtime archive is left out of the bundle
-## single/macos/build.sh
+## single/macos/sign.sh
 <<<<
-codesign --force --sign - "$app"
+sign "$app"
 ====
 rm "$contents/Resources/libbotlish_runtime.a"
-codesign --force --sign - "$app"
+sign "$app"
 >>>>
 
 @@ runtime-relative the application names the runtime archive by a path relative to the working directory
@@ -206,34 +207,34 @@ codesign --force --sign - "$app"
 >>>>
 
 @@ modified-after-signing the launcher is changed after the application is signed
-## single/macos/build.sh
+## single/macos/sign.sh
 <<<<
-codesign --force --sign - "$app"
+sign "$app"
 ====
-codesign --force --sign - "$app"
+sign "$app"
 install_name_tool -add_rpath @executable_path/../Resources "$contents/MacOS/botlish" 2>/dev/null
 >>>>
 
 @@ framework-unsigned the framework is never signed (only its library's linker signature)
-## single/macos/build.sh
+## single/macos/sign.sh
 <<<<
-codesign --force --sign - "$contents/Frameworks/Tcl.framework/Versions/$tcl_version"
+sign "$contents/Frameworks/Tcl.framework/Versions/$tcl_version"
 ====
 >>>>
 
 @@ backend-unsigned the native backend is never signed with its identifier (its linker signature left)
-## single/macos/build.sh
+## single/macos/sign.sh
 <<<<
-codesign --force --sign - --identifier "$identifier.native" "$contents/MacOS/botlish-native"
+sign --identifier "$identifier.native" "$contents/MacOS/botlish-native"
 ====
 >>>>
 
 @@ zip-changed-after-signing the compiler archive is rewritten after the application is signed
-## single/macos/build.sh
+## single/macos/sign.sh
 <<<<
-codesign --force --sign - "$app"
+sign "$app"
 ====
-codesign --force --sign - "$app"
+sign "$app"
 printf 'x' >>"$contents/Resources/botlish.zip"
 >>>>
 
@@ -252,3 +253,65 @@ printf 'x' >>"$contents/Resources/botlish.zip"
 ====
     if (loaded == NULL) {
 >>>>
+
+# --- MACOS-BOTLISH-DISTRIBUTION-MILESTONE-1.md: the hardened runtime and the
+# native backend without a JIT
+
+@@ hardened-runtime-dropped the application is signed without the hardened runtime (notarization requires it)
+## single/macos/sign.sh
+<<<<
+sign() { codesign --force --sign "$identity" "${keychain[@]}" --options runtime "$timestamp" "$@"; }
+====
+sign() { codesign --force --sign "$identity" "${keychain[@]}" "$timestamp" "$@"; }
+>>>>
+
+@@ jit-entitlement-added the driver is signed with the JIT's entitlement, which the application has no use for
+## single/macos/sign.sh
+<<<<
+sign --identifier "$identifier.native" "$contents/MacOS/botlish-native"
+====
+printf '<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict><key>com.apple.security.cs.allow-jit</key><true/></dict></plist>\n' >"${TMPDIR:-/tmp}/jit.entitlements"
+sign --identifier "$identifier.native" --entitlements "${TMPDIR:-/tmp}/jit.entitlements" "$contents/MacOS/botlish-native"
+>>>>
+
+@@ driver-identifier-lost the driver is signed under the application's identifier
+## single/macos/sign.sh
+<<<<
+sign --identifier "$identifier.native" "$contents/MacOS/botlish-native"
+====
+sign --identifier "$identifier" "$contents/MacOS/botlish-native"
+>>>>
+
+@@ archive-names-unsigned-driver the compiler archive is not written again after the driver's signature: its native-bin/ID names another driver
+## single/macos/sign.sh
+<<<<
+if [[ $got != "$want" ]]; then
+====
+if [[ -z $got ]]; then
+>>>>
+
+@@ jit-refusal-removed main.tcl runs -backend cranelift whatever the native backend can do: the driver's own refusal, not the actionable one
+## main.tcl
+<<<<
+if {$runsNatively && [lspMode $commandLine] eq "" && ![native::jitAvailable]} {
+====
+if {0 && $runsNatively && [lspMode $commandLine] eq "" && ![native::jitAvailable]} {
+>>>>
+
+@@ run-default-not-aot run's native default asks the JIT where there is none: a program as a command cannot run natively in the application
+## main.tcl
+<<<<
+    if {[dict get $commandLine action] eq "program" && !$backendGiven} {
+        exit [aotRunProgram [lindex $files 0]]
+    }
+====
+>>>>
+
+@@ jit-capability-misreported the application says its native backend has a JIT
+## native/native.tcl
+<<<<
+                    set available [expr {[lindex $line 1] eq "1"}]
+====
+                    set available 1
+>>>>
+
