@@ -705,6 +705,20 @@ tclsh9.0 tools/mutant-catalogs.tcl
 tclsh9.0 tests/local.tcl
 ```
 
-`tests/local.tcl` (every Tcl test file on interp and compile, every golden
-suite on the four backends): running when this report was first
-committed; its result is recorded in a follow-up commit.
+`tests/local.tcl` on the final tree (every Tcl test file on interp and
+compile, minus the golden duplicates; every golden suite on the four
+backends, 4 jobs, 5,507 s):
+
+```
+Tcl tests on interp    8980 passed, 0 failed, 214 skipped, 2493 golden duplicates skipped
+Tcl tests on compile   8975 passed, 0 failed, 219 skipped, 2493 golden duplicates skipped
+Golden suites: 118 run, 0 failed; tests passed: interp 5637/5637, compile 5637/5637, cranelift-generic 5545/5545, cranelift 5647/5647
+```
+
+Also: `tests/fold-loops.test` (all 104 tests, golden duplicates included)
+and `tests/consumed-fold-intermediates.test` under
+`BOTLISH_NATIVE_GC_STRESS=1`, every test passing; `tools/compilerpedia.tcl
+check` (1,290 topics, 759 examples, 0 problems); `tools/mutant-catalogs.tcl`
+(91 catalogs, 3,198 mutants, 0 problems); the census corpus on the four
+backends (41 programs, 0 failures, a02's and a05's new `# alloc:` lines
+included).
