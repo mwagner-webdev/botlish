@@ -501,16 +501,16 @@ related: capability.concurrency capability.files
 == STATUS
 Nothing in `std` opens a network connection: no HTTP, TLS, DNS or socket
 function exists in the standard library or the compiler, and none is
-planned there (the engines are native code a package carries:
-HTTP-SHIPPING-CENSUS.md). An HTTP/1.1 and HTTP/2 client with TLS
-verification is the official package `http` (HTTP-CLIENT-PACKAGE-
-MILESTONE-1.md), for Linux x86-64 only. It has no server, no HTTP/3, no
-WebSocket, no redirects, cookies, proxies or decompression.
+planned there: the engines are native code a package carries. An HTTP/1.1
+and HTTP/2 client with TLS verification is the official package `http`,
+for Linux x86-64 only. It has no server, no HTTP/3, no WebSocket, no
+redirects, cookies, proxies or decompression, and one thread of a process
+uses it at a time.
 
 == NEAREST ALTERNATIVE
 Install the package and its driver from a repository of released
-artifacts, then follow its README.md and GUIDE.md (they come with the
-package, in .bot_modules/http):
+artifacts, then follow the README and the user's guide that come with the
+package (in .bot_modules/http):
 
     botlish add http -repository REPO -target linux-x86_64
     botlish add event_loop_linux -repository REPO -target linux-x86_64

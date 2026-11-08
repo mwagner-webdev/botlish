@@ -58,6 +58,20 @@ proc httpExecutable {} {
     return $::httpExe
 }
 
+# The executable of the thread program NAME.bot (tests/http/beside.bot,
+# both.bot), with its worker module neighbor.bot, in the same application.
+proc httpProgram {name} {
+    if {![info exists ::httpPrograms($name)]} {
+        httpExecutable
+        foreach f [list $name.bot neighbor.bot] {
+            file copy -force [file join $::httpTests $f] $::httpDir
+        }
+        set hir [surface::readProgramFile [file join $::httpDir $name.bot] -warnings off -cache ""]
+        set ::httpPrograms($name) [native::executable $hir [file join $::httpDir $name]]
+    }
+    return $::httpPrograms($name)
+}
+
 # The certificates (tests/http/pki.sh), made once.
 proc httpPki {} {
     set dir [file join $::httpDir pki]
@@ -111,16 +125,45 @@ proc httpTlsUrl {path {name good} {cert good} {alpn h2,http/1.1}} {
 
 # The report lines of scenario ARGS (the executable's value).
 proc httpRun {args} {
-    set exe [httpExecutable]
-    if {[catch {exec $exe {*}$args} out]} {
-        return [list FAILED $out]
+    httpRunProgram [httpExecutable] {*}$args
+}
+
+# Run the executable EXE with ARGS; its value, a List[str], as a Tcl list
+# of its lines, read through the driver protocol (BOTLISH_NATIVE_RESULT:
+# an executable prints only what its program writes, PROGRAM-OUTPUT-
+# MILESTONE-1.md), or {FAILED REASON}.
+proc httpRunProgram {exe args} {
+    set result [file join [temporaryDirectory] http-result-[pid]-[incr ::httpRuns]]
+    try {
+        if {[catch {exec env BOTLISH_NATIVE_RESULT=$result $exe {*}$args} out]} {
+            return [list FAILED $out]
+        }
+        if {[catch {httpResultLines $result} lines]} {
+            return [list FAILED $lines]
+        }
+        return $lines
+    } finally {
+        file delete $result
     }
-    regexp -all -inline {"((?:[^"\\]|\\.)*)"} $out
-    set lines {}
-    foreach {- line} [regexp -all -inline {"((?:[^"\\]|\\.)*)"} $out] {
-        lappend lines [string map {\\" \" \\\\ \\} $line]
+}
+
+# The lines of a List[str] value in the result file PATH: its host value
+# is {list {{str TEXT} ...}}.
+proc httpResultLines {path} {
+    set f [open $path r]
+    fconfigure $f -encoding utf-8
+    set lines [split [string trimright [read $f] \n] \n]
+    close $f
+    set value [native::Outcome $lines]
+    if {[lindex $value 0] ne "list"} {
+        error "not a List: $value"
     }
-    return $lines
+    lmap item [lindex $value 1] {
+        if {[lindex $item 0] ne "str"} {
+            error "not a str: $item"
+        }
+        lindex $item 1
+    }
 }
 
 proc httpStop {} {
@@ -227,7 +270,7 @@ test http-statuses {a 404 and a 204 are responses, not failures} -constraints {h
 
 test http-utf8-split {UTF-8 text sent one byte per write arrives as the same bytes (decoding is the program's, once it has them)} -constraints {httpBuilt httpPeer} -body {
     lindex [httpRun get [httpTlsUrl /utf8] [httpCa] text] 2
-} -result "text h\u00e9llo w\u00f6rld \u2713 \U0001F600 end\\n"
+} -result "text h\u00e9llo w\u00f6rld \u2713 \U0001F600 end\n"
 
 test http-upload {streamed request bodies: a declared length (Content-Length) over HTTP/2, an unknown one chunked over HTTP/1.1 and as DATA frames over HTTP/2; the server receives every byte} -constraints {httpBuilt httpPeer} -body {
     list [lmap l [httpRun upload [httpTlsUrl /echo] [httpCa] 1000000 65536 1] {expr {[string match {header x-echo-length*} $l] || [string match echoed* $l] ? $l : [continue]}}] \
@@ -335,11 +378,11 @@ test http-abandon-control {the negative control: with releases leaving their tas
 test http-stale-handle {a released exchange whose native slot another exchange took: its reads are Released, never the other exchange's body (the handle's generation), on both protocols} -constraints {httpBuilt httpPeer} -body {
     list [httpRun stale [httpTlsUrl "/stream?n=50&size=1000&delay=10"] [httpCa] [httpTlsUrl /hello]] \
         [httpRun stale [httpPlainUrl "/stream?n=50&size=1000&delay=10"] "" [httpPlainUrl /hello]]
-} -result {{{first chunk 1000} {stale read: <released>} {fresh read: hello\n} {final: clients 0 exchanges 0 panics 0}} {{first chunk 1000} {stale read: <released>} {fresh read: hello\n} {final: clients 0 exchanges 0 panics 0}}}
+} -result [lrepeat 2 [list {first chunk 1000} {stale read: <released>} "fresh read: hello\n" {final: clients 0 exchanges 0 panics 0}]]
 
 test http-stale-handle-control {the negative control: with an index-only handle lookup (fault 256) the released exchange's read reaches the exchange that reused its slot} -constraints {httpBuilt httpPeer} -body {
     lindex [httpRun fault 256 stale [httpTlsUrl "/stream?n=50&size=1000&delay=10"] [httpCa] [httpTlsUrl /hello]] 1
-} -result {stale read: hello\n}
+} -result "stale read: hello\n"
 
 test http-header-validation {request header validation in both layers: http::header refuses a control character, a trailing space, a name that is no token and a connection-specific name where the program builds the header; a Header built by hand is refused natively when sent (a CR LF value, a framing header), and obs-text bytes pass} -constraints {httpBuilt httpPeer} -body {
     httpRun headers [httpTlsUrl /echo] [httpCa] [httpPlainUrl /echo]
@@ -354,6 +397,16 @@ test http-resolver-control {the name resolver's answer comes back to the loop by
     list [lindex [httpRun fault 1 outcome [httpTlsUrl /hello] [httpCa] connect 500000] 0] \
         [lindex [httpRun outcome [httpTlsUrl /hello] [httpCa] connect 500000] 0]
 } -result {{error Timeout connect} {status 200 bytes 6}}
+
+# --- Botlish threads (std::thread): one loop per VM, one http runtime per process
+
+test http-beside-thread {a Botlish thread runs http on a loop of its own while the main VM's loop is open too (two loops in one process, event_loop_linux 0.5.0): the name resolver's wake names the worker's loop (the integration ABI's version 2), so its request to localhost succeeds; once the worker has ended, its runtime never closed, the claim is gone with its thread and the main VM opens a runtime of its own} -constraints {httpBuilt httpPeer} -body {
+    httpRunProgram [httpProgram beside] [httpTlsUrl /hello] [httpCa]
+} -result {{worker: two loops: status 200 bytes 6} {main after it: status 200 bytes 6}}
+
+test http-one-thread {one thread of a process has the http runtime at a time: with the main VM's open, a worker thread's is refused (Fault, naming the reason; the name resolver's pool and the counters are the process's), and the main VM's own request still succeeds} -constraints {httpBuilt httpPeer} -body {
+    httpRunProgram [httpProgram both] [httpTlsUrl /hello] [httpCa]
+} -result {{worker: two loops: error Fault bh_open: the HTTP runtime is open on another thread (one thread of a process at a time)} {main: status 200 bytes 6}}
 
 # --- lifetimes under random operation orders
 

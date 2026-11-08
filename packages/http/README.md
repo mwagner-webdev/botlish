@@ -24,8 +24,8 @@ timeouts, cancellation, TLS, connections and the limits.
 ## Installing
 
 With the single-file compiler (`botlish`) and a repository holding the
-released artifacts (`http-0.1.0.botpkg`, `boringssl-0.20261020.0.botpkg`,
-`event_loop_linux-0.3.0.botpkg`):
+released artifacts (`http-0.2.0.botpkg`, `boringssl-0.20261020.0.botpkg`,
+`event_loop_linux-0.5.0.botpkg`):
 
     botlish add http -repository REPO -target linux-x86_64
     botlish add event_loop_linux -repository REPO -target linux-x86_64
@@ -47,6 +47,8 @@ import http
 import std::abi::bytes
 import std::event_loop
 import std::int
+import std::io
+import std::linux::io
 import std::str
 
 # The work: one GET, the body read to its end. Every failure is a declared
@@ -57,8 +59,8 @@ fn fetch(url: str, context h: http::Http, ev: std::event_loop::Loop, n: event_lo
     body = response.exchange.read_all(10000000)
     "status ".concat(std::int::to_string(response.status)).concat(", ").concat(std::int::to_string(std::abi::bytes::length(body).value)).concat(" bytes")
 
-# A task of the loop: the work, its failures turned into text.
-fn task(url: str, context h: http::Http, ev: std::event_loop::Loop, n: event_loop_linux::Native) -> int errors std::event_loop::SchedulerFault:
+# A task of the loop: the work, its failures turned into text, printed.
+fn task(url: str, context h: http::Http, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::io::IO) -> int errors std::event_loop::SchedulerFault:
     line = fetch(url):
         on http::InvalidUri {reason}:
             "invalid URI: ".concat(reason)
@@ -90,34 +92,39 @@ fn task(url: str, context h: http::Http, ev: std::event_loop::Loop, n: event_loo
             "fault: ".concat(reason)
         on http::BodyTooLarge:
             "body too large"
-    std::event_loop::log(line)
+    std::io::print_line(line):
+        on std::io::WriteFailed:
+            return 1
     0
 
-fn main(context ev: std::event_loop::Loop, d: event_loop_linux::Linux, n: event_loop_linux::Native, h: http::Http) -> List[str] errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+fn main(context ev: std::event_loop::Loop, d: event_loop_linux::Linux, n: event_loop_linux::Native, h: http::Http, io: std::io::IO) -> int errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
     coroutine {step, first} = task("https://example.com/")
     std::event_loop::adopt(step, first)
     std::event_loop::run()
-    std::event_loop::trace()
+    0
 
-with context std::event_loop::create(64, :trace)
+with context std::event_loop::create(64)
 with context event_loop_linux::create()
 with context event_loop_linux::native()
 with context http::create()
+with context std::linux::io::create()
 main():
     on std::event_loop::SchedulerFault:
-        ["SchedulerFault"]
+        1
     on std::event_loop::DriverFault:
-        ["DriverFault"]
+        2
     on std::event_loop::LoopReentered:
-        ["LoopReentered"]
+        3
 ```
 
-    botlish -backend cranelift fetch.bot
+    botlish run fetch.bot
     botlish -emit-native-executable fetch.bot && ./fetch
 
-The program installs four contexts -- the loop, the Linux driver, its
-integration capability, and the HTTP runtime made from it -- and runs one
-task. `send` waits (the task only: the loop runs other tasks meanwhile)
+Either prints one line -- the status and the body's size (`status 200, N
+bytes`), or what failed (an executable prints only what its program
+writes). The program installs the loop, the
+Linux driver, its integration capability, the HTTP runtime made from it
+and standard output, and runs one task. `send` waits (the task only: the loop runs other tasks meanwhile)
 for the response head; `read_all` reads the body. The client and the
 exchange are released where `fetch` ends, on every exit.
 
@@ -128,16 +135,23 @@ package manager refuses to prepare another (`UNSUPPORTED`). Linux AArch64,
 macOS and Windows are not supported: the native unit has not been built or
 tested there (and macOS and Windows have no event-loop driver package).
 
+Botlish threads (`std::thread`): one thread of a process has the HTTP
+runtime at a time -- the main VM's or a worker's, beside other threads'
+event loops (`event_loop_linux` 0.5 runs one loop per VM, and the
+runtime's wakes name its own). Another thread's `http::create` is refused
+(its first client fails with `Fault`) until the owner's runtime is shut
+down or its thread ends. GUIDE.md, section 1.
+
 ## What is inside
 
 | package | version | holds |
 |---|---|---|
-| `http` | 0.1.0 | `http.bot`; `native/libbotlish_http.a` (the Rust unit: Hyper 1.12.0, h2 0.4.20, boring 5.4.0, the bridge; localized: only its `bh_*` functions are global); the unit's sources (`native/`); `licenses/http/` (the unit's crates and their license files) |
+| `http` | 0.2.0 | `http.bot`; `native/libbotlish_http.a` (the Rust unit: Hyper 1.12.0, h2 0.4.20, boring 5.4.0, the bridge; localized: only its `bh_*` functions are global); the unit's sources (`native/`); `licenses/http/` (the unit's crates and their license files) |
 | `boringssl` | 0.20261020.0 | `boringssl.bot`; `native/libbotlish_boringssl.a` (BoringSSL's release tag 0.20261020.0, commit d3bf4795, unpatched, unprefixed, under its own archive name); `licenses/boringssl/LICENSE` |
-| `event_loop_linux` | 0.3.0 | the Linux driver of `std::event_loop` |
+| `event_loop_linux` | 0.5.0 | the Linux driver of `std::event_loop` (one loop per VM) |
 
 `http` locks the other two exactly; a program's graph holds one instance of
 each, shared with every other package that uses them. Each release has a
 provenance record beside its artifact (`botlish package inspect
-http-0.1.0.botpkg -provenance http-0.1.0.provenance.json` checks it against
+http-0.2.0.botpkg -provenance http-0.2.0.provenance.json` checks it against
 the artifact). A provenance record is evidence, not a signature.

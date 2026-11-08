@@ -58,7 +58,7 @@ echo "== botlish add"
 for name in http event_loop_linux feeds; do
   "$botlish" add "$name" -repository "$repo" -target linux-x86_64; echo "status $?"
 done
-check "botlish.json requests http, the driver and feeds" bash -c 'grep -q "\"http\": \"0.1\"" botlish.json && grep -q "\"event_loop_linux\": \"0.3\"" botlish.json && grep -q "\"feeds\": \"1.0\"" botlish.json'
+check "botlish.json requests http, the driver and feeds" bash -c 'grep -q "\"http\": \"0.2\"" botlish.json && grep -q "\"event_loop_linux\": \"0.5\"" botlish.json && grep -q "\"feeds\": \"1.0\"" botlish.json'
 echo "== the installed graph"
 graph=.bot_modules/.targets/linux-x86_64/.graph
 cat "$graph"
@@ -71,7 +71,7 @@ check "the graph reports the driver shared" grep -q 'shared: one instance, event
 echo "== botlish verify"
 "$botlish" verify -repository "$repo"; check "verify is clean" test $? -eq 0
 echo "== provenance records"
-for f in boringssl-0.20261020.0 http-0.1.0; do
+for f in boringssl-0.20261020.0 event_loop_linux-0.5.0 http-0.2.0; do
   if [[ -f $repo/$f.provenance.json ]]; then
     "$botlish" package inspect "$repo/$f.botpkg" -provenance "$repo/$f.provenance.json" > "$out/provenance-$f.txt" 2>&1
     check "the provenance record of $f matches its artifact" test $? -eq 0
@@ -139,7 +139,7 @@ before=$(find .bot_modules -type f -exec sha256sum {} + | sort | sha256sum)
 "$botlish" add oldtls -repository "$repo" -target linux-x86_64 2> "$out/conflict.txt"; status=$?
 cat "$out/conflict.txt"
 check "add oldtls fails" test $status -eq 1
-check "the failure is a DEPENDENCY-CONFLICT naming both locks" bash -c "grep -q '(PM DEPENDENCY-CONFLICT)' '$out/conflict.txt' && grep -q 'oldtls 1.0.0 locks boringssl 0.20250101.0' '$out/conflict.txt' && grep -q 'http 0.1.0 locks boringssl 0.20261020.0' '$out/conflict.txt'"
+check "the failure is a DEPENDENCY-CONFLICT naming both locks" bash -c "grep -q '(PM DEPENDENCY-CONFLICT)' '$out/conflict.txt' && grep -q 'oldtls 1.0.0 locks boringssl 0.20250101.0' '$out/conflict.txt' && grep -q 'http 0.2.0 locks boringssl 0.20261020.0' '$out/conflict.txt'"
 after=$(find .bot_modules -type f -exec sha256sum {} + | sort | sha256sum)
 check "the installation is unchanged" test "$before" = "$after"
 

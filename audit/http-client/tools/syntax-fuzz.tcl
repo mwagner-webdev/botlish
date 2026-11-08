@@ -110,6 +110,30 @@ proc client {} {
     return [native::executable $hir [file join $dir client]]
 }
 
+# The lines of the client's value (a List[str]) for the NUL-separated
+# arguments in ARGSFILE, read through the driver protocol
+# (BOTLISH_NATIVE_RESULT: an executable prints only what its program
+# writes, PROGRAM-OUTPUT-MILESTONE-1.md). One run of the client: xargs is
+# told to fail rather than split the batch, and the lines are counted.
+proc clientLines {exe argsFile count} {
+    set result [file join [file dirname $exe] result.txt]
+    file delete $result
+    exec xargs -0 -x -a $argsFile env BOTLISH_NATIVE_RESULT=$result $exe
+    set f [open $result r]
+    fconfigure $f -encoding utf-8
+    set lines [split [string trimright [read $f] \n] \n]
+    close $f
+    set value ""
+    foreach line $lines {
+        if {[lindex $line 0] eq "value"} { set value [lindex $line 1] }
+        if {[lindex $line 0] eq "error"} { error "the client failed: $line" }
+    }
+    if {[lindex $value 0] ne "list"} { error "the client wrote no List: $lines" }
+    set out [lmap item [lindex $value 1] { lindex $item 1 }]
+    if {[llength $out] != $count} { error "the client reported [llength $out] lines for $count" }
+    return $out
+}
+
 set exe [client]
 set uris {}
 for {set i 0} {$i < [dict get $opts -count]} {incr i} { lappend uris [uri] }
@@ -122,12 +146,7 @@ for {set i 0} {$i < [llength $uris]} {incr i $batch} {
     set f [open $argsFile wb]
     puts -nonewline $f [encoding convertto utf-8 [join [concat [list parse-many] $chunk] \0]]
     close $f
-    set out [exec xargs -0 -a $argsFile $exe]
-    set mine {}
-    foreach {- line} [regexp -all -inline {"((?:[^"\\]|\\.)*)"} $out] {
-        lappend mine [string map {\\" \" \\\\ \\} $line]
-    }
-    set mine [lrange $mine 0 end-1]
+    set mine [lrange [clientLines $exe $argsFile [expr {[llength $chunk] + 1}]] 0 end-1]
     set f [open $argsFile wb]
     puts -nonewline $f [encoding convertto utf-8 [join $chunk \0]]
     close $f
@@ -184,12 +203,7 @@ for {set i 0} {$i < [llength $fields]} {incr i [expr {2 * $batch}]} {
     set f [open $argsFile wb]
     puts -nonewline $f [encoding convertto utf-8 [join [concat [list headers-many] $chunk] \0]]
     close $f
-    set out [exec xargs -0 -a $argsFile $exe]
-    set mine {}
-    foreach {- line} [regexp -all -inline {"((?:[^"\\]|\\.)*)"} $out] {
-        lappend mine [string map {\\" \" \\\\ \\} $line]
-    }
-    set mine [lrange $mine 0 end-1]
+    set mine [lrange [clientLines $exe $argsFile [expr {[llength $chunk] / 2 + 1}]] 0 end-1]
     set f [open $argsFile wb]
     puts -nonewline $f [encoding convertto utf-8 [join $chunk \0]]
     close $f

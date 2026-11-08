@@ -201,7 +201,47 @@
 %% http-client.test:http-package-metadata
 ## packages/http/botlish.json
 <<<<
-    "event_loop_linux": "0.3.0"
+    "event_loop_linux": "0.5.0"
 ====
-    "event_loop_linux": "0.3.1"
+    "event_loop_linux": "0.5.1"
+>>>>
+
+# ---------------------------------------------------------------------------
+# Botlish threads: one loop per VM, one http runtime per process
+# (packages/http/native/src/notify.c, bridge/ffi.rs)
+
+@@ wake-v1-post the name resolver's wake posts through the integration ABI's version 1, which names no loop: refused while another Botlish thread's loop is open, so a request to a name never connects
+%% http-client.test:http-beside-thread
+## packages/http/native/src/notify.c
+<<<<
+    return botlish_event_post2(loop, endpoint, slot, gen, a, b);
+====
+    extern int botlish_event_post(int endpoint, int slot, int gen, long long a, long long b);
+    return botlish_event_post(endpoint, slot, gen, a, b);
+>>>>
+
+@@ owner-not-claimed a second thread opens an http runtime beside the owner's, sharing the process's name resolver pool and counters
+%% http-client.test:http-one-thread
+## packages/http/native/src/bridge/ffi.rs
+<<<<
+    if owner.is_some_and(|t| t != me) {
+        return false;
+    }
+====
+    if owner.is_some_and(|t| t != me) {
+        *owner = Some(me);
+    }
+>>>>
+
+@@ owner-never-released a claim on the http runtime is never given up: a thread that ended with its runtime open keeps every other thread from opening one
+%% http-client.test:http-beside-thread
+## packages/http/native/src/bridge/ffi.rs
+<<<<
+            if *owner == Some(self.0) {
+                *owner = None;
+            }
+====
+            if *owner == Some(self.0) && self.0 != self.0 {
+                *owner = None;
+            }
 >>>>

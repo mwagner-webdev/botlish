@@ -201,11 +201,22 @@ try {
     foreach f {client.bot probe.bot} { file copy [file join $root tests http $f] $tdir }
     set thir [surface::readProgramFile [file join $tdir client.bot] -warnings off -cache ""]
     set client [native::executable $thir [file join $tdir client]]
+    # The client's value, a List[str], read through the driver protocol
+    # (BOTLISH_NATIVE_RESULT: an executable prints only what its program
+    # writes, PROGRAM-OUTPUT-MILESTONE-1.md).
     proc costs {client args} {
-        set out [exec $client costs {*}$args]
-        set lines {}
-        foreach {- line} [regexp -all -inline {"((?:[^"\\]|\\.)*)"} $out] { lappend lines $line }
-        return $lines
+        set result [file join [file dirname $client] result.txt]
+        file delete $result
+        exec env BOTLISH_NATIVE_RESULT=$result $client costs {*}$args
+        set f [open $result r]
+        fconfigure $f -encoding utf-8
+        set lines [split [string trimright [read $f] \n] \n]
+        close $f
+        foreach line $lines {
+            if {[lindex $line 0] eq "error"} { error "costs $args: $line" }
+            if {[lindex $line 0] eq "value"} { return [lmap item [lindex [lindex $line 1] 1] { lindex $item 1 }] }
+        }
+        error "costs $args: no value"
     }
     foreach {label url anchors big} [list "HTTP/1.1, plaintext" http://127.0.0.1:$plain/hello "" "http://127.0.0.1:$plain/stream?n=256&size=4096" \
             "HTTP/2, TLS" https://localhost:$tls/hello [readFile $ca] "https://localhost:$tls/stream?n=256&size=4096"] {

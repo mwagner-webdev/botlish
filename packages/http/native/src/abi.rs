@@ -14,7 +14,7 @@
 #![allow(clippy::missing_safety_doc)]
 
 use crate::body::Outgoing;
-use crate::bridge::ffi::{copy_in, copy_out, guard, guard_with, ERR_REENTRANT};
+use crate::bridge::ffi::{copy_in, copy_out, guard, guard_with, ERR_OPEN_ELSEWHERE, ERR_REENTRANT};
 use crate::bridge::{exec, io, notices, stats, time};
 use crate::client::{self, Failure, Kind, Origin, Parts, Settings};
 use crate::tls::Versions;
@@ -29,20 +29,23 @@ const R_INTEREST: i64 = 2;
 
 // ------------------------------------------------------------ lifecycle
 
-/// Open the bridge on this thread (the loop's): 0, or ERR_REENTRANT when
-/// it is open already.
+/// Open the bridge on this thread (the loop's): 0, ERR_REENTRANT when it
+/// is open already, or ERR_OPEN_ELSEWHERE while another thread of the
+/// process has it open.
 #[no_mangle]
 pub extern "C" fn bh_open(_flags: i64) -> i64 {
     guard_with(false, || {
         if exec::is_open() {
             return ERR_REENTRANT;
         }
+        if !crate::bridge::ffi::claim_owner() {
+            return ERR_OPEN_ELSEWHERE;
+        }
         // The provider this unit was built against must be the one linked
         // (a reference to its identity symbol: another provider, or none,
         // fails the link instead of running silently: B2).
         crate::provider::check();
         exec::open();
-        crate::bridge::ffi::set_owner();
         time::reset();
         io::reset();
         notices::reset();
@@ -64,16 +67,18 @@ pub extern "C" fn bh_close() -> i64 {
         crate::net::shutdown();
         let n = exec::close() as i64;
         notices::reset();
+        crate::bridge::ffi::release_owner();
         n
     })
 }
 
-/// Where a foreign thread's wake posts: the Linux driver's endpoint id and
-/// the registration tag (std::event_loop::native_slot/native_generation).
+/// Where a foreign thread's wake posts: the Linux driver's loop handle
+/// (event_loop_linux::loop_handle), its endpoint id and the registration
+/// tag (std::event_loop::native_slot/native_generation).
 #[no_mangle]
-pub extern "C" fn bh_set_notify(endpoint: i64, slot: i64, generation: i64) -> i64 {
+pub extern "C" fn bh_set_notify(lp: i64, endpoint: i64, slot: i64, generation: i64) -> i64 {
     guard(|| {
-        exec::set_notify(endpoint, slot, generation);
+        exec::set_notify(lp, endpoint, slot, generation);
         0
     })
 }

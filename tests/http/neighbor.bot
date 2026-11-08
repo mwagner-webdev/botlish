@@ -1,0 +1,164 @@
+# neighbor.bot -- tests/http-client.test's http-beside-thread and
+# http-one-thread: the http package on a Botlish thread of its own
+# (std::thread; BOTLISH-OWNED-THREADS-AND-CROSS-THREAD-ACTORS-MILESTONE-1.md)
+# while the main VM's loop is open too: two loops in one process, each VM's
+# own (event_loop_linux 0.5.0). beside.bot and both.bot start it.
+#
+# The worker reports one line: whether its loop is not the main VM's, and
+# how its one GET ended. Connecting is bounded (2 s), so a name
+# resolution whose wake never reaches the worker's loop ends as Timeout
+# connect rather than never.
+import event_loop_linux
+import http
+import std::abi::bytes
+import std::event_loop
+import std::int
+import std::list
+import std::mutable_vector
+import std::str
+
+struct Plan:
+    url: str
+    ca: str
+    main_loop: int
+
+# The lines a VM reports.
+opaque context struct Out:
+    lines: MutableVector[str]
+
+fn out() -> Out:
+    lines = std::mutable_vector::from_list([""])
+    lines.clear()
+    Out {lines: lines}
+
+nomethod fn say(text: str, context o: Out):
+    o.lines.push(text)
+
+fn said(context o: Out) -> List[str]:
+    loop i from 0 to std::mutable_vector::length(o.lines):
+        o.lines.at(i):
+            on IndexNotFound:
+                ""
+
+nomethod fn n(x: int) -> str:
+    std::int::to_string(x)
+
+nomethod fn phase_text(p: http::Phase) -> str:
+    if p == http::Phase::Connect:
+        "connect"
+    elif p == http::Phase::Deadline:
+        "deadline"
+    else:
+        "idle"
+
+# The test CA's PEM as the only anchor; connecting bounded to 2 s.
+nomethod fn config_for(pem: str) -> http::Config:
+    c = http::config()
+    http::Config {versions: c.versions, trust: http::Trust {system: false, anchors: std::abi::bytes::from_list(std::str::encode_utf8(pem))}, connect_timeout: 2000000, idle_timeout: c.idle_timeout, max_connections: c.max_connections, max_header_bytes: c.max_header_bytes, pool_idle: c.pool_idle, window: c.window}
+
+# One GET: how it ended, as one line.
+fn fetch(url: str, ca: str, context h: http::Http, ev: std::event_loop::Loop, nat: event_loop_linux::Native) -> str errors std::event_loop::SchedulerFault:
+    {owner, client} = http::client(config_for(ca)):
+        on http::TrustFailed {reason}:
+            return "error TrustFailed ".concat(reason)
+        on http::Unsupported {reason}:
+            return "error Unsupported ".concat(reason)
+        on http::Fault {reason}:
+            return "error Fault ".concat(reason)
+    target = http::uri(url):
+        on http::InvalidUri {reason}:
+            return "error InvalidUri ".concat(reason)
+    sent = client.send(http::get(target)):
+        on http::InvalidRequest {reason}:
+            return "error InvalidRequest ".concat(reason)
+        on http::ResolveFailed {reason}:
+            return "error ResolveFailed ".concat(reason)
+        on http::ConnectFailed {reason}:
+            return "error ConnectFailed ".concat(reason)
+        on http::TlsVerifyFailed {reason}:
+            return "error TlsVerifyFailed ".concat(reason)
+        on http::TlsHandshakeFailed {reason}:
+            return "error TlsHandshakeFailed ".concat(reason)
+        on http::ProtocolError {reason}:
+            return "error ProtocolError ".concat(reason)
+        on http::Timeout {phase}:
+            return "error Timeout ".concat(phase_text(phase))
+        on http::Cancelled:
+            return "error Cancelled"
+        on http::Closed:
+            return "error Closed"
+        on http::Unsupported {reason}:
+            return "error Unsupported ".concat(reason)
+        on http::TrustFailed {reason}:
+            return "error TrustFailed ".concat(reason)
+        on http::Released:
+            return "error Released"
+        on http::Fault {reason}:
+            return "error Fault ".concat(reason)
+    {owner: exchange, response} = sent
+    body = response.exchange.read_all(1048576):
+        on http::BodyTooLarge:
+            return "body error BodyTooLarge"
+        on http::ProtocolError:
+            return "body error ProtocolError"
+        on http::Timeout {phase}:
+            return "body error Timeout ".concat(phase_text(phase))
+        on http::Cancelled:
+            return "body error Cancelled"
+        on http::Closed:
+            return "body error Closed"
+        on http::Released:
+            return "body error Released"
+        on http::Fault {reason}:
+            return "body error Fault ".concat(reason)
+        on http::ResolveFailed:
+            return "body error ResolveFailed"
+        on http::ConnectFailed:
+            return "body error ConnectFailed"
+        on http::TlsVerifyFailed:
+            return "body error TlsVerifyFailed"
+        on http::TlsHandshakeFailed:
+            return "body error TlsHandshakeFailed"
+        on http::InvalidRequest:
+            return "body error InvalidRequest"
+        on http::Unsupported:
+            return "body error Unsupported"
+        on http::TrustFailed:
+            return "body error TrustFailed"
+    "status ".concat(n(response.status)).concat(" bytes ").concat(n(std::abi::bytes::length(body).value))
+
+# A task of a loop: one GET, reported.
+fn report(url: str, ca: str, prefix: str, context h: http::Http, ev: std::event_loop::Loop, nat: event_loop_linux::Native, o: Out) -> int errors std::event_loop::SchedulerFault:
+    say(prefix.concat(fetch(url, ca)))
+    0
+
+# Run REPORT on this VM's loop; the line it said.
+fn ran(url: str, ca: str, prefix: str, context ev: std::event_loop::Loop, d: event_loop_linux::Linux, nat: event_loop_linux::Native, h: http::Http, o: Out) -> str errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    coroutine {step, first} = report(url, ca, prefix)
+    std::event_loop::adopt(step, first)
+    std::event_loop::run()
+    std::list::get(said(), 0, "no line")
+
+private nomethod fn loops(own: int, main_loop: int) -> str:
+    if own > 0 and main_loop > 0 and own != main_loop:
+        "two loops: "
+    else:
+        "one loop: "
+
+private fn worked(plan: Plan, context ev: std::event_loop::Loop, d: event_loop_linux::Linux, nat: event_loop_linux::Native, h: http::Http, o: Out) -> str errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    ran(plan.url, plan.ca, loops(event_loop_linux::loop_handle(), plan.main_loop))
+
+# The worker VM: a loop of its own, the Linux driver, the http runtime.
+thread fn fetch_beside(plan: Plan) -> str:
+    with context std::event_loop::create(64)
+    with context event_loop_linux::create()
+    with context event_loop_linux::native()
+    with context http::create()
+    with context out()
+    worked(plan):
+        on std::event_loop::SchedulerFault:
+            "SchedulerFault"
+        on std::event_loop::DriverFault:
+            "DriverFault"
+        on std::event_loop::LoopReentered:
+            "LoopReentered"

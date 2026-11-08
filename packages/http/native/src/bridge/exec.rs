@@ -36,6 +36,7 @@ use crate::faults;
 pub struct Shared {
     inbox: Mutex<Vec<TaskKey>>,
     loop_thread: ThreadId,
+    lp: AtomicI64,
     endpoint: AtomicI64,
     slot: AtomicI64,
     generation: AtomicI64,
@@ -112,7 +113,7 @@ fn on_loop_thread(shared: &Shared) -> bool {
 }
 
 extern "C" {
-    fn botlish_http_notify_post(endpoint: i32, slot: i32, gen: i32, a: i64, b: i64) -> i32;
+    fn botlish_http_notify_post(lp: i32, endpoint: i32, slot: i32, gen: i32, a: i64, b: i64) -> i32;
 }
 
 /// The `a` of a wake record (a readiness record's `a` is its bits, > 0).
@@ -131,6 +132,7 @@ impl Shared {
         }
         let r = unsafe {
             botlish_http_notify_post(
+                self.lp.load(Ordering::Acquire) as i32,
                 endpoint as i32,
                 self.slot.load(Ordering::Acquire) as i32,
                 self.generation.load(Ordering::Acquire) as i32,
@@ -178,6 +180,7 @@ pub fn open() {
             shared: Arc::new(Shared {
                 inbox: Mutex::new(Vec::new()),
                 loop_thread: std::thread::current().id(),
+                lp: AtomicI64::new(0),
                 endpoint: AtomicI64::new(-1),
                 slot: AtomicI64::new(0),
                 generation: AtomicI64::new(0),
@@ -205,11 +208,13 @@ pub fn close() -> usize {
     n
 }
 
-/// Where a foreign wake posts (the endpoint of the Linux driver and the
-/// registration tag Botlish gave), or -1: refuse foreign wakes.
-pub fn set_notify(endpoint: i64, slot: i64, generation: i64) {
+/// Where a foreign wake posts: the Linux driver's loop (its handle, ABI
+/// version 2) and endpoint, and the registration tag Botlish gave; an
+/// endpoint of -1 refuses foreign wakes.
+pub fn set_notify(lp: i64, endpoint: i64, slot: i64, generation: i64) {
     EXEC.with(|e| {
         if let Some(x) = e.borrow().as_ref() {
+            x.shared.lp.store(lp, Ordering::Release);
             x.shared.slot.store(slot, Ordering::Release);
             x.shared.generation.store(generation, Ordering::Release);
             x.shared.endpoint.store(endpoint, Ordering::Release);

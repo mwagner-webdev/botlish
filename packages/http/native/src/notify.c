@@ -1,15 +1,19 @@
 /* notify.c -- botlish_http's one use of the event loop's native integration
- * ABI (packages/event_loop_linux/native/botlish_event_loop.h, version 1):
- * a wake from a foreign thread posts a record. The reference is weak, so
- * a program without the Linux driver links (its wakes are refused with
- * -ENOSYS: the deterministic driver has no foreign threads to wake it). A
- * weak reference pulls no archive member: it resolves only because the
- * driver's module calls the adapter, whose one object defines the symbol. */
-__attribute__((weak)) int botlish_event_post(int endpoint, int slot, int gen, long long a, long long b);
+ * ABI (packages/event_loop_linux/native/botlish_event_loop.h, version 2):
+ * a wake from a foreign thread posts a record to the endpoint of the loop
+ * the program named (botlish_event_post2's LOOP, event_loop_linux's
+ * loop_handle). Never the version 1 post: it names no loop, and while
+ * another Botlish thread runs a loop of its own it is refused, so the wake
+ * would be lost. The reference is weak, so a program without the Linux
+ * driver links (its wakes are refused with -ENOSYS: the deterministic
+ * driver has no foreign threads to wake it). A weak reference pulls no
+ * archive member: it resolves only because the driver's module calls the
+ * adapter, whose one object defines the symbol. */
+__attribute__((weak)) int botlish_event_post2(int loop, int endpoint, int slot, int gen, long long a, long long b);
 
-int botlish_http_notify_post(int endpoint, int slot, int gen, long long a, long long b) {
-    if (!botlish_event_post) {
+int botlish_http_notify_post(int loop, int endpoint, int slot, int gen, long long a, long long b) {
+    if (!botlish_event_post2) {
         return -38;
     }
-    return botlish_event_post(endpoint, slot, gen, a, b);
+    return botlish_event_post2(loop, endpoint, slot, gen, a, b);
 }

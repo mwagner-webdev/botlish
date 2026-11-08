@@ -108,7 +108,7 @@ proc cacheDir {} {
 
 # A private copy of the sources the tests read, and its cache.
 set tree [file tempdir botlish-http-mutants]
-foreach dir {compiler core hir surface stdlib tests service lsp pm tools single compilerpedia packages audit/http-client} {
+foreach dir {ccompile compiler core hir surface stdlib tests service lsp pm tools single compilerpedia packages audit/http-client} {
     file mkdir [file dirname [file join $tree $dir]]
     file copy [file join $root $dir] [file join $tree $dir]
 }

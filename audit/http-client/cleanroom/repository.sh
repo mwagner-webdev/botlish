@@ -5,7 +5,7 @@
 #
 #   repository.sh OUT [RELEASES]
 #
-#   boringssl 0.20261020.0, event_loop_linux 0.3.0, http 0.1.0
+#   boringssl 0.20261020.0, event_loop_linux 0.5.0, http 0.2.0
 #       the releases: copied from the directory RELEASES when given (the
 #       pinned author image's build: tools/package-build/author.sh build
 #       RELEASES -release boringssl event_loop_linux http), else made here by
@@ -29,7 +29,7 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 botlish() { tclsh9.0 "$root/main.tcl" "$@"; }
 if [[ -n $releases ]]; then
-  for f in boringssl-0.20261020.0 event_loop_linux-0.3.0 http-0.1.0; do
+  for f in boringssl-0.20261020.0 event_loop_linux-0.5.0 http-0.2.0; do
     cp "$releases/$f.botpkg" "$out/"
     [[ -f $releases/$f.provenance.json ]] && cp "$releases/$f.provenance.json" "$out/"
   done

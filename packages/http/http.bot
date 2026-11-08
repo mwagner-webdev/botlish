@@ -69,7 +69,7 @@ extern c library "botlish_http" static at "native/libbotlish_http.a"
 
 private extern c fn bh_open(flags: std::ffi::c::LongLong) -> std::ffi::c::LongLong
 private extern c fn bh_close() -> std::ffi::c::LongLong
-private extern c fn bh_set_notify(endpoint: std::ffi::c::LongLong, slot: std::ffi::c::LongLong, generation: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+private extern c fn bh_set_notify(lp: std::ffi::c::LongLong, endpoint: std::ffi::c::LongLong, slot: std::ffi::c::LongLong, generation: std::ffi::c::LongLong) -> std::ffi::c::LongLong
 private extern c fn bh_provider() -> std::ffi::c::LongLong
 private extern c fn bh_step(budget: std::ffi::c::LongLong, now: std::ffi::c::LongLong, buf: std::ffi::c::Ptr[std::ffi::c::Void] write noescape, cap: std::ffi::c::ULong) -> std::ffi::c::LongLong
 private extern c fn bh_drain(buf: std::ffi::c::Ptr[std::ffi::c::Void] write noescape, cap: std::ffi::c::ULong) -> std::ffi::c::LongLong
@@ -861,6 +861,8 @@ private nomethod fn guard_text(call: str, code: int) -> str:
         call.concat(": a stale handle")
     elif code == -90005:
         call.concat(": the HTTP runtime is not open")
+    elif code == -90009:
+        call.concat(": the HTTP runtime is open on another thread (one thread of a process at a time)")
     else:
         call.concat(": an unexpected status")
 
@@ -1324,7 +1326,7 @@ private nomethod fn start_runtime(context h: Http, ev: std::event_loop::Loop, n:
     endpoint = event_loop_linux::endpoint(64):
         on std::event_loop::DriverFault {code}:
             fail Fault {reason: "the Linux driver refused an endpoint for the name resolver's wakes", code: code}
-    cll(event_loop_linux::endpoint_id(endpoint)).bh_set_notify(cll(std::event_loop::native_slot(rx)), cll(std::event_loop::native_generation(rx)))
+    cll(event_loop_linux::loop_handle()).bh_set_notify(cll(event_loop_linux::endpoint_id(endpoint)), cll(std::event_loop::native_slot(rx)), cll(std::event_loop::native_generation(rx)))
     reg_put(s_started, 1):
         on IndexNotFound:
             unit

@@ -1,8 +1,8 @@
 // The unit's build script:
 //
-// * notify.c: the weak reference to the Linux driver's botlish_event_post
-//   (a foreign-thread wake, the name resolver's, posts a record through the
-//   event loop's integration ABI);
+// * notify.c: the weak reference to the Linux driver's botlish_event_post2
+//   (a foreign-thread wake, the name resolver's, posts a record to the
+//   program's loop through the event loop's integration ABI, version 2);
 // * provider.rs: the reference to the BoringSSL provider's identity symbol
 //   (packages/boringssl/native/identity.c), named by
 //   BOTLISH_BORINGSSL_PROVIDER (the provider's tag and commit, as the

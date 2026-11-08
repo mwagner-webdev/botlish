@@ -1,6 +1,6 @@
 # The http package: a user's guide
 
-This guide describes what `http` 0.1.0 does, as its tests check it
+This guide describes what `http` 0.2.0 does, as its tests check it
 (tests/http-client.test in the Botlish repository). Every `botlish` block
 is a complete program the package's documentation test compiles.
 
@@ -22,6 +22,17 @@ runs a bounded batch of protocol work and settles what that work asked for
 (readiness watches, timers, the tasks to wake). Name resolution
 (`getaddrinfo`) runs on up to four worker threads, which only resolve and
 wake the loop; nothing else runs off the loop's thread.
+
+**Botlish threads.** A program may run VMs on threads of their own
+(`std::thread`), each with its own loop (`event_loop_linux` 0.5: one loop
+per VM). One thread of a process has the HTTP runtime at a time: the
+thread whose `http::create` came first. Its wakes name its own loop, so
+other threads' loops neither receive them nor block them. Another thread's
+`http::create` is refused -- its first client fails with `Fault` ("the
+HTTP runtime is open on another thread") -- until the owner's runtime is
+shut down (`http::shutdown`) or its thread ends; then another thread's
+runtime opens. A thread that wants HTTP from the owner sends it a message
+(`std::actor::remote`).
 
 Every operation that waits -- `send`, `finish`, `read`, `read_all`,
 `write` -- suspends only the calling task, so it must run in a task of the
@@ -144,27 +155,35 @@ import http
 import std::abi::bytes
 import std::event_loop
 import std::int
+import std::io
+import std::linux::io
 import std::str
 
 fn utf8(text: str) -> std::abi::bytes::Bytes:
     std::abi::bytes::from_list(std::str::encode_utf8(text))
 
-fn ask(url: str, key: str, context h: http::Http, ev: std::event_loop::Loop, n: event_loop_linux::Native) -> str errors http::InvalidUri, http::InvalidRequest, http::ResolveFailed, http::ConnectFailed, http::TlsVerifyFailed, http::TlsHandshakeFailed, http::ProtocolError, http::Timeout, http::Cancelled, http::Closed, http::Unsupported, http::TrustFailed, http::Released, http::Fault, std::event_loop::SchedulerFault:
+# A line on standard output (a failed write is not this example's concern).
+fn say(text: str, context io: std::io::IO):
+    std::io::print_line(text):
+        on std::io::WriteFailed:
+            unit
+
+fn ask(url: str, key: str, context h: http::Http, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::io::IO) -> str errors http::InvalidUri, http::InvalidRequest, http::ResolveFailed, http::ConnectFailed, http::TlsVerifyFailed, http::TlsHandshakeFailed, http::ProtocolError, http::Timeout, http::Cancelled, http::Closed, http::Unsupported, http::TrustFailed, http::Released, http::Fault, std::event_loop::SchedulerFault:
     {owner, client} = http::client(http::config())
     body = utf8("{\"input\": \"hello\", \"stream\": true}")
     request = http::post(http::uri(url), body).with_header(http::header("content-type", "application/json")).with_header(http::header("authorization", "Bearer ".concat(key)))
     {owner: exchange, response} = client.send(request)
-    std::event_loop::log("status ".concat(std::int::to_string(response.status)))
+    say("status ".concat(std::int::to_string(response.status)))
     # The body as it arrives: each chunk processed, then the next read.
     loop:
         chunk = response.exchange.read()
         size = std::abi::bytes::length(chunk).value
         if size == 0:
             break
-        std::event_loop::log("chunk of ".concat(std::int::to_string(size)).concat(" bytes"))
+        say("chunk of ".concat(std::int::to_string(size)).concat(" bytes"))
     "done"
 
-fn task(url: str, key: str, context h: http::Http, ev: std::event_loop::Loop, n: event_loop_linux::Native) -> int errors std::event_loop::SchedulerFault:
+fn task(url: str, key: str, context h: http::Http, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::io::IO) -> int errors std::event_loop::SchedulerFault:
     line = url.ask(key):
         on http::InvalidUri {reason}:
             reason
@@ -194,26 +213,27 @@ fn task(url: str, key: str, context h: http::Http, ev: std::event_loop::Loop, n:
             "released"
         on http::Fault {reason}:
             reason
-    std::event_loop::log(line)
+    say(line)
     0
 
-fn main(context ev: std::event_loop::Loop, d: event_loop_linux::Linux, n: event_loop_linux::Native, h: http::Http) -> List[str] errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+fn main(context ev: std::event_loop::Loop, d: event_loop_linux::Linux, n: event_loop_linux::Native, h: http::Http, io: std::io::IO) -> int errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
     coroutine {step, first} = task("https://api.example.com/v1/responses", "TOKEN")
     std::event_loop::adopt(step, first)
     std::event_loop::run()
-    std::event_loop::trace()
+    0
 
-with context std::event_loop::create(64, :trace)
+with context std::event_loop::create(64)
 with context event_loop_linux::create()
 with context event_loop_linux::native()
 with context http::create()
+with context std::linux::io::create()
 main():
     on std::event_loop::SchedulerFault:
-        ["SchedulerFault"]
+        1
     on std::event_loop::DriverFault:
-        ["DriverFault"]
+        2
     on std::event_loop::LoopReentered:
-        ["LoopReentered"]
+        3
 ```
 
 **Streaming a request body.** `client.start(request, length)` sends the
@@ -274,7 +294,7 @@ negative number, and none is a status.
 | `TrustFailed` | `reason` | `http::client`: its trust anchors could not be made |
 | `HeaderNotText` | `name` | `http::text` of a value that is no UTF-8 |
 | `BodyTooLarge` | `limit` | `read_all` past its limit |
-| `Fault` | `reason, code` | a defect of the package (a contained panic of the native unit, a call from another thread): never a network condition |
+| `Fault` | `reason, code` | a defect of the package (a contained panic of the native unit, a call from another thread), or a runtime made while another thread's is open (section 1): never a network condition |
 
 A request is sent again on another connection only when the first one
 hands it back unsent (no byte of it reached the connection), whatever its
@@ -315,6 +335,8 @@ connection closed), and fails every later request carrying it at once:
 import event_loop_linux
 import http
 import std::event_loop
+import std::io
+import std::linux::io
 
 fn stopper(c: http::Cancel, context h: http::Http, ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
     std::event_loop::sleep(2000000)
@@ -365,32 +387,35 @@ fn slow(url: str, c: http::Cancel, context h: http::Http, ev: std::event_loop::L
     {owner: exchange, response} = sent
     "answered"
 
-fn task(url: str, context h: http::Http, ev: std::event_loop::Loop, n: event_loop_linux::Native) -> int errors std::event_loop::SchedulerFault:
+fn task(url: str, context h: http::Http, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::io::IO) -> int errors std::event_loop::SchedulerFault:
     c = http::cancellation():
         on http::Fault:
             return 1
     coroutine {step, first} = stopper(c)
     std::event_loop::adopt(step, first)
-    std::event_loop::log(url.slow(c))
+    std::io::print_line(url.slow(c)):
+        on std::io::WriteFailed:
+            return 2
     0
 
-fn main(context ev: std::event_loop::Loop, d: event_loop_linux::Linux, n: event_loop_linux::Native, h: http::Http) -> List[str] errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+fn main(context ev: std::event_loop::Loop, d: event_loop_linux::Linux, n: event_loop_linux::Native, h: http::Http, io: std::io::IO) -> int errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
     coroutine {step, first} = task("https://example.com/slow")
     std::event_loop::adopt(step, first)
     std::event_loop::run()
-    std::event_loop::trace()
+    0
 
-with context std::event_loop::create(64, :trace)
+with context std::event_loop::create(64)
 with context event_loop_linux::create()
 with context event_loop_linux::native()
 with context http::create()
+with context std::linux::io::create()
 main():
     on std::event_loop::SchedulerFault:
-        ["SchedulerFault"]
+        1
     on std::event_loop::DriverFault:
-        ["DriverFault"]
+        2
     on std::event_loop::LoopReentered:
-        ["LoopReentered"]
+        3
 ```
 
 Abandoning the task that waits (the loop's `abandon`) releases what it
@@ -431,7 +456,9 @@ is a response); no cookies; no proxy configuration; no transparent
 decompression (a `content-encoding` body arrives as sent); no response
 trailers; no cache; no Happy Eyeballs; no h2c (HTTP/2 without TLS); no
 client certificates, session resumption or OCSP; no TLS key logging or
-verification bypass, ever. Linux x86-64 only. The response body crosses
+verification bypass, ever. Linux x86-64 only. One thread of a process
+uses the runtime at a time (section 1); two threads making requests at once
+need two processes, or one thread serving the other's requests. The response body crosses
 into Botlish storage as a copy per chunk (no borrowed foreign bytes). A
 TLS handshake runs on the loop's thread, inside the executor's step. IPv6
 connections are made like IPv4 ones but have not been tested yet (the test
