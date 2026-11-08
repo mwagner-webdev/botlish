@@ -4335,6 +4335,10 @@ tests/method-resolution.test mr-diag-static-not-by-a-placeholder pass
 tests/method-resolution.test mr-diag-syntax-recovery pass
 tests/method-resolution.test mr-diag-kinds-of-candidates pass
 tests/method-resolution.test mr-diag-decision-unchanged pass
+tests/method-resolution.test mr-fold-receiver-decided pass
+tests/method-resolution.test mr-fold-receiver-trait-program pass
+tests/method-resolution.test mr-fold-receiver-no-candidate pass
+tests/method-resolution.test mr-poisoned-receiver-judged-by-nothing pass
 tests/method-resolution.test mr-static-blocks pass
 tests/method-resolution.test mr-oscillation-is-ambiguous pass
 tests/method-sugar.test method-alias-does-not-import pass

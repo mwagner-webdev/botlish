@@ -1918,6 +1918,14 @@ parentheses) or the call as a whole (its instance, an imprint):
 A note for each candidate declared in source (`note:` lines under the
 error; an editor's related information) says where it is declared.
 
+A call whose own result becomes its receiver -- in a fold,
+`acc.name(...)` computes the next iteration's `acc` -- is judged with
+each candidate's result in place: a candidate whose result the fold
+cannot join with its initial value leaves the receiver no type at all,
+and is rejected with "with this function the receiver has no valid type
+(its value depends on the call's own result)". The candidate that keeps
+the intermediate's type is the one the call means.
+
 That one diagnostic is all the call reports: a candidate's reason is not
 reported again as an error of its own, and nothing that uses the call's
 result is checked against a candidate's result type. When the only
@@ -1974,6 +1982,27 @@ fn scale(label: str, n: int) -> int:
 @error CORE SEMANTIC NO-APPLICABLE-METHOD
 @at 4:5
 @message *labels::scale rejects the receiver: *shapes::scale rejects argument 1: *
+@end
+
+@example reject
+import counts
+import flags
+
+fn line(parts: List[str]) -> str:
+    fold p in parts with intermediate acc "":
+        acc.join(p)
+
+line(["ab", "cd"])
+@module counts
+fn join(n: int, s: str) -> int:
+    n
+@module flags
+fn join(b: bool, s: str) -> bool:
+    b
+@caption Neither join keeps the fold's intermediate a String
+@error CORE SEMANTIC NO-APPLICABLE-METHOD
+@at 6:13
+@message *counts::join rejects the receiver: with this function the receiver has no valid type (its value depends on the call's own result); flags::join rejects the receiver: *
 @end
 
 @topic error.nomethod-call
