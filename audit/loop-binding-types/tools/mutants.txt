@@ -3,7 +3,8 @@
 # that a loop clause binding -- a listloop's element, a countloop's counter,
 # a lockstep clause -- records the type the checker gives its references
 # (hir/types.tcl's RecordClause), that the program's record is its generic
-# walk's and an instance's its snapshot's (hir/semantic.tcl), and that the
+# walk's and an instance's its snapshot's (an instance walk's own table,
+# hir/semantic.tcl), and that the
 # compiler service, HIR interchange, HIR text and the front-end cache carry
 # it. Each must be killed by one of the tests its `!!` line names (a pattern
 # of test names), run from the test files its `%%` line names (default
@@ -28,7 +29,7 @@
 ## hir/types.tcl
 <<<<
             dict set ctx facts [dict get $node elementBinding] $elemType
-            RecordClause hir [dict get $node elementBinding] $elemType
+            RecordClause hir $ctx [dict get $node elementBinding] $elemType
 ====
             dict set ctx facts [dict get $node elementBinding] $elemType
 >>>>
@@ -38,7 +39,7 @@
 ## hir/types.tcl
 <<<<
             dict set ctx facts [dict get $node countBinding] int
-            RecordClause hir [dict get $node countBinding] int
+            RecordClause hir $ctx [dict get $node countBinding] int
 ====
             dict set ctx facts [dict get $node countBinding] int
 >>>>
@@ -49,7 +50,7 @@
 ## hir/types.tcl
 <<<<
                 dict set ctx facts $binding $type
-                RecordClause hir $binding $type
+                RecordClause hir $ctx $binding $type
 ====
                 dict set ctx facts $binding $type
 >>>>
@@ -59,10 +60,10 @@
 ## hir/types.tcl
 <<<<
                 dict set ctx facts $binding $type
-                RecordClause hir $binding $type
+                RecordClause hir $ctx $binding $type
 ====
                 dict set ctx facts $binding $type
-                RecordClause hir $binding [lindex $facts 1]
+                RecordClause hir $ctx $binding [lindex $facts 1]
 >>>>
 
 @@ lcb-poison-recorded-any a poisoned iterable's element records any instead of the never its references have
@@ -70,25 +71,21 @@
 ## hir/types.tcl
 <<<<
             dict set ctx facts [dict get $node elementBinding] $elemType
-            RecordClause hir [dict get $node elementBinding] $elemType
+            RecordClause hir $ctx [dict get $node elementBinding] $elemType
 ====
             dict set ctx facts [dict get $node elementBinding] $elemType
-            RecordClause hir [dict get $node elementBinding] [if {$poison} {string cat any} else {set elemType}]
+            RecordClause hir $ctx [dict get $node elementBinding] [if {$poison} {string cat any} else {set elemType}]
 >>>>
 
 @@ lcb-refinement-forgotten a refined element records its base: a List[int]{length: 2} element reads List[int]
 !! lcb-refinements
 ## hir/types.tcl
 <<<<
-proc hir::types::RecordClause {hirVar b type} {
-    upvar 1 $hirVar hir
-    dict set hir bindings $b type [intern hir $type]
-}
+    set t [intern hir $type]
+    if {[dict exists $ctx inst]} {
 ====
-proc hir::types::RecordClause {hirVar b type} {
-    upvar 1 $hirVar hir
-    dict set hir bindings $b type [intern hir [Unrefined $type]]
-}
+    set t [intern hir [Unrefined $type]]
+    if {[dict exists $ctx inst]} {
 >>>>
 
 @@ lcb-domain-carrier an element of an integer domain records its carrier: a Byte element reads int
@@ -96,18 +93,14 @@ proc hir::types::RecordClause {hirVar b type} {
 %% tests/loop-clause-binding-types.test tests/lsp.test
 ## hir/types.tcl
 <<<<
-proc hir::types::RecordClause {hirVar b type} {
+proc hir::types::RecordClause {hirVar ctx b type} {
     upvar 1 $hirVar hir
-    dict set hir bindings $b type [intern hir $type]
-}
 ====
-proc hir::types::RecordClause {hirVar b type} {
+proc hir::types::RecordClause {hirVar ctx b type} {
     upvar 1 $hirVar hir
     if {[kindOf $type] eq "int"} {
         set type int
     }
-    dict set hir bindings $b type [intern hir $type]
-}
 >>>>
 
 # ---------------------------------------------------------------------------
@@ -161,9 +154,11 @@ proc hir::types::RecordClause {hirVar b type} {
 !! lcb-generic-record lcb-instance-view
 ## hir/semantic.tcl
 <<<<
-            set recorded [hir::loopClauseBindings $node]
+        foreach b [hir::loopClauseBindings $node] {
+            if {[dict exists $scratch instanceClauses $b]} {
 ====
-            set recorded {}
+        foreach b {} {
+            if {[dict exists $scratch instanceClauses $b]} {
 >>>>
 
 # ---------------------------------------------------------------------------

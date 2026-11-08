@@ -137,17 +137,22 @@ Three walks type HIR, and each records into the HIR it types:
   rewrites the references and the record together), and every walk of the
   rounds starts from the same base, so nothing accumulates across walks.
 * **A semantic instance's walk** (`hir::semantic::Walk`) types a scratch
-  copy of the request-time HIR, which is discarded. What survives is its
-  snapshot (`hir::semantic::Snapshot`), which kept the binding types of the
-  region's `bind`s and now also its loop clause bindings'; its view
+  copy of the request-time HIR, which is discarded. It records its loop
+  clause bindings in a table of the copy's own (`instanceClauses`), never
+  in the copy's binding table: the copy shares the program's binding
+  table, and its first write there would copy every binding of the program
+  for each instance walk (section M). What survives is its snapshot
+  (`hir::semantic::Snapshot`), which kept the binding types of the region's
+  `bind`s and now also its loop clause bindings'; its view
   (`hir::semantic::View`, what `hir::semantic::verify`'s instance checks and
   the trait plan read) installs them. So `first`'s instance for
   `List[int]` sees `x: int`, the one for `List[str]` sees `x: str`, and the
   program's HIR keeps `any`.
 * **Region inference** (`hir::types::inferRegion`, hir/specialize.tcl's
   native instances) types a scratch copy too, of which only expressions'
-  types reach its overlay (`hir::specialize::View`); a specialization's view
-  keeps every local's and every clause binding's generic record, as before.
+  types reach its overlay (`hir::specialize::View`), so it records no loop
+  clause binding; a specialization's view keeps every local's and every
+  clause binding's generic record, as before.
   The one reader that needs an instance's element type there, the ownership
   analysis's `hir::affine::BindingType` (a consuming loop's element, whose
   drop the native lowering emits), keeps deriving a listloop element from
@@ -169,9 +174,9 @@ instance's type.
 
 | file | change | why |
 |---|---|---|
-| hir/types.tcl | `RecordClause`, called by the `listloop`, `countloop` and `lockloop` cases beside the fact they set | the one missing write; `intern` of the type the walk already computed, no new walk |
+| hir/types.tcl | `RecordClause HIR CTX B TYPE`, called by the `listloop`, `countloop` and `lockloop` cases beside the fact they set: the generic walk writes the binding table (only a changed record), a semantic instance's walk its copy's `instanceClauses`, region inference nothing | the one missing write; `intern` of the type the walk already computed, no new walk, and no copy of the program's binding table per instance walk |
 | hir/hir.tcl | `hir::loopClauseBindings NODE`; the binding record's `type` documented for every kind of binding | one statement of which bindings are clause bindings, for the snapshot, HIR text and the tests |
-| hir/semantic.tcl | `Snapshot` keeps the region's loop clause bindings' types | an instance's view sees its own type, as for its locals |
+| hir/semantic.tcl | `Snapshot` keeps the region's loop clause bindings' types (from the walk's `instanceClauses`) | an instance's view sees its own type, as for its locals |
 | hir/affine.tcl | `BindingType` derives a listloop element before reading the record | keeps the per-specialization precision the derivation gave (section E); no ownership decision changes |
 | hir/read.tcl | `ClauseTypes`: HIR text's reader records clause bindings as the walk does | HIR text prints no binding record and its reader rebuilds a local's and a payload's; now a clause binding's too, so a `.hir` file's HIR agrees with the HIR it was printed from |
 
@@ -423,7 +428,57 @@ CI on the branch (`cad6bb7`): `icy-tower (windows x86-64)` and the `tests (linux
 
 ## M. Performance
 
-Pending: `audit/loop-binding-types/tools/bench.tcl` (both trees, 5 runs each, without other load) is being measured.
+`audit/loop-binding-types/tools/bench.tcl` (each run a fresh process, -strict 0, no
+cache; medians of five; front-end time, the HIR interchange text's size,
+the bindings with a record, the semantic instances and their snapshots'
+loop clause entries, a cache hit in a fresh process), on this container (4
+cores, nothing else running), before (`88ca1e4`) and after:
+
+| workload | front end before / after (ms) | interchange before / after (bytes) | recorded bindings | instances | snapshot loop entries | cache hit before / after (ms) |
+|---|---:|---:|---:|---:|---:|---:|
+| 100 list loops | 683 / 619 | 644,107 / 644,138 | 206 / 310 | 0 | 0 / 0 | 30 / 29 |
+| 100 x 3 nested loops | 1,061 / 991 | 961,176 / 961,407 | 206 / 510 | 0 | 0 / 0 | 51 / 42 |
+| 100 counted loops | 551 / 525 | 572,357 / 572,388 | 206 / 310 | 0 | 0 / 0 | 28 / 28 |
+| 100 lockstep loops, 3 clauses | 1,556 / 1,468 | 1,150,762 / 1,151,093 | 306 / 710 | 0 | 0 / 0 | 53 / 50 |
+| 100 generic loops x 4 instances | 1,507 / 1,560 (+3.5%) * | 1,357,507 / 1,362,538 | 506 / 610 | 400 / 400 | 0 / 400 | 55 / 55 |
+
+The four single-kind workloads run within noise or faster (all before-runs
+came first; the differences are the machine's, not the change's: the
+recording adds an `intern` and a compare per clause, which no measurement
+here can tell apart).
+The interchange text grows by tens of bytes per hundred records, and by
+about 12 bytes per snapshot entry.
+
+(*) Interleaved runs (before, after, before, ...; seven each). The first
+version of the change recorded an instance walk's clause bindings in its
+scratch copy's binding table: +8.8% here, every after-run slower than every
+before-run, because that copy shares the program's binding table and its
+first write copied all of it for every instance walk (the functions here
+have no local of their own, whose bind paid that copy before). Recording in
+the walk's own table (section E) took it to +3.5%. What is left is the
+snapshot's entry being installed in each instance's view
+(`hir::semantic::View`, during `hir::semantic::verify`): measured with the
+snapshot's loop entries disabled, the cost is -0.3%. That copy is the one
+any instance with a local already pays, so it is new only for an instance
+whose body binds no local; it is linear in the instances verified.
+
+The repository's iteration-heavy programs, interleaved (five each; the
+first version of the change, which did the extra copy above, so an upper
+bound):
+
+| program | front end before (ms) | after (ms) | |
+|---|---:|---:|---:|
+| the 2048 engine's suite | 5,524 | 5,493 | -0.6% |
+| Icy Tower's suite | 35,563 | 36,088 | +1.5% |
+| collection-iteration.bot | 8,869 | 8,850 | -0.2% |
+| fold-loops.bot | 14,884 | 14,816 | -0.5% |
+| mutable-vector.bot | 14,105 | 14,491 | +2.7% |
+
+all within the runs' spread (Icy Tower's before runs span 34.8-36.6 s).
+The corpus as a whole (section H's 138 compilations, four at a time) took
+1,048.6 s before and 1,043.6 s after. The number of semantic instances
+analyzed is unchanged everywhere; the static-decision dependency counts are
+section H's (identical); a cache hit is unchanged.
 
 ## N. Remaining limitations
 

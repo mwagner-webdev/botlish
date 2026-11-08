@@ -757,17 +757,18 @@ proc hir::semantic::Snapshot {scratch id} {
         }
         dict set exprs $e $rec
         if {[dict get $node kind] eq "bind" && ![dict get $node duplicate]} {
-            set recorded [list [dict get $node binding]]
-        } else {
-            # A loop's clause bindings: their types as this instance's walk
-            # recorded them (hir/types.tcl's RecordClause), which the
-            # program's own record -- the generic walk's -- never holds.
-            set recorded [hir::loopClauseBindings $node]
-        }
-        foreach b $recorded {
+            set b [dict get $node binding]
             if {$b ne "" && [dict exists $scratch bindings $b type]
                     && [dict get $scratch bindings $b type] ne ""} {
                 dict set bindings $b [dict get $scratch types [dict get $scratch bindings $b type]]
+            }
+        }
+        # A loop's clause bindings: their types as this instance's walk
+        # recorded them (hir/types.tcl's RecordClause: its own table, never
+        # the program's record, the generic walk's).
+        foreach b [hir::loopClauseBindings $node] {
+            if {[dict exists $scratch instanceClauses $b]} {
+                dict set bindings $b [dict get $scratch types [dict get $scratch instanceClauses $b]]
             }
         }
     }
