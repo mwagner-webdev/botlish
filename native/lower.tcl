@@ -2485,7 +2485,7 @@ proc native::lower::Function {id} {
         set scope [hir::top $hir]
         set body [hir::roots $hir]
     } else {
-        set name [hir::aot::BlockName $hir $region]
+        set name [dict getdef $context names $region ""]
         set params [hir::get $hir $region params]
         set env [expr {$region ni $envless}]
         set scope [hir::get $hir $region bodyScope]
@@ -2680,7 +2680,7 @@ proc native::lower::CompanionFunction {id} {
         rawCache [dict create] rawRegs [dict create] rawUnboxes 0 rawBoxes 0 rawArith 0 rawCompare 0 \
         locals [dict create] loops [dict create] broken [dict create] continued [dict create] calls {} companion $arity regionCompanion 0 \
         traversal "" traversalByteReg ""]
-    set name [hir::aot::BlockName $hir $region]
+    set name [dict getdef $context names $region ""]
     set params [hir::get $hir $region params]
     set env [expr {$region ni $envless}]
     set scope [hir::get $hir $region bodyScope]
@@ -2776,7 +2776,7 @@ proc native::lower::RegionCompanionFunction {id} {
         rawCache [dict create] rawRegs [dict create] rawUnboxes 0 rawBoxes 0 rawArith 0 rawCompare 0 \
         locals [dict create] loops [dict create] broken [dict create] continued [dict create] calls {} companion "" regionCompanion 1 \
         traversal "" traversalByteReg ""]
-    set name [hir::aot::BlockName $hir $region]
+    set name [dict getdef $context names $region ""]
     set params [hir::get $hir $region params]
     set env [expr {$region ni $envless}]
     set scope [hir::get $hir $region bodyScope]
@@ -2889,7 +2889,7 @@ proc native::lower::InternalFunction {id} {
         rawCache [dict create] rawRegs [dict create] rawUnboxes 0 rawBoxes 0 rawArith 0 rawCompare 0 \
         locals [dict create] loops [dict create] broken [dict create] continued [dict create] calls {} companion "" regionCompanion 0 \
         traversal "" traversalByteReg ""]
-    set name [hir::aot::BlockName $hir $region]
+    set name [dict getdef $context names $region ""]
     set params [hir::get $hir $region params]
     set scope [hir::get $hir $region bodyScope]
     set body [hir::get $hir $region body]
@@ -3014,7 +3014,7 @@ proc native::lower::InternalRegionCompanionFunction {id} {
         rawCache [dict create] rawRegs [dict create] rawUnboxes 0 rawBoxes 0 rawArith 0 rawCompare 0 \
         locals [dict create] loops [dict create] broken [dict create] continued [dict create] calls {} companion "" regionCompanion 1 \
         traversal "" traversalByteReg ""]
-    set name [hir::aot::BlockName $hir $region]
+    set name [dict getdef $context names $region ""]
     set params [hir::get $hir $region params]
     set scope [hir::get $hir $region bodyScope]
     set body [hir::get $hir $region body]
@@ -3118,7 +3118,7 @@ proc native::lower::InternalCompanionFunction {id} {
         rawCache [dict create] rawRegs [dict create] rawUnboxes 0 rawBoxes 0 rawArith 0 rawCompare 0 \
         locals [dict create] loops [dict create] broken [dict create] continued [dict create] calls {} companion $arity regionCompanion 0 \
         traversal "" traversalByteReg ""]
-    set name [hir::aot::BlockName $hir $region]
+    set name [dict getdef $context names $region ""]
     set params [hir::get $hir $region params]
     set body [hir::get $hir $region body]
     set rawParams [RawParams $id $instance $params]
@@ -3255,7 +3255,7 @@ proc native::lower::FieldsFunction {id} {
         rawCache [dict create] rawRegs [dict create] rawUnboxes 0 rawBoxes 0 rawArith 0 rawCompare 0 \
         locals [dict create] loops [dict create] broken [dict create] continued [dict create] calls {} companion "" regionCompanion 0 \
         traversal "" traversalByteReg ""]
-    set name [hir::aot::BlockName $hir $region]
+    set name [dict getdef $context names $region ""]
     set params [hir::get $hir $region params]
     set env [expr {$region ni $envless}]
     set scope [hir::get $hir $region bodyScope]
@@ -3329,7 +3329,7 @@ proc native::lower::FieldsCompanionFunction {id} {
         rawCache [dict create] rawRegs [dict create] rawUnboxes 0 rawBoxes 0 rawArith 0 rawCompare 0 \
         locals [dict create] loops [dict create] broken [dict create] continued [dict create] calls {} companion $arity regionCompanion 0 \
         traversal "" traversalByteReg ""]
-    set name [hir::aot::BlockName $hir $region]
+    set name [dict getdef $context names $region ""]
     set params [hir::get $hir $region params]
     set env [expr {$region ni $envless}]
     set scope [hir::get $hir $region bodyScope]

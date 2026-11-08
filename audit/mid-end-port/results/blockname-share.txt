@@ -1,0 +1,8 @@
+# hir::aot::BlockName's share of lowering at eff6aea (before its fix); tools/blockname-share.tcl.
+# 2048/demo.bot is examples/games/2048/demo.bot; synth-gN is synth.tcl -passes N -generic 0 (6,543, 12,939, 25,736 lines).
+# Measured while other jobs shared the 4 cores: the times are inflated, the shares are one process's.
+2048/demo.bot                                  -specialize 1  front end    1.5 s  lowering    0.5 s  BlockName    0.0 s (  2.0% of lowering,   0.5% of front end + lowering; 168 calls)
+synth-g16/main.bot                             -specialize 0  front end   46.6 s  lowering   13.1 s  BlockName    5.2 s ( 39.7% of lowering,   8.7% of front end + lowering; 3989 calls)
+synth-g32/main.bot                             -specialize 0  front end   97.7 s  lowering   35.5 s  BlockName   17.5 s ( 49.4% of lowering,  13.2% of front end + lowering; 7863 calls)
+synth-g64/main.bot                             -specialize 0  front end  246.1 s  lowering  180.2 s  BlockName  124.4 s ( 69.0% of lowering,  29.2% of front end + lowering; 15615 calls)
+synth-g16/main.bot                             -specialize 1  front end   45.9 s  lowering   67.7 s  BlockName    5.3 s (  7.8% of lowering,   4.7% of front end + lowering; 4770 calls)

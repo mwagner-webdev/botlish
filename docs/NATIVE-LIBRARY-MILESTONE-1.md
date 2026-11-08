@@ -663,6 +663,10 @@ heap.
 * **The active-program thread-local.** The runtime's one thread-local
   "program" (`vm.rs:101`), which display and hashing read, is set for each
   call (`ProgramScope`, `library.rs:226`; `vm::swap_current_program`).
+  (This was so at this milestone. PER-THREAD-RUNTIME-STATE-MILESTONE-1.md
+  removed the thread-local, `ProgramScope` and the swap: every read goes
+  through the running Vm's own program, `Vm::info`, and a library call has
+  nothing to set or restore. The account below is this milestone's.)
   * Each library has its own copy of that thread-local, as of every runtime
     static, because its runtime is private.
   * So a library called from inside another library's call cannot change

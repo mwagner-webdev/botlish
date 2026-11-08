@@ -1,0 +1,4 @@
+# tools/instance-walks.tcl at eff6aea; synth-gN is synth.tcl -passes N -generic 0 (6,543, 12,939, 25,736 lines). Other jobs shared the cores.
+synth-g16: 38626 exprs; front end 45.6 s; signatures::infer 10.6 s; 126 instance walks, 1.9 s in them; one exprs copy 8.3 ms; walks x copy = 1.0 s
+synth-g32: 74322 exprs; front end 94.9 s; signatures::infer 30.1 s; 258 instance walks, 8.9 s in them; one exprs copy 19.1 ms; walks x copy = 4.9 s
+synth-g64: 145714 exprs; front end 228.6 s; signatures::infer 96.8 s; 477 instance walks, 36.2 s in them; one exprs copy 52.7 ms; walks x copy = 25.1 s
