@@ -18,9 +18,21 @@ follow-up milestone can show what it changed.
 
 * `tools/matrix.py` -- the census's section H table: the checker's static
   type of twelve operations' results over six element types, read from TYPE
-  diagnostics of generated programs (written to a temporary directory).
+  diagnostics of generated programs (written to a temporary directory), and
+  two more columns (a refined `List[int]{length: 2}` element, and an
+  element the checker knows only as `any`). A second table, added by
+  LOOP-CLAUSE-BINDING-TYPE-CORRECTNESS-MILESTONE-1.md, is the binding
+  table's record of every loop clause binding of those programs, checked
+  against the service's presentation, its references' types and the first
+  table (exit status 1 on a disagreement).
 
       python3 -I audit/text-collection-precision/tools/matrix.py
+
+* `tools/bindings.tcl` -- the binding table of one program as the compiler
+  service analyzes it: each binding's recorded type, presented type and
+  references' types (matrix.py reads it).
+
+      tclsh9.0 audit/text-collection-precision/tools/bindings.tcl FILE.bot
 
 * `tools/bench.tcl` -- section G's text-construction strategies at chosen
   sizes and backends: time and (natively) String bytes copied.
