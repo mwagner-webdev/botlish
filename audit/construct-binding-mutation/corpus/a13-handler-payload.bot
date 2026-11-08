@@ -1,0 +1,25 @@
+# category: handler-payload (bound whole)
+# class: A -- the handler's value is computed from its mutated payload; the
+#        raiser's caller still has its own buffer (a place it gave the
+#        raiser), unchanged
+# expect: [0, 2]
+import std::mutable_vector
+
+error Full:
+    log: MutableVector[str]
+
+fn add(place log: MutableVector[str], x: str) -> int errors Full:
+    if log.length() >= 2:
+        fail Full {log: log}
+    log.push(x)
+    log.length()
+
+fn run() -> List[int]:
+    log = std::mutable_vector::from_list(["a", "b"])
+    r = add(log, "c"):
+        on Full details:
+            details.log.clear()
+            details.log.length()
+    [r, log.length()]
+
+run()

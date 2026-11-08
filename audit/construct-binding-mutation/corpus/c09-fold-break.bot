@@ -1,0 +1,21 @@
+# category: fold-intermediate
+# class: C -- silently discarded write (fold-specific)
+# intended: record values up to and including the sentinel 0 ([1, 2, 0])
+# actual: a bare `break` ends the fold with the iteration's starting
+#         intermediate (rule 6), so the sentinel's push is discarded
+# expect: [1, 2]
+import std::mutable_vector
+
+fn ints() -> MutableVector[int]:
+    std::mutable_vector::from_list([])
+
+fn f(xs: List[int]) -> List[int]:
+    w = fold x in xs with intermediate acc ints():
+        acc.push(x)
+        if x == 0:
+            break
+        acc
+    loop y in w:
+        y
+
+f([1, 2, 0, 9])

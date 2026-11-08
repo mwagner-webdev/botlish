@@ -1,0 +1,20 @@
+examples/dfa/json/emit_probes.bot: claims proven 22; summaries 140 computed, 60 reused, 44 rounds; edges: children 57, reads 0; duplicate function names: 0 
+    branch decisions (Facts): 592
+    call, a guard: 4
+    call, a named callee (Taint): 1312
+    call, a native: 1137
+    call, a non-yielding function (Child): 12
+    call, a yielding function (Apply): 159
+    reference, from the walk's environment: 788
+    reference, to a parameter outside the environment (a list loop's element): 11
+    reference, to a root binding: 226
+examples/dfa/csv/probes.bot: claims proven 52; summaries 207 computed, 121 reused, 104 rounds; edges: children 5, reads 0; duplicate function names: 0 
+    branch decisions (Facts): 168
+    call, a guard: 40
+    call, a named callee (Taint): 888
+    call, a native: 686
+    call, a non-yielding function (Child): 6
+    call, a yielding function (Apply): 156
+    reference, from the walk's environment: 682
+    reference, to a parameter outside the environment (a list loop's element): 56
+    reference, to a root binding: 120

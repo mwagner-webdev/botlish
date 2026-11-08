@@ -1,0 +1,16 @@
+# category: local of the function (a value parameter's working copy)
+# class: proof interaction -- the same zeroing as p01 through a local and a
+#        counted loop: `w.set(i, 0)` is proven in bounds, no handler needed
+# expect: 0
+import std::mutable_array
+
+fn zero(a: MutableArray[int]) -> MutableArray[int]:
+    w = a
+    loop i from 0 to w.capacity():
+        w.set(i, 0)
+    w
+
+r = zero(std::mutable_array::create(4, 7)).at(3):
+    on IndexNotFound:
+        -1
+r

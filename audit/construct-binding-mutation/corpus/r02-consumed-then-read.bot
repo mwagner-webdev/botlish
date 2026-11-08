@@ -1,0 +1,34 @@
+# category: loop-element of a consuming loop, the collection read afterwards
+# class: rejected -- USE-AFTER-MOVE: an affine collection's loop consumes it,
+#        so the code that would observe the "lost" pushes cannot be written
+# expect-diagnostics: USE-AFTER-MOVE@32:5
+import std::coroutine
+import std::mutable_vector
+
+struct Msg:
+    v: int
+struct Ev:
+    v: int
+
+fn w(acc: int, resume Msg) -> Ev:
+    m = yield Ev {v: acc}
+    Ev {v: acc + m.v}
+
+fn make(acc: int) -> Coroutine{args: [Msg], return: Ev}:
+    coroutine {step} = w(acc)
+    step
+
+fn group(n: int) -> MutableVector[Coroutine{args: [Msg], return: Ev}]:
+    g = std::mutable_vector::from_list([make(n)])
+    g
+
+fn run() -> int:
+    outer = std::mutable_vector::from_list([group(1), group(2)])
+    loop inner in outer:
+        inner.push(make(9))
+        inner.length()
+    # The pushes went into the moved inner vectors; reading `outer` would
+    # be the observation, and it is rejected.
+    outer.length()
+
+run()

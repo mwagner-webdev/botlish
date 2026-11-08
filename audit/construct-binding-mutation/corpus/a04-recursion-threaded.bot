@@ -1,0 +1,18 @@
+# category: local of the function (a value parameter's working copy)
+# class: A -- productive local mutation, threaded through a self call: the
+#        copy convention consumes the parameter, nothing is copied
+# expect: 1000
+# alloc: mutableVector shares 0 detaches 0 detachElements 0
+import std::mutable_vector
+
+fn ints() -> MutableVector[int]:
+    std::mutable_vector::from_list([])
+
+fn fill(v: MutableVector[int], i: int, n: int) -> MutableVector[int]:
+    if i >= n:
+        return v
+    w = v
+    w.push(i)
+    fill(w, i + 1, n)
+
+fill(ints(), 0, 1000).length()

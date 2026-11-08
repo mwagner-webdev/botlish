@@ -1,0 +1,16 @@
+# category: fold-intermediate (a MutableArray), set below the array's capacity
+# class: proof interaction -- the intermediate is a join over iterations, so
+#        its capacity is not known to be `a`'s: the set is unproven
+#        (UNHANDLED-ERROR); p02, the same through a local, is proven
+# expect-diagnostics: UNHANDLED-ERROR@13:5 UNHANDLED-ERROR@10:9
+import std::mutable_array
+
+fn zero(a: MutableArray[int]) -> MutableArray[int]:
+    fold i from 0 to a.capacity() with intermediate acc a:
+        acc.set(i, 0)
+        acc
+
+r = zero(std::mutable_array::create(4, 7)).at(3):
+    on IndexNotFound:
+        -1
+r
