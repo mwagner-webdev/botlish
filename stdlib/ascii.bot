@@ -21,7 +21,7 @@
 # Byte parameter -- Byte is `Int in 0..255` (stdlib/byte.bot), so an Int-typed
 # comparison operand needs no conversion; wrapping every boundary in its
 # own runtime Byte(...) checked construction would add nothing but
-# nominal symmetry (see the report's "Boundary representation choice").
+# nominal symmetry (ASCII-AND-URI-UNRESERVED.md, "Boundary representation choice").
 #
 # This namespace deliberately owns only ASCII *structure*: is_digit,
 # is_upper, is_lower, is_alphabetic, is_alphanumeric, and nothing else --

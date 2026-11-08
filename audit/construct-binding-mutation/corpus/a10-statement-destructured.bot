@@ -1,0 +1,16 @@
+# category: destructured-field (a statement)
+# class: B -- a destructured field is an independent local copy
+# expect: [2, 1]
+import std::mutable_vector
+
+struct Bag:
+    items: MutableVector[int]
+    n: int
+
+fn run() -> List[int]:
+    b = Bag {items: std::mutable_vector::from_list([1]), n: 1}
+    {items} = b
+    items.push(2)
+    [items.length(), b.items.length()]
+
+run()

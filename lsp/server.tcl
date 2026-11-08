@@ -20,6 +20,10 @@
 #   diagnostics textDocument/publishDiagnostics (pushed)
 #   queries     textDocument/hover, textDocument/definition,
 #               textDocument/references
+#   highlighting textDocument/semanticTokens/full (the service's tokens:
+#               SYNTAX-HIGHLIGHTING-MILESTONE-1.md), and
+#               workspace/semanticTokens/refresh to a client that supports it
+#               when a fresh analysis lands
 #
 # Documents. The editor's open documents are the workspace's overlay
 # (service::setDocument): their text, never the disk's, is what every
@@ -63,6 +67,9 @@ namespace eval lsp::server {
     # The negotiated position encoding (utf-16 or utf-32) and hover format.
     variable encoding utf-16
     variable markdown 0
+    # 1 when the client takes workspace/semanticTokens/refresh requests.
+    variable tokenRefresh 0
+    variable nextRequest 0
     variable debounce 250
     # Open documents: path -> {uri U version V gen G text T normal N}
     variable documents [dict create]
@@ -203,7 +210,8 @@ proc lsp::server::Message {bytes} {
                 Send [lsp::rpc::failure [dict get $message id] InvalidRequest [dict get $message problem]]
             }
             response {
-                # The server sends no requests.
+                # The server's one request, workspace/semanticTokens/refresh,
+                # is answered with nothing to read: a response is dropped.
             }
             notification {
                 lsp::stats::label [dict get $message method]
@@ -240,7 +248,7 @@ namespace eval lsp::server {
     variable requests [dict create \
         initialize Initialize shutdown Shutdown \
         textDocument/hover Hover textDocument/definition Definition \
-        textDocument/references References]
+        textDocument/references References textDocument/semanticTokens/full SemanticTokens]
     variable notifications [dict create \
         initialized Initialized exit Exit \$/cancelRequest Cancel \
         textDocument/didOpen DidOpen textDocument/didChange DidChange \
@@ -324,8 +332,10 @@ proc lsp::server::Initialize {id params} {
     variable options
     variable workspace
     variable faults
+    variable tokenRefresh
     set params [Params $params]
     set capabilities [lsp::json::get $params capabilities [lsp::json::obj]]
+    set tokenRefresh [expr {[lsp::json::dig $capabilities {workspace semanticTokens refreshSupport} {bool 0}] eq {bool 1}}]
     # Position encodings, in the client's order of preference; UTF-16 when it
     # names none this server implements (every client implements UTF-16).
     set encoding utf-16
@@ -370,7 +380,12 @@ proc lsp::server::Initialize {id params} {
     set result [lsp::json::obj \
         capabilities [lsp::json::obj positionEncoding [lsp::json::str $encoding] \
             textDocumentSync $sync hoverProvider {bool 1} definitionProvider {bool 1} \
-            referencesProvider {bool 1}] \
+            referencesProvider {bool 1} \
+            semanticTokensProvider [lsp::json::obj \
+                legend [lsp::json::obj \
+                    tokenTypes [lsp::json::arrayOf [lmap t $::service::tokenTypes {lsp::json::str $t}]] \
+                    tokenModifiers [lsp::json::arrayOf [lmap m $::service::tokenModifiers {lsp::json::str $m}]]] \
+                full {bool 1}]] \
         serverInfo [lsp::json::obj name {str botlish} version [lsp::json::str [hir::interchange::fingerprint]]]]
     return [list answer $result]
 }
@@ -847,6 +862,7 @@ proc lsp::server::Apply {root job outcome payload} {
             after idle [list lsp::server::Prepare $root $payload]
             if {[Fresh $payload]} {
                 lsp::stats::count freshResults
+                RefreshTokens
             } else {
                 lsp::stats::count staleResults
                 # A source it read changed while it ran; that change may not
@@ -1158,6 +1174,7 @@ proc lsp::server::Reconcile {} {
         foreach path [dict get [RevInfo $latest] read] {
             dict set grouped $path {}
         }
+        set analyzed [dict get [RevInfo $latest] hir]
         foreach d [service::diagnostics $latest] {
             if {[dict get $d range] eq "none"} {
                 set path $root
@@ -1165,6 +1182,18 @@ proc lsp::server::Reconcile {} {
                 set path [Internal [file normalize [dict get $d file]]]
             }
             dict lappend grouped $path $d
+            # A program with no analysis at all (a loader error: nothing
+            # answers anywhere in it) shows each diagnostic in a module file
+            # also at each import of the chain that loads that file (its
+            # `import` notes, the loader's), so the file an editor has open
+            # -- the program's entry -- says why. An analyzed program's
+            # files answer for themselves: a module's syntax error stays
+            # the module's.
+            foreach n [if {$analyzed} {list} else {dict get $d notes}] {
+                if {[dict getdef $n kind ""] eq "import"} {
+                    dict lappend grouped [Internal [file normalize [dict get $n file]]] [ImportMirror $d $n]
+                }
+            }
         }
         dict set reports $root $grouped
         lappend paths {*}[dict keys $grouped]
@@ -1207,6 +1236,26 @@ proc lsp::server::Reconcile {} {
             }
         }
     }
+}
+
+# The service diagnostic D shown at its import note N (Reconcile): at N's
+# range, with D's severity, code and topic (its text), the message N's text
+# and D's own, and D's location as its related information -- the same
+# diagnostic, presented where the import is.
+proc lsp::server::ImportMirror {d n} {
+    set mirror [dict create severity [dict get $d severity] code [dict get $d code] \
+        message "[dict get $n message]: [dict get $d message]" text [dict get $d text] range span]
+    foreach key {file start end line column endLine endColumn} {
+        dict set mirror $key [dict get $n $key]
+    }
+    set primary [dict create message [dict get $d message] text [dict get $d text]]
+    foreach key {file start end line column endLine endColumn} {
+        dict set primary $key [dict get $d $key]
+    }
+    dict set mirror related {}
+    dict set mirror notes [list $primary]
+    dict set mirror record ""
+    return $mirror
 }
 
 proc lsp::server::DocumentVersion {path} {
@@ -1305,6 +1354,25 @@ proc lsp::server::References {id params} {
     return [Ask $id references $where $params]
 }
 
+# textDocument/semanticTokens/full: the document's tokens, as Answer finds a
+# revision to give them (TokensAnswer).
+proc lsp::server::SemanticTokens {id params} {
+    set params [Params $params]
+    set uri [lsp::json::text [lsp::json::get [lsp::json::get $params textDocument] uri] uri]
+    return [Ask $id tokens [dict create path [PathOf $uri] uri $uri] $params]
+}
+
+# Asks the client to request the tokens of its documents again, when it
+# takes such a request: an analysis may have changed a document's tokens
+# without any change to the document itself (a module it imports).
+proc lsp::server::RefreshTokens {} {
+    variable tokenRefresh
+    variable nextRequest
+    if {$tokenRefresh} {
+        Send [lsp::rpc::request [lsp::json::str refresh[incr nextRequest]] workspace/semanticTokens/refresh [lsp::json::null]]
+    }
+}
+
 # Answers the request ID of KIND at WHERE now, or makes it wait (Answer).
 proc lsp::server::Ask {id kind where params} {
     variable documents
@@ -1397,6 +1465,9 @@ proc lsp::server::Resolve {key final} {
 proc lsp::server::Answer {kind where final} {
     variable roots
     variable encoding
+    if {$kind eq "tokens"} {
+        return [TokensAnswer $where $final]
+    }
     set path [dict get $where path]
     set text [dict get $where text]
     set empty [if {$kind eq "references"} {lsp::json::arr} else {lsp::json::null}]
@@ -1440,6 +1511,82 @@ proc lsp::server::Answer {kind where final} {
         return wait
     }
     return [list answer $empty]
+}
+
+# The answer to a semantic tokens request for the document at WHERE ({path
+# text version ...}: the text the client has), or {wait}. The revisions that
+# may answer are the owner's latest and its latest of the program as written
+# (Answer's), one with or without a HIR: the syntax of any source it read
+# has tokens (service::tokens). A fresh one answers; a stale one waits for a
+# pending analysis and otherwise answers with the tokens its text and the
+# client's share (Mapping: the unchanged prefix and suffix of one edit).
+# Without a revision of the document, the answer is null.
+proc lsp::server::TokensAnswer {where final} {
+    variable roots
+    set path [dict get $where path]
+    set text [dict get $where text]
+    set owner [Owner $path]
+    if {$owner eq ""} {
+        return [list answer [lsp::json::null]]
+    }
+    set pending [expr {!$final && [Pending $owner]}]
+    set record [dict get $roots $owner]
+    set candidates {}
+    foreach rev [list [dict get $record latest] [dict get $record good]] {
+        if {$rev ne "" && $rev ni $candidates} {
+            lappend candidates $rev
+        }
+    }
+    foreach rev $candidates {
+        if {[catch {RevText $rev $path} old]} continue
+        if {!($old eq $text && [Fresh $rev]) && $pending} {
+            return wait
+        }
+        if {[catch {service::tokens $rev [dict get [RevInfo $rev] sources $path path]} tokens]} continue
+        set mapping [Mapping "$rev,$path,[dict get $where version]" $old $text]
+        return [list answer [lsp::json::obj data [EncodeTokens \
+            "request,$path,[dict get $where version]" $text $mapping $tokens]]]
+    }
+    if {$pending} {
+        return wait
+    }
+    return [list answer [lsp::json::null]]
+}
+
+# TOKENS (service::tokens: {START END TYPE MODIFIERS} of a revision's text)
+# in the protocol's relative encoding for TEXT, the client's, which MAPPING
+# relates to the revision's: five integers each -- line and start character
+# relative to the previous token's, length, the type's index in the legend
+# and the modifiers' bits -- for every token wholly in unchanged text.
+proc lsp::server::EncodeTokens {key text mapping tokens} {
+    variable encoding
+    set starts [Starts $key $text]
+    set data {}
+    set lastLine 0
+    set lastCharacter 0
+    foreach token $tokens {
+        lassign $token start end type modifiers
+        set mapped [ToNew $mapping $start $end]
+        if {$mapped eq ""} continue
+        lassign $mapped start end
+        lassign [lsp::positions::toLsp $text $starts $start $encoding] line character
+        lassign [lsp::positions::toLsp $text $starts $end $encoding] endLine endCharacter
+        if {$endLine != $line || $endCharacter <= $character} continue
+        set bits 0
+        foreach modifier $modifiers {
+            set bits [expr {$bits | (1 << [lsearch -exact $::service::tokenModifiers $modifier])}]
+        }
+        if {$line != $lastLine} {
+            set lastCharacter 0
+        }
+        lappend data [lsp::json::int [expr {$line - $lastLine}]] \
+            [lsp::json::int [expr {$character - $lastCharacter}]] \
+            [lsp::json::int [expr {$endCharacter - $character}]] \
+            [lsp::json::int [lsearch -exact $::service::tokenTypes $type]] [lsp::json::int $bits]
+        set lastLine $line
+        set lastCharacter $character
+    }
+    return [lsp::json::arrayOf $data]
 }
 
 # The protocol answer to a KIND request from the facts FACTS (service::at) of

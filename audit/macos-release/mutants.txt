@@ -903,6 +903,18 @@ rm -rf "$out/Icy Tower.app"
           sudo security add-trusted-cert -d -r trustRoot -p codeSign -k "$kc" "$dry/anchors/root.cer"
 >>>>
 
+@@ dry-run-signs-the-ci-bundle the dry run signs a copy of the CI bundle, whose identifier is not its environment's MACOS_BUNDLE_ID (the refusal of run 42377791764)
+!! test_workflow.Workflow.test_dry_run_bundle_is_assembled_as_a_release_s
+## .github/workflows/icy-tower-macos.yml
+<<<<
+          examples/games/icy-tower/package-macos.sh "$EXE" "$dry/app" --bundle-id "$MACOS_BUNDLE_ID" \
+            --version 0.0.0 --build 0.0.0 --sdl3-license "$SDLSRC/LICENSE.txt" >"$dry/package.log" 2>&1 \
+            || { cat "$dry/package.log"; echo "::error::the dry run's bundle was not assembled"; exit 1; }
+====
+          mkdir -p "$dry/app"
+          ditto "$APPDIR" "$dry/app/Icy Tower.app"
+>>>>
+
 @@ dry-run-blocked-as-passed any refusal of the dry run's signature counted as the environment's, a broken signing step hidden
 !! test_workflow.Workflow.test_dry_run_blocked_signature_is_never_passed
 ## .github/workflows/icy-tower-macos.yml

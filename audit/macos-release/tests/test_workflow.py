@@ -168,6 +168,19 @@ class Workflow(unittest.TestCase):
         # Apple's check precedes the signature, as in a release
         self.assertLess(body.index("rel notary-auth"), body.index("rel sign"))
 
+    def test_dry_run_bundle_is_assembled_as_a_release_s(self):
+        """The dry run signs a bundle assembled as the release job assembles its own (package-macos.sh with the
+        environment's MACOS_BUNDLE_ID), so the signature's identifier is the one its stages check -- never a copy
+        of the CI bundle, whose identifier is another (run 42377791764: the first runner whose codesign signed
+        with the throwaway identity refused the copy)."""
+        game = self.jobs["game"]
+        body = game["steps"][step_index(game, "The release path's dry run")]["run"]
+        assembly = 'package-macos.sh "$EXE" "$dry/app" --bundle-id "$MACOS_BUNDLE_ID"'
+        self.assertIn(assembly, body)
+        self.assertNotIn('ditto "$APPDIR"', body)
+        self.assertLess(body.index('. "$dry/env"'), body.index(assembly))
+        self.assertLess(body.index(assembly), body.index("rel sign"))
+
     # --- the order of the release -----------------------------------------------------
 
     def test_stages_in_order(self):

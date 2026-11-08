@@ -8,7 +8,6 @@ index: errors
 alias: neither handled here nor admitted; may produce the declared error; unhandled declared error; error not handled
 keywords: on, errors clause, handler, admit, propagate, fail, declared error, IndexNotFound, LowerUnderrun, UpperOverrun, Fn contract, top level, grouped
 related: rule.unhandled-errors concept.errors proof.completions proof.list-bounds proof.slices proof.callable-contracts error.known-error error.undeclared-error concept.function-types rule.one-handler-per-error principle.errors-over-sentinels stdlib.std::list::get
-docs: EXPLICIT-ERROR-COMPLETIONS.md STATIC-COMPLETION-PROOFS.md DIAGNOSTIC-RECOVERY.md VERIFIED-CALLABLE-CONTRACT-BOUNDARY.md
 code: CORE SEMANTIC UNHANDLED-ERROR
 
 == MEANING
@@ -172,7 +171,6 @@ index: errors
 alias: can never complete normally; statically known failure; always fails; known failure
 keywords: handler, on, KnownError, always, constant argument, literal, risky, negative test, static compile, std::test::rejects, parameter
 related: rule.known-error concept.known-errors concept.negative-tests proof.completions error.unhandled-error concept.static-compile concept.testing stdlib.std::test::rejects proof.list-bounds
-docs: STATIC-COMPLETION-PROOFS.md STATIC-COMPILE.md GOLDEN-TEST-FRAMEWORK.md
 code: CORE SEMANTIC KNOWN-ERROR
 
 == MEANING
@@ -302,7 +300,6 @@ index: errors
 alias: unknown error; no error declaration is visible; error is already declared
 keywords: error declaration, fail, on, errors clause, qualified, module error, builtin error, redeclare
 related: concept.errors error.unhandled-error error.missing-error-payload concept.modules concept.imports error.duplicate error.missing-import
-docs: EXPLICIT-ERROR-COMPLETIONS.md ERROR-PAYLOADS.md
 code: CORE SEMANTIC UNDECLARED-ERROR
 
 == MEANING
@@ -360,7 +357,6 @@ index: errors
 alias: carries a payload; fail without payload
 keywords: error payload, fields, fail, construct, struct literal
 related: concept.error-payloads error.unexpected-error-payload concept.errors error.undeclared-error
-docs: ERROR-PAYLOADS.md
 code: CORE SEMANTIC MISSING-ERROR-PAYLOAD
 
 == MEANING
@@ -420,7 +416,6 @@ index: errors
 alias: declares no payload; nothing to bind
 keywords: error payload, fail, handler, details, destructure, fields
 related: concept.error-payloads error.missing-error-payload concept.errors
-docs: ERROR-PAYLOADS.md
 code: CORE SEMANTIC UNEXPECTED-ERROR-PAYLOAD
 
 == MEANING
@@ -460,7 +455,6 @@ index: errors
 alias: break outside lexical loop; break outside loop
 keywords: break, loop, nested function, closure, placement
 related: rule.control-placement concept.loops error.continue-outside-loop error.return-outside-callable
-docs: COLLECTING-LOOPS.md PAYLOAD-FREE-BREAK.md
 code: CORE SEMANTIC BREAK-OUTSIDE-LOOP
 
 == MEANING
@@ -504,7 +498,6 @@ index: errors
 alias: continue outside lexical loop; continue outside loop
 keywords: continue, loop, nested function, placement
 related: rule.control-placement concept.loops error.break-outside-loop error.return-outside-callable
-docs: COLLECTING-LOOPS.md
 code: CORE SEMANTIC CONTINUE-OUTSIDE-LOOP
 
 == MEANING
@@ -536,7 +529,6 @@ index: errors
 alias: order is not known to hold exactly; unproven order; reorder not proven
 keywords: reorder, order, validate_order, OrderMismatch, MutableMap, MutableSet, permutation, members, keys, relation, proof
 related: concept.collection-order proof.same-members concept.mutable-map concept.mutable-set stdlib.std::mutable_map::reorder stdlib.std::mutable_set::reorder
-docs: PROVEN-COLLECTION-REORDERING.md
 code: CORE SEMANTIC REORDER-NOT-PROVEN
 
 == MEANING
@@ -614,7 +606,6 @@ index: errors
 alias: return outside callable invocation; return at top level
 keywords: return, top level, function, program value, placement
 related: rule.control-placement concept.functions concept.program-value error.break-outside-loop error.continue-outside-loop
-docs: EXPLICIT-ERROR-COMPLETIONS.md
 code: CORE SEMANTIC RETURN-OUTSIDE-CALLABLE
 
 == MEANING
@@ -643,7 +634,6 @@ index: errors
 alias: break with a value is not valid inside a collecting loop
 keywords: break, collecting loop, value, HIR, internal
 related: error.break-outside-loop concept.loops error.surface-syntax
-docs: RETURNING-ITERABLE-LOOPS.md PAYLOAD-FREE-BREAK.md
 code: CORE SEMANTIC LISTLOOP-BREAK-VALUE
 
 == MEANING
@@ -675,7 +665,6 @@ index: errors
 alias: is required by this call, but the enclosing inject block; which this inject block does not inject; which the enclosing inject block; does not inject; injects no context; injects only
 keywords: inject, inject context, inject no context, injection, authority, restricted, context, installed, requirement, chain, nested, airlock
 related: concept.context-injection concept.contexts concept.context-traits error.context-retained-authority error.missing-context error.duplicate-injected-context concept.direct-modules
-docs: RESTRICTED-CONTEXT-INJECTION-MILESTONE-1.md CONTEXTS.md
 code: CORE SEMANTIC CONTEXT-NOT-INJECTED
 
 == MEANING
@@ -692,7 +681,7 @@ covered by what it injects:
   * every nested inject block: it may inject only what the enclosing block
     injects (a computation grants only authority it was given);
   * every call of a direct module that the enclosing function mediates
-    through its context (DIRECT-MODULES.md): the context must be injected.
+    through its context: the context must be injected.
 
     std::linux::io::LinuxIO is required by this call, but the enclosing
     inject block (at f.bot:12:1) injects no context: ...
@@ -785,7 +774,6 @@ index: errors
 alias: this call runs coroutine code with authority the enclosing inject block; may resume a coroutine that retains; whose retained authority cannot be proven
 keywords: inject, coroutine, resume, retained, authority, construction, handle, laundering, provenance, context place, parameter
 related: concept.context-injection concept.coroutines error.context-not-injected concept.context-owned-state
-docs: RESTRICTED-CONTEXT-INJECTION-MILESTONE-1.md COROUTINES.md
 code: CORE SEMANTIC CONTEXT-RETAINED-AUTHORITY
 
 == MEANING
@@ -863,7 +851,6 @@ index: errors
 alias: is injected twice by this inject block
 keywords: inject, duplicate, context, list
 related: concept.context-injection error.context-not-injected error.not-a-context
-docs: RESTRICTED-CONTEXT-INJECTION-MILESTONE-1.md
 code: CORE SEMANTIC DUPLICATE-INJECTED-CONTEXT
 
 == MEANING
@@ -892,7 +879,6 @@ index: errors
 alias: is required by this call but is not installed here; no installed context implements it; context not installed
 keywords: with context, context parameter, context struct, context trait, std::io::IO, installation, chain, requirement, order
 related: concept.contexts concept.context-traits proof.contexts rule.context-installation rule.sfiae error.not-a-context error.context-function-value error.context-installation-unsupported stdlib.module.std::io
-docs: CONTEXTS.md CONTEXT-TRAITS.md
 code: CORE SEMANTIC MISSING-CONTEXT
 
 == MEANING
@@ -1025,7 +1011,6 @@ index: errors
 alias: is not a context; only a value of a type declared context struct
 keywords: context struct, context parameter, with context, struct, trait, context trait
 related: concept.contexts concept.context-traits error.missing-context error.context-type-not-exact error.duplicate-context
-docs: CONTEXTS.md CONTEXT-TRAITS.md
 code: CORE SEMANTIC NOT-A-CONTEXT
 
 == MEANING
@@ -1067,7 +1052,6 @@ index: errors
 alias: is already installed in this scope; context installed twice
 keywords: with context, installation, replace, shadow, identity
 related: concept.contexts rule.context-installation error.missing-context error.not-a-context
-docs: CONTEXTS.md
 code: CORE SEMANTIC DUPLICATE-CONTEXT
 
 == MEANING
@@ -1105,7 +1089,6 @@ index: errors
 alias: must have one exact context-struct type
 keywords: with context, anonymous struct, any, union, inference, type annotation
 related: concept.contexts error.not-a-context error.duplicate-context concept.types
-docs: CONTEXTS.md
 code: CORE SEMANTIC CONTEXT-TYPE-NOT-EXACT
 
 == MEANING
@@ -1144,7 +1127,6 @@ index: errors
 alias: context parameter has the name of
 keywords: context parameter, parameter, flag, name, namespace, local
 related: concept.contexts error.duplicate-context-parameter error.duplicate concept.flags
-docs: CONTEXTS.md
 code: CORE SEMANTIC CONTEXT-BINDING-COLLISION
 
 == MEANING
@@ -1180,7 +1162,6 @@ index: errors
 alias: context is declared twice
 keywords: context section, context parameter, context trait, identity, type
 related: concept.contexts error.context-binding-collision error.malformed-context-section
-docs: CONTEXTS.md CONTEXT-TRAITS.md
 code: CORE SEMANTIC DUPLICATE-CONTEXT-PARAMETER
 
 == MEANING
@@ -1214,7 +1195,6 @@ index: errors
 alias: requires context so it can only be called
 keywords: function value, higher-order, callback, pass, return, store, closure, context requirement
 related: concept.contexts concept.closures concept.function-types error.missing-context error.direct-callable-value
-docs: CONTEXTS.md
 code: CORE SEMANTIC CONTEXT-FUNCTION-VALUE
 
 == MEANING
@@ -1267,7 +1247,6 @@ index: errors
 alias: context installation is currently supported only; with context inside a function
 keywords: with context, installation, top level, function, loop, branch, module
 related: rule.context-installation concept.contexts error.missing-context error.duplicate-context concept.modules
-docs: CONTEXTS.md
 code: CORE SEMANTIC CONTEXT-INSTALLATION-UNSUPPORTED
 code: SURFACE MODULE CONTEXT-INSTALLATION-UNSUPPORTED
 
@@ -1313,7 +1292,6 @@ index: errors
 alias: module binding initializer must be context-free
 keywords: module binding, module, initializer, context-free, native, top-level value
 related: rule.module-bindings concept.modules error.module-immutable error.missing-context
-docs: MODULE-BINDINGS.md
 code: CORE SEMANTIC MODULE-CONTEXT
 
 == MEANING
@@ -1356,7 +1334,6 @@ index: errors
 alias: context section cannot follow; needs its context type
 keywords: context section, parameter list, flags, order, type, syntax
 related: concept.contexts concept.flags error.malformed-flag-section error.duplicate-context-parameter error.surface-syntax
-docs: CONTEXTS.md FLAGS.md
 code: MALFORMED-CONTEXT-SECTION
 match: SURFACE SYNTAX | MALFORMED-CONTEXT-SECTION: *
 
@@ -1398,7 +1375,6 @@ index: errors
 alias: variadic parameter must be the last; at most one variadic parameter; needs its List type
 keywords: variadic, parameter list, section order, List, trait requirement, syntax
 related: concept.variadics concept.flags error.malformed-flag-section error.malformed-context-section error.surface-syntax
-docs: VARIADICS-VERTICAL-SLICE-1.md FLAGS.md
 code: MALFORMED-VARIADIC-SECTION
 match: SURFACE SYNTAX | MALFORMED-VARIADIC-SECTION: *
 
@@ -1444,7 +1420,6 @@ index: errors
 alias: uses direct authority; undischarged direct edge
 keywords: direct module, linux, syscall, authority, context, mediate, contextualize, capability, extern c fn, captures
 related: concept.direct-modules concept.contexts error.stale-direct-module error.direct-callable-value error.direct-module-position concept.c-ffi stdlib.module.std::linux
-docs: DIRECT-MODULES.md CONTEXTS.md C-FFI.md
 code: CORE SEMANTIC DIRECT
 
 == MEANING
@@ -1512,7 +1487,6 @@ index: errors
 alias: is a callable of the direct module
 keywords: direct module, function value, pass, return, store, capture, authority
 related: concept.direct-modules error.direct error.context-function-value
-docs: DIRECT-MODULES.md
 code: CORE SEMANTIC DIRECT-CALLABLE-VALUE
 
 == MEANING
@@ -1551,7 +1525,6 @@ index: errors
 alias: direct module is unnecessary
 keywords: direct module, stale, marker, declaration, inference, mediated
 related: concept.direct-modules error.direct error.direct-module-position
-docs: DIRECT-MODULES.md
 code: CORE SEMANTIC STALE-DIRECT-MODULE
 
 == MEANING
@@ -1589,7 +1562,6 @@ index: errors
 alias: direct module takes no name
 keywords: direct module, syntax, module name, file path
 related: concept.direct-modules error.direct-module-position error.duplicate-direct-module error.surface-syntax
-docs: DIRECT-MODULES.md
 code: DIRECT-MODULE-FORM
 match: SURFACE SYNTAX | DIRECT-MODULE-FORM: *
 
@@ -1620,7 +1592,6 @@ index: errors
 alias: direct module must be the file's first declaration
 keywords: direct module, position, first line, import, function, block
 related: concept.direct-modules error.direct-module-form error.duplicate-direct-module error.direct error.surface-syntax
-docs: DIRECT-MODULES.md
 code: DIRECT-MODULE-POSITION
 match: SURFACE SYNTAX | DIRECT-MODULE-POSITION: *
 
@@ -1655,7 +1626,6 @@ index: errors
 alias: duplicate direct module
 keywords: direct module, duplicate, twice
 related: concept.direct-modules error.direct-module-position error.direct-module-form error.surface-syntax
-docs: DIRECT-MODULES.md
 code: DUPLICATE-DIRECT-MODULE
 match: SURFACE SYNTAX | DUPLICATE-DIRECT-MODULE: *
 
@@ -1683,7 +1653,6 @@ index: errors
 alias: extern declaration names its foreign ABI; the only foreign ABI is c
 keywords: extern, c, fn, library, named, symbol, linker, noescape, captures, read, write, syntax, FFI
 related: concept.c-ffi error.foreign-borrow error.surface-syntax backend.native-only
-docs: C-FFI.md C-ABI-TYPES.md
 code: EXTERN-SYNTAX
 match: SURFACE SYNTAX | EXTERN-SYNTAX: *
 
@@ -1731,7 +1700,6 @@ index: errors
 alias: byte storage is exposed to C only; temporary byte exposure refused
 keywords: FFI, extern c fn, std::abi::bytes::Bytes, MutableBytes, noescape, captures, access, read, write, pointer, borrow, exposure, alias, independent
 related: concept.c-ffi error.extern-syntax error.direct error.imprint stdlib.module.std::ffi::c stdlib.module.std::abi::bytes
-docs: C-POINTER-BORROWING.md C-FFI.md C-ABI-TYPES.md
 code: CORE SEMANTIC FOREIGN-BORROW
 
 == MEANING
@@ -1792,7 +1760,6 @@ index: errors
 alias: imprint variable is not established; imprinted callable is not a value; explicit imprints
 keywords: imprint, imprint variable, T, generic, List[T], std::ffi::c::null, std::ffi::c::Ptr, explicit, f[int]
 related: concept.c-ffi concept.specialization concept.function-types error.type error.foreign-borrow stdlib.module.std::ffi::c
-docs: C-ABI-TYPES.md
 code: CORE SEMANTIC IMPRINT
 
 == MEANING
@@ -1911,7 +1878,6 @@ index: errors
 alias: layout has size
 keywords: layout, size, binary, bytes, declaration
 related: concept.binary-layouts error.layout-alignment error.layout-field-bounds stdlib.module.std::binary
-docs: BINARY-LAYOUT.md
 code: CORE SEMANTIC LAYOUT-SIZE
 
 == MEANING
@@ -1949,7 +1915,6 @@ index: errors
 alias: layout has alignment
 keywords: layout, align, alignment, power of two, binary
 related: concept.binary-layouts error.layout-size stdlib.module.std::binary
-docs: BINARY-LAYOUT.md
 code: CORE SEMANTIC LAYOUT-ALIGNMENT
 
 == MEANING
@@ -1984,7 +1949,6 @@ index: errors
 alias: cannot have type; no fixed width
 keywords: layout, field, int, std::binary::U32, domain, encoding, width, signed, unsigned, nested layout
 related: concept.binary-layouts concept.integer-domains error.layout-cycle stdlib.module.std::binary
-docs: BINARY-LAYOUT.md
 code: CORE SEMANTIC LAYOUT-FIELD-TYPE
 
 == MEANING
@@ -2031,7 +1995,6 @@ index: errors
 alias: outside the layout's size
 keywords: layout, field, offset, width, size, bounds
 related: concept.binary-layouts error.layout-size error.layout-field-overlap stdlib.module.std::binary
-docs: BINARY-LAYOUT.md
 code: CORE SEMANTIC LAYOUT-FIELD-BOUNDS
 
 == MEANING
@@ -2062,7 +2025,6 @@ index: errors
 alias: overlaps field
 keywords: layout, field, overlap, union, overlay, offset
 related: concept.binary-layouts error.layout-field-bounds stdlib.module.std::binary
-docs: BINARY-LAYOUT.md
 code: CORE SEMANTIC LAYOUT-FIELD-OVERLAP
 
 == MEANING
@@ -2096,7 +2058,6 @@ index: errors
 alias: contains itself by value
 keywords: layout, nested, recursive, cycle, pointer
 related: concept.binary-layouts error.layout-field-type stdlib.module.std::binary
-docs: BINARY-LAYOUT.md
 code: CORE SEMANTIC LAYOUT-CYCLE
 
 == MEANING
@@ -2128,7 +2089,6 @@ index: errors
 alias: a fixed array's extent is a positive integer
 keywords: layout, array, extent, zero-length, flexible array member, length, fixed array
 related: concept.binary-layouts error.layout-field-bounds error.layout-array-index stdlib.module.std::binary
-docs: FIXED-LAYOUT-ARRAYS.md
 code: CORE SEMANTIC LAYOUT-ARRAY-EXTENT
 
 == MEANING
@@ -2183,7 +2143,6 @@ index: errors
 alias: the element index lies outside the fixed array
 keywords: layout, array, index, designator, out of range, element, subscript
 related: concept.binary-layouts error.layout-array-extent stdlib.std::binary::store stdlib.std::binary::write stdlib.std::binary::element
-docs: FIXED-LAYOUT-ARRAYS.md
 code: CORE SEMANTIC LAYOUT-ARRAY-INDEX
 
 == MEANING
@@ -2222,7 +2181,6 @@ index: errors
 alias: cannot imprint layout; is a C pointer
 keywords: layout, pointer, std::ffi::c::Ptr, FnPtr, parse, emit, native view, forge
 related: concept.binary-layouts stdlib.std::binary::native::view stdlib.std::binary::load error.layout-field-type
-docs: NATIVE-LAYOUT-VIEWS.md BINARY-LAYOUT.md
 code: CORE SEMANTIC LAYOUT-NATIVE-ONLY
 
 == MEANING
@@ -2236,8 +2194,8 @@ Any bit pattern can arrive in byte storage, so a pointer read from bytes
 would be forged. A pointer field nested inside another layout makes the
 outer layout native-only too; the message names the field's path. Emitting
 such a layout is rejected the same way, and so is an ordinary
-std::binary::write of the pointer field itself (NATIVE-LAYOUT-WRITES.md): an
-existing pointer is encoded into bytes only by std::binary::write_foreign.
+std::binary::write of the pointer field itself: an existing pointer is
+encoded into bytes only by std::binary::write_foreign.
 
 == WHAT TO DO
 Read the record where foreign code put it: std::binary::native::view(L, p)
@@ -2273,7 +2231,6 @@ index: errors
 alias: encodes an existing foreign value; is an ordinary field
 keywords: write_foreign, pointer field, std::binary::write, encode pointer, foreign write
 related: stdlib.std::binary::write_foreign stdlib.std::binary::write error.layout-native-only concept.binary-layouts
-docs: NATIVE-LAYOUT-WRITES.md
 code: CORE SEMANTIC LAYOUT-FOREIGN-WRITE
 
 == MEANING
@@ -2318,7 +2275,6 @@ index: errors
 alias: has no copied value; is a union layout; holds the union layout
 keywords: union, union layout, alternative, overlap, LayoutStruct, std::binary::parse, std::binary::load, std::binary::read, copy, OVERLAPPED
 related: concept.layout-unions stdlib.std::binary::read stdlib.std::binary::write concept.binary-layouts error.layout-native-only
-docs: LAYOUT-UNIONS.md
 code: CORE SEMANTIC LAYOUT-UNION
 
 == MEANING
@@ -2408,7 +2364,6 @@ index: errors
 alias: is a layout, not a type
 keywords: layout, LayoutStruct, type annotation, parameter, std::binary::parse
 related: concept.binary-layouts error.layout-not-a-value error.layout-struct-parameter stdlib.std::binary::parse
-docs: BINARY-LAYOUT.md
 code: CORE SEMANTIC LAYOUT-NOT-A-TYPE
 
 == MEANING
@@ -2443,7 +2398,6 @@ index: errors
 alias: is a layout, not a value
 keywords: layout, value, std::binary::parse, layout_length, method syntax, Header.parse
 related: concept.binary-layouts error.layout-not-a-type error.layout-operand stdlib.std::binary::parse
-docs: BINARY-LAYOUT.md
 code: CORE SEMANTIC LAYOUT-NOT-A-VALUE
 
 == MEANING
@@ -2481,7 +2435,6 @@ index: errors
 alias: layout operand must be the name of a layout
 keywords: layout, std::binary::parse, operand, static, parameter, value
 related: concept.binary-layouts error.layout-not-a-value error.unknown-layout stdlib.std::binary::parse
-docs: BINARY-LAYOUT.md
 code: CORE SEMANTIC LAYOUT-OPERAND
 
 == MEANING
@@ -2517,7 +2470,6 @@ index: errors
 alias: the argument of LayoutStruct must name a layout declaration
 keywords: LayoutStruct, layout, type argument, struct, generic
 related: concept.binary-layouts error.unknown-layout error.layout-not-a-type
-docs: BINARY-LAYOUT.md
 code: CORE SEMANTIC LAYOUT-STRUCT-PARAMETER
 
 == MEANING
@@ -2550,7 +2502,6 @@ index: errors
 alias: unknown layout
 keywords: layout, std::binary::parse, LayoutStruct, qualified, import, module
 related: concept.binary-layouts error.layout-operand error.layout-struct-parameter concept.imports
-docs: BINARY-LAYOUT.md
 code: CORE SEMANTIC UNKNOWN-LAYOUT
 
 == MEANING
@@ -2585,7 +2536,6 @@ index: errors
 alias: clause 1 iterates
 keywords: lockstep, and, loop, iteration count, cardinality, zip, enumerate, length
 related: concept.lockstep proof.lockstep error.lockstep-unproven concept.loops task.iterate-with-index
-docs: COLLECTING-LOOPS.md
 code: CORE SEMANTIC LOCKSTEP-UNEQUAL
 
 == MEANING
@@ -2630,7 +2580,6 @@ index: errors
 alias: could not prove; lockstep equal counts
 keywords: lockstep, and, loop, iteration count, cardinality, length, parameter, proof, zip
 related: concept.lockstep proof.lockstep error.lockstep-unequal concept.loops task.iterate-with-index
-docs: COLLECTING-LOOPS.md
 code: CORE SEMANTIC LOCKSTEP-UNPROVEN
 
 == MEANING
@@ -2671,7 +2620,6 @@ index: errors
 alias: flag is written :name; no space after the colon
 keywords: flag, colon, :name, syntax, keyword, space
 related: concept.flags rule.flags error.malformed-flag-section error.flag-not-a-value error.surface-syntax
-docs: FLAGS.md
 code: MALFORMED-FLAG
 match: SURFACE SYNTAX | MALFORMED-FLAG: *
 
@@ -2704,7 +2652,6 @@ index: errors
 alias: cannot follow the flags section; flag outside a flag section
 keywords: flags, flag section, parameter list, order, syntax
 related: concept.flags rule.flags error.malformed-flag error.malformed-context-section error.surface-syntax
-docs: FLAGS.md
 code: MALFORMED-FLAG-SECTION
 match: SURFACE SYNTAX | MALFORMED-FLAG-SECTION: *
 
@@ -2741,7 +2688,6 @@ index: errors
 alias: ordinary argument cannot follow the flag
 keywords: flag, call, argument order, syntax
 related: concept.flags rule.flags error.flag-not-a-value error.surface-syntax
-docs: FLAGS.md
 code: ARGUMENT-AFTER-FLAG
 match: SURFACE SYNTAX | ARGUMENT-AFTER-FLAG: *
 
@@ -2768,7 +2714,6 @@ index: errors
 alias: is a call flag, not a value
 keywords: flag, value, symbol, keyword argument, :name
 related: concept.flags rule.flags error.argument-after-flag error.surface-syntax
-docs: FLAGS.md
 code: FLAG-NOT-A-VALUE
 match: SURFACE SYNTAX | FLAG-NOT-A-VALUE: *
 
@@ -2802,7 +2747,6 @@ index: errors
 alias: static compile takes no arguments; static intrinsic names its operation
 keywords: static, static compile, block, indentation, syntax
 related: concept.static-compile error.static-unknown-operation concept.negative-tests error.surface-syntax
-docs: STATIC-COMPILE.md
 code: STATIC-INTRINSIC-FORM
 match: SURFACE SYNTAX | STATIC-INTRINSIC-FORM: *
 
@@ -2843,7 +2787,6 @@ index: errors
 alias: unknown static operation
 keywords: static, static compile, static parse, static assert, compile-time evaluation
 related: concept.static-compile error.static-intrinsic-form error.surface-syntax
-docs: STATIC-COMPILE.md
 code: STATIC-UNKNOWN-OPERATION
 match: SURFACE SYNTAX | STATIC-UNKNOWN-OPERATION: *
 
@@ -2874,7 +2817,6 @@ index: errors
 alias: positional list destructuring; destructure a list
 keywords: destructuring, list, tuple, pattern, multiple return values, struct, named fields, unpack
 related: rule.no-list-destructuring principle.name-the-parts concept.destructuring concept.structs concept.lists warning.fixed-arity-list-return error.surface-syntax
-docs: STRUCT-DESTRUCTURING.md MULTI-VALUE-RESULTS.md
 code: LIST-DESTRUCTURING
 match: SURFACE SYNTAX | LIST-DESTRUCTURING: *
 

@@ -1,0 +1,87 @@
+# callee.bot -- tests/threads.test: a worker VM that serves calls badly on
+# purpose (calls.bot). Its service actor answers the first call, then waits
+# -- polling its own observations, so the test depends on no timing --
+# until the other three have been sent (the process's transport counted
+# them) and its pump has settled: one in its mailbox of one, one taken by
+# the pump waiting for room, one left queued in the endpoint. It takes the
+# second and holds it unanswered, closes the service (the queued call:
+# Undelivered) and stops its loop: the VM ends owing the held call and the
+# taken one (ServiceEnded).
+import event_loop_linux
+import std::actor
+import std::actor::remote
+import std::event_loop
+import std::list
+import std::thread
+
+struct Ask:
+    n: int
+
+struct Home:
+    home: std::actor::remote::Remote[std::actor::remote::Service[Ask, int]]
+
+# What the worker reports: whether the service reached home, and how many
+# calls its close found queued (-1: the actor did not get that far).
+struct Served:
+    sent: bool
+    dropped: int
+
+fn badly(inbox: std::actor::Inbox[std::actor::remote::Call[Ask, int]], svc: std::actor::remote::Service[Ask, int], done: std::actor::Address[int], context ev: std::event_loop::Loop, resume std::actor::Answer) -> std::actor::Exit:
+    rx = std::actor::listen(inbox):
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    first = std::actor::receive(rx):
+        on std::actor::Closed:
+            return std::actor::exit(-2)
+    std::actor::remote::reply(first.reply, first.body.n * 10)
+    # The service's message home and four calls: five messages queued in
+    # all; then one call left in the endpoint (the pump holds the next).
+    settled = fold i from 0 to 20000 with intermediate settled false:
+        if settled:
+            break
+        std::actor::sleep(500):
+            on std::event_loop::SchedulerFault:
+                return std::actor::exit(-3)
+        std::thread::stats().messages >= 5 and std::actor::remote::in_transit_calls(svc) == 1
+    if not settled:
+        return std::actor::exit(-6)
+    held = std::actor::receive(rx):
+        on std::actor::Closed:
+            return std::actor::exit(-4)
+    dropped = std::actor::remote::close_service(svc)
+    done.send(dropped)
+    std::event_loop::stop():
+        on std::event_loop::SchedulerFault:
+            return std::actor::exit(-5)
+    std::actor::exit(dropped)
+
+private fn served(init: Home, context ev: std::event_loop::Loop, d: std::event_loop::Driver, ac: std::actor::Actors, p: std::thread::Port, db: std::thread::Doorbell) -> Served errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    std::thread::serve()
+    {to: calls, inbox} = std::actor::open[std::actor::remote::Call[Ask, int]](1)
+    svc = std::actor::remote::serve_calls(calls, 16)
+    {to: done, inbox: done_in} = std::actor::open[int](1)
+    a = inject context std::event_loop::Loop:
+        coroutine {step, first} = badly(inbox, svc, done)
+        std::actor::spawned(step, first)
+    std::actor::start(a)
+    sent = std::actor::remote::send(init.home, svc)
+    std::event_loop::run()
+    std::thread::close_port()
+    dropped = std::actor::drain(done_in).at(0):
+        on IndexNotFound:
+            -1
+    Served {sent: sent == std::actor::remote::Sent::Delivered, dropped: dropped}
+
+thread fn serve_badly(init: Home) -> Served:
+    with context std::event_loop::create(64)
+    with context event_loop_linux::create()
+    with context event_loop_linux::native()
+    with context std::actor::create()
+    with context std::thread::port()
+    served(init):
+        on std::event_loop::SchedulerFault:
+            Served {sent: false, dropped: -2}
+        on std::event_loop::DriverFault {code}:
+            Served {sent: false, dropped: code}
+        on std::event_loop::LoopReentered:
+            Served {sent: false, dropped: -3}

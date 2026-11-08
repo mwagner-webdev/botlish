@@ -1,0 +1,104 @@
+# calls.bot -- tests/threads.test: typed calls into another VM whose service
+# answers one call and fails the others (callee.bot). Every call completes:
+# with its reply, or with the failure the transport saw -- never left
+# waiting because its service went.
+import callee
+import event_loop_linux
+import std::actor
+import std::actor::remote
+import std::event_loop
+import std::list
+import std::thread
+
+# A caller: the service from its inbox, one call, its outcome reported.
+fn caller(k: int, services: std::actor::Inbox[std::actor::remote::Service[callee::Ask, int]], r: std::actor::remote::Replies[int], out: std::actor::Address[str], resume std::actor::Answer) -> std::actor::Exit:
+    c = std::actor::remote::caller(r):
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    rx = std::actor::listen(services):
+        on std::actor::Closed:
+            return std::actor::exit(-2)
+    svc = std::actor::receive(rx):
+        on std::actor::Closed:
+            return std::actor::exit(-3)
+    v = std::actor::remote::call(svc, callee::Ask {n: k}, c):
+        on std::actor::remote::CallFailed {reason}:
+            out.send(reason)
+            return std::actor::exit(0)
+        on std::actor::Closed:
+            return std::actor::exit(-4)
+    out.send("answered")
+    std::actor::exit(v)
+
+# The hub: the service the worker sends home, handed to every caller.
+fn hub(home: std::actor::Inbox[std::actor::remote::Service[callee::Ask, int]], callers: List[std::actor::Address[std::actor::remote::Service[callee::Ask, int]]], resume std::actor::Answer) -> std::actor::Exit:
+    rx = std::actor::listen(home):
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    svc = std::actor::receive(rx):
+        on std::actor::Closed:
+            return std::actor::exit(-2)
+    sent = loop to in callers:
+        to.send(svc)
+    std::actor::exit(std::list::length(sent))
+
+# The collector: N outcomes forwarded to FINAL, then the loop stops.
+fn collector(n: int, outcomes: std::actor::Inbox[str], final: std::actor::Address[str], context ev: std::event_loop::Loop, resume std::actor::Answer) -> std::actor::Exit:
+    rx = std::actor::listen(outcomes):
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    got = fold i from 0 to n with intermediate got 0:
+        o = std::actor::receive(rx):
+            on std::actor::Closed:
+                break
+        final.send(o)
+        got + 1
+    std::event_loop::stop():
+        on std::event_loop::SchedulerFault:
+            return std::actor::exit(-2)
+    std::actor::exit(got)
+
+fn go(context ev: std::event_loop::Loop, d: std::event_loop::Driver, ac: std::actor::Actors, t: std::thread::Threads, p: std::thread::Port, db: std::thread::Doorbell) -> List[any] errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered, std::thread::ThreadLimit, std::thread::ThreadStartFailed, std::thread::ThreadFailed:
+    std::thread::serve()
+    {to: home, inbox: home_in} = std::actor::open[std::actor::remote::Service[callee::Ask, int]](1)
+    {to: outcomes, inbox: outcomes_in} = std::actor::open[str](8)
+    {to: final, inbox: final_in} = std::actor::open[str](8)
+    remote_home = std::actor::remote::export(home, 1)
+    addresses = loop k from 1 to 5:
+        {to, inbox} = std::actor::open[std::actor::remote::Service[callee::Ask, int]](1)
+        r = std::actor::remote::replies[int](4)
+        coroutine {step, first} = caller(k, inbox, r, outcomes)
+        std::actor::start(std::actor::spawned(step, first))
+        to
+    coroutine {step: hs, first: hf} = hub(home_in, addresses)
+    std::actor::start(std::actor::spawned(hs, hf))
+    c = inject context std::event_loop::Loop:
+        coroutine {step, first} = collector(4, outcomes_in, final)
+        std::actor::spawned(step, first)
+    std::actor::start(c)
+    {thread} = std::thread::start(std::thread::entry(callee::serve_badly), callee::Home {home: remote_home})
+    std::event_loop::run()
+    worker = std::thread::join(thread)
+    std::thread::close_port()
+    seen = std::actor::drain(final_in)
+    [seen, worker.sent, worker.dropped, std::thread::stats().undelivered]
+
+with context std::event_loop::create(64)
+with context event_loop_linux::create()
+with context event_loop_linux::native()
+with context std::actor::create()
+with context std::thread::create(2)
+with context std::thread::port()
+go():
+    on std::event_loop::SchedulerFault:
+        ["scheduler fault"]
+    on std::event_loop::DriverFault {code}:
+        ["driver fault", code]
+    on std::event_loop::LoopReentered:
+        ["reentered"]
+    on std::thread::ThreadLimit:
+        ["thread limit"]
+    on std::thread::ThreadStartFailed {reason}:
+        ["start failed", reason]
+    on std::thread::ThreadFailed {identity, message}:
+        ["failed", identity, message]

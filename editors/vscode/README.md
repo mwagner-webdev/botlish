@@ -9,12 +9,19 @@ window that starts the server. What you get is what the server answers:
 * hover: a function's signature, a binding's type;
 * go to definition, into the program, its modules and the standard
   library;
-* find references within the analyzed program.
+* find references within the analyzed program;
+* semantic highlighting: what the compiler says each token is -- a
+  function, a parameter, a variable, a type, a contextual keyword -- once
+  its analysis answers (SYNTAX-HIGHLIGHTING-MILESTONE-1.md).
 
-There is no syntax highlighting (the repository has no grammar), and no
-completion, rename or formatting (the server implements none). Comment
-toggling, bracket matching and spaces for indentation are configured
-(a tab in indentation is a Botlish syntax error).
+Before the server answers, and in hovers' code, a TextMate grammar
+(`syntaxes/botlish.tmLanguage.json`) highlights the text. It is generated
+from the compiler's own word lists by `tools/editor-grammars.tcl`: never
+edit it by hand (regenerate with `tclsh9.0 tools/editor-grammars.tcl
+generate`). There is no completion, rename or formatting (the server
+implements none). Comment toggling, bracket matching and spaces for
+indentation are configured (a tab in indentation is a Botlish syntax
+error).
 
 ## What it needs
 
@@ -104,9 +111,16 @@ host's rules, so a Windows path names no file there.
 npm test
 ```
 
-runs the command resolution's tests (Windows layouts simulated) and a
+runs the command resolution's tests (Windows layouts simulated), a
 session with the real server (`tclsh9.0` on PATH, or `BOTLISH_TCLSH`):
-VS Code's transport library, its client capabilities and CRLF text.
+VS Code's transport library, its client capabilities and CRLF text, and
+the grammar's test: VS Code's own TextMate engine (vscode-textmate over
+vscode-oniguruma, installed by `npm ci`) tokenizes
+`test/fixtures/sample.bot`, and every keyword, contextual word, constant,
+number, string, character and comment must be scoped as the compiler
+classifies it (`test/fixtures/sample.classes.json`, which
+`tools/editor-grammars.tcl` writes from the compiler's token IR), and no
+name as a keyword.
 
 ```bash
 xvfb-run -a npm run test:vscode

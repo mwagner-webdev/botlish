@@ -19,7 +19,7 @@ compiler and the `.botpkg`.
 
 ```sh
 single/build.sh                                         # single/out/botlish
-tclsh9.0 tools/package-repository.tcl repo raven        # repo/raven-0.3.1.botpkg
+tclsh9.0 tools/package-repository.tcl repo raven        # repo/raven-0.4.0.botpkg
 audit/raven-cleanroom/tools/cleanroom.sh image
-audit/raven-cleanroom/tools/cleanroom.sh run single/out/botlish repo/raven-0.3.1.botpkg out
+audit/raven-cleanroom/tools/cleanroom.sh run single/out/botlish repo/raven-0.4.0.botpkg out
 ```

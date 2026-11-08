@@ -215,12 +215,12 @@ fn show_into(prog: &ProgramInfo, v: Value, out: &mut String) {
     if mine().is_some() {
         return Err(io::Error::new(io::ErrorKind::AlreadyExists, "this thread's stack-overflow guard is already installed"));
     }
-    // A record a dead thread
+    let found = match reservation {
 ====
     if mine().is_some() || in_use() > 0 {
         return Err(io::Error::new(io::ErrorKind::AlreadyExists, "this thread's stack-overflow guard is already installed"));
     }
-    // A record a dead thread
+    let found = match reservation {
 >>>>
 
 @@ guard-publish-process-wide a publication goes to the first record whatever thread publishes: one thread overwrites another's published stack

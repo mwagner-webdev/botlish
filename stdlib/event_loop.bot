@@ -1,6 +1,6 @@
 # event_loop.bot -- the "std::event_loop" namespace: one thread-local
 # scheduler of ordinary Botlish coroutines and native event sources
-# (EVENT-LOOP-MILESTONE-1.md; the evidence it promotes is
+# (EVENT-LOOP-MILESTONE-1.md; the evidence it promotes:
 # EVENT-LOOP-EXPLORATION.md).
 #
 #   with context std::event_loop::create(64)          the scheduler (Loop)

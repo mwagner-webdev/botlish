@@ -258,7 +258,18 @@ impl OverflowGuard {
         Self::install_mode(stack, false, label)
     }
 
+    /// Installs the guard of a Botlish thread (runtime/thread.rs) in the
+    /// record its start reserved (RESERVATION), in the starting thread's
+    /// mode: EXECUTABLE, and its report's DESTINATION.
+    pub fn install_reserved(stack: &NativeStack, reservation: usize, executable: bool, destination: usize, label: &[u8]) -> io::Result<Self> {
+        Self::install_in(stack, executable, Some(destination), label, Some(reservation))
+    }
+
     fn install_mode(stack: &NativeStack, executable: bool, label: &[u8]) -> io::Result<Self> {
+        Self::install_in(stack, executable, None, label, None)
+    }
+
+    fn install_in(stack: &NativeStack, executable: bool, destination: Option<usize>, label: &[u8], reservation: Option<usize>) -> io::Result<Self> {
         if stack.guard_low >= stack.low_bound {
             return Err(io::Error::new(io::ErrorKind::Unsupported, "the thread's stack has no confirmed guard"));
         }
@@ -288,8 +299,8 @@ impl OverflowGuard {
                 }
                 return Err(error);
             }
-            let destination = RESULT_FD.load(Ordering::Relaxed) as usize;
-            match records::claim(super::thread_token(), (stack.guard_low, stack.low_bound), executable, destination, label) {
+            let destination = destination.unwrap_or_else(|| RESULT_FD.load(Ordering::Relaxed) as usize);
+            match records::claim_as(reservation, super::thread_token(), (stack.guard_low, stack.low_bound), executable, destination, label) {
                 Ok(record) => {
                     *installed += 1;
                     Ok(Self { _alt_stack: alt_stack, old_stack, record })

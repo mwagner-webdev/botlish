@@ -315,3 +315,30 @@
 ====
         if {0} {
 >>>>
+
+@@ module-error-not-at-import a program that does not load because of a module shows the module's diagnostic in the module's file only: the open entry is published nothing, and looks clean while nothing answers
+%% tests/lsp.test lsp-lang-module-load-error
+## lsp/server.tcl
+<<<<
+            foreach n [if {$analyzed} {list} else {dict get $d notes}] {
+====
+            foreach n {} {
+>>>>
+
+@@ analyzed-program-at-import an analyzed program's module diagnostics are shown at the imports too: a syntax error in a module marks every importer while it answers fresh
+%% tests/lsp.test lsp-lang-recovery-session lsp-lang-recovery-declarations
+## lsp/server.tcl
+<<<<
+            foreach n [if {$analyzed} {list} else {dict get $d notes}] {
+====
+            foreach n [dict get $d notes] {
+>>>>
+
+@@ import-copy-unlocated the diagnostic shown at an import does not name where the error is: no related information leads to the module's line
+%% tests/lsp.test lsp-lang-module-load-error
+## lsp/server.tcl
+<<<<
+    dict set mirror notes [list $primary]
+====
+    dict set mirror notes {}
+>>>>

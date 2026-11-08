@@ -24,9 +24,9 @@
 ## native/lower.tcl
 <<<<
             [CleanupBlocks $hirProgram] \
-            [lmap callback [hir::callbacks::of $hirProgram] {dict get $callback block}]]]
+            [lmap callback [hir::callbacks::of $hirProgram] {dict get $callback block}] \
 ====
-            [CleanupBlocks $hirProgram]]]
+            [CleanupBlocks $hirProgram] \
 >>>>
 
 @@ root-dropped-by-fusion dead-code elimination after coroutine fusion keeps only what the program function and the exports reach: a callback's function, which only its entry point calls, is dropped

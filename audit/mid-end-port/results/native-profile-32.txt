@@ -1,0 +1,16 @@
+synth.tcl -passes 32 -generic 0: main.bot: lowering to NIR (-specialize 0, wrapped) 96.6 s
+   39.86 s      7863  hir::aot::BlockName
+   25.91 s  11871599  hir::get
+    4.87 s   2307567  hir::kind
+    1.24 s         1  hir::aot::context
+    1.04 s     12024  hir::aot::VisitCall
+    0.87 s         2  hir::aot::TailCalls
+    0.85 s    603023  hir::node
+    0.61 s    287815  hir::typeOf
+    0.56 s     63275  hir::aot::Visit
+    0.45 s      1173  hir::aot::analyzeRegion
+    0.41 s         1  hir::aot::StaticBlocks
+    0.36 s    214497  hir::binding
+    0.35 s     34484  hir::aot::MaterializedByRef
+    0.35 s      1490  hir::aot::materializedBlocks
+    0.31 s     77039  hir::aot::RegionOf
