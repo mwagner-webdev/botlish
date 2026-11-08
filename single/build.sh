@@ -14,14 +14,14 @@
 # `system` linker -- the host's C compiler driver and the packed runtime
 # archive, no Rust -- for one that does: SINGLE-EXECUTABLE-FFI-MILESTONE-1.md).
 #
-# The base kit is --basekit PATH (or $BOTLISH_BASEKIT) if given: any
-# zipfs-capable Tcl 9 executable with Tcl linked statically, such as a
-# prebuilt zipkit. Otherwise this script builds one, once, from the official
-# Tcl source release (TCL_VERSION below, checked against TCL_SHA256): a
-# static tclsh with the bundled zlib and libtommath, cached in
-# ${BOTLISH_BASEKIT_CACHE:-~/.cache/botlish-single}. Building it needs a C
-# compiler, make and curl; $TCL_SOURCE_TARBALL names an already downloaded
-# tarball instead of downloading it.
+# The base kit is single/basekit.sh's: Tcl's static library, built once from
+# the source release pinned below and cached, linked with single/basekit.c as its
+# main program -- a tclsh that never runs a Tcl library TCL_LIBRARY names.
+# --basekit PATH (or $BOTLISH_BASEKIT) uses a base kit single/basekit.sh
+# linked before. Whichever it is, it is checked first: started with
+# TCL_LIBRARY naming a decoy library, it must take its own and give its
+# script the variable back. Any other Tcl (a stock tclsh, a prebuilt zipkit)
+# runs the decoy's init.tcl, and is refused.
 #
 # The native backend is built with cargo (`cargo build --release`, the same
 # build the test suite uses); its executables and the runtime archive are
@@ -31,6 +31,8 @@
 # (`--print native-static-libs`; native/runtime-archive/libraries.tcl).
 set -euo pipefail
 
+# The Tcl release the base kit's Tcl is built from (single/basekit.sh;
+# single/macos/tcl-framework.sh builds the macOS application's from it too).
 TCL_VERSION=9.0.1
 TCL_SHA256=a72b1607d7a399c75148c80fcdead88ed3371a29884181f200f2200cdee33bbc
 TCL_URLS=(
@@ -56,38 +58,21 @@ trap 'rm -rf "$work"' EXIT
 
 # --- the base kit -------------------------------------------------------------
 if [[ -z $basekit ]]; then
-  cache=${BOTLISH_BASEKIT_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/botlish-single}
-  basekit="$cache/tclsh${TCL_VERSION}-static"
-  if [[ ! -x $basekit ]]; then
-    echo "== building a static Tcl ${TCL_VERSION} base kit (once; cached as $basekit)"
-    tarball=${TCL_SOURCE_TARBALL:-}
-    if [[ -z $tarball ]]; then
-      tarball="$work/tcl${TCL_VERSION}-src.tar.gz"
-      for url in "${TCL_URLS[@]}"; do
-        if curl -fsSL --retry 3 -o "$tarball" "$url"; then break; fi
-        rm -f "$tarball"
-      done
-      [[ -f $tarball ]] || { echo "cannot download the Tcl ${TCL_VERSION} source" >&2; exit 1; }
-    fi
-    echo "${TCL_SHA256}  $tarball" | sha256sum -c --quiet - || {
-      echo "$tarball is not the Tcl ${TCL_VERSION} source release (sha256 mismatch)" >&2
-      exit 1
-    }
-    mkdir -p "$work/tcl-src" "$work/tcl-build"
-    tar -xzf "$tarball" -C "$work/tcl-src"
-    (
-      cd "$work/tcl-build"
-      # Static libtcl with zipfs (the tclsh gets the Tcl library zip
-      # appended), Tcl's own copies of libtommath and zlib: the result links
-      # only libc and libm.
-      ac_cv_header_zlib_h=no "$work/tcl-src/tcl${TCL_VERSION}/unix/configure" \
-        --disable-shared --enable-zipfs --with-system-libtommath=no >configure.log
-      make -j"$(nproc)" tclsh >make.log
-    )
-    mkdir -p "$cache"
-    cp "$work/tcl-build/tclsh" "$basekit.partial"
-    mv "$basekit.partial" "$basekit"
-  fi
+  basekit="$work/basekit"
+  "$root/single/basekit.sh" "$basekit"
+fi
+# Whatever the base kit, it starts with its own Tcl library and gives its
+# script the TCL_LIBRARY the environment had: a decoy library's init.tcl,
+# named by TCL_LIBRARY, never runs (single/basekit.c). (The compiler's own
+# check is single/smoke-test.sh's, on the executable this builds.)
+mkdir -p "$work/decoy"
+printf 'puts stderr "a decoy init.tcl ran"\nexit 3\n' >"$work/decoy/init.tcl"
+started=$(echo 'puts [info library]; puts $env(TCL_LIBRARY)' | TCL_LIBRARY="$work/decoy" "$basekit" 2>&1) || true
+if [[ $started != "//zipfs:/app/tcl_library"$'\n'"$work/decoy" ]]; then
+  echo "the base kit $basekit does not start with its own Tcl library under TCL_LIBRARY=$work/decoy:" >&2
+  echo "$started" >&2
+  echo "(a stock tclsh or zipkit runs the init.tcl TCL_LIBRARY names: leave out --basekit, and single/basekit.sh links one)" >&2
+  exit 1
 fi
 echo "== base kit: $basekit (Tcl $(echo 'puts [info patchlevel]' | "$basekit"))"
 

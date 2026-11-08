@@ -1,0 +1,14 @@
+# probe: c4 plus `import std::byte`, which nothing names: accepted (C).
+# outcome: accept
+# value: [105, 196, 170, 109, 109, 112]
+import std::str
+import std::list
+import std::byte
+
+fn classes(s: str) -> List[int]:
+    table = loop i from 0 to 256:
+        i + 1
+    loop b in s.encode_utf8():
+        table.at(b)
+
+classes("héllo")

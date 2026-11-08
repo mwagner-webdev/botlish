@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "kind": "botlish-target-support",
+  "target": "linux-x86_64",
+  "triple": "x86_64-unknown-linux-gnu",
+  "linker": "system",
+  "runtime": {
+    "archive": "runtime/libbotlish_runtime.a",
+    "abi": "d554d5ff4c234348"
+  },
+  "systemLibraries": ["-lgcc_s", "-lutil", "-lrt", "-lpthread", "-lm", "-ldl", "-lc"]
+}

@@ -1,8 +1,11 @@
 # category: fold-intermediate (a struct of two vectors)
 # class: A -- productive local mutation carrying several pieces of state;
-#        each iteration shares both vectors and detaches the one it pushes
+#        at the census each iteration shared both vectors and detached the
+#        one it pushed (400 shares, 200 detaches, 9,900 elements copied);
+#        since CONSUMED-FOLD-INTERMEDIATES-MILESTONE-1.md the struct
+#        intermediate is consumed: nothing is copied
 # expect: [100, 100]
-# alloc: mutableVector shares 400 detaches 200 detachElements 9900
+# alloc: mutableVector shares 0 detaches 0 detachElements 0
 import std::mutable_vector
 
 fn ints() -> MutableVector[int]:

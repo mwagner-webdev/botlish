@@ -1,0 +1,247 @@
+# Mutants of the http package and its provider (audit/http-client/tools/mutate.tcl,
+# HTTP-CLIENT-PACKAGE-MILESTONE-1.md, "Mutation testing").
+#
+#   @@ NAME DESCRIPTION
+#   %% TESTFILE:PATTERN[,PATTERN...]...   tests (a tcltest -match each) that must kill it
+#   !! COMMAND                            a tool (run in the mutant's tree) that must fail
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+#
+# Lines starting with # outside an edit are comments. A mutant of the
+# native unit (packages/http/native) rebuilds the test unit in the mutant
+# tree's own cache; nothing reaches the checkout's.
+
+# ---------------------------------------------------------------------------
+# TLS (packages/http/native/src/tls.rs)
+
+@@ tls-no-hostname the certificate's names are never checked against the host: a valid certificate for another name is accepted
+%% http-client.test:http-tls-verify
+## packages/http/native/src/tls.rs
+<<<<
+        match ip {
+            Some(ip) => param.set_ip(ip),
+            None => param.set_host(host),
+        }
+        .map_err(|e| TlsError::Handshake(e.to_string()))?;
+====
+        let _ = &ip;
+>>>>
+
+@@ tls-no-verify the peer's certificate chain is not verified (SSL_VERIFY_NONE): an unknown issuer, an expired certificate, a wrong host all pass
+%% http-client.test:http-tls-verify
+## packages/http/native/src/tls.rs
+<<<<
+    b.set_verify(SslVerifyMode::PEER);
+====
+    b.set_verify(SslVerifyMode::NONE);
+>>>>
+
+# ---------------------------------------------------------------------------
+# Header validation (packages/http/http.bot; packages/http/native/src/client.rs)
+
+@@ header-value-control the constructor accepts control characters in a value (CR LF included): a header injection reaches the native layer unrefused by the module
+%% http-client.test:http-header-validation
+## packages/http/http.bot
+<<<<
+        elif k < 32 or k == 127:
+            return false
+====
+        elif k == 127:
+            return false
+>>>>
+
+@@ header-native-value the native layer accepts any bytes as a header value (CR LF included) of a Header a program built by hand
+%% http-client.test:http-header-validation
+## packages/http/native/src/client.rs
+<<<<
+        let value = HeaderValue::from_bytes(pair[1])
+====
+        let value = Ok::<_, ()>(unsafe { HeaderValue::from_maybe_shared_unchecked(bytes::Bytes::copy_from_slice(pair[1])) })
+>>>>
+
+# (The native layer's check of a header *name* -- a token, none the client
+# owns -- is not a mutant: open_exchange checks every name in Botlish
+# before the native call, so no program reaches it; it is defense in depth,
+# and its mutant is equivalent.)
+
+# ---------------------------------------------------------------------------
+# Bodies (packages/http/native/src/client.rs, body.rs)
+
+@@ body-duplicate-chunk a received chunk is queued twice: the body the program reads holds bytes the server never sent
+%% http-client.test:http-get-h1,http-get-h2-tls,http-utf8-split
+## packages/http/native/src/client.rs
+<<<<
+                    r.chunks.push_back(data);
+====
+                    r.chunks.push_back(data.clone());
+                    r.chunks.push_back(data);
+>>>>
+
+@@ body-drop-chunk every second received chunk is dropped
+%% http-client.test:http-get-h1,http-get-h2-tls,http-utf8-split
+## packages/http/native/src/client.rs
+<<<<
+                    r.chunks.push_back(data);
+====
+                    if r.chunk_count % 2 == 1 {
+                        r.chunks.push_back(data);
+                    }
+>>>>
+
+@@ backpressure-ignored the receive pump reads the next frame while a chunk still waits for the program: the native side buffers what the program does not read
+%% http-client.test:http-backpressure
+## packages/http/native/src/client.rs
+<<<<
+                if r.chunks.is_empty() {
+                    Poll::Ready(())
+====
+                if r.chunks.len() < 1000 {
+                    Poll::Ready(())
+>>>>
+
+# ---------------------------------------------------------------------------
+# Lifetimes (packages/http/native/src/client.rs, bridge/slab.rs, bridge/exec.rs)
+
+@@ cancel-leaves-task a cancelled exchange fails with Cancelled but its task runs on: the request keeps the connection and the stream
+%% http-client.test:http-cancel
+## packages/http/native/src/client.rs
+<<<<
+            fail(x, Failure::new(Kind::Cancelled, 0, "the request was cancelled"));
+            exec::cancel(t);
+====
+            fail(x, Failure::new(Kind::Cancelled, 0, "the request was cancelled"));
+            std::mem::forget(t);
+>>>>
+
+@@ release-leaves-task releasing an exchange mid-body leaves its task running: its stream is never reset, its connection never closed
+%% http-client.test:http-abandon
+## packages/http/native/src/client.rs
+<<<<
+            with_client(e.client, |c| c.exchanges.retain(|y| *y != h));
+            if let Some(t) = e.task.take() {
+                exec::cancel(t);
+            }
+====
+            with_client(e.client, |c| c.exchanges.retain(|y| *y != h));
+            std::mem::forget(e.task.take());
+>>>>
+
+@@ slab-index-only a handle is looked up by its index alone: a released exchange's handle reaches the exchange that reused its slot
+%% http-client.test:http-stale-handle
+## packages/http/native/src/bridge/slab.rs
+<<<<
+        (slot.0 as i64 == (handle >> 32) & 0x7fff_ffff).then_some(slot)
+====
+        Some(slot)
+>>>>
+
+@@ executor-unbounded a turn polls every ready task, the budget ignored: one turn can run without bound
+%% http-client.test:http-executor-budget
+## packages/http/native/src/bridge/exec.rs
+<<<<
+    let limit = if unbounded { usize::MAX } else { snapshot.min(budget) };
+====
+    let limit = if unbounded { usize::MAX } else { snapshot };
+>>>>
+
+@@ foreign-wake-lost a name resolution's completion is never posted to the loop: a request to a name never connects
+%% http-client.test:http-resolver-control
+## packages/http/native/src/bridge/exec.rs
+<<<<
+        let endpoint = self.endpoint.load(Ordering::Acquire);
+        if endpoint < 0 {
+====
+        let endpoint = -1i64;
+        if endpoint < 0 {
+>>>>
+
+@@ deadline-ignored a request's deadline is never enforced
+%% http-client.test:http-timeouts
+## packages/http/native/src/rt.rs
+<<<<
+    let Some(deadline) = deadline else { return Ok(future.await) };
+====
+    let _ = deadline;
+    if true { return Ok(future.await) };
+    let deadline = 0u64;
+>>>>
+
+# ---------------------------------------------------------------------------
+# URIs (packages/http/http.bot)
+
+@@ uri-bad-escape a percent sign needs one hex digit after it, not two: "%az" passes
+%% http-client.test:http-uri
+!! tclsh9.0 audit/http-client/tools/syntax-fuzz.tcl -seed 1 -count 1500
+## packages/http/http.bot
+<<<<
+            if not hex?(char_of(s, k + 1)) or not hex?(char_of(s, k + 2)):
+                return false
+====
+            if not hex?(char_of(s, k + 1)):
+                return false
+>>>>
+
+# ---------------------------------------------------------------------------
+# The provider and the graph (tools/http-package.tcl, packages/http/botlish.json)
+
+@@ provider-mismatch the provider archive carries another identity than the unit references: a unit built against one BoringSSL linked with another
+%% http-client.test:http-provider-identity,http-get-h1
+## tools/http-package.tcl
+<<<<
+    exec cc -O2 -Wall -Wextra -Werror -fPIC -DBOTLISH_BORINGSSL_ID=$id \
+====
+    exec cc -O2 -Wall -Wextra -Werror -fPIC -DBOTLISH_BORINGSSL_ID=${id}_other \
+>>>>
+
+@@ graph-lock-drift http locks a driver release this repository does not hold: its graph cannot share the application's driver
+%% http-client.test:http-package-metadata
+## packages/http/botlish.json
+<<<<
+    "event_loop_linux": "0.5.0"
+====
+    "event_loop_linux": "0.5.1"
+>>>>
+
+# ---------------------------------------------------------------------------
+# Botlish threads: one loop per VM, one http runtime per process
+# (packages/http/native/src/notify.c, bridge/ffi.rs)
+
+@@ wake-v1-post the name resolver's wake posts through the integration ABI's version 1, which names no loop: refused while another Botlish thread's loop is open, so a request to a name never connects
+%% http-client.test:http-beside-thread
+## packages/http/native/src/notify.c
+<<<<
+    return botlish_event_post2(loop, endpoint, slot, gen, a, b);
+====
+    extern int botlish_event_post(int endpoint, int slot, int gen, long long a, long long b);
+    return botlish_event_post(endpoint, slot, gen, a, b);
+>>>>
+
+@@ owner-not-claimed a second thread opens an http runtime beside the owner's, sharing the process's name resolver pool and counters
+%% http-client.test:http-one-thread
+## packages/http/native/src/bridge/ffi.rs
+<<<<
+    if owner.is_some_and(|t| t != me) {
+        return false;
+    }
+====
+    if owner.is_some_and(|t| t != me) {
+        *owner = Some(me);
+    }
+>>>>
+
+@@ owner-never-released a claim on the http runtime is never given up: a thread that ended with its runtime open keeps every other thread from opening one
+%% http-client.test:http-beside-thread
+## packages/http/native/src/bridge/ffi.rs
+<<<<
+            if *owner == Some(self.0) {
+                *owner = None;
+            }
+====
+            if *owner == Some(self.0) && self.0 != self.0 {
+                *owner = None;
+            }
+>>>>

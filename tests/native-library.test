@@ -1272,7 +1272,7 @@ test nl-manifest {the manifest states the interface as data, from the compiler's
         }] \
         [lmap e [lsp::json::elements [lsp::json::get $manifest exports]] {lsp::json::text [lsp::json::get $e name]}] \
         [expr {[core::ReadFile [dict get $built manifest]] eq [core::ReadFile [dict get [nlLibrary $dir ty $::nlTypes] manifest]]}]
-} -result {1 ty libty.a ty_odd {odd(n: int) -> int errors Odd {count: int, flag: bool, items: other, note: str, ratio: Float64}} {{count int} {flag bool} {items other} {note str} {ratio float64}} {negate half echo length joined nothing odd huge range_error} 1}
+} -result {2 ty libty.a ty_odd {odd(n: int) -> int errors Odd {count: int, flag: bool, items: other, note: str, ratio: Float64}} {{count int} {flag bool} {items other} {note str} {ratio float64}} {negate half echo length joined nothing odd huge range_error} 1}
 
 test nl-main-cli {main.tcl -emit-native-library builds a library from one input} -constraints nativeLibraries -body {
     set dir [nlDir]

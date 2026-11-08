@@ -252,7 +252,17 @@
 #
 #   kind         root | ambient | param | local
 #   declaredBy   ExprId of the first bind of a local ("" otherwise)
-#   type         TypeId of the value it is bound to ("" if not inferred)
+#   type         TypeId of the value it is bound to ("" if not inferred):
+#                a local's, the static type of its bind's value; a loop
+#                clause binding's (hir::loopClauseBindings: an element, a
+#                counter, a lockstep clause), the type its references have
+#                at the loop's entry; a fold's intermediate, its one type;
+#                a handler's payload binding, its error's payload type. A
+#                function's parameter records none (its contract is its
+#                block's signature, hir::signatures). What the typing walk
+#                of this HIR found: the generic walk's in the program's own
+#                HIR, never one semantic instance's (an instance's is its
+#                snapshot's, hir::semantic::Snapshot)
 #   symbol       SymbolId of what a root binding denotes
 #   value        runtime value of a root binding
 #   spelling     only on bindings hygiene renamed (hygiene.tcl): the name
@@ -1312,6 +1322,22 @@ proc hir::loopOperands {node} {
         }
     }
     return $result
+}
+
+# The clause bindings of loop node NODE, in written order: a listloop's
+# element, a countloop's counter, each lockloop domain's binding (its
+# element or its counter); {} for a plain `loop`. A fold's intermediate is
+# no clause binding (hir::IsFoldNode). Each is a parameter of the loop's
+# bodyScope whose recorded type is the one the typing walk gives its
+# references at the loop's entry (hir/types.tcl's RecordClause;
+# LOOP-CLAUSE-BINDING-TYPE-CORRECTNESS-MILESTONE-1.md).
+proc hir::loopClauseBindings {node} {
+    switch -- [dict get $node kind] {
+        listloop { return [list [dict get $node elementBinding]] }
+        countloop { return [list [dict get $node countBinding]] }
+        lockloop { return [lmap domain [dict get $node domains] {dict get $domain binding}] }
+    }
+    return {}
 }
 
 # All expression ids in pre-order.

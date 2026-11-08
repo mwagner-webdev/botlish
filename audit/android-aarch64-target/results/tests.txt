@@ -1,0 +1,22 @@
+at-target-row PASSED
+at-target-pm-facts PASSED
+at-driver-target-report PASSED
+at-driver-library-object PASSED
+at-driver-refusals PASSED
+at-library-needs-support PASSED
+at-executable-refused PASSED
+at-support-refusals PASSED
+at-support-linux-archive PASSED
+at-toolchain-refusals PASSED
+at-toolchain-failures PASSED
+at-runtime-identity PASSED
+at-library-elf PASSED
+at-library-manifest PASSED
+at-library-deterministic PASSED
+at-library-package-runtime PASSED
+at-library-alignment-checked PASSED
+at-android-2048 PASSED
+at-android-lifecycle PASSED
+at-android-16k-control PASSED
+at-android-stress PASSED
+android-target.test:	Total	21	Passed	21	Skipped	0	Failed	0

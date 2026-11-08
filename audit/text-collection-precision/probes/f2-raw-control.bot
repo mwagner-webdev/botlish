@@ -1,0 +1,11 @@
+# probe: a raw control character (here ESC, U+001B, and U+0001) typed
+# into a String or character literal is accepted and runs on every backend;
+# HIR text writes it back as \u001b (F).
+# outcome: accept
+# value: [5, 27, 27]
+import std::str
+import std::char
+
+text = "[1m"
+esc = ''
+[text.length(), std::char::scalar_value(text.char_at(0)), std::char::scalar_value(esc)]

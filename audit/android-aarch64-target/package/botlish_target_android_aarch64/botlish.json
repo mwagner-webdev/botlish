@@ -1,0 +1,19 @@
+{
+  "schema": 2,
+  "name": "botlish_target_android_aarch64",
+  "version": "0.1.0",
+  "dependencies": {},
+  "targets": {
+    "android-aarch64": {
+      "files": "targets/android-aarch64",
+      "libraries": [
+        {
+          "name": "botlish_runtime",
+          "origin": "bundled",
+          "linkage": "static",
+          "file": "runtime/libbotlish_runtime.a"
+        }
+      ]
+    }
+  }
+}

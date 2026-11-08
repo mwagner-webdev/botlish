@@ -1,0 +1,55 @@
+KILLED optimizer-disabled -- no fold is ever a plan fold: every append copies the prefix again (values unchanged; only structure and cost show it)
+    tests: killed (25 failed: fvc-append, fvc-break, fvc-conditional, fvc-continue, fvc-copies-linear, fvc-coroutine, ...)
+    fuzz:  killed (0 disagreements, 12 mispredictions)
+KILLED break-not-a-use -- a bare break targeting the fold is not counted as a reference: an append computed before the break is extended in place and the break hands the extended List out
+    tests: killed (2 failed: fvc-reject-break-after-append, fvc-reject-break-after-materialized)
+    fuzz:  survived
+KILLED continue-not-a-use -- a continue targeting the fold is not counted as a reference: the next iteration sees a plan an abandoned append already extended
+    tests: killed (3 failed: fvc-reject-continue-after-append, fvc-reject-continue-after-materialized, fvc-reject-handler-continue)
+    fuzz:  survived
+KILLED linearity-ignored -- every fold intermediate is taken for linear: an observed or twice-used earlier version is extended in place
+    tests: killed (10 failed: fvc-reject-bare, fvc-reject-break-after-append, fvc-reject-break-after-materialized, fvc-reject-continue-after-append, fvc-reject-continue-after-materialized, fvc-reject-discarded-append, ...)
+    fuzz:  killed (14 disagreements, 18 mispredictions)
+KILLED captured-accepted -- a captured intermediate may be a plan: the closure would see later appends
+    tests: killed (1 failed: fvc-reject-captured)
+    fuzz:  survived
+KILLED continues-dropped -- a fold whose every use needs a flat value still carries a plan (a plan built only to be materialized)
+    tests: killed (1 failed: fvc-reject-retained-only)
+    fuzz:  survived
+KILLED next-value-check-dropped -- a fold whose next intermediate is no construction still carries a plan register
+    tests: killed (1 failed: fvc-inner-seeded)
+    fuzz:  survived
+KILLED declined-fails -- a fold the analysis declines fails the compilation instead of keeping the eager lowering
+    tests: killed (13 failed: fvc-reject-bare, fvc-reject-break-after-append, fvc-reject-break-after-materialized, fvc-reject-captured, fvc-reject-continue-after-append, fvc-reject-continue-after-materialized, ...)
+    fuzz:  killed (28 disagreements, 0 mispredictions)
+KILLED next-value-materialized -- the body's trailing value is lowered flat: the next intermediate is materialized (copied) every iteration
+    tests: killed (6 failed: fvc-copies-linear, fvc-matches-recursion, fvc-nir-break, fvc-nir-carried, fvc-nir-flat-separate, fvc-string-copies)
+    fuzz:  survived
+KILLED escaped-not-materialized -- the fold's value is the plan register itself: neither exhaustion nor a break materializes it
+    tests: killed (40 failed: fvc-append, fvc-break, fvc-break-continue, fvc-computed-elements, fvc-conditional, fvc-continue, ...)
+    fuzz:  killed (12 disagreements, 0 mispredictions)
+KILLED exhaustion-wrong-family -- exhaustion and break materialize a List plan as a String
+    tests: killed (38 failed: fvc-append, fvc-break, fvc-break-continue, fvc-computed-elements, fvc-conditional, fvc-continue, ...)
+    fuzz:  killed (12 disagreements, 0 mispredictions)
+KILLED binding-read-flat -- the intermediate is bound as an ordinary register although it holds a plan
+    tests: killed (57 failed: fvc-append, fvc-break, fvc-break-continue, fvc-computed-elements, fvc-conditional, fvc-continue, ...)
+    fuzz:  killed (40 disagreements, 0 mispredictions)
+KILLED append-skipped -- an ordinary completion of a plan fold's body is not committed: the next iteration starts from the old register
+    tests: killed (38 failed: fvc-append, fvc-break, fvc-break-continue, fvc-computed-elements, fvc-conditional, fvc-continue, ...)
+    fuzz:  killed (9 disagreements, 0 mispredictions)
+KILLED initial-dropped -- a plan fold starts from an empty List whatever its initial value
+    tests: killed (14 failed: fvc-conditional, fvc-domains, fvc-empty-domain, fvc-executable, fvc-handoff-to-inner-fold, fvc-in-outer-loop, ...)
+    fuzz:  killed (7 disagreements, 0 mispredictions)
+KILLED nested-register-shared -- nested plan folds share one plan register: the inner fold's initial value overwrites the outer fold's intermediate
+    tests: killed (2 failed: fvc-gc-stress, fvc-nested-independent)
+    fuzz:  survived
+KILLED element-order -- a construction's pieces are concatenated in the wrong order (the appended element before the List it extends)
+    tests: killed (47 failed: fvc-append, fvc-break, fvc-break-continue, fvc-computed-elements, fvc-conditional, fvc-continue, ...)
+    fuzz:  killed (23 disagreements, 0 mispredictions)
+KILLED release-dropped -- SequenceTo drops the affine releases after its statements again (a coroutine that dies mid-body of a plan fold is never released)
+    tests: killed (2 failed: fvc-release-in-body, fvc-release-plan-join)
+    fuzz:  survived
+KILLED construct-pieces-not-live -- the collector's liveness forgets a construction's pieces: the plan a fold carries across the back edge is no root at the allocating construct
+    tests: killed (2 failed: fvc-executable, fvc-gc-stress)
+    fuzz:  survived
+18 mutants, 18 killed, 0 survived

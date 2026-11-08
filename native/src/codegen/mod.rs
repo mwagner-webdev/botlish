@@ -249,7 +249,28 @@ fn isa(pic: bool) -> Result<OwnedTargetIsa, BackendError> {
     // Linked executables use the target's baseline ISA; only JIT code may
     // assume CPU features detected on the compiler's own machine.
     let isa = cranelift_native::builder_with_options(!pic).map_err(|e| BackendError::Codegen(e.to_string()))?;
-    isa.finish(isa_flags(pic)?).map_err(|e| BackendError::Codegen(e.to_string()))
+    isa.finish(isa_flags(pic, stack_probes())?).map_err(|e| BackendError::Codegen(e.to_string()))
+}
+
+/// The ISA of code kept for TARGET (ANDROID-AARCH64-TARGET-SUPPORT-
+/// MILESTONE-1.md): this host's own baseline ISA when TARGET is the host's
+/// target (exactly `isa(true)`), else TARGET's baseline ISA from its triple
+/// -- position-independent, with TARGET's stack probes. Only code that is
+/// never run here is made so (`target::check_emit` has accepted TARGET).
+fn isa_for_target(target: &target_lexicon::Triple) -> Result<OwnedTargetIsa, BackendError> {
+    if target::same_target(target, &target_lexicon::Triple::host()) {
+        return isa(true);
+    }
+    let builder = cranelift_codegen::isa::lookup(target.clone()).map_err(|e| BackendError::Codegen(format!("{target}: {e}")))?;
+    builder.finish(isa_flags(true, target_stack_probes(target))?).map_err(|e| BackendError::Codegen(e.to_string()))
+}
+
+/// Whether code for TARGET probes its large frames (`stack_probes`, for
+/// another target than the host's): where TARGET's runtime has the stack
+/// guard, and on Windows.
+fn target_stack_probes(target: &target_lexicon::Triple) -> bool {
+    target::runtime_capabilities(target).is_some_and(|c| c.stack_guard)
+        || target.operating_system == target_lexicon::OperatingSystem::Windows
 }
 
 /// The ISA of the target TRIPLE with the flags of `isa(true)`: for tests
@@ -258,10 +279,10 @@ fn isa(pic: bool) -> Result<OwnedTargetIsa, BackendError> {
 fn isa_for(triple: &str) -> OwnedTargetIsa {
     use std::str::FromStr;
     let triple = target_lexicon::Triple::from_str(triple).unwrap();
-    cranelift_codegen::isa::lookup(triple).unwrap().finish(isa_flags(true).unwrap()).unwrap()
+    cranelift_codegen::isa::lookup(triple).unwrap().finish(isa_flags(true, stack_probes()).unwrap()).unwrap()
 }
 
-fn isa_flags(pic: bool) -> Result<settings::Flags, BackendError> {
+fn isa_flags(pic: bool, probes: bool) -> Result<settings::Flags, BackendError> {
     let mut flags = settings::builder();
     let set = |flags: &mut settings::Builder, k: &str, v: &str| {
         flags.set(k, v).map_err(|e| BackendError::Codegen(format!("setting {k}: {e}")))
@@ -269,8 +290,10 @@ fn isa_flags(pic: bool) -> Result<settings::Flags, BackendError> {
     set(&mut flags, "opt_level", "speed")?;
     set(&mut flags, "use_colocated_libcalls", "false")?;
     set(&mut flags, "is_pic", if pic { "true" } else { "false" })?;
-    // Probe only large frames (default spacing: one 4 KiB page).
-    if stack_probes() {
+    // Probe only large frames (default spacing: one 4 KiB page, which is
+    // also every page of a 16 KiB-page system: probing more often than its
+    // guard's size never steps over it).
+    if probes {
         set(&mut flags, "enable_probestack", "true")?;
         set(&mut flags, "probestack_strategy", "inline")?;
     }
@@ -499,8 +522,13 @@ pub fn emit_executable_object(program: &Program, startup: Startup) -> Result<Obj
 /// library's public C functions (codegen::library), its only global ones.
 /// Its record's startup word is the worker's: a library has no startup of
 /// its own (its host calls it on its own thread), and nothing reads it.
-pub fn emit_library_object(program: &Program, name: &str) -> Result<ObjectProgram, BackendError> {
-    emit_object_with(program, isa(true)?, Some(name), Startup::Worker)
+///
+/// TARGET is the library's target (`target::check_emit` has accepted it): the
+/// host's for a library this host could also run, another target's -- an
+/// Android library on Linux -- for one it only keeps
+/// (ANDROID-AARCH64-TARGET-SUPPORT-MILESTONE-1.md).
+pub fn emit_library_object(program: &Program, name: &str, target: &target_lexicon::Triple) -> Result<ObjectProgram, BackendError> {
+    emit_object_with(program, isa_for_target(target)?, Some(name), Startup::Worker)
 }
 
 fn emit_object_with(program: &Program, isa: OwnedTargetIsa, library: Option<&str>, startup: Startup) -> Result<ObjectProgram, BackendError> {

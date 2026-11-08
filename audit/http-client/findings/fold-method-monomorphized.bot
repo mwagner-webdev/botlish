@@ -1,0 +1,19 @@
+# A finding of HTTP-CLIENT-PACKAGE-MILESTONE-1.md (section "Findings"): the
+# fold intermediate ACC is a str, yet in the monomorphized program the
+# method-style call acc.concat(p) is charged std::linux::fs::concat's
+# NotAPath (UNHANDLED-ERROR, FOLD-INTERMEDIATE-TYPE). The same call outside a fold
+# (a str parameter) compiles; so does std::str::concat(acc, p).
+#
+#   tclsh9.0 main.tcl -check audit/http-client/findings/fold-method-monomorphized.bot
+import std::linux::fs
+import std::str
+
+nomethod fn line(parts: List[str]) -> str:
+    fold p in parts with intermediate acc "":
+        acc.concat(p)
+
+fn main(context fs: std::linux::fs::LinuxFS) -> str:
+    line(["ab", "cd"])
+
+with context std::linux::fs::create()
+main()

@@ -89,6 +89,14 @@ proc pm::catalog::Load {path origin} {
             pm::Fail ARTIFACT "$origin: the artifact's target layout is invalid:\n  [join $problems "\n  "]"
         }
     }
+    if {[dict getdef $descriptor tools {}] ne ""} {
+        # A tool's programs are files of the artifact, each an executable of
+        # its host: checked at every acquisition, never run by it.
+        set problems [pm::tools::Problems $descriptor [dict get $archive files]]
+        if {$problems ne ""} {
+            pm::Fail ARTIFACT "$origin: the artifact's tools are invalid:\n  [join $problems "\n  "]"
+        }
+    }
     set artifact [dict create name [dict get $descriptor name] version [dict get $descriptor version] \
         digest $digest path $path size [dict get $archive size] files [dict get $archive files] \
         descriptor $descriptor]

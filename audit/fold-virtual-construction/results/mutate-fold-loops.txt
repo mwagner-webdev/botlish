@@ -1,0 +1,45 @@
+KILLED eval-fold-yields-list
+    tests: killed (60 failed: fold-loops-bare, fold-loops-big-ints, fold-loops-bool, fold-loops-break-discards-next, fold-loops-break-first, fold-loops-break-in-count, ...)
+KILLED eval-initial-before-bounds
+    tests: killed (1 failed: fold-loops-count-bounds-before-initial)
+KILLED eval-continue-replaces
+    tests: killed (8 failed: fold-loops-continue-after-work, fold-loops-continue-and-break, fold-loops-continue-every-iteration, fold-loops-continue-first, fold-loops-core-ir-text, fold-loops-fold-in-loop, ...)
+KILLED eval-initial-error-swallowed
+    tests: killed (1 failed: fold-loops-initial-error)
+KILLED tcl-fold-collects
+    tests: killed (51 failed: fold-loops-big-ints, fold-loops-bool, fold-loops-break-discards-next, fold-loops-break-in-count, fold-loops-break-later, fold-loops-callable-step, ...)
+KILLED tcl-break-yields-list
+    tests: killed (11 failed: fold-loops-bare, fold-loops-break-discards-next, fold-loops-break-first, fold-loops-break-in-count, fold-loops-break-later, fold-loops-continue-and-break, ...)
+KILLED native-intermediate-not-replaced
+    tests: killed (did not complete: ==== fold-loops-lockstep FAILED)
+KILLED native-break-yields-unit
+    tests: killed (12 failed: fold-loops-bare, fold-loops-break-discards-next, fold-loops-break-first, fold-loops-break-in-count, fold-loops-break-later, fold-loops-continue-and-break, ...)
+KILLED native-exhaustion-yields-unit
+    tests: killed (54 failed: fold-loops-big-ints, fold-loops-bool, fold-loops-callable-step, fold-loops-closure-in-body, fold-loops-context, fold-loops-continue-after-work, ...)
+KILLED aot-bare-fold-body-discarded
+    tests: killed (1 failed: fold-loops-executable)
+KILLED types-no-fixpoint
+    tests: killed (2 failed: fold-loops-type-growing-join-widens, fold-loops-type-joins-initial-and-body)
+KILLED types-conflict-ignored
+    tests: killed (8 failed: fold-loops-conflict-branch, fold-loops-conflict-incompatible-initial, fold-loops-conflict-kinds, fold-loops-conflict-missing-else, fold-loops-conflict-named-structs, fold-loops-conflict-related, ...)
+KILLED types-conflict-not-poisoned
+    tests: killed (5 failed: fold-loops-conflict-branch, fold-loops-conflict-kinds, fold-loops-conflict-missing-else, fold-loops-conflict-related, fold-loops-yield-body-used)
+KILLED types-stale-poison
+    tests: killed (1 failed: fold-loops-conflict-branch)
+KILLED resolve-intermediate-outside
+    tests: killed (67 failed: fold-loops-affine-rejected, fold-loops-bare, fold-loops-bare-return, fold-loops-big-ints, fold-loops-body-error, fold-loops-bool, ...)
+KILLED cardinality-fold-collects
+    tests: killed (1 failed: fold-loops-cardinality-not-domain)
+KILLED affine-fold-accepted
+    tests: killed (2 failed: fold-loops-affine-rejected, fold-loops-affine-rejected-discarded)
+KILLED coroutines-fold-body-discarded
+    tests: killed (2 failed: fold-loops-affine-rejected-discarded, fold-loops-yield-body-used)
+KILLED completions-initial-unwalked
+    tests: killed (1 failed: fold-loops-unhandled-initial)
+KILLED lower-fold-dropped
+    tests: killed (49 failed: fold-loops-body-error, fold-loops-bool, fold-loops-break-discards-next, fold-loops-break-first, fold-loops-break-later, fold-loops-callable-step, ...)
+KILLED format-fold-header-dropped
+    tests: killed (1 failed: fold-loops-hir-text-round-trip)
+KILLED parser-fold-reserved
+    tests: killed (1 failed: fold-loops-parse-fold-is-a-name)
+22 mutants, 22 killed, 0 survived

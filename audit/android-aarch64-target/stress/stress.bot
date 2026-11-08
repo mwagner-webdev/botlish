@@ -1,0 +1,65 @@
+# stress.bot -- runtime workloads for a Botlish native library on Android
+# (ANDROID-AARCH64-TARGET-SUPPORT-MILESTONE-1.md, "Native runtime stress"):
+# large and astral-plane strings, nested Lists of structs, a growing
+# MutableVector, many allocations, and a declared error with a payload
+# raised after allocating, each an export a C host calls. host/stress.c
+# calls them on Android; the interpreter computes the same values.
+#
+# A library's entry file holds declarations only: this is one.
+import std::list
+import std::str
+import std::int
+import std::mutable_vector
+
+error Boom:
+    count: int
+    text: str
+
+struct Cell:
+    key: int
+    name: str
+    items: List[int]
+
+# TEXT COUNT times over: a string of COUNT * length(TEXT) characters.
+exported c fn repeated(text: str, count: int) -> str:
+    fold i from 0 to count with intermediate acc "":
+        acc.concat(text)
+
+# The characters of TEXT, last first (Unicode scalar values: an astral
+# character is one).
+exported c fn reversed(text: str) -> str errors IndexNotFound:
+    n = text.length()
+    fold i from 0 to n with intermediate acc "":
+        acc.append_char(text.char_at(n - 1 - i))
+
+# The number of characters of TEXT.
+exported c fn characters(text: str) -> int:
+    text.length()
+
+# N cells, each with a name and a List of its key's multiples, summed:
+# nested Lists and structs, all allocated, all reachable until the end.
+exported c fn nested(n: int) -> int:
+    cells = loop k from 0 to n:
+        items = loop j from 0 to 8:
+            k * j
+        Cell {key: k, name: k.to_string(), items: items}
+    fold cell in cells with intermediate total 0:
+        sizes = fold item in cell.items with intermediate s 0:
+            s + item
+        total + sizes + cell.name.length()
+
+# A MutableVector grown to N elements, then summed.
+exported c fn vector(n: int) -> int errors IndexNotFound:
+    v = std::mutable_vector::from_list([0])
+    loop i from 1 to n:
+        v.push(i * 3)
+    fold i from 0 to n with intermediate total 0:
+        total + v.at(i)
+
+# Allocates COUNT strings, then fails with Boom carrying COUNT and the last
+# string: an error after many allocations (and collections, under stress).
+exported c fn boom(count: int) -> int errors Boom:
+    texts = loop i from 0 to count:
+        "item-".concat(i.to_string())
+    last = texts.get(count - 1, "none")
+    fail Boom {count: count, text: last}

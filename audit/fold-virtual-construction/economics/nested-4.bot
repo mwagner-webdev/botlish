@@ -1,0 +1,17 @@
+# nested-4.bot -- FOLD-VIRTUAL-LIST-CONSTRUCTION-MILESTONE-1.md's compile-cost
+# input: 4 nested folds, each appending the List its inner fold builds
+# (tools/economics.tcl). Generated; every fold is a plan fold.
+
+import std::list
+
+fn f(xs: List[int]):
+    fold x1 in xs with intermediate a1 []:
+        inner1 = fold x2 in xs with intermediate a2 []:
+            inner2 = fold x3 in xs with intermediate a3 []:
+                inner3 = fold x4 in xs with intermediate a4 []:
+                    a4.append(x4)
+                a3.append(inner3)
+            a2.append(inner2)
+        a1.append(inner1)
+
+f([1, 2])
