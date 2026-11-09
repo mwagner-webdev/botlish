@@ -77,9 +77,11 @@ running in an Android application process in this session:
 * this host has no KVM, and Google's emulator refuses an arm64 guest on an
   x86_64 host, also when its `qemu-system-aarch64` is run directly
   (observed, section 16);
-* the workflow that runs the APK on GitHub's Android emulators
-  (`react-native-2048.yml`'s `android` jobs, two images) stayed queued
-  behind a saturated runner pool for the whole session, and never started.
+* the workflow's `android` jobs, which run the APK on GitHub's Android
+  emulators (two images), were still queued behind a saturated runner pool
+  when this report was last updated. Its build job did run, and passed:
+  the build from checkout to APK and the clean room on a GitHub runner
+  (sections 18 and 23).
 
 The Android acceptance is implemented and committed, with the oracle it
 compares against (section 16). Its result is CI evidence still to come.
@@ -100,7 +102,7 @@ is designed and built, not observed.
 | `useBotlish2048()` and a playable 2048 screen (swipes, buttons, score, New game, game over, win) | implemented; Jest observed (28 tests: 10 of the hook and the snapshot reader, 17 of the generated entry point, 1 without the native module) |
 | a second, unrelated library through the same generator, both packages in one app | observed (host harness, TypeScript, Jest, the APK) |
 | a clean room: the single-file compiler and packages only, then npm, Codegen and Gradle | observed (section 18) |
-| the app on Android: Hermes, the TurboModule, the Botlish library in an Android application process | **partially validated**: the acceptance is implemented (section 16) but was not observed in this session (no KVM here; its CI runs stayed queued) |
+| the app on Android: Hermes, the TurboModule, the Botlish library in an Android application process | **partially validated**: the acceptance is implemented (section 16) but was not observed in this session (no KVM here; its CI jobs still queued) |
 | mutation testing | 44/44 killed, each by a detector it names; observed (section 21) |
 | iOS, Android ABIs other than arm64-v8a, asynchronous workers | not supported (section 24) |
 
@@ -739,10 +741,12 @@ the package manager's library loading, SELinux, the JavaScript thread and
 its reloads. It does not show native AArch64 execution (section 24).
 
 **What happened in this session.** Every push of the branch started the
-workflow, and each run stayed `queued`: the repository's runners were busy
-with other branches' runs that had been going for hours. Each newer push
-cancelled the queued run, as the workflow's concurrency group intends. The
-latest run is linked in section 23; its result is the Android evidence.
+workflow. Runs 1 to 7 stayed `queued`, because the repository's runners
+were busy with other branches' runs that had been going for hours, and
+each newer push cancelled the queued run, as the workflow's concurrency
+group intends. Run 8's build job ran and passed. Its `android` jobs were
+still queued when this report was last updated (section 23), and their
+result is the Android evidence.
 
 **Locally**, this host has no `/dev/kvm`. Observed, with the emulator 37.2.13
 and `system-images;android-30;aosp_atd;arm64-v8a`:
