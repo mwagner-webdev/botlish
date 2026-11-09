@@ -271,7 +271,7 @@ receiver rejected by parameter 1 (`5.takes_text()`) at the receiver
 | a field and a function both candidates | `AMBIGUOUS-METHOD-CALL` (above), at the method name |
 | several distinct visible functions, more than one fits the call | `AMBIGUOUS-METHOD-CALL` ("more than one visible function accepts the call"), at the method name, a note locating each applicable candidate |
 | several distinct visible functions, none fits | `NO-APPLICABLE-METHOD`, at the method name, with each candidate's reason (the operand it rejects: the receiver, argument N, or the call) and a note locating each candidate |
-| shadowing local that is not callable | `NOT-CALLABLE`, as `f(x)` |
+| shadowing local that is not callable | `NOT-CALLABLE` at compile time, as `f(x)` (the one candidate); beside other visible candidates it is no applicable one, so a function that accepts the call applies |
 
 A rejected call -- ambiguous, or with no applicable candidate -- is that one
 diagnostic and nothing else (METHOD-RESOLUTION-DIAGNOSTICS-MILESTONE-2.md):

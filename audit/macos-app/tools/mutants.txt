@@ -51,6 +51,13 @@
     (void)scripts;
 >>>>
 
+@@ tcllibpath-honored single/main.tcl keeps auto_path as init.tcl made it: $TCLLIBPATH's directories first, whose decoy tclIndex runs at the first command Tcl loads
+## single/main.tcl
+<<<<
+set ::auto_path [list $::tcl_library [file dirname $::tcl_library]]
+====
+>>>>
+
 @@ launcher-locale-kept Tcl starts in the environment's locale: without a UTF-8 locale Tcl 9.0.1 crashes when the bundle's path is not ASCII
 ## single/macos/launcher.c
 <<<<

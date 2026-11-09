@@ -1,0 +1,14 @@
+leader exited 0
+leader-exit-us 1061
+stdout-eof-us 1502296
+group signal after the leader's exit yes
+stdout-eof-after-group-kill-us 1365
+end owned before shutdown 0
+abandoned 0
+end killed by shutdown 0
+end owned 0
+end escalations 0
+end live 0
+end fds delta 0
+[harness] supervisor peak RSS 16280 kB, CPU 0.008 s
+[harness] PASS in 1.51 s

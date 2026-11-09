@@ -3269,6 +3269,19 @@ proc hir::types::kindOf {type} {
     return [core::type::base $type]
 }
 
+# 1 if no value of static type TYPE can be called: its kind is known and is
+# no callable kind (an Int, a String, a Bool, a List, a struct, an enum, a C
+# address, ...), so a call of it always raises NOT-CALLABLE. The callable
+# kinds are a Block, a native and a coroutine handle (whose call is a
+# resume); a type of no fixed kind -- `any`, a structural function type, a
+# trait view, an imprint variable, `never` -- is no proof either way. The
+# one statement of the rule: the check of a call against its callee
+# (hir::range::VerifyCallable), the call's poison and region inference's
+# dead call (Call) ask it.
+proc hir::types::NotCallable {type} {
+    return [expr {[kindOf $type] ni {"" block native coroutine}}]
+}
+
 # The core type (core/type.tcl) a static type implies.
 proc hir::types::semantic {type} {
     if {[hir::cabi::IsFiniteFloating $type]} {
@@ -3645,6 +3658,7 @@ proc hir::types::Walk {hirVar} {
 # region get their types, known outcomes and reachability. Returns the type
 # of the region's normal completion (never if none).
 proc hir::types::inferRegion {hirVar region types handler} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $hirVar hir
     set ctx [NewContext]
     dict set ctx types $types
@@ -4304,6 +4318,7 @@ proc hir::types::ValueBinding {hir e} {
 # (hir::static::reifiedStatement): what follows it stays reachable for the
 # checks, as if the block could complete (STATIC-COMPILE.md, "Completions").
 proc hir::types::Sequence {hirVar ctxVar exprs} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $hirVar hir $ctxVar ctx
     set entry [dict get $ctx reachable]
     set result unit
@@ -4329,6 +4344,7 @@ proc hir::types::Sequence {hirVar ctxVar exprs} {
 
 # Types expression E. Returns its type.
 proc hir::types::Expr {hirVar ctxVar e} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $hirVar hir $ctxVar ctx
     if {[dict exists $hir syntaxDependent $e] && ![dict exists $ctx spec]} {
         return [Dependent hir ctx $e]
@@ -4414,6 +4430,7 @@ proc hir::types::Expr {hirVar ctxVar e} {
             set fold [FoldInitial hir ctx $node]
             set saved [dict get $ctx facts]
             dict set ctx facts [dict get $node elementBinding] $elemType
+            RecordClause hir $ctx [dict get $node elementBinding] $elemType
             # breakTypes is seeded (and later unset) only so the shared
             # `break` case in this same switch (below) always has a
             # dict entry to lub into, exactly as a plain `loop`/countloop
@@ -4478,6 +4495,7 @@ proc hir::types::Expr {hirVar ctxVar e} {
             # compiler boundary, spec item 6) -- not something this static
             # type pass needs to decide or reject.
             dict set ctx facts [dict get $node countBinding] int
+            RecordClause hir $ctx [dict get $node countBinding] int
             # A countloop is a collecting loop exactly like a listloop
             # (COLLECTING-LOOPS.md): see that case above for why breakTypes
             # is only seeded for the shared `break` case and why the result
@@ -4530,6 +4548,7 @@ proc hir::types::Expr {hirVar ctxVar e} {
             set saved [dict get $ctx facts]
             foreach {binding type} $facts {
                 dict set ctx facts $binding $type
+                RecordClause hir $ctx $binding $type
             }
             dict set ctx breakTypes $e never
             set entry [dict get $ctx reachable]
@@ -4629,6 +4648,40 @@ namespace eval hir::types {
     variable foldAttempts 4
 }
 
+# Records TYPE, the fact the walk (context CTX) gives loop clause binding B
+# (a listloop's element, a countloop's counter, a lockloop domain's binding:
+# hir::loopClauseBindings) at its loop's entry, as B's type in the binding
+# table (hir::bindingType), the way a bind records its value's type on its
+# binding and a fold its intermediate's
+# (LOOP-CLAUSE-BINDING-TYPE-CORRECTNESS-MILESTONE-1.md): every reference to B
+# starts from this fact, so the declaration and its references agree (a
+# reference is narrower only where a guard narrowed B on its path). The
+# element type is the loop's own rule's (hir::iteration::ElementOf: a
+# List's, a MutableVector's or MutableArray's, a collection struct's loop
+# protocol), `any` where that knows none, never for a poisoned iterable or a
+# List[never]'s element; a counter is exactly Int. The last walk of a loop is
+# the one its references are typed by. The generic walk's record is the
+# program's (hir::types::Walk), written only when it changes. A semantic
+# instance's walk types a scratch copy of the program's HIR: it records into
+# that copy's `instanceClauses`, a table of its own, which its snapshot keeps
+# (hir::semantic::Snapshot) -- never into the copy's binding table, whose
+# first write would copy every binding of the program for each instance
+# walk. Region inference's copy keeps no record (only its expressions'
+# types reach a specialization's view). So no instance's type ever reaches
+# the program's record, whatever order the instances are analyzed in.
+proc hir::types::RecordClause {hirVar ctx b type} {
+    upvar 1 $hirVar hir
+    if {[dict exists $ctx spec]} {
+        return
+    }
+    set t [intern hir $type]
+    if {[dict exists $ctx inst]} {
+        dict set hir instanceClauses $b $t
+    } elseif {[dict get $hir bindings $b type] ne $t} {
+        dict set hir bindings $b type $t
+    }
+}
+
 # The type of a fold NODE's initial value, typed in CTX -- the enclosing
 # scope's, after the loop's own operands -- or "" for a collecting loop.
 proc hir::types::FoldInitial {hirVar ctxVar node} {
@@ -4655,6 +4708,7 @@ proc hir::types::FoldInitial {hirVar ctxVar node} {
 # is then poison too (FoldResult). Elsewhere T is `any`, the sound dynamic
 # type.
 proc hir::types::FoldBody {hirVar ctxVar e node initial} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $hirVar hir $ctxVar ctx
     variable foldAttempts
     set b [dict get $node foldBinding]
@@ -4853,6 +4907,7 @@ proc hir::types::InferApplication {hirVar e id fieldTypes} {
 }
 
 proc hir::types::Struct {hirVar ctxVar e} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $hirVar hir $ctxVar ctx
     set node [dict get $hir exprs $e]
     set entry [dict get $ctx reachable]
@@ -4940,6 +4995,7 @@ proc hir::types::Struct {hirVar ctxVar e} {
 # (a receiver statically of another kind, or without that field) is `never`
 # in specialization inference, like any operation that always raises.
 proc hir::types::Project {hirVar ctxVar e} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $hirVar hir $ctxVar ctx
     set node [dict get $hir exprs $e]
     set receiver [Expr hir ctx [dict get $node receiver]]
@@ -5057,6 +5113,7 @@ proc hir::types::ProjectionFailed {hirVar ctx e} {
 # an `if` (If), applied when a validator fact is involved; otherwise the
 # construct keeps the facts after the call, as it always has.
 proc hir::types::Handle {hirVar ctxVar e} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $hirVar hir $ctxVar ctx
     set node [dict get $hir exprs $e]
     set entry [dict get $ctx reachable]
@@ -5170,6 +5227,7 @@ proc hir::types::Handle {hirVar ctxVar e} {
 }
 
 proc hir::types::Bind {hirVar ctxVar e} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $hirVar hir $ctxVar ctx
     set node [dict get $hir exprs $e]
     set b [dict get $node binding]
@@ -5214,6 +5272,7 @@ proc hir::types::Bind {hirVar ctxVar e} {
 
 # Types block expression E; SELF is the binding it is bound to (or "").
 proc hir::types::Block {hirVar outerVar e self} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $hirVar hir $outerVar outer
     set node [dict get $hir exprs $e]
     set arity [llength [dict get $node params]]
@@ -5339,6 +5398,7 @@ proc hir::types::Block {hirVar outerVar e self} {
 }
 
 proc hir::types::Call {hirVar ctxVar e} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $hirVar hir $ctxVar ctx
     set node [dict get $hir exprs $e]
     set entry [dict get $ctx reachable]
@@ -5622,9 +5682,19 @@ proc hir::types::Call {hirVar ctxVar e} {
         } elseif {$spec} {
             set dead 1
         }
-    } elseif {$spec && [kindOf $calleeType] ni {"" block native coroutine}} {
-        # Not callable: the call always raises NOT-CALLABLE.
-        set dead 1
+    } elseif {[NotCallable $calleeType]} {
+        # Not callable: the call always raises NOT-CALLABLE. In the generic
+        # walk of a call the program wrote it is the call's own NOT-CALLABLE
+        # diagnostic (hir::range::VerifyCallable), so it has no value:
+        # poison, and nothing that uses its result restates it (a declared
+        # result it cannot prove). (A semantic instance, typed under one
+        # call's argument types, neither reports nor poisons it, as for a
+        # native's argument kinds above: a callee of no fixed kind in the
+        # program as written is checked when the call runs.)
+        if {$spec || ([dict exists $node written] && [MakesPoison $hir $ctx]
+                && ![dict exists $ctx inst] && [dict get $ctx reachable])} {
+            set dead 1
+        }
     }
     if {$target eq "" && [dict exists $node imprint]} {
         # Explicit imprints on a callee that is not statically known.
@@ -5823,6 +5893,7 @@ proc hir::types::KnownOutcome {hir condition} {
 }
 
 proc hir::types::If {hirVar ctxVar e} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $hirVar hir $ctxVar ctx
     set node [dict get $hir exprs $e]
     set condition [dict get $node condition]

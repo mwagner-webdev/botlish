@@ -1,0 +1,458 @@
+# loop-clause-binding-types.test -- the binding table records every loop
+# clause binding -- a listloop's element, a countloop's counter, each
+# lockstep clause -- with the type the checker gives its references
+# (LOOP-CLAUSE-BINDING-TYPE-CORRECTNESS-MILESTONE-1.md): the declaration,
+# its references, its HIR record, the compiler service, HIR interchange, HIR
+# text and the front-end cache agree, and a generic function's record is its
+# generic walk's whatever its semantic instances find.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot service service.tcl]
+source [file join $::projectRoot audit static-decisions tools lib.tcl]
+interp recursionlimit {} 100000
+
+namespace eval lcb {}
+
+# Every loop clause binding (hir::loopClauseBindings) HIR's entry program
+# declares, in declaration order: {NAME RECORDED REFS}, RECORDED its
+# hir::bindingType, REFS the distinct types (hir::types::show) of its
+# reachable references.
+proc lcb::Clauses {hir} {
+    set entry [lindex [dict get $hir scopes [hir::top $hir] origin] 1]
+    set refs [dict create]
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict get $node kind] eq "ref" && [dict get $node reachable]} {
+            dict lappend refs [dict get $node binding] [hir::types::show [hir::typeOf $hir $e]]
+        }
+    }
+    set result {}
+    foreach e [hir::walk $hir] {
+        foreach b [hir::loopClauseBindings [dict get $hir exprs $e]] {
+            set origin [dict get $hir bindings $b origin]
+            if {[lindex $origin 1] ne $entry} continue
+            lappend result [list [hir::semantic::SourceName $hir $b] \
+                [hir::types::show [hir::bindingType $hir $b]] [lsort -unique [dict getdef $refs $b {}]]]
+        }
+    }
+    return $result
+}
+
+# {NAME: RECORDED ...} of Clauses, or a list of the clauses whose record
+# differs from a reference's type ("NAME: RECORDED / REF").
+proc lcb::Records {hir} {
+    set out {}
+    foreach clause [Clauses $hir] {
+        lassign $clause name recorded refs
+        foreach r $refs {
+            if {$r ne $recorded} {
+                return "DISAGREE $name: $recorded / $r"
+            }
+        }
+        lappend out "$name: $recorded"
+    }
+    return $out
+}
+
+proc lcb::Compile {text args} {
+    return [surface::compile $text -warnings off {*}$args]
+}
+
+# The clause binding named NAME (the first in declaration order) of HIR's
+# entry program, or of its module file whose name is FILE.
+proc lcb::Binding {hir name {file ""}} {
+    set entry [lindex [dict get $hir scopes [hir::top $hir] origin] 1]
+    foreach e [hir::walk $hir] {
+        foreach b [hir::loopClauseBindings [dict get $hir exprs $e]] {
+            set f [lindex [dict get $hir bindings $b origin] 1]
+            if {$file eq ""} {
+                set mine [expr {$f eq $entry}]
+            } else {
+                set mine [expr {[dict exists $hir files $f] && [file tail [dict get $hir files $f path]] eq $file}]
+            }
+            if {$mine && [hir::semantic::SourceName $hir $b] eq $name} {
+                return $b
+            }
+        }
+    }
+    error "no clause binding $name"
+}
+
+proc lcb::Dir {name} {
+    set dir [file join [temporaryDirectory] lcb-$name-[pid]]
+    file delete -force $dir
+    file mkdir $dir
+    return [file normalize $dir]
+}
+
+proc lcb::Put {path text} {
+    file mkdir [file dirname $path]
+    set channel [open $path w]
+    fconfigure $channel -encoding utf-8 -translation lf
+    puts -nonewline $channel $text
+    close $channel
+    return $path
+}
+
+# The census's reproducer (TEXT-AND-COLLECTION-PRECISION-CENSUS.md, C).
+set ::lcbBytes {import std::str
+import std::list
+import std::byte
+
+fn need_byte(b: std::byte::Byte) -> int:
+    b
+
+fn example(s: str):
+    bs = s.encode_utf8()
+    loop b in bs:
+        need_byte(b)
+
+example("é")
+}
+
+# Every loop kind, nested, over several element types.
+set ::lcbKinds {import std::list
+import std::str
+
+struct Holder:
+    n: int
+
+type Small = Int in 0..9
+
+enum Color:
+    Red, Green
+
+fn kinds(xs: List[int], n: int) -> int:
+    words = loop v in xs:
+        "w"
+    counted = loop i from 0 to n:
+        i
+    down = loop d down from n through 0:
+        d
+    held = loop h in [Holder {n: 1}, Holder {n: 2}]:
+        h.n
+    colors = loop c in [Color::Red, Color::Green]:
+        c
+    lock = loop x in xs and w in words and j from 0 to std::list::length(xs):
+        x + j + std::str::length(w)
+    nested = loop row in [xs, xs]:
+        loop cell in row:
+            loop k from 0 through cell:
+                k
+    smalls = fold s in [3, 4] with intermediate acc 0:
+        acc + s
+    std::list::length(counted) + std::list::length(down) + std::list::length(held) + std::list::length(colors) \
+        + std::list::length(lock) + std::list::length(nested) + smalls
+
+kinds([1, 2], 2)
+}
+
+test lcb-reproducer {the census's reproducer: the loop element over s.encode_utf8() is recorded as the Byte the checker gives its reference (it was any)} -body {
+    lcb::Records [lcb::Compile $::lcbBytes]
+} -result {{b: int[std::byte::Byte]}}
+
+test lcb-every-kind {every loop clause binding -- a counter (ascending, descending), a nominal struct's and an enum's element, three lockstep clauses of three types, nested elements and a nested counter, a fold's element -- is recorded with exactly its references' type; a lockstep clause gets its own type, never another clause's} -body {
+    lcb::Records [lcb::Compile $::lcbKinds]
+} -result {{v: int} {i: int} {d: int} {h: Holder} {c: Color} {x: int} {w: str} {j: int} {row: List[int]} {cell: int} {k: int} {s: int}}
+
+test lcb-refinements {a refined element keeps its refinement: a List of List[int]{length: 2}'s element, a domain's} -body {
+    lcb::Records [lcb::Compile {import std::list
+import std::str
+
+type Small = Int in 0..9
+
+fn pairs(n: int) -> List[List[int]{length: 2}]:
+    loop i from 0 to n:
+        [i, i]
+
+fn small(n: int) -> Small:
+    if n < 0 or n > 9:
+        return 0
+    n
+
+fn smalls() -> List[Small]:
+    loop t from 0 to 3:
+        small(t)
+
+fn f(n: int) -> int:
+    a = fold p in pairs(n) with intermediate acc 0:
+        acc + p.at(1)
+    b = fold q in smalls() with intermediate acc 0:
+        acc + q
+    a + b
+
+f(2)
+}]
+} -result {{i: int} {t: int} {p: List[int]{length: 2}} {q: int[Small]}}
+
+test lcb-unknown-elements {a genuinely unknown element stays any: an untyped parameter's in its generic walk, a bare list's, encode_utf8's without std::byte loaded (M3); an empty List's element, which never exists, is never} -body {
+    lcb::Records [lcb::Compile {import std::str
+import std::list
+
+fn untyped(xs):
+    loop x in xs:
+        x
+
+fn bare(ys: list):
+    loop y in ys:
+        y
+
+fn bytes(s: str):
+    loop b in s.encode_utf8():
+        b
+
+e = loop z in []:
+    z
+
+[untyped([1]), bare([2]), bytes("a"), e]
+}]
+} -result {{x: any} {y: any} {b: any} {z: never}}
+
+test lcb-poisoned-iterable {a poisoned iterable (an unknown field) records its element never and poison, as a poisoned bind records its binding: no reference restates the diagnostic} -body {
+    set hir [lcb::Compile "struct P:\n    n: int\n\nfn f(p: P):\n    loop x in p.nosuch:\n        x + 1\n\nf(P {n: 1})\n" -strict 0]
+    set b [lcb::Binding $hir x]
+    list [lsort -unique [lmap d [dict get $hir diagnostics] {dict get $d kind}]] \
+        [hir::types::show [hir::bindingType $hir $b]] [hir::types::Poisoned $hir $b]
+} -cleanup {unset -nocomplain hir b} -result {UNKNOWN-FIELD never 1}
+
+test lcb-closures-and-top-level {a loop at the entry program's top level and a loop element a nested function captures: recorded as their references see them, inside the closure too} -body {
+    lcb::Records [lcb::Compile {import std::list
+
+total = loop x in [1, 2]:
+    x
+
+fn f(names: List[str]) -> List[str]:
+    loop name in names:
+        fn g() -> str:
+            name
+        g()
+
+[total, f(["a"])]
+}]
+} -result {{x: int} {name: str}}
+
+test lcb-modules {a loop clause binding of an application module is recorded like the entry program's} -setup {
+    set dir [lcb::Dir modules]
+    lcb::Put $dir/util.bot "import std::list\n\nfn sizes(words: List\[str\]) -> List\[int\]:\n    loop w in words and i from 0 to std::list::length(words):\n        i\n"
+    lcb::Put $dir/main.bot "import util\n\nutil::sizes(\[\"a\"\])\n"
+} -body {
+    set hir [surface::readProgramFile $dir/main.bot -warnings off -cache ""]
+    lmap name {w i} {
+        set b [lcb::Binding $hir $name util.bot]
+        list $name [hir::types::show [hir::bindingType $hir $b]]
+    }
+} -cleanup {file delete -force $dir; unset -nocomplain dir hir name b} -result {{w str} {i int}}
+
+# ---------------------------------------------------------------------------
+# Semantic instances
+
+# A generic loop and a generic counter, called with List[int] and
+# List[str] in ORDER (int-first or str-first): {GENERIC INSTANCES}, the
+# generic record of x and i and, per instance of `first`, its argument
+# type and the type its snapshot records for x.
+proc lcb::Instances {order} {
+    set calls [dict create int "a = first(\[1, 2\])\n" str "b = first(\[\"s\"\])\n"]
+    set text "fn first(xs):\n    loop x in xs:\n        x\n\nfn upto(n):\n    loop i from 0 to n:\n        i\n\n"
+    foreach k $order {
+        append text [dict get $calls $k]
+    }
+    append text "c = upto(2)\n\[a, b, c\]\n"
+    set hir [lcb::Compile $text]
+    set x [lcb::Binding $hir x]
+    set i [lcb::Binding $hir i]
+    set seen {}
+    dict for {id inst} [dict get $hir semantic instances] {
+        if {[dict exists $inst snapshot bindings $x]} {
+            lappend seen [list [hir::types::show [lindex [dict get $inst args] 0]] \
+                [hir::types::show [dict get $inst snapshot bindings $x]]]
+        }
+    }
+    return [list [hir::types::show [hir::bindingType $hir $x]] [hir::types::show [hir::bindingType $hir $i]] [lsort $seen]]
+}
+
+test lcb-generic-record {a generic function's loop variable records its generic walk's type (any for an untyped parameter's element), never the first or the last semantic instance's; each instance's snapshot keeps its own (int, str); the order of the calls changes neither} -body {
+    list [lcb::Instances {int str}] [expr {[lcb::Instances {int str}] eq [lcb::Instances {str int}]}]
+} -result {{any int {{{List[int]} int} {{List[str]} str}}} 1}
+
+test lcb-instance-view {a semantic instance's view (hir::semantic::View) sees the instance's own loop variable type, as it sees its locals'; the program's HIR keeps the generic record} -body {
+    set hir [lcb::Compile "fn first(xs):\n    loop x in xs:\n        y = x\n        y\n\nfirst(\[\"s\"\])\n"]
+    set x [lcb::Binding $hir x]
+    set y ""
+    dict for {b binding} [dict get $hir bindings] {
+        if {[dict get $binding name] eq "y"} {
+            set y $b
+        }
+    }
+    set views {}
+    dict for {id inst} [dict get $hir semantic instances] {
+        if {[hir::types::show [lindex [dict get $inst args] 0]] ne {List[str]}} continue
+        set view [hir::semantic::View $hir $id]
+        lappend views [hir::types::show [hir::bindingType $view $x]] [hir::types::show [hir::bindingType $view $y]]
+    }
+    list [hir::types::show [hir::bindingType $hir $x]] [hir::types::show [hir::bindingType $hir $y]] $views
+} -cleanup {unset -nocomplain hir x y views view b binding id inst} -result {any any {str str}}
+
+test lcb-repeated-compilation {compiling programs whose loops have different element types in one process, in turn and again, records each program's own types: no record leaks from one compilation into another} -body {
+    set a "fn f(xs: List\[int\]) -> List\[int\]:\n    loop x in xs:\n        x\n\nf(\[1\])\n"
+    set b "fn f(xs: List\[str\]) -> List\[str\]:\n    loop x in xs:\n        x\n\nf(\[\"s\"\])\n"
+    set first [lcb::Compile $a]
+    set second [lcb::Compile $b]
+    set again [lcb::Compile $a]
+    hir::activate $first
+    list [lcb::Records $first] [lcb::Records $second] [lcb::Records $again]
+} -cleanup {unset -nocomplain a b first second again} -result {{{x: int}} {{x: str}} {{x: int}}}
+
+# ---------------------------------------------------------------------------
+# Representations: HIR interchange, HIR text, the front-end cache
+
+test lcb-interchange {HIR interchange carries every loop clause record, decoded exactly as built} -body {
+    set hir [lcb::Compile $::lcbKinds]
+    set read [hir::interchange::decode [hir::interchange::encode $hir]]
+    list [expr {[lcb::Records $read] eq [lcb::Records $hir]}] [llength [lcb::Records $read]]
+} -cleanup {unset -nocomplain hir read} -result {1 12}
+
+test lcb-hir-text {HIR text prints no binding record; reading it back records each loop clause binding as the typing walk does} -body {
+    set hir [lcb::Compile $::lcbKinds]
+    set read [hir::parse [hir::format $hir]]
+    set differ {}
+    foreach e [hir::walk $hir] {
+        foreach b [hir::loopClauseBindings [dict get $hir exprs $e]] {
+            if {[hir::bindingType $hir $b] ne [hir::bindingType $read $b]} {
+                lappend differ [dict get $hir bindings $b name]
+            }
+        }
+    }
+    set differ
+} -cleanup {unset -nocomplain hir read differ e b} -result {}
+
+test lcb-cache {a front-end cache hit -- in this process and in a fresh one -- has the records the build made} -setup {
+    set dir [lcb::Dir cache]
+    set path [lcb::Put $dir/program.bot $::lcbKinds]
+    set cache [file join $dir cache]
+} -body {
+    set built [surface::readProgramFile $path -cache $cache -warnings off]
+    surface::cache::resetStats
+    set hit [surface::readProgramFile $path -cache $cache -warnings off]
+    set hits [dict get [surface::cache::stats] hits]
+    set script [lcb::Put $dir/child.tcl [string map [list @ROOT@ $::projectRoot] {
+        source [file join {@ROOT@} compiler compiler.tcl]
+        source [file join {@ROOT@} surface surface.tcl]
+        lassign $argv path cache
+        set hir [surface::readProgramFile $path -cache $cache -warnings off]
+        set out {}
+        foreach e [hir::walk $hir] {
+            foreach b [hir::loopClauseBindings [dict get $hir exprs $e]] {
+                lappend out $b [hir::types::show [hir::bindingType $hir $b]]
+            }
+        }
+        puts [list [dict get [surface::cache::stats] hits] $out]
+    }]]
+    lassign [exec [info nameofexecutable] $script $path $cache] childHits childRecords
+    set records {}
+    foreach e [hir::walk $built] {
+        foreach b [hir::loopClauseBindings [dict get $built exprs $e]] {
+            lappend records $b [hir::types::show [hir::bindingType $built $b]]
+        }
+    }
+    list $hits [expr {[lcb::Records $hit] eq [lcb::Records $built]}] $childHits [expr {$childRecords eq $records}]
+} -cleanup {file delete -force $dir; unset -nocomplain dir path cache built hit hits script childHits childRecords records e b} -result {1 1 1 1}
+
+# ---------------------------------------------------------------------------
+# The compiler service
+
+# The hover of each NEEDLE (a {TEXT SKIP} pair: the SKIP-th occurrence's
+# first character) of TEXT, analyzed by the service as main.bot of a
+# directory of its own.
+proc lcb::Hovers {name text needles} {
+    set dir [lcb::Dir $name]
+    set path [lcb::Put $dir/main.bot $text]
+    set ws [service::workspace -warnings off -cache ""]
+    try {
+        set rev [service::analyze $ws $path]
+        return [lmap {needle skip} $needles {
+            set at -1
+            for {set n 0} {$n <= $skip} {incr n} {
+                set at [string first $needle $text [expr {$at + 1}]]
+            }
+            set before [string range $text 0 [expr {$at - 1}]]
+            set line [expr {[regexp -all \n $before] + 1}]
+            set column [expr {$at - [string last \n $before]}]
+            dict getdef [service::at $rev $path $line $column] hover -
+        }]
+    } finally {
+        service::closeWorkspace $ws
+        file delete -force $dir
+    }
+}
+
+test lcb-service-declaration-reference {the service's hover at a loop clause declaration and at its reference agree: the reproducer's Byte element, a counter, two lockstep clauses, a nested element, a nominal element} -body {
+    concat [lcb::Hovers bytes $::lcbBytes {{b in} 0 {b)} 0}] \
+        [lcb::Hovers kinds $::lcbKinds {{i from} 0 {i
+} 0 {x in} 0 {x +} 0 {w in} 0 {w)} 0 {cell in} 0 {cell:} 0 {h in} 0 {h.n} 0}]
+} -result {{b: int[std::byte::Byte]} {b: int[std::byte::Byte]} {i: int} {i: int} {x: int} {x: int} {w: str} {w: str} {cell: int} {cell: int} {h: Holder} {h: Holder}}
+
+test lcb-service-generic {the service shows a generic function's loop variable as its generic walk types it (any), never as one of its instances does; a genuinely unknown element is any at the declaration and the reference alike} -body {
+    lcb::Hovers generic "fn first(xs):\n    loop x in xs:\n        x\n\na = first(\[1\])\nb = first(\[\"s\"\])\n" {{x in} 0 {x
+} 0}
+} -result {{x: any} {x: any}}
+
+# ---------------------------------------------------------------------------
+# Static decisions (hir/staticdeps.tcl reads the binding table)
+
+# Two static sites that fail, so one build's dependency analysis runs: a
+# loop over MutableVectors whose element a nested function mentions, and an
+# ordinary TYPE failure. TAIL ends the first site's body.
+proc lcb::SharedSites {} {
+    return {import std::compiler
+import std::list
+import std::mutable_vector
+
+fn captured() -> int errors std::compiler::CompilerError:
+    static compile:
+        vs = [std::mutable_vector::from_list([1, 2])]
+        sizes = loop v in vs:
+            fn size() -> int:
+                std::mutable_vector::length(v)
+            size()
+        std::list::length(sizes) + "a"
+    0
+
+fn other() -> int errors std::compiler::CompilerError:
+    static compile:
+        total = fold x in [1, 2] and i from 0 to 2 with intermediate acc 0:
+            acc + x + i
+        total + "b"
+    0
+
+a = captured():
+    on std::compiler::CompilerError:
+        -1
+b = other():
+    on std::compiler::CompilerError:
+        -1
+[a, b]
+}
+}
+
+test lcb-staticdeps-reads {what the dependency analysis reads of a loop clause binding is now its type: a MutableVector element mentions a mutable value (a mention from another region is a `shared` dependency, which the `any` record left out), an Int element and counter mention neither `any` nor a mutable value (no erasure consumer, no `shared` edge)} -body {
+    set hir [lcb::Compile [string map {"static compile:" "if true:" " + \"a\"" "" " + \"b\"" ""} [lcb::SharedSites]]]
+    lmap name {v x i} {
+        set type [hir::bindingType $hir [lcb::Binding $hir $name]]
+        list $name [hir::staticdeps::MentionsMutable $type] [hir::staticdeps::MentionsAny $type]
+    }
+} -cleanup {unset -nocomplain hir name type} -result {{v 1 0} {x 0 0} {i 0 0}}
+
+test lcb-staticdeps-decisions {the static sites over loop clause bindings are decided by the batched scheduler exactly as by the sequential order (both rejected, for their own TYPE failures)} -body {
+    set source [lcb::SharedSites]
+    set batched [sdCompile batched $source <input>]
+    list [sdDiff $batched [sdCompile sequential $source <input>]] \
+        [lmap {key site} [hir::static::sites [lcb::Compile $source -strict 0]] {dict get $site diagnostic kind}]
+} -cleanup {unset -nocomplain source batched} -result {{} {TYPE TYPE}}
+
+# ---------------------------------------------------------------------------
+# Backends
+
+test lcb-backends {a program with every loop kind runs alike on all four backends (the records change no lowering)} -body {
+    sourceAgree $::lcbKinds
+} -result {value 20}
+
+cleanupTests

@@ -157,9 +157,9 @@
 @@ driver-runs-any-target the driver runs and emits machine code for a program of any target
 ## native/src/main.rs
 <<<<
-    if matches!(command, "run" | "bench" | "batch" | "vms" | "object" | "executable" | "aot-run" | "library" | "link-plan") {
+    } else if matches!(command, "run" | "bench" | "batch" | "vms" | "object" | "executable" | "aot-run" | "library" | "link-plan") {
 ====
-    if false {
+    } else if false {
 >>>>
 
 @@ host-check-architecture-only machine code runs where the architecture matches, whatever the operating system

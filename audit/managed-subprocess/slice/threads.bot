@@ -1,0 +1,44 @@
+# threads.bot -- two Botlish-owned threads, each its own VM with its own
+# loop, driver and process context, supervise a child each while this VM
+# supervises a third (MANAGED-SUBPROCESS-AND-EVENT-LOOP-CENSUS-MILESTONE-1.md,
+# section 12).
+#
+#   threads HELPER
+import event_loop_linux
+import msp
+import procworker
+import report
+import std::event_loop
+import std::int
+import std::linux::io
+import std::list
+import std::str
+import std::thread
+import type std::event_loop::Delivery
+
+fn line(s: procworker::Summary, context io: std::linux::io::LinuxIO):
+    report::say(std::str::concat("vm ", std::int::to_string(s.id)).concat(" bytes ").concat(std::int::to_string(s.bytes)).concat(" exit ").concat(std::int::to_string(s.code)).concat(" owned-after ").concat(std::int::to_string(s.owned)))
+
+fn main(helper: str, context t: std::thread::Threads, io: std::linux::io::LinuxIO) -> int errors std::thread::ThreadLimit, std::thread::ThreadStartFailed, std::thread::ThreadFailed:
+    {thread: t1, id: i1} = std::thread::start(std::thread::entry(procworker::supervise), procworker::Job {id: 1, helper: helper, args: ["chunks:20:10", "outn:2000000:65", "exit:11"]})
+    {thread: t2, id: i2} = std::thread::start(std::thread::entry(procworker::supervise), procworker::Job {id: 2, helper: helper, args: ["chunks:10:20", "outn:3000000:66", "exit:22"]})
+    mine = std::thread::join(t1)
+    other = std::thread::join(t2)
+    line(mine)
+    line(other)
+    report::say(std::str::concat("distinct children ", report::yes(mine.pid != other.pid)))
+    report::say_int("adapter live after both ", msp::stat(12))
+    0
+
+args = argv():
+    on InvalidArgumentEncoding:
+        []
+with context std::thread::create(4)
+with context std::linux::io::create()
+main(std::list::get(args, 1, "")):
+    on std::thread::ThreadLimit:
+        -1
+    on std::thread::ThreadStartFailed:
+        -2
+    on std::thread::ThreadFailed:
+        -3

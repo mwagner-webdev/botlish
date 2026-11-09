@@ -314,12 +314,14 @@ proc hir::types::subtype {a b} {
 ## core/binary.tcl
 <<<<
 proc core::binary::EncodeRepr {operation repr value bytes at what} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     switch -- [lindex $repr 0] {
         layout {
             return [Encode [lindex $repr 1] $value $bytes $at]
         }
 ====
 proc core::binary::EncodeRepr {operation repr value bytes at what} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     switch -- [lindex $repr 0] {
         layout {
             return $bytes

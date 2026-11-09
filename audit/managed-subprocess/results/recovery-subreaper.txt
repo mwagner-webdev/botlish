@@ -1,0 +1,23 @@
+supervisor 7420: recorded
+record P1: pid 7422 start 263714 pgid 7422 cwd /tmp/msp-durable-68vyoad_/a
+record P2: pid 7423 start 263714 pgid 7423 cwd /tmp/msp-durable-68vyoad_/b
+record P3: pid 7424 start 263714 pgid 7424 cwd /tmp/msp-durable-68vyoad_
+supervisor killed (SIGKILL); P3's output had 64 bytes
+  0.3 s after the crash: P1 exited, not yet reaped (parent 7419, group 7422)
+  0.3 s after the crash: P2 alive (parent 7419, group 7423)
+  0.3 s after the crash: P2's descendant alive (parent 7423, group 7423)
+  0.3 s after the crash: P3 alive (parent 7419, group 7424)
+  reaped orphan P1: signal 13 (SIGPIPE) 0.30 s after the crash
+  reaped orphan P3: exited 0 2.31 s after the crash
+after 4 s: P1 gone; status signal 13 (SIGPIPE)
+after 4 s: P2 alive (parent 7419); status not observed by the coordinator
+after 4 s: P2's descendant alive (parent 7423); status not observed by the coordinator
+after 4 s: P3 gone; status exited 0
+P3's output file: 64 bytes at the crash, 260 after (complete: yes)
+reattach P2: pidfd opened, start time verified
+reattach P2: SIGTERM sent to its group through the pidfd
+  reaped orphan P2: signal 15 (SIGTERM) 4.62 s after the crash
+  reaped orphan P2's descendant: signal 15 (SIGTERM) 4.62 s after the crash
+after reattach: P2 gone; status signal 15 (SIGTERM)
+after reattach: P2's descendant gone; status signal 15 (SIGTERM)
+forged record (pid 7419, start 263712): refused

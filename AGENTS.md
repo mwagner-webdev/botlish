@@ -18,11 +18,15 @@ one), check `main`'s CI at both ends of the work
   that list, so your branch's failures are compared with it rather than
   dismissed as "main's own".
 * **Before you merge a finished milestone into `main`,** check again:
-  `main`'s latest runs and your branch's own. `macos-arm64.yml` and
-  `windows-x86_64.yml` run on every branch push; `tests.yml` and
-  `tests-arm64.yml` run only their canary on a branch push (next section)
-  and the rest only when dispatched (`workflow_dispatch` with the branch as
-  the ref), so dispatch them. Don't merge onto a red
+  `main`'s latest runs and your branch's own. A branch push runs only the
+  canary of each of the four test workflows (macOS: the smoke job; next
+  section) and the jobs its message opts into (`[ci-full]`,
+  `[ci-app-mutants]`, `[ci-probes]`); the rest runs only when dispatched
+  (`workflow_dispatch` with the branch as the ref), so dispatch
+  `tests.yml`, `tests-arm64.yml`, `macos-arm64.yml` and `windows-x86_64.yml`
+  on the branch tip. A branch push's run that deferred to another (its
+  summary says "Deferred: ... is tested by RUN") tested nothing: read the
+  run it names. Don't merge onto a red
   `main` without telling the user. A failure on your branch that `main`'s
   latest run does not have is yours to fix before the merge. Pending runs
   are acceptable: report them as pending, never as passed.
@@ -33,12 +37,12 @@ nothing either way. Read the latest run of the workflow instead. Merging a
 branch makes its unfinished runs obsolete, and `prune-runs.yml` cancels
 them (CI-RUNS.md; next section).
 
-## CI housekeeping (cancellation, pruning, the release gate, the canary)
+## CI housekeeping (cancellation, pruning, the release gate, the canary, deferral)
 
 The runners are a shared, limited pool, and main's merges come in bursts
-(CI-RUNS.md). Four rules keep obsolete and doomed runs off them and keep
-releases honest; `tools/ci/runs.py` implements the second and the third,
-`tests/canary.tcl` the fourth. Keep it so:
+(CI-RUNS.md). Five rules keep obsolete, doomed and repeated runs off them
+and keep releases honest; `tools/ci/runs.py` implements the second, the
+third and the fifth, `tests/canary.tcl` the fourth. Keep it so:
 
 * **A newer push cancels a running test workflow on the same ref, on main
   too:** a workflow that tests a push has `concurrency: group:
@@ -53,9 +57,10 @@ releases honest; `tools/ci/runs.py` implements the second and the third,
   head may be a commit no workflow ran (scalar-asm-audit's).
 * **A release is published only once every test of its commit is green**,
   by a run nothing cancels. `CORE`: tests.yml and tests-arm64.yml with their
-  GC-stress jobs *succeeded* (skipped is no success), macos-arm64.yml,
-  windows-x86_64.yml, static-decisions.yml when it ran, and the release's
-  own build workflow. Any run at the commit counts.
+  GC-stress jobs *succeeded* (skipped is no success), macos-arm64.yml and
+  windows-x86_64.yml with their acceptance jobs succeeded (a branch push's
+  run has none), static-decisions.yml when it ran, and the release's own
+  build workflow. Any run at the commit counts.
   - `release-gate.yml` (workflow_run of those workflows on main) dispatches
     single-executable.yml or icy-tower-windows.yml on main with
     `release=SHA` for main's newest green commit (`run-name: release SHA`,
@@ -81,13 +86,33 @@ releases honest; `tools/ci/runs.py` implements the second and the third,
   history says failed recently on that host; tests.yml's runs the mutant
   catalogs and the warning gate first, as steps (a job of its own would
   wait for a runner before the expensive jobs could start: keep them steps).
-  On a branch push tests.yml and tests-arm64.yml run only the canary. The
-  canary orders, it never skips: never drop a job or
-  a test because the canary passed, never let an expensive job start
+  A branch push runs only the canary job, on every host (macOS: the smoke
+  job and its Linux control), plus the opt-in jobs its head commit's message
+  asks for (a marker counts anywhere in the message, prose included: write
+  one only to ask for its jobs); every other job runs on pushes to main, on pull requests and
+  when dispatched (its `if` holds `github.event_name != 'push' ||
+  github.ref == 'refs/heads/main'`). Where this file asks for a workflow,
+  or one of its jobs, "on the branch", dispatch it there, unless it is the
+  canary job (macOS: the smoke job) or one a marker opts into. The canary
+  orders, it never skips: never drop a job or a test because the canary
+  passed, never let an expensive job start
   before it (a job that runs after a failed need checks the canary's
   result itself), and never give it an item list of its own beside its
   selection. `tools/ci/test_runs.py` checks the workflows' side. A new
-  test workflow, or a new expensive job, waits for its host's canary.
+  test workflow, or a new expensive job, waits for its host's canary, and
+  a successful run counts for the release gate only with the jobs a branch
+  push skips (`CORE`'s job names: GC stress, the acceptance tiers).
+* **A branch push at a commit another run already tests defers to it**
+  (CI-RUNS.md, "A commit already tested"): the step "Already tested at this
+  commit?" (`.github/actions/twin`, `runs.py twin`) right after the
+  checkout of every job a branch push runs finds main's push run at the
+  commit (unfinished or successful) or another branch's successful push run
+  that ran its canary, and the job skips every later step; an opt-in job after the
+  canary reads the canary job's `deferred` output. A deferred run tested
+  nothing (the release gate never counts it). Never let a run of main, a
+  dispatched run or a pull request's run defer, never defer to a failed,
+  cancelled or deferred run or to another branch's unfinished one, and never
+  defer on an API error. A new job a branch push runs defers too.
 
 If you change `tools/ci/`, a workflow's concurrency or triggers, a release
 job, or the name of a workflow or of a GC-stress job a requirement names,
@@ -95,7 +120,7 @@ run `python3 -I tools/ci/test_runs.py` (it also checks the workflows' side
 of these rules), `python3 -I audit/macos-release/tests/test_workflow.py`
 and that audit's mutants for icy-tower-macos.yml, and
 `tclsh9.0 tools/mutant-catalogs.tcl`. Then push and read the `ci tools`
-run, which runs the gate and the pruning read-only against the
+run, which runs the gate, the pruning and the deferral read-only against the
 repository's runs. A new required workflow goes into `CORE` and into
 release-gate.yml's `workflow_run` list together (the tests check it).
 
@@ -174,6 +199,82 @@ others, must be identical) and `audit/compilation-isolation/tools/mutate.tcl`
 (every mutant in its `mutants.txt` must still apply and be killed). Core IR
 text has no declarations: core IR kept and run on a Tcl backend after another
 compilation still reads the later one's (run a HIR, or lower it again).
+
+## Depth-safe recursion (nesting is never Tcl's limit)
+
+A syntactically valid program is never rejected, and no compilation fails,
+because of how deep the program nests
+(DEPTH-SAFE-NESTED-EXPRESSION-FRONTEND-MILESTONE-1.md): Tcl's limit of
+nested evaluations (`interp recursionlimit`, 1000 by default; TCL LIMIT
+STACK, "too many nested evaluations") is an implementation property, never
+a language limit. The walks that follow source nesting -- the parser's
+productions, the AST and loader walks, surface lowering, resolution,
+inference, the range, completion and warning walks, HIR text, core IR and
+its check, the Tcl compiler and native lowering, and the walks of what
+else nests as deep as the source writes it (destructuring patterns,
+written types, loops, Boolean conditions, inject blocks, layout
+representations, module bindings, an affine type's drop descriptor over a
+chain of declarations) -- stay recursive procedures, and each starts with
+the guard
+
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+
+which, past a segment's frames, goes on in a new segment (a Tcl coroutine
+holding the caller's variables, core/deep.tcl) that a driver resumes from
+its own shallow frame; the interpreter's nesting stays one segment deep.
+Keep it so:
+
+* **Frontend algorithms over recursively nested source must not use host
+  call-stack depth as a language limit.** A procedure whose recursion
+  follows the program's nesting carries the guard and is listed in
+  `audit/depth-safe-nesting/census.tsv`; a new one is found by
+  `audit/depth-safe-nesting/tools/census.tcl` (and the probe, below).
+  Never raise `interp recursionlimit` for the front end, catch TCL LIMIT
+  STACK, retry, rewrite source before parsing, or add a nesting limit or a
+  diagnostic for depth. `hir::Deep` and `core::deep::run` are drivers,
+  never limit raisers.
+* **A parser/build/type/lowering walk proportional to arbitrary
+  expression nesting should use an explicit work stack or another
+  depth-safe representation** -- here the guard's segments, whose stack is
+  the driver's. A guarded procedure reaches its caller only through
+  `upvar 1` or `uplevel 1` (deeper levels are another segment's), never
+  yields, and passes no namespace variable by another name (`upvar #0
+  ::x y`): a segment takes its caller's variables by value and gives them
+  back, re-linking a namespace variable only under its own name. Nothing
+  reads `info level` to decide what a program means (hir::semantic's
+  instance budget is the instance stack's: `maxDepth`).
+* Segments change where frames live, never what a walk computes: no
+  segment-dependent result, order, error or diagnostic
+  (tests/depth-safe-nesting.test's `dsn-segment-invariance` compiles with
+  a segment every 3 frames).
+* A nested node is never put into text whole: `regexp`, `string first`,
+  `in`/`ni`, `lsort`, `switch` or a dict key on a syntax or AST node
+  gives every node of its subtree a string, and `concat` gives one to every
+  element of a list after the first -- quadratic memory in the nesting
+  (590 MB for a List literal 400 deep). Join node lists with `list
+  {*}...`, search syntax with `hir::syntax::words`.
+* The reference interpreter's run (core::interp, core::forms, a Botlish
+  call) is the program's own recursion, not the compiler's: it stays under
+  the program recursion limit (core::useProgramRecursionLimit), and is
+  never guarded (a Botlish coroutine's Tcl `yield` must reach its own
+  resumer).
+
+If you change core/deep.tcl, a guarded procedure's frame use, the census or
+a walk over nesting, run `tests/depth-safe-nesting.test` (at Tcl's default
+limit), `audit/depth-safe-nesting/tools/probe.tcl` (every path of every
+specimen 1000 deep at the default limit: no TCL LIMIT STACK, and no
+refusal the program 3 deep does not get too),
+`audit/depth-safe-nesting/tools/census.tcl` (no recursive procedure
+missing from the census; the specimens that cycle through forms once
+more each, with `-fraction` their number of forms: `-kinds loops -fraction
+3`, `-kinds mixed -fraction 4`, and `-kinds cond -depth 12 -fraction 3`,
+whose traced Boolean analyses take over an hour 24 deep),
+`audit/depth-safe-nesting/tools/fuzz.tcl`
+(several seeds) and `audit/depth-safe-nesting/tools/mutate.tcl` (every
+mutant in its `mutants.txt` must still apply and be killed by a detector
+its `!!` line names: update a mutant's text when you change the code it
+mutates, keeping it a mutant of the same rule).
+`bench/nested-frontend.tcl` regenerates the scaling report.
 
 ## HIR interchange
 
@@ -341,11 +442,14 @@ containers (`single/smoke-test.sh`); once every test of the commit is green,
 the release gate's release run publishes that build as the
 `botlish-linux-x86_64` asset of the rolling `single-latest` prerelease
 (CI-RUNS.md). The README's download button links to that tag and asset
-name: rename either only together with the button. Its base kit is a static tclsh that the
-script builds once from the pinned Tcl 9.0.1 source release. That build is
-the one exception to "do not build Tcl 9 from source" above: no package ships
-a static zipfs tclsh. `--basekit PATH` uses a prebuilt zipkit instead. To run
-the test suite, still install the `.deb`s.
+name: rename either only together with the button. Its base kit is Tcl's
+static library, which `single/basekit.sh` builds once from the pinned Tcl
+9.0.1 source release and caches, linked with `single/basekit.c` as its main
+program. That build is the one exception to "do not build Tcl 9 from
+source" above: no package ships a static zipfs Tcl. `--basekit PATH` takes
+a base kit `single/basekit.sh` linked before; a stock tclsh or prebuilt
+zipkit is refused (next item). To run the test suite, still install the
+`.deb`s.
 
 * `single/package.tcl` packs exactly main.tcl, LICENSE, `core/`,
   `compiler/`, `hir/`, `surface/`, `service/`, `lsp/`, `pm/`, `ccompile/`,
@@ -356,6 +460,18 @@ the test suite, still install the `.deb`s.
   it there. Never make main.tcl or the compiler depend on the single
   executable: `single/main.tcl` only sets the environment and sources
   main.tcl unchanged.
+* The packaged compiler runs only its own Tcl library (SINGLE-EXECUTABLE.md,
+  "Its own Tcl library"). Tcl starts without the user's `TCL_LIBRARY`
+  (`single/basekit.c`; on macOS the launcher sets `tcl_library` first), and
+  `single/main.tcl` keeps `auto_path` and the module path inside the
+  packaged library: never `$TCLLIBPATH`, `$TCL9.0_TM_PATH` or the
+  directories beside the executable. The compiler's children see those
+  variables exactly as the user set them: put back after Tcl starts, never
+  unset, replaced or set by the compiler. Never give the base kit Tcl's
+  stock main (a stock tclsh or zipkit sources a decoy `TCL_LIBRARY`'s
+  `init.tcl` before `single/main.tcl` runs; `single/build.sh` refuses
+  one), and never create a Tcl interpreter in the compiler: `interp
+  create` (one not `-safe`) runs `tclInit` again, with `TCL_LIBRARY` back.
 * Standalone executables have three linkers, chosen by
   `BOTLISH_NATIVE_LINKER`: `rustc` (the default), `stub` (no toolchain:
   `botlish-aot-stub` with the program image appended,
@@ -438,8 +554,9 @@ the test suite, still install the `.deb`s.
   `.github/workflows/tests.yml` have the commands. Run them once more under
   `BOTLISH_NATIVE_GC_STRESS=1`. A change to the system linker also runs
   `audit/native-aot/tools/mutate.tcl` (its `sys-*` mutants), and one to the
-  single executable's packing or installation (`single/main.tcl`,
-  `single/package.tcl`) `audit/single-executable/tools/mutate.tcl` and both
+  single executable's packing, startup or installation (`single/main.tcl`,
+  `single/package.tcl`, `single/basekit.c`, `single/basekit.sh`)
+  `audit/single-executable/tools/mutate.tcl` and both
   `single/smoke-test.sh` and `single/ffi-smoke-test.sh` after
   `single/build.sh`.
 
@@ -519,10 +636,10 @@ and `Contents/Resources/libbotlish_runtime.a` -- signs it ad hoc with the
 hardened runtime (`single/macos/sign.sh`), verifies it
 (`single/macos/verify.sh`) and archives it as `botlish-macos-aarch64.zip`.
 macos-arm64.yml's `app` and `app-clean` jobs build and accept it on every
-push (a manual run with `app_only` runs only them); `botlish-macos.yml`
-releases it, Developer ID-signed and notarized, for a tag
-`botlish-macos-vX.Y.Z` (MACOS-BOTLISH-DISTRIBUTION-MILESTONE-1.md). Keep it
-so:
+push to main and every dispatched run (a manual run with `app_only` runs
+only them; a branch push runs neither); `botlish-macos.yml` releases it,
+Developer ID-signed and notarized, for a tag `botlish-macos-vX.Y.Z`
+(MACOS-BOTLISH-DISTRIBUTION-MILESTONE-1.md). Keep it so:
 
 * One staging procedure: both distributions pack what `single/package.tcl`'s
   `StageCompiler` stages; never a second file list. The macOS archive holds
@@ -573,8 +690,9 @@ so:
   damages or changes it, and checks the bundle untouched afterwards.
 
 If you change `single/macos/`, `single/main.tcl`, `single/package.tcl`,
-`audit/macos-app/` or the driver's `packaged_runtime_archive`, push and
-read the `app` and `app-clean` jobs (they run `single/macos/verify.sh`,
+`audit/macos-app/` or the driver's `packaged_runtime_archive`, dispatch
+macos-arm64.yml on the branch (`app_only` for these alone) and read the
+`app` and `app-clean` jobs (they run `single/macos/verify.sh`,
 `single/smoke-test.sh`, `single/ffi-smoke-test.sh`,
 `single/macos/app-test.sh`, `single/macos/compare.sh`, the release's
 stages in ad hoc mode with `single/macos/acceptance.sh`, and
@@ -692,7 +810,10 @@ What it costs, measured on a 4-core container (2026-10-15):
     stress) and, on pushes to main and manual runs, the GC-stress run. Run
     it on a branch with workflow_dispatch;
   - first, on every push to any branch and on every host, the canary
-    (CI-RUNS.md, "The canary"), which the jobs above wait for.
+    (CI-RUNS.md, "The canary"), which the jobs above wait for. A branch
+    push runs only the canary (and the jobs its message opts into), and
+    none at a commit another run already tests: dispatch the workflows on
+    the branch for the rest.
 
   A push or pull request that changes only Markdown files and `docs/` starts
   no workflow (their `paths-ignore`). Renaming or removing a design document
@@ -1100,6 +1221,54 @@ when you change the code it mutates, keeping it a mutant of the same rule),
 plus `tests/fold-loops.test` under `BOTLISH_NATIVE_GC_STRESS=1` for a change
 to native lowering. `audit/fold-loops/tools/measure.sh` and
 `economics.tcl` regenerate the report's measurements.
+
+## Virtual construction across folds
+
+A fold whose String or List intermediate the body only extends carries it
+as a construction plan (FOLD-VIRTUAL-LIST-CONSTRUCTION-MILESTONE-1.md):
+hir/construction.tcl's *plan fold*, a fourth carrier beside its plan
+locals, parameters and results, lowered by native/lower.tcl's
+`LoopResultStart`, `LoopResultBind`, `LoopBody` and `FoldValue`. Keep it
+so:
+
+* One construction mechanism: M8.a's pieces, `construct`, plan registers
+  and nir.rs's `validate_plans` (M8A-VIRTUAL-IMMUTABLE-CONSTRUCTION.md).
+  Never a fold-specific builder, NIR instruction, runtime object or helper,
+  and never a rule keyed on how the body is spelled (`acc.append`): the
+  decision reads value flow only (`FoldLinear`, `Context`, `Source`).
+* Linearity is per iteration, and a `continue` or bare `break` targeting
+  the fold is a reference to its intermediate (the "fold" marker `Uses`
+  reads in LOOPS): it passes the current intermediate on. Never drop that,
+  or an append computed before a break or continue is extended in place and
+  becomes visible. A captured intermediate, or one another representation
+  analysis claims, is never a plan; a fold is a plan only when some
+  reference continues the construction and the body's trailing value is
+  plan-producing.
+* The fold's own value stays flat: materialized once at exhaustion and at
+  a break (`FoldValue`). A fold as a plan source, a struct intermediate's
+  List fields and fusion with collecting loops or `std::list::flat` are
+  later milestones' (the report's follow-up), never a special case here.
+* Declining is never an error: the eager lowering stays, its reason in
+  the analysis' `foldWhy`. HIR, types, specialization keys, the Tcl
+  backends and `-virtual-construction-opt 0` are unchanged.
+* A plan-position sequence (`SequenceTo`) releases the affine values dead
+  after each statement exactly as `Sequence` does.
+
+If you change any of that, or what hir/construction.tcl or the loop
+lowering's result handling does, run `tests/fold-virtual-construction.test`
+(also under `BOTLISH_NATIVE_GC_STRESS=1`), its golden suite (`tclsh9.0
+tests/local.tcl tests/golden/fold-virtual-construction.bot`; generated with
+its fragment and census by `tclsh9.0
+audit/fold-virtual-construction/tools/golden-port.tcl` from the Tcl tests'
+own programs), `tests/virtual-construction.test`, `tests/fold-loops.test`,
+`audit/fold-virtual-construction/tools/fuzz.tcl` (several seeds, once with
+`-gc-stress 1`: values against an independent model, decisions against an
+independent model of the rule) and `audit/fold-virtual-construction/tools/
+mutate.tcl` (every mutant in its `mutants.txt` must still apply and be
+killed: update a mutant's text when you change the code it mutates, keeping
+it a mutant of the same rule; its native mutant rebuilds a private copy).
+`audit/fold-virtual-construction/tools/measure.tcl` regenerates the
+report's tables (`-root DIR` measures another checkout).
 
 ## Flattening Lists (std::list::flat)
 
@@ -1701,12 +1870,12 @@ that applies to the host must still apply and be killed: update a mutant's
 text when you change the code it mutates, keeping it a mutant of the same
 rule; a mutant of `platform/macos.rs` runs on macOS only, of
 `platform/windows.rs` on Windows only: the tier item
-`native-stack-mutants`), and the macOS smoke job and `CI-Tests:
-native-stack-overflow.test rust native-stack-mutants` on a branch (macOS
-facts are CI's: the shared Mac is not used); for the Windows guard, the
-Windows workflow on the branch (its smoke job runs the native stack
-checks, and `[ci-full]` with `CI-Tests: native-stack-mutants` the
-mutants). `bench/native-stack-guard.tcl` compares a driver against a
+`native-stack-mutants`), and the macOS smoke job and a `[ci-full]` push
+with `CI-Tests: native-stack-overflow.test rust native-stack-mutants` on a
+branch (macOS facts are CI's: the shared Mac is not used); for the Windows
+guard, the Windows workflow dispatched on the branch (its smoke job runs
+the native stack checks, and `[ci-full]` with `CI-Tests:
+native-stack-mutants` the mutants). `bench/native-stack-guard.tcl` compares a driver against a
 baseline build (`-baseline-rev main`; the tier item `native-stack-bench`
 on a macOS runner).
 
@@ -1860,8 +2029,9 @@ The native backend is being ported to macOS on Apple Silicon
 (MACOS-AARCH64-PORT-AUDIT.md: the Linux assumptions by subsystem, the
 census of what passes there today, the CI and the roadmap; one milestone
 at a time). Develop on Linux (or macOS); the Apple Silicon testing runs in
-GitHub Actions, `.github/workflows/macos-arm64.yml`, on every push to any
-branch (not documentation-only ones) -- never on a shared development Mac,
+GitHub Actions, `.github/workflows/macos-arm64.yml`: its smoke job on every
+push to any branch (not documentation-only ones), the rest on every push to
+main and when dispatched on a branch -- never on a shared development Mac,
 and no acceptance depends on one.
 
 * Every push runs Tier A on macOS (`smoke`: the host and its toolchains,
@@ -1870,8 +2040,11 @@ and no acceptance depends on one.
   backends' Unicode 16 semantics -- `tests/platform/cabi-facts.tcl`, the
   native build and its Rust unit tests, `tests/platform/native-status.tcl`,
   `tests/platform/aot-facts.tcl` (the program object and an executable as
-  the host's tools see them), `tests/platform/tier.tcl smoke`), Tier B (`tier.tcl acceptance`, four
-  shards) and the same smoke on ubuntu as a control. Locally, `tclsh9.0
+  the host's tools see them), `tests/platform/tier.tcl smoke`, the canary)
+  and the same smoke on ubuntu as a control; a push to main and a
+  dispatched run (`workflow_dispatch` on the branch) also Tier B
+  (`tier.tcl acceptance`, five shards), the system linker and the
+  application's jobs. Locally, `tclsh9.0
   tests/platform/tier.tcl smoke` takes seconds, and `tier.tcl X.test
   Y.bot` runs any file or suite the way CI does.
 * Tier C is opt-in: `[ci-full]` in the message of a push's head commit
@@ -2071,16 +2244,18 @@ WINDOWS-TOOLCHAIN-CENSUS.md): the driver and runtime built for
   widths reads the target's row (`long` is 32 bits on Windows); one that
   reads main.tcl's output untranslated expects CRLF from main.tcl's own
   lines on Windows.
-* CI: `.github/workflows/windows-x86_64.yml` on every push (windows-2025,
-  production code, Tcl 9.0.1 built by `tests/platform/setup-windows.ps1`):
-  the smoke job (the Rust tests, `native-status.tcl`, `aot-facts.tcl`'s
+* CI: `.github/workflows/windows-x86_64.yml` (windows-2025, production
+  code, Tcl 9.0.1 built by `tests/platform/setup-windows.ps1`): the canary
+  on every push; on a push to main and a dispatched run (`workflow_dispatch`
+  on the branch) also the smoke job (the Rust tests, `native-status.tcl`, `aot-facts.tcl`'s
   COFF/PE checks and unwind information, C calls through link.exe and the
   C runtime matrix, `tests/platform/gc-workloads.tcl` under GC stress and
   under the unwind check, the 2048 executable, Windows I/O redirected by
   bash, cmd and PowerShell, dumpbin's headers and unwind information, the
   smoke tier and the Windows-relevant test files), the `roots` job (the
   fallback plan's Rust tests and GC workloads, `bench/root-plans.tcl`;
-  `[ci-probes]` or a manual run adds `audit/windows-unwind`'s anchor probe)
+  `[ci-probes]` -- on a branch push too -- or a manual run adds
+  `audit/windows-unwind`'s anchor probe)
   and the acceptance tier in four shards; `[ci-full]` or a manual run adds
   the GC-stress tier.
   Neither Wine nor WSL is an authority for Windows; a `-gnu` cross build
@@ -2204,6 +2379,70 @@ Compilerpedia topics that state these rules true (`backend.targets`,
 the macOS row in every macOS smoke job (`tests/platform/cabi-facts.tcl`),
 and `tests/platform/native-status.tcl` the native target boundary.
 
+## Android AArch64 (android-aarch64) and emitting for another target
+
+android-aarch64 is a target of its own (ANDROID-AARCH64-TARGET-SUPPORT-
+MILESTONE-1.md): Android on AArch64, Bionic's C library, the NDK's
+`aarch64-linux-android` -- never linux-aarch64, whose instruction set, data
+model and plain char it shares and whose C library, loader, system
+libraries and runtime archive it does not. Its one artifact is a native
+library, made on a Linux x86-64 host with the NDK and its target support
+package. Keep it so:
+
+* Emitting is not running: the driver emits machine code for another
+  target only as a native library's object (`library --target TRIPLE`,
+  `codegen::target::check_emit`): the program built for that target or for
+  none, Cranelift's backend for its instruction set (the driver is built
+  with `x86` and `arm64`), and the target's runtime with exactly the
+  capabilities this driver's code generation reads from its own runtime
+  (`runtime_capabilities` against `host_runtime`: frame roots, the stack
+  guard, stack switching). Never run or JIT code of another target, never
+  accept --target on another command, never emit for a target whose runtime
+  the table does not state, and never let a host-only constant decide a
+  target's code without that check.
+* The runtime is Botlish's one runtime built for aarch64-linux-android
+  (`tools/package.sh`): Android AArch64 joins Linux AArch64's platform layer,
+  coroutine switch and frame walk where Bionic gives the same contract
+  (pthread_getattr_np, POSIX signals, MAP_STACK); the Linux syscall
+  transports stay Linux's. Never touch x18 (Android's shadow call stack),
+  never assume a 4 KiB page, and never make a 2048-only runtime.
+* A library of another target than the host's is linked with its target
+  support package's runtime (schema 2: `artifacts`, `platform.minimumApi`,
+  `runtime.relocation`, `toolchain`; native/support.tcl), never with the
+  driver's own archive, by the toolchain the package declares as data (the
+  NDK found through ANDROID_NDK_ROOT: nothing is searched). The compiler
+  composes every argument (`LinkWithToolchain`: `--target=TRIPLE` + the
+  minimum API, `-z defs`, `-z text`, 16 KiB segment alignment); a
+  descriptor adds no flag, and its system libraries must equal the target's
+  (`targetLibraries`). A missing toolchain is {NATIVE LIBRARY TOOLCHAIN},
+  never a target support refusal.
+* The shared object is checked from its bytes before it is reported
+  (`ValidateShared`, native/elf.tcl): machine, type, alignment, no text
+  relocation, no glibc symbol version, only the stated system libraries,
+  exactly the public functions. A failed link leaves no earlier build's file
+  under the new names. The manifest names the target and the package.
+* No Android application knowledge in the compiler: no Activity, JNI
+  generation, Gradle, APK, React Native, UI or event loop. The Android host
+  under audit/android-aarch64-target/host is test infrastructure.
+
+If you change any of that (codegen/target.rs's emission rules, codegen's
+`isa_for_target`, codegen/library.rs's `supports`, the driver's --target,
+native/library.tcl's toolchain link or `ValidateShared`, native/elf.tcl,
+native/support.tcl's schema 2, the android row of core/cabi.tcl or
+pm/target.tcl, the Android cfgs of the runtime), run
+`tests/android-target.test` (its link half needs ANDROID_NDK_ROOT and the
+Android runtime archive, `audit/android-aarch64-target/tools/package.sh`;
+its execution half qemu-aarch64 and BOTLISH_ANDROID_ROOTS,
+`tools/sysroot.sh`), `tests/target-model.test`, `tests/native-library.test`,
+`tests/external-tools.test`, `cargo test --release --manifest-path
+native/Cargo.toml --bin botlish-native target::` and
+`audit/android-aarch64-target/tools/mutate.tcl` (every mutant in its
+`mutants.txt` must still apply and be killed by a test its `!!` line names:
+update a mutant's text when you change the code it mutates, keeping it a
+mutant of the same rule), and, after `single/build.sh`, its clean room
+(`audit/android-aarch64-target/cleanroom/cleanroom.sh BOTLISH REPO NDK ROOTS
+RESULTS`).
+
 ## Linux syscall transports
 
 A raw Linux syscall is one architecture's transport
@@ -2297,8 +2536,9 @@ native views, variadic calls, context-trait satisfaction), run
 `tests/target-model.test`, `tests/workload-2048.test` and
 `audit/context-traits/tools/mutate.tcl` (its `darwin-*` mutants run on
 macOS through the tier item `darwin-io-mutants`; every mutant that applies
-to the host must still apply and be killed), and on macOS (a branch push
-with `CI-Tests: darwin-io.test ...`) the darwin-io tests themselves.
+to the host must still apply and be killed), and on macOS (a `[ci-full]`
+branch push with `CI-Tests: darwin-io.test ...`, or a dispatched run) the
+darwin-io tests themselves.
 `bench/darwin-io.tcl` (tier item `darwin-io-bench`) is the performance
 report.
 
@@ -2718,12 +2958,31 @@ carries, so only the frames' release pads run. Keep it so:
   verdict (`hir::staticdeps::ScopedBy`, `PathJoins`), and whether the
   program unwinds is the waiting channel `C:unwind`. A new way for code to
   make a binding scoped, or for the program to unwind, goes into them.
+* A cleanup is compiled where code that may release its resource is
+  compiled, never because it is declared
+  (NATIVE-UNUSED-CONTEXT-IMPORT-CORRECTNESS-MILESTONE-1.md): natively it is
+  a value of each region whose release edges name it
+  (`hir::contexts::releasedCleanups`, the edges the context analysis charges
+  its requirement through; hir::specialize's `-releases`), and the cleanup
+  table holds unit for one the program compiles nothing for
+  (`LiveCleanups`, `CleanupTable`; the runtime refuses a unit entry). So a
+  program that imports a module for its other declarations requires and
+  loads none of its cleanups' contexts. Never root a cleanup
+  unconditionally, never state a second "may release" rule beside
+  `ReleaseEdges`, and never make an import compile by supplying, skipping or
+  tolerating a load of a context the program does not install (the
+  `UninstalledContext` NATIVE BUG stays the backstop).
 
 If you change any of that (hir/resources.tcl, the resource cases of
 hir/affine.tcl, hir/structs.tcl and hir/contexts.tcl, the cleanup and
 abandonment runtimes in core/affine.tcl, core/coroutines.tcl,
 native/src/runtime/{affine,coroutine,mutvec}.rs, native/lower.tcl's release
-lowering, or std::event_loop's Owner), run `tests/resources.test`,
+lowering, which cleanups native lowering compiles -- `releasedCleanups`,
+hir/specialize.tcl's `ReleaseValues`, native/lower.tcl's `LiveCleanups`,
+`LiveCleanup` and `CleanupTable` -- or std::event_loop's Owner), run
+`tests/resources.test`, `tests/unused-context.test`,
+`audit/unused-context-import/tools/mutate.tcl` (every mutant must still
+apply and be killed by a test its `!!` line names),
 `tests/event-loop.test` (its `el-owned-*`), `tests/event-loop-linux.test`
 (`el-linux-owned`), `tests/affine.test`, `tests/coroutines.test`,
 `audit/lexical-cleanup/tools/fuzz.tcl` (several seeds) and
@@ -3405,6 +3664,40 @@ coroutine harnesses for any change to `hir/affine.tcl` (above). A change to
 native tracing, growth or drops also needs a `BOTLISH_NATIVE_GC_STRESS=1`
 run of `tests/mutable-vector.test`. `bench/mutable-vector.tcl` regenerates
 the performance report.
+
+### Consumed fold intermediates
+
+A fold's intermediate holding a collection is consumed like a directly
+called function's parameter -- no entry copy, the carried header mutated in
+place -- only where no `continue` or bare `break` of its fold can run after
+the iteration may have given the header away
+(CONSUMED-FOLD-INTERMEDIATES-MILESTONE-1.md; hir/mutvec.tcl's
+`FoldExitsClean`, `FoldWalk`, `GivesHeader`, `FoldIncoming`). Keep it so:
+
+* An exit after a give-away keeps the entry copy: such an exit carries the
+  iteration's starting value (FOLD-LOOPS-MILESTONE-1.md, rules 5 and 6),
+  which only the copy keeps. The give-aways are the convention's own facts
+  (`PlaceArgument`, `ByReference`, `NoLaterUse`): never decide one by an
+  operation's or a function's name, and never stop the walk short (an
+  `if`'s branches join, a handler starts after any part of its call, an
+  inner loop's body repeats).
+* Every value a consumed fold binds its intermediate to -- its initial
+  value, each normal completion -- is an exclusive position, wrapped in a
+  share unless fresh or a move: never let one alias a live binding.
+* It is an optimization: no diagnostic, rule or proof changes, no runtime
+  state and no backend special case. `hir::mutvec::consumedFolds 0` is the
+  copying elaboration, the tests' and the fuzzer's oracle (a front-end
+  input: `surface::cache::Key`); never set it outside tests.
+
+If you change any of that, or the copy convention it joins (`Eligible`,
+`ExclusivePositions`, `Fresh`, `NoLaterUse`, `Moved`), run
+`tests/consumed-fold-intermediates.test`, `tests/fold-loops.test`,
+`tests/mutable-vector.test`, `audit/consumed-folds/tools/fuzz.tcl` (several
+seeds, once with `-gc-stress 1`) and `audit/consumed-folds/tools/mutate.tcl`
+(every mutant in its `mutants.txt` must still apply and be killed by a test
+its `!!` line names: update a mutant's text when you change the code it
+mutates, keeping it a mutant of the same rule). `bench/consumed-folds.tcl`
+is the performance report.
 
 ## MutableArray
 
@@ -4482,7 +4775,7 @@ file with `objdump`; its trace needs Linux and ptrace; its `ec-modes-*`
 tests every lowering mode), `tests/c-pointer-borrowing.test`,
 `tests/c-byte-borrowing.test`, `tests/windows-io.test`,
 `tests/darwin-io.test` (its `di-errno-allocator` runs on macOS: the
-acceptance tier of every branch push, and under GC stress a `[ci-full]`
+acceptance tier of a dispatched run, and under GC stress a `[ci-full]`
 push with `CI-Tests: darwin-io.test c-ffi-error-capture.test`), all also
 under `BOTLISH_NATIVE_GC_STRESS=1`, the struct and transport tests
 (`tests/struct-scalar-replacement.test`, `tests/value-transport.test`),
@@ -4665,7 +4958,7 @@ c-ffi.test's MSVC captures on Windows: `CI-Tests: c-ffi-mutants=...` in a
 `win64_variadic_tests` here -- the latter runs a Win64 call through its
 stub in the JIT on any x86-64 host; the Apple and Linux AArch64 placements
 on an AArch64 host: CI's arm64 workflow and the macOS smoke job), the
-Windows workflow on the branch for a change to Win64's lowering, and the
+Windows workflow dispatched on the branch for a change to Win64's lowering, and the
 binding generator's checks for a change to what it emits (next sections).
 
 ## C header archaeology (a research instrument)
@@ -4963,11 +5256,18 @@ candidate whose ordinary call is valid. Keep it so:
 * **Relative to the decided program.** A candidate is applicable when the
   call has no problem of its own in the build of the decided configuration
   with only that call moved to it (the decided build for the candidate the
-  call stands at, a single deviation for any other), or when a kind proof
-  rules it out (next item). The decision is the configuration in which
-  every call has exactly the candidate it stands at applicable; a call with
-  several is AMBIGUOUS-METHOD-CALL, with none NO-APPLICABLE-METHOD, and a
-  call that is still moving at the certification's bound is ambiguous. The
+  call stands at, a single deviation for any other), and the call's
+  receiver is not poison there, unless a kind proof rules it out (next
+  item). A call whose receiver the decided build poisons is judged by those
+  same builds (its own stand-in may have poisoned it: a fold's `acc.f(x)`,
+  HTTP-CLIENT-PACKAGE-MILESTONE-1.md's F2), and decides nothing only when
+  every candidate's build poisons it; a rejection is dismissed for its
+  receiver only when the reported program poisons it. Never take a poison
+  of the decision's builds for an independent diagnostic's. The decision
+  is the configuration in which every call has exactly the candidate it
+  stands at applicable; a call with several is AMBIGUOUS-METHOD-CALL, with
+  none NO-APPLICABLE-METHOD, and a call that is still moving at the
+  certification's bound is ambiguous. The
   search (the kind waves, the trial rounds) only proposes stand-ins: never
   decide a call from a stand-in, a trial round, candidate order, a guess or
   an unrelated call's outcome, and never add a precedence.
@@ -4975,13 +5275,18 @@ candidate whose ordinary call is valid. Keep it so:
   candidate is excluded only when the receiver the build gives makes the
   ordinary call invalid by kind (a native's first parameter, a module
   function's declared or inferred first-parameter contract, the plain value
-  kinds only) or by a named struct's declaration (a *declared* first
+  kinds only), by a named struct's declaration (a *declared* first
   parameter of another named struct declaration than the receiver's:
-  `NominalMismatch`). Never exclude a lexical name, by a domain or a
+  `NominalMismatch`) or by a trait's conformance (a *declared* first
+  parameter that is a trait the receiver does not satisfy:
+  `TraitMismatch`). Never exclude a lexical name, by a domain or a
   refinement, by a struct's type arguments, by an inferred contract's struct
-  or by a type's spelling. The native rule is stated once
-  (`NativeMismatch`, which a call's problems and the kind proofs both ask).
-  Certification never reads a waves' guess (`DefinedType`).
+  or by a type's spelling, and never for a receiver of no kind (`any`, a
+  trait view, an imprint variable, a function). The native rule is
+  stated once (`NativeMismatch`, which a call's problems and the kind proofs
+  both ask), and so is the trait rule (`hir::traits::Accept`, which a call's
+  own admission check and `TraitMismatch` both ask). Certification never
+  reads a waves' guess (`DefinedType`).
 * **Checked, not trusted.** `hir::methodKindProofs 0`
   (`BOTLISH_METHOD_KIND_PROOFS=0`) is the reference rule: every candidate
   judged by its own build. `hir::methodReferenceAudit 1`
@@ -5092,6 +5397,37 @@ If you change any of that, or a native's `-param-types`, run
 `mutants.txt` must still apply and be killed by a test its `!!` line names:
 update a mutant's text when you change the code it mutates, keeping it a
 mutant of the same rule), plus the method-call decision's harnesses (above).
+
+## Callee kinds (NOT-CALLABLE)
+
+A call whose callee's static type is of a known kind no call accepts -- an
+Int, a String, a Bool, a List, a struct, an enum case, a C address -- is a
+compile-time NOT-CALLABLE of the call (HTTP-CLIENT-PACKAGE-MILESTONE-1.md,
+F4): the call's own check (`hir::range::VerifyCallable`, inside
+`hir::CheckingCall`), located at the callee, naming the function a binding
+hides as its related location, and the call is poison (`hir::types::Call`).
+The rule is stated once (`hir::types::NotCallable`: the callable kinds are
+a Block, a native and a coroutine handle); the check, the poison and
+region inference's dead call ask it. Keep it so:
+
+* A callee of no fixed kind -- `any`, an untyped parameter's value, a
+  structural function type, a trait view, an imprint variable -- stays
+  dynamic, checked when the call runs. Never judge a call in a semantic
+  instance's view, or a call the program did not write (`written`; core IR
+  text), and never add a run-time check for a static one.
+* The method decision reads it like any problem of the call: a
+  non-callable binding named like a function is no applicable candidate.
+  Never give it a method rule of its own, and never let it add, rank or
+  retry a candidate (SFIAE, METHOD-SUGAR.md).
+
+If you change any of that, run `tests/not-callable.test`,
+`tests/method-sugar.test`, `tests/enums.test`, `tests/method-resolution.test`,
+`tests/method-filter.test`, `tests/diagnostic-recovery.test`,
+`tests/static-compile.test` and `audit/not-callable/tools/mutate.tcl` (every
+mutant in its `mutants.txt` must still apply and be killed by a test its
+`!!` line names: update a mutant's text when you change the code it
+mutates, keeping it a mutant of the same rule), plus the method-call
+decision's harnesses (above).
 
 ## Declared recognizers (dfa and class)
 
@@ -5213,6 +5549,23 @@ backend compiles, or reports why not (EMIT-*). Keep it so:
   HIR text carries no tables (its claims are not proved). Never accept a
   certificate because its text looks right, and never put process history
   (reuse) into the HIR.
+* Identity: the memo, the certificate table and a certificate's
+  dependencies name a function by its binding's name, which identifies it
+  only when no other function block of the compilation has that name
+  (`hir::emission::Identified`; EMISSION-IDENTITY-AND-FEASIBILITY-
+  CORRECTNESS-MILESTONE-1.md). A name of two functions selects nothing: no
+  memo reuse or storage for its claim, no publication of its certificate,
+  no composition with a certificate it finds, no validation of a
+  dependency on it, and no memoizing a proof that read a function of such a
+  name (`ReadsIdentified`). Each falls back to walking the code the claim
+  or call actually names. Never let a name choose between two blocks,
+  never refuse a proof (only a reuse) because a name is shared, and never
+  invent a lexical identity to keep a reuse without a design of its own.
+* Feasibility is a flag: `hir::emission::Facts` answers `{FEASIBLE ENV}`,
+  and an environment with no binding (a function without parameters, before
+  its first `bind`) is a feasible path's environment like any other. Never
+  read feasibility, or any other fact, from whether an abstract value's
+  text is empty.
 * Diagnostics anchor at the claimed function (its unit: recovery, static
   sites) and are located at the yield or call; a claim whose code holds
   another diagnostic, poison or a hole is `dependent` and says nothing.
@@ -5242,7 +5595,11 @@ lowering, loader walk or resolution, or the `emissions` table's trust
 census.tcl` (no false proof; every case as expected),
 `audit/emission-claims/tools/fuzz.tcl` (several seeds; 0 false proofs),
 `audit/emission-claims/tools/loops.tcl` for a change to loops or their
-bounds' facts (several seeds; 0 false certificates, 0 regressions) and
+bounds' facts (several seeds; 0 false certificates, 0 regressions),
+`audit/emission-identity/tools/structure.tcl` for a change to the memo,
+certificates, composition or branch facts (several seeds; 0 false
+certificates, 0 history differences), `audit/emission-dependencies/tools/
+census.tcl` (0 false certificates, no difference from its record) and
 `audit/emission-claims/tools/mutate.tcl` (every mutant in its `mutants.txt`
 must still apply and be killed: update a mutant's text when you change the
 code it mutates, keeping it a mutant of the same rule), plus
@@ -6068,6 +6425,160 @@ touches these files). The manual `tasks app (raven, manual)` workflow builds
 the experiment's Tasks app with `audit/raven-cleanroom/tools/build-app.sh`
 (the clean room's consumer build) and publishes it as an artifact: run it
 after a change to `build-app.sh` or the release.
+
+## The http and boringssl packages (HTTP client)
+
+`packages/http` is the official HTTP/1.1 and HTTP/2 client with TLS
+(HTTP-CLIENT-PACKAGE-MILESTONE-1.md; its README.md and GUIDE.md are the
+user's documentation): Hyper and BoringSSL in a Rust unit
+(`packages/http/native`, crate `botlish_http`, built and localized by
+`tools/http-package.tcl` into `native/libbotlish_http.a`), driven by the
+program's own event loop and the Linux driver package; `packages/boringssl`
+is the provider (BoringSSL's pinned release, `packages/boringssl/PIN`, in
+one archive of its own name, `libbotlish_boringssl.a`, with the provider's
+identity symbol). `tools/package-repository.tcl`'s `author::boringssl` and
+`author::http` are their release recipes. Keep it so:
+
+* Nothing of them enters the compiler, the runtime, the standard library or
+  the single executable: a consumer installs the released artifacts and
+  compiles none of their native code. No Tokio runtime and no second
+  scheduler: the unit's executor runs a bounded batch per `bh_step` (the
+  module's budget) from a task of the loop, its timers are the loop's
+  clock, its readiness the driver's watches; the only threads are the name
+  resolver's, which answer and wake the loop (`botlish_event_post2`, which
+  names the runtime's own loop: never the version 1 post, which another
+  Botlish thread's loop makes refused).
+* One thread of a process has the runtime at a time (std::thread: the
+  resolver's pool and the process counters are shared): `bh_open` claims
+  it, another thread's is refused (`ERR_OPEN_ELSEWHERE`, the module's
+  `Fault`), and the claim ends at `bh_close` or with its thread
+  (`http-one-thread`, `http-beside-thread`). Never let two threads' runtimes
+  share the pool silently; per-thread runtimes need the pool and counters
+  made per thread first.
+* The public interface is Botlish values, declared errors and resources:
+  no handle integer, Rust type, BoringSSL object or raw status reaches a
+  program (every `bh_*` is `private`); a client and an exchange are
+  resources released where their owners' scopes end. Never add a public
+  function that takes or returns a handle, a descriptor or a pointer.
+* TLS is verified, always: chain, host name (or IP address) and expiry,
+  against the system's bundle and the anchors a program passes as data.
+  Never add a switch, an option, an environment variable or a test-only
+  path in the released unit that turns verification off or reads another
+  trust file (the bundles are the documented `SYSTEM_BUNDLES`).
+* Test-only behavior is the `testing` feature's (fault bits, counters, a
+  counting allocator, the `bh_t_*` exports): the released unit compiles
+  every fault check to `false` and exports only `bh_*`
+  (`http-unit-exports`). Never read an environment variable in the unit.
+* The provider is identified, not assumed: the unit references
+  `botlish_boringssl_<tag>_<commit>`, which only the provider package's
+  archive defines (`http-provider-identity`); the http package locks the
+  boringssl release it was built against, and a graph with another release
+  is a DEPENDENCY-CONFLICT. Never prefix, patch or bundle BoringSSL into
+  the unit (boring-sys builds link-only against empty archives).
+* Releases are reproducible: `--locked`, one codegen unit, remapped paths,
+  deterministic archives; the pinned author image (tools/package-build/)
+  carries the Rust toolchain. `http` 0.1.0 and 0.2.0 and `boringssl`
+  0.20261020.0 are recorded in packages/RELEASES.tsv: any change under
+  `packages/http` or `packages/boringssl` (its documentation included:
+  the artifact holds it) is a new version, built and recorded as they
+  were.
+
+If you change `packages/http`, `packages/boringssl`, `tools/http-package.tcl`
+or their recipes, run `tclsh9.0 tests/cffi/http.tcl` (it builds the
+provider and both units into Botlish's cache), `tests/http-client.test`
+(independent peers: Python's asyncio, ssl and `h2`, which it needs, and
+nghttpd where installed), `tests/resources.test`,
+`audit/http-client/tools/syntax-fuzz.tcl` (several seeds; URIs and header
+fields against their oracles) and `audit/http-client/tools/mutate.tcl`
+(every mutant in its `mutants.txt` must still apply and be killed: update a
+mutant's text when you change the code it mutates, keeping it a mutant of
+the same rule), plus the clean room for a change to what a consumer
+installs or links (`audit/http-client/cleanroom/cleanroom.sh image`, then
+`repository.sh OUT` and `cleanroom.sh run single/out/botlish OUT RESULTS`
+after `single/build.sh`: the report's "Clean room").
+`audit/http-client/tools/measure.tcl` regenerates the measurements.
+
+## External tools and target support packages
+
+A package may carry tools and target runtime artifacts
+(EXTERNAL-COMPILER-TOOLS-AND-TARGET-PACKAGES-MILESTONE-1.md; BOTLISH-TOOLS.md
+is the protocol, BOTLISH-JSON.md section 14 the key): `botlish.json` schema
+4's `tools`, run only by `botlish tool` (pm/tools.tcl, a package-manager
+command: the compiler is not loaded); a target support package's
+`botlish-target-support.json`, read only by `-emit-native-executable
+-target-support NAME` (native/support.tcl); and the native library
+manifest, schema 2 (native/library.tcl's `Manifest`), what tools consume.
+Keep it so:
+
+* Installation never implies activation: no operation but `tool` runs a
+  package's program -- not add, install, update, remove, verify, a view, an
+  import, a compilation, `tools` -- and no installed file is ever
+  executable (the program is copied into a private directory and made
+  executable there, by `tool`, after its bytes are checked against the
+  installation record). Never add a hook, a post-install step, automatic
+  activation, a compiler pass, a plugin loaded into the compiler process,
+  a grammar extension, an intrinsic or a diagnostic contributed by a
+  package, or a tool the compiler starts by itself.
+* Resolution is explicit: only the project's direct dependencies provide
+  runnable tools; a short name two of them declare is TOOL-AMBIGUOUS, never
+  resolved by order; a transitive package's tool is TOOL-NOT-DIRECT; an
+  unknown protocol, a program for another host (the host's program runs,
+  whatever -target says) and a changed or missing program are refused
+  before anything runs. Never fall back to another tool.
+* The process boundary: a tool's words reach it exactly, never as shell
+  text -- Tcl's exec reads words starting with <, >, | or 2> as
+  redirections, so Unix goes through the fixed /bin/sh trampoline
+  (`pm::tools::trampoline`: positional parameters only), and a test that
+  passes such words to a command does the same. The tool's exit status is
+  the command's; a signal, or a change to the installation (the snapshot
+  against the record taken before it ran), fails it. The project stays
+  locked while a tool runs.
+* Tool packages use ordinary dependencies: their locks join the one graph
+  (pm/graph.tcl) like any package's; never resolve a tool's dependencies
+  apart, never weaken a lock for one, no peer dependencies.
+* The request carries paths, names and facts, never a value of the
+  environment (only whether a declared variable is set), a time or compiler
+  memory; a tool consumes artifacts, never the HIR. A new request member or
+  input kind is a new protocol number.
+* The manifest binds its build: each artifact's SHA-256, the runtime ABI
+  fingerprint, ownership and release functions as data. Its keys stay in
+  their fixed order and two builds give the same bytes; `tool -artifact`
+  refuses a manifest whose files differ, of another schema or target.
+  Library mode links with libbotlish_native.a beside the driver, else the
+  runtime archive (what the single executable carries); single/main.tcl's
+  `MayLink` counts -emit-native-library.
+* Target support is declarative and explicit: the compiler reads a
+  package's descriptor only when -target-support names it, from the
+  compilation target's package tree (never the host's), and checks it --
+  and the runtime archive's own identity record (`runtime::aotimage::
+  identity_record`: the triple and `ABI_FINGERPRINT`, a static of
+  native/runtime-archive, read from the bytes, never by running anything)
+  -- before any linker runs. Never accept an archive for a target by its
+  architecture alone (another OS or C library ABI is refused), never fall
+  back to the driver's own runtime archive when the named package is
+  missing, never let a descriptor add a linker flag (its system libraries
+  are compared with the system linker's, never added), and never give a
+  target support package code generation: an unknown target stays unknown.
+  `ABI_FINGERPRINT` is the same digest `abi_fingerprint()` always computed
+  (`abi_fingerprint_constant_is_the_digest_of_its_words`): never fork it.
+
+If you change pm/tools.tcl, schema 4 (pm/descriptor.tcl), the tool command
+dispatch (pm/commands.tcl, main.tcl, single/main.tcl), native/support.tcl,
+`-target-support` (main.tcl, native::executable's -runtime-archive, the
+driver's --runtime-archive and `runtime-abi`), the identity record, the
+manifest, library mode's runtime archive, audit/external-tools/src/ or its
+packages, run `tests/external-tools.test`, `tests/native-library.test`,
+`tests/package-manager.test` (its descriptor tests), `tests/main-cli.test`,
+`audit/external-tools/tools/mutate.tcl` (every mutant in its `mutants.txt`
+must still apply and be killed by a test its `!!` line names: update a
+mutant's text when you change the code it mutates, keeping it a mutant of
+the same rule), `cargo test --release --manifest-path native/Cargo.toml --lib
+aotimage` for the fingerprint or the record, `tests/system-linker.test` for
+the driver's runtime archive, and, after `single/build.sh`, the clean room
+(`audit/external-tools/tools/packages.sh OUT native/target/release
+single/out/botlish`, then `audit/external-tools/cleanroom/cleanroom.sh
+single/out/botlish OUT/repo RESULTS`; the single-executable workflow's
+build job runs both).
 
 ## Diagnostic recovery
 

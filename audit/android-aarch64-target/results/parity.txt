@@ -1,0 +1,19 @@
+== API 21 (api-21)
+PASS states equal the interpreter's (321 states)
+PASS score, over and first_empty equal the interpreter's (744, 1, -1)
+PASS declared errors cross the C ABI with their identities
+PASS the final score is positive (tiles merged)
+parity: 160 steps, 321 states, score 744, host run 128 ms
+== API 24 (api-24)
+PASS states equal the interpreter's (321 states)
+PASS score, over and first_empty equal the interpreter's (744, 1, -1)
+PASS declared errors cross the C ABI with their identities
+PASS the final score is positive (tiles merged)
+parity: 160 steps, 321 states, score 744, host run 140 ms
+== API 35 (api-35)
+PASS states equal the interpreter's (321 states)
+PASS score, over and first_empty equal the interpreter's (744, 1, -1)
+PASS declared errors cross the C ABI with their identities
+PASS the final score is positive (tiles merged)
+parity: 160 steps, 321 states, score 744, host run 151 ms
+libgame.so sha256 a40d786e5a386db1b4257ed1ebea78ddf23fbff8cf88d71edd048ee9f1b144d3

@@ -530,6 +530,7 @@ proc hir::aot::TailCalls {hir} {
 }
 
 proc hir::aot::TailInto {hir e tailsVar} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $tailsVar tails
     switch -- [hir::kind $hir $e] {
         call { lappend tails $e }

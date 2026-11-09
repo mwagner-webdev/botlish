@@ -571,11 +571,11 @@ test method-types-dynamic-receiver-into-typed-parameter {an untyped receiver is 
 # ---------------------------------------------------------------------------
 # Shadowing and ambiguity: ordinary lexical resolution
 
-test method-shadowing-local {a local binding that shadows a function is what the sugar sees too: it does not reach the function behind it} -body {
+test method-shadowing-local {a local binding that shadows a function is what the sugar sees too: it does not reach the function behind it (a non-callable one is a compile-time NOT-CALLABLE in both spellings)} -body {
     set prelude "fn f(a):\n    a + 100\n"
     list [bothSpellings "${prelude}fn g(x):\n    f = 5\n    x.f()\ng(1)" "${prelude}fn g(x):\n    f = 5\n    f(x)\ng(1)"] \
         [bothSpellings "${prelude}fn g(x):\n    fn f(a):\n        a + 1\n    x.f()\ng(1)" "${prelude}fn g(x):\n    fn f(a):\n        a + 1\n    f(x)\ng(1)"]
-} -result {{error {CORE SEMANTIC NOT-CALLABLE} {cannot call non-callable value 5}} {value 2}}
+} -result {{error {CORE SEMANTIC NOT-CALLABLE} {t.bot:L:C: cannot call "f", a value of type int: only a function can be called, so this call could only fail when it runs; this binding of "f" hides the function "f", which a call of "f" here never reaches (rename the binding)}} {value 2}}
 
 test method-shadowing-parameter {a parameter named like a function shadows it for the sugar too} -body {
     set prelude "fn f(a):\n    a + 100\n"

@@ -56,7 +56,7 @@ The remaining problems are primarily distribution, resolution, authentication an
 | PM-4 | Signed publication and TUF-backed registry | Medium | not started |
 | PM-5 | Upstream history continuity and native provenance | Medium | not started (PM-3 records upstream Git identities, unchecked against history) |
 | PM-6 | Independent attestations and transparency | Long-term | not started |
-| PM-7 | Compiler-plugin distribution experiment | Parallel research after PM-2 | not started |
+| PM-7 | Compiler-plugin distribution experiment | Parallel research after PM-2 | PM-7A done: EXTERNAL-COMPILER-TOOLS-AND-TARGET-PACKAGES-MILESTONE-1.md (external tools run only explicitly, out of process; declarative target support packages; the native library manifest as the artifact contract). In-process and privileged extensions: not started |
 
 PM-1 through PM-3 constitute the first practically useful package ecosystem. PM-4 is required before treating a public registry as a trusted distribution channel.
 
@@ -489,6 +489,8 @@ Compiler extensions should require explicit enablement and a separate authority 
 An independent plugin registry is justified only if actual lifecycle or security requirements cannot be accommodated by distinct package kinds and activation policies.
 
 **Exit criterion:** A documented evidence-based decision on common versus separate distribution infrastructure, with at least one working experiment and an explicit compiler-plugin authority model.
+
+*PM-7A (EXTERNAL-COMPILER-TOOLS-AND-TARGET-PACKAGES-MILESTONE-1.md)* built candidates A and B and a narrow form of C: ordinary packages carry declarative target support (a runtime archive and its descriptor, read only when a compilation names it) and external tools (`botlish.json` schema 4), which only `botlish tool` runs, in a process of their own, against the documented artifact contract (the native library manifest, schema 2). The ordinary package manager distributes all of them; installation never implies activation. Executable extensions inside the compiler process, and any extension with privileged compiler access, remain undecided and unbuilt.
 
 ---
 

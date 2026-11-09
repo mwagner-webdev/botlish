@@ -131,6 +131,8 @@ source [file join [file dirname [file normalize [info script]]] shortstring.tcl]
 source [file join [file dirname [file normalize [info script]]] lower.tcl]
 source [file join [file dirname [file normalize [info script]]] prepare.tcl]
 source [file join [file dirname [file normalize [info script]]] library.tcl]
+source [file join [file dirname [file normalize [info script]]] support.tcl]
+source [file join [file dirname [file normalize [info script]]] elf.tcl]
 
 namespace eval native {
     variable home [file dirname [file normalize [info script]]]
@@ -211,7 +213,9 @@ proc native::WithProgramDirs {hir run script} {
 #   stackGuard   NATIVE LIMIT STACK for any exhausted native stack
 #   libraries    native libraries (native::library, NATIVE-LIBRARY-MILESTONE-1.md:
 #                codegen/library.rs's SUPPORTED; the archive's partial link
-#                and symbol localization are GNU binutils')
+#                and symbol localization are GNU binutils') of this host's
+#                own target; a library of another target is made through its
+#                target support package (`targetCapabilities`, below)
 #   mainThreadStartup  executables started on the process's main thread
 #                (native::executable -startup main-thread, MAIN-THREAD-
 #                STARTUP-MILESTONE-1.md: runtime/aot.rs's MAIN_THREAD_STARTUP,
@@ -251,6 +255,21 @@ namespace eval native {
         frameRoots {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
         libraries {linux-x86_64 linux-aarch64} \
         mainThreadStartup {macos-aarch64}]
+    # What the native backend makes *for* a target, on any host that has the
+    # target's support package and toolchain (ANDROID-AARCH64-TARGET-
+    # SUPPORT-MILESTONE-1.md): code kept, never run here. `libraries`: a
+    # native library's object is emitted for the target (botlish-native
+    # library --target, codegen/library.rs's `supports`) and linked with its
+    # target support package's runtime by the package's declared toolchain.
+    variable targetCapabilities [dict create \
+        libraries {linux-x86_64 linux-aarch64 android-aarch64}]
+}
+
+# Whether the native backend makes CAPABILITY (native::targetCapabilities)
+# for TARGET, whatever this host is.
+proc native::targetSupports {capability target} {
+    variable targetCapabilities
+    return [expr {$target in [dict get $targetCapabilities $capability]}]
 }
 
 # Whether the native backend has CAPABILITY (native::capabilities) on this
@@ -360,6 +379,28 @@ proc native::targetFacts {triple} {
     return [lrange $output 2 end]
 }
 
+# This driver's runtime ABI fingerprint (runtime::aotimage::ABI_FINGERPRINT,
+# 16 lowercase hexadecimal digits: botlish-native runtime-abi), asked once
+# per process: what a native library's manifest records and a target
+# support package's runtime archive must state
+# (EXTERNAL-COMPILER-TOOLS-AND-TARGET-PACKAGES-MILESTONE-1.md).
+proc native::runtimeAbi {} {
+    variable runtimeAbiCache
+    if {[info exists runtimeAbiCache]} {
+        return $runtimeAbiCache
+    }
+    set pipe [open |[list [binary] runtime-abi 2>@1] r]
+    fconfigure $pipe -encoding utf-8 -translation lf
+    set output [string trimright [read $pipe] \n]
+    catch {close $pipe}
+    set first [lindex [split $output \n] 0]
+    if {[lindex $first 0] ne "runtime-abi" || ![regexp {^[0-9a-f]{16}$} [lindex $first 1]]} {
+        throw {NATIVE BUG} "native backend gave no runtime ABI: $output"
+    }
+    set runtimeAbiCache [lindex $first 1]
+    return $runtimeAbiCache
+}
+
 # The link plan of the program-mode HIR program HIR as the driver resolves
 # it for this host's linker with the search directories in force
 # (native::linkDirs, native::frameworkDirs): a list of records, one per
@@ -402,8 +443,8 @@ proc native::lowered {hir args} {
     variable unsupported
     try {
         # Its walks recurse as deep as the program nests (a left-deep `and`
-        # chain: BRANCH-FORM-BOOLEAN-LOWERING.md), under the front end's
-        # recursion floor (hir::Deep); the program then runs natively.
+        # chain: BRANCH-FORM-BOOLEAN-LOWERING.md), in segments under a
+        # driver (hir::Deep, core/deep.tcl); the program then runs natively.
         return [hir::Deep {native::lower::program [prepareHir $hir] {*}$args}]
     } trap {NATIVE UNSUPPORTED} {message options} {
         lappend unsupported [list [dict get $options -errorcode] $message]
@@ -616,8 +657,16 @@ proc native::StartupOption {command args} {
 
 proc native::executable {hir path args} {
     lassign [StartupOption native::executable {*}$args] startup args
+    # A target support package's runtime archive (-runtime-archive PATH,
+    # native::support::select's `archive`): the one the system linker links
+    # (EXTERNAL-COMPILER-TOOLS-AND-TARGET-PACKAGES-MILESTONE-1.md).
+    set runtimeArchive {}
+    if {[dict exists $args -runtime-archive]} {
+        set runtimeArchive [list --runtime-archive [file normalize [dict get $args -runtime-archive]]]
+        dict unset args -runtime-archive
+    }
     set text [ExecutableText $hir {*}$args]
-    set lines [WithProgramDirs $hir 0 {Driver executable $text [file normalize $path] --startup $startup}]
+    set lines [WithProgramDirs $hir 0 {Driver executable $text [file normalize $path] --startup $startup {*}$runtimeArchive}]
     foreach line $lines {
         if {[lindex $line 0] eq "error"} { Outcome $lines }
     }

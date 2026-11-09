@@ -1,0 +1,11 @@
+# unreachable.bot -- a release in code the compiler proves never runs
+# (tests/unused-context.test): no requirement, nothing compiled.
+import terminal
+
+fn maybe(n: int) -> int:
+    if false:
+        s = terminal::enter(n)
+        terminal::note(n)
+    n + 1
+
+maybe(1)

@@ -1,0 +1,12 @@
+pid 13028
+end owned before shutdown 1
+waiter: its read was revoked by the shutdown
+abandoned 0
+end killed by shutdown 1
+end owned 0
+end escalations 0
+end live 0
+end fds delta 0
+[harness] pid 13028 gone
+[harness] supervisor peak RSS 16280 kB, CPU 0.005 s
+[harness] PASS in 0.20 s

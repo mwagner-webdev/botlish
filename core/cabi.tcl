@@ -26,6 +26,14 @@
 # and are still two targets (plain char differs, and so do the C calling
 # convention, the object format and every platform interface). Nothing
 # reads an operating system from an architecture, or the reverse. On
+# Android is an operating system of its own (android-aarch64,
+# ANDROID-AARCH64-TARGET-SUPPORT-MILESTONE-1.md): Linux's kernel, Bionic's C
+# library and the NDK's toolchain, the Android arm64-v8a ABI -- never
+# linux-aarch64, whose data model, plain char and calling convention it
+# shares and whose C library, loader, system libraries and runtime archive
+# it does not. No standard namespace is its platform interface (the
+# `platforms` table names none: std::linux is Linux's), so a program of it
+# imports none of them. On
 # Windows the C toolchain's ABI family is part of the target too:
 # windows-x86_64 is MSVC's (x86_64-pc-windows-msvc), windows-x86_64-gnu
 # MinGW-w64's (x86_64-pc-windows-gnu). Their rows agree today (LLP64, signed
@@ -165,8 +173,9 @@ namespace eval core::cabi {
         macos-aarch64   {os macos arch aarch64 model LP64 charSigned 1 triple aarch64-apple-darwin floating IEEE} \
         windows-x86_64  {os windows arch x86_64 model LLP64 charSigned 1 triple x86_64-pc-windows-msvc floating IEEE} \
         windows-x86_64-gnu {os windows arch x86_64 model LLP64 charSigned 1 triple x86_64-pc-windows-gnu floating IEEE} \
-        windows-aarch64 {os windows arch aarch64 model LLP64 charSigned 1 triple aarch64-pc-windows-msvc floating IEEE}]
-    variable systems [dict create linux Linux macos macOS windows Windows]
+        windows-aarch64 {os windows arch aarch64 model LLP64 charSigned 1 triple aarch64-pc-windows-msvc floating IEEE} \
+        android-aarch64 {os android arch aarch64 model LP64 charSigned 0 triple aarch64-linux-android floating IEEE}]
+    variable systems [dict create linux Linux macos macOS windows Windows android Android]
     # The standard namespace trees that are an operating system's platform
     # interface -- ROOT -> OS: the namespace ROOT and every namespace under
     # it are OS's, importable only for a target of OS (surface/modules.tcl's

@@ -633,6 +633,7 @@ proc native::shortstr::ApplyDemand {plan} {
 # Records the uses of a statement list's expressions: all but the last are
 # discarded, the last flows to TAIL.
 proc native::shortstr::DemandBody {id body tail} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     set n [llength $body]
     set i 0
     foreach e $body {
@@ -674,6 +675,7 @@ proc native::shortstr::PotNatural {id e} {
 # Records, for every expression under E that reaches a candidate slot, the
 # context it is consumed in (CTX: scalar, tagged, discard or "slot KEY").
 proc native::shortstr::DemandWalk {id e ctx} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     variable Spec
     variable SlotUses
     variable SlotCand
@@ -853,6 +855,7 @@ proc native::shortstr::CallsOf {id} {
 }
 
 proc native::shortstr::LiveWalk {id h e liveVar} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $liveVar live
     variable Ranges
     if {![hir::get $h $e reachable]} {

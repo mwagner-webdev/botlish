@@ -1,0 +1,17 @@
+# probe: the escape vocabulary is \\ \" \n \r \t in a String and
+# \\ \' \n \r \t in a character literal; every other escape is a syntax
+# error, so no valid program spells one (F).
+# outcome: reject
+# diagnostic: 11:6 invalid escape "\u" in string
+# diagnostic: 12:6 invalid escape "\x" in string
+# diagnostic: 13:6 invalid escape "\e" in string
+# diagnostic: 14:6 invalid escape "\0" in string
+# diagnostic: 15:6 invalid escape "\'" in string
+# diagnostic: 16:6 invalid escape "\"" in character literal
+a = "\u{1B}"
+b = "\x1b"
+c = "\e"
+d = "\0"
+e = "\'"
+f = '\"'
+[a, b, c, d, e, f]

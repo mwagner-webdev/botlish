@@ -7,7 +7,9 @@ name: tests (macos arm64)
 # the native golden runner) and check that what does not is refused the way
 # the audit records.
 #
-#   smoke          Tier A, every push: the host and its C and Rust
+#   smoke          Tier A, every push (a branch push runs it and the
+#                  opt-in jobs only; CI-RUNS.md, "The canary"): the host
+#                  and its C and Rust
 #                  toolchains (not Botlish), Tcl 9.0.1, core::cabi's macOS row,
 #                  the native build and its Rust unit tests, the native stack
 #                  bounds and overflow tests, the native status, native
@@ -18,26 +20,30 @@ name: tests (macos arm64)
 #                  then the ones that failed in recent CI runs on macOS,
 #                  within about ten minutes. system-linker, acceptance, app
 #                  and full wait for it: a push that breaks them costs one
-#                  macOS runner for minutes
-#   system-linker  every push: the system linker (SINGLE-EXECUTABLE-FFI-
+#                  macOS runner for minutes. A branch push at a commit
+#                  another run already tests defers to it and runs nothing
+#                  (CI-RUNS.md, "A commit already tested")
+#   system-linker  every push to main, dispatch and fork pull request (as
+#                  every job below but the opt-in ones and linux control):
+#                  the system linker (SINGLE-EXECUTABLE-FFI-
 #                  MILESTONE-1.md) -- Apple clang and ld, the precompiled
 #                  runtime archive, no rustc -- its tests and the executable
 #                  and C test files linked by it
-#   acceptance     Tier B, every push, four shards: the acceptance tier --
+#   acceptance     Tier B, five shards: the acceptance tier --
 #                  the test files and golden suites that pass on macOS
-#   app            every push: the macOS distribution, Botlish.app
+#   app            the macOS distribution, Botlish.app
 #                  (MACOS-AARCH64-MILESTONE-9.md) -- built, signed ad hoc,
 #                  verified, its packaging census, accepted outside the
 #                  checkout, compared with the checkout's compiler, measured
 #                  -- and its download archive the run's
 #                  botlish-macos-aarch64 artifact
-#   app-clean      every push, after app: the downloaded application on the
+#   app-clean      after app: the downloaded application on the
 #                  runner with Apple's developer tools, Rust and the
 #                  checkout moved away
-#   link-plan-sdl3 every push, after app: the downloaded application links
+#   link-plan-sdl3 after app: the downloaded application links
 #                  static SDL3 (built from its pinned release) with the
 #                  frameworks SDL3 needs (NATIVE-LINK-PLAN-MILESTONE-1.md)
-#   main-thread-startup  every push, after app: the startup policy
+#   main-thread-startup  after app: the startup policy
 #                  main-thread (MAIN-THREAD-STARTUP-MILESTONE-1.md) through
 #                  the downloaded application -- an executable built with
 #                  the checkout and Rust moved away, its LC_MAIN, its thread
@@ -49,7 +55,8 @@ name: tests (macos arm64)
 #   app-mutants    opt-in, "[ci-app-mutants]" in the pushed head commit's
 #                  message (or a manual run's app_mutants): the
 #                  application's packaging mutants
-#   linux control  Tier A on ubuntu-latest, every push: the same smoke
+#   linux control  Tier A on ubuntu-latest, every push (deferred with the
+#                  smoke job): the same smoke
 #                  commands on Linux x86-64, for telling a macOS failure from
 #                  a Linux one at the same commit
 #   full           Tier C, opt-in: "[ci-full]" in the pushed head commit's
@@ -64,8 +71,12 @@ name: tests (macos arm64)
 #                  (or the "gc_stress" input)
 #
 # Pushes to any branch run it, so a feature branch gets macOS results before
-# this file is on main; a pull request from this repository's own branches
-# skips (its push already ran), one from a fork runs. Documentation-only
+# this file is on main: a branch push the smoke job (its canary last), linux
+# control and the opt-in jobs its head commit asks for (a marker counts
+# anywhere in the message, prose included); "Run workflow" on
+# the branch (workflow_dispatch) runs the rest, which every push to main
+# runs. A pull request from this repository's own branches skips (its push
+# already ran), one from a fork runs. Documentation-only
 # pushes skip, and so do tags (a tag's commit was tested where it was
 # pushed). A newer push to the same branch cancels a running one, on main
 # too (CI-RUNS.md). No macOS job waits for a Linux runner. A manual run with app_only
@@ -123,6 +134,11 @@ jobs:
     if: (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository) && !inputs.app_only
     runs-on: macos-15
     timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      deferred: ${{ steps.twin.outputs.deferred }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -130,7 +146,14 @@ jobs:
           fetch-depth: 0
           filter: blob:none
 
+      # A branch push at a commit another run already tests defers to it and
+      # runs nothing (CI-RUNS.md, "A commit already tested").
+      - name: Already tested at this commit?
+        id: twin
+        uses: ./.github/actions/twin
+
       - name: Host
+        if: steps.twin.outputs.deferred != 'true'
         run: |
           sw_vers
           uname -a
@@ -148,62 +171,71 @@ jobs:
       # The toolchain, not Botlish: a C program (also linked against a
       # static library) and Rust programs built and run as Mach-O arm64.
       - name: Toolchain smoke (C, Rust, Cargo; not Botlish)
+        if: steps.twin.outputs.deferred != 'true'
         run: tests/platform/toolchain-smoke.sh
 
       - name: Install prerequisites (Tcl 9.0.1, stable Rust)
+        if: steps.twin.outputs.deferred != 'true'
         uses: ./.github/actions/setup-macos
 
       - name: C ABI facts against core::cabi's macos-aarch64 row
+        if: steps.twin.outputs.deferred != 'true'
         run: tclsh9.0 tests/platform/cabi-facts.tcl
 
       - name: Build native (Cranelift) backend
+        if: steps.twin.outputs.deferred != 'true'
         uses: ./.github/actions/build-native
 
       # The runtime's tests and the driver's own (--bins): its link plans,
       # targets and the Apple C signature, which Cranelift's AArch64 backend
       # compiles here.
       - name: Native Rust unit tests
+        if: steps.twin.outputs.deferred != 'true'
         run: cargo test --release --manifest-path native/Cargo.toml --lib --bins
 
       # The host's stack bounds and guards and the runtime's overflow guard,
       # checked in child processes (native/tests/native_stack.rs, milestone 4):
       # its log records the macOS stack facts it observed.
       - name: Native stack bounds and overflow (isolated processes)
+        if: steps.twin.outputs.deferred != 'true'
         run: cargo test --release --manifest-path native/Cargo.toml --test native_stack
 
       # Each native capability works or is refused exactly as recorded for
       # macos-aarch64 (MACOS-AARCH64-PORT-AUDIT.md, section 15).
       - name: Native status
+        if: steps.twin.outputs.deferred != 'true'
         run: tclsh9.0 tests/platform/native-status.tcl -verbose 1
 
       - name: Smoke tier
+        if: steps.twin.outputs.deferred != 'true'
         run: tclsh9.0 tests/platform/tier.tcl smoke 2>&1 | tee tier.log
 
       # The likeliest to fail, first (CI-RUNS.md, "The canary"): compared
       # with main's previous head on a push to main, with the merge base
       # with main otherwise. Its selection goes to the job summary.
       - name: Canary
+        if: steps.twin.outputs.deferred != 'true'
         env:
           BASE: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.event.before || 'origin/main' }}
         run: tclsh9.0 tests/canary.tcl -base "$BASE"
+
+      # What -aot-run costs on this host (bench/aot-run.tcl,
+      # AOT-RUN-MILESTONE-1.md): the phases, the commands beside an explicit
+      # compile-then-run and the JIT, the time to a program's first output.
+      - name: AOT-run costs
+        if: always() && steps.twin.outputs.deferred != 'true'
+        run: tclsh9.0 bench/aot-run.tcl -runs 3 2>&1 | tee aot-run-costs.log
 
       # A program object and a standalone executable as the host's tools see
       # them (file, nm, objdump, otool, lipo, codesign), the executable run
       # outside its build directory, the link command and timings
       # (milestone 5). Last, so that its lines are the log's last.
       - name: Native objects and executables
-        if: always()
+        if: always() && steps.twin.outputs.deferred != 'true'
         run: tclsh9.0 tests/platform/aot-facts.tcl -verbose 1
 
-      # What -aot-run costs on this host (bench/aot-run.tcl,
-      # AOT-RUN-MILESTONE-1.md): the phases, the commands beside an explicit
-      # compile-then-run and the JIT, the time to a program's first output.
-      - name: AOT-run costs
-        if: always()
-        run: tclsh9.0 bench/aot-run.tcl -runs 3 2>&1 | tee aot-run-costs.log
-
       - name: Publish summary
-        if: always()
+        if: always() && steps.twin.outputs.deferred != 'true'
         run: |
           {
             echo "## Smoke (macOS arm64)"
@@ -219,7 +251,9 @@ jobs:
   system-linker:
     name: system linker (macOS arm64)
     needs: smoke
-    if: (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository) && !inputs.app_only
+    # Not on a branch push, which runs the smoke job only: dispatch the
+    # workflow on the branch (CI-RUNS.md, "The canary").
+    if: (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository) && !inputs.app_only && (github.event_name != 'push' || github.ref == 'refs/heads/main')
     runs-on: macos-15
     timeout-minutes: 120
     env:
@@ -282,6 +316,7 @@ jobs:
     if: >-
       !cancelled() && (needs.smoke.result == 'success' || needs.smoke.result == 'skipped')
       && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository)
+      && (github.event_name != 'push' || github.ref == 'refs/heads/main')
     runs-on: macos-15
     timeout-minutes: 120
     steps:
@@ -429,7 +464,7 @@ jobs:
     needs: [smoke, app]
     if: >-
       !cancelled() && (needs.smoke.result == 'success' || needs.smoke.result == 'skipped')
-      && needs.app.result == 'success'
+      && needs.app.result == 'success' && (github.event_name != 'push' || github.ref == 'refs/heads/main')
     runs-on: macos-15
     timeout-minutes: 45
     steps:
@@ -497,6 +532,7 @@ jobs:
   link-plan-sdl3:
     name: static SDL3 through Botlish.app (macOS arm64)
     needs: app
+    if: github.event_name != 'push' || github.ref == 'refs/heads/main'
     runs-on: macos-15
     timeout-minutes: 60
     steps:
@@ -553,7 +589,7 @@ jobs:
   main-thread-startup:
     name: main-thread startup (macOS arm64)
     needs: app
-    if: (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository) && !inputs.app_only
+    if: (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository) && !inputs.app_only && (github.event_name != 'push' || github.ref == 'refs/heads/main')
     runs-on: macos-15
     timeout-minutes: 120
     steps:
@@ -713,55 +749,72 @@ jobs:
       && (contains(github.event.head_commit.message, '[ci-app-mutants]') || inputs.app_mutants)
     runs-on: macos-15
     timeout-minutes: 300
+    permissions:
+      contents: read
+      actions: read
     steps:
       - uses: actions/checkout@v5
 
+      # A branch push at a commit another run already tests defers to it
+      # (its message, so its opt-in jobs, is this push's) and runs nothing
+      # (CI-RUNS.md, "A commit already tested").
+      - name: Already tested at this commit?
+        id: twin
+        uses: ./.github/actions/twin
+
       - name: Install prerequisites (Tcl 9.0.1, stable Rust)
+        if: steps.twin.outputs.deferred != 'true'
         uses: ./.github/actions/setup-macos
 
       - name: Build native (Cranelift) backend
+        if: steps.twin.outputs.deferred != 'true'
         uses: ./.github/actions/build-native
 
       - name: Cache the Tcl.framework build
+        if: steps.twin.outputs.deferred != 'true'
         uses: actions/cache@v4
         with:
           path: ~/Library/Caches/botlish-app
           key: app-tcl-framework-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('single/macos/tcl-framework.sh', 'single/build.sh') }}
 
       - name: Build Botlish.app (and the framework, unless cached)
+        if: steps.twin.outputs.deferred != 'true'
         run: single/macos/build.sh -o dist
 
       - name: The application's mutants
-        if: always()
+        if: always() && steps.twin.outputs.deferred != 'true'
         run: tclsh9.0 audit/macos-app/tools/mutate.tcl -tcl-framework "$(ls -d ~/Library/Caches/botlish-app/tcl-framework-* | head -n 1)" 2>&1 | tee app-mutants.log
 
       - name: The driver's mutants of the application's share
-        if: always()
+        if: always() && steps.twin.outputs.deferred != 'true'
         run: tclsh9.0 audit/native-aot/tools/mutate.tcl -only sys-runtime-bundle-ignored,sys-runtime-bundle-relative,sys-runtime-bundle-remedy-build,sys-apple-remedy-rust,sys-executable-rpath 2>&1 | tee native-aot-mutants.log
 
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: always() && steps.twin.outputs.deferred != 'true'
         with:
           name: botlish-macos-app-mutants
           path: "*.log"
           if-no-files-found: warn
 
   acceptance:
-    name: acceptance (Tier B, macOS arm64, shard ${{ matrix.shard }}/4)
+    name: acceptance (Tier B, macOS arm64, shard ${{ matrix.shard }}/5)
     needs: smoke
-    if: (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository) && !inputs.app_only
+    if: (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository) && !inputs.app_only && (github.event_name != 'push' || github.ref == 'refs/heads/main')
     runs-on: macos-15
     timeout-minutes: 75
-    # Four shards. Two had grown to 61-76 minutes each (Tcl test files
+    # Five shards. Two had grown to 61-76 minutes each (Tcl test files
     # 57-73 of them) and were cut off at the limit in the golden phase, so
     # they became three; with SENDABILITY-AND-VALUE-COPY-MILESTONE-1.md's two
     # test files shard 1 of three was cut off again at 75 minutes in its
-    # golden phase (MAIN-CI-FAILURES-2026-11.md, 3.4): tier.tcl shards
+    # golden phase (MAIN-CI-FAILURES-2026-11.md, 3.4), so they became four;
+    # with DEPTH-SAFE-NESTED-EXPRESSION-FRONTEND-MILESTONE-1.md's test file
+    # shard 2 of four was cut off at 75 minutes in its golden phase (its Tcl
+    # test files alone 65 minutes), so they became five: tier.tcl shards
     # round-robin by index, not by cost.
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5]
     steps:
       - uses: actions/checkout@v5
 
@@ -774,7 +827,7 @@ jobs:
       - name: Acceptance tier, this shard
         env:
           SHARD: ${{ matrix.shard }}
-        run: tclsh9.0 tests/platform/tier.tcl -shard "$SHARD/4" -backends interp acceptance 2>&1 | tee tier.log
+        run: tclsh9.0 tests/platform/tier.tcl -shard "$SHARD/5" -backends interp acceptance 2>&1 | tee tier.log
 
       - name: Publish summary
         if: always()
@@ -782,7 +835,7 @@ jobs:
           SHARD: ${{ matrix.shard }}
         run: |
           {
-            echo "## Acceptance (macOS arm64), shard $SHARD/4"
+            echo "## Acceptance (macOS arm64), shard $SHARD/5"
             echo '```'
             awk '/^######## .*: (ok|FAILED)/ {print} /^######## [0-9]+ commands/ {tail = 1} tail {print}' tier.log 2>/dev/null | grep -a . || echo "the acceptance tier did not run"
             echo '```'
@@ -793,31 +846,47 @@ jobs:
     if: (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository) && !inputs.app_only
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
     env:
       LANG: C.utf8
       LC_ALL: C.utf8
     steps:
       - uses: actions/checkout@v5
 
+      # A branch push at a commit another run already tests defers to it and
+      # runs nothing (CI-RUNS.md, "A commit already tested").
+      - name: Already tested at this commit?
+        id: twin
+        uses: ./.github/actions/twin
+
       - name: Toolchain smoke (C, Rust, Cargo; not Botlish)
+        if: steps.twin.outputs.deferred != 'true'
         run: tests/platform/toolchain-smoke.sh
 
       - name: Install project prerequisites
+        if: steps.twin.outputs.deferred != 'true'
         run: bash .devcontainer/setup.sh
 
       - name: C ABI facts against core::cabi's linux-x86_64 row
+        if: steps.twin.outputs.deferred != 'true'
         run: tclsh9.0 tests/platform/cabi-facts.tcl
 
       - name: Build native (Cranelift) backend
+        if: steps.twin.outputs.deferred != 'true'
         uses: ./.github/actions/build-native
 
       - name: Native status
+        if: steps.twin.outputs.deferred != 'true'
         run: tclsh9.0 tests/platform/native-status.tcl -verbose 1
 
       - name: Native objects and executables
+        if: steps.twin.outputs.deferred != 'true'
         run: tclsh9.0 tests/platform/aot-facts.tcl -verbose 1
 
       - name: Smoke tier
+        if: steps.twin.outputs.deferred != 'true'
         run: tclsh9.0 tests/platform/tier.tcl smoke
 
   full:
@@ -826,6 +895,7 @@ jobs:
     if: >-
       (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository)
       && (contains(github.event.head_commit.message, '[ci-full]') || inputs.tier == 'full') && !inputs.app_only
+      && needs.smoke.outputs.deferred != 'true'
     runs-on: macos-15
     timeout-minutes: 180
     strategy:

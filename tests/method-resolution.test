@@ -750,6 +750,65 @@ test mr-diag-decision-unchanged {how rejections are reported decides nothing: wi
 } -result {{1 1 1 1} {1 1 1 1} {1 1 1 1} {1 1 1 1}}
 
 # ---------------------------------------------------------------------------
+# A call whose result flows into its own receiver (a fold's intermediate)
+
+# `acc.concat(p)` in a fold whose intermediate starts as a String, beside the
+# application modules MODULES' `concat`s, whose first parameter is no String
+# and whose results are Int (aa, zz) and Bool (bb), with std::str's when STD.
+# With such a candidate standing, the intermediate's join (str and its
+# result) has no type and the fold's walk makes the intermediate -- the
+# call's receiver -- poison: the receiver depends on the call's own decision
+# (HTTP-CLIENT-PACKAGE-MILESTONE-1.md, F2).
+proc mrFoldConcat {modules std} {
+    set files [dict create]
+    set imports ""
+    foreach m $modules {
+        set type [expr {$m eq "bb" ? "bool" : "int"}]
+        dict set files $m.bot "fn concat(a: $type, b: str) -> $type:\n    a\n"
+        append imports "import $m\n"
+    }
+    if {$std} {
+        append imports "import std::str\n"
+    }
+    dict set files main.bot "${imports}\nnomethod fn line(parts: List\[str\]) -> str:\n    fold p in parts with intermediate acc \"\":\n        acc.concat(p)\n\nline(\[\"ab\", \"cd\"\])\n"
+    return $files
+}
+
+test mr-fold-receiver-decided {a fold's `acc.concat(p)`, whose first stand-in (aa::concat, sorting before std::str) makes its own receiver poison, is judged by its candidates' own builds: std::str::concat is the one whose build establishes the receiver and has no problem of its own, so the call is decided to it and runs on every backend -- whichever way the other candidate sorts (zz), with the kind proofs and without them (it was rejected unreported: no diagnostic, and the program failed at run time; F2)} -body {
+    set results {}
+    foreach module {aa zz} {
+        foreach kind {1 0} {
+            set r [mrCompile [mrFoldConcat [list $module] 1] $kind]
+            lappend results $module $kind [dict get $r diagnostics] [mrDecidedIn $r main.bot] \
+                [lmap b {interp compile cranelift-generic cranelift} {mrValue $r $b}]
+        }
+    }
+    set results
+} -result {aa 1 {} std::str::concat {{"abcd"} {"abcd"} {"abcd"} {"abcd"}} aa 0 {} std::str::concat {{"abcd"} {"abcd"} {"abcd"} {"abcd"}} zz 1 {} std::str::concat {{"abcd"} {"abcd"} {"abcd"} {"abcd"}} zz 0 {} std::str::concat {{"abcd"} {"abcd"} {"abcd"} {"abcd"}}}
+
+test mr-fold-receiver-trait-program {the finding's own program (audit/http-client/findings/fold-method-monomorphized.bot): with std::linux::fs imported (a trait program, which the trait monomorphization builds again from the decisions) the fold's `acc.concat(p)` is std::str::concat in the checked and in the monomorphized program, and runs -- it was charged std::linux::fs::concat's NotAPath and FOLD-INTERMEDIATE-TYPE "in the monomorphized program" (F2)} -body {
+    set text "import std::linux::fs\nimport std::str\n\nnomethod fn line(parts: List\[str\]) -> str:\n    fold p in parts with intermediate acc \"\":\n        acc.concat(p)\n\nfn main(context fs: std::linux::fs::LinuxFS) -> str:\n    line(\[\"ab\", \"cd\"\])\n\nwith context std::linux::fs::create()\nmain()\n"
+    set target [linuxTarget]
+    set r [mrCompile [dict create main.bot $text] 1 1 -target $target]
+    set hir [dict get $r hir]
+    list [dict get $r diagnostics] [dict exists $hir traitSource] [mrDecidedIn $r main.bot] \
+        [lsort -unique [lmap b [backendsFor $target {interp cranelift}] {mrValue $r $b}]]
+} -result {{} 1 std::str::concat {{"abcd"}}}
+
+test mr-fold-receiver-no-candidate {when every candidate's own build poisons the receiver (aa::concat's Int and bb::concat's Bool both conflict with the String the fold starts from), the call is NO-APPLICABLE-METHOD, reported: the reported program establishes the receiver, so no other diagnostic is its cause; each candidate's reason is that it leaves the receiver no valid type (it was rejected unreported, and the program failed at run time)} -body {
+    set r [mrCompile [mrFoldConcat {aa bb} 0]]
+    set d [lindex [mrReportedOf $r NO-APPLICABLE-METHOD] 0]
+    list [mrReported $r] [mrRecords $r] [mrDecidedIn $r main.bot] \
+        [regexp {aa::concat rejects the receiver: with this function the receiver has no valid type \(its value depends on the call's own result\); bb::concat rejects the receiver: with this function the receiver has no valid type} [dict get $d message]]
+} -result {{{NO-APPLICABLE-METHOD main.bot:6:13}} {{concat NO-APPLICABLE-METHOD 1 {}}} {} 1}
+
+test mr-poisoned-receiver-judged-by-nothing {a receiver every candidate's own build poisons for a reason independent of the call (an UNKNOWN-FIELD projection) is still judged by nothing: the call is decided to nothing, its rejection is not reported (its receiver is poison in the reported program too), and the projection's diagnostic is the only one -- at the cost of the single deviations that show the poison is not the call's (two; there were none)} -body {
+    set files [dict create main.bot "${::mrStd}\ns = {a: \[1\]}\ns.b.length()\n"]
+    set r [mrCompile $files]
+    list [mrReportedKinds $r] [mrRecords $r] [mrDecidedIn $r main.bot] [dict get [mrCompile $files 1 0] methodDeviations]
+} -result {UNKNOWN-FIELD {{length NO-APPLICABLE-METHOD 0 receiver}} {} 2}
+
+# ---------------------------------------------------------------------------
 # Static rounds and the oscillation bound
 
 test mr-static-blocks {method-style calls inside static compile blocks: the block holding the valid chain is accepted, the one holding the ambiguous call rejected with AMBIGUOUS-METHOD-CALL, alike under the batched and the sequential scheduler} -body {

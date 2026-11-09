@@ -1,0 +1,16 @@
+supervisor fds 5
+default: sigpipe dfl mask 0
+fds 0 1 2
+tty 0 0 0
+
+kept: sigpipe ign mask 0
+fds 0 1 2
+
+tty 0 0 0
+inherited
+supervisor fds after 5
+end owned 0
+end live 0
+end fds delta 0
+[harness] supervisor peak RSS 16092 kB, CPU 0.008 s
+[harness] PASS in 0.01 s

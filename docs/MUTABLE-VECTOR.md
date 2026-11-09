@@ -47,6 +47,7 @@ primitive affine value the scheduler-shaped programs put in it.
 * [By-reference arguments](#by-reference-arguments) -- a later fix
 * [Last uses per path](#last-uses-per-path) -- a later precision change
 * [Demand through struct literals](#demand-through-struct-literals) -- another
+* [Consumed fold intermediates](#consumed-fold-intermediates) -- a fourth
 * [Files](#files)
 * [What to run when changing this](#what-to-run-when-changing-this)
 
@@ -1312,6 +1313,39 @@ copies).
 Still not followed into: an `if` expression or a handled call in an
 exclusive position (`t2 = if c: put(t) else: put2(t)`), a List literal.
 
+## Consumed fold intermediates
+
+A fourth change of the copy convention
+(CONSUMED-FOLD-INTERMEDIATES-MILESTONE-1.md). A fold's intermediate is a
+parameter of its loop's body, which every backend binds to the value the
+loop carries. A mutated one was a place root renamed `acc#entry` and
+copied at every iteration's entry (`acc = mutable_vector#share(acc#entry)`):
+that copy keeps the carried value unchanged for a `continue` to keep and a
+bare `break` to yield (FOLD-LOOPS-MILESTONE-1.md, rules 5 and 6), and made
+every iteration's first write detach the whole vector -- n pushes copied
+n(n-1)/2 elements (CONSTRUCT-BINDING-MUTATION-CENSUS-1.md, section 15).
+
+Now a fold's intermediate is *consumed*, like a directly called function's
+parameter, when it needs to own its header (it is a place root, or its last
+use hands the header to an exclusive position) and no `continue` or bare
+`break` of its fold can run after the iteration may have given the header
+away -- as a mutating operation's receiver or a place argument, or by a
+use at its path's last use, which moves it (`FoldExitsClean`, a walk of the
+body that joins `if` branches and handlers and repeats inner loops; inner
+loops' exits are their own). The fold's initial value and every normal
+completion of its body (an `if`'s branches, a struct literal's fields) are
+then exclusive positions, the intermediate makes no entry copy, and the
+iteration mutates the carried header in place; a consumed fold's value is
+fresh. A fold that can exit after a give-away keeps the entry copy, which
+its rollback needs.
+
+Measured (natively, n pushes completing with the intermediate): 1,000
+shares, 1,000 detaches and 499,500 copied elements at n = 1,000 before, 0,
+0 and 0 now; 32,000 pushes took 308 ms before and 8.3 ms now (the driver's
+start-up included). `tests/consumed-fold-intermediates.test`,
+`audit/consumed-folds/tools/fuzz.tcl` (against the copying elaboration,
+`hir::mutvec::consumedFolds 0`) and `audit/consumed-folds/tools/mutate.tcl`.
+
 ## Files
 
 | file | what |
@@ -1343,4 +1377,10 @@ native/Cargo.toml --lib mutvec`; a change to `hir/affine.tcl` also needs
 AFFINE-VALUES.md's and COROUTINES.md's harnesses (AGENTS.md). A change to
 native tracing, growth or drop needs a `BOTLISH_NATIVE_GC_STRESS=1` run of
 `tests/mutable-vector.test`. `bench/mutable-vector.tcl` regenerates the
-performance report.
+performance report. A change to how a fold's intermediate is consumed
+(`FoldExitsClean`, `FoldWalk`, `GivesHeader`, `FoldIncoming`, the fold
+cases of `Eligible`, `ExclusivePositions` and `Fresh`) also runs
+`tests/consumed-fold-intermediates.test`, `tests/fold-loops.test`,
+`audit/consumed-folds/tools/fuzz.tcl` (several seeds, once with
+`-gc-stress 1`) and `audit/consumed-folds/tools/mutate.tcl`;
+`bench/consumed-folds.tcl` is its performance report.

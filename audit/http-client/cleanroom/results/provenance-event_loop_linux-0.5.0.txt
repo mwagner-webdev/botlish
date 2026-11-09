@@ -1,0 +1,26 @@
+event_loop_linux 0.5.0
+  sha256 ecd9e8114fa5bc24c2d23a2068e96ec2932e9386ca0cdb79fc568b9662146f77
+  40216 bytes, 8 files
+       1912  README.md
+        737  botlish.json
+      12613  event_loop_linux.bot
+      33242  native/event_loop_linux.c
+       5942  targets/linux-aarch64/include/botlish_event_loop.h
+      28004  targets/linux-aarch64/native/libevent_loop_linux.a
+       5942  targets/linux-x86_64/include/botlish_event_loop.h
+      21708  targets/linux-x86_64/native/libevent_loop_linux.a
+  target linux-aarch64: 6 files in its view (targets/linux-aarch64 at the package root)
+    library event_loop_linux: bundled static, native/libevent_loop_linux.a
+    headers include
+  target linux-x86_64: 6 files in its view (targets/linux-x86_64 at the package root)
+    library event_loop_linux: bundled static, native/libevent_loop_linux.a
+    headers include
+  native closure of linux-aarch64: complete
+  native closure of linux-x86_64: complete
+  provenance /home/dev/inputs/repo/event_loop_linux-0.5.0.provenance.json (sha256 5342aff86398, format 1)
+    describes this artifact: its subject's SHA-256 and every file's digest are the artifact's
+    asserted by the author, unchecked unless a check below says so: 0 source(s), 2 build(s), 0 generator(s)
+    check made when the record was made: build event loop adapter linux-aarch64 output targets/linux-aarch64/native/libevent_loop_linux.a: confirmed (da69c74d8627)
+    check made when the record was made: build event loop adapter linux-x86_64 output targets/linux-x86_64/native/libevent_loop_linux.a: confirmed (23ddb58ab496)
+    unsigned: the record does not authenticate who made the artifact or its sources (PM-4 and PM-5)
+(a valid .botpkg, format 1, schema 2: one release for every target it names; nothing authenticates who made it)

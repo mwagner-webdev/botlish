@@ -1,0 +1,1175 @@
+# fold-virtual-construction.test -- virtual construction across fold
+# intermediates (FOLD-VIRTUAL-LIST-CONSTRUCTION-MILESTONE-1.md;
+# hir/construction.tcl's plan fold, native/lower.tcl's LoopResultStart,
+# LoopResultBind, FoldValue and LoopBody).
+#
+# A fold whose String/List intermediate is only extended carries it as a
+# construction plan (M8A-VIRTUAL-IMMUTABLE-CONSTRUCTION.md), extended in
+# place and materialized once, exactly as a self tail call's plan parameter
+# is. Every value test is differential: the reference interpreter, the Tcl
+# compiler, cranelift-generic, and cranelift with -virtual-construction-opt
+# 1 (its default) and 0 (the eager fold, which copies the prefix on every
+# append) must agree. Decision tests pin which folds the analysis accepts
+# and why it declines the rest; structural tests pin where materialization
+# happens (NIR) and what it costs (the runtime's copy and allocation
+# counters).
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+source [file join $::projectRoot native native.tcl]
+
+testConstraint nativeBuilt [expr {![catch {native::binary}]}]
+
+set ::fvcBackends {interp compile cranelift-generic cranelift}
+
+proc fvcHir {text} {
+    return [surface::compile $text t.bot -strict 0 -warnings off]
+}
+
+# HIR's outcome on cranelift with virtual construction off: the eager fold.
+proc fvcEager {hir} {
+    resetEffects
+    if {[catch {native::evalHir $hir -virtual-construction-opt 0} result options]} {
+        return [list error [dict get $options -errorcode] $result $::testLog]
+    }
+    return [list value [core::value::show $result 1 1] $::testLog]
+}
+
+# The value of program TEXT, the same on every backend and with virtual
+# construction on and off; else what differs. EXTRA names more backends
+# (cranelift-unfused for a coroutine).
+proc fvc {text {extra {}}} {
+    set hir [fvcHir $text]
+    if {[hir::diagnostics $hir] ne ""} {
+        return "DIAGNOSTICS: [lmap d [hir::diagnostics $hir] {dict get $d kind}]"
+    }
+    set labels [concat $::fvcBackends $extra eager]
+    set outcomes {}
+    foreach label $labels {
+        if {$label eq "eager"} {
+            lappend outcomes [fvcEager $hir]
+        } else {
+            lappend outcomes [outcomeUnderHir $label $hir]
+        }
+    }
+    if {[llength [lsort -unique $outcomes]] != 1} {
+        return "DISAGREE: [join [lmap label $labels outcome $outcomes {list $label $outcome}] { / }]"
+    }
+    set outcome [lindex $outcomes 0]
+    if {[lindex $outcome 0] eq "value"} {
+        return [lindex $outcome 1]
+    }
+    return "ERROR [lindex $outcome 1]"
+}
+
+# One entry per fold of TEXT's used instances, in instance and expression
+# order: "LABEL NAME plan FAMILY" for a plan fold, "LABEL NAME flat REASON"
+# for one the analysis declines.
+proc fvcDecisions {text} {
+    set lowered [native::lower::program [fvcHir $text]]
+    set spec [dict get $lowered specialization]
+    set analysis [dict get $lowered construction]
+    set out {}
+    foreach id [dict get $spec used] {
+        set view [dict get $analysis regions $id view]
+        foreach e [dict get $analysis regions $id exprs] {
+            if {[hir::kind $view $e] ni {loop listloop countloop lockloop} || ![hir::isFold $view $e]} {
+                continue
+            }
+            set name [dict get [hir::binding $view [hir::get $view $e foldBinding]] name]
+            set family [hir::construction::foldFamily $analysis $id $e]
+            set label [hir::specialize::label $spec $id]
+            if {$family ne ""} {
+                lappend out [list $label $name plan $family]
+            } else {
+                lappend out [list $label $name flat [dict getdef $analysis foldWhy $id $e ?]]
+            }
+        }
+    }
+    return $out
+}
+
+# Just the plan/flat verdicts of fvcDecisions.
+proc fvcVerdicts {text} {
+    return [lmap d [fvcDecisions $text] {lindex $d 2}]
+}
+
+proc fvcNir {text {opt 1}} {
+    return [native::nir [fvcHir $text] -virtual-construction-opt $opt -short-string-opt 0]
+}
+
+# The body of NIR function NAME (first match) in NIR text NIR.
+proc fvcFunc {nir name} {
+    regexp "func \\d+ \"$name\"\[^\\n\]*\\n(.*?)\\nend" $nir -> body
+    return $body
+}
+
+proc fvcCount {nir pattern} {
+    return [regexp -all -line $pattern $nir]
+}
+
+proc fvcReport {text opt} {
+    return [native::allocationReport [fvcHir $text] summary 1 -virtual-construction-opt $opt -short-string-opt 0]
+}
+
+# The append fold of N elements: list-fold.bot's shape.
+proc fvcAppendProgram {n} {
+    return "import std::list
+
+fn build(xs: List\[int\]) -> List\[int\]:
+    fold x in xs with intermediate acc \[\]:
+        acc.append(x * 3 + 1)
+
+xs = loop i from 0 to $n:
+    i
+std::list::length(build(xs))
+"
+}
+
+# The same construction as a self tail call (the plan parameter).
+proc fvcRecursiveProgram {n} {
+    return "import std::list
+
+fn build_from(xs: List\[int\], i: int, acc: List\[int\]) -> List\[int\]:
+    if i < 0 or i >= xs.length():
+        return acc
+    build_from(xs, i + 1, acc.append(xs.at(i) * 3 + 1))
+
+xs = loop i from 0 to $n:
+    i
+std::list::length(build_from(xs, 0, \[\]))
+"
+}
+
+# ---------------------------------------------------------------------------
+# Values: the optimized fold means exactly what the eager fold means
+
+test fvc-append {appending each element: the plan fold's value on every backend, with virtual construction on and off} -constraints nativeBuilt -body {
+    set text {import std::list
+
+fn f(xs: List[int]) -> List[int]:
+    fold x in xs with intermediate acc []:
+        acc.append(x)
+
+[f([]), f([1]), f([1, 2, 3])]
+}
+    list [fvc $text] [fvcDecisions $text]
+} -result {{[[], [1], [1, 2, 3]]} {{{f<List[never]>} acc plan list} {{f<List[int]>} acc plan list}}}
+
+test fvc-nonempty-initial {an initial List with elements: its elements first, in order} -constraints nativeBuilt -body {
+    fvc {import std::list
+
+fn f(xs: List[int]) -> List[int]:
+    fold x in xs with intermediate acc [100, 200]:
+        acc.append(x)
+
+[f([]), f([1, 2])]
+}
+} -result {[[100, 200], [100, 200, 1, 2]]}
+
+test fvc-empty-domain {an empty domain or List[never] never runs the body: the initial value, which no extension copied} -constraints nativeBuilt -body {
+    set text {import std::list
+
+a = fold x in [] with intermediate acc [7]:
+    acc.append(x)
+b = fold i from 3 to 3 with intermediate acc [8]:
+    acc.append(i)
+[a, b]
+}
+    list [fvc $text] [fvcVerdicts $text]
+} -result {{[[7], [8]]} {plan plan}}
+
+test fvc-list-of-lists {a List[List[int]] intermediate: inner Lists (empty ones included) appended whole, never flattened} -constraints nativeBuilt -body {
+    fvc {import std::list
+
+fn f(xs: List[int]) -> List[List[int]]:
+    fold x in xs with intermediate acc []:
+        if x == 0:
+            acc.append([])
+        else:
+            acc.append([x, -x])
+
+f([1, 0, 2])
+}
+} -result {[[1, -1], [], [2, -2]]}
+
+test fvc-computed-elements {appended elements computed by ordinary expressions and calls, evaluated in order} -constraints nativeBuilt -body {
+    fvc {import std::list
+
+fn square(x: int) -> int:
+    x * x
+
+fn f(xs: List[int]) -> List[int]:
+    fold x in xs with intermediate acc []:
+        acc.append(square(x) + 1)
+
+f([1, 2, 3, 4])
+}
+} -result {[2, 5, 10, 17]}
+
+test fvc-heap-elements {appended elements that are heap values: fresh Strings and Lists} -constraints nativeBuilt -body {
+    fvc {import std::list
+import std::str
+
+fn f(xs: List[str]) -> List[str]:
+    fold x in xs with intermediate acc []:
+        acc.append(std::str::concat(x, "!"))
+
+fn g(n: int) -> List[List[int]]:
+    fold i from 0 to n with intermediate acc []:
+        row = loop j from 0 to i:
+            j
+        acc.append(row)
+
+[f(["a", "bé", "🙂"]), g(4)]
+}
+} -result {[["a!", "bé!", "🙂!"], [[], [0], [0, 1], [0, 1, 2]]]}
+
+test fvc-conditional {a conditional append: an iteration either extends the intermediate or keeps it} -constraints nativeBuilt -body {
+    set text {import std::list
+
+fn keep(x: int) -> bool:
+    x.mod(3) != 0
+
+fn f(xs: List[int]) -> List[int]:
+    fold x in xs with intermediate acc [0]:
+        if keep(x):
+            acc.append(x * 10)
+        else:
+            acc
+
+f([1, 2, 3, 4, 5, 6, 7])
+}
+    list [fvc $text] [fvcVerdicts $text]
+} -result {{[0, 10, 20, 40, 50, 70]} plan}
+
+test fvc-unchanged {an iteration that keeps the intermediate unchanged, and one fold that never appends at all} -constraints nativeBuilt -body {
+    fvc {import std::list
+
+fn f(xs: List[int]) -> List[int]:
+    fold x in xs with intermediate acc [1]:
+        if x > 100:
+            acc.append(x)
+        else:
+            acc
+
+[f([1, 2, 3]), f([5, 500, 6, 600])]
+}
+} -result {[[1], [1, 500, 600]]}
+
+test fvc-continue {continue keeps the current intermediate: before other body operations, and after them} -constraints nativeBuilt -body {
+    set text {import std::list
+
+fn f(xs: List[int]) -> List[int]:
+    fold x in xs with intermediate acc []:
+        if x == 0:
+            continue
+        y = x * 2
+        if y > 10:
+            continue
+        acc.append(y)
+
+f([1, 0, 2, 9, 3, 0])
+}
+    list [fvc $text] [fvcVerdicts $text]
+} -result {{[2, 4, 6]} plan}
+
+test fvc-break {a bare break ends the fold with the intermediate the iteration started with: no element of the breaking iteration} -constraints nativeBuilt -body {
+    set text {import std::list
+
+fn f(xs: List[int]) -> List[int]:
+    fold x in xs with intermediate acc []:
+        if x > 5:
+            break
+        acc.append(x)
+
+[f([1, 2, 9, 3]), f([9]), f([1, 2])]
+}
+    list [fvc $text] [fvcVerdicts $text]
+} -result {{[[1, 2], [], [1, 2]]} plan}
+
+test fvc-break-continue {continue and break in one body, on every path of a List[List[int]] fold} -constraints nativeBuilt -body {
+    fvc {import std::list
+
+fn f(xs: List[int]) -> List[List[int]]:
+    fold t in xs with intermediate done []:
+        if t == 0:
+            continue
+        if t > 1000:
+            break
+        if t < 0:
+            done.append([t]).append([-t])
+        elif t == 1:
+            done.append([])
+        elif t == 2:
+            done
+        else:
+            done.append([t, t + 1])
+
+f([3, 0, -4, 1, 2, 5, 2000, 6])
+}
+} -result {[[3, 4], [-4], [4], [], [5, 6]]}
+
+test fvc-positions {a plan fold in every value position: bound, returned, the last expression, an if value, top level} -constraints nativeBuilt -body {
+    fvc {import std::list
+
+fn bound(xs: List[int]) -> int:
+    r = fold x in xs with intermediate acc []:
+        acc.append(x)
+    r.length()
+
+fn returned(xs: List[int]) -> List[int]:
+    return fold x in xs with intermediate acc []:
+        acc.append(x + 1)
+
+fn branch(xs: List[int], c: bool) -> List[int]:
+    if c:
+        fold x in xs with intermediate acc []:
+            acc.append(x * 2)
+    else:
+        []
+
+top = fold x in [4, 5] with intermediate acc []:
+    acc.append(x)
+[[bound([1, 2, 3])], returned([1, 2]), branch([1, 2], true), branch([1], false), top]
+}
+} -result {[[3], [2, 3], [2, 4], [], [4, 5]]}
+
+test fvc-generic {an untyped generic function's fold, specialized twice: each instance carries its own plan} -constraints nativeBuilt -body {
+    set text {import std::list
+
+fn f(xs):
+    fold x in xs with intermediate acc []:
+        acc.append(x)
+
+[f([1, 2]), f(["a", "b"])]
+}
+    list [fvc $text] [fvcDecisions $text]
+} -result {{[[1, 2], ["a", "b"]]} {{{f<List[int]>} acc plan list} {{f<List[str]>} acc plan list}}}
+
+test fvc-refined {refined elements keep their refinement through a plan fold} -constraints nativeBuilt -body {
+    fvc {import std::list
+
+type FvcPercent = Int in 0..100
+
+fn clamp(n: int) -> FvcPercent:
+    if n < 0:
+        return 0
+    if n > 100:
+        return 100
+    n
+
+fn f(xs: List[int]) -> List[FvcPercent]:
+    fold x in xs with intermediate acc []:
+        acc.append(clamp(x))
+
+fn need(ps: List[FvcPercent]) -> List[FvcPercent]:
+    ps
+
+need(f([-5, 50, 500]))
+}
+} -result {[0, 50, 100]}
+
+test fvc-string {a String intermediate extended by concat: the same carrier rule, a String plan (ASCII, BMP and astral pieces)} -constraints nativeBuilt -body {
+    set text {import std::str
+
+fn f(xs: List[str]) -> str:
+    fold x in xs with intermediate s "<":
+        s.concat(x).concat(",")
+
+[f([]), f(["a", "bé", "🙂"])]
+}
+    list [fvc $text] [fvcVerdicts $text]
+} -result {{["<", "<a,bé,🙂,"]} {plan plan}}
+
+test fvc-domains {every iteration form carries a plan: a counted range, down from, a lockstep, a MutableMap through the loop protocol (its skipped entries are continues)} -constraints nativeBuilt -body {
+    set text {import std::list
+import std::mutable_map
+
+fn keys(m: std::mutable_map::MutableMap[str, int]) -> List[str]:
+    fold e in m with intermediate acc []:
+        acc.append(e.key)
+
+fn build() -> std::mutable_map::MutableMap[str, int] errors std::mutable_map::KeyNotFound:
+    m = std::mutable_map::create[str, int]()
+    m.set("a", 1)
+    m.set("b", 20)
+    m.set("c", 300)
+    m.remove("b")
+    m
+
+m = build():
+    on std::mutable_map::KeyNotFound:
+        std::mutable_map::create[str, int]()
+a = fold i from 0 to 3 with intermediate acc ["s"]:
+    acc.append("x")
+b = fold i down from 3 through 1 with intermediate acc []:
+    acc.append(i)
+c = fold x in [1, 2, 3] and i from 0 to 3 with intermediate acc []:
+    acc.append(x + i)
+[[a.length()], b, c, [keys(m).length()]]
+}
+    list [fvc $text] [fvcVerdicts $text]
+} -result {{[[4], [3, 2, 1], [1, 3, 5], [2]]} {plan plan plan plan}}
+
+test fvc-nested-independent {nested folds with independent intermediates: each its own plan, never shared} -constraints nativeBuilt -body {
+    set text {import std::list
+
+fn f(xs: List[int]) -> List[List[int]]:
+    fold x in xs with intermediate outer []:
+        inner = fold y in [x, x + 1] with intermediate acc []:
+            acc.append(y * 2)
+        outer.append(inner)
+
+f([1, 5, 9])
+}
+    list [fvc $text] [fvcVerdicts $text]
+} -result {{[[2, 4], [10, 12], [18, 20]]} {plan plan}}
+
+test fvc-inner-seeded {an inner fold seeded with the outer intermediate: the inner carries a plan, the outer (whose next value is a fold's, never a construction) stays flat} -constraints nativeBuilt -body {
+    set text {import std::list
+
+fn f(xs: List[int]) -> List[int]:
+    fold x in xs with intermediate outer [0]:
+        fold y in [x, x] with intermediate inner outer:
+            inner.append(y)
+
+f([1, 2, 3])
+}
+    list [fvc $text] [fvcDecisions $text]
+} -result {{[0, 1, 1, 2, 2, 3, 3]} {{{f<List[int]>} outer flat {the next intermediate (the body's trailing value) is not a construction}} {{f<List[int]>} inner plan list}}}
+
+test fvc-handoff-to-inner-fold {an outer plan fold's extended intermediate is an inner plan fold's initial value: the inner fold extends that one continuation, the outer one carries the inner's result on} -constraints nativeBuilt -body {
+    set text {import std::list
+
+fn f(xs: List[int], ws: List[int]) -> List[int]:
+    fold x in xs with intermediate acc []:
+        y = acc.append(x)
+        z = fold w in ws with intermediate inner y:
+            inner.append(w * 10)
+        z.append(0)
+
+[f([1, 2], [3, 4]), f([5], [])]
+}
+    list [fvc $text] [fvcVerdicts $text]
+} -result {{[[1, 30, 40, 0, 2, 30, 40, 0], [5, 0]]} {plan plan plan plan}}
+
+test fvc-in-outer-loop {a fold inside a collecting loop's body: a fresh plan per outer iteration, each result its own List} -constraints nativeBuilt -body {
+    set text {import std::list
+
+loop k from 0 to 3:
+    fold x in [1, 2] with intermediate acc [k]:
+        acc.append(x)
+}
+    list [fvc $text] [fvcVerdicts $text]
+} -result {{[[0, 1, 2], [1, 1, 2], [2, 1, 2]]} plan}
+
+test fvc-several-appends {several appends in one iteration: one in-place extension of the intermediate} -constraints nativeBuilt -body {
+    fvc {import std::list
+
+fn f(xs: List[int]) -> List[List[int]]:
+    fold x in xs with intermediate acc []:
+        acc.append([x]).append([]).append([x, x])
+
+f([1, 2])
+}
+} -result {[[1], [], [1, 1], [2], [], [2, 2]]}
+
+test fvc-return-path {a return from the body: the intermediate extended and returned, the fold abandoned} -constraints nativeBuilt -body {
+    fvc {import std::list
+
+fn f(xs: List[int]) -> List[int]:
+    fold x in xs with intermediate acc []:
+        if x < 0:
+            return acc.append(99)
+        acc.append(x)
+
+[f([1, 2]), f([1, -1, 2])]
+}
+} -result {[[1, 2], [1, 99]]}
+
+test fvc-plan-initial {the initial value is itself a construction (a plan local): it seeds the intermediate's plan} -constraints nativeBuilt -body {
+    fvc {import std::list
+
+fn f(xs: List[int], base: List[int]) -> List[int]:
+    start = base.append(0)
+    fold x in xs with intermediate acc start:
+        acc.append(x)
+
+[f([1, 2], [7]), f([], [8])]
+}
+} -result {[[7, 0, 1, 2], [8, 0]]}
+
+test fvc-shared-initial {the initial List is shared with another binding: the fold never modifies it} -constraints nativeBuilt -body {
+    set text {import std::list
+
+fn f(xs: List[int], base: List[int]) -> List[List[int]]:
+    r = fold x in xs with intermediate acc base:
+        acc.append(x)
+    s = fold x in xs with intermediate acc base:
+        acc.append(-x)
+    [base, r, s]
+
+f([1, 2], [7])
+}
+    list [fvc $text] [fvcVerdicts $text]
+} -result {{[[7], [7, 1, 2], [7, -1, -2]]} {plan plan}}
+
+test fvc-retained-element {an appended element that is retained elsewhere stays an ordinary shared value} -constraints nativeBuilt -body {
+    fvc {import std::list
+
+fn f(xs: List[int]) -> List[List[int]]:
+    r = fold x in xs with intermediate acc []:
+        acc.append(xs)
+    r.append(xs)
+
+f([1, 2])
+}
+} -result {[[1, 2], [1, 2], [1, 2]]}
+
+test fvc-element-error {an error while evaluating an appended element leaves the fold; a caller handles it with a value of its own} -constraints nativeBuilt -body {
+    fvc {import std::list
+
+error FvcBad
+
+fn check(x: int) -> int errors FvcBad:
+    if x == 2:
+        fail FvcBad
+    x
+
+fn f(xs: List[int]) -> List[int] errors FvcBad:
+    fold x in xs with intermediate acc []:
+        acc.append(check(x))
+
+fn g(xs: List[int]) -> List[int]:
+    r = f(xs):
+        on FvcBad:
+            [-1]
+    r
+
+[g([1, 3]), g([1, 2, 3])]
+}
+} -result {[[1, 3], [-1]]}
+
+test fvc-error-before-commit {an error after the next intermediate is computed but before the body completes: nothing is committed, the caller's handler value wins} -constraints nativeBuilt -body {
+    set text {import std::list
+
+error FvcLate
+
+fn check(x: int) -> int errors FvcLate:
+    if x == 2:
+        fail FvcLate
+    x
+
+fn f(xs: List[int]) -> List[int] errors FvcLate:
+    fold x in xs with intermediate acc []:
+        y = acc.append(x)
+        check(x)
+        y
+
+fn g(xs: List[int]) -> List[int]:
+    r = f(xs):
+        on FvcLate:
+            [-1]
+    r
+
+[g([1, 3]), g([1, 2, 3])]
+}
+    list [fvc $text] [fvcVerdicts $text]
+} -result {{[[1, 3], [-1]]} plan}
+
+test fvc-handled-in-body {a handled call in the body is an ordinary completion} -constraints nativeBuilt -body {
+    fvc {import std::list
+
+error FvcOdd
+
+fn check(x: int) -> int errors FvcOdd:
+    if x.mod(2) == 1:
+        fail FvcOdd
+    x
+
+fn f(xs: List[int]) -> List[int]:
+    fold x in xs with intermediate acc []:
+        y = check(x):
+            on FvcOdd:
+                0
+        acc.append(y)
+
+f([1, 2, 3, 4])
+}
+} -result {[0, 2, 0, 4]}
+
+test fvc-discarded {a plan fold whose own value is discarded still runs its body} -constraints nativeBuilt -body {
+    set text {import std::list
+import std::mutable_vector
+
+fn note(place log: MutableVector[int], n: int) -> int:
+    log.push(n)
+    n
+
+fn f(xs: List[int]) -> List[int]:
+    log = std::mutable_vector::from_list([0])
+    log.clear()
+    fold x in xs with intermediate acc []:
+        acc.append(note(log, x))
+    loop v in log:
+        v
+
+f([3, 1, 2])
+}
+    list [fvc $text] [fvcVerdicts $text]
+} -result {{[3, 1, 2]} plan}
+
+test fvc-flat-composition {std::list::flat of a plan fold's result: flat sees an ordinary completed List, the fold's result is also returned, inspected, stored and passed on} -constraints nativeBuilt -body {
+    fvc {import std::list
+
+fn expand(x: int) -> List[int]:
+    [x, x + 1]
+
+fn chunks(xs: List[int]) -> List[List[int]]:
+    fold x in xs with intermediate acc []:
+        acc.append(expand(x))
+
+fn count(cs: List[List[int]]) -> int:
+    cs.length()
+
+cs = chunks([1, 5, 9])
+second = std::list::at(cs, 1):
+    on IndexNotFound:
+        []
+[std::list::flat(cs), std::list::flat(chunks([])), [count(cs), cs.length()], second]
+}
+} -result {[[1, 2, 5, 6, 9, 10], [], [3, 3], [5, 6]]}
+
+test fvc-coroutine {a yield inside a plan fold's body: the plan survives the suspension, fused and on the general runtime} -constraints nativeBuilt -body {
+    set text {import std::list
+import std::coroutine
+
+fn running(xs: List[int]) -> List[int]:
+    fold x in xs with intermediate acc []:
+        yield [x * 10]
+        acc.append(x)
+
+fn drive() -> List[List[int]]:
+    coroutine {step, first} = running([1, 2, 3])
+    a = step()
+    b = step()
+    c = step()
+    [first, a, b, c]
+
+drive()
+}
+    list [fvc $text cranelift-unfused] [fvcVerdicts $text]
+} -result {{[[10], [20], [30], [1, 2, 3]]} plan}
+
+# ---------------------------------------------------------------------------
+# Rejected: an intermediate whose earlier version is observable stays flat
+
+test fvc-reject-break-after-append {an append computed before a break is never committed: the break passes the old intermediate on, a second reference, so the fold stays flat} -constraints nativeBuilt -body {
+    set text {import std::list
+
+fn f(xs: List[int]) -> List[int]:
+    fold x in xs with intermediate acc []:
+        y = acc.append(x)
+        if x > 5:
+            break
+        y
+
+f([1, 2, 9, 3])
+}
+    list [fvc $text] [fvcDecisions $text]
+} -result {{[1, 2]} {{{f<List[int]>} acc flat {fork: referenced more than once on some path of an iteration (continue and break included)}}}}
+
+test fvc-reject-continue-after-append {an append computed before a continue is discarded: the continue carries the old intermediate, so the fold stays flat} -constraints nativeBuilt -body {
+    set text {import std::list
+
+fn f(xs: List[int]) -> List[int]:
+    fold x in xs with intermediate acc []:
+        y = acc.append(x)
+        if x == 2:
+            continue
+        y
+
+f([1, 2, 9, 3])
+}
+    list [fvc $text] [fvcVerdicts $text]
+} -result {{[1, 9, 3]} flat}
+
+test fvc-reject-break-after-materialized {an append materialized (observed) before a break: the break passes the old intermediate on, so the fold stays flat (counting the break as a reference is what keeps the plan from being consumed twice)} -constraints nativeBuilt -body {
+    set text {import std::list
+
+fn f(xs: List[int]) -> List[int]:
+    fold x in xs with intermediate acc []:
+        y = acc.append(x)
+        if y.length() > 3:
+            break
+        y.append(0)
+
+f([1, 2, 9, 3])
+}
+    list [fvc $text] [fvcVerdicts $text]
+} -result {{[1, 0, 2, 0]} flat}
+
+test fvc-reject-continue-after-materialized {an append materialized (observed) before a continue: the continue carries the old intermediate on, so the fold stays flat} -constraints nativeBuilt -body {
+    set text {import std::list
+
+fn f(xs: List[int]) -> List[int]:
+    fold x in xs with intermediate acc []:
+        y = acc.append(x)
+        if x == y.length():
+            continue
+        y.append(0)
+
+f([1, 2, 9, 3])
+}
+    list [fvc $text] [fvcVerdicts $text]
+} -result {{[2, 0, 9, 0, 3, 0]} flat}
+
+test fvc-reject-discarded-append {a branch computes an appended value but completes with the original intermediate: two versions on one path} -constraints nativeBuilt -body {
+    set text {import std::list
+
+fn f(xs: List[int]) -> List[int]:
+    fold x in xs with intermediate acc []:
+        y = acc.append(x)
+        if x == 2:
+            acc
+        else:
+            y
+
+f([1, 2, 9, 3])
+}
+    list [fvc $text] [fvcVerdicts $text]
+} -result {{[1, 9, 3]} flat}
+
+test fvc-reject-observed {the intermediate observed (its length) and then extended: the observation is an independent use} -constraints nativeBuilt -body {
+    set text {import std::list
+
+fn f(xs: List[int]) -> List[int]:
+    fold x in xs with intermediate acc []:
+        n = acc.length()
+        acc.append(n + x)
+
+f([1, 2, 9, 3])
+}
+    list [fvc $text] [fvcVerdicts $text]
+} -result {{[1, 3, 11, 6]} flat}
+
+test fvc-reject-two-versions {two versions of the intermediate in one record: both stay distinct immutable values} -constraints nativeBuilt -body {
+    set text {import std::list
+
+fn f(xs: List[int]) -> List[List[int]]:
+    r = fold x in xs with intermediate acc []:
+        p = {before: acc, after: acc.append(x)}
+        p.after
+    fold x in xs with intermediate acc [r]:
+        p = {before: acc, after: acc.append([x])}
+        if x == 2:
+            p.before
+        else:
+            p.after
+
+f([1, 2, 3])
+}
+    list [fvc $text] [fvcVerdicts $text]
+} -result {{[[1, 2, 3], [1], [3]]} {flat flat}}
+
+test fvc-reject-retained {the intermediate retained in another List and passed to a retaining function, then extended: two uses} -constraints nativeBuilt -body {
+    set text {import std::list
+import std::mutable_vector
+
+fn keep(place log: MutableVector[List[int]], l: List[int]) -> int:
+    log.push(l)
+    l.length()
+
+fn f(xs: List[int]) -> List[List[int]]:
+    log = std::mutable_vector::from_list([[0]])
+    log.clear()
+    r = fold x in xs with intermediate acc []:
+        n = keep(log, acc)
+        acc.append(n)
+    s = fold x in xs with intermediate acc []:
+        held = [acc]
+        acc.append(held.length())
+    snapshots = loop v in log:
+        v
+    snapshots.append(r).append(s)
+
+f([5, 6, 7])
+}
+    list [fvc $text] [fvcVerdicts $text]
+} -result {{[[], [0], [0, 1], [0, 1, 2], [1, 1, 1]]} {flat flat}}
+
+test fvc-reject-retained-only {the intermediate's only use stores it (a retaining place parameter): every use needs a flat value, so no plan is built, although the next intermediate is a construction} -constraints nativeBuilt -body {
+    set text {import std::list
+import std::mutable_vector
+
+fn keep(place log: MutableVector[List[int]], l: List[int]) -> int:
+    log.push(l)
+    l.length()
+
+fn f(xs: List[int]) -> List[List[int]]:
+    log = std::mutable_vector::from_list([[0]])
+    log.clear()
+    last = fold x in xs with intermediate acc [1]:
+        n = keep(log, acc)
+        [x].append(n)
+    snapshots = loop v in log:
+        v
+    snapshots.append(last)
+
+f([5, 6])
+}
+    list [fvc $text] [fvcDecisions $text]
+} -result {{[[1], [5, 1], [6, 2]]} {{{f<List[int]>} acc flat {every use needs a flat value}}}}
+
+test fvc-reject-captured {a function made in the body captures the intermediate and outlives the iteration: it keeps that iteration's value} -constraints nativeBuilt -body {
+    set text {import std::list
+
+fn f(xs: List[int]) -> List[int]:
+    fs = fold x in xs with intermediate acc []:
+        fn size() -> int:
+            acc.length()
+        acc.append(size)
+    loop g in fs:
+        g()
+
+f([1, 2, 3])
+}
+    list [fvc $text] [fvcDecisions $text]
+} -result {{[0, 1, 2]} {{{f<List[int]>} acc flat {captured by a nested block (fork/alias)}}}}
+
+test fvc-reject-inner-loop {the intermediate referenced inside an inner loop's body runs once per inner iteration: not linear} -constraints nativeBuilt -body {
+    set text {import std::list
+
+fn f(xs: List[int]) -> List[List[int]]:
+    fold x in xs with intermediate acc []:
+        ys = loop y in [1, 2]:
+            acc.length() + y
+        acc.append(ys)
+
+f([5, 6])
+}
+    list [fvc $text] [fvcVerdicts $text]
+} -result {{[[1, 2], [2, 3]]} flat}
+
+test fvc-reject-handler-continue {a handler that continues after the intermediate was extended carries the old one on: not linear} -constraints nativeBuilt -body {
+    set text {import std::list
+
+error FvcSkip
+
+fn check(x: int) -> int errors FvcSkip:
+    if x == 2:
+        fail FvcSkip
+    x
+
+fn f(xs: List[int]) -> List[int]:
+    fold x in xs with intermediate acc []:
+        y = acc.append(x)
+        z = check(x):
+            on FvcSkip:
+                continue
+        y
+
+f([1, 2, 3])
+}
+    list [fvc $text] [fvcVerdicts $text]
+} -result {{[1, 3]} flat}
+
+test fvc-reject-bare {a fold with no domain ends by a break on its own intermediate: the test reads it, the break passes it on (two uses)} -constraints nativeBuilt -body {
+    set text {import std::list
+
+fold with intermediate acc []:
+    if acc.length() >= 3:
+        break
+    acc.append(1)
+}
+    list [fvc $text] [fvcVerdicts $text]
+} -result {{[1, 1, 1]} flat}
+
+test fvc-scalar-and-struct-folds {an Int fold and a struct fold (with List fields) are never plan folds: their NIR has no construction plan} -constraints nativeBuilt -body {
+    set text {import std::list
+
+struct FvcChunks:
+    done: List[List[int]]
+    current: List[int]
+
+fn total(xs: List[int]) -> int:
+    fold x in xs with intermediate s 0:
+        s + x
+
+fn chunks(xs: List[int]) -> List[List[int]]:
+    c = fold t in xs with intermediate st FvcChunks {done: [], current: []}:
+        if t == 0:
+            FvcChunks {done: st.done.append(st.current), current: []}
+        else:
+            FvcChunks {done: st.done, current: st.current.append(t)}
+    c.done.append(c.current)
+
+[[total([1, 2, 3])], chunks([1, 2, 0, 3])]
+}
+    set nir [fvcNir $text]
+    list [fvc $text] [fvcDecisions $text] \
+        [fvcCount [fvcFunc $nir total] {construct|planregs}] \
+        [fvcCount [fvcFunc $nir chunks] {construct list plan}]
+} -result {{[[6], [[1, 2], [3]]]} {{{total<List[int]>} s flat {not statically String/List-typed at every reference}} {{chunks<List[int]>} st flat {not statically String/List-typed at every reference}}} 0 0}
+
+# ---------------------------------------------------------------------------
+# Structure: where the plan lives and where it is materialized
+
+test fvc-nir-carried {the NIR of an append fold: one in-place extension per iteration into a declared plan register, one materialization at exhaustion, no eager listappend} -constraints nativeBuilt -body {
+    set nir [fvcNir [fvcAppendProgram 10]]
+    set body [fvcFunc $nir build]
+    regexp {func \d+ "build"[^\n]*planregs="([^"]*)"} $nir -> planregs
+    regexp -line {^\s*(%\d+) = construct list plan (%\d+) elem} $body -> next acc
+    list [fvcCount $body {= construct list plan %\d+ elem %\d+}] [fvcCount $body {= construct list flat %\d+}] \
+        [fvcCount $body {op listappend}] [expr {[string range $acc 1 end] in $planregs}] \
+        [fvcCount $body "^\\s*$acc = move $next"]
+} -result {1 1 0 1 1}
+
+test fvc-nir-break {a break materializes the intermediate where it leaves, as exhaustion does: two flat constructs of the plan register, one per exit} -constraints nativeBuilt -body {
+    set body [fvcFunc [fvcNir {import std::list
+
+fn f(xs: List[int]) -> List[int]:
+    fold x in xs with intermediate acc []:
+        if x > 5:
+            break
+        acc.append(x)
+
+f([1, 9])
+}] f]
+    regexp -line {^\s*%\d+ = construct list plan (%\d+) elem} $body -> acc
+    list [fvcCount $body "= construct list flat ${acc}( |\$)"] [fvcCount $body {op listappend}]
+} -result {2 0}
+
+test fvc-nir-off {-virtual-construction-opt 0: the eager fold, one listappend per iteration and no construction at all} -constraints nativeBuilt -body {
+    set body [fvcFunc [fvcNir [fvcAppendProgram 10] 0] build]
+    list [fvcCount $body {construct}] [fvcCount $body {op listappend}]
+} -result {0 1}
+
+test fvc-nir-flat-separate {std::list::flat of a fold stays two operations: the fold's one materialization, then one listflat, no fusion} -constraints nativeBuilt -body {
+    set nir [fvcNir {import std::list
+
+fn chunks(xs: List[int]) -> List[int]:
+    cs = fold x in xs with intermediate acc []:
+        acc.append([x, x])
+    std::list::flat(cs)
+
+chunks([1, 2])
+}]
+    set body [fvcFunc $nir chunks]
+    list [fvcCount $body {construct list plan}] [fvcCount $body {construct list flat}] [fvcCount $body {op listflat}]
+} -result {1 1 1}
+
+test fvc-types-unchanged {expression types, instance keys and function counts are identical with virtual construction on and off} -constraints nativeBuilt -body {
+    set text {import std::list
+import std::str
+
+fn f(xs):
+    fold x in xs with intermediate acc []:
+        if x == 0:
+            continue
+        acc.append(x)
+
+fn g(xs: List[str]) -> str:
+    fold x in xs with intermediate s "":
+        s.concat(x)
+
+[f([1, 0, 2]), f(["a"]), [g(["x", "y"])]]
+}
+    set hir [fvcHir $text]
+    set facts {}
+    foreach opt {0 1} {
+        set lowered [native::lower::program $hir -virtual-construction-opt $opt -short-string-opt 0]
+        set spec [dict get $lowered specialization]
+        set types {}
+        foreach id [dict get $spec used] {
+            set view [hir::specialize::view $hir $spec $id]
+            foreach e [dict get $spec context exprs [dict get $spec instances $id block]] {
+                lappend types [list $e [hir::types::show [hir::typeOf $view $e]]]
+            }
+        }
+        lappend facts [list [lsort [lmap id [dict get $spec used] {hir::specialize::label $spec $id}]] \
+            [llength [dict get $lowered functions]] $types]
+    }
+    list [expr {[lindex $facts 0] eq [lindex $facts 1]}] [lindex $facts 0 1]
+} -result {1 4}
+
+test fvc-explain {hir::construction::explain names the plan fold} -constraints nativeBuilt -body {
+    set hir [fvcHir [fvcAppendProgram 4]]
+    set lowered [native::lower::program $hir]
+    regexp -inline {build<List\[int\]> \(i\d+\):\n  fold intermediate acc \(b\d+ of e\d+\): a list plan carried across iterations} \
+        [hir::construction::explain $hir [dict get $lowered specialization] [dict get $lowered construction]]
+} -match regexp -result {^\{build<List\[int\]> \(i\d+\):\n  fold intermediate acc \(b\d+ of e\d+\): a list plan carried across iterations\}$}
+
+# ---------------------------------------------------------------------------
+# Cost: repeated-prefix copying is gone
+
+test fvc-copies-linear {the append fold copies linearly (N and 4N) with a constant number of Lists; the eager fold copies quadratically, one List per append} -constraints nativeBuilt -body {
+    set rows {}
+    foreach n {500 2000} {
+        set text [fvcAppendProgram $n]
+        set on [fvcReport $text 1]
+        set off [fvcReport $text 0]
+        lappend rows [list [dict get $on copies listElements] [dict get $off copies listElements] \
+            [dict get $on byKind List allocations] [dict get $off byKind List allocations] \
+            [dict get $on construction materializations]]
+    }
+    lassign $rows small large
+    list [expr {[lindex $large 0] <= 5 * [lindex $small 0]}] [expr {[lindex $large 1] >= 15 * [lindex $small 1]}] \
+        [expr {[lindex $small 2] == [lindex $large 2]}] [expr {[lindex $large 3] >= 2000}] [lindex $large 4]
+} -result {1 1 1 1 2}
+
+test fvc-matches-recursion {the fold's construction costs exactly what the self tail call's plan parameter costs: the same Lists, plans, extensions and copied elements} -constraints nativeBuilt -body {
+    set rows {}
+    foreach text [list [fvcAppendProgram 1000] [fvcRecursiveProgram 1000]] {
+        set r [fvcReport $text 1]
+        lappend rows [list [dict get $r byKind List allocations] [dict get $r byKind ListPlan allocations] \
+            [dict get $r construction extensions] [dict get $r construction materializations] \
+            [dict get $r copies listElements]]
+    }
+    list [expr {[lindex $rows 0] eq [lindex $rows 1]}] [lindex $rows 0 0] [lindex $rows 0 3]
+} -result {1 4 2}
+
+test fvc-string-copies {a String fold's bytes are copied linearly too} -constraints nativeBuilt -body {
+    set template {import std::str
+
+fn build(n: int) -> str:
+    fold i from 0 to n with intermediate s "":
+        s.concat("ab")
+
+std::str::length(build(%N%))
+}
+    set copies {}
+    foreach n {500 2000} {
+        set text [string map [list %N% $n] $template]
+        lappend copies [dict get [fvcReport $text 1] copies stringBytes] [dict get [fvcReport $text 0] copies stringBytes]
+    }
+    lassign $copies smallOn smallOff largeOn largeOff
+    list [expr {$largeOn <= 5 * $smallOn}] [expr {$largeOff >= 15 * $smallOff}]
+} -result {1 1}
+
+# ---------------------------------------------------------------------------
+# Runtime safety: GC roots, releases, executables
+
+test fvc-gc-stress {plan folds holding fresh heap elements, nested and broken off, under GC stress (a collection at every allocation)} -constraints nativeBuilt -body {
+    set text {import std::list
+import std::str
+
+fn f(xs: List[str]) -> List[List[str]]:
+    fold x in xs with intermediate outer []:
+        if x == "stop":
+            break
+        inner = fold i from 0 to 3 with intermediate acc []:
+            acc.append(std::str::concat(x, std::str::substring("0123", i, i + 1)))
+        outer.append(inner)
+
+r = f(["a", "bé", "🙂", "stop", "z"])
+[r.length(), std::list::flat(r)]
+}
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    try {
+        list [fvc $text] [fvcVerdicts $text]
+    } finally {
+        unset ::env(BOTLISH_NATIVE_GC_STRESS)
+    }
+} -result {{[3, ["a0", "a1", "a2", "bé0", "bé1", "bé2", "🙂0", "🙂1", "🙂2"]]} {plan plan}}
+
+test fvc-release-in-body {an affine value that dies mid-body of a plan fold is released after its last use (SequenceTo releases, as Sequence does)} -constraints {nativeBuilt nativeCoroutines} -body {
+    set text {import std::list
+import std::coroutine
+
+fn gen(n: int) -> int:
+    yield n
+    n + 1
+
+fn f(xs: List[int]) -> List[int]:
+    fold x in xs with intermediate acc []:
+        coroutine {step, first} = gen(x)
+        v = step()
+        acc.append(first + v)
+
+f([1, 2, 3])
+}
+    withoutCoroutineFusion {
+        set report [native::allocationReport [fvcHir $text] summary 1]
+    }
+    list [fvc $text] [fvcVerdicts $text] [dict get $report coroutines released]
+} -result {{[3, 5, 7]} plan 3}
+
+test fvc-release-plan-join {the same fix outside folds: a plan-family if branch of a recurrence releases its coroutine (the eager lowering always did)} -constraints {nativeBuilt nativeCoroutines} -body {
+    set text {import std::list
+import std::coroutine
+
+fn gen(n: int) -> int:
+    yield n
+    n + 1
+
+fn build(xs: List[int], i: int, acc: List[int]) -> List[int]:
+    if i < 0 or i >= xs.length():
+        return acc
+    next = if xs.at(i) > 0:
+        coroutine {step, first} = gen(xs.at(i))
+        v = step()
+        acc.append(first + v)
+    else:
+        acc
+    build(xs, i + 1, next)
+
+build([1, 2, 3], 0, [])
+}
+    set released {}
+    withoutCoroutineFusion {
+        foreach opt {0 1} {
+            lappend released [dict get [fvcReport $text $opt] coroutines released]
+        }
+    }
+    list [fvc $text] $released
+} -result {{[3, 5, 7]} {3 3}}
+
+proc fvcAotParity {text} {
+    set dir [makeDirectory {fold virtual construction executable test}]
+    set path [file join $dir program.bot]
+    set channel [open $path w]
+    fconfigure $channel -encoding utf-8 -translation lf
+    puts $channel $text
+    close $channel
+    try {
+        set hir [surface::readProgramFile $path -warnings off]
+        set values {}
+        foreach backend $::fvcBackends {
+            set outcome [outcomeUnderHir $backend $hir]
+            if {[lindex $outcome 0] ne "value"} { error "$backend: $outcome" }
+            lappend values [lindex $outcome 1]
+        }
+        exec [info nameofexecutable] [file join $::projectRoot main.tcl] -warnings off -emit-native-executable $path
+        lappend values [standaloneValue [file rootname $path]]
+        lappend values [standaloneValue [file rootname $path] BOTLISH_NATIVE_GC_STRESS 1]
+        if {[llength [lsort -unique $values]] != 1} { error "values disagree: $values" }
+        return [lindex $values 0]
+    } finally {
+        removeDirectory {fold virtual construction executable test}
+    }
+}
+
+test fvc-executable {plan folds of Lists, Lists of Lists and Strings, with continue and break, in a standalone executable, plain and under GC stress} -constraints executableAot -body {
+    fvcAotParity {import std::list
+import std::str
+
+fn chunks(xs: List[int]) -> List[List[int]]:
+    fold t in xs with intermediate done []:
+        if t == 0:
+            continue
+        if t > 100:
+            break
+        done.append([t, t * t])
+
+fn text(xs: List[int]) -> str:
+    fold x in xs with intermediate s "":
+        s.concat("é").concat("!")
+
+cs = chunks([1, 0, 2, 3, 500, 4])
+[cs.length(), std::list::flat(cs).length(), text([1, 2, 3]).length()]
+}
+} -result {[3, 6, 6]}
+
+cleanupTests

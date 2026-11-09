@@ -1,0 +1,12 @@
+stdout a
+
+exited-at-eof 0
+stderr late
+
+exit-after-eof-us 300235
+status exited 4
+end owned 0
+end live 0
+end fds delta 0
+[harness] supervisor peak RSS 16092 kB, CPU 0.005 s
+[harness] PASS in 0.30 s

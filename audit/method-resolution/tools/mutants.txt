@@ -186,6 +186,38 @@
                     dict set choices $key $choice
 >>>>
 
+@@ unestablished-receiver-applicable a candidate whose own build poisons the call's receiver is applicable when the call has no problem of its own there (a poisoned receiver skips every check): a fold's `acc.concat(p)` is ambiguous between std::str::concat and the candidate whose result conflicts with the intermediate (HTTP-CLIENT-PACKAGE-MILESTONE-1.md, F2)
+## hir/methods.tcl
+<<<<
+            if {![dict exists $problems $cand] || [dict get $problems $cand] ne {} || $cand in $unestablished} continue
+====
+            if {![dict exists $problems $cand] || [dict get $problems $cand] ne {}} continue
+>>>>
+
+@@ poisoned-receiver-not-judged the previous rule: a call whose receiver the decision's build poisons is judged by nothing, whatever its other candidates' builds establish -- a fold's call whose own stand-in poisoned its receiver is never moved (F2)
+## hir/methods.tcl
+<<<<
+        if {[dict get $entry poisoned] && [llength $unestablished] == [dict size $problems]} {
+====
+        if {[dict get $entry poisoned]} {
+>>>>
+
+@@ rejection-dismissed-by-the-decisions-poison a rejection is dismissed when the decision's build poisoned the receiver, though the reported program establishes it: a fold's call none of whose candidates fits is rejected unreported, and the program compiles with no diagnostic (F2)
+## hir/methods.tcl
+<<<<
+    if {$operands ne {} && [hir::types::Poisoned $final [lindex $operands 0]]} {
+====
+    if {[dict get $verdict poisoned] || ($operands ne {} && [hir::types::Poisoned $final [lindex $operands 0]])} {
+>>>>
+
+@@ unestablished-receiver-unexplained NO-APPLICABLE-METHOD gives no reason for a candidate whose own build poisons the receiver: "no problem found"
+## hir/methods.tcl
+<<<<
+        if {![dict exists $reasons $candidate] && $candidate in [dict getdef $verdict unestablished {}]} {
+====
+        if {0} {
+>>>>
+
 @@ final-any-build the final program is the last build made, whatever its configuration: a single deviation's
 ## hir/methods.tcl
 <<<<
@@ -291,7 +323,7 @@
 @@ poisoned-receiver-reported a call whose receiver the reported program does not establish (a rejected call's result) is judged by the placeholder's receiver type, not dismissed as depending on the rejection
 ## hir/methods.tcl
 <<<<
-    if {[dict get $verdict poisoned] || ($operands ne {} && [hir::types::Poisoned $final [lindex $operands 0]])} {
+    if {$operands ne {} && [hir::types::Poisoned $final [lindex $operands 0]]} {
 ====
     if {[dict get $verdict poisoned]} {
 >>>>

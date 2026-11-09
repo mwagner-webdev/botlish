@@ -4,14 +4,17 @@
 
     python3 -I tools/ci/test_runs.py [-v]
 
-The release check, the gate and the pruning against a fake of the GitHub
-API over a small commit graph; the canary's records (history.py) from
-runs and job logs of the fake; the requests themselves against a fake
-urlopen; and, when PyYAML is installed, the workflows' side of the rules
+The release check, the gate, the pruning and a branch push's deferral to
+a run that already tests its commit against a fake of the GitHub API over
+a small commit graph; the canary's records (history.py) from runs and job
+logs of the fake; the requests themselves against a fake urlopen; and,
+when PyYAML is installed, the workflows' side of the rules
 (.github/workflows/: every test workflow cancels a superseded run, main's
 included; a release is published only by a release run, after the check;
-no job asks for the concurrency group its own run holds; the gate listens to every workflow a release waits for; every test
-workflow's expensive jobs wait for its canary).
+no job asks for the concurrency group its own run holds; the gate listens
+to every workflow a release waits for; every test workflow's expensive
+jobs wait for its canary, a branch push runs only the canary and the jobs
+its message opts into, and every job a branch push runs defers with it).
 """
 import io
 import itertools
@@ -70,21 +73,25 @@ class FakeApi:
         if jobs is not None:
             self.jobs_[r["id"]] = []
             for job in jobs:
-                n, c, labels, log = (tuple(job) + (None, None))[:4]
+                n, c, labels, log, steps = (tuple(job) + (None, None, None))[:5]
                 self.next_id += 1
                 self.jobs_[r["id"]].append({"id": self.next_id, "name": n, "status": "completed", "conclusion": c,
-                                            "labels": labels or ["ubuntu-latest"]})
+                                            "labels": labels or ["ubuntu-latest"],
+                                            "steps": [{"name": k, "status": "completed", "conclusion": v}
+                                                      for k, v in (steps or {}).items()]})
                 self.logs[self.next_id] = log or ""
         return r
 
     def green(self, commit, gc="success", own=()):
         """Every CORE workflow green at commit (GC-stress jobs `gc`)."""
-        self.run("tests.yml", commit, jobs=[("tests (interp)", "success"), ("tests (native GC-stress)", gc)])
+        self.run("tests.yml", commit, jobs=[("tests (interp)", "success"),
+                                            ("tests (native GC-stress, interp)", gc),
+                                            ("tests (native GC-stress, compile)", gc)])
         self.run("tests-arm64.yml", commit, jobs=[("arm64 tests (interp)", "success"),
                                                   ("arm64 tests (native GC-stress, interp)", gc),
                                                   ("arm64 tests (native GC-stress, compile)", gc)])
-        self.run("macos-arm64.yml", commit)
-        self.run("windows-x86_64.yml", commit)
+        self.run("macos-arm64.yml", commit, jobs=full_jobs("macos-arm64.yml"))
+        self.run("windows-x86_64.yml", commit, jobs=full_jobs("windows-x86_64.yml"))
         for w in own:
             self.run(w, commit)
 
@@ -156,6 +163,24 @@ class FakeApi:
         self.cancelled.append(run_id)
 
 
+def full_jobs(workflow, acceptance="success"):
+    """The jobs of a macOS or Windows run that ran its acceptance tier
+    (main's push runs, dispatched runs; never a branch push's)."""
+    host = {"macos-arm64.yml": "Tier B, macOS arm64", "windows-x86_64.yml": "Windows x86-64"}[workflow]
+    canary = "smoke (Tier A, macOS arm64)" if workflow == "macos-arm64.yml" else "canary (Windows x86-64, MSVC)"
+    return [(canary, "success", None, None, {"Canary": "success"})] + \
+        [("acceptance (%s, shard %d/4)" % (host, i), acceptance) for i in (1, 2, 3, 4)]
+
+
+def canary_jobs(workflow, canary="success"):
+    """The jobs of a branch push's run: the canary job alone, its canary
+    step `canary` (skipped: the run deferred to another)."""
+    name = {"tests.yml": "canary (linux x86-64)", "tests-arm64.yml": "canary (linux arm64)",
+            "macos-arm64.yml": "smoke (Tier A, macOS arm64)",
+            "windows-x86_64.yml": "canary (Windows x86-64, MSVC)"}[workflow]
+    return [(name, "success", None, None, {"Already tested at this commit?": "success", runs.CANARY_STEP: canary})]
+
+
 def linear(*names, branches=None):
     """Main's history names[0] <- names[1] <- ... (the last is main's head),
     plus branches: name -> (fork point, [its commits])."""
@@ -216,7 +241,7 @@ class Check(unittest.TestCase):
         self.assertEqual(state["tests.yml"], "failed")
         self.assertEqual(state["tests-arm64.yml"], "failed")
         # a push run with GC stress makes it green, whichever run is newer
-        api.run("tests.yml", "b", jobs=[("tests (native GC-stress)", "success")])
+        api.run("tests.yml", "b", jobs=[("tests (native GC-stress, interp)", "success")])
         api.run("tests-arm64.yml", "b", jobs=[("arm64 tests (native GC-stress, interp)", "success")])
         self.assertTrue(runs.check(api, sha("b"), SE).green)
 
@@ -235,14 +260,32 @@ class Check(unittest.TestCase):
         self.assertFalse(runs.check(api, sha("b"), SE).green)
         api.run("windows-x86_64.yml", "b", status="queued")
         v = runs.check(api, sha("b"), SE)
-        self.assertIn("pending", [s for w, s, _ in v.lines if w == "windows-x86_64.yml"])
+        self.assertIn("pending", [s for w, s, _ in v.lines if w.split()[0] == "windows-x86_64.yml"])
         api.runs[-1].update(status="completed", conclusion="failure")
         v = runs.check(api, sha("b"), SE)
-        self.assertIn("failed", [s for w, s, _ in v.lines if w == "windows-x86_64.yml"])
+        self.assertIn("failed", [s for w, s, _ in v.lines if w.split()[0] == "windows-x86_64.yml"])
         api.run("windows-x86_64.yml", "b", conclusion="cancelled")
         self.assertFalse(runs.check(api, sha("b"), SE).green)
-        api.run("windows-x86_64.yml", "b")
+        api.run("windows-x86_64.yml", "b", jobs=full_jobs("windows-x86_64.yml"))
         self.assertTrue(runs.check(api, sha("b"), SE).green, "a later successful attempt counts")
+
+    def test_acceptance_required_on_macos_and_windows(self):
+        # A branch push runs only the canary, and a deferred run nothing: a
+        # successful run counts only with its acceptance tier, which every
+        # run of main and every dispatched run has (CI-RUNS.md).
+        for workflow in ("macos-arm64.yml", "windows-x86_64.yml"):
+            api = self.api()
+            api.green("b", own=["single-executable.yml"])
+            api.runs = [r for r in api.runs if not r["path"].endswith(workflow)]
+            api.run(workflow, "b", branch="topic", jobs=canary_jobs(workflow))
+            api.run(workflow, "b", branch="other", jobs=canary_jobs(workflow, canary="skipped"))
+            v = runs.check(api, sha("b"), SE)
+            self.assertFalse(v.green, workflow)
+            self.assertIn((workflow + " (acceptance jobs succeeded)", "failed"), [(w, s) for w, s, _ in v.lines])
+            api.run(workflow, "b", jobs=full_jobs(workflow, acceptance="skipped"))
+            self.assertFalse(runs.check(api, sha("b"), SE).green, "%s: a skipped acceptance shard" % workflow)
+            api.run(workflow, "b", branch="topic", event="workflow_dispatch", jobs=full_jobs(workflow))
+            self.assertTrue(runs.check(api, sha("b"), SE).green, "%s: a dispatched run counts" % workflow)
 
     def test_static_decisions_when_it_ran(self):
         api = self.api()
@@ -264,11 +307,12 @@ class Check(unittest.TestCase):
             self.assertEqual(v.lines[0][:2], ("in main's history", "failed"))
 
     def test_any_event_at_the_commit_counts(self):
-        # a branch push at the commit main later reached tests the same tree
+        # a dispatched run on a branch at the commit main later reached
+        # tests the same tree
         api = self.api()
         api.green("b", own=["single-executable.yml"])
         api.runs = [r for r in api.runs if not r["path"].endswith("macos-arm64.yml")]
-        api.run("macos-arm64.yml", "b", branch="topic")
+        api.run("macos-arm64.yml", "b", branch="topic", event="workflow_dispatch", jobs=full_jobs("macos-arm64.yml"))
         self.assertTrue(runs.check(api, sha("b"), SE).green)
 
     def test_release_runs_are_no_build(self):
@@ -452,6 +496,156 @@ class Prune(unittest.TestCase):
         done, lines = self.prune(api)
         self.assertEqual(api.cancelled, [b])
         self.assertTrue(any("could not cancel run %d" % a in l for l in lines), lines)
+
+
+class Twin(unittest.TestCase):
+    """A branch push defers to a run that already tests its commit
+    (CI-RUNS.md, "A commit already tested")."""
+
+    def api(self):
+        return FakeApi(*linear("a", "b", branches={"topic": ("b", ["t1"])}))
+
+    def twin(self, api, commit="b", ref="refs/heads/topic", event="push", workflow="macos-arm64.yml", me=None):
+        if me is None:
+            me = api.run(workflow, commit, branch=ref.split("/", 2)[-1], event=event, status="in_progress")["id"]
+        return runs.twin(api, workflow, me, sha(commit), ref, event)
+
+    def test_defers_to_mains_unfinished_or_successful_run(self):
+        for status, conclusion in (("queued", None), ("in_progress", None), ("completed", "success")):
+            api = self.api()
+            main = api.run("macos-arm64.yml", "b", status=status, conclusion=conclusion)
+            found, why = self.twin(api)
+            self.assertEqual(found and found["id"], main["id"], status)
+            self.assertIn("main's push run", why)
+
+    def test_mains_failed_or_cancelled_run_is_no_twin(self):
+        for conclusion in ("failure", "cancelled"):
+            api = self.api()
+            api.run("macos-arm64.yml", "b", conclusion=conclusion)
+            found, why = self.twin(api)
+            self.assertIsNone(found, conclusion)
+            self.assertEqual(why, "no other run tests this commit")
+
+    def test_another_branch_counts_once_green_and_tested(self):
+        api = self.api()
+        unfinished = api.run("macos-arm64.yml", "b", branch="other", status="in_progress")
+        self.assertIsNone(self.twin(api)[0], "its own next push may cancel it")
+        unfinished.update(status="completed", conclusion="failure")
+        self.assertIsNone(self.twin(api)[0], "a failed run")
+        api.run("macos-arm64.yml", "b", branch="third", jobs=canary_jobs("macos-arm64.yml", canary="skipped"))
+        self.assertIsNone(self.twin(api)[0], "a deferred run tested nothing")
+        tested = api.run("macos-arm64.yml", "b", branch="other", jobs=canary_jobs("macos-arm64.yml"))
+        found, why = self.twin(api)
+        self.assertEqual(found["id"], tested["id"])
+        self.assertIn("other's push run", why)
+
+    def test_main_preferred(self):
+        api = self.api()
+        api.run("macos-arm64.yml", "b", branch="other", jobs=canary_jobs("macos-arm64.yml"))
+        main = api.run("macos-arm64.yml", "b", status="queued")
+        self.assertEqual(self.twin(api)[0]["id"], main["id"])
+
+    def test_only_the_same_workflow_commit_and_kind(self):
+        api = self.api()
+        api.run("windows-x86_64.yml", "b", status="queued")                    # another workflow
+        api.run("macos-arm64.yml", "a", status="queued")                        # another commit
+        api.run("macos-arm64.yml", "b", event="workflow_dispatch", jobs=full_jobs("macos-arm64.yml"))
+        api.run("macos-arm64.yml", "b", event="pull_request", status="queued")  # not a push
+        api.run("macos-arm64.yml", "b", status="queued", repo="fork/repo")     # not ours
+        self.assertIsNone(self.twin(api)[0])
+
+    def test_another_commits_run_is_no_twin(self):
+        # whatever the API's filter returns, a run at another commit
+        api = self.api()
+        api.run("macos-arm64.yml", "a", status="queued")
+        api.runs_at = lambda s: list(api.runs)
+        self.assertIsNone(self.twin(api)[0])
+
+    def test_never_itself(self):
+        api = self.api()
+        me = api.run("macos-arm64.yml", "b", branch="topic", jobs=canary_jobs("macos-arm64.yml"))
+        self.assertIsNone(self.twin(api, me=me["id"])[0], "a re-run attempt of a run is no twin of it")
+
+    def test_who_never_defers(self):
+        api = self.api()
+        api.run("macos-arm64.yml", "b", status="queued")
+        api.run("macos-arm64.yml", "b", branch="other", jobs=canary_jobs("macos-arm64.yml"))
+        for ref, event, why in (("refs/heads/main", "push", "a push to main never defers"),
+                                ("refs/heads/topic", "workflow_dispatch", "a workflow_dispatch run never defers"),
+                                ("refs/pull/7/merge", "pull_request", "a pull_request run never defers"),
+                                ("refs/tags/v1", "push", "refs/tags/v1 is no branch")):
+            found, got = self.twin(api, ref=ref, event=event)
+            self.assertIsNone(found, (ref, event))
+            self.assertTrue(got.startswith(why), got)
+
+    def test_workflow_file(self):
+        self.assertEqual(runs.workflow_file("o/r/.github/workflows/tests-arm64.yml@refs/heads/main"), "tests-arm64.yml")
+        self.assertEqual(runs.workflow_file(""), "")
+
+    def command(self, api, env, *argv):
+        """Runs the twin command with the GITHUB_* variables `env`, the API
+        `api` (an exception: every call of it fails so); returns its outputs,
+        its summary and its lines."""
+        def make_api():
+            if isinstance(api, Exception):
+                raise api
+            return api
+        lines, out = quiet()
+        with tempfile.TemporaryDirectory() as d:
+            outp, summ = os.path.join(d, "out"), os.path.join(d, "summary")
+            saved = {k: os.environ.get(k) for k in ("GITHUB_OUTPUT", "GITHUB_STEP_SUMMARY")}
+            os.environ["GITHUB_OUTPUT"], os.environ["GITHUB_STEP_SUMMARY"] = outp, summ
+            try:
+                runs.twin_command(runs.parser().parse_args(["twin"] + list(argv)), make_api, out, env)
+                return (read(outp) if os.path.exists(outp) else ""), (read(summ) if os.path.exists(summ) else ""), lines
+            finally:
+                for k, v in saved.items():
+                    if v is None:
+                        os.environ.pop(k, None)
+                    else:
+                        os.environ[k] = v
+
+    def env(self, api, commit="b", ref="refs/heads/topic", event="push"):
+        me = api.run("tests.yml", commit, branch=ref.split("/", 2)[-1], status="in_progress")
+        return {"GITHUB_WORKFLOW_REF": "%s/.github/workflows/tests.yml@%s" % (REPO, ref),
+                "GITHUB_RUN_ID": str(me["id"]), "GITHUB_SHA": sha(commit), "GITHUB_REF": ref,
+                "GITHUB_EVENT_NAME": event}
+
+    def test_command_outputs(self):
+        api = self.api()
+        main = api.run("tests.yml", "b", status="in_progress")
+        outputs, summary, lines = self.command(api, self.env(api))
+        self.assertEqual(outputs, "deferred=true\nrun=%s\n" % main["html_url"])
+        self.assertIn("### Deferred: commit %s is tested by %s" % (sha("b"), main["html_url"]), summary)
+        self.assertIn("This run tested nothing", summary)
+        self.assertTrue(any("deferred to" in l for l in lines), lines)
+        # not deferred: the outputs say so, the summary says nothing
+        outputs, summary, _ = self.command(api, self.env(api, commit="a"))
+        self.assertEqual((outputs, summary), ("deferred=false\nrun=\n", ""))
+
+    def test_command_never_defers_on_errors(self):
+        api = self.api()
+        api.run("tests.yml", "b", status="in_progress")
+        env = self.env(api)
+        outputs, _, lines = self.command(runs.ApiError("HTTP 502"), env)
+        self.assertEqual(outputs, "deferred=false\nrun=\n")
+        self.assertTrue(any(l.startswith("::warning") and "HTTP 502" in l for l in lines), lines)
+        broken = self.api()
+        broken.runs_at = lambda s: [{"path": ".github/workflows/tests.yml", "event": "push"}]  # no id
+        outputs, _, lines = self.command(broken, env)
+        self.assertEqual(outputs, "deferred=false\nrun=\n")
+        # main's push asks nothing of the API
+        outputs, _, _ = self.command(runs.ApiError("not asked"), self.env(api, ref="refs/heads/main"))
+        self.assertEqual(outputs, "deferred=false\nrun=\n")
+
+    def test_command_dry_run(self):
+        api = self.api()
+        api.heads["main"] = sha("b")
+        api.run("tests.yml", "b", status="queued")
+        outputs, summary, lines = self.command(api, {}, "--dry-run", "--workflow", "tests.yml", "--sha", "main",
+                                               "--ref", "refs/heads/a-branch", "--event", "push", "--run-id", "0")
+        self.assertEqual((outputs, summary), ("", ""))
+        self.assertTrue(any("would defer" in l for l in lines), lines)
 
 
 class CommandLine(unittest.TestCase):
@@ -1021,17 +1215,91 @@ class Workflows(unittest.TestCase):
         for st in steps[first + 1:]:
             self.assertIn("!cancelled()", str(st.get("if")), "step %s must run whatever an earlier gate found" % st.get("name"))
 
-    def test_branch_pushes_run_only_the_canary_on_linux(self):
-        for name in ("tests.yml", "tests-arm64.yml"):
+    # What a branch push runs beside its canary job (CI-RUNS.md, "The
+    # canary"): macOS's Linux control, and the opt-in jobs its head commit's
+    # message asks for (the marker each one's condition reads).
+    BRANCH_PUSH = {
+        "tests.yml": {},
+        "tests-arm64.yml": {},
+        "macos-arm64.yml": {"linux-control": None, "full": "[ci-full]", "app-mutants": "[ci-app-mutants]"},
+        "windows-x86_64.yml": {"full": "[ci-full]", "roots": "[ci-probes]"},
+    }
+    NOT_ON_A_BRANCH_PUSH = "github.event_name != 'push' || github.ref == 'refs/heads/main'"
+
+    def test_branch_pushes_run_only_the_canary(self):
+        for name, extra in self.BRANCH_PUSH.items():
             jobs = workflow(name)["jobs"]
-            canary, free = self.CANARY[name]
+            canary, _ = self.CANARY[name]
             for n, j in jobs.items():
-                if n == canary or n in free:
+                if_ = str(j.get("if"))
+                if n == canary:
+                    self.assertNotIn("refs/heads/main", if_, "%s: a branch push runs its canary" % name)
                     continue
-                self.assertIn("github.ref == 'refs/heads/main'", str(j.get("if")), "%s: job %s runs on a branch push" % (name, n))
+                marker = extra.get(n, False)
+                if marker is False:
+                    self.assertTrue(self.NOT_ON_A_BRANCH_PUSH in if_
+                                    or "github.event_name == 'push' && github.ref == 'refs/heads/main'" in if_,
+                                    "%s: job %s runs on a branch push" % (name, n))
+                elif marker:
+                    self.assertIn("contains(github.event.head_commit.message, '%s')" % marker, if_,
+                                  "%s: job %s runs on a branch push unasked" % (name, n))
                 if "GC-stress" in j["name"]:
                     self.assertIn("github.event_name == 'push' && github.ref == 'refs/heads/main'", j["if"], name)
                     self.assertNotIn("!= 'pull_request'", j["if"], "%s: GC stress on a branch push" % name)
+
+    TWIN_ACTION = "./.github/actions/twin"
+    DEFERRED = "steps.twin.outputs.deferred != 'true'"
+
+    def own_twin(self, name, n, job):
+        """The job decides itself whether it defers: the twin step right
+        after its checkout, every later step skipped once it defers, and
+        the token's actions: read."""
+        steps = job["steps"]
+        at = [i for i, st in enumerate(steps) if st.get("uses") == self.TWIN_ACTION]
+        self.assertEqual(len(at), 1, "%s: job %s has no twin step" % (name, n))
+        self.assertEqual(steps[at[0]].get("id"), "twin", name)
+        self.assertTrue(steps[at[0] - 1].get("uses", "").startswith("actions/checkout"),
+                        "%s: job %s: the twin step comes right after the checkout" % (name, n))
+        self.assertNotIn("if", steps[at[0]], name)
+        for st in steps[:at[0]]:
+            # nothing that tests before it: the checkout, Windows' line ends
+            self.assertTrue(st.get("uses", "").startswith("actions/checkout")
+                            or st.get("run", "").startswith("git config"),
+                            "%s: job %s runs %s before its twin step" % (name, n, st.get("name") or st.get("uses")))
+        for st in steps[at[0] + 1:]:
+            self.assertIn(self.DEFERRED, str(st.get("if")),
+                          "%s: job %s's step %s runs in a deferred run" % (name, n, st.get("name") or st.get("uses")))
+        self.assertEqual(job.get("permissions"), {"contents": "read", "actions": "read"}, "%s: job %s" % (name, n))
+
+    def test_a_branch_push_already_tested_defers(self):
+        """Every job a branch push runs is deferred with it (CI-RUNS.md, "A
+        commit already tested"): the canary job and the jobs that need not
+        wait for it decide by their own twin step, the others by the canary
+        job's output."""
+        for name, extra in self.BRANCH_PUSH.items():
+            jobs = workflow(name)["jobs"]
+            canary, _ = self.CANARY[name]
+            self.own_twin(name, canary, jobs[canary])
+            self.assertEqual(jobs[canary]["outputs"]["deferred"], "${{ steps.twin.outputs.deferred }}", name)
+            for n in extra:
+                if canary in self.chain(jobs, n):
+                    self.assertIn("needs.%s.outputs.deferred != 'true'" % canary, str(jobs[n].get("if")),
+                                  "%s: job %s runs after a deferred canary" % (name, n))
+                else:
+                    self.own_twin(name, n, jobs[n])
+
+    def test_twin_action_and_canary_step(self):
+        with open(os.path.join(ROOT, ".github", "actions", "twin", "action.yml")) as f:
+            action = yaml.safe_load(f)
+        steps = action["runs"]["steps"]
+        self.assertEqual(len(steps), 1)
+        self.assertIn("tools/ci/runs.py twin", steps[0]["run"])
+        self.assertEqual(steps[0]["env"], {"GH_TOKEN": "${{ github.token }}"})
+        self.assertEqual(action["outputs"]["deferred"]["value"], "${{ steps.decide.outputs.deferred }}")
+        # runs.ran_canary reads the canary step by its name
+        for name, (canary, _) in self.CANARY.items():
+            st = [st for st in workflow(name)["jobs"][canary]["steps"] if "tests/canary.tcl" in (st.get("run") or "")]
+            self.assertEqual(st[0].get("name"), runs.CANARY_STEP, name)
 
     def test_only_housekeeping_cancels_or_dispatches(self):
         for name, w in all_workflows().items():

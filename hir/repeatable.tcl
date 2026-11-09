@@ -92,6 +92,7 @@ proc hir::repeatable::Walk {hir block env memoVar} {
 }
 
 proc hir::repeatable::Expr {hir e env memoVar} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $memoVar memo
     set node [dict get $hir exprs $e]
     switch -- [dict get $node kind] {

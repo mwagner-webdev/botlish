@@ -1,0 +1,45 @@
+# Reproducer outputs (MANAGED-SUBPROCESS-AND-EVENT-LOOP-CENSUS-MILESTONE-1.md, section 13)
+
+$ tclsh9.0 main.tcl -check audit/managed-subprocess/repro/posix-spawn-ffi.bot
+== posix-spawn-ffi.bot (check)
+   error: audit/managed-subprocess/repro/posix-spawn-ffi.bot:30:84: argument 5 of posix_spawn cannot be proven to satisfy std::ffi::c::Ptr[std::ffi::c::Ptr[std::ffi::c::Char]] (argument type: List[std::abi::bytes::Bytes]) (CORE SEMANTIC TYPE)
+   help: tclsh9.0 main.tcl -help error.type
+   error: audit/managed-subprocess/repro/posix-spawn-ffi.bot:30:90: argument 6 of posix_spawn cannot be proven to satisfy std::ffi::c::Ptr[std::ffi::c::Ptr[std::ffi::c::Char]] (argument type: List[std::abi::bytes::Bytes]) (CORE SEMANTIC TYPE)
+
+$ tclsh9.0 main.tcl -check audit/managed-subprocess/repro/cleanup-cannot-wait.bot
+== cleanup-cannot-wait.bot (check)
+   error: /home/user/botlish/audit/managed-subprocess/repro/cleanup_job.bot:8:16: cleanup function cleanup_job::stop may yield: a cleanup runs where an owner's scope ends, inside whatever code is running there, and can suspend nothing (it would suspend the code that released the resource) (CORE SEMANTIC RESOURCE-DECLARATION)
+   help: tclsh9.0 main.tcl -help error.resource-declaration
+
+$ tclsh9.0 main.tcl audit/managed-subprocess/repro/raw-fork.bot -backend cranelift
+== raw-fork.bot (cranelift)
+   value: [true, true]
+
+$ (cd audit/managed-subprocess/slice && tclsh9.0 ../../../main.tcl -check repro-send-child.bot)
+== repro-send-child.bot (check)
+   error: /home/user/botlish/audit/managed-subprocess/slice/sendchild.bot:6:16: thread fn "steal": parameter "c" is declared msp::Child, which is not sendable: it cannot be reconstructed in another VM
+msp::Child is an opaque struct whose owner, module msp, does not declare it sendable: its fields are its owner's representation, whose meaning (a value, or an identity of one VM: a slot, a handle) only the owner knows (CORE SEMANTIC THREAD-ENTRY-SIGNATURE)
+   help: tclsh9.0 main.tcl -help error.thread-entry-signature
+
+$ cc -O2 repro/pidfd-spawn-leak.c -o leak && ./leak
+before 3
+r=2 pidfd=-77 fds=4
+r=2 pidfd=-77 fds=5
+r=2 pidfd=-77 fds=6
+posix_spawn r=2 fds=6
+posix_spawn r=2 fds=6
+posix_spawn r=2 fds=6
+waitable child after failures: w=-1 pid=0
+fd 3 -> anon_inode:[pidfd]
+fd 4 -> anon_inode:[pidfd]
+fd 5 -> anon_inode:[pidfd]
+
+$ cc -O2 repro/group-after-reap.c -o grp && ./grp
+leader 11428 reaped; descendant 11429 in group 11428
+group signal 0 after reap: r=0 
+kill(-pgid,0) after reap: r=0 
+process signal after reap: r=-1 No such process
+group SIGKILL after reap: r=0 
+descendant: state Z (killed; an unreaped zombie of PID 1)
+
+group signal once the group is empty: r=0   (not empty yet: the killed descendant is still a zombie member) 

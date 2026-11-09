@@ -20,6 +20,15 @@ Evidence labels:
   exercised;
 * **projected**: a design consequence, not built.
 
+**Status (HTTP-CLIENT-PACKAGE-MILESTONE-1.md).** Since this census, the
+package route (section 6) has been built for HTTP/1.1 and HTTP/2 with TLS
+on Linux x86-64: the packages `boringssl` (the provider) and `http` (the
+client), their release recipes, a test suite against independent peers, a
+mutation harness and a clean-room consumer with the single-file compiler.
+Section 4 records each open item's state after it; section 10's work plan
+marks what is done, deferred or still blocking. The rest of this document
+is the census as it was written.
+
 ## Contents
 
 1. Answer
@@ -204,23 +213,25 @@ decision (D7); a minimal one can leave all of them to the application.
 
 ## 4. The integration census's open items, today
 
-Status read in this checkout (observed unless marked):
+Status read in this checkout (observed unless marked); the last column is
+the state after HTTP-CLIENT-PACKAGE-MILESTONE-1.md (its section
+"Census items"):
 
-| item | then | now |
-|---|---|---|
-| B1 BoringSSL bundled twice by boring-sys and quiche | upstream; remedy: link-only build | open; a release recipe must use link-only mode |
-| B2 another BoringSSL revision links and runs silently | needs a provider check as a build step | open: the package manager's checks (two archives defining one symbol, digests) would not catch a unit *compiled* against another revision's headers; the API-version identity check must be a recipe step |
-| B3 COMDAT collision of a localized Rust unit | rename `DW.ref.rust_eh_personality` | open; an author-side recipe step (consumers link an already-localized archive) |
-| B4 a context-trait implementation takes exactly one context | language | open (`hir/contexts.tcl:298`) |
-| B5 the Linux driver's watch interest is fixed at creation | package API | open: `evl_watch_rearm(id, slot, gen)` takes no interest (`packages/event_loop_linux/event_loop_linux.bot:63`) |
-| B6 quiche's default congestion control never paces | upstream | open; choose BBR2 in the configuration |
-| B7 two BoringSSL conventions (prefixed 0.20260929.0 for the C FFI; unprefixed 0.20261020.0 for boring) | converge | open: `tests/cffi/boringssl.tcl` still builds `BORINGSSL_PREFIX=botlish_bssl` at 0.20260929.0 |
-| B8 no borrowed foreign bytes | language | open |
-| B9 no integer division | known | open (Compilerpedia `capability.integer-division`) |
-| B10 `extern c fn` cannot be `nomethod` | known | open (a function modifier must be followed by `fn`: `surface/parser.tcl`'s modifier rule) |
-| B11 a method call resolved to an invalid candidate | compiler | fixed (METHOD-RECEIVER-TYPE-CORRECTNESS-MILESTONE-1.md) |
-| B12 one expensive synchronous call blocks the loop | bridge | open; also covers name resolution (3.1) and key generation |
-| recommendation 2: scope-bound handles | after lexical cleanup | the language part is available (3.4); the HTTP part is not built |
+| item | then | at this census | after the HTTP client milestone |
+|---|---|---|---|
+| B1 BoringSSL bundled twice by boring-sys and quiche | upstream; remedy: link-only build | open; a release recipe must use link-only mode | **implemented**: the http unit builds boring-sys link-only against empty archives and defines no BoringSSL symbol (`http-unit-exports`); quiche is not shipped |
+| B2 another BoringSSL revision links and runs silently | needs a provider check as a build step | open: the package manager's checks would not catch a unit *compiled* against another revision's headers | **implemented**: the unit references `botlish_boringssl_<tag>_<commit>`, defined only by the provider package's archive: another provider fails the link (`http-provider-identity`, the `provider-mismatch` mutant); the graph refuses another boringssl release (clean room) |
+| B3 COMDAT collision of a localized Rust unit | rename `DW.ref.rust_eh_personality` | open; an author-side recipe step | **implemented** in `tools/http-package.tcl` (the unit's COMDAT group renamed after localization) |
+| B4 a context-trait implementation takes exactly one context | language | open (`hir/contexts.tcl:298`) | **not needed**: shared dependencies (D1) gave libraries the application's driver; unchanged |
+| B5 the Linux driver's watch interest is fixed at creation | package API | open | **worked around** in the http package (another interest is an unwatch and a new watch, counted as `rewatches`); the driver's API unchanged (deferred: a new driver release) |
+| B6 quiche's default congestion control never paces | upstream | open | **deferred** with HTTP/3 |
+| B7 two BoringSSL conventions | converge | open | **converged for shipping**: the provider package is the unprefixed 0.20261020.0 boring consumes; `tests/cffi/boringssl.tcl`'s prefixed 0.20260929.0 remains a test fixture of the C FFI (deferred) |
+| B8 no borrowed foreign bytes | language | open | **not needed** (excluded by the milestone): a read copies one chunk into Botlish storage through the C FFI's write exposure, at most one chunk held natively |
+| B9 no integer division | known | open | **still absent**; worked around in the module and its tests |
+| B10 `extern c fn` cannot be `nomethod` | known | open | **unchanged**; the externs are `private`, so no method-style call reaches them from a consumer |
+| B11 a method call resolved to an invalid candidate | compiler | fixed | fixed |
+| B12 one expensive synchronous call blocks the loop | bridge | open | **implemented for name resolution** (a bounded getaddrinfo pool that answers by a foreign wake); TLS handshakes and verification still run on the loop's thread (measured: the report's "Measurements") |
+| recommendation 2: scope-bound handles | after lexical cleanup | the HTTP part is not built | **implemented**: clients and exchanges are resources (`ClientOwner`, `ExchangeOwner`) |
 
 ## 5. The standard-library route
 
@@ -569,13 +580,13 @@ milestone like the ones in `docs/`, L: several). Projected.
 | # | work | size | needs |
 |---|---|---|---|
 | 1 | D1 decided and built (peer dependencies, or B4, or the std driver) -- done: shared dependencies, SHARED-PACKAGE-DEPENDENCIES-MILESTONE-1.md | M-L | language design |
-| 2 | provider: one BoringSSL convention (D4), a provider package with distinct archive names, its recipe in the author image | M | D4, Rust/CMake in the image |
-| 3 | the bridge as a maintained crate: test-only exports and the environment read moved to a test unit, the batched executor step, B12's worker, send retry for UDP | M | -- |
-| 4 | transport: addresses, IPv4/IPv6, name resolution off the loop, listen/connect options, the transport context (8.1) | M | 3 |
-| 5 | HTTP/1.1 and HTTP/2 API: headers, URIs, byte bodies, declared errors, resource-typed handles with detach-to-executor release, graceful shutdown, limits | L | 1, 3, 4 |
-| 6 | TLS policy: system trust anchors, application certificates and keys, ALPN, no verification bypass | M | 2, 5 |
-| 7 | the release recipe: vendored crates, pinned rustc, link-only unit, localization, identity checks, reproducible archives, notices; `packages/http` and RELEASES.tsv | M | 2, D5 |
-| 8 | tests, GC stress, AArch64, interop, mutants, fuzzing, CI jobs with caching; AGENTS.md section; milestone report | M | 5-7 |
+| 2 | provider: one BoringSSL convention (D4), a provider package with distinct archive names, its recipe in the author image -- done (`packages/boringssl`; HTTP-CLIENT-PACKAGE-MILESTONE-1.md) | M | D4, Rust/CMake in the image |
+| 3 | the bridge as a maintained crate: test-only exports and the environment read moved to a test unit, the batched executor step, B12's worker, send retry for UDP -- done for the client (UDP with HTTP/3) | M | -- |
+| 4 | transport: addresses, IPv4/IPv6, name resolution off the loop, listen/connect options, the transport context (8.1) -- done for outbound connections (no listen) | M | 3 |
+| 5 | HTTP/1.1 and HTTP/2 API: headers, URIs, byte bodies, declared errors, resource-typed handles with detach-to-executor release, graceful shutdown, limits -- done for the client | L | 1, 3, 4 |
+| 6 | TLS policy: system trust anchors, application certificates and keys, ALPN, no verification bypass -- done for the client (no client certificates) | M | 2, 5 |
+| 7 | the release recipe: vendored crates, pinned rustc, link-only unit, localization, identity checks, reproducible archives, notices; `packages/http` and RELEASES.tsv -- done (boringssl 0.20261020.0 and http 0.1.0 recorded from the pinned image; http 0.2.0, for event_loop_linux 0.5.0's one loop per VM, likewise: HTTP-CLIENT-PACKAGE-MILESTONE-1.md, section 18) | M | 2, D5 |
+| 8 | tests, GC stress, AArch64, interop, mutants, fuzzing, CI jobs with caching; AGENTS.md section; milestone report -- done but for AArch64 and a CI job | M | 5-7 |
 | 9 | HTTP/3: multi-connection endpoints, retry and version negotiation, Alt-Svc, BBR2 configuration | L | 5-8 |
 | 10 | std vocabulary module(s) (5.3), Compilerpedia, warning gate, stdlib census | S-M | D2, D6 |
 | 11 | distribution: assets beside `single-latest` (E2), README download links, a smoke test that installs and links an HTTP program with the single executable | S | 7, 8 |

@@ -1,0 +1,406 @@
+# The clean room's consumer (HTTP-CLIENT-PACKAGE-MILESTONE-1.md, section
+# 14): an application written against the published packages only -- http,
+# its shared event_loop_linux, and feeds, a library authored apart from
+# them. Its first argument names the workload:
+#
+#   public URL                      A: a GET of a public HTTPS URL
+#   post BASE CAFILE                B: a JSON POST to an HTTPS peer whose
+#                                      certificate CAFILE's anchor signs
+#   stream BASE CAFILE              C: a 64 MiB response read chunk by chunk
+#                                      (the process's peak memory before and
+#                                      after), UTF-8 split across chunks, a
+#                                      streamed 4 MiB upload
+#   shared BASE CAFILE              D: feeds' polls and this program's own
+#                                      requests, concurrently, under the one
+#                                      driver and the one HTTP runtime
+#   failures BASE CAFILE BAD CLOSED E: name resolution, an untrusted
+#                                      certificate (BAD), a refused
+#                                      connection (CLOSED), a deadline, an
+#                                      idle body, cancellation, an early
+#                                      release
+#
+# Every line it prints is the workload's observation; the harness
+# (inside.sh) checks them.
+import event_loop_linux
+import feeds
+import http
+import std::abi
+import std::abi::bytes
+import std::char
+import std::event_loop
+import std::int
+import std::io
+import std::io::fs
+import std::io::path
+import std::linux::fs
+import std::linux::io
+import std::list
+import std::mutable_vector
+import std::str
+
+nomethod fn n(x: int) -> str:
+    std::int::to_string(x)
+
+nomethod fn say(text: str, context io: std::io::IO):
+    std::io::print_line(text):
+        on std::io::WriteFailed:
+            unit
+
+nomethod fn arg(args: List[str], i: int) -> str:
+    args.get(i, "")
+
+nomethod fn utf8(text: str) -> std::abi::bytes::Bytes:
+    std::abi::bytes::from_list(std::str::encode_utf8(text))
+
+nomethod fn size(b: std::abi::bytes::Bytes) -> int:
+    std::abi::bytes::length(b).value
+
+nomethod fn yes(b: bool) -> str:
+    if b:
+        "yes"
+    else:
+        "NO"
+
+nomethod fn text_of(b: std::abi::bytes::Bytes) -> str:
+    std::abi::bytes::decode_utf8(b):
+        on InvalidUtf8:
+            "<not utf-8>"
+
+nomethod fn version_text(v: http::Version) -> str:
+    if v == http::Version::Http2:
+        "HTTP/2"
+    else:
+        "HTTP/1.1"
+
+nomethod fn phase_text(p: http::Phase) -> str:
+    if p == http::Phase::Connect:
+        "connect"
+    elif p == http::Phase::Deadline:
+        "deadline"
+    else:
+        "idle"
+
+# The file PATH's bytes (the trust anchor a workload names), or none.
+nomethod fn file_bytes(path: str, context fs: std::linux::fs::LinuxFS) -> std::abi::bytes::Bytes:
+    p = std::linux::fs::from_text(path):
+        on std::io::path::NotAPath:
+            return utf8("")
+    std::linux::fs::read_file(p):
+        on std::io::fs::FileError:
+            utf8("")
+
+# PARTS joined. Lines are built this way, not with "...".concat(...) chains:
+# with std::linux::fs imported, each method-style concat is a whole-program
+# trial build (std::linux::fs::concat is a candidate the decision's kind
+# proofs cannot exclude for a str receiver), and inside a fold the
+# method-style call is charged std::linux::fs::concat's NotAPath in the
+# monomorphized program (audit/http-client/findings/).
+nomethod fn line(parts: List[str]) -> str:
+    fold p in parts with intermediate acc "":
+        std::str::concat(acc, p)
+
+# The decimal number after "VmHWM:" in /proc/self/status: the process's
+# peak resident memory, in KiB (-1 when it cannot be read).
+nomethod fn peak_kib(context fs: std::linux::fs::LinuxFS) -> int:
+    status = text_of(file_bytes("/proc/self/status"))
+    length = std::str::length(status)
+    loop i from 0 to length:
+        label = status.substring(i, i + 6):
+            on LowerUnderrun:
+                ""
+            on UpperOverrun:
+                ""
+        if label == "VmHWM:":
+            digits = loop j from i + 6 to length:
+                c = status.char_at(j):
+                    on IndexNotFound:
+                        '\n'
+                if c == '\n':
+                    break
+                if std::char::is_tcl_alnum(c) and c != 'k' and c != 'B':
+                    "".append_char(c)
+                else:
+                    ""
+            value = std::int::from_string(line(digits)):
+                on InvalidIntegerText:
+                    -1
+            return value
+    -1
+
+# How one request ends: its status and body size, or the failure.
+nomethod fn attempt(client: http::Client, r: http::Request, context h: http::Http, ev: std::event_loop::Loop) -> str errors std::event_loop::SchedulerFault:
+    sent = client.send(r):
+        on http::InvalidRequest {reason}:
+            return line(["error InvalidRequest ", reason])
+        on http::ResolveFailed {host, reason}:
+            return line(["error ResolveFailed ", host, ": ", reason])
+        on http::ConnectFailed {host, port, reason}:
+            return line(["error ConnectFailed ", host, " port ", n(port), ": ", reason])
+        on http::TlsVerifyFailed {host, reason}:
+            return line(["error TlsVerifyFailed ", host, ": ", reason])
+        on http::TlsHandshakeFailed {reason}:
+            return line(["error TlsHandshakeFailed ", reason])
+        on http::ProtocolError {reason}:
+            return line(["error ProtocolError ", reason])
+        on http::Timeout {phase, reason}:
+            return line(["error Timeout ", phase_text(phase), ": ", reason])
+        on http::Cancelled:
+            return "error Cancelled"
+        on http::Closed:
+            return "error Closed"
+        on http::Unsupported {reason}:
+            return line(["error Unsupported ", reason])
+        on http::TrustFailed {reason}:
+            return line(["error TrustFailed ", reason])
+        on http::Released:
+            return "error Released"
+        on http::Fault {reason}:
+            return line(["error Fault ", reason])
+    {owner, response} = sent
+    body = response.exchange.read_all(1073741824):
+        on http::BodyTooLarge:
+            return "body error BodyTooLarge"
+        on http::ProtocolError {reason}:
+            return line(["body error ProtocolError ", reason])
+        on http::Timeout {phase, reason}:
+            return line(["body error Timeout ", phase_text(phase), ": ", reason])
+        on http::Cancelled:
+            return "body error Cancelled"
+        on http::Closed:
+            return "body error Closed"
+        on http::Released:
+            return "body error Released"
+        on http::Fault {reason}:
+            return line(["body error Fault ", reason])
+        on http::ResolveFailed:
+            return "body error ResolveFailed"
+        on http::ConnectFailed:
+            return "body error ConnectFailed"
+        on http::TlsVerifyFailed:
+            return "body error TlsVerifyFailed"
+        on http::TlsHandshakeFailed:
+            return "body error TlsHandshakeFailed"
+        on http::InvalidRequest:
+            return "body error InvalidRequest"
+        on http::Unsupported:
+            return "body error Unsupported"
+        on http::TrustFailed:
+            return "body error TrustFailed"
+    line(["status ", n(response.status), ", ", version_text(response.version), ", ", n(size(body)), " bytes"])
+
+# --- A: a public HTTPS URL, trusting the system's anchors only
+fn public(args: List[str], context h: http::Http, ev: std::event_loop::Loop, nat: event_loop_linux::Native, io: std::io::IO) errors http::InvalidUri, http::InvalidRequest, http::ResolveFailed, http::ConnectFailed, http::TlsVerifyFailed, http::TlsHandshakeFailed, http::ProtocolError, http::Timeout, http::Cancelled, http::Closed, http::Unsupported, http::TrustFailed, http::Released, http::Fault, http::BodyTooLarge, http::HeaderNotText, std::event_loop::SchedulerFault:
+    {owner, client} = http::client(http::config())
+    {owner: x, response} = client.send(http::get(http::uri(arg(args, 1))).with_timeout(30000000))
+    say(line(["public: status ", n(response.status), ", ", version_text(response.version)]))
+    say(line(["public: content-type ", response.headers.first("content-type")]))
+    body = response.exchange.read_all(16777216)
+    say(line(["public: ", n(size(body)), " bytes"]))
+
+# --- B: JSON over HTTPS to a peer the program's own anchor certifies
+fn post(args: List[str], context h: http::Http, ev: std::event_loop::Loop, nat: event_loop_linux::Native, io: std::io::IO, fs: std::linux::fs::LinuxFS) errors http::InvalidUri, http::InvalidRequest, http::ResolveFailed, http::ConnectFailed, http::TlsVerifyFailed, http::TlsHandshakeFailed, http::ProtocolError, http::Timeout, http::Cancelled, http::Closed, http::Unsupported, http::TrustFailed, http::Released, http::Fault, http::BodyTooLarge, http::HeaderNotText, std::event_loop::SchedulerFault:
+    {owner, client} = http::client(http::config().with_anchors(file_bytes(arg(args, 2))))
+    body = utf8("{\"input\": \"héllo ✓\", \"stream\": false}")
+    r = http::post(http::uri(line([arg(args, 1), "/echo"])), body).with_header(http::header("content-type", "application/json")).with_header(http::header("authorization", "Bearer cleanroom-token"))
+    {owner: x, response} = client.send(r)
+    say(line(["post: status ", n(response.status), ", ", version_text(response.version)]))
+    say(line(["post: the peer saw method ", response.headers.first("x-echo-method"), ", content-type ", response.headers.first("x-echo-content-type"), ", authorization ", response.headers.first("x-echo-authorization")]))
+    echoed = response.exchange.read_all(1048576)
+    say(line(["post: the echoed body is the body sent: ", yes(echoed == body), ": ", text_of(echoed)]))
+
+# --- C: streaming both ways, bounded memory
+fn stream(args: List[str], context h: http::Http, ev: std::event_loop::Loop, nat: event_loop_linux::Native, io: std::io::IO, fs: std::linux::fs::LinuxFS) errors http::InvalidUri, http::InvalidRequest, http::ResolveFailed, http::ConnectFailed, http::TlsVerifyFailed, http::TlsHandshakeFailed, http::ProtocolError, http::Timeout, http::Cancelled, http::Closed, http::Unsupported, http::TrustFailed, http::Released, http::Fault, http::BodyTooLarge, http::HeaderNotText, std::event_loop::SchedulerFault:
+    base = arg(args, 1)
+    {owner, client} = http::client(http::config().with_anchors(file_bytes(arg(args, 2))))
+    before = peak_kib()
+    {owner: x, response} = client.send(http::get(http::uri(line([base, "/stream?n=4096&size=16384"]))))
+    seen = fold with intermediate acc {total: 0, chunks: 0, largest: 0}:
+        chunk = response.exchange.read()
+        k = size(chunk)
+        if k == 0:
+            break
+        largest = if k > acc.largest:
+            k
+        else:
+            acc.largest
+        {total: acc.total + k, chunks: acc.chunks + 1, largest: largest}
+    after = peak_kib()
+    say(line(["stream: ", n(seen.total), " bytes in ", n(seen.chunks), " chunks over ", version_text(response.version), ", the largest ", n(seen.largest)]))
+    say(line(["stream: at most ", n(http::stats().max_held), " bytes held natively while the program did not read"]))
+    growth = after - before
+    say(line(["stream: peak memory grew by ", n(growth), " KiB while 65536 KiB passed through: bounded ", yes(growth >= 0 and growth < 16384)]))
+    # UTF-8 text the peer writes one byte at a time: the chunks split its
+    # characters; the program decodes the bytes once it has them all.
+    {owner: u, response: text} = client.send(http::get(http::uri(line([base, "/utf8"]))))
+    parts = std::mutable_vector::from_list([utf8("")])
+    parts.clear()
+    loop:
+        chunk = text.exchange.read()
+        if size(chunk) == 0:
+            break
+        parts.push(chunk)
+    listed = loop i from 0 to std::mutable_vector::length(parts):
+        parts.at(i):
+            on IndexNotFound:
+                utf8("")
+    all = std::abi::bytes::join(listed)
+    say(line(["stream: utf-8 text in ", n(std::list::length(listed)), " chunks: ", text_of(all)]))
+    # A 4 MiB upload written 64 KiB at a time, its length declared.
+    piece = std::abi::bytes::freeze(std::abi::bytes::zeroed(std::abi::usize(65536)))
+    r = http::request("PUT", http::uri(line([base, "/echo"]))).with_header(http::header("content-type", "application/octet-stream"))
+    {owner: w, exchange} = client.start(r, 4194304)
+    loop i from 0 to 64:
+        exchange.write(piece)
+    unit
+    echoed = exchange.finish()
+    back = echoed.exchange.read_all(8388608)
+    say(line(["stream: uploaded 4194304 bytes in 64 writes; the peer saw content-length ", echoed.headers.first("x-echo-length"), " and echoed ", n(size(back))]))
+
+# --- D: a separately authored library under the same driver and runtime
+fn mine(client: http::Client, url: str, count: int, context h: http::Http, ev: std::event_loop::Loop, io: std::io::IO) -> int errors std::event_loop::SchedulerFault:
+    target = http::uri(url):
+        on http::InvalidUri:
+            return 1
+    loop i from 0 to count:
+        say(line(["app: request ", n(i + 1), ": ", attempt(client, http::get(target))]))
+        std::event_loop::sleep(50000)
+    0
+
+fn library(url: str, anchors: std::abi::bytes::Bytes, context h: http::Http, ev: std::event_loop::Loop, nat: event_loop_linux::Native, io: std::io::IO) -> int errors std::event_loop::SchedulerFault:
+    lines = url.poll(anchors, 3, 100000)
+    loop text in lines:
+        say(text)
+    # feeds' client was released where poll ended; the application's task
+    # ended first (its own last line counted feeds' client, still open).
+    st = http::stats():
+        on http::Fault:
+            return 1
+    say(line(["feeds task done: clients ", n(st.clients), ", exchanges ", n(st.exchanges), ", panics ", n(st.panics)]))
+    0
+
+fn shared(args: List[str], context h: http::Http, ev: std::event_loop::Loop, nat: event_loop_linux::Native, io: std::io::IO, fs: std::linux::fs::LinuxFS) errors http::InvalidUri, http::InvalidRequest, http::ResolveFailed, http::ConnectFailed, http::TlsVerifyFailed, http::TlsHandshakeFailed, http::ProtocolError, http::Timeout, http::Cancelled, http::Closed, http::Unsupported, http::TrustFailed, http::Released, http::Fault, http::BodyTooLarge, http::HeaderNotText, std::event_loop::SchedulerFault:
+    anchors = file_bytes(arg(args, 2))
+    url = line([arg(args, 1), "/hello"])
+    {owner, client} = http::client(http::config().with_anchors(anchors))
+    coroutine {step: s, first: f} = library(url, anchors)
+    std::event_loop::adopt(s, f)
+    client.mine(url, 4)
+    # Both tasks' clients are released where their scopes end; the loop
+    # runs until feeds' task is done.
+    unit
+
+# --- E: failures, each a declared error
+fn canceller(c: http::Cancel, after: int, context h: http::Http, ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    std::event_loop::sleep(after)
+    http::cancel(c):
+        on http::Fault:
+            -1
+    0
+
+fn failures(args: List[str], context h: http::Http, ev: std::event_loop::Loop, nat: event_loop_linux::Native, io: std::io::IO, fs: std::linux::fs::LinuxFS) errors http::InvalidUri, http::InvalidRequest, http::ResolveFailed, http::ConnectFailed, http::TlsVerifyFailed, http::TlsHandshakeFailed, http::ProtocolError, http::Timeout, http::Cancelled, http::Closed, http::Unsupported, http::TrustFailed, http::Released, http::Fault, http::BodyTooLarge, http::HeaderNotText, std::event_loop::SchedulerFault:
+    base = arg(args, 1)
+    config = http::config().with_anchors(file_bytes(arg(args, 2)))
+    {owner, client} = http::client(config)
+    say(line(["failures: name resolution: ", attempt(client, http::get(http::uri("https://no-such-host.invalid/")))]))
+    say(line(["failures: untrusted certificate: ", attempt(client, http::get(http::uri(line([arg(args, 3), "/hello"]))))]))
+    say(line(["failures: refused: ", attempt(client, http::get(http::uri(line([arg(args, 4), "/hello"]))))]))
+    say(line(["failures: deadline: ", attempt(client, http::get(http::uri(line([base, "/slowhead?delay=3000"]))).with_timeout(300000))]))
+    idle = http::Config {versions: config.versions, trust: config.trust, connect_timeout: config.connect_timeout, idle_timeout: 300000, max_connections: config.max_connections, max_header_bytes: config.max_header_bytes, pool_idle: config.pool_idle, window: config.window}
+    {owner: o2, client: patient} = http::client(idle)
+    say(line(["failures: idle body: ", attempt(patient, http::get(http::uri(line([base, "/idle?delay=3000"]))))]))
+    c = http::cancellation()
+    coroutine {step: s, first: f} = canceller(c, 200000)
+    std::event_loop::adopt(s, f)
+    say(line(["failures: cancelled: ", attempt(client, http::get(http::uri(line([base, "/slowhead?delay=3000"]))).with_cancel(c))]))
+    # An exchange released after its first chunk, mid-body: its native work
+    # is dropped, and the client goes on.
+    {owner: x, response} = client.send(http::get(http::uri(line([base, "/stream?n=1000&size=65536&delay=10"]))))
+    first = response.exchange.read()
+    http::close(x)
+    again = response.exchange.read():
+        on http::Released:
+            utf8("released")
+    std::event_loop::sleep(20000)
+    st = http::stats()
+    say(line(["failures: early release: first chunk ", n(size(first)), ", a read after release: ", text_of(again), ", exchanges left ", n(st.exchanges)]))
+    say(line(["failures: the client after it: ", attempt(client, http::get(http::uri(line([base, "/hello"]))))]))
+
+fn workload(args: List[str], context h: http::Http, ev: std::event_loop::Loop, nat: event_loop_linux::Native, io: std::io::IO, fs: std::linux::fs::LinuxFS) errors http::InvalidUri, http::InvalidRequest, http::ResolveFailed, http::ConnectFailed, http::TlsVerifyFailed, http::TlsHandshakeFailed, http::ProtocolError, http::Timeout, http::Cancelled, http::Closed, http::Unsupported, http::TrustFailed, http::Released, http::Fault, http::BodyTooLarge, http::HeaderNotText, std::event_loop::SchedulerFault:
+    which = arg(args, 0)
+    if which == "public":
+        public(args)
+    elif which == "post":
+        post(args)
+    elif which == "stream":
+        stream(args)
+    elif which == "shared":
+        shared(args)
+    elif which == "failures":
+        failures(args)
+    else:
+        say("usage: main public|post|stream|shared|failures ...")
+
+fn task(args: List[str], context h: http::Http, ev: std::event_loop::Loop, nat: event_loop_linux::Native, io: std::io::IO, fs: std::linux::fs::LinuxFS) -> int errors std::event_loop::SchedulerFault:
+    workload(args):
+        on http::InvalidUri {reason}:
+            say(line(["error InvalidUri ", reason]))
+        on http::InvalidRequest {reason}:
+            say(line(["error InvalidRequest ", reason]))
+        on http::ResolveFailed {reason}:
+            say(line(["error ResolveFailed ", reason]))
+        on http::ConnectFailed {reason}:
+            say(line(["error ConnectFailed ", reason]))
+        on http::TlsVerifyFailed {reason}:
+            say(line(["error TlsVerifyFailed ", reason]))
+        on http::TlsHandshakeFailed {reason}:
+            say(line(["error TlsHandshakeFailed ", reason]))
+        on http::ProtocolError {reason}:
+            say(line(["error ProtocolError ", reason]))
+        on http::Timeout {phase, reason}:
+            say(line(["error Timeout ", phase_text(phase), ": ", reason]))
+        on http::Cancelled:
+            say("error Cancelled")
+        on http::Closed:
+            say("error Closed")
+        on http::Unsupported {reason}:
+            say(line(["error Unsupported ", reason]))
+        on http::TrustFailed {reason}:
+            say(line(["error TrustFailed ", reason]))
+        on http::Released:
+            say("error Released")
+        on http::Fault {reason}:
+            say(line(["error Fault ", reason]))
+        on http::BodyTooLarge {limit}:
+            say(line(["error BodyTooLarge ", n(limit)]))
+        on http::HeaderNotText {name}:
+            say(line(["error HeaderNotText ", name]))
+    st = http::stats():
+        on http::Fault:
+            return 1
+    say(line(["end: clients ", n(st.clients), ", exchanges ", n(st.exchanges), ", panics ", n(st.panics)]))
+    0
+
+fn main(context ev: std::event_loop::Loop, d: event_loop_linux::Linux, nat: event_loop_linux::Native, h: http::Http, io: std::io::IO, fs: std::linux::fs::LinuxFS) -> int errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    raw = argv():
+        on InvalidArgumentEncoding:
+            ["main"]
+    args = loop i from 1 to std::list::length(raw):
+        raw.get(i, "")
+    coroutine {step, first} = task(args)
+    std::event_loop::adopt(step, first)
+    std::event_loop::run()
+    0
+
+with context std::event_loop::create(64)
+with context event_loop_linux::create()
+with context event_loop_linux::native()
+with context http::create()
+with context std::linux::io::create()
+with context std::linux::fs::create()
+main():
+    on std::event_loop::SchedulerFault:
+        1
+    on std::event_loop::DriverFault:
+        2
+    on std::event_loop::LoopReentered:
+        3

@@ -33,9 +33,16 @@ jobs:
     # earlier one found. Every other job waits for this one, so a push that
     # breaks them costs one runner for minutes, not every runner for hours.
     # On a branch push it is all that runs: dispatch the workflow on the
-    # branch for the rest.
+    # branch for the rest. A branch push at a commit another run already
+    # tests defers to it and runs nothing (CI-RUNS.md, "A commit already
+    # tested").
     runs-on: ubuntu-latest
     timeout-minutes: 40
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      deferred: ${{ steps.twin.outputs.deferred }}
     env:
       LANG: C.utf8
       LC_ALL: C.utf8
@@ -46,7 +53,12 @@ jobs:
           fetch-depth: 0
           filter: blob:none
 
+      - name: Already tested at this commit?
+        id: twin
+        uses: ./.github/actions/twin
+
       - name: Install project prerequisites
+        if: steps.twin.outputs.deferred != 'true'
         run: bash .devcontainer/setup.sh
 
       # Every mutant of every audit's catalog still applies to this tree: its
@@ -56,6 +68,7 @@ jobs:
       # elsewhere that rewrites or duplicates the text it targets fails here
       # instead, on its own push. Reads files only: seconds.
       - name: Every mutant applies
+        if: steps.twin.outputs.deferred != 'true'
         run: tclsh9.0 tools/mutant-catalogs.tcl -verbose 1
 
       # The shipped stdlib, libraries, examples and benchmarks compile with
@@ -66,15 +79,15 @@ jobs:
       # fails it. Warnings are discovered before any backend runs: no native
       # build needed. About two and a half minutes.
       - name: Warning gate
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.twin.outputs.deferred != 'true' }}
         run: tclsh9.0 audit/refactor/tools/gate.tcl
 
       - name: Build native (Cranelift) backend
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.twin.outputs.deferred != 'true' }}
         uses: ./.github/actions/build-native
 
       - name: Canary
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.twin.outputs.deferred != 'true' }}
         env:
           BASE: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.event.before || 'origin/main' }}
         run: tclsh9.0 tests/canary.tcl -base "$BASE"
@@ -388,18 +401,29 @@ jobs:
         run: tclsh9.0 audit/golden/tools/check.tcl -shard ${{ matrix.shard }}/4 -jobs 2
 
   gc-stress:
-    name: tests (native GC-stress)
+    name: tests (native GC-stress, ${{ matrix.backend }})
     needs: canary
     # GC-stress forces a GC attempt at every allocation site, which is the
     # standard way to surface native stack-walking/root-tracking bugs (see
     # AGENTS.md). It's slower than a plain run, so it runs on pushes to main
     # only: not on pull requests, manual runs or branch pushes.
+    # One job per Tcl backend pass, as in tests-arm64.yml: both passes in one
+    # job ran one after the other, 3 h 48 min of the job's 4 h 1 min on main
+    # (run 42358112066), the workflow's slowest job. Both passes are kept:
+    # the stress reaches only the native runs inside each pass's test files,
+    # and some files run cranelift in the interp pass and cranelift-generic
+    # only in the compile pass (actor.test, event-loop.test, golden.test, ...).
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: [interp, compile]
     env:
       LANG: C.utf8
       LC_ALL: C.utf8
       BOTLISH_NATIVE_GC_STRESS: "1"
+      CORE_BACKEND: ${{ matrix.backend }}
     steps:
       - uses: actions/checkout@v5
 
@@ -410,9 +434,11 @@ jobs:
         uses: ./.github/actions/build-native
 
       # The runtime's own Rust unit tests, under the same stress (each test
-      # roots what it holds in Rust locals, see Vm::temp_roots). Cheap: the
-      # dependencies are already built, the tests run in well under a second.
+      # roots what it holds in Rust locals, see Vm::temp_roots), once: in
+      # the compile pass's job, the shorter of the two. About 12 minutes,
+      # nearly all of it transfer_deep_trees_iteratively (run 42358112066).
       - name: Run native Rust unit tests under GC stress
+        if: matrix.backend == 'compile'
         run: cargo test --release --manifest-path native/Cargo.toml
 
       - name: Run test suite under GC stress

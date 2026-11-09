@@ -1,0 +1,2416 @@
+# The binding and signature dependency census of emission claims
+# (EMISSION-BINDING-AND-SIGNATURE-DEPENDENCY-CENSUS-MILESTONE-1.md): paired
+# programs in which a claimed function reads a value, a binding or a
+# callable signature whose declaration holds an unresolved name, a
+# diagnosed expression or a syntax hole -- and the valid programs beside
+# them. tools/census.tcl compiles each one leniently and strictly, with the
+# certificate memo and without it, through HIR interchange, and runs the
+# runnable ones with their claims erased, judging the trace with the
+# reference interpreter (tests/dfa-support.tcl).
+#
+#   @@ NAME DESCRIPTION
+#   section TEXT              the report's section the case belongs to
+#   class C                   the finding's consequence (the report's
+#                             section 19): A wrong verdict in a rejected
+#                             program, B missing certificate dependency,
+#                             C accepted-program unsoundness, D precision
+#                             loss, E correct, U undecided
+#   observed VERDICT ...      each claim's verdict at the census's commit,
+#                             in record order; `+` when it holds a
+#                             certificate
+#   appropriate VERDICT ...   what it should be (`undecided`: the report
+#                             says why)
+#   strict OUTCOME            `accepted`, or the kind a strict compilation
+#                             raises
+#   recover                   lenient compilation with syntax recovery
+#   run INDEX JUDGMENT        the program, its claims erased, runs on every
+#                             backend; its value is the claim INDEX's
+#                             complete trace (a List of symbols), judged
+#                             against that claim's recognizer: `ok` or
+#                             `invalid`, the recorded judgment
+#   --- FILE                  a file of the case (main.bot is the entry)
+#   ...
+#   @@end
+#
+#   @@sequence NAME DESCRIPTION   compilations in one process, the memo kept
+#   step CASE VERDICTS REUSE      REUSE `reused` or `fresh` (the claims'
+#                                 certificates taken from the memo or not);
+#                                 `run INDEX JUDGMENT` after it judges a run
+#   @@end
+#
+# The recognizer of every case: one ASCII digit (N6's: a digit, then a
+# letter).
+#
+# EMISSION-IDENTITY-AND-FEASIBILITY-CORRECTNESS-MILESTONE-1.md corrected the
+# two class C defects: the `observed` and `strict` lines of N1, N2, N3, F1,
+# F2 and F3 and the `identity` sequence's N4b step are its verdicts (the
+# census's were proven+ and accepted, N4b's proven+ reused); N6a, N6b and
+# the `identity-read` sequence are its own (a gap the census's prototype
+# left: a proof that read two functions of one name, memoized).
+
+# ---------------------------------------------------------------------------
+# Module bindings
+
+@@ R1 a module binding initialized by an unresolved call, read as a value
+section module bindings
+class A
+observed rejected
+appropriate dependent
+strict UNBOUND
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+k = missing()
+
+fn emitter() -> unit emits digit_token:
+    yield 48 + k
+    unit
+
+0
+@@end
+
+@@ R1v R1 repaired: the binding is the exact Int 1
+section module bindings
+class E
+observed proven+
+appropriate proven+
+strict accepted
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+k = 1
+
+fn emitter() -> unit emits digit_token:
+    yield 48 + k
+    unit
+
+0
+@@end
+
+@@ B3 an exact value whose initializer's condition is unresolved, both branches the same Int
+section module bindings
+class U
+observed proven+
+appropriate undecided
+strict UNBOUND
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+k = if missing():
+    1
+else:
+    1
+
+fn emitter() -> unit emits digit_token:
+    yield 48 + k
+    unit
+
+0
+@@end
+
+@@ B3b an exact value whose unresolved branch is statically dead
+section module bindings
+class E
+observed proven+
+appropriate proven+
+strict UNBOUND
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+k = if true:
+    1
+else:
+    missing()
+
+fn emitter() -> unit emits digit_token:
+    yield 48 + k
+    unit
+
+0
+@@end
+
+@@ B3c a value whose initializer's condition is unresolved, the branches differ
+section module bindings
+class A
+observed rejected
+appropriate dependent
+strict UNBOUND
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+k = if missing():
+    1
+else:
+    2
+
+fn emitter() -> unit emits digit_token:
+    yield 48 + k
+    unit
+
+0
+@@end
+
+@@ B4 a module binding initialized by a TYPE-diagnosed expression: poison, so the reference is too
+section module bindings
+class E
+observed dependent
+appropriate dependent
+strict TYPE
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+k = 1 + "x"
+
+fn emitter() -> unit emits digit_token:
+    yield 48 + k
+    unit
+
+0
+@@end
+
+@@ B5 a binding typed by a helper's declared result, the helper's body unresolved
+section module bindings
+class E
+observed proven+
+appropriate proven+
+strict UNBOUND
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+type Digit = Int in 0..9
+
+fn helper() -> Digit:
+    missing()
+
+k = helper()
+
+fn emitter() -> unit emits digit_token:
+    yield 48 + k
+    unit
+
+0
+@@end
+
+@@ B6 a binding of a helper whose inferred result is never because of an unresolved call
+section module bindings
+class A
+observed rejected
+appropriate dependent
+strict UNBOUND
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+fn helper():
+    missing()
+
+k = helper()
+
+fn emitter() -> unit emits digit_token:
+    yield 48 + k
+    unit
+
+0
+@@end
+
+@@ D1 bindings destructured from an unresolved call
+section module bindings
+class A
+observed rejected
+appropriate dependent
+strict UNBOUND
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+{k, j} = missing()
+
+fn emitter() -> unit emits digit_token:
+    yield 48 + k
+    unit
+
+0
+@@end
+
+@@ D2 bindings destructured from a struct one of whose fields is unresolved
+section module bindings
+class A
+observed rejected
+appropriate dependent
+strict UNBOUND
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+struct P:
+    k: int
+    j: int
+
+p = P {k: 1, j: missing()}
+{k, j} = p
+
+fn emitter() -> unit emits digit_token:
+    yield 48 + k
+    unit
+
+0
+@@end
+
+@@ D2v D2 valid: an exact field read through destructuring is not followed (precision)
+section module bindings
+class D
+observed rejected
+appropriate rejected
+strict EMIT-END-SYMBOL
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+struct P:
+    k: int
+    j: int
+
+p = P {k: 1, j: 2}
+{k, j} = p
+
+fn emitter() -> unit emits digit_token:
+    yield 48 + k
+    unit
+
+0
+@@end
+
+@@ G1 an unresolved binding the claimed function guards itself: the proof uses no fact of it
+section module bindings
+class U
+observed proven+
+appropriate undecided
+strict UNBOUND
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+k = missing()
+
+fn emitter() -> unit emits digit_token:
+    if k >= 0 and k <= 9:
+        yield 48 + k
+    else:
+        yield 48
+    unit
+
+0
+@@end
+
+@@ Z1 an unrelated unresolved module binding
+section module bindings
+class E
+observed proven+
+appropriate proven+
+strict UNBOUND
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+z = missing()
+
+fn emitter() -> unit emits digit_token:
+    yield 49
+    unit
+
+0
+@@end
+
+# ---------------------------------------------------------------------------
+# Local and captured bindings
+
+@@ B7 a local of the claimed function initialized by an unresolved call (walked: tainted)
+section local and captured bindings
+class E
+observed dependent
+appropriate dependent
+strict UNBOUND
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+fn emitter() -> unit emits digit_token:
+    k = missing()
+    yield 48 + k
+    unit
+
+0
+@@end
+
+@@ B8 an enclosing function's local initialized by an unresolved call, captured by a nested claimed function
+section local and captured bindings
+class A
+observed rejected
+appropriate dependent
+strict UNBOUND
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+fn outer() -> int:
+    k = missing()
+    fn inner() -> unit emits digit_token:
+        yield 48 + k
+        unit
+    3
+
+0
+@@end
+
+@@ B8b a captured exact value whose initializer's condition is unresolved
+section local and captured bindings
+class U
+observed proven+
+appropriate undecided
+strict UNBOUND
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+fn outer() -> int:
+    k = if missing():
+        1
+    else:
+        1
+    fn inner() -> unit emits digit_token:
+        yield 48 + k
+        unit
+    3
+
+0
+@@end
+
+@@ B8c B8 repaired: the captured value is the exact Int 1
+section local and captured bindings
+class E
+observed proven+
+appropriate proven+
+strict accepted
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+fn outer() -> int:
+    k = 1
+    fn inner() -> unit emits digit_token:
+        yield 48 + k
+        unit
+    3
+
+0
+@@end
+
+@@ B8d a captured value initialized by a TYPE-diagnosed expression: poison
+section local and captured bindings
+class E
+observed dependent
+appropriate dependent
+strict TYPE
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+fn outer() -> int:
+    k = 1 + "x"
+    fn inner() -> unit emits digit_token:
+        yield 48 + k
+        unit
+    3
+
+0
+@@end
+
+@@ B8e a valid captured value; an unrelated unresolved call later in the enclosing function
+section local and captured bindings
+class E
+observed proven+
+appropriate proven+
+strict UNBOUND
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+fn outer() -> int:
+    k = 1
+    fn inner() -> unit emits digit_token:
+        yield 48 + k
+        unit
+    missing()
+    3
+
+0
+@@end
+
+@@ B8f a captured alias of a local initialized by an unresolved call
+section local and captured bindings
+class A
+observed rejected
+appropriate dependent
+strict UNBOUND
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+fn outer() -> int:
+    j = missing()
+    k = j
+    fn inner() -> unit emits digit_token:
+        yield 48 + k
+        unit
+    3
+
+0
+@@end
+
+# ---------------------------------------------------------------------------
+# Imported declarations
+
+@@ X1 an imported constant
+section imported declarations
+class E
+observed proven+
+appropriate proven+
+strict accepted
+--- main.bot
+import consts
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+fn emitter() -> unit emits digit_token:
+    yield 48 + consts::k
+    unit
+
+0
+--- consts.bot
+k = 1
+@@end
+
+@@ X2 an imported binding initialized by an unresolved call
+section imported declarations
+class A
+observed rejected
+appropriate dependent
+strict UNBOUND
+--- main.bot
+import consts
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+fn emitter() -> unit emits digit_token:
+    yield 48 + consts::k
+    unit
+
+0
+--- consts.bot
+k = missing()
+@@end
+
+@@ X3 an imported function whose result type is unresolved (its result inferred from its body)
+section imported declarations
+class E
+observed proven+
+appropriate proven+
+strict TYPE
+--- main.bot
+import consts
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+fn emitter() -> unit emits digit_token:
+    yield 48 + consts::f()
+    unit
+
+0
+--- consts.bot
+fn f() -> Missing:
+    1
+@@end
+
+@@ X4 an imported function with a declared domain result whose body is unresolved (read: tainted)
+section imported declarations
+class E
+observed dependent
+appropriate dependent
+strict UNBOUND
+--- main.bot
+import consts
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+fn emitter() -> unit emits digit_token:
+    yield 48 + consts::f()
+    unit
+
+0
+--- consts.bot
+type Digit = Int in 0..9
+
+fn f() -> Digit:
+    missing()
+@@end
+
+@@ X5 an unrelated broken function in the imported module
+section imported declarations
+class E
+observed proven+
+appropriate proven+
+strict UNBOUND
+--- main.bot
+import consts
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+fn emitter() -> unit emits digit_token:
+    yield 48 + consts::k
+    unit
+
+0
+--- consts.bot
+k = 1
+
+fn broken() -> int:
+    missing()
+@@end
+
+# ---------------------------------------------------------------------------
+# Static compile and syntax recovery
+
+@@ SC1 a module binding whose initializer is a rejected static block (an unhandled CompilerError)
+section static compile and syntax recovery
+class A
+observed rejected
+appropriate dependent
+strict UNHANDLED-ERROR
+--- main.bot
+import std::compiler
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+k = static compile:
+    missing()
+
+fn emitter() -> unit emits digit_token:
+    yield 48 + k
+    unit
+
+0
+@@end
+
+@@ SC2 a rejected static block as a statement before a valid binding
+section static compile and syntax recovery
+class E
+observed proven+
+appropriate proven+
+strict UNHANDLED-ERROR
+--- main.bot
+import std::compiler
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+static compile:
+    missing()
+k = 1
+
+fn emitter() -> unit emits digit_token:
+    yield 48 + k
+    unit
+
+0
+@@end
+
+@@ SC3 an accepted program: the claimed function's own static block in value position always fails, so it never completes
+section static compile and syntax recovery
+class E
+observed proven+
+appropriate proven+
+strict accepted
+--- main.bot
+import std::compiler
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+fn emitter() -> unit errors std::compiler::CompilerError emits digit_token:
+    k = static compile:
+        missing()
+    yield 48 + k
+    unit
+
+0
+@@end
+
+@@ H1 a syntax hole as a module binding's initializer: poison
+section static compile and syntax recovery
+class E
+observed dependent
+appropriate dependent
+strict SYNTAX
+recover
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+k = (1 +
+
+fn emitter() -> unit emits digit_token:
+    yield 48 + k
+    unit
+
+0
+@@end
+
+@@ H2 a syntax hole in an unrelated binding
+section static compile and syntax recovery
+class E
+observed proven+
+appropriate proven+
+strict SYNTAX
+recover
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+k = 1
+j = (1 +
+
+fn emitter() -> unit emits digit_token:
+    yield 48 + k
+    unit
+
+0
+@@end
+
+# ---------------------------------------------------------------------------
+# Callable values
+
+@@ R2 a module binding of an unresolved name, called as a statement: the proof holds for every value it could be
+section callable values
+class E
+observed proven+
+appropriate proven+
+strict UNBOUND
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+f = missing
+
+fn emitter() -> unit emits digit_token:
+    f()
+    yield 49
+    unit
+
+0
+@@end
+
+@@ R2v R2 repaired: the binding is a function, the call's target its block
+section callable values
+class E
+observed proven+
+appropriate proven+
+strict accepted
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+fn g() -> unit:
+    unit
+
+f = g
+
+fn emitter() -> unit emits digit_token:
+    f()
+    yield 49
+    unit
+
+0
+@@end
+
+@@ B2b a module binding of an unresolved name, its call's value yielded
+section callable values
+class A
+observed rejected
+appropriate dependent
+strict UNBOUND
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+f = missing
+
+fn emitter() -> unit emits digit_token:
+    yield 48 + f()
+    unit
+
+0
+@@end
+
+@@ C1 a List of a function that genuinely never returns: the call's target is the block (its type names it), read
+section callable values
+class E
+observed proven+
+appropriate proven+
+strict accepted
+--- main.bot
+import std::list
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+fn mk():
+    loop:
+        continue
+
+fs = [mk]
+
+fn emitter() -> unit emits digit_token:
+    std::list::at(fs, 0)()
+    yield 65
+    unit
+
+0
+@@end
+
+@@ C2 C1 with the function's never an unresolved call's: read, tainted
+section callable values
+class E
+observed dependent
+appropriate dependent
+strict UNBOUND
+--- main.bot
+import std::list
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+fn mk():
+    missing()
+
+fs = [mk]
+
+fn emitter() -> unit emits digit_token:
+    std::list::at(fs, 0)()
+    yield 65
+    unit
+
+0
+@@end
+
+@@ V1 a value selected at run time between two functions that genuinely never return: a structural type, no target
+section callable values
+class E
+observed proven+
+appropriate proven+
+strict accepted
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+fn pick() -> bool:
+    true
+
+fn g():
+    loop:
+        continue
+
+fn h():
+    loop:
+        continue
+
+f = if pick():
+    g
+else:
+    h
+
+fn emitter() -> unit emits digit_token:
+    yield 49
+    f()
+    yield 65
+    unit
+
+0
+@@end
+
+@@ V2 V1 with g's never an unresolved call's: the walk ends at the never without reading anything
+section callable values
+class A
+observed proven+
+appropriate dependent
+strict UNBOUND
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+fn pick() -> bool:
+    true
+
+fn g():
+    missing()
+
+fn h():
+    loop:
+        continue
+
+f = if pick():
+    g
+else:
+    h
+
+fn emitter() -> unit emits digit_token:
+    yield 49
+    f()
+    yield 65
+    unit
+
+0
+@@end
+
+# ---------------------------------------------------------------------------
+# Signatures
+
+@@ S1 the claimed function's parameter type is unresolved, the parameter used
+section signatures
+class A
+observed rejected
+appropriate dependent
+strict TYPE
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+fn emitter(d: Missing) -> unit emits digit_token:
+    yield 48 + d
+    unit
+
+0
+@@end
+
+@@ S1v S1 repaired: a declared domain
+section signatures
+class E
+observed proven+
+appropriate proven+
+strict accepted
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+type Digit = Int in 0..9
+
+fn emitter(d: Digit) -> unit emits digit_token:
+    yield 48 + d
+    unit
+
+0
+@@end
+
+@@ S1b the claimed function's parameter type is unresolved, the parameter unused
+section signatures
+class E
+observed proven+
+appropriate proven+
+strict TYPE
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+fn emitter(d: Missing) -> unit emits digit_token:
+    yield 49
+    unit
+
+0
+@@end
+
+@@ S2 the claimed function's result type is unresolved (a result is no symbol)
+section signatures
+class E
+observed proven+
+appropriate proven+
+strict TYPE
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+fn emitter() -> Missing emits digit_token:
+    yield 49
+    unit
+
+0
+@@end
+
+@@ S3 the claimed function's declared error is unresolved
+section signatures
+class E
+observed proven+
+appropriate proven+
+strict UNDECLARED-ERROR
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+fn emitter() -> unit errors Missing emits digit_token:
+    yield 49
+    unit
+
+0
+@@end
+
+@@ S4 a helper's parameter type is unresolved: the argument's own facts are used
+section signatures
+class E
+observed proven+
+appropriate proven+
+strict TYPE
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+fn helper(d: Missing) -> unit:
+    yield 48 + d
+    unit
+
+fn emitter() -> unit emits digit_token:
+    helper(1)
+    unit
+
+0
+@@end
+
+@@ S4b S4 with an argument no repair of the type admits as a digit
+section signatures
+class U
+observed rejected
+appropriate undecided
+strict TYPE
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+fn helper(d: Missing) -> unit:
+    yield 48 + d
+    unit
+
+fn emitter() -> unit emits digit_token:
+    helper(65)
+    unit
+
+0
+@@end
+
+@@ S5 a helper's result type is unresolved: its result inferred from its body
+section signatures
+class E
+observed proven+
+appropriate proven+
+strict TYPE
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+fn helper() -> Missing:
+    5
+
+fn emitter() -> unit emits digit_token:
+    yield 48 + helper()
+    unit
+
+0
+@@end
+
+@@ S5b a helper whose result type is unresolved and whose body loops: its inferred never is genuine, but the declared program is walked past it (S5bv)
+section signatures
+class U
+observed proven+
+appropriate undecided
+strict TYPE
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+fn helper() -> Missing:
+    loop:
+        continue
+
+fn emitter() -> unit emits digit_token:
+    yield 49
+    helper()
+    yield 65
+    unit
+
+0
+@@end
+
+@@ S5bv S5b with a declared result: walked past (imprecise, never unsound)
+section signatures
+class D
+observed rejected
+appropriate rejected
+strict EMIT-AFTER-TOKEN
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+fn helper() -> unit:
+    loop:
+        continue
+
+fn emitter() -> unit emits digit_token:
+    yield 49
+    helper()
+    yield 65
+    unit
+
+0
+@@end
+
+@@ S5c a helper whose result type is unresolved and whose body is an unresolved call (read: tainted)
+section signatures
+class E
+observed dependent
+appropriate dependent
+strict TYPE
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+fn helper() -> Missing:
+    missing()
+
+fn emitter() -> unit emits digit_token:
+    yield 49
+    helper()
+    yield 65
+    unit
+
+0
+@@end
+
+@@ S5d a module binding of a helper whose result type is unresolved: the binding's type is the inferred int
+section signatures
+class A
+observed rejected
+appropriate dependent
+strict TYPE
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+fn helper() -> Missing:
+    5
+
+k = helper()
+
+fn emitter() -> unit emits digit_token:
+    yield 48 + k
+    unit
+
+0
+@@end
+
+@@ S6 a helper whose declared error is misspelled and whose body fails with the real one (read: tainted)
+section signatures
+class E
+observed dependent
+appropriate dependent
+strict UNDECLARED-ERROR
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+error Oops:
+    v: int
+
+fn helper(n: int) -> unit errors Opps:
+    if n > 0:
+        fail Oops {v: 1}
+    unit
+
+fn emitter(n: int) -> unit emits digit_token:
+    helper(n):
+        on Oops:
+            yield 65
+    yield 49
+    unit
+
+0
+@@end
+
+@@ S6b a helper whose only declared error is unresolved and whose body cannot fail: no failure point, the handler never runs
+section signatures
+class U
+observed proven+
+appropriate undecided
+strict UNDECLARED-ERROR
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+error Oops:
+    v: int
+
+fn helper() -> unit errors Missing:
+    unit
+
+fn emitter() -> unit emits digit_token:
+    helper():
+        on Oops:
+            yield 65
+    yield 49
+    unit
+
+0
+@@end
+
+@@ S6c the valid program: a helper that may fail Oops, its handler's yield checked
+section signatures
+class E
+observed rejected
+appropriate rejected
+strict EMIT-REJECTED
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+error Oops:
+    v: int
+
+fn helper(n: int) -> unit errors Oops:
+    if n > 0:
+        fail Oops {v: 1}
+    unit
+
+fn emitter(n: int) -> unit emits digit_token:
+    helper(n):
+        on Oops:
+            yield 65
+    yield 49
+    unit
+
+0
+@@end
+
+@@ S8 a helper whose own claim names an unknown recognizer: no claim, its body walked
+section signatures
+class E
+observed proven+
+appropriate proven+
+strict EMIT-RECOGNIZER
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+fn helper() -> unit emits nothing:
+    yield 49
+    unit
+
+fn emitter() -> unit emits digit_token:
+    helper()
+    unit
+
+0
+@@end
+
+@@ S10 a helper's parameter type List[Missing], the parameter unused
+section signatures
+class E
+observed proven+
+appropriate proven+
+strict TYPE
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+fn helper(d: List[Missing]) -> unit:
+    yield 49
+    unit
+
+fn emitter() -> unit emits digit_token:
+    helper([1])
+    unit
+
+0
+@@end
+
+@@ S11 an unresolved error declared and failed two calls down, a handler around the outer call (the fail read: tainted)
+section signatures
+class E
+observed dependent
+appropriate dependent
+strict UNDECLARED-ERROR
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+error Oops:
+    v: int
+
+fn helper2() -> unit errors Missing:
+    fail Missing
+
+fn helper() -> unit:
+    helper2()
+    unit
+
+fn emitter() -> unit emits digit_token:
+    helper():
+        on Oops:
+            yield 65
+    yield 49
+    unit
+
+0
+@@end
+
+@@ K1 a coroutine source whose result type is unresolved: the construction's outward type is the inferred int
+section signatures
+class A
+observed rejected
+appropriate dependent
+strict TYPE
+--- main.bot
+import std::coroutine
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+fn src() -> Missing:
+    yield 3
+    0
+
+fn emitter() -> unit emits digit_token:
+    coroutine {step, first} = src()
+    yield 48 + first
+    unit
+
+0
+@@end
+
+# ---------------------------------------------------------------------------
+# Function identity (the memo and certificates keyed by a bare name)
+
+@@ N1 two nested functions of one name, both claimed: the second reuses the first's certificate
+section function identity
+class C
+observed proven+ rejected
+appropriate proven+ rejected
+strict EMIT-REJECTED
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+fn outer1() -> int:
+    fn inner() -> unit emits digit_token:
+        yield 49
+        unit
+    3
+
+fn outer2() -> int:
+    fn inner() -> unit emits digit_token:
+        yield 65
+        unit
+    4
+
+0
+@@end
+
+@@ N2 a top-level and a nested emitter of one name; the nested one's run yields 'A'
+section function identity
+class C
+observed proven+ rejected
+appropriate proven+ rejected
+strict EMIT-REJECTED
+run 2 invalid
+--- main.bot
+import std::coroutine
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+fn emitter() -> int emits digit_token:
+    yield 49
+    0
+
+fn outer() -> List[int]:
+    fn emitter() -> int emits digit_token:
+        yield 65
+        0
+    coroutine {step, first} = emitter()
+    last = step()
+    if std::coroutine::done?(step):
+        [first]
+    else:
+        [first, -9]
+
+outer()
+@@end
+
+@@ N3 one name shadowed in a nested scope of one function
+section function identity
+class C
+observed proven+ rejected
+appropriate proven+ rejected
+strict EMIT-REJECTED
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+fn outer() -> int:
+    fn inner() -> unit emits digit_token:
+        yield 49
+        unit
+    if true:
+        fn inner() -> unit emits digit_token:
+            yield 65
+            unit
+        2
+    3
+
+0
+@@end
+
+@@ N4a two nested helpers of one name with the same code; the claimed function calls outer2's
+section function identity
+class E
+observed proven+
+appropriate proven+
+strict accepted
+run 1 ok
+--- main.bot
+import std::coroutine
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+fn outer1() -> int:
+    fn helper(d: int) -> unit:
+        yield 49
+        unit
+    3
+
+fn outer2() -> List[int]:
+    fn helper(d: int) -> unit:
+        yield 49
+        unit
+    fn emitter() -> int emits digit_token:
+        helper(0)
+        0
+    coroutine {step, first} = emitter()
+    last = step()
+    if std::coroutine::done?(step):
+        [first]
+    else:
+        [first, -9]
+
+outer2()
+@@end
+
+@@ N4b N4a after an edit of outer2's helper alone: a fresh compilation rejects the claim (the memo sequence below does not)
+section function identity
+class C
+observed rejected
+appropriate rejected
+strict EMIT-REJECTED
+run 1 invalid
+--- main.bot
+import std::coroutine
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+fn outer1() -> int:
+    fn helper(d: int) -> unit:
+        yield 49
+        unit
+    3
+
+fn outer2() -> List[int]:
+    fn helper(d: int) -> unit:
+        yield 65
+        unit
+    fn emitter() -> int emits digit_token:
+        helper(0)
+        0
+    coroutine {step, first} = emitter()
+    last = step()
+    if std::coroutine::done?(step):
+        [first]
+    else:
+        [first, -9]
+
+outer2()
+@@end
+
+@@ N5 one proof reading two nested helpers of one name: its certificate records one fingerprint for both
+section function identity
+class B
+observed proven+
+appropriate proven+
+strict accepted
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+fn outer() -> int:
+    fn step() -> unit:
+        yield 49
+        unit
+    fn emitter() -> unit emits digit_token:
+        step()
+        if true:
+            fn step() -> unit:
+                unit
+            step()
+        unit
+    3
+
+0
+@@end
+
+@@ N6a one proof reading two functions of one name: the nested `step` (a digit) and, through g, the top-level `step` (a letter); its certificate records one fingerprint for both (the top-level one's)
+section function identity
+class E
+observed proven+
+appropriate proven+
+strict accepted
+run 1 ok
+--- main.bot
+import std::coroutine
+import std::dfa
+
+class digit = '0'..'9'
+class letter = 'A'..'Z'
+
+dfa pair_token over ascii:
+    start:
+        digit -> second
+    second:
+        letter -> accept
+
+fn step() -> unit:
+    yield 65
+    unit
+
+fn g() -> unit:
+    step()
+    unit
+
+fn outer() -> List[int]:
+    fn step() -> unit:
+        yield 49
+        unit
+    fn emitter() -> int emits pair_token:
+        step()
+        g()
+        0
+    coroutine {step: k, first} = emitter()
+    second = k()
+    if std::coroutine::done?(k):
+        [first]
+    else:
+        third = k()
+        if std::coroutine::done?(k):
+            [first, second]
+        else:
+            [first, second, -9]
+
+outer()
+@@end
+
+@@ N6b N6a after the nested `step` is removed: the claimed function's code is the same text (its call names `step`), which is now the top-level one -- the run yields two letters
+section function identity
+class C
+observed rejected
+appropriate rejected
+strict EMIT-REJECTED
+run 1 invalid
+--- main.bot
+import std::coroutine
+import std::dfa
+
+class digit = '0'..'9'
+class letter = 'A'..'Z'
+
+dfa pair_token over ascii:
+    start:
+        digit -> second
+    second:
+        letter -> accept
+
+fn step() -> unit:
+    yield 65
+    unit
+
+fn g() -> unit:
+    step()
+    unit
+
+fn outer() -> List[int]:
+    fn emitter() -> int emits pair_token:
+        step()
+        g()
+        0
+    coroutine {step: k, first} = emitter()
+    second = k()
+    if std::coroutine::done?(k):
+        [first]
+    else:
+        third = k()
+        if std::coroutine::done?(k):
+            [first, second]
+        else:
+            [first, second, -9]
+
+outer()
+@@end
+
+# ---------------------------------------------------------------------------
+# The empty environment (hir::emission::Facts)
+
+@@ F1 a claimed function with no parameter whose first statement is an if: both branches yield letters
+section the empty environment
+class C
+observed rejected
+appropriate rejected
+strict EMIT-REJECTED
+run 1 invalid
+--- main.bot
+import std::coroutine
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+fn flip() -> bool:
+    true
+
+fn emitter() -> int emits digit_token:
+    if flip():
+        yield 65
+    else:
+        yield 66
+    0
+
+fn run() -> List[int]:
+    coroutine {step, first} = emitter()
+    last = step()
+    if std::coroutine::done?(step):
+        [first]
+    else:
+        [first, -9]
+
+run()
+@@end
+
+@@ F2 a second symbol after the token, in a branch decided true
+section the empty environment
+class C
+observed rejected
+appropriate rejected
+strict EMIT-AFTER-TOKEN
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+fn emitter() -> unit emits digit_token:
+    yield 49
+    if true:
+        yield 65
+    unit
+
+0
+@@end
+
+@@ F3 a parameterless helper's if: its summary never completes, so its caller's walk ends at the call
+section the empty environment
+class C
+observed rejected
+appropriate rejected
+strict EMIT-REJECTED
+run 1 invalid
+--- main.bot
+import std::coroutine
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+fn helper() -> unit:
+    if true:
+        yield 65
+    unit
+
+fn emitter(n: int) -> int emits digit_token:
+    helper()
+    0
+
+fn run() -> List[int]:
+    coroutine {step, first} = emitter(0)
+    last = step()
+    if std::coroutine::done?(step):
+        [first]
+    else:
+        [first, -9]
+
+run()
+@@end
+
+@@ F4 the same if with a parameter in the environment: decided as written
+section the empty environment
+class E
+observed rejected
+appropriate rejected
+strict EMIT-REJECTED
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+fn emitter(n: int) -> unit emits digit_token:
+    if n > 0:
+        yield 65
+    else:
+        yield 66
+    unit
+
+0
+@@end
+
+# ---------------------------------------------------------------------------
+# The memo across compilations (one process, as the compiler service)
+
+@@ MK3 a module binding of a helper declared Digit, returning 3
+section memo
+class E
+observed proven+
+appropriate proven+
+strict accepted
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+type Digit = Int in 0..9
+
+fn mk() -> Digit:
+    3
+
+k = mk()
+
+fn emitter() -> unit emits digit_token:
+    yield 48 + k
+    unit
+
+0
+@@end
+
+@@ MK5 MK3 with the helper returning 5: the value changed, its type did not
+section memo
+class E
+observed proven+
+appropriate proven+
+strict accepted
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+type Digit = Int in 0..9
+
+fn mk() -> Digit:
+    5
+
+k = mk()
+
+fn emitter() -> unit emits digit_token:
+    yield 48 + k
+    unit
+
+0
+@@end
+
+@@ MK17 MK3 with the helper declared int, returning 17
+section memo
+class E
+observed rejected
+appropriate rejected
+strict EMIT-END-SYMBOL
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+fn mk() -> int:
+    17
+
+k = mk()
+
+fn emitter() -> unit emits digit_token:
+    yield 48 + k
+    unit
+
+0
+@@end
+
+@@ K17 the exact Int 17
+section memo
+class E
+observed rejected
+appropriate rejected
+strict EMIT-REJECTED
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+k = 17
+
+fn emitter() -> unit emits digit_token:
+    yield 48 + k
+    unit
+
+0
+@@end
+
+@@ MS1 a yielding helper over a declared domain
+section memo
+class E
+observed proven+
+appropriate proven+
+strict accepted
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+type Digit = Int in 0..9
+
+fn h(d: Digit) -> unit:
+    yield 48 + d
+    unit
+
+fn emitter() -> unit emits digit_token:
+    h(1)
+    unit
+
+0
+@@end
+
+@@ MS2 MS1 with the helper's parameter declared int
+section memo
+class E
+observed proven+
+appropriate proven+
+strict accepted
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+fn h(d: int) -> unit:
+    yield 48 + d
+    unit
+
+fn emitter() -> unit emits digit_token:
+    h(1)
+    unit
+
+0
+@@end
+
+@@ MR3 a helper declared Digit returning 3, yielded
+section memo
+class E
+observed proven+
+appropriate proven+
+strict accepted
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+type Digit = Int in 0..9
+
+fn r() -> Digit:
+    3
+
+fn emitter() -> unit emits digit_token:
+    yield 48 + r()
+    unit
+
+0
+@@end
+
+@@ MR4 MR3 with the helper returning 4: its body changed, its signature did not
+section memo
+class E
+observed proven+
+appropriate proven+
+strict accepted
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+type Digit = Int in 0..9
+
+fn r() -> Digit:
+    4
+
+fn emitter() -> unit emits digit_token:
+    yield 48 + r()
+    unit
+
+0
+@@end
+
+@@ MRM MR3 with the helper's result type unresolved
+section memo
+class E
+observed proven+
+appropriate proven+
+strict TYPE
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+type Digit = Int in 0..9
+
+fn r() -> Missing:
+    3
+
+fn emitter() -> unit emits digit_token:
+    yield 48 + r()
+    unit
+
+0
+@@end
+
+@@ MZ MR4 with an unrelated module binding added
+section memo
+class E
+observed proven+
+appropriate proven+
+strict accepted
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+type Digit = Int in 0..9
+
+z = 1
+
+fn r() -> Digit:
+    4
+
+fn emitter() -> unit emits digit_token:
+    yield 48 + r()
+    unit
+
+0
+@@end
+
+@@ MZM MZ with the unrelated binding unresolved: every later declaration unreachable to inference
+section memo
+class E
+observed proven+
+appropriate proven+
+strict UNBOUND
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+type Digit = Int in 0..9
+
+z = missing()
+
+fn r() -> Digit:
+    4
+
+fn emitter() -> unit emits digit_token:
+    yield 48 + r()
+    unit
+
+0
+@@end
+
+@@ MSa a String module binding decides a branch
+section memo
+class E
+observed proven+
+appropriate proven+
+strict accepted
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+mode = "a"
+
+fn emitter(n: int) -> unit emits digit_token:
+    if mode == "a":
+        yield 49
+    else:
+        yield 65
+    unit
+
+0
+@@end
+
+@@ MSb MSa with the String changed: the other branch
+section memo
+class E
+observed rejected
+appropriate rejected
+strict EMIT-REJECTED
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+mode = "b"
+
+fn emitter(n: int) -> unit emits digit_token:
+    if mode == "a":
+        yield 49
+    else:
+        yield 65
+    unit
+
+0
+@@end
+
+@@sequence binding a valid binding becomes unresolved, is repaired, then gets an unresolved condition with equal branches
+step R1v proven+ fresh
+step R1 rejected fresh
+step R1v proven+ reused
+step B3 proven+ fresh
+@@end
+
+@@sequence value the binding's value changes with and without its type; an exact value changes
+step MK3 proven+ fresh
+step MK5 proven+ reused
+step MK17 rejected fresh
+step R1v proven+ fresh
+step K17 rejected fresh
+@@end
+
+@@sequence signature a helper's parameter type, result type and body change under one name (the memo keeps one certificate per name: MR3 after MRM is proved again)
+step MS1 proven+ fresh
+step MS2 proven+ fresh
+step MR3 proven+ fresh
+step MRM proven+ fresh
+step MR3 proven+ fresh
+step MR4 proven+ fresh
+step MZ proven+ reused
+step MZM proven+ fresh
+@@end
+
+@@sequence string a non-Int exact value deciding a branch changes: the fingerprint, which records only Int exact values, changes through the branches' reachability
+step MSa proven+ fresh
+step MSb rejected fresh
+step MSa proven+ reused
+@@end
+
+@@sequence callable a run-time-selected value's function gains an unresolved call: the certificate, which records neither function, is kept
+step V1 proven+ fresh
+step V2 proven+ reused
+step V1 proven+ reused
+@@end
+
+@@sequence identity the edit of N4b after N4a in one process: the census's compiler validated the certificate against the other helper of the name and kept it (the run yields 'A'); a name of two functions validates nothing, so N4b is proved again, and rejected
+step N4a proven+ fresh
+step N4b rejected fresh
+run 1 invalid
+@@end
+
+@@sequence identity-read N6a then N6b in one process: the census's identity prototype memoized N6a's certificate (its claimed function's name is unique), validated it against the one `step` N6b has -- the fingerprint it had recorded -- and reused it, a false certificate; a proof that read a name of two functions is not memoized
+step N6a proven+ fresh
+run 1 ok
+step N6b rejected fresh
+run 1 invalid
+@@end

@@ -69,6 +69,7 @@ proc hir::modulebinding::validate {hirVar} {
 # a bad operation reached by a member still makes that member, and its caller,
 # fail when the walk completes.
 proc hir::modulebinding::ContextExpr {hir e stateVar} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $stateVar state
     set node [hir::node $hir $e]
     switch -- [dict get $node kind] {
@@ -205,6 +206,7 @@ proc hir::modulebinding::ContextBlock {hir block stateVar} {
 # A plain List type alone is deliberately not enough: its items could be
 # mutable. List construction must remain visible to this structural proof.
 proc hir::modulebinding::ImmutableExpr {hir e factsVar activeVar} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $factsVar facts $activeVar active
     set node [hir::node $hir $e]
     switch -- [dict get $node kind] {

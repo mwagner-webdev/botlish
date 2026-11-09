@@ -217,6 +217,70 @@ run -version >"$work/version.out" || fail "-version"
 grep -q '^source revision: ' "$work/version.out" || fail "-version names no source revision"
 grep -q '^native backend: packaged' "$work/version.out" || fail "-version names no packaged native backend"
 
+# The packaged compiler runs only its own Tcl library (single/basekit.c,
+# single/main.tcl; on macOS the launcher): a decoy library named by
+# TCL_LIBRARY, by TCLLIBPATH or by the Tcl module path never runs -- each of
+# its init.tcl, tclIndex, pkgIndex.tcl files and modules ends the process --
+# with no locale and in a UTF-8 one. On Linux the program the compiler runs
+# also sees the three variables exactly as they were set (its
+# /proc/self/environ, which it copies into a file); the directory's name
+# holds a non-ASCII letter and, where a file name may (not macOS), a byte
+# that is no UTF-8.
+decoy="$work/décoy"
+(( macos )) || decoy+=$'\xff'
+mkdir -p "$decoy/lib/sub" "$decoy/tm"
+for file in init.tcl lib/tclIndex lib/pkgIndex.tcl lib/sub/pkgIndex.tcl tm/msgcat-9.9.tm; do
+  printf '# Tcl autoload index file, version 2.0\nputs stderr "a decoy %s ran"\nexit 9\n' "$file" >"$decoy/$file"
+done
+cat >environ.bot <<'EOF'
+import std::io::fs
+import std::io::path
+import std::linux::fs
+
+fn save() errors std::io::fs::FileError, std::io::path::NotAPath:
+    std::linux::fs::from_text("child-environ").write_file(std::linux::fs::from_text("/proc/self/environ").read_file())
+
+with context std::linux::fs::create()
+
+save():
+    on std::io::fs::FileError:
+        unit
+    on std::io::path::NotAPath:
+        unit
+EOF
+# LOCALE ARGS...: BOTLISH ARGS... beside the decoy, in LOCALE ("": none).
+# (PATH: where -aot-run's linker is found.)
+decoyed() {
+  local locale=$1; shift
+  env -i HOME="$work/home" PATH=/usr/bin:/bin ${locale:+LANG=$locale} TCL_LIBRARY="$decoy" TCLLIBPATH="$decoy/lib" \
+    TCL9.0_TM_PATH="$decoy/tm" TCL9_0_TM_PATH="$decoy/tm" "$botlish" "$@" 2>&1
+}
+for locale in "" C.UTF-8; do
+  where="with a decoy Tcl library${locale:+ in $locale}"
+  out=$(decoyed "$locale" -version) && [[ $out == "Botlish compiler "* ]] || fail "-version $where: $out"
+  for backend in interp $natives; do
+    out=$(decoyed "$locale" -backend "$backend" samples/01-arithmetic.bot) && grep -qx '   value: 50' <<<"$out" ||
+      fail "-backend $backend $where: $out"
+  done
+  if (( !jit && toolchain )); then
+    # No JIT: the native path is -aot-run's (the executable prints nothing;
+    # a decoy ends the process with status 9).
+    out=$(decoyed "$locale" -warnings off -aot-run samples/01-arithmetic.bot) || fail "-aot-run $where: $out"
+  fi
+  if (( ! macos )); then
+    rm -f child-environ
+    out=$(decoyed "$locale" run -warnings off environ.bot) && [[ -f child-environ ]] || fail "run environ.bot $where: $out"
+    for variable in TCL_LIBRARY="$decoy" TCLLIBPATH="$decoy/lib" TCL9.0_TM_PATH="$decoy/tm" TCL9_0_TM_PATH="$decoy/tm"; do
+      if ! tr '\0' '\n' <child-environ | LC_ALL=C grep -qxF -- "$variable"; then
+        name=${variable%%=*}
+        got=$(tr '\0' '\n' <child-environ | LC_ALL=C awk -v name="$name" 'index($0, name "=") == 1' | od -An -c | tr -s ' \n' ' ')
+        fail "the program the compiler runs $where has no $name as it was set (it has: ${got:-no $name})"
+      fi
+    done
+  fi
+done
+echo "   a decoy TCL_LIBRARY, TCLLIBPATH and module path: never run$( (( macos )) || echo "; the program's environment as set")"
+
 for option in -code -hir -ast -aot -aot-spec -contexts -traits -emit-nir -emit-clif; do
   run -backend compile -warnings off "$option" samples/01-arithmetic.bot >/dev/null || fail "option $option"
 done

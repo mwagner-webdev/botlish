@@ -1807,10 +1807,28 @@ add10(32)          # 42 (add captures x)
     `=`, after `return`, a body's last expression, never an operand or an
     argument. `fold` is contextual: it begins a fold only directly before a
     name, and stays an ordinary name everywhere else (`fold = 1`).
+  - An intermediate holding a mutable collection is a value like any other
+    and may be mutated in its iteration (`acc.push(x)`, then `acc` as the
+    body's value): a normal completion carries the mutated value on, while
+    `continue` and a bare `break` carry the value the iteration *started*
+    with, discarding that iteration's mutations. How that is kept is the
+    compiler's business (CONSUMED-FOLD-INTERMEDIATES-MILESTONE-1.md): where
+    no `continue` or bare `break` of the fold can run after the iteration
+    first mutates the intermediate or hands it on, the carried collection is
+    mutated in place and nothing is copied; where one can, the iteration
+    works on a logical copy (a copy of the whole collection at its first
+    mutation), which that exit needs.
 
   Iteration, aggregation and construction are distinct operations: a fold
   aggregates without building anything it does not compute (natively, one
-  loop-carried register: no List, no plan, no MutableArray).
+  loop-carried register: no List, no plan, no MutableArray). A String or
+  List intermediate that the body only extends -- used at most once on each
+  path of an iteration, a `continue` or `break` counting as a use, and never
+  captured -- is carried natively as a construction plan, extended in place
+  and built once when the fold yields it, exactly as the same List carried
+  by a self tail call is (FOLD-VIRTUAL-LIST-CONSTRUCTION-MILESTONE-1.md);
+  any other List intermediate copies the List so far at each append. The
+  values are the same either way.
 * **Flattening.** `std::list::flat(xss)` removes exactly one level of
   nesting from a List of Lists: the elements of the first List, then of the
   second, and so on, in order (LIST-FLAT-MILESTONE-1.md). Collecting,

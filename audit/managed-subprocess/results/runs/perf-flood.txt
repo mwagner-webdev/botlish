@@ -1,0 +1,11 @@
+bytes 28314858
+chunks 156578
+ticks 100
+max-tick-late-us 67
+missed-ticks 0
+status signal 15
+end owned 0
+end live 0
+end fds delta 0
+[harness] supervisor peak RSS 16280 kB, CPU 1.957 s
+[harness] PASS in 1.01 s

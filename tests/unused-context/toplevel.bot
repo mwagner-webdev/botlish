@@ -1,0 +1,7 @@
+# toplevel.bot -- a Job only the top level releases (tests/unused-context.test):
+# a discarded value, released at its statement.
+import spool
+
+with context spool::create()
+spool::submit(7)
+spool::done()

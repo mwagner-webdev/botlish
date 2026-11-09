@@ -668,6 +668,7 @@ proc native::rawabi::FoldInitial {node} {
 
 # The statements of a body: every value but the last is discarded.
 proc native::rawabi::Seq {exprs sink why} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     set n [llength $exprs]
     set i 0
     foreach e $exprs {
@@ -683,6 +684,7 @@ proc native::rawabi::Seq {exprs sink why} {
 # Walk expression E, whose value flows to SINK ("" tagged, RAW, or a node),
 # WHY labelling that edge. Records the edges of everything beneath it.
 proc native::rawabi::Walk {e sink why} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     variable W
     set h $W(h)
     if {![hir::get $h $e reachable]} {
@@ -802,6 +804,7 @@ proc native::rawabi::CountBounds {e startExpr endExpr} {
 }
 
 proc native::rawabi::If {e node sink why} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     variable W
     variable Ranges
     set h $W(h)
@@ -821,6 +824,7 @@ proc native::rawabi::If {e node sink why} {
 }
 
 proc native::rawabi::Call {e node sink why} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     variable W
     variable Plan
     variable rawOps
