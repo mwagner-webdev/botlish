@@ -1626,6 +1626,53 @@ mod cleanup_root_tests {
             assert_eq!(vm.heap.collections > 0, stress);
         }
     }
+
+    /// A cleanup table entry the program does not compile is unit
+    /// (native/lower.tcl's CleanupTable; NATIVE-UNUSED-CONTEXT-IMPORT-
+    /// CORRECTNESS-MILESTONE-1.md): a runtime walk that reached one would be
+    /// a compiler bug, and is refused as one -- never called -- while the
+    /// live entry after it is called by its own index.
+    fn table_program(descriptor: &str) -> String {
+        format!(
+            concat!(
+                "nir 1 call-effects=1 statics=0\n\n",
+                "func 0 \"<program>\" params=0 env=0 regs=10 pnames=\"\" captures=0\n",
+                "    %0 = unit\n    %1 = fnvalue 1\n    %2 = op cleanuptable %0 %1\n    %3 = int 0\n",
+                "    %4 = op listnew %3\n    %5 = op listnew %4\n    %6 = op mvfromlist %5\n",
+                "    %7 = str \"{}\"\n    %8 = op mvcleardroprun %6 %7\n    %9 = op mvlen %6\n    ret %9\nend\n\n",
+                "func 1 \"cleanup\" params=1 env=0 regs=3 pnames=\"l\" captures=0\n",
+                "    %1 = int 0\n    %2 = op listget %0 %1\n    ret %2\nend\n",
+            ),
+            descriptor
+        )
+    }
+
+    #[test]
+    fn unit_cleanup_entry_is_refused_live_entry_called() {
+        let options = CompileOptions { clif: false, vcode: false, alloc_sites: false, count_accesses: false };
+        for (descriptor, refused) in [("r0.", true), ("r1.", false)] {
+            let text = table_program(descriptor);
+            let program = crate::nir::parse(&text).unwrap_or_else(|e| panic!("{}", e.message));
+            let compiled = CraneliftJit.compile(&program, &options).unwrap_or_else(|e| panic!("{}", e.message()));
+            let functions = [(0, ""), (1, "l")].map(|(arity, pnames)| FunctionInfo { arity, pnames: pnames.into() }).into();
+            let mut vm = Vm::new(
+                std::sync::Arc::new(ProgramInfo { functions, natives: Vec::new(), shapes: Vec::new(), enums: Vec::new(), errors: Vec::new() }),
+                AllocMode::Summary,
+            );
+            compiled.install_constants(&mut vm);
+            vm.set_framemap(compiled.framemap.clone());
+            (compiled.entry)(&mut *vm);
+            let error = vm.error.as_ref().map(|e| e.message(&vm.info));
+            if refused {
+                let message = error.unwrap_or_default();
+                assert!(message.contains("no cleanup function 0"), "{descriptor}: {message}");
+                assert_eq!(vm.metrics.resources.cleanups, 0, "{descriptor}: the unit entry is never called");
+            } else {
+                assert!(error.is_none(), "{descriptor}: {error:?}");
+                assert_eq!(vm.metrics.resources.cleanups, 1, "{descriptor}: the live entry is called once");
+            }
+        }
+    }
 }
 
 /// A caller's live root, found while its callee collects

@@ -1,0 +1,33 @@
+# tags.bot -- only Tags are released (tests/unused-context.test): Session's
+# cleanup (entry 0 of the cleanup table) is compiled by nothing, Tag's
+# (entry 1) is called by the runtime's walks -- a cleared vector, a dying
+# struct -- and by a direct release.
+import terminal
+import std::mutable_vector
+
+struct Pair:
+    tag: terminal::Tag
+    n: int
+
+fn vector() -> int:
+    v = std::mutable_vector::from_list([terminal::tag(1), terminal::tag(2)])
+    v.clear()
+    terminal::note(3)
+    0
+
+fn pair() -> int:
+    p = Pair {tag: terminal::tag(4), n: 5}
+    terminal::note(5)
+    0
+
+fn single() -> int:
+    t = terminal::tag(6)
+    0
+
+with context terminal::create()
+vector()
+pair()
+single()
+terminal::log():
+    on IndexNotFound:
+        []

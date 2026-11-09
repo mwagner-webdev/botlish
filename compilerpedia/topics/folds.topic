@@ -45,6 +45,11 @@ becomes the next intermediate. The fold itself is the last intermediate.
     never a call argument. Outside that position `fold` is an ordinary
     name.
   * An affine intermediate is error.affine-fold-unsupported.
+  * An intermediate holding a mutable collection may be mutated in its
+    iteration (`acc.push(x)`, then `acc` as the body's value): a normal
+    completion carries the mutated value on; `continue` and a bare
+    `break` carry the value the iteration started with, so that
+    iteration's mutations are dropped.
 
 == WHY
 Iteration, aggregation and construction are different operations. A
@@ -67,6 +72,14 @@ captured by a function made in the body. Otherwise -- `n = acc.length()`
 before `acc.append(n)`, an append computed before a `break`, both `acc`
 and `acc.append(x)` kept -- the fold runs eagerly and each append copies
 the List so far. A struct intermediate's List fields are always copied.
+
+== COST OF A MUTABLE COLLECTION INTERMEDIATE
+A mutated collection intermediate costs no copy where no `continue` or
+bare `break` of the fold can run after the iteration first mutates it or
+hands it on: the carried collection is mutated in place. Where one can,
+that exit needs the iteration's starting value, so the iteration works on
+a logical copy (the whole collection is copied at its first mutation in
+that iteration). Exiting before the mutation keeps the cheap form.
 
 == EXAMPLES
 @example accept
@@ -125,6 +138,33 @@ fn chunks(xs: List[int]) -> List[List[int]]:
 [evens_scaled([1, 2, 3, 4]), std::list::flat(chunks([1, 0, 2]))]
 @caption Lists built by folds that only extend their intermediate: each append extends a construction plan, the List is built once
 @value [[20, 40], [1, -1, 2, -2]]
+@end
+
+@example accept
+import std::mutable_vector
+
+fn ints() -> MutableVector[int]:
+    std::mutable_vector::from_list([])
+
+fn squares(n: int) -> List[int]:
+    v = fold i from 0 to n with intermediate acc ints():
+        acc.push(i * i)
+        acc
+    loop y in v:
+        y
+
+fn kept(xs: List[int]) -> List[int]:
+    v = fold x in xs with intermediate acc ints():
+        acc.push(x)
+        if x < 0:
+            continue
+        acc
+    loop y in v:
+        y
+
+[squares(4), kept([1, -2, 3])]
+@caption A vector intermediate pushed in place; a continue after the push drops that iteration's push
+@value [[0, 1, 4, 9], [1, 3]]
 @end
 
 @example reject

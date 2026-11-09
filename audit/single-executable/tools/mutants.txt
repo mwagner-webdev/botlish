@@ -1,8 +1,10 @@
 # Mutants of the single-file compiler's packaging of the system linker
 # (audit/single-executable/tools/mutate.tcl; SINGLE-EXECUTABLE-FFI-MILESTONE-1.md):
 # single/package.tcl's archive contents and build id, single/main.tcl's
-# installation and linker choice. The same format as
-# audit/native-aot/tools/mutants.txt:
+# installation and linker choice; and of its own Tcl library
+# (SINGLE-EXECUTABLE.md, "How it is built"): single/basekit.c's startup
+# without TCL_LIBRARY, and single/main.tcl's script search. The same format
+# as audit/native-aot/tools/mutants.txt:
 #
 #   @@ NAME DESCRIPTION
 #   ## FILE
@@ -13,7 +15,11 @@
 #   >>>>
 #
 # Not here: a partial archive installed under its final name (the write is
-# not atomic): no smoke test can race a first run reliably.
+# not atomic): no smoke test can race a first run reliably. Nor the Tcl
+# module path left as tm.tcl makes it (single/main.tcl's `::tcl::tm::path
+# remove`): Tcl reads it only for a package a script requires that no
+# pkgIndex.tcl provides, and the compiler requires none (only Tcl itself),
+# so no run of it can tell.
 
 @@ runtime-not-packed the runtime archive is left out of the single executable
 ## single/package.tcl
@@ -111,5 +117,38 @@ if {1} {
 ## single/main.tcl
 <<<<
         && [lindex $::argv 0] ni {add install update remove verify package native tool tools}
+====
+>>>>
+
+@@ tcl-library-honored Tcl starts with the user's TCL_LIBRARY: its init.tcl search sources a decoy library's before the archive's
+## single/basekit.c
+<<<<
+        if (library == NULL || unsetenv("TCL_LIBRARY") != 0) {
+====
+        if (library == NULL) {
+>>>>
+
+@@ tcl-library-not-restored TCL_LIBRARY is never put back after Tcl starts: the programs the compiler runs see no TCL_LIBRARY the user set
+## single/basekit.c
+<<<<
+    int status = Tcl_Init(interp);
+    RestoreLibrary(interp);
+====
+    int status = Tcl_Init(interp);
+>>>>
+
+@@ tcl-library-restored-as-text TCL_LIBRARY is put back through Tcl's env array only: in a UTF-8 locale a byte that is no UTF-8 reaches the programs the compiler runs re-encoded
+## single/basekit.c
+<<<<
+    Tcl_DStringFree(&value);
+    setenv("TCL_LIBRARY", library, 1);
+====
+    Tcl_DStringFree(&value);
+>>>>
+
+@@ tcllibpath-honored auto_path keeps TCLLIBPATH's directories (and the ones beside the executable and the prefix): a decoy tclIndex runs at the first command Tcl loads
+## single/main.tcl
+<<<<
+set ::auto_path [list $::tcl_library [file dirname $::tcl_library]]
 ====
 >>>>

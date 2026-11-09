@@ -70,11 +70,11 @@ jobs:
 
       # single/build.sh pins the Tcl source release (version and sha256), so
       # its text is the base kit's cache key.
-      - name: Cache the static Tcl base kit
+      - name: Cache the static Tcl build (single/basekit.sh)
         uses: actions/cache@v4
         with:
           path: ~/.cache/botlish-single
-          key: single-basekit-${{ runner.os }}-${{ hashFiles('single/build.sh') }}
+          key: single-basekit-${{ runner.os }}-${{ hashFiles('single/build.sh', 'single/basekit.sh') }}
 
       - name: Build the single executable
         run: single/build.sh -o dist/botlish
@@ -131,11 +131,11 @@ jobs:
       - name: Build native (Cranelift) backend
         uses: ./.github/actions/build-native
 
-      - name: Cache the static Tcl base kit
+      - name: Cache the static Tcl build (single/basekit.sh)
         uses: actions/cache@v4
         with:
           path: ~/.cache/botlish-single
-          key: single-basekit-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('single/build.sh') }}
+          key: single-basekit-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('single/build.sh', 'single/basekit.sh') }}
 
       - name: Build the single executable
         run: single/build.sh -o dist/botlish

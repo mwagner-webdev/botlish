@@ -341,11 +341,14 @@ containers (`single/smoke-test.sh`); once every test of the commit is green,
 the release gate's release run publishes that build as the
 `botlish-linux-x86_64` asset of the rolling `single-latest` prerelease
 (CI-RUNS.md). The README's download button links to that tag and asset
-name: rename either only together with the button. Its base kit is a static tclsh that the
-script builds once from the pinned Tcl 9.0.1 source release. That build is
-the one exception to "do not build Tcl 9 from source" above: no package ships
-a static zipfs tclsh. `--basekit PATH` uses a prebuilt zipkit instead. To run
-the test suite, still install the `.deb`s.
+name: rename either only together with the button. Its base kit is Tcl's
+static library, which `single/basekit.sh` builds once from the pinned Tcl
+9.0.1 source release and caches, linked with `single/basekit.c` as its main
+program. That build is the one exception to "do not build Tcl 9 from
+source" above: no package ships a static zipfs Tcl. `--basekit PATH` takes
+a base kit `single/basekit.sh` linked before; a stock tclsh or prebuilt
+zipkit is refused (next item). To run the test suite, still install the
+`.deb`s.
 
 * `single/package.tcl` packs exactly main.tcl, LICENSE, `core/`,
   `compiler/`, `hir/`, `surface/`, `service/`, `lsp/`, `pm/`, `ccompile/`,
@@ -356,6 +359,18 @@ the test suite, still install the `.deb`s.
   it there. Never make main.tcl or the compiler depend on the single
   executable: `single/main.tcl` only sets the environment and sources
   main.tcl unchanged.
+* The packaged compiler runs only its own Tcl library (SINGLE-EXECUTABLE.md,
+  "Its own Tcl library"). Tcl starts without the user's `TCL_LIBRARY`
+  (`single/basekit.c`; on macOS the launcher sets `tcl_library` first), and
+  `single/main.tcl` keeps `auto_path` and the module path inside the
+  packaged library: never `$TCLLIBPATH`, `$TCL9.0_TM_PATH` or the
+  directories beside the executable. The compiler's children see those
+  variables exactly as the user set them: put back after Tcl starts, never
+  unset, replaced or set by the compiler. Never give the base kit Tcl's
+  stock main (a stock tclsh or zipkit sources a decoy `TCL_LIBRARY`'s
+  `init.tcl` before `single/main.tcl` runs; `single/build.sh` refuses
+  one), and never create a Tcl interpreter in the compiler: `interp
+  create` (one not `-safe`) runs `tclInit` again, with `TCL_LIBRARY` back.
 * Standalone executables have three linkers, chosen by
   `BOTLISH_NATIVE_LINKER`: `rustc` (the default), `stub` (no toolchain:
   `botlish-aot-stub` with the program image appended,
@@ -438,8 +453,9 @@ the test suite, still install the `.deb`s.
   `.github/workflows/tests.yml` have the commands. Run them once more under
   `BOTLISH_NATIVE_GC_STRESS=1`. A change to the system linker also runs
   `audit/native-aot/tools/mutate.tcl` (its `sys-*` mutants), and one to the
-  single executable's packing or installation (`single/main.tcl`,
-  `single/package.tcl`) `audit/single-executable/tools/mutate.tcl` and both
+  single executable's packing, startup or installation (`single/main.tcl`,
+  `single/package.tcl`, `single/basekit.c`, `single/basekit.sh`)
+  `audit/single-executable/tools/mutate.tcl` and both
   `single/smoke-test.sh` and `single/ffi-smoke-test.sh` after
   `single/build.sh`.
 
@@ -2806,12 +2822,31 @@ carries, so only the frames' release pads run. Keep it so:
   verdict (`hir::staticdeps::ScopedBy`, `PathJoins`), and whether the
   program unwinds is the waiting channel `C:unwind`. A new way for code to
   make a binding scoped, or for the program to unwind, goes into them.
+* A cleanup is compiled where code that may release its resource is
+  compiled, never because it is declared
+  (NATIVE-UNUSED-CONTEXT-IMPORT-CORRECTNESS-MILESTONE-1.md): natively it is
+  a value of each region whose release edges name it
+  (`hir::contexts::releasedCleanups`, the edges the context analysis charges
+  its requirement through; hir::specialize's `-releases`), and the cleanup
+  table holds unit for one the program compiles nothing for
+  (`LiveCleanups`, `CleanupTable`; the runtime refuses a unit entry). So a
+  program that imports a module for its other declarations requires and
+  loads none of its cleanups' contexts. Never root a cleanup
+  unconditionally, never state a second "may release" rule beside
+  `ReleaseEdges`, and never make an import compile by supplying, skipping or
+  tolerating a load of a context the program does not install (the
+  `UninstalledContext` NATIVE BUG stays the backstop).
 
 If you change any of that (hir/resources.tcl, the resource cases of
 hir/affine.tcl, hir/structs.tcl and hir/contexts.tcl, the cleanup and
 abandonment runtimes in core/affine.tcl, core/coroutines.tcl,
 native/src/runtime/{affine,coroutine,mutvec}.rs, native/lower.tcl's release
-lowering, or std::event_loop's Owner), run `tests/resources.test`,
+lowering, which cleanups native lowering compiles -- `releasedCleanups`,
+hir/specialize.tcl's `ReleaseValues`, native/lower.tcl's `LiveCleanups`,
+`LiveCleanup` and `CleanupTable` -- or std::event_loop's Owner), run
+`tests/resources.test`, `tests/unused-context.test`,
+`audit/unused-context-import/tools/mutate.tcl` (every mutant must still
+apply and be killed by a test its `!!` line names),
 `tests/event-loop.test` (its `el-owned-*`), `tests/event-loop-linux.test`
 (`el-linux-owned`), `tests/affine.test`, `tests/coroutines.test`,
 `audit/lexical-cleanup/tools/fuzz.tcl` (several seeds) and
@@ -3493,6 +3528,40 @@ coroutine harnesses for any change to `hir/affine.tcl` (above). A change to
 native tracing, growth or drops also needs a `BOTLISH_NATIVE_GC_STRESS=1`
 run of `tests/mutable-vector.test`. `bench/mutable-vector.tcl` regenerates
 the performance report.
+
+### Consumed fold intermediates
+
+A fold's intermediate holding a collection is consumed like a directly
+called function's parameter -- no entry copy, the carried header mutated in
+place -- only where no `continue` or bare `break` of its fold can run after
+the iteration may have given the header away
+(CONSUMED-FOLD-INTERMEDIATES-MILESTONE-1.md; hir/mutvec.tcl's
+`FoldExitsClean`, `FoldWalk`, `GivesHeader`, `FoldIncoming`). Keep it so:
+
+* An exit after a give-away keeps the entry copy: such an exit carries the
+  iteration's starting value (FOLD-LOOPS-MILESTONE-1.md, rules 5 and 6),
+  which only the copy keeps. The give-aways are the convention's own facts
+  (`PlaceArgument`, `ByReference`, `NoLaterUse`): never decide one by an
+  operation's or a function's name, and never stop the walk short (an
+  `if`'s branches join, a handler starts after any part of its call, an
+  inner loop's body repeats).
+* Every value a consumed fold binds its intermediate to -- its initial
+  value, each normal completion -- is an exclusive position, wrapped in a
+  share unless fresh or a move: never let one alias a live binding.
+* It is an optimization: no diagnostic, rule or proof changes, no runtime
+  state and no backend special case. `hir::mutvec::consumedFolds 0` is the
+  copying elaboration, the tests' and the fuzzer's oracle (a front-end
+  input: `surface::cache::Key`); never set it outside tests.
+
+If you change any of that, or the copy convention it joins (`Eligible`,
+`ExclusivePositions`, `Fresh`, `NoLaterUse`, `Moved`), run
+`tests/consumed-fold-intermediates.test`, `tests/fold-loops.test`,
+`tests/mutable-vector.test`, `audit/consumed-folds/tools/fuzz.tcl` (several
+seeds, once with `-gc-stress 1`) and `audit/consumed-folds/tools/mutate.tcl`
+(every mutant in its `mutants.txt` must still apply and be killed by a test
+its `!!` line names: update a mutant's text when you change the code it
+mutates, keeping it a mutant of the same rule). `bench/consumed-folds.tcl`
+is the performance report.
 
 ## MutableArray
 
