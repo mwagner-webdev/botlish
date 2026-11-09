@@ -1,0 +1,10 @@
+wait-us 2001160
+supervisor-cpu-us 154
+turns 3
+driver-blocks 3
+both exited yes
+end owned 0
+end live 0
+end fds delta 0
+[harness] supervisor peak RSS 16280 kB, CPU 0.006 s
+[harness] PASS in 2.01 s

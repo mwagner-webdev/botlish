@@ -1,0 +1,7 @@
+# sendchild.bot -- the module of repro-send-child.bot: a thread entry that
+# would take a child's identity from another VM.
+import msp
+import std::thread
+
+thread fn steal(c: msp::Child) -> int:
+    msp::pid(c)

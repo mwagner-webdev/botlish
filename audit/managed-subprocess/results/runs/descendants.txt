@@ -1,0 +1,20 @@
+first: desc 12998
+
+pid 12997
+group signal 15
+first: desc 13000
+
+escaped signal 15
+orphans (no subreaper) 0
+end owned before shutdown 0
+abandoned 0
+end killed by shutdown 0
+end owned 0
+end escalations 0
+end live 0
+end fds delta 0
+[harness] desc 12998 gone
+[harness] pid 12997 gone
+[harness] desc 13000 alive (state S, parent 1)
+[harness] supervisor peak RSS 16280 kB, CPU 0.008 s
+[harness] PASS in 0.06 s

@@ -1,0 +1,16 @@
+supervisor fds 5
+default: sigpipe dfl mask 0
+fds 0 1 2
+tty 0 0 0
+
+kept: sigpipe ign mask 0
+fds 0 1 2
+
+tty 0 1 1
+inherited
+supervisor fds after 5
+end owned 0
+end live 0
+end fds delta 0
+[harness] terminal attributes unchanged
+[harness] PASS in 0.11 s
