@@ -435,8 +435,26 @@ instances.
 Dispatched on the branch: `static-decisions.yml` (the batched against
 the sequential scheduler on every golden suite: the check of section 3.4
 and of `framework-semantics.bot`'s fewer builds), `tests.yml` and
-`tests-arm64.yml` (the whole suite, its native coverage, GC stress); and
-the push workflows (macOS arm64, Windows x86-64, the canaries). PENDING-CI
+`tests-arm64.yml` (the whole suite and its native coverage; their
+GC-stress jobs run on pushes to main only, so they are skipped here); and
+the push workflows (macOS arm64, Windows x86-64, the two Icy Tower
+builds). The state of each at 2026-11-09 00:40 UTC, the shared runners
+saturated:
+
+| workflow | run | commit | state |
+|---|---|---|---|
+| `icy-tower-windows.yml` | 42518051620 | a6f677e | passed |
+| `icy-tower-macos.yml` | 42518051627 | a6f677e | passed |
+| `windows-x86_64.yml` | 42518051637 | a6f677e | canary and root plans passed; smoke running (the smoke tier and the Windows test files passed) |
+| `tests.yml` | 42518057437 | a6f677e | canary passed (mutant catalogs, warning gate, canary selection); cranelift coverage running; every other job queued |
+| `tests-arm64.yml` | 42518059748 | a6f677e | queued |
+| `macos-arm64.yml` | 42518051822 | a6f677e | queued |
+| `static-decisions.yml` | 42507142725 | 9dca40a | queued |
+
+The static-decisions run is at 9dca40a, the last commit that changes the
+front end: the commits after it change this report, the audit tools and
+their results only. Whatever is pending above is pending, not passed.
+PENDING-CI
 
 ## 7. Remaining limits and known problems
 
