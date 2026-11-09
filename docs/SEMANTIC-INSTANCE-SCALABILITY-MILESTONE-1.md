@@ -471,18 +471,19 @@ count are that commit's; the runs at a6f677e and 9dca40a tested the tree
 before the merge. At a6f677e, before they were superseded, `icy-tower
 (windows x86-64)` and `icy-tower (macos arm64)` passed, `tests (windows
 x86-64)` passed its canary, smoke and root-plans jobs, and `tests.yml`
-passed its canary. The state at bf0f585 on 2026-11-09 03:05 UTC, the shared
+passed its canary. The state at bf0f585 on 2026-11-09 05:57 UTC, the shared
 runners saturated (main's own test workflows at 996b50d are queued too):
 
 | workflow | run | state |
 |---|---|---|
-| `tests.yml` (dispatched) | 42553518671 | queued |
-| `tests-arm64.yml` (dispatched) | 42553521335 | queued |
+| `tests.yml` (dispatched) | 42553518671 | canary passed (mutant catalogs, warning gate, canary selection); every other job queued |
+| `tests-arm64.yml` (dispatched) | 42553521335 | canary passed; every other job queued |
 | `static-decisions.yml` (dispatched) | 42553524098 | queued |
-| `windows-x86_64.yml` | 42553507858 | queued |
+| `windows-x86_64.yml` | 42553507858 | canary passed; smoke and root plans queued |
 | `macos-arm64.yml` | 42553507896 | queued |
-| `icy-tower-windows.yml` | 42553507899 | queued |
+| `icy-tower-windows.yml` | 42553507899 | passed |
 | `icy-tower-macos.yml` | 42553507952 | queued |
+| `raven-cleanroom.yml`, `ci-tools.yml` | 42553507901, 42553507895 | passed |
 
 Whatever is pending above is pending, not passed.
 PENDING-CI
