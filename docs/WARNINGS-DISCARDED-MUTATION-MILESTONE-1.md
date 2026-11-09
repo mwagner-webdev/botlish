@@ -599,15 +599,21 @@ the backends run the program to the same value with warnings on and off.
 | seed | programs | backends | with warnings | dead | fold-exit | disagreements |
 |---|---:|---|---:|---:|---:|---:|
 | 1 | 150 | interp, compile | 62 | 77 | 7 | 0 |
-| 2 | 60 | interp, compile | 27 | 35 | 3 | 0 |
-| 3 | 150 | interp, compile | 66 | 75 | 11 | 0 |
+| 2 | 60 | interp, compile | 29 | 34 | 2 | 0 |
+| 3 | 150 | interp, compile | 66 | 74 | 11 | 0 |
 | 5 | 150 | interp, compile | 82 | 89 | 12 | 0 |
-| 7 | 150 | interp | 63 | 75 | 2 | 0 |
-| 13 | 100 | interp | 43 | 53 | 7 | 0 |
+| 7 | 150 | interp | 69 | 75 | 9 | 0 |
+| 13 | 100 | interp | 43 | 52 | 7 | 0 |
 | 17 | 150 | interp, compile | 57 | 69 | 5 | 0 |
 | 21 | 40 | interp, compile, cranelift-generic, cranelift | 22 | 28 | 1 | 0 |
 | 41 | 150 | interp, compile | 71 | 86 | 5 | 0 |
-| **total** | **1,100** | | **493** | **587** | **53** | **0** |
+| **total** | **1,100** | | **501** | **584** | **59** | **0** |
+
+Every seed was run again, as the table shows, after the fold-exit rule
+became "a mutation on every path" (section 5), with the model changed to
+match (a must-flag and a may-set per fold body); the earlier runs, against
+the first rule and the generator's earlier versions, had also ended with 0
+disagreements.
 
 Every disagreement found while building the fuzzer was the model's, and each
 taught it something true about the rule rather than the reverse: (1) a fold
