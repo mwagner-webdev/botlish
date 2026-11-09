@@ -822,15 +822,32 @@ Locally (a 4-core container, Tcl 9.0.1), on the branch with main merged:
   applies).
 
 `main` was green or still running at both ends of the work (no workflow
-failed on it): when the branch started, and when main (`f2787af`) was
-merged into it -- its latest finished test runs (`43f6869`) and
-static-decisions (`1d73754`) green, `f2787af`'s still running.
+failed on it): when the branch started, and when main (`f2787af`, then
+`53a0d1b`) was merged into it -- its latest finished test runs (`43f6869`,
+then `f2787af`) and static-decisions (`1d73754`) green, the newer heads'
+still running.
 
-CI on the branch, at the time of writing (the shared runners queue for
-hours; a run a newer push superseded says nothing either way):
+CI on the branch (a run a newer push superseded says nothing either way):
 
-* **The head, `549071b`:** tests.yml and tests-arm64.yml dispatched (every
-  job), macos-arm64.yml and windows-x86_64.yml from the push -- pending.
+* **The head, `0dae7f8a`** (main's `53a0d1b` merged, its one conflict
+  `hir::lower`: main's thread refusal before the branch's driver), every
+  workflow green: tests.yml and tests-arm64.yml dispatched (every job but
+  tests.yml's GC-stress run, which is main's), static-decisions.yml
+  dispatched (mutable-array.bot and the four shards: no suite
+  disagrees), macos-arm64.yml (smoke, the
+  system linker, the acceptance tier, Botlish.app and its follow-ups),
+  windows-x86_64.yml (smoke, root plans, the acceptance tier, the system
+  linker), icy-tower's macOS and Windows workflows, ci tools, the raven
+  clean room and package reproducibility.
+* **The macOS acceptance tier in five shards.** On `549071b` every
+  workflow passed but macos-arm64.yml, whose acceptance shard 2 of 4 hit
+  the job's 75-minute limit with no test failed: tier.tcl deals the items
+  to shards by index, not by cost, and that shard held workload-2048.test
+  (about 17 minutes) and several other long files; main's own shard 2 took
+  55 minutes, and the shard's golden suites ran about 6% slower than in
+  main's run (the guards' check is part of it: section 20).
+  `1adea066` runs the tier in five shards (the workflow and AGENTS.md): on
+  `0dae7f8a` they took 53, 23, 30, 41 and 20 minutes.
 * **static-decisions.yml**, the batched scheduler against the sequential
   one over the golden suites: passed on `c6cdd86` (before main was merged
   and before the last twelve guards and the segment size), and passed on
