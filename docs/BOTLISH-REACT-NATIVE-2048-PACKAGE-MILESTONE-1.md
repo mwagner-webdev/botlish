@@ -71,27 +71,42 @@ game played through it is the interpreter's, snapshot for snapshot. A
 second, unrelated library goes through the same generator into the same
 app.
 
-**Android execution is partially validated.** The app was not observed
-running in an Android application process in this session:
+**Android execution is observed on a 4 KiB-page emulator, through the ARM
+native bridge, with two gaps.** The CI evidence (sections 16 and 23):
 
-* this host has no KVM, and Google's emulator refuses an arm64 guest on an
-  x86_64 host, also when its `qemu-system-aarch64` is run directly
-  (observed, section 16);
-* the workflow's build job passed on a GitHub runner: the build from
-  checkout to APK, and the clean room (sections 18 and 23);
-* its `android` jobs ran the APK on GitHub's Android emulators, two images
-  with the ARM native bridge, after hours in a saturated runner pool. **The
-  app crashed at launch on both**, before any JavaScript or Botlish code
-  ran. React Native's library loader (SoLoader) looked for the
-  unextracted libraries under the device's primary ABI, x86_64, not the
-  app's arm64-v8a (observed, section 16). The app now extracts its native
-  libraries at installation, and the acceptance of that APK is the next
-  run's (section 23).
+* Run 8: the app crashed at launch on both emulator images, before any
+  JavaScript or Botlish code ran. React Native's library loader (SoLoader)
+  looked for the unextracted libraries under the device's primary ABI,
+  x86_64, not the app's arm64-v8a. The app now extracts its native
+  libraries at installation.
+* Run 9, on the Android 14 x86_64 image with the ARM native bridge (4 KiB
+  pages), passed every phase, for the build's APK and for the clean room's:
+  - the self-test in the app process, under Hermes: 401 module snapshots
+    and 401 hook states, each equal to the interpreter's;
+  - every Botlish call on React Native's JavaScript thread;
+  - three reloads, each destroying the old instances on their own threads;
+  - 24 swipes on the screen, every one applied exactly once;
+  - the win and the game over on the screen;
+  - a clean exit, with no crash;
+  - the debug build's development reload with Metro, twice.
 
-The Android acceptance is implemented and committed, with the oracle it
-compares against (section 16). Its result is CI evidence still to come.
-Until a run of it passes, what sections 15 and 16 say of the app on Android
-is designed and built, not observed.
+  The app's arm64 code ran translated by the native bridge, not natively.
+
+**The gaps:**
+
+* **GC stress in the app process is not demonstrated.** Run 9's GC-stress
+  phase passed, but the library ran no slower under it than without it.
+  The activity sets the variable with `Os.setenv`, and the arm64 library,
+  which runs on the native bridge's own libc, very likely never saw it.
+  The acceptance now sets the variable from the process's start and
+  requires its cost to show (section 16). The run that checks this is
+  pending.
+* **The 16 KiB-page image** has not run yet: run 9's job was still queued
+  when the fix above was pushed, which cancelled it.
+
+This host has no KVM, and Google's emulator refuses an arm64 guest on an
+x86_64 host, also when its `qemu-system-aarch64` is run directly (observed,
+section 16).
 
 | | status |
 |---|---|
@@ -107,7 +122,7 @@ is designed and built, not observed.
 | `useBotlish2048()` and a playable 2048 screen (swipes, buttons, score, New game, game over, win) | implemented; Jest observed (28 tests: 10 of the hook and the snapshot reader, 17 of the generated entry point, 1 without the native module) |
 | a second, unrelated library through the same generator, both packages in one app | observed (host harness, TypeScript, Jest, the APK) |
 | a clean room: the single-file compiler and packages only, then npm, Codegen and Gradle | observed (section 18) |
-| the app on Android: Hermes, the TurboModule, the Botlish library in an Android application process | **partially validated**: the acceptance is implemented (section 16). Its first run crashed at launch on both images, in React Native's library loader, before any Botlish code ran; fixed in the app's packaging, the fixed APK's run pending |
+| the app on Android: Hermes, the TurboModule, the Botlish library in an Android application process | **observed on Android 14 (4 KiB pages), translated by the ARM native bridge** (CI, run 9: every phase but GC stress); GC stress in the app process and the 16 KiB-page image pending (section 16) |
 | mutation testing | 44/44 killed, each by a detector it names; observed (section 21) |
 | iOS, Android ABIs other than arm64-v8a, asynchronous workers | not supported (section 24) |
 
@@ -680,8 +695,15 @@ evidence: section 16.
 
 ## 16. Android execution
 
-**Status: partially validated.** The acceptance below is implemented and
-committed. It was not observed in this session.
+**Status:**
+
+* **Observed on Android 14, 4 KiB pages, through the ARM native bridge**
+  (CI, run 9): every phase but GC stress.
+* **GC stress in the app process: not demonstrated.** Its acceptance is
+  corrected, and the run that checks it is pending.
+* **16 KiB pages: pending.**
+
+The runs and their results follow the description.
 
 `audit/react-native-2048/tools/android-acceptance.sh APK EXPECTED OUT` runs
 on whatever emulator or device `adb` sees. EXPECTED is `build.sh`'s output:
@@ -709,8 +731,15 @@ six phases:
    destroyed on its own thread: at its thread's exit or its next call,
    never by a foreign thread (the `BotlishRN` log's `destroyed on thread T
    (...)`). The self-test must pass each time.
-3. **gc-stress.** The self-test under `BOTLISH_NATIVE_GC_STRESS=1`, set by
-   `Os.setenv` before any instance exists. It must give the same snapshots.
+3. **gc-stress.** The self-test under `BOTLISH_NATIVE_GC_STRESS=1`. It
+   must give the same snapshots, and its C ABI time per call must be at
+   least twice the self-test's: a collection before every allocation makes
+   a move 6.2 times slower on the host, so this shows that stress took
+   effect in the library. The variable is set from the process's start
+   through the `wrap.com.botlish2048` property: the zygote starts the app
+   with the property's text before `app_process`, so every libc in the
+   process sees it. The activity's `Os.setenv` is not enough here (run 9,
+   below).
 4. **play.** The game is played by swipes on the screen (`input swipe`),
    including a rapid burst, with the app sent to the background and
    back, then New game. Each swipe must be applied exactly once, each
@@ -797,8 +826,72 @@ also requires `extractNativeLibs=true` in the APK's manifest.
 
 The generator, the generated package and the Botlish libraries are
 unchanged. The fix is the app's own packaging, as any arm64-only React
-Native 0.88 app would need to start on such a device. The acceptance of
-the fixed APK is the next run (section 23).
+Native 0.88 app would need to start on such a device.
+
+**Run 9** (`8bf01899`), job `android (4 KiB pages)`, on
+`sdk_gphone64_x86_64`: Android 14 (API 34), `abilist x86_64,arm64-v8a`,
+`native.bridge libndk_translation.so`, 4 KiB pages. It ran the acceptance
+on the build's APK, again on the clean room's APK, then the development
+reload. Every one passed (`result: passed`, three times). Observed (the
+job's log and artifact `rn2048-android-0`):
+
+* **Self-test.** `failures=0`, `env hermes=true reactNative=0.88.1 os=android
+  api=34`, and both libraries' metadata (target, ABI, the manifest's and
+  the shared object's SHA-256, the runtime ABI).
+  - 401 module snapshots and 401 hook states equal the interpreter's.
+  - Each library's instance was created on React Native's JavaScript
+    thread `mqt_v_js`, and all its calls (game 4,819, textkit 10,015) were
+    made on that thread.
+  - `libgame.so` and `libtextkit.so` were mapped from the app's native
+    library directory, `/data/app/.../lib/arm64/`, where they were
+    extracted.
+* **Reloads.** Each of the three reloads passed the self-test again with
+  the interpreter's snapshots, made a new instance of each library, and
+  destroyed the old one on its own thread with status 0.
+  - On the clean room's APK every old instance was destroyed when its
+    thread exited.
+  - On the build's APK, reload 2's old game instance was first orphaned
+    (`its module went on thread 5251; its own thread 5233 destroys it`),
+    then destroyed on its own thread 5233. This is the foreign-thread path
+    of section 11, observed in the app.
+  - After three reloads the process counters balance: game 4 instances
+    created, 3 destroyed (at thread exit; 1 orphaned first on the build's
+    APK), 19,244 results acquired and released, 32 errors acquired and
+    released; textkit 24 results and 12 errors, each acquired and
+    released.
+* **GC stress: passed, but not demonstrated.** The self-test passed with
+  the interpreter's snapshots, and the app process logged the variable as
+  set. But a call's time in the C ABI was 83.13 µs under "stress" against
+  98.36 µs without it for the build's APK, and 78.44 against 80.87 µs for
+  the clean room's, where the host is 6.2 times slower under stress. So the library's runtime did not see the
+  variable. `Heap::new` reads it with `getenv`, and the arm64 library runs
+  on the native bridge's arm64 libc, which very likely kept the
+  environment it was given at process start. The acceptance now sets the
+  variable from the process's start and checks its cost (phase 3 above);
+  the run that checks it is pending (section 23).
+* **Play.**
+  - 24 swipes on the screen, 8 of them in a burst. Every one was read once,
+    in order, and applied exactly once.
+  - 25 snapshots equal the interpreter's, and New game made the
+    interpreter's game of seed 43.
+  - 26 traced calls, all on the JavaScript thread and none on any other.
+  - One instance across background and foreground.
+  - Input to render took 13.43 ms on average (12.59 ms for the clean room's
+    APK).
+* **Win, over, exit.** The screen showed "won" after the move that made
+  2048, and "game over" after the last move. The back key ended the
+  activity, and no native crash or fatal exception occurred in any phase.
+* **Development reload** (the debug build, its bundle from Metro over `adb
+  reverse`). The self-test passed with Metro's bundle under Hermes. Both
+  of React Native's double-R reloads passed it again, each making a new
+  instance of each library and destroying the old one on its own thread
+  (status 0).
+
+This is the app's arm64 code (Hermes, React Native, the adapters and
+Botlish) running translated in a real Android application process.
+
+The job `android (16 KiB pages)` of run 9 was cancelled, still queued, by
+the push that corrected the GC-stress phase (section 23).
 
 **Locally**, this host has no `/dev/kvm`. Observed, with the emulator 37.2.13
 and `system-images;android-30;aosp_atd;arm64-v8a`:
@@ -923,8 +1016,17 @@ at `be3d4018`): result passed.
   aligned, and it is zip-aligned.
 
 Its single executable (15,917,955 bytes) and packages were built on the
-runner, so their digests differ from the local ones. The 4 KiB android job
-runs the acceptance on this APK (section 16; pending).
+runner, so their digests differ from the local ones.
+
+**Run 9's clean room** ([job 128981303373](https://github.com/mwagner-webdev/botlish/actions/runs/42562346693/job/128981303373),
+at `8bf01899`, after the packaging fix) passed again. Jest passed 28 tests,
+and the release build took 3 min 8 s. Its APK, 11,287,309 bytes, SHA-256
+`ca32b1b3...`, passed the APK checks, the new one included: `ok the native
+libraries are extracted at installation (extractNativeLibs true)`.
+
+That APK, built in the clean room from the single-file compiler and
+published packages alone, then passed the whole Android acceptance on the
+4 KiB emulator (section 16, run 9).
 
 ## 19. GC and lifecycle testing
 
@@ -943,9 +1045,19 @@ runs the acceptance on this APK (section 16; pending).
   - invalidation, double invalidation;
   - many instances on one thread;
   - repeated failures and releases.
-* **Android** (implemented, not observed in this session: section 16):
-  GC stress in the app process, three reloads and module reconstruction,
-  the development reload with Metro, background and foreground.
+* **Android, observed** (CI run 9, Android 14 through the ARM native
+  bridge: section 16):
+  - three reloads, each making new instances and destroying the old ones
+    on their own threads;
+  - one old instance orphaned by a foreign thread first, then destroyed by
+    its own;
+  - two development reloads with Metro;
+  - background and foreground with one instance;
+  - every acquired result and error released (19,244 and 32).
+
+  GC stress in the app process is **not demonstrated**: the variable did
+  not reach the library under the native bridge, so the corrected phase is
+  pending.
 
 ## 20. Negative testing
 
@@ -1038,11 +1150,32 @@ Both were rerun (`-only guessed-param-type,any-thread`): killed.
 | the same under `BOTLISH_NATIVE_GC_STRESS=1` | 189.0 µs per call, the same 20 final states |
 
 The time is the core's own measurement of its C ABI calls (`nativeNanos`).
-The JSI conversion and the JavaScript side are Android measurements: the
-self-test logs the first call of each library and the mean of the timed
-moves (`BOTLISH_RN timing ...`), and the acceptance logs each launch's
-`TotalTime` and each played swipe's input-to-render latency. They are in
-the CI run's artifacts (pending, section 16).
+**On Android, observed** (CI run 9; Android 14 on an x86_64 emulator,
+*every arm64 instruction translated by the native bridge*, so the absolute
+numbers are not those of an arm64 phone):
+
+| measure | the build's APK | the clean room's APK |
+|---|---:|---:|
+| first launch of the self-test (`am start -W` TotalTime; install, translation, Hermes, the bundle) | 1,864 ms | 823 ms |
+| later launches (TotalTime: play, win, over) | 326 to 353 ms | 307 to 338 ms |
+| the game library's first call, its instance made | 33.66 ms | 10.02 ms |
+| its second call | 0.41 ms | 0.31 ms |
+| the text library's first call, its instance made | 17.60 ms | 7.80 ms |
+| a 2048 move, mean of 4,001 calls, from JavaScript | 103.40 µs | 85.28 µs |
+| of it in the C ABI (the Botlish library) | 98.36 µs | 80.87 µs |
+| of it in JSI and the generated adapter | 5.05 µs | 4.41 µs |
+| a swipe on the screen to the new board rendered, mean of 24 | 13.43 ms | 12.59 ms |
+
+The adapter and JSI cost about 5 µs a call, about 5 % of a move. The move
+itself is the Botlish library's: 2048's rules over the snapshot text,
+translated by the bridge. The same library built for the host x86-64 takes
+30.7 µs.
+
+The textkit line of the log (`10000 scalarCount calls: 5995.84 us per
+call` and `2577.84`) is wrong by a factor of 1,000. The self-test
+multiplied milliseconds by 100 where it should have multiplied by 0.1,
+so the true figures are about 6.0 and 2.6 µs a call. The self-test is
+corrected, and the next run logs the right figure.
 
 **Footprint, observed** (`results/footprint.txt`; local release builds,
 React Native 0.88.1, arm64-v8a only). Native libraries are compressed in
@@ -1122,9 +1255,18 @@ nothing in the release gate requires it. Its runs on this branch:
     libreactnative.so`), and so did every phase after it. The cause and
     the fix are in section 16.
 * run 9, at `8bf01899`, the app's packaging fix:
-  [react-native 2048 #9](https://github.com/mwagner-webdev/botlish/actions/runs/42562346693),
-  queued when this report was last updated. Its `android` jobs are the
-  acceptance of the fixed APK.
+  [react-native 2048 #9](https://github.com/mwagner-webdev/botlish/actions/runs/42562346693).
+  - **build: success**: the build and the clean room, the extraction
+    check included (section 18).
+  - **android (4 KiB pages): success**
+    ([job 129017340836](https://github.com/mwagner-webdev/botlish/actions/runs/42562346693/job/129017340836)):
+    the acceptance of the build's APK and of the clean room's, and the
+    development reload with Metro, every phase passed (section 16). Its
+    GC-stress phase passed without demonstrating GC stress (section 16).
+  - **android (16 KiB pages): cancelled** while still queued, by the push
+    of the corrected GC-stress phase.
+* run 10, the corrected GC-stress phase and the self-test's textkit timing:
+  @@RUN10@@
 
 Main's own workflows were queued or in progress, none red among those
 completed, when this branch was made (`a6977d56`) and when it was last
@@ -1143,11 +1285,11 @@ checked.
   this x86_64 host is refused by the emulator (section 16). A physical
   device or an arm64 emulator on an arm64 host with KVM is the missing
   evidence for native execution inside an app.
-* **Android execution itself** (section 16): the acceptance is
-  implemented, and was not observed in this session. Until a run of the
-  workflow's `android` jobs passes, the app on Android, the reloads (also
-  the development reload with Metro, `tools/dev-reload.sh`), GC stress in
-  the app process and the measurements on Android are unproven.
+* **GC stress in the app process and 16 KiB pages** (section 16): run 9
+  observed every other phase on Android 14 with 4 KiB pages. GC stress is
+  not demonstrated there: the variable did not reach the library under the
+  native bridge. The 16 KiB-page image has not run yet. Both are the next
+  run's, with the corrected phase.
 * **iOS.** Not supported. The package declares `ios: null`, iOS
   autolinking is disabled, and no podspec or module provider is written.
   It needs:

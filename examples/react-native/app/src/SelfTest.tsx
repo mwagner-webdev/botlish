@@ -189,7 +189,8 @@ function timings() {
   for (let i = 0; i < 10000; i++) {
     Text_.scalarCount('abc');
   }
-  log(`timing textkit 10000 scalarCount calls: ${((now() - t2) * 100).toFixed(2)} us per call`);
+  // now() is in milliseconds: microseconds per call over 10,000 calls.
+  log(`timing textkit 10000 scalarCount calls: ${(((now() - t2) * 1e3) / 10000).toFixed(2)} us per call`);
 }
 
 function ownership() {
