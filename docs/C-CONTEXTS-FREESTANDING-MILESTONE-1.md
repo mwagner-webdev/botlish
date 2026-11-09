@@ -819,9 +819,42 @@ GC-stress job per Tcl backend pass in `tests.yml`). The branch merged it
 `tests/main-cli.test` 72 of 72, `tests/golden.test` 9 of 9,
 `tests/numeric-looking-names.test` 5 of 5, the manifest regenerated equal,
 `tools/compilerpedia.tcl check` and `tools/mutant-catalogs.tcl` 0 problems.
-The merge's CI -- every workflow a push starts, and the full `tests.yml` and
-`tests-arm64.yml` dispatched on it -- is recorded here once read; until
-then it is **pending**, not passed.
+
+That merge's push (5db4d23) passed what ran before main moved again: the
+three canaries (Linux x86-64 with the mutant catalogs and the warning gate,
+Linux arm64, Windows), both icy-tower workflows and `ci tools`. Main's next
+commits (PM-7A, external tools and target support packages; the scalar
+assembly audit corpus; no front-end change) merged without conflict as
+f3b5898, with the same local checks passing (the native backend rebuilt
+for main's driver changes), and its push superseded the rest.
+
+[run] Every workflow of f3b5898 passed (the runners were saturated: the
+round took about fourteen hours):
+
+| workflow | result at f3b5898 |
+|---|---|
+| tests, dispatched (the full run: canary, interp, compile, cranelift and cranelift-generic coverage, golden 1-4, stub- and system-linked executables, Rust unit tests, the method-call oracle) | passed. Golden shard 1's first attempt failed before any test ran (`curl: (56) Recv failure: Connection reset by peer` fetching Tcl 9.0.1's package from archive.ubuntu.com); its re-run passed |
+| tests (linux arm64), dispatched (the full run, both GC-stress jobs included) | passed |
+| tests (macos arm64) | passed |
+| tests (windows x86-64): canary, root plans, smoke, system linker, acceptance 1-4 (`full` is the opt-in `[ci-full]` tier) | passed |
+| icy-tower (windows x86-64), icy-tower (macos arm64) | passed |
+| ci tools, raven clean room, package reproducibility | passed |
+
+Main had moved again during that round (method-call decision fixes F2-F4
+with the NOT-CALLABLE diagnostic, depth-safe walks, unused context imports,
+the http and boringssl packages): front-end changes, among them
+`hir/contexts.tcl`, `hir/specialize.tcl`, `hir/range.tcl` and
+`hir/types.tcl`, which the C backend reads, and none in `ccompile/` or its
+tests. They merged without conflict as ef9e381e; on it [run] (the native
+backend rebuilt) `tests/c-compile.test` 61 of 61 -- its parity tests run
+the context programs on the new front end against interp, compile and
+cranelift --, `tests/main-cli.test` 72 of 72, `tests/golden.test` 9 of 9,
+`tests/numeric-looking-names.test` 5 of 5, the manifest regenerated equal,
+`tools/compilerpedia.tcl check` and `tools/mutant-catalogs.tcl` (99
+catalogs) 0 problems. Because those changes are the front end's, the merge
+gets a CI round of its own: every workflow its push starts, and the full
+`tests.yml` and `tests-arm64.yml` dispatched on it. It is recorded here
+once read; until then it is **pending**, not passed.
 
 ## 17. Known limitations
 
