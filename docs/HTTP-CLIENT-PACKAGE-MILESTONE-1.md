@@ -582,13 +582,37 @@ catalogs, 3,037 mutants, every one still applies), and the affine,
 coroutine and lexical-cleanup harnesses (section 10.3).
 
 **F2. A fold's method-style call charged another module's function
-(open).** With `std::linux::fs` imported, `fold p in parts with
-intermediate acc "": acc.concat(p)` is rejected in the monomorphized
+(fixed).** With `std::linux::fs` imported, `fold p in parts with
+intermediate acc "": acc.concat(p)` was rejected in the monomorphized
 program as if `acc.concat` were `std::linux::fs::concat` (UNHANDLED-ERROR
 of NotAPath, FOLD-INTERMEDIATE-TYPE), although `acc` is a str; the same
-call outside a fold compiles (`audit/http-client/findings/
-fold-method-monomorphized.bot`). Worked around with
-`std::str::concat(acc, p)`.
+call outside a fold compiled (`audit/http-client/findings/
+fold-method-monomorphized.bot`). The call depends on itself: its result is
+the next iteration's receiver. Its first stand-in, `std::linux::fs::concat`
+(it sorts first), returns a NativePath the fold cannot join with the
+String it starts from, so the fold's walk made the intermediate -- the
+call's receiver -- poison, and the method-call decision judged a call with
+a poisoned receiver by nothing, taking the poison for an independent
+diagnostic's. The call was rejected unreported, and the program reported
+(the call at no candidate) had no diagnostic at all: a trait program like
+this one was then built again monomorphized from the stand-in, and any
+other program compiled and failed at run time (`field projection
+".concat": expected a struct`). Fixed in `hir/methods.tcl`: a candidate is
+applicable only when its own build establishes the call's receiver, a call
+whose receiver the decided build poisons is judged by its candidates'
+single deviations (here `std::str::concat`'s establishes it: decided), and
+a rejection is dismissed for its receiver only when the reported program
+poisons it (METHOD-RESOLUTION-CORRECTNESS-MILESTONE-1.md, section 10.1,
+"Cycles"). Validated by `tests/method-resolution.test`'s
+`mr-fold-receiver-*` and `mr-poisoned-receiver-judged-by-nothing` (on
+every backend; the finding's own program among them), four new mutants
+of `audit/method-resolution/tools/mutants.txt` and the decision's oracle
+(200 seeds, with and without contexts: no disagreement); over the golden
+and workload suites no decision, static outcome, accepted HIR or report
+changes, at 3 builds more of 399 (a call in a rejected static block whose
+receiver another diagnostic poisons now has its other candidates built to
+show it). The package keeps its
+`std::str::concat(acc, p)` (0.1.0 and 0.2.0 are recorded releases).
 
 **F3. A method-call decision costs a build per call (open).** With
 `std::str` and `std::linux::fs` both imported, every `"...".concat(...)`

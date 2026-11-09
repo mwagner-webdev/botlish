@@ -5120,11 +5120,18 @@ candidate whose ordinary call is valid. Keep it so:
 * **Relative to the decided program.** A candidate is applicable when the
   call has no problem of its own in the build of the decided configuration
   with only that call moved to it (the decided build for the candidate the
-  call stands at, a single deviation for any other), or when a kind proof
-  rules it out (next item). The decision is the configuration in which
-  every call has exactly the candidate it stands at applicable; a call with
-  several is AMBIGUOUS-METHOD-CALL, with none NO-APPLICABLE-METHOD, and a
-  call that is still moving at the certification's bound is ambiguous. The
+  call stands at, a single deviation for any other), and the call's
+  receiver is not poison there, unless a kind proof rules it out (next
+  item). A call whose receiver the decided build poisons is judged by those
+  same builds (its own stand-in may have poisoned it: a fold's `acc.f(x)`,
+  HTTP-CLIENT-PACKAGE-MILESTONE-1.md's F2), and decides nothing only when
+  every candidate's build poisons it; a rejection is dismissed for its
+  receiver only when the reported program poisons it. Never take a poison
+  of the decision's builds for an independent diagnostic's. The decision
+  is the configuration in which every call has exactly the candidate it
+  stands at applicable; a call with several is AMBIGUOUS-METHOD-CALL, with
+  none NO-APPLICABLE-METHOD, and a call that is still moving at the
+  certification's bound is ambiguous. The
   search (the kind waves, the trial rounds) only proposes stand-ins: never
   decide a call from a stand-in, a trial round, candidate order, a guess or
   an unrelated call's outcome, and never add a precedence.
