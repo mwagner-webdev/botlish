@@ -471,18 +471,18 @@ count are that commit's; the runs at a6f677e and 9dca40a tested the tree
 before the merge. At a6f677e, before they were superseded, `icy-tower
 (windows x86-64)` and `icy-tower (macos arm64)` passed, `tests (windows
 x86-64)` passed its canary, smoke and root-plans jobs, and `tests.yml`
-passed its canary. The state at bf0f585 on 2026-11-09 05:57 UTC, the shared
+passed its canary. The state at bf0f585 on 2026-11-09 09:05 UTC, the shared
 runners saturated (main's own test workflows at 996b50d are queued too):
 
 | workflow | run | state |
 |---|---|---|
-| `tests.yml` (dispatched) | 42553518671 | canary passed (mutant catalogs, warning gate, canary selection); every other job queued |
-| `tests-arm64.yml` (dispatched) | 42553521335 | canary passed; every other job queued |
-| `static-decisions.yml` (dispatched) | 42553524098 | queued |
-| `windows-x86_64.yml` | 42553507858 | canary passed; smoke and root plans queued |
+| `tests.yml` (dispatched) | 42553518671 | passed: canary (mutant catalogs, warning gate, canary selection), native Rust unit tests, golden suites shards 1, 3 and 4. `tests (interp)` did not run its tests: its "Install Neovim" step failed fetching Neovim's release (`curl: (22) ... error: 504`, GitHub's release server), before any test; to be rerun. Running: the method-call decision job (its tests, oracle and fuzzer passed), stub-linked executables. Queued: compile, cranelift and cranelift-generic coverage, system-linked executables, golden shard 2 |
+| `tests-arm64.yml` (dispatched) | 42553521335 | canary passed; the rest running or queued |
+| `static-decisions.yml` (dispatched) | 42553524098 | shard 1 passed (batched and sequential agree); mutable-array.bot running; shards 2-4 queued |
+| `windows-x86_64.yml` | 42553507858 | passed: canary, smoke, root plans, system linker, acceptance shards 2 and 3; shards 1 and 4 queued |
 | `macos-arm64.yml` | 42553507896 | queued |
 | `icy-tower-windows.yml` | 42553507899 | passed |
-| `icy-tower-macos.yml` | 42553507952 | queued |
+| `icy-tower-macos.yml` | 42553507952 | passed |
 | `raven-cleanroom.yml`, `ci-tools.yml` | 42553507901, 42553507895 | passed |
 
 Whatever is pending above is pending, not passed.
