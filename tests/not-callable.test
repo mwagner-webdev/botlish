@@ -1,0 +1,266 @@
+# not-callable.test -- a call whose callee is statically known to be no
+# function is a compile-time NOT-CALLABLE (HTTP-CLIENT-PACKAGE-MILESTONE-1.md,
+# finding F4; RAVEN-CLEANROOM-DESKTOP-MILESTONE-1.md, follow-up 3).
+#
+# The finding: a local Int binding that shadows a function of the same name
+# was called without a diagnostic and failed when it ran (CORE SEMANTIC
+# NOT-CALLABLE); with a declared result the program was instead rejected by a
+# TYPE diagnostic on the function's result. And a non-callable local named
+# like a function stayed an applicable candidate of a method-style call
+# (AMBIGUOUS-METHOD-CALL). The call's own check now rejects a callee of a
+# known kind no call accepts (hir::range::VerifyCallable; one rule,
+# hir::types::NotCallable), the call is poison, and these tests pin
+#
+#   * the finding's program, rejected before it runs, on every backend, by a
+#     strict compilation and through the compiler service, with the function
+#     the binding hides as the diagnostic's related location;
+#   * a declared result: the one NOT-CALLABLE, never a TYPE of the result;
+#   * every concrete callee kind, and how each is named;
+#   * callable callees still accepted; callees of no fixed kind (an untyped
+#     parameter, `any`) still checked when the call runs;
+#   * method syntax: a non-callable binding is no applicable candidate (the
+#     visible function applies), the one candidate reports as the free call,
+#     several report NO-APPLICABLE-METHOD;
+#   * recovery (no cascade), `static compile:` (DiagnosticCode::NotCallable),
+#     core IR text (run time, as ever), and the rule's one statement.
+#
+# audit/not-callable/tools/mutate.tcl's mutants must be killed here.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+source [file join $::projectRoot service service.tcl]
+interp recursionlimit {} 100000
+
+set ::allBackends {interp compile cranelift-generic cranelift}
+
+# Compiles the entry program TEXT in a fresh directory, -strict 0 (a
+# rejection stays a diagnostic), with the method decision's reference audit
+# on (every decision checked against the reference rule): the HIR.
+proc ncCompile {text args} {
+    set dir [makeDirectory nc-app-[pid]-[incr ::ncCounter]]
+    try {
+        set f [open [file join $dir main.bot] w]
+        fconfigure $f -encoding utf-8 -translation lf
+        puts -nonewline $f $text
+        close $f
+        set saved $hir::methodReferenceAudit
+        set hir::methodReferenceAudit 1
+        try {
+            return [surface::readProgramFile [file join $dir main.bot] -strict 0 -warnings off -cache "" {*}$args]
+        } finally {
+            set hir::methodReferenceAudit $saved
+        }
+    } finally {
+        removeDirectory nc-app-[pid]-$::ncCounter
+    }
+}
+set ::ncCounter 0
+
+# What HIR reports, as a strict compilation raises it: {KIND LINE:COLUMN
+# MESSAGE} each, in order.
+proc ncShown {hir} {
+    lmap d [hir::recovery::reported $hir] {
+        list [dict get $d kind] \
+            [regsub {^.*:(\d+:\d+)$} [hir::originLocation $hir [hir::methods::DiagnosticOrigin $hir $d]] {\1}] \
+            [dict get $d message]
+    }
+}
+
+proc ncReported {text} {
+    ncShown [ncCompile $text]
+}
+
+proc ncKinds {text} {
+    lmap d [ncReported $text] {lindex $d 0}
+}
+
+# The outcome of the program TEXT, compiled strictly, on every backend: the
+# one outcome they agree on (sourceAgree), without the effect log.
+proc ncRuns {text} {
+    lrange [sourceAgree $text $::allBackends] 0 1
+}
+
+# LINE:COLUMN of the origin ORIGIN of HIR.
+proc ncAt {hir origin} {
+    regsub {^.*:(\d+:\d+)$} [hir::originLocation $hir $origin] {\1}
+}
+
+set ::ncFinding [file join $::projectRoot audit http-client findings call-of-shadowing-int.bot]
+set ::ncFindingMessage {cannot call "n", a value of type int: only a function can be called, so this call could only fail when it runs; this binding of "n" hides the function "n", which a call of "n" here never reaches (rename the binding)}
+
+# ---------------------------------------------------------------------------
+# The finding
+
+test nc-finding-rejected {the finding's program (a local Int n hiding the function n, then n(3)) is rejected at compile time with one NOT-CALLABLE at the callee: the call is its subject, and its related location is the hidden function's declaration} -body {
+    set hir [surface::readProgramFile $::ncFinding -strict 0 -warnings off -cache ""]
+    set reported [hir::recovery::reported $hir]
+    set d [lindex $reported 0]
+    set call [dict get $d subject]
+    list [llength $reported] [lindex [ncShown $hir] 0] \
+        [expr {[dict get $hir exprs $call callee] eq [dict get $d expr]}] \
+        [lmap origin [dict getdef $d related {}] {ncAt $hir $origin}]
+} -result [list 1 [list NOT-CALLABLE 16:5 $::ncFindingMessage] 1 11:1]
+
+test nc-finding-strict {a strict compilation raises it as {CORE SEMANTIC NOT-CALLABLE}, the program's only diagnostic} -body {
+    catch {surface::readProgramFile $::ncFinding -warnings off -cache ""} message options
+    list [dict get $options -errorcode] [llength [dict get $options -diagnostics]]
+} -result {{CORE SEMANTIC NOT-CALLABLE} 1}
+
+test nc-finding-every-backend {main.tcl rejects the finding's program before it runs on every backend: the compile-time diagnostic at 16:5, never the run-time "cannot call non-callable value"} -body {
+    set results {}
+    foreach backend $::allBackends {
+        set status [catch {exec [info nameofexecutable] [file join $::projectRoot main.tcl] -warnings off -backend $backend $::ncFinding 2>@1} output]
+        lappend results [list $backend $status \
+            [regexp {call-of-shadowing-int\.bot:16:5: cannot call "n", a value of type int} $output] \
+            [regexp {cannot call non-callable value} $output]]
+    }
+    set results
+} -result {{interp 1 1 0} {compile 1 1 0} {cranelift-generic 1 1 0} {cranelift 1 1 0}}
+
+test nc-finding-compiler-service {the compiler service reports the same diagnostic at the callee's range, with the hidden function as its related range} -body {
+    set ws [service::workspace -warnings off -cache ""]
+    try {
+        set rev [service::analyze $ws $::ncFinding]
+        list [dict get [service::revision $rev] outcome] [lmap d [service::diagnostics $rev] {
+            list [dict get $d severity] [dict get $d code] [dict get $d line] [dict get $d column] [dict get $d endColumn] \
+                [dict get $d message] [lmap r [dict get $d related] {list [dict get $r line] [dict get $r column]}]
+        }]
+    } finally {
+        service::closeWorkspace $ws
+    }
+} -result [list semantic [list [list error {CORE SEMANTIC NOT-CALLABLE} 16 5 6 $::ncFindingMessage {{11 1}}]]]
+
+test nc-finding-declared-result {with a declared result (fn f(text: str) -> int) the program is rejected by the one NOT-CALLABLE, never by a TYPE diagnostic on the result: the call is poison} -body {
+    set text "import std::str\n\nfn n(x: int) -> int:\n    x + 1\n\nfn f(text: str) -> int:\n    n = std::str::length(text)\n    n(3)\n\nf(\"abc\")\n"
+    set hir [ncCompile $text]
+    set reported [hir::recovery::reported $hir]
+    list [ncShown $hir] [hir::types::Poisoned $hir [dict get [lindex $reported 0] subject]]
+} -result [list [list [list NOT-CALLABLE 8:5 $::ncFindingMessage]] 1]
+
+# ---------------------------------------------------------------------------
+# Callees
+
+test nc-concrete-callees {every callee of a known kind no call accepts is rejected, in the function's body as written (no call of it needed), each named as written: a binding of a String, an Int, a Bool, a Float64, a List, a named struct, an enum, a MutableVector, an anonymous struct; a field; a constant; an enum case; a call's result} -body {
+    set results {}
+    foreach {decl type} {
+        {} str
+        {} int
+        {} bool
+        {} Float64
+        {} List[int]
+        {struct P:\n    x: int\n} P
+        {enum Color:\n    Red, Green\n} Color
+        {} MutableVector[int]
+    } {
+        set text "[subst -nocommands -novariables $decl]\nfn f(v: $type):\n    v(0)\n\n1\n"
+        set reported [ncReported $text]
+        lappend results [list [llength $reported] [lindex $reported 0 0] \
+            [regsub {^cannot call "v", a value of type (.*): only a function can be called, so this call could only fail when it runs$} [lindex $reported 0 2] {\1}]]
+    }
+    foreach text {
+        "fn f():\n    v = {x: 1}\n    v(0)\n\n1\n"
+        "struct P:\n    count: int\n\nfn f(p: P):\n    p.count(1)\n\n1\n"
+        "fn f():\n    5(1)\n\n1\n"
+        "enum Vehicle:\n    Car, Boat\n\nfn f():\n    Vehicle::Car()\n\n1\n"
+        "fn three() -> int:\n    3\n\nfn f():\n    three()(1)\n\n1\n"
+    } {
+        set reported [ncReported $text]
+        lappend results [list [llength $reported] [lindex $reported 0 0] \
+            [regsub {^cannot call (.*): only a function can be called, so this call could only fail when it runs$} [lindex $reported 0 2] {\1}]]
+    }
+    set results
+} -result {{1 NOT-CALLABLE str} {1 NOT-CALLABLE int} {1 NOT-CALLABLE bool} {1 NOT-CALLABLE Float64} {1 NOT-CALLABLE {List[int]}} {1 NOT-CALLABLE P} {1 NOT-CALLABLE Color} {1 NOT-CALLABLE {MutableVector[int]}} {1 NOT-CALLABLE {"v", a value of type struct{x: int}}} {1 NOT-CALLABLE {the field "count", a value of type int}} {1 NOT-CALLABLE {5, a value of type int}} {1 NOT-CALLABLE {Vehicle::Car, a value of type Vehicle}} {1 NOT-CALLABLE {a value of type int}}}
+
+test nc-hidden-function {the hint names what the binding hides: a parameter or a flag hiding a function, its declaration the related location; a binding that hides nothing callable has no hint} -body {
+    set results {}
+    foreach text {
+        "fn size(x):\n    x\n\nfn f(size: int):\n    size(1)\n\n1\n"
+        "fn size(x):\n    x\n\nfn f(flags :size):\n    if size:\n        return 1\n    return size(5)\n\nf()\n"
+        "size = 2\n\nfn f():\n    size = 3\n    size(1)\n\n1\n"
+    } {
+        set hir [ncCompile $text]
+        set d [lindex [hir::recovery::reported $hir] 0]
+        lappend results [list [dict get $d kind] [regexp {; this binding of "size" hides the function "size", which a call of "size" here never reaches \(rename the binding\)$} [dict get $d message]] \
+            [lmap origin [dict getdef $d related {}] {ncAt $hir $origin}]]
+    }
+    set results
+} -result {{NOT-CALLABLE 1 1:1} {NOT-CALLABLE 1 1:1} {NOT-CALLABLE 0 {}}}
+
+test nc-callable-callees {callable callees are accepted and run on every backend: a function, a nested function, a Fn-typed parameter, a native taken as a value, an exact function value} -body {
+    set text "import std::str\n\nfn add1(x: int) -> int:\n    x + 1\n\nfn apply(g: Fn{args: \[int\], return: int}, x: int) -> int:\n    g(x)\n\nfn f(s: str) -> int:\n    fn twice(y):\n        y * 2\n    len = std::str::length\n    h = add1\n    add1(1) + twice(2) + apply(add1, 3) + len(s) + h(4)\n\nf(\"abc\")\n"
+    list [ncKinds $text] [ncRuns $text]
+} -result {{} {value 18}}
+
+test nc-dynamic-callee-runtime {a callee of no fixed kind is checked when the call runs, as ever: an untyped parameter or one declared any compiles, and fails on every backend with the run-time NOT-CALLABLE; its semantic instance's view neither reports nor poisons the call (no poison without a diagnostic)} -body {
+    set results {}
+    foreach text {
+        "fn apply(f, x):\n    f(x)\n\napply(3, 4)\n"
+        "fn apply(f: any, x):\n    f(x)\n\napply(3, 4)\n"
+    } {
+        set hir [ncCompile $text]
+        lappend results [list [ncShown $hir] [dict keys [dict getdef $hir poisoned {}]] [ncRuns $text]]
+    }
+    set results
+} -result {{{} {} {error {CORE SEMANTIC NOT-CALLABLE}}} {{} {} {error {CORE SEMANTIC NOT-CALLABLE}}}}
+
+test nc-core-ir-runtime {core IR text is past the source boundary: its call of a constant has no static diagnostic in its HIR (no call it wrote is judged) and stays the run-time NOT-CALLABLE} -body {
+    set hir [hir::build {{call {const 5}}} -strict 0]
+    list [lmap d [dict get $hir diagnostics] {dict get $d kind}] \
+        [catch {core::eval {call {const 5}}} message options] [dict get $options -errorcode] $message
+} -result {{} 1 {CORE SEMANTIC NOT-CALLABLE} {cannot call non-callable value 5}}
+
+# ---------------------------------------------------------------------------
+# Method syntax
+
+test nc-method-binding-not-a-candidate {a non-callable local named like a visible function is no applicable candidate of a method-style call: s.length() beside length = 3 applies std::str::length (it was AMBIGUOUS-METHOD-CALL), on every backend} -body {
+    set text "import std::str\n\nfn g(s: str) -> int:\n    length = 3\n    s.length() + length\n\ng(\"ab\")\n"
+    set hir [ncCompile $text]
+    set callees {}
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict get $node kind] eq "call" && [dict getdef [dict getdef $node written {}] form ""] eq "method"} {
+            lappend callees [dict get $hir exprs [dict get $node callee] name]
+        }
+    }
+    list [ncShown $hir] $callees [ncRuns $text]
+} -result {{} std::str::length {value 5}}
+
+test nc-method-single-candidate {the one candidate, a non-callable local hiding the function, is the call: NOT-CALLABLE at the method name, the free call's diagnostic} -body {
+    set prelude "fn f(a):\n    a + 100\n\n"
+    list [ncReported "${prelude}fn g(x):\n    f = 5\n    x.f()\n\ng(1)\n"] \
+        [ncReported "${prelude}fn g(x):\n    f = 5\n    f(x)\n\ng(1)\n"]
+} -result {{{NOT-CALLABLE 6:7 {cannot call "f", a value of type int: only a function can be called, so this call could only fail when it runs; this binding of "f" hides the function "f", which a call of "f" here never reaches (rename the binding)}}} {{NOT-CALLABLE 6:5 {cannot call "f", a value of type int: only a function can be called, so this call could only fail when it runs; this binding of "f" hides the function "f", which a call of "f" here never reaches (rename the binding)}}}}
+
+test nc-method-none-applicable {several candidates, none applicable: NO-APPLICABLE-METHOD, the local's reason its NOT-CALLABLE} -body {
+    set reported [ncReported "import std::str\n\nfn g(n: int):\n    length = 3\n    n.length()\n\n1\n"]
+    list [llength $reported] [lindex $reported 0 0] [lindex $reported 0 1] \
+        [regexp {\(length rejects the call: cannot call "length", a value of type int: } [lindex $reported 0 2]] \
+        [regexp {; std::str::length rejects the receiver: } [lindex $reported 0 2]]
+} -result {1 NO-APPLICABLE-METHOD 5:7 1 1}
+
+# ---------------------------------------------------------------------------
+# Recovery, static compile, the rule
+
+test nc-recovery-no-cascade {the rejected call is poison: its result's uses report nothing of their own, an independent error is still reported} -body {
+    ncReported "import std::str\n\nfn f() -> str:\n    n = 3\n    x = n(1)\n    y = std::str::length(x)\n    q = \"a\" + 1\n    x\n\nf()\n"
+} -result {{NOT-CALLABLE 5:9 {cannot call "n", a value of type int: only a function can be called, so this call could only fail when it runs}} {TYPE 7:9 {argument 1 of native + requires int, but this operand has type str: the call could only fail when it runs}}}
+
+test nc-static-compile {a static compile: block whose body calls an Int is rejected with DiagnosticCode::NotCallable at the callee, on every backend} -body {
+    ncRuns "import std::compiler\n\nfn probe() -> int errors std::compiler::CompilerError:\n    static compile:\n        m = 3\n        m(1)\n\nr = probe():\n    on std::compiler::CompilerError {code, primary}:\n        if code == std::compiler::DiagnosticCode::NotCallable:\n            primary.line * 100 + primary.column\n        else:\n            0\nr\n"
+} -result {value 609}
+
+test nc-rule-one-statement {hir::types::NotCallable is the rule: a known kind no call accepts, never a callable kind or a type of no fixed kind; and the kind list is written only there} -body {
+    set results {}
+    foreach type {int str bool unit {list int} struct {cptr std::ffi::c::Void}} {
+        lappend results [hir::types::NotCallable $type]
+    }
+    foreach type {any never block native} {
+        lappend results [hir::types::NotCallable $type]
+    }
+    set uses 0
+    foreach path [glob [file join $::projectRoot hir *.tcl]] {
+        incr uses [regexp -all {ni \{"" block native coroutine\}} [core::ReadFile $path]]
+    }
+    list $results $uses
+} -result {{1 1 1 1 1 1 1 0 0 0 0} 1}
+
+cleanupTests

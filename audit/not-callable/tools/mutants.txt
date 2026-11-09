@@ -1,0 +1,135 @@
+# Mutants of the static NOT-CALLABLE check (HTTP-CLIENT-PACKAGE-MILESTONE-1.md,
+# finding F4; audit/not-callable/tools/mutate.tcl): deliberate breaks of the
+# check of a call's callee (hir/range.tcl's VerifyCallable and
+# ShadowedFunction), the rule (hir/types.tcl's NotCallable) and the poison of
+# a rejected call (hir/types.tcl's Call). Each must be killed by
+# tests/not-callable.test, by one of the tests its `!!` line names -- the test
+# that states the rule it breaks, never an unrelated failure.
+#
+#   @@ NAME DESCRIPTION
+#   !! TEST ...
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+
+# ---------------------------------------------------------------------------
+# The check
+
+@@ callee-unchecked the callee is never held to the rule: the call is still poison, but no diagnostic says why, and the program runs into the run-time NOT-CALLABLE again (the finding)
+!! nc-finding-rejected nc-finding-strict nc-finding-every-backend nc-concrete-callees
+## hir/range.tcl
+<<<<
+        } else {
+            VerifyCallable hir $e $node $calleeType
+        }
+====
+        }
+>>>>
+
+@@ subject-lost the diagnostic is reported but is no call's own (no subject): the method decision cannot read it as the candidate's problem, and the non-callable local stays applicable (AMBIGUOUS-METHOD-CALL again)
+!! nc-method-binding-not-a-candidate
+## hir/range.tcl
+<<<<
+    hir::Diagnose hir NOT-CALLABLE \
+====
+    set ::hir::checkingCall ""
+    hir::Diagnose hir NOT-CALLABLE \
+>>>>
+
+@@ instance-view-judged the check also runs in a semantic instance's view: an untyped callee is judged by the type one caller gives it, never checked when the call runs
+!! nc-dynamic-callee-runtime
+## hir/range.tcl
+<<<<
+            || ![dict exists $node written] || [dict exists $hir semanticContext]} {
+====
+            || ![dict exists $node written]} {
+>>>>
+
+@@ unwritten-judged a call the program did not write (core IR text, past the source boundary) is judged too
+!! nc-core-ir-runtime
+## hir/range.tcl
+<<<<
+            || ![dict exists $node written] || [dict exists $hir semanticContext]} {
+====
+            || [dict exists $hir semanticContext]} {
+>>>>
+
+@@ related-dropped the hidden function's declaration is named in the message only, never as the diagnostic's related location (data a consumer would have to parse)
+!! nc-finding-rejected nc-finding-compiler-service nc-hidden-function
+## hir/range.tcl
+<<<<
+                if {$origin ne ""} {
+                    lappend related $origin
+                }
+====
+>>>>
+
+@@ hint-own-scope the hidden function is looked up from the binding's own scope, where the binding itself is found: the hint never appears
+!! nc-finding-rejected nc-finding-compiler-service nc-hidden-function nc-method-single-candidate
+## hir/range.tcl
+<<<<
+    set target [hir::resolve::LexicalTarget hir $parent $name]
+====
+    set target [hir::resolve::LexicalTarget hir $scope $name]
+>>>>
+
+@@ hint-any-binding the hint is given for whatever the binding hides, a value too: a local hiding a top-level Int is said to hide a function
+!! nc-hidden-function
+## hir/range.tcl
+<<<<
+    if {$value eq "" || [dict get $hir exprs $value kind] ne "block"} {
+        return ""
+    }
+====
+>>>>
+
+# ---------------------------------------------------------------------------
+# The rule
+
+@@ any-not-callable the rule takes a type of no fixed kind for a non-callable one: an `any` callee is rejected, never checked when the call runs
+!! nc-dynamic-callee-runtime nc-rule-one-statement
+## hir/types.tcl
+<<<<
+    return [expr {[kindOf $type] ni {"" block native coroutine}}]
+====
+    return [expr {[kindOf $type] ni {block native coroutine}}]
+>>>>
+
+@@ structs-callable a special case: a struct callee is left to the run-time check
+!! nc-concrete-callees nc-rule-one-statement
+## hir/types.tcl
+<<<<
+    return [expr {[kindOf $type] ni {"" block native coroutine}}]
+====
+    return [expr {[kindOf $type] ni {"" block native coroutine struct}}]
+>>>>
+
+# ---------------------------------------------------------------------------
+# The poison
+
+@@ call-not-poisoned the rejected call keeps the `any` result of an unknown callee: a declared result is reported unproven beside the NOT-CALLABLE (the finding's second program)
+!! nc-finding-declared-result
+## hir/types.tcl
+<<<<
+        if {$spec || ([dict exists $node written] && [MakesPoison $hir $ctx]
+====
+        if {$spec || (0 && [dict exists $node written] && [MakesPoison $hir $ctx]
+>>>>
+
+@@ instance-poisoned a semantic instance's walk poisons the call too: an untyped callee given an Int by one caller makes that call invalid, a static rejection of a program the generic walk accepts
+!! nc-dynamic-callee-runtime
+## hir/types.tcl
+<<<<
+                && ![dict exists $ctx inst] && [dict get $ctx reachable])} {
+            set dead 1
+        }
+    }
+====
+                && [dict get $ctx reachable])} {
+            set dead 1
+        }
+    }
+>>>>

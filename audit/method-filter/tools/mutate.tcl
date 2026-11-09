@@ -19,8 +19,8 @@ set only [expr {[llength $argv] > 1 ? [lindex $argv 1] : "*"}]
 # {NAME FILE OLD NEW}: OLD must occur exactly once in FILE.
 set mutants [list \
     [list native-equal-kinds-excluded hir/types.tcl \
-        "    if \{\$kind eq \"\" || \$wanted in \{\"\" any\} || \$kind eq \$wanted\} \{\n        return \{\}\n    \}" \
-        "    if \{\$kind eq \"\" || \$wanted in \{\"\" any\}\} \{\n        return \{\}\n    \}"] \
+        "    if \{\$kind ne \$wanted\} \{\n        return \[list \$kind \$wanted\]\n    \}" \
+        "    if \{1\} \{\n        return \[list \$kind \$wanted\]\n    \}"] \
     [list bare-name-excluded hir/methods.tcl \
         "    if \{!\[regexp \{^(.+)::\[^:\]+\$\} \$cand -> ns\]\} \{\n        return 0\n    \}" \
         "    if \{!\[regexp \{^(.+)::\[^:\]+\$\} \$cand -> ns\]\} \{\n        return 1\n    \}"] \
@@ -37,8 +37,17 @@ set mutants [list \
         "foreach field \{declaredParamTypes inferredParamTypes checkedParamTypes\} \{" \
         "foreach field \{inferredParamTypes checkedParamTypes\} \{"] \
     [list nominal-rule-dropped hir/methods.tcl \
-        "    return \[NominalMismatch \[DeclaredParam \$hir \$ns \$cand\] \$R\]" \
-        "    return 0"] \
+        "    return \[expr \{\[NominalMismatch \$declared \$R\] || \[TraitMismatch \$declared \$R\]\}\]" \
+        "    return \[expr \{0 || \[TraitMismatch \$declared \$R\]\}\]"] \
+    [list trait-rule-dropped hir/methods.tcl \
+        "    return \[expr \{\[NominalMismatch \$declared \$R\] || \[TraitMismatch \$declared \$R\]\}\]" \
+        "    return \[expr \{\[NominalMismatch \$declared \$R\] || 0\}\]"] \
+    [list trait-satisfaction-ignored hir/methods.tcl \
+        "    expr \{\[hir::types::IsTraitConstraint \$declared\] && !\[hir::traits::Accept \$R \$declared\]\}" \
+        "    expr \{\[hir::types::IsTraitConstraint \$declared\] && 1\}"] \
+    [list trait-rule-any-declared-type hir/methods.tcl \
+        "    expr \{\[hir::types::IsTraitConstraint \$declared\] && !\[hir::traits::Accept \$R \$declared\]\}" \
+        "    expr \{1 && !\[hir::traits::Accept \$R \$declared\]\}"] \
     [list nominal-arguments-compared hir/methods.tcl \
         "        && \[lindex \$declared 1\] ne \[lindex \$R 1\]\}" \
         "        && \$declared ne \$R\}"] \
@@ -82,8 +91,8 @@ set mutants [list \
         "    set methodKindProofs 0\n    hir::activate \$hir" \
         "    hir::activate \$hir"] \
     [list native-type-problem-lost hir/range.tcl \
-        "        hir::Diagnose hir TYPE \[format \{argument %d of native %s requires" \
-        "        set ::hir::checkingCall \"\"\n        hir::Diagnose hir TYPE \[format \{argument %d of native %s requires"] \
+        "        hir::Diagnose hir TYPE \[format \{argument %d of native %s requires %s, but" \
+        "        set ::hir::checkingCall \"\"\n        hir::Diagnose hir TYPE \[format \{argument %d of native %s requires %s, but"] \
 ]
 
 proc readText {path} {

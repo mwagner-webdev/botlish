@@ -1,8 +1,11 @@
-# A finding of HTTP-CLIENT-PACKAGE-MILESTONE-1.md (section "Findings"): the
-# fold intermediate ACC is a str, yet in the monomorphized program the
-# method-style call acc.concat(p) is charged std::linux::fs::concat's
-# NotAPath (UNHANDLED-ERROR, FOLD-INTERMEDIATE-TYPE). The same call outside a fold
-# (a str parameter) compiles; so does std::str::concat(acc, p).
+# A finding of HTTP-CLIENT-PACKAGE-MILESTONE-1.md (section "Findings", F2,
+# fixed): the fold intermediate ACC is a str, yet in the monomorphized
+# program the method-style call acc.concat(p) was charged
+# std::linux::fs::concat's NotAPath (UNHANDLED-ERROR, FOLD-INTERMEDIATE-TYPE):
+# that stand-in's result made the call's own receiver poison, and the
+# decision took the poison for another diagnostic's. It compiles now, to
+# std::str::concat (tests/method-resolution.test's
+# mr-fold-receiver-trait-program compiles this program).
 #
 #   tclsh9.0 main.tcl -check audit/http-client/findings/fold-method-monomorphized.bot
 import std::linux::fs

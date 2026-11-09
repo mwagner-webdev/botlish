@@ -557,7 +557,7 @@ linking a program takes 49 s against about 40 s (the module is larger).
 Latency and throughput are not comparable directly (the census's peer was
 Hyper in the same process; here, Python's asyncio and nghttpd).
 
-## 12. Findings (and the compiler fix they led to)
+## 12. Findings (and the compiler fixes they led to)
 
 **F1. Resources were not released on several native sequence forms
 (fixed).** `native/lower.tcl`'s `Sequence` releases the affine values that
@@ -582,32 +582,102 @@ catalogs, 3,037 mutants, every one still applies), and the affine,
 coroutine and lexical-cleanup harnesses (section 10.3).
 
 **F2. A fold's method-style call charged another module's function
-(open).** With `std::linux::fs` imported, `fold p in parts with
-intermediate acc "": acc.concat(p)` is rejected in the monomorphized
+(fixed).** With `std::linux::fs` imported, `fold p in parts with
+intermediate acc "": acc.concat(p)` was rejected in the monomorphized
 program as if `acc.concat` were `std::linux::fs::concat` (UNHANDLED-ERROR
 of NotAPath, FOLD-INTERMEDIATE-TYPE), although `acc` is a str; the same
-call outside a fold compiles (`audit/http-client/findings/
-fold-method-monomorphized.bot`). Worked around with
-`std::str::concat(acc, p)`.
+call outside a fold compiled (`audit/http-client/findings/
+fold-method-monomorphized.bot`). The call depends on itself: its result is
+the next iteration's receiver. Its first stand-in, `std::linux::fs::concat`
+(it sorts first), returns a NativePath the fold cannot join with the
+String it starts from, so the fold's walk made the intermediate -- the
+call's receiver -- poison, and the method-call decision judged a call with
+a poisoned receiver by nothing, taking the poison for an independent
+diagnostic's. The call was rejected unreported, and the program reported
+(the call at no candidate) had no diagnostic at all: a trait program like
+this one was then built again monomorphized from the stand-in, and any
+other program compiled and failed at run time (`field projection
+".concat": expected a struct`). Fixed in `hir/methods.tcl`: a candidate is
+applicable only when its own build establishes the call's receiver, a call
+whose receiver the decided build poisons is judged by its candidates'
+single deviations (here `std::str::concat`'s establishes it: decided), and
+a rejection is dismissed for its receiver only when the reported program
+poisons it (METHOD-RESOLUTION-CORRECTNESS-MILESTONE-1.md, section 10.1,
+"Cycles"). Validated by `tests/method-resolution.test`'s
+`mr-fold-receiver-*` and `mr-poisoned-receiver-judged-by-nothing` (on
+every backend; the finding's own program among them), four new mutants
+of `audit/method-resolution/tools/mutants.txt` and the decision's oracle
+(200 seeds, with and without contexts: no disagreement); over the golden
+and workload suites no decision, static outcome, accepted HIR or report
+changes, at 3 builds more of 399 (a call in a rejected static block whose
+receiver another diagnostic poisons now has its other candidates built to
+show it). The package keeps its
+`std::str::concat(acc, p)` (0.1.0 and 0.2.0 are recorded releases).
 
-**F3. A method-call decision costs a build per call (open).** With
-`std::str` and `std::linux::fs` both imported, every `"...".concat(...)`
-is a whole-program trial build: `std::linux::fs::concat`'s first parameter
-is an opaque struct the kind proofs never exclude for a str receiver
-(METHOD-DECISION-FILTER.md excludes by named struct only between named
-structs). Six calls cost 15 builds and 11 s, against 2 builds and 0.8 s
-without that import (`findings/concat-deviations.bot`); the clean room's
-first consumer program took over ten minutes to check before its lines
-were built with one helper. The same mechanism made a lexical helper of
-the module named like a method (`at`) cost 69 builds and seven minutes:
+**F3. A method-call decision cost a build per call (fixed for
+trait-polymorphic candidates; open for lexical ones).** With
+`std::io::path` and `std::str` both imported, every `"...".concat(...)`
+was a whole-program trial build: `std::io::path::concat`, whose first
+parameter is the trait `Path`, is a candidate of every `concat`, and no
+kind proof ruled a candidate out by a trait (a trait has no kind), although
+a String does not satisfy `Path` (`std::str` has no `text`) and the
+candidate's own build always rejected it (TRAIT-NOT-SATISFIED). Sorting
+first, it was also each call's initial stand-in, whose `Path` result left
+the next call of a chain on a view. Four calls cost 15 builds (9 single
+deviations) and 10-11 s (`findings/concat-deviations.bot`); the clean
+room's first consumer program took over ten minutes to check before its
+lines were built with one helper. This report first blamed
+`std::linux::fs::concat`, measured by removing several imports at once:
+its opaque `NativePath` parameter was already ruled out for a String
+receiver by kind, and the program without `std::linux::fs` alone still
+took 14 builds. Fixed in the method-call decision: a module function whose
+declared first parameter is a trait is ruled out for a receiver that does
+not satisfy it (`hir::methods::TraitMismatch`, which
+asks the call's own admission check, `hir::traits::Accept`;
+METHOD-DECISION-FILTER.md). The program now takes 5 builds, no deviation,
+4.1 s -- the 5 it takes without `std::io::path`, three of them the kind
+waves of its three-link chain -- decided as the reference rule decides it
+(`tests/method-filter.test`'s `mf-trait-*`, the reference audit, the
+method-filter fuzzer with a trait module, and its mutants). Still open: a
+lexical helper of the module named like a method (`at`) cost 69 builds and
+seven minutes, because a lexical candidate is never ruled out (a bare name
+may be a parameter or a binding: METHOD-DECISION-FILTER.md); it stays
 renamed and marked `nomethod` (`http-warning-clean` keeps a program
 importing http at three builds).
 
-**F4. Calling an Int is accepted (open).** A local Int binding that
-shadows a function of the same name is called without a diagnostic and
-fails at run time with NOT-CALLABLE, naming the value
+**F4. Calling an Int was accepted (fixed).** A local Int binding that
+shadows a function of the same name was called without a diagnostic and
+failed at run time with NOT-CALLABLE, naming the value
 (`findings/call-of-shadowing-int.bot`); with a declared result type the
-program is instead rejected by an unrelated-looking TYPE diagnostic.
+program was instead rejected by an unrelated-looking TYPE diagnostic. The
+shadowing was incidental: no call of a value of a known non-callable type
+(an Int, a String, a List, a struct, an enum case, a field, a call's
+result) was checked, and so a non-callable local named like a function
+also stayed an applicable candidate of a method-style call
+(AMBIGUOUS-METHOD-CALL: RAVEN-CLEANROOM-DESKTOP-MILESTONE-1.md, follow-up
+3). Now the call's own check rejects a callee whose kind is known and no
+callable kind (`hir::types::NotCallable`, the one statement of the rule;
+`hir::range::VerifyCallable`), as a native's argument kinds are held
+(METHOD-RECEIVER-TYPE-CORRECTNESS-MILESTONE-1.md): a compile-time
+`CORE SEMANTIC NOT-CALLABLE` at the callee, `std::compiler::
+DiagnosticCode::NotCallable` in a `static compile:` block. It names the
+function a binding hides, as its related location:
+
+    call-of-shadowing-int.bot:16:5: cannot call "n", a value of type int:
+    only a function can be called, so this call could only fail when it
+    runs; this binding of "n" hides the function "n", which a call of "n"
+    here never reaches (rename the binding)
+
+The call is poison (no TYPE of the declared result follows), and, being
+the call's own problem, it makes the local no applicable method candidate:
+`s.length()` beside `length = 3` applies `std::str::length`. A callee of no
+fixed kind (an untyped parameter, `any`, a trait view, an imprint
+variable) is still checked when the call runs, and neither a semantic
+instance's view nor core IR text is judged. Validated by
+`tests/not-callable.test` (16 tests) and `audit/not-callable/tools/
+mutate.tcl` (its mutants all killed), with `tests/enums.test`'s and
+`tests/method-sugar.test`'s run-time expectations of such calls now the
+compile-time diagnostic.
 
 **F5. The native audit counts a weak definition twice.** BoringSSL's
 libcrypto and libssl each define some symbols weakly; as two archives of
@@ -728,7 +798,9 @@ blocked correctness, not expressiveness. Convenient but absent: integer
 division (B9), a `str` join or format (lines are built with a fold), an
 SSE or JSON decoder (consumers' code), a driver `rearm` with an interest
 (B5, worked around), and method-call decisions that do not cost a
-whole-program build per call in some import sets (F3).
+whole-program build per call of a module's own function named like a
+method (F3; the trait-polymorphic case, `std::io::path::concat` beside
+`std::str::concat`, is fixed).
 
 **E. Is the remaining obstacle to a cleanroom AI-agent TUI primarily
 managed subprocess execution, or does HTTP still have consumer-visible

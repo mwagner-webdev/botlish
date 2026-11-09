@@ -5196,11 +5196,18 @@ candidate whose ordinary call is valid. Keep it so:
 * **Relative to the decided program.** A candidate is applicable when the
   call has no problem of its own in the build of the decided configuration
   with only that call moved to it (the decided build for the candidate the
-  call stands at, a single deviation for any other), or when a kind proof
-  rules it out (next item). The decision is the configuration in which
-  every call has exactly the candidate it stands at applicable; a call with
-  several is AMBIGUOUS-METHOD-CALL, with none NO-APPLICABLE-METHOD, and a
-  call that is still moving at the certification's bound is ambiguous. The
+  call stands at, a single deviation for any other), and the call's
+  receiver is not poison there, unless a kind proof rules it out (next
+  item). A call whose receiver the decided build poisons is judged by those
+  same builds (its own stand-in may have poisoned it: a fold's `acc.f(x)`,
+  HTTP-CLIENT-PACKAGE-MILESTONE-1.md's F2), and decides nothing only when
+  every candidate's build poisons it; a rejection is dismissed for its
+  receiver only when the reported program poisons it. Never take a poison
+  of the decision's builds for an independent diagnostic's. The decision
+  is the configuration in which every call has exactly the candidate it
+  stands at applicable; a call with several is AMBIGUOUS-METHOD-CALL, with
+  none NO-APPLICABLE-METHOD, and a call that is still moving at the
+  certification's bound is ambiguous. The
   search (the kind waves, the trial rounds) only proposes stand-ins: never
   decide a call from a stand-in, a trial round, candidate order, a guess or
   an unrelated call's outcome, and never add a precedence.
@@ -5208,13 +5215,18 @@ candidate whose ordinary call is valid. Keep it so:
   candidate is excluded only when the receiver the build gives makes the
   ordinary call invalid by kind (a native's first parameter, a module
   function's declared or inferred first-parameter contract, the plain value
-  kinds only) or by a named struct's declaration (a *declared* first
+  kinds only), by a named struct's declaration (a *declared* first
   parameter of another named struct declaration than the receiver's:
-  `NominalMismatch`). Never exclude a lexical name, by a domain or a
+  `NominalMismatch`) or by a trait's conformance (a *declared* first
+  parameter that is a trait the receiver does not satisfy:
+  `TraitMismatch`). Never exclude a lexical name, by a domain or a
   refinement, by a struct's type arguments, by an inferred contract's struct
-  or by a type's spelling. The native rule is stated once
-  (`NativeMismatch`, which a call's problems and the kind proofs both ask).
-  Certification never reads a waves' guess (`DefinedType`).
+  or by a type's spelling, and never for a receiver of no kind (`any`, a
+  trait view, an imprint variable, a function). The native rule is
+  stated once (`NativeMismatch`, which a call's problems and the kind proofs
+  both ask), and so is the trait rule (`hir::traits::Accept`, which a call's
+  own admission check and `TraitMismatch` both ask). Certification never
+  reads a waves' guess (`DefinedType`).
 * **Checked, not trusted.** `hir::methodKindProofs 0`
   (`BOTLISH_METHOD_KIND_PROOFS=0`) is the reference rule: every candidate
   judged by its own build. `hir::methodReferenceAudit 1`
@@ -5325,6 +5337,37 @@ If you change any of that, or a native's `-param-types`, run
 `mutants.txt` must still apply and be killed by a test its `!!` line names:
 update a mutant's text when you change the code it mutates, keeping it a
 mutant of the same rule), plus the method-call decision's harnesses (above).
+
+## Callee kinds (NOT-CALLABLE)
+
+A call whose callee's static type is of a known kind no call accepts -- an
+Int, a String, a Bool, a List, a struct, an enum case, a C address -- is a
+compile-time NOT-CALLABLE of the call (HTTP-CLIENT-PACKAGE-MILESTONE-1.md,
+F4): the call's own check (`hir::range::VerifyCallable`, inside
+`hir::CheckingCall`), located at the callee, naming the function a binding
+hides as its related location, and the call is poison (`hir::types::Call`).
+The rule is stated once (`hir::types::NotCallable`: the callable kinds are
+a Block, a native and a coroutine handle); the check, the poison and
+region inference's dead call ask it. Keep it so:
+
+* A callee of no fixed kind -- `any`, an untyped parameter's value, a
+  structural function type, a trait view, an imprint variable -- stays
+  dynamic, checked when the call runs. Never judge a call in a semantic
+  instance's view, or a call the program did not write (`written`; core IR
+  text), and never add a run-time check for a static one.
+* The method decision reads it like any problem of the call: a
+  non-callable binding named like a function is no applicable candidate.
+  Never give it a method rule of its own, and never let it add, rank or
+  retry a candidate (SFIAE, METHOD-SUGAR.md).
+
+If you change any of that, run `tests/not-callable.test`,
+`tests/method-sugar.test`, `tests/enums.test`, `tests/method-resolution.test`,
+`tests/method-filter.test`, `tests/diagnostic-recovery.test`,
+`tests/static-compile.test` and `audit/not-callable/tools/mutate.tcl` (every
+mutant in its `mutants.txt` must still apply and be killed by a test its
+`!!` line names: update a mutant's text when you change the code it
+mutates, keeping it a mutant of the same rule), plus the method-call
+decision's harnesses (above).
 
 ## Declared recognizers (dfa and class)
 

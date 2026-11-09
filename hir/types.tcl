@@ -3269,6 +3269,19 @@ proc hir::types::kindOf {type} {
     return [core::type::base $type]
 }
 
+# 1 if no value of static type TYPE can be called: its kind is known and is
+# no callable kind (an Int, a String, a Bool, a List, a struct, an enum, a C
+# address, ...), so a call of it always raises NOT-CALLABLE. The callable
+# kinds are a Block, a native and a coroutine handle (whose call is a
+# resume); a type of no fixed kind -- `any`, a structural function type, a
+# trait view, an imprint variable, `never` -- is no proof either way. The
+# one statement of the rule: the check of a call against its callee
+# (hir::range::VerifyCallable), the call's poison and region inference's
+# dead call (Call) ask it.
+proc hir::types::NotCallable {type} {
+    return [expr {[kindOf $type] ni {"" block native coroutine}}]
+}
+
 # The core type (core/type.tcl) a static type implies.
 proc hir::types::semantic {type} {
     if {[hir::cabi::IsFiniteFloating $type]} {
@@ -5669,9 +5682,19 @@ proc hir::types::Call {hirVar ctxVar e} {
         } elseif {$spec} {
             set dead 1
         }
-    } elseif {$spec && [kindOf $calleeType] ni {"" block native coroutine}} {
-        # Not callable: the call always raises NOT-CALLABLE.
-        set dead 1
+    } elseif {[NotCallable $calleeType]} {
+        # Not callable: the call always raises NOT-CALLABLE. In the generic
+        # walk of a call the program wrote it is the call's own NOT-CALLABLE
+        # diagnostic (hir::range::VerifyCallable), so it has no value:
+        # poison, and nothing that uses its result restates it (a declared
+        # result it cannot prove). (A semantic instance, typed under one
+        # call's argument types, neither reports nor poisons it, as for a
+        # native's argument kinds above: a callee of no fixed kind in the
+        # program as written is checked when the call runs.)
+        if {$spec || ([dict exists $node written] && [MakesPoison $hir $ctx]
+                && ![dict exists $ctx inst] && [dict get $ctx reachable])} {
+            set dead 1
+        }
     }
     if {$target eq "" && [dict exists $node imprint]} {
         # Explicit imprints on a callee that is not statically known.
