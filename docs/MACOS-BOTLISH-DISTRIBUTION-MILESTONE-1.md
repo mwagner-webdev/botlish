@@ -741,8 +741,8 @@ release.
   JIT `-aot-run` in its place, `-emit-native-executable`, a moved copy's
   first start). Measured on `460fcee` (job 128698763992) and, after the
   merge of main, on `717f3bd` (job 129014124084); startup times vary
-  between runners by a third (the same commit's `1d6bc3a` run measured
-  `-version` at 150 ms):
+  between runners by a third (on `1d6bc3a`, whose application differs
+  from `717f3bd`'s in nothing it runs, `-version` took 150 ms):
 
   | part | MB, `460fcee` | MB, `717f3bd` |
   |---|---:|---:|
