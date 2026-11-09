@@ -69,7 +69,7 @@ waitFor() { # NAME PATTERN COUNT LIMIT
     for _ in $(seq 1 "$limit"); do
         seen=$(appLog | grep -c -E "$pattern" || true)
         (( seen >= count )) && break
-        if appLog | grep -q -E "FATAL EXCEPTION|Fatal signal"; then break; fi
+        [[ -n $(appLog | crashes) ]] && break
         sleep 1
     done
     appLog >"$out/$name.log"
@@ -77,8 +77,21 @@ waitFor() { # NAME PATTERN COUNT LIMIT
     return 0
 }
 
-crashes() { # LOG
-    grep -E "FATAL EXCEPTION|Fatal signal|SIGSEGV|SIGABRT|backtrace:|Abort message" "$1" || true
+# The app's own crash lines, from LOG or standard input. A crash of another
+# process on the device is not the app's (run 11: Google Play services
+# crashed on the API 35 16 KiB image, pid 2216, and was counted as the
+# app's). Each kind of report names its process: AndroidRuntime's
+# "Process: PACKAGE, PID", libc's fatal signal line "pid N (PACKAGE)" (the
+# 15 characters of the process name: the whole of com.botlish2048) and
+# debuggerd's ">>> PACKAGE <<<".
+crashes() { # [LOG]
+    grep -E "Process: $pkg, PID|Fatal signal .*, pid [0-9]+ \($pkg\)|>>> $pkg <<<" "${1:--}" || true
+}
+# Other processes' crash reports (for the record): AndroidRuntime's and
+# libc's lines that name a process other than the app.
+otherCrashes() { # [LOG]
+    grep -E "Process: [^,]+, PID|Fatal signal .*, pid [0-9]+ \(" "${1:--}" |
+        grep -v -E "Process: $pkg, PID|\($pkg\)$" || true
 }
 
 # A swipe across the board (its centre CX, CY; a third of its width D)
@@ -308,9 +321,11 @@ shellp am force-stop $pkg
 sleep 1
 appLog >"$out/exit.log"
 [[ -z $(crashes "$out/exit.log") ]] && pass "exit: no crash" || fail "exit: a crash"
-all=$(cat "$out"/*.log | grep -c -E "FATAL EXCEPTION|Fatal signal" || true)
-[[ $all == 0 ]] && pass "no native crash and no fatal exception in any phase" || fail "$all crash lines across the run"
-shellp ls /data/tombstones 2>/dev/null | sed 's/^/  tombstone /' | tee -a "$summary"
+all=$(cat "$out"/*.log | crashes | wc -l)
+others=$(cat "$out"/*.log | otherCrashes | wc -l)
+[[ $all == 0 ]] && pass "no native crash and no fatal exception of the app in any phase" || fail "$all crash lines of the app across the run"
+(( others > 0 )) && note "  $others crash lines of other processes on the device (not the app's)"
+shellp ls /data/tombstones 2>/dev/null | sed 's/^/  tombstone (any process) /' | tee -a "$summary"
 if [[ $status != 0 ]]; then
     note "result: FAILED"
 elif [[ -n $undemonstrated ]]; then

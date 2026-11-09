@@ -109,8 +109,17 @@ native bridge, with two gaps.** The CI evidence (sections 16 and 23):
   native-bridge device, never as passed. A device that runs arm64 code
   natively checks it. GC stress of the libraries through the same
   generated core is observed on the host (section 19).
-* **The 16 KiB-page image** has not run yet. The jobs of runs 9 and 10
-  were cancelled while still queued, and run 11's is queued.
+* **The 16 KiB-page image** ran once (run 11, Android 15, page size 16384).
+  - The app ran there through the native bridge: Hermes, both libraries
+    mapped from their extracted directory, the instances on the JavaScript
+    thread, 401 module snapshots equal to the interpreter's, two reloads,
+    the GC-stress phase's self-test, the 24 swipes, the win, the game over
+    and a clean exit.
+  - The job failed nonetheless. Its acceptance counted a crash of Google
+    Play services, another process on the device, as the app's, and cut
+    the self-test's wait and the first reload short. The acceptance now
+    counts the app's own crashes only, and the run that repeats the image
+    is pending (section 16).
 
 This host has no KVM, and Google's emulator refuses an arm64 guest on an
 x86_64 host, also when its `qemu-system-aarch64` is run directly (observed,
@@ -130,7 +139,7 @@ section 16).
 | `useBotlish2048()` and a playable 2048 screen (swipes, buttons, score, New game, game over, win) | implemented; Jest observed (28 tests: 10 of the hook and the snapshot reader, 17 of the generated entry point, 1 without the native module) |
 | a second, unrelated library through the same generator, both packages in one app | observed (host harness, TypeScript, Jest, the APK) |
 | a clean room: the single-file compiler and packages only, then npm, Codegen and Gradle | observed (section 18) |
-| the app on Android: Hermes, the TurboModule, the Botlish library in an Android application process | **observed on Android 14 (4 KiB pages), translated by the ARM native bridge** (CI, runs 9, 10 and 11: every phase but GC stress); GC stress in the app process not demonstrable on a native-bridge emulator; the 16 KiB-page image pending (section 16) |
+| the app on Android: Hermes, the TurboModule, the Botlish library in an Android application process | **observed on Android 14 (4 KiB pages), translated by the ARM native bridge** (CI, runs 9, 10 and 11: every phase but GC stress); GC stress in the app process not demonstrable on a native-bridge emulator; on Android 15 with 16 KiB pages every phase observed (run 11) but the job not yet passed: it counted another process's crash (section 16) |
 | mutation testing | 44/44 killed, each by a detector it names; observed (section 21) |
 | iOS, Android ABIs other than arm64-v8a, asynchronous workers | not supported (section 24) |
 
@@ -710,7 +719,10 @@ evidence: section 16.
 * **GC stress in the app process: not demonstrated.** It cannot be on a
   native-bridge emulator (run 10, below). The acceptance reports it there
   as NOT DEMONSTRATED; a device running arm64 natively checks it.
-* **16 KiB pages: pending.**
+* **16 KiB pages (Android 15): observed in run 11, not yet passed.** Every
+  phase ran. The job failed on another process's crash, which the
+  acceptance counted as the app's (run 11, below); the corrected run is
+  pending.
 
 The runs and their results follow the description.
 
@@ -949,8 +961,60 @@ device: gc-stress`, with the measurement:
 
 The textkit timing now reads 2.01 to 2.12 µs per call. Reload 2's old game
 instance was again orphaned when its module went on another thread, then
-destroyed on its own thread. The `android (16 KiB pages)` job was still
-queued when this report was last updated.
+destroyed on its own thread.
+
+**Run 11's 16 KiB job** (`android (16 KiB pages)`,
+[job 129156321360](https://github.com/mwagner-webdev/botlish/actions/runs/42609322660/job/129156321360))
+ran on `sdk_gphone16k_x86_64`: Android 15 (API 35), `abilist
+x86_64,arm64-v8a`, `native.bridge libndk_translation.so`, page size 16384.
+This is the image's first run.
+
+**Observed in the app process:**
+* **Self-test.** `env hermes=true reactNative=0.88.1 os=android api=35`,
+  and 401 module snapshots equal to the interpreter's.
+  - Both libraries' instances were created on `mqt_v_js`.
+  - `libgame.so` and `libtextkit.so` were mapped from
+    `/data/app/.../lib/arm64/`: the extracted, 16 KiB-aligned libraries
+    loaded by a 16 KiB-page kernel.
+  - The first call took 85.28 ms (the instance made), the second 0.31 ms.
+* **Reloads 2 and 3** passed the self-test again with the interpreter's
+  snapshots. Each destroyed the old instances on their own threads with
+  status 0, and the counters balance: 14,032 results and 24 errors, each
+  acquired and released.
+* **The GC-stress phase's launch** passed its self-test with the
+  interpreter's snapshots. A move took 74.26 µs from JavaScript (68.45 µs
+  in the C ABI, 5.82 µs JSI and adapter), and textkit 2.27 µs a call.
+* **Play.** 24 swipes, each read once and applied exactly once; 25
+  snapshots equal to the interpreter's; every call on the JavaScript
+  thread. Input to render took 15.41 ms on average.
+* **Win, over, exit.** The screen showed "won" and "game over", and the
+  exit had no crash.
+
+**Why it failed.** The acceptance counted the crashes of another process
+as the app's.
+* Google Play services (`com.google.android.gms.persistent`, pid 2216)
+  crashed during the run, with five Java exceptions and one SIGSEGV
+  (`Fatal signal 11 ... pid 2216 (.gms.persistent)`). The device also
+  listed two tombstones, whose processes the acceptance does not read.
+* The acceptance's crash patterns matched any process. Seeing the SIGSEGV,
+  it stopped waiting for the self-test, which was still running: its
+  last line was `ok textkit-empty`. So the hook states and the timing
+  were not captured, the first reload's wait broke the same way, and the
+  GC-stress ratio had no self-test timing to compare.
+* None of the six crash lines is the app's.
+
+**The fix** (`android-acceptance.sh`, `dev-reload.sh`): only the app's own
+crashes count, matched by the process each report names:
+* AndroidRuntime's `Process: com.botlish2048, PID`;
+* libc's `pid N (com.botlish2048)`;
+* debuggerd's `>>> com.botlish2048 <<<`.
+
+Other processes' crash lines are counted apart and noted, never as the
+app's. Checked against the runs' own logs: the filter finds the app's
+crashes of runs 8 and 10 and none of run 11's six lines.
+
+The clean room's APK and the development reload are the 4 KiB job's
+alone.
 
 **Locally**, this host has no `/dev/kvm`. Observed, with the emulator 37.2.13
 and `system-images;android-30;aosp_atd;arm64-v8a`:
@@ -1353,7 +1417,12 @@ nothing in the release gate requires it. Its runs on this branch:
     Every phase passed for the build's and the clean room's APK, and the
     development reload with Metro passed. GC stress was NOT DEMONSTRATED
     (0.5x and 1.0x), as the summary and the result line say (section 16).
-  - **android (16 KiB pages): queued** when this report was last updated.
+  - **android (16 KiB pages): failure**
+    ([job 129156321360](https://github.com/mwagner-webdev/botlish/actions/runs/42609322660/job/129156321360)),
+    the image's first run. Every phase ran in the app process on Android
+    15 with 16 KiB pages, but the acceptance counted Google Play services'
+    crash as the app's (section 16). The acceptance counts the app's own
+    crashes only since.
 
 Main's own workflows were queued or in progress, none red among those
 completed, when this branch was made (`a6977d56`) and when it was last
@@ -1377,7 +1446,9 @@ checked.
   libc, and a wrapper-started process gets no bridge. It needs a device
   that runs arm64 natively, where the acceptance's GC-stress phase checks
   it.
-* **16 KiB pages** (section 16): the 16 KiB-page image has not run yet.
+* **16 KiB pages** (section 16): observed once (run 11), the job not yet
+  passed: it counted another process's crash. The corrected run is
+  pending.
 * **iOS.** Not supported. The package declares `ios: null`, iOS
   autolinking is disabled, and no podspec or module provider is written.
   It needs:

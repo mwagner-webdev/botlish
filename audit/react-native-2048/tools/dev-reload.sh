@@ -72,7 +72,8 @@ for round in 1 2; do
         grep -E -q "BotlishRN: $lib: instance [0-9]+ destroyed on thread [0-9]+ \((its thread exits|its module was invalidated on its thread|its module went on another thread; reaped at this thread's next call)\): status 0" "$log" ||
             fail "development reload $round: the old $lib instance was not destroyed on its own thread"
     done
-    grep -E -q "FATAL EXCEPTION|Fatal signal" "$log" && fail "development reload $round: a crash"
+    # The app's own crash, not another process's (android-acceptance.sh's crashes).
+    grep -E -q "Process: $pkg, PID|Fatal signal .*, pid [0-9]+ \($pkg\)|>>> $pkg <<<" "$log" && fail "development reload $round: a crash"
 done
 note "result: $([[ $status == 0 ]] && echo passed || echo FAILED)"
 exit $status
