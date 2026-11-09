@@ -100,7 +100,8 @@
 #                elaborations rewrite it: the HIR the DISCARDED-MUTATION
 #                warning reads (hir/discarded.tcl, WARNINGS-DISCARDED-
 #                MUTATION-MILESTONE-1.md). Nothing else reads it, and
-#                interchange text leaves it out.
+#                hir::warnings::run drops it from the HIR a compilation
+#                returns (interchange text leaves it out too).
 #   semantic     compiler-internal side table of opportunistic semantic
 #                function instances (semantic.tcl, OPPORTUNISTIC-SEMANTIC-
 #                INSTANCES.md): instances, keys, calls (a call ExprId, in the
@@ -657,8 +658,9 @@ proc hir::BuildFull {nodes options given halt checkedVar {seeds {}}} {
             # rewrite it (a fold's intermediate renamed, a MutableMap loop a
             # counted loop of its own): what the DISCARDED-MUTATION warning
             # reads (hir/discarded.tcl). A trait program's is its
-            # `traitSource`. Nothing else reads it; interchange text leaves
-            # it out (the warnings it gave are attached).
+            # `traitSource`. Nothing else reads it: hir::warnings::run drops
+            # it from the HIR the compilation returns, and interchange text
+            # leaves it out.
             dict set hir checkedSource $hir
         }
         hir::coroutines::ElaborateResumes hir

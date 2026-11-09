@@ -250,9 +250,11 @@
 ## hir/discarded.tcl
 <<<<
         set exits [dict create]
-        ExitSequence $hir $f $mutations [dict get $node body] [dict create] exits
+        set state [dict create]
+        ExitSequence $hir $f $mutations [dict get $node body] state exits
 ====
         set exits [dict create]
+        set state [dict create]
         if {![hir::mutvec::FoldExitsClean $hir $parent $f $b]} {
             set any [lsort [dict keys $mutations]]
             dict for {x xnode} [dict get $hir exprs] {
@@ -261,7 +263,7 @@
                 }
             }
         }
-        ExitSequence $hir $f $mutations [dict get $node body] [dict create] exits
+        ExitSequence $hir $f $mutations [dict get $node body] state exits
 >>>>
 
 @@ dm-inner-loop-exits a loop in the fold's body is walked as if its exits were the fold's: an inner loop's continue after a mutation of the intermediate is reported
@@ -275,17 +277,18 @@
 ## hir/discarded.tcl
 <<<<
             if {[hir::typeOf $hir $x] eq "never"} {
-                return top
+                set state {top 1}
             }
-            return $state
+            return
         }
     }
 ====
-            ExitSequence $hir $f $mutations $body $state exits
+            set inner $state
+            ExitSequence $hir $f $mutations $body inner exits
             if {[hir::typeOf $hir $x] eq "never"} {
-                return top
+                set state {top 1}
             }
-            return $state
+            return
         }
     }
 >>>>
@@ -303,16 +306,11 @@
 !! dm-fold-handler
 ## hir/discarded.tcl
 <<<<
-            set result [ExitWalk $hir $f $mutations [dict get $node call] $state exits]
-            foreach body [dict get $node handlerBodies] {
-                set result [Meet $result [ExitSequence $hir $f $mutations $body $state exits]]
-            }
+            set before $state
+            ExitWalk $hir $f $mutations [dict get $node call] state exits
 ====
-            set result [ExitWalk $hir $f $mutations [dict get $node call] $state exits]
-            set after $result
-            foreach body [dict get $node handlerBodies] {
-                set result [Meet $result [ExitSequence $hir $f $mutations $body $after exits]]
-            }
+            ExitWalk $hir $f $mutations [dict get $node call] state exits
+            set before $state
 >>>>
 
 @@ dm-duplicate-reports a mutation a fold exit discards is reported again as dead: one problem, two warnings
@@ -326,7 +324,7 @@
 # ---------------------------------------------------------------------------
 # The program as written
 
-@@ dm-no-checked-source the checked program before the elaborations is not kept: an ordinary program is analyzed only when its elaboration happened to write no copy, and a fold with an exit (copied) never
+@@ dm-no-checked-source the checked program before the elaborations is not kept for the warning run: an ordinary program is analyzed only when its elaboration happened to write no copy, and a fold with an exit (copied) never
 !! dm-corpus-discarded-writes dm-checked-source dm-fold-continue-before-and-after
 ## hir/hir.tcl
 <<<<
@@ -385,11 +383,11 @@
 ## hir/warnings.tcl
 <<<<
     if {[Mode $mode] eq "off" || [dict get $hir diagnostics] ne ""} {
-        return $hir
+        return [dict remove $hir checkedSource]
     }
 ====
     if {[dict get $hir diagnostics] ne ""} {
-        return $hir
+        return [dict remove $hir checkedSource]
     }
 >>>>
 
@@ -400,4 +398,14 @@
     if {$mode ne "error" || $warnings eq ""} {
 ====
     if {1} {
+>>>>
+
+@@ dm-checked-source-leaks the checked source outlives the warning run: every compiled HIR of a program with a mutable collection carries a second copy of its program into the cache, the compiler service and every comparison of HIRs
+!! dm-checked-source
+## hir/warnings.tcl
+<<<<
+    set hir [dict remove $hir checkedSource]
+    set rejection [Rejection $hir $warnings $mode]
+====
+    set rejection [Rejection $hir $warnings $mode]
 >>>>

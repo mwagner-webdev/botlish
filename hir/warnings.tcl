@@ -133,11 +133,15 @@ proc hir::warnings::run {hir mode {channel stderr}} {
         set mode [defaultMode]
     }
     if {[Mode $mode] eq "off" || [dict get $hir diagnostics] ne ""} {
-        return $hir
+        return [dict remove $hir checkedSource]
     }
     # A monomorphized trait program (TRAITS.md) is warned about as written:
-    # its checked source build, where each function exists once.
+    # its checked source build, where each function exists once. (Another
+    # program's checked source before the elaborations, `checkedSource`,
+    # which DISCARDED-MUTATION reads, exists for this run only: the HIR the
+    # compilation returns has none, whatever the mode.)
     set warnings [collect [dict getdef $hir traitSource $hir]]
+    set hir [dict remove $hir checkedSource]
     set rejection [Rejection $hir $warnings $mode]
     if {$rejection ne ""} {
         core::raiseDiagnostics [list $rejection]

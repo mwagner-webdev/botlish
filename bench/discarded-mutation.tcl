@@ -1,7 +1,7 @@
 # discarded-mutation.tcl -- the compile-time cost of the DISCARDED-MUTATION
 # warning (WARNINGS-DISCARDED-MUTATION-MILESTONE-1.md, section 17).
 #
-#   tclsh9.0 bench/discarded-mutation.tcl ?-runs N? ?-scale N? ?-programs FILES?
+#   tclsh9.0 bench/discarded-mutation.tcl ?-runs N? ?-scale N? ?-programs FILES? ?-real 0|1?
 #
 # For each program: the front end's compile time with warnings off and with
 # warnings on (best of N runs each), the DISCARDED-MUTATION pass's own time
@@ -16,11 +16,12 @@
 # generated stress shapes whose size grows with -scale: many local
 # mutations, deeply nested loops, one large fold with many mutations and
 # exits, an untyped function called at several types, and many application
-# modules mutating their own locals.
+# modules mutating their own locals. -real 0 measures the generated ones
+# only (a scaling run).
 
 set here [file dirname [file normalize [info script]]]
 set root [file dirname $here]
-set options [dict create -runs 3 -scale 1 -programs ""]
+set options [dict create -runs 3 -scale 1 -programs "" -real 1]
 foreach {option value} $argv {
     if {![dict exists $options $option]} { error "unknown option $option" }
     dict set options $option $value
@@ -147,7 +148,7 @@ proc genModules {dir m n} {
         puts $f [join $lines \n]
         close $f
         lappend imports "import mod$j"
-        lappend calls "mod$j::work(1)"
+        lappend calls "mod${j}::work(1)"
     }
     set f [open [file join $dir main.bot] w]
     puts $f "[join $imports \n]\n\[[join $calls {, }]\]"
@@ -163,14 +164,18 @@ if {[dict get $options -programs] ne ""} {
         lappend programs [list file [file normalize $p]]
     }
 } else {
-    foreach p {
+    set real {}
+    if {[dict get $options -real]} {
+        set real {
         tests/golden/mutable-vector.bot
         tests/golden/fold-loops.bot
         tests/golden/mutable-map.bot
         tests/golden/consumed-fold-intermediates.bot
         examples/games/2048/game2048.bot
         examples/games/2048/demo.bot
-    } {
+        }
+    }
+    foreach p $real {
         if {[file exists [file join $root $p]]} {
             lappend programs [list file [file join $root $p]]
         }
@@ -215,7 +220,14 @@ foreach program $programs {
     useCapture 1
     set off [best $runs {compileProgram $program off}]
     set on [best $runs {compileProgram $program default}]
-    set hir [compileProgram $program off]
+    # The HIR the warning run is given (its checked source still attached:
+    # the run drops it from the HIR the compilation returns).
+    set ::given ""
+    set trace {apply {{command op} {set ::given [lindex $command 1]}}}
+    trace add execution hir::warnings::run enter $trace
+    compileProgram $program default
+    trace remove execution hir::warnings::run enter $trace
+    set hir $::given
     set source [hir::discarded::Source [dict getdef $hir traitSource $hir]]
     set sites 0
     set folds 0
@@ -230,7 +242,11 @@ foreach program $programs {
     useCapture 0
     set bare [best $runs {compileProgram $program off}]
     useCapture 1
-    set exprs [dict size [dict get [dict getdef $hir traitSource $hir] exprs]]
+    if {$source eq ""} {
+        set exprs [dict size [dict get [dict getdef $hir traitSource $hir] exprs]]
+    } else {
+        set exprs [dict size [dict get $source exprs]]
+    }
     puts "| $name | $exprs | $sites | $folds | $findings | [ms $off] | [ms $on] | [ms $pass] | [format %.1f%% [expr {100.0 * $pass / $off}]] | [ms $bare] |"
 }
 if {[info exists tmp]} {

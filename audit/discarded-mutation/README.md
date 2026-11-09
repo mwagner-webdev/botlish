@@ -9,8 +9,8 @@ hir/warnings.tcl).
   repository's programs (every tracked `.bot` file but the generated
   bindings, and a loader per standard-library module), compiled with
   warnings on; `-shard I/N` splits the work, `-out FILE` writes the rows.
-  `census.tsv` is its committed result, each row classified in the report
-  (section 12).
+  `census.tsv` is its committed result; `golden-sites.tsv` classifies its
+  33 golden-suite rows (the report, section 12).
 * `tools/test-census.tcl`, `tools/test-census.sh` -- the same facts inside
   every program the Tcl test files compile (most with warnings off), by a
   hook around `hir::BuildFull`; `test-census.tsv` is the committed result.

@@ -1121,18 +1121,34 @@ test dm-hir-unchanged-by-mode {the HIR every backend compiles is the same with w
         [expr {[hir::format $on] eq [hir::format $off]}] [regexp DISCARDED [hir::format $on]]
 } -result {1 1 0}
 
-test dm-checked-source {the checked program as written is kept only for a program that may mutate a collection, never for a trait program (whose traitSource it is), and interchange text leaves it out: a decoded HIR carries the warnings, not the source} -body {
-    set hir [compileWith $::dmProgram default]
-    set plain [compileWith "fn f() -> int:\n    1\nf()" default]
-    set trait [compileWith "import std::mutable_set\nfn f() -> int:\n    s = std::mutable_set::create\[int\]()\n    s.add(1)\n    0\nf()" default]
-    set back [hir::interchange::decode [hir::interchange::encode $hir]]
-    list [dict exists $hir checkedSource] [dict exists $plain checkedSource] [dict exists $trait checkedSource] \
-        [dict exists $back checkedSource] [llength [dmOf $back]] \
-        [expr {[hir::interchange::encode $hir] eq [hir::interchange::encode [dict remove $hir checkedSource]]}]
-} -result {1 0 0 0 1 1}
+# The HIR the warning run is given (hir::warnings::run's first argument) when
+# SOURCE is compiled under MODE.
+proc warnedHir {source mode} {
+    set ::dmGiven ""
+    set trace {apply {{command op} {set ::dmGiven [lindex $command 1]}}}
+    trace add execution hir::warnings::run enter $trace
+    try {
+        compileWith $source $mode
+    } finally {
+        trace remove execution hir::warnings::run enter $trace
+    }
+    return $::dmGiven
+}
 
-test dm-elaborated-hir-not-analyzed {an elaborated HIR with no checked source (a fold's intermediate renamed, copies written out) is no program as written: the analysis declines it rather than misread it} -body {
-    set hir [compileWith "${::foldDecl}fn f(xs: List\[int\]) -> int:
+test dm-checked-source {the checked program as written is kept for the warning run only, and only for a program that uses a mutable collection and is no trait program (whose traitSource it is): the HIR a compilation returns has none, whatever the mode, and interchange text leaves it out} -body {
+    set given [warnedHir $::dmProgram default]
+    set plain [warnedHir "fn f() -> int:\n    1\nf()" default]
+    set trait [warnedHir "import std::mutable_set\nfn f() -> int:\n    s = std::mutable_set::create\[int\]()\n    s.add(1)\n    0\nf()" default]
+    set on [compileWith $::dmProgram default]
+    set off [compileWith $::dmProgram off]
+    list [dict exists $given checkedSource] [dict exists $plain checkedSource] [dict exists $trait checkedSource] \
+        [dict exists $trait traitSource] [dict exists $on checkedSource] [dict exists $off checkedSource] \
+        [expr {[hir::interchange::encode $given] eq [hir::interchange::encode [dict remove $given checkedSource]]}] \
+        [llength [dmOf $on]]
+} -result {1 0 0 1 0 0 1 1}
+
+test dm-elaborated-hir-not-analyzed {an elaborated HIR with no checked source is no program as written -- a fold's intermediate renamed to a local (the exit's discard invisible), a loop element given an entry copy -- and the analysis declines it rather than misread it: the checked source gives the facts, the elaborated HIR none} -body {
+    set fold [warnedHir "${::foldDecl}fn f(xs: List\[int\]) -> int:
     w = fold x in xs with intermediate acc ints():
         acc.push(x)
         if x < 0:
@@ -1140,8 +1156,16 @@ test dm-elaborated-hir-not-analyzed {an elaborated HIR with no checked source (a
         acc
     w.length()
 f(\[1, -2\])" default]
-    list [llength [hir::discarded::findings $hir]] [hir::discarded::findings [dict remove $hir checkedSource]]
-} -result {1 {}}
+    set loop [warnedHir "${::vec}fn f(rows: List\[MutableVector\[int\]\]) -> int:
+    loop row in rows:
+        row.push(42)
+    0
+f(\[std::mutable_vector::from_list(\[1\])\])" default]
+    list [lmap f [hir::discarded::findings $fold] {dict get $f reason}] \
+        [lmap f [hir::discarded::findings $loop] {dict get $f reason}] \
+        [hir::discarded::findings [dict remove $fold checkedSource]] \
+        [hir::discarded::findings [dict remove $loop checkedSource]]
+} -result {fold-exit dead {} {}}
 
 test dm-backends-agree {every backend runs a warned program to the same value as with warnings off} -body {
     list [values $::dmProgram default] [values $::dmProgram off] \

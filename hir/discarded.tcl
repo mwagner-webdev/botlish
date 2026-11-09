@@ -199,7 +199,8 @@ proc hir::discarded::Analyze {hir owner parent sites} {
             dict set mutations $e 1
         }
         set exits [dict create]
-        ExitSequence $hir $f $mutations [dict get $node body] [dict create] exits
+        set state [dict create]
+        ExitSequence $hir $f $mutations [dict get $node body] state exits
         dict for {x ran} $exits {
             if {![Reached $hir $owner $parent $x reached]} continue
             set ran [lmap e $ran {
@@ -501,25 +502,31 @@ proc hir::discarded::NativeConfined {name} {
 # ---------------------------------------------------------------------------
 # Fold exits (B2)
 #
-# The must-analysis over one iteration of fold F: STATE is "top" where no
-# path arrives (after a statement that never completes; unreachable code),
-# else a dict of the mutations of F's intermediate (MUTATIONS: call ExprId
-# -> 1) that every path to here has run in this iteration. A call is
-# counted once it completes (its operands first); a handler starts from
-# the state before its handled call (whose mutation may not have happened);
-# an `if` meets its branches; a loop inside the body may run its body no
-# times, so it adds nothing; a nested function's body runs elsewhere. A
-# `continue` or bare `break` of F (every `break` is bare, and both target
-# the nearest loop: F's own exits are never inside a nested loop) records
-# the state it is reached with in EXITSVAR (exit ExprId -> its mutations,
-# sorted) when it is not empty.
+# The must-analysis over one iteration of fold F: STATE (a variable of the
+# caller's, updated in place) is the set of the mutations of F's
+# intermediate (MUTATIONS: call ExprId -> 1) that every path to here has run
+# in this iteration, a dict, or {top 1} where no path arrives (after a
+# statement that never completes; unreachable code). A call is counted once
+# it completes (its operands first); a handler starts from the state before
+# its handled call (whose mutation may not have happened); an `if` meets its
+# branches; a loop inside the body may run its body no times, so it adds
+# nothing; a nested function's body runs elsewhere. A `continue` or bare
+# `break` of F (every `break` is bare, and both target the nearest loop: F's
+# own exits are never inside a nested loop) records the state it is reached
+# with in EXITSVAR (exit ExprId -> its mutations, sorted) when it is not
+# empty. The state is updated where it is held -- never a copy per
+# statement -- so a straight-line body is walked in linear time; a branch
+# costs one copy of the set for its other side.
 
 proc hir::discarded::Meet {a b} {
-    if {$a eq "top"} {
+    if {[dict exists $a top]} {
         return $b
     }
-    if {$b eq "top"} {
+    if {[dict exists $b top]} {
         return $a
+    }
+    if {[dict size $b] < [dict size $a]} {
+        lassign [list $b $a] a b
     }
     set result [dict create]
     dict for {e -} $a {
@@ -530,84 +537,90 @@ proc hir::discarded::Meet {a b} {
     return $result
 }
 
-proc hir::discarded::ExitSequence {hir f mutations sequence state exitsVar} {
+proc hir::discarded::ExitSequence {hir f mutations sequence stateVar exitsVar} {
     if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
-    upvar 1 $exitsVar exits
+    upvar 1 $stateVar state $exitsVar exits
     foreach s $sequence {
-        if {$state eq "top"} {
-            return top
+        if {[dict exists $state top]} {
+            return
         }
-        set state [ExitWalk $hir $f $mutations $s $state exits]
+        ExitWalk $hir $f $mutations $s state exits
     }
-    return $state
 }
 
-proc hir::discarded::ExitWalk {hir f mutations x state exitsVar} {
+proc hir::discarded::ExitWalk {hir f mutations x stateVar exitsVar} {
     if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
-    upvar 1 $exitsVar exits
-    if {$state eq "top"} {
-        return top
+    upvar 1 $stateVar state $exitsVar exits
+    if {[dict exists $state top]} {
+        return
     }
     set node [dict get $hir exprs $x]
     if {![dict get $node reachable]} {
-        return top
+        set state {top 1}
+        return
     }
     set kind [dict get $node kind]
     switch -- $kind {
         const - ref - block {
-            return $state
+            return
         }
         break - continue {
             if {[dict get $node target] eq $f && [dict size $state] > 0} {
                 dict set exits $x [lsort -dictionary [dict keys $state]]
             }
-            return top
+            set state {top 1}
+            return
         }
         if {
-            set state [ExitWalk $hir $f $mutations [dict get $node condition] $state exits]
-            if {$state eq "top"} {
-                return top
+            ExitWalk $hir $f $mutations [dict get $node condition] state exits
+            if {[dict exists $state top]} {
+                return
             }
-            set then [ExitSequence $hir $f $mutations [dict get $node thenBody] $state exits]
-            set else [ExitSequence $hir $f $mutations [dict get $node elseBody] $state exits]
-            return [Meet $then $else]
+            set else $state
+            ExitSequence $hir $f $mutations [dict get $node thenBody] state exits
+            ExitSequence $hir $f $mutations [dict get $node elseBody] else exits
+            set state [Meet $state $else]
+            return
         }
         handle {
-            set result [ExitWalk $hir $f $mutations [dict get $node call] $state exits]
+            set before $state
+            ExitWalk $hir $f $mutations [dict get $node call] state exits
             foreach body [dict get $node handlerBodies] {
-                set result [Meet $result [ExitSequence $hir $f $mutations $body $state exits]]
+                set handler $before
+                ExitSequence $hir $f $mutations $body handler exits
+                set state [Meet $state $handler]
             }
-            return $result
+            return
         }
         loop - listloop - countloop - lockloop {
             set body [dict get $node body]
             set children [hir::children $hir $x]
             foreach c [lrange $children 0 end-[llength $body]] {
-                set state [ExitWalk $hir $f $mutations $c $state exits]
-                if {$state eq "top"} {
-                    return top
+                ExitWalk $hir $f $mutations $c state exits
+                if {[dict exists $state top]} {
+                    return
                 }
             }
             if {[hir::typeOf $hir $x] eq "never"} {
-                return top
+                set state {top 1}
             }
-            return $state
+            return
         }
     }
     foreach c [hir::children $hir $x] {
-        set state [ExitWalk $hir $f $mutations $c $state exits]
-        if {$state eq "top"} {
-            return top
+        ExitWalk $hir $f $mutations $c state exits
+        if {[dict exists $state top]} {
+            return
         }
     }
     if {$kind in {return fail}} {
-        return top
+        set state {top 1}
+        return
     }
     if {$kind eq "call" && [dict exists $mutations $x]} {
         dict set state $x 1
     }
     if {[hir::typeOf $hir $x] eq "never"} {
-        return top
+        set state {top 1}
     }
-    return $state
 }

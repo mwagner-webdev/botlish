@@ -1040,7 +1040,8 @@ hir/discarded.tcl the facts, hir/warnings.tcl the pass) reads the checked
 program as written -- a trait program's `traitSource`, any other program's
 `checkedSource`, which hir::BuildFull keeps (for a program that uses a
 mutable collection) before the elaborations rename a fold's intermediate
-and rewrite MutableMap loops, and which interchange text leaves out -- and
+and rewrite MutableMap loops, and which `hir::warnings::run` drops from the
+HIR every compilation returns (interchange text leaves it out too) -- and
 reports two proven facts: a mutation (hir::mutvec's `place` receivers and
 place arguments, written calls only) whose every destination is a place
 that dies with its scope and is its path's last use

@@ -95,7 +95,13 @@ foreach program $programs {
         set module [file rootname [string range $program [string length loader:stdlib/] end]]
         set ns std::[string map {/ ::} $module]
         regsub {\.(x86_64|aarch64)$} $ns {} ns
-        set code [catch {surface::compile "import $ns\n0\n" loader.bot -warnings default -warning-channel ""} hir options]
+        # (A platform's module is compiled for its platform's target.)
+        set target {}
+        switch -glob -- $ns {
+            std::windows* { set target [list -target windows-x86_64] }
+            std::darwin* { set target [list -target macos-aarch64] }
+        }
+        set code [catch {surface::compile "import $ns\n0\n" loader.bot -warnings default -warning-channel "" {*}$target} hir options]
     } else {
         set code [catch {surface::readProgramFile [file join $root $program] -warnings default -warning-channel ""} hir options]
     }
