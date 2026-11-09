@@ -16,10 +16,11 @@
 #                 runtime and its TurboModules destroyed and made again, a
 #                 new instance each time, each old one destroyed on its own
 #                 thread, the self-test passing each time
-#   3. gc-stress  the self-test under BOTLISH_NATIVE_GC_STRESS=1, set from
-#                 the process's start (wrap.PACKAGE): the same snapshots,
-#                 and the C ABI at least twice as slow per call as without
-#                 it (stress took effect in the library)
+#   3. gc-stress  the self-test under BOTLISH_NATIVE_GC_STRESS=1: the same
+#                 snapshots, and the C ABI at least twice as slow per call
+#                 as without it (stress took effect in the library); NOT
+#                 DEMONSTRATED, never passed, where the native bridge keeps
+#                 the variable from the library
 #   4. play       the game played by swipes on the screen (input swipe),
 #                 a rapid burst included, the app sent to the background and
 #                 back, then New game: every swipe applied exactly once, every
@@ -173,25 +174,28 @@ grep -h "BOTLISH_RN diagnostics" "$out"/reload-3.log | sed 's/^/  /' | tee -a "$
 
 # --------------------------------------------------------------- gc stress
 # The Botlish runtime reads BOTLISH_NATIVE_GC_STRESS with getenv when it makes
-# an instance's heap. The activity's Os.setenv (gcStress) changes the
-# environment of the libc Java runs on. Under Android's native bridge the
-# arm64 library runs on the bridge's own arm64 libc, which did not see it:
-# run 9 of the workflow measured no slowdown at all. So the variable is put
-# in the app process's environment from its start, through the wrap.PACKAGE
-# property (the zygote starts the process with the property's text before
-# app_process), where every libc of the process reads it. Whether stress took
-# effect is measured, not assumed: a collection before every allocation
-# makes a move several times slower in the C ABI (6x on the host), so the
-# phase requires at least twice the self-test's C ABI time per call.
-note "  build $(shellp getprop ro.build.type), ro.debuggable $(shellp getprop ro.debuggable)"
+# an instance's heap; the activity sets it with Os.setenv (gcStress) before
+# React Native starts. Whether stress took effect is measured, not assumed: a
+# collection before every allocation makes a move several times slower in the
+# C ABI (6.2x on the host), so the phase requires at least twice the
+# self-test's C ABI time per call.
+#
+# On a device that runs the arm64 app through Android's native bridge (an
+# x86_64 emulator), Os.setenv changes the environment of the libc Java runs
+# on, not of the bridge's own arm64 libc the library runs on: run 9 of the
+# workflow measured no slowdown at all. The other way to set it, the
+# wrap.PACKAGE property, starts the process through a wrapper without the
+# native bridge, and the app cannot load its arm64 libraries (run 10:
+# "libc++_shared.so is for EM_AARCH64 (183) instead of EM_X86_64 (62)"). So
+# there the phase is NOT DEMONSTRATED, said so in the summary and the result,
+# never passed: a device that runs arm64 code natively checks it.
+bridged=0
+[[ $(shellp getprop ro.product.cpu.abi) != arm64-v8a ]] && bridge=$(shellp getprop ro.dalvik.vm.native.bridge) &&
+    [[ -n $bridge && $bridge != 0 ]] && bridged=1
 shellp am force-stop $pkg
-shellp setprop "wrap.$pkg" BOTLISH_NATIVE_GC_STRESS=1
-note "  wrap.$pkg: $(shellp getprop "wrap.$pkg")"
 launch gc-stress "selftest done" 1 1800 --es mode selftest --ez gcStress true
-shellp am force-stop $pkg
-shellp setprop "wrap.$pkg" "''"
 log="$out/gc-stress.log"
-grep -q "BOTLISH_NATIVE_GC_STRESS=1" "$log" && note "  BOTLISH_NATIVE_GC_STRESS=1 set in the app process"
+grep -q "BOTLISH_NATIVE_GC_STRESS=1" "$log" && note "  BOTLISH_NATIVE_GC_STRESS=1 set in the app process (Os.setenv)"
 grep -E "BOTLISH_RN timing" "$log" | sed 's/^/  gc-stress /' | tee -a "$summary"
 grep -q "selftest done failures=0" "$log" && pass "gc-stress: the self-test passes" || fail "gc-stress: $(grep -o 'selftest done failures=[0-9]*' "$log")"
 snapshots "$log" oracle | cmp -s - "$expected/oracle-42.txt" && pass "gc-stress: the interpreter's snapshots" || fail "gc-stress: snapshots differ"
@@ -199,13 +203,17 @@ snapshots "$log" oracle | cmp -s - "$expected/oracle-42.txt" && pass "gc-stress:
 cabi() { # LOG: the game's C ABI microseconds per call in the self-test's timing
     sed -n 's/.*BOTLISH_RN timing game [0-9]* calls: [0-9.]* us per call from JavaScript, \([0-9.]*\) us of it in the C ABI.*/\1/p' "$1" | tail -1
 }
-plain=$(cabi "$out/selftest.log") stressed=$(cabi "$log")
+plain=$(cabi "$out/selftest.log") stressed=$(cabi "$log") undemonstrated=""
 if [[ -n $plain && -n $stressed ]]; then
     ratio=$(awk -v a="$stressed" -v b="$plain" 'BEGIN { printf "%.1f", a / b }')
+    measured="$stressed us per call in the C ABI, ${ratio}x the self-test's $plain us"
     if awk -v r="$ratio" 'BEGIN { exit !(r >= 2) }'; then
-        pass "gc-stress: stress took effect in the library ($stressed us per call in the C ABI, ${ratio}x the self-test's $plain us)"
+        pass "gc-stress: stress took effect in the library ($measured)"
+    elif (( bridged )); then
+        undemonstrated="gc-stress"
+        note "NOT DEMONSTRATED gc-stress: no sign of stress in the library ($measured): the app's arm64 code runs on the native bridge ($bridge), whose libc does not see the activity's Os.setenv"
     else
-        fail "gc-stress: no sign of stress in the library ($stressed us per call in the C ABI, ${ratio}x the self-test's $plain us)"
+        fail "gc-stress: no sign of stress in the library ($measured)"
     fi
 else
     fail "gc-stress: no C ABI timing to compare (self-test ${plain:-none}, gc-stress ${stressed:-none})"
@@ -303,5 +311,11 @@ appLog >"$out/exit.log"
 all=$(cat "$out"/*.log | grep -c -E "FATAL EXCEPTION|Fatal signal" || true)
 [[ $all == 0 ]] && pass "no native crash and no fatal exception in any phase" || fail "$all crash lines across the run"
 shellp ls /data/tombstones 2>/dev/null | sed 's/^/  tombstone /' | tee -a "$summary"
-note "result: $([[ $status == 0 ]] && echo passed || echo FAILED)"
+if [[ $status != 0 ]]; then
+    note "result: FAILED"
+elif [[ -n $undemonstrated ]]; then
+    note "result: passed, but NOT DEMONSTRATED on this device: $undemonstrated"
+else
+    note "result: passed"
+fi
 exit $status

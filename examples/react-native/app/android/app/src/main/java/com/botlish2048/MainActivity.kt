@@ -17,7 +17,10 @@ import com.facebook.react.defaults.DefaultReactActivityDelegate
  *   --es mode selftest        the JavaScript self-test instead of the game
  *   --es start SNAPSHOT       the game begins from SNAPSHOT
  *   --ez gcStress true        BOTLISH_NATIVE_GC_STRESS=1 for the Botlish
- *                             libraries (set before any instance exists)
+ *                             libraries (set before any instance exists;
+ *                             where the app runs on a native bridge, its
+ *                             arm64 libc does not see it: the acceptance
+ *                             reports GC stress as not demonstrated there)
  *   --ez reload true          (to the running activity) React Native reloads:
  *                             its JavaScript runtime and TurboModules are
  *                             destroyed and made again
