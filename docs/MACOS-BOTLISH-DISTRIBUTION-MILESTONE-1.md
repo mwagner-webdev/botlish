@@ -708,6 +708,10 @@ The branch `ccr-7f920867-5n2fuj` (https://github.com/mwagner-webdev/botlish/acti
 | `1d6bc3a` | tests (linux arm64), single executable (dispatched) | 42505879585, 42505881610 | no job failed; [pending] |
 | `1d6bc3a` | tests (macos arm64), the Botlish.app job | 42505874116 (job 128828371644) | **failure**, two steps, one cause: c3cd83c's fixes held on macOS -- the no-JIT sample loop ran 18 samples as executables and named the 5 not AOT-ready, and app-test.sh's relocation group passed (`TCL_LIBRARY` and `BOTLISH_NATIVE_BIN` ignored, the `::binary` fix) [executed, macOS] -- but single/smoke-test.sh's later no-JIT check of a non-ASCII argument through `-aot-run` ran before the step that writes its `args.bot` (a check never reached before: every earlier macOS run stopped sooner), so smoke-test.sh failed, and with it app-test.sh's read-only group, which runs smoke-test.sh on the read-only application. Fixed in the next commit (the check after the file is written); the corrected block passes and the old one fails as CI did, and the whole smoke test passes with the JIT off against a Linux single executable built with the JIT-less driver [executed, Linux x86-64]. In the same job ffi-smoke-test.sh, compare.sh (121 comparisons alike), the ad hoc release stages (the tamper checks, Gatekeeper's refusal), acceptance.sh (9 cases, 0 failed) and bench/macos-app.tcl passed [executed, macOS] |
 | `1d6bc3a` | tests (dispatched), golden suites shard 3/4 | 42505877367 (job 128857713523) | **failure**, infrastructure: curl's connection was reset downloading the Tcl 9.0.1 packages (`curl: (56)`) before any test ran; to be re-run |
+| `717f3bd` | tests (macos arm64), the Botlish.app job | 42564661164 (job 129014124084) | **success**, every step [executed, macOS], the first complete run of the job: the application built (the driver without its JIT, ad hoc signed with the hardened runtime, inspected, its packaging census) and placed outside the checkout; single/smoke-test.sh passed whole (the JIT refused naming `-aot-run`; 18 samples as executables, the 5 not AOT-ready named; `-aot-run`'s output, arguments, non-ASCII arguments and directories, a rejected program not run; a C program without developer tools refused, NATIVE LINK TOOLCHAIN; the language server; the package manager); single/ffi-smoke-test.sh; single/macos/app-test.sh, every group (relocation with `TCL_LIBRARY` and `BOTLISH_NATIVE_BIN` ignored and `DYLD_FRAMEWORK_PATH`'s Tcl refused, read-only, paths, processes, concurrency, cache, moved, tamper, damage, executables, darwin-io, no-jit: the driver's run, bench, batch and vms refused, the Cocoa and Metal canary on the main thread, the bundle unchanged); single/macos/compare.sh (121 comparisons alike); the release's stages in ad hoc mode (sign, verify, the tamper checks, Gatekeeper's refusal of an ad hoc bundle) and acceptance.sh (9 cases, 0 failed); bench/macos-app.tcl (section 26); the bundle untouched by every run |
+| `717f3bd` | tests (macos arm64), the other jobs | 42564661164 | smoke (its canary, `AOT-run costs`), linux control and the acceptance tier's four shards **success** [executed, macOS]; the system linker, the app without developer tools (`app-clean`), main-thread startup and static SDL3 through Botlish.app [pending] (queued when this was written) |
+| `717f3bd` | icy-tower (macos arm64) | 42564661479 | **success** [executed, macOS] |
+| `717f3bd` | tests (windows x86-64); tests, tests (linux arm64), single executable (dispatched) | 42564661156; 42564685111, 42564687298, 42564689345 | no job failed; [pending] when this was written |
 
 Ordinary CI uploads the ad hoc
 bundle as the `botlish-macos-aarch64` artifact (macos-arm64.yml's `app`
@@ -735,38 +739,40 @@ release.
   times (the launcher, Tcl, the archive's mount, `-version`, `-help`,
   `-check`, the interpreter, the language server, the driver, and with no
   JIT `-aot-run` in its place, `-emit-native-executable`, a moved copy's
-  first start). Measured on `460fcee` (job 128698763992; on `1d6bc3a`,
-  after the merge of main, the bundle is 26.66 MB, the download 11.03 MB,
-  `-version` 150 ms and `-aot-run` 264 ms on another runner):
+  first start). Measured on `460fcee` (job 128698763992) and, after the
+  merge of main, on `717f3bd` (job 129014124084); startup times vary
+  between runners by a third (the same commit's `1d6bc3a` run measured
+  `-version` at 150 ms):
 
-  | part | MB |
-  |---|---:|
-  | Tcl.framework | 4.03 |
-  | launcher (MacOS/botlish) | 0.07 |
-  | compiler archive (Resources/botlish.zip) | 2.42 |
-  | native driver (MacOS/botlish-native, no JIT) | 5.82 |
-  | runtime archive (Resources/libbotlish_runtime.a) | 13.99 |
-  | Botlish.app | 26.33 |
-  | download (botlish-macos-aarch64.zip) | 10.86 |
+  | part | MB, `460fcee` | MB, `717f3bd` |
+  |---|---:|---:|
+  | Tcl.framework | 4.03 | 4.03 |
+  | launcher (MacOS/botlish) | 0.07 | 0.07 |
+  | compiler archive (Resources/botlish.zip) | 2.42 | 2.50 |
+  | native driver (MacOS/botlish-native, no JIT) | 5.82 | 5.91 |
+  | runtime archive (Resources/libbotlish_runtime.a) | 13.99 | 14.15 |
+  | Botlish.app | 26.33 | 26.66 |
+  | download (botlish-macos-aarch64.zip) | 10.86 | 11.03 |
 
-  | startup, best of 7 | ms |
-  |---|---:|
-  | the launcher alone (process) | 5.0 |
-  | Tcl.framework loaded and initialized | 14.6 |
-  | the compiler archive mounted | 17.0 |
-  | `-version` | 123.6 |
-  | `-help` | 205.8 |
-  | `-check` | 191.1 |
-  | a program on the interpreter | 147.6 |
-  | the compiler service | 91.4 |
-  | the driver (`capabilities`) | 5.3 |
-  | `-aot-run` of a printing program | 239.4 |
-  | `-emit-native-executable`, then the executable | 234.7 |
+  | startup, best of 7 | ms, `460fcee` | ms, `717f3bd` |
+  |---|---:|---:|
+  | the launcher alone (process) | 5.0 | 4.1 |
+  | Tcl.framework loaded and initialized | 14.6 | 11.2 |
+  | the compiler archive mounted | 17.0 | 12.8 |
+  | `-version` | 123.6 | 89.6 |
+  | `-help` | 205.8 | 165.1 |
+  | `-check` | 191.1 | 126.0 |
+  | a program on the interpreter | 147.6 | 113.4 |
+  | the compiler service | 91.4 | 84.7 |
+  | the driver (`capabilities`) | 5.3 | 5.4 |
+  | `-aot-run` of a printing program | 239.4 | 182.8 |
+  | `-emit-native-executable`, then the executable | 234.7 | 176.6 |
 
-  Of `-aot-run`'s 239 ms, 92 ms are native (lowering, the driver, the
-  object, the link and the run) over the interpreter's run of the same
-  program. A moved copy's first `-version` took 97-106 ms, its second
-  98-111 ms: no first-start penalty in a new location.
+  Of `-aot-run`'s time, 92 ms (`460fcee`) and 69 ms (`717f3bd`) are native
+  (lowering, the driver, the object, the link and the run) over the
+  interpreter's run of the same program. A moved copy's first `-version`
+  took 97-106 ms and 90-109 ms, its second about the same: no first-start
+  penalty in a new location.
 * [executed, Linux x86-64] the JIT's share of the driver: −320,768 bytes
   stripped (3.6%) (section 3). The difference between a JIT-less binary and
   one that merely refuses is that difference plus the absence of the JIT's

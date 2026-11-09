@@ -316,7 +316,7 @@ TerminateProcess and requires the program gone and the directory removed).
 | Linux x86-64 | `tests` workflow (ubuntu-latest), its canary | [executed] the changed file runs first on every push; see section 9.1 |
 | Linux AArch64 | `tests (linux arm64)` (ubuntu-24.04-arm) | [executed] canary on the branch push; see section 9.1 |
 | Windows x86-64 (MSVC) | `tests (windows x86-64)` (windows-2025), canary | [executed] green on `460fceea` (section 9.1) |
-| macOS AArch64 | `tests (macos arm64)` (macos-15): the smoke job's canary, the acceptance tier, the app jobs | [executed] the canary on `a822905`, `460fcee` and `c3cd83c` (section 9.1); the acceptance tier and the app jobs [pending] on the merge of main |
+| macOS AArch64 | `tests (macos arm64)` (macos-15): the smoke job's canary, the acceptance tier, the app jobs | [executed] the canary on every push (section 9.1); on `717f3bd` the acceptance tier's four shards and the Botlish.app job, `-aot-run` as the JIT-less application's only native run, green; the system linker and the jobs after the app's [pending] |
 
 The JIT build's own tests are unchanged and run as before on every host
 that has the JIT: the native backend's test files, the golden suites on
@@ -373,6 +373,14 @@ The branch `ccr-7f920867-5n2fuj`:
   macOS acceptance tier and app jobs, Windows' acceptance shards and the
   rest of the full Linux suites [pending] at the time of writing
   (MACOS-BOTLISH-DISTRIBUTION-MILESTONE-1.md, section 24, lists the runs).
+* `717f3bd` (smoke-test.sh's no-JIT check of a non-ASCII argument through
+  `-aot-run` moved after the step that writes its program, which the
+  Botlish.app job on `1d6bc3a` had reached for the first time): the
+  Botlish.app job **green**, every step -- the whole smoke test on the
+  JIT-less application, `-aot-run` its only native run, app-test.sh's
+  groups, compare.sh, the ad hoc release stages and acceptance.sh -- and
+  the macOS acceptance tier's four shards green [executed, macOS]; the
+  rest [pending] at the time of writing.
 
 ## 10. Positive controls and mutants
 
