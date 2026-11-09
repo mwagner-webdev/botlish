@@ -109,8 +109,8 @@ native bridge, with two gaps.** The CI evidence (sections 16 and 23):
   native-bridge device, never as passed. A device that runs arm64 code
   natively checks it. GC stress of the libraries through the same
   generated core is observed on the host (section 19).
-* **The 16 KiB-page image** has not run yet: run 9's job was cancelled
-  while queued, and run 10's is still queued.
+* **The 16 KiB-page image** has not run yet. The jobs of runs 9 and 10
+  were cancelled while still queued, and run 11's is queued.
 
 This host has no KVM, and Google's emulator refuses an arm64 guest on an
 x86_64 host, also when its `qemu-system-aarch64` is run directly (observed,
@@ -130,7 +130,7 @@ section 16).
 | `useBotlish2048()` and a playable 2048 screen (swipes, buttons, score, New game, game over, win) | implemented; Jest observed (28 tests: 10 of the hook and the snapshot reader, 17 of the generated entry point, 1 without the native module) |
 | a second, unrelated library through the same generator, both packages in one app | observed (host harness, TypeScript, Jest, the APK) |
 | a clean room: the single-file compiler and packages only, then npm, Codegen and Gradle | observed (section 18) |
-| the app on Android: Hermes, the TurboModule, the Botlish library in an Android application process | **observed on Android 14 (4 KiB pages), translated by the ARM native bridge** (CI, runs 9 and 10: every phase but GC stress); GC stress in the app process not demonstrable on a native-bridge emulator; the 16 KiB-page image pending (section 16) |
+| the app on Android: Hermes, the TurboModule, the Botlish library in an Android application process | **observed on Android 14 (4 KiB pages), translated by the ARM native bridge** (CI, runs 9, 10 and 11: every phase but GC stress); GC stress in the app process not demonstrable on a native-bridge emulator; the 16 KiB-page image pending (section 16) |
 | mutation testing | 44/44 killed, each by a detector it names; observed (section 21) |
 | iOS, Android ABIs other than arm64-v8a, asynchronous workers | not supported (section 24) |
 
@@ -934,8 +934,23 @@ phase.
   The two crash lines the run counted are the GC-stress launch's.
 * **The corrected textkit timing:** 3.41 µs per call.
 
-Its `android (16 KiB pages)` job was still queued when this report was
-last updated.
+Its `android (16 KiB pages)` job was cancelled, still queued, by the push
+of the acceptance's corrected GC-stress phase (`bc4bb613`).
+
+**Run 11** (`bc4bb613`), job `android (4 KiB pages)`, ran on the same image.
+Every phase passed for both APKs, and the development reload with Metro
+passed. Each acceptance ended `result: passed, but NOT DEMONSTRATED on this
+device: gc-stress`, with the measurement:
+
+* the build's APK: `NOT DEMONSTRATED gc-stress: no sign of stress in the
+  library (67.49 us per call in the C ABI, 0.5x the self-test's 132.25
+  us)`;
+* the clean room's APK: 60.60 µs against 58.37 µs, 1.0x.
+
+The textkit timing now reads 2.01 to 2.12 µs per call. Reload 2's old game
+instance was again orphaned when its module went on another thread, then
+destroyed on its own thread. The `android (16 KiB pages)` job was still
+queued when this report was last updated.
 
 **Locally**, this host has no `/dev/kvm`. Observed, with the emulator 37.2.13
 and `system-images;android-30;aosp_atd;arm64-v8a`:
@@ -1222,7 +1237,8 @@ The textkit line of the log (`10000 scalarCount calls: 5995.84 us per
 call` and `2577.84`) is wrong by a factor of 1,000. The self-test
 multiplied milliseconds by 100 where it should have multiplied by 0.1,
 so the true figures are about 6.0 and 2.6 µs a call. The self-test is
-corrected. Run 10 logged 3.41 µs a call, on another runner whose game
+corrected. Run 11 logged 2.01 to 2.12 µs a call. Run 10 logged 3.41 µs,
+on another runner whose game
 move took 165.23 µs from JavaScript (155.53 µs in the C ABI, 9.70 µs JSI
 and adapter) and whose input to render averaged 18.50 ms. The runners
 differ that much between runs.
@@ -1324,10 +1340,20 @@ nothing in the release gate requires it. Its runs on this branch:
     ([job 129066467473](https://github.com/mwagner-webdev/botlish/actions/runs/42577642784/job/129066467473)),
     in the GC-stress phase alone. A wrapper-started process has no native
     bridge (section 16). Every other phase passed.
-  - **android (16 KiB pages): queued** when this report was last updated.
+  - **android (16 KiB pages): cancelled** while still queued, by the push
+    of `bc4bb613`.
 
   The acceptance's GC-stress phase is changed after it: no wrapper, and
   NOT DEMONSTRATED on a native-bridge device.
+* run 11, at `bc4bb613`, the GC-stress phase reporting NOT DEMONSTRATED:
+  [react-native 2048 #11](https://github.com/mwagner-webdev/botlish/actions/runs/42609322660).
+  - **build: success.**
+  - **android (4 KiB pages): success**
+    ([job 129156321062](https://github.com/mwagner-webdev/botlish/actions/runs/42609322660/job/129156321062)).
+    Every phase passed for the build's and the clean room's APK, and the
+    development reload with Metro passed. GC stress was NOT DEMONSTRATED
+    (0.5x and 1.0x), as the summary and the result line say (section 16).
+  - **android (16 KiB pages): queued** when this report was last updated.
 
 Main's own workflows were queued or in progress, none red among those
 completed, when this branch was made (`a6977d56`) and when it was last
