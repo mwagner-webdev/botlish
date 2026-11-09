@@ -355,7 +355,7 @@ and the branch head for the tests.
 
 | run | result |
 |---|---|
-| `tests/semantic-instances.test` | 95 of 95; 93 of them again with `BOTLISH_SEMANTIC_ROLLBACK_AUDIT=1` (the two left out are the 1,024-type program and `si-region-no-copy`, which the audit's own copies would defeat) |
+| `tests/semantic-instances.test` | 95 of 95; 93 of them again with `BOTLISH_SEMANTIC_ROLLBACK_AUDIT=1` (the two left out are the 1,024-type program and `si-region-no-copy`, which the audit's own copies would defeat). On the tree merged with main (bf0f585): 96 of 96, and 96 of 96 with the audit (`si-region-no-copy` turns it off for itself) |
 | `tests/traits.test`, `tests/affine.test`, `tests/coroutines.test` under the rollback audit | 112, 48 and 81 of 81: no walk left a change behind |
 | `tests/static-economics.test`: `se-equal-deep-first-request`, `se-equal-plan-unplanned`, `se-equal-erased-key-argument` | pass |
 | golden `callables.bot` (section 3.4) | 134 of 140 before the fix, 140 of 140 after |
@@ -365,6 +365,8 @@ and the branch head for the tests.
 | `tools/mutant-catalogs.tcl` | 92 catalogs, 3,213 mutants, 0 problems |
 | `tools/compilerpedia.tcl check` | 1,291 topics, 758 examples, 0 problems |
 | `audit/golden/migration/merge.tcl -check 1` | 13,448 rows, consistent |
+| `tests/local.tcl` on the tree merged with main (bf0f585, the native driver rebuilt; 4 jobs, 5,705 s) | 0 failures: Tcl tests 9,164 passed on interp and 9,159 on compile (264 and 269 skipped by constraint, 2,493 golden duplicates each); 119 golden suites, 5,682 / 5,682 / 5,590 / 5,692 tests passed on interp / compile / cranelift-generic / cranelift |
+| merged tree: `tests/loop-clause-binding-types.test` (also under the rollback audit), `audit/loop-binding-types/tools/mutate.tcl`, `tools/mutant-catalogs.tcl`, `merge.tcl -check 1`, `tools/compilerpedia.tcl check` | 18 of 18 both ways; 14 of 14 mutants killed; 97 catalogs, 3,308 mutants, 0 problems; 13,549 rows, consistent; 1,295 topics, 760 examples, 0 problems |
 
 ### 6.2 The corpus builds the same programs (observed)
 
@@ -462,22 +464,27 @@ and of `framework-semantics.bot`'s fewer builds), `tests.yml` and
 `tests-arm64.yml` (the whole suite and its native coverage; their
 GC-stress jobs run on pushes to main only, so they are skipped here); and
 the push workflows (macOS arm64, Windows x86-64, the two Icy Tower
-builds). The state of each at 2026-11-09 00:40 UTC, the shared runners
-saturated:
+builds).
 
-| workflow | run | commit | state |
-|---|---|---|---|
-| `icy-tower-windows.yml` | 42518051620 | a6f677e | passed |
-| `icy-tower-macos.yml` | 42518051627 | a6f677e | passed |
-| `windows-x86_64.yml` | 42518051637 | a6f677e | canary and root plans passed; smoke running (the smoke tier and the Windows test files passed) |
-| `tests.yml` | 42518057437 | a6f677e | canary passed (mutant catalogs, warning gate, canary selection); cranelift coverage running; every other job queued |
-| `tests-arm64.yml` | 42518059748 | a6f677e | queued |
-| `macos-arm64.yml` | 42518051822 | a6f677e | queued |
-| `static-decisions.yml` | 42507142725 | 9dca40a | queued |
+Main was merged into the branch at bf0f585 (section 3.6), so the runs that
+count are that commit's; the runs at a6f677e and 9dca40a tested the tree
+before the merge. At a6f677e, before they were superseded, `icy-tower
+(windows x86-64)` and `icy-tower (macos arm64)` passed, `tests (windows
+x86-64)` passed its canary, smoke and root-plans jobs, and `tests.yml`
+passed its canary. The state at bf0f585 on 2026-11-09 03:05 UTC, the shared
+runners saturated (main's own test workflows at 996b50d are queued too):
 
-The static-decisions run is at 9dca40a, the last commit that changes the
-front end: the commits after it change this report, the audit tools and
-their results only. Whatever is pending above is pending, not passed.
+| workflow | run | state |
+|---|---|---|
+| `tests.yml` (dispatched) | 42553518671 | queued |
+| `tests-arm64.yml` (dispatched) | 42553521335 | queued |
+| `static-decisions.yml` (dispatched) | 42553524098 | queued |
+| `windows-x86_64.yml` | 42553507858 | queued |
+| `macos-arm64.yml` | 42553507896 | queued |
+| `icy-tower-windows.yml` | 42553507899 | queued |
+| `icy-tower-macos.yml` | 42553507952 | queued |
+
+Whatever is pending above is pending, not passed.
 PENDING-CI
 
 ## 7. Remaining limits and known problems
