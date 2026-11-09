@@ -382,9 +382,11 @@ The branch `ccr-7f920867-5n2fuj`:
   the macOS acceptance tier's four shards and system linker green
   [executed, macOS]; Windows' whole run green (canary, smoke, root plans,
   system linker, acceptance shards) [executed, Windows]; the full Linux
-  suite green but for interp and compile, still running, and the single
-  executable green [executed, Linux]; Linux AArch64 and macOS's
-  main-thread startup job [pending] at the time of writing.
+  suite, the full Linux AArch64 suite and the single executable green,
+  every job [executed, Linux x86-64 and AArch64]; macOS's main-thread
+  startup job failed one case of the graphical census, which ran the
+  JIT-less application with `-backend cranelift` (fixed in `d1bc78e`: the
+  application's case runs `-aot-run`) [pending] at the time of writing.
 
 ## 10. Positive controls and mutants
 

@@ -726,7 +726,8 @@ The branch `ccr-7f920867-5n2fuj` (https://github.com/mwagner-webdev/botlish/acti
 | `717f3bd` | tests (windows x86-64) | 42564661156 | **success**, every job [executed, Windows]: the canary, smoke (`AOT-run costs`), root plans, the system linker and the acceptance tier's four shards |
 | `717f3bd` | single executable (dispatched) | 42564689345 | **success** [executed, Linux x86-64 and AArch64] |
 | `717f3bd` | tests (dispatched in full) | 42564685111 | **success**, every job [executed, Linux x86-64]: the canary, interp, compile, the system-linked executables (also under GC stress), the stub-linked executables, the native Rust unit tests (the JIT-less driver's step), cranelift and cranelift-generic coverage, the method-call decision and the golden suites' four shards |
-| `717f3bd` | tests (linux arm64) (dispatched in full) | 42564687298 | running, no job failed; [pending] |
+| `717f3bd` | tests (linux arm64) (dispatched in full) | 42564687298 | **success**, every job [executed, Linux AArch64] |
+| `d1bc78e` | (the census's application case through `-aot-run`; nothing else of 717f3bd's code changed) | -- | macos-arm64.yml's main-thread-startup job [pending] at the time of writing; the suites that do not run the census (tests.yml, tests-arm64.yml, single-executable.yml, Windows) are green on `717f3bd` |
 
 Ordinary CI uploads the ad hoc
 bundle as the `botlish-macos-aarch64` artifact (macos-arm64.yml's `app`
