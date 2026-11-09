@@ -1,0 +1,30 @@
+# probe.bot -- the test unit's own exports (feature `testing` of
+# packages/http/native: tools/http-package.tcl unit -testing 1), for the
+# test client: fault injection and the unit's counters. A program importing
+# this module links only with the test unit; the released unit has none of
+# these symbols.
+import std::ffi::c
+
+extern c fn bh_t_set_fault(bits: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+extern c fn bh_t_alloc(i: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+extern c fn bh_t_stat(i: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+
+nomethod fn cll(x: int) -> std::ffi::c::LongLong:
+    if x < 0:
+        0
+    elif x > 4294967295:
+        4294967295
+    else:
+        x
+
+# Set the fault bits (packages/http/native/src/faults.rs).
+fn set_fault(bits: int) -> int:
+    cll(bits).bh_t_set_fault()
+
+# 0 allocations, 1 bytes allocated, 2 bytes live (the unit's Rust heap).
+fn alloc(i: int) -> int:
+    cll(i).bh_t_alloc()
+
+# The bridge's counter I.
+fn stat(i: int) -> int:
+    cll(i).bh_t_stat()

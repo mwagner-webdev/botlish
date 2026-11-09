@@ -20,7 +20,7 @@
 </p>
 
 <p>
-  <a href="https://github.com/mwagner-webdev/botlish/actions/workflows/tests.yml"><img src="https://img.shields.io/github/actions/workflow/status/mwagner-webdev/botlish/tests.yml?branch=main&style=flat-square&label=tests&labelColor=164e63&color=0e7490&logo=githubactions&logoColor=white" alt="tests" /></a>
+  <a href="https://github.com/mwagner-webdev/botlish/actions/workflows/tests.yml?query=branch%3Amain"><img src="https://img.shields.io/badge/tests-GitHub_Actions-0e7490?style=flat-square&labelColor=164e63&logo=githubactions&logoColor=white" alt="tests on GitHub Actions" /></a>
   <a href="#why-tcl"><img src="https://img.shields.io/badge/Tcl-9.0-0e7490?style=flat-square&labelColor=164e63" alt="Tcl 9.0" /></a>
   <img src="https://img.shields.io/badge/Rust-1.95%2B-0e7490?style=flat-square&labelColor=164e63&logo=rust&logoColor=white" alt="Rust 1.95+" />
   <img src="https://img.shields.io/badge/native-Cranelift-0e7490?style=flat-square&labelColor=164e63" alt="Cranelift" />

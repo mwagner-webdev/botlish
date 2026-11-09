@@ -269,6 +269,30 @@ the change removes -- and is for tests and audits only. It found nothing in
 `tests/semantic-instances.test`, `tests/traits.test`, `tests/affine.test` and
 `tests/coroutines.test` (section 6.1).
 
+### 3.6 Merging main's loop clause records (2026-11-09)
+
+`main` gained LOOP-CLAUSE-BINDING-TYPE-CORRECTNESS-MILESTONE-1.md
+(a71cfe4) while this branch waited for CI: the typing walk records a loop
+clause binding's type (`hir::types::RecordClause`), and an instance's walk
+records it into a top-level table of its own, `instanceClauses`, which
+`hir::semantic::Snapshot` reads. On `main` that table lived in the walk's
+scratch copy and died with it. Here the walk types the program's HIR in
+place, so the table must not survive the walk, and it does not without any
+change to the journal: `Save` keeps every top-level entry that is not one
+of the sparse tables, and `Rewind` removes every top-level entry the
+journal does not hold (section 3.1). A walk nested in another puts the
+enclosing walk's records aside with its other changes (`Capture`) and
+back after. The merge itself changed only what read the scratch copy:
+`Snapshot` reads `instanceClauses` from the HIR it is given, the comment of
+`RecordClause` describes the walk in place, and the mutant
+`lcb-snapshot-omits-clauses` (`audit/loop-binding-types/tools/mutants.txt`)
+quotes the new text. `si-region-clause-records` (new) compiles a helper with
+a loop instantiated for three element types, one instance requested from
+inside another's walk, under the rollback audit: every instance's snapshot
+has its own element type and the program's HIR has no `instanceClauses`; a
+`Rewind` that keeps the table fails it. All 14 of main's
+`loop-binding-types` mutants are killed on the merged tree.
+
 ## 4. Invariants and what bounds the analysis
 
 * The HIR is authoritative and unmodified by an instance walk: every walk
@@ -303,18 +327,18 @@ the change removes -- and is for tests and audits only. It found nothing in
 
 | file | change |
 |---|---|
-| `hir/semantic.tcl` | in-place walks and verification (`Save`, `Capture`, `Rewind`, `Restore`, `AuditRestore`, `RegionScopes`, `ScopeKids`, `Apply`, `Nested`), deferral (`Defer`), the guard (`Exhausted`, `Drain`), `Abandon`; `maxPerBlock` removed; the header's "Budgets" and "Region-local walks" |
-| `hir/types.tcl` | `hir::types::Call` passes the variable's name; `hir::types::Walk` abandons the run on error |
+| `hir/semantic.tcl` | in-place walks and verification (`Save`, `Capture`, `Rewind`, `Restore`, `AuditRestore`, `RegionScopes`, `ScopeKids`, `Apply`, `Nested`), deferral (`Defer`), the guard (`Exhausted`, `Drain`), `Abandon`; `maxPerBlock` removed; the header's "Budgets" and "Region-local walks"; `Snapshot` reads main's `instanceClauses` in place (section 3.6) |
+| `hir/types.tcl` | `hir::types::Call` passes the variable's name; `hir::types::Walk` abandons the run on error; `RecordClause`'s comment (section 3.6) |
 | `hir/staticdeps.tcl`, `hir/static.tcl` | `C:budget` removed; `KeyArguments` (section 3.4) |
 | `hir/traits.tcl`, `hir/affine.tcl` | two messages and a comment no longer blame a budget |
-| `tests/semantic-instances.test` | `si-rec-3/5/6` rewritten; 15 new tests (95 in all) |
+| `tests/semantic-instances.test` | `si-rec-3/5/6` rewritten; 16 new tests (96 in all) |
 | `tests/static-economics.test` | `se-equal-deep-first-request` expects `late` accepted; `se-equal-erased-key-argument` (new) |
 | `audit/semantic-instance-scalability/` | `tools/equivalence.tcl` (the corpus HIR comparison), `tools/scaling.tcl` (the measurement grid), `results/` (their recorded outputs) |
 | `audit/mid-end-port/tools/` | `instance-walks.tcl` reports instances, per-walk time and peak memory; `budget.tcl` and `measure.tcl` cope without `maxPerBlock` |
-| mutant catalogs | static-decisions: `budget-deep-ignored` removed, `key-arguments-uncontracted-only` added, `channels-not-consumed` and `unwind-not-waiting` updated; native-view `untyped-receiver-accepted`, tree-struct `construction-outward-result-only` updated |
+| mutant catalogs | static-decisions: `budget-deep-ignored` removed, `key-arguments-uncontracted-only` added, `channels-not-consumed` and `unwind-not-waiting` updated; native-view `untyped-receiver-accepted`, tree-struct `construction-outward-result-only`, loop-binding-types `lcb-snapshot-omits-clauses` (section 3.6) updated |
 | Compilerpedia | `error.hir-semantic-limit` (new); `concept.specialization`, `error.affine-erasure-unsupported`, `error.affine-instance-budget`, `error.trait-instance-budget` corrected |
 | docs | OPPORTUNISTIC-SEMANTIC-INSTANCES.md, STATIC-COMPILE.md, STATIC-DECISION-ECONOMICS.md, SIMCITY-WORKLOAD-KNOWN-GAPS.md (gap 3.1 fixed), INDEX.md, AGENTS.md (the waiting channels) |
-| golden census and manifest | rows for the 16 new Tcl tests (`audit/golden/migration/census/`, `tcl-names.txt`, `tests/golden/manifest.tsv` regenerated) |
+| golden census and manifest | rows for the 17 new Tcl tests (`audit/golden/migration/census/`, `tcl-names.txt`, `tests/golden/manifest.tsv` regenerated) |
 
 ## 6. Evidence
 

@@ -1,0 +1,5 @@
+post: status 200, HTTP/2
+post: the peer saw method POST, content-type application/json, authorization Bearer cleanroom-token
+post: the echoed body is the body sent: yes: {"input": "héllo ✓", "stream": false}
+end: clients 0, exchanges 0, panics 0
+exit 0

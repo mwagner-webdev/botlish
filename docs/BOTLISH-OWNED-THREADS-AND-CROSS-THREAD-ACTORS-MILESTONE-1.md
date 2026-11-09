@@ -597,7 +597,11 @@ destination actor's ordinary mailbox through an ordinary task.
   `1`): a resource's cleanup is a root of the program whatever it
   releases, and a cleanup whose context no region installs is now
   unreachable code (native/lower.tcl's `InCleanup`), since every release
-  point is charged its cleanup's requirement.
+  point is charged its cleanup's requirement. (Superseded by
+  NATIVE-UNUSED-CONTEXT-IMPORT-CORRECTNESS-MILESTONE-1.md: a cleanup is no
+  longer a root but is compiled only where compiled code may release its
+  resource, so such a cleanup is not compiled at all; `InCleanup` is gone
+  and an uninstalled context load is a NATIVE BUG again everywhere.)
 
 ## 17. Backend and platform matrix
 

@@ -604,14 +604,47 @@ test si-region-no-copy {an instance walk writes the program's expression table i
         return $result
     }
     set ::siWalkTables {}
+    # (The rollback audit keeps the whole HIR before every walk to compare,
+    # so a walk's first write copies the table it shares: off here, whatever
+    # BOTLISH_SEMANTIC_ROLLBACK_AUDIT says.)
+    set audit $::hir::semantic::auditRollback
+    set ::hir::semantic::auditRollback 0
     try {
         siCompile [siManyTypes 64]
     } finally {
+        set ::hir::semantic::auditRollback $audit
         rename ::hir::semantic::Walk {}
         rename ::hir::semantic::WalkUnderTest ::hir::semantic::Walk
     }
     list [expr {[llength $::siWalkTables] >= 64}] [lsort -unique $::siWalkTables]
 } -result {1 1}
+
+test si-region-clause-records {an instance walk's loop clause records (hir/types.tcl's RecordClause: the walk's own top-level table) reach its snapshot only: each instance keeps its own element type (the generic walk of outer requests first's instance for a List of any), through a walk nested in another's, and the program's HIR keeps none of them (under the rollback audit)} -body {
+    set src "fn first(xs):\n    loop x in xs:\n        x\n\nfn outer(ys):\n    loop y in ys:\n        first(\[y\])\n\na = outer(\[1\])\nb = outer(\[\"s\"\])\nc = first(\[true\])\n\[a, b, c\]"
+    set audit $::hir::semantic::auditRollback
+    set ::hir::semantic::auditRollback 1
+    try {
+        set hir [siCompile $src]
+    } finally {
+        set ::hir::semantic::auditRollback $audit
+    }
+    set ids {}
+    dict for {b binding} [dict get $hir bindings] {
+        if {[dict get $binding name] in {x y}} {
+            dict set ids [dict get $binding name] $b
+        }
+    }
+    set rows {}
+    foreach row [hir::semantic::census $hir] {
+        set name [dict get $row name]
+        if {$name ni {first outer}} continue
+        set clause [dict get $ids [expr {$name eq "first" ? "x" : "y"}]]
+        set bindings [dict get $hir semantic instances [dict get $row id] snapshot bindings]
+        lappend rows [list $name [hir::types::show [lindex [dict get $row args] 0]] \
+            [hir::types::show [dict getdef $bindings $clause ""]]]
+    }
+    list [dict exists $hir instanceClauses] [lsort $rows]
+} -cleanup {unset -nocomplain hir ids rows row bindings binding b clause name audit} -result {0 {{first list any} {first {List[bool]} bool} {first {List[int]} int} {first {List[str]} str} {outer {List[int]} int} {outer {List[str]} str}}}
 
 test si-region-reorder {independent definitions and calls in another order give the same instances and the same types} -body {
     set forward [siManyTypes 24 "" pick24]

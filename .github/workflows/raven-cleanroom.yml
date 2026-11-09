@@ -56,11 +56,11 @@ jobs:
       - name: Build native (Cranelift) backend
         uses: ./.github/actions/build-native
 
-      - name: Cache the static Tcl base kit
+      - name: Cache the static Tcl build (single/basekit.sh)
         uses: actions/cache@v4
         with:
           path: ~/.cache/botlish-single
-          key: single-basekit-${{ runner.os }}-${{ hashFiles('single/build.sh') }}
+          key: single-basekit-${{ runner.os }}-${{ hashFiles('single/build.sh', 'single/basekit.sh') }}
 
       - name: Build the single executable
         run: single/build.sh -o dist/botlish

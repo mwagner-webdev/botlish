@@ -584,9 +584,9 @@ if {$nativeStartup eq ""} {
 %% linux-x86_64 linux-aarch64
 ## native/src/codegen/mod.rs
 <<<<
-    emit_object_with(program, isa(true)?, Some(name), Startup::Worker)
+    emit_object_with(program, isa_for_target(target)?, Some(name), Startup::Worker)
 ====
-    emit_object_with(program, isa(true)?, Some(name), Startup::MainThread)
+    emit_object_with(program, isa_for_target(target)?, Some(name), Startup::MainThread)
 >>>>
 
 @@ record-policy-ignored the runtime reads every record as the worker's, whatever its word

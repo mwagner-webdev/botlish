@@ -4421,6 +4421,7 @@ proc hir::types::Expr {hirVar ctxVar e} {
             set fold [FoldInitial hir ctx $node]
             set saved [dict get $ctx facts]
             dict set ctx facts [dict get $node elementBinding] $elemType
+            RecordClause hir $ctx [dict get $node elementBinding] $elemType
             # breakTypes is seeded (and later unset) only so the shared
             # `break` case in this same switch (below) always has a
             # dict entry to lub into, exactly as a plain `loop`/countloop
@@ -4485,6 +4486,7 @@ proc hir::types::Expr {hirVar ctxVar e} {
             # compiler boundary, spec item 6) -- not something this static
             # type pass needs to decide or reject.
             dict set ctx facts [dict get $node countBinding] int
+            RecordClause hir $ctx [dict get $node countBinding] int
             # A countloop is a collecting loop exactly like a listloop
             # (COLLECTING-LOOPS.md): see that case above for why breakTypes
             # is only seeded for the shared `break` case and why the result
@@ -4537,6 +4539,7 @@ proc hir::types::Expr {hirVar ctxVar e} {
             set saved [dict get $ctx facts]
             foreach {binding type} $facts {
                 dict set ctx facts $binding $type
+                RecordClause hir $ctx $binding $type
             }
             dict set ctx breakTypes $e never
             set entry [dict get $ctx reachable]
@@ -4634,6 +4637,41 @@ proc hir::types::Expr {hirVar ctxVar e} {
 # hir::fold::verify's, on the final types.
 namespace eval hir::types {
     variable foldAttempts 4
+}
+
+# Records TYPE, the fact the walk (context CTX) gives loop clause binding B
+# (a listloop's element, a countloop's counter, a lockloop domain's binding:
+# hir::loopClauseBindings) at its loop's entry, as B's type in the binding
+# table (hir::bindingType), the way a bind records its value's type on its
+# binding and a fold its intermediate's
+# (LOOP-CLAUSE-BINDING-TYPE-CORRECTNESS-MILESTONE-1.md): every reference to B
+# starts from this fact, so the declaration and its references agree (a
+# reference is narrower only where a guard narrowed B on its path). The
+# element type is the loop's own rule's (hir::iteration::ElementOf: a
+# List's, a MutableVector's or MutableArray's, a collection struct's loop
+# protocol), `any` where that knows none, never for a poisoned iterable or a
+# List[never]'s element; a counter is exactly Int. The last walk of a loop is
+# the one its references are typed by. The generic walk's record is the
+# program's (hir::types::Walk), written only when it changes. A semantic
+# instance's walk types the program's HIR in place, its region journaled
+# (hir/semantic.tcl, "Region-local walks"): it records into `instanceClauses`,
+# a top-level table of its own, which its snapshot keeps
+# (hir::semantic::Snapshot) and the walk's Restore drops with its other
+# changes -- never into the binding table, where the generic walk's record
+# is. Region inference's copy keeps no record (only its expressions' types
+# reach a specialization's view). So no instance's type ever reaches the
+# program's record, whatever order the instances are analyzed in.
+proc hir::types::RecordClause {hirVar ctx b type} {
+    upvar 1 $hirVar hir
+    if {[dict exists $ctx spec]} {
+        return
+    }
+    set t [intern hir $type]
+    if {[dict exists $ctx inst]} {
+        dict set hir instanceClauses $b $t
+    } elseif {[dict get $hir bindings $b type] ne $t} {
+        dict set hir bindings $b type $t
+    }
 }
 
 # The type of a fold NODE's initial value, typed in CTX -- the enclosing

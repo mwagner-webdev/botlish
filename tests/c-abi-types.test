@@ -80,12 +80,12 @@ opaque struct Ctx:
 # ---------------------------------------------------------------------------
 # Targets and data models (core/cabi.tcl)
 
-test ca-targets {the six targets the design represents, each with its data model and plain char's signedness; pointers are 64 bits on all of them} -body {
+test ca-targets {the targets the design represents, each with its data model and plain char's signedness; pointers are 64 bits on all of them} -body {
     lmap t [core::cabi::targetNames] {
         set m [core::cabi::target $t]
         list $t [dict get $m model] [dict get $m charSigned] [dict get $m pointer]
     }
-} -result {{linux-aarch64 LP64 0 64} {linux-x86_64 LP64 1 64} {macos-aarch64 LP64 1 64} {macos-x86_64 LP64 1 64} {windows-aarch64 LLP64 1 64} {windows-x86_64 LLP64 1 64} {windows-x86_64-gnu LLP64 1 64}}
+} -result {{android-aarch64 LP64 0 64} {linux-aarch64 LP64 0 64} {linux-x86_64 LP64 1 64} {macos-aarch64 LP64 1 64} {macos-x86_64 LP64 1 64} {windows-aarch64 LLP64 1 64} {windows-x86_64 LLP64 1 64} {windows-x86_64-gnu LLP64 1 64}}
 
 test ca-lp64-llp64 {C long is 64 bits on LP64 and 32 on LLP64, where long long is 64: the width is the target's, never the name's} -body {
     lmap t {linux-x86_64 macos-aarch64 windows-x86_64 windows-aarch64} {
@@ -103,7 +103,7 @@ test ca-char-signedness {plain char is its own type whose signedness is the targ
 test ca-host-target {the default target is the host's, and an unknown target is an error} -body {
     list [expr {[core::cabi::hostTarget] in [core::cabi::targetNames]}] \
         [catch {caHir "import std::ffi::c\n1\n" -target vax-ultrix} message] $message
-} -cleanup {unset -nocomplain message} -result {1 1 {unknown C ABI target "vax-ultrix" (known: linux-aarch64, linux-x86_64, macos-aarch64, macos-x86_64, windows-aarch64, windows-x86_64, windows-x86_64-gnu)}}
+} -cleanup {unset -nocomplain message} -result {1 1 {unknown C ABI target "vax-ultrix" (known: android-aarch64, linux-aarch64, linux-x86_64, macos-aarch64, macos-x86_64, windows-aarch64, windows-x86_64, windows-x86_64-gnu)}}
 
 test ca-scalar-info-validated {a scalar's metadata is checked against the table: a width or signedness that is not the target's is refused, so nothing can register a hard-coded one} -body {
     list [core::cabi::validScalarInfo [core::cabi::scalarInfo ULong windows-x86_64]] \

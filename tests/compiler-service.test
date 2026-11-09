@@ -674,6 +674,13 @@ test cs-hover-signatures {hover names a function by its signature and a value by
     }
 } -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain rev path ws dir} -result {{fn add(a: int, b: int) -> int} {fn twice(f: Fn{args: [int], return: int, errors: []}, n: int) -> int} {fn inc(n: int) -> int} {fns: List[Fn{args: [int], return: int, errors: []}]{length: 2}} {total: List[int]{length: 3}} {fn util::f(n: int) -> int} {std::list::at: Fn{args: [any, any], return: any, errors: [IndexNotFound]}} {q: int}}
 
+test cs-hover-loop-variable {a loop variable's hover is its type at the declaration and at a reference alike: the binding table records it (LOOP-CLAUSE-BINDING-TYPE-CORRECTNESS-MILESTONE-1.md; it was any at the declaration)} -body {
+    lassign [cs::Program loopvar] rev path ws dir
+    lmap needle {"x in xs" "x, l"} {
+        dict get [cs::Query $rev $path $needle] hover
+    }
+} -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain rev path ws dir} -result {{x: int} {x: int}}
+
 test cs-hover-no-internal-ids {at every position of the program, no type or hover text shows an internal id (block(eN), function eN, a BindingId)} -body {
     lassign [cs::Program noids] rev path ws dir
     set leaks {}

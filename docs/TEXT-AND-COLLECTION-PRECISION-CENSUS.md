@@ -830,6 +830,9 @@ work it unblocks. None combines a language change with another.
 
 ### M1. Record loop clause binding types
 
+Done: LOOP-CLAUSE-BINDING-TYPE-CORRECTNESS-MILESTONE-1.md (probes `c1` and
+`c6` record the precise types since).
+
 * **Problem.** `hir::bindingType` and the hover report `any` for every loop
   element, counter and lockstep clause binding (probe c6).
 * **Reproducer.** Probe c6; hover over `b` in `loop b in s.encode_utf8()`

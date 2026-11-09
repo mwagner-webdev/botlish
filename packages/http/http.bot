@@ -1,0 +1,1710 @@
+
+
+# http.bot -- the package `http`: an HTTP/1.1 and HTTP/2 client with TLS
+# for Botlish programs on Linux (HTTP-CLIENT-PACKAGE-MILESTONE-1.md;
+# README.md and GUIDE.md are the user's documentation).
+#
+#   with context std::event_loop::create(64)
+#   with context event_loop_linux::create()          the Linux driver
+#   with context event_loop_linux::native()          its integration capability
+#   with context http::create()                      the HTTP runtime (Http)
+#
+# and, in a task of the loop:
+#
+#   {owner, client} = http::client(http::config())
+#   r = http::get(http::uri("https://example.com/"))
+#   {owner: x, response} = http::send(client, r)
+#   response.status, response.headers
+#   chunk = http::read(response.exchange)        # bytes; empty at the end
+#
+# What it is:
+#
+# * One HTTP engine, Hyper (HTTP/1.1, HTTP/2), with TLS by BoringSSL, both
+#   inside this package's native unit (native/libbotlish_http.a, built on
+#   the author's side; BoringSSL is the `boringssl` package's). Nothing of
+#   them crosses this module's interface: a program sees Botlish values --
+#   URIs, headers, bytes, statuses, declared errors -- and resources.
+# * Scheduled by the program's own event loop (std::event_loop with the
+#   Linux driver package, event_loop_linux): the native unit never decides
+#   when work runs. A task of the loop (the executor) runs a bounded batch of
+#   protocol work per turn and settles what it asked for -- readiness watches
+#   (event_loop_linux), timers (the loop's clock), notices to the tasks that
+#   wait. No Tokio runtime, no second scheduler, no thread but the name
+#   resolver's (getaddrinfo, which blocks, runs on worker threads that only
+#   answer and wake the loop).
+# * Authority: the Http context is made from event_loop_linux's Native (the
+#   application installs both), and every operation that opens a connection
+#   requires it. The native functions are private to this module; none takes
+#   a descriptor or an address from Botlish.
+# * Lifetimes: a client and an exchange are resources
+#   (LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md). Their owners
+#   (ClientOwner, ExchangeOwner) release them where the owner's lexical
+#   scope ends -- on every exit, and when a task holding one is abandoned --
+#   or when released explicitly (close_client, close); the identities
+#   (Client, Exchange) are what the operations take, and one used after its
+#   owner released it is Released. Releasing an exchange before its body
+#   ended abandons it (HTTP/2: the stream is reset; HTTP/1.1: the
+#   connection is closed, never reused); releasing a client closes its
+#   connections and fails its exchanges (Closed).
+# * Every operation that waits (send, finish, read, write) suspends the
+#   calling task only: it must run in a task of the loop.
+import boringssl
+import event_loop_linux
+import std::abi
+import std::abi::bytes
+import std::binary
+import std::byte
+import std::char
+import std::event_loop
+import std::ffi::c
+import std::int
+import std::list
+import std::mutable_array
+import std::mutable_vector
+import std::str
+import type std::event_loop::Delivery
+import type std::event_loop::Wake
+
+extern c library "botlish_http" static at "native/libbotlish_http.a"
+
+private extern c fn bh_open(flags: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+private extern c fn bh_close() -> std::ffi::c::LongLong
+private extern c fn bh_set_notify(lp: std::ffi::c::LongLong, endpoint: std::ffi::c::LongLong, slot: std::ffi::c::LongLong, generation: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+private extern c fn bh_provider() -> std::ffi::c::LongLong
+private extern c fn bh_step(budget: std::ffi::c::LongLong, now: std::ffi::c::LongLong, buf: std::ffi::c::Ptr[std::ffi::c::Void] write noescape, cap: std::ffi::c::ULong) -> std::ffi::c::LongLong
+private extern c fn bh_drain(buf: std::ffi::c::Ptr[std::ffi::c::Void] write noescape, cap: std::ffi::c::ULong) -> std::ffi::c::LongLong
+private extern c fn bh_io_ready(fd: std::ffi::c::LongLong, bits: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+private extern c fn bh_close_fd(fd: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+private extern c fn bh_client(versions: std::ffi::c::LongLong, connect_us: std::ffi::c::LongLong, idle_us: std::ffi::c::LongLong, max_per_origin: std::ffi::c::LongLong, max_header_bytes: std::ffi::c::LongLong, pool_idle_us: std::ffi::c::LongLong, window: std::ffi::c::LongLong, system_trust: std::ffi::c::LongLong, anchors: std::ffi::c::Ptr[std::ffi::c::Void] read noescape, anchors_len: std::ffi::c::ULong) -> std::ffi::c::LongLong
+private extern c fn bh_request(client: std::ffi::c::LongLong, method: std::ffi::c::Ptr[std::ffi::c::Void] read noescape, method_len: std::ffi::c::ULong, https: std::ffi::c::LongLong, host: std::ffi::c::Ptr[std::ffi::c::Void] read noescape, host_len: std::ffi::c::ULong, port: std::ffi::c::LongLong, target: std::ffi::c::Ptr[std::ffi::c::Void] read noescape, target_len: std::ffi::c::ULong, headers: std::ffi::c::Ptr[std::ffi::c::Void] read noescape, headers_len: std::ffi::c::ULong, body: std::ffi::c::Ptr[std::ffi::c::Void] read noescape, body_len: std::ffi::c::ULong, streamed: std::ffi::c::LongLong, length: std::ffi::c::LongLong, deadline: std::ffi::c::LongLong, cancel: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+private extern c fn bh_state(x: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+private extern c fn bh_head(x: std::ffi::c::LongLong, buf: std::ffi::c::Ptr[std::ffi::c::Void] write noescape, cap: std::ffi::c::ULong) -> std::ffi::c::LongLong
+private extern c fn bh_read(x: std::ffi::c::LongLong, buf: std::ffi::c::Ptr[std::ffi::c::Void] write noescape, cap: std::ffi::c::ULong) -> std::ffi::c::LongLong
+private extern c fn bh_write(x: std::ffi::c::LongLong, data: std::ffi::c::Ptr[std::ffi::c::Void] read noescape, len: std::ffi::c::ULong) -> std::ffi::c::LongLong
+private extern c fn bh_finish(x: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+private extern c fn bh_failure(x: std::ffi::c::LongLong, buf: std::ffi::c::Ptr[std::ffi::c::Void] write noescape, cap: std::ffi::c::ULong) -> std::ffi::c::LongLong
+private extern c fn bh_release(h: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+private extern c fn bh_token() -> std::ffi::c::LongLong
+private extern c fn bh_cancel(token: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+private extern c fn bh_stats(buf: std::ffi::c::Ptr[std::ffi::c::Void] write noescape, cap: std::ffi::c::ULong) -> std::ffi::c::LongLong
+
+# ---------------------------------------------------------------------------
+# Errors. Each names one failure category; the payloads are data (codes as
+# the system or the protocol gave them), never parsed from a message. An
+# HTTP response of any status is no error: send returns it.
+
+# A URI this client cannot take: malformed, another scheme than http and
+# https, user information, a host that is no DNS name or IP address.
+error InvalidUri:
+    text: str
+    reason: str
+
+# A method, a header or a body that may not be sent as given.
+error InvalidRequest:
+    reason: str
+
+# Name resolution failed: getaddrinfo's code (EAI_*) and its text.
+error ResolveFailed:
+    host: str
+    reason: str
+    code: int
+
+# No address of the host accepted a TCP connection: the last attempt's errno.
+error ConnectFailed:
+    host: str
+    port: int
+    reason: str
+    code: int
+
+# The server's certificate did not verify: the X.509 verify result (as
+# BoringSSL numbers it: 10 expired, 18 self-signed, 20 unknown issuer, 62
+# host name mismatch, ...) and its text.
+error TlsVerifyFailed:
+    host: str
+    reason: str
+    code: int
+
+# The TLS handshake failed otherwise (an alert, no common protocol, the
+# peer went away).
+error TlsHandshakeFailed:
+    host: str
+    reason: str
+
+# The connection broke the protocol, or broke: a malformed response, a
+# reset stream (CODE: the HTTP/2 error code, -1 when there is none), a
+# connection closed mid-response.
+error ProtocolError:
+    reason: str
+    code: int
+
+# A limit passed: connecting (Phase::Connect), the request's deadline
+# (Phase::Deadline), the server's silence while the client waited for data
+# (Phase::Idle).
+error Timeout:
+    phase: Phase
+    reason: str
+
+# The request's cancellation was requested (cancel).
+error Cancelled
+
+# The client of the exchange was released.
+error Closed
+
+# A client or exchange used after its owner released it.
+error Released
+
+# A configuration or protocol this client does not do (h2c, an HTTP/2-only
+# client and a server that does not negotiate it, ...).
+error Unsupported:
+    reason: str
+
+# The client's trust anchors could not be made: no system bundle, anchors
+# that are no PEM certificates, nothing trusted at all.
+error TrustFailed:
+    reason: str
+
+# A header value that is no UTF-8 text (text).
+error HeaderNotText:
+    name: str
+
+# read_all's limit was exceeded.
+error BodyTooLarge:
+    limit: int
+
+# A defect of this package or its native unit (a panic it contained, a
+# call from another thread, its own tables): never a network condition.
+error Fault:
+    reason: str
+    code: int
+
+enum Phase:
+    Connect,
+    Deadline,
+    Idle,
+
+# ---------------------------------------------------------------------------
+# Small helpers
+
+# A C long long of X, clamped (every value this module passes is in range;
+# the clamp keeps the call in its domain).
+private nomethod fn cll(x: int) -> std::ffi::c::LongLong:
+    if x < -9223372036854775808:
+        -9223372036854775808
+    elif x > 9223372036854775807:
+        9223372036854775807
+    else:
+        x
+
+# Cell I of A (0 outside it), and A with cell I set to V.
+private nomethod fn cell(a: MutableArray[int], i: int) -> int:
+    a.at(i):
+        on IndexNotFound:
+            0
+
+private nomethod fn put(place a: MutableArray[int], i: int, v: int):
+    a.set(i, v):
+        on IndexNotFound:
+            unit
+
+private nomethod fn code_of(c: UnicodeChar) -> int:
+    std::char::scalar_value(c)
+
+private nomethod fn alpha?(c: UnicodeChar) -> bool:
+    k = code_of(c)
+    (k >= 65 and k <= 90) or (k >= 97 and k <= 122)
+
+private nomethod fn digit?(c: UnicodeChar) -> bool:
+    k = code_of(c)
+    k >= 48 and k <= 57
+
+private nomethod fn hex?(c: UnicodeChar) -> bool:
+    k = code_of(c)
+    digit?(c) or (k >= 65 and k <= 70) or (k >= 97 and k <= 102)
+
+private nomethod fn char_of(s: str, i: int) -> UnicodeChar:
+    if i < 0 or i >= std::str::length(s):
+        return ' '
+    s.char_at(i)
+
+private nomethod fn slice(s: str, start: int, end: int) -> str:
+    n = std::str::length(s)
+    a = if start < 0:
+        0
+    elif start > n:
+        n
+    else:
+        start
+    b = if end < a:
+        a
+    elif end > n:
+        n
+    else:
+        end
+    s.substring(a, b):
+        on LowerUnderrun:
+            ""
+        on UpperOverrun:
+            ""
+
+# The first index at or after START of a character in STOPS ("" stops
+# nowhere), or the length.
+private nomethod fn scan_to(s: str, start: int, stops: List[UnicodeChar]) -> int:
+    n = std::str::length(s)
+    loop i from start to n:
+        c = char_of(s, i)
+        loop j from 0 to std::list::length(stops):
+            if stops.at(j) == c:
+                return i
+    n
+
+private nomethod fn index_of(s: str, c: UnicodeChar, start: int) -> int:
+    n = std::str::length(s)
+    loop i from start to n:
+        if char_of(s, i) == c:
+            return i
+    -1
+
+# ---------------------------------------------------------------------------
+# Configuration
+
+# Which protocols a client may use. Over https, Negotiate offers h2 and
+# http/1.1 by ALPN and takes the server's choice (HTTP/1.1 when it chooses
+# none); Http2 accepts only h2 (Unsupported otherwise, never a silent
+# fallback). An http URI is HTTP/1.1 (no h2c): Http2 refuses it.
+enum Versions:
+    Negotiate,
+    Http1,
+    Http2,
+
+# Whom a client trusts: the system's bundle (the first regular file of
+# /etc/ssl/certs/ca-certificates.crt, /etc/pki/ca-trust/extracted/pem/
+# tls-ca-bundle.pem, /etc/pki/tls/certs/ca-bundle.crt, /etc/ssl/ca-bundle.pem,
+# /etc/ssl/cert.pem; read when the client is made, no environment variable
+# consulted) and ANCHORS, PEM certificates trusted besides (empty: none).
+# There is no way to turn verification off.
+struct Trust:
+    system: bool
+    anchors: std::abi::bytes::Bytes
+
+# A client's configuration. Times are microseconds, 0 for no limit: CONNECT_TIMEOUT bounds making a connection (resolution, TCP,
+# TLS, the HTTP/2 handshake); IDLE_TIMEOUT bounds each wait for the server
+# while the client wants data (the response head once the request is sent,
+# each body chunk) -- never the program's own pauses; POOL_IDLE is how long
+# an idle HTTP/1.1 connection stays reusable. MAX_CONNECTIONS: HTTP/1.1
+# connections per origin (HTTP/2 uses one). MAX_HEADER_BYTES bounds a
+# response head. WINDOW is HTTP/2's receive window per stream (bytes; the
+# connection's is four times it): what a server may send ahead of a program
+# that does not read -- with the one chunk the native side holds, the bound
+# of a paused exchange's memory (HTTP/1.1's is the 16 KiB read buffer and
+# the kernel's socket buffers).
+struct Config:
+    versions: Versions
+    trust: Trust
+    connect_timeout: int
+    idle_timeout: int
+    max_connections: int
+    max_header_bytes: int
+    pool_idle: int
+    window: int
+
+# The defaults: negotiate, system trust, 30 s to connect, 300 s idle (a
+# server-sent event stream may be quiet for minutes), 6 connections per
+# origin, 64 KiB of head, 90 s pool idle, a 1 MiB HTTP/2 window.
+fn config() -> Config:
+    Config {
+        versions: Versions::Negotiate,
+        trust: Trust {system: true, anchors: std::abi::bytes::from_list([])},
+        connect_timeout: 30000000,
+        idle_timeout: 300000000,
+        max_connections: 6,
+        max_header_bytes: 65536,
+        pool_idle: 90000000,
+        window: 1048576
+    }
+
+# CONFIG trusting PEM besides what it trusts.
+fn with_anchors(config: Config, pem: std::abi::bytes::Bytes) -> Config:
+    Config {
+        versions: config.versions,
+        trust: Trust {system: config.trust.system, anchors: std::abi::bytes::join([config.trust.anchors, pem])},
+        connect_timeout: config.connect_timeout,
+        idle_timeout: config.idle_timeout,
+        max_connections: config.max_connections,
+        max_header_bytes: config.max_header_bytes,
+        pool_idle: config.pool_idle,
+        window: config.window
+    }
+
+# ---------------------------------------------------------------------------
+# URIs (RFC 3986, absolute http and https URIs)
+
+# A parsed absolute URI. SCHEME is "http" or "https"; HOST a DNS name
+# (lowercased, ASCII: an internationalized name in its xn-- form), a dotted
+# IPv4 address or an IPv6 address (without its brackets); PORT the explicit
+# port or the scheme's default; PATH the path as written (percent-encoding
+# kept, "/" when empty); QUERY the query without its "?" (HAS_QUERY says
+# whether there was one, even empty). A fragment is checked and dropped:
+# it is never sent. User information is refused (RFC 9110, section 4.2.4).
+struct Uri:
+    scheme: str
+    host: str
+    port: int
+    path: str
+    query: str
+    has_query: bool
+
+private nomethod fn unreserved?(c: UnicodeChar) -> bool:
+    alpha?(c) or digit?(c) or c == '-' or c == '.' or c == '_' or c == '~'
+
+private nomethod fn sub_delim?(c: UnicodeChar) -> bool:
+    c == '!' or c == '$' or c == '&' or c == '\'' or c == '(' or c == ')' or c == '*' or c == '+' or c == ',' or c == ';' or c == '='
+
+# A path, query or fragment character other than '%' (RFC 3986's pchar,
+# with '/' and, for a query and a fragment, '?').
+private nomethod fn pchar?(c: UnicodeChar) -> bool:
+    unreserved?(c) or sub_delim?(c) or c == ':' or c == '@' or c == '/' or c == '?'
+
+# Whether S[start, end) is made of characters PCHAR? admits ('?' only in a
+# query or a fragment) and valid percent-escapes ('%' and two hex digits).
+private nomethod fn escaped_text?(s: str, start: int, end: int, query: bool) -> bool:
+    loop k from start to end:
+        c = char_of(s, k)
+        if c == '%':
+            if k + 2 >= end:
+                return false
+            if not hex?(char_of(s, k + 1)) or not hex?(char_of(s, k + 2)):
+                return false
+        elif c == '?':
+            if not query:
+                return false
+        elif not pchar?(c):
+            return false
+    true
+
+private nomethod fn lower_ascii(s: str) -> str:
+    std::str::lowercase(s)
+
+# A dotted-quad IPv4 address: four decimal octets, no leading zeros.
+nomethod fn ipv4?(s: str) -> bool:
+    n = std::str::length(s)
+    # 0: dots seen, 1: digits in the current octet, 2: its value
+    st = std::mutable_array::create(3, 0)
+    loop i from 0 to n:
+        c = char_of(s, i)
+        dots = cell(st, 0)
+        digits = cell(st, 1)
+        value = cell(st, 2)
+        if c == '.':
+            if digits == 0:
+                return false
+            put(st, 0, dots + 1)
+            put(st, 1, 0)
+            put(st, 2, 0)
+        elif digit?(c):
+            if digits == 1 and value == 0:
+                return false
+            v = value * 10 + (code_of(c) - 48)
+            if v > 255:
+                return false
+            put(st, 1, digits + 1)
+            put(st, 2, v)
+        else:
+            return false
+    cell(st, 0) == 3 and cell(st, 1) > 0
+
+# An IPv6 address (RFC 4291's text form: eight groups of 1-4 hex digits, at
+# most one "::" standing for one or more groups of zeros, an IPv4 address in
+# place of the last two groups). No zone identifier.
+nomethod fn ipv6?(s: str) -> bool:
+    n = std::str::length(s)
+    if n < 2 or n > 45:
+        return false
+    count = std::mutable_array::create(1, 0)
+    loop i from 0 to n - 1:
+        if char_of(s, i) == ':' and char_of(s, i + 1) == ':':
+            put(count, 0, cell(count, 0) + 1)
+    double = cell(count, 0)
+    if double > 1:
+        return false
+    if char_of(s, 0) == ':' and char_of(s, 1) != ':':
+        return false
+    if char_of(s, n - 1) == ':' and char_of(s, n - 2) != ':':
+        return false
+    # The non-empty fields between colons: 0 the groups counted, 1 the
+    # current field's start.
+    st = std::mutable_array::create(2, 0)
+    loop i from 0 to n + 1:
+        if i == n or char_of(s, i) == ':':
+            groups = cell(st, 0)
+            start = cell(st, 1)
+            len = i - start
+            if len > 0:
+                field = slice(s, start, i)
+                if index_of(field, '.', 0) >= 0:
+                    if i != n or not ipv4?(field):
+                        return false
+                    put(st, 0, groups + 2)
+                else:
+                    if len > 4:
+                        return false
+                    loop j from 0 to len:
+                        if not hex?(char_of(field, j)):
+                            return false
+                    put(st, 0, groups + 1)
+            put(st, 1, i + 1)
+    total = cell(st, 0)
+    if double == 1:
+        total <= 7
+    else:
+        total == 8
+
+# A DNS name as a URI host: labels of letters, digits and '-', separated
+# by '.', none empty (a trailing '.' is allowed), at most 63 characters
+# each and 253 in all.
+nomethod fn dns_name?(s: str) -> bool:
+    n = std::str::length(s)
+    if n == 0 or n > 254:
+        return false
+    label = std::mutable_array::create(1, 0)
+    loop i from 0 to n:
+        c = char_of(s, i)
+        k = cell(label, 0)
+        if c == '.':
+            if k == 0:
+                return false
+            if char_of(s, i - 1) == '-':
+                return false
+            put(label, 0, 0)
+        elif alpha?(c) or digit?(c) or c == '-' or c == '_':
+            if k == 0 and c == '-':
+                return false
+            if k >= 63:
+                return false
+            put(label, 0, k + 1)
+        else:
+            return false
+    if char_of(s, n - 1) == '-':
+        return false
+    not (n == 254 and char_of(s, n - 1) != '.')
+
+# All-digits-and-dots, the shape of an IPv4 address (a host of that shape
+# that is no valid IPv4 address is refused, never resolved as a name).
+private nomethod fn numeric_dotted?(s: str) -> bool:
+    n = std::str::length(s)
+    if n == 0:
+        return false
+    loop i from 0 to n:
+        c = char_of(s, i)
+        if not (digit?(c) or c == '.'):
+            return false
+    true
+
+# Parse TEXT as an absolute http or https URI.
+nomethod fn uri(text: str) -> Uri errors InvalidUri:
+    n = std::str::length(text)
+    loop i from 0 to n:
+        k = code_of(char_of(text, i))
+        if k <= 32 or k >= 127:
+            fail InvalidUri {text: text, reason: "a URI holds only visible ASCII characters (percent-encode the others)"}
+    colon = index_of(text, ':', 0)
+    if colon <= 0:
+        fail InvalidUri {text: text, reason: "no scheme"}
+    if not alpha?(char_of(text, 0)):
+        fail InvalidUri {text: text, reason: "the scheme does not start with a letter"}
+    loop i from 1 to colon:
+        c = char_of(text, i)
+        if not (alpha?(c) or digit?(c) or c == '+' or c == '-' or c == '.'):
+            fail InvalidUri {text: text, reason: "the scheme holds a character a scheme may not"}
+    scheme = lower_ascii(slice(text, 0, colon))
+    if scheme != "http" and scheme != "https":
+        fail InvalidUri {text: text, reason: "the scheme is not http or https"}
+    if char_of(text, colon + 1) != '/' or char_of(text, colon + 2) != '/':
+        fail InvalidUri {text: text, reason: "no authority (an http or https URI starts with scheme://)"}
+    start = colon + 3
+    stop = scan_to(text, start, ['/', '?', '#'])
+    authority = slice(text, start, stop)
+    if index_of(authority, '@', 0) >= 0:
+        fail InvalidUri {text: text, reason: "user information in the authority is not allowed"}
+    alen = std::str::length(authority)
+    if alen == 0:
+        fail InvalidUri {text: text, reason: "the host is empty"}
+    host_end = if char_of(authority, 0) == '[':
+        close = index_of(authority, ']', 0)
+        if close < 0:
+            fail InvalidUri {text: text, reason: "an IPv6 host's '[' is not closed"}
+        close + 1
+    else:
+        c = index_of(authority, ':', 0)
+        if c < 0:
+            alen
+        else:
+            c
+    raw_host = slice(authority, 0, host_end)
+    host = if char_of(raw_host, 0) == '[':
+        inner = slice(raw_host, 1, std::str::length(raw_host) - 1)
+        if not ipv6?(inner):
+            fail InvalidUri {text: text, reason: "the host in brackets is not an IPv6 address"}
+        lower_ascii(inner)
+    else:
+        h = lower_ascii(raw_host)
+        if numeric_dotted?(h):
+            if not ipv4?(h):
+                fail InvalidUri {text: text, reason: "the host is not a valid IPv4 address"}
+        elif not dns_name?(h):
+            fail InvalidUri {text: text, reason: "the host is not a DNS name or an IP address"}
+        h
+    default_port = if scheme == "https":
+        443
+    else:
+        80
+    port = if host_end < alen:
+        if char_of(authority, host_end) != ':':
+            fail InvalidUri {text: text, reason: "the host is followed by something else than a port"}
+        digits = slice(authority, host_end + 1, alen)
+        dn = std::str::length(digits)
+        if dn == 0:
+            default_port
+        else:
+            value = std::mutable_array::create(1, 0)
+            loop i from 0 to dn:
+                c = char_of(digits, i)
+                if not digit?(c):
+                    fail InvalidUri {text: text, reason: "the port is not a number"}
+                v = cell(value, 0)
+                if v <= 65535:
+                    put(value, 0, v * 10 + (code_of(c) - 48))
+            p = cell(value, 0)
+            if p < 1 or p > 65535:
+                fail InvalidUri {text: text, reason: "the port is out of range"}
+            p
+    else:
+        default_port
+    path_end = scan_to(text, stop, ['?', '#'])
+    if not escaped_text?(text, stop, path_end, false):
+        fail InvalidUri {text: text, reason: "the path holds a character or an escape a path may not"}
+    path = if path_end == stop:
+        "".append_char('/')
+    else:
+        slice(text, stop, path_end)
+    hash = index_of(text, '#', stop)
+    query_end = if hash < 0:
+        n
+    else:
+        hash
+    has_query = char_of(text, path_end) == '?' and path_end < n
+    query = if has_query:
+        if not escaped_text?(text, path_end + 1, query_end, true):
+            fail InvalidUri {text: text, reason: "the query holds a character or an escape a query may not"}
+        slice(text, path_end + 1, query_end)
+    else:
+        ""
+    if hash >= 0:
+        if index_of(text, '#', hash + 1) >= 0:
+            fail InvalidUri {text: text, reason: "a second '#'"}
+        if not escaped_text?(text, hash + 1, n, true):
+            fail InvalidUri {text: text, reason: "the fragment holds a character or an escape a fragment may not"}
+    Uri {scheme: scheme, host: host, port: port, path: path, query: query, has_query: has_query}
+
+# The authority as sent (Host, :authority): the host (an IPv6 address in
+# brackets) and the port unless it is the scheme's default.
+fn authority(u: Uri) -> str:
+    host = if index_of(u.host, ':', 0) >= 0:
+        "".append_char('[').concat(u.host).append_char(']')
+    else:
+        u.host
+    default_port = if u.scheme == "https":
+        443
+    else:
+        80
+    if u.port == default_port:
+        host
+    else:
+        host.append_char(':').concat(std::int::to_string(u.port))
+
+# The request target (origin form): the path, and the query after '?'.
+fn target(u: Uri) -> str:
+    if u.has_query:
+        u.path.append_char('?').concat(u.query)
+    else:
+        u.path
+
+# The URI as text (scheme://authority/path?query).
+fn uri_text(u: Uri) -> str:
+    u.scheme.concat("://").concat(authority(u)).concat(target(u))
+
+# ---------------------------------------------------------------------------
+# Headers
+
+# A header field: NAME a token, lowercased (HTTP/2's spelling; HTTP/1.1's
+# names are case-insensitive), VALUE its bytes (no CR, LF, NUL or other
+# control character but HTAB; no leading or trailing space). A response
+# keeps every field the server sent, repeated names included, each name's
+# values in their order.
+struct Header:
+    name: str
+    value: std::abi::bytes::Bytes
+
+private nomethod fn token_char?(c: UnicodeChar) -> bool:
+    alpha?(c) or digit?(c) or c == '!' or c == '#' or c == '$' or c == '%' or c == '&' or c == '\'' or c == '*' or c == '+' or c == '-' or c == '.' or c == '^' or c == '_' or c == '`' or c == '|' or c == '~'
+
+# A token (RFC 9110, section 5.6.2): a method's or a header name's syntax.
+nomethod fn token?(s: str) -> bool:
+    n = std::str::length(s)
+    if n == 0:
+        return false
+    loop i from 0 to n:
+        if not token_char?(char_of(s, i)):
+            return false
+    true
+
+# The header names a request may not carry: the client owns connection
+# management and framing (HTTP/1.1's and HTTP/2's connection-specific
+# fields), and the authority comes from the URI.
+private nomethod fn forbidden?(name: str) -> bool:
+    name == "connection" or name == "keep-alive" or name == "proxy-connection" or name == "transfer-encoding" or name == "upgrade" or name == "te" or name == "host" or name == "content-length"
+
+private nomethod fn check_name(name: str) -> str errors InvalidRequest:
+    if not token?(name):
+        fail InvalidRequest {reason: "a header name is not a token: \"".concat(name).append_char('"')}
+    lower = std::str::lowercase(name)
+    if forbidden?(lower):
+        fail InvalidRequest {reason: "the client sets the ".concat(lower).concat(" header itself")}
+    lower
+
+# Whether TEXT is a valid field value: visible characters, spaces and tabs
+# inside, no control character, no leading or trailing space or tab.
+nomethod fn field_value?(text: str) -> bool:
+    n = std::str::length(text)
+    loop i from 0 to n:
+        k = code_of(char_of(text, i))
+        if k == 9 or k == 32:
+            if i == 0 or i == n - 1:
+                return false
+        elif k < 32 or k == 127:
+            return false
+    true
+
+# A request header NAME: VALUE (VALUE's UTF-8 bytes).
+nomethod fn header(name: str, value: str) -> Header errors InvalidRequest:
+    lower = check_name(name)
+    if not field_value?(value):
+        fail InvalidRequest {reason: "the value of header ".concat(lower).concat(" holds a control character, or leading or trailing space")}
+    Header {name: lower, value: std::abi::bytes::from_list(std::str::encode_utf8(value))}
+
+# A request header NAME with VALUE's bytes as they are (checked when sent).
+nomethod fn header_bytes(name: str, value: std::abi::bytes::Bytes) -> Header errors InvalidRequest:
+    lower = check_name(name)
+    Header {name: lower, value: value}
+
+# H's value as text.
+fn text(h: Header) -> str errors HeaderNotText:
+    std::abi::bytes::decode_utf8(h.value):
+        on InvalidUtf8:
+            fail HeaderNotText {name: h.name}
+
+# The values of the fields named NAME (any case) in HEADERS, in order.
+fn values(headers: List[Header], name: str) -> List[std::abi::bytes::Bytes]:
+    lower = std::str::lowercase(name)
+    found = loop h in headers:
+        if h.name != lower:
+            continue
+        h.value
+    found
+
+# The first value of NAME as text, or "" when there is none.
+fn first(headers: List[Header], name: str) -> str errors HeaderNotText:
+    lower = std::str::lowercase(name)
+    loop i from 0 to std::list::length(headers):
+        h = headers.at(i)
+        if h.name == lower:
+            return text(h)
+    ""
+
+# ---------------------------------------------------------------------------
+# Requests
+
+# A cancellation token: every exchange whose request carries it fails with
+# Cancelled once cancel(token) is called (one started after it at once).
+# An identity, not a resource: copy it to whoever may cancel.
+opaque struct Cancel:
+    token: int
+
+fn no_cancel() -> Cancel:
+    Cancel {token: 0}
+
+# What a client sends. METHOD a token (case-sensitive: "GET", not "get");
+# TARGET the URI; HEADERS in order; BODY its bytes (empty: none); DEADLINE
+# the microsecond of the driver's monotonic clock (event_loop_linux::now_us)
+# by which the whole exchange must be done (0: none; with_timeout sets it
+# from now); CANCEL the token cancel acts on.
+struct Request:
+    method: str
+    target: Uri
+    headers: List[Header]
+    body: std::abi::bytes::Bytes
+    deadline: int
+    cancel: Cancel
+
+# A request of METHOD for TARGET (no headers, no body).
+nomethod fn request(method: str, target: Uri) -> Request errors InvalidRequest:
+    if not token?(method):
+        fail InvalidRequest {reason: "the method is not a token: \"".concat(method).append_char('"')}
+    Request {method: method, target: target, headers: [], body: std::abi::bytes::from_list([]), deadline: 0, cancel: no_cancel()}
+
+nomethod fn get(target: Uri) -> Request:
+    Request {method: "GET", target: target, headers: [], body: std::abi::bytes::from_list([]), deadline: 0, cancel: no_cancel()}
+
+nomethod fn post(target: Uri, body: std::abi::bytes::Bytes) -> Request:
+    Request {method: "POST", target: target, headers: [], body: body, deadline: 0, cancel: no_cancel()}
+
+fn with_header(r: Request, h: Header) -> Request:
+    Request {method: r.method, target: r.target, headers: r.headers.append(h), body: r.body, deadline: r.deadline, cancel: r.cancel}
+
+fn with_body(r: Request, body: std::abi::bytes::Bytes) -> Request:
+    Request {method: r.method, target: r.target, headers: r.headers, body: body, deadline: r.deadline, cancel: r.cancel}
+
+fn with_deadline(r: Request, deadline: int) -> Request:
+    Request {method: r.method, target: r.target, headers: r.headers, body: r.body, deadline: deadline, cancel: r.cancel}
+
+# R due within MICROS from now: the driver's monotonic clock read now (the
+# loop's own now() is the time of its current turn, 0 before the first).
+fn with_timeout(r: Request, micros: int, context n: event_loop_linux::Native) -> Request:
+    r.with_deadline(event_loop_linux::now_us() + micros)
+
+fn with_cancel(r: Request, c: Cancel) -> Request:
+    Request {method: r.method, target: r.target, headers: r.headers, body: r.body, deadline: r.deadline, cancel: c}
+
+# ---------------------------------------------------------------------------
+# Native records: failures and response heads
+
+private nomethod fn frozen(buf: std::abi::bytes::MutableBytes, n: int) -> std::abi::bytes::Bytes errors Fault:
+    count = std::abi::usize(n):
+        on std::abi::AbiIntegerBelowRange:
+            fail Fault {reason: "a negative byte count", code: n}
+        on std::abi::AbiIntegerAboveRange:
+            fail Fault {reason: "a byte count out of range", code: n}
+    buf.freeze_prefix(count):
+        on UpperOverrun:
+            fail Fault {reason: "the native unit reported more bytes than it was lent", code: n}
+
+private nomethod fn cut(data: std::abi::bytes::Bytes, start: int, length: int) -> std::abi::bytes::Bytes errors Fault:
+    data.slice(start, start + length):
+        on LowerUnderrun:
+            fail Fault {reason: "a record of the native unit points before its buffer", code: start}
+        on UpperOverrun:
+            fail Fault {reason: "a record of the native unit points past its buffer", code: start + length}
+
+# The bytes a native call that copies out a record of unknown size gave:
+# called with 512 bytes, then again with what it said it needs.
+private nomethod fn fetched(x: int, what: int) -> std::abi::bytes::Bytes errors Fault:
+    first = if what == 0:
+        cll(x).bh_head(std::abi::bytes::zeroed(std::abi::usize(512)), 512)
+    else:
+        cll(x).bh_failure(std::abi::bytes::zeroed(std::abi::usize(512)), 512)
+    n = first.result
+    if n <= 512:
+        if n < 0:
+            return std::abi::bytes::from_list([])
+        return frozen(first.buf, n)
+    size = std::abi::usize(n):
+        on std::abi::AbiIntegerBelowRange:
+            fail Fault {reason: "a negative record size", code: n}
+        on std::abi::AbiIntegerAboveRange:
+            fail Fault {reason: "a record size out of range", code: n}
+    second = if what == 0:
+        cll(x).bh_head(std::abi::bytes::zeroed(size), size.value)
+    else:
+        cll(x).bh_failure(std::abi::bytes::zeroed(size), size.value)
+    frozen(second.buf, second.result)
+
+layout FailureRecord:
+    size 32
+    align 8
+    field kind: std::binary::I64 at 0
+    field code: std::binary::I64 at 8
+    field port: std::binary::I64 at 16
+    field reason_length: std::binary::U32 at 24
+    field host_length: std::binary::U32 at 28
+
+struct FailureInfo:
+    kind: int
+    code: int
+    port: int
+    reason: str
+    host: str
+
+private nomethod fn decoded(data: std::abi::bytes::Bytes) -> str:
+    std::abi::bytes::decode_utf8(data):
+        on InvalidUtf8:
+            "(not UTF-8)"
+
+# The failure the native unit recorded for X (0: the last constructor's).
+private nomethod fn failure_of(x: int) -> FailureInfo errors Fault:
+    data = fetched(x, 1)
+    f = std::binary::parse(FailureRecord, cut(data, 0, 32)):
+        on LayoutLengthMismatch:
+            fail Fault {reason: "the failure record is short", code: x}
+    reason = decoded(cut(data, 32, f.reason_length))
+    host = decoded(cut(data, 32 + f.reason_length, f.host_length))
+    FailureInfo {kind: f.kind, code: f.code, port: f.port, reason: reason, host: host}
+
+# What a bridge refusal (the guard's, <= -90000) means: never a network
+# condition.
+private nomethod fn guard_text(call: str, code: int) -> str:
+    if code == -90001:
+        call.concat(": the native unit panicked (contained)")
+    elif code == -90002:
+        call.concat(": called from another thread than the loop's")
+    elif code == -90003:
+        call.concat(": a reentrant call")
+    elif code == -90004:
+        call.concat(": a stale handle")
+    elif code == -90005:
+        call.concat(": the HTTP runtime is not open")
+    elif code == -90009:
+        call.concat(": the HTTP runtime is open on another thread (one thread of a process at a time)")
+    else:
+        call.concat(": an unexpected status")
+
+private nomethod fn phase_of(code: int) -> Phase:
+    if code == 1:
+        Phase::Connect
+    elif code == 2:
+        Phase::Deadline
+    else:
+        Phase::Idle
+
+# STATUS is a native call's answer about exchange X (0: a constructor): a
+# failure (<= -100) fails with the failure the native unit recorded, a
+# guard refusal (<= -90000) with Fault; anything else returns. Called after
+# every such call, whatever it answered.
+private nomethod fn check(x: int, status: int) errors InvalidRequest, ResolveFailed, ConnectFailed, TlsVerifyFailed, TlsHandshakeFailed, ProtocolError, Timeout, Cancelled, Closed, Unsupported, TrustFailed, Released, Fault:
+    if status > -100:
+        return unit
+    if status <= -90000:
+        fail Fault {reason: guard_text("the HTTP runtime", status), code: status}
+    f = failure_of(x)
+    k = f.kind
+    if k == 1:
+        fail InvalidRequest {reason: f.reason}
+    if k == 2:
+        fail ResolveFailed {host: f.host, reason: f.reason, code: f.code}
+    if k == 3:
+        fail ConnectFailed {host: f.host, port: f.port, reason: f.reason, code: f.code}
+    if k == 4:
+        fail TlsVerifyFailed {host: f.host, reason: f.reason, code: f.code}
+    if k == 5:
+        fail TlsHandshakeFailed {host: f.host, reason: f.reason}
+    if k == 6:
+        fail ProtocolError {reason: f.reason, code: f.code}
+    if k == 7:
+        fail Timeout {phase: phase_of(f.code), reason: f.reason}
+    if k == 8:
+        fail Cancelled
+    if k == 9:
+        fail Closed
+    if k == 10:
+        fail Unsupported {reason: f.reason}
+    if k == 11:
+        fail TrustFailed {reason: f.reason}
+    if k == 12:
+        fail Released
+    fail Fault {reason: f.reason, code: f.code}
+
+# The same for a request the native unit refused before it had a handle.
+private nomethod fn check_request(status: int) errors InvalidRequest, Unsupported, Released, Fault:
+    if status > 0:
+        return unit
+    if status <= -90000:
+        fail Fault {reason: guard_text("bh_request", status), code: status}
+    f = failure_of(0)
+    if f.kind == 1:
+        fail InvalidRequest {reason: f.reason}
+    if f.kind == 10:
+        fail Unsupported {reason: f.reason}
+    if f.kind == 12:
+        fail Released
+    fail Fault {reason: f.reason, code: f.code}
+
+# The same for a client the native unit could not make.
+private nomethod fn check_client(status: int) errors TrustFailed, Unsupported, Fault:
+    if status > 0:
+        return unit
+    if status <= -90000:
+        fail Fault {reason: guard_text("bh_client", status), code: status}
+    f = failure_of(0)
+    if f.kind == 11:
+        fail TrustFailed {reason: f.reason}
+    if f.kind == 10:
+        fail Unsupported {reason: f.reason}
+    fail Fault {reason: f.reason, code: f.code}
+
+# A status of a call the guard may refuse, and nothing else.
+private nomethod fn check_guard(call: str, status: int) errors Fault:
+    if status > -90000:
+        return unit
+    fail Fault {reason: guard_text(call, status), code: status}
+
+layout HeadRecord:
+    size 16
+    align 4
+    field status: std::binary::U32 at 0
+    field version: std::binary::U32 at 4
+    field count: std::binary::U32 at 8
+    field reserved: std::binary::U32 at 12
+
+layout FieldRecord:
+    size 16
+    align 4
+    field name_offset: std::binary::U32 at 0
+    field name_length: std::binary::U32 at 4
+    field value_offset: std::binary::U32 at 8
+    field value_length: std::binary::U32 at 12
+
+private nomethod fn head_bytes(x: int) -> std::abi::bytes::Bytes errors Fault:
+    fetched(x, 0)
+
+# ---------------------------------------------------------------------------
+# The runtime: the bridge's state and its executor on the Linux driver
+
+# regs: 0 RX (the executor's source: readiness records, the timekeeper's
+# expiries, wakes), 1 the timekeeper's current timer, 2 its kick channel.
+# handles/waiters: the tasks waiting on a native handle, each on its own
+# registration (-1: a free slot). fds/interests/watches: the descriptors
+# the native unit waits on, their interests and event_loop_linux watches.
+# state: the registers below.
+opaque context struct Http:
+    regs: MutableVector[std::event_loop::Reg]
+    handles: MutableVector[int]
+    waiters: MutableVector[std::event_loop::Reg]
+    fds: MutableVector[int]
+    interests: MutableVector[int]
+    watches: MutableVector[event_loop_linux::Watch]
+    state: MutableArray[int]
+
+private s_open = 0
+
+private s_started = 1
+
+private s_armed = 2
+
+private s_stop = 3
+
+private s_nudged = 4
+
+private s_budget = 5
+
+private s_steps = 6
+
+private s_waits = 7
+
+private s_yields = 8
+
+private s_io = 9
+
+private s_watches = 10
+
+private s_rewatches = 11
+
+private s_retired = 12
+
+private s_posted = 13
+
+private s_stale = 14
+
+private s_deadline = 15
+
+private s_size = 16
+
+# A readiness record carries the bits (1..15); a wake 0; the timekeeper's
+# expiry this.
+private timer_record = 16
+
+# The record buffer of a step: 64 records of 32 bytes.
+private step_capacity = 2048
+
+layout StepRecord:
+    size 32
+    align 8
+    field kind: std::binary::I64 at 0
+    field a: std::binary::I64 at 8
+    field b: std::binary::I64 at 16
+    field c: std::binary::I64 at 24
+
+layout StepBatch:
+    size 2048
+    align 8
+    field records: array 64 of StepRecord at 0
+
+# The HTTP runtime of this thread, made from the installed Linux driver's
+# Native capability (the application's: `with context http::create()`
+# after event_loop_linux::native()). The native unit opens here; its
+# executor starts with the first client.
+fn create(context n: event_loop_linux::Native) -> Http:
+    opened = bh_open(0)
+    state = std::mutable_array::create(s_size, 0)
+    put(state, s_open, opened + 0)
+    put(state, s_armed, -1)
+    put(state, s_budget, 32)
+    put(state, s_deadline, -1)
+    Http {regs: std::mutable_vector::from_list([]), handles: std::mutable_vector::from_list([]), waiters: std::mutable_vector::from_list([]), fds: std::mutable_vector::from_list([]), interests: std::mutable_vector::from_list([]), watches: std::mutable_vector::from_list([]), state: state}
+
+private nomethod fn reg_get(i: int, context h: Http) -> int errors IndexNotFound:
+    h.state.at(i)
+
+private nomethod fn reg_put(i: int, v: int, context h: Http) errors IndexNotFound:
+    h.state.set(i, v)
+
+private nomethod fn bump(i: int, context h: Http) errors IndexNotFound:
+    h.state.set(i, h.state.at(i) + 1)
+
+private nomethod fn reg_or_zero(i: int, context h: Http) -> int:
+    h.state.at(i):
+        on IndexNotFound:
+            0
+
+# After a call that may have given the native side work (a request, a
+# chunk taken or offered, a release, a cancellation): wake the executor,
+# once until its next step.
+private nomethod fn nudge(context h: Http, ev: std::event_loop::Loop) errors IndexNotFound, std::event_loop::SchedulerFault:
+    if reg_get(s_started) == 0 or reg_get(s_nudged) == 1:
+        return unit
+    reg_put(s_nudged, 1)
+    h.regs.at(0).post(0, 0)
+
+private nomethod fn nudge_checked(context h: Http, ev: std::event_loop::Loop) errors Fault, std::event_loop::SchedulerFault:
+    nudge():
+        on IndexNotFound:
+            fail Fault {reason: "the runtime's registrations are missing", code: 0}
+
+private nomethod fn find_free(context h: Http) -> int errors IndexNotFound:
+    n = h.handles.length()
+    loop i from 0 to n:
+        if h.handles.at(i) == -1:
+            return i
+    -1
+
+# Wait until HANDLE's state may have changed (a notice for it): a
+# registration of this task's own, owned (it keeps the loop alive while
+# the task waits, and is revoked when this function ends -- also when the
+# task is abandoned while it waits).
+private nomethod fn await(handle: int, context h: Http, ev: std::event_loop::Loop) errors IndexNotFound, std::event_loop::SchedulerFault:
+    {owner, reg} = std::event_loop::owned_source(Delivery::Coalesce, 1, :keep_alive)
+    free = find_free()
+    slot = if free >= 0:
+        h.handles.swap(free, handle)
+        h.waiters.swap(free, reg)
+        free
+    else:
+        h.handles.push(handle)
+        h.waiters.push(reg)
+        h.handles.length() - 1
+    bump(s_waits)
+    std::event_loop::wait(reg)
+    h.handles.swap(slot, -1)
+
+private nomethod fn wait_for(handle: int, context h: Http, ev: std::event_loop::Loop) errors Fault, std::event_loop::SchedulerFault:
+    await(handle):
+        on IndexNotFound:
+            fail Fault {reason: "the runtime's waiter table is inconsistent", code: handle}
+
+# Wake every task waiting on HANDLE (it was released).
+private nomethod fn forget(handle: int, context h: Http, ev: std::event_loop::Loop) errors IndexNotFound, std::event_loop::SchedulerFault:
+    n = h.handles.length()
+    loop i from 0 to n:
+        if h.handles.at(i) == handle:
+            h.waiters.at(i).post(0, 0)
+    unit
+
+private nomethod fn notice(handle: int, context h: Http, ev: std::event_loop::Loop) errors IndexNotFound, std::event_loop::SchedulerFault:
+    n = h.handles.length()
+    posted = std::mutable_array::create(1, 0)
+    loop i from 0 to n:
+        if h.handles.at(i) == handle:
+            h.waiters.at(i).post(1, 0)
+            posted.set(0, 1)
+    if posted.at(0) == 1:
+        bump(s_posted)
+    else:
+        bump(s_stale)
+
+private nomethod fn interest_of(i: int) -> event_loop_linux::Interest:
+    if i == 1:
+        event_loop_linux::Interest::Readable
+    elif i == 2:
+        event_loop_linux::Interest::Writable
+    else:
+        event_loop_linux::Interest::Both
+
+private nomethod fn find_fd(fd: int, context h: Http) -> int errors IndexNotFound:
+    n = h.fds.length()
+    loop i from 0 to n:
+        if h.fds.at(i) == fd:
+            return i
+    -1
+
+# (event_loop_linux: a watch's interest is fixed when it is made, so another
+# interest is an unwatch and a new watch.)
+private nomethod fn arm_watch(fd: int, interest: int, context h: Http, ev: std::event_loop::Loop, n: event_loop_linux::Native) errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    i = find_fd(fd)
+    if i < 0:
+        w = event_loop_linux::watch(fd, interest_of(interest), h.regs.at(0))
+        bump(s_watches)
+        free = find_fd(-1)
+        if free >= 0:
+            h.fds.swap(free, fd)
+            h.interests.swap(free, interest)
+            h.watches.swap(free, w)
+        else:
+            h.fds.push(fd)
+            h.interests.push(interest)
+            h.watches.push(w)
+        return unit
+    if h.interests.at(i) == interest:
+        event_loop_linux::rearm(h.watches.at(i))
+        return unit
+    bump(s_rewatches)
+    event_loop_linux::unwatch(h.watches.at(i))
+    w = event_loop_linux::watch(fd, interest_of(interest), h.regs.at(0))
+    h.interests.swap(i, interest)
+    h.watches.swap(i, w)
+
+# Watch FD for INTEREST; a watch the driver refuses is reported to the native
+# side as an error on FD (its operation fails), never left waiting.
+private nomethod fn arm(fd: int, interest: int, context h: Http, ev: std::event_loop::Loop, n: event_loop_linux::Native) errors IndexNotFound, std::event_loop::SchedulerFault:
+    arm_watch(fd, interest):
+        on std::event_loop::DriverFault:
+            cll(fd).bh_io_ready(8)
+
+# Unwatch FD, then close it (the package's order: a closed descriptor's
+# number may name another file at once).
+private nomethod fn retire(fd: int, context h: Http, n: event_loop_linux::Native) errors IndexNotFound:
+    i = find_fd(fd)
+    bump(s_retired)
+    if i >= 0:
+        event_loop_linux::unwatch(h.watches.at(i))
+        h.fds.swap(i, -1)
+    bh_close_fd(cll(fd))
+
+# Settle a batch of step records: notices posted to their waiters,
+# readiness interest armed, closed descriptors retired. Whether more wait
+# (bh_drain), the ready count and the deadline are in the summary.
+private nomethod fn settle(batch: List[LayoutStruct[StepRecord]], count: int, context h: Http, ev: std::event_loop::Loop, n: event_loop_linux::Native) errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    loop i from 1 to count:
+        r = batch.at(i)
+        if r.kind == 1:
+            notice(r.a)
+        elif r.kind == 2:
+            if r.b == 4:
+                retire(r.a)
+            else:
+                arm(r.a, r.b)
+    unit
+
+private nomethod fn batch_of(buf: std::abi::bytes::MutableBytes) -> List[LayoutStruct[StepRecord]] errors IndexNotFound:
+    b = std::binary::parse(StepBatch, std::abi::bytes::freeze(buf)):
+        on LayoutLengthMismatch:
+            fail IndexNotFound
+    b.records
+
+# The earliest native deadline after a step (-1: none): the timekeeper is
+# woken when it waits for none, and its timer revoked when the deadline is
+# earlier than the one it waits for, or gone. A later deadline lets the
+# timer fire early: that step finds nothing due and sets the deadline again.
+private nomethod fn settle_deadline(d: int, context h: Http, ev: std::event_loop::Loop) errors IndexNotFound, std::event_loop::SchedulerFault:
+    reg_put(s_deadline, d)
+    armed = reg_get(s_armed)
+    if armed < 0:
+        if d >= 0:
+            h.regs.at(2).post(1, d)
+    elif d < 0 or d < armed:
+        std::event_loop::revoke(h.regs.at(1))
+
+private nomethod fn dispatch(e: std::event_loop::Event, context h: Http) errors IndexNotFound:
+    if e.a > 0 and e.a < timer_record:
+        bump(s_io)
+        cll(e.b).bh_io_ready(cll(e.a))
+
+private nomethod fn drain(context h: Http, ev: std::event_loop::Loop) errors IndexNotFound, std::event_loop::SchedulerFault:
+    loop:
+        e = std::event_loop::try_take(h.regs.at(0))
+        if e.reason != Wake::Event:
+            break
+        dispatch(e)
+
+# One executor step: the records delivered, a bounded native run (its
+# timers due fire first), its records settled. How many native tasks are
+# ready after it.
+private nomethod fn step(context h: Http, ev: std::event_loop::Loop, n: event_loop_linux::Native) -> int errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    drain()
+    reg_put(s_nudged, 0)
+    bump(s_steps)
+    # The native side's clock: the driver's monotonic clock read now (the
+    # loop's now() is its turn's, 0 before the first turn).
+    r = cll(reg_get(s_budget)).bh_step(cll(event_loop_linux::now_us()), std::abi::bytes::zeroed(std::abi::usize(step_capacity)), 2048)
+    if r.result <= 0:
+        return 0
+    batch = batch_of(r.buf)
+    settle(batch, r.result)
+    head = batch.at(0)
+    more = std::mutable_array::create(1, head.b)
+    loop:
+        if more.at(0) == 0:
+            break
+        d = std::abi::bytes::zeroed(std::abi::usize(step_capacity)).bh_drain(2048)
+        if d.result <= 0:
+            break
+        next = batch_of(d.buf)
+        settle(next, d.result)
+        more.set(0, next.at(0).b)
+    settle_deadline(head.c)
+    head.a
+
+private nomethod fn executor(context h: Http, ev: std::event_loop::Loop, n: event_loop_linux::Native) -> int errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    loop:
+        if reg_get(s_stop) == 1:
+            break
+        left = step()
+        if reg_get(s_stop) == 1:
+            break
+        if left > 0:
+            bump(s_yields)
+            std::event_loop::yield_now()
+        else:
+            e = std::event_loop::wait(h.regs.at(0))
+            if e.reason != Wake::Event:
+                break
+            dispatch(e)
+    0
+
+# The timekeeper: waits for the earliest native deadline (s_deadline, which
+# each executor step sets) on a timer of the loop, and wakes the executor
+# when it passes; the executor's next step fires the native timers due. A
+# new earlier deadline, or none, revokes the timer (a timer keeps the loop
+# alive: none is kept that nothing needs).
+private nomethod fn timekeeper(context h: Http, ev: std::event_loop::Loop) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    loop:
+        if reg_get(s_stop) == 1:
+            break
+        d = reg_get(s_deadline)
+        if d < 0:
+            reg_put(s_armed, -1)
+            e = std::event_loop::wait(h.regs.at(2))
+            if e.reason == Wake::Revoked:
+                break
+            continue
+        t = std::event_loop::timer(d, 0)
+        h.regs.swap(1, t)
+        reg_put(s_armed, d)
+        w = std::event_loop::wait(t)
+        reg_put(s_armed, -1)
+        if reg_get(s_stop) == 1:
+            break
+        if w.reason == Wake::Timer:
+            if reg_get(s_deadline) == d:
+                reg_put(s_deadline, -1)
+            h.regs.at(0).post(timer_record, d)
+    0
+
+# Start the executor and the timekeeper, once.
+private nomethod fn start_runtime(context h: Http, ev: std::event_loop::Loop, n: event_loop_linux::Native) errors Fault, std::event_loop::SchedulerFault:
+    started = reg_get(s_started):
+        on IndexNotFound:
+            fail Fault {reason: "the runtime's registers are missing", code: 0}
+    if started == 1:
+        return unit
+    opened = reg_get(s_open):
+        on IndexNotFound:
+            0
+    if opened != 0:
+        fail Fault {reason: guard_text("bh_open", opened), code: opened}
+    rx = std::event_loop::source(Delivery::Reliable, 1024)
+    kick = std::event_loop::channel(Delivery::Coalesce, 1)
+    h.regs.push(rx)
+    h.regs.push(kick)
+    h.regs.push(kick)
+    endpoint = event_loop_linux::endpoint(64):
+        on std::event_loop::DriverFault {code}:
+            fail Fault {reason: "the Linux driver refused an endpoint for the name resolver's wakes", code: code}
+    cll(event_loop_linux::loop_handle()).bh_set_notify(cll(event_loop_linux::endpoint_id(endpoint)), cll(std::event_loop::native_slot(rx)), cll(std::event_loop::native_generation(rx)))
+    reg_put(s_started, 1):
+        on IndexNotFound:
+            unit
+    coroutine {step: es, first: ef} = executor():
+        on IndexNotFound:
+            fail Fault {reason: "the executor's first step found its tables inconsistent", code: 0}
+        on std::event_loop::DriverFault {code}:
+            fail Fault {reason: "the Linux driver refused a watch", code: code}
+    std::event_loop::adopt(es, ef)
+    coroutine {step: ts, first: tf} = timekeeper():
+        on IndexNotFound:
+            fail Fault {reason: "the timekeeper found its tables inconsistent", code: 0}
+    std::event_loop::adopt(ts, tf)
+
+# Stop the runtime: every client and exchange is released, every native
+# task dropped, every descriptor unwatched and closed; the executor and the
+# timekeeper end in the next turn. How many native tasks were still live.
+# For the end of a program (a later call finds the runtime closed: Fault).
+fn shutdown(context h: Http, ev: std::event_loop::Loop, n: event_loop_linux::Native) -> int errors Fault, std::event_loop::SchedulerFault:
+    live = bh_close()
+    reg_put(s_stop, 1):
+        on IndexNotFound:
+            unit
+    started = reg_get(s_started):
+        on IndexNotFound:
+            0
+    if started == 1:
+        loop i from 0 to 3:
+            r = h.regs.at(i):
+                on IndexNotFound:
+                    fail Fault {reason: "the runtime's registrations are missing", code: i}
+            std::event_loop::revoke(r)
+    loop:
+        d = std::abi::bytes::zeroed(std::abi::usize(step_capacity)).bh_drain(2048)
+        if d.result <= 1:
+            break
+        batch = batch_of(d.buf):
+            on IndexNotFound:
+                fail Fault {reason: "a short record batch", code: 0}
+        loop i from 1 to d.result:
+            r = batch.at(i):
+                on IndexNotFound:
+                    fail Fault {reason: "a short record batch", code: i}
+            if r.kind == 2 and r.b == 4:
+                retire(r.a):
+                    on IndexNotFound:
+                        fail Fault {reason: "the descriptor table is inconsistent", code: r.a}
+    live
+
+# ---------------------------------------------------------------------------
+# Cancellation
+
+fn cancellation(context h: Http) -> Cancel errors Fault:
+    t = bh_token()
+    check_guard("bh_token", t)
+    Cancel {token: t + 0}
+
+# Cancel C's exchanges: each fails with Cancelled, its task wakes, and its
+# native work is dropped now (an HTTP/2 stream reset, an HTTP/1.1
+# connection closed). How many were in flight.
+fn cancel(c: Cancel, context h: Http, ev: std::event_loop::Loop) -> int errors Fault, std::event_loop::SchedulerFault:
+    if c.token == 0:
+        return 0
+    n = bh_cancel(cll(c.token))
+    check_guard("bh_cancel", n)
+    nudge_checked()
+    n
+
+# ---------------------------------------------------------------------------
+# Clients and exchanges
+
+# A client: its own connections (a pool per origin) under one
+# configuration. The owner releases it; the identity is what send takes.
+opaque resource struct ClientOwner:
+    handle: int
+
+opaque struct Client:
+    handle: int
+
+struct OwnedClient:
+    owner: ClientOwner
+    client: Client
+
+# An exchange: one request and its response. The owner releases it (an
+# exchange whose body was not read to its end is abandoned); the identity
+# is what read, write and finish take.
+opaque resource struct ExchangeOwner:
+    handle: int
+
+opaque struct Exchange:
+    handle: int
+
+enum Version:
+    Http1,
+    Http2,
+
+# A response head and the exchange its body is read from.
+struct Response:
+    status: int
+    version: Version
+    headers: List[Header]
+    exchange: Exchange
+
+struct Sent:
+    owner: ExchangeOwner
+    response: Response
+
+struct Started:
+    owner: ExchangeOwner
+    exchange: Exchange
+
+private nomethod fn release_handle(handle: int, context h: Http, ev: std::event_loop::Loop):
+    bh_release(cll(handle))
+    forget(handle):
+        on IndexNotFound:
+            unit
+        on std::event_loop::SchedulerFault:
+            unit
+    nudge():
+        on IndexNotFound:
+            unit
+        on std::event_loop::SchedulerFault:
+            unit
+
+# Release a client: its connections close (an idle HTTP/2 connection
+# without GOAWAY; a TLS connection after one attempt to send close_notify)
+# and its exchanges fail with Closed. Its owner's cleanup.
+cleanup fn close_client(owner: ClientOwner, context h: Http, ev: std::event_loop::Loop):
+    {handle} = owner
+    release_handle(handle)
+
+# Release an exchange (abandoning it if its body was not read to the end).
+# Its owner's cleanup.
+cleanup fn close(owner: ExchangeOwner, context h: Http, ev: std::event_loop::Loop):
+    {handle} = owner
+    release_handle(handle)
+
+private nomethod fn version_code(v: Versions) -> int:
+    if v == Versions::Negotiate:
+        0
+    elif v == Versions::Http1:
+        1
+    else:
+        2
+
+# A client of CONFIG. TrustFailed: its trust anchors could not be made.
+nomethod fn client(config: Config, context h: Http, ev: std::event_loop::Loop, n: event_loop_linux::Native) -> OwnedClient errors TrustFailed, Unsupported, Fault, std::event_loop::SchedulerFault:
+    start_runtime()
+    system = if config.trust.system:
+        1
+    else:
+        0
+    anchors = config.trust.anchors
+    r = cll(version_code(config.versions)).bh_client(cll(config.connect_timeout), cll(config.idle_timeout), cll(config.max_connections), cll(config.max_header_bytes), cll(config.pool_idle), cll(config.window), cll(system), anchors, std::abi::bytes::length(anchors).value)
+    check_client(r)
+    handle = r + 0
+    OwnedClient {owner: ClientOwner {handle: handle}, client: Client {handle: handle}}
+
+# The bytes of TEXT.
+private nomethod fn utf8(text: str) -> std::abi::bytes::Bytes:
+    std::abi::bytes::from_list(std::str::encode_utf8(text))
+
+private nomethod fn nul() -> std::byte::Byte:
+    0
+
+# The header block the native unit reads: NAME NUL VALUE NUL ...
+private nomethod fn header_block(headers: List[Header]) -> std::abi::bytes::Bytes:
+    zero = std::abi::bytes::from_list([nul()])
+    parts = loop h in headers:
+        std::abi::bytes::join([utf8(h.name), zero, h.value, zero])
+    std::abi::bytes::join(parts)
+
+struct Opened:
+    owner: ExchangeOwner
+    handle: int
+
+private nomethod fn open_exchange(c: Client, r: Request, streamed: bool, length: int, context h: Http, ev: std::event_loop::Loop) -> Opened errors InvalidRequest, Unsupported, Released, Fault, std::event_loop::SchedulerFault:
+    if not token?(r.method):
+        fail InvalidRequest {reason: "the method is not a token: \"".concat(r.method).append_char('"')}
+    loop i from 0 to std::list::length(r.headers):
+        hd = r.headers.at(i)
+        check_name(hd.name)
+    https = if r.target.scheme == "https":
+        1
+    else:
+        0
+    flag = if streamed:
+        1
+    else:
+        0
+    method = utf8(r.method)
+    host = utf8(r.target.host)
+    path = utf8(target(r.target))
+    block = header_block(r.headers)
+    x = cll(c.handle).bh_request(method, std::abi::bytes::length(method).value, cll(https), host, std::abi::bytes::length(host).value, cll(r.target.port), path, std::abi::bytes::length(path).value, block, std::abi::bytes::length(block).value, r.body, std::abi::bytes::length(r.body).value, cll(flag), cll(length), cll(r.deadline), cll(r.cancel.token))
+    check_request(x)
+    owner = ExchangeOwner {handle: x}
+    nudge_checked()
+    Opened {owner: owner, handle: x}
+
+# Wait for X's head; read it.
+private nomethod fn head_of(x: Exchange, context h: Http, ev: std::event_loop::Loop) -> Response errors InvalidRequest, ResolveFailed, ConnectFailed, TlsVerifyFailed, TlsHandshakeFailed, ProtocolError, Timeout, Cancelled, Closed, Unsupported, TrustFailed, Released, Fault, std::event_loop::SchedulerFault:
+    loop:
+        s = bh_state(cll(x.handle))
+        check(x.handle, s)
+        if s == 1:
+            break
+        wait_for(x.handle)
+    data = head_bytes(x.handle)
+    head = std::binary::parse(HeadRecord, cut(data, 0, 16)):
+        on LayoutLengthMismatch:
+            fail Fault {reason: "the head record is short", code: 0}
+    count = head.count
+    fields = loop i from 0 to count:
+        f = std::binary::parse(FieldRecord, cut(data, 16 + 16 * i, 16)):
+            on LayoutLengthMismatch:
+                fail Fault {reason: "a field record is short", code: i}
+        name = std::abi::bytes::decode_utf8(cut(data, f.name_offset, f.name_length)):
+            on InvalidUtf8:
+                fail Fault {reason: "a header name is not ASCII", code: i}
+        Header {name: name, value: cut(data, f.value_offset, f.value_length)}
+    version = if head.version == 20:
+        Version::Http2
+    else:
+        Version::Http1
+    Response {status: head.status, version: version, headers: fields, exchange: x}
+
+# Send R on C and wait for the response head: the exchange's owner and the
+# response (its status, version, headers, and the exchange to read the body
+# from). Any status is a response; the errors are the exchange's failures.
+fn send(c: Client, r: Request, context h: Http, ev: std::event_loop::Loop) -> Sent errors InvalidRequest, ResolveFailed, ConnectFailed, TlsVerifyFailed, TlsHandshakeFailed, ProtocolError, Timeout, Cancelled, Closed, Unsupported, TrustFailed, Released, Fault, std::event_loop::SchedulerFault:
+    {owner, handle} = open_exchange(c, r, false, std::abi::bytes::length(r.body).value)
+    response = head_of(Exchange {handle: handle})
+    Sent {owner: owner, response: response}
+
+# Start R on C with a body streamed by write and ended by finish: R's body
+# goes first. LENGTH: the whole body's length, R's body included, when
+# known (sent as Content-Length, and held to it: InvalidRequest), or -1
+# (HTTP/1.1 chunked; HTTP/2 DATA frames).
+fn start(c: Client, r: Request, length: int, context h: Http, ev: std::event_loop::Loop) -> Started errors InvalidRequest, Unsupported, Released, Fault, std::event_loop::SchedulerFault:
+    {owner, handle} = open_exchange(c, r, true, length)
+    Started {owner: owner, exchange: Exchange {handle: handle}}
+
+# Write DATA as the next chunk of X's request body, waiting while the one
+# chunk the native side holds has not been taken (backpressure from the
+# connection). An empty DATA writes nothing.
+fn write(x: Exchange, data: std::abi::bytes::Bytes, context h: Http, ev: std::event_loop::Loop) errors InvalidRequest, ResolveFailed, ConnectFailed, TlsVerifyFailed, TlsHandshakeFailed, ProtocolError, Timeout, Cancelled, Closed, Unsupported, TrustFailed, Released, Fault, std::event_loop::SchedulerFault:
+    n = std::abi::bytes::length(data).value
+    if n == 0:
+        return unit
+    loop:
+        r = cll(x.handle).bh_write(data, n)
+        check(x.handle, r)
+        if r > 0:
+            nudge_checked()
+            return unit
+        if r == -2:
+            fail ProtocolError {reason: "the request body is closed: the server ended the exchange before the body was complete (finish returns its response)", code: -1}
+        wait_for(x.handle)
+
+# End X's request body and wait for the response head.
+fn finish(x: Exchange, context h: Http, ev: std::event_loop::Loop) -> Response errors InvalidRequest, ResolveFailed, ConnectFailed, TlsVerifyFailed, TlsHandshakeFailed, ProtocolError, Timeout, Cancelled, Closed, Unsupported, TrustFailed, Released, Fault, std::event_loop::SchedulerFault:
+    r = bh_finish(cll(x.handle))
+    check(x.handle, r)
+    nudge_checked()
+    head_of(x)
+
+# The next chunk of X's response body (at most 64 KiB), waiting for the
+# server when none is there; an empty Bytes at the end (and after it). The
+# native side holds at most one chunk per exchange: a program that does
+# not read stops the server (the connection's flow control).
+fn read(x: Exchange, context h: Http, ev: std::event_loop::Loop) -> std::abi::bytes::Bytes errors ProtocolError, Timeout, Cancelled, Closed, Released, Fault, ResolveFailed, ConnectFailed, TlsVerifyFailed, TlsHandshakeFailed, InvalidRequest, Unsupported, TrustFailed, std::event_loop::SchedulerFault:
+    loop:
+        r = cll(x.handle).bh_read(std::abi::bytes::zeroed(std::abi::usize(65536)), 65536)
+        n = r.result
+        check(x.handle, n)
+        if n > 0:
+            nudge_checked()
+            return frozen(r.buf, n)
+        if n == -1:
+            return std::abi::bytes::from_list([])
+        wait_for(x.handle)
+
+# The whole rest of X's body, failing with BodyTooLarge beyond LIMIT bytes.
+fn read_all(x: Exchange, limit: int, context h: Http, ev: std::event_loop::Loop) -> std::abi::bytes::Bytes errors BodyTooLarge, ProtocolError, Timeout, Cancelled, Closed, Released, Fault, ResolveFailed, ConnectFailed, TlsVerifyFailed, TlsHandshakeFailed, InvalidRequest, Unsupported, TrustFailed, std::event_loop::SchedulerFault:
+    parts = std::mutable_vector::from_list([std::abi::bytes::from_list([])])
+    parts.clear()
+    total = std::mutable_array::create(1, 0)
+    loop:
+        chunk = read(x)
+        n = std::abi::bytes::length(chunk).value
+        if n == 0:
+            break
+        t = total.at(0):
+            on IndexNotFound:
+                0
+        if t + n > limit:
+            fail BodyTooLarge {limit: limit}
+        total.set(0, t + n):
+            on IndexNotFound:
+                unit
+        parts.push(chunk)
+    chunks = loop i from 0 to parts.length():
+        parts.at(i):
+            on IndexNotFound:
+                std::abi::bytes::from_list([])
+    std::abi::bytes::join(chunks)
+
+# ---------------------------------------------------------------------------
+# Counters
+
+# The runtime's counters: live clients and exchanges, native tasks,
+# watched descriptors, name resolutions outstanding and resolver threads
+# (alive, started), the pools (HTTP/1.1 idle and open, HTTP/2 open,
+# connections being made), and the boundary: C calls, executor runs,
+# native polls, notices, bytes copied out and in, the most polls one run
+# made, the longest call (microseconds), panics contained, the most
+# response body bytes held natively for one exchange at once. Then the
+# executor's own: steps, waits, readiness reports, watches made and remade.
+struct Stats:
+    clients: int
+    exchanges: int
+    tasks: int
+    watched: int
+    resolving: int
+    resolvers: int
+    resolvers_started: int
+    idle_connections: int
+    http1_connections: int
+    http2_connections: int
+    connecting: int
+    calls: int
+    runs: int
+    polls: int
+    notices: int
+    bytes_out: int
+    bytes_in: int
+    max_polls_per_run: int
+    max_call_us: int
+    panics: int
+    max_held: int
+    steps: int
+    waits: int
+    readiness: int
+    watches: int
+    rewatches: int
+
+layout StatsRecord:
+    size 168
+    align 8
+    field values: array 21 of std::binary::I64 at 0
+
+fn stats(context h: Http) -> Stats errors Fault:
+    r = std::abi::bytes::zeroed(std::abi::usize(168)).bh_stats(168)
+    rec = std::binary::parse(StatsRecord, std::abi::bytes::freeze(r.buf)):
+        on LayoutLengthMismatch:
+            fail Fault {reason: "the counter record is short", code: r.result}
+    v = rec.values
+    mine = std::mutable_array::create(5, 0)
+    put(mine, 0, reg_or_zero(s_steps))
+    put(mine, 1, reg_or_zero(s_waits))
+    put(mine, 2, reg_or_zero(s_io))
+    put(mine, 3, reg_or_zero(s_watches))
+    put(mine, 4, reg_or_zero(s_rewatches))
+    fn at_v(i: int) -> int:
+        v.at(i):
+            on IndexNotFound:
+                0
+    Stats {
+        clients: at_v(0), exchanges: at_v(1), tasks: at_v(2), watched: at_v(3),
+        resolving: at_v(4), resolvers: at_v(5), resolvers_started: at_v(6),
+        idle_connections: at_v(7), http1_connections: at_v(8), http2_connections: at_v(9),
+        connecting: at_v(10), calls: at_v(11), runs: at_v(12), polls: at_v(13),
+        notices: at_v(14), bytes_out: at_v(15), bytes_in: at_v(16),
+        max_polls_per_run: at_v(17), max_call_us: at_v(18), panics: at_v(19), max_held: at_v(20),
+        steps: cell(mine, 0), waits: cell(mine, 1), readiness: cell(mine, 2), watches: cell(mine, 3), rewatches: cell(mine, 4)
+    }
+
+# The BoringSSL API version the native unit was compiled against.
+fn provider_api() -> int:
+    bh_provider()

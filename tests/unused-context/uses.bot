@@ -1,0 +1,77 @@
+# uses.bot -- the context-bearing resources used for real
+# (tests/unused-context.test): every release runs its cleanup with the
+# installed contexts. The value is the Terminal's log, the releases and
+# notes in the order they ran.
+import terminal
+import clock
+
+error Boom
+
+# A helper holds a Session to its end: the release, and the Terminal, are
+# its own (the top level holds no Session for it).
+fn scoped(n: int) -> int:
+    s = terminal::enter(n)
+    terminal::note(n + 1)
+    n
+
+# The explicit release: at once.
+fn explicit(n: int) -> int:
+    s = terminal::enter(n)
+    terminal::leave(s)
+    terminal::note(n + 1)
+    n
+
+# A propagated failure releases on its edge, before the caller's handler.
+fn failing(n: int) -> int errors Boom:
+    s = terminal::enter(n)
+    if n > 0:
+        fail Boom
+    n
+
+fn handled(n: int) -> int:
+    failing(n):
+        on Boom:
+            terminal::note(n + 1)
+            0
+
+# A moved-in Session is released at the callee's end.
+fn keep(s: terminal::Session, n: int) -> int:
+    terminal::note(n)
+    n
+
+# Kept alive across a function boundary: made by one function, released at
+# its new owner's end.
+fn made(n: int) -> terminal::Session:
+    terminal::enter(n)
+
+fn across(n: int) -> int:
+    s = made(n)
+    terminal::note(n + 1)
+    n
+
+# A generic function (its native instance specialized for an Int).
+fn generic(n):
+    s = terminal::enter(n)
+    n
+
+# A cleanup that requires two contexts, one of another module; the only
+# function that releases an Alarm, after a Session acquired first (released
+# last).
+fn alarmed(n: int) -> int:
+    s = terminal::enter(n + 1)
+    a = clock::arm(n)
+    n
+
+with context terminal::create()
+with context clock::create()
+scoped(10)
+explicit(20)
+handled(30)
+terminal::enter(41).keep(40)
+across(50)
+generic(60)
+alarmed(70)
+terminal::note(clock::ticks())
+terminal::log():
+    on IndexNotFound:
+        []

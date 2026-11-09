@@ -1,0 +1,26 @@
+emit-refused               KILLED      at-driver-library-object, at-library-elf
+host-isa                   KILLED      at-driver-library-object, at-library-elf
+any-target-has-a-runtime   KILLED      at-driver-refusals, at-driver-target-report
+run-with-target            KILLED      at-driver-refusals
+pic-off                    KILLED      at-library-elf
+android-linked-as-host     KILLED      at-library-needs-support
+target-not-passed          KILLED      at-library-elf
+host-linker                KILLED      at-library-elf
+support-ignored-for-libraries KILLED      at-library-elf
+driver-runtime             KILLED      at-library-elf, at-library-package-runtime
+api-ignored                KILLED      at-android-2048
+alignment-4k               KILLED      at-library-elf, at-android-16k-control
+alignment-unchecked        KILLED      at-library-alignment-checked
+stale-output-kept          KILLED      at-toolchain-failures
+pic-unmapped               KILLED      at-toolchain-failures
+toolchain-error-as-support KILLED      at-toolchain-refusals
+revision-unchecked         KILLED      at-toolchain-refusals
+linux-archive-accepted     KILLED      at-support-linux-archive
+descriptor-trusted         KILLED      at-support-linux-archive
+relocation-unchecked       KILLED      at-support-refusals
+artifact-unchecked         KILLED      at-support-refusals, at-executable-refused
+api-floor-ignored          KILLED      at-support-refusals
+manifest-host-target       KILLED      at-library-manifest
+thread-affinity-ignored    KILLED      at-android-lifecycle
+runtime-from-checkout      KILLED      at-library-package-runtime
+android-runtime-shadow-roots KILLED      at-runtime-identity

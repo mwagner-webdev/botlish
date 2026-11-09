@@ -1807,6 +1807,17 @@ add10(32)          # 42 (add captures x)
     `=`, after `return`, a body's last expression, never an operand or an
     argument. `fold` is contextual: it begins a fold only directly before a
     name, and stays an ordinary name everywhere else (`fold = 1`).
+  - An intermediate holding a mutable collection is a value like any other
+    and may be mutated in its iteration (`acc.push(x)`, then `acc` as the
+    body's value): a normal completion carries the mutated value on, while
+    `continue` and a bare `break` carry the value the iteration *started*
+    with, discarding that iteration's mutations. How that is kept is the
+    compiler's business (CONSUMED-FOLD-INTERMEDIATES-MILESTONE-1.md): where
+    no `continue` or bare `break` of the fold can run after the iteration
+    first mutates the intermediate or hands it on, the carried collection is
+    mutated in place and nothing is copied; where one can, the iteration
+    works on a logical copy (a copy of the whole collection at its first
+    mutation), which that exit needs.
 
   Iteration, aggregation and construction are distinct operations: a fold
   aggregates without building anything it does not compute (natively, one
