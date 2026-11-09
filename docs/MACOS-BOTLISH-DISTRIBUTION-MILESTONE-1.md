@@ -24,9 +24,14 @@ Every claim below is marked:
   the stand-ins for Apple's tools that the release tests use: evidence about
   the release tooling's logic, never about Apple's tools;
 * **[pending]** a CI run that had not finished when this was written;
-* **[credential-blocked]** needs the `macos-release` environment's real
-  Developer ID identity and notarization key, which only a protected
-  release run holds: not run;
+* **[awaits a release run]** needs the `macos-release` environment's
+  Developer ID identity and notarization key, which only a release run of
+  botlish-macos.yml receives (a `botlish-macos-vX.Y.Z` tag of main's
+  history whose commit's tests are green): not run yet. Nothing is missing
+  from the environment -- the same credentials signed, notarized and
+  stapled Icy Tower's release, through the same tools/macos-release core
+  -- but no Botlish release run has happened, because this work is not on
+  main and no such tag exists;
 * **[environment-blocked]** needs something no available machine has
   (below: SIP enabled);
 * **[not implemented]** absent, by design or for now.
@@ -65,14 +70,20 @@ Every claim below is marked:
 
 ## 1. Result and release link
 
-**No release is published.** [credential-blocked] The release job runs only
+**No release is published.** [awaits a release run] The release job runs only
 for a tag `botlish-macos-vX.Y.Z` of main's history, in the protected
 `macos-release` environment, once every test of the tagged commit is
 green. This work is on a branch, no such tag exists, and nothing here can
 reach the environment's secrets (by design: section 9). So Developer ID
 signing with the real identity, notarization, stapling, Gatekeeper's
 acceptance of a notarized bundle and publication are not run; the first
-real evidence of them will be the first release run's.
+real evidence of them will be the first release run's. The credentials are
+not the obstacle: the environment holds them, and Icy Tower's release used
+them through the same signing, notarization and stapling stages. What that
+run does not show for the compiler is what only the compiler's bundle has:
+the nested Tcl.framework and the second executable (the driver), each
+signed inside out, Apple's notarization of that bundle, and the final
+ZIP's acceptance running the compiler and `-aot-run`.
 
 What exists and runs:
 
@@ -106,21 +117,21 @@ The milestone's acceptance criteria, as they stand:
 | 16 | the interpreter remains functional | [executed, macOS] smoke-test.sh, acceptance.sh |
 | 17 | relocated, self-contained | [executed, macOS] app-test.sh's relocation, `app-clean` |
 | 18 | validated structure and stable identity | [executed, macOS] verify.sh's layout; bundle.py's check and the identity stage |
-| 19 | every executable component signed correctly | [executed, macOS] ad hoc with the hardened runtime, each unit verified; [credential-blocked] with the Developer ID |
-| 20 | Developer ID signature with the hardened runtime and a secure timestamp | [stand-in] the stages and checks; [credential-blocked] the real signature |
+| 19 | every executable component signed correctly | [executed, macOS] ad hoc with the hardened runtime, each unit verified; [awaits a release run] with the Developer ID |
+| 20 | Developer ID signature with the hardened runtime and a secure timestamp | [stand-in] the stages and checks; [awaits a release run] the real signature |
 | 21 | no unnecessary JIT entitlement | [executed, macOS] no entitlement at all (verify.sh) |
 | 22 | compilation and AOT-run do not invalidate the signature | [executed, macOS] acceptance.sh's `signature`, app-test.sh's tree comparison |
-| 23 | the Developer ID-signed compiler passes functional tests | [credential-blocked]; the same acceptance passes on the ad hoc hardened-runtime bundle [executed, macOS] |
-| 24 | notarized by Apple | [credential-blocked] |
-| 25 | ticket stapled and verified | [credential-blocked] |
-| 26 | Gatekeeper accepts the application | [credential-blocked]; Gatekeeper's refusal of the ad hoc bundle [executed, macOS] |
-| 27 | the final ZIP preserves every signature and ticket | [stand-in] the package stage's checks; [credential-blocked] the ticket |
-| 28 | a quarantined extraction is assessed and launched | [credential-blocked] in release mode (synthetic quarantine, section 14) |
-| 29 | the compiler works from that extracted artifact | [credential-blocked]; the ad hoc download's toolchain-free smoke test [executed, macOS: `app-clean`] |
-| 30 | AOT-run works from that extracted artifact | [credential-blocked] (the final acceptance's `aot-run` case) |
+| 23 | the Developer ID-signed compiler passes functional tests | [awaits a release run]; the same acceptance passes on the ad hoc hardened-runtime bundle [executed, macOS] |
+| 24 | notarized by Apple | [awaits a release run] |
+| 25 | ticket stapled and verified | [awaits a release run] |
+| 26 | Gatekeeper accepts the application | [awaits a release run]; Gatekeeper's refusal of the ad hoc bundle [executed, macOS] |
+| 27 | the final ZIP preserves every signature and ticket | [stand-in] the package stage's checks; [awaits a release run] the ticket |
+| 28 | a quarantined extraction is assessed and launched | [awaits a release run] in release mode (synthetic quarantine, section 14) |
+| 29 | the compiler works from that extracted artifact | [awaits a release run]; the ad hoc download's toolchain-free smoke test [executed, macOS: `app-clean`] |
+| 30 | AOT-run works from that extracted artifact | [awaits a release run] (the final acceptance's `aot-run` case) |
 | 31 | the AOT-compiled SDL3/Cocoa canary works | [executed, macOS] the AppKit and Metal canary through `-aot-run -native-startup main-thread`; SDL3 through the application (main-thread-startup's census, Icy Tower) |
 | 32 | developer-tool requirements documented and tested | [executed, macOS] section 19 (`app-clean` without them, the app jobs with them) |
-| 33 | the release publishes the exact verified ZIP with SHA-256 and provenance | [inspected] the publish job; [stand-in] `publishable`; [credential-blocked] a real release |
+| 33 | the release publishes the exact verified ZIP with SHA-256 and provenance | [inspected] the publish job; [stand-in] `publishable`; [awaits a release run] a real release |
 | 34 | credentials unavailable to untrusted jobs | [inspected] test_botlish_workflow.py (15 tests) and its mutants |
 | 35 | malformed credentials fail before Apple tools | [stand-in] the shared preflight's 63 tests (test_credentials.py) and its mutants |
 | 36 | negative controls and mutants reject broken artifacts | [stand-in, and executed on macOS by icy-tower-macos.yml] audit/macos-release's 92 mutants; [executed, macOS with `[ci-app-mutants]`] audit/macos-app's |
@@ -388,7 +399,7 @@ The workflow's own boundary (test_botlish_workflow.py checks each line):
 
 ## 10. Developer ID identity and timestamp
 
-[stand-in; credential-blocked for real] The keychain stage imports the
+[stand-in; the real run awaits a release run] The keychain stage imports the
 PKCS#12 into a temporary keychain made for the run (`botlish-signing.
 keychain-db`), the identity stage requires the certificate to be a
 Developer ID Application certificate of `APPLE_TEAM_ID` (and the bundle
@@ -407,7 +418,7 @@ was signed and a wrong identifier are each refused before notarization.
 
 ## 11. Notarization
 
-[stand-in; credential-blocked for real] `notarize` zips the signed bundle,
+[stand-in; the real run awaits a release run] `notarize` zips the signed bundle,
 submits it with `xcrun notarytool submit --wait` through the profile the
 notary-auth stage validated with Apple, requires `Accepted`, fetches the
 log (`notarytool log`) and requires it to be readable and to say Accepted
@@ -418,7 +429,7 @@ adopted, never another upload). Times are recorded in `timings.txt`.
 
 ## 12. Stapling
 
-[stand-in; credential-blocked for real] `staple` runs `xcrun stapler staple`
+[stand-in; the real run awaits a release run] `staple` runs `xcrun stapler staple`
 on the bundle and `stapler validate`; the stapled ticket is
 `Contents/CodeResources` (bundle.py's layout check allows that one file
 there); verify-signature runs again on the stapled bundle (`--label
@@ -426,7 +437,7 @@ stapled`): stapling must not change any unit's CDHash.
 
 ## 13. Gatekeeper
 
-[stand-in; credential-blocked for real] `gatekeeper --expect notarized`
+[stand-in; the real run awaits a release run] `gatekeeper --expect notarized`
 requires `spctl --assess --type execute` to accept the bundle with
 `source=Notarized Developer ID`; the tamper control changes a sealed
 resource of a copy and requires codesign to reject it and the original
@@ -455,7 +466,7 @@ browser's download carries (`0081;TIME;Safari;UUID`), set by `xattr`, not
 by a browser; no browser ran and no LaunchServices download was recorded --
 and requires Gatekeeper's assessment (`spctl --assess --type execute`),
 `codesign --verify --deep --strict` and `stapler validate` to pass on it
-before the final acceptance runs the compiler from it. [credential-blocked]
+before the final acceptance runs the compiler from it. [awaits a release run]
 in release mode; the same steps in ad hoc mode run in the release tests
 [stand-in].
 
@@ -722,7 +733,7 @@ the stage timings: never the work directory's secret part).
 
 ## 25. Release provenance and SHA-256
 
-[credential-blocked] Each release publishes `botlish-macos-aarch64.zip`,
+[awaits a release run] Each release publishes `botlish-macos-aarch64.zip`,
 `SHA256SUMS` and `provenance.json`: the tag, the version, the source
 commit, the target (macos-aarch64, macOS 11.0 and later), `native_jit:
 none`, the Rust toolchain, the workflow run, the mode (`release`), the
@@ -778,7 +789,7 @@ release.
   one that merely refuses is that difference plus the absence of the JIT's
   code paths, not a large saving: most of the driver is the code
   generator, which AOT needs.
-* Signing, notarization and verification times: [credential-blocked] the
+* Signing, notarization and verification times: [awaits a release run] the
   release job records them (`timings.txt`).
 * AOT compile, link, `-aot-run` end to end and time to first output:
   AOT-RUN-MILESTONE-1.md, section 11.
