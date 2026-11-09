@@ -692,9 +692,9 @@ anywhere; and the mutant that analyzes an elaborated HIR survived (the
 test's program happened to give no finding either way), so the test now
 also uses a loop-variable program whose elaborated HIR *would* give one.
 The table is the last run, the whole catalog against the final code
-(`mutate.tcl`, exit status 0): 33 of 33 killed for their reason. (The first
+(`mutate.tcl`, exit status 0): 34 of 34 killed for their reason. (The first
 run, before the two test changes above, had killed 30 of 32.)
-`tools/mutant-catalogs.tcl`: 101 catalogs, 3,434 mutants, all apply (the
+`tools/mutant-catalogs.tcl`: 101 catalogs, 3,435 mutants, all apply (the
 existing catalogs unaffected by this change).
 
 ## 17. Compile-time performance
