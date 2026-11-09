@@ -379,8 +379,12 @@ The branch `ccr-7f920867-5n2fuj`:
   Botlish.app job **green**, every step -- the whole smoke test on the
   JIT-less application, `-aot-run` its only native run, app-test.sh's
   groups, compare.sh, the ad hoc release stages and acceptance.sh -- and
-  the macOS acceptance tier's four shards green [executed, macOS]; the
-  rest [pending] at the time of writing.
+  the macOS acceptance tier's four shards and system linker green
+  [executed, macOS]; Windows' whole run green (canary, smoke, root plans,
+  system linker, acceptance shards) [executed, Windows]; the full Linux
+  suite green but for interp and compile, still running, and the single
+  executable green [executed, Linux]; Linux AArch64 and macOS's
+  main-thread startup job [pending] at the time of writing.
 
 ## 10. Positive controls and mutants
 
