@@ -559,7 +559,41 @@ against the revision before the milestone):
 
 ## 20. Regression and CI
 
-@REGRESSION@
+Local (a 4-core container, Linux x86-64):
+
+* `tclsh9.0 tests/local.tcl` (every Tcl test file on interp and compile,
+  every golden suite on all four backends through the front-end cache): 687
+  items, 685 passed, 2 failed -- `numeric-looking-names.test` on both
+  passes, its `nl-no-string-ternary` source rule finding ten `expr ?:`
+  selections of a possibly-String value in hir/applied.tcl, rewritten as
+  `if` (3e1cdd87; the file re-run: 5 of 5).
+* The milestone's own and the most affected files, directly:
+  applied-type-bound (34), depth-safe-nesting (52, `dsn-box-bound` updated),
+  trait-constrained-types (77), affine-applications (21),
+  written-affine-applications (26), parameterized-declaration-summaries
+  (24), tree-struct (45), semantic-instances (80), structs (89), hashable
+  (48), value-identity (33), owned-recursion (28), method-resolution (47),
+  method-filter (39), static-compile (83), diagnostic-recovery (57),
+  hir-interchange (11), hir-cache (19), compilation-isolation (19), affine
+  (48), sendability (82), mutable-map (28), immutable-map (26), mutable-set
+  (12), imports (104): all pass.
+* Method-call decisions (`audit/method-resolution/tools/invariance.tcl`,
+  the revision before against this one, over the 121 golden and workload
+  programs): 0 semantic differences (decisions, choices, static outcomes,
+  accepted programs' HIR), 0 programs reporting differently, the same
+  builds (402) and method trials (71) -- old and new verdicts and
+  diagnostics are identical wherever the bound cuts nothing, as the
+  fuzzer's within-the-bound check also requires.
+* The depth-safe census (`audit/depth-safe-nesting/tools/census.tcl
+  -kinds mixed,struct,project -fraction 4`): 70 procedures recurse with the
+  nesting, 0 missing from the census -- none of hir/applied.tcl's walks.
+* `tools/mutant-catalogs.tcl`: 100 catalogs, 3398 mutants, every one still
+  applies; `tools/compilerpedia.tcl check`: 1294 topics, 763 examples, 0
+  problems (no topic says what the bound does, so none changed).
+* The oracle's selftest (16 cases), the fuzzer (seeds 1-11), the mutation
+  catalog (27 of 27 killed): sections 17 and 18.
+
+CI on the branch (claude/happy-sagan-d6fiso): @CI@
 
 ## 21. Next milestone
 

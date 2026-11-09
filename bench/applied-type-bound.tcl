@@ -16,9 +16,12 @@
 # For each: whether it compiled, the front end's wall time (milliseconds),
 # peak memory (MB), the HIR's type-table size (types, characters) and the
 # exact machinery's counters (evidence applications built, comparisons,
-# admissions, projections). With -frontend 1, the front end's cost on real
+# admissions, projections), here and, with -baseline DIR, there (where
+# the specimens past the bound are rejected: its time and memory are the
+# front end's own cost of the same program). With -frontend 1, the front
+# end's cost on real
 # programs (golden suites of parameterized structs, Hashable, identity,
-# maps, structs, enums, coroutines, affine values and the 2048 workload),
+# maps, structs and enums, destructuring, coroutines and the 2048 workload),
 # median of -runs compilations in a fresh process each, here and in the
 # checkout -baseline DIR (the revision before this milestone).
 
@@ -88,23 +91,29 @@ proc child {args} {
     return [exec [info nameofexecutable] [info script] -child $args 2>@1]
 }
 
-puts "## Deep specimens ([file tail $root])\n"
-puts "| specimen | N | compiled | ms | peak MB | types | type chars | apps | compares | accepts | projections |"
-puts "|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|"
-foreach kind {inferred written mismatch} {
-    foreach n $opt(-sizes) {
-        lassign [child $kind $n $root] ok ms mb types chars apps compares accepts projections
-        puts "| $kind | $n | [expr {$ok ? "yes" : "no"}] | $ms | $mb | $types | $chars | $apps | $compares | $accepts | $projections |"
-        flush stdout
+set deepTrees [list $root]
+if {$opt(-baseline) ne ""} {
+    lappend deepTrees [file normalize $opt(-baseline)]
+}
+foreach tree $deepTrees {
+    puts "## Deep specimens ([file tail $tree])\n"
+    puts "| specimen | N | compiled | ms | peak MB | types | type chars | apps | compares | accepts | projections |"
+    puts "|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|"
+    foreach kind {inferred written mismatch} {
+        foreach n $opt(-sizes) {
+            lassign [child $kind $n $tree] ok ms mb types chars apps compares accepts projections
+            puts "| $kind | $n | [expr {$ok ? "yes" : "no"}] | $ms | $mb | $types | $chars | $apps | $compares | $accepts | $projections |"
+            flush stdout
+        }
     }
+    puts ""
 }
 
 if {$opt(-frontend)} {
     set suites {
         tests/golden/trait-constrained-types.bot tests/golden/hashable.bot tests/golden/value-identity.bot
-        tests/golden/immutable-map.bot tests/golden/mutable-map.bot tests/golden/structs.bot
-        tests/golden/enums.bot tests/golden/coroutines.bot tests/golden/affine.bot
-        examples/games/2048/golden.bot
+        tests/golden/immutable-map.bot tests/golden/mutable-map.bot tests/golden/structs-and-enums-instances.bot
+        tests/golden/destructuring.bot tests/golden/coroutines.bot examples/games/2048/golden.bot
     }
     set trees [list $root]
     if {$opt(-baseline) ne ""} {
