@@ -706,6 +706,8 @@ The branch `ccr-7f920867-5n2fuj` (https://github.com/mwagner-webdev/botlish/acti
 | `1d6bc3a` | tests (windows x86-64) | 42505874103 | the canary (aot-run.test, `aotr-diagnostic-presentation` among its tests), smoke (the smoke tier and the Windows-relevant test files, `AOT-run costs`, GC workloads, Windows I/O through bash, cmd and PowerShell) and root plans **success** [executed, Windows]; the acceptance shards and the system linker [pending] (queued) |
 | `1d6bc3a` | tests (dispatched in full) | 42505877367 | the canary (the mutant catalogs, the warning gate, the changed files), the system-linked executables (also under GC stress), the cranelift coverage and the native Rust unit tests **success** [executed, Linux x86-64]: the last job's new step built the driver without its JIT and ran aot-run.test with it, 33 passed and 2 skipped (`aotrMainThread`, `aotrWindowsKill`), so `aotr-no-jit-driver` ran; compile and the method-call decision running, interp, the stub-linked executables, cranelift-generic and the golden shards [pending] when this was written; no job failed |
 | `1d6bc3a` | tests (linux arm64), single executable (dispatched) | 42505879585, 42505881610 | no job failed; [pending] |
+| `1d6bc3a` | tests (macos arm64), the Botlish.app job | 42505874116 (job 128828371644) | **failure**, two steps, one cause: c3cd83c's fixes held on macOS -- the no-JIT sample loop ran 18 samples as executables and named the 5 not AOT-ready, and app-test.sh's relocation group passed (`TCL_LIBRARY` and `BOTLISH_NATIVE_BIN` ignored, the `::binary` fix) [executed, macOS] -- but single/smoke-test.sh's later no-JIT check of a non-ASCII argument through `-aot-run` ran before the step that writes its `args.bot` (a check never reached before: every earlier macOS run stopped sooner), so smoke-test.sh failed, and with it app-test.sh's read-only group, which runs smoke-test.sh on the read-only application. Fixed in the next commit (the check after the file is written); the corrected block passes and the old one fails as CI did, and the whole smoke test passes with the JIT off against a Linux single executable built with the JIT-less driver [executed, Linux x86-64]. In the same job ffi-smoke-test.sh, compare.sh (121 comparisons alike), the ad hoc release stages (the tamper checks, Gatekeeper's refusal), acceptance.sh (9 cases, 0 failed) and bench/macos-app.tcl passed [executed, macOS] |
+| `1d6bc3a` | tests (dispatched), golden suites shard 3/4 | 42505877367 (job 128857713523) | **failure**, infrastructure: curl's connection was reset downloading the Tcl 9.0.1 packages (`curl: (56)`) before any test ran; to be re-run |
 
 Ordinary CI uploads the ad hoc
 bundle as the `botlish-macos-aarch64` artifact (macos-arm64.yml's `app`
@@ -733,8 +735,9 @@ release.
   times (the launcher, Tcl, the archive's mount, `-version`, `-help`,
   `-check`, the interpreter, the language server, the driver, and with no
   JIT `-aot-run` in its place, `-emit-native-executable`, a moved copy's
-  first start). Measured on `460fcee` (job 128698763992; `c3cd83c`
-  changed no sizes):
+  first start). Measured on `460fcee` (job 128698763992; on `1d6bc3a`,
+  after the merge of main, the bundle is 26.66 MB, the download 11.03 MB,
+  `-version` 150 ms and `-aot-run` 264 ms on another runner):
 
   | part | MB |
   |---|---:|

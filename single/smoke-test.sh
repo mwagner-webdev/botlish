@@ -277,12 +277,16 @@ for backend in interp $natives; do
 done
 if (( !jit && toolchain )); then
   [[ $(cd / && aot_value "$work/ünï cödé/answer.bot") == 'int 42' ]] || fail "a program in a non-ASCII directory, -aot-run"
-  [[ $(cd "$work/ünï cödé" && aot_value args.bot -- 'ünï cödé') == 'list str args.bot str ünï cödé' ]] ||
-    fail "a non-ASCII argument, -aot-run: $(cd "$work/ünï cödé" && aot_value args.bot -- 'ünï cödé')"
 fi
 printf 'argv():\n    on InvalidArgumentEncoding:\n        ["invalid"]\n' >"$work/ünï cödé/args.bot"
 out=$(cd "$work/ünï cödé" && run -argv 'ünï cödé' args.bot) && grep -qxF '   value: ["ünï cödé"]' <<<"$out" ||
   fail "a non-ASCII argument with no locale"
+if (( !jit && toolchain )); then
+  # The same argument to the program as its executable: argv()[0] FILE as
+  # typed, then the words after --.
+  [[ $(cd "$work/ünï cödé" && aot_value args.bot -- 'ünï cödé') == 'list str args.bot str ünï cödé' ]] ||
+    fail "a non-ASCII argument, -aot-run: $(cd "$work/ünï cödé" && aot_value args.bot -- 'ünï cödé')"
+fi
 printf 'import nosuch\n\n1\n' >"$work/app/missing.bot"
 if run "$work/app/missing.bot" >"$work/missing.out"; then fail "a missing module was accepted"; fi
 grep -qF "no such module file $work/app/nosuch.bot" "$work/missing.out" ||

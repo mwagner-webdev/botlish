@@ -545,6 +545,17 @@ copied here. bench/macos-app.tcl in macos-arm64.yml's `app` job measures
   the driver only ignores it.
 * **One program per command.** No REPL, no watch mode, no build of several
   programs.
+* **`-version`'s JIT line asks the driver.** `native::jitAvailable` runs
+  `botlish-native capabilities`, and a driver that cannot answer is taken
+  to have a JIT (a driver older than the feature). Botlish.app's driver is
+  in the bundle and answers, so its `-version` says "unavailable"; the
+  Linux single executable installs its driver at its first native run, so
+  before that its `-version` says "available" whatever the driver it
+  carries -- right for every build that ships (only Botlish.app's has no
+  JIT), wrong for a JIT-less Linux single executable built by hand, which
+  then refuses `-backend cranelift` correctly at the run [executed, Linux
+  x86-64, such a build]. Writing the driver's capabilities into the
+  packaged archive at build time would close it.
 
 ## 13. Exact files changed
 
