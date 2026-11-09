@@ -1,0 +1,278 @@
+# Mutants of the android-aarch64 target (audit/android-aarch64-target/tools/
+# mutate.tcl; ANDROID-AARCH64-TARGET-SUPPORT-MILESTONE-1.md, "Mutation
+# testing"): each a deliberate bug of the target model, cross-target
+# emission, the toolchain link, runtime identity, the native library's
+# contract or distribution.
+#
+#   @@ NAME DESCRIPTION
+#   !! TEST ...        the tests of tests/android-target.test meant to
+#                      detect it (one failing is a kill)
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+#
+# A mutant may have several edits. Lines starting with # outside an edit
+# are comments. A mutant that edits native/src rebuilds the copy's native
+# backend; one that edits the runtime also changes the Android runtime
+# archive the tests' fixture builds from the copy.
+
+# ---------------------------------------------------------------- the target model
+
+@@ emit-refused every non-host emission is refused again: the driver emits machine code for its own host only
+!! at-driver-library-object at-library-elf
+## native/src/main.rs
+<<<<
+        if let Err(message) = codegen::target::check_emit(&program, &emit_triple) {
+====
+        if let Err(message) = codegen::target::check_host(&program).and_then(|_| if codegen::target::same_target(&emit_triple, &target_lexicon::Triple::host()) { Ok(()) } else { Err(format!("{emit_triple} is not this host's target")) }) {
+>>>>
+
+@@ host-isa Cranelift is configured for the host whatever the target: an Android library's object is x86-64 code
+!! at-driver-library-object at-library-elf
+## native/src/codegen/mod.rs
+<<<<
+    if target::same_target(target, &target_lexicon::Triple::host()) {
+====
+    if true {
+>>>>
+
+@@ any-target-has-a-runtime every target is taken to have a Botlish runtime with this driver's capabilities: code is emitted for musl, for which none exists
+!! at-driver-refusals at-driver-target-report
+## native/src/codegen/target.rs
+<<<<
+        _ => None,
+====
+        _ => Some(full),
+>>>>
+
+@@ run-with-target --target is accepted by any command: `run --target aarch64-linux-android` runs host code as if it were Android's
+!! at-driver-refusals
+## native/src/main.rs
+<<<<
+    if emit_target.is_some() && command != "library" {
+====
+    if emit_target.is_some() && command == "never" {
+>>>>
+
+@@ pic-off a non-host library's object is not position-independent
+!! at-library-elf
+## native/src/codegen/mod.rs
+<<<<
+    builder.finish(isa_flags(true, target_stack_probes(target))?).map_err(|e| BackendError::Codegen(e.to_string()))
+====
+    builder.finish(isa_flags(false, target_stack_probes(target))?).map_err(|e| BackendError::Codegen(e.to_string()))
+>>>>
+
+@@ android-linked-as-host a library of android-aarch64 without a target support package is made for the host, silently
+!! at-library-needs-support
+## native/library.tcl
+<<<<
+        if {$target ne $host} {
+            throw {NATIVE TARGET} "native::library: a library of $target is linked with $target's runtime, which this compiler does not carry: name the target support package of $target (-target-support NAME); this host is $host"
+        }
+====
+>>>>
+
+@@ target-not-passed the library's target is not passed to the driver: the host's object is linked with Android's runtime
+!! at-library-elf
+## native/library.tcl
+<<<<
+            lappend targetArgs --target [dict get [core::cabi::target $target] triple]
+====
+            lappend targetArgs
+>>>>
+
+# ---------------------------------------------------------------- the link
+
+@@ host-linker the shared library is linked by the host's cc, not by the target support package's toolchain
+!! at-library-elf
+## native/library.tcl
+<<<<
+    ToolchainTool $tools cc {*}$args
+====
+    Tool cc {*}[lrange $args 1 end]
+>>>>
+
+@@ support-ignored-for-libraries -target-support is read but not given to the library
+!! at-library-elf
+## main.tcl
+<<<<
+            lappend options -support $support
+====
+>>>>
+
+@@ driver-runtime the driver's own (Linux) runtime archive is linked instead of the package's
+!! at-library-elf at-library-package-runtime
+## native/library.tcl
+<<<<
+    set runtime [dict get $support archive]
+====
+    set runtime [RuntimeArchive]
+>>>>
+
+@@ api-ignored the shared library is linked for the newest API level, not the package's minimum: Android 5.0 cannot load it
+!! at-android-2048
+## native/library.tcl
+<<<<
+    set driverTarget $triple[dict get $tools api]
+====
+    set driverTarget ${triple}35
+>>>>
+
+@@ alignment-4k the shared library's segments are aligned to 4 KiB: no 16 KiB-page device loads it
+!! at-library-elf at-android-16k-control
+## native/library.tcl
+<<<<
+    return [dict getdef {android-aarch64 16384} $target 4096]
+====
+    return 4096
+>>>>
+
+@@ alignment-unchecked a shared object whose segments are 4 KiB-aligned passes the check
+!! at-library-alignment-checked
+## native/library.tcl
+<<<<
+        if {[dict get $load align] < $align || [dict get $load vaddr] % $align != [dict get $load offset] % $align} {
+====
+        if {0} {
+>>>>
+
+@@ stale-output-kept a failed link leaves the previous build's library and manifest under the new names
+!! at-toolchain-failures
+## native/library.tcl
+<<<<
+        file delete $static [file join $out $name.manifest.json]
+        if {$shared ne ""} {
+            file delete $shared
+        }
+====
+>>>>
+
+@@ pic-unmapped a link that fails for a relocation that is not position-independent is a plain tool failure
+!! at-toolchain-failures
+## native/library.tcl
+<<<<
+        if {[string match "*recompile with -fPIC*" $output] || [string match "*can't create dynamic relocation*" $output]
+                || [string match "*relocation R_AARCH64_*cannot be used against*" $output]} {
+====
+        if {0} {
+>>>>
+
+@@ toolchain-error-as-support a missing host toolchain is reported as a broken target support package
+!! at-toolchain-refusals
+## native/support.tcl
+<<<<
+    return -code error -errorcode {NATIVE LIBRARY TOOLCHAIN} "native::library: $message"
+====
+    return -code error -errorcode {NATIVE TARGET-SUPPORT TOOLCHAIN} "target support: $message"
+>>>>
+
+@@ revision-unchecked an NDK older than the package's minimum revision is used
+!! at-toolchain-refusals
+## native/support.tcl
+<<<<
+    if {[CompareVersions $revision $minimum] < 0} {
+====
+    if {0} {
+>>>>
+
+# ---------------------------------------------------------------- runtime identity
+
+@@ linux-archive-accepted an archive whose identity record names another OS of the same architecture is accepted (Linux/glibc's for Android)
+!! at-support-linux-archive
+## native/support.tcl
+<<<<
+    if {[dict get $record triple] ne $triple} {
+====
+    if {[lindex [split [dict get $record triple] -] 0] ne [lindex [split $triple -] 0]} {
+>>>>
+
+@@ descriptor-trusted the archive's identity record is not read: the descriptor's word is taken for it
+!! at-support-linux-archive
+## native/support.tcl
+<<<<
+    set record [identity $archive]
+====
+    set record [list triple $triple abi $abi]
+>>>>
+
+@@ relocation-unchecked a runtime archive stated for the static relocation model is linked into a shared library
+!! at-support-refusals
+## native/support.tcl
+<<<<
+    if {[dict get $fields relocation] ne "pic"} {
+====
+    if {0} {
+>>>>
+
+@@ api-floor-ignored a package stating an API level below the runtime's floor is accepted
+!! at-support-refusals
+## native/support.tcl
+<<<<
+    if {$version < $floor} {
+====
+    if {0} {
+>>>>
+
+@@ artifact-unchecked a schema 1 package (an executable's runtime) is taken for a native library's
+!! at-support-refusals at-executable-refused
+## native/support.tcl
+<<<<
+    if {$artifact ni [dict get $fields artifacts]} {
+====
+    if {0} {
+>>>>
+
+@@ android-runtime-shadow-roots Android's runtime keeps its roots on the shadow stack while the driver's code keeps them in native frames
+!! at-runtime-identity at-library-elf
+## native/src/runtime/framewalk.rs
+<<<<
+        all(target_arch = "aarch64", target_os = "android"),
+        all(target_arch = "x86_64", target_os = "windows", target_env = "msvc")
+====
+        all(target_arch = "x86_64", target_os = "windows", target_env = "msvc")
+>>>>
+
+# ---------------------------------------------------------------- the library's contract
+
+@@ manifest-host-target the manifest names the host's target for a library of android-aarch64
+!! at-library-manifest
+## native/library.tcl
+<<<<
+    if {$target eq ""} {
+        set target [core::cabi::hostTarget]
+    }
+    set links $systemLibraries
+====
+    set target [core::cabi::hostTarget]
+    set links $systemLibraries
+>>>>
+
+@@ thread-affinity-ignored an instance answers a call from another thread than the one that created it (Android's runtime)
+!! at-android-lifecycle
+## native/src/runtime/library.rs
+<<<<
+    if entry.owner != std::thread::current().id() {
+        return Err(invocation("WRONG-THREAD", "an instance is called only on the thread that created it"));
+====
+    if entry.owner != std::thread::current().id() && false {
+        return Err(invocation("WRONG-THREAD", "an instance is called only on the thread that created it"));
+>>>>
+
+# ---------------------------------------------------------------- distribution
+
+@@ runtime-from-checkout the runtime archive is read from the compiler's own tree, not from the installed package
+!! at-library-package-runtime
+## native/support.tcl
+<<<<
+    set archive [file join $dir {*}[split $relative /]]
+====
+    set archive [file join $dir {*}[split $relative /]]
+    variable home
+    if {[file isfile [file join $home native target aarch64-linux-android release libbotlish_runtime.a]]} {
+        set archive [file join $home native target aarch64-linux-android release libbotlish_runtime.a]
+    }
+>>>>

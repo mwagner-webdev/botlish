@@ -152,8 +152,9 @@
 #   calls     call ExprId -> callee InstanceId, for direct calls of blocks
 #   creates   block ExprIds the region creates
 #   values    blocks whose Block value its reachable code materializes
-#             (hir::aot::materializedBlocks): their generic instances run
-#             those values
+#             (hir::aot::materializedBlocks), the cleanups its code may
+#             release (ReleaseValues) and, for the program, the exports
+#             (ProgramValues): their generic instances run those values
 #   edges     InstanceIds its reachable code uses: callees and the generic
 #             instances of values
 #   overlay   ExprId -> {TYPE KNOWN REACHABLE ?TARGET?} for the region's
@@ -221,7 +222,7 @@ proc hir::specialize::analyze {hir args} {
     variable state
     set options [hir::Options hir::specialize::analyze \
         {-specialize 1 -call-facts-opt 1 -closed-caller-facts-opt 1 -exact-callable-opt 1
-         -exact-callable-limit {} -exports {}} $args]
+         -exact-callable-limit {} -exports {} -releases {}} $args]
     variable exactLimit
     set context [hir::aot::context $hir]
     set state [dict create hir $hir context $context \
@@ -232,6 +233,7 @@ proc hir::specialize::analyze {hir args} {
         seeds [dict create] deps [dict create] refs [dict create] \
         queue {} next 0 current "" building {} analyses 0 \
         exports [lsort -unique [dict get $options -exports]] \
+        releases [dict get $options -releases] \
         refinementFacts [if {[dict get $options -specialize]} {RefinementFacts $hir} else {string cat {}}]]
     try {
         Instance program {}
@@ -873,8 +875,8 @@ proc hir::specialize::Analyze {id} {
         dict set instance overlay $overlay
         dict set instance reachable [dict keys $reachable]
         dict set instance seeds $seeds
-        dict set instance values [ProgramValues $block [hir::aot::materializedBlocks $semantic [dict get $state context] \
-            $block [dict keys $reachable]]]
+        dict set instance values [ProgramValues $block [ReleaseValues $block [hir::aot::materializedBlocks $semantic \
+            [dict get $state context] $block [dict keys $reachable]]]]
         dict set state instances $id $instance
 
         # Edges from reachable code only.
@@ -1870,7 +1872,7 @@ proc hir::specialize::SemanticInstances {} {
                 }
             }
         }
-        set values [ProgramValues $region [hir::aot::materializedBlocks $hir $context $region $reachable]]
+        set values [ProgramValues $region [ReleaseValues $region [hir::aot::materializedBlocks $hir $context $region $reachable]]]
         dict set state instances $id values $values
         dict set state instances $id reachable $reachable
         foreach block $values {
@@ -1901,6 +1903,31 @@ proc hir::specialize::ProgramValues {region values} {
         return $values
     }
     return [lsort -unique [concat $values [dict get $state exports]]]
+}
+
+# VALUES (the Block values region REGION's reachable code materializes),
+# plus the cleanup functions REGION's code may release a resource with
+# (-releases: hir::contexts::releasedCleanups, region -> cleanup blocks;
+# NATIVE-UNUSED-CONTEXT-IMPORT-CORRECTNESS-MILESTONE-1.md). A release
+# materializes its cleanup's value (native lowering's `fnvalue` before
+# `cleanupcall`, or the program's cleanup table entry a runtime walk
+# calls), and the cleanup is then called with whatever value its declared
+# parameter type admits, as an export is: its GENERIC instance is used (an
+# edge of the releasing instance) and OPEN (InstanceClosed: its block's
+# value is materialized), so no analysis gives it a fact only its Botlish
+# callers prove. A cleanup no used instance may release has no instance:
+# importing a module that declares a resource compiles nothing of it, and
+# a context its cleanup requires is no requirement of the program. (The
+# edges are the region's as written, whatever an instance proves
+# unreachable in it: the edges the context analysis charged the cleanup's
+# requirement through, never more.)
+proc hir::specialize::ReleaseValues {region values} {
+    variable state
+    set released [dict getdef [dict get $state releases] $region {}]
+    if {$released eq {}} {
+        return $values
+    }
+    return [lsort -unique [concat $values $released]]
 }
 
 # InstanceIds reachable from the program through edges, in program order.

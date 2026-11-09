@@ -2030,6 +2030,33 @@ proc hir::read::ConstrainBodies {hirVar} {
     }
 }
 
+# Records the types of loop NODE's clause bindings (hir::loopClauseBindings),
+# which the text implies but does not print: as the typing walk records them
+# (hir/types.tcl's RecordClause), an element its iterable's element type by
+# the loop's own rule (hir::iteration::ElementOf; `any` where that knows
+# none), a counter Int.
+proc hir::read::ClauseTypes {hirVar node} {
+    upvar 1 $hirVar hir
+    switch -- [dict get $node kind] {
+        listloop {
+            set clauses [list [dict create kind list binding [dict get $node elementBinding] \
+                iterable [dict get $node iterable]]]
+        }
+        countloop { set clauses [list [dict create kind count binding [dict get $node countBinding]]] }
+        lockloop { set clauses [dict get $node domains] }
+    }
+    foreach clause $clauses {
+        set type int
+        if {[dict get $clause kind] eq "list"} {
+            set type [hir::iteration::ElementOf $hir [hir::typeOf $hir [dict get $clause iterable]]]
+            if {$type eq ""} {
+                set type any
+            }
+        }
+        dict set hir bindings [dict get $clause binding] type [hir::types::intern hir $type]
+    }
+}
+
 proc hir::read::Finish {hirVar} {
     upvar 1 $hirVar hir
     ConstrainEnclosingSignatures hir
@@ -2045,6 +2072,10 @@ proc hir::read::Finish {hirVar} {
                     dict set hir bindings $b type [hir::types::intern hir [hir::errordecls::payloadType $name]]
                 }
             }
+        }
+        if {[dict get $node kind] in {listloop countloop lockloop}} {
+            ClauseTypes hir $node
+            continue
         }
         if {[dict get $node kind] ne "bind" || [dict get $node duplicate]} {
             continue

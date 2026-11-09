@@ -1351,6 +1351,7 @@ proc native::lower::Program {hirProgram args} {
     variable hir
     variable baseHir
     variable spec
+    variable liveCleanups
     variable context
     variable selfTail
     variable envless
@@ -1583,10 +1584,10 @@ proc native::lower::Program {hirProgram args} {
         -exact-callable-opt [dict get $options -exact-callable-opt] \
         -exact-callable-limit [dict get $options -exact-callable-limit] \
         -exports [concat [lmap export [dict get $options -exports] {dict get $export block}] \
-            [CleanupBlocks $hirProgram] \
             [lmap callback [hir::callbacks::of $hirProgram] {dict get $callback block}] \
             [lmap record $threadRecords {dict get $record block}] \
-            [ThreadOwnerBlocks $hirProgram $threadRecords]]]
+            [ThreadOwnerBlocks $hirProgram $threadRecords]] \
+        -releases [hir::contexts::releasedCleanups $hirProgram]]
     hir::specialize::memoizeViews $hirProgram $spec
     set ranges [hir::range::analyze $hirProgram $spec [dict get $options -call-facts-opt] 1 1 \
         [dict get $options -recursive-result-range-opt] [dict get $options -recursive-range-limit]]
@@ -1615,7 +1616,7 @@ proc native::lower::Program {hirProgram args} {
     # Virtual construction (see "Virtual construction" below) runs last: it
     # leaves every binding/variant the analyses above claim to them, and
     # decides plan results from M7.c's closedness proof over blockescape.
-    set construction [if {$constructionOpt} {hir::construction::analyze $hirProgram $spec $escape $stringregion $blockescape} else {dict create params {} bindings {} locals {} results {} closed {} regions {}}]
+    set construction [if {$constructionOpt} {hir::construction::analyze $hirProgram $spec $escape $stringregion $blockescape} else {dict create params {} bindings {} locals {} results {} folds {} closed {} regions {}}]
     # The ShortString1 plan (SHORT-STRING.md) runs strictly after the
     # closedness, Range and virtual-construction analyses it composes with,
     # and before any lowering. It reads facts and decides a representation;
@@ -1639,6 +1640,8 @@ proc native::lower::Program {hirProgram args} {
     # The program's context slots (CONTEXTS.md), fixed before any function
     # is lowered.
     ContextSlots
+    # The cleanups the program compiles (LiveCleanups), fixed with them.
+    set liveCleanups [LiveCleanups]
     set context [dict get $spec context]
     set selfTail [dict get $context selfTails]
     set envless [dict get $context envless]
@@ -2705,16 +2708,11 @@ proc native::lower::CompanionFunction {id} {
     if {$body eq ""} {
         throw {NATIVE BUG} "native lowering: companion of instance $id has an empty body"
     }
-    set ok 1
-    foreach e [lrange $body 0 end-1] {
-        if {[Expr fn $e] eq "never"} {
-            set ok 0
-            break
-        }
-    }
-    if {$ok} {
-        set fields [TaggedFields fn [VirtualValue fn [lindex $body end] $arity [hir::escape::resultCut $escape $id]]]
+    if {[SequenceStatements fn $body]} {
+        set last [lindex $body end]
+        set fields [TaggedFields fn [VirtualValue fn $last $arity [hir::escape::resultCut $escape $id]]]
         if {$fields ne "never"} {
+            ReleaseHandles fn [hir::affine::releasesAfter $hir $last] $last
             Emit fn "retmulti [join $fields { }]"
         }
     }
@@ -2801,16 +2799,11 @@ proc native::lower::RegionCompanionFunction {id} {
     if {$body eq ""} {
         throw {NATIVE BUG} "native lowering: region companion of instance $id has an empty body"
     }
-    set ok 1
-    foreach e [lrange $body 0 end-1] {
-        if {[Expr fn $e] eq "never"} {
-            set ok 0
-            break
-        }
-    }
-    if {$ok} {
-        set fields [Expr fn [lindex $body end] region]
+    if {[SequenceStatements fn $body]} {
+        set last [lindex $body end]
+        set fields [Expr fn $last region]
         if {$fields ne "never"} {
+            ReleaseHandles fn [hir::affine::releasesAfter $hir $last] $last
             Emit fn "retmulti [join $fields { }]"
         }
     }
@@ -3042,16 +3035,11 @@ proc native::lower::InternalRegionCompanionFunction {id} {
     if {$body eq ""} {
         throw {NATIVE BUG} "native lowering: internal region companion of instance $id has an empty body"
     }
-    set ok 1
-    foreach e [lrange $body 0 end-1] {
-        if {[Expr fn $e] eq "never"} {
-            set ok 0
-            break
-        }
-    }
-    if {$ok} {
-        set fields [Expr fn [lindex $body end] region]
+    if {[SequenceStatements fn $body]} {
+        set last [lindex $body end]
+        set fields [Expr fn $last region]
         if {$fields ne "never"} {
+            ReleaseHandles fn [hir::affine::releasesAfter $hir $last] $last
             Emit fn "retmulti [join $fields { }]"
         }
     }
@@ -3145,16 +3133,11 @@ proc native::lower::InternalCompanionFunction {id} {
     if {$body eq ""} {
         throw {NATIVE BUG} "native lowering: internal scalar companion of instance $id has an empty body"
     }
-    set ok 1
-    foreach e [lrange $body 0 end-1] {
-        if {[Expr fn $e] eq "never"} {
-            set ok 0
-            break
-        }
-    }
-    if {$ok} {
-        set fields [TaggedFields fn [VirtualValue fn [lindex $body end] $arity [hir::escape::resultCut $escape $id]]]
+    if {[SequenceStatements fn $body]} {
+        set last [lindex $body end]
+        set fields [TaggedFields fn [VirtualValue fn $last $arity [hir::escape::resultCut $escape $id]]]
         if {$fields ne "never"} {
+            ReleaseHandles fn [hir::affine::releasesAfter $hir $last] $last
             Emit fn "retmulti [join $fields { }]"
         }
     }
@@ -3343,16 +3326,11 @@ proc native::lower::FieldsCompanionFunction {id} {
     if {$body eq ""} {
         throw {NATIVE BUG} "native lowering: fields+companion of instance $id has an empty body"
     }
-    set ok 1
-    foreach e [lrange $body 0 end-1] {
-        if {[Expr fn $e] eq "never"} {
-            set ok 0
-            break
-        }
-    }
-    if {$ok} {
-        set fields [TaggedFields fn [VirtualValue fn [lindex $body end] $arity [hir::escape::resultCut $escape $id]]]
+    if {[SequenceStatements fn $body]} {
+        set last [lindex $body end]
+        set fields [TaggedFields fn [VirtualValue fn $last $arity [hir::escape::resultCut $escape $id]]]
         if {$fields ne "never"} {
+            ReleaseHandles fn [hir::affine::releasesAfter $hir $last] $last
             Emit fn "retmulti [join $fields { }]"
         }
     }
@@ -3824,8 +3802,9 @@ proc native::lower::DropAccess {fnVar access descriptor e} {
                 Assign fn "op coabandon $where" $e
             } elseif {[regexp {^r([0-9]+)\.$} $descriptor -> k]} {
                 # A resource (hir/resources.tcl): a call of its cleanup
-                # function, which the program roots (CleanupBlocks).
-                set f [Assign fn "fnvalue [GenericRef [hir::affine::CleanupBlock $hir $k]]" $e]
+                # function, which this region's release edges made a used,
+                # open instance (LiveCleanup).
+                set f [Assign fn "fnvalue [GenericRef [LiveCleanup $k $e]]" $e]
                 Assign fn "op cleanupcall $f $where" $e
             } elseif {[regexp {[rC]} $descriptor]} {
                 # A drop that runs code (a cleanup or an abandonment inside).
@@ -3922,10 +3901,7 @@ proc native::lower::DescriptorSkip {descriptor posVar} {
 }
 
 # The cleanup function blocks of HIR (hir/resources.tcl), in cleanup-table
-# order: roots of the program like a C export's (hir::specialize's
-# ProgramValues) -- the compiler calls each from any release point, with
-# any value its declared parameter type admits, whether or not Botlish code
-# calls it -- so each has its open generic instance and a function value.
+# order.
 proc native::lower::CleanupBlocks {hir} {
     set blocks {}
     dict for {id record} [hir::resources::table $hir] {
@@ -3934,32 +3910,73 @@ proc native::lower::CleanupBlocks {hir} {
     return [lmap pair [lsort -integer -index 0 $blocks] {lindex $pair 1}]
 }
 
-# Whether the function being lowered is a resource's cleanup (the open
-# instance of one of CleanupBlocks).
-proc native::lower::InCleanup {} {
+# The cleanup blocks the program compiles, -> 1 (computed once, after
+# specialization, into `liveCleanups`): those whose Block value some used
+# instance materializes. A cleanup is no root of the program: it
+# is a value of every region that may release its resource
+# (hir::contexts::releasedCleanups, hir::specialize's ReleaseValues), so
+# exactly a cleanup that compiled code may run has its open generic
+# instance (the compiler calls it from any release point, with any value
+# its declared parameter type admits, whether or not Botlish code calls
+# it), and one of a resource nothing compiled may release -- declared by a
+# module the program imports for something else -- is not compiled, nor is
+# a context only it requires loaded
+# (NATIVE-UNUSED-CONTEXT-IMPORT-CORRECTNESS-MILESTONE-1.md).
+proc native::lower::LiveCleanups {} {
     variable baseHir
     variable spec
-    variable currentInstance
-    if {![info exists currentInstance] || $currentInstance eq ""} {
-        return 0
+    set live [dict create]
+    set cleanups [CleanupBlocks $baseHir]
+    if {$cleanups eq {}} {
+        return $live
     }
-    set block [dict get [hir::specialize::instance $spec $currentInstance] block]
-    return [expr {$block in [CleanupBlocks $baseHir]}]
+    set materialized [hir::specialize::MaterializedBlocks $spec]
+    foreach block $cleanups {
+        if {[dict exists $materialized $block]} {
+            dict set live $block 1
+        }
+    }
+    return $live
+}
+
+# The block of cleanup K (hir/affine.tcl's CleanupIndex), released at
+# expression E: a live one (LiveCleanups). A release the release edges did
+# not reach is a lowering bug, never a cleanup compiled on demand: its
+# contexts were never proven installed.
+proc native::lower::LiveCleanup {k e} {
+    variable hir
+    variable liveCleanups
+    set block [hir::affine::CleanupBlock $hir $k]
+    if {![dict exists $liveCleanups $block]} {
+        throw {NATIVE BUG} "native lowering: release of resource cleanup $k ($block) at $e, which no release edge of the program reaches"
+    }
+    return $block
 }
 
 # The run's cleanup table (runtime/affine.rs's rt_cleanup_table), installed
 # first thing in the program: what a drop descriptor's `rK` calls from a
-# runtime walk. Nothing for a program without resources.
+# runtime walk. Entry K is cleanup K's function value when the program
+# compiles it (LiveCleanups), else unit: no compiled code releases that
+# resource, and the runtime refuses an entry that is no function
+# (rt_cleanup_table's `cleanup`). Nothing when the program compiles no
+# cleanup.
 proc native::lower::CleanupTable {fnVar} {
     upvar 1 $fnVar fn
     variable hir
+    variable liveCleanups
+    set live $liveCleanups
+    if {[dict size $live] == 0} {
+        return
+    }
     set regs {}
     foreach block [CleanupBlocks $hir] {
-        lappend regs [Assign fn "fnvalue [GenericRef $block]"]
+        if {[dict exists $live $block]} {
+            lappend regs [Assign fn "fnvalue [GenericRef $block]"]
+        } else {
+            lappend regs [Assign fn "unit"]
+        }
     }
-    if {$regs ne {}} {
-        Assign fn "op cleanuptable [join $regs { }]"
-    }
+    Assign fn "op cleanuptable [join $regs { }]"
 }
 
 # Where a failure of call (or handle) E is pending: releases the affine
@@ -4090,8 +4107,9 @@ proc native::lower::Expr {fnVar e {want tagged}} {
             lassign [dict get $fn loops [dict get $node target]] head exit resultReg accReg mode
             if {$mode eq "fold"} {
                 # A fold (FOLD-LOOPS-MILESTONE-1.md): a bare break ends it
-                # with its current intermediate, the register it carries.
-                Emit fn "$resultReg = move $accReg" $e
+                # with its current intermediate, the register it carries (a
+                # plan fold's materialized: FoldValue).
+                Emit fn "$resultReg = move [FoldValue fn [dict get $node target] $accReg]" $e
                 Emit fn "jump $exit" $e
                 dict set fn broken [dict get $node target] 1
                 set result never
@@ -4862,16 +4880,16 @@ proc native::lower::ContextDiagnostic {} {
 # A load (at E) of context ID, which the program never installs: only
 # possible in a program that failed verification (whose program function
 # raises the diagnostic before anything runs, Function), and then unreachable
-# code, or in a resource's cleanup (CleanupBlocks), which is a root whatever
-# the program releases: every release point is charged the cleanup's
-# context requirement (hir::contexts::ReleaseEdges), so a cleanup whose
-# context no region installs is one no verified code releases, and its
-# load is unreachable too (a module that declares a resource, imported by a
-# program that never makes one: std::event_loop's Owner). Anything else is
-# a lowering bug.
+# code; anything else is a lowering bug. A resource's cleanup is no
+# exception: it is compiled only where compiled code may release its
+# resource (LiveCleanups), along the release edges the context analysis
+# verified, so its loads are of installed contexts like any function's
+# (NATIVE-UNUSED-CONTEXT-IMPORT-CORRECTNESS-MILESTONE-1.md: a cleanup no
+# compiled code releases -- std::event_loop's Owner's, in a program that
+# imports it and never makes one -- is not compiled at all).
 proc native::lower::UninstalledContext {fnVar e id} {
     upvar 1 $fnVar fn
-    if {[ContextDiagnostic] eq "" && ![InCleanup]} {
+    if {[ContextDiagnostic] eq ""} {
         throw {NATIVE BUG} "native lowering: context load $e of context \"$id\", which the program does not install"
     }
     Emit fn "raise MISSING-CONTEXT [Quote "$id: no context of this type is installed"]" $e
@@ -12371,12 +12389,42 @@ proc native::lower::CollectFinish {fnVar e accReg} {
 #            Nothing is collected or allocated for it: no List, no plan, no
 #            MutableArray -- what it holds is whatever the body computes.
 #
+#            A *plan fold* (hir::construction's fold carrier, FOLD-VIRTUAL-
+#            LIST-CONSTRUCTION-MILESTONE-1.md) keeps the same register as a
+#            maybe-plan register: its initial value is lowered in a plan
+#            position (PlanPieces), the intermediate is bound as `{plan REG
+#            FAMILY}` -- exactly a plan parameter's local, so a reference
+#            extends it in place or materializes it -- the body's trailing
+#            value (the next intermediate) is lowered in a plan position
+#            (SequenceTo), and exhaustion and a bare break materialize it
+#            once (FoldValue). Linearity per iteration (a continue or break
+#            is a reference: FoldLinear) is what makes the in-place extension
+#            invisible: no path extends the plan and then also passes the
+#            old intermediate on. -virtual-construction-opt 0 keeps the
+#            ordinary register.
+#
 # {MODE ACCREG} for loop E (node NODE), or never when a fold's initial value
 # never completes.
 proc native::lower::LoopResultStart {fnVar e node} {
     upvar 1 $fnVar fn
     variable context
     if {[hir::IsFoldNode $node]} {
+        set family [FoldFamily $e]
+        if {$family ne ""} {
+            # A plan fold: the initial value stays a construction if it is
+            # one (a plan local, a plan result, an append), else a flat
+            # value the first extension copies into a fresh plan.
+            set initialExpr [dict get $node foldInitial]
+            set pieces [PlanPieces fn $initialExpr $family]
+            if {$pieces eq "never"} {
+                return never
+            }
+            set initial [PiecesToPlan fn $pieces $family $initialExpr]
+            set accReg [NewReg fn]
+            MarkPlan fn $accReg
+            Emit fn "$accReg = move $initial" $e
+            return [list fold $accReg]
+        }
         set initial [Expr fn [dict get $node foldInitial]]
         if {$initial eq "never"} {
             return never
@@ -12404,12 +12452,47 @@ proc native::lower::LoopEntry {continueLabel exit resultReg mode accReg} {
     error "native::lower::LoopEntry: bad mode $mode"
 }
 
-# Binds a fold NODE's intermediate to its register ACCREG for the body.
-proc native::lower::LoopResultBind {fnVar node mode accReg} {
+# Binds fold E's (node NODE) intermediate to its register ACCREG for the
+# body: a plan fold's as a plan parameter's local is bound.
+proc native::lower::LoopResultBind {fnVar e node mode accReg} {
     upvar 1 $fnVar fn
     if {$mode eq "fold"} {
-        dict set fn locals [dict get $node foldBinding] [list reg $accReg]
+        if {[IsPlanReg fn $accReg]} {
+            dict set fn locals [dict get $node foldBinding] [list plan $accReg [FoldFamily $e]]
+        } else {
+            dict set fn locals [dict get $node foldBinding] [list reg $accReg]
+        }
     }
+}
+
+# The construction family ("" | str | list) of fold E's intermediate when
+# it is a plan fold (hir::construction::foldFamily) of the instance being
+# lowered.
+proc native::lower::FoldFamily {e} {
+    variable construction
+    variable currentInstance
+    return [hir::construction::foldFamily $construction $currentInstance $e]
+}
+
+# Fold E's intermediate in ACCREG as an ordinary flat register, where the
+# fold yields it (exhaustion, a bare break): a plan fold's one
+# materialization (`construct ... flat` passes a flat value through).
+proc native::lower::FoldValue {fnVar e accReg} {
+    upvar 1 $fnVar fn
+    if {[IsPlanReg fn $accReg]} {
+        return [Assign fn "construct [FoldFamily $e] flat $accReg" $e]
+    }
+    return $accReg
+}
+
+# The value of loop E's body BODY (Sequence): a plan fold's trailing value,
+# the next intermediate, is lowered in a plan position.
+proc native::lower::LoopBody {fnVar e mode body} {
+    upvar 1 $fnVar fn
+    if {$mode eq "fold"} {
+        return [SequenceTo fn $body [FoldFamily $e]]
+    }
+    return [Sequence fn $body]
 }
 
 # Accounts for an ordinary completion of loop E's body with VALUE.
@@ -12434,7 +12517,7 @@ proc native::lower::LoopResultFinish {fnVar e mode accReg resultReg} {
             Emit fn "$resultReg = move [CollectFinish fn $e $accReg]" $e
         }
         fold {
-            Emit fn "$resultReg = move $accReg" $e
+            Emit fn "$resultReg = move [FoldValue fn $e $accReg]" $e
         }
         discard {
             set unitConst [Assign fn unit $e]
@@ -12539,14 +12622,14 @@ proc native::lower::ListLoop {fnVar e node} {
     set saved [dict get $fn locals]
     set savedRaw [dict get $fn rawCache]
     dict set fn loops $e [LoopEntry $continueLabel $exit $resultReg $mode $accReg]
-    LoopResultBind fn $node $mode $accReg
+    LoopResultBind fn $e $node $mode $accReg
     if {$consuming} {
         set elemReg [Assign fn "op ${drain}takefront $iterReg" $e]
     } else {
         set elemReg [Assign fn "op listget $iterReg $idxReg" $e]
     }
     dict set fn locals [dict get $node elementBinding] [list reg $elemReg]
-    set bodyValue [IterationBody fn $e [dict get $node body]]
+    set bodyValue [IterationBody fn $e [dict get $node body] $mode]
     set usedContinue [dict exists $fn continued $e]
     if {$bodyValue ne "never"} {
         LoopResultAdd fn $e $mode $accReg $bodyValue
@@ -12577,7 +12660,7 @@ proc native::lower::ListLoop {fnVar e node} {
 # cases) is not lowered, exactly as a decided `if`'s dead arm is not (If):
 # HIR's analyses (the specialization's calls, the ownership releases) never
 # saw it as code that runs.
-proc native::lower::IterationBody {fnVar e body} {
+proc native::lower::IterationBody {fnVar e body mode} {
     if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $fnVar fn
     variable hir
@@ -12585,7 +12668,7 @@ proc native::lower::IterationBody {fnVar e body} {
         Emit fn unreachable $e
         return never
     }
-    return [Sequence fn $body]
+    return [LoopBody fn $e $mode $body]
 }
 
 # 1 if the numeric loop domain START..END of instance ID gets a raw
@@ -12743,9 +12826,9 @@ proc native::lower::CountLoop {fnVar e node} {
     set saved [dict get $fn locals]
     set savedRaw [dict get $fn rawCache]
     dict set fn loops $e [LoopEntry $continueLabel $exit $resultReg $mode $accReg]
-    LoopResultBind fn $node $mode $accReg
+    LoopResultBind fn $e $node $mode $accReg
     dict set fn locals [dict get $node countBinding] [list [expr {$raw ? "rawreg" : "reg"}] $idxReg]
-    set bodyValue [Sequence fn [dict get $node body]]
+    set bodyValue [LoopBody fn $e $mode [dict get $node body]]
     set usedContinue [dict exists $fn continued $e]
     if {$bodyValue ne "never"} {
         LoopResultAdd fn $e $mode $accReg $bodyValue
@@ -12910,7 +12993,7 @@ proc native::lower::LockLoop {fnVar e node} {
     set saved [dict get $fn locals]
     set savedRaw [dict get $fn rawCache]
     dict set fn loops $e [LoopEntry $continueLabel $exit $resultReg $mode $accReg]
-    LoopResultBind fn $node $mode $accReg
+    LoopResultBind fn $e $node $mode $accReg
     foreach domain $domains state $states {
         if {[dict get $state kind] eq "list"} {
             set elemReg [Assign fn "op listget [dict get $state list] $posReg" $e]
@@ -12920,7 +13003,7 @@ proc native::lower::LockLoop {fnVar e node} {
                 [list [expr {[dict get $state raw] ? "rawreg" : "reg"}] [dict get $state idx]]
         }
     }
-    set bodyValue [IterationBody fn $e [dict get $node body]]
+    set bodyValue [IterationBody fn $e [dict get $node body] $mode]
     set usedContinue [dict exists $fn continued $e]
     if {$bodyValue ne "never"} {
         LoopResultAdd fn $e $mode $accReg $bodyValue
@@ -13173,11 +13256,11 @@ proc native::lower::Loop {fnVar e node} {
     set savedRaw [dict get $fn rawCache]
     if {$mode eq "fold"} {
         dict set fn loops $e [LoopEntry $head $exit $result $mode $accReg]
-        LoopResultBind fn $node $mode $accReg
+        LoopResultBind fn $e $node $mode $accReg
     } else {
         dict set fn loops $e [list $head $exit $result]
     }
-    set value [Sequence fn [dict get $node body]]
+    set value [LoopBody fn $e $mode [dict get $node body]]
     if {$value ne "never"} {
         if {$mode eq "fold"} {
             LoopResultAdd fn $e $mode $accReg $value
@@ -13503,17 +13586,41 @@ proc native::lower::PlanCallResult {fnVar e result family want} {
 proc native::lower::SequenceVirtual {fnVar exprs n {cut ""}} {
     upvar 1 $fnVar fn
     variable hir
-    foreach e [lrange $exprs 0 end-1] {
-        if {[Expr fn $e] eq "never"} {
-            return never
-        }
+    if {![SequenceStatements fn $exprs]} {
+        return never
     }
     set last [lindex $exprs end]
     if {[hir::typeOf $hir $last] eq "never"} {
         Expr fn $last
         return never
     }
-    return [VirtualValue fn $last $n $cut]
+    set value [VirtualValue fn $last $n $cut]
+    if {$value ne "never"} {
+        ReleaseHandles fn [hir::affine::releasesAfter $hir $last] $last
+    }
+    return $value
+}
+
+# The statements of EXPRS but the last, as Sequence runs them: each one
+# evaluated, then the affine values dead after it released (its own
+# discarded value included). 0 when one cannot complete normally. Every
+# lowering of a sequence whose value is wanted in a form of its own (a
+# virtual aggregate, a raw Int, a scalar String, a construction plan) runs
+# its statements so, and releases what dies after its last expression once
+# that value is had: releasing is the sequence's, whatever form its value
+# takes (a resource's cleanup, a coroutine's release and an affine
+# aggregate's drop were once skipped on these paths' normal exits).
+proc native::lower::SequenceStatements {fnVar exprs} {
+    upvar 1 $fnVar fn
+    variable hir
+    foreach e [lrange $exprs 0 end-1] {
+        set result [Expr fn $e]
+        if {$result eq "never"} {
+            return 0
+        }
+        ReleaseHandles fn [hir::affine::releasesAfter $hir $e] $e $result
+    }
+    return 1
 }
 
 # Like Sequence, for a body whose value is wanted as a raw machine integer
@@ -13523,15 +13630,19 @@ proc native::lower::SequenceVirtual {fnVar exprs n {cut ""}} {
 # small-Int domain.
 proc native::lower::SequenceRaw {fnVar exprs} {
     upvar 1 $fnVar fn
+    variable hir
     if {$exprs eq ""} {
         throw {NATIVE BUG} "native lowering: a raw-Int body has no value"
     }
-    foreach e [lrange $exprs 0 end-1] {
-        if {[Expr fn $e] eq "never"} {
-            return never
-        }
+    if {![SequenceStatements fn $exprs]} {
+        return never
     }
-    return [Expr fn [lindex $exprs end] rawjoin]
+    set last [lindex $exprs end]
+    set r [Expr fn $last rawjoin]
+    if {$r ne "never"} {
+        ReleaseHandles fn [hir::affine::releasesAfter $hir $last] $last
+    }
+    return $r
 }
 
 # Like SequenceRaw, for a body whose value flows into a scalar String register
@@ -13539,34 +13650,46 @@ proc native::lower::SequenceRaw {fnVar exprs} {
 # effect, the last is produced as KIND.
 proc native::lower::SequenceShort {fnVar exprs kind} {
     upvar 1 $fnVar fn
+    variable hir
     if {$exprs eq ""} {
         throw {NATIVE BUG} "native lowering: a ShortString1 body has no value"
     }
-    foreach e [lrange $exprs 0 end-1] {
-        if {[Expr fn $e] eq "never"} {
-            return never
-        }
+    if {![SequenceStatements fn $exprs]} {
+        return never
     }
-    return [Expr fn [lindex $exprs end] $kind]
+    set last [lindex $exprs end]
+    set r [Expr fn $last $kind]
+    if {$r ne "never"} {
+        ReleaseHandles fn [hir::affine::releasesAfter $hir $last] $last
+    }
+    return $r
 }
 
+# The affine values dead after each statement are released after it, as
+# Sequence releases them (AFFINE-VALUES.md): a plan or a flat String/List is
+# never affine itself, so the release never touches the construction.
 proc native::lower::SequenceTo {fnVar exprs family} {
     if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $fnVar fn
+    variable hir
     if {$family eq "" || $exprs eq ""} {
         return [Sequence fn $exprs]
     }
     foreach e [lrange $exprs 0 end-1] {
-        if {[Expr fn $e] eq "never"} {
+        set r [Expr fn $e]
+        if {$r eq "never"} {
             return never
         }
+        ReleaseHandles fn [hir::affine::releasesAfter $hir $e] $e $r
     }
     set last [lindex $exprs end]
     set pieces [PlanPieces fn $last $family]
     if {$pieces eq "never"} {
         return never
     }
-    return [PiecesToPlan fn $pieces $family $last]
+    set r [PiecesToPlan fn $pieces $family $last]
+    ReleaseHandles fn [hir::affine::releasesAfter $hir $last] $last $r
+    return $r
 }
 
 # ---------------------------------------------------------------------------

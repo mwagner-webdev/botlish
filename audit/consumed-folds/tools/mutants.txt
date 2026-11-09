@@ -1,0 +1,226 @@
+# Mutants of CONSUMED-FOLD-INTERMEDIATES-MILESTONE-1.md
+# (audit/consumed-folds/tools/mutate.tcl): deliberate breaks of the rules
+# that let a fold's intermediate be consumed instead of copied at every
+# iteration's entry (hir/mutvec.tcl, "Consumed fold intermediates"): no
+# `continue` or bare `break` of the fold after the iteration may have given
+# the intermediate's header away (FoldExitsClean, FoldWalk, GivesHeader),
+# every value the fold binds it to exclusive (FoldIncoming and the
+# elaboration's wraps), and the precision those rules buy (a consumed
+# fold's value is fresh, an `if`'s branches and a struct literal's fields
+# are positions of their own). Each must be killed by
+# tests/consumed-fold-intermediates.test, by one of the tests its `!!` line
+# names: an unsound mutant by a value the copying elaboration does not give
+# (cfi's eight outcomes disagree, or the value differs), a lost precision
+# by the HIR or the native copy counters.
+#
+#   @@ NAME DESCRIPTION
+#   !! TEST ...
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+
+# ---------------------------------------------------------------------------
+# Exits (soundness)
+
+@@ exits-always-clean every fold's exits count as clean: a `continue` or bare `break` after a push carries the pushed vector instead of the iteration's starting one
+!! cfi-exit-after-mutation cfi-exit-after-give-away cfi-exit-after-conditional-mutation
+## hir/mutvec.tcl
+<<<<
+    return [expr {[FoldWalkSequence $hir $parent $f $b [dict get $hir exprs $f body] 0] >= 0}]
+====
+    return 1
+>>>>
+
+@@ exit-target-inverted only the exits of other loops count: the fold's own `continue` after a push is taken for an inner loop's
+!! cfi-exit-after-mutation cfi-exit-after-give-away cfi-exit-after-conditional-mutation
+## hir/mutvec.tcl
+<<<<
+            if {$state && [dict get $node target] eq $f} {
+====
+            if {$state && [dict get $node target] ne $f} {
+>>>>
+
+@@ exit-any-loop an inner loop's `break` or `continue` counts as the fold's: a fold pushed inside an inner loop that has its own exits keeps its copy for nothing
+!! cfi-exit-of-inner-loop
+## hir/mutvec.tcl
+<<<<
+            if {$state && [dict get $node target] eq $f} {
+====
+            if {$state} {
+>>>>
+
+@@ give-away-place-ignored a mutating operation's receiver or a place parameter's argument gives nothing away: a push before a `continue` is kept on the continue's path
+!! cfi-exit-after-mutation cfi-exit-after-give-away cfi-exit-after-conditional-mutation
+## hir/mutvec.tcl
+<<<<
+        if {[PlaceArgument $hir $p $top]} {
+            return 1
+====
+        if {[PlaceArgument $hir $p $top]} {
+            return 0
+>>>>
+
+@@ give-away-move-ignored a use at its path's last use gives nothing away: the intermediate moved into a local the body pushes, then a `continue`, keeps the push
+!! cfi-exit-after-give-away
+## hir/mutvec.tcl
+<<<<
+    return [NoLaterUse $hir $parent $top $b]
+====
+    return 0
+>>>>
+
+@@ give-away-reads-count an argument read by reference (`acc.length()`) counts as a give-away: a fold that breaks after only measuring its intermediate keeps its copy
+!! cfi-exit-before-mutation
+## hir/mutvec.tcl
+<<<<
+        if {[ByReference $hir $p $top]} {
+            return 0
+====
+        if {[ByReference $hir $p $top]} {
+            return 1
+>>>>
+
+@@ give-away-int-field a read of a field that holds no header (an Int) at its last use counts as a give-away: a struct fold that breaks on its count keeps its copy
+!! cfi-int-field-read
+## hir/mutvec.tcl
+<<<<
+    if {[HeldDescriptor [hir::typeOf $hir $top]] eq ""} {
+====
+    if {0} {
+>>>>
+
+# ---------------------------------------------------------------------------
+# The walk (soundness)
+
+@@ walk-else-ignored an `if`'s state after it is its `then` branch's: a push in the `else` branch before a `continue` is kept
+!! cfi-exit-after-conditional-mutation
+## hir/mutvec.tcl
+<<<<
+            return [expr {$then || $else}]
+====
+            return $then
+>>>>
+
+@@ walk-condition-ignored an `if`'s condition is not walked: a place helper called in the condition of an `if` whose branch breaks keeps its push on the break's path
+!! cfi-exit-after-conditional-mutation
+## hir/mutvec.tcl
+<<<<
+            set state [FoldWalk $hir $parent $f $b [dict get $node condition] $state]
+====
+            set state $state
+>>>>
+
+@@ walk-handlers-ignored a handled call's state after it is its call's: a push in a handler's body before a `break` is kept
+!! cfi-exit-after-conditional-mutation
+## hir/mutvec.tcl
+<<<<
+                set result [expr {$result || $after}]
+====
+                set result $result
+>>>>
+
+@@ walk-loop-body-ignored an inner loop's body is not walked: pushes in an inner loop before the fold's `break` are kept
+!! cfi-exit-after-give-away
+## hir/mutvec.tcl
+<<<<
+            set after [FoldWalkSequence $hir $parent $f $b $body $state]
+            if {$after > 0 && !$state} {
+====
+            set after $state
+            if {$after > 0 && !$state} {
+>>>>
+
+@@ walk-loop-operands-ignored an inner loop's operands and a nested fold's initial value are not walked: the intermediate moved into a nested fold, then a `continue`, keeps the nested fold's pushes
+!! cfi-exit-after-conditional-mutation
+## hir/mutvec.tcl
+<<<<
+            foreach c [lrange $children 0 end-[llength $body]] {
+====
+            foreach c {} {
+>>>>
+
+# ---------------------------------------------------------------------------
+# Exclusive incoming values (soundness)
+
+@@ incoming-initial-dropped the fold's initial value is no exclusive position: an initial value another binding still reads is pushed in place, and that binding sees the pushes
+!! cfi-initial-shared cfi-error-leaves-fold cfi-mutable-array
+## hir/mutvec.tcl
+<<<<
+        lappend result $initial
+====
+        # (no initial value)
+>>>>
+
+@@ incoming-completions-dropped the body's normal completions are no exclusive positions: a completion with a vector another binding holds is pushed in place by the next iteration
+!! cfi-completion-shared cfi-struct-completion-fields
+## hir/mutvec.tcl
+<<<<
+    set body [dict get $node body]
+    if {$body eq {}} {
+====
+    set body {}
+    if {$body eq {}} {
+>>>>
+
+# ---------------------------------------------------------------------------
+# Precision (what consuming buys)
+
+@@ folds-never-consumed no fold intermediate is eligible: every mutated intermediate is copied at every iteration's entry again
+!! cfi-push-consumed cfi-push-linear cfi-hir-text cfi-exit-before-mutation
+## hir/mutvec.tcl
+<<<<
+            if {![dict get $convention foldClean $b]} {
+====
+            if {1} {
+>>>>
+
+@@ fold-positions-not-exclusive a consumed fold's initial value and completions are no exclusive positions of the convention: the outer intermediate of nested folds, never mutated itself, is copied into the inner fold at every outer iteration
+!! cfi-nested-folds
+## hir/mutvec.tcl
+<<<<
+            lappend result {*}[FoldIncoming $hir $f]
+====
+            # (none)
+>>>>
+
+@@ incoming-if-not-descended an `if` completing the body is one value, not its branches': its every completion is copied, though each branch moves the intermediate on
+!! cfi-if-completion
+## hir/mutvec.tcl
+<<<<
+        if {[dict get $xnode kind] eq "if" && [dict get $xnode thenBody] ne {} && [dict get $xnode elseBody] ne {}} {
+====
+        if {0} {
+>>>>
+
+@@ struct-literal-whole a struct literal completing the body is copied whole when one field needs it: the pushed vector moved into it is copied with the other, and detached at the next push
+!! cfi-struct-completion-fields
+## hir/mutvec.tcl
+<<<<
+            if {[dict get $hir exprs $v kind] eq "struct"} {
+====
+            if {0} {
+>>>>
+
+@@ fold-value-not-fresh a consumed fold's value is not fresh: a local bound to it and mutated after, and a caller mutating a function's fold result, copy it
+!! cfi-fold-value-fresh
+## hir/mutvec.tcl
+<<<<
+                && [dict exists $convention consumed [dict get $node foldBinding]]}]
+====
+                && 0}]
+>>>>
+
+# ---------------------------------------------------------------------------
+# The fold's initial value as a read-out's position
+
+@@ replace-child-no-fold-initial hir::mutvec::ReplaceChild does not know a fold's initial value: a read-out of a place there stops the elaboration
+!! cfi-initial-read-out
+## hir/mutvec.tcl
+<<<<
+    foreach field {value callee condition iterable start end receiver call foldInitial} {
+====
+    foreach field {value callee condition iterable start end receiver call} {
+>>>>

@@ -1298,10 +1298,10 @@ proc native::lower::CountLoop {fnVar e node} {
 >>>>
 ## native/lower.tcl
 <<<<
-proc native::lower::IterationBody {fnVar e body} {
+proc native::lower::IterationBody {fnVar e body mode} {
     if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
 ====
-proc native::lower::IterationBody {fnVar e body} {
+proc native::lower::IterationBody {fnVar e body mode} {
 >>>>
 ## native/lower.tcl
 <<<<

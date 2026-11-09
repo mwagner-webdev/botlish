@@ -1,0 +1,103 @@
+# feeds -- a library written apart from the http package, as a consumer's
+# dependency would be: it polls a URL with its own HTTP client and its own
+# timer, as tasks of the loop and the HTTP runtime the application
+# installed (HTTP-CLIENT-PACKAGE-MILESTONE-1.md, the clean room's workload
+# D). It installs nothing: the application chooses the driver and makes the
+# runtime, and this library shares them.
+import event_loop_linux
+import http
+import std::abi::bytes
+import std::event_loop
+import std::int
+import std::list
+import std::str
+
+nomethod fn n(x: int) -> str:
+    std::int::to_string(x)
+
+# What one poll of URL observed.
+nomethod fn observe(client: http::Client, url: str, context h: http::Http, ev: std::event_loop::Loop) -> str errors std::event_loop::SchedulerFault:
+    target = http::uri(url):
+        on http::InvalidUri {reason}:
+            return "invalid URI: ".concat(reason)
+    sent = client.send(http::get(target)):
+        on http::InvalidRequest {reason}:
+            return "invalid request: ".concat(reason)
+        on http::ResolveFailed {reason}:
+            return "cannot resolve: ".concat(reason)
+        on http::ConnectFailed {reason}:
+            return "cannot connect: ".concat(reason)
+        on http::TlsVerifyFailed {reason}:
+            return "certificate rejected: ".concat(reason)
+        on http::TlsHandshakeFailed {reason}:
+            return "handshake failed: ".concat(reason)
+        on http::ProtocolError {reason}:
+            return "protocol error: ".concat(reason)
+        on http::Timeout {reason}:
+            return "timed out: ".concat(reason)
+        on http::Cancelled:
+            return "cancelled"
+        on http::Closed:
+            return "closed"
+        on http::Unsupported {reason}:
+            return "unsupported: ".concat(reason)
+        on http::TrustFailed {reason}:
+            return "no trust anchors: ".concat(reason)
+        on http::Released:
+            return "released"
+        on http::Fault {reason}:
+            return "fault: ".concat(reason)
+    {owner, response} = sent
+    body = response.exchange.read_all(1048576):
+        on http::BodyTooLarge:
+            return "body too large"
+        on http::ProtocolError {reason}:
+            return "body: protocol error: ".concat(reason)
+        on http::Timeout {reason}:
+            return "body: timed out: ".concat(reason)
+        on http::Cancelled:
+            return "body: cancelled"
+        on http::Closed:
+            return "body: closed"
+        on http::Released:
+            return "body: released"
+        on http::Fault {reason}:
+            return "body: fault: ".concat(reason)
+        on http::ResolveFailed:
+            return "body: resolve failed"
+        on http::ConnectFailed:
+            return "body: connect failed"
+        on http::TlsVerifyFailed:
+            return "body: certificate rejected"
+        on http::TlsHandshakeFailed:
+            return "body: handshake failed"
+        on http::InvalidRequest:
+            return "body: invalid request"
+        on http::Unsupported:
+            return "body: unsupported"
+        on http::TrustFailed:
+            return "body: no trust anchors"
+    "status ".concat(n(response.status)).concat(", ").concat(n(std::abi::bytes::length(body).value)).concat(" bytes")
+
+# Polls URL COUNT times, PERIOD microseconds apart, with a client trusting
+# the system's anchors and ANCHORS (PEM; empty for none); one line per poll.
+fn poll(url: str, anchors: std::abi::bytes::Bytes, count: int, period: int, context h: http::Http, ev: std::event_loop::Loop, nat: event_loop_linux::Native) -> List[str] errors std::event_loop::SchedulerFault:
+    made = http::client(http::config().with_anchors(anchors)):
+        on http::TrustFailed {reason}:
+            return ["feeds: no trust anchors: ".concat(reason)]
+        on http::Unsupported {reason}:
+            return ["feeds: unsupported: ".concat(reason)]
+        on http::Fault {reason}:
+            return ["feeds: fault: ".concat(reason)]
+    {owner, client} = made
+    started = event_loop_linux::now_us()
+    lines = loop i from 0 to count:
+        seen = observe(client, url)
+        std::event_loop::sleep(period)
+        "feeds: poll ".concat(n(i + 1)).concat(": ").concat(seen)
+    elapsed = event_loop_linux::now_us() - started
+    paced = if elapsed >= count * period:
+        "yes"
+    else:
+        "NO"
+    std::list::flat([lines, ["feeds: ".concat(n(count)).concat(" polls, each followed by its pause: ").concat(paced)]])

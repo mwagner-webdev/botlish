@@ -11,7 +11,7 @@
 //! (`guard`), a vectored exception handler for Windows' STATUS_STACK_OVERFLOW
 //! (`windows`). runtime::native_stack is the one stack representation they
 //! fill; everything above this module is host-independent.
-#[cfg(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")))]
+#[cfg(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "android", target_arch = "aarch64")))]
 pub mod linux;
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 pub mod macos;
@@ -24,7 +24,7 @@ mod records;
 
 #[cfg(unix)]
 pub use guard::{guarded_threads, published_stack, report_fatal, set_active_stack, set_result_file, OverflowGuard};
-#[cfg(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")))]
+#[cfg(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "android", target_arch = "aarch64")))]
 pub use linux::{current_stack, thread_token};
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 pub use macos::{current_stack, thread_token};

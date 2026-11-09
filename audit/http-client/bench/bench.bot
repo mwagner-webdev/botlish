@@ -1,0 +1,265 @@
+# The http package's measurements (HTTP-CLIENT-PACKAGE-MILESTONE-1.md,
+# "Measurements"; audit/http-client/tools/measure.tcl runs it against the
+# test peers and nghttpd, with the released unit). Each line is one
+# measurement, "NAME VALUE UNIT", taken with the driver's clock.
+#
+#   bench latency URL ANCHORFILE N       N sequential GETs on one client
+#   bench clients URL ANCHORFILE N       N clients made and released (each
+#                                        builds its trust store), no request
+#   bench cold URL ANCHORFILE N          N GETs, each on a new client
+#                                        (connect, TLS handshake, request)
+#   bench stream URL ANCHORFILE [PAUSE]  one GET read chunk by chunk (a slow
+#                                        consumer sleeps PAUSE us per chunk)
+#   bench upload URL ANCHORFILE BYTES CHUNK  one PUT written CHUNK at a time
+import event_loop_linux
+import http
+import std::abi
+import std::abi::bytes
+import std::char
+import std::event_loop
+import std::int
+import std::io
+import std::io::fs
+import std::io::path
+import std::linux::fs
+import std::linux::io
+import std::list
+import std::str
+
+nomethod fn n(x: int) -> str:
+    std::int::to_string(x)
+
+# PARTS joined (function-form concat: see audit/http-client/findings/).
+nomethod fn line(parts: List[str]) -> str:
+    fold p in parts with intermediate acc "":
+        std::str::concat(acc, p)
+
+nomethod fn say(text: str, context io: std::io::IO):
+    std::io::print_line(text):
+        on std::io::WriteFailed:
+            unit
+
+nomethod fn arg(args: List[str], i: int) -> str:
+    args.get(i, "")
+
+nomethod fn num(args: List[str], i: int) -> int:
+    value = std::int::from_string(arg(args, i)):
+        on InvalidIntegerText:
+            0
+    value
+
+nomethod fn size(b: std::abi::bytes::Bytes) -> int:
+    std::abi::bytes::length(b).value
+
+nomethod fn text_of(b: std::abi::bytes::Bytes) -> str:
+    std::abi::bytes::decode_utf8(b):
+        on InvalidUtf8:
+            ""
+
+nomethod fn file_bytes(path: str, context fs: std::linux::fs::LinuxFS) -> std::abi::bytes::Bytes:
+    p = std::linux::fs::from_text(path):
+        on std::io::path::NotAPath:
+            return std::abi::bytes::from_list([])
+    std::linux::fs::read_file(p):
+        on std::io::fs::FileError:
+            std::abi::bytes::from_list([])
+
+# The process's peak resident memory (KiB), from /proc/self/status.
+nomethod fn peak_kib(context fs: std::linux::fs::LinuxFS) -> int:
+    status = text_of(file_bytes("/proc/self/status"))
+    length = std::str::length(status)
+    loop i from 0 to length:
+        label = status.substring(i, i + 6):
+            on LowerUnderrun:
+                ""
+            on UpperOverrun:
+                ""
+        if label == "VmHWM:":
+            digits = loop j from i + 6 to length:
+                c = status.char_at(j):
+                    on IndexNotFound:
+                        '\n'
+                if c == '\n':
+                    break
+                if std::char::is_tcl_alnum(c) and c != 'k' and c != 'B':
+                    "".append_char(c)
+                else:
+                    ""
+            value = std::int::from_string(line(digits)):
+                on InvalidIntegerText:
+                    -1
+            return value
+    -1
+
+nomethod fn config_for(path: str, context fs: std::linux::fs::LinuxFS) -> http::Config:
+    if path == "":
+        return http::config()
+    http::config().with_anchors(file_bytes(path))
+
+# One GET read to its end; its body's size.
+nomethod fn fetch(client: http::Client, target: http::Uri, context h: http::Http, ev: std::event_loop::Loop) -> int errors http::InvalidRequest, http::ResolveFailed, http::ConnectFailed, http::TlsVerifyFailed, http::TlsHandshakeFailed, http::ProtocolError, http::Timeout, http::Cancelled, http::Closed, http::Unsupported, http::TrustFailed, http::Released, http::Fault, http::BodyTooLarge, std::event_loop::SchedulerFault:
+    {owner, response} = client.send(http::get(target))
+    size(response.exchange.read_all(1073741824))
+
+fn latency(args: List[str], context h: http::Http, ev: std::event_loop::Loop, nat: event_loop_linux::Native, io: std::io::IO, fs: std::linux::fs::LinuxFS) errors http::InvalidUri, http::InvalidRequest, http::ResolveFailed, http::ConnectFailed, http::TlsVerifyFailed, http::TlsHandshakeFailed, http::ProtocolError, http::Timeout, http::Cancelled, http::Closed, http::Unsupported, http::TrustFailed, http::Released, http::Fault, http::BodyTooLarge, std::event_loop::SchedulerFault:
+    count = num(args, 3)
+    target = http::uri(arg(args, 1))
+    {owner, client} = http::client(config_for(arg(args, 2)))
+    fetch(client, target)
+    calls = http::stats().calls
+    started = event_loop_linux::now_us()
+    loop i from 0 to count:
+        fetch(client, target)
+    elapsed = event_loop_linux::now_us() - started
+    say(line(["latency_total_us ", n(elapsed), " us"]))
+    say(line(["latency_requests ", n(count), " requests"]))
+    say(line(["calls_total ", n(http::stats().calls - calls), " calls"]))
+
+fn cold(args: List[str], context h: http::Http, ev: std::event_loop::Loop, nat: event_loop_linux::Native, io: std::io::IO, fs: std::linux::fs::LinuxFS) errors http::InvalidUri, http::InvalidRequest, http::ResolveFailed, http::ConnectFailed, http::TlsVerifyFailed, http::TlsHandshakeFailed, http::ProtocolError, http::Timeout, http::Cancelled, http::Closed, http::Unsupported, http::TrustFailed, http::Released, http::Fault, http::BodyTooLarge, std::event_loop::SchedulerFault:
+    count = num(args, 3)
+    target = http::uri(arg(args, 1))
+    config = config_for(arg(args, 2))
+    started = event_loop_linux::now_us()
+    loop i from 0 to count:
+        {owner, client} = http::client(config)
+        fetch(client, target)
+    elapsed = event_loop_linux::now_us() - started
+    say(line(["cold_total_us ", n(elapsed), " us"]))
+    say(line(["cold_requests ", n(count), " requests"]))
+
+fn clients(args: List[str], context h: http::Http, ev: std::event_loop::Loop, nat: event_loop_linux::Native, io: std::io::IO, fs: std::linux::fs::LinuxFS) errors http::InvalidUri, http::InvalidRequest, http::ResolveFailed, http::ConnectFailed, http::TlsVerifyFailed, http::TlsHandshakeFailed, http::ProtocolError, http::Timeout, http::Cancelled, http::Closed, http::Unsupported, http::TrustFailed, http::Released, http::Fault, http::BodyTooLarge, std::event_loop::SchedulerFault:
+    count = num(args, 3)
+    config = config_for(arg(args, 2))
+    started = event_loop_linux::now_us()
+    loop i from 0 to count:
+        {owner, client} = http::client(config)
+    elapsed = event_loop_linux::now_us() - started
+    say(line(["clients_total_us ", n(elapsed), " us"]))
+
+fn stream(args: List[str], context h: http::Http, ev: std::event_loop::Loop, nat: event_loop_linux::Native, io: std::io::IO, fs: std::linux::fs::LinuxFS) errors http::InvalidUri, http::InvalidRequest, http::ResolveFailed, http::ConnectFailed, http::TlsVerifyFailed, http::TlsHandshakeFailed, http::ProtocolError, http::Timeout, http::Cancelled, http::Closed, http::Unsupported, http::TrustFailed, http::Released, http::Fault, http::BodyTooLarge, std::event_loop::SchedulerFault:
+    target = http::uri(arg(args, 1))
+    pause = num(args, 3)
+    {owner, client} = http::client(config_for(arg(args, 2)))
+    before = peak_kib()
+    calls = http::stats().calls
+    started = event_loop_linux::now_us()
+    {owner: x, response} = client.send(http::get(target))
+    seen = fold with intermediate acc {total: 0, chunks: 0}:
+        chunk = response.exchange.read()
+        k = size(chunk)
+        if k == 0:
+            break
+        if pause > 0:
+            std::event_loop::sleep(pause)
+        {total: acc.total + k, chunks: acc.chunks + 1}
+    elapsed = event_loop_linux::now_us() - started
+    say(line(["stream_bytes ", n(seen.total), " bytes"]))
+    say(line(["stream_chunks ", n(seen.chunks), " chunks"]))
+    say(line(["stream_us ", n(elapsed), " us"]))
+    say(line(["stream_calls ", n(http::stats().calls - calls), " calls"]))
+    say(line(["stream_peak_growth ", n(peak_kib() - before), " KiB"]))
+    say(line(["stream_max_held ", n(http::stats().max_held), " bytes"]))
+
+fn upload(args: List[str], context h: http::Http, ev: std::event_loop::Loop, nat: event_loop_linux::Native, io: std::io::IO, fs: std::linux::fs::LinuxFS) errors http::InvalidUri, http::InvalidRequest, http::ResolveFailed, http::ConnectFailed, http::TlsVerifyFailed, http::TlsHandshakeFailed, http::ProtocolError, http::Timeout, http::Cancelled, http::Closed, http::Unsupported, http::TrustFailed, http::Released, http::Fault, http::BodyTooLarge, http::HeaderNotText, std::event_loop::SchedulerFault:
+    target = http::uri(arg(args, 1))
+    total = num(args, 3)
+    chunk = num(args, 4)
+    {owner, client} = http::client(config_for(arg(args, 2)))
+    width = std::abi::usize(chunk):
+        on std::abi::AbiIntegerAboveRange:
+            std::abi::usize(65536)
+        on std::abi::AbiIntegerBelowRange:
+            std::abi::usize(65536)
+    piece = std::abi::bytes::freeze(std::abi::bytes::zeroed(width))
+    calls = http::stats().calls
+    started = event_loop_linux::now_us()
+    {owner: w, exchange} = client.start(http::request("PUT", target), total)
+    sent = fold with intermediate acc 0:
+        if acc >= total:
+            break
+        exchange.write(piece)
+        acc + chunk
+    response = exchange.finish()
+    back = response.exchange.read_all(1073741824)
+    elapsed = event_loop_linux::now_us() - started
+    say(line(["upload_bytes ", n(sent), " bytes"]))
+    say(line(["upload_echoed ", n(size(back)), " bytes"]))
+    say(line(["upload_us ", n(elapsed), " us"]))
+    say(line(["upload_calls ", n(http::stats().calls - calls), " calls"]))
+    say(line(["upload_peer_length ", response.headers.first("x-echo-length"), " bytes"]))
+
+fn work(args: List[str], context h: http::Http, ev: std::event_loop::Loop, nat: event_loop_linux::Native, io: std::io::IO, fs: std::linux::fs::LinuxFS) errors http::InvalidUri, http::InvalidRequest, http::ResolveFailed, http::ConnectFailed, http::TlsVerifyFailed, http::TlsHandshakeFailed, http::ProtocolError, http::Timeout, http::Cancelled, http::Closed, http::Unsupported, http::TrustFailed, http::Released, http::Fault, http::BodyTooLarge, http::HeaderNotText, std::event_loop::SchedulerFault:
+    which = arg(args, 0)
+    if which == "latency":
+        latency(args)
+    elif which == "cold":
+        cold(args)
+    elif which == "clients":
+        clients(args)
+    elif which == "stream":
+        stream(args)
+    elif which == "upload":
+        upload(args)
+    else:
+        say("usage: bench latency|cold|stream|upload ...")
+
+fn task(args: List[str], context h: http::Http, ev: std::event_loop::Loop, nat: event_loop_linux::Native, io: std::io::IO, fs: std::linux::fs::LinuxFS) -> int errors std::event_loop::SchedulerFault:
+    work(args):
+        on http::InvalidUri {reason}:
+            say(line(["error InvalidUri ", reason]))
+        on http::InvalidRequest {reason}:
+            say(line(["error InvalidRequest ", reason]))
+        on http::ResolveFailed {reason}:
+            say(line(["error ResolveFailed ", reason]))
+        on http::ConnectFailed {reason}:
+            say(line(["error ConnectFailed ", reason]))
+        on http::TlsVerifyFailed {reason}:
+            say(line(["error TlsVerifyFailed ", reason]))
+        on http::TlsHandshakeFailed {reason}:
+            say(line(["error TlsHandshakeFailed ", reason]))
+        on http::ProtocolError {reason}:
+            say(line(["error ProtocolError ", reason]))
+        on http::Timeout {reason}:
+            say(line(["error Timeout ", reason]))
+        on http::Cancelled:
+            say("error Cancelled")
+        on http::Closed:
+            say("error Closed")
+        on http::Unsupported {reason}:
+            say(line(["error Unsupported ", reason]))
+        on http::TrustFailed {reason}:
+            say(line(["error TrustFailed ", reason]))
+        on http::Released:
+            say("error Released")
+        on http::Fault {reason}:
+            say(line(["error Fault ", reason]))
+        on http::BodyTooLarge:
+            say("error BodyTooLarge")
+        on http::HeaderNotText {name}:
+            say(line(["error HeaderNotText ", name]))
+    0
+
+fn main(context ev: std::event_loop::Loop, d: event_loop_linux::Linux, nat: event_loop_linux::Native, h: http::Http, io: std::io::IO, fs: std::linux::fs::LinuxFS) -> int errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    raw = argv():
+        on InvalidArgumentEncoding:
+            ["bench"]
+    args = loop i from 1 to std::list::length(raw):
+        raw.get(i, "")
+    coroutine {step, first} = task(args)
+    std::event_loop::adopt(step, first)
+    std::event_loop::run()
+    0
+
+with context std::event_loop::create(64)
+with context event_loop_linux::create()
+with context event_loop_linux::native()
+with context http::create()
+with context std::linux::io::create()
+with context std::linux::fs::create()
+main():
+    on std::event_loop::SchedulerFault:
+        1
+    on std::event_loop::DriverFault:
+        2
+    on std::event_loop::LoopReentered:
+        3

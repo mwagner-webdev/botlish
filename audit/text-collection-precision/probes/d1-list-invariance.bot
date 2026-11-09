@@ -1,0 +1,41 @@
+# probe: a List[Byte] is admitted neither for a List[int] parameter nor as a
+# List[int] declared result; the converse is rejected too; an untyped or
+# `list` parameter takes it (D: MINIMAL-APPLIED-LIST-TYPES.md's initial
+# invariance rule, hir::range::AggregateAdmits).
+# outcome: reject
+# diagnostic: 27:11 function result does not prove declared type List[int]
+# diagnostic: 36:9 argument for parameter "xs" cannot be proven to satisfy List[int] (argument type: List[int[std::byte::Byte]])
+# diagnostic: 39:16 argument for parameter "xs" cannot be proven to satisfy List[int[std::byte::Byte]] (argument type: List[int])
+# diagnostic: 40:9 argument for parameter "xs" cannot be proven to satisfy List[int] (argument type: List[int[std::byte::Byte]])
+import std::str
+import std::list
+import std::byte
+import std::mutable_vector
+
+fn sum(xs: List[int]) -> int:
+    fold x in xs with intermediate acc 0:
+        acc + x
+
+fn sum_untyped(xs) -> int:
+    fold x in xs with intermediate acc 0:
+        acc + x
+
+fn sum_list(xs: list) -> int:
+    fold x in xs with intermediate acc 0:
+        acc + x
+
+fn widened(s: str) -> List[int]:
+    s.encode_utf8()
+
+fn need_bytes(xs: List[std::byte::Byte]) -> int:
+    std::list::length(xs)
+
+fn vec(v: MutableVector[int]) -> int:
+    std::mutable_vector::length(v)
+
+a = sum("héllo".encode_utf8())
+b = sum_untyped("héllo".encode_utf8())
+c = sum_list("héllo".encode_utf8())
+e = need_bytes([1, 2])
+f = sum(std::list::flat(["a".encode_utf8()]))
+[a, b, c, e, f]

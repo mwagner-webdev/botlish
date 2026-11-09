@@ -1,0 +1,349 @@
+# unused-context.test -- importing a declaration requires none of its unused
+# contexts (NATIVE-UNUSED-CONTEXT-IMPORT-CORRECTNESS-MILESTONE-1.md).
+#
+# A module that declares a context and a resource whose cleanup requires it
+# (tests/unused-context/terminal.bot, the shape of the clean-room TUI
+# library's session module) may be imported for its other declarations by a
+# program that installs no such context: the program requires nothing of it
+# and runs on every backend. The native backend used to compile every
+# cleanup as a root of the program and failed, at lowering, with "NATIVE
+# BUG: context load ... which the program does not install". A cleanup is
+# compiled where code that may release its resource is compiled -- the
+# release edges the context analysis charges its requirement through
+# (hir::contexts::releasedCleanups) -- and every real release still runs its
+# cleanup with the installed contexts, on a normal end, an error edge, a
+# move and a runtime walk.
+#
+# The programs are tests/unused-context/*.bot (an application root: the
+# modules terminal.bot, clock.bot, spool.bot and relay.bot beside them),
+# compiled under -warnings error and run on this pass's backends, which must
+# agree. The package test writes the TUI structure (a portable module and a
+# session module of one package) into the temporary directory.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+if {![info exists ::env(CORE_BACKEND)]} {
+    set ucBackends {interp compile cranelift-generic cranelift}
+} elseif {$::env(CORE_BACKEND) eq "interp"} {
+    set ucBackends {interp cranelift}
+} elseif {$::env(CORE_BACKEND) eq "compile"} {
+    set ucBackends {compile cranelift-generic}
+} else {
+    set ucBackends [list $::env(CORE_BACKEND)]
+}
+set ucNative {cranelift-generic cranelift}
+
+set ucDir [file join $::projectRoot tests unused-context]
+
+proc ucHir {name} {
+    if {![info exists ::ucHirs($name)]} {
+        set ::ucHirs($name) [surface::readProgramFile [file join $::ucDir $name.bot] -warnings error]
+    }
+    return $::ucHirs($name)
+}
+
+# The outcomes ({TAG VALUE}) of HIR on BACKENDS, one per backend.
+proc ucOutcomes {hir backends} {
+    lmap b $backends {lrange [outcomeUnderHir $b $hir] 0 1}
+}
+
+# Program NAME's outcome on this pass's backends and both native backends:
+# {AGREE OUTCOME}, AGREE 1 when every backend gave the same one.
+proc ucRun {name} {
+    if {![info exists ::ucRuns($name)]} {
+        set outcomes [lsort -unique [ucOutcomes [ucHir $name] [lsort -unique [concat $::ucBackends $::ucNative]]]]
+        if {[llength $outcomes] != 1} {
+            puts stderr "$name: [string range $outcomes 0 2000]"
+        }
+        set ::ucRuns($name) [list [expr {[llength $outcomes] == 1}] [lindex $outcomes 0]]
+    }
+    return $::ucRuns($name)
+}
+
+# The functions of program NAME's NIR (their names, unique, sorted), the
+# contexts it gives slots, and its cleanup table's entries (`fn` for a function
+# value, `unit` for an entry the program compiles nothing for), on the
+# specialized native backend or, with -specialize 0, the generic one.
+proc ucNir {name args} {
+    set text [native::nir [ucHir $name] {*}$args]
+    set functions [lsort -unique [lmap {- f} [regexp -all -inline -line {^func [0-9]+ "([^"]+)"} $text] {set f}]]
+    set contexts [lmap {- c} [regexp -all -inline -line {^context [0-9]+ "([^"]+)"} $text] {set c}]
+    set table none
+    if {[regexp -line {^\s*%[0-9]+ = op cleanuptable (.*)$} $text -> regs]} {
+        set table [lmap reg $regs {
+            regexp -line "^\\s*$reg = (\\S+)" $text -> what
+            expr {$what eq "fnvalue" ? "fn" : $what}
+        }]
+    }
+    list $functions $contexts $table
+}
+
+# A fresh application directory holding FILES ({RELATIVE-PATH TEXT ...}).
+set ucAppN 0
+proc ucApp {files} {
+    set dir [file join [temporaryDirectory] uc-app-[pid]-[incr ::ucAppN]]
+    file delete -force $dir
+    foreach {relative text} $files {
+        set path [file join $dir {*}[file split $relative]]
+        file mkdir [file dirname $path]
+        set f [open $path w]
+        fconfigure $f -encoding utf-8 -translation lf
+        puts -nonewline $f $text
+        close $f
+    }
+    return $dir
+}
+
+# The text of tests/unused-context/NAME, its line ends LF whatever the
+# checkout's are (the edits below match LF text).
+proc ucText {name} {
+    set f [open [file join $::ucDir $name] r]
+    fconfigure $f -encoding utf-8 -translation auto
+    set text [read $f]
+    close $f
+    return $text
+}
+
+# "KIND: SUMMARY" of each diagnostic of the compilation of FILE, or accepted.
+proc ucRejection {file} {
+    if {[catch {surface::readProgramFile $file -warnings off} message options]} {
+        if {[dict exists $options -diagnostics]} {
+            return [lmap d [dict get $options -diagnostics] {
+                string cat [lindex [dict get $d errorcode] end] ": " [dict get $d summary]
+            }]
+        }
+        return [list "[lindex [dict get $options -errorcode] end]: $message"]
+    }
+    return accepted
+}
+
+# Runs SCRIPT with BOTLISH_NATIVE_GC_STRESS=1, restoring the environment.
+proc ucGcStress {script} {
+    set had [info exists ::env(BOTLISH_NATIVE_GC_STRESS)]
+    set saved [expr {$had ? $::env(BOTLISH_NATIVE_GC_STRESS) : ""}]
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    try {
+        uplevel 1 $script
+    } finally {
+        if {$had} {
+            set ::env(BOTLISH_NATIVE_GC_STRESS) $saved
+        } else {
+            unset ::env(BOTLISH_NATIVE_GC_STRESS)
+        }
+    }
+}
+
+# --------------------------------------------------------------------------
+# Unused declarations: nothing required, nothing compiled
+
+test uc-import-only {the reproducer: a program that imports terminal for its portable width() -- installing no Terminal, making no Session, calling no cleanup -- runs on every backend, the native ones included (it used to fail natively with NATIVE BUG: context load ... which the program does not install)} -body {
+    ucRun import_only
+} -result {1 {value 81}}
+
+test uc-transitive {the same declarations reached through a transitive import (relay imports terminal for width)} -body {
+    ucRun transitive
+} -result {1 {value 82}}
+
+test uc-several {several imported modules, each with a context and a resource whose cleanup requires it (terminal's Terminal; clock's Alarm, whose cleanup requires its own Clock and terminal's Terminal; spool's Spool), none installed, none used} -body {
+    ucRun several
+} -result {1 {value 223}}
+
+test uc-unreachable-release {a release in a branch the compiler proves never runs (if false) charges nothing: the program installs no Terminal and runs on every backend} -body {
+    ucRun unreachable
+} -result {1 {value 2}}
+
+test uc-stdlib-imports {the standard library's instance of the defect: std::event_loop's Owner is a resource whose cleanup (release) requires the Loop, so a program that imported std::event_loop -- or std::actor, which imports it -- without installing a Loop failed natively; it now runs on every backend, and compiles neither release nor a context slot} -body {
+    lmap text {"import std::event_loop\n\n1 + 1\n" "import std::actor\n\n2 + 1\n"} {
+        set hir [surface::compile $text main.bot -warnings error]
+        set nir [native::nir $hir]
+        list [lsort -unique [ucOutcomes $hir [lsort -unique [concat $::ucBackends $::ucNative]]]] \
+            [regexp {func [0-9]+ "std::event_loop::release"} $nir] [regexp -line {^context } $nir] [expr {[string first cleanuptable $nir] >= 0}]
+    }
+} -cleanup {unset -nocomplain text hir nir} -result {{{{value 2}} 0 0 0} {{{value 3}} 0 0 0}}
+
+test uc-nir-import-only {natively, the importing program compiles nothing of terminal but what it calls: no context slot, no cleanup table, no cleanup function -- on both native backends} -body {
+    list [ucNir import_only] [ucNir import_only -specialize 0]
+} -result {{<program> {} none} {<program> {} none}}
+
+test uc-nir-several {natively, several.bot compiles no cleanup of its three modules, no unused function that holds a resource, no context slot and no cleanup table} -body {
+    lassign [ucNir several] functions contexts table
+    list [lmap f {terminal::leave terminal::untag clock::disarm spool::finish terminal::session_demo} {expr {$f in $functions}}] $contexts $table
+} -cleanup {unset -nocomplain functions contexts table} -result {{0 0 0 0 0} {} none}
+
+test uc-declarations-still-checked {an unused cleanup is still analyzed as it was: its block requires the Terminal (requiredContexts), and the release edges are where the code is -- terminal's session_demo, which holds a Session, number, whose parameter is one, and leave itself, whose destructuring reads one -- though no compiled region reaches them} -body {
+    set hir [ucHir import_only]
+    set leave [dict get [hir::resources::Cleanup $hir terminal::Session] block]
+    set regions [lsort [lmap {region cleanups} [hir::contexts::releasedCleanups $hir] {
+        if {$cleanups ne [list $leave]} continue
+        hir::contexts::BlockName $hir $region
+    }]]
+    list [dict get $hir exprs $leave requiredContexts] $regions [dict get $hir contexts installs]
+} -cleanup {unset -nocomplain hir leave regions} -result {terminal::Terminal {terminal::leave terminal::number terminal::session_demo} {}}
+
+test uc-unused-cleanup-checked {an unused cleanup is no less checked than a used one: one whose body is ill-typed is rejected though the program only imports its module for width (importing checks declarations; only compiling them for a run follows use)} -body {
+    set text [string map [list "    t.lines.push(id)\n" "    t.lines.push(id)\n    t.lines.push(\"one\")\n"] [ucText terminal.bot]]
+    set dir [ucApp [list terminal.bot $text main.bot [ucText import_only.bot]]]
+    lmap entry [ucRejection [file join $dir main.bot]] {lindex [split $entry :] 0}
+} -cleanup {file delete -force $dir; unset -nocomplain text dir} -result TYPE
+
+test uc-unused-cleanup-yield-rejected {an unused cleanup that may yield is still RESOURCE-DECLARATION} -body {
+    set text [string map [list "    t.lines.push(id)\n" "    t.lines.push(id)\n    yield id\n"] [ucText terminal.bot]]
+    set dir [ucApp [list terminal.bot $text main.bot [ucText import_only.bot]]]
+    set got [ucRejection [file join $dir main.bot]]
+    list [lindex [split [lindex $got 0] :] 0] [string match "*may yield*" [lindex $got 0]]
+} -cleanup {file delete -force $dir; unset -nocomplain text dir got} -result {RESOURCE-DECLARATION 1}
+
+# --------------------------------------------------------------------------
+# Actual use: the requirement stands, every release runs its cleanup
+
+test uc-uses {uses.bot, with the Terminal and the Clock installed: a helper's Session at the helper's end (11 10); the explicit release at once (20 21); a propagated failure's edge before the handler (30 31); a moved-in Session at the callee's end (40 41); one made by a function and released by its new owner after its note (51 50); a generic function's (60); an Alarm, whose cleanup requires both contexts, before the Session acquired before it (1070 71); one tick on the Clock (1) -- the same on every backend} -body {
+    ucRun uses
+} -result {1 {value {[11, 10, 20, 21, 30, 31, 40, 41, 51, 50, 60, 1070, 71, 1]}}}
+
+test uc-uses-counters {natively, uses.bot's compiled releases run their cleanups exactly once each: 7 (10 30 41 50 60 71 and the Alarm 70; 20's release is the program's own call); the interpreter's probe sees the same releases} -body {
+    set core::affine::cleanupTrace {}
+    try {
+        outcomeUnderHir interp [ucHir uses]
+        set trace $core::affine::cleanupTrace
+    } finally {
+        set core::affine::cleanupTrace none
+    }
+    list [dict get [native::allocationReport [ucHir uses] summary] resources] [llength $trace]
+} -cleanup {unset -nocomplain trace} -result {{cleanups 7 abandoned 0} 7}
+
+test uc-nir-uses {natively, uses.bot compiles the cleanups it releases (clock::disarm, terminal::leave) and not terminal::untag, whose resource nothing releases: the cleanup table's entries 0 and 1 are function values, entry 2 (Tag) unit; both contexts have slots; terminal::session_demo, never called, is not compiled} -body {
+    lassign [ucNir uses] functions contexts table
+    list [lmap f {clock::disarm terminal::leave terminal::untag terminal::session_demo} {expr {$f in $functions}}] $contexts $table
+} -cleanup {unset -nocomplain functions contexts table} -result {{1 1 0 0} {terminal::Terminal clock::Clock} {fn fn unit}}
+
+test uc-tags {tags.bot releases only Tags -- by a cleared vector's walk (-1 -2), a dying struct's walk (-4) and a direct release (-6) -- each by Tag's cleanup, entry 1 of the table, while entry 0 (Session's) is compiled for nothing} -body {
+    ucRun tags
+} -result {1 {value {[-1, -2, 3, 5, -4, -6]}}}
+
+test uc-tags-table {natively, tags.bot's cleanup table is {unit fn}: Session's cleanup is not compiled, Tag's is; the runtime's walks called entry 1 four times; the interpreter's releases name cleanup 1 alone} -body {
+    set core::affine::cleanupTrace {}
+    try {
+        outcomeUnderHir interp [ucHir tags]
+        set trace $core::affine::cleanupTrace
+    } finally {
+        set core::affine::cleanupTrace none
+    }
+    lassign [ucNir tags] functions contexts table
+    list $table [expr {"terminal::leave" in $functions}] [expr {"terminal::untag" in $functions}] \
+        [dict get [native::allocationReport [ucHir tags] summary] resources] [lsort -unique [lmap entry $trace {lindex $entry 0}]]
+} -cleanup {unset -nocomplain trace functions contexts table} -result {{unit fn} 0 1 {cleanups 4 abandoned 0} 1}
+
+test uc-toplevel {a Job only the top level releases (a discarded value) runs spool's cleanup: one job done} -body {
+    ucRun toplevel
+} -result {1 {value 1}}
+
+test uc-gc-stress {uses.bot, tags.bot and import_only.bot under native GC stress: the same values} -body {
+    ucGcStress {
+        lmap name {uses tags import_only} {lindex [outcomeUnderHir cranelift [ucHir $name]] 1}
+    }
+} -result {{[11, 10, 20, 21, 30, 31, 40, 41, 51, 50, 60, 1070, 71, 1]} {[-1, -2, 3, 5, -4, -6]} 81}
+
+test uc-typed-callable {a function that releases a resource, called only through a typed callable: with a context-free cleanup it runs on every backend and natively its cleanup runs once (the function's value is materialized, its region's releases compiled); with a cleanup that requires the Terminal it requires the Terminal, and so cannot become a value at all (CONTEXT-FUNCTION-VALUE)} -body {
+    set apply "fn apply(f: Fn\{args: \[int\], return: int\}, n: int) -> int:\n    f(n)\n\n"
+    set dir [ucApp [list \
+        terminal.bot [ucText terminal.bot] \
+        plain.bot "opaque resource struct Plain:\n    id: int\n\ncleanup fn discard(p: Plain):\n    \{id\} = p\n    unit\n\nfn make(n: int) -> Plain:\n    Plain \{id: n\}\n" \
+        free.bot "import plain\n\nfn hold(n: int) -> int:\n    p = plain::make(n)\n    n + 1\n\n${apply}hold.apply(3)\n" \
+        bound.bot "import terminal\n\nfn hold(n: int) -> int:\n    s = terminal::enter(n)\n    n + 1\n\n${apply}with context terminal::create()\nhold.apply(3)\n"]]
+    set hir [surface::readProgramFile [file join $dir free.bot] -warnings error -cache ""]
+    list [lsort -unique [ucOutcomes $hir [lsort -unique [concat $::ucBackends $::ucNative]]]] \
+        [dict get [native::allocationReport $hir summary] resources] \
+        [lmap entry [ucRejection [file join $dir bound.bot]] {lindex [split $entry :] 0}]
+} -cleanup {file delete -force $dir; unset -nocomplain apply dir hir} -result {{{value 4}} {cleanups 1 abandoned 0} CONTEXT-FUNCTION-VALUE}
+
+# --------------------------------------------------------------------------
+# A missing context is still missing
+
+test uc-missing-context {a Session really released where no Terminal is installed is MISSING-CONTEXT at compile time, never a Terminal the compiler supplies: the helper's requirement charged to its call} -body {
+    lmap entry [ucRejection [file join $::ucDir missing.bot]] {
+        list [lindex [split $entry :] 0] [string match "*terminal::Terminal is required by this call*" $entry]
+    }
+} -result {{MISSING-CONTEXT 1}}
+
+test uc-missing-context-branch {a release in a branch that may run requires the Terminal whatever this run's argument is: MISSING-CONTEXT} -body {
+    lmap entry [ucRejection [file join $::ucDir branch.bot]] {lindex [split $entry :] 0}
+} -result MISSING-CONTEXT
+
+test uc-missing-context-release {a release at the top level where the Terminal is not installed is MISSING-CONTEXT located at the release} -body {
+    set dir [ucApp [list terminal.bot [ucText terminal.bot] main.bot "import terminal\n\nterminal::enter(1)\n1\n"]]
+    lmap entry [ucRejection [file join $dir main.bot]] {
+        list [lindex [split $entry :] 0] [string match "*required by the release of this value*" $entry]
+    }
+} -cleanup {file delete -force $dir; unset -nocomplain dir} -result {{MISSING-CONTEXT 1}}
+
+# --------------------------------------------------------------------------
+# The TUI structure: a package's portable module and its session module
+
+proc ucTuiApp {} {
+    ucApp [list \
+        .bot_modules/tui/tui/session.bot [ucText terminal.bot] \
+        .bot_modules/tui/tui/app.bot "import tui::session\n\n# Portable: the layout of a frame.\nfn columns(n: int) -> int:\n    tui::session::width() - n\n\n# Enters a terminal session and leaves it at the end.\nfn run(n: int, context t: tui::session::Terminal) -> int:\n    s = tui::session::enter(n)\n    tui::session::note(n + 1)\n    n\n" \
+        portable.bot "import tui::app\n\ntui::app::columns(4)\n" \
+        session.bot "import tui::app\nimport tui::session\n\nwith context tui::session::create()\ntui::app::run(5)\ntui::session::log():\n    on IndexNotFound:\n        \[\]\n"]
+}
+
+test uc-package-portable {the TUI structure: a program that imports a package's portable module (tui::app), which imports the package's session module (tui::session: the Terminal, the Session and its cleanup), runs on every backend without a Terminal} -body {
+    set dir [ucTuiApp]
+    set hir [surface::readProgramFile [file join $dir portable.bot] -warnings error -cache ""]
+    lsort -unique [ucOutcomes $hir [lsort -unique [concat $::ucBackends $::ucNative]]]
+} -cleanup {file delete -force $dir; unset -nocomplain dir hir} -result {{value 76}}
+
+test uc-package-session {a program that installs the package's Terminal and enters and leaves a session runs the cleanup on every backend (note 6, then the release 5)} -body {
+    set dir [ucTuiApp]
+    set hir [surface::readProgramFile [file join $dir session.bot] -warnings error -cache ""]
+    lsort -unique [ucOutcomes $hir [lsort -unique [concat $::ucBackends $::ucNative]]]
+} -cleanup {file delete -force $dir; unset -nocomplain dir hir} -result {{value {[6, 5]}}}
+
+# --------------------------------------------------------------------------
+# Compilation isolation, interchange and the cache
+
+test uc-isolation {two applications compiled in one process -- one releasing context-bearing resources, one merely importing their module -- run natively in either order and alternately, each to its own value: no installed context, cleanup table or reachability decision of one reaches the other} -body {
+    set use [surface::readProgramFile [file join $::ucDir uses.bot] -warnings error]
+    set only [surface::readProgramFile [file join $::ucDir import_only.bot] -warnings error]
+    set tags [surface::readProgramFile [file join $::ucDir tags.bot] -warnings error]
+    set out {}
+    foreach backend $::ucNative {
+        foreach hir [list $only $use $only $tags $use $tags $only] {
+            lappend out [lindex [outcomeUnderHir $backend $hir] 1]
+        }
+    }
+    lsort -unique $out
+} -cleanup {unset -nocomplain use only tags out backend hir} -result {81 {[-1, -2, 3, 5, -4, -6]} {[11, 10, 20, 21, 30, 31, 40, 41, 51, 50, 60, 1070, 71, 1]}}
+
+test uc-interchange {HIR interchange: import_only.bot's, uses.bot's and tags.bot's HIR written and read back run natively to the same values, the cleanup table (resources) unchanged} -body {
+    lmap name {import_only uses tags} {
+        set back [hir::interchange::decode [hir::interchange::encode [ucHir $name]]]
+        list [expr {[dict getdef $back resources {}] eq [dict getdef [ucHir $name] resources {}]}] \
+            [lsort -unique [lmap b $::ucNative {expr {[lrange [outcomeUnderHir $b $back] 0 1] eq [lrange [outcomeUnderHir $b [ucHir $name]] 0 1]}}]]
+    }
+} -cleanup {unset -nocomplain name back} -result {{1 1} {1 1} {1 1}}
+
+test uc-cache {the front-end cache: import_only.bot and uses.bot compiled into an empty cache and then read from it run natively to their values} -body {
+    set cache [file join [temporaryDirectory] uc-cache-[pid]]
+    file delete -force $cache
+    set out {}
+    foreach pass {miss hit} {
+        foreach name {import_only uses} {
+            set hir [surface::readProgramFile [file join $::ucDir $name.bot] -warnings error -cache $cache]
+            lappend out [lindex [outcomeUnderHir cranelift $hir] 1]
+        }
+    }
+    set out
+} -cleanup {file delete -force $cache; unset -nocomplain cache out pass name hir} -result {81 {[11, 10, 20, 21, 30, 31, 40, 41, 51, 50, 60, 1070, 71, 1]} 81 {[11, 10, 20, 21, 30, 31, 40, 41, 51, 50, 60, 1070, 71, 1]}}
+
+test uc-executable {a standalone executable of the reproducer links and runs (no Terminal), and one of tags.bot runs its cleanups through the table} -constraints executableAot -body {
+    set dir [file join [temporaryDirectory] uc-exe-[pid]]
+    file delete -force $dir
+    file mkdir $dir
+    lmap name {import_only tags} {
+        standaloneValue [native::executable [ucHir $name] [file join $dir $name]]
+    }
+} -cleanup {file delete -force $dir; unset -nocomplain dir name} -result {81 {[-1, -2, 3, 5, -4, -6]}}
+
+cleanupTests

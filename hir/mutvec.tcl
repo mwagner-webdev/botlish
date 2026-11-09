@@ -91,6 +91,12 @@ namespace eval hir::mutvec {
     variable currentParent {}
     # The named structs ShareDescriptor is inside of, outermost first.
     variable shareVisiting {}
+    # 1: a fold's intermediate may be consumed ("Consumed fold intermediates"
+    # below); 0: no fold's is, every mutated intermediate copied at its
+    # iteration's entry as before consumption existed -- the oracle the
+    # tests and the fuzzer compare the consumed elaboration with. A
+    # front-end input (surface::cache::Key), never set but by a test.
+    variable consumedFolds 1
 }
 
 proc hir::mutvec::ShareNative {} { return mutable_vector#share }
@@ -957,6 +963,31 @@ proc hir::mutvec::Elaborate {hirVar} {
             }
         }
     }
+    # The values a consumed fold intermediate is bound to: the same -- a
+    # struct literal by its collection-bearing fields, so that a field
+    # moved into it stays uncopied beside one that needs its copy.
+    dict for {b _} [dict get $convention consumed] {
+        set f [FoldOf $hir $b]
+        if {$f eq ""} continue
+        set work [FoldIncoming $hir $f]
+        while {$work ne {}} {
+            set work [lassign $work v]
+            if {[Fresh $hir $v] || [Moved $hir $parent $v]} continue
+            if {[dict get $hir exprs $v kind] eq "struct"} {
+                foreach field [dict get $hir exprs $v fields] {
+                    set type [hir::typeOf $hir $field]
+                    if {[ShareDescriptor $type] ne "" || [MayHoldVector $type]} {
+                        lappend work $field
+                    }
+                }
+                continue
+            }
+            set d [HeldDescriptor [hir::typeOf $hir $v]]
+            if {$d ne ""} {
+                lappend wraps [list $v [ShareNative] $d]
+            }
+        }
+    }
     Apply hir $wraps
     Installations hir
     set freshFunctions [dict create]
@@ -996,6 +1027,23 @@ proc hir::mutvec::Elaborate {hirVar} {
 #   demanded    a local whose last use hands its header to such a position
 #               is held like a place root (its entry is exclusive, its other
 #               value uses copy), so that last use needs no copy either.
+#   folds       a fold's intermediate (FOLD-LOOPS-MILESTONE-1.md) is a
+#               parameter of its loop's body, bound per iteration to the
+#               value its loop carries -- the initial value, then each
+#               normal completion of the body -- and that carried value is
+#               what a `continue` keeps and a bare `break` yields. It is
+#               consumed like a function's parameter
+#               (CONSUMED-FOLD-INTERMEDIATES-MILESTONE-1.md) when it needs
+#               to own its header (it is a place root, or its last use hands
+#               the header on to an exclusive position) and no `continue` or
+#               bare `break` of its fold can run after its iteration may have
+#               given that header to anything that may change it
+#               (FoldExitsClean): the fold's initial value and every normal
+#               completion are then exclusive positions (FoldIncoming), the
+#               intermediate makes no entry copy, and the iteration mutates
+#               the carried header in place. With such an exit the entry
+#               copy stays: it is what keeps the iteration's starting value
+#               for the exit to carry.
 #   observed    a parameter of a directly called function that only reads
 #               its collection (ObservedOnly: never stores, returns, captures
 #               or mutates it) is given a place's header uncopied: the callee
@@ -1009,7 +1057,8 @@ proc hir::mutvec::Elaborate {hirVar} {
 #               copy (ByReference, WrittenLater).
 #
 # The positions needing an exclusive header are a place root's entry, a
-# consumed parameter's argument, and the result of a function whose call
+# consumed parameter's argument (a consumed fold intermediate's initial value
+# and normal completions among them), and the result of a function whose call
 # sits in one of them (its result is *demanded*: a parameter it returns is
 # then consumed, which makes the function's result fresh), and each
 # collection-bearing field of a struct literal in one of them (a literal is
@@ -1019,11 +1068,14 @@ proc hir::mutvec::Elaborate {hirVar} {
 
 namespace eval hir::mutvec {
     # The convention of the elaboration under way: consumed (parameter
-    # BindingId -> 1), demanded (local BindingId -> 1), direct (function
-    # block -> 1), uses (BindingId -> {ExprId -> 1}: every expression
-    # containing a reference to the binding), held (BindingId -> 1: the
-    # place roots, consumed parameters and demanded locals), observed
-    # (BindingId -> 1: ObservedOnly).
+    # BindingId -> 1: a function's parameter or a fold's intermediate),
+    # demanded (local BindingId -> 1), direct (function block -> 1), uses
+    # (BindingId -> {ExprId -> 1}: every expression containing a reference
+    # to the binding), held (BindingId -> 1: the place roots, consumed
+    # parameters and demanded locals), observed (BindingId -> 1:
+    # ObservedOnly), foldClean (intermediate BindingId -> 1 if
+    # FoldExitsClean, 0 if not: every fold whose intermediate may hold a
+    # header).
     variable convention [dict create]
 }
 
@@ -1033,7 +1085,19 @@ proc hir::mutvec::Convention {hir parent blocks rootSet} {
     variable convention
     set direct [DirectOnly $hir $parent $blocks]
     set convention [dict create consumed {} demanded {} direct $direct uses [UseMap $hir $parent] \
-        captured [Captured $hir]]
+        captured [Captured $hir] foldClean {}]
+    # Whether each fold's exits leave its intermediate eligible (Eligible
+    # reads it on every pass): a fold's own facts, decided once.
+    variable consumedFolds
+    set foldClean [dict create]
+    dict for {e node} [dict get $hir exprs] {
+        if {![dict exists $node foldBinding] || ![dict get $node reachable]} continue
+        set b [dict get $node foldBinding]
+        if {![dict exists $hir bindings $b] || [dict get $hir bindings $b kind] ne "param"
+                || [HeldDescriptor [hir::affine::BindingType $hir $b]] eq ""} continue
+        dict set foldClean $b [expr {$consumedFolds && [FoldExitsClean $hir $parent $e $b]}]
+    }
+    dict set convention foldClean $foldClean
     # Seeds: the place-root parameters of directly called functions own
     # their header by the caller's copy instead of an entry copy.
     dict for {b _} $rootSet {
@@ -1099,6 +1163,14 @@ proc hir::mutvec::ExclusivePositions {hir rootSet demandedResults} {
             if {$arg ne "" && $param ne "" && [dict exists $convention consumed $param]} {
                 lappend result $arg
             }
+        }
+    }
+    # A consumed fold intermediate's "arguments": its fold's initial value
+    # and the body's normal completions.
+    dict for {b _} [dict get $convention consumed] {
+        set f [FoldOf $hir $b]
+        if {$f ne ""} {
+            lappend result {*}[FoldIncoming $hir $f]
         }
     }
     dict for {f _} $demandedResults {
@@ -1170,8 +1242,9 @@ proc hir::mutvec::DirectOnly {hir parent blocks} {
     return $result
 }
 
-# 1 if binding B may be held under the convention: a local or a parameter
-# (of a directly called function) of a collection-bearing unrestricted type,
+# 1 if binding B may be held under the convention: a local, a parameter (of
+# a directly called function) or a fold's intermediate (whose fold's exits
+# are clean: FoldExitsClean) of a collection-bearing unrestricted type,
 # never a module binding, a context parameter or a destructuring temporary,
 # referred to only from its own function (a closure that captures it reads
 # it whenever it runs).
@@ -1187,10 +1260,18 @@ proc hir::mutvec::Eligible {hir b} {
         return 0
     }
     if {[dict get $binding kind] eq "param"} {
-        set f [dict get $hir scopes [dict get $binding scope] owner]
-        if {$f eq "" || ![dict exists $hir exprs $f] || [dict get $hir exprs $f kind] ne "block"
-                || ![dict exists $convention direct $f]} {
-            return 0
+        if {[dict exists $convention foldClean $b]} {
+            # A fold's intermediate: every value it is bound to comes from
+            # the fold itself (FoldIncoming), its one "caller".
+            if {![dict get $convention foldClean $b]} {
+                return 0
+            }
+        } else {
+            set f [dict get $hir scopes [dict get $binding scope] owner]
+            if {$f eq "" || ![dict exists $hir exprs $f] || [dict get $hir exprs $f kind] ne "block"
+                    || ![dict exists $convention direct $f]} {
+                return 0
+            }
         }
     }
     return [expr {![dict exists $convention captured $b]}]
@@ -1533,6 +1614,230 @@ proc hir::mutvec::Moved {hir parent e} {
     return [NoLaterUse $hir $parent $e $b]
 }
 
+# ---------------------------------------------------------------------------
+# Consumed fold intermediates (CONSUMED-FOLD-INTERMEDIATES-MILESTONE-1.md)
+#
+# A fold's loop carries one value from each iteration to the next, and the
+# backends bind the intermediate to that carried value itself (native
+# lowering's accumulator register, the Tcl compiler's accumulator
+# variable, the evaluator's result state). The entry copy of a mutated
+# intermediate (EntryRename: `acc = share(acc#entry)`) keeps the carried
+# header unchanged while the iteration works on its own copy, and that is
+# what a `continue` keeps and a bare `break` yields: the iteration's
+# starting value (FOLD-LOOPS-MILESTONE-1.md, rules 5 and 6). It is also a
+# copy of the whole collection at every iteration's first write, which no
+# one observes where neither exit can follow the write.
+#
+# A consumed intermediate makes no entry copy: the iteration mutates the
+# carried header in place, and a normal completion carries the result on.
+# That needs two things.
+#
+#   exclusive   nothing but the carried value holds the header the
+#               iteration mutates: every value the fold binds the
+#               intermediate to -- its initial value, each normal completion
+#               of its body (FoldIncoming) -- is an exclusive position, as a
+#               consumed parameter's argument is (a new header, the last use
+#               of a binding that owns its own, a consumed fold, or a copy).
+#   clean exits no `continue` or bare `break` of the fold may run after the
+#               iteration may have given the intermediate's header -- or a
+#               header in one of its struct fields -- to anything that may
+#               change it (FoldExitsClean): a mutating operation's receiver,
+#               a place argument, or a use that moves it on (its path's last
+#               use: GivesHeader). Every other use shares or only reads it.
+#               An exit before such a use carries the header unchanged, as
+#               the copy would have.
+#
+# A fold's `return`, `fail` or propagated error leaves it with no value:
+# what the iteration did to the carried header is observed by no one.
+
+# The fold whose intermediate binding B is, or "".
+proc hir::mutvec::FoldOf {hir b} {
+    set binding [dict get $hir bindings $b]
+    if {[dict get $binding kind] ne "param"} {
+        return ""
+    }
+    set f [dict get $hir scopes [dict get $binding scope] owner]
+    if {$f eq "" || ![dict exists $hir exprs $f] || [dict getdef $hir exprs $f foldBinding ""] ne $b} {
+        return ""
+    }
+    return $f
+}
+
+# The values fold F binds its intermediate to, reachable ones: its initial
+# value, then every normal completion of its body -- the body's last
+# statement, or in place of an `if` with two branches each branch's last
+# statement, the same way down (a statement that never completes is none).
+proc hir::mutvec::FoldIncoming {hir f} {
+    set node [dict get $hir exprs $f]
+    set result {}
+    set initial [dict get $node foldInitial]
+    if {[dict get $hir exprs $initial reachable]} {
+        lappend result $initial
+    }
+    set body [dict get $node body]
+    if {$body eq {}} {
+        return $result
+    }
+    set work [list [lindex $body end]]
+    while {$work ne {}} {
+        set work [lassign $work x]
+        set xnode [dict get $hir exprs $x]
+        if {![dict get $xnode reachable] || [hir::typeOf $hir $x] eq "never"} continue
+        if {[dict get $xnode kind] eq "if" && [dict get $xnode thenBody] ne {} && [dict get $xnode elseBody] ne {}} {
+            lappend work [lindex [dict get $xnode thenBody] end] [lindex [dict get $xnode elseBody] end]
+            continue
+        }
+        lappend result $x
+    }
+    return $result
+}
+
+# 1 if no `continue` or bare `break` of fold F (intermediate B; PARENT the
+# parent map) can run after its iteration may have given B's header away
+# (GivesHeader), on any path through the body.
+proc hir::mutvec::FoldExitsClean {hir parent f b} {
+    return [expr {[FoldWalkSequence $hir $parent $f $b [dict get $hir exprs $f body] 0] >= 0}]
+}
+
+# The state after the statements of SEQUENCE run, from STATE before them
+# (FoldWalk).
+proc hir::mutvec::FoldWalkSequence {hir parent f b sequence state} {
+    foreach s $sequence {
+        set state [FoldWalk $hir $parent $f $b $s $state]
+        if {$state < 0} {
+            return -1
+        }
+    }
+    return $state
+}
+
+# The state after expression X of fold F's body runs, from STATE before it:
+# 1 once B's header may have been given away in this iteration (GivesHeader
+# of a reference to B that ran), 0 before; -1 when an exit of F may run in
+# state 1. Over-approximated, never under: what runs before X in its
+# sequence, its operands left to right, either branch of an `if`, a
+# handler after any part of its call (from the state after the call), an
+# inner loop's body any number of times, and a statement after one that
+# never completes as if it could run. Unreachable code runs never; a nested
+# function's body runs in another invocation, which cannot refer to B
+# (Eligible: never captured) or exit F.
+proc hir::mutvec::FoldWalk {hir parent f b x state} {
+    set node [dict get $hir exprs $x]
+    if {![dict get $node reachable]} {
+        return $state
+    }
+    switch -- [dict get $node kind] {
+        const - block {
+            return $state
+        }
+        ref {
+            if {!$state && [dict get $node binding] eq $b && [GivesHeader $hir $parent $x $b]} {
+                return 1
+            }
+            return $state
+        }
+        break - continue {
+            foreach c [hir::children $hir $x] {
+                set state [FoldWalk $hir $parent $f $b $c $state]
+                if {$state < 0} {
+                    return -1
+                }
+            }
+            if {$state && [dict get $node target] eq $f} {
+                return -1
+            }
+            return $state
+        }
+        if {
+            set state [FoldWalk $hir $parent $f $b [dict get $node condition] $state]
+            if {$state < 0} {
+                return -1
+            }
+            set then [FoldWalkSequence $hir $parent $f $b [dict get $node thenBody] $state]
+            set else [FoldWalkSequence $hir $parent $f $b [dict get $node elseBody] $state]
+            if {$then < 0 || $else < 0} {
+                return -1
+            }
+            return [expr {$then || $else}]
+        }
+        handle {
+            set state [FoldWalk $hir $parent $f $b [dict get $node call] $state]
+            if {$state < 0} {
+                return -1
+            }
+            set result $state
+            foreach body [dict get $node handlerBodies] {
+                set after [FoldWalkSequence $hir $parent $f $b $body $state]
+                if {$after < 0} {
+                    return -1
+                }
+                set result [expr {$result || $after}]
+            }
+            return $result
+        }
+        loop - listloop - countloop - lockloop {
+            set body [dict get $node body]
+            set children [hir::children $hir $x]
+            foreach c [lrange $children 0 end-[llength $body]] {
+                # (The operands and a fold's initial value: once, first.)
+                set state [FoldWalk $hir $parent $f $b $c $state]
+                if {$state < 0} {
+                    return -1
+                }
+            }
+            set after [FoldWalkSequence $hir $parent $f $b $body $state]
+            if {$after > 0 && !$state} {
+                # A later iteration starts where an earlier one ended.
+                set after [FoldWalkSequence $hir $parent $f $b $body 1]
+            }
+            if {$after < 0} {
+                return -1
+            }
+            return [expr {$state || $after}]
+        }
+    }
+    foreach c [hir::children $hir $x] {
+        set state [FoldWalk $hir $parent $f $b $c $state]
+        if {$state < 0} {
+            return -1
+        }
+    }
+    return $state
+}
+
+# 1 if reference R to fold intermediate B (PARENT the parent map), when it
+# runs, may give B's header -- or a header in one of B's struct fields -- to
+# something that may change it, B being held under the convention: the path
+# R begins (its projections continuing it) is a place the call it is given
+# to mutates (PlaceArgument: a mutating operation's receiver, a place
+# parameter's argument), or a value use at its path's last use
+# (NoLaterUse), which moves the header on uncopied. Not a use that holds no
+# header (an Int field), a discarded statement, an argument the call only
+# reads by reference (ByReference), or a value use before the path's last,
+# which is shared.
+proc hir::mutvec::GivesHeader {hir parent r b} {
+    lassign [UsePath $hir $parent $r] fields top
+    if {[HeldDescriptor [hir::typeOf $hir $top]] eq ""} {
+        return 0
+    }
+    if {![dict exists $parent $top]} {
+        return 1
+    }
+    lassign [dict get $parent $top] p role
+    if {$role eq "seq 0"} {
+        return 0
+    }
+    if {$p ne "" && $role ne "callee" && [dict get $hir exprs $p kind] eq "call"} {
+        if {[PlaceArgument $hir $p $top]} {
+            return 1
+        }
+        if {[ByReference $hir $p $top]} {
+            return 0
+        }
+    }
+    return [NoLaterUse $hir $parent $top $b]
+}
+
 # 1 if place path A, an argument of call P, is handed over by reference --
 # uncopied although it may not be its path's last use -- because the call
 # reads it (or mutates it, a place) when it runs: the argument of a
@@ -1807,11 +2112,18 @@ proc hir::mutvec::Observed {hir p e} {
 }
 
 # 1 if the value of E is a collection-bearing value nothing else refers to: a
-# new vector or array, a logical copy, or a struct literal of such.
+# new vector or array, a logical copy, a struct literal of such, or a fold
+# whose intermediate is consumed (its every incoming value is exclusive, and
+# its iterations give the carried header away only when they complete).
 proc hir::mutvec::Fresh {hir e} {
     variable freshFunctions
     set node [dict get $hir exprs $e]
     switch -- [dict get $node kind] {
+        loop - listloop - countloop - lockloop {
+            variable convention
+            return [expr {[dict exists $node foldBinding]
+                && [dict exists $convention consumed [dict get $node foldBinding]]}]
+        }
         call {
             set name [hir::affine::NativeName $hir $e]
             if {[Constructor $name] || $name eq [ShareNative]} {
@@ -2131,7 +2443,7 @@ proc hir::mutvec::Retarget {hirVar e name} {
 proc hir::mutvec::ReplaceChild {hirVar p old new} {
     upvar 1 $hirVar hir
     set node [dict get $hir exprs $p]
-    foreach field {value callee condition iterable start end receiver call} {
+    foreach field {value callee condition iterable start end receiver call foldInitial} {
         if {[dict exists $node $field] && [dict get $node $field] eq $old} {
             dict set hir exprs $p $field $new
             return

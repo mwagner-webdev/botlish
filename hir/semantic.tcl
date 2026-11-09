@@ -765,6 +765,14 @@ proc hir::semantic::Snapshot {scratch id} {
                 dict set bindings $b [dict get $scratch types [dict get $scratch bindings $b type]]
             }
         }
+        # A loop's clause bindings: their types as this instance's walk
+        # recorded them (hir/types.tcl's RecordClause: its own table, never
+        # the program's record, the generic walk's).
+        foreach b [hir::loopClauseBindings $node] {
+            if {[dict exists $scratch instanceClauses $b]} {
+                dict set bindings $b [dict get $scratch types [dict get $scratch instanceClauses $b]]
+            }
+        }
     }
     return [dict create exprs $exprs bindings $bindings]
 }

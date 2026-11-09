@@ -1,0 +1,54 @@
+# chunks-direct-recursive.bot -- chunks-direct-fold.bot's transitions as
+# self tail calls: the List[List[int]] is a parameter the existing virtual
+# construction pass carries as a plan register. The fold's reference.
+#
+# expect: [109, 170, 9380]
+
+import std::list
+
+marker = 1000000000
+
+fn token(i: int, n: int) -> int:
+    if i >= n:
+        return marker
+    if i.mod(5) == 4:
+        return 0
+    if i.mod(7) == 6:
+        return -i
+    if i.mod(11) == 10:
+        return 1
+    if i.mod(13) == 12:
+        return 2
+    i
+
+fn chunks_from(tokens: List[int], i: int, done: List[List[int]]) -> List[List[int]]:
+    if i < 0 or i >= tokens.length():
+        return done
+    t = tokens.at(i)
+    if t == 0:
+        return chunks_from(tokens, i + 1, done)
+    if t >= marker:
+        return done
+    if t < 0:
+        return chunks_from(tokens, i + 1, done.append([t]).append([-t]))
+    if t == 1:
+        return chunks_from(tokens, i + 1, done.append([]))
+    if t == 2:
+        return chunks_from(tokens, i + 1, done)
+    chunks_from(tokens, i + 1, done.append([t, t + 1]))
+
+fn size(cs: List[List[int]]) -> int:
+    fold c in cs with intermediate k 0:
+        k + c.length()
+
+fn total(cs: List[List[int]]) -> int:
+    fold c in cs with intermediate s 0:
+        inner = fold x in c with intermediate t 0:
+            t + x
+        s + inner
+
+n = 128
+tokens = loop i from 0 to n + 3:
+    token(i, n)
+cs = chunks_from(tokens, 0, [])
+[cs.length(), size(cs), total(cs)]

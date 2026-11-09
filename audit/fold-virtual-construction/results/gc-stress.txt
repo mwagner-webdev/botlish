@@ -1,0 +1,3 @@
+fold-virtual-construction: fold-virtual-construction.test:	Total	58	Passed	58	Skipped	0	Failed	0
+virtual-construction: virtual-construction.test:	Total	51	Passed	51	Skipped	0	Failed	0
+fold-loops: fold-loops.test:	Total	104	Passed	104	Skipped	0	Failed	0

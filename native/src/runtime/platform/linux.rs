@@ -1,6 +1,9 @@
 //! Linux pthread stack discovery for the stack-overflow guard (guard.rs), for
 //! x86-64 and AArch64 alike (pthread_getattr_np works the same on both): the
-//! stack glibc reports, with the guard glibc reports directly below it. The
+//! stack glibc reports, with the guard glibc reports directly below it.
+//! Android AArch64 uses it too (ANDROID-AARCH64-TARGET-SUPPORT-MILESTONE-1.md):
+//! Bionic's pthread_getattr_np, pthread_attr_getstack and getguardsize have
+//! glibc's contract (a created thread's guard below its usable stack). The
 //! worker and Rust/JIT helper frames use the same pthread stack and the
 //! platform's ordinary C calling convention.
 use crate::runtime::native_stack::{NativeStack, StackState};

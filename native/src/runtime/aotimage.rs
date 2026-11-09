@@ -85,18 +85,19 @@ pub struct Image {
 /// and a driver from different builds), since that code would address fields
 /// that are not there.
 pub fn abi_fingerprint() -> u64 {
-    // FNV-1a over the words' little-endian bytes.
-    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for byte in abi_words().iter().flat_map(|w| w.to_le_bytes()) {
-        hash = (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3);
-    }
-    hash
+    ABI_FINGERPRINT
 }
 
-/// What `abi_fingerprint` digests, word by word.
-pub fn abi_words() -> Vec<u64> {
+/// `abi_fingerprint`, evaluated when the runtime is compiled: FNV-1a over
+/// `abi_words`' little-endian bytes. A constant, so that a runtime archive
+/// states the fingerprint of the runtime it holds in its identity record
+/// (`identity_record`) without running anything.
+pub const ABI_FINGERPRINT: u64 = fingerprint_of(&ABI_SCALAR_WORDS, super::ops::HELPER_SIGNATURES);
+
+/// The fingerprint's words before the helpers' (`abi_words`).
+const ABI_SCALAR_WORDS: [u64; 26] = {
     use super::{bytesobj, strobj, value, vm};
-    let mut words: Vec<u64> = vec![
+    [
         std::mem::size_of::<Vm>() as u64,
         vm::VM_SS_TOP_OFFSET as u64,
         vm::VM_SS_LIMIT_OFFSET as u64,
@@ -127,13 +128,53 @@ pub fn abi_words() -> Vec<u64> {
         // The GC root plan the code was generated for (stack maps and the
         // frame walk, or the shadow stack): a `fallback-roots` build's code
         // never runs on a runtime of the other plan.
-        u64::from(super::framewalk::NATIVE_FRAME_ROOTS),
+        super::framewalk::NATIVE_FRAME_ROOTS as u64,
         // The program record's layout (runtime::program's LinkedProgram):
         // a runtime that reads the record's words elsewhere -- its startup
         // policy among them -- refuses it here, before it reads them.
         std::mem::size_of::<LinkedProgram>() as u64,
         std::mem::offset_of!(LinkedProgram, startup) as u64,
-    ];
+    ]
+};
+
+/// FNV-1a over WORD's little-endian bytes, continuing HASH.
+const fn fnv_word(mut hash: u64, word: u64) -> u64 {
+    let bytes = word.to_le_bytes();
+    let mut i = 0;
+    while i < 8 {
+        hash = (hash ^ bytes[i] as u64).wrapping_mul(0x0000_0100_0000_01b3);
+        i += 1;
+    }
+    hash
+}
+
+/// The fingerprint of the scalar words SCALARS followed by the helpers
+/// HELPERS: each name's bytes, one word each, then its
+/// parameter count -- `abi_words`' order.
+const fn fingerprint_of(scalars: &[u64], helpers: &[(&str, usize)]) -> u64 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    let mut i = 0;
+    while i < scalars.len() {
+        hash = fnv_word(hash, scalars[i]);
+        i += 1;
+    }
+    let mut h = 0;
+    while h < helpers.len() {
+        let name = helpers[h].0.as_bytes();
+        let mut b = 0;
+        while b < name.len() {
+            hash = fnv_word(hash, name[b] as u64);
+            b += 1;
+        }
+        hash = fnv_word(hash, helpers[h].1 as u64);
+        h += 1;
+    }
+    hash
+}
+
+/// What `abi_fingerprint` digests, word by word.
+pub fn abi_words() -> Vec<u64> {
+    let mut words: Vec<u64> = ABI_SCALAR_WORDS.to_vec();
     // The helpers' names and parameter counts, never their addresses: an
     // executable whose startup computes this (every executable's, through
     // runtime::program::read_linked) would otherwise keep every helper
@@ -144,6 +185,59 @@ pub fn abi_words() -> Vec<u64> {
         words.push(params as u64);
     }
     words
+}
+
+/// The length of a runtime archive's identity record (`identity_record`).
+pub const IDENTITY_LEN: usize = 160;
+
+/// The identity record of a runtime built for the target TRIPLE: the bytes
+///
+///   BOTLISH-RUNTIME-IDENTITY v1 TRIPLE FINGERPRINT
+///
+/// (FINGERPRINT `ABI_FINGERPRINT` as 16 lowercase hexadecimal digits) and NUL
+/// bytes up to IDENTITY_LEN. The runtime archive keeps it as a static
+/// (native/runtime-archive), so that the compiler reads from an archive's
+/// bytes -- without running any of it -- which target and runtime ABI it
+/// was built for: a target support package's archive is accepted only for
+/// its own target and this driver's ABI
+/// (EXTERNAL-COMPILER-TOOLS-AND-TARGET-PACKAGES-MILESTONE-1.md, "Target
+/// support packages"). The prefix is assembled from two pieces, so that it
+/// occurs in a compiled runtime only in the record itself.
+pub const fn identity_record(triple: &str) -> [u8; IDENTITY_LEN] {
+    const FIRST: &[u8] = b"BOTLISH-RUNTIME";
+    const SECOND: &[u8] = b"-IDENTITY v1 ";
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut record = [0u8; IDENTITY_LEN];
+    let mut at = 0;
+    let mut i = 0;
+    while i < FIRST.len() {
+        record[at] = FIRST[i];
+        at += 1;
+        i += 1;
+    }
+    i = 0;
+    while i < SECOND.len() {
+        record[at] = SECOND[i];
+        at += 1;
+        i += 1;
+    }
+    let name = triple.as_bytes();
+    assert!(name.len() + 64 < IDENTITY_LEN, "a target triple too long for the identity record");
+    i = 0;
+    while i < name.len() {
+        record[at] = name[i];
+        at += 1;
+        i += 1;
+    }
+    record[at] = b' ';
+    at += 1;
+    let mut shift = 64;
+    while shift > 0 {
+        shift -= 4;
+        record[at] = HEX[((ABI_FINGERPRINT >> shift) & 0xf) as usize];
+        at += 1;
+    }
+    record
 }
 
 // ---------------------------------------------------------------- encoding
@@ -462,6 +556,28 @@ mod tests {
         let record = [std::mem::size_of::<LinkedProgram>() as u64, std::mem::offset_of!(LinkedProgram, startup) as u64];
         assert!(words.windows(2).any(|w| w == record), "{record:?} not among the fingerprint's words");
         assert_eq!(record, [56, 48]);
+    }
+
+    /// The constant fingerprint is FNV-1a over `abi_words`, as the
+    /// fingerprint has always been computed: one value, whichever way it is
+    /// read.
+    #[test]
+    fn abi_fingerprint_constant_is_the_digest_of_its_words() {
+        let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+        for byte in abi_words().iter().flat_map(|w| w.to_le_bytes()) {
+            hash = (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3);
+        }
+        assert_eq!(hash, ABI_FINGERPRINT);
+        assert_eq!(abi_fingerprint(), ABI_FINGERPRINT);
+    }
+
+    /// The identity record names the triple and the fingerprint, NUL-padded.
+    #[test]
+    fn identity_record_states_triple_and_fingerprint() {
+        let record = identity_record("x86_64-unknown-linux-gnu");
+        let text = std::str::from_utf8(&record).unwrap().trim_end_matches('\0');
+        assert_eq!(text, format!("BOTLISH-RUNTIME-IDENTITY v1 x86_64-unknown-linux-gnu {:016x}", ABI_FINGERPRINT));
+        assert!(record[text.len()..].iter().all(|&b| b == 0));
     }
 
     #[test]

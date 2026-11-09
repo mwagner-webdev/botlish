@@ -1,0 +1,10 @@
+# missing.bot -- a Session really released where no Terminal is installed
+# (tests/unused-context.test): MISSING-CONTEXT, at compile time, never a
+# Terminal the compiler supplies.
+import terminal
+
+fn scoped(n: int) -> int:
+    s = terminal::enter(n)
+    n
+
+scoped(1)
