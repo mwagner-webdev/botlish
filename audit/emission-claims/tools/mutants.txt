@@ -849,6 +849,201 @@ proc hir::emission::NativeMayFail {name} {
 >>>>
 
 # ---------------------------------------------------------------------------
+# Function identity and branch feasibility (EMISSION-IDENTITY-AND-
+# FEASIBILITY-CORRECTNESS-MILESTONE-1.md): a name of two functions selects
+# nothing; a feasible path through an empty environment is a path. Three
+# guards are redundant in pairs, so a mutant removes both of a pair (either
+# alone is an equivalent mutant; the report, section 14): the certificate
+# table's (an ambiguous name publishes nothing) and the checks that read
+# the table (composition, a certificate's certificate dependencies); and
+# the memo's (an ambiguous claim is not looked up) and Valid's (a
+# certificate always depends on its own function's name).
+
+@@ ambiguous-first-only identity: a name two function blocks share is never recorded as ambiguous (byName's first block taken for both)
+%% match ec-identity-*
+## hir/emission.tcl
+<<<<
+        } elseif {[dict get $::hir::emission::byName $name] ne $v} {
+            dict set ::hir::emission::ambiguous $name 1
+        }
+====
+        }
+>>>>
+
+@@ ambiguous-reused identity: the memo is consulted for a claim whose name two functions share, and Valid takes the name for its first function (the second of N1 and N2 reuses the first's certificate)
+%% match ec-identity-same-name ec-identity-memo-history ec-identity-service
+## hir/emission.tcl
+<<<<
+    if {$useMemo && $identified && [dict exists $memo $id]} {
+====
+    if {$useMemo && [dict exists $memo $id]} {
+>>>>
+<<<<
+        if {[dict exists $ambiguous $name]} { return [list 0 "$name names more than one function"] }
+====
+>>>>
+
+@@ ambiguous-stored identity: every proven claim is memoized, its name ambiguous or its read set holding a name of two functions
+%% match ec-identity-read-set ec-identity-composition ec-identity-memo-sequence
+## hir/emission.tcl
+<<<<
+        if {$useMemo && $identified && [ReadsIdentified $readset]} {
+====
+        if {$useMemo} {
+>>>>
+
+@@ memo-read-set-unchecked identity: a proof that read two functions of one name is memoized when its own name is unique (the census prototype's rule): N6b reuses N6a's certificate, which recorded one fingerprint for both
+%% match ec-identity-read-set ec-identity-composition ec-identity-memo-sequence
+## hir/emission.tcl
+<<<<
+        if {$useMemo && $identified && [ReadsIdentified $readset]} {
+====
+        if {$useMemo && $identified} {
+>>>>
+
+@@ ambiguous-validated identity: Valid takes a dependency's name for the first function of the name (N4b, after a version with unique names, validated against outer1's helper)
+%% match ec-identity-memo-sequence ec-identity-memo-history
+## hir/emission.tcl
+<<<<
+        if {[dict exists $ambiguous $name]} { return [list 0 "$name names more than one function"] }
+====
+>>>>
+
+@@ ambiguous-composed identity: a call composes with the certificate its callee's name finds, published by whichever function of the name was proven (outer2's b composes with another h's certificate)
+%% match ec-identity-composition
+## hir/emission.tcl
+<<<<
+    if {![Identified $t]} {
+        return $out
+    }
+    foreach key [dict getdef $claimsOf $t {}] {
+====
+    foreach key [dict getdef $claimsOf $t {}] {
+>>>>
+<<<<
+        if {$identified} {
+            dict set certs $id $cert
+        }
+====
+        dict set certs $id $cert
+>>>>
+
+@@ ambiguous-certificate-validated identity: a memoized certificate's certificate dependency is validated through a name of two functions (d, which composed with the top-level h, is reused beside a nested h yielding 'A')
+%% match ec-identity-certificate-dependency
+## hir/emission.tcl
+<<<<
+        if {[dict exists $ambiguous $fn]} {
+            return [list 0 "$fn names more than one function"]
+        }
+====
+>>>>
+<<<<
+        if {$identified} {
+            dict set certs $id $cert
+        }
+====
+        dict set certs $id $cert
+>>>>
+
+@@ facts-env-as-feasibility feasibility: the environment's value read as feasibility, the census's defect (a function without parameters loses both branches of its first `if`)
+%% match ec-feasibility-* ec-callee-unreachable
+## hir/emission.tcl
+<<<<
+        lassign [Facts $cond $outcome] feasible facts
+        if {!$feasible} continue
+====
+        lassign [Facts $cond $outcome] feasible facts
+        if {$facts eq ""} continue
+>>>>
+
+@@ facts-empty-skipped feasibility: a feasible path through an environment with no binding is dropped
+%% match ec-feasibility-*
+## hir/emission.tcl
+<<<<
+        if {!$feasible} continue
+        if {!$feasibleAny} {
+====
+        if {!$feasible || [dict size $penv] == 0} continue
+        if {!$feasibleAny} {
+>>>>
+
+@@ facts-empty-feasible feasibility: every path through an environment with no binding is feasible (a branch a known condition excludes is walked)
+%% match ec-feasibility-* ec-callee-unreachable
+## hir/emission.tcl
+<<<<
+        if {!$feasible} continue
+        if {!$feasibleAny} {
+====
+        if {!$feasible && [dict size $penv] > 0} continue
+        if {!$feasibleAny} {
+>>>>
+
+@@ facts-infeasible-explored feasibility: Facts answers feasible whatever its paths (an infeasible branch is walked)
+%% match ec-feasibility-* ec-callee-unreachable
+## hir/emission.tcl
+<<<<
+    return [list $feasibleAny $result]
+====
+    return [list 1 $result]
+>>>>
+
+@@ facts-known-ignored feasibility: a statically known comparison does not decide its path (a branch decided false walked as though it may be taken)
+%% match ec-feasibility-* ec-callee-unreachable
+## hir/emission.tcl
+<<<<
+            set known [hir::types::KnownOutcome $hir $c]
+            if {$known ne {} && $known != $o} {
+                set feasible 0
+                break
+            }
+====
+            set known [hir::types::KnownOutcome $hir $c]
+>>>>
+
+@@ facts-first-path-only feasibility: only the first feasible path's environment is kept (an `or`'s second path, holding the out-of-range values, dropped)
+%% match ec-feasibility-* ec-negation-holes ec-order-narrowing
+## hir/emission.tcl
+<<<<
+        } else {
+            set result [JoinEnv $result $penv]
+        }
+    }
+    return [list $feasibleAny $result]
+====
+        }
+    }
+    return [list $feasibleAny $result]
+>>>>
+
+@@ facts-last-path-only feasibility: the last feasible path's environment replaces the others' (an `or`'s first path dropped)
+%% match ec-feasibility-* ec-negation-holes ec-order-narrowing
+## hir/emission.tcl
+<<<<
+        } else {
+            set result [JoinEnv $result $penv]
+        }
+    }
+    return [list $feasibleAny $result]
+====
+        } else {
+            set result $penv
+        }
+    }
+    return [list $feasibleAny $result]
+>>>>
+
+@@ facts-helper-exits-dropped feasibility: in a function without a claim, a feasible branch through an empty environment is skipped (a parameterless helper's conditional never completes, so its caller's walk ends at the call: the census's F3)
+%% match ec-feasibility-*
+## hir/emission.tcl
+<<<<
+        lassign [Facts $cond $outcome] feasible facts
+        if {!$feasible} continue
+====
+        lassign [Facts $cond $outcome] feasible facts
+        if {!$feasible || ($facts eq "" && ![dict exists [Node $::hir::emission::block] emits])} continue
+>>>>
+
+# ---------------------------------------------------------------------------
 # The value transfers certificates read (hir/range.tcl), as soundness rules
 
 @@ range-add-low addition's lower bound from the wrong corner
