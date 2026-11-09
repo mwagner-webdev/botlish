@@ -94,15 +94,23 @@ native bridge, with two gaps.** The CI evidence (sections 16 and 23):
 
 **The gaps:**
 
-* **GC stress in the app process is not demonstrated.** Run 9's GC-stress
-  phase passed, but the library ran no slower under it than without it.
-  The activity sets the variable with `Os.setenv`, and the arm64 library,
-  which runs on the native bridge's own libc, very likely never saw it.
-  The acceptance now sets the variable from the process's start and
-  requires its cost to show (section 16). The run that checks this is
-  pending.
-* **The 16 KiB-page image** has not run yet: run 9's job was still queued
-  when the fix above was pushed, which cancelled it.
+* **GC stress in the app process is not demonstrated, and on these
+  emulators it cannot be.**
+  - In run 9 the GC-stress phase passed, but the library ran no slower
+    under it than without it. The activity sets the variable with
+    `Os.setenv`, and the arm64 library, which runs on the native bridge's
+    own libc, did not see it.
+  - Run 10 set the variable from the process's start instead, through
+    Android's `wrap.PACKAGE` property. That starts the process through a
+    wrapper without the native bridge, and the app could not load its
+    arm64 libraries.
+
+  The acceptance now reports the phase as NOT DEMONSTRATED on a
+  native-bridge device, never as passed. A device that runs arm64 code
+  natively checks it. GC stress of the libraries through the same
+  generated core is observed on the host (section 19).
+* **The 16 KiB-page image** has not run yet: run 9's job was cancelled
+  while queued, and run 10's is still queued.
 
 This host has no KVM, and Google's emulator refuses an arm64 guest on an
 x86_64 host, also when its `qemu-system-aarch64` is run directly (observed,
@@ -122,7 +130,7 @@ section 16).
 | `useBotlish2048()` and a playable 2048 screen (swipes, buttons, score, New game, game over, win) | implemented; Jest observed (28 tests: 10 of the hook and the snapshot reader, 17 of the generated entry point, 1 without the native module) |
 | a second, unrelated library through the same generator, both packages in one app | observed (host harness, TypeScript, Jest, the APK) |
 | a clean room: the single-file compiler and packages only, then npm, Codegen and Gradle | observed (section 18) |
-| the app on Android: Hermes, the TurboModule, the Botlish library in an Android application process | **observed on Android 14 (4 KiB pages), translated by the ARM native bridge** (CI, run 9: every phase but GC stress); GC stress in the app process and the 16 KiB-page image pending (section 16) |
+| the app on Android: Hermes, the TurboModule, the Botlish library in an Android application process | **observed on Android 14 (4 KiB pages), translated by the ARM native bridge** (CI, runs 9 and 10: every phase but GC stress); GC stress in the app process not demonstrable on a native-bridge emulator; the 16 KiB-page image pending (section 16) |
 | mutation testing | 44/44 killed, each by a detector it names; observed (section 21) |
 | iOS, Android ABIs other than arm64-v8a, asynchronous workers | not supported (section 24) |
 
@@ -699,8 +707,9 @@ evidence: section 16.
 
 * **Observed on Android 14, 4 KiB pages, through the ARM native bridge**
   (CI, run 9): every phase but GC stress.
-* **GC stress in the app process: not demonstrated.** Its acceptance is
-  corrected, and the run that checks it is pending.
+* **GC stress in the app process: not demonstrated.** It cannot be on a
+  native-bridge emulator (run 10, below). The acceptance reports it there
+  as NOT DEMONSTRATED; a device running arm64 natively checks it.
 * **16 KiB pages: pending.**
 
 The runs and their results follow the description.
@@ -735,11 +744,15 @@ six phases:
    must give the same snapshots, and its C ABI time per call must be at
    least twice the self-test's: a collection before every allocation makes
    a move 6.2 times slower on the host, so this shows that stress took
-   effect in the library. The variable is set from the process's start
-   through the `wrap.com.botlish2048` property: the zygote starts the app
-   with the property's text before `app_process`, so every libc in the
-   process sees it. The activity's `Os.setenv` is not enough here (run 9,
-   below).
+   effect in the library. The activity sets the variable with `Os.setenv`
+   before React Native starts.
+   - On a device that runs the app's arm64 code through a native bridge,
+     the library's libc does not see it (run 9, below), and no other route
+     keeps the bridge (run 10, below). There the phase is reported NOT
+     DEMONSTRATED, with its measurement, in the summary and in the result
+     line, never as passed.
+   - On a device that runs arm64 natively, a phase without the slowdown
+     fails.
 4. **play.** The game is played by swipes on the screen (`input swipe`),
    including a rapid burst, with the app sent to the background and
    back, then New game. Each swipe must be applied exactly once, each
@@ -892,6 +905,37 @@ Botlish) running translated in a real Android application process.
 
 The job `android (16 KiB pages)` of run 9 was cancelled, still queued, by
 the push that corrected the GC-stress phase (section 23).
+
+**Run 10** (`b60b76dc`), job `android (4 KiB pages)`, ran on the same image.
+Its build type was `userdebug` and `ro.debuggable` was 1, and it set
+`wrap.com.botlish2048` to `BOTLISH_NATIVE_GC_STRESS=1` for the GC-stress
+phase.
+
+* **The GC-stress phase failed.** The app crashed at launch before any
+  JavaScript ran: `SoLoaderULError: dlopen failed:
+  ".../lib-main/libc++_shared.so" is for EM_AARCH64 (183) instead of
+  EM_X86_64 (62)`, raised through `WrapperInit.main`. A process started
+  through a wrapper does not get the native bridge, so it cannot load the
+  arm64 libraries at all. The route fails on this device for a reason
+  that has nothing to do with Botlish. With run 9's measurement, GC
+  stress in the app process cannot be shown on a native-bridge emulator.
+  The acceptance no longer uses the property, and reports the phase as NOT
+  DEMONSTRATED there (above).
+* **Every other phase passed again**:
+  - the self-test, with 401 module snapshots and hook states equal to the
+    interpreter's, on `mqt_v_js`;
+  - three reloads. Reload 3's old game instance was again orphaned when
+    its module went on another thread (6300), then destroyed by its own
+    thread (6293);
+  - play: 24 swipes, each applied exactly once, with 25 snapshots equal to
+    the interpreter's;
+  - the win, the game over and the exit.
+
+  The two crash lines the run counted are the GC-stress launch's.
+* **The corrected textkit timing:** 3.41 µs per call.
+
+Its `android (16 KiB pages)` job was still queued when this report was
+last updated.
 
 **Locally**, this host has no `/dev/kvm`. Observed, with the emulator 37.2.13
 and `system-images;android-30;aosp_atd;arm64-v8a`:
@@ -1055,9 +1099,12 @@ published packages alone, then passed the whole Android acceptance on the
   - background and foreground with one instance;
   - every acquired result and error released (19,244 and 32).
 
-  GC stress in the app process is **not demonstrated**: the variable did
-  not reach the library under the native bridge, so the corrected phase is
-  pending.
+  GC stress in the app process is **not demonstrated**, and cannot be on
+  a native-bridge emulator. `Os.setenv` does not reach the library's arm64
+  libc (run 9), and a wrapper-started process gets no native bridge, so it
+  cannot load the app (run 10). GC stress through the generated core is
+  the host's evidence above, with the same Botlish runtime built for the
+  host.
 
 ## 20. Negative testing
 
@@ -1175,7 +1222,10 @@ The textkit line of the log (`10000 scalarCount calls: 5995.84 us per
 call` and `2577.84`) is wrong by a factor of 1,000. The self-test
 multiplied milliseconds by 100 where it should have multiplied by 0.1,
 so the true figures are about 6.0 and 2.6 µs a call. The self-test is
-corrected, and the next run logs the right figure.
+corrected. Run 10 logged 3.41 µs a call, on another runner whose game
+move took 165.23 µs from JavaScript (155.53 µs in the C ABI, 9.70 µs JSI
+and adapter) and whose input to render averaged 18.50 ms. The runners
+differ that much between runs.
 
 **Footprint, observed** (`results/footprint.txt`; local release builds,
 React Native 0.88.1, arm64-v8a only). Native libraries are compressed in
@@ -1265,11 +1315,19 @@ nothing in the release gate requires it. Its runs on this branch:
     GC-stress phase passed without demonstrating GC stress (section 16).
   - **android (16 KiB pages): cancelled** while still queued, by the push
     of the corrected GC-stress phase.
-* run 10, the corrected GC-stress phase and the self-test's textkit timing:
+* run 10, the GC-stress phase through `wrap.PACKAGE` and the self-test's
+  textkit timing:
   [react-native 2048 #10](https://github.com/mwagner-webdev/botlish/actions/runs/42577642784),
-  at `b60b76dc`, queued when this report was last updated. Its `android`
-  jobs are the evidence for GC stress in the app process and for the
-  16 KiB-page image.
+  at `b60b76dc`.
+  - **build: success.**
+  - **android (4 KiB pages): failure**
+    ([job 129066467473](https://github.com/mwagner-webdev/botlish/actions/runs/42577642784/job/129066467473)),
+    in the GC-stress phase alone. A wrapper-started process has no native
+    bridge (section 16). Every other phase passed.
+  - **android (16 KiB pages): queued** when this report was last updated.
+
+  The acceptance's GC-stress phase is changed after it: no wrapper, and
+  NOT DEMONSTRATED on a native-bridge device.
 
 Main's own workflows were queued or in progress, none red among those
 completed, when this branch was made (`a6977d56`) and when it was last
@@ -1288,11 +1346,12 @@ checked.
   this x86_64 host is refused by the emulator (section 16). A physical
   device or an arm64 emulator on an arm64 host with KVM is the missing
   evidence for native execution inside an app.
-* **GC stress in the app process and 16 KiB pages** (section 16): run 9
-  observed every other phase on Android 14 with 4 KiB pages. GC stress is
-  not demonstrated there: the variable did not reach the library under the
-  native bridge. The 16 KiB-page image has not run yet. Both are the next
-  run's, with the corrected phase.
+* **GC stress in the app process** (section 16): not demonstrable on a
+  native-bridge emulator. The variable does not reach the library's arm64
+  libc, and a wrapper-started process gets no bridge. It needs a device
+  that runs arm64 natively, where the acceptance's GC-stress phase checks
+  it.
+* **16 KiB pages** (section 16): the 16 KiB-page image has not run yet.
 * **iOS.** Not supported. The package declares `ios: null`, iOS
   autolinking is disabled, and no podspec or module provider is written.
   It needs:
