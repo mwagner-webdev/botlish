@@ -306,10 +306,11 @@ test atb-hashable-deep {a constrained slot past the bound is judged on what it h
     lsort -unique [lmap r $results {lreplace $r 5 5 [expr {[lindex $r 5] > 0}]}]
 } -cleanup {unset -nocomplain results n bad r} -result {{accepted accepted accepted TRAIT-NOT-SATISFIED -1 1 TRAIT-NOT-SATISFIED}}
 
-test atb-hashable-slots {an exact application's class is its declaration's, from every argument and its own fields: past the bound a key whose function is in a Pair's second slot, or in a declaration's own field, is not Hashable, and one whose second slot is an Int is} -body {
+test atb-hashable-slots {an exact application's class is its declaration's, from every argument and its own fields: a key the bound cut whose function is in a Pair's second slot (Pair {first: 1, second: Box^8 {inc}}), or whose declaration holds a function of its own beside a deep slot (F {value: Box^8 {1}, f: inc}), is not Hashable, and the same Pair with an Int is} -body {
     set decls "${::atbHashed}struct Pair\[A, B\]:\n    first: A\n    second: B\n\nstruct F\[T\]:\n    value: T\n    f: Fn\{args: \[int\], return: int\}\n\n"
-    lmap value {{Pair {first: 1, second: inc}} {F {value: 1, f: inc}} {Pair {first: 1, second: 2}}} {
-        atbCode "$decls\h = H \{key: [atbNest 8 $value], value: 2\}\n1\n"
+    lmap value [list "Pair \{first: 1, second: [atbNest 8 inc]\}" "F \{value: [atbNest 8 1], f: inc\}" \
+            "Pair \{first: 1, second: [atbNest 8 2]\}"] {
+        atbCode "$decls\h = H \{key: $value, value: 2\}\n1\n"
     }
 } -cleanup {unset -nocomplain decls value} -result {TRAIT-NOT-SATISFIED TRAIT-NOT-SATISFIED accepted}
 
