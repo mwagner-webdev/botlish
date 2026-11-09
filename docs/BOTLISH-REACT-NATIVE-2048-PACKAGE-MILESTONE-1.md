@@ -1121,6 +1121,10 @@ nothing in the release gate requires it. Its runs on this branch:
     in React Native's SoLoader (`couldn't find DSO to load:
     libreactnative.so`), and so did every phase after it. The cause and
     the fix are in section 16.
+* run 9, at `8bf01899`, the app's packaging fix:
+  [react-native 2048 #9](https://github.com/mwagner-webdev/botlish/actions/runs/42562346693),
+  queued when this report was last updated. Its `android` jobs are the
+  acceptance of the fixed APK.
 
 Main's own workflows were queued or in progress, none red among those
 completed, when this branch was made (`a6977d56`) and when it was last
