@@ -856,7 +856,14 @@ tests each, 0 failed, and their 2 golden suites on all four backends;
 the census of the `loops` (`-fraction 3`) and `mixed` (`-fraction 4`)
 specimens, 0 missing; `tools/mutant-catalogs.tcl` (98 catalogs, 3356
 mutants, every one applies); `tools/ci/test_runs.py`;
-`tools/compilerpedia.tcl check`.
+`tools/compilerpedia.tcl check`. Then main once more, at `a04d06e` (the
+method-call decision's F2 and F3, and F4's NOT-CALLABLE): no conflict and
+no new walk over the nesting; `tests/local.tcl` over the depth-safe file,
+not-callable, method-resolution, method-sugar, method-filter,
+static-compile, golden-framework and diagnostic-recovery -- 8 files on
+interp and compile, 322 tests each, 0 failed, and their 12 golden suites
+on all four backends; the mutant catalogs (99, 3371 mutants), the CI
+tools' tests and the Compilerpedia check (0 problems) again.
 
 CI on the branch (a run a newer push superseded says nothing either way):
 
