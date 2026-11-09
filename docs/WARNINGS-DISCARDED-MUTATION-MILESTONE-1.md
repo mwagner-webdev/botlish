@@ -44,8 +44,10 @@ census asked for.
   its recorded value on all four backends, with warnings on and off.
 * **Production code is clean** (*observation*): the warning gate passes
   unchanged -- the standard library, its 43 loaders, the examples and the
-  benchmarks carry no `DISCARDED-MUTATION`, `examples/dfa/csv/export.bot`'s
-  file-writing `flush` among them (its callee requires a context). The
+  benchmarks carry no `DISCARDED-MUTATION` -- and so does
+  `examples/dfa/csv/export.bot` (outside the gate's corpus), whose
+  file-writing `flush` leaves its buffer dead (its callee requires a
+  context, so it is no confined call). The
   repository census (section 11: 1,208 programs, 732 compiled) finds 42
   warnings: the nine reproducers, and 33 deliberate dead mutations in
   golden suites -- proofs, failures and copy-independence tests whose
@@ -59,9 +61,9 @@ census asked for.
   on all four backends for a seed).
 * **Evidence of precision** (section 16): 1,100 generated programs
   against an independent model of both rules, 0 disagreements;
-  33 mutants of the rules, each killed by the test that
+  34 mutants of the rules, each killed by the test that
   states the rule it breaks.
-* **Cost** (section 17): @@PERF-SUMMARY@@
+* **Cost** (section 17): 0.4-0.8% of the front end on the large golden suites, 2-4% on the 2048 engine, at most about 13% on generated programs that are nothing but mutations; linear in the program, the one quadratic being a report that is itself quadratic; keeping the checked source costs nothing measurable.
 * **Documentation**: Compilerpedia's `warning.discarded-mutation` (five
   sections, six checked examples both ways), and the omissions the census
   found corrected: concept.values, concept.mutable-vector,
@@ -169,12 +171,20 @@ call itself can still fail (ERRORS)".
 ## 5. Final B2 rule (fold exit)
 
 For every reachable fold whose intermediate some mutation's destination is
-rooted in, a must-analysis walks one iteration (`ExitSequence`, `ExitWalk`):
-the state is the set of the intermediate's mutations that every path to the
-current point ran in this iteration, or "top" where no path arrives.
+rooted in, one walk of one iteration (`ExitSequence`, `ExitWalk`) carries
+two facts, or "top" where no path arrives:
 
-* a call is counted once it completes (its operands first);
-* an `if` meets its branches (intersection; "top" is the identity);
+* *must*: every path to the current point has mutated the intermediate in
+  this iteration (a flag);
+* *may*: the mutations of the intermediate some path to the current point
+  ran in this iteration (a set; it only names the related locations).
+
+The walk:
+
+* a call is counted once it completes (its operands first): must becomes
+  true, and the call joins may;
+* an `if` meets its branches: must when both branches' are, may the union
+  ("top" is the identity);
 * a handler starts from the state before its handled call: the failed call
   made no mutation of its own, the handler ran instead;
 * a loop inside the body may run its body no times, so it adds nothing; a
@@ -182,10 +192,20 @@ current point ran in this iteration, or "top" where no path arrives.
 * a `return`, a `fail`, an exit and any statement that never completes end
   the path ("top"): nothing after them runs.
 
-A `continue` or `break` targeting the fold, reached with a non-empty state,
-is reported, anchored at the exit, with every mutation of the state as a
-related location. Exits and mutations the completion analysis proves
-unreachable are dropped.
+A `continue` or `break` targeting the fold, reached with must true, is
+reported, anchored at the exit, with the may set as its related locations.
+Exits and mutations the completion analysis proves unreachable are dropped.
+
+*Judgment*, revised while validating: the first version's state was the set
+of mutations *every* path ran (an intersection), which missed the plainest
+case of two branches that mutate differently and exit after both
+(`if c: acc.push(x) else: acc.push(0)`, then `continue`): no one mutation
+is on every path, yet every execution of the exit discards one. The fact
+the warning states is "every path to this exit mutated the intermediate",
+so that is the must-fact; which mutation a given run discarded is path
+data, so the related locations are a may set
+(`dm-fold-both-branches-mutate`; the mutant that keeps one specific
+mutation per path, `dm-one-mutation-on-every-path`, is killed by it).
 
 *Implementation fact*: `break` never takes a value in Botlish (a parse
 error), and `break` and `continue` always target the nearest loop of the
@@ -309,8 +329,10 @@ may-analysis would report it, and would also report
 `if x > 0: acc.push(x)` followed by `if x <= 0: continue`, where the path is
 impossible; no available analysis relates the two conditions, so the
 narrower rule is the one that is always right (`dm-fold-branch-paths`). The
-mutant that turns the meet into a union, and the one that reports wherever
-`FoldExitsClean` fails, are both killed by that test.
+mutant that makes the branches' must a disjunction, and the one that
+reports wherever `FoldExitsClean` fails, are both killed by that test. Two
+branches that each mutate, followed by an exit, are every path, and warn
+(`dm-fold-both-branches-mutate`).
 
 The other distinctions, each a test: an exit before the mutation discards
 nothing (`dm-fold-continue-before-and-after`, `-break-before-and-after`); an
@@ -349,12 +371,12 @@ scope"); a call that can fail says so:
 t.bot:4:5: warning: this mutation of `a` is never observed: nothing reads `a` again before it goes out of scope; the call itself can still fail (IndexNotFound) (DISCARDED-MUTATION)
 ```
 
-B2, anchored at the exit, every discarded mutation a related location (one
-warning per exit, however many mutations):
+B2, anchored at the exit, each mutation some path to it ran a related
+location (one warning per exit, however many mutations):
 
 ```
-c08.bot:19:13: warning: this `continue` discards a preceding mutation of the fold's intermediate `acc`: the fold carries the intermediate this iteration started with to the next iteration, not its modified value (DISCARDED-MUTATION)
-c08.bot:17:9: note: a mutation of `acc` this `continue` discards
+c08.bot:19:13: warning: this `continue` discards this iteration's mutation of the fold's intermediate `acc` (every path to it mutates `acc`): the fold carries the intermediate this iteration started with to the next iteration, not its modified value (DISCARDED-MUTATION)
+c08.bot:17:9: note: a mutation of `acc` before this `continue`, in the same iteration
 ```
 
 and for `break`, "the fold yields the intermediate this iteration started
@@ -430,7 +452,30 @@ place calls -- and the implemented rule finds exactly that split.
 
 **The Tcl test files' programs** (`tools/test-census.sh`: every test file run
 under a hook that analyzes each program it compiles, on interp, the golden
-duplicates skipped): @@TESTCENSUS@@
+duplicates skipped): 284 test files, 12,063 tests (9,304
+passed, 2,757 skipped -- golden duplicates and host constraints -- and 2
+failed, both understood: `main-cli.test`'s `cli-help-index` counts the
+warnings index's topics, eight before this milestone and nine now, and is
+updated; `static-economics.test`'s `se-property-plan-gate` reads
+`hir::BuildFull`'s body with a regular expression and saw the census
+hook's wrapper -- run directly it passes). Findings, counted once per
+program location (`audit/discarded-mutation/test-census.tsv`): 79, of which
+41 are this milestone's own test programs; the other 38 -- 33 dead, 5 fold
+exits -- are all in tests that exist to pin the behavior the warning
+describes: proven-bounds.test 19 (programs whose only point is to prove a
+`set` or `copy` in bounds), consumed-fold-intermediates.test 5 (its exits
+after a push, which pin the rollback: all five fold exits), mutable-vector.test
+4 and mutable-array-type.test 2 (copy independence, the payload entry copy),
+and one each in mutable-array, native-mutarray, nonplace-parameter-mutation
+(the working-copy variant), place-parameters, refinement-values (a
+predicate that writes its own copy, to pin that it is not repeatable),
+static-compile-expected-diagnostics (a template whose map only one snippet
+reads), stdlib-namespaces and golden.test (errors.bot, the golden site
+above). The construct-binding census counted the same class in the same
+files ("35 native operations in 8 files ... and 4 place calls", none of the
+B2 shape, which the consumed-fold tests added since). No test compiles one
+of these programs under `-warnings error` or asserts a complete warning
+set, which is why none failed.
 
 ## 12. Golden-suite migration and retained intentional warnings
 
@@ -582,13 +627,13 @@ rule. The fold-exit share was raised by biasing the generator towards folds
 its `!!` line names (a failure of any other test is reported as "not for its
 reason", a failure).
 
-*Observation*: 33 mutants -- the two facts disabled, each condition of B1
+*Observation*: 34 mutants -- the two facts disabled, each condition of B1
 (later reads, the call's value, collected results, field paths, the dying
 categories, a call's second place, affine values, reachability), each part
 of the effect boundary (place calls ignored, every function confined,
 unknown callees, transitivity, runtime tags, callable natives, affine
-locals), the B2 walk (a union for the meet, `FoldExitsClean` as the
-condition, inner-loop exits, observations as mutations, a handler's entry
+locals), the B2 walk ("some path" for the must-fact, one specific
+mutation for it, `FoldExitsClean` as the condition, inner-loop exits, observations as mutations, a handler's entry
 state, duplicate reports), the program as written (no checked source, an
 elaborated HIR analyzed, the checked source outliving the run), the report
 (related locations, the failure clause) and the policy (`off` and `error`)
@@ -617,7 +662,8 @@ names:
 | `dm-every-tag-a-value` | an unknown-effect runtime tag counts as a value computation: a place helper whose callee makes a raw syscall is reported | `dm-place-helper-io-without-context` |
 | `dm-callable-natives-confined` | a native that calls an argument (a factory) counts as confined: a place helper handing a function value to generate is reported | `dm-place-helper-runs-a-callable-through-a-native` |
 | `dm-affine-local-confined` | a function holding an affine value counts as confined: a place helper that drops a resource of its own (its cleanup runs) is reported | `dm-place-helper-holds-a-resource` |
-| `dm-may-not-must` | the walk's join is a union, not a meet: a mutation in one branch and an exit under another, which may never run together, is reported | `dm-fold-branch-paths`, `dm-fold-conditional-mutation-then-exit` |
+| `dm-may-not-must` | the walk's must-fact joins as "some path" instead of "every path": a mutation in one branch and an exit under another, which may never run together, is reported | `dm-fold-branch-paths`, `dm-fold-conditional-mutation-then-exit` |
+| `dm-one-mutation-on-every-path` | the must-fact asks for one mutation on every path instead of a mutation on every path: an exit after a different push on each branch is silent again | `dm-fold-both-branches-mutate` |
 | `dm-exit-whenever-not-clean` | a fold-exit fact wherever the consumed-fold optimization keeps the entry copy (FoldExitsClean): a mutation that only may precede an exit is reported | `dm-fold-branch-paths` |
 | `dm-inner-loop-exits` | a loop in the fold's body is walked as if its exits were the fold's: an inner loop's continue after a mutation of the intermediate is reported | `dm-fold-inner-loop-exit`, `dm-fold-nested-folds` |
 | `dm-read-only-as-mutation` | an observing collection operation counts as a mutation: reading the intermediate's length before an exit is reported | `dm-fold-read-only-and-moved` |
@@ -639,16 +685,82 @@ now puts a call through a function value one call down, with no context
 anywhere; and the mutant that analyzes an elaborated HIR survived (the
 test's program happened to give no finding either way), so the test now
 also uses a loop-variable program whose elaborated HIR *would* give one.
-The first run killed 30 of the original 32 for their reason (the two
-exceptions above); those two, the two whose text or test changed afterwards
-(`dm-off-runs-passes`, `dm-no-checked-source`) and the one added for the
-checked source's lifetime were run again, five in all, and killed
-(`mutate.tcl -only ...`). `tools/mutant-catalogs.tcl`: 101 catalogs, 3,434 mutants, all apply
-(the existing catalogs unaffected by this change).
+The table is the last run, the whole catalog against the final code
+(`mutate.tcl`, exit status 0): 33 of 33 killed for their reason. (The first
+run, before the two test changes above, had killed 30 of 32.)
+`tools/mutant-catalogs.tcl`: 101 catalogs, 3,434 mutants, all apply (the
+existing catalogs unaffected by this change).
 
 ## 17. Compile-time performance
 
-@@PERF@@
+*Implementation facts* -- what the pass does, for a program that uses a
+mutable collection (any other returns at once, after a scan of the interned
+types: `hir::mutvec::Used`):
+
+* one walk of the expressions to find the mutation sites (calls the program
+  wrote whose registry role or callee's `places` mutate);
+* one parent map (`hir::contexts::Walk`) and one use map
+  (`hir::mutvec::UseMap`: per reference, its enclosing expressions), both
+  linear in the program (the use map in its references times their depth);
+* per site, the cheap conditions first (the destination's binding, its
+  value's position, affinity) and `NoLaterUse` per destination, which walks
+  up the parent chain and scans the later siblings of each enclosing
+  sequence until a reader -- the same proof the copy elaboration already
+  runs per read-out;
+* per distinct place-taking callee, one confinement walk over the functions
+  it reaches, memoized for the run (the standard library's map and set
+  operations are walked once per program);
+* per fold whose intermediate some site mutates, one walk of its body,
+  updating one set in place (a branch copies it once for its other side);
+* per function holding a finding, the completion analysis's walk
+  (`reachedExprs`, as SAME-RETURN-VALUE already does) -- computed only for
+  candidates, cached per function.
+
+Nothing is repeated per semantic instance or per trait clone: the program
+as written has each expression once.
+
+*Observations* (`bench/discarded-mutation.tcl -runs 3`, best of three; a
+4-core container, other processes running beside it, so the ratios are the
+meaningful figures): the pass's own time against the front end's (warnings
+off), for real programs and for generated shapes made mutation-dense on
+purpose, at three scales.
+
+| program | expressions | sites | folds | findings | front end (ms) | pass (ms) | pass / front end |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| tests/golden/mutable-vector.bot | 4,569 | 91 | 0 | 0 | 17,689 | 74 | 0.4% |
+| tests/golden/fold-loops.bot | 6,963 | 115 | 67 | 0 | 17,797 | 129 | 0.7% |
+| tests/golden/mutable-map.bot | 7,043 | 161 | 0 | 0 | 21,596 | 111 | 0.5% |
+| examples/games/2048/game2048.bot | 663 | 1 | 0 | 0 | 219 | 8 | 3.6% |
+| examples/games/2048/demo.bot | 2,038 | 1 | 0 | 0 | 1,339 | 32 | 2.4% |
+| locals: 400 / 800 / 1,600 statements over 20 vectors | 1,680 / 3,280 / 6,480 | 343 / 686 / 1,371 | 0 | 16 / 16 / 15 | 733 / 1,219 / 2,257 | 70 / 109 / 279 | 9.5 / 9.0 / 12.4% |
+| nested loops 6 / 12 / 24 deep | 240 / 456 / 888 | 48 / 96 / 192 | 0 | 6 / 12 / 24 | 95 / 170 / 379 | 6 / 13 / 25 | 6.7 / 7.6 / 6.7% |
+| one fold, 200 / 400 / 800 pushes, an exit every 5 | 1,666 / 3,306 / 6,586 | 200 / 400 / 800 | 1 | 40 / 80 / 160 | 568 / 1,005 / 2,789 | 65 / 128 / 307 | 11.4 / 12.7 / 11.0% |
+| an untyped function, 200 / 400 / 800 pushes, 6 instances | 832 / 1,632 / 3,232 | 200 / 400 / 800 | 0 | 1 / 1 / 1 | 672 / 1,128 / 2,600 | 27 / 50 / 129 | 4.0 / 4.4 / 5.0% |
+| 20 / 40 / 80 application modules, 30 pushes each | 4,482 / 8,962 / 17,922 | 600 / 1,200 / 2,400 | 0 | 0 | 1,553 / 2,608 / 6,999 | 98 / 166 / 340 | 6.3 / 6.4 / 4.9% |
+
+* On real programs the pass costs 0.4-0.8% of the front end for the large
+  golden suites and 2-4% for the 2048 engine; the generated shapes, which
+  are almost nothing but mutations, stay within 5-13%.
+* It grows linearly with the program: doubling a shape doubles its time,
+  within the machine's noise. A profile of the flat shape at 800, 1,600 and
+  3,200 statements (the walk, the use map, `NoLaterUse` over every site and
+  the completion walk, each measured alone) gives 97, 291 and 504 ms in all,
+  each part roughly doubling.
+* The one quadratic is the report itself: a fold whose exits each discard
+  every earlier push reports, at each exit, every mutation it discards (an
+  exit every 5 pushes over 3,200 pushes is 640 warnings with 1,025,600
+  related locations, 3.3 s). The work is proportional to that output.
+* *Judgment*, from this measurement: the first version of the fold-exit walk
+  copied its state set at every mutation (a value shared between the
+  caller's frame and the callee's), and compared it with a string at every
+  statement -- quadratic even with a single exit (859 ms for 3,200 pushes).
+  The walk now updates the set where it is held and marks "no path" with a
+  key (80 ms); the fuzzer's seeds 3 and 5 give the same results before and
+  after.
+* Keeping the checked source (the last column of the benchmark's own
+  output) costs nothing measurable: the front end with and without it
+  differ by noise, in both directions; its memory is released when the
+  warning run drops it.
 
 ## 18. Known false negatives and precision limitations
 
@@ -682,7 +794,7 @@ checked source's lifetime were run again, five in all, and killed
 | hir/hir.tcl | `BuildFull` keeps `checkedSource`; the file list sources hir/discarded.tcl; the HIR documentation |
 | hir/interchange.tcl | encode leaves `checkedSource` out |
 | tests/discarded-mutation.test (new) | the regression corpus |
-| tests/{warnings,many-boolean-arguments,method-eligible,one-char-string-literal,fixed-arity-list-return,proves-naming,same-failure,compilerpedia,static-compile}.test | the ninth registered code |
+| tests/{warnings,many-boolean-arguments,method-eligible,one-char-string-literal,fixed-arity-list-return,proves-naming,same-failure,compilerpedia,static-compile,main-cli}.test | the ninth registered code (main-cli: the warnings index lists nine topics) |
 | compilerpedia/topics/{warnings,concepts,folds,errors-ownership,proofs}.topic | the warning's topic, the construct-binding documentation, two examples |
 | audit/discarded-mutation/ (new) | census, test census, fuzzer, mutation catalog, their results |
 | audit/depth-safe-nesting/census.tsv | the two guarded walks |

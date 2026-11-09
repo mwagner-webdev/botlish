@@ -1745,10 +1745,10 @@ proc hir::warnings::OptionShape {target shown types} {
 #              declaration.
 #   fold-exit  a `continue` or bare `break` of a fold, every path to which
 #              has mutated the fold's intermediate in its iteration: the exit
-#              carries the intermediate the iteration started with, so the
-#              mutations are discarded. Anchored at the exit; the related
-#              locations are the mutations it discards (one warning per
-#              exit, however many).
+#              carries the intermediate the iteration started with, so a
+#              mutation is discarded on every execution of it. Anchored at
+#              the exit; the related locations are the mutations some path
+#              to it runs (one warning per exit, however many).
 #
 # The warning says what happens to the state, never that a call may be
 # deleted: the call's own failure, and its arguments' evaluation, are the
@@ -1798,17 +1798,11 @@ proc hir::warnings::DiscardedMutation {hir} {
                 } else {
                     set carries "the fold yields the intermediate this iteration started with, not its modified value"
                 }
-                set count [llength $mutations]
-                if {$count == 1} {
-                    set what "a preceding mutation"
-                } else {
-                    set what "$count preceding mutations"
-                }
-                set message "this `$exit` discards $what of the fold's intermediate `$name`: $carries"
+                set message "this `$exit` discards this iteration's mutation of the fold's intermediate `$name` (every path to it mutates `$name`): $carries"
                 lappend warnings [New DISCARDED-MUTATION $message [dict get $source exprs $x origin] \
                     [lmap e $mutations {dict get $source exprs $e origin}] \
                     [dict create reason fold-exit exit $x fold [dict get $finding fold] binding $b name $name \
-                        mutations $mutations note "a mutation of `$name` this `$exit` discards"]]
+                        mutations $mutations note "a mutation of `$name` before this `$exit`, in the same iteration"]]
             }
         }
     }

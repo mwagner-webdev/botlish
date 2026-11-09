@@ -159,8 +159,8 @@ c01-collecting-loop-push.bot:11:6: note: `row` is bound here}
 test dm-corpus-fold-exit-rendered {c08 rendered: the exit, what the fold carries instead, the mutation it discards} -body {
     set hir [corpusHir c08-fold-continue]
     join [lmap w [dmOf $hir] {regsub -all {[^ \n]*/corpus/} [hir::warnings::render $hir $w] {}}] \n
-} -result {c08-fold-continue.bot:19:13: warning: this `continue` discards a preceding mutation of the fold's intermediate `acc`: the fold carries the intermediate this iteration started with to the next iteration, not its modified value (DISCARDED-MUTATION)
-c08-fold-continue.bot:17:9: note: a mutation of `acc` this `continue` discards}
+} -result {c08-fold-continue.bot:19:13: warning: this `continue` discards this iteration's mutation of the fold's intermediate `acc` (every path to it mutates `acc`): the fold carries the intermediate this iteration started with to the next iteration, not its modified value (DISCARDED-MUTATION)
+c08-fold-continue.bot:17:9: note: a mutation of `acc` before this `continue`, in the same iteration}
 
 test dm-corpus-behavior-unchanged {the warned reproducers run to their stated values on every backend, with warnings on as with warnings off: the warning changes no semantics} -body {
     set out {}
@@ -818,7 +818,7 @@ f(\[1, 0, 3\])"] [shown "${::foldDecl}fn f(xs: List\[int\]) -> int:
         acc
     w.length()
 f(\[1, 0, 3\])"]
-} -result {1 {{this `break` discards a preceding mutation of the fold's intermediate `acc`: the fold yields the intermediate this iteration started with, not its modified value @ 8:13}}}
+} -result {1 {{this `break` discards this iteration's mutation of the fold's intermediate `acc` (every path to it mutates `acc`): the fold yields the intermediate this iteration started with, not its modified value @ 8:13}}}
 
 test dm-fold-several-mutations-one-exit {several mutations before one exit: one warning at the exit, each mutation a related location} -body {
     dmSitesOf [compileWith "${::foldDecl}fn f(xs: List\[int\]) -> int:
@@ -852,7 +852,7 @@ f(\[1, -2\])"] [sites "${::foldDecl}fn f(xs: List\[int\]) -> int:
 f(\[1, 20\])"]
 } -result {1 {{fold-exit 9:17}}}
 
-test dm-fold-both-branches-mutate {a mutation on both branches before an exit is a mutation on every path: warned, with both mutations} -body {
+test dm-fold-both-branches-mutate {a different mutation on each branch before an exit: every path to the exit has mutated the intermediate, though no one mutation is on every path -- warned, both mutations related} -body {
     dmSitesOf [compileWith "${::foldDecl}fn f(xs: List\[int\]) -> int:
     w = fold x in xs with intermediate acc ints():
         if x > 0:
@@ -864,7 +864,7 @@ test dm-fold-both-branches-mutate {a mutation on both branches before an exit is
         acc
     w.length()
 f(\[1, 5\])"]
-} -result {}
+} -result {{fold-exit 11:13 {7:13 9:13}}}
 
 test dm-fold-inner-loop-exit {a continue or break inside a loop in the fold's body targets that loop, never the fold: silent} -body {
     silent "${::foldDecl}fn f(xs: List\[int\], ys: List\[int\]) -> int:
@@ -1039,8 +1039,15 @@ f(3)"] [sites "${::foldDecl}fn f(xs: List\[int\], ys: List\[int\]) -> int:
             break
         acc
     w.length()
-f(\[1, 2\], \[3, 4\])"]
-} -result {{{fold-exit 8:13}} {{fold-exit 8:13}}}
+f(\[1, 2\], \[3, 4\])"] [sites "${::foldDecl}fn f(n: int) -> int:
+    w = fold with intermediate acc ints():
+        acc.push(n)
+        if acc.length() > n:
+            break
+        acc
+    w.length()
+f(3)"]
+} -result {{{fold-exit 8:13}} {{fold-exit 8:13}} {{fold-exit 8:13}}}
 
 test dm-fold-exit-deep {an exit 400 conditions deep inside a fold, after a push of the intermediate, at Tcl's default recursion limit: the fold-exit walk follows the nesting in depth-safe segments (core/deep.tcl) and reports it} -body {
     set depth 400

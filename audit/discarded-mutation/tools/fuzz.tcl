@@ -24,12 +24,12 @@
 # `continue` of the fold, and through a `break` into what follows the fold;
 # an intermediate is live at the body's end only when the body completes
 # with it, and dead after an exit; a `return` reads only its own operands --
-# and a forward must-analysis of each fold body for the fold exits (the
-# mutations of the intermediate every path to a `continue` or `break` ran;
-# a handled pop's own mutation never counts, its handler having run instead
-# on some path). A dead mutation is reported when its value is dropped and
-# its callee is no `logged`; a mutation an exit reports is not reported
-# again.
+# and a forward walk of each fold body for the fold exits (a `continue` or
+# `break` every path to which mutated the intermediate, reported with the
+# mutations some path to it ran; a handled pop mutates on one of its two
+# paths only, its handler being the other). A dead mutation is reported
+# when its value is dropped and its callee is no `logged`; a mutation an
+# exit reports is not reported again.
 #
 # For every program: the warnings (reason, line, column) equal the model's;
 # `-warnings off` attaches none and builds the same HIR (but the side
@@ -363,30 +363,44 @@ proc fz::Live {statements liveOut ctx} {
     return $live
 }
 
-# The fold-exit facts of a fold body: the must-set of the intermediate's
-# mutations at each exit (the `exits` array: exit id -> mutation ids).
+# The fold-exit facts of a fold body: STATE is "top" (no path) or {ANY
+# MAY}, ANY 1 when every path here mutated the intermediate, MAY the
+# mutations some path here ran (a dict). An exit reached with ANY 1 records
+# MAY in the `exits` array (exit id -> mutation ids). A handled pop
+# mutates on the path where it succeeds only: its handler (-1) is the other
+# path, so it adds to MAY and leaves ANY as it was.
 proc fz::Must {statements state} {
     variable exits
     foreach s $statements {
         if {$state eq "top"} {
             return top
         }
+        lassign $state any may
         switch -- [lindex $s 0] {
             mut {
                 lassign $s - id v form
-                if {$v eq "acc" && $form ne "pop"} {
-                    # (A handled pop's own mutation: its handler ran
-                    # instead on some path.)
-                    dict set state $id 1
+                if {$v eq "acc"} {
+                    dict set may $id 1
+                    if {$form ne "pop"} {
+                        set any 1
+                    }
                 }
+                set state [list $any $may]
+            }
+            readpop {
+                lassign $s - id v
+                if {$v eq "acc"} {
+                    dict set may $id 1
+                }
+                set state [list $any $may]
             }
             return {
                 return top
             }
             exit {
                 lassign $s - id
-                if {[dict size $state] > 0} {
-                    set exits($id) [lsort -integer [dict keys $state]]
+                if {$any} {
+                    set exits($id) [lsort -integer [dict keys $may]]
                 }
                 return top
             }
@@ -404,11 +418,9 @@ proc fz::Must {statements state} {
 proc fz::Meet {a b} {
     if {$a eq "top"} { return $b }
     if {$b eq "top"} { return $a }
-    set r [dict create]
-    dict for {k -} $a {
-        if {[dict exists $b $k]} { dict set r $k 1 }
-    }
-    return $r
+    lassign $a anyA mayA
+    lassign $b anyB mayB
+    return [list [expr {$anyA && $anyB}] [dict merge $mayA $mayB]]
 }
 
 # The model's warnings of TREE: {REASON LINE:COL} sorted.
@@ -425,7 +437,7 @@ proc fz::Predict {tree finalVars} {
     set reported [dict create]
     foreach s [Folds $tree] {
         lassign $s - id name body
-        Must $body [dict create]
+        Must $body [list 0 [dict create]]
     }
     foreach x [array names exits] {
         lassign [dict get $at $x] line col

@@ -12,6 +12,10 @@
 # test suite compiles most programs with warnings off. A finding is keyed by
 # its program's file name, line, column and reason, so a template a test
 # compiles many times is one row with its count.
+#
+# The hook replaces hir::BuildFull by a wrapper: a test that reads that
+# procedure's body (static-economics.test's se-property-plan-gate) fails
+# under this tool, and only under it.
 
 set ::dmcOut [lindex $argv 0]
 set ::dmcTest [file normalize [lindex $argv 1]]

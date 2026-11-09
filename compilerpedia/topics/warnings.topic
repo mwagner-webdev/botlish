@@ -1013,11 +1013,13 @@ guess about intent.
     every path reaching it has mutated the fold's intermediate on, in the
     same iteration. The exit carries the intermediate the iteration started
     with (concept.folds), so the mutation is undone:
-        f.bot:9:13: warning: this `continue` discards a preceding mutation
-            of the fold's intermediate `acc`: the fold carries the
-            intermediate this iteration started with to the next iteration,
-            not its modified value (DISCARDED-MUTATION)
-        f.bot:7:9: note: a mutation of `acc` this `continue` discards
+        f.bot:10:13: warning: this `continue` discards this iteration's
+            mutation of the fold's intermediate `acc` (every path to it
+            mutates `acc`): the fold carries the intermediate this iteration
+            started with to the next iteration, not its modified value
+            (DISCARDED-MUTATION)
+        f.bot:8:9: note: a mutation of `acc` before this `continue`, in the
+            same iteration
 
 == WHY IT MATTERS
 A collection is a value (concept.values). A loop variable, a fold's
@@ -1057,9 +1059,10 @@ loop the place outlives); whether the call's value is used; the callee's
 effects for a call of a function -- every function it can reach touches
 only its own places and its place parameters (no context, no function
 value, no syscall, C call or yield, nothing affine); for a fold, a walk of
-the iteration that counts a mutation only when every path to the exit ran
-it; and the completion analysis's reachability inside functions. All of it
-on the checked program as written, the same for every backend.
+the iteration that reports an exit only when every path to it has mutated
+the intermediate; and the completion analysis's reachability inside
+functions. All of it on the checked program as written, the same for every
+backend.
 
 == LEGITIMATE EXCEPTIONS
 Silent by construction: a mutation whose state is read on some path, a

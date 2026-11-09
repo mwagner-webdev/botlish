@@ -45,14 +45,14 @@
 #              deleted.
 #   fold-exit  (B2) a `continue` or bare `break` of a fold, every path to
 #              which, in its iteration, has mutated the fold's intermediate
-#              (ExitWalk: a must-analysis over the iteration). The exit
-#              carries the intermediate the iteration started with
-#              (FOLD-LOOPS-MILESTONE-1.md, rules 5 and 6): the mutations are
-#              discarded on every execution of the exit. "Every path"
-#              rather than "some path" keeps the fact independent of path
-#              feasibility, which no analysis here decides: a mutation under
-#              one condition and an exit under another may never run
-#              together.
+#              (ExitWalk: a must-fact over the iteration). The exit carries
+#              the intermediate the iteration started with
+#              (FOLD-LOOPS-MILESTONE-1.md, rules 5 and 6): every execution
+#              of it discards a mutation. "Every path" rather than "some
+#              path" keeps the fact independent of path feasibility, which
+#              no analysis here decides: a mutation under one condition and
+#              an exit under another may never run together. The mutations
+#              reported with it are those some path to it runs.
 #
 # A mutation a fold-exit fact reports is not reported again as dead (the
 # exit says why). Facts inside a function are kept only where the completion
@@ -199,7 +199,7 @@ proc hir::discarded::Analyze {hir owner parent sites} {
             dict set mutations $e 1
         }
         set exits [dict create]
-        set state [dict create]
+        set state [dict create any 0 may {}]
         ExitSequence $hir $f $mutations [dict get $node body] state exits
         dict for {x ran} $exits {
             if {![Reached $hir $owner $parent $x reached]} continue
@@ -502,21 +502,26 @@ proc hir::discarded::NativeConfined {name} {
 # ---------------------------------------------------------------------------
 # Fold exits (B2)
 #
-# The must-analysis over one iteration of fold F: STATE (a variable of the
-# caller's, updated in place) is the set of the mutations of F's
-# intermediate (MUTATIONS: call ExprId -> 1) that every path to here has run
-# in this iteration, a dict, or {top 1} where no path arrives (after a
-# statement that never completes; unreachable code). A call is counted once
-# it completes (its operands first); a handler starts from the state before
-# its handled call (whose mutation may not have happened); an `if` meets its
-# branches; a loop inside the body may run its body no times, so it adds
-# nothing; a nested function's body runs elsewhere. A `continue` or bare
-# `break` of F (every `break` is bare, and both target the nearest loop: F's
-# own exits are never inside a nested loop) records the state it is reached
-# with in EXITSVAR (exit ExprId -> its mutations, sorted) when it is not
-# empty. The state is updated where it is held -- never a copy per
+# The analysis of one iteration of fold F: STATE (a variable of the
+# caller's, updated in place) is a dict {any A may M}, or {top 1} where no
+# path arrives (after a statement that never completes; unreachable code).
+# A is 1 when every path to here has mutated F's intermediate in this
+# iteration (a must-fact), M the mutations (MUTATIONS: call ExprId -> 1)
+# some path to here ran (a may-set). A call is counted once it completes
+# (its operands first); a handler starts from the state before its handled
+# call (whose mutation may not have happened); an `if` meets its branches
+# (A both, M either); a loop inside the body may run its body no times, so
+# it adds nothing; a nested function's body runs elsewhere. A `continue` or
+# bare `break` of F (every `break` is bare, and both target the nearest
+# loop: F's own exits are never inside a nested loop) reached with A 1
+# records M in EXITSVAR (exit ExprId -> its mutations, sorted): every
+# execution of that exit discards a mutation, and each of M is one it
+# discards on the paths that run both. A is a must-fact over every path of
+# the iteration's control flow, feasible or not, so no infeasible path can
+# make it: a mutation under one condition and an exit under another never
+# make A. The state is updated where it is held -- never a copy per
 # statement -- so a straight-line body is walked in linear time; a branch
-# costs one copy of the set for its other side.
+# costs one copy of M for its other side.
 
 proc hir::discarded::Meet {a b} {
     if {[dict exists $a top]} {
@@ -525,16 +530,16 @@ proc hir::discarded::Meet {a b} {
     if {[dict exists $b top]} {
         return $a
     }
-    if {[dict size $b] < [dict size $a]} {
-        lassign [list $b $a] a b
+    set any [expr {[dict get $a any] && [dict get $b any]}]
+    set may [dict get $a may]
+    set other [dict get $b may]
+    if {[dict size $other] > [dict size $may]} {
+        lassign [list $other $may] may other
     }
-    set result [dict create]
-    dict for {e -} $a {
-        if {[dict exists $b $e]} {
-            dict set result $e 1
-        }
+    dict for {e -} $other {
+        dict set may $e 1
     }
-    return $result
+    return [dict create any $any may $may]
 }
 
 proc hir::discarded::ExitSequence {hir f mutations sequence stateVar exitsVar} {
@@ -565,8 +570,8 @@ proc hir::discarded::ExitWalk {hir f mutations x stateVar exitsVar} {
             return
         }
         break - continue {
-            if {[dict get $node target] eq $f && [dict size $state] > 0} {
-                dict set exits $x [lsort -dictionary [dict keys $state]]
+            if {[dict get $node target] eq $f && [dict get $state any]} {
+                dict set exits $x [lsort -dictionary [dict keys [dict get $state may]]]
             }
             set state {top 1}
             return
@@ -618,7 +623,8 @@ proc hir::discarded::ExitWalk {hir f mutations x stateVar exitsVar} {
         return
     }
     if {$kind eq "call" && [dict exists $mutations $x]} {
-        dict set state $x 1
+        dict set state any 1
+        dict set state may $x 1
     }
     if {[hir::typeOf $hir $x] eq "never"} {
         set state {top 1}

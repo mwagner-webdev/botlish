@@ -230,19 +230,26 @@
 # ---------------------------------------------------------------------------
 # B2: the fold-exit walk
 
-@@ dm-may-not-must the walk's join is a union, not a meet: a mutation in one branch and an exit under another, which may never run together, is reported
+@@ dm-may-not-must the walk's must-fact joins as "some path" instead of "every path": a mutation in one branch and an exit under another, which may never run together, is reported
 !! dm-fold-branch-paths dm-fold-conditional-mutation-then-exit
 ## hir/discarded.tcl
 <<<<
-    set result [dict create]
-    dict for {e -} $a {
-        if {[dict exists $b $e]} {
-            dict set result $e 1
-        }
-    }
-    return $result
+    set any [expr {[dict get $a any] && [dict get $b any]}]
 ====
-    return [dict merge $a $b]
+    set any [expr {[dict get $a any] || [dict get $b any]}]
+>>>>
+
+@@ dm-one-mutation-on-every-path the must-fact asks for one mutation on every path instead of a mutation on every path: an exit after a different push on each branch is silent again
+!! dm-fold-both-branches-mutate
+## hir/discarded.tcl
+<<<<
+    set any [expr {[dict get $a any] && [dict get $b any]}]
+    set may [dict get $a may]
+    set other [dict get $b may]
+====
+    set may [dict get $a may]
+    set other [dict get $b may]
+    set any [expr {[dict get $a any] && [dict get $b any] && [llength [lmap e [dict keys $may] {if {![dict exists $other $e]} continue; set e}]] > 0}]
 >>>>
 
 @@ dm-exit-whenever-not-clean a fold-exit fact wherever the consumed-fold optimization keeps the entry copy (FoldExitsClean): a mutation that only may precede an exit is reported
@@ -250,11 +257,11 @@
 ## hir/discarded.tcl
 <<<<
         set exits [dict create]
-        set state [dict create]
+        set state [dict create any 0 may {}]
         ExitSequence $hir $f $mutations [dict get $node body] state exits
 ====
         set exits [dict create]
-        set state [dict create]
+        set state [dict create any 0 may {}]
         if {![hir::mutvec::FoldExitsClean $hir $parent $f $b]} {
             set any [lsort [dict keys $mutations]]
             dict for {x xnode} [dict get $hir exprs] {
@@ -270,9 +277,9 @@
 !! dm-fold-inner-loop-exit dm-fold-nested-folds
 ## hir/discarded.tcl
 <<<<
-            if {[dict get $node target] eq $f && [dict size $state] > 0} {
+            if {[dict get $node target] eq $f && [dict get $state any]} {
 ====
-            if {[dict size $state] > 0} {
+            if {[dict get $state any]} {
 >>>>
 ## hir/discarded.tcl
 <<<<
