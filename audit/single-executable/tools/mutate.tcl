@@ -1,20 +1,26 @@
-# mutate.tcl -- mutation testing of the single-file compiler's packaging of
-# the system linker (SINGLE-EXECUTABLE-FFI-MILESTONE-1.md, "Mutation testing").
+# mutate.tcl -- mutation testing of the single-file compiler's packaging
+# (SINGLE-EXECUTABLE-FFI-MILESTONE-1.md, "Mutation testing"; the base kit's
+# startup: SINGLE-EXECUTABLE.md, "How it is built").
 #
 #   tclsh9.0 audit/single-executable/tools/mutate.tcl ?-only NAME,...? ?-basekit PATH?
 #
-# Each mutant of mutants.txt (beside this script) edits single/main.tcl or
-# single/package.tcl in a private copy of what single/package.tcl packs.
-# For each, the copy is packed into a single executable -- with the base kit
-# (-basekit, else $BOTLISH_BASEKIT, else the one single/build.sh cached) and
-# this checkout's built native backend, stripped once -- and the two smoke
-# tests run against it: single/smoke-test.sh (no toolchain) and
-# single/ffi-smoke-test.sh (the host's cc). A mutant both pass SURVIVES; the
-# report lists what killed each and exits 1 on a survivor or a mutant that no
-# longer applies (update its text when the code it mutates changes, keeping
-# it a mutant of the same rule). Linux x86-64 only, as the single executable.
-# Needs the native backend built (cargo build --release --manifest-path
-# native/Cargo.toml) and a C toolchain; the checkout is never modified.
+# Each mutant of mutants.txt (beside this script) edits single/main.tcl,
+# single/package.tcl or single/basekit.c in a private copy of what
+# single/package.tcl packs. For each, the copy is packed into a single
+# executable -- with the base kit single/basekit.sh links from the copy
+# (once, unless -basekit or $BOTLISH_BASEKIT names one; again for each
+# mutant of single/basekit.c or single/basekit.sh) and this checkout's
+# built native backend, stripped once -- and the two smoke tests run
+# against it: single/smoke-test.sh (no toolchain) and
+# single/ffi-smoke-test.sh (the host's cc). The unmutated copy must pass
+# both first: otherwise no verdict would mean anything, and the run stops.
+# A mutant both pass SURVIVES; the report lists what killed each and exits 1
+# on a survivor or a mutant that no longer applies (update its text when the
+# code it mutates changes, keeping it a mutant of the same rule). Linux
+# x86-64 only, as the single executable. Needs the native backend built
+# (cargo build --release --manifest-path native/Cargo.toml), a C toolchain
+# and make (single/basekit.sh builds Tcl's static library once, cached);
+# the checkout is never modified.
 
 set root [file dirname [file dirname [file dirname [file dirname [file normalize [info script]]]]]]
 set options [dict create -only "" -basekit ""]
@@ -24,13 +30,8 @@ foreach {option value} $argv {
 }
 set basekit [dict get $options -basekit]
 if {$basekit eq "" && [info exists ::env(BOTLISH_BASEKIT)]} { set basekit $::env(BOTLISH_BASEKIT) }
-if {$basekit eq ""} {
-    set cache [file join $::env(HOME) .cache]
-    if {[info exists ::env(XDG_CACHE_HOME)]} { set cache $::env(XDG_CACHE_HOME) }
-    set basekit [file join $cache botlish-single tclsh9.0.1-static]
-}
-if {![file executable $basekit]} {
-    puts stderr "no base kit at $basekit: run single/build.sh once (it builds and caches one), or pass -basekit"
+if {$basekit ne "" && ![file executable $basekit]} {
+    puts stderr "no base kit at $basekit"
     exit 2
 }
 
@@ -99,6 +100,48 @@ try {
         file copy $built $nativeDir
         catch {exec strip --strip-debug [file join $nativeDir $name]}
     }
+    # The base kit the tree's single/basekit.sh links into OUTPUT; the error
+    # message's last line when it fails.
+    proc linkBasekit {output} {
+        global tree
+        if {[catch {exec bash [file join $tree single basekit.sh] $output 2>@1} message]} {
+            return -code error [lindex [split [string trim $message] \n] end]
+        }
+        return $output
+    }
+    # What kills the tree as it is now, packed with BASEKIT: package.tcl's
+    # failure, or each smoke test's first FAIL line.
+    proc killers {basekit} {
+        global tree nativeDir
+        set exe [file join $tree out botlish]
+        file mkdir [file dirname $exe]
+        if {[catch {exec $basekit [file join $tree single package.tcl] $exe $nativeDir 2>@1} message]} {
+            return [list "package.tcl ([lindex [split [string trim $message] \n] end])"]
+        }
+        set killers {}
+        foreach script {smoke-test.sh ffi-smoke-test.sh} {
+            set home [file tempdir botlish-single-mutant-home]
+            set status [catch {exec env HOME=$home PATH=/usr/bin:/bin bash [file join $tree single $script] $exe 2>@1} output]
+            file delete -force $home
+            if {$status} {
+                set fail [lsearch -inline -glob [split $output \n] FAIL:*]
+                if {$fail eq ""} { set fail [lindex [split [string trim $output] \n] end] }
+                lappend killers "$script ($fail)"
+            }
+        }
+        return $killers
+    }
+    if {$basekit eq ""} {
+        if {[catch {linkBasekit [file join $tree basekits unmutated]} basekit]} {
+            throw {MUTATE STOP} "single/basekit.sh cannot link the base kit: $basekit"
+        }
+    }
+    set baseline [killers $basekit]
+    if {$baseline ne {}} {
+        throw {MUTATE STOP} "the unmutated copy fails its smoke tests, with the base kit $basekit:\n    [join $baseline "\n    "]"
+    }
+    puts "baseline: the unmutated copy passes both smoke tests"
+    flush stdout
     set results {}
     foreach {name description edits} [readMutants [file join [file dirname [file normalize [info script]]] mutants.txt]] {
         if {$only ne {} && $name ni $only} continue
@@ -116,22 +159,17 @@ try {
             lappend results [list $name NOT-APPLIED]
             puts "NOT-APPLIED $name: the text to replace does not occur exactly once in $file"
         } else {
-            set exe [file join $tree out botlish]
-            file mkdir [file dirname $exe]
+            # A mutant of the base kit's startup is linked into a base kit of
+            # its own.
+            set kit $basekit
             set killers {}
-            if {[catch {exec $basekit [file join $tree single package.tcl] $exe $nativeDir 2>@1} message]} {
-                lappend killers "package.tcl ([lindex [split [string trim $message] \n] end])"
-            } else {
-                foreach script {smoke-test.sh ffi-smoke-test.sh} {
-                    set home [file tempdir botlish-single-mutant-home]
-                    set status [catch {exec env HOME=$home PATH=/usr/bin:/bin bash [file join $tree single $script] $exe 2>@1} output]
-                    file delete -force $home
-                    if {$status} {
-                        set fail [lsearch -inline -glob [split $output \n] FAIL:*]
-                        if {$fail eq ""} { set fail [lindex [split [string trim $output] \n] end] }
-                        lappend killers "$script ($fail)"
-                    }
+            if {[dict exists $touched single/basekit.c] || [dict exists $touched single/basekit.sh]} {
+                if {[catch {linkBasekit [file join $tree basekits $name]} kit]} {
+                    lappend killers "basekit.sh ($kit)"
                 }
+            }
+            if {$killers eq {}} {
+                set killers [killers $kit]
             }
             set verdict [expr {$killers eq {} ? "SURVIVED" : "KILLED"}]
             lappend results [list $name $verdict]
@@ -141,9 +179,13 @@ try {
         }
         dict for {file text} $touched { writeFile [file join $tree $file] $text }
     }
+} trap {MUTATE STOP} {message} {
+    puts stderr $message
+    set stopped 1
 } finally {
     file delete -force $tree
 }
+if {[info exists stopped]} { exit 2 }
 set survivors [lmap r $results {if {[lindex $r 1] ne "SURVIVED"} continue; lindex $r 0}]
 set unapplied [lmap r $results {if {[lindex $r 1] ne "NOT-APPLIED"} continue; lindex $r 0}]
 puts "[llength $results] mutants, [llength [lsearch -all -index 1 $results KILLED]] killed, [llength $survivors] survived[expr {$survivors eq {} ? "" : ": [join $survivors {, }]"}][expr {$unapplied eq {} ? "" : ", not applied: [join $unapplied {, }]"}]"

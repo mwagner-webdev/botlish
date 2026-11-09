@@ -143,6 +143,14 @@
         dfa-lowering compact]
 >>>>
 
+@@ key-ignores-consumed-folds the cache key leaves out whether fold intermediates may be consumed: a build with the consumption off (the oracle elaboration) hits the consumed elaboration's HIR
+## surface/cache.tcl
+<<<<
+        consumed-folds $::hir::mutvec::consumedFolds \
+====
+        consumed-folds 1 \
+>>>>
+
 @@ key-ignores-root the cache key leaves out the application root: one relative path from another working directory hits the other application's HIR
 ## surface/cache.tcl
 <<<<

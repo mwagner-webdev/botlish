@@ -1,10 +1,12 @@
 # category: fold-intermediate
 # class: A -- productive local mutation (the idiom fold-loops-mutable-vector
-#        pins), and its cost: the intermediate's entry is a logical copy of
-#        the carried value, so every iteration's push detaches the whole
-#        vector -- 1000 pushes copy 499,500 elements (section 15)
+#        pins), and its cost at the census: the intermediate's entry was a
+#        logical copy of the carried value, so every iteration's push
+#        detached the whole vector -- 1000 pushes copied 499,500 elements
+#        (section 15). Since CONSUMED-FOLD-INTERMEDIATES-MILESTONE-1.md the
+#        intermediate is consumed (no exit of the fold): nothing is copied.
 # expect: 1000
-# alloc: mutableVector shares 1000 detaches 1000 detachElements 499500
+# alloc: mutableVector shares 0 detaches 0 detachElements 0
 import std::mutable_vector
 
 fn ints() -> MutableVector[int]:

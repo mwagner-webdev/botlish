@@ -1,0 +1,57 @@
+# terminal.bot -- a terminal-session module (tests/unused-context.test,
+# NATIVE-UNUSED-CONTEXT-IMPORT-CORRECTNESS-MILESTONE-1.md): a context, two
+# resources whose cleanups require it, a function that requires it, a
+# function that holds a Session nobody calls, and a portable function.
+# Importing it for `width` alone requires no Terminal.
+import std::list
+import std::mutable_vector
+
+opaque context struct Terminal:
+    lines: MutableVector[int]
+
+fn create() -> Terminal:
+    Terminal {lines: std::mutable_vector::from_list([])}
+
+# Leaving a session logs its number (the Log the programs read).
+opaque resource struct Session:
+    id: int
+
+cleanup fn leave(s: Session, context t: Terminal):
+    {id} = s
+    t.lines.push(id)
+
+fn enter(n: int) -> Session:
+    Session {id: n}
+
+fn number(s: Session) -> int:
+    {id} = s
+    id
+
+# A second resource of the same module (after Session in the cleanup table):
+# untagging logs the negated number.
+opaque resource struct Tag:
+    id: int
+
+cleanup fn untag(t: Tag, context term: Terminal):
+    {id} = t
+    term.lines.push(0 - id)
+
+fn tag(n: int) -> Tag:
+    Tag {id: n}
+
+# Requires the Terminal directly.
+fn note(n: int, context t: Terminal):
+    t.lines.push(n)
+
+fn log(context t: Terminal) -> List[int] errors IndexNotFound:
+    loop i from 0 to t.lines.length():
+        t.lines.at(i)
+
+# Holds a Session to its end: a release, and so the Terminal, it requires.
+fn session_demo(n: int) -> int:
+    s = enter(n)
+    n + 1
+
+# Portable.
+fn width() -> int:
+    80

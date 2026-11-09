@@ -1,0 +1,27 @@
+# clock.bot -- a resource whose cleanup requires two contexts, one of them
+# declared by another module (tests/unused-context.test).
+import std::mutable_vector
+import terminal
+
+opaque context struct Clock:
+    ticks: MutableVector[int]
+
+fn create() -> Clock:
+    Clock {ticks: std::mutable_vector::from_list([])}
+
+opaque resource struct Alarm:
+    at: int
+
+cleanup fn disarm(a: Alarm, context c: Clock, t: terminal::Terminal):
+    {at} = a
+    c.ticks.push(at)
+    terminal::note(1000 + at)
+
+fn arm(at: int) -> Alarm:
+    Alarm {at: at}
+
+fn ticks(context c: Clock) -> int:
+    c.ticks.length()
+
+fn seconds() -> int:
+    60

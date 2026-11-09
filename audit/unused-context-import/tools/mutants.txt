@@ -1,0 +1,143 @@
+# Mutants of NATIVE-UNUSED-CONTEXT-IMPORT-CORRECTNESS-MILESTONE-1.md
+# (audit/unused-context-import/tools/mutate.tcl): deliberate breaks of the
+# rule that the native backend compiles a resource's cleanup -- and so
+# loads the contexts it requires -- exactly where code it compiles may
+# release that resource (hir::contexts::releasedCleanups, the release edges
+# the context analysis charges the cleanup's requirement through;
+# hir::specialize's ReleaseValues; native/lower.tcl's LiveCleanups,
+# LiveCleanup and CleanupTable). Each must be killed by
+# tests/unused-context.test, by one of the tests its `!!` line names -- the
+# test that states the property it breaks, never an unrelated failure.
+#
+#   @@ NAME DESCRIPTION
+#   !! TEST ...
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+
+# ---------------------------------------------------------------------------
+# The false dependency restored
+
+@@ cleanups-rooted every declared cleanup is a root of the program again (the defect): a program that imports a module for its portable functions compiles the module's cleanup, whose context load has no slot (NATIVE BUG)
+!! uc-import-only uc-transitive uc-several uc-stdlib-imports uc-nir-import-only uc-nir-several uc-package-portable
+## native/lower.tcl
+<<<<
+            [ThreadOwnerBlocks $hirProgram $threadRecords]] \
+        -releases [hir::contexts::releasedCleanups $hirProgram]]
+====
+            [ThreadOwnerBlocks $hirProgram $threadRecords] \
+            [CleanupBlocks $hirProgram]] \
+        -releases [hir::contexts::releasedCleanups $hirProgram]]
+>>>>
+
+@@ table-names-dead-cleanups the cleanup table names every declared cleanup, released or not: an entry nothing compiled has no instance (NATIVE BUG), whatever the program releases
+!! uc-tags uc-tags-table uc-nir-uses uc-uses
+## native/lower.tcl
+<<<<
+        if {[dict exists $live $block]} {
+            lappend regs [Assign fn "fnvalue [GenericRef $block]"]
+====
+        if {1 || [dict exists $live $block]} {
+            lappend regs [Assign fn "fnvalue [GenericRef $block]"]
+>>>>
+
+@@ releases-of-every-region every region's releases are charged to the program, whether or not its code is compiled: an imported module's unused function that holds a Session (terminal::session_demo) makes the cleanup and its Terminal the program's
+!! uc-import-only uc-transitive uc-several uc-stdlib-imports uc-nir-import-only uc-nir-several uc-package-portable
+## hir/specialize.tcl
+<<<<
+    set released [dict getdef [dict get $state releases] $region {}]
+====
+    set released [if {$region eq "program"} {lsort -unique [concat {*}[dict values [dict get $state releases]]]}]
+>>>>
+
+# ---------------------------------------------------------------------------
+# A genuine dependency omitted
+
+@@ releases-ignored no region's releases make its cleanups live: a real release has no compiled cleanup (the backstop's NATIVE BUG), the genuine dependency lost
+!! uc-uses uc-tags uc-toplevel uc-package-session uc-uses-counters uc-tags-table
+## hir/specialize.tcl
+<<<<
+    set released [dict getdef [dict get $state releases] $region {}]
+====
+    set released {}
+>>>>
+
+@@ releases-program-only only the top level's releases count: a helper function's release (uses.bot's scoped, a vector's clear in tags.bot) loses its cleanup, the dependency not propagated through the helper
+!! uc-uses uc-tags uc-package-session uc-uses-counters uc-tags-table
+## hir/specialize.tcl
+<<<<
+    set released [dict getdef [dict get $state releases] $region {}]
+====
+    set released [if {$region eq "program"} {dict getdef [dict get $state releases] $region {}}]
+>>>>
+
+@@ releases-first-only a region that releases two resources keeps the first one's cleanup only: uses.bot's alarmed, the one function that releases an Alarm, loses clock::disarm
+!! uc-uses uc-uses-counters uc-nir-uses
+## hir/contexts.tcl
+<<<<
+        dict set result $o [lsort -unique [lmap edge $edges {lindex $edge 1}]]
+====
+        dict set result $o [list [lindex $edges 0 1]]
+>>>>
+
+@@ releases-top-level-dropped the top level's own releases are not the program's: a Job only the top level releases (a discarded value) has no compiled cleanup
+!! uc-toplevel
+## hir/contexts.tcl
+<<<<
+        if {$o eq ""} {
+            set o program
+        }
+====
+        if {$o eq ""} {
+            continue
+        }
+>>>>
+
+# ---------------------------------------------------------------------------
+# The table and isolation
+
+@@ cleanup-table-compacted the cleanup table lists only the compiled cleanups, without a place for the others: a runtime walk's entry K names another cleanup, or none (tags.bot's Tag is entry 1 behind Session's uncompiled 0)
+!! uc-tags uc-tags-table uc-nir-uses uc-gc-stress uc-isolation uc-executable
+## native/lower.tcl
+<<<<
+        } else {
+            lappend regs [Assign fn "unit"]
+        }
+====
+        }
+>>>>
+
+@@ live-cleanups-stale the compiled cleanups are decided once per process and kept: a later compilation reads an earlier one's (the first program lowered compiles none), its releases' cleanups never compiled
+!! uc-isolation uc-uses uc-tags uc-uses-counters uc-tags-table uc-nir-uses uc-gc-stress uc-interchange uc-cache uc-toplevel uc-package-session
+## native/lower.tcl
+<<<<
+    set liveCleanups [LiveCleanups]
+====
+    if {![info exists liveCleanups]} {
+        set liveCleanups [LiveCleanups]
+    }
+>>>>
+
+@@ cleanups-rooted-load-suppressed the workaround the brief rules out (main's InCleanup before this milestone): every cleanup a root again, and a load of a context the program does not install raises at run time instead of failing lowering -- programs run, but every declared cleanup is compiled with its uninstalled context loads
+!! uc-nir-import-only uc-nir-several uc-stdlib-imports uc-tags-table uc-nir-uses
+## native/lower.tcl
+<<<<
+            [ThreadOwnerBlocks $hirProgram $threadRecords]] \
+        -releases [hir::contexts::releasedCleanups $hirProgram]]
+====
+            [ThreadOwnerBlocks $hirProgram $threadRecords] \
+            [CleanupBlocks $hirProgram]] \
+        -releases [hir::contexts::releasedCleanups $hirProgram]]
+>>>>
+<<<<
+    upvar 1 $fnVar fn
+    if {[ContextDiagnostic] eq ""} {
+        throw {NATIVE BUG} "native lowering: context load $e of context \"$id\", which the program does not install"
+====
+    upvar 1 $fnVar fn
+    if {0} {
+        throw {NATIVE BUG} "native lowering: context load $e of context \"$id\", which the program does not install"
+>>>>
