@@ -550,6 +550,7 @@ proc hir::format::Target {hir target} {
 }
 
 proc hir::format::Expr {hir e indent origins linesVar} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $linesVar lines
     set node [dict get $hir exprs $e]
     set inner [expr {$indent + 1}]

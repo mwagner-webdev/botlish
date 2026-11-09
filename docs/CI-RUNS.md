@@ -1,4 +1,4 @@
-# CI-RUNS.md -- superseded runs, merged branches' runs, the release gate, and the canary
+# CI-RUNS.md -- superseded runs, merged branches' runs, the release gate, the canary, and commits already tested
 
 GitHub-hosted runners are a limited pool: a fixed number of jobs run at
 once for the account, and macOS jobs have a much smaller cap of their own.
@@ -10,8 +10,9 @@ were runs of branches already merged into main. One superseded main run (at
 17b0e66) had held its place in its workflow's queue for four hours while
 the run of main's newest commit waited behind it.
 
-Three rules came out of that, and a fourth from the cost of a red push;
-this document is their reference:
+Three rules came out of that, a fourth from the cost of a red push, and a
+fifth from the cost of a commit tested twice; this document is their
+reference:
 
 1. A newer push cancels a running test workflow on the same ref, on main
    too (section 1).
@@ -21,11 +22,14 @@ this document is their reference:
    GC stress included, by a run of its own that a superseding push does not
    cancel (section 3).
 4. Every test workflow first runs a canary, the tests likeliest to fail,
-   for about ten minutes, and its expensive jobs wait for it (section 4).
+   for about ten minutes, and its expensive jobs wait for it; a branch
+   push runs only the canary, on every host (section 4).
+5. A branch push at a commit another run already tests defers to that run
+   and runs nothing (section 5).
 
-`tools/ci/runs.py` implements the pruning and the release gate,
-`tests/canary.tcl` and `tools/ci/history.py` the canary. Nothing in the
-compiler reads any of it.
+`tools/ci/runs.py` implements the pruning, the release gate and the
+deferral, `tests/canary.tcl` and `tools/ci/history.py` the canary. Nothing
+in the compiler reads any of it.
 
 ## 1. Superseded runs are cancelled, on main too
 
@@ -119,8 +123,8 @@ A commit's tests are **green** for a release when all of these hold:
 | the commit is main's head or an ancestor of it | only reviewed code is released |
 | `tests.yml`: a successful run whose GC-stress jobs (`tests (native GC-stress, interp/compile)`) succeeded | GC stress runs only on pushes: a manual run skips it, and a skipped job is no success |
 | `tests-arm64.yml`: a successful run whose GC-stress jobs (`arm64 tests (native GC-stress, interp/compile)`) succeeded | the same, on Linux AArch64 |
-| `macos-arm64.yml`: a successful run | macOS |
-| `windows-x86_64.yml`: a successful run | Windows |
+| `macos-arm64.yml`: a successful run whose acceptance jobs (`acceptance (Tier B, macOS arm64, shard N/5)`) succeeded | macOS; a branch push runs only the smoke job (section 4), a deferred run nothing (section 5), a manual run with `app_only` only the application's jobs |
+| `windows-x86_64.yml`: a successful run whose acceptance jobs (`acceptance (Windows x86-64, shard N/4)`) succeeded | Windows; a branch push runs only the canary, a deferred run nothing |
 | `static-decisions.yml`: a successful run, if it ran at the commit | it runs only when the commit changed what it compares |
 | the release's own build workflow: a successful run | single-executable.yml, icy-tower-windows.yml (the macOS release builds in its own run) |
 
@@ -254,11 +258,36 @@ runner after the canary had passed, and the expensive jobs waited with it.
 Each step runs whatever an earlier one found, so one red push reports all
 three.
 
-tests.yml and tests-arm64.yml now run on every branch push, but there only
-the canary: their other jobs run, as before, on
-pushes to main, on pull requests and when dispatched, and GC stress only on
-pushes to main (and arm64's in a manual run). macOS and Windows run
-everything on every push, as before, once the canary passes.
+### A branch push runs only the canary, on every host
+
+Every test workflow runs on every branch push, but there only its canary
+job: tests.yml's and tests-arm64.yml's `canary`, windows-x86_64.yml's
+`canary`, macos-arm64.yml's `smoke` (whose last step is the canary) with
+its `linux control`. The other jobs run on pushes to main, on pull requests
+(on macOS and Windows a fork's: a same-repository pull request's push
+already ran) and when dispatched (`workflow_dispatch` with the branch as
+the ref; macOS's and Windows' default inputs run their ordinary jobs), and
+GC stress only on pushes to main (and arm64's in a manual run).
+
+A branch push still runs the opt-in jobs its head commit's message asks
+for: `[ci-full]` (macOS's and Windows' `full`, with its `CI-Tests:` and
+`CI-GC-Stress:` trailers), `[ci-app-mutants]` (macOS's `app-mutants`) and
+`[ci-probes]` (Windows' `roots`, with its probes). A marker counts
+anywhere in the message, prose included (`contains()`): the commit that
+introduced this rule named all three in its description and so queued
+every opt-in job on its branch, hours of macOS and Windows runners, until
+the next push cancelled them. Write a marker in a commit message only to
+ask for its jobs.
+
+Until 2026-11-08 macOS and Windows ran everything on every push. Their
+runners are the pool's scarcest, and most of those runs tested a commit a
+later push replaced: of macos-arm64.yml's last 100 push runs before the
+change (2026-11-06 to 11-08), 75 were branch pushes, 55 of them cancelled by
+a newer push to their branch (and 20 of main's 25 by a newer push to main),
+and a successful run took 71 minutes to 9 hours from its start, queue
+included. A branch is merged at its tip, which the merge rule (AGENTS.md,
+"Git workflow") tests with a dispatched run of every test workflow: the
+pushes before it get the canary's quick verdict, on every host.
 
 ### The history
 
@@ -301,22 +330,78 @@ and reports the rest as not run.
 A green run starts its expensive jobs about fifteen minutes later than
 before (the canary's build and its ten minutes); on main, where GC stress
 takes three hours, that is under a tenth. A red push whose failure the
-canary finds stops after one job per host.
+canary finds stops after one job per host. A branch push costs one job
+per host (two on macOS: the smoke job and its Linux control).
 
 The canary orders; it skips nothing. A test it runs runs again in its
 ordinary job, and a failure it misses is found there as before. It is no
 substitute for the checks AGENTS.md names for an area.
 
-## 5. The housekeeping's own tests
+## 5. A commit already tested
 
-`tools/ci/test_runs.py` (no network) runs the release check, the gate and
-the pruning against a fake of the GitHub API over a small commit graph:
+A commit is one tree: two runs of a workflow at one commit test the same
+code. Branch pushes repeat commits: a branch that
+merges main and is then pushed beside main (main fast-forwarded to it), a
+commit pushed to a second branch, a branch moved back to a commit it had.
+Of macos-arm64.yml's last 100 push runs on 2026-11-08, 18 tested 9
+commits twice, each once on main and once on a branch (fe607ecc's two runs
+were created two seconds apart).
 
-* green, pending, failed and missing requirements; skipped GC stress; any
-  ref's runs at the commit; release runs that are no build;
+So a run of a test workflow on a **push to a branch other than main** first
+asks whether another run of the same workflow already tests its commit
+(`tools/ci/runs.py twin`, the composite action `.github/actions/twin`, the
+step "Already tested at this commit?" right after the checkout of the
+canary job and of every other job a branch push runs). It defers to:
+
+1. **main's push run at the commit**, while it is unfinished or once it
+   succeeded. Main's run is the whole workflow, and only a newer push to
+   main cancels it, which supersedes the commit there too;
+2. else **another branch's push run at the commit** that finished,
+   succeeded and ran its canary step (`Canary`): an unfinished one may be
+   cancelled by its own branch's next push, and a deferred one tested
+   nothing.
+
+A push run of the same commit is at least the test a branch push is: the
+same canary, or the whole workflow, and the same head commit, so the same
+opt-in jobs (a commit's message is part of it). A failed or cancelled run
+is no twin: the push tests the commit itself, and a failure is seen where it
+was pushed. A dispatched run, a pull request's run and a run of main never
+defer: they were asked for, or they are what the release gate and every
+merge read (section 3).
+
+A deferred run skips every later step of its jobs (and the jobs that wait
+for its canary skip), succeeds, writes `deferred=true` and the twin's URL
+as the step's outputs and "Deferred: commit SHA is tested by RUN" to its job
+summary. **Its result is the twin's: read that run.** The release gate never
+counts it (it has no GC-stress or acceptance job: section 3).
+
+The lookup costs one request (the runs at the commit) and, for another
+branch's run, one more (its jobs); a run of main asks nothing. An API error,
+or an answer it cannot read, never defers: the run tests its commit and the
+step says why, as a warning.
+
+Not done: deferring by tree rather than commit. Its case would be a merge
+whose tree equals its branch tip's (4 of the 94 merges into main from
+2026-09-15 to 11-08), and that is a commit of main, which never defers.
+
+## 6. The housekeeping's own tests
+
+`tools/ci/test_runs.py` (no network) runs the release check, the gate,
+the pruning and the deferral against a fake of the GitHub API over a small
+commit graph:
+
+* green, pending, failed and missing requirements; skipped GC stress; a
+  macOS or Windows run without its acceptance tier (a branch push's, a
+  deferred one's); any ref's runs at the commit; release runs that are no
+  build;
 * the gate's newest green commit, its tag rule, its rule against
   dispatching twice, and the deferral of tags;
-* every case the pruning must and must not cancel.
+* every case the pruning must and must not cancel;
+* every twin a branch push must and must not defer to (main's unfinished,
+  successful, failed and cancelled runs; another branch's unfinished,
+  failed, deferred and tested ones; another workflow, commit or kind of
+  run; itself), who never defers, and the command's outputs, summary and
+  errors (which never defer).
 
 It also checks the requests the API client makes. With PyYAML it checks
 the workflows' side of the rules:
@@ -330,8 +415,12 @@ the workflows' side of the rules:
 * only the two housekeeping workflows may start or cancel runs;
 * every test workflow runs the canary on every branch push, its other
   jobs wait for it (a job that runs after a failed need checks the
-  canary's result itself), and tests.yml and tests-arm64.yml run nothing
-  else on a branch push.
+  canary's result itself), and a branch push runs nothing else on any
+  host but macOS's Linux control and the jobs its message opts into;
+* every job a branch push runs defers with it: the canary job (and a job
+  that does not wait for it) by its own twin step right after its
+  checkout, every later step skipped once it defers, with `actions: read`;
+  an opt-in job after the canary by the canary job's `deferred` output.
 
 It also tests `tools/ci/history.py` against fake runs and job logs: what
 each test runner's report names, a commit counted once, the host from the
@@ -346,7 +435,7 @@ mutations of runs.py (a skipped GC-stress job taken for success, a branch
 ahead of main pruned, a tag moved backwards, a second dispatch, ...) were
 all killed by these tests.
 
-## 6. What to run when changing this
+## 7. What to run when changing this
 
 For a change to `tools/ci/`, to a workflow's concurrency or triggers, to a
 release job, or to the name of a workflow or a GC-stress job that a
@@ -358,14 +447,17 @@ requirement names:
 * `python3 -I audit/macos-release/tests/test_workflow.py` and that audit's
   mutants (`audit/macos-release/tools/mutate.py`) for icy-tower-macos.yml;
 * `tclsh9.0 tools/mutant-catalogs.tcl`;
-* push, and read the `ci tools` run's dry runs.
+* push, and read the `ci tools` run's dry runs (the gate, the pruning, and
+  what a branch push at main's head would defer to).
 
 A new release goes into `RELEASES`, a new required workflow into `CORE`,
 and both into release-gate.yml's `workflow_run` list. A new workflow that
-tests a push gets the concurrency block of section 1. The tests check all
-three.
+tests a push gets the concurrency block of section 1, a canary job that a
+branch push runs alone and that defers (section 5), and, in `CORE`, the
+jobs a branch push skips. The tests check all of it. A new job a branch
+push runs (an opt-in job) defers too.
 
-## 7. Limits
+## 8. Limits
 
 * `workflow_run` and `schedule` run from main only, so the gate and the
   scheduled pruning start once their files are on main. The first release
@@ -383,3 +475,12 @@ three.
 * A run that GITHUB_TOKEN started, such as a gate's dispatch, may not
   itself trigger `workflow_run`. The gate does not depend on it: the test
   workflows that trigger it are pushes.
+* A branch push deferred to main's unfinished run gets no verdict of its
+  own: if a newer push to main cancels that run, the commit is tested
+  nowhere until something runs it again (a dispatch, or the branch's next
+  push). Main's queue can also hold the twin for hours, longer than the
+  canary would have taken. Both are bounded by the commit being main's: the
+  branch adds nothing to it.
+* A branch push's canary is not the branch's verdict. The merge rule
+  (AGENTS.md) dispatches every test workflow on the branch tip; a dispatched
+  run never defers.

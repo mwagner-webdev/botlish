@@ -42,6 +42,13 @@ Operators, from highest precedence to lowest:
 Arithmetic, `and` and `or` are left-associative. There is no `/`, `%`,
 `+=`, `++`, ternary operator or line-continuation character.
 
+Nesting has no limit of the language's: parentheses, List literals,
+constructions, calls, operator chains, conditions, destructuring patterns,
+written types and blocks nest as deep as a program writes them. How deep
+the compiler's own walks over the nesting go is not bounded by the Tcl
+interpreter's stack; only running a program on the interp backend
+evaluates its nesting as nested Tcl evaluations (backend.interp).
+
 == WHY
 One way to lay out a block and no implicit statement separators keep
 programs uniform; refusing `a < b < c` avoids a form that means different

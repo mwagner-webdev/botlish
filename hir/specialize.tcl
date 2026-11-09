@@ -742,6 +742,7 @@ proc hir::specialize::RefinementFacts {hir} {
 # Analyzes instance ID once: infers its region, records its overlay, calls
 # and edges, and updates its result.
 proc hir::specialize::Analyze {id} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     variable state
     variable passLimit
     variable instanceLimit
@@ -949,6 +950,7 @@ proc hir::specialize::InstanceTarget {scratch node base} {
 
 # The handler region inference calls (hir::types::inferRegion).
 proc hir::specialize::Handle {op args} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     variable state
     set current [dict get $state current]
     switch -- $op {

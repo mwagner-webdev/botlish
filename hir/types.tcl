@@ -3269,6 +3269,19 @@ proc hir::types::kindOf {type} {
     return [core::type::base $type]
 }
 
+# 1 if no value of static type TYPE can be called: its kind is known and is
+# no callable kind (an Int, a String, a Bool, a List, a struct, an enum, a C
+# address, ...), so a call of it always raises NOT-CALLABLE. The callable
+# kinds are a Block, a native and a coroutine handle (whose call is a
+# resume); a type of no fixed kind -- `any`, a structural function type, a
+# trait view, an imprint variable, `never` -- is no proof either way. The
+# one statement of the rule: the check of a call against its callee
+# (hir::range::VerifyCallable), the call's poison and region inference's
+# dead call (Call) ask it.
+proc hir::types::NotCallable {type} {
+    return [expr {[kindOf $type] ni {"" block native coroutine}}]
+}
+
 # The core type (core/type.tcl) a static type implies.
 proc hir::types::semantic {type} {
     if {[hir::cabi::IsFiniteFloating $type]} {
@@ -3645,6 +3658,7 @@ proc hir::types::Walk {hirVar} {
 # region get their types, known outcomes and reachability. Returns the type
 # of the region's normal completion (never if none).
 proc hir::types::inferRegion {hirVar region types handler} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $hirVar hir
     set ctx [NewContext]
     dict set ctx types $types
@@ -4304,6 +4318,7 @@ proc hir::types::ValueBinding {hir e} {
 # (hir::static::reifiedStatement): what follows it stays reachable for the
 # checks, as if the block could complete (STATIC-COMPILE.md, "Completions").
 proc hir::types::Sequence {hirVar ctxVar exprs} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $hirVar hir $ctxVar ctx
     set entry [dict get $ctx reachable]
     set result unit
@@ -4329,6 +4344,7 @@ proc hir::types::Sequence {hirVar ctxVar exprs} {
 
 # Types expression E. Returns its type.
 proc hir::types::Expr {hirVar ctxVar e} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $hirVar hir $ctxVar ctx
     if {[dict exists $hir syntaxDependent $e] && ![dict exists $ctx spec]} {
         return [Dependent hir ctx $e]
@@ -4692,6 +4708,7 @@ proc hir::types::FoldInitial {hirVar ctxVar node} {
 # is then poison too (FoldResult). Elsewhere T is `any`, the sound dynamic
 # type.
 proc hir::types::FoldBody {hirVar ctxVar e node initial} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $hirVar hir $ctxVar ctx
     variable foldAttempts
     set b [dict get $node foldBinding]
@@ -4890,6 +4907,7 @@ proc hir::types::InferApplication {hirVar e id fieldTypes} {
 }
 
 proc hir::types::Struct {hirVar ctxVar e} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $hirVar hir $ctxVar ctx
     set node [dict get $hir exprs $e]
     set entry [dict get $ctx reachable]
@@ -4977,6 +4995,7 @@ proc hir::types::Struct {hirVar ctxVar e} {
 # (a receiver statically of another kind, or without that field) is `never`
 # in specialization inference, like any operation that always raises.
 proc hir::types::Project {hirVar ctxVar e} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $hirVar hir $ctxVar ctx
     set node [dict get $hir exprs $e]
     set receiver [Expr hir ctx [dict get $node receiver]]
@@ -5094,6 +5113,7 @@ proc hir::types::ProjectionFailed {hirVar ctx e} {
 # an `if` (If), applied when a validator fact is involved; otherwise the
 # construct keeps the facts after the call, as it always has.
 proc hir::types::Handle {hirVar ctxVar e} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $hirVar hir $ctxVar ctx
     set node [dict get $hir exprs $e]
     set entry [dict get $ctx reachable]
@@ -5207,6 +5227,7 @@ proc hir::types::Handle {hirVar ctxVar e} {
 }
 
 proc hir::types::Bind {hirVar ctxVar e} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $hirVar hir $ctxVar ctx
     set node [dict get $hir exprs $e]
     set b [dict get $node binding]
@@ -5251,6 +5272,7 @@ proc hir::types::Bind {hirVar ctxVar e} {
 
 # Types block expression E; SELF is the binding it is bound to (or "").
 proc hir::types::Block {hirVar outerVar e self} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $hirVar hir $outerVar outer
     set node [dict get $hir exprs $e]
     set arity [llength [dict get $node params]]
@@ -5376,6 +5398,7 @@ proc hir::types::Block {hirVar outerVar e self} {
 }
 
 proc hir::types::Call {hirVar ctxVar e} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $hirVar hir $ctxVar ctx
     set node [dict get $hir exprs $e]
     set entry [dict get $ctx reachable]
@@ -5659,9 +5682,19 @@ proc hir::types::Call {hirVar ctxVar e} {
         } elseif {$spec} {
             set dead 1
         }
-    } elseif {$spec && [kindOf $calleeType] ni {"" block native coroutine}} {
-        # Not callable: the call always raises NOT-CALLABLE.
-        set dead 1
+    } elseif {[NotCallable $calleeType]} {
+        # Not callable: the call always raises NOT-CALLABLE. In the generic
+        # walk of a call the program wrote it is the call's own NOT-CALLABLE
+        # diagnostic (hir::range::VerifyCallable), so it has no value:
+        # poison, and nothing that uses its result restates it (a declared
+        # result it cannot prove). (A semantic instance, typed under one
+        # call's argument types, neither reports nor poisons it, as for a
+        # native's argument kinds above: a callee of no fixed kind in the
+        # program as written is checked when the call runs.)
+        if {$spec || ([dict exists $node written] && [MakesPoison $hir $ctx]
+                && ![dict exists $ctx inst] && [dict get $ctx reachable])} {
+            set dead 1
+        }
     }
     if {$target eq "" && [dict exists $node imprint]} {
         # Explicit imprints on a callee that is not statically known.
@@ -5860,6 +5893,7 @@ proc hir::types::KnownOutcome {hir condition} {
 }
 
 proc hir::types::If {hirVar ctxVar e} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $hirVar hir $ctxVar ctx
     set node [dict get $hir exprs $e]
     set condition [dict get $node condition]

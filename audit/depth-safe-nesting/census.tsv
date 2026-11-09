@@ -1,0 +1,223 @@
+# census.tsv -- every compile-time procedure whose recursion follows the
+# program's nesting, each guarded (core/deep.tcl; DEPTH-SAFE-NESTED-
+# EXPRESSION-FRONTEND-MILESTONE-1.md). Found by tracing every procedure's
+# simultaneous activations over generated programs nested N deep
+# (audit/depth-safe-nesting/tools/census.tcl): one whose count grows with N.
+# tests/depth-safe-nesting.test checks each starts with the guard and that
+# no other procedure carries one.
+# PROCEDURE	PHASE	RECURSIVE SHAPE
+::surface::parser::Additive	parse	recursive descent: a production per precedence level and per bracketed form, re-entered for every nested operand, argument, element, field value and block
+::surface::parser::Arguments	parse	recursive descent: a production per precedence level and per bracketed form, re-entered for every nested operand, argument, element, field value and block
+::surface::parser::CallArguments	parse	recursive descent: a production per precedence level and per bracketed form, re-entered for every nested operand, argument, element, field value and block
+::surface::parser::Comparison	parse	recursive descent: a production per precedence level and per bracketed form, re-entered for every nested operand, argument, element, field value and block
+::surface::parser::Conjunction	parse	recursive descent: a production per precedence level and per bracketed form, re-entered for every nested operand, argument, element, field value and block
+::surface::parser::Expression	parse	recursive descent: a production per precedence level and per bracketed form, re-entered for every nested operand, argument, element, field value and block
+::surface::parser::FieldInits	parse	recursive descent: a production per precedence level and per bracketed form, re-entered for every nested operand, argument, element, field value and block
+::surface::parser::Function	parse	recursive descent: a production per precedence level and per bracketed form, re-entered for every nested operand, argument, element, field value and block
+::surface::parser::HandledCall	parse	recursive descent: a production per precedence level and per bracketed form, re-entered for every nested operand, argument, element, field value and block
+::surface::parser::If	parse	recursive descent: a production per precedence level and per bracketed form, re-entered for every nested operand, argument, element, field value and block
+::surface::parser::Inversion	parse	recursive descent: a production per precedence level and per bracketed form, re-entered for every nested operand, argument, element, field value and block
+::surface::parser::Logical	parse	recursive descent: a production per precedence level and per bracketed form, re-entered for every nested operand, argument, element, field value and block
+::surface::parser::Multiplicative	parse	recursive descent: a production per precedence level and per bracketed form, re-entered for every nested operand, argument, element, field value and block
+::surface::parser::Postfix	parse	recursive descent: a production per precedence level and per bracketed form, re-entered for every nested operand, argument, element, field value and block
+::surface::parser::Primary	parse	recursive descent: a production per precedence level and per bracketed form, re-entered for every nested operand, argument, element, field value and block
+::surface::parser::Simple	parse	recursive descent: a production per precedence level and per bracketed form, re-entered for every nested operand, argument, element, field value and block
+::surface::parser::Statement	parse	recursive descent: a production per precedence level and per bracketed form, re-entered for every nested operand, argument, element, field value and block
+::surface::parser::Value	parse	recursive descent: a production per precedence level and per bracketed form, re-entered for every nested operand, argument, element, field value and block
+::surface::parser::Statements	parse	recursive descent: a production per precedence level and per bracketed form, re-entered for every nested operand, argument, element, field value and block
+::surface::parser::Suite	parse	recursive descent: a production per precedence level and per bracketed form, re-entered for every nested operand, argument, element, field value and block
+::surface::parser::Unary	parse	recursive descent: a production per precedence level and per bracketed form, re-entered for every nested operand, argument, element, field value and block
+::surface::parser::ValueOrHandled	parse	recursive descent: a production per precedence level and per bracketed form, re-entered for every nested operand, argument, element, field value and block
+::surface::ast::Ids	AST	structural ids assigned by a walk of the nested AST (a left-deep chain is as deep as it is long)
+::surface::ast::Statements	AST	structural ids assigned by a walk of the nested AST (a left-deep chain is as deep as it is long)
+::surface::ast::Suite	AST	structural ids assigned by a walk of the nested AST (a left-deep chain is as deep as it is long)
+::surface::modules::StaticSitesWalk	load	the loader's walks of a file's AST: qualified references, static sites
+::surface::modules::Walk	load	the loader's walks of a file's AST: qualified references, static sites
+::surface::lower::FieldInits	surface lowering	AST to HIR syntax, one call per nested node
+::surface::lower::Handlers	surface lowering	AST to HIR syntax, one call per nested node
+::surface::lower::Node	surface lowering	AST to HIR syntax, one call per nested node
+::surface::lower::Sequence	surface lowering	AST to HIR syntax, one call per nested node
+::hir::static::HasStatic	static sites	search of the nested syntax for a static block
+::hir::resolve::Expr	resolution	scopes and names over nested syntax
+::hir::resolve::ResolveStruct	resolution	scopes and names over nested syntax
+::hir::resolve::Sequence	resolution	scopes and names over nested syntax
+::hir::types::Bind	inference	type inference: Expr dispatches on a node and re-enters for its children
+::hir::types::Block	inference	type inference: Expr dispatches on a node and re-enters for its children
+::hir::types::Call	inference	type inference: Expr dispatches on a node and re-enters for its children
+::hir::types::Expr	inference	type inference: Expr dispatches on a node and re-enters for its children
+::hir::types::Handle	inference	type inference: Expr dispatches on a node and re-enters for its children
+::hir::types::If	inference	type inference: Expr dispatches on a node and re-enters for its children
+::hir::types::Project	inference	type inference: Expr dispatches on a node and re-enters for its children
+::hir::types::FoldBody	inference	a fold's body typed to its intermediate's fixpoint, nested folds within
+::hir::types::Sequence	inference	type inference: Expr dispatches on a node and re-enters for its children
+::hir::types::Struct	inference	type inference: Expr dispatches on a node and re-enters for its children
+::hir::types::inferRegion	inference	type inference: Expr dispatches on a node and re-enters for its children
+::hir::signatures::Call	contracts	inferred parameter contracts and results
+::hir::signatures::Seq	contracts	inferred parameter contracts and results
+::hir::signatures::Value	contracts	inferred parameter contracts and results
+::hir::range::Call	range	range analysis, admission and verification of calls
+::hir::range::Expr	range	range analysis, admission and verification of calls
+::hir::range::If	range	range analysis, admission and verification of calls
+::hir::range::PathsWithin	range	range analysis, admission and verification of calls
+::hir::range::Sequence	range	range analysis, admission and verification of calls
+::hir::range::VerifyCallArguments	range	range analysis, admission and verification of calls
+::hir::refine::IfImplication	refinement	implication through nested conditions
+::hir::refine::Implication	refinement	implication through nested conditions
+::hir::refine::BodyImplication	refinement	implication through nested conditions
+::hir::callables::WalkExpr	callables	callable-bearing audit
+::hir::callables::WalkFold	callables	callable-bearing audit
+::hir::completions::EffectiveFacts	completions	completion analysis (also nests per static call: the call chain)
+::hir::completions::Eval	completions	completion analysis (also nests per static call: the call chain)
+::hir::completions::EvalCall	completions	completion analysis (also nests per static call: the call chain)
+::hir::completions::EvalHandle	completions	completion analysis (also nests per static call: the call chain)
+::hir::completions::EvalIf	completions	completion analysis (also nests per static call: the call chain)
+::hir::completions::ExactCopy	completions	completion analysis (also nests per static call: the call chain)
+::hir::completions::Seq	completions	completion analysis (also nests per static call: the call chain)
+::hir::completions::StaticWalk	completions	completion analysis (also nests per static call: the call chain)
+::hir::completions::WalkBlock	completions	completion analysis (also nests per static call: the call chain)
+::hir::completions::analyzeBlock	completions	completion analysis (also nests per static call: the call chain)
+::hir::specialize::Analyze	specialization	call-site specialization analysis of nested functions
+::hir::specialize::Handle	specialization	call-site specialization analysis of nested functions
+::hir::warnings::BodyInto	warnings	the warning passes' completion walks
+::hir::warnings::FallThroughs	warnings	the warning passes' completion walks
+::hir::warnings::Leaves	warnings	the warning passes' completion walks
+::hir::lower::Exprs	core IR lowering	HIR to core IR (the interpreter's program)
+::hir::lower::Seq	core IR lowering	HIR to core IR (the interpreter's program)
+::hir::lower::body	core IR lowering	HIR to core IR (the interpreter's program)
+::hir::lower::expr	core IR lowering	HIR to core IR (the interpreter's program)
+::core::ir::CollectBindNames	core IR check	core IR validation and binding collection
+::core::ir::check	core IR check	core IR validation and binding collection
+::core::compiler::CompileBind	Tcl compiler	code generation, one call per nested expression
+::core::compiler::CompileBlock	Tcl compiler	code generation, one call per nested expression
+::core::compiler::CompileBlockBody	Tcl compiler	code generation, one call per nested expression
+::core::compiler::CompileCall	Tcl compiler	code generation, one call per nested expression
+::core::compiler::CompileCondition	Tcl compiler	code generation, one call per nested expression
+::core::compiler::CompileExpr	Tcl compiler	code generation, one call per nested expression
+::core::compiler::CompileForm	Tcl compiler	code generation, one call per nested expression
+::core::compiler::CompileHandle	Tcl compiler	code generation, one call per nested expression
+::core::compiler::CompileIf	Tcl compiler	code generation, one call per nested expression
+::core::compiler::CompileProject	Tcl compiler	code generation, one call per nested expression
+::core::compiler::CompileSequence	Tcl compiler	code generation, one call per nested expression
+::core::compiler::CompileStruct	Tcl compiler	code generation, one call per nested expression
+::core::compiler::ConditionIf	Tcl compiler	code generation, one call per nested expression
+::core::compiler::ConditionBranch	Tcl compiler	code generation, one call per nested expression
+::core::compiler::ReleasingOnError	Tcl compiler	code generation, one call per nested expression
+::hir::WalkInto	Tcl compiler	the compiler's walk of nested expressions
+::hir::aot::TailInto	Tcl compiler	tail positions
+::hir::construction::SeqUses	native lowering	construction uses (escape of nested values)
+::hir::construction::Uses	native lowering	construction uses (escape of nested values)
+::hir::escape::ChooseLevel	native lowering	escape and scalar-replacement plans of nested constructions
+::hir::escape::Classify	native lowering	escape and scalar-replacement plans of nested constructions
+::hir::escape::ClassifyIf	native lowering	escape and scalar-replacement plans of nested constructions
+::hir::escape::CutFields	native lowering	escape and scalar-replacement plans of nested constructions
+::hir::escape::LiteralTree	native lowering	escape and scalar-replacement plans of nested constructions
+::hir::escape::WriteBackPaths	native lowering	escape and scalar-replacement plans of nested constructions
+::native::lower::Call	native lowering	HIR to NIR, one call per nested expression
+::native::lower::Bind	native lowering	HIR to NIR, one call per nested expression
+::native::lower::CallArgs	native lowering	HIR to NIR, one call per nested expression
+::native::lower::CallInner	native lowering	HIR to NIR, one call per nested expression
+::native::lower::ConstantIntValue	native lowering	HIR to NIR, one call per nested expression
+::native::lower::Expr	native lowering	HIR to NIR, one call per nested expression
+::native::lower::Project	native lowering	HIR to NIR, one call per nested expression
+::native::lower::Handle	native lowering	HIR to NIR, one call per nested expression
+::native::lower::If	native lowering	HIR to NIR, one call per nested expression
+::native::lower::MandatoryWriteBack	native lowering	HIR to NIR, one call per nested expression
+::native::lower::Sequence	native lowering	HIR to NIR, one call per nested expression
+::native::lower::SequenceTo	native lowering	HIR to NIR, one call per nested expression
+::native::lower::StaticOutcome	native lowering	HIR to NIR, one call per nested expression
+::native::lower::StaticOutcomeOf	native lowering	HIR to NIR, one call per nested expression
+::native::lower::StructFields	native lowering	HIR to NIR, one call per nested expression
+::native::shortstr::DemandBody	native lowering	short-string demand and liveness walks
+::native::shortstr::DemandWalk	native lowering	short-string demand and liveness walks
+::native::shortstr::LiveWalk	native lowering	short-string demand and liveness walks
+::native::rawabi::If	native lowering	raw ABI walk
+::native::rawabi::Seq	native lowering	raw ABI walk
+::native::rawabi::Walk	native lowering	raw ABI walk
+::hir::format::Expr	HIR text	the HIR text printer, one call per nested expression
+::hir::read::Expr	HIR text	the HIR text reader, one call per nested expression
+::surface::ast::Expr	AST text	the AST printer (surface::formatAst), one call per nested node
+::hir::traits::StampNode	traits	a trait or coroutine program's syntax stamped node by node
+::hir::static::CollectSites	static sites	the static blocks of nested syntax collected
+::surface::modules::RemapFile	load	an imported module's nodes given their file's id
+::service::SyntaxWalk	service	the service's index of a file's nested AST
+::hir::repeatable::Expr	repeatability	whether a nested expression repeats its value
+::hir::affine::Flow	ownership	the affine flow analysis, one call per nested expression
+::hir::static::Node	static sites	decided static blocks replaced in nested syntax
+::hir::static::Value	static sites	decided static blocks replaced in nested syntax (a value position)
+::hir::syntax::CollectBindNames	static sites	the names a nested syntax node binds
+::surface::parser::Pattern	parse	a destructuring pattern's nested field patterns
+::surface::parser::TypeExpr	parse	a written type's arguments (List[List[...]], Fn{...})
+::surface::ast::PatternIds	AST	structural ids of a nested destructuring pattern
+::surface::ast::PatternText	AST text	the AST printer's nested patterns
+::surface::ast::showType	AST text	the AST printer's written types
+::surface::lower::Projections	surface lowering	a nested pattern's projections, one level per nested field pattern
+::surface::modules::TypeRefs	load	qualified names in a written type's arguments
+::hir::resolve::ResolveTypeExpr	resolution	a written type's arguments resolved
+::hir::resolve::ShowTypeExpr	resolution	a written type shown in a diagnostic
+::native::lower::Struct	native lowering	HIR to NIR, one call per nested expression
+::native::lower::VirtualValue	native lowering	a scalar-replaced struct's fields read back as a value, one level per nested construction
+::native::rawabi::Call	native lowering	raw ABI walk
+::hir::affine::Descriptor	ownership	an affine type's drop descriptor, one level per owned component (a chain of declarations is as deep as it is long)
+::hir::affine::DescriptorOf	ownership	an affine type's drop descriptor, one level per owned component (a chain of declarations is as deep as it is long)
+::hir::affine::Seq	ownership	the affine flow, one call per nested sequence (a loop's body)
+::hir::completions::EvalListloop	completions	completion analysis (also nests per static call: the call chain)
+::hir::completions::EvalCountloop	completions	completion analysis (also nests per static call: the call chain)
+::hir::completions::ExitsLoop	completions	whether a nested loop body exits its loop
+::hir::static::Sequence	static sites	decided static blocks replaced in nested syntax (a sequence)
+::surface::parser::Loop	parse	a loop's header and suite
+::surface::parser::Fold	parse	a fold's header and suite
+::surface::lower::LoopSyntax	surface lowering	AST to HIR syntax, one call per nested loop
+::core::compiler::CompileListLoop	Tcl compiler	code generation, one call per nested expression
+::core::compiler::CompileCountLoop	Tcl compiler	code generation, one call per nested expression
+::native::lower::ListLoop	native lowering	HIR to NIR, one call per nested expression
+::native::lower::CountLoop	native lowering	HIR to NIR, one call per nested expression
+::native::lower::IterationBody	native lowering	HIR to NIR, one call per nested expression
+::native::lower::DeferredNeeds	native lowering	HIR to NIR, one call per nested expression
+::native::lower::Condition	native lowering	a branch-form condition's Boolean structure (BRANCH-FORM-BOOLEAN-LOWERING.md)
+::native::lower::ConditionIf	native lowering	a branch-form condition's Boolean structure (BRANCH-FORM-BOOLEAN-LOWERING.md)
+::native::lower::ConditionBody	native lowering	a branch-form condition's Boolean structure (BRANCH-FORM-BOOLEAN-LOWERING.md)
+::native::lower::EmitRegionConsumerCondition	native lowering	an inlined region consumer's condition and body
+::native::lower::EmitRegionConsumerBody	native lowering	an inlined region consumer's condition and body
+::hir::modulebinding::ContextExpr	module bindings	a module binding's value, one call per nested expression
+::hir::modulebinding::ImmutableExpr	module bindings	a module binding's value, one call per nested expression
+::hir::injection::Seq	injection	the injection proof's provenance walk over nested blocks
+::hir::injection::Tau	injection	the injection proof's provenance walk over nested blocks
+::hir::layouts::CopyType	layouts	a layout representation, one level per nested array, union or record
+::hir::layouts::ReprDescriptor	layouts	a layout representation, one level per nested array, union or record
+::hir::layouts::ReprOfTerm	layouts	a layout representation, one level per nested array, union or record
+::hir::layouts::ReprPointerPath	layouts	a layout representation, one level per nested array, union or record
+::hir::layouts::ReprTerm	layouts	a layout representation, one level per nested array, union or record
+::hir::layouts::ReprText	layouts	a layout representation, one level per nested array, union or record
+::hir::layouts::ReprUnionAt	layouts	a layout representation, one level per nested array, union or record
+::hir::layouts::ReprUnionPath	layouts	a layout representation, one level per nested array, union or record
+::hir::layouts::ResolveArrayTerm	layouts	a layout representation, one level per nested array, union or record
+::hir::layouts::ResolveRepr	layouts	a layout representation, one level per nested array, union or record
+::hir::layouts::ShowTerm	layouts	a layout representation, one level per nested array, union or record
+::hir::layouts::ShowTypeExpr	layouts	a layout representation, one level per nested array, union or record
+::hir::layouts::WithLeafType	layouts	a layout representation, one level per nested array, union or record
+::hir::layouts::WordsFormats	layouts	a layout representation, one level per nested array, union or record
+::hir::layouts::align	layouts	a layout representation, one level per nested array, union or record
+::hir::layouts::size	layouts	a layout representation, one level per nested array, union or record
+::native::lower::ArrayCheck	native lowering	a layout representation's reads, writes and checks
+::native::lower::ArrayRead	native lowering	a layout representation's reads, writes and checks
+::native::lower::LayoutLeaves	native lowering	a layout representation's reads, writes and checks
+::native::lower::ReprHasArrays	native lowering	a layout representation's reads, writes and checks
+::native::lower::ReprRead	native lowering	a layout representation's reads, writes and checks
+::native::lower::ReprWrite	native lowering	a layout representation's reads, writes and checks
+::native::lower::ViewBase	native lowering	a layout representation's reads, writes and checks
+::core::compiler::ArrayOfRecords	Tcl compiler	a layout representation's leaves and values
+::core::compiler::LayoutLeaves	Tcl compiler	a layout representation's leaves and values
+::core::compiler::LayoutValueText	Tcl compiler	a layout representation's leaves and values
+::surface::parser::ArrayTypeExpr	parse	a written `array N of ...` representation
+::surface::parser::Injection	parse	an inject block's header and suite
+::core::binary::EncodeForeign	layouts	a layout descriptor's representation, one level per nested array, union or record (the Tcl compiler's static descriptors; the Tcl backends' codec)
+::core::binary::Rows	layouts	a layout descriptor's representation, one level per nested array, union or record (the Tcl compiler's static descriptors; the Tcl backends' codec)
+::core::binary::DecodeRepr	layouts	a layout descriptor's representation, one level per nested array, union or record (the Tcl compiler's static descriptors; the Tcl backends' codec)
+::core::binary::HasArrays	layouts	a layout descriptor's representation, one level per nested array, union or record (the Tcl compiler's static descriptors; the Tcl backends' codec)
+::core::binary::EncodeRepr	layouts	a layout descriptor's representation, one level per nested array, union or record (the Tcl compiler's static descriptors; the Tcl backends' codec)
+::core::binary::ReprHoldsRaw	layouts	a layout descriptor's representation, one level per nested array, union or record (the Tcl compiler's static descriptors; the Tcl backends' codec)
+::core::binary::ReprUnionPath	layouts	a layout descriptor's representation, one level per nested array, union or record (the Tcl compiler's static descriptors; the Tcl backends' codec)
+::core::binary::ReprPointerPath	layouts	a layout descriptor's representation, one level per nested array, union or record (the Tcl compiler's static descriptors; the Tcl backends' codec)
+::hir::mutvec::FoldWalk	logical copies	a consumed fold intermediate's exits: the fold body's nested expressions (hir/mutvec.tcl, "Consumed fold intermediates")
+::hir::mutvec::FoldWalkSequence	logical copies	a consumed fold intermediate's exits: the fold body's nested expressions (hir/mutvec.tcl, "Consumed fold intermediates")
+::native::lower::LoopBody	native lowering	HIR to NIR, one call per nested expression

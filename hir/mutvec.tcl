@@ -1702,6 +1702,7 @@ proc hir::mutvec::FoldExitsClean {hir parent f b} {
 # The state after the statements of SEQUENCE run, from STATE before them
 # (FoldWalk).
 proc hir::mutvec::FoldWalkSequence {hir parent f b sequence state} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     foreach s $sequence {
         set state [FoldWalk $hir $parent $f $b $s $state]
         if {$state < 0} {
@@ -1722,6 +1723,7 @@ proc hir::mutvec::FoldWalkSequence {hir parent f b sequence state} {
 # function's body runs in another invocation, which cannot refer to B
 # (Eligible: never captured) or exit F.
 proc hir::mutvec::FoldWalk {hir parent f b x state} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     set node [dict get $hir exprs $x]
     if {![dict get $node reachable]} {
         return $state

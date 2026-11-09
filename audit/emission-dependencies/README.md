@@ -26,16 +26,27 @@ it, and neither `tests/local.tcl` nor CI runs it.
 
 * `prototype/corrections.patch` -- the three corrections the report
   recommends (section 21), as prototyped against the census's commit to
-  measure them: never applied to the compiler here, a starting point for
-  the correction milestone (which owns their tests, mutants and the
-  mutant text `dependent-reports` the third one duplicates).
+  measure them: never applied to the compiler as it is. Its sections 21.1
+  and 21.2 were rewritten, with their tests and mutants, by
+  EMISSION-IDENTITY-AND-FEASIBILITY-CORRECTNESS-MILESTONE-1.md; 21.3 (and
+  the mutant text `dependent-reports` it duplicates) is still a starting
+  point.
 
 ```sh
 LANG=C.utf8 LC_ALL=C.utf8 tclsh9.0 audit/emission-dependencies/tools/census.tcl \
     -out audit/emission-dependencies/results/census.md
 ```
 
-At the census's commit it finds four false certificates in accepted
-programs (cases N2, F1, F3 and the sequence `identity`) and 25 open cases.
+At the census's commit it found four false certificates in accepted
+programs (cases N2, F1, F3 and the sequence `identity`) and 26 open cases.
 A correction milestone updates the `observed` lines it changes: the report's
 section 21 lists what each correction must change and what it must keep.
+
+EMISSION-IDENTITY-AND-FEASIBILITY-CORRECTNESS-MILESTONE-1.md corrected the
+two class C defects (the prototype's sections 21.1 and 21.2, with one more
+rule its identity correction lacked) and updated the record: N1, N2, N3,
+F1, F2, F3 and the `identity` sequence's N4b now record the corrected
+verdicts, and N6a, N6b and the sequence `identity-read` are its own (the
+gap: a proof that read two functions of one name, memoized). The census
+now finds 0 false certificates and 20 open cases, every one a binding or
+signature case of section 21.3, which that milestone defers.

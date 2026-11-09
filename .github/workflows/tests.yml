@@ -33,9 +33,16 @@ jobs:
     # earlier one found. Every other job waits for this one, so a push that
     # breaks them costs one runner for minutes, not every runner for hours.
     # On a branch push it is all that runs: dispatch the workflow on the
-    # branch for the rest.
+    # branch for the rest. A branch push at a commit another run already
+    # tests defers to it and runs nothing (CI-RUNS.md, "A commit already
+    # tested").
     runs-on: ubuntu-latest
     timeout-minutes: 40
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      deferred: ${{ steps.twin.outputs.deferred }}
     env:
       LANG: C.utf8
       LC_ALL: C.utf8
@@ -46,7 +53,12 @@ jobs:
           fetch-depth: 0
           filter: blob:none
 
+      - name: Already tested at this commit?
+        id: twin
+        uses: ./.github/actions/twin
+
       - name: Install project prerequisites
+        if: steps.twin.outputs.deferred != 'true'
         run: bash .devcontainer/setup.sh
 
       # Every mutant of every audit's catalog still applies to this tree: its
@@ -56,6 +68,7 @@ jobs:
       # elsewhere that rewrites or duplicates the text it targets fails here
       # instead, on its own push. Reads files only: seconds.
       - name: Every mutant applies
+        if: steps.twin.outputs.deferred != 'true'
         run: tclsh9.0 tools/mutant-catalogs.tcl -verbose 1
 
       # The shipped stdlib, libraries, examples and benchmarks compile with
@@ -66,15 +79,15 @@ jobs:
       # fails it. Warnings are discovered before any backend runs: no native
       # build needed. About two and a half minutes.
       - name: Warning gate
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.twin.outputs.deferred != 'true' }}
         run: tclsh9.0 audit/refactor/tools/gate.tcl
 
       - name: Build native (Cranelift) backend
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.twin.outputs.deferred != 'true' }}
         uses: ./.github/actions/build-native
 
       - name: Canary
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.twin.outputs.deferred != 'true' }}
         env:
           BASE: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.event.before || 'origin/main' }}
         run: tclsh9.0 tests/canary.tcl -base "$BASE"

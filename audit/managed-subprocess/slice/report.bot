@@ -1,0 +1,58 @@
+# report.bot -- the census experiments' output helpers (not shipped): one
+# line per observation on stdout, the shape audit/managed-subprocess/tools/
+# run.py reads.
+import std::abi::bytes
+import std::int
+import std::io
+import std::linux::io
+import std::mutable_array
+import type std::byte::Byte
+import std::str
+
+fn say(text: str, context io: std::linux::io::LinuxIO):
+    std::linux::io::write_text(std::str::concat(text, "\n")):
+        on std::io::WriteFailed:
+            unit
+
+fn say_int(label: str, v: int, context io: std::linux::io::LinuxIO):
+    say(std::str::concat(label, std::int::to_string(v)))
+
+# The bytes' text, or a marker when they are no UTF-8.
+fn text_of(b: std::abi::bytes::Bytes) -> str:
+    std::abi::bytes::decode_utf8(b):
+        on InvalidUtf8:
+            "<invalid utf-8>"
+
+fn cat(a: std::abi::bytes::Bytes, b: std::abi::bytes::Bytes) -> std::abi::bytes::Bytes:
+    std::abi::bytes::join([a, b])
+
+fn empty() -> std::abi::bytes::Bytes:
+    std::abi::bytes::from_list([])
+
+# Element I of a MutableArray of Ints (0 when out of range).
+fn cell(a: MutableArray[int], i: int) -> int:
+    a.at(i):
+        on IndexNotFound:
+            0
+
+fn yes(b: bool) -> str:
+    if b:
+        "yes"
+    else:
+        "no"
+
+fn bit(b: bool) -> int:
+    if b:
+        1
+    else:
+        0
+
+fn zero_byte() -> Byte:
+    0
+
+# A String holding U+0000 (a C string cannot carry it).
+fn nul_text() -> str:
+    text_of(std::abi::bytes::from_list([zero_byte()]))
+
+fn bytes_of(t: str) -> std::abi::bytes::Bytes:
+    std::abi::bytes::from_list(std::str::encode_utf8(t))

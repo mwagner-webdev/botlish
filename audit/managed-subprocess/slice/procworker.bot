@@ -1,0 +1,69 @@
+# procworker.bot -- the census's threads experiment (MANAGED-SUBPROCESS-AND-
+# EVENT-LOOP-CENSUS-MILESTONE-1.md, section 12): a thread entry that runs
+# its own VM's event loop, Linux driver and process context, supervises one
+# child and returns a summary. Nothing of a child crosses VMs: the entry
+# gets plain data and returns plain data.
+import event_loop_linux
+import labkit
+import msp
+import report
+import std::event_loop
+import std::linux::io
+import std::list
+import std::mutable_array
+import type std::event_loop::Delivery
+
+struct Job:
+    id: int
+    helper: str
+    args: List[str]
+
+struct Summary:
+    id: int
+    bytes: int
+    reads: int
+    code: int
+    pid: int
+    owned: int
+    live_here: int
+
+fn work(j: Job, done: std::event_loop::Reg, context p: msp::Procs, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    {owner, child} = labkit::spawn(msp::command(j.helper, j.args))
+    pid = msp::pid(child)
+    counted = labkit::count(child, msp::Stream::Stdout)
+    st = labkit::wait(child)
+    msp::release(owner)
+    std::event_loop::post(done, counted.bytes, st.code)
+    std::event_loop::post(done, counted.reads, pid)
+    0
+
+fn supervised(j: Job, context ev: std::event_loop::Loop, d: event_loop_linux::Linux, n: event_loop_linux::Native, p: msp::Procs, io: std::linux::io::LinuxIO) -> Summary errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered, std::event_loop::TaskFailed, IndexNotFound:
+    std::event_loop::sync()
+    done = std::event_loop::channel(Delivery::Reliable, 4)
+    coroutine {step, first} = work(j, done)
+    std::event_loop::adopt(step, first)
+    std::event_loop::run()
+    a = std::event_loop::try_take(done)
+    b = std::event_loop::try_take(done)
+    owned = msp::owned()
+    msp::shutdown()
+    event_loop_linux::close()
+    Summary {id: j.id, bytes: a.a, reads: b.a, code: a.b, pid: b.b, owned: owned, live_here: msp::stat(12)}
+
+thread fn supervise(j: Job) -> Summary:
+    with context std::event_loop::create(64)
+    with context event_loop_linux::create()
+    with context event_loop_linux::native()
+    with context msp::create(200000)
+    with context std::linux::io::create()
+    supervised(j):
+        on std::event_loop::SchedulerFault:
+            Summary {id: j.id, bytes: -1, reads: 0, code: 0, pid: 0, owned: 0, live_here: 0}
+        on std::event_loop::DriverFault:
+            Summary {id: j.id, bytes: -2, reads: 0, code: 0, pid: 0, owned: 0, live_here: 0}
+        on std::event_loop::LoopReentered:
+            Summary {id: j.id, bytes: -3, reads: 0, code: 0, pid: 0, owned: 0, live_here: 0}
+        on std::event_loop::TaskFailed {code}:
+            Summary {id: j.id, bytes: -4, reads: code, code: 0, pid: 0, owned: 0, live_here: 0}
+        on IndexNotFound:
+            Summary {id: j.id, bytes: -5, reads: 0, code: 0, pid: 0, owned: 0, live_here: 0}

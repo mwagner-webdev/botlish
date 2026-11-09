@@ -1,0 +1,14 @@
+bytes 262
+reads 2
+first-nul 0
+first-newline 10
+second-newline 261
+whole-as-utf8 <invalid utf-8>
+tail-as-utf8 €
+
+status exited 0
+end owned 0
+end live 0
+end fds delta 0
+[harness] supervisor peak RSS 15964 kB, CPU 0.005 s
+[harness] PASS in 0.30 s

@@ -142,6 +142,7 @@ proc core::binary::Decode {descriptor bytes base} {
 # (FIXED-LAYOUT-ARRAYS.md), element i at AT + i * STRIDE. NAME and STRUCTID
 # name the field in a refusal.
 proc core::binary::DecodeRepr {repr bytes at name structId} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     switch -- [lindex $repr 0] {
         layout {
             return [Decode [lindex $repr 1] $bytes $at]
@@ -193,6 +194,7 @@ proc core::binary::HoldsRaw {descriptor} {
 }
 
 proc core::binary::ReprHoldsRaw {repr} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     switch -- [lindex $repr 0] {
         r { return 1 }
         layout - union { return [HoldsRaw [lindex $repr 1]] }
@@ -244,6 +246,7 @@ proc core::binary::Encode {descriptor value bytes base} {
 # bytes change (a nested layout's padding is emission's zeros only because
 # emission starts from zeros).
 proc core::binary::EncodeRepr {operation repr value bytes at what} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     switch -- [lindex $repr 0] {
         layout {
             return [Encode [lindex $repr 1] $value $bytes $at]
@@ -338,6 +341,7 @@ proc core::binary::ScalarPiece {n sign width endian} {
 # 1 if DESCRIPTOR has a fixed array field, directly or in a nested layout
 # (FIXED-LAYOUT-ARRAYS.md).
 proc core::binary::HasArrays {descriptor} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     foreach field [lindex $descriptor 3] {
         switch -- [lindex $field 2] {
             array {
@@ -358,6 +362,7 @@ proc core::binary::HasArrays {descriptor} {
 # the extents DIMS: a List of Ints for one dimension, a List of such Lists
 # for two, and so on (the Tcl compiler's parse, compiler/compiler.tcl).
 proc core::binary::Rows {numbers dims} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     if {[llength $dims] == 1} {
         return [list list [lmap n $numbers {list int $n}]]
     }
@@ -390,6 +395,7 @@ proc core::binary::PointerPath {descriptor} {
 # The path of a pointer within the representation words REPR ("" for REPR
 # itself, "[]" for an array element, "[].next" ...), or "none".
 proc core::binary::ReprPointerPath {repr} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     switch -- [lindex $repr 0] {
         ptr {
             return ""
@@ -445,6 +451,7 @@ proc core::binary::UnionPath {descriptor} {
 
 # The path of a union within the representation words REPR, or "none".
 proc core::binary::ReprUnionPath {repr} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     switch -- [lindex $repr 0] {
         union {
             return ""
@@ -721,6 +728,7 @@ proc core::binary::writeForeign {data path pointer} {
 # ({ptr WIDTH ENDIAN}, or arrays of it): each pointer's own address bits,
 # observed (std::binary::write_foreign).
 proc core::binary::EncodeForeign {repr value bytes at what} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     if {[lindex $repr 0] eq "array"} {
         lassign $repr - extent stride element
         set i 0

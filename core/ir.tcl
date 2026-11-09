@@ -588,6 +588,7 @@ proc core::ir::scopeBindNames {exprs} {
 }
 
 proc core::ir::CollectBindNames {node namesVar} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $namesVar names
     switch -- [op $node] {
         bind {
@@ -746,6 +747,7 @@ proc core::ir::containsBlock {exprs} {
 # every other block node starts a new callable context outside any loop.
 
 proc core::ir::check {node {context {callable 0 loop 0}}} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     CheckShape $node
     switch -- [op $node] {
         const - ref {}

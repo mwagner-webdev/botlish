@@ -103,9 +103,11 @@ test range-fixpoint-scaling-2.2 {narrowing a 40-function chain costs a constant 
 # completions by analyzing its exact callee's body under the call's facts,
 # which nests one analysis per call of a static chain. It is bounded by
 # hir::completions::maxDepth (past it a call gets its callee's declared
-# contract), and the front end runs under a recursion floor (hir::Deep) the
-# bound fits under, so the depth no longer runs into Tcl's recursion limit:
-# at the default of 1000 a chain of about 110 functions did.
+# contract), and its walks are depth-safe (core/deep.tcl: they go on in
+# segments past a segment's frames), so the depth no longer runs into Tcl's
+# recursion limit: at the default of 1000 a chain of about 110 functions did
+# (DEPTH-SAFE-NESTED-EXPRESSION-FRONTEND-MILESTONE-1.md removed the
+# recursion floor this used to run under).
 
 # g0 .. gN: g0 raises Neg for a negative argument, every other gi passes its
 # argument on, all declaring Neg; top() calls gN(5) with no handler, which is

@@ -1,11 +1,14 @@
-# A finding of HTTP-CLIENT-PACKAGE-MILESTONE-1.md ("Findings"): with
-# std::str and std::linux::fs both imported, each method-style
-# "...".concat(...) is a whole-program trial build of the method-call
-# decision: std::linux::fs::concat (its first parameter an opaque
-# NativePath) is a candidate the kind proofs do not exclude for a str
-# receiver. This program's six concat calls cost 15 builds (9 deviations,
-# 11 s) where the same program without std::linux::fs costs 2 (0.8 s).
-# Measured with hir::buildStats (tests/helpers.tcl loaded): see the report.
+# A finding of HTTP-CLIENT-PACKAGE-MILESTONE-1.md ("Findings", F3): with
+# std::io::path and std::str both imported, each method-style
+# "...".concat(...) was a whole-program trial build of the method-call
+# decision: std::io::path::concat (its first parameter the trait Path,
+# which a String does not satisfy) was a candidate no kind proof ruled out.
+# This program's four concat calls cost 15 builds (9 single deviations,
+# 10 s). Fixed: the kind proofs rule a trait-polymorphic candidate out for
+# a receiver that does not satisfy its trait (hir::methods::TraitMismatch,
+# METHOD-DECISION-FILTER.md), and the program takes 5 builds, none of them
+# a deviation -- the 5 it takes without std::io::path. Measured with
+# hir::buildStats (tests/helpers.tcl loaded): see the report.
 import std::io
 import std::io::fs
 import std::io::path

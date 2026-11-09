@@ -39,6 +39,13 @@
 #               chain's outer call has a candidate that sorts first and
 #               rejects the inner call's result:
 #               EXACT-METHOD-DECISION-MISATTRIBUTION.md);
+#   traits      in half the programs, a fourth module, std::fzt: the trait
+#               Measured (its one requirement `measure`, which std::fzb
+#               declares for its Box and nothing else does) and the
+#               trait-polymorphic length and at over it, so every length
+#               and at call has a candidate whose first parameter is a
+#               trait -- one only a std::fzb::Box receiver satisfies, which
+#               such programs call length and at on as well;
 #   shape       one to three functions, two to five statements each, which
 #               call one another.
 #
@@ -83,7 +90,8 @@ while {[llength $args] >= 2} {
 }
 
 # The private library: a copy of the standard library beside three modules
-# whose functions take named structs (removed at the end). They also define
+# whose functions take named structs, and a fourth whose functions take a
+# trait (removed at the end). They also define
 # functions named like methods of the other receivers (length, at, get)
 # over their structs: beside std::list::length, a struct-parameter `length`
 # that sorts first is the outer candidate of `xs.at(0).length()` that
@@ -98,8 +106,9 @@ foreach entry [glob -nocomplain -directory $::core::libraryDir *] {
 set ::core::libraryDir $library
 foreach {name text} {
     fza "struct Box:\n    v: int\n\nstruct Pair\[A, B\]:\n    a: A\n    b: B\n\nfn size(b: Box) -> int:\n    b.v\n\nfn weight(p: Pair\[A, B\]) -> int:\n    1\n\nfn tag(x) -> int:\n    size(x)\n\nfn peek(b: Box, k: int) -> int:\n    b.v + k\n\nfn length(b: Box) -> int:\n    b.v\n\nfn at(b: Box, i: int) -> int:\n    b.v + i\n"
-    fzb "import std::fza\n\nstruct Box:\n    v: int\n\nstruct Cell\[T\]:\n    t: T\n\nfn size(b: Box) -> int:\n    b.v + 1\n\nfn weight(p: std::fza::Pair\[int, int\]) -> int:\n    2\n\nfn tag(b: Box) -> int:\n    b.v\n\nfn peek(c: Cell\[T\], k: int) -> int:\n    k\n\nfn get(c: Cell\[T\], i: int, d: int) -> int:\n    d\n"
+    fzb "import std::fza\n\nstruct Box:\n    v: int\n\nstruct Cell\[T\]:\n    t: T\n\nfn size(b: Box) -> int:\n    b.v + 1\n\nfn measure(b: Box) -> int:\n    b.v * 10\n\nfn weight(p: std::fza::Pair\[int, int\]) -> int:\n    2\n\nfn tag(b: Box) -> int:\n    b.v\n\nfn peek(c: Cell\[T\], k: int) -> int:\n    k\n\nfn get(c: Cell\[T\], i: int, d: int) -> int:\n    d\n"
     fzc "import std::fzb\n\nfn size(c: std::fzb::Cell\[T\]) -> int:\n    3\n\nfn length(c: std::fzb::Cell\[T\]) -> int:\n    4\n"
+    fzt "trait Measured:\n    fn measure(m: Measured) -> int\n\nfn length(m: Measured) -> int:\n    m.measure()\n\nfn at(m: Measured, i: int) -> int:\n    m.measure() + i\n"
 } {
     set f [open [file join $library $name.bot] w]
     fconfigure $f -encoding utf-8
@@ -337,7 +346,12 @@ proc nominalText {name collections} {
             }
         }
         if {[chance 0.85]} {
-            set call [pick [dict get $::nominalCalls $tag]]
+            set calls [dict get $::nominalCalls $tag]
+            if {$::withTraits && $tag eq "bbox"} {
+                # (std::fzt's length and at: a std::fzb::Box is Measured.)
+                lappend calls length() at(1)
+            }
+            set call [pick $calls]
         } else {
             set call [pick {size() weight() tag() peek(1) length() at(1) {get(1, 2)}}]
         }
@@ -349,6 +363,7 @@ proc nominalText {name collections} {
 }
 
 proc program {} {
+    set ::withTraits [chance 0.5]
     set fns {}
     set callable {}
     set n [expr {1 + int(rand() * 3)}]
@@ -400,6 +415,9 @@ proc program {} {
         lappend sum c1
     }
     set head "import std::list\nimport std::str\nimport std::mutable_array\nimport std::mutable_vector\nimport std::fza\nimport std::fzb\nimport std::fzc\n"
+    if {$::withTraits} {
+        append head "import std::fzt\n"
+    }
     if {$nominal ne ""} {
         lappend lines [entryLine n1 "nm([join [lindex $nominal 0] {, }])" 0]
         lappend sum n1
