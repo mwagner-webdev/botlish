@@ -471,16 +471,16 @@ count are that commit's; the runs at a6f677e and 9dca40a tested the tree
 before the merge. At a6f677e, before they were superseded, `icy-tower
 (windows x86-64)` and `icy-tower (macos arm64)` passed, `tests (windows
 x86-64)` passed its canary, smoke and root-plans jobs, and `tests.yml`
-passed its canary. The state at bf0f585 on 2026-11-09 11:40 UTC, the shared
+passed its canary. The state at bf0f585 on 2026-11-09 13:40 UTC, the shared
 runners saturated (main's own test workflows at 996b50d are queued too):
 
 | workflow | run | state |
 |---|---|---|
-| `tests.yml` (dispatched) | 42553518671 | passed: canary (mutant catalogs, warning gate, canary selection), native Rust unit tests, the four golden shards (every suite on every backend beside its Tcl originals), stub-linked executables, the method-call decision job (its tests, oracle and fuzzer, and the golden suites under the reference audit). `tests (interp)` did not run its tests: its "Install Neovim" step failed fetching Neovim's release (`curl: (22) ... error: 504`, GitHub's release server), before any test; to be rerun when the run ends. Running: cranelift and cranelift-generic coverage. Queued: compile, system-linked executables |
+| `tests.yml` (dispatched) | 42553518671 | passed: canary (mutant catalogs, warning gate, canary selection), native Rust unit tests, cranelift and cranelift-generic coverage, the four golden shards (every suite on every backend beside its Tcl originals), stub-linked and system-linked executables (also under GC stress), the method-call decision job (its tests, oracle and fuzzer, and the golden suites under the reference audit). `tests (interp)` did not run its tests: its "Install Neovim" step failed fetching Neovim's release (`curl: (22) ... error: 504`, GitHub's release server), before any test; to be rerun when the run ends. Running: `tests (compile)` |
 | `tests-arm64.yml` (dispatched) | 42553521335 | passed, every job: canary, interp, compile, both GC-stress runs, cranelift and cranelift-generic coverage, the four golden shards, the native Rust unit tests (also under GC stress), system-linked executables |
 | `static-decisions.yml` (dispatched) | 42553524098 | passed: batched and sequential agree on every golden suite (mutable-array.bot: batched 5 rounds, 7 builds; sequential 69 rounds, 205 builds) |
 | `windows-x86_64.yml` | 42553507858 | passed, every job |
-| `macos-arm64.yml` | 42553507896 | passed: the Linux control, smoke (with the canary), Botlish.app, acceptance shards 1, 3 and 4. Running: acceptance shard 2, system linker. Queued: main-thread startup, static SDL3, Botlish.app without developer tools |
+| `macos-arm64.yml` | 42553507896 | passed, every job (the Linux control, smoke with the canary, Botlish.app and without developer tools, the four acceptance shards, system linker, main-thread startup, static SDL3) |
 | `icy-tower-windows.yml` | 42553507899 | passed |
 | `icy-tower-macos.yml` | 42553507952 | passed |
 | `raven-cleanroom.yml`, `ci-tools.yml` | 42553507901, 42553507895 | passed |
