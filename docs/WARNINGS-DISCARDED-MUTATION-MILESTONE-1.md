@@ -415,7 +415,9 @@ shards; its result is `audit/discarded-mutation/census.tsv`). The programs
 are the construct-binding census's: every tracked `.bot` file but the
 generated C bindings, plus a one-line loader per standard-library module
 (a Windows or macOS module compiled for its platform's target), each
-compiled by the ordinary front end with warnings on. *Observation*: 1,208
+compiled by the ordinary front end with warnings on, and taken again
+against the final fold-exit rule (the same 42 sites; only the two fold
+exits' message text changed). *Observation*: 1,208
 programs, 732 compiled (the 8 Windows and macOS loaders compiled for their
 targets). The 476 rejected are, by first diagnostic, the by-design
 categories the construct-binding census recorded: modules compiled outside
