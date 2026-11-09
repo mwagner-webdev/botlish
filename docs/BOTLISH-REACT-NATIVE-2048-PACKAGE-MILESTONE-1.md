@@ -853,9 +853,20 @@ from npm's registry, Google's Maven and Maven Central: they are the app's,
 not Botlish's. This host reaches them through a proxy. Its variables pass
 into the room, and the run was given a Gradle properties file and a Maven
 Central mirror (`GRADLE_PROPERTIES`, `GRADLE_INIT_DIR`), which are
-environment, not inputs. The workflow's build job runs the same clean room
-after `single/build.sh`, without them, and its 4 KiB android job runs the
-acceptance on the clean room's APK (section 16; pending).
+environment, not inputs. **In CI, observed**, the workflow's build job ran the same clean room
+after `single/build.sh`, on a GitHub runner without the proxy and its
+settings ([job 128893618768](https://github.com/mwagner-webdev/botlish/actions/runs/42533820805/job/128893618768),
+at `be3d4018`): result passed.
+* The Botlish steps touched nothing of the checkout and ran no Tcl of the
+  system.
+* Jest passed 28 tests, and the release build took 3 min 17 s.
+* The APK, 20,604,081 bytes, holds arm64-v8a libraries only. Its
+  `libgame.so` is the package's as stripped, its segments are 16 KiB
+  aligned, and it is zip-aligned.
+
+Its single executable (15,917,955 bytes) and packages were built on the
+runner, so their digests differ from the local ones. The 4 KiB android job
+runs the acceptance on this APK (section 16; pending).
 
 ## 19. GC and lifecycle testing
 
@@ -1029,10 +1040,22 @@ nothing in the release gate requires it. Its runs on this branch:
 * runs 1 to 7 (`4d1fc581` to `d25b5c0d`): each stayed queued until the
   next push cancelled it, with no runner assigned;
 * run 8, at `be3d4018`, the tested commit of this report:
-  [react-native 2048 #8](https://github.com/mwagner-webdev/botlish/actions/runs/42533820805),
-  queued when this report was written. Its build job's clean room and its
-  `android` jobs' `summary.txt` files are the Android evidence. Until it
-  passes, read section 16's status as partially validated.
+  [react-native 2048 #8](https://github.com/mwagner-webdev/botlish/actions/runs/42533820805).
+  - **build: success** (observed, 2026-11-09 00:12 UTC). `build.sh` ran
+    from checkout to APK. It stops at the first failed check, so on a
+    GitHub runner it observed all of these:
+    - the host checks of both cores, the stricter thread check included;
+    - GC stress, with the same 20 final states;
+    - the 401 snapshots, identical to the interpreter's;
+    - TypeScript, Jest and the release build;
+    - the APK inspection.
+
+    The job then made the debug build for Metro (BUILD SUCCESSFUL in
+    1 min 30 s), the single-file compiler, and the clean room (section 18).
+  - **android (4 KiB pages), android (16 KiB pages): queued** since
+    00:12 UTC, waiting for a runner. Their `summary.txt` files are the
+    Android evidence. Until they pass, read section 16's status as
+    partially validated.
 
 Main's own workflows were queued or in progress, none red among those
 completed, when this branch was made (`a6977d56`) and when it was last
