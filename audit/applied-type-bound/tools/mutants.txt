@@ -84,7 +84,7 @@
 @@ result-check-bounded-before-check a result type written deeper than the bound is held only as its bounded form
 ## hir/applied.tcl
 <<<<
-    set expected [expr {$x ne "" ? [Decode $x] : [Leaf [dict get $node declaredResult]]}]
+    set expected [if {$x ne ""} {Decode $x} else {Leaf [dict get $node declaredResult]}]
 ====
     set expected [Leaf [dict get $node declaredResult]]
 >>>>

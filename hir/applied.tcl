@@ -178,7 +178,7 @@ proc hir::applied::Truncate {type h} {
 # The evidence of a value whose canonical type TYPE is all that is known.
 proc hir::applied::Leaf {type {horizon auto}} {
     if {$horizon eq "auto"} {
-        set horizon [expr {[Cut $type] ? $::hir::types::appliedDepth : ""}]
+        set horizon [if {[Cut $type]} {set ::hir::types::appliedDepth} else {string cat ""}]
     }
     return [list type $type $horizon]
 }
@@ -271,7 +271,7 @@ proc hir::applied::Parts {ev} {
         # arguments are the bound's.)
         return ""
     }
-    set inner [expr {$h eq "" ? "" : $h - 1}]
+    set inner [if {$h eq ""} {string cat ""} else {expr {$h - 1}}]
     return [list [lindex $t 1] [lmap a [lindex $t 2] {list type $a $inner}]]
 }
 
@@ -338,7 +338,13 @@ proc hir::applied::Equal {a b} {
             if {$px eq "" || $py eq "" || ([lindex $x 0] ne "app" && [lindex $y 0] ne "app")} {
                 set hx [Horizon $x]
                 set hy [Horizon $y]
-                set h [expr {$hx eq "" ? $hy : ($hy eq "" ? $hx : min($hx, $hy))}]
+                if {$hx eq ""} {
+                    set h $hy
+                } elseif {$hy eq ""} {
+                    set h $hx
+                } else {
+                    set h [expr {min($hx, $hy)}]
+                }
                 if {[Truncate [Canonical $x] $h] ne [Truncate [Canonical $y] $h]} {
                     return [list $x $y $trail]
                 }
@@ -383,7 +389,7 @@ proc hir::applied::Horizon {ev} {
         }
         either - named {
             # (Known as its bounded type is.)
-            return [expr {[Cut [Canonical $ev]] ? $::hir::types::appliedDepth : ""}]
+            return [if {[Cut [Canonical $ev]]} {set ::hir::types::appliedDepth} else {string cat ""}]
         }
     }
     return [lindex $ev 2]
@@ -689,7 +695,7 @@ proc hir::applied::Constructed {e node type fields} {
         return ""
     }
     lassign $bound - binding establishers
-    set written [expr {[dict exists $node structArgs] ? [WrittenArgs $node] : ""}]
+    set written [if {[dict exists $node structArgs]} {WrittenArgs $node} else {string cat ""}]
     set args {}
     set est {}
     foreach slot [hir::structs::slots $id] a $written {
@@ -895,7 +901,10 @@ proc hir::applied::WrittenList {typeExprs types ns} {
         }
         lappend result $x
     }
-    return [expr {$any ? $result : ""}]
+    if {$any} {
+        return $result
+    }
+    return ""
 }
 
 # {ID ARGUMENTS} when the written type TYPEEXPR is an application of a
@@ -1358,7 +1367,7 @@ proc hir::applied::VerifyArguments {hirVar ranges e node target declared} {
         set explicit [dict getdef $node imprint ""]
         if {$explicit ne ""} {
             foreach name [dict get $sig vars] type $explicit x [if {$exactImprint ne {}} {set exactImprint} else {lrepeat [llength $explicit] ""}] {
-                dict set binding $name [expr {$x ne "" ? [Decode $x] : [Leaf $type]}]
+                dict set binding $name [if {$x ne ""} {Decode $x} else {Leaf $type}]
             }
         } else {
             set pairs {}
@@ -1388,7 +1397,7 @@ proc hir::applied::VerifyArguments {hirVar ranges e node target declared} {
     set i 0
     foreach arg $args ev $evs param $params type $declared {
         set x [lindex $exactParams $i]
-        set sigParam [expr {$sig ne "" ? [lindex [dict get $sig params] $i] : ""}]
+        set sigParam [if {$sig ne ""} {lindex [dict get $sig params] $i} else {string cat ""}]
         incr i
         if {$type eq {} || $arg eq "" || [dict exists $hir poisoned $arg]
                 || [hir::signatures::inferredTrusted $hir $target [expr {$i - 1}]]} {
@@ -1420,7 +1429,7 @@ proc hir::applied::VerifyArguments {hirVar ranges e node target declared} {
 proc hir::applied::VerifyResult {hirVar e node} {
     upvar 1 $hirVar hir
     set x [dict getdef $node exactResult ""]
-    set expected [expr {$x ne "" ? [Decode $x] : [Leaf [dict get $node declaredResult]]}]
+    set expected [if {$x ne ""} {Decode $x} else {Leaf [dict get $node declaredResult]}]
     foreach exit [hir::warnings::Exits $hir $e] {
         set value [lindex $exit 1]
         set ev [Of hir $value]
@@ -1502,7 +1511,7 @@ proc hir::applied::TotalityClass {operation ev} {
         set stack [lreplace $stack[set stack {}] end end]
         if {[lindex $x 0] ne "app" || ![lindex $x 4]} {
             set level [lsearch -exact $classes [hir::types::TotalityClassOf $operation [Canonical $x]]]
-            lappend out [list $level [expr {$level ? [list $x] : ""}]]
+            lappend out [list $level [if {$level} {list $x} else {string cat ""}]]
             continue
         }
         if {$phase == 0} {
@@ -1524,7 +1533,7 @@ proc hir::applied::TotalityClass {operation ev} {
         set responsible ""
         if {$level} {
             set i [hir::summaries::Contributor totality.$operation $type $levels $level]
-            set responsible [expr {$i ne "" ? [lindex $parts $i 1] : [list $x]}]
+            set responsible [if {$i ne ""} {lindex $parts $i 1} else {list $x}]
         }
         lappend out [list $level $responsible]
     }
