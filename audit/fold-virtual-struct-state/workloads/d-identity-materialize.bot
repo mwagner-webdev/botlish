@@ -1,0 +1,33 @@
+# d-identity-materialize.bot -- FOLD-VIRTUAL-STRUCT-STATE-CENSUS-1.md,
+# Probe D: the case a field-register intermediate must not be used for. The
+# body hands the whole intermediate to a function value every iteration (an
+# open call: the object is needed) and completes with the intermediate
+# itself on most iterations. Today no struct is built on those iterations
+# (the register holds the one object); carried as fields, the object would
+# be built again for every call. tools/measure.tcl rewrites `n = ...`.
+#
+# expect: [1, 1024, 1024]
+
+import std::list
+
+struct P:
+    a: int
+    b: int
+
+fn weight(p: P) -> int:
+    p.a + p.b
+
+fn run(n: int) -> P:
+    f = weight
+    fold i from 0 to n with intermediate s P {a: 0, b: 1}:
+        w = f(s)
+        if w > 1000 * 1000:
+            P {a: s.a, b: 1}
+        elif i == n - 1:
+            P {a: s.a + 1, b: s.b + i}
+        else:
+            s
+
+n = 1024
+r = run(n)
+[r.a, r.b, weight(r) - 1]

@@ -1,0 +1,29 @@
+# b-wrap-fold.bot -- FOLD-VIRTUAL-STRUCT-STATE-CENSUS-1.md, Probe B: the
+# direct List fold of audit/fold-virtual-construction/workloads/list-fold.bot
+# with its List wrapped in a one-field struct. The fold carries `Wrap
+# {items}`, and every iteration builds a new Wrap whose items extend the
+# old one's: the List is the same construction the direct fold carries as
+# a plan, but it is a struct's field, which no carrier of hir/construction.tcl
+# is. tools/measure.tcl rewrites `n = ...` to measure other sizes.
+#
+# expect: [1024, 1572352]
+
+import std::list
+
+struct Wrap:
+    items: List[int]
+
+fn build(xs: List[int]) -> List[int]:
+    w = fold x in xs with intermediate acc Wrap {items: []}:
+        Wrap {items: acc.items.append(x * 3 + 1)}
+    w.items
+
+fn sum(ys: List[int]) -> int:
+    fold y in ys with intermediate s 0:
+        s + y
+
+n = 1024
+xs = loop i from 0 to n:
+    i
+ys = build(xs)
+[ys.length(), sum(ys)]

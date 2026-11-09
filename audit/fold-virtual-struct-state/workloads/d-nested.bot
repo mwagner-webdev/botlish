@@ -1,0 +1,48 @@
+# d-nested.bot -- FOLD-VIRTUAL-STRUCT-STATE-CENSUS-1.md, Probe D: nested
+# folds and loops around a struct intermediate. An inner fold seeded with
+# the outer intermediate whose value is the outer's next; an inner fold
+# seeded with one field; the intermediate read inside an inner loop's body
+# (once per inner iteration); a struct-valued fold as a function's result,
+# read field by field by its caller (number_at's shape).
+#
+# expect: [[9, 6], [10, 3], [3, 12], [123, 3]]
+
+import std::list
+
+struct P:
+    a: int
+    b: int
+
+xs = [1, 2, 3]
+
+# The inner fold starts from the outer intermediate; its value is the
+# outer's next intermediate.
+fn seeded(xs: List[int]) -> P:
+    fold x in xs with intermediate s P {a: 0, b: 0}:
+        fold y in [x, 1] with intermediate t s:
+            P {a: t.a + y, b: t.b + 1 + 0 * y}
+
+# The inner fold starts from one field of the outer intermediate.
+fn field_seeded(xs: List[int]) -> P:
+    fold x in xs with intermediate s P {a: 1, b: 0}:
+        a = fold y in [x, x] with intermediate u s.a:
+            u + y - x + 1
+        P {a: a + 1, b: s.b + 1}
+
+# The intermediate read in an inner collecting loop's body.
+fn inner_loop(xs: List[int]) -> P:
+    fold x in xs with intermediate s P {a: 0, b: 0}:
+        ys = loop y in [1, 1]:
+            s.a + y
+        P {a: s.a + 1 + 0 * ys.length(), b: s.b + ys.length() * 2}
+
+# A struct-valued fold as the function's result.
+fn digits(text: List[int]) -> P:
+    fold d in text with intermediate n P {a: 0, b: 0}:
+        P {a: n.a * 10 + d, b: n.b + 1}
+
+sd = seeded(xs)
+fs = field_seeded(xs)
+il = inner_loop(xs)
+dg = digits(xs)
+[[sd.a, sd.b], [fs.a, fs.b], [il.a, il.b], [dg.a, dg.b]]

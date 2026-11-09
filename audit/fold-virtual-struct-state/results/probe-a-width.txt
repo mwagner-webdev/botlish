@@ -1,0 +1,25 @@
+row                                     n  Struct   List  Plan    copied plans extend   mat shr/det/el   new  get  app plan  code-B lower-ms instr/run
+spill-2-fold                            -    1001      0     0         0     0      0     0      0/0/0     2    4    0    0    1065     21.3 806961 generated=16.4% allocator=63.6% helpers=13.9% collector=4.7% mem=1.4%
+    value {int 1991}
+spill-2-fold+fields                     -       0      0     0         0     0      0     0      0/0/0     0    0    0    0     961        - 129774 generated=97.9% allocator=0.2% helpers=1.1% collector=0.5% mem=0.3%
+    value {int 1991}
+spill-4-fold                            -    1001      0     0         0     0      0     0      0/0/0     2    8    0    0    1833     42.1 898556 generated=24.7% allocator=57.2% helpers=12.5% collector=4.2% mem=1.4%
+    value {int 3970}
+spill-4-fold+fields                     -       0      0     0         0     0      0     0      0/0/0     0    0    0    0    1745        - 222756 generated=98.8% allocator=0.1% helpers=0.6% collector=0.3% mem=0.2%
+    value {int 3970}
+spill-8-fold                            -    1001      0     0         0     0      0     0      0/0/0     2   16    0    0    3345     67.2 1082703 generated=37.5% allocator=47.4% helpers=10.4% collector=3.5% mem=1.2%
+    value {int 7892}
+spill-8-fold+fields                     -       0      0     0         0     0      0     0      0/0/0     0    0    0    0    3329        - 410911 generated=99.3% allocator=0.1% helpers=0.4% collector=0.1% mem=0.1%
+    value {int 7892}
+spill-16-fold                           -    1001      0     0         0     0      0     0      0/0/0     2   32    0    0    6329     64.4 1544606 generated=49.8% allocator=39.0% helpers=7.3% collector=2.4% mem=1.4%
+    value {int 15592}
+spill-16-fold+fields                    -       0      0     0         0     0      0     0      0/0/0     0    0    0    0    7025        - 778320 generated=99.6% allocator=0.1% helpers=0.2% collector=0.1% mem=0.1%
+    value {int 15592}
+spill-32-fold                           -    1001      0     0         0     0      0     0      0/0/0     2   64    0    0   12681    129.7 2294894 generated=65.9% allocator=26.3% helpers=4.9% collector=1.6% mem=1.2%
+    value {int 30416}
+spill-32-fold+fields                    -       0      0     0         0     0      0     0      0/0/0     0    0    0    0   14049        - 1507650 generated=99.7% allocator=0.0% helpers=0.2% collector=0.0% mem=0.0%
+    value {int 30416}
+spill-64-fold                           -    1001      0     0         0     0      0     0      0/0/0     2  128    0    0   25265    252.7 3832474 generated=77.8% allocator=15.9% helpers=3.0% collector=1.0% mem=2.3%
+    value {int 57760}
+spill-64-fold+fields                    -       0      0     0         0     0      0     0      0/0/0     0    0    0    0   27929        - 2956750 generated=99.6% allocator=0.0% helpers=0.4% collector=0.0% mem=0.0%
+    value {int 57760}

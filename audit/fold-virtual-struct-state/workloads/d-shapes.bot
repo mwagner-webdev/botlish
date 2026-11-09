@@ -1,0 +1,73 @@
+# d-shapes.bot -- FOLD-VIRTUAL-STRUCT-STATE-CENSUS-1.md, Probe D: struct
+# shapes a carried intermediate may have -- anonymous, nested (a struct
+# field), generic (an application of a parameterized struct), a field
+# holding a function value, one field, a refined field.
+#
+# expect: [[6, 3], [6, 3, 3], [6, 3], 14, 6, 6]
+
+import std::list
+
+struct P:
+    a: int
+    b: int
+
+struct Outer:
+    inner: P
+    n: int
+
+struct Box[T]:
+    value: T
+    count: int
+
+struct Step:
+    f: Fn{args: [int], return: int}
+    total: int
+
+struct One:
+    v: int
+
+type Small = Int in 0..1000
+
+struct Bounded:
+    total: Small
+
+xs = [1, 2, 3]
+
+fn anonymous(xs: List[int]) -> List[int]:
+    t = fold x in xs with intermediate s {a: 0, b: 0}:
+        {a: s.a + x, b: s.b + 1}
+    [t.a, t.b]
+
+fn nested(xs: List[int]) -> List[int]:
+    t = fold x in xs with intermediate s Outer {inner: P {a: 0, b: 0}, n: 0}:
+        Outer {inner: P {a: s.inner.a + x, b: s.inner.b + 1}, n: s.n + 1}
+    [t.inner.a, t.inner.b, t.n]
+
+fn generic(xs: List[int]) -> List[int]:
+    t = fold x in xs with intermediate s Box {value: 0, count: 0}:
+        Box {value: s.value + x, count: s.count + 1}
+    [t.value, t.count]
+
+fn double(x: int) -> int:
+    x * 2
+
+fn callable(xs: List[int]) -> int:
+    t = fold x in xs with intermediate s Step {f: double, total: 2}:
+        Step {f: s.f, total: s.total + s.f(x)}
+    t.total
+
+fn one(xs: List[int]) -> int:
+    t = fold x in xs with intermediate s One {v: 0}:
+        One {v: s.v + x}
+    t.v
+
+fn bounded(xs: List[int]) -> int:
+    t = fold x in xs with intermediate s Bounded {total: 0}:
+        n = s.total + x
+        if n >= 0 and n <= 1000:
+            Bounded {total: n}
+        else:
+            s
+    t.total
+
+[anonymous(xs), nested(xs), generic(xs), callable(xs), one(xs), bounded(xs)]

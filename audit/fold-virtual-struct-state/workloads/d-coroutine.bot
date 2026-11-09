@@ -1,0 +1,30 @@
+# d-coroutine.bot -- FOLD-VIRTUAL-STRUCT-STATE-CENSUS-1.md, Probe D: a fold
+# carrying a struct whose body yields, so the intermediate (today one
+# pointer; as fields, several registers) is live across each suspension --
+# on the general runtime's coroutine stack, or in the fused coroutine's
+# registers (COROUTINE-FUSION-MILESTONE-1.md). tools/probes.tcl runs it on
+# every backend and the experiment rewrites the coroutine's fold as fields.
+#
+# expect: [[10], [21], [32], [6, 3]]
+
+import std::list
+import std::coroutine
+
+struct P:
+    a: int
+    b: int
+
+fn running(xs: List[int]) -> List[int]:
+    t = fold x in xs with intermediate s P {a: 0, b: 0}:
+        yield [x * 10 + s.b]
+        P {a: s.a + x, b: s.b + 1}
+    [t.a, t.b]
+
+fn drive() -> List[List[int]]:
+    coroutine {step, first} = running([1, 2, 3])
+    a = step()
+    b = step()
+    c = step()
+    [first, a, b, c]
+
+drive()
