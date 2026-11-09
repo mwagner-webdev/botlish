@@ -477,7 +477,9 @@ above). The construct-binding census counted the same class in the same
 files ("35 native operations in 8 files ... and 4 place calls", none of the
 B2 shape, which the consumed-fold tests added since). No test compiles one
 of these programs under `-warnings error` or asserts a complete warning
-set, which is why none failed.
+set, which is why none failed. After the fold-exit rule became "a mutation
+on every path" (section 5), the 22 test files that write a fold were taken
+again: the same findings, row for row, and no test failed.
 
 ## 12. Golden-suite migration and retained intentional warnings
 
