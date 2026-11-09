@@ -543,19 +543,76 @@ catalog under `audit/` still applies to the changed tree
 
 `bench/applied-type-bound.tcl` (fresh process per measurement):
 
-@BENCH-DEEP@
+This tree:
+
+| specimen | N | compiled | ms | peak MB | types | type chars | apps | compares | accepts | projections |
+|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| inferred | 100 | yes | 143 | 27 | 16 | 460 | 193 | 0 | 0 | 94 |
+| inferred | 200 | yes | 304 | 33 | 16 | 460 | 393 | 0 | 0 | 194 |
+| inferred | 400 | yes | 543 | 50 | 16 | 460 | 793 | 0 | 0 | 394 |
+| inferred | 800 | yes | 1157 | 104 | 16 | 460 | 1593 | 0 | 0 | 794 |
+| inferred | 1000 | yes | 1506 | 137 | 16 | 460 | 1993 | 0 | 0 | 994 |
+| written | 100 | yes | 161 | 27 | 18 | 609 | 394 | 1 | 1 | 0 |
+| written | 200 | yes | 265 | 31 | 18 | 609 | 794 | 1 | 1 | 0 |
+| written | 400 | yes | 511 | 44 | 18 | 609 | 1594 | 1 | 1 | 0 |
+| written | 800 | yes | 1127 | 83 | 18 | 609 | 3194 | 1 | 1 | 0 |
+| written | 1000 | yes | 1428 | 106 | 18 | 609 | 3994 | 1 | 1 | 0 |
+| mismatch | 100 | no | 163 | 27 | 0 | 0 | 394 | 1 | 1 | 0 |
+| mismatch | 200 | no | 295 | 31 | 0 | 0 | 794 | 1 | 1 | 0 |
+| mismatch | 400 | no | 545 | 44 | 0 | 0 | 1594 | 1 | 1 | 0 |
+| mismatch | 800 | no | 1103 | 83 | 0 | 0 | 3194 | 1 | 1 | 0 |
+| mismatch | 1000 | no | 1373 | 107 | 0 | 0 | 3994 | 1 | 1 | 0 |
 
 The work of the exact machinery is linear in the depth (evidence
 applications 2N for the read-back specimen, 4N for the written parameter,
 one admission and one comparison); the time and memory growth is the front
-end's own (structural ids, section 25 of the depth-safe report: the same
-chain's memory before this milestone is in the table below), the HIR's type
-table constant. @BENCH-MEMORY@
+end's own -- the structural ids' quadratic memory (section 25 of the
+depth-safe report) -- and the HIR's type table is constant. The same
+programs compiled by the revision before this milestone, which rejects them
+past the bound, take the same time and peak memory:
+
+| specimen | N | compiled | ms | peak MB |
+|---|---:|---|---:|---:|
+| inferred | 100 | no | 174 | 27 |
+| inferred | 200 | no | 289 | 33 |
+| inferred | 400 | no | 589 | 51 |
+| inferred | 800 | no | 1233 | 104 |
+| inferred | 1000 | no | 1586 | 137 |
+| written | 100 | no | 169 | 27 |
+| written | 200 | no | 310 | 31 |
+| written | 400 | no | 531 | 44 |
+| written | 800 | no | 1089 | 84 |
+| written | 1000 | no | 1450 | 108 |
+| mismatch | 100 | no | 166 | 27 |
+| mismatch | 200 | no | 325 | 31 |
+| mismatch | 400 | no | 573 | 44 |
+| mismatch | 800 | no | 1170 | 84 |
+| mismatch | 1000 | no | 1344 | 108 |
+
+So the new exact machinery adds no measurable time or memory to the deepest
+programs, and none of the quadratic type-table growth global exactness
+costs (section 3).
 
 Ordinary programs (front end, median of 3 fresh processes, ms; this tree
 against the revision before the milestone):
 
-@BENCH-SUITES@
+| program | botlish | baseline-tree |
+|---|---:|---:|
+| trait-constrained-types.bot | 7231 | 7232 |
+| hashable.bot | 5395 | 4945 |
+| value-identity.bot | 13994 | 13748 |
+| immutable-map.bot | 50697 | 49172 |
+| mutable-map.bot | 17396 | 17660 |
+| structs-and-enums-instances.bot | 1049 | 1003 |
+| destructuring.bot | 40353 | 39290 |
+| coroutines.bot | 12725 | 12431 |
+| golden.bot | 5367 | 5303 |
+
+The differences are measurement noise: hashable.bot, the largest (+9% in
+that run), interleaved five times per tree is 5118 ms here against 5278 ms
+before (medians). Over the 121 golden and workload programs of the
+invariance run (section 20) the front end's total time is 1,029,712 ms
+against 1,026,959 ms (+0.3%), with the same builds.
 
 ## 20. Regression and CI
 
