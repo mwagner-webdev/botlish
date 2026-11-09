@@ -12488,6 +12488,7 @@ proc native::lower::FoldValue {fnVar e accReg} {
 # The value of loop E's body BODY (Sequence): a plan fold's trailing value,
 # the next intermediate, is lowered in a plan position.
 proc native::lower::LoopBody {fnVar e mode body} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $fnVar fn
     if {$mode eq "fold"} {
         return [SequenceTo fn $body [FoldFamily $e]]

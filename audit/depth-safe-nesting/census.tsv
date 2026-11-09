@@ -218,3 +218,6 @@
 ::core::binary::ReprHoldsRaw	layouts	a layout descriptor's representation, one level per nested array, union or record (the Tcl compiler's static descriptors; the Tcl backends' codec)
 ::core::binary::ReprUnionPath	layouts	a layout descriptor's representation, one level per nested array, union or record (the Tcl compiler's static descriptors; the Tcl backends' codec)
 ::core::binary::ReprPointerPath	layouts	a layout descriptor's representation, one level per nested array, union or record (the Tcl compiler's static descriptors; the Tcl backends' codec)
+::hir::mutvec::FoldWalk	logical copies	a consumed fold intermediate's exits: the fold body's nested expressions (hir/mutvec.tcl, "Consumed fold intermediates")
+::hir::mutvec::FoldWalkSequence	logical copies	a consumed fold intermediate's exits: the fold body's nested expressions (hir/mutvec.tcl, "Consumed fold intermediates")
+::native::lower::LoopBody	native lowering	HIR to NIR, one call per nested expression

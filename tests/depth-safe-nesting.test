@@ -513,6 +513,22 @@ test dsn-repeatable {a proof-producing predicate whose body nests 1000 deep, dec
     list [expr {$::dsnRepeatable > 0}] [dsnRunning {lrange [outcomeUnderHir interp $hir] 0 1}]
 } -cleanup {unset -nocomplain s i source hir ::dsnRepeatable} -result {1 {value 1}}
 
+test dsn-consumed-fold {a fold whose MutableVector intermediate is consumed (hir/mutvec.tcl, "Consumed fold intermediates"), its body pushing a sum 1000 deep (the function form: a method-style call with such an argument costs quadratic memory, the report's section 25): the walk of the body's exits (FoldWalk) and every lowering run at the default limit, and every backend gives the same length} -body {
+    set s i
+    for {set i 0} {$i < 1000} {incr i} {
+        set s "i + ($s)"
+    }
+    set source "import std::mutable_vector\n\nfn ints() -> MutableVector\[int\]:\n    std::mutable_vector::from_list(\[\])\n\nfn f(n: int) -> int:\n    w = fold i from 0 to n with intermediate acc ints():\n        std::mutable_vector::push(acc, $s)\n        acc\n    w.length()\n\nf(3)\n"
+    set ::dsnFoldWalk 0
+    trace add execution hir::mutvec::FoldExitsClean enter {apply {args {incr ::dsnFoldWalk}}}
+    try {
+        set outcomes [dsnOutcomes $source]
+    } finally {
+        trace remove execution hir::mutvec::FoldExitsClean enter {apply {args {incr ::dsnFoldWalk}}}
+    }
+    list [expr {$::dsnFoldWalk > 0}] $outcomes
+} -cleanup {unset -nocomplain s i source outcomes ::dsnFoldWalk} -result {1 {{value 3} {value 3} {value 3} {value 3}}}
+
 test dsn-text {HIR text and the AST's text of 1000-deep programs: printed, and HIR text read back into the same HIR text} -body {
     lmap kind {list rbin struct} {
         set source [dict get [dsn::specimen $kind 1000] source]

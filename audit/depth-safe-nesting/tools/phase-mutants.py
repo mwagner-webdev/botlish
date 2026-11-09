@@ -51,6 +51,7 @@ groups=[
  ('modulebinding-recursion', 'a module binding\'s value walked recursively', ['::hir::modulebinding::'], 'dsn-module-binding'),
  ('injection-recursion', 'the injection proof\'s provenance walk recursive', ['::hir::injection::'], 'dsn-1000-inject'),
  ('layouts-recursion', 'layout representations resolved and described recursively', ['::hir::layouts::'], 'dsn-1000-layout'),
+ ('consumed-fold-recursion', 'a consumed fold intermediate\'s exits walked recursively', ['::hir::mutvec::'], 'dsn-consumed-fold'),
  ('codec-recursion', 'the layout codec\'s descriptor walks recursive (the Tcl compiler reads them at compile time)', ['::core::binary::'], 'dsn-1000-layout'),
 ]
 out=[]

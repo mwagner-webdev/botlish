@@ -1394,6 +1394,13 @@ proc native::lower::ViewBase {fnVar arg} {
 ====
 proc native::lower::ViewBase {fnVar arg} {
 >>>>
+## native/lower.tcl
+<<<<
+proc native::lower::LoopBody {fnVar e mode body} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc native::lower::LoopBody {fnVar e mode body} {
+>>>>
 
 @@ hirtext-recursion HIR text printed and read recursively
 !! dsn-text dsn-cache
@@ -1579,6 +1586,23 @@ proc hir::layouts::size {id} {
     if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
 ====
 proc hir::layouts::size {id} {
+>>>>
+
+@@ consumed-fold-recursion a consumed fold intermediate's exits walked recursively
+!! dsn-consumed-fold
+## hir/mutvec.tcl
+<<<<
+proc hir::mutvec::FoldWalk {hir parent f b x state} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc hir::mutvec::FoldWalk {hir parent f b x state} {
+>>>>
+## hir/mutvec.tcl
+<<<<
+proc hir::mutvec::FoldWalkSequence {hir parent f b sequence state} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+====
+proc hir::mutvec::FoldWalkSequence {hir parent f b sequence state} {
 >>>>
 
 @@ codec-recursion the layout codec's descriptor walks recursive (the Tcl compiler reads them at compile time)
