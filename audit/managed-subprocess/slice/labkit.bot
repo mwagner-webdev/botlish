@@ -1,0 +1,177 @@
+# labkit.bot -- the census experiments' wrappers (not shipped): msp's
+# operations with every failure reported on stdout and turned into the
+# task's own TaskFailed, so a scenario reads as its steps. Failure codes:
+# 10 launch, 11 stale, 12 closed, 13 interrupted, 14 fault, 15 scheduler.
+import event_loop_linux
+import msp
+import report
+import std::abi::bytes
+import std::event_loop
+import std::int
+import std::linux::io
+import std::mutable_array
+import std::str
+
+nomethod fn launch_text(stage: msp::Stage) -> str:
+    if stage == msp::Stage::Spec:
+        "spec"
+    elif stage == msp::Stage::WorkingDirectory:
+        "working-directory"
+    elif stage == msp::Stage::File:
+        "file"
+    elif stage == msp::Stage::Pipe:
+        "pipe"
+    elif stage == msp::Stage::Exec:
+        "exec"
+    else:
+        "table"
+
+nomethod fn spawn(s: msp::Spec, context p: msp::Procs, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> msp::Spawned errors std::event_loop::TaskFailed:
+    msp::spawn(s):
+        on msp::LaunchFailed {stage, code}:
+            report::say(std::str::concat("launch-failed ", launch_text(stage)).concat(" ").concat(std::int::to_string(code)))
+            fail std::event_loop::TaskFailed {code: 10}
+        on msp::ProcessFault {reason, code}:
+            report::say(std::str::concat("fault ", reason))
+            fail std::event_loop::TaskFailed {code: 14}
+        on std::event_loop::SchedulerFault:
+            fail std::event_loop::TaskFailed {code: 15}
+
+nomethod fn read(c: msp::Child, s: msp::Stream, context p: msp::Procs, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> std::abi::bytes::Bytes errors std::event_loop::TaskFailed:
+    msp::read(c, s):
+        on msp::StaleChild:
+            report::say("read: stale")
+            fail std::event_loop::TaskFailed {code: 11}
+        on msp::StreamClosed:
+            report::say("read: closed")
+            fail std::event_loop::TaskFailed {code: 12}
+        on msp::Interrupted:
+            report::say("read: interrupted")
+            fail std::event_loop::TaskFailed {code: 13}
+        on msp::ProcessFault {reason, code}:
+            report::say(std::str::concat("read: fault ", reason).concat(" ").concat(std::int::to_string(code)))
+            fail std::event_loop::TaskFailed {code: 14}
+        on std::event_loop::SchedulerFault:
+            fail std::event_loop::TaskFailed {code: 15}
+
+# Every byte of stream S to its end of file.
+nomethod fn drain(c: msp::Child, s: msp::Stream, context p: msp::Procs, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> std::abi::bytes::Bytes errors std::event_loop::TaskFailed:
+    acc = std::mutable_array::create(1, report::empty())
+    loop:
+        b = read(c, s)
+        if std::abi::bytes::length(b).value == 0:
+            break
+        acc.set(0, report::cat(acc.at(0), b)):
+            on IndexNotFound:
+                unit
+    acc.at(0):
+        on IndexNotFound:
+            report::empty()
+
+# How many bytes stream S holds to its end of file, and in how many reads
+# (the bytes are counted, never kept: a sink that persists nothing).
+struct Counted:
+    bytes: int
+    reads: int
+
+nomethod fn count(c: msp::Child, s: msp::Stream, context p: msp::Procs, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> Counted errors std::event_loop::TaskFailed:
+    acc = std::mutable_array::create(2, 0)
+    loop:
+        b = read(c, s)
+        k = std::abi::bytes::length(b).value
+        if k == 0:
+            break
+        acc.set(0, acc.at(0) + k):
+            on IndexNotFound:
+                unit
+        acc.set(1, acc.at(1) + 1):
+            on IndexNotFound:
+                unit
+    Counted {bytes: report::cell(acc, 0), reads: report::cell(acc, 1)}
+
+nomethod fn write(c: msp::Child, data: std::abi::bytes::Bytes, context p: msp::Procs, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) errors std::event_loop::TaskFailed:
+    msp::write(c, data):
+        on msp::StaleChild:
+            report::say("write: stale")
+            fail std::event_loop::TaskFailed {code: 11}
+        on msp::StreamClosed:
+            report::say("write: closed")
+            fail std::event_loop::TaskFailed {code: 12}
+        on msp::Interrupted:
+            report::say("write: interrupted")
+            fail std::event_loop::TaskFailed {code: 13}
+        on msp::ProcessFault {reason, code}:
+            report::say(std::str::concat("write: fault ", reason))
+            fail std::event_loop::TaskFailed {code: 14}
+        on std::event_loop::SchedulerFault:
+            fail std::event_loop::TaskFailed {code: 15}
+
+nomethod fn close_stdin(c: msp::Child, context p: msp::Procs, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) errors std::event_loop::TaskFailed:
+    msp::close_stdin(c):
+        on msp::StaleChild:
+            fail std::event_loop::TaskFailed {code: 11}
+        on msp::ProcessFault:
+            fail std::event_loop::TaskFailed {code: 14}
+
+nomethod fn wait(c: msp::Child, context p: msp::Procs, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> msp::ExitStatus errors std::event_loop::TaskFailed:
+    msp::wait(c):
+        on msp::StaleChild:
+            report::say("wait: stale")
+            fail std::event_loop::TaskFailed {code: 11}
+        on msp::Interrupted:
+            report::say("wait: interrupted")
+            fail std::event_loop::TaskFailed {code: 13}
+        on msp::ProcessFault {reason, code}:
+            report::say(std::str::concat("wait: fault ", reason))
+            fail std::event_loop::TaskFailed {code: 14}
+        on std::event_loop::SchedulerFault:
+            fail std::event_loop::TaskFailed {code: 15}
+
+nomethod fn wait_until(c: msp::Child, deadline: int, context p: msp::Procs, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> bool errors std::event_loop::TaskFailed:
+    msp::wait_until(c, deadline):
+        on msp::StaleChild:
+            fail std::event_loop::TaskFailed {code: 11}
+        on msp::Interrupted:
+            report::say("wait: interrupted")
+            fail std::event_loop::TaskFailed {code: 13}
+        on msp::ProcessFault:
+            fail std::event_loop::TaskFailed {code: 14}
+        on std::event_loop::SchedulerFault:
+            fail std::event_loop::TaskFailed {code: 15}
+
+nomethod fn terminate(c: msp::Child, grace_us: int, context p: msp::Procs, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> msp::ExitStatus errors std::event_loop::TaskFailed:
+    msp::terminate(c, grace_us):
+        on msp::StaleChild:
+            report::say("terminate: stale")
+            fail std::event_loop::TaskFailed {code: 11}
+        on msp::Interrupted:
+            fail std::event_loop::TaskFailed {code: 13}
+        on msp::ProcessFault:
+            fail std::event_loop::TaskFailed {code: 14}
+        on std::event_loop::SchedulerFault:
+            fail std::event_loop::TaskFailed {code: 15}
+
+nomethod fn finish(owner: msp::ChildOwner, grace_us: int, context p: msp::Procs, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> msp::ExitStatus errors std::event_loop::TaskFailed:
+    msp::finish(owner, grace_us):
+        on msp::ProcessFault {reason, code}:
+            report::say(std::str::concat("finish: fault ", reason))
+            fail std::event_loop::TaskFailed {code: 14}
+        on std::event_loop::SchedulerFault:
+            fail std::event_loop::TaskFailed {code: 15}
+
+nomethod fn interrupt(c: msp::Child, context p: msp::Procs, ev: std::event_loop::Loop, io: std::linux::io::LinuxIO) errors std::event_loop::TaskFailed:
+    msp::interrupt(c):
+        on msp::StaleChild:
+            fail std::event_loop::TaskFailed {code: 11}
+        on msp::ProcessFault:
+            fail std::event_loop::TaskFailed {code: 14}
+        on std::event_loop::SchedulerFault:
+            fail std::event_loop::TaskFailed {code: 15}
+
+nomethod fn status_line(label: str, s: msp::ExitStatus, context io: std::linux::io::LinuxIO):
+    report::say(std::str::concat(label, " ").concat(msp::status_text(s)))
+
+nomethod fn sleep(us: int, context ev: std::event_loop::Loop) errors std::event_loop::TaskFailed:
+    std::event_loop::sleep(us):
+        on std::event_loop::SchedulerFault:
+            fail std::event_loop::TaskFailed {code: 15}

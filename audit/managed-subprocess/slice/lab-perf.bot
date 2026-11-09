@@ -1,0 +1,251 @@
+# lab-perf.bot -- the census's measurements (MANAGED-SUBPROCESS-AND-EVENT-
+# LOOP-CENSUS-MILESTONE-1.md, section 15): sums and maxima only (Botlish has
+# no integer division; ../tools/measure.py divides).
+#
+#   lab-perf HELPER SCENARIO TMPDIR
+import event_loop_linux
+import labkit
+import msp
+import report
+import std::abi::bytes
+import std::event_loop
+import std::int
+import std::linux::io
+import std::list
+import std::mutable_array
+import std::str
+import type std::event_loop::Delivery
+import type std::event_loop::Wake
+
+fn since(start: int) -> int:
+    msp::now_us() - start
+
+# A ticker every PERIOD us until STOP has an event: (ticks, max lateness us)
+# posted to DONE.
+fn ticker(period: int, stop: std::event_loop::Reg, done: std::event_loop::Reg, context ev: std::event_loop::Loop) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    stats = std::mutable_array::create(3, 0)
+    t = std::event_loop::every(period)
+    start = msp::now_us()
+    loop:
+        e = std::event_loop::wait(t)
+        if e.reason != Wake::Timer:
+            break
+        if std::event_loop::pending(stop) > 0:
+            break
+        ticks = stats.at(0) + e.count
+        stats.set(0, ticks)
+        stats.set(2, stats.at(2) + e.count - 1)
+        late = msp::now_us() - (start + ticks * period)
+        if late > stats.at(1):
+            stats.set(1, late)
+    std::event_loop::revoke(t)
+    std::event_loop::post(done, stats.at(0), stats.at(1))
+    std::event_loop::post(done, stats.at(2), 0)
+    0
+
+fn sc_throughput(helper: str, context p: msp::Procs, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    stop = std::event_loop::channel(Delivery::Reliable, 2)
+    done = std::event_loop::channel(Delivery::Reliable, 4)
+    coroutine {step, first} = ticker(5000, stop, done)
+    std::event_loop::adopt(step, first)
+    reads0 = msp::stat(7)
+    eagain0 = msp::stat(11)
+    cpu0 = event_loop_linux::cpu_us()
+    t = msp::now_us()
+    {owner, child} = labkit::spawn(msp::with_stdio(msp::command(helper, ["outn:67108864:97"]), msp::Stdio::Null, msp::Stdio::Pipe, msp::Stdio::Null))
+    c = labkit::count(child, msp::Stream::Stdout)
+    elapsed = since(t)
+    cpu = event_loop_linux::cpu_us() - cpu0
+    labkit::wait(child)
+    msp::release(owner)
+    std::event_loop::post(stop, 1, 0)
+    e = std::event_loop::wait(done)
+    e2 = std::event_loop::wait(done)
+    report::say_int("bytes ", c.bytes)
+    report::say_int("chunks ", c.reads)
+    report::say_int("elapsed-us ", elapsed)
+    report::say_int("supervisor-cpu-us ", cpu)
+    report::say_int("native-reads ", msp::stat(7) - reads0)
+    report::say_int("eagain ", msp::stat(11) - eagain0)
+    report::say_int("ticks ", e.a)
+    report::say_int("max-tick-late-us ", e.b)
+    report::say_int("missed-ticks ", e2.a)
+    0
+
+# 200 sequential children that stamp the monotonic clock, then exit: the
+# spawn call's duration and the time from the child's last instruction to
+# its exit being observed (the pidfd's readiness, through the loop).
+fn sc_latency(helper: str, context p: msp::Procs, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    acc = std::mutable_array::create(6, 0)
+    loop i from 0 to 200:
+        t = msp::now_us()
+        {owner, child} = labkit::spawn(msp::with_stdio(msp::command(helper, ["stamp", "exit:0"]), msp::Stdio::Null, msp::Stdio::Pipe, msp::Stdio::Null))
+        spawn_us = since(t)
+        line = report::text_of(labkit::drain(child, msp::Stream::Stdout))
+        st = labkit::wait(child)
+        seen = msp::now_us()
+        k = std::str::length(line)
+        digits = std::str::substring(line, 6, k - 1):
+            on LowerUnderrun:
+                ""
+            on UpperOverrun:
+                ""
+        stamp = std::int::from_string(digits):
+            on InvalidIntegerText:
+                0
+        if stamp == 0 or st.code != 0:
+            acc.set(5, acc.at(5) + 1)
+        exit_us = seen - stamp
+        acc.set(0, acc.at(0) + spawn_us)
+        if spawn_us > acc.at(1):
+            acc.set(1, spawn_us)
+        acc.set(2, acc.at(2) + exit_us)
+        if exit_us > acc.at(3):
+            acc.set(3, exit_us)
+        acc.set(4, acc.at(4) + since(t))
+        msp::release(owner)
+    report::say_int("spawned ", 200)
+    report::say_int("spawn-us-sum ", acc.at(0))
+    report::say_int("spawn-us-max ", acc.at(1))
+    report::say_int("exit-observed-us-sum ", acc.at(2))
+    report::say_int("exit-observed-us-max ", acc.at(3))
+    report::say_int("round-trip-us-sum ", acc.at(4))
+    report::say_int("wrong ", acc.at(5))
+    0
+
+fn waiter(c: msp::Child, done: std::event_loop::Reg, context p: msp::Procs, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    labkit::wait(c)
+    std::event_loop::post(done, 1, 0)
+    0
+
+# The same wait by polling: exited? every millisecond (the control).
+fn poller(c: msp::Child, done: std::event_loop::Reg, context p: msp::Procs, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    loop:
+        ex = msp::exited?(c):
+            on msp::StaleChild:
+                true
+        if ex:
+            break
+        labkit::sleep(1000)
+    std::event_loop::post(done, 1, 0)
+    0
+
+# Two children sleeping 2 s: the supervisor's CPU and the loop's turns while
+# it waits for them, event-driven (idle) or polling (poll).
+fn sc_idle(helper: str, polling: bool, context p: msp::Procs, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    done = std::event_loop::channel(Delivery::Reliable, 4)
+    {owner: o1, child: c1} = labkit::spawn(msp::with_stdio(msp::command(helper, ["sleep:2000"]), msp::Stdio::Null, msp::Stdio::Pipe, msp::Stdio::Null))
+    {owner: o2, child: c2} = labkit::spawn(msp::with_stdio(msp::command(helper, ["sleep:2000"]), msp::Stdio::Null, msp::Stdio::Pipe, msp::Stdio::Null))
+    turns0 = std::event_loop::stats().turns
+    blocks0 = event_loop_linux::stats().blocks
+    cpu0 = event_loop_linux::cpu_us()
+    t = msp::now_us()
+    if polling:
+        coroutine {step: s1, first: f1} = poller(c1, done)
+        std::event_loop::adopt(s1, f1)
+        coroutine {step: s2, first: f2} = poller(c2, done)
+        std::event_loop::adopt(s2, f2)
+    else:
+        coroutine {step: s1, first: f1} = waiter(c1, done)
+        std::event_loop::adopt(s1, f1)
+        coroutine {step: s2, first: f2} = waiter(c2, done)
+        std::event_loop::adopt(s2, f2)
+    std::event_loop::wait(done)
+    std::event_loop::wait(done)
+    report::say_int("wait-us ", since(t))
+    report::say_int("supervisor-cpu-us ", event_loop_linux::cpu_us() - cpu0)
+    report::say_int("turns ", std::event_loop::stats().turns - turns0)
+    report::say_int("driver-blocks ", event_loop_linux::stats().blocks - blocks0)
+    b1 = msp::exited?(c1):
+        on msp::StaleChild:
+            false
+    b2 = msp::exited?(c2):
+        on msp::StaleChild:
+            false
+    report::say(std::str::concat("both exited ", report::yes(b1 and b2)))
+    msp::release(o1)
+    msp::release(o2)
+    0
+
+# A child that floods stdout for 1 s while a 10 ms ticker runs: does a
+# continuously ready stream starve the timer? (The reader reads one chunk per
+# dispatch and yields to the loop at each wait.)
+fn sc_flood(helper: str, context p: msp::Procs, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    stop = std::event_loop::channel(Delivery::Reliable, 2)
+    done = std::event_loop::channel(Delivery::Reliable, 4)
+    coroutine {step, first} = ticker(10000, stop, done)
+    std::event_loop::adopt(step, first)
+    {owner, child} = labkit::spawn(msp::with_stdio(msp::command(helper, ["flood"]), msp::Stdio::Null, msp::Stdio::Pipe, msp::Stdio::Null))
+    t = msp::now_us()
+    total = std::mutable_array::create(2, 0)
+    loop:
+        b = labkit::read(child, msp::Stream::Stdout)
+        total.set(0, total.at(0) + std::abi::bytes::length(b).value)
+        total.set(1, total.at(1) + 1)
+        if since(t) > 1000000:
+            break
+        # No await happened when the pipe had data: yield so a flooding
+        # stream cannot hold the thread (the read itself never yields then).
+        std::event_loop::yield_now()
+    st = labkit::terminate(child, 100000)
+    msp::release(owner)
+    std::event_loop::post(stop, 1, 0)
+    e = std::event_loop::wait(done)
+    e2 = std::event_loop::wait(done)
+    report::say_int("bytes ", total.at(0))
+    report::say_int("chunks ", total.at(1))
+    report::say_int("ticks ", e.a)
+    report::say_int("max-tick-late-us ", e.b)
+    report::say_int("missed-ticks ", e2.a)
+    labkit::status_line("status", st)
+    0
+
+fn main(helper: str, scenario: str, context ev: std::event_loop::Loop, d: event_loop_linux::Linux, n: event_loop_linux::Native, p: msp::Procs, io: std::linux::io::LinuxIO) -> int errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered, std::event_loop::TaskFailed, IndexNotFound:
+    std::event_loop::sync()
+    fds = msp::open_fds()
+    if scenario == "throughput":
+        coroutine {step, first} = sc_throughput(helper)
+        std::event_loop::adopt(step, first)
+    elif scenario == "latency":
+        coroutine {step, first} = sc_latency(helper)
+        std::event_loop::adopt(step, first)
+    elif scenario == "idle":
+        coroutine {step, first} = sc_idle(helper, false)
+        std::event_loop::adopt(step, first)
+    elif scenario == "poll":
+        coroutine {step, first} = sc_idle(helper, true)
+        std::event_loop::adopt(step, first)
+    elif scenario == "flood":
+        coroutine {step, first} = sc_flood(helper)
+        std::event_loop::adopt(step, first)
+    else:
+        report::say(std::str::concat("no such scenario: ", scenario))
+        return 2
+    std::event_loop::run()
+    loop o in std::event_loop::take_outcomes():
+        if o.ending != std::event_loop::Ending::Returned:
+            report::say_int("task failed ", o.value)
+    report::say_int("end owned ", msp::owned())
+    report::say_int("end live ", msp::stat(12))
+    report::say_int("end fds delta ", msp::open_fds() - fds)
+    msp::shutdown()
+
+args = argv():
+    on InvalidArgumentEncoding:
+        []
+with context std::event_loop::create(64)
+with context event_loop_linux::create()
+with context event_loop_linux::native()
+with context msp::create(200000)
+with context std::linux::io::create()
+main(std::list::get(args, 1, ""), std::list::get(args, 2, "")):
+    on std::event_loop::SchedulerFault:
+        -1
+    on std::event_loop::DriverFault:
+        -2
+    on std::event_loop::LoopReentered:
+        -3
+    on std::event_loop::TaskFailed:
+        -4
+    on IndexNotFound:
+        -5

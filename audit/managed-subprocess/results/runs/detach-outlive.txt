@@ -1,0 +1,15 @@
+pid 13034
+owned after detach 0
+still running (sweep) 1
+the identity is stale after detach
+end owned before shutdown 0
+abandoned 0
+end killed by shutdown 0
+end owned 0
+end escalations 0
+end live 1
+end fds delta 1
+[harness] pid 13034 alive (state S, parent 1)
+[harness] file detached.pid: 6 bytes
+[harness] supervisor peak RSS 16280 kB, CPU 0.004 s
+[harness] PASS in 0.00 s

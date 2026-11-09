@@ -1,0 +1,12 @@
+spawned 200
+spawn-us-sum 49107
+spawn-us-max 1989
+exit-observed-us-sum 29796
+exit-observed-us-max 353
+round-trip-us-sum 220093
+wrong 0
+end owned 0
+end live 0
+end fds delta 0
+[harness] supervisor peak RSS 16280 kB, CPU 0.245 s
+[harness] PASS in 0.23 s

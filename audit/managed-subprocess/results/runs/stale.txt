@@ -1,0 +1,13 @@
+old identity: stale -116
+signal through the old identity: stale -116
+the new child unaffected yes
+new signal 15
+end owned before shutdown 0
+abandoned 0
+end killed by shutdown 0
+end owned 0
+end escalations 0
+end live 0
+end fds delta 0
+[harness] supervisor peak RSS 16280 kB, CPU 0.005 s
+[harness] PASS in 0.01 s

@@ -1,0 +1,24 @@
+# board.bot -- the vertical slice's shared state (not shipped): one context
+# the entry installs, read and updated by every task of the VM. Cells: 0 A
+# stdout bytes, 1 A stderr bytes, 2 B stdout bytes, 3 ticks, 4 cancel
+# requested, 5 A done, 6 B done, 7 input lines, 8 A stdin lines fed.
+import std::mutable_array
+
+context struct Board:
+    cells: MutableArray[int]
+
+fn create() -> Board:
+    Board {cells: std::mutable_array::create(16, 0)}
+
+fn get(i: int, context b: Board) -> int:
+    b.cells.at(i):
+        on IndexNotFound:
+            0
+
+fn put(i: int, v: int, context b: Board):
+    b.cells.set(i, v):
+        on IndexNotFound:
+            unit
+
+fn add(i: int, v: int, context b: Board):
+    put(i, get(i) + v)

@@ -1,0 +1,16 @@
+sequential-us 419540
+concurrent live 64
+concurrent-us 65242
+wrong sequential 0
+wrong concurrent 0
+live 0
+fds delta 0
+end owned before shutdown 0
+abandoned 0
+end killed by shutdown 0
+end owned 0
+end escalations 0
+end live 0
+end fds delta 0
+[harness] supervisor peak RSS 16280 kB, CPU 0.504 s
+[harness] PASS in 0.49 s
