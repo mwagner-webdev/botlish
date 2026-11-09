@@ -557,7 +557,7 @@ linking a program takes 49 s against about 40 s (the module is larger).
 Latency and throughput are not comparable directly (the census's peer was
 Hyper in the same process; here, Python's asyncio and nghttpd).
 
-## 12. Findings (and the compiler fix they led to)
+## 12. Findings (and the compiler fixes they led to)
 
 **F1. Resources were not released on several native sequence forms
 (fixed).** `native/lower.tcl`'s `Sequence` releases the affine values that
@@ -614,16 +614,34 @@ receiver another diagnostic poisons now has its other candidates built to
 show it). The package keeps its
 `std::str::concat(acc, p)` (0.1.0 and 0.2.0 are recorded releases).
 
-**F3. A method-call decision costs a build per call (open).** With
-`std::str` and `std::linux::fs` both imported, every `"...".concat(...)`
-is a whole-program trial build: `std::linux::fs::concat`'s first parameter
-is an opaque struct the kind proofs never exclude for a str receiver
-(METHOD-DECISION-FILTER.md excludes by named struct only between named
-structs). Six calls cost 15 builds and 11 s, against 2 builds and 0.8 s
-without that import (`findings/concat-deviations.bot`); the clean room's
-first consumer program took over ten minutes to check before its lines
-were built with one helper. The same mechanism made a lexical helper of
-the module named like a method (`at`) cost 69 builds and seven minutes:
+**F3. A method-call decision cost a build per call (fixed for
+trait-polymorphic candidates; open for lexical ones).** With
+`std::io::path` and `std::str` both imported, every `"...".concat(...)`
+was a whole-program trial build: `std::io::path::concat`, whose first
+parameter is the trait `Path`, is a candidate of every `concat`, and no
+kind proof ruled a candidate out by a trait (a trait has no kind), although
+a String does not satisfy `Path` (`std::str` has no `text`) and the
+candidate's own build always rejected it (TRAIT-NOT-SATISFIED). Sorting
+first, it was also each call's initial stand-in, whose `Path` result left
+the next call of a chain on a view. Four calls cost 15 builds (9 single
+deviations) and 10-11 s (`findings/concat-deviations.bot`); the clean
+room's first consumer program took over ten minutes to check before its
+lines were built with one helper. This report first blamed
+`std::linux::fs::concat`, measured by removing several imports at once:
+its opaque `NativePath` parameter was already ruled out for a String
+receiver by kind, and the program without `std::linux::fs` alone still
+took 14 builds. Fixed in the method-call decision: a module function whose
+declared first parameter is a trait is ruled out for a receiver that does
+not satisfy it (`hir::methods::TraitMismatch`, which
+asks the call's own admission check, `hir::traits::Accept`;
+METHOD-DECISION-FILTER.md). The program now takes 5 builds, no deviation,
+4.1 s -- the 5 it takes without `std::io::path`, three of them the kind
+waves of its three-link chain -- decided as the reference rule decides it
+(`tests/method-filter.test`'s `mf-trait-*`, the reference audit, the
+method-filter fuzzer with a trait module, and its mutants). Still open: a
+lexical helper of the module named like a method (`at`) cost 69 builds and
+seven minutes, because a lexical candidate is never ruled out (a bare name
+may be a parameter or a binding: METHOD-DECISION-FILTER.md); it stays
 renamed and marked `nomethod` (`http-warning-clean` keeps a program
 importing http at three builds).
 
@@ -780,7 +798,9 @@ blocked correctness, not expressiveness. Convenient but absent: integer
 division (B9), a `str` join or format (lines are built with a fold), an
 SSE or JSON decoder (consumers' code), a driver `rearm` with an interest
 (B5, worked around), and method-call decisions that do not cost a
-whole-program build per call in some import sets (F3).
+whole-program build per call of a module's own function named like a
+method (F3; the trait-polymorphic case, `std::io::path::concat` beside
+`std::str::concat`, is fixed).
 
 **E. Is the remaining obstacle to a cleanroom AI-agent TUI primarily
 managed subprocess execution, or does HTTP still have consumer-visible

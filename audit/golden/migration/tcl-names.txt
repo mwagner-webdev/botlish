@@ -4261,6 +4261,8 @@ tests/method-filter.test mf-excluded-by-kind pass
 tests/method-filter.test mf-contract-kinds-by-source pass
 tests/method-filter.test mf-kinds-outside-the-comparable-set-exclude-nothing pass
 tests/method-filter.test mf-excluded-by-nominal-identity pass
+tests/method-filter.test mf-excluded-by-trait-conformance pass
+tests/method-filter.test mf-trait-rule-one-statement pass
 tests/method-filter.test mf-chain-decided-in-one-wave pass
 tests/method-filter.test mf-typed-receivers-one-build pass
 tests/method-filter.test mf-first-candidates-no-build pass
@@ -4270,6 +4272,8 @@ tests/method-filter.test mf-wrong-guess-corrected pass
 tests/method-filter.test mf-narrowed-untyped-receiver pass
 tests/method-filter.test mf-nominal-receivers-decided pass
 tests/method-filter.test mf-nominal-same-fields-excluded pass
+tests/method-filter.test mf-trait-receivers-decided pass
+tests/method-filter.test mf-trait-path-concat-chain pass
 tests/method-filter.test mf-untyped-receiver-judged-by-builds pass
 tests/method-filter.test mf-no-applicable-method pass
 tests/method-filter.test mf-lexical-candidate-never-excluded pass
