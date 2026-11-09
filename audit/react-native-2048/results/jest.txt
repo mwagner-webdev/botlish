@@ -1,5 +1,9 @@
+PASS __tests__/unavailable.test.ts
+PASS __tests__/generatedModule.test.ts
+PASS __tests__/useBotlish2048.test.tsx
+
 Test Suites: 3 passed, 3 total
 Tests:       28 passed, 28 total
 Snapshots:   0 total
-Time:        0.693 s, estimated 1 s
+Time:        1.074 s
 Ran all test suites.

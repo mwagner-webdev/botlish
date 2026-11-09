@@ -18,7 +18,7 @@ ok npm install of the generated package's tarball
 ok the second library's package generated and installed
 ok TypeScript
 ok Jest: Tests:       28 passed, 28 total
-ok the Android release build (BUILD SUCCESSFUL in 5m 6s)
+ok the Android release build (BUILD SUCCESSFUL in 4m 47s)
   > Task :app:generateReact_45_native_45_botlish_45_gameCodegenSchemaFromJavaScript
   > Task :app:generateReact_45_native_45_botlish_45_gameCodegenArtifactsFromSchema
   > Task :app:generateReact_45_native_45_botlish_45_textkitCodegenSchemaFromJavaScript
@@ -26,7 +26,7 @@ ok the Android release build (BUILD SUCCESSFUL in 5m 6s)
   > Task :app:generateCodegenSchemaFromJavaScript SKIPPED
   > Task :app:generateCodegenArtifactsFromSchema SKIPPED
 ok neither the app nor the packages name this checkout
-apk 20601745 bytes sha256 406e3457b9b2320dbe770d0180eee89bba0514b74e5cddb4a9673f3077d79161
+apk 11285621 bytes sha256 e2720a6a66de17690cddd0753034758d67137cea906ec0ff4cb054f894b5f7ae
 ok the APK holds arm64-v8a only
 ok libgame.so is the generated package's library, as the Android build strips it
 ok every shared object's segments are 16 KiB-aligned

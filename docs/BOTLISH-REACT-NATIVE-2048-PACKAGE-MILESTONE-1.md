@@ -77,11 +77,16 @@ running in an Android application process in this session:
 * this host has no KVM, and Google's emulator refuses an arm64 guest on an
   x86_64 host, also when its `qemu-system-aarch64` is run directly
   (observed, section 16);
-* the workflow's `android` jobs, which run the APK on GitHub's Android
-  emulators (two images), were still queued behind a saturated runner pool
-  when this report was last updated. Its build job did run, and passed:
-  the build from checkout to APK and the clean room on a GitHub runner
-  (sections 18 and 23).
+* the workflow's build job passed on a GitHub runner: the build from
+  checkout to APK, and the clean room (sections 18 and 23);
+* its `android` jobs ran the APK on GitHub's Android emulators, two images
+  with the ARM native bridge, after hours in a saturated runner pool. **The
+  app crashed at launch on both**, before any JavaScript or Botlish code
+  ran. React Native's library loader (SoLoader) looked for the
+  unextracted libraries under the device's primary ABI, x86_64, not the
+  app's arm64-v8a (observed, section 16). The app now extracts its native
+  libraries at installation, and the acceptance of that APK is the next
+  run's (section 23).
 
 The Android acceptance is implemented and committed, with the oracle it
 compares against (section 16). Its result is CI evidence still to come.
@@ -102,7 +107,7 @@ is designed and built, not observed.
 | `useBotlish2048()` and a playable 2048 screen (swipes, buttons, score, New game, game over, win) | implemented; Jest observed (28 tests: 10 of the hook and the snapshot reader, 17 of the generated entry point, 1 without the native module) |
 | a second, unrelated library through the same generator, both packages in one app | observed (host harness, TypeScript, Jest, the APK) |
 | a clean room: the single-file compiler and packages only, then npm, Codegen and Gradle | observed (section 18) |
-| the app on Android: Hermes, the TurboModule, the Botlish library in an Android application process | **partially validated**: the acceptance is implemented (section 16) but was not observed in this session (no KVM here; its CI jobs still queued) |
+| the app on Android: Hermes, the TurboModule, the Botlish library in an Android application process | **partially validated**: the acceptance is implemented (section 16). Its first run crashed at launch on both images, in React Native's library loader, before any Botlish code ran; fixed in the app's packaging, the fixed APK's run pending |
 | mutation testing | 44/44 killed, each by a detector it names; observed (section 21) |
 | iOS, Android ABIs other than arm64-v8a, asynchronous workers | not supported (section 24) |
 
@@ -664,6 +669,8 @@ What was observed of the app without an Android device:
   - `libappmodules.so` NEEDs both and defines no Botlish runtime symbol;
   - every shared object's segments are 16 KiB-aligned, and
     `zipalign -c -P 16` passes;
+  - the manifest's `extractNativeLibs` is true, so the libraries
+    (compressed in the APK) are extracted at installation (section 16);
   - the JavaScript bundle is Hermes bytecode (its magic, `c6 1f bc 03`)
     holding both entry points (`BotlishGame`, `BotlishTextkit`), the hook
     and the self-test.
@@ -744,9 +751,54 @@ its reloads. It does not show native AArch64 execution (section 24).
 workflow. Runs 1 to 7 stayed `queued`, because the repository's runners
 were busy with other branches' runs that had been going for hours, and
 each newer push cancelled the queued run, as the workflow's concurrency
-group intends. Run 8's build job ran and passed. Its `android` jobs were
-still queued when this report was last updated (section 23), and their
-result is the Android evidence.
+group intends.
+
+**Run 8** (`be3d4018`) got its runners after three to four hours. Observed
+(the jobs' logs and `summary.txt` artifacts, section 23):
+
+* Both images booted with the ARM native bridge:
+  - `sdk_gphone64_x86_64`: API 34, `abilist x86_64,arm64-v8a`,
+    `native.bridge libndk_translation.so`, 4 KiB pages, booted in 25 s;
+  - `sdk_gphone16k_x86_64`: API 35, the same ABIs and bridge, 16 KiB
+    pages.
+* The APK installed as arm64-v8a (`installed abi arm64-v8a`).
+* **The app crashed at launch on both images**, before any JavaScript
+  ran: `com.facebook.soloader.SoLoaderDSONotFoundError: couldn't find DSO
+  to load: libreactnative.so`, raised from `MainApplication.onCreate`
+  through `DefaultNewArchitectureEntryPoint.load`. Every phase failed
+  after it, and the acceptance reported each failure: no self-test line,
+  no Hermes, no mapped Botlish library, no board on the screen, seven
+  crash lines.
+
+The cause is React Native's library loader on a native-bridge device, not
+Botlish. No Botlish code had run yet, and `libreactnative.so` is React
+Native's own library. The facts:
+
+* AGP keeps an app's native libraries inside the APK by default: the
+  APK's manifest said `extractNativeLibs=false`.
+* SoLoader 0.12.1, React Native 0.88.1's, then loads them through
+  `DirectApkSoSource`. It builds the path from
+  `SysUtil.getSupportedAbis()[0]`, which is `Build.SUPPORTED_ABIS`
+  (static: its bytecode, `javap -c`). On these devices that is `x86_64`,
+  so SoLoader looked in `base.apk!/lib/x86_64`. An arm64-v8a-only APK
+  has no such directory, and the process, which runs arm64 code through
+  the bridge, needs `lib/arm64-v8a`.
+* A real arm64 device lists `arm64-v8a` first, and is not affected.
+
+**The fix** (`examples/react-native/app/android/app/build.gradle`): the
+app extracts its native libraries at installation (`packaging { jniLibs {
+useLegacyPackaging = true } }`, which sets `extractNativeLibs="true"`).
+They then lie in the app's native library directory, `lib/arm64`, where
+SoLoader's `ApplicationSoSource` looks first. An extracted library is
+loaded from its file, so what a 16 KiB device needs is the ELF alignment,
+which every library has. In the APK they are now compressed, so
+`zipalign -P 16` has no `.so` entry to page-align. `inspect-apk.sh` now
+also requires `extractNativeLibs=true` in the APK's manifest.
+
+The generator, the generated package and the Botlish libraries are
+unchanged. The fix is the app's own packaging, as any arm64-only React
+Native 0.88 app would need to start on such a device. The acceptance of
+the fixed APK is the next run (section 23).
 
 **Locally**, this host has no `/dev/kvm`. Observed, with the emulator 37.2.13
 and `system-images;android-30;aosp_atd;arm64-v8a`:
@@ -841,16 +893,18 @@ Observed locally (`audit/react-native-2048/results/cleanroom/`:
    - `npm install` of the tarball;
    - the second library's package, generated and installed the same way;
    - TypeScript, and Jest (28 passed);
-   - the Android release build: BUILD SUCCESSFUL in 5 min 6 s. Codegen ran
+   - the Android release build: BUILD SUCCESSFUL in 4 min 47 s. Codegen ran
      from the app, for both packages
      (`generateReact_45_native_45_botlish_45_{game,textkit}Codegen*`); the
      app's own Codegen tasks were skipped, as it has no spec of its own.
 
    Neither the app nor the packages name this checkout.
-3. **The APK** (20,601,745 bytes) holds arm64-v8a libraries only.
+3. **The APK** (11,285,621 bytes) holds arm64-v8a libraries only.
    `libgame.so` is the generated package's library as the Android build
    strips it. Every segment is 16 KiB-aligned, and `zipalign -c -P 16`
-   passes.
+   passes. The manifest's `extractNativeLibs` is true: checked with the
+   same `aapt2` command `cleanroom.sh` now runs, which this run predates
+   by minutes.
 
 The external dependencies (React Native, Hermes, Gradle's plugins) come
 from npm's registry, Google's Maven and Maven Central: they are the app's,
@@ -859,7 +913,7 @@ into the room, and the run was given a Gradle properties file and a Maven
 Central mirror (`GRADLE_PROPERTIES`, `GRADLE_INIT_DIR`), which are
 environment, not inputs. **In CI, observed**, the workflow's build job ran the same clean room
 after `single/build.sh`, on a GitHub runner without the proxy and its
-settings ([job 128893618768](https://github.com/mwagner-webdev/botlish/actions/runs/42533820805/job/128893618768),
+settings, before the app's packaging fix (section 16) ([job 128893618768](https://github.com/mwagner-webdev/botlish/actions/runs/42533820805/job/128893618768),
 at `be3d4018`): result passed.
 * The Botlish steps touched nothing of the checkout and ran no Tcl of the
   system.
@@ -991,7 +1045,9 @@ moves (`BOTLISH_RN timing ...`), and the acceptance logs each launch's
 the CI run's artifacts (pending, section 16).
 
 **Footprint, observed** (`results/footprint.txt`; local release builds,
-React Native 0.88.1, arm64-v8a only):
+React Native 0.88.1, arm64-v8a only). Native libraries are compressed in
+the APK and extracted at installation, the app's packaging (section 16).
+The template was built with the same packaging.
 
 | artifact | bytes |
 |---|---:|
@@ -999,12 +1055,13 @@ React Native 0.88.1, arm64-v8a only):
 | the tool's program (static, stripped) | 841,736 |
 | `react-native-botlish-game-0.1.0.tgz` (14 files, 1,151,883 unpacked) | 452,355 |
 | `react-native-botlish-textkit-0.1.0.tgz` | 425,017 |
-| `libgame.so`: the package's (the manifest's) / in the APK | 1,093,032 / 756,136 |
-| `libtextkit.so`: the package's / in the APK | 1,055,160 / 732,104 |
-| the React Native template's APK, arm64-v8a, no Botlish package | 19,028,306 |
-| the 2048 app's APK, both packages | 20,601,745 (+1,573,439, +8.3%) |
-| `libappmodules.so`: the template's / the app's (both adapters, both Codegen specs, the app) | 145,912 / 264,680 |
-| the JavaScript bundle: the template's / the app's (both entry points, the screens) | 1,012,412 / 1,031,056 |
+| `libgame.so`: the package's (the manifest's) / installed (stripped) / compressed in the APK | 1,093,032 / 756,136 / 361,015 |
+| `libtextkit.so`: the package's / installed / compressed in the APK | 1,055,160 / 732,104 / 336,588 |
+| the React Native template's APK, arm64-v8a, no Botlish package | 10,622,082 |
+| the 2048 app's APK, both packages | 11,285,609 (+663,527, +6.2%) |
+| `libappmodules.so` installed: the template's / the app's (both adapters, both Codegen specs, the app) | 145,912 / 264,680 |
+| the JavaScript bundle: the template's / the app's (both entry points, the screens) | 1,012,412 / 1,031,388 |
+| installed native code the two Botlish packages add (both libraries, the `libappmodules.so` difference) | 1,607,008 |
 
 Each Botlish library carries its own localized runtime, about 0.7 MB
 stripped, so two libraries cost two runtimes. Sharing one runtime between
@@ -1056,10 +1113,14 @@ nothing in the release gate requires it. Its runs on this branch:
 
     The job then made the debug build for Metro (BUILD SUCCESSFUL in
     1 min 30 s), the single-file compiler, and the clean room (section 18).
-  - **android (4 KiB pages), android (16 KiB pages): queued** since
-    00:12 UTC, waiting for a runner. Their `summary.txt` files are the
-    Android evidence. Until they pass, read section 16's status as
-    partially validated.
+  - **android (16 KiB pages): failure**
+    ([job 128909277779](https://github.com/mwagner-webdev/botlish/actions/runs/42533820805/job/128909277779),
+    03:29 to 03:52 UTC), and **android (4 KiB pages): failure**
+    ([job 128909277826](https://github.com/mwagner-webdev/botlish/actions/runs/42533820805/job/128909277826),
+    04:00 to 04:13 UTC). Both emulators booted. The app crashed at launch
+    in React Native's SoLoader (`couldn't find DSO to load:
+    libreactnative.so`), and so did every phase after it. The cause and
+    the fix are in section 16.
 
 Main's own workflows were queued or in progress, none red among those
 completed, when this branch was made (`a6977d56`) and when it was last

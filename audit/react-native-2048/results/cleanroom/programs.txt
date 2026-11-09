@@ -6,7 +6,7 @@
       2 execve("ROOM/home/.cache/botlish/native-1606c3f3-12157336-9dbff349-1550296-603dda16-17020286/botlish-native"
       2 execve("/opt/android-ndk-r29/toolchains/llvm/prebuilt/linux-x86_64/bin/ld.lld"
       2 execve("/bin/sh"
-      1 execve("ROOM/tmp/tcl_SpOUPl/react-native"
+      1 execve("ROOM/tmp/tcl_XXXXXX/react-native"
       1 execve("/opt/android-ndk-r29/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-objcopy"
       1 execve("/opt/android-ndk-r29/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar"
       1 execve("/opt/android-ndk-r29/toolchains/llvm/prebuilt/linux-x86_64/bin/clang"

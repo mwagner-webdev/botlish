@@ -105,6 +105,23 @@ android {
             proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
         }
     }
+    // The native libraries are extracted at installation
+    // (android:extractNativeLibs="true"). Kept in the APK, an arm64-v8a-only
+    // app does not start on a device whose primary ABI is another one and
+    // that runs arm64 code through Android's native bridge (an x86_64
+    // emulator, an x86_64 Chromebook): React Native's SoLoader 0.12.1 looks
+    // for in-APK libraries under Build.SUPPORTED_ABIS[0]
+    // (DirectApkSoSource's base.apk!/lib/x86_64), not under the process's
+    // own ABI, and fails with "couldn't find DSO to load: libreactnative.so".
+    // Extracted, they are in the app's native library directory (lib/arm64),
+    // where SoLoader's ApplicationSoSource finds them. Every library is
+    // 16 KiB-aligned as an ELF file, which is what loading an extracted
+    // library on a 16 KiB device needs.
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
 }
 
 dependencies {

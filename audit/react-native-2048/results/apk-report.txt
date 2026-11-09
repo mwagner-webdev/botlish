@@ -1,4 +1,5 @@
-apk app-release.apk 20601745 bytes sha256 93984a6ae2ee92a929008051028a62e2d13850ef461395a37c1049f6f3a0ec97
+ndk 27.1.12297006 (the app's build's)
+apk app-release.apk 11285609 bytes sha256 93f9bf41efade7c76b7323e45639530084dcdaba16550b8aeb5fee7ba009d2f5
 abis arm64-v8a
 so libappmodules.so 264680 bytes, LOAD alignment 0x4000 
 so libc++_shared.so 1292904 bytes, LOAD alignment 0x4000 
@@ -20,3 +21,4 @@ botlish libtextkit.so .text, .rodata and dynamic symbols identical to the genera
 libappmodules.so needs libc++_shared.so libc.so libdl.so libfbjni.so libgame.so libjsi.so liblog.so libm.so libreact_codegen_safeareacontext.so libreactnative.so libtextkit.so 
 libappmodules.so defines 0 Botlish runtime symbols
 zipalign -c -P 16 4: verification successful
+manifest extractNativeLibs true

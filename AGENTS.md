@@ -6316,7 +6316,12 @@ second, unrelated library (`textkit/textkit.bot`) and the React Native
   below the package's, and a library that is not the recorded one. The APK
   carries the package's library as the Android build strips it
   (`llvm-strip --strip-unneeded`: `tools/inspect-apk.sh` checks it byte for
-  byte), 16 KiB-aligned and zip-aligned.
+  byte), 16 KiB-aligned and zip-aligned. The example app extracts its
+  native libraries at installation (`useLegacyPackaging`). Left in the
+  APK, an arm64-v8a-only app does not start on a native-bridge device:
+  React Native's SoLoader looks for them under the device's primary ABI.
+  Keep extraction, which `inspect-apk.sh` checks, until SoLoader looks
+  under the process's own ABI.
 
 If you change `integrations/react-native/`, `examples/react-native/` or the
 native library manifest or C ABI it reads, run

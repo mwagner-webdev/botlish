@@ -11,7 +11,9 @@
 #   * every shared object's loadable segments aligned to 16 KiB, and the APK
 #     zip-aligned for 16 KiB pages (zipalign -c -P 16);
 #   * libappmodules.so needs the Botlish libraries by their SONAMEs and holds
-#     no Botlish runtime of its own (no botlish_library_* symbol).
+#     no Botlish runtime of its own (no botlish_library_* symbol);
+#   * the manifest's extractNativeLibs is true: the libraries are extracted
+#     at installation (React Native's SoLoader and the native bridge).
 #
 # OUT is build.sh's output (its generated/ packages). Exit status 1 on any
 # difference.
@@ -76,4 +78,11 @@ if "$build_tools/zipalign" -c -P 16 4 "$apk" >/dev/null; then
 else
     fail "the APK is not zip-aligned for 16 KiB pages"
 fi
+# The native libraries are extracted at installation (the app's
+# useLegacyPackaging): on a native-bridge device React Native's SoLoader finds
+# an arm64-v8a-only app's libraries only in its native library directory
+# (examples/react-native/app/android/app/build.gradle says why).
+extract=$("$build_tools/aapt2" dump xmltree --file AndroidManifest.xml "$apk" | sed -n 's/.*:extractNativeLibs([^)]*)=\([a-z]*\).*/\1/p')
+echo "manifest extractNativeLibs ${extract:-unset}"
+[[ $extract == true ]] || fail "the APK keeps its native libraries unextracted (extractNativeLibs ${extract:-unset}): an arm64-v8a app does not start on a native-bridge device"
 exit $status

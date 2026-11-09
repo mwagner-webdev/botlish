@@ -31,7 +31,8 @@
 #      environment's (NODE_DIR, JAVA_HOME, ANDROID_HOME). Nothing under
 #      node_modules is edited.
 #   3. The APK: arm64-v8a only; the library is the generated package's (as
-#      the Android build strips it), 16 KiB-aligned, zip-aligned.
+#      the Android build strips it), 16 KiB-aligned, zip-aligned; the
+#      native libraries extracted at installation (extractNativeLibs).
 #
 # RESULTS gets each step's output, the trace, the APK and summary.txt; exit
 # status 0 only when every check passed. Running the APK on Android is
@@ -188,6 +189,11 @@ if [[ -f $apk ]]; then
     note "ok every shared object's segments are 16 KiB-aligned"
     tools=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
     check "zipalign -c -P 16" "$tools/zipalign" -c -P 16 4 "$apk"
+    # Extracted at installation: React Native's SoLoader finds an
+    # arm64-v8a-only app's libraries on a native-bridge device only there
+    # (examples/react-native/app/android/app/build.gradle).
+    extract=$("$tools/aapt2" dump xmltree --file AndroidManifest.xml "$apk" | sed -n 's/.*:extractNativeLibs([^)]*)=\([a-z]*\).*/\1/p')
+    check "the native libraries are extracted at installation (extractNativeLibs ${extract:-unset})" test "$extract" = true
 fi
 rm -rf "$room"
 note "result: $([[ $status == 0 ]] && echo passed || echo FAILED)"
