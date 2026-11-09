@@ -1,0 +1,932 @@
+# consumed-fold-intermediates.test -- a fold's intermediate consumed instead
+# of copied (CONSUMED-FOLD-INTERMEDIATES-MILESTONE-1.md).
+#
+# A fold carries one value from each iteration to the next. A mutated
+# intermediate used to be a logical copy of the carried value at every
+# iteration's entry (`acc = mutable_vector#share(acc#entry)`), so that a
+# `continue` could keep and a bare `break` yield the iteration's starting
+# value -- and every iteration's first write copied the whole collection. A
+# consumed intermediate is the carried value itself: the iteration mutates
+# it in place, and the fold's initial value and every normal completion are
+# exclusive positions (hir/mutvec.tcl, "Consumed fold intermediates"). It
+# is consumed only where no `continue` or bare `break` of the fold can run
+# after the iteration may have given its header away (FoldExitsClean).
+#
+# Every program runs on the interpreter, the Tcl compiler and both native
+# backends with the consumption on and again with it off
+# (hir::mutvec::consumedFolds 0: the elaboration before this milestone, the
+# oracle): the eight outcomes must be one. The representation tests read
+# the elaborated HIR (an intermediate copied at entry is renamed
+# NAME#entry) and the native copy-on-write counters.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot native native.tcl]
+
+testConstraint nativeBuilt [expr {![catch {native::binary}]}]
+
+set ::cfiBackends {interp compile cranelift-generic cranelift}
+
+set ::cfiInts {import std::mutable_vector
+
+fn ints() -> MutableVector[int]:
+    std::mutable_vector::from_list([])
+
+}
+
+# The HIR of TEXT with the consumption ON (1) or off (0).
+proc cfiHir {text {on 1}} {
+    set saved $::hir::mutvec::consumedFolds
+    set ::hir::mutvec::consumedFolds $on
+    try {
+        return [surface::compile $text t.bot -warnings off]
+    } finally {
+        set ::hir::mutvec::consumedFolds $saved
+    }
+}
+
+# The outcome of TEXT ({value V} or {error CODE}), the same on every backend
+# with the consumption on and off; else what differs.
+proc cfiValue {text} {
+    set outcomes {}
+    foreach on {1 0} {
+        set hir [cfiHir $text $on]
+        foreach backend $::cfiBackends {
+            lappend outcomes [list $on $backend [lrange [outcomeUnderHir $backend $hir] 0 1]]
+        }
+    }
+    set distinct [lsort -unique [lmap o $outcomes {lindex $o 2}]]
+    if {[llength $distinct] != 1} {
+        return "DISAGREE: $outcomes"
+    }
+    return [lindex $distinct 0]
+}
+
+# The fold intermediates of HIR, in source order, each as written when the
+# elaboration consumed it or left it uncopied, NAME#entry when it copies it
+# at every iteration's entry.
+proc cfiFolds {hir} {
+    set result {}
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict exists $node foldBinding]} {
+            set origin [dict get $node origin]
+            lappend result [list [dict get $origin line] [dict get $origin column] \
+                [dict get $hir bindings [dict get $node foldBinding] name]]
+        }
+    }
+    return [lmap triple [lsort -integer -index 0 [lsort -integer -index 1 $result]] {lindex $triple 2}]
+}
+
+# The number of logical copies (mutable_vector#share calls) in HIR.
+proc cfiShares {hir} {
+    set n 0
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict get $node kind] eq "call" && [hir::affine::NativeName $hir $e] eq "mutable_vector#share"} {
+            incr n
+        }
+    }
+    return $n
+}
+
+# {SHARES DETACHES ELEMENTS} of HIR's native run: the copy-on-write counters
+# of its MutableVectors and MutableArrays together (native::allocationReport).
+# Always measured without GC stress: a collection at every allocation can
+# free a header that shares a backing before the write that would detach
+# it, so the counters of a run under stress are the collector's timing,
+# not the program's copies. (The values are run under stress when it is on.)
+proc cfiCounters {hir} {
+    set had [info exists ::env(BOTLISH_NATIVE_GC_STRESS)]
+    set saved [expr {$had ? $::env(BOTLISH_NATIVE_GC_STRESS) : ""}]
+    unset -nocomplain ::env(BOTLISH_NATIVE_GC_STRESS)
+    try {
+        set report [native::allocationReport $hir summary]
+    } finally {
+        if {$had} {
+            set ::env(BOTLISH_NATIVE_GC_STRESS) $saved
+        }
+    }
+    set totals {0 0 0}
+    foreach kind {mutableVector mutableArray} {
+        if {![dict exists $report $kind]} continue
+        set counts [dict get $report $kind]
+        set i 0
+        foreach field {shares detaches detachElements} {
+            lset totals $i [expr {[lindex $totals $i] + [dict getdef $counts $field 0]}]
+            incr i
+        }
+    }
+    return $totals
+}
+
+# {VALUE FOLDS COUNTERS-ON COUNTERS-OFF} of TEXT: its one outcome (cfiValue),
+# its fold intermediates (cfiFolds) and the native copy counters with the
+# consumption on and off.
+proc cfi {text} {
+    set value [cfiValue $text]
+    set on [cfiHir $text 1]
+    set off [cfiHir $text 0]
+    return [list $value [cfiFolds $on] [cfiCounters $on] [cfiCounters $off]]
+}
+
+# The diagnostics (kind and location) of a strict compilation of TEXT with
+# the consumption ON, or "accepted".
+proc cfiDiagnostics {text on} {
+    set saved $::hir::mutvec::consumedFolds
+    set ::hir::mutvec::consumedFolds $on
+    try {
+        if {![catch {surface::compile $text t.bot -warnings off} message options]} {
+            return accepted
+        }
+        return [lmap d [dict get $options -diagnostics] {
+            set location [dict get $d location]
+            list [lindex [dict get $d errorcode] 2] [dict get $location line] [dict get $location column]
+        }]
+    } finally {
+        set ::hir::mutvec::consumedFolds $saved
+    }
+}
+
+proc cfiGcStress {script} {
+    set had [info exists ::env(BOTLISH_NATIVE_GC_STRESS)]
+    set saved [expr {$had ? $::env(BOTLISH_NATIVE_GC_STRESS) : ""}]
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    try {
+        return [uplevel 1 $script]
+    } finally {
+        if {$had} {
+            set ::env(BOTLISH_NATIVE_GC_STRESS) $saved
+        } else {
+            unset ::env(BOTLISH_NATIVE_GC_STRESS)
+        }
+    }
+}
+
+# ---------------------------------------------------------------------------
+# The census's fold (CONSTRUCT-BINDING-MUTATION-CENSUS-1.md, corpus a02)
+
+set ::cfiPush "${::cfiInts}fn f(n: int) -> int:
+    w = fold i from 0 to n with intermediate acc ints():
+        acc.push(i)
+        acc
+    w.length()
+
+f(N)
+"
+
+test cfi-push-consumed {the census's fold (a02): pushing onto a MutableVector intermediate and completing with it -- no exit -- consumes the intermediate: no entry copy in the HIR, no share, detach or copied element at run time; with the consumption off, n shares, n detaches and n(n-1)/2 elements copied; the same value everywhere} -constraints nativeBuilt -body {
+    set text [string map {N 1000} $::cfiPush]
+    list [cfi $text] [cfiShares [cfiHir $text 1]] [cfiShares [cfiHir $text 0]]
+} -result {{{value 1000} acc {0 0 0} {1000 1000 499500}} 0 1}
+
+test cfi-push-linear {the copies a consumed fold makes do not grow with its length (0 at 1,000, 2,000 and 4,000 pushes), where the entry copy's grew quadratically} -constraints nativeBuilt -body {
+    lmap n {1000 2000 4000} {
+        set text [string map [list N $n] $::cfiPush]
+        list [cfiCounters [cfiHir $text 1]] [cfiCounters [cfiHir $text 0]]
+    }
+} -result {{{0 0 0} {1000 1000 499500}} {{0 0 0} {2000 2000 1999000}} {{0 0 0} {4000 4000 7998000}}}
+
+test cfi-hir-text {HIR text: a consumed intermediate keeps its name and its loop carries it, with no entry statement; a copied one is NAME#entry, bound to a share as the body's first statement} -body {
+    set text [string map {N 3} $::cfiPush]
+    set on [hir::format [cfiHir $text 1]]
+    set off [hir::format [cfiHir $text 0]]
+    list [regexp {fold \(b[0-9]+ acc\)} $on] [string match *#share* $on] \
+        [regexp {fold \(b[0-9]+ acc#entry\) binds b[0-9]+ acc} $off] [string match *mutable_vector#share* $off]
+} -result {1 0 1 1}
+
+# ---------------------------------------------------------------------------
+# Exits: `continue` and a bare `break` keep their rollback
+
+test cfi-exit-after-mutation {a `continue` or bare `break` that can run after the push (census c08, c09; the iteration's push is discarded on that path) keeps the entry copy: the intermediate stays NAME#entry and the values are the rollback's} -constraints nativeBuilt -body {
+    lmap exit {continue break} {
+        set text "${::cfiInts}fn f(xs: List\[int\]) -> List\[int\]:
+    w = fold x in xs with intermediate acc ints():
+        acc.push(x)
+        if x < 0:
+            $exit
+        acc
+    loop y in w:
+        y
+
+f(\[1, -2, 3\])
+"
+        lrange [cfi $text] 0 1
+    }
+} -result {{{value {[1, 3]}} acc#entry} {{value {[1]}} acc#entry}}
+
+test cfi-exit-before-mutation {an exit that runs before the iteration gives the intermediate away -- a `continue` first, a `break` after only reading it (`acc.length()`), a bare fold ended by such a break -- carries the header unchanged: the intermediate is consumed, nothing is copied, and the exit's value is the rollback's} -constraints nativeBuilt -body {
+    set a "${::cfiInts}fn f(xs: List\[int\]) -> List\[int\]:
+    w = fold x in xs with intermediate acc ints():
+        if x < 0:
+            continue
+        acc.push(x)
+        acc
+    loop y in w:
+        y
+
+f(\[1, -2, 3, -4, 5\])
+"
+    set b "${::cfiInts}fn f(xs: List\[int\]) -> List\[int\]:
+    w = fold x in xs with intermediate acc ints():
+        if acc.length() >= 3:
+            break
+        acc.push(x)
+        acc
+    loop y in w:
+        y
+
+f(\[1, 2, 3, 4, 5\])
+"
+    set c "${::cfiInts}fn f() -> List\[int\]:
+    w = fold with intermediate acc ints():
+        if acc.length() == 5:
+            break
+        acc.push(acc.length() * 2)
+        acc
+    loop y in w:
+        y
+
+f()
+"
+    list [cfi $a] [cfi $b] [cfi $c]
+} -result {{{value {[1, 3, 5]}} acc {0 0 0} {5 3 3}} {{value {[1, 2, 3]}} acc {0 0 0} {4 3 3}} {{value {[0, 2, 4, 6, 8]}} acc {0 0 0} {6 5 10}}}
+
+test cfi-exit-after-give-away {an exit after anything that gives the intermediate's header away keeps the copy: a use that moves it to a local the body then mutates, a place parameter's argument, a push before a handled call whose handler continues, an inner loop that pushes before a break, a bare fold's break after its push -- and every value is the rollback's} -constraints nativeBuilt -body {
+    set moved "${::cfiInts}fn f(xs: List\[int\]) -> List\[int\]:
+    w = fold x in xs with intermediate acc ints():
+        nxt = acc
+        nxt.push(x)
+        if x < 0:
+            continue
+        nxt
+    loop y in w:
+        y
+
+f(\[1, -2, 3\])
+"
+    set place "${::cfiInts}fn add(place v: MutableVector\[int\], x: int):
+    v.push(x)
+
+fn f(xs: List\[int\]) -> List\[int\]:
+    w = fold x in xs with intermediate acc ints():
+        add(acc, x)
+        if x < 0:
+            continue
+        acc
+    loop y in w:
+        y
+
+f(\[1, -2, 3\])
+"
+    set handler "${::cfiInts}error Odd
+
+fn check(x: int) -> int errors Odd:
+    if x == 1 or x == 3:
+        fail Odd
+    x
+
+fn f(xs: List\[int\]) -> List\[int\]:
+    w = fold x in xs with intermediate acc ints():
+        acc.push(x)
+        y = check(x):
+            on Odd:
+                continue
+        acc.push(y * 10)
+        acc
+    loop y in w:
+        y
+
+f(\[1, 2, 3, 4\])
+"
+    set inner "${::cfiInts}fn f(rows: List\[List\[int\]\]) -> List\[int\]:
+    w = fold row in rows with intermediate acc ints():
+        loop x in row:
+            acc.push(x)
+        if acc.length() > 3:
+            break
+        acc
+    loop y in w:
+        y
+
+f(\[\[1, 2\], \[3, 4\], \[5\]\])
+"
+    set bare "${::cfiInts}fn f() -> List\[int\]:
+    w = fold with intermediate acc ints():
+        acc.push(acc.length() * 2)
+        if acc.length() == 5:
+            break
+        acc
+    loop y in w:
+        y
+
+f()
+"
+    lmap text [list $moved $place $handler $inner $bare] {
+        lrange [cfi $text] 0 1
+    }
+} -result {{{value {[1, 3]}} acc} {{value {[1, 3]}} acc#entry} {{value {[2, 20, 4, 40]}} acc#entry} {{value {[1, 2]}} acc#entry} {{value {[0, 2, 4, 6]}} acc#entry}}
+
+test cfi-exit-after-conditional-mutation {a push on one path only still keeps the copy for an exit that can follow it: in the `else` branch of an `if`, in a handler's body, in the condition of the `if` whose branch exits (a place helper), or as a nested fold's initial value at the intermediate's last use (the intermediate, never mutated itself, stays an alias and the nested fold's initial value a copy) -- and on that path the exit discards it} -constraints nativeBuilt -body {
+    set else "${::cfiInts}fn f(xs: List\[int\]) -> List\[int\]:
+    log = ints()
+    w = fold x in xs with intermediate acc ints():
+        if x > 0:
+            log.push(x)
+        else:
+            acc.push(x)
+        if x < 0:
+            continue
+        acc
+    loop y in w:
+        y
+
+f(\[1, -2, 0, 3\])
+"
+    set handler "${::cfiInts}error Odd
+
+fn check(x: int) -> int errors Odd:
+    if x == 3:
+        fail Odd
+    x
+
+fn f(xs: List\[int\]) -> List\[int\]:
+    w = fold x in xs with intermediate acc ints():
+        y = check(x):
+            on Odd:
+                acc.push(x)
+                0
+        if x == 3:
+            break
+        acc.push(y)
+        acc
+    loop y in w:
+        y
+
+f(\[1, 2, 3, 4\])
+"
+    set condition "${::cfiInts}fn bumped(place v: MutableVector\[int\]) -> int:
+    v.push(0)
+    v.length()
+
+fn f(xs: List\[int\]) -> List\[int\]:
+    w = fold x in xs with intermediate acc ints():
+        if bumped(acc) > 4:
+            break
+        acc.push(x)
+        acc
+    loop y in w:
+        y
+
+f(\[1, 2, 3, 4\])
+"
+    set nested "${::cfiInts}fn f(xs: List\[int\]) -> List\[int\]:
+    w = fold x in xs with intermediate acc ints():
+        n = fold z in \[1, 2\] with intermediate q acc:
+            q.push(z)
+            q
+        if x < 0:
+            continue
+        n
+    loop y in w:
+        y
+
+f(\[5, -1, 6\])
+"
+    lmap text [list $else $handler $condition $nested] {
+        lrange [cfi $text] 0 1
+    }
+} -result {{{value {[0]}} acc#entry} {{value {[1, 2]}} acc#entry} {{value {[0, 1, 0, 2]}} acc#entry} {{value {[1, 2, 1, 2]}} {acc q}}}
+
+test cfi-int-field-read {a read of an Int field of a struct intermediate, the last use of that field before a `break`, gives no header away: consumed} -constraints nativeBuilt -body {
+    cfi "${::cfiInts}struct Acc:
+    items: MutableVector\[int\]
+    count: int
+
+fn f(xs: List\[int\]) -> List\[int\]:
+    t = fold x in xs with intermediate a Acc {items: ints(), count: 0}:
+        if a.count > 100:
+            break
+        a.items.push(x)
+        Acc {items: a.items, count: 0}
+    loop y in t.items:
+        y
+
+f(\[4, 5, 6\])
+"
+} -result {{value {[4, 5, 6]}} a {0 0 0} {3 3 3}}
+
+test cfi-exit-of-inner-loop {a `break` or `continue` of an inner loop is not one of the fold's: it carries nothing of the fold's, and the fold's intermediate, pushed inside that inner loop, is consumed} -constraints nativeBuilt -body {
+    cfi "${::cfiInts}fn f(rows: List\[List\[int\]\]) -> List\[int\]:
+    w = fold row in rows with intermediate acc ints():
+        loop x in row:
+            if x < 0:
+                break
+            if x == 0:
+                continue
+            acc.push(x)
+        acc
+    loop y in w:
+        y
+
+f(\[\[1, -1, 2\], \[3, 0, 4\], \[-5, 6\]\])
+"
+} -result {{value {[1, 3, 4]}} acc {0 0 0} {3 2 1}}
+
+test cfi-handler-before-mutation {a handler that continues, on a call made before the intermediate is touched, is an exit before the give-away: consumed} -constraints nativeBuilt -body {
+    cfi "${::cfiInts}error Odd
+
+fn check(x: int) -> int errors Odd:
+    if x == 1 or x == 3:
+        fail Odd
+    x
+
+fn f(xs: List\[int\]) -> List\[int\]:
+    w = fold x in xs with intermediate acc ints():
+        y = check(x):
+            on Odd:
+                continue
+        acc.push(y * 10)
+        acc
+    loop y in w:
+        y
+
+f(\[1, 2, 3, 4\])
+"
+} -result {{value {[20, 40]}} acc {0 0 0} {4 2 1}}
+
+# ---------------------------------------------------------------------------
+# Exclusive incoming values
+
+test cfi-initial-shared {an initial value another binding still holds is copied once, at the fold's start, never at each iteration: the fold's pushes never reach it (a local read after the fold, one mutated after it too)} -constraints nativeBuilt -body {
+    set read "${::cfiInts}fn f(n: int) -> List\[int\] errors IndexNotFound:
+    v = std::mutable_vector::from_list(\[100\])
+    w = fold i from 0 to n with intermediate acc v:
+        acc.push(i)
+        acc
+    \[v.length(), w.length(), v.at(0), w.at(3)\]
+
+r = f(3):
+    on IndexNotFound:
+        \[\]
+r
+"
+    set mutated "${::cfiInts}fn f(n: int) -> List\[int\]:
+    v = ints()
+    v.push(1)
+    w = fold i from 0 to n with intermediate acc v:
+        acc.push(i)
+        acc
+    v.push(2)
+    w.push(3)
+    \[v.length(), w.length()\]
+
+f(4)
+"
+    list [cfi $read] [cfi $mutated]
+} -result {{{value {[1, 4, 100, 2]}} acc {1 1 1} {3 3 6}} {{value {[2, 6]}} acc {1 1 1} {6 6 16}}}
+
+test cfi-initial-moved {an initial value at its binding's last use moves into the fold: nothing is copied} -constraints nativeBuilt -body {
+    cfi "${::cfiInts}fn f(n: int) -> int:
+    v = ints()
+    v.push(7)
+    w = fold i from 0 to n with intermediate acc v:
+        acc.push(i)
+        acc
+    w.length()
+
+f(5)
+"
+} -result {{value 6} acc {0 0 0} {5 5 15}}
+
+test cfi-completion-shared {a normal completion with a value another binding still holds is copied for the fold: the next iterations' pushes never reach it} -constraints nativeBuilt -body {
+    cfi "${::cfiInts}fn f(n: int) -> List\[int\]:
+    u = std::mutable_vector::from_list(\[7\])
+    w = fold i from 0 to n with intermediate acc ints():
+        acc.push(i)
+        if i == 1:
+            u
+        else:
+            acc
+    \[u.length(), w.length()\]
+
+f(4)
+"
+} -result {{value {[1, 3]}} acc {1 1 1} {4 4 4}}
+
+test cfi-struct-completion-fields {a completion that is a struct literal is exclusive field by field: a field moved into it (the pushed vector) stays uncopied, a field another binding still holds is copied -- once per iteration, never the pushed one -- and the later push onto that field never reaches the other binding} -constraints nativeBuilt -body {
+    cfi "${::cfiInts}struct Pair:
+    mine: MutableVector\[int\]
+    theirs: MutableVector\[int\]
+
+fn f(n: int) -> List\[int\]:
+    other = std::mutable_vector::from_list(\[5\])
+    t = fold i from 0 to n with intermediate p Pair {mine: ints(), theirs: ints()}:
+        p.mine.push(i)
+        Pair {mine: p.mine, theirs: other}
+    t.theirs.push(1)
+    \[t.mine.length(), t.theirs.length(), other.length()\]
+
+f(10)
+"
+} -result {{value {[10, 2, 1]}} p {10 1 1} {22 11 46}}
+
+test cfi-if-completion {an `if` whose branches each complete with the intermediate: every branch's value is a move, and the fold is consumed} -constraints nativeBuilt -body {
+    cfi "${::cfiInts}fn f(n: int) -> List\[int\]:
+    w = fold i from 0 to n with intermediate acc ints():
+        if i < 5:
+            acc.push(i)
+            acc
+        else:
+            acc.push(0 - i)
+            acc
+    loop y in w:
+        y
+
+f(8)
+"
+} -result {{value {[0, 1, 2, 3, 4, -5, -6, -7]}} acc {0 0 0} {8 8 28}}
+
+test cfi-fold-value-fresh {a consumed fold's value is exclusive: a local bound to it and mutated after makes no copy, nor does a caller mutating the result of a function that returns one} -constraints nativeBuilt -body {
+    set local "${::cfiInts}fn f(n: int) -> List\[int\]:
+    w = fold i from 0 to n with intermediate acc ints():
+        acc.push(i)
+        acc
+    w.push(99)
+    loop y in w:
+        y
+
+f(3)
+"
+    set returned "${::cfiInts}fn build(n: int) -> MutableVector\[int\]:
+    fold i from 0 to n with intermediate acc ints():
+        acc.push(i)
+        acc
+
+fn f() -> int:
+    v = build(4)
+    v.push(9)
+    v.push(9)
+    v.length()
+
+f()
+"
+    list [cfi $local] [cfi $returned]
+} -result {{{value {[0, 1, 2, 99]}} acc {0 0 0} {4 4 6}} {{value 6} acc {0 0 0} {5 5 10}}}
+
+# ---------------------------------------------------------------------------
+# Other collections and values
+
+test cfi-mutable-array {a MutableArray intermediate: set in place, consumed; an initial value read after the fold is copied once} -constraints nativeBuilt -body {
+    cfi {import std::mutable_array
+
+fn f(n: int) -> List[int] errors IndexNotFound:
+    a = std::mutable_array::create(4, 0)
+    w = fold i from 0 to n with intermediate acc a:
+        if i < 4:
+            acc.set(i, i + 10)
+        else:
+            acc.set(i - 4, i + 20)
+        acc
+    [a.at(1), w.at(1), w.at(3)]
+
+r = f(8):
+    on IndexNotFound:
+        []
+r
+}
+} -result {{value {[0, 25, 27]}} acc {1 1 4} {8 8 32}}
+
+test cfi-struct-intermediate {a struct of two vectors (census a05), one pushed per iteration; a struct carrying a count completed by a new struct literal of its fields; a struct whose fold continues before any push: each consumed, no copy} -constraints nativeBuilt -body {
+    set a05 "${::cfiInts}struct Acc:
+    evens: MutableVector\[int\]
+    odds: MutableVector\[int\]
+
+fn split(n: int) -> List\[int\]:
+    t = fold i from 0 to n with intermediate a Acc {evens: ints(), odds: ints()}:
+        if i < 100:
+            a.evens.push(i)
+        else:
+            a.odds.push(i)
+        a
+    \[t.evens.length(), t.odds.length()\]
+
+split(200)
+"
+    set literal "${::cfiInts}struct Acc:
+    evens: MutableVector\[int\]
+    odds: MutableVector\[int\]
+    count: int
+
+fn f(n: int) -> List\[int\]:
+    t = fold i from 0 to n with intermediate a Acc {evens: ints(), odds: ints(), count: 0}:
+        if a.count < 3:
+            a.evens.push(i)
+        else:
+            a.odds.push(i)
+        Acc {evens: a.evens, odds: a.odds, count: a.count + 1}
+    \[t.evens.length(), t.odds.length(), t.count\]
+
+f(10)
+"
+    set skip "${::cfiInts}struct Acc:
+    evens: MutableVector\[int\]
+    odds: MutableVector\[int\]
+
+fn f(n: int) -> List\[int\]:
+    t = fold i from 0 to n with intermediate a Acc {evens: ints(), odds: ints()}:
+        if i == 5:
+            continue
+        if i < 3:
+            a.evens.push(i)
+        else:
+            a.odds.push(i)
+        a
+    \[t.evens.length(), t.odds.length()\]
+
+f(10)
+"
+    list [cfi $a05] [cfi $literal] [cfi $skip]
+} -result {{{value {[100, 100]}} a {0 0 0} {400 200 9900}} {{value {[3, 7, 10]}} a {0 0 0} {20 10 24}} {{value {[3, 6]}} a {0 0 0} {20 9 18}}}
+
+test cfi-mutable-map {a MutableMap intermediate updated through std::mutable_map::set (a generic place parameter), and a fold over a MutableMap (the loop protocol's `continue` skips dead positions first): both consumed, no copy} -constraints nativeBuilt -body {
+    set into {import std::mutable_map
+
+fn f(keys: List[str]) -> List[int]:
+    m = fold k in keys with intermediate acc std::mutable_map::create[str, int]():
+        acc.set(k, 1)
+        acc
+    [m.length()]
+
+f(["a", "b", "a", "c"])
+}
+    set over {import std::mutable_map
+import std::mutable_vector
+
+fn ints() -> MutableVector[int]:
+    std::mutable_vector::from_list([])
+
+fn f() -> List[int] errors std::mutable_map::KeyNotFound:
+    m = std::mutable_map::create[str, int]()
+    m.set("a", 1)
+    m.set("b", 2)
+    m.set("c", 3)
+    m.remove("b")
+    w = fold e in m with intermediate acc ints():
+        acc.push(e.value)
+        acc
+    loop y in w:
+        y
+
+r = f():
+    on std::mutable_map::KeyNotFound:
+        []
+r
+}
+    list [cfi $into] [cfi $over]
+} -result {{{value {[3]}} acc {0 0 0} {20 16 38}} {{value {[1, 3]}} acc {0 0 0} {3 2 1}}}
+
+test cfi-mutable-set {a MutableSet intermediate updated through std::mutable_set::add: consumed, no copy} -constraints nativeBuilt -body {
+    cfi {import std::mutable_set
+
+fn f(xs: List[int]) -> List[int]:
+    s = fold x in xs with intermediate acc std::mutable_set::create[int]():
+        acc.add(x)
+        acc
+    [s.length()]
+
+f([3, 1, 3, 2, 1])
+}
+} -result {{value {[3]}} acc {0 0 0} {20 12 33}}
+
+test cfi-immutable-intermediates {a fold whose intermediate is never mutated -- a scalar, a List, a vector carried unchanged -- is elaborated exactly as before: no copy either way} -constraints nativeBuilt -body {
+    set scalar {fn f(xs: List[int]) -> int:
+    fold x in xs with intermediate acc 0:
+        acc + x
+
+f([1, 2, 3])
+}
+    set carried "${::cfiInts}fn f(xs: List\[int\]) -> int:
+    v = ints()
+    v.push(5)
+    w = fold x in xs with intermediate acc v:
+        if x < 0:
+            continue
+        acc
+    w.length()
+
+f(\[1, -2, 3\])
+"
+    list [cfi $scalar] [cfi $carried] [cfiShares [cfiHir $carried 1]] [cfiShares [cfiHir $carried 0]]
+} -result {{{value 6} acc {0 0 0} {0 0 0}} {{value 1} acc {0 0 0} {0 0 0}} 0 0}
+
+test cfi-generic {a fold inside a generic function, its intermediate of an imprinted element type: consumed} -constraints nativeBuilt -body {
+    cfi {import std::mutable_vector
+
+fn doubled(xs: List[T]) -> MutableVector[T]:
+    fold x in xs with intermediate acc std::mutable_vector::from_list(xs):
+        acc.push(x)
+        acc
+
+fn f() -> List[int]:
+    a = doubled([1, 2, 3])
+    b = doubled(["x"])
+    [a.length(), b.length()]
+
+f()
+}
+} -result {{value {[6, 2]}} acc {0 0 0} {4 4 13}}
+
+# ---------------------------------------------------------------------------
+# Nested folds and nesting
+
+test cfi-nested-folds {nested folds carrying one vector (census a06): the inner fold's initial value is the outer intermediate's last use, so the outer intermediate -- never mutated itself -- is consumed too, and the outer body's completion, the inner fold, is exclusive: no copy at any level} -constraints nativeBuilt -body {
+    cfi "${::cfiInts}fn f(rows: List\[List\[int\]\]) -> int:
+    w = fold row in rows with intermediate acc ints():
+        fold x in row with intermediate inner acc:
+            inner.push(x)
+            inner
+    w.length()
+
+f(\[\[1, 2\], \[3\], \[4, 5, 6\]\])
+"
+} -result {{value 6} {acc inner} {0 0 0} {6 6 15}}
+
+test cfi-nested-inner-exit {an inner fold that continues after its push keeps its own copy; the outer fold, whose completion the inner fold is, is decided on its own} -constraints nativeBuilt -body {
+    cfi "${::cfiInts}fn f(rows: List\[List\[int\]\]) -> List\[int\]:
+    w = fold row in rows with intermediate acc ints():
+        fold x in row with intermediate inner acc:
+            inner.push(x)
+            if x < 0:
+                continue
+            inner
+    loop y in w:
+        y
+
+f(\[\[1, -1, 2\], \[3\], \[-5, 6\]\])
+"
+} -result {{value {[1, 2, 3, 6]}} {acc inner#entry} {6 6 10} {6 6 10}}
+
+# ---------------------------------------------------------------------------
+# Errors, returns, coroutines
+
+test cfi-error-leaves-fold {a fold left by an error after its push has no value; the caller's vector, the fold's initial value through a value parameter, is unchanged} -constraints nativeBuilt -body {
+    cfi "${::cfiInts}error Boom
+
+fn g(v: MutableVector\[int\], n: int) -> int errors Boom:
+    w = fold i from 0 to n with intermediate acc v:
+        acc.push(i)
+        if i == 2:
+            fail Boom
+        acc
+    w.length()
+
+fn f() -> List\[int\]:
+    v = std::mutable_vector::from_list(\[9\])
+    r = g(v, 5):
+        on Boom:
+            -1
+    \[r, v.length()\]
+
+f()
+"
+} -result {{value {[-1, 1]}} acc {1 1 1} {3 3 6}}
+
+test cfi-return-mid {a `return` from inside the fold after the push returns what the iteration computed: consumed, the same value} -constraints nativeBuilt -body {
+    cfi "${::cfiInts}fn f(xs: List\[int\]) -> List\[int\]:
+    w = fold x in xs with intermediate acc ints():
+        acc.push(x)
+        if x == 0:
+            return \[0 - acc.length()\]
+        acc
+    loop y in w:
+        y
+
+f(\[4, 5, 0, 6\])
+"
+} -result {{value {[-3]}} acc {0 0 0} {3 3 3}}
+
+test cfi-coroutine {a yield inside the fold suspends with the carried vector live: the resumer observes the lengths, the fold is consumed, the values are the copy's} -constraints nativeBuilt -body {
+    cfi {import std::coroutine
+import std::mutable_vector
+
+fn ints() -> MutableVector[int]:
+    std::mutable_vector::from_list([])
+
+fn producer(n: int) -> int:
+    w = fold i from 0 to n with intermediate acc ints():
+        acc.push(i)
+        yield acc.length()
+        acc
+    w.length()
+
+fn f() -> List[int]:
+    coroutine {step, first} = producer(3)
+    a = step()
+    b = step()
+    c = step()
+    [first, a, b, c]
+
+f()
+}
+} -result {{value {[1, 2, 3, 3]}} acc {0 0 0} {3 3 3}}
+
+# ---------------------------------------------------------------------------
+# What the change leaves alone
+
+test cfi-diagnostics-unchanged {the consumption is an elaboration after the checks: every rejected program of the census corpus (rNN, the fold proof interaction p01) reports exactly the same diagnostics with it on and off} -body {
+    set dir [file join $::projectRoot audit construct-binding-mutation corpus]
+    set result {}
+    foreach path [lsort [glob -directory $dir r*.bot p01*.bot]] {
+        set text [core::ReadFile $path]
+        set on [cfiDiagnostics $text 1]
+        lappend result [expr {$on eq [cfiDiagnostics $text 0] && $on ne "accepted"}]
+    }
+    lsort -unique $result
+} -result 1
+
+test cfi-initial-read-out {a fold's initial value that is a place's read-out -- a vector mutated before the fold and read after it -- is copied into the fold (it used to stop the elaboration: hir::mutvec::ReplaceChild knew no foldInitial), with the consumption on and off} -constraints nativeBuilt -body {
+    cfi "${::cfiInts}fn f(n: int) -> List\[int\]:
+    v = ints()
+    v.push(100)
+    w = fold i from 0 to n with intermediate acc v:
+        acc.push(i)
+        acc
+    v.push(7)
+    \[v.length(), w.length()\]
+
+f(3)
+"
+} -result {{value {[2, 4]}} acc {1 1 1} {4 4 7}}
+
+test cfi-executable {consumed folds in a standalone executable -- a pushed vector, a struct whose fold continues before its pushes -- and one that keeps its copy (a `continue` after the push), plain and under GC stress: the values of every in-process backend} -constraints executableAot -body {
+    set dir [makeDirectory {consumed folds executable}]
+    set path [file join $dir program.bot]
+    set channel [open $path w]
+    fconfigure $channel -encoding utf-8 -translation lf
+    puts $channel "${::cfiInts}struct Acc:
+    evens: MutableVector\[int\]
+    odds: MutableVector\[int\]
+
+fn pushed(n: int) -> int:
+    w = fold i from 0 to n with intermediate acc ints():
+        acc.push(i)
+        acc
+    w.length()
+
+fn split(n: int) -> List\[int\]:
+    t = fold i from 0 to n with intermediate a Acc {evens: ints(), odds: ints()}:
+        if i == 3:
+            continue
+        if i < 5:
+            a.evens.push(i)
+        else:
+            a.odds.push(i)
+        a
+    \[t.evens.length(), t.odds.length()\]
+
+fn rolled(xs: List\[int\]) -> int:
+    w = fold x in xs with intermediate acc ints():
+        acc.push(x)
+        if x < 0:
+            continue
+        acc
+    w.length()
+
+\[pushed(300), split(9), rolled(\[1, -2, 3\])\]
+"
+    close $channel
+    try {
+        set hir [surface::readProgramFile $path -warnings off]
+        set values [lmap backend $::cfiBackends {lindex [outcomeUnderHir $backend $hir] 1}]
+        exec [info nameofexecutable] [file join $::projectRoot main.tcl] -warnings off -emit-native-executable $path
+        lappend values [standaloneValue [file rootname $path]]
+        lappend values [standaloneValue [file rootname $path] BOTLISH_NATIVE_GC_STRESS 1]
+        list [lsort -unique $values] [cfiFolds $hir]
+    } finally {
+        removeDirectory {consumed folds executable}
+    }
+} -result {{{[300, [4, 4], 2]}} {acc a acc#entry}}
+
+test cfi-gc-stress {under GC stress (a collection attempt at every allocation site) a consumed fold's native run gives the same values} -constraints nativeBuilt -body {
+    cfiGcStress {
+        lmap text [list [string map {N 200} $::cfiPush] "${::cfiInts}struct Acc:
+    evens: MutableVector\[int\]
+    odds: MutableVector\[int\]
+
+fn split(n: int) -> List\[int\]:
+    t = fold i from 0 to n with intermediate a Acc {evens: ints(), odds: ints()}:
+        if i == 7:
+            continue
+        if i < 10:
+            a.evens.push(i)
+        else:
+            a.odds.push(i)
+        a
+    \[t.evens.length(), t.odds.length()\]
+
+split(20)
+"] {
+            lrange [outcomeUnderHir cranelift [cfiHir $text 1]] 0 1
+        }
+    }
+} -result {{value 200} {value {[9, 10]}}}
+
+cleanupTests

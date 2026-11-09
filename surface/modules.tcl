@@ -1287,6 +1287,7 @@ proc surface::modules::Ref {ns name span kind rooted} {
 # NODE after the traversal in progress: its qualified references recorded,
 # and rewritten, in source order.
 proc surface::modules::Walk {node} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     if {[dict exists $node imprints]} {
         # A call's explicit imprints (C-ABI-TYPES.md) name types like any
         # annotation.
@@ -1536,6 +1537,7 @@ proc surface::modules::ErrorRef {spelling span} {
 # each located at SPAN, and rewritten -- and the qualified errors of a
 # function type's `errors` list.
 proc surface::modules::TypeRefs {type span} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     if {$type eq ""} {
         return $type
     }
@@ -1611,6 +1613,7 @@ proc surface::modules::RemapFlags {flags fileId} {
 # NODE (an hir/syntax.tcl node, as surface::lower::Sequence produces) with
 # every origin in its subtree repointed at FILEID.
 proc surface::modules::RemapFile {node fileId} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     dict set node origin [RemapOrigin [dict get $node origin] $fileId]
     switch -- [dict get $node kind] {
         bind {
@@ -1939,15 +1942,15 @@ proc surface::modules::LoadNamespace {stateVar name usedAtSpan {path ""} {scope 
     }
     set intrinsic [hir::cabi::NamespaceTypeDecls $name [dict get $state target] [dict get $ast span]]
     if {$intrinsic ne ""} {
-        set decls [concat $intrinsic $decls]
+        set decls [list {*}$intrinsic {*}$decls]
         dict set state loadedTypes $name [concat [lmap d $intrinsic {dict get $d name}] [dict get $state loadedTypes $name]]
     }
-    dict set state typeDecls [concat [dict get $state typeDecls] $decls]
-    dict set state errorDecls [concat [dict get $state errorDecls] $errorDecls]
-    dict set state structDecls [concat [dict get $state structDecls] $structDecls]
-    dict set state traitDecls [concat [dict get $state traitDecls] $traitDecls]
-    dict set state externDecls [concat [dict get $state externDecls] [RemapDecls $externDecls $fileId]]
-    dict set state linkDecls [concat [dict get $state linkDecls] [RemapDecls [LinkDecls state $linkDecls $name] $fileId]]
+    dict set state typeDecls [list {*}[dict get $state typeDecls] {*}$decls]
+    dict set state errorDecls [list {*}[dict get $state errorDecls] {*}$errorDecls]
+    dict set state structDecls [list {*}[dict get $state structDecls] {*}$structDecls]
+    dict set state traitDecls [list {*}[dict get $state traitDecls] {*}$traitDecls]
+    dict set state externDecls [list {*}[dict get $state externDecls] {*}[RemapDecls $externDecls $fileId]]
+    dict set state linkDecls [list {*}[dict get $state linkDecls] {*}[RemapDecls [LinkDecls state $linkDecls $name] $fileId]]
     set statements [lmap node [LowerStatements $state $name $executable] {RemapFile $node $fileId}]
     set origin [RemapOrigin [surface::lower::Origin [dict get $ast span] "namespace"] $fileId]
     set section [dict create namespace $name nodes $statements origin $origin \
@@ -1955,7 +1958,10 @@ proc surface::modules::LoadNamespace {stateVar name usedAtSpan {path ""} {scope 
     # The module's declaration (DIRECT-MODULES.md): `direct module`, if the
     # file is declared direct -- {direct 0|1 origin ORIGIN-OF-THE-MARKER}.
     dict set state moduleDecls $name [ModuleDecl $ast $fileId]
-    dict set state sections [concat [dict get $state sections] [list $section]]
+    # (Appended, never concatenated: Tcl 9.0.1's concat gives every element
+    # of its later lists a string, here a module's whole syntax with one at
+    # each of its levels, quadratic in its nesting.)
+    dict lappend state sections $section
     dict set state stack [lrange [dict get $state stack] 0 end-1]
     dict set state physical [lrange [dict get $state physical] 0 end-1]
 }
@@ -2676,6 +2682,7 @@ proc surface::modules::StaticSites {ast} {
 }
 
 proc surface::modules::StaticSitesWalk {node sitesVar} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $sitesVar sites
     if {[dict get $node kind] eq "static"} {
         lappend sites [dict create id [dict get $node id] operation [dict get $node operation] \
@@ -2998,10 +3005,10 @@ proc surface::modules::BuildProgram {ast strict {target ""} {root ""} {recover 0
     }
     lassign [surface::lower::SplitTypeDecls [dict get $ast body]] executable ownDecls ownErrorDecls ownStructDecls ownTraitDecls \
         ownExternDecls ownLinkDecls
-    set decls [concat [dict get $state typeDecls] $ownDecls]
-    set errorDecls [concat [dict get $state errorDecls] $ownErrorDecls]
-    set structDecls [concat [dict get $state structDecls] $ownStructDecls]
-    set traitDecls [concat [dict get $state traitDecls] $ownTraitDecls]
+    set decls [list {*}[dict get $state typeDecls] {*}$ownDecls]
+    set errorDecls [list {*}[dict get $state errorDecls] {*}$ownErrorDecls]
+    set structDecls [list {*}[dict get $state structDecls] {*}$ownStructDecls]
+    set traitDecls [list {*}[dict get $state traitDecls] {*}$ownTraitDecls]
     # Every unit's declaration, the entry program's ("") included: the entry
     # program is a module like any other (DIRECT-MODULES.md, "No root-module
     # special case").
@@ -3021,8 +3028,8 @@ proc surface::modules::BuildProgram {ast strict {target ""} {root ""} {recover 0
         -files [dict get $state files] -modules $sections \
         -imports [dict get $state imports] -module-decls $moduleDecls \
         -type-decls $decls -error-decls $errorDecls -struct-decls $structDecls -trait-decls $traitDecls \
-        -foreign-decls [concat [dict get $state externDecls] $ownExternDecls] \
-        -link-decls [concat [dict get $state linkDecls] [LinkDecls state $ownLinkDecls ""]]]
+        -foreign-decls [list {*}[dict get $state externDecls] {*}$ownExternDecls] \
+        -link-decls [list {*}[dict get $state linkDecls] {*}[LinkDecls state $ownLinkDecls ""]]]
     # The target the HIR was built for, when the build read it (header,
     # "Target dependence"); "" when the HIR is every target's.
     dict set hir target [if {[dict get $state targetRead]} {dict get $state target} else {string cat ""}]

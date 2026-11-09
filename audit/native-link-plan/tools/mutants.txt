@@ -121,9 +121,9 @@ proc hir::interchange::WithoutRepresentations {hir} {
 @@ module-links-dropped the loader drops an imported module's link declarations: the program links without its binding's library
 ## surface/modules.tcl
 <<<<
-    dict set state linkDecls [concat [dict get $state linkDecls] [RemapDecls [LinkDecls state $linkDecls $name] $fileId]]
+    dict set state linkDecls [list {*}[dict get $state linkDecls] {*}[RemapDecls [LinkDecls state $linkDecls $name] $fileId]]
 ====
-    dict set state linkDecls [concat [dict get $state linkDecls] [RemapDecls [LinkDecls state {} $name] $fileId]]
+    dict set state linkDecls [list {*}[dict get $state linkDecls] {*}[RemapDecls [LinkDecls state {} $name] $fileId]]
 >>>>
 
 @@ archive-conflict-merged two archives of one library merge silently, the first one kept

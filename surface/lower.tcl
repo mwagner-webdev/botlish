@@ -446,6 +446,7 @@ proc surface::lower::OriginOf {node {role ""}} {
 # the one payload an anonymous struct value and a named construction share.
 # A field's origin is its whole initializer (name through value).
 proc surface::lower::FieldInits {node} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     set index 0
     return [lmap field [dict get $node init fields] {
         incr index
@@ -461,6 +462,7 @@ proc surface::lower::FieldInits {node} {
 # is the one statement that lowers to several nodes (Destructure), spliced in
 # place.
 proc surface::lower::Sequence {nodes} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     set result {}
     foreach node $nodes {
         if {[dict get $node kind] eq "destructure"} {
@@ -540,7 +542,7 @@ proc surface::lower::Destructure {node} {
     set source [hir::syntax::bindNode [Origin [dict get $pattern span] [dict get $node id]/pattern] \
         $temp [Node [dict get $node value]]]
     set result [hir::syntax::rootRef [OriginOf $node unit] unit]
-    return [concat [list $source] [Projections $pattern $temp] [list $result]]
+    return [list $source {*}[Projections $pattern $temp] $result]
 }
 
 # The handler syntax dicts of handled call NODE (hir/syntax.tcl's handleNode):
@@ -551,6 +553,7 @@ proc surface::lower::Destructure {node} {
 # the handler body. Nothing else of a handler is payload-specific: selection
 # stays the error name alone.
 proc surface::lower::Handlers {node} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     return [lmap handler [dict get $node handlers] {
         set suite [dict get $handler body]
         set body [Sequence [dict get $suite body]]
@@ -563,7 +566,7 @@ proc surface::lower::Handlers {node} {
             set temp [TempName $pattern]
             set payload [dict create name $temp \
                 origin [Origin [dict get $pattern span] [dict get $suite id]/payload]]
-            set body [concat [Projections $pattern $temp] $body]
+            set body [list {*}[Projections $pattern $temp] {*}$body]
         }
         dict create name [dict get $handler name] nameSpan [dict get $handler nameSpan] \
             origin [OriginOf $suite] body $body payload $payload
@@ -577,6 +580,7 @@ proc surface::lower::TempName {pattern} {
 
 # The binds of the fields of PATTERN, each reading the struct bound to TEMP.
 proc surface::lower::Projections {pattern temp} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     set nodes {}
     foreach field [dict get $pattern fields] {
         set id [dict get $field id]
@@ -687,7 +691,7 @@ proc surface::lower::CoroutineBind {node} {
     if {$first ne ""} {
         set start [hir::syntax::bindNode [dict get $first origin] [dict get $first local] $start]
     }
-    return [concat $pre [list $create $start [hir::syntax::rootRef [OriginOf $node unit] unit]]]
+    return [list {*}$pre $create $start [hir::syntax::rootRef [OriginOf $node unit] unit]]
 }
 
 # The {NAME ORIGIN} flag pairs of the function declaration or call AST node
@@ -739,6 +743,7 @@ proc surface::lower::DecimalConstant {decimal} {
 
 # The syntax node of AST NODE.
 proc surface::lower::Node {node} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     set origin [OriginOf $node]
     switch -- [dict get $node kind] {
         int {
@@ -1101,6 +1106,7 @@ proc surface::lower::Node {node} {
 # listloop, countloop or plain loop by its clauses, whether it collects or
 # folds (Node's `loop` case adds a fold's intermediate).
 proc surface::lower::LoopSyntax {node origin} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     set body [dict get $node body]
     if {[llength [dict get $node clauses]] > 1} {
         set domains {}

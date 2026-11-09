@@ -1,0 +1,32 @@
+# A finding of HTTP-CLIENT-PACKAGE-MILESTONE-1.md ("Findings", F3): with
+# std::io::path and std::str both imported, each method-style
+# "...".concat(...) was a whole-program trial build of the method-call
+# decision: std::io::path::concat (its first parameter the trait Path,
+# which a String does not satisfy) was a candidate no kind proof ruled out.
+# This program's four concat calls cost 15 builds (9 single deviations,
+# 10 s). Fixed: the kind proofs rule a trait-polymorphic candidate out for
+# a receiver that does not satisfy its trait (hir::methods::TraitMismatch,
+# METHOD-DECISION-FILTER.md), and the program takes 5 builds, none of them
+# a deviation -- the 5 it takes without std::io::path. Measured with
+# hir::buildStats (tests/helpers.tcl loaded): see the report.
+import std::io
+import std::io::fs
+import std::io::path
+import std::linux::fs
+import std::linux::io
+import std::int
+import std::str
+
+nomethod fn say(text: str, context io: std::io::IO):
+    std::io::print_line(text):
+        on std::io::WriteFailed:
+            unit
+
+fn main(context io: std::io::IO, fs: std::linux::fs::LinuxFS) -> int:
+    say("aa".concat("bb").concat("cc").concat(std::int::to_string(3)))
+    say("xx".concat("yy"))
+    0
+
+with context std::linux::io::create()
+with context std::linux::fs::create()
+main()

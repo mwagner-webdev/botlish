@@ -132,6 +132,7 @@ source [file join [file dirname [file normalize [info script]]] lower.tcl]
 source [file join [file dirname [file normalize [info script]]] prepare.tcl]
 source [file join [file dirname [file normalize [info script]]] library.tcl]
 source [file join [file dirname [file normalize [info script]]] support.tcl]
+source [file join [file dirname [file normalize [info script]]] elf.tcl]
 
 namespace eval native {
     variable home [file dirname [file normalize [info script]]]
@@ -212,7 +213,9 @@ proc native::WithProgramDirs {hir run script} {
 #   stackGuard   NATIVE LIMIT STACK for any exhausted native stack
 #   libraries    native libraries (native::library, NATIVE-LIBRARY-MILESTONE-1.md:
 #                codegen/library.rs's SUPPORTED; the archive's partial link
-#                and symbol localization are GNU binutils')
+#                and symbol localization are GNU binutils') of this host's
+#                own target; a library of another target is made through its
+#                target support package (`targetCapabilities`, below)
 #   mainThreadStartup  executables started on the process's main thread
 #                (native::executable -startup main-thread, MAIN-THREAD-
 #                STARTUP-MILESTONE-1.md: runtime/aot.rs's MAIN_THREAD_STARTUP,
@@ -252,6 +255,21 @@ namespace eval native {
         frameRoots {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
         libraries {linux-x86_64 linux-aarch64} \
         mainThreadStartup {macos-aarch64}]
+    # What the native backend makes *for* a target, on any host that has the
+    # target's support package and toolchain (ANDROID-AARCH64-TARGET-
+    # SUPPORT-MILESTONE-1.md): code kept, never run here. `libraries`: a
+    # native library's object is emitted for the target (botlish-native
+    # library --target, codegen/library.rs's `supports`) and linked with its
+    # target support package's runtime by the package's declared toolchain.
+    variable targetCapabilities [dict create \
+        libraries {linux-x86_64 linux-aarch64 android-aarch64}]
+}
+
+# Whether the native backend makes CAPABILITY (native::targetCapabilities)
+# for TARGET, whatever this host is.
+proc native::targetSupports {capability target} {
+    variable targetCapabilities
+    return [expr {$target in [dict get $targetCapabilities $capability]}]
 }
 
 # Whether the native backend has CAPABILITY (native::capabilities) on this
@@ -400,8 +418,8 @@ proc native::lowered {hir args} {
     variable unsupported
     try {
         # Its walks recurse as deep as the program nests (a left-deep `and`
-        # chain: BRANCH-FORM-BOOLEAN-LOWERING.md), under the front end's
-        # recursion floor (hir::Deep); the program then runs natively.
+        # chain: BRANCH-FORM-BOOLEAN-LOWERING.md), in segments under a
+        # driver (hir::Deep, core/deep.tcl); the program then runs natively.
         return [hir::Deep {native::lower::program [prepareHir $hir] {*}$args}]
     } trap {NATIVE UNSUPPORTED} {message options} {
         lappend unsupported [list [dict get $options -errorcode] $message]

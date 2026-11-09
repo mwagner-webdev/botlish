@@ -9,8 +9,9 @@
 # own: the kind proofs, which also choose the stand-ins the certification
 # starts from (the kind waves). These tests pin
 #
-#   * the exclusion rule (by kind, and by a named struct's declaration) and
-#     its one statement (NativeMismatch);
+#   * the exclusion rule (by kind, by a named struct's declaration and by a
+#     trait's conformance) and the one statement of each rule it asks
+#     (NativeMismatch, TraitMismatch);
 #   * what the kind waves settle and how many builds a decision takes;
 #   * that a kind proof never decides what is not unambiguously decided (an
 #     untyped receiver, a lexical candidate, no applicable method): those
@@ -131,6 +132,36 @@ proc mfWithNominalModules {script} {
     }
 }
 
+# Runs SCRIPT with two modules in a private library: std::mftr declares the
+# trait Shape (one requirement, `area`) and the trait-polymorphic `grow(s:
+# Shape, k: int)`; std::mfsq declares Square, which satisfies Shape by its
+# own `area`, Circle, which does not, and `grow(s: str, k: int)`. So
+# `X.grow(k)` has two candidates: a Square receiver fits std::mftr::grow
+# alone, a String one std::mfsq::grow alone.
+proc mfWithTraitModules {script} {
+    withPrivateLibrary {
+        set f [open [file join $::core::libraryDir mftr.bot] w]
+        puts $f "trait Shape:\n    fn area(s: Shape) -> int\n\nfn grow(s: Shape, k: int) -> int:\n    s.area() + k\n"
+        close $f
+        set f [open [file join $::core::libraryDir mfsq.bot] w]
+        puts $f "struct Square:\n    side: int\n\nstruct Circle:\n    radius: int\n\nfn area(s: Square) -> int:\n    s.side * s.side\n\nfn grow(s: str, k: int) -> int:\n    k\n"
+        close $f
+        uplevel 1 $script
+    }
+}
+
+# Receivers of both kinds of std::mftr::grow and std::mfsq::grow
+# (mfWithTraitModules): a Square parameter, a String parameter and a String
+# literal.
+set ::mfTraitReceivers "import std::mftr\nimport std::mfsq\n\nfn f(q: std::mfsq::Square, s: str) -> int:\n    q.grow(1) + s.grow(2) + \"abc\".grow(3)\n\nf(std::mfsq::Square {side: 4}, \"x\")\n"
+
+# HTTP-CLIENT-PACKAGE-MILESTONE-1.md's F3: with std::io::path imported, a
+# String's `concat` has the trait-polymorphic std::io::path::concat (its
+# first parameter the trait Path, which a String does not satisfy) beside
+# std::str::concat -- and std::io::path::concat sorts first, so a chain's
+# outer calls start on a Path view.
+set ::mfPathConcat "import std::io::path\nimport std::str\n\nfn f(a: str, b: str) -> str:\n    a.concat(b).concat(\"!\").concat(b)\n\nf(\"x\", \"y\")\n"
+
 # ---------------------------------------------------------------------------
 # The exclusion rule
 
@@ -219,6 +250,34 @@ test mf-excluded-by-nominal-identity {a module function whose declared first par
     }
 } -result {1 0 1 0 1 0 0 0 0 1}
 
+test mf-excluded-by-trait-conformance {a module function whose declared first parameter is a trait is ruled out for a receiver that does not satisfy the trait, whatever its kind -- a String (whose owner namespace std::str has no `area`), a struct whose module declares no `area` for it, a List or a C pointer (no owner at all), each rejected by the call's own check as well -- and not for one that satisfies it; a receiver of no kind (any, a trait view, never) excludes nothing; a parameter that is no trait is no trait rule's} -body {
+    mfWithTraitModules {
+        # (A rejected program: it is not monomorphized, so its HIR keeps the
+        # trait-polymorphic std::mftr::grow as declared. std::ffi::c declares
+        # the C scalar the pointer receiver points to.)
+        set hir [dict get [mfCompile "import std::mftr\nimport std::mfsq\nimport std::ffi::c\n\nfn bad() -> int:\n    \"a\"\n" 0] hir]
+        proc excluded {hir cand type} {hir::methods::ResetCache; hir::methods::Excluded $hir $cand $type}
+        list [lmap d [dict get $hir diagnostics] {dict get $d kind}] \
+            [excluded $hir std::mftr::grow str] \
+            [excluded $hir std::mftr::grow {nstruct std::mfsq::Square}] \
+            [excluded $hir std::mftr::grow {nstruct std::mfsq::Circle}] \
+            [excluded $hir std::mftr::grow {list int}] \
+            [excluded $hir std::mftr::grow {cptr std::ffi::c::Int}] \
+            [excluded $hir std::mftr::grow any] \
+            [excluded $hir std::mftr::grow {trait std::mftr::Shape {nstruct std::mfsq::Square}}] \
+            [excluded $hir std::mftr::grow never] \
+            [excluded $hir std::mfsq::grow {nstruct std::mfsq::Square}] \
+            [excluded $hir std::mfsq::grow str]
+    }
+} -result {TYPE 1 0 1 1 1 0 0 0 1 0}
+
+test mf-trait-rule-one-statement {the trait rule asks the admission the call's own check makes of an argument at a trait parameter (hir::range::ProvesValueAcceptedBy, which asks hir::traits::Accept): it states no conformance rule of its own} -body {
+    set mismatch [info body hir::methods::TraitMismatch]
+    list [regexp {hir::traits::Accept } $mismatch] [regexp {satisfies|WitnessOwner|requirement} $mismatch] \
+        [regexp {hir::traits::Accept } [info body hir::range::ProvesValueAcceptedBy]] \
+        [regexp {TraitMismatch} [info body hir::methods::Excluded]]
+} -result {1 0 1 1}
+
 # ---------------------------------------------------------------------------
 # What the kind proofs settle, and the cost
 
@@ -302,6 +361,27 @@ test mf-nominal-same-fields-excluded {a struct with the same fields as another m
 
 # ---------------------------------------------------------------------------
 # What the kind proofs leave to the candidates' own builds
+
+test mf-trait-receivers-decided {a trait-polymorphic candidate beside a function of another kind: the Square receiver satisfies the trait and is ruled out of std::mfsq::grow by kind, the String receivers do not satisfy it, so every call is settled by the kind proofs and certification needs no single deviation; the reference rule judges every candidate by its own build, and the program and its value are the reference rule's} -body {
+    mfWithTraitModules {
+        set reference [mfCompile $::mfTraitReceivers 0]
+        set decided [mfCompile $::mfTraitReceivers 1]
+        list [dict get $decided diagnostics] [dict get $decided methodDeviations] \
+            [expr {[dict get $reference methodDeviations] > 0}] \
+            [mfSame $decided $reference] [mfSame [mfCompile $::mfTraitReceivers 1 1] $reference] \
+            [outcomeUnderHir interp [dict get $decided hir]]
+    }
+} -result {{} 0 1 1 1 {value 22 {}}}
+
+test mf-trait-path-concat-chain {F3 (HTTP-CLIENT-PACKAGE-MILESTONE-1.md): a chain of `concat` on Strings with std::io::path imported. Each String receiver rules std::io::path::concat out (a String does not satisfy Path), so the kind waves settle the chain link by link, with no single deviation -- the reference rule, and the kind proofs before the trait rule, judged std::io::path::concat by a build per call -- and the program and its value are the reference rule's} -body {
+    set reference [mfCompile $::mfPathConcat 0]
+    set decided [mfCompile $::mfPathConcat 1]
+    list [dict get $decided diagnostics] [dict get $decided methodDeviations] \
+        [expr {[dict get $reference methodDeviations] > 0}] \
+        [expr {[dict get $decided builds] < [dict get $reference builds]}] \
+        [mfSame $decided $reference] [mfSame [mfCompile $::mfPathConcat 1 1] $reference] \
+        [outcomeUnderHir interp [dict get $decided hir]]
+} -result {{} 0 1 1 1 1 {value {"xy!y"} {}}}
 
 test mf-untyped-receiver-judged-by-builds {an untyped receiver fits every candidate: no kind proof rules one out, each is judged by its own build (the standing one by the first build, the other two by one each -- the trial round's, which certification reads again as their single deviations), and the call is AMBIGUOUS-METHOD-CALL as under the reference rule} -body {
     set reference [mfCompile $::mfAmbiguous 0]

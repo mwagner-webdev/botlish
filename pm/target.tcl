@@ -30,7 +30,7 @@ namespace eval pm::target {
     variable machines [dict create \
         x86_64  {elf 62 macho 0x01000007 pe 0x8664} \
         aarch64 {elf 183 macho 0x0100000c pe 0xaa64}]
-    variable formats [dict create linux elf macos macho windows pe]
+    variable formats [dict create linux elf macos macho windows pe android elf]
 }
 
 # The compiler's target table (NAME -> {os OS arch ARCH triple T ...}),
@@ -99,7 +99,7 @@ proc pm::target::facts {name} {
     }
     return [dict create name $name os $os arch $arch triple $triple format $format \
         machine [dict get $machines $arch $format] \
-        libc [expr {$os eq "linux" ? "gnu" : ""}] toolchain $toolchain \
+        libc [dict getdef {linux gnu android bionic} $os ""] toolchain $toolchain \
         frameworks [expr {$os eq "macos"}]]
 }
 
@@ -109,7 +109,7 @@ proc pm::target::facts {name} {
 proc pm::target::linkFile {name library linkage} {
     set facts [facts $name]
     switch -- [dict get $facts os] {
-        linux {
+        linux - android {
             return [dict get {static lib%s.a shared lib%s.so} $linkage]
         }
         macos {
@@ -145,6 +145,14 @@ proc pm::target::platformLibrary {name identity} {
         }
         macos {
             return [expr {[string match /usr/lib/* $identity] || [string match /System/Library/* $identity]}]
+        }
+        android {
+            # Bionic and the NDK's stable platform libraries
+            # (ANDROID-AARCH64-TARGET-SUPPORT-MILESTONE-1.md): on every
+            # device of the target's minimum API level, never bundled.
+            return [expr {$identity in {libc.so libm.so libdl.so liblog.so libandroid.so
+                libz.so libjnigraphics.so libEGL.so libGLESv2.so libGLESv3.so libvulkan.so
+                libOpenSLES.so libaaudio.so libmediandk.so libnativewindow.so libbinder_ndk.so}}]
         }
         windows {
             set lower [string tolower $identity]

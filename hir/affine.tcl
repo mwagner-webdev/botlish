@@ -376,11 +376,14 @@ proc hir::affine::ContextCopyOutMessage {hir e where {p ""}} {
 
 # The static type of binding B: its inferred type, or a parameter's entry
 # type (declared, or trusted-inferred: hir::signatures::entryTypes) when
-# inference recorded none for it.
+# inference recorded none for it. A listloop's variable has its iterable's
+# element type as HIR types the iterable: in the program's HIR and a
+# semantic instance's view that is the binding's record (hir/types.tcl's
+# RecordClause records exactly it; a poisoned iterable's `never` is `any`
+# here, which no ownership decision tells apart), in a specialization's view
+# (hir::specialize::View, which overlays expressions' types and no local's
+# record) the instance's own.
 proc hir::affine::BindingType {hir b} {
-    if {[dict get $hir bindings $b type] ne ""} {
-        return [hir::bindingType $hir $b]
-    }
     if {[dict get $hir bindings $b kind] eq "param"} {
         set block [dict get $hir scopes [dict get $hir bindings $b scope] owner]
         if {$block ne "" && [dict exists $hir exprs $block] && [dict get $hir exprs $block kind] eq "listloop"
@@ -393,6 +396,12 @@ proc hir::affine::BindingType {hir b} {
             }
             return $t
         }
+    }
+    if {[dict get $hir bindings $b type] ne ""} {
+        return [hir::bindingType $hir $b]
+    }
+    if {[dict get $hir bindings $b kind] eq "param"} {
+        set block [dict get $hir scopes [dict get $hir bindings $b scope] owner]
         if {$block ne "" && [dict exists $hir exprs $block] && [dict get $hir exprs $block kind] eq "block"} {
             set index [lsearch -exact [dict get $hir exprs $block params] $b]
             if {[dict exists $hir semanticContext] && [dict get $hir semanticContext] ne "generic"} {
@@ -1172,6 +1181,7 @@ proc hir::affine::Join {a b} {
 }
 
 proc hir::affine::Seq {hirVar exprs state} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $hirVar hir
     variable afterStates
     foreach e $exprs {
@@ -1196,6 +1206,7 @@ proc hir::affine::Seq {hirVar exprs state} {
 }
 
 proc hir::affine::Flow {hirVar e state} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $hirVar hir
     variable loopExits
     variable joinStates
@@ -2533,6 +2544,7 @@ proc hir::affine::temporaries {hir} {
 # Releases are unobservable, so the order changes no value; it is fixed so
 # runtime behavior is reproducible (AFFINE-VALUES.md, "Drop glue").
 proc hir::affine::Descriptor {hir type {exclude {}}} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     variable descriptorMemo
     variable descriptorCut
     set key [list $type $exclude [hir::resources::unwinds $hir] [hir::resources::table $hir]]
@@ -2555,6 +2567,7 @@ proc hir::affine::Descriptor {hir type {exclude {}}} {
 
 # Descriptor's walk.
 proc hir::affine::DescriptorOf {hir type exclude} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     set type [hir::types::Unrefined $type]
     if {![hir::types::IsAffine $type]} {
         # An unrestricted value owns nothing affine (every component this

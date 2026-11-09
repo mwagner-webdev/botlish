@@ -542,7 +542,9 @@ proc surface::parse {source args} {
     # Parsed with recovery either way: without -recover, the error raised is
     # every syntax diagnostic the recovering parse reports (one per
     # malformed construct and independent lexical problem, in source order).
-    set program [surface::parseTokens [dict get $lexed tokens] -recover 1]
+    # The parser's productions and the AST's walks recurse as deep as the
+    # program nests: under a driver of depth-safe recursion (core/deep.tcl).
+    set program [core::deep::run {surface::parseTokens [dict get $lexed tokens] -recover 1}]
     set diagnostics [surface::parser::Independent $lexed $program]
     if {!$recover && $diagnostics ne ""} {
         surface::raiseSyntax $diagnostics
@@ -557,7 +559,7 @@ proc surface::parse {source args} {
     dict unset program failed
     dict unset program words
     dict set program diagnostics $diagnostics
-    return [surface::ast::assignIds $program]
+    return [core::deep::run {surface::ast::assignIds $program}]
 }
 
 # The damage record of a recovering parse (LEXED the lexer's result, PROGRAM
@@ -2509,6 +2511,7 @@ proc surface::parser::ExternLineEnd {pVar what} {
 
 # Statements up to a token of a kind in STOP (not consumed).
 proc surface::parser::Statements {pVar stop} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $pVar p
     set body {}
     while {[Kind p] ni $stop} {
@@ -2618,6 +2621,7 @@ proc surface::parser::SkipBlock {pVar} {
 }
 
 proc surface::parser::Statement {pVar} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $pVar p
     set token [Peek p]
     if {[AtPrivate p]} {
@@ -2774,6 +2778,7 @@ proc surface::parser::Statement {pVar} {
 }
 
 proc surface::parser::Simple {pVar} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $pVar p
     set token [Peek p]
     set start [dict get $token span]
@@ -2871,6 +2876,7 @@ proc surface::parser::Simple {pVar} {
 # (EXPLICIT-ERROR-COMPLETIONS.md item 34: a bare handled-call expression-
 # statement falls out of this same shared path with no extra grammar).
 proc surface::parser::ValueOrHandled {pVar} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $pVar p
     if {[Kind p] in {if loop} || [AtFold p]} {
         return [Value p]
@@ -2899,6 +2905,7 @@ proc surface::parser::ValueOrHandled {pVar} {
 # to a direct call expression (CALL), per item 9's first-implementation
 # scope.
 proc surface::parser::HandledCall {pVar call} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $pVar p
     set start [dict get $call span]
     Advance p
@@ -3081,6 +3088,7 @@ proc surface::parser::AtInject {pVar} {
 # permission to use an installed context, it never installs, selects or
 # constructs one. Every other shape is a located syntax error.
 proc surface::parser::Injection {pVar} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $pVar p
     set injectToken [Word p]
     set start [dict get $injectToken span]
@@ -3138,6 +3146,7 @@ proc surface::parser::Injection {pVar} {
 
 # A statement's value: an if, a loop, or an expression.
 proc surface::parser::Value {pVar} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $pVar p
     if {[Kind p] eq "if"} {
         return [If p]
@@ -3171,6 +3180,7 @@ proc surface::parser::Value {pVar} {
 # so "Fn[...]" (a positional function type) and a bare "Fn" are syntax
 # errors here, each with its own message.
 proc surface::parser::TypeExpr {pVar what} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $pVar p
     if {[Kind p] eq "IDENT" && [dict get [Peek p] text] eq "array" && [Kind p 1] eq "INT"} {
         # `array N of TYPE` (FIXED-LAYOUT-ARRAYS.md): a fixed repetition of
@@ -3345,6 +3355,7 @@ proc surface::parser::ScalarRefinement {pVar name {base ""}} {
 # INT token's decimal text; what it may be (positive, within the layout) is
 # hir/layouts.tcl's.
 proc surface::parser::ArrayTypeExpr {pVar} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $pVar p
     Word p
     set extent [Advance p]
@@ -3501,6 +3512,7 @@ proc surface::parser::FnList {pVar field typeWhat item} {
 }
 
 proc surface::parser::Function {pVar} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     variable functionModifiers
     upvar 1 $pVar p
     dict set p allowFunctionResult 1
@@ -4117,6 +4129,7 @@ proc surface::parser::SignedInt {pVar} {
 # collected in a loop, not by recursion, so a long chain costs no parser
 # stack depth.
 proc surface::parser::If {pVar} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $pVar p
     set start [dict get [Peek p] span]
     set clauseStart $start
@@ -4186,6 +4199,7 @@ proc surface::parser::If {pVar} {
 # keep working unchanged; a lockstep loop (two or more clauses) leaves them
 # empty and is described by `clauses` alone.
 proc surface::parser::Loop {pVar} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $pVar p
     set start [dict get [Advance p] span]
     set clauses {}
@@ -4286,6 +4300,7 @@ proc surface::parser::IsWord {pVar offset word} {
 # intermediate: a fold is a loop that carries one value instead of
 # collecting its iterations' values.
 proc surface::parser::Fold {pVar} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $pVar p
     set start [dict get [Word p] span]
     set clauses {}
@@ -4397,6 +4412,7 @@ proc surface::parser::LoopOperand {pVar} {
 
 # ":" NEWLINE INDENT statements DEDENT, after AFTER (for messages).
 proc surface::parser::Suite {pVar after} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $pVar p
     set resultType {}
     set resultTypeSpan {}
@@ -4510,6 +4526,7 @@ proc surface::parser::Suite {pVar after} {
 # Expressions
 
 proc surface::parser::Expression {pVar} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $pVar p
     if {[Kind p] eq "yield"} {
         # `yield V` (COROUTINES.md): the lowest-precedence expression form.
@@ -4524,12 +4541,14 @@ proc surface::parser::Expression {pVar} {
 }
 
 proc surface::parser::Conjunction {pVar} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $pVar p
     return [Logical p and Inversion]
 }
 
 # OPERAND { OP OPERAND }, left-associative.
 proc surface::parser::Logical {pVar op operand} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $pVar p
     set left [$operand p]
     while {[Kind p] eq $op} {
@@ -4543,6 +4562,7 @@ proc surface::parser::Logical {pVar op operand} {
 }
 
 proc surface::parser::Inversion {pVar} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $pVar p
     if {[Kind p] eq "not"} {
         set op [Advance p]
@@ -4555,6 +4575,7 @@ proc surface::parser::Inversion {pVar} {
 }
 
 proc surface::parser::Comparison {pVar} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $pVar p
     variable comparisons
     set left [Additive p]
@@ -4576,6 +4597,7 @@ proc surface::parser::Binary {op left right} {
 }
 
 proc surface::parser::Additive {pVar} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $pVar p
     set left [Multiplicative p]
     while {[Kind p] in {+ -}} {
@@ -4586,6 +4608,7 @@ proc surface::parser::Additive {pVar} {
 }
 
 proc surface::parser::Multiplicative {pVar} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $pVar p
     set left [Unary p]
     while {[Kind p] in {* /}} {
@@ -4596,6 +4619,7 @@ proc surface::parser::Multiplicative {pVar} {
 }
 
 proc surface::parser::Unary {pVar} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $pVar p
     if {[Kind p] eq "-"} {
         set op [Advance p]
@@ -4633,6 +4657,7 @@ proc surface::parser::Imprints {pVar what} {
 }
 
 proc surface::parser::Postfix {pVar} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $pVar p
     set expr [Primary p]
     while 1 {
@@ -4711,6 +4736,7 @@ proc surface::parser::Postfix {pVar} {
 # Expressions separated by commas up to CLOSE (consumed), trailing comma
 # allowed.
 proc surface::parser::Arguments {pVar close what} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $pVar p
     set items {}
     while {[Kind p] ne $close} {
@@ -4738,6 +4764,7 @@ proc surface::parser::Arguments {pVar close what} {
 # variadic argument list), and which flags a call supplies is statically
 # known from its spelling.
 proc surface::parser::CallArguments {pVar} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $pVar p
     set args {}
     set flags {}
@@ -4837,6 +4864,7 @@ proc surface::parser::QualifiedPrimary {pVar first span rooted} {
 }
 
 proc surface::parser::Primary {pVar} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $pVar p
     set token [Peek p]
     set span [dict get $token span]
@@ -5104,6 +5132,7 @@ proc surface::parser::CoroutineBind {pVar} {
 #   nested          the pattern the field's value is destructured by, or ""
 #   shorthand       1 for `name`
 proc surface::parser::Pattern {pVar} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $pVar p
     set open [Expect p \{ "\"\{\""]
     set start [dict get $open span]
@@ -5195,6 +5224,7 @@ proc surface::parser::Pattern {pVar} {
 # the names are unique, known or complete is semantic (hir::resolve), never
 # a parse concern, so every syntactically well-formed payload parses.
 proc surface::parser::FieldInits {pVar} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $pVar p
     set open [Expect p \{ "\"\{\""]
     set start [dict get $open span]

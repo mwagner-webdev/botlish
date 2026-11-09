@@ -63,12 +63,22 @@ zipfs-enabled tclsh) and a directory.
 
 `single/build.sh`:
 
-1. **Base kit.** `--basekit PATH` (or `$BOTLISH_BASEKIT`) uses any such
-   executable, for example a prebuilt zipkit such as BAWT's. Otherwise it
-   downloads the official Tcl 9.0.1 source release (the repository's Tcl
-   baseline, AGENTS.md), checks its sha256, and builds a static `tclsh` with
-   zipfs and Tcl's bundled zlib and libtommath (`--disable-shared`), once. The
-   result is cached in `~/.cache/botlish-single`. It links only libc and libm.
+1. **Base kit.** `single/basekit.sh` links one: Tcl's static library with
+   `single/basekit.c` as its main program, and Tcl's script library
+   appended as a zip archive. Its Tcl comes from the official Tcl 9.0.1
+   source release (the repository's Tcl baseline, AGENTS.md), downloaded
+   once and checked against its sha256. It is configured with zipfs and
+   Tcl's bundled zlib and libtommath (`--disable-shared`) and built into a
+   static library, script library zip, public headers and `tclConfig.sh`,
+   cached in `~/.cache/botlish-single/tcl9.0.1-static`. Linking the base
+   kit from them takes a second, and the result links only libc and libm.
+   `single/basekit.c` is Tcl's `unix/tclAppInit.c` with one difference:
+   Tcl starts without the user's `TCL_LIBRARY` (next section). `--basekit
+   PATH` (or `$BOTLISH_BASEKIT`) uses a base kit `single/basekit.sh` linked
+   before. Every base kit is checked first: started with `TCL_LIBRARY`
+   naming a decoy library, it must report its own library and give its
+   script the variable back. A stock tclsh or prebuilt zipkit runs the
+   decoy's `init.tcl` instead, and is refused.
 2. **Native backend.** `cargo build --release`, the same build the test suite
    uses. Both Rust executables are packed with `strip --strip-debug`:
    `botlish-native` (the driver: JIT, objects, executables) and
@@ -94,9 +104,60 @@ archive are the ones rustc reports for it (`--print native-static-libs`;
 `native/runtime-archive/libraries.tcl`, which every host's system-linker CI
 job runs too).
 
+## Its own Tcl library
+
+The single executable runs only the Tcl script library packed into it,
+whatever the environment names. Tcl itself would look elsewhere in three
+places:
+
+* **`TCL_LIBRARY`.** Tcl's own startup reads it first. `Tcl_Init`'s
+  `tclInit` sources `init.tcl` from `$TCL_LIBRARY` before any other place,
+  and Tcl puts `$TCL_LIBRARY/encoding` first on its encoding search path. A
+  stock tclsh or zipkit therefore runs whatever `init.tcl` the variable
+  names, before the archive's `main.tcl` runs at all. That was the single
+  executable's behavior until the base kit got a main program of its own:
+  `TCL_LIBRARY=DIR botlish -version` ran `DIR/init.tcl`. Now
+  `single/basekit.c` removes the variable from the environment before Tcl
+  starts, so Tcl takes `//zipfs:/app/tcl_library`
+  (`::tcl::zipfs::tcl_library_init`, whose encodings are then the only
+  ones). Once `Tcl_Init` is done, before `main.tcl` runs, it puts the
+  variable back exactly as it was, both in the process's environment (byte
+  for byte) and in Tcl's `env` array.
+* **`TCLLIBPATH`, and the directories beside the executable and the
+  installation prefix.** `init.tcl` builds `auto_path` from them. Tcl
+  loads a library command that is not defined yet (`readFile`, say) from
+  every `tclIndex` on `auto_path`, and a package from every `pkgIndex.tcl`
+  there. Every run that compiled a program evaluated a `tclIndex` in a
+  `TCLLIBPATH` directory.
+* **`TCL9.0_TM_PATH`, `TCL9_0_TM_PATH`.** `tm.tcl` adds them to the module
+  path when it loads.
+
+`single/main.tcl`, before anything else, sets `auto_path` to the packaged
+library and its parent, and the module path to the roots Tcl derives from
+that library. The bundled packages (msgcat, tcltest, ...) are still found.
+
+None of this changes what the compiler's children see. The native backend,
+the programs it runs and links, and the C compiler get `TCL_LIBRARY`,
+`TCLLIBPATH` and the module-path variables exactly as the user set them.
+`single/smoke-test.sh` checks both sides. With a decoy library named by
+all four variables, whose every `init.tcl`, `tclIndex`, `pkgIndex.tcl`
+and module ends the process, nothing of it runs, with no locale and in a
+UTF-8 one. On Linux, a program run with `run` copies its
+`/proc/self/environ` and finds the four variables as they were set, though
+the directory's name holds a non-ASCII letter and a byte that is no UTF-8.
+`audit/single-executable/tools/mutate.tcl`'s `tcl-library-*` and
+`tcllibpath-honored` mutants are killed by those checks. Nothing in the
+compiler creates another interpreter: `interp create` (one not `-safe`)
+runs `tclInit` again, and would read the variable, which is back by then.
+The macOS application's launcher keeps the same rule its own way (it sets
+`tcl_library` to its framework's library before `Tcl_Init`), and its
+`single/main.tcl` is the same.
+
 ## How it runs
 
 `single/main.tcl` runs first:
+
+* It keeps Tcl's script search inside the packaged library (above).
 
 * It sets UTF-8 as the system and standard-channel encoding. A checkout's
   canonical setup is `LANG=C.utf8` (AGENTS.md), and a single executable does
@@ -382,7 +443,8 @@ Botlish.app/Contents/MacOS/botlish -version    # (or a symbolic link to it on PA
   `//zipfs:/app` and runs `//zipfs:/app/main.tcl` with every argument,
   `argv[0]` being its own real path. A missing or damaged part of the
   application is the launcher's diagnostic ("botlish: ...", status 2).
-* **single/main.tcl** runs the bundle's driver where it is
+* **single/main.tcl** keeps Tcl's script search inside the framework's
+  library (Its own Tcl library, above), runs the bundle's driver where it is
   (`BOTLISH_NATIVE_BIN`, whatever the environment names) and sets
   `BOTLISH_NATIVE_LINKER=auto`, which is the system linker on macOS: there
   is no stub. The driver finds the runtime archive in `Contents/Resources`

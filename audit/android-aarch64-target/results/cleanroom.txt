@@ -1,0 +1,20 @@
+PASS A the packages installed for android-aarch64
+PASS B the library linked with the installed package's runtime
+PASS B an AArch64 ELF shared object
+PASS B every loadable segment 16 KiB-aligned
+PASS B needs Bionic's libc, libdl, liblog and libm only
+PASS B no text relocation
+PASS B the manifest is android-aarch64's and binds the shared library
+PASS C api-21: 321 states as the interpreter's
+PASS C api-21: the declared errors cross the C ABI
+PASS C api-21: instances and thread affinity
+PASS C api-24: 321 states as the interpreter's
+PASS C api-24: the declared errors cross the C ABI
+PASS C api-24: instances and thread affinity
+PASS C api-35: 321 states as the interpreter's
+PASS C api-35: the declared errors cross the C ABI
+PASS C api-35: instances and thread affinity
+PASS D a removed target support package is refused, precisely
+PASS the run reached nothing of the checkout (/home/user/botlish)
+PASS the run used no Tcl but the single file's own
+PASS the run built no runtime (no cargo, no rustc)

@@ -527,7 +527,16 @@ test bf-large-chain {a 400-operand conjunction compiles and runs exactly on ever
 test bf-lowering-work-linear {the work of lowering a conjunction grows linearly with it: CompileCondition visits each node once, and native lowering's StaticOutcome evaluates each query once (remembered per condition: re-asked level by level, it was quadratic)} -body {
     set counts {}
     set ::bfCalls 0
-    set count {apply {args {incr ::bfCalls}}}
+    # (A guarded call that goes on in a new segment is entered twice, where
+    # it stood and in its segment (core/deep.tcl). The entry that descends
+    # is the one past the guard's bound -- a trace sees the level the call
+    # will -- and is not counted, so each call counts once wherever
+    # segments begin.)
+    set count {apply {args {
+        if {[info level] <= $::core::deep::bound} {
+            incr ::bfCalls
+        }
+    }}}
     trace add execution core::compiler::CompileCondition enter $count
     trace add execution native::lower::StaticOutcomeOf enter $count
     try {

@@ -594,6 +594,25 @@ test lsp-lang-schedulers-agree {the synchronous scheduler and the worker answer 
     expr {[lt::Session sync] eq [lt::Session worker]}
 } -result 1
 
+# A loop variable's declaration and its reference
+# (LOOP-CLAUSE-BINDING-TYPE-CORRECTNESS-MILESTONE-1.md): the census's
+# reproducer, a lockstep clause's counter, and a generic function's element.
+set ::ltLoop "import std::str\nimport std::list\nimport std::byte\n\nfn need_byte(b: std::byte::Byte) -> int:\n    b\n\nfn example(s: str):\n    bs = s.encode_utf8()\n    loop b in bs:\n        need_byte(b)\n    loop c in bs and i from 0 to std::list::length(bs):\n        i\n\nfn first(xs):\n    loop x in xs:\n        x\n\nexample(\"é\")\nfirst(\[1\])\n"
+
+foreach scheduler {worker sync} {
+    test lsp-lang-loop-variable-$scheduler "hover at a loop variable's declaration shows the type its references have ($scheduler scheduler: the worker's revisions cross service::export and import): the reproducer's Byte element, a lockstep counter; a generic function's element is its generic walk's any, never an instance's" -body {
+        set dir [lt::Dir loopvar-$scheduler]
+        set c [lt::Start -scheduler $scheduler]
+        set main [lspc::uri $dir/main.bot]
+        lspc::didOpen $c $main $::ltLoop
+        lt::Diagnostics $c $main 1
+        set out [lmap {line character} {9 9 10 18 11 21 12 8 15 9 16 8} {
+            lt::Hover [lspc::hover $c $main $line $character]
+        }]
+        lappend out [lt::Stop $c]
+    } -cleanup {file delete -force $dir; unset -nocomplain dir c main out line character} -result {{b: int[std::byte::Byte]} {b: int[std::byte::Byte]} {i: int} {i: int} {x: any} {x: any} 0}
+}
+
 # Syntax-error-tolerant analysis (SYNTAX-RECOVERY-MILESTONE-1.md): the
 # editing sequence of its section 11, over real pipes. A program of two
 # modules; an expression left unfinished in one function, then fixed; a

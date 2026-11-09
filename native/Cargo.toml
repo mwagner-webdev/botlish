@@ -13,7 +13,11 @@ publish = false
 crate-type = ["rlib", "staticlib"]
 
 [dependencies]
-cranelift-codegen = { version = "0.135", features = ["trace-log"] }
+# Both native instruction sets, whatever the host's: a driver emits a
+# native library's object for another target than its own
+# (ANDROID-AARCH64-TARGET-SUPPORT-MILESTONE-1.md: android-aarch64 from a
+# Linux x86-64 host), and Cranelift's default builds only the host's.
+cranelift-codegen = { version = "0.135", features = ["trace-log", "x86", "arm64"] }
 cranelift-frontend = "0.135"
 cranelift-module = "0.135"
 cranelift-jit = "0.135"

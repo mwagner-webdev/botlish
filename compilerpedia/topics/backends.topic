@@ -264,6 +264,22 @@ An archive built for another operating system or C library of the same
 architecture is refused. A missing C compiler driver is the link's own
 error, not the package's.
 
+A native library of another target than the host's -- android-aarch64 from
+a Linux x86-64 host -- is made the same way, with a package whose
+descriptor (schema 2) supplies the "native-library" artifact:
+    botlish -target android-aarch64 -target-support NAME -emit-native-library LIB FILE.bot
+The descriptor also states the platform's minimum version (Android's API
+level, 21 or later), that its runtime archive is position-independent, and
+the toolchain that links it, as data: the environment variable naming its
+directory (ANDROID_NDK_ROOT: nothing is searched), the minimum revision,
+its directory per host and its tools. The compiler emits the library's
+machine code for the target (it never runs it here) and links it with the
+package's runtime by that toolchain, then checks the shared object's bytes:
+the target's machine, every loadable segment 16 KiB-aligned, no text
+relocation, only the target's system libraries needed. The manifest names
+the target and the package. A missing toolchain is NATIVE LIBRARY
+TOOLCHAIN, never the package's fault.
+
 @topic backend.native-library
 title: Native libraries: Botlish functions a C host calls
 summary: `exported c fn` declares a C export; -emit-native-library NAME builds libNAME.a, libNAME.so, NAME.h and a manifest that any C host can link and call.
@@ -285,7 +301,8 @@ declared in the source:
         n * 2
 
 and `-emit-native-library NAME FILE.bot` builds (Linux glibc, x86_64 and
-aarch64):
+aarch64, for the host's target; android-aarch64 with -target and its
+target support package: backend.target-support):
 
     libNAME.a            a static library: one object with the program and
                          a private copy of the runtime; only the library's
@@ -662,12 +679,13 @@ title: -target: the compilation target, an operating system and an architecture
 summary: -target NAME picks the operating system and architecture a program is built for (C type sizes, modules, platforms); native code runs only for the host's own target.
 index: backends
 alias: target; -target; cross compile; C ABI target
-keywords: target, linux-x86_64, linux-aarch64, macos, macos-aarch64, windows, windows-x86_64-gnu, mingw, ffi, std::linux::sys, architecture, operating system, triple
+keywords: target, linux-x86_64, linux-aarch64, macos, macos-aarch64, windows, windows-x86_64-gnu, mingw, android, android-aarch64, bionic, arm64-v8a, ffi, std::linux::sys, architecture, operating system, triple
 related: backend.platforms concept.c-ffi cli.options error.unsupported-platform error.native-target error.hir-interchange-target
 
 == WHAT IT DOES
 The targets are linux-x86_64, linux-aarch64, macos-x86_64, macos-aarch64,
-windows-x86_64, windows-x86_64-gnu and windows-aarch64 (to the native
+windows-x86_64, windows-x86_64-gnu, windows-aarch64 and android-aarch64
+(Android on AArch64, Bionic's C library) (to the native
 backend, triples: x86_64-unknown-linux-gnu, ..., aarch64-apple-darwin); the
 default is the host's. A target is an operating system and an architecture:
 linux-aarch64 and macos-aarch64 share an instruction set, not a target. On

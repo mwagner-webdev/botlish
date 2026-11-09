@@ -33,9 +33,17 @@
 #   "Source locations"), not the problems of a call nested in its arguments
 #   (that call's own), not a diagnostic another construct's check reports.
 # * Configurations. A configuration gives every call one of its candidates.
-#   Candidate K of call C is *applicable* relative to configuration S when
-#   C has no own problem in the build of S with C at K -- S itself if S
-#   puts C at K, else the single deviation S[C:=K].
+#   Candidate K of call C is *applicable* relative to configuration S when,
+#   in the build of S with C at K -- S itself if S puts C at K, else the
+#   single deviation S[C:=K] -- C's receiver is established (not poison:
+#   an analysis proved it invalid in every context there) and C has no own
+#   problem. The two differ only where C's own result flows into its
+#   receiver, a cycle: a fold's `acc.f(x)`, whose result is the next
+#   iteration's `acc` -- with a K whose result the fold cannot join with its
+#   initial value, the walk makes the intermediate poison, and with it K's
+#   own receiver (HTTP-CLIENT-PACKAGE-MILESTONE-1.md, F2). A call whose
+#   receiver every candidate's own build poisons is judged by nothing: what
+#   poisoned it does not depend on the call, and is the cause.
 # * The decision is a configuration S in which every call C's applicable
 #   candidates relative to S are exactly {S(C)}: each call is the one
 #   candidate whose ordinary call is valid, given the others. A call with
@@ -56,9 +64,10 @@
 #
 # 1. Kind waves (search). A candidate the receiver's kind rules out
 #    (Excluded: a native whose first parameter has another known kind, a
-#    module function whose first-parameter contract has another plain kind
-#    or whose declared first parameter is a named struct of another
-#    declaration) cannot be applicable: its build would report exactly
+#    module function whose first-parameter contract has another plain kind,
+#    whose declared first parameter is a named struct of another
+#    declaration, or whose declared first parameter is a trait the receiver
+#    does not satisfy) cannot be applicable: its build would report exactly
 #    that. A call with one survivor stands at it; a receiver that is a
 #    reference to a binding is read as the binding's defined type, a guess
 #    that settles a receiver chain in one build (the default candidates of
@@ -267,9 +276,9 @@ proc hir::methods::ParamKinds {hir ns cand} {
 
 # The declared type of the first parameter of module function CAND (display
 # "NS::NAME") in HIR, "" when it declares none or is no module function. Only
-# a declaration: NominalMismatch is stated for declared types, and an
-# inferred contract's struct stays the kind rule's (which compares no
-# declarations).
+# a declaration: NominalMismatch and TraitMismatch are stated for declared
+# types, and an inferred contract's struct stays the kind rule's (which
+# compares no declarations).
 proc hir::methods::DeclaredParam {hir ns cand} {
     variable declaredParams
     if {[dict exists $declaredParams $cand]} {
@@ -318,11 +327,24 @@ proc hir::methods::NominalMismatch {declared R} {
         && [lindex $declared 1] ne [lindex $R 1]}
 }
 
+# 1 if a receiver of type R rules out a first parameter declared DECLARED by
+# trait conformance: DECLARED is a trait ({trait ID}, a trait-polymorphic
+# function's parameter) and R is not admitted to it. The admission is the
+# call's own check's (hir::range::VerifyCallChecks: hir::range::
+# ProvesValueAcceptedBy, which asks hir::traits::Accept for a trait), stated
+# once: a concrete type satisfies the trait or not by its owner namespace's
+# declarations (hir::traits::satisfies), whatever its kind and whatever the
+# call's other arguments are. (Excluded asks only for a receiver of a kind:
+# `any`, a trait view, an imprint variable or a function excludes nothing.)
+proc hir::methods::TraitMismatch {declared R} {
+    expr {[hir::types::IsTraitConstraint $declared] && ![hir::traits::Accept $R $declared]}
+}
+
 # 1 if candidate CAND (a display of a methodCalls entry) is not applicable to
-# a receiver of type R by kind alone, or by a named struct's identity
-# (NominalMismatch): its build would report exactly that problem. A bare
-# name is a lexical candidate (a function of the file, a parameter, a
-# binding): never excluded.
+# a receiver of type R by kind alone, by a named struct's identity
+# (NominalMismatch) or by a trait's conformance (TraitMismatch): its build
+# would report exactly that problem. A bare name is a lexical candidate (a
+# function of the file, a parameter, a binding): never excluded.
 proc hir::methods::Excluded {hir cand R} {
     variable comparableKinds
     if {$R eq "never"} {
@@ -343,7 +365,8 @@ proc hir::methods::Excluded {hir cand R} {
             return 1
         }
     }
-    return [NominalMismatch [DeclaredParam $hir $ns $cand] $R]
+    set declared [DeclaredParam $hir $ns $cand]
+    return [expr {[NominalMismatch $declared $R] || [TraitMismatch $declared $R]}]
 }
 
 # The type binding B was defined with: a parameter's declared type, else the
@@ -597,13 +620,13 @@ proc hir::methods::Decide {nodes options given hir seeds} {
     }
     # 3. Certification. A call moves to its canonical stand-in: its unique
     # applicable candidate, the first of several (it is then ambiguous), its
-    # first candidate when none is applicable or its receiver is poison (it
-    # decides nothing) -- in candidate order, which only picks the
-    # placeholder a rejected call keeps. STEPS bounds the builds of new
-    # configurations: a call still moving then is one whose decision changes
-    # its own arguments (a cycle through an inferred result), rejected as
-    # ambiguous between the candidates it moved between; it keeps the one it
-    # stands at.
+    # first candidate when none is applicable or every candidate's build
+    # poisons its receiver (it decides nothing) -- in candidate order, which
+    # only picks the placeholder a rejected call keeps. STEPS bounds the
+    # builds of new configurations: a call still moving then is one whose
+    # decision changes its own arguments (a cycle through an inferred
+    # result), rejected as ambiguous between the candidates it moved
+    # between; it keeps the one it stands at.
     set limit [expr {4 * [llength $open] + 8}]
     set steps 0
     set unstable [dict create]
@@ -810,39 +833,60 @@ proc hir::methods::Proposal {stateVar record choices open} {
 }
 
 # The verdicts of the calls OPEN relative to CHOICES, whose build RECORD is:
-# key -> {poisoned 0|1 survivors S problems {CANDIDATE -> P} applicable A}.
-# A call's standing candidate is judged by RECORD, every other survivor by
-# its single deviation; a call with a poisoned receiver (hir/types.tcl,
-# "Poison") is judged by nothing: it fits every candidate and decides
-# nothing, and the diagnostic that poisoned it is the cause.
+# key -> {poisoned 0|1 survivors S problems {CANDIDATE -> P} unestablished U
+# applicable A}. A call's standing candidate is judged by RECORD, every other
+# survivor by its single deviation. A candidate is applicable when, in its
+# own build, the call's receiver is established -- not poison (hir/types.tcl,
+# "Poison"): an analysis proved it invalid in every context there -- and the
+# call has no problem of its own; U lists the survivors whose own build
+# poisons the receiver.
+#
+# A receiver the build of CHOICES poisons is judged by the same builds: it
+# may be this call's own doing, when the call's result flows back into its
+# receiver (a fold's intermediate: the stand-in's result conflicts with the
+# initial value, and the walk makes the intermediate poison) -- then another
+# candidate's build establishes it, and the stand-in is not applicable. A
+# call whose receiver every candidate's own build poisons (no kind proof
+# rules out a candidate of a poisoned receiver: every candidate is built) is
+# judged by nothing (`poisoned`): it fits every candidate and decides
+# nothing, and what poisoned it, independent of the call, is the cause.
 proc hir::methods::Verdicts {stateVar record choices open} {
     upvar 1 $stateVar state
     set verdicts [dict create]
     foreach key $open {
         if {![dict exists $record calls $key]} continue
         set entry [dict get $record calls $key]
-        if {[dict get $entry poisoned]} {
-            dict set verdicts $key [dict create poisoned 1 survivors {} problems {} applicable {}]
-            continue
-        }
         set standing [dict get $choices $key]
         set survivors [dict get $entry survivors]
         set problems [dict create]
         if {$standing in $survivors} {
             dict set problems $standing [dict get $entry problems]
         }
+        set unestablished {}
+        if {[dict get $entry poisoned] && $standing in $survivors} {
+            lappend unestablished $standing
+        }
         foreach cand $survivors {
             if {$cand eq $standing} continue
             set deviation [Build state [dict merge $choices [list $key $cand]] deviation]
             if {[dict exists $deviation calls $key]} {
                 dict set problems $cand [dict get $deviation calls $key problems]
+                if {[dict get $deviation calls $key poisoned]} {
+                    lappend unestablished $cand
+                }
             }
         }
+        if {[dict get $entry poisoned] && [llength $unestablished] == [dict size $problems]} {
+            dict set verdicts $key [dict create poisoned 1 survivors $survivors problems $problems \
+                unestablished $unestablished applicable {}]
+            continue
+        }
         set applicable [lmap cand $survivors {
-            if {![dict exists $problems $cand] || [dict get $problems $cand] ne {}} continue
+            if {![dict exists $problems $cand] || [dict get $problems $cand] ne {} || $cand in $unestablished} continue
             set cand
         }]
-        dict set verdicts $key [dict create poisoned 0 survivors $survivors problems $problems applicable $applicable]
+        dict set verdicts $key [dict create poisoned 0 survivors $survivors problems $problems \
+            unestablished $unestablished applicable $applicable]
     }
     return $verdicts
 }
@@ -967,18 +1011,22 @@ proc hir::methods::SourceOrder {hir diagnostics} {
 #   applicable  the applicable ones (AMBIGUOUS-METHOD-CALL)
 #   reasons     candidate -> {operand O kind K message M origin ORIGIN}: the
 #               reason NO-APPLICABLE-METHOD gives for it, its first own
-#               problem (from its own build) outside every poisoned operand;
-#               O is 0 for the receiver, N for the call's Nth argument, ""
-#               for the call itself
+#               problem (from its own build) outside every poisoned operand,
+#               else, when its own build poisons the receiver (the verdict's
+#               `unestablished`: the call's result flows into its receiver),
+#               that (kind ""); O is 0 for the receiver, N for the call's Nth
+#               argument, "" for the call itself
 #   reported    1, or 0 when the rejection depends on what the program does
-#               not establish (`why`): the receiver is poison (`receiver`:
-#               the cause is its own diagnostic), or computed by an operation
-#               its trait does not declare (`trait-operation`), or the
-#               verdict read a poisoned operand (`operand`: the result of
-#               another rejected call, or of an expression already rejected
-#               -- an ambiguity whatever the operand holds is not known, and
-#               a candidate whose only problems are inside it fails only by
-#               what nobody established)
+#               not establish (`why`): the receiver is poison in FINAL
+#               (`receiver`: the cause is its own diagnostic -- never a
+#               poison of the decision's builds alone, which a placeholder,
+#               the call's own among them, may have made), or computed by
+#               an operation its trait does not declare (`trait-operation`),
+#               or the verdict read a poisoned operand (`operand`: the
+#               result of another rejected call, or of an expression already
+#               rejected -- an ambiguity whatever the operand holds is not
+#               known, and a candidate whose only problems are inside it
+#               fails only by what nobody established)
 #
 # The verdict is the decision's, unchanged: this decides only whether it is
 # reported, and how it is explained.
@@ -996,10 +1044,14 @@ proc hir::methods::Rejection {final calls key verdict unstable} {
     set record [dict create kind $kind expr $e name [dict get $info name] \
         origin [NameOrigin $final $e] candidates $candidates \
         applicable $applicable reasons [dict create] reported 1 why ""]
-    if {[dict get $verdict poisoned] || ($operands ne {} && [hir::types::Poisoned $final [lindex $operands 0]])} {
+    if {$operands ne {} && [hir::types::Poisoned $final [lindex $operands 0]]} {
         # A poisoned receiver (hir/types.tcl, "Poison") fits every
         # candidate and decides nothing: the diagnostic that rejected it is
-        # the cause, already reported (DIAGNOSTIC-RECOVERY.md).
+        # the cause, already reported (DIAGNOSTIC-RECOVERY.md). Only the
+        # reported program's poison has one: a receiver the verdict's builds
+        # poisoned and FINAL establishes was poisoned by a placeholder (the
+        # call's own result, flowing into its receiver: a fold's
+        # intermediate), and the rejection is the cause.
         return [dict replace $record reported 0 why receiver]
     }
     if {$operands ne {} && [UnknownTraitOperation $final [lindex $operands 0]]} {
@@ -1033,6 +1085,11 @@ proc hir::methods::Rejection {final calls key verdict unstable} {
             }
             dict set reasons $candidate [dict create operand $operand kind $pkind message $message origin $origin]
             break
+        }
+        if {![dict exists $reasons $candidate] && $candidate in [dict getdef $verdict unestablished {}]} {
+            dict set reasons $candidate [dict create operand 0 kind "" \
+                message "with this function the receiver has no valid type (its value depends on the call's own result)" \
+                origin [hir::get $final [lindex $operands 0] origin]]
         }
         if {![dict exists $reasons $candidate] && $poisoned ne {}} {
             return [dict replace $record reported 0 why operand reasons $reasons]

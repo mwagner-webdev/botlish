@@ -82,7 +82,7 @@ namespace eval native::library {
 }
 
 proc native::library {hir args} {
-    set options [dict create -name "" -out "" -shared 1 -target ""]
+    set options [dict create -name "" -out "" -shared 1 -target "" -support ""]
     set selected 0
     set names {}
     set lowering {}
@@ -104,17 +104,35 @@ proc native::library {hir args} {
     if {$out eq ""} {
         throw {NATIVE LIBRARY OUT} "native::library: -out DIR is required"
     }
-    if {![native::hostSupports libraries]} {
-        throw {NATIVE UNSUPPORTED library} "native libraries are made on Linux glibc (x86_64, aarch64) only; this host is [core::cabi::hostTarget] (NATIVE-LIBRARY-MILESTONE-1.md)"
-    }
     hir::activate $hir
+    set host [core::cabi::hostTarget]
     set built [hir::cabi::targetOf $hir]
     set wanted [dict get $options -target]
-    if {$wanted ne "" && $wanted ne [core::cabi::hostTarget]} {
-        throw {NATIVE TARGET} "native::library: a library is made for this host's target ([core::cabi::hostTarget]), not $wanted"
+    set support [dict get $options -support]
+    # The library's target: -target's, else the one the program was built
+    # for, else the host's. A library of another target than the host's is
+    # emitted for it and linked with its runtime -- a target support
+    # package's, with the toolchain the package declares
+    # (ANDROID-AARCH64-TARGET-SUPPORT-MILESTONE-1.md): never with this
+    # host's runtime, which is another target's.
+    set target [if {$wanted ne ""} {set wanted} elseif {$built ne ""} {set built} else {set host}]
+    if {$built ne "" && $built ne $target} {
+        throw {NATIVE TARGET} "native::library: the program was built for $built, and the library is made for $target: compile it for $target (-target $target)"
     }
-    if {$built ne "" && $built ne [core::cabi::hostTarget]} {
-        throw {NATIVE TARGET} "native::library: the program was built for $built, and a library is made for this host's target ([core::cabi::hostTarget])"
+    if {$support eq ""} {
+        if {$target ne $host} {
+            throw {NATIVE TARGET} "native::library: a library of $target is linked with $target's runtime, which this compiler does not carry: name the target support package of $target (-target-support NAME); this host is $host"
+        }
+        if {![native::hostSupports libraries]} {
+            throw {NATIVE UNSUPPORTED library} "native libraries are made on Linux glibc (x86_64, aarch64) only; this host is $host (NATIVE-LIBRARY-MILESTONE-1.md)"
+        }
+    } else {
+        if {[dict get $support target] ne $target} {
+            throw {NATIVE TARGET} "native::library: the target support package [dict get $support package] supports [dict get $support target], and the library is made for $target"
+        }
+        if {![native::targetSupports libraries $target]} {
+            throw {NATIVE UNSUPPORTED library} "native libraries are made for [join [dict get $native::targetCapabilities libraries] {, }] only, not $target"
+        }
     }
 
     set problems [library::TopLevelProblems $hir]
@@ -152,6 +170,11 @@ proc native::library {hir args} {
             params [lmap {p t} [dict get $record params] {set t}] result [dict get $record result]
     }]
     set text [nir $hir -exports $lowered {*}$lowering]
+    if {$support ne ""} {
+        # The toolchain is the host's, found before anything is written: a
+        # missing one is never mistaken for a broken package.
+        set tools [support::toolchain $support]
+    }
     # The program's native dependencies (NATIVE-LINK-PLAN-MILESTONE-1.md),
     # resolved as an executable's link would resolve them: the shared
     # library is linked with them, and the manifest names them for a
@@ -164,26 +187,44 @@ proc native::library {hir args} {
     set work [file tempdir]
     try {
         set object [file join $work $name.program.o]
-        set lines [Driver library $text $object $name]
+        set targetArgs {}
+        if {$target ne $host} {
+            lappend targetArgs --target [dict get [core::cabi::target $target] triple]
+        }
+        set lines [Driver library $text $object $name {*}$targetArgs]
         foreach line $lines {
             if {[lindex $line 0] eq "error"} { Outcome $lines }
         }
-        set runtime [library::RuntimeArchive]
         set keep [file join $work $name.keep]
         set public [library::PublicNames $name $records]
         library::Write $keep [join $public \n]\n
         set linked [file join $work $name.linked.o]
         set final [file join $work $name.o]
-        library::Tool ld -r -o $linked $object $runtime
-        library::Tool objcopy --strip-debug --keep-global-symbols=$keep $linked $final
         set static [file join $out lib$name.a]
-        file delete $static
-        library::Tool ar rcs $static $final
         set shared ""
         if {[dict get $options -shared]} {
             set shared [file join $out lib$name.so]
-            library::Tool cc -shared -o $shared $final -Wl,-z,defs -Wl,--gc-sections -Wl,-soname,lib$name.so \
-                {*}[library::DependencyArgs $dependencies] {*}$library::systemLibraries
+        }
+        # A failed link never leaves an earlier build's files under the new
+        # manifest's names.
+        file delete $static [file join $out $name.manifest.json]
+        if {$shared ne ""} {
+            file delete $shared
+        }
+        if {$support eq ""} {
+            set runtime [library::RuntimeArchive]
+            library::Tool ld -r -o $linked $object $runtime
+            library::Tool objcopy --strip-debug --keep-global-symbols=$keep $linked $final
+            library::Tool ar rcs $static $final
+            if {$shared ne ""} {
+                library::Tool cc -shared -o $shared $final -Wl,-z,defs -Wl,--gc-sections -Wl,-soname,lib$name.so \
+                    {*}[library::DependencyArgs $dependencies] {*}$library::systemLibraries
+            }
+        } else {
+            library::LinkWithToolchain $support $tools $target $name $object $keep $linked $final $static $shared \
+                $dependencies $public
+            dict set support toolchainName [dict get $tools name]
+            dict set support toolchainRevision [dict get $tools revision]
         }
         set header [file join $out $name.h]
         library::Write $header [library::Header $hir $name $records]
@@ -192,11 +233,123 @@ proc native::library {hir args} {
         if {$shared ne ""} {
             dict set digests shared [library::Sha256 $shared]
         }
-        library::Write $manifest [library::Manifest $hir $name $records [expr {$shared ne ""}] $dependencies $digests]
+        library::Write $manifest [library::Manifest $hir $name $records [expr {$shared ne ""}] $dependencies $digests $target $support]
     } finally {
         file delete -force $work
     }
     return [dict create static $static shared $shared header $header manifest $manifest exports $records]
+}
+
+# Links library NAME's program OBJECT with target support SUPPORT's runtime
+# archive by the toolchain TOOLS (native::support::toolchain) for TARGET
+# (ANDROID-AARCH64-TARGET-SUPPORT-MILESTONE-1.md): the same four steps as the
+# host's link -- a relocatable link of the object and the runtime archive
+# (only the members it needs; no --gc-sections, as for GNU ld), every
+# symbol but the PUBLIC ones (the file KEEP) made local, the static archive,
+# and the shared library -- each by the toolchain's own tool, never this
+# host's: an LLVM linker, objcopy and archiver, and the C compiler driver for
+# TARGET's triple at the package's platform version (the NDK's clang with
+# --target=aarch64-linux-androidN). The shared library is position-
+# independent and its loadable segments 16 KiB-aligned (`Alignment`), and it
+# is checked before anything is reported (`ValidateShared`).
+proc native::library::LinkWithToolchain {support tools target name object keep linked final static shared dependencies public} {
+    set runtime [dict get $support archive]
+    set triple [dict get [core::cabi::target $target] triple]
+    ToolchainTool $tools ld -r -o $linked $object $runtime
+    ToolchainTool $tools objcopy --strip-debug --keep-global-symbols=$keep $linked $final
+    ToolchainTool $tools ar rcs $static $final
+    if {$shared eq ""} {
+        return
+    }
+    set driverTarget $triple[dict get $tools api]
+    set args [list --target=$driverTarget -shared -o $shared $final -Wl,-z,defs -Wl,-z,text -Wl,--gc-sections \
+        -Wl,-z,max-page-size=[Alignment $target] -Wl,-soname,lib$name.so]
+    lappend args {*}[DependencyArgs $dependencies] {*}[dict get $support libraries]
+    ToolchainTool $tools cc {*}$args
+    ValidateShared $shared $target $support $public $name $dependencies
+}
+
+# The page size a shared library of TARGET is aligned to: Android AArch64's
+# largest, 16 KiB (devices with 16 KiB pages load only libraries whose
+# loadable segments are aligned to it; a 4 KiB device loads them too).
+proc native::library::Alignment {target} {
+    return [dict getdef {android-aarch64 16384} $target 4096]
+}
+
+# Runs the toolchain's TOOL with ARGS (an argv list: no shell). A link that
+# fails because an archive is not position-independent is {NATIVE LIBRARY
+# PIC}; any other failure {NATIVE LIBRARY TOOL TOOL}, with the tool's words.
+proc native::library::ToolchainTool {tools tool args} {
+    set program [dict get $tools $tool]
+    if {[catch {exec $program {*}$args 2>@1} output]} {
+        if {[string match "*recompile with -fPIC*" $output] || [string match "*can't create dynamic relocation*" $output]
+                || [string match "*relocation R_AARCH64_*cannot be used against*" $output]} {
+            throw {NATIVE LIBRARY PIC} "native::library: the shared library cannot be linked: an archive linked into it is not position-independent (the target support package's runtime must be built for the pic relocation model): $output"
+        }
+        throw [list NATIVE LIBRARY TOOL $tool] "native::library: [dict get $tools name] $tool failed: $output"
+    }
+}
+
+# Checks the shared library PATH a toolchain link made for TARGET with
+# SUPPORT's runtime, from its bytes (native/elf.tcl): an ELF shared object
+# of TARGET's machine, every loadable segment aligned to `Alignment`, no
+# text relocation, an executable stack nowhere, no symbol version of another
+# C library (GLIBC_), nothing needed but the system libraries SUPPORT states
+# (and the program's own dependencies), and exactly the library's public
+# functions exported. A failure is {NATIVE LIBRARY ELF} and the file is
+# removed: a library that fails is never left looking like a build.
+proc native::library::ValidateShared {path target support public name dependencies} {
+    set facts [native::elf::facts $path]
+    set problems {}
+    set machine [dict get {x86_64 62 aarch64 183} [dict get [core::cabi::target $target] arch]]
+    if {[dict get $facts machine] != $machine} {
+        lappend problems "its machine is [dict get $facts machine], not $target's $machine"
+    }
+    if {[dict get $facts type] ne "dyn"} {
+        lappend problems "it is no shared object (ELF type [dict get $facts type])"
+    }
+    set align [Alignment $target]
+    foreach load [dict get $facts loads] {
+        if {[dict get $load align] < $align || [dict get $load vaddr] % $align != [dict get $load offset] % $align} {
+            lappend problems "a loadable segment (offset [dict get $load offset], vaddr [dict get $load vaddr]) is aligned to [dict get $load align], not $align"
+        }
+    }
+    if {[dict get $facts textrel]} {
+        lappend problems "it has text relocations (DT_TEXTREL): its code is not position-independent"
+    }
+    if {[dict get $facts stackExec]} {
+        lappend problems "it asks for an executable stack"
+    }
+    if {[dict get $facts interpreter] ne ""} {
+        lappend problems "it names a program interpreter ([dict get $facts interpreter])"
+    }
+    foreach {library versions} [dict get $facts verneed] {
+        foreach version $versions {
+            if {[string match GLIBC_* $version]} {
+                lappend problems "it requires $library's $version: the GNU C library's symbol version, which $target's C library has none of"
+            }
+        }
+    }
+    set allowed [lmap l [dict get $support libraries] {string cat lib[string range $l 2 end].so}]
+    lappend allowed {*}[lmap d $dependencies {if {[lindex $d 0] ne "library"} continue; string cat lib[lindex $d 1].so}]
+    foreach need [dict get $facts needed] {
+        if {$need ni $allowed} {
+            lappend problems "it needs $need, which is neither one of $target's system libraries nor a library the program declares ([join [lsort -unique $allowed] {, }])"
+        }
+    }
+    set exports [dict get $facts exports]
+    set missing [lmap p $public {if {$p in $exports} continue; set p}]
+    if {[llength $missing]} {
+        lappend problems "it does not export [join $missing {, }]"
+    }
+    set extra [lmap e $exports {if {[string match ${name}_* $e]} continue; set e}]
+    if {[llength $extra]} {
+        lappend problems "it exports [llength $extra] symbols that are no public function of the library (the first: [lindex $extra 0])"
+    }
+    if {[llength $problems]} {
+        file delete $path
+        throw {NATIVE LIBRARY ELF} "native::library: the shared library made for $target is not one: [join $problems {; }]"
+    }
 }
 
 # The native runtime archive a library's object is linked with: the
@@ -529,12 +682,29 @@ proc native::library::Dependency {dependency} {
 # ownership of every value that crosses the boundary as data (each
 # parameter's and result's `ownership`, the release function of what the
 # caller owns, each export's `error` out-parameter).
-proc native::library::Manifest {hir name records shared {dependencies {}} {digests {}}} {
+proc native::library::Manifest {hir name records shared {dependencies {}} {digests {}} {target ""} {support ""}} {
     variable schema
     variable abiVersion
     variable systemLibraries
     variable reserved
-    set target [core::cabi::hostTarget]
+    if {$target eq ""} {
+        set target [core::cabi::hostTarget]
+    }
+    set links $systemLibraries
+    set supported {}
+    if {$support ne ""} {
+        # A library linked with a target support package's runtime
+        # (ANDROID-AARCH64-TARGET-SUPPORT-MILESTONE-1.md): the system
+        # libraries its runtime is linked with, and which package, platform
+        # version and toolchain made it.
+        set links [dict get $support libraries]
+        set platform [lmap {k v} [dict get $support platform] {list $k [N $v]}]
+        set supported [list targetSupport [list obj [list \
+            package [S [dict get $support package]] \
+            runtimeAbi [S [dict get $support abi]] \
+            platform [list obj [concat {*}$platform]] \
+            toolchain [list obj [list name [S [dict get $support toolchainName]] revision [S [dict get $support toolchainRevision]]]]]]]
+    }
     set exports {}
     foreach record $records {
         set params {}
@@ -580,7 +750,7 @@ proc native::library::Manifest {hir name records shared {dependencies {}} {diges
             shared [if {$shared} {S lib$name.so} else {list null {}}] \
             header [S $name.h]]] \
         sha256 [list obj $sha256] \
-        link [list arr [lmap l $systemLibraries {S $l}]] \
+        link [list arr [lmap l $links {S $l}]] \
         dependencies [list arr [lmap d $dependencies {Dependency $d}]] \
         threading [S thread-affine] \
         reentrancy [S refused] \
@@ -600,7 +770,7 @@ proc native::library::Manifest {hir name records shared {dependencies {}} {diges
         lifecycle [list obj [list create [S ${name}_create] destroy [S ${name}_destroy] \
             initialization [S "module static initialization only: the entry file holds declarations"]]] \
         api [list arr $api] \
-        exports [list arr $exports]]]
+        exports [list arr $exports] {*}$supported]]
     return "[Json $value]\n"
 }
 

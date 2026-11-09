@@ -1,0 +1,18 @@
+# A finding of HTTP-CLIENT-PACKAGE-MILESTONE-1.md (F4, fixed): a local Int n
+# shadows the function n. The call n(3) was accepted and failed only when it
+# ran (NOT-CALLABLE, "cannot call non-callable value 3"), or, with a declared
+# result, the program was rejected by an unrelated-looking TYPE diagnostic. It
+# is now rejected at compile time, at 16:5, by the call's own NOT-CALLABLE,
+# which names the function n the binding hides (tests/not-callable.test).
+#
+#   tclsh9.0 main.tcl audit/http-client/findings/call-of-shadowing-int.bot
+import std::str
+
+fn n(x: int) -> int:
+    x + 1
+
+fn f(text: str):
+    n = std::str::length(text)
+    n(3)
+
+f("abc")

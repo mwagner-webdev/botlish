@@ -250,35 +250,60 @@ TYPE error at the call.
 
 @topic error.not-callable
 title: NOT-CALLABLE: calling a value that is not a function
-summary: CORE SEMANTIC NOT-CALLABLE stops a run when a call's callee evaluates to something other than a function or a native.
+summary: A call whose callee is known not to be a function (an Int, a String, a struct ...) is rejected at compile time; one whose callee's type is not known fails when it runs.
 index: errors
-alias: call a non-function; non-callable value; calling a number
-keywords: call, callee, function value, untyped parameter, any, Fn
-related: concept.functions concept.function-types concept.types error.not-boolean error.equality
+alias: call a non-function; non-callable value; calling a number; cannot call
+keywords: call, callee, function value, untyped parameter, any, Fn, shadowing, local binding, method syntax
+related: concept.functions concept.function-types concept.types concept.method-sugar error.not-boolean error.equality error.not-a-struct
 code: CORE SEMANTIC NOT-CALLABLE
 
 == MEANING
-Run time, on every backend; an error of the program. A call `f(x)` whose
-`f` is an Int, a String, a struct or any other non-callable value stops
-with "cannot call non-callable value V". The compiler does not establish
-that a called parameter or binding holds a function: an untyped parameter
-(or one declared `any`) that is called is checked when the call runs.
+Only a function (or a native) can be called. A call `f(x)` whose callee
+has a type that no call accepts -- an Int, a String, a Bool, a List, a
+struct, an enum case -- could only fail when it runs, so the compiler
+rejects it:
 
-== EXAMPLE
+    cannot call "n", a value of type int: only a function can be called,
+    so this call could only fail when it runs
+
+When the callee is a local binding or a parameter that hides a function
+of the same name, the message says so and locates that function: the
+call reaches the binding, never the function. In method syntax such a
+binding is no candidate (its ordinary call is not valid), so
+`x.length()` applies the visible function `length` even beside a local
+`length = 3` (concept.method-sugar).
+
+A callee of no known type -- an untyped parameter, or one declared `any`
+-- is checked when the call runs, on every backend:
+
     fn apply(f, x):
         f(x)
 
     apply(3, 4)
 
-compiles, and stops on every backend with
-
-    error: cannot call non-callable value 3 (CORE SEMANTIC NOT-CALLABLE)
+compiles, and stops with "cannot call non-callable value 3".
 
 == WHAT TO DO
-Give a parameter that is called a function type, `f: Fn{args: [int],
-return: int}` (concept.function-types): a non-function argument is then a
-compile-time TYPE error at the call, and the call itself is checked against
-the function's contract.
+Rename a binding that hides the function you meant to call. Give a
+parameter that is called a function type, `f: Fn{args: [int], return:
+int}` (concept.function-types): a non-function argument is then a
+compile-time TYPE error at the call, and the call itself is checked
+against the function's contract.
+
+@example reject
+fn n(x: int) -> int:
+    x + 1
+
+fn f(text: str) -> int:
+    n = 3
+    n(4)
+
+f("abc")
+@caption A local Int hides the function n: the call is rejected
+@error CORE SEMANTIC NOT-CALLABLE
+@at 6:5
+@message cannot call "n", a value of type int: only a function can be called*
+@end
 
 @topic error.struct
 title: STRUCT: a struct value built with the wrong fields (core IR)
@@ -1607,10 +1632,13 @@ code: NATIVE TARGET-SUPPORT LINKER
 code: NATIVE TARGET-SUPPORT RUNTIME
 code: NATIVE TARGET-SUPPORT ABI
 code: NATIVE TARGET-SUPPORT LIBRARIES
+code: NATIVE TARGET-SUPPORT ARTIFACT
+code: NATIVE TARGET-SUPPORT PIC
+code: NATIVE TARGET-SUPPORT API
 
 == MEANING
-On -emit-native-executable -target-support NAME, after the program
-compiled and before any linker runs:
+On -emit-native-executable or -emit-native-library -target-support NAME,
+after the program compiled and before any linker runs:
 
   * MISSING: no package NAME is installed in the application's package
     tree of the program's target.
@@ -1630,7 +1658,17 @@ compiled and before any linker runs:
   * ABI: its runtime ABI fingerprint, or the archive's, is not this
     compiler's: another build's generated code addresses another runtime.
   * LIBRARIES: the system libraries it states are not the ones the system
-    linker links the runtime with.
+    linker links the runtime with (for another target than the host's,
+    not the ones the compiler knows that target's runtime needs).
+  * ARTIFACT: it does not supply what is being built: a schema 1 package
+    supplies an executable's runtime, a schema 2 package the artifact kinds
+    its "artifacts" names (native-library).
+  * PIC: its runtime archive is not stated position-independent
+    ("relocation": "pic"), which every archive linked into a shared
+    library must be.
+  * API: the platform version it states is below what this compiler's
+    runtime for the target needs (android-aarch64: API level 21), or the
+    toolchain has no libraries of that level.
 
 == WHAT TO DO
 Install the target support package of this compiler build and the
@@ -1651,6 +1689,9 @@ code: NATIVE LIBRARY LIBRARY-SYMBOL
 code: NATIVE LIBRARY NAME
 code: NATIVE LIBRARY OUT
 code: NATIVE LIBRARY TOOL
+code: NATIVE LIBRARY TOOLCHAIN
+code: NATIVE LIBRARY PIC
+code: NATIVE LIBRARY ELF
 
 == MEANING
 On -emit-native-library (native::library), after the program compiled:
@@ -1667,7 +1708,20 @@ On -emit-native-library (native::library), after the program compiled:
   * NAME: the library name is not a C identifier (it prefixes every
     public C name).
   * OUT: native::library was called without -out.
-  * TOOL: ld, objcopy, ar or cc failed; the message has its output.
+  * TOOL: ld, objcopy, ar or cc failed; the message has its output. For a
+    library of another target, the tools are the ones its target support
+    package declares (the Android NDK's).
+  * TOOLCHAIN: the toolchain a target support package declares is missing
+    on this host -- its environment variable (ANDROID_NDK_ROOT) unset, a
+    revision older than the package's minimum, no directory for this host,
+    a missing tool. It is this host's, never the package's fault.
+  * PIC: the shared library cannot be linked because something linked into
+    it is not position-independent.
+  * ELF: the shared library the toolchain made is not one of the target:
+    another machine or type, a loadable segment aligned to less than the
+    target's page size (16 KiB on Android), a text relocation, a glibc
+    symbol version, a library needed that is no system library of the
+    target, or an export that is no public function. It is removed.
 
 == WHAT TO DO
 Move a top-level constant or computation into a function, or into an

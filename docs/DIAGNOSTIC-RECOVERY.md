@@ -154,7 +154,10 @@ Poison is `never` minus the divergence (hir/types.tcl, "Poison"):
   E` is still rejected): `verifyDeclaredResults` (a poisoned function
   result) and the argument checks (`VerifyCall`, `VerifyStructuralCall`).
   A method-style call whose receiver is poison decides nothing
-  (`DecideMethodCalls`).
+  (`DecideMethodCalls`) -- unless the poison is the call's own (a fold's
+  intermediate its candidate's result conflicts with): then it is judged
+  by the candidates whose own builds establish the receiver
+  (METHOD-RESOLUTION-CORRECTNESS-MILESTONE-1.md, section 10.1, "Cycles").
 
 Poison exists only where its diagnostic does: only reachable code (a
 failing projection in dead code is typed `any`, as before, and reported

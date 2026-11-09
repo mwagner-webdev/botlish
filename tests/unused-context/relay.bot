@@ -1,0 +1,6 @@
+# relay.bot -- imports terminal for its portable function only
+# (tests/unused-context.test): a transitive import.
+import terminal
+
+fn wide(n: int) -> int:
+    terminal::width() + n

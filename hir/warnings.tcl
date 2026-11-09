@@ -157,7 +157,8 @@ proc hir::warnings::collect {hir} {
     variable stats
     set warnings {}
     # (The completion walk the passes read, hir::completions::reachedExprs,
-    # nests as deep as the front end's: under its recursion floor.)
+    # nests as deep as the front end's: under a driver of depth-safe
+    # recursion, core/deep.tcl.)
     hir::Deep {
         dict for {code pass} $passes {
             dict incr stats $code
@@ -554,6 +555,7 @@ proc hir::warnings::BodyExprs {hir block} {
 }
 
 proc hir::warnings::BodyInto {hir e resultVar} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $resultVar result
     lappend result $e
     if {[dict get $hir exprs $e kind] eq "block"} {
@@ -569,6 +571,7 @@ proc hir::warnings::BodyInto {hir e resultVar} {
 # written branch of an `if`. An expression that cannot complete (a return,
 # fail, break, continue, or anything of type never) leaves nothing.
 proc hir::warnings::Leaves {hir e} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     set node [dict get $hir exprs $e]
     if {![dict get $node reachable]} {
         return {}
@@ -1108,6 +1111,7 @@ proc hir::warnings::ShapeExits {hir block} {
 # decide away: falling through such an `if` completes the function with
 # unit.
 proc hir::warnings::FallThroughs {hir e} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     set node [dict get $hir exprs $e]
     if {![dict get $node reachable] || [dict get $node kind] ne "if"
             || [SynthesizedBranch $hir $node] || [hir::typeOf $hir $e] eq "never"} {
