@@ -1266,7 +1266,10 @@ nothing in the release gate requires it. Its runs on this branch:
   - **android (16 KiB pages): cancelled** while still queued, by the push
     of the corrected GC-stress phase.
 * run 10, the corrected GC-stress phase and the self-test's textkit timing:
-  @@RUN10@@
+  [react-native 2048 #10](https://github.com/mwagner-webdev/botlish/actions/runs/42577642784),
+  at `b60b76dc`, queued when this report was last updated. Its `android`
+  jobs are the evidence for GC stress in the app process and for the
+  16 KiB-page image.
 
 Main's own workflows were queued or in progress, none red among those
 completed, when this branch was made (`a6977d56`) and when it was last
