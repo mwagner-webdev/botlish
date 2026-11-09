@@ -497,7 +497,47 @@ bounded form (`Constructed`), and the List boundary of a slot's knowledge
 
 `audit/applied-type-bound/tools/mutate.tcl` (mutants.txt): every mutant
 applied to a private copy, killed by `tests/applied-type-bound.test` or the
-fuzzer (seeds 1, 2, 4, 30 programs each). @MUTATION-RESULTS@
+fuzzer (seeds 1, 2, 4, 30 programs each), each detector run first on the
+unmutated copy. 27 mutants, 27 killed: the first run killed 25, and its two
+survivors were each a missing test, now written (`atb-explicit-variable`:
+an explicit application past the bound mentioning an imprint variable has
+no exact form and is checked at its own top; `atb-hashable-slots`: a cut
+application with two slots, the non-Hashable part in the second or in the
+declaration's own field), both killed by the re-run.
+
+| mutant | the bug | killed by |
+|---|---|---|
+| field-check-uses-bounded-type | the starting defect: the cut construction checked against its own bounded type | 25 tests, fuzzer (14 failures) |
+| construction-result-bounded-before-check | the field's declared type read out of the construction's bounded type | 25 tests, fuzzer |
+| expected-field-type-bounded-before-substitution | a field's expected type the bounded substitution of the slots | 15 tests (atb-deep-mismatch-leaf, atb-hashable-deep, ...) |
+| explicit-args-bounded | an explicit construction keeps the bounded application's arguments | atb-explicit-variable |
+| explicit-exact-args-dropped | an explicit application's exact form never recorded | atb-deep-mismatch-leaf, atb-phantom-written, fuzzer |
+| parameter-check-bounded-before-check | a parameter written deep held as its bounded form | 8 tests, fuzzer |
+| explicit-imprint-bounded-before-check | an explicit imprint bound as its bounded form | atb-deep-mismatch-leaf |
+| result-check-bounded-before-check | a result written deep held as its bounded form | atb-deep-mismatch-leaf |
+| struct-field-written-bounded | a struct field written deep never recorded exactly | atb-deep-mismatch-leaf, atb-isolation |
+| projection-reads-bounded | a projection reads the cut argument again | 14 tests (atb-reproducer's read-back, ...) |
+| inference-over-cut-binding | inference keeps the over-cut binding (a false conflict) | atb-establish-exact, atb-establish-conflict |
+| raised-bound-no-fix | appliedDepth 64 instead of the fix: the rejection only moves deeper | 15 tests (the 1000-deep specimens, atb-bound-unchanged), fuzzer |
+| no-bound | no application ever cut (global exactness) | the test file did not complete (memory cap), fuzzer |
+| any-covariant | `App[precise]` accepted as `App[any]` | atb-no-covariance |
+| arguments-ignored-past-bound | the exact check never finds a difference | 9 tests, fuzzer |
+| deep-slot-mismatch-ignored | a slot established twice never compared exactly | atb-establish-conflict |
+| exactness-from-any | an `any` part of the value taken to match anything | atb-any |
+| horizon-ignored | a bounded part read past its horizon | atb-phantom-written, fuzzer |
+| slots-reversed | slots substituted in reverse order | atb-pair, atb-swap, atb-phantom-written, ..., fuzzer (11) |
+| only-first-slot-precise | only an application's first argument compared | atb-pair-slot-identity, fuzzer |
+| phantom-written-dropped | a slot no field establishes taken as its bounded written argument | atb-phantom-written, fuzzer |
+| join-takes-first | differing `if` branches taken for the first's | atb-if-join-differ |
+| report-at-outer-site | a deep difference reported where the check stands | atb-deep-mismatch-leaf, atb-pair-slot-identity, atb-any, atb-isolation |
+| deep-hashable-skipped | a constrained slot with evidence never judged | atb-hashable-deep |
+| deep-hashable-rejected | a constrained slot past the bound judged on `any` | atb-hashable-deep, atb-hashable-runs |
+| hash-class-from-first-argument | an exact application's class read from its first argument alone | atb-hashable-slots |
+| deep-affine-cut | an affine application cut like any other | atb-affine |
+
+The fuzzer alone kills 11 of them; the tests alone all 27. Every other
+catalog under `audit/` still applies to the changed tree
+(`tools/mutant-catalogs.tcl`: 100 catalogs, 3398 mutants, 0 problems).
 
 ## 19. Performance
 
