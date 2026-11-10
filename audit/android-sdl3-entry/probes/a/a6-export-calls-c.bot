@@ -1,0 +1,8 @@
+# Probe A6: an export calling C (libc getpid: no pointer, so no retaining
+# call and no direct edge) with no context: accepted today.
+import std::ffi::c
+
+extern c fn getpid() -> std::ffi::c::Int
+
+exported c fn pid() -> int:
+    getpid()

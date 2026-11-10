@@ -1,0 +1,31 @@
+diff --git a/native/library.tcl b/native/library.tcl
+index f661ea46..7f51c707 100644
+--- a/native/library.tcl
++++ b/native/library.tcl
+@@ -135,7 +135,7 @@ proc native::library {hir args} {
+         }
+     }
+ 
+-    set problems [library::TopLevelProblems $hir]
++    set problems {} ;# PROBE F ONLY: LIBRARY-TOP-LEVEL lifted in this scratch tree
+     if {$selected} {
+         lassign [hir::exports::select $hir $names] records refused
+         foreach problem $refused {
+@@ -180,8 +180,16 @@ proc native::library {hir args} {
+     # library is linked with them, and the manifest names them for a
+     # consumer of the static library, which holds none of them.
+     set dependencies {}
+-    if {[hir::foreign::linkPlan $hir] ne {}} {
++    if {[hir::foreign::linkPlan $hir] ne {} && $target eq $host} {
+         set dependencies [LinkPlanOf $text]
++    } elseif {[hir::foreign::linkPlan $hir] ne {}} {
++        # PROBE E ONLY: the driver's link-plan command refuses another
++        # target (NATIVE TARGET); shared libraries of the plan by name.
++        foreach entry [hir::foreign::linkPlan $hir] {
++            if {[dict get $entry kind] eq "library" && [dict getdef $entry path ""] eq ""} {
++                lappend dependencies [list library [dict get $entry name]]
++            }
++        }
+     }
+     file mkdir $out
+     set work [file tempdir]

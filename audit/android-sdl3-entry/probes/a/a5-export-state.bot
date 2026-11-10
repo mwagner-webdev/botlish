@@ -1,0 +1,11 @@
+# Probe A5: a persistent instance's state between two export calls. A module
+# binding is immutable and a MutableVector bound at module level is no place
+# a function may mutate. Expected today: MUTABLE-PLACE-RECEIVER (module
+# binding).
+import std::mutable_vector
+
+counts = std::mutable_vector::from_list([0])
+
+exported c fn tick() -> int:
+    counts.push(1)
+    counts.length()

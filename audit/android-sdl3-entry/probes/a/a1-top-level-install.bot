@@ -1,0 +1,12 @@
+# Probe A1: an ordinary entry program -- it installs a context and runs --
+# compiled as a native library. Expected today: LIBRARY-TOP-LEVEL.
+import std::io
+import std::linux::io
+
+exported c fn answer() -> int:
+    42
+
+with context std::linux::io::create()
+std::io::print_line("the application ran"):
+    on std::io::WriteFailed:
+        unit

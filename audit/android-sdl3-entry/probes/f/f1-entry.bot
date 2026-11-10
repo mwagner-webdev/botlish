@@ -1,0 +1,35 @@
+# Probe F1 (ANDROID-SDL3-NATIVE-APPLICATION-ENTRY-CENSUS-MILESTONE-1.md):
+# an ordinary entry program -- it installs its own contexts and runs its
+# own loop to the end -- built as a native library in a scratch tree whose
+# LIBRARY-TOP-LEVEL check is removed, and started by a C host thread
+# through the library's NAME_create. Nothing else changed: no compiler,
+# runtime or ABI addition. The one export only satisfies
+# LIBRARY-NO-EXPORTS.
+import std::int
+import std::io
+import std::linux::io
+import std::mutable_vector
+import std::str
+
+exported c fn version() -> int:
+    1
+
+# Application state owned by an installed context: the frame counts the
+# loop records, one per frame (CONTEXT-OWNED-AFFINE-STATE-MILESTONE-1.md).
+context struct Frames:
+    seen: MutableVector[int]
+
+# The frame loop: one self-tail-recursive function, as Icy Tower's `run`.
+fn frames(n: int, total: int, context f: Frames) -> int:
+    if n == 0:
+        return total
+    f.seen.push(n)
+    frames(n - 1, total + n)
+
+with context std::linux::io::create()
+with context Frames {seen: std::mutable_vector::from_list([])}
+
+total = frames(100000, 0)
+std::io::print_line("entry ran in the host's thread: total ".concat(total.to_string())):
+    on std::io::WriteFailed:
+        unit

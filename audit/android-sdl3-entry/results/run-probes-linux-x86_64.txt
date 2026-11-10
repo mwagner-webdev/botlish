@@ -1,0 +1,111 @@
+
+== A: the native-library rules (the checkout as it is)
+-- a1-top-level-install.bot
+audit/android-sdl3-entry/probes/a/a1-top-level-install.bot: audit/android-sdl3-entry/probes/a/a1-top-level-install.bot:9:1: a library's entry file holds declarations only: this top-level statement would run whenever an instance is created (move a constant or a computation into a function or an imported module) (LIBRARY-TOP-LEVEL)
+audit/android-sdl3-entry/probes/a/a1-top-level-install.bot: audit/android-sdl3-entry/probes/a/a1-top-level-install.bot:9:1: a library's entry file holds declarations only: this top-level statement would run whenever an instance is created (move a constant or a computation into a function or an imported module) (LIBRARY-TOP-LEVEL)
+audit/android-sdl3-entry/probes/a/a1-top-level-install.bot: audit/android-sdl3-entry/probes/a/a1-top-level-install.bot:10:1: a library's entry file holds declarations only: this top-level statement would run whenever an instance is created (move a constant or a computation into a function or an imported module) (LIBRARY-TOP-LEVEL)
+-- a2-export-requires-context.bot
+audit/android-sdl3-entry/probes/a/a2-export-requires-context.bot: audit/android-sdl3-entry/probes/a/a2-export-requires-context.bot:8:18: function run requires context std::io::IO, so it can only be called (or bound to another name as a statement): it cannot be passed, returned or stored as a value, because a call through an unknown function value could not prove that context installed (CORE SEMANTIC CONTEXT-FUNCTION-VALUE)
+audit/android-sdl3-entry/probes/a/a2-export-requires-context.bot: audit/android-sdl3-entry/probes/a/a2-export-requires-context.bot:8:18: exported c fn "run" requires the context std::io::IO; a C caller installs no context (CORE SEMANTIC EXPORT-ENVIRONMENT)
+-- a3-export-context-parameter.bot
+audit/android-sdl3-entry/probes/a/a3-export-context-parameter.bot: audit/android-sdl3-entry/probes/a/a3-export-context-parameter.bot:5:18: function run requires context std::io::IO, so it can only be called (or bound to another name as a statement): it cannot be passed, returned or stored as a value, because a call through an unknown function value could not prove that context installed (CORE SEMANTIC CONTEXT-FUNCTION-VALUE)
+audit/android-sdl3-entry/probes/a/a3-export-context-parameter.bot: audit/android-sdl3-entry/probes/a/a3-export-context-parameter.bot:5:18: exported c fn "run" declares context parameters; a C caller has no installed context to give a C export (CORE SEMANTIC EXPORT-SIGNATURE)
+audit/android-sdl3-entry/probes/a/a3-export-context-parameter.bot: audit/android-sdl3-entry/probes/a/a3-export-context-parameter.bot:5:18: exported c fn "run" requires the context std::io::IO; a C caller installs no context (CORE SEMANTIC EXPORT-ENVIRONMENT)
+-- a4-export-suspends.bot
+audit/android-sdl3-entry/probes/a/a4-export-suspends.bot: audit/android-sdl3-entry/probes/a/a4-export-suspends.bot:6:19: step may suspend, so it cannot become a function value: a call through an unknown function value could run it outside every coroutine (call it directly, or start it with "coroutine {step, first} = step(...)"):
+    step, which yields directly at audit/android-sdl3-entry/probes/a/a4-export-suspends.bot:7:9 (CORE SEMANTIC UNWRAPPED-YIELD)
+audit/android-sdl3-entry/probes/a/a4-export-suspends.bot: audit/android-sdl3-entry/probes/a/a4-export-suspends.bot:6:19: exported c fn "step" declares a resume clause; a C export is never a coroutine body (CORE SEMANTIC EXPORT-SIGNATURE)
+audit/android-sdl3-entry/probes/a/a4-export-suspends.bot: audit/android-sdl3-entry/probes/a/a4-export-suspends.bot:6:19: exported c fn "step" may suspend (it yields, or calls a function that does); a C export runs to completion (CORE SEMANTIC EXPORT-ENVIRONMENT)
+-- a5-export-state.bot
+audit/android-sdl3-entry/probes/a/a5-export-state.bot: audit/android-sdl3-entry/probes/a/a5-export-state.bot:10:5: the receiver of std::mutable_vector::push is `counts`, a binding of an enclosing function: a nested function cannot mutate a vector it captured (a vector is a value; pass it in and return the result) (CORE SEMANTIC MUTABLE-PLACE-RECEIVER)
+audit/android-sdl3-entry/probes/a/a5-export-state.bot: audit/android-sdl3-entry/probes/a/a5-export-state.bot:9:19: exported c fn "tick" captures counts; a C export is environment-free (a top-level value it reads belongs in a module, where it is a module static) (CORE SEMANTIC EXPORT-ENVIRONMENT)
+-- a6-export-calls-c.bot
+static: WORK/a/libp6.a
+shared: WORK/a/libp6.so
+header: WORK/a/p6.h
+manifest: WORK/a/p6.manifest.json
+-- a7-direct-export-retaining-c.bot
+static: WORK/a/libp7.a
+shared: WORK/a/libp7.so
+header: WORK/a/p7.h
+manifest: WORK/a/p7.manifest.json
+
+== C: a host-driven instance (the React Native 2048 facade)
+create: 146.4 us, RSS 2096 -> 2780 KiB (+684)
+state: 59 bytes
+move: 20000 calls, 29.25 us per call (state crossing twice), 0 refused
+foreign-thread call: status 4 identity WRONG-THREAD
+destroy: status 0, RSS 4428 KiB
+
+== F: an entry program inside a library instance (scratch tree: LIBRARY-TOP-LEVEL lifted)
+-- f1 on a 1 MiB host thread
+entry ran in the host's thread: total 5000050000
+host: create status 0 (the entry ran to its end)
+host: destroy status 0
+-- f2 on a 1 MiB host thread
+host: create status 2, identity NATIVE LIMIT STACK
+
+== D: Icy Tower's modules as the entry, started through SDL_RunApp on SDLThread
+frames=600 round=1 floor=36 score=360 best=35.5 time=10.0 over=no x=247 y=3469 camera=3211 platforms=11 rng=659525717
+observer: SDL_Init                  1 calls, on SDLThread
+observer: SDL_CreateWindow          1 calls, on SDLThread
+observer: SDL_CreateRenderer        1 calls, on SDLThread
+observer: SDL_PollEvent           611 calls, on SDLThread
+observer: SDL_RenderPresent       600 calls, on SDLThread
+observer: SDL_RenderDebugText    2876 calls, on SDLThread
+observer: SDL_DestroyRenderer       1 calls, on SDLThread
+observer: SDL_Quit                  1 calls, on SDLThread
+bootstrap: UI thread tid 14281
+bootstrap: SDL_main on thread SDLThread (tid 14282), SDL_IsMainThread 1
+bootstrap: the application returned; destroy status 0
+bootstrap: SDL_RunApp returned 0
+-- the committed executable, the same seed
+frames=600 round=1 floor=36 score=360 best=35.5 time=10.0 over=no x=247 y=3469 camera=3211 platforms=11 rng=659525717
+
+== E: the application for android-aarch64 (scratch tree), inspected
+-- probe E2 on the checkout as it is (a cross-target library with a link plan)
+e2-link-plan-cross.bot: this program was built for target android-aarch64 (aarch64-linux-android), and native code runs only on its own target's host: this host is x86_64-unknown-linux-gnu. Compile the program for this host (main.tcl -target, or the host's default), or run it on a Tcl backend (NATIVE TARGET)
+target support: botlish_target_android_aarch64 (android-aarch64, runtime WORK/e/app/.bot_modules/.targets/android-aarch64/botlish_target_android_aarch64/runtime/libbotlish_runtime.a)
+static: lib/libicy.a
+shared: lib/libicy.so
+header: lib/icy.h
+manifest: lib/icy.manifest.json
+-- libicy.so
+  Machine:                           AArch64
+  LOAD           0x000000 0x0000000000000000 0x0000000000000000 0x0ca2f0 0x0ca2f0 R E 0x4000
+  LOAD           0x0ca2f0 0x00000000000ce2f0 0x00000000000ce2f0 0x0045d0 0x004d10 RW  0x4000
+  LOAD           0x0ce8c0 0x00000000000d68c0 0x00000000000d68c0 0x000a70 0x003258 RW  0x4000
+ 0x0000000000000001 (NEEDED)             Shared library: [liblog.so]
+ 0x0000000000000001 (NEEDED)             Shared library: [libSDL3.so]
+ 0x0000000000000001 (NEEDED)             Shared library: [libdl.so]
+ 0x0000000000000001 (NEEDED)             Shared library: [libm.so]
+ 0x0000000000000001 (NEEDED)             Shared library: [libc.so]
+ 0x000000000000000e (SONAME)             Library soname: [libicy.so]
+   bytes 1197608, stripped 850976
+-- libmain.so
+  Machine:                           AArch64
+  LOAD           0x000000 0x0000000000000000 0x0000000000000000 0x0008a0 0x0008a0 R E 0x4000
+  LOAD           0x0008a0 0x00000000000048a0 0x00000000000048a0 0x000230 0x000760 RW  0x4000
+ 0x0000000000000001 (NEEDED)             Shared library: [libicy.so]
+ 0x0000000000000001 (NEEDED)             Shared library: [libSDL3.so]
+ 0x0000000000000001 (NEEDED)             Shared library: [liblog.so]
+ 0x0000000000000001 (NEEDED)             Shared library: [libdl.so]
+ 0x0000000000000001 (NEEDED)             Shared library: [libc.so]
+ 0x000000000000000e (SONAME)             Library soname: [libmain.so]
+   bytes 6192, stripped 4728
+-- libSDL3.so
+  Machine:                           AArch64
+  LOAD           0x000000 0x0000000000000000 0x0000000000000000 0x239480 0x239480 R E 0x4000
+  LOAD           0x239480 0x000000000023d480 0x000000000023d480 0x009bd8 0x00ab80 RW  0x4000
+  LOAD           0x243058 0x000000000024b058 0x000000000024b058 0x006b98 0x009e28 RW  0x4000
+ 0x0000000000000001 (NEEDED)             Shared library: [libm.so]
+ 0x0000000000000001 (NEEDED)             Shared library: [libOpenSLES.so]
+ 0x0000000000000001 (NEEDED)             Shared library: [libdl.so]
+ 0x0000000000000001 (NEEDED)             Shared library: [liblog.so]
+ 0x0000000000000001 (NEEDED)             Shared library: [libandroid.so]
+ 0x0000000000000001 (NEEDED)             Shared library: [libGLESv1_CM.so]
+ 0x0000000000000001 (NEEDED)             Shared library: [libGLESv2.so]
+ 0x0000000000000001 (NEEDED)             Shared library: [libc.so]
+ 0x000000000000000e (SONAME)             Library soname: [libSDL3.so]
+   bytes 12086056, stripped 2401784
+-- SDL functions libicy.so imports: 24

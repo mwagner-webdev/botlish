@@ -1,0 +1,15 @@
+direct module
+# Probe A7: an export of a direct module making a retaining C call (libc
+# free, whose pointer parameter states no contract: unknown, so retaining,
+# a direct edge) with no context: accepted today, because the entry file
+# acknowledges raw authority with `direct module`. This is how a
+# host-driven instance could reach SDL without contexts -- the context
+# discipline given up, not kept.
+import std::ffi::c
+
+extern c fn free(p: std::ffi::c::Ptr[std::ffi::c::Void]) -> unit
+
+exported c fn release_nothing() -> int:
+    nothing = std::ffi::c::null[std::ffi::c::Void]()
+    free(nothing)
+    0

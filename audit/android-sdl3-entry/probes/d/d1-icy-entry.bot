@@ -1,0 +1,23 @@
+# Probe D1 (ANDROID-SDL3-NATIVE-APPLICATION-ENTRY-CENSUS-MILESTONE-1.md):
+# Icy Tower's application -- its unchanged modules game, sdl, render, hud,
+# tower and options -- as the entry computation of a native library, built
+# in the probe's scratch tree without LIBRARY-TOP-LEVEL, and started by
+# sdl_bootstrap.c the way SDL's Android bootstrap starts an application:
+# a host thread named SDLThread, SDL_RunApp, then the application's
+# SDL_main, which runs this entry and returns its status. The game's
+# arguments are fixed here (a library's argv() is the empty list): the
+# autopilot plays 600 frames on SDL's dummy video driver.
+import game
+import sdl
+import std::io
+import std::linux::io
+
+exported c fn version() -> int:
+    1
+
+with context std::linux::io::create()
+with context sdl::create()
+
+game::main(["--autopilot", "--fixed-step", "--frames", "600", "--seed", "17"]):
+    on std::io::WriteFailed:
+        unit
