@@ -1,0 +1,430 @@
+# applied-type-bound.test -- the applied-type bound is an approximation of
+# the type lattice, never a rule a source program is rejected by
+# (APPLIED-TYPE-BOUND-PRECISION-MILESTONE-1.md).
+#
+# Past hir::types::appliedDepth applications nested directly in arguments,
+# an application's arguments are `any` (hir::types::MakeApplied). The
+# construction Box {value: Box {value: ...}} seven deep used to be a TYPE
+# error: the field's declared type was read out of the construction's own
+# bounded type, which is cut one application earlier than the value in the
+# field. A construction's field types are now what its own field values or
+# its written application establish, a projection of a value the program
+# constructed reads the field value's own type, and where a written type
+# says more than the bound keeps (a parameter, a result, a field, an
+# explicit application or imprint written deeper), the value's evidence is
+# held to it exactly -- a deep mismatch is reported at its deepest field,
+# with the same message at every depth (hir/applied.tcl).
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+
+set atbDecls "struct Box\[T\]:\n    value: T\n\n"
+
+# Box {value: ... LEAF} N deep, and the type Box[...LEAF...] N deep.
+proc atbNest {n leaf} {
+    set s $leaf
+    for {set i 0} {$i < $n} {incr i} {
+        set s "Box \{value: $s\}"
+    }
+    return $s
+}
+
+proc atbType {n leaf} {
+    set s $leaf
+    for {set i 0} {$i < $n} {incr i} {
+        set s "Box\[$s\]"
+    }
+    return $s
+}
+
+proc atbProject {n} {
+    return [string repeat .value $n]
+}
+
+# The first diagnostic of SOURCE: {CODE LINE COLUMN SUMMARY}, or accepted.
+proc atbDiagnostic {source} {
+    if {![catch {surface::compile $source -warnings off} result options]} {
+        return accepted
+    }
+    if {![dict exists $options -diagnostics]} {
+        return [list ERROR $result]
+    }
+    set first [lindex [dict get $options -diagnostics] 0]
+    return [list [lindex [dict get $first errorcode] end] [dict get $first location line] \
+        [dict get $first location column] [dict get $first summary]]
+}
+
+proc atbCode {source} {
+    return [lindex [atbDiagnostic $source] 0]
+}
+
+# SOURCE run on BACKENDS under the program recursion limit (a 1000-deep
+# construction is the program's own nesting on the interpreter): one
+# {value SHOWN} or {error CODE} each.
+proc atbRun {source {backends {interp compile cranelift-generic cranelift}}} {
+    set hir [surface::compile $source -warnings off]
+    set saved [interp recursionlimit {}]
+    core::useProgramRecursionLimit
+    try {
+        return [lmap backend $backends {lrange [outcomeUnderHir $backend $hir] 0 1}]
+    } finally {
+        interp recursionlimit {} $saved
+    }
+}
+
+# The column (1-based) of the last occurrence of NEEDLE on line LINE of
+# SOURCE: where a deep mismatch's leaf is.
+proc atbColumn {source line needle} {
+    return [expr {[string last $needle [lindex [split $source \n] $line-1]] + 1}]
+}
+
+# The programs of the reproducer and the checked positions, N deep.
+proc atbReproducer {n} {
+    return "$::atbDecls\x = [atbNest $n 1]\nx[atbProject $n]\n"
+}
+
+proc atbParameter {n leaf} {
+    return "${::atbDecls}fn consume(x: [atbType $n int]) -> int:\n    1\n\nconsume([atbNest $n $leaf])\n"
+}
+
+proc atbResult {n leaf} {
+    return "${::atbDecls}fn make() -> [atbType $n int]:\n    [atbNest $n $leaf]\n\nmake()\n1\n"
+}
+
+proc atbHolder {n leaf} {
+    return "${::atbDecls}struct Holder:\n    value: [atbType $n int]\n\nh = Holder \{value: [atbNest $n $leaf]\}\nh.value[atbProject $n]\n"
+}
+
+proc atbExplicit {n leaf} {
+    return "$::atbDecls\x = [atbType $n int] \{value: [atbNest [expr {$n - 1}] $leaf]\}\nx[atbProject $n]\n"
+}
+
+proc atbImprint {n leaf} {
+    return "${::atbDecls}fn unwrap(b: Box\[T\]) -> int:\n    1\n\nunwrap\[[atbType $n int]\]([atbNest [expr {$n + 1}] $leaf])\n"
+}
+
+# ---------------------------------------------------------------------------
+# The starting defect
+
+test atb-reproducer {the specimen Box {value: Box {value: ... 1}} with its terminal Int read back through the projection chain is a program at every depth -- it was a TYPE error from 7 deep on (the depth-safe front end's dsn-box-bound), the same at 1000 as at 7} -body {
+    lmap n {1 2 3 4 5 6 7 8 12 24 48 96 256 1000} {atbDiagnostic [atbReproducer $n]}
+} -result {accepted accepted accepted accepted accepted accepted accepted accepted accepted accepted accepted accepted accepted accepted}
+
+test atb-reproducer-runs {the specimen's terminal Int is observable on every backend: 7, 24 and 1000 deep} -body {
+    lmap n {7 24 1000} {atbRun [atbReproducer $n]}
+} -result {{{value 1} {value 1} {value 1} {value 1}} {{value 1} {value 1} {value 1} {value 1}} {{value 1} {value 1} {value 1} {value 1}}}
+
+test atb-first-cut {the first cut, mechanically: Box^7 {1}'s bounded type is cut (an application seven deep keeps no argument), and the type of its field read out of it is Box^6[any] -- cut one application earlier than the field's value, which is Box^6[int] at its own top: the comparison the construction check used to make} -body {
+    set hir [surface::compile "$::atbDecls\x = [atbNest 7 1]\n0\n" -warnings off]
+    set e [dict get $hir exprs [lindex [dict get $hir roots] 0] value]
+    set type [hir::typeOf $hir $e]
+    set field [lindex [dict get $hir exprs $e fields] 0]
+    list [hir::applied::Cut $type] [hir::types::show [hir::types::StructField $type value]] \
+        [hir::types::show [hir::typeOf $hir $field]] [hir::applied::Cut [hir::typeOf $hir $field]]
+} -cleanup {unset -nocomplain hir e type field} -result {1 {Box[Box[Box[Box[Box[Box[any]]]]]]} {Box[Box[Box[Box[Box[Box[int]]]]]]} 0}
+
+test atb-bound-unchanged {the lattice stays finite: appliedDepth is still 6, every type the HIR holds is still bounded, and the deep specimen's type table does not grow with the depth (the same types 100 and 400 deep) -- precision is cashed out in the checks, never kept in the types} -body {
+    set counts {}
+    foreach n {100 400} {
+        set hir [surface::compile [atbReproducer $n] -warnings off]
+        set types [dict get $hir types]
+        lappend counts [llength $types] [tcl::mathfunc::max {*}[lmap t $types {string length $t}]]
+    }
+    list $::hir::types::appliedDepth [expr {[lindex $counts 0] == [lindex $counts 2]}] [expr {[lindex $counts 1] == [lindex $counts 3]}]
+} -cleanup {unset -nocomplain counts n hir types} -result {6 1 1}
+
+# ---------------------------------------------------------------------------
+# Written types: valid values accepted, deep mismatches found at the leaf
+
+test atb-written-valid {a value that exactly satisfies a type written deeper than the bound is accepted wherever the type stands -- a parameter, a result, a struct field, an explicit construction, an explicit imprint -- 8, 24 and 1000 deep} -body {
+    lmap n {8 24 1000} {
+        list [atbCode [atbParameter $n 1]] [atbCode [atbResult $n 1]] [atbCode [atbHolder $n 1]] \
+            [atbCode [atbExplicit $n 1]] [atbCode [atbImprint $n 1]]
+    }
+} -result {{accepted accepted accepted accepted accepted} {accepted accepted accepted accepted accepted} {accepted accepted accepted accepted accepted}}
+
+test atb-written-runs {the written positions run on every backend 24 deep: a struct field's value and an explicit construction read back to their terminal Int} -body {
+    list [atbRun [atbHolder 24 1]] [atbRun [atbExplicit 24 1]] [atbRun [atbParameter 24 1] {interp cranelift}]
+} -result {{{value 1} {value 1} {value 1} {value 1}} {{value 1} {value 1} {value 1} {value 1}} {{value 1} {value 1}}}
+
+test atb-deep-mismatch-leaf {a String where a written type says Int, deeper than the bound, is a TYPE error at its deepest field -- the innermost construction's, at the String -- with the same message at every depth, for a parameter, a result, a struct field, an explicit construction and an explicit imprint; the message never says any} -body {
+    set results {}
+    foreach n {8 24 96 1000} {
+        set row {}
+        foreach make {atbParameter atbResult atbHolder atbExplicit atbImprint} {
+            set source [$make $n {"wrong"}]
+            lassign [atbDiagnostic $source] code line column summary
+            lappend row [list $code [expr {$column == [atbColumn $source $line {value: "wrong"}]}] $summary]
+        }
+        lappend results [lsort -unique $row]
+    }
+    lsort -unique $results
+} -cleanup {unset -nocomplain results n row make source code line column summary} -result {{{TYPE 1 {field "value" of struct Box[int] cannot be proven to satisfy its declared type int (value type: str)}}}}
+
+test atb-shallow-unchanged {within the bound nothing changes: the same mismatches 3 deep keep the bounded check's diagnostics, word for word, at the argument, the result and the outer field} -body {
+    list [atbDiagnostic [atbParameter 3 {"wrong"}]] [lrange [atbDiagnostic [atbResult 3 {"wrong"}]] 0 2] \
+        [atbDiagnostic [atbExplicit 3 {"wrong"}]]
+} -result {{TYPE 7 9 {argument for parameter "x" cannot be proven to satisfy Box[Box[Box[int]]] (argument type: Box[Box[Box[str]]]); Box[Box[Box[str]]] and Box[Box[Box[int]]] are distinct applications of Box (T is Box[Box[str]], not Box[Box[int]]): an application is a type of its own for each argument of each slot, and no slot is converted, widened or narrowed}} {TYPE 4 8} {TYPE 4 25 {field "value" of struct Box[Box[Box[int]]] cannot be proven to satisfy its declared type Box[Box[int]] (value type: Box[Box[str]]); Box[Box[str]] and Box[Box[int]] are distinct applications of Box (T is Box[str], not Box[int]): an application is a type of its own for each argument of each slot, and no slot is converted, widened or narrowed}}}
+
+test atb-explicit-variable {an explicit application written past the bound that mentions an imprint variable has no exact form, and is still checked against each written argument at its own top -- never the bounded application's arguments, cut one application early: a generic function's Box[Box^8[T]] {value: <a Box chain 8 deep around a T>} is a program, run with an Int and a String} -body {
+    set source "${::atbDecls}fn wrap(b: Box\[T\]) -> int:\n    x = [atbType 9 T] \{value: [atbNest 8 {b.value}]\}\n    1\n\n\[wrap(Box \{value: 1\}), wrap(Box \{value: \"s\"\})\]\n"
+    list [atbCode $source] [atbRun $source {interp cranelift}]
+} -cleanup {unset -nocomplain source} -result {accepted {{value {[1, 1]}} {value {[1, 1]}}}}
+
+test atb-no-exact-forms-shallow {an ordinary program's HIR is unchanged: no exact written form is recorded for a type the bound did not cut (a parameter, a result, an explicit construction, an imprint, a field), only for one it did} -body {
+    set shallow [surface::compile [atbHolder 3 1] -warnings off]
+    set deep [surface::compile [atbParameter 9 1] -warnings off]
+    set keys {}
+    foreach hir [list $shallow $deep] {
+        set found {}
+        dict for {e node} [dict get $hir exprs] {
+            foreach k {exactParamTypes exactResult exactStructArgs exactImprint} {
+                if {[dict exists $node $k]} {
+                    lappend found $k
+                }
+            }
+        }
+        lappend keys $found
+    }
+    set keys
+} -cleanup {unset -nocomplain shallow deep keys hir found e node k} -result {{} exactParamTypes}
+
+# ---------------------------------------------------------------------------
+# Slots
+
+set atbSlots "struct Box\[T\]:\n    value: T\n\nstruct Pair\[A, B\]:\n    first: A\n    second: B\n\nstruct Swap\[A, B\]:\n    value: Pair\[B, A\]\n\nstruct Phantom\[T\]:\n    value: int\n\n"
+
+proc atbPair {n {first {}} {leaf 1}} {
+    set s $leaf
+    for {set i 0} {$i < $n} {incr i} {
+        set f [expr {$i == 0 && $first ne "" ? $first : $i}]
+        set s "Pair \{first: $f, second: $s\}"
+    }
+    return $s
+}
+
+proc atbPairType {n} {
+    set s int
+    for {set i 0} {$i < $n} {incr i} {
+        set s "Pair\[int, $s\]"
+    }
+    return $s
+}
+
+test atb-pair {two slots, one constant and one growing: Pair {first: I, second: Pair {...}} 24 deep is a program, read back through its second slot, and held to a written Pair[int, Pair[...]] 24 deep} -body {
+    list [atbRun "$::atbSlots\x = [atbPair 24]\nx[string repeat .second 24]\n"] \
+        [atbCode "${::atbSlots}fn f(x: [atbPairType 24]) -> int:\n    1\nf([atbPair 24])\n"]
+} -result {{{value 1} {value 1} {value 1} {value 1}} accepted}
+
+test atb-pair-slot-identity {a deep mismatch is in the slot it is in: a String in the innermost Pair's second slot is reported at its field "second", one in its first slot at "first" -- never at the other slot, never at an outer one} -body {
+    set results {}
+    foreach n {8 50} {
+        set second "${::atbSlots}fn f(x: [atbPairType $n]) -> int:\n    1\nf([atbPair $n {} {"s"}])\n"
+        set first "${::atbSlots}fn f(x: [atbPairType $n]) -> int:\n    1\nf([atbPair $n {"s"}])\n"
+        lassign [atbDiagnostic $second] code line column summary
+        lassign [atbDiagnostic $first] code2 line2 column2 summary2
+        lappend results [list $code $summary [expr {$column == [atbColumn $second $line {second: "s"}]}] \
+            $code2 $summary2 [expr {$column2 == [atbColumn $first $line2 {first: "s"}]}]]
+    }
+    lsort -unique $results
+} -cleanup {unset -nocomplain results n second first code line column summary code2 line2 column2 summary2} -result {{TYPE {field "second" of struct Pair[int, int] cannot be proven to satisfy its declared type int (value type: str)} 1 TYPE {field "first" of struct Pair[int, int] cannot be proven to satisfy its declared type int (value type: str)} 1}}
+
+test atb-swap {a declaration that moves its slots (Swap[A, B] holds Pair[B, A]) is followed through the declaration, never by position: Swap {value: Pair {first: "x", second: Swap {...}}} 24 deep is a program, read back to its Int} -body {
+    set s 1
+    for {set i 0} {$i < 24} {incr i} {
+        set s "Swap \{value: Pair \{first: \"x\", second: $s\}\}"
+    }
+    atbRun "$::atbSlots\x = $s\nx[string repeat .value.second 24]\n"
+} -cleanup {unset -nocomplain s i} -result {{value 1} {value 1} {value 1} {value 1}}
+
+test atb-phantom {a phantom slot needs no precision: a Phantom nested past the bound in a Box chain is a program, its own field read back} -body {
+    atbRun "$::atbSlots\x = [atbNest 24 {Phantom[Box[int]] {value: 3}}]\nx[atbProject 24].value\n"
+} -result {{value 3} {value 3} {value 3} {value 3}}
+
+test atb-phantom-written {a phantom slot's argument is what the written application says, exactly: a construction written with a phantom argument a Box 12 deep is held to a parameter type that says the same (accepted) or differs deep inside it (TYPE), though no field value depends on it -- and a slot read out of a List's contents, compared past the bound, is not taken for a mismatch} -body {
+    set decls "${::atbSlots}struct P\[A, B\]:\n    f1: Box\[A\]\n\nstruct L\[A\]:\n    f1: List\[A\]\n\n"
+    set written [atbType 12 int]
+    set other [atbType 12 str]
+    list [atbCode "${decls}fn f(x: P\[int, $written\]) -> int:\n    1\nf(P\[int, $written\] \{f1: Box \{value: 1\}\})\n"] \
+        [atbCode "${decls}fn f(x: P\[int, $other\]) -> int:\n    1\nf(P\[int, $written\] \{f1: Box \{value: 1\}\})\n"] \
+        [atbCode "import std::list\n${decls}fn f(x: Box\[L\[$written\]\]) -> int:\n    1\nf(Box \{value: L \{f1: \[[atbNest 12 1]\]\}\})\n"]
+} -cleanup {unset -nocomplain decls written other} -result {accepted TYPE accepted}
+
+# ---------------------------------------------------------------------------
+# Slot establishment
+
+set atbTwo "struct Box\[T\]:\n    value: T\n\nstruct Two\[T\]:\n    a: Box\[T\]\n    b: T\n\nfn same(a: Box\[T\], b: Box\[T\]) -> int:\n    1\n\n"
+
+test atb-establish-exact {a slot two fields establish is held to one type exactly: Two {a: Box {value: X}, b: X} with X a Box 8 or 50 deep is a program (the bounded inference read T out of a's cut argument one application earlier than b's own type, and reported a conflict that was none), and so is a call whose two arguments establish one variable from equal deep values} -body {
+    lmap n {8 50} {
+        list [atbCode "$::atbTwo\x = Two \{a: Box \{value: [atbNest $n 1]\}, b: [atbNest $n 1]\}\n1\n"] \
+            [atbCode "${::atbTwo}same([atbNest $n 1], [atbNest $n 1])\n"]
+    }
+} -result {{accepted accepted} {accepted accepted}}
+
+test atb-establish-conflict {deep conflicting establishments are still IMPRINT, however deep the difference, and the message names the exact types (an Int against a String, never any): two fields of a construction, two arguments of a call} -body {
+    set results {}
+    foreach n {8 50} {
+        lassign [atbDiagnostic "$::atbTwo\x = Two \{a: Box \{value: [atbNest $n 1]\}, b: [atbNest $n {"s"}]\}\n1\n"] c1 - - m1
+        lassign [atbDiagnostic "${::atbTwo}same([atbNest $n 1], [atbNest $n {"s"}])\n"] c2 - - m2
+        lappend results [list $c1 [regexp {Box\[int\]\]* by an earlier argument but .*Box\[str\]\]* by field 2$} $m1] \
+            [string first any $m1] $c2 [regexp {^same: imprint variable T is .*Box\[int\]\]* by an earlier argument but .*Box\[str\]\]* by argument 2$} $m2] \
+            [string first any $m2]]
+    }
+    lsort -unique $results
+} -cleanup {unset -nocomplain results n c1 m1 c2 m2} -result {{IMPRINT 1 -1 IMPRINT 1 -1}}
+
+# ---------------------------------------------------------------------------
+# `any` stays imprecise
+
+test atb-any {a value the program gives as any stays any: a deep Box whose leaf comes from a function declared to return any is rejected where a written type says Int -- at the leaf, value type any -- and accepted where it says any; no precision is made up from any} -body {
+    set dyn "${::atbDecls}fn dyn() -> any:\n    1\n\n"
+    list [lrange [atbDiagnostic "${dyn}fn f(x: [atbType 24 int]) -> int:\n    1\nf([atbNest 24 {dyn()}])\n"] 0 0] \
+        [lindex [atbDiagnostic "${dyn}fn f(x: [atbType 24 int]) -> int:\n    1\nf([atbNest 24 {dyn()}])\n"] 3] \
+        [atbCode "${dyn}fn f(x: [atbType 24 any]) -> int:\n    1\nf([atbNest 24 {dyn()}])\n"]
+} -cleanup {unset -nocomplain dyn} -result {TYPE {field "value" of struct Box[int] cannot be proven to satisfy its declared type int (value type: any, facts: [-∞, +∞])} accepted}
+
+test atb-no-covariance {no covariance is introduced: a deep Box of Int is not a deep Box of any, past the bound or within it} -body {
+    list [atbCode "${::atbDecls}fn f(x: [atbType 3 any]) -> int:\n    1\nf([atbNest 3 1])\n"] \
+        [atbCode "${::atbDecls}fn f(x: [atbType 24 any]) -> int:\n    1\nf([atbNest 24 1])\n"]
+} -result {TYPE TYPE}
+
+# ---------------------------------------------------------------------------
+# Constrained slots
+
+set atbHashed "struct Box\[T\]:\n    value: T\n\nstruct H\[K satisfies Hashable, V\]:\n    key: K\n    value: V\n\nfn inc(x: int) -> int:\n    x + 1\n\n"
+
+test atb-hashable-deep {a constrained slot past the bound is judged on what it holds: a Hashable key a Box 8 or 50 deep satisfies Hashable -- in a construction, a written parameter type and an explicit application (it used to be TRAIT-NOT-SATISFIED: any satisfies nothing) -- and a key holding a function that deep does not, with a reason that names the exact type} -body {
+    set results {}
+    foreach n {8 50} {
+        set bad [atbDiagnostic "$::atbHashed\h = H \{key: [atbNest $n inc], value: 2\}\n1\n"]
+        lappend results [list [atbCode "$::atbHashed\h = H \{key: [atbNest $n 1], value: 2\}\nh.key[atbProject $n]\n"] \
+            [atbCode "${::atbHashed}fn g(h: H\[[atbType $n int], int\]) -> int:\n    h.value\ng(H \{key: [atbNest $n 1], value: 2\})\n"] \
+            [atbCode "$::atbHashed\h = H\[[atbType $n int], int\] \{key: [atbNest $n 1], value: 2\}\nh.value\n"] \
+            [lindex $bad 0] [string first {[any]} [lindex $bad 3]] [string first "does not satisfy Hashable: it holds" [lindex $bad 3]] \
+            [atbCode "${::atbHashed}fn g(h: H\[[atbType $n {Fn{args: [int], return: int}}], int\]) -> int:\n    h.value\n1\n"]]
+    }
+    lsort -unique [lmap r $results {lreplace $r 5 5 [expr {[lindex $r 5] > 0}]}]
+} -cleanup {unset -nocomplain results n bad r} -result {{accepted accepted accepted TRAIT-NOT-SATISFIED -1 1 TRAIT-NOT-SATISFIED}}
+
+test atb-hashable-slots {an exact application's class is its declaration's, from every argument and its own fields: a key the bound cut whose function is in a Pair's second slot (Pair {first: 1, second: Box^8 {inc}}), or whose declaration holds a function of its own beside a deep slot (F {value: Box^8 {1}, f: inc}), is not Hashable, and the same Pair with an Int is} -body {
+    set decls "${::atbHashed}struct Pair\[A, B\]:\n    first: A\n    second: B\n\nstruct F\[T\]:\n    value: T\n    f: Fn\{args: \[int\], return: int\}\n\n"
+    lmap value [list "Pair \{first: 1, second: [atbNest 8 inc]\}" "F \{value: [atbNest 8 1], f: inc\}" \
+            "Pair \{first: 1, second: [atbNest 8 2]\}"] {
+        atbCode "$decls\h = H \{key: $value, value: 2\}\n1\n"
+    }
+} -cleanup {unset -nocomplain decls value} -result {TRAIT-NOT-SATISFIED TRAIT-NOT-SATISFIED accepted}
+
+test atb-hashable-runs {the deep Hashable key's construction runs, its key read back, on every backend} -body {
+    atbRun "$::atbHashed\h = H \{key: [atbNest 24 1], value: 2\}\nh.key[atbProject 24]\n"
+} -result {{value 1} {value 1} {value 1} {value 1}}
+
+# ---------------------------------------------------------------------------
+# Affinity and recursion
+
+set atbAffine "import std::coroutine\n\nstruct Box\[T\]:\n    value: T\n\nstruct Phantom\[T\]:\n    value: int\n\nstruct Node\[T\]:\n    value: T\n    children: List\[Node\[T\]\]\n\nfn worker(seed: int) -> int:\n    yield seed\n    seed\n\nfn make(seed: int) -> Coroutine\{args: \[\], return: int\}:\n    coroutine \{step\} = worker(seed)\n    step\n\n"
+
+test atb-affine {affinity is unchanged by the precision: a Box chain holding a coroutine handle past the bound is affine (never cut), a phantom of one nested past the bound is not, and a written recursive affine application nested past the bound is still AFFINE-CONTAINER-UNSUPPORTED} -body {
+    set hir [surface::compile "$::atbAffine\x = [atbNest 12 {make(1)}]\ny = [atbNest 12 {Phantom[Coroutine{args: [], return: int}] {value: 1}}]\n0\n" -warnings off]
+    set types {}
+    foreach name {x y} {
+        foreach root [dict get $hir roots] {
+            if {[dict get $hir exprs $root kind] eq "bind" && [dict get $hir exprs $root name] eq $name} {
+                lappend types [hir::typeOf $hir [dict get $hir exprs $root value]]
+            }
+        }
+    }
+    list [hir::types::IsAffine [lindex $types 0]] [hir::types::IsAffine [lindex $types 1]] [hir::applied::Cut [lindex $types 1]] \
+        [atbCode "${::atbAffine}fn f(x: [atbType 9 {Node[Coroutine{args: [], return: int}]}]) -> int:\n    1\n0\n"]
+} -cleanup {unset -nocomplain hir types} -result {1 0 1 AFFINE-CONTAINER-UNSUPPORTED}
+
+# ---------------------------------------------------------------------------
+# Evidence: what the program constructs, as far as it goes
+
+test atb-alias {a value bound to a name keeps its evidence: a deep Box bound first and then passed is held to the written type exactly (reported at the argument, whose definition is no part of the call), and an equal one is accepted} -body {
+    set bad "${::atbDecls}fn f(x: [atbType 24 int]) -> int:\n    1\n\ny = [atbNest 24 {"s"}]\nf(y)\n"
+    lassign [atbDiagnostic $bad] code line column summary
+    list $code $line $column [string match {argument for parameter "x" cannot be proven to satisfy Box*int*(argument type: Box*str*} $summary] \
+        [atbCode "${::atbDecls}fn f(x: [atbType 24 int]) -> int:\n    1\n\ny = [atbNest 24 1]\nf(y)\n"]
+} -cleanup {unset -nocomplain bad code line column summary} -result {TYPE 8 3 1 accepted}
+
+test atb-if-join {an if whose branches end in the same deep evidence keeps it (its value is read back past the bound); the join of two different types stays the bounded type} -body {
+    atbRun "${::atbDecls}fn pick(c: bool) -> int:\n    b = if c:\n        [atbNest 12 1]\n    else:\n        [atbNest 12 2]\n    b[atbProject 12]\npick(false)\n"
+} -result {{value 2} {value 2} {value 2} {value 2}}
+
+test atb-if-join-differ {an if whose branches end in different deep types keeps no evidence of either: passed where a written type says Int deep inside, the branch holding a String is not overlooked -- the join is the bounded check's, and the String branch's own value is rejected} -body {
+    atbCode "${::atbDecls}fn f(x: [atbType 12 int]) -> int:\n    1\nfn pick(c: bool) -> int:\n    b = if c:\n        [atbNest 12 1]\n    else:\n        [atbNest 12 {"s"}]\n    f(b)\npick(false)\n"
+} -result TYPE
+
+test atb-semantic-instance {a generic function whose semantic instances grow an application past the bound (grow(Box {value: x}, n - 1)) is a program: its deepest instance's construction was a TYPE error ("call to grow with x : Box[...] is invalid")} -body {
+    lmap n {3 8} {
+        lindex [atbRun "${::atbDecls}fn grow(x, n: int):\n    if n == 0:\n        x\n    else:\n        grow(Box \{value: x\}, n - 1)\ngrow(1, $n)\n1\n"] 0
+    }
+} -result {{value 1} {value 1}}
+
+# ---------------------------------------------------------------------------
+# What stays bounded, deliberately
+
+test atb-bounded-declarations {a declaration is never evidence of the values in its position: a projection chain read out of a parameter declared deeper than the bound reads the bounded type (any past the bound: the result is not proven), and so does one read out of a List element -- the precision the bound forgets globally is recovered only from what the program constructs} -body {
+    list [atbCode "${::atbDecls}fn consume(x: [atbType 8 int]) -> int:\n    x[atbProject 8]\n\nconsume([atbNest 8 1])\n"] \
+        [atbCode "import std::list\n$::atbDecls\xs = \[[atbNest 8 1]\]\nstd::list::at(xs, 0)[atbProject 8]\n"]
+} -result {TYPE UNPROVEN-FIELD}
+
+test atb-erasure-intentional {a typed function past the bound is still an erasure: the bounded type of the construction that cuts it cannot carry its parameter contract (as a List past the aggregate bound cannot), and that diagnostic is the bound's intended one, not a lost precision} -body {
+    list [atbCode "${::atbDecls}fn f(x: int) -> int:\n    x + 1\nb = [atbNest 6 f]\nb[atbProject 6](41)\n"] \
+        [atbCode "${::atbDecls}fn f(x: int) -> int:\n    x + 1\nb = [atbNest 8 f]\nb[atbProject 8](41)\n"]
+} -result {accepted TYPE}
+
+# ---------------------------------------------------------------------------
+# HIR, interchange, cache, isolation, static blocks
+
+test atb-interchange {a deep program's HIR, written as interchange text and read back, runs and checks as built: the exact written forms are recomputed facts of the resolution, carried as the HIR's own fields} -body {
+    set hir [surface::compile [atbHolder 24 1] -warnings off]
+    set read [hir::interchange::decode [hir::interchange::encode $hir]]
+    list [lrange [outcomeUnderHir interp $read] 0 1] [lrange [outcomeUnderHir cranelift $read] 0 1]
+} -cleanup {unset -nocomplain hir read} -result {{value 1} {value 1}}
+
+test atb-cache {the front-end cache keeps a deep program's HIR: a hit in a fresh read equals the build, and runs} -body {
+    set dir [makeDirectory atb-cache]
+    set file [file join $dir deep.bot]
+    set f [open $file w]
+    puts -nonewline $f [atbHolder 24 1]
+    close $f
+    set built [surface::readProgramFile $file -warnings off -cache [file join $dir cache]]
+    set hit [surface::readProgramFile $file -warnings off -cache [file join $dir cache]]
+    list [expr {[hir::interchange::encode $built] eq [hir::interchange::encode $hit]}] [lrange [outcomeUnderHir interp $hit] 0 1]
+} -cleanup {removeDirectory atb-cache; unset -nocomplain dir file f built hit} -result {1 {value 1}}
+
+test atb-isolation {compiling another program whose Box is phantom does not change a deep program's checks or run: the exact forms are the HIR's and its declarations', never another compilation's} -body {
+    set a [surface::compile [atbHolder 24 1] a.bot -warnings off]
+    set before [lrange [outcomeUnderHir interp $a] 0 1]
+    set other 0
+    for {set i 0} {$i < 24} {incr i} {
+        set other "Box \{extra: 0, value: $other\}"
+    }
+    surface::compile "struct Box\[T\]:\n    extra: int\n    value: T\n\nstruct Holder:\n    value: [atbType 24 int]\n\nh = Holder \{value: $other\}\n0\n" b.bot -warnings off
+    list $before [lrange [outcomeUnderHir interp $a] 0 1] [lrange [outcomeUnderHir cranelift $a] 0 1] \
+        [lindex [atbDiagnostic [atbHolder 24 {"wrong"}]] 3]
+} -cleanup {unset -nocomplain a before other i} -result {{value 1} {value 1} {value 1} {field "value" of struct Box[int] cannot be proven to satisfy its declared type int (value type: str)}}
+
+test atb-static-compile {a static compile block decides a deep construction like any other program: accepted against a written deep type, a CompilerError of code Type for a deep mismatch} -body {
+    set program "import std::compiler\n\n${::atbDecls}fn g(x: @TYPE@) -> int:\n    1\n\nfn f() -> int errors std::compiler::CompilerError:\n    static compile:\n        g(@VALUE@)\n\nr = f():\n    on std::compiler::CompilerError:\n        -1\nr\n"
+    lmap leaf {1 {"s"}} {
+        lindex [atbRun [string map [list @TYPE@ [atbType 24 int] @VALUE@ [atbNest 24 $leaf]] $program] {interp cranelift}] 0
+    }
+} -cleanup {unset -nocomplain program leaf} -result {{value 1} {value -1}}
+
+# ---------------------------------------------------------------------------
+# Cost
+
+test atb-linear {the exact machinery is linear in the depth: the evidence applications built and the comparisons made to check a 1000-deep mismatch are proportional to the depth (doubling it at most doubles them, plus a constant), and nothing is quadratic in the type table} -body {
+    set counts {}
+    foreach n {200 400 800} {
+        hir::applied::ResetStats
+        atbDiagnostic [atbParameter $n {"wrong"}]
+        lappend counts [dict getdef [hir::applied::Stats] apps 0]
+    }
+    lassign $counts a b c
+    list [expr {$b <= 2 * $a + 20}] [expr {$c <= 2 * $b + 20}] [expr {$c >= 800}]
+} -cleanup {unset -nocomplain counts n a b c} -result {1 1 1}
+
+cleanupTests

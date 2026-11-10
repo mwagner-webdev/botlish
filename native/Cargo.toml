@@ -20,7 +20,8 @@ crate-type = ["rlib", "staticlib"]
 cranelift-codegen = { version = "0.135", features = ["trace-log", "x86", "arm64"] }
 cranelift-frontend = "0.135"
 cranelift-module = "0.135"
-cranelift-jit = "0.135"
+# The JIT (codegen's CraneliftJit): the `jit` feature, on by default.
+cranelift-jit = { version = "0.135", optional = true }
 cranelift-object = "0.135"
 cranelift-native = "0.135"
 log = "0.4"
@@ -69,6 +70,15 @@ windows-sys = { version = "0.61", features = ["Win32_Security"] }
 debug = 1
 
 [features]
+# The in-process code generator: `run`, `bench`, `batch`, `vms` (main.tcl's
+# -backend cranelift and cranelift-generic, native::evalHir) and their
+# measurements. On by default; `--no-default-features` builds a driver
+# without it (MACOS-BOTLISH-DISTRIBUTION-MILESTONE-1.md: the macOS
+# application's, which ships no code that makes executable memory) that
+# refuses every in-process run ({NATIVE UNSUPPORTED jit}) and compiles,
+# links and runs executables as any other. The driver's own tests need it.
+default = ["jit"]
+jit = ["dep:cranelift-jit"]
 # The GC root plan of a host without native-frame roots -- the shadow stack,
 # leaf frames published through Vm::native_roots_ptr, no frame walk
 # (runtime::framewalk's NATIVE_FRAME_ROOTS false), Windows' plan -- built on

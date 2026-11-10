@@ -693,9 +693,14 @@ proc hir::structs::verifyApplications {hirVar} {
             block {
                 if {![dict exists $node declaredParamTypes]} continue
                 set names [lmap b [dict get $node params] {hir::semantic::SourceName $hir $b}]
-                foreach t [dict get $node declaredParamTypes] name $names {
+                foreach t [dict get $node declaredParamTypes] name $names x [dict getdef $node exactParamTypes {}] {
                     if {$t eq ""} continue
                     set issue [ApplicationIssue $t]
+                    if {$issue ne "" && $x ne ""} {
+                        # (Written deeper than the type bound: judged on its
+                        # exact form, hir/applied.tcl.)
+                        set issue [hir::applied::Issue [hir::applied::Decode $x]]
+                    }
                     if {$issue ne ""} {
                         lassign $issue kind problem
                         hir::Diagnose hir $kind "the type of parameter \"$name\" is invalid: $problem" $e
@@ -704,6 +709,9 @@ proc hir::structs::verifyApplications {hirVar} {
                 set result [dict getdef $node declaredResult {}]
                 if {$result ne ""} {
                     set issue [ApplicationIssue $result]
+                    if {$issue ne "" && [dict exists $node exactResult]} {
+                        set issue [hir::applied::Issue [hir::applied::Decode [dict get $node exactResult]]]
+                    }
                     if {$issue ne ""} {
                         lassign $issue kind problem
                         hir::Diagnose hir $kind "the declared result type is invalid: $problem" $e
@@ -789,6 +797,18 @@ proc hir::structs::AppliedFieldType {type name} {
         return $t
     }
     return [hir::types::canonical [hir::imprint::Substitute $t $binding]]
+}
+
+# The exact written form (hir/applied.tcl's evidence) of the declared type
+# of field NAME of struct ID, where the type bound cut the declared type
+# (its application spine is deeper than hir::types::appliedDepth and it
+# mentions no slot), else "".
+proc hir::structs::exactFieldType {id name} {
+    variable registry
+    if {![dict exists $registry $id exactFields $name]} {
+        return ""
+    }
+    return [hir::applied::Decode [dict get $registry $id exactFields $name]]
 }
 
 # 1 if struct ID was declared `opaque struct`.
@@ -1106,6 +1126,15 @@ proc hir::structs::ResolveFields {decls} {
                         $fieldName $name [hir::types::show $resolved]] TRAIT-STORAGE-UNSUPPORTED
             }
             lappend types $fieldName $resolved
+            if {[hir::applied::Cut $resolved]} {
+                # A field type written deeper than the type bound (no slot
+                # in it): its exact form, which a construction's value is
+                # held to (hir/applied.tcl).
+                set exact [hir::applied::Written $typeExpr $ns]
+                if {$exact ne ""} {
+                    dict set registry $id exactFields $fieldName [hir::applied::Encode $exact]
+                }
+            }
         }
         dict set registry $id types $types
         dict set registry $id typeSpans [concat {*}[lmap field [dict get $decl fields] {

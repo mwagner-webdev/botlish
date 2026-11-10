@@ -14,13 +14,16 @@
 # "botlish") are written alike -- and for Compilerpedia and the usage, whose
 # text is wrapped to a width, line breaks and runs of spaces too. Compared:
 #
-#   * every backend's run of the sample programs (examples/surface,
-#     examples/stdlib) and audit/macos-app/programs (a coroutine fusion
-#     compiles into its function, two it keeps on the general runtime,
-#     closures, a context, a native stack overflow), the native ones also under
-#     BOTLISH_NATIVE_GC_STRESS=1; the 2048 benchmark on cranelift;
-#     examples/io/hello-darwin.bot (Darwin IO: a linked run) on both native
-#     backends;
+#   * the sample programs (examples/surface, examples/stdlib) and
+#     audit/macos-app/programs (a coroutine fusion compiles into its
+#     function, two it keeps on the general runtime, closures, a context, a
+#     native stack overflow) on interp and compile, and natively as
+#     executables (-aot-run, AOT-RUN-MILESTONE-1.md: the application has no
+#     JIT, MACOS-BOTLISH-DISTRIBUTION-MILESTONE-1.md, and the checkout's
+#     -aot-run is the same pipeline), the native ones also under
+#     BOTLISH_NATIVE_GC_STRESS=1, each with the value its executable reports
+#     (BOTLISH_NATIVE_RESULT); the 2048 benchmark;
+#     examples/io/hello-darwin.bot (Darwin IO); args.bot's arguments;
 #   * diagnostics: a syntax error, a type error, a missing module, the
 #     warnings a standard-library module reports in its own source, -check;
 #   * the census: a one-line program importing each standard-library module,
@@ -52,6 +55,7 @@ cd "$work/p"
 
 fail() { echo "FAIL[compare]: $*" >&2; exit 1; }
 compared=0
+both_env=()
 reflowed=0
 # The checkout's and the application's run of ARGS..., compared. With
 # GC=1 under GC stress. Each run's environment: a fresh HOME, PATH with the
@@ -62,12 +66,21 @@ both() {
   shift 2
   local env=(env -i HOME="$work/home" PATH=/usr/bin:/bin LANG=en_US.UTF-8 BOTLISH_NATIVE_LINKER=system)
   (( gc )) && env+=(BOTLISH_NATIVE_GC_STRESS=1)
-  local status
-  status=0; "${env[@]}" "$tclsh" "$root/main.tcl" "$@" >"$work/c.out" 2>"$work/c.err" || status=$?
+  local status streams=(out err)
+  # (both_aot: the run's reported value, a file per side.)
+  local extra=() which
+  rm -f "$work/side.result"
+  if [[ ${#both_env[@]} -gt 0 ]]; then extra=("${both_env[@]}"); streams+=(result); fi
+  status=0; "${env[@]}" ${extra[@]+"${extra[@]}"} "$tclsh" "$root/main.tcl" "$@" >"$work/c.out" 2>"$work/c.err" || status=$?
   echo "status $status" >>"$work/c.out"
-  status=0; "${env[@]}" "$botlish" "$@" >"$work/a.out" 2>"$work/a.err" || status=$?
+  if [[ ${#extra[@]} -gt 0 ]]; then mv "$work/side.result" "$work/c.result" 2>/dev/null || : >"$work/c.result"; fi
+  status=0; "${env[@]}" ${extra[@]+"${extra[@]}"} "$botlish" "$@" >"$work/a.out" 2>"$work/a.err" || status=$?
   echo "status $status" >>"$work/a.out"
-  for stream in out err; do
+  if [[ ${#extra[@]} -gt 0 ]]; then mv "$work/side.result" "$work/a.result" 2>/dev/null || : >"$work/a.result"; fi
+  if [[ ${#extra[@]} -gt 0 && ! -s $work/a.result && $(tail -n 1 "$work/a.out") == "status 0" ]]; then
+    fail "$label: the application's executable reported no value"
+  fi
+  for stream in "${streams[@]}"; do
     sed -e "s|$root/|//zipfs:/app/botlish/|g" -e 's|tclsh9.0 main.tcl|botlish|g' "$work/c.$stream" >"$work/c.$stream.n"
     # (Both sides: Compilerpedia's text names both invocations itself.)
     sed -e 's|tclsh9.0 main.tcl|botlish|g' "$work/a.$stream" >"$work/a.$stream.n"
@@ -83,31 +96,46 @@ both() {
   compared=$((compared + 1))
 }
 
+# The checkout's and the application's -aot-run of FILE (ARGS... its
+# arguments), compared as `both` compares them, and the values their
+# executables report through the driver protocol (BOTLISH_NATIVE_RESULT,
+# which -aot-run passes on to the program) too.
+both_aot() {
+  local gc=$1 label=$2 file=$3
+  shift 3
+  rm -f "$work/c.result" "$work/a.result"
+  both_env=(BOTLISH_NATIVE_RESULT="$work/side.result")
+  both "$gc" "$label" -warnings off -aot-run "$file" -- "$@"
+  both_env=()
+}
 samples=$(ls [01]*.bot csv*.bot ai_text_clean.bot hashtable.bot matmul.bot string_*.bot)
-for backend in interp compile cranelift cranelift-generic; do
+for backend in interp compile; do
   for program in $samples; do
     both 0 "$program on $backend" -backend "$backend" "$program"
   done
 done
-echo "   the samples on every backend: $compared runs alike"
+for program in $samples; do
+  both_aot 0 "$program as an executable (-aot-run)" "$program"
+done
+echo "   the samples on interp, compile and as executables: $compared runs alike"
 for program in coroutine.bot coroutine-kept.bot closures.bot context.bot overflow.bot; do
-  for backend in interp compile cranelift cranelift-generic; do
-    [[ $program == overflow.bot && $backend != cranelift* ]] && continue
+  for backend in interp compile; do
+    [[ $program == overflow.bot ]] && continue
     both 0 "$program on $backend" -backend "$backend" "$program"
   done
-  for backend in cranelift cranelift-generic; do
-    both 1 "$program on $backend under GC stress" -backend "$backend" "$program"
-  done
+  both_aot 0 "$program as an executable" "$program"
+  both_aot 1 "$program as an executable under GC stress" "$program"
 done
-for backend in interp cranelift; do
-  both 0 "args.bot on $backend" -backend "$backend" -argv 'ünï cödé' -argv '' -argv-hex 41ff args.bot
-done
-both 0 "the 2048 benchmark" -backend cranelift bench.bot
-for backend in cranelift cranelift-generic; do
-  both 0 "hello-darwin.bot on $backend" -backend "$backend" hello-darwin.bot
-  both 1 "hello-darwin.bot on $backend under GC stress" -backend "$backend" hello-darwin.bot
-done
-echo "   the acceptance programs, natively also under GC stress: $compared runs alike"
+both 0 "args.bot on interp" -backend interp -argv 'ünï cödé' -argv '' -argv-hex 41ff args.bot
+both_aot 0 "args.bot's arguments" args.bot 'ünï cödé' '' -v --
+both_aot 0 "the 2048 benchmark" bench.bot
+both_aot 0 "hello-darwin.bot as an executable" hello-darwin.bot
+both_aot 1 "hello-darwin.bot as an executable under GC stress" hello-darwin.bot
+# The one difference: the checkout's JIT runs a program in-process, the
+# application has none and says so (NATIVE UNSUPPORTED jit, status 1).
+status=0; env -i HOME="$work/home" PATH=/usr/bin:/bin "$botlish" -backend cranelift 01-arithmetic.bot >"$work/jit.out" 2>&1 || status=$?
+[[ $status == 1 ]] && grep -q 'NATIVE UNSUPPORTED jit' "$work/jit.out" || fail "the application's -backend cranelift: status $status, $(cat "$work/jit.out")"
+echo "   the acceptance programs, as executables also under GC stress: $compared runs alike (the application's -backend cranelift refused)"
 for program in syntax-error.bot type-error.bot missing-module.bot library-warnings.bot; do
   both 0 "the diagnostics of $program" "$program"
   both 0 "-check of $program" -check "$program"

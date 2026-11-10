@@ -1,0 +1,301 @@
+# Mutants of the exact check of applications past the applied-type bound
+# (audit/applied-type-bound/tools/mutate.tcl; APPLIED-TYPE-BOUND-PRECISION-
+# MILESTONE-1.md, "Mutation testing"): each a deliberate bug in
+# hir/applied.tcl or the places that call it (hir/types.tcl, hir/range.tcl,
+# hir/resolve.tcl, hir/structs.tcl).
+#
+#   @@ NAME DESCRIPTION
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+#
+# Lines starting with # outside an edit are comments.
+
+# ---------------------------------------------------------------------------
+# The old bound behavior: a check made against a bounded type
+
+@@ field-check-uses-bounded-type a cut construction is checked against its own bounded type's arguments again (the starting defect)
+## hir/range.tcl
+<<<<
+        if {[hir::applied::Cut $type]} {
+            # An application the type bound cut: its field types are what its
+====
+        if {0 && [hir::applied::Cut $type]} {
+            # An application the type bound cut: its field types are what its
+>>>>
+
+@@ construction-result-bounded-before-check the cut construction's check reads each field's declared type out of the construction's bounded type
+## hir/applied.tcl
+<<<<
+        set declared [Canonical $expected]
+        set valueRange [dict getdef $ranges $field [hir::range::unknown]]
+====
+        set declared [hir::types::StructField $type $name]
+        set valueRange [dict getdef $ranges $field [hir::range::unknown]]
+>>>>
+
+@@ expected-field-type-bounded-before-substitution a field's expected type is the bounded substitution of the slots, never their evidence
+## hir/applied.tcl
+<<<<
+    if {[hir::types::IsImprint $declared] && [dict exists $binding [lindex $declared 1]]} {
+        return [dict get $binding [lindex $declared 1]]
+    }
+====
+    if {[hir::types::IsImprint $declared] && [dict exists $binding [lindex $declared 1]]} {
+        return [Leaf [dict get $canonical [lindex $declared 1]]]
+    }
+>>>>
+
+@@ explicit-args-bounded an explicit construction keeps its bounded application's arguments (cut one application early)
+## hir/resolve.tcl
+<<<<
+        set structArgs [lmap t $args {
+====
+        set unused [lmap t $args {
+>>>>
+
+@@ explicit-exact-args-dropped an explicit construction's exact written arguments are never recorded
+## hir/resolve.tcl
+<<<<
+            SetField hir $e exactStructArgs [lmap a [lindex $exact 2] {hir::applied::Encode $a}]
+====
+            set unused $exact
+>>>>
+
+@@ parameter-check-bounded-before-check a parameter type written deeper than the bound is held only as its bounded form
+## hir/applied.tcl
+<<<<
+    set exactParams [dict getdef $targetNode exactParamTypes {}]
+====
+    set exactParams {}
+>>>>
+
+@@ explicit-imprint-bounded-before-check an explicit imprint written deeper than the bound is bound as its bounded form
+## hir/applied.tcl
+<<<<
+    set exactImprint [dict getdef $node exactImprint {}]
+====
+    set exactImprint {}
+>>>>
+
+@@ result-check-bounded-before-check a result type written deeper than the bound is held only as its bounded form
+## hir/applied.tcl
+<<<<
+    set expected [if {$x ne ""} {Decode $x} else {Leaf [dict get $node declaredResult]}]
+====
+    set expected [Leaf [dict get $node declaredResult]]
+>>>>
+
+@@ struct-field-written-bounded a struct field type written deeper than the bound is never recorded exactly
+## hir/structs.tcl
+<<<<
+                    dict set registry $id exactFields $fieldName [hir::applied::Encode $exact]
+====
+                    set unused $exact
+>>>>
+
+@@ projection-reads-bounded a projection of a constructed value whose type the bound cut reads the cut argument again
+## hir/types.tcl
+<<<<
+            set exact [hir::applied::TypedProjection hir ctx $e [dict get $node receiver] $name]
+====
+            set exact ""
+>>>>
+
+@@ inference-over-cut-binding inference keeps the binding a bounded match read out of a cut argument (a false conflict)
+## hir/types.tcl
+<<<<
+        set exact [hir::applied::TypedBinding $hir $ctx $e $id]
+====
+        set exact ""
+>>>>
+
+@@ raised-bound-no-fix the bound raised to 64 instead of the fix: the false rejection only moves deeper
+## hir/types.tcl
+<<<<
+    variable appliedDepth 6
+====
+    variable appliedDepth 64
+>>>>
+## hir/range.tcl
+<<<<
+        if {[hir::applied::Cut $type]} {
+            # An application the type bound cut: its field types are what its
+====
+        if {0 && [hir::applied::Cut $type]} {
+            # An application the type bound cut: its field types are what its
+>>>>
+
+# ---------------------------------------------------------------------------
+# Overprecision: exactness kept globally
+
+@@ no-bound applications are never cut: every exact application kept in the HIR's types
+## hir/types.tcl
+<<<<
+    if {$nesting >= $appliedDepth && ![hir::structs::IsAffine $id $args]} {
+====
+    if {0 && $nesting >= $appliedDepth && ![hir::structs::IsAffine $id $args]} {
+>>>>
+
+# ---------------------------------------------------------------------------
+# Fake covariance, ignored arguments
+
+@@ any-covariant an application whose expected argument is any admits any argument (App[precise] accepted as App[any])
+## hir/applied.tcl
+<<<<
+                if {[Truncate [Canonical $x] $h] ne [Truncate [Canonical $y] $h]} {
+                    return [list $x $y $trail]
+                }
+                continue
+====
+                if {[Canonical $y] ne "any" && [Truncate [Canonical $x] $h] ne [Truncate [Canonical $y] $h]} {
+                    return [list $x $y $trail]
+                }
+                continue
+>>>>
+
+@@ arguments-ignored-past-bound the exact check never finds a difference: arguments past the bound are ignored
+## hir/applied.tcl
+<<<<
+    Count accepts
+    return [Equal $v $e]
+====
+    Count accepts
+    return ""
+>>>>
+
+@@ deep-slot-mismatch-ignored a slot established twice is never compared exactly: a deep conflict passes
+## hir/applied.tcl
+<<<<
+                set prior [dict get $binding $slot]
+                set difference [Equal $prior $v]
+====
+                set prior [dict get $binding $slot]
+                set difference ""
+>>>>
+
+@@ exactness-from-any an any part of the value is taken to match whatever the expected type says (precision made up from any)
+## hir/applied.tcl
+<<<<
+                if {[Truncate [Canonical $x] $h] ne [Truncate [Canonical $y] $h]} {
+                    return [list $x $y $trail]
+                }
+                continue
+====
+                if {[Canonical $x] ne "any" && [Truncate [Canonical $x] $h] ne [Truncate [Canonical $y] $h]} {
+                    return [list $x $y $trail]
+                }
+                continue
+>>>>
+
+@@ horizon-ignored a bounded part's arguments are read past its knowledge horizon (the cut `any` taken for a type)
+## hir/applied.tcl
+<<<<
+    if {$h ne "" && $h <= 0} {
+====
+    if {0 && $h ne "" && $h <= 0} {
+>>>>
+
+# ---------------------------------------------------------------------------
+# Slot mapping
+
+@@ slots-reversed a field's expected type substitutes the slots in reverse order (slot identity by position, reversed)
+## hir/applied.tcl
+<<<<
+    foreach slot [hir::structs::slots $id] a $args {
+        if {$a eq ""} {
+            continue
+        }
+====
+    foreach slot [hir::structs::slots $id] a [lreverse $args] {
+        if {$a eq ""} {
+            continue
+        }
+>>>>
+
+@@ only-first-slot-precise the exact comparison descends into the first argument of an application only
+## hir/applied.tcl
+<<<<
+        set slot [llength [lindex $px 1]]
+        foreach p [lreverse [lindex $px 1]] q [lreverse [lindex $py 1]] {
+====
+        set slot 1
+        foreach p [lrange [lindex $px 1] 0 0] q [lrange [lindex $py 1] 0 0] {
+>>>>
+
+@@ phantom-written-dropped a slot no field establishes is taken from the bounded written argument (a deep phantom mismatch passes)
+## hir/applied.tcl
+<<<<
+            lappend args $a
+            lappend est ""
+        } else {
+            return ""
+        }
+====
+            lappend args [Leaf [Canonical $a]]
+            lappend est ""
+        } else {
+            return ""
+        }
+>>>>
+
+# ---------------------------------------------------------------------------
+# Joins, locations
+
+@@ join-takes-first an if whose branches end in different evidence is taken for its first branch's
+## hir/applied.tcl
+<<<<
+    # (Different evidence: the value is one of the members'.)
+    return [list either $members $type]
+====
+    return [lindex $members 0]
+>>>>
+
+@@ report-at-outer-site a deep difference is reported where the check stands, never at the deepest field
+## hir/applied.tcl
+<<<<
+    set at [Locate $hir $e $difference]
+====
+    set at ""
+>>>>
+
+# ---------------------------------------------------------------------------
+# Constraints
+
+@@ deep-hashable-skipped a constrained slot's argument with evidence is never judged: a deep non-Hashable key passes
+## hir/applied.tcl
+<<<<
+                set why [lindex [Unsatisfied $arg $trait] 0]
+====
+                set why ""
+>>>>
+
+@@ deep-hashable-rejected a constrained slot past the bound is judged on its bounded argument (any satisfies nothing)
+## hir/types.tcl
+<<<<
+                set issue [hir::applied::TypedIssue $hir $ctx $e $type]
+====
+                set issue $issue
+>>>>
+
+@@ hash-class-from-first-argument an exact application's Totality class read from its first argument alone
+## hir/applied.tcl
+<<<<
+        set level [hir::summaries::Level totality.$operation $type $levels]
+====
+        set level [lindex $levels 0]
+>>>>
+
+# ---------------------------------------------------------------------------
+# Ownership
+
+@@ deep-affine-cut an affine application is cut by the bound like any other (the handle it owns erased)
+## hir/types.tcl
+<<<<
+    if {$nesting >= $appliedDepth && ![hir::structs::IsAffine $id $args]} {
+====
+    if {$nesting >= $appliedDepth} {
+>>>>

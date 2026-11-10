@@ -49,6 +49,22 @@
 #                 arguments and status
 #   darwin-io     examples/io/hello-darwin.bot: checked, its context selected
 #                 statically (NIR), linked against libSystem, run
+#   no-jit        the application's native backend has no JIT
+#                 (MACOS-BOTLISH-DISTRIBUTION-MILESTONE-1.md): -backend
+#                 cranelift and cranelift-generic, and run -backend cranelift,
+#                 refused (NATIVE UNSUPPORTED jit, naming -aot-run) before
+#                 anything compiles; the driver's in-process commands (run,
+#                 bench, batch, vms) refused, its capabilities `jit 0`;
+#                 -version says so; -emit-clif still works; `run`'s native
+#                 default and -aot-run run the program as an executable
+#                 (AOT-RUN-MILESTONE-1.md); a Cocoa and Metal canary
+#                 (AppKit's NSApplicationLoad, a Metal device) run by -aot-run
+#                 -native-startup main-thread on the process's main thread,
+#                 and refused on a worker; the bundle unchanged and verifying
+#
+# Native runs are -aot-run's (the application has no JIT): a program's value
+# is read through its executable's driver protocol (BOTLISH_NATIVE_RESULT),
+# which -aot-run passes on to the program (aot_value).
 #
 # A failure is "FAIL[GROUP]: ..." and exit 1.
 set -euo pipefail
@@ -72,6 +88,19 @@ value_words() {
   env -i BOTLISH_NATIVE_RESULT="$result" "$@" >/dev/null || return 1
   tr -d '\\{}' <"$result" | tr -s ' \n' ' ' | sed 's/ $//'
 }
+# The words of the value APP's -aot-run of FILE reports (ARGS... after FILE,
+# -- first), as value_words gives them without "value"; AOT_ENV (assignments)
+# in the environment too. Its standard error is $work/aot.err.
+aot_value() {
+  local app=$1 result="$work/aot-value.result"
+  shift
+  rm -f "$result"
+  # (AOT_ENV's words are assignments: split on purpose.)
+  # shellcheck disable=SC2086
+  env -i HOME="$home" PATH=/usr/bin:/bin ${AOT_ENV:-} BOTLISH_NATIVE_RESULT="$result" "$app/Contents/MacOS/botlish" -warnings off -aot-run "$@" \
+    >/dev/null 2>"$work/aot.err" || return 1
+  sed -n 's/^value //p' "$result" | tr -d '\\{}' | tr -s ' \n' ' ' | sed 's/ $//'
+}
 section() { group=$1; echo "== $1"; }
 # A check of a command's output captures the output, then matches it, never
 # `COMMAND | grep -q PATTERN`: grep -q stops reading at its first match, and
@@ -93,31 +122,33 @@ cd "$work/p"
 # --- relocation -----------------------------------------------------------------
 section relocation
 copied=$(copy_app "$work/A dir with spaces/Ünïcödé")
-[[ $(bl "$copied" -backend cranelift 01-arithmetic.bot) == *"value: 50" ]] || fail "the copy in a non-ASCII path does not run"
+[[ $(aot_value "$copied" 01-arithmetic.bot) == 'int 50' ]] || fail "the copy in a non-ASCII path does not run natively: $(cat "$work/aot.err")"
+[[ $(bl "$copied" 01-arithmetic.bot) == *"value: 50" ]] || fail "the copy in a non-ASCII path does not run"
 # (Without a locale, as above, and in the C locale: the launcher starts Tcl
 # in a UTF-8 locale, which Tcl 9.0.1 needs in a non-ASCII path.)
-[[ $(env -i HOME="$home" PATH=/usr/bin:/bin LC_ALL=C "$copied/Contents/MacOS/botlish" -backend cranelift 01-arithmetic.bot) == *"value: 50" ]] ||
-  fail "the copy in a non-ASCII path does not run with LC_ALL=C"
+[[ $(AOT_ENV=LC_ALL=C aot_value "$copied" 01-arithmetic.bot) == 'int 50' ]] ||
+  fail "the copy in a non-ASCII path does not run with LC_ALL=C: $(cat "$work/aot.err")"
 verify "$copied"
 mkdir -p "$work/moved"
 mv "$copied" "$work/moved/"
 moved="$work/moved/Botlish.app"
-[[ $(bl "$moved" -backend cranelift 01-arithmetic.bot) == *"value: 50" ]] || fail "the moved copy does not run"
+[[ $(aot_value "$moved" 01-arithmetic.bot) == 'int 50' ]] || fail "the moved copy does not run: $(cat "$work/aot.err")"
 verify "$moved"
 mkdir -p "$work/bin"
 ln -s "$moved/Contents/MacOS/botlish" "$work/bin/botlish"
 version=$(cd / && env -i HOME="$home" PATH="$work/bin:/usr/bin:/bin" botlish -version)
 grep -qx 'invocation: botlish' <<<"$version" || fail "through a symbolic link on PATH: $version"
 grep -q '^native backend: packaged' <<<"$version" || fail "through a symbolic link on PATH: $version"
-[[ $(cd / && env -i HOME="$home" PATH="$work/bin:/usr/bin:/bin" botlish -backend cranelift "$work/p/01-arithmetic.bot") == *"value: 50" ]] ||
+rm -f "$work/onpath.result"
+(cd / && env -i HOME="$home" PATH="$work/bin:/usr/bin:/bin" BOTLISH_NATIVE_RESULT="$work/onpath.result" botlish -warnings off -aot-run "$work/p/01-arithmetic.bot") ||
   fail "a native run through a symbolic link on PATH"
+grep -qx 'value {int 50}' "$work/onpath.result" || fail "a native run through a symbolic link on PATH: $(cat "$work/onpath.result")"
 # The environment cannot substitute another Tcl script library or another
 # build's driver: the application's own are used.
 mkdir -p "$work/decoy"
 echo 'puts stderr "DECOY TCL LIBRARY"' >"$work/decoy/init.tcl"
-decoyed=$(env -i HOME="$home" PATH=/usr/bin:/bin TCL_LIBRARY="$work/decoy" BOTLISH_NATIVE_BIN=/nonexistent/botlish-native \
-  "$moved/Contents/MacOS/botlish" -backend cranelift 01-arithmetic.bot 2>&1)
-[[ $decoyed == *"value: 50" && $decoyed != *DECOY* ]] || fail "TCL_LIBRARY and BOTLISH_NATIVE_BIN in the environment: $decoyed"
+decoyed=$(AOT_ENV="TCL_LIBRARY=$work/decoy BOTLISH_NATIVE_BIN=/nonexistent/botlish-native" aot_value "$moved" 01-arithmetic.bot) || true
+[[ $decoyed == 'int 50' ]] && ! grep -q DECOY "$work/aot.err" || fail "TCL_LIBRARY and BOTLISH_NATIVE_BIN in the environment: $decoyed $(cat "$work/aot.err")"
 # Nor another Tcl.framework through dyld's DYLD_FRAMEWORK_PATH (a copy whose
 # script library announces itself): the launcher refuses a Tcl that is not
 # the bundle's, or dyld loads the bundle's.
@@ -134,7 +165,7 @@ else
   dyld_outcome="the bundle's Tcl loaded"
 fi
 ln -s "$moved" "$work/Linked.app"
-[[ $(bl "$work/Linked.app" -backend cranelift 01-arithmetic.bot) == *"value: 50" ]] || fail "through a symbolic link to the bundle"
+[[ $(aot_value "$work/Linked.app" 01-arithmetic.bot) == 'int 50' ]] || fail "through a symbolic link to the bundle: $(cat "$work/aot.err")"
 echo "   copied, moved, linked; TCL_LIBRARY and BOTLISH_NATIVE_BIN ignored; DYLD_FRAMEWORK_PATH's Tcl: $dyld_outcome"
 
 # --- read-only ------------------------------------------------------------------
@@ -160,11 +191,14 @@ mkdir -p "$src"
 printf 'fn triple(n: int) -> int:\n    3 * n\n' >"$src/helper.bot"
 printf 'import helper\n\nhelper::triple(14)\n' >"$src/main.bot"
 cp args.bot "$src/args.bot"
-for backend in interp compile cranelift cranelift-generic; do
+for backend in interp compile; do
   [[ $(cd / && bl "$app" -backend "$backend" "$src/main.bot") == *'value: 42' ]] || fail "an absolute path on $backend"
 done
-[[ $(cd "$work/sources dir" && bl "$app" -backend cranelift "./ünï cödé/main.bot") == *'value: 42' ]] || fail "a relative path"
-[[ $(cd "$src" && bl "$app" -backend cranelift -argv 'ü' -argv 'two words' args.bot) == *'value: ["ü", "two words"]' ]] || fail "-argv with non-ASCII text"
+[[ $(cd / && aot_value "$app" "$src/main.bot") == 'int 42' ]] || fail "an absolute path, natively: $(cat "$work/aot.err")"
+[[ $(cd "$work/sources dir" && aot_value "$app" "./ünï cödé/main.bot") == 'int 42' ]] || fail "a relative path: $(cat "$work/aot.err")"
+[[ $(cd "$src" && bl "$app" -argv 'ü' -argv 'two words' args.bot) == *'value: ["ü", "two words"]' ]] || fail "-argv with non-ASCII text"
+[[ $(cd "$src" && aot_value "$app" args.bot -- 'ü' 'two words') == 'list str args.bot str ü str two words' ]] ||
+  fail "-aot-run with non-ASCII arguments: $(cd "$src" && aot_value "$app" args.bot -- 'ü' 'two words')"
 (cd "$src" && bl "$app" -warnings off -emit-native-executable args.bot >/dev/null) || fail "an executable in the non-ASCII directory"
 [[ $(cd / && value_words "$src/args" 'ü' 'two words') == *'str ü str two words' ]] || fail "the executable's non-ASCII arguments: $(cd / && value_words "$src/args" 'ü' 'two words')"
 echo "   spaces and non-ASCII characters in sources, arguments and executables: ok"
@@ -176,10 +210,10 @@ status=0; bl "$app" -no-such-option >/dev/null 2>&1 || status=$?
 printf 'x = \n' >broken.bot
 status=0; bl "$app" broken.bot >/dev/null 2>&1 || status=$?
 [[ $status == 1 ]] || fail "a rejected program exits $status, not 1"
-status=0; bl "$app" -backend cranelift overflow.bot >"$work/overflow.out" 2>&1 || status=$?
+status=0; bl "$app" -warnings off -aot-run overflow.bot >"$work/overflow.out" 2>&1 || status=$?
 [[ $status == 1 ]] && grep -q 'NATIVE LIMIT STACK' "$work/overflow.out" || fail "a native stack overflow: status $status, $(cat "$work/overflow.out")"
 # The driver's path (the bundle's) with spaces and non-ASCII characters: one argument.
-[[ $(bl "$work/moved/Botlish.app" -backend cranelift coroutine.bot) == *'value: [0, 1, 4, -1]' ]] || fail "the driver's path as one argument"
+[[ $(aot_value "$work/moved/Botlish.app" coroutine.bot) == 'list int 0 int 1 int 4 int -1' ]] || fail "the driver's path as one argument: $(cat "$work/aot.err")"
 # The environment reaches what the compiler runs as the user gave it (the
 # UTF-8 locale Tcl starts in is put back): a C compiler driver first on PATH
 # that records its environment, then links with Apple's.
@@ -225,13 +259,14 @@ pids=""
 for i in 1 2 3 4; do
   mkdir -p "$work/c$i"
   cp coroutine-kept.bot hello-darwin.bot "$work/c$i/"
-  (cd "$work/c$i" && bl "$app" -backend cranelift coroutine-kept.bot >run.out 2>&1 &&
+  (cd "$work/c$i" && env -i HOME="$home" PATH=/usr/bin:/bin BOTLISH_NATIVE_RESULT="$work/c$i/run.out" "$app/Contents/MacOS/botlish" -warnings off -aot-run coroutine-kept.bot 2>run.err &&
      bl "$app" -warnings off -emit-native-executable hello-darwin.bot >emit.out 2>&1) &
   pids="$pids $!"
 done
 for pid in $pids; do wait "$pid" || fail "a concurrent run failed"; done
 for i in 1 2 3 4; do
-  grep -qF 'value: [[0, [1, 4, -1]], [4, 5, 6, 7, -1]]' "$work/c$i/run.out" || fail "concurrent run $i: $(cat "$work/c$i/run.out")"
+  grep -qxF 'value {list {{list {{int 0} {list {{int 1} {int 4} {int -1}}}}} {list {{int 4} {int 5} {int 6} {int 7} {int -1}}}}}' "$work/c$i/run.out" ||
+    fail "concurrent run $i: $(cat "$work/c$i/run.out" "$work/c$i/run.err")"
   [[ $(env -i "$work/c$i/hello-darwin") == 'Hello, world!' ]] || fail "concurrent link $i"
 done
 echo "   four concurrent native runs (coroutines on their own stacks) and links: ok"
@@ -324,7 +359,7 @@ t=$(copy_app "$work/t1"); flip "$t/Contents/Resources/botlish.zip" 100; rejected
 t=$(copy_app "$work/t2"); flip "$t/Contents/MacOS/botlish-native" 20000; rejected "$t" "a changed driver"
 # (Running it: the kernel validates a signed page as it is paged in; what
 # a change does depends on whether the run touches its page. Recorded.)
-status=0; bl "$t" -backend cranelift 01-arithmetic.bot >"$work/t2.out" 2>&1 || status=$?
+status=0; bl "$t" -warnings off -aot-run 01-arithmetic.bot >"$work/t2.out" 2>&1 || status=$?
 echo "     (a native run with it: status $status, $(tr '\n' ' ' <"$work/t2.out" | cut -c1-140))"
 t=$(copy_app "$work/t3"); flip "$t/Contents/MacOS/botlish" 20000; rejected "$t" "a changed launcher"
 status=0; bl "$t" -version >"$work/t3.out" 2>&1 || status=$?
@@ -360,15 +395,15 @@ d=$(copy_app "$work/d5"); head -c 100000 "$source_app/Contents/Resources/botlish
 early "$d" 'cannot mount the compiler archive' "botlish.zip truncated"
 d=$(copy_app "$work/d6"); (cd "$d/Contents/Resources" && zip -q -d botlish.zip main.tcl); early "$d" 'holds no main.tcl' "botlish.zip without main.tcl"
 d=$(copy_app "$work/d7"); rm "$d/Contents/MacOS/botlish-native"
-damaged "$d" "native backend is missing: $d/Contents/MacOS/botlish-native" "the driver missing" -backend cranelift 01-arithmetic.bot
+damaged "$d" "native backend is missing: $d/Contents/MacOS/botlish-native" "the driver missing" -warnings off -aot-run 01-arithmetic.bot
 grep -q 'reinstall' "$work/d.out" "$work/d.err" || fail "the driver missing: no remedy"
 tcl_run=$(bl "$d" -backend compile 01-arithmetic.bot 2>&1) || true
 [[ $tcl_run == *"value: 50"* ]] || fail "without the driver the Tcl backends stop working: $tcl_run"
 d=$(copy_app "$work/d8"); chmod 644 "$d/Contents/MacOS/botlish-native"
-damaged "$d" 'error' "the driver not executable" -backend cranelift 01-arithmetic.bot
+damaged "$d" 'error' "the driver not executable" -warnings off -aot-run 01-arithmetic.bot
 d=$(copy_app "$work/d9"); printf 'int main(void) { return 0; }\n' >"$work/x86.c"
 clang -arch x86_64 -o "$d/Contents/MacOS/botlish-native" "$work/x86.c"
-damaged "$d" 'error' "the driver for x86_64" -backend cranelift 01-arithmetic.bot
+damaged "$d" 'error' "the driver for x86_64" -warnings off -aot-run 01-arithmetic.bot
 d=$(copy_app "$work/d10"); rm "$d/Contents/Resources/libbotlish_runtime.a"
 damaged "$d" "the runtime archive is missing: $d/Contents/Resources/libbotlish_runtime.a" "the runtime archive missing" -warnings off -emit-native-executable hello-darwin.bot
 d=$(copy_app "$work/d11"); clang -arch x86_64 -c -o "$work/x86.o" "$work/x86.c" && rm -f "$work/x86.a" && ar rcs "$work/x86.a" "$work/x86.o"
@@ -432,5 +467,63 @@ bl "$app" -warnings off -emit-native-executable hello-darwin.bot >/dev/null || f
 out=$(otool -L hello-darwin) && grep -q '/usr/lib/libSystem.B.dylib' <<<"$out" || fail "hello-darwin does not link libSystem"
 [[ $(env -i ./hello-darwin) == 'Hello, world!' ]] || fail "hello-darwin: $(env -i ./hello-darwin)"
 echo "   checked, std::io::IO selected statically (print_line<...DarwinIO> calls write_text), libSystem, run: ok"
+
+# --- no-jit ---------------------------------------------------------------------
+section no-jit
+nj=$(copy_app "$work/nojit")
+before=$(tree "$nj")
+for invocation in "-backend cranelift" "-backend cranelift-generic" "run -backend cranelift"; do
+  status=0
+  # shellcheck disable=SC2086
+  bl "$nj" $invocation 01-arithmetic.bot >"$work/nojit.out" 2>"$work/nojit.err" || status=$?
+  [[ $status == 1 ]] || fail "$invocation: status $status, $(cat "$work/nojit.out" "$work/nojit.err")"
+  grep -q 'NATIVE UNSUPPORTED jit' "$work/nojit.err" && grep -q -e '-aot-run' "$work/nojit.err" ||
+    fail "$invocation: not the JIT's refusal: $(cat "$work/nojit.err")"
+  if grep -q 'value:' "$work/nojit.out"; then fail "$invocation ran the program"; fi
+done
+grep -qx 'native JIT: unavailable (programs run natively as executables: -aot-run)' <<<"$(bl "$nj" -version)" || fail "-version does not say the JIT is unavailable"
+[[ $("$nj/Contents/MacOS/botlish-native" capabilities | sed -n 's/^jit //p') == 0 ]] || fail "the driver says it has a JIT"
+bl "$nj" -warnings off -emit-nir 01-arithmetic.bot | sed -e '1d' -e '/^   value: /d' >"$work/nojit.nir"
+[[ -s $work/nojit.nir ]] || fail "no NIR to run"
+for command in "run" "bench 3" "batch 3" "vms 2"; do
+  # shellcheck disable=SC2086
+  out=$("$nj/Contents/MacOS/botlish-native" $command "$work/nojit.nir" 2>&1) || true
+  [[ $out == "error {NATIVE UNSUPPORTED jit} "* ]] || fail "the driver's $command: $out"
+done
+clif=$(bl "$nj" -warnings off -emit-clif 01-arithmetic.bot) && grep -q '^function ' <<<"$clif" || fail "-emit-clif without the JIT"
+[[ $(env -i HOME="$home" PATH=/usr/bin:/bin "$nj/Contents/MacOS/botlish" run -warnings off hello-darwin.bot) == 'Hello, world!' ]] ||
+  fail "run's native default (as an executable)"
+[[ $(env -i HOME="$home" PATH=/usr/bin:/bin "$nj/Contents/MacOS/botlish" -warnings off -aot-run hello-darwin.bot) == 'Hello, world!' ]] ||
+  fail "-aot-run hello-darwin.bot"
+# The Cocoa and Metal canary: on the main thread by -native-startup
+# main-thread, through AppKit and Metal (frameworks linked by Apple's ld),
+# exit status 0; 3 on a worker (pthread_main_np() is 0 there).
+cat >canary.bot <<'CANARY'
+import std::ffi::c
+
+extern c framework "AppKit"
+extern c framework "Metal"
+extern c fn pthread_main_np() -> std::ffi::c::Int
+extern c fn NSApplicationLoad() -> std::ffi::c::Bool
+extern c fn MTLCreateSystemDefaultDevice() -> std::ffi::c::Ptr[std::ffi::c::Void]
+extern c fn exit(status: std::ffi::c::Int) -> unit
+
+if pthread_main_np() != 1:
+    exit(3)
+if not NSApplicationLoad():
+    exit(4)
+device = MTLCreateSystemDefaultDevice()
+if std::ffi::c::null?(device):
+    exit(5)
+unit
+CANARY
+status=0; env -i HOME="$home" PATH=/usr/bin:/bin "$nj/Contents/MacOS/botlish" -warnings off -aot-run -native-startup main-thread canary.bot \
+  >"$work/canary.out" 2>&1 || status=$?
+[[ $status == 0 ]] || fail "the Cocoa and Metal canary on the main thread: status $status, $(cat "$work/canary.out")"
+status=0; env -i HOME="$home" PATH=/usr/bin:/bin "$nj/Contents/MacOS/botlish" -warnings off -aot-run canary.bot >"$work/canary.out" 2>&1 || status=$?
+[[ $status == 3 ]] || fail "the canary on a worker: status $status (want 3: not the main thread), $(cat "$work/canary.out")"
+[[ $(tree "$nj") == "$before" ]] || fail "the application's files changed while it ran"
+verify "$nj"
+echo "   -backend cranelift, cranelift-generic, run -backend cranelift and the driver's run, bench, batch, vms refused; -emit-clif, run, -aot-run, the Cocoa and Metal canary on the main thread: ok; the bundle unchanged"
 
 echo "== app-test passed"

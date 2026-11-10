@@ -597,6 +597,25 @@ proofs, as native lowering does, and runs no C compiler. Keep it so:
   exactly the service symbols the C calls, per translation unit.
 * Harnesses and providers stay outside the backend
   (`examples/c-freestanding/`), as integration code of a target's.
+* Contexts (C-CONTEXTS-FREESTANDING-MILESTONE-1.md) are the front end's,
+  translated, never re-decided: an installation is an object of the
+  program function's frame (per run); a function's C parameters after its
+  ordinary ones are one `T *` per context of its block's
+  `requiredContexts`, in order, and a call passes exactly the callee's
+  requirement (`ContextArgs`): the signature is its authority. Nothing
+  writes through the pointer, but neither it nor the object is
+  `const`-qualified: GCC 15 reports an initialized object passed to a
+  pointer-to-const parameter "may be used uninitialized" after cloning a
+  recursive function with its constant contents
+  (`cc-ctx-no-const-context-pointers`). Never put a
+  context in file-scope storage, a global or thread-local pointer, a
+  registry, an environment struct handed to every function, a lookup or a
+  runtime service; never compute a requirement, a selection or an
+  injection in the backend (the trait plan and hir/contexts.tcl did), and
+  never compile a HIR that failed context verification. No context name
+  starts with `PREFIX_` (`ContextName`). A context the C subset cannot
+  represent (a member of an unsupported type, affine state) is C
+  UNSUPPORTED naming it.
 * **Every enhancement of type inference is also analyzed for what it gives
   the C target.** The backend adds no analysis of its own, so its
   precision is the analyses': a new or sharper fact -- a type or a Range
@@ -617,7 +636,8 @@ proofs, as native lowering does, and runs no C compiler. Keep it so:
 
 If you change `ccompile/`, `examples/c-freestanding/` or what the backend
 reads (`hir::specialize`'s instances, `hir::range`'s results, the HIR node
-kinds it compiles), run `tests/c-compile.test` (its cross tests need clang,
+kinds it compiles, the context facts `requiredContexts`, `installId` and
+`loadId`), run `tests/c-compile.test` (its cross tests need clang,
 ld.lld, qemu-user and the cross libgcc packages, and are skipped without
 them), `tests/main-cli.test` and `tools/compilerpedia.tcl check`, and
 `examples/c-freestanding/demo.sh`.
@@ -632,19 +652,23 @@ application"): `single/macos/build.sh` makes `Botlish.app` -- the launcher
 (`single/macos/tcl-framework.sh`: Tcl's own framework build of the pinned
 9.0.1, install name `@rpath/Tcl.framework/Versions/9.0/Tcl`), the compiler
 archive `Contents/Resources/botlish.zip` (`single/package.tcl -archive`)
-and `Contents/Resources/libbotlish_runtime.a` -- signs it ad hoc, verifies
-it (`single/macos/verify.sh`) and archives it as
-`botlish-macos-aarch64.zip`. macos-arm64.yml's `app` and `app-clean` jobs
-build and accept it on every push to main and every dispatched run (a
-manual run with `app_only` runs only them; a branch push runs neither).
-Keep it so:
+and `Contents/Resources/libbotlish_runtime.a` -- signs it ad hoc with the
+hardened runtime (`single/macos/sign.sh`), verifies it
+(`single/macos/verify.sh`) and archives it as `botlish-macos-aarch64.zip`.
+macos-arm64.yml's `app` and `app-clean` jobs build and accept it on every
+push to main and every dispatched run (a manual run with `app_only` runs
+only them; a branch push runs neither); `botlish-macos.yml` releases it,
+Developer ID-signed and notarized, for a tag `botlish-macos-vX.Y.Z`
+(MACOS-BOTLISH-DISTRIBUTION-MILESTONE-1.md). Keep it so:
 
 * One staging procedure: both distributions pack what `single/package.tcl`'s
   `StageCompiler` stages; never a second file list. The macOS archive holds
   no Tcl library (the framework's) and no native executable (the bundle's).
 * Never append data to a signed Mach-O, change a file after it is signed,
   or sign with `--deep`: sign inner code first (the framework's version,
-  the driver, then the application). Executable code lives in
+  the driver, then the application). `single/macos/sign.sh` is the one
+  statement of that order, for the ad hoc build and the release alike:
+  never a second signing sequence. Executable code lives in
   `Contents/MacOS` and `Contents/Frameworks` only; nothing is extracted to
   a cache to run, and nothing is ever written into the bundle (the
   language server's copy of the standard library goes to
@@ -663,11 +687,25 @@ Keep it so:
   non-ASCII path otherwise) and the user's `LC_ALL` is put back, exactly,
   before anything runs: never let the compiler's children see a locale
   the user did not set.
-* Ad hoc signing is not notarization: never describe the artifact as
-  notarized or Gatekeeper-approved, never add a JIT or other entitlement or
-  the hardened runtime without the Developer ID milestone's decision
-  (MACOS-AARCH64-MILESTONE-9.md, "Prerequisites for Developer ID signing
-  and notarization": the census measured what the JIT needs then).
+* The application's driver has no JIT: build.sh builds it with `cargo
+  build --no-default-features` (the `jit` feature off; its own target
+  directory) and refuses one whose `capabilities` say `jit 1`; verify.sh's
+  `no JIT` group checks the binary. `-backend cranelift` and
+  `cranelift-generic` are refused by main.tcl, naming `-aot-run`; `run`'s
+  native default is `-aot-run`; the driver's run, bench, batch and vms are
+  `NATIVE UNSUPPORTED jit`. Never ship a driver with the JIT, never
+  re-route a JIT entry point to something else silently, and never add a
+  JIT entitlement.
+* Every unit (the framework's version, the driver, the application) is
+  signed with the hardened runtime and no entitlement in every mode, so
+  ordinary CI runs the bundle under it. Ad hoc signing is not
+  notarization: never describe an ad hoc artifact as notarized or
+  Gatekeeper-approved. The release's rules are Icy Tower's (next section
+  but many: "Icy Tower.app and its release"), through the same
+  `tools/macos-release/` core; the compiler's description is
+  `single/macos/bundle.py`, its identifier fixed there
+  (`io.github.mwagner-webdev.botlish`), never read from a GitHub variable
+  (`MACOS_BUNDLE_ID` is the game's).
 * A test or tool that runs the application uses a copy for anything that
   damages or changes it, and checks the bundle untouched afterwards.
 
@@ -676,13 +714,18 @@ If you change `single/macos/`, `single/main.tcl`, `single/package.tcl`,
 macos-arm64.yml on the branch (`app_only` for these alone) and read the
 `app` and `app-clean` jobs (they run `single/macos/verify.sh`,
 `single/smoke-test.sh`, `single/ffi-smoke-test.sh`,
-`single/macos/app-test.sh`, `single/macos/compare.sh` and
+`single/macos/app-test.sh`, `single/macos/compare.sh`, the release's
+stages in ad hoc mode with `single/macos/acceptance.sh`, and
 `bench/macos-app.tcl`), run `audit/macos-app/tools/mutate.tcl` (a push with
 `[ci-app-mutants]`: every mutant in its `mutants.txt` must still apply and
 be killed; update a mutant's text when you change the code it mutates,
 keeping it a mutant of the same rule), and the Linux single executable's
 checks (single/build.sh, both smoke tests,
-`audit/single-executable/tools/mutate.tcl`): the scripts are shared.
+`audit/single-executable/tools/mutate.tcl`): the scripts are shared. If you
+change sign.sh, acceptance.sh, `single/macos/bundle.py` or `release.py`,
+`tools/macos-release/` or botlish-macos.yml, also run the release tests
+and mutants (next section but many: test_botlish_release.py and
+test_botlish_workflow.py beside Icy Tower's).
 
 ## Running the tests locally
 
@@ -2885,6 +2928,64 @@ code it mutates, keeping it a mutant of the same rule), plus the affine,
 tree-struct and declaration-summaries mutation harnesses for a change to
 code they mutate. `bench/owned-recursion.tcl` regenerates the scaling
 report.
+
+## The applied-type bound (hir/applied.tcl)
+
+`aggregateDepth` / `appliedDepth` (hir/types.tcl) are precision and economy
+bounds of the type lattice, not language validity limits
+(APPLIED-TYPE-BOUND-PRECISION-MILESTONE-1.md): past `appliedDepth`
+applications nested directly in arguments, `MakeApplied` keeps an
+application's constructor and makes its arguments `any`, so that joins,
+fixpoints, instance and memo keys stay finite. A part of a cut application
+read back out of it is cut one application earlier than a value of that part
+on its own; never check a value against it. Keep it so:
+
+* Before using a bounded applied type to reject a declared construction,
+  parameter, result or imprint, prefer the exact local declaration/value
+  relationship when it is already available: a construction's field types
+  are what its own field values or its written application establish
+  (`hir::applied::VerifyConstruction`, `FieldExpected`), never
+  `hir::types::StructField` of its own cut type; a projection of a value the
+  program constructed reads the field value's type (`TypedProjection`);
+  inference re-decides a bounded conflict or a constrained slot on the
+  evidence (`TypedBinding`, `TypedIssue`).
+* Never raise `appliedDepth` (or remove it) to make a program pass: the
+  false rejection only moves deeper, and exact types in the HIR are
+  quadratic (`atb-bound-unchanged`, the report's section 3). Precision is
+  forgotten globally and cashed out locally: evidence lives in one typing
+  walk's context (ctx `applied`) or one verification pass's memo
+  (`hir::applied::Pass`), never in a HIR type, an interned type, an instance
+  key or a side table; a written type the bound cut is recorded beside its
+  bounded form (`exactParamTypes`, `exactResult`, `exactStructArgs`,
+  `exactImprint`, the struct registry's `exactFields`), flat-encoded.
+* Evidence comes only from what the program constructs (constructions,
+  immutable aliases, projections, `if` branches) -- a slot no field
+  establishes from its written argument -- never from a declaration of a
+  value's position (a parameter read in its body stays its bounded type: not
+  every way into a parameter is checked exactly). The exact layer only adds
+  rejections: the bounded check of the value's HIR type runs first and
+  decides every subtype, Range, refinement and kind question.
+* No covariance (`App[int]` is no `App[any]`), no precision from `any`, no
+  reading past a bounded part's horizon (`Parts`), no unfolding of a
+  declaration (a constrained slot's class is the summaries' `Level` of its
+  arguments' classes). Every walk of evidence is a loop over an explicit
+  stack and no exact term is ever compared or keyed as a string.
+* A deep difference is reported at the deepest construction inside the
+  checked value whose slot it passes through (`Locate`), with the message
+  the same at every depth; a program the bound cuts nothing of keeps its
+  diagnostics byte for byte.
+
+If you change `MakeApplied`, `Bound`, `hir/applied.tcl`, construction typing
+or checking, imprint matching or the resolver's exact forms, run
+`tests/applied-type-bound.test` (its deep generated specimens, 1000 deep),
+`tests/depth-safe-nesting.test`, `tests/trait-constrained-types.test`,
+`tests/affine-applications.test`, `tests/written-affine-applications.test`,
+`python3 -I audit/applied-type-bound/tools/oracle.py selftest`,
+`audit/applied-type-bound/tools/fuzz.tcl` (several seeds) and
+`audit/applied-type-bound/tools/mutate.tcl` (every mutant in its
+`mutants.txt` must still apply and be killed: update a mutant's text when
+you change the code it mutates, keeping it a mutant of the same rule).
+`bench/applied-type-bound.tcl -baseline DIR` is the performance report.
 
 ## Resources (scope-bound cleanup)
 
@@ -5820,24 +5921,36 @@ temporary one, whose bundles LaunchServices' lookup did not find.
 `examples/games/icy-tower/package-macos.sh` assembles `Icy Tower.app` from
 build-macos.sh's executable, byte for byte (`macos/bundle.py`: a structured
 Info.plist, the Mach-O and the bundle checked as a whole);
-`macos/credentials.py` validates the release's seven GitHub values;
-`macos/release.py` is the trust path as gated stages (keychain,
-notarytool's credential validation, sign, verify, record an acceptance,
-notarize, staple, Gatekeeper, tamper, package, publishable, cleanup) in
-three modes, `adhoc` and `dry-run` for ordinary CI, `release` for the
-`release` job (ICY-TOWER-MACOS-APP-MILESTONE-1.md). Keep it so:
+`tools/macos-release/credentials.py` validates the release's seven GitHub
+values; `tools/macos-release/release.py` is the trust path as gated stages
+(keychain, notarytool's credential validation, sign, verify, record an
+acceptance, notarize, staple, Gatekeeper, tamper, package, publishable,
+cleanup) in three modes, `adhoc` and `dry-run` for ordinary CI, `release`
+for the `release` job (ICY-TOWER-MACOS-APP-MILESTONE-1.md). The core is
+application-neutral and shared with Botlish.app's release
+(MACOS-BOTLISH-DISTRIBUTION-MILESTONE-1.md): each application supplies its
+description (`examples/games/icy-tower/macos/bundle.py`,
+`single/macos/bundle.py`: its name, units, identifier, ZIP, signing) and an
+entry point (`macos/release.py`, `single/macos/release.py`). Keep it so:
+
+* One validator and one trust path: an application's description never
+  checks a credential, skips a stage or adds one of its own; a rule both
+  applications need goes into the core. Never let one application's
+  release read the other's identifier or overwrite its release (their tags,
+  names and assets differ, and publish refuses an existing release).
 
 * Credentials live only in the `macos-release` environment and reach only
   the `release` job of icy-tower-macos.yml, for an `icy-tower-macos-vX.Y.Z`
-  tag of main's history, pushed, run by hand or dispatched again by the
+  tag, and of botlish-macos.yml, for a `botlish-macos-vX.Y.Z` tag, of main's
+  history, pushed, run by hand or dispatched again by the
   release gate, and only once every test of the tagged commit is green (the
   `tested` job, CI-RUNS.md) -- never a branch, a pull request, a fork,
   `pull_request_target`, another job or another workflow;
   each secret only in the `env` of the step that reads it, never in a
   script, a `with` or a job's `env`; no step holding one traces commands.
   Nothing is committed: no certificate but Apple's public ones
-  (`macos/apple-ca/`, pinned by SHA-256 in credentials.py), no key, no
-  password.
+  (`tools/macos-release/apple-ca/`, pinned by SHA-256 in credentials.py),
+  no key, no password.
 * The preflight runs before any Apple tool and reports every problem under
   its stable code without a byte of a secret; a malformed value is never
   left for `security`, `codesign` or `notarytool` to report. A release never
@@ -5845,9 +5958,10 @@ three modes, `adhoc` and `dry-run` for ordinary CI, `release` for the
   signature, never skips a stage (each refuses to run unless the stages it
   depends on passed: `publishable` checks the whole sequence, one CDHash
   and one ZIP digest), and never publishes over an existing release.
-* No entitlement, no `--deep`, no JIT or library-validation exception: the
-  game needs none. The hardened runtime is on in every mode, so ordinary CI
-  plays the bundle under it.
+* No entitlement, no `--deep`, no JIT or library-validation exception:
+  neither application needs one (the compiler's driver has no JIT). The
+  hardened runtime is on in every mode, so ordinary CI runs each bundle
+  under it.
 * No job changes a trust setting (`add-trusted-cert`, `authorizationdb
   write`, `spctl --master-disable`): a release trusts Apple's root, which
   is the system's, and the dry run's throwaway identity, which no runner
@@ -5869,10 +5983,12 @@ three modes, `adhoc` and `dry-run` for ordinary CI, `release` for the
   published release updates them, in a change of its own after the release
   exists. Never point them at a tag whose release is not published.
 
-If you change `package-macos.sh`, `macos/`, `macos_app.bot`, the release
-jobs or `macos-session.py app`, run `audit/macos-release/tests/`
-(test_credentials, test_release, test_workflow; `tests/workload-icy-tower.test`'s
-`workload-icy-tower-release-tooling` runs them) and
+If you change `package-macos.sh`, `macos/`, `macos_app.bot`,
+`tools/macos-release/`, the release jobs or `macos-session.py app`, run
+`audit/macos-release/tests/` (test_credentials, test_release,
+test_workflow, test_botlish_release, test_botlish_workflow;
+`tests/workload-icy-tower.test`'s `workload-icy-tower-release-tooling` runs
+them) and
 `audit/macos-release/tools/mutate.py` (every mutant in its `mutants.txt`
 must still apply and be killed by a test its `!!` line names: update a
 mutant's text when you change the code it mutates, keeping it a mutant of
@@ -5920,6 +6036,50 @@ If you change any of that, run `tests/native-executable.test`,
 single/main.tcl, `audit/single-executable/tools/mutate.tcl` (its
 `run-command-not-linking` mutant) and both smoke tests after
 `single/build.sh`.
+
+## Running a program as its executable (-aot-run)
+
+`main.tcl -aot-run [OPTION...] FILE [-- ARG...]` (AOT-RUN-MILESTONE-1.md)
+builds the program exactly as `-emit-native-executable` does and runs that
+file as a command: `native::aotRun` lowers it with `native::ExecutableText`
+(the one compilation of an executable, `native::executable`'s too), and
+the driver's `aot-run` (native/src/aotrun.rs) links it with
+`codegen::aot::emit_executable` into a private directory and starts it.
+Keep it so:
+
+* No second pipeline and no in-process run: never run the program in the
+  driver's process, never cache an executable, never run a file this
+  command did not just link. The directory is new every run (created
+  exclusively, owner-only on Unix) and removed when the program ends
+  (`-aot-keep` keeps it); a failed build or link runs nothing.
+* The program's arguments are exactly the words after `--` (argv()[0] is
+  FILE as typed); its standard streams, working directory and environment
+  are the command's (a packaged compiler's own settings put back:
+  `childEnvironment`, `--child-env`); nothing of its output passes through
+  the compiler. Its exit status is the command's, 128+N for a signal on
+  Unix; SIGTERM and SIGHUP are forwarded, SIGINT and SIGQUIT are not (the
+  terminal sends them to the group); the program never outlives its
+  command (the parent watch).
+* The host's target only, and the startup policy the executable's
+  (`-native-startup`): a foreign target is a usage error, main-thread where
+  unsupported `NATIVE UNSUPPORTED startup`.
+* The JIT is the driver's `jit` cargo feature (default on): `-aot-run`
+  never needs it, and a driver without it refuses only the in-process
+  commands (run, bench, batch, vms). Never make anything but those depend
+  on the JIT, and never turn it off for a build other than Botlish.app's.
+
+If you change aotrun.rs, launch.rs's Windows spawn and wait,
+`native::aotRun`, `native::ExecutableText`, RunDriver's `run-command`
+mode, main.tcl's `-aot-run` or JIT boundary, or the `jit` feature, run
+`cargo test --release --manifest-path native/Cargo.toml --bin
+botlish-native aot_run`, `tests/aot-run.test` (also with
+`BOTLISH_NATIVE_LINKER=system` and `stub`, and with a driver built
+`--no-default-features --target-dir native/target/no-jit`),
+`tests/main-cli.test`, `tools/compilerpedia.tcl check` and
+`audit/aot-run/tools/mutate.tcl` (every mutant in its `mutants.txt` must
+still apply and be killed: update a mutant's text when you change the code
+it mutates, keeping it a mutant of the same rule), and read the Windows
+and macOS workflows on the branch. `bench/aot-run.tcl` measures the costs.
 
 ## Application modules, native program output, the recursion limit
 

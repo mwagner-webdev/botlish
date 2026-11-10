@@ -1,0 +1,35 @@
+# shop -- the application's logic: it needs a Payment and nothing else, and
+# says so in one place (sell's context parameter). Which terminal and
+# which clock serve it is the entry program's choice.
+
+import clock
+import payment
+
+type Revenue = Int in 0..3000
+
+struct Sale:
+    ok: bool
+    paid: payment::Amount
+    fee: payment::Cents
+    stamp: clock::Tick
+
+fn sell(price: payment::Amount, context pay: payment::Payment) -> Sale:
+    r = pay.authorize(price):
+        on payment::Declined:
+            return Sale {ok: false, paid: 0, fee: 0, stamp: 0}
+    Sale {ok: true, paid: r.amount, fee: r.fee, stamp: r.stamp}
+
+fn revenue(a: Sale, b: Sale, c: Sale) -> Revenue:
+    a.paid + b.paid + c.paid
+
+struct Day:
+    first: Sale
+    second: Sale
+    third: Sale
+    revenue: Revenue
+
+fn day(first: payment::Amount, second: payment::Amount, third: payment::Amount) -> Day:
+    a = sell(first)
+    b = sell(second)
+    c = sell(third)
+    Day {first: a, second: b, third: c, revenue: a.revenue(b, c)}

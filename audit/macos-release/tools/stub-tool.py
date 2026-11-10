@@ -13,7 +13,16 @@ a small model of the real one, configured by $STUB_STATE/config.json:
                the identity, the flags and a seal of every file but the
                signature and the stapled ticket; --verify recomputes the
                seal; -dvvv prints codesign's fields (Authority chain,
-               TeamIdentifier, Timestamp, flags, CDHash)
+               TeamIdentifier, Timestamp, flags, CDHash). Nested code -- a
+               path inside a bundle other than its main executable (a
+               framework's version, a helper executable: Botlish.app's
+               driver) -- has a signature of its own, sealing that file or
+               directory, with the --identifier it was given (else the
+               directory's Resources/Info.plist's, else its name): a file's
+               is embedded in it, as a Mach-O's is (a trailer, so signing
+               changes its bytes), a directory's kept in the bundle
+               (Contents/_CodeSignature/nested/); the bundle's seal covers
+               both
   spctl        accepted as "Notarized Developer ID" only for an Apple-chain
                signature with a stapled ticket of its CDHash; with no origin
                line, as macOS 15's spctl answers (config spctl_origin:
@@ -21,7 +30,9 @@ a small model of the real one, configured by $STUB_STATE/config.json:
                text)
   xcrun        notarytool (store-credentials, submit, wait, info, log) and
                stapler (staple, validate), their answers from the config
-  ditto/unzip  ZIP archives with the files' modes (zipfile); copies
+  ditto/unzip  ZIP archives with the files' modes and symbolic links (zipfile;
+               deref_links: stored as what they point to; absolute_links:
+               their targets' absolute paths); copies
   xattr        nothing
 """
 import hashlib
@@ -113,7 +124,145 @@ def info_plist(app):
         return plistlib.load(f)
 
 
+def nested(path):
+    """(APP, the signature's file) of PATH when it is nested code, else None: a path inside a bundle that is not
+    the bundle itself or its main executable."""
+    p = os.path.abspath(path)
+    app = bundle_of(p)
+    if app == "/" or p == app:
+        return None
+    rel = os.path.relpath(p, app)
+    try:
+        main = "Contents/MacOS/" + info_plist(app)["CFBundleExecutable"]
+    except Exception:
+        main = None
+    if rel == main:
+        return None
+    return app, os.path.join(app, "Contents", "_CodeSignature", "nested", rel.replace("/", "%") + ".json")
+
+
+TRAILER = b"\n#stub-codesign "
+
+
+def file_parts(path):
+    """(code, signature or None) of the nested file PATH: its bytes without the embedded signature, and that."""
+    with open(path, "rb") as f:
+        data = f.read()
+    i = data.rfind(TRAILER)
+    if i < 0:
+        return data, None
+    try:
+        return data[:i], json.loads(data[i + len(TRAILER):].decode())
+    except ValueError:
+        return data, None
+
+
+def nested_seal(path):
+    h = hashlib.sha256()
+    if os.path.isfile(path):
+        h.update(file_parts(path)[0])
+    elif os.path.isdir(path):
+        for dirpath, dirnames, filenames in os.walk(path):
+            dirnames.sort()
+            for n in sorted(filenames):
+                q = os.path.join(dirpath, n)
+                h.update(os.path.relpath(q, path).encode() + b"\0")
+                with open(q, "rb") as f:
+                    h.update(f.read())
+    return h.hexdigest()
+
+
+def nested_identifier(path):
+    if opt("--identifier"):
+        return opt("--identifier")
+    import plistlib
+    info = os.path.join(path, "Resources", "Info.plist")
+    if os.path.isdir(path) and os.path.exists(info):
+        with open(info, "rb") as f:
+            return plistlib.load(f).get("CFBundleIdentifier", os.path.basename(path))
+    return os.path.basename(path)
+
+
+def codesign_nested(target, store):
+    """codesign of nested code TARGET (its signature in STORE)."""
+    if "--sign" in ARGS:
+        if CFG.get("sign_fails"):
+            die("%s: errSecInternalComponent" % target)
+        ident = opt("--sign")
+        identities = load("identities", {})
+        if ident != "-":
+            kc = opt("--keychain")
+            if not kc or ident not in identities.get(kc, {}):
+                die("%s: no identity found" % ident)
+            subject, team = identities[kc][ident]
+        else:
+            subject, team = None, None
+        runtime = opt("--options") == "runtime" and CFG.get("sign_runtime", True) and not CFG.get("nested_no_runtime")
+        timestamp = "--timestamp" in ARGS and CFG.get("timestamp", True)
+        s = nested_seal(target)
+        sig = {"identity": ident, "subject": subject, "team": team, "runtime": runtime, "timestamp": timestamp, "seal": s,
+               "cdhash": hashlib.sha1((s + ident).encode()).hexdigest(), "apple": bool(CFG.get("apple_chain")) and ident != "-",
+               "identifier": nested_identifier(target)}
+        if os.path.isfile(target):
+            code = file_parts(target)[0]
+            mode = os.stat(target).st_mode
+            with open(target, "wb") as f:
+                f.write(code + TRAILER + json.dumps(sig).encode())
+            os.chmod(target, mode & 0o7777)
+        else:
+            os.makedirs(os.path.dirname(store), exist_ok=True)
+            with open(store, "w") as f:
+                json.dump(sig, f)
+        print("%s: replacing existing signature" % target, file=sys.stderr)
+        return
+    sig = None
+    if os.path.isfile(target):
+        sig = file_parts(target)[1]
+    elif os.path.exists(store):
+        with open(store) as f:
+            sig = json.load(f)
+    if "--verify" in ARGS:
+        if sig is None:
+            die("%s: code object is not signed at all" % target)
+        if nested_seal(target) != sig["seal"]:
+            die("%s: invalid signature (code or signature have been modified)" % target)
+        print("%s: valid on disk\n%s: satisfies its Designated Requirement" % (target, target), file=sys.stderr)
+        return
+    if "--entitlements" in ARGS:
+        if CFG.get("entitlements") or CFG.get("nested_entitlements"):
+            print('<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>%s</key><true/></dict></plist>'
+                  % (CFG.get("nested_entitlements") or CFG["entitlements"]))
+        return
+    if "-dvvv" in ARGS:
+        if sig is None:
+            die("%s: code object is not signed at all" % target)
+        flags = (["adhoc"] if sig["identity"] == "-" else []) + (["runtime"] if sig["runtime"] else [])
+        value = (0x2 if sig["identity"] == "-" else 0) | (0x10000 if sig["runtime"] else 0)
+        kind = "bundle with Mach-O thin (arm64)" if os.path.isdir(target) else "Mach-O thin (arm64)"
+        lines = ["Executable=%s" % target, "Identifier=%s" % sig["identifier"], "Format=%s" % kind,
+                 "CodeDirectory v=20500 size=1 flags=0x%x(%s) hashes=1+7 location=embedded" % (value, ",".join(flags) or "none"),
+                 "CDHash=%s" % sig["cdhash"]]
+        if sig["identity"] == "-":
+            lines += ["Signature=adhoc", "TeamIdentifier=not set"]
+        else:
+            lines += ["Signature size=9000", "Authority=%s" % sig["subject"]]
+            if sig["apple"]:
+                lines += ["Authority=Developer ID Certification Authority", "Authority=Apple Root CA"]
+            if sig["timestamp"]:
+                lines.append("Timestamp=Oct 31, 2026 at 10:00:00")
+            else:
+                lines.append("Signed Time=Oct 31, 2026 at 10:00:00")
+            lines.append("TeamIdentifier=%s" % sig["team"])
+        print("\n".join(lines), file=sys.stderr)
+        return
+    die("codesign stub: unknown use %s" % ARGS)
+
+
 def codesign():
+    if ARGS and nested(ARGS[-1]) and ("--sign" in ARGS or "--verify" in ARGS and "--deep" not in ARGS or "-dvvv" in ARGS
+                                       or "--entitlements" in ARGS):
+        app, store = nested(ARGS[-1])
+        return codesign_nested(os.path.abspath(ARGS[-1]), store)
     if "--sign" in ARGS:
         app = ARGS[-1]
         if CFG.get("sign_fails"):
@@ -396,12 +545,24 @@ def ditto():
     if ARGS[:2] == ["-c", "-k"]:
         src, dst = ARGS[-2], ARGS[-1]
         parent = os.path.dirname(os.path.abspath(src)) if "--keepParent" in ARGS else os.path.abspath(src)
+        # (A symbolic link is an entry of its own, its target the data, as
+        # ditto keeps it; deref_links stores what it points to instead, as a
+        # tool that follows links would; absolute_links stores the absolute
+        # path of its target, as a tool that resolves links would: a bundle
+        # that works only where it was built.)
+        deref = bool(CFG.get("deref_links"))
         with zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as z:
-            for dirpath, dirnames, filenames in os.walk(src):
+            for dirpath, dirnames, filenames in os.walk(src, followlinks=deref):
                 dirnames.sort()
-                for n in sorted(filenames):
+                for n in sorted(dirnames + filenames):
                     p = os.path.join(dirpath, n)
                     info = zipfile.ZipInfo(os.path.relpath(p, parent))
+                    if os.path.islink(p) and not deref:
+                        info.external_attr = (stat.S_IFLNK | 0o755) << 16
+                        z.writestr(info, os.path.realpath(p) if CFG.get("absolute_links") else os.readlink(p))
+                        continue
+                    if n not in filenames:
+                        continue
                     mode = os.stat(p).st_mode & 0o777
                     if CFG.get("drop_modes"):
                         mode = 0o644
@@ -415,6 +576,9 @@ def ditto():
             for info in z.infolist():
                 out = os.path.join(dst, info.filename)
                 os.makedirs(os.path.dirname(out), exist_ok=True)
+                if stat.S_ISLNK(info.external_attr >> 16):
+                    os.symlink(z.read(info).decode(), out)
+                    continue
                 with open(out, "wb") as f:
                     f.write(z.read(info))
                 os.chmod(out, (info.external_attr >> 16) & 0o777)

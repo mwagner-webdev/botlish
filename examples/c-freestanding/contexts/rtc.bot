@@ -1,0 +1,14 @@
+# rtc -- a real-time clock's registers, hours and minutes: another
+# implementation of clock::Clock, which converts them to seconds.
+
+import clock
+
+type Hours = Int in 0..23
+type Minutes = Int in 0..59
+
+context struct Rtc:
+    hours: Hours
+    minutes: Minutes
+
+fn now(context r: Rtc) -> clock::Tick:
+    r.hours * 3600 + r.minutes * 60

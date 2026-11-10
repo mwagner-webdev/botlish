@@ -1,0 +1,17 @@
+# payment -- the capability to take a payment: a context trait whose one
+# operation fails with Declined. terminal.bot implements it.
+
+import clock
+
+type Amount = Int in 0..1000
+type Cents = Int in 0..99
+
+error Declined
+
+struct Receipt:
+    amount: Amount
+    fee: Cents
+    stamp: clock::Tick
+
+context trait Payment:
+    fn authorize(amount: Amount) -> Receipt errors Declined
