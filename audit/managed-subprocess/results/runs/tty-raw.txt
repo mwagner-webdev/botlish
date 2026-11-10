@@ -1,0 +1,6 @@
+status exited 0
+end owned 0
+end live 0
+end fds delta 0
+[harness] terminal attributes changed
+[harness] PASS in 0.11 s

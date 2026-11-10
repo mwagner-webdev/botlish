@@ -1,0 +1,15 @@
+# cleanup_job.bot -- the module of cleanup-cannot-wait.bot's reproducer: a
+# resource whose cleanup tries to wait (sleep) on the event loop.
+import std::event_loop
+
+opaque resource struct Job:
+    pid: int
+
+cleanup fn stop(j: Job, context ev: std::event_loop::Loop):
+    {pid} = j
+    std::event_loop::sleep(100000):
+        on std::event_loop::SchedulerFault:
+            std::event_loop::Wake::Empty
+
+fn make() -> Job:
+    Job {pid: 1}

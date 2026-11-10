@@ -68,6 +68,19 @@
 # the in-process memo (`memo`) reuses one in a later compilation exactly when
 # every dependency still holds; a HIR read from text (interchange, the
 # front-end cache) is verified again (reverify), never believed.
+#
+# Identity. The memo, the compilation's certificate table and a
+# certificate's dependencies name a function by its binding's name, which
+# identifies a function only when no other function block of the
+# compilation is bound by the same name (two nested functions of one name in
+# different scopes, a nested one beside a top-level one, one shadowing
+# another). A name that identifies no function selects nothing: no memo
+# entry is reused or stored for it, no certificate is published, composed
+# with or validated through it, and a certificate whose proof read a
+# function of such a name is not memoized (Identified). Each falls back to
+# walking the code the call or claim actually names -- an optimization
+# declined, never a proof substituted
+# (EMISSION-IDENTITY-AND-FEASIBILITY-CORRECTNESS-MILESTONE-1.md).
 
 namespace eval hir::emission {
     variable END -1
@@ -88,6 +101,9 @@ namespace eval hir::emission {
     variable hir
     variable names [dict create]
     variable byName [dict create]
+    # Names bound by more than one function block of the compilation: names
+    # that identify no function (Identified).
+    variable ambiguous [dict create]
     variable claimsOf [dict create]
     variable guards [dict create]
     variable guardKeys [dict create]
@@ -199,7 +215,7 @@ proc hir::emission::reverify {hirVar} {
 
 proc hir::emission::Reset {h} {
     variable hir
-    foreach v {names byName claimsOf guards guardKeys cache langCache contexts certs fingerprints
+    foreach v {names byName ambiguous claimsOf guards guardKeys cache langCache contexts certs fingerprints
             diagnosed registeredUsed guardsUsed} {
         set ::hir::emission::$v [dict create]
     }
@@ -211,7 +227,9 @@ proc hir::emission::Reset {h} {
     set ::hir::emission::budgetHit 0
     set ::hir::emission::stats [dict create]
     LoadRecognizers $hir
-    # Function names: the binding each function block is declared by.
+    # Function names: the binding each function block is declared by. A
+    # name two function blocks share identifies neither (Identified):
+    # `byName` keeps the first, which nothing may take for the other.
     dict for {e node} [dict get $hir exprs] {
         if {[dict get $node kind] ne "bind"} continue
         set v [dict get $node value]
@@ -222,6 +240,8 @@ proc hir::emission::Reset {h} {
         dict set ::hir::emission::names $v $name
         if {![dict exists $::hir::emission::byName $name]} {
             dict set ::hir::emission::byName $name $v
+        } elseif {[dict get $::hir::emission::byName $name] ne $v} {
+            dict set ::hir::emission::ambiguous $name 1
         }
     }
     # Guards: recognizers none of whose transitions suspends -- an ordinary
@@ -357,6 +377,16 @@ proc hir::emission::FunctionText {b} {
 proc hir::emission::FunctionName {b} {
     variable names
     return [dict getdef $names $b ""]
+}
+
+# 1 if function block B's name identifies it in this compilation -- it has
+# one, and no other function block is bound by it -- else 0: the memo, the
+# certificate table and a certificate's dependencies, which name functions,
+# can then say nothing of B (the header's "Identity").
+proc hir::emission::Identified {b} {
+    variable ambiguous
+    set name [FunctionName $b]
+    return [expr {$name ne "" && ![dict exists $ambiguous $name]}]
 }
 
 # ---------------------------------------------------------------------------
@@ -1333,17 +1363,22 @@ proc hir::emission::Violation {kind e what c y {related {}}} {
 # ---------------------------------------------------------------------------
 # Conditions
 
-# The environment on the paths where CONDITION has OUTCOME, or "" when no
-# path is feasible: each path of hir::range::Paths narrows the bindings its
-# comparisons compare (hir::intset::Narrow, from the operands' values this
-# walk computed), a statically known comparison (hir::types::KnownOutcome)
-# or an empty binding making it infeasible; the environment is the union
-# over the feasible paths.
+# {FEASIBLE ENVIRONMENT} on the paths where CONDITION has OUTCOME: FEASIBLE
+# 1 when some path is feasible, ENVIRONMENT then the union over the
+# feasible paths; FEASIBLE 0 when none is. Each path of hir::range::Paths
+# narrows the bindings its comparisons compare (hir::intset::Narrow, from
+# the operands' values this walk computed), a statically known comparison
+# (hir::types::KnownOutcome) or an empty binding making it infeasible.
+# Feasibility is the flag, never the environment's value: an environment
+# with no binding (a function without parameters, before its first `bind`)
+# is "", and a feasible path through it is a path
+# (EMISSION-IDENTITY-AND-FEASIBILITY-CORRECTNESS-MILESTONE-1.md).
 proc hir::emission::Facts {condition outcome} {
     variable hir
     variable env
     variable exprVal
     set result ""
+    set feasibleAny 0
     foreach path [hir::range::Paths $hir $condition $outcome] {
         set penv $env
         set feasible 1
@@ -1389,13 +1424,14 @@ proc hir::emission::Facts {condition outcome} {
             if {!$feasible} break
         }
         if {!$feasible} continue
-        if {$result eq ""} {
+        if {!$feasibleAny} {
             set result $penv
+            set feasibleAny 1
         } else {
             set result [JoinEnv $result $penv]
         }
     }
-    return $result
+    return [list $feasibleAny $result]
 }
 
 proc hir::emission::JoinEnv {a b} {
@@ -1428,8 +1464,8 @@ proc hir::emission::EvalIf {e node s} {
     set value {}
     set any 0
     foreach outcome {1 0} body [list [dict get $node thenBody] [dict get $node elseBody]] {
-        set facts [Facts $cond $outcome]
-        if {$facts eq ""} continue
+        lassign [Facts $cond $outcome] feasible facts
+        if {!$feasible} continue
         set env $facts
         lassign [EvalBody $body $s] out v
         if {$out ne {}} {
@@ -1702,11 +1738,16 @@ proc hir::emission::EvalHandle {e node s} {
 # Certificates
 
 # The certificates of block T usable here: its proven claims (this
-# compilation's, or reused from the memo after validation).
+# compilation's, or reused from the memo after validation), found by T's
+# name -- none when the name identifies no function (Identified): the
+# certificate under it may be another function's, so T's body is walked.
 proc hir::emission::UsableCertificates {t} {
     variable certs
     variable claimsOf
     set out {}
+    if {![Identified $t]} {
+        return $out
+    }
     foreach key [dict getdef $claimsOf $t {}] {
         set id [list [FunctionName $t] [KeyText $key]]
         if {[dict exists $certs $id]} {
@@ -1815,16 +1856,20 @@ proc hir::emission::Statable {exits} {
 # holds in this compilation -- every input its proof read is unchanged: the
 # front end, every function's code, every recognizer's table, every
 # registered native result set, every certificate it composed with -- else
-# {0 WHY}.
+# {0 WHY}. A function or certificate it names is looked up by name, so a
+# name that identifies no function of this compilation (Identified) is no
+# dependency that holds: which of its functions the proof read is not known.
 proc hir::emission::Valid {cert} {
     variable byName
     variable certs
+    variable ambiguous
     set deps [dict get $cert depends]
     if {[dict get $deps checker] ne [hir::interchange::fingerprint]} {
         return [list 0 "the checker or the front end changed"]
     }
     dict for {name fp} [dict get $deps functions] {
         if {![dict exists $byName $name]} { return [list 0 "$name is gone"] }
+        if {[dict exists $ambiguous $name]} { return [list 0 "$name names more than one function"] }
         if {[FunctionFingerprint [dict get $byName $name]] ne $fp} { return [list 0 "$name changed"] }
     }
     variable byQualified
@@ -1840,6 +1885,9 @@ proc hir::emission::Valid {cert} {
     }
     foreach ref [dict get $deps certificates] {
         lassign $ref fn r digest
+        if {[dict exists $ambiguous $fn]} {
+            return [list 0 "$fn names more than one function"]
+        }
         set id [list $fn $r]
         if {![dict exists $certs $id]} {
             return [list 0 "the certificate of $fn for $r is gone"]
@@ -1995,9 +2043,14 @@ proc hir::emission::CheckClaim {claim} {
     set key [dict get $claim key]
     dict set record recognizer [KeyText $key]
     set id [list [FunctionName $b] [KeyText $key]]
+    # The memo and the certificate table name the claim by its function's
+    # name: one that identifies no function (Identified) is neither looked
+    # up nor stored -- the entry under it may be another function's -- and
+    # the claim is proved from its own code.
+    set identified [Identified $b]
     # A certificate this process proved in an earlier compilation, still
     # valid here: reused, not proved again.
-    if {$useMemo && [dict exists $memo $id]} {
+    if {$useMemo && $identified && [dict exists $memo $id]} {
         set t0 [clock microseconds]
         lassign [Valid [dict get $memo $id]] ok why
         dict incr ::hir::emission::stats validateMicroseconds [expr {[clock microseconds] - $t0}]
@@ -2073,8 +2126,17 @@ proc hir::emission::CheckClaim {claim} {
         set t0 [clock microseconds]
         set cert [Certificate $claim $readset $exits [dict get $rec visits] [dict get $rec fails] $value]
         dict incr ::hir::emission::stats certifyMicroseconds [expr {[clock microseconds] - $t0}]
-        dict set certs $id $cert
-        if {$useMemo} {
+        # The record holds the certificate whatever the name; only an
+        # identified claim publishes it by name (callers compose with it,
+        # Valid checks it). And only a proof every function of whose read
+        # set its name identifies is memoized: a certificate's dependencies
+        # are keyed by name, so two functions of one name would leave one
+        # fingerprint for both, which a later compilation -- where the name
+        # may identify the other -- would validate.
+        if {$identified} {
+            dict set certs $id $cert
+        }
+        if {$useMemo && $identified && [ReadsIdentified $readset]} {
             dict set memo $id $cert
         }
         dict set record verdict proven
@@ -2091,6 +2153,17 @@ proc hir::emission::CheckClaim {claim} {
         Report $d
     }
     return $record
+}
+
+# 1 if every function of the read set KEYSET (summary keys) is identified by
+# its name (Identified).
+proc hir::emission::ReadsIdentified {keyset} {
+    foreach k $keyset {
+        if {![Identified [lindex $k 0]]} {
+            return 0
+        }
+    }
+    return 1
 }
 
 proc hir::emission::ByOrigin {a b} {

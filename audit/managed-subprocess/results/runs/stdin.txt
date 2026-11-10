@@ -1,0 +1,14 @@
+written 4194304
+write-us 304800
+echoed 4194304
+child: cat-eof 4194304
+
+ticks 30
+max-tick-late-us 0
+eagain 95
+status exited 0
+end owned 0
+end live 0
+end fds delta 0
+[harness] supervisor peak RSS 15964 kB, CPU 0.011 s
+[harness] PASS in 0.31 s

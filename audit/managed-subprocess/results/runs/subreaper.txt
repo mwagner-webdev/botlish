@@ -1,0 +1,17 @@
+subreaper 0
+first: desc 13004
+
+escaped signal 15
+orphans found 1
+orphans killed 1
+orphans after 0
+end owned before shutdown 0
+abandoned 0
+end killed by shutdown 0
+end owned 0
+end escalations 0
+end live 0
+end fds delta 0
+[harness] desc 13004 gone
+[harness] supervisor peak RSS 16280 kB, CPU 0.007 s
+[harness] PASS in 0.16 s

@@ -1,0 +1,6 @@
+status exited 3
+end owned 0
+end live 0
+end fds delta 0
+[harness] supervisor peak RSS 16092 kB, CPU 0.005 s
+[harness] PASS in 0.20 s

@@ -1,0 +1,94 @@
+# durable.bot -- the census's crash-recovery experiment's supervisor
+# (MANAGED-SUBPROCESS-AND-EVENT-LOOP-CENSUS-MILESTONE-1.md, section 10):
+# starts three jobs, writes a durable job record for each, then runs until
+# ../tools/recovery.py kills it (SIGKILL: no cleanup runs).
+#
+#   P1  pipes, writes a chunk every 100 ms (its reader dies with us)
+#   P2  pipes, silent, with a descendant in its group
+#   P3  output to files, writes a chunk every 100 ms, exits 0 after 3 s
+#
+# A record is one line of TMP/jobs.txt: NAME PID START-TIME PGID CWD, START-
+# TIME the kernel's (/proc/PID/stat field 22, clock ticks after boot): the
+# identity a restarted coordinator verifies before it acts on PID.
+#
+#   durable HELPER TMPDIR
+import event_loop_linux
+import labkit
+import msp
+import report
+import std::abi::bytes
+import std::event_loop
+import std::int
+import std::io::fs
+import std::io::path
+import std::linux::fs
+import std::linux::io
+import std::list
+import std::str
+import type std::event_loop::Delivery
+
+fn join_path(dir: str, name: str) -> str:
+    std::str::concat(std::str::concat(dir, "/"), name)
+
+# (Written with qualified calls: with std::linux::fs imported, every
+# method-style `.concat` is a whole-program trial build -- the open defect
+# F3 of HTTP-CLIENT-PACKAGE-MILESTONE-1.md; this file took over 180 s to
+# compile written that way.)
+fn word(text: str, value: int) -> str:
+    std::str::concat(std::str::concat(text, " "), std::int::to_string(value))
+
+fn record(name: str, c: msp::Child, cwd: str) -> str:
+    fields = word(word(word(name, msp::pid(c)), msp::start_time(c)), msp::pid(c))
+    std::str::concat(std::str::concat(std::str::concat(fields, " "), cwd), "\n")
+
+fn reader(c: msp::Child, context p: msp::Procs, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    labkit::count(c, msp::Stream::Stdout)
+    0
+
+fn run(helper: str, tmp: str, context p: msp::Procs, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO, fs: std::linux::fs::LinuxFS) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    {owner: o1, child: c1} = labkit::spawn(msp::in_directory(msp::command(helper, ["chunks:60:100"]), join_path(tmp, "a")))
+    {owner: o2, child: c2} = labkit::spawn(msp::in_directory(msp::command(helper, ["child:sleep:20000", "sleep:20000"]), join_path(tmp, "b")))
+    {owner: o3, child: c3} = labkit::spawn(msp::with_output_files(msp::command(helper, ["chunks:30:100", "exit:0"]), join_path(tmp, "p3.out"), join_path(tmp, "p3.err")))
+    text = std::str::concat(std::str::concat(record("P1", c1, join_path(tmp, "a")), record("P2", c2, join_path(tmp, "b"))), record("P3", c3, tmp))
+    path = std::linux::fs::from_text(join_path(tmp, "jobs.txt")):
+        on std::io::path::NotAPath:
+            fail std::event_loop::TaskFailed {code: 30}
+    std::linux::fs::write_file(path, report::bytes_of(text)):
+        on std::io::fs::FileError:
+            fail std::event_loop::TaskFailed {code: 31}
+    report::say("recorded")
+    coroutine {step, first} = reader(c1)
+    std::event_loop::adopt(step, first)
+    labkit::sleep(30000000)
+    msp::release(o1)
+    msp::release(o2)
+    msp::release(o3)
+    0
+
+fn main(helper: str, tmp: str, context ev: std::event_loop::Loop, d: event_loop_linux::Linux, n: event_loop_linux::Native, p: msp::Procs, io: std::linux::io::LinuxIO, fs: std::linux::fs::LinuxFS) -> int errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered, std::event_loop::TaskFailed, IndexNotFound:
+    std::event_loop::sync()
+    coroutine {step, first} = run(helper, tmp)
+    std::event_loop::adopt(step, first)
+    std::event_loop::run()
+    msp::shutdown()
+
+args = argv():
+    on InvalidArgumentEncoding:
+        []
+with context std::event_loop::create(64)
+with context event_loop_linux::create()
+with context event_loop_linux::native()
+with context msp::create(200000)
+with context std::linux::io::create()
+with context std::linux::fs::create()
+main(std::list::get(args, 1, ""), std::list::get(args, 2, "/tmp")):
+    on std::event_loop::SchedulerFault:
+        -1
+    on std::event_loop::DriverFault:
+        -2
+    on std::event_loop::LoopReentered:
+        -3
+    on std::event_loop::TaskFailed:
+        -4
+    on IndexNotFound:
+        -5

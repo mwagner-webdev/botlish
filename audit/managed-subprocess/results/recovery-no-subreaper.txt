@@ -1,0 +1,19 @@
+supervisor 7431: recorded
+record P1: pid 7433 start 264260 pgid 7433 cwd /tmp/msp-durable-9prm_7rw/a
+record P2: pid 7434 start 264260 pgid 7434 cwd /tmp/msp-durable-9prm_7rw/b
+record P3: pid 7435 start 264260 pgid 7435 cwd /tmp/msp-durable-9prm_7rw
+supervisor killed (SIGKILL); P3's output had 64 bytes
+  0.3 s after the crash: P1 exited, not yet reaped (parent 1, group 7433)
+  0.3 s after the crash: P2 alive (parent 1, group 7434)
+  0.3 s after the crash: P2's descendant alive (parent 7434, group 7434)
+  0.3 s after the crash: P3 alive (parent 1, group 7435)
+after 4 s: P1 gone; status not observed by the coordinator
+after 4 s: P2 alive (parent 1); status not observed by the coordinator
+after 4 s: P2's descendant alive (parent 7434); status not observed by the coordinator
+after 4 s: P3 gone; status not observed by the coordinator
+P3's output file: 64 bytes at the crash, 260 after (complete: yes)
+reattach P2: pidfd opened, start time verified
+reattach P2: SIGTERM sent to its group through the pidfd
+after reattach: P2 gone; status not observed
+after reattach: P2's descendant gone; status not observed
+forged record (pid 7430, start 264258): refused

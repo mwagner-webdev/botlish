@@ -1,0 +1,11 @@
+first-chunk 65536
+paused pid 12950
+resumed exited 0
+total 8388608
+status exited 0
+end owned 0
+end live 0
+end fds delta 0
+[harness] pid 12950 gone
+[harness] paused child 12950 state S wchan anon_pipe_write supervisor VmRSS 4756 kB
+[harness] PASS in 1.01 s

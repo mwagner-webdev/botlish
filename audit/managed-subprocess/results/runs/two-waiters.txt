@@ -1,0 +1,11 @@
+waiter 1 saw exited 6
+waiter 2 saw exited 6
+end owned before shutdown 0
+abandoned 0
+end killed by shutdown 0
+end owned 0
+end escalations 0
+end live 0
+end fds delta 0
+[harness] supervisor peak RSS 16280 kB, CPU 0.005 s
+[harness] PASS in 0.21 s
