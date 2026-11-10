@@ -862,6 +862,10 @@ is pending, never passed):
 | icy-tower (macos arm64), icy-tower (windows x86-64) | branch push | passed |
 | static-decisions (static-compile-expected-diagnostics.bot) | [42795041291](https://github.com/mwagner-webdev/botlish/actions/runs/42795041291) | passed: batched and sequential agree (4 rounds and 6 builds against 26 rounds and 52 builds) |
 
+Read again at 14:25 UTC: the four test runs are still running, their
+remaining jobs waiting for runners; no job of them has failed but the
+arm64 cranelift coverage job's download (above).
+
 ## 22. Production files changed
 
 One: `hir/emission.tcl`, 273 lines of code added and 5 removed (comments
