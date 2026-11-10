@@ -699,6 +699,12 @@ other platforms.
                              calls on all of them (Win64's through a
                              stub copying doubles into integer
                              registers); never with the stub linker
+    native libraries         Linux, glibc, x86-64 and AArch64 (libNAME.a,
+                             libNAME.so); Windows x86-64 (NAME.dll and its
+                             import library, linked by link.exe from a
+                             Developer environment); android-aarch64 through
+                             its target support package; not macOS
+                             (backend.native-library)
     single executable        Linux x86-64
     Botlish.app              macOS AArch64 (backend.macos-application)
 

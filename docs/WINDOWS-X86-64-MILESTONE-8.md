@@ -479,7 +479,34 @@ the explicit host links neither.
 
 ## 13. Static COFF libraries: why none is shipped
 
-PENDING-STATIC
+The brief's rule: a static COFF library ships only if two of them coexist
+in one executable with independent runtimes, by construction, not by link
+order. On Linux that holds because `ld -r` merges the program object and
+the runtime archive into *one* object, whose private symbols `objcopy`
+then makes local: nothing outside the object can bind to them. COFF has no
+partial link (link.exe has no `-r`; lib.exe only collects members), so a
+static `NAME.lib` is the program object plus the runtime archive's members,
+each member's runtime symbols external -- they must be, or the members could
+not reach one another.
+
+The census (section 3, experiments E5 and E6; real Windows):
+
+PENDING-STATIC-EVIDENCE
+
+**The decision: no static COFF library.** The production path is the DLL
+and its import library; `-shared 0` is refused on Windows, and nothing
+named `NAME_static.lib` is made. A sound static library needs every private
+symbol of one library's objects -- the runtime's, the standard library's,
+the program's -- given a name of that library's own, consistently in
+definitions and references, COMDAT sections, weak externals and `.refptr`
+pointers included, and the result checked: a COFF symbol-rewriting step
+over about 1,800 archive members per build. That is the "large
+general-purpose COFF rewriting subsystem" the brief warns against, and it
+would bring a tool MSVC's toolchain does not have (LLVM's objcopy) into
+every Windows library build. The reproducer of the unresolved isolation
+problem is the probe's E5: `audit/windows-library/probe.tcl` on any Windows
+runner (the `windows library probe` workflow).
+
 
 ## 14. Toolchain and diagnostics
 
