@@ -249,19 +249,39 @@ fn enter(vm: &mut Vm, f: impl FnOnce(&mut Vm) -> Value) -> Value {
     // the stack its collections walk (Vm::entry_stack).
     vm.stack_limit = vm.stack_limit_at(frame);
     vm.entry_stack = vm.entry_stack_at(frame);
-    CALL_DEPTH.with(|d| d.set(d.get() + 1));
+    let depth = CallDepth::enter();
     let result = f(vm);
     vm.stack_ceiling = outer;
     vm.stack_limit = outer_limit;
     vm.entry_stack = outer_entry;
-    if CALL_DEPTH.with(|d| {
-        d.set(d.get() - 1);
-        d.get() == 0
-    }) {
-        super::coroutine::library_call_ended();
-    }
+    drop(depth);
     // Keeps this frame from becoming a tail call of F.
     std::hint::black_box(result)
+}
+
+/// One call of this library in progress on this thread (`CALL_DEPTH`):
+/// counted when made, uncounted when dropped -- however the call ends, a
+/// panic its boundary code catches (`guarded`) included -- and the end of
+/// the outermost one leaves the thread's own state as the host gave it.
+struct CallDepth;
+
+impl CallDepth {
+    fn enter() -> CallDepth {
+        CALL_DEPTH.with(|d| d.set(d.get() + 1));
+        CallDepth
+    }
+}
+
+impl Drop for CallDepth {
+    fn drop(&mut self) {
+        let outermost = CALL_DEPTH.with(|d| {
+            d.set(d.get().saturating_sub(1));
+            d.get() == 0
+        });
+        if outermost {
+            super::coroutine::library_call_ended();
+        }
+    }
 }
 
 thread_local! {
