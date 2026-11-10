@@ -214,7 +214,15 @@ proc native::library::TopLevelProblems {hir} {
 ## native/src/main.rs
 <<<<
             nir::check_stack_limit(&mut program);
+            match codegen::emit_library_object(&program, name, &emit_triple) {
 ====
+            match codegen::emit_library_object(&program, name, &emit_triple) {
+>>>>
+<<<<
+            nir::check_stack_limit(&mut program);
+            let object = match codegen::emit_library_object(&program, name, &emit_triple) {
+====
+            let object = match codegen::emit_library_object(&program, name, &emit_triple) {
 >>>>
 
 @@ stack-check-callers-unchecked a library call that can fail for the stack is proven infallible: its callers go on past the failure
@@ -229,7 +237,11 @@ proc native::library::TopLevelProblems {hir} {
 ## native/src/runtime/vm.rs
 <<<<
             if self.stack_limit_checked {
-                self.stack_limit = stack.map_or(0, |s| s.stack_limit());
+                self.stack_limit = match (stack, self.entry_stack) {
+                    (Some(coroutine), _) => coroutine.stack_limit(),
+                    (None, Some(_)) => 0,
+                    (None, None) => self.native_stack.map_or(0, |s| s.stack_limit()),
+                };
             }
 ====
 >>>>

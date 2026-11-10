@@ -157,7 +157,7 @@
 @@ driver-runs-any-target the driver runs and emits machine code for a program of any target
 ## native/src/main.rs
 <<<<
-    } else if matches!(command, "run" | "bench" | "batch" | "vms" | "object" | "executable" | "aot-run" | "library" | "link-plan") {
+    } else if matches!(command, "run" | "bench" | "batch" | "vms" | "object" | "executable" | "aot-run" | "library" | "library-dll" | "link-plan") {
 ====
     } else if false {
 >>>>

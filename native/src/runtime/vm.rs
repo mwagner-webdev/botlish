@@ -307,6 +307,17 @@ pub struct Vm {
     /// walked (NATIVE-LIBRARY-MILESTONE-1.md, "The collector at the
     /// boundary"). Executables and the driver leave it 0.
     pub stack_ceiling: usize,
+    /// The stack a native library's call entered on, when it is not this
+    /// Vm's thread's own (`native_stack`): a stack the host made -- a fiber
+    /// of its own on Windows, a coroutine or `ucontext` stack elsewhere --
+    /// set for the call by runtime::library's `enter` (`entry_stack_at`),
+    /// None otherwise (WINDOWS-X86-64-MILESTONE-8.md, "Calls on a host's
+    /// stack"). While it is set, the collector's walk of the running stack,
+    /// and of a coroutine's resumer on it, is bounded by it rather than by
+    /// the thread's stack (which holds none of the call's frames), and code
+    /// running on it checks no stack limit (`publish_active_stack`), as the
+    /// call's own entry does not (`stack_limit_at`).
+    pub entry_stack: Option<NativeStack>,
     /// The foreign transitions in progress (C-CALLBACK-MILESTONE-1.md,
     /// runtime::callback): per open call of a C function that may call back,
     /// innermost last, the frame record of the transition shim the Botlish
@@ -401,6 +412,7 @@ impl Vm {
             framemap: std::sync::Arc::new(ProgramMap::new()),
             native_stack,
             stack_ceiling: 0,
+            entry_stack: None,
             foreign_open: Vec::new(),
             callback_segments: Vec::new(),
             co_current: std::ptr::null_mut(),
@@ -427,12 +439,19 @@ impl Vm {
     pub fn publish_active_stack(&mut self, stack: Option<NativeStack>) {
         #[cfg(any(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "android", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc")))]
         {
-            let stack = stack.or(self.native_stack);
-            if let Some(stack) = stack {
+            // Back on the call's own stack (STACK None): the thread's, or a
+            // host-made one the call entered on, which no limit of ours
+            // bounds (`entry_stack`).
+            let arrived = stack.or(self.entry_stack).or(self.native_stack);
+            if let Some(stack) = arrived {
                 super::platform::set_active_stack(&stack);
             }
             if self.stack_limit_checked {
-                self.stack_limit = stack.map_or(0, |s| s.stack_limit());
+                self.stack_limit = match (stack, self.entry_stack) {
+                    (Some(coroutine), _) => coroutine.stack_limit(),
+                    (None, Some(_)) => 0,
+                    (None, None) => self.native_stack.map_or(0, |s| s.stack_limit()),
+                };
             }
         }
         #[cfg(not(any(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "android", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc"))))]
@@ -478,6 +497,27 @@ impl Vm {
             Some(stack) if self.stack_limit_checked && sp > stack.low_bound && sp <= stack.high_bound => stack.stack_limit(),
             _ => 0,
         }
+    }
+
+    /// The `entry_stack` of a native library's call entered at stack pointer
+    /// SP: None when SP is on this Vm's thread's stack (or the thread's stack
+    /// is not known); else the stack SP is on -- on Windows the running
+    /// fiber's, which the thread's environment block describes once
+    /// SwitchToFiber has run (`NativeStack::current`, GetCurrentThreadStackLimits);
+    /// where no stack containing SP can be found, one unbounded below and up
+    /// to SP's call (the walk's ceiling bounds it above: Vm::stack_ceiling).
+    pub fn entry_stack_at(&self, sp: usize) -> Option<NativeStack> {
+        let thread = self.native_stack?;
+        if sp > thread.low_bound && sp <= thread.high_bound {
+            return None;
+        }
+        #[cfg(all(windows, target_arch = "x86_64", target_env = "msvc"))]
+        if let Ok(stack) = NativeStack::current() {
+            if sp > stack.low_bound && sp <= stack.high_bound {
+                return Some(stack);
+            }
+        }
+        Some(NativeStack { low_bound: 0, high_bound: usize::MAX, guard_low: 0, saved_sp: None, state: thread.state })
     }
 
     /// Replaces the argument snapshot with ARGV (raw bytes, one Vec per
@@ -709,7 +749,7 @@ impl Vm {
         };
         // The thread's own stack, up to the ceiling a library call set
         // (`stack_ceiling`): no frame above it is walked.
-        let main_stack = self.native_stack.map(|mut stack| {
+        let main_stack = self.entry_stack.or(self.native_stack).map(|mut stack| {
             if self.stack_ceiling != 0 {
                 stack.high_bound = stack.high_bound.min(self.stack_ceiling);
             }
