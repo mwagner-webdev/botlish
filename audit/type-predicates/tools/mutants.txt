@@ -47,10 +47,10 @@
 ## hir/range.tcl
 <<<<
         if {![ProvesValueAcceptedBy $inferred $result $declared]} {
-            hir::Diagnose hir TYPE [format {function result does not prove declared type %s%s%s} \
+            # Both sides of the comparison, as an argument's diagnostic
 ====
         if {0 && ![ProvesValueAcceptedBy $inferred $result $declared]} {
-            hir::Diagnose hir TYPE [format {function result does not prove declared type %s%s%s} \
+            # Both sides of the comparison, as an argument's diagnostic
 >>>>
 
 @@ converter-refines-input a call of a function declaring an integer-domain result refines its one argument to that domain once it completes (a converter as an implicit validator)

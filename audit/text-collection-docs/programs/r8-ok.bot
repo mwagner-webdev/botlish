@@ -1,0 +1,17 @@
+import std::str
+import std::byte
+
+type Digit = Int in 0..9
+
+fn give(s: str) -> List[std::byte::Byte]:
+    s.encode_utf8()
+
+fn digit(n: int) -> Digit:
+    if n < 0 or n > 9:
+        return 0
+    n
+
+fn any_list(s: str) -> list:
+    s.encode_utf8()
+
+[give("a"), digit(4), any_list("b")]

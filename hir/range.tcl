@@ -1905,9 +1905,17 @@ proc hir::range::verifyDeclaredResults {hirVar} {
         set declared [dict get $node declaredResult]
         set inferred [hir::type $hir [dict get $node inferredResultType]]
         if {![ProvesValueAcceptedBy $inferred $result $declared]} {
-            hir::Diagnose hir TYPE [format {function result does not prove declared type %s%s%s} \
+            # Both sides of the comparison, as an argument's diagnostic
+            # states them (VerifyCall): the declared type, and the type and
+            # facts the proof above was given -- the generic body's own
+            # inferred result (every normal completion joined), never a
+            # semantic instance's (TEXT-AND-COLLECTION-DOCUMENTATION-AND-
+            # DIAGNOSTICS-MILESTONE-1.md). Formatted only here, on a
+            # mismatch.
+            hir::Diagnose hir TYPE [format {function result does not prove declared type %s (result type: %s%s)%s} \
                 [hir::types::show $declared] \
-                [expr {[FactsRelevant $inferred $declared] ? " (facts: [show $result])" : ""}] \
+                [hir::semantic::ShowType $hir [ShownArgType $inferred $declared]] \
+                [FactsClause $inferred $declared $result] \
                 [MismatchClause $inferred $declared]] $e
         }
     }

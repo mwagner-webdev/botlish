@@ -864,6 +864,9 @@ Done: LOOP-CLAUSE-BINDING-TYPE-CORRECTNESS-MILESTONE-1.md (probes `c1` and
 
 ### M2. Documentation and diagnostic corrections
 
+Done: TEXT-AND-COLLECTION-DOCUMENTATION-AND-DIAGNOSTICS-MILESTONE-1.md (probe
+`j3` pins the result type in the diagnostic since).
+
 * **Problem.** Section J's four documentation problems and the result
   diagnostic.
 * **Rule.** State what the compiler does: `decode_utf8` exists; the
@@ -997,6 +1000,12 @@ Done: LOOP-CLAUSE-BINDING-TYPE-CORRECTNESS-MILESTONE-1.md (probes `c1` and
   instead (a different rule, not covariance).
 
 ### M8. Construction plans through folds (optimizer, already planned)
+
+Since the census was measured, FOLD-VIRTUAL-LIST-CONSTRUCTION-MILESTONE-1.md
+reached main: a fold carrying `concat` is linear natively on current main,
+while a fold or a recursion carrying `append_char` still copies O(n²)
+(TEXT-AND-COLLECTION-DOCUMENTATION-AND-DIAGNOSTICS-MILESTONE-1.md, section D,
+measured it; section G.2's fold rows are the tree of f2787af0).
 
 * **Problem.** Section G.3: folds carrying `concat`/`append_char`/`append`
   copy O(n²) natively.

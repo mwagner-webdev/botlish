@@ -1,0 +1,7 @@
+import std::str
+import std::byte
+
+fn give(s: str) -> List[List[int]]:
+    [s.encode_utf8(), s.encode_utf8()]
+
+give("a")
