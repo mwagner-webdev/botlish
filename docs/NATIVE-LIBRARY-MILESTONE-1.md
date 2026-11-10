@@ -26,6 +26,18 @@ The JSON/Tcl probe and the React Native host probe both run on the
 compiler's output; `audit/react-native/tools/libmode.tcl` is kept as
 history only.
 
+> **Since WINDOWS-X86-64-MILESTONE-8.md** native libraries are made on
+> Windows x86-64 too, as a DLL and its import library (`NAME.dll`,
+> `NAME.lib`) that link.exe links from the same program object and the
+> runtime archive, exporting exactly the public C functions, with the C
+> ABI, lifecycle, errors and ownership of section 6 unchanged; no static
+> COFF library is made (that report's section 13 says why). It also fixed
+> two things of this milestone's runtime on every host: a call made on a
+> stack the instance did not make is walked within that stack (section 7's
+> "Which stack" left its collections reading the thread's stack, which
+> holds none of the call's frames), and a thread's pooled coroutine stacks
+> are freed with its last instance.
+
 ## Contents
 
 1. Executive result
@@ -82,7 +94,9 @@ evidence is CI's. `tests-arm64.yml`, dispatched on this branch (run
 * the Rust unit tests, also under GC stress, the golden suites and both
   native coverage jobs.
 
-**Not supported: macOS, Windows and mobile targets.**
+**Not supported: macOS, Windows and mobile targets.** (Windows x86-64
+since WINDOWS-X86-64-MILESTONE-8.md; Android AArch64 since
+ANDROID-AARCH64-TARGET-SUPPORT-MILESTONE-1.md.)
 
 * `native::library` refuses them before lowering (`NATIVE UNSUPPORTED
   library`, from `native::hostSupports libraries`).

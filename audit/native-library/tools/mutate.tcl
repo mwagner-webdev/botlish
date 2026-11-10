@@ -12,7 +12,8 @@
 # the detectors run against it:
 #
 #   * cargo test --lib program (the program record's and descriptor's unit
-#     tests);
+#     tests), and --bin botlish-native windows_library (a Windows DLL's link
+#     and module-definition file: WINDOWS-X86-64-MILESTONE-8.md);
 #   * tests/native-library.test (export roots, the C boundary, lifecycle,
 #     threads, several libraries, symbols, the front end's checks, the
 #     manifest, main.tcl);
@@ -23,9 +24,13 @@
 # misses SURVIVES; on a host that builds no libraries every mutant is
 # SKIPPED. The report lists each mutant and what killed it; it exits 1 on a
 # survivor or a mutant that no longer applies. The real checkout, its
-# native/target included, is never modified.
+# native/target included, is never modified. On Windows x86-64 (MSVC: the
+# tier item native-library-mutants, tests/platform/tier.tcl) the copy is
+# made by Tcl and an overrunning run is ended with taskkill.
 
 set root [file dirname [file dirname [file dirname [file dirname [file normalize [info script]]]]]]
+source [file join $root core core.tcl]
+set windows [expr {$::tcl_platform(platform) eq "windows"}]
 
 set options [dict create -only "" -timeout 1800]
 foreach {option value} $argv {
@@ -33,9 +38,9 @@ foreach {option value} $argv {
     dict set options $option $value
 }
 # This host's target, named as core::cabi names it (linux-x86_64,
-# linux-aarch64, macos-aarch64): native::hostSupports libraries.
-set host [string cat [expr {$::tcl_platform(os) eq "Darwin" ? "macos" : [string tolower $::tcl_platform(os)]}] - \
-    [expr {$::tcl_platform(machine) in {arm64 aarch64} ? "aarch64" : ($::tcl_platform(machine) in {amd64 x86_64} ? "x86_64" : $::tcl_platform(machine))}]]
+# linux-aarch64, macos-aarch64, windows-x86_64): native::hostSupports
+# libraries.
+set host [core::cabi::hostTarget]
 
 # The mutants of mutants.txt, as {NAME DESCRIPTION HOSTS {FILE OLD NEW ...}}
 # (HOSTS empty: every host).
@@ -110,7 +115,7 @@ proc run {timeout dir args} {
     cd $dir
     set pipe [open |[concat $args [list 2>@1]] r]
     cd $here
-    fconfigure $pipe -blocking 0 -translation lf -encoding utf-8
+    fconfigure $pipe -blocking 0 -translation auto -encoding utf-8
     set ::runOutput ""
     set ::runDone 0
     fileevent $pipe readable [list apply {{pipe} {
@@ -121,7 +126,13 @@ proc run {timeout dir args} {
     vwait ::runDone
     after cancel $timer
     if {$::runDone eq "timeout"} {
-        catch {exec kill -9 {*}[pid $pipe]}
+        foreach id [pid $pipe] {
+            if {$::windows} {
+                catch {exec taskkill /F /T /PID $id}
+            } else {
+                catch {exec kill -9 $id}
+            }
+        }
         catch {close $pipe}
         return [list timeout $::runOutput]
     }
@@ -152,7 +163,7 @@ proc testFailures {label output} {
 }
 
 # The hosts native::library builds for (native/native.tcl's capabilities).
-set libraryHosts {linux-x86_64 linux-aarch64}
+set libraryHosts {linux-x86_64 linux-aarch64 windows-x86_64}
 
 set only [split [dict get $options -only] ,]
 set selected {}
@@ -164,7 +175,13 @@ foreach {name description hosts edits} [readMutants [file join [file dirname [fi
 # A private copy of the front end, the tests and the native backend, its
 # native/target a real copy (each mutant rebuilds it), following a linked
 # target: a copied link would build every mutant into another checkout.
-set tree [file tempdir botlish-native-library-mutants]
+# On a GitHub runner under RUNNER_TEMP (a short path on the work drive), not
+# the user profile's, for Windows' build tools.
+if {[info exists ::env(RUNNER_TEMP)]} {
+    set tree [file tempdir [file join $::env(RUNNER_TEMP) nlm]]
+} else {
+    set tree [file tempdir botlish-native-library-mutants]
+}
 foreach dir {compiler compilerpedia core hir surface stdlib tests examples lsp service .cargo} {
     if {![file exists [file join $root $dir]]} continue
     file copy [file join $root $dir] [file join $tree $dir]
@@ -180,7 +197,11 @@ foreach entry [glob -directory [file join $root native] *] {
         while {[file type $entry] eq "link"} {
             set entry [file join [file dirname $entry] [file readlink $entry]]
         }
-        exec cp -a $entry [file join $tree native target]
+        if {$windows} {
+            file copy $entry [file join $tree native target]
+        } else {
+            exec cp -a $entry [file join $tree native target]
+        }
     }
 }
 foreach entry [glob -directory $root -types f *.tcl] {
@@ -234,10 +255,12 @@ try {
             continue
         }
         set killers {}
-        lassign [run $timeout $tree cargo test --release --manifest-path $manifest --lib program] status output
-        if {$status != 0} {
-            set failing [lmap {- n} [regexp -all -inline -line {^test (\S+) \.\.\. FAILED$} $output] {set n}]
-            lappend killers "rust ([expr {$failing eq {} ? [lastLine $output] : [join [lrange $failing 0 5] {, }]}])"
+        foreach {label target filter} {rust --lib program rust-driver {--bin botlish-native} windows_library} {
+            lassign [run $timeout $tree cargo test --release --manifest-path $manifest {*}$target $filter] status output
+            if {$status != 0} {
+                set failing [lmap {- n} [regexp -all -inline -line {^test (\S+) \.\.\. FAILED$} $output] {set n}]
+                lappend killers "$label ([expr {$failing eq {} ? [lastLine $output] : [join [lrange $failing 0 5] {, }]}])"
+            }
         }
         foreach {label file match} {
             native-library.test native-library.test *

@@ -1561,6 +1561,85 @@ test nl-windows-exports {the DLL exports exactly the public C functions and impo
         [lsort -unique [lmap i [dict get $library imports] {string tolower [lrange $i 1 2]}]]
 } -result {1 chk.dll 1 1 0 1 1 1 1 1 {{chk.dll code}}}
 
+# native::library checks the DLL link.exe made before it reports it
+# (`ValidateDll`): a DLL that exports a name that is no public function of
+# the library, or that imports a C runtime's DLL, is refused and removed,
+# with its import library.
+test nl-windows-validate {a DLL exporting a name of its own, or importing a C runtime's DLLs, is refused and removed} -constraints windowsLibraries -body {
+    set dir [nlDir]
+    set results {}
+    foreach {name crt source} {
+        extra static "__declspec(dllexport) int extra_create(void) { return 1; }\n__declspec(dllexport) int extra_hidden(void) { return 2; }\n"
+        dynamic dynamic "#include <stdlib.h>\n__declspec(dllexport) void *dynamic_create(size_t n) { return malloc(n); }\n"
+    } {
+        set lib [file join $dir $name]
+        file mkdir $lib
+        nlWrite [file join $lib $name.c] $source
+        lassign [ctool::sharedLibrary $lib $name [file join $lib $name.c] -crt $crt] dll import
+        catch {native::library::ValidateDll $dll $import $name [list ${name}_create]} message options
+        lappend results [dict get $options -errorcode] \
+            [regexp {no public function of the library: extra_hidden} $message] [regexp {imports a C runtime's DLLs} $message] \
+            [file exists $dll] [file exists $import]
+    }
+    set results
+} -result {{NATIVE LIBRARY PE} 1 0 0 0 {NATIVE LIBRARY PE} 0 1 0 0}
+
+# Every public function has unwind information (WINDOWS-X86-64-MILESTONE-8.md,
+# "Unwind information"): Windows finds a function entry for each one's
+# address, and a stack trace a host takes inside a C callback that Botlish
+# code called -- through the export's trampoline, the runtime and the
+# Botlish frames -- reaches the host function that called the export.
+test nl-windows-unwind-through {Windows unwinds through the public functions: a stack trace inside a callback reaches the export's caller} -constraints windowsLibraries -body {
+    set dir [nlDir]
+    lassign [nlHostCallback $dir] declaration hostLibs
+    set built [nlLibrary $dir un "import std::ffi::c\n$declaration
+extern c fn host_callback(n: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+
+exported c fn outer(n: int) -> int:
+    if n < -1000 or n > 1000:
+        return 0
+    host_callback(n) + 1
+"]
+    set public [native::library::PublicNames un [dict get $built exports]]
+    set exe [nlExecutable $dir "[nlPrelude un]
+static const char *names\[\] = {[join [lmap n $public {string cat \"$n\"}] {, }]};
+static int reached;
+static __declspec(noinline) int64_t call_outer(un_instance *in, int64_t n);
+long long host_callback(long long n) {
+    void *frames\[128\];
+    USHORT count = RtlCaptureStackBackTrace(0, 128, frames, NULL);
+    for (USHORT i = 0; i < count; i++)
+        if ((char *) frames\[i\] > (char *) call_outer && (char *) frames\[i\] < (char *) call_outer + 512) reached = 1;
+    return n * 2;
+}
+static __declspec(noinline) int64_t call_outer(un_instance *in, int64_t n) {
+    int64_t r = -1; un_error *e = NULL;
+    check(\"outer\", un_outer(in, n, &r, &e), &e);
+    return r;
+}
+int main(void) {
+    un_instance *in; un_error *e = NULL;
+    HMODULE module = GetModuleHandleW(L\"un.dll\");
+    int entries = 0;
+    for (size_t i = 0; i < sizeof names / sizeof *names; i++) {
+        DWORD64 base = 0;
+        FARPROC f = GetProcAddress(module, names\[i\]);
+        PRUNTIME_FUNCTION entry = f ? RtlLookupFunctionEntry((DWORD64) (uintptr_t) f, &base, NULL) : NULL;
+        if (entry != NULL && base + entry->BeginAddress == (DWORD64) (uintptr_t) f) entries++;
+    }
+    printf(\"function entries: %d of %zu public functions\\n\", entries, sizeof names / sizeof *names);
+    NL_REGISTER(host_callback);
+    check(\"create\", un_create(&in, &e), &e);
+    int64_t r = call_outer(in, 20);
+    printf(\"outer(20) = %lld, the stack trace reached its caller: %s\\n\", (long long) r, reached ? \"yes\" : \"no\");
+    un_destroy(in);
+    return 0;
+}
+" [list [nlLink $built] {*}$hostLibs]]
+    nlRunBoth $exe
+} -result {function entries: 16 of 16 public functions
+outer(20) = 41, the stack trace reached its caller: yes}
+
 # Loading the DLL runs no Botlish code: the instance is made by NAME_create,
 # after the loader lock is released. What runs at load and at a thread's
 # attach or detach is what the DLL's sections hold: the C runtime's entry
@@ -1570,14 +1649,28 @@ test nl-windows-exports {the DLL exports exactly the public C functions and impo
 # dependency -- holds exactly one: the standard library's TLS callback,
 # which runs thread-local destructors when a thread or the process detaches
 # (and nothing at attach). The DLL's TLS directory has that one callback.
+# The section names of the COFF object DATA: a plain object (its section
+# table after the 20-byte header) or a "bigobj" one (Sig1 0, Sig2 0xFFFF,
+# Version 2 or more: the table after its 56-byte header); none for anything
+# else -- an archive's short import objects (Version 0) have no sections.
 proc nlCoffSections {data} {
-    binary scan $data susu@16su machine count optional
-    if {$machine != 0x8664 || $optional != 0} {
-        return {}
+    binary scan $data susu machine count
+    if {$machine == 0 && $count == 0xffff} {
+        binary scan $data @4su@6su@44iu version machine count
+        if {$version < 2 || $machine != 0x8664} {
+            return {}
+        }
+        set table 56
+    } else {
+        binary scan $data @16su optional
+        if {$machine != 0x8664 || $optional != 0} {
+            return {}
+        }
+        set table 20
     }
     set names {}
     for {set i 0} {$i < $count} {incr i} {
-        lappend names [string trimright [string range $data [expr {20 + 40 * $i}] [expr {27 + 40 * $i}]] \x00]
+        lappend names [string trimright [string range $data [expr {$table + 40 * $i}] [expr {$table + 7 + 40 * $i}]] \x00]
     }
     return $names
 }
@@ -1822,8 +1915,8 @@ import std::str
 error Negative:
     value: int
 
-fn weight(on: bool, n: int) -> int:
-    if on:
+fn weight(flag: bool, n: int) -> int:
+    if flag:
         return n
     0
 
