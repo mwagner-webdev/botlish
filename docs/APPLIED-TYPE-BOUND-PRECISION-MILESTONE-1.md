@@ -671,16 +671,34 @@ commit; later commits are documentation only):
   branch's Windows run the same afternoon (42644203828) lost every one of
   its acceptance jobs the same way. So the acceptance tier was dispatched
   again on both hosts (runs 42766853782 and 42766857987, at c5505d2c,
-  whose code is f14b02b6's): **pending** when this was written.
+  whose code is f14b02b6's); the push of the merge below cancelled both
+  before their acceptance jobs ran. Those three shards never ran on the
+  branch: main's push run of the merge runs every acceptance shard on both
+  hosts.
 
-Main: its latest runs (0a518ba4; its head cbaa0402 is scalar-asm-audit's
-commit, which no workflow runs) are green -- tests, tests (linux arm64),
-tests (macos arm64), tests (windows x86-64), static-decisions, single
-executable, c-bindgen, bench and the three icy-tower workflows. The branch
-is not merged: main has moved since it branched (32ed8f87's CI rules,
-which is why this branch's pushes still ran macOS's and Windows's
-acceptance tiers, cbb08464's census and 0a518ba4's emission fix), and a
-merge is the owner's decision.
+Main's latest runs before the merge (0a518ba4; its head cbaa0402 is
+scalar-asm-audit's commit, which no workflow runs) were green -- tests,
+tests (linux arm64), tests (macos arm64), tests (windows x86-64),
+static-decisions, single executable, c-bindgen, bench and the three
+icy-tower workflows.
+
+Main merged into the branch (01ed3667): main had gained 32ed8f87's CI
+rules, cbb08464's census, 0a518ba4's emission fix (hir/emission.tcl) and
+cbaa0402's regeneration; only AGENTS.md and docs/INDEX.md changed on both
+sides, and they merged without conflict. On the merged tree:
+
+* `tests/local.tcl`, the whole suite: every Tcl test file on interp and
+  compile and every golden suite on all four backends, 687 items, 0
+  failures. (The first run reached its process's time limit after 427
+  items, every one passing, with every golden suite done; the 130 files
+  left ran on their own: 2248 and 2244 tests passed, 0 failed.)
+* `tools/mutant-catalogs.tcl`: 101 catalogs, 3428 mutants, 0 problems;
+  `tools/compilerpedia.tcl check`: 0 problems; `tools/ci/test_runs.py`: 61
+  tests pass.
+* The merge's push runs, which under 32ed8f87's rules are each host's
+  canary: tests, tests (linux arm64), tests (macos arm64), tests (windows
+  x86-64), ci tools, icy-tower (macos arm64) and icy-tower (windows
+  x86-64), all passed.
 
 ## 21. Next milestone
 
