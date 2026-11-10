@@ -2929,6 +2929,64 @@ tree-struct and declaration-summaries mutation harnesses for a change to
 code they mutate. `bench/owned-recursion.tcl` regenerates the scaling
 report.
 
+## The applied-type bound (hir/applied.tcl)
+
+`aggregateDepth` / `appliedDepth` (hir/types.tcl) are precision and economy
+bounds of the type lattice, not language validity limits
+(APPLIED-TYPE-BOUND-PRECISION-MILESTONE-1.md): past `appliedDepth`
+applications nested directly in arguments, `MakeApplied` keeps an
+application's constructor and makes its arguments `any`, so that joins,
+fixpoints, instance and memo keys stay finite. A part of a cut application
+read back out of it is cut one application earlier than a value of that part
+on its own; never check a value against it. Keep it so:
+
+* Before using a bounded applied type to reject a declared construction,
+  parameter, result or imprint, prefer the exact local declaration/value
+  relationship when it is already available: a construction's field types
+  are what its own field values or its written application establish
+  (`hir::applied::VerifyConstruction`, `FieldExpected`), never
+  `hir::types::StructField` of its own cut type; a projection of a value the
+  program constructed reads the field value's type (`TypedProjection`);
+  inference re-decides a bounded conflict or a constrained slot on the
+  evidence (`TypedBinding`, `TypedIssue`).
+* Never raise `appliedDepth` (or remove it) to make a program pass: the
+  false rejection only moves deeper, and exact types in the HIR are
+  quadratic (`atb-bound-unchanged`, the report's section 3). Precision is
+  forgotten globally and cashed out locally: evidence lives in one typing
+  walk's context (ctx `applied`) or one verification pass's memo
+  (`hir::applied::Pass`), never in a HIR type, an interned type, an instance
+  key or a side table; a written type the bound cut is recorded beside its
+  bounded form (`exactParamTypes`, `exactResult`, `exactStructArgs`,
+  `exactImprint`, the struct registry's `exactFields`), flat-encoded.
+* Evidence comes only from what the program constructs (constructions,
+  immutable aliases, projections, `if` branches) -- a slot no field
+  establishes from its written argument -- never from a declaration of a
+  value's position (a parameter read in its body stays its bounded type: not
+  every way into a parameter is checked exactly). The exact layer only adds
+  rejections: the bounded check of the value's HIR type runs first and
+  decides every subtype, Range, refinement and kind question.
+* No covariance (`App[int]` is no `App[any]`), no precision from `any`, no
+  reading past a bounded part's horizon (`Parts`), no unfolding of a
+  declaration (a constrained slot's class is the summaries' `Level` of its
+  arguments' classes). Every walk of evidence is a loop over an explicit
+  stack and no exact term is ever compared or keyed as a string.
+* A deep difference is reported at the deepest construction inside the
+  checked value whose slot it passes through (`Locate`), with the message
+  the same at every depth; a program the bound cuts nothing of keeps its
+  diagnostics byte for byte.
+
+If you change `MakeApplied`, `Bound`, `hir/applied.tcl`, construction typing
+or checking, imprint matching or the resolver's exact forms, run
+`tests/applied-type-bound.test` (its deep generated specimens, 1000 deep),
+`tests/depth-safe-nesting.test`, `tests/trait-constrained-types.test`,
+`tests/affine-applications.test`, `tests/written-affine-applications.test`,
+`python3 -I audit/applied-type-bound/tools/oracle.py selftest`,
+`audit/applied-type-bound/tools/fuzz.tcl` (several seeds) and
+`audit/applied-type-bound/tools/mutate.tcl` (every mutant in its
+`mutants.txt` must still apply and be killed: update a mutant's text when
+you change the code it mutates, keeping it a mutant of the same rule).
+`bench/applied-type-bound.tcl -baseline DIR` is the performance report.
+
 ## Resources (scope-bound cleanup)
 
 `opaque resource struct R:` and `cleanup fn NAME(r: R, context ...):`

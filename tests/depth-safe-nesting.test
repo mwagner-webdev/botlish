@@ -384,9 +384,9 @@ proc dsnBox {n} {
     return "struct Box\[T\]:\n    value: T\n\nx = $s\nx[string repeat .value $n]\n"
 }
 
-test dsn-box-bound {Box {value: Box {value: ...}}: 6 deep is a program; from 7 deep on the applied-type bound cuts an inner argument to `any` and the construction is a TYPE error at its first field's value (a separate precision limit, unchanged) -- reached and reported the same way 1000 deep, where the front end used to fail with Tcl's TCL LIMIT STACK first} -body {
-    list [dsnDiagnostic [dsnBox 6]] [lrange [dsnDiagnostic [dsnBox 7]] 0 2] [lrange [dsnDiagnostic [dsnBox 1000]] 0 2]
-} -result {accepted {{CORE SEMANTIC TYPE} 4 10} {{CORE SEMANTIC TYPE} 4 10}}
+test dsn-box-bound {Box {value: Box {value: ...}} read back through its projection chain is a program at every depth: 6, 7 and 1000 deep (from 7 deep on it used to be a TYPE error -- the applied-type bound cut an inner argument to `any` one application before the value -- until APPLIED-TYPE-BOUND-PRECISION-MILESTONE-1.md: tests/applied-type-bound.test), where the front end used to fail with Tcl's TCL LIMIT STACK first} -body {
+    list [dsnDiagnostic [dsnBox 6]] [dsnDiagnostic [dsnBox 7]] [dsnDiagnostic [dsnBox 1000]]
+} -result {accepted accepted accepted}
 
 # ---------------------------------------------------------------------------
 # The paths around the walks: traits, static blocks, the service, the cache

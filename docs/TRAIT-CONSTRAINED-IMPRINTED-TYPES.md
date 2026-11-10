@@ -863,9 +863,14 @@ Tests that pinned the unary grammar were updated (above), and
   from `List[K]`, an application or an explicit imprint.
 * **Empty constructions need their application** (`Bag[int] {items: []}`),
   as empty Lists need a typed position.
-* **Depth.** Applications nest six levels; deeper arguments are `any`, so a
-  constrained slot seven applications deep is TRAIT-NOT-SATISFIED (`any`
-  satisfies nothing).
+* **Depth.** Applications nest six levels in the bounded types; deeper
+  arguments are `any`. That is an approximation, never a rejection
+  (APPLIED-TYPE-BOUND-PRECISION-MILESTONE-1.md): a construction, a written
+  type or an imprint whose argument is deeper is checked against what its
+  values and written types say exactly, and a constrained slot past the
+  bound is judged on that (a Hashable key a Box 50 deep satisfies
+  Hashable). A constrained variable bound at a call from an opaque value's
+  bounded type (a map's) still reads `any` there.
 * **Nested specialized functions.** A function specialized per binding of a
   source-trait-constrained variable must be top-level, like a
   trait-polymorphic function (TRAIT-NESTED-POLYMORPHIC).
