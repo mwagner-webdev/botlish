@@ -447,7 +447,9 @@ results:
 | `tclsh9.0 audit/text-collection-docs/tools/mutate.tcl` | 12 mutants, 12 killed, each by a test its `!!` line names |
 | `audit/text-collection-docs/tools/compare.tcl` before/after | 183 programs, 0 semantic differences (section I) |
 | `bash single/build.sh`, then the clean-directory help session | built; every query as in section H |
-| `tclsh9.0 tests/local.tcl -jobs 3` (every Tcl test file on interp and compile, every golden suite on four backends) | still running when this was committed (no failure in its first 108 files and suites); its result is recorded below when it ends |
+| `tclsh9.0 tests/local.tcl -jobs 3` (every Tcl test file on interp and compile, every golden suite on four backends, front-end cache) | stopped by its 7,000 s time limit after all 119 golden suites (interp 5,682/5,682, compile 5,682/5,682, cranelift-generic 5,590/5,590, cranelift 5,692/5,692) and 443 of the 568 Tcl file runs; its one failure, tests/compilerpedia.test (2 tests on each backend), is described below |
+| `tclsh9.0 tests/local.tcl -jobs 4 -parts tcl` on the 122 files the first run had not reached, and compilerpedia.test again | 246 file runs, 0 failed: interp 2094 passed, 12 skipped; compile 2089 passed, 17 skipped (661 golden duplicates skipped on each) |
+| both parts together | every Tcl test file on interp and compile and every golden suite on four backends: 18,517 Tcl tests passed, 0 failed, 5,517 skipped (4,986 of them golden duplicates) |
 
 The mutants (`audit/text-collection-docs/tools/mutants.txt`), the ten the
 brief asks for and two more:
@@ -467,6 +469,14 @@ brief asks for and two more:
 | doc-decode-undiscoverable | `decode utf8` finds the decoding page | tcd-doc-discovery, tcd-doc-utf8-decoding |
 | doc-invalid-escape-help-unrouted | an invalid escape's help line leads to the escapes | tcd-doc-no-numeric-escape |
 
+The full run found two things this milestone broke, both in
+tests/compilerpedia.test, both fixed (`637e832c`) and the file passing
+since (43/43): `cp-render-fits-80-columns` -- two lines of std::char's
+rewrapped note rendered at 81 columns (rewrapped to 76) -- and
+`cp-string-char-search`, which pins `concept.strings`' alias list and now
+pins the literal and escape aliases too (its lookups -- the warning's
+code and phrase, `rune` unmatched -- were and are unchanged).
+
 Each documentation mutant edits the notes and the generated topic alike
 (what the help reads), or the topic file or README, and is detected by an
 assertion about that statement, never by a test infrastructure failure.
@@ -475,11 +485,13 @@ CI: before branching, `main`'s latest runs at `0a518ba4` were green or
 queued, none red; they have since all completed green (tests, tests (linux
 arm64), tests (macos arm64), tests (windows x86-64), static-decisions,
 single executable, icy-tower on all three hosts). The branch push of
-`7ae1f014` ran each host's canary: tests, tests (linux arm64), tests
-(macos arm64) and tests (windows x86-64) succeeded, and icy-tower
-(windows x86-64); icy-tower (macos arm64) was running. tests.yml,
-tests-arm64.yml, macos-arm64.yml and windows-x86_64.yml were then
-dispatched on the branch: queued when this was committed (pending, not passed). static-decisions was not
+`7ae1f014` ran each host's canary, all four green, and icy-tower on
+Windows and macOS, green. The workflows dispatched on `7ae1f014` were
+cancelled by the push of `637e832c` (they would have failed
+compilerpedia.test); on `637e832c` icy-tower (windows x86-64) and
+icy-tower (macos arm64) succeeded, and tests.yml, tests-arm64.yml,
+macos-arm64.yml and windows-x86_64.yml were dispatched: queued or running
+when this was written -- pending, not passed. static-decisions was not
 dispatched: the change moves no static decision (the comparison's static
 outcomes are equal, and both schedulers see the same message); it runs on
 main's next push that changes `hir/`.
