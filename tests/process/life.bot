@@ -171,12 +171,14 @@ fn sc_old_kernel(helper: str, tmp: str, context p: process_linux::Processes, ev:
     0
 
 # Shared group: the child stays in the supervisor's group, and a signal
-# reaches the child alone (a descendant survives; the test kills it).
+# reaches the child alone: its descendant survives, and writes its pid to
+# TMP/desc-alive 700 ms after it started, while the program still runs.
 fn sc_shared_group(helper: str, tmp: str, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
-    {owner, child} = kit::spawn(process_linux::command(helper, ["ids", "child:sleep:30000", "sleep:30000"]).with_group(process_linux::Group::Shared))
+    {owner, child} = kit::spawn(process_linux::command(helper, ["ids", "child:sleep:700,pidfile:".concat(kit::join_path(tmp, "desc-alive")), "sleep:30000"]).with_group(process_linux::Group::Shared))
     kit::first_line(child)
     kit::status_line("shared", kit::terminate(child, 300000))
     process_linux::release(owner)
+    kit::sleep(1500000)
     {owner: o2, child: c2} = kit::spawn(process_linux::command(helper, ["ids"]))
     kit::first_line(c2)
     kit::wait(c2)

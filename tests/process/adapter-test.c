@@ -120,6 +120,22 @@ int main(int argc, char **argv) {
     check("a zombie (unreaped) takes a signal", pl_signal(h3, 0, 1), 0);
     check("reap", pl_reap(h3), 0);
     pl_release(h3);
+    /* After the reap only the refusal guards a group signal: the pidfd
+     * answers ESRCH for the process itself, but the group's ID outlives its
+     * leader while a member runs -- the kernel's group flag still reaches
+     * it, and the fallback's kill(-pgid) names whatever group holds that
+     * number once it is free. */
+    const char *group_args[] = { "child:sleep:30000", "exit:0", NULL };
+    long long hg = spawn(helper, group_args);
+    long long gpid = pl_pid(hg);
+    wait_exit(hg);
+    pl_reap(hg);
+    check("a group signal after the reap is refused while a member runs", pl_signal(hg, 0, 1), -ESRCH);
+    pl_t_faults(64);
+    check("... also without the kernel's group flag (the kill(-pgid) fallback)", pl_signal(hg, 0, 1), -ESRCH);
+    pl_t_faults(0);
+    kill(-(pid_t)gpid, SIGKILL);
+    pl_release(hg);
     const char *short_args[] = { "sleep:100", NULL };
     long long h4 = spawn(helper, short_args);
     long long h4d = pl_detach(h4);
@@ -133,10 +149,16 @@ int main(int argc, char **argv) {
     long long fds2 = pl_t_open_fds();
     for (int i = 0; i < 3; i++) spawn("/nonexistent", missing_args);
     check("posix_spawn+pidfd_open: no descriptor leaked by exec failures", pl_t_open_fds() - fds2, 0);
+    /* The negative control: glibc's pidfd_spawn leaked its pidfd when exec
+     * failed (glibc bug 31695) until its fix (2.40, and later 2.39
+     * builds): reported, not required -- this host's glibc decides. */
     pl_t_faults(8);
     for (int i = 0; i < 3; i++) spawn("/nonexistent", missing_args);
     pl_t_faults(0);
-    check("pidfd_spawn (negative control): descriptors leaked by exec failures", pl_t_open_fds() - fds2, 3);
+    long long leaked = pl_t_open_fds() - fds2;
+    printf("info pidfd_spawn (negative control): %lld descriptors leaked by 3 exec failures (%s)\n",
+           leaked, leaked == 3 ? "this glibc leaks" : leaked == 0 ? "this glibc has the fix" : "unexpected");
+    check("pidfd_spawn (negative control) leaks one descriptor per failure or none", leaked == 0 || leaked == 3, 1);
     /* A thread's end: its supervised child killed and reaped, its detached
      * one left running and swept later. */
     long long live = pl_stat(12), killed = pl_stat(15), specs = pl_stat(16);
@@ -151,7 +173,7 @@ int main(int argc, char **argv) {
     check("a later sweep reaps the orphaned detached child", pl_sweep(), 0);
     check("the orphaned detached child is reaped", pl_t_proc_state(ended_pids[1]), -ENOENT);
     check("unreaped children", pl_stat(12) - live, 0);
-    check("descriptors (without the control's leaks)", pl_t_open_fds() - fds - 3, 0);
+    check("descriptors (without the control's leaks)", pl_t_open_fds() - fds - leaked, 0);
     check("descriptors the adapter holds", pl_stat(13), 0);
     printf("adapter-test: %d failures\n", failures);
     return failures != 0;

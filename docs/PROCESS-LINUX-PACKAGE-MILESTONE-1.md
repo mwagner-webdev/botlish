@@ -45,10 +45,11 @@ Contents: 1. Outcome -- 2. Implementation census -- 3. The public API --
   `Exec` stage reported for a pidfd failure, and more.
 * **Evidence.** 53 tests pass (the census's 42 scenarios ported and
   extended, the tty ones under a PTY, two VMs, GC stress, the documented
-  programs, the adapter's own C test of 34 checks); 90 model-based fuzz
+  programs, the adapter's own C test of 36 checks); 90 model-based fuzz
   sequences match an independent lifecycle model (10 under GC stress);
-  29 mutants, every one killed by behavior (after fixing three weak kills
-  and one weak detector the first run exposed); a clean room of 42 checks
+  29 mutants, every one killed by behavior (after fixing three weak kills,
+  one weak detector and one missing check the runs exposed: section 11); a
+  clean room of 42 checks
   passes with only the single-file compiler and the published artifacts.
 
 ## 2. Implementation census
@@ -120,10 +121,12 @@ METHOD-ELIGIBLE would otherwise suggest it.
 
 * `posix_spawn` (glibc's CLONE_VM|CLONE_VFORK: safe in a multithreaded
   process; exec's errno reported) then `pidfd_open` of the still-unreaped
-  child: its PID cannot name another process before the reap. glibc 2.39's
-  `pidfd_spawn` leaks its pidfd when exec fails (the census's reproducer):
-  never used; the testing build's fault 8 keeps it as the control
-  (`process-linux-adapter`: three leaked descriptors).
+  child: its PID cannot name another process before the reap. glibc
+  2.39's `pidfd_spawn` leaks its pidfd when exec fails (the census's
+  reproducer; Ubuntu 24.04's 2.39-0ubuntu8.9): never used; the testing
+  build's fault 8 keeps it as the control, which `process-linux-adapter`
+  reports rather than requires -- three leaked descriptors here, none on
+  GitHub's runner, whose glibc has the fix (section 14).
 * Everything that can fail before exec is opened in the parent: the
   working directory (`O_PATH|O_DIRECTORY`, `fchdir` in the child), files,
   `/dev/null`, pipes. The stage says where (`process-linux-launch`).
@@ -224,7 +227,9 @@ JSON-lines decoder needs, and no part of this milestone needed one.
   The identity is stale at once and suspended operations wake with
   `StaleChild` (`process-linux-release-reader`).
 * **Reaping.** A child is reaped only once its supervision is over; signals
-  after the reap are refused (`c-signal-after-reap`); a group signal after
+  after the reap are refused (`c-signal-after-reap`: for the child itself
+  its pidfd already answers ESRCH, so the refusal matters for its group,
+  whose ID outlives the leader while a member runs); a group signal after
   the leader's exit, while unreaped, reaches its descendants (`reap-order`;
   the eager-reap control shows the descendant surviving).
 * **Shutdown.** The loop's shutdown revokes everything: reads end
@@ -324,7 +329,7 @@ artifacts and a prebuilt helper child copied in. 42 checks passed
   room's workload, its perf scenarios are the benchmark. New:
   close-output, fairness, unsupported, pidfd-fail, old-kernel,
   shared-group, release-reader, finish, thread-end, child-not-sendable,
-  authority, warning-clean, adapter (34 C checks), release-archive,
+  authority, warning-clean, adapter (36 C checks), release-archive,
   metadata, docs (every program of README and GUIDE compiled under
   `-warnings error` and run), gc-stress (11 scenarios with a collection at
   every allocation).
@@ -340,11 +345,18 @@ artifacts and a prebuilt helper child copied in. 42 checks passed
   by design, not waited for.
 * `audit/process-linux/tools/mutate.tcl` with 29 mutants (the census's 15
   ported, 14 new): every one KILLED by the test its `%%` line names
-  (`results/mutants.txt`). Two lessons of the first run: three C mutants
-  were "killed" in a second because they left a variable unused and the
-  `-Werror` build failed -- a weak kill, now rewritten to compile, and the
-  harness reports a C build failure as NOT-BUILT; and `m-fair` survived
-  (section 5). `tools/mutant-catalogs.tcl`: 101 catalogs, 0 problems.
+  (`results/mutants.txt`). Three lessons: three C mutants were "killed"
+  in a second because they left a variable unused and the `-Werror` build
+  failed -- a weak kill, now rewritten to compile, and the harness reports
+  a C build failure as NOT-BUILT; `m-fair` survived (section 5); and
+  `c-signal-after-reap` survived too, which the first version of this
+  report missed: a reaped child's pidfd answers ESRCH by itself, so the
+  refusal was observable only for a group signal while a member of the
+  group still runs, which no test made. The adapter test now does, with
+  and without the kernel's group flag (the third run of
+  `results/mutants.txt`). `c-leaking-spawn` is killed only where glibc's
+  `pidfd_spawn` leaks (section 4); on a glibc with the fix it is no defect.
+  `tools/mutant-catalogs.tcl`: 101 catalogs, 0 problems.
 
 ## 12. Measurements
 
@@ -424,6 +436,19 @@ through the same 12.6 MiB as an idle program.
 * **The clean room found a real API wart**: `close_stdin` returned the C
   call's integer instead of `unit` (a handler of `StaleChild` completing
   with unit was refused): fixed before the release.
+* **The branch's CI canary found three host dependencies in the tests**
+  (none in the package), on GitHub's ubuntu-latest runner: (1) the
+  `inherit` negative control assumed the supervisor holds exactly one
+  descriptor without close-on-exec, and the runner's process inherits two
+  more (both closed by `closefrom(3)` in the real path); (2) the
+  `shared-group` test checked the descendant after the program had ended,
+  and on the runner something had ended it by then (not the package: a
+  shared-group child's signals go to the child alone, `signal_child`) --
+  the descendant now records its survival (a pid file) while the program
+  runs; (3) the `adapter`
+  test's `pidfd_spawn` control assumed a leaking glibc, and the runner's
+  has the fix. All three are now independent of the host; my container
+  reproduces (1) with two extra inherited descriptors.
 
 ## 15. Commands
 

@@ -6444,8 +6444,9 @@ Keep it so:
   signals with PIDFD_SIGNAL_PROCESS_GROUP; before Linux 6.9 kill(-PGID),
   only while the leader is unreaped), and reaped only once its supervision
   is over; never signal a PID number, never signal after the reap, never
-  use glibc's `pidfd_spawn` (it leaks its pidfd when exec fails: the
-  testing build keeps it as a negative control only). A kernel without
+  use glibc's `pidfd_spawn` (it leaks its pidfd when exec fails, where
+  glibc lacks its fix: the testing build keeps it as a negative control,
+  reported, never required). A kernel without
   pidfds, or a process whose SIGCHLD is ignored, is Unsupported -- never a
   fallback to PID numbers.
 * Ownership: ChildOwner is an affine resource whose release (also at its

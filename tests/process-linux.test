@@ -236,7 +236,7 @@ test process-linux-limit {an output policy is the reader's: a bounded tail of 40
 } -result ok
 
 test process-linux-inherit {a child gets SIGPIPE's default disposition, an empty signal mask and only descriptors 0, 1 and 2 (the negative control, fault bits 3, keeps the supervisor's ignored SIGPIPE); inherited and /dev/null streams; a read of a non-piped stream is StreamClosed} -constraints processLinux -body {
-    processExpect [processRun io inherit] [concat {{^default: sigpipe dfl mask 0$} {^fds 0 1 2$} {^kept: sigpipe ign mask 0$} {^fds 0 1 2 \d+$} {^inherited$} {^null exited 0$} {^read of a null stdout: closed$}} $::processClean]
+    processExpect [processRun io inherit] [concat {{^default: sigpipe dfl mask 0$} {^fds 0 1 2$} {^kept: sigpipe ign mask 0$} {^fds 0 1 2( \d+)+$} {^inherited$} {^null exited 0$} {^read of a null stdout: closed$}} $::processClean]
 } -result ok
 
 test process-linux-tty-inherit {under a terminal: the children's pipes are no terminal; an inherited stdout and stderr are} -constraints processPty -body {
@@ -301,12 +301,15 @@ test process-linux-old-kernel {the pre-6.9 fallback (fault 64: kill(-pgid) while
     list [processExpect $out [concat {{^group signal 15$}} $::processClean]] [processLeftovers $out]
 } -result {ok {desc dead desc dead}}
 
-test process-linux-shared-group {a child of the supervisor's own group (Group::Shared) is signalled alone: its descendant survives; a child of its own group leads it} -constraints processLinux -body {
+test process-linux-shared-group {a child of the supervisor's own group (Group::Shared) is signalled alone: its descendant survives the child's termination and records it while the program runs (what happens to it after the program ends is the host's: a runner may end the group); a child of its own group leads it} -constraints processLinux -body {
     set out [processRun life shared-group]
     regexp -line {^first: ids (\d+) \d+ (\d+) \d+$} $out -> pid pgid
     regexp -line {^first: ids (\d+) \d+ (\d+) \d+\n} [string range $out [string first "shared signal" $out] end] -> pid2 pgid2
-    list [processExpect $out [concat {{^shared signal 15$}} $::processClean]] [expr {$pid != $pgid}] [expr {$pid2 == $pgid2}] [processLeftovers $out]
-} -result {ok 1 1 {desc alive}}
+    set record [file join $::processLastScratch desc-alive]
+    set survived [expr {[file exists $record] && [string trim [readFile $record]] eq [lindex [processPids $out desc] 0]}]
+    processLeftovers $out
+    list [processExpect $out [concat {{^shared signal 15$}} $::processClean]] [expr {$pid != $pgid}] [expr {$pid2 == $pgid2}] $survived
+} -result {ok 1 1 1}
 
 test process-linux-inherited {a descendant holding the child's stdout keeps it open after the leader's exit; terminating the group after the leader exited (unreaped: its group ID reserved) ends it at once} -constraints processLinux -body {
     processExpect [processRun life inherited] [concat {{^leader exited 0$} {^stdout's end of file over 1 s after the leader's exit yes$}
@@ -459,14 +462,14 @@ test process-linux-warning-clean {the public module compiles warning-free: a pro
     expr {[string match *Exited* $m] || ![string match *warning* $m] ? "clean" : $m}
 } -result clean
 
-test process-linux-adapter {the adapter's guarantees the Botlish side cannot reach: another thread's call refused, release only once reaped, no signal after the reap, generations, a detached child swept, no descriptor leaked by exec failures (glibc's pidfd_spawn leaks, the negative control), a thread's end killing and reaping its children and freeing its specs} -constraints processLinux -body {
+test process-linux-adapter {the adapter's guarantees the Botlish side cannot reach: another thread's call refused, release only once reaped, no signal after the reap (a group signal while a member of the group still runs included, with and without the kernel's group flag), generations, a detached child swept, no descriptor leaked by exec failures (glibc's pidfd_spawn, the negative control, leaks where glibc lacks its fix: reported), a thread's end killing and reaping its children and freeing its specs} -constraints processLinux -body {
     set dir [processApp]
     set exe [file join $dir adapter-test]
     exec cc -O2 -Wall -Wextra -Werror -pthread -DPL_TESTING [file join $::processTests adapter-test.c] \
         [file join $::projectRoot packages process_linux native process_linux.c] -o $exe
     set out [exec timeout -k 5 60 $exe [processHelper] 2>@1]
     list [regexp -line {^adapter-test: 0 failures$} $out] [regexp -all -line {^ok } $out]
-} -result {1 34}
+} -result {1 36}
 
 test process-linux-release-archive {the released archive defines exactly the module's pl_* functions: no pl_t_* probe or fault, no pidfd_spawn, and it reads no environment variable; the testing archive adds the seven pl_t_* probes} -constraints processNm -body {
     set dir [processApp]

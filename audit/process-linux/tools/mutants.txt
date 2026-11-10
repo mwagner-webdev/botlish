@@ -77,7 +77,7 @@
         cwdfd = open(s->cwd, O_PATH | O_CLOEXEC);
 >>>>
 
-@@ c-leaking-spawn glibc's pidfd_spawn by default: a pidfd leaked per failed exec
+@@ c-leaking-spawn glibc's pidfd_spawn by default: a pidfd leaked per failed exec (where glibc lacks its fix; with the fix the mutant is no defect and survives)
 %% process-linux.test:process-linux-launch
 ## packages/process_linux/native/process_linux.c
 <<<<

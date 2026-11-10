@@ -76,3 +76,24 @@ KILLED m-fair (47 s)
 real	1m33.147s
 user	1m27.997s
 sys	0m4.037s
+
+# third run, after the branch's CI canary: c-signal-after-reap had survived
+# the first run unnoticed (a reaped child's pidfd answers ESRCH by itself);
+# the adapter test now signals a group after the reap while a member runs.
+# The other mutants whose detectors changed, rerun (two invocations: the
+# adapter's four again after its group check was added).
+KILLED c-sigdefault (43 s)
+    killed (process-linux.test: 1 failed: process-linux-inherit)
+KILLED c-generation (2 s)
+    killed (process-linux.test: 1 failed: process-linux-adapter)
+KILLED c-leaking-spawn (42 s)
+    killed (process-linux.test: 1 failed: process-linux-launch)
+KILLED c-closefrom (43 s)
+    killed (process-linux.test: 1 failed: process-linux-inherit)
+KILLED c-thread-end (32 s)
+    killed (process-linux.test: 2 failed: process-linux-adapter, process-linux-thread-end)
+KILLED c-signal-after-reap (2 s)
+    killed (process-linux.test: 1 failed: process-linux-adapter)
+KILLED c-owner-thread (2 s)
+    killed (process-linux.test: 1 failed: process-linux-adapter)
+7 mutants, 7 killed, 0 survived
