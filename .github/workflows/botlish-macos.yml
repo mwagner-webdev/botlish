@@ -1,0 +1,398 @@
+name: botlish (macos arm64 release)
+
+# The release of the compiler's macOS application, Botlish.app
+# (MACOS-BOTLISH-DISTRIBUTION-MILESTONE-1.md): signed with the repository's
+# Developer ID under the hardened runtime, with no entitlement (its native
+# backend has no JIT), notarized by Apple, its ticket stapled, accepted by
+# Gatekeeper, and published as the GitHub Release of a tag botlish-macos-vX.Y.Z
+# -- its ZIP, SHA256SUMS and provenance.
+#
+# Only for such a tag, of main's history (pushed, or a manual run on it), and
+# only once every test of the tagged commit is green (the tested job,
+# CI-RUNS.md: tests.yml with its GC-stress job, tests-arm64.yml with its,
+# macOS, Windows, static-decisions when it ran). A tag pushed before they are
+# is deferred -- its release job skips -- and the release gate
+# (release-gate.yml) runs the workflow on the tag again once they are.
+# Ordinary CI never runs this workflow: macos-arm64.yml's app jobs build,
+# sign ad hoc with the hardened runtime and accept the same bundle on every
+# push, with no credential.
+#
+# The release job, in the protected environment macos-release (the only
+# holder of the Developer ID identity and the notarization key; its
+# deployment rule admits the tags icy-tower-macos-v* and botlish-macos-v*),
+# builds Botlish.app from the tagged commit itself (single/macos/build.sh:
+# the driver without its JIT, ad hoc signed), accepts it before signing,
+# validates the credentials locally and with Apple, signs its three units
+# with the Developer ID (single/macos/release.py sign: single/macos/sign.sh),
+# verifies them, accepts the signed bundle under the hardened runtime,
+# notarizes, staples, asks Gatekeeper, makes the ZIP, and accepts the ZIP's
+# bundle extracted again and quarantined. The publish job, the only one with
+# contents: write, publishes exactly that ZIP. Any failed or skipped stage
+# publishes nothing; an existing release is never replaced.
+
+on:
+  push:
+    # (Path filters are not applied to tag pushes.)
+    tags: ["botlish-macos-v*"]
+  workflow_dispatch:
+    inputs:
+      resume_run:
+        description: "A run on a botlish-macos-v* tag whose notarization timed out"
+        type: string
+        default: ""
+      resume_submission:
+        description: "That run's notarization submission ID, continued instead of uploading again"
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: botlish-macos-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  # A release waits for its commit's tests (CI-RUNS.md, "The release gate").
+  # It reads runs only: no credential, no write.
+  tested:
+    name: the release commit's tests are green
+    if: >-
+      startsWith(github.ref, 'refs/tags/botlish-macos-v')
+      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      green: ${{ steps.check.outputs.green }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          sparse-checkout: tools/ci
+
+      - name: The tagged commit's tests
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 -I tools/ci/runs.py check "$GITHUB_SHA" --for botlish-macos
+          if ! grep -qx 'green=true' "$GITHUB_OUTPUT"; then
+            echo "::notice::the release of $GITHUB_REF_NAME is deferred: the tests of $GITHUB_SHA are not green yet (the summary lists them); the release gate runs this workflow on the tag again once they are"
+          fi
+
+  release:
+    name: release (Developer ID, notarization, Gatekeeper)
+    needs: tested
+    if: >-
+      always() && startsWith(github.ref, 'refs/tags/botlish-macos-v')
+      && needs.tested.outputs.green == 'true'
+      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: macos-15
+    timeout-minutes: 300
+    environment: macos-release
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      zip_sha256: ${{ steps.package.outputs.zip_sha256 }}
+      version: ${{ steps.revision.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # The tag names the version and a commit of main's history (reviewed
+      # code), and is this run's commit: the bundle is built from it here.
+      - name: The release's revision
+        id: revision
+        run: |
+          tag="$GITHUB_REF_NAME"
+          version="${tag#botlish-macos-v}"
+          if ! [[ $version =~ ^(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})$ ]]; then
+            echo "::error::MACOS-BUNDLE-METADATA: the tag $tag is not botlish-macos-vX.Y.Z"; exit 1
+          fi
+          [ "$(git rev-parse "refs/tags/$tag^{commit}")" = "$GITHUB_SHA" ] || { echo "::error::the tag $tag does not name this run's commit"; exit 1; }
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::$tag ($GITHUB_SHA) is not a commit of main's history: a release is built from reviewed code only"; exit 1
+          fi
+          echo "version=$version" >>"$GITHUB_OUTPUT"
+          echo "VERSION=$version" >>"$GITHUB_ENV"
+          echo "WORK=$RUNNER_TEMP/release" >>"$GITHUB_ENV"
+          echo "DIST=$RUNNER_TEMP/dist" >>"$GITHUB_ENV"
+          echo "release $tag: version $version, commit $GITHUB_SHA"
+
+      - name: Install prerequisites (Tcl 9.0.1, stable Rust)
+        uses: ./.github/actions/setup-macos
+
+      - name: Cache the Tcl.framework build
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/botlish-app
+          key: app-tcl-framework-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('single/macos/tcl-framework.sh', 'single/build.sh') }}
+
+      - uses: actions/setup-python@v5
+        id: setup-python-release
+        with:
+          python-version: "3.13"
+          update-environment: false
+
+      - name: The release tooling's Python (pinned, hash-checked)
+        run: |
+          "${{ steps.setup-python-release.outputs.python-path }}" -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install -q --require-hashes --only-binary :all: -r tools/macos-release/requirements.txt
+          echo "PY=$RUNNER_TEMP/venv/bin/python" >>"$GITHUB_ENV"
+          echo "BOTLISH_RELEASE_TCLSH=$(command -v tclsh9.0)" >>"$GITHUB_ENV"
+
+      # The trusted revision built here: the driver without its JIT, the
+      # bundle ad hoc signed with the hardened runtime, verified.
+      - name: Botlish.app from the tagged commit
+        run: |
+          started=$(date +%s)
+          single/macos/build.sh -o "$RUNNER_TEMP/build" --version "$VERSION" 2>&1 | tee build.log
+          echo "RAPP=$RUNNER_TEMP/build/Botlish.app" >>"$GITHUB_ENV"
+          echo "build: $(( $(date +%s) - started )) s" | tee -a "$RUNNER_TEMP/timings.txt"
+
+      # The bundled compiler works before it is signed (the ad hoc build).
+      - name: Acceptance before signing
+        run: single/macos/acceptance.sh "$RAPP" "$RUNNER_TEMP/accept-unsigned" --only version,interpreter,check,jit-refused,aot-run,executable,cocoa-canary,signature
+
+      # The local preflight: every value checked before any Apple tool sees
+      # one (credentials.py; nothing is signed or sent when it fails). The
+      # application's identifier is the repository's
+      # (io.github.mwagner-webdev.botlish): MACOS_BUNDLE_ID is not given.
+      - name: Credential preflight (local)
+        env:
+          MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          APPLE_NOTARY_KEY_BASE64: ${{ secrets.APPLE_NOTARY_KEY_BASE64 }}
+          APPLE_NOTARY_KEY_ID: ${{ vars.APPLE_NOTARY_KEY_ID }}
+          APPLE_NOTARY_ISSUER_ID: ${{ vars.APPLE_NOTARY_ISSUER_ID }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+        run: |
+          started=$(date +%s)
+          "$PY" -I single/macos/release.py preflight --work "$WORK" --mode release
+          echo "preflight: $(( $(date +%s) - started )) s" | tee -a "$RUNNER_TEMP/timings.txt"
+
+      # The bundle identifier of every earlier release: never another.
+      - name: The application's identity (earlier releases)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/previous"
+          prev=()
+          for t in $(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName --jq '.[].tagName' | grep '^botlish-macos-v' || true); do
+            [ "$t" = "$GITHUB_REF_NAME" ] && continue
+            if gh release download "$t" --repo "$GITHUB_REPOSITORY" --pattern provenance.json --dir "$RUNNER_TEMP/previous/$t" 2>/dev/null; then
+              prev+=(--previous "$RUNNER_TEMP/previous/$t/provenance.json")
+            fi
+          done
+          "$PY" -I single/macos/release.py identity --work "$WORK" "${prev[@]}"
+
+      - name: Temporary keychain and the Developer ID identity
+        env:
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          "$PY" -I single/macos/release.py keychain --work "$WORK"
+
+      # Apple's own validation of the Key ID, Issuer ID and key together,
+      # before anything is uploaded.
+      - name: Apple's validation of the notarization credentials
+        run: |
+          "$PY" -I single/macos/release.py notary-auth --work "$WORK"
+
+      - name: Developer ID signature (inner first; hardened runtime, secure timestamp)
+        if: inputs.resume_submission == ''
+        run: |
+          started=$(date +%s)
+          "$PY" -I single/macos/release.py sign --work "$WORK" --app "$RAPP"
+          echo "sign: $(( $(date +%s) - started )) s" | tee -a "$RUNNER_TEMP/timings.txt"
+          mkdir -p "$RUNNER_TEMP/signed"
+          ditto -c -k --keepParent "$RAPP" "$RUNNER_TEMP/signed/botlish-macos-signed.zip"
+
+      - name: Resume -- the bundle the earlier run signed
+        if: inputs.resume_submission != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RESUME_RUN: ${{ inputs.resume_run }}
+          RESUME_SUBMISSION: ${{ inputs.resume_submission }}
+        run: |
+          [[ $RESUME_RUN =~ ^[0-9]+$ ]] || { echo "::error::resume_run must be the earlier run's ID"; exit 1; }
+          sha=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RESUME_RUN" --jq .head_sha)
+          [ "$sha" = "$GITHUB_SHA" ] || { echo "::error::run $RESUME_RUN built $sha, not this release's $GITHUB_SHA"; exit 1; }
+          gh run download "$RESUME_RUN" --repo "$GITHUB_REPOSITORY" --name botlish-macos-signed --dir "$RUNNER_TEMP/resumed"
+          rm -rf "$RUNNER_TEMP/build/Botlish.app"
+          ditto -x -k "$RUNNER_TEMP/resumed/botlish-macos-signed.zip" "$RUNNER_TEMP/build"
+          "$PY" -I single/macos/release.py adopt --work "$WORK" --app "$RAPP" --resume "$RESUME_SUBMISSION"
+
+      - name: The signatures (Developer ID, team, hardened runtime, timestamp, no entitlement; every unit)
+        env:
+          TEAM: ${{ vars.APPLE_TEAM_ID }}
+        run: |
+          "$PY" -I single/macos/release.py verify-signature --work "$WORK" --app "$RAPP"
+          single/macos/verify.sh --checkout "$PWD" --signature developer-id --team "$TEAM" "$RAPP"
+
+      - uses: actions/upload-artifact@v4
+        if: inputs.resume_submission == ''
+        with:
+          name: botlish-macos-signed
+          path: ${{ runner.temp }}/signed/botlish-macos-signed.zip
+          if-no-files-found: error
+
+      # The Developer ID-signed compiler under the hardened runtime, before
+      # notarization: every case of single/macos/acceptance.sh.
+      - name: Hardened-runtime acceptance (the signed application)
+        run: |
+          single/macos/acceptance.sh "$RAPP" "$RUNNER_TEMP/accept-signed" || true
+          "$PY" -I single/macos/release.py record --work "$WORK" --label hardened-runtime \
+            --results "$RUNNER_TEMP/accept-signed/results.json" --app "$RAPP" \
+            --cases version,interpreter,check,jit-refused,aot-run,executable,ffi,cocoa-canary,smoke,app,finder-launch,signature
+
+      - name: Notarization (notarytool, Accepted required, the log inspected)
+        env:
+          RESUME_SUBMISSION: ${{ inputs.resume_submission }}
+        run: |
+          started=$(date +%s)
+          resume=()
+          [ -n "$RESUME_SUBMISSION" ] && resume=(--resume "$RESUME_SUBMISSION")
+          "$PY" -I single/macos/release.py notarize --work "$WORK" --app "$RAPP" --timeout 5400 "${resume[@]}"
+          echo "notarization (upload and Apple's processing): $(( $(date +%s) - started )) s" | tee -a "$RUNNER_TEMP/timings.txt"
+
+      - name: Stapling, the stapled signature, Gatekeeper, the tamper control
+        run: |
+          rel() { "$PY" -I single/macos/release.py "$@"; }
+          rel staple --work "$WORK" --app "$RAPP"
+          rel verify-signature --work "$WORK" --app "$RAPP" --label stapled
+          rel gatekeeper --work "$WORK" --app "$RAPP" --expect notarized
+          rel tamper --work "$WORK" --app "$RAPP"
+
+      - name: The release ZIP, SHA256SUMS and the provenance
+        id: package
+        run: |
+          prov=$("$PY" -I -c '
+          import json, os, subprocess
+          facts = {"tag": os.environ["GITHUB_REF_NAME"], "version": os.environ["VERSION"], "source_commit": os.environ["GITHUB_SHA"],
+                   "target": "macos-aarch64 (arm64)", "minimum_macos": "11.0", "native_jit": "none (the driver is built without it)",
+                   "toolchain": subprocess.run(["rustc", "--version"], capture_output=True, text=True).stdout.strip(),
+                   "workflow_run": os.environ["GITHUB_SERVER_URL"] + "/" + os.environ["GITHUB_REPOSITORY"] + "/actions/runs/" + os.environ["GITHUB_RUN_ID"]}
+          print(json.dumps(facts))')
+          "$PY" -I single/macos/release.py package --work "$WORK" --app "$RAPP" --out "$DIST" --provenance "$prov"
+          cat "$DIST/SHA256SUMS"
+          echo "zip_sha256=$(shasum -a 256 "$DIST/botlish-macos-aarch64.zip" | awk '{print $1}')" >>"$GITHUB_OUTPUT"
+
+      # The downloaded artifact: the ZIP extracted into a fresh directory with
+      # a space and non-ASCII letters, every file given the quarantine
+      # attribute a browser's download carries (synthetic: no browser ran),
+      # assessed by Gatekeeper, then the compiler run from it.
+      - name: The released ZIP, extracted and quarantined, accepted
+        run: |
+          place="$HOME/Prögram Files"
+          rm -rf "$place"; mkdir -p "$place"
+          ditto -x -k "$DIST/botlish-macos-aarch64.zip" "$place"
+          app="$place/Botlish.app"
+          xattr -w -r com.apple.quarantine "0081;$(printf %x "$(date +%s)");Safari;$(uuidgen)" "$app"
+          spctl --assess --type execute --verbose=4 "$app"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          xcrun stapler validate "$app"
+          # (Every case but the Finder's launch: LaunchServices asks a person
+          # before it first opens a quarantined download; the compiler run from
+          # a shell, as it is used, is assessed by Gatekeeper without a dialog.)
+          cases=version,interpreter,check,jit-refused,aot-run,executable,ffi,cocoa-canary,smoke,app,signature
+          single/macos/acceptance.sh "$app" "$RUNNER_TEMP/accept-final" --only "$cases" || true
+          "$PY" -I single/macos/release.py record --work "$WORK" --label final-artifact \
+            --results "$RUNNER_TEMP/accept-final/results.json" --zip "$DIST/botlish-macos-aarch64.zip" --cases "$cases"
+
+      - name: Publishable (every stage passed, on the same signature and ZIP)
+        run: |
+          "$PY" -I single/macos/release.py publishable --work "$WORK" --out "$DIST"
+
+      - name: Remove the temporary keychain and the decoded credentials
+        if: always()
+        run: |
+          if [ -d "$WORK" ]; then "$PY" -I single/macos/release.py cleanup --work "$WORK"; fi
+          security list-keychains -d user
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: botlish-macos-release
+          path: |
+            ${{ runner.temp }}/dist/botlish-macos-aarch64.zip
+            ${{ runner.temp }}/dist/SHA256SUMS
+            ${{ runner.temp }}/dist/provenance.json
+          if-no-files-found: error
+
+      # Public facts only: never the work directory's secret/.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: botlish-macos-release-diagnostics
+          path: |
+            ${{ runner.temp }}/release/state.json
+            ${{ runner.temp }}/release/notary-submission.json
+            ${{ runner.temp }}/release/notary-log.json
+            ${{ runner.temp }}/release/notary-auth.log
+            ${{ runner.temp }}/accept-unsigned/
+            ${{ runner.temp }}/accept-signed/
+            ${{ runner.temp }}/accept-final/
+            ${{ runner.temp }}/timings.txt
+          if-no-files-found: warn
+
+  # The GitHub Release of the tag: exactly the release job's ZIP, SHA256SUMS
+  # and the provenance. The only job with contents: write; an existing
+  # release of the tag is never replaced.
+  publish:
+    name: publish the GitHub Release
+    needs: release
+    if: >-
+      always() && needs.release.result == 'success'
+      && startsWith(github.ref, 'refs/tags/botlish-macos-v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: botlish-macos-publish
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      ZIP_SHA256: ${{ needs.release.outputs.zip_sha256 }}
+      VERSION: ${{ needs.release.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: botlish-macos-release
+          path: dist
+
+      - name: Publish the tag's release
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum -c SHA256SUMS
+          got=$(sha256sum botlish-macos-aarch64.zip | awk '{print $1}')
+          [ "$got" = "$ZIP_SHA256" ] || { echo "::error::MACOS-PUBLISH: the ZIP is not the release job's ($got, not $ZIP_SHA256)"; exit 1; }
+          [ "$(jq -r .version provenance.json)" = "$VERSION" ] || { echo "::error::MACOS-PUBLISH: the provenance is not this version's"; exit 1; }
+          [ "$(jq -r .mode provenance.json)" = release ] || { echo "::error::MACOS-PUBLISH: not a release build"; exit 1; }
+          [ "$(jq -r .bundle_id provenance.json)" = io.github.mwagner-webdev.botlish ] || { echo "::error::MACOS-PUBLISH: not the compiler's application"; exit 1; }
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "::error::MACOS-PUBLISH: the release $GITHUB_REF_NAME exists already: it is never replaced (tag a new version)"; exit 1
+          fi
+          notes=$(jq -r '"The Botlish compiler \(.version) for macOS 11 and later on Apple Silicon (arm64), as an application: Botlish.app (docs/MACOS-BOTLISH-DISTRIBUTION-MILESTONE-1.md).
+
+          Download botlish-macos-aarch64.zip, open it, and move Botlish.app where you like (Applications). It is a command-line compiler: run Botlish.app/Contents/MacOS/botlish (a symbolic link to it on your PATH works). It is signed with Developer ID (team \(.team)), notarized by Apple (submission \(.notarization_submission)) and its ticket is stapled; its native backend has no JIT and the application has no entitlement.
+
+          Programs run on the interpreter, or natively as executables: botlish -aot-run FILE.bot -- ARG... (Apple'"'"'s Command Line Tools link them: xcode-select --install). -backend cranelift is unavailable in this distribution.
+
+          Verify: shasum -a 256 -c SHA256SUMS; codesign --verify --deep --strict --verbose=2 Botlish.app; xcrun stapler validate Botlish.app; spctl --assess --type execute --verbose=4 Botlish.app.
+
+          Provenance: commit \(.source_commit), bundle \(.bundle_id), \(.toolchain); built, signed and tested by \(.workflow_run). botlish-macos-aarch64.zip SHA-256 \(.zip_sha256)."' provenance.json)
+          gh release create "$GITHUB_REF_NAME" botlish-macos-aarch64.zip SHA256SUMS provenance.json --verify-tag \
+            --title "Botlish $VERSION for macOS (Apple Silicon)" --notes "$notes"
+          gh release view "$GITHUB_REF_NAME" --json url,assets --jq '.url, (.assets[] | "\(.name) \(.size)")'

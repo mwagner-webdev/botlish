@@ -32,7 +32,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 TOOLS = os.path.join(HERE, "..", "tools")
 MACOS = os.path.join(ROOT, "examples", "games", "icy-tower", "macos")
+SHARED = os.path.join(ROOT, "tools", "macos-release")
 sys.path.insert(0, TOOLS)
+sys.path.insert(0, SHARED)
 sys.path.insert(0, MACOS)
 import fixtures as fx  # noqa: E402
 import machofake  # noqa: E402
