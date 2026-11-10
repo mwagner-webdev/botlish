@@ -78,16 +78,19 @@ test canary-select-estimate {an item without a measured duration is estimated fr
     list [names $chosen] [expr {[lindex $estimates 0] > 0 && [lindex $estimates 1] > [lindex $estimates 0]}]
 } -result {{tests/a.test tests/golden/s.bot} 1}
 
-test canary-records-format {the records file: history and duration lines, comments; anything else is an error naming the line} -body {
+test canary-records-format {the records file: history, duration and cost lines, comments; anything else is an error naming the line} -body {
     set path [file join [temporaryDirectory] canary-[pid]-records.tsv]
-    canaryWrite $path "# a comment\n\nhistory\ttests/a.test\t*\t3\t2026-11-01\twhy\nduration\ttests/a.test\t12.5\n"
+    canaryWrite $path "# a comment\n\nhistory\ttests/a.test\t*\t3\t2026-11-01\twhy\nduration\ttests/a.test\t12.5\n\ncost\tmacos-aarch64\ttests/a.test\t30.0\ncost\tmacos-aarch64\ttests/golden/s.bot\t4.5\n"
     set good [canary::records $path]
     canaryWrite $path "history\ttests/a.test\t*\tthree\t2026-11-01\twhy\n"
     set bad1 [catch {canary::records $path} m1]
     canaryWrite $path "durations\ttests/a.test\t1\n"
     set bad2 [catch {canary::records $path} m2]
-    list $good $bad1 [string match *:1:* $m1] $bad2 [string match "*not a history or duration line*" $m2]
-} -result {{history {{tests/a.test * 3 2026-11-01 why}} durations {tests/a.test 12.5}} 1 1 1 1}
+    canaryWrite $path "duration\ttests/a.test\t1\ncost\ttests/a.test\t1\n"
+    set bad3 [catch {canary::records $path} m3]
+    list $good $bad1 [string match *:1:* $m1] $bad2 [string match "*not a history, duration or cost line*" $m2] \
+        $bad3 [string match "*:2: a cost line is: cost HOST ITEM SECONDS" $m3]
+} -result {{history {{tests/a.test * 3 2026-11-01 why}} durations {tests/a.test 12.5} costs {macos-aarch64 {tests/a.test 30.0 tests/golden/s.bot 4.5}}} 1 1 1 1 1 1}
 
 test canary-records-items-exist {every item tests/canary.tsv names is a test file or golden suite of this tree, and each history entry's hosts are targets} -body {
     set records [canary::records]
@@ -102,7 +105,65 @@ test canary-records-items-exist {every item tests/canary.tsv names is a test fil
     dict for {item seconds} [dict get $records durations] {
         if {![canary::IsItem $item] || ![file isfile [file join $::projectRoot $item]]} { lappend problems "duration: $item" }
     }
-    list [expr {[llength [dict get $records history]] > 0}] $problems
+    dict for {host items} [dict get $records costs] {
+        if {$host ni {macos-aarch64 windows-x86_64}} { lappend problems "cost host: $host" }
+        dict for {item seconds} $items {
+            if {![canary::IsItem $item] || ![file isfile [file join $::projectRoot $item]]} { lappend problems "cost: $host $item" }
+        }
+    }
+    list [expr {[llength [dict get $records history]] > 0}] [lsort [dict keys [dict get $records costs]]] $problems
+} -result {1 {macos-aarch64 windows-x86_64} {}}
+
+# tests/platform/tier.tcl's shares of the acceptance tier for -shard I/N:
+# {FILES SUITES}, each in the order the tier runs them.
+proc tierShare {i n} {
+    set files {}
+    set suites {}
+    set out [exec [info nameofexecutable] [file join $::projectRoot tests platform tier.tcl] \
+        -shard $i/$n -backends interp -list 1 acceptance]
+    foreach line [split $out \n] {
+        if {[regexp {Tcl test files on interp: .* -file (.*)$} $line -> rest]} {
+            set files [lsearch -all -inline -glob $rest *.test]
+        } elseif {[regexp {golden suites on [^:]*: (.*)$} $line -> rest]} {
+            set suites [lmap path [lsearch -all -inline -glob $rest *.bot] {file tail $path}]
+        }
+    }
+    return [list $files $suites]
+}
+
+test canary-tier-shards-partition {tier.tcl's shares partition the acceptance tier, keep its order and are balanced: each within the costliest item of the mean, by the estimate tier.tcl uses (this host's costs, else the canary's)} -body {
+    set records [canary::records]
+    set costs [dict getdef [dict get $records costs] [canary::hostTarget] {}]
+    lassign [tierShare 1 1] allFiles allSuites
+    set problems {}
+    foreach n {2 3 4 5 6 7} {
+        set seenFiles {}
+        set seenSuites {}
+        foreach {kind prefix all} [list tcl tests/ $allFiles golden tests/golden/ $allSuites] {
+            set estimate [dict create]
+            set total 0.0
+            set top 0.0
+            foreach x $all {
+                set item $prefix$x
+                set e [if {[dict exists $costs $item]} {dict get $costs $item} else {canary::Estimate $item [dict get $records durations] $::projectRoot}]
+                dict set estimate $x $e
+                set total [expr {$total + $e}]
+                if {$e > $top} { set top $e }
+            }
+            for {set i 1} {$i <= $n} {incr i} {
+                lassign [tierShare $i $n] files suites
+                set share [if {$kind eq "tcl"} {set files} else {set suites}]
+                set order [lmap x $share {lsearch -exact $all $x}]
+                if {$order ne [lsort -integer $order] || -1 in $order} { lappend problems "$kind $i/$n: order" }
+                set load [::tcl::mathop::+ 0.0 {*}[lmap x $share {dict get $estimate $x}]]
+                if {$load > $total / $n + $top + 0.01} { lappend problems "$kind $i/$n: [format %.0f $load] s" }
+                if {$kind eq "tcl"} { lappend seenFiles {*}$share } else { lappend seenSuites {*}$share }
+            }
+        }
+        if {[lsort $seenFiles] ne [lsort $allFiles]} { lappend problems "files $n: not a partition" }
+        if {[lsort $seenSuites] ne [lsort $allSuites]} { lappend problems "suites $n: not a partition" }
+    }
+    list [expr {[llength $allFiles] > 200 && [llength $allSuites] > 100}] $problems
 } -result {1 {}}
 
 # A scratch repository: main with one commit, a branch with more.
