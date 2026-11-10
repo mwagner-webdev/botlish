@@ -471,12 +471,12 @@ count are that commit's; the runs at a6f677e and 9dca40a tested the tree
 before the merge. At a6f677e, before they were superseded, `icy-tower
 (windows x86-64)` and `icy-tower (macos arm64)` passed, `tests (windows
 x86-64)` passed its canary, smoke and root-plans jobs, and `tests.yml`
-passed its canary. The state at bf0f585 on 2026-11-09 15:35 UTC, the shared
-runners saturated (main's own test workflows at 996b50d are queued too):
+passed its canary. At bf0f585 every run passed (finished 2026-11-09 19:09
+UTC):
 
 | workflow | run | state |
 |---|---|---|
-| `tests.yml` (dispatched) | 42553518671 | passed: canary (mutant catalogs, warning gate, canary selection), `tests (compile)` (the whole Tcl suite on the compile backend, and the examples), native Rust unit tests, cranelift and cranelift-generic coverage, the four golden shards (every suite on every backend beside its Tcl originals), stub-linked and system-linked executables (also under GC stress), the method-call decision job (its tests, oracle and fuzzer, and the golden suites under the reference audit). `tests (interp)` did not run its tests in the first attempt: its "Install Neovim" step failed fetching Neovim's release (`curl: (22) ... error: 504`, GitHub's release server), before any test. Rerun (attempt 2) queued at 15:35 UTC: pending |
+| `tests.yml` (dispatched) | 42553518671 | passed, every job: canary (mutant catalogs, warning gate, canary selection), `tests (interp)` and `tests (compile)` (the whole Tcl suite on each, and the examples), native Rust unit tests, cranelift and cranelift-generic coverage, the four golden shards (every suite on every backend beside its Tcl originals), stub-linked and system-linked executables (also under GC stress), the method-call decision job (its tests, oracle and fuzzer, and the golden suites under the reference audit). `tests (interp)` passed in the run's second attempt: the first stopped in its "Install Neovim" step (`curl: (22) ... error: 504`, GitHub's release server) before any test ran, and the failed job was rerun unchanged |
 | `tests-arm64.yml` (dispatched) | 42553521335 | passed, every job: canary, interp, compile, both GC-stress runs, cranelift and cranelift-generic coverage, the four golden shards, the native Rust unit tests (also under GC stress), system-linked executables |
 | `static-decisions.yml` (dispatched) | 42553524098 | passed: batched and sequential agree on every golden suite (mutable-array.bot: batched 5 rounds, 7 builds; sequential 69 rounds, 205 builds) |
 | `windows-x86_64.yml` | 42553507858 | passed, every job |
@@ -485,8 +485,21 @@ runners saturated (main's own test workflows at 996b50d are queued too):
 | `icy-tower-macos.yml` | 42553507952 | passed |
 | `raven-cleanroom.yml`, `ci-tools.yml` | 42553507901, 42553507895 | passed |
 
-Whatever is pending above is pending, not passed.
-PENDING-CI
+The GC-stress jobs of `tests.yml` run on pushes to main only and were
+skipped; `tests-arm64.yml` ran its own under the dispatch.
+
+**Since these runs** main has moved on (0030f8a to cbaa040, 46 commits),
+and the branch no longer merges cleanly: DEPTH-SAFE-NESTED-EXPRESSION-
+FRONTEND-MILESTONE-1.md removes `levelLimit` from `hir::semantic::Call` (the
+nesting counted is the instances' alone, since the front end's walks run in
+segments, core/deep.tcl) where this branch made it a reason to defer a
+request -- a conflict in hir/semantic.tcl, to be resolved by keeping the
+deferral and dropping the interpreter-depth test. Its segments take the
+caller's variables in and give them back (core/deep.tcl's `Take`, `Give`);
+whether a walk that crosses the segment bound shares the HIR's expression
+table that way, and so copies it at its next write, is to be measured when
+main is merged. The branch must merge main again before it lands, and its CI
+runs again then.
 
 ## 7. Remaining limits and known problems
 
