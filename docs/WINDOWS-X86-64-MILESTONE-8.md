@@ -548,4 +548,108 @@ PENDING-CI
 
 ## 19. Files changed, and what to run
 
-PENDING-FILES
+**The production path.**
+
+* `native/src/codegen/library.rs`: `SUPPORTED` and `supports` name Windows
+  x86-64 (MSVC); `define` returns each public function's `Defined` (its
+  size and Windows `UNWIND_INFO`).
+* `native/src/codegen/mod.rs`: `add_windows_unwind` writes the public
+  functions' entries beside the program's.
+* `native/src/codegen/clif.rs`: `windows_unwind` shared with the library
+  writer.
+* `native/src/codegen/aot.rs`: `windows_library_definition`,
+  `windows_library_link_args`, `link_windows_library` (and the unit test
+  `windows_library_link_is_a_dll_of_the_static_runtime`).
+* `native/src/main.rs`: the driver's `library-dll DIR NAME FILE.nir`.
+* `native/src/runtime/library.rs`: `public_names`; `enter`'s
+  `entry_stack`; `CallDepth` (the outermost call's end); `LIVE_INSTANCES`
+  and `instance_gone`.
+* `native/src/runtime/vm.rs`: `Vm::entry_stack`, `entry_stack_at`; the
+  collector's walk and `publish_active_stack` follow it.
+* `native/src/runtime/coroutine.rs`: `release_pool`, `library_call_ended`,
+  `CoStack::discard`; `native/src/runtime/coroutine/windows.rs`:
+  `restore_thread`, the fiber's `discard`.
+* `native/library.tcl`: the Windows branch of `native::library`,
+  `WindowsToolchain`, `ValidateDll`, the Windows header and manifest,
+  certutil's digests; `native/pe.tcl` (new): the PE and import-library
+  reader; `native/native.tcl`: the `libraries` capability.
+* `main.tcl`: the `import:` line and the help text; `pm/tools.tcl`: an
+  artifact's `import` digest.
+
+**Tests, tools, CI, documents.**
+
+* `tests/native-library.test`: portable harness (MSVC's cl on Windows, the
+  import library, `nl_thread`, `nlHostCallback`), the ported tests, and the
+  new ones (`nl-coroutine-stacks-released`, `nl-windows-*`,
+  `nl-unsupported-host`); `tests/cffi/nl-win64-probe.asm` (new).
+* `audit/native-library/tools/fuzz.tcl` (new), `mutate.tcl` (Windows),
+  `mutants.txt` (fourteen new, two updated); `audit/target-model/tools/
+  mutants.txt` (one updated).
+* `audit/windows-library/probe.tcl` and
+  `.github/workflows/windows-library-probe.yml` (new): the census.
+* `bench/native-library.tcl` (new).
+* `tests/platform/tier.tcl`: `native-library-fuzz`, `-mutants`, `-bench`.
+* `.github/workflows/windows-x86_64.yml`: the smoke job's library step and
+  `native-library.test` among its files.
+* `docs/NATIVE-LIBRARY-MILESTONE-1.md` (forward reference),
+  `docs/INDEX.md`, `AGENTS.md` (Native libraries), Compilerpedia's
+  `backend.native-library` and `error.native-library`.
+
+**Building and consuming a sample library on Windows** (from a Developer
+Command Prompt, or a shell after `vcvars64.bat`; Tcl 9.0.1 and the native
+backend built as WINDOWS-X86-64-MILESTONE-1.md says), `example.bot` being
+
+```botlish
+error Rejected:
+    code: int
+
+exported c fn checked(n: int) -> int errors Rejected:
+    if n < 0:
+        fail Rejected {code: n}
+    n * 2
+```
+
+```bat
+tclsh9.0 main.tcl -emit-native-library example -out output example.bot
+rem output\example.dll, example.lib, example.h, example.manifest.json
+cl /nologo /W4 /Ioutput host.c output\example.lib /Fe:output\host.exe
+output\host.exe
+```
+
+where `host.c` is
+
+```c
+#include <stdio.h>
+#include "example.h"
+
+int main(void) {
+    example_instance *in; example_error *e = NULL; int64_t r;
+    if (example_create(&in, &e) != example_STATUS_OK) return 1;
+    if (example_checked(in, 21, &r, &e) == example_STATUS_OK)
+        printf("%lld\n", (long long) r);
+    example_destroy(in);
+    return 0;
+}
+```
+
+The host runs beside `example.dll` (the loader's first directory), or
+loads it itself with `LoadLibraryW(L"example.dll")` and finds
+`example_create`, `example_checked`, ... with `GetProcAddress`.
+
+**What to run when changing this.** Everything NATIVE-LIBRARY-MILESTONE-1.md's
+section 16 lists, and:
+
+* `tclsh9.0 tests/native-library.test` on Windows (Visual Studio's x64
+  tools; the Windows workflow's smoke job) and on Linux;
+* `cargo test --release --manifest-path native/Cargo.toml --bin
+  botlish-native windows_library` and `--lib program`;
+* `tclsh9.0 audit/native-library/tools/fuzz.tcl -seed S` (several seeds,
+  once with `-gc-stress 1`), on both hosts;
+* `tclsh9.0 audit/native-library/tools/mutate.tcl` (every mutant that
+  applies to the host; on Windows the tier item `native-library-mutants`,
+  a `[ci-full]` push with `CI-Tests: native-library-mutants`);
+* `tclsh9.0 bench/native-library.tcl` for the costs;
+* `tclsh9.0 audit/windows-library/probe.tcl` (its workflow) for a change to
+  the link;
+* for the runtime's coroutine and stack changes, what AGENTS.md lists for
+  coroutines and for the native stack guard; `tools/mutant-catalogs.tcl`.

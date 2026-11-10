@@ -1427,19 +1427,20 @@ a worker thread's, at its last destroy: freed}
 # Windows x86-64: the DLL in a host it does not own (WINDOWS-X86-64-MILESTONE-8.md)
 
 # The C declarations of a host that loads library LIB itself (LoadLibraryW,
-# GetProcAddress): a pointer type and variable for each function it uses,
-# and `nl_resolve`, which loads the DLL and finds them, printing what it
-# could not find.
+# GetProcAddress): for each function FN it uses, its pointer type
+# LIB_FN_t -- TYPE with T standing for that name, e.g. "int32_t (*T)(void)"
+# -- and a variable LIB_p_FN; and `LIB_resolve`, which loads the DLL and
+# finds them, printing what it could not find.
 proc nlLoaderC {lib functions} {
     set c "static HMODULE ${lib}_module;\n"
     foreach {fn type} $functions {
-        append c "typedef $type;\nstatic ${fn}_t ${lib}_p_$fn;\n"
+        append c "typedef [string map [list (*T) "(*${lib}_${fn}_t)"] $type];\nstatic ${lib}_${fn}_t ${lib}_p_$fn;\n"
     }
     append c "static int ${lib}_resolve(void) \{\n"
     append c "    ${lib}_module = LoadLibraryW(L\"$lib.dll\");\n"
     append c "    if (${lib}_module == NULL) \{ printf(\"LoadLibraryW($lib.dll) failed: %lu\\n\", GetLastError()); return 0; \}\n"
     foreach {fn type} $functions {
-        append c "    ${lib}_p_$fn = (${fn}_t) (void (*)(void)) GetProcAddress(${lib}_module, \"${lib}_$fn\");\n"
+        append c "    ${lib}_p_$fn = (${lib}_${fn}_t) (void (*)(void)) GetProcAddress(${lib}_module, \"${lib}_$fn\");\n"
         append c "    if (${lib}_p_$fn == NULL) \{ printf(\"no ${lib}_$fn\\n\"); return 0; \}\n"
     }
     append c "    return 1;\n\}\n"
@@ -1461,22 +1462,22 @@ typedef struct chk_error chk_error;
 typedef struct one_instance one_instance;
 typedef struct two_instance two_instance;
 [nlLoaderC chk {
-    create {int32_t (*create_t)(chk_instance **, chk_error **)}
-    destroy {int32_t (*destroy_t)(chk_instance *)}
-    checked {int32_t (*checked_t)(chk_instance *, int64_t, int64_t *, chk_error **)}
-    error_identity {int32_t (*error_identity_t)(const chk_error *, const uint8_t **, size_t *)}
-    error_field_int {int32_t (*error_field_int_t)(const chk_error *, size_t, int64_t *)}
-    error_release {int32_t (*error_release_t)(chk_error **)}
+    create {int32_t (*T)(chk_instance **, chk_error **)}
+    destroy {int32_t (*T)(chk_instance *)}
+    checked {int32_t (*T)(chk_instance *, int64_t, int64_t *, chk_error **)}
+    error_identity {int32_t (*T)(const chk_error *, const uint8_t **, size_t *)}
+    error_field_int {int32_t (*T)(const chk_error *, size_t, int64_t *)}
+    error_release {int32_t (*T)(chk_error **)}
 }]
 [nlLoaderC one {
-    create {int32_t (*one_create_t)(one_instance **, void **)}
-    twice {int32_t (*one_twice_t)(one_instance *, int64_t, int64_t *, void **)}
-    destroy {int32_t (*one_destroy_t)(one_instance *)}
+    create {int32_t (*T)(one_instance **, void **)}
+    twice {int32_t (*T)(one_instance *, int64_t, int64_t *, void **)}
+    destroy {int32_t (*T)(one_instance *)}
 }]
 [nlLoaderC two {
-    create {int32_t (*two_create_t)(two_instance **, void **)}
-    twice {int32_t (*two_twice_t)(two_instance *, int64_t, int64_t *, void **)}
-    destroy {int32_t (*two_destroy_t)(two_instance *)}
+    create {int32_t (*T)(two_instance **, void **)}
+    twice {int32_t (*T)(two_instance *, int64_t, int64_t *, void **)}
+    destroy {int32_t (*T)(two_instance *)}
 }]
 static const char *public_names\[\] = {[join [lmap n $public {string cat \"$n\"}] {, }]};
 static const char *internal_names\[\] = {\"botlish_library_call\", \"botlish_library_create\", \"botlish_program\", \"botlish_fn_0\",
@@ -1887,9 +1888,9 @@ test nl-windows-unload {after every instance is destroyed the DLL unloads, a thr
 #include <stdint.h>
 typedef struct co_instance co_instance;
 [nlLoaderC co {
-    create {int32_t (*create_t)(co_instance **, void **)}
-    chain {int32_t (*chain_t)(co_instance *, int64_t, int64_t *, void **)}
-    destroy {int32_t (*destroy_t)(co_instance *)}
+    create {int32_t (*T)(co_instance **, void **)}
+    chain {int32_t (*T)(co_instance *, int64_t, int64_t *, void **)}
+    destroy {int32_t (*T)(co_instance *)}
 }]
 $::nlStacksC
 static HANDLE used, unloaded;
