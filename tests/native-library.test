@@ -54,6 +54,8 @@ if {$::nlWindows} {
 testConstraint elfLibraries [expr {[testConstraint nativeLibraries] && !$::nlWindows}]
 testConstraint windowsLibraries [expr {[testConstraint nativeLibraries] && $::nlWindows}]
 testConstraint nm [expr {[auto_execok nm] ne ""}]
+# A host the capability table gives no libraries (macOS today).
+testConstraint noNativeLibraries [expr {![native::hostSupports libraries]}]
 set ::nlCounter 0
 
 proc nlWrite {path text} {
@@ -1584,6 +1586,43 @@ test nl-windows-validate {a DLL exporting a name of its own, or importing a C ru
     set results
 } -result {{NATIVE LIBRARY PE} 1 0 0 0 {NATIVE LIBRARY PE} 0 1 0 0}
 
+# The Windows library build's failures, each its own kind with the tool's
+# words kept (WINDOWS-X86-64-MILESTONE-8.md, "Toolchain and diagnostics"): a
+# linker that is not there (NATIVE LIBRARY TOOLCHAIN, before anything is
+# compiled), a runtime archive that is none (NATIVE LIBRARY RUNTIME), a
+# library or a C function no input provides (NATIVE LIBRARY LINK, with
+# link.exe's LNK lines); nothing is left under the library's names.
+test nl-windows-diagnostics {a missing linker, an unusable runtime archive and a failed link are each said as such} -constraints windowsLibraries -setup {
+    set saved [array get ::env BOTLISH_NATIVE_*]
+} -body {
+    set dir [nlDir]
+    set results {}
+    nlWrite [file join $dir chk.bot] $::nlChecked
+    set hir [nlHir [file join $dir chk.bot]]
+    set ::env(BOTLISH_NATIVE_SYSTEM_LINKER) [file join $dir no-such-dir link.exe]
+    catch {nlBuild $hir -name chk -out [file join $dir lib]} message options
+    lappend results [dict get $options -errorcode] [string match "*no-such-dir*" $message]
+    unset ::env(BOTLISH_NATIVE_SYSTEM_LINKER)
+    nlWrite [file join $dir fake.lib] "not an archive\n"
+    set ::env(BOTLISH_NATIVE_RUNTIME) [file join $dir fake.lib]
+    catch {nlBuild $hir -name chk -out [file join $dir lib]} message options
+    lappend results [dict get $options -errorcode] [string match "*fake.lib*" $message]
+    unset ::env(BOTLISH_NATIVE_RUNTIME)
+    foreach {name source} {
+        nolib "import std::ffi::c\n\nextern c library \"botlish_no_such_library\"\n\nextern c fn labs(x: std::ffi::c::Long) -> std::ffi::c::Long\n\nexported c fn f(n: int) -> int:\n    labs(n) + 0\n"
+        nosym "import std::ffi::c\n\nextern c fn botlish_no_such_function(x: std::ffi::c::Long) -> std::ffi::c::Long\n\nexported c fn f(n: int) -> int:\n    botlish_no_such_function(n) + 0\n"
+    } {
+        nlWrite [file join $dir $name.bot] $source
+        catch {nlBuild [nlHir [file join $dir $name.bot]] -name $name -out [file join $dir lib]} message options
+        lappend results [dict get $options -errorcode] [regexp {LNK\d+} $message] \
+            [file exists [file join $dir lib $name.dll]] [file exists [file join $dir lib $name.manifest.json]]
+    }
+    set results
+} -cleanup {
+    unset -nocomplain ::env(BOTLISH_NATIVE_SYSTEM_LINKER) ::env(BOTLISH_NATIVE_RUNTIME)
+    array set ::env $saved
+} -result {{NATIVE LIBRARY TOOLCHAIN} 1 {NATIVE LIBRARY RUNTIME} 1 {NATIVE LIBRARY LINK} 1 0 0 {NATIVE LIBRARY LINK} 1 0 0}
+
 # Every public function has unwind information (WINDOWS-X86-64-MILESTONE-8.md,
 # "Unwind information"): Windows finds a function entry for each one's
 # address, and a stack trace a host takes inside a C callback that Botlish
@@ -1961,6 +2000,27 @@ fsum = 18
 sum6: status 0 = 91, nonvolatile registers changed: 0
 sum6(-3): status 1 Negative value=0
 nonvolatile registers changed: 0}
+
+# Where the capability table gives no native libraries (macOS: neither its
+# Mach-O library link nor its runtime's library mode exists), native::library
+# refuses the build before anything is lowered, and the driver refuses its
+# library commands: no host gains libraries by accident
+# (WINDOWS-X86-64-MILESTONE-8.md enabled Windows x86-64 alone).
+test nl-unsupported-host {a host without native libraries refuses them before lowering, in native::library and in the driver} -constraints {nativeBuilt noNativeLibraries} -body {
+    set dir [nlDir]
+    nlWrite [file join $dir chk.bot] $::nlChecked
+    set hir [nlHir [file join $dir chk.bot]]
+    catch {native::library $hir -name chk -out [file join $dir lib]} message options
+    set text [native::nir $hir -exports [lmap r [hir::exports::of $hir] {
+        dict create symbol chk_[dict get $r name] block [dict get $r block] params [lmap {p t} [dict get $r params] {set t}] result [dict get $r result]
+    }]]
+    set driver {}
+    foreach command {library library-dll} {
+        set lines [native::Driver $command $text [file join $dir out.o] chk]
+        lappend driver [lindex [lsearch -inline -index 0 $lines error] 1]
+    }
+    list [dict get $options -errorcode] [file exists [file join $dir lib]] $driver
+} -result {{NATIVE UNSUPPORTED library} 0 {{NATIVE UNSUPPORTED library} {NATIVE UNSUPPORTED library}}}
 
 # ---------------------------------------------------------------------------
 # The front end
