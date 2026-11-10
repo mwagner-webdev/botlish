@@ -17,10 +17,12 @@ makes the exit status 1. Before any mutant, every named test runs on the
 unmutated copy and must pass (a test that fails there kills nothing).
 
 TEST is FILE.CLASS.METHOD of audit/macos-release/tests/ (test_credentials,
-test_release, test_workflow). The real checkout is never modified.
+test_release, test_workflow, test_botlish_release, test_botlish_workflow).
+The real checkout is never modified.
 """
 import argparse
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -29,8 +31,28 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
-COPIED = ["examples/games/icy-tower/macos", "examples/games/icy-tower/package-macos.sh", "LICENSE",
-          ".github/workflows/icy-tower-macos.yml", "audit/macos-release"]
+COPIED = ["tools/macos-release", "examples/games/icy-tower/macos", "examples/games/icy-tower/package-macos.sh", "LICENSE",
+          ".github/workflows/icy-tower-macos.yml", "audit/macos-release",
+          # Botlish.app's release (single/macos/release.py, bundle.py, sign.sh);
+          # what single/package.tcl packs from the tree is read from it
+          # (staged(), below), never listed here a second time.
+          "single/macos", "single/package.tcl", "single/main.tcl", "single/build.sh", "native/*.tcl",
+          "compilerpedia/compilerpedia.tcl", "compilerpedia/topics", "compilerpedia/generated",
+          ".github/workflows/botlish-macos.yml"]
+
+
+def staged():
+    """The files and directories single/package.tcl's StageCompiler copies
+    from the tree (its `foreach item {...}` list): the private tree must
+    hold every one, or the Botlish release tests' baseline cannot stage the
+    compiler (the C backend's ccompile/ was missed this way)."""
+    with open(os.path.join(ROOT, "single", "package.tcl"), encoding="utf-8") as f:
+        text = f.read()
+    body = re.search(r"proc StageCompiler \{app\} \{(.*?)\n\}", text, re.S)
+    items = body and re.search(r"foreach item \{([^}]*)\}", body.group(1))
+    if not items:
+        raise SystemExit("mutate.py: single/package.tcl's StageCompiler has no `foreach item {...}` list to read")
+    return items.group(1).split()
 
 
 def read_mutants(path):
@@ -64,7 +86,14 @@ def read_mutants(path):
 
 
 def tree(base):
-    for rel in COPIED:
+    import glob
+    copied = []
+    for rel in COPIED + [item for item in staged() if item not in COPIED]:
+        if "*" in rel:
+            copied += sorted(os.path.relpath(p, ROOT) for p in glob.glob(os.path.join(ROOT, rel)))
+        elif os.path.exists(os.path.join(ROOT, rel)):
+            copied.append(rel)
+    for rel in copied:
         src, dst = os.path.join(ROOT, rel), os.path.join(base, rel)
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         if os.path.isdir(src):

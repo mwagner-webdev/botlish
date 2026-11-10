@@ -196,8 +196,7 @@ def good_env(authority):
 def damaged_inside(data, password):
     """DATA (a PKCS#12) with one byte of its largest encrypted value changed and its MAC computed again with
     PASSWORD: the password is right, the contents are damaged."""
-    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "examples", "games",
-                                    "icy-tower", "macos"))
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "tools", "macos-release"))
     import credentials as c
     import hashlib
     import hmac

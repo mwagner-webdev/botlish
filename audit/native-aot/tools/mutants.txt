@@ -559,9 +559,9 @@ if {$nativeStartup eq ""} {
 @@ driver-startup-for-run the driver takes --startup for run and bench, where no executable is made (the JIT)
 ## native/src/main.rs
 <<<<
-    if startup.is_some() && !matches!(command, "executable" | "object") {
+    if startup.is_some() && !matches!(command, "executable" | "object" | "aot-run") {
 ====
-    if startup.is_some() && !matches!(command, "executable" | "object" | "run" | "bench") {
+    if startup.is_some() && !matches!(command, "executable" | "object" | "aot-run" | "run" | "bench") {
 >>>>
 
 @@ linked-run-main-thread a linked run (a program that calls C, run by the driver) is emitted with the main thread's policy

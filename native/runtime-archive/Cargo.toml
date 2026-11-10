@@ -21,7 +21,9 @@ test = false
 doctest = false
 
 [dependencies]
-botlish-native = { path = ".." }
+# The runtime only: never the driver's JIT (a feature of botlish-native's
+# defaults), whichever features the driver is built with.
+botlish-native = { path = "..", default-features = false }
 
 [features]
 # The driver's root plan, never another (runtime::framewalk; the ABI

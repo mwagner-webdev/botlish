@@ -126,6 +126,9 @@ RELEASES = {
         Release("icy-tower-windows", "icy-tower-windows.yml", tag="icy-tower-windows-latest",
                 built_by="icy-tower-windows.yml"),
         Release("icy-tower-macos", "icy-tower-macos.yml", tag_prefix="icy-tower-macos-v"),
+        # Botlish.app (MACOS-BOTLISH-DISTRIBUTION-MILESTONE-1.md): built,
+        # signed and tested by its release run itself, from the tag.
+        Release("botlish-macos", "botlish-macos.yml", tag_prefix="botlish-macos-v"),
     )
 }
 
@@ -468,7 +471,8 @@ def tagged_due(api, release, out, summary):
 
 def deferred(api, run):
     """The run's release job was skipped (icy-tower-macos.yml: its game
-    and release jobs wait for the `tested` job's green)."""
+    and release jobs wait for the `tested` job's green; botlish-macos.yml:
+    its release job)."""
     jobs = api.jobs(run["id"])
     release = [j for j in jobs if (j.get("name") or "").startswith("release")]
     return bool(release) and all(j.get("conclusion") == "skipped" for j in release)

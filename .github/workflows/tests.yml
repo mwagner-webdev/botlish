@@ -235,6 +235,19 @@ jobs:
       - name: Run native Rust unit tests
         run: cargo test --release --manifest-path native/Cargo.toml
 
+      # The driver without its JIT, the macOS application's
+      # (MACOS-BOTLISH-DISTRIBUTION-MILESTONE-1.md): built here too, so code
+      # that needs the JIT outside its cargo feature fails on Linux rather
+      # than only in macos-arm64.yml's app job, and tests/aot-run.test's
+      # aotr-no-jit-driver runs against it.
+      - name: The driver without its JIT, and -aot-run with it
+        env:
+          LANG: C.utf8
+          LC_ALL: C.utf8
+        run: |
+          cargo build --release --no-default-features --manifest-path native/Cargo.toml --target-dir native/target/no-jit
+          tclsh9.0 tests/all.tcl -file aot-run.test
+
   stub-linker:
     name: tests (stub-linked executables)
     needs: canary
