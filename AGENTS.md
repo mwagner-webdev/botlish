@@ -1078,6 +1078,42 @@ computed bools, follow exact values, group per callee, warn on a declaration
 without call evidence, print a flag spelling, or add a fixit or an opt-out
 (FLAGS.md, "Boolean arguments", records the graduation criteria).
 
+`DISCARDED-MUTATION` (WARNINGS-DISCARDED-MUTATION-MILESTONE-1.md;
+hir/discarded.tcl the facts, hir/warnings.tcl the pass) reads the checked
+program as written -- a trait program's `traitSource`, any other program's
+`checkedSource`, which hir::BuildFull keeps (for a program that uses a
+mutable collection) before the elaborations rename a fold's intermediate
+and rewrite MutableMap loops, and which `hir::warnings::run` drops from the
+HIR every compilation returns (interchange text leaves it out too) -- and
+reports two proven facts: a mutation (hir::mutvec's `place` receivers and
+place arguments, written calls only) whose every destination is a place
+that dies with its scope and is its path's last use
+(`hir::mutvec::NoLaterUse`), whose value is discarded and whose callee is
+confined (only its own places and its place parameters, transitively: no
+context, function value, syscall, C call, yield or affine value); and a
+fold's `continue` or bare `break` that every path reaches after mutating the
+intermediate (a must-walk of the iteration, never `FoldExitsClean`, which
+answers another question). Keep it so: never warn on a mutation some path
+reads, on a place parameter's or a context's, on a call with another
+effect, on anything affine, or on an exit only some paths reach after the
+mutation; never read a name or a spelling (`push`, `set`); never analyze an
+elaborated HIR as if it were written (`hir::discarded::Source` declines
+one); no opt-out, no fixit, no claim that the call may be deleted (its
+failure stays the program's). If you change any of that, `NoLaterUse` or
+`UseMap`, how a fold, a loop, a handler or a place parameter binds, the
+registry's ownership roles or runtime tags, `checkedSource`, or the
+completion analysis's `reachedExprs`, run `tests/discarded-mutation.test`,
+`audit/discarded-mutation/tools/fuzz.tcl` (several seeds: its model is its
+own liveness and must-walk over the statements it generated) and
+`audit/discarded-mutation/tools/mutate.tcl` (every mutant in its
+`mutants.txt` must still apply and be killed by a test its `!!` line names:
+update a mutant's text when you change the code it mutates, keeping it a
+mutant of the same rule), and the warning gate.
+`audit/discarded-mutation/tools/census.tcl` (and `test-census.sh` for the
+Tcl test files' programs) re-takes the repository census against
+`audit/discarded-mutation/census.tsv`; `bench/discarded-mutation.tcl` the
+compile-time costs.
+
 ## The warning gate
 
 The shipped stdlib, libraries, examples and benchmarks compile clean under
@@ -2063,7 +2099,7 @@ and no acceptance depends on one.
   the host's tools see them), `tests/platform/tier.tcl smoke`, the canary)
   and the same smoke on ubuntu as a control; a push to main and a
   dispatched run (`workflow_dispatch` on the branch) also Tier B
-  (`tier.tcl acceptance`, five shards), the system linker and the
+  (`tier.tcl acceptance`, six shards), the system linker and the
   application's jobs. Locally, `tclsh9.0
   tests/platform/tier.tcl smoke` takes seconds, and `tier.tcl X.test
   Y.bot` runs any file or suite the way CI does.

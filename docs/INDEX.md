@@ -232,6 +232,7 @@ at its top ("Superseded by ...", "Partially superseded by ...").
 - [WARNINGS-PROVES-NAMING.md](WARNINGS-PROVES-NAMING.md) -- `PROVES-NAMING`
 - [WARNINGS-ONE-CHAR-STRING-LITERAL.md](WARNINGS-ONE-CHAR-STRING-LITERAL.md) -- `ONE-CHAR-STRING-LITERAL`
 - [WARNINGS-MANY-BOOLEAN-ARGUMENTS.md](WARNINGS-MANY-BOOLEAN-ARGUMENTS.md) -- `MANY-BOOLEAN-ARGUMENTS`
+- [WARNINGS-DISCARDED-MUTATION-MILESTONE-1.md](WARNINGS-DISCARDED-MUTATION-MILESTONE-1.md) -- `DISCARDED-MUTATION`: a mutation whose new state nothing reads before its place dies (a local, a loop variable, a fold intermediate, a payload), and a fold's `continue` or `break` that every path reaches after mutating the intermediate; proven from the checked program as written, the census's nine reproducers caught, every legitimate idiom silent
 - [MODULE-PRIVACY-AND-CONTEXT-ESCAPE-MILESTONE-1.md](MODULE-PRIVACY-AND-CONTEXT-ESCAPE-MILESTONE-1.md) -- `CONTEXT-RESOURCE-ESCAPE` (section 3)
 - [REFACTOR-WARNINGS-CLEAN.md](REFACTOR-WARNINGS-CLEAN.md) -- the corpus under its own warnings
 - [LANGUAGE-LIBRARY-DEFICIENCIES.md](LANGUAGE-LIBRARY-DEFICIENCIES.md) -- language and library gaps that refactor found

@@ -100,9 +100,14 @@ values of the systems layer). Operations never modify their operands:
   * MutableVector[T] and MutableArray[T] are the two mutable values. They
     are still values, not references: `w = v` is a logical copy, and a
     mutation (`v.push(x)`) must name a place -- a local, a place
-    parameter, a context parameter or a field path from one -- and changes
-    only that place's value. An ordinary parameter is the function's copy,
-    not a place it may mutate (NONPLACE-PARAMETER-MUTATION).
+    parameter, a context parameter, a loop or lockstep variable, a fold's
+    intermediate, a handler's payload, or a field path from one -- and
+    changes only that place's value. A construct's binding is a place of
+    its construct holding its own copy: `loop row in rows: row.push(1)`
+    changes each iteration's copy, never `rows` (warning.discarded-mutation
+    reports such a change that nothing reads). An ordinary parameter is the
+    function's copy, not a place it may mutate
+    (NONPLACE-PARAMETER-MUTATION).
 
 == WHY
 Immutable values make every binding mean one thing for its whole scope, so
@@ -2651,7 +2656,7 @@ summary: `loop x in xs:` and `loop i from a to b:` collect their body's values i
 index: concepts
 alias: loop; for loop; while loop; collecting loop; break and continue; counted loop; for; while; for x in xs; for i in range; while true
 keywords: loop, in, from, to, through, down from, break, continue, while, for, collect, map, filter, iteration, iterator, iterate, range, placement
-related: concept.folds concept.lockstep concept.lists concept.if-expressions concept.mutable-map concept.mutable-set rule.loop-placement rule.control-placement capability.map-filter proof.list-bounds task.iterate-with-index
+related: concept.folds concept.lockstep concept.lists concept.if-expressions concept.mutable-map concept.mutable-set rule.loop-placement rule.control-placement capability.map-filter proof.list-bounds task.iterate-with-index warning.discarded-mutation
 
 == WHAT IT IS
     loop x in xs:                  every element of a List (or vector), or
@@ -2683,6 +2688,13 @@ whose bounds are empty runs zero times and never reverses direction.
     (task.accumulate). `total = total + x` in a body compiles, but binds a
     new `total` of the body: the outer one never changes
     (rule.immutable-bindings).
+  * The loop variable is a fresh binding holding a copy of the element.
+    When the element is a MutableVector, MutableArray, MutableMap or
+    MutableSet, the variable is a place of its iteration: mutating it
+    changes that copy, never the element in the collection
+    (concept.values). To change the elements, collect the changed copies
+    (`loop row in rows:` / `row.push(0)` / `row`) and continue with that
+    List; a mutation nothing reads is warning.discarded-mutation.
 
 == WHY
 Collecting loops replace map, filter and list-building variables with one
@@ -4058,9 +4070,16 @@ elements copy-on-write, so copying is cheap.
     function make logical copies, and mutating one never changes another.
   * The receiver of a mutation must be a place of the function doing it
     (MUTABLE-PLACE-RECEIVER): a local binding, a place parameter, a
-    context parameter, or a field path from one. A call result or a
-    temporary is not a place, and a nested function cannot mutate an
-    enclosing function's vector (MUTABLE-PLACE-CAPTURE).
+    context parameter, a loop variable, a fold's intermediate, a handler's
+    payload, or a field path from one. A call result or a temporary is not
+    a place, and a nested function cannot mutate an enclosing function's
+    vector (MUTABLE-PLACE-CAPTURE).
+  * A loop variable, a fold's intermediate and a handler's payload are
+    places of their construct, each holding its own copy: mutating a loop
+    variable changes that iteration's copy of the element, never the
+    iterated collection; collect the changed copies (`loop v in vs:
+    v.push(0); v`, on two lines) to keep them. A mutation whose new state
+    nothing reads is warning.discarded-mutation.
   * An ordinary parameter is the callee's own copy, never a place it may
     mutate (NONPLACE-PARAMETER-MUTATION): to give a caller the change,
     declare the parameter a place (`place v: MutableVector[T]`,
@@ -4655,6 +4674,10 @@ reference semantics; it is now a value like MutableVector.
 == RULES
   * Assignment and argument passing copy (copy-on-write); mutations go
     through places only (MUTABLE-PLACE-RECEIVER, MUTABLE-PLACE-CAPTURE).
+    A loop variable, a fold's intermediate and a handler's payload are
+    places of their construct holding their own copy: `loop row in rows:
+    row.set(0, 1)` changes each iteration's copy, never `rows`
+    (warning.discarded-mutation).
   * at and set fail with IndexNotFound, freeze and copy with
     LowerUnderrun/UpperOverrun, unless the compiler proves the index or
     slice valid (proof.list-bounds, proof.slices).
