@@ -842,14 +842,16 @@ its function literals and exact call targets -- and the memo, which reads
 the program-wide `trusted` flag, never changes a verdict (tested: memo on
 and off agree in every provenance test). The one golden suite with claims
 inside static blocks is `static-compile-expected-diagnostics.bot`;
-`static-decisions.yml` was dispatched on the branch for it (below).
+`static-decisions.yml`, dispatched on the branch for it, found the batched
+and the sequential scheduler in agreement (below).
 
 **CI.** On the branch at 19cc383 (the later commits change only Markdown,
 which starts no workflow). Main's latest runs at the branch point
 (cbaa040) were green; main has since moved to cfd6ecf, whose runs are
 queued, and the branch merges with it without a conflict (trial merge).
 The status of each dispatched run when this section was written, 2026-11-10
-around 10:00 UTC (pending is pending, never passed):
+around 10:00 UTC, the static-decisions run read again at 12:50 UTC (pending
+is pending, never passed):
 
 | workflow | run | status |
 |---|---|---|
@@ -858,7 +860,7 @@ around 10:00 UTC (pending is pending, never passed):
 | tests (macos arm64) | [42770749276](https://github.com/mwagner-webdev/botlish/actions/runs/42770749276) | smoke, Linux control and acceptance shards 4 and 5 passed; the rest pending |
 | tests (windows x86-64) | [42770752278](https://github.com/mwagner-webdev/botlish/actions/runs/42770752278) | canary, smoke and root plans passed; the acceptance shards and the system linker pending |
 | icy-tower (macos arm64), icy-tower (windows x86-64) | branch push | passed |
-| static-decisions (static-compile-expected-diagnostics.bot) | [42795041291](https://github.com/mwagner-webdev/botlish/actions/runs/42795041291) | pending |
+| static-decisions (static-compile-expected-diagnostics.bot) | [42795041291](https://github.com/mwagner-webdev/botlish/actions/runs/42795041291) | passed: batched and sequential agree (4 rounds and 6 builds against 26 rounds and 52 builds) |
 
 ## 22. Production files changed
 
