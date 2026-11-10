@@ -650,7 +650,37 @@ Local (a 4-core container, Linux x86-64):
 * The oracle's selftest (16 cases), the fuzzer (seeds 1-11), the mutation
   catalog (27 of 27 killed): sections 17 and 18.
 
-CI on the branch (claude/happy-sagan-d6fiso): @CI@
+CI on the branch (claude/happy-sagan-d6fiso), at f14b02b6 (the last code
+commit; later commits are documentation only):
+
+* **Passed:** tests (dispatched: canary, interp, compile, the cranelift and
+  cranelift-generic coverage, the native Rust unit tests, the stub- and
+  system-linked executables, the four golden shards, the method-call
+  decision's oracle and reference audit), tests (linux arm64, dispatched),
+  static-decisions (dispatched: every golden suite batched against
+  sequential, no disagreement), icy-tower (macos arm64) and icy-tower
+  (windows x86-64).
+* **tests (windows x86-64)** and **tests (macos arm64)** (push runs) are
+  marked failed, but every job they record passed: Windows' canary, smoke,
+  root plans, system linker and acceptance shards 2, 3 and 4 of 4; macOS's
+  smoke, Linux control, Botlish.app, Botlish.app without developer tools,
+  system linker, main-thread startup, static SDL3 and acceptance shards 1,
+  4 and 5 of 5. Windows' acceptance shard 1 and macOS's shards 2 and 3
+  have no job record and no artifact: they never ran, and GitHub refuses
+  to retry either run ("This workflow run cannot be retried"). Another
+  branch's Windows run the same afternoon (42644203828) lost every one of
+  its acceptance jobs the same way. So the acceptance tier was dispatched
+  again on both hosts (runs 42766853782 and 42766857987, at c5505d2c,
+  whose code is f14b02b6's): **pending** when this was written.
+
+Main: its latest runs (0a518ba4; its head cbaa0402 is scalar-asm-audit's
+commit, which no workflow runs) are green -- tests, tests (linux arm64),
+tests (macos arm64), tests (windows x86-64), static-decisions, single
+executable, c-bindgen, bench and the three icy-tower workflows. The branch
+is not merged: main has moved since it branched (32ed8f87's CI rules,
+which is why this branch's pushes still ran macOS's and Windows's
+acceptance tiers, cbb08464's census and 0a518ba4's emission fix), and a
+merge is the owner's decision.
 
 ## 21. Next milestone
 
