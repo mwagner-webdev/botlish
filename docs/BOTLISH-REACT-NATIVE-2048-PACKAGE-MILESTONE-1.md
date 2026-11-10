@@ -71,8 +71,10 @@ game played through it is the interpreter's, snapshot for snapshot. A
 second, unrelated library goes through the same generator into the same
 app.
 
-**Android execution is observed on a 4 KiB-page emulator, through the ARM
-native bridge, with two gaps.** The CI evidence (sections 16 and 23):
+**Android execution is observed on both emulator images, Android 14 with
+4 KiB pages and Android 15 with 16 KiB pages, through the ARM native
+bridge: every phase but GC stress.** Run 12 passed both Android jobs. The
+CI evidence (sections 16 and 23):
 
 * Run 8: the app crashed at launch on both emulator images, before any
   JavaScript or Botlish code ran. React Native's library loader (SoLoader)
@@ -109,17 +111,12 @@ native bridge, with two gaps.** The CI evidence (sections 16 and 23):
   native-bridge device, never as passed. A device that runs arm64 code
   natively checks it. GC stress of the libraries through the same
   generated core is observed on the host (section 19).
-* **The 16 KiB-page image** ran once (run 11, Android 15, page size 16384).
-  - The app ran there through the native bridge: Hermes, both libraries
-    mapped from their extracted directory, the instances on the JavaScript
-    thread, 401 module snapshots equal to the interpreter's, two reloads,
-    the GC-stress phase's self-test, the 24 swipes, the win, the game over
-    and a clean exit.
-  - The job failed nonetheless. Its acceptance counted a crash of Google
-    Play services, another process on the device, as the app's, and cut
-    the self-test's wait and the first reload short. The acceptance now
-    counts the app's own crashes only, and the run that repeats the image
-    is pending (section 16).
+* **The 16 KiB-page image** (Android 15, page size 16384) passed in run 12,
+  with every phase but GC stress, as the 4 KiB image did. The app's
+  extracted, 16 KiB-aligned libraries were loaded by a 16 KiB-page kernel.
+  Its first run, run 11, failed only because the acceptance counted a
+  crash of Google Play services, another process on the device, as the
+  app's. The acceptance has counted the app's own crashes only since.
 
 This host has no KVM, and Google's emulator refuses an arm64 guest on an
 x86_64 host, also when its `qemu-system-aarch64` is run directly (observed,
@@ -139,7 +136,7 @@ section 16).
 | `useBotlish2048()` and a playable 2048 screen (swipes, buttons, score, New game, game over, win) | implemented; Jest observed (28 tests: 10 of the hook and the snapshot reader, 17 of the generated entry point, 1 without the native module) |
 | a second, unrelated library through the same generator, both packages in one app | observed (host harness, TypeScript, Jest, the APK) |
 | a clean room: the single-file compiler and packages only, then npm, Codegen and Gradle | observed (section 18) |
-| the app on Android: Hermes, the TurboModule, the Botlish library in an Android application process | **observed on Android 14 (4 KiB pages), translated by the ARM native bridge** (CI, runs 9, 10 and 11: every phase but GC stress); GC stress in the app process not demonstrable on a native-bridge emulator; on Android 15 with 16 KiB pages every phase observed (run 11) but the job not yet passed: it counted another process's crash (section 16) |
+| the app on Android: Hermes, the TurboModule, the Botlish library in an Android application process | **observed on Android 14 (4 KiB pages), translated by the ARM native bridge** (CI, runs 9 to 12: every phase but GC stress); GC stress in the app process not demonstrable on a native-bridge emulator; **observed on Android 15 (16 KiB pages) too** (CI, run 12: every phase but GC stress) (section 16) |
 | mutation testing | 44/44 killed, each by a detector it names; observed (section 21) |
 | iOS, Android ABIs other than arm64-v8a, asynchronous workers | not supported (section 24) |
 
@@ -715,14 +712,14 @@ evidence: section 16.
 **Status:**
 
 * **Observed on Android 14, 4 KiB pages, through the ARM native bridge**
-  (CI, run 9): every phase but GC stress.
+  (CI, runs 9 to 12): every phase but GC stress, for the build's APK and
+  the clean room's, and the development reload with Metro.
 * **GC stress in the app process: not demonstrated.** It cannot be on a
   native-bridge emulator (run 10, below). The acceptance reports it there
   as NOT DEMONSTRATED; a device running arm64 natively checks it.
-* **16 KiB pages (Android 15): observed in run 11, not yet passed.** Every
-  phase ran. The job failed on another process's crash, which the
-  acceptance counted as the app's (run 11, below); the corrected run is
-  pending.
+* **Observed on Android 15, 16 KiB pages, through the ARM native bridge**
+  (CI, run 12): every phase but GC stress. Run 11 failed there on another
+  process's crash, which the acceptance counted as the app's (below).
 
 The runs and their results follow the description.
 
@@ -1016,6 +1013,45 @@ crashes of runs 8 and 10 and none of run 11's six lines.
 The clean room's APK and the development reload are the 4 KiB job's
 alone.
 
+**Run 12** (`304ba6bd`) passed both Android jobs. Every acceptance ended
+`result: passed, but NOT DEMONSTRATED on this device: gc-stress`.
+
+The job `android (16 KiB pages)`
+([job 129284261090](https://github.com/mwagner-webdev/botlish/actions/runs/42644203711/job/129284261090))
+ran on `sdk_gphone16k_x86_64`: Android 15 (API 35), the native bridge,
+page size 16384.
+* **Self-test.** `failures=0`, `env hermes=true reactNative=0.88.1
+  os=android api=35`.
+  - 401 module snapshots and 401 hook states equal the interpreter's.
+  - Each library's instance was created on `mqt_v_js`, and all its calls
+    (game 4,819, textkit 10,015) were made there.
+  - Both libraries were mapped from `/data/app/.../lib/arm64/`: extracted,
+    16 KiB-aligned, loaded by a 16 KiB-page kernel.
+* **Reloads.** All three passed the self-test again with the interpreter's
+  snapshots, and each destroyed the old instances on their own threads
+  with status 0. The counters balance: 19,244 results and 32 errors, each
+  acquired and released.
+* **GC stress: NOT DEMONSTRATED.** 142.76 µs a call in the C ABI, 0.8x the
+  self-test's 183.82 µs. The self-test under it passed, with the
+  interpreter's snapshots.
+* **Play.** 24 swipes, each read once and applied exactly once; 25
+  snapshots equal to the interpreter's; every call on the JavaScript
+  thread; one instance across background and foreground.
+* **Win, over, exit.** The screen showed "won" and "game over", and the
+  app neither crashed nor raised a fatal exception in any phase. The
+  acceptance noted `3 crash lines of other processes on the device (not
+  the app's)`.
+
+The job `android (4 KiB pages)`
+([job 129284261160](https://github.com/mwagner-webdev/botlish/actions/runs/42644203711/job/129284261160)),
+on Android 14, passed for the build's APK (GC stress 0.7x) and for the
+clean room's (0.9x), and the development reload with Metro passed. On the
+clean room's APK, reloads 1 and 2 both went the foreign-thread way: the
+old instance was orphaned when its module went on another thread, then
+destroyed on its own thread. This happened for the game library in both
+reloads and for textkit in reload 2, so the process counted 2 and 1
+orphaned instances, with every destruction's status 0.
+
 **Locally**, this host has no `/dev/kvm`. Observed, with the emulator 37.2.13
 and `system-images;android-30;aosp_atd;arm64-v8a`:
 
@@ -1168,12 +1204,13 @@ published packages alone, then passed the whole Android acceptance on the
   - invalidation, double invalidation;
   - many instances on one thread;
   - repeated failures and releases.
-* **Android, observed** (CI run 9, Android 14 through the ARM native
-  bridge: section 16):
-  - three reloads, each making new instances and destroying the old ones
-    on their own threads;
-  - one old instance orphaned by a foreign thread first, then destroyed by
-    its own;
+* **Android, observed** (CI runs 9 to 12, Android 14 with 4 KiB pages and
+  Android 15 with 16 KiB pages, both through the ARM native bridge:
+  section 16; the counts below are run 9's):
+  - three reloads, each making new instances of both libraries and
+    destroying the old ones on their own threads;
+  - one old instance of each library orphaned by a foreign thread first,
+    then destroyed by its own;
   - two development reloads with Metro;
   - background and foreground with one instance;
   - every acquired result and error released (19,244 and 32).
@@ -1304,8 +1341,14 @@ so the true figures are about 6.0 and 2.6 µs a call. The self-test is
 corrected. Run 11 logged 2.01 to 2.12 µs a call. Run 10 logged 3.41 µs,
 on another runner whose game
 move took 165.23 µs from JavaScript (155.53 µs in the C ABI, 9.70 µs JSI
-and adapter) and whose input to render averaged 18.50 ms. The runners
-differ that much between runs.
+and adapter) and whose input to render averaged 18.50 ms. Run 12's
+Android 15 image with 16 KiB pages, on another runner, took 1,974 ms to
+the first launch, 83.15 ms to the game library's first call, 196.52 µs a
+move from JavaScript (183.82 µs in the C ABI, 12.70 µs JSI and adapter),
+4.98 µs a textkit call and 21.35 ms from input to render; the same run's
+clean room APK, on the 4 KiB image, 67.84 µs a move (64.73 and 3.12 µs)
+and 10.07 ms. The runners differ that much between runs, and these
+figures cannot separate a page size's share from a runner's.
 
 **Footprint, observed** (`results/footprint.txt`; local release builds,
 React Native 0.88.1, arm64-v8a only). Native libraries are compressed in
@@ -1423,6 +1466,20 @@ nothing in the release gate requires it. Its runs on this branch:
     15 with 16 KiB pages, but the acceptance counted Google Play services'
     crash as the app's (section 16). The acceptance counts the app's own
     crashes only since.
+* run 12, at `304ba6bd`, only the app's own crashes counted:
+  [react-native 2048 #12](https://github.com/mwagner-webdev/botlish/actions/runs/42644203711).
+  - **build: success.**
+  - **android (16 KiB pages): success**
+    ([job 129284261090](https://github.com/mwagner-webdev/botlish/actions/runs/42644203711/job/129284261090)).
+    Android 15, page size 16384: every phase passed, with GC stress NOT
+    DEMONSTRATED (0.8x). Three crash lines of other processes were noted.
+  - **android (4 KiB pages): success**
+    ([job 129284261160](https://github.com/mwagner-webdev/botlish/actions/runs/42644203711/job/129284261160)).
+    Android 14: both APKs and the development reload with Metro passed,
+    with GC stress NOT DEMONSTRATED (0.7x and 0.9x).
+
+  Every acceptance ended `result: passed, but NOT DEMONSTRATED on this
+  device: gc-stress`.
 
 Main's own workflows were queued or in progress, none red among those
 completed, when this branch was made (`a6977d56`) and when it was last
@@ -1446,9 +1503,10 @@ checked.
   libc, and a wrapper-started process gets no bridge. It needs a device
   that runs arm64 natively, where the acceptance's GC-stress phase checks
   it.
-* **16 KiB pages** (section 16): observed once (run 11), the job not yet
-  passed: it counted another process's crash. The corrected run is
-  pending.
+* **16 KiB pages on hardware.** The 16 KiB-page Android 15 image passed
+  (run 12), through the native bridge like the 4 KiB one. A 16 KiB device
+  running arm64 natively is the hardware evidence still to come, as for
+  4 KiB.
 * **iOS.** Not supported. The package declares `ios: null`, iOS
   autolinking is disabled, and no podspec or module provider is written.
   It needs:
