@@ -552,7 +552,7 @@ them at 10:46:
 | `icy-tower-macos.yml` | 42769079434 | every step passed but the graphical acceptance, whose `restart` case passed 9 of its 10 checks: "Right reaches the game: the player was not found in both captures (press 3)". The headless simulation, the oracle, the executable's tests, the SDL call trace and every other graphical and LaunchServices case passed, so the game the compiler built behaves as specified, and what failed is the session's reading of a capture. The run is superseded by the third merge's, which plays the same cases again |
 
 The runs that count are the third merge's, at bbb95fd (dispatched 10:47
-UTC). As of 16:55 UTC:
+UTC). As of 20:10 UTC:
 
 | workflow | run | state |
 |---|---|---|
@@ -560,9 +560,9 @@ UTC). As of 16:55 UTC:
 | `icy-tower-windows.yml`, `ci-tools.yml`, `raven-cleanroom.yml`, `macos-graphical-main-thread.yml` | 42802022405, 42802022594, 42802022859, 42802022580 | passed |
 | `windows-x86_64.yml` (dispatched) | 42802045549 | passed, every job |
 | `static-decisions.yml` (dispatched) | 42802037262 | passed: batched and sequential agree on every golden suite (mutable-array.bot's job and the four shards) |
-| `tests.yml` (dispatched) | 42802026983 | canary, system-linked executables (also under GC stress) and golden shards 1/4 and 2/4 passed; `tests (compile)` and `tests (interp)` running; the cranelift and cranelift-generic coverage, stub-linked executables, native Rust unit tests, golden shards 3/4 and 4/4 and the method-call decision job pending, queued for runners (the canary waited three hours for one) |
-| `tests-arm64.yml` (dispatched) | 42802031961 | in progress |
-| `macos-arm64.yml` (dispatched) | 42802040876 | smoke (Tier A, the canary among its steps) and the Linux control passed; the five acceptance shards, the system linker and Botlish.app's jobs pending, queued for a macOS runner |
+| `macos-arm64.yml` (dispatched) | 42802040876 | passed, every job: smoke (Tier A, the canary among its steps) and the Linux control, the five acceptance shards (Tier B), the system linker (also under GC stress), Botlish.app (its smoke, FFI, acceptance and comparison scripts and the ad hoc release stages), Botlish.app without developer tools, main-thread startup and static SDL3 through Botlish.app |
+| `tests.yml` (dispatched) | 42802026983 | 13 of 14 jobs passed: canary, `tests (interp)` and `tests (compile)`, the four golden shards, stub-linked and system-linked executables (also under GC stress), native Rust unit tests (and the driver without its JIT), cranelift-generic coverage, the method-call decision job; the cranelift coverage still running |
+| `tests-arm64.yml` (dispatched) | 42802031961 | 12 of 13 jobs passed: canary, interp, compile, GC stress on interp, cranelift and cranelift-generic coverage, the four golden shards, native Rust unit tests (also under GC stress), system-linked executables. GC stress on compile was lost to the runner: "The runner has received a shutdown signal", exit 143, during `event-loop.test`, with no test failure before it; rerun once (pending) |
 
 ## 7. Remaining limits and known problems
 
