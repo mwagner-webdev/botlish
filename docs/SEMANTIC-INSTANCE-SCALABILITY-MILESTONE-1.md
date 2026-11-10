@@ -318,6 +318,26 @@ HIR holds before and after each walk is the same, as `si-region-no-copy`
 checks for 64 instances side by side); the times stay flat (0.09, 0.11,
 0.16 and 0.19 s at N = 8, 16, 32, 48).
 
+### 3.8 Merging main's applied-type bound (2026-11-10)
+
+Main then gained, from cbaa040 to 4bb9890, the C backend's statically
+resolved contexts (C-CONTEXTS-FREESTANDING-MILESTONE-1.md), the applied-type
+bound as an approximation (APPLIED-TYPE-BOUND-PRECISION-MILESTONE-1.md),
+`-aot-run` and Botlish.app as a Developer ID release. The merge (bbb95fd)
+had no conflict; `hir/types.tcl` merged by itself, main's hooks being in
+`InferApplication`, `Struct` and `Project` and this branch's change there
+`RecordClause`'s comment.
+
+The one interaction to rule out is the applied-type bound's: an instance
+walk changes the HIR in place and must leave nothing of itself behind
+(section 3.1). The bound's evidence is kept in the typing context
+(`applied`, in the context `hir::types::NewContext` makes for each walk,
+`hir::semantic::Walk`'s included) and in its verification pass's memo,
+keyed by the semantic view, never in the HIR, so a walk has none of it to
+rewind. `tests/applied-type-bound.test` passes under the rollback audit as
+well as without it, and the bound's fuzzer finds nothing under the audit
+(section 6.1).
+
 ## 4. Invariants and what bounds the analysis
 
 * The HIR is authoritative and unmodified by an instance walk: every walk
@@ -393,6 +413,7 @@ and the branch head for the tests.
 | `tests/local.tcl` on the tree merged with main (bf0f585, the native driver rebuilt; 4 jobs, 5,705 s) | 0 failures: Tcl tests 9,164 passed on interp and 9,159 on compile (264 and 269 skipped by constraint, 2,493 golden duplicates each); 119 golden suites, 5,682 / 5,682 / 5,590 / 5,692 tests passed on interp / compile / cranelift-generic / cranelift |
 | `tests/local.tcl` on the tree merged with main again (89c4298, section 3.7; 4 jobs) | 0 failures: Tcl tests 9,247 passed on interp and 9,242 on compile; 119 golden suites, 5,682 / 5,682 / 5,590 / 5,692 tests passed on interp / compile / cranelift-generic / cranelift. The run reached its two-hour background limit with `warning-gate.test` still running, which then passed alone on both passes (6 of 6 each) |
 | 89c4298: `tests/depth-safe-nesting.test`, `semantic-instances.test` (also under the rollback audit), `static-economics.test`, `traits.test`, `affine.test`, `loop-clause-binding-types.test`; `tools/mutant-catalogs.tcl`; `host-depth-decides-instances` through its harness; `merge.tcl -check 1`; `tools/compilerpedia.tcl check` | 52, 96 (and 96), 94, 112, 48 and 18 passed; 100 catalogs, 3,401 mutants, 0 problems; killed by `dsn-census-guarded`; 13,573 rows, consistent; 1,295 topics, 763 examples, 0 problems |
+| bbb95fd (section 3.8): `semantic-instances.test` and `applied-type-bound.test`, each also under the rollback audit; `audit/applied-type-bound/tools/fuzz.tcl -seed 1`, `2`, `3` under the audit; `tools/mutant-catalogs.tcl`; `merge.tcl -check 1` | 96 and 34 passed, both ways; 60 programs each, 0 failures; 102 catalogs, 3,475 mutants, 0 problems; 13,628 rows, consistent |
 | merged tree: `tests/loop-clause-binding-types.test` (also under the rollback audit), `audit/loop-binding-types/tools/mutate.tcl`, `tools/mutant-catalogs.tcl`, `merge.tcl -check 1`, `tools/compilerpedia.tcl check` | 18 of 18 both ways; 14 of 14 mutants killed; 97 catalogs, 3,308 mutants, 0 problems; 13,549 rows, consistent; 1,295 topics, 760 examples, 0 problems |
 
 ### 6.2 The corpus builds the same programs (observed)
@@ -515,8 +536,21 @@ UTC):
 The GC-stress jobs of `tests.yml` run on pushes to main only and were
 skipped; `tests-arm64.yml` ran its own under the dispatch.
 
-Main was merged into the branch once more after these runs (section 3.7);
-the runs of that merge follow.
+Main was merged into the branch once more after these runs (section 3.7),
+as 89c4298. Its runs (dispatched 06:38 UTC on 2026-11-10) stood as follows
+when main had moved again and the third merge (section 3.8) superseded
+them at 10:46:
+
+| workflow | run | state |
+|---|---|---|
+| `static-decisions.yml` (dispatched) | 42769816219 | passed: batched and sequential agree on every golden suite |
+| `tests.yml` (dispatched) | 42769808374 | 12 of 14 jobs passed: canary, `tests (compile)`, native Rust unit tests, cranelift-generic coverage, the four golden shards, stub-linked and system-linked executables (also under GC stress), the method-call decision job. `tests (interp)` and the cranelift coverage were still running (the runners had started them late: 09:50 and 08:55) |
+| `tests-arm64.yml` (dispatched) | 42769812336 | canary, native Rust unit tests (also under GC stress), system-linked executables, cranelift coverage, GC stress on interp and the four golden shards passed; `arm64 tests (compile)` and the cranelift-generic coverage stopped in "Install project prerequisites" before any test ran (`curl: (56) Recv failure: Connection reset by peer` downloading Tcl from ports.ubuntu.com); interp and GC stress on compile were still running |
+| `macos-arm64.yml`, `windows-x86_64.yml` (dispatched) | 42769820853, 42769823980 | still queued after four hours: no job had started |
+| `icy-tower-windows.yml`, `ci-tools.yml` | 42769079531, 42769079533 | passed |
+| `icy-tower-macos.yml` | 42769079434 | every step passed but the graphical acceptance, whose `restart` case passed 9 of its 10 checks: "Right reaches the game: the player was not found in both captures (press 3)". The headless simulation, the oracle, the executable's tests, the SDL call trace and every other graphical and LaunchServices case passed, so the game the compiler built behaves as specified, and what failed is the session's reading of a capture. The run is superseded by the third merge's, which plays the same cases again |
+
+The runs that count are the third merge's, at bbb95fd; they follow.
 
 ## 7. Remaining limits and known problems
 
