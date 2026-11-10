@@ -104,7 +104,9 @@ w=$out/workload.txt
 check "workload: A and B started without a shell" has "$w" "spawned A and B without a shell"
 check "workload: A ran in its own working directory" has "$w" "A stdout chunk: cwd $app/a"
 check "workload: B ran in another, with its own environment" bash -c "grep -qF 'cwd $app/b' '$w' && grep -qF 'env CLEANROOM_JOB=job-b' '$w'"
-check "workload: stdout and stderr streamed concurrently" bash -c "grep -qF 'A stderr chunk: warning from A' '$w' && grep -qF 'A stdout bytes 103, stderr bytes 15' '$w'"
+# A's stdout: "cwd DIR_A\n" (DIR_A is $app/a), five "chunk N\n", three "got: line N\n".
+a_bytes=$(( ${#app} + 7 + 40 + 36 ))
+check "workload: stdout and stderr streamed concurrently, every byte" bash -c "grep -qF 'A stderr chunk: warning from A' '$w' && grep -qF 'A stdout bytes $a_bytes, stderr bytes 15' '$w'"
 check "workload: stdin written incrementally and closed" has "$w" "A's stdin: 3 lines written, closed"
 check "workload: A ended normally" has "$w" "A ended exited 0"
 check "workload: B terminated gracefully, escalated to SIGKILL at its grace period" bash -c "grep -qF 'B ended signal 9' '$w' && grep -qF 'B escalated at the grace period: yes' '$w'"

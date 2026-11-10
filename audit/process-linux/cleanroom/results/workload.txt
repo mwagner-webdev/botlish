@@ -1,0 +1,39 @@
+spawned A and B without a shell
+B stdout chunk: cwd /home/dev/app/b
+env CLEANROOM_JOB=job-b
+desc 164
+
+B stdout chunk: chunk 0
+
+A stdout chunk: cwd /home/dev/app/a
+chunk 0
+
+A stderr chunk: warning from A
+
+A stdout chunk: chunk 1
+
+A's stdin: 3 lines written, closed
+A ended exited 0
+A stdout bytes 96, stderr bytes 15
+B pid 163
+B ended signal 9
+B escalated at the grace period: yes
+B stdout chunks 41, its end of file once the group was killed
+A's identity after release: stale
+ticker ticks 16
+ticker kept time (no tick 40 ms late): yes
+workload elapsed under 3 s: yes
+C received: args 7
+arg 0 2f686f6d652f6465762f696e707574732f6368696c64
+arg 1 61726773
+arg 2 -
+arg 3 74776f20776f726473
+arg 4 24484f4d45
+arg 5 2a2e747874
+arg 6 68c3a96c6c6f
+
+end: shut down 0 children still supervised
+end: owned 0, dying 0, watches 0, children 0, adapter descriptors 0
+end: descriptors delta 0, registrations delta 0
+end: escalations 1, released 3
+exit 0
