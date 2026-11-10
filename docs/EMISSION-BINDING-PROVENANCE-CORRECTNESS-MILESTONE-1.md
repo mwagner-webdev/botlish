@@ -103,7 +103,7 @@ identical to their committed results).
 | certificates in rejected programs resting on a recovery-derived `never` or type (V2-V6) | 5 | 0 |
 | memo reuse in a compilation with a resolution diagnostic | yes | no |
 | emission tests | 123 | 138 |
-| emission mutants (all killed) | 101 | 119 |
+| emission mutants (all killed) | 101 | 120 |
 
 ## 2. Starting defects and census findings
 
@@ -135,10 +135,10 @@ milestone, and its binding part had three gaps this milestone found
    included) as a source, but its memo rule trusted compilations with only
    check diagnostics: a claim could be dependent fresh and reused from the
    memo in one compilation (process history).
-3. **Coverage.** It asked only for a value call whose callee is a reference
-   to a non-local binding: V4 (the callee a call), V5 (a local, in the
-   walk's environment) and V6 kept their certificates, and V3 (a narrow
-   result, not `never`) was not asked at all.
+3. **Coverage.** It asked only at a value call typed `never` whose callee
+   is a reference: V4 (the callee the call `choose()`) kept its
+   certificate, and V3 (a narrow result, not `never`) was not asked at all.
+   (It did follow a local or captured callee binding, V5 and V6.)
 
 ## 3. The R1 and V2 reproducers
 
@@ -265,6 +265,13 @@ part of a value; a reference to the function is followed instead. Only the
 code that typed the facts counts: where a root is reachable, its reachable
 part (a dead branch contributes nothing: B3b); where the root itself is
 unreachable, all of it (section 4).
+
+`RefValue` asks only about a binding declared outside the function being
+walked: a binding of its own that the walk did not bind -- a list loop's
+element, read through its type -- was typed by code the walk evaluated
+(the loop's iterable), so asking would traverse it again (tested: a claim
+reading only such an element asks no question; a mutant that asks is
+killed).
 
 The two readers taint the summary being walked through the existing
 `tainted` flag, so `CheckClaim` reports the claim `dependent` exactly as
@@ -617,17 +624,19 @@ invalid on every backend (observed).
 | `audit/emission-claims/tools/fuzz.tcl -seeds 1-40` | byte-identical to `results/fuzz.md`: 0 false proofs |
 | `audit/emission-claims/tools/loops.tcl -count 150 -seed 11 -cross 10` | the committed seed-11 section exactly but for its timing line: 25,350 runs, 0 false certificates, 0 regressions, 45 cross-backend checks agreeing |
 | `audit/emission-identity/tools/structure.tcl -seeds 1-40` | identical to `results/structure.md`: 0 false certificates, 0 history differences |
-| `audit/csv-emission/tools/differential.tcl -part all` | CSV-DIFF |
-| `audit/csv-emission/tools/census.tcl` | CSV-CENSUS |
+| `audit/csv-emission/tools/differential.tcl -part all` | identical to `results/differential.md` but for its timing lines: 25,246 cases, 126,230 runs, 0 backend disagreements, 0 recognizer rejections, every check passed |
+| `audit/csv-emission/tools/census.tcl` | identical to `results/census.md` but for its timings: 26 mutants, each as its class states; `oracle.py selftest` passes |
 
-**Mutation.** Eighteen mutants were added to
+**Mutation.** Nineteen mutants were added to
 `audit/emission-claims/tools/mutants.txt` (section "Binding provenance"),
 one per way the rule could be wrong; six existing ones were updated to the
-code they mutate, each still a mutant of its rule:
+code they mutate, each still a mutant of its rule, and a seventh's tests
+(next paragraph):
 
 | mutant | what it does | killed by |
 |---|---|---|
 | `provenance-refvalue-unread` | a non-local binding's facts read without asking | module-bindings, captures, imported, ... |
+| `provenance-own-binding-asked` | a binding of the walked function's own (a list loop's element) asked about too | accepted |
 | `provenance-unreachable-trusted` | an unreachable declaration skipped as dead code | module-bindings, captures, transitive |
 | `provenance-alias-unfollowed` | an initializer naming a value binding not followed | module-bindings, captures, memo, service |
 | `provenance-destructure-lost` | a projection no part of its value | module-bindings, captures |
@@ -662,8 +671,9 @@ question, so only the callee read first makes the claim dependent), kills
 it.
 
 The whole catalog, run by `audit/emission-claims/tools/mutate.tcl` on the
-final tree: MUTANTS-ALL (`audit/emission-claims/results/mutants.md`).
-`tools/mutant-catalogs.tcl`: CATALOGS.
+final tree: 120 mutants, 120 killed, 0 survived
+(`audit/emission-claims/results/mutants.md`).
+`tools/mutant-catalogs.tcl`: 100 catalogs, 3,420 mutants, 0 problems.
 
 ## 19. JSON and CSV preservation
 
@@ -683,15 +693,21 @@ independence, certificate re-verification and runtime erasure
 
 ## 20. Performance
 
-PERFORMANCE
+(In progress: the timings are taken once the local suite has finished,
+on a quiet machine.)
 
 ## 21. Regression and CI results
 
-REGRESSION
+(In progress: the local suite's second part and the dispatched CI runs
+are still running; this section is completed when they finish.)
 
 ## 22. Production files changed
 
-One: `hir/emission.tcl`. PRODLINES The Provenance section (`Dependent`,
+One: `hir/emission.tcl`, 273 lines of code added and 5 removed (comments
+and blank lines aside; 429 and 7 in all). The census estimated 136 for its
+prototype of 21.3, which lacked the cycle-safe search, the loop clause
+bindings, the callee question for a callee that is no reference and the
+result question (section 2). The Provenance section (`Dependent`,
 `Provenance`, `Source`, `ScanCode`, `RefNode`, `DefiningCode`,
 `ClauseMap`, `Operand`, and the readers' entry points), the source set and
 `trusted` in `Reset`, the two readers in `RefValue` and `EvalCall`, the
@@ -701,7 +717,7 @@ diagnostic, certificate field, interchange field or language construct.
 
 Beside it: the tests (15 in tests/emission-claims.test: 14 `ec-provenance-*`
 and `ec-callee-before-arguments`, and the changed hover text in
-`ec-callee-service`), the mutants (18 added, 7 updated), the census record
+`ec-callee-service`), the mutants (19 added, 7 updated), the census record
 (`audit/emission-dependencies/census/cases.txt` and its results), and
 AGENTS.md's emission rules.
 
@@ -738,7 +754,22 @@ AGENTS.md's emission rules.
 
 ## 24. Recommendation
 
-RECOMMENDATION
+Merge, once the dispatched CI runs (section 21) are green. The one
+certificate hole the census left -- V2 -- is closed with the four forms of
+it this milestone found, by a question asked only where the walk reads a
+fact of code it does not walk, answered from the HIR's own references, and
+never asked in an accepted program; the memo rule that keeps a
+recovery-derived proof from being reused is exact for the source set. Every
+accepted program, workload, differential and earlier correction is
+unchanged, and the remaining open cases are verdicts of rejected programs
+that certify nothing.
+
+The next emission milestone, if one is wanted, is the signature component
+record (S1, S4b, S5b, S6b): a HIR change to say which signature component a
+block's resolution diagnostic is about. It would change four rejected
+programs' verdicts and no certificate, so it is not urgent. B2b and K1 need
+value provenance or a native-result rule and are not worth either on
+present evidence.
 
 ## 25. Final evaluation questions
 
