@@ -852,9 +852,58 @@ cranelift --, `tests/main-cli.test` 72 of 72, `tests/golden.test` 9 of 9,
 `tests/numeric-looking-names.test` 5 of 5, the manifest regenerated equal,
 `tools/compilerpedia.tcl check` and `tools/mutant-catalogs.tcl` (99
 catalogs) 0 problems. Because those changes are the front end's, the merge
-gets a CI round of its own: every workflow its push starts, and the full
-`tests.yml` and `tests-arm64.yml` dispatched on it. It is recorded here
-once read; until then it is **pending**, not passed.
+got a CI round of its own: every workflow its push started (d824f867, this
+report's commit on top of ef9e381e), and the full `tests.yml` and
+`tests-arm64.yml` dispatched on it.
+
+[run] Every workflow of d824f867 passed (about twenty-three hours, the
+runners saturated again):
+
+| workflow | result at d824f867 |
+|---|---|
+| tests, dispatched (the full run) | passed |
+| tests (linux arm64), dispatched (the full run, both GC-stress jobs included) | passed |
+| tests (macos arm64): smoke, Linux control, system linker, Botlish.app and its jobs, main-thread startup, static SDL3, acceptance 1-5 | passed; acceptance shard 3/5 on its third attempt (next paragraph) |
+| tests (windows x86-64): canary, root plans, smoke, system linker, acceptance 1-4 (`full` is the opt-in `[ci-full]` tier) | passed |
+| icy-tower (windows x86-64), icy-tower (macos arm64) | passed |
+| ci tools, raven clean room, package reproducibility | passed |
+
+macOS acceptance shard 3/5 was cut off twice by its job's 75-minute limit,
+both times with all of its 57 Tcl test files passed (in 4205.6 s and
+4075.0 s) and its golden suites cut off while passing; its third attempt
+passed. The runners, not the branch, made it slow. Main's own run at
+0a518ba4 ran the same 57 files in 2978.6 s. Shard 3 loads no file the
+branch changes: the branch changes nothing in `core/`, `hir/`, `surface/`,
+`stdlib/`, `compiler/`, `native/`, `tests/helpers.tcl` or `main.tcl`, and
+`ccompile/` is loaded only for `-emit-c`. In the second attempt the first
+seven files (`actor.test` to `coroutine-fusion.test`, sixteen minutes) ran
+at main's speed (0.94 to 1.09 times its time), and every later file, unrelated
+ones alike, about 1.5 times slower. The other four shards took main's time
+within a few minutes. And [run] four of shard 3's files take the same time
+locally on b0fb9e63 (the branch's base) and on the branch merged with main
+(`method-resolution.test` 120.0 and 123.5 s against 118.4 and 113.9 s,
+`static-compile-expected-diagnostics.test` 62.8 and 63.1 s against 62.6
+and 60.6 s, `struct-destructuring.test` 26.6 and 25.5 s against 26.5 and
+23.7 s, `same-failure.test` 32.3 and 32.1 s against 32.7 and 31.0 s).
+
+Main had moved meanwhile, to cfd6ecfa: emission identity and feasibility
+(`hir/emission.tcl`, `tests/emission-claims.test`), the managed subprocess
+census, the branch-push CI rules (a branch push now runs only each host's
+canary), and `-aot-run` with Botlish.app as a Developer ID release
+(`main.tcl`, the native driver, `single/`, the macOS release tooling).
+Nothing of it is `ccompile/` or what the C backend reads (no backend reads
+an emission claim; `main.tcl`'s `-emit-c` path is unchanged), so this merge
+needs no CI round of its own, unlike the third, whose front-end changes
+the C backend reads. It
+merged without conflict as 9c6d963b; on it [run] (the native backend
+rebuilt for main's driver changes) `tests/c-compile.test` 61 of 61,
+`tests/main-cli.test` 72 of 72, `tests/golden.test` 9 of 9,
+`tests/numeric-looking-names.test` 5 of 5, `tests/emission-claims.test`
+123 of 123, the manifest regenerated equal, `tools/compilerpedia.tcl check`
+(1295 topics, 763 examples) and `tools/mutant-catalogs.tcl` (101 catalogs,
+3448 mutants) 0 problems, and `examples/c-freestanding/demo.sh` passed.
+Main's latest finished runs (0a518ba4) were all green; its runs at
+cfd6ecfa were queued.
 
 ## 17. Known limitations
 
