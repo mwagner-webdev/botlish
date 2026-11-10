@@ -917,8 +917,11 @@ AGENTS.md's emission rules.
 
 ## 24. Recommendation
 
-Merge: every dispatched CI run is green (section 21), and main's later
-commits merge into the branch without a conflict. The one
+Merge: every dispatched CI run is green (section 21). Main has moved on
+(ba93014 when last read, 21:35 UTC); it merges into the branch without a
+conflict and changes neither `hir/emission.tcl` nor the emission tests and
+audits, but it changes other `hir/` files, so the merge needs its own CI
+run before it lands. The one
 certificate hole the census left -- V2 -- is closed with the four forms of
 it this milestone found, by a question asked only where the walk reads a
 fact of code it does not walk, answered from the HIR's own references, and
