@@ -693,13 +693,172 @@ independence, certificate re-verification and runtime erasure
 
 ## 20. Performance
 
-(In progress: the timings are taken once the local suite has finished,
-on a quiet machine.)
+Measured on the four-core container, idle but for the measurement, against
+the parent (cbaa040) in a worktree of its own; every tool and its output
+are in the session's scratch directory, not committed.
+
+**Accepted programs: no measurable cost.** One compilation of each probe
+program under callgrind (instructions of the whole process: front end,
+checks and the emission checker):
+
+| program | parent | this milestone | difference |
+|---|---:|---:|---:|
+| JSON (`emit_probes.bot`, 22 claims) | 21,788,685,399 | 21,776,462,933 | -0.06% |
+| CSV (`probes.bot`, 52 claims) | 28,752,785,202 | 28,745,780,980 | -0.02% |
+
+The new tree executes slightly fewer instructions, which is the noise of
+instruction counts in this front end, not a saving. What the change runs on
+these programs, counted by wrapping its procedures: on CSV, `RefValue`
+858 calls, of which 176 reach `NonLocalDependent` (0.8 ms in all,
+instrumentation included) and 152 its `Within` test; on JSON 1,025, 237
+and 68; `Asked`, `Dependent` and `CalleeDependent` are never called (the
+claims read no local or parameter declared outside their own functions and
+call nothing through a value). The `trusted` flag and the source set
+are computed once per compilation from three HIR tables.
+
+`audit/emission-identity/tools/bench.tcl -runs 5`, parent and new:
+
+| program | checker ms, parent (median, range) | checker ms, new | summaries computed / reused, rounds | second compilation in one process: claims reused; checker ms, parent and new |
+|---|---|---|---|---|
+| JSON | 256 (249-304) | 247 (243-332) | 140 / 60, 44 (both) | 22 of 22 (both); 34 ms, 39 ms |
+| CSV | 612 (553-749) | 715 (577-862) | 207 / 121, 104 (both) | 52 of 52 (both); 59 ms, 46 ms |
+| 12 scopes, names shared | -- | -- | -- | 0 of 12 (both); 21 ms, 21 ms |
+| 12 scopes, names of their own | -- | -- | -- | 12 of 12 (both); 6 ms, 8 ms |
+
+The CSV medians differ by 17% in ranges that overlap almost entirely. 16
+interleaved pairs of fresh processes (`ab.tcl`: parent then new, then new
+then parent) give CSV 612 ms and 650 ms, JSON 238 ms and 257 ms (medians);
+in the second half alone, CSV 651 ms and 657 ms. The wall-clock medians
+move by up to 17% between measurements, JSON's in both directions, where
+the instruction counts do not move and the added code runs for about a
+millisecond: I read the differences as the machine's, not the change's.
+
+**Untrusted compilations: the memo's cost.** The probe programs compiled
+twice in one process, as written and with one unresolved top-level name
+appended (`provenance_probe_unresolved = no_such_name_anywhere`, which
+neither program reads), three runs each:
+
+| program | trusted: first / second compilation (claims reused) | untrusted: first / second (claims reused) |
+|---|---|---|
+| CSV | 612-706 ms / 43-67 ms (52) | 599-753 ms / 617-687 ms (0) |
+| JSON | 230-326 ms / 38-40 ms (22) | 234-285 ms / 246-255 ms (0) |
+
+An untrusted compilation proves every claim again: the second compilation
+costs what the first does, ten to fifteen times the trusted second
+compilation for CSV and six times for JSON. Neither variant
+asks a provenance question (asked 0, searches 0): the claims read nothing
+outside their functions. This is the price section 15 chose: an editor
+session pays it for every revision that holds an unresolved name, a poison
+or a syntax-dependent reference anywhere in the program, and stops paying
+it when the program is repaired.
+
+**The search's cost.** A chain of N module bindings, each defined from the
+one before (`a0`, `a1 = a0`, ..., `aN`), read by one claimed function, in
+three variants: the unresolved name at the chain's root (the search walks
+the chain and finds it), elsewhere in the program (the search walks the
+whole chain and finds nothing), and absent (trusted: no search); three
+fresh processes each:
+
+| N | searches, nodes, edges, deepest stack | checker ms, root / elsewhere | checker ms, trusted |
+|---:|---|---|---|
+| 100 | 1, 101, 100, 100 (root) or 101 (elsewhere) | 2.3-3.6 / 2.2-2.7 | 4.8-5.3 |
+| 400 | 1, 401, 400, 400 or 401 | 5.9-8.9 / 6.7-10.1 | 5.5-7.8 |
+| 1600 | 1, 1601, 1600, 1600 or 1601 | 28.0-32.2 / 36.5-43.7 | 12.8-15.0 |
+
+(The trusted program is each process's first, so its time includes
+compiling the checker's procedures; at N = 100 that is most of it.) The
+search is linear, about 10 to 20 microseconds a node at 1,600, and its
+stack is the explicit one: 1,601 deep with no host recursion. Two claims
+reading the same 400-link chain search once (the second takes the memoized
+answer: 1 search, 401 nodes). The verdicts are dependent at the root, and
+for the trusted and elsewhere variants the verdict the parent gives:
+proven up to 60 links, rejected from 100, where `hir::exact` stops
+following a chain for an exact value. That bound is the front end's and is
+unchanged here. The front end's own compilation of the 1,600-link program
+takes 41 to 46 s; the checker's part of it is at most 44 ms.
 
 ## 21. Regression and CI results
 
-(In progress: the local suite's second part and the dispatched CI runs
-are still running; this section is completed when they finish.)
+**Locally**, on the final code (19cc383; the commits after it change only
+Markdown), with Tcl 9.0.1:
+
+`tclsh9.0 tests/local.tcl`, in two runs because one run outlasts this
+session's two-hour limit on a background command: the first (three jobs)
+was stopped after the golden layer and 83 Tcl files, and the second ran
+the remaining 200 files (`-parts tcl`, four jobs, 100 minutes). Together
+they cover every Tcl test file on interp and compile, with the golden
+duplicates skipped as `tests/local.tcl` skips them, and every golden suite
+on all four backends through the front-end cache:
+
+| run | Tcl files | interp: passed, failed | compile: passed, failed | golden suites |
+|---|---:|---|---|---|
+| first | 83 | 4,462, 0 | 4,462, 0 | 119 of 119, every test on interp, compile, cranelift-generic and cranelift |
+| second | 200 | 4,789, 0 | 4,783, 1 | -- |
+| total | 283 | 9,251, 0 | 9,245, 1 | 119 of 119 |
+
+(Skipped: 1,297 per backend in the first run, golden duplicates included;
+102 and 107 in the second, beside 1,358 golden duplicates per backend.)
+
+The one failure is no emission test: `sh-grammar-vim-fixture` of
+`tests/syntax-highlighting.test`, on compile, whose `vim` exited 1. The
+test runs `vim` on the fixture in place, and the interp and compile copies
+of the file ran at the same moment: the second `vim` finds the first one's
+swap file beside the fixture and exits with status 1. Reproduced directly:
+two concurrent `vim -Nu NONE -i NONE -es` runs of one file exit 0 and 1;
+with `-n` (no swap file) both exit 0. Run alone, the file passes (four of
+four runs, on compile), and its interp copy passed in the same run; two
+copies started together fail again (`sh-grammar-vim-corpus`, which edits
+`stdlib/actor.bot` in place, the same way). It is a defect of the test's
+isolation, older than this milestone and unrelated to it (a file under a
+fixed name outside the tcltest temporary directory); `-n` in
+`shVimGroups` would fix it. It is not changed here.
+
+Among the files, those the emission rules name, each on both backends:
+`tests/emission-claims.test` 138 of 138, `tests/interval-sets.test` 37,
+`tests/dfa.test` 85, `tests/csv-emission.test` 36,
+`tests/dfa-workloads.test` 21, `tests/hir-range.test` 71,
+`tests/static-compile.test` 55, `tests/static-compile-expected-diagnostics.test`
+19, `tests/static-economics.test` 91, `tests/golden.test` 9,
+`tests/hir-interchange.test` 11, `tests/hir-cache.test` 19,
+`tests/compiler-service.test` 57, `tests/lsp.test` 79,
+`tests/syntax-recovery.test` 33, `tests/diagnostic-recovery.test` 52,
+`tests/compilerpedia.test` 43 (interp; 42 and one skipped on compile), all
+passing. The audits and harnesses are section 18's, the mutation run's
+120 of 120 included; `tools/mutant-catalogs.tcl` reports no problem.
+
+Not run locally: `tests/lsp-neovim.test`'s Neovim tests (no Neovim here;
+they are skipped), GC stress (no native code changed; the dispatched runs
+below include the arm64 GC-stress jobs), the static-decisions fuzzer and
+mutants (its generator writes no claim and its mutants edit
+`hir/staticdeps.tcl`, which this change leaves alone), and the batched
+against sequential comparison, which runs only in CI (below).
+
+**Static decisions.** A claim's verdict now reads whether another
+declaration's code holds a resolution diagnostic: a fact read across
+functions. `hir/staticdeps.tcl` already has every edge it follows -- a
+binding's node depends on its definition (a loop variable's on its loop
+operands), a region on every binding it references and on the summaries of
+its function literals and exact call targets -- and the memo, which reads
+the program-wide `trusted` flag, never changes a verdict (tested: memo on
+and off agree in every provenance test). The one golden suite with claims
+inside static blocks is `static-compile-expected-diagnostics.bot`;
+`static-decisions.yml` was dispatched on the branch for it (below).
+
+**CI.** On the branch at 19cc383 (the later commits change only Markdown,
+which starts no workflow). Main's latest runs at the branch point
+(cbaa040) were green; main has since moved to cfd6ecf, whose runs are
+queued, and the branch merges with it without a conflict (trial merge).
+The status of each dispatched run when this section was written, 2026-11-10
+around 10:00 UTC (pending is pending, never passed):
+
+| workflow | run | status |
+|---|---|---|
+| tests | [42770740123](https://github.com/mwagner-webdev/botlish/actions/runs/42770740123) | canary and stub-linked executables passed; the rest pending (waiting for runners) |
+| tests (linux arm64) | [42770745285](https://github.com/mwagner-webdev/botlish/actions/runs/42770745285) | canary, native Rust unit tests (also under GC stress), system-linked executables, golden shards 1 and 2 passed; the cranelift coverage job failed before any test, downloading the Tcl package (`curl: (56) Recv failure: Connection reset by peer` from ports.ubuntu.com), to be re-run; the rest pending |
+| tests (macos arm64) | [42770749276](https://github.com/mwagner-webdev/botlish/actions/runs/42770749276) | smoke, Linux control and acceptance shards 4 and 5 passed; the rest pending |
+| tests (windows x86-64) | [42770752278](https://github.com/mwagner-webdev/botlish/actions/runs/42770752278) | canary, smoke and root plans passed; the acceptance shards and the system linker pending |
+| icy-tower (macos arm64), icy-tower (windows x86-64) | branch push | passed |
+| static-decisions (static-compile-expected-diagnostics.bot) | dispatched | pending |
 
 ## 22. Production files changed
 
