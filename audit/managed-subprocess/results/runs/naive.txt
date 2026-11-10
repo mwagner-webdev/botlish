@@ -1,0 +1,10 @@
+watchdog fired
+stdout read interrupted: deadlock
+stdout bytes before the deadlock 0
+child exited no
+status signal 15
+end owned 0
+end live 0
+end fds delta 0
+[harness] supervisor peak RSS 15964 kB, CPU 0.005 s
+[harness] PASS in 1.51 s

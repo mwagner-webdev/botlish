@@ -133,10 +133,13 @@
 #   * an instance's result only grows (lub), with passLimit as a widening:
 #     past it a still-growing result is `any` -- a function of the instance
 #     alone, never of other requests;
-#   * nesting: a request made with maxDepth analyses in progress (or Tcl's
-#     stack near levelLimit) is deferred to the worklist (Defer), which
-#     analyzes it once they return; it costs walks, never precision, and does
-#     not depend on which request came first;
+#   * nesting: a request made with maxDepth analyses in progress is deferred
+#     to the worklist (Defer), which analyzes it once they return; it costs
+#     walks, never precision, and does not depend on which request came
+#     first. The nesting counted is the instances', never the interpreter's:
+#     the front end's walks run in segments (core/deep.tcl), so how deep the
+#     program's expressions nest around a call decides nothing
+#     (DEPTH-SAFE-NESTED-EXPRESSION-FRONTEND-MILESTONE-1.md);
 #   * the worklist's length (Drain) and the number of instances
 #     (maxInstances) are the resource guards left: reaching either fails the
 #     compilation with HIR SEMANTIC LIMIT, naming the function and the chain
@@ -191,7 +194,6 @@ namespace eval hir::semantic {
     # hir::types::infer re-runs the walk (once the creation environments of
     # blocks a first pass had to decline are known) at most this many times.
     variable maxRounds 3
-    variable levelLimit 700
     # Run state (empty outside hir::types::infer).
     variable state {}
     # Per-expression facts a walk writes (hir/types.tcl); the ones that are
@@ -330,7 +332,6 @@ proc hir::semantic::Call {hirVar ctx e block argTypes blockResult} {
     variable enabled
     variable maxInstances
     variable maxDepth
-    variable levelLimit
     if {!$enabled || $state eq "" || ($blockResult eq "never" && ![hir::traits::IsPolymorphic $hir $block]
             && ![hir::types::AnyAffine $argTypes])} {
         # (A call that gives an affine argument always gets its instance,
@@ -429,7 +430,7 @@ proc hir::semantic::Call {hirVar ctx e block argTypes blockResult} {
         if {[dict get $state stack] eq {}} {
             Analyze hir $id
             Drain hir
-        } elseif {[llength [dict get $state stack]] >= $maxDepth || [info level] > $levelLimit} {
+        } elseif {[llength [dict get $state stack]] >= $maxDepth} {
             # Deep enough: analyzed by the worklist once the analyses in
             # progress return (Defer), never declined.
             Defer $id
@@ -649,10 +650,10 @@ proc hir::semantic::Analyze {hirVar id} {
     }
 }
 
-# Instance ID, requested deeper than the nesting limits (maxDepth analyses
-# in progress, or Tcl's own stack near levelLimit): not analyzed now but
-# queued, so that the worklist analyzes it once the analyses in progress
-# return (Drain, at the request that started them). Until then it answers
+# Instance ID, requested deeper than the nesting limit (maxDepth analyses
+# in progress; Tcl's own depth is core/deep.tcl's, never counted here): not
+# analyzed now but queued, so that the worklist analyzes it once the analyses
+# in progress return (Drain, at the request that started them). Until then it answers
 # with its current result, never, as a recursive request does: whoever reads
 # it assumes (Call) and is analyzed again when the answer grows. So depth
 # costs walks, never precision, and never depends on which request came

@@ -293,6 +293,31 @@ has its own element type and the program's HIR has no `instanceClauses`; a
 `Rewind` that keeps the table fails it. All 14 of main's
 `loop-binding-types` mutants are killed on the merged tree.
 
+### 3.7 Merging main's depth-safe front end (2026-11-10)
+
+`main` then gained DEPTH-SAFE-NESTED-EXPRESSION-FRONTEND-MILESTONE-1.md
+(on main at cbaa040): the front end's recursive walks run in
+segments (core/deep.tcl), so Tcl's own nesting bounds nothing, and nothing a
+compile-time walk decides may read `info level` (tests/depth-safe-nesting.test's
+`dsn-census-guarded`). It removed `levelLimit`, the 700-frame test with which
+`hir::semantic::Call` declined a request; this branch had kept it as a
+second reason to defer one (section 3.2). The merge keeps the deferral and
+counts the instances' nesting alone (`maxDepth` analyses in progress), and
+main's mutant `host-depth-decides-instances` now puts the `info level` test
+back into the deferral (killed by `dsn-census-guarded`).
+
+A segment takes its caller's variables in and gives them back
+(core/deep.tcl's `Take`, `Give`), which could hand the HIR to a nested
+instance walk as a second reference and so copy its expression table at the
+walk's next write. Measured on chains of N helpers, each calling the next
+with an argument of a struct type of its own, so every instance is
+requested inside the previous one's walk: at N = 32 and 48 the analyses
+cross the segment bound (one and two descents), every instance is walked
+once, and no walk found the expression table copied (the table object the
+HIR holds before and after each walk is the same, as `si-region-no-copy`
+checks for 64 instances side by side); the times stay flat (0.09, 0.11,
+0.16 and 0.19 s at N = 8, 16, 32, 48).
+
 ## 4. Invariants and what bounds the analysis
 
 * The HIR is authoritative and unmodified by an instance walk: every walk
@@ -327,7 +352,7 @@ has its own element type and the program's HIR has no `instanceClauses`; a
 
 | file | change |
 |---|---|
-| `hir/semantic.tcl` | in-place walks and verification (`Save`, `Capture`, `Rewind`, `Restore`, `AuditRestore`, `RegionScopes`, `ScopeKids`, `Apply`, `Nested`), deferral (`Defer`), the guard (`Exhausted`, `Drain`), `Abandon`; `maxPerBlock` removed; the header's "Budgets" and "Region-local walks"; `Snapshot` reads main's `instanceClauses` in place (section 3.6) |
+| `hir/semantic.tcl` | in-place walks and verification (`Save`, `Capture`, `Rewind`, `Restore`, `AuditRestore`, `RegionScopes`, `ScopeKids`, `Apply`, `Nested`), deferral (`Defer`), the guard (`Exhausted`, `Drain`), `Abandon`; `maxPerBlock` removed; the header's "Budgets" and "Region-local walks"; `Snapshot` reads main's `instanceClauses` in place (section 3.6); the deferral counts nested analyses only (section 3.7) |
 | `hir/types.tcl` | `hir::types::Call` passes the variable's name; `hir::types::Walk` abandons the run on error; `RecordClause`'s comment (section 3.6) |
 | `hir/staticdeps.tcl`, `hir/static.tcl` | `C:budget` removed; `KeyArguments` (section 3.4) |
 | `hir/traits.tcl`, `hir/affine.tcl` | two messages and a comment no longer blame a budget |
@@ -335,7 +360,7 @@ has its own element type and the program's HIR has no `instanceClauses`; a
 | `tests/static-economics.test` | `se-equal-deep-first-request` expects `late` accepted; `se-equal-erased-key-argument` (new) |
 | `audit/semantic-instance-scalability/` | `tools/equivalence.tcl` (the corpus HIR comparison), `tools/scaling.tcl` (the measurement grid), `results/` (their recorded outputs) |
 | `audit/mid-end-port/tools/` | `instance-walks.tcl` reports instances, per-walk time and peak memory; `budget.tcl` and `measure.tcl` cope without `maxPerBlock` |
-| mutant catalogs | static-decisions: `budget-deep-ignored` removed, `key-arguments-uncontracted-only` added, `channels-not-consumed` and `unwind-not-waiting` updated; native-view `untyped-receiver-accepted`, tree-struct `construction-outward-result-only`, loop-binding-types `lcb-snapshot-omits-clauses` (section 3.6) updated |
+| mutant catalogs | static-decisions: `budget-deep-ignored` removed, `key-arguments-uncontracted-only` added, `channels-not-consumed` and `unwind-not-waiting` updated; native-view `untyped-receiver-accepted`, tree-struct `construction-outward-result-only`, loop-binding-types `lcb-snapshot-omits-clauses` (section 3.6), depth-safe-nesting `host-depth-decides-instances` (section 3.7) updated |
 | Compilerpedia | `error.hir-semantic-limit` (new); `concept.specialization`, `error.affine-erasure-unsupported`, `error.affine-instance-budget`, `error.trait-instance-budget` corrected |
 | docs | OPPORTUNISTIC-SEMANTIC-INSTANCES.md, STATIC-COMPILE.md, STATIC-DECISION-ECONOMICS.md, SIMCITY-WORKLOAD-KNOWN-GAPS.md (gap 3.1 fixed), INDEX.md, AGENTS.md (the waiting channels) |
 | golden census and manifest | rows for the 17 new Tcl tests (`audit/golden/migration/census/`, `tcl-names.txt`, `tests/golden/manifest.tsv` regenerated) |
@@ -488,18 +513,8 @@ UTC):
 The GC-stress jobs of `tests.yml` run on pushes to main only and were
 skipped; `tests-arm64.yml` ran its own under the dispatch.
 
-**Since these runs** main has moved on (0030f8a to cbaa040, 46 commits),
-and the branch no longer merges cleanly: DEPTH-SAFE-NESTED-EXPRESSION-
-FRONTEND-MILESTONE-1.md removes `levelLimit` from `hir::semantic::Call` (the
-nesting counted is the instances' alone, since the front end's walks run in
-segments, core/deep.tcl) where this branch made it a reason to defer a
-request -- a conflict in hir/semantic.tcl, to be resolved by keeping the
-deferral and dropping the interpreter-depth test. Its segments take the
-caller's variables in and give them back (core/deep.tcl's `Take`, `Give`);
-whether a walk that crosses the segment bound shares the HIR's expression
-table that way, and so copies it at its next write, is to be measured when
-main is merged. The branch must merge main again before it lands, and its CI
-runs again then.
+Main was merged into the branch once more after these runs (section 3.7);
+the runs of that merge follow.
 
 ## 7. Remaining limits and known problems
 

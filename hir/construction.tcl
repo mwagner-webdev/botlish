@@ -204,6 +204,7 @@ proc hir::construction::Max {args} {
 }
 
 proc hir::construction::SeqUses {view b loops exprs} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     set n 0
     set a -1
     foreach e $exprs {
@@ -222,6 +223,7 @@ proc hir::construction::SeqUses {view b loops exprs} {
 # LOOPS: the set of loop/listloop ExprIds that contain B's own `bind` (a
 # per-iteration binding): only their bodies are analyzed per iteration.
 proc hir::construction::Uses {view b loops e} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     switch -- [hir::kind $view $e] {
         const { return {0 -1} }
         ref {

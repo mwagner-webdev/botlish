@@ -1,0 +1,492 @@
+# lab-life.bot -- the census's lifetime, cancellation and termination
+# scenarios (MANAGED-SUBPROCESS-AND-EVENT-LOOP-CENSUS-MILESTONE-1.md,
+# sections 8-9):
+#
+#   lab-life HELPER SCENARIO TMPDIR
+#
+# Lines "desc PID" and "pid PID" name processes ../tools/run.py checks from
+# outside after the run (gone, or alive and reparented).
+import event_loop_linux
+import labkit
+import msp
+import report
+import std::abi
+import std::abi::bytes
+import std::event_loop
+import std::int
+import std::linux::io
+import std::list
+import std::mutable_array
+import std::mutable_vector
+import std::str
+import type std::event_loop::Delivery
+import type std::event_loop::Wake
+
+fn since(start: int) -> int:
+    msp::now_us() - start
+
+fn join_path(dir: str, name: str) -> str:
+    std::str::concat(std::str::concat(dir, "/"), name)
+
+# The child's first chunk of stdout, reported (a "desc PID" line).
+fn first_line(c: msp::Child, context p: msp::Procs, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) errors std::event_loop::TaskFailed:
+    b = labkit::read(c, msp::Stream::Stdout)
+    report::say(std::str::concat("first: ", report::text_of(b)))
+
+fn say_pid(c: msp::Child, context io: std::linux::io::LinuxIO):
+    report::say_int("pid ", msp::pid(c))
+
+# A reader whose read is interrupted: it reports, then reads again.
+fn interrupted_reader(c: msp::Child, done: std::event_loop::Reg, context p: msp::Procs, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    start = msp::now_us()
+    b = msp::read(c, msp::Stream::Stdout):
+        on msp::Interrupted:
+            report::say_int("read interrupted after-us ", since(start))
+            report::empty()
+        on msp::StaleChild:
+            fail std::event_loop::TaskFailed {code: 11}
+        on msp::StreamClosed:
+            fail std::event_loop::TaskFailed {code: 12}
+        on msp::ProcessFault:
+            fail std::event_loop::TaskFailed {code: 14}
+    alive = msp::exited?(c):
+        on msp::StaleChild:
+            true
+    report::say(std::str::concat("child still running after the interrupt ", report::yes(not alive)))
+    rest = labkit::drain(c, msp::Stream::Stdout)
+    report::say_int("second read got bytes ", std::abi::bytes::length(rest).value)
+    std::event_loop::post(done, 1, 0)
+    0
+
+fn sc_cancel(helper: str, tmp: str, context p: msp::Procs, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    {owner, child} = labkit::spawn(msp::command(helper, ["sleep:400", "out:after\\n", "exit:0"]))
+    done = std::event_loop::channel(Delivery::Reliable, 2)
+    coroutine {step, first} = interrupted_reader(child, done)
+    std::event_loop::adopt(step, first)
+    labkit::sleep(100000)
+    labkit::interrupt(child)
+    labkit::interrupt(child)
+    std::event_loop::wait(done)
+    labkit::status_line("status", labkit::wait(child))
+    msp::release(owner)
+    0
+
+# terminate(): graceful (the child traps SIGTERM and takes 150 ms), ignored
+# (escalated to SIGKILL after 300 ms), the child exiting by itself during the
+# grace period, an already exited child, and terminate twice.
+fn sc_terminate(helper: str, tmp: str, context p: msp::Procs, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    {owner: o1, child: c1} = labkit::spawn(msp::command(helper, ["trap:15:150", "sleep:10000"]))
+    labkit::sleep(50000)
+    t1 = msp::now_us()
+    labkit::status_line("graceful", labkit::terminate(c1, 1000000))
+    report::say_int("graceful-us ", since(t1))
+    msp::release(o1)
+    e0 = msp::escalations()
+    {owner: o2, child: c2} = labkit::spawn(msp::command(helper, ["ignore:15", "sleep:10000"]))
+    labkit::sleep(50000)
+    t2 = msp::now_us()
+    labkit::status_line("ignored", labkit::terminate(c2, 300000))
+    report::say_int("ignored-us ", since(t2))
+    report::say_int("escalations ", msp::escalations() - e0)
+    msp::release(o2)
+    {owner: o3, child: c3} = labkit::spawn(msp::command(helper, ["ignore:15", "sleep:200", "exit:0"]))
+    labkit::sleep(50000)
+    t3 = msp::now_us()
+    labkit::status_line("exits-during-grace", labkit::terminate(c3, 1000000))
+    report::say_int("exits-during-grace-us ", since(t3))
+    msp::release(o3)
+    {owner: o4, child: c4} = labkit::spawn(msp::command(helper, ["exit:0"]))
+    labkit::wait(c4)
+    to_zombie = msp::signal(c4, 15):
+        on msp::StaleChild:
+            fail std::event_loop::TaskFailed {code: 11}
+    report::say(std::str::concat("signal to an exited, unreaped child ", report::yes(to_zombie)))
+    labkit::status_line("already-exited", labkit::terminate(c4, 100000))
+    labkit::status_line("terminate-again", labkit::terminate(c4, 100000))
+    msp::release(o4)
+    stale = msp::signal(c4, 9):
+        on msp::StaleChild {code}:
+            report::say_int("signal after release: stale ", code)
+            false
+    report::say(std::str::concat("signal after release delivered ", report::yes(stale)))
+    0
+
+# Descendants: one in the group (killed with it), one that left with setsid
+# (survives the group's termination: the operating system offers no group
+# guarantee for it).
+fn sc_descendants(helper: str, tmp: str, context p: msp::Procs, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    {owner: o1, child: c1} = labkit::spawn(msp::command(helper, ["child:sleep:30000", "sleep:30000"]))
+    first_line(c1)
+    say_pid(c1)
+    labkit::status_line("group", labkit::terminate(c1, 300000))
+    msp::release(o1)
+    {owner: o2, child: c2} = labkit::spawn(msp::command(helper, ["child:setsid,sleep:30000", "sleep:30000"]))
+    first_line(c2)
+    labkit::sleep(50000)
+    labkit::status_line("escaped", labkit::terminate(c2, 300000))
+    msp::release(o2)
+    report::say_int("orphans (no subreaper) ", msp::orphans(0))
+    0
+
+# The same escape with this process as the subreaper: the escaped
+# descendant is reparented here when its parent dies, and can be found
+# (orphans) and killed.
+fn sc_subreaper(helper: str, tmp: str, context p: msp::Procs, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    report::say_int("subreaper ", msp::subreaper(true))
+    {owner, child} = labkit::spawn(msp::command(helper, ["child:setsid,sleep:30000", "sleep:30000"]))
+    first_line(child)
+    labkit::sleep(50000)
+    labkit::status_line("escaped", labkit::terminate(child, 300000))
+    msp::release(owner)
+    labkit::sleep(50000)
+    report::say_int("orphans found ", msp::orphans(0))
+    report::say_int("orphans killed ", msp::orphans(9))
+    labkit::sleep(50000)
+    report::say_int("orphans after ", msp::orphans(0))
+    0
+
+# A descendant that inherited the child's stdout keeps it open: the child's
+# exit is not the stream's end of file. Signalling the group after the
+# leader exited (still unreaped, so its group ID is reserved) ends it.
+fn sc_inherited(helper: str, tmp: str, context p: msp::Procs, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    {owner, child} = labkit::spawn(msp::command(helper, ["child:sleep:1500", "exit:0"]))
+    t = msp::now_us()
+    labkit::status_line("leader", labkit::wait(child))
+    report::say_int("leader-exit-us ", since(t))
+    out = labkit::drain(child, msp::Stream::Stdout)
+    report::say_int("stdout-eof-us ", since(t))
+    msp::release(owner)
+    {owner: o2, child: c2} = labkit::spawn(msp::command(helper, ["child:sleep:5000", "exit:0"]))
+    t2 = msp::now_us()
+    labkit::wait(c2)
+    delivered = msp::signal(c2, 9):
+        on msp::StaleChild:
+            false
+    report::say(std::str::concat("group signal after the leader's exit ", report::yes(delivered)))
+    labkit::drain(c2, msp::Stream::Stdout)
+    report::say_int("stdout-eof-after-group-kill-us ", since(t2))
+    msp::release(o2)
+    0
+
+# The reap order: the adapter refuses every signal once a child is reaped,
+# so it reaps last -- a group signal after the leader's exit (the leader
+# still unreaped) reaches its descendants. With the negative control (flag
+# 4: reap at the first status check) the adapter refuses the same signal and
+# the descendant survives. (The kernel itself would still deliver a group
+# signal through the reaped leader's pidfd: repro/group-after-reap.c.)
+fn sc_reap_order(helper: str, tmp: str, flags: int, context p: msp::Procs, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    {owner, child} = labkit::spawn(msp::with_stdio(msp::with_flags(msp::command(helper, ["child:sleep:30000", "exit:0"]), flags), msp::Stdio::Null, msp::Stdio::Pipe, msp::Stdio::Null))
+    first_line(child)
+    labkit::wait(child)
+    delivered = msp::signal(child, 9):
+        on msp::StaleChild:
+            false
+    report::say(std::str::concat("group signal after exit delivered ", report::yes(delivered)))
+    msp::release(owner)
+    0
+
+# Releasing a running child (explicitly, and by its owner's scope ending):
+# the reaper terminates it in the background; the loop runs until it is
+# reaped.
+fn scoped(helper: str, args: List[str], context p: msp::Procs, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) errors std::event_loop::TaskFailed:
+    {owner, child} = labkit::spawn(msp::command(helper, args))
+    say_pid(child)
+    # Let the child install its signal disposition first: a SIGTERM sent
+    # right after spawn ends a child that has not yet set it up.
+    labkit::sleep(50000)
+    report::say("leaving the owner's scope")
+
+fn sc_release(helper: str, tmp: str, context p: msp::Procs, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    {owner, child} = labkit::spawn(msp::command(helper, ["trap:15:100", "sleep:10000"]))
+    say_pid(child)
+    labkit::sleep(50000)
+    t = msp::now_us()
+    msp::release(owner)
+    report::say_int("release returned after-us ", since(t))
+    report::say_int("owned right after release ", msp::owned())
+    scoped(helper, ["ignore:15", "sleep:10000"])
+    report::say_int("owned after the scope ", msp::owned())
+    0
+
+# A coroutine owning a child, suspended in a read, is dropped without being
+# resumed: its unwinding releases the owner (lexical cleanup).
+fn holder(helper: str, context p: msp::Procs, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    {owner, child} = labkit::spawn(msp::command(helper, ["sleep:30000"]))
+    say_pid(child)
+    b = labkit::read(child, msp::Stream::Stdout)
+    report::say("holder resumed (never expected)")
+    msp::release(owner)
+    0
+
+fn drop_holder(helper: str, context p: msp::Procs, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    coroutine {step, first} = holder(helper)
+    report::say_int("holder suspended at ", first)
+    report::say("dropping the holder")
+
+fn sc_abandon(helper: str, tmp: str, context p: msp::Procs, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    labkit::sleep(1000)
+    drop_holder(helper)
+    report::say_int("owned after the drop ", msp::owned())
+    report::say_int("releases ", msp::releases())
+    0
+
+# A task owning a child waits in a read when the application stops and
+# shuts the loop down: its wait is revoked, it ends, its owner is released;
+# msp::shutdown kills and reaps what the reaper did not get to.
+fn waiter(helper: str, context p: msp::Procs, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    {owner, child} = labkit::spawn(msp::command(helper, ["ignore:15", "sleep:30000"]))
+    say_pid(child)
+    b = msp::read(child, msp::Stream::Stdout):
+        on msp::StreamClosed:
+            report::say("waiter: its read was revoked by the shutdown")
+            report::empty()
+        on msp::Interrupted:
+            report::empty()
+        on msp::StaleChild:
+            report::empty()
+        on msp::ProcessFault:
+            report::empty()
+    msp::release(owner)
+    0
+
+fn stopper(us: int, context ev: std::event_loop::Loop) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    labkit::sleep(us)
+    std::event_loop::stop()
+    0
+
+fn sc_shutdown(helper: str, tmp: str, context p: msp::Procs, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    coroutine {step, first} = waiter(helper)
+    std::event_loop::adopt(step, first)
+    coroutine {step: s2, first: f2} = stopper(200000)
+    std::event_loop::adopt(s2, f2)
+    labkit::sleep(1000)
+    0
+
+# Detaching: the process outlives its owner (and, in detach-outlive, the
+# supervisor); while the supervisor runs, sweep reaps it once it ends.
+fn sc_detach(helper: str, tmp: str, ms: int, context p: msp::Procs, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    {owner, child} = labkit::spawn(msp::with_stdio(msp::command(helper, [std::str::concat("pidfile:", join_path(tmp, "detached.pid")), std::str::concat("sleep:", std::int::to_string(ms)), std::str::concat("pidfile:", join_path(tmp, "detached.done"))]), msp::Stdio::Null, msp::Stdio::Null, msp::Stdio::Null))
+    say_pid(child)
+    msp::detach(owner):
+        on msp::ProcessFault:
+            fail std::event_loop::TaskFailed {code: 14}
+    report::say_int("owned after detach ", msp::owned())
+    report::say_int("still running (sweep) ", msp::sweep())
+    stale = msp::exited?(child):
+        on msp::StaleChild:
+            report::say("the identity is stale after detach")
+            false
+    if ms < 1000:
+        labkit::sleep(ms * 1000 + 200000)
+        report::say_int("still running after its end (sweep) ", msp::sweep())
+    0
+
+# Two tasks wait for the same child's exit: both must be woken (one
+# readiness record, passed on by re-arming the level-triggered pidfd watch).
+fn exit_waiter(c: msp::Child, id: int, done: std::event_loop::Reg, context p: msp::Procs, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    st = labkit::wait(c)
+    labkit::status_line(std::str::concat("waiter ", std::int::to_string(id)).concat(" saw"), st)
+    std::event_loop::post(done, id, 0)
+    0
+
+fn sc_two_waiters(helper: str, tmp: str, context p: msp::Procs, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    {owner, child} = labkit::spawn(msp::command(helper, ["sleep:200", "exit:6"]))
+    done = std::event_loop::channel(Delivery::Reliable, 4)
+    coroutine {step: s1, first: f1} = exit_waiter(child, 1, done)
+    std::event_loop::adopt(s1, f1)
+    coroutine {step: s2, first: f2} = exit_waiter(child, 2, done)
+    std::event_loop::adopt(s2, f2)
+    std::event_loop::wait(done)
+    std::event_loop::wait(done)
+    std::event_loop::revoke(done)
+    msp::release(owner)
+    0
+
+# A child is released while a readiness record of its stdout is queued and
+# nobody reads it: the record must not reach the slot's next child.
+fn sc_watch_release(helper: str, tmp: str, context p: msp::Procs, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    {owner, child} = labkit::spawn(msp::command(helper, ["out:old\n", "sleep:2000"]))
+    labkit::sleep(100000)
+    msp::release(owner)
+    labkit::sleep(50000)
+    {owner: o2, child: c2} = labkit::spawn(msp::command(helper, ["sleep:200", "out:new\n", "exit:0"]))
+    report::say(std::str::concat("the next child's first chunk: ", report::text_of(labkit::read(c2, msp::Stream::Stdout))))
+    labkit::status_line("status", labkit::wait(c2))
+    msp::release(o2)
+    report::say_int("stale records dropped ", std::event_loop::stats().stale_records)
+    0
+
+# Descriptor exhaustion (run.py starts this scenario with RLIMIT_NOFILE
+# 128): launches fail at the pipe stage with EMFILE, never half-made.
+fn sc_exhaust(helper: str, tmp: str, context p: msp::Procs, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    labkit::sleep(1000)
+    {owner: o0, child: c0} = labkit::spawn(msp::command(helper, ["sleep:5000"]))
+    owners = std::mutable_vector::from_list([o0])
+    loop i from 1 to 300:
+        {owner, child} = msp::spawn(msp::command(helper, ["sleep:5000"])):
+            on msp::LaunchFailed {stage, code}:
+                report::say(std::str::concat("launch ", std::int::to_string(i)).concat(" failed at ").concat(labkit::launch_text(stage)).concat(" ").concat(std::int::to_string(code)))
+                break
+            on msp::ProcessFault {reason, code}:
+                report::say(std::str::concat("fault ", reason).concat(" ").concat(std::int::to_string(code)))
+                break
+        owners.push(owner)
+    report::say_int("running ", std::mutable_vector::length(owners))
+    loop i from 0 to std::mutable_vector::length(owners):
+        o = owners.pop()
+        msp::release(o)
+    0
+
+# A released child's identity names nothing, also once its slot is reused.
+fn sc_stale(helper: str, tmp: str, context p: msp::Procs, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    {owner: oa, child: a} = labkit::spawn(msp::command(helper, ["exit:0"]))
+    labkit::wait(a)
+    msp::release(oa)
+    {owner: ob, child: b} = labkit::spawn(msp::command(helper, ["sleep:2000"]))
+    ex = msp::exited?(a):
+        on msp::StaleChild {code}:
+            report::say_int("old identity: stale ", code)
+            false
+    sent = msp::signal(a, 9):
+        on msp::StaleChild {code}:
+            report::say_int("signal through the old identity: stale ", code)
+            false
+    bex = msp::exited?(b):
+        on msp::StaleChild:
+            true
+    report::say(std::str::concat("the new child unaffected ", report::yes(not bex)))
+    labkit::status_line("new", labkit::terminate(b, 100000))
+    msp::release(ob)
+    0
+
+# Many short-lived children: sequentially, then 64 at once.
+fn sc_many(helper: str, tmp: str, count: int, context p: msp::Procs, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    fds = msp::open_fds()
+    wrong = std::mutable_array::create(2, 0)
+    t = msp::now_us()
+    loop i from 0 to count:
+        code = if i < 200:
+            i
+        else:
+            i - 200
+        {owner, child} = labkit::spawn(msp::with_stdio(msp::command(helper, [std::str::concat("exit:", std::int::to_string(code))]), msp::Stdio::Null, msp::Stdio::Pipe, msp::Stdio::Null))
+        st = labkit::wait(child)
+        if st.code != code or st.ending != msp::Ending::Exited:
+            wrong.set(0, wrong.at(0) + 1)
+        msp::release(owner)
+    report::say_int("sequential-us ", since(t))
+    t2 = msp::now_us()
+    # No typed empty vector: the first owner makes the vector (friction
+    # POST-2048-PRODUCT-FIXES.md records).
+    {owner: o0, child: c0} = labkit::spawn(msp::with_stdio(msp::command(helper, ["sleep:20", "exit:0"]), msp::Stdio::Null, msp::Stdio::Pipe, msp::Stdio::Null))
+    owners = std::mutable_vector::from_list([o0])
+    kids = std::mutable_vector::from_list([c0])
+    loop i from 1 to 64:
+        {owner, child} = labkit::spawn(msp::with_stdio(msp::command(helper, ["sleep:20", std::str::concat("exit:", std::int::to_string(i))]), msp::Stdio::Null, msp::Stdio::Pipe, msp::Stdio::Null))
+        owners.push(owner)
+        kids.push(child)
+    report::say_int("concurrent live ", msp::stat(12))
+    loop i from 0 to 64:
+        c = kids.at(i)
+        st = labkit::wait(c)
+        if st.code != i:
+            wrong.set(1, wrong.at(1) + 1)
+    loop i from 0 to 64:
+        o = owners.pop()
+        msp::release(o)
+    report::say_int("concurrent-us ", since(t2))
+    report::say_int("wrong sequential ", wrong.at(0))
+    report::say_int("wrong concurrent ", wrong.at(1))
+    report::say_int("live ", msp::stat(12))
+    report::say_int("fds delta ", msp::open_fds() - fds)
+    0
+
+fn main(helper: str, scenario: str, tmp: str, context ev: std::event_loop::Loop, d: event_loop_linux::Linux, n: event_loop_linux::Native, p: msp::Procs, io: std::linux::io::LinuxIO) -> int errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered, std::event_loop::TaskFailed, IndexNotFound:
+    std::event_loop::sync()
+    fds = msp::open_fds()
+    if scenario == "cancel":
+        coroutine {step, first} = sc_cancel(helper, tmp)
+        std::event_loop::adopt(step, first)
+    elif scenario == "terminate":
+        coroutine {step, first} = sc_terminate(helper, tmp)
+        std::event_loop::adopt(step, first)
+    elif scenario == "descendants":
+        coroutine {step, first} = sc_descendants(helper, tmp)
+        std::event_loop::adopt(step, first)
+    elif scenario == "subreaper":
+        coroutine {step, first} = sc_subreaper(helper, tmp)
+        std::event_loop::adopt(step, first)
+    elif scenario == "inherited":
+        coroutine {step, first} = sc_inherited(helper, tmp)
+        std::event_loop::adopt(step, first)
+    elif scenario == "reap-order":
+        coroutine {step, first} = sc_reap_order(helper, tmp, 0)
+        std::event_loop::adopt(step, first)
+    elif scenario == "eager-reap":
+        coroutine {step, first} = sc_reap_order(helper, tmp, 4)
+        std::event_loop::adopt(step, first)
+    elif scenario == "release":
+        coroutine {step, first} = sc_release(helper, tmp)
+        std::event_loop::adopt(step, first)
+    elif scenario == "abandon":
+        coroutine {step, first} = sc_abandon(helper, tmp)
+        std::event_loop::adopt(step, first)
+    elif scenario == "shutdown":
+        coroutine {step, first} = sc_shutdown(helper, tmp)
+        std::event_loop::adopt(step, first)
+    elif scenario == "detach":
+        coroutine {step, first} = sc_detach(helper, tmp, 300)
+        std::event_loop::adopt(step, first)
+    elif scenario == "detach-outlive":
+        coroutine {step, first} = sc_detach(helper, tmp, 3000)
+        std::event_loop::adopt(step, first)
+    elif scenario == "two-waiters":
+        coroutine {step, first} = sc_two_waiters(helper, tmp)
+        std::event_loop::adopt(step, first)
+    elif scenario == "watch-release":
+        coroutine {step, first} = sc_watch_release(helper, tmp)
+        std::event_loop::adopt(step, first)
+    elif scenario == "exhaust":
+        coroutine {step, first} = sc_exhaust(helper, tmp)
+        std::event_loop::adopt(step, first)
+    elif scenario == "stale":
+        coroutine {step, first} = sc_stale(helper, tmp)
+        std::event_loop::adopt(step, first)
+    elif scenario == "many":
+        coroutine {step, first} = sc_many(helper, tmp, 400)
+        std::event_loop::adopt(step, first)
+    else:
+        report::say(std::str::concat("no such scenario: ", scenario))
+        return 2
+    std::event_loop::run()
+    loop o in std::event_loop::take_outcomes():
+        if o.ending != std::event_loop::Ending::Returned:
+            report::say_int("task failed ", o.value)
+    report::say_int("end owned before shutdown ", msp::owned())
+    report::say_int("abandoned ", std::event_loop::shutdown(4))
+    report::say_int("end killed by shutdown ", msp::shutdown())
+    report::say_int("end owned ", msp::owned())
+    report::say_int("end escalations ", msp::escalations())
+    report::say_int("end live ", msp::stat(12))
+    report::say_int("end fds delta ", msp::open_fds() - fds)
+    0
+
+args = argv():
+    on InvalidArgumentEncoding:
+        []
+with context std::event_loop::create(64)
+with context event_loop_linux::create()
+with context event_loop_linux::native()
+with context msp::create(200000)
+with context std::linux::io::create()
+main(std::list::get(args, 1, ""), std::list::get(args, 2, ""), std::list::get(args, 3, "/tmp")):
+    on std::event_loop::SchedulerFault:
+        -1
+    on std::event_loop::DriverFault:
+        -2
+    on std::event_loop::LoopReentered:
+        -3
+    on std::event_loop::TaskFailed:
+        -4
+    on IndexNotFound:
+        -5

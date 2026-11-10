@@ -37,9 +37,15 @@ jobs:
     # runner for hours. On a branch push it is all that runs: dispatch the
     # workflow on the branch for the rest. It compares HEAD with main's
     # previous head on a push to main, with its merge base with main
-    # otherwise.
+    # otherwise. A branch push at a commit another run already tests defers
+    # to it and runs nothing (CI-RUNS.md, "A commit already tested").
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 40
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      deferred: ${{ steps.twin.outputs.deferred }}
     env:
       LANG: C.utf8
       LC_ALL: C.utf8
@@ -50,13 +56,20 @@ jobs:
           fetch-depth: 0
           filter: blob:none
 
+      - name: Already tested at this commit?
+        id: twin
+        uses: ./.github/actions/twin
+
       - name: Install project prerequisites
+        if: steps.twin.outputs.deferred != 'true'
         run: bash .devcontainer/setup.sh
 
       - name: Build native (Cranelift) backend
+        if: steps.twin.outputs.deferred != 'true'
         uses: ./.github/actions/build-native
 
       - name: Canary
+        if: steps.twin.outputs.deferred != 'true'
         env:
           BASE: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.event.before || 'origin/main' }}
         run: tclsh9.0 tests/canary.tcl -base "$BASE"

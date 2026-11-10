@@ -1,0 +1,653 @@
+# depth-safe-nesting.test -- the front end's nesting is never bounded by
+# Tcl's (DEPTH-SAFE-NESTED-EXPRESSION-FRONTEND-MILESTONE-1.md).
+#
+# A syntactically valid program nested a thousand deep -- parentheses,
+# arithmetic either way, a flat operator chain, unary operators, List
+# literals, struct constructions, calls, method and projection chains,
+# boolean chains, elif chains, nested blocks, functions and handlers, and
+# all of them mixed -- compiles at Tcl's default recursion limit of 1000
+# nested evaluations and runs on every backend with the value its structure
+# gives it. The walks over that nesting are guarded (core/deep.tcl): past a
+# segment's frames they go on in a new segment, which a driver resumes from
+# its own shallow frame. This file runs at the default limit; only running a
+# program on the Tcl backends raises it (the reference interpreter evaluates
+# the program's own nesting as nested Tcl evaluations: a run, not a
+# compilation).
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot audit depth-safe-nesting tools specimens.tcl]
+source [file join $::projectRoot service service.tcl]
+
+# Tcl's default: the front end must not need more.
+interp recursionlimit {} 1000
+
+testConstraint python3 [expr {![catch {exec python3 -c {print(1)}}]}]
+
+# The census: every procedure whose recursion follows the program's nesting,
+# by phase (audit/depth-safe-nesting/census.tsv). Each starts with the guard.
+proc dsnCensus {} {
+    set f [open [file join $::projectRoot audit depth-safe-nesting census.tsv] r]
+    set rows {}
+    foreach line [split [read $f] \n] {
+        if {$line eq "" || [string index $line 0] eq "#"} {
+            continue
+        }
+        lappend rows [split $line \t]
+    }
+    close $f
+    return $rows
+}
+
+set ::dsnGuard {if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}}
+
+# Runs SCRIPT with Tcl's limit raised to the program recursion limit: a
+# Tcl backend running a program evaluates its nesting (and its calls) as
+# nested Tcl evaluations, which is the run's depth, not the compiler's.
+proc dsnRunning {script} {
+    set saved [interp recursionlimit {}]
+    core::useProgramRecursionLimit
+    try {
+        uplevel 1 $script
+    } finally {
+        interp recursionlimit {} $saved
+    }
+}
+
+# Compiles SOURCE at the default limit (front end, the interpreter's core
+# IR, the Tcl compiler's unit, native lowering) and runs it on BACKENDS:
+# {OUTCOME ...}, one per backend, each `value SHOWN` or `error CODE`.
+proc dsnOutcomes {source {backends {interp compile cranelift-generic cranelift}}} {
+    set hir [surface::compile $source -warnings off]
+    core::ir::check [list block {} {*}[hir::lower $hir]]
+    core::compiler::compileHir $hir
+    native::lowered $hir
+    return [dsnRunning {
+        lmap backend $backends {
+            lrange [outcomeUnderHir $backend $hir] 0 1
+        }
+    }]
+}
+
+# KIND N deep on BACKENDS: "ok" when every backend shows the specimen's
+# value, else what they did.
+proc dsnAgree {kind n {backends {interp compile cranelift-generic cranelift}}} {
+    set specimen [dsn::specimen $kind $n]
+    set expected [list value [dict get $specimen value]]
+    if {[catch {dsnOutcomes [dict get $specimen source] $backends} outcomes options]} {
+        return "$kind $n: [dict get $options -errorcode] [string range $outcomes 0 200]"
+    }
+    foreach outcome $outcomes {
+        if {$outcome ne $expected} {
+            return "$kind $n: $outcomes, expected $expected"
+        }
+    }
+    return ok
+}
+
+# The first diagnostic of compiling SOURCE: {CODE LINE COLUMN SUMMARY}
+# (CODE the error code, a syntax error's without its record), or accepted.
+proc dsnDiagnostic {source} {
+    if {![catch {surface::compile $source -warnings off} result options]} {
+        return accepted
+    }
+    set first [lindex [dict get $options -diagnostics] 0]
+    set code [dict get $first errorcode]
+    if {[lrange $code 0 1] eq {SURFACE SYNTAX}} {
+        set code [lrange $code 0 1]
+    }
+    set location [dict get $first location]
+    return [list $code [dict get $location line] [dict get $location column] [dict get $first summary]]
+}
+
+# ---------------------------------------------------------------------------
+# The mechanism (core/deep.tcl), on a walk of its own
+
+namespace eval dsnWalk {
+    variable log {}
+}
+
+# A recursive walk of every shape the front end's take: state the caller
+# owns (upvar 1), a namespace variable it shares, a variable it creates in
+# its caller's frame, an error from the deepest level, and return codes.
+proc dsnWalk::Walk {stateVar n} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+    upvar 1 $stateVar state
+    variable log
+    lappend log $n
+    dict lappend state order $n
+    if {$n == 0} {
+        if {[dict exists $state fail]} {
+            error "failed at the bottom" {} {DSN BOTTOM}
+        }
+        return 0
+    }
+    set below [Walk state [expr {$n - 1}]]
+    upvar 1 made$n made
+    set made $n
+    dict lappend state after $n
+    return [expr {$below + 1}]
+}
+
+proc dsnWalk::Signal {code} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
+    return -code $code
+}
+
+# A loop of Signal CODE calls, each in a segment of its own (the bound 0):
+# what the loop saw.
+proc dsnWalk::Loop {code} {
+    set saved $::core::deep::bound
+    set ::core::deep::bound 0
+    try {
+        set seen 0
+        while {[incr seen] < 4} {
+            Signal $code
+            return "$code not seen"
+        }
+        return "$code seen"
+    } finally {
+        set ::core::deep::bound $saved
+    }
+}
+
+proc dsnWalk::Top {n {fail 0}} {
+    variable log
+    set log {}
+    set state [dict create order {} after {}]
+    if {$fail} {
+        dict set state fail 1
+    }
+    set code [catch {Walk state $n} result options]
+    return [list $code $result [dict getdef $options -errorcode {}] \
+        [llength [dict get $state order]] [lindex [dict get $state order] end] \
+        [lindex [dict get $state after] end] [llength $log] [info exists made$n]]
+}
+
+test dsn-mechanism-walk {a guarded walk 20000 deep at the default limit: its value, the caller's state in order (20001 entries, the last the bottom's, the first `after` the deepest's), the namespace variable shared by every level, the variable it made in its caller's frame -- with or without a driver, each in a segment per segment's frames} -body {
+    core::deep::resetStats
+    set direct [dsnWalk::Top 20000]
+    set driven [core::deep::run {dsnWalk::Top 20000}]
+    list $direct $driven [expr {[dict get [core::deep::stats] segments] >= 2 * 19800 / $core::deep::segment}] \
+        [info commands ::core::deep::seg*]
+} -cleanup {unset -nocomplain direct driven} -result {{0 20000 {} 20001 0 20000 20001 1} {0 20000 {} 20001 0 20000 20001 1} 1 {}}
+
+test dsn-mechanism-errors {an error from the bottom of a 5000-deep walk reaches the top with its code, the caller's state holds what every level did before it, and no segment is left behind; a guarded call's `break` and `continue` reach the loop around its call, as the call's own would} -body {
+    set failed [dsnWalk::Top 5000 1]
+    list $failed [dsnWalk::Loop break] [dsnWalk::Loop continue] [info commands ::core::deep::seg*]
+} -cleanup {unset -nocomplain failed} -result {{1 {failed at the bottom} {DSN BOTTOM} 5001 0 {} 5001 0} {break seen} {continue seen} {}}
+
+test dsn-mechanism-run {core::deep::run is its script in the caller's frame: its result, a variable it sets, a `return` from the caller} -body {
+    proc dsnRunReturn {} {
+        core::deep::run {
+            set inside 1
+            return early
+        }
+        return late
+    }
+    proc dsnRunSet {} {
+        set before 1
+        core::deep::run {
+            set made [expr {$before + 1}]
+        }
+        return $made
+    }
+    list [dsnRunReturn] [dsnRunSet] [core::deep::run {expr {6 * 7}}]
+} -cleanup {rename dsnRunReturn {}; rename dsnRunSet {}} -result {early 2 42}
+
+# ---------------------------------------------------------------------------
+# The census
+
+test dsn-census-guarded {every procedure of the census starts with the guard, exactly once; every guarded procedure is in the census; and no compile-time walk reads `info level` for anything else} -body {
+    set problems {}
+    set listed {}
+    foreach row [dsnCensus] {
+        lassign $row name phase shape
+        lappend listed $name
+        if {[info procs $name] eq ""} {
+            lappend problems "$name: no such procedure"
+            continue
+        }
+        set body [info body $name]
+        if {[string trim [lindex [split [string trimleft $body \n] \n] 0]] ne $::dsnGuard} {
+            lappend problems "$name: no guard"
+        }
+    }
+    foreach dir {surface hir compiler native core service lsp} {
+        foreach file [glob -directory [file join $::projectRoot $dir] *.tcl] {
+            set f [open $file r]
+            set text [read $f]
+            close $f
+            set lines [split $text \n]
+            for {set i 0} {$i < [llength $lines]} {incr i} {
+                set line [lindex $lines $i]
+                if {[string trim $line] eq $::dsnGuard} {
+                    set header [lindex $lines [expr {$i - 1}]]
+                    if {![regexp {^proc (::)?(\S+) } $header -> - name] || "::$name" ni $listed} {
+                        lappend problems "[file tail $file]:[expr {$i + 1}]: a guard outside the census"
+                    }
+                } elseif {[string match {*\[info level\]*} $line] && [file tail $file] ne "deep.tcl"
+                        && [string index [string trimleft $line] 0] ne "#"} {
+                    lappend problems "[file tail $file]:[expr {$i + 1}]: reads info level"
+                }
+            }
+        }
+    }
+    list [llength $listed] [expr {[llength $listed] > 100}] $problems
+} -match glob -cleanup {unset -nocomplain problems listed} -result {* 1 {}}
+
+# ---------------------------------------------------------------------------
+# A thousand levels of every production, at the default limit
+
+# Two backends' own code costs grow faster than the nesting where the
+# front end's do not (the report, section 25): the Tcl compiler's code for
+# nested handlers is nested, indented Tcl scripts that Tcl's parser scans
+# once per level (1000 handlers take minutes on `compile`), and the native
+# driver's code generator compiles 1000 nested loops in one function in
+# minutes. Those programs compile 1000 deep like every other -- the front
+# end, core IR, the Tcl compiler's unit and NIR -- and run on those
+# backends 250 deep.
+set ::dsnShallow {handler {compile 250} loops {cranelift-generic 250 cranelift 250}}
+
+proc dsnBackends {kind} {
+    set shallow [dict getdef $::dsnShallow $kind {}]
+    return [lmap backend {interp compile cranelift-generic cranelift} {
+        if {[dict exists $shallow $backend]} continue
+        set backend
+    }]
+}
+
+foreach kind [dsn::kinds] {
+    test dsn-1000-$kind "$kind nested 1000 deep compiles at Tcl's default limit (front end, core IR, the Tcl compiler's unit, native lowering) and runs on every backend with the value its structure gives it" -body {
+        set results [list [dsnAgree $kind 1000 [dsnBackends $kind]]]
+        dict for {backend depth} [dict getdef $::dsnShallow $kind {}] {
+            lappend results [dsnAgree $kind $depth $backend]
+        }
+        lsort -unique $results
+    } -cleanup {unset -nocomplain results backend depth} -result ok
+}
+
+test dsn-depths {every specimen kind at 1, 8, 32, 64, 96 and 128 levels on every backend (the depths the host's limit used to cut, around 80), each with its value} -body {
+    set failures {}
+    foreach kind [dsn::kinds] {
+        foreach n {1 8 32 64 96 128} {
+            set verdict [dsnAgree $kind $n]
+            if {$verdict ne "ok"} {
+                lappend failures $verdict
+            }
+        }
+    }
+    set failures
+} -cleanup {unset -nocomplain failures verdict} -result {}
+
+test dsn-beyond {5000 levels of parentheses and of List literals: no bound waits at 1000 either} -body {
+    list [dsnAgree paren 5000 {interp cranelift}] [dsnAgree list 5000 {compile cranelift}]
+} -result {ok ok}
+
+# ---------------------------------------------------------------------------
+# Malformed deep programs: the parser's own diagnostics
+
+test dsn-malformed {one token missing or wrong 1000 levels deep -- a parenthesis, a List's bracket, a construction's brace, the innermost argument -- is the parser's syntax diagnostic, at the place and in the words it reports at depth 5: never Tcl's "too many nested evaluations"} -body {
+    set result {}
+    foreach kind {paren list struct call} {
+        foreach n {5 1000} {
+            set m [dsn::malformed $kind $n]
+            set got [dsnDiagnostic [dict get $m source]]
+            set expected [list {SURFACE SYNTAX} [dict get $m line] [dict get $m column] [dict get $m message]]
+            if {$got ne $expected} {
+                lappend result "$kind $n: $got, expected $expected"
+            }
+        }
+    }
+    set result
+} -cleanup {unset -nocomplain result m got expected} -result {}
+
+test dsn-type-error-deep {a TYPE error in the innermost construction of a 1000-deep chain is the one diagnostic the compiler reports, at the innermost field: the analysis reaches it} -body {
+    set specimen [dict get [dsn::specimen struct 1000] source]
+    set source [string map {"S1000 {value: 42}" "S1000 {value: \"wrong\"}"} $specimen]
+    set lines [split $source \n]
+    set line [lsearch -glob $lines "x = *"]
+    set column [expr {[string first "S1000 \{value" [lindex $lines $line]] + [string length "S1000 \{"]}]
+    catch {surface::compile $source -warnings off} message options
+    set diagnostic [dsnDiagnostic $source]
+    list [lindex $diagnostic 0] [llength [dict get $options -diagnostics]] \
+        [expr {[lindex $diagnostic 1] == $line + 1}] [expr {[lindex $diagnostic 2] == $column + 1}]
+} -cleanup {unset -nocomplain specimen source lines line column message options diagnostic} -result {{CORE SEMANTIC TYPE} 1 1 1}
+
+# ---------------------------------------------------------------------------
+# Evaluation and error order
+
+# A chain of N calls, each failing with its own index when it is in BAD and
+# adding 1 otherwise, the innermost first: the error a run raises is the
+# innermost failing index's (arguments run before their call), and of two
+# failing siblings the left one's.
+proc dsnOrderProgram {n bad} {
+    set text "error Bad:\n    at: int\n\nfn g(i: int, v: int) -> int errors Bad:\n"
+    append text "    if [join [lmap b $bad {string cat "i == $b"}] { or }]:\n        fail Bad \{at: i\}\n    v + 1\n\n"
+    append text "fn pair(a: int, b: int) -> int:\n    a + b\n\n"
+    set s "pair(g(-1, 0), g(-2, 0))"
+    for {set i [expr {$n - 1}]} {$i >= 0} {incr i -1} {
+        set s "g($i, $s)"
+    }
+    append text "fn main() -> int errors Bad:\n    $s\n\nmain():\n    on Bad \{at\}:\n        at\n"
+    return $text
+}
+
+test dsn-evaluation-order {1000 nested calls: each call's argument runs before it (the innermost failing index is the one handled: 998 of {3, 500, 998}); the left sibling before the right (-1 of the two failing leaves); no failure: the leaves (1 + 1) and 1000 increments -- on every backend} -body {
+    list [dsnOutcomes [dsnOrderProgram 1000 {3 500 998}]] \
+        [dsnOutcomes [dsnOrderProgram 1000 {-1 -2}]] \
+        [dsnOutcomes [dsnOrderProgram 1000 {-7}]]
+} -result {{{value 998} {value 998} {value 998} {value 998}} {{value -1} {value -1} {value -1} {value -1}} {{value 1002} {value 1002} {value 1002} {value 1002}}}
+
+# ---------------------------------------------------------------------------
+# Affine values: a deep construction that owns a coroutine handle
+
+# S0 {next: S1 {next: ... SN {c: make(1)}}} in one expression: a finite
+# affine value N fields deep, made, passed, returned and dropped.
+proc dsnAffineChain {n} {
+    return [dict get [dsn::specimen affine $n] source]
+}
+
+# {OUTCOME RELEASES DISTINCT} of HIR on BACKEND (interp or compile).
+proc dsnReleases {hir backend} {
+    set core::coroutines::releaseCalls {}
+    try {
+        set outcome [dsnRunning {lrange [outcomeUnderHir $backend $hir] 0 1}]
+        set calls $core::coroutines::releaseCalls
+    } finally {
+        set core::coroutines::releaseCalls none
+    }
+    return [list $outcome [llength $calls] [llength [lsort -unique $calls]]]
+}
+
+test dsn-affine-chain {a construction 1000 fields deep in one expression, its innermost field a coroutine handle: compiled at the default limit, made twice, passed, returned and dropped -- every handle released exactly once on the Tcl backends} -body {
+    set hir [surface::compile [dsnAffineChain 1000] -warnings off]
+    list [dsnReleases $hir interp] [dsnReleases $hir compile]
+} -cleanup {unset -nocomplain hir} -result {{{value 1} 2 2} {{value 1} 2 2}}
+
+test dsn-affine-chain-native {the same natively, unfused, and under GC stress: every handle released by its owner, none left to the collector} -constraints nativeCoroutines -body {
+    set hir [surface::compile [dsnAffineChain 1000] -warnings off]
+    set plain [withoutCoroutineFusion {dict get [native::allocationReport $hir summary] coroutines}]
+    set stressed [withEnvironment {BOTLISH_NATIVE_GC_STRESS 1} {
+        withoutCoroutineFusion {lrange [outcomeUnderHir cranelift $hir] 0 1}
+    }]
+    list [dict get $plain released] [dict get $plain sweptSuspended] $stressed
+} -cleanup {unset -nocomplain hir plain stressed} -result {2 0 {value 1}}
+
+# ---------------------------------------------------------------------------
+# What stays a semantic answer
+
+proc dsnBox {n} {
+    set s 1
+    for {set i 0} {$i < $n} {incr i} {
+        set s "Box \{value: $s\}"
+    }
+    return "struct Box\[T\]:\n    value: T\n\nx = $s\nx[string repeat .value $n]\n"
+}
+
+test dsn-box-bound {Box {value: Box {value: ...}}: 6 deep is a program; from 7 deep on the applied-type bound cuts an inner argument to `any` and the construction is a TYPE error at its first field's value (a separate precision limit, unchanged) -- reached and reported the same way 1000 deep, where the front end used to fail with Tcl's TCL LIMIT STACK first} -body {
+    list [dsnDiagnostic [dsnBox 6]] [lrange [dsnDiagnostic [dsnBox 7]] 0 2] [lrange [dsnDiagnostic [dsnBox 1000]] 0 2]
+} -result {accepted {{CORE SEMANTIC TYPE} 4 10} {{CORE SEMANTIC TYPE} 4 10}}
+
+# ---------------------------------------------------------------------------
+# The paths around the walks: traits, static blocks, the service, the cache
+
+# 1 + (1 + (... 1)) N deep, as an expression.
+proc dsnSum {n} {
+    set s 1
+    for {set i 0} {$i < $n} {incr i} {
+        set s "1 + ($s)"
+    }
+    return $s
+}
+
+test dsn-trait-program {a trait program (its syntax stamped, checked as written, then monomorphized and built again) with a 1000-deep expression in a trait-polymorphic call's argument} -body {
+    dsnOutcomes "struct Person:\n    n: int\n\ntrait Named:\n    fn name(value: Named) -> int\n\nfn name(value: Person) -> int:\n    value.n\n\nfn describe(value: Named) -> int:\n    value.name()\n\ndescribe(Person \{n: [dsnSum 1000]\})\n"
+} -result {{value 1001} {value 1001} {value 1001} {value 1001}}
+
+test dsn-static-compile {a `static compile:` block decided by whole-program builds with a 1000-deep List in its body (accepted: the List), and one whose 1000-deep construction holds a TYPE error at its innermost field (rejected: its CompilerError handled)} -body {
+    set accepted "import std::compiler\n\nfn f() -> List\[any\] errors std::compiler::CompilerError:\n    static compile:\n        [string repeat \[ 1000]1[string repeat \] 1000]\n\nr = f():\n    on std::compiler::CompilerError:\n        \[\]\nstd::list::length(r)\n"
+    set chain [dict get [dsn::specimen struct 1000] source]
+    set decls [string range $chain 0 [string first "x = " $chain]-1]
+    set s "S1000 \{value: \"wrong\"\}"
+    for {set i 999} {$i >= 0} {incr i -1} {
+        set s "S$i \{next: $s\}"
+    }
+    set rejected "import std::compiler\n\n${decls}fn f() -> int errors std::compiler::CompilerError:\n    static compile:\n        x = $s\n        1\n\nf():\n    on std::compiler::CompilerError:\n        -1\n"
+    list [dsnOutcomes [withImports $accepted] {interp cranelift}] [dsnOutcomes $rejected {interp cranelift}]
+} -cleanup {unset -nocomplain accepted chain decls s rejected i} -result {{{value 1} {value 1}} {{value -1} {value -1}}}
+
+test dsn-module-binding {a module binding 1000 deep -- a List literal, a sum, a call chain -- read by the importing program: compiled at the default limit, its value on every backend} -body {
+    set dir [file join [temporaryDirectory] dsn-module-binding]
+    file delete -force $dir
+    file mkdir $dir
+    set results {}
+    foreach kind {list rbin call} {
+        set specimen [dsn::specimen $kind 1000]
+        set first [lsearch -inline [split [dict get $specimen source] \n] "x = *"]
+        set f [open [file join $dir deepbind.bot] w]
+        puts -nonewline $f "[expr {$kind eq "call" ? "fn f(a: int) -> int:\n    return a\n\n" : ""}]$first\n"
+        close $f
+        set f [open [file join $dir main.bot] w]
+        puts -nonewline $f "import deepbind\n\ndeepbind::x\n"
+        close $f
+        set hir [surface::readProgramFile [file join $dir main.bot] -warnings off]
+        hir::lower $hir
+        core::compiler::compileHir $hir
+        native::lowered $hir
+        set outcomes [dsnRunning {
+            lmap backend {interp compile cranelift-generic cranelift} {
+                lrange [outcomeUnderHir $backend $hir] 0 1
+            }
+        }]
+        lappend results [expr {[lsort -unique $outcomes] eq [list [list value [dict get $specimen value]]]}]
+    }
+    set results
+} -cleanup {file delete -force $dir; unset -nocomplain dir results kind specimen first f hir outcomes} -result {1 1 1}
+
+test dsn-service {the compiler service analyzes an unsaved 1000-deep document (no diagnostic) and answers position queries inside its nesting (its index of the file's syntax), and a malformed one (the parser's diagnostic), at the default limit} -body {
+    set ws [service::workspace -warnings off -cache ""]
+    set path [file join [temporaryDirectory] dsn-service.bot]
+    service::setDocument $ws $path [dict get [dsn::specimen list 1000] source]
+    set good [service::analyze $ws $path]
+    set answered [lmap column {1 500 1001} {expr {![catch {service::at $good $path 1 $column}]}}]
+    service::setDocument $ws $path [dict get [dsn::malformed list 1000] source]
+    set bad [service::analyze $ws $path]
+    set result [list [dict get [service::revision $good] outcome] [llength [service::diagnostics $good]] $answered \
+        [dict get [service::revision $bad] outcome] \
+        [lmap d [service::diagnostics $bad] {list [dict get $d code] [dict get $d line] [dict get $d column]}]]
+    service::closeWorkspace $ws
+    set result
+} -cleanup {unset -nocomplain ws path good bad result answered} -result {ok 0 {1 1 1} syntax {{{SURFACE SYNTAX} 2 1}}}
+
+test dsn-cache {a 1000-deep program read through the front-end cache twice (written, then read back by the interchange reader) is the HIR its build makes} -body {
+    set dir [file join [temporaryDirectory] dsn-cache]
+    file delete -force $dir
+    file mkdir $dir
+    set path [file join $dir deep.bot]
+    set f [open $path w]
+    puts -nonewline $f [dict get [dsn::specimen struct 1000] source]
+    close $f
+    set built [hir::format [surface::readProgramFile $path -warnings off]]
+    set first [hir::format [surface::readProgramFile $path -warnings off -cache [file join $dir cache]]]
+    set second [hir::format [surface::readProgramFile $path -warnings off -cache [file join $dir cache]]]
+    list [expr {$first eq $built}] [expr {$second eq $built}] [llength [glob -nocomplain -directory [file join $dir cache] *]]
+} -cleanup {file delete -force $dir; unset -nocomplain dir path f built first second} -match glob -result {1 1 *}
+
+test dsn-isolation {deep valid, deep malformed, ordinary and deep programs compiled in turn each build exactly the HIR they build alone; no driver, segment or bound outlives a compilation} -body {
+    set programs [list [dict get [dsn::specimen mixed 1000] source] [dict get [dsn::malformed struct 1000] source] \
+        "x = 1 + 2 * 3\nx\n" [dict get [dsn::specimen elif 300] source]]
+    set alone {}
+    foreach source $programs {
+        catch {surface::compile $source -warnings off} hir
+        lappend alone [expr {[dict exists $hir exprs] ? [hir::format $hir] : $hir}]
+    }
+    set interleaved {}
+    foreach source [concat $programs [lreverse $programs]] {
+        catch {surface::compile $source -warnings off} hir
+        lappend interleaved [expr {[dict exists $hir exprs] ? [hir::format $hir] : $hir}]
+    }
+    list [expr {[lrange $interleaved 0 3] eq $alone}] [expr {[lreverse [lrange $interleaved 4 7]] eq $alone}] \
+        $core::deep::current $core::deep::bound [info commands ::core::deep::seg*]
+} -cleanup {unset -nocomplain programs alone interleaved hir source} -result {1 1 {} 200 {}}
+
+test dsn-warnings {every warning pass runs over 1000-deep programs at the default limit (the completion walks they repeat included, and the exit walks over 1000 nested blocks): the struct chain draws none, a 1000-term `or` chain none, the nested ifs one -- their 42nd else returns 42, as the innermost branch does: SAME-RETURN-VALUE, from 42 levels on, segments or not} -body {
+    lmap kind {struct or handler mixed ifnest inject} {
+        set hir [surface::compile [dict get [dsn::specimen $kind 1000] source] -warnings default -warning-channel ""]
+        lmap warning [hir::warnings::of $hir] {dict get $warning code}
+    }
+} -cleanup {unset -nocomplain hir} -result {{} {} {} {} SAME-RETURN-VALUE {}}
+
+test dsn-repeatable {a proof-producing predicate whose body nests 1000 deep, decided at its second call: the repeatability walk over its body (hir/repeatable.tcl) runs at the default limit, and the decided call is taken} -body {
+    set s x
+    for {set i 0} {$i < 1000} {incr i} {
+        set s "x + ($s)"
+    }
+    set source "refined type Big = int\n\nfn big?(x: int) -> bool proves x: Big:\n    $s > 0\n\ny = 5\nr = if big?(y):\n    if big?(y):\n        1\n    else:\n        2\nelse:\n    3\nr\n"
+    set ::dsnRepeatable 0
+    trace add execution hir::repeatable::Block enter {apply {args {incr ::dsnRepeatable}}}
+    try {
+        set hir [surface::compile $source -warnings off]
+    } finally {
+        trace remove execution hir::repeatable::Block enter {apply {args {incr ::dsnRepeatable}}}
+    }
+    list [expr {$::dsnRepeatable > 0}] [dsnRunning {lrange [outcomeUnderHir interp $hir] 0 1}]
+} -cleanup {unset -nocomplain s i source hir ::dsnRepeatable} -result {1 {value 1}}
+
+test dsn-consumed-fold {a fold whose MutableVector intermediate is consumed (hir/mutvec.tcl, "Consumed fold intermediates"), its body pushing a sum 1000 deep (the function form: a method-style call with such an argument costs quadratic memory, the report's section 25): the walk of the body's exits (FoldWalk) and every lowering run at the default limit, and every backend gives the same length} -body {
+    set s i
+    for {set i 0} {$i < 1000} {incr i} {
+        set s "i + ($s)"
+    }
+    set source "import std::mutable_vector\n\nfn ints() -> MutableVector\[int\]:\n    std::mutable_vector::from_list(\[\])\n\nfn f(n: int) -> int:\n    w = fold i from 0 to n with intermediate acc ints():\n        std::mutable_vector::push(acc, $s)\n        acc\n    w.length()\n\nf(3)\n"
+    set ::dsnFoldWalk 0
+    trace add execution hir::mutvec::FoldExitsClean enter {apply {args {incr ::dsnFoldWalk}}}
+    try {
+        set outcomes [dsnOutcomes $source]
+    } finally {
+        trace remove execution hir::mutvec::FoldExitsClean enter {apply {args {incr ::dsnFoldWalk}}}
+    }
+    list [expr {$::dsnFoldWalk > 0}] $outcomes
+} -cleanup {unset -nocomplain s i source outcomes ::dsnFoldWalk} -result {1 {{value 3} {value 3} {value 3} {value 3}}}
+
+test dsn-text {HIR text and the AST's text of 1000-deep programs: printed, and HIR text read back into the same HIR text} -body {
+    lmap kind {list rbin struct} {
+        set source [dict get [dsn::specimen $kind 1000] source]
+        set text [hir::format [surface::compile $source -warnings off]]
+        set ast [surface::formatAst [surface::parse $source]]
+        list [expr {[hir::format [hir::parse $text]] eq $text}] [expr {[string length $ast] > 1000}]
+    }
+} -cleanup {unset -nocomplain source text ast} -result {{1 1} {1 1} {1 1}}
+
+# ---------------------------------------------------------------------------
+# Linear work
+
+# Whether VALUE has a string representation.
+proc dsnStringified {value} {
+    return [expr {![string match "*no string representation*" [tcl::unsupported::representation $value]]}]
+}
+
+test dsn-no-stringified-syntax {searching a program's syntax for an intrinsic trait's name or a coroutine construction, and taking a node's children, never gives a nested node a string (a leaf's few characters are all a search may make): a node's text holds its whole subtree, and Tcl keeps it with every node (quadratic memory in the nesting)} -body {
+    set node [hir::syntax::constNode {ir {}} int [clock seconds]]
+    for {set i 0} {$i < 200} {incr i} {
+        set node [hir::syntax::callNode [list ir [list $i]] [hir::syntax::rootRef {ir {}} +] $node \
+            [hir::syntax::constNode {ir {}} int $i]]
+    }
+    set inner [lindex [dict get $node args] 0]
+    set middle $inner
+    for {set i 0} {$i < 100} {incr i} {
+        set middle [lindex [dict get $middle args] 0]
+    }
+    set bind [hir::syntax::bindNode {ir {}} x $node]
+    set results [list [hir::traits::IntrinsicDecls [list $bind] {-modules {}}] \
+        [hir::traits::UsesCoroutines [list $bind] {}] [llength [hir::static::Children $node]]]
+    set ast [surface::parse "x = [string repeat f( 200]1[string repeat ) 200]\nx\n"]
+    set call [dict get [lindex [dict get $ast body] 0] value]
+    set children [surface::ast::Children $call]
+    list $results [dsnStringified $inner] [dsnStringified $middle] [dsnStringified [lindex $children 1]]
+} -cleanup {unset -nocomplain node inner middle bind results ast call children i} -result {{{} 0 3} 0 0 0}
+
+test dsn-module-not-stringified {loading a module never gives its nested syntax a string: a List literal 200 deep in a module's function, loaded after the module it imports, comes out of the loader with no string at a node 100 levels down (the modules' sections were once concatenated, which gave every node of every module after the first one)} -body {
+    withPrivateLibrary {
+        set f [open [file join $::core::libraryDir dsndeep.bot] w]
+        puts -nonewline $f "import std::list\n\nfn value():\n    std::list::length([string repeat \[ 200]1[string repeat \] 200])\n"
+        close $f
+        set loaded [surface::modules::LoadNamespaces {std::dsndeep}]
+    }
+    set section [lindex [dict get $loaded sections] end]
+    set node [dict get [lindex [dict get $section nodes] 0] value]
+    while {[dict get $node kind] ne "call"} {
+        set node [lindex [dict get $node body] end]
+    }
+    for {set i 0} {$i <= 100} {incr i} {
+        set node [lindex [dict get $node args] 0]
+    }
+    list [dict get $section namespace] [dict get $node kind] [dsnStringified $node]
+} -cleanup {unset -nocomplain f loaded section node i} -result {std::dsndeep call 0}
+
+test dsn-linear-constant-fold {native lowering asks each integer constant expression's value once: 1 + (1 + ...) 400 deep asks it about as many times as the expression has nodes, not once per level per node below} -body {
+    set hir [surface::compile "x = [dsnSum 400]\nx\n" -warnings off]
+    set ::dsnFolds 0
+    trace add execution native::lower::ConstantIntValue enter {apply {args {incr ::dsnFolds}}}
+    try {
+        native::lowered $hir
+    } finally {
+        trace remove execution native::lower::ConstantIntValue enter {apply {args {incr ::dsnFolds}}}
+    }
+    list [expr {$::dsnFolds > 400}] [expr {$::dsnFolds < 4 * 801}]
+} -cleanup {unset -nocomplain hir ::dsnFolds} -result {1 1}
+
+test dsn-linear-segments {segments grow linearly with the nesting: List literals 2000 deep make about twice the segments 1000 deep make, and the explicit stack is as deep as the nesting divided by a segment's frames} -body {
+    set counts {}
+    foreach n {1000 2000} {
+        core::deep::resetStats
+        surface::compile [dict get [dsn::specimen list $n] source] -warnings off
+        lappend counts [dict get [core::deep::stats] segments] [dict get [core::deep::stats] deepest]
+    }
+    lassign $counts s1 d1 s2 d2
+    list [expr {$s2 > 1.6 * $s1 && $s2 < 2.4 * $s1}] [expr {$d2 > 1.6 * $d1 && $d2 < 2.4 * $d1}] [expr {$d1 > 1000 / $core::deep::segment}]
+} -cleanup {unset -nocomplain counts n s1 d1 s2 d2} -result {1 1 1}
+
+# ---------------------------------------------------------------------------
+# Segments change where frames live, nothing else
+
+# Compiles SOURCE with segments SIZE frames deep (and drivers made SIZE
+# frames from the top): its HIR text, or its diagnostics.
+proc dsnWithSegments {size source} {
+    set saved [list $core::deep::segment $core::deep::outside $core::deep::bound]
+    lassign [list $size $size $size] core::deep::segment core::deep::outside core::deep::bound
+    try {
+        if {[catch {surface::compile $source -warnings off} hir options]} {
+            return [list error [dict get $options -errorcode] $hir]
+        }
+        # The Tcl compiler names temporaries from a process-wide counter:
+        # both compilations count from the same place.
+        set ids $core::compiler::nextId
+        set core::compiler::nextId 0
+        set unit [core::compiler::compileHir $hir]
+        set core::compiler::nextId [expr {max($ids, $core::compiler::nextId)}]
+        set code [string map [list [namespace tail [dict get $unit name]] UNIT] [dict get $unit code]]
+        return [list [hir::format $hir] [hir::lower $hir] $code [native::lowered $hir]]
+    } finally {
+        lassign $saved core::deep::segment core::deep::outside core::deep::bound
+    }
+}
+
+test dsn-segment-invariance {every specimen 40 deep, a malformed one and the 2048 engine with its demo compile to the same HIR text, core IR, Tcl code and NIR (or the same diagnostics) with a segment every 3 frames as with the default 150: a guarded call's segment computes exactly what the call computes} -body {
+    set sources {}
+    foreach kind [dsn::kinds] {
+        lappend sources $kind [dict get [dsn::specimen $kind 40] source]
+    }
+    lappend sources malformed [dict get [dsn::malformed struct 40] source]
+    set f [open [file join $::projectRoot examples games 2048 game2048.bot] r]
+    lappend sources 2048 "[read $f]\nempty_board()\n"
+    close $f
+    set differ {}
+    foreach {name source} $sources {
+        if {[dsnWithSegments 3 $source] ne [dsnWithSegments $core::deep::segment $source]} {
+            lappend differ $name
+        }
+    }
+    set differ
+} -cleanup {unset -nocomplain sources differ f} -result {}
+
+cleanupTests

@@ -603,11 +603,13 @@ proc native::lower::HoistDeferredUses {fnVar exprs e} {
 ## native/lower.tcl
 <<<<
 proc native::lower::MandatoryWriteBack {e} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     variable hir
     variable fault
     if {$fault ne ""} {
 ====
 proc native::lower::MandatoryWriteBack {e} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     variable hir
     variable fault
     variable structOpt
@@ -618,11 +620,13 @@ proc native::lower::MandatoryWriteBack {e} {
 ## native/lower.tcl
 <<<<
 proc native::lower::MandatoryWriteBack {e} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     variable hir
     variable fault
     if {$fault ne ""} {
 ====
 proc native::lower::MandatoryWriteBack {e} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     variable hir
     variable fault
     variable spec

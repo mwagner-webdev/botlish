@@ -192,7 +192,8 @@ candidate swap can change).
   depend on the other candidates' builds.
 * **Poison and unknown types.** A call whose receiver is poison (an earlier
   diagnostic proved it invalid in every context, hir/types.tcl) is judged
-  by nothing and decides nothing; its cause is that diagnostic. An `any`
+  by nothing and decides nothing; its cause is that diagnostic. (Unless the
+  poison is the call's own: section 10.1, "Cycles".) An `any`
   receiver excludes nothing by kind and is judged by builds. A build that
   does not type (resolution failed) decides no call.
 * **What the filter contributed.** Its exclusions are cheap proofs of a
@@ -331,7 +332,10 @@ Notation: a configuration S gives every multi-candidate call one candidate;
 `build(S)` is the program built with those choices; `own(C, S)` the
 diagnostics of `build(S)` whose subject is C, minus obligation kinds, plus
 C's native kind mismatch. K is applicable to C relative to S iff
-`own(C, S[C:=K]) = {}`.
+`own(C, S[C:=K]) = {}` and C's receiver is not poison in
+`build(S[C:=K])` (section 10.1, "Cycles": in an acyclic program the
+deviation leaves the receiver as `build(S)` has it, so this is the
+condition the decision always had).
 
 1. **Candidate applicability is semantic (3.1).** `own(C, S)` contains
    exactly what the checks of the ordinary call C against its callee report
@@ -772,9 +776,47 @@ filter, 7 with it; now 7).
   configuration (every decided call has exactly one applicable candidate
   relative to it) or rejects the oscillating calls as ambiguous, but a
   second certified configuration may exist, and which one is found depends
-  on the stand-ins. No such program is known; none was generated. The
-  language design does not say what a self-dependent method call means:
-  this is an open design question, not a rule the implementation settles.
+  on the stand-ins. The language design does not say what a
+  self-dependent method call means in general: this is an open design
+  question, not a rule the implementation settles.
+
+  *A receiver the call's own candidate poisons* (HTTP-CLIENT-PACKAGE-
+  MILESTONE-1.md, F2) is the one cycle found, and is settled. In a fold,
+  `acc.concat(p)`'s result is the next iteration's receiver `acc`. With a
+  candidate whose result the fold cannot join with its initial value (the
+  first stand-in, `std::linux::fs::concat`, beside `std::str::concat`),
+  the fold's walk makes the intermediate poison -- and so the call's
+  receiver, which the decision took for an independent diagnostic's: the
+  call was judged by nothing and rejected unreported, and the reported
+  program (the call at no candidate) had no diagnostic at all. A trait
+  program then failed "in the monomorphized program", rebuilt from the
+  stand-in; any other program compiled and failed at run time. Now a
+  candidate is applicable only when its own build establishes the receiver
+  (section 5's notation), a call whose receiver the decided build poisons
+  is judged by its candidates' single deviations, and it is judged by
+  nothing only when every candidate's build poisons the receiver. Where the
+  poison is the call's own for every candidate, the reported program
+  establishes the receiver, and the rejection is reported (a rejection is
+  dismissed for its receiver only when the *reported* program poisons it,
+  where its diagnostic is), each candidate's reason saying that with it
+  the receiver has no valid type. The cost: a call whose receiver an
+  independent diagnostic poisons -- in a rejected program only -- now
+  takes a deviation per other candidate to show it. Over the golden and
+  workload suites (`audit/method-resolution/tools/invariance.tcl` against
+  the tree before the change) nothing semantic and nothing reported
+  differs, and the builds go from 399 to 402: the three are traits.bot's
+  `chain_after_unknown_operation`, a rejected static compile block whose
+  receiver TRAIT-UNKNOWN-OPERATION poisons (one deviation per other
+  `length`); the diagnostic-recovery corpus builds exactly as before
+  (`mr-fold-receiver-decided`, `mr-fold-receiver-trait-program`,
+  `mr-fold-receiver-no-candidate`, `mr-poisoned-receiver-judged-by-nothing`;
+  the mutants `unestablished-receiver-applicable`,
+  `poisoned-receiver-not-judged`,
+  `rejection-dismissed-by-the-decisions-poison`,
+  `unestablished-receiver-unexplained`). A self-dependence through an
+  argument rather than the receiver (`p.concat(acc)`) is unchanged: the
+  argument's poison skips the candidate's checks, so the call can be
+  ambiguous where one candidate is meant -- reported, never silent.
 * **Kind proofs in a cycle.** An exclusion assumes the deviation leaves the
   call's receiver as the decided build has it. The reference audit checks
   this on every program it runs; it is not proven for cycles.

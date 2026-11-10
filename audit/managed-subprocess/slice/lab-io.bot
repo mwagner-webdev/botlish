@@ -1,0 +1,528 @@
+# lab-io.bot -- the census's launch and stream scenarios
+# (MANAGED-SUBPROCESS-AND-EVENT-LOOP-CENSUS-MILESTONE-1.md, sections 5-7):
+#
+#   lab-io HELPER SCENARIO TMPDIR
+#
+# One scenario per run; every observation a line on stdout, which
+# ../tools/run.py checks against its expectations. Every scenario runs under
+# a watchdog task that interrupts and reports a hang instead of hanging.
+import event_loop_linux
+import labkit
+import msp
+import report
+import std::abi
+import std::abi::bytes
+import std::event_loop
+import std::int
+import std::linux::io
+import std::list
+import std::mutable_array
+import std::mutable_vector
+import std::str
+import type std::event_loop::Delivery
+import type std::event_loop::Wake
+
+# The time since START, us.
+fn since(start: int) -> int:
+    msp::now_us() - start
+
+fn join_path(dir: str, name: str) -> str:
+    std::str::concat(std::str::concat(dir, "/"), name)
+
+# A launch whose outcome is reported, never a task failure.
+fn try_launch(label: str, s: msp::Spec, context p: msp::Procs, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) errors std::event_loop::TaskFailed:
+    {owner, child} = msp::spawn(s):
+        on msp::LaunchFailed {stage, code}:
+            report::say(std::str::concat(label, " launch-failed ").concat(labkit::launch_text(stage)).concat(" ").concat(std::int::to_string(code)))
+            return unit
+        on msp::ProcessFault {reason, code}:
+            report::say(std::str::concat(label, " fault ").concat(reason))
+            return unit
+        on std::event_loop::SchedulerFault:
+            fail std::event_loop::TaskFailed {code: 15}
+    st = labkit::wait(child)
+    labkit::status_line(std::str::concat(label, " started"), st)
+    msp::release(owner)
+
+fn sc_launch(helper: str, tmp: str, context p: msp::Procs, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    try_launch("missing", msp::command(join_path(tmp, "no-such-program"), []))
+    try_launch("not-executable", msp::command("/etc/passwd", []))
+    try_launch("directory", msp::command("/tmp", []))
+    try_launch("relative-not-searched", msp::command("true", []))
+    try_launch("bad-cwd", msp::in_directory(msp::command(helper, ["cwd"]), join_path(tmp, "no-such-dir")))
+    try_launch("cwd-is-file", msp::in_directory(msp::command(helper, ["cwd"]), "/etc/passwd"))
+    try_launch("bad-file", msp::with_output_files(msp::command(helper, ["out:x"]), join_path(tmp, "no-such-dir/out.log"), ""))
+    try_launch("nul-in-arg", msp::command(helper, [std::str::concat("a", report::nul_text())]))
+    try_launch("exit-3", msp::command(helper, ["exit:3"]))
+    try_launch("abort", msp::command(helper, ["raise:6"]))
+    try_launch("killed", msp::command(helper, ["raise:9"]))
+    try_launch("shell-explicit", msp::command("/bin/sh", ["-c", "exit 4"]))
+    report::say_int("live ", msp::stat(12))
+    0
+
+# A task that reads stream S to its end and posts (bytes, reads) to DONE.
+fn reader(c: msp::Child, s: msp::Stream, done: std::event_loop::Reg, context p: msp::Procs, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    counted = labkit::count(c, s)
+    std::event_loop::post(done, counted.bytes, counted.reads)
+    0
+
+# A task that ticks every PERIOD us until STOP is posted, posting to DONE its
+# tick count and the largest lateness of a tick (us): the loop's
+# responsiveness while the scenario runs.
+fn ticker(period: int, stop: std::event_loop::Reg, done: std::event_loop::Reg, context ev: std::event_loop::Loop) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    stats = std::mutable_array::create(2, 0)
+    t = std::event_loop::every(period)
+    start = msp::now_us()
+    loop:
+        e = std::event_loop::wait(t)
+        if e.reason != Wake::Timer:
+            break
+        if std::event_loop::pending(stop) > 0:
+            break
+        ticks = stats.at(0) + e.count
+        stats.set(0, ticks)
+        late = msp::now_us() - (start + ticks * period)
+        if late > stats.at(1):
+            stats.set(1, late)
+    std::event_loop::revoke(t)
+    std::event_loop::post(done, stats.at(0), stats.at(1))
+    0
+
+fn take2(done: std::event_loop::Reg, context ev: std::event_loop::Loop) -> std::event_loop::Event errors std::event_loop::SchedulerFault:
+    std::event_loop::wait(done)
+
+# Stdout and stderr each 1 MiB, the child writing stderr first: only a
+# supervisor that reads both concurrently gets either.
+fn sc_streams(helper: str, tmp: str, context p: msp::Procs, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    start = msp::now_us()
+    {owner, child} = labkit::spawn(msp::command(helper, ["errn:1048576:101", "outn:1048576:111", "err:end\\n"]))
+    d_out = std::event_loop::channel(Delivery::Reliable, 2)
+    d_err = std::event_loop::channel(Delivery::Reliable, 2)
+    coroutine {step: s1, first: f1} = reader(child, msp::Stream::Stdout, d_out)
+    std::event_loop::adopt(s1, f1)
+    coroutine {step: s2, first: f2} = reader(child, msp::Stream::Stderr, d_err)
+    std::event_loop::adopt(s2, f2)
+    st = labkit::wait(child)
+    o = std::event_loop::wait(d_out)
+    e = std::event_loop::wait(d_err)
+    report::say_int("stdout bytes ", o.a)
+    report::say_int("stderr bytes ", e.a)
+    report::say_int("stdout reads ", o.b)
+    report::say_int("stderr reads ", e.b)
+    labkit::status_line("status", st)
+    report::say_int("elapsed-us ", since(start))
+    msp::release(owner)
+    0
+
+# The same child, read naively: stdout to its end first. The child blocks on
+# its full stderr pipe, so stdout never ends: a watchdog interrupts the read
+# after 1.5 s and the scenario reports the deadlock it would have been.
+fn watchdog(c: msp::Child, us: int, context p: msp::Procs, ev: std::event_loop::Loop, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    labkit::sleep(us)
+    report::say("watchdog fired")
+    labkit::interrupt(c)
+    0
+
+fn sc_naive(helper: str, tmp: str, context p: msp::Procs, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    {owner, child} = labkit::spawn(msp::command(helper, ["errn:1048576:101", "outn:1048576:111", "err:end\\n"]))
+    coroutine {step, first} = watchdog(child, 1500000)
+    std::event_loop::adopt(step, first)
+    total = std::mutable_array::create(1, 0)
+    loop:
+        b = msp::read(child, msp::Stream::Stdout):
+            on msp::Interrupted:
+                report::say("stdout read interrupted: deadlock")
+                break
+            on msp::StaleChild:
+                fail std::event_loop::TaskFailed {code: 11}
+            on msp::StreamClosed:
+                fail std::event_loop::TaskFailed {code: 12}
+            on msp::ProcessFault:
+                fail std::event_loop::TaskFailed {code: 14}
+        k = std::abi::bytes::length(b).value
+        if k == 0:
+            break
+        total.set(0, total.at(0) + k)
+    report::say_int("stdout bytes before the deadlock ", total.at(0))
+    ex = msp::exited?(child):
+        on msp::StaleChild:
+            false
+    report::say(std::str::concat("child exited ", report::yes(ex)))
+    st = labkit::terminate(child, 100000)
+    labkit::status_line("status", st)
+    msp::release(owner)
+    0
+
+# Writing 4 MiB to a child that reads only after 300 ms: the writer task
+# waits for room (EAGAIN, then readiness), a reader drains the echo, and a
+# ticker keeps ticking meanwhile.
+fn writer(c: msp::Child, size: int, chunk: int, done: std::event_loop::Reg, context p: msp::Procs, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    size_of = std::abi::usize(chunk):
+        on std::abi::AbiIntegerBelowRange:
+            fail std::event_loop::TaskFailed {code: 20}
+        on std::abi::AbiIntegerAboveRange:
+            fail std::event_loop::TaskFailed {code: 20}
+    block = std::abi::bytes::zeroed(size_of)
+    data = std::abi::bytes::freeze(block)
+    written = std::mutable_array::create(1, 0)
+    start = msp::now_us()
+    loop:
+        if written.at(0) >= size:
+            break
+        labkit::write(c, data)
+        written.set(0, written.at(0) + chunk)
+    labkit::close_stdin(c)
+    std::event_loop::post(done, written.at(0), since(start))
+    0
+
+fn sc_stdin(helper: str, tmp: str, context p: msp::Procs, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    eagain = msp::stat(11)
+    {owner, child} = labkit::spawn(msp::command(helper, ["sleep:300", "cat"]))
+    d_w = std::event_loop::channel(Delivery::Reliable, 2)
+    d_r = std::event_loop::channel(Delivery::Reliable, 2)
+    d_t = std::event_loop::channel(Delivery::Reliable, 2)
+    stop = std::event_loop::channel(Delivery::Reliable, 2)
+    coroutine {step: s0, first: f0} = ticker(10000, stop, d_t)
+    std::event_loop::adopt(s0, f0)
+    coroutine {step: s1, first: f1} = writer(child, 4194304, 65536, d_w)
+    std::event_loop::adopt(s1, f1)
+    coroutine {step: s2, first: f2} = reader(child, msp::Stream::Stdout, d_r)
+    std::event_loop::adopt(s2, f2)
+    w = std::event_loop::wait(d_w)
+    r = std::event_loop::wait(d_r)
+    err = labkit::drain(child, msp::Stream::Stderr)
+    st = labkit::wait(child)
+    std::event_loop::post(stop, 1, 0)
+    t = std::event_loop::wait(d_t)
+    report::say_int("written ", w.a)
+    report::say_int("write-us ", w.b)
+    report::say_int("echoed ", r.a)
+    report::say(std::str::concat("child: ", report::text_of(err)))
+    report::say_int("ticks ", t.a)
+    report::say_int("max-tick-late-us ", t.b)
+    report::say_int("eagain ", msp::stat(11) - eagain)
+    labkit::status_line("status", st)
+    msp::release(owner)
+    0
+
+# Writes larger than the pipe (100,000 bytes, the pipe holding 64 KiB): every
+# write is partial at first, and the module completes it after waiting.
+fn sc_stdin_partial(helper: str, tmp: str, context p: msp::Procs, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    {owner, child} = labkit::spawn(msp::command(helper, ["cat"]))
+    d_w = std::event_loop::channel(Delivery::Reliable, 2)
+    d_r = std::event_loop::channel(Delivery::Reliable, 2)
+    coroutine {step: s1, first: f1} = writer(child, 1000000, 100000, d_w)
+    std::event_loop::adopt(s1, f1)
+    coroutine {step: s2, first: f2} = reader(child, msp::Stream::Stdout, d_r)
+    std::event_loop::adopt(s2, f2)
+    w = std::event_loop::wait(d_w)
+    r = std::event_loop::wait(d_r)
+    report::say_int("written ", w.a)
+    report::say_int("echoed ", r.a)
+    report::say_int("native writes ", msp::stat(9))
+    labkit::status_line("status", labkit::wait(child))
+    msp::release(owner)
+    0
+
+# An 8 MiB writer whose reader pauses 1 s after the first chunk: the bytes
+# stay in the kernel's pipe and the child blocks on its own write.
+fn sc_backpressure(helper: str, tmp: str, context p: msp::Procs, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    {owner, child} = labkit::spawn(msp::command(helper, ["outn:8388608:120", "exit:0"]))
+    first = labkit::read(child, msp::Stream::Stdout)
+    report::say_int("first-chunk ", std::abi::bytes::length(first).value)
+    report::say_int("paused pid ", msp::pid(child))
+    labkit::sleep(1000000)
+    resumed = msp::exited?(child):
+        on msp::StaleChild:
+            false
+    report::say_int("resumed exited ", report::bit(resumed))
+    rest = labkit::count(child, msp::Stream::Stdout)
+    report::say_int("total ", std::abi::bytes::length(first).value + rest.bytes)
+    st = labkit::wait(child)
+    labkit::status_line("status", st)
+    msp::release(owner)
+    0
+
+# The binary probe: every byte value, an invalid UTF-8 pair, and a
+# three-byte character split across two writes 300 ms apart.
+fn sc_binary(helper: str, tmp: str, context p: msp::Procs, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    {owner, child} = labkit::spawn(msp::command(helper, ["bin"]))
+    acc = std::mutable_array::create(1, report::empty())
+    reads = std::mutable_array::create(1, 0)
+    loop:
+        b = labkit::read(child, msp::Stream::Stdout)
+        if std::abi::bytes::length(b).value == 0:
+            break
+        reads.set(0, reads.at(0) + 1)
+        acc.set(0, report::cat(acc.at(0), b))
+    data = acc.at(0)
+    len = std::abi::bytes::length(data).value
+    report::say_int("bytes ", len)
+    report::say_int("reads ", reads.at(0))
+    report::say_int("first-nul ", msp::find_byte(data, 0, 0))
+    report::say_int("first-newline ", msp::find_byte(data, 0, 10))
+    report::say_int("second-newline ", msp::find_byte(data, 11, 10))
+    report::say(std::str::concat("whole-as-utf8 ", report::text_of(data)))
+    tail = std::abi::bytes::slice(data, len - 4, len):
+        on LowerUnderrun:
+            report::empty()
+        on UpperOverrun:
+            report::empty()
+    report::say(std::str::concat("tail-as-utf8 ", report::text_of(tail)))
+    st = labkit::wait(child)
+    labkit::status_line("status", st)
+    msp::release(owner)
+    0
+
+# End of file is not exit: stdout closes, the child sleeps, then exits 4.
+fn sc_eof_early(helper: str, tmp: str, context p: msp::Procs, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    {owner, child} = labkit::spawn(msp::command(helper, ["out:a\\n", "close:out", "sleep:300", "err:late\\n", "exit:4"]))
+    out = labkit::drain(child, msp::Stream::Stdout)
+    eof = msp::now_us()
+    report::say(std::str::concat("stdout ", report::text_of(out)))
+    at_eof = msp::exited?(child):
+        on msp::StaleChild:
+            false
+    report::say_int("exited-at-eof ", report::bit(at_eof))
+    err = labkit::drain(child, msp::Stream::Stderr)
+    report::say(std::str::concat("stderr ", report::text_of(err)))
+    st = labkit::wait(child)
+    report::say_int("exit-after-eof-us ", since(eof))
+    labkit::status_line("status", st)
+    msp::release(owner)
+    0
+
+# A child that exits with output still unread: within the pipe's capacity
+# the exit comes first and every byte is read after it; beyond it the child
+# cannot exit until it is read.
+fn sc_exit_unread(helper: str, tmp: str, context p: msp::Procs, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    {owner, child} = labkit::spawn(msp::command(helper, ["outn:30000:65", "exit:5"]))
+    st = labkit::wait(child)
+    labkit::status_line("small status", st)
+    out = labkit::count(child, msp::Stream::Stdout)
+    report::say_int("small bytes after exit ", out.bytes)
+    msp::release(owner)
+    {owner: o2, child: c2} = labkit::spawn(msp::command(helper, ["outn:200000:65", "exit:5"]))
+    early = labkit::wait_until(c2, msp::now_us() + 700000)
+    report::say(std::str::concat("large exited within 0.7 s unread ", report::yes(early)))
+    out2 = labkit::count(c2, msp::Stream::Stdout)
+    report::say_int("large bytes ", out2.bytes)
+    st2 = labkit::wait(c2)
+    labkit::status_line("large status", st2)
+    msp::release(o2)
+    0
+
+# A child that exits before anything waits for it: the pidfd's readiness is
+# level-triggered, so a wait that starts late still sees the exit.
+fn sc_exit_first(helper: str, tmp: str, context p: msp::Procs, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    {owner, child} = labkit::spawn(msp::command(helper, ["exit:3"]))
+    labkit::sleep(200000)
+    st = labkit::wait(child)
+    labkit::status_line("status", st)
+    msp::release(owner)
+    0
+
+# Durable output: stdout and stderr appended to files the supervisor never
+# reads through.
+fn sc_persist(helper: str, tmp: str, context p: msp::Procs, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    s = msp::with_output_files(msp::command(helper, ["out:to-file\\n", "err:to-err-file\\n", "outn:100000:46"]), join_path(tmp, "job.out"), join_path(tmp, "job.err"))
+    {owner, child} = labkit::spawn(s)
+    st = labkit::wait(child)
+    labkit::status_line("status", st)
+    msp::release(owner)
+    0
+
+# An output policy: keep only the last 4096 bytes, and terminate the child
+# once it wrote more than 1 MiB (memory stays bounded).
+fn sc_limit(helper: str, tmp: str, context p: msp::Procs, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    {owner, child} = labkit::spawn(msp::command(helper, ["flood"]))
+    tail = std::mutable_array::create(1, report::empty())
+    seen = std::mutable_array::create(1, 0)
+    loop:
+        b = labkit::read(child, msp::Stream::Stdout)
+        k = std::abi::bytes::length(b).value
+        if k == 0:
+            break
+        seen.set(0, seen.at(0) + k)
+        joined = report::cat(tail.at(0), b)
+        jl = std::abi::bytes::length(joined).value
+        kept = if jl > 4096:
+            std::abi::bytes::slice(joined, jl - 4096, jl):
+                on LowerUnderrun:
+                    joined
+                on UpperOverrun:
+                    joined
+        else:
+            joined
+        tail.set(0, kept)
+        if seen.at(0) > 1048576:
+            report::say("limit exceeded: terminating")
+            break
+    st = labkit::terminate(child, 200000)
+    report::say(std::str::concat("seen over limit ", report::yes(seen.at(0) > 1048576)))
+    report::say_int("kept ", std::abi::bytes::length(tail.at(0)).value)
+    labkit::status_line("status", st)
+    err = labkit::drain(child, msp::Stream::Stderr)
+    report::say(std::str::concat("child: ", report::text_of(err)))
+    msp::release(owner)
+    0
+
+# What the child inherits: signal dispositions and mask, descriptors.
+fn sc_inherit(helper: str, tmp: str, context p: msp::Procs, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    report::say_int("supervisor fds ", msp::open_fds())
+    {owner, child} = labkit::spawn(msp::command(helper, ["sig", "fds", "tty"]))
+    report::say(std::str::concat("default: ", report::text_of(labkit::drain(child, msp::Stream::Stdout))))
+    labkit::wait(child)
+    msp::release(owner)
+    {owner: o2, child: c2} = labkit::spawn(msp::with_flags(msp::command(helper, ["sig", "fds"]), 3))
+    report::say(std::str::concat("kept: ", report::text_of(labkit::drain(c2, msp::Stream::Stdout))))
+    labkit::wait(c2)
+    msp::release(o2)
+    {owner: o3, child: c3} = labkit::spawn(msp::with_stdio(msp::command(helper, ["tty", "out:inherited\\n"]), msp::Stdio::Null, msp::Stdio::Inherit, msp::Stdio::Inherit))
+    labkit::wait(c3)
+    msp::release(o3)
+    report::say_int("supervisor fds after ", msp::open_fds())
+    0
+
+# A child in a process group of its own, given the supervisor's terminal as
+# stdin, reads it: the kernel stops it (SIGTTIN, a background group), so it
+# never exits; only SIGKILL (SIGTERM stays pending while it is stopped) ends
+# it. A TUI's children must not get the terminal.
+fn sc_tty_read(helper: str, tmp: str, context p: msp::Procs, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    {owner, child} = labkit::spawn(msp::with_stdio(msp::command(helper, ["readn:1"]), msp::Stdio::Inherit, msp::Stdio::Pipe, msp::Stdio::Pipe))
+    done = labkit::wait_until(child, msp::now_us() + 500000)
+    st = msp::proc_state(child)
+    report::say(std::str::concat("stopped by the terminal: ", report::yes(not done and st == 84)))
+    report::say_int("state ", st)
+    labkit::status_line("status", labkit::terminate(child, 300000))
+    msp::release(owner)
+    0
+
+# A child in the supervisor's own (foreground) process group, given the
+# terminal, puts it into raw mode and exits: the terminal stays raw. Nothing
+# in the supervisor restores it (no termios binding: the TUI's).
+fn sc_tty_raw(helper: str, tmp: str, context p: msp::Procs, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    {owner, child} = labkit::spawn(msp::with_group(msp::with_stdio(msp::command(helper, ["stty-raw"]), msp::Stdio::Inherit, msp::Stdio::Pipe, msp::Stdio::Pipe), false))
+    labkit::status_line("status", labkit::wait(child))
+    msp::release(owner)
+    0
+
+# A write after the child closed its stdin: EPIPE (the supervisor ignores
+# SIGPIPE: the runtime's startup), reported as StreamClosed, not a kill.
+fn sc_stdin_closed(helper: str, tmp: str, context p: msp::Procs, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    {owner, child} = labkit::spawn(msp::command(helper, ["close:in", "sleep:300", "exit:0"]))
+    labkit::sleep(100000)
+    msp::write(child, report::bytes_of("too late\n")):
+        on msp::StreamClosed:
+            report::say("write after the child closed stdin: closed")
+        on msp::StaleChild:
+            fail std::event_loop::TaskFailed {code: 11}
+        on msp::Interrupted:
+            fail std::event_loop::TaskFailed {code: 13}
+        on msp::ProcessFault {reason, code}:
+            report::say_int("write: fault ", code)
+    labkit::status_line("status", labkit::wait(child))
+    msp::release(owner)
+    0
+
+fn sc_basic(helper: str, tmp: str, context p: msp::Procs, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    {owner, child} = labkit::spawn(msp::command(helper, ["args", "", "a b", "quote\"d 'x'", "héllo €", "--", "$HOME", "*"]))
+    report::say(report::text_of(labkit::drain(child, msp::Stream::Stdout)))
+    labkit::status_line("status", labkit::wait(child))
+    msp::release(owner)
+    spec = msp::in_directory(msp::with_env(msp::with_env(msp::command(helper, ["env:MSP_X", "env:HOME", "env:PATH", "cwd"]), "MSP_X=one two"), "HOME"), tmp)
+    {owner: o2, child: c2} = labkit::spawn(spec)
+    report::say(report::text_of(labkit::drain(c2, msp::Stream::Stdout)))
+    labkit::wait(c2)
+    msp::release(o2)
+    {owner: o3, child: c3} = labkit::spawn(msp::with_env(msp::with_clear_env(msp::command(helper, ["env:PATH", "env:ONLY"])), "ONLY=1"))
+    report::say(report::text_of(labkit::drain(c3, msp::Stream::Stdout)))
+    labkit::wait(c3)
+    msp::release(o3)
+    0
+
+fn main(helper: str, scenario: str, tmp: str, context ev: std::event_loop::Loop, d: event_loop_linux::Linux, n: event_loop_linux::Native, p: msp::Procs, io: std::linux::io::LinuxIO) -> int errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered, std::event_loop::TaskFailed, IndexNotFound:
+    std::event_loop::sync()
+    fds = msp::open_fds()
+    if scenario == "basic":
+        coroutine {step, first} = sc_basic(helper, tmp)
+        std::event_loop::adopt(step, first)
+    elif scenario == "launch":
+        coroutine {step, first} = sc_launch(helper, tmp)
+        std::event_loop::adopt(step, first)
+    elif scenario == "streams":
+        coroutine {step, first} = sc_streams(helper, tmp)
+        std::event_loop::adopt(step, first)
+    elif scenario == "naive":
+        coroutine {step, first} = sc_naive(helper, tmp)
+        std::event_loop::adopt(step, first)
+    elif scenario == "stdin":
+        coroutine {step, first} = sc_stdin(helper, tmp)
+        std::event_loop::adopt(step, first)
+    elif scenario == "stdin-partial":
+        coroutine {step, first} = sc_stdin_partial(helper, tmp)
+        std::event_loop::adopt(step, first)
+    elif scenario == "backpressure":
+        coroutine {step, first} = sc_backpressure(helper, tmp)
+        std::event_loop::adopt(step, first)
+    elif scenario == "binary":
+        coroutine {step, first} = sc_binary(helper, tmp)
+        std::event_loop::adopt(step, first)
+    elif scenario == "eof-early":
+        coroutine {step, first} = sc_eof_early(helper, tmp)
+        std::event_loop::adopt(step, first)
+    elif scenario == "exit-unread":
+        coroutine {step, first} = sc_exit_unread(helper, tmp)
+        std::event_loop::adopt(step, first)
+    elif scenario == "exit-first":
+        coroutine {step, first} = sc_exit_first(helper, tmp)
+        std::event_loop::adopt(step, first)
+    elif scenario == "persist":
+        coroutine {step, first} = sc_persist(helper, tmp)
+        std::event_loop::adopt(step, first)
+    elif scenario == "limit":
+        coroutine {step, first} = sc_limit(helper, tmp)
+        std::event_loop::adopt(step, first)
+    elif scenario == "tty-read":
+        coroutine {step, first} = sc_tty_read(helper, tmp)
+        std::event_loop::adopt(step, first)
+    elif scenario == "tty-raw":
+        coroutine {step, first} = sc_tty_raw(helper, tmp)
+        std::event_loop::adopt(step, first)
+    elif scenario == "stdin-closed":
+        coroutine {step, first} = sc_stdin_closed(helper, tmp)
+        std::event_loop::adopt(step, first)
+    elif scenario == "inherit":
+        coroutine {step, first} = sc_inherit(helper, tmp)
+        std::event_loop::adopt(step, first)
+    else:
+        report::say(std::str::concat("no such scenario: ", scenario))
+        return 2
+    std::event_loop::run()
+    loop o in std::event_loop::take_outcomes():
+        if o.ending != std::event_loop::Ending::Returned:
+            report::say_int("task failed ", o.value)
+    report::say_int("end owned ", msp::owned())
+    report::say_int("end live ", msp::stat(12))
+    report::say_int("end fds delta ", msp::open_fds() - fds)
+    msp::shutdown()
+
+args = argv():
+    on InvalidArgumentEncoding:
+        []
+with context std::event_loop::create(64)
+with context event_loop_linux::create()
+with context event_loop_linux::native()
+with context msp::create(200000)
+with context std::linux::io::create()
+main(std::list::get(args, 1, ""), std::list::get(args, 2, ""), std::list::get(args, 3, "/tmp")):
+    on std::event_loop::SchedulerFault:
+        -1
+    on std::event_loop::DriverFault:
+        -2
+    on std::event_loop::LoopReentered:
+        -3
+    on std::event_loop::TaskFailed:
+        -4
+    on IndexNotFound:
+        -5

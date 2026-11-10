@@ -42,8 +42,8 @@ namespace eval core {
     # about a minute: Tcl unwinds an error through its nested try/finally
     # bodies in quadratic time). Tcl 9's non-recursive engine
     # does not grow the C stack for these evaluations, so the limit bounds a
-    # count, not native memory. The same number as the front end's floor
-    # (hir::recursionFloor).
+    # count, not native memory. The front end needs none of it: its walks
+    # are depth-safe whatever the limit (core/deep.tcl).
     variable programRecursionLimit 100000
 }
 
@@ -58,7 +58,7 @@ proc core::useProgramRecursionLimit {} {
 
 apply {{dir} {
     foreach file {
-        errors value completion env ir type regex
+        deep errors value completion env ir type regex
         block native callable refine runtime evaluator
         primitives predicates scalarbits unicodechar float strings tclcompat lists immutableset mutarray hashing tree actor process linuxabi bytestore binary decimal listlength inttext utf8text utf16text contexts coroutines affine mutvec cabi programfile dfa transfer thread
     } {

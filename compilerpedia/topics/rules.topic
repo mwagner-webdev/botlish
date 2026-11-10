@@ -742,7 +742,9 @@ A struct field interferes only when it may hold a function: if the
 receiver's struct has a field `f` whose value may be callable and a
 function `f` is visible, `x.f()` is ambiguous; `(x.f)()` calls the field
 and `f(x)` the function. A field of a non-callable type (an `int` field
-named like a function) is no candidate.
+named like a function) is no candidate. Neither is a local binding or a
+parameter whose type no call accepts (`length = 3`): its call is a
+compile-time NOT-CALLABLE, never valid (error.not-callable).
 
 == WHY
 Botlish has no overloading: a qualified spelling is one exact function and

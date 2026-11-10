@@ -314,10 +314,12 @@ proc hir::layouts::StructFieldTypes {id} {
 }
 
 proc hir::layouts::size {id} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     return [dict get [entry $id] size]
 }
 
 proc hir::layouts::align {id} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     return [dict get [entry $id] align]
 }
 
@@ -359,6 +361,7 @@ proc hir::layouts::descriptor {id} {
 # (LAYOUT-UNIONS.md). A field's descriptor entry is its name and offset
 # followed by these.
 proc hir::layouts::ReprDescriptor {repr} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     switch -- [dict get $repr kind] {
         float {
             # A C floating field: {f WIDTH ENDIAN}, the IEEE 754 format of
@@ -420,6 +423,7 @@ proc hir::layouts::ArrayConsumerType {element} {
 
 # The type-level term of the representation REPR (above).
 proc hir::layouts::ReprTerm {repr} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     switch -- [dict get $repr kind] {
         float  { return [dict get $repr ctype] }
         layout { return [list layout [dict get $repr layout]] }
@@ -459,6 +463,7 @@ proc hir::layouts::IsArrayTerm {term} {
 # compilation; "" if TERM is no representation (an unknown layout, a type
 # with no fixed-width encoding).
 proc hir::layouts::ReprOfTerm {term} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     if {[IsArrayTerm $term]} {
         lassign $term - extent inner
         set element [ReprOfTerm $inner]
@@ -560,6 +565,7 @@ proc hir::layouts::TermConsumerType {term} {
 # write checks (LayoutExtentMismatch). A union has no copied value (`any`,
 # UnionConsumerType), and neither has an array of one.
 proc hir::layouts::CopyType {repr} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     if {[dict get $repr kind] ne "array"} {
         return [dict get $repr type]
     }
@@ -584,6 +590,7 @@ proc hir::layouts::CopiedFieldType {id name} {
 # TERM as source text, the way hir::types::show prints a type: "array 16 of
 # int[std::binary::U16]", "array 4 of POINT".
 proc hir::layouts::ShowTerm {term} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     if {[IsArrayTerm $term]} {
         return "array [lindex $term 1] of [ShowTerm [lindex $term 2]]"
     }
@@ -617,6 +624,7 @@ proc hir::layouts::TermDescriptor {term} {
 # canonical identity of a scalar's domain, a nested layout's identity, a
 # pointer's type, `array N of ...`): read back by hir::read::TypeDeclLine.
 proc hir::layouts::ReprText {repr} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     switch -- [dict get $repr kind] {
         float {
             return [hir::types::show [dict get $repr ctype]]
@@ -637,6 +645,7 @@ proc hir::layouts::ReprText {repr} {
 # when REPR holds no pointer. Pointer authority is recursive: through every
 # alternative of a union too (LAYOUT-UNIONS.md).
 proc hir::layouts::ReprPointerPath {repr} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     switch -- [dict get $repr kind] {
         pointer {
             return ""
@@ -687,6 +696,7 @@ proc hir::layouts::DescriptorLayout {descriptor} {
 # union by value. A pointer to one is no union held (a pointer field names a
 # pointee identity, never a representation).
 proc hir::layouts::ReprUnionPath {repr} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     switch -- [dict get $repr kind] {
         union {
             return ""
@@ -755,6 +765,7 @@ proc hir::layouts::UnionRefusal {repr subject {root ""}} {
 
 # The union REPR holds first (its ReprUnionPath's), or "".
 proc hir::layouts::ReprUnionAt {repr} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     switch -- [dict get $repr kind] {
         union { return [dict get $repr layout] }
         array { return [ReprUnionAt [dict get $repr element]] }
@@ -1392,6 +1403,7 @@ proc hir::layouts::Resolve {id byId doneVar stack} {
 #   LAYOUT-FIELD-TYPE    an element (or a field) of no representation
 #   LAYOUT-CYCLE         a layout containing itself, through arrays too
 proc hir::layouts::ResolveRepr {typeExpr pointerText ns byId doneVar stack id name fieldName typeSpan depth} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $doneVar done
     variable registry
     variable maxSize
@@ -1493,6 +1505,7 @@ proc hir::layouts::FloatingRepr {ctype} {
 # REPR (a representation) with the type of the leaf DEPTH arrays down set to
 # TYPE, and every enclosing array's consumer type rebuilt from it.
 proc hir::layouts::WithLeafType {repr depth type} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     if {$depth == 0} {
         dict set repr type $type
         return $repr
@@ -1616,6 +1629,7 @@ proc hir::layouts::NestedLayout {typeExpr ns byId} {
 }
 
 proc hir::layouts::ShowTypeExpr {typeExpr} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     if {[catch {hir::resolve::ShowTypeExpr $typeExpr} text]} {
         return $typeExpr
     }
@@ -1729,6 +1743,7 @@ proc hir::layouts::ResolveNativeEdit {arg ns} {
 #                            fixed-width integer domain, a C pointer, a
 #                            layout or an array)
 proc hir::layouts::ResolveArrayTerm {arg ns ctor} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     variable maxSize
     lassign $arg - extent elementExpr
     set spelled [ShowTypeExpr $arg]
@@ -2279,6 +2294,7 @@ proc hir::layouts::ConstText {hir e} {
 # values the representation words WORDS (a descriptor field entry's words
 # after its name and offset) hold, sorted, without repeats.
 proc hir::layouts::WordsFormats {words} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     switch -- [lindex $words 0] {
         f {
             return [list [core::cabi::formatOfWidth [lindex $words 1]]]

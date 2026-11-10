@@ -21,12 +21,14 @@
 ## hir/layouts.tcl
 <<<<
 proc hir::layouts::ReprUnionPath {repr} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     switch -- [dict get $repr kind] {
         union {
             return ""
         }
 ====
 proc hir::layouts::ReprUnionPath {repr} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     switch -- [dict get $repr kind] {
         union {
             return none
@@ -233,6 +235,7 @@ proc hir::layouts::ReprUnionPath {repr} {
 ## hir/layouts.tcl
 <<<<
 proc hir::layouts::ReprPointerPath {repr} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     switch -- [dict get $repr kind] {
         pointer {
             return ""
@@ -240,6 +243,7 @@ proc hir::layouts::ReprPointerPath {repr} {
         layout - union {
 ====
 proc hir::layouts::ReprPointerPath {repr} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     switch -- [dict get $repr kind] {
         pointer {
             return ""

@@ -1,0 +1,31 @@
+# posix-spawn-ffi.bot -- reproducer (MANAGED-SUBPROCESS-AND-EVENT-LOOP-CENSUS-
+# MILESTONE-1.md, section 5): posix_spawn's argv and envp are NULL-terminated
+# arrays of pointers to C strings. Botlish can borrow one Bytes as a pointer
+# for one call (C-POINTER-BORROWING.md: a byte-sized pointee only), but it
+# has no value that is an array of pointers to several borrowed storages,
+# and no native allocation to build one: the call cannot be written, and a
+# C adapter that copies the strings (the census's msp_spec_arg) is needed.
+#
+#   tclsh9.0 main.tcl -check audit/managed-subprocess/repro/posix-spawn-ffi.bot
+#   expected: rejected (no borrowing for a pointer-to-pointer parameter; a
+#   List of Bytes is no pointer)
+direct module
+
+import std::abi
+import std::abi::bytes
+import type std::byte::Byte
+import std::ffi::c
+import std::list
+import std::str
+
+extern c fn posix_spawn(pid: std::ffi::c::Ptr[std::ffi::c::Void] write noescape, path: std::ffi::c::Ptr[std::ffi::c::Char] read noescape, actions: std::ffi::c::Ptr[std::ffi::c::Void], attr: std::ffi::c::Ptr[std::ffi::c::Void], argv: std::ffi::c::Ptr[std::ffi::c::Ptr[std::ffi::c::Char]] read noescape, envp: std::ffi::c::Ptr[std::ffi::c::Ptr[std::ffi::c::Char]] read noescape) -> std::ffi::c::Int
+
+fn nul() -> Byte:
+    0
+
+path = std::abi::bytes::from_list(std::str::encode_utf8("/bin/true").append(nul()))
+argv = [path]
+none_a = std::ffi::c::null[std::ffi::c::Void]()
+none_b = std::ffi::c::null[std::ffi::c::Void]()
+r = posix_spawn(std::abi::bytes::zeroed(std::abi::usize(4)), path, none_a, none_b, argv, argv)
+r.result

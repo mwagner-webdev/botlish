@@ -1,0 +1,18 @@
+missing launch-failed exec -2
+not-executable launch-failed exec -13
+directory launch-failed exec -13
+relative-not-searched launch-failed exec -2
+bad-cwd launch-failed working-directory -2
+cwd-is-file launch-failed working-directory -20
+bad-file launch-failed file -2
+nul-in-arg launch-failed spec -22
+exit-3 started exited 3
+abort started signal 6
+killed started signal 9
+shell-explicit started exited 4
+live 0
+end owned 0
+end live 0
+end fds delta 0
+[harness] supervisor peak RSS 15836 kB, CPU 0.008 s
+[harness] PASS in 0.01 s

@@ -80,6 +80,7 @@ duration	tests/coroutine-fusion.test	23.6
 duration	tests/coroutines.test	13.3
 duration	tests/darwin-io.test	58.8
 duration	tests/decimal-rounded.test	5.5
+duration	tests/depth-safe-nesting.test	1254.3
 duration	tests/dfa-workloads.test	185.7
 duration	tests/dfa.test	66.4
 duration	tests/diagnostic-recovery.test	6.1

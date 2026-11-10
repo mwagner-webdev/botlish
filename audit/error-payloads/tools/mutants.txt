@@ -122,7 +122,7 @@
 @@ nested-destructuring-handler-specific a handler's nested pattern reads the inner fields from the payload itself (handler-specific rules)
 ## surface/lower.tcl
 <<<<
-            set body [concat [Projections $pattern $temp] $body]
+            set body [list {*}[Projections $pattern $temp] {*}$body]
 ====
             set flat {}
             foreach field [dict get $pattern fields] {
@@ -137,7 +137,7 @@
                     lappend flat $field
                 }
             }
-            set body [concat [Projections [dict replace $pattern fields $flat] $temp] $body]
+            set body [list {*}[Projections [dict replace $pattern fields $flat] $temp] {*}$body]
 >>>>
 
 @@ renaming-binds-original a handler's renaming binds the field's own name instead

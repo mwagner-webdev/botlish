@@ -1,0 +1,10 @@
+small status exited 5
+small bytes after exit 30000
+large exited within 0.7 s unread no
+large bytes 200000
+large status exited 5
+end owned 0
+end live 0
+end fds delta 0
+[harness] supervisor peak RSS 16092 kB, CPU 0.007 s
+[harness] PASS in 0.71 s

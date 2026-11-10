@@ -1,0 +1,156 @@
+# mutants.txt -- the managed-subprocess census's mutants
+# (MANAGED-SUBPROCESS-AND-EVENT-LOOP-CENSUS-MILESTONE-1.md, section 13), for
+# audit/managed-subprocess/tools/mutate.py; tools/mutant-catalogs.tcl checks
+# that every edit still applies.
+#
+#   @@ NAME DESCRIPTION
+#   !! SCENARIO ...       run.py scenarios of which one must fail
+#   ## FILE               relative to the repository root
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+
+@@ c-sigdefault children inherit the supervisor's signal dispositions: SIGPIPE stays ignored in every child
+!! inherit
+## audit/managed-subprocess/native/msp.c
+<<<<
+if (!(s->flags & MSP_KEEP_SIGNALS)) {
+====
+if (0) {
+>>>>
+
+@@ c-nonblock the parent's pipe ends stay blocking: a read with nothing there blocks the loop's thread
+!! streams
+## audit/managed-subprocess/native/msp.c
+<<<<
+            if (fcntl(mine_end[i], F_SETFL, O_NONBLOCK) < 0) {
+====
+            if (0) {
+>>>>
+
+@@ c-wnowait the first status check reaps without recording it: the child is never released (its slot and descriptors leak)
+!! reap-order
+## audit/managed-subprocess/native/msp.c
+<<<<
+        int opts = WEXITED | WNOHANG | ((c->flags & MSP_EAGER_REAP) ? 0 : WNOWAIT);
+====
+        int opts = WEXITED | WNOHANG;
+>>>>
+
+@@ c-generation a handle's generation is not checked: a stale identity reaches the slot's next child
+!! stale
+## audit/managed-subprocess/native/msp.c
+<<<<
+    if (!c->used || c->gen != gen) return NULL;
+====
+    if (!c->used) return NULL;
+>>>>
+
+@@ c-group-signal signals reach the child only, never its process group: in-group descendants survive
+!! descendants
+## audit/managed-subprocess/native/msp.c
+<<<<
+    unsigned flags = (group && c->group) ? PIDFD_SIGNAL_PROCESS_GROUP : 0;
+====
+    unsigned flags = 0;
+>>>>
+
+@@ c-cwd-in-parent the working directory is opened without O_DIRECTORY: a file as cwd fails at exec, misreported
+!! launch
+## audit/managed-subprocess/native/msp.c
+<<<<
+        cwdfd = open(s->cwd, O_PATH | O_DIRECTORY | O_CLOEXEC);
+====
+        cwdfd = open(s->cwd, O_PATH | O_CLOEXEC);
+>>>>
+
+@@ c-leaking-spawn glibc's pidfd_spawn by default: a pidfd leaked per failed exec
+!! launch
+## audit/managed-subprocess/native/msp.c
+<<<<
+    if (s->flags & MSP_PIDFD_SPAWN) {
+====
+    if (1) {
+>>>>
+
+@@ m-interrupt interrupt does not change the generation: a suspended read is not cancelled
+!! cancel
+## audit/managed-subprocess/slice/msp.bot
+<<<<
+    p.gen.swap(slot, gen_at(slot) + 1):
+====
+    p.gen.swap(slot, gen_at(slot)):
+>>>>
+
+@@ m-alarm the deadline alarm never posts: a wait with a deadline waits forever
+!! terminate
+## audit/managed-subprocess/slice/msp.bot
+<<<<
+            std::event_loop::post(target, -1, 0)
+====
+            std::event_loop::live?(target)
+>>>>
+
+@@ m-escalate terminate never sends SIGKILL: a child that ignores SIGTERM is never stopped
+!! terminate
+## audit/managed-subprocess/slice/msp.bot
+<<<<
+            signal(c, 9)
+====
+            signal(c, 0)
+>>>>
+
+@@ m-release-term a release sends no SIGTERM: every released child is killed at the grace deadline
+!! release
+## audit/managed-subprocess/slice/msp.bot
+<<<<
+    msp_signal(ll(handle), 15, 1)
+    p.dying.push(handle)
+====
+    p.dying.push(handle)
+>>>>
+
+@@ m-read-eagain EAGAIN is read as end of file: a stream ends at its first empty pipe
+!! streams
+## audit/managed-subprocess/slice/msp.bot
+<<<<
+        if got == 0:
+            return std::abi::bytes::from_list([])
+====
+        if got == 0 or got == -11:
+            return std::abi::bytes::from_list([])
+>>>>
+
+@@ m-write-partial a short write counts as a full one: stdin loses bytes
+!! stdin-partial
+## audit/managed-subprocess/slice/msp.bot
+<<<<
+            done.set(0, done.at(0) + w)
+====
+            done.set(0, done.at(0) + std::abi::bytes::length(chunk).value)
+>>>>
+
+@@ m-retire-on-release a release retires a running child and hands an exited one to the reaper
+!! release
+## audit/managed-subprocess/slice/msp.bot
+<<<<
+    if st == 1:
+        msp_reap(ll(handle))
+====
+    if st == 0:
+        msp_reap(ll(handle))
+>>>>
+
+@@ m-exit-broadcast the exit watch is not re-armed: of two waiters only the first wakes
+!! two-waiters
+## audit/managed-subprocess/slice/msp.bot
+<<<<
+            event_loop_linux::rearm(watch_at(slot, 3)):
+                on std::event_loop::DriverFault {code}:
+                    fail ProcessFault {reason: "the Linux driver refused to re-arm the exit watch", code: code}
+            break
+====
+            break
+>>>>

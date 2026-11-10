@@ -286,6 +286,9 @@ namespace eval native::lower {
     variable context {}
     variable guards {}
     variable knownErrors {}
+    # ExprId -> its value as an integer constant expression, or "", for the
+    # program being lowered (ConstantIntValue).
+    variable constantInts {}
     # ExprId -> its parent ExprId in baseHir, built on first use (Parent).
     variable parents {}
     variable selfTail {}
@@ -1496,6 +1499,8 @@ proc native::lower::Program {hirProgram args} {
     }
     set baseHir $hirProgram
     set hir $hirProgram
+    variable constantInts
+    set constantInts [dict create]
     variable parents
     set parents [dict create]
     variable affineTemps
@@ -3709,6 +3714,7 @@ proc native::lower::ScalarLit {fnVar kind text e} {
 # normally (the instructions then end in a terminator).
 
 proc native::lower::Sequence {fnVar exprs} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $fnVar fn
     variable hir
     if {$exprs eq ""} {
@@ -3997,6 +4003,7 @@ proc native::lower::ReleaseOnError {fnVar e byName} {
 }
 
 proc native::lower::Expr {fnVar e {want tagged}} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $fnVar fn
     variable hir
     variable escape
@@ -4346,6 +4353,7 @@ proc native::lower::ShapeIndex {id layout} {
 # object exists yet: Struct builds one from these, a virtual struct
 # (hir/escape.tcl) keeps them as they are.
 proc native::lower::StructFields {fnVar e node {cut ""}} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $fnVar fn
     variable hir
     set regs {}
@@ -4469,6 +4477,7 @@ proc native::lower::StructShapeOf {node} {
 }
 
 proc native::lower::Struct {fnVar e node} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $fnVar fn
     variable context
     variable structOpt
@@ -4563,6 +4572,7 @@ proc native::lower::OpenedFieldObject {fnVar b name e} {
 }
 
 proc native::lower::Project {fnVar e node {want tagged}} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $fnVar fn
     variable hir
     variable escape
@@ -5610,6 +5620,7 @@ proc native::lower::FieldOut {fnVar reg want {e ""}} {
 # build at the call). "" for anything else, and under the
 # eager-foreign-result fault.
 proc native::lower::MandatoryWriteBack {e} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     variable hir
     variable fault
     if {$fault ne ""} {
@@ -5858,6 +5869,7 @@ proc native::lower::HoistDeferredUses {fnVar exprs e} {
 # value, a byte owner handed to a foreign call and a word compared need
 # nothing (they read the representation as it is).
 proc native::lower::DeferredNeeds {fnVar x parent nested needsVar} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $fnVar fn
     upvar 1 $needsVar needs
     variable hir
@@ -6613,6 +6625,7 @@ proc native::lower::LayoutWrite {fnVar e name role callArgs wantVirtual} {
 # and I * STRIDE are emitted here (ElementAccess). BASE is a byte count, or
 # a register holding one once an element index is dynamic.
 proc native::lower::ViewBase {fnVar arg} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $fnVar fn
     variable hir
     if {[hir::kind $hir $arg] eq "call" && [lindex [hir::get $hir $arg target] 0] eq "native"} {
@@ -6793,6 +6806,7 @@ proc native::lower::NativeField {fnVar e view field base} {
 # is one load, a nested layout its LayoutStruct (every field, then its
 # object), a fixed array its List (ArrayRead).
 proc native::lower::ReprRead {fnVar e mode source repr base} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $fnVar fn
     switch -- [lindex $repr 0] {
         layout {
@@ -6850,6 +6864,7 @@ proc native::lower::DecodeAt {fnVar e mode source descriptor base {fieldsOnly 0}
 # counted loop appending each -- O(N), straight from the descriptor's
 # constants, no descriptor read at run time (FIXED-LAYOUT-ARRAYS.md).
 proc native::lower::ArrayRead {fnVar e mode source repr base} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $fnVar fn
     variable unrollExtent
     lassign $repr - extent stride element
@@ -6921,6 +6936,7 @@ proc native::lower::ArrayScaled {fnVar e index stride} {
 # bounds check is its `extents` one): everything a write writes is checked
 # before the first byte is, and a proven write has no failure path.
 proc native::lower::ArrayCheck {fnVar e repr value} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $fnVar fn
     if {[BoundsProven $e]} {
         return
@@ -6959,6 +6975,7 @@ proc native::lower::ArrayCheck {fnVar e repr value} {
 # 1 if the representation words REPR hold a fixed array, itself or in a
 # nested layout.
 proc native::lower::ReprHasArrays {repr} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     switch -- [lindex $repr 0] {
         array {
             return 1
@@ -6984,6 +7001,7 @@ proc native::lower::ReprHasArrays {repr} {
 # it writes any (`binstorearray` / `nativestorearray`), any other element
 # in a counted loop. Only the representation's own bytes are written.
 proc native::lower::ReprWrite {fnVar e mode target repr base value} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $fnVar fn
     switch -- [lindex $repr 0] {
         union {
@@ -7052,6 +7070,7 @@ proc native::lower::LayoutDecode {fnVar e storage descriptor base {fieldsOnly 0}
 # order: the order of a LayoutStruct's leaves (ContextObjectLeaves,
 # ContextLeafRegs), REPR the leaf's representation words.
 proc native::lower::LayoutLeaves {descriptor base} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     set leaves {}
     foreach field [lindex $descriptor 3] {
         lassign $field name offset kind
@@ -7514,6 +7533,7 @@ proc native::lower::RootValue {fnVar e binding} {
 }
 
 proc native::lower::Bind {fnVar e node} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $fnVar fn
     variable construction
     variable hir
@@ -7803,6 +7823,7 @@ proc native::lower::Closure {fnVar e} {
 # fixed-shape construction -- never a materialized List register. "never"
 # if evaluating one of its parts cannot complete normally.
 proc native::lower::VirtualValue {fnVar e arity {cut ""}} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $fnVar fn
     variable hir
     set node [hir::node $hir $e]
@@ -8042,6 +8063,7 @@ proc native::lower::TryFields {fnVar e n {cut ""}} {
 # non-virtualized positions want Expr's `raw` (or scalar String) form
 # instead of `tagged`. "never" if any argument cannot complete normally.
 proc native::lower::CallArgs {fnVar argExprs fieldWidths rawSlots {planSlots {}} {fieldCuts {}}} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $fnVar fn
     variable hir
     set regs {}
@@ -8366,6 +8388,7 @@ proc native::lower::ClosedResult {fnVar e result} {
 # Calls with neither (every call of a program that never takes an address) pay
 # one dict-exists test.
 proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0} {wantCut ""}} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $fnVar fn
     variable hir
     # A declared error this call propagates out of the scope of affine
@@ -8502,6 +8525,7 @@ proc native::lower::AddressFlowAcrossCall {fnVar e node result} {
 }
 
 proc native::lower::CallInner {fnVar e node want {wantVirtual ""} {wantRegion 0} {wantCut ""}} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $fnVar fn
     variable hir
     variable selfTail
@@ -9482,6 +9506,7 @@ proc native::lower::IsRefToBinding {view e b} {
 # native value), or a call to `==`/`std::str::length`/a ConsumingNative is a
 # hir::stringregion.tcl bug, not a case this lowering falls back from.
 proc native::lower::EmitRegionConsumerBody {fnVar calleeView e b region} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $fnVar fn
     switch -- [hir::kind $calleeView $e] {
         ref {
@@ -9560,6 +9585,7 @@ proc native::lower::EmitRegionConsumerBody {fnVar calleeView e b region} {
 # Ranges or statements of their own. Returns never if no path reaches T or
 # F.
 proc native::lower::EmitRegionConsumerCondition {fnVar calleeView e b region t f} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $fnVar fn
     switch -- [hir::condition::form $calleeView $e] {
         true {
@@ -11117,36 +11143,45 @@ proc native::lower::BigConstantResult {e argExprs op} {
 # The exact value of E when it is an integer constant expression: an Int
 # literal, or `+ - *` (the root natives) of two of them -- a negative literal
 # is `0 - N` -- else "". Tcl's own arbitrary-precision arithmetic computes it.
+# Remembered per expression for the program being lowered (constantInts):
+# every call of a constant expression asks it of its whole subtree, which
+# asked again at every level was quadratic in how deep the expression nests
+# (DEPTH-SAFE-NESTED-EXPRESSION-FRONTEND-MILESTONE-1.md). An instance's view
+# changes no answer: it reads only literals and root-native callees, which
+# no view overlays.
 proc native::lower::ConstantIntValue {e} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     variable hir
+    variable constantInts
+    if {[dict exists $constantInts $e]} {
+        return [dict get $constantInts $e]
+    }
+    set value ""
     switch -- [hir::kind $hir $e] {
         const {
             set v [hir::get $hir $e value]
             if {[core::value::kind $v] eq "int"} {
-                return [core::value::intOf $v]
+                set value [core::value::intOf $v]
             }
-            return ""
         }
         call {
             set node [hir::node $hir $e]
             lassign [dict get $node target] targetKind target
-            if {$targetKind ne "native" || ![PlainNativeCallee [dict get $node callee]]} {
-                return ""
+            if {$targetKind eq "native" && [PlainNativeCallee [dict get $node callee]]} {
+                set name [dict get [hir::symbol $hir $target] name]
+                set args [dict get $node args]
+                if {$name in {+ - *} && [llength $args] == 2} {
+                    set a [ConstantIntValue [lindex $args 0]]
+                    set b [ConstantIntValue [lindex $args 1]]
+                    if {$a ne "" && $b ne ""} {
+                        set value [expr "\$a $name \$b"]
+                    }
+                }
             }
-            set name [dict get [hir::symbol $hir $target] name]
-            set args [dict get $node args]
-            if {$name ni {+ - *} || [llength $args] != 2} {
-                return ""
-            }
-            set a [ConstantIntValue [lindex $args 0]]
-            set b [ConstantIntValue [lindex $args 1]]
-            if {$a eq "" || $b eq ""} {
-                return ""
-            }
-            return [expr "\$a $name \$b"]
         }
     }
-    return ""
+    dict set constantInts $e $value
+    return $value
 }
 
 # Whether E (a call to the pure, total, two-operand bitwise native OP: iand,
@@ -11754,6 +11789,7 @@ proc native::lower::PureIntOperand {fnVar parent e} {
 }
 
 proc native::lower::If {fnVar e node {family ""} {virtualN ""} {virtualCut ""} {rawJoin 0} {shortJoin ""}} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $fnVar fn
     variable hir
     variable guards
@@ -11982,6 +12018,7 @@ proc native::lower::CheckCondition {fnVar e condition test} {
 # and at label F when it is false. Returns never if no path does (as Expr
 # does), "" otherwise.
 proc native::lower::Condition {fnVar e t f} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $fnVar fn
     variable hir
     switch -- [hir::condition::form $hir $e] {
@@ -12056,6 +12093,7 @@ proc native::lower::ConditionTest {fnVar e test t f} {
 # with a Boolean guard, as a value) to its branches, each of them lowered as
 # a branch to T/F (ConditionBody). Returns never if no path reaches T or F.
 proc native::lower::ConditionIf {fnVar e node t f} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $fnVar fn
     variable hir
     variable guards
@@ -12169,6 +12207,7 @@ proc native::lower::BodyTarget {fnVar body t f skippedVar} {
 # ConditionIf asks again, level by level, what If's question already
 # answered, so a long chain is walked once, not once per level.
 proc native::lower::StaticOutcome {fnVar parent e} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $fnVar fn
     set key [list $parent $e]
     if {[dict exists $fn staticOutcomes $key]} {
@@ -12182,6 +12221,7 @@ proc native::lower::StaticOutcome {fnVar parent e} {
 }
 
 proc native::lower::StaticOutcomeOf {fnVar parent e} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $fnVar fn
     variable hir
     variable guards
@@ -12225,6 +12265,7 @@ proc native::lower::StaticOutcomeOf {fnVar parent e} {
 # releases (Sequence's order) and a `br` on the value (a Boolean constant's
 # releases and a `jump`: an affine value used on the other side only, say).
 proc native::lower::ConditionBody {fnVar body t f} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $fnVar fn
     variable hir
     foreach e [lrange $body 0 end-1] {
@@ -12447,6 +12488,7 @@ proc native::lower::FoldValue {fnVar e accReg} {
 # The value of loop E's body BODY (Sequence): a plan fold's trailing value,
 # the next intermediate, is lowered in a plan position.
 proc native::lower::LoopBody {fnVar e mode body} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $fnVar fn
     if {$mode eq "fold"} {
         return [SequenceTo fn $body [FoldFamily $e]]
@@ -12523,6 +12565,7 @@ proc native::lower::LoopResultFinish {fnVar e mode accReg resultReg} {
 # distinguishable from a plain loop/countloop's own registration) tells
 # the shared Break case there is no accumulator to move on break either.
 proc native::lower::ListLoop {fnVar e node} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $fnVar fn
     variable hir
     variable context
@@ -12619,6 +12662,7 @@ proc native::lower::ListLoop {fnVar e node} {
 # HIR's analyses (the specialization's calls, the ownership releases) never
 # saw it as code that runs.
 proc native::lower::IterationBody {fnVar e body mode} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $fnVar fn
     variable hir
     if {$body ne "" && ![hir::get $hir [lindex $body 0] reachable]} {
@@ -12726,6 +12770,7 @@ proc native::lower::CountOps {direction endKind} {
 # own Require call for this node feeds it, exactly like ListLoop's iterable
 # check); no Range/List/iterator allocation exists beyond the result.
 proc native::lower::CountLoop {fnVar e node} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $fnVar fn
     variable context
     variable ranges
@@ -13093,6 +13138,7 @@ proc native::lower::PayloadNeeded {b body name} {
 # (`reraise`) to whatever the *outer* error-exit target is (PopErrorExit
 # has already restored it by then).
 proc native::lower::Handle {fnVar e node} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $fnVar fn
     variable hir
     set call [dict get $node call]
@@ -13624,6 +13670,7 @@ proc native::lower::SequenceShort {fnVar exprs kind} {
 # Sequence releases them (AFFINE-VALUES.md): a plan or a flat String/List is
 # never affine itself, so the release never touches the construction.
 proc native::lower::SequenceTo {fnVar exprs family} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $fnVar fn
     variable hir
     if {$family eq "" || $exprs eq ""} {

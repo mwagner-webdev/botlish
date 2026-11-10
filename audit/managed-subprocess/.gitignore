@@ -1,0 +1,12 @@
+# Build products of slice/build.sh (never committed).
+/slice/.bot_modules/
+/slice/native/
+/slice/bin/
+/slice/out/
+# The executables tools/run.py --build emits beside their sources.
+/slice/lab-io
+/slice/lab-life
+/slice/lab-perf
+/slice/slice
+/slice/threads
+/slice/durable

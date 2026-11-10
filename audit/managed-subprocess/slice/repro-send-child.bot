@@ -1,0 +1,11 @@
+# repro-send-child.bot -- reproducer (MANAGED-SUBPROCESS-AND-EVENT-LOOP-
+# CENSUS-MILESTONE-1.md, section 12): a child's identity cannot be sent to
+# another VM. msp::Child is an opaque struct with no `sendable` clause, so a
+# thread entry taking one is refused at compile time: the process stays the
+# VM's that spawned it, and another VM reaches it only through messages its
+# owner answers. (The adapter's thread check, -EPERM, is the second line.)
+#
+#   cd audit/managed-subprocess/slice && tclsh9.0 ../../../main.tcl -check repro-send-child.bot
+import sendchild
+
+0

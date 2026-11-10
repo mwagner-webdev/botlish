@@ -38,7 +38,15 @@
 #                                 `run INDEX JUDGMENT` after it judges a run
 #   @@end
 #
-# The recognizer of every case: one ASCII digit.
+# The recognizer of every case: one ASCII digit (N6's: a digit, then a
+# letter).
+#
+# EMISSION-IDENTITY-AND-FEASIBILITY-CORRECTNESS-MILESTONE-1.md corrected the
+# two class C defects: the `observed` and `strict` lines of N1, N2, N3, F1,
+# F2 and F3 and the `identity` sequence's N4b step are its verdicts (the
+# census's were proven+ and accepted, N4b's proven+ reused); N6a, N6b and
+# the `identity-read` sequence are its own (a gap the census's prototype
+# left: a proof that read two functions of one name, memoized).
 
 # ---------------------------------------------------------------------------
 # Module bindings
@@ -1571,9 +1579,9 @@ fn emitter() -> unit emits digit_token:
 @@ N1 two nested functions of one name, both claimed: the second reuses the first's certificate
 section function identity
 class C
-observed proven+ proven+
+observed proven+ rejected
 appropriate proven+ rejected
-strict accepted
+strict EMIT-REJECTED
 --- main.bot
 import std::dfa
 
@@ -1601,9 +1609,9 @@ fn outer2() -> int:
 @@ N2 a top-level and a nested emitter of one name; the nested one's run yields 'A'
 section function identity
 class C
-observed proven+ proven+
+observed proven+ rejected
 appropriate proven+ rejected
-strict accepted
+strict EMIT-REJECTED
 run 2 invalid
 --- main.bot
 import std::coroutine
@@ -1636,9 +1644,9 @@ outer()
 @@ N3 one name shadowed in a nested scope of one function
 section function identity
 class C
-observed proven+ proven+
+observed proven+ rejected
 appropriate proven+ rejected
-strict accepted
+strict EMIT-REJECTED
 --- main.bot
 import std::dfa
 
@@ -1773,15 +1781,112 @@ fn outer() -> int:
 0
 @@end
 
+@@ N6a one proof reading two functions of one name: the nested `step` (a digit) and, through g, the top-level `step` (a letter); its certificate records one fingerprint for both (the top-level one's)
+section function identity
+class E
+observed proven+
+appropriate proven+
+strict accepted
+run 1 ok
+--- main.bot
+import std::coroutine
+import std::dfa
+
+class digit = '0'..'9'
+class letter = 'A'..'Z'
+
+dfa pair_token over ascii:
+    start:
+        digit -> second
+    second:
+        letter -> accept
+
+fn step() -> unit:
+    yield 65
+    unit
+
+fn g() -> unit:
+    step()
+    unit
+
+fn outer() -> List[int]:
+    fn step() -> unit:
+        yield 49
+        unit
+    fn emitter() -> int emits pair_token:
+        step()
+        g()
+        0
+    coroutine {step: k, first} = emitter()
+    second = k()
+    if std::coroutine::done?(k):
+        [first]
+    else:
+        third = k()
+        if std::coroutine::done?(k):
+            [first, second]
+        else:
+            [first, second, -9]
+
+outer()
+@@end
+
+@@ N6b N6a after the nested `step` is removed: the claimed function's code is the same text (its call names `step`), which is now the top-level one -- the run yields two letters
+section function identity
+class C
+observed rejected
+appropriate rejected
+strict EMIT-REJECTED
+run 1 invalid
+--- main.bot
+import std::coroutine
+import std::dfa
+
+class digit = '0'..'9'
+class letter = 'A'..'Z'
+
+dfa pair_token over ascii:
+    start:
+        digit -> second
+    second:
+        letter -> accept
+
+fn step() -> unit:
+    yield 65
+    unit
+
+fn g() -> unit:
+    step()
+    unit
+
+fn outer() -> List[int]:
+    fn emitter() -> int emits pair_token:
+        step()
+        g()
+        0
+    coroutine {step: k, first} = emitter()
+    second = k()
+    if std::coroutine::done?(k):
+        [first]
+    else:
+        third = k()
+        if std::coroutine::done?(k):
+            [first, second]
+        else:
+            [first, second, -9]
+
+outer()
+@@end
+
 # ---------------------------------------------------------------------------
 # The empty environment (hir::emission::Facts)
 
 @@ F1 a claimed function with no parameter whose first statement is an if: both branches yield letters
 section the empty environment
 class C
-observed proven+
+observed rejected
 appropriate rejected
-strict accepted
+strict EMIT-REJECTED
 run 1 invalid
 --- main.bot
 import std::coroutine
@@ -1817,9 +1922,9 @@ run()
 @@ F2 a second symbol after the token, in a branch decided true
 section the empty environment
 class C
-observed proven+
+observed rejected
 appropriate rejected
-strict accepted
+strict EMIT-AFTER-TOKEN
 --- main.bot
 import std::dfa
 
@@ -1841,9 +1946,9 @@ fn emitter() -> unit emits digit_token:
 @@ F3 a parameterless helper's if: its summary never completes, so its caller's walk ends at the call
 section the empty environment
 class C
-observed proven+
+observed rejected
 appropriate rejected
-strict accepted
+strict EMIT-REJECTED
 run 1 invalid
 --- main.bot
 import std::coroutine
@@ -2297,8 +2402,15 @@ step V2 proven+ reused
 step V1 proven+ reused
 @@end
 
-@@sequence identity the edit of N4b after N4a in one process: the certificate validated against the other helper of the name is kept, and the run yields 'A'
+@@sequence identity the edit of N4b after N4a in one process: the census's compiler validated the certificate against the other helper of the name and kept it (the run yields 'A'); a name of two functions validates nothing, so N4b is proved again, and rejected
 step N4a proven+ fresh
-step N4b proven+ reused
+step N4b rejected fresh
+run 1 invalid
+@@end
+
+@@sequence identity-read N6a then N6b in one process: the census's identity prototype memoized N6a's certificate (its claimed function's name is unique), validated it against the one `step` N6b has -- the fingerprint it had recorded -- and reused it, a false certificate; a proof that read a name of two functions is not memoized
+step N6a proven+ fresh
+run 1 ok
+step N6b rejected fresh
 run 1 invalid
 @@end

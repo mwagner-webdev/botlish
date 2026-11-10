@@ -1182,6 +1182,7 @@ proc hir::affine::Join {a b} {
 }
 
 proc hir::affine::Seq {hirVar exprs state} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $hirVar hir
     variable afterStates
     foreach e $exprs {
@@ -1206,6 +1207,7 @@ proc hir::affine::Seq {hirVar exprs state} {
 }
 
 proc hir::affine::Flow {hirVar e state} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $hirVar hir
     variable loopExits
     variable joinStates
@@ -2543,6 +2545,7 @@ proc hir::affine::temporaries {hir} {
 # Releases are unobservable, so the order changes no value; it is fixed so
 # runtime behavior is reproducible (AFFINE-VALUES.md, "Drop glue").
 proc hir::affine::Descriptor {hir type {exclude {}}} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     variable descriptorMemo
     variable descriptorCut
     set key [list $type $exclude [hir::resources::unwinds $hir] [hir::resources::table $hir]]
@@ -2565,6 +2568,7 @@ proc hir::affine::Descriptor {hir type {exclude {}}} {
 
 # Descriptor's walk.
 proc hir::affine::DescriptorOf {hir type exclude} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     set type [hir::types::Unrefined $type]
     if {![hir::types::IsAffine $type]} {
         # An unrestricted value owns nothing affine (every component this

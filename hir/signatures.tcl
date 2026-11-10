@@ -497,6 +497,7 @@ proc hir::signatures::Root {AVar b} {
 }
 
 proc hir::signatures::Seq {hir AVar exprs sink ctx} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $AVar A
     set n [llength $exprs]
     set i 0
@@ -545,6 +546,7 @@ proc hir::signatures::Name {hir e} {
 # handler names of a `handle` directly around this call), tested (params
 # refined by an enclosing `if`: their uses are path-dependent).
 proc hir::signatures::Value {hir AVar e sink ctx} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $AVar A
     set node [dict get $hir exprs $e]
     set handled [dict get $ctx handled]
@@ -739,6 +741,7 @@ proc hir::signatures::UseFact {hir AVar e p} {
 }
 
 proc hir::signatures::Call {hir AVar e sink ctx} {
+    if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $AVar A
     set node [dict get $hir exprs $e]
     set callee [dict get $node callee]

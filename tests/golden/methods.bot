@@ -1038,7 +1038,7 @@ fn register_types_tests():
 fn register_shadowing_tests():
     # method-shadowing-local: an inner function shadowing an outer one is
     # what the sugar sees. (The Tcl test's non-callable local `f = 5` is a
-    # run-time NOT-CALLABLE: it stays in the Tcl suite.)
+    # compile-time NOT-CALLABLE: it stays in the Tcl suite.)
     fn b_local_method() errors std::compiler::CompilerError:
         static compile:
             fn f(a):
