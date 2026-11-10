@@ -227,9 +227,9 @@ set plain [runHost $exe 0]
 set stressed [runHost $exe 1]
 
 # The same work inside Botlish, for the boundary's share of a call: an
-# executable that runs `add` and `words(16)` CALLS times in a loop, against
-# the same executable running no iteration (its startup), best of ROUNDS
-# each. (A program's loop may inline or fold what a C call cannot: this is
+# executable that runs `add` and `words(16)` CALLS times in a fold carrying
+# an Int (nothing collected), against the same executable running no
+# iteration (its startup), best of ROUNDS each. (A program's loop may inline or fold what a C call cannot: this is
 # what a call costs from Botlish code, not a measure of the same machine
 # instructions.)
 proc executableMicros {source rounds} {
@@ -260,12 +260,11 @@ fn words(n: int) -> int:
     std::list::length(xs)
 
 fn run(calls: int, which: int) -> int:
-    total = loop i from 0 to calls:
+    fold i from 0 to calls with intermediate total 0:
         if which == 0:
-            add(i, 2)
+            total + add(i, 2) - i
         else:
-            words(16)
-    std::list::length(total)
+            total + words(16)
 
 run(CALLS, WHICH)
 }

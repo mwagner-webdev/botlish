@@ -321,7 +321,9 @@ proc native::library::ValidateDll {path import name public} {
         lappend problems "it is not relocatable and DEP-compatible (DllCharacteristics [format 0x%x $characteristics])"
     }
     if {[dict get $facts exportName] ne "$name.dll"} {
-        lappend problems "its export directory names [expr {[dict get $facts exportName] eq "" ? "no DLL" : [dict get $facts exportName]}], not $name.dll"
+        set named [dict get $facts exportName]
+        if {$named eq ""} { set named "no DLL" }
+        lappend problems "its export directory names $named, not $name.dll"
     }
     set exports [dict get $facts exports]
     set expected [lsort $public]

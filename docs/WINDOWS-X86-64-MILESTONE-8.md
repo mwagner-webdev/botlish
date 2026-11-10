@@ -546,11 +546,107 @@ as for executables.
 
 ## 15. Tests, fuzzing, mutation testing
 
-PENDING-TESTS
+**The test file.** `tests/native-library.test` is one file for both
+library hosts: 41 tests, every host test written once, its C written for
+both compilers (`nlPrelude`: `<windows.h>` and `NL_REGISTER` there,
+pthreads here, one `nl_thread_start`/`nl_thread_join` over CreateThread or
+pthread_create), built by MSVC's cl in vcvars64's environment on Windows
+(`nlExecutable`: `/O1 /W3 /std:c11`, or `/TP /EHsc /std:c++17` for a C++
+host, `-crt MT|MD`) and by cc on Linux. A host calls the library through
+its import library (`nlLink`), or loads it with `LoadLibraryW` and
+`GetProcAddress` (`nlLoaderC`, which declares each library's function
+pointer types under its own name). Constraints say what a test needs:
+`nativeLibraries` (the host builds libraries: a C compiler and the runtime
+archive), `elfLibraries` (Linux's archive and symbols), `windowsLibraries`,
+`noNativeLibraries` (the refusal).
+
+| Tests | Linux | Windows |
+|---|---|---|
+| export roots, export checks, front end (`nl-export-root-*`, `nl-export-imported-module`, `nl-front-end-*`, `nl-library-checks`, `nl-library-export-list`) | run | run |
+| the C ABI (`nl-abi-types`, `nl-abi-results-survive`), lifecycle, threads, reentrancy | run | run (MSVC hosts) |
+| coroutines, stack safety (also on a host's own stack: a fiber on Windows, a `makecontext` stack on Linux), the walk's ceiling, `nl-coroutine-stacks-released` | run | run |
+| several libraries and instances (`nl-two-*`, `nl-nested-libraries`) | run | run |
+| `nl-symbols`, `nl-two-libraries-shared` (ELF symbol tables, archives) | run | -- |
+| `nl-windows-*` (12: explicit loading, exports, validation, diagnostics, unwinding through the trampoline, the loader lock, a C++ host, `/MT` and `/MD` hosts, fibers, unloading, the Win64 convention) | -- | run |
+| `nl-unsupported-host` (a host the capability table gives no libraries: macOS) | -- | -- (runs on macOS) |
+| `nl-manifest`, `nl-main-cli` | run | run (the host's artifacts) |
+
+Linux x86-64, locally: 29 run, 0 failed (12 skipped: the Windows tests and
+the refusal); with `BOTLISH_NATIVE_GC_STRESS=1`, the same. Windows x86-64
+(MSVC, CI): WINDOWS-TESTS-PENDING.
+
+**The fuzzer.** `audit/native-library/tools/fuzz.tcl` generates a library
+of eight random exports -- one to eight parameters of int, bool, Float64
+and str mixed (so positions past the fourth, which Win64 passes on the
+stack, in every class), a result of each type or unit, some failing with a
+declared error carrying a payload -- calls each 24 times from a generated
+C host with the boundary's edge values (INT64_MIN and INT64_MAX, -0.0, NaN
+and the infinities, the smallest subnormal, the empty String, NULL with
+length 0 and with a length, embedded NULs, invalid UTF-8 and a surrogate's
+encoding, 9,000-byte text) and runs random lifecycle sequences on up to
+three instances (live, destroyed and never-made handles, double releases,
+a foreign buffer); every line the host prints is compared with an
+independent model of the C ABI written in Tcl from
+NATIVE-LIBRARY-MILESTONE-1.md's rules, never from the compiler. Linux:
+seeds 1 to 6, 192 calls and 37 to 56 lifecycle steps each, 0
+disagreements (seed 6 also under GC stress). Windows: WINDOWS-FUZZ-PENDING.
+
+**Mutation testing.** `audit/native-library/tools/mutate.tcl` runs on
+Windows too now (a private copy made by Tcl, an overrunning run ended with
+taskkill; the tier item `native-library-mutants`). Its catalog has 40
+mutants: the 26 of NATIVE-LIBRARY-MILESTONE-1.md (two updated to the code
+they mutate now, `stack-check-not-emitted` and `stack-limit-not-followed`)
+and 14 new ones:
+
+| Mutant | Host | Killed by |
+|---|---|---|
+| `dll-export-omitted` (the .def file leaves out a public function) | all | `windows_library_link_is_a_dll_of_the_static_runtime` |
+| `dll-internal-exported` (the DLL exports `botlish_library_call`) | Windows | WINDOWS-MUTANT |
+| `dll-import-library-misnamed` | Windows | WINDOWS-MUTANT |
+| `dll-crt-dynamic` (VCRUNTIME140 and the UCRT, not the static CRT) | all | `windows_library_link_is_a_dll_of_the_static_runtime` |
+| `dll-validation-extra-exports` (ValidateDll ignores an extra export) | Windows | WINDOWS-MUTANT |
+| `dll-validation-runtime-imports` (ValidateDll ignores a CRT DLL import) | Windows | WINDOWS-MUTANT |
+| `public-unwind-dropped` (no unwind information for the public functions) | Windows | WINDOWS-MUTANT |
+| `win64-convention-ignored` (the public functions use System V on Windows) | Windows | WINDOWS-MUTANT |
+| `loader-lock-initializer` (the program object gains a `.CRT$XCU` initializer) | Windows | WINDOWS-MUTANT |
+| `fiber-left-converted` (the outermost call's end keeps the thread a fiber) | Windows | WINDOWS-MUTANT |
+| `str-result-borrowed` (a String result points into the heap) | all | `nl-abi-results-survive`, `nl-abi-types`, `nl-two-instances` |
+| `invalid-handle-dereferenced` | all | `nl-lifecycle` |
+| `stacks-kept-after-last-instance` | all | `nl-coroutine-stacks-released` |
+| `entry-stack-ignored` (a host's stack walked within the thread's) | all | `nl-stack-safety-foreign-stack` |
+
+Linux x86-64: LINUX-MUTANTS-PENDING.
+
+The brief's other mutant ideas are covered where they apply: an internal
+symbol exported, a public one missing, the import library's name, the
+dynamic CRT, the convention, unwind information, the loader lock, a host
+fiber left converted, a borrowed result, an invalid handle, a host's stack
+(above); "a destroyed instance stays live", "wrong thread accepted",
+"reentrancy accepted", "a released buffer kept" and "a foreign buffer
+freed" are the milestone-1 mutants, which run on Windows now; "a DLL's
+runtime shared with another's" cannot be written as a source mutant (two
+DLLs' runtime copies are separate modules whatever the source says: the
+only way to share one is to export it, which `dll-internal-exported` is).
 
 ## 16. Performance and size
 
-PENDING-PERF
+`bench/native-library.tcl` (the tier item `native-library-bench`) builds a
+library of five exports, a C reference library of the same functions, and
+measures, best of five runs of 200,000 calls: the build, the sizes, loading
+and unloading (a copy of the library loaded by path, so no earlier load is
+reused), creating and destroying an instance, each call against the C
+reference's, the same under GC stress, and the same functions called from
+Botlish code in an executable's loop (what a call costs without the
+boundary). The library's functions: `add` (two Ints), `scale` (a Float64),
+`echo` (a str, 10 bytes and 4 KiB: copied in, validated, copied out),
+`words` (`words(16)` collects 16 Strings, each made by `concat`, into a
+List and returns its length: 17 allocations), `fail_if` (a declared error
+with a payload).
+
+**Windows x86-64** (windows-2025 runner, MSVC 14.4x, `/O1` hosts):
+WINDOWS-PERF-PENDING
+
+LINUX-PERF-RERUN
 
 ## 17. CI
 
