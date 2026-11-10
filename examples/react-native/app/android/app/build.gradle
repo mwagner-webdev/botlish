@@ -72,6 +72,23 @@ def enableProguardInReleaseBuilds = false
  */
 def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
 
+/**
+ * A build for a device in hand (BOTLISH-REACT-NATIVE-2048-PACKAGE-
+ * MILESTONE-1.md, "Device builds"): -PbotlishDevice=plain or
+ * -PbotlishDevice=gc-stress. Both show a Self-test button under the game,
+ * and the self-test shows its result on the screen, so no adb is needed.
+ * gc-stress also sets BOTLISH_NATIVE_GC_STRESS=1 when the process starts
+ * (MainApplication) and is an application of its own
+ * (com.botlish2048.gcstress, "2048 GC stress"), installed beside the
+ * other. Without the property the build is the one the acceptance runs,
+ * unchanged.
+ */
+def botlishDevice = (findProperty("botlishDevice") ?: "").toString()
+if (!(botlishDevice in ["", "plain", "gc-stress"])) {
+    throw new GradleException("botlishDevice is plain or gc-stress, not \"${botlishDevice}\"")
+}
+def botlishGcStress = botlishDevice == "gc-stress"
+
 android {
     ndkVersion rootProject.ext.ndkVersion
     buildToolsVersion rootProject.ext.buildToolsVersion
@@ -79,11 +96,14 @@ android {
 
     namespace "com.botlish2048"
     defaultConfig {
-        applicationId "com.botlish2048"
+        applicationId botlishGcStress ? "com.botlish2048.gcstress" : "com.botlish2048"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
         versionName "1.0"
+        buildConfigField "String", "BOTLISH_DEVICE", "\"${botlishDevice}\""
+        buildConfigField "boolean", "BOTLISH_GC_STRESS", botlishGcStress ? "true" : "false"
+        manifestPlaceholders.put("appLabel", botlishGcStress ? "2048 GC stress" : "@string/app_name")
     }
     signingConfigs {
         debug {

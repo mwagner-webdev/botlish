@@ -12,18 +12,24 @@
 //   4. the contracts: declared errors and their identities, argument and
 //      result checks, strings, the second library, ownership counters;
 //   5. timings: calls per second through the module, time inside the C ABI.
+//
+// The screen shows the result too (the status, the checks that failed, the
+// timings, the digest of the module's snapshots against the interpreter's):
+// a device build (App.tsx's Self-test button) is read there, with no adb.
 import React, { useEffect, useRef, useState } from 'react';
-import { Platform, Text, View } from 'react-native';
+import { Platform, Pressable, ScrollView, Text, View } from 'react-native';
 import * as Game from 'react-native-botlish-game';
 import NativeGame from 'react-native-botlish-game/src/NativeBotlishGame';
 import * as Text_ from 'react-native-botlish-textkit';
 
 import { now } from './clock';
-import { directions, seed } from './directions';
+import { digest } from './digest';
+import { directions, oracleDigest, seed } from './directions';
 import { useBotlish2048, type Direction } from './useBotlish2048';
 
 const names: Direction[] = ['left', 'right', 'up', 'down'];
 let failures = 0;
+let failed: string[] = [];
 
 function log(line: string) {
   console.log(`BOTLISH_RN ${line}`);
@@ -32,6 +38,7 @@ function log(line: string) {
 function expect(name: string, ok: boolean, detail = '') {
   if (!ok) {
     failures++;
+    failed.push(name);
   }
   log(`${ok ? 'ok' : 'FAIL'} ${name}${detail ? ` ${detail}` : ''}`);
 }
@@ -85,6 +92,8 @@ function oracle(): string[] {
     states.push(s);
     log(`oracle ${i + 1} ${s}`);
   }
+  const d = digest(states);
+  expect('module-matches-interpreter', d === oracleDigest, `digest ${d}, the interpreter's ${oracleDigest}`);
   return states;
 }
 
@@ -168,7 +177,8 @@ function contracts() {
   expect('textkit-not-game-error', !Game.isBotlishError(e) && e instanceof Text_.BotlishError);
 }
 
-function timings() {
+// The timings, logged; returned as the lines the screen shows.
+function timings(): string[] {
   const before = Game.diagnostics().process;
   let s = Game.newGame(1);
   const n = 2000;
@@ -190,7 +200,12 @@ function timings() {
     Text_.scalarCount('abc');
   }
   // now() is in milliseconds: microseconds per call over 10,000 calls.
-  log(`timing textkit 10000 scalarCount calls: ${(((now() - t2) * 1e3) / 10000).toFixed(2)} us per call`);
+  const textkit = ((now() - t2) * 1e3) / 10000;
+  log(`timing textkit 10000 scalarCount calls: ${textkit.toFixed(2)} us per call`);
+  return [
+    `a 2048 move: ${total.toFixed(1)} µs, ${native.toFixed(1)} µs of it in Botlish (${calls} calls)`,
+    `a textkit call: ${textkit.toFixed(2)} µs (10,000 calls)`,
+  ];
 }
 
 function ownership() {
@@ -230,32 +245,53 @@ function HookDriver({ expected, onDone }: { expected: string[]; onDone: (ok: boo
   return null;
 }
 
-export default function SelfTest() {
+// DEVICE is a device build's (App.tsx): the screen says whether this build
+// runs the libraries under GC stress. ONCLOSE, when given, is the way back.
+export default function SelfTest({ device, onClose }: { device?: string; onClose?: () => void }) {
   const [status, setStatus] = useState('running');
   const [expected, setExpected] = useState<string[] | null>(null);
+  const [details, setDetails] = useState<string[]>([]);
   useEffect(() => {
+    // A device build runs the self-test again from the game: count afresh.
+    failures = 0;
+    failed = [];
     try {
       environment();
       const states = oracle();
       contracts();
-      timings();
+      setDetails([
+        `${states.length} snapshots, digest ${digest(states)} (the interpreter's: ${oracleDigest})`,
+        ...timings(),
+      ]);
       setExpected(states);
     } catch (e) {
       expect('selftest-threw', false, describe(e));
       log(`selftest done failures=${failures}`);
-      setStatus('failed');
+      setStatus(`failed: ${failed.join(', ')}`);
     }
   }, []);
   const done = (ok: boolean) => {
     expect('hook-matches-module', ok);
     ownership();
     log(`selftest done failures=${failures}`);
-    setStatus(failures === 0 ? 'passed' : `failed (${failures})`);
+    setStatus(failures === 0 ? 'passed' : `failed (${failures}): ${failed.join(', ')}`);
   };
+  const stress = device === 'gc-stress' ? 'on' : device === 'plain' ? 'off' : null;
   return (
-    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+    <ScrollView contentContainerStyle={{ flexGrow: 1, alignItems: 'center', justifyContent: 'center', padding: 24 }}>
       <Text accessibilityLabel="selftest">Botlish self-test: {status}</Text>
+      {stress !== null ? <Text accessibilityLabel="gc stress">GC stress: {stress} (this build)</Text> : null}
+      {details.map(line => (
+        <Text key={line} style={{ marginTop: 8, textAlign: 'center' }}>
+          {line}
+        </Text>
+      ))}
       {expected !== null && status === 'running' ? <HookDriver expected={expected} onDone={done} /> : null}
-    </View>
+      {onClose !== undefined && status !== 'running' ? (
+        <Pressable onPress={onClose} accessibilityLabel="back" style={{ marginTop: 24, backgroundColor: '#8f7a66', borderRadius: 6, paddingHorizontal: 16, paddingVertical: 10 }}>
+          <Text style={{ color: '#f9f6f2', fontWeight: 'bold' }}>Back to the game</Text>
+        </Pressable>
+      ) : null}
+    </ScrollView>
   );
 }

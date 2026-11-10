@@ -6322,6 +6322,15 @@ second, unrelated library (`textkit/textkit.bot`) and the React Native
   React Native's SoLoader looks for them under the device's primary ABI.
   Keep extraction, which `inspect-apk.sh` checks, until SoLoader looks
   under the process's own ABI.
+* The device builds (`-PbotlishDevice=plain|gc-stress`, the app's
+  build.gradle) are for a phone without adb: a Self-test button, the
+  result on the screen, and for gc-stress `BOTLISH_NATIVE_GC_STRESS=1` set
+  in `MainApplication` as an application of its own. Without the property
+  the build is the acceptance's: never let a device build's button,
+  variable or package reach it. The self-test checks its snapshots on the
+  device by `oracleDigest` (src/directions.ts), which must stay the
+  interpreter's (`rn-selftest-oracle-digest`). `tools/device-builds.sh`
+  runs both on the workflow's emulators and, over USB, on a phone.
 
 If you change `integrations/react-native/`, `examples/react-native/` or the
 native library manifest or C ABI it reads, run

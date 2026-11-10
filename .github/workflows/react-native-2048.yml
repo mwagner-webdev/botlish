@@ -11,8 +11,8 @@ name: react-native 2048
 #            npm pack, the host harnesses of the generated C++ (also under
 #            BOTLISH_NATIVE_GC_STRESS=1), the interpreter's oracles, the app
 #            (npm ci, the packages from their tarballs, TypeScript, Jest, the
-#            Android release build) and what its APK holds
-#            (audit/react-native-2048/tools/build.sh); then the single-file
+#            Android release build, the two device builds) and what its APK
+#            holds (audit/react-native-2048/tools/build.sh); then the single-file
 #            compiler and the clean room (cleanroom/cleanroom.sh: the
 #            single executable and the packages only, traced; npm, Codegen
 #            and Gradle with the app's own dependencies)
@@ -20,7 +20,10 @@ name: react-native 2048
 #            against the interpreter, reloads, GC stress, swipes, the win and
 #            the end, a clean exit (tools/android-acceptance.sh); with 4 KiB
 #            pages the clean room's APK too, and the debug build's development
-#            reload with Metro (tools/dev-reload.sh). The images
+#            reload with Metro (tools/dev-reload.sh); then the device builds
+#            as a person uses them, no launch extras: the Self-test button,
+#            the result on the screen, the GC-stress build beside the plain
+#            one (tools/device-builds.sh). The images
 #            are x86_64 (GitHub's Linux runners have KVM for x86_64 guests
 #            only, and Google's emulator runs arm64 images on arm64 hosts
 #            only): the arm64-v8a APK runs through Android's ARM native
@@ -134,6 +137,8 @@ jobs:
           path: |
             ${{ runner.temp }}/rn2048/app-release.apk
             ${{ runner.temp }}/rn2048/app-debug.apk
+            ${{ runner.temp }}/rn2048/app-device-plain.apk
+            ${{ runner.temp }}/rn2048/app-device-gc-stress.apk
             ${{ runner.temp }}/rn2048/*.txt
             ${{ runner.temp }}/rn2048/*.json
             ${{ runner.temp }}/rn2048/npm/*.tgz
@@ -175,6 +180,7 @@ jobs:
           sudo udevadm trigger --name-match=kvm
 
       - name: Boot the emulator (the first image that runs arm64-v8a code)
+        id: boot
         env:
           IMAGES: ${{ matrix.images }}
         run: |
@@ -208,12 +214,21 @@ jobs:
           adb uninstall com.botlish2048 || true
           audit/react-native-2048/tools/dev-reload.sh "$RUNNER_TEMP/rn2048/app-debug.apk" "$app" "$RUNNER_TEMP/acceptance/development"
 
+      - name: Device builds (tools/device-builds.sh; also after a failed phase above)
+        if: ${{ !cancelled() && steps.boot.outcome == 'success' }}
+        run: |
+          export PATH="$ANDROID_HOME/platform-tools:$PATH"
+          adb uninstall com.botlish2048 || true
+          adb uninstall com.botlish2048.gcstress || true
+          audit/react-native-2048/tools/device-builds.sh "$RUNNER_TEMP/rn2048" "$RUNNER_TEMP/acceptance/device"
+
       - name: Summary
         if: always()
         run: |
           cat "$RUNNER_TEMP/acceptance/summary.txt" || true
           cat "$RUNNER_TEMP/acceptance/cleanroom/summary.txt" 2> /dev/null || true
           cat "$RUNNER_TEMP/acceptance/development/summary.txt" 2> /dev/null || true
+          cat "$RUNNER_TEMP/acceptance/device/summary.txt" 2> /dev/null || true
 
       - uses: actions/upload-artifact@v4
         if: always()

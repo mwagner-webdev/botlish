@@ -25,6 +25,9 @@ import com.facebook.react.defaults.DefaultReactActivityDelegate
  *                             its JavaScript runtime and TurboModules are
  *                             destroyed and made again
  *
+ * A device build (-PbotlishDevice, app/build.gradle) also passes the launch
+ * option `device` (plain or gc-stress): the game shows a Self-test button.
+ *
  * None of it is the Botlish package's: the generated module knows nothing of
  * these extras.
  */
@@ -56,6 +59,9 @@ class MainActivity : ReactActivity() {
           val options = Bundle()
           for (key in listOf("mode", "start")) {
             intent.getStringExtra(key)?.let { options.putString(key, it) }
+          }
+          if (BuildConfig.BOTLISH_DEVICE.isNotEmpty()) {
+            options.putString("device", BuildConfig.BOTLISH_DEVICE)
           }
           return if (options.isEmpty) null else options
         }

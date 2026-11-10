@@ -22,7 +22,8 @@
 #   5. the interpreter's oracle for the self-test's game -> OUT/oracle-42.txt
 #   6. the app: examples/react-native/app copied, its locked dependencies
 #      (npm ci), the two packages installed from their tarballs, TypeScript,
-#      Jest, the Android release build -> OUT/app, OUT/app-release.apk
+#      Jest, the Android release build -> OUT/app, OUT/app-release.apk; the
+#      two device builds -> OUT/app-device-{plain,gc-stress}.apk
 #   7. what the APK holds -> OUT/apk-report.txt
 #
 # Environment: ANDROID_NDK_ROOT (an NDK of at least r28, for the Botlish
@@ -143,6 +144,14 @@ npx --no-install tsc --noEmit
 npx --no-install jest --ci 2>&1 | tee "$out/jest.txt"
 (cd android && ./gradlew --no-daemon --console=plain assembleRelease)
 cp android/app/build/outputs/apk/release/app-release.apk "$out/app-release.apk"
+# The device builds (android/app/build.gradle's -PbotlishDevice): the same
+# app with a Self-test button whose result is on the screen, for a device
+# in hand; gc-stress runs the libraries under GC stress, as an application
+# of its own. Built after the acceptance's APK, which is copied first.
+for device in plain gc-stress; do
+    (cd android && ./gradlew --no-daemon --console=plain assembleRelease -PbotlishDevice=$device)
+    cp android/app/build/outputs/apk/release/app-release.apk "$out/app-device-$device.apk"
+done
 
 step "7. the APK"
 "$here/inspect-apk.sh" "$out/app-release.apk" "$out" | tee "$out/apk-report.txt"

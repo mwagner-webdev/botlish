@@ -562,3 +562,41 @@ if(FALSE)
     return teardown;
     // The first game only: later seeds come from restart().
 >>>>
+
+# ------------------------------------------------------------- device builds
+
+@@ device-button-always the default build -- the one the acceptance runs -- shows the device builds' Self-test button
+!! rn-js-jest
+## examples/react-native/app/App.tsx
+<<<<
+        <Game start={props.start} device={device} onSelfTest={device !== undefined ? () => setSelfTest(true) : undefined} />
+====
+        <Game start={props.start} device={device} onSelfTest={() => setSelfTest(true)} />
+>>>>
+
+@@ device-value-unchecked any value of the launch option device makes a device build
+!! rn-js-jest
+## examples/react-native/app/App.tsx
+<<<<
+  const device = props.device === 'plain' || props.device === 'gc-stress' ? props.device : undefined;
+====
+  const device = props.device;
+>>>>
+
+@@ oracle-digest-stale the self-test compares the module's snapshots with a digest that is not the interpreter's
+!! rn-selftest-oracle-digest
+## examples/react-native/app/src/directions.ts
+<<<<
+export const oracleDigest = 'fbee79e6';
+====
+export const oracleDigest = 'fbee79e7';
+>>>>
+
+@@ digest-float-multiply the digest multiplies in floating point, losing the low bits of FNV-1a's product
+!! rn-js-jest
+## examples/react-native/app/src/digest.ts
+<<<<
+    h = Math.imul(h, 0x01000193) >>> 0;
+====
+    h = (h * 0x01000193) >>> 0;
+>>>>

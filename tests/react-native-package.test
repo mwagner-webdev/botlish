@@ -698,6 +698,25 @@ test rn-core-oracle {the 2048 package's core on the host plays the Botlish inter
     list [llength [split $oracle \n]] [expr {$oracle eq $host}]
 } -result {81 1}
 
+# The self-test checks the module's 401 snapshots against the interpreter's
+# on any device by a digest (src/digest.ts: FNV-1a of the lines joined by
+# newlines), the constant oracleDigest of src/directions.ts: it is the
+# interpreter's for the game the self-test plays.
+test rn-selftest-oracle-digest {the self-test's oracleDigest is the digest of the Botlish interpreter's 401 snapshots of its game (seed and moves of src/directions.ts)} -body {
+    set channel [open [file join $::projectRoot examples react-native app src directions.ts]]
+    set source [read $channel]
+    close $channel
+    regexp {export const seed = (\d+);} $source -> seed
+    regexp {export const oracleDigest = '([0-9a-f]{8})';} $source -> recorded
+    regexp {export const directions =\s*'([0-3]+)';} $source -> directions
+    set oracle [exec [info nameofexecutable] [file join $::rnAudit tools oracle.tcl] $seed $directions]
+    set h 0x811c9dc5
+    foreach c [split $oracle ""] {
+        set h [expr {(($h ^ [scan $c %c]) * 0x01000193) & 0xffffffff}]
+    }
+    list [llength [split $oracle \n]] [regexp {^[\x20-\x7e\n]*$} $oracle] [expr {[format %08x $h] eq $recorded ? "equal" : "[format %08x $h], recorded $recorded"}]
+} -result {401 1 equal}
+
 # ---------------------------------------------------------------------------
 # The CMake file's guards (configured with the host's CMake and compiler:
 # the checks run before any target is built)

@@ -7,8 +7,11 @@
 // The launch option `mode` (MainActivity passes the intent's extras) picks
 // the screen: `play` (the default) or `selftest` (src/SelfTest.tsx, which
 // the CI's Android run reads from logcat); `start`, a snapshot, begins the
-// game there (the acceptance run's win and game-over positions).
-import React, { useEffect, useMemo, useRef } from 'react';
+// game there (the acceptance run's win and game-over positions). `device`
+// (plain or gc-stress) is a device build's (android/app/build.gradle,
+// -PbotlishDevice): the game shows a Self-test button, whose result is on
+// the screen, and says whether the build runs Botlish under GC stress.
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   PanResponder,
   Pressable,
@@ -60,7 +63,7 @@ function swipeDirection(dx: number, dy: number): Direction | null {
   return dy > 0 ? 'down' : 'up';
 }
 
-function Game({ start }: { start?: string }) {
+function Game({ start, device, onSelfTest }: { start?: string; device?: string; onSelfTest?: () => void }) {
   const pending = useRef<{ direction: Direction; at: number } | null>(null);
   const game = useBotlish2048({
     seed: 42,
@@ -146,15 +149,31 @@ function Game({ start }: { start?: string }) {
       <Text style={styles.status} accessibilityLabel="status">
         {game.error ? `Error: ${game.error.message}` : `Moves: ${game.moves} · seed ${game.seed}`}
       </Text>
+      {onSelfTest !== undefined ? (
+        <View style={styles.device}>
+          <Text style={styles.status} accessibilityLabel="device build">
+            {device === 'gc-stress' ? 'GC-stress build' : 'Device build'}
+          </Text>
+          <Pressable style={styles.button} onPress={onSelfTest} accessibilityLabel="self-test">
+            <Text style={styles.buttonText}>Self-test</Text>
+          </Pressable>
+        </View>
+      ) : null}
     </View>
   );
 }
 
-export default function App(props: { mode?: string; start?: string }) {
+export default function App(props: { mode?: string; start?: string; device?: string }) {
+  const [selfTest, setSelfTest] = useState(props.mode === 'selftest');
+  const device = props.device === 'plain' || props.device === 'gc-stress' ? props.device : undefined;
   return (
     <>
       <StatusBar barStyle="dark-content" />
-      {props.mode === 'selftest' ? <SelfTest /> : <Game start={props.start} />}
+      {selfTest ? (
+        <SelfTest device={device} onClose={device !== undefined ? () => setSelfTest(false) : undefined} />
+      ) : (
+        <Game start={props.start} device={device} onSelfTest={device !== undefined ? () => setSelfTest(true) : undefined} />
+      )}
     </>
   );
 }
@@ -189,4 +208,5 @@ const styles = StyleSheet.create({
   arrows: { flexDirection: 'row', gap: 12, marginTop: 16 },
   arrow: { backgroundColor: '#8f7a66', borderRadius: 6, width: 56, height: 48, alignItems: 'center', justifyContent: 'center' },
   status: { marginTop: 12, color: '#776e65' },
+  device: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 12 },
 });

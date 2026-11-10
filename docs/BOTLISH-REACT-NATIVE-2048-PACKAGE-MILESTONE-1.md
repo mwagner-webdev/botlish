@@ -93,6 +93,7 @@ CI evidence (sections 16 and 23):
   - the debug build's development reload with Metro, twice.
 
   The app's arm64 code ran translated by the native bridge, not natively.
+  It ran natively on a phone, in the device builds (section 16).
 
 **The gaps:**
 
@@ -111,6 +112,19 @@ CI evidence (sections 16 and 23):
   native-bridge device, never as passed. A device that runs arm64 code
   natively checks it. GC stress of the libraries through the same
   generated core is observed on the host (section 19).
+
+  The device builds (section 16, "Device builds") take the check to a
+  phone without adb. On a phone, which runs arm64 code natively, the
+  GC-stress build's self-test passed with the variable set as its
+  process started:
+  - 401 snapshots, digest `fbee79e6`, the interpreter's;
+  - 258.2 µs a call in Botlish;
+  - every other check of the self-test.
+
+  The library did run under it, then. Whether the stress took effect in
+  it is still open: that takes the plain build's figure from the same
+  phone, at least half the GC-stress build's (the acceptance's rule),
+  which is not yet recorded.
 * **The 16 KiB-page image** (Android 15, page size 16384) passed in run 12,
   with every phase but GC stress, as the 4 KiB image did. The app's
   extracted, 16 KiB-aligned libraries were loaded by a 16 KiB-page kernel.
@@ -133,11 +147,12 @@ section 16).
 | the generated C++ compiles against React Native 0.88.1 and links into `libappmodules.so`; the APK carries the real arm64-v8a library | observed (local Gradle release builds; `inspect-apk.sh`) |
 | ownership, thread affinity, lifecycle, number and string rules of the generated core | observed on the host (34 + 24 checks, GC stress) |
 | the 2048 rules in Botlish (seeded spawns, scoring, the end, the win); the hook computes none | implemented, observed (401 snapshots equal to the interpreter's through the generated core on the host) |
-| `useBotlish2048()` and a playable 2048 screen (swipes, buttons, score, New game, game over, win) | implemented; Jest observed (28 tests: 10 of the hook and the snapshot reader, 17 of the generated entry point, 1 without the native module) |
+| `useBotlish2048()` and a playable 2048 screen (swipes, buttons, score, New game, game over, win) | implemented; Jest observed (34 tests: 10 of the hook and the snapshot reader, 17 of the generated entry point, 1 without the native module, 6 of the device builds and the self-test's digest) |
+| device builds for a phone without adb (`-PbotlishDevice=plain`, `gc-stress`): a Self-test button, the result on the screen, the GC-stress build beside the plain one | implemented; both APKs built and inspected locally; **on a phone (arm64, natively) both ran, and the GC-stress build's self-test passed with GC stress set** (section 16); `tools/device-builds.sh` on the CI emulators pending |
 | a second, unrelated library through the same generator, both packages in one app | observed (host harness, TypeScript, Jest, the APK) |
 | a clean room: the single-file compiler and packages only, then npm, Codegen and Gradle | observed (section 18) |
 | the app on Android: Hermes, the TurboModule, the Botlish library in an Android application process | **observed on Android 14 (4 KiB pages), translated by the ARM native bridge** (CI, runs 9 to 12: every phase but GC stress); GC stress in the app process not demonstrable on a native-bridge emulator; **observed on Android 15 (16 KiB pages) too** (CI, run 12: every phase but GC stress) (section 16) |
-| mutation testing | 44/44 killed, each by a detector it names; observed (section 21) |
+| mutation testing | 48 mutants, each killed by a detector it names: 44 in the last full run, the 4 of the device builds run on their own; the full rerun with them is pending (section 21) |
 | iOS, Android ABIs other than arm64-v8a, asynchronous workers | not supported (section 24) |
 
 The compiler, the runtime and the standard library are unchanged (static:
@@ -674,7 +689,9 @@ called while a test component renders:
 * the self-test screen;
 * `MainActivity` extras: `mode` and `start` as launch options, `gcStress`
   setting `BOTLISH_NATIVE_GC_STRESS=1` with `Os.setenv` before any
-  instance, and `reload` calling `ReactHost.reload`.
+  instance, and `reload` calling `ReactHost.reload`;
+* the device builds' Self-test button and the self-test's result on the
+  screen (section 16, "Device builds"). The default build shows neither.
 
 A swipe on the board (`PanResponder`, 24 points at least, the larger axis)
 or an arrow reads one direction. The hook asks the library, React renders
@@ -684,7 +701,9 @@ logged as `BOTLISH_RN ...` lines.
 What was observed of the app without an Android device:
 
 * TypeScript (`tsc --noEmit`) over the app and both generated entry points;
-* Jest: 28 tests (section 14; `results/jest.txt`);
+* Jest: 34 tests (section 14; `results/jest.txt`). Six of them are the
+  device builds' screens and the self-test's digest
+  (`__tests__/deviceBuild.test.tsx`).
 * Gradle release builds of the app with both packages, locally and in the
   clean room (section 18). Codegen ran for both specs; the adapters were
   compiled against React Native 0.88.1 with the NDK the app pins (r27.1)
@@ -717,6 +736,10 @@ evidence: section 16.
 * **GC stress in the app process: not demonstrated.** It cannot be on a
   native-bridge emulator (run 10, below). The acceptance reports it there
   as NOT DEMONSTRATED; a device running arm64 natively checks it.
+* **On a phone** (arm64, natively): both device builds ran, and the
+  GC-stress build's self-test passed with GC stress set ("Device builds",
+  below). The comparison with the plain build that shows the stress
+  taking effect is not yet recorded.
 * **Observed on Android 15, 16 KiB pages, through the ARM native bridge**
   (CI, run 12): every phase but GC stress. Run 11 failed there on another
   process's crash, which the acceptance counted as the app's (below).
@@ -1052,6 +1075,85 @@ destroyed on its own thread. This happened for the game library in both
 reloads and for textkit in reload 2, so the process counted 2 and 1
 orphaned instances, with every destruction's status 0.
 
+**Device builds.** The acceptance drives the app with launch extras
+through adb, and a phone in hand has none. The Gradle property
+`-PbotlishDevice` (`android/app/build.gradle`) makes the same app for a
+device:
+
+* `plain` is the app with a **Self-test** button under the game. The
+  self-test shows its result on the screen:
+  - "passed", or the checks that failed;
+  - whether GC stress is on;
+  - the digest of the module's 401 snapshots against the interpreter's;
+  - the time per call.
+
+  "Back to the game" returns to the board.
+* `gc-stress` is the same, plus `BOTLISH_NATIVE_GC_STRESS=1`, set with
+  `Os.setenv` in `MainApplication.onCreate`, before React Native starts and
+  so before any Botlish instance exists. It is an application of its own
+  (`com.botlish2048.gcstress`, "2048 GC stress"), installed beside the
+  plain one.
+* Without the property the build is the acceptance's, unchanged. Its
+  `MainApplication` holds no `setenv`, and its `MainActivity` passes no
+  `device` option, so the game shows no button (observed in the three
+  APKs' dex, and by `rn-js-jest`'s `deviceBuild.test.tsx`).
+
+The self-test now checks the module's snapshots against the interpreter's
+on the device itself. FNV-1a of the 401 lines (`src/digest.ts`) must equal
+`oracleDigest` in `src/directions.ts`, which `rn-selftest-oracle-digest`
+recomputes from the Botlish interpreter. The CI's line-by-line comparison
+from logcat stays.
+
+`build.sh` builds both device APKs after the acceptance's
+(`app-device-plain.apk`, `app-device-gc-stress.apk`). They differ from it
+in their dex, their manifest and, for gc-stress, their package. Each
+passes `inspect-apk.sh`: the Botlish libraries are byte for byte the
+packages' as stripped, 16 KiB-aligned, extracted at installation.
+
+`tools/device-builds.sh DIR OUT` uses them as a person does, on any device
+adb sees. For each build it checks:
+
+* the package and the label;
+* a launch from the launcher with no extras;
+* the build's line on the game screen and, for the GC-stress build, the
+  variable set as its process started;
+* a tap on Self-test, failures=0 and the digest's check;
+* the screen's "passed" and "GC stress: on" or "off";
+* "Back to the game", and no crash of the app.
+
+Then it compares the two builds' time per call in the C ABI. The rule is
+the acceptance's: at least 2x passes, and through a native bridge a lower
+ratio is NOT DEMONSTRATED. Run against a phone over USB, it is the
+acceptance's GC-stress check on hardware. Both Android jobs of the
+workflow run it after the other phases (pending: run 13).
+
+**On a phone, observed.** The owner of the project installed both
+locally built APKs on a phone (arm64; model and Android version not
+recorded). The APKs hold arm64-v8a code only, so they install only where
+it runs. Both looked right. The GC-stress build's self-test screen read:
+
+```
+Botlish self-test: passed
+GC stress: on (this build)
+401 snapshots, digest fbee79e6 (the interpreter's: fbee79e6)
+a 2048 move: 260.3 µs, 258.2 µs of it in Botlish (4001 calls)
+a textkit call: 0.93 µs (10,000 calls)
+```
+
+So every check of the self-test passed in an app process whose arm64 code
+runs natively, with `BOTLISH_NATIVE_GC_STRESS=1` in the libc the
+libraries use:
+* the snapshots equal the interpreter's;
+* the contracts and errors held;
+* the hook equalled the module;
+* ownership balanced;
+* the instances belonged to the JavaScript thread.
+
+The JSI and adapter share was 2.1 µs a call, against 5 µs translated by
+the bridge (section 22). Whether the stress took effect in the library is
+the comparison with the plain build's self-test on the same phone, at
+least half of 258.2 µs: not yet recorded.
+
 **Locally**, this host has no `/dev/kvm`. Observed, with the emulator 37.2.13
 and `system-images;android-30;aosp_atd;arm64-v8a`:
 
@@ -1221,6 +1323,12 @@ published packages alone, then passed the whole Android acceptance on the
   cannot load the app (run 10). GC stress through the generated core is
   the host's evidence above, with the same Botlish runtime built for the
   host.
+* **On a phone, observed** (section 16, "Device builds"). The GC-stress
+  device build's self-test passed in an app process that runs arm64
+  natively, with the variable set before any instance existed. Its
+  snapshots were the interpreter's and ownership balanced, at 258.2 µs a
+  call in Botlish. The plain build's figure, which shows the stress taking
+  effect, is not yet recorded.
 
 ## 20. Negative testing
 
@@ -1267,12 +1375,14 @@ the tool's own checks is reached:
 
 ## 21. Mutation testing
 
-`audit/react-native-2048/tools/mutate.tcl` with `mutants.txt`: 44 mutants,
+`audit/react-native-2048/tools/mutate.tcl` with `mutants.txt`: 48 mutants,
 each with the detector tests that must kill it. `tools/mutant-catalogs.tcl`
 applies all of them (95 catalogs, 0 problems).
 
 Observed (`results/mutation.txt`): **44/44 killed**, each by a detector
-its `!!` line names. The harness runs each mutant in a private copy of the
+its `!!` line names, in the last full run, before the device builds. Their
+four mutants were run on their own (`-only`): all four killed. The full
+rerun with all 48 is pending. The harness runs each mutant in a private copy of the
 tree, against a baseline in which every detector passes unmutated.
 
 | what the mutants break | mutants | killed by |
@@ -1282,6 +1392,7 @@ tree, against a baseline in which every detector passes unmutated.
 | the generated C++ core: unsafe and fractional integers, strings by length both ways, error identity and categories, released results and errors, thread affinity, one instance per module, invalidation, destruction on the owner thread, reaping | 13 | `rn-core-game`, `rn-core-textkit`, `rn-core-gc-stress` |
 | the generated TypeScript entry point: unsafe integers, argument counts, error identity, no JavaScript fallback | 4 | `rn-js-jest` |
 | the hook: no call while rendering, the latest snapshot, no new game on rerender, one call per move, no rules in JavaScript, nothing native at unmount | 6 | `rn-js-jest` |
+| the device builds: the Self-test button in the default build, any `device` value taken, a stale `oracleDigest`, the digest's multiplication in floating point | 4 | `rn-js-jest`, `rn-selftest-oracle-digest` |
 
 Two mutants survived the first full run, and each exposed a weakness that
 was fixed:
@@ -1350,6 +1461,12 @@ clean room APK, on the 4 KiB image, 67.84 µs a move (64.73 and 3.12 µs)
 and 10.07 ms. The runners differ that much between runs, and these
 figures cannot separate a page size's share from a runner's.
 
+**On a phone** (arm64, natively; the GC-stress device build, section 16):
+260.3 µs a move from JavaScript, 258.2 µs of it in Botlish, 2.1 µs JSI and
+the adapter; 0.93 µs a textkit call. Every instruction ran natively, and
+the game library under GC stress, so the move is no figure of the
+library's speed.
+
 **Footprint, observed** (`results/footprint.txt`; local release builds,
 React Native 0.88.1, arm64-v8a only). Native libraries are compressed in
 the APK and extracted at installation, the app's packaging (section 16).
@@ -1386,7 +1503,7 @@ libraries is not a goal of the native-library ABI
 | `tests/android-target.test` | 17 passed, 4 skipped (`androidRun`, `androidRun16k`: qemu-aarch64 and Android roots not set up here) |
 | `tests/package-manager.test` | 86/86 |
 | `tests/workload-2048.test` | 9 passed, 2 skipped (`darwinIO`, `windowsIO`) |
-| `audit/react-native-2048/tools/mutate.tcl` | 44/44 killed (section 21) |
+| `audit/react-native-2048/tools/mutate.tcl` | 44/44 killed; the device builds' 4 killed on their own; the full rerun pending (section 21) |
 | `tools/compilerpedia.tcl check` | 0 problems |
 | `tools/mutant-catalogs.tcl` | 95 catalogs, 0 problems |
 | `python3 -I tools/ci/test_runs.py` (a new workflow) | OK |
@@ -1480,6 +1597,8 @@ nothing in the release gate requires it. Its runs on this branch:
 
   Every acceptance ended `result: passed, but NOT DEMONSTRATED on this
   device: gc-stress`.
+* run 13, the device builds: `build.sh` builds them and both Android jobs
+  run `tools/device-builds.sh`. Pending.
 
 Main's own workflows were queued or in progress, none red among those
 completed, when this branch was made (`a6977d56`) and when it was last
@@ -1495,14 +1614,17 @@ checked.
   app runs translated: Hermes, React Native, the adapter and Botlish. Native AArch64
   execution of the same library remains the Android target milestone's
   (qemu-user, Bionic) evidence. Software emulation of an arm64 Android on
-  this x86_64 host is refused by the emulator (section 16). A physical
-  device or an arm64 emulator on an arm64 host with KVM is the missing
-  evidence for native execution inside an app.
+  this x86_64 host is refused by the emulator (section 16). On a phone
+  the device builds ran natively (section 16, "Device builds"). That was
+  observed by the project's owner on a phone, not by CI: no CI job runs on
+  arm64 hardware.
 * **GC stress in the app process** (section 16): not demonstrable on a
   native-bridge emulator. The variable does not reach the library's arm64
-  libc, and a wrapper-started process gets no bridge. It needs a device
-  that runs arm64 natively, where the acceptance's GC-stress phase checks
-  it.
+  libc, and a wrapper-started process gets no bridge. On a phone, which
+  runs arm64 natively, the GC-stress device build's self-test passed with
+  the variable set. What remains is the plain build's figure from the
+  same phone, to show the stress taking effect
+  (`tools/device-builds.sh` over USB does both).
 * **16 KiB pages on hardware.** The 16 KiB-page Android 15 image passed
   (run 12), through the native bridge like the 4 KiB one. A 16 KiB device
   running arm64 natively is the hardware evidence still to come, as for
