@@ -811,6 +811,7 @@ purpose, at three scales.
 | audit/golden/migration/census/discarded-mutation.tsv, tcl-names.txt, tests/golden/manifest.tsv | the new test file's rows |
 | bench/discarded-mutation.tcl (new) | the cost measurement |
 | AGENTS.md, docs/INDEX.md | the rule and what to run; this report |
+| .github/workflows/macos-arm64.yml, docs/CI-RUNS.md | the macOS acceptance tier in six shards, not five: the new test file moved every later file a shard (tier.tcl shards round-robin by index), and shard 3 of five, holding depth-safe-nesting.test, warning-gate.test and actor.test, was cut off twice at its 75-minute limit with every test passing; main's own shard 3 measured 78 minutes of work and was cut off once on another branch. Six shards measure 58 minutes at most, from the per-file times of the branch's macOS runs. The gate itself is not slower: 238 s on main, 243 s here |
 
 ## 20. Reproduction commands
 
