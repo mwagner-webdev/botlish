@@ -114,7 +114,7 @@ CI evidence (sections 16 and 23):
   generated core is observed on the host (section 19).
 
   The device builds (section 16, "Device builds") take the check to a
-  phone without adb. On a phone, which runs arm64 code natively, the
+  phone without adb (and CI runs them on both emulator images, run 13). On a phone, which runs arm64 code natively, the
   GC-stress build's self-test passed with the variable set as its
   process started:
   - 401 snapshots, digest `fbee79e6`, the interpreter's;
@@ -148,10 +148,10 @@ section 16).
 | ownership, thread affinity, lifecycle, number and string rules of the generated core | observed on the host (34 + 24 checks, GC stress) |
 | the 2048 rules in Botlish (seeded spawns, scoring, the end, the win); the hook computes none | implemented, observed (401 snapshots equal to the interpreter's through the generated core on the host) |
 | `useBotlish2048()` and a playable 2048 screen (swipes, buttons, score, New game, game over, win) | implemented; Jest observed (34 tests: 10 of the hook and the snapshot reader, 17 of the generated entry point, 1 without the native module, 6 of the device builds and the self-test's digest) |
-| device builds for a phone without adb (`-PbotlishDevice=plain`, `gc-stress`): a Self-test button, the result on the screen, the GC-stress build beside the plain one | implemented; both APKs built and inspected locally; **on a phone (arm64, natively) both ran, and the GC-stress build's self-test passed with GC stress set** (section 16); `tools/device-builds.sh` on the CI emulators pending |
+| device builds for a phone without adb (`-PbotlishDevice=plain`, `gc-stress`): a Self-test button, the result on the screen, the GC-stress build beside the plain one | implemented; both APKs built and inspected locally; **on a phone (arm64, natively) both ran, and the GC-stress build's self-test passed with GC stress set** (section 16); `tools/device-builds.sh` passed on both CI emulator images (run 13), GC stress NOT DEMONSTRATED there through the bridge |
 | a second, unrelated library through the same generator, both packages in one app | observed (host harness, TypeScript, Jest, the APK) |
 | a clean room: the single-file compiler and packages only, then npm, Codegen and Gradle | observed (section 18) |
-| the app on Android: Hermes, the TurboModule, the Botlish library in an Android application process | **observed on Android 14 (4 KiB pages), translated by the ARM native bridge** (CI, runs 9 to 12: every phase but GC stress); GC stress in the app process not demonstrable on a native-bridge emulator; **observed on Android 15 (16 KiB pages) too** (CI, run 12: every phase but GC stress) (section 16) |
+| the app on Android: Hermes, the TurboModule, the Botlish library in an Android application process | **observed on Android 14 (4 KiB pages), translated by the ARM native bridge** (CI, runs 9 to 13: every phase but GC stress); GC stress in the app process not demonstrable on a native-bridge emulator; **observed on Android 15 (16 KiB pages) too** (CI, runs 12 and 13: every phase but GC stress) (section 16) |
 | mutation testing | 48/48 killed, each by a detector it names; observed (section 21) |
 | iOS, Android ABIs other than arm64-v8a, asynchronous workers | not supported (section 24) |
 
@@ -731,7 +731,7 @@ evidence: section 16.
 **Status:**
 
 * **Observed on Android 14, 4 KiB pages, through the ARM native bridge**
-  (CI, runs 9 to 12): every phase but GC stress, for the build's APK and
+  (CI, runs 9 to 13): every phase but GC stress, for the build's APK and
   the clean room's, and the development reload with Metro.
 * **GC stress in the app process: not demonstrated.** It cannot be on a
   native-bridge emulator (run 10, below). The acceptance reports it there
@@ -741,7 +741,7 @@ evidence: section 16.
   below). The comparison with the plain build that shows the stress
   taking effect is not yet recorded.
 * **Observed on Android 15, 16 KiB pages, through the ARM native bridge**
-  (CI, run 12): every phase but GC stress. Run 11 failed there on another
+  (CI, runs 12 and 13): every phase but GC stress. Run 11 failed there on another
   process's crash, which the acceptance counted as the app's (below).
 
 The runs and their results follow the description.
@@ -1125,7 +1125,8 @@ Then it compares the two builds' time per call in the C ABI. The rule is
 the acceptance's: at least 2x passes, and through a native bridge a lower
 ratio is NOT DEMONSTRATED. Run against a phone over USB, it is the
 acceptance's GC-stress check on hardware. Both Android jobs of the
-workflow run it after the other phases (pending: run 13).
+workflow run it after the other phases; run 13 passed it on both images
+(below).
 
 **On a phone, observed.** The owner of the project installed both
 locally built APKs on a phone (arm64; model and Android version not
@@ -1153,6 +1154,33 @@ The JSI and adapter share was 2.1 µs a call, against 5 µs translated by
 the bridge (section 22). Whether the stress took effect in the library is
 the comparison with the plain build's self-test on the same phone, at
 least half of 258.2 µs: not yet recorded.
+
+**Run 13** (`aadb691c`, the device builds) passed every job. The
+acceptance and the development reload passed as in run 12, every
+acceptance ending `result: passed, but NOT DEMONSTRATED on this device:
+gc-stress`. `tools/device-builds.sh` then passed on both images
+([job 129684027788](https://github.com/mwagner-webdev/botlish/actions/runs/42770087048/job/129684027788),
+Android 15 with page size 16384;
+[job 129684027875](https://github.com/mwagner-webdev/botlish/actions/runs/42770087048/job/129684027875),
+Android 14 with 4 KiB pages), for both builds:
+
+* the package and the label: `com.botlish2048` "Botlish2048", and
+  `com.botlish2048.gcstress` "2048 GC stress", installed side by side;
+* a launch from the launcher with no extras showed the build's line ("Device
+  build", "GC-stress build") and the Self-test button. The GC-stress build
+  logged `BOTLISH_NATIVE_GC_STRESS=1` as its process started, and the plain
+  build logged nothing of it;
+* the button's self-test passed, its digest `fbee79e6` the interpreter's;
+* the screen said "Botlish self-test: passed" and "GC stress: off (this
+  build)" or "on";
+* "Back to the game" returned to the board, with no crash of either app.
+
+The comparison came out NOT DEMONSTRATED, as through the bridge it must:
+95.12 against 95.07 µs a call in the C ABI with 16 KiB pages, 86.65
+against 86.83 µs with 4 KiB pages (1.0x). The CI-built device APKs'
+SHA-256 are `e0f35307...` (plain) and `85036416...` (gc-stress); they are
+the `rn2048-build` artifact's `app-device-plain.apk` and
+`app-device-gc-stress.apk`.
 
 **Locally**, this host has no `/dev/kvm`. Observed, with the emulator 37.2.13
 and `system-images;android-30;aosp_atd;arm64-v8a`:
@@ -1306,7 +1334,7 @@ published packages alone, then passed the whole Android acceptance on the
   - invalidation, double invalidation;
   - many instances on one thread;
   - repeated failures and releases.
-* **Android, observed** (CI runs 9 to 12, Android 14 with 4 KiB pages and
+* **Android, observed** (CI runs 9 to 13, Android 14 with 4 KiB pages and
   Android 15 with 16 KiB pages, both through the ARM native bridge:
   section 16; the counts below are run 9's):
   - three reloads, each making new instances of both libraries and
@@ -1379,11 +1407,9 @@ the tool's own checks is reached:
 each with the detector tests that must kill it. `tools/mutant-catalogs.tcl`
 applies all of them (95 catalogs, 0 problems).
 
-Observed: **48/48 killed**, each by a detector its `!!` line names, in a
-full run with the device builds. The earlier full run, before them, killed
-44/44. `results/mutation.txt` holds the earlier run's output until the next
-change to `audit/react-native-2048/`: committing it alone would have
-cancelled run 13 (section 23). The harness runs each mutant in a private copy of the
+Observed (`results/mutation.txt`): **48/48 killed**, each by a detector
+its `!!` line names, in a full run with the device builds. The earlier full
+run, before them, killed 44/44 (its record follows in the same file). The harness runs each mutant in a private copy of the
 tree, against a baseline in which every detector passes unmutated.
 
 | what the mutants break | mutants | killed by |
@@ -1598,8 +1624,18 @@ nothing in the release gate requires it. Its runs on this branch:
 
   Every acceptance ended `result: passed, but NOT DEMONSTRATED on this
   device: gc-stress`.
-* run 13, the device builds: `build.sh` builds them and both Android jobs
-  run `tools/device-builds.sh`. Pending.
+* run 13, at `aadb691c`, the device builds:
+  [react-native 2048 #13](https://github.com/mwagner-webdev/botlish/actions/runs/42770087048).
+  - **build: success**, the two device APKs among its outputs.
+  - **android (16 KiB pages): success**
+    ([job 129684027788](https://github.com/mwagner-webdev/botlish/actions/runs/42770087048/job/129684027788)):
+    the acceptance as in run 12, then `device-builds.sh`: every check
+    passed, GC stress NOT DEMONSTRATED (1.0x).
+  - **android (4 KiB pages): success**
+    ([job 129684027875](https://github.com/mwagner-webdev/botlish/actions/runs/42770087048/job/129684027875)):
+    both APKs' acceptance, the development reload with Metro, and
+    `device-builds.sh`: every check passed, GC stress NOT DEMONSTRATED
+    (1.0x).
 
 Main's own workflows were queued or in progress, none red among those
 completed, when this branch was made (`a6977d56`) and when it was last
