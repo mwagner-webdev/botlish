@@ -364,7 +364,7 @@ test workload-icy-tower-app-module-shared-sources-untouched {the application's a
 # against recording stand-ins of Apple's tools, the bundle's negative
 # controls and the workflow's trust boundary -- on any host whose Python has
 # the pinned environment of audit/macos-release/requirements.txt (with the
-# tooling's own examples/games/icy-tower/macos/requirements.txt): every
+# tooling's own tools/macos-release/requirements.txt): every
 # package at its pinned version. Another version is not that environment
 # and is no evidence either way: Ubuntu 24.04's system cryptography (41.x,
 # what a GitHub arm64 runner's python3 imports) has no
@@ -374,7 +374,7 @@ test workload-icy-tower-app-module-shared-sources-untouched {the application's a
 set releasePython [if {[info exists ::env(BOTLISH_RELEASE_PYTHON)]} {set ::env(BOTLISH_RELEASE_PYTHON)} else {set python3 python3}]
 proc releasePins {} {
     set pins {}
-    foreach file {{audit macos-release requirements.txt} {examples games icy-tower macos requirements.txt}} {
+    foreach file {{audit macos-release requirements.txt} {tools macos-release requirements.txt}} {
         foreach line [split [core::ReadFile [file join $::projectRoot {*}$file]] \n] {
             if {[regexp {^([A-Za-z0-9_.-]+)==([^\s\\]+)} $line -> name version]} {
                 dict set pins $name $version
@@ -393,14 +393,14 @@ proc releaseEnvironmentPinned {python} {
 }
 testConstraint releaseTooling [releaseEnvironmentPinned $releasePython]
 
-test workload-icy-tower-release-tooling {the macOS release tooling's suites pass (audit/macos-release/tests: test_credentials, test_release, test_workflow): every malformed credential refused with its code and remedy and no secret printed, every stage refusing what an earlier one did not establish, the workflow's trust boundary} -constraints releaseTooling -body {
+test workload-icy-tower-release-tooling {the macOS release tooling's suites pass (audit/macos-release/tests: test_credentials, test_release, test_workflow, and Botlish.app's, the same tooling's other application: test_botlish_release, test_botlish_workflow): every malformed credential refused with its code and remedy and no secret printed, every stage refusing what an earlier one did not establish, each workflow's trust boundary} -constraints releaseTooling -body {
     set results {}
-    foreach t {test_credentials test_release test_workflow} {
+    foreach t {test_credentials test_release test_workflow test_botlish_release test_botlish_workflow} {
         set status [catch {exec $::releasePython -I [file join $::projectRoot audit macos-release tests $t.py] 2>@1} output]
         lappend results $t $status [lindex [split [string trim $output] \n] end]
     }
     set results
-} -result {test_credentials 0 OK test_release 0 OK test_workflow 0 OK}
+} -result {test_credentials 0 OK test_release 0 OK test_workflow 0 OK test_botlish_release 0 OK test_botlish_workflow 0 OK}
 
 test workload-icy-tower-dt-tests-use-exact-steps {the golden suite's motion tests step by exact binary fractions, so its written Float64 expectations are exact results (a guard on the suite itself)} -body {
     set text [core::ReadFile [file join $gameDir golden.bot]]

@@ -1,5 +1,12 @@
 # MACOS-AARCH64-MILESTONE-9.md
 
+> Partially superseded by MACOS-BOTLISH-DISTRIBUTION-MILESTONE-1.md: the
+> application's driver is built without its JIT (programs run natively
+> through `-aot-run`, AOT-RUN-MILESTONE-1.md), every unit is signed with
+> the hardened runtime and no entitlement by `single/macos/sign.sh`, and
+> section 41's prerequisites are met by a Developer ID release job. The
+> bundle's layout is unchanged.
+
 Milestone 9 of the macOS Apple Silicon port: the canonical macOS compiler
 distribution. Botlish itself is now a relocatable, ad-hoc-signed
 application, `Botlish.app`: Tcl 9 as the bundle's own `Tcl.framework`, the
