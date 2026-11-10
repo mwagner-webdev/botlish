@@ -97,8 +97,13 @@ CI evidence (sections 16 and 23):
 
 **The gaps:**
 
-* **GC stress in the app process is not demonstrated, and on these
-  emulators it cannot be.**
+* **GC stress in the app process: demonstrated on a phone, by hand; on
+  the CI emulators it cannot be.** On a realme GT 7, which runs arm64
+  code natively, the GC-stress device build took 258.2 µs a call in
+  Botlish and the plain build 38.8 µs: 6.7x, over the acceptance's 2x
+  (the host: 6.2x). Every check of both self-tests passed (below, and
+  section 16, "Device builds"). The owner read both off the phone's
+  screen; no CI job runs on arm64 hardware. On the emulators:
   - In run 9 the GC-stress phase passed, but the library ran no slower
     under it than without it. The activity sets the variable with
     `Os.setenv`, and the arm64 library, which runs on the native bridge's
@@ -114,17 +119,12 @@ CI evidence (sections 16 and 23):
   generated core is observed on the host (section 19).
 
   The device builds (section 16, "Device builds") take the check to a
-  phone without adb (and CI runs them on both emulator images, run 13). On a phone, which runs arm64 code natively, the
-  GC-stress build's self-test passed with the variable set as its
-  process started:
+  phone without adb (and CI runs them on both emulator images, run 13).
+  On the phone, with the variable set as its process started, the
+  GC-stress build's self-test passed:
   - 401 snapshots, digest `fbee79e6`, the interpreter's;
-  - 258.2 µs a call in Botlish;
+  - 258.2 µs a call in Botlish, against the plain build's 38.8 µs;
   - every other check of the self-test.
-
-  The library did run under it, then. Whether the stress took effect in
-  it is still open: that takes the plain build's figure from the same
-  phone, at least half the GC-stress build's (the acceptance's rule),
-  which is not yet recorded.
 * **The 16 KiB-page image** (Android 15, page size 16384) passed in run 12,
   with every phase but GC stress, as the 4 KiB image did. The app's
   extracted, 16 KiB-aligned libraries were loaded by a 16 KiB-page kernel.
@@ -148,10 +148,10 @@ section 16).
 | ownership, thread affinity, lifecycle, number and string rules of the generated core | observed on the host (34 + 24 checks, GC stress) |
 | the 2048 rules in Botlish (seeded spawns, scoring, the end, the win); the hook computes none | implemented, observed (401 snapshots equal to the interpreter's through the generated core on the host) |
 | `useBotlish2048()` and a playable 2048 screen (swipes, buttons, score, New game, game over, win) | implemented; Jest observed (34 tests: 10 of the hook and the snapshot reader, 17 of the generated entry point, 1 without the native module, 6 of the device builds and the self-test's digest) |
-| device builds for a phone without adb (`-PbotlishDevice=plain`, `gc-stress`): a Self-test button, the result on the screen, the GC-stress build beside the plain one | implemented; both APKs built and inspected locally; **on a phone (arm64, natively) both ran, and the GC-stress build's self-test passed with GC stress set** (section 16); `tools/device-builds.sh` passed on both CI emulator images (run 13), GC stress NOT DEMONSTRATED there through the bridge |
+| device builds for a phone without adb (`-PbotlishDevice=plain`, `gc-stress`): a Self-test button, the result on the screen, the GC-stress build beside the plain one | implemented; both APKs built and inspected locally; **on a phone (realme GT 7, arm64 natively) both self-tests passed, and GC stress took effect in the library: 258.2 against 38.8 µs a call (6.7x)** (section 16); `tools/device-builds.sh` passed on both CI emulator images (run 13), GC stress NOT DEMONSTRATED there through the bridge |
 | a second, unrelated library through the same generator, both packages in one app | observed (host harness, TypeScript, Jest, the APK) |
 | a clean room: the single-file compiler and packages only, then npm, Codegen and Gradle | observed (section 18) |
-| the app on Android: Hermes, the TurboModule, the Botlish library in an Android application process | **observed on Android 14 (4 KiB pages), translated by the ARM native bridge** (CI, runs 9 to 13: every phase but GC stress); GC stress in the app process not demonstrable on a native-bridge emulator; **observed on Android 15 (16 KiB pages) too** (CI, runs 12 and 13: every phase but GC stress) (section 16) |
+| the app on Android: Hermes, the TurboModule, the Botlish library in an Android application process | **observed on Android 14 (4 KiB pages), translated by the ARM native bridge** (CI, runs 9 to 13: every phase but GC stress); GC stress in the app process not demonstrable on a native-bridge emulator; **observed on Android 15 (16 KiB pages) too** (CI, runs 12 and 13: every phase but GC stress); **natively on a phone (realme GT 7), by hand: the device builds' self-tests, GC stress taking effect (6.7x)** (section 16) |
 | mutation testing | 48/48 killed, each by a detector it names; observed (section 21) |
 | iOS, Android ABIs other than arm64-v8a, asynchronous workers | not supported (section 24) |
 
@@ -733,13 +733,13 @@ evidence: section 16.
 * **Observed on Android 14, 4 KiB pages, through the ARM native bridge**
   (CI, runs 9 to 13): every phase but GC stress, for the build's APK and
   the clean room's, and the development reload with Metro.
-* **GC stress in the app process: not demonstrated.** It cannot be on a
-  native-bridge emulator (run 10, below). The acceptance reports it there
-  as NOT DEMONSTRATED; a device running arm64 natively checks it.
-* **On a phone** (arm64, natively): both device builds ran, and the
-  GC-stress build's self-test passed with GC stress set ("Device builds",
-  below). The comparison with the plain build that shows the stress
-  taking effect is not yet recorded.
+* **GC stress in the app process: not demonstrable on a native-bridge
+  emulator** (run 10, below). The acceptance reports it there as NOT
+  DEMONSTRATED.
+* **On a phone** (realme GT 7, arm64 natively), by hand: both device
+  builds' self-tests passed, and **GC stress took effect in the library**:
+  258.2 µs a call under it, 38.8 µs without (6.7x; "Device builds",
+  below).
 * **Observed on Android 15, 16 KiB pages, through the ARM native bridge**
   (CI, runs 12 and 13): every phase but GC stress. Run 11 failed there on another
   process's crash, which the acceptance counted as the app's (below).
@@ -1129,7 +1129,7 @@ workflow run it after the other phases; run 13 passed it on both images
 (below).
 
 **On a phone, observed.** The owner of the project installed both
-locally built APKs on a phone (arm64; model and Android version not
+locally built APKs on a realme GT 7 (Android version and page size not
 recorded). The APKs hold arm64-v8a code only, so they install only where
 it runs. Both looked right. The GC-stress build's self-test screen read:
 
@@ -1150,10 +1150,37 @@ libraries use:
 * ownership balanced;
 * the instances belonged to the JavaScript thread.
 
-The JSI and adapter share was 2.1 µs a call, against 5 µs translated by
-the bridge (section 22). Whether the stress took effect in the library is
-the comparison with the plain build's self-test on the same phone, at
-least half of 258.2 µs: not yet recorded.
+and the plain build's, on the same phone:
+
+```
+Botlish self-test: passed
+GC stress: off (this build)
+401 snapshots, digest fbee79e6 (the interpreter's: fbee79e6)
+a 2048 move: 39.7 µs, 38.8 µs of it in Botlish (4001 calls)
+a textkit call: 0.79 µs (10,000 calls)
+```
+
+**GC stress took effect in the library on hardware.** 258.2 µs a call in
+Botlish under it, 38.8 µs without: 6.7x, where the acceptance asks for
+2x. The host's Linux build of the same library gives 6.2x (189.0 against
+30.7 µs, section 19), so the phone's slowdown is that of the forced
+collection attempts at every allocation site, not noise. On the
+emulators the same comparison stays at 1.0x (run 13, below). The textkit
+call barely changes (0.93 against 0.79 µs): `scalarCount("abc")`
+allocates little to collect.
+
+What this evidence is, and is not:
+* it is one self-test of each build, read off the screen by the owner
+  and reported here, not `tools/device-builds.sh` over USB and not a CI
+  job: the two runs were taken at different times, and no log of either
+  is committed;
+* the margin, 6.7x against a threshold of 2x, leaves no doubt of the
+  verdict, and the snapshots' digest, the contracts, the hook and
+  ownership passed under stress.
+
+The JSI and adapter share was 0.9 µs a call in the plain build (2.1 µs
+under GC stress), against 5 to 8 µs translated by the bridge (section
+22).
 
 **Run 13** (`aadb691c`, the device builds) passed every job. The
 acceptance and the development reload passed as in run 12, every
@@ -1351,12 +1378,13 @@ published packages alone, then passed the whole Android acceptance on the
   cannot load the app (run 10). GC stress through the generated core is
   the host's evidence above, with the same Botlish runtime built for the
   host.
-* **On a phone, observed** (section 16, "Device builds"). The GC-stress
-  device build's self-test passed in an app process that runs arm64
-  natively, with the variable set before any instance existed. Its
-  snapshots were the interpreter's and ownership balanced, at 258.2 µs a
-  call in Botlish. The plain build's figure, which shows the stress taking
-  effect, is not yet recorded.
+* **On a phone, observed** (realme GT 7; section 16, "Device builds").
+  The GC-stress device build's self-test passed in an app process that
+  runs arm64 natively, with the variable set before any instance existed:
+  its snapshots were the interpreter's and ownership balanced. Its 258.2
+  µs a call in Botlish against the plain build's 38.8 µs (6.7x; the host
+  6.2x) shows the stress taking effect in the library. Read off the
+  screen by hand, one run of each.
 
 ## 20. Negative testing
 
@@ -1488,11 +1516,19 @@ clean room APK, on the 4 KiB image, 67.84 µs a move (64.73 and 3.12 µs)
 and 10.07 ms. The runners differ that much between runs, and these
 figures cannot separate a page size's share from a runner's.
 
-**On a phone** (arm64, natively; the GC-stress device build, section 16):
-260.3 µs a move from JavaScript, 258.2 µs of it in Botlish, 2.1 µs JSI and
-the adapter; 0.93 µs a textkit call. Every instruction ran natively, and
-the game library under GC stress, so the move is no figure of the
-library's speed.
+**On a phone** (realme GT 7, arm64 natively; the device builds, section
+16; one self-test of each, read off the screen):
+
+| measure | plain build | GC-stress build |
+|---|---:|---:|
+| a 2048 move from JavaScript, mean of 4,001 calls | 39.7 µs | 260.3 µs |
+| of it in the C ABI (the Botlish library) | 38.8 µs | 258.2 µs |
+| of it in JSI and the generated adapter | 0.9 µs | 2.1 µs |
+| a textkit call, mean of 10,000 | 0.79 µs | 0.93 µs |
+
+Natively the adapter and JSI cost under a microsecond a call, about 2 % of
+a move; translated by the bridge they cost 5 to 8 µs. The move itself,
+38.8 µs, is near the host x86-64 build's 30.7 µs.
 
 **Footprint, observed** (`results/footprint.txt`; local release builds,
 React Native 0.88.1, arm64-v8a only). Native libraries are compressed in
@@ -1651,21 +1687,21 @@ checked.
   app runs translated: Hermes, React Native, the adapter and Botlish. Native AArch64
   execution of the same library remains the Android target milestone's
   (qemu-user, Bionic) evidence. Software emulation of an arm64 Android on
-  this x86_64 host is refused by the emulator (section 16). On a phone
-  the device builds ran natively (section 16, "Device builds"). That was
-  observed by the project's owner on a phone, not by CI: no CI job runs on
-  arm64 hardware.
+  this x86_64 host is refused by the emulator (section 16). On a phone, a
+  realme GT 7, the device builds ran natively (section 16, "Device
+  builds"). That was observed by the project's owner, not by CI: no CI
+  job runs on arm64 hardware, so a regression there is found only by
+  running the device builds again (or `tools/device-builds.sh` over USB).
 * **GC stress in the app process** (section 16): not demonstrable on a
-  native-bridge emulator. The variable does not reach the library's arm64
-  libc, and a wrapper-started process gets no bridge. On a phone, which
-  runs arm64 natively, the GC-stress device build's self-test passed with
-  the variable set. What remains is the plain build's figure from the
-  same phone, to show the stress taking effect
-  (`tools/device-builds.sh` over USB does both).
+  native-bridge emulator, so CI cannot check it. The variable does not
+  reach the library's arm64 libc, and a wrapper-started process gets no
+  bridge. On a phone (realme GT 7) it was demonstrated by hand: 6.7x, the
+  self-tests passing. A CI job on arm64 hardware would make it a standing
+  check.
 * **16 KiB pages on hardware.** The 16 KiB-page Android 15 image passed
-  (run 12), through the native bridge like the 4 KiB one. A 16 KiB device
-  running arm64 natively is the hardware evidence still to come, as for
-  4 KiB.
+  (runs 12 and 13), through the native bridge like the 4 KiB one. The
+  phone's page size was not recorded, so a 16 KiB device running arm64
+  natively is still to come.
 * **iOS.** Not supported. The package declares `ios: null`, iOS
   autolinking is disabled, and no podspec or module provider is written.
   It needs:
