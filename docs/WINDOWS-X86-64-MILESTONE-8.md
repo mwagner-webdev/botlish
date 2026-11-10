@@ -569,9 +569,9 @@ archive), `elfLibraries` (Linux's archive and symbols), `windowsLibraries`,
 | `nl-symbols`, `nl-two-libraries-shared` (ELF symbol tables, archives) | run | -- |
 | `nl-windows-*` (12: explicit loading, exports, validation, diagnostics, unwinding through the trampoline, the loader lock, a C++ host, `/MT` and `/MD` hosts, fibers, unloading, the Win64 convention) | -- | run |
 | `nl-unsupported-host` (a host the capability table gives no libraries: macOS) | -- | -- (runs on macOS) |
-| `nl-manifest`, `nl-main-cli` | run | run (the host's artifacts) |
+| `nl-manifest`, `nl-main-cli`, `nl-sample` (section 19's sample, as it is given) | run | run (the host's artifacts) |
 
-Linux x86-64, locally: 29 run, 0 failed (12 skipped: the Windows tests and
+Linux x86-64, locally: 30 run, 0 failed (12 skipped: the Windows tests and
 the refusal); with `BOTLISH_NATIVE_GC_STRESS=1`, the same. Windows x86-64
 (MSVC, CI): WINDOWS-TESTS-PENDING.
 
@@ -650,7 +650,30 @@ LINUX-PERF-RERUN
 
 ## 17. CI
 
-PENDING-CI
+What runs where:
+
+* **`tests (windows x86-64)`** (`.github/workflows/windows-x86_64.yml`,
+  windows-2025, MSVC from Visual Studio 2022's x64 tools): the canary on
+  every push; on a push to main and a dispatched run the smoke job, whose
+  tier now includes `native-library.test` and whose new step "Native
+  libraries (DLL, MSVC hosts)" runs the fuzzer (seed 1 also under GC
+  stress, seed 2 with 12 exports and 120 lifecycle steps) and the
+  benchmark; the acceptance tier (four shards) runs `native-library.test`
+  again with every Windows-relevant test file. `[ci-full]` or a manual run
+  with `tier: full` adds the GC-stress tier; its `tests` input (or a
+  `CI-Tests:` trailer) names tier items such as `native-library-mutants=...`.
+* **`windows library probe`** (`.github/workflows/windows-library-probe.yml`,
+  on a push that changes the probe and by hand): the census of section 3,
+  its log uploaded.
+* **Linux x86-64, Linux AArch64, macOS AArch64** (`tests.yml`,
+  `tests-arm64.yml`, `macos-arm64.yml`): the existing native-library tests
+  on Linux (the file runs on both Linux workflows; the new
+  `nl-coroutine-stacks-released` and the foreign-stack test's GC check
+  among them) and `nl-unsupported-host` on macOS.
+
+Runs of this branch:
+
+CI-RUNS-PENDING
 
 ## 18. Remaining limitations
 

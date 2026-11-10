@@ -2185,4 +2185,50 @@ test nl-main-cli {main.tcl -emit-native-library builds a library from one input}
     lmap line [split $out \n] {lindex [split $line :] 0}
 } -result [expr {$::nlWindows ? "shared import header manifest" : "static shared header manifest"}]
 
+# The sample WINDOWS-X86-64-MILESTONE-8.md's last section gives, as it gives
+# it: example.bot built by main.tcl's command line in the directory that
+# holds it, host.c compiled with the header and linked with the import
+# library (Linux: the shared library), the host run from the output
+# directory. The two texts here are the report's: change them together.
+test nl-sample {the report's sample library builds and its host runs} -constraints nativeLibraries -body {
+    set dir [nlDir]
+    nlWrite [file join $dir example.bot] {error Rejected:
+    code: int
+
+exported c fn checked(n: int) -> int errors Rejected:
+    if n < 0:
+        fail Rejected {code: n}
+    n * 2
+}
+    nlWrite [file join $dir host.c] {#include <stdio.h>
+#include "example.h"
+
+int main(void) {
+    example_instance *in; example_error *e = NULL; int64_t r;
+    if (example_create(&in, &e) != example_STATUS_OK) return 1;
+    if (example_checked(in, 21, &r, &e) == example_STATUS_OK)
+        printf("%lld\n", (long long) r);
+    example_destroy(in);
+    return 0;
+}
+}
+    set here [pwd]
+    cd $dir
+    try {
+        set emit [list exec [info nameofexecutable] [file join $::projectRoot main.tcl] -emit-native-library example -out output example.bot 2>@1]
+        if {$::nlWindows} {
+            ctool::withMsvc $emit
+            ctool::msvc cl /nologo /W4 /Ioutput host.c output\\example.lib /Fe:output\\host.exe
+            set out [exec [file join $dir output host.exe]]
+        } else {
+            {*}$emit
+            exec cc -Wall -Ioutput host.c output/libexample.so -Wl,-rpath,[file join $dir output] -o output/host
+            set out [exec [file join $dir output host]]
+        }
+    } finally {
+        cd $here
+    }
+    list [lsort [glob -tails -directory [file join $dir output] example.*]] $out
+} -result [list [lsort [expr {$::nlWindows ? {example.dll example.h example.lib example.manifest.json} : {example.h example.manifest.json}}]] 42]
+
 cleanupTests
