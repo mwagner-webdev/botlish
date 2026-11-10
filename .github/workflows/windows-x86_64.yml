@@ -287,6 +287,13 @@ jobs:
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: tclsh9.0 tests/platform/aot-facts.tcl -verbose 1 2>&1 | tee aot-facts.log
 
+      # What -aot-run costs on this host (bench/aot-run.tcl,
+      # AOT-RUN-MILESTONE-1.md): the phases, the commands beside an explicit
+      # compile-then-run and the JIT, the time to a program's first output.
+      - name: AOT-run costs
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: tclsh9.0 bench/aot-run.tcl -runs 3 2>&1 | tee aot-run-costs.log
+
       # The census's allocation-heavy workloads and more, on both native
       # backends and as executables, five times under GC stress -- the
       # coroutine workloads among them, every coroutine on a fiber of its

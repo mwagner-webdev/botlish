@@ -874,10 +874,13 @@ class Census:
             self.case("id-botlish-aot-rustc", "identity", [e.get(("prod-rustc", "identity"))], "identity", expect={"main": False},
                       note="the production runtime, rustc-linked")
             if self.args.app:
+                # The application's driver has no JIT (MACOS-BOTLISH-DISTRIBUTION-MILESTONE-1.md): -backend
+                # cranelift is refused there, and its native run of a program is -aot-run, the program
+                # linked as its executable (worker startup) and run as a command.
                 self.case("id-botlish-linked-run", "identity",
-                          [Path(self.args.app) / "Contents/MacOS/botlish", "-warnings", "off", "-backend", "cranelift",
+                          [Path(self.args.app) / "Contents/MacOS/botlish", "-warnings", "off", "-aot-run",
                            self.work / "prod/identity.bot"], "identity", expect={"main": False},
-                          note="main.tcl -backend cranelift: a program that calls C runs as a linked executable (driver protocol)")
+                          note="the application's -aot-run (it has no JIT): the program built as its executable and run as a command")
             elif self.args.checkout:
                 self.case("id-botlish-linked-run", "identity",
                           [self.args.tclsh, Path(self.args.checkout) / "main.tcl", "-warnings", "off", "-backend",

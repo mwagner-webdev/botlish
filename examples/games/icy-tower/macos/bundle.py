@@ -33,6 +33,8 @@ import stat
 import struct
 import sys
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "..", "tools", "macos-release"))
+
 EXECUTABLE = "icy-tower"
 NAME = "Icy Tower"
 MINIMUM_SYSTEM = "11.0"
@@ -45,52 +47,27 @@ LAUNCH_ENVIRONMENT = {"ICY_TOWER_ERROR_ALERTS": "1"}
 # (MAIN-THREAD-STARTUP-MILESTONE-1.md): LC_MAIN's stacksize.
 MAIN_STACK = 536870912
 RESOURCES = ("LICENSE-Botlish.txt", "LICENSE-SDL3.txt")
+# The release's names (tools/macos-release/release.py): its ZIP, notarytool
+# profile, temporary keychain and temporary directories. The bundle
+# identifier is MACOS_BUNDLE_ID's (no BUNDLE_ID fixed here).
+ZIP = "icy-tower-macos-aarch64.zip"
+PROFILE = "icy-tower-notary"
+KEYCHAIN = "icy-tower-signing.keychain-db"
+SLUG = "icy-tower"
 
 
-class Refused(Exception):
-    def __init__(self, code, text):
-        super().__init__("%s: %s" % (code, text))
-        self.code = code
-
-
-def refuse(code, text):
-    raise Refused(code, text)
+# The refusal and the bundle identifier's rules are every application's
+# (tools/macos-release/bundleid.py).
+from bundleid import IDENTIFIER, Refused, check_identifier, refuse  # noqa: E402,F401
 
 
 # ---------------------------------------------------------------------------
 # Values
 
-# CFBundleIdentifier: "only alphanumeric characters (A-Z, a-z, 0-9), hyphens
-# (-) and periods (.)", reverse-DNS: at least two non-empty components.
-IDENTIFIER = re.compile(r"[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+")
 # CFBundleShortVersionString and CFBundleVersion: one to three
 # period-separated non-negative integers (Apple: "can only contain numeric
 # characters (0-9) and periods").
 VERSION = re.compile(r"(0|[1-9][0-9]{0,8})(\.(0|[1-9][0-9]{0,8})){0,2}")
-
-
-def check_identifier(value, name="MACOS_BUNDLE_ID"):
-    """The bundle identifier VALUE, or a refusal naming where it came from (NAME)."""
-    if value is None or value == "":
-        refuse("MACOS-BUNDLE-METADATA", "%s is empty: set it to the game's stable reverse-DNS bundle identifier "
-               "(for example com.example.icy-tower)" % name)
-    if value != value.strip():
-        refuse("MACOS-BUNDLE-METADATA", "%s has leading or trailing white space: enter the identifier alone" % name)
-    if any(ord(c) < 32 or ord(c) == 127 for c in value):
-        refuse("MACOS-BUNDLE-METADATA", "%s holds a control character (a line break?): enter the identifier alone" % name)
-    if len(value) > 255:
-        refuse("MACOS-BUNDLE-METADATA", "%s is %d characters long; a bundle identifier has at most 255" % (name, len(value)))
-    for bad, why in (("/", "a path separator"), (" ", "a space"), ("*", "a wildcard"), ("$", "a shell substitution"),
-                     ("`", "a shell substitution"), ("_", "an underscore"), ('"', "a quotation mark"), ("'", "a quotation mark")):
-        if bad in value:
-            refuse("MACOS-BUNDLE-METADATA", "%s holds %s; a bundle identifier is letters, digits, hyphens and periods, "
-                   "reverse-DNS (com.example.icy-tower)" % (name, why))
-    if not IDENTIFIER.fullmatch(value):
-        refuse("MACOS-BUNDLE-METADATA", "%s is not a reverse-DNS bundle identifier: letters (A-Z, a-z), digits, hyphens "
-               "and periods, at least two components, none empty (com.example.icy-tower)" % name)
-    if value.lower().startswith("com.apple."):
-        refuse("MACOS-BUNDLE-METADATA", "%s is in Apple's reserved com.apple. domain: use a domain of your own" % name)
-    return value
 
 
 def check_version(value, name):

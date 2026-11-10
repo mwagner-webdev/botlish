@@ -1,0 +1,13 @@
+# simclock -- a simulated clock: a fixed start and an offset, the time a
+# test bench sets. Implements clock::Clock.
+
+import clock
+
+type HalfDay = Int in 0..43200
+
+context struct SimClock:
+    start: HalfDay
+    offset: HalfDay
+
+fn now(context c: SimClock) -> clock::Tick:
+    c.start + c.offset

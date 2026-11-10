@@ -1909,6 +1909,11 @@ proc hir::range::verifyDeclaredResults {hirVar} {
                 [hir::types::show $declared] \
                 [expr {[FactsRelevant $inferred $declared] ? " (facts: [show $result])" : ""}] \
                 [MismatchClause $inferred $declared]] $e
+        } elseif {[dict exists $node exactResult] || [hir::applied::Cut $inferred]} {
+            # A result type written deeper than the type bound, or a result
+            # the bound cut: the exits are held to it exactly too
+            # (hir/applied.tcl).
+            hir::applied::VerifyResult hir $e $node
         }
     }
 }
@@ -1961,8 +1966,11 @@ proc hir::range::verifyBlocks {hirVar blocks} {
         set outcome [AnalyzeInstance $hir verify {} $block $params \
             [lrepeat [llength $params] [unknown]] {} {}]
         set ranges [dict get $outcome exprs]
-        foreach e $body {
-            VerifyCallArguments hir $ranges $e
+        # (One memo of exact evidence for the block: hir/applied.tcl.)
+        hir::applied::Pass {
+            foreach e $body {
+                VerifyCallArguments hir $ranges $e
+            }
         }
     }
 }
@@ -2277,6 +2285,9 @@ proc hir::range::VerifyCallChecks {hirVar ranges e node} {
             [hir::semantic::ShowType $hir [ShownArgType $argType $checkedType]] [FactsClause $argType $checkedType $argRange] \
             [hir::signatures::because $hir $targetBlock $i]] $arg
     }
+    # Where an argument, a parameter type or the call's imprint says more
+    # than the type bound keeps: the exact layer (hir/applied.tcl).
+    hir::applied::VerifyArguments hir $ranges $e $node $targetBlock $declaredTypes
 }
 
 # Checks that the callee of call E (NODE), of static type CALLEETYPE, may be
@@ -2571,6 +2582,15 @@ proc hir::range::VerifyStruct {hirVar ranges e node} {
         if {![hir::types::IsAppliedStruct $type]} {
             return
         }
+        if {[hir::applied::Cut $type]} {
+            # An application the type bound cut: its field types are what its
+            # own field values or its written application establish, never
+            # the cut arguments of its bounded type, which are cut one
+            # application earlier than a value standing in the field
+            # (APPLIED-TYPE-BOUND-PRECISION-MILESTONE-1.md).
+            hir::applied::VerifyConstruction hir $ranges $e $node $type
+            return
+        }
     }
     foreach name [dict get $node names] field [dict get $node fields] origin [dict get $node fieldOrigins] {
         set declared [hir::types::StructField $type $name]
@@ -2583,6 +2603,13 @@ proc hir::range::VerifyStruct {hirVar ranges e node} {
         }
         set valueRange [dict getdef $ranges $field [unknown]]
         if {[ProvesValueAcceptedBy $valueType $valueRange $declared]} {
+            set exact [hir::structs::exactFieldType $id $name]
+            if {$exact ne ""} {
+                # A field type written deeper than the type bound
+                # (hir/applied.tcl): the value is held to it exactly too.
+                hir::applied::Expect hir $ranges $field [hir::applied::Of hir $field] $exact \
+                    [list field $name [hir::applied::Leaf $type] $origin]
+            }
             continue
         }
         hir::DiagnoseAt hir TYPE [format \
