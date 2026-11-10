@@ -226,6 +226,58 @@ proc runHost {exe stress} {
 set plain [runHost $exe 0]
 set stressed [runHost $exe 1]
 
+# The same work inside Botlish, for the boundary's share of a call: an
+# executable that runs `add` and `words(16)` CALLS times in a loop, against
+# the same executable running no iteration (its startup), best of ROUNDS
+# each. (A program's loop may inline or fold what a C call cannot: this is
+# what a call costs from Botlish code, not a measure of the same machine
+# instructions.)
+proc executableMicros {source rounds} {
+    set path [file join $::dir loop.bot]
+    write $path $source
+    set exe [native::executable [surface::readProgramFile $path -warnings off -warning-channel ""] [file join $::dir loop]]
+    set best 1e30
+    for {set r 0} {$r < $rounds} {incr r} {
+        set t0 [clock microseconds]
+        exec $exe
+        set t [expr {[clock microseconds] - $t0}]
+        if {$t < $best} { set best $t }
+    }
+    return $best
+}
+set loopSource {
+import std::list
+import std::str
+
+fn add(a: int, b: int) -> int:
+    a + b
+
+fn words(n: int) -> int:
+    if n < 0 or n > 100000:
+        return 0
+    xs = loop i from 0 to n:
+        std::str::concat("w", "x")
+    std::list::length(xs)
+
+fn run(calls: int, which: int) -> int:
+    total = loop i from 0 to calls:
+        if which == 0:
+            add(i, 2)
+        else:
+            words(16)
+    std::list::length(total)
+
+run(CALLS, WHICH)
+}
+set calls [dict get $options -calls]
+set rounds [dict get $options -rounds]
+set inside {}
+foreach which {0 1} {
+    set empty [executableMicros [string map [list CALLS 0 WHICH $which] $loopSource] $rounds]
+    set full [executableMicros [string map [list CALLS $calls WHICH $which] $loopSource] $rounds]
+    lappend inside [format %.1f [expr {($full - $empty) * 1000.0 / $calls}]]
+}
+
 set shared [dict get $built shared]
 puts "native library performance and size ([core::cabi::hostTarget], [dict get $options -calls] calls, best of [dict get $options -rounds])"
 puts ""
@@ -261,4 +313,9 @@ foreach line [split $plain \n] {
     set under [lindex [split [lsearch -inline [split $stressed \n] "$name\t*"] \t] 1]
     puts "| $name | $value | $under | $ref |"
 }
+puts ""
+puts "| The same function called from Botlish code (an executable's loop, per iteration) | |"
+puts "|---|---:|"
+puts "| int (add) | [lindex $inside 0] ns |"
+puts "| allocating (words(16)) | [lindex $inside 1] ns |"
 file delete -force $dir
