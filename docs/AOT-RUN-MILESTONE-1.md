@@ -316,7 +316,7 @@ TerminateProcess and requires the program gone and the directory removed).
 | Linux x86-64 | `tests` workflow (ubuntu-latest), its canary | [executed] the changed file runs first on every push; see section 9.1 |
 | Linux AArch64 | `tests (linux arm64)` (ubuntu-24.04-arm) | [executed] canary on the branch push; see section 9.1 |
 | Windows x86-64 (MSVC) | `tests (windows x86-64)` (windows-2025), canary | [executed] green on `460fceea` (section 9.1) |
-| macOS AArch64 | `tests (macos arm64)` (macos-15): the smoke job's canary, the acceptance tier, the app jobs | [executed] the canary on every push (section 9.1); on `717f3bd` the acceptance tier's four shards and the Botlish.app job, `-aot-run` as the JIT-less application's only native run, green; the system linker and the jobs after the app's [pending] |
+| macOS AArch64 | `tests (macos arm64)` (macos-15): the smoke job's canary, the acceptance tier, the app jobs | [executed] the canary on every push (section 9.1); on `1c337b3` every job green: the acceptance tier's five shards, the system linker, the Botlish.app job (`-aot-run` the JIT-less application's only native run) and main-thread startup |
 
 The JIT build's own tests are unchanged and run as before on every host
 that has the JIT: the native backend's test files, the golden suites on
@@ -386,7 +386,18 @@ The branch `ccr-7f920867-5n2fuj`:
   every job [executed, Linux x86-64 and AArch64]; macOS's main-thread
   startup job failed one case of the graphical census, which ran the
   JIT-less application with `-backend cranelift` (fixed in `d1bc78e`: the
-  application's case runs `-aot-run`) [pending] at the time of writing.
+  application's case runs `-aot-run`).
+* `1c337b3` (the merge of main at `cbaa040`; `-aot-run` beside main's
+  `--target`, `--runtime-archive` and `-target-support`): every workflow
+  green [executed, Linux x86-64 and AArch64, Windows, macOS] -- the full
+  Linux suites (the JIT-less driver's step among them), Windows' whole
+  run, the single executable, and macOS's whole run: the smoke job and
+  `AOT-run costs`, the Botlish.app job, the application's mutants,
+  main-thread startup with the census's application case through
+  `-aot-run`, the system linker and the acceptance tier's five shards
+  (shard 4/5 on its re-run: the first attempt reached the job's timeout
+  on a slow runner with no failure). Locally: audit/aot-run's 23 mutants
+  killed on the merged tree.
 
 ## 10. Positive controls and mutants
 
@@ -523,7 +534,8 @@ The `AOT-run costs` step of windows-x86_64.yml's smoke job ran and passed
 on `460fcee` (run 42466433448); its figures are in that job's log, not
 copied here. bench/macos-app.tcl in macos-arm64.yml's `app` job measures
 `-aot-run` from the JIT-less Botlish.app
-(MACOS-BOTLISH-DISTRIBUTION-MILESTONE-1.md, section 26): [pending].
+(MACOS-BOTLISH-DISTRIBUTION-MILESTONE-1.md, section 26: on `717f3bd`,
+`-aot-run` of a printing program from the application in 182.8 ms, the best of 7).
 
 ## 12. Limitations
 

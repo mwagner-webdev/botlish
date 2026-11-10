@@ -504,8 +504,8 @@ mutants: section 22).
 [executed, macOS AArch64] Ordinary CI runs the same acceptance on the ad
 hoc hardened-runtime bundle (`app` job: "The release's signing stages and
 acceptance, ad hoc"), plus app-test.sh, compare.sh, the two smoke tests and
-the toolchain-free smoke test, outside the checkout. [pending] at the time
-of writing (section 24).
+the toolchain-free smoke test, outside the checkout: green on `717f3bd`
+and again on the merge of main, `1c337b3` (section 24).
 
 Finder: [inspected] Botlish is a command-line compiler; opened from Finder,
 its launcher starts the compiler with no arguments, which prints the usage
@@ -680,11 +680,10 @@ canary failed three aot-run.test tests' reading of Windows output on
 by single/build.sh (14,853,994 bytes) passes single/smoke-test.sh (the
 new `-aot-run` refusal without a C compiler included) and
 single/ffi-smoke-test.sh, and audit/single-executable/tools/mutate.tcl
-kills its 11 mutants (none survived). [pending] the full suites
-(tests.yml, tests-arm64.yml) and Windows' acceptance shards on the merge
-of main (`4ece288` and the commit after it, section 24): the runs
-dispatched on `460fcee` and on `c3cd83c` were superseded by the next
-push before their expensive jobs had a runner.
+kills its 11 mutants (none survived). The full suites (tests.yml,
+tests-arm64.yml) and Windows' acceptance shards, superseded on `460fcee`
+and `c3cd83c` before their expensive jobs had a runner, ran green on
+`717f3bd` and on the second merge of main, `1c337b3` (section 24).
 
 ## 24. CI runs and artifacts
 
@@ -727,7 +726,11 @@ The branch `ccr-7f920867-5n2fuj` (https://github.com/mwagner-webdev/botlish/acti
 | `717f3bd` | single executable (dispatched) | 42564689345 | **success** [executed, Linux x86-64 and AArch64] |
 | `717f3bd` | tests (dispatched in full) | 42564685111 | **success**, every job [executed, Linux x86-64]: the canary, interp, compile, the system-linked executables (also under GC stress), the stub-linked executables, the native Rust unit tests (the JIT-less driver's step), cranelift and cranelift-generic coverage, the method-call decision and the golden suites' four shards |
 | `717f3bd` | tests (linux arm64) (dispatched in full) | 42564687298 | **success**, every job [executed, Linux AArch64] |
-| `d1bc78e` | (the census's application case through `-aot-run`; nothing else of 717f3bd's code changed) | -- | macos-arm64.yml's main-thread-startup job [pending] at the time of writing; the suites that do not run the census (tests.yml, tests-arm64.yml, single-executable.yml, Windows) are green on `717f3bd` |
+| `d1bc78e` | (the census's application case through `-aot-run`; nothing else of 717f3bd's code changed) | -- | superseded by the merge of main before its macOS run; the case passed on `1c337b3` (next rows) |
+| `1c337b3` | (merge of main at `cbaa040`) | -- | conflicts in AGENTS.md, main.tcl, native/native.tcl, native/src/main.rs, single/main.tcl, backends.topic and one target-model mutant, both sides kept (the driver's aot-run beside main's `--target` and `--runtime-archive`; native::executable's `-runtime-archive` before the shared ExecutableText); adapted to main's rules: macos-arm64.yml's `AOT-run costs` step skips in a deferred run (test_runs.py's twin rule), and single/smoke-test.sh's new decoy Tcl library check runs the native backend as `-aot-run` where there is no JIT. Locally on the merged tree: both drivers built, mutant-catalogs (3,448 mutants, 0 problems), test_runs.py, compilerpedia check, aot-run.test with the rustc, system and stub linkers, main-cli.test, the driver's aot_run tests, the five release test files and the release mutants (92 of 92 killed), audit/aot-run's 23 mutants (23 killed), single/smoke-test.sh with and without the JIT and single/ffi-smoke-test.sh [executed, Linux x86-64] |
+| `1c337b3` | tests (macos arm64) (dispatched, with the application's mutants) | 42655832532 | **success** [executed, macOS]: smoke (its canary, `AOT-run costs`), linux control, the Botlish.app job (every step, as on `717f3bd`), Botlish.app mutants, app-clean, static SDL3, the system linker (also under GC stress), main-thread startup (the graphical census `--strict`, its application case through `-aot-run`) and the acceptance tier's five shards. Shard 4/5 was cancelled on its first attempt at the job's 75-minute timeout with no failure (its 57 test files passed, on a runner about 1.8 times slower than main's on the same files: depth-safe-nesting.test 25.6 min against 13.4) and passed on its re-run |
+| `1c337b3` | tests, tests (linux arm64), tests (windows x86-64), single executable (dispatched) | 42655821622, 42655827324, 42655837864, 42655843794 | **success**, every job [executed, Linux x86-64 and AArch64, Windows] |
+| `1c337b3` | icy-tower (macos arm64), icy-tower (windows x86-64), raven clean room, package reproducibility, ci tools | 42655805505, 42655805477, 42655805385, 42655805353, 42655805360 | **success**; ci tools on its second attempt (the first failed on a GitHub API HTTP 502 while tools/ci/history.py read old runs, after its tests, gate, pruning and deferral dry runs had passed) |
 
 Ordinary CI uploads the ad hoc
 bundle as the `botlish-macos-aarch64` artifact (macos-arm64.yml's `app`
