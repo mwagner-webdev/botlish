@@ -856,15 +856,16 @@ is pending, never passed):
 | workflow | run | status |
 |---|---|---|
 | tests | [42770740123](https://github.com/mwagner-webdev/botlish/actions/runs/42770740123) | canary and stub-linked executables passed; the rest pending (waiting for runners) |
-| tests (linux arm64) | [42770745285](https://github.com/mwagner-webdev/botlish/actions/runs/42770745285) | canary, native Rust unit tests (also under GC stress), system-linked executables, golden shards 1 and 2 passed; the cranelift coverage job failed before any test, downloading the Tcl package (`curl: (56) Recv failure: Connection reset by peer` from ports.ubuntu.com), to be re-run; the rest pending |
+| tests (linux arm64) | [42770745285](https://github.com/mwagner-webdev/botlish/actions/runs/42770745285) | completed: every job passed -- canary, native Rust unit tests (also under GC stress), interp, compile, cranelift-generic coverage, golden shards 1-4, system-linked executables, the GC-stress test suite on interp and on compile -- but the cranelift coverage job, which failed before any test, downloading the Tcl package (`curl: (56) Recv failure: Connection reset by peer` from ports.ubuntu.com); that job re-run (attempt 2), pending |
 | tests (macos arm64) | [42770749276](https://github.com/mwagner-webdev/botlish/actions/runs/42770749276) | smoke, Linux control and acceptance shards 4 and 5 passed; the rest pending |
-| tests (windows x86-64) | [42770752278](https://github.com/mwagner-webdev/botlish/actions/runs/42770752278) | canary, smoke and root plans passed; the acceptance shards and the system linker pending |
+| tests (windows x86-64) | [42770752278](https://github.com/mwagner-webdev/botlish/actions/runs/42770752278) | passed: canary, smoke, root plans, system linker, acceptance shards 1-4 (the opt-in GC-stress tier not requested) |
 | icy-tower (macos arm64), icy-tower (windows x86-64) | branch push | passed |
 | static-decisions (static-compile-expected-diagnostics.bot) | [42795041291](https://github.com/mwagner-webdev/botlish/actions/runs/42795041291) | passed: batched and sequential agree (4 rounds and 6 builds against 26 rounds and 52 builds) |
 
-Read again at 14:25 UTC: the four test runs are still running, their
-remaining jobs waiting for runners; no job of them has failed but the
-arm64 cranelift coverage job's download (above).
+Read again at 14:25 and 16:30 UTC: tests (windows x86-64) and tests
+(linux arm64) have completed as above; tests and tests (macos arm64) are
+still running, their remaining jobs waiting for runners, and no job of
+either has failed.
 
 ## 22. Production files changed
 
