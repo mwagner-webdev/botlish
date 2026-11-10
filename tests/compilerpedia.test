@@ -194,10 +194,10 @@ test cp-primer-overview {the overview opens with the primer's AT A GLANCE sectio
         [string match "*-help primer" [lindex $glance end-1]]
 } -cleanup {unset -nocomplain overview page glance block} -result {{BEFORE YOU WRITE A PROGRAM} 1 1 1 1 1}
 
-test cp-string-char-search {the String / UnicodeChar / List[UnicodeChar] explanation adds no alias: the warning keeps its own code and phrase lookups, canonical names reach the concept, and words other languages use for a code point (rune) stay unmatched} -body {
+test cp-string-char-search {the String / UnicodeChar / List[UnicodeChar] explanation adds no alias, and the literal and escape aliases TEXT-AND-COLLECTION-DOCUMENTATION-AND-DIAGNOSTICS-MILESTONE-1.md added take no other lookup: the warning keeps its own code and phrase lookups, canonical names reach the concept, and words other languages use for a code point (rune) stay unmatched} -body {
     list [found ONE-CHAR-STRING-LITERAL] [found "one char string literal"] [found UnicodeChar] \
         [lindex [found rune] 0] [dict get [compilerpedia::topic concept.strings] alias]
-} -result {{page warning.one-char-string-literal} {page warning.one-char-string-literal} {page concept.strings} none {{str type} UnicodeChar {character literal} {char literal} {text values}}}
+} -result {{page warning.one-char-string-literal} {page warning.one-char-string-literal} {page concept.strings} none {{str type} UnicodeChar {character literal} {char literal} {text values} {string literal} {escape sequence} {escape sequences} {string escapes} {character escapes} {control character} {control characters} {invalid escape}}}
 
 test cp-search-missing {a query nothing matches finds nothing and offers near matches: close identifiers by edit distance, then topics holding most of the words; never an invented topic} -body {
     set near [found metod-eligibel]

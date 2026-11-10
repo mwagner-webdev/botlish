@@ -6260,10 +6260,10 @@ Each member is a topic: -help NAME (e.g. -help std::char::is_tcl_alnum).
 == NOTES
 `char` has no module file: its members are intrinsics. A UnicodeChar is
 written as a character literal ('a', '\n', '😀') and read from a String with
-std::str::char_at; it becomes text with std::str::append_char. A character is
-classified with std::char::is_tcl_alpha and std::char::is_tcl_alnum (Tcl 9's
-[:alpha:] and [:alnum:], the classes the temporary std::str forms decide for a
-one-character String), compared with character literals (c == '_'), or
+std::str::char_at; it becomes text with std::str::append_char. A character
+is classified with std::char::is_tcl_alpha and std::char::is_tcl_alnum (Tcl
+9's [:alpha:] and [:alnum:], the classes the temporary std::str forms decide
+for a one-character String), compared with character literals (c == '_'), or
 measured with std::char::scalar_value (with the byte-level ascii::
 predicates for an ASCII scalar).
 
