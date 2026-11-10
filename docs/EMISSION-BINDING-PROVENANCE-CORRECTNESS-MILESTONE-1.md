@@ -849,21 +849,20 @@ and the sequential scheduler in agreement (below).
 which starts no workflow). Main's latest runs at the branch point
 (cbaa040) were green; main has since moved to cfd6ecf, whose runs are
 queued, and the branch merges with it without a conflict (trial merge).
-The status of each dispatched run when this section was written, 2026-11-10
-around 10:00 UTC, the static-decisions run read again at 12:50 UTC (pending
-is pending, never passed):
+The dispatched runs, read until each had completed (2026-11-10, 10:00 to
+21:30 UTC):
 
 | workflow | run | status |
 |---|---|---|
 | tests | [42770740123](https://github.com/mwagner-webdev/botlish/actions/runs/42770740123) | passed: canary (mutant catalogs and the warning gate included), interp, compile, cranelift and cranelift-generic coverage, golden shards 1-4, native Rust unit tests, stub-linked and system-linked executables, the method-call decision's oracle and reference audit (the GC-stress job runs on pushes to main only) |
-| tests (linux arm64) | [42770745285](https://github.com/mwagner-webdev/botlish/actions/runs/42770745285) | every job passed -- canary, native Rust unit tests (also under GC stress), interp, compile, cranelift-generic coverage, golden shards 1-4, system-linked executables, the GC-stress test suite on interp and on compile -- but the cranelift coverage job, which failed before any test, downloading the Tcl package (`curl: (56) Recv failure: Connection reset by peer` from ports.ubuntu.com); re-run (attempt 2): past the download, its coverage run pending |
+| tests (linux arm64) | [42770745285](https://github.com/mwagner-webdev/botlish/actions/runs/42770745285) | passed: canary, native Rust unit tests (also under GC stress), interp, compile, cranelift and cranelift-generic coverage, golden shards 1-4, system-linked executables, the GC-stress test suite on interp and on compile; the cranelift coverage job on its second attempt, its first having failed before any test, downloading the Tcl package (`curl: (56) Recv failure: Connection reset by peer` from ports.ubuntu.com) |
 | tests (macos arm64) | [42770749276](https://github.com/mwagner-webdev/botlish/actions/runs/42770749276) | passed: smoke, Linux control, system linker, Botlish.app, acceptance shards 1-5 (the opt-in application mutants and Tier C not requested) |
 | tests (windows x86-64) | [42770752278](https://github.com/mwagner-webdev/botlish/actions/runs/42770752278) | passed: canary, smoke, root plans, system linker, acceptance shards 1-4 (the opt-in GC-stress tier not requested) |
 | icy-tower (macos arm64), icy-tower (windows x86-64) | branch push | passed |
 | static-decisions (static-compile-expected-diagnostics.bot) | [42795041291](https://github.com/mwagner-webdev/botlish/actions/runs/42795041291) | passed: batched and sequential agree (4 rounds and 6 builds against 26 rounds and 52 builds) |
 
-Read again at 14:25, 16:30 and 18:30 UTC: every run has completed as
-above but the re-run of the arm64 cranelift coverage job.
+Read again at 14:25, 16:30, 18:30 and 21:30 UTC: every run has completed,
+as above. Every dispatched workflow is green at 19cc383.
 
 ## 22. Production files changed
 
@@ -918,7 +917,8 @@ AGENTS.md's emission rules.
 
 ## 24. Recommendation
 
-Merge, once the dispatched CI runs (section 21) are green. The one
+Merge: every dispatched CI run is green (section 21), and main's later
+commits merge into the branch without a conflict. The one
 certificate hole the census left -- V2 -- is closed with the four forms of
 it this milestone found, by a question asked only where the walk reads a
 fact of code it does not walk, answered from the HIR's own references, and
