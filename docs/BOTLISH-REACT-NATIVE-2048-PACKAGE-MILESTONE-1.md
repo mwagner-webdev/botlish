@@ -152,7 +152,7 @@ section 16).
 | a second, unrelated library through the same generator, both packages in one app | observed (host harness, TypeScript, Jest, the APK) |
 | a clean room: the single-file compiler and packages only, then npm, Codegen and Gradle | observed (section 18) |
 | the app on Android: Hermes, the TurboModule, the Botlish library in an Android application process | **observed on Android 14 (4 KiB pages), translated by the ARM native bridge** (CI, runs 9 to 12: every phase but GC stress); GC stress in the app process not demonstrable on a native-bridge emulator; **observed on Android 15 (16 KiB pages) too** (CI, run 12: every phase but GC stress) (section 16) |
-| mutation testing | 48 mutants, each killed by a detector it names: 44 in the last full run, the 4 of the device builds run on their own; the full rerun with them is pending (section 21) |
+| mutation testing | 48/48 killed, each by a detector it names; observed (section 21) |
 | iOS, Android ABIs other than arm64-v8a, asynchronous workers | not supported (section 24) |
 
 The compiler, the runtime and the standard library are unchanged (static:
@@ -1379,10 +1379,11 @@ the tool's own checks is reached:
 each with the detector tests that must kill it. `tools/mutant-catalogs.tcl`
 applies all of them (95 catalogs, 0 problems).
 
-Observed (`results/mutation.txt`): **44/44 killed**, each by a detector
-its `!!` line names, in the last full run, before the device builds. Their
-four mutants were run on their own (`-only`): all four killed. The full
-rerun with all 48 is pending. The harness runs each mutant in a private copy of the
+Observed: **48/48 killed**, each by a detector its `!!` line names, in a
+full run with the device builds. The earlier full run, before them, killed
+44/44. `results/mutation.txt` holds the earlier run's output until the next
+change to `audit/react-native-2048/`: committing it alone would have
+cancelled run 13 (section 23). The harness runs each mutant in a private copy of the
 tree, against a baseline in which every detector passes unmutated.
 
 | what the mutants break | mutants | killed by |
@@ -1503,7 +1504,7 @@ libraries is not a goal of the native-library ABI
 | `tests/android-target.test` | 17 passed, 4 skipped (`androidRun`, `androidRun16k`: qemu-aarch64 and Android roots not set up here) |
 | `tests/package-manager.test` | 86/86 |
 | `tests/workload-2048.test` | 9 passed, 2 skipped (`darwinIO`, `windowsIO`) |
-| `audit/react-native-2048/tools/mutate.tcl` | 44/44 killed; the device builds' 4 killed on their own; the full rerun pending (section 21) |
+| `audit/react-native-2048/tools/mutate.tcl` | 48/48 killed (section 21) |
 | `tools/compilerpedia.tcl check` | 0 problems |
 | `tools/mutant-catalogs.tcl` | 95 catalogs, 0 problems |
 | `python3 -I tools/ci/test_runs.py` (a new workflow) | OK |
