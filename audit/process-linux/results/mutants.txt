@@ -97,3 +97,12 @@ KILLED c-signal-after-reap (2 s)
 KILLED c-owner-thread (2 s)
     killed (process-linux.test: 1 failed: process-linux-adapter)
 7 mutants, 7 killed, 0 survived
+
+# fourth run, after the shared-group scenario's rewrite (it relied on the
+# child's own lines, which a termination may precede): the new mutant of a
+# group signal reaching a shared child's group, and its neighbour.
+KILLED c-group-signal (46 s)
+    killed (process-linux.test: 1 failed: process-linux-descendants)
+KILLED c-shared-group-signal (76 s)
+    killed (process-linux.test: 1 failed: process-linux-shared-group)
+2 mutants, 2 killed, 0 survived

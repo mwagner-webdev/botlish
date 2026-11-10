@@ -171,14 +171,24 @@ fn sc_old_kernel(helper: str, tmp: str, context p: process_linux::Processes, ev:
     0
 
 # Shared group: the child stays in the supervisor's group, and a signal
-# reaches the child alone: its descendant survives, and writes its pid to
-# TMP/desc-alive 700 ms after it started, while the program still runs.
+# reaches the child alone. Its descendant is forked before anything is
+# written (so it exists once any output has arrived) and reports its own
+# ids -- its group is the child's -- then a second later its pid in
+# TMP/desc-alive. After the termination the rest of stdout is drained: its
+# end comes only when the descendant exits, so it outlived the child. No
+# line of the child's own is relied on: the termination may come before it
+# writes one.
 fn sc_shared_group(helper: str, tmp: str, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
-    {owner, child} = kit::spawn(process_linux::command(helper, ["ids", "child:sleep:700,pidfile:".concat(kit::join_path(tmp, "desc-alive")), "sleep:30000"]).with_group(process_linux::Group::Shared))
+    {owner, child} = kit::spawn(process_linux::command(helper, ["child:ids,sleep:1000,pidfile:".concat(kit::join_path(tmp, "desc-alive")), "sleep:30000"]).with_group(process_linux::Group::Shared))
+    kit::say_int("child pid ", kit::pid(child))
     kit::first_line(child)
+    t = process_linux::now_us()
     kit::status_line("shared", kit::terminate(child, 300000))
+    rest = kit::drain(child, process_linux::Stream::Stdout)
+    kit::say("rest: ".concat(kit::text_of(rest)))
+    kit::say("stdout's end of file over half a second after the termination ".concat(kit::yes(kit::since(t) > 500000)))
     process_linux::release(owner)
-    kit::sleep(1500000)
+    kit::say("second child")
     {owner: o2, child: c2} = kit::spawn(process_linux::command(helper, ["ids"]))
     kit::first_line(c2)
     kit::wait(c2)

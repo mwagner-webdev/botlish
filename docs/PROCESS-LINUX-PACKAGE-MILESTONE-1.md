@@ -47,7 +47,7 @@ Contents: 1. Outcome -- 2. Implementation census -- 3. The public API --
   extended, the tty ones under a PTY, two VMs, GC stress, the documented
   programs, the adapter's own C test of 36 checks); 90 model-based fuzz
   sequences match an independent lifecycle model (10 under GC stress);
-  29 mutants, every one killed by behavior (after fixing three weak kills,
+  30 mutants, every one killed by behavior (after fixing three weak kills,
   one weak detector and one missing check the runs exposed: section 11); a
   clean room of 42 checks
   passes with only the single-file compiler and the published artifacts.
@@ -343,8 +343,8 @@ artifacts and a prebuilt helper child copied in. 42 checks passed
   51-90 of 40 operations): 0 different (`results/fuzz.txt`: the last). The first run found one difference,
   in the model: a detached child that exits while the loop finishes is,
   by design, not waited for.
-* `audit/process-linux/tools/mutate.tcl` with 29 mutants (the census's 15
-  ported, 14 new): every one KILLED by the test its `%%` line names
+* `audit/process-linux/tools/mutate.tcl` with 30 mutants (the census's 15
+  ported, 15 new): every one KILLED by the test its `%%` line names
   (`results/mutants.txt`). Three lessons: three C mutants were "killed"
   in a second because they left a variable unused and the `-Werror` build
   failed -- a weak kill, now rewritten to compile, and the harness reports
@@ -356,7 +356,9 @@ artifacts and a prebuilt helper child copied in. 42 checks passed
   and without the kernel's group flag (the third run of
   `results/mutants.txt`). `c-leaking-spawn` is killed only where glibc's
   `pidfd_spawn` leaks (section 4); on a glibc with the fix it is no defect.
-  `tools/mutant-catalogs.tcl`: 101 catalogs, 0 problems.
+  `c-shared-group-signal` (a group signal reaching a shared child's group,
+  the supervisor's own) was added with the shared-group test's rewrite
+  (section 14). `tools/mutant-catalogs.tcl`: 101 catalogs, 0 problems.
 
 ## 12. Measurements
 
@@ -436,19 +438,26 @@ through the same 12.6 MiB as an idle program.
 * **The clean room found a real API wart**: `close_stdin` returned the C
   call's integer instead of `unit` (a handler of `StaleChild` completing
   with unit was refused): fixed before the release.
-* **The branch's CI canary found three host dependencies in the tests**
-  (none in the package), on GitHub's ubuntu-latest runner: (1) the
-  `inherit` negative control assumed the supervisor holds exactly one
-  descriptor without close-on-exec, and the runner's process inherits two
-  more (both closed by `closefrom(3)` in the real path); (2) the
-  `shared-group` test checked the descendant after the program had ended,
-  and on the runner something had ended it by then (not the package: a
-  shared-group child's signals go to the child alone, `signal_child`) --
-  the descendant now records its survival (a pid file) while the program
-  runs; (3) the `adapter`
-  test's `pidfd_spawn` control assumed a leaking glibc, and the runner's
-  has the fix. All three are now independent of the host; my container
-  reproduces (1) with two extra inherited descriptors.
+* **The branch's CI canary found three faults in the tests** (none in the
+  package), on GitHub's ubuntu-latest runner: (1) the `inherit` negative
+  control assumed the supervisor holds exactly one descriptor without
+  close-on-exec, and the runner's process inherits two more (both closed
+  by `closefrom(3)` in the real path; reproduced here with two extra
+  inherited descriptors); (2) the `shared-group` scenario raced: its
+  child wrote `ids`, then forked and wrote `desc`, the scenario read one
+  chunk and terminated the child at once -- so the `desc` line could be
+  missing and, worse, the child could be terminated before it forked at
+  all. The first fix (a pid file the descendant writes while the program
+  runs) rested on a wrong explanation (that the runner ended the
+  descendant after the program) and failed the same way; forcing the race
+  here (a delay between the child's writes) reproduced the runner's result
+  exactly. The scenario now relies on no line of the child's: the
+  descendant is forked before any output, reports its own ids and pid, and
+  the drain after the termination ends only when it exits (verified also
+  with the descendant slow to write, and against a mutant that signals a
+  shared child's group); (3) the `adapter` test's `pidfd_spawn` control
+  assumed a leaking glibc, and the runner's has the fix: it is measured and
+  reported now.
 
 ## 15. Commands
 

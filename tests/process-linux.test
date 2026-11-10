@@ -301,14 +301,18 @@ test process-linux-old-kernel {the pre-6.9 fallback (fault 64: kill(-pgid) while
     list [processExpect $out [concat {{^group signal 15$}} $::processClean]] [processLeftovers $out]
 } -result {ok {desc dead desc dead}}
 
-test process-linux-shared-group {a child of the supervisor's own group (Group::Shared) is signalled alone: its descendant survives the child's termination and records it while the program runs (what happens to it after the program ends is the host's: a runner may end the group); a child of its own group leads it} -constraints processLinux -body {
+test process-linux-shared-group {a child of the supervisor's own group (Group::Shared) is signalled alone: its descendant, in the same group and forked before any output, outlives the child's termination -- it holds stdout open half a second past it and records its own pid (no line of the child's relied on: the termination may precede it); a child of its own group leads it} -constraints processLinux -body {
     set out [processRun life shared-group]
-    regexp -line {^first: ids (\d+) \d+ (\d+) \d+$} $out -> pid pgid
-    regexp -line {^first: ids (\d+) \d+ (\d+) \d+\n} [string range $out [string first "shared signal" $out] end] -> pid2 pgid2
+    set split [string first "second child" $out]
+    set shared [string range $out 0 $split]
+    regexp -line {^child pid (\d+)$} $shared -> pid
+    regexp -line {ids (\d+) \d+ (\d+) \d+} $shared -> desc pgid
+    regexp -line {ids (\d+) \d+ (\d+) \d+} [string range $out $split end] -> pid2 pgid2
     set record [file join $::processLastScratch desc-alive]
-    set survived [expr {[file exists $record] && [string trim [readFile $record]] eq [lindex [processPids $out desc] 0]}]
-    processLeftovers $out
-    list [processExpect $out [concat {{^shared signal 15$}} $::processClean]] [expr {$pid != $pgid}] [expr {$pid2 == $pgid2}] $survived
+    set recorded ""
+    if {[file exists $record]} { set recorded [string trim [readFile $record]] }
+    list [processExpect $out [concat {{^shared signal 15$} {^stdout's end of file over half a second after the termination yes$}} $::processClean]] \
+        [expr {$pid != $pgid}] [expr {$pid2 == $pgid2}] [expr {$recorded ne "" && $recorded eq $desc}]
 } -result {ok 1 1 1}
 
 test process-linux-inherited {a descendant holding the child's stdout keeps it open after the leader's exit; terminating the group after the leader exited (unreaped: its group ID reserved) ends it at once} -constraints processLinux -body {

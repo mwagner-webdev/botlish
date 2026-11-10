@@ -68,6 +68,15 @@
     (void)group;
 >>>>
 
+@@ c-shared-group-signal a group signal reaches a shared child's group: the supervisor's own (and every process in it) is signalled
+%% process-linux.test:process-linux-shared-group
+## packages/process_linux/native/process_linux.c
+<<<<
+    unsigned flags = (group && c->group) ? PIDFD_SIGNAL_PROCESS_GROUP : 0;
+====
+    unsigned flags = group ? PIDFD_SIGNAL_PROCESS_GROUP : 0;
+>>>>
+
 @@ c-cwd-in-parent the working directory is opened without O_DIRECTORY: a file as cwd fails at exec, misreported
 %% process-linux.test:process-linux-launch
 ## packages/process_linux/native/process_linux.c
