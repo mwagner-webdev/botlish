@@ -444,6 +444,26 @@ horizon 0, where only an application's head is known).
   `hir::declarations::capture` captures; a compilation of another `Box`
   (another declaration of the name) does not change a deep program's checks
   or run (`atb-isolation`).
+* **The C target** (AGENTS.md, "The C backend"). `main.tcl -emit-c` over
+  C-COMPILE-FREESTANDING-MILESTONE-1.md's corpus (section 14: the 33
+  programs of `examples/surface`, `examples/stdlib`,
+  `examples/refinement` and `bench`), with the tree before the change
+  (main at e78b24f6) and after it: every exit status, generated `.c`, `.h`,
+  display unit and `.runtime.json` manifest byte for byte identical (11
+  compile, 20 C UNSUPPORTED, 2 rejected on purpose); the bound cuts
+  nothing of those programs. Nothing changes for C today: no program
+  changes representation, no service leaves a manifest, no C UNSUPPORTED
+  goes away. The programs this milestone makes valid are applications
+  nested past the bound, and the backend compiles no application of a
+  parameterized struct yet: `Box {value: ...}` 10 deep, inferred or held
+  to a written parameter, was the front end's false TYPE before and is now
+  `C UNSUPPORTED` ("the C backend cannot compile an application of the
+  parameterized struct Box yet"), as it is 5 deep, before and after. The
+  sharper fact the milestone adds -- a projection of a value the program
+  constructed typed by the field value (`int` at the leaf of
+  `x.value.value...`, where the cut type said `any`) -- is the backend's
+  next step: it gives an `int64_t` leaf once the backend compiles
+  applications.
 
 ## 17. Oracle and fuzzing
 
