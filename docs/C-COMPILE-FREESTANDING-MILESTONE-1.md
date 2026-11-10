@@ -59,7 +59,8 @@ Acceptance criteria (brief, section 15), each with its evidence:
 
 Not implemented (deliberately; brief, section 13): a general embedded
 runtime, allocation, Strings, Lists of unknown length, closures,
-coroutines, contexts, I/O, threads, floating point.
+coroutines, contexts, I/O, threads, floating point. (Contexts compile since
+C-CONTEXTS-FREESTANDING-MILESTONE-1.md.)
 
 ## 2. Starting compiler architecture
 

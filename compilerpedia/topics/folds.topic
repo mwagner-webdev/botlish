@@ -7,7 +7,7 @@ summary: A fold iterates like a loop but, instead of collecting its iterations' 
 index: concepts
 alias: fold; reduce; accumulate with a loop; fold loop; folding loop; carry a value through a loop; with intermediate; running value
 keywords: fold, reduce, accumulate, accumulator, intermediate, carry, sum, count, running, state, scanner, aggregate
-related: concept.loops concept.lockstep task.accumulate capability.map-filter rule.immutable-bindings error.fold-intermediate-type error.affine-fold-unsupported
+related: concept.loops concept.lockstep task.accumulate capability.map-filter rule.immutable-bindings error.fold-intermediate-type error.affine-fold-unsupported warning.discarded-mutation
 
 == WHAT IT IS
     fold x in xs with intermediate acc INITIAL:      every element
@@ -18,8 +18,10 @@ related: concept.loops concept.lockstep task.accumulate capability.map-filter ru
 
 The clauses are a loop's, word for word. `acc` is the intermediate: in
 each iteration it is the value the previous iteration produced (INITIAL
-for the first), an immutable binding of the body. The body's value
-becomes the next intermediate. The fold itself is the last intermediate.
+for the first), a binding of the body that cannot be bound again (a
+collection it holds can still be mutated in place: rules below). The
+body's value becomes the next intermediate. The fold itself is the last
+intermediate.
 
     loop x in xs:                      the List of the body's values
         transform(x)
@@ -35,7 +37,9 @@ becomes the next intermediate. The fold itself is the last intermediate.
     fold as they leave any loop.
   * The intermediate is not in scope in INITIAL or the loop's operands, nor
     after the fold. Binding its name again in the body's own scope is a
-    DUPLICATE (it is immutable); a nested scope may shadow it.
+    DUPLICATE (the binding is immutable: its name cannot be bound again,
+    though a collection it holds is a place, rules below); a nested scope
+    may shadow it.
   * The fold's type is the intermediate's: the join of INITIAL's type and
     every normal completion of the body. A join of two different kinds
     is error.fold-intermediate-type; `continue` and `break` produce no
@@ -49,7 +53,9 @@ becomes the next intermediate. The fold itself is the last intermediate.
     iteration (`acc.push(x)`, then `acc` as the body's value): a normal
     completion carries the mutated value on; `continue` and a bare
     `break` carry the value the iteration started with, so that
-    iteration's mutations are dropped.
+    iteration's mutations are dropped. An exit every path to which
+    mutated the intermediate is warning.discarded-mutation: test first,
+    then mutate and complete with `acc`.
 
 == WHY
 Iteration, aggregation and construction are different operations. A
@@ -163,7 +169,8 @@ fn kept(xs: List[int]) -> List[int]:
         y
 
 [squares(4), kept([1, -2, 3])]
-@caption A vector intermediate pushed in place; a continue after the push drops that iteration's push
+@caption A vector intermediate pushed in place; a continue after the push drops that iteration's push (and the compiler says so)
+@warn DISCARDED-MUTATION
 @value [[0, 1, 4, 9], [1, 3]]
 @end
 

@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """credentials.py -- the macOS release's credential preflight
-(ICY-TOWER-MACOS-APP-MILESTONE-1.md, "Credential preflight").
+(ICY-TOWER-MACOS-APP-MILESTONE-1.md, "Credential preflight";
+MACOS-BOTLISH-DISTRIBUTION-MILESTONE-1.md: the same preflight for every
+application the release tooling signs, Icy Tower.app and Botlish.app).
 
-    python3 -I credentials.py check --out DIR [--trust-anchors DIR]
+    python3 -I credentials.py check --out DIR [--trust-anchors DIR] [--bundle-id ID]
 
 Reads the release's configuration from the environment -- the names are the
 GitHub Actions configuration contract:
@@ -14,6 +16,11 @@ GitHub Actions configuration contract:
     APPLE_NOTARY_ISSUER_ID         variable  the team API key's Issuer ID (a UUID)
     APPLE_TEAM_ID                  variable  the Apple Developer Team ID
     MACOS_BUNDLE_ID                variable  the game's stable bundle identifier
+                                             (an application whose identifier
+                                             is fixed in the repository --
+                                             Botlish.app's -- gives it instead:
+                                             --bundle-id, check's bundle_id,
+                                             and MACOS_BUNDLE_ID is not read)
 
 -- and validates every one locally, before any Apple tool sees it: present;
 strict Base64 (the standard alphabet, its padding, canonical; line breaks
@@ -71,7 +78,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import bundle  # noqa: E402
+import bundleid  # noqa: E402
 
 VARIABLES = (
     ("MACOS_CERTIFICATE_P12_BASE64", "secret"),
@@ -83,7 +90,7 @@ VARIABLES = (
     ("MACOS_BUNDLE_ID", "variable"),
 )
 SECRETS = tuple(n for n, kind in VARIABLES if kind == "secret")
-DOC = "docs/ICY-TOWER-MACOS-APP-MILESTONE-1.md, \"GitHub configuration\""
+DOC = "docs/ICY-TOWER-MACOS-APP-MILESTONE-1.md, \"GitHub configuration\"; docs/MACOS-BOTLISH-DISTRIBUTION-MILESTONE-1.md, \"GitHub environment configuration\""
 
 # Apple's public certificates (apple-ca/), pinned by SHA-256: the root that
 # issues both Developer ID Certification Authorities, and the two.
@@ -829,10 +836,15 @@ def secret_values(env):
     return [env[n] for n in SECRETS if env.get(n)]
 
 
-def check(env, out=None, anchors_dir=None):
-    """(problems, facts): every problem of the configuration ENV; on success the facts, and OUT written."""
+def check(env, out=None, anchors_dir=None, bundle_id=None):
+    """(problems, facts): every problem of the configuration ENV; on success the facts, and OUT written.
+    BUNDLE_ID, when given, is the application's own identifier (fixed in the repository): MACOS_BUNDLE_ID is
+    then neither required nor read."""
     problems = []
     present = {}
+    if bundle_id is not None:
+        env = {k: v for k, v in env.items() if k != "MACOS_BUNDLE_ID"}
+        env["MACOS_BUNDLE_ID"] = bundle_id
     for name, kind in VARIABLES:
         if name not in env:
             problems.append(Problem("MACOS-CONFIG-MISSING", name, "is not set",
@@ -854,8 +866,8 @@ def check(env, out=None, anchors_dir=None):
                 problems.append(p)
     if "MACOS_BUNDLE_ID" in present:
         try:
-            bundle.check_identifier(present["MACOS_BUNDLE_ID"])
-        except bundle.Refused as r:
+            bundleid.check_identifier(present["MACOS_BUNDLE_ID"], "MACOS_BUNDLE_ID" if bundle_id is None else "the application's bundle identifier")
+        except bundleid.Refused as r:
             problems.append(Problem(r.code, "", str(r).split(": ", 1)[1],
                                     "Set MACOS_BUNDLE_ID to the game's reverse-DNS identifier, and never change it "
                                     "between releases"))
@@ -913,10 +925,11 @@ def main(argv):
     c = sub.add_parser("check")
     c.add_argument("--out")
     c.add_argument("--trust-anchors")
+    c.add_argument("--bundle-id")
     a = p.parse_args(argv)
     if a.trust_anchors:
         print("credentials.py: TEST TRUST ANCHORS (%s): no Apple certificate is checked; this is no release" % a.trust_anchors)
-    problems, facts = check(dict(os.environ), a.out, a.trust_anchors)
+    problems, facts = check(dict(os.environ), a.out, a.trust_anchors, a.bundle_id)
     if problems:
         print("The macOS release's configuration has %d problem(s); nothing was signed or sent to Apple:" % len(problems))
         for prob in problems:

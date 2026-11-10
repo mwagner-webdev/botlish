@@ -1,0 +1,1188 @@
+# discarded-mutation.test -- the DISCARDED-MUTATION compiler warning
+# (WARNINGS-DISCARDED-MUTATION-MILESTONE-1.md; hir/discarded.tcl holds the
+# facts, hir/warnings.tcl the pass) on the warning framework of
+# WARNINGS-SAME-RETURN.md.
+#
+# Two reasons, one code:
+#
+#   dead       a mutating call (a collection operation, or a call giving
+#              places to a confined function) whose every destination is a
+#              place that dies with its scope -- a local, a loop or lockstep
+#              element, a fold intermediate, a handler payload -- unread on
+#              every path after it (hir::mutvec::NoLaterUse), whose own value
+#              is discarded, and in which nothing affine moves;
+#   fold-exit  a `continue` or bare `break` of a fold every path to which has
+#              mutated the fold's intermediate in its iteration.
+#
+# Precision is the point: most tests here are of programs that must stay
+# silent -- a read after the mutation on some path, a used result, a place
+# that outlives the call (a place parameter, a context), a callee with
+# another effect (a context, a function value, a second place), an affine
+# release, an exit that only some paths reach after a mutation. The
+# reproducers of CONSTRUCT-BINDING-MUTATION-CENSUS-1.md
+# (audit/construct-binding-mutation/corpus) are the first table.
+#
+# Like the other warning test files, every compile passes its policy and
+# channel explicitly (`-warnings MODE`, `-warning-channel ""` to collect
+# without printing).
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+set ::allBackends {interp compile cranelift-generic cranelift}
+set ::dmCode DISCARDED-MUTATION
+set ::dmCorpus [file join $::projectRoot audit construct-binding-mutation corpus]
+
+# The HIR of SOURCE under policy MODE, collecting warnings without printing.
+proc compileWith {source {mode default}} {
+    return [surface::compile $source t.bot -warnings $mode -warning-channel ""]
+}
+
+# "LINE:COL" of ORIGIN in HIR, without the file name when it is t.bot.
+proc loc {hir origin} {
+    return [regsub {^.*?([^/]+\.bot):} [hir::originLocation $hir $origin] {}]
+}
+
+# The DISCARDED-MUTATION warnings of HIR.
+proc dmOf {hir} {
+    return [lmap w [hir::warnings::of $hir] {
+        if {[dict get $w code] ne $::dmCode} continue
+        set w
+    }]
+}
+
+# Each warning of HIR as {REASON PRIMARY {SECONDARY...}}.
+proc dmSitesOf {hir} {
+    return [lmap w [dmOf $hir] {
+        list [dict get $w data reason] [loc $hir [dict get $w primary]] \
+            [lmap o [dict get $w secondary] {loc $hir $o}]
+    }]
+}
+
+# Each DISCARDED-MUTATION warning of SOURCE as {REASON PRIMARY}.
+proc sites {source} {
+    return [lmap s [dmSitesOf [compileWith $source]] {lrange $s 0 1}]
+}
+
+# "MESSAGE @ PRIMARY" for each warning of SOURCE.
+proc shown {source} {
+    set hir [compileWith $source]
+    return [lmap w [dmOf $hir] {
+        string cat [dict get $w message] " @ " [loc $hir [dict get $w primary]]
+    }]
+}
+
+# 1 if SOURCE compiles with no DISCARDED-MUTATION warning.
+proc silent {source} {
+    return [expr {[dmOf [compileWith $source]] eq ""}]
+}
+
+# The rejection of SOURCE under MODE: {errorcode message}, or "compiled".
+proc rejection {source mode} {
+    if {[catch {compileWith $source $mode} message options]} {
+        return [list [dict get $options -errorcode] $message]
+    }
+    return compiled
+}
+
+# The value of SOURCE on every backend, compiled with warnings MODE: one
+# value when they agree.
+proc values {source {mode off}} {
+    set hir [compileWith $source $mode]
+    return [lsort -unique [lmap b $::allBackends {lrange [outcomeUnderHir $b $hir] 0 1}]]
+}
+
+# The corpus program NAME's HIR (warnings on), or {rejected CODE}.
+proc corpusHir {name} {
+    if {[catch {surface::readProgramFile [file join $::dmCorpus $name.bot] -warnings default -warning-channel ""} hir options]} {
+        return [list rejected [lindex [dict get $options -errorcode] end]]
+    }
+    return $hir
+}
+
+set ::vec "import std::mutable_vector\n"
+set ::arr "import std::mutable_array\n"
+
+# ---------------------------------------------------------------------------
+# The census's reproducers (CONSTRUCT-BINDING-MUTATION-CENSUS-1.md, section
+# 12): the seven dead mutations and the two fold exits warn, at the mutation
+# (with the place's binding) and at the exit (with the mutation it
+# discards); every legitimate idiom, every corrected program and every
+# reproducer whose mutated copy is read stays silent.
+
+set ::dmCorpusExpected {
+    c01-collecting-loop-push {{dead 12:5 11:6}}
+    c02-loop-field-push {{dead 19:9 18:10}}
+    c05-mutable-array-rows {{dead 12:9 11:10}}
+    c06-lockstep {{dead 12:9 11:10}}
+    c07-context-member-elements {{dead 15:9 14:10}}
+    c08-fold-continue {{fold-exit 19:13 17:9}}
+    c09-fold-break {{fold-exit 16:13 14:9}}
+    c12-mutable-set-elements {{dead 14:9 13:10}}
+    c14-working-copy-discarded {{dead 19:5 18:5}}
+}
+
+test dm-corpus-discarded-writes {the census's nine reproducers the warning was designed for each warn exactly once, with its reason, its anchor and its related location} -body {
+    set out {}
+    dict for {name expected} $::dmCorpusExpected {
+        set got [dmSitesOf [corpusHir $name]]
+        if {$got ne $expected} {
+            lappend out "$name: $got"
+        }
+    }
+    set out
+} -result {}
+
+test dm-corpus-silent {every other reproducer is silent: the reproducers whose copy is read (c03, c04, c10, c11), the destructive read (c13), the sixteen legitimate idioms (a01-a16), every corrected program and the proof interactions; the rejected programs are rejected as before} -body {
+    set out {}
+    foreach file [lsort [glob -directory $::dmCorpus *.bot]] {
+        set name [file rootname [file tail $file]]
+        if {[dict exists $::dmCorpusExpected $name]} continue
+        set hir [corpusHir $name]
+        if {[lindex $hir 0] eq "rejected"} {
+            lappend out "$name [lindex $hir 1]"
+            continue
+        }
+        if {[dmOf $hir] ne ""} {
+            lappend out "$name: [dmSitesOf $hir]"
+        }
+    }
+    set out
+} -result {{p01-fold-array-unproven UNHANDLED-ERROR} {r01-capture MUTABLE-PLACE-CAPTURE} {r02-consumed-then-read USE-AFTER-MOVE} {r03-count-variable TYPE} {r04-value-parameter NONPLACE-PARAMETER-MUTATION} {r05-nested-function-mutation MUTABLE-PLACE-RECEIVER}}
+
+test dm-corpus-rendered {the canonical reproducer, rendered: the mutation, why nothing sees it, and what a loop variable is; the note at the loop variable} -body {
+    set hir [corpusHir c01-collecting-loop-push]
+    join [lmap w [dmOf $hir] {regsub -all {[^ \n]*/corpus/} [hir::warnings::render $hir $w] {}}] \n
+} -result {c01-collecting-loop-push.bot:12:5: warning: this mutation of `row` is never observed: nothing reads `row` again before it goes out of scope (`row` is this iteration's own copy of an element, not the element of the iterated collection) (DISCARDED-MUTATION)
+c01-collecting-loop-push.bot:11:6: note: `row` is bound here}
+
+test dm-corpus-fold-exit-rendered {c08 rendered: the exit, what the fold carries instead, the mutation it discards} -body {
+    set hir [corpusHir c08-fold-continue]
+    join [lmap w [dmOf $hir] {regsub -all {[^ \n]*/corpus/} [hir::warnings::render $hir $w] {}}] \n
+} -result {c08-fold-continue.bot:19:13: warning: this `continue` discards this iteration's mutation of the fold's intermediate `acc` (every path to it mutates `acc`): the fold carries the intermediate this iteration started with to the next iteration, not its modified value (DISCARDED-MUTATION)
+c08-fold-continue.bot:17:9: note: a mutation of `acc` before this `continue`, in the same iteration}
+
+test dm-corpus-behavior-unchanged {the warned reproducers run to their stated values on every backend, with warnings on as with warnings off: the warning changes no semantics} -body {
+    set out {}
+    dict for {name -} $::dmCorpusExpected {
+        set text [core::ReadFile [file join $::dmCorpus $name.bot]]
+        regexp -line {^#\s*expect:\s*(.*)$} $text -> want
+        set on [surface::readProgramFile [file join $::dmCorpus $name.bot] -warnings default -warning-channel ""]
+        set off [surface::readProgramFile [file join $::dmCorpus $name.bot] -warnings off]
+        set got [lsort -unique [concat \
+            [lmap b $::allBackends {lrange [outcomeUnderHir $b $on] 0 1}] \
+            [lmap b $::allBackends {lrange [outcomeUnderHir $b $off] 0 1}]]]
+        if {$got ne [list [list value $want]]} {
+            lappend out "$name: $got"
+        }
+    }
+    set out
+} -result {}
+
+# ---------------------------------------------------------------------------
+# B1, the dead mutation: places that die
+
+test dm-local-push {a local's push nothing reads again: the change is lost when the function returns} -body {
+    sites "${::vec}fn f(n: int) -> int:
+    v = std::mutable_vector::from_list(\[1\])
+    v.push(n)
+    n
+f(2)"
+} -result {{dead 4:5}}
+
+test dm-local-read-after {the same push read afterwards, on the one path or on some path, is silent} -body {
+    list [silent "${::vec}fn f(n: int) -> int:
+    v = std::mutable_vector::from_list(\[1\])
+    v.push(n)
+    v.length()
+f(2)"] [silent "${::vec}fn f(n: int) -> int:
+    v = std::mutable_vector::from_list(\[1\])
+    v.push(n)
+    if n > 3:
+        return v.length()
+    n
+f(2)"] [silent "${::vec}fn f(n: int) -> MutableVector\[int\]:
+    v = std::mutable_vector::from_list(\[1\])
+    v.push(n)
+    v
+f(2).length()"]
+} -result {1 1 1}
+
+test dm-array-set-can-fail {a MutableArray set nothing reads: warned, and the message says the call itself can still fail (the state is unused, the call is not deletable)} -body {
+    shown "${::arr}fn f(i: int) -> int errors IndexNotFound:
+    a = std::mutable_array::create(4, 0)
+    a.set(i, 7)
+    i
+f(2):
+    on IndexNotFound:
+        0"
+} -result {{this mutation of `a` is never observed: nothing reads `a` again before it goes out of scope; the call itself can still fail (IndexNotFound) @ 4:5}}
+
+test dm-array-set-proven {a set the bounds proof proves in range says nothing of failure} -body {
+    shown "${::arr}fn f() -> int:
+    a = std::mutable_array::create(4, 0)
+    a.set(1, 7)
+    0
+f()"
+} -result {{this mutation of `a` is never observed: nothing reads `a` again before it goes out of scope @ 4:5}}
+
+test dm-explicit-copy-of-value-parameter {the working copy NONPLACE-PARAMETER-MUTATION suggests, mutated and never returned, warns; returned, it is silent} -body {
+    list [sites "${::arr}fn zone(tiles: MutableArray\[int\], i: int) -> int errors IndexNotFound:
+    working = tiles
+    working.set(i, 2)
+    i
+zone(std::mutable_array::create(3, 0), 1):
+    on IndexNotFound:
+        0"] [silent "${::arr}fn zone(tiles: MutableArray\[int\]) -> MutableArray\[int\] errors IndexNotFound:
+    working = tiles
+    working.set(0, 2)
+    working
+r = zone(std::mutable_array::create(3, 0)):
+    on IndexNotFound:
+        std::mutable_array::create(1, 0)
+r.capacity()"]
+} -result {{{dead 4:5}} 1}
+
+test dm-nested-field-path {a struct field's vector, pushed and never read: the path is named; reading a disjoint field (an Int) keeps it dead, reading the struct or the field does not} -body {
+    set decl "${::vec}struct S:
+    items: MutableVector\[int\]
+    count: int
+"
+    list [shown "${decl}fn f() -> int:
+    s = S {items: std::mutable_vector::from_list(\[0\]), count: 3}
+    s.items.push(1)
+    s.count
+f()"] [silent "${decl}fn f() -> int:
+    s = S {items: std::mutable_vector::from_list(\[0\]), count: 3}
+    s.items.push(1)
+    s.items.length()
+f()"] [silent "${decl}fn f() -> S:
+    s = S {items: std::mutable_vector::from_list(\[0\]), count: 3}
+    s.items.push(1)
+    s
+f().count"]
+} -result {{{this mutation of `s.items` is never observed: nothing reads `s.items` again before `s` goes out of scope @ 7:5}} 1 1}
+
+test dm-top-level {a top-level local of the entry program dies with the program} -body {
+    sites "${::vec}v = std::mutable_vector::from_list(\[1\])
+v.push(2)
+0"
+} -result {{dead 3:1}}
+
+test dm-collecting-loop-element {a loop element pushed and never read again, the census's canonical shape, in a function: warned; collecting the pushed element is silent} -body {
+    list [sites "${::vec}fn f(rows: List\[MutableVector\[int\]\]) -> int:
+    loop row in rows:
+        row.push(42)
+    0
+f(\[std::mutable_vector::from_list(\[1\])\])"] [silent "${::vec}fn f(rows: List\[MutableVector\[int\]\]) -> List\[MutableVector\[int\]\]:
+    loop row in rows:
+        row.push(42)
+        row
+f(\[std::mutable_vector::from_list(\[1\])\])"]
+} -result {{{dead 4:9}} 1}
+
+test dm-nested-loop-inner-element {the element of an inner loop is its iteration's copy too} -body {
+    sites "${::vec}fn f(grid: List\[List\[MutableVector\[int\]\]\]) -> int:
+    loop row in grid:
+        loop cell in row:
+            cell.push(0)
+    0
+f(\[\[std::mutable_vector::from_list(\[1\])\]\])"
+} -result {{dead 5:13}}
+
+test dm-handler-payload {a handler's payload, cleared and dropped: warned (its message says whose copy it is); its length returned instead is silent} -body {
+    set decl "${::vec}error Full:
+    items: MutableVector\[int\]
+
+fn fill(n: int) -> int errors Full:
+    if n > 0:
+        fail Full {items: std::mutable_vector::from_list(\[1, 2\])}
+    n
+"
+    list [shown "${decl}fn g(n: int) -> int:
+    fill(n):
+        on Full details:
+            details.items.clear()
+            0
+g(1)"] [silent "${decl}fn g(n: int) -> int:
+    fill(n):
+        on Full details:
+            details.items.clear()
+            details.items.length()
+g(1)"]
+} -result {{{this mutation of `details.items` is never observed: nothing reads `details.items` again before `details` goes out of scope (`details` is the handler's own copy of the error's payload, not the value the failing code holds) @ 12:13}} 1}
+
+test dm-destructured-local {a destructured field is an ordinary local: dead when nothing reads it, silent when read} -body {
+    set decl "${::vec}struct B:
+    items: MutableVector\[int\]
+"
+    list [sites "${decl}fn f(b: B) -> int:
+    {items} = b
+    items.push(9)
+    0
+f(B {items: std::mutable_vector::from_list(\[0\])})"] [silent "${decl}fn f(b: B) -> int:
+    {items} = b
+    items.push(9)
+    items.length()
+f(B {items: std::mutable_vector::from_list(\[0\])})"]
+} -result {{{dead 6:5}} 1}
+
+test dm-mutation-then-fail {a dead mutation before a fail is dead because nothing reads it on any path -- never because a fail follows it: the same fail after a read is silent} -body {
+    set decl "${::vec}error Bad
+"
+    list [sites "${decl}fn f(n: int) -> int errors Bad:
+    v = std::mutable_vector::from_list(\[0\])
+    v.push(n)
+    if n > 0:
+        fail Bad
+    n
+fn g(n: int) -> int:
+    f(n):
+        on Bad:
+            0
+g(1)"] [silent "${decl}fn f(n: int) -> int errors Bad:
+    v = std::mutable_vector::from_list(\[0\])
+    v.push(n)
+    if n > 0:
+        fail Bad
+    v.length()
+fn g(n: int) -> int:
+    f(n):
+        on Bad:
+            0
+g(1)"]
+} -result {{{dead 5:5}} 1}
+
+test dm-conditional-return-is-no-trigger {a return on some paths does not make a mutation dead: the push is read on the path that goes on} -body {
+    silent "${::vec}fn f(n: int) -> int:
+    v = std::mutable_vector::from_list(\[0\])
+    v.push(n)
+    if n > 3:
+        return 0
+    v.length()
+f(1)"
+} -result 1
+
+# ---------------------------------------------------------------------------
+# B1: the call's own value
+
+test dm-destructive-read-used {a pop whose element is used is a read: silent (the census's c13 shape); the same pop whose element is dropped is a dead mutation} -body {
+    list [silent "${::vec}fn f() -> int errors IndexNotFound:
+    q = std::mutable_vector::from_list(\[1, 2\])
+    x = q.pop()
+    x
+f():
+    on IndexNotFound:
+        0"] [silent "${::vec}fn f() -> int errors IndexNotFound:
+    q = std::mutable_vector::from_list(\[1, 2\])
+    q.pop()
+f():
+    on IndexNotFound:
+        0"] [sites "${::vec}fn f() -> int errors IndexNotFound:
+    q = std::mutable_vector::from_list(\[1, 2\])
+    q.pop()
+    0
+f():
+    on IndexNotFound:
+        0"]
+} -result {1 1 {{dead 4:5}}}
+
+test dm-handled-destructive-read {the element of a handled pop is the handle's value: used when the handle is, discarded when it is a statement} -body {
+    list [silent "${::vec}fn f() -> int:
+    q = std::mutable_vector::from_list(\[1, 2\])
+    x = q.pop():
+        on IndexNotFound:
+            -1
+    x
+f()"] [sites "${::vec}fn f() -> int:
+    q = std::mutable_vector::from_list(\[1, 2\])
+    q.pop():
+        on IndexNotFound:
+            -1
+    0
+f()"]
+} -result {1 {{dead 4:5}}}
+
+test dm-collected-result {a mutation's value collected by a loop is discarded when the loop's List is (the census's c12), and used when it is bound and read} -body {
+    set decl "import std::mutable_set\n"
+    list [sites "${decl}fn f() -> int:
+    sets = \[std::mutable_set::create\[int\](), std::mutable_set::create\[int\]()\]
+    loop s in sets:
+        s.add(5)
+    0
+f()"] [silent "${decl}fn f() -> List\[bool\]:
+    sets = \[std::mutable_set::create\[int\](), std::mutable_set::create\[int\]()\]
+    added = loop s in sets:
+        s.add(5)
+    added
+f()"]
+} -result {{{dead 5:9}} 1}
+
+# ---------------------------------------------------------------------------
+# B1: places that outlive the call, and callees with another effect
+
+test dm-place-parameter {a place parameter's mutation is the caller's: never dead in the callee, and the caller reads it} -body {
+    silent "${::vec}fn grow(place v: MutableVector\[int\]):
+    v.push(1)
+fn f() -> int:
+    w = std::mutable_vector::from_list(\[0\])
+    grow(w)
+    w.length()
+f()"
+} -result 1
+
+test dm-place-helper-confined {a confined place helper (its only effect is on its place) given a dying place warns at the call, in both spellings} -body {
+    set decl "${::vec}fn grow(place v: MutableVector\[int\]):
+    v.push(1)
+"
+    list [sites "${decl}fn f() -> int:
+    w = std::mutable_vector::from_list(\[0\])
+    grow(w)
+    0
+f()"] [sites "${decl}fn f() -> int:
+    w = std::mutable_vector::from_list(\[0\])
+    w.grow()
+    0
+f()"]
+} -result {{{dead 6:5}} {{dead 6:5}}}
+
+test dm-place-helper-context {a place helper that also changes an installed context (it requires one) is not confined: silent, though the place dies} -body {
+    silent "${::vec}opaque context struct Log:
+    lines: MutableVector\[int\]
+
+fn grow(place v: MutableVector\[int\], context log: Log):
+    v.push(1)
+    log.lines.push(1)
+
+fn f(context log: Log) -> int:
+    w = std::mutable_vector::from_list(\[0\])
+    grow(w)
+    log.lines.length()
+
+with context Log {lines: std::mutable_vector::from_list(\[0\])}
+f()"
+} -result 1
+
+test dm-place-helper-calls-a-function-value {a place helper that calls a function value is not confined (what it calls is unknown): silent} -body {
+    silent "${::vec}fn apply(place v: MutableVector\[int\], f: Fn{args: \[int\], return: int}):
+    v.push(f(1))
+fn inc(x: int) -> int:
+    x + 1
+fn g() -> int:
+    w = std::mutable_vector::from_list(\[0\])
+    apply(w, inc)
+    0
+g()"
+} -result 1
+
+test dm-place-helper-transitive {confinement is transitive: a helper whose own body is confined but whose callee calls a function value (no context anywhere) is not confined, and neither is one whose callee changes a context; one whose callees are confined is} -body {
+    set decl "${::vec}opaque context struct Log:
+    lines: MutableVector\[int\]
+fn note(context log: Log):
+    log.lines.push(1)
+fn apply(f: Fn{args: \[int\], return: int}) -> int:
+    f(1)
+fn inc(x: int) -> int:
+    x + 1
+fn inner(place v: MutableVector\[int\]):
+    v.push(1)
+"
+    list [silent "${decl}fn outer(place v: MutableVector\[int\]):
+    v.push(apply(inc))
+fn f() -> int:
+    w = std::mutable_vector::from_list(\[0\])
+    outer(w)
+    0
+f()"] [silent "${decl}fn outer(place v: MutableVector\[int\], context log: Log):
+    inner(v)
+    note()
+fn f(context log: Log) -> int:
+    w = std::mutable_vector::from_list(\[0\])
+    outer(w)
+    0
+with context Log {lines: std::mutable_vector::from_list(\[0\])}
+f()"] [sites "${decl}fn outer(place v: MutableVector\[int\]):
+    inner(v)
+    inner(v)
+fn f() -> int:
+    w = std::mutable_vector::from_list(\[0\])
+    outer(w)
+    0
+f()"]
+} -result {1 1 {{dead 17:5}}}
+
+test dm-place-helper-two-places {a call giving two places is dead only when both die unread: one read keeps the call productive (a transfer between them)} -body {
+    set decl "${::vec}fn move_one(place from: MutableVector\[int\], place to: MutableVector\[int\]) -> unit errors IndexNotFound:
+    to.push(from.pop())
+"
+    list [silent "${decl}fn f() -> int errors IndexNotFound:
+    a = std::mutable_vector::from_list(\[1\])
+    b = std::mutable_vector::from_list(\[0\])
+    move_one(a, b)
+    b.length()
+f():
+    on IndexNotFound:
+        0"] [sites "${decl}fn f() -> int errors IndexNotFound:
+    a = std::mutable_vector::from_list(\[1\])
+    b = std::mutable_vector::from_list(\[0\])
+    move_one(a, b)
+    0
+f():
+    on IndexNotFound:
+        0"]
+} -result {1 {{dead 7:5}}}
+
+test dm-place-helper-io-without-context {a place helper in a direct module that makes a raw syscall (close of a bad descriptor) requires no context, and is still not confined: the walk reaches the syscall transport, whose effects are unknown} -body {
+    set hir [surface::compile "direct module
+${::vec}import std::linux
+import std::abi
+fn note(place v: MutableVector\[int\], n: int):
+    v.push(n)
+    fd = std::abi::i32(n):
+        on std::abi::AbiIntegerBelowRange:
+            return
+        on std::abi::AbiIntegerAboveRange:
+            return
+    std::linux::close(fd)
+fn f() -> int:
+    w = std::mutable_vector::from_list(\[0\])
+    note(w, -1)
+    0
+f()" t.bot -warnings default -warning-channel "" -target [linuxTarget]]
+    dmOf $hir
+} -result {}
+
+test dm-place-helper-runs-a-callable-through-a-native {a place helper that hands a function value to a native that calls it (generate's factory) is not confined: what the callable does is unknown} -body {
+    silent "${::vec}import std::mutable_array
+fn fill(place v: MutableVector\[int\], f: Fn{args: \[int\], return: int}):
+    a = std::mutable_array::generate(2, f)
+    v.push(a.capacity())
+fn twice(x: int) -> int:
+    x * 2
+fn g() -> int:
+    w = std::mutable_vector::from_list(\[0\])
+    fill(w, twice)
+    0
+g()"
+} -result 1
+
+test dm-place-helper-holds-a-resource {a place helper that makes and drops a resource of its own is not confined: the resource's cleanup runs at the helper's end -- here a direct module's, which closes a descriptor with a raw syscall and requires no context, so only the helper's affine value says so} -body {
+    withPrivateLibrary {
+        set f [open [file join $::core::libraryDir dmres2.bot] w]
+        puts -nonewline $f "direct module
+import std::linux
+import std::abi
+
+opaque resource struct Fd:
+    fd: int
+
+cleanup fn close(h: Fd):
+    {fd} = h
+    n = std::abi::i32(fd):
+        on std::abi::AbiIntegerBelowRange:
+            return
+        on std::abi::AbiIntegerAboveRange:
+            return
+    std::linux::close(n)
+    return
+
+fn adopt(n: int) -> Fd:
+    Fd {fd: n}
+"
+        close $f
+        set hir [surface::compile "direct module
+${::vec}import std::dmres2
+fn grow(place v: MutableVector\[int\], n: int):
+    h = std::dmres2::adopt(n)
+    v.push(n)
+fn f() -> int:
+    w = std::mutable_vector::from_list(\[0\])
+    grow(w, -1)
+    0
+f()" t.bot -warnings default -warning-channel "" -target [linuxTarget]]
+    }
+    set source [hir::discarded::Source $hir]
+    set grow ""
+    dict for {e node} [dict get $source exprs] {
+        if {[dict get $node kind] eq "bind" && [hir::semantic::SourceName $source [dict get $node binding]] eq "grow"} {
+            set grow [dict get $node value]
+        }
+    }
+    list [dmOf $hir] [hir::contexts::required $source $grow] [dict get [hir::discarded::ConfinedBlocks $source $grow] $grow]
+} -result {{} {} 0}
+
+test dm-context-member {a context member is the installed context's place: never dead} -body {
+    silent "${::vec}opaque context struct Log:
+    lines: MutableVector\[int\]
+fn f(context log: Log) -> int:
+    log.lines.push(1)
+    0
+with context Log {lines: std::mutable_vector::from_list(\[0\])}
+f()"
+} -result 1
+
+test dm-mutable-map-and-set {std::mutable_map's and std::mutable_set's operations are confined place functions: set, remove, clear and add on a dying collection warn; read afterwards they are silent} -body {
+    set decl "import std::mutable_map
+import std::mutable_set
+"
+    list [lmap s [sites "${decl}fn f() -> int:
+    m = std::mutable_map::create\[str, int\]()
+    m.set(\"a\", 1)
+    s = std::mutable_set::create\[int\]()
+    s.add(1)
+    t = std::mutable_set::create\[int\]()
+    t.clear()
+    0
+f()"] {lindex $s 1}] [silent "${decl}fn f() -> int:
+    m = std::mutable_map::create\[str, int\]()
+    m.set(\"a\", 1)
+    s = std::mutable_set::create\[int\]()
+    s.add(1)
+    m.length() + s.length()
+f()"]
+} -result {{5:5 7:5 9:5} 1}
+
+test dm-affine-collection {a collection of resources cleared or pushed as it dies releases them -- their cleanups run code -- and is silent; so is a vector of coroutine handles} -body {
+    withPrivateLibrary {
+        set f [open [file join $::core::libraryDir dmres.bot] w]
+        puts -nonewline $f "${::vec}opaque resource struct H:
+    id: int
+opaque context struct Log:
+    lines: MutableVector\[int\]
+cleanup fn close(h: H, context log: Log):
+    {id} = h
+    log.lines.push(id)
+fn open(n: int) -> H:
+    H {id: n}
+fn create() -> Log:
+    Log {lines: std::mutable_vector::from_list(\[0\])}
+"
+        close $f
+        set resources [silent "${::vec}import std::dmres
+fn f(context log: std::dmres::Log) -> int:
+    v = std::mutable_vector::from_list(\[std::dmres::open(1)\])
+    v.push(std::dmres::open(2))
+    v.clear()
+    0
+with context std::dmres::create()
+f()"]
+    }
+    list $resources [silent "${::vec}fn gen() -> int:
+    yield 1
+    2
+fn f() -> int:
+    coroutine {step} = gen()
+    v = std::mutable_vector::from_list(\[step\])
+    v.clear()
+    0
+f()"]
+} -result {1 1}
+
+# ---------------------------------------------------------------------------
+# B1: what the analysis does not see (false negatives by construction)
+
+test dm-loop-liveness-false-negative {KNOWN FALSE NEGATIVE (the report, section 18): a local pushed in every iteration and never read after the loop is live to NoLaterUse, which counts the next iteration as a later use; silent} -body {
+    silent "${::vec}fn f(n: int) -> int:
+    acc = std::mutable_vector::from_list(\[0\])
+    loop i from 0 to n:
+        acc.push(i)
+    n
+f(3)"
+} -result 1
+
+test dm-read-whose-value-is-discarded {KNOWN FALSE NEGATIVE: a read is a read, even one whose own value nobody uses (a loop collecting the mutated element as a statement): silent} -body {
+    silent "${::vec}fn f(rows: List\[MutableVector\[int\]\]) -> int:
+    loop row in rows:
+        row.push(42)
+        row
+    0
+f(\[std::mutable_vector::from_list(\[1\])\])"
+} -result 1
+
+test dm-unreachable {a mutation in code that cannot run warns nothing: a statically dead branch, and a branch the completion analysis proves infeasible} -body {
+    list [silent "${::vec}fn f() -> int:
+    v = std::mutable_vector::from_list(\[0\])
+    if false:
+        v.push(1)
+    0
+f()"] [silent "${::vec}fn f(n: int) -> int:
+    v = std::mutable_vector::from_list(\[0\])
+    if n > 0:
+        if n < 0:
+            v.push(1)
+    0
+f(1)"]
+} -result {1 1}
+
+# ---------------------------------------------------------------------------
+# B1: spellings, generics, granularity
+
+test dm-spellings-agree {the method and the qualified function spelling of one mutation are one call: the same warning, the same data} -body {
+    set a [compileWith "${::vec}fn f() -> int:
+    v = std::mutable_vector::from_list(\[0\])
+    v.push(1)
+    0
+f()"]
+    set b [compileWith "${::vec}fn f() -> int:
+    v = std::mutable_vector::from_list(\[0\])
+    std::mutable_vector::push(v, 1)
+    0
+f()"]
+    list [lmap w [dmOf $a] {list [dict get $w message] [dict get $w data name]}] \
+        [lmap w [dmOf $b] {list [dict get $w message] [dict get $w data name]}]
+} -result {{{{this mutation of `v` is never observed: nothing reads `v` again before it goes out of scope} v}} {{{this mutation of `v` is never observed: nothing reads `v` again before it goes out of scope} v}}}
+
+test dm-generic-function-once {an untyped function called with three argument types is judged once, as written: one warning, not one per semantic instance} -body {
+    sites "${::vec}fn f(x):
+    v = std::mutable_vector::from_list(\[x\])
+    v.push(x)
+    x
+\[f(1), f(\"a\"), f(true)\]"
+} -result {{dead 4:5}}
+
+test dm-trait-program {a trait program (one using std::mutable_set, whose keys are Hashable) is judged on its checked source, once per written call} -body {
+    sites "import std::mutable_set
+fn f(n: int) -> int:
+    s = std::mutable_set::create\[int\]()
+    s.add(n)
+    n
+\[f(1), f(2)\]"
+} -result {{dead 4:5}}
+
+test dm-one-per-call {two dead mutations are two warnings; one call with two dead destinations is one} -body {
+    set decl "${::vec}fn both(place a: MutableVector\[int\], place b: MutableVector\[int\]):
+    a.push(1)
+    b.push(1)
+"
+    list [sites "${::vec}fn f() -> int:
+    v = std::mutable_vector::from_list(\[0\])
+    v.push(1)
+    v.push(2)
+    0
+f()"] [sites "${decl}fn f() -> int:
+    v = std::mutable_vector::from_list(\[0\])
+    w = std::mutable_vector::from_list(\[0\])
+    both(v, w)
+    0
+f()"]
+} -result {{{dead 5:5}} {{dead 8:5}}}
+
+test dm-earlier-mutations-live {only the last mutation of a run is dead: the earlier ones are read by the later mutation (it operates on their state)} -body {
+    sites "${::vec}fn f() -> int:
+    v = std::mutable_vector::from_list(\[0\])
+    v.push(1)
+    v.push(2)
+    v.push(3)
+    0
+f()"
+} -result {{dead 6:5}}
+
+# ---------------------------------------------------------------------------
+# B2, the fold exit
+
+set ::foldDecl "${::vec}fn ints() -> MutableVector\[int\]:
+    std::mutable_vector::from_list(\[0\])
+"
+
+test dm-fold-continue-before-and-after {a continue before the mutation discards nothing; after it, it discards it} -body {
+    list [silent "${::foldDecl}fn f(xs: List\[int\]) -> int:
+    w = fold x in xs with intermediate acc ints():
+        if x < 0:
+            continue
+        acc.push(x)
+        acc
+    w.length()
+f(\[1, -2, 3\])"] [sites "${::foldDecl}fn f(xs: List\[int\]) -> int:
+    w = fold x in xs with intermediate acc ints():
+        acc.push(x)
+        if x < 0:
+            continue
+        acc
+    w.length()
+f(\[1, -2, 3\])"]
+} -result {1 {{fold-exit 8:13}}}
+
+test dm-fold-break-before-and-after {a bare break before the mutation discards nothing; after it, it discards it, and the message says what the fold yields} -body {
+    list [silent "${::foldDecl}fn f(xs: List\[int\]) -> int:
+    w = fold x in xs with intermediate acc ints():
+        if x == 0:
+            break
+        acc.push(x)
+        acc
+    w.length()
+f(\[1, 0, 3\])"] [shown "${::foldDecl}fn f(xs: List\[int\]) -> int:
+    w = fold x in xs with intermediate acc ints():
+        acc.push(x)
+        if x == 0:
+            break
+        acc
+    w.length()
+f(\[1, 0, 3\])"]
+} -result {1 {{this `break` discards this iteration's mutation of the fold's intermediate `acc` (every path to it mutates `acc`): the fold yields the intermediate this iteration started with, not its modified value @ 8:13}}}
+
+test dm-fold-several-mutations-one-exit {several mutations before one exit: one warning at the exit, each mutation a related location} -body {
+    dmSitesOf [compileWith "${::foldDecl}fn f(xs: List\[int\]) -> int:
+    w = fold x in xs with intermediate acc ints():
+        acc.push(x)
+        acc.push(x * 2)
+        if x < 0:
+            continue
+        acc
+    w.length()
+f(\[1, -2\])"]
+} -result {{fold-exit 9:13 {6:9 7:9}}}
+
+test dm-fold-branch-paths {only an exit every path to which mutated the intermediate warns: a mutation in one branch and an exit after both is no fold-exit fact (that exit may never follow it)} -body {
+    list [silent "${::foldDecl}fn f(xs: List\[int\]) -> int:
+    w = fold x in xs with intermediate acc ints():
+        if x > 0:
+            acc.push(x)
+        if x <= 0:
+            continue
+        acc
+    w.length()
+f(\[1, -2\])"] [sites "${::foldDecl}fn f(xs: List\[int\]) -> int:
+    w = fold x in xs with intermediate acc ints():
+        if x > 0:
+            acc.push(x)
+            if x > 10:
+                continue
+        acc
+    w.length()
+f(\[1, 20\])"]
+} -result {1 {{fold-exit 9:17}}}
+
+test dm-fold-both-branches-mutate {a different mutation on each branch before an exit: every path to the exit has mutated the intermediate, though no one mutation is on every path -- warned, both mutations related} -body {
+    dmSitesOf [compileWith "${::foldDecl}fn f(xs: List\[int\]) -> int:
+    w = fold x in xs with intermediate acc ints():
+        if x > 0:
+            acc.push(x)
+        else:
+            acc.push(0)
+        if x == 5:
+            continue
+        acc
+    w.length()
+f(\[1, 5\])"]
+} -result {{fold-exit 11:13 {7:13 9:13}}}
+
+test dm-fold-inner-loop-exit {a continue or break inside a loop in the fold's body targets that loop, never the fold: silent} -body {
+    silent "${::foldDecl}fn f(xs: List\[int\], ys: List\[int\]) -> int:
+    w = fold x in xs with intermediate acc ints():
+        acc.push(x)
+        inner = loop y in ys:
+            if y < 0:
+                continue
+            if y == 0:
+                break
+            y
+        acc
+    w.length()
+f(\[1\], \[1, -1, 0\])"
+} -result 1
+
+test dm-fold-nested-folds {nested folds: the inner fold's exit after a mutation of the outer intermediate discards nothing of it; an outer exit after it does} -body {
+    list [silent "${::foldDecl}fn f(xs: List\[int\]) -> int:
+    w = fold x in xs with intermediate outer ints():
+        outer.push(x)
+        n = fold y in xs with intermediate count 0:
+            if y < 0:
+                continue
+            count + 1
+        outer
+    w.length()
+f(\[1, -2\])"] [sites "${::foldDecl}fn f(xs: List\[int\]) -> int:
+    w = fold x in xs with intermediate outer ints():
+        outer.push(x)
+        n = fold y in xs with intermediate count 0:
+            count + y
+        if n < 0:
+            continue
+        outer
+    w.length()
+f(\[1, -2\])"]
+} -result {1 {{fold-exit 10:13}}}
+
+test dm-fold-place-helper {a mutation of the intermediate through a place helper is a mutation: an exit after it warns} -body {
+    sites "${::foldDecl}fn grow(place v: MutableVector\[int\], x: int):
+    v.push(x)
+fn f(xs: List\[int\]) -> int:
+    w = fold x in xs with intermediate acc ints():
+        grow(acc, x)
+        if x < 0:
+            continue
+        acc
+    w.length()
+f(\[1, -2\])"
+} -result {{fold-exit 10:13}}
+
+test dm-fold-read-only-and-moved {a read of the intermediate before an exit is no mutation; nor is mutating a copy of it (the copy is its own place): silent} -body {
+    list [silent "${::foldDecl}fn f(xs: List\[int\]) -> int:
+    w = fold x in xs with intermediate acc ints():
+        if acc.length() > 2:
+            continue
+        acc.push(x)
+        acc
+    w.length()
+f(\[1, 2, 3, 4\])"] [silent "${::foldDecl}fn f(xs: List\[int\]) -> int:
+    w = fold x in xs with intermediate acc ints():
+        copy = acc
+        copy.push(x)
+        if x < 0:
+            continue
+        copy
+    w.length()
+f(\[1, -2\])"]
+} -result {1 1}
+
+test dm-fold-struct-intermediate {a field of a struct intermediate mutated before an exit is a mutation of the intermediate} -body {
+    sites "${::vec}struct State:
+    seen: MutableVector\[int\]
+    n: int
+fn f(xs: List\[int\]) -> int:
+    w = fold x in xs with intermediate s State {seen: std::mutable_vector::from_list(\[0\]), n: 0}:
+        s.seen.push(x)
+        if x < 0:
+            continue
+        State {seen: s.seen, n: s.n + 1}
+    w.n
+f(\[1, -2\])"
+} -result {{fold-exit 9:13}}
+
+test dm-fold-handler {an exit in the handler of the mutating call itself discards no mutation of that call (the failed call made none), only what ran before it; an exit after the handled call, which completed on every path that reaches it, discards both} -body {
+    list [silent "${::foldDecl}fn f(xs: List\[int\]) -> int:
+    w = fold x in xs with intermediate acc ints():
+        acc.pop():
+            on IndexNotFound:
+                continue
+        acc
+    w.length()
+f(\[1, 2\])"] [sites "${::foldDecl}fn f(xs: List\[int\]) -> int:
+    w = fold x in xs with intermediate acc ints():
+        acc.push(x)
+        acc.pop():
+            on IndexNotFound:
+                continue
+        if x == 2:
+            continue
+        acc
+    w.length()
+f(\[1, 2\])"]
+} -result {1 {{fold-exit 9:17} {fold-exit 11:13}}}
+
+test dm-fold-return-is-not-a-fold-exit {a return after a mutation of the intermediate leaves the fold with no value: never a fold-exit fact; the mutation is dead (nothing reads it on that one path) and the dead-mutation fact says so, about the intermediate} -body {
+    shown "${::foldDecl}fn f(xs: List\[int\]) -> int:
+    w = fold x in xs with intermediate acc ints():
+        acc.push(x)
+        return 0
+    w.length()
+f(\[1\])"
+} -result {{this mutation of `acc` is never observed: nothing reads `acc` again before it goes out of scope (a fold carries its intermediate's changes only to the iteration after one that completes with it) @ 6:9}}
+
+test dm-fold-dead-and-exit-once {a mutation followed unconditionally by the exit is dead and discarded by the exit: one warning, the fold-exit one, which says why} -body {
+    sites "${::foldDecl}fn f(xs: List\[int\]) -> int:
+    w = fold x in xs with intermediate acc ints():
+        acc.push(x)
+        continue
+    w.length()
+f(\[1\])"
+} -result {{fold-exit 7:9}}
+
+test dm-fold-conditional-mutation-then-exit {a mutation in one branch followed, on every path, by an exit is dead (nothing ever reads it) but no fold-exit fact (not every path to the exit ran it): the dead-mutation fact reports it} -body {
+    sites "${::foldDecl}fn f(xs: List\[int\]) -> int:
+    w = fold x in xs with intermediate acc ints():
+        if x > 0:
+            acc.push(x)
+        continue
+    w.length()
+f(\[1\])"
+} -result {{dead 7:13}}
+
+test dm-fold-normal-completion {the documented idiom, push and complete with the intermediate, is silent; completing with something else instead discards the push (dead)} -body {
+    list [silent "${::foldDecl}fn f(xs: List\[int\]) -> int:
+    w = fold x in xs with intermediate acc ints():
+        acc.push(x)
+        acc
+    w.length()
+f(\[1, 2\])"] [sites "${::foldDecl}fn f(xs: List\[int\]) -> int:
+    w = fold x in xs with intermediate acc ints():
+        acc.push(x)
+        ints()
+    w.length()
+f(\[1, 2\])"]
+} -result {1 {{dead 6:9}}}
+
+test dm-fold-unreachable-exit {an exit the completion analysis proves unreachable warns nothing} -body {
+    silent "${::foldDecl}fn f(xs: List\[int\]) -> int:
+    w = fold x in xs with intermediate acc ints():
+        acc.push(x)
+        if x > 0:
+            if x < 0:
+                continue
+        acc
+    w.length()
+f(\[1\])"
+} -result 1
+
+test dm-fold-every-loop-kind {a fold of each loop kind -- over a List, counted, lockstep, unbounded -- has its exits judged} -body {
+    list [sites "${::foldDecl}fn f(n: int) -> int:
+    w = fold i from 0 to n with intermediate acc ints():
+        acc.push(i)
+        if i == 1:
+            continue
+        acc
+    w.length()
+f(3)"] [sites "${::foldDecl}fn f(xs: List\[int\], ys: List\[int\]) -> int:
+    w = fold x in xs and y in xs with intermediate acc ints():
+        acc.push(x + y)
+        if x == 1:
+            break
+        acc
+    w.length()
+f(\[1, 2\], \[3, 4\])"] [sites "${::foldDecl}fn f(n: int) -> int:
+    w = fold with intermediate acc ints():
+        acc.push(n)
+        if acc.length() > n:
+            break
+        acc
+    w.length()
+f(3)"]
+} -result {{{fold-exit 8:13}} {{fold-exit 8:13}} {{fold-exit 8:13}}}
+
+test dm-fold-exit-deep {an exit 400 conditions deep inside a fold, after a push of the intermediate, at Tcl's default recursion limit: the fold-exit walk follows the nesting in depth-safe segments (core/deep.tcl) and reports it} -body {
+    set depth 400
+    set lines [list "fn f(xs: List\[int\], p: int) -> int:" "    w = fold x in xs with intermediate acc ints():" "        acc.push(x)"]
+    for {set i 0} {$i < $depth} {incr i} {
+        lappend lines "[string repeat {    } [expr {$i + 2}]]if p > $i:"
+    }
+    lappend lines "[string repeat {    } [expr {$depth + 2}]]continue" "        acc" "    w.length()" "f(\[1\], 1000)"
+    set saved [interp recursionlimit {}]
+    interp recursionlimit {} 1000
+    try {
+        set result [sites "${::foldDecl}[join $lines \n]"]
+    } finally {
+        interp recursionlimit {} $saved
+    }
+    set result
+} -result [list [list fold-exit [expr {3 + 3 + 400 + 1}]:[expr {4 * 402 + 1}]]]
+
+# ---------------------------------------------------------------------------
+# The policy (WARNINGS-SAME-RETURN.md's one global switch)
+
+set ::dmProgram "${::vec}fn f() -> int:
+    v = std::mutable_vector::from_list(\[0\])
+    v.push(1)
+    0
+f()"
+
+test dm-mode-off {off runs no warning pass and attaches nothing} -body {
+    hir::warnings::resetStats
+    set hir [compileWith $::dmProgram off]
+    list [hir::warnings::of $hir] [dict getdef [hir::warnings::stats] DISCARDED-MUTATION 0]
+} -result {{} 0}
+
+test dm-mode-error {error rejects the program with the warning's own code and message, located at the mutation, its related location after it} -body {
+    lassign [rejection $::dmProgram error] code message
+    list $code [regsub -all {t\.bot:} $message {}]
+} -result {{CORE SEMANTIC DISCARDED-MUTATION} {4:5: this mutation of `v` is never observed: nothing reads `v` again before it goes out of scope (also at 3:5)}}
+
+test dm-mode-default-runs {default runs the pass and attaches the warning} -body {
+    hir::warnings::resetStats
+    set hir [compileWith $::dmProgram default]
+    list [llength [dmOf $hir]] [dict getdef [hir::warnings::stats] DISCARDED-MUTATION 0]
+} -result {1 1}
+
+test dm-registered {DISCARDED-MUTATION is one more static registry entry} -body {
+    dict get $::hir::warnings::passes DISCARDED-MUTATION
+} -result hir::warnings::DiscardedMutation
+
+test dm-rejected-program-not-warned {a program the compiler rejects is never warned about} -body {
+    catch {compileWith "${::vec}fn f(v: MutableVector\[int\]) -> int:
+    v.push(1)
+    0
+f(std::mutable_vector::from_list(\[0\]))"} message options
+    lindex [dict get $options -errorcode] end
+} -result NONPLACE-PARAMETER-MUTATION
+
+test dm-cli {main.tcl prints the warning on standard error with its Compilerpedia help line, and runs the program; -warnings error rejects it} -constraints executableAot -body {
+    set dir [makeDirectory dm-cli-[pid]]
+    set path [file join $dir p.bot]
+    set f [open $path w]
+    puts -nonewline $f $::dmProgram
+    close $f
+    set main [file join $::projectRoot main.tcl]
+    set default [catch {exec [info nameofexecutable] $main -backend interp -warnings default $path 2>@1} out]
+    set strict [catch {exec [info nameofexecutable] $main -backend interp -warnings error $path 2>@1} err]
+    list $default [regexp {warning: this mutation of `v` is never observed[^\n]*\(DISCARDED-MUTATION\)} $out] \
+        [regexp {help: tclsh9.0 main.tcl -help warning.discarded-mutation} $out] [regexp {value: 0} $out] \
+        $strict [regexp {DISCARDED-MUTATION} $err]
+} -cleanup {removeDirectory dm-cli-[pid]} -result {0 1 1 1 1 1}
+
+# ---------------------------------------------------------------------------
+# Nothing changes but the side table
+
+test dm-hir-unchanged-by-mode {the HIR every backend compiles is the same with warnings on and off (but the warnings side table), and hir::format prints no warning} -body {
+    set on [compileWith $::dmProgram default]
+    set off [compileWith $::dmProgram off]
+    list [expr {[dict remove $on warnings] eq [dict remove $off warnings]}] \
+        [expr {[hir::format $on] eq [hir::format $off]}] [regexp DISCARDED [hir::format $on]]
+} -result {1 1 0}
+
+# The HIR the warning run is given (hir::warnings::run's first argument) when
+# SOURCE is compiled under MODE.
+proc warnedHir {source mode} {
+    set ::dmGiven ""
+    set trace {apply {{command op} {set ::dmGiven [lindex $command 1]}}}
+    trace add execution hir::warnings::run enter $trace
+    try {
+        compileWith $source $mode
+    } finally {
+        trace remove execution hir::warnings::run enter $trace
+    }
+    return $::dmGiven
+}
+
+test dm-checked-source {the checked program as written is kept for the warning run only, and only for a program that uses a mutable collection and is no trait program (whose traitSource it is): the HIR a compilation returns has none, whatever the mode, and interchange text leaves it out} -body {
+    set given [warnedHir $::dmProgram default]
+    set plain [warnedHir "fn f() -> int:\n    1\nf()" default]
+    set trait [warnedHir "import std::mutable_set\nfn f() -> int:\n    s = std::mutable_set::create\[int\]()\n    s.add(1)\n    0\nf()" default]
+    set on [compileWith $::dmProgram default]
+    set off [compileWith $::dmProgram off]
+    list [dict exists $given checkedSource] [dict exists $plain checkedSource] [dict exists $trait checkedSource] \
+        [dict exists $trait traitSource] [dict exists $on checkedSource] [dict exists $off checkedSource] \
+        [expr {[hir::interchange::encode $given] eq [hir::interchange::encode [dict remove $given checkedSource]]}] \
+        [llength [dmOf $on]]
+} -result {1 0 0 1 0 0 1 1}
+
+test dm-elaborated-hir-not-analyzed {an elaborated HIR with no checked source is no program as written -- a fold's intermediate renamed to a local (the exit's discard invisible), a loop element given an entry copy -- and the analysis declines it rather than misread it: the checked source gives the facts, the elaborated HIR none} -body {
+    set fold [warnedHir "${::foldDecl}fn f(xs: List\[int\]) -> int:
+    w = fold x in xs with intermediate acc ints():
+        acc.push(x)
+        if x < 0:
+            continue
+        acc
+    w.length()
+f(\[1, -2\])" default]
+    set loop [warnedHir "${::vec}fn f(rows: List\[MutableVector\[int\]\]) -> int:
+    loop row in rows:
+        row.push(42)
+    0
+f(\[std::mutable_vector::from_list(\[1\])\])" default]
+    list [lmap f [hir::discarded::findings $fold] {dict get $f reason}] \
+        [lmap f [hir::discarded::findings $loop] {dict get $f reason}] \
+        [hir::discarded::findings [dict remove $fold checkedSource]] \
+        [hir::discarded::findings [dict remove $loop checkedSource]]
+} -result {fold-exit dead {} {}}
+
+test dm-backends-agree {every backend runs a warned program to the same value as with warnings off} -body {
+    list [values $::dmProgram default] [values $::dmProgram off] \
+        [values [core::ReadFile [file join $::dmCorpus c08-fold-continue.bot]] default]
+} -result {{{value 0}} {{value 0}} {{value {[1, 3]}}}}
+
+test dm-native-unchanged {native IR (specialized and generic) is identical with warnings off and on} -body {
+    set on [compileWith $::dmProgram default]
+    set off [compileWith $::dmProgram off]
+    list [expr {[native::nir $off] eq [native::nir $on]}] [expr {[native::nir $off -specialize 0] eq [native::nir $on -specialize 0]}]
+} -result {1 1}
+
+cleanupTests

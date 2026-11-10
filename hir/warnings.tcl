@@ -56,6 +56,7 @@ namespace eval hir::warnings {
         ONE-CHAR-STRING-LITERAL hir::warnings::OneCharStringLiteral
         MANY-BOOLEAN-ARGUMENTS  hir::warnings::ManyBooleanArguments
         CONTEXT-RESOURCE-ESCAPE hir::warnings::ContextResourceEscape
+        DISCARDED-MUTATION hir::warnings::DiscardedMutation
     }
     variable modes {default off error}
     # CODE -> number of times its pass has run in this process: test
@@ -132,11 +133,15 @@ proc hir::warnings::run {hir mode {channel stderr}} {
         set mode [defaultMode]
     }
     if {[Mode $mode] eq "off" || [dict get $hir diagnostics] ne ""} {
-        return $hir
+        return [dict remove $hir checkedSource]
     }
     # A monomorphized trait program (TRAITS.md) is warned about as written:
-    # its checked source build, where each function exists once.
+    # its checked source build, where each function exists once. (Another
+    # program's checked source before the elaborations, `checkedSource`,
+    # which DISCARDED-MUTATION reads, exists for this run only: the HIR the
+    # compilation returns has none, whatever the mode.)
     set warnings [collect [dict getdef $hir traitSource $hir]]
+    set hir [dict remove $hir checkedSource]
     set rejection [Rejection $hir $warnings $mode]
     if {$rejection ne ""} {
         core::raiseDiagnostics [list $rejection]
@@ -1721,4 +1726,114 @@ proc hir::warnings::OptionShape {target shown types} {
     }
     return [dict create target $target shown $shown ordinary [llength $types] \
         bools $bools subjects [expr {[llength $types] - $bools}]]
+}
+
+# ---------------------------------------------------------------------------
+# DISCARDED-MUTATION (WARNINGS-DISCARDED-MUTATION-MILESTONE-1.md)
+#
+# A mutation whose modified state no computation can see. Two reasons, one
+# code; each fact is hir/discarded.tcl's proof over the checked program as
+# written (its header states both rules in full):
+#
+#   dead       a mutating call (a collection operation, or a call giving
+#              places to a function whose only effects are on its places)
+#              whose every destination is a place that dies with its scope
+#              -- a local, a loop or lockstep element, a fold intermediate,
+#              a handler payload -- with no later read of the mutated path
+#              on any path, and whose own value is discarded. Anchored at
+#              the call; the related location is the root binding's
+#              declaration.
+#   fold-exit  a `continue` or bare `break` of a fold, every path to which
+#              has mutated the fold's intermediate in its iteration: the exit
+#              carries the intermediate the iteration started with, so a
+#              mutation is discarded on every execution of it. Anchored at
+#              the exit; the related locations are the mutations some path
+#              to it runs (one warning per exit, however many).
+#
+# The warning says what happens to the state, never that a call may be
+# deleted: the call's own failure, and its arguments' evaluation, are the
+# program's whatever becomes of the place. No opt-out, no fixit.
+
+proc hir::warnings::DiscardedMutation {hir} {
+    set source [hir::discarded::Source $hir]
+    if {$source eq ""} {
+        return {}
+    }
+    set warnings {}
+    foreach finding [hir::discarded::Findings $source] {
+        set b [dict get $finding binding]
+        set name [hir::semantic::SourceName $source $b]
+        switch -- [dict get $finding reason] {
+            dead {
+                set e [dict get $finding call]
+                set paths [lmap d [dict get $finding dests] {DiscardedPathText $source $d}]
+                set what [join [lmap p [lsort -unique $paths] {string cat "`" $p "`"}] " and "]
+                if {[lsort -unique $paths] eq [list $name]} {
+                    set scope "it goes"
+                } else {
+                    set scope "`$name` goes"
+                }
+                set message "this mutation of $what is never observed: nothing reads $what again before $scope out of scope[DiscardedRole $source $b]"
+                set errors [hir::completions::effectiveErrorsOf $source $e]
+                if {$errors ne ""} {
+                    # (Its failure is the program's, whatever becomes of the
+                    # place: the fact is about the state, not the call.)
+                    append message "; the call itself can still fail ([join [lsort $errors] {, }])"
+                }
+                set secondary {}
+                set origin [dict get $source bindings $b origin]
+                if {[lindex $origin 0] eq "file"} {
+                    lappend secondary $origin
+                }
+                lappend warnings [New DISCARDED-MUTATION $message [dict get $source exprs $e origin] $secondary \
+                    [dict create reason dead call $e binding $b name $name paths $paths \
+                        note "`$name` is bound here"]]
+            }
+            fold-exit {
+                set x [dict get $finding exit]
+                set exit [dict get $source exprs $x kind]
+                set mutations [dict get $finding mutations]
+                if {$exit eq "continue"} {
+                    set carries "the fold carries the intermediate this iteration started with to the next iteration, not its modified value"
+                } else {
+                    set carries "the fold yields the intermediate this iteration started with, not its modified value"
+                }
+                set message "this `$exit` discards this iteration's mutation of the fold's intermediate `$name` (every path to it mutates `$name`): $carries"
+                lappend warnings [New DISCARDED-MUTATION $message [dict get $source exprs $x origin] \
+                    [lmap e $mutations {dict get $source exprs $e origin}] \
+                    [dict create reason fold-exit exit $x fold [dict get $finding fold] binding $b name $name \
+                        mutations $mutations note "a mutation of `$name` before this `$exit`, in the same iteration"]]
+            }
+        }
+    }
+    return $warnings
+}
+
+# The written text of place path expression D (`row`, `s.points`).
+proc hir::warnings::DiscardedPathText {hir d} {
+    set path [hir::mutvec::Path $hir $d]
+    return [join [concat [list [hir::semantic::SourceName $hir [lindex $path 0]]] [lindex $path 1]] .]
+}
+
+# What the place B is, when it is a construct's binding rather than a local:
+# the clause the dead-mutation message ends with ("" for a local).
+proc hir::warnings::DiscardedRole {hir b} {
+    set binding [dict get $hir bindings $b]
+    if {[dict get $binding kind] ne "param"} {
+        return ""
+    }
+    set name [hir::semantic::SourceName $hir $b]
+    set owner [dict get $hir exprs [dict get $hir scopes [dict get $binding scope] owner]]
+    if {[dict getdef $owner foldBinding ""] eq $b} {
+        return " (a fold carries its intermediate's changes only to the iteration after one that completes with it)"
+    }
+    switch -- [dict get $owner kind] {
+        listloop - lockloop {
+            return " (`$name` is this iteration's own copy of an element, not the element of the iterated collection)"
+        }
+        handle {
+            return " (`$name` is the handler's own copy of the error's payload, not the value the failing code holds)"
+        }
+    }
+    return ""
 }

@@ -38,6 +38,14 @@
 # (NATIVE LINK TOOLCHAIN), and everything else runs as before. The
 # application installs nothing: no run creates a cache directory but the
 # language server's copy of the standard library (~/Library/Caches/botlish).
+#
+# A compiler whose native backend has no JIT (-version: "native JIT:
+# unavailable"; the macOS application, MACOS-BOTLISH-DISTRIBUTION-
+# MILESTONE-1.md) refuses -backend cranelift and cranelift-generic (NATIVE
+# UNSUPPORTED jit, naming -aot-run), and every native run is a program built
+# and run as an executable instead (-aot-run, AOT-RUN-MILESTONE-1.md), its
+# value read through the executable's driver protocol (BOTLISH_NATIVE_RESULT):
+# the same checks, natively, without the in-process code generator.
 set -euo pipefail
 
 botlish=$(cd "$(dirname "$1")" && pwd)/$(basename "$1")
@@ -84,13 +92,37 @@ echo "== $botlish"
 for tool in tclsh tclsh9.0 rustc cargo cc ld; do
   echo "   host $tool: $(command -v "$tool" || echo no)"
 done
+# Whether the native backend runs programs in-process (the JIT).
+jit=0
+version=$(run -version) || fail "-version"
+grep -qx 'native JIT: available' <<<"$version" && jit=1
+grep -q '^native JIT: ' <<<"$version" || fail "-version says nothing of the native JIT"
+natives=""
+(( jit )) && natives="cranelift"
+echo "   native JIT: $( (( jit )) && echo available || echo 'unavailable: native runs are -aot-run' )"
+# The words of the value FILE's executable reports (-aot-run, the driver
+# protocol: BOTLISH_NATIVE_RESULT=RESULT), its quoting removed: 50 is
+# "int 50", [99, 2] "list int 99 int 2". ARGS... after FILE are run's.
+aot_value() {
+  local result="$work/aot-value.result" file=$1
+  shift
+  rm -f "$result"
+  env -i HOME="$work/home" PATH=/usr/bin:/bin BOTLISH_NATIVE_RESULT="$result" "$botlish" -warnings off -aot-run "$file" "$@" >/dev/null || return 1
+  sed -n 's/^value //p' "$result" | tr -d '\\{}' | tr -s ' \n' ' ' | sed 's/ $//'
+}
 
 mkdir -p "$work/home-nolink"
 if (( macos )); then
   # The application installs nothing: it runs and links its files where they
   # are, in the bundle.
-  env -i HOME="$work/home-nolink" "$botlish" -backend cranelift -warnings off samples/01-arithmetic.bot >/dev/null ||
-    fail "a native run"
+  if (( jit )); then
+    env -i HOME="$work/home-nolink" "$botlish" -backend cranelift -warnings off samples/01-arithmetic.bot >/dev/null ||
+      fail "a native run"
+  else
+    # (No JIT: the driver compiles the program's code for -emit-clif.)
+    env -i HOME="$work/home-nolink" "$botlish" -warnings off -emit-clif samples/01-arithmetic.bot >/dev/null ||
+      fail "a native compilation (-emit-clif)"
+  fi
   [[ -z $(ls -A "$work/home-nolink") ]] || fail "a run wrote into HOME: $(cd "$work/home-nolink" && find . | head -5)"
   echo "   installed: nothing (the application's driver runs where it is)"
 else
@@ -113,18 +145,56 @@ else
   echo "   installed: the driver and the stub for any run, the runtime archive for one that may link"
 fi
 
-for backend in interp compile cranelift; do
+for backend in interp compile $natives; do
   run -backend "$backend" -warnings off samples/* >"$work/$backend.out" ||
     fail "backend $backend"
   grep -E '^(==|   value:)' "$work/$backend.out" | sed "s/ ($backend)\$//" >"$work/$backend.values"
   echo "   $backend: $(grep -c '^   value:' "$work/$backend.values") values"
 done
-for backend in compile cranelift; do
+for backend in compile $natives; do
   cmp -s "$work/interp.values" "$work/$backend.values" ||
     { diff "$work/interp.values" "$work/$backend.values" >&2; fail "$backend disagrees with interp"; }
 done
-# (The unspecialized baseline does not compile every corpus program.)
-run -backend cranelift-generic -warnings off samples/0*.bot >"$work/generic.out" || fail "backend cranelift-generic"
+if (( jit )); then
+  # (The unspecialized baseline does not compile every corpus program.)
+  run -backend cranelift-generic -warnings off samples/0*.bot >"$work/generic.out" || fail "backend cranelift-generic"
+else
+  # No JIT: refused before anything compiles, naming what runs natively.
+  for backend in cranelift cranelift-generic; do
+    status=0
+    run -backend "$backend" samples/01-arithmetic.bot >"$work/nojit.out" 2>&1 || status=$?
+    [[ $status == 1 ]] && grep -q 'NATIVE UNSUPPORTED jit' "$work/nojit.out" && grep -q -e '-aot-run' "$work/nojit.out" ||
+      { cat "$work/nojit.out" >&2; fail "-backend $backend without a JIT: status $status"; }
+    if grep -q '^   value:' "$work/nojit.out"; then fail "-backend $backend without a JIT ran the program"; fi
+  done
+  status=0
+  run run -backend cranelift samples/01-arithmetic.bot >"$work/nojit.out" 2>&1 || status=$?
+  [[ $status == 1 ]] && grep -q 'NATIVE UNSUPPORTED jit' "$work/nojit.out" || fail "run -backend cranelift without a JIT: status $status"
+  echo "   -backend cranelift, cranelift-generic, run -backend cranelift: refused (NATIVE UNSUPPORTED jit)"
+  if (( toolchain )); then
+    # Natively, as executables: each sample's value, through its driver
+    # protocol -- or, for a program whose functions the AOT compiler cannot
+    # close (an untyped closure's parameter, a value of no static kind),
+    # NATIVE AOT NOT-READY: the JIT ran those with run-time guards, and
+    # without one they run on the interpreter (AOT-RUN-MILESTONE-1.md,
+    # "Limitations"). Any other failure fails.
+    count=0
+    notready=""
+    for sample in samples/*; do
+      if [[ -n $(aot_value "$sample") ]]; then
+        count=$((count + 1))
+        continue
+      fi
+      status=0
+      env -i HOME="$work/home" PATH=/usr/bin:/bin "$botlish" -warnings off -aot-run "$sample" >"$work/aot.out" 2>&1 || status=$?
+      [[ $status == 1 ]] && grep -q '(NATIVE AOT NOT-READY)$' "$work/aot.out" ||
+        { cat "$work/aot.out" >&2; fail "-aot-run $sample: status $status"; }
+      notready="$notready ${sample#samples/}"
+    done
+    [[ $(aot_value samples/01-arithmetic.bot) == 'int 50' ]] || fail "-aot-run 01-arithmetic.bot: $(aot_value samples/01-arithmetic.bot)"
+    echo "   -aot-run: $count samples run as executables; not AOT-ready (the interpreter runs them):${notready:- none}"
+  fi
+fi
 
 # Without arguments: the usage summary, and no program runs.
 run >"$work/default.out" || fail "the no-argument run (usage)"
@@ -179,18 +249,24 @@ save():
         unit
 EOF
 # LOCALE ARGS...: BOTLISH ARGS... beside the decoy, in LOCALE ("": none).
+# (PATH: where -aot-run's linker is found.)
 decoyed() {
   local locale=$1; shift
-  env -i HOME="$work/home" ${locale:+LANG=$locale} TCL_LIBRARY="$decoy" TCLLIBPATH="$decoy/lib" \
+  env -i HOME="$work/home" PATH=/usr/bin:/bin ${locale:+LANG=$locale} TCL_LIBRARY="$decoy" TCLLIBPATH="$decoy/lib" \
     TCL9.0_TM_PATH="$decoy/tm" TCL9_0_TM_PATH="$decoy/tm" "$botlish" "$@" 2>&1
 }
 for locale in "" C.UTF-8; do
   where="with a decoy Tcl library${locale:+ in $locale}"
   out=$(decoyed "$locale" -version) && [[ $out == "Botlish compiler "* ]] || fail "-version $where: $out"
-  for backend in interp cranelift; do
+  for backend in interp $natives; do
     out=$(decoyed "$locale" -backend "$backend" samples/01-arithmetic.bot) && grep -qx '   value: 50' <<<"$out" ||
       fail "-backend $backend $where: $out"
   done
+  if (( !jit && toolchain )); then
+    # No JIT: the native path is -aot-run's (the executable prints nothing;
+    # a decoy ends the process with status 9).
+    out=$(decoyed "$locale" -warnings off -aot-run samples/01-arithmetic.bot) || fail "-aot-run $where: $out"
+  fi
   if (( ! macos )); then
     rm -f child-environ
     out=$(decoyed "$locale" run -warnings off environ.bot) && [[ -f child-environ ]] || fail "run environ.bot $where: $out"
@@ -247,22 +323,34 @@ fi
 mkdir -p "$work/app"
 printf 'fn count(k: int) -> int:\n    if k == 0:\n        return 0\n    1 + count(k - 1)\n' >"$work/app/counter.bot"
 printf 'import counter\n\ncounter::count(3000)\n' >"$work/app/value.bot"
-for backend in interp compile cranelift-generic cranelift; do
+for backend in interp compile $( (( jit )) && echo cranelift-generic cranelift); do
   out=$(cd / && run -backend "$backend" "$work/app/value.bot") && grep -qx '   value: 3000' <<<"$out" ||
     fail "an application module on $backend"
 done
+if (( !jit && toolchain )); then
+  [[ $(cd / && aot_value "$work/app/value.bot") == 'int 3000' ]] || fail "an application module, -aot-run"
+fi
 # Non-ASCII directory names and arguments with no locale at all: file names
 # and arguments are UTF-8 bytes whatever the locale says.
 mkdir -p "$work/ünï cödé"
 printf 'fn count(k: int) -> int:\n    if k == 0:\n        return 0\n    1 + count(k - 1)\n' >"$work/ünï cödé/counter.bot"
 printf 'import counter\n\ncounter::count(42)\n' >"$work/ünï cödé/answer.bot"
-for backend in interp cranelift; do
+for backend in interp $natives; do
   out=$(cd / && run -backend "$backend" "$work/ünï cödé/answer.bot") && grep -qx '   value: 42' <<<"$out" ||
     fail "a program in a non-ASCII directory, with no locale, on $backend"
 done
+if (( !jit && toolchain )); then
+  [[ $(cd / && aot_value "$work/ünï cödé/answer.bot") == 'int 42' ]] || fail "a program in a non-ASCII directory, -aot-run"
+fi
 printf 'argv():\n    on InvalidArgumentEncoding:\n        ["invalid"]\n' >"$work/ünï cödé/args.bot"
 out=$(cd "$work/ünï cödé" && run -argv 'ünï cödé' args.bot) && grep -qxF '   value: ["ünï cödé"]' <<<"$out" ||
   fail "a non-ASCII argument with no locale"
+if (( !jit && toolchain )); then
+  # The same argument to the program as its executable: argv()[0] FILE as
+  # typed, then the words after --.
+  [[ $(cd "$work/ünï cödé" && aot_value args.bot -- 'ünï cödé') == 'list str args.bot str ünï cödé' ]] ||
+    fail "a non-ASCII argument, -aot-run: $(cd "$work/ünï cödé" && aot_value args.bot -- 'ünï cödé')"
+fi
 printf 'import nosuch\n\n1\n' >"$work/app/missing.bot"
 if run "$work/app/missing.bot" >"$work/missing.out"; then fail "a missing module was accepted"; fi
 grep -qF "no such module file $work/app/nosuch.bot" "$work/missing.out" ||
@@ -273,10 +361,13 @@ grep -qF "no such module file $work/app/nosuch.bot" "$work/missing.out" ||
 # directory holds.
 printf 'fn length(xs) -> int:\n    99\n' >"$work/app/list.bot"
 printf 'import list\nimport ::std::list\n\n[list::length([1]), ::std::list::length([1, 2])]\n' >"$work/app/both.bot"
-for backend in interp cranelift; do
+for backend in interp $natives; do
   out=$(cd "$work/app" && run -backend "$backend" "$work/app/both.bot") && grep -qxF '   value: [99, 2]' <<<"$out" ||
     fail "a local list beside std::list on $backend"
 done
+if (( !jit && toolchain )); then
+  [[ $(cd "$work/app" && aot_value "$work/app/both.bot") == 'list int 99 int 2' ]] || fail "a local list beside std::list, -aot-run"
+fi
 printf 'import std::nosuch\n\n1\n' >"$work/app/nostd.bot"
 if run "$work/app/nostd.bot" >"$work/nostd.out"; then fail "a missing standard namespace was accepted"; fi
 grep -qF "no such module file //zipfs:/app/botlish/stdlib/nosuch.bot" "$work/nostd.out" ||
@@ -284,10 +375,21 @@ grep -qF "no such module file //zipfs:/app/botlish/stdlib/nosuch.bot" "$work/nos
 # A native run shows the program's output, then its value (on macOS the
 # program's Darwin IO is C: the backend links it to run it).
 if (( toolchain )); then
-  for backend in cranelift cranelift-generic; do
+  for backend in $( (( jit )) && echo cranelift cranelift-generic); do
     [[ $(linking -backend "$backend" hello.bot) == "== hello.bot ($backend)"$'\n'"Hello, world!"$'\n'"   value: unit" ]] ||
       fail "-backend $backend shows no program output"
   done
+  # -aot-run, in every distribution: the program's output, nothing else.
+  [[ $(linking -warnings off -aot-run hello.bot) == "Hello, world!" ]] || fail "-aot-run hello.bot"
+  [[ $(linking -warnings off -aot-run show-args.bot -- one 'ünï cödé' -v) == "show-args.bot"$'\n'"one"$'\n'"ünï cödé"$'\n'"-v" ]] ||
+    fail "-aot-run passes no arguments: $(linking -warnings off -aot-run show-args.bot -- one 'ünï cödé' -v 2>&1)"
+  if linking -warnings off -aot-run broken.bot >"$work/aot-broken.out" 2>&1; then fail "-aot-run accepted a broken program"; fi
+  echo "   -aot-run: the program's output and arguments, a rejected program not run"
+else
+  status=0
+  linking -warnings off -aot-run hello.bot >"$work/aot-notools.out" 2>&1 || status=$?
+  [[ $status == 1 ]] && grep -q 'NATIVE LINK TOOLCHAIN' "$work/aot-notools.out" || { cat "$work/aot-notools.out" >&2; fail "-aot-run without developer tools: status $status"; }
+  echo "   no developer tools: -aot-run refused (NATIVE LINK TOOLCHAIN)"
 fi
 # Without HOME the native backend lives in a temporary directory for the run
 # (the single executable's; the application needs none).
@@ -299,8 +401,13 @@ if (( toolchain )); then
   fi
   [[ $(env -i ./hello) == 'Hello, world!' ]] || fail "executable built without HOME"
 fi
-env -i "$botlish" -backend cranelift samples/01-arithmetic.bot >"$work/nohome.out" || fail "cranelift without HOME"
-grep -q 'value: 50' "$work/nohome.out" || fail "cranelift without HOME: wrong value"
+if (( jit )); then
+  env -i "$botlish" -backend cranelift samples/01-arithmetic.bot >"$work/nohome.out" || fail "cranelift without HOME"
+  grep -q 'value: 50' "$work/nohome.out" || fail "cranelift without HOME: wrong value"
+else
+  env -i "$botlish" -emit-clif samples/01-arithmetic.bot >"$work/nohome.out" || fail "-emit-clif without HOME"
+  grep -q 'value: 50' "$work/nohome.out" || fail "-emit-clif without HOME: wrong value"
+fi
 
 # A program that calls C needs the host's C compiler driver (the system
 # linker, SINGLE-EXECUTABLE-FFI-MILESTONE-1.md): without one -- this
@@ -311,7 +418,13 @@ if run -warnings off -emit-native-executable labs.bot >"$work/labs.out" 2>&1; th
 grep -q "needs a C compiler driver to link an executable for $target, and there is none: no cc on PATH.*(NATIVE LINK TOOLCHAIN)" "$work/labs.out" ||
   { cat "$work/labs.out" >&2; fail "a C program's link without a C compiler said no NATIVE LINK TOOLCHAIN"; }
 [[ ! -e labs ]] || fail "a refused link left an executable"
-echo "   a C program without a C compiler: NATIVE LINK TOOLCHAIN"
+# -aot-run alike (AOT-RUN-MILESTONE-1.md): the same link refused, the program
+# never run, status 1.
+status=0; run -warnings off -aot-run labs.bot >"$work/labs-aot.out" 2>&1 || status=$?
+[[ $status == 1 ]] || { cat "$work/labs-aot.out" >&2; fail "-aot-run of a C program without a C compiler: status $status"; }
+grep -q "labs.bot: .*needs a C compiler driver to link an executable for $target, and there is none: no cc on PATH.*(NATIVE LINK TOOLCHAIN)" "$work/labs-aot.out" ||
+  { cat "$work/labs-aot.out" >&2; fail "-aot-run of a C program without a C compiler said no NATIVE LINK TOOLCHAIN"; }
+echo "   a C program without a C compiler: NATIVE LINK TOOLCHAIN (-emit-native-executable and -aot-run)"
 
 # The language server: an editor's session, framed by hand. The hover and
 # the definition are asked before the analysis is done and answered when it
