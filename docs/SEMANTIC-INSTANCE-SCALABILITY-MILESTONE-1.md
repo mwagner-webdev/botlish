@@ -552,7 +552,7 @@ them at 10:46:
 | `icy-tower-macos.yml` | 42769079434 | every step passed but the graphical acceptance, whose `restart` case passed 9 of its 10 checks: "Right reaches the game: the player was not found in both captures (press 3)". The headless simulation, the oracle, the executable's tests, the SDL call trace and every other graphical and LaunchServices case passed, so the game the compiler built behaves as specified, and what failed is the session's reading of a capture. The run is superseded by the third merge's, which plays the same cases again |
 
 The runs that count are the third merge's, at bbb95fd (dispatched 10:47
-UTC). As of 20:10 UTC:
+UTC). As of 23:40 UTC:
 
 | workflow | run | state |
 |---|---|---|
@@ -561,8 +561,8 @@ UTC). As of 20:10 UTC:
 | `windows-x86_64.yml` (dispatched) | 42802045549 | passed, every job |
 | `static-decisions.yml` (dispatched) | 42802037262 | passed: batched and sequential agree on every golden suite (mutable-array.bot's job and the four shards) |
 | `macos-arm64.yml` (dispatched) | 42802040876 | passed, every job: smoke (Tier A, the canary among its steps) and the Linux control, the five acceptance shards (Tier B), the system linker (also under GC stress), Botlish.app (its smoke, FFI, acceptance and comparison scripts and the ad hoc release stages), Botlish.app without developer tools, main-thread startup and static SDL3 through Botlish.app |
-| `tests.yml` (dispatched) | 42802026983 | 13 of 14 jobs passed: canary, `tests (interp)` and `tests (compile)`, the four golden shards, stub-linked and system-linked executables (also under GC stress), native Rust unit tests (and the driver without its JIT), cranelift-generic coverage, the method-call decision job; the cranelift coverage still running |
-| `tests-arm64.yml` (dispatched) | 42802031961 | 12 of 13 jobs passed: canary, interp, compile, GC stress on interp, cranelift and cranelift-generic coverage, the four golden shards, native Rust unit tests (also under GC stress), system-linked executables. GC stress on compile was lost to the runner: "The runner has received a shutdown signal", exit 143, during `event-loop.test`, with no test failure before it; rerun once (pending) |
+| `tests.yml` (dispatched) | 42802026983 | passed, every job: canary (mutant catalogs, warning gate, canary selection), `tests (interp)` and `tests (compile)`, the four golden shards, stub-linked and system-linked executables (also under GC stress), native Rust unit tests (and the driver without its JIT), cranelift and cranelift-generic coverage, the method-call decision job (its tests, oracle and fuzzer, and the golden suites under the reference audit). Its GC-stress jobs run on pushes to main only |
+| `tests-arm64.yml` (dispatched) | 42802031961 | 12 of 13 jobs passed: canary, interp, compile, GC stress on interp, cranelift and cranelift-generic coverage, the four golden shards, native Rust unit tests (also under GC stress), system-linked executables. GC stress on compile was lost to the runner: "The runner has received a shutdown signal", exit 143, during `event-loop.test`, with no test failure before it; rerun once: in progress since 20:08 |
 
 ## 7. Remaining limits and known problems
 
