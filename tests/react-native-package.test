@@ -20,8 +20,9 @@
 #     prepared (node_modules installed): the generated entry points and the
 #     2048 hook under Jest, and TypeScript.
 #
-# The Android libraries need the Android NDK (ANDROID_NDK_ROOT: it links
-# them) and the Android AArch64 target support package: BOTLISH_RN_PACKAGES
+# The Android libraries need the Android NDK (ANDROID_NDK_ROOT naming one of
+# revision 28 or later, the target support package's minimum: it links them)
+# and the Android AArch64 target support package: BOTLISH_RN_PACKAGES
 # names a directory of prebuilt .botpkg files (the target support package
 # and game2048), else it is built here with cargo
 # (audit/android-aarch64-target/tools/package.sh, a few minutes). Without
@@ -44,8 +45,23 @@ testConstraint nativeBuilt [expr {![catch {native::binary}]}]
 testConstraint rnTool [expr {[testConstraint unix] && [testConstraint linuxX86_64Host] && [testConstraint cc]}]
 set ::rnPrebuilt [expr {[info exists ::env(BOTLISH_RN_PACKAGES)] && [llength [glob -nocomplain -directory $::env(BOTLISH_RN_PACKAGES) botlish_target_android_aarch64-*.botpkg]]}]
 # The NDK links every Android library; without prebuilt packages, cargo
-# builds the Android runtime too.
-set ::rnNdk [expr {[info exists ::env(ANDROID_NDK_ROOT)] && [file isdirectory $::env(ANDROID_NDK_ROOT)]}]
+# builds the Android runtime too. Only an NDK the target support package
+# accepts counts (revision 28 or later, as tests/android-target.test reads
+# it): GitHub's runner images set ANDROID_NDK_ROOT to an older NDK, whose
+# links fail (NATIVE LIBRARY TOOLCHAIN) rather than skip.
+proc rnNdkRoot {} {
+    if {![info exists ::env(ANDROID_NDK_ROOT)]} { return "" }
+    set root $::env(ANDROID_NDK_ROOT)
+    set props [file join $root source.properties]
+    if {![file isfile $props]} { return "" }
+    set channel [open $props]
+    set text [read $channel]
+    close $channel
+    if {![regexp -line {^Pkg\.Revision\s*=\s*([0-9]+)} $text -> major] || $major < 28} { return "" }
+    if {![file executable [file join $root toolchains llvm prebuilt linux-x86_64 bin clang]]} { return "" }
+    return $root
+}
+set ::rnNdk [expr {[rnNdkRoot] ne ""}]
 set ::rnCargo [expr {[auto_execok cargo] ne "" && [auto_execok rustup] ne ""}]
 testConstraint rnAndroid [expr {[testConstraint rnTool] && [testConstraint nativeBuilt] && $::rnNdk && ($::rnPrebuilt || $::rnCargo)}]
 testConstraint rnHost [expr {[testConstraint rnAndroid] && [testConstraint cxx] && [native::hostSupports libraries]}]
