@@ -2,6 +2,7 @@
 # (NATIVE-LIBRARY-MILESTONE-1.md, "Mutation results").
 #
 #   tclsh9.0 audit/native-library/tools/mutate.tcl ?-only NAME,...? ?-timeout SECONDS?
+#       ?-first 0|1?
 #
 # Each mutant is a deliberate bug, written in mutants.txt (beside this
 # script) as exact source replacements, each replaced text occurring exactly
@@ -20,7 +21,10 @@
 #   * tests/aot-stub-linker.test (the stub's image reads the same program
 #     record).
 #
-# Each test file runs with a private -tmpdir. A mutant every detector
+# Each test file runs with a private -tmpdir. With -first 1 the test file
+# runs first and the detectors stop at the first that kills the mutant (the
+# verdict is the same; the report names that detector only): what a CI job
+# with a time limit runs (the tier item). A mutant every detector
 # misses SURVIVES; on a host that builds no libraries every mutant is
 # SKIPPED. The report lists each mutant and what killed it; it exits 1 on a
 # survivor or a mutant that no longer applies. The real checkout, its
@@ -32,7 +36,7 @@ set root [file dirname [file dirname [file dirname [file dirname [file normalize
 source [file join $root core core.tcl]
 set windows [expr {$::tcl_platform(platform) eq "windows"}]
 
-set options [dict create -only "" -timeout 1800]
+set options [dict create -only "" -timeout 1800 -first 0]
 foreach {option value} $argv {
     if {![dict exists $options $option]} { error "unknown option $option" }
     dict set options $option $value
@@ -211,6 +215,7 @@ foreach entry [glob -directory $root -types f *.tcl] {
 set results {}
 set manifest [file join $tree native Cargo.toml]
 set timeout [dict get $options -timeout]
+set first [dict get $options -first]
 try {
     foreach {name description hosts edits} $selected {
         if {$host ni $libraryHosts || ($hosts ne {} && $host ni $hosts)} {
@@ -254,23 +259,36 @@ try {
             eval $restore
             continue
         }
-        set killers {}
-        foreach {label target filter} {rust --lib program rust-driver {--bin botlish-native} windows_library} {
-            lassign [run $timeout $tree cargo test --release --manifest-path $manifest {*}$target $filter] status output
-            if {$status != 0} {
-                set failing [lmap {- n} [regexp -all -inline -line {^test (\S+) \.\.\. FAILED$} $output] {set n}]
-                lappend killers "$label ([expr {$failing eq {} ? [lastLine $output] : [join [lrange $failing 0 5] {, }]}])"
-            }
+        # The detectors, each {label kind ARGS}: the Rust unit tests, then
+        # the test files; with -first, the library's test file first (it
+        # kills most mutants, and the Rust tests' builds are the slowest
+        # part on Windows) and nothing after the first killer.
+        set detectors {
+            {rust cargo {--lib program}}
+            {rust-driver cargo {--bin botlish-native windows_library}}
+            {native-library.test tcltest native-library.test}
+            {aot-stub-linker.test tcltest aot-stub-linker.test}
         }
-        foreach {label file match} {
-            native-library.test native-library.test *
-            aot-stub-linker.test aot-stub-linker.test *
-        } {
-            set tmp [file tempdir botlish-native-library-mutant-run]
-            lassign [run $timeout $tree tclsh9.0 [file join $tree tests $file] -tmpdir $tmp -match $match] status output
-            file delete -force $tmp
-            set failure [testFailures $label $output]
-            if {$failure ne ""} { lappend killers $failure }
+        if {$first} {
+            set detectors [concat [lrange $detectors 2 2] [lrange $detectors 0 1] [lrange $detectors 3 3]]
+        }
+        set killers {}
+        foreach detector $detectors {
+            lassign $detector label kind what
+            if {$kind eq "cargo"} {
+                lassign [run $timeout $tree cargo test --release --manifest-path $manifest {*}$what] status output
+                if {$status != 0} {
+                    set failing [lmap {- n} [regexp -all -inline -line {^test (\S+) \.\.\. FAILED$} $output] {set n}]
+                    lappend killers "$label ([expr {$failing eq {} ? [lastLine $output] : [join [lrange $failing 0 5] {, }]}])"
+                }
+            } else {
+                set tmp [file tempdir botlish-native-library-mutant-run]
+                lassign [run $timeout $tree tclsh9.0 [file join $tree tests $what] -tmpdir $tmp] status output
+                file delete -force $tmp
+                set failure [testFailures $label $output]
+                if {$failure ne ""} { lappend killers $failure }
+            }
+            if {$first && $killers ne {}} break
         }
         set verdict [expr {$killers eq {} ? "SURVIVED" : "KILLED"}]
         lappend results [list $name $description $verdict $killers]

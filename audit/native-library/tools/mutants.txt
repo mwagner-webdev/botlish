@@ -57,6 +57,7 @@ proc native::library::TopLevelProblems {hir} {
 >>>>
 
 @@ symbols-global the library's runtime and program symbols stay global (two libraries collide)
+%% linux-x86_64 linux-aarch64
 ## native/library.tcl
 <<<<
         library::Tool objcopy --strip-debug --keep-global-symbols=$keep $linked $final

@@ -101,7 +101,7 @@
 #   utf16-mutants         tclsh9.0 audit/abi-bytes/tools/utf16-mutate.tcl ?-only NAMES?
 #   native-library-fuzz   tclsh9.0 audit/native-library/tools/fuzz.tcl -seed S, seeds 1
 #                         and 2, and -seed 9 -gc-stress 1
-#   native-library-mutants  tclsh9.0 audit/native-library/tools/mutate.tcl ?-only NAMES?
+#   native-library-mutants  tclsh9.0 audit/native-library/tools/mutate.tcl -first 1 ?-only NAMES?
 #   native-library-bench  tclsh9.0 bench/native-library.tcl
 #   utf16-bench           tclsh9.0 bench/utf16-bytes.tcl and bench/filesystem.tcl,
 #                         each -baseline-rev f9e0ed0 (the commit before the
@@ -415,7 +415,7 @@ foreach check $checks {
                     [list $tclsh [file join $root audit abi-bytes tools utf16-mutate.tcl] {*}[expr {$only ne "" ? [list -only $only] : {}}]] plain]
             } elseif {[regexp {^native-library-mutants(?:=(.*))?$} $check -> only]} {
                 lappend commands [list "native library mutants" {} \
-                    [list $tclsh [file join $root audit native-library tools mutate.tcl] {*}[expr {$only ne "" ? [list -only $only] : {}}]] plain]
+                    [list $tclsh [file join $root audit native-library tools mutate.tcl] -first 1 {*}[expr {$only ne "" ? [list -only $only] : {}}]] plain]
             } elseif {[regexp {^filesystem-mutants(?:=(.*))?$} $check -> only]} {
                 lappend commands [list "filesystem mutants" {} \
                     [list $tclsh [file join $root audit filesystem tools mutate.tcl] {*}[expr {$only ne "" ? [list -only $only] : {}}]] plain]
