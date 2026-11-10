@@ -9,7 +9,7 @@ summary: Every facility other languages offer that Botlish lacks or offers only 
 index: concepts
 alias: capabilities; missing features; absent features; unsupported features; does it exist; what is missing; limitations of the language
 keywords: capability, absent, missing, unsupported, limitation, feature, exist, alternative
-related: capability.integer-division capability.string-formatting capability.input capability.files capability.http capability.process-exit-status capability.test-timeout capability.concurrency capability.exceptions capability.multi-error-handler capability.lambdas capability.match capability.map-filter capability.null capability.assignment capability.struct-type-import
+related: capability.integer-division capability.string-formatting capability.input capability.files capability.http capability.processes capability.process-exit-status capability.test-timeout capability.concurrency capability.exceptions capability.multi-error-handler capability.lambdas capability.match capability.map-filter capability.null capability.assignment capability.struct-type-import
 
 == HOW TO FIND OUT WHETHER SOMETHING EXISTS
 Ask for it as you would name it elsewhere: `-help division`, `-help "exit
@@ -521,3 +521,41 @@ loop (`std::event_loop::adopt`): a request waits without blocking the
 loop's other tasks. Linking it needs the host's C compiler driver (`cc`),
 the C++ standard library's link name (`libstdc++.so`) and, for HTTPS, a
 trust bundle (`ca-certificates`).
+
+@topic capability.processes
+title: Child processes: absent from the standard library (process_linux package)
+summary: The standard library cannot start a process; launching, streaming, waiting for and terminating child processes is the Linux x86-64 package `process_linux`, installed with `botlish add`.
+index: concepts
+alias: subprocess; child process; spawn; spawn a process; run a command; run an external program; exec; execute a program; popen; system; shell command; fork; kill a process; wait for a process
+keywords: process, subprocess, child, spawn, exec, command, program, shell, pipe, stdout, stderr, stdin, wait, kill, terminate, signal
+related: capability.process-exit-status capability.concurrency capability.http
+
+== STATUS
+Nothing in `std` starts a process: no spawn, exec, wait, kill or pipe
+function exists in the standard library or the compiler (the compiler's own
+subprocesses, its linkers, are its implementation's and reach no program).
+Starting, supervising and terminating child processes is the official
+package `process_linux`, for Linux x86-64 only: commands without a shell
+(an executable path and an exact argument vector, an environment, a working
+directory, a policy per standard stream), stdout, stderr and stdin as
+byte streams read and written from tasks of the event loop, exit statuses,
+cancellation of waits (interrupt) apart from termination (SIGTERM, a grace
+period, SIGKILL, to the child's process group), and an owner whose lexical
+scope bounds the supervision. It has no pseudo-terminal children, no line
+splitter, no durable job records across a supervisor crash, and no macOS
+or Windows.
+
+== NEAREST ALTERNATIVE
+Install the package and its driver from a repository of released
+artifacts, then follow the README and the user's guide that come with the
+package (in .bot_modules/process_linux):
+
+    botlish add process_linux -repository REPO -target linux-x86_64
+    botlish add event_loop_linux -repository REPO -target linux-x86_64
+
+A program installs the loop, the Linux driver, its integration capability
+and the process authority (`process_linux::create()`) as contexts, and
+supervises children from tasks of the loop (`std::event_loop::adopt`): a
+read, a write or a wait suspends only its task. Linking it needs the host's
+C compiler driver (`cc`) and the C library's development files.
+

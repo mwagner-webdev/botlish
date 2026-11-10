@@ -1,0 +1,326 @@
+# Mutants of the process_linux package (audit/process-linux/tools/mutate.tcl;
+# PROCESS-LINUX-PACKAGE-MILESTONE-1.md, "Mutation testing"). The census's 15
+# (audit/managed-subprocess/tools/mutants.txt) ported to the package, and
+# the package's own.
+#
+#   @@ NAME DESCRIPTION
+#   %% TESTFILE:PATTERN[,PATTERN...]...   tests (a tcltest -match each) of which one must fail
+#   ## FILE                               relative to the repository root
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+#
+# A test that hangs is killed by its own watchdog (timeout) and fails: a
+# hang is a detection, never a pass. A mutant killed only because the test
+# could not set up (the adapter or a scenario program does not compile:
+# every build is -Werror, so a mutant must leave no variable unused) is no
+# detection: the harness reports it NOT-BUILT.
+
+# ---------------------------------------------------------------------------
+# The native adapter (packages/process_linux/native/process_linux.c)
+
+@@ c-sigdefault children inherit the supervisor's signal dispositions: SIGPIPE stays ignored in every child
+%% process-linux.test:process-linux-inherit
+## packages/process_linux/native/process_linux.c
+<<<<
+    if (!FAULT(F_KEEP_SIGNALS)) {
+====
+    if (0) {
+>>>>
+
+@@ c-nonblock the parent's pipe ends stay blocking: a read with nothing there blocks the loop's thread
+%% process-linux.test:process-linux-streams
+## packages/process_linux/native/process_linux.c
+<<<<
+            if (fcntl(mine_end[i], F_SETFL, O_NONBLOCK) < 0) {
+====
+            if (0) {
+>>>>
+
+@@ c-wnowait the status check reaps without recording it: the child is never released (its slot and descriptors leak)
+%% process-linux.test:process-linux-exit-first
+## packages/process_linux/native/process_linux.c
+<<<<
+        int opts = WEXITED | WNOHANG | (FAULT(F_EAGER_REAP) ? 0 : WNOWAIT);
+====
+        int opts = WEXITED | WNOHANG;
+>>>>
+
+@@ c-generation a handle's generation is not checked: a stale handle reaches the slot's next child
+%% process-linux.test:process-linux-adapter
+## packages/process_linux/native/process_linux.c
+<<<<
+    if (!c->used || c->gen != gen) return NULL;
+====
+    if (!c->used) return NULL;
+    (void)gen;
+>>>>
+
+@@ c-group-signal signals reach the child only, never its process group: in-group descendants survive
+%% process-linux.test:process-linux-descendants
+## packages/process_linux/native/process_linux.c
+<<<<
+    unsigned flags = (group && c->group) ? PIDFD_SIGNAL_PROCESS_GROUP : 0;
+====
+    unsigned flags = 0;
+    (void)group;
+>>>>
+
+@@ c-shared-group-signal a group signal reaches a shared child's group: the supervisor's own (and every process in it) is signalled
+%% process-linux.test:process-linux-shared-group
+## packages/process_linux/native/process_linux.c
+<<<<
+    unsigned flags = (group && c->group) ? PIDFD_SIGNAL_PROCESS_GROUP : 0;
+====
+    unsigned flags = group ? PIDFD_SIGNAL_PROCESS_GROUP : 0;
+>>>>
+
+@@ c-cwd-in-parent the working directory is opened without O_DIRECTORY: a file as cwd fails at exec, misreported
+%% process-linux.test:process-linux-launch
+## packages/process_linux/native/process_linux.c
+<<<<
+        cwdfd = open(s->cwd, O_PATH | O_DIRECTORY | O_CLOEXEC);
+====
+        cwdfd = open(s->cwd, O_PATH | O_CLOEXEC);
+>>>>
+
+@@ c-leaking-spawn glibc's pidfd_spawn by default: a pidfd leaked per failed exec (where glibc lacks its fix; with the fix the mutant is no defect and survives)
+%% process-linux.test:process-linux-launch
+## packages/process_linux/native/process_linux.c
+<<<<
+    if (FAULT(F_PIDFD_SPAWN)) {
+====
+    if (1) {
+>>>>
+
+@@ c-closefrom children are not given closefrom(3): a descriptor the supervisor opened without close-on-exec leaks into every child
+%% process-linux.test:process-linux-inherit
+## packages/process_linux/native/process_linux.c
+<<<<
+    if (!FAULT(F_KEEP_FDS) && posix_spawn_file_actions_addclosefrom_np(&fa, 3) != 0) {
+====
+    if (0) {
+>>>>
+
+@@ c-pidfd-orphan a child whose pidfd could not be opened is left running, unsupervised and unreaped
+%% process-linux.test:process-linux-pidfd-fail
+## packages/process_linux/native/process_linux.c
+<<<<
+                if (s->group) kill(-pid, SIGKILL);
+                kill(pid, SIGKILL);
+                while (waitpid(pid, NULL, 0) < 0 && errno == EINTR) {}
+====
+                (void)pid;
+>>>>
+
+@@ c-thread-end a thread's end leaves its supervised children running (and unreaped)
+%% process-linux.test:process-linux-thread-end,process-linux-adapter
+## packages/process_linux/native/process_linux.c
+<<<<
+        pthread_mutex_unlock(&LOCK);
+        kill_and_reap(c);
+====
+        pthread_mutex_unlock(&LOCK);
+>>>>
+
+@@ c-sigchld-ignored a process whose SIGCHLD is ignored spawns anyway: its children reap themselves behind the supervisor's back
+%% process-linux.test:process-linux-unsupported
+## packages/process_linux/native/process_linux.c
+<<<<
+    if (children_reap_themselves()) {
+        last_stage = STAGE_KERNEL;
+====
+    if (0) {
+        last_stage = STAGE_KERNEL;
+>>>>
+
+@@ c-old-kernel-fallback a kernel without group signals through a pidfd signals nothing: descendants survive
+%% process-linux.test:process-linux-old-kernel
+## packages/process_linux/native/process_linux.c
+<<<<
+        r = kill(-c->pid, sig);
+====
+        r = -1;
+>>>>
+
+@@ c-signal-after-reap a signal after the reap is not refused (a reaped child's PID may name another process)
+%% process-linux.test:process-linux-adapter
+## packages/process_linux/native/process_linux.c
+<<<<
+    if (c->reaped) return -ESRCH;
+====
+    (void)0;
+>>>>
+
+@@ c-owner-thread another thread's call on a child is not refused
+%% process-linux.test:process-linux-adapter
+## packages/process_linux/native/process_linux.c
+<<<<
+    if (c->owner != me) {
+====
+    (void)me;
+    if (0) {
+>>>>
+
+# ---------------------------------------------------------------------------
+# The module (packages/process_linux/process_linux.bot)
+
+@@ m-interrupt interrupt does not move the generation: a suspended read or wait is not cancelled
+%% process-linux.test:process-linux-cancel
+## packages/process_linux/process_linux.bot
+<<<<
+    vput(p.gen, i, vget(p.gen, i) + 1)
+====
+    vget(p.gen, i)
+>>>>
+
+@@ m-alarm deadline waits never wake at their deadline
+%% process-linux.test:process-linux-terminate
+## packages/process_linux/process_linux.bot
+<<<<
+            target.post(-1, 0)
+====
+            std::event_loop::pending(target)
+>>>>
+
+@@ m-escalate no SIGKILL at the end of the grace period
+%% process-linux.test:process-linux-terminate
+## packages/process_linux/process_linux.bot
+<<<<
+        ll(h).pl_signal(9, 1)
+        bump(s_escalations)
+====
+        bump(s_escalations)
+>>>>
+
+@@ m-release-term a release sends no SIGTERM: a child that would stop gracefully is killed at the grace period
+%% process-linux.test:process-linux-release
+## packages/process_linux/process_linux.bot
+<<<<
+    ll(handle).pl_signal(15, 1)
+    hand_over(index)
+====
+    hand_over(index)
+>>>>
+
+@@ m-read-eagain EAGAIN read as end of file: a reader stops at the first empty pipe
+%% process-linux.test:process-linux-streams
+## packages/process_linux/process_linux.bot
+<<<<
+        if got == 0:
+            return std::abi::bytes::from_list([])
+====
+        if got == 0 or got == -11:
+            return std::abi::bytes::from_list([])
+>>>>
+
+@@ m-write-partial a short write counted as complete: the rest of the data is never written
+%% process-linux.test:process-linux-stdin-partial
+## packages/process_linux/process_linux.bot
+<<<<
+            done.set(0, offset + w):
+====
+            done.set(0, total):
+>>>>
+
+@@ m-retire-keys retirement leaves the child's slot marked: the context counts it supervised forever
+%% process-linux.test:process-linux-release
+## packages/process_linux/process_linux.bot
+<<<<
+        ll(h).pl_release()
+    vput(p.keys, i, 0)
+    vput(p.phase, i, 0)
+====
+        ll(h).pl_release()
+>>>>
+
+@@ m-exit-broadcast the exit watch is not re-armed: a second waiter of the same child waits forever
+%% process-linux.test:process-linux-waiters
+## packages/process_linux/process_linux.bot
+<<<<
+            event_loop_linux::rearm(watch_at(i, 3)):
+                on std::event_loop::DriverFault {code}:
+                    fail ProcessFault {reason: "the Linux driver refused to re-arm the exit watch", code: 0 - code}
+            break
+====
+            break
+>>>>
+
+@@ m-fair a stream that keeps delivering never yields: its reader starves timers and other tasks
+%% process-linux.test:process-linux-fairness
+## packages/process_linux/process_linux.bot
+<<<<
+        vput(p.burst, 4 * i + k, 0)
+        std::event_loop::yield_now()
+====
+        vput(p.burst, 4 * i + k, 0)
+>>>>
+
+@@ m-final-group-kill the end of supervision leaves the group's members running once the leader exited
+%% process-linux.test:process-linux-descendants
+## packages/process_linux/process_linux.bot
+<<<<
+    ll(h).pl_signal(9, 1)
+    ll(h).pl_reap()
+    retire(i, h)
+====
+    ll(h).pl_reap()
+    retire(i, h)
+>>>>
+
+@@ m-stale-on-release the identity stays usable after its owner is released (until the reaper retires it)
+%% process-linux.test:process-linux-release
+## packages/process_linux/process_linux.bot
+<<<<
+    if not holds?(c.index, c.handle, 1):
+        fail StaleChild
+    c.index
+====
+    if vget(p.keys, c.index) != c.handle:
+        fail StaleChild
+    c.index
+>>>>
+
+@@ m-spec-leak an invalid command's native spec is not freed: after 64 rejections nothing can be spawned
+%% process-linux.test:process-linux-invalid
+## packages/process_linux/process_linux.bot
+<<<<
+        ll(id).pl_spec_free()
+        fail InvalidCommand {item: problem.item, reason: item_reason(problem.code)}
+====
+        fail InvalidCommand {item: problem.item, reason: item_reason(problem.code)}
+>>>>
+
+@@ m-detach-unreaped a detached child is never reaped: it stays a zombie of the supervisor
+%% process-linux.test:process-linux-detach
+## packages/process_linux/process_linux.bot
+<<<<
+    coroutine {step, first} = detached(h2)
+    std::event_loop::adopt(step, first)
+====
+    h2 + 0
+>>>>
+
+@@ m-detach-keepalive a detached child's exit watch keeps the loop alive: the supervisor waits for a process it let go
+%% process-linux.test:process-linux-detach-outlive
+## packages/process_linux/process_linux.bot
+<<<<
+    reg = std::event_loop::source(Delivery::Coalesce, 1)
+    reap_detached(
+====
+    reg = std::event_loop::source(Delivery::Coalesce, 1, :keep_alive)
+    reap_detached(
+>>>>
+
+@@ m-release-wake a release does not wake the identity's suspended operations: a read waits for the child's retirement
+%% process-linux.test:process-linux-release-reader
+## packages/process_linux/process_linux.bot
+<<<<
+            reg.post(-3, 0):
+                on std::event_loop::SchedulerFault:
+                    std::event_loop::Posted::NotLive
+====
+            reg.native_slot()
+>>>>

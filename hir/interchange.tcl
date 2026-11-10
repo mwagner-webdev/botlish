@@ -100,6 +100,9 @@ proc hir::interchange::encode {hir args} {
     if {![dict get $options -trait-source]} {
         set hir [dict remove $hir traitSource]
     }
+    # (The checked program before the elaborations, kept for the
+    # DISCARDED-MUTATION warning only: the HIR carries the warnings it gave.)
+    set hir [dict remove $hir checkedSource]
     return "$magic $version\n[list compiler [fingerprint] requires $::core::loadedLibraries hir [WithoutRepresentations $hir]]\n"
 }
 

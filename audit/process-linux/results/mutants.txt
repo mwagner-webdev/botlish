@@ -1,0 +1,108 @@
+KILLED c-sigdefault (39 s)
+    killed (process-linux.test: 1 failed: process-linux-inherit)
+KILLED c-nonblock (160 s)
+    killed (process-linux.test: 1 failed: process-linux-streams)
+KILLED c-wnowait (45 s)
+    killed (process-linux.test: 1 failed: process-linux-exit-first)
+KILLED c-generation (1 s)
+    killed (process-linux.test: 1 failed: process-linux-adapter)
+KILLED c-group-signal (1 s)
+    killed (process-linux.test: 1 failed: process-linux-descendants)
+KILLED c-cwd-in-parent (45 s)
+    killed (process-linux.test: 1 failed: process-linux-launch)
+KILLED c-leaking-spawn (46 s)
+    killed (process-linux.test: 1 failed: process-linux-launch)
+KILLED c-closefrom (48 s)
+    killed (process-linux.test: 1 failed: process-linux-inherit)
+KILLED c-pidfd-orphan (46 s)
+    killed (process-linux.test: 1 failed: process-linux-pidfd-fail)
+KILLED c-thread-end (34 s)
+    killed (process-linux.test: 2 failed: process-linux-adapter, process-linux-thread-end)
+KILLED c-sigchld-ignored (165 s)
+    killed (process-linux.test: 1 failed: process-linux-unsupported)
+KILLED c-old-kernel-fallback (74 s)
+    killed (process-linux.test: 1 failed: process-linux-old-kernel)
+SURVIVED c-signal-after-reap (2 s)
+    survived
+KILLED c-owner-thread (1 s)
+    killed (process-linux.test: 1 failed: process-linux-adapter)
+KILLED m-interrupt (43 s)
+    killed (process-linux.test: 1 failed: process-linux-cancel)
+KILLED m-alarm (54 s)
+    killed (process-linux.test: 1 failed: process-linux-terminate)
+KILLED m-escalate (53 s)
+    killed (process-linux.test: 1 failed: process-linux-terminate)
+KILLED m-release-term (44 s)
+    killed (process-linux.test: 1 failed: process-linux-release)
+KILLED m-read-eagain (165 s)
+    killed (process-linux.test: 1 failed: process-linux-streams)
+KILLED m-write-partial (61 s)
+    killed (process-linux.test: 1 failed: process-linux-stdin-partial)
+KILLED m-retire-keys (46 s)
+    killed (process-linux.test: 1 failed: process-linux-release)
+KILLED m-exit-broadcast (160 s)
+    killed (process-linux.test: 1 failed: process-linux-waiters)
+SURVIVED m-fair (47 s)
+    survived
+KILLED m-final-group-kill (45 s)
+    killed (process-linux.test: 1 failed: process-linux-descendants)
+KILLED m-stale-on-release (44 s)
+    killed (process-linux.test: 1 failed: process-linux-release)
+KILLED m-spec-leak (49 s)
+    killed (process-linux.test: 1 failed: process-linux-invalid)
+KILLED m-detach-unreaped (45 s)
+    killed (process-linux.test: 1 failed: process-linux-detach)
+KILLED m-detach-keepalive (49 s)
+    killed (process-linux.test: 1 failed: process-linux-detach-outlive)
+KILLED m-release-wake (44 s)
+    killed (process-linux.test: 1 failed: process-linux-release-reader)
+29 mutants, 27 killed, 2 survived: c-signal-after-reap, m-fair
+
+real	27m37.296s
+user	19m19.001s
+sys	1m8.015s
+
+# second run, after the three weak C kills were rewritten to compile and m-fair's detector was strengthened
+KILLED c-generation (2 s)
+    killed (process-linux.test: 1 failed: process-linux-adapter)
+KILLED c-group-signal (42 s)
+    killed (process-linux.test: 1 failed: process-linux-descendants)
+KILLED c-owner-thread (2 s)
+    killed (process-linux.test: 1 failed: process-linux-adapter)
+KILLED m-fair (47 s)
+    killed (process-linux.test: 1 failed: process-linux-fairness)
+4 mutants, 4 killed, 0 survived
+
+real	1m33.147s
+user	1m27.997s
+sys	0m4.037s
+
+# third run, after the branch's CI canary: c-signal-after-reap had survived
+# the first run unnoticed (a reaped child's pidfd answers ESRCH by itself);
+# the adapter test now signals a group after the reap while a member runs.
+# The other mutants whose detectors changed, rerun (two invocations: the
+# adapter's four again after its group check was added).
+KILLED c-sigdefault (43 s)
+    killed (process-linux.test: 1 failed: process-linux-inherit)
+KILLED c-generation (2 s)
+    killed (process-linux.test: 1 failed: process-linux-adapter)
+KILLED c-leaking-spawn (42 s)
+    killed (process-linux.test: 1 failed: process-linux-launch)
+KILLED c-closefrom (43 s)
+    killed (process-linux.test: 1 failed: process-linux-inherit)
+KILLED c-thread-end (32 s)
+    killed (process-linux.test: 2 failed: process-linux-adapter, process-linux-thread-end)
+KILLED c-signal-after-reap (2 s)
+    killed (process-linux.test: 1 failed: process-linux-adapter)
+KILLED c-owner-thread (2 s)
+    killed (process-linux.test: 1 failed: process-linux-adapter)
+7 mutants, 7 killed, 0 survived
+
+# fourth run, after the shared-group scenario's rewrite (it relied on the
+# child's own lines, which a termination may precede): the new mutant of a
+# group signal reaching a shared child's group, and its neighbour.
+KILLED c-group-signal (46 s)
+    killed (process-linux.test: 1 failed: process-linux-descendants)
+KILLED c-shared-group-signal (76 s)
+    killed (process-linux.test: 1 failed: process-linux-shared-group)
+2 mutants, 2 killed, 0 survived

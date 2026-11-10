@@ -952,7 +952,9 @@ namespace):
   to `any` while the value is still precise. Unchanged: 1000 deep it is the
   same diagnostic at the same place as 7 deep (`dsn-box-bound`), where the
   front end used to fail with TCL LIMIT STACK at 100. That precision limit
-  is the next milestone's candidate, not this one's.
+  is the next milestone's candidate, not this one's. (Removed by
+  APPLIED-TYPE-BOUND-PRECISION-MILESTONE-1.md: `dsn-box-bound` now pins the
+  specimen accepted 6, 7 and 1000 deep.)
 * **Superlinear phases left** (section 20 has the numbers). None is a
   depth limit -- each compiles 1000 deep -- and each is an algorithm's
   cost, not the segments':

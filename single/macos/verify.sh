@@ -2,7 +2,8 @@
 # single/macos/verify.sh -- checks a built Botlish.app
 # (MACOS-AARCH64-MILESTONE-9.md, "Verification").
 #
-#   single/macos/verify.sh [--checkout ROOT] [--no-developer-tools] APP
+#   single/macos/verify.sh [--checkout ROOT] [--no-developer-tools]
+#                          [--signature adhoc|developer-id --team TEAM] APP
 #
 # Checks APP as single/macos/build.sh makes it, without running it:
 #
@@ -19,10 +20,20 @@
 #                 of them loads is the system's (/usr/lib, /System/Library);
 #                 no load path is absolute outside the system (a build
 #                 directory, /Library/Frameworks, Homebrew)
-#   signature     ad hoc and valid: codesign --verify --deep --strict of the
+#   signature     valid: codesign --verify --deep --strict of the
 #                 application and --strict of each nested code (the
 #                 framework's version, the driver), each with its own
-#                 identifier, none merely linker-signed, the resources sealed
+#                 identifier, none merely linker-signed, the resources
+#                 sealed, each with the hardened runtime and no entitlement
+#                 (MACOS-BOTLISH-DISTRIBUTION-MILESTONE-1.md); ad hoc (the
+#                 default, --signature adhoc), or --signature developer-id:
+#                 each a Developer ID Application signature of team TEAM
+#                 (Developer ID Certification Authority, Apple Root CA) with
+#                 a secure timestamp
+#   no JIT        the driver holds no JIT: no symbol of Cranelift's JIT
+#                 crate, and no Mach-O of the bundle imports the functions
+#                 that write JIT memory (pthread_jit_write_protect_np) or
+#                 flush code made at run time (sys_icache_invalidate)
 #   archive       Resources/botlish.zip holds the compiler (main.tcl,
 #                 botlish/...), no native executable and no Tcl library,
 #                 and its native-bin/ID names the bundled driver and runtime
@@ -37,14 +48,23 @@ set -euo pipefail
 
 checkout=""
 tools=1
+signature=adhoc
+team=""
 while [[ $# -gt 1 ]]; do
   case $1 in
     --checkout) checkout=$2; shift 2 ;;
     --no-developer-tools) tools=0; shift ;;
+    --signature) signature=$2; shift 2 ;;
+    --team) team=$2; shift 2 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
-[[ $# -eq 1 ]] || { echo "usage: single/macos/verify.sh [--checkout ROOT] [--no-developer-tools] APP" >&2; exit 2; }
+[[ $# -eq 1 ]] || { echo "usage: single/macos/verify.sh [--checkout ROOT] [--no-developer-tools] [--signature adhoc|developer-id --team TEAM] APP" >&2; exit 2; }
+case $signature in
+  adhoc) ;;
+  developer-id) [[ $team =~ ^[A-Z0-9]{10}$ ]] || { echo "single/macos/verify.sh: --signature developer-id needs --team TEAM (a 10-character Team ID)" >&2; exit 2; } ;;
+  *) echo "single/macos/verify.sh: unknown signature kind $signature (adhoc, developer-id)" >&2; exit 2 ;;
+esac
 app=$(cd "$1" && pwd)
 c="$app/Contents"
 identifier=io.github.mwagner-webdev.botlish
@@ -120,19 +140,48 @@ fi
 codesign --verify --deep --strict --verbose=2 "$app" >"${TMPDIR:-/tmp}/botlish-verify.$$" 2>&1 ||
   { cat "${TMPDIR:-/tmp}/botlish-verify.$$" >&2; rm -f "${TMPDIR:-/tmp}/botlish-verify.$$"; fail signature "codesign --verify --deep --strict rejects the application"; }
 rm -f "${TMPDIR:-/tmp}/botlish-verify.$$"
-signed() { # PATH IDENTIFIER
-  local details
+signed() { # PATH IDENTIFIER [sealed]
+  local details entitlements
   codesign --verify --strict "$1" 2>/dev/null || fail signature "${1#$app/} does not verify"
-  details=$(codesign -dv "$1" 2>&1)
-  grep -qx 'Signature=adhoc' <<<"$details" || fail signature "${1#$app/} is not signed ad hoc: $(tr '\n' ';' <<<"$details")"
+  details=$(codesign -dvvv "$1" 2>&1)
+  if [[ $signature == adhoc ]]; then
+    grep -qx 'Signature=adhoc' <<<"$details" || fail signature "${1#$app/} is not signed ad hoc: $(tr '\n' ';' <<<"$details")"
+  else
+    if grep -qx 'Signature=adhoc' <<<"$details"; then fail signature "${1#$app/} is signed ad hoc, not with the Developer ID"; fi
+    [[ $(grep '^Authority=' <<<"$details" | sed 's/^Authority=//' | tr '\n' '|') == "Developer ID Application: "*"($team)|Developer ID Certification Authority|Apple Root CA|" ]] ||
+      fail signature "${1#$app/}'s authority chain is not team $team's Developer ID Application, Developer ID Certification Authority, Apple Root CA: $(grep '^Authority=' <<<"$details" | tr '\n' ';')"
+    grep -qx "TeamIdentifier=$team" <<<"$details" || fail signature "${1#$app/}'s team is not $team: $(grep '^TeamIdentifier=' <<<"$details")"
+    grep -q '^Timestamp=' <<<"$details" || fail signature "${1#$app/} has no secure timestamp"
+  fi
   grep -qx "Identifier=$2" <<<"$details" || fail signature "${1#$app/}'s identifier is not $2: $(grep '^Identifier=' <<<"$details")"
   if grep -q '^CodeDirectory.*flags=.*linker-signed' <<<"$details"; then fail signature "${1#$app/} is only linker-signed"; fi
+  grep -q '^CodeDirectory.*flags=0x[0-9a-f]*(.*runtime.*)' <<<"$details" ||
+    fail signature "${1#$app/} has no hardened runtime: $(grep '^CodeDirectory' <<<"$details")"
+  entitlements=$(codesign -d --entitlements - --xml "$1" 2>/dev/null | tr -d '\0' || true)
+  if grep -q '<key>' <<<"$entitlements"; then fail signature "${1#$app/} has entitlements (none is needed): $(grep -o '<key>[^<]*</key>' <<<"$entitlements" | tr '\n' ' ')"; fi
   if [[ ${3:-} == sealed ]]; then grep -q '^Sealed Resources version=2' <<<"$details" || fail signature "${1#$app/} has no sealed resources"; fi
 }
 signed "$fw/Versions/$v" com.tcltk.tcllibrary sealed
 signed "$c/MacOS/botlish-native" "$identifier.native"
 signed "$app" "$identifier" sealed
-echo "   signature: ok (ad hoc; application, framework and driver verify strictly)"
+if [[ $signature == adhoc ]]; then
+  echo "   signature: ok (ad hoc, hardened runtime, no entitlement; application, framework and driver verify strictly)"
+else
+  echo "   signature: ok (Developer ID of team $team, secure timestamps, hardened runtime, no entitlement; application, framework and driver verify strictly)"
+fi
+
+# --- no JIT -------------------------------------------------------------------
+if (( tools )); then
+  jit_symbols=$(nm "$c/MacOS/botlish-native" 2>/dev/null | grep -c 'cranelift_jit' || true)
+  [[ $jit_symbols == 0 ]] || fail "no JIT" "the driver holds $jit_symbols symbols of Cranelift's JIT crate: it was built with its JIT"
+  for path in MacOS/botlish MacOS/botlish-native "Frameworks/Tcl.framework/Versions/$v/Tcl"; do
+    imports=$(nm -u "$c/$path" 2>/dev/null | grep -E '_pthread_jit_write_protect_np|_sys_icache_invalidate' || true)
+    [[ -z $imports ]] || fail "no JIT" "Contents/$path imports $(tr '\n' ' ' <<<"$imports")(functions of code made at run time)"
+  done
+  echo "   no JIT: ok (no JIT crate in the driver; no Mach-O imports JIT memory or instruction-cache functions)"
+else
+  echo "   no JIT: SKIPPED (--no-developer-tools: nm is the developer tools')"
+fi
 
 # --- archive ------------------------------------------------------------------
 zip="$c/Resources/botlish.zip"

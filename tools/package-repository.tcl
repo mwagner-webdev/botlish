@@ -73,7 +73,7 @@ foreach arg $argv {
 }
 if {$out eq ""} usage
 if {$names eq ""} {
-    set names {sdl3 sdlkit raven event_loop_linux boringssl http}
+    set names {sdl3 sdlkit raven event_loop_linux boringssl http process_linux}
 }
 
 namespace eval author {
@@ -536,6 +536,27 @@ proc author::event_loop_linux {dir targets} {
     file delete [file join $dir native botlish_event_loop.h]
 }
 
+# The process package (PROCESS-LINUX-PACKAGE-MILESTONE-1.md): its C adapter
+# compiled with the flags every build of it uses (tools/process-linux.tcl's
+# archiveFlags), without PL_TESTING (the released archive has no probe and
+# no fault bit); the project's license as its notice. Linux x86-64 only: the
+# package's one target, so its metadata names no other (another target is
+# UNSUPPORTED to the package manager, never a guess).
+proc author::process_linux {dir targets} {
+    variable root
+    variable stage
+    source [file join $root tools process-linux.tcl]
+    botlish package stage $dir -files [file join $root LICENSE] -as licenses/process_linux
+    foreach target $targets {
+        set flags $::processLinux::archiveFlags
+        set adapter [archive $target [list [file join $dir native process_linux.c]] $flags [file join $stage pl-$target libprocess_linux.a]]
+        botlish native add $adapter -target $target -name process_linux -license MIT -notice licenses/process_linux/LICENSE -package $dir
+        build "process adapter $target" [list $target] [list targets/$target/native/libprocess_linux.a] {} adapter \
+            [dict create cc [version [cc $target] --version] ar [version [ar $target] --version]] $flags \
+            [list "[cc $target] -c native/process_linux.c" "[ar $target] rcs libprocess_linux.a process_linux.o"]
+    }
+}
+
 # The BoringSSL provider (HTTP-CLIENT-PACKAGE-MILESTONE-1.md, "The
 # provider"): the pinned release built by tools/http-package.tcl (upstream's
 # CMake, unpatched, unprefixed), its two archives' members in one archive
@@ -678,7 +699,7 @@ proc author::prepare {name stage} {
     }
     set descriptor [pm::descriptor::read [file join $dir botlish.json] pack]
     set targets [dict getdef [dict create sdl3 {linux-aarch64 linux-x86_64} raven {linux-aarch64 linux-x86_64} \
-        event_loop_linux {linux-aarch64 linux-x86_64} boringssl {linux-x86_64} http {linux-x86_64}] $name {}]
+        event_loop_linux {linux-aarch64 linux-x86_64} boringssl {linux-x86_64} http {linux-x86_64} process_linux {linux-x86_64}] $name {}]
     if {$targets eq ""} {
         return [list $dir ""]
     }

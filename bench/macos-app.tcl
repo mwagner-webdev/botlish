@@ -23,7 +23,10 @@
 #   service     the language server: initialize, a document's diagnostics,
 #               shutdown (one session, its analysis worker started)
 #   driver      the native driver's own start (botlish-native target ...)
-#   jit         a native run of a small program (cranelift)
+#   jit         a native run of a small program (cranelift), where the
+#               application's native backend has a JIT; aot-run (-aot-run,
+#               the program built and run as an executable) where it has
+#               none (MACOS-BOTLISH-DISTRIBUTION-MILESTONE-1.md)
 #   executable  -emit-native-executable of the same program, warm: the
 #               front end, Cranelift and the host's link
 #   moved       -version from a fresh copy of the bundle, first and second
@@ -132,7 +135,13 @@ puts $f {frame() { printf 'Content-Length: %d\r\n\r\n%s' "$(printf %s "$1" | LC_
 close $f
 dict set times service [best [list /bin/bash $session $launcher]]
 dict set times driver [best [list [file join $c MacOS botlish-native] target aarch64-apple-darwin]]
-dict set times jit [best [list $launcher -backend cranelift $program]]
+set native jit
+if {[catch {exec $launcher -version} version] || [string first "native JIT: available" $version] < 0} {
+    set native aot-run
+    dict set times aot-run [best [list $launcher -warnings off -aot-run $program]]
+} else {
+    dict set times jit [best [list $launcher -backend cranelift $program]]
+}
 dict set times executable [best [list $launcher -warnings off -emit-native-executable $program]]
 foreach {name ms} $times {
     puts [format "   %-12s %8s" $name $ms]
@@ -140,8 +149,13 @@ foreach {name ms} $times {
 puts [format "   %-12s %8.1f   (tcl - process: loading Tcl.framework, Tcl_Init)" "  tcl" [expr {[dict get $times tcl] - [dict get $times process]}]]
 puts [format "   %-12s %8.1f   (mount - tcl: mounting the compiler archive)" "  mount" [expr {[dict get $times mount] - [dict get $times tcl]}]]
 puts [format "   %-12s %8.1f   (-version - mount: single/main.tcl, main.tcl)" "  compiler" [expr {[dict get $times -version] - [dict get $times mount]}]]
-puts [format "   %-12s %8.1f   (jit - interp: lowering, the driver, Cranelift, the run)" "  native" [expr {[dict get $times jit] - [dict get $times interp]}]]
-puts [format "   %-12s %8.1f   (executable - jit: the object and the host's link, less the run)" "  link" [expr {[dict get $times executable] - [dict get $times jit]}]]
+if {$native eq "jit"} {
+    puts [format "   %-12s %8.1f   (jit - interp: lowering, the driver, Cranelift, the run)" "  native" [expr {[dict get $times jit] - [dict get $times interp]}]]
+    puts [format "   %-12s %8.1f   (executable - jit: the object and the host's link, less the run)" "  link" [expr {[dict get $times executable] - [dict get $times jit]}]]
+} else {
+    puts [format "   %-12s %8.1f   (aot-run - interp: lowering, the driver, the object, the link, the run)" "  native" [expr {[dict get $times aot-run] - [dict get $times interp]}]]
+    puts [format "   %-12s %8.1f   (aot-run - executable: starting the executable and its run)" "  run" [expr {[dict get $times aot-run] - [dict get $times executable]}]]
+}
 
 puts "== a moved application's first and second -version (ms)"
 set runs 1

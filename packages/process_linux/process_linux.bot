@@ -1,0 +1,1325 @@
+# process_linux.bot -- the package `process_linux`: launching, supervising,
+# talking to and terminating external processes on Linux, scheduled by the
+# program's own event loop (PROCESS-LINUX-PACKAGE-MILESTONE-1.md; README.md
+# and GUIDE.md are the user's documentation).
+#
+#   with context std::event_loop::create(64)
+#   with context event_loop_linux::create()          the Linux driver
+#   with context event_loop_linux::native()          its integration capability
+#   with context process_linux::create()             the process authority
+#
+# and, in a task of the loop:
+#
+#   {owner, child} = process_linux::spawn(process_linux::command("/usr/bin/tool", ["--flag", "value"]))
+#   chunk = child.read(process_linux::Stream::Stdout)    # bytes; empty at end of file
+#   child.write(data)
+#   status = child.wait()                                # ExitStatus
+#   process_linux::release(owner)                         # or the owner's scope ends
+#
+# What it is:
+#
+# * No shell: a command is an executable path and an exact argument vector
+#   (a shell is an executable like any other: command("/bin/sh", ["-c",
+#   TEXT])), an environment (the supervisor's with settings and removals, or
+#   an explicit one), a working directory and a policy per standard stream
+#   (a pipe, /dev/null, the supervisor's own, a file).
+# * Bytes are bytes: stdout and stderr are read chunk by chunk and stdin is
+#   written chunk by chunk, as std::abi::bytes::Bytes, concurrently from
+#   ordinary tasks; nothing is decoded, split or accumulated here (an output
+#   policy -- a file, a bounded tail, a limit -- is the reader's code).
+# * One scheduler: every pipe and the child's exit (its pidfd) are readiness
+#   watches of the Linux driver (event_loop_linux), so a task that reads,
+#   writes or waits suspends only itself; no polling, no thread, no signal
+#   handler. A stream that keeps delivering yields to the loop every few
+#   chunks, so timers and other tasks keep running.
+# * Authority: starting a process requires the installed Processes context,
+#   which only an entry program installs; the native functions are private.
+# * Ownership: a child is two values, as event_loop's owned registrations and
+#   the http package's exchanges are -- the OWNER (ChildOwner, an affine
+#   resource: one owner, moved, never copied) and the IDENTITY (Child, an
+#   ordinary value the operations take). The owner's lexical scope bounds
+#   the SUPERVISION, not the process:
+#     - release(owner) -- the owner's cleanup, also where its scope ends,
+#       on every exit and when a task holding it is abandoned -- asks a
+#       running child to stop (SIGTERM to its process group), and hands it to
+#       the context's reaper task, which waits the release grace, kills the
+#       group (SIGKILL) if the child still runs, reaps it and retires it
+#       (watches, registrations, descriptors). A cleanup cannot wait, so the
+#       reaper does; the loop stays alive until the child is reaped.
+#     - finish(owner, grace) waits for the same sequence and returns how the
+#       child ended.
+#     - detach(owner) is the one way to let a process outlive its owner.
+#   The identity is StaleChild once its owner is released (also after its
+#   slot is reused by another child).
+# * Cancellation is not termination: interrupt(child) makes the child's
+#   suspended reads, writes and waits fail Interrupted and leaves the child
+#   running and owned; terminate, kill and send_signal are the operating
+#   system's side.
+# * Identity safety: signals go through the child's pidfd, never a PID
+#   number, and a child is reaped only once its supervision is over, so no
+#   signal can reach an unrelated process through a reused PID.
+#
+# Native programs only (the Tcl backends refuse a C call), Linux x86-64.
+import event_loop_linux
+import std::abi
+import std::abi::bytes
+import std::event_loop
+import std::ffi::c
+import std::int
+import std::list
+import std::mutable_array
+import std::mutable_vector
+import std::str
+import type std::event_loop::Delivery
+import type std::event_loop::Wake
+
+extern c library "process_linux" static at "native/libprocess_linux.a"
+
+private extern c fn pl_abi() -> std::ffi::c::LongLong
+private extern c fn pl_now() -> std::ffi::c::LongLong
+private extern c fn pl_probe() -> std::ffi::c::LongLong
+private extern c fn pl_last_stage() -> std::ffi::c::LongLong
+private extern c fn pl_stat(i: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+private extern c fn pl_index(h: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+private extern c fn pl_spec_new() -> std::ffi::c::LongLong
+private extern c fn pl_spec_free(spec: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+private extern c fn pl_spec_executable(spec: std::ffi::c::LongLong, data: std::ffi::c::Ptr[std::ffi::c::Void] read noescape, n: std::ffi::c::ULong) -> std::ffi::c::LongLong
+private extern c fn pl_spec_arg(spec: std::ffi::c::LongLong, data: std::ffi::c::Ptr[std::ffi::c::Void] read noescape, n: std::ffi::c::ULong) -> std::ffi::c::LongLong
+private extern c fn pl_spec_env_set(spec: std::ffi::c::LongLong, name: std::ffi::c::Ptr[std::ffi::c::Void] read noescape, nn: std::ffi::c::ULong, value: std::ffi::c::Ptr[std::ffi::c::Void] read noescape, vn: std::ffi::c::ULong) -> std::ffi::c::LongLong
+private extern c fn pl_spec_env_unset(spec: std::ffi::c::LongLong, name: std::ffi::c::Ptr[std::ffi::c::Void] read noescape, nn: std::ffi::c::ULong) -> std::ffi::c::LongLong
+private extern c fn pl_spec_env_clear(spec: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+private extern c fn pl_spec_cwd(spec: std::ffi::c::LongLong, data: std::ffi::c::Ptr[std::ffi::c::Void] read noescape, n: std::ffi::c::ULong) -> std::ffi::c::LongLong
+private extern c fn pl_spec_stdio(spec: std::ffi::c::LongLong, which: std::ffi::c::LongLong, policy: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+private extern c fn pl_spec_stdio_file(spec: std::ffi::c::LongLong, which: std::ffi::c::LongLong, data: std::ffi::c::Ptr[std::ffi::c::Void] read noescape, n: std::ffi::c::ULong, append: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+private extern c fn pl_spec_group(spec: std::ffi::c::LongLong, group: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+private extern c fn pl_spawn(spec: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+private extern c fn pl_pid(h: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+private extern c fn pl_fd(h: std::ffi::c::LongLong, which: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+private extern c fn pl_read(h: std::ffi::c::LongLong, which: std::ffi::c::LongLong, buf: std::ffi::c::Ptr[std::ffi::c::Void] write noescape, cap: std::ffi::c::ULong) -> std::ffi::c::LongLong
+private extern c fn pl_write(h: std::ffi::c::LongLong, data: std::ffi::c::Ptr[std::ffi::c::Void] read noescape, n: std::ffi::c::ULong, offset: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+private extern c fn pl_close_stream(h: std::ffi::c::LongLong, which: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+private extern c fn pl_status(h: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+private extern c fn pl_await_exit(h: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+private extern c fn pl_exit_kind(h: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+private extern c fn pl_exit_code(h: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+private extern c fn pl_signal(h: std::ffi::c::LongLong, sig: std::ffi::c::LongLong, group: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+private extern c fn pl_reap(h: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+private extern c fn pl_kill_and_reap(h: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+private extern c fn pl_release(h: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+private extern c fn pl_detach(h: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+private extern c fn pl_sweep() -> std::ffi::c::LongLong
+
+# ---------------------------------------------------------------------------
+# Errors. Codes are the operating system's (a positive errno), never parsed
+# from a message. A child that started and then failed is no error: it has
+# an ExitStatus.
+
+# A command that cannot be started as written: ITEM names the part
+# ("executable", "argument 3", "environment name", "environment value of
+# PATH", "directory", "stdout file", ...) and REASON what is wrong with it
+# ("contains NUL", "is empty", "contains '='"). Nothing was started.
+error InvalidCommand:
+    item: str
+    reason: str
+
+# Where a launch failed: before exec, in the parent (the working directory,
+# a redirection file or /dev/null, a pipe, the adapter's table of children,
+# the child's pidfd), or at exec itself (no such executable, permission
+# denied, not an executable format).
+enum Stage:
+    WorkingDirectory,
+    File,
+    Pipe,
+    Exec,
+    Pidfd,
+    Limit,
+
+# The operating system refused to start the command: STAGE and errno CODE
+# (2 ENOENT, 13 EACCES, 20 ENOTDIR, 24 EMFILE, 8 ENOEXEC, ...). Nothing is
+# left running and no descriptor is left open.
+error LaunchFailed:
+    stage: Stage
+    code: int
+
+# This process cannot supervise children safely, so none is started: the
+# kernel has no pidfds (Linux 5.4 or later is required), or SIGCHLD is
+# ignored in this process (children would be reaped behind the supervisor's
+# back, and their PIDs could name other processes).
+error Unsupported:
+    reason: str
+    code: int
+
+# The identity names no supervised child: its owner was released (finish,
+# detach), or another child now has its slot.
+error StaleChild
+
+# STREAM ("stdin", "stdout", "stderr") is not a pipe of the child, was
+# closed (close_stdin, close_output, the child's retirement, the loop's
+# shutdown), or -- stdin -- the child closed its end (EPIPE).
+error StreamClosed:
+    stream: str
+
+# status(child) of a child that has not exited yet.
+error StillRunning
+
+# interrupt(child) cancelled the operation (or the loop shut down while it
+# waited for the child's exit); the child is unaffected.
+error Interrupted
+
+# A failure of the adapter or the driver that is no property of the child
+# (a refused watch, the adapter's ABI, another thread's child).
+error ProcessFault:
+    reason: str
+    code: int
+
+# ---------------------------------------------------------------------------
+# What to start
+
+# Stdin's policy: a pipe the program writes (the default), /dev/null, or
+# the supervisor's own stdin (inherited: a terminal stops a child of another
+# process group that reads it, SIGTTIN).
+enum Input:
+    Pipe,
+    Null,
+    Inherit,
+
+# Stdout's or stderr's policy: a pipe the program reads (the default),
+# /dev/null, or the supervisor's own (inherited).
+enum Output:
+    Pipe,
+    Null,
+    Inherit,
+
+# How a redirection file is written: emptied first, or appended to.
+enum FileMode:
+    Truncate,
+    Append,
+
+# Own: the child leads a process group of its own (the default), so
+# terminate, kill, send_signal and the end of supervision reach its ordinary
+# descendants too. Shared: the child stays in the supervisor's group, and
+# signals reach the child alone.
+enum Group:
+    Own,
+    Shared,
+
+# A change to the child's environment (applied in order).
+private struct EnvChange:
+    name: str
+    value: str
+    remove: bool
+
+# A process to start: built with command and the with_* functions, checked
+# when it is spawned. Each stream's policy is a code (0 inherit, 1 pipe, 2
+# null, 3 the file *_FILE, appended when *_APPEND).
+opaque struct Command:
+    executable: str
+    arguments: List[str]
+    changes: List[EnvChange]
+    clear: bool
+    directory: str
+    stdin: int
+    stdout: int
+    stderr: int
+    stdin_file: str
+    stdout_file: str
+    stderr_file: str
+    stdout_append: bool
+    stderr_append: bool
+    group: bool
+
+# EXECUTABLE with ARGUMENTS (after argv[0], which is EXECUTABLE): a path,
+# never searched for in PATH (a relative one is resolved in the child's
+# working directory, as execve does); each argument exactly these bytes.
+# Every stream a pipe, the supervisor's environment and working directory, a
+# process group of its own.
+nomethod fn command(executable: str, arguments: List[str]) -> Command:
+    Command {executable: executable, arguments: arguments, changes: [], clear: false, directory: "", stdin: 1, stdout: 1, stderr: 1, stdin_file: "", stdout_file: "", stderr_file: "", stdout_append: false, stderr_append: false, group: true}
+
+private nomethod fn with_changes(c: Command, changes: List[EnvChange], clear: bool) -> Command:
+    Command {executable: c.executable, arguments: c.arguments, changes: changes, clear: clear, directory: c.directory, stdin: c.stdin, stdout: c.stdout, stderr: c.stderr, stdin_file: c.stdin_file, stdout_file: c.stdout_file, stderr_file: c.stderr_file, stdout_append: c.stdout_append, stderr_append: c.stderr_append, group: c.group}
+
+# C started in DIRECTORY (checked when it is spawned: a failure is
+# LaunchFailed at Stage::WorkingDirectory, never at exec).
+fn in_directory(c: Command, directory: str) -> Command:
+    Command {executable: c.executable, arguments: c.arguments, changes: c.changes, clear: c.clear, directory: directory, stdin: c.stdin, stdout: c.stdout, stderr: c.stderr, stdin_file: c.stdin_file, stdout_file: c.stdout_file, stderr_file: c.stderr_file, stdout_append: c.stdout_append, stderr_append: c.stderr_append, group: c.group}
+
+# C with NAME set to VALUE in its environment.
+fn with_env(c: Command, name: str, value: str) -> Command:
+    with_changes(c, c.changes.append(EnvChange {name: name, value: value, remove: false}), c.clear)
+
+# C with NAME removed from its environment.
+fn without_env(c: Command, name: str) -> Command:
+    with_changes(c, c.changes.append(EnvChange {name: name, value: "", remove: true}), c.clear)
+
+# C started from an empty environment (only what with_env sets, before or
+# after this call), never the supervisor's.
+fn with_clear_env(c: Command) -> Command:
+    with_changes(c, c.changes, true)
+
+private nomethod fn input_code(i: Input) -> int:
+    if i == Input::Pipe:
+        1
+    elif i == Input::Null:
+        2
+    else:
+        0
+
+private nomethod fn output_code(o: Output) -> int:
+    if o == Output::Pipe:
+        1
+    elif o == Output::Null:
+        2
+    else:
+        0
+
+private nomethod fn stdin_as(c: Command, policy: int, file: str) -> Command:
+    Command {executable: c.executable, arguments: c.arguments, changes: c.changes, clear: c.clear, directory: c.directory, stdin: policy, stdout: c.stdout, stderr: c.stderr, stdin_file: file, stdout_file: c.stdout_file, stderr_file: c.stderr_file, stdout_append: c.stdout_append, stderr_append: c.stderr_append, group: c.group}
+
+private nomethod fn stdout_as(c: Command, policy: int, file: str, append: bool) -> Command:
+    Command {executable: c.executable, arguments: c.arguments, changes: c.changes, clear: c.clear, directory: c.directory, stdin: c.stdin, stdout: policy, stderr: c.stderr, stdin_file: c.stdin_file, stdout_file: file, stderr_file: c.stderr_file, stdout_append: append, stderr_append: c.stderr_append, group: c.group}
+
+private nomethod fn stderr_as(c: Command, policy: int, file: str, append: bool) -> Command:
+    Command {executable: c.executable, arguments: c.arguments, changes: c.changes, clear: c.clear, directory: c.directory, stdin: c.stdin, stdout: c.stdout, stderr: policy, stdin_file: c.stdin_file, stdout_file: c.stdout_file, stderr_file: file, stdout_append: c.stdout_append, stderr_append: append, group: c.group}
+
+fn with_stdin(c: Command, i: Input) -> Command:
+    stdin_as(c, input_code(i), "")
+
+# C reading its stdin from the file PATH.
+fn with_stdin_file(c: Command, path: str) -> Command:
+    stdin_as(c, 3, path)
+
+fn with_stdout(c: Command, o: Output) -> Command:
+    stdout_as(c, output_code(o), "", false)
+
+# C writing its stdout to the file PATH (created with mode 0666 less the
+# umask): durable output, which survives the supervisor and passes nothing
+# through it.
+fn with_stdout_file(c: Command, path: str, mode: FileMode) -> Command:
+    stdout_as(c, 3, path, mode == FileMode::Append)
+
+fn with_stderr(c: Command, o: Output) -> Command:
+    stderr_as(c, output_code(o), "", false)
+
+fn with_stderr_file(c: Command, path: str, mode: FileMode) -> Command:
+    stderr_as(c, 3, path, mode == FileMode::Append)
+
+fn with_group(c: Command, g: Group) -> Command:
+    Command {executable: c.executable, arguments: c.arguments, changes: c.changes, clear: c.clear, directory: c.directory, stdin: c.stdin, stdout: c.stdout, stderr: c.stderr, stdin_file: c.stdin_file, stdout_file: c.stdout_file, stderr_file: c.stderr_file, stdout_append: c.stdout_append, stderr_append: c.stderr_append, group: g == Group::Own}
+
+fn executable(c: Command) -> str:
+    c.executable
+
+fn arguments(c: Command) -> List[str]:
+    c.arguments
+
+# ---------------------------------------------------------------------------
+# How a child ended
+
+enum Ending:
+    Exited,
+    Signaled,
+    Dumped,
+
+# Exited: CODE is the exit status (0..255). Signaled: CODE is the signal
+# that ended it. Dumped: the same, with a core dump.
+struct ExitStatus:
+    ending: Ending
+    code: int
+
+# Whether S is a normal exit with status 0.
+fn success?(s: ExitStatus) -> bool:
+    s.ending == Ending::Exited and s.code == 0
+
+# "exited 3", "signal 9", "core 6".
+fn status_text(s: ExitStatus) -> str:
+    word = if s.ending == Ending::Exited:
+        "exited "
+    elif s.ending == Ending::Signaled:
+        "signal "
+    else:
+        "core "
+    word.concat(std::int::to_string(s.code))
+
+# The signals send_signal sends (Linux's numbers).
+enum Signal:
+    Hangup,
+    Interrupt,
+    Quit,
+    Kill,
+    User1,
+    User2,
+    Terminate,
+    Continue,
+    Stop,
+
+private nomethod fn signal_number(s: Signal) -> int:
+    if s == Signal::Hangup:
+        1
+    elif s == Signal::Interrupt:
+        2
+    elif s == Signal::Quit:
+        3
+    elif s == Signal::Kill:
+        9
+    elif s == Signal::User1:
+        10
+    elif s == Signal::User2:
+        12
+    elif s == Signal::Terminate:
+        15
+    elif s == Signal::Continue:
+        18
+    else:
+        19
+
+# The streams read reads.
+enum Stream:
+    Stdout,
+    Stderr,
+
+# ---------------------------------------------------------------------------
+# The context
+
+# How the context behaves: RELEASE_GRACE_US is how long a released child that
+# still runs is given between SIGTERM and SIGKILL (default 2 s); BURST is
+# how many chunks a stream that keeps delivering reads or writes before its
+# task yields to the loop (default 4).
+struct Options:
+    release_grace_us: int
+    burst: int
+
+fn options() -> Options:
+    Options {release_grace_us: 2000000, burst: 4}
+
+# Per child, at the adapter's index I of its handle: keys[I] the handle (0:
+# none), phase[I] 1 owned or 2 dying (released, the reaper's), gen[I] the
+# interrupt generation; at 4*I+K (K: 0 stdin, 1 stdout, 2 stderr, 3 exit)
+# its registration, its watch, whether the watch exists (live) and the
+# stream's burst of reads that did not wait. dying: indices a release handed
+# to the reaper and it has not taken yet. kick: the reaper's channel (none
+# until the first spawn). state: the s_* registers below.
+opaque context struct Processes:
+    keys: MutableVector[int]
+    phase: MutableVector[int]
+    gen: MutableVector[int]
+    regs: MutableVector[std::event_loop::Reg]
+    watches: MutableVector[event_loop_linux::Watch]
+    live: MutableVector[int]
+    burst: MutableVector[int]
+    dying: MutableVector[int]
+    kick: MutableVector[std::event_loop::Reg]
+    state: MutableArray[int]
+
+# The adapter ABI this module calls (native/process_linux.c).
+private abi = 1
+private s_reaper = 0
+private s_grace = 1
+private s_burst = 2
+private s_probe = 3
+private s_spawned = 4
+private s_failed = 5
+private s_released = 6
+private s_escalations = 7
+private s_detached = 8
+private s_size = 9
+
+private nomethod fn ll(x: int) -> std::ffi::c::LongLong:
+    if x < -9223372036854775808:
+        -9223372036854775808
+    elif x > 9223372036854775807:
+        9223372036854775807
+    else:
+        x
+
+private nomethod fn text_bytes(t: str) -> std::abi::bytes::Bytes:
+    std::abi::bytes::from_list(std::str::encode_utf8(t))
+
+private nomethod fn sput(place state: MutableArray[int], i: int, v: int):
+    state.set(i, v):
+        on IndexNotFound:
+            unit
+
+private nomethod fn sget(i: int, context p: Processes) -> int:
+    p.state.at(i):
+        on IndexNotFound:
+            0
+
+private nomethod fn bump(i: int, context p: Processes):
+    sput(p.state, i, sget(i) + 1)
+
+private nomethod fn vget(v: MutableVector[int], i: int) -> int:
+    v.at(i):
+        on IndexNotFound:
+            0
+
+private nomethod fn vput(place v: MutableVector[int], i: int, x: int):
+    v.swap(i, x):
+        on IndexNotFound:
+            0
+
+private nomethod fn cell(a: MutableArray[int], i: int) -> int:
+    a.at(i):
+        on IndexNotFound:
+            0
+
+fn create_with(o: Options, context n: event_loop_linux::Native) -> Processes:
+    state = std::mutable_array::create(s_size, 0)
+    probe = if pl_abi() == abi:
+        pl_probe() + 0
+    else:
+        -71
+    sput(state, s_grace, o.release_grace_us)
+    sput(state, s_burst, o.burst)
+    sput(state, s_probe, probe)
+    Processes {keys: std::mutable_vector::from_list([]), phase: std::mutable_vector::from_list([]), gen: std::mutable_vector::from_list([]), regs: std::mutable_vector::from_list([]), watches: std::mutable_vector::from_list([]), live: std::mutable_vector::from_list([]), burst: std::mutable_vector::from_list([]), dying: std::mutable_vector::from_list([]), kick: std::mutable_vector::from_list([]), state: state}
+
+# The process authority of this VM, with the default options. Made from the
+# Linux driver's integration capability: a program needs the driver
+# installed (and its loop running) to supervise children.
+fn create(context n: event_loop_linux::Native) -> Processes:
+    create_with(options())
+
+# The owner and the identity of a child.
+opaque resource struct ChildOwner:
+    handle: int
+    index: int
+
+opaque struct Child:
+    handle: int
+    index: int
+
+struct Spawned:
+    owner: ChildOwner
+    child: Child
+
+# The clock the adapter and the Linux driver share (CLOCK_MONOTONIC, us):
+# std::event_loop's timers run on it. Deadlines here are on it.
+fn now_us() -> int:
+    pl_now() + 0
+
+# ---------------------------------------------------------------------------
+# Spawning
+
+# What a spec item's code means (native/process_linux.c's E_*).
+private nomethod fn item_reason(code: int) -> str:
+    if code == -1001:
+        "contains NUL"
+    elif code == -1002:
+        "is empty"
+    elif code == -1003:
+        "contains '='"
+    elif code == -12:
+        "could not be stored (no memory)"
+    else:
+        "was refused, code ".concat(std::int::to_string(code))
+
+private struct Problem:
+    code: int
+    item: str
+
+private nomethod fn ok() -> Problem:
+    Problem {code: 0, item: ""}
+
+private nomethod fn stream_name(which: int) -> str:
+    if which == 0:
+        "stdin"
+    elif which == 1:
+        "stdout"
+    else:
+        "stderr"
+
+# Stream WHICH of spec ID: POLICY, or the file FILE (APPEND).
+private nomethod fn stream_item(id: int, which: int, policy: int, file: str, append: bool) -> Problem:
+    if policy == 3:
+        f = text_bytes(file)
+        app = if append:
+            1
+        else:
+            0
+        rf = ll(id).pl_spec_stdio_file(ll(which), f, std::abi::bytes::length(f).value, ll(app)) + 0
+        if rf < 0:
+            return Problem {code: rf, item: stream_name(which).concat(" file")}
+    else:
+        ll(id).pl_spec_stdio(ll(which), ll(policy))
+    ok()
+
+# The native spec ID made from C, item by item: the first item the adapter
+# refused (code < 0), or ok().
+private nomethod fn build(id: int, c: Command) -> Problem:
+    exe = text_bytes(c.executable)
+    r = ll(id).pl_spec_executable(exe, std::abi::bytes::length(exe).value) + 0
+    if r < 0:
+        return Problem {code: r, item: "executable"}
+    count = std::list::length(c.arguments)
+    loop i from 0 to count:
+        b = text_bytes(std::list::get(c.arguments, i, ""))
+        ra = ll(id).pl_spec_arg(b, std::abi::bytes::length(b).value) + 0
+        if ra < 0:
+            return Problem {code: ra, item: "argument ".concat(std::int::to_string(i + 1))}
+    if c.clear:
+        ll(id).pl_spec_env_clear()
+    loop e in c.changes:
+        name = text_bytes(e.name)
+        re = if e.remove:
+            ll(id).pl_spec_env_unset(name, std::abi::bytes::length(name).value) + 0
+        else:
+            value = text_bytes(e.value)
+            ll(id).pl_spec_env_set(name, std::abi::bytes::length(name).value, value, std::abi::bytes::length(value).value) + 0
+        if re == -1005:
+            return Problem {code: -1001, item: "environment value of ".concat(e.name)}
+        if re < 0:
+            return Problem {code: re, item: "environment name"}
+    if std::str::length(c.directory) > 0:
+        d = text_bytes(c.directory)
+        rd = ll(id).pl_spec_cwd(d, std::abi::bytes::length(d).value) + 0
+        if rd < 0:
+            return Problem {code: rd, item: "directory"}
+    r0 = stream_item(id, 0, c.stdin, c.stdin_file, false)
+    if r0.code != 0:
+        return r0
+    r1 = stream_item(id, 1, c.stdout, c.stdout_file, c.stdout_append)
+    if r1.code != 0:
+        return r1
+    r2 = stream_item(id, 2, c.stderr, c.stderr_file, c.stderr_append)
+    if r2.code != 0:
+        return r2
+    group = if c.group:
+        1
+    else:
+        0
+    ll(id).pl_spec_group(ll(group))
+    ok()
+
+private nomethod fn stage_of(code: int) -> Stage:
+    if code == 2:
+        Stage::WorkingDirectory
+    elif code == 3:
+        Stage::File
+    elif code == 4:
+        Stage::Pipe
+    elif code == 6:
+        Stage::Limit
+    elif code == 7:
+        Stage::Pidfd
+    else:
+        Stage::Exec
+
+private nomethod fn unsupported_reason(code: int) -> str:
+    if code == -38:
+        "the kernel has no pidfd_open (Linux 5.3 or later is required)"
+    elif code == -22:
+        "the kernel has no waitid(P_PIDFD) (Linux 5.4 or later is required)"
+    elif code == -10:
+        "SIGCHLD is ignored in this process: its children are reaped automatically"
+    elif code == -71:
+        "the native adapter's ABI is another than this module's"
+    else:
+        "the process cannot supervise children, code ".concat(std::int::to_string(code))
+
+# Grow the per-index tables to hold index I (placeholders: REG, W).
+private nomethod fn grow(i: int, reg: std::event_loop::Reg, w: event_loop_linux::Watch, context p: Processes):
+    loop:
+        if std::mutable_vector::length(p.keys) > i:
+            break
+        p.keys.push(0)
+        p.phase.push(0)
+        p.gen.push(0)
+        loop k from 0 to 4:
+            p.regs.push(reg)
+            p.watches.push(w)
+            p.live.push(0)
+            p.burst.push(0)
+
+# Registrations and watches for the child H at index I: stdin writable,
+# stdout and stderr readable (where piped), the pidfd readable. Each
+# registration is a keep-alive Coalesce source of capacity 1: a task that
+# waits on it keeps the loop running.
+private nomethod fn adopt_child(h: int, i: int, context p: Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native) errors std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    pidfd = ll(h).pl_fd(3) + 0
+    exit_reg = std::event_loop::source(Delivery::Coalesce, 1, :keep_alive)
+    exit_watch = event_loop_linux::watch(pidfd, event_loop_linux::Interest::Readable, exit_reg):
+        on std::event_loop::DriverFault {code}:
+            std::event_loop::revoke(exit_reg)
+            fail std::event_loop::DriverFault {code: code}
+    grow(i, exit_reg, exit_watch)
+    vput(p.keys, i, h)
+    vput(p.phase, i, 1)
+    loop k from 0 to 3:
+        vput(p.live, 4 * i + k, 0)
+        vput(p.burst, 4 * i + k, 0)
+    p.regs.swap(4 * i + 3, exit_reg):
+        on IndexNotFound:
+            exit_reg
+    p.watches.swap(4 * i + 3, exit_watch):
+        on IndexNotFound:
+            exit_watch
+    vput(p.live, 4 * i + 3, 1)
+    vput(p.burst, 4 * i + 3, 0)
+    loop k from 0 to 3:
+        fd = ll(h).pl_fd(ll(k)) + 0
+        if fd >= 0:
+            reg = std::event_loop::source(Delivery::Coalesce, 1, :keep_alive)
+            interest = if k == 0:
+                event_loop_linux::Interest::Writable
+            else:
+                event_loop_linux::Interest::Readable
+            w = event_loop_linux::watch(fd, interest, reg):
+                on std::event_loop::DriverFault {code}:
+                    std::event_loop::revoke(reg)
+                    fail std::event_loop::DriverFault {code: code}
+            p.regs.swap(4 * i + k, reg):
+                on IndexNotFound:
+                    reg
+            p.watches.swap(4 * i + k, w):
+                on IndexNotFound:
+                    w
+            vput(p.live, 4 * i + k, 1)
+
+# ---------------------------------------------------------------------------
+# Slots
+
+# Whether index I holds the child H in phase PHASE.
+private nomethod fn holds?(i: int, h: int, phase: int, context p: Processes) -> bool:
+    vget(p.keys, i) == h and vget(p.phase, i) == phase
+
+# C's index, if C is an owned child of this context.
+private nomethod fn slot_of(c: Child, context p: Processes) -> int errors StaleChild:
+    if not holds?(c.index, c.handle, 1):
+        fail StaleChild
+    c.index
+
+private nomethod fn reg_at(i: int, k: int, context p: Processes) -> std::event_loop::Reg errors ProcessFault:
+    p.regs.at(4 * i + k):
+        on IndexNotFound:
+            fail ProcessFault {reason: "no registration for the slot", code: i}
+
+private nomethod fn watch_at(i: int, k: int, context p: Processes) -> event_loop_linux::Watch errors ProcessFault:
+    p.watches.at(4 * i + k):
+        on IndexNotFound:
+            fail ProcessFault {reason: "no watch for the slot", code: i}
+
+private nomethod fn live?(i: int, k: int, context p: Processes) -> bool:
+    vget(p.live, 4 * i + k) == 1
+
+# Stop watching stream K of index I (the descriptor stays open until the
+# adapter closes it: unwatch first, never after). Its waiters wake revoked.
+private nomethod fn unwatch(i: int, k: int, context p: Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native) errors ProcessFault:
+    if not live?(i, k):
+        return unit
+    vput(p.live, 4 * i + k, 0)
+    event_loop_linux::unwatch(watch_at(i, k))
+    std::event_loop::revoke(reg_at(i, k)):
+        on std::event_loop::SchedulerFault:
+            fail ProcessFault {reason: "the scheduler refused a revocation", code: i}
+
+# Wait for readiness of stream K of C (at index I), or an interrupt: the
+# stream's burst starts again. StaleChild when C's owner was released
+# meanwhile.
+private nomethod fn await_ready(c: Child, i: int, k: int, entered: int, context p: Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native) errors StaleChild, Interrupted, StreamClosed, ProcessFault, std::event_loop::SchedulerFault:
+    vput(p.burst, 4 * i + k, 0)
+    if vget(p.gen, i) == entered:
+        if not live?(i, k):
+            fail StreamClosed {stream: stream_name(k)}
+        e = event_loop_linux::readable(watch_at(i, k)):
+            on std::event_loop::DriverFault {code}:
+                fail ProcessFault {reason: "the Linux driver refused to re-arm a watch", code: 0 - code}
+        slot_of(c)
+        if vget(p.gen, i) == entered:
+            if e.reason == Wake::Revoked:
+                fail StreamClosed {stream: stream_name(k)}
+            return unit
+    fail Interrupted
+
+# Fairness: one more chunk of stream K of index I that did not wait; past
+# the burst, the task yields to the loop (timers and other tasks run) before
+# it goes on.
+private nomethod fn fair(i: int, k: int, context p: Processes):
+    b = vget(p.burst, 4 * i + k) + 1
+    if b >= sget(s_burst):
+        vput(p.burst, 4 * i + k, 0)
+        std::event_loop::yield_now()
+    else:
+        vput(p.burst, 4 * i + k, b)
+
+# ---------------------------------------------------------------------------
+# Streams
+
+private nomethod fn which(s: Stream) -> int:
+    if s == Stream::Stdout:
+        1
+    else:
+        2
+
+# The reason of a fault of an operation WHAT that the adapter answered CODE.
+private nomethod fn fault_reason(what: str, code: int) -> str:
+    if code == -1:
+        "another thread's child"
+    else:
+        what
+
+# The next chunk (at most 64 KiB) of stream S, waiting until there is one;
+# an empty Bytes at end of file (and after it). End of file is not exit: a
+# descendant that inherited the pipe keeps it open after the child exited,
+# and a child's unread output stays readable after it exited.
+fn read(c: Child, s: Stream, context p: Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native) -> std::abi::bytes::Bytes errors StaleChild, StreamClosed, Interrupted, ProcessFault, std::event_loop::SchedulerFault:
+    k = which(s)
+    i = slot_of(c)
+    entered = vget(p.gen, i)
+    loop:
+        slot_of(c)
+        r = ll(c.handle).pl_read(ll(k), std::abi::bytes::zeroed(std::abi::usize(65536)), 65536)
+        got = r.result + 0
+        if got > 0:
+            count = std::abi::usize(got):
+                on std::abi::AbiIntegerBelowRange:
+                    fail ProcessFault {reason: "a negative count", code: got}
+                on std::abi::AbiIntegerAboveRange:
+                    fail ProcessFault {reason: "a count out of range", code: got}
+            chunk = r.buf.freeze_prefix(count):
+                on UpperOverrun:
+                    fail ProcessFault {reason: "the adapter read more than it was lent", code: got}
+            fair(i, k)
+            return chunk
+        if got == 0:
+            return std::abi::bytes::from_list([])
+        if got == -116:
+            fail StaleChild
+        if got == -9:
+            fail StreamClosed {stream: stream_name(k)}
+        if got != -11:
+            fail ProcessFault {reason: fault_reason("read failed", got), code: 0 - got}
+        await_ready(c, i, k, entered)
+
+# Write DATA to the child's stdin: as much as the pipe takes at once, the
+# rest after waiting for room (the writing task waits, the loop does not).
+# StreamClosed once the child closed its end (EPIPE): the supervisor never
+# dies of SIGPIPE.
+fn write(c: Child, data: std::abi::bytes::Bytes, context p: Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native) errors StaleChild, StreamClosed, Interrupted, ProcessFault, std::event_loop::SchedulerFault:
+    i = slot_of(c)
+    entered = vget(p.gen, i)
+    total = std::abi::bytes::length(data).value
+    done = std::mutable_array::create(1, 0)
+    loop:
+        offset = done.at(0):
+            on IndexNotFound:
+                total
+        if offset >= total:
+            break
+        slot_of(c)
+        w = ll(c.handle).pl_write(data, total, ll(offset)) + 0
+        if w > 0:
+            done.set(0, offset + w):
+                on IndexNotFound:
+                    unit
+            if offset + w < total:
+                fair(i, 0)
+            continue
+        if w == -116:
+            fail StaleChild
+        if w == -32 or w == -9:
+            fail StreamClosed {stream: "stdin"}
+        if w != -11:
+            fail ProcessFault {reason: fault_reason("write failed", w), code: 0 - w}
+        await_ready(c, i, 0, entered)
+
+# Close the child's stdin: it reads end of file. Later writes are
+# StreamClosed.
+fn close_stdin(c: Child, context p: Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native) errors StaleChild, ProcessFault:
+    i = slot_of(c)
+    unwatch(i, 0)
+    ll(c.handle).pl_close_stream(0)
+    unit
+
+# Close the supervisor's end of stdout or stderr: nothing more is read from
+# it (a child that writes it then gets EPIPE, or dies of SIGPIPE). Later
+# reads are StreamClosed.
+fn close_output(c: Child, s: Stream, context p: Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native) errors StaleChild, ProcessFault:
+    i = slot_of(c)
+    k = which(s)
+    unwatch(i, k)
+    ll(c.handle).pl_close_stream(ll(k))
+    unit
+
+# Make every suspended read, write and wait of C fail Interrupted (and one
+# that starts before its wake is consumed wakes at once). The child keeps
+# running and stays owned; later operations work again.
+fn interrupt(c: Child, context p: Processes, ev: std::event_loop::Loop) errors StaleChild, ProcessFault, std::event_loop::SchedulerFault:
+    i = slot_of(c)
+    vput(p.gen, i, vget(p.gen, i) + 1)
+    loop k from 0 to 4:
+        if live?(i, k):
+            reg_at(i, k).post(-2, 0)
+
+# ---------------------------------------------------------------------------
+# Exit
+
+private nomethod fn status_of(h: int) -> ExitStatus errors StaleChild:
+    kind = ll(h).pl_exit_kind() + 0
+    code = ll(h).pl_exit_code() + 0
+    if kind <= 0:
+        fail StaleChild
+    ending = if kind == 1:
+        Ending::Exited
+    elif kind == 3:
+        Ending::Dumped
+    else:
+        Ending::Signaled
+    ExitStatus {ending: ending, code: code}
+
+private nomethod fn exited_handle?(h: int) -> bool:
+    ll(h).pl_status() + 0 == 1
+
+# Whether C has exited (without waiting).
+fn exited?(c: Child, context p: Processes) -> bool errors StaleChild:
+    slot_of(c)
+    r = ll(c.handle).pl_status() + 0
+    if r < 0:
+        fail StaleChild
+    r == 1
+
+# How C ended, without waiting: StillRunning until it has exited.
+fn status(c: Child, context p: Processes) -> ExitStatus errors StaleChild, StillRunning:
+    slot_of(c)
+    if not exited_handle?(c.handle):
+        fail StillRunning
+    status_of(c.handle)
+
+# The alarm of a deadline wait: wakes the waiter by posting into the exit
+# registration at its timer, unless the waiter revoked TIMER first.
+private nomethod fn alarm(timer: std::event_loop::Reg, target: std::event_loop::Reg, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    e = std::event_loop::wait(timer)
+    if e.reason == Wake::Timer:
+        std::event_loop::revoke(timer)
+        if std::event_loop::live?(target):
+            target.post(-1, 0)
+    0
+
+# Wait until the child H at index I exits, DEADLINE (now_us's clock; -1:
+# none) passes, or (ENTERED >= 0: a wait of the child's identity) its
+# interrupt generation moves on or its owner is released: 1 exited, 0 the
+# deadline, 2 interrupted, 3 the exit watch was revoked (the loop shut
+# down), 4 released. Exit is observed through the pidfd's readiness, never by
+# polling; a deadline is an alarm task that posts into the exit
+# registration (every wake re-checks the state, so a coalesced record loses
+# nothing).
+private nomethod fn exit_wait(i: int, h: int, deadline: int, entered: int, context p: Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native) -> int errors ProcessFault, std::event_loop::SchedulerFault:
+    if exited_handle?(h):
+        return 1
+    if deadline >= 0 and now_us() >= deadline:
+        return 0
+    if not live?(i, 3):
+        return 3
+    exit_reg = reg_at(i, 3)
+    timers = std::mutable_vector::from_list([exit_reg])
+    timers.clear()
+    if deadline >= 0:
+        t = std::event_loop::timer(deadline, 0)
+        timers.push(t)
+        coroutine {step, first} = alarm(t, exit_reg)
+        std::event_loop::adopt(step, first)
+    result = std::mutable_array::create(1, 0)
+    loop:
+        if exited_handle?(h):
+            result.set(0, 1)
+            # Exit is one readiness record, delivered to the first waiter
+            # only: re-arm the (level-triggered) pidfd watch so that every
+            # other waiter of the same child is woken too.
+            event_loop_linux::rearm(watch_at(i, 3)):
+                on std::event_loop::DriverFault {code}:
+                    fail ProcessFault {reason: "the Linux driver refused to re-arm the exit watch", code: 0 - code}
+            break
+        if deadline >= 0 and now_us() >= deadline:
+            break
+        if entered >= 0 and vget(p.gen, i) != entered:
+            result.set(0, 2)
+            break
+        if entered >= 0 and not holds?(i, h, 1):
+            result.set(0, 4)
+            break
+        if not live?(i, 3):
+            result.set(0, 3)
+            break
+        e = event_loop_linux::readable(watch_at(i, 3)):
+            on std::event_loop::DriverFault {code}:
+                fail ProcessFault {reason: "the Linux driver refused to re-arm the exit watch", code: 0 - code}
+        if e.reason == Wake::Revoked:
+            result.set(0, 3)
+            break
+    loop t in timers:
+        std::event_loop::revoke(t)
+    result.at(0):
+        on IndexNotFound:
+            0
+
+# Wait until C exits or DEADLINE (now_us's clock, us; -1: none) passes: true
+# when it exited. Interrupted by interrupt(c), or when the loop shuts down
+# meanwhile.
+fn wait_until(c: Child, deadline: int, context p: Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native) -> bool errors StaleChild, Interrupted, ProcessFault, std::event_loop::SchedulerFault:
+    i = slot_of(c)
+    r = exit_wait(i, c.handle, deadline, vget(p.gen, i))
+    if r == 4:
+        fail StaleChild
+    if r >= 2:
+        fail Interrupted
+    r == 1
+
+# Wait until C exits; how it ended.
+fn wait(c: Child, context p: Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native) -> ExitStatus errors StaleChild, Interrupted, ProcessFault, std::event_loop::SchedulerFault:
+    c.wait_until(-1)
+    status_of(c.handle)
+
+# Send SIG to C: to its process group when it leads one of its own (the
+# default), else to C alone. A child that has exited (and is not yet
+# released) takes it harmlessly; nothing else can: the pidfd names C.
+fn send_signal(c: Child, sig: Signal, context p: Processes) errors StaleChild, ProcessFault:
+    slot_of(c)
+    r = ll(c.handle).pl_signal(ll(signal_number(sig)), 1) + 0
+    if r == -116:
+        fail StaleChild
+    if r < 0 and r != -3:
+        fail ProcessFault {reason: fault_reason("the signal was refused", r), code: 0 - r}
+
+# Kill C's group (SIGKILL) now, without waiting; wait reports how it ended.
+fn kill(c: Child, context p: Processes) errors StaleChild, ProcessFault:
+    c.send_signal(Signal::Kill)
+
+# The termination sequence of the child H at index I: SIGTERM to its group
+# (unless TERM is false: a release sent it already), GRACE_US for it to
+# exit, SIGKILL if it did not, its exit, then SIGKILL to whatever is left of
+# its group (its members still running once the leader has exited: no
+# member of the group outlives the sequence). ENTERED >= 0:
+# interruptible by that generation (2 is returned when interrupted, signals
+# already sent stay sent). 1 when the child's exit was observed.
+private nomethod fn terminating(i: int, h: int, term: bool, grace_us: int, entered: int, context p: Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native) -> int errors ProcessFault, std::event_loop::SchedulerFault:
+    if term:
+        ll(h).pl_signal(15, 1)
+    r = exit_wait(i, h, now_us() + grace_us, entered)
+    if r == 2 or r == 4:
+        return r
+    if r != 1:
+        ll(h).pl_signal(9, 1)
+        bump(s_escalations)
+        r2 = exit_wait(i, h, now_us() + 1000000, entered)
+        if r2 == 2 or r2 == 4:
+            return r2
+        if r2 != 1:
+            # The loop can no longer deliver the exit (revoked) or the child
+            # is stuck after SIGKILL: wait for it on this thread (bounded:
+            # SIGKILL cannot be caught).
+            ll(h).pl_await_exit()
+    ll(h).pl_signal(9, 1)
+    1
+
+# Ask C's group to stop (SIGTERM), wait GRACE_US for C to exit, then kill
+# the group (SIGKILL) if it did not; once C has exited, members of its
+# group still running are killed. How C ended. Interrupted (the signals
+# already sent stay sent) by interrupt(c).
+fn terminate(c: Child, grace_us: int, context p: Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native) -> ExitStatus errors StaleChild, Interrupted, ProcessFault, std::event_loop::SchedulerFault:
+    i = slot_of(c)
+    r = terminating(i, c.handle, true, grace_us, vget(p.gen, i))
+    if r == 4:
+        fail StaleChild
+    if r == 2:
+        fail Interrupted
+    status_of(c.handle)
+
+# The process ID of C, for reports and records (never for signalling: the
+# operations name the child by its pidfd).
+fn pid(c: Child, context p: Processes) -> int errors StaleChild:
+    slot_of(c)
+    ll(c.handle).pl_pid() + 0
+
+# ---------------------------------------------------------------------------
+# Lifetime
+
+# Free index I after its child H was reaped: watches, registrations,
+# descriptors. A child that is not reaped yet is killed and reaped first
+# (the end of a loop that can no longer wait).
+private nomethod fn retire(i: int, h: int, context p: Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native):
+    loop k from 0 to 4:
+        unwatch(i, k):
+            on ProcessFault:
+                unit
+    if ll(h).pl_release() + 0 == -16:
+        ll(h).pl_kill_and_reap()
+        ll(h).pl_release()
+    vput(p.keys, i, 0)
+    vput(p.phase, i, 0)
+
+# The end of a child whose supervision is over: SIGKILL to what is left of
+# its group, reaped, retired.
+private nomethod fn conclude(i: int, h: int, context p: Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native):
+    ll(h).pl_signal(9, 1)
+    ll(h).pl_reap()
+    retire(i, h)
+
+# The reaper's task for one dying child H at index I (its release sent
+# SIGTERM to its group): the release grace, SIGKILL, its exit; then reaped
+# and retired. Uninterruptible.
+private nomethod fn dying(i: int, h: int, context p: Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native) -> int errors std::event_loop::SchedulerFault:
+    if holds?(i, h, 2):
+        terminating(i, h, false, sget(s_grace), -1):
+            on ProcessFault:
+                ll(h).pl_kill_and_reap()
+        conclude(i, h)
+    0
+
+private nomethod fn reaper(kick: std::event_loop::Reg, context p: Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native) -> int errors std::event_loop::SchedulerFault:
+    loop:
+        if std::mutable_vector::length(p.dying) > 0:
+            i = p.dying.pop():
+                on IndexNotFound:
+                    0
+            coroutine {step, first} = dying(i, vget(p.keys, i))
+            std::event_loop::adopt(step, first)
+        else:
+            e = std::event_loop::wait(kick)
+            if e.reason == Wake::Revoked:
+                break
+    0
+
+# Whether the reaper's channel is still live (the loop's shutdown revokes it,
+# and the reaper ends).
+private nomethod fn reaper_live?(context p: Processes, ev: std::event_loop::Loop) -> bool errors std::event_loop::SchedulerFault:
+    alive = std::mutable_array::create(1, false)
+    loop k in p.kick:
+        if std::event_loop::live?(k):
+            alive.set(0, true):
+                on IndexNotFound:
+                    unit
+    alive.at(0):
+        on IndexNotFound:
+            false
+
+# The reaper: started with the first spawn, it waits (on a channel, which
+# keeps nothing alive) until a release hands it a dying child, and gives
+# each dying child a task of its own.
+private nomethod fn start_reaper(context p: Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native) errors std::event_loop::SchedulerFault:
+    if sget(s_reaper) == 1 and reaper_live?():
+        return unit
+    sput(p.state, s_reaper, 1)
+    kick = std::event_loop::channel(Delivery::Coalesce, 1)
+    p.kick.clear()
+    p.kick.push(kick)
+    coroutine {step, first} = reaper(kick)
+    std::event_loop::adopt(step, first)
+
+# Hand index I (its child running) to the reaper. The identity's suspended
+# reads, writes and waits are woken: they find it stale.
+private nomethod fn hand_over(i: int, context p: Processes, ev: std::event_loop::Loop):
+    vput(p.phase, i, 2)
+    loop k from 0 to 4:
+        if live?(i, k):
+            reg = p.regs.at(4 * i + k):
+                on IndexNotFound:
+                    continue
+            reg.post(-3, 0):
+                on std::event_loop::SchedulerFault:
+                    std::event_loop::Posted::NotLive
+    p.dying.push(i)
+    loop kick in p.kick:
+        kick.post(0, 0):
+            on std::event_loop::SchedulerFault:
+                std::event_loop::Posted::NotLive
+
+# Start C. Its owner (a resource: its scope bounds the supervision) and its
+# identity. Nothing is left behind by a failure: an invalid command is
+# InvalidCommand before anything starts, a failure of the operating system
+# LaunchFailed with the stage that failed.
+fn spawn(c: Command, context p: Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native) -> Spawned errors InvalidCommand, LaunchFailed, Unsupported, ProcessFault, std::event_loop::SchedulerFault:
+    probe = sget(s_probe)
+    if probe != 0:
+        fail Unsupported {reason: unsupported_reason(probe), code: 0 - probe}
+    start_reaper()
+    id = pl_spec_new() + 0
+    if id < 0:
+        fail ProcessFault {reason: "the adapter has no free spec", code: 0 - id}
+    problem = build(id, c)
+    if problem.code != 0:
+        ll(id).pl_spec_free()
+        fail InvalidCommand {item: problem.item, reason: item_reason(problem.code)}
+    h = ll(id).pl_spawn() + 0
+    stage = pl_last_stage() + 0
+    ll(id).pl_spec_free()
+    if h < 0:
+        bump(s_failed)
+        if stage == 8:
+            fail Unsupported {reason: unsupported_reason(h), code: 0 - h}
+        if stage == 1:
+            fail InvalidCommand {item: "command", reason: item_reason(h)}
+        fail LaunchFailed {stage: stage_of(stage), code: 0 - h}
+    i = ll(h).pl_index() + 0
+    adopt_child(h, i):
+        on std::event_loop::DriverFault {code}:
+            # Every watch and registration made so far is revoked, the
+            # child killed and reaped: nothing of it is left.
+            retire(i, h)
+            fail ProcessFault {reason: "the Linux driver refused a watch", code: 0 - code}
+    bump(s_spawned)
+    Spawned {owner: ChildOwner {handle: h, index: i}, child: Child {handle: h, index: i}}
+
+# Release the owner: the default end of supervision, and the owner's
+# cleanup (where its lexical scope ends, on every exit, when its task is
+# abandoned). A child that has exited is concluded now (SIGKILL to what is
+# left of its group, reaped, retired); one that still runs is asked to stop
+# (SIGTERM to its group) and handed to the reaper, which kills it after the
+# release grace and retires it once reaped. Returns at once.
+cleanup fn release(owner: ChildOwner, context p: Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native):
+    {handle, index} = owner
+    if not holds?(index, handle, 1):
+        return unit
+    bump(s_released)
+    if exited_handle?(handle):
+        conclude(index, handle)
+        return unit
+    ll(handle).pl_signal(15, 1)
+    hand_over(index)
+
+# End supervision by waiting: terminate (SIGTERM, GRACE_US, SIGKILL; the
+# group's last members), reap and retire; how the child ended. Consumes the
+# owner. Interrupted by interrupt(child): the child is then handed to the
+# reaper, as release does.
+fn finish(owner: ChildOwner, grace_us: int, context p: Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native) -> ExitStatus errors StaleChild, Interrupted, ProcessFault, std::event_loop::SchedulerFault:
+    {handle, index} = owner
+    if not holds?(index, handle, 1):
+        fail StaleChild
+    bump(s_released)
+    r = terminating(index, handle, true, grace_us, vget(p.gen, index)):
+        on ProcessFault {reason, code}:
+            hand_over(index)
+            fail ProcessFault {reason: reason, code: code}
+        on std::event_loop::SchedulerFault:
+            hand_over(index)
+            fail std::event_loop::SchedulerFault
+    if r != 1:
+        hand_over(index)
+        fail Interrupted
+    s = status_of(handle):
+        on StaleChild:
+            conclude(index, handle)
+            fail ProcessFault {reason: "the child's exit status is unknown", code: 0}
+    conclude(index, handle)
+    s
+
+# Wait, on REG (a source that keeps nothing alive), until the detached child
+# H2 (its pidfd PIDFD) has exited and is reaped, or the loop shuts down.
+private nomethod fn reap_detached(h2: int, pidfd: int, reg: std::event_loop::Reg, context ev: std::event_loop::Loop, n: event_loop_linux::Native) errors std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    w = event_loop_linux::watch(pidfd, event_loop_linux::Interest::Readable, reg)
+    loop:
+        if ll(h2).pl_reap() + 0 == 0:
+            break
+        e = std::event_loop::wait(reg)
+        if e.reason == Wake::Revoked:
+            break
+    event_loop_linux::unwatch(w)
+
+# The task that reaps a detached child H2 once it exits: its exit watch
+# keeps nothing alive (a detached child never holds the loop open).
+private nomethod fn detached(h2: int, context ev: std::event_loop::Loop, n: event_loop_linux::Native) -> int errors std::event_loop::SchedulerFault:
+    reg = std::event_loop::source(Delivery::Coalesce, 1)
+    reap_detached(h2, ll(h2).pl_fd(3) + 0, reg):
+        on std::event_loop::DriverFault:
+            0
+    std::event_loop::revoke(reg)
+    if ll(h2).pl_reap() + 0 == 0:
+        ll(h2).pl_release()
+    0
+
+# Let the process outlive its owner: the supervisor's pipe ends close (a
+# piped stdin reads end of file; a write to a piped stdout or stderr fails
+# with EPIPE, or SIGPIPE kills the child -- detach a child whose output goes
+# to files or /dev/null), the identity goes stale, and the process keeps
+# running, in its own process group, unsignalled. While this VM's loop runs,
+# its exit is reaped (it never becomes a zombie of this supervisor) without
+# keeping the loop alive; otherwise it is reparented when this process
+# exits. Consumes the owner; its process ID, for the application's records.
+fn detach(owner: ChildOwner, context p: Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native) -> int errors StaleChild, ProcessFault, std::event_loop::SchedulerFault:
+    {handle, index} = owner
+    if not holds?(index, handle, 1):
+        fail StaleChild
+    pid = ll(handle).pl_pid() + 0
+    loop k from 0 to 4:
+        unwatch(index, k)
+    h2 = ll(handle).pl_detach() + 0
+    vput(p.keys, index, 0)
+    vput(p.phase, index, 0)
+    if h2 < 0:
+        fail ProcessFault {reason: "the adapter refused to detach the child", code: 0 - h2}
+    bump(s_detached)
+    coroutine {step, first} = detached(h2)
+    std::event_loop::adopt(step, first)
+    pid
+
+# For the end of a program (or of a VM's supervision): every child still
+# supervised -- owned or dying -- is killed (SIGKILL to its group) and
+# reaped at once, synchronously, and retired; the reaper ends (a later spawn
+# starts it again). What the loop's shutdown cannot leave to the reaper.
+# How many children there were. (A VM whose thread ends with children still
+# supervised has them killed and reaped by the adapter all the same.)
+fn shutdown(context p: Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native) -> int:
+    total = std::mutable_array::create(1, 0)
+    count = std::mutable_vector::length(p.keys)
+    loop i from 0 to count:
+        h = vget(p.keys, i)
+        if h != 0:
+            ll(h).pl_kill_and_reap()
+            retire(i, h)
+            total.set(0, total.at(0) + 1):
+                on IndexNotFound:
+                    unit
+    p.dying.clear()
+    pl_sweep()
+    if sget(s_reaper) == 1:
+        sput(p.state, s_reaper, 0)
+        loop k in p.kick:
+            std::event_loop::revoke(k):
+                on std::event_loop::SchedulerFault:
+                    false
+    total.at(0):
+        on IndexNotFound:
+            0
+
+# ---------------------------------------------------------------------------
+# Counters
+
+# This VM's supervision: OWNED children (owners not yet released), DYING
+# ones (released, the reaper's), WATCHES held for them (readiness watches of
+# the Linux driver), and the totals SPAWNED, LAUNCH_FAILURES, RELEASED
+# (release and finish), ESCALATIONS (SIGKILL after a grace period) and
+# DETACHED. The adapter's, for the whole process (every VM): CHILDREN
+# unreaped and DESCRIPTORS held (pipe ends and pidfds).
+struct Stats:
+    owned: int
+    dying: int
+    watches: int
+    spawned: int
+    launch_failures: int
+    released: int
+    escalations: int
+    detached: int
+    children: int
+    descriptors: int
+
+fn stats(context p: Processes) -> Stats:
+    counts = std::mutable_array::create(3, 0)
+    count = std::mutable_vector::length(p.keys)
+    loop i from 0 to count:
+        ph = vget(p.phase, i)
+        if ph == 1 or ph == 2:
+            slot = ph - 1
+            counts.set(slot, counts.at(slot) + 1):
+                on IndexNotFound:
+                    unit
+        loop k from 0 to 4:
+            if live?(i, k):
+                counts.set(2, counts.at(2) + 1):
+                    on IndexNotFound:
+                        unit
+    Stats {
+        owned: cell(counts, 0), dying: cell(counts, 1), watches: cell(counts, 2),
+        spawned: sget(s_spawned), launch_failures: sget(s_failed), released: sget(s_released),
+        escalations: sget(s_escalations), detached: sget(s_detached),
+        children: pl_stat(12) + 0, descriptors: pl_stat(13) + 0
+    }
+

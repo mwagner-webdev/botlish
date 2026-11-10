@@ -1,0 +1,9 @@
+compiler d5333e5718d04208c2ccd50fda7315b11f0d53428e1a8efa272b942a8671b0f9 15495546 bytes
+ecd9e8114fa5bc24c2d23a2068e96ec2932e9386ca0cdb79fc568b9662146f77  ./event_loop_linux-0.5.0.botpkg
+c2a04db5df8a1b0326d5a606f50ec5dd89e873d1bb9239aab8856d932ad5f579  ./process_linux-0.1.0.botpkg
+31ce05541f80547159514a6fb7ffced5fcf129ad26e0b12af36e4d9b6b32bb43  ./ticker-1.0.0.botpkg
+cc: cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0
+kernel: 6.18.44-fc-v338
+glibc: ldd (Ubuntu GLIBC 2.39-0ubuntu8.9) 2.39
+build: 86.9918 s, executable 1758672 bytes
+workload: B pid 163, its descendant 164

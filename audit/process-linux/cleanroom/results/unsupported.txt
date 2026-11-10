@@ -1,0 +1,1 @@
+error: the project -> process_linux 0.1.0: process_linux 0.1.0 supports linux-x86_64, not linux-aarch64: its package has no bindings or native files for linux-aarch64 (the package's own metadata says so; nothing is assumed portable) (PM UNSUPPORTED)

@@ -69,7 +69,7 @@ The exceptions never cancel a running member:
   be cut off;
 * `react-native-probe.yml` records every run as census evidence;
 * `release-gate.yml` reads the state as it is when it runs (section 3);
-* a tag's run is the release's (icy-tower-macos.yml:
+* a tag's run is the release's (icy-tower-macos.yml, botlish-macos.yml:
   `cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}`);
 * a release run is in a group of its own (section 3).
 
@@ -123,7 +123,7 @@ A commit's tests are **green** for a release when all of these hold:
 | the commit is main's head or an ancestor of it | only reviewed code is released |
 | `tests.yml`: a successful run whose GC-stress jobs (`tests (native GC-stress, interp/compile)`) succeeded | GC stress runs only on pushes: a manual run skips it, and a skipped job is no success |
 | `tests-arm64.yml`: a successful run whose GC-stress jobs (`arm64 tests (native GC-stress, interp/compile)`) succeeded | the same, on Linux AArch64 |
-| `macos-arm64.yml`: a successful run whose acceptance jobs (`acceptance (Tier B, macOS arm64, shard N/5)`) succeeded | macOS; a branch push runs only the smoke job (section 4), a deferred run nothing (section 5), a manual run with `app_only` only the application's jobs |
+| `macos-arm64.yml`: a successful run whose acceptance jobs (`acceptance (Tier B, macOS arm64, shard N/6)`) succeeded | macOS; a branch push runs only the smoke job (section 4), a deferred run nothing (section 5), a manual run with `app_only` only the application's jobs |
 | `windows-x86_64.yml`: a successful run whose acceptance jobs (`acceptance (Windows x86-64, shard N/4)`) succeeded | Windows; a branch push runs only the canary, a deferred run nothing |
 | `static-decisions.yml`: a successful run, if it ran at the commit | it runs only when the commit changed what it compares |
 | the release's own build workflow: a successful run | single-executable.yml, icy-tower-windows.yml (the macOS release builds in its own run) |
@@ -197,6 +197,13 @@ cancelled run, or a release that exists already leaves the tag to its runs
 and to a person. The release job also checks `needs.tested.outputs.green`
 itself (audit/macos-release/tests/test_workflow.py's
 `test_release_waits_for_green_tests`; the mutant `release-before-green`).
+
+botlish-macos.yml (MACOS-BOTLISH-DISTRIBUTION-MILESTONE-1.md) is a tagged
+release of the same kind, for `botlish-macos-vX.Y.Z`: its `tested` job is
+the same check (`runs.py check SHA --for botlish-macos`), its release job
+the only one in the `macos-release` environment, and the gate dispatches
+it on a deferred tag by the same rule (audit/macos-release/tests/
+test_botlish_workflow.py; the mutant `botlish-release-before-green`).
 
 A tag on a commit that will never be green waits forever. That happens to a
 commit whose main runs a later push cancelled, or whose GC-stress jobs

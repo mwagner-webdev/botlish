@@ -1,0 +1,29 @@
+| Measure | process_linux 0.1.0 | census experiment |
+|---|---:|---:|
+| spawn call, mean (us) | 247.3 | 242.5 |
+| spawn call, max (us) | 2734 |  |
+| exit notification, mean (us) | 167.6 | 165 |
+| exit notification, max (us) | 3021 |  |
+| spawn, read to end, wait, release (us) | 1215 | 1167 |
+| 64 MiB of stdout (ms) | 34.97 | 32.6 |
+| 64 MiB: supervisor CPU (ms) | 32.5 | 30.73 |
+| 64 MiB: 64 KiB chunks read | 1024 |  |
+| 64 MiB: 5 ms ticker, worst lateness (ms) | 0.2227 | 2.623 |
+| 64 MiB: peak RSS (MiB) | 12.61 | 12.58 |
+| 1 GiB of stdout (ms) | 449.1 |  |
+| 1 GiB: peak RSS (MiB) | 12.59 |  |
+| no child at all: peak RSS (MiB) | 12.6 |  |
+| two idle children, 2 s: CPU (us) | 210.3 | 161.7 |
+| two idle children, 2 s: loop turns | 3.667 |  |
+| polling control (exited? every 1 ms): CPU (us) | 6.728e+04 | 60440.0 |
+| polling control: loop turns | 1810 |  |
+| flood 1 s, 10 ms ticker: ticks | 100 | 100 |
+| flood: worst tick lateness (ms) | 3.718 | 2.174 |
+| flood: MiB read in the second | 2381 |  |
+| flood, yielding off (control): ticks | 100 |  |
+| flood, yielding off: worst tick lateness (ms) | 168.5 |  |
+| terminate, graceful (child takes 150 ms) (ms) | 150.7 |  |
+| terminate, forced (300 ms grace) (ms) | 300.9 |  |
+| 400 sequential spawn-wait-release (ms) | 443 |  |
+| 64 concurrent children (ms) | 67.54 |  |
+| after completion: owned, watches, children, descriptors | 0, 0, 0, 0 (registrations delta 0) |  |

@@ -1,0 +1,314 @@
+# perf.bot -- the process_linux package's measurements (bench/process-
+# linux.tcl; PROCESS-LINUX-PACKAGE-MILESTONE-1.md, "Measurements"), the
+# census's (audit/managed-subprocess/slice/lab-perf.bot) repeated against
+# the package's released adapter, and more: sums and maxima only (the
+# driver divides).
+#
+#   perf HELPER SCENARIO BURST
+#
+# BURST: the context's burst option (chunks a stream reads before yielding;
+# 1000000000 turns the yielding off, the control).
+import event_loop_linux
+import kit
+import process_linux
+import std::abi::bytes
+import std::event_loop
+import std::int
+import std::linux::io
+import std::list
+import std::mutable_array
+import std::mutable_vector
+import std::str
+import type std::event_loop::Delivery
+import type std::event_loop::Wake
+
+# A ticker every PERIOD us until STOP has an event: (ticks, max lateness us)
+# and (missed ticks) posted to DONE.
+fn ticker(period: int, stop: std::event_loop::Reg, done: std::event_loop::Reg, context ev: std::event_loop::Loop) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    stats = std::mutable_array::create(3, 0)
+    t = std::event_loop::every(period)
+    start = process_linux::now_us()
+    loop:
+        e = std::event_loop::wait(t)
+        if e.reason != Wake::Timer or std::event_loop::pending(stop) > 0:
+            break
+        # Lateness of the earliest expiry this wake answers (measured from
+        # the last, a starved task would look punctual).
+        due = start + (stats.at(0) + 1) * period
+        ticks = stats.at(0) + e.count
+        stats.set(0, ticks)
+        stats.set(2, stats.at(2) + e.count - 1)
+        late = process_linux::now_us() - due
+        if late > stats.at(1):
+            stats.set(1, late)
+    std::event_loop::revoke(t)
+    done.post(stats.at(0), stats.at(1))
+    done.post(stats.at(2), 0)
+    0
+
+nomethod fn quiet(c: process_linux::Command) -> process_linux::Command:
+    c.with_stdin(process_linux::Input::Null).with_stderr(process_linux::Output::Null)
+
+fn sc_throughput(helper: str, size: int, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    stop = std::event_loop::channel(Delivery::Reliable, 2)
+    done = std::event_loop::channel(Delivery::Reliable, 4)
+    coroutine {step, first} = ticker(5000, stop, done)
+    std::event_loop::adopt(step, first)
+    cpu0 = event_loop_linux::cpu_us()
+    t = process_linux::now_us()
+    {owner, child} = kit::spawn(quiet(process_linux::command(helper, ["outn:".concat(std::int::to_string(size)).concat(":97")])))
+    c = kit::count(child, process_linux::Stream::Stdout)
+    elapsed = kit::since(t)
+    cpu = event_loop_linux::cpu_us() - cpu0
+    kit::wait(child)
+    process_linux::release(owner)
+    stop.post(1, 0)
+    e = std::event_loop::wait(done)
+    e2 = std::event_loop::wait(done)
+    kit::say_int("bytes ", c.bytes)
+    kit::say_int("chunks ", c.reads)
+    kit::say_int("elapsed-us ", elapsed)
+    kit::say_int("supervisor-cpu-us ", cpu)
+    kit::say_int("ticks ", e.a)
+    kit::say_int("max-tick-late-us ", e.b)
+    kit::say_int("missed-ticks ", e2.a)
+    0
+
+# 200 sequential children that stamp the monotonic clock, then exit: the
+# spawn call's duration, the time from the child's last instruction to its
+# exit being observed, and the whole cycle (spawn, read to end, wait,
+# release).
+fn sc_latency(helper: str, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    acc = std::mutable_array::create(6, 0)
+    loop i from 0 to 200:
+        t = process_linux::now_us()
+        {owner, child} = kit::spawn(quiet(process_linux::command(helper, ["stamp", "exit:0"])))
+        spawn_us = kit::since(t)
+        line = kit::text_of(kit::drain(child, process_linux::Stream::Stdout))
+        st = kit::wait(child)
+        seen = process_linux::now_us()
+        k = std::str::length(line)
+        digits = std::str::substring(line, 6, k - 1):
+            on LowerUnderrun:
+                ""
+            on UpperOverrun:
+                ""
+        stamp = std::int::from_string(digits):
+            on InvalidIntegerText:
+                0
+        if stamp == 0 or st.code != 0:
+            acc.set(5, acc.at(5) + 1)
+        exit_us = seen - stamp
+        acc.set(0, acc.at(0) + spawn_us)
+        if spawn_us > acc.at(1):
+            acc.set(1, spawn_us)
+        acc.set(2, acc.at(2) + exit_us)
+        if exit_us > acc.at(3):
+            acc.set(3, exit_us)
+        process_linux::release(owner)
+        acc.set(4, acc.at(4) + kit::since(t))
+    kit::say_int("spawned ", 200)
+    kit::say_int("spawn-us-sum ", acc.at(0))
+    kit::say_int("spawn-us-max ", acc.at(1))
+    kit::say_int("exit-observed-us-sum ", acc.at(2))
+    kit::say_int("exit-observed-us-max ", acc.at(3))
+    kit::say_int("cycle-us-sum ", acc.at(4))
+    kit::say_int("wrong ", acc.at(5))
+    0
+
+fn waiter(c: process_linux::Child, done: std::event_loop::Reg, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    kit::wait(c)
+    done.post(1, 0)
+    0
+
+# The same wait by polling: exited? every millisecond (the control).
+fn poller(c: process_linux::Child, done: std::event_loop::Reg, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    loop:
+        if kit::exited?(c):
+            break
+        kit::sleep(1000)
+    done.post(1, 0)
+    0
+
+# Two children sleeping 2 s: the supervisor's CPU and the loop's turns while
+# it waits for them, event-driven (idle) or polling (poll).
+fn sc_idle(helper: str, polling: bool, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    done = std::event_loop::channel(Delivery::Reliable, 4)
+    {owner: o1, child: c1} = kit::spawn(quiet(process_linux::command(helper, ["sleep:2000"])))
+    {owner: o2, child: c2} = kit::spawn(quiet(process_linux::command(helper, ["sleep:2000"])))
+    turns0 = std::event_loop::stats().turns
+    blocks0 = event_loop_linux::stats().blocks
+    cpu0 = event_loop_linux::cpu_us()
+    t = process_linux::now_us()
+    if polling:
+        coroutine {step: s1, first: f1} = poller(c1, done)
+        std::event_loop::adopt(s1, f1)
+        coroutine {step: s2, first: f2} = poller(c2, done)
+        std::event_loop::adopt(s2, f2)
+    else:
+        coroutine {step: s1, first: f1} = waiter(c1, done)
+        std::event_loop::adopt(s1, f1)
+        coroutine {step: s2, first: f2} = waiter(c2, done)
+        std::event_loop::adopt(s2, f2)
+    std::event_loop::wait(done)
+    std::event_loop::wait(done)
+    kit::say_int("wait-us ", kit::since(t))
+    kit::say_int("supervisor-cpu-us ", event_loop_linux::cpu_us() - cpu0)
+    kit::say_int("turns ", std::event_loop::stats().turns - turns0)
+    kit::say_int("driver-blocks ", event_loop_linux::stats().blocks - blocks0)
+    process_linux::release(o1)
+    process_linux::release(o2)
+    0
+
+# A child that floods stdout for 1 s while a 10 ms ticker runs, read by a
+# plain loop of reads; its 1 MiB pipe keeps it ahead of the reader, so no
+# read ever waits: the package's own yielding (every BURST chunks) is all
+# that lets the ticker run.
+fn sc_flood(helper: str, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    stop = std::event_loop::channel(Delivery::Reliable, 2)
+    done = std::event_loop::channel(Delivery::Reliable, 4)
+    coroutine {step, first} = ticker(10000, stop, done)
+    std::event_loop::adopt(step, first)
+    {owner, child} = kit::spawn(quiet(process_linux::command(helper, ["pipesz:1048576", "outn:68719476736:120"])))
+    t = process_linux::now_us()
+    total = std::mutable_array::create(2, 0)
+    loop:
+        b = kit::read(child, process_linux::Stream::Stdout)
+        total.set(0, total.at(0) + kit::size(b))
+        total.set(1, total.at(1) + 1)
+        if kit::since(t) > 1000000:
+            break
+    st = kit::terminate(child, 100000)
+    process_linux::release(owner)
+    stop.post(1, 0)
+    e = std::event_loop::wait(done)
+    e2 = std::event_loop::wait(done)
+    kit::say_int("bytes ", total.at(0))
+    kit::say_int("chunks ", total.at(1))
+    kit::say_int("ticks ", e.a)
+    kit::say_int("max-tick-late-us ", e.b)
+    kit::say_int("missed-ticks ", e2.a)
+    kit::status_line("status", st)
+    0
+
+# Termination: a child that traps SIGTERM and takes 150 ms (graceful), one
+# that ignores it (SIGKILL at a 300 ms grace), 20 of each.
+fn sc_terminate(helper: str, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    acc = std::mutable_array::create(4, 0)
+    loop i from 0 to 20:
+        {owner: o1, child: c1} = kit::spawn(quiet(process_linux::command(helper, ["trap:15:150", "out:ready\\n", "sleep:10000"])))
+        kit::read(c1, process_linux::Stream::Stdout)
+        t1 = process_linux::now_us()
+        kit::terminate(c1, 1000000)
+        g = kit::since(t1)
+        acc.set(0, acc.at(0) + g)
+        if g > acc.at(1):
+            acc.set(1, g)
+        process_linux::release(o1)
+        {owner: o2, child: c2} = kit::spawn(quiet(process_linux::command(helper, ["ignore:15", "out:ready\\n", "sleep:10000"])))
+        kit::read(c2, process_linux::Stream::Stdout)
+        t2 = process_linux::now_us()
+        kit::terminate(c2, 300000)
+        f = kit::since(t2)
+        acc.set(2, acc.at(2) + f)
+        if f > acc.at(3):
+            acc.set(3, f)
+        process_linux::release(o2)
+    kit::say_int("graceful-us-sum ", acc.at(0))
+    kit::say_int("graceful-us-max ", acc.at(1))
+    kit::say_int("forced-us-sum ", acc.at(2))
+    kit::say_int("forced-us-max ", acc.at(3))
+    kit::say_int("escalations ", process_linux::stats().escalations)
+    0
+
+# Many children: 400 sequential spawn-wait-release cycles, then 64 at once.
+fn sc_many(helper: str, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    t = process_linux::now_us()
+    loop i from 0 to 400:
+        {owner, child} = kit::spawn(quiet(process_linux::command(helper, ["exit:0"])))
+        kit::wait(child)
+        process_linux::release(owner)
+    kit::say_int("sequential-400-us ", kit::since(t))
+    t2 = process_linux::now_us()
+    {owner: o0, child: c0} = kit::spawn(quiet(process_linux::command(helper, ["sleep:20", "exit:0"])))
+    owners = std::mutable_vector::from_list([o0])
+    kids = std::mutable_vector::from_list([c0])
+    loop i from 1 to 64:
+        {owner, child} = kit::spawn(quiet(process_linux::command(helper, ["sleep:20", "exit:0"])))
+        owners.push(owner)
+        kids.push(child)
+    loop i from 0 to 64:
+        kit::wait(kids.at(i))
+    loop i from 0 to 64:
+        o = owners.pop()
+        process_linux::release(o)
+    kit::say_int("concurrent-64-us ", kit::since(t2))
+    0
+
+fn main(helper: str, scenario: str, context ev: std::event_loop::Loop, d: event_loop_linux::Linux, n: event_loop_linux::Native, p: process_linux::Processes, io: std::linux::io::LinuxIO) -> int errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered, std::event_loop::TaskFailed, IndexNotFound:
+    std::event_loop::sync()
+    regs = std::event_loop::stats().registrations
+    if scenario == "throughput":
+        coroutine {step, first} = sc_throughput(helper, 67108864)
+        std::event_loop::adopt(step, first)
+    elif scenario == "memory":
+        coroutine {step, first} = sc_throughput(helper, 1073741824)
+        std::event_loop::adopt(step, first)
+    elif scenario == "latency":
+        coroutine {step, first} = sc_latency(helper)
+        std::event_loop::adopt(step, first)
+    elif scenario == "idle":
+        coroutine {step, first} = sc_idle(helper, false)
+        std::event_loop::adopt(step, first)
+    elif scenario == "poll":
+        coroutine {step, first} = sc_idle(helper, true)
+        std::event_loop::adopt(step, first)
+    elif scenario == "flood":
+        coroutine {step, first} = sc_flood(helper)
+        std::event_loop::adopt(step, first)
+    elif scenario == "terminate":
+        coroutine {step, first} = sc_terminate(helper)
+        std::event_loop::adopt(step, first)
+    elif scenario == "many":
+        coroutine {step, first} = sc_many(helper)
+        std::event_loop::adopt(step, first)
+    elif scenario == "nothing":
+        kit::say("nothing")
+    else:
+        kit::say("no such scenario: ".concat(scenario))
+        return 2
+    std::event_loop::run()
+    loop o in std::event_loop::take_outcomes():
+        if o.ending != std::event_loop::Ending::Returned:
+            kit::say_int("task failed ", o.value)
+    process_linux::shutdown()
+    st = process_linux::stats()
+    kit::say_int("end owned ", st.owned)
+    kit::say_int("end watches ", st.watches)
+    kit::say_int("end children ", st.children)
+    kit::say_int("end descriptors ", st.descriptors)
+    kit::say_int("end registrations delta ", std::event_loop::stats().registrations - regs)
+    0
+
+args = argv():
+    on InvalidArgumentEncoding:
+        []
+burst = std::int::from_string(std::list::get(args, 3, "4")):
+    on InvalidIntegerText:
+        4
+with context std::event_loop::create(64)
+with context event_loop_linux::create()
+with context event_loop_linux::native()
+with context process_linux::create_with(process_linux::Options {release_grace_us: 200000, burst: burst})
+with context std::linux::io::create()
+main(std::list::get(args, 1, ""), std::list::get(args, 2, "")):
+    on std::event_loop::SchedulerFault:
+        -1
+    on std::event_loop::DriverFault:
+        -2
+    on std::event_loop::LoopReentered:
+        -3
+    on std::event_loop::TaskFailed:
+        -4
+    on IndexNotFound:
+        -5

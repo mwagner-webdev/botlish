@@ -1,0 +1,697 @@
+# io.bot -- the process_linux tests' launch and stream scenarios
+# (tests/process-linux.test; PROCESS-LINUX-PACKAGE-MILESTONE-1.md), ported
+# from the census's lab-io (audit/managed-subprocess/slice/lab-io.bot):
+#
+#   io HELPER SCENARIO TMPDIR
+#
+# One scenario per run; every observation a line on stdout, which the test
+# checks. Every run ends with the context's and the adapter's counters
+# (kit::end) and the change in open descriptors.
+import event_loop_linux
+import kit
+import probe
+import process_linux
+import std::abi
+import std::abi::bytes
+import std::event_loop
+import std::int
+import std::linux::io
+import std::list
+import std::mutable_array
+import std::str
+import type std::byte::Byte
+import type std::event_loop::Delivery
+import type std::event_loop::Wake
+
+# A launch whose outcome is reported, never a task failure.
+fn try_launch(label: str, c: process_linux::Command, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) errors std::event_loop::TaskFailed:
+    {owner, child} = process_linux::spawn(c):
+        on process_linux::InvalidCommand {item, reason}:
+            kit::say(label.concat(" invalid ").concat(item).concat(": ").concat(reason))
+            return unit
+        on process_linux::LaunchFailed {stage, code}:
+            kit::say(label.concat(" launch-failed ").concat(kit::stage_text(stage)).concat(" ").concat(std::int::to_string(code)))
+            return unit
+        on process_linux::Unsupported {reason, code}:
+            kit::say(label.concat(" unsupported ").concat(std::int::to_string(code)).concat(" ").concat(reason))
+            return unit
+        on process_linux::ProcessFault {reason}:
+            kit::say(label.concat(" fault ").concat(reason))
+            return unit
+        on std::event_loop::SchedulerFault:
+            fail std::event_loop::TaskFailed {code: 15}
+    st = kit::wait(child)
+    kit::status_line(label.concat(" started"), st)
+    process_linux::release(owner)
+
+nomethod fn byte_of(i: int) -> Byte:
+    if i < 0:
+        0
+    elif i > 255:
+        255
+    else:
+        i
+
+# The bytes the helper's bin operation writes: 0x00..0xff, ff fe, then
+# U+20AC (e2 82 ac) and a newline.
+fn expected_bin() -> std::abi::bytes::Bytes:
+    values = loop i from 0 to 256:
+        byte_of(i)
+    tail = std::abi::bytes::from_list([byte_of(255), byte_of(254), byte_of(226), byte_of(130), byte_of(172), byte_of(10)])
+    kit::cat(std::abi::bytes::from_list(values), tail)
+
+fn sc_launch(helper: str, tmp: str, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    try_launch("missing", process_linux::command(kit::join_path(tmp, "no-such-program"), []))
+    try_launch("not-executable", process_linux::command("/etc/passwd", []))
+    try_launch("directory", process_linux::command("/tmp", []))
+    try_launch("relative-not-searched", process_linux::command("true", []))
+    try_launch("bad-cwd", process_linux::command(helper, ["cwd"]).in_directory(kit::join_path(tmp, "no-such-dir")))
+    try_launch("cwd-is-file", process_linux::command(helper, ["cwd"]).in_directory("/etc/passwd"))
+    try_launch("bad-file", process_linux::command(helper, ["out:x"]).with_stdout_file(kit::join_path(tmp, "no-such-dir/out.log"), process_linux::FileMode::Append))
+    try_launch("bad-stdin-file", process_linux::command(helper, ["cat"]).with_stdin_file(kit::join_path(tmp, "no-such-input")))
+    try_launch("exit-3", process_linux::command(helper, ["exit:3"]))
+    try_launch("abort", process_linux::command(helper, ["raise:6"]))
+    try_launch("killed", process_linux::command(helper, ["raise:9"]))
+    try_launch("shell-explicit", process_linux::command("/bin/sh", ["-c", "exit 4"]))
+    0
+
+# Commands that cannot be started as written: rejected before anything
+# starts, naming the item; nothing is left behind (100 rejections, then a
+# spawn that works: the adapter's specs are freed on every path).
+fn sc_invalid(helper: str, tmp: str, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    nul = kit::nul_text()
+    try_launch("nul-in-executable", process_linux::command(helper.concat(nul), []))
+    try_launch("nul-in-arg", process_linux::command(helper, ["out:a", "b".concat(nul)]))
+    try_launch("empty-executable", process_linux::command("", []))
+    try_launch("nul-in-env-name", process_linux::command(helper, ["exit:0"]).with_env("A".concat(nul), "x"))
+    try_launch("nul-in-env-value", process_linux::command(helper, ["exit:0"]).with_env("ABC", "x".concat(nul)))
+    try_launch("eq-in-env-name", process_linux::command(helper, ["exit:0"]).with_env("A=B", "x"))
+    try_launch("empty-env-name", process_linux::command(helper, ["exit:0"]).without_env(""))
+    try_launch("nul-in-directory", process_linux::command(helper, ["exit:0"]).in_directory(tmp.concat(nul)))
+    try_launch("nul-in-file", process_linux::command(helper, ["exit:0"]).with_stderr_file(tmp.concat(nul), process_linux::FileMode::Truncate))
+    loop i from 0 to 100:
+        process_linux::spawn(process_linux::command(helper, ["x".concat(nul)])):
+            on process_linux::InvalidCommand:
+                continue
+            on process_linux::LaunchFailed:
+                fail std::event_loop::TaskFailed {code: 10}
+            on process_linux::Unsupported:
+                fail std::event_loop::TaskFailed {code: 17}
+            on process_linux::ProcessFault:
+                fail std::event_loop::TaskFailed {code: 14}
+            on std::event_loop::SchedulerFault:
+                fail std::event_loop::TaskFailed {code: 15}
+        kit::say("an invalid command started")
+    try_launch("after-100-rejections", process_linux::command(helper, ["exit:7"]))
+    st = process_linux::stats()
+    kit::say_int("launch failures counted ", st.launch_failures)
+    0
+
+# A task that reads stream S to its end and posts (bytes, reads) to DONE.
+fn reader(c: process_linux::Child, s: process_linux::Stream, done: std::event_loop::Reg, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    counted = kit::count(c, s)
+    done.post(counted.bytes, counted.reads)
+    0
+
+# A task that ticks every PERIOD us until STOP is posted, posting to DONE its
+# tick count and the largest lateness of a tick (us): the loop's
+# responsiveness while the scenario runs.
+fn ticker(period: int, stop: std::event_loop::Reg, done: std::event_loop::Reg, context ev: std::event_loop::Loop) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    stats = std::mutable_array::create(2, 0)
+    t = std::event_loop::every(period)
+    start = process_linux::now_us()
+    loop:
+        e = std::event_loop::wait(t)
+        if e.reason != Wake::Timer:
+            break
+        if std::event_loop::pending(stop) > 0:
+            break
+        # Lateness of the earliest expiry this wake answers: a starved
+        # task that wakes once with many expirations was late by all of
+        # them (measured from the last, it would look punctual).
+        due = start + (stats.at(0) + 1) * period
+        ticks = stats.at(0) + e.count
+        stats.set(0, ticks)
+        late = process_linux::now_us() - due
+        if late > stats.at(1):
+            stats.set(1, late)
+    std::event_loop::revoke(t)
+    done.post(stats.at(0), stats.at(1))
+    0
+
+# Stdout and stderr each 1 MiB, the child writing stderr first: only a
+# supervisor that reads both concurrently gets either.
+fn sc_streams(helper: str, tmp: str, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    {owner, child} = kit::spawn(process_linux::command(helper, ["errn:1048576:101", "outn:1048576:111", "err:end\\n"]))
+    d_out = std::event_loop::channel(Delivery::Reliable, 2)
+    d_err = std::event_loop::channel(Delivery::Reliable, 2)
+    coroutine {step: s1, first: f1} = reader(child, process_linux::Stream::Stdout, d_out)
+    std::event_loop::adopt(s1, f1)
+    coroutine {step: s2, first: f2} = reader(child, process_linux::Stream::Stderr, d_err)
+    std::event_loop::adopt(s2, f2)
+    st = kit::wait(child)
+    o = std::event_loop::wait(d_out)
+    e = std::event_loop::wait(d_err)
+    kit::say_int("stdout bytes ", o.a)
+    kit::say_int("stderr bytes ", e.a)
+    kit::status_line("status", st)
+    process_linux::release(owner)
+    0
+
+# The same child, read naively: stdout to its end first. The child blocks on
+# its full stderr pipe, so stdout never ends: a watchdog interrupts the read
+# after 1.5 s and the scenario reports the deadlock it would have been.
+fn watchdog(c: process_linux::Child, us: int, context p: process_linux::Processes, ev: std::event_loop::Loop, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    kit::sleep(us)
+    kit::say("watchdog fired")
+    kit::interrupt(c)
+    0
+
+fn sc_naive(helper: str, tmp: str, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    {owner, child} = kit::spawn(process_linux::command(helper, ["errn:1048576:101", "outn:1048576:111", "err:end\\n"]))
+    coroutine {step, first} = watchdog(child, 1500000)
+    std::event_loop::adopt(step, first)
+    total = std::mutable_array::create(1, 0)
+    loop:
+        b = process_linux::read(child, process_linux::Stream::Stdout):
+            on process_linux::Interrupted:
+                kit::say("stdout read interrupted: deadlock")
+                break
+            on process_linux::StaleChild:
+                fail std::event_loop::TaskFailed {code: 11}
+            on process_linux::StreamClosed:
+                fail std::event_loop::TaskFailed {code: 12}
+            on process_linux::ProcessFault:
+                fail std::event_loop::TaskFailed {code: 14}
+        k = kit::size(b)
+        if k == 0:
+            break
+        total.set(0, total.at(0) + k)
+    kit::say_int("stdout bytes before the deadlock ", total.at(0))
+    kit::say("child exited ".concat(kit::yes(kit::exited?(child))))
+    kit::status_line("status", kit::terminate(child, 100000))
+    process_linux::release(owner)
+    0
+
+# CHUNK bytes of a pattern (no two neighbouring 251-byte runs alike: a
+# write that sent a part twice, or skipped one, changes the echo).
+fn pattern(chunk: int) -> std::abi::bytes::Bytes:
+    values = loop i from 0 to 251:
+        byte_of(i)
+    run = std::abi::bytes::from_list(values)
+    whole = std::mutable_array::create(1, kit::empty())
+    loop:
+        have = kit::size(whole.at(0))
+        if have >= chunk:
+            break
+        whole.set(0, kit::cat(whole.at(0), run))
+    std::abi::bytes::slice(whole.at(0), 0, chunk):
+        on LowerUnderrun:
+            kit::empty()
+        on UpperOverrun:
+            kit::empty()
+
+# Writing SIZE bytes in CHUNK-byte writes (the pattern), then closing stdin.
+fn writer(c: process_linux::Child, size: int, chunk: int, done: std::event_loop::Reg, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    data = pattern(chunk)
+    written = std::mutable_array::create(1, 0)
+    start = process_linux::now_us()
+    loop:
+        if written.at(0) >= size:
+            break
+        kit::write(c, data)
+        written.set(0, written.at(0) + chunk)
+    kit::close_stdin(c)
+    done.post(written.at(0), kit::since(start))
+    0
+
+# 4 MiB to a child that reads only after 300 ms: the writer waits for room
+# (EAGAIN, then readiness), a reader drains the echo, a ticker keeps ticking.
+fn sc_stdin(helper: str, tmp: str, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    {owner, child} = kit::spawn(process_linux::command(helper, ["sleep:300", "cat"]))
+    d_w = std::event_loop::channel(Delivery::Reliable, 2)
+    d_r = std::event_loop::channel(Delivery::Reliable, 2)
+    d_t = std::event_loop::channel(Delivery::Reliable, 2)
+    stop = std::event_loop::channel(Delivery::Reliable, 2)
+    coroutine {step: s0, first: f0} = ticker(10000, stop, d_t)
+    std::event_loop::adopt(s0, f0)
+    coroutine {step: s1, first: f1} = writer(child, 4194304, 65536, d_w)
+    std::event_loop::adopt(s1, f1)
+    coroutine {step: s2, first: f2} = reader(child, process_linux::Stream::Stdout, d_r)
+    std::event_loop::adopt(s2, f2)
+    w = std::event_loop::wait(d_w)
+    r = std::event_loop::wait(d_r)
+    err = kit::drain(child, process_linux::Stream::Stderr)
+    st = kit::wait(child)
+    stop.post(1, 0)
+    t = std::event_loop::wait(d_t)
+    kit::say_int("written ", w.a)
+    kit::say_int("echoed ", r.a)
+    kit::say("child: ".concat(kit::text_of(err)))
+    kit::say_int("ticks ", t.a)
+    kit::status_line("status", st)
+    process_linux::release(owner)
+    0
+
+# Writes larger than the pipe: every write partial at first, completed after
+# waiting (one write of the whole 4 MiB, and 100,000-byte writes).
+fn sc_stdin_partial(helper: str, tmp: str, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    {owner, child} = kit::spawn(process_linux::command(helper, ["cat"]))
+    d_w = std::event_loop::channel(Delivery::Reliable, 2)
+    d_r = std::event_loop::channel(Delivery::Reliable, 2)
+    coroutine {step: s1, first: f1} = writer(child, 1000000, 100000, d_w)
+    std::event_loop::adopt(s1, f1)
+    coroutine {step: s2, first: f2} = reader(child, process_linux::Stream::Stdout, d_r)
+    std::event_loop::adopt(s2, f2)
+    w = std::event_loop::wait(d_w)
+    r = std::event_loop::wait(d_r)
+    kit::say_int("written ", w.a)
+    kit::say_int("echoed ", r.a)
+    kit::status_line("status", kit::wait(child))
+    process_linux::release(owner)
+    {owner: o2, child: c2} = kit::spawn(process_linux::command(helper, ["cat"]))
+    coroutine {step: s3, first: f3} = writer(c2, 4194304, 4194304, d_w)
+    std::event_loop::adopt(s3, f3)
+    echo = kit::drain(c2, process_linux::Stream::Stdout)
+    w2 = std::event_loop::wait(d_w)
+    kit::say_int("one write of ", w2.a)
+    kit::say_int("echoed ", kit::size(echo))
+    kit::say("the echo is the bytes written ".concat(kit::yes(echo == pattern(4194304))))
+    kit::status_line("status", kit::wait(c2))
+    process_linux::release(o2)
+    0
+
+# An 8 MiB writer whose reader pauses 1 s after the first chunk: the bytes
+# stay in the kernel's pipe and the child blocks on its own write.
+fn sc_backpressure(helper: str, tmp: str, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    {owner, child} = kit::spawn(process_linux::command(helper, ["outn:8388608:120", "exit:0"]))
+    first = kit::read(child, process_linux::Stream::Stdout)
+    kit::say_int("first-chunk ", kit::size(first))
+    kit::sleep(1000000)
+    kit::say_int("resumed exited ", kit::bit(kit::exited?(child)))
+    rest = kit::count(child, process_linux::Stream::Stdout)
+    kit::say_int("total ", kit::size(first) + rest.bytes)
+    kit::status_line("status", kit::wait(child))
+    process_linux::release(owner)
+    0
+
+# The binary probe: every byte value, an invalid UTF-8 pair, and a
+# three-byte character split across two writes 300 ms apart.
+fn sc_binary(helper: str, tmp: str, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    {owner, child} = kit::spawn(process_linux::command(helper, ["bin"]))
+    acc = std::mutable_array::create(1, kit::empty())
+    reads = std::mutable_array::create(1, 0)
+    loop:
+        b = kit::read(child, process_linux::Stream::Stdout)
+        if kit::size(b) == 0:
+            break
+        reads.set(0, reads.at(0) + 1)
+        acc.set(0, kit::cat(acc.at(0), b))
+    data = acc.at(0)
+    len = kit::size(data)
+    kit::say_int("bytes ", len)
+    kit::say("split across reads ".concat(kit::yes(reads.at(0) >= 2)))
+    kit::say("bytes as sent ".concat(kit::yes(data == expected_bin())))
+    kit::say("whole-as-utf8 ".concat(kit::text_of(data)))
+    tail = std::abi::bytes::slice(data, len - 4, len):
+        on LowerUnderrun:
+            kit::empty()
+        on UpperOverrun:
+            kit::empty()
+    kit::say("tail-as-utf8 ".concat(kit::text_of(tail)))
+    kit::status_line("status", kit::wait(child))
+    process_linux::release(owner)
+    0
+
+# End of file is not exit: stdout closes, the child sleeps, then exits 4.
+fn sc_eof_early(helper: str, tmp: str, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    {owner, child} = kit::spawn(process_linux::command(helper, ["out:a\\n", "close:out", "sleep:300", "err:late\\n", "exit:4"]))
+    out = kit::drain(child, process_linux::Stream::Stdout)
+    kit::say("stdout ".concat(kit::text_of(out)))
+    kit::say_int("exited-at-eof ", kit::bit(kit::exited?(child)))
+    err = kit::drain(child, process_linux::Stream::Stderr)
+    kit::say("stderr ".concat(kit::text_of(err)))
+    kit::status_line("status", kit::wait(child))
+    process_linux::release(owner)
+    0
+
+# A child that exits with output still unread: within the pipe's capacity
+# the exit comes first and every byte is read after it; beyond it the child
+# cannot exit until it is read.
+fn sc_exit_unread(helper: str, tmp: str, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    {owner, child} = kit::spawn(process_linux::command(helper, ["outn:30000:65", "exit:5"]))
+    kit::status_line("small status", kit::wait(child))
+    kit::say_int("small bytes after exit ", kit::count(child, process_linux::Stream::Stdout).bytes)
+    process_linux::release(owner)
+    {owner: o2, child: c2} = kit::spawn(process_linux::command(helper, ["outn:200000:65", "exit:5"]))
+    early = kit::wait_until(c2, process_linux::now_us() + 700000)
+    kit::say("large exited within 0.7 s unread ".concat(kit::yes(early)))
+    kit::say_int("large bytes ", kit::count(c2, process_linux::Stream::Stdout).bytes)
+    kit::status_line("large status", kit::wait(c2))
+    process_linux::release(o2)
+    0
+
+# A child that exits before anything waits for it: the pidfd's readiness is
+# level-triggered, so a wait that starts late still sees the exit.
+fn sc_exit_first(helper: str, tmp: str, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    {owner, child} = kit::spawn(process_linux::command(helper, ["exit:3"]))
+    kit::sleep(200000)
+    kit::status_line("status", kit::wait(child))
+    process_linux::release(owner)
+    0
+
+# Durable output: stdout appended to a file, stderr truncated into one, the
+# supervisor reading through neither; stdin read from a file.
+fn sc_persist(helper: str, tmp: str, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    out = kit::join_path(tmp, "job.out")
+    err = kit::join_path(tmp, "job.err")
+    c = process_linux::command(helper, ["out:to-file\\n", "err:to-err-file\\n", "outn:100000:46"]).with_stdout_file(out, process_linux::FileMode::Append).with_stderr_file(err, process_linux::FileMode::Truncate)
+    {owner, child} = kit::spawn(c)
+    kit::status_line("status", kit::wait(child))
+    process_linux::release(owner)
+    {owner: o2, child: c2} = kit::spawn(c)
+    kit::status_line("again", kit::wait(c2))
+    process_linux::release(o2)
+    {owner: o3, child: c3} = kit::spawn(process_linux::command(helper, ["cat"]).with_stdin_file(err))
+    kit::say("stdin from the file: ".concat(kit::text_of(kit::drain(c3, process_linux::Stream::Stdout))))
+    kit::status_line("cat", kit::wait(c3))
+    process_linux::release(o3)
+    0
+
+# An output policy: keep only the last 4096 bytes, and terminate the child
+# once it wrote more than 1 MiB (memory stays bounded).
+fn sc_limit(helper: str, tmp: str, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    {owner, child} = kit::spawn(process_linux::command(helper, ["flood"]))
+    tail = std::mutable_array::create(1, kit::empty())
+    seen = std::mutable_array::create(1, 0)
+    loop:
+        b = kit::read(child, process_linux::Stream::Stdout)
+        k = kit::size(b)
+        if k == 0:
+            break
+        seen.set(0, seen.at(0) + k)
+        joined = kit::cat(tail.at(0), b)
+        jl = kit::size(joined)
+        kept = if jl > 4096:
+            std::abi::bytes::slice(joined, jl - 4096, jl):
+                on LowerUnderrun:
+                    joined
+                on UpperOverrun:
+                    joined
+        else:
+            joined
+        tail.set(0, kept)
+        if seen.at(0) > 1048576:
+            kit::say("limit exceeded: terminating")
+            break
+    st = kit::terminate(child, 200000)
+    kit::say_int("kept ", kit::size(tail.at(0)))
+    kit::status_line("status", st)
+    process_linux::release(owner)
+    0
+
+# What the child inherits: signal dispositions and mask, descriptors (also
+# with a descriptor the supervisor opened without close-on-exec); the
+# negative control (fault bits 3: keep the supervisor's dispositions and
+# descriptors) shows what the defaults protect.
+fn sc_inherit(helper: str, tmp: str, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    plain = probe::plain_fd()
+    {owner, child} = kit::spawn(process_linux::command(helper, ["sig", "fds", "tty"]))
+    kit::say("default: ".concat(kit::text_of(kit::drain(child, process_linux::Stream::Stdout))))
+    kit::wait(child)
+    process_linux::release(owner)
+    probe::faults(3)
+    {owner: o2, child: c2} = kit::spawn(process_linux::command(helper, ["sig", "fds"]))
+    probe::faults(0)
+    kit::say("kept: ".concat(kit::text_of(kit::drain(c2, process_linux::Stream::Stdout))))
+    kit::wait(c2)
+    process_linux::release(o2)
+    probe::close(plain)
+    {owner: o3, child: c3} = kit::spawn(process_linux::command(helper, ["tty", "out:inherited\\n"]).with_stdin(process_linux::Input::Null).with_stdout(process_linux::Output::Inherit).with_stderr(process_linux::Output::Inherit))
+    kit::wait(c3)
+    process_linux::release(o3)
+    {owner: o4, child: c4} = kit::spawn(process_linux::command(helper, ["out:to-null\\n", "cat"]).with_stdin(process_linux::Input::Null).with_stdout(process_linux::Output::Null).with_stderr(process_linux::Output::Null))
+    kit::status_line("null", kit::wait(c4))
+    process_linux::read(c4, process_linux::Stream::Stdout):
+        on process_linux::StreamClosed {stream}:
+            kit::say("read of a null ".concat(stream).concat(": closed"))
+            kit::empty()
+        on process_linux::StaleChild:
+            fail std::event_loop::TaskFailed {code: 11}
+        on process_linux::Interrupted:
+            fail std::event_loop::TaskFailed {code: 13}
+        on process_linux::ProcessFault:
+            fail std::event_loop::TaskFailed {code: 14}
+    process_linux::release(o4)
+    0
+
+# A child in a process group of its own, given the supervisor's terminal as
+# stdin, reads it: the kernel stops it (SIGTTIN, a background group), so it
+# never exits; only SIGKILL ends it. A TUI's children must not get the
+# terminal.
+fn sc_tty_read(helper: str, tmp: str, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    {owner, child} = kit::spawn(process_linux::command(helper, ["readn:1"]).with_stdin(process_linux::Input::Inherit))
+    done = kit::wait_until(child, process_linux::now_us() + 500000)
+    st = probe::proc_state(kit::pid(child))
+    kit::say("stopped by the terminal: ".concat(kit::yes(not done and st == 84)))
+    kit::status_line("status", kit::terminate(child, 300000))
+    process_linux::release(owner)
+    0
+
+# A child in the supervisor's own (foreground) process group, given the
+# terminal, puts it into raw mode and exits: the terminal stays raw (the
+# test restores it). Nothing here restores it: termios is the TUI's.
+fn sc_tty_raw(helper: str, tmp: str, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    {owner, child} = kit::spawn(process_linux::command(helper, ["stty-raw"]).with_stdin(process_linux::Input::Inherit).with_group(process_linux::Group::Shared))
+    kit::status_line("status", kit::wait(child))
+    process_linux::release(owner)
+    0
+
+# A write after the child closed its stdin: EPIPE (the supervisor ignores
+# SIGPIPE: the runtime's startup), reported as StreamClosed, not a kill; a
+# write after close_stdin is StreamClosed too.
+fn sc_stdin_closed(helper: str, tmp: str, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    {owner, child} = kit::spawn(process_linux::command(helper, ["close:in", "sleep:300", "exit:0"]))
+    kit::sleep(100000)
+    process_linux::write(child, kit::bytes_of("too late\n")):
+        on process_linux::StreamClosed {stream}:
+            kit::say("write after the child closed ".concat(stream).concat(": closed"))
+        on process_linux::StaleChild:
+            fail std::event_loop::TaskFailed {code: 11}
+        on process_linux::Interrupted:
+            fail std::event_loop::TaskFailed {code: 13}
+        on process_linux::ProcessFault {code}:
+            kit::say_int("write: fault ", code)
+    kit::status_line("status", kit::wait(child))
+    process_linux::release(owner)
+    {owner: o2, child: c2} = kit::spawn(process_linux::command(helper, ["cat"]))
+    kit::write(c2, kit::bytes_of("one\n"))
+    kit::close_stdin(c2)
+    process_linux::write(c2, kit::bytes_of("two\n")):
+        on process_linux::StreamClosed {stream}:
+            kit::say("write after close_stdin: closed ".concat(stream))
+        on process_linux::StaleChild:
+            fail std::event_loop::TaskFailed {code: 11}
+        on process_linux::Interrupted:
+            fail std::event_loop::TaskFailed {code: 13}
+        on process_linux::ProcessFault {code}:
+            kit::say_int("write: fault ", code)
+    kit::say("echoed ".concat(kit::text_of(kit::drain(c2, process_linux::Stream::Stdout))))
+    kit::status_line("cat", kit::wait(c2))
+    process_linux::release(o2)
+    0
+
+# close_output: the supervisor stops reading stderr; the child's next write
+# to it fails (SIGPIPE, its default disposition restored at spawn).
+fn sc_close_output(helper: str, tmp: str, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    {owner, child} = kit::spawn(process_linux::command(helper, ["sleep:200", "err:after\\n", "exit:0"]))
+    process_linux::close_output(child, process_linux::Stream::Stderr):
+        on process_linux::StaleChild:
+            fail std::event_loop::TaskFailed {code: 11}
+        on process_linux::ProcessFault:
+            fail std::event_loop::TaskFailed {code: 14}
+    process_linux::read(child, process_linux::Stream::Stderr):
+        on process_linux::StreamClosed {stream}:
+            kit::say("read after close_output: closed ".concat(stream))
+            kit::empty()
+        on process_linux::StaleChild:
+            fail std::event_loop::TaskFailed {code: 11}
+        on process_linux::Interrupted:
+            fail std::event_loop::TaskFailed {code: 13}
+        on process_linux::ProcessFault:
+            fail std::event_loop::TaskFailed {code: 14}
+    kit::status_line("status", kit::wait(child))
+    process_linux::release(owner)
+    0
+
+# A flood of stdout read continuously while a 10 ms ticker runs: the reading
+# task yields every few chunks (the package's fairness), so the ticker keeps
+# its period. The child enlarges its pipe to 1 MiB and stays ahead of the
+# reader, so its reads never find the pipe empty (never wait): only the
+# package's own yielding lets the ticker run.
+fn sc_fairness(helper: str, tmp: str, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    {owner, child} = kit::spawn(process_linux::command(helper, ["pipesz:1048576", "outn:68719476736:120", "exit:0"]))
+    d_t = std::event_loop::channel(Delivery::Reliable, 2)
+    stop = std::event_loop::channel(Delivery::Reliable, 2)
+    coroutine {step: s0, first: f0} = ticker(10000, stop, d_t)
+    std::event_loop::adopt(s0, f0)
+    start = process_linux::now_us()
+    total = std::mutable_array::create(1, 0)
+    loop:
+        if process_linux::now_us() - start > 1000000:
+            break
+        k = kit::size(kit::read(child, process_linux::Stream::Stdout))
+        if k == 0:
+            break
+        total.set(0, total.at(0) + k)
+    stop.post(1, 0)
+    t = std::event_loop::wait(d_t)
+    kit::say("streamed over 16 MiB ".concat(kit::yes(total.at(0) > 16777216)))
+    kit::say("ticks at least 80 ".concat(kit::yes(t.a >= 80)))
+    kit::say("no tick later than 30 ms ".concat(kit::yes(t.b < 30000)))
+    kit::say_int("ticks ", t.a)
+    kit::say_int("max-tick-late-us ", t.b)
+    kit::status_line("status", kit::terminate(child, 100000))
+    process_linux::release(owner)
+    0
+
+# A process that cannot supervise safely refuses to start anything: a kernel
+# without pidfd_open (the testing build's fault 16), and SIGCHLD ignored
+# (children reaped behind the supervisor's back).
+fn sc_unsupported(helper: str, tmp: str, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    probe::faults(16)
+    try_launch("no-pidfd", process_linux::command(helper, ["exit:0"]))
+    probe::faults(0)
+    probe::ignore_sigchld(true)
+    try_launch("sigchld-ignored", process_linux::command(helper, ["exit:0"]))
+    probe::ignore_sigchld(false)
+    try_launch("after", process_linux::command(helper, ["exit:0"]))
+    0
+
+# The pidfd cannot be opened after the spawn (descriptors exhausted at that
+# moment: the testing build's fault 32): the child is killed and reaped at
+# once, nothing is left, and the launch fails at Stage::Pidfd.
+fn sc_pidfd_fail(helper: str, tmp: str, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    probe::faults(32)
+    try_launch("pidfd", process_linux::command(helper, ["pidfile:".concat(kit::join_path(tmp, "pidfd.pid")), "sleep:30000"]))
+    probe::faults(0)
+    try_launch("after", process_linux::command(helper, ["exit:0"]))
+    0
+
+# The environment: a child sees exactly its arguments, the supervisor's
+# environment with settings and removals, an explicit one, its directory.
+fn sc_basic(helper: str, tmp: str, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    {owner, child} = kit::spawn(process_linux::command(helper, ["args", "", "a b", "quote\"d 'x'", "héllo €", "--", "$HOME", "*"]))
+    kit::say(kit::text_of(kit::drain(child, process_linux::Stream::Stdout)))
+    kit::status_line("status", kit::wait(child))
+    process_linux::release(owner)
+    c2 = process_linux::command(helper, ["env:PL_X", "env:HOME", "env:PL_LATER", "cwd"]).with_env("PL_X", "one two").without_env("HOME").with_env("PL_LATER", "a").with_env("PL_LATER", "b=c").in_directory(tmp)
+    {owner: o2, child: ch2} = kit::spawn(c2)
+    kit::say(kit::text_of(kit::drain(ch2, process_linux::Stream::Stdout)))
+    kit::wait(ch2)
+    process_linux::release(o2)
+    {owner: o3, child: c3} = kit::spawn(process_linux::command(helper, ["env:PATH", "env:ONLY"]).with_clear_env().with_env("ONLY", "1"))
+    kit::say(kit::text_of(kit::drain(c3, process_linux::Stream::Stdout)))
+    kit::wait(c3)
+    process_linux::release(o3)
+    0
+
+fn main(helper: str, scenario: str, tmp: str, context ev: std::event_loop::Loop, d: event_loop_linux::Linux, n: event_loop_linux::Native, p: process_linux::Processes, io: std::linux::io::LinuxIO) -> int errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered, std::event_loop::TaskFailed, IndexNotFound:
+    std::event_loop::sync()
+    fds = probe::open_fds()
+    if scenario == "basic":
+        coroutine {step, first} = sc_basic(helper, tmp)
+        std::event_loop::adopt(step, first)
+    elif scenario == "launch":
+        coroutine {step, first} = sc_launch(helper, tmp)
+        std::event_loop::adopt(step, first)
+    elif scenario == "invalid":
+        coroutine {step, first} = sc_invalid(helper, tmp)
+        std::event_loop::adopt(step, first)
+    elif scenario == "streams":
+        coroutine {step, first} = sc_streams(helper, tmp)
+        std::event_loop::adopt(step, first)
+    elif scenario == "naive":
+        coroutine {step, first} = sc_naive(helper, tmp)
+        std::event_loop::adopt(step, first)
+    elif scenario == "stdin":
+        coroutine {step, first} = sc_stdin(helper, tmp)
+        std::event_loop::adopt(step, first)
+    elif scenario == "stdin-partial":
+        coroutine {step, first} = sc_stdin_partial(helper, tmp)
+        std::event_loop::adopt(step, first)
+    elif scenario == "backpressure":
+        coroutine {step, first} = sc_backpressure(helper, tmp)
+        std::event_loop::adopt(step, first)
+    elif scenario == "binary":
+        coroutine {step, first} = sc_binary(helper, tmp)
+        std::event_loop::adopt(step, first)
+    elif scenario == "eof-early":
+        coroutine {step, first} = sc_eof_early(helper, tmp)
+        std::event_loop::adopt(step, first)
+    elif scenario == "exit-unread":
+        coroutine {step, first} = sc_exit_unread(helper, tmp)
+        std::event_loop::adopt(step, first)
+    elif scenario == "exit-first":
+        coroutine {step, first} = sc_exit_first(helper, tmp)
+        std::event_loop::adopt(step, first)
+    elif scenario == "persist":
+        coroutine {step, first} = sc_persist(helper, tmp)
+        std::event_loop::adopt(step, first)
+    elif scenario == "limit":
+        coroutine {step, first} = sc_limit(helper, tmp)
+        std::event_loop::adopt(step, first)
+    elif scenario == "inherit":
+        coroutine {step, first} = sc_inherit(helper, tmp)
+        std::event_loop::adopt(step, first)
+    elif scenario == "tty-read":
+        coroutine {step, first} = sc_tty_read(helper, tmp)
+        std::event_loop::adopt(step, first)
+    elif scenario == "tty-raw":
+        coroutine {step, first} = sc_tty_raw(helper, tmp)
+        std::event_loop::adopt(step, first)
+    elif scenario == "stdin-closed":
+        coroutine {step, first} = sc_stdin_closed(helper, tmp)
+        std::event_loop::adopt(step, first)
+    elif scenario == "close-output":
+        coroutine {step, first} = sc_close_output(helper, tmp)
+        std::event_loop::adopt(step, first)
+    elif scenario == "fairness":
+        coroutine {step, first} = sc_fairness(helper, tmp)
+        std::event_loop::adopt(step, first)
+    elif scenario == "unsupported":
+        coroutine {step, first} = sc_unsupported(helper, tmp)
+        std::event_loop::adopt(step, first)
+    elif scenario == "pidfd-fail":
+        coroutine {step, first} = sc_pidfd_fail(helper, tmp)
+        std::event_loop::adopt(step, first)
+    else:
+        kit::say("no such scenario: ".concat(scenario))
+        return 2
+    std::event_loop::run()
+    loop o in std::event_loop::take_outcomes():
+        if o.ending != std::event_loop::Ending::Returned:
+            kit::say_int("task failed ", o.value)
+    kit::end(fds)
+    kit::say_int("end fds delta ", probe::open_fds() - fds)
+    0
+
+args = argv():
+    on InvalidArgumentEncoding:
+        []
+with context std::event_loop::create(64)
+with context event_loop_linux::create()
+with context event_loop_linux::native()
+with context process_linux::create_with(kit::options())
+with context std::linux::io::create()
+main(std::list::get(args, 1, ""), std::list::get(args, 2, ""), std::list::get(args, 3, "/tmp")):
+    on std::event_loop::SchedulerFault:
+        -1
+    on std::event_loop::DriverFault:
+        -2
+    on std::event_loop::LoopReentered:
+        -3
+    on std::event_loop::TaskFailed:
+        -4
+    on IndexNotFound:
+        -5

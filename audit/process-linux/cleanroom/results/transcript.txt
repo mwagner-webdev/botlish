@@ -1,0 +1,168 @@
+== the clean room
+tclsh: none
+tclsh9.0: none
+cargo: none
+rustc: none
+python3: none
+git: none
+curl: none
+Botlish compiler (no release version; this is a development build)
+source revision: cbaa0402 (modified), packaged
+front end: 76941c240e9a4175-5389884
+Tcl: 9.0.1
+native backend: packaged (47a811d1-12157272-ab559fe1-1550224-79097f25-17020146)
+invocation: botlish
+ecd9e8114fa5bc24c2d23a2068e96ec2932e9386ca0cdb79fc568b9662146f77  ./event_loop_linux-0.5.0.botpkg
+c2a04db5df8a1b0326d5a606f50ec5dd89e873d1bb9239aab8856d932ad5f579  ./process_linux-0.1.0.botpkg
+31ce05541f80547159514a6fb7ffced5fcf129ad26e0b12af36e4d9b6b32bb43  ./ticker-1.0.0.botpkg
+== botlish add
+event_loop_linux 0.5.0 (sha256 ecd9e8114fa5): installed, used by process_linux
+process_linux 0.1.0 (sha256 c2a04db5df8a): installed
+view linux-x86_64: derived (16 files, 2 native libraries)
+added process_linux (request "0.1", lock 0.1.0)
+status 0
+event_loop_linux 0.5.0: unchanged, used by the application, process_linux
+process_linux 0.1.0: unchanged
+view linux-x86_64: derived again (16 files, 2 native libraries)
+note: event_loop_linux 0.5.0 is the version process_linux 0.1.0 locks: the application shares that instance
+added event_loop_linux (request "0.5", lock 0.5.0)
+status 0
+event_loop_linux 0.5.0: unchanged, used by the application, process_linux, ticker
+process_linux 0.1.0: unchanged
+ticker 1.0.0 (sha256 31ce05541f80): installed
+view linux-x86_64: derived again (18 files, 2 native libraries)
+added ticker (request "1.0", lock 1.0.0)
+status 0
+== the installed graph
+botlish package graph 1
+application event_loop_linux process_linux ticker
+package event_loop_linux
+package process_linux event_loop_linux
+package ticker event_loop_linux
+the dependency graph of /home/dev/app: 3 packages, one instance of each
+application uses: event_loop_linux, process_linux, ticker
+event_loop_linux 0.5.0 (sha256 ecd9e8114fa5): used by the application, process_linux, ticker; installed
+  locked by: the application (request "0.5"), process_linux 0.1.0, ticker 1.0.0
+  shared: one instance, event_loop_linux, for the application, process_linux, ticker
+  path: the project -> event_loop_linux 0.5.0
+process_linux 0.1.0 (sha256 c2a04db5df8a): used by the application; installed
+  locked by: the application (request "0.1")
+  uses: event_loop_linux 0.5.0
+  path: the project -> process_linux 0.1.0
+ticker 1.0.0 (sha256 31ce05541f80): used by the application; installed
+  locked by: the application (request "1.0")
+  uses: event_loop_linux 0.5.0
+  path: the project -> ticker 1.0.0
+== botlish verify
+note: target views: linux-x86_64 (verify -target T verifies one's native dependencies again)
+verify: 3 package instance(s) in /home/dev/app: as installed
+(integrity only: installed bytes against local artifacts and the installation record; no artifact carries a publisher signature to authenticate)
+== provenance records
+== a target the package does not support
+error: the project -> process_linux 0.1.0: process_linux 0.1.0 supports linux-x86_64, not linux-aarch64: its package has no bindings or native files for linux-aarch64 (the package's own metadata says so; nothing is assumed portable) (PM UNSUPPORTED)
+== native executable
+executable: main
+	linux-vdso.so.1 (0x00007fd7b98ca000)
+	libgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1 (0x00007fd7b8069000)
+	libm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007fd7b7f80000)
+	libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007fd7b7d6d000)
+	/lib64/ld-linux-x86-64.so.2 (0x00007fd7b98cc000)
+== the workload
+spawned A and B without a shell
+B stdout chunk: cwd /home/dev/app/b
+env CLEANROOM_JOB=job-b
+desc 164
+
+B stdout chunk: chunk 0
+
+A stdout chunk: cwd /home/dev/app/a
+chunk 0
+
+A stderr chunk: warning from A
+
+A stdout chunk: chunk 1
+
+A's stdin: 3 lines written, closed
+A ended exited 0
+A stdout bytes 96, stderr bytes 15
+B pid 163
+B ended signal 9
+B escalated at the grace period: yes
+B stdout chunks 41, its end of file once the group was killed
+A's identity after release: stale
+ticker ticks 16
+ticker kept time (no tick 40 ms late): yes
+workload elapsed under 3 s: yes
+C received: args 7
+arg 0 2f686f6d652f6465762f696e707574732f6368696c64
+arg 1 61726773
+arg 2 -
+arg 3 74776f20776f726473
+arg 4 24484f4d45
+arg 5 2a2e747874
+arg 6 68c3a96c6c6f
+
+end: shut down 0 children still supervised
+end: owned 0, dying 0, watches 0, children 0, adapter descriptors 0
+end: descriptors delta 0, registrations delta 0
+end: escalations 1, released 3
+exit 0
+== the failure cases
+launch failed at exec: errno 2
+launch failed at working directory: errno 2
+launch failed at exec: errno 13
+refused before starting: environment name: contains '='
+a failing child is an outcome, not an error: exited 5
+wait through a released identity: stale
+signal through a released identity: stale
+the old identity does not reach the new child: stale
+the new child unaffected: yes
+end: shut down 0 children still supervised
+end: owned 0, dying 0, watches 0, children 0, adapter descriptors 0
+end: descriptors delta 0, registrations delta 0
+end: escalations 0, released 2
+exit 0
+== checks
+PASS no Tcl, Rust, Python or Git in the clean room
+PASS no Botlish checkout or adapter source in the clean room
+PASS no network
+PASS botlish.json requests process_linux, the driver and ticker
+PASS the application uses one instance each of the driver, process_linux and ticker
+PASS process_linux uses the application's driver
+PASS ticker uses the same driver
+PASS every package is installed once, none holds a .bot_modules of its own
+PASS the graph reports the driver shared
+PASS verify is clean
+PASS the provenance record of process_linux-0.1.0 matches its artifact
+PASS the provenance record of event_loop_linux-0.5.0 matches its artifact
+PASS process_linux for linux-aarch64 is refused as unsupported, nothing installed
+PASS the program builds as a native executable, warning-free
+PASS the executable holds the adapter once
+PASS the executable holds no test probe (the released adapter)
+PASS the executable depends on the C library only
+PASS workload: A and B started without a shell
+PASS workload: A ran in its own working directory
+PASS workload: B ran in another, with its own environment
+PASS workload: stdout and stderr streamed concurrently, every byte
+PASS workload: stdin written incrementally and closed
+PASS workload: A ended normally
+PASS workload: B terminated gracefully, escalated to SIGKILL at its grace period
+PASS workload: B's stream ended once its group was killed
+PASS workload: the identity is stale after release
+PASS workload: ticker's task (another library, the same loop) kept time
+PASS workload: exact arguments (empty, spaces, $HOME and *.txt unexpanded, UTF-8)
+PASS workload: nothing supervised, watched, unreaped or held at the end
+PASS workload: no descriptor or registration left
+PASS workload: one escalation, three releases
+PASS workload: the program ended normally
+PASS workload: B is gone
+PASS workload: B's descendant (in its group, ignoring SIGTERM) is gone
+PASS failures: a missing executable fails at exec (ENOENT)
+PASS failures: a missing working directory fails in the parent (ENOENT)
+PASS failures: a non-executable file fails at exec (EACCES)
+PASS failures: an invalid environment name is refused before starting
+PASS failures: a nonzero exit is an outcome
+PASS failures: a released identity is stale for wait and signal
+PASS failures: the old identity never reaches the slot's new child
+PASS failures: nothing left
+passed 42, failed 0

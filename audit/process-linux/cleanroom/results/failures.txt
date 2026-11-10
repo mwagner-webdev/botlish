@@ -1,0 +1,14 @@
+launch failed at exec: errno 2
+launch failed at working directory: errno 2
+launch failed at exec: errno 13
+refused before starting: environment name: contains '='
+a failing child is an outcome, not an error: exited 5
+wait through a released identity: stale
+signal through a released identity: stale
+the old identity does not reach the new child: stale
+the new child unaffected: yes
+end: shut down 0 children still supervised
+end: owned 0, dying 0, watches 0, children 0, adapter descriptors 0
+end: descriptors delta 0, registrations delta 0
+end: escalations 0, released 2
+exit 0

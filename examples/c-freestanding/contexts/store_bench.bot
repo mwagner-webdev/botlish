@@ -1,0 +1,15 @@
+# store_bench -- the shop on a test bench: a simulated clock and a terminal
+# with a low limit (C-CONTEXTS-FREESTANDING-MILESTONE-1.md). The same
+# application as store_field.bot, configured otherwise: only the
+# installations differ.
+#
+# expect: shop::Day {first: shop::Sale {ok: true, paid: 120, fee: 3, stamp: 30600}, second: shop::Sale {ok: false, paid: 0, fee: 0, stamp: 0}, third: shop::Sale {ok: true, paid: 480, fee: 3, stamp: 30600}, revenue: 600}
+
+import shop
+import simclock
+import terminal
+
+with context simclock::SimClock {start: 30000, offset: 600}
+with context terminal::Terminal {limit: 500, fee: 3}
+
+shop::day(120, 900, 480)

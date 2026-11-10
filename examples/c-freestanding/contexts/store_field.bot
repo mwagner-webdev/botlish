@@ -1,0 +1,14 @@
+# store_field -- the shop in the field: a real-time clock's registers and a
+# terminal with a higher limit and fee. The same application as
+# store_bench.bot; another Clock implementation and another Terminal value.
+#
+# expect: shop::Day {first: shop::Sale {ok: true, paid: 120, fee: 5, stamp: 52440}, second: shop::Sale {ok: true, paid: 900, fee: 5, stamp: 52440}, third: shop::Sale {ok: true, paid: 480, fee: 5, stamp: 52440}, revenue: 1500}
+
+import shop
+import rtc
+import terminal
+
+with context rtc::Rtc {hours: 14, minutes: 34}
+with context terminal::Terminal {limit: 1000, fee: 5}
+
+shop::day(120, 900, 480)
