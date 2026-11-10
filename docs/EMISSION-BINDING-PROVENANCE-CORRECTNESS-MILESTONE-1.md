@@ -855,17 +855,15 @@ is pending, never passed):
 
 | workflow | run | status |
 |---|---|---|
-| tests | [42770740123](https://github.com/mwagner-webdev/botlish/actions/runs/42770740123) | canary and stub-linked executables passed; the rest pending (waiting for runners) |
-| tests (linux arm64) | [42770745285](https://github.com/mwagner-webdev/botlish/actions/runs/42770745285) | completed: every job passed -- canary, native Rust unit tests (also under GC stress), interp, compile, cranelift-generic coverage, golden shards 1-4, system-linked executables, the GC-stress test suite on interp and on compile -- but the cranelift coverage job, which failed before any test, downloading the Tcl package (`curl: (56) Recv failure: Connection reset by peer` from ports.ubuntu.com); that job re-run (attempt 2), pending |
-| tests (macos arm64) | [42770749276](https://github.com/mwagner-webdev/botlish/actions/runs/42770749276) | smoke, Linux control and acceptance shards 4 and 5 passed; the rest pending |
+| tests | [42770740123](https://github.com/mwagner-webdev/botlish/actions/runs/42770740123) | passed: canary (mutant catalogs and the warning gate included), interp, compile, cranelift and cranelift-generic coverage, golden shards 1-4, native Rust unit tests, stub-linked and system-linked executables, the method-call decision's oracle and reference audit (the GC-stress job runs on pushes to main only) |
+| tests (linux arm64) | [42770745285](https://github.com/mwagner-webdev/botlish/actions/runs/42770745285) | every job passed -- canary, native Rust unit tests (also under GC stress), interp, compile, cranelift-generic coverage, golden shards 1-4, system-linked executables, the GC-stress test suite on interp and on compile -- but the cranelift coverage job, which failed before any test, downloading the Tcl package (`curl: (56) Recv failure: Connection reset by peer` from ports.ubuntu.com); re-run (attempt 2): past the download, its coverage run pending |
+| tests (macos arm64) | [42770749276](https://github.com/mwagner-webdev/botlish/actions/runs/42770749276) | passed: smoke, Linux control, system linker, Botlish.app, acceptance shards 1-5 (the opt-in application mutants and Tier C not requested) |
 | tests (windows x86-64) | [42770752278](https://github.com/mwagner-webdev/botlish/actions/runs/42770752278) | passed: canary, smoke, root plans, system linker, acceptance shards 1-4 (the opt-in GC-stress tier not requested) |
 | icy-tower (macos arm64), icy-tower (windows x86-64) | branch push | passed |
 | static-decisions (static-compile-expected-diagnostics.bot) | [42795041291](https://github.com/mwagner-webdev/botlish/actions/runs/42795041291) | passed: batched and sequential agree (4 rounds and 6 builds against 26 rounds and 52 builds) |
 
-Read again at 14:25 and 16:30 UTC: tests (windows x86-64) and tests
-(linux arm64) have completed as above; tests and tests (macos arm64) are
-still running, their remaining jobs waiting for runners, and no job of
-either has failed.
+Read again at 14:25, 16:30 and 18:30 UTC: every run has completed as
+above but the re-run of the arm64 cranelift coverage job.
 
 ## 22. Production files changed
 
