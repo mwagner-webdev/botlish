@@ -551,7 +551,16 @@ them at 10:46:
 | `icy-tower-windows.yml`, `ci-tools.yml` | 42769079531, 42769079533 | passed |
 | `icy-tower-macos.yml` | 42769079434 | every step passed but the graphical acceptance, whose `restart` case passed 9 of its 10 checks: "Right reaches the game: the player was not found in both captures (press 3)". The headless simulation, the oracle, the executable's tests, the SDL call trace and every other graphical and LaunchServices case passed, so the game the compiler built behaves as specified, and what failed is the session's reading of a capture. The run is superseded by the third merge's, which plays the same cases again |
 
-The runs that count are the third merge's, at bbb95fd; they follow.
+The runs that count are the third merge's, at bbb95fd (dispatched 10:47
+UTC). As of 13:55 UTC:
+
+| workflow | run | state |
+|---|---|---|
+| `icy-tower-macos.yml` | 42802022427 | passed, every step: the graphical acceptance's `restart` case among them, which failed one check at 89c4298 |
+| `icy-tower-windows.yml`, `ci-tools.yml`, `raven-cleanroom.yml`, `macos-graphical-main-thread.yml` | 42802022405, 42802022594, 42802022859, 42802022580 | passed |
+| `macos-arm64.yml` (dispatched) | 42802040876 | smoke (Tier A, the canary among its steps) and the Linux control passed; the five acceptance shards, the system linker and Botlish.app's jobs pending, queued for a macOS runner |
+| `windows-x86_64.yml` (dispatched) | 42802045549 | in progress |
+| `tests.yml`, `tests-arm64.yml`, `static-decisions.yml` (dispatched) | 42802026983, 42802031961, 42802037262 | pending: queued for a Linux runner (tests.yml's canary has waited since 10:47, as main's own run at 46ab091 has since 09:13) |
 
 ## 7. Remaining limits and known problems
 
