@@ -42,10 +42,12 @@ if {$framework eq "" || ![file isdirectory [file join $framework Tcl.framework]]
     exit 2
 }
 set framework [file normalize $framework]
-set nativeDir [file join $root native target release]
+# The distribution's native backend: built without the JIT
+# (single/macos/build.sh's own build, MACOS-BOTLISH-DISTRIBUTION-MILESTONE-1.md).
+set nativeDir [file join $root native target macos-app release]
 foreach name {botlish-native libbotlish_runtime.a} {
     if {![file isfile [file join $nativeDir $name]]} {
-        puts stderr "missing [file join $nativeDir $name]: build the native backend first"
+        puts stderr "missing [file join $nativeDir $name]: build the application's native backend first (single/macos/build.sh, or cargo build --release --no-default-features --manifest-path native/Cargo.toml --target-dir native/target/macos-app)"
         exit 2
     }
 }

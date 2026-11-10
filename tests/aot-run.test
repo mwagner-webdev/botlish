@@ -1,0 +1,840 @@
+# aot-run.test -- main.tcl -aot-run FILE [-- ARG...]: one program built as
+# the standalone executable -emit-native-executable links and run as a
+# command (AOT-RUN-MILESTONE-1.md; the driver's aot-run, native/src/aotrun.rs;
+# native::aotRun).
+#
+# Every test runs main.tcl as its own process, as a user would, and reads
+# its standard output (bytes), standard error and exit status. The programs
+# print through the host's std::io context (std::linux::io, std::darwin::io,
+# std::windows::io), so the same tests run on every host that links
+# executables; those that call C carry nativeCCalls, those that send Unix
+# signals unixSignals. Each test that builds gives the driver a private
+# temporary directory of its own (TMPDIR, TEMP: aotrTemp), so it can check
+# that nothing of the run is left there.
+#
+# The positive controls (aotr-control-*) show that the checks can fail: the
+# same comparisons fed a wrong value, or the driver asked to keep what it
+# would remove, report the difference.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+source [file join $::projectRoot native native.tcl]
+
+testConstraint nativeBuilt [expr {![catch {native::binary}]}]
+testConstraint aotRun [expr {[testConstraint executableAot] && [testConstraint nativeBuilt]}]
+# Signals sent by name, a process group, getppid's reparenting: POSIX.
+testConstraint unixSignals [expr {[testConstraint aotRun] && $::tcl_platform(platform) eq "unix"}]
+testConstraint aotrPython [expr {[testConstraint unixSignals] && [auto_execok python3] ne ""}]
+testConstraint aotrCCalls [expr {[testConstraint aotRun] && [testConstraint nativeCCalls] && [testConstraint cLinker]}]
+testConstraint aotrMainThread [expr {[testConstraint aotRun] && [native::hostSupports mainThreadStartup]}]
+testConstraint aotrNoMainThread [expr {[testConstraint aotRun] && ![native::hostSupports mainThreadStartup]}]
+testConstraint aotrStackGuard [expr {[testConstraint aotRun] && [testConstraint nativeStackGuard]}]
+testConstraint aotrCoroutines [expr {[testConstraint aotRun] && [testConstraint nativeCoroutines]}]
+
+set mainScript [file join $::projectRoot main.tcl]
+
+# The host's std::io context module.
+proc aotrIo {} {
+    switch -- [dict get [core::cabi::target [core::cabi::hostTarget]] os] {
+        linux { return std::linux::io }
+        macos { return std::darwin::io }
+        windows { return std::windows::io }
+    }
+    return std::linux::io
+}
+
+# A fresh directory of this test's own in the tcltest temporary directory.
+set aotrCounter 0
+proc aotrDir {name} {
+    set dir [file join [temporaryDirectory] aotr-[pid]-[incr ::aotrCounter]-$name]
+    file delete -force $dir
+    file mkdir $dir
+    return $dir
+}
+
+# The program file NAME in DIR, of the Botlish LINES, printing through the
+# host's std::io.
+proc aotrProgram {dir name lines} {
+    set io [aotrIo]
+    # (A file's imports are its header: LINES' own go there too.)
+    set imports [lsearch -all -inline -regexp $lines {^import }]
+    set body [lsearch -all -inline -not -regexp $lines {^import }]
+    set text [join [concat [list "import std::io" "import $io" "import std::str" "import std::list" "import std::int"] $imports [list "" "with context $io\::create()" ""] $body] \n]\n
+    set path [file join $dir $name]
+    set channel [open $path w]
+    fconfigure $channel -encoding utf-8 -translation lf
+    puts -nonewline $channel $text
+    close $channel
+    return $path
+}
+
+# The printer: each argument after argv()[0] on a line of its own, between
+# brackets, then a line on standard error.
+proc aotrPrinter {dir {name printer.bot}} {
+    return [aotrProgram $dir $name {
+        "fn show(args: List[str]) -> unit errors std::io::WriteFailed:"
+        "    loop i from 1 to args.length():"
+        "        std::io::print_line(\"arg \[\".concat(args.at(i)).concat(\"\]\"))"
+        "    std::io::write_error_line(\"to stderr\")"
+        "    unit"
+        ""
+        "args = argv():"
+        "    on InvalidArgumentEncoding:"
+        "        \[\]"
+        "show(args):"
+        "    on std::io::WriteFailed:"
+        "        unit"
+    }]
+}
+
+# The private temporary directory of a test's runs, and the environment
+# that names it to the driver (std::env::temp_dir: TMPDIR on Unix, TMP and
+# TEMP on Windows).
+proc aotrTemp {dir} {
+    set temp [file join $dir tmp]
+    file mkdir $temp
+    return $temp
+}
+proc aotrTempEnvironment {temp} {
+    return [list TMPDIR $temp TMP $temp TEMP $temp]
+}
+
+# What -aot-run left in TEMP: the driver's private directories.
+proc aotrLeft {temp} {
+    return [lsort [glob -nocomplain -tails -directory $temp botlish-aot-run-*]]
+}
+
+# {STDOUT STDERR STATUS} of COMMAND run as its own process (STDOUT bytes,
+# STDERR text, STATUS the exit status, or {signal NAME}), with INPUT (bytes)
+# on its standard input.
+proc aotrProcess {command {input ""}} {
+    set errPath [file join [temporaryDirectory] aotr-stderr-[pid]]
+    set inPath [file join [temporaryDirectory] aotr-stdin-[pid]]
+    set channel [open $inPath wb]
+    puts -nonewline $channel $input
+    close $channel
+    try {
+        set pipe [open |[list {*}$command < $inPath 2> $errPath] rb]
+        set out [read $pipe]
+        set status 0
+        if {[catch {close $pipe} message options]} {
+            set code [dict get $options -errorcode]
+            switch -- [lindex $code 0] {
+                CHILDSTATUS { set status [lindex $code 2] }
+                CHILDKILLED { set status [list signal [lindex $code 2]] }
+                default { set status $code }
+            }
+        }
+        set channel [open $errPath rb]
+        set err [encoding convertfrom utf-8 [read $channel]]
+        close $channel
+        return [list $out $err $status]
+    } finally {
+        file delete $errPath $inPath
+    }
+}
+
+# {STDOUT STDERR STATUS} of main.tcl ARGS with TEMP the driver's temporary
+# directory and the extra environment ENVIRONMENT (NAME VALUE ...).
+proc aotrMain {temp args} {
+    return [aotrMainEnv $temp {} {*}$args]
+}
+proc aotrMainEnv {temp environment args} {
+    withEnvironment [concat [aotrTempEnvironment $temp] $environment] {
+        return [aotrProcess [list [info nameofexecutable] $::mainScript {*}$args]]
+    }
+}
+proc aotrMainInput {temp input args} {
+    withEnvironment [aotrTempEnvironment $temp] {
+        return [aotrProcess [list [info nameofexecutable] $::mainScript {*}$args] $input]
+    }
+}
+
+# STDERR without the compiler's warnings and help lines (the programs'
+# one-character literals warn): only what the run itself wrote.
+proc aotrErr {text} {
+    return [join [lsearch -all -inline -not -regexp [split $text \n] {: warning: |^help: }] \n]
+}
+
+# The bytes of the printer's output for ARGUMENTS.
+proc aotrPrinted {arguments} {
+    return [encoding convertto utf-8 [join [lmap a $arguments {string cat "arg \[$a\]\n"}] ""]]
+}
+
+# --- the program as a command ---------------------------------------------------
+
+test aotr-arguments {the words after -- are the program's arguments, exactly: spaces, the empty one, option-like ones, non-ASCII, a second --; argv()[0] is FILE as typed} -constraints aotRun -setup {
+    set dir [aotrDir arguments]
+    set temp [aotrTemp $dir]
+    set program [aotrPrinter $dir]
+    set argv0 [aotrProgram $dir argv0.bot {
+        "fn show(args: List[str]) -> unit errors std::io::WriteFailed:"
+        "    loop a in args:"
+        "        std::io::print_line(a)"
+        "        break"
+        "    unit"
+        "args = argv():"
+        "    on InvalidArgumentEncoding:"
+        "        \[\"invalid\"\]"
+        "show(args):"
+        "    on std::io::WriteFailed:"
+        "        unit"
+    }]
+} -body {
+    set words [list one "two words" "" -x --backend -- "ünï cödé" {a\b"c} *]
+    lassign [aotrMain $temp -warnings off -aot-run $program -- {*}$words] out err status
+    lassign [aotrMain $temp -warnings off -aot-run $argv0] out0 err0 status0
+    list [string equal $out [aotrPrinted $words]] [string trimright [aotrErr $err] \n] $status \
+        [string equal [string trimright [encoding convertfrom utf-8 $out0] \n] $argv0] $status0 [aotrLeft $temp]
+} -cleanup {file delete -force $dir} -result {1 {to stderr} 0 1 0 {}}
+
+test aotr-no-arguments {without -- the program has no arguments but its file; an empty -- the same} -constraints aotRun -setup {
+    set dir [aotrDir noarguments]
+    set temp [aotrTemp $dir]
+    set program [aotrPrinter $dir]
+} -body {
+    list [aotrMain $temp -warnings off -aot-run $program] [aotrMain $temp -warnings off -aot-run $program --]
+} -cleanup {file delete -force $dir} -result [list [list {} "to stderr\n" 0] [list {} "to stderr\n" 0]]
+
+test aotr-streams {standard output is the program's bytes, standard error its lines: nothing of the compiler's on either when the program has no warning} -constraints aotRun -setup {
+    set dir [aotrDir streams]
+    set temp [aotrTemp $dir]
+    set program [aotrProgram $dir clean.bot {
+        "fn hello() -> unit errors std::io::WriteFailed:"
+        "    std::io::print(\"no newline, then \")"
+        "    std::io::print_line(\"ü\")"
+        "    std::io::write_error_line(\"err\")"
+        "hello():"
+        "    on std::io::WriteFailed:"
+        "        unit"
+    }]
+} -body {
+    aotrMain $temp -aot-run $program
+} -cleanup {file delete -force $dir} -result [list [encoding convertto utf-8 "no newline, then ü\n"] "err\n" 0]
+
+test aotr-stdin {standard input is the program's: a C reader counts every byte of it} -constraints aotrCCalls -setup {
+    set dir [aotrDir stdin]
+    set temp [aotrTemp $dir]
+    set program [aotrProgram $dir stdin.bot {
+        "import std::ffi::c"
+        "extern c fn getchar() -> std::ffi::c::Int"
+        "fn count(n: int) -> int:"
+        "    c = getchar()"
+        "    if c < 0:"
+        "        return n"
+        "    count(n + 1)"
+        "fn report() -> unit errors std::io::WriteFailed:"
+        "    std::io::print_line(std::int::to_string(count(0)))"
+        "report():"
+        "    on std::io::WriteFailed:"
+        "        unit"
+    }]
+} -body {
+    lassign [aotrMainInput $temp [string repeat "0123456789" 300] -warnings off -aot-run $program] out err status
+    list $out [aotrErr $err] $status [aotrLeft $temp]
+} -cleanup {file delete -force $dir} -result [list "3000\n" "" 0 {}]
+
+test aotr-working-directory {the program runs in the user's working directory, not its build directory or the source's: it finds a file there by a relative name (C access)} -constraints aotrCCalls -setup {
+    set dir [aotrDir cwd]
+    set temp [aotrTemp $dir]
+    set work [file join $dir "wörk dir"]
+    file mkdir $work
+    set channel [open [file join $work marker.txt] w]
+    puts -nonewline $channel X
+    close $channel
+    set symbol [if {$::tcl_platform(platform) eq "windows"} {set _ _access} else {set _ access}]
+    set program [aotrProgram $dir cwd.bot [list \
+        "import std::ffi::c" \
+        "import std::abi::bytes" \
+        "import std::byte" \
+        "extern c fn access named \"$symbol\"(path: std::ffi::c::Ptr\[std::ffi::c::Char\] read noescape, mode: std::ffi::c::Int) -> std::ffi::c::Int" \
+        "fn terminator() -> std::byte::Byte:" \
+        "    0" \
+        "fn report() -> unit errors std::io::WriteFailed:" \
+        "    name = std::abi::bytes::from_list(std::str::encode_utf8(\"marker.txt\").append(terminator()))" \
+        "    std::io::print_line(std::int::to_string(access(name, 0)))" \
+        "report():" \
+        "    on std::io::WriteFailed:" \
+        "        unit"]]
+} -body {
+    set here [pwd]
+    set results {}
+    foreach where [list $work $dir] {
+        cd $where
+        try {
+            lappend results [lindex [aotrMain $temp -warnings off -aot-run $program] 0]
+        } finally {
+            cd $here
+        }
+    }
+    set results
+} -cleanup {file delete -force $dir} -result [list "0\n" "-1\n"]
+
+# --- exit status ----------------------------------------------------------------
+
+test aotr-exit-status {a C exit's status is the command's; a completed program's 0} -constraints aotrCCalls -setup {
+    set dir [aotrDir exit]
+    set temp [aotrTemp $dir]
+    set program [aotrProgram $dir exit.bot {
+        "import std::ffi::c"
+        "extern c fn exit(status: std::ffi::c::Int) -> unit"
+        "args = argv():"
+        "    on InvalidArgumentEncoding:"
+        "        \[\]"
+        "if args.length() > 2:"
+        "    exit(200)"
+        "elif args.length() > 1:"
+        "    exit(3)"
+        "unit"
+    }]
+} -body {
+    list [lindex [aotrMain $temp -warnings off -aot-run $program] 2] \
+        [lindex [aotrMain $temp -warnings off -aot-run $program -- a] 2] \
+        [lindex [aotrMain $temp -warnings off -aot-run $program -- a b] 2] [aotrLeft $temp]
+} -cleanup {file delete -force $dir} -result {0 3 200 {}}
+
+test aotr-runtime-error {a run-time failure is the executable's: its message on stderr, status 1, as the emitted executable reports it} -constraints aotrStackGuard -setup {
+    set dir [aotrDir runtime]
+    set temp [aotrTemp $dir]
+    file copy [file join $::projectRoot audit macos-app programs overflow.bot] [file join $dir overflow.bot]
+    set program [file join $dir overflow.bot]
+} -body {
+    lassign [aotrMain $temp -warnings off -aot-run $program] out err status
+    lassign [aotrMain $temp -warnings off -emit-native-executable $program] - - built
+    set executable [native::executableFile [file rootname $program]]
+    lassign [aotrProcess [list $executable]] xout xerr xstatus
+    list $out [string match "*NATIVE LIMIT STACK*" $err] $status [string equal [string trimright [aotrErr $err] \n] [string trimright $xerr \n]] $built $xstatus [aotrLeft $temp]
+} -cleanup {file delete -force $dir} -result {{} 1 1 1 0 1 {}}
+
+test aotr-signal-status {a child ended by a signal: 128+N, a line naming the signal on stderr, as a shell reports it in $?} -constraints {aotrCCalls unixSignals} -setup {
+    set dir [aotrDir signal]
+    set temp [aotrTemp $dir]
+    set program [aotrProgram $dir signal.bot {
+        "import std::ffi::c"
+        "extern c fn raise(signal: std::ffi::c::Int) -> std::ffi::c::Int"
+        "raise(15)"
+        "unit"
+    }]
+} -body {
+    lassign [aotrMain $temp -warnings off -aot-run $program] out err status
+    list $status [string equal [string trimright [aotrErr $err] \n] "$program: the program was ended by signal 15 (SIGTERM)"] [aotrLeft $temp]
+} -cleanup {file delete -force $dir} -result {143 1 {}}
+
+test aotr-broken-pipe {a reader that stops early: the program's own broken pipe, no message of the compiler's} -constraints {aotRun unixSignals} -setup {
+    set dir [aotrDir pipe]
+    set temp [aotrTemp $dir]
+    set program [aotrProgram $dir many.bot {
+        "fn lines(n: int) -> unit errors std::io::WriteFailed:"
+        "    loop i from 0 to n:"
+        "        std::io::print_line(\"a line of output that fills a pipe quickly\")"
+        "    unit"
+        "lines(200000):"
+        "    on std::io::WriteFailed:"
+        "        unit"
+    }]
+} -body {
+    withEnvironment [aotrTempEnvironment $temp] {
+        set errPath [file join $dir err]
+        set out [exec [info nameofexecutable] $::mainScript -warnings off -aot-run $program 2> $errPath | head -n 1]
+    }
+    set channel [open $errPath]
+    set err [read $channel]
+    close $channel
+    list $out [string match "*the program was ended*" $err] [aotrLeft $temp]
+} -cleanup {file delete -force $dir} -result {{a line of output that fills a pipe quickly} 0 {}}
+
+# --- what never runs --------------------------------------------------------------
+
+test aotr-rejected-never-runs {a rejected program is never run: its diagnostics after "FILE: ", status 1, no output, nothing left -- also after an earlier successful run of the same file} -constraints aotRun -setup {
+    set dir [aotrDir rejected]
+    set temp [aotrTemp $dir]
+    set program [aotrPrinter $dir program.bot]
+} -body {
+    set first [aotrMain $temp -warnings off -aot-run $program -- before]
+    set channel [open $program a]
+    puts $channel "x = 1 + \"two\""
+    close $channel
+    lassign [aotrMain $temp -warnings off -aot-run $program -- after] out err status
+    list [string equal [lindex $first 0] [aotrPrinted before]] $out [string match "$program: *" $err] \
+        [string match "*to stderr*" $err] $status [aotrLeft $temp]
+} -cleanup {file delete -force $dir} -result {1 {} 1 0 1 {}}
+
+test aotr-link-failure-never-runs {a program whose link fails is never run: NATIVE LINK, status 1, nothing left -- after an earlier successful run too} -constraints aotrCCalls -setup {
+    set dir [aotrDir link]
+    set temp [aotrTemp $dir]
+    set program [aotrPrinter $dir program.bot]
+} -body {
+    set first [aotrMain $temp -warnings off -aot-run $program -- before]
+    set channel [open $program a]
+    puts $channel "extern c library \"definitely_missing_botlish_lib\""
+    puts $channel "extern c fn botlish_no_such_symbol() -> std::ffi::c::Int"
+    puts $channel "botlish_no_such_symbol()"
+    close $channel
+    set channel [open $program r]
+    set text [read $channel]
+    close $channel
+    set channel [open $program w]
+    puts -nonewline $channel "import std::ffi::c\n$text"
+    close $channel
+    lassign [aotrMain $temp -warnings off -aot-run $program -- after] out err status
+    list [string equal [lindex $first 0] [aotrPrinted before]] $out [string match "*NATIVE LINK*" $err] \
+        [string match "*to stderr*" $err] $status [aotrLeft $temp]
+} -cleanup {file delete -force $dir} -result {1 {} 1 0 1 {}}
+
+test aotr-core-ir-input {core IR text has no native path: refused, nothing built} -constraints aotRun -setup {
+    set dir [aotrDir coreir]
+    set temp [aotrTemp $dir]
+    set path [file join $dir p.ir]
+    set channel [open $path w]
+    puts $channel "(int 1)"
+    close $channel
+} -body {
+    lassign [aotrMain $temp -aot-run $path] out err status
+    list $out [string match "*NATIVE AOT INPUT*" $err] $status [aotrLeft $temp]
+} -cleanup {file delete -force $dir} -result {{} 1 1 {}}
+
+test aotr-main-thread-refused {-native-startup main-thread where executables cannot start so: NATIVE UNSUPPORTED startup before anything is written; nothing runs} -constraints aotrNoMainThread -setup {
+    set dir [aotrDir startup]
+    set temp [aotrTemp $dir]
+    set program [aotrPrinter $dir]
+} -body {
+    lassign [aotrMain $temp -warnings off -aot-run -native-startup main-thread $program -- x] out err status
+    list $out [string match "*NATIVE UNSUPPORTED startup*" $err] $status [aotrLeft $temp]
+} -cleanup {file delete -force $dir} -result {{} 1 1 {}}
+
+test aotr-main-thread {-native-startup main-thread on macOS AArch64: the program runs on the process's main thread (its startup report), as its emitted executable would} -constraints aotrMainThread -setup {
+    set dir [aotrDir mainthread]
+    set temp [aotrTemp $dir]
+    set program [aotrPrinter $dir]
+    set report [file join $dir report.txt]
+} -body {
+    lassign [aotrMainEnv $temp [list BOTLISH_NATIVE_STARTUP_REPORT $report] -warnings off -aot-run -native-startup main-thread $program -- x] out err status
+    set channel [open $report]
+    set lines [split [string trim [read $channel]] \n]
+    close $channel
+    list [string equal $out [aotrPrinted x]] $status [lsearch -inline $lines {startup *}] [lsearch -inline $lines {process-main-thread *}]
+} -cleanup {file delete -force $dir} -result {1 0 {startup main-thread} {process-main-thread 1}}
+
+test aotr-worker-default {without -native-startup the executable is the worker's (its startup report)} -constraints aotRun -setup {
+    set dir [aotrDir worker]
+    set temp [aotrTemp $dir]
+    set program [aotrPrinter $dir]
+    set report [file join $dir report.txt]
+} -body {
+    lassign [aotrMainEnv $temp [list BOTLISH_NATIVE_STARTUP_REPORT $report] -warnings off -aot-run $program] out err status
+    set channel [open $report]
+    set lines [split [string trim [read $channel]] \n]
+    close $channel
+    # (Whether the worker is the process's main thread: 0, or unknown where
+    # the host cannot tell -- Windows; main-thread-startup.test's reading.)
+    list $status [lsearch -inline $lines {startup *}] \
+        [expr {[lindex [lsearch -inline $lines {process-main-thread *}] 1] in {0 unknown}}]
+} -cleanup {file delete -force $dir} -result {0 {startup worker} 1}
+
+# --- the private directory --------------------------------------------------------
+
+test aotr-keep {-aot-keep keeps the private directory -- owner-only, the executable and the NIR in it -- and names it on stderr; the kept executable runs again alike} -constraints aotRun -setup {
+    set dir [aotrDir keep]
+    set temp [aotrTemp $dir]
+    set program [aotrPrinter $dir]
+} -body {
+    lassign [aotrMain $temp -warnings off -aot-run -aot-keep $program -- one] out err status
+    set left [aotrLeft $temp]
+    regexp {build directory (.*) is kept \(the executable (.*)\)} $err -> kept executable
+    set files [lsort [glob -tails -directory $kept *]]
+    set mode 700
+    if {$::tcl_platform(platform) eq "unix"} {
+        file stat $kept st
+        set mode [format %o [expr {$st(mode) & 0o777}]]
+    }
+    lassign [aotrProcess [list $executable one]] again
+    list [string equal $out [aotrPrinted one]] $status [llength $left] [string equal [file normalize [file join $temp [lindex $left 0]]] [file normalize $kept]] \
+        $files $mode [string equal $again $out]
+} -cleanup {file delete -force $dir} -result [list 1 0 1 1 [lsort [list [file tail [native::executableFile printer]] printer.nir]] 700 1]
+
+test aotr-concurrent {four runs of one program at once: each builds in a directory of its own, each prints its own arguments, nothing is left} -constraints aotRun -setup {
+    set dir [aotrDir concurrent]
+    set temp [aotrTemp $dir]
+    set program [aotrPrinter $dir]
+} -body {
+    set pipes {}
+    withEnvironment [aotrTempEnvironment $temp] {
+        foreach i {1 2 3 4} {
+            lappend pipes [open |[list [info nameofexecutable] $::mainScript -warnings off -aot-run $program -- run$i 2>@1] rb]
+        }
+    }
+    set outs [lmap pipe $pipes {
+        set out [read $pipe]
+        close $pipe
+        set out
+    }]
+    list {*}[lmap out $outs i {1 2 3 4} {expr {[string first "arg \[run$i\]\n" $out] >= 0}}] [aotrLeft $temp]
+} -cleanup {file delete -force $dir} -result {1 1 1 1 {}}
+
+test aotr-unwritable-working-directory {the build needs no writable working directory: its directory is the temporary directory's} -constraints {aotRun unixSignals} -setup {
+    set dir [aotrDir readonly]
+    set temp [aotrTemp $dir]
+    set program [aotrPrinter $dir]
+    set locked [file join $dir locked]
+    file mkdir $locked
+    file attributes $locked -permissions 0555
+} -body {
+    set here [pwd]
+    cd $locked
+    try {
+        set result [aotrMain $temp -warnings off -aot-run $program -- x]
+    } finally {
+        cd $here
+    }
+    list [string equal [lindex $result 0] [aotrPrinted x]] [lindex $result 2] [aotrLeft $temp]
+} -cleanup {file attributes $locked -permissions 0755; file delete -force $dir} -result {1 0 {}}
+
+test aotr-unicode-paths {a source, an application root and a temporary directory with spaces and non-ASCII letters} -constraints aotRun -setup {
+    set dir [aotrDir unicode]
+    set root [file join $dir "ünï cödé root"]
+    file mkdir $root
+    set temp [file join $dir "tëmp dír"]
+    file mkdir $temp
+    set channel [open [file join $root helper.bot] w]
+    fconfigure $channel -encoding utf-8
+    puts $channel "fn word() -> str:\n    \"from a module\""
+    close $channel
+    set program [aotrProgram $root "prögram one.bot" {
+        "import helper"
+        "fn show() -> unit errors std::io::WriteFailed:"
+        "    std::io::print_line(helper::word())"
+        "show():"
+        "    on std::io::WriteFailed:"
+        "        unit"
+    }]
+} -body {
+    aotrMain $temp -warnings off -aot-run $program
+} -cleanup {file delete -force $dir} -result [list "from a module\n" "" 0]
+
+# --- interruption -----------------------------------------------------------------
+
+# A program that says where it is and then waits: "ready PID" on stdout
+# (getpid, through C), then a minute's sleep.
+proc aotrSleeper {dir} {
+    return [aotrProgram $dir sleeper.bot {
+        "import std::ffi::c"
+        "extern c fn getpid() -> std::ffi::c::Int"
+        "extern c fn sleep(seconds: std::ffi::c::UInt) -> std::ffi::c::UInt"
+        "fn ready() -> unit errors std::io::WriteFailed:"
+        "    pid = getpid()"
+        "    std::io::print_line(\"ready \".concat(std::int::to_string(pid)))"
+        "ready():"
+        "    on std::io::WriteFailed:"
+        "        unit"
+        "sleep(60)"
+        "unit"
+    }]
+}
+
+# Runs main.tcl -aot-run SLEEPER as the leader of a process group of its own
+# (a terminal's foreground job), waits for its "ready PID", does HOW to it
+# (python3 tests/aot-run-interrupt.py: `group SIGINT` is a terminal's Ctrl-C
+# to the whole group, `parent SIGKILL` kills main.tcl alone) and reports, as
+# a dict, the program's PID, whether it is still alive a few seconds later,
+# main.tcl's status and what is left in TEMP.
+proc aotrInterrupt {temp sleeper how} {
+    withEnvironment [aotrTempEnvironment $temp] {
+        set result [exec python3 -I [file join $::projectRoot tests aot-run-interrupt.py] {*}$how -- \
+            [info nameofexecutable] $::mainScript -warnings off -aot-run $sleeper]
+    }
+    return [dict merge $result [dict create left [aotrLeft $temp]]]
+}
+
+test aotr-interrupt-group {Ctrl-C (SIGINT to the foreground process group): the program ends, the private directory is removed} -constraints {aotrPython aotrCCalls} -setup {
+    set dir [aotrDir interrupt]
+    set temp [aotrTemp $dir]
+    set sleeper [aotrSleeper $dir]
+} -body {
+    set r [aotrInterrupt $temp $sleeper {group SIGINT}]
+    list [dict get $r ready] [dict get $r alive] [dict get $r left]
+} -cleanup {file delete -force $dir} -result {1 0 {}}
+
+test aotr-terminate-command {SIGTERM to main.tcl's driver's group leader: forwarded to the program, which ends; nothing left} -constraints {aotrPython aotrCCalls} -setup {
+    set dir [aotrDir terminate]
+    set temp [aotrTemp $dir]
+    set sleeper [aotrSleeper $dir]
+} -body {
+    set r [aotrInterrupt $temp $sleeper {driver SIGTERM}]
+    list [dict get $r ready] [dict get $r alive] [dict get $r left]
+} -cleanup {file delete -force $dir} -result {1 0 {}}
+
+test aotr-parent-killed {main.tcl killed alone (SIGKILL): the program does not outlive the command that ran it -- the driver sees its parent gone and ends it -- and the private directory is removed} -constraints {aotrPython aotrCCalls} -setup {
+    set dir [aotrDir parent]
+    set temp [aotrTemp $dir]
+    set sleeper [aotrSleeper $dir]
+} -body {
+    set r [aotrInterrupt $temp $sleeper {parent SIGKILL}]
+    list [dict get $r ready] [dict get $r alive] [dict get $r left]
+} -cleanup {file delete -force $dir} -result {1 0 {}}
+
+# Windows: main.tcl killed alone (taskkill /F: TerminateProcess) while its
+# program runs. The driver waits on main.tcl's process handle beside the
+# program's (launch.rs's wait_watching) and terminates the program.
+testConstraint aotrWindowsKill [expr {[testConstraint aotrCCalls] && $::tcl_platform(platform) eq "windows"
+    && [auto_execok taskkill] ne "" && [auto_execok tasklist] ne ""}]
+proc aotrWindowsAlive {pid} {
+    return [string match "*\"$pid\"*" [exec tasklist /FI "PID eq $pid" /NH /FO CSV]]
+}
+test aotr-parent-killed-windows {main.tcl killed alone on Windows (TerminateProcess): the program does not outlive the command that ran it, and the private directory is removed} -constraints aotrWindowsKill -setup {
+    set dir [aotrDir parentwin]
+    set temp [aotrTemp $dir]
+    set sleeper [aotrProgram $dir sleeper.bot {
+        "import std::ffi::c"
+        "extern c library \"kernel32\""
+        "extern c fn GetCurrentProcessId() -> std::ffi::c::ULong"
+        "extern c fn Sleep(milliseconds: std::ffi::c::ULong) -> unit"
+        "fn ready() -> unit errors std::io::WriteFailed:"
+        "    std::io::print_line(\"ready \".concat(std::int::to_string(GetCurrentProcessId())))"
+        "ready():"
+        "    on std::io::WriteFailed:"
+        "        unit"
+        "Sleep(60000)"
+        "unit"
+    }]
+} -body {
+    withEnvironment [aotrTempEnvironment $temp] {
+        set pipe [open |[list [info nameofexecutable] $::mainScript -warnings off -aot-run $sleeper 2>@1] r]
+    }
+    set child ""
+    while {$child eq "" && [gets $pipe line] >= 0} {
+        regexp {^ready (\d+)} $line -> child
+    }
+    exec taskkill /F /PID [lindex [pid $pipe] 0]
+    set deadline [expr {[clock milliseconds] + 20000}]
+    while {$child ne "" && [aotrWindowsAlive $child] && [clock milliseconds] < $deadline} {
+        after 100
+    }
+    set alive [expr {$child ne "" && [aotrWindowsAlive $child]}]
+    if {$alive} { catch {exec taskkill /F /PID $child} }
+    catch {close $pipe}
+    # (The driver removes its directory once the program has ended.)
+    while {[aotrLeft $temp] ne {} && [clock milliseconds] < $deadline + 10000} {
+        after 100
+    }
+    list [expr {$child ne ""}] $alive [aotrLeft $temp]
+} -cleanup {file delete -force $dir} -result {1 0 {}}
+
+# --- the same as the emitted executable ---------------------------------------------
+
+test aotr-equals-emitted {the program run by -aot-run and its -emit-native-executable executable run directly: the same output, error and status, plainly and under GC stress} -constraints aotrCoroutines -setup {
+    set dir [aotrDir equals]
+    set temp [aotrTemp $dir]
+    set program [aotrProgram $dir coroutine.bot {
+        "struct Ev:"
+        "    n: int"
+        "fn counting(limit: int) -> Ev:"
+        "    loop i from 0 to limit:"
+        "        yield Ev {n: i * i}"
+        "    return Ev {n: -1}"
+        "fn drive() -> List\[int\]:"
+        "    coroutine {step, first} = counting(3)"
+        "    a = step()"
+        "    b = step()"
+        "    c = step()"
+        "    \[first.n, a.n, b.n, c.n\]"
+        "fn show(values: List\[int\]) -> unit errors std::io::WriteFailed:"
+        "    loop v in values:"
+        "        std::io::print_line(std::int::to_string(v))"
+        "    unit"
+        "show(drive()):"
+        "    on std::io::WriteFailed:"
+        "        unit"
+    }]
+} -body {
+    lassign [aotrMain $temp -warnings off -emit-native-executable $program] - - built
+    set executable [native::executableFile [file rootname $program]]
+    set results {}
+    foreach stress {0 1} {
+        lassign [aotrMainEnv $temp [list BOTLISH_NATIVE_GC_STRESS $stress] -warnings off -aot-run $program] out err status
+        withEnvironment [list BOTLISH_NATIVE_GC_STRESS $stress] {
+            lassign [aotrProcess [list $executable]] xout xerr xstatus
+        }
+        lappend results [string equal $out $xout] [string equal [aotrErr $err] $xerr] [list $status $xstatus]
+    }
+    list $built $results [lindex [aotrMain $temp -warnings off -aot-run $program] 0] [aotrLeft $temp]
+} -cleanup {file delete -force $dir} -result [list 0 {1 1 {0 0} 1 1 {0 0}} "0\n1\n4\n-1\n" {}]
+
+test aotr-no-jit-route {-aot-run runs nothing in the driver's process: the driver's aot-run only links and starts the executable, and native::aotRun never calls the in-process run} -constraints aotRun -body {
+    # The driver's in-process runs are its run, bench, batch and vms
+    # commands (native::RunDriver's argv file is written for them and for
+    # aot-run); native::aotRun asks for aot-run alone.
+    set body [info body native::aotRun]
+    list [regexp {RunDriver run-command aot-run } $body] [regexp {RunDriver \w+ (run|bench|batch|vms) } $body] \
+        [regexp {CraneliftJit|execute\(} [core::ReadFile [file join $::projectRoot native src aotrun.rs]]]
+} -result {1 0 0}
+
+# --- a native backend without a JIT ------------------------------------------------
+
+# The driver built without its JIT (cargo build --release --no-default-features
+# --target-dir native/target/no-jit; the macOS application's,
+# MACOS-BOTLISH-DISTRIBUTION-MILESTONE-1.md): its tests run where one is built.
+set aotrNoJitDriver [file join $::projectRoot native target no-jit release botlish-native[expr {$::tcl_platform(platform) eq "windows" ? ".exe" : ""}]]
+testConstraint aotrNoJitDriver [expr {[testConstraint aotRun] && [file executable $aotrNoJitDriver]}]
+
+# A driver that says it has no JIT (botlish-native capabilities: jit 0) and
+# is the real one for everything else: main.tcl's side of the boundary.
+proc aotrJitlessWrapper {dir} {
+    set path [file join $dir botlish-native-jitless]
+    set channel [open $path w]
+    puts $channel "#!/bin/sh"
+    puts $channel {if [ "$1" = capabilities ]; then echo "jit 0"; echo "aot-run 1"; exit 0; fi}
+    puts $channel "exec [list [native::binary]] \"\$@\""
+    close $channel
+    file attributes $path -permissions 0755
+    return $path
+}
+
+test aotr-no-jit-refused {a native backend without a JIT: -backend cranelift, cranelift-generic and run -backend cranelift refused before anything compiles -- status 1, NATIVE UNSUPPORTED jit and -aot-run named on stderr, nothing on stdout} -constraints {aotRun unixSignals} -setup {
+    set dir [aotrDir nojit]
+    set temp [aotrTemp $dir]
+    set program [aotrPrinter $dir]
+    set driver [aotrJitlessWrapper $dir]
+} -body {
+    lmap invocation {{-backend cranelift} {-backend cranelift-generic} {run -backend cranelift}} {
+        lassign [aotrMainEnv $temp [list BOTLISH_NATIVE_BIN $driver] {*}$invocation $program] out err status
+        list $status [expr {$out eq ""}] [string match "*(NATIVE UNSUPPORTED jit)*" $err] [string match "*-aot-run FILE*" $err]
+    }
+} -cleanup {file delete -force $dir} -result {{1 1 1 1} {1 1 1 1} {1 1 1 1}}
+
+test aotr-no-jit-run-default {without a JIT, run's native default runs the program as its executable: its output, arguments and status, as -aot-run's} -constraints {aotRun unixSignals} -setup {
+    set dir [aotrDir nojitrun]
+    set temp [aotrTemp $dir]
+    set program [aotrPrinter $dir]
+    set driver [aotrJitlessWrapper $dir]
+} -body {
+    lassign [aotrMainEnv $temp [list BOTLISH_NATIVE_BIN $driver] run -warnings off $program one "two words"] out err status
+    lassign [aotrMainEnv $temp [list BOTLISH_NATIVE_BIN $driver] -warnings off -aot-run $program -- one "two words"] aout aerr astatus
+    lassign [aotrMainEnv $temp [list BOTLISH_NATIVE_BIN $driver] -version] version
+    list [string equal $out [aotrPrinted [list one "two words"]]] $status [string equal $out $aout] $astatus \
+        [regexp -line {^native JIT: unavailable} $version] [aotrLeft $temp]
+} -cleanup {file delete -force $dir} -result {1 0 1 0 1 {}}
+
+test aotr-jit-available {with a JIT, -version says so and run's default is the JIT's (the program's value in the driver's result, not an executable's)} -constraints aotRun -setup {
+    set dir [aotrDir jit]
+    set temp [aotrTemp $dir]
+} -body {
+    lassign [aotrMain $temp -version] version
+    # (main.tcl's own lines end in CRLF on Windows: read untranslated.)
+    list [regexp -line {^native JIT: available\r?$} $version] [native::jitAvailable]
+} -cleanup {file delete -force $dir} -result {1 1}
+
+test aotr-no-jit-driver {the driver built without its JIT: capabilities jit 0; its in-process commands refused (NATIVE UNSUPPORTED jit); -emit-clif from the object; -aot-run and -emit-native-executable as with the JIT} -constraints aotrNoJitDriver -setup {
+    set dir [aotrDir nojitdriver]
+    set temp [aotrTemp $dir]
+    set program [aotrPrinter $dir]
+    set nir [file join $dir p.nir]
+    set channel [open $nir w]
+    puts -nonewline $channel [native::nir [surface::compile "1 + 2"]]
+    close $channel
+} -body {
+    set capabilities [exec $aotrNoJitDriver capabilities]
+    set refused [lmap command {{run} {bench 3} {batch 3} {vms 2}} {
+        string match "error {NATIVE UNSUPPORTED jit} *" [exec $aotrNoJitDriver {*}$command $nir]
+    }]
+    set clif [exec $aotrNoJitDriver clif $nir]
+    lassign [aotrMainEnv $temp [list BOTLISH_NATIVE_BIN $aotrNoJitDriver] -warnings off -aot-run $program -- x] out err status
+    lassign [aotrMainEnv $temp [list BOTLISH_NATIVE_BIN $aotrNoJitDriver] -backend cranelift $program] - jerr jstatus
+    list $capabilities $refused [string match "*function *" $clif] [string equal $out [aotrPrinted x]] $status \
+        $jstatus [string match "*(NATIVE UNSUPPORTED jit)*" $jerr] [aotrLeft $temp]
+} -cleanup {file delete -force $dir} -result [list "jit 0\naot-run 1" {1 1 1 1} 1 1 0 1 1 {}]
+
+# --- the command line ---------------------------------------------------------------
+
+# A packaged compiler's own settings put back for the program
+# (native::aotRun -environment, which single/main.tcl's userEnvironment
+# feeds: the driver's --child-env): a variable set to the user's value, one
+# unset. BOTLISH_NATIVE_RESULT is the variable an executable reads itself
+# (the driver protocol), so the program's own result file says whether it
+# saw it.
+test aotr-child-environment {native::aotRun -environment: a variable the compiler changed is the user's value again for the program, one the user had not set is unset} -constraints aotRun -setup {
+    set dir [aotrDir childenv]
+    set temp [aotrTemp $dir]
+    set program [aotrProgram $dir value.bot {"40 + 2"}]
+    set restored [file join $dir restored.result]
+    set compilers [file join $dir compilers.result]
+} -body {
+    set hir [surface::readProgramFile $program -warnings off]
+    withEnvironment [concat [aotrTempEnvironment $temp] [list BOTLISH_NATIVE_RESULT $compilers]] {
+        set a [native::aotRun $hir value -environment [list BOTLISH_NATIVE_RESULT [list $restored]]]
+        set b [native::aotRun $hir value -environment [list BOTLISH_NATIVE_RESULT {}]]
+    }
+    set channel [open $restored]
+    set lines [split [string trim [read $channel]] \n]
+    close $channel
+    list [dict get $a status] [dict get $b status] [expr {{value {int 42}} in $lines}] [file exists $compilers] [aotrLeft $temp]
+} -cleanup {file delete -force $dir} -result {{exit 0} {exit 0} 1 0 {}}
+
+test aotr-usage {-aot-run's usage errors (status 2, nothing compiled): two files, an option that runs or builds another way, -aot-keep or -- without it, a -target of another host} -constraints aotRun -setup {
+    set dir [aotrDir usage]
+    set temp [aotrTemp $dir]
+    set program [aotrPrinter $dir]
+    set other [if {[core::cabi::hostTarget] eq "linux-aarch64"} {set _ linux-x86_64} else {set _ linux-aarch64}]
+} -body {
+    lmap arguments [list \
+        [list -aot-run $program $program] \
+        [list -aot-run -backend interp $program] \
+        [list -aot-run -emit-native-executable $program] \
+        [list -aot-run -argv x $program] \
+        [list -aot-keep $program] \
+        [list $program -- x] \
+        [list -aot-run -target $other $program]] {
+        lassign [aotrMain $temp {*}$arguments] out err status
+        list $status [expr {$out eq ""}]
+    }
+} -cleanup {file delete -force $dir} -result {{2 1} {2 1} {2 1} {2 1} {2 1} {2 1} {2 1}}
+
+test aotr-diagnostic-presentation {-color and -excerpts decide how a rejection's diagnostics look, as for run: colored with the source line under -color always -excerpts always, plain under never; status 1 and nothing run either way} -constraints aotRun -setup {
+    set dir [aotrDir presentation]
+    set temp [aotrTemp $dir]
+    set program [file join $dir rejected.bot]
+    set channel [open $program w]
+    puts $channel "x = 1 + \"two\""
+    close $channel
+} -body {
+    lassign [aotrMain $temp -warnings off -aot-run -color always -excerpts always $program] out err status
+    lassign [aotrMain $temp -warnings off -aot-run -color never -excerpts never $program] pout perr pstatus
+    regsub -all {\x1b\[[0-9;]*m} $err "" plain
+    list $status $out [string match "*\x1b\\\[*" $err] [string match "*| x = 1 + \"two\"*" $plain] \
+        $pstatus $pout [string match "*\x1b*" $perr] [string match "*x = 1 + \"two\"*" $perr] \
+        [string match "$program: *" $perr] [aotrLeft $temp]
+} -cleanup {file delete -force $dir} -result {1 {} 1 1 1 {} 0 0 1 {}}
+
+# --- positive controls ----------------------------------------------------------------
+
+test aotr-control-arguments {positive control: the argument comparison fails for arguments the program was not given} -constraints aotRun -setup {
+    set dir [aotrDir control-arguments]
+    set temp [aotrTemp $dir]
+    set program [aotrPrinter $dir]
+} -body {
+    lassign [aotrMain $temp -warnings off -aot-run $program -- "two words"] out
+    list [string equal $out [aotrPrinted [list two words]]] [string equal $out [aotrPrinted [list "two words"]]]
+} -cleanup {file delete -force $dir} -result {0 1}
+
+test aotr-control-left {positive control: what a kept run leaves is seen (the cleanup check is no tautology)} -constraints aotRun -setup {
+    set dir [aotrDir control-left]
+    set temp [aotrTemp $dir]
+    set program [aotrPrinter $dir]
+} -body {
+    aotrMain $temp -warnings off -aot-run -aot-keep $program
+    llength [aotrLeft $temp]
+} -cleanup {file delete -force $dir} -result 1
+
+test aotr-control-status {positive control: the status check tells 3 from 0} -constraints aotrCCalls -setup {
+    set dir [aotrDir control-status]
+    set temp [aotrTemp $dir]
+    set program [aotrProgram $dir exit.bot {
+        "import std::ffi::c"
+        "extern c fn exit(status: std::ffi::c::Int) -> unit"
+        "exit(3)"
+        "unit"
+    }]
+} -body {
+    expr {[lindex [aotrMain $temp -warnings off -aot-run $program] 2] == 0}
+} -cleanup {file delete -force $dir} -result 0
+
+cleanupTests

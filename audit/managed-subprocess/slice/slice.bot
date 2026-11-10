@@ -1,0 +1,198 @@
+# slice.bot -- the census's vertical slice (MANAGED-SUBPROCESS-AND-EVENT-
+# LOOP-CENSUS-MILESTONE-1.md, section 14), on one event loop:
+#
+#   * child A ("build"): its own working directory and arguments; streams
+#     stdout chunks and a stderr warning; reads three lines the slice feeds
+#     it one by one; exits 0;
+#   * child B ("agent"): another directory; a descendant in its group;
+#     ignores SIGTERM; streams until it is cancelled from the terminal --
+#     terminate escalates to SIGKILL, which also ends the descendant;
+#   * a progress ticker every 100 ms, from the shared Board;
+#   * terminal input: the slice's stdin watched like any descriptor; a line
+#     "c" cancels B (no terminal is put in raw mode: nothing to restore);
+#   * at the end: nothing owned, nothing live, no descriptor or
+#     registration left.
+#
+#   slice HELPER TMPDIR      (tools/run.py runs it under a PTY and types "c")
+import board
+import event_loop_linux
+import labkit
+import msp
+import report
+import std::abi
+import std::abi::bytes
+import std::event_loop
+import std::int
+import std::linux
+import std::linux::io
+import std::list
+import std::str
+import type std::event_loop::Delivery
+import type std::event_loop::Wake
+
+fn join_path(dir: str, name: str) -> str:
+    std::str::concat(std::str::concat(dir, "/"), name)
+
+# Stream S of C: every chunk counted in CELL and shown, prefixed LABEL.
+fn pump(c: msp::Child, s: msp::Stream, cell: int, label: str, done: std::event_loop::Reg, context p: msp::Procs, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO, b: board::Board) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    loop:
+        chunk = labkit::read(c, s)
+        k = std::abi::bytes::length(chunk).value
+        if k == 0:
+            break
+        board::add(cell, k)
+        report::say(std::str::concat(label, report::text_of(chunk)))
+    std::event_loop::post(done, cell, 0)
+    0
+
+# Feed A three lines, 100 ms apart, then close its stdin.
+fn feeder(c: msp::Child, context p: msp::Procs, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO, b: board::Board) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    loop i from 1 to 4:
+        labkit::sleep(100000)
+        labkit::write(c, report::bytes_of(std::str::concat("line ", std::int::to_string(i)).concat("\n")))
+        board::add(8, 1)
+    labkit::close_stdin(c)
+    0
+
+fn progress(context ev: std::event_loop::Loop, io: std::linux::io::LinuxIO, b: board::Board) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    t = std::event_loop::every(100000)
+    loop:
+        e = std::event_loop::wait(t)
+        if e.reason != Wake::Timer:
+            break
+        board::add(3, 1)
+        report::say(std::str::concat("tick ", std::int::to_string(board::get(3))).concat(" A=").concat(std::int::to_string(board::get(0))).concat(" B=").concat(std::int::to_string(board::get(2))))
+        if board::get(5) == 1 and board::get(6) == 1:
+            break
+    std::event_loop::revoke(t)
+    0
+
+# The terminal: the slice's stdin, watched; a line starting with "c" cancels
+# B. Ends at end of file or when its registration is revoked.
+fn terminal(input: std::event_loop::Reg, cancel: std::event_loop::Reg, context ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO, b: board::Board) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    w = event_loop_linux::watch(0, event_loop_linux::Interest::Readable, input)
+    loop:
+        e = event_loop_linux::readable(w)
+        if e.reason != Wake::Event:
+            break
+        r = std::linux::io::read(std::abi::bytes::zeroed(std::abi::usize(256)))
+        if r.result <= 0:
+            report::say("terminal: end of input")
+            break
+        count = std::abi::usize(r.result):
+            on std::abi::AbiIntegerBelowRange:
+                break
+            on std::abi::AbiIntegerAboveRange:
+                break
+        got = std::abi::bytes::freeze_prefix(r.data, count):
+            on UpperOverrun:
+                break
+        board::add(7, 1)
+        text = report::text_of(got)
+        report::say(std::str::concat("terminal input: ", text))
+        if std::str::length(text) > 0 and std::str::substring(text, 0, 1) == "c":
+            board::put(4, 1)
+            std::event_loop::post(cancel, 1, 0)
+    event_loop_linux::unwatch(w)
+    0
+
+# Cancel B when the terminal asks: SIGTERM to its group (ignored), SIGKILL
+# after 300 ms.
+fn controller(c: msp::Child, cancel: std::event_loop::Reg, done: std::event_loop::Reg, context p: msp::Procs, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO, b: board::Board) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    e = std::event_loop::wait(cancel)
+    if e.reason != Wake::Event:
+        return 0
+    t = msp::now_us()
+    report::say("cancelling B")
+    st = labkit::terminate(c, 300000)
+    labkit::status_line("B ended", st)
+    report::say_int("B cancel-to-exit-us ", msp::now_us() - t)
+    std::event_loop::post(done, 9, 0)
+    0
+
+fn run(helper: str, tmp: str, input: std::event_loop::Reg, context p: msp::Procs, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO, b: board::Board) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    a_spec = msp::in_directory(msp::command(helper, ["cwd", "chunks:15:40", "err:warning: something\\n", "lines:3", "exit:0"]), join_path(tmp, "a"))
+    b_spec = msp::in_directory(msp::command(helper, ["cwd", "child:sleep:30000", "ignore:15", "chunks:1000:20"]), join_path(tmp, "b"))
+    {owner: oa, child: ca} = labkit::spawn(a_spec)
+    {owner: ob, child: cb} = labkit::spawn(b_spec)
+    report::say_int("A pid ", msp::pid(ca))
+    report::say_int("pid ", msp::pid(cb))
+    done = std::event_loop::channel(Delivery::Reliable, 8)
+    cancel = std::event_loop::channel(Delivery::Coalesce, 1)
+    coroutine {step: s1, first: f1} = pump(ca, msp::Stream::Stdout, 0, "A| ", done)
+    std::event_loop::adopt(s1, f1)
+    coroutine {step: s2, first: f2} = pump(ca, msp::Stream::Stderr, 1, "A! ", done)
+    std::event_loop::adopt(s2, f2)
+    coroutine {step: s3, first: f3} = pump(cb, msp::Stream::Stdout, 2, "B| ", done)
+    std::event_loop::adopt(s3, f3)
+    coroutine {step: s4, first: f4} = feeder(ca)
+    std::event_loop::adopt(s4, f4)
+    coroutine {step: s5, first: f5} = progress()
+    std::event_loop::adopt(s5, f5)
+    coroutine {step: s6, first: f6} = terminal(input, cancel)
+    std::event_loop::adopt(s6, f6)
+    coroutine {step: s7, first: f7} = controller(cb, cancel, done)
+    std::event_loop::adopt(s7, f7)
+    sa = labkit::wait(ca)
+    labkit::status_line("A ended", sa)
+    board::put(5, 1)
+    sb = labkit::wait(cb)
+    board::put(6, 1)
+    # The pumps and the controller end before the owners are released: a
+    # released child's identity is stale for every task (StaleChild).
+    loop i from 0 to 4:
+        std::event_loop::wait(done)
+    msp::release(oa)
+    msp::release(ob)
+    std::event_loop::revoke(input)
+    std::event_loop::revoke(cancel)
+    std::event_loop::revoke(done)
+    report::say_int("A stdout bytes ", board::get(0))
+    report::say_int("A stderr bytes ", board::get(1))
+    report::say_int("A lines fed ", board::get(8))
+    report::say_int("B stdout bytes ", board::get(2))
+    report::say_int("ticks ", board::get(3))
+    report::say_int("input lines ", board::get(7))
+    0
+
+fn main(helper: str, tmp: str, context ev: std::event_loop::Loop, d: event_loop_linux::Linux, n: event_loop_linux::Native, p: msp::Procs, io: std::linux::io::LinuxIO, b: board::Board) -> int errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered, std::event_loop::TaskFailed, IndexNotFound:
+    std::event_loop::sync()
+    fds = msp::open_fds()
+    regs = std::event_loop::stats().registrations
+    input = std::event_loop::source(Delivery::Coalesce, 1, :keep_alive)
+    coroutine {step, first} = run(helper, tmp, input)
+    std::event_loop::adopt(step, first)
+    start = msp::now_us()
+    std::event_loop::run()
+    loop o in std::event_loop::take_outcomes():
+        if o.ending != std::event_loop::Ending::Returned:
+            report::say_int("task failed ", o.value)
+    report::say_int("elapsed-us ", msp::now_us() - start)
+    report::say_int("end owned ", msp::owned())
+    report::say_int("end live ", msp::stat(12))
+    report::say_int("end escalations ", msp::escalations())
+    report::say_int("end fds delta ", msp::open_fds() - fds)
+    report::say_int("end shutdown killed ", msp::shutdown())
+    report::say_int("end registrations delta ", std::event_loop::stats().registrations - regs)
+    0
+
+args = argv():
+    on InvalidArgumentEncoding:
+        []
+with context std::event_loop::create(64)
+with context event_loop_linux::create()
+with context event_loop_linux::native()
+with context msp::create(200000)
+with context std::linux::io::create()
+with context board::create()
+main(std::list::get(args, 1, ""), std::list::get(args, 2, "/tmp")):
+    on std::event_loop::SchedulerFault:
+        -1
+    on std::event_loop::DriverFault:
+        -2
+    on std::event_loop::LoopReentered:
+        -3
+    on std::event_loop::TaskFailed:
+        -4
+    on IndexNotFound:
+        -5

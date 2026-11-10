@@ -363,9 +363,25 @@ expect_failure "an undefined symbol" "botlish_no_such_symbol" \
 # A native backend's run of a program that calls C, with a cache this run
 # fills itself: the runtime archive installed for it, the program linked,
 # then run.
-[[ $(env -i HOME="$work/home-run" PATH="$path" "$botlish" -backend cranelift -warnings off -L "$work/lib" b.bot) == \
-   "== b.bot (cranelift)"$'\n'"   value: $(expected b)" ]] || fail "-backend cranelift of b"
-echo "   ran b on -backend cranelift"
+# (A native backend without a JIT -- the macOS application's,
+# MACOS-BOTLISH-DISTRIBUTION-MILESTONE-1.md -- refuses -backend cranelift,
+# NATIVE UNSUPPORTED jit, and runs b as an executable instead: -aot-run,
+# its value through the driver protocol.)
+if env -i "$botlish" -version | grep -qx 'native JIT: available'; then
+  [[ $(env -i HOME="$work/home-run" PATH="$path" "$botlish" -backend cranelift -warnings off -L "$work/lib" b.bot) == \
+     "== b.bot (cranelift)"$'\n'"   value: $(expected b)" ]] || fail "-backend cranelift of b"
+  echo "   ran b on -backend cranelift"
+else
+  status=0
+  env -i HOME="$work/home-run" PATH="$path" "$botlish" -backend cranelift -warnings off -L "$work/lib" b.bot >"$work/jit.out" 2>&1 || status=$?
+  [[ $status == 1 ]] && grep -q 'NATIVE UNSUPPORTED jit' "$work/jit.out" || fail "-backend cranelift of b without a JIT: status $status, $(cat "$work/jit.out")"
+  rm -f "$work/b.result"
+  env -i HOME="$work/home-run" PATH="$path" BOTLISH_NATIVE_RESULT="$work/b.result" "$botlish" -warnings off -L "$work/lib" -aot-run b.bot >/dev/null ||
+    fail "-aot-run of b"
+  [[ $(value_words "$work/b.result") == "$(expected_words b)" ]] ||
+    fail "-aot-run of b: $(cat "$work/b.result"), not $(expected_words b)"
+  echo "   ran b as an executable (-aot-run; -backend cranelift refused: no JIT)"
+fi
 # run, the program as a command (PROGRAM-OUTPUT-MILESTONE-1.md), is a native
 # run too: with a fresh cache the runtime archive is installed for it, the
 # program linked and run, and its output -- none -- is all it writes.

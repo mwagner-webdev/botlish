@@ -159,7 +159,11 @@ shell "env -i DYLD_PRINT_LIBRARIES=1 '$moved/Botlish.app/Contents/MacOS/botlish'
 probe C6 the native JIT and the signature
 printf '1 + 41\n' >"$work/jit.bot"
 run codesign -dv --entitlements - "$app/Contents/MacOS/botlish-native"
+echo "# The application's driver has no JIT (MACOS-BOTLISH-DISTRIBUTION-MILESTONE-1.md): its own account, the refusal, -aot-run"
+run "$app/Contents/MacOS/botlish-native" capabilities
 run "$app/Contents/MacOS/botlish" -backend cranelift "$work/jit.bot"
+run "$app/Contents/MacOS/botlish" -warnings off -aot-run "$work/jit.bot"
+echo "# (The experiments below run the checkout's main.tcl with a copy of the application's driver: without a JIT they show the refusal under each signature.)"
 echo "# The same driver signed with the hardened runtime and no entitlement (as a Developer ID build would be):"
 cp "$app/Contents/MacOS/botlish-native" "$work/hardened-native"
 run codesign --force --sign - --options runtime "$work/hardened-native"

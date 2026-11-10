@@ -1,0 +1,51 @@
+# raw-fork.bot -- reproducer (MANAGED-SUBPROCESS-AND-EVENT-LOOP-CENSUS-
+# MILESTONE-1.md, section 5): what the raw Linux syscall transport alone
+# permits. fork(2), execve(2) and wait4(2) are reachable from a direct
+# module, and this program does start /bin/true and reap it -- but only
+# because execve accepts NULL for argv and envp on Linux: no argument, no
+# environment, no descriptor plan can be expressed (an argv is an array of
+# pointers: posix-spawn-ffi.bot), and the child of fork() runs Botlish code
+# -- a copy of a multithreaded VM, its other threads gone, any lock they
+# held held forever -- between fork and execve. Observed to work here, and
+# unsafe by construction: no subprocess API can be built on it.
+#
+#   tclsh9.0 main.tcl run audit/managed-subprocess/repro/raw-fork.bot
+direct module
+
+import std::abi
+import std::abi::bytes
+import std::abi::x86_64
+import std::linux::abi::x86_64
+import std::list
+import std::str
+import type std::byte::Byte
+
+fn nul() -> Byte:
+    0
+
+fn fork() -> int:
+    std::abi::x86_64::to_int(std::linux::abi::x86_64::syscall({rax: std::abi::x86_64::register64(57)}))
+
+fn execve(path: std::abi::bytes::Bytes) -> int:
+    std::abi::x86_64::to_int(std::linux::abi::x86_64::syscall({rax: std::abi::x86_64::register64(59), rdi: std::abi::x86_64::from_bytes(path), rsi: std::abi::x86_64::register64(0), rdx: std::abi::x86_64::register64(0)}))
+
+fn exit_group(code: std::abi::I32) -> int:
+    std::abi::x86_64::to_int(std::linux::abi::x86_64::syscall({rax: std::abi::x86_64::register64(231), rdi: std::abi::x86_64::from_i32(code)}))
+
+fn wait4(pid: std::abi::I32) -> int:
+    status = std::abi::bytes::zeroed(std::abi::usize(4))
+    local = std::abi::bytes::detach(status)
+    std::abi::x86_64::to_int(std::linux::abi::x86_64::syscall({rax: std::abi::x86_64::register64(61), rdi: std::abi::x86_64::from_i32(pid), rsi: std::abi::x86_64::from_mutable_bytes(local), rdx: std::abi::x86_64::register64(0), r10: std::abi::x86_64::register64(0)}))
+
+path = std::abi::bytes::from_list(std::str::encode_utf8("/bin/true").append(nul()))
+pid = fork()
+if pid == 0:
+    execve(path)
+    exit_group(std::abi::I32 {value: 127})
+child = std::abi::i32(pid):
+    on std::abi::AbiIntegerBelowRange:
+        std::abi::I32 {value: 0}
+    on std::abi::AbiIntegerAboveRange:
+        std::abi::I32 {value: 0}
+reaped = wait4(child)
+[pid > 0, reaped == pid]

@@ -16,8 +16,13 @@ name: tests (windows x86-64)
 #                CI runs on Windows, within about ten minutes
 #                (tests/canary.tcl; CI-RUNS.md, "The canary"). Every other
 #                job waits for it: a push that breaks them costs one Windows
-#                runner for minutes, not nine for hours
-#   smoke        every push: the host and its toolchains; the native build
+#                runner for minutes, not nine for hours. A branch push runs
+#                it and the opt-in jobs only; one at a commit another run
+#                already tests defers to it and runs nothing (CI-RUNS.md, "A
+#                commit already tested")
+#   smoke        every push to main, dispatch and fork pull request (as
+#                every job below but the opt-in ones): the host and its
+#                toolchains; the native build
 #                and the Rust unit tests; core::cabi's windows-x86_64 row
 #                against clang's MSVC target; the native status (each
 #                capability works or is refused as recorded); program
@@ -44,15 +49,18 @@ name: tests (windows x86-64)
 #                the machine state against MSVC's own calls, MSVC's va_arg
 #                callees, the C runtime's snprintf and _open, user32's
 #                wsprintfA
-#   roots        every push: the fallback root plan (a `fallback-roots`
+#   roots        the fallback root plan (a `fallback-roots`
 #                driver: its Rust tests, the GC workloads) and native-frame
-#                roots against it on the same runner (bench/root-plans.tcl)
-#   system-linker every push: the system linker (SINGLE-EXECUTABLE-FFI-
+#                roots against it on the same runner (bench/root-plans.tcl);
+#                with "[ci-probes]" in a push's head commit message (a
+#                branch push then runs this job too) or a manual run's
+#                probes, also audit/windows-unwind's anchor probe
+#   system-linker the system linker (SINGLE-EXECUTABLE-FFI-
 #                MILESTONE-1.md) -- link.exe from a Developer environment,
 #                the precompiled runtime archive, no rustc -- its tests and
 #                the executable and C test files linked by it, plainly and
 #                under GC stress
-#   acceptance   every push, four shards: tests/platform/tier.tcl's
+#   acceptance   four shards: tests/platform/tier.tcl's
 #                acceptance tier -- every Tcl test file on interp and every
 #                golden suite on all four backends (the golden runner is a
 #                coroutine, which the native backends run on Windows since
@@ -66,8 +74,12 @@ name: tests (windows x86-64)
 #                (or the "gc_stress" input)
 #
 # Pushes to any branch run it, so a branch gets Windows results before this
-# file is on main; a pull request from this repository's own branches skips
-# (its push already ran), one from a fork runs. Documentation-only pushes
+# file is on main: a branch push the canary and the opt-in jobs its head
+# commit asks for (a marker counts anywhere in the message, prose
+# included); "Run workflow" on the branch (workflow_dispatch) runs the
+# rest, which every push to main runs. A pull request from this
+# repository's own branches skips (its push already ran), one from a fork
+# runs. Documentation-only pushes
 # skip, and so do tags (a tag's commit was tested where it was pushed). A
 # newer push to the same branch cancels a running one, on main too
 # (CI-RUNS.md). The checkout keeps the repository's bytes (no CRLF
@@ -126,6 +138,11 @@ jobs:
     runs-on: windows-2025
     # The budget is linux-x86_64 seconds; a Windows runner takes longer.
     timeout-minutes: 60
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      deferred: ${{ steps.twin.outputs.deferred }}
     steps:
       - name: Keep the repository's bytes
         run: git config --global core.autocrlf false
@@ -136,16 +153,25 @@ jobs:
           fetch-depth: 0
           filter: blob:none
 
+      # A branch push at a commit another run already tests defers to it and
+      # runs nothing (CI-RUNS.md, "A commit already tested").
+      - name: Already tested at this commit?
+        id: twin
+        uses: ./.github/actions/twin
+
       - name: Install prerequisites (Tcl 9.0.1, stable Rust for x86_64-pc-windows-msvc)
+        if: steps.twin.outputs.deferred != 'true'
         uses: ./.github/actions/setup-windows
 
       - name: Build native (Cranelift) backend
+        if: steps.twin.outputs.deferred != 'true'
         uses: ./.github/actions/build-native
 
       # Compared with main's previous head on a push to main, with the
       # merge base with main otherwise. Its selection goes to the job
       # summary.
       - name: Canary
+        if: steps.twin.outputs.deferred != 'true'
         env:
           BASE: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.event.before || 'origin/main' }}
         run: tclsh9.0 tests/canary.tcl -base "$BASE"
@@ -153,7 +179,11 @@ jobs:
   smoke:
     name: smoke (Windows x86-64, MSVC)
     needs: canary
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    # Not on a branch push, which runs the canary only: dispatch the
+    # workflow on the branch (CI-RUNS.md, "The canary").
+    if: >-
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository)
+      && (github.event_name != 'push' || github.ref == 'refs/heads/main')
     runs-on: windows-2025
     timeout-minutes: 75
     steps:
@@ -256,6 +286,13 @@ jobs:
       - name: Native objects and executables
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: tclsh9.0 tests/platform/aot-facts.tcl -verbose 1 2>&1 | tee aot-facts.log
+
+      # What -aot-run costs on this host (bench/aot-run.tcl,
+      # AOT-RUN-MILESTONE-1.md): the phases, the commands beside an explicit
+      # compile-then-run and the JIT, the time to a program's first output.
+      - name: AOT-run costs
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: tclsh9.0 bench/aot-run.tcl -runs 3 2>&1 | tee aot-run-costs.log
 
       # The census's allocation-heavy workloads and more, on both native
       # backends and as executables, five times under GC stress -- the
@@ -594,7 +631,11 @@ jobs:
   roots:
     name: root plans (Windows x86-64, native frames and the fallback)
     needs: canary
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    # Not on a branch push, unless its head commit asks for the probes.
+    if: >-
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository)
+      && (github.event_name != 'push' || github.ref == 'refs/heads/main' || contains(github.event.head_commit.message, '[ci-probes]'))
+      && needs.canary.outputs.deferred != 'true'
     runs-on: windows-2025
     timeout-minutes: 120
     steps:
@@ -743,6 +784,7 @@ jobs:
     if: >-
       !cancelled() && needs.canary.result == 'success'
       && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository)
+      && (github.event_name != 'push' || github.ref == 'refs/heads/main')
     runs-on: windows-2025
     timeout-minutes: 90
     steps:
@@ -803,6 +845,7 @@ jobs:
     if: >-
       !cancelled() && needs.canary.result == 'success'
       && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository)
+      && (github.event_name != 'push' || github.ref == 'refs/heads/main')
     runs-on: windows-2025
     timeout-minutes: 150
     strategy:
@@ -866,6 +909,7 @@ jobs:
     if: >-
       (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository)
       && (contains(github.event.head_commit.message, '[ci-full]') || inputs.tier == 'full')
+      && needs.canary.outputs.deferred != 'true'
     runs-on: windows-2025
     timeout-minutes: 240
     strategy:

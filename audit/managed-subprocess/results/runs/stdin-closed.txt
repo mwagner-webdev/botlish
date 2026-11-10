@@ -1,0 +1,7 @@
+write after the child closed stdin: closed
+status exited 0
+end owned 0
+end live 0
+end fds delta 0
+[harness] supervisor peak RSS 16280 kB, CPU 0.005 s
+[harness] PASS in 0.31 s

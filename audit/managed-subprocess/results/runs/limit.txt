@@ -1,0 +1,10 @@
+limit exceeded: terminating
+seen over limit yes
+kept 4096
+status signal 15
+child: 
+end owned 0
+end live 0
+end fds delta 0
+[harness] supervisor peak RSS 16092 kB, CPU 0.084 s
+[harness] PASS in 0.04 s

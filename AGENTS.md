@@ -18,11 +18,15 @@ one), check `main`'s CI at both ends of the work
   that list, so your branch's failures are compared with it rather than
   dismissed as "main's own".
 * **Before you merge a finished milestone into `main`,** check again:
-  `main`'s latest runs and your branch's own. `macos-arm64.yml` and
-  `windows-x86_64.yml` run on every branch push; `tests.yml` and
-  `tests-arm64.yml` run only their canary on a branch push (next section)
-  and the rest only when dispatched (`workflow_dispatch` with the branch as
-  the ref), so dispatch them. Don't merge onto a red
+  `main`'s latest runs and your branch's own. A branch push runs only the
+  canary of each of the four test workflows (macOS: the smoke job; next
+  section) and the jobs its message opts into (`[ci-full]`,
+  `[ci-app-mutants]`, `[ci-probes]`); the rest runs only when dispatched
+  (`workflow_dispatch` with the branch as the ref), so dispatch
+  `tests.yml`, `tests-arm64.yml`, `macos-arm64.yml` and `windows-x86_64.yml`
+  on the branch tip. A branch push's run that deferred to another (its
+  summary says "Deferred: ... is tested by RUN") tested nothing: read the
+  run it names. Don't merge onto a red
   `main` without telling the user. A failure on your branch that `main`'s
   latest run does not have is yours to fix before the merge. Pending runs
   are acceptable: report them as pending, never as passed.
@@ -33,12 +37,12 @@ nothing either way. Read the latest run of the workflow instead. Merging a
 branch makes its unfinished runs obsolete, and `prune-runs.yml` cancels
 them (CI-RUNS.md; next section).
 
-## CI housekeeping (cancellation, pruning, the release gate, the canary)
+## CI housekeeping (cancellation, pruning, the release gate, the canary, deferral)
 
 The runners are a shared, limited pool, and main's merges come in bursts
-(CI-RUNS.md). Four rules keep obsolete and doomed runs off them and keep
-releases honest; `tools/ci/runs.py` implements the second and the third,
-`tests/canary.tcl` the fourth. Keep it so:
+(CI-RUNS.md). Five rules keep obsolete, doomed and repeated runs off them
+and keep releases honest; `tools/ci/runs.py` implements the second, the
+third and the fifth, `tests/canary.tcl` the fourth. Keep it so:
 
 * **A newer push cancels a running test workflow on the same ref, on main
   too:** a workflow that tests a push has `concurrency: group:
@@ -53,9 +57,10 @@ releases honest; `tools/ci/runs.py` implements the second and the third,
   head may be a commit no workflow ran (scalar-asm-audit's).
 * **A release is published only once every test of its commit is green**,
   by a run nothing cancels. `CORE`: tests.yml and tests-arm64.yml with their
-  GC-stress jobs *succeeded* (skipped is no success), macos-arm64.yml,
-  windows-x86_64.yml, static-decisions.yml when it ran, and the release's
-  own build workflow. Any run at the commit counts.
+  GC-stress jobs *succeeded* (skipped is no success), macos-arm64.yml and
+  windows-x86_64.yml with their acceptance jobs succeeded (a branch push's
+  run has none), static-decisions.yml when it ran, and the release's own
+  build workflow. Any run at the commit counts.
   - `release-gate.yml` (workflow_run of those workflows on main) dispatches
     single-executable.yml or icy-tower-windows.yml on main with
     `release=SHA` for main's newest green commit (`run-name: release SHA`,
@@ -81,13 +86,33 @@ releases honest; `tools/ci/runs.py` implements the second and the third,
   history says failed recently on that host; tests.yml's runs the mutant
   catalogs and the warning gate first, as steps (a job of its own would
   wait for a runner before the expensive jobs could start: keep them steps).
-  On a branch push tests.yml and tests-arm64.yml run only the canary. The
-  canary orders, it never skips: never drop a job or
-  a test because the canary passed, never let an expensive job start
+  A branch push runs only the canary job, on every host (macOS: the smoke
+  job and its Linux control), plus the opt-in jobs its head commit's message
+  asks for (a marker counts anywhere in the message, prose included: write
+  one only to ask for its jobs); every other job runs on pushes to main, on pull requests and
+  when dispatched (its `if` holds `github.event_name != 'push' ||
+  github.ref == 'refs/heads/main'`). Where this file asks for a workflow,
+  or one of its jobs, "on the branch", dispatch it there, unless it is the
+  canary job (macOS: the smoke job) or one a marker opts into. The canary
+  orders, it never skips: never drop a job or a test because the canary
+  passed, never let an expensive job start
   before it (a job that runs after a failed need checks the canary's
   result itself), and never give it an item list of its own beside its
   selection. `tools/ci/test_runs.py` checks the workflows' side. A new
-  test workflow, or a new expensive job, waits for its host's canary.
+  test workflow, or a new expensive job, waits for its host's canary, and
+  a successful run counts for the release gate only with the jobs a branch
+  push skips (`CORE`'s job names: GC stress, the acceptance tiers).
+* **A branch push at a commit another run already tests defers to it**
+  (CI-RUNS.md, "A commit already tested"): the step "Already tested at this
+  commit?" (`.github/actions/twin`, `runs.py twin`) right after the
+  checkout of every job a branch push runs finds main's push run at the
+  commit (unfinished or successful) or another branch's successful push run
+  that ran its canary, and the job skips every later step; an opt-in job after the
+  canary reads the canary job's `deferred` output. A deferred run tested
+  nothing (the release gate never counts it). Never let a run of main, a
+  dispatched run or a pull request's run defer, never defer to a failed,
+  cancelled or deferred run or to another branch's unfinished one, and never
+  defer on an API error. A new job a branch push runs defers too.
 
 If you change `tools/ci/`, a workflow's concurrency or triggers, a release
 job, or the name of a workflow or of a GC-stress job a requirement names,
@@ -95,7 +120,7 @@ run `python3 -I tools/ci/test_runs.py` (it also checks the workflows' side
 of these rules), `python3 -I audit/macos-release/tests/test_workflow.py`
 and that audit's mutants for icy-tower-macos.yml, and
 `tclsh9.0 tools/mutant-catalogs.tcl`. Then push and read the `ci tools`
-run, which runs the gate and the pruning read-only against the
+run, which runs the gate, the pruning and the deferral read-only against the
 repository's runs. A new required workflow goes into `CORE` and into
 release-gate.yml's `workflow_run` list together (the tests check it).
 
@@ -627,18 +652,23 @@ application"): `single/macos/build.sh` makes `Botlish.app` -- the launcher
 (`single/macos/tcl-framework.sh`: Tcl's own framework build of the pinned
 9.0.1, install name `@rpath/Tcl.framework/Versions/9.0/Tcl`), the compiler
 archive `Contents/Resources/botlish.zip` (`single/package.tcl -archive`)
-and `Contents/Resources/libbotlish_runtime.a` -- signs it ad hoc, verifies
-it (`single/macos/verify.sh`) and archives it as
-`botlish-macos-aarch64.zip`. macos-arm64.yml's `app` and `app-clean` jobs
-build and accept it on every push (a manual run with `app_only` runs only
-them). Keep it so:
+and `Contents/Resources/libbotlish_runtime.a` -- signs it ad hoc with the
+hardened runtime (`single/macos/sign.sh`), verifies it
+(`single/macos/verify.sh`) and archives it as `botlish-macos-aarch64.zip`.
+macos-arm64.yml's `app` and `app-clean` jobs build and accept it on every
+push to main and every dispatched run (a manual run with `app_only` runs
+only them; a branch push runs neither); `botlish-macos.yml` releases it,
+Developer ID-signed and notarized, for a tag `botlish-macos-vX.Y.Z`
+(MACOS-BOTLISH-DISTRIBUTION-MILESTONE-1.md). Keep it so:
 
 * One staging procedure: both distributions pack what `single/package.tcl`'s
   `StageCompiler` stages; never a second file list. The macOS archive holds
   no Tcl library (the framework's) and no native executable (the bundle's).
 * Never append data to a signed Mach-O, change a file after it is signed,
   or sign with `--deep`: sign inner code first (the framework's version,
-  the driver, then the application). Executable code lives in
+  the driver, then the application). `single/macos/sign.sh` is the one
+  statement of that order, for the ad hoc build and the release alike:
+  never a second signing sequence. Executable code lives in
   `Contents/MacOS` and `Contents/Frameworks` only; nothing is extracted to
   a cache to run, and nothing is ever written into the bundle (the
   language server's copy of the standard library goes to
@@ -657,25 +687,45 @@ them). Keep it so:
   non-ASCII path otherwise) and the user's `LC_ALL` is put back, exactly,
   before anything runs: never let the compiler's children see a locale
   the user did not set.
-* Ad hoc signing is not notarization: never describe the artifact as
-  notarized or Gatekeeper-approved, never add a JIT or other entitlement or
-  the hardened runtime without the Developer ID milestone's decision
-  (MACOS-AARCH64-MILESTONE-9.md, "Prerequisites for Developer ID signing
-  and notarization": the census measured what the JIT needs then).
+* The application's driver has no JIT: build.sh builds it with `cargo
+  build --no-default-features` (the `jit` feature off; its own target
+  directory) and refuses one whose `capabilities` say `jit 1`; verify.sh's
+  `no JIT` group checks the binary. `-backend cranelift` and
+  `cranelift-generic` are refused by main.tcl, naming `-aot-run`; `run`'s
+  native default is `-aot-run`; the driver's run, bench, batch and vms are
+  `NATIVE UNSUPPORTED jit`. Never ship a driver with the JIT, never
+  re-route a JIT entry point to something else silently, and never add a
+  JIT entitlement.
+* Every unit (the framework's version, the driver, the application) is
+  signed with the hardened runtime and no entitlement in every mode, so
+  ordinary CI runs the bundle under it. Ad hoc signing is not
+  notarization: never describe an ad hoc artifact as notarized or
+  Gatekeeper-approved. The release's rules are Icy Tower's (next section
+  but many: "Icy Tower.app and its release"), through the same
+  `tools/macos-release/` core; the compiler's description is
+  `single/macos/bundle.py`, its identifier fixed there
+  (`io.github.mwagner-webdev.botlish`), never read from a GitHub variable
+  (`MACOS_BUNDLE_ID` is the game's).
 * A test or tool that runs the application uses a copy for anything that
   damages or changes it, and checks the bundle untouched afterwards.
 
 If you change `single/macos/`, `single/main.tcl`, `single/package.tcl`,
-`audit/macos-app/` or the driver's `packaged_runtime_archive`, push and
-read the `app` and `app-clean` jobs (they run `single/macos/verify.sh`,
+`audit/macos-app/` or the driver's `packaged_runtime_archive`, dispatch
+macos-arm64.yml on the branch (`app_only` for these alone) and read the
+`app` and `app-clean` jobs (they run `single/macos/verify.sh`,
 `single/smoke-test.sh`, `single/ffi-smoke-test.sh`,
-`single/macos/app-test.sh`, `single/macos/compare.sh` and
+`single/macos/app-test.sh`, `single/macos/compare.sh`, the release's
+stages in ad hoc mode with `single/macos/acceptance.sh`, and
 `bench/macos-app.tcl`), run `audit/macos-app/tools/mutate.tcl` (a push with
 `[ci-app-mutants]`: every mutant in its `mutants.txt` must still apply and
 be killed; update a mutant's text when you change the code it mutates,
 keeping it a mutant of the same rule), and the Linux single executable's
 checks (single/build.sh, both smoke tests,
-`audit/single-executable/tools/mutate.tcl`): the scripts are shared.
+`audit/single-executable/tools/mutate.tcl`): the scripts are shared. If you
+change sign.sh, acceptance.sh, `single/macos/bundle.py` or `release.py`,
+`tools/macos-release/` or botlish-macos.yml, also run the release tests
+and mutants (next section but many: test_botlish_release.py and
+test_botlish_workflow.py beside Icy Tower's).
 
 ## Running the tests locally
 
@@ -780,7 +830,10 @@ What it costs, measured on a 4-core container (2026-10-15):
     stress) and, on pushes to main and manual runs, the GC-stress run. Run
     it on a branch with workflow_dispatch;
   - first, on every push to any branch and on every host, the canary
-    (CI-RUNS.md, "The canary"), which the jobs above wait for.
+    (CI-RUNS.md, "The canary"), which the jobs above wait for. A branch
+    push runs only the canary (and the jobs its message opts into), and
+    none at a commit another run already tests: dispatch the workflows on
+    the branch for the rest.
 
   A push or pull request that changes only Markdown files and `docs/` starts
   no workflow (their `paths-ignore`). Renaming or removing a design document
@@ -1837,12 +1890,12 @@ that applies to the host must still apply and be killed: update a mutant's
 text when you change the code it mutates, keeping it a mutant of the same
 rule; a mutant of `platform/macos.rs` runs on macOS only, of
 `platform/windows.rs` on Windows only: the tier item
-`native-stack-mutants`), and the macOS smoke job and `CI-Tests:
-native-stack-overflow.test rust native-stack-mutants` on a branch (macOS
-facts are CI's: the shared Mac is not used); for the Windows guard, the
-Windows workflow on the branch (its smoke job runs the native stack
-checks, and `[ci-full]` with `CI-Tests: native-stack-mutants` the
-mutants). `bench/native-stack-guard.tcl` compares a driver against a
+`native-stack-mutants`), and the macOS smoke job and a `[ci-full]` push
+with `CI-Tests: native-stack-overflow.test rust native-stack-mutants` on a
+branch (macOS facts are CI's: the shared Mac is not used); for the Windows
+guard, the Windows workflow dispatched on the branch (its smoke job runs
+the native stack checks, and `[ci-full]` with `CI-Tests:
+native-stack-mutants` the mutants). `bench/native-stack-guard.tcl` compares a driver against a
 baseline build (`-baseline-rev main`; the tier item `native-stack-bench`
 on a macOS runner).
 
@@ -1996,8 +2049,9 @@ The native backend is being ported to macOS on Apple Silicon
 (MACOS-AARCH64-PORT-AUDIT.md: the Linux assumptions by subsystem, the
 census of what passes there today, the CI and the roadmap; one milestone
 at a time). Develop on Linux (or macOS); the Apple Silicon testing runs in
-GitHub Actions, `.github/workflows/macos-arm64.yml`, on every push to any
-branch (not documentation-only ones) -- never on a shared development Mac,
+GitHub Actions, `.github/workflows/macos-arm64.yml`: its smoke job on every
+push to any branch (not documentation-only ones), the rest on every push to
+main and when dispatched on a branch -- never on a shared development Mac,
 and no acceptance depends on one.
 
 * Every push runs Tier A on macOS (`smoke`: the host and its toolchains,
@@ -2006,8 +2060,11 @@ and no acceptance depends on one.
   backends' Unicode 16 semantics -- `tests/platform/cabi-facts.tcl`, the
   native build and its Rust unit tests, `tests/platform/native-status.tcl`,
   `tests/platform/aot-facts.tcl` (the program object and an executable as
-  the host's tools see them), `tests/platform/tier.tcl smoke`), Tier B (`tier.tcl acceptance`, five
-  shards) and the same smoke on ubuntu as a control. Locally, `tclsh9.0
+  the host's tools see them), `tests/platform/tier.tcl smoke`, the canary)
+  and the same smoke on ubuntu as a control; a push to main and a
+  dispatched run (`workflow_dispatch` on the branch) also Tier B
+  (`tier.tcl acceptance`, five shards), the system linker and the
+  application's jobs. Locally, `tclsh9.0
   tests/platform/tier.tcl smoke` takes seconds, and `tier.tcl X.test
   Y.bot` runs any file or suite the way CI does.
 * Tier C is opt-in: `[ci-full]` in the message of a push's head commit
@@ -2207,16 +2264,18 @@ WINDOWS-TOOLCHAIN-CENSUS.md): the driver and runtime built for
   widths reads the target's row (`long` is 32 bits on Windows); one that
   reads main.tcl's output untranslated expects CRLF from main.tcl's own
   lines on Windows.
-* CI: `.github/workflows/windows-x86_64.yml` on every push (windows-2025,
-  production code, Tcl 9.0.1 built by `tests/platform/setup-windows.ps1`):
-  the smoke job (the Rust tests, `native-status.tcl`, `aot-facts.tcl`'s
+* CI: `.github/workflows/windows-x86_64.yml` (windows-2025, production
+  code, Tcl 9.0.1 built by `tests/platform/setup-windows.ps1`): the canary
+  on every push; on a push to main and a dispatched run (`workflow_dispatch`
+  on the branch) also the smoke job (the Rust tests, `native-status.tcl`, `aot-facts.tcl`'s
   COFF/PE checks and unwind information, C calls through link.exe and the
   C runtime matrix, `tests/platform/gc-workloads.tcl` under GC stress and
   under the unwind check, the 2048 executable, Windows I/O redirected by
   bash, cmd and PowerShell, dumpbin's headers and unwind information, the
   smoke tier and the Windows-relevant test files), the `roots` job (the
   fallback plan's Rust tests and GC workloads, `bench/root-plans.tcl`;
-  `[ci-probes]` or a manual run adds `audit/windows-unwind`'s anchor probe)
+  `[ci-probes]` -- on a branch push too -- or a manual run adds
+  `audit/windows-unwind`'s anchor probe)
   and the acceptance tier in four shards; `[ci-full]` or a manual run adds
   the GC-stress tier.
   Neither Wine nor WSL is an authority for Windows; a `-gnu` cross build
@@ -2497,8 +2556,9 @@ native views, variadic calls, context-trait satisfaction), run
 `tests/target-model.test`, `tests/workload-2048.test` and
 `audit/context-traits/tools/mutate.tcl` (its `darwin-*` mutants run on
 macOS through the tier item `darwin-io-mutants`; every mutant that applies
-to the host must still apply and be killed), and on macOS (a branch push
-with `CI-Tests: darwin-io.test ...`) the darwin-io tests themselves.
+to the host must still apply and be killed), and on macOS (a `[ci-full]`
+branch push with `CI-Tests: darwin-io.test ...`, or a dispatched run) the
+darwin-io tests themselves.
 `bench/darwin-io.tcl` (tier item `darwin-io-bench`) is the performance
 report.
 
@@ -4735,7 +4795,7 @@ file with `objdump`; its trace needs Linux and ptrace; its `ec-modes-*`
 tests every lowering mode), `tests/c-pointer-borrowing.test`,
 `tests/c-byte-borrowing.test`, `tests/windows-io.test`,
 `tests/darwin-io.test` (its `di-errno-allocator` runs on macOS: the
-acceptance tier of every branch push, and under GC stress a `[ci-full]`
+acceptance tier of a dispatched run, and under GC stress a `[ci-full]`
 push with `CI-Tests: darwin-io.test c-ffi-error-capture.test`), all also
 under `BOTLISH_NATIVE_GC_STRESS=1`, the struct and transport tests
 (`tests/struct-scalar-replacement.test`, `tests/value-transport.test`),
@@ -4918,7 +4978,7 @@ c-ffi.test's MSVC captures on Windows: `CI-Tests: c-ffi-mutants=...` in a
 `win64_variadic_tests` here -- the latter runs a Win64 call through its
 stub in the JIT on any x86-64 host; the Apple and Linux AArch64 placements
 on an AArch64 host: CI's arm64 workflow and the macOS smoke job), the
-Windows workflow on the branch for a change to Win64's lowering, and the
+Windows workflow dispatched on the branch for a change to Win64's lowering, and the
 binding generator's checks for a change to what it emits (next sections).
 
 ## C header archaeology (a research instrument)
@@ -5509,6 +5569,23 @@ backend compiles, or reports why not (EMIT-*). Keep it so:
   HIR text carries no tables (its claims are not proved). Never accept a
   certificate because its text looks right, and never put process history
   (reuse) into the HIR.
+* Identity: the memo, the certificate table and a certificate's
+  dependencies name a function by its binding's name, which identifies it
+  only when no other function block of the compilation has that name
+  (`hir::emission::Identified`; EMISSION-IDENTITY-AND-FEASIBILITY-
+  CORRECTNESS-MILESTONE-1.md). A name of two functions selects nothing: no
+  memo reuse or storage for its claim, no publication of its certificate,
+  no composition with a certificate it finds, no validation of a
+  dependency on it, and no memoizing a proof that read a function of such a
+  name (`ReadsIdentified`). Each falls back to walking the code the claim
+  or call actually names. Never let a name choose between two blocks,
+  never refuse a proof (only a reuse) because a name is shared, and never
+  invent a lexical identity to keep a reuse without a design of its own.
+* Feasibility is a flag: `hir::emission::Facts` answers `{FEASIBLE ENV}`,
+  and an environment with no binding (a function without parameters, before
+  its first `bind`) is a feasible path's environment like any other. Never
+  read feasibility, or any other fact, from whether an abstract value's
+  text is empty.
 * Diagnostics anchor at the claimed function (its unit: recovery, static
   sites) and are located at the yield or call; a claim whose code holds
   another diagnostic, poison or a hole is `dependent` and says nothing.
@@ -5538,7 +5615,11 @@ lowering, loader walk or resolution, or the `emissions` table's trust
 census.tcl` (no false proof; every case as expected),
 `audit/emission-claims/tools/fuzz.tcl` (several seeds; 0 false proofs),
 `audit/emission-claims/tools/loops.tcl` for a change to loops or their
-bounds' facts (several seeds; 0 false certificates, 0 regressions) and
+bounds' facts (several seeds; 0 false certificates, 0 regressions),
+`audit/emission-identity/tools/structure.tcl` for a change to the memo,
+certificates, composition or branch facts (several seeds; 0 false
+certificates, 0 history differences), `audit/emission-dependencies/tools/
+census.tcl` (0 false certificates, no difference from its record) and
 `audit/emission-claims/tools/mutate.tcl` (every mutant in its `mutants.txt`
 must still apply and be killed: update a mutant's text when you change the
 code it mutates, keeping it a mutant of the same rule), plus
@@ -5784,24 +5865,36 @@ temporary one, whose bundles LaunchServices' lookup did not find.
 `examples/games/icy-tower/package-macos.sh` assembles `Icy Tower.app` from
 build-macos.sh's executable, byte for byte (`macos/bundle.py`: a structured
 Info.plist, the Mach-O and the bundle checked as a whole);
-`macos/credentials.py` validates the release's seven GitHub values;
-`macos/release.py` is the trust path as gated stages (keychain,
-notarytool's credential validation, sign, verify, record an acceptance,
-notarize, staple, Gatekeeper, tamper, package, publishable, cleanup) in
-three modes, `adhoc` and `dry-run` for ordinary CI, `release` for the
-`release` job (ICY-TOWER-MACOS-APP-MILESTONE-1.md). Keep it so:
+`tools/macos-release/credentials.py` validates the release's seven GitHub
+values; `tools/macos-release/release.py` is the trust path as gated stages
+(keychain, notarytool's credential validation, sign, verify, record an
+acceptance, notarize, staple, Gatekeeper, tamper, package, publishable,
+cleanup) in three modes, `adhoc` and `dry-run` for ordinary CI, `release`
+for the `release` job (ICY-TOWER-MACOS-APP-MILESTONE-1.md). The core is
+application-neutral and shared with Botlish.app's release
+(MACOS-BOTLISH-DISTRIBUTION-MILESTONE-1.md): each application supplies its
+description (`examples/games/icy-tower/macos/bundle.py`,
+`single/macos/bundle.py`: its name, units, identifier, ZIP, signing) and an
+entry point (`macos/release.py`, `single/macos/release.py`). Keep it so:
+
+* One validator and one trust path: an application's description never
+  checks a credential, skips a stage or adds one of its own; a rule both
+  applications need goes into the core. Never let one application's
+  release read the other's identifier or overwrite its release (their tags,
+  names and assets differ, and publish refuses an existing release).
 
 * Credentials live only in the `macos-release` environment and reach only
   the `release` job of icy-tower-macos.yml, for an `icy-tower-macos-vX.Y.Z`
-  tag of main's history, pushed, run by hand or dispatched again by the
+  tag, and of botlish-macos.yml, for a `botlish-macos-vX.Y.Z` tag, of main's
+  history, pushed, run by hand or dispatched again by the
   release gate, and only once every test of the tagged commit is green (the
   `tested` job, CI-RUNS.md) -- never a branch, a pull request, a fork,
   `pull_request_target`, another job or another workflow;
   each secret only in the `env` of the step that reads it, never in a
   script, a `with` or a job's `env`; no step holding one traces commands.
   Nothing is committed: no certificate but Apple's public ones
-  (`macos/apple-ca/`, pinned by SHA-256 in credentials.py), no key, no
-  password.
+  (`tools/macos-release/apple-ca/`, pinned by SHA-256 in credentials.py),
+  no key, no password.
 * The preflight runs before any Apple tool and reports every problem under
   its stable code without a byte of a secret; a malformed value is never
   left for `security`, `codesign` or `notarytool` to report. A release never
@@ -5809,9 +5902,10 @@ three modes, `adhoc` and `dry-run` for ordinary CI, `release` for the
   signature, never skips a stage (each refuses to run unless the stages it
   depends on passed: `publishable` checks the whole sequence, one CDHash
   and one ZIP digest), and never publishes over an existing release.
-* No entitlement, no `--deep`, no JIT or library-validation exception: the
-  game needs none. The hardened runtime is on in every mode, so ordinary CI
-  plays the bundle under it.
+* No entitlement, no `--deep`, no JIT or library-validation exception:
+  neither application needs one (the compiler's driver has no JIT). The
+  hardened runtime is on in every mode, so ordinary CI runs each bundle
+  under it.
 * No job changes a trust setting (`add-trusted-cert`, `authorizationdb
   write`, `spctl --master-disable`): a release trusts Apple's root, which
   is the system's, and the dry run's throwaway identity, which no runner
@@ -5833,10 +5927,12 @@ three modes, `adhoc` and `dry-run` for ordinary CI, `release` for the
   published release updates them, in a change of its own after the release
   exists. Never point them at a tag whose release is not published.
 
-If you change `package-macos.sh`, `macos/`, `macos_app.bot`, the release
-jobs or `macos-session.py app`, run `audit/macos-release/tests/`
-(test_credentials, test_release, test_workflow; `tests/workload-icy-tower.test`'s
-`workload-icy-tower-release-tooling` runs them) and
+If you change `package-macos.sh`, `macos/`, `macos_app.bot`,
+`tools/macos-release/`, the release jobs or `macos-session.py app`, run
+`audit/macos-release/tests/` (test_credentials, test_release,
+test_workflow, test_botlish_release, test_botlish_workflow;
+`tests/workload-icy-tower.test`'s `workload-icy-tower-release-tooling` runs
+them) and
 `audit/macos-release/tools/mutate.py` (every mutant in its `mutants.txt`
 must still apply and be killed by a test its `!!` line names: update a
 mutant's text when you change the code it mutates, keeping it a mutant of
@@ -5884,6 +5980,50 @@ If you change any of that, run `tests/native-executable.test`,
 single/main.tcl, `audit/single-executable/tools/mutate.tcl` (its
 `run-command-not-linking` mutant) and both smoke tests after
 `single/build.sh`.
+
+## Running a program as its executable (-aot-run)
+
+`main.tcl -aot-run [OPTION...] FILE [-- ARG...]` (AOT-RUN-MILESTONE-1.md)
+builds the program exactly as `-emit-native-executable` does and runs that
+file as a command: `native::aotRun` lowers it with `native::ExecutableText`
+(the one compilation of an executable, `native::executable`'s too), and
+the driver's `aot-run` (native/src/aotrun.rs) links it with
+`codegen::aot::emit_executable` into a private directory and starts it.
+Keep it so:
+
+* No second pipeline and no in-process run: never run the program in the
+  driver's process, never cache an executable, never run a file this
+  command did not just link. The directory is new every run (created
+  exclusively, owner-only on Unix) and removed when the program ends
+  (`-aot-keep` keeps it); a failed build or link runs nothing.
+* The program's arguments are exactly the words after `--` (argv()[0] is
+  FILE as typed); its standard streams, working directory and environment
+  are the command's (a packaged compiler's own settings put back:
+  `childEnvironment`, `--child-env`); nothing of its output passes through
+  the compiler. Its exit status is the command's, 128+N for a signal on
+  Unix; SIGTERM and SIGHUP are forwarded, SIGINT and SIGQUIT are not (the
+  terminal sends them to the group); the program never outlives its
+  command (the parent watch).
+* The host's target only, and the startup policy the executable's
+  (`-native-startup`): a foreign target is a usage error, main-thread where
+  unsupported `NATIVE UNSUPPORTED startup`.
+* The JIT is the driver's `jit` cargo feature (default on): `-aot-run`
+  never needs it, and a driver without it refuses only the in-process
+  commands (run, bench, batch, vms). Never make anything but those depend
+  on the JIT, and never turn it off for a build other than Botlish.app's.
+
+If you change aotrun.rs, launch.rs's Windows spawn and wait,
+`native::aotRun`, `native::ExecutableText`, RunDriver's `run-command`
+mode, main.tcl's `-aot-run` or JIT boundary, or the `jit` feature, run
+`cargo test --release --manifest-path native/Cargo.toml --bin
+botlish-native aot_run`, `tests/aot-run.test` (also with
+`BOTLISH_NATIVE_LINKER=system` and `stub`, and with a driver built
+`--no-default-features --target-dir native/target/no-jit`),
+`tests/main-cli.test`, `tools/compilerpedia.tcl check` and
+`audit/aot-run/tools/mutate.tcl` (every mutant in its `mutants.txt` must
+still apply and be killed: update a mutant's text when you change the code
+it mutates, keeping it a mutant of the same rule), and read the Windows
+and macOS workflows on the branch. `bench/aot-run.tcl` measures the costs.
 
 ## Application modules, native program output, the recursion limit
 

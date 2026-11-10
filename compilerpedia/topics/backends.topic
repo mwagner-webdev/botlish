@@ -103,6 +103,11 @@ call sites prove (concept.specialization).
   * It needs the native executables: in a checkout, `cargo build --release
     --manifest-path native/Cargo.toml` (otherwise NATIVE NOT-BUILT); the
     single executable packs them.
+  * It is the JIT: the program is compiled into this process's memory and
+    run there. The JIT is optional. The macOS application, Botlish.app,
+    has none, and refuses -backend cranelift and cranelift-generic with
+    NATIVE UNSUPPORTED jit. Natively, a program runs there as an
+    executable (-aot-run, cli.aot-run), which every native build can do.
   * A construct the native lowering does not support fails with NATIVE
     UNSUPPORTED; native stack exhaustion is NATIVE LIMIT STACK.
 
@@ -795,8 +800,8 @@ title: Every command-line option
 summary: The options of botlish (tclsh9.0 main.tcl): backend and warning selection, program arguments, building, checking, the language server, inspection output, and the reference.
 index: backends
 alias: options; flags of the command line; command-line options
-keywords: -backend, -warnings, -target, -L, -F, -runtime-path, -target-support, -argv, -argv-hex, -argv-none, -emit-native-executable, -native-startup, -emit-hir-interchange, -emit-native-library, -export, -out, -emit-c, -check, -color, -excerpts, -lsp, -lsp-scheduler, -lsp-worker, -code, -hir, -ast, -aot, -aot-data, -aot-spec, -contexts, -direct, -traits, -emit-nir, -emit-clif, -help, -version
-related: cli.usage cli.output cli.exit-status cli.lsp lint.policy backend.targets backend.hir-interchange backend.native-executable backend.native-startup backend.native-library backend.target-support backend.c concept.argv
+keywords: -backend, -warnings, -target, -L, -F, -runtime-path, -target-support, -argv, -argv-hex, -argv-none, -aot-run, -aot-keep, --, -emit-native-executable, -native-startup, -emit-hir-interchange, -emit-native-library, -export, -out, -emit-c, -check, -color, -excerpts, -lsp, -lsp-scheduler, -lsp-worker, -code, -hir, -ast, -aot, -aot-data, -aot-spec, -contexts, -direct, -traits, -emit-nir, -emit-clif, -help, -version
+related: cli.usage cli.output cli.exit-status cli.lsp cli.run cli.aot-run lint.policy backend.targets backend.hir-interchange backend.native-executable backend.native-startup backend.native-library backend.target-support backend.c concept.argv
 
 == RUNNING
     -backend NAME     interp (default), compile, cranelift,
@@ -823,6 +828,17 @@ related: cli.usage cli.output cli.exit-status cli.lsp lint.policy backend.target
                       ($ORIGIN/lib, @executable_path/lib); refused on
                       Windows, whose loader searches the executable's own
                       directory (cli.packages: native deploy)
+    -aot-run          build the one input as the executable
+                      -emit-native-executable links, in a private
+                      directory, and run it as a command: the words after
+                      `--` its arguments, its output and exit status its
+                      own; nothing is left behind (cli.aot-run). It takes
+                      only -warnings, -target (the host's), -L, -F,
+                      -native-startup, -aot-keep, -color and -excerpts
+    -aot-keep         keep -aot-run's build directory (the executable and
+                      its NIR) and name it on stderr
+    --                ends -aot-run's options: every word after it is the
+                      program's argument
 
 == PROGRAM ARGUMENTS (argv())
     -argv TEXT        append one argument (its UTF-8 bytes); the first one
@@ -842,7 +858,8 @@ own process arguments.
                               main-thread (the process's main thread, a
                               512 MiB stack; macOS AArch64 only), fixed
                               into the executable (backend.native-startup);
-                              an option of -emit-native-executable only
+                              an option of -emit-native-executable and
+                              -aot-run only
     -target-support NAME      link the executable with the runtime archive
                               of the target support package NAME, installed
                               in the application's package tree of the
@@ -1040,7 +1057,7 @@ summary: botlish run FILE.bot ARG... runs a program as its executable would: onl
 index: backends
 alias: run; botlish run; run a program as a command; utility; unix tool; run with arguments; no value line; quiet run
 keywords: run, command, arguments, argv, stdin, stdout, value, status, utility, pipe
-related: cli.usage cli.output cli.exit-status backend.native-executable concept.argv concept.program-value task.print-output
+related: cli.usage cli.output cli.exit-status cli.aot-run backend.native-executable concept.argv concept.program-value task.print-output
 
 == THE FORM
     botlish run [OPTION...] FILE.bot [ARG...]
@@ -1053,10 +1070,11 @@ Standard input is the program's (std::linux::io::read).
 
 == OPTIONS
 Before FILE: -backend NAME (default cranelift: the program runs natively,
-as its executable would), -warnings MODE, -target NAME, -L DIR, -F DIR,
--color WHEN and -excerpts WHEN (how a rejection's diagnostics look on
-stderr). Any other option (inspection, building, -check, -argv) is a usage
-error.
+as its executable would; where the native backend has no JIT, as the
+macOS application's has none, natively as an executable: cli.aot-run),
+-warnings MODE, -target NAME, -L DIR, -F DIR, -color WHEN and -excerpts
+WHEN (how a rejection's diagnostics look on stderr). Any other option
+(inspection, building, -check, -argv) is a usage error.
 The Tcl backends run it too, but cannot print (backend.io).
 
 == WHAT IT PRINTS AND RETURNS
@@ -1069,6 +1087,63 @@ The Tcl backends run it too, but cannot print (backend.io).
 The program cannot choose its exit status (capability.process-exit-status).
 To see a program's value, run it the development way (botlish FILE.bot,
 cli.output).
+
+@topic cli.aot-run
+title: Building and running a program as a native executable: -aot-run
+summary: botlish -aot-run FILE.bot -- ARG... builds the program as a standalone executable in a private directory and runs it as a command: its output, arguments and exit status its own, no JIT needed.
+index: backends
+alias: aot run; compile and run; build and run; run natively without the JIT; native development cycle; cargo run; go run
+keywords: -aot-run, -aot-keep, --, executable, AOT, ahead of time, status, signal, exit code, temporary, private directory, main-thread, JIT
+related: cli.run cli.options cli.exit-status backend.native-executable backend.native-startup backend.cranelift concept.argv error.native-unsupported error.native-link
+
+== THE FORM
+    botlish -aot-run [OPTION...] FILE.bot [-- ARG...]
+    tclsh9.0 main.tcl -aot-run tool.bot -- -n 3 < input > output
+    botlish -aot-run -native-startup main-thread game.bot
+Builds FILE as `-emit-native-executable` builds it: the same compilation,
+link plan, linker and startup policy. The executable goes in a new private
+directory under the system's temporary directory, is run, and the
+directory is removed when the program has ended. Nothing runs in the
+compiler's own process, so no JIT is needed.
+
+== THE PROGRAM'S PROCESS
+  * Arguments: argv() is FILE as typed, then every word after `--`,
+    exactly as given: spaces, an empty word, a word that looks like an
+    option, another `--`.
+  * Standard input, output and error are the program's, unchanged. The
+    compiler writes nothing on standard output, and on standard error only
+    its own diagnostics, each after "FILE: ".
+  * The working directory and the environment are the user's.
+  * The exit status is the program's own: 0 when it completes, 1 when it
+    fails at run time (its error on stderr, as an executable reports it),
+    the status a C `exit` gave. When signal N ends it the status is 128+N,
+    as a POSIX shell's `$?` says, and a line on stderr names the signal
+    (none for SIGINT and SIGPIPE).
+  * Interrupted: Ctrl-C reaches the program as it would from a shell, and
+    the build directory is removed. If the compiler's process is killed,
+    the program is ended too: it never outlives the command that ran it.
+
+== WHAT NEVER RUNS
+A program that is rejected, is not AOT-ready, or does not link is not run:
+its diagnostics on stderr, status 1. Every run builds anew, so a failed
+build never runs an earlier executable of the same file. A signal that
+comes before the program starts stops the run there.
+
+== OPTIONS
+-warnings, -target (only the host's: the program runs here), -L, -F,
+-native-startup, -aot-keep, -color and -excerpts (how a rejection's
+diagnostics look on stderr). -aot-keep keeps the build directory, with
+the executable and the program's NIR, and names it on stderr. Any other
+option is a malformed invocation (status 2), as is a second input file or
+`--` without -aot-run.
+
+== AND `run`
+`botlish run FILE ARG...` runs a program as a command too, on the JIT
+where the native backend has one. Where it has none (the macOS
+application), `run`'s native default runs the program as -aot-run does.
+-aot-run behaves the same in every native build. A program that finds files
+relative to its own executable sees the private build directory: build it
+with -emit-native-executable for that.
 
 @topic cli.tools
 title: External tools: a package's program, run explicitly

@@ -93,20 +93,22 @@ Columns: the case, its class (the report's section 19), each claim's verdict com
 
 | case | class | verdicts | appropriate | strict | reported | depends | interchange | notes |
 |---|---|---|---|---|---|---|---|---|
-| `N1` | C | proven+ proven+ | proven+ rejected | accepted |  | inner inner | kept / refused (EMISSION) | memo off: proven+ rejected |
-| `N2` | C | proven+ proven+ | proven+ rejected | accepted |  | emitter emitter | kept / refused (EMISSION) | memo off: proven+ rejected; run interp,compile,cranelift-generic,cranelift: trace 65, invalid |
-| `N3` | C | proven+ proven+ | proven+ rejected | accepted |  | inner inner | kept / refused (EMISSION) | memo off: proven+ rejected |
+| `N1` | C | proven+ rejected | proven+ rejected | EMIT-REJECTED | EMIT-REJECTED | inner - | kept / kept |  |
+| `N2` | C | proven+ rejected | proven+ rejected | EMIT-REJECTED | EMIT-REJECTED | emitter - | kept / kept | run interp,compile,cranelift-generic,cranelift: trace 65, invalid |
+| `N3` | C | proven+ rejected | proven+ rejected | EMIT-REJECTED | EMIT-REJECTED | inner - | kept / kept |  |
 | `N4a` | E | proven+ | proven+ | accepted |  | emitter,helper | kept / kept | run interp,compile,cranelift-generic,cranelift: trace 49, ok |
 | `N4b` | C | rejected | rejected | EMIT-REJECTED | EMIT-REJECTED | - | kept / kept | run interp,compile,cranelift-generic,cranelift: trace 65, invalid |
 | `N5` | B | proven+ | proven+ | accepted |  | emitter,step | kept / kept |  |
+| `N6a` | E | proven+ | proven+ | accepted |  | emitter,g,step | kept / kept | run interp,compile,cranelift-generic,cranelift: trace 49 65, ok |
+| `N6b` | C | rejected | rejected | EMIT-REJECTED | EMIT-REJECTED | - | kept / kept | run interp,compile,cranelift-generic,cranelift: trace 65 65, invalid |
 
 ## the empty environment
 
 | case | class | verdicts | appropriate | strict | reported | depends | interchange | notes |
 |---|---|---|---|---|---|---|---|---|
-| `F1` | C | proven+ | rejected | accepted |  | emitter,flip | kept / kept | run interp,compile,cranelift-generic,cranelift: trace 65, invalid |
-| `F2` | C | proven+ | rejected | accepted |  | emitter | kept / kept |  |
-| `F3` | C | proven+ | rejected | accepted |  | emitter,helper | kept / kept | run interp,compile,cranelift-generic,cranelift: trace 65, invalid |
+| `F1` | C | rejected | rejected | EMIT-REJECTED | EMIT-REJECTED | - | kept / kept | run interp,compile,cranelift-generic,cranelift: trace 65, invalid |
+| `F2` | C | rejected | rejected | EMIT-AFTER-TOKEN | EMIT-AFTER-TOKEN | - | kept / kept |  |
+| `F3` | C | rejected | rejected | EMIT-REJECTED | EMIT-REJECTED | - | kept / kept | run interp,compile,cranelift-generic,cranelift: trace 65, invalid |
 | `F4` | E | rejected | rejected | EMIT-REJECTED | EMIT-REJECTED | - | kept / kept |  |
 
 ## memo
@@ -177,22 +179,25 @@ Columns: the case, its class (the report's section 19), each claim's verdict com
 | `V2` | proven+ | reused | emitter |  |
 | `V1` | proven+ | reused | emitter |  |
 
-**identity**: the edit of N4b after N4a in one process: the certificate validated against the other helper of the name is kept, and the run yields 'A'
+**identity**: the edit of N4b after N4a in one process: the census's compiler validated the certificate against the other helper of the name and kept it (the run yields 'A'); a name of two functions validates nothing, so N4b is proved again, and rejected
 
 | step | verdicts | reuse | depends | run |
 |---|---|---|---|---|
 | `N4a` | proven+ | fresh | emitter,helper |  |
-| `N4b` | proven+ | reused | emitter,helper | interp,compile,cranelift-generic,cranelift: trace 65, invalid |
+| `N4b` | rejected | fresh | - | interp,compile,cranelift-generic,cranelift: trace 65, invalid |
+
+**identity-read**: N6a then N6b in one process: the census's identity prototype memoized N6a's certificate (its claimed function's name is unique), validated it against the one `step` N6b has -- the fingerprint it had recorded -- and reused it, a false certificate; a proof that read a name of two functions is not memoized
+
+| step | verdicts | reuse | depends | run |
+|---|---|---|---|---|
+| `N6a` | proven+ | fresh | emitter,g,step | interp,compile,cranelift-generic,cranelift: trace 49 65, ok |
+| `N6b` | rejected | fresh | - | interp,compile,cranelift-generic,cranelift: trace 65 65, invalid |
 
 ## Summary
 
-False certificates (a certified claim whose run is invalid): 4
-* **FALSE CERTIFICATE** N2 (claim 2): interp,compile,cranelift-generic,cranelift: trace 65, invalid
-* **FALSE CERTIFICATE** F1 (claim 1): interp,compile,cranelift-generic,cranelift: trace 65, invalid
-* **FALSE CERTIFICATE** F3 (claim 1): interp,compile,cranelift-generic,cranelift: trace 65, invalid
-* **FALSE CERTIFICATE** sequence identity, step N4b (claim 1): interp,compile,cranelift-generic,cranelift: trace 65, invalid
+False certificates (a certified claim whose run is invalid): 0
 
-Open cases (the verdict observed is not the appropriate one): 26
+Open cases (the verdict observed is not the appropriate one): 20
 * R1 (A): rejected -> dependent
 * B3 (U): proven+ -> undecided
 * B3c (A): rejected -> dependent
@@ -213,11 +218,5 @@ Open cases (the verdict observed is not the appropriate one): 26
 * S5d (A): rejected -> dependent
 * S6b (U): proven+ -> undecided
 * K1 (A): rejected -> dependent
-* N1 (C): proven+ proven+ -> proven+ rejected
-* N2 (C): proven+ proven+ -> proven+ rejected
-* N3 (C): proven+ proven+ -> proven+ rejected
-* F1 (C): proven+ -> rejected
-* F2 (C): proven+ -> rejected
-* F3 (C): proven+ -> rejected
 
 Differences from the record: 0

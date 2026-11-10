@@ -1,16 +1,20 @@
 #!/usr/bin/env python3
 """runs.py -- this repository's GitHub Actions housekeeping (CI-RUNS.md):
-the release gate and the pruning of obsolete runs.
+the release gate, the pruning of obsolete runs, and a branch push's
+deferral to a run that already tests its commit.
 
     python3 -I tools/ci/runs.py check SHA --for RELEASE [--require]
     python3 -I tools/ci/runs.py gate [--dry-run]
     python3 -I tools/ci/runs.py prune [--dry-run]
+    python3 -I tools/ci/runs.py twin [--dry-run] [--workflow FILE] [--run-id ID]
+                                     [--sha SHA|main] [--ref REF] [--event EVENT]
 
 check   Whether the tests of commit SHA are green for RELEASE (one of
         RELEASES' names): every workflow of CORE (and the release's own
         build workflow) has a finished, successful run at SHA, and in it
-        every job a requirement names (the GC-stress jobs) succeeded rather
-        than being skipped; SHA is a commit of main's history. Prints the
+        every job a requirement names (the GC-stress jobs, the acceptance
+        tiers: what a branch push skips) succeeded rather than being
+        skipped; SHA is a commit of main's history. Prints the
         verdict per requirement (also to $GITHUB_STEP_SUMMARY) and writes
         green=true|false and run_id=ID (the release's build run) to
         $GITHUB_OUTPUT. --require exits 1 unless green.
@@ -28,6 +32,17 @@ prune   Cancels the unfinished runs of branches that are fully in main: the
         branch's tip is main's or an ancestor of it (or, the branch
         deleted, the run's commit is). Never a run of main (the workflows'
         concurrency groups supersede those), of a tag, or of a fork.
+
+twin    Whether this run of a test workflow defers to another run of the
+        same workflow that tests the same commit (CI-RUNS.md, "A commit
+        already tested"). Only a push to a branch other than main defers:
+        to main's push run at the commit while it is unfinished or once it
+        succeeded, else to a finished, successful push run whose canary
+        step ran. Its canary job then skips every later step. The run is
+        the GITHUB_* variables' unless the options name one (--sha main:
+        main's head). Writes deferred=true|false and run=URL to
+        $GITHUB_OUTPUT and the deferral to the job summary; an API error
+        never defers (the run tests its commit). --dry-run only reports.
 
 The token is $GH_TOKEN (or $GITHUB_TOKEN), the repository
 $GITHUB_REPOSITORY, the API $GITHUB_API_URL. Nothing here runs a tool or
@@ -55,7 +70,9 @@ class Requirement:
     """A workflow that must have a successful run at the commit; `jobs`
     are substrings of job names that must each match at least one job of
     that run, and every matching job must have succeeded (a skipped
-    GC-stress job, as in a manual run of tests.yml, is no success).
+    GC-stress job, as in a manual run of tests.yml, is no success; neither
+    is a run without one, such as a branch push's, which runs only the
+    canary).
     `optional`: required only when the workflow ran at the commit (its
     paths filter decides whether it does)."""
 
@@ -70,12 +87,15 @@ class Requirement:
 
 # The tests every release waits for: the four test workflows, each on its
 # host, the two GC-stress runs among them, and the front end's
-# static-decision comparison when the commit changed what it compares.
+# static-decision comparison when the commit changed what it compares. A
+# branch push runs only its canary on every host (and a run deferred to
+# another runs nothing): a run counts only with the jobs such a run skips,
+# GC stress on Linux, the acceptance tier on macOS and Windows.
 CORE = (
     Requirement("tests.yml", jobs=("GC-stress",)),
     Requirement("tests-arm64.yml", jobs=("GC-stress",)),
-    Requirement("macos-arm64.yml"),
-    Requirement("windows-x86_64.yml"),
+    Requirement("macos-arm64.yml", jobs=("acceptance",)),
+    Requirement("windows-x86_64.yml", jobs=("acceptance",)),
     Requirement("static-decisions.yml", optional=True),
 )
 
@@ -106,6 +126,9 @@ RELEASES = {
         Release("icy-tower-windows", "icy-tower-windows.yml", tag="icy-tower-windows-latest",
                 built_by="icy-tower-windows.yml"),
         Release("icy-tower-macos", "icy-tower-macos.yml", tag_prefix="icy-tower-macos-v"),
+        # Botlish.app (MACOS-BOTLISH-DISTRIBUTION-MILESTONE-1.md): built,
+        # signed and tested by its release run itself, from the tag.
+        Release("botlish-macos", "botlish-macos.yml", tag_prefix="botlish-macos-v"),
     )
 }
 
@@ -448,7 +471,8 @@ def tagged_due(api, release, out, summary):
 
 def deferred(api, run):
     """The run's release job was skipped (icy-tower-macos.yml: its game
-    and release jobs wait for the `tested` job's green)."""
+    and release jobs wait for the `tested` job's green; botlish-macos.yml:
+    its release job)."""
     jobs = api.jobs(run["id"])
     release = [j for j in jobs if (j.get("name") or "").startswith("release")]
     return bool(release) and all(j.get("conclusion") == "skipped" for j in release)
@@ -497,6 +521,115 @@ def prune(api, dry_run, out):
     return cancelled
 
 
+# --- twin -------------------------------------------------------------------------
+
+# The name of the step that runs tests/canary.tcl in every test workflow's
+# canary job (macos-arm64.yml's smoke job): a run whose step succeeded
+# tested its commit, a deferred run skipped it.
+CANARY_STEP = "Canary"
+
+
+def twin_exempt(event, ref):
+    """Why a run never defers, or None: only a push to a branch other than
+    main does."""
+    if event != "push":
+        return "a %s run never defers: it was asked for" % (event or "manual")
+    if not ref.startswith("refs/heads/"):
+        return "%s is no branch" % (ref or "the ref")
+    if ref == "refs/heads/main":
+        return "a push to main never defers: main's runs are what the release gate and every merge read"
+    return None
+
+
+def ran_canary(api, run):
+    """The run's canary step succeeded: it tested its commit."""
+    for job in api.jobs(run["id"]):
+        for step in job.get("steps") or ():
+            if step.get("name") == CANARY_STEP and step.get("conclusion") == "success":
+                return True
+    return False
+
+
+def twin(api, workflow, run_id, sha, ref, event):
+    """(run, why): the run of `workflow` this one defers to, or (None, why
+    it does not). A push run of the same commit is at least the test a
+    branch push is: main's runs the whole workflow, another branch's the
+    same canary, and its message, so its opt-in jobs, is this push's.
+    Main's run counts while unfinished, since only a newer push to main
+    cancels it; another branch's only once it succeeded and ran its
+    canary (its own next push may cancel it, and a deferred run tested
+    nothing). A failed or cancelled run is no twin: this run then tests."""
+    why = twin_exempt(event, ref)
+    if why:
+        return None, why
+    mine = [r for r in api.runs_at(sha)
+            if workflow_of(r) == workflow and r["id"] != run_id and r.get("event") == "push"
+            and r.get("head_sha") == sha
+            and ((r.get("head_repository") or {}).get("full_name") or "").lower() == api.repo.lower()]
+    mine.sort(key=lambda r: r["id"], reverse=True)
+    for r in mine:
+        if r.get("head_branch") != "main":
+            continue
+        if r.get("status") != "completed":
+            return r, "main's push run at this commit is %s" % r.get("status")
+        if r.get("conclusion") == "success":
+            return r, "main's push run at this commit succeeded"
+    for r in mine:
+        if r.get("head_branch") == "main" or r.get("status") != "completed" or r.get("conclusion") != "success":
+            continue
+        if ran_canary(api, r):
+            return r, "%s's push run at this commit succeeded and ran its canary" % r.get("head_branch")
+    return None, "no other run tests this commit"
+
+
+def workflow_file(workflow_ref):
+    """The workflow file of GITHUB_WORKFLOW_REF (OWNER/REPO/.github/
+    workflows/FILE@REF)."""
+    path = (workflow_ref or "").split("@", 1)[0]
+    at = path.find("/" + WORKFLOWS)
+    return path[at + 1 + len(WORKFLOWS):] if at >= 0 else ""
+
+
+def twin_command(a, make_api, out, env):
+    """The twin command: decides, reports, writes the step's outputs.
+    Returns the run deferred to (or None)."""
+    workflow = a.workflow or workflow_file(env.get("GITHUB_WORKFLOW_REF"))
+    run_id = a.run_id if a.run_id is not None else int(env.get("GITHUB_RUN_ID") or 0)
+    sha = a.sha or env.get("GITHUB_SHA") or ""
+    ref = a.ref or env.get("GITHUB_REF") or ""
+    event = a.event or env.get("GITHUB_EVENT_NAME") or ""
+    found, why = None, twin_exempt(event, ref)
+    if not why:
+        try:
+            api = make_api()
+            if sha == "main":
+                sha = api.ref_sha("heads/main") or ""
+            if not workflow or not SHA.match(sha):
+                why = "no workflow file or commit to look up (%r, %r): this run tests its commit" % (workflow, sha)
+            else:
+                found, why = twin(api, workflow, run_id, sha, ref, event)
+        except (ApiError, KeyError, TypeError, ValueError) as e:
+            found, why = None, "the lookup failed (%s): this run tests its commit" % e
+            out("::warning title=twin::%s" % why)
+    if found is None:
+        out("twin: %s at %s: not deferred: %s" % (workflow, sha[:12] or "?", why))
+    else:
+        verb = "would defer" if a.dry_run else "deferred"
+        out("twin: %s at %s: %s to %s (%s, %s): %s" % (workflow, sha[:12], verb, link(None, found),
+                                                       found.get("head_branch"), found.get("status"), why))
+    if a.dry_run:
+        return found
+    deferred = found is not None
+    github_file("GITHUB_OUTPUT", ["deferred=%s" % ("true" if deferred else "false"),
+                                  "run=%s" % (link(None, found) if deferred else "")])
+    if deferred:
+        github_file("GITHUB_STEP_SUMMARY", [
+            "### Deferred: commit %s is tested by %s" % (sha, link(None, found)), "",
+            "%s (CI-RUNS.md, \"A commit already tested\"). This run tested nothing:"
+            " its result is that run's." % (why[0].upper() + why[1:]), ""])
+    return found
+
+
 # --- the command line ---------------------------------------------------------------
 
 
@@ -507,7 +640,7 @@ def github_file(var, lines):
             f.write("\n".join(lines) + "\n")
 
 
-def main(argv, api=None, out=print):
+def parser():
     p = argparse.ArgumentParser(prog="runs.py", description=__doc__.split("\n\n")[0])
     sub = p.add_subparsers(dest="command", required=True)
     c = sub.add_parser("check")
@@ -516,11 +649,28 @@ def main(argv, api=None, out=print):
     c.add_argument("--require", action="store_true")
     for name in ("gate", "prune"):
         sub.add_parser(name).add_argument("--dry-run", action="store_true")
-    a = p.parse_args(argv)
-    if api is None:
-        api = Api(os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN"),
-                  os.environ.get("GITHUB_REPOSITORY"),
-                  os.environ.get("GITHUB_API_URL", "https://api.github.com"))
+    t = sub.add_parser("twin")
+    t.add_argument("--dry-run", action="store_true")
+    t.add_argument("--workflow")
+    t.add_argument("--run-id", type=int)
+    t.add_argument("--sha")
+    t.add_argument("--ref")
+    t.add_argument("--event")
+    return p
+
+
+def main(argv, api=None, out=print):
+    a = parser().parse_args(argv)
+
+    def make_api():
+        return api if api is not None else \
+            Api(os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN"),
+                os.environ.get("GITHUB_REPOSITORY"),
+                os.environ.get("GITHUB_API_URL", "https://api.github.com"))
+    if a.command == "twin":
+        twin_command(a, make_api, out, os.environ)
+        return 0
+    api = make_api()
     summary = []
     if a.command == "check":
         if not SHA.match(a.sha):

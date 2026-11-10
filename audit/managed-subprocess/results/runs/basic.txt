@@ -1,0 +1,25 @@
+args 9
+arg 0 2f686f6d652f757365722f626f746c6973682f61756469742f6d616e616765642d73756270726f636573732f736c6963652f62696e2f6d73702d6368696c64
+arg 1 61726773
+arg 2 -
+arg 3 612062
+arg 4 71756f7465226420277827
+arg 5 68c3a96c6c6f20e282ac
+arg 6 2d2d
+arg 7 24484f4d45
+arg 8 2a
+
+status exited 0
+env MSP_X=one two
+env HOME unset
+env PATH=/nix/var/nix/profiles/default/bin:/root/.local/bin:/root/.cargo/bin:/usr/local/go/bin:/opt/node22/bin:/opt/maven/bin:/opt/gradle/bin:/opt/rbenv/bin:/root/.bun/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+cwd /tmp/msp-638k79sh
+
+env PATH unset
+env ONLY=1
+
+end owned 0
+end live 0
+end fds delta 0
+[harness] supervisor peak RSS 15660 kB, CPU 0.007 s
+[harness] PASS in 0.01 s

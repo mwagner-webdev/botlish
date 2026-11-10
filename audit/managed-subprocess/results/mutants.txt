@@ -1,0 +1,23 @@
+# tools/mutate.py's results (MANAGED-SUBPROCESS-AND-EVENT-LOOP-CENSUS-
+# MILESTONE-1.md, section 13). The full run killed 13 of 15 by their
+# detectors; m-read-eagain did not compile as first written (a weak kill)
+# and m-write-partial survived (no scenario made a partial write). Both
+# were corrected -- the mutant made compilable, the scenario stdin-partial
+# added -- and rerun (`mutate.py m-read-eagain m-write-partial`): their
+# lines below are the rerun's.
+KILLED c-sigdefault by FAIL inherit 0.01s -- missing '^default: sigpipe dfl mask 0$'  (34 s)
+KILLED c-nonblock by FAIL streams 60.00s -- exit status TIMEOUT; missing '^stdout bytes 1048576$'; missing '^stderr bytes 1048580$'; missing '^status exited 0$'; missing '^end owned 0$'; missing '^end live 0$'; missing '^end fds delta 0$'  (93 s)
+KILLED c-wnowait by FAIL reap-order 0.01s -- missing '^end live 0$'; missing '^end fds delta 0$'  (34 s)
+KILLED c-generation by FAIL stale 0.00s -- missing '^old identity: stale -116$'; missing '^signal through the old identity: stale -116$'  (35 s)
+KILLED c-group-signal by FAIL descendants 0.06s -- desc 11491 alive  (35 s)
+KILLED c-cwd-in-parent by FAIL launch 0.01s -- missing '^cwd-is-file launch-failed working-directory -20$'  (33 s)
+KILLED c-leaking-spawn by FAIL launch 0.01s -- missing '^end fds delta 0$'  (34 s)
+KILLED m-interrupt by FAIL cancel 0.41s -- missing '^read interrupted after-us \\d+$'; missing '^child still running after the interrupt yes$'; missing '^second read got bytes 6$'  (33 s)
+KILLED m-alarm by FAIL terminate 10.41s -- missing '^ignored signal 9$'; missing '^escalations 1$'  (44 s)
+KILLED m-escalate by FAIL terminate 10.41s -- missing '^ignored signal 9$'  (45 s)
+KILLED m-release-term by FAIL release 0.30s -- missing '^end escalations 1$'  (35 s)
+KILLED m-read-eagain by FAIL streams 60.00s -- exit status TIMEOUT; missing '^stdout bytes 1048576$'; missing '^stderr bytes 1048580$'; missing '^status exited 0$'; missing '^end owned 0$'; missing '^end live 0$'; missing '^end fds delta 0$'  (93 s)
+KILLED m-write-partial by FAIL stdin-partial 0.01s -- missing '^echoed 1000000$'  (33 s)
+KILLED m-retire-on-release by FAIL release 0.10s -- missing '^owned right after release 1$'; missing '^owned after the scope 2$'; missing '^end escalations 1$'; missing '^end live 0$'; missing '^end fds delta 0$'; pid 12317 alive; pid 12318 alive  (34 s)
+KILLED m-exit-broadcast by FAIL two-waiters 60.00s -- exit status TIMEOUT; missing '^waiter 2 saw exited 6$'; missing '^end owned 0$'; missing '^end live 0$'; missing '^end fds delta 0$'  (95 s)
+15 of 15 mutants killed

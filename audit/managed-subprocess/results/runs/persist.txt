@@ -1,0 +1,8 @@
+status exited 0
+end owned 0
+end live 0
+end fds delta 0
+[harness] file job.out: 100008 bytes
+[harness] file job.err: 12 bytes
+[harness] supervisor peak RSS 16092 kB, CPU 0.005 s
+[harness] PASS in 0.01 s

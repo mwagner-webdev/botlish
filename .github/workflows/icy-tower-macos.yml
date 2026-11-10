@@ -430,7 +430,7 @@ jobs:
         id: release-tests
         if: always() && steps.python.outcome == 'success'
         run: |
-          for t in test_credentials test_release test_workflow; do
+          for t in test_credentials test_release test_workflow test_botlish_release test_botlish_workflow; do
             "$PY" -I "audit/macos-release/tests/$t.py" 2>&1 | tail -n 4 | tee -a out/logs/release-tests.log
           done
           "$PY" -I audit/macos-release/tools/mutate.py 2>&1 | tee out/logs/release-mutants.log
@@ -845,7 +845,7 @@ jobs:
         run: |
           "${{ steps.setup-python-release.outputs.python-path }}" --version
           "${{ steps.setup-python-release.outputs.python-path }}" -m venv "$RUNNER_TEMP/venv"
-          "$RUNNER_TEMP/venv/bin/pip" install -q --require-hashes --only-binary :all: -r examples/games/icy-tower/macos/requirements.txt
+          "$RUNNER_TEMP/venv/bin/pip" install -q --require-hashes --only-binary :all: -r tools/macos-release/requirements.txt
           echo "PY=$RUNNER_TEMP/venv/bin/python" >>"$GITHUB_ENV"
           clang -fobjc-arc -framework AppKit -framework ApplicationServices -framework CoreServices -o "$RUNNER_TEMP/macos-input" audit/icy-tower/tools/macos-input.m
           "$RUNNER_TEMP/macos-input" preflight

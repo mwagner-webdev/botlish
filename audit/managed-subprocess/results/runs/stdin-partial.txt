@@ -1,0 +1,9 @@
+written 1000000
+echoed 1000000
+native writes 36
+status exited 0
+end owned 0
+end live 0
+end fds delta 0
+[harness] supervisor peak RSS 15964 kB, CPU 0.007 s
+[harness] PASS in 0.01 s

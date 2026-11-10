@@ -1,0 +1,31 @@
+name: Already tested at this commit?
+description: >
+  Whether this run of a test workflow defers to another run of the same
+  workflow that tests the same commit (CI-RUNS.md, "A commit already
+  tested"; tools/ci/runs.py twin). Only a push to a branch other than main
+  defers: to main's push run at the commit while it is unfinished or once it
+  succeeded, else to another branch's finished, successful push run that ran
+  its canary. The output `deferred` is true then, and the canary job skips
+  every later step; an API error never defers. The job needs `actions:
+  read`. Runs on Linux, macOS and Windows (Git Bash) runners.
+
+outputs:
+  deferred:
+    description: true when this run defers to another (then `run` is its URL)
+    value: ${{ steps.decide.outputs.deferred }}
+  run:
+    description: the run this one defers to
+    value: ${{ steps.decide.outputs.run }}
+
+runs:
+  using: composite
+  steps:
+    - id: decide
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        # The interpreter that runs: Linux and macOS images have python3,
+        # Windows images python.
+        for py in python3 python; do "$py" -c '' 2>/dev/null && break; done
+        "$py" -I tools/ci/runs.py twin

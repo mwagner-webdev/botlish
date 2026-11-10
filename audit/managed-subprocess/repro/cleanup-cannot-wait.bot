@@ -1,0 +1,14 @@
+# cleanup-cannot-wait.bot -- reproducer (MANAGED-SUBPROCESS-AND-EVENT-LOOP-
+# CENSUS-MILESTONE-1.md, section 8): a resource's cleanup cannot wait on the
+# event loop, so a scope-bound child process cannot be terminated
+# gracefully (SIGTERM, a grace period, SIGKILL) inside its owner's cleanup.
+# The census's module hands the dying child to a reaper task instead.
+#
+#   tclsh9.0 main.tcl -check audit/managed-subprocess/repro/cleanup-cannot-wait.bot
+#   expected: RESOURCE-DECLARATION (a cleanup never yields)
+import cleanup_job
+import std::event_loop
+
+with context std::event_loop::create(4)
+j = cleanup_job::make()
+0

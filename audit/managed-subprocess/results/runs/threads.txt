@@ -1,0 +1,6 @@
+vm 1 bytes 2000170 exit 11 owned-after 0
+vm 2 bytes 3000080 exit 22 owned-after 0
+distinct children yes
+adapter live after both 0
+[harness] supervisor peak RSS 16280 kB, CPU 0.017 s
+[harness] PASS in 0.21 s

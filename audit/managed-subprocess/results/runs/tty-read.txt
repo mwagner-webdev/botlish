@@ -1,0 +1,8 @@
+stopped by the terminal: yes
+state 84
+status signal 9
+end owned 0
+end live 0
+end fds delta 0
+[harness] terminal attributes unchanged
+[harness] PASS in 0.91 s

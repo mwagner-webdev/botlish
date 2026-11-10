@@ -1,0 +1,13 @@
+read interrupted after-us 99737
+child still running after the interrupt yes
+second read got bytes 6
+status exited 0
+end owned before shutdown 0
+abandoned 0
+end killed by shutdown 0
+end owned 0
+end escalations 0
+end live 0
+end fds delta 0
+[harness] supervisor peak RSS 16280 kB, CPU 0.006 s
+[harness] PASS in 0.41 s

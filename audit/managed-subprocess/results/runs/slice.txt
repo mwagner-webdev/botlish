@@ -1,0 +1,144 @@
+A pid 13556
+pid 13557
+A| cwd /tmp/msp-y9zj6skm/a
+chunk 0
+
+B| cwd /tmp/msp-y9zj6skm/b
+desc 13558
+chunk 0
+
+B| chunk 1
+
+A| chunk 1
+
+B| chunk 2
+
+B| chunk 3
+
+A| chunk 2
+
+B| chunk 4
+
+tick 1 A=48 B=75
+B| chunk 5
+
+A| chunk 3
+
+B| chunk 6
+
+B| chunk 7
+
+A| chunk 4
+
+B| chunk 8
+
+B| chunk 9
+
+tick 2 A=64 B=115
+A| chunk 5
+
+B| chunk 10
+
+B| chunk 11
+
+A| chunk 6
+
+B| chunk 12
+
+B| chunk 13
+
+A| chunk 7
+
+B| chunk 14
+
+tick 3 A=88 B=160
+B| chunk 15
+
+A| chunk 8
+
+B| chunk 16
+
+B| chunk 17
+
+A| chunk 9
+
+B| chunk 18
+
+B| chunk 19
+
+tick 4 A=104 B=205
+c
+terminal input: c
+
+cancelling B
+A| chunk 10
+
+B| chunk 20
+
+B| chunk 21
+
+A| chunk 11
+
+B| chunk 22
+
+B| chunk 23
+
+A| chunk 12
+
+B| chunk 24
+
+tick 5 A=131 B=250
+B| chunk 25
+
+A| chunk 13
+
+B| chunk 26
+
+B| chunk 27
+
+A| chunk 14
+
+B| chunk 28
+
+B| chunk 29
+
+tick 6 A=149 B=295
+A! warning: something
+
+A| got: line 1
+got: line 2
+got: line 3
+
+A ended exited 0
+B| chunk 30
+
+B| chunk 31
+
+B| chunk 32
+
+B| chunk 33
+
+B| chunk 34
+
+tick 7 A=185 B=340
+B ended signal 9
+B cancel-to-exit-us 300487
+A stdout bytes 185
+A stderr bytes 19
+A lines fed 3
+B stdout bytes 340
+ticks 7
+input lines 1
+tick 8 A=185 B=340
+elapsed-us 799079
+end owned 0
+end live 0
+end escalations 1
+end fds delta 0
+end shutdown killed 0
+end registrations delta 0
+[harness] pid 13556 gone
+[harness] pid 13557 gone
+[harness] desc 13558 gone
+[harness] terminal attributes unchanged
+[harness] PASS in 0.90 s
