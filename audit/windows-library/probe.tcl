@@ -305,6 +305,24 @@ if {$llvm eq ""} {
             lassign [msvc lib /NOLOGO /EXTRACT:$member /OUT:[file nativename $extracted] [file nativename $runtime]] status text
             if {!$status} { lappend objects $extracted }
         }
+        # A short import object (the standard library's and windows-sys'
+        # raw-dylib imports: Sig1 0, Sig2 0xFFFF, Version 0) names a DLL's
+        # function: kept as it is, its symbols never renamed.
+        set imports {}
+        set plain {}
+        foreach object $objects {
+            set channel [open $object rb]
+            set head [read $channel 6]
+            close $channel
+            if {[binary scan $head susu sig1 sig2] == 2 && $sig1 == 0 && $sig2 == 0xffff
+                    && [binary scan $head @4su version] == 1 && $version == 0} {
+                lappend imports $object
+            } else {
+                lappend plain $object
+            }
+        }
+        set objects $plain
+        set renamedObjects($name) $imports
         set defined {}
         foreach object $objects {
             catch {exec [file join $llvm llvm-nm.exe] --defined-only --extern-only --format=just-symbols $object} names
@@ -322,7 +340,7 @@ if {$llvm eq ""} {
             }
         }
         lassign [msvc lib /NOLOGO /OUT:[file nativename [file join $host6 ${name}_static.lib]] {*}[lmap o $renamedObjects($name) {file nativename $o}]] status text
-        row "E6 $name renamed" "[llength $defined] defined symbols renamed in [llength $objects] objects ([expr {$failed}] failed); archive: [expr {$status ? "failed [firstLines $text 3]" : "[file size [file join $host6 ${name}_static.lib]] bytes"}]"
+        row "E6 $name renamed" "[llength $defined] defined symbols renamed in [llength $objects] objects ([expr {$failed}] failed), [llength $imports] import objects kept; archive: [expr {$status ? "failed [firstLines $text 3]" : "[file size [file join $host6 ${name}_static.lib]] bytes"}]"
         file copy -force [file join $out $name $name.h] $host6
     }
     file copy -force [file join $host5 both.c] $host6
