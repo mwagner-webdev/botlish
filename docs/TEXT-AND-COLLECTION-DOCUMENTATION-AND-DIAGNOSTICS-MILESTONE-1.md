@@ -379,15 +379,141 @@ result diagnostic. Nothing was written beside it.
 
 ## I. Semantic stability
 
-RESULTS-I
+`audit/text-collection-docs/tools/compare.tcl` compiled 183 programs with
+the front end before the change (a worktree at `cbaa0402`) and after it,
+each in a process of its own, `-strict 0`, no cache, both runs reading the
+same program files (the before tree's, so that a suite whose expected text
+this change updates is the same input to both): the 119 golden suites, the
+2048 and Icy Tower suites, the census's 18 probes, `examples/surface`,
+`examples/stdlib` and this audit's 20 programs
+(`audit/text-collection-docs/programs/`: the representative mismatches of
+section G, the documented UTF-8 and joining programs, every escape).
+
+    programs 183; semantic differences 0
+    totals: accepted 155, errors 2, reported 50, results 21, runs 68,
+            messagesChanged 21
+
+Compared field by field, every one semantic and every one equal:
+
+* acceptance (155 accepted, 26 rejected, before and after; the 2 errors are
+  probes the loader rejects before any HIR exists -- e2's unknown symbol,
+  f1's invalid escapes -- with identical text);
+* the reported diagnostics' kinds and locations (50), and their messages
+  with the one added clause removed;
+* every declared-result mismatch's declared and inferred types read from
+  the HIR (21): the inferred type was already there, and is the same;
+* method-call decisions and choices, static sites' outcomes and the codes
+  they reify, emission verdicts;
+* HIR text (`hir::format`: every expression's type, completion outcome --
+  known errors, callee errors, reachability -- target and flags), with the
+  clause removed from the constants a rejected static block reifies;
+* the value of every accepted program outside the golden suites (68) on
+  interp and compile.
+
+What did change, as intended: the 21 result messages (every result
+diagnostic of the corpus, and nothing else: p1 4, r1 1, r2 1, r3 2, r4 2,
+r6 2, r7 2, r9 2, s2 1 of this audit's programs; the census's d1 1, d2 2,
+j3 1), and the HIR text of 16 golden suites (abi-bytes, affinity,
+callable-contracts, collections, compiled-values, layout-arrays,
+layout-unions, list-flat, lists-and-sets, range-and-contract-values,
+refinements, static-compile, type-predicates, types,
+validators-and-proofs, warning-programs), each only in a `static compile:`
+block's reified `CompilerError` message: a result diagnostic a block
+rejects carries the new text into the program's value. Only types.bot,
+refinements.bot and static-compile.bot compare that text exactly; they are
+updated (section J), the others match on a part of it or on the code.
+
+The comparison is not run on the native backends: their output for the
+golden corpus is the golden suites' own (section J: every suite on all
+four backends), and the one native-only claim of this milestone (the
+copying costs) has its own test.
 
 ## J. Regression and mutation tests
 
-RESULTS-J
+Commands run on this branch (Linux x86-64, `LANG=C.utf8`), with their
+results:
+
+| command | result |
+|---|---|
+| `tclsh9.0 tests/text-collection-docs-diagnostics.test` (new; interp and `CORE_BACKEND=compile`) | 24 passed, 0 failed, 0 skipped on each |
+| the 17 test files that pin "does not prove declared type" (c-abi-types, c-float-ffi, decimal-rounded, diagnostic-recovery, enums, exact-value-facts, list-length-refinement, raw-c-float-ffi, refinement-values, source-types, type-predicates, applied-types, empty-collection-admissibility, immutable-set, refined-signatures, refinement-validators, typed-parameters) | before updating: 17 tests failed in 11 files, each only by the added clause; after: all pass (e.g. c-abi-types 73/73, diagnostic-recovery 57/57, refinement-values 88/88) |
+| `tclsh9.0 tests/local.tcl -parts golden` on types.bot, refinements.bot, static-compile.bot, validators-and-proofs.bot, range-and-contract-values.bot | 5 suites, 495/495 on each of interp, compile, cranelift-generic, cranelift |
+| `tclsh9.0 tools/compilerpedia.tcl check` | 1294 topics, 770 examples run, 0 problems |
+| `tclsh9.0 audit/text-collection-precision/tools/probes.tcl` | 18 probes, 0 failed (j3's expectation updated; every other probe's unchanged) |
+| `python3 -I audit/text-collection-precision/tools/matrix.py` | exit 0, the tables unchanged |
+| `tclsh9.0 audit/golden/migration/merge.tcl -names audit/golden/migration/tcl-names.txt -check 1` | 13580 rows, exit 0 (24 new KEEP rows for the new file) |
+| `tclsh9.0 tools/mutant-catalogs.tcl` | 101 catalogs, 3413 mutants, 0 problems |
+| `tclsh9.0 audit/type-predicates/tools/mutate.tcl -only converter-return-skips-proof` (its anchor moved with the code) | killed |
+| `tclsh9.0 audit/text-collection-docs/tools/mutate.tcl` | 12 mutants, 12 killed, each by a test its `!!` line names |
+| `audit/text-collection-docs/tools/compare.tcl` before/after | 183 programs, 0 semantic differences (section I) |
+| `bash single/build.sh`, then the clean-directory help session | built; every query as in section H |
+| `tclsh9.0 tests/local.tcl -jobs 3` (every Tcl test file on interp and compile, every golden suite on four backends) | still running when this was committed (no failure in its first 108 files and suites); its result is recorded below when it ends |
+
+The mutants (`audit/text-collection-docs/tools/mutants.txt`), the ten the
+brief asks for and two more:
+
+| mutant | rule broken | killed by |
+|---|---|---|
+| result-type-omitted | the diagnostic names the inferred type | tcd-result-applied, -nested, -refinement, -unknown, -joined-paths, -semantic-instances, -type-is-the-checked-one |
+| result-type-is-declared | it names the inferred type, not the declared one | tcd-result-applied, -refinement, -type-is-the-checked-one |
+| result-type-carrier-only | a refinement is shown, not its carrier | tcd-result-refinement, -type-is-the-checked-one |
+| result-type-from-an-instance | the generic body's type, not a semantic instance's | tcd-result-semantic-instances, -type-is-the-checked-one |
+| doc-decoding-denied | encode_utf8's page names the decoding path | tcd-doc-utf8-decoding |
+| doc-static-type-unconditional | encode_utf8's type is stated with its condition | tcd-doc-utf8-static-type |
+| doc-test-join-recommended | the quadratic test helper is not recommended | tcd-doc-no-test-library-join |
+| doc-escape-omitted | every supported escape is documented | tcd-doc-escapes-complete |
+| doc-numeric-escape-valid | no unsupported escape is documented as valid | tcd-doc-escapes-complete |
+| doc-readme-lists-untyped | README §19's untyped Lists are history | tcd-doc-readme-list-history |
+| doc-decode-undiscoverable | `decode utf8` finds the decoding page | tcd-doc-discovery, tcd-doc-utf8-decoding |
+| doc-invalid-escape-help-unrouted | an invalid escape's help line leads to the escapes | tcd-doc-no-numeric-escape |
+
+Each documentation mutant edits the notes and the generated topic alike
+(what the help reads), or the topic file or README, and is detected by an
+assertion about that statement, never by a test infrastructure failure.
+
+CI: before branching, `main`'s latest runs at `0a518ba4` were green or
+queued, none red; they have since all completed green (tests, tests (linux
+arm64), tests (macos arm64), tests (windows x86-64), static-decisions,
+single executable, icy-tower on all three hosts). The branch push of
+`7ae1f014` ran each host's canary: tests, tests (linux arm64), tests
+(macos arm64) and tests (windows x86-64) succeeded, and icy-tower
+(windows x86-64); icy-tower (macos arm64) was running. tests.yml,
+tests-arm64.yml, macos-arm64.yml and windows-x86_64.yml were then
+dispatched on the branch: queued when this was committed (pending, not passed). static-decisions was not
+dispatched: the change moves no static decision (the comparison's static
+outcomes are equal, and both schedulers see the same message); it runs on
+main's next push that changes `hir/`.
 
 ## K. Performance
 
-RESULTS-K
+**The diagnostic.** The new formatting is inside the branch that reports
+the mismatch: a proven result runs exactly the statements it ran before
+(`set inferred ...` and the `ProvesValueAcceptedBy` test both existed;
+by inspection of the diff). Measured with an execution trace summing the
+microseconds spent inside `hir::range::verifyDeclaredResults` per
+compilation, each a fresh process, before and after alternately, five
+runs each, the minimum (the machine was running the full local suite on
+three cores meanwhile, so the spread is several percent):
+
+| program | result mismatches | calls | before: verify us / front end ms | after |
+|---|---:|---:|---:|---:|
+| r8-ok.bot (three declared results, all proven) | 0 | 1 | 3,454 / 86 | 3,440 / 85 |
+| examples/games/2048/demo.bot | 0 | 2 | 43,079 / 1,496 | 41,334 / 1,415 |
+| examples/games/icy-tower/headless.bot | 0 | 9 | 119,818 / 3,509 | 129,796 / 3,480 |
+| p1-joined-and-unknown.bot | 4 | 1 | 2,780 / 70 | 3,106 / 70 |
+
+So no material work on success (the differences go both ways and are
+within the spread), and about 80 us per reported mismatch for presenting
+its type. A golden suite whose static blocks build rejected programs pays
+that per rejected result in those builds: in the comparison's runs the
+front end of the whole corpus took 1,274 s before and 1,228 s after, the
+two runs' difference being the machine's load, not the change.
+
+**Documentation.** `tools/compilerpedia.tcl generate` takes 4.3 s before
+and after; `check` runs 770 examples instead of 763 (1 min 54 s here). The
+new test file takes about a minute on one backend, most of it the native
+copying measurement (four programs at two sizes). Nothing at run time
+changed: no runtime, backend or standard-library code was touched.
 
 ## L. Remaining issues
 
