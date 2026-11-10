@@ -490,11 +490,33 @@ Windows and macOS, green. The workflows dispatched on `7ae1f014` were
 cancelled by the push of `637e832c` (they would have failed
 compilerpedia.test); on `637e832c` icy-tower (windows x86-64) and
 icy-tower (macos arm64) succeeded, and tests.yml, tests-arm64.yml,
-macos-arm64.yml and windows-x86_64.yml were dispatched: queued or running
-when this was written -- pending, not passed. static-decisions was not
-dispatched: the change moves no static decision (the comparison's static
-outcomes are equal, and both schedulers see the same message); it runs on
-main's next push that changes `hir/`.
+macos-arm64.yml and windows-x86_64.yml were dispatched. static-decisions
+was not dispatched: the change moves no static decision (the comparison's
+static outcomes are equal, and both schedulers see the same message); it
+runs on main's next push that changes `hir/`.
+
+The dispatched runs on `637e832c`: tests, tests (linux arm64) and tests
+(windows x86-64) succeeded, every job. tests (macos arm64) passed every job
+but one: acceptance shard 3 of 5 was cut off at its 75-minute limit (73
+minutes into the tier, no test failure recorded) -- the limit main's
+`473a58fa` hit twice on the same shard and answered by running macOS's
+acceptance tier in six shards.
+
+Main then moved by 72 commits (the applied-type bound, process_linux,
+DISCARDED-MUTATION, -aot-run, Botlish.app as a Developer ID release, the
+six macOS shards), merged into the branch without a conflict (`06b44602`;
+hir/range.tcl merged automatically: main's exact layer,
+`hir::applied::VerifyResult`, runs where the result proof passes and
+reports one exit's `(value type: ...)`, beside this milestone's joined
+`(result type: ...)` where it fails). On the merged tree:
+tools/mutant-catalogs.tcl (105 catalogs, 3,551 mutants, 0 problems),
+tools/compilerpedia.tcl check (1,297 topics, 776 examples, 0 problems), the
+native backend rebuilt, and tests/local.tcl on this milestone's test file,
+the result diagnostic's test files, main's tests/applied-types.test,
+tests/compilerpedia.test and the golden suites types.bot, refinements.bot
+and static-compile.bot (Tcl tests: interp 591 passed, compile 590 passed
+and 1 skipped, 0 failed; golden suites 248/248 on each of the four
+backends). The merge into main's push runs every workflow.
 
 ## K. Performance
 
