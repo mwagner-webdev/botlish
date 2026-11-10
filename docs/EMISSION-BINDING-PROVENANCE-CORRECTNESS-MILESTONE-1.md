@@ -858,7 +858,7 @@ around 10:00 UTC (pending is pending, never passed):
 | tests (macos arm64) | [42770749276](https://github.com/mwagner-webdev/botlish/actions/runs/42770749276) | smoke, Linux control and acceptance shards 4 and 5 passed; the rest pending |
 | tests (windows x86-64) | [42770752278](https://github.com/mwagner-webdev/botlish/actions/runs/42770752278) | canary, smoke and root plans passed; the acceptance shards and the system linker pending |
 | icy-tower (macos arm64), icy-tower (windows x86-64) | branch push | passed |
-| static-decisions (static-compile-expected-diagnostics.bot) | dispatched | pending |
+| static-decisions (static-compile-expected-diagnostics.bot) | [42795041291](https://github.com/mwagner-webdev/botlish/actions/runs/42795041291) | pending |
 
 ## 22. Production files changed
 
