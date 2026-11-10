@@ -589,7 +589,9 @@ a foreign buffer); every line the host prints is compared with an
 independent model of the C ABI written in Tcl from
 NATIVE-LIBRARY-MILESTONE-1.md's rules, never from the compiler. Linux:
 seeds 1 to 6, 192 calls and 37 to 56 lifecycle steps each, 0
-disagreements (seed 6 also under GC stress). Windows: WINDOWS-FUZZ-PENDING.
+disagreements; seed 6 again and seed 7 (12 exports, 288 calls, 94
+lifecycle steps) plainly and under GC stress, 0 disagreements. Windows:
+WINDOWS-FUZZ-PENDING.
 
 **Mutation testing.** `audit/native-library/tools/mutate.tcl` runs on
 Windows too now (a private copy made by Tcl, an overrunning run ended with
@@ -615,7 +617,9 @@ and 14 new ones:
 | `stacks-kept-after-last-instance` | all | `nl-coroutine-stacks-released` |
 | `entry-stack-ignored` (a host's stack walked within the thread's) | all | `nl-stack-safety-foreign-stack` |
 
-Linux x86-64: LINUX-MUTANTS-PENDING.
+Linux x86-64 (the whole catalog, every detector): 40 mutants, 32 killed,
+0 survived, 8 skipped (the Windows-only ones). Windows x86-64:
+WINDOWS-MUTANTS-PENDING.
 
 The brief's other mutant ideas are covered where they apply: an internal
 symbol exported, a public one missing, the import library's name, the
@@ -646,7 +650,42 @@ with a payload).
 **Windows x86-64** (windows-2025 runner, MSVC 14.4x, `/O1` hosts):
 WINDOWS-PERF-PENDING
 
-LINUX-PERF-RERUN
+**Linux x86-64** (the development container, 4 cores, idle; for
+comparison):
+
+| Measure | Value |
+|---|---:|
+| build (`native::library`, five exports) | 400 ms |
+| shared library (`libbl.so`) | 879,936 bytes |
+| static archive (`libbl.a`) | 14,046,168 bytes |
+| exported functions | 20 (5 exports, 15 forwarders) |
+| C reference library | 15,840 bytes |
+| load and unload | 31.7 us |
+| create and destroy | 23.5 us |
+
+| Call | Botlish | Botlish, GC stress | C reference | from Botlish code (an executable's loop) |
+|---|---:|---:|---:|---:|
+| int (`add`) | 80.2 ns | 86.1 ns | 0.8 ns | 2.5 ns |
+| Float64 (`scale`) | 133.2 ns | 347.2 ns | 0.7 ns | |
+| short str (`echo`, 10 bytes) | 144.2 ns | 248.0 ns | 11.8 ns | |
+| longer str (`echo`, 4 KiB) | 392.4 ns | 384.8 ns | 58.5 ns | |
+| allocating (`words(16)`) | 1,419.1 ns | 4,557.4 ns | 162.9 ns | 1,430.3 ns |
+| declared error (`fail_if`) | 391.8 ns | 376.2 ns | 0.9 ns | |
+
+A library call's fixed cost, about 78 ns on Linux (`add`: 80.2 ns through
+the boundary, 2.5 ns from Botlish code), is the boundary's: the registry's
+lookup and thread check, the reentrancy flag, entering the Vm (its stack
+ceiling, stack limit and entry stack, the program), `catch_unwind`, and
+the arguments' and result's conversion. For a call that does work it
+disappears in the noise: `words(16)` costs the same through the boundary as
+from an executable's loop (1,419 against 1,430 ns). A declared error costs
+about 310 ns more than a result (the error object, its identity and its
+payload copied out of the heap); a str argument and result about 64 ns
+more than an Int at 10 bytes (validated, copied in and out). This
+milestone adds to a call a thread-local counter's increment and decrement
+(`CallDepth`), the entry stack's save, set and restore, and at the
+outermost call's end one thread-local read (`library_call_ended`, which on
+Linux does nothing else).
 
 ## 17. CI
 
