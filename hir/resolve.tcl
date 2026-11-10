@@ -1315,6 +1315,14 @@ proc hir::resolve::Expr {hirVar node ctx} {
             AddClosure hir $scope $e
             SetField hir $e bodyScope $bodyScope
             SetField hir $e params $params
+            # A parameter type written deeper than the type bound, beside its
+            # bounded form: what a call's argument is held to exactly
+            # (hir/applied.tcl, APPLIED-TYPE-BOUND-PRECISION-MILESTONE-1.md).
+            set exactParams [hir::applied::WrittenList $paramTypes \
+                [lrange $declaredParamTypes 0 [llength $paramTypes]-1] [CtxNamespace $ctx]]
+            if {$exactParams ne ""} {
+                SetField hir $e exactParamTypes $exactParams
+            }
             SetField hir $e declaredParamTypes $declaredParamTypes
             SetField hir $e captures {}
             SetField hir $e staticRefs {}
@@ -1329,6 +1337,12 @@ proc hir::resolve::Expr {hirVar node ctx} {
                     set declared {}
                 } else {
                     set declared $normalized
+                    set exact [hir::applied::WrittenList [list [dict get $node declaredResult]] [list $normalized] [CtxNamespace $ctx]]
+                    if {$exact ne ""} {
+                        # (A result type written deeper than the type bound:
+                        # hir/applied.tcl.)
+                        SetField hir $e exactResult [lindex $exact 0]
+                    }
                 }
             }
             if {$head ne "" && [dict get $head imprints] ne {} && $declared ne {}} {
@@ -1604,6 +1618,12 @@ proc hir::resolve::Expr {hirVar node ctx} {
                 }
                 if {$valid} {
                     SetField hir $e imprint $imprint
+                    set exact [hir::applied::WrittenList [dict get $node imprint] $imprint [CtxNamespace $ctx]]
+                    if {$exact ne ""} {
+                        # (An imprint written deeper than the type bound:
+                        # hir/applied.tcl.)
+                        SetField hir $e exactImprint $exact
+                    }
                 }
             }
             # (The call's flags against its callee's flag interface: its own
@@ -2233,14 +2253,37 @@ proc hir::resolve::ResolveAppliedConstruction {hirVar e typeRef ctx} {
             [format {invalid applied type %s: %s} $spelling $type] $e [dict get $typeRef origin]
         return [list "" $spelling "" 0]
     }
-    set type [hir::imprint::BodyType $ctx [hir::imprint::ConstrainVariables $type [hir::imprint::EnclosingConstraints $hir $ctx]]]
+    set constraints [hir::imprint::EnclosingConstraints $hir $ctx]
+    set type [hir::imprint::BodyType $ctx [hir::imprint::ConstrainVariables $type $constraints]]
+    set structArgs [hir::types::StructArgs $type]
+    if {[hir::applied::Cut $type]} {
+        # The type bound cut the application: its arguments as its fields'
+        # values stand on their own, each at its own top -- the bounded
+        # application cuts each one application earlier
+        # (APPLIED-TYPE-BOUND-PRECISION-MILESTONE-1.md) -- and, where it
+        # mentions no imprint variable, its exact written form, which the
+        # construction's check holds the field values to (hir/applied.tcl).
+        set imprints [if {$variables eq {}} {string cat 0} else {set variables}]
+        set structArgs [lmap t $args {
+            hir::imprint::BodyType $ctx [hir::imprint::ConstrainVariables \
+                [ResolveTypeExpr $t $ns $imprints] $constraints]
+        }]
+        set exact [hir::applied::Written [if {[dict exists $typeRef typeArgs]} {
+            list apply $ctor $args
+        } else {
+            list $ctor [lindex $args 0]
+        }] $ns]
+        if {$exact ne ""} {
+            SetField hir $e exactStructArgs [lmap a [lindex $exact 2] {hir::applied::Encode $a}]
+        }
+    }
     set denied 0
     if {[hir::structs::representationDenied $id $ns]} {
         set denied 1
         hir::DiagnoseAt hir OPAQUE-CONSTRUCTION [hir::structs::ConstructionMessage $id] $e \
             [dict get $typeRef origin]
     }
-    return [list $id $spelling [hir::types::StructArgs $type] $denied]
+    return [list $id $spelling $structArgs $denied]
 }
 
 # Resolves the syntax nodes NODES in order.

@@ -188,7 +188,7 @@ fn f() -> Small:
 
 1
 }
-} -result {3:5 function result does not prove declared type int[Small] (facts: [20, 20] {20})}
+} -result {3:5 function result does not prove declared type int[Small] (result type: int, facts: [20, 20] {20})}
 
 test source-type-sparse-result-contract {a sparse source-declared result: exact-set proof works unchanged} -body {
     set h [surface::compile {type Sparse = Int in {0, 4, 8, 12}
@@ -215,7 +215,7 @@ fn h(x) -> Sparse:
 
 1
 }
-} -result {3:5 function result does not prove declared type int[Sparse] (facts: [0, 12])}
+} -result {3:5 function result does not prove declared type int[Sparse] (result type: int, facts: [0, 12])}
 
 # ---------------------------------------------------------------------------
 # Constructors (items 66-72). These used to exercise the callable Small(x)/

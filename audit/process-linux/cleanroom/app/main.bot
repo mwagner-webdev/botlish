@@ -1,0 +1,319 @@
+# main.bot -- the clean-room consumer of PROCESS-LINUX-PACKAGE-MILESTONE-1.md:
+# an application written outside the Botlish repository against the
+# published process_linux and event_loop_linux artifacts (and ticker, a
+# third-party library over the same driver), built with the single-file
+# compiler. Every observation is a line on standard output that inside.sh
+# checks.
+#
+#   main HELPER DIR_A DIR_B          the supervision workload
+#   main HELPER DIR_A DIR_B failures the failure cases
+#
+# The workload: child A (DIR_A) streams stdout and stderr and echoes three
+# lines the program writes to its stdin 100 ms apart; child B (DIR_B, its
+# own exact arguments) ignores SIGTERM, has a descendant in its group and
+# streams every 20 ms; ticker's task and the program's own timer keep
+# ticking; A exits normally; B is terminated gracefully, escalated to SIGKILL
+# at its grace period, its descendant killed with the group; every owner is
+# released; the counters show nothing left.
+import event_loop_linux
+import fdcount
+import process_linux
+import std::abi::bytes
+import std::event_loop
+import std::int
+import std::io
+import std::linux::fs
+import std::linux::io
+import std::list
+import std::mutable_array
+import std::str
+import ticker
+import type std::event_loop::Delivery
+import type std::event_loop::Wake
+
+nomethod fn say(text: str, context io: std::linux::io::LinuxIO):
+    std::linux::io::write_text(text.append_char('\n')):
+        on std::io::WriteFailed:
+            unit
+
+nomethod fn num(x: int) -> str:
+    std::int::to_string(x)
+
+nomethod fn text_of(b: std::abi::bytes::Bytes) -> str:
+    std::abi::bytes::decode_utf8(b):
+        on InvalidUtf8:
+            "(not UTF-8)"
+
+nomethod fn bytes_of(t: str) -> std::abi::bytes::Bytes:
+    std::abi::bytes::from_list(std::str::encode_utf8(t))
+
+nomethod fn yes(b: bool) -> str:
+    if b:
+        "yes"
+    else:
+        "NO"
+
+nomethod fn cell(a: MutableArray[int], i: int) -> int:
+    a.at(i):
+        on IndexNotFound:
+            0
+
+# Stream S of C to its end of file, as text; posted as its byte count to
+# DONE once read.
+fn collect(c: process_linux::Child, s: process_linux::Stream, label: str, done: std::event_loop::Reg, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    total = std::mutable_array::create(2, 0)
+    loop:
+        chunk = c.read(s):
+            on process_linux::StaleChild:
+                say(label.concat(": stale"))
+                break
+            on process_linux::StreamClosed:
+                say(label.concat(": closed"))
+                break
+            on process_linux::Interrupted:
+                say(label.concat(": interrupted"))
+                break
+            on process_linux::ProcessFault {reason}:
+                say(label.concat(": fault ").concat(reason))
+                break
+        size = std::abi::bytes::length(chunk).value
+        if size == 0:
+            break
+        if cell(total, 1) < 2:
+            say(label.concat(" chunk: ").concat(text_of(chunk)))
+        total.set(0, cell(total, 0) + size)
+        total.set(1, cell(total, 1) + 1)
+    done.post(cell(total, 0), cell(total, 1))
+    0
+
+# Three lines to C's stdin, 100 ms apart, written incrementally; then its
+# stdin closed.
+fn feed(c: process_linux::Child, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    loop i from 1 to 4:
+        std::event_loop::sleep(100000)
+        c.write(bytes_of("line ".concat(num(i)).append_char('\n'))):
+            on process_linux::StaleChild:
+                say("feed: stale")
+            on process_linux::StreamClosed {stream}:
+                say("feed: closed ".concat(stream))
+            on process_linux::Interrupted:
+                say("feed: interrupted")
+            on process_linux::ProcessFault {reason}:
+                say("feed: fault ".concat(reason))
+    c.close_stdin():
+        on process_linux::StaleChild:
+            say("feed: stale")
+        on process_linux::ProcessFault {reason}:
+            say("feed: fault ".concat(reason))
+    say("A's stdin: 3 lines written, closed")
+    0
+
+# ticker's task (another library over the same loop), until STOP.
+fn heartbeat(stop: std::event_loop::Reg, done: std::event_loop::Reg, context ev: std::event_loop::Loop, n: event_loop_linux::Native) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    t = ticker::run(50000, stop)
+    done.post(t.count, t.max_late_us)
+    0
+
+nomethod fn launch(c: process_linux::Command, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> process_linux::Spawned errors std::event_loop::TaskFailed:
+    process_linux::spawn(c):
+        on process_linux::InvalidCommand {item, reason}:
+            say("invalid ".concat(item).concat(": ").concat(reason))
+            fail std::event_loop::TaskFailed {code: 1}
+        on process_linux::LaunchFailed {code}:
+            say("launch failed: errno ".concat(num(code)))
+            fail std::event_loop::TaskFailed {code: 2}
+        on process_linux::Unsupported {reason}:
+            say("unsupported: ".concat(reason))
+            fail std::event_loop::TaskFailed {code: 3}
+        on process_linux::ProcessFault {reason}:
+            say("fault: ".concat(reason))
+            fail std::event_loop::TaskFailed {code: 4}
+        on std::event_loop::SchedulerFault:
+            fail std::event_loop::TaskFailed {code: 5}
+
+fn workload(helper: str, dir_a: str, dir_b: str, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    started = process_linux::now_us()
+    a_cmd = process_linux::command(helper, ["cwd", "err:warning from A\\n", "chunks:5:20", "lines:3", "exit:0"]).in_directory(dir_a)
+    b_cmd = process_linux::command(helper, ["cwd", "env:CLEANROOM_JOB", "ignore:15", "child:ignore:15,sleep:30000", "chunks:100000:20"]).in_directory(dir_b).with_stdin(process_linux::Input::Null).with_env("CLEANROOM_JOB", "job-b")
+    {owner: owner_a, child: a} = launch(a_cmd)
+    {owner: owner_b, child: b} = launch(b_cmd)
+    say("spawned A and B without a shell")
+    a_out = std::event_loop::channel(Delivery::Reliable, 2)
+    a_err = std::event_loop::channel(Delivery::Reliable, 2)
+    b_out = std::event_loop::channel(Delivery::Reliable, 2)
+    beats = std::event_loop::channel(Delivery::Reliable, 2)
+    stop = std::event_loop::channel(Delivery::Reliable, 2)
+    coroutine {step: s1, first: f1} = collect(a, process_linux::Stream::Stdout, "A stdout", a_out)
+    std::event_loop::adopt(s1, f1)
+    coroutine {step: s2, first: f2} = collect(a, process_linux::Stream::Stderr, "A stderr", a_err)
+    std::event_loop::adopt(s2, f2)
+    coroutine {step: s3, first: f3} = collect(b, process_linux::Stream::Stdout, "B stdout", b_out)
+    std::event_loop::adopt(s3, f3)
+    coroutine {step: s4, first: f4} = feed(a)
+    std::event_loop::adopt(s4, f4)
+    coroutine {step: s5, first: f5} = heartbeat(stop, beats)
+    std::event_loop::adopt(s5, f5)
+    sa = a.wait():
+        on process_linux::StaleChild:
+            fail std::event_loop::TaskFailed {code: 6}
+        on process_linux::Interrupted:
+            fail std::event_loop::TaskFailed {code: 7}
+        on process_linux::ProcessFault:
+            fail std::event_loop::TaskFailed {code: 8}
+    say("A ended ".concat(process_linux::status_text(sa)))
+    oa = std::event_loop::wait(a_out)
+    ea = std::event_loop::wait(a_err)
+    say("A stdout bytes ".concat(num(oa.a)).concat(", stderr bytes ").concat(num(ea.a)))
+    std::event_loop::sleep(200000)
+    pid_b = b.pid():
+        on process_linux::StaleChild:
+            -1
+    say("B pid ".concat(num(pid_b)))
+    t = process_linux::now_us()
+    sb = b.terminate(300000):
+        on process_linux::StaleChild:
+            fail std::event_loop::TaskFailed {code: 6}
+        on process_linux::Interrupted:
+            fail std::event_loop::TaskFailed {code: 7}
+        on process_linux::ProcessFault:
+            fail std::event_loop::TaskFailed {code: 8}
+    elapsed = process_linux::now_us() - t
+    say("B ended ".concat(process_linux::status_text(sb)))
+    say("B escalated at the grace period: ".concat(yes(elapsed >= 300000 and elapsed < 800000)))
+    ob = std::event_loop::wait(b_out)
+    say("B stdout chunks ".concat(num(ob.b)).concat(", its end of file once the group was killed"))
+    process_linux::release(owner_a)
+    process_linux::release(owner_b)
+    a.exited?():
+        on process_linux::StaleChild:
+            say("A's identity after release: stale")
+            false
+    stop.post(1, 0)
+    hb = std::event_loop::wait(beats)
+    loop r in [a_out, a_err, b_out, beats, stop]:
+        std::event_loop::revoke(r)
+    say("ticker ticks ".concat(num(hb.a)))
+    say("ticker kept time (no tick 40 ms late): ".concat(yes(hb.b < 40000)))
+    say("workload elapsed under 3 s: ".concat(yes(process_linux::now_us() - started < 3000000)))
+    # Exact arguments, no shell: what the child received, byte for byte.
+    {owner: owner_c, child: c} = launch(process_linux::command(helper, ["args", "", "two words", "$HOME", "*.txt", "héllo"]).with_stderr(process_linux::Output::Null))
+    whole = std::mutable_array::create(1, std::abi::bytes::from_list([]))
+    loop:
+        chunk = c.read(process_linux::Stream::Stdout):
+            on process_linux::StaleChild:
+                break
+            on process_linux::StreamClosed:
+                break
+            on process_linux::Interrupted:
+                break
+            on process_linux::ProcessFault:
+                break
+        if std::abi::bytes::length(chunk).value == 0:
+            break
+        held = whole.at(0)
+        whole.set(0, std::abi::bytes::join([held, chunk]))
+    say("C received: ".concat(text_of(whole.at(0))))
+    process_linux::release(owner_c)
+    0
+
+fn failures(helper: str, dir_a: str, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    cases = [process_linux::command(dir_a.concat("/no-such-program"), []), process_linux::command(helper, ["exit:0"]).in_directory(dir_a.concat("/no-such-dir")), process_linux::command("/etc/hostname", []), process_linux::command(helper, ["exit:0"]).with_env("BAD=NAME", "value")]
+    loop c in cases:
+        {owner, child} = process_linux::spawn(c):
+            on process_linux::InvalidCommand {item, reason}:
+                say("refused before starting: ".concat(item).concat(": ").concat(reason))
+                continue
+            on process_linux::LaunchFailed {stage, code}:
+                where = if stage == process_linux::Stage::Exec:
+                    "exec"
+                elif stage == process_linux::Stage::WorkingDirectory:
+                    "working directory"
+                else:
+                    "another stage"
+                say("launch failed at ".concat(where).concat(": errno ").concat(num(code)))
+                continue
+            on process_linux::Unsupported {reason}:
+                say("unsupported: ".concat(reason))
+                continue
+            on process_linux::ProcessFault {reason}:
+                say("fault: ".concat(reason))
+                continue
+        say("started (not expected)")
+        process_linux::release(owner)
+    {owner: o, child: c} = launch(process_linux::command(helper, ["exit:5"]))
+    s = c.wait():
+        on process_linux::StaleChild:
+            fail std::event_loop::TaskFailed {code: 6}
+        on process_linux::Interrupted:
+            fail std::event_loop::TaskFailed {code: 7}
+        on process_linux::ProcessFault:
+            fail std::event_loop::TaskFailed {code: 8}
+    say("a failing child is an outcome, not an error: ".concat(process_linux::status_text(s)))
+    process_linux::release(o)
+    c.wait():
+        on process_linux::StaleChild:
+            say("wait through a released identity: stale")
+            s
+        on process_linux::Interrupted:
+            s
+        on process_linux::ProcessFault:
+            s
+    c.send_signal(process_linux::Signal::Kill):
+        on process_linux::StaleChild:
+            say("signal through a released identity: stale")
+        on process_linux::ProcessFault:
+            say("signal: fault")
+    {owner: o2, child: c2} = launch(process_linux::command(helper, ["sleep:2000"]))
+    c.exited?():
+        on process_linux::StaleChild:
+            say("the old identity does not reach the new child: stale")
+            false
+    gone = c2.exited?():
+        on process_linux::StaleChild:
+            true
+    say("the new child unaffected: ".concat(yes(not gone)))
+    process_linux::release(o2)
+    0
+
+fn main(args: List[str], context ev: std::event_loop::Loop, d: event_loop_linux::Linux, n: event_loop_linux::Native, p: process_linux::Processes, io: std::linux::io::LinuxIO, fs: std::linux::fs::LinuxFS) -> int errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered, std::event_loop::TaskFailed, IndexNotFound:
+    std::event_loop::sync()
+    fds = fdcount::open_fds()
+    regs = std::event_loop::stats().registrations
+    helper = std::list::get(args, 1, "")
+    if std::list::get(args, 4, "") == "failures":
+        coroutine {step, first} = failures(helper, std::list::get(args, 2, "/tmp"))
+        std::event_loop::adopt(step, first)
+    else:
+        coroutine {step, first} = workload(helper, std::list::get(args, 2, "/tmp"), std::list::get(args, 3, "/tmp"))
+        std::event_loop::adopt(step, first)
+    std::event_loop::run()
+    loop o in std::event_loop::take_outcomes():
+        if o.ending != std::event_loop::Ending::Returned:
+            say("task failed ".concat(num(o.value)))
+    say("end: shut down ".concat(num(process_linux::shutdown())).concat(" children still supervised"))
+    st = process_linux::stats()
+    say("end: owned ".concat(num(st.owned)).concat(", dying ").concat(num(st.dying)).concat(", watches ").concat(num(st.watches)).concat(", children ").concat(num(st.children)).concat(", adapter descriptors ").concat(num(st.descriptors)))
+    say("end: descriptors delta ".concat(num(fdcount::open_fds() - fds)).concat(", registrations delta ").concat(num(std::event_loop::stats().registrations - regs)))
+    say("end: escalations ".concat(num(st.escalations)).concat(", released ").concat(num(st.released)))
+    0
+
+args = argv():
+    on InvalidArgumentEncoding:
+        []
+with context std::linux::io::create()
+with context std::linux::fs::create()
+with context std::event_loop::create(64)
+with context event_loop_linux::create()
+with context event_loop_linux::native()
+with context process_linux::create()
+main(args):
+    on std::event_loop::SchedulerFault:
+        -1
+    on std::event_loop::DriverFault:
+        -2
+    on std::event_loop::LoopReentered:
+        -3
+    on std::event_loop::TaskFailed:
+        -4
+    on IndexNotFound:
+        -5

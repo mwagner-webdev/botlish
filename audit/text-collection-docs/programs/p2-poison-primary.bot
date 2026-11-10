@@ -1,0 +1,11 @@
+fn poisoned() -> str:
+    n = 5
+    n(1)
+
+fn unbound() -> str:
+    missing_name
+
+fn hole_free(x: int) -> str:
+    x.no_such_method()
+
+0

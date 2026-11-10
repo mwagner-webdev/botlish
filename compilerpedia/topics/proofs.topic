@@ -298,12 +298,12 @@ fn branched(h: int) -> int:
             x
         r = ys.at(h.mod(zs.length()))
         v.push(r)
-        return r
+        return r + v.length()
     v.length()
 
 branched(4)
 @caption A branch's loop before the branch's own push sees the vector of the loops before it
-@value 20
+@value 24
 @end
 
 == LIMITATIONS (NOT PROVEN TODAY)

@@ -16,7 +16,16 @@
  *        -I OUT linux_start.c OUT/PREFIX.c OUT/PREFIX_display.c
  *
  * (a cross build: clang --target=aarch64-linux-gnu -fuse-ld=lld ...)
+ *
+ * With -DBOTLISH_START_ENTRY=NAME it runs no program itself: _start calls
+ * `int NAME(void)` instead and exits with its result, and
+ * botlish_start_write(TEXT, LENGTH) writes to standard output for it --
+ * how two_apps.c runs two generated programs in one executable with no C
+ * library (C-CONTEXTS-FREESTANDING-MILESTONE-1.md).
  */
+#include <stddef.h>
+
+#ifndef BOTLISH_START_ENTRY
 #include BOTLISH_PROGRAM_HEADER
 
 #define BOTLISH_CAT2(a, b) a##b
@@ -28,6 +37,7 @@
 #endif
 
 static char text[START_BUFFER];
+#endif
 
 /*
  * memcpy, memmove, memset and memcmp: GCC and Clang document that a
@@ -195,6 +205,7 @@ static void put(const char *s, size_t n)
     }
 }
 
+#ifndef BOTLISH_START_ENTRY
 static size_t length_of(const char *s)
 {
     size_t n = 0;
@@ -208,6 +219,15 @@ static void put_text(const char *s)
 {
     put(s, length_of(s));
 }
+#else
+int BOTLISH_START_ENTRY(void);
+void botlish_start_write(const char *s, size_t n);
+
+void botlish_start_write(const char *s, size_t n)
+{
+    put(s, n);
+}
+#endif
 
 void _start(void);
 #if defined(__x86_64__) || defined(__i386__)
@@ -215,6 +235,11 @@ __attribute__((force_align_arg_pointer))
 #endif
 __attribute__((noreturn)) void _start(void)
 {
+#ifdef BOTLISH_START_ENTRY
+    sys3(SYS_EXIT, BOTLISH_START_ENTRY(), 0, 0);
+    for (;;) {
+    }
+#else
     P(_value) value;
     P(_status) status = P(_run)(&value);
     int code = 0;
@@ -234,4 +259,5 @@ __attribute__((noreturn)) void _start(void)
     sys3(SYS_EXIT, code, 0, 0);
     for (;;) {
     }
+#endif
 }

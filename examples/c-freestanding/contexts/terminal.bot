@@ -1,0 +1,19 @@
+# terminal -- a card terminal: Payment's implementation. A receipt carries
+# the time of the authorization, so the terminal needs a Clock itself: the
+# application asks for a Payment, and gets the Clock dependency with it,
+# without naming it.
+
+import clock
+import payment
+
+context struct Terminal:
+    limit: payment::Amount
+    fee: payment::Cents
+
+fn stamp(context c: clock::Clock) -> clock::Tick:
+    c.now()
+
+fn authorize(amount: payment::Amount, context t: Terminal) -> payment::Receipt errors payment::Declined:
+    if amount > t.limit:
+        fail payment::Declined
+    payment::Receipt {amount: amount, fee: t.fee, stamp: stamp()}

@@ -1,0 +1,17 @@
+import std::list
+import std::str
+
+# PARTS[I..] appended to ACC, SEPARATOR between parts: tail recursion.
+fn join_from(parts: List[str], separator: str, i: int, acc: str) -> str:
+    if i < 0 or i >= parts.length():
+        return acc
+    if i == 0:
+        return join_from(parts, separator, i + 1, acc.concat(parts.at(i)))
+    join_from(parts, separator, i + 1, acc.concat(separator).concat(parts.at(i)))
+
+fn chars_from(chars: List[UnicodeChar], i: int, acc: str) -> str:
+    if i < 0 or i >= chars.length():
+        return acc
+    chars_from(chars, i + 1, acc.append_char(chars.at(i)))
+
+[join_from(["red", "green", "blue"], ", ", 0, ""), join_from([], ", ", 0, ""), chars_from(['h', 'é', '!'], 0, "")]

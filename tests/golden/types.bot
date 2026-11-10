@@ -241,7 +241,7 @@ fn register_result_contract_tests():
                 20
             1
     std::test::rejects_at("source-type-result-contract-invalid/location", std::compiler::DiagnosticCode::Type, 240, 17, b_result_invalid)
-    std::test::rejects_message("source-type-result-contract-invalid/message", std::compiler::DiagnosticCode::Type, "function result does not prove declared type int[Small] (facts: [20, 20] {20})", b_result_invalid)
+    std::test::rejects_message("source-type-result-contract-invalid/message", std::compiler::DiagnosticCode::Type, "function result does not prove declared type int[Small] (result type: int, facts: [20, 20] {20})", b_result_invalid)
 
     # source-type-sparse-result-contract: bit_and(x, 12)'s exact result set
     # {0, 4, 8, 12} proves the sparse Sparse result; the call is exactly a
@@ -270,7 +270,7 @@ fn register_result_contract_tests():
                 z
             1
     std::test::rejects_at("source-type-interval-cannot-prove-sparse/location", std::compiler::DiagnosticCode::Type, 264, 17, b_hull_not_sparse)
-    std::test::rejects_message("source-type-interval-cannot-prove-sparse/message", std::compiler::DiagnosticCode::Type, "function result does not prove declared type int[Sparse] (facts: [0, 12])", b_hull_not_sparse)
+    std::test::rejects_message("source-type-interval-cannot-prove-sparse/message", std::compiler::DiagnosticCode::Type, "function result does not prove declared type int[Sparse] (result type: int, facts: [0, 12])", b_hull_not_sparse)
 
     # source-type-exact-set-accepted-by-broad-int: an exact set {0, 78, 999}
     # reached by equality narrowing of an untyped parameter is admitted by a

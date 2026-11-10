@@ -1,0 +1,7 @@
+fn f() -> int:
+    missing_name
+
+fn g(x) -> str:
+    x
+
+f()

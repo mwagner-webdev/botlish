@@ -1,0 +1,112 @@
+# worker.bot -- the process_linux tests' thread entries (tests/process/
+# threads.bot): each runs its own VM's event loop, Linux driver and process
+# context, supervises children and returns a summary. Nothing of a child
+# crosses VMs: the entry gets plain data and returns plain data.
+import event_loop_linux
+import kit
+import probe
+import process_linux
+import std::event_loop
+import std::linux::io
+import std::list
+import std::mutable_array
+import std::str
+import type std::event_loop::Delivery
+
+struct Job:
+    id: int
+    helper: str
+    args: List[str]
+    children: int
+    mode: int
+
+struct Summary:
+    id: int
+    bytes: int
+    code: int
+    pid: int
+    owned: int
+    fds_ok: int
+    token: int
+
+# Supervise J's child (and, mode 1, J.CHILDREN children reporting their
+# descriptors): bytes read, exit code, pid.
+fn work(j: Job, done: std::event_loop::Reg, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    {owner, child} = kit::spawn(process_linux::command(j.helper, j.args))
+    pid = kit::pid(child)
+    counted = kit::count(child, process_linux::Stream::Stdout)
+    st = kit::wait(child)
+    process_linux::release(owner)
+    good = std::mutable_array::create(1, 0)
+    loop i from 0 to j.children:
+        {owner: o, child: c} = kit::spawn(process_linux::command(j.helper, ["fds"]))
+        text = kit::text_of(kit::drain(c, process_linux::Stream::Stdout))
+        if text == "fds 0 1 2\n":
+            good.set(0, good.at(0) + 1)
+        kit::wait(c)
+        process_linux::release(o)
+    done.post(counted.bytes, st.code)
+    done.post(pid, good.at(0))
+    0
+
+fn supervised(j: Job, context ev: std::event_loop::Loop, d: event_loop_linux::Linux, n: event_loop_linux::Native, p: process_linux::Processes, io: std::linux::io::LinuxIO) -> Summary errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered, std::event_loop::TaskFailed, IndexNotFound:
+    std::event_loop::sync()
+    done = std::event_loop::channel(Delivery::Reliable, 4)
+    coroutine {step, first} = work(j, done)
+    std::event_loop::adopt(step, first)
+    std::event_loop::run()
+    a = std::event_loop::try_take(done)
+    b = std::event_loop::try_take(done)
+    owned = process_linux::stats().owned
+    process_linux::shutdown()
+    event_loop_linux::close()
+    Summary {id: j.id, bytes: a.a, code: a.b, pid: b.a, owned: owned, fds_ok: b.b, token: probe::token()}
+
+thread fn supervise(j: Job) -> Summary:
+    with context std::event_loop::create(64)
+    with context event_loop_linux::create()
+    with context event_loop_linux::native()
+    with context process_linux::create_with(kit::options())
+    with context std::linux::io::create()
+    supervised(j):
+        on std::event_loop::SchedulerFault:
+            Summary {id: j.id, bytes: -1, code: 0, pid: 0, owned: 0, fds_ok: 0, token: 0}
+        on std::event_loop::DriverFault:
+            Summary {id: j.id, bytes: -2, code: 0, pid: 0, owned: 0, fds_ok: 0, token: 0}
+        on std::event_loop::LoopReentered:
+            Summary {id: j.id, bytes: -3, code: 0, pid: 0, owned: 0, fds_ok: 0, token: 0}
+        on std::event_loop::TaskFailed {code}:
+            Summary {id: j.id, bytes: -4, code: code, pid: 0, owned: 0, fds_ok: 0, token: 0}
+        on IndexNotFound:
+            Summary {id: j.id, bytes: -5, code: 0, pid: 0, owned: 0, fds_ok: 0, token: 0}
+
+# A VM that starts a child ignoring SIGTERM, releases its owner where the
+# scope ends without running its loop again, and ends: the adapter kills
+# and reaps the child at the thread's end (no child outlives its VM). With
+# DETACH it detaches one more first, which outlives the VM.
+fn abandon_children(j: Job, context ev: std::event_loop::Loop, d: event_loop_linux::Linux, n: event_loop_linux::Native, p: process_linux::Processes, io: std::linux::io::LinuxIO) -> Summary errors std::event_loop::SchedulerFault, std::event_loop::TaskFailed:
+    {owner, child} = kit::spawn(process_linux::command(j.helper, ["ignore:15", "sleep:30000"]))
+    pid = kit::pid(child)
+    detached = if j.mode == 2:
+        {owner: o2, child: c2} = kit::spawn(process_linux::command(j.helper, ["sleep:30000"]).with_stdin(process_linux::Input::Null).with_stdout(process_linux::Output::Null).with_stderr(process_linux::Output::Null))
+        process_linux::detach(o2):
+            on process_linux::StaleChild:
+                -1
+            on process_linux::ProcessFault:
+                -1
+    else:
+        0
+    process_linux::release(owner)
+    Summary {id: j.id, bytes: 0, code: detached, pid: pid, owned: process_linux::stats().dying, fds_ok: 0, token: probe::token()}
+
+thread fn abandoner(j: Job) -> Summary:
+    with context std::event_loop::create(64)
+    with context event_loop_linux::create()
+    with context event_loop_linux::native()
+    with context process_linux::create_with(kit::options())
+    with context std::linux::io::create()
+    abandon_children(j):
+        on std::event_loop::SchedulerFault:
+            Summary {id: j.id, bytes: -1, code: 0, pid: 0, owned: 0, fds_ok: 0, token: 0}
+        on std::event_loop::TaskFailed {code}:
+            Summary {id: j.id, bytes: -4, code: code, pid: 0, owned: 0, fds_ok: 0, token: 0}

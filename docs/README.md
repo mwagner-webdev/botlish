@@ -603,7 +603,10 @@ argument: `decimal_rounded#less` `#less_equal` `#greater` `#greater_equal`
 `UnrepresentableDecimal`). A check form left unelaborated refuses to run.
 `==` and `hash` refuse a DecimalRounded value (`EQUALITY`).
 
-Standard intrinsics (qualified root natives):
+Standard intrinsics (qualified root natives). The signatures are the
+registered ones, what the runtime checks; the static types the checker
+gives are often more precise (§13, §21): `std::list::at` has its List's
+element type, `std::list::append` the lub of it and the new element's.
 
 | Name | Signature |
 |------|-----------|
@@ -616,7 +619,7 @@ Standard intrinsics (qualified root natives):
 | `std::str::lowercase` | str → str (Unicode 16 simple one-to-one case mapping; see §"Strings") |
 | `std::str::concat` | str, str → str |
 | `std::str::append_char` | str, UnicodeChar → str: the String followed by the one character (`std::str::length` + 1 characters; the argument is unchanged), as `std::list::append` is to a List: the way a character becomes text, with no one-character String of its own |
-| `std::str::encode_utf8` | str → `List[Byte]` (the UTF-8 bytes) |
+| `std::str::encode_utf8` | str → list of the UTF-8 bytes, each 0..255: statically `List[std::byte::Byte]` when the compilation has loaded `std::byte` (directly or through a module that imports it, such as `std::abi::bytes`), otherwise plain `list` (TEXT-AND-COLLECTION-PRECISION-CENSUS.md, C.3); `std::abi::bytes::decode_utf8` (errors `InvalidUtf8`) is the way back |
 | `std::str::char_at` | str, int → UnicodeChar, errors `IndexNotFound`: the scalar at character index `0 <= i < length` (the index space of `length`/`substring`); any other Int index fails with `IndexNotFound`; never allocates. With char literals (`c == '%'`) and `std::char::scalar_value` it classifies a String's characters without a one-character String or an `encode_utf8` List (ENCODE-UTF8-ALLOCATION-RESEARCH.md) |
 | `std::str::is_tcl_alpha` `std::str::is_tcl_alnum` | one-scalar str → bool (temporary Tcl-compatibility classes, core/tclcompat.tcl) |
 | `std::char::scalar_value` | UnicodeChar → int (the Unicode scalar value: `0..0x10FFFF` without the surrogates, never a byte or a code unit of an encoding) |
@@ -2545,8 +2548,9 @@ Facts it derives beyond HIR (without changing HIR):
   used to be a fact for a forward reference, as in mutual recursion.)
 * `==` on two known scalars needs no structural comparison.
 
-**The corpus today.** Every function in §18 has closed dispatch: every call
-target is a known native or a known Botlish function. None is closed:
+**The corpus when this analysis was written.** Every function in §18 had
+closed dispatch: every call target is a known native or a known Botlish
+function. None was closed:
 
 | Program | Dispatch | Types | Main blocker | Native-runtime needs |
 |---------|----------|-------|--------------|----------------------|
@@ -2558,16 +2562,29 @@ target is a known native or a known Botlish function. None is closed:
 (Requirements are unions over each program's functions and exclude the
 sample expression's list literal.)
 
-The blockers come from two sources, neither of them dynamic dispatch:
+The blockers came from two sources, neither of them dynamic dispatch. Both
+items describe the compiler of that milestone, not today's (next
+paragraph):
 
-1. **Parameters have no kind.** There are no annotations and no call-site
+1. **Parameters had no kind.** There were no annotations and no call-site
    inference, and calling a block proves nothing about its arguments. So
-   the first use of each parameter needs a check, and results that pass a
-   parameter through (`reverse_from`'s accumulator, `dot`'s `total`) are
-   `any`. Flow facts from native signatures already remove every later
+   the first use of each parameter needed a check, and results that pass a
+   parameter through (`reverse_from`'s accumulator, `dot`'s `total`) were
+   `any`. Flow facts from native signatures already removed every later
    check on the same path.
-2. **Lists carry no element type.** `std::list::at` returns `any`. That affects
-   `matmul`'s entries and the pairs `csv` returns.
+2. **Lists carried no element type.** `std::list::at` returned `any`. That
+   affected `matmul`'s entries and the pairs `csv` returns.
+
+**Since then.** Lists carry their element type: a List's static type is
+`List[E]` (MINIMAL-APPLIED-LIST-TYPES.md), `std::list::at`, a loop variable
+and a collecting loop's elements have type E, and a parameter, field or
+result may declare `List[T]`. A parameter may declare its type
+(STRICT-TYPED-PARAMETERS.md), and call-site specialization (§21) analyzes
+each instance under its callers' argument kinds. The corpus's functions
+still declare no parameter types, so `-aot` still reports their parameters
+without a kind, and an element read out of such a parameter as unknown:
+because the parameter's type is unknown, not because the List has no
+element type.
 
 This table is the *semantic* analysis, and it stays so: a function's HIR
 types never change because of its callers. Call-site specialization (§21)
@@ -3190,8 +3207,9 @@ itself share one view per instance.
 
 ### Aggregate facts
 
-Lists get element facts in region inference only (semantic HIR types are
-unchanged):
+Lists get element facts in region inference (when this was written, only
+there: semantic HIR types were unchanged; they have since gained List
+element types too, `List[E]`, MINIMAL-APPLIED-LIST-TYPES.md):
 
 | Form | Meaning |
 |---|---|

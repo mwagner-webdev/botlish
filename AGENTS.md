@@ -597,6 +597,25 @@ proofs, as native lowering does, and runs no C compiler. Keep it so:
   exactly the service symbols the C calls, per translation unit.
 * Harnesses and providers stay outside the backend
   (`examples/c-freestanding/`), as integration code of a target's.
+* Contexts (C-CONTEXTS-FREESTANDING-MILESTONE-1.md) are the front end's,
+  translated, never re-decided: an installation is an object of the
+  program function's frame (per run); a function's C parameters after its
+  ordinary ones are one `T *` per context of its block's
+  `requiredContexts`, in order, and a call passes exactly the callee's
+  requirement (`ContextArgs`): the signature is its authority. Nothing
+  writes through the pointer, but neither it nor the object is
+  `const`-qualified: GCC 15 reports an initialized object passed to a
+  pointer-to-const parameter "may be used uninitialized" after cloning a
+  recursive function with its constant contents
+  (`cc-ctx-no-const-context-pointers`). Never put a
+  context in file-scope storage, a global or thread-local pointer, a
+  registry, an environment struct handed to every function, a lookup or a
+  runtime service; never compute a requirement, a selection or an
+  injection in the backend (the trait plan and hir/contexts.tcl did), and
+  never compile a HIR that failed context verification. No context name
+  starts with `PREFIX_` (`ContextName`). A context the C subset cannot
+  represent (a member of an unsupported type, affine state) is C
+  UNSUPPORTED naming it.
 * **Every enhancement of type inference is also analyzed for what it gives
   the C target.** The backend adds no analysis of its own, so its
   precision is the analyses': a new or sharper fact -- a type or a Range
@@ -617,7 +636,8 @@ proofs, as native lowering does, and runs no C compiler. Keep it so:
 
 If you change `ccompile/`, `examples/c-freestanding/` or what the backend
 reads (`hir::specialize`'s instances, `hir::range`'s results, the HIR node
-kinds it compiles), run `tests/c-compile.test` (its cross tests need clang,
+kinds it compiles, the context facts `requiredContexts`, `installId` and
+`loadId`), run `tests/c-compile.test` (its cross tests need clang,
 ld.lld, qemu-user and the cross libgcc packages, and are skipped without
 them), `tests/main-cli.test` and `tools/compilerpedia.tcl check`, and
 `examples/c-freestanding/demo.sh`.
@@ -1057,6 +1077,42 @@ only and is not autofixable on purpose: do not count flags, bindings or
 computed bools, follow exact values, group per callee, warn on a declaration
 without call evidence, print a flag spelling, or add a fixit or an opt-out
 (FLAGS.md, "Boolean arguments", records the graduation criteria).
+
+`DISCARDED-MUTATION` (WARNINGS-DISCARDED-MUTATION-MILESTONE-1.md;
+hir/discarded.tcl the facts, hir/warnings.tcl the pass) reads the checked
+program as written -- a trait program's `traitSource`, any other program's
+`checkedSource`, which hir::BuildFull keeps (for a program that uses a
+mutable collection) before the elaborations rename a fold's intermediate
+and rewrite MutableMap loops, and which `hir::warnings::run` drops from the
+HIR every compilation returns (interchange text leaves it out too) -- and
+reports two proven facts: a mutation (hir::mutvec's `place` receivers and
+place arguments, written calls only) whose every destination is a place
+that dies with its scope and is its path's last use
+(`hir::mutvec::NoLaterUse`), whose value is discarded and whose callee is
+confined (only its own places and its place parameters, transitively: no
+context, function value, syscall, C call, yield or affine value); and a
+fold's `continue` or bare `break` that every path reaches after mutating the
+intermediate (a must-walk of the iteration, never `FoldExitsClean`, which
+answers another question). Keep it so: never warn on a mutation some path
+reads, on a place parameter's or a context's, on a call with another
+effect, on anything affine, or on an exit only some paths reach after the
+mutation; never read a name or a spelling (`push`, `set`); never analyze an
+elaborated HIR as if it were written (`hir::discarded::Source` declines
+one); no opt-out, no fixit, no claim that the call may be deleted (its
+failure stays the program's). If you change any of that, `NoLaterUse` or
+`UseMap`, how a fold, a loop, a handler or a place parameter binds, the
+registry's ownership roles or runtime tags, `checkedSource`, or the
+completion analysis's `reachedExprs`, run `tests/discarded-mutation.test`,
+`audit/discarded-mutation/tools/fuzz.tcl` (several seeds: its model is its
+own liveness and must-walk over the statements it generated) and
+`audit/discarded-mutation/tools/mutate.tcl` (every mutant in its
+`mutants.txt` must still apply and be killed by a test its `!!` line names:
+update a mutant's text when you change the code it mutates, keeping it a
+mutant of the same rule), and the warning gate.
+`audit/discarded-mutation/tools/census.tcl` (and `test-census.sh` for the
+Tcl test files' programs) re-takes the repository census against
+`audit/discarded-mutation/census.tsv`; `bench/discarded-mutation.tcl` the
+compile-time costs.
 
 ## The warning gate
 
@@ -2043,7 +2099,7 @@ and no acceptance depends on one.
   the host's tools see them), `tests/platform/tier.tcl smoke`, the canary)
   and the same smoke on ubuntu as a control; a push to main and a
   dispatched run (`workflow_dispatch` on the branch) also Tier B
-  (`tier.tcl acceptance`, five shards), the system linker and the
+  (`tier.tcl acceptance`, six shards), the system linker and the
   application's jobs. Locally, `tclsh9.0
   tests/platform/tier.tcl smoke` takes seconds, and `tier.tcl X.test
   Y.bot` runs any file or suite the way CI does.
@@ -2908,6 +2964,64 @@ code it mutates, keeping it a mutant of the same rule), plus the affine,
 tree-struct and declaration-summaries mutation harnesses for a change to
 code they mutate. `bench/owned-recursion.tcl` regenerates the scaling
 report.
+
+## The applied-type bound (hir/applied.tcl)
+
+`aggregateDepth` / `appliedDepth` (hir/types.tcl) are precision and economy
+bounds of the type lattice, not language validity limits
+(APPLIED-TYPE-BOUND-PRECISION-MILESTONE-1.md): past `appliedDepth`
+applications nested directly in arguments, `MakeApplied` keeps an
+application's constructor and makes its arguments `any`, so that joins,
+fixpoints, instance and memo keys stay finite. A part of a cut application
+read back out of it is cut one application earlier than a value of that part
+on its own; never check a value against it. Keep it so:
+
+* Before using a bounded applied type to reject a declared construction,
+  parameter, result or imprint, prefer the exact local declaration/value
+  relationship when it is already available: a construction's field types
+  are what its own field values or its written application establish
+  (`hir::applied::VerifyConstruction`, `FieldExpected`), never
+  `hir::types::StructField` of its own cut type; a projection of a value the
+  program constructed reads the field value's type (`TypedProjection`);
+  inference re-decides a bounded conflict or a constrained slot on the
+  evidence (`TypedBinding`, `TypedIssue`).
+* Never raise `appliedDepth` (or remove it) to make a program pass: the
+  false rejection only moves deeper, and exact types in the HIR are
+  quadratic (`atb-bound-unchanged`, the report's section 3). Precision is
+  forgotten globally and cashed out locally: evidence lives in one typing
+  walk's context (ctx `applied`) or one verification pass's memo
+  (`hir::applied::Pass`), never in a HIR type, an interned type, an instance
+  key or a side table; a written type the bound cut is recorded beside its
+  bounded form (`exactParamTypes`, `exactResult`, `exactStructArgs`,
+  `exactImprint`, the struct registry's `exactFields`), flat-encoded.
+* Evidence comes only from what the program constructs (constructions,
+  immutable aliases, projections, `if` branches) -- a slot no field
+  establishes from its written argument -- never from a declaration of a
+  value's position (a parameter read in its body stays its bounded type: not
+  every way into a parameter is checked exactly). The exact layer only adds
+  rejections: the bounded check of the value's HIR type runs first and
+  decides every subtype, Range, refinement and kind question.
+* No covariance (`App[int]` is no `App[any]`), no precision from `any`, no
+  reading past a bounded part's horizon (`Parts`), no unfolding of a
+  declaration (a constrained slot's class is the summaries' `Level` of its
+  arguments' classes). Every walk of evidence is a loop over an explicit
+  stack and no exact term is ever compared or keyed as a string.
+* A deep difference is reported at the deepest construction inside the
+  checked value whose slot it passes through (`Locate`), with the message
+  the same at every depth; a program the bound cuts nothing of keeps its
+  diagnostics byte for byte.
+
+If you change `MakeApplied`, `Bound`, `hir/applied.tcl`, construction typing
+or checking, imprint matching or the resolver's exact forms, run
+`tests/applied-type-bound.test` (its deep generated specimens, 1000 deep),
+`tests/depth-safe-nesting.test`, `tests/trait-constrained-types.test`,
+`tests/affine-applications.test`, `tests/written-affine-applications.test`,
+`python3 -I audit/applied-type-bound/tools/oracle.py selftest`,
+`audit/applied-type-bound/tools/fuzz.tcl` (several seeds) and
+`audit/applied-type-bound/tools/mutate.tcl` (every mutant in its
+`mutants.txt` must still apply and be killed: update a mutant's text when
+you change the code it mutates, keeping it a mutant of the same rule).
+`bench/applied-type-bound.tcl -baseline DIR` is the performance report.
 
 ## Resources (scope-bound cleanup)
 
@@ -6498,6 +6612,76 @@ installs or links (`audit/http-client/cleanroom/cleanroom.sh image`, then
 after `single/build.sh`: the report's "Clean room").
 `audit/http-client/tools/measure.tcl` regenerates the measurements.
 
+## The process_linux package (supervised child processes)
+
+`packages/process_linux` is the official package for launching,
+supervising, talking to and terminating external processes on Linux x86-64
+(PROCESS-LINUX-PACKAGE-MILESTONE-1.md; its README.md and GUIDE.md are the
+user's documentation): a Botlish module over a C adapter
+(`native/process_linux.c`, built on the author's side into
+`native/libprocess_linux.a`: tools/process-linux.tcl for tests,
+`tools/package-repository.tcl`'s `author::process_linux` for the release),
+scheduled by the program's own event loop through the Linux driver package.
+It grew from the census MANAGED-SUBPROCESS-AND-EVENT-LOOP-CENSUS-
+MILESTONE-1.md (audit/managed-subprocess, which stays the experiment).
+Keep it so:
+
+* No language, compiler or standard-library change for processes, and no
+  second scheduler: every pipe and the child's exit (its pidfd) are
+  event_loop_linux watches; no polling, no thread, no signal handler, no
+  SIGCHLD handler, never `waitpid(-1)` or `waitid(P_ALL)`. A stream that
+  keeps delivering yields to the loop every `burst` chunks (`fair`): never
+  drop that.
+* No shell, no PATH search: a command is an executable path and an exact
+  argument vector; a NUL in any item is InvalidCommand before anything
+  starts. Bytes stay bytes: nothing decodes, splits or accumulates a
+  stream in the package.
+* Identity safety: a child is signalled only through its pidfd (group
+  signals with PIDFD_SIGNAL_PROCESS_GROUP; before Linux 6.9 kill(-PGID),
+  only while the leader is unreaped), and reaped only once its supervision
+  is over; never signal a PID number, never signal after the reap, never
+  use glibc's `pidfd_spawn` (it leaks its pidfd when exec fails, where
+  glibc lacks its fix: the testing build keeps it as a negative control,
+  reported, never required). A kernel without
+  pidfds, or a process whose SIGCHLD is ignored, is Unsupported -- never a
+  fallback to PID numbers.
+* Ownership: ChildOwner is an affine resource whose release (also at its
+  lexical scope's end) sends SIGTERM and hands a running child to the
+  reaper task (grace, SIGKILL, reap, retire); a cleanup never waits. The
+  identity (Child) is StaleChild once its owner is released, at once.
+  `detach` is the only way to outlive the owner. When supervision ends,
+  members of the child's group still running once the leader exited are
+  killed. Interrupt cancels waits, never the child.
+* Threads: a child belongs to the thread (the token, never a pthread_t)
+  that spawned it; another thread's call is refused; a thread's end kills
+  and reaps the children it still supervises (`thread_ended`), and process
+  exit sends SIGKILL to every supervised group (`process_ending`). Child is
+  never sendable. No process-wide subreaper, cgroup or PTY in this package.
+* Authority: starting a process requires the installed Processes context;
+  every extern is `private`. The released archive defines exactly the
+  module's `pl_*` functions and reads no environment variable; fault bits
+  and probes (`pl_t_*`) exist only with PL_TESTING (tests/process/probe.bot).
+* The adapter is built `-Werror`: a mutant of it must leave no variable
+  unused, or its kill is a build failure, which the harness reports
+  NOT-BUILT.
+
+If you change packages/process_linux, tools/process-linux.tcl or the
+recipe, run `tests/process-linux.test` (Linux x86-64, cc; its tty tests
+need python3; it includes GC stress and the documentation's programs),
+`audit/process-linux/tools/fuzz.tcl` (several seeds, once with
+`-gc-stress 1`), `audit/process-linux/tools/mutate.tcl` (every mutant in
+its `mutants.txt` must still apply and be killed by a test its `%%` line
+names: update a mutant's text when you change the code it mutates, keeping
+it a mutant of the same rule), the warning gate's view of the module (a
+program importing it compiles under `-warnings error`), and, after
+`single/build.sh`, the clean room (`audit/process-linux/cleanroom/
+cleanroom.sh image`, then `repository.sh OUT RELEASES` and `cleanroom.sh
+run single/out/botlish OUT RESULTS`). `process_linux` 0.1.0 is recorded in
+packages/RELEASES.tsv: any change under `packages/process_linux` (its
+documentation included) is a new version, built in the pinned author image
+(`tools/package-build/author.sh build OUT -release process_linux`).
+`bench/process-linux.tcl` regenerates the measurements.
+
 ## External tools and target support packages
 
 A package may carry tools and target runtime artifacts
@@ -6956,6 +7140,48 @@ native, a public declaration):
 The check catches only the mechanical case (an alias that is an
 operation's name); a broader claim -- "no tasks" while std::event_loop
 schedules them -- is found only by reading the pages, so read them.
+
+## Declared-result diagnostics and the text documentation
+
+A declared result that is not proven is reported with both sides of the
+comparison (TEXT-AND-COLLECTION-DOCUMENTATION-AND-DIAGNOSTICS-MILESTONE-1.md):
+`function result does not prove declared type T (result type: R, facts:
+F); WHY`, as an argument's TYPE states its type
+(`hir::range::verifyDeclaredResults`). Keep it so:
+
+* R is the generic body's own inferred result (the block's
+  `inferredResultType`: every normal completion joined) -- exactly what the
+  admission proof was given -- presented as an argument's type is
+  (`hir::semantic::ShowType` of `ShownArgType`, `FactsClause`,
+  `MismatchClause`): never one branch's type, a semantic instance's (an
+  instance types a scratch copy), the declared type or a refinement's
+  carrier. Format it only on a mismatch, never add a second diagnostic for
+  it, and never let the message change what is accepted, poisoned or
+  reported: a poisoned or unresolved result keeps its one primary
+  diagnostic.
+* The pages that state facts of the compiler about strings, UTF-8, text
+  construction, literal escapes and List typing are checked against it by
+  tests/text-collection-docs-diagnostics.test: the escape table of
+  `concept.strings` against the lexer, `encode_utf8`'s static type (List
+  of Bytes only with `std::byte` loaded) against the checker, the costs
+  `task.string-concatenation` states against `native::allocationReport`.
+  A change that makes one false -- a new escape (`\u{...}`), encode_utf8
+  typed whatever is imported, `append_char` carried by construction
+  plans, a `std::str::join`, a `std::char::from_scalar_value` -- rewrites
+  the page in the same change. `std::test::joined` is the test library's
+  (quadratic): never recommend it for production text.
+
+If you change the diagnostic or those pages (or what they state), run
+tests/text-collection-docs-diagnostics.test, `tclsh9.0
+tools/compilerpedia.tcl check`, `tclsh9.0
+audit/text-collection-precision/tools/probes.tcl` and
+`audit/text-collection-docs/tools/mutate.tcl` (every mutant in its
+`mutants.txt` must still apply and be killed by a test its `!!` line names:
+update a mutant's text when you change the code or the page it mutates,
+keeping it a mutant of the same rule); for the diagnostic, also the test
+files and golden suites that pin its text (`grep -rl "does not prove
+declared type" tests`) and `audit/text-collection-docs/tools/compare.tcl`
+before and after (no semantic difference over the corpus).
 
 ## Golden tests (Botlish-native test framework)
 

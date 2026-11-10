@@ -1,8 +1,8 @@
 # probe: an argument's TYPE diagnostic names the argument's type; a declared
-# result's names only the declared type, not the type inferred (J).
+# result's names the inferred type too since M2 (J: it used to omit it).
 # outcome: reject
 # diagnostic: 16:6 argument for parameter "xs" cannot be proven to satisfy List[int] (argument type: List[int[std::byte::Byte]])
-# diagnostic: 13:8 function result does not prove declared type List[int]
+# diagnostic: 13:8 function result does not prove declared type List[int] (result type: List[int[std::byte::Byte]])
 import std::str
 import std::list
 import std::byte

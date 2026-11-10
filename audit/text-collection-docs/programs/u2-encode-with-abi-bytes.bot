@@ -1,0 +1,7 @@
+import std::str
+import std::abi::bytes
+
+fn probe(t: str) -> str:
+    t
+
+probe("é".encode_utf8())

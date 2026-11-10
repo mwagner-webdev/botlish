@@ -1,0 +1,9 @@
+import std::list
+
+fn first(xs: List[T]) -> List[int]:
+    xs
+
+fn one(xs: List[T]) -> int:
+    xs.at(0)
+
+[first(["b"]), first([1]), one([1])]

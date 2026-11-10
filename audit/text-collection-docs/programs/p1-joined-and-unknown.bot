@@ -1,0 +1,23 @@
+import std::list
+
+type Digit = Int in 0..9
+type Small = Int in 0..5
+
+fn needs_int(n: int) -> int:
+    n
+
+fn poisoned() -> str:
+    needs_int("x")
+
+fn unknown(xs: list) -> int errors IndexNotFound:
+    xs.at(0)
+
+fn joined(c: bool, d: Digit, s: Small) -> Small:
+    if c:
+        return d
+    s
+
+fn narrow(d: Digit) -> Small:
+    d
+
+0
