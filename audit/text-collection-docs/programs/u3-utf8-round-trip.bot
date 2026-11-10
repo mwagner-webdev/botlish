@@ -1,0 +1,9 @@
+import std::str
+import std::abi::bytes
+
+fn round_trip(s: str) -> str errors InvalidUtf8:
+    std::abi::bytes::decode_utf8(std::abi::bytes::from_list(s.encode_utf8()))
+
+round_trip("héllo"):
+    on InvalidUtf8:
+        "?"

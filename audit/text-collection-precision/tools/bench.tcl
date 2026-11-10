@@ -99,10 +99,39 @@ s = std::abi::bytes::decode_utf8(std::abi::bytes::join(encoded)):
         ""
 std::str::length(s)
 }] \
-    test-joined [list "std::test::joined(parts, \"\") (what task.string-concatenation suggests)" {
+    test-joined [list "std::test::joined(parts, \"\") (what task.string-concatenation suggested)" {
 parts = loop i from 0 to %N%:
     "ab;"
 std::str::length(std::test::joined(parts, ""))
+}] \
+    tail-join-list [list "typed self-tail recursion over a List of parts with a separator (task.string-concatenation's example since M2)" {
+fn join_from(parts: List[str], separator: str, i: int, acc: str) -> str:
+    if i < 0 or i >= parts.length():
+        return acc
+    if i == 0:
+        return parts.join_from(separator, i + 1, acc.concat(parts.at(i)))
+    parts.join_from(separator, i + 1, acc.concat(separator).concat(parts.at(i)))
+parts = loop i from 0 to %N%:
+    "ab;"
+std::str::length(parts.join_from(", ", 0, ""))
+}] \
+    tail-char-concat [list "typed self-tail recursion concatenating each character as a one-character String (task.string-concatenation's example since M2)" {
+fn text_from(chars: List[UnicodeChar], i: int, acc: str) -> str:
+    if i < 0 or i >= chars.length():
+        return acc
+    chars.text_from(i + 1, acc.concat("".append_char(chars.at(i))))
+chars = loop i from 0 to %N%:
+    'é'
+std::str::length(chars.text_from(0, ""))
+}] \
+    tail-append-char [list "typed self-tail recursion carrying std::str::append_char(acc, c) (not a construction-plan piece)" {
+fn text_from(chars: List[UnicodeChar], i: int, acc: str) -> str:
+    if i < 0 or i >= chars.length():
+        return acc
+    chars.text_from(i + 1, acc.append_char(chars.at(i)))
+chars = loop i from 0 to %N%:
+    'é'
+std::str::length(chars.text_from(0, ""))
 }]]
 
 proc tcbench::source {strategy n} {

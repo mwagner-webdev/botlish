@@ -282,8 +282,8 @@ No format, printf-style operation or interpolation syntax exists.
 == NEAREST ALTERNATIVE
 Concatenate, converting each number explicitly (task.number-text):
 `"moves: ".concat(n.to_string()).concat(" steps")` (import std::int);
-build long texts with a helper or stdlib/test.bot's std::test::joined(parts,
-separator).
+build a long text from many parts by extending one String
+(task.string-concatenation, which also says what each way costs).
 
 @topic capability.assignment
 title: Assignment and mutable variables: absent

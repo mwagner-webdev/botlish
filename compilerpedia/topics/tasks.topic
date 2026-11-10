@@ -363,19 +363,69 @@ checked(-1)
 
 @topic task.string-concatenation
 title: Joining text
-summary: std::str::concat(a, b) (written a.concat(b) after `import std::str`) joins two Strings, std::str::append_char(s, c) appends a character; `+` is for Ints only.
+summary: a.concat(b) joins two Strings and s.append_char(c) adds a character; std::str has no join, so text from many parts is one String extended by a tail recursion (linear natively).
 index: stdlib
-alias: string concatenation; concatenate strings; join strings; append string; string plus
-keywords: concat, join, append, String, text, plus
-related: stdlib.std::str::concat stdlib.std::str::append_char concept.strings capability.string-formatting task.number-text stdlib.std::test::joined
+alias: string concatenation; concatenate strings; join strings; append string; string plus; build string; string builder; join a list of strings; string from characters
+keywords: concat, join, append, append_char, String, text, plus, builder, many parts, characters, linear, quadratic, performance, copy
+related: stdlib.std::str::concat stdlib.std::str::append_char concept.strings capability.string-formatting task.number-text stdlib.std::str::encode_utf8 stdlib.std::abi::bytes::decode_utf8 stdlib.std::abi::bytes::join concept.folds
 
 == HOW
+A few fixed parts: concatenate them.
     import std::str
-    greeting = "Hello, ".concat(name)
-    line = greeting.append_char('!')
-`+` adds Ints; applied to Strings it fails (a TYPE error). For many parts,
-chain concat calls or use stdlib/test.bot's std::test::joined(parts,
-separator). Numbers need std::int::to_string first (task.number-text).
+    greeting = "Hello, ".concat(name).append_char('!')
+`+` adds Ints; applied to Strings it fails (a TYPE error). Numbers need
+std::int::to_string first (task.number-text).
+
+Many parts -- a List of Strings: std::str has no join operation today.
+Carry one String and only ever extend it, by a self-tail recursion:
+    fn join_from(parts: List[str], separator: str, i: int, acc: str) -> str:
+        if i < 0 or i >= parts.length():
+            return acc
+        if i == 0:
+            return parts.join_from(separator, i + 1, acc.concat(parts.at(i)))
+        parts.join_from(separator, i + 1, acc.concat(separator).concat(parts.at(i)))
+    text = parts.join_from(", ", 0, "")
+(the guard proves every parts.at(i) in range: no IndexNotFound to handle).
+
+Many characters (UnicodeChar values): append_char is right for a few. For
+many, extend the String with each character as a one-character String,
+acc.concat("".append_char(c)), in the same kind of recursion (COST says
+why).
+
+Text and bytes are separate: s.encode_utf8() gives a String's UTF-8 bytes
+(stdlib.std::str::encode_utf8); std::abi::bytes::decode_utf8 makes a
+String of UTF-8 bytes (std::abi::bytes::from_list makes the Bytes from a
+List[std::byte::Byte]) and fails with InvalidUtf8 for bytes that are not
+UTF-8; std::abi::bytes::join joins Bytes values.
+
+== COST
+The language defines what each of these computes, never how much it
+copies: every concat or append_char is a new String value. What follows
+is the native backends' behavior, measured (N parts of three characters,
+or N characters); it is an optimization of today's compiler, not a
+guarantee. (On the Tcl backends, interp and compile, the cost per
+operation dominates at these sizes, whichever way the text is built.)
+
+  * The recursion above, and a fold whose intermediate is only extended
+    with concat (concept.folds), copy bytes in proportion to the result:
+    the compiler carries the String being built as a growing buffer
+    (N = 64000: about 1.1 MB copied for 320 KB of text, 5 ms). It does so
+    only when that String is used once on each path -- extended and passed
+    on, or returned -- and is not read, compared, kept or captured before
+    it is finished; anything else makes each step copy it whole.
+  * append_char is not extended that way: a recursion or fold carrying
+    acc.append_char(c) copies the whole String for every character,
+    quadratic (N = 64000: 4.1 GB copied, about 0.3 s). Concatenating
+    one-character Strings, as above, is linear (0.6 MB, 7 ms).
+  * std::test::joined is a helper of the golden-test library
+    (stdlib.module.std::test), not a production API: it copies its text so
+    far for every part, quadratic (N = 64000: 6.1 GB copied, about 0.5 s).
+  * Through bytes -- each part's encode_utf8, std::list::flat or
+    std::abi::bytes::join, one decode_utf8 -- is linear too, but builds a
+    List of Ints (one per byte) and handles an InvalidUtf8 that cannot
+    happen when every part was a String: right for bytes that really come
+    from elsewhere, a workaround for text.
+For a short text (a few dozen parts) none of this matters.
 
 @example accept
 import std::str
@@ -384,7 +434,30 @@ fn greet(name: str) -> str:
     "Hello, ".concat(name).append_char('!')
 
 greet("Botlish")
+@caption A few fixed parts
 @value "Hello, Botlish!"
+@quiet
+@end
+
+@example accept
+import std::list
+import std::str
+
+fn join_from(parts: List[str], separator: str, i: int, acc: str) -> str:
+    if i < 0 or i >= parts.length():
+        return acc
+    if i == 0:
+        return parts.join_from(separator, i + 1, acc.concat(parts.at(i)))
+    parts.join_from(separator, i + 1, acc.concat(separator).concat(parts.at(i)))
+
+fn text_from(chars: List[UnicodeChar], i: int, acc: str) -> str:
+    if i < 0 or i >= chars.length():
+        return acc
+    chars.text_from(i + 1, acc.concat("".append_char(chars.at(i))))
+
+[["red", "green", "blue"].join_from(", ", 0, ""), ['h', 'é', '!'].text_from(0, "")]
+@caption Many parts, many characters: one String, only extended
+@value ["red, green, blue", "hé!"]
 @quiet
 @end
 

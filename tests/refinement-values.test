@@ -592,7 +592,7 @@ fn f(s: str) -> int:
 
 test refinement-return-unproven {returning an unproven carrier value is rejected} -body {
     rejection "$prelude\nfn parse(s: str) -> Mail:\n    s\nparse(\"abcd\")\n"
-} -result {TYPE {function result does not prove declared type str[Mail]; expected Mail but found str: a refinement proof is required (a str value becomes Mail only where one of its owner's proof-producing functions has proven it: a predicate returned true for it, or a validator completed normally for it; there is no implicit conversion)}}
+} -result {TYPE {function result does not prove declared type str[Mail] (result type: str); expected Mail but found str: a refinement proof is required (a str value becomes Mail only where one of its owner's proof-producing functions has proven it: a predicate returned true for it, or a validator completed normally for it; there is no implicit conversion)}}
 
 test refinement-field {a struct field of refinement type accepts only a proven value; the field is a refined value} -body {
     list [sourceAgree "$prelude

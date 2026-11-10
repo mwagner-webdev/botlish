@@ -771,14 +771,16 @@ proof.ranges for what range facts the compiler derives.
 title: Strings and characters
 summary: str is an immutable sequence of Unicode scalar values; 'a' is a UnicodeChar, a distinct type; str:: operations need `import std::str`; no formatting, and numbers become text explicitly.
 index: concepts
-alias: str type; UnicodeChar; character literal; char literal; text values
-keywords: string, str, char, character, unicode, scalar, concat, append_char, char_at, substring, length, encode_utf8, escape
-related: concept.integers concept.types principle.characters-not-strings warning.one-char-string-literal capability.string-formatting task.number-text stdlib.module.std::str stdlib.std::str::concat stdlib.std::str::char_at stdlib.std::str::substring
+alias: str type; UnicodeChar; character literal; char literal; text values; string literal; escape sequence; escape sequences; string escapes; character escapes; control character; control characters; invalid escape
+keywords: string, str, char, character, unicode, scalar, concat, append_char, char_at, substring, length, encode_utf8, decode_utf8, escape, backslash, newline, tab, carriage return, quote, unicode escape, hex escape, ANSI, ESC
+related: concept.integers concept.types principle.characters-not-strings warning.one-char-string-literal capability.string-formatting task.string-concatenation task.number-text stdlib.module.std::str stdlib.std::str::concat stdlib.std::str::char_at stdlib.std::str::substring stdlib.std::str::encode_utf8 stdlib.std::abi::bytes::decode_utf8 stdlib.module.std::char
+match: SURFACE SYNTAX | invalid escape *
 
 == WHAT IT IS
 A `str` value is a sequence of Unicode scalar values: `std::str::length`
-counts characters, not bytes. A character literal 'a' (escapes '\n',
-'\'', '\\') is a `UnicodeChar`: one scalar value, neither an Int nor a
+counts characters, not bytes. A String literal is written in double
+quotes ("héllo"). A character literal is written in single quotes ('a')
+and is a `UnicodeChar`: one scalar value, neither an Int nor a
 one-character String.
 
 Three different abstractions, not three spellings of one thing:
@@ -795,17 +797,41 @@ is comparable to a Go rune, except that it is a type of its own. A String
 is not iterable by `loop`; a List of UnicodeChars is.
 
 After `import std::str`: length, concat, append_char, char_at, substring,
-lowercase, encode_utf8 (to a List of bytes). `std::char::scalar_value(c)`
-(`import std::char`) gives a character's number.
+lowercase, encode_utf8 (to a List of bytes; std::abi::bytes::decode_utf8
+is the way back). `std::char::scalar_value(c)` (`import std::char`) gives
+a character's number; no operation makes a character from a number.
+
+== LITERALS AND ESCAPES
+These are the only escapes; each stands for one character:
+
+    in a String literal "..."      \\  \"  \n  \r  \t
+    in a character literal '...'   \\  \'  \n  \r  \t
+
+(\\ is a backslash, \" and \' a quotation mark, \n a line feed, \r a
+carriage return, \t a tab.) A String literal takes \" but not \', a
+character literal \' but not \". Any other backslash sequence is a syntax
+error -- `invalid escape "\X" in string` (or `in character literal`),
+SURFACE SYNTAX -- so there is no numeric escape: no \u or \u{...}, no \x,
+no \e, no \0.
+
+Every other character is taken from the source text as it is, any
+Unicode scalar value included ('é', '😀', "naïve"). A control character
+other than line feed, carriage return and tab therefore has no visible
+spelling: typed raw into a literal it is accepted and works on every
+backend, but most editors do not show it, and a diagnostic quoting the
+literal prints it raw. Write it raw only where nothing else will do, with
+a comment saying which character it is.
 
 == RULES
   * `==` compares strings; `+` does not concatenate (a run-time TYPE error):
-    use `a.concat(b)`, or `a.append_char('!')` for one character.
+    use `a.concat(b)`, or `a.append_char('!')` for one character
+    (task.string-concatenation for text built from many parts).
   * std::str::char_at and std::str::substring fail with declared errors
     (IndexNotFound; LowerUnderrun/UpperOverrun) unless the compiler proves
     the index or slice valid.
-  * A one-character String literal draws ONE-CHAR-STRING-LITERAL: a single
-    character is written as a character literal.
+  * A one-character String literal ("\t" as much as "a") draws
+    ONE-CHAR-STRING-LITERAL: a single character is written as a character
+    literal ('\t'), and appended to text with std::str::append_char.
   * No formatting or interpolation (capability.string-formatting), and no
     implicit number-to-text conversion: std::int::to_string,
     std::decimal_rounded::to_string (task.number-text).
@@ -813,7 +839,10 @@ lowercase, encode_utf8 (to a List of bytes). `std::char::scalar_value(c)`
 == WHY
 Counting scalar values gives the same answers on every backend and never
 splits a character. Keeping UnicodeChar separate from Int and String means
-a character is never silently used as a number or as text.
+a character is never silently used as a number or as text. A String holds
+scalar values, never bytes: bytes have their own types (a List of
+std::byte::Byte values, std::abi::bytes::Bytes), so no escape can put an
+invalid UTF-8 byte into text.
 
 == EXAMPLES
 @example accept
@@ -833,8 +862,31 @@ import std::char
 @value [65, true]
 @end
 
+@example accept
+import std::char
+import std::str
+
+quoted = "say \"hi\"\tC:\\dir\r\n"
+chars = ['\\', '\'', '\n', '\r', '\t']
+values = loop c in chars:
+    c.scalar_value()
+[quoted.length(), values]
+@caption Every escape: five in each kind of literal
+@value [17, [92, 39, 10, 13, 9]]
+@end
+
+@example reject
+esc = "\u001b[1m"
+esc
+@caption There is no numeric escape
+@error SURFACE SYNTAX
+@at 1:8
+@message invalid escape "\\u" in string
+@end
+
 == MORE
-stdlib.module.std::str lists every operation.
+stdlib.module.std::str lists every operation; stdlib.module.std::char the
+character operations; stdlib.std::str::encode_utf8 the UTF-8 bytes.
 
 @topic concept.booleans
 title: Booleans and conditions
@@ -933,23 +985,30 @@ x
 title: Lists: immutable sequences
 summary: List[T] is an immutable sequence written [a, b]; its operations need `import std::list`, collecting loops transform it, and it is never destructured positionally.
 index: concepts
-alias: List type; list literal; immutable list; sequence
-keywords: list, List, at, get, append, flat, length, find, any?, all?, IndexNotFound, element, index, empty list
-related: concept.loops concept.values concept.destructuring concept.list-length proof.list-bounds rule.no-list-destructuring principle.name-the-parts capability.map-filter task.list-element stdlib.module.std::list stdlib.std::list::at stdlib.std::list::get
+alias: List type; list literal; immutable list; sequence; list element type; element type of a list
+keywords: list, List, at, get, append, flat, length, find, any?, all?, IndexNotFound, element, element type, index, empty list, invariant
+related: concept.loops concept.values concept.destructuring concept.list-length proof.list-bounds rule.no-list-destructuring principle.name-the-parts capability.map-filter task.list-element stdlib.module.std::list stdlib.std::list::at stdlib.std::list::get rule.type-argument
 
 == WHAT IT IS
 `[1, 2, 3]` is a `List[int]`; `[]` is the empty List. After `import
 std::list`: length, at, append (a new List with one more element), get (with
 a default), find, any?, all?, none?, and flat (the elements of a List of
-Lists, in order: one level of nesting removed). Element types are inferred;
-a parameter or result may declare `List[T]`, or `List[T]{length: N}` for a
-List of a proven exact length (concept.list-length).
+Lists, in order: one level of nesting removed). Element types are inferred
+and kept: `xs.at(i)`, a loop variable over xs and a collecting loop's
+elements have xs's element type. A parameter or result may declare
+`List[T]`, or `List[T]{length: N}` for a List of a proven exact length
+(concept.list-length).
 
 == RULES
   * `xs.at(i)` fails with the declared error IndexNotFound unless the
     compiler proves i in range (proof.list-bounds); handle it, admit it,
     or use `xs.get(i, default)`.
   * A List never changes: append and flat return a new List.
+  * Where a List type is declared, the element type must match exactly
+    (rule.type-argument): a List[std::byte::Byte] is not admissible for
+    List[int], though every Byte is an Int, and the literal `[27]` is a
+    List[int], not a List of Bytes. An untyped parameter, or one declared
+    `list`, takes any List.
   * Lists are not destructured positionally: `[a, b] = xs` is
     LIST-DESTRUCTURING. A fixed group of different values is a struct
     (principle.name-the-parts).

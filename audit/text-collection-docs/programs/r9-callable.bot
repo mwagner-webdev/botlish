@@ -1,0 +1,10 @@
+fn inc(x: int) -> int:
+    x + 1
+
+fn get() -> Fn{args: [str], return: int}:
+    inc
+
+fn never_ok() -> str:
+    3
+
+get()

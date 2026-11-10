@@ -301,14 +301,14 @@ test dr-single-diagnostic-unchanged {a program with one diagnostic raises exactl
     set path [makeFile "fn f(x: int) -> str:\n    x\n\nf(1)\n" dr-one.bot]
     catch {surface::readProgramFile $path -warnings off} message options
     list [dict get $options -errorcode] [regsub {^.*dr-one\.bot} $message dr-one.bot] [llength [dict get $options -diagnostics]]
-} -cleanup {removeFile dr-one.bot; unset -nocomplain path message options} -result {{CORE SEMANTIC TYPE} {dr-one.bot:1:5: function result does not prove declared type str} 1}
+} -cleanup {removeFile dr-one.bot; unset -nocomplain path message options} -result {{CORE SEMANTIC TYPE} {dr-one.bot:1:5: function result does not prove declared type str (result type: int)} 1}
 
 test dr-message-lists-all {the error of a compilation with several diagnostics: the first one's code and text, then each further one on a line of its own with its code} -body {
     set path [makeFile "fn a(x: int) -> str:\n    x\n\nfn b(y: int) -> int:\n    missing\n\na(1)\n" dr-two.bot]
     catch {surface::readProgramFile $path -warnings off} message options
     list [dict get $options -errorcode] [regsub -all {[^\n ]*dr-two\.bot} $message dr-two.bot]
 } -cleanup {removeFile dr-two.bot; unset -nocomplain path message options} -result {{CORE SEMANTIC UNBOUND} {dr-two.bot:5:5: unbound name "missing"
-dr-two.bot:1:5: function result does not prove declared type str (CORE SEMANTIC TYPE)}}
+dr-two.bot:1:5: function result does not prove declared type str (result type: int) (CORE SEMANTIC TYPE)}}
 
 test dr-order-deterministic {the reported order is the build's: resolution diagnostics first, then each check's in its own walk; compiling again gives the same list} -body {
     set source "fn a(x: int) -> str:\n    x\n\nfn b(p: str) -> int:\n    p.size()\n\nfn c(y: int) -> int:\n    later\n\nlater = 1\na(1)\n"
@@ -462,7 +462,7 @@ test dr-main-prints-each {main.tcl prints each reported diagnostic on a line of 
         if {![string match "*error:*" $line]} continue
         regsub {^.*dr-main\.bot} [string trim $line] {dr-main.bot}
     }
-} -cleanup {removeFile dr-main.bot; unset -nocomplain path output} -result {{dr-main.bot:1:5: function result does not prove declared type str (CORE SEMANTIC TYPE)} {dr-main.bot:5:7: namespace "std::str" is not imported; add `import std::str` to use `std::str::concat` (the method-style call ".concat(...)" applies only a function visible by that name) (CORE SEMANTIC MISSING-IMPORT)}}
+} -cleanup {removeFile dr-main.bot; unset -nocomplain path output} -result {{dr-main.bot:1:5: function result does not prove declared type str (result type: int) (CORE SEMANTIC TYPE)} {dr-main.bot:5:7: namespace "std::str" is not imported; add `import std::str` to use `std::str::concat` (the method-style call ".concat(...)" applies only a function visible by that name) (CORE SEMANTIC MISSING-IMPORT)}}
 
 # ---------------------------------------------------------------------------
 # A build whose diagnostics are all the compiler's own
@@ -519,7 +519,7 @@ test dr-internal-only-entries {the entries the compiler service reports for such
 test dr-internal-mixed-ordinary {beside an ordinary diagnostic of another unit the program's own problem is reported exactly as before -- first, alone, with its own code -- and the compiler's own are not: recovery's rule that a dependent or internal diagnostic is not the program's is unchanged} -body {
     set hir [drInternalOnly "fn f() -> int:\n    g()\n\nfn h(x: int) -> str:\n    x\n\nf()\n"]
     list [llength [hir::diagnostics $hir]] [lmap d [hir::recovery::reported $hir] {dict get $d kind}] [drFinish $hir]
-} -cleanup {unset -nocomplain hir} -result {2 TYPE {{CORE SEMANTIC TYPE} {{CORE SEMANTIC TYPE}} {dr-internal.bot:4:5: function result does not prove declared type str}}}
+} -cleanup {unset -nocomplain hir} -result {2 TYPE {{CORE SEMANTIC TYPE} {{CORE SEMANTIC TYPE}} {dr-internal.bot:4:5: function result does not prove declared type str (result type: int)}}}
 
 test dr-internal-ordinary-unchanged {an ordinary rejected build reports what it always did (the resolution failure and nothing dependent on it), and an accepted one is accepted: the internal entry exists only where nothing else would be reported} -body {
     set path [makeFile "fn f() -> int:\n    g()\n\nf()\n" dr-internal.bot]

@@ -1,0 +1,4 @@
+fn id(x) -> int:
+    x
+
+[id(1), id("s")]

@@ -185,7 +185,7 @@ test ca-scalar-arithmetic-is-botlish {arithmetic on C scalars is Botlish arithme
 test ca-scalar-no-silent-narrowing {an Int becomes a C scalar only where its range proves it fits: returned unchecked it is rejected, guarded it is admitted} -body {
     list [caError "import std::ffi::c\nfn f(x: int) -> std::ffi::c::UInt:\n    x\n\nf(1)\n"] \
         [caAgree "import std::ffi::c\nfn f(x: int) -> std::ffi::c::UInt:\n    if x >= 0 and x <= 4294967295:\n        x\n    else:\n        0\n\nf(4294967295)\n"]
-} -result {{TYPE {function result does not prove declared type std::ffi::c::UInt (facts: [-∞, +∞])}} {value 4294967295}}
+} -result {{TYPE {function result does not prove declared type std::ffi::c::UInt (result type: int, facts: [-∞, +∞])}} {value 4294967295}}
 
 test ca-scalar-identity-distinct {two scalars of one range (int and long on LLP64) stay two types: neither is a subtype of the other, and each keeps its own name; a value moves between them by its range, as between any domains} -body {
     set hir [caHir "import std::ffi::c\nfn widen(x: std::ffi::c::Int) -> std::ffi::c::Long:\n    x\n\nwiden(5)\n" -target windows-x86_64]
@@ -549,7 +549,7 @@ test ca-imprint-no-variables {an explicit imprint on a callable without variable
 
 test ca-imprint-parametric-body {the body is checked once for every T: returning an Int as T is rejected} -body {
     caError "fn bad(xs: List\[T\]) -> T:\n    5\n\nbad(\[1\])\n"
-} -result {TYPE {function result does not prove declared type T (facts: [5, 5] {5})}}
+} -result {TYPE {function result does not prove declared type T (result type: int, facts: [5, 5] {5})}}
 
 test ca-imprint-not-a-value {an imprinted callable is only called: a user function and an intrinsic alike are rejected as values} -body {
     list [caError "fn empty() -> List\[T\]:\n    \[\]\n\ng = empty\n1\n"] \

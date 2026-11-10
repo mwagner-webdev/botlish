@@ -7141,6 +7141,48 @@ The check catches only the mechanical case (an alias that is an
 operation's name); a broader claim -- "no tasks" while std::event_loop
 schedules them -- is found only by reading the pages, so read them.
 
+## Declared-result diagnostics and the text documentation
+
+A declared result that is not proven is reported with both sides of the
+comparison (TEXT-AND-COLLECTION-DOCUMENTATION-AND-DIAGNOSTICS-MILESTONE-1.md):
+`function result does not prove declared type T (result type: R, facts:
+F); WHY`, as an argument's TYPE states its type
+(`hir::range::verifyDeclaredResults`). Keep it so:
+
+* R is the generic body's own inferred result (the block's
+  `inferredResultType`: every normal completion joined) -- exactly what the
+  admission proof was given -- presented as an argument's type is
+  (`hir::semantic::ShowType` of `ShownArgType`, `FactsClause`,
+  `MismatchClause`): never one branch's type, a semantic instance's (an
+  instance types a scratch copy), the declared type or a refinement's
+  carrier. Format it only on a mismatch, never add a second diagnostic for
+  it, and never let the message change what is accepted, poisoned or
+  reported: a poisoned or unresolved result keeps its one primary
+  diagnostic.
+* The pages that state facts of the compiler about strings, UTF-8, text
+  construction, literal escapes and List typing are checked against it by
+  tests/text-collection-docs-diagnostics.test: the escape table of
+  `concept.strings` against the lexer, `encode_utf8`'s static type (List
+  of Bytes only with `std::byte` loaded) against the checker, the costs
+  `task.string-concatenation` states against `native::allocationReport`.
+  A change that makes one false -- a new escape (`\u{...}`), encode_utf8
+  typed whatever is imported, `append_char` carried by construction
+  plans, a `std::str::join`, a `std::char::from_scalar_value` -- rewrites
+  the page in the same change. `std::test::joined` is the test library's
+  (quadratic): never recommend it for production text.
+
+If you change the diagnostic or those pages (or what they state), run
+tests/text-collection-docs-diagnostics.test, `tclsh9.0
+tools/compilerpedia.tcl check`, `tclsh9.0
+audit/text-collection-precision/tools/probes.tcl` and
+`audit/text-collection-docs/tools/mutate.tcl` (every mutant in its
+`mutants.txt` must still apply and be killed by a test its `!!` line names:
+update a mutant's text when you change the code or the page it mutates,
+keeping it a mutant of the same rule); for the diagnostic, also the test
+files and golden suites that pin its text (`grep -rl "does not prove
+declared type" tests`) and `audit/text-collection-docs/tools/compare.tcl`
+before and after (no semantic difference over the corpus).
+
 ## Golden tests (Botlish-native test framework)
 
 `stdlib/test.bot` (GOLDEN-TEST-FRAMEWORK.md) is an ordinary Botlish library:
