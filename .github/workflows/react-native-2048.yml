@@ -1,0 +1,237 @@
+name: react-native 2048
+
+# BOTLISH-REACT-NATIVE-2048-PACKAGE-MILESTONE-1.md: the botlish_react_native
+# tool package turns Botlish native libraries into React Native New
+# Architecture TurboModule packages; a React Native app plays 2048 through
+# one of them on Android.
+#
+#   build    the packages as their authors pack them (the Android AArch64
+#            target support package, the 2048 engine, the tool), two Botlish
+#            libraries built for android-aarch64, the tool run explicitly,
+#            npm pack, the host harnesses of the generated C++ (also under
+#            BOTLISH_NATIVE_GC_STRESS=1), the interpreter's oracles, the app
+#            (npm ci, the packages from their tarballs, TypeScript, Jest, the
+#            Android release build, the two device builds) and what its APK
+#            holds (audit/react-native-2048/tools/build.sh); then the single-file
+#            compiler and the clean room (cleanroom/cleanroom.sh: the
+#            single executable and the packages only, traced; npm, Codegen
+#            and Gradle with the app's own dependencies)
+#   android  the APK on an Android emulator, per image: the self-test
+#            against the interpreter, reloads, GC stress, swipes, the win and
+#            the end, a clean exit (tools/android-acceptance.sh); with 4 KiB
+#            pages the clean room's APK too, and the debug build's development
+#            reload with Metro (tools/dev-reload.sh); then the device builds
+#            as a person uses them, no launch extras: the Self-test button,
+#            the result on the screen, the GC-stress build beside the plain
+#            one (tools/device-builds.sh). The images
+#            are x86_64 (GitHub's Linux runners have KVM for x86_64 guests
+#            only, and Google's emulator runs arm64 images on arm64 hosts
+#            only): the arm64-v8a APK runs through Android's ARM native
+#            bridge, which emulator.sh requires the image to have (trying
+#            the next image of the list otherwise). One job's images have
+#            4 KiB pages, the other's 16 KiB pages.
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "integrations/react-native/**"
+      - "examples/react-native/**"
+      - "examples/games/2048/game2048.bot"
+      - "audit/react-native-2048/**"
+      - "audit/android-aarch64-target/tools/package.sh"
+      - ".github/workflows/react-native-2048.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push (or run on the same ref) cancels the running one, on main
+# too (CI-RUNS.md).
+concurrency:
+  group: react-native-2048-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  LANG: C.utf8
+  LC_ALL: C.utf8
+
+jobs:
+  build:
+    name: build (tool, packages, app, APK)
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install project prerequisites
+        run: bash .devcontainer/setup.sh
+
+      - name: Build native (Cranelift) backend
+        uses: ./.github/actions/build-native
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: 17
+
+      - name: Android SDK components (the NDK r29 for the Botlish libraries; the app template's NDK, platform and build tools)
+        run: |
+          sm=$(ls -d "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager | sort -V | tail -1)
+          yes | "$sm" --licenses > /dev/null || true
+          for _ in 1 2 3; do
+            "$sm" --install "ndk;29.0.14206865" "ndk;27.1.12297006" "platforms;android-37" "build-tools;37.0.0" "cmake;3.22.1" > /dev/null && break || sleep 15
+          done
+          rustup target add aarch64-linux-android
+
+      - name: Tool versions
+        run: |
+          tclsh9.0 <<< 'puts "Tcl [info patchlevel]"'
+          rustc --version; node --version; npm --version; java -version 2>&1 | head -1
+          cat "$ANDROID_HOME/ndk/29.0.14206865/source.properties" | grep Revision
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: rn2048-gradle-${{ hashFiles('examples/react-native/app/package-lock.json', 'examples/react-native/app/android/**/*.gradle', 'examples/react-native/app/android/gradle/wrapper/gradle-wrapper.properties') }}
+
+      # (ANDROID_HOME is the runner image's: the shell's, not the workflow's
+      # env context.)
+      - name: Build (audit/react-native-2048/tools/build.sh)
+        run: |
+          export ANDROID_NDK_ROOT="$ANDROID_HOME/ndk/29.0.14206865"
+          audit/react-native-2048/tools/build.sh "$RUNNER_TEMP/rn2048"
+
+      - name: The record of the generated 2048 package
+        run: cat "$RUNNER_TEMP/rn2048/generated/react-native-botlish-game/botlish-react-native.json"
+
+      - name: The app's debug build (its JavaScript from Metro, for the development reload)
+        working-directory: ${{ runner.temp }}/rn2048/app/android
+        run: |
+          ./gradlew --no-daemon --console=plain assembleDebug
+          cp app/build/outputs/apk/debug/app-debug.apk "$RUNNER_TEMP/rn2048/app-debug.apk"
+
+      - name: The single-file compiler (single/build.sh)
+        run: bash single/build.sh
+
+      - name: Clean room (audit/react-native-2048/cleanroom/cleanroom.sh)
+        run: |
+          export ANDROID_NDK_ROOT="$ANDROID_HOME/ndk/29.0.14206865"
+          sudo apt-get install -y -qq strace > /dev/null
+          audit/react-native-2048/cleanroom/cleanroom.sh single/out/botlish "$RUNNER_TEMP/rn2048/repo" "$RUNNER_TEMP/rn2048/cleanroom"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rn2048-build
+          path: |
+            ${{ runner.temp }}/rn2048/app-release.apk
+            ${{ runner.temp }}/rn2048/app-debug.apk
+            ${{ runner.temp }}/rn2048/app-device-plain.apk
+            ${{ runner.temp }}/rn2048/app-device-gc-stress.apk
+            ${{ runner.temp }}/rn2048/*.txt
+            ${{ runner.temp }}/rn2048/*.json
+            ${{ runner.temp }}/rn2048/npm/*.tgz
+            ${{ runner.temp }}/rn2048/host/*.txt
+            ${{ runner.temp }}/rn2048/repo/*.botpkg
+            ${{ runner.temp }}/rn2048/cleanroom/summary.txt
+            ${{ runner.temp }}/rn2048/cleanroom/app-release.apk
+            ${{ runner.temp }}/rn2048/cleanroom/programs.txt
+
+  android:
+    name: android (${{ matrix.name }})
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: 4 KiB pages
+            images: "system-images;android-34;google_apis;x86_64 system-images;android-33;google_apis;x86_64 system-images;android-30;google_apis;x86_64"
+            cleanroom: true
+            development: true
+          - name: 16 KiB pages
+            images: "system-images;android-35;google_apis_ps16k;x86_64 system-images;android-36;google_apis_ps16k;x86_64"
+            cleanroom: false
+            development: false
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: rn2048-build
+          path: ${{ runner.temp }}/rn2048
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Boot the emulator (the first image that runs arm64-v8a code)
+        id: boot
+        env:
+          IMAGES: ${{ matrix.images }}
+        run: |
+          read -r -a images <<< "$IMAGES"
+          audit/react-native-2048/tools/emulator.sh "${images[@]}"
+
+      - name: Acceptance (audit/react-native-2048/tools/android-acceptance.sh)
+        run: |
+          export PATH="$ANDROID_HOME/platform-tools:$PATH"
+          audit/react-native-2048/tools/android-acceptance.sh "$RUNNER_TEMP/rn2048/app-release.apk" "$RUNNER_TEMP/rn2048" "$RUNNER_TEMP/acceptance"
+
+      - name: Acceptance of the clean room's APK
+        if: matrix.cleanroom
+        run: |
+          export PATH="$ANDROID_HOME/platform-tools:$PATH"
+          adb uninstall com.botlish2048 || true
+          audit/react-native-2048/tools/android-acceptance.sh "$RUNNER_TEMP/rn2048/cleanroom/app-release.apk" "$RUNNER_TEMP/rn2048" "$RUNNER_TEMP/acceptance/cleanroom"
+
+      - uses: actions/setup-node@v4
+        if: matrix.development
+        with:
+          node-version: 22
+
+      - name: Development reload (the debug build, Metro; tools/dev-reload.sh)
+        if: matrix.development
+        run: |
+          export PATH="$ANDROID_HOME/platform-tools:$PATH"
+          app="$RUNNER_TEMP/dev-app"
+          cp -r examples/react-native/app "$app"
+          (cd "$app" && npm ci --no-audit --no-fund && npm install --no-audit --no-fund "$RUNNER_TEMP"/rn2048/npm/*.tgz)
+          adb uninstall com.botlish2048 || true
+          audit/react-native-2048/tools/dev-reload.sh "$RUNNER_TEMP/rn2048/app-debug.apk" "$app" "$RUNNER_TEMP/acceptance/development"
+
+      - name: Device builds (tools/device-builds.sh; also after a failed phase above)
+        if: ${{ !cancelled() && steps.boot.outcome == 'success' }}
+        run: |
+          export PATH="$ANDROID_HOME/platform-tools:$PATH"
+          adb uninstall com.botlish2048 || true
+          adb uninstall com.botlish2048.gcstress || true
+          audit/react-native-2048/tools/device-builds.sh "$RUNNER_TEMP/rn2048" "$RUNNER_TEMP/acceptance/device"
+
+      - name: Summary
+        if: always()
+        run: |
+          cat "$RUNNER_TEMP/acceptance/summary.txt" || true
+          cat "$RUNNER_TEMP/acceptance/cleanroom/summary.txt" 2> /dev/null || true
+          cat "$RUNNER_TEMP/acceptance/development/summary.txt" 2> /dev/null || true
+          cat "$RUNNER_TEMP/acceptance/device/summary.txt" 2> /dev/null || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rn2048-android-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/acceptance

@@ -1,0 +1,78 @@
+{
+  "schema": 1,
+  "kind": "botlish-react-native-package",
+  "generator": {
+    "name": "botlish-react-native",
+    "version": "0.1.0",
+    "protocol": 1
+  },
+  "package": {
+    "name": "react-native-botlish-textkit",
+    "version": "0.1.0",
+    "module": "BotlishTextkit",
+    "spec": "BotlishTextkitSpec",
+    "cxxModule": "BotlishTextkitModule",
+    "cmakeTarget": "botlish_rn_botlishtextkit"
+  },
+  "library": {
+    "name": "textkit",
+    "manifestSchema": 2,
+    "abi": 1,
+    "target": "android-aarch64",
+    "triple": "aarch64-linux-android",
+    "frontEnd": "f59ed9acbd5f3771-5320453",
+    "runtimeAbi": "e6c1492eceebb13c",
+    "targetSupport": "botlish_target_android_aarch64",
+    "toolchain": "Android NDK 29.0.14206865",
+    "sha256": {
+      "manifest": "2fabdb995605ab876bd930176211cfca04d53e7f4cbfd567a177ab6e2be831f8",
+      "shared": "d5d4f4c1c71a505f7a7fb82faaf6420060c298bc8321cc58206809ee447ae7d3",
+      "header": "7606311ba88f5c9627c7e04bce3d6de38ab7fb1e86fca21b2322df7672fa8bde",
+      "static": "e6ea94256b3621755e412e05a2b17bdada8ae920d81246941bd91995eacdd93c"
+    },
+    "exports": [
+      "scalar_count",
+      "reversed",
+      "palindrome",
+      "repeated",
+      "mean",
+      "alnum_share",
+      "require_text"
+    ]
+  },
+  "reactNative": {
+    "range": ">=0.88.0 <0.89.0",
+    "tested": "0.88.1",
+    "architecture": "new",
+    "engine": "hermes",
+    "module": "pure-cxx-turbomodule",
+    "codegen": "app"
+  },
+  "android": {
+    "abis": [
+      "arm64-v8a"
+    ],
+    "minimumApi": {
+      "library": 21,
+      "reactNative": 24,
+      "package": 24
+    },
+    "pageSize": 16384
+  },
+  "ios": null,
+  "files": [
+    "package.json",
+    "react-native.config.js",
+    "src/NativeBotlishTextkit.ts",
+    "src/index.ts",
+    "cpp/BotlishTextkitCore.h",
+    "cpp/BotlishTextkitCore.cpp",
+    "cpp/BotlishTextkitModule.h",
+    "cpp/BotlishTextkitModule.cpp",
+    "android/CMakeLists.txt",
+    "README.md",
+    "include/textkit.h",
+    "native/android/arm64-v8a/libtextkit.so",
+    "botlish/textkit.manifest.json"
+  ]
+}
