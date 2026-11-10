@@ -1,0 +1,64 @@
+# threads.bot -- Botlish-owned threads, each its own VM with its own loop,
+# driver and process context, supervising children concurrently
+# (tests/process-linux.test; PROCESS-LINUX-PACKAGE-MILESTONE-1.md):
+#
+#   threads HELPER SCENARIO
+#
+#   two      two VMs stream and wait for a child each, then spawn 40
+#            children each concurrently, every one of which must see only
+#            its own descriptors 0, 1 and 2 (no other VM's pipe end)
+#   ended    a VM releases a running child and ends without running its loop
+#            again: the adapter kills and reaps it at the thread's end; a
+#            child it detached outlives it
+import event_loop_linux
+import kit
+import probe
+import std::event_loop
+import std::int
+import std::linux::io
+import std::list
+import std::str
+import std::thread
+import worker
+import process_linux
+
+fn line(s: worker::Summary, context io: std::linux::io::LinuxIO):
+    kit::say("vm ".concat(std::int::to_string(s.id)).concat(" bytes ").concat(std::int::to_string(s.bytes)).concat(" exit ").concat(std::int::to_string(s.code)).concat(" owned-after ").concat(std::int::to_string(s.owned)).concat(" children-with-only-0-1-2 ").concat(std::int::to_string(s.fds_ok)))
+
+fn main(helper: str, scenario: str, context t: std::thread::Threads, io: std::linux::io::LinuxIO) -> int errors std::thread::ThreadLimit, std::thread::ThreadStartFailed, std::thread::ThreadFailed:
+    if scenario == "two":
+        {thread: t1, id: i1} = std::thread::start(std::thread::entry(worker::supervise), worker::Job {id: 1, helper: helper, args: ["chunks:20:10", "outn:2000000:65", "exit:11"], children: 40, mode: 0})
+        {thread: t2, id: i2} = std::thread::start(std::thread::entry(worker::supervise), worker::Job {id: 2, helper: helper, args: ["chunks:10:20", "outn:3000000:66", "exit:22"], children: 40, mode: 0})
+        a = std::thread::join(t1)
+        b = std::thread::join(t2)
+        line(a)
+        line(b)
+        kit::say("distinct children ".concat(kit::yes(a.pid != b.pid)))
+        kit::say("distinct thread tokens ".concat(kit::yes(a.token != b.token and a.token != probe::token())))
+    else:
+        {thread: t3, id: i3} = std::thread::start(std::thread::entry(worker::abandoner), worker::Job {id: 3, helper: helper, args: [], children: 0, mode: 2})
+        c = std::thread::join(t3)
+        kit::say_int("dying when the VM ended ", c.owned)
+        kit::say_int("pid ", c.pid)
+        kit::say_int("the VM's child after its end: state ", probe::proc_state(c.pid))
+        kit::say_int("detached ", c.code)
+        kit::say("the detached child outlives the VM ".concat(kit::yes(probe::proc_state(c.code) > 0 and probe::proc_state(c.code) != 90)))
+    kit::say_int("adapter children after ", process_linux::stats().children)
+    0
+
+args = argv():
+    on InvalidArgumentEncoding:
+        []
+with context std::thread::create(4)
+with context std::linux::io::create()
+with context std::event_loop::create(64)
+with context event_loop_linux::create()
+with context event_loop_linux::native()
+with context process_linux::create_with(kit::options())
+main(std::list::get(args, 1, ""), std::list::get(args, 2, "two")):
+    on std::thread::ThreadLimit:
+        -1
+    on std::thread::ThreadStartFailed:
+        -2
+    on std::thread::ThreadFailed:
+        -3

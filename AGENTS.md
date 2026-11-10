@@ -6416,6 +6416,75 @@ installs or links (`audit/http-client/cleanroom/cleanroom.sh image`, then
 after `single/build.sh`: the report's "Clean room").
 `audit/http-client/tools/measure.tcl` regenerates the measurements.
 
+## The process_linux package (supervised child processes)
+
+`packages/process_linux` is the official package for launching,
+supervising, talking to and terminating external processes on Linux x86-64
+(PROCESS-LINUX-PACKAGE-MILESTONE-1.md; its README.md and GUIDE.md are the
+user's documentation): a Botlish module over a C adapter
+(`native/process_linux.c`, built on the author's side into
+`native/libprocess_linux.a`: tools/process-linux.tcl for tests,
+`tools/package-repository.tcl`'s `author::process_linux` for the release),
+scheduled by the program's own event loop through the Linux driver package.
+It grew from the census MANAGED-SUBPROCESS-AND-EVENT-LOOP-CENSUS-
+MILESTONE-1.md (audit/managed-subprocess, which stays the experiment).
+Keep it so:
+
+* No language, compiler or standard-library change for processes, and no
+  second scheduler: every pipe and the child's exit (its pidfd) are
+  event_loop_linux watches; no polling, no thread, no signal handler, no
+  SIGCHLD handler, never `waitpid(-1)` or `waitid(P_ALL)`. A stream that
+  keeps delivering yields to the loop every `burst` chunks (`fair`): never
+  drop that.
+* No shell, no PATH search: a command is an executable path and an exact
+  argument vector; a NUL in any item is InvalidCommand before anything
+  starts. Bytes stay bytes: nothing decodes, splits or accumulates a
+  stream in the package.
+* Identity safety: a child is signalled only through its pidfd (group
+  signals with PIDFD_SIGNAL_PROCESS_GROUP; before Linux 6.9 kill(-PGID),
+  only while the leader is unreaped), and reaped only once its supervision
+  is over; never signal a PID number, never signal after the reap, never
+  use glibc's `pidfd_spawn` (it leaks its pidfd when exec fails: the
+  testing build keeps it as a negative control only). A kernel without
+  pidfds, or a process whose SIGCHLD is ignored, is Unsupported -- never a
+  fallback to PID numbers.
+* Ownership: ChildOwner is an affine resource whose release (also at its
+  lexical scope's end) sends SIGTERM and hands a running child to the
+  reaper task (grace, SIGKILL, reap, retire); a cleanup never waits. The
+  identity (Child) is StaleChild once its owner is released, at once.
+  `detach` is the only way to outlive the owner. When supervision ends,
+  members of the child's group still running once the leader exited are
+  killed. Interrupt cancels waits, never the child.
+* Threads: a child belongs to the thread (the token, never a pthread_t)
+  that spawned it; another thread's call is refused; a thread's end kills
+  and reaps the children it still supervises (`thread_ended`), and process
+  exit sends SIGKILL to every supervised group (`process_ending`). Child is
+  never sendable. No process-wide subreaper, cgroup or PTY in this package.
+* Authority: starting a process requires the installed Processes context;
+  every extern is `private`. The released archive defines exactly the
+  module's `pl_*` functions and reads no environment variable; fault bits
+  and probes (`pl_t_*`) exist only with PL_TESTING (tests/process/probe.bot).
+* The adapter is built `-Werror`: a mutant of it must leave no variable
+  unused, or its kill is a build failure, which the harness reports
+  NOT-BUILT.
+
+If you change packages/process_linux, tools/process-linux.tcl or the
+recipe, run `tests/process-linux.test` (Linux x86-64, cc; its tty tests
+need python3; it includes GC stress and the documentation's programs),
+`audit/process-linux/tools/fuzz.tcl` (several seeds, once with
+`-gc-stress 1`), `audit/process-linux/tools/mutate.tcl` (every mutant in
+its `mutants.txt` must still apply and be killed by a test its `%%` line
+names: update a mutant's text when you change the code it mutates, keeping
+it a mutant of the same rule), the warning gate's view of the module (a
+program importing it compiles under `-warnings error`), and, after
+`single/build.sh`, the clean room (`audit/process-linux/cleanroom/
+cleanroom.sh image`, then `repository.sh OUT RELEASES` and `cleanroom.sh
+run single/out/botlish OUT RESULTS`). `process_linux` 0.1.0 is recorded in
+packages/RELEASES.tsv: any change under `packages/process_linux` (its
+documentation included) is a new version, built in the pinned author image
+(`tools/package-build/author.sh build OUT -release process_linux`).
+`bench/process-linux.tcl` regenerates the measurements.
+
 ## External tools and target support packages
 
 A package may carry tools and target runtime artifacts

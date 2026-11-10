@@ -1,0 +1,41 @@
+# ticker.bot -- a library written apart from process_linux, for the clean
+# room of PROCESS-LINUX-PACKAGE-MILESTONE-1.md: it depends on the Linux
+# driver package independently (its own request and lock) and schedules a
+# periodic task on the application's loop. Installed beside process_linux,
+# the two share the one event_loop_linux instance the graph holds.
+import event_loop_linux
+import std::event_loop
+import std::mutable_array
+import type std::event_loop::Wake
+
+private nomethod fn cell(a: MutableArray[int], i: int) -> int:
+    a.at(i):
+        on IndexNotFound:
+            0
+
+private nomethod fn sput(place a: MutableArray[int], i: int, v: int):
+    a.set(i, v):
+        on IndexNotFound:
+            unit
+
+struct Ticks:
+    count: int
+    max_late_us: int
+
+# Tick every PERIOD_US until STOP is posted: how many ticks and the largest
+# lateness of one (the driver's clock, us).
+fn run(period_us: int, stop: std::event_loop::Reg, context ev: std::event_loop::Loop, n: event_loop_linux::Native) -> Ticks errors std::event_loop::SchedulerFault:
+    stats = std::mutable_array::create(2, 0)
+    t = std::event_loop::every(period_us)
+    start = event_loop_linux::now_us()
+    loop:
+        e = std::event_loop::wait(t)
+        if e.reason != Wake::Timer or std::event_loop::pending(stop) > 0:
+            break
+        ticks = cell(stats, 0) + e.count
+        sput(stats, 0, ticks)
+        late = event_loop_linux::now_us() - (start + ticks * period_us)
+        if late > cell(stats, 1):
+            sput(stats, 1, late)
+    std::event_loop::revoke(t)
+    Ticks {count: cell(stats, 0), max_late_us: cell(stats, 1)}

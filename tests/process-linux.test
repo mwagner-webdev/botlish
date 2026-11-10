@@ -1,0 +1,552 @@
+# process-linux.test -- the process_linux package (packages/process_linux;
+# PROCESS-LINUX-PACKAGE-MILESTONE-1.md): launching, supervising, talking to
+# and terminating external processes through std::event_loop and the Linux
+# driver, ported from the census's 42 scenarios
+# (MANAGED-SUBPROCESS-AND-EVENT-LOOP-CENSUS-MILESTONE-1.md; audit/managed-
+# subprocess/tools/run.py) and extended.
+#
+# The package and its dependency (event_loop_linux) are installed into a
+# private application directory as one package graph (tools/process-linux.tcl
+# app, with the testing archive: its fault bits and probes, tests/process/
+# probe.bot), with the deterministic helper child (tests/process/child.c).
+# The scenario programs (tests/process/io.bot, life.bot, threads.bot) are
+# compiled once each to executables; each test runs one scenario under an
+# external watchdog (timeout: a hang fails, never passes), under a PTY where
+# it needs a terminal (tests/process/pty.py), checks its report lines, and
+# checks from outside the processes the run named ("pid N", "desc N"): gone,
+# or -- where the scenario says so -- alive (then killed here).
+#
+# Linux x86-64 (the package's one target): a C compiler, the native backend
+# and the system linker.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+source [file join $::projectRoot native native.tcl]
+source [file join $::projectRoot tools process-linux.tcl]
+
+interp recursionlimit {} 100000
+
+proc processHostOk {} {
+    expr {$::tcl_platform(os) eq "Linux" && $::tcl_platform(machine) in {x86_64 amd64}
+        && [auto_execok cc] ne "" && [auto_execok ar] ne "" && [auto_execok timeout] ne ""}
+}
+testConstraint processLinux [expr {[processHostOk] && [testConstraint nativeCCalls] && [testConstraint cLinker]}]
+testConstraint processPty [expr {[testConstraint processLinux] && [auto_execok python3] ne ""}]
+testConstraint processNm [expr {[testConstraint processLinux] && [auto_execok nm] ne ""}]
+
+set processDir [file join [temporaryDirectory] process-linux-[pid]]
+set processTests [file join $::projectRoot tests process]
+
+# The application, the helper and the scenario programs' executables, made
+# once.
+proc processApp {} {
+    if {![info exists ::processAppMade]} {
+        file delete -force $::processDir
+        file mkdir $::processDir
+        processLinux::app $::processDir 1
+        foreach f [glob -directory $::processTests *.bot] {
+            file copy -force $f $::processDir
+        }
+        processLinux::helper [file join $::processDir child]
+        set ::processAppMade 1
+    }
+    return $::processDir
+}
+
+proc processHelper {} {
+    file join [processApp] child
+}
+
+proc processExecutable {name} {
+    if {![info exists ::processExes($name)]} {
+        set dir [processApp]
+        set hir [surface::readProgramFile [file join $dir $name.bot] -warnings off -cache ""]
+        set ::processExes($name) [native::executable $hir [file join $dir $name]]
+    }
+    return $::processExes($name)
+}
+
+# A fresh scratch directory for one run.
+proc processScratch {} {
+    set dir [file join [processApp] scratch-[incr ::processRuns]]
+    file delete -force $dir
+    file mkdir $dir
+    return $dir
+}
+
+# Run scenario SCENARIO of program PROG (io, life) under the watchdog; its
+# output. OPTS: -pty 1 (a terminal), -nofile N (RLIMIT_NOFILE), -env {K V}
+# (environment), -timeout S.
+proc processRun {prog scenario args} {
+    set opts [dict merge {-pty 0 -nofile 0 -env {} -timeout 120} $args]
+    set exe [processExecutable $prog]
+    set tmp [processScratch]
+    set ::processLastScratch $tmp
+    set cmd [list $exe [processHelper] $scenario $tmp]
+    if {[dict get $opts -nofile]} {
+        set cmd [list sh -c "ulimit -n [dict get $opts -nofile] && exec \"\$@\"" sh {*}$cmd]
+    }
+    if {[dict get $opts -pty]} {
+        set cmd [list python3 -I [file join $::processTests pty.py] [dict get $opts -timeout] {*}$cmd]
+    } else {
+        set cmd [list timeout -k 5 [dict get $opts -timeout] {*}$cmd]
+    }
+    set env [dict get $opts -env]
+    set status 0
+    withEnvironment $env {
+        if {[catch {exec {*}$cmd 2>@1} out options]} {
+            set status [lindex [dict get $options -errorcode] end]
+        }
+    }
+    if {$status == 124} {
+        append out "\nTIMEOUT"
+    } elseif {$status != 0} {
+        append out "\nexit status $status"
+    }
+    return $out
+}
+
+# Every regular expression of EXPECTED matches a line of OUT (a "!RE" none);
+# the ones that do not, or "ok".
+proc processExpect {out expected} {
+    set missing {}
+    foreach re $expected {
+        if {[string index $re 0] eq "!"} {
+            if {[regexp -line -- [string range $re 1 end] $out]} { lappend missing $re }
+        } elseif {![regexp -line -- $re $out]} {
+            lappend missing $re
+        }
+    }
+    if {[regexp -line {^TIMEOUT$|^exit status|^task failed} $out]} { lappend missing "a clean end" }
+    if {$missing eq ""} { return ok }
+    return [list missing $missing output $out]
+}
+
+# What every scenario's end reports: nothing supervised, watched, unreaped
+# or open.
+set processClean {{^end owned 0$} {^end dying 0$} {^end watches 0$} {^end children 0$} {^end descriptors 0$} {^end fds delta 0$}}
+
+# The state of process PID now: dead (no such process, or a zombie: an
+# orphan that died and that a container's PID 1 may not reap) or alive.
+proc processState {pid} {
+    if {[catch {readFile /proc/$pid/stat} stat]} { return dead }
+    set fields [split [string range $stat [expr {[string last ")" $stat] + 2}] end]]
+    if {[lindex $fields 0] eq "Z"} { return dead }
+    return alive
+}
+
+# The diagnostic kinds (the error code's last word) of compiling PATH.
+proc processKinds {path} {
+    if {![catch {surface::readProgramFile $path -warnings off -cache ""} m opts]} { return {} }
+    set kinds [lmap d [dict getdef $opts -diagnostics {}] {lindex [dict get $d errorcode] end}]
+    if {$kinds eq ""} { set kinds [list [lindex [dict get $opts -errorcode] end]] }
+    return $kinds
+}
+
+# The pids of the "LABEL PID" lines of OUT.
+proc processPids {out label} {
+    lmap {_ pid} [regexp -all -inline -line "^(?:first: )?$label (\\d+)\$" $out] {set pid}
+}
+
+# The states of the processes OUT's lines name (desc N, pid N), after a
+# moment for a dying one to go; the alive ones are killed.
+proc processLeftovers {out} {
+    after 200
+    set states {}
+    foreach label {desc pid} {
+        foreach pid [processPids $out $label] {
+            set s [processState $pid]
+            lappend states $label $s
+            if {$s eq "alive"} { catch {exec kill -9 $pid} }
+        }
+    }
+    return $states
+}
+
+# --- the launch and stream scenarios
+
+test process-linux-basic {exact arguments (empty, spaces, quotes, UTF-8, $HOME and * unexpanded: no shell), an environment with settings, a removal and a later setting winning, an explicit environment, the working directory} -constraints processLinux -body {
+    set out [processRun io basic]
+    processExpect $out [concat {{^args 9$} {^arg 2 -$} {^arg 3 612062$} {^arg 4 71756f7465226420277827$} {^arg 5 68c3a96c6c6f20e282ac$} {^arg 7 24484f4d45$} {^arg 8 2a$}
+        {^env PL_X=one two$} {^env HOME unset$} {^env PL_LATER=b=c$} {^cwd /} {^env PATH unset$} {^env ONLY=1$}} $::processClean]
+} -result ok
+
+test process-linux-launch {launch failures are LaunchFailed with their stage and errno (a missing, a non-executable and a relative executable at exec, a missing or non-directory working directory and a missing redirection file in the parent), a started child that fails has an ExitStatus, and a shell is an explicit executable} -constraints processLinux -body {
+    set out [processRun io launch]
+    processExpect $out [concat {{^missing launch-failed exec 2$} {^not-executable launch-failed exec 13$} {^directory launch-failed exec 13$}
+        {^relative-not-searched launch-failed exec 2$} {^bad-cwd launch-failed working-directory 2$} {^cwd-is-file launch-failed working-directory 20$}
+        {^bad-file launch-failed file 2$} {^bad-stdin-file launch-failed file 2$} {^exit-3 started exited 3$} {^abort started (signal|core) 6$}
+        {^killed started signal 9$} {^shell-explicit started exited 4$}} $::processClean]
+} -result ok
+
+test process-linux-invalid {a command that cannot be started as written is InvalidCommand naming its item, before anything starts: NUL in the executable, an argument, an environment name or value, the directory or a redirection file, an empty executable or environment name, '=' in a name; 100 rejections leave nothing behind} -constraints processLinux -body {
+    set out [processRun io invalid]
+    processExpect $out [concat {{^nul-in-executable invalid executable: contains NUL$} {^nul-in-arg invalid argument 2: contains NUL$}
+        {^empty-executable invalid executable: is empty$} {^nul-in-env-name invalid environment name: contains NUL$}
+        {^nul-in-env-value invalid environment value of ABC: contains NUL$} {^eq-in-env-name invalid environment name: contains '='$}
+        {^empty-env-name invalid environment name: is empty$} {^nul-in-directory invalid directory: contains NUL$}
+        {^nul-in-file invalid stderr file: contains NUL$} {^after-100-rejections started exited 7$} {!^an invalid command started$}} $::processClean]
+} -result ok
+
+test process-linux-streams {stdout and stderr, 1 MiB each with stderr written first, read concurrently by two tasks} -constraints processLinux -body {
+    processExpect [processRun io streams] [concat {{^stdout bytes 1048576$} {^stderr bytes 1048580$} {^status exited 0$}} $::processClean]
+} -result ok
+
+test process-linux-naive {reading stdout to its end while the child blocks on a full stderr deadlocks; a watchdog task's interrupt ends the read, and the child is terminated} -constraints processLinux -body {
+    processExpect [processRun io naive] [concat {{^stdout read interrupted: deadlock$} {^stdout bytes before the deadlock 0$} {^child exited no$} {^status signal 15$}} $::processClean]
+} -result ok
+
+test process-linux-stdin {4 MiB written incrementally to a child that reads only after 300 ms: the writer waits for room, the echo arrives whole, a 10 ms ticker keeps ticking} -constraints processLinux -body {
+    processExpect [processRun io stdin] [concat {{^written 4194304$} {^echoed 4194304$} {^child: cat-eof 4194304} {^status exited 0$} {^ticks ([2-9]\d|\d{3,})$}} $::processClean]
+} -result ok
+
+test process-linux-stdin-partial {writes larger than the pipe (100,000-byte writes, one 4 MiB write) are partial and completed after readiness, every byte once and in order} -constraints processLinux -body {
+    processExpect [processRun io stdin-partial] [concat {{^written 1000000$} {^echoed 1000000$} {^one write of 4194304$} {^echoed 4194304$}
+        {^the echo is the bytes written yes$}} $::processClean]
+} -result ok
+
+test process-linux-backpressure {an unread 8 MiB producer blocks in its own write (the supervisor buffers nothing) and finishes once read} -constraints processLinux -body {
+    processExpect [processRun io backpressure] [concat {{^first-chunk 65536$} {^resumed exited 0$} {^total 8388608$}} $::processClean]
+} -result ok
+
+test process-linux-binary {bytes stay bytes: every byte value, invalid UTF-8 and a character split across reads arrive exactly as written} -constraints processLinux -body {
+    processExpect [processRun io binary] [concat {{^bytes 262$} {^split across reads yes$} {^bytes as sent yes$} {^whole-as-utf8 <invalid utf-8>$} {^tail-as-utf8 €$}} $::processClean]
+} -result ok
+
+test process-linux-eof-early {end of file is not exit: stdout closes, the child runs on and exits later; stderr is read afterwards} -constraints processLinux -body {
+    processExpect [processRun io eof-early] [concat {{^stdout a$} {^exited-at-eof 0$} {^stderr late$} {^status exited 4$}} $::processClean]
+} -result ok
+
+test process-linux-exit-unread {a child's unread output stays readable after it exited; one with more unread output than the pipe holds cannot exit until it is read} -constraints processLinux -body {
+    processExpect [processRun io exit-unread] [concat {{^small bytes after exit 30000$} {^large exited within 0.7 s unread no$} {^large bytes 200000$} {^large status exited 5$}} $::processClean]
+} -result ok
+
+test process-linux-exit-first {a child that exits before anything waits for it (between spawn and the first wait) is seen: the pidfd's readiness is level-triggered} -constraints processLinux -body {
+    processExpect [processRun io exit-first] [concat {{^status exited 3$}} $::processClean]
+} -result ok
+
+test process-linux-persist {redirection files: stdout appended (two runs, both kept), stderr truncated, stdin read from a file; nothing passes through the supervisor} -constraints processLinux -body {
+    set out [processRun io persist]
+    list [processExpect $out [concat {{^status exited 0$} {^again exited 0$} {^stdin from the file: to-err-file$}} $::processClean]] \
+        [file size [file join $::processLastScratch job.out]] [file size [file join $::processLastScratch job.err]]
+} -result {ok 200016 12}
+
+test process-linux-limit {an output policy is the reader's: a bounded tail of 4096 bytes kept, the child terminated past 1 MiB} -constraints processLinux -body {
+    processExpect [processRun io limit] [concat {{^limit exceeded: terminating$} {^kept 4096$} {^status signal 15$}} $::processClean]
+} -result ok
+
+test process-linux-inherit {a child gets SIGPIPE's default disposition, an empty signal mask and only descriptors 0, 1 and 2 (the negative control, fault bits 3, keeps the supervisor's ignored SIGPIPE); inherited and /dev/null streams; a read of a non-piped stream is StreamClosed} -constraints processLinux -body {
+    processExpect [processRun io inherit] [concat {{^default: sigpipe dfl mask 0$} {^fds 0 1 2$} {^kept: sigpipe ign mask 0$} {^fds 0 1 2 \d+$} {^inherited$} {^null exited 0$} {^read of a null stdout: closed$}} $::processClean]
+} -result ok
+
+test process-linux-tty-inherit {under a terminal: the children's pipes are no terminal; an inherited stdout and stderr are} -constraints processPty -body {
+    processExpect [processRun io inherit -pty 1 -timeout 60] [concat {{^tty 0 0 0$} {^tty 0 1 1$} {^inherited$} {^pty exit 0$} {^pty termios changed no$}} $::processClean]
+} -result ok
+
+test process-linux-tty-read {a child of its own process group given the terminal as stdin is stopped by the kernel (SIGTTIN) when it reads it, and ends only by SIGKILL: children must not get the terminal} -constraints processPty -body {
+    processExpect [processRun io tty-read -pty 1 -timeout 60] [concat {{^stopped by the terminal: yes$} {^status signal 9$} {^pty exit 0$}} $::processClean]
+} -result ok
+
+test process-linux-tty-raw {a child in the supervisor's group given the terminal can leave it raw (nothing here restores it: termios is the terminal program's)} -constraints processPty -body {
+    processExpect [processRun io tty-raw -pty 1 -timeout 60] [concat {{^status exited 0$} {^pty termios changed yes$}} $::processClean]
+} -result ok
+
+test process-linux-stdin-closed {a write after the child closed its stdin is StreamClosed (EPIPE; the supervisor never dies of SIGPIPE), and after close_stdin too} -constraints processLinux -body {
+    processExpect [processRun io stdin-closed] [concat {{^write after the child closed stdin: closed$} {^write after close_stdin: closed stdin$} {^echoed one$} {^cat exited 0$}} $::processClean]
+} -result ok
+
+test process-linux-close-output {close_output: later reads are StreamClosed, and the child's next write to the stream ends it with SIGPIPE (its default disposition)} -constraints processLinux -body {
+    processExpect [processRun io close-output] [concat {{^read after close_output: closed stderr$} {^status signal 13$}} $::processClean]
+} -result ok
+
+test process-linux-fairness {a continuous flood read for 1 s leaves a 10 ms ticker on time: the reading task yields every few chunks} -constraints processLinux -body {
+    processExpect [processRun io fairness] [concat {{^streamed over 16 MiB yes$} {^ticks at least 80 yes$} {^no tick later than 30 ms yes$}} $::processClean]
+} -result ok
+
+test process-linux-unsupported {a process that cannot supervise safely starts nothing: a kernel without pidfd_open (fault 16) and an ignored SIGCHLD are Unsupported with their reason; afterwards spawns work} -constraints processLinux -body {
+    processExpect [processRun io unsupported] [concat {{^no-pidfd unsupported 38 the kernel has no pidfd_open} {^sigchld-ignored unsupported 10 SIGCHLD is ignored} {^after started exited 0$}} $::processClean]
+} -result ok
+
+test process-linux-pidfd-fail {a pidfd that cannot be opened after the spawn (fault 32) is LaunchFailed at Stage::Pidfd: the child is killed and reaped at once, nothing is left} -constraints processLinux -body {
+    set out [processRun io pidfd-fail]
+    set pidfile [file join $::processLastScratch pidfd.pid]
+    set gone [expr {![file exists $pidfile] || [processState [string trim [readFile $pidfile]]] eq "dead"}]
+    list [processExpect $out [concat {{^pidfd launch-failed pidfd 24$} {^after started exited 0$}} $::processClean]] $gone
+} -result {ok 1}
+
+# --- the lifetime, cancellation and termination scenarios
+
+test process-linux-cancel {interrupt cancels a suspended read and a suspended wait (Interrupted), not the child: it runs on, stays owned, and later reads get its output; interrupting twice is harmless} -constraints processLinux -body {
+    processExpect [processRun life cancel] [concat {{^read interrupted after-us \d+$} {^child still running after the interrupt yes$} {^wait interrupted$}
+        {^second read got bytes 6$} {^status exited 0$}} $::processClean]
+} -result ok
+
+test process-linux-terminate {terminate: a graceful child (SIGTERM trapped, 150 ms), an ignoring one escalated to SIGKILL at the grace period, one exiting by itself during the grace, an exited one, terminate twice; kill; status of a running child is StillRunning; a signal after release is StaleChild} -constraints processLinux -body {
+    processExpect [processRun life terminate] [concat {{^graceful exited 143$} {^graceful in 0.14 to 0.6 s yes$} {^ignored signal 9$} {^escalated at 0.3 to 0.8 s yes$}
+        {^escalations 1$} {^exits-during-grace exited 0$} {^signal to an exited, unreaped child: accepted$} {^already-exited exited 0$}
+        {^terminate-again exited 0$} {^signal after release: stale$} {^killed signal 9$} {^status of a running child: still running$}
+        {^hangup signal 1$} {^status after signal 1$}} $::processClean]
+} -result ok
+
+test process-linux-descendants {process groups: an in-group descendant dies with the group's termination; one that left with setsid survives it (no group guarantee for it); an in-group descendant left when the leader exits normally is killed when supervision ends} -constraints processLinux -body {
+    set out [processRun life descendants]
+    set descs [processPids $out desc]
+    set states [lmap pid $descs {processState $pid}]
+    foreach pid $descs { catch {exec kill -9 $pid} }
+    list [processExpect $out [concat {{^group signal 15$} {^escaped signal 15$} {^leader exited 0$}} $::processClean]] $states
+} -result {ok {dead alive dead}}
+
+test process-linux-old-kernel {the pre-6.9 fallback (fault 64: kill(-pgid) while the leader is unreaped) reaches the group the same way} -constraints processLinux -body {
+    set out [processRun life old-kernel]
+    list [processExpect $out [concat {{^group signal 15$}} $::processClean]] [processLeftovers $out]
+} -result {ok {desc dead desc dead}}
+
+test process-linux-shared-group {a child of the supervisor's own group (Group::Shared) is signalled alone: its descendant survives; a child of its own group leads it} -constraints processLinux -body {
+    set out [processRun life shared-group]
+    regexp -line {^first: ids (\d+) \d+ (\d+) \d+$} $out -> pid pgid
+    regexp -line {^first: ids (\d+) \d+ (\d+) \d+\n} [string range $out [string first "shared signal" $out] end] -> pid2 pgid2
+    list [processExpect $out [concat {{^shared signal 15$}} $::processClean]] [expr {$pid != $pgid}] [expr {$pid2 == $pgid2}] [processLeftovers $out]
+} -result {ok 1 1 {desc alive}}
+
+test process-linux-inherited {a descendant holding the child's stdout keeps it open after the leader's exit; terminating the group after the leader exited (unreaped: its group ID reserved) ends it at once} -constraints processLinux -body {
+    processExpect [processRun life inherited] [concat {{^leader exited 0$} {^stdout's end of file over 1 s after the leader's exit yes$}
+        {^terminated after the leader's exit exited 0$} {^stdout's end of file at once yes$}} $::processClean]
+} -result ok
+
+test process-linux-reap-order {a group signal after the leader's exit, while it is unreaped, reaches its descendant} -constraints processLinux -body {
+    set out [processRun life reap-order]
+    list [processExpect $out $::processClean] [processLeftovers $out]
+} -result {ok {desc dead}}
+
+test process-linux-eager-reap {the negative control (fault 4: reaped at the first status check) refuses the same signal, and the descendant survives} -constraints processLinux -body {
+    set out [processRun life eager-reap]
+    list [processExpect $out $::processClean] [processLeftovers $out]
+} -result {ok {desc alive}}
+
+test process-linux-release {releasing a running child returns at once and hands it to the reaper (SIGTERM; one that ignores it escalated after the grace period); the identity is stale at once; an owner's scope end releases it the same way; the loop runs until both are reaped} -constraints processLinux -body {
+    set out [processRun life release]
+    list [processExpect $out [concat {{^release returned within 10 ms yes$} {^dying right after release 1$} {^the identity is stale after release$}
+        {^leaving the owner's scope$} {^dying after the scope 2$} {^end escalations 1$}} $::processClean]] [processLeftovers $out]
+} -result {ok {pid dead pid dead}}
+
+test process-linux-release-reader {a read suspended on a child that another task releases ends StaleChild at once} -constraints processLinux -body {
+    processExpect [processRun life release-reader] [concat {{^the suspended read: stale$} {^the read ended within 50 ms of the release yes$}} $::processClean]
+} -result ok
+
+test process-linux-finish {finish waits for the termination sequence and returns the status (an exited child, a graceful one); interrupted, it hands the child to the reaper} -constraints processLinux -body {
+    set out [processRun life finish]
+    list [processExpect $out [concat {{^finished exited exited 9$} {^finished running exited 143$} {^finish interrupted: handed to the reaper$} {^dying after the interrupted finish 1$}} $::processClean]] [processLeftovers $out]
+} -result {ok {pid dead}}
+
+test process-linux-abandon {a coroutine owning a child, dropped while suspended in a read, releases the owner as it unwinds (lexical cleanup): no implicit detachment} -constraints processLinux -body {
+    set out [processRun life abandon]
+    list [processExpect $out [concat {{^holder suspended at \d+$} {^dying after the drop 1$} {^releases 1$}} $::processClean]] [processLeftovers $out]
+} -result {ok {pid dead}}
+
+test process-linux-shutdown {the loop's shutdown revokes a suspended read (StreamClosed); process_linux::shutdown kills and reaps what is left} -constraints processLinux -body {
+    set out [processRun life shutdown]
+    list [processExpect $out [concat {{^end owned before shutdown 1$} {^waiter: its read was revoked by the shutdown$} {^end killed by shutdown 1$}} $::processClean]] [processLeftovers $out]
+} -result {ok {pid dead}}
+
+test process-linux-detach {detach: the identity is stale, the process runs on, and once it ends while the loop runs it is reaped (no zombie), without the loop being kept alive by it} -constraints processLinux -body {
+    set out [processRun life detach]
+    list [processExpect $out [concat {{^detach returned the pid yes$} {^owned after detach 0$} {^the identity is stale after detach$}
+        {^the detached child after its end: state -2$}} $::processClean]] [processLeftovers $out]
+} -result {ok {pid dead}}
+
+test process-linux-detach-outlive {a detached child outlives the supervisor (reparented), and the loop ended without waiting for it} -constraints processLinux -body {
+    set t [clock milliseconds]
+    set out [processRun life detach-outlive]
+    set elapsed [expr {[clock milliseconds] - $t}]
+    regexp -line {^detached pid (\d+)$} $out -> pid
+    set state [processState $pid]
+    catch {exec kill -9 $pid}
+    list [processExpect $out {{^owned after detach 0$} {^end owned 0$} {^end watches 0$}}] $state [expr {$elapsed < 2500}]
+} -result {ok alive 1}
+
+test process-linux-waiters {three tasks wait for one child's exit: each is woken (the exit watch is re-armed for the next)} -constraints processLinux -body {
+    processExpect [processRun life waiters] [concat {{^waiter 1 saw exited 6$} {^waiter 2 saw exited 6$} {^waiter 3 saw exited 6$}} $::processClean]
+} -result ok
+
+test process-linux-watch-release {a readiness record of a released child never reaches the slot's next child} -constraints processLinux -body {
+    processExpect [processRun life watch-release] [concat {{^the next child's first chunk: new$} {^status exited 0$}} $::processClean]
+} -result ok
+
+test process-linux-exhaust {descriptor exhaustion (RLIMIT_NOFILE 128): launches fail at the pipe stage with EMFILE, never half-made; nothing leaks} -constraints processLinux -body {
+    processExpect [processRun life exhaust -nofile 128] [concat {{failed at pipe 24$} {^running \d+$}} $::processClean]
+} -result ok
+
+test process-linux-stale {a released child's identity is StaleChild for every operation, also once its slot is reused, and never reaches the new child} -constraints processLinux -body {
+    processExpect [processRun life stale] [concat {{^old identity: stale$} {^signal through the old identity: stale$} {^read through the old identity: stale$}
+        {^the new child unaffected yes$}} $::processClean]
+} -result ok
+
+test process-linux-many {400 sequential spawn-wait-release cycles and 64 concurrent children: every status right, no zombie, no descriptor left} -constraints processLinux -body {
+    set out [processRun life many]
+    processExpect $out [concat {{^concurrent children 64$} {^wrong sequential 0$} {^wrong concurrent 0$} {^end released 464$}} $::processClean]
+} -result ok
+
+# --- independent VMs
+
+test process-linux-threads {two Botlish-owned threads, each its own VM, loop, driver and process context, supervise children concurrently: the right bytes and statuses, distinct thread tokens, and 40 children each spawned concurrently that see only their own descriptors 0, 1 and 2} -constraints processLinux -body {
+    set exe [processExecutable threads]
+    set out [exec timeout -k 5 120 $exe [processHelper] two 2>@1]
+    processExpect $out {{^vm 1 bytes 2000170 exit 11 owned-after 0 children-with-only-0-1-2 40$} {^vm 2 bytes 3000080 exit 22 owned-after 0 children-with-only-0-1-2 40$}
+        {^distinct children yes$} {^distinct thread tokens yes$} {^adapter children after 0$}}
+} -result ok
+
+test process-linux-thread-end {a VM that ends with a released child it did not wait for (its loop not run again): the adapter kills and reaps it at the thread's end; a child it detached outlives the VM} -constraints processLinux -body {
+    set exe [processExecutable threads]
+    set out [exec timeout -k 5 120 $exe [processHelper] ended 2>@1]
+    regexp -line {^detached (\d+)$} $out -> detached
+    set state [processState $detached]
+    catch {exec kill -9 $detached}
+    list [processExpect $out {{^dying when the VM ended 1$} {^the VM's child after its end: state -2$} {^the detached child outlives the VM yes$}}] $state
+} -result {ok alive}
+
+test process-linux-child-not-sendable {a child's identity cannot cross VMs: a thread entry taking one is refused at compile time} -constraints processLinux -body {
+    set dir [processApp]
+    writeFile [file join $dir sendchild.bot] "import process_linux\n\nthread fn take(c: process_linux::Child) -> int:\n    0\n"
+    writeFile [file join $dir sendmain.bot] "import sendchild\nimport std::thread\n\nwith context std::thread::create(2)\nstd::thread::entry(sendchild::take)\n"
+    processKinds [file join $dir sendmain.bot]
+} -result THREAD-ENTRY-SIGNATURE
+
+test process-linux-authority {the process authority is the installed context only: spawn without Processes installed is MISSING-CONTEXT, the native functions are private, and Processes and an owner cannot be built outside the module} -constraints processLinux -body {
+    set dir [processApp]
+    set prelude "import event_loop_linux\nimport process_linux\nimport std::event_loop\n\n"
+    set cases {
+        missing {fn go(context ev: std::event_loop::Loop, n: event_loop_linux::Native) -> int:
+    {owner, child} = process_linux::spawn(process_linux::command("/bin/true", [])):
+        on process_linux::InvalidCommand:
+            return 1
+        on process_linux::LaunchFailed:
+            return 2
+        on process_linux::Unsupported:
+            return 3
+        on process_linux::ProcessFault:
+            return 4
+        on std::event_loop::SchedulerFault:
+            return 5
+    process_linux::release(owner)
+    0
+
+with context std::event_loop::create(8)
+with context event_loop_linux::create()
+with context event_loop_linux::native()
+go()
+}
+        private {fn go() -> int:
+    process_linux::pl_probe() + 0
+}
+        forged {fn go() -> process_linux::ChildOwner:
+    process_linux::ChildOwner {handle: 1, index: 0}
+}
+    }
+    set out {}
+    foreach {name body} $cases {
+        writeFile [file join $dir auth-$name.bot] "$prelude$body"
+        lappend out $name [lsort -unique [processKinds [file join $dir auth-$name.bot]]]
+    }
+    set out
+} -result {missing MISSING-CONTEXT private PRIVATE-ACCESS forged OPAQUE-CONSTRUCTION}
+
+# --- the package itself
+
+test process-linux-warning-clean {the public module compiles warning-free: a program importing it, under -warnings error} -constraints processLinux -body {
+    set dir [processApp]
+    writeFile [file join $dir loader.bot] "import process_linux\n\nprocess_linux::status_text(process_linux::ExitStatus {ending: process_linux::Ending::Exited, code: 0})\n"
+    catch {surface::readProgramFile [file join $dir loader.bot] -warnings error -cache ""} m
+    expr {[string match *Exited* $m] || ![string match *warning* $m] ? "clean" : $m}
+} -result clean
+
+test process-linux-adapter {the adapter's guarantees the Botlish side cannot reach: another thread's call refused, release only once reaped, no signal after the reap, generations, a detached child swept, no descriptor leaked by exec failures (glibc's pidfd_spawn leaks, the negative control), a thread's end killing and reaping its children and freeing its specs} -constraints processLinux -body {
+    set dir [processApp]
+    set exe [file join $dir adapter-test]
+    exec cc -O2 -Wall -Wextra -Werror -pthread -DPL_TESTING [file join $::processTests adapter-test.c] \
+        [file join $::projectRoot packages process_linux native process_linux.c] -o $exe
+    set out [exec timeout -k 5 60 $exe [processHelper] 2>@1]
+    list [regexp -line {^adapter-test: 0 failures$} $out] [regexp -all -line {^ok } $out]
+} -result {1 34}
+
+test process-linux-release-archive {the released archive defines exactly the module's pl_* functions: no pl_t_* probe or fault, no pidfd_spawn, and it reads no environment variable; the testing archive adds the seven pl_t_* probes} -constraints processNm -body {
+    set dir [processApp]
+    set out {}
+    foreach {kind testing} {release 0 testing 1} {
+        set archive [processLinux::archive [file join $dir archive-$kind libprocess_linux.a] $testing]
+        set defined [lsort [lmap line [split [exec nm --defined-only -g $archive] \n] {
+            if {[llength $line] != 3} continue
+            lindex $line 2
+        }]]
+        set undefined [lmap line [split [exec nm -u $archive] \n] {lindex $line end}]
+        lappend out $kind [llength [lmap s $defined {expr {[string match pl_* $s] && ![string match pl_t_* $s] ? $s : [continue]}}]] \
+            [llength [lmap s $defined {expr {[string match pl_t_* $s] ? $s : [continue]}}]] \
+            [llength [lmap s $defined {expr {[string match pl_* $s] ? [continue] : $s}}]] \
+            [expr {"pidfd_spawn" in $undefined}] [expr {"getenv" in $undefined || "secure_getenv" in $undefined}]
+    }
+    # Every extern the module declares is a function of the released archive.
+    set module [readFile [file join $::projectRoot packages process_linux process_linux.bot]]
+    set externs [lsort [lmap {_ name} [regexp -all -inline {extern c fn (pl_[a-z_]+)\(} $module] {set name}]]
+    set released [lsort [lmap line [split [exec nm --defined-only -g [file join $dir archive-release libprocess_linux.a]] \n] {
+        if {[llength $line] != 3} continue
+        lindex $line 2
+    }]]
+    lappend out [expr {$externs eq $released}]
+} -result {release 33 0 0 0 0 testing 33 7 0 1 0 1}
+
+test process-linux-metadata {process_linux locks this repository's release of event_loop_linux, its request admits that lock, and its only dependency is the driver} -constraints processLinux -body {
+    set pkgs [file join $::projectRoot packages]
+    set desc [readFile [file join $pkgs process_linux botlish.json]]
+    regexp {"version": "([^"]*)"} [readFile [file join $pkgs event_loop_linux botlish.json]] -> driver
+    regexp {"lock": \{([^\}]*)\}} $desc -> locks
+    regexp {"dependencies": \{([^\}]*)\}} $desc -> requests
+    regexp {"event_loop_linux": "([^"]*)"} $locks -> lock
+    regexp {"event_loop_linux": "([^"]*)"} $requests -> request
+    list [expr {$lock eq $driver}] [string match $request.* $lock] [llength [regexp -all -inline {"[a-z_]+": "[0-9.]+"} $requests]]
+} -result {1 1 1}
+
+test process-linux-docs {the package's documentation is checked: every botlish block of README.md and GUIDE.md is a complete program that compiles under -warnings error as installed, and runs giving what the documents say (ls's output counted, seq's tail kept, a sleep bounded and terminated)} -constraints processLinux -body {
+    set dir [processApp]
+    set out {}
+    foreach doc {README GUIDE} {
+        set text [readFile [file join $::projectRoot packages process_linux $doc.md]]
+        set i 0
+        foreach {_ block} [regexp -all -inline {```botlish\n(.*?)```} $text] {
+            set name [string tolower $doc]-[incr i]
+            writeFile [file join $dir $name.bot] $block
+            set hir [surface::readProgramFile [file join $dir $name.bot] -warnings error -cache ""]
+            set exe [native::executable $hir [file join $dir $name]]
+            lappend out $name [lindex [split [string trim [exec timeout -k 5 60 $exe 2>@1]] \n] 0]
+        }
+    }
+    regsub {ls: exited 0, \d+ bytes} $out {ls: exited 0, N bytes} out
+    set out
+} -result {readme-1 {ls: exited 0, N bytes} guide-1 {exited 0, 588895 bytes, ending } guide-2 {sleep: signal 15}}
+
+# --- GC stress
+
+test process-linux-gc-stress {the stream, lifetime and thread scenarios hold with a collection at every allocation (BOTLISH_NATIVE_GC_STRESS=1)} -constraints processLinux -body {
+    set results {}
+    foreach {prog scenario expected} {
+        io streams {{^stdout bytes 1048576$} {^stderr bytes 1048580$}}
+        io stdin-partial {{^the echo is the bytes written yes$}}
+        io binary {{^bytes as sent yes$}}
+        io invalid {{^after-100-rejections started exited 7$}}
+        life cancel {{^second read got bytes 6$}}
+        life terminate {{^escalations 1$} {^status after signal 1$}}
+        life release {{^dying after the scope 2$}}
+        life abandon {{^releases 1$}}
+        life waiters {{^waiter 3 saw exited 6$}}
+        life stale {{^the new child unaffected yes$}}
+    } {
+        set out [processRun $prog $scenario -env {BOTLISH_NATIVE_GC_STRESS 1} -timeout 300]
+        lappend results $scenario [processExpect $out [concat $expected $::processClean]]
+    }
+    set exe [processExecutable threads]
+    set out [withEnvironment {BOTLISH_NATIVE_GC_STRESS 1} {exec timeout -k 5 300 $exe [processHelper] two 2>@1}]
+    lappend results threads [processExpect $out {{^vm 1 bytes 2000170 exit 11 owned-after 0 children-with-only-0-1-2 40$} {^vm 2 bytes 3000080 exit 22} {^adapter children after 0$}}]
+} -result {streams ok stdin-partial ok binary ok invalid ok cancel ok terminate ok release ok abandon ok waiters ok stale ok threads ok}
+
+if {[info exists ::processAppMade]} {
+    file delete -force $::processDir
+}
+cleanupTests
