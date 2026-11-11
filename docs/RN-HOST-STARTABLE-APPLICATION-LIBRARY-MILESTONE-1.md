@@ -93,9 +93,10 @@ ANDROID-AARCH64-TARGET-SUPPORT-MILESTONE-1.md harness).
   (protocol 1 unchanged); the React Native generator, which reads schema 2,
   refuses them (static: `integrations/react-native/src/main.c:490`).
 * The runtime ABI fingerprint now digests the native-library boundary and
-  the initialize-only selector (`e6c1492eceebb13c` -> `dc11c1c031a8f12d`):
-  a stale target support package is refused by its identity record before
-  any link.
+  the initialize-only selector (`e6c1492eceebb13c` -> `dc11c1c031a8f12d`;
+  `14aa5041bb46ae5d` once main's Windows DLL milestone, which changed the
+  Vm's layout, was merged in): a stale target support package is refused by
+  its identity record before any link.
 * **The cross-target link plan is fixed**: the driver's `link-plan` takes
   `--target` and resolves the plan for that target's linker. The census's
   probe E2 (`extern c library "log"` in an Android library) builds; so do
@@ -449,7 +450,9 @@ support package's, built elsewhere. So the fingerprint
 * `ENTRY_INDEX_INITIALIZE_ONLY` (-1), one scalar word.
 
 `e6c1492eceebb13c` became `dc11c1c031a8f12d` (**observed**: `botlish-native
-runtime-abi`). Consequences: every target support package is rebuilt (the
+runtime-abi`), and `14aa5041bb46ae5d` after main's
+WINDOWS-X86-64-MILESTONE-8.md was merged into the branch (its own Vm
+fields, `entry_stack`, are fingerprint inputs too; section 21). Consequences: every target support package is rebuilt (the
 Android one was, by audit/android-aarch64-target/tools/package.sh); an old
 package's identity record is refused before any linker runs
 (`at-runtime-identity`'s rule), rather than failing at link time on a
@@ -711,13 +714,21 @@ it):
   pthread-key destructor on a foreign thread: `dlclose` then crashed the
   process when the thread ended (**observed**: SIGSEGV in
   `__nptl_deallocate_tsd`). The owner rule now uses a token drawn once per
-  thread, never reused, kept in the slot of one pthread key created without
+  thread, never reused, kept in the slot of a pthread key created without
   a destructor (runtime/library.rs's `thread_word`), with the active-call
-  count.
+  count; a second such slot counts the thread's live instances (main's
+  WINDOWS-X86-64-MILESTONE-8.md had added both counts as `thread_local!`s:
+  section 21).
 * An entry that runs a coroutine registers the coroutine stack pool's
   destructor through `__cxa_thread_atexit_impl`, which glibc pins: after
   `dlclose` the library stays mapped (and stays so after the thread ends).
-  Safe.
+  Safe. A thread that never ran one must never touch the pool: main's
+  milestone frees a thread's pooled stacks when its last instance goes
+  (`release_pool`), and its first look into the pool's thread-local
+  registered that destructor on every such thread, so `al-dlopen` failed
+  after the merge ("unloaded while the thread lives: no"). The pool now
+  keeps a destructor-free flag of whether the thread ever asked it for a
+  stack (`POOL_USED`), and `release_pool` returns at once without one.
 * `al-dlopen`: three rounds of dlopen, `NAME_main`, dlclose; then a thread
   that ran `NAME_main`, and one that ran an instance, outliving the
   unloading -- all clean, also under GC stress.
@@ -871,7 +882,100 @@ all 107 catalogs' 3,637 mutants applying.
 
 ## 21. Regressions and CI
 
-REGRESSIONS_PENDING
+### main before branching (**CI**)
+
+At `eeaf1e3e`, the census's merge and this branch's base: every test
+workflow's latest run on main was green except `tests (linux arm64)`, red
+from a DNS failure while its job installed prerequisites (infrastructure;
+no test ran).
+
+### Merging main (**observed**)
+
+While this milestone was in progress main merged
+WINDOWS-X86-64-MILESTONE-8.md (native libraries as Windows DLLs, `73c32da8`),
+which changed the same files. It was merged into the branch (`b17eed02`)
+rather than left for the final merge, so that every check below ran on the
+combined code. Besides textual conflicts (the driver's usage line, the
+library's build, header and manifest, the topics, AGENTS.md):
+
+* A DLL exports exactly the library's public names
+  (`runtime::library::public_names`, which must agree with
+  `native::library::PublicNames`): both name `NAME_main` of an application
+  library in the same place, after the runtime API's forwarders.
+* main made every public function report its Windows unwind information
+  (codegen::library's `Defined`); `NAME_main`'s forwarder, which the
+  textual merge left out, does too.
+* main counted a thread's calls of the library (`CALL_DEPTH`) and its live
+  instances (`LIVE_INSTANCES`) with `thread_local!`s -- the per-thread
+  state section 17 keeps out of std's thread-locals. The call count was
+  the one `Active` already kept (its end now runs main's
+  `coroutine::library_call_ended`); the instance count is a second
+  destructor-free slot.
+* main's `release_pool`, run on a thread's last instance, registered the
+  coroutine pool's destructor on threads that never ran a coroutine, and
+  `al-dlopen` failed after the merge (section 17's `POOL_USED`).
+* `NAME_main`'s Vm ending with no instance left on the thread frees the
+  thread's pooled stacks, as `destroy` does.
+* The fingerprint became `14aa5041bb46ae5d` (section 11); the Android
+  runtime was rebuilt (`audit/android-aarch64-target/tools/package.sh`).
+* Three mutants followed the text the merge changed (this catalog's
+  `main-not-in-header` and `vm-never-dropped`, native-library's
+  `dll-internal-exported`).
+
+main's Windows code was type-checked here with `cargo check --target
+x86_64-pc-windows-msvc` (one warning, in thread.rs, older than both
+milestones); Windows itself is CI's.
+
+### Local regressions (**observed**, at the merged tip)
+
+`tests/local.tcl` (every Tcl test file on interp and compile, every golden
+suite on the four backends) was running at the time of writing: pending.
+The files this branch changes ran first and passed.
+
+| Check | Result |
+|---|---|
+| `cargo test --lib` / `--bins` / `--test native_stack` | 345 passed / 131 passed / every native stack check passed |
+| `tests/application-library.test` | 18 of 18 |
+| `tests/android-target.test` (ANDROID_NDK_ROOT, BOTLISH_ANDROID_ROOTS) | 27 of 27 |
+| `tests/native-library.test` | 30 passed, 12 skipped (Windows' and macOS's) |
+| `tests/c-bindgen.test` (with the NDK; before the merge, which changed no generator file) | 60 passed, 35 skipped (sources and toolchains not here) |
+| `tests/external-tools.test` | 49 of 49 |
+| `tests/coroutines.test` | 81 of 81 |
+| `tests/main-cli.test` | 72 of 72 |
+| `tests/main-thread-startup.test` | 10 passed, 14 skipped (macOS's) |
+| `tests/threads.test` (before the merge) | 21 of 21 |
+| `tools/compilerpedia.tcl check` | 1298 topics, 776 examples, 0 problems |
+| `tools/mutant-catalogs.tcl` | 107 catalogs, 3651 mutants, 0 problems |
+| `audit/host-startable-library/tools/mutate.tcl` | 38 of 38 killed before the merge (section 20); the run on the merged tip is pending |
+
+android-target.test runs its Android processes from its temporary
+directory: API 21's linker refuses a `dlopen` path of 128 bytes or more
+("library name ... too long"), so a deep `-tmpdir` fails the execution
+tests on API 21 -- an environment limit of the old Bionic, seen once here.
+
+### CI (**CI**)
+
+The pre-merge tip `517a87a0` (the four test workflows, c-bindgen and
+react-native 2048 dispatched; the rest by the push):
+
+| Workflow | Run | Result |
+|---|---|---|
+| c-bindgen | 43103717644 | success: every committed binding regenerated and checked with the pinned toolchain, sdl3's android-aarch64 with NDK r29 |
+| tests | 43103698411 | failure: the canary's `cb-android-configuration` (GitHub's Ubuntu image has an NDK and no SDL3 sources: fixed in `c0985c69`, the refusal checked before the sources) |
+| tests (macos arm64) | 43103708654 | failure: the same test in the smoke job's canary (the macOS image has an NDK too); everything else in the smoke job passed |
+| package reproducibility | 43103680859 | success |
+| icy-tower (windows x86-64) | 43103680843 | success |
+| icy-tower (macos arm64) | 43103680920 | success |
+| ci tools | 43103680864 | success |
+| raven clean room | 43103680865 | failure: building its author image, snapshot.ubuntu.com answered 502 Bad Gateway to apt (infrastructure) |
+| tests (linux arm64), tests (windows x86-64), react-native 2048 | 43103703421, 43103713265, 43103766038 | superseded by the merged tip's runs before they finished |
+
+The merged tip `c0985c69`: tests, tests (linux arm64), tests (macos arm64),
+tests (windows x86-64), c-bindgen and react-native 2048 dispatched, with the
+push's own runs: **pending** at the time of writing.
+
+main's latest runs, at `73c32da8` (the Windows DLL merge): queued for more
+than an hour at the time of writing, **pending**.
 
 ## 22. Performance and footprint
 
@@ -955,8 +1059,13 @@ libSDL3.so 12,141,504 (2,401,784): section 16.
 * **Icy Tower's `exit`**: its usage and float-failure paths call C's
   `exit`, which in a library ends the host process; an application library
   should return instead (the SDL 2048 application will).
-* **macOS and Windows**: native libraries are made on Linux glibc and for
-  Android only, so are application libraries.
+* **Windows and macOS**: main's WINDOWS-X86-64-MILESTONE-8.md, merged into
+  this branch at its end (section 21), makes native libraries as Windows
+  DLLs. The merge carries `NAME_main` into them -- the DLL's export list
+  (`public_names`), the header's `__declspec(dllimport)` declaration, the
+  forwarder's unwind information -- but no application library was built
+  or run on Windows (**projected**): application-library.test's C hosts
+  are Linux programs and skip there. macOS makes no native library.
 * **CI's verdicts** are pending at the time of writing (section 21).
 
 ## 24. Next milestone
