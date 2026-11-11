@@ -123,7 +123,7 @@ A commit's tests are **green** for a release when all of these hold:
 | the commit is main's head or an ancestor of it | only reviewed code is released |
 | `tests.yml`: a successful run whose GC-stress jobs (`tests (native GC-stress, interp/compile)`) succeeded | GC stress runs only on pushes: a manual run skips it, and a skipped job is no success |
 | `tests-arm64.yml`: a successful run whose GC-stress jobs (`arm64 tests (native GC-stress, interp/compile)`) succeeded | the same, on Linux AArch64 |
-| `macos-arm64.yml`: a successful run whose acceptance jobs (`acceptance (Tier B, macOS arm64, shard N/5)`) succeeded | macOS; a branch push runs only the smoke job (section 4), a deferred run nothing (section 5), a manual run with `app_only` only the application's jobs |
+| `macos-arm64.yml`: a successful run whose acceptance jobs (`acceptance (Tier B, macOS arm64, shard N/6)`) succeeded | macOS; a branch push runs only the smoke job (section 4), a deferred run nothing (section 5), a manual run with `app_only` only the application's jobs |
 | `windows-x86_64.yml`: a successful run whose acceptance jobs (`acceptance (Windows x86-64, shard N/4)`) succeeded | Windows; a branch push runs only the canary, a deferred run nothing |
 | `static-decisions.yml`: a successful run, if it ran at the commit | it runs only when the commit changed what it compares |
 | the release's own build workflow: a successful run | single-executable.yml, icy-tower-windows.yml (the macOS release builds in its own run) |

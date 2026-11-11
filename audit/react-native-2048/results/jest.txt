@@ -1,0 +1,10 @@
+PASS __tests__/deviceBuild.test.tsx
+PASS __tests__/useBotlish2048.test.tsx
+PASS __tests__/generatedModule.test.ts
+PASS __tests__/unavailable.test.ts
+
+Test Suites: 4 passed, 4 total
+Tests:       34 passed, 34 total
+Snapshots:   0 total
+Time:        0.728 s, estimated 1 s
+Ran all test suites.

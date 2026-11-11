@@ -1,0 +1,11 @@
+// directions.ts -- the self-test's moves (0 left, 1 right, 2 up, 3 down):
+// 400 drawn once with Python's random.Random(2048). The CI replays the same
+// string through the Botlish interpreter and compares every snapshot.
+export const seed = 42;
+// digest.ts of the interpreter's 401 snapshots of this game (newGame(seed),
+// then every move): the self-test checks the module's against it, on any
+// device. tests/react-native-package.test's rn-selftest-oracle-digest
+// recomputes it from the interpreter; change it with the rules or the moves.
+export const oracleDigest = 'fbee79e6';
+export const directions =
+  '2332120001011132330013102321113000011010230030030013221030222113111330030012220222130231202030112330021202111200301011132103333222002122132130301220030213003231003222110113231112213212022311121330010120003323201110131322110222002102312001201020303221021313202201033123003101100000113320113312131233320132022213211230322033022303212222302322210033122310010013010220330000023223101133010010213323100232';

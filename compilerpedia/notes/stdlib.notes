@@ -1151,19 +1151,41 @@ line = "done".append_char('!').append_char('\n')
 
 @topic stdlib.std::str::encode_utf8
 title: -
-summary: The UTF-8 encoding of a String as a List of byte values (each a std::byte::Byte, 0..255), written s.encode_utf8().
+summary: The UTF-8 encoding of a String as a List of byte values (0..255), written s.encode_utf8(); std::abi::bytes::decode_utf8 turns UTF-8 bytes back into a String.
 index: stdlib
-keywords: utf-8; utf8 bytes; encode; string to bytes; byte count
-related: concept.strings stdlib.module.std::byte stdlib.std::abi::bytes::from_list stdlib.std::str::char_at
+alias: encode utf8; encode utf-8; utf-8 encoding; string to bytes
+keywords: utf-8; utf8 bytes; encode; byte count; decode; bytes to string; utf8 round trip
+related: concept.strings stdlib.module.std::byte stdlib.std::abi::bytes::from_list stdlib.std::abi::bytes::decode_utf8 stdlib.std::str::char_at rule.type-argument
 
 == NOTES
-The general byte-level view of a String: one Int per byte, in order. Its
-static type is List[std::byte::Byte], so it feeds std::abi::bytes::from_list
-(the bytes a write(2) or a C call takes) and ascii:: classification
-directly. Its length is the String's size in bytes, not its character count.
-There is no decoding operation back from bytes to a String. To classify
-characters, prefer std::str::char_at, which reads a character without
-building a List.
+The general byte-level view of a String: one Int per byte of its UTF-8
+encoding, in order, each in 0..255 ("é" is [195, 169]). Its length is the
+String's size in bytes, not its character count. It never fails: every
+String has exactly one UTF-8 encoding. To classify characters, prefer
+std::str::char_at, which reads a character without building a List.
+
+Its static type depends, today, on what the compilation has loaded. When
+the program has loaded std::byte -- an `import std::byte` in any of its
+files, or an import of a module that loads it, such as std::abi::bytes --
+it is List[std::byte::Byte]; otherwise it is the plain `list`, whose
+elements the compiler knows nothing about. The values are the same either
+way; only what the compiler can prove about them differs. So where an
+element must be proven a Byte (a std::byte::Byte parameter, an index into
+a 256-entry table, std::abi::bytes::from_list's List[std::byte::Byte]),
+import std::byte or std::abi::bytes.
+
+The way back is std::abi::bytes::decode_utf8, which takes a
+std::abi::bytes::Bytes: make one from the List with
+std::abi::bytes::from_list. That needs a List[std::byte::Byte]: List
+element types are held exactly (rule.type-argument), so a List[int] such
+as the literal [104, 105] is not accepted -- std::byte::from_int converts
+each Int, and encode_utf8's own result already has the type. decode_utf8
+is strict: bytes that are not well-formed UTF-8 fail with the declared
+error InvalidUtf8, which a caller handles or declares like any declared
+error; no replacement character is inserted, and nothing crashes. The two
+directions have different contracts: encoding is total, decoding is not,
+so decode_utf8(from_list(s.encode_utf8())) == s for every String s, while
+a List of bytes need not encode any String.
 
 == EXAMPLES
 @example accept
@@ -1172,6 +1194,38 @@ import std::str
 
 ["Aé".encode_utf8(), "€uro".encode_utf8().length(), "€uro".length()]
 @value [[65, 195, 169], 6, 4]
+@end
+
+@example accept
+import std::abi::bytes
+import std::byte
+import std::str
+
+fn text_of(utf8: List[std::byte::Byte]) -> str errors InvalidUtf8:
+    std::abi::bytes::decode_utf8(std::abi::bytes::from_list(utf8))
+
+good = text_of("héllo".encode_utf8()):
+    on InvalidUtf8:
+        "not UTF-8"
+bad = text_of([std::byte::from_int(255)]):
+    on InvalidUtf8:
+        "not UTF-8"
+[good, bad]
+@caption Encode, then decode: invalid UTF-8 is the declared error InvalidUtf8
+@value ["héllo", "not UTF-8"]
+@end
+
+@example reject
+import std::str
+
+fn needs_text(t: str) -> str:
+    t
+
+needs_text("é".encode_utf8())
+@caption Without std::byte loaded the compiler knows only the plain list
+@error CORE SEMANTIC TYPE
+@at 6:12
+@message *(argument type: list)
 @end
 
 @topic stdlib.std::str::char_at
@@ -1271,19 +1325,29 @@ text = "7-"
 title: -
 summary: The UnicodeChar operations: std::char::scalar_value, a character's Unicode scalar value as an Int, and the character classes std::char::is_tcl_alpha and std::char::is_tcl_alnum.
 index: stdlib
-keywords: character functions; char functions; unicode character; character class
-related: concept.strings stdlib.std::str::char_at stdlib.std::str::append_char stdlib.std::char::is_tcl_alpha stdlib.std::char::is_tcl_alnum
+alias: char from int; character from integer; int to char; chr; character from code point
+keywords: character functions; char functions; unicode character; character class; code point to character
+related: concept.strings stdlib.std::str::char_at stdlib.std::str::append_char stdlib.std::char::is_tcl_alpha stdlib.std::char::is_tcl_alnum stdlib.std::char::scalar_value stdlib.std::abi::bytes::decode_utf8
 
 == NOTES
 `char` has no module file: its members are intrinsics. A UnicodeChar is
 written as a character literal ('a', '\n', '😀') and read from a String with
-std::str::char_at; it becomes text with std::str::append_char. There is no
-conversion from an Int to a UnicodeChar. A character is classified with
-std::char::is_tcl_alpha and std::char::is_tcl_alnum (Tcl 9's [:alpha:] and
-[:alnum:], the classes the temporary std::str forms decide for a
-one-character String), compared with character literals (c == '_'), or
+std::str::char_at; it becomes text with std::str::append_char. A character
+is classified with std::char::is_tcl_alpha and std::char::is_tcl_alnum (Tcl
+9's [:alpha:] and [:alnum:], the classes the temporary std::str forms decide
+for a one-character String), compared with character literals (c == '_'), or
 measured with std::char::scalar_value (with the byte-level ascii::
 predicates for an ASCII scalar).
+
+There is no conversion from an Int to a UnicodeChar, and no escape that
+spells a character by its number (concept.strings lists the escapes). A
+character comes from a literal, which may hold any Unicode scalar value
+directly ('é', '😀'), or from a String (std::str::char_at). A program that
+has only the number must write the character's UTF-8 bytes itself and
+decode them: std::abi::bytes::decode_utf8 of std::abi::bytes::from_list of
+the bytes, then char_at(0) -- each step with its declared error
+(InvalidUtf8, IndexNotFound) to handle, although bytes made correctly
+cannot fail.
 
 @topic stdlib.std::char::scalar_value
 title: -
@@ -2524,6 +2588,42 @@ part = std::byte_store::from_list("abcdef".encode_utf8()).slice(1, 4):
         std::byte_store::from_list([])
 part.byte_count()
 @value 3
+@end
+
+@topic stdlib.std::abi::bytes::decode_utf8
+title: -
+summary: The String whose UTF-8 encoding is a Bytes value's bytes, or the declared error InvalidUtf8: the inverse of std::str::encode_utf8.
+index: stdlib
+alias: decode utf8; decode utf-8; utf-8 decoding; utf8 to string
+keywords: decode; bytes to string; text from bytes; InvalidUtf8; utf-8; from_list
+related: stdlib.std::str::encode_utf8 stdlib.std::abi::bytes::from_list stdlib.module.std::abi::bytes stdlib.module.std::byte concept.strings
+
+== NOTES
+Takes a std::abi::bytes::Bytes; std::abi::bytes::from_list makes one from
+a List[std::byte::Byte], such as std::str::encode_utf8's result (with
+std::abi::bytes imported, std::byte is loaded and that result has the
+type). The List's element type must be exactly std::byte::Byte: a List of
+plain Ints is converted element by element with std::byte::from_int.
+
+Strict: ill-formed UTF-8 -- an overlong form, an encoded surrogate, a
+value above U+10FFFF, a truncated sequence, a stray continuation byte --
+is the declared error InvalidUtf8, which the caller handles or declares.
+Nothing is replaced, skipped or normalized, and it never crashes. This is
+the operation to use for bytes that really are UTF-8 from elsewhere (a
+file, a socket, a C buffer). Building text from a program's own Strings
+through bytes works too, but its InvalidUtf8 handler is then dead code
+(task.string-concatenation).
+
+== EXAMPLES
+@example accept
+import std::abi::bytes
+import std::byte
+
+bytes = std::abi::bytes::from_list([std::byte::from_int(104), std::byte::from_int(195), std::byte::from_int(169)])
+std::abi::bytes::decode_utf8(bytes):
+    on InvalidUtf8:
+        "not UTF-8"
+@value "hé"
 @end
 
 @topic stdlib.std::byte_store::decode_utf8
@@ -4663,6 +4763,21 @@ summary: An empty MutableVector[str]: the test framework's typed empty vector (a
 index: stdlib
 keywords: empty vector; typed empty vector
 related: stdlib.std::mutable_vector::from_list stdlib.module.std::test
+
+@topic stdlib.std::test::joined
+title: -
+summary: PARTS joined by SEPARATOR: a helper of the golden-test library for short test texts, quadratic in the text's length; not a way to build long text.
+index: stdlib
+keywords: join; test helper
+related: stdlib.module.std::test task.string-concatenation
+
+== NOTES
+A helper of the test framework (stdlib/test.bot), where it joins the
+short texts of test reports. It copies the text built so far for every
+part, so its cost grows with the square of the result's length
+(natively, 64000 three-character parts copy 6.1 GB): production code that
+joins many Strings extends one String instead (task.string-concatenation).
+std::str itself has no join operation.
 
 @topic stdlib.std::test::no_results
 title: -

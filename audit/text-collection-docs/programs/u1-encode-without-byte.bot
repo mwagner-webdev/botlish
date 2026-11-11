@@ -1,0 +1,6 @@
+import std::str
+
+fn probe(t: str) -> str:
+    t
+
+probe("é".encode_utf8())

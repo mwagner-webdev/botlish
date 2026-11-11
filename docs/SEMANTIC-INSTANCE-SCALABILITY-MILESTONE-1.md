@@ -338,6 +338,24 @@ rewind. `tests/applied-type-bound.test` passes under the rollback audit as
 well as without it, and the bound's fuzzer finds nothing under the audit
 (section 6.1).
 
+### 3.9 Merging main's DISCARDED-MUTATION warning (2026-11-11)
+
+Main then gained, from 4bb9890 to db3599ed, the DISCARDED-MUTATION warning
+(WARNINGS-DISCARDED-MUTATION-MILESTONE-1.md: hir/discarded.tcl and its
+hooks in hir/hir.tcl, hir/warnings.tcl and hir/interchange.tcl), the
+process_linux package, the text and collection documentation (a declared
+result's TYPE diagnostic now names the inferred type, through
+`hir::semantic::ShowType`, which this branch leaves as it was) and the React
+Native integration. The merge had no conflict.
+
+One addition could have cost the region-local walks what they saved:
+`hir::BuildFull` now keeps the checked program as written,
+`checkedSource`, a second reference to the HIR's tables, until
+`hir::warnings::run` drops it. An instance walk that ran while it exists
+would copy the expression table at its first write. None does: in
+mutable-vector.bot (1,162 walks) and fold-loops.bot (872 walks), both
+programs that keep the snapshot, no walk ran while it existed.
+
 ## 4. Invariants and what bounds the analysis
 
 * The HIR is authoritative and unmodified by an instance walk: every walk
@@ -414,6 +432,7 @@ and the branch head for the tests.
 | `tests/local.tcl` on the tree merged with main again (89c4298, section 3.7; 4 jobs) | 0 failures: Tcl tests 9,247 passed on interp and 9,242 on compile; 119 golden suites, 5,682 / 5,682 / 5,590 / 5,692 tests passed on interp / compile / cranelift-generic / cranelift. The run reached its two-hour background limit with `warning-gate.test` still running, which then passed alone on both passes (6 of 6 each) |
 | 89c4298: `tests/depth-safe-nesting.test`, `semantic-instances.test` (also under the rollback audit), `static-economics.test`, `traits.test`, `affine.test`, `loop-clause-binding-types.test`; `tools/mutant-catalogs.tcl`; `host-depth-decides-instances` through its harness; `merge.tcl -check 1`; `tools/compilerpedia.tcl check` | 52, 96 (and 96), 94, 112, 48 and 18 passed; 100 catalogs, 3,401 mutants, 0 problems; killed by `dsn-census-guarded`; 13,573 rows, consistent; 1,295 topics, 763 examples, 0 problems |
 | `tests/local.tcl` on the tree merged with main a third time (bbb95fd, section 3.8, the native driver rebuilt; 4 jobs) | 0 failures: Tcl tests 9,333 passed on interp and 9,328 on compile; 119 golden suites, 5,682 / 5,682 / 5,590 / 5,692 tests passed on interp / compile / cranelift-generic / cranelift. As before, the run reached its two-hour background limit with `warning-gate.test` still running on both passes; alone, it passed 6 of 6 on each |
+| the tree merged with main a fourth time (db3599ed, section 3.9): `semantic-instances.test` (also under the rollback audit), `discarded-mutation.test` (also under the rollback audit), `text-collection-docs-diagnostics.test`; `merge.tcl -check 1`; `tools/mutant-catalogs.tcl`; `tools/compilerpedia.tcl check`; `tests/local.tcl` over every test file and golden suite main changed since the third merge | 96 and 70 passed, both ways, and 24; 13,722 rows, consistent; 106 catalogs, 3,599 mutants, 0 problems; 1,298 topics, 776 examples, 0 problems; the local run was still running when the merge was pushed (27 of its 51 items passed, 0 failed); its result follows in section 6.5 |
 | bbb95fd (section 3.8): `semantic-instances.test` and `applied-type-bound.test`, each also under the rollback audit; `audit/applied-type-bound/tools/fuzz.tcl -seed 1`, `2`, `3` under the audit; `tools/mutant-catalogs.tcl`; `merge.tcl -check 1` | 96 and 34 passed, both ways; 60 programs each, 0 failures; 102 catalogs, 3,475 mutants, 0 problems; 13,628 rows, consistent |
 | merged tree: `tests/loop-clause-binding-types.test` (also under the rollback audit), `audit/loop-binding-types/tools/mutate.tcl`, `tools/mutant-catalogs.tcl`, `merge.tcl -check 1`, `tools/compilerpedia.tcl check` | 18 of 18 both ways; 14 of 14 mutants killed; 97 catalogs, 3,308 mutants, 0 problems; 13,549 rows, consistent; 1,295 topics, 760 examples, 0 problems |
 
@@ -552,7 +571,7 @@ them at 10:46:
 | `icy-tower-macos.yml` | 42769079434 | every step passed but the graphical acceptance, whose `restart` case passed 9 of its 10 checks: "Right reaches the game: the player was not found in both captures (press 3)". The headless simulation, the oracle, the executable's tests, the SDL call trace and every other graphical and LaunchServices case passed, so the game the compiler built behaves as specified, and what failed is the session's reading of a capture. The run is superseded by the third merge's, which plays the same cases again |
 
 The runs that count are the third merge's, at bbb95fd (dispatched 10:47
-UTC). As of 23:40 UTC:
+UTC). Every run passed (the last finished 23:40 UTC on 2026-11-10):
 
 | workflow | run | state |
 |---|---|---|
@@ -562,7 +581,7 @@ UTC). As of 23:40 UTC:
 | `static-decisions.yml` (dispatched) | 42802037262 | passed: batched and sequential agree on every golden suite (mutable-array.bot's job and the four shards) |
 | `macos-arm64.yml` (dispatched) | 42802040876 | passed, every job: smoke (Tier A, the canary among its steps) and the Linux control, the five acceptance shards (Tier B), the system linker (also under GC stress), Botlish.app (its smoke, FFI, acceptance and comparison scripts and the ad hoc release stages), Botlish.app without developer tools, main-thread startup and static SDL3 through Botlish.app |
 | `tests.yml` (dispatched) | 42802026983 | passed, every job: canary (mutant catalogs, warning gate, canary selection), `tests (interp)` and `tests (compile)`, the four golden shards, stub-linked and system-linked executables (also under GC stress), native Rust unit tests (and the driver without its JIT), cranelift and cranelift-generic coverage, the method-call decision job (its tests, oracle and fuzzer, and the golden suites under the reference audit). Its GC-stress jobs run on pushes to main only |
-| `tests-arm64.yml` (dispatched) | 42802031961 | 12 of 13 jobs passed: canary, interp, compile, GC stress on interp, cranelift and cranelift-generic coverage, the four golden shards, native Rust unit tests (also under GC stress), system-linked executables. GC stress on compile was lost to the runner: "The runner has received a shutdown signal", exit 143, during `event-loop.test`, with no test failure before it; rerun once: in progress since 20:08 |
+| `tests-arm64.yml` (dispatched) | 42802031961 | passed, every job: canary, interp, compile, GC stress on interp and on compile, cranelift and cranelift-generic coverage, the four golden shards, native Rust unit tests (also under GC stress), system-linked executables. GC stress on compile passed in the run's second attempt: the first was lost to the runner ("The runner has received a shutdown signal", exit 143, during `event-loop.test`, with no test failure before it), and the job was rerun unchanged |
 
 ## 7. Remaining limits and known problems
 

@@ -1,0 +1,7 @@
+import std::abi::bytes
+import std::byte
+
+bad = std::abi::bytes::decode_utf8(std::abi::bytes::from_list([std::byte::from_int(255)])):
+    on InvalidUtf8:
+        "invalid"
+bad

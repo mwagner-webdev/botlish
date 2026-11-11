@@ -1,0 +1,12 @@
+fn f(c: bool) -> int:
+    if c:
+        return "early"
+    1
+
+fn g(c: bool) -> str:
+    if c:
+        "text"
+    else:
+        2
+
+[f(true), g(false)]

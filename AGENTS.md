@@ -1078,6 +1078,42 @@ computed bools, follow exact values, group per callee, warn on a declaration
 without call evidence, print a flag spelling, or add a fixit or an opt-out
 (FLAGS.md, "Boolean arguments", records the graduation criteria).
 
+`DISCARDED-MUTATION` (WARNINGS-DISCARDED-MUTATION-MILESTONE-1.md;
+hir/discarded.tcl the facts, hir/warnings.tcl the pass) reads the checked
+program as written -- a trait program's `traitSource`, any other program's
+`checkedSource`, which hir::BuildFull keeps (for a program that uses a
+mutable collection) before the elaborations rename a fold's intermediate
+and rewrite MutableMap loops, and which `hir::warnings::run` drops from the
+HIR every compilation returns (interchange text leaves it out too) -- and
+reports two proven facts: a mutation (hir::mutvec's `place` receivers and
+place arguments, written calls only) whose every destination is a place
+that dies with its scope and is its path's last use
+(`hir::mutvec::NoLaterUse`), whose value is discarded and whose callee is
+confined (only its own places and its place parameters, transitively: no
+context, function value, syscall, C call, yield or affine value); and a
+fold's `continue` or bare `break` that every path reaches after mutating the
+intermediate (a must-walk of the iteration, never `FoldExitsClean`, which
+answers another question). Keep it so: never warn on a mutation some path
+reads, on a place parameter's or a context's, on a call with another
+effect, on anything affine, or on an exit only some paths reach after the
+mutation; never read a name or a spelling (`push`, `set`); never analyze an
+elaborated HIR as if it were written (`hir::discarded::Source` declines
+one); no opt-out, no fixit, no claim that the call may be deleted (its
+failure stays the program's). If you change any of that, `NoLaterUse` or
+`UseMap`, how a fold, a loop, a handler or a place parameter binds, the
+registry's ownership roles or runtime tags, `checkedSource`, or the
+completion analysis's `reachedExprs`, run `tests/discarded-mutation.test`,
+`audit/discarded-mutation/tools/fuzz.tcl` (several seeds: its model is its
+own liveness and must-walk over the statements it generated) and
+`audit/discarded-mutation/tools/mutate.tcl` (every mutant in its
+`mutants.txt` must still apply and be killed by a test its `!!` line names:
+update a mutant's text when you change the code it mutates, keeping it a
+mutant of the same rule), and the warning gate.
+`audit/discarded-mutation/tools/census.tcl` (and `test-census.sh` for the
+Tcl test files' programs) re-takes the repository census against
+`audit/discarded-mutation/census.tsv`; `bench/discarded-mutation.tcl` the
+compile-time costs.
+
 ## The warning gate
 
 The shipped stdlib, libraries, examples and benchmarks compile clean under
@@ -2063,7 +2099,7 @@ and no acceptance depends on one.
   the host's tools see them), `tests/platform/tier.tcl smoke`, the canary)
   and the same smoke on ubuntu as a control; a push to main and a
   dispatched run (`workflow_dispatch` on the branch) also Tier B
-  (`tier.tcl acceptance`, five shards), the system linker and the
+  (`tier.tcl acceptance`, six shards), the system linker and the
   application's jobs. Locally, `tclsh9.0
   tests/platform/tier.tcl smoke` takes seconds, and `tier.tcl X.test
   Y.bot` runs any file or suite the way CI does.
@@ -6574,6 +6610,76 @@ installs or links (`audit/http-client/cleanroom/cleanroom.sh image`, then
 after `single/build.sh`: the report's "Clean room").
 `audit/http-client/tools/measure.tcl` regenerates the measurements.
 
+## The process_linux package (supervised child processes)
+
+`packages/process_linux` is the official package for launching,
+supervising, talking to and terminating external processes on Linux x86-64
+(PROCESS-LINUX-PACKAGE-MILESTONE-1.md; its README.md and GUIDE.md are the
+user's documentation): a Botlish module over a C adapter
+(`native/process_linux.c`, built on the author's side into
+`native/libprocess_linux.a`: tools/process-linux.tcl for tests,
+`tools/package-repository.tcl`'s `author::process_linux` for the release),
+scheduled by the program's own event loop through the Linux driver package.
+It grew from the census MANAGED-SUBPROCESS-AND-EVENT-LOOP-CENSUS-
+MILESTONE-1.md (audit/managed-subprocess, which stays the experiment).
+Keep it so:
+
+* No language, compiler or standard-library change for processes, and no
+  second scheduler: every pipe and the child's exit (its pidfd) are
+  event_loop_linux watches; no polling, no thread, no signal handler, no
+  SIGCHLD handler, never `waitpid(-1)` or `waitid(P_ALL)`. A stream that
+  keeps delivering yields to the loop every `burst` chunks (`fair`): never
+  drop that.
+* No shell, no PATH search: a command is an executable path and an exact
+  argument vector; a NUL in any item is InvalidCommand before anything
+  starts. Bytes stay bytes: nothing decodes, splits or accumulates a
+  stream in the package.
+* Identity safety: a child is signalled only through its pidfd (group
+  signals with PIDFD_SIGNAL_PROCESS_GROUP; before Linux 6.9 kill(-PGID),
+  only while the leader is unreaped), and reaped only once its supervision
+  is over; never signal a PID number, never signal after the reap, never
+  use glibc's `pidfd_spawn` (it leaks its pidfd when exec fails, where
+  glibc lacks its fix: the testing build keeps it as a negative control,
+  reported, never required). A kernel without
+  pidfds, or a process whose SIGCHLD is ignored, is Unsupported -- never a
+  fallback to PID numbers.
+* Ownership: ChildOwner is an affine resource whose release (also at its
+  lexical scope's end) sends SIGTERM and hands a running child to the
+  reaper task (grace, SIGKILL, reap, retire); a cleanup never waits. The
+  identity (Child) is StaleChild once its owner is released, at once.
+  `detach` is the only way to outlive the owner. When supervision ends,
+  members of the child's group still running once the leader exited are
+  killed. Interrupt cancels waits, never the child.
+* Threads: a child belongs to the thread (the token, never a pthread_t)
+  that spawned it; another thread's call is refused; a thread's end kills
+  and reaps the children it still supervises (`thread_ended`), and process
+  exit sends SIGKILL to every supervised group (`process_ending`). Child is
+  never sendable. No process-wide subreaper, cgroup or PTY in this package.
+* Authority: starting a process requires the installed Processes context;
+  every extern is `private`. The released archive defines exactly the
+  module's `pl_*` functions and reads no environment variable; fault bits
+  and probes (`pl_t_*`) exist only with PL_TESTING (tests/process/probe.bot).
+* The adapter is built `-Werror`: a mutant of it must leave no variable
+  unused, or its kill is a build failure, which the harness reports
+  NOT-BUILT.
+
+If you change packages/process_linux, tools/process-linux.tcl or the
+recipe, run `tests/process-linux.test` (Linux x86-64, cc; its tty tests
+need python3; it includes GC stress and the documentation's programs),
+`audit/process-linux/tools/fuzz.tcl` (several seeds, once with
+`-gc-stress 1`), `audit/process-linux/tools/mutate.tcl` (every mutant in
+its `mutants.txt` must still apply and be killed by a test its `%%` line
+names: update a mutant's text when you change the code it mutates, keeping
+it a mutant of the same rule), the warning gate's view of the module (a
+program importing it compiles under `-warnings error`), and, after
+`single/build.sh`, the clean room (`audit/process-linux/cleanroom/
+cleanroom.sh image`, then `repository.sh OUT RELEASES` and `cleanroom.sh
+run single/out/botlish OUT RESULTS`). `process_linux` 0.1.0 is recorded in
+packages/RELEASES.tsv: any change under `packages/process_linux` (its
+documentation included) is a new version, built in the pinned author image
+(`tools/package-build/author.sh build OUT -release process_linux`).
+`bench/process-linux.tcl` regenerates the measurements.
+
 ## External tools and target support packages
 
 A package may carry tools and target runtime artifacts
@@ -6655,6 +6761,104 @@ the driver's runtime archive, and, after `single/build.sh`, the clean room
 single/out/botlish`, then `audit/external-tools/cleanroom/cleanroom.sh
 single/out/botlish OUT/repo RESULTS`; the single-executable workflow's
 build job runs both).
+
+## The React Native integration (botlish_react_native)
+
+`integrations/react-native/` is the external tool package
+`botlish_react_native` (BOTLISH-REACT-NATIVE-2048-PACKAGE-MILESTONE-1.md;
+its README is the tool's documentation). Its protocol 1 tool
+`react-native` turns a Botlish native library into a React Native New
+Architecture npm package: a Pure C++ TurboModule, Android arm64-v8a. It
+reads the library's manifest (schema 2), header and Android AArch64 shared
+object. `examples/react-native/` holds the 2048 facade (`2048/game.bot`), a
+second, unrelated library (`textkit/textkit.bot`) and the React Native
+0.88.1 app that plays 2048 through the generated package
+(`app/`, `useBotlish2048`). Keep it so:
+
+* Nothing of React Native enters the compiler, the runtime, the standard
+  library or the single executable. No Hermes, Node, Gradle, CMake or JNI
+  knowledge, no compiler pass, no export or ABI change made for it. The
+  compiler never loads the tool, and installing it runs nothing.
+* The tool knows Botlish through the request and the manifest only. It
+  reads no source, HIR, compiler internals or checkout file, and its
+  templates are compiled in (`src/embed.c`). It checks every fact before it
+  writes a byte:
+  - the manifest's schema, C ABI version, target and runtime ABI;
+  - the contracts (thread-affine, reentrancy refused, no callbacks, no
+    native dependencies);
+  - every export's C types and ownership;
+  - every artifact's SHA-256;
+  - the shared object's ELF: AArch64, 16 KiB segments, its SONAME, Bionic's
+    libraries only, its C ABI exported.
+
+  It refuses what it cannot read, under a stable `RN-*` code, never
+  guessing a type or an ownership. No function name, method list or 2048
+  rule is built in: names come from the manifest and the options. A new
+  boundary type is a new mapping with its tests, never an `any`.
+* The package's native interface is React Native's own. The app's Codegen
+  generates it from the spec (`includesGeneratedCode` false). The package is
+  a pure C++ dependency of autolinking; never ship Codegen output, a Gradle
+  module, Java or Kotlin, and never patch `node_modules` or React Native.
+  The React Native versions it generates for are a table (`reactNatives`):
+  a version not in it is refused, never assumed compatible.
+* The generated C++ is two layers. The core (`MODULECore`) knows no
+  JavaScript engine. It owns the instance's thread affinity: a call from
+  another thread is refused before the C ABI is entered, and the instance
+  is destroyed on its own thread only (at once, at that thread's next call,
+  or at its exit, never by a foreign thread). It also owns ownership (RAII:
+  every owned result and error released on every path) and the number and
+  string rules:
+  - an int is a safe integer, never rounded;
+  - a float64 is finite;
+  - a string crosses by length, never by NUL.
+
+  The TurboModule only turns a failure into a JavaScript error. Never make
+  an instance `Send`, lock it for another thread, or destroy it from one.
+  Never return a pointer into a Botlish VM to JavaScript, and never fall
+  back to JavaScript when the native module is missing (`BotlishError`
+  category `unavailable`).
+* The 2048 rules stay Botlish's. The facade adds the played game's rules
+  (seeded spawns, two starting tiles, the end and the win) over the
+  unchanged engine, and the hook and the screen compute nothing of them.
+  The hook calls the library only in effects and event handlers, never
+  while rendering.
+* Android: arm64-v8a only. The CMake file refuses another ABI, an API level
+  below the package's, and a library that is not the recorded one. The APK
+  carries the package's library as the Android build strips it
+  (`llvm-strip --strip-unneeded`: `tools/inspect-apk.sh` checks it byte for
+  byte), 16 KiB-aligned and zip-aligned. The example app extracts its
+  native libraries at installation (`useLegacyPackaging`). Left in the
+  APK, an arm64-v8a-only app does not start on a native-bridge device:
+  React Native's SoLoader looks for them under the device's primary ABI.
+  Keep extraction, which `inspect-apk.sh` checks, until SoLoader looks
+  under the process's own ABI.
+* The device builds (`-PbotlishDevice=plain|gc-stress`, the app's
+  build.gradle) are for a phone without adb: a Self-test button, the
+  result on the screen, and for gc-stress `BOTLISH_NATIVE_GC_STRESS=1` set
+  in `MainApplication` as an application of its own. Without the property
+  the build is the acceptance's: never let a device build's button,
+  variable or package reach it. The self-test checks its snapshots on the
+  device by `oracleDigest` (src/directions.ts), which must stay the
+  interpreter's (`rn-selftest-oracle-digest`). `tools/device-builds.sh`
+  runs both on the workflow's emulators and, over USB, on a phone.
+
+If you change `integrations/react-native/`, `examples/react-native/` or the
+native library manifest or C ABI it reads, run
+`tests/react-native-package.test`. It needs ANDROID_NDK_ROOT. Give it
+BOTLISH_RN_PACKAGES, a directory of the prebuilt Android target support
+and game2048 packages, else it builds them. Give it BOTLISH_RN_APP, an app
+`audit/react-native-2048/tools/build.sh` prepared, for its Jest and
+TypeScript tests. Also run `audit/react-native-2048/tools/mutate.tcl`, with
+the same environment (every mutant in its `mutants.txt` must still apply
+and be killed by a test its `!!` line names: update a mutant's text when you
+change the code it mutates, keeping it a mutant of the same rule). Then push
+and read the `react-native 2048` workflow: `build.sh` from checkout to APK,
+then `tools/android-acceptance.sh` on an Android emulator for each image.
+The images are x86_64 ones that run the arm64-v8a APK through Android's
+native bridge, one with 4 KiB and one with 16 KiB pages. After
+`single/build.sh`, also run the clean room
+(`audit/react-native-2048/cleanroom/cleanroom.sh single/out/botlish REPO
+RESULTS`).
 
 ## Diagnostic recovery
 
@@ -7032,6 +7236,48 @@ native, a public declaration):
 The check catches only the mechanical case (an alias that is an
 operation's name); a broader claim -- "no tasks" while std::event_loop
 schedules them -- is found only by reading the pages, so read them.
+
+## Declared-result diagnostics and the text documentation
+
+A declared result that is not proven is reported with both sides of the
+comparison (TEXT-AND-COLLECTION-DOCUMENTATION-AND-DIAGNOSTICS-MILESTONE-1.md):
+`function result does not prove declared type T (result type: R, facts:
+F); WHY`, as an argument's TYPE states its type
+(`hir::range::verifyDeclaredResults`). Keep it so:
+
+* R is the generic body's own inferred result (the block's
+  `inferredResultType`: every normal completion joined) -- exactly what the
+  admission proof was given -- presented as an argument's type is
+  (`hir::semantic::ShowType` of `ShownArgType`, `FactsClause`,
+  `MismatchClause`): never one branch's type, a semantic instance's (an
+  instance types a scratch copy), the declared type or a refinement's
+  carrier. Format it only on a mismatch, never add a second diagnostic for
+  it, and never let the message change what is accepted, poisoned or
+  reported: a poisoned or unresolved result keeps its one primary
+  diagnostic.
+* The pages that state facts of the compiler about strings, UTF-8, text
+  construction, literal escapes and List typing are checked against it by
+  tests/text-collection-docs-diagnostics.test: the escape table of
+  `concept.strings` against the lexer, `encode_utf8`'s static type (List
+  of Bytes only with `std::byte` loaded) against the checker, the costs
+  `task.string-concatenation` states against `native::allocationReport`.
+  A change that makes one false -- a new escape (`\u{...}`), encode_utf8
+  typed whatever is imported, `append_char` carried by construction
+  plans, a `std::str::join`, a `std::char::from_scalar_value` -- rewrites
+  the page in the same change. `std::test::joined` is the test library's
+  (quadratic): never recommend it for production text.
+
+If you change the diagnostic or those pages (or what they state), run
+tests/text-collection-docs-diagnostics.test, `tclsh9.0
+tools/compilerpedia.tcl check`, `tclsh9.0
+audit/text-collection-precision/tools/probes.tcl` and
+`audit/text-collection-docs/tools/mutate.tcl` (every mutant in its
+`mutants.txt` must still apply and be killed by a test its `!!` line names:
+update a mutant's text when you change the code or the page it mutates,
+keeping it a mutant of the same rule); for the diagnostic, also the test
+files and golden suites that pin its text (`grep -rl "does not prove
+declared type" tests`) and `audit/text-collection-docs/tools/compare.tcl`
+before and after (no semantic difference over the corpus).
 
 ## Golden tests (Botlish-native test framework)
 

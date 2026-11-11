@@ -1,0 +1,24 @@
+ndk 27.1.12297006 (the app's build's)
+apk app-release.apk 11285609 bytes sha256 93f9bf41efade7c76b7323e45639530084dcdaba16550b8aeb5fee7ba009d2f5
+abis arm64-v8a
+so libappmodules.so 264680 bytes, LOAD alignment 0x4000 
+so libc++_shared.so 1292904 bytes, LOAD alignment 0x4000 
+so libfbjni.so 177000 bytes, LOAD alignment 0x4000 
+so libgame.so 756136 bytes, LOAD alignment 0x4000 
+so libhermestooling.so 140792 bytes, LOAD alignment 0x4000 
+so libhermesvm.so 2705536 bytes, LOAD alignment 0x4000 
+so libimagepipeline.so 8760 bytes, LOAD alignment 0x4000 
+so libjsi.so 412784 bytes, LOAD alignment 0x4000 
+so libnative-filters.so 277744 bytes, LOAD alignment 0x4000 
+so libnative-imagetranscoder.so 585376 bytes, LOAD alignment 0x4000 
+so libreact_codegen_safeareacontext.so 156440 bytes, LOAD alignment 0x4000 
+so libreactnative.so 7048592 bytes, LOAD alignment 0x4000 
+so libtextkit.so 732104 bytes, LOAD alignment 0x4000 
+botlish libgame.so package sha256 b0f61943e2fae9eb545f673d8e17f7b146fb8fef3803d9424f1ab9c2d61d0ba9 (manifest b0f61943e2fae9eb545f673d8e17f7b146fb8fef3803d9424f1ab9c2d61d0ba9), packaged 7d39ae0436ce482c6abe028a8787d058e0e56606cbfa478357a5a731124679c5, strip-unneeded of the package's 7d39ae0436ce482c6abe028a8787d058e0e56606cbfa478357a5a731124679c5
+botlish libgame.so .text, .rodata and dynamic symbols identical to the generated package's
+botlish libtextkit.so package sha256 d5d4f4c1c71a505f7a7fb82faaf6420060c298bc8321cc58206809ee447ae7d3 (manifest d5d4f4c1c71a505f7a7fb82faaf6420060c298bc8321cc58206809ee447ae7d3), packaged 24fbcfd3328bfee3defb6b33d36df6670d08ffdee01eeeee2e8b790597816c98, strip-unneeded of the package's 24fbcfd3328bfee3defb6b33d36df6670d08ffdee01eeeee2e8b790597816c98
+botlish libtextkit.so .text, .rodata and dynamic symbols identical to the generated package's
+libappmodules.so needs libc++_shared.so libc.so libdl.so libfbjni.so libgame.so libjsi.so liblog.so libm.so libreact_codegen_safeareacontext.so libreactnative.so libtextkit.so 
+libappmodules.so defines 0 Botlish runtime symbols
+zipalign -c -P 16 4: verification successful
+manifest extractNativeLibs true

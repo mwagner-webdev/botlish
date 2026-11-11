@@ -1,0 +1,41 @@
+# golden-sites.tsv -- the 33 DISCARDED-MUTATION warnings of the golden
+# suites (audit/discarded-mutation/census.tsv's golden rows), each classified
+# (WARNINGS-DISCARDED-MUTATION-MILESTONE-1.md, section 12). Every one is
+# retained: the mutating call is the test's subject -- its proof, its
+# failure, its result, or the independence of another copy the test reads --
+# and the golden runner compiles with warnings off, so none changes a test.
+# Classes: proof, failure, independence, result.
+site	reason	root	test	class	why
+tests/golden/collection-reorder.bot:251:13	dead	q	cr-order-snapshot	independence	order() is a snapshot: mutating the copy q and an unrelated set s must change nothing the test reads
+tests/golden/collection-reorder.bot:252:13	dead	s	cr-order-snapshot	independence	order() is a snapshot: mutating the copy q and an unrelated set s must change nothing the test reads
+tests/golden/collection-reorder.bot:365:13	dead	m	cr-proof-established/snapshot	proof	a static compile block whose reorder exists to be proven (REORDER-NOT-PROVEN is the alternative); nothing after it is the test
+tests/golden/collection-reorder.bot:385:13	dead	m	cr-proof-established/validated	proof	a static compile block whose reorder exists to be proven (REORDER-NOT-PROVEN is the alternative); nothing after it is the test
+tests/golden/collection-reorder.bot:415:13	dead	m	cr-proof-established/order-copy	proof	a static compile block whose reorder exists to be proven (REORDER-NOT-PROVEN is the alternative); nothing after it is the test
+tests/golden/collection-reorder.bot:425:13	dead	m2	cr-proof-established/map-copy	proof	a static compile block whose reorder exists to be proven (REORDER-NOT-PROVEN is the alternative); nothing after it is the test
+tests/golden/collection-reorder.bot:426:13	dead	m	cr-proof-established/map-copy	proof	a static compile block whose reorder exists to be proven (REORDER-NOT-PROVEN is the alternative); nothing after it is the test
+tests/golden/collection-reorder.bot:441:13	dead	s	cr-proof-established/set-forms	proof	a static compile block whose reorder exists to be proven (REORDER-NOT-PROVEN is the alternative); nothing after it is the test
+tests/golden/collection-reorder.bot:685:13	dead	m	cr-proof-order-only-and-reads-preserve/reads	proof	a static compile block whose reorder exists to be proven (REORDER-NOT-PROVEN is the alternative); nothing after it is the test
+tests/golden/collection-reorder.bot:697:13	dead	m	cr-proof-order-only-and-reads-preserve/reorders	proof	a static compile block whose reorder exists to be proven (REORDER-NOT-PROVEN is the alternative); nothing after it is the test
+tests/golden/collection-reorder.bot:707:13	dead	m	cr-proof-order-only-and-reads-preserve/order-reordered	proof	a static compile block whose reorder exists to be proven (REORDER-NOT-PROVEN is the alternative); nothing after it is the test
+tests/golden/collection-reorder.bot:994:13	dead	m	cr-proof-function-boundary/observer	proof	a static compile block whose reorder exists to be proven (REORDER-NOT-PROVEN is the alternative); nothing after it is the test
+tests/golden/compiled-values.bot:369:21	dead	y	si-bad-2/raw-array	proof	an untyped writer whose instances are typed per call (si-bad-*): the write to its working copy is the instance being checked
+tests/golden/compiled-values.bot:380:21	dead	y	si-bad-2/fitting-value	proof	an untyped writer whose instances are typed per call (si-bad-*): the write to its working copy is the instance being checked
+tests/golden/compiled-values.bot:429:21	dead	y	si-bad-4/two-fitting-instances	proof	an untyped writer whose instances are typed per call (si-bad-*): the write to its working copy is the instance being checked
+tests/golden/errors.bot:564:21	dead	m	mat-run-7	failure	the operation's IndexNotFound, LowerUnderrun or UpperOverrun (or its success) is the observed outcome; the array is never meant to be read
+tests/golden/mutable-array.bot:1878:21	dead	w	mat-bd-5/write-valid	proof	a write the element-type check admits (mat-bd-5, a refined raw array): the write is what is checked
+tests/golden/mutable-array.bot:2331:25	dead	w	mat-ref-3	proof	a write the element-type check admits (mat-bd-5, a refined raw array): the write is what is checked
+tests/golden/mutable-array.bot:500:17	dead	y	ma-cow-surviving-result	independence	a copy is independent: the test reads the other copy, which the write must not reach
+tests/golden/mutable-array.bot:675:21	dead	w	mat-atk-18/parameter-store	independence	a copy is independent: the test reads the other copy, which the write must not reach
+tests/golden/mutable-array.bot:857:17	dead	m	mutarray-sem-4	independence	a copy is independent: the test reads the other copy, which the write must not reach
+tests/golden/mutable-array.bot:896:17	dead	inner	mutarray-sem-7	independence	a copy is independent: the test reads the other copy, which the write must not reach
+tests/golden/native-aggregates.bot:248:17	dead	a	mutarray-4	result	set's own result (unit) is the observed value
+tests/golden/native-aggregates.bot:261:17	dead	a	mutarray-5	independence	a copy is independent: the test reads the other copy, which the write must not reach
+tests/golden/native-aggregates.bot:293:17	dead	a	mutarray-bounds-3, mutarray-bounds-4 (register_set_out_of_range)	failure	the operation's IndexNotFound, LowerUnderrun or UpperOverrun (or its success) is the observed outcome; the array is never meant to be read
+tests/golden/native-aggregates.bot:320:17	dead	a	mutarray-copy-bounds-1, -2, -3 (register_copy_out_of_range)	failure	the operation's IndexNotFound, LowerUnderrun or UpperOverrun (or its success) is the observed outcome; the array is never meant to be read
+tests/golden/native-aggregates.bot:954:21	dead	arr	paramagg-gc-stress-1	result	a GC workload: 2000 allocating recursive calls keep their values; the final write exercises the array, the string is the result
+tests/golden/nonplace-parameter-mutation.bot:617:17	dead	working	npm-simcity-field-helper/local-copy	independence	the SimCity copied variants: a working copy written and dropped, pinning the old program's lost write (NONPLACE-PARAMETER-MUTATION's second fix, unused)
+tests/golden/nonplace-parameter-mutation.bot:655:17	dead	working	npm-simcity-copy-destination/local-copy	independence	the SimCity copied variants: a working copy written and dropped, pinning the old program's lost write (NONPLACE-PARAMETER-MUTATION's second fix, unused)
+tests/golden/place-parameters.bot:433:21	dead	w	pp-lengths-across-place-calls/outside	proof	the length proof of a disjoint field read after a place call is the test; the cleared field is never read
+tests/golden/stdlib-namespaces.bot:519:13	dead	a	ns-slice-proofs/copy-within-capacities	proof	a static compile block whose copy exists to be proven within capacities
+tests/golden/validators-and-proofs.bot:1143:17	dead	w	bounds-values-agree-unknown/mutable-array-set	failure	the operation's IndexNotFound, LowerUnderrun or UpperOverrun (or its success) is the observed outcome; the array is never meant to be read
+tests/golden/validators-and-proofs.bot:1154:17	dead	w	bounds-values-agree-unknown/mutable-array-copy	failure	the operation's IndexNotFound, LowerUnderrun or UpperOverrun (or its success) is the observed outcome; the array is never meant to be read

@@ -93,6 +93,15 @@
 #                does, only when warnings are on. Diagnostics over facts: no
 #                analysis, lowering or backend reads it, hir::format does not
 #                print it, and a program compiles to the same HIR without it.
+#   checkedSource
+#                the checked program as written, kept by hir::BuildFull for a
+#                source program that uses a mutable collection (and is no
+#                trait program, whose `traitSource` it is) before the
+#                elaborations rewrite it: the HIR the DISCARDED-MUTATION
+#                warning reads (hir/discarded.tcl, WARNINGS-DISCARDED-
+#                MUTATION-MILESTONE-1.md). Nothing else reads it, and
+#                hir::warnings::run drops it from the HIR a compilation
+#                returns (interchange text leaves it out too).
 #   semantic     compiler-internal side table of opportunistic semantic
 #                function instances (semantic.tcl, OPPORTUNISTIC-SEMANTIC-
 #                INSTANCES.md): instances, keys, calls (a call ExprId, in the
@@ -166,8 +175,9 @@
 #             namespace of the code it is in (NS: "" for the entry program),
 #             recorded in every compilation mode for the METHOD-ELIGIBLE
 #             warning (hir/warnings.tcl, WARNINGS-METHOD-ELIGIBLE.md) and read
-#             by nothing else: no analysis, lowering, backend or hir::format
-#             sees it. Calls from core IR carry no `written`.
+#             by the warnings only (MANY-BOOLEAN-ARGUMENTS and
+#             DISCARDED-MUTATION read which calls the program wrote): no
+#             analysis, lowering, backend or hir::format sees it. Calls from core IR carry no `written`.
 #             A method-style call whose only visible functions of that name are
 #             declared `nomethod` stays a call of the written field value and
 #             is the resolution diagnostic NOMETHOD-CALL
@@ -642,6 +652,17 @@ proc hir::BuildFull {nodes options given halt checkedVar {seeds {}}} {
     if {$checked} {
         # Calls of coroutine handles typed as resumes, written out as the
         # resume operation (AFFINE-VALUES.md): what every backend compiles.
+        if {[lindex [dict get $options -origin] 0] ne "ir" && ![dict exists $hir traitSource]
+                && [dict get $hir diagnostics] eq "" && [hir::mutvec::Used $hir]} {
+            # The checked program as written, before the elaborations below
+            # rewrite it (a fold's intermediate renamed, a MutableMap loop a
+            # counted loop of its own): what the DISCARDED-MUTATION warning
+            # reads (hir/discarded.tcl). A trait program's is its
+            # `traitSource`. Nothing else reads it: hir::warnings::run drops
+            # it from the HIR the compilation returns, and interchange text
+            # leaves it out.
+            dict set hir checkedSource $hir
+        }
         hir::coroutines::ElaborateResumes hir
         # MutableVector places (MUTABLE-VECTOR.md): the logical copies a
         # vector-bearing value makes leaving or entering a place, the
@@ -1458,7 +1479,7 @@ proc hir::exprsAt {hir origin} {
 }
 
 apply {{dir} {
-    foreach file {summaries ownership syntax static staticdeps imports resolve flags variadic contexts injection direct privacy coroutines affine resources mutvec iteration relations transfer refcheck hygiene sourcetypes structs enums layouts cabi imprint traits syscall internal borrow foreign errordecls refinements types operators decimal listlength exactvalue signatures modulebinding refine repeatable lower condition format read aot specialize range applied intset emitdfa emission rangerec callables containers semantic exports callbacks threads completions errorsets induction transport escape blockescape stringregion traversal construction cardinality lockstep fold resourceescape warnings recovery methods declarations interchange} {
+    foreach file {summaries ownership syntax static staticdeps imports resolve flags variadic contexts injection direct privacy coroutines affine resources mutvec iteration relations transfer refcheck hygiene sourcetypes structs enums layouts cabi imprint traits syscall internal borrow foreign errordecls refinements types operators decimal listlength exactvalue signatures modulebinding refine repeatable lower condition format read aot specialize range applied intset emitdfa emission rangerec callables containers semantic exports callbacks threads completions errorsets induction transport escape blockescape stringregion traversal construction cardinality lockstep fold resourceescape discarded warnings recovery methods declarations interchange} {
         uplevel #0 [list source [file join $dir $file.tcl]]
     }
 }} $hir::home

@@ -1,0 +1,418 @@
+# Mutants of WARNINGS-DISCARDED-MUTATION-MILESTONE-1.md
+# (audit/discarded-mutation/tools/mutate.tcl): deliberate breaks of the
+# DISCARDED-MUTATION warning's two facts (hir/discarded.tcl) and of the pass
+# and policy that report them (hir/warnings.tcl, hir/hir.tcl). Each must be
+# killed by tests/discarded-mutation.test, by one of the tests its `!!` line
+# names -- the test that states the rule it breaks, never an unrelated
+# failure.
+#
+#   @@ NAME DESCRIPTION
+#   !! TEST ...
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+
+# ---------------------------------------------------------------------------
+# The two facts exist
+
+@@ dm-no-dead the dead-mutation fact is never reported: every B1 reproducer compiles silently again
+!! dm-corpus-discarded-writes dm-local-push dm-explicit-copy-of-value-parameter
+## hir/discarded.tcl
+<<<<
+        lappend findings [dict create reason dead call $e dests $dests binding $binding]
+====
+>>>>
+
+@@ dm-no-fold-exit the fold-exit fact is never reported: a continue or break after a mutation of the intermediate is silent again
+!! dm-corpus-discarded-writes dm-fold-continue-before-and-after dm-fold-break-before-and-after
+## hir/discarded.tcl
+<<<<
+            lappend findings [dict create reason fold-exit exit $x fold $f binding $b mutations $ran]
+====
+>>>>
+
+# ---------------------------------------------------------------------------
+# B1: liveness, value, destinations
+
+@@ dm-ignore-later-read a later read is ignored: every mutation of a dying place is dead, read afterwards or not
+!! dm-local-read-after dm-corpus-silent dm-earlier-mutations-live
+## hir/discarded.tcl
+<<<<
+                    || ![hir::mutvec::NoLaterUse $hir $parent $d [dict get $roots $d]]} {
+====
+                    || 0} {
+>>>>
+
+@@ dm-used-destructive-read every call's value counts as discarded: a pop whose element is used is a dead mutation
+!! dm-destructive-read-used dm-handled-destructive-read dm-corpus-silent
+## hir/discarded.tcl
+<<<<
+    if {[hir::types::kindOf $type] eq "unit"} {
+        return 1
+    }
+====
+    if {1} {
+        return 1
+    }
+>>>>
+
+@@ dm-collected-result-used a value a collecting loop collects counts as used, whatever becomes of the loop's List: the census's c12 is silent again
+!! dm-collected-result dm-corpus-discarded-writes
+## hir/discarded.tcl
+<<<<
+                if {$role ne "seq 1" || [dict exists $node foldBinding]} {
+====
+                if {1} {
+>>>>
+
+@@ dm-ignore-field-paths a destination that is a field path is never analyzed: a struct field's dead push is silent again
+!! dm-nested-field-path dm-corpus-discarded-writes
+## hir/discarded.tcl
+<<<<
+            set path [hir::mutvec::Path $hir $d]
+            if {$path eq ""} continue
+====
+            set path [hir::mutvec::Path $hir $d]
+            if {$path eq "" || [lindex $path 1] ne {}} continue
+>>>>
+
+@@ dm-context-dies a context parameter counts as a place that dies with its function: a context member's push is reported
+!! dm-context-member
+## hir/discarded.tcl
+<<<<
+            return [expr {![hir::mutvec::IsContextParam $hir $b]}]
+====
+            return 1
+>>>>
+
+@@ dm-place-parameter-dies a function's parameter counts as a dying place: a place parameter's mutation inside its function is reported, although the caller owns it
+!! dm-place-parameter dm-place-helper-confined dm-fold-place-helper
+## hir/discarded.tcl
+<<<<
+            return [expr {[dict get $node kind] in {listloop lockloop handle}}]
+====
+            return [expr {[dict get $node kind] in {listloop lockloop handle block}}]
+>>>>
+
+@@ dm-loop-element-lives a loop element counts as a place that outlives the call: the canonical loop-variable push is silent again
+!! dm-corpus-discarded-writes dm-collecting-loop-element dm-nested-loop-inner-element
+## hir/discarded.tcl
+<<<<
+            return [expr {[dict get $node kind] in {listloop lockloop handle}}]
+====
+            return [expr {[dict get $node kind] in {handle}}]
+>>>>
+
+@@ dm-payload-lives a handler's payload counts as a place that outlives the handler: its dead mutation is silent again
+!! dm-handler-payload
+## hir/discarded.tcl
+<<<<
+            return [expr {[dict get $node kind] in {listloop lockloop handle}}]
+====
+            return [expr {[dict get $node kind] in {listloop lockloop}}]
+>>>>
+
+@@ dm-first-place-only a call giving two places is judged by its first: a transfer whose second place is read is reported
+!! dm-place-helper-two-places
+## hir/discarded.tcl
+<<<<
+            if {$binding eq ""} {
+                set binding [dict get $roots $d]
+            }
+====
+            if {$binding eq ""} {
+                set binding [dict get $roots $d]
+            }
+            break
+>>>>
+
+@@ dm-affine-ignored an affine destination or argument is ignored: clearing a collection of resources -- whose cleanups run code -- is reported
+!! dm-affine-collection
+## hir/discarded.tcl
+<<<<
+        if {$x ne "" && [hir::types::IsAffine [hir::typeOf $hir $x]]} {
+            return 1
+        }
+====
+        if {0} {
+            return 1
+        }
+>>>>
+
+@@ dm-unreachable-kept the completion analysis's reachability is ignored: a mutation or an exit under a branch it proves infeasible is reported
+!! dm-unreachable dm-fold-unreachable-exit
+## hir/discarded.tcl
+<<<<
+    set block [dict getdef $owner $e ""]
+    if {$block eq ""} {
+        return 1
+    }
+====
+    set block [dict getdef $owner $e ""]
+    if {1} {
+        return 1
+    }
+>>>>
+
+# ---------------------------------------------------------------------------
+# B1: the callee's effects
+
+@@ dm-place-calls-ignored a call giving a place to a function is no mutation: std::mutable_set::add on a dying set (c12) and a place helper on the intermediate are silent again
+!! dm-corpus-discarded-writes dm-collected-result dm-place-helper-confined dm-mutable-map-and-set dm-fold-place-helper
+## hir/discarded.tcl
+<<<<
+            if {$dests ne {}} {
+                dict set sites $e $dests
+            }
+====
+>>>>
+
+@@ dm-any-place-call-confined every function is confined: a place helper with another effect -- a context, a function value -- is reported
+!! dm-place-helper-context dm-place-helper-calls-a-function-value dm-place-helper-transitive
+## hir/discarded.tcl
+<<<<
+            if {![dict get $confined $f]} continue
+====
+>>>>
+
+@@ dm-unknown-callee-confined a call through a function value is taken for a confined one: a place helper calling one is reported
+!! dm-place-helper-calls-a-function-value
+## hir/discarded.tcl
+<<<<
+                default {
+                    return [list 0 {}]
+                }
+====
+                default {
+                }
+>>>>
+
+@@ dm-not-transitive confinement reads a function's own body only: a helper whose callee calls a function value, or makes a raw syscall, is reported
+!! dm-place-helper-transitive dm-place-helper-io-without-context
+## hir/discarded.tcl
+<<<<
+                if {![dict get $local $h]} {
+====
+                if {0} {
+>>>>
+
+@@ dm-every-tag-a-value an unknown-effect runtime tag counts as a value computation: a place helper whose callee makes a raw syscall is reported
+!! dm-place-helper-io-without-context
+## hir/discarded.tcl
+<<<<
+            if {$tag ni $valueTags} {
+====
+            if {0} {
+>>>>
+
+@@ dm-callable-natives-confined a native that calls an argument (a factory) counts as confined: a place helper handing a function value to generate is reported
+!! dm-place-helper-runs-a-callable-through-a-native
+## hir/discarded.tcl
+<<<<
+        if {[core::native::ownershipRole $name $i] in {factory resume}} {
+====
+        if {0} {
+>>>>
+
+@@ dm-affine-local-confined a function holding an affine value counts as confined: a place helper that drops a resource of its own (its cleanup runs) is reported
+!! dm-place-helper-holds-a-resource
+## hir/discarded.tcl
+<<<<
+        if {[dict get $affine $type]} {
+            return [list 0 {}]
+        }
+====
+>>>>
+
+# ---------------------------------------------------------------------------
+# B2: the fold-exit walk
+
+@@ dm-may-not-must the walk's must-fact joins as "some path" instead of "every path": a mutation in one branch and an exit under another, which may never run together, is reported
+!! dm-fold-branch-paths dm-fold-conditional-mutation-then-exit
+## hir/discarded.tcl
+<<<<
+    set any [expr {[dict get $a any] && [dict get $b any]}]
+====
+    set any [expr {[dict get $a any] || [dict get $b any]}]
+>>>>
+
+@@ dm-one-mutation-on-every-path the must-fact asks for one mutation on every path instead of a mutation on every path: an exit after a different push on each branch is silent again
+!! dm-fold-both-branches-mutate
+## hir/discarded.tcl
+<<<<
+    set any [expr {[dict get $a any] && [dict get $b any]}]
+    set may [dict get $a may]
+    set other [dict get $b may]
+====
+    set may [dict get $a may]
+    set other [dict get $b may]
+    set any [expr {[dict get $a any] && [dict get $b any] && [llength [lmap e [dict keys $may] {if {![dict exists $other $e]} continue; set e}]] > 0}]
+>>>>
+
+@@ dm-exit-whenever-not-clean a fold-exit fact wherever the consumed-fold optimization keeps the entry copy (FoldExitsClean): a mutation that only may precede an exit is reported
+!! dm-fold-branch-paths
+## hir/discarded.tcl
+<<<<
+        set exits [dict create]
+        set state [dict create any 0 may {}]
+        ExitSequence $hir $f $mutations [dict get $node body] state exits
+====
+        set exits [dict create]
+        set state [dict create any 0 may {}]
+        if {![hir::mutvec::FoldExitsClean $hir $parent $f $b]} {
+            set any [lsort [dict keys $mutations]]
+            dict for {x xnode} [dict get $hir exprs] {
+                if {[dict get $xnode kind] in {break continue} && [dict get $xnode target] eq $f} {
+                    dict set exits $x $any
+                }
+            }
+        }
+        ExitSequence $hir $f $mutations [dict get $node body] state exits
+>>>>
+
+@@ dm-inner-loop-exits a loop in the fold's body is walked as if its exits were the fold's: an inner loop's continue after a mutation of the intermediate is reported
+!! dm-fold-inner-loop-exit dm-fold-nested-folds
+## hir/discarded.tcl
+<<<<
+            if {[dict get $node target] eq $f && [dict get $state any]} {
+====
+            if {[dict get $state any]} {
+>>>>
+## hir/discarded.tcl
+<<<<
+            if {[hir::typeOf $hir $x] eq "never"} {
+                set state {top 1}
+            }
+            return
+        }
+    }
+====
+            set inner $state
+            ExitSequence $hir $f $mutations $body inner exits
+            if {[hir::typeOf $hir $x] eq "never"} {
+                set state {top 1}
+            }
+            return
+        }
+    }
+>>>>
+
+@@ dm-read-only-as-mutation an observing collection operation counts as a mutation: reading the intermediate's length before an exit is reported
+!! dm-fold-read-only-and-moved
+## hir/discarded.tcl
+<<<<
+        if {[hir::mutvec::OpKind $hir $e] ne "mutate"} continue
+====
+        if {[hir::mutvec::OpKind $hir $e] eq ""} continue
+>>>>
+
+@@ dm-handler-after-call a handler starts from the state after its handled call: the failed pop's own mutation counts as one the handler's continue discards
+!! dm-fold-handler
+## hir/discarded.tcl
+<<<<
+            set before $state
+            ExitWalk $hir $f $mutations [dict get $node call] state exits
+====
+            ExitWalk $hir $f $mutations [dict get $node call] state exits
+            set before $state
+>>>>
+
+@@ dm-duplicate-reports a mutation a fold exit discards is reported again as dead: one problem, two warnings
+!! dm-fold-dead-and-exit-once
+## hir/discarded.tcl
+<<<<
+        if {[dict exists $reported $e]} continue
+====
+>>>>
+
+# ---------------------------------------------------------------------------
+# The program as written
+
+@@ dm-no-checked-source the checked program before the elaborations is not kept for the warning run: an ordinary program is analyzed only when its elaboration happened to write no copy, and a fold with an exit (copied) never
+!! dm-corpus-discarded-writes dm-checked-source dm-fold-continue-before-and-after
+## hir/hir.tcl
+<<<<
+            dict set hir checkedSource $hir
+====
+>>>>
+
+@@ dm-elaborated-analyzed an elaborated HIR is analyzed as if it were written so (its fold's intermediate renamed, its copies written out)
+!! dm-elaborated-hir-not-analyzed
+## hir/discarded.tcl
+<<<<
+            return ""
+        }
+    }
+    return $hir
+====
+            return $hir
+        }
+    }
+    return $hir
+>>>>
+
+# ---------------------------------------------------------------------------
+# The report
+
+@@ dm-no-related-locations the warnings carry no related location: the dead mutation's binding and the exit's mutations are not named
+!! dm-corpus-discarded-writes dm-fold-several-mutations-one-exit
+## hir/warnings.tcl
+<<<<
+                    [lmap e $mutations {dict get $source exprs $e origin}] \
+====
+                    {} \
+>>>>
+## hir/warnings.tcl
+<<<<
+                if {[lindex $origin 0] eq "file"} {
+                    lappend secondary $origin
+                }
+====
+>>>>
+
+@@ dm-failure-unmentioned the dead-mutation message no longer says that the call can still fail
+!! dm-array-set-can-fail
+## hir/warnings.tcl
+<<<<
+                if {$errors ne ""} {
+====
+                if {0} {
+>>>>
+
+# ---------------------------------------------------------------------------
+# The policy (the warning framework the code joins)
+
+@@ dm-off-runs-passes warnings off runs the passes anyway
+!! dm-mode-off
+## hir/warnings.tcl
+<<<<
+    if {[Mode $mode] eq "off" || [dict get $hir diagnostics] ne ""} {
+        return [dict remove $hir checkedSource]
+    }
+====
+    if {[dict get $hir diagnostics] ne ""} {
+        return [dict remove $hir checkedSource]
+    }
+>>>>
+
+@@ dm-error-not-raised warnings error rejects nothing
+!! dm-mode-error
+## hir/warnings.tcl
+<<<<
+    if {$mode ne "error" || $warnings eq ""} {
+====
+    if {1} {
+>>>>
+
+@@ dm-checked-source-leaks the checked source outlives the warning run: every compiled HIR of a program with a mutable collection carries a second copy of its program into the cache, the compiler service and every comparison of HIRs
+!! dm-checked-source
+## hir/warnings.tcl
+<<<<
+    set hir [dict remove $hir checkedSource]
+    set rejection [Rejection $hir $warnings $mode]
+====
+    set rejection [Rejection $hir $warnings $mode]
+>>>>

@@ -1107,7 +1107,7 @@ std::coroutine::done?(step)
 
 @topic error.mutable-place-receiver
 title: MUTABLE-PLACE-RECEIVER: a mutation's receiver is not a place
-summary: A MutableVector or MutableArray operation that mutates must be applied to a place -- a local, place parameter or context parameter of the same function, or a field path from one.
+summary: A MutableVector or MutableArray mutation must name a place of its function: a local, a place or context parameter, a construct's binding (a loop variable), or a field path from one.
 index: errors
 alias: push to a temporary vector; mutate a captured vector; push as a function value
 keywords: MutableVector, MutableArray, push, set, swap, take, pop, place, receiver, temporary, nested function, module binding, function value
@@ -1120,8 +1120,10 @@ a mutation (push, pop, take, swap, clear; set, swap, copy into) changes
 the header of the place it is applied to, in place, and never stores a
 new value anywhere else. So the receiver must be a place this function
 owns: a local binding, a place parameter or a context parameter of the
-same function, or a chain of fields from one (`state.queue.push(x)`),
-whose binding's static type is the collection type. (A parameter not
+same function, a loop variable, a fold's intermediate or a handler's
+payload of its code (each a place of its construct, holding its own
+copy), or a chain of fields from one (`state.queue.push(x)`), whose
+binding's static type is the collection type. (A parameter not
 declared `place` is the function's own copy: mutating it is
 NONPLACE-PARAMETER-MUTATION.) The message says which rule the receiver
 breaks:

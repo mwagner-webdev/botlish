@@ -1,0 +1,273 @@
+# fuzz.bot -- the interpreter of the process_linux lifecycle fuzzer
+# (audit/process-linux/tools/fuzz.tcl; PROCESS-LINUX-PACKAGE-MILESTONE-1.md,
+# "Lifecycle fuzzing"):
+#
+#   fuzz HELPER COUNT WORD ARG WORD ARG ...
+#
+# runs the COUNT operations in order in one task, each printing one line
+# that the fuzzer's independent model predicts. An operation is WORD N (N
+# the child's number: the order of its spawn) or spawn KIND:
+#
+#   spawn eC  a child that writes "hi\n" and exits C (0, 3, 7)        spawn t  one that traps SIGTERM (30 ms)
+#   spawn i   one that ignores SIGTERM                       spawn s  one with SIGTERM's default action
+#   spawn c   cat (echoes stdin)
+#   (t, i and s print "ready" once their disposition is set: the spawn reads
+#   it, so a signal after it is deterministic)
+#
+#   drain write close wait term kill int exited release finish detach
+#
+# The owners live in the Fuzz context (context-owned affine state); release,
+# finish and detach move them out. At the end every owner left is released
+# and the loop runs until the reaper is done; the counters follow.
+import event_loop_linux
+import kit
+import process_linux
+import std::abi::bytes
+import std::event_loop
+import std::int
+import std::linux::io
+import std::list
+import std::mutable_vector
+import std::str
+
+opaque context struct Fuzz:
+    owners: MutableVector[process_linux::ChildOwner]
+    owner_of: MutableVector[int]
+    kids: MutableVector[process_linux::Child]
+
+fn fuzz() -> Fuzz:
+    Fuzz {owners: std::mutable_vector::from_list([]), owner_of: std::mutable_vector::from_list([]), kids: std::mutable_vector::from_list([])}
+
+nomethod fn num(text: str) -> int:
+    std::int::from_string(text):
+        on InvalidIntegerText:
+            -1
+
+nomethod fn helper_args(kind: str) -> List[str]:
+    if kind == "e0":
+        ["out:hi\\n", "exit:0"]
+    elif kind == "e3":
+        ["out:hi\\n", "exit:3"]
+    elif kind == "e7":
+        ["out:hi\\n", "exit:7"]
+    elif kind == "t":
+        ["trap:15:30", "out:ready\\n", "sleep:30000"]
+    elif kind == "i":
+        ["ignore:15", "out:ready\\n", "sleep:30000"]
+    elif kind == "s":
+        ["out:ready\\n", "sleep:30000"]
+    else:
+        ["cat"]
+
+nomethod fn line(n: int, text: str, context io: std::linux::io::LinuxIO):
+    kit::say(std::int::to_string(n).concat(" ").concat(text))
+
+# The position of child N's owner in the context, or -1.
+nomethod fn owner_position(n: int, context f: Fuzz) -> int:
+    count = std::mutable_vector::length(f.owner_of)
+    loop i from 0 to count:
+        o = f.owner_of.at(i):
+            on IndexNotFound:
+                -1
+        if o == n:
+            return i
+    -1
+
+nomethod fn kid(n: int, context f: Fuzz) -> process_linux::Child errors std::event_loop::TaskFailed:
+    f.kids.at(n):
+        on IndexNotFound:
+            fail std::event_loop::TaskFailed {code: 30}
+
+nomethod fn take_owner(n: int, context f: Fuzz) -> process_linux::ChildOwner errors std::event_loop::TaskFailed:
+    pos = owner_position(n)
+    f.owner_of.take(pos):
+        on IndexNotFound:
+            fail std::event_loop::TaskFailed {code: 31}
+    f.owners.take(pos):
+        on IndexNotFound:
+            fail std::event_loop::TaskFailed {code: 31}
+
+fn op(helper: str, word: str, arg: str, context f: Fuzz, p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) errors std::event_loop::TaskFailed:
+    if word == "spawn":
+        number = std::mutable_vector::length(f.kids)
+        {owner, child} = kit::spawn(process_linux::command(helper, helper_args(arg)))
+        f.owners.push(owner)
+        f.owner_of.push(number)
+        f.kids.push(child)
+        if arg == "t" or arg == "i" or arg == "s":
+            kit::read(child, process_linux::Stream::Stdout)
+        line(number, "spawned")
+        kit::say("pid ".concat(std::int::to_string(kit::pid(child))))
+        return unit
+    k = num(arg)
+    c = kid(k)
+    if word == "drain":
+        b = process_linux::read(c, process_linux::Stream::Stdout):
+            on process_linux::StaleChild:
+                line(k, "stale")
+                return unit
+            on process_linux::StreamClosed:
+                line(k, "closed")
+                return unit
+            on process_linux::Interrupted:
+                line(k, "interrupted")
+                return unit
+            on process_linux::ProcessFault:
+                fail std::event_loop::TaskFailed {code: 14}
+            on std::event_loop::SchedulerFault:
+                fail std::event_loop::TaskFailed {code: 15}
+        rest = kit::drain(c, process_linux::Stream::Stdout)
+        line(k, "drained ".concat(std::int::to_string(kit::size(b) + kit::size(rest))))
+    elif word == "write":
+        process_linux::write(c, kit::bytes_of("abc\n")):
+            on process_linux::StaleChild:
+                line(k, "stale")
+                return unit
+            on process_linux::StreamClosed:
+                line(k, "closed")
+                return unit
+            on process_linux::Interrupted:
+                line(k, "interrupted")
+                return unit
+            on process_linux::ProcessFault:
+                fail std::event_loop::TaskFailed {code: 14}
+            on std::event_loop::SchedulerFault:
+                fail std::event_loop::TaskFailed {code: 15}
+        line(k, "wrote 4")
+    elif word == "close":
+        process_linux::close_stdin(c):
+            on process_linux::StaleChild:
+                line(k, "stale")
+                return unit
+            on process_linux::ProcessFault:
+                fail std::event_loop::TaskFailed {code: 14}
+            on std::event_loop::SchedulerFault:
+                fail std::event_loop::TaskFailed {code: 15}
+        line(k, "closed stdin")
+    elif word == "wait":
+        st = process_linux::wait(c):
+            on process_linux::StaleChild:
+                line(k, "stale")
+                return unit
+            on process_linux::Interrupted:
+                line(k, "interrupted")
+                return unit
+            on process_linux::ProcessFault:
+                fail std::event_loop::TaskFailed {code: 14}
+            on std::event_loop::SchedulerFault:
+                fail std::event_loop::TaskFailed {code: 15}
+        line(k, process_linux::status_text(st))
+    elif word == "term":
+        st = process_linux::terminate(c, 100000):
+            on process_linux::StaleChild:
+                line(k, "stale")
+                return unit
+            on process_linux::Interrupted:
+                line(k, "interrupted")
+                return unit
+            on process_linux::ProcessFault:
+                fail std::event_loop::TaskFailed {code: 14}
+            on std::event_loop::SchedulerFault:
+                fail std::event_loop::TaskFailed {code: 15}
+        line(k, process_linux::status_text(st))
+    elif word == "kill":
+        process_linux::kill(c):
+            on process_linux::StaleChild:
+                line(k, "stale")
+                return unit
+            on process_linux::ProcessFault:
+                fail std::event_loop::TaskFailed {code: 14}
+            on std::event_loop::SchedulerFault:
+                fail std::event_loop::TaskFailed {code: 15}
+        line(k, "killed")
+    elif word == "int":
+        process_linux::interrupt(c):
+            on process_linux::StaleChild:
+                line(k, "stale")
+                return unit
+            on process_linux::ProcessFault:
+                fail std::event_loop::TaskFailed {code: 14}
+            on std::event_loop::SchedulerFault:
+                fail std::event_loop::TaskFailed {code: 15}
+        line(k, "interrupted none")
+    elif word == "exited":
+        e = process_linux::exited?(c):
+            on process_linux::StaleChild:
+                line(k, "stale")
+                return unit
+        line(k, "exited ".concat(kit::yes(e)))
+    elif word == "release":
+        process_linux::release(take_owner(k))
+        line(k, "released")
+    elif word == "finish":
+        st = process_linux::finish(take_owner(k), 100000):
+            on process_linux::StaleChild:
+                line(k, "stale")
+                return unit
+            on process_linux::Interrupted:
+                line(k, "interrupted")
+                return unit
+            on process_linux::ProcessFault:
+                fail std::event_loop::TaskFailed {code: 14}
+            on std::event_loop::SchedulerFault:
+                fail std::event_loop::TaskFailed {code: 15}
+        line(k, "finished ".concat(process_linux::status_text(st)))
+    elif word == "detach":
+        process_linux::detach(take_owner(k)):
+            on process_linux::StaleChild:
+                line(k, "stale")
+                return unit
+            on process_linux::ProcessFault:
+                fail std::event_loop::TaskFailed {code: 14}
+            on std::event_loop::SchedulerFault:
+                fail std::event_loop::TaskFailed {code: 15}
+        line(k, "detached")
+    else:
+        kit::say("unknown operation ".concat(word))
+
+fn script(helper: str, count: int, ops: List[str], context f: Fuzz, p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    loop i from 0 to count:
+        op(helper, std::list::get(ops, 2 * i + 3, ""), std::list::get(ops, 2 * i + 4, ""))
+    loop:
+        if std::mutable_vector::length(f.owners) == 0:
+            break
+        f.owner_of.pop()
+        process_linux::release(f.owners.pop())
+    0
+
+fn main(ops: List[str], context f: Fuzz, ev: std::event_loop::Loop, d: event_loop_linux::Linux, n: event_loop_linux::Native, p: process_linux::Processes, io: std::linux::io::LinuxIO) -> int errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered, std::event_loop::TaskFailed, IndexNotFound:
+    std::event_loop::sync()
+    coroutine {step, first} = script(std::list::get(ops, 1, ""), num(std::list::get(ops, 2, "0")), ops)
+    std::event_loop::adopt(step, first)
+    std::event_loop::run()
+    loop o in std::event_loop::take_outcomes():
+        if o.ending != std::event_loop::Ending::Returned:
+            kit::say_int("task failed ", o.value)
+    st = process_linux::stats()
+    kit::say_int("end owned ", st.owned)
+    kit::say_int("end dying ", st.dying)
+    kit::say_int("end watches ", st.watches)
+    kit::say_int("end children ", st.children)
+    kit::say_int("end descriptors ", st.descriptors)
+    0
+
+args = argv():
+    on InvalidArgumentEncoding:
+        []
+with context std::event_loop::create(64)
+with context event_loop_linux::create()
+with context event_loop_linux::native()
+with context process_linux::create_with(kit::options())
+with context std::linux::io::create()
+with context fuzz()
+main(args):
+    on std::event_loop::SchedulerFault:
+        -1
+    on std::event_loop::DriverFault:
+        -2
+    on std::event_loop::LoopReentered:
+        -3
+    on std::event_loop::TaskFailed:
+        -4
+    on IndexNotFound:
+        -5

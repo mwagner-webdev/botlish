@@ -1,0 +1,42 @@
+PASS no Tcl, Rust, Python or Git in the clean room
+PASS no Botlish checkout or adapter source in the clean room
+PASS no network
+PASS botlish.json requests process_linux, the driver and ticker
+PASS the application uses one instance each of the driver, process_linux and ticker
+PASS process_linux uses the application's driver
+PASS ticker uses the same driver
+PASS every package is installed once, none holds a .bot_modules of its own
+PASS the graph reports the driver shared
+PASS verify is clean
+PASS the provenance record of process_linux-0.1.0 matches its artifact
+PASS the provenance record of event_loop_linux-0.5.0 matches its artifact
+PASS process_linux for linux-aarch64 is refused as unsupported, nothing installed
+PASS the program builds as a native executable, warning-free
+PASS the executable holds the adapter once
+PASS the executable holds no test probe (the released adapter)
+PASS the executable depends on the C library only
+PASS workload: A and B started without a shell
+PASS workload: A ran in its own working directory
+PASS workload: B ran in another, with its own environment
+PASS workload: stdout and stderr streamed concurrently, every byte
+PASS workload: stdin written incrementally and closed
+PASS workload: A ended normally
+PASS workload: B terminated gracefully, escalated to SIGKILL at its grace period
+PASS workload: B's stream ended once its group was killed
+PASS workload: the identity is stale after release
+PASS workload: ticker's task (another library, the same loop) kept time
+PASS workload: exact arguments (empty, spaces, $HOME and *.txt unexpanded, UTF-8)
+PASS workload: nothing supervised, watched, unreaped or held at the end
+PASS workload: no descriptor or registration left
+PASS workload: one escalation, three releases
+PASS workload: the program ended normally
+PASS workload: B is gone
+PASS workload: B's descendant (in its group, ignoring SIGTERM) is gone
+PASS failures: a missing executable fails at exec (ENOENT)
+PASS failures: a missing working directory fails in the parent (ENOENT)
+PASS failures: a non-executable file fails at exec (EACCES)
+PASS failures: an invalid environment name is refused before starting
+PASS failures: a nonzero exit is an outcome
+PASS failures: a released identity is stale for wait and signal
+PASS failures: the old identity never reaches the slot's new child
+PASS failures: nothing left

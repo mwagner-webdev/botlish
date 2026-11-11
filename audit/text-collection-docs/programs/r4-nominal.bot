@@ -1,0 +1,19 @@
+struct Meters:
+    value: int
+
+struct Feet:
+    value: int
+
+enum Color:
+    Red, Green
+
+enum Shade:
+    Red, Dark
+
+fn length() -> Meters:
+    Feet {value: 3}
+
+fn color() -> Color:
+    Shade::Red
+
+[length(), color()]

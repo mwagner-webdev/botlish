@@ -1,0 +1,214 @@
+# Mutants of TEXT-AND-COLLECTION-DOCUMENTATION-AND-DIAGNOSTICS-MILESTONE-1.md
+# (audit/text-collection-docs/tools/mutate.tcl): deliberate breaks of the
+# rules that a declared result's TYPE diagnostic names the result type the
+# compiler inferred for the generic body -- the type the admission proof was
+# given, every normal completion joined, presented as an argument's type is
+# -- and that the documentation of UTF-8, text construction, literal escapes
+# and List typing says what the compiler does. A documentation mutant
+# restores a statement the milestone corrected, in the notes and in the
+# generated topic alike (what the help reads). Each must be killed by one of
+# the tests its `!!` line names (a pattern of test names), run from the test
+# files its `%%` line names (default
+# tests/text-collection-docs-diagnostics.test), never by an unrelated
+# failure.
+#
+#   @@ NAME DESCRIPTION
+#   !! TEST-PATTERN ...
+#   %% TEST-FILE ...
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+
+# ---------------------------------------------------------------------------
+# The declared-result diagnostic (hir/range.tcl's verifyDeclaredResults)
+
+@@ result-type-omitted the diagnostic names only the declared type again, as before the milestone
+!! tcd-result-applied tcd-result-nested tcd-result-refinement tcd-result-unknown tcd-result-joined-paths tcd-result-semantic-instances tcd-result-type-is-the-checked-one
+## hir/range.tcl
+<<<<
+            hir::Diagnose hir TYPE [format {function result does not prove declared type %s (result type: %s%s)%s} \
+                [hir::types::show $declared] \
+                [hir::semantic::ShowType $hir [ShownArgType $inferred $declared]] \
+                [FactsClause $inferred $declared $result] \
+                [MismatchClause $inferred $declared]] $e
+====
+            hir::Diagnose hir TYPE [format {function result does not prove declared type %s%s%s} \
+                [hir::types::show $declared] \
+                [expr {[FactsRelevant $inferred $declared] ? " (facts: [show $result])" : ""}] \
+                [MismatchClause $inferred $declared]] $e
+>>>>
+
+@@ result-type-is-declared the diagnostic prints the declared type where the inferred one belongs
+!! tcd-result-applied tcd-result-refinement tcd-result-type-is-the-checked-one
+## hir/range.tcl
+<<<<
+                [hir::semantic::ShowType $hir [ShownArgType $inferred $declared]] \
+====
+                [hir::semantic::ShowType $hir [ShownArgType $declared $declared]] \
+>>>>
+
+@@ result-type-carrier-only a numeric refinement is printed as its carrier: int[Digit] shown as int (and an applied type as its bare kind)
+!! tcd-result-refinement tcd-result-applied tcd-result-type-is-the-checked-one
+## hir/range.tcl
+<<<<
+                [hir::semantic::ShowType $hir [ShownArgType $inferred $declared]] \
+====
+                [hir::semantic::ShowType $hir [expr {[catch {core::type::base $inferred} carrier] ? $inferred : $carrier}]] \
+>>>>
+
+@@ result-type-from-an-instance a generic function's diagnostic names the inferred result of one of its semantic instances instead of the generic body's
+!! tcd-result-semantic-instances tcd-result-type-is-the-checked-one
+## hir/range.tcl
+<<<<
+        if {![ProvesValueAcceptedBy $inferred $result $declared]} {
+            # Both sides of the comparison, as an argument's diagnostic
+====
+        set shownInferred $inferred
+        dict for {id inst} [dict getdef $hir semantic instances {}] {
+            if {[dict get $inst block] eq $e && [dict exists $inst snapshot exprs $e inferredResultType]} {
+                set shownInferred [dict get $inst snapshot exprs $e inferredResultType]
+            }
+        }
+        if {![ProvesValueAcceptedBy $inferred $result $declared]} {
+            set inferred $shownInferred
+            # Both sides of the comparison, as an argument's diagnostic
+>>>>
+
+# ---------------------------------------------------------------------------
+# UTF-8 documentation
+
+@@ doc-decoding-denied encode_utf8's page says again that no operation decodes bytes back into a String
+!! tcd-doc-utf8-decoding
+## compilerpedia/notes/stdlib.notes
+<<<<
+The way back is std::abi::bytes::decode_utf8, which takes a
+std::abi::bytes::Bytes: make one from the List with
+====
+There is no decoding operation back from bytes to a String. A
+std::abi::bytes::Bytes is made from the List with
+>>>>
+## compilerpedia/generated/stdlib.topic
+<<<<
+The way back is std::abi::bytes::decode_utf8, which takes a
+std::abi::bytes::Bytes: make one from the List with
+====
+There is no decoding operation back from bytes to a String. A
+std::abi::bytes::Bytes is made from the List with
+>>>>
+
+@@ doc-static-type-unconditional encode_utf8's page states its List[std::byte::Byte] type unconditionally again, without the std::byte condition or the plain list
+!! tcd-doc-utf8-static-type
+## compilerpedia/notes/stdlib.notes
+<<<<
+Its static type depends, today, on what the compilation has loaded. When
+the program has loaded std::byte -- an `import std::byte` in any of its
+files, or an import of a module that loads it, such as std::abi::bytes --
+it is List[std::byte::Byte]; otherwise it is the plain `list`, whose
+elements the compiler knows nothing about. The values are the same either
+way; only what the compiler can prove about them differs. So where an
+element must be proven a Byte (a std::byte::Byte parameter, an index into
+a 256-entry table, std::abi::bytes::from_list's List[std::byte::Byte]),
+import std::byte or std::abi::bytes.
+====
+Its static type is List[std::byte::Byte], so it feeds
+std::abi::bytes::from_list (the bytes a write(2) or a C call takes) and
+ascii:: classification directly.
+>>>>
+## compilerpedia/generated/stdlib.topic
+<<<<
+Its static type depends, today, on what the compilation has loaded. When
+the program has loaded std::byte -- an `import std::byte` in any of its
+files, or an import of a module that loads it, such as std::abi::bytes --
+it is List[std::byte::Byte]; otherwise it is the plain `list`, whose
+elements the compiler knows nothing about. The values are the same either
+way; only what the compiler can prove about them differs. So where an
+element must be proven a Byte (a std::byte::Byte parameter, an index into
+a 256-entry table, std::abi::bytes::from_list's List[std::byte::Byte]),
+import std::byte or std::abi::bytes.
+====
+Its static type is List[std::byte::Byte], so it feeds
+std::abi::bytes::from_list (the bytes a write(2) or a C call takes) and
+ascii:: classification directly.
+>>>>
+
+@@ doc-decode-undiscoverable decode utf8 no longer finds std::abi::bytes::decode_utf8 (the internal byte_store substrate wins again)
+!! tcd-doc-discovery tcd-doc-utf8-decoding
+## compilerpedia/notes/stdlib.notes
+<<<<
+alias: decode utf8; decode utf-8; utf-8 decoding; utf8 to string
+====
+alias: decode utf-8; utf-8 decoding; utf8 to string
+>>>>
+## compilerpedia/generated/stdlib.topic
+<<<<
+alias: decode utf8; decode utf-8; utf-8 decoding; utf8 to string
+====
+alias: decode utf-8; utf-8 decoding; utf8 to string
+>>>>
+
+# ---------------------------------------------------------------------------
+# Text construction
+
+@@ doc-test-join-recommended task.string-concatenation recommends the quadratic test-library helper std::test::joined for many parts again
+!! tcd-doc-no-test-library-join
+## compilerpedia/topics/tasks.topic
+<<<<
+Many parts -- a List of Strings: std::str has no join operation today.
+Carry one String and only ever extend it, by a self-tail recursion:
+====
+Many parts -- a List of Strings: chain concat calls or use stdlib/test.bot's
+std::test::joined(parts, separator), or carry one String and only ever
+extend it, by a self-tail recursion:
+>>>>
+## compilerpedia/topics/tasks.topic
+<<<<
+related: stdlib.std::str::concat stdlib.std::str::append_char concept.strings capability.string-formatting task.number-text stdlib.std::str::encode_utf8 stdlib.std::abi::bytes::decode_utf8 stdlib.std::abi::bytes::join concept.folds
+====
+related: stdlib.std::str::concat stdlib.std::str::append_char concept.strings capability.string-formatting task.number-text stdlib.std::str::encode_utf8 stdlib.std::abi::bytes::decode_utf8 stdlib.std::abi::bytes::join concept.folds stdlib.std::test::joined
+>>>>
+
+# ---------------------------------------------------------------------------
+# Literal escapes
+
+@@ doc-escape-omitted concept.strings omits a supported String escape (\r), as it used to omit \t and \r
+!! tcd-doc-escapes-complete
+## compilerpedia/topics/concepts.topic
+<<<<
+    in a String literal "..."      \\  \"  \n  \r  \t
+====
+    in a String literal "..."      \\  \"  \n  \t
+>>>>
+
+@@ doc-numeric-escape-valid concept.strings documents a numeric escape the lexer rejects (\u{...}) as valid
+!! tcd-doc-escapes-complete tcd-doc-no-numeric-escape
+## compilerpedia/topics/concepts.topic
+<<<<
+    in a character literal '...'   \\  \'  \n  \r  \t
+====
+    in a character literal '...'   \\  \'  \n  \r  \t  \u{...}
+>>>>
+
+@@ doc-invalid-escape-help-unrouted an invalid escape's help line no longer leads to the page that lists the escapes
+!! tcd-doc-no-numeric-escape
+## compilerpedia/topics/concepts.topic
+<<<<
+match: SURFACE SYNTAX | invalid escape *
+====
+>>>>
+
+# ---------------------------------------------------------------------------
+# List typing history (docs/README.md)
+
+@@ doc-readme-lists-untyped README §19 states again, in the present tense, that Lists carry no element type
+!! tcd-doc-readme-list-history
+## docs/README.md
+<<<<
+2. **Lists carried no element type.** `std::list::at` returned `any`. That
+   affected `matmul`'s entries and the pairs `csv` returns.
+====
+2. **Lists carry no element type.** `std::list::at` returns `any`. That affects
+   `matmul`'s entries and the pairs `csv` returns.
+>>>>
