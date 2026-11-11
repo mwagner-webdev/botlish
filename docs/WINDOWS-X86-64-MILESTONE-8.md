@@ -84,7 +84,7 @@ through the import library. Real Windows evidence, all on CI runners:
   system DLLs, runs no Botlish code at load (no initializer, no TLS
   callback), and nothing in the inputs exports anything by itself.
 * WINDOWS-FUZZ-RESULT
-* WINDOWS-MUTANTS-RESULT
+* Mutation testing: the 32 mutants of the catalog's 40 that apply on Linux all killed there (every detector), and 10 on Windows -- the 8 Windows-only ones and the two of the runtime's new coroutine and stack rules -- all killed; none survived.
 
 **Not done: a static COFF library** (section 13). Two static Botlish
 libraries made the obvious way link into one executable without any
@@ -734,23 +734,30 @@ and 14 new ones:
 | Mutant | Host | Killed by |
 |---|---|---|
 | `dll-export-omitted` (the .def file leaves out a public function) | all | `windows_library_link_is_a_dll_of_the_static_runtime` |
-| `dll-internal-exported` (the DLL exports `botlish_library_call`) | Windows | WINDOWS-MUTANT |
-| `dll-import-library-misnamed` | Windows | WINDOWS-MUTANT |
+| `dll-internal-exported` (the DLL exports `botlish_library_call`) | Windows | `ValidateDll` refuses every build (31 tests fail) |
+| `dll-import-library-misnamed` | Windows | every build fails (31 tests) |
 | `dll-crt-dynamic` (VCRUNTIME140 and the UCRT, not the static CRT) | all | `windows_library_link_is_a_dll_of_the_static_runtime` |
-| `dll-validation-extra-exports` (ValidateDll ignores an extra export) | Windows | WINDOWS-MUTANT |
-| `dll-validation-runtime-imports` (ValidateDll ignores a CRT DLL import) | Windows | WINDOWS-MUTANT |
-| `public-unwind-dropped` (no unwind information for the public functions) | Windows | WINDOWS-MUTANT |
-| `win64-convention-ignored` (the public functions use System V on Windows) | Windows | WINDOWS-MUTANT |
-| `loader-lock-initializer` (the program object gains a `.CRT$XCU` initializer) | Windows | WINDOWS-MUTANT |
-| `fiber-left-converted` (the outermost call's end keeps the thread a fiber) | Windows | WINDOWS-MUTANT |
+| `dll-validation-extra-exports` (ValidateDll ignores an extra export) | Windows | `nl-windows-validate` |
+| `dll-validation-runtime-imports` (ValidateDll ignores a CRT DLL import) | Windows | `nl-windows-validate` |
+| `public-unwind-dropped` (no unwind information for the public functions) | Windows | `nl-windows-unwind-through` |
+| `win64-convention-ignored` (the public functions use System V on Windows) | Windows | every call's arguments (27 tests) |
+| `loader-lock-initializer` (the runtime gains a `.CRT$XCU` initializer) | Windows | `nl-windows-loader-lock` |
+| `fiber-left-converted` (the outermost call's end keeps the thread a fiber) | Windows | `nl-windows-fibers`, `nl-windows-unload` |
 | `str-result-borrowed` (a String result points into the heap) | all | `nl-abi-results-survive`, `nl-abi-types`, `nl-two-instances` |
 | `invalid-handle-dereferenced` | all | `nl-lifecycle` |
 | `stacks-kept-after-last-instance` | all | `nl-coroutine-stacks-released` |
 | `entry-stack-ignored` (a host's stack walked within the thread's) | all | `nl-stack-safety-foreign-stack` |
 
 Linux x86-64 (the whole catalog, every detector): 40 mutants, 32 killed,
-0 survived, 8 skipped (the Windows-only ones). Windows x86-64:
-WINDOWS-MUTANTS-PENDING.
+0 survived, 8 skipped (the Windows-only ones). Windows x86-64 (the tier
+item `native-library-mutants=...` in run 42945387449's full shard 1, with
+`-first 1`): the 8 Windows-only mutants and `entry-stack-ignored` and
+`stacks-kept-after-last-instance`, 10 mutants, 10 killed, 0 survived --
+the last two by `nl-stack-safety-foreign-stack` and `nl-windows-fibers`,
+and by `nl-coroutine-stacks-released` and `nl-windows-unload`. The other
+29 mutants that apply on Windows were not run there (each costs a rebuild;
+the code they mutate is shared with Linux, where they are killed, and the
+test file that kills them passes on Windows).
 
 The brief's other mutant ideas are covered where they apply: an internal
 symbol exported, a public one missing, the import library's name, the
