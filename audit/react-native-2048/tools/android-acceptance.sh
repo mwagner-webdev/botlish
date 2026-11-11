@@ -9,7 +9,8 @@
 #
 #   1. selftest   the JavaScript self-test (src/SelfTest.tsx): failures=0;
 #                 its 401 module snapshots and 401 hook states equal the
-#                 interpreter's; Hermes; the Botlish instance owned by React
+#                 interpreter's (every run of them: its screen may mount
+#                 more than once in one process; splitRuns); Hermes; the Botlish instance owned by React
 #                 Native's JavaScript thread (mqt_v_js); the libraries
 #                 mapped in the app process (extracted from the APK)
 #   2. reload     React Native reloaded three times (ReactHost.reload): the
@@ -106,9 +107,69 @@ swipe() { # DIRECTION
     esac
 }
 
-# The snapshots of KIND lines (oracle, hook) of LOG, in their order.
-snapshots() { # LOG KIND
-    sed -n "s/.*BOTLISH_RN $2 \([0-9]*\) \(2048\/1 .*\)$/\1 \2/p" "$1" | sort -n -k1,1 | cut -d' ' -f2-
+# The self-test logs one run of KIND lines (oracle, hook: "BOTLISH_RN KIND
+# INDEX SNAPSHOT", INDEX from 0) each time its screen mounts, and the screen
+# can mount more than once in one JavaScript runtime: on main's f06de8e6 the
+# first launch after installation ran it twice in one process, the second
+# run beginning before the first had finished (as when Android creates the
+# activity again). So the lines are split into runs, each line to the run
+# whose next index it is (two mounted screens may log at once), and every
+# run is held to the interpreter's game. Writes PREFIX.N for run N (and
+# PREFIX.stray for a line no run expects); prints the number of runs and of
+# stray lines.
+splitRuns() { # LOG KIND PREFIX
+    sed -n "s/.*BOTLISH_RN $2 \([0-9]*\) \(2048\/1 .*\)$/\1 \2/p" "$1" | awk -v p="$3" '
+        { idx = $1 + 0; s = $0; sub(/^[0-9]+ /, "", s); r = 0
+          if (idx == 0) { n++; r = n } else for (k = n; k >= 1; k--) if (want[k] == idx) { r = k; break }
+          if (r == 0) { stray++; print s > (p ".stray"); next }
+          print s > (p "." r); want[r]++ }
+        END { print n + 0, stray + 0 }'
+}
+
+# Whether every run of KIND in LOG is the interpreter's game as far as it got
+# (a prefix of the oracle: a run whose screen went away stops early), with no
+# stray line and at least one run of the whole game. Prints what it found.
+oracleRuns() { # LOG KIND PREFIX
+    local n stray i lines whole=0 bad=0 total
+    total=$(wc -l <"$expected/oracle-42.txt")
+    read -r n stray < <(splitRuns "$1" "$2" "$3")
+    for i in $(seq 1 "$n"); do
+        lines=$(wc -l <"$3.$i")
+        head -n "$lines" "$expected/oracle-42.txt" | cmp -s - "$3.$i" || bad=$((bad + 1))
+        (( lines == total )) && whole=$((whole + 1))
+    done
+    echo "$n run(s) of $total, $whole complete, $bad differing, $stray stray line(s)"
+    (( n > 0 && whole > 0 && bad == 0 && stray == 0 ))
+}
+
+# Whether every self-test run in LOG that finished passed, at least one did,
+# and the last run started finished (its "selftest done" after its "env").
+selfTestsPassed() { # LOG
+    local finished
+    finished=$(grep -c "BOTLISH_RN selftest done" "$1" || true)
+    (( finished > 0 )) && ! grep "BOTLISH_RN selftest done" "$1" | grep -qv "failures=0$" && lastRunDone "$1"
+}
+lastRunDone() { # LOG
+    awk '/BOTLISH_RN env hermes=/ { e = NR } /BOTLISH_RN selftest done/ { d = NR } END { exit !(e > 0 && d > e) }' "$1"
+}
+
+# After the first run finished: if another started meanwhile, wait (up to
+# LIMIT s) until the last run started has finished too, and keep the log as
+# OUT/NAME.log.
+settleRuns() { # NAME LIMIT
+    local started
+    started=$(appLog | grep -c "BOTLISH_RN env hermes=" || true)
+    (( started > 1 )) || return 0
+    note "  $1: the self-test started $started times in one process (its screen mounted again); every run is checked"
+    for _ in $(seq 1 "$2"); do
+        appLog >"$out/$1.log"
+        lastRunDone "$out/$1.log" && break
+        [[ -n $(crashes "$out/$1.log") ]] && break
+        sleep 1
+    done
+    appLog >"$out/$1.log"
+    # What started the activity: kept for the record.
+    adb logcat -d -v tag -s ActivityTaskManager:I ActivityManager:I | tr -d '\r' | grep -F "$pkg" >"$out/$1-activity.log" || true
 }
 
 adb wait-for-device
@@ -124,22 +185,21 @@ note "installed abi $(shellp dumpsys package $pkg | sed -n 's/ *primaryCpuAbi=//
 
 # ---------------------------------------------------------------- selftest
 launch selftest "selftest done" 1 600 --es mode selftest
+settleRuns selftest 600
 log="$out/selftest.log"
 grep -E "BOTLISH_RN (env|timing|FAIL)" "$log" | sed 's/^/  /' | tee -a "$summary"
-if grep -q "selftest done failures=0" "$log"; then pass "selftest: failures=0"; else fail "selftest: $(grep -o 'selftest done failures=[0-9]*' "$log")"; fi
+if selfTestsPassed "$log"; then pass "selftest: failures=0"; else fail "selftest: $(grep -o 'selftest done failures=[0-9]*' "$log" | tr '\n' ' ')(the last run finished: $(lastRunDone "$log" && echo yes || echo no))"; fi
 grep -q "env hermes=true" "$log" && pass "selftest: Hermes" || fail "selftest: not Hermes"
-snapshots "$log" oracle >"$out/selftest-module.txt"
-snapshots "$log" hook >"$out/selftest-hook.txt"
-if cmp -s "$out/selftest-module.txt" "$expected/oracle-42.txt"; then
-    pass "selftest: $(wc -l <"$out/selftest-module.txt") module snapshots equal the interpreter's"
+if runs=$(oracleRuns "$log" oracle "$out/selftest-module"); then
+    pass "selftest: the module's snapshots equal the interpreter's ($runs)"
 else
-    fail "selftest: the module's snapshots differ from the interpreter's ($(wc -l <"$out/selftest-module.txt") lines)"
-    diff "$out/selftest-module.txt" "$expected/oracle-42.txt" | head -5 | tee -a "$summary"
+    fail "selftest: the module's snapshots differ from the interpreter's ($runs)"
+    [[ -f $out/selftest-module.1 ]] && diff "$out/selftest-module.1" "$expected/oracle-42.txt" | head -5 | tee -a "$summary"
 fi
-if cmp -s "$out/selftest-hook.txt" "$expected/oracle-42.txt"; then
-    pass "selftest: $(wc -l <"$out/selftest-hook.txt") hook states equal the interpreter's"
+if runs=$(oracleRuns "$log" hook "$out/selftest-hook"); then
+    pass "selftest: the hook's states equal the interpreter's ($runs)"
 else
-    fail "selftest: the hook's states differ from the interpreter's ($(wc -l <"$out/selftest-hook.txt") lines)"
+    fail "selftest: the hook's states differ from the interpreter's ($runs)"
 fi
 pid=$(shellp pidof $pkg)
 note "process $pid"
@@ -169,9 +229,10 @@ for round in 1 2 3; do
     adb logcat -c
     shellp am start -n "$activity" --ez reload true >/dev/null
     waitFor "reload-$round" "selftest done" 1 600 || continue
+    settleRuns "reload-$round" 600
     log="$out/reload-$round.log"
-    grep -q "selftest done failures=0" "$log" && pass "reload $round: the self-test passes again" || fail "reload $round: $(grep -o 'selftest done failures=[0-9]*' "$log")"
-    snapshots "$log" oracle | cmp -s - "$expected/oracle-42.txt" && pass "reload $round: the interpreter's snapshots" || fail "reload $round: snapshots differ"
+    selfTestsPassed "$log" && pass "reload $round: the self-test passes again" || fail "reload $round: $(grep -o 'selftest done failures=[0-9]*' "$log" | tr '\n' ' ')"
+    runs=$(oracleRuns "$log" oracle "$out/reload-$round-module") && pass "reload $round: the interpreter's snapshots ($runs)" || fail "reload $round: snapshots differ ($runs)"
     for lib in game textkit; do
         created=$(sed -n "s/.*BotlishRN: $lib: instance \([0-9]*\) created on thread \([0-9]*\).*/\1 \2/p" "$log" | head -1)
         gone=$(grep -E "BotlishRN: $lib: instance [0-9]+ (destroyed|orphaned)" "$log" | head -2 | sed 's/.*BotlishRN: //')
@@ -207,11 +268,12 @@ bridged=0
     [[ -n $bridge && $bridge != 0 ]] && bridged=1
 shellp am force-stop $pkg
 launch gc-stress "selftest done" 1 1800 --es mode selftest --ez gcStress true
+settleRuns gc-stress 1800
 log="$out/gc-stress.log"
 grep -q "BOTLISH_NATIVE_GC_STRESS=1" "$log" && note "  BOTLISH_NATIVE_GC_STRESS=1 set in the app process (Os.setenv)"
 grep -E "BOTLISH_RN timing" "$log" | sed 's/^/  gc-stress /' | tee -a "$summary"
-grep -q "selftest done failures=0" "$log" && pass "gc-stress: the self-test passes" || fail "gc-stress: $(grep -o 'selftest done failures=[0-9]*' "$log")"
-snapshots "$log" oracle | cmp -s - "$expected/oracle-42.txt" && pass "gc-stress: the interpreter's snapshots" || fail "gc-stress: snapshots differ"
+selfTestsPassed "$log" && pass "gc-stress: the self-test passes" || fail "gc-stress: $(grep -o 'selftest done failures=[0-9]*' "$log" | tr '\n' ' ')"
+runs=$(oracleRuns "$log" oracle "$out/gc-stress-module") && pass "gc-stress: the interpreter's snapshots ($runs)" || fail "gc-stress: snapshots differ ($runs)"
 [[ -z $(crashes "$log") ]] || fail "gc-stress: a crash"
 cabi() { # LOG: the game's C ABI microseconds per call in the self-test's timing
     sed -n 's/.*BOTLISH_RN timing game [0-9]* calls: [0-9.]* us per call from JavaScript, \([0-9.]*\) us of it in the C ABI.*/\1/p' "$1" | tail -1

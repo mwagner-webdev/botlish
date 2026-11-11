@@ -1209,6 +1209,33 @@ SHA-256 are `e0f35307...` (plain) and `85036416...` (gc-stress); they are
 the `rn2048-build` artifact's `app-device-plain.apk` and
 `app-device-gc-stress.apk`.
 
+**Run 14** (`7dd3a578`) passed on its second attempt. On the first, the
+16 KiB job's app died in its self-test because Android itself did:
+`system_server` crashed (SIGSEGV in the package manager's
+`ComponentResolver$ServiceIntentResolver.queryIntentForPackage`, x86_64
+framework code on a binder thread), every app logged
+`DeadSystemException`, and the three reloads timed out without a running
+activity. Every later phase of that job passed, on a fresh process.
+
+**Main's run for the merge** (`f06de8e6`) failed in the 4 KiB job's first
+self-test, though nothing in it was wrong: the self-test ran twice in one
+process. The first run logged its environment and its 401 module
+snapshots, then the screen mounted again and a second run began in the
+same JavaScript runtime (its first call took 0.167 ms: the instance
+existed) before the first had drawn a hook state; one hook run and one
+`selftest done failures=0` followed. That is what Android creating the
+activity again looks like, on a cold emulator right after installation.
+The acceptance concatenated both runs into 802 lines against the
+interpreter's 401 and failed. It now splits a log into runs
+(`splitRuns`: a run begins at index 0, each line goes to the run whose
+next index it is) and holds every run to the interpreter's game: each
+run's snapshots a prefix of it, at least one run whole, no stray line,
+every finished run `failures=0`, and the last run started finished. Both
+logs read again: main's passes, run 14's first 16 KiB attempt still
+fails; a changed snapshot in a second run, a second run's failure, an
+unfinished last run and a stray line fail. When the screen mounts again,
+the summary says so and keeps the ActivityManager lines.
+
 **Locally**, this host has no `/dev/kvm`. Observed, with the emulator 37.2.13
 and `system-images;android-30;aosp_atd;arm64-v8a`:
 
@@ -1672,6 +1699,12 @@ nothing in the release gate requires it. Its runs on this branch:
     both APKs' acceptance, the development reload with Metro, and
     `device-builds.sh`: every check passed, GC stress NOT DEMONSTRATED
     (1.0x).
+* run 14, at `7dd3a578`: green on its second attempt; the first lost its
+  16 KiB job's app to an Android `system_server` crash (section 16).
+* main's run for the merge, at `f06de8e6`: the build, the 16 KiB job and
+  both jobs' device builds green; the 4 KiB job's acceptance failed on a
+  self-test that ran twice in one process, which the acceptance now
+  checks run by run (section 16).
 
 Main's own workflows were queued or in progress, none red among those
 completed, when this branch was made (`a6977d56`) and when it was last
