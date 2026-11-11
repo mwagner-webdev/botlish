@@ -34,6 +34,18 @@
 #   nested-2          a callback that calls C, which calls a second callback
 #                     (two callback levels per outer call)
 #   allocating        a callback that allocates a String per call
+#   collecting        a callback that allocates a List of 40 Strings per call
+#                     (N/40 calls): collections run inside callbacks, their
+#                     walks crossing the transition
+#   in-coroutine      the callback-int loop made by a coroutine's body (on the
+#                     general runtime: its own stack, a fiber on Windows)
+#
+# On Windows x86-64 (WINDOWS-X86-64-MILESTONE-9.md) the fixture is MSVC's
+# (with tests/cffi/callback-fixture-win64.asm), and a last line measures
+# the alternative the milestone rejected: capturing a continuation with
+# Windows' unwinder (RtlCaptureContext, RtlLookupFunctionEntry,
+# RtlVirtualUnwind of one frame), per capture, which a transition would pay
+# on every call of a C function that may call back.
 #
 # For each: calls, the best run's total time, ns per call, and from one run
 # with the runtime's allocation counters on (`--alloc summary` of the linked
@@ -63,7 +75,11 @@ if {![testConstraint nativeCCalls] || ![testConstraint nativeCCallbacks] || [cat
 }
 
 set scratch [file tempdir botlish-callback-bench]
-ctool::staticLibrary $scratch botlish_callback_fixture [file join $root tests cffi callback-fixture.c]
+set sources [list [file join $root tests cffi callback-fixture.c]]
+if {$::tcl_platform(platform) eq "windows"} {
+    lappend sources [file join $root tests cffi callback-fixture-win64.asm]
+}
+ctool::staticLibrary $scratch botlish_callback_fixture {*}$sources
 file copy [file join $root tests cffi cbx.bot] [file join $scratch cbx.bot]
 if {[dict get $options -gc-stress]} {
     set ::env(BOTLISH_NATIVE_GC_STRESS) 1
@@ -141,6 +157,22 @@ callback c fn allocating(x: std::ffi::c::Int) -> std::ffi::c::Int:
     if std::str::length(s) > 100:
         return 0
     1
+
+callback c fn collecting(x: std::ffi::c::Int) -> std::ffi::c::Int:
+    xs = loop i from 0 to 40:
+        std::str::concat("collect-", std::int::to_string(i))
+    if std::list::length(xs) != 40:
+        return 0
+    1
+
+fn summing(n: std::ffi::c::Int) -> int:
+    cb = std::ffi::c::callback(identity)
+    loop i from 0 to 1:
+        yield 0
+    s = cbx::sum(cb, n)
+    if s > 1000000000000 or s < 0:
+        return 0
+    s
 
 }
 
@@ -225,10 +257,25 @@ try {
             raw-admit {cb = std::ffi::c::callback(admit)} "cbx::bench_double_in(cb, $n)" $n \
             nested-2 {cb = std::ffi::c::callback(outer)} "cbx::sum(cb, $n)" $n \
             allocating {cb = std::ffi::c::callback(allocating)} "cbx::sum(cb, $n)" $n \
+            collecting {cb = std::ffi::c::callback(collecting)} "cbx::sum(cb, [expr {$n / 40}])" [expr {$n / 40}] \
+            in-coroutine {x = 0} "coroutine {step, first} = summing($n)\n    step()" $n \
         ] {
-            lassign [measure [callProgram $setup $expression] $backend] best report
+            if {$name eq "in-coroutine"} {
+                lassign [withoutCoroutineFusion {measure [callProgram $setup $expression] $backend}] best report
+            } else {
+                lassign [measure [callProgram $setup $expression] $backend] best report
+            }
             puts [row $name $calls $best $report]
         }
+    }
+    if {[core::cabi::hostTarget] eq "windows-x86_64"} {
+        set hir [compileApp "import cbx
+
+cbx::unwinder_capture_ps($n)
+"]
+        set ps [native::withLinkDirs [list $::scratch] {lindex [outcomeUnderHir cranelift $hir] 1}]
+        puts [format "
+the rejected alternative: a continuation captured by Windows' unwinder costs %.1f ns per transition (RtlCaptureContext, RtlLookupFunctionEntry, RtlVirtualUnwind of one frame; %d captures)" [expr {$ps / 1000.0}] $n]
     }
 } finally {
     file delete -force $scratch

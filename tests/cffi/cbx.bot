@@ -74,3 +74,4 @@ extern c fn locale_reset named "cbx_locale_reset"() -> unit
 extern c fn locale_note named "cbx_locale_note"(name: std::ffi::c::Ptr[std::ffi::c::UShort] noescape, flags: std::ffi::c::ULong, param: std::ffi::c::LongLong, limit: std::ffi::c::Int) -> std::ffi::c::Int
 extern c fn locale_calls named "cbx_locale_calls"() -> std::ffi::c::Int
 extern c fn locale_bad named "cbx_locale_bad"() -> std::ffi::c::Int
+extern c fn unwinder_capture_ps named "cbx_unwinder_capture_ps"(n: std::ffi::c::Int) -> std::ffi::c::LongLong

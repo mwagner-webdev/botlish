@@ -664,3 +664,39 @@ int cbx_locale_note(const unsigned short *name, unsigned long flags, long long p
 }
 int cbx_locale_calls(void) { return locale_calls; }
 int cbx_locale_bad(void) { return locale_bad; }
+
+/* ------------------------------------------------------------------------
+ * The alternative WINDOWS-X86-64-MILESTONE-9.md rejected, measured: what a
+ * transition would cost if it captured the Botlish caller's continuation
+ * with Windows' unwinder (RtlCaptureContext, then RtlLookupFunctionEntry and
+ * RtlVirtualUnwind of one frame) instead of handing on the shim's frame
+ * register. Picoseconds per capture over N captures (bench/c-callbacks.tcl);
+ * -1 where Windows' unwinder is not there to ask. */
+long long cbx_unwinder_capture_ps(int n) {
+#ifdef _WIN32
+    LARGE_INTEGER frequency, start, end;
+    QueryPerformanceFrequency(&frequency);
+    volatile DWORD64 sink = 0;
+    QueryPerformanceCounter(&start);
+    for (int i = 0; i < n; i++) {
+        CONTEXT context;
+        RtlCaptureContext(&context);
+        DWORD64 base = 0;
+        PRUNTIME_FUNCTION entry = RtlLookupFunctionEntry(context.Rip, &base, NULL);
+        if (entry != NULL) {
+            PVOID handler_data = NULL;
+            DWORD64 establisher = 0;
+            RtlVirtualUnwind(UNW_FLAG_NHANDLER, base, context.Rip, entry, &context, &handler_data, &establisher, NULL);
+        }
+        sink += context.Rsp;
+    }
+    QueryPerformanceCounter(&end);
+    if (n <= 0) {
+        return 0;
+    }
+    return (long long)((double)(end.QuadPart - start.QuadPart) * 1e12 / (double)frequency.QuadPart / n);
+#else
+    (void)n;
+    return -1;
+#endif
+}
