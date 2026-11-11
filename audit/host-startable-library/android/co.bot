@@ -1,0 +1,26 @@
+# co.bot -- an application entry that runs a coroutine
+# (RN-HOST-STARTABLE-APPLICATION-LIBRARY-MILESTONE-1.md, "Dynamic loader and
+# TLS lifetime"): the coroutine's stack comes from, and returns to, the
+# runtime's per-thread stack pool, whose thread-local destructor is then
+# registered on the host's thread. It calls no C and prints nothing.
+import std::str
+
+struct Message:
+    text: str
+
+fn produce(i: int, n: int, acc: str, resume Message) -> str:
+    if i >= n:
+        return acc
+    message = yield acc
+    produce(i + 1, n, acc.concat(message.text))
+
+fn drive(step: Coroutine{args: [Message], return: str}, k: int, last: str) -> str:
+    if k <= 0:
+        return last
+    next = step(Message {text: "xy"})
+    step.drive(k - 1, next)
+
+coroutine {step, first} = produce(0, 50, "")
+r = step.drive(51, first)
+if std::str::length(r) != 100:
+    100.mod(0)

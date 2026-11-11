@@ -649,6 +649,38 @@ say():
         $missing [lindex [dict get $missingOptions -errorcode] end]
 } -result {1 EXPORT-ENVIRONMENT 1 1 MISSING-CONTEXT}
 
+test al-library-symbol-main {an application library's export may not be named main: NAME_main is its entry (an ordinary library's may)} -constraints nativeLibraries -body {
+    set source {
+exported c fn main() -> int:
+    1
+}
+    set app [catch {alLibrary [alDir] mn $source} appMessage appOptions]
+    set built [alLibrary [alDir] mo $source {} -application 0]
+    list $app [lindex [dict get $appOptions -errorcode] end] [string match {*would be mn_main*} $appMessage] \
+        [expr {"mo_main" in [native::library::PublicNames mo [dict get $built exports]]}]
+} -result {1 LIBRARY-SYMBOL 1 1}
+
+test al-dispatch-nir {an application library's program function: the module sections once, then the entry dispatch, whose "initialize only" case (the index rt_entry_index reports for NAME_create's Vm) returns at once; the entry program's statements follow, for NAME_main} -constraints nativeBuilt -body {
+    set dir [alDir]
+    alWrite [file join $dir m.bot] "import std::list\n\ntable = \[1, 2, 3\]\n\nfn size() -> int:\n    std::list::length(table)\n"
+    alWrite [file join $dir app.bot] "import m\n\nif m::size() != 3:\n    100.mod(0)\n"
+    set nir [native::nir [alHir [file join $dir app.bot]] -application 1]
+    set lines {}
+    set on 0
+    foreach line [split $nir \n] {
+        if {[string match {func 0 *} $line]} { set on 1; continue }
+        if {[string match {func *} $line] || $line eq "end"} { set on 0 }
+        if {$on} { lappend lines [string trim $line] }
+    }
+    set switch [lsearch -regexp $lines {^switch }]
+    regexp {^switch %\d+ (L\d+) -1:-1:(L\d+)$} [lindex $lines $switch] -> main only
+    set at [lsearch -exact $lines "label $only"]
+    set statics [lsearch -all -regexp $lines {^staticset }]
+    list [llength $statics] [expr {[lindex $statics end] < $switch}] [regexp {^%\d+ = unit$} [lindex $lines $at+1]] \
+        [regexp {^ret %\d+$} [lindex $lines $at+2]] [expr {[lsearch -exact $lines "label $main"] > $at}] \
+        [expr {"application" in [split $nir \n]}] [core::thread::initializeOnly]
+} -result {1 1 1 1 1 1 -1}
+
 # ---------------------------------------------------------------------------
 # An ordinary library is what it was
 

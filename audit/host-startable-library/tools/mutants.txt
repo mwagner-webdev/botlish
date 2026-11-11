@@ -1,0 +1,414 @@
+# Mutants of host-startable application libraries, cross-target link plans
+# and Android C-binding generation (audit/host-startable-library/tools/
+# mutate.tcl; RN-HOST-STARTABLE-APPLICATION-LIBRARY-MILESTONE-1.md, "Mutation
+# testing"): the application's admission and header, manifest and public
+# names (native/library.tcl), the entry dispatch (native/lower.tcl), the
+# runtime's entry and its thread state (native/src/runtime/library.rs,
+# thread.rs), the ABI fingerprint (aotimage.rs), the forwarder
+# (codegen/library.rs), the cross-target link plan (codegen/aot.rs,
+# native/library.tcl), and the generator's android-aarch64 configuration
+# (tools/cheader/toolchain.tcl).
+#
+#   @@ NAME DESCRIPTION
+#   !! TEST ...        the tests that must kill it (al-* application-
+#                      library.test, at-* android-target.test, cb-*
+#                      c-bindgen.test, nl-* native-library.test; rust:FILTER
+#                      the driver's cargo tests matching FILTER)
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+#
+# A mutant is killed only by a detector its !! line names failing; a mutant
+# that does not build is NOT-BUILT, never killed. Lines starting with #
+# outside an edit are comments.
+
+# ---------------------------------------------------------------------------
+# Entry semantics
+
+@@ app-top-level-refused an application library's entry program is refused LIBRARY-TOP-LEVEL, as an ordinary library's
+!! al-create-initializes-only al-main-cli
+## native/library.tcl
+<<<<
+    set problems [if {$application} {list} else {library::TopLevelProblems $hir}]
+====
+    set problems [library::TopLevelProblems $hir]
+>>>>
+
+@@ ordinary-top-level-admitted an ordinary library's entry file may hold statements, which every create would run
+!! al-ordinary
+## native/library.tcl
+<<<<
+    set problems [if {$application} {list} else {library::TopLevelProblems $hir}]
+====
+    set problems [list]
+>>>>
+
+@@ ordinary-no-exports-admitted an ordinary library that exports nothing is built
+!! al-ordinary
+## native/library.tcl
+<<<<
+    if {![llength $records] && ![llength $problems] && !$application} {
+====
+    if {![llength $records] && ![llength $problems] && 0} {
+>>>>
+
+@@ create-runs-entry NAME_create runs the entry program: the instance's Vm selects no "initialize only"
+!! al-create-initializes-only al-thread-entries
+## native/src/runtime/library.rs
+<<<<
+        vm.thread.entry = super::thread::ENTRY_INITIALIZE_ONLY;
+====
+>>>>
+
+@@ main-skips-entry NAME_main initializes only: the entry program never runs
+!! al-create-initializes-only al-contexts
+## native/src/runtime/library.rs
+<<<<
+        vm.thread.entry = 0;
+====
+        vm.thread.entry = super::thread::ENTRY_INITIALIZE_ONLY;
+>>>>
+
+@@ init-only-runs-entry the dispatch's "initialize only" case runs the entry program's statements
+!! al-create-initializes-only al-dispatch-nir
+## native/lower.tcl
+<<<<
+        set cases [linsert $cases 0 "$only:$only:$initialize"]
+====
+        set cases [linsert $cases 0 "$only:$only:$main"]
+>>>>
+
+@@ dispatch-missing-for-application an application without thread entries gets no entry dispatch: NAME_create runs the entry program
+!! al-create-initializes-only al-dispatch-nir
+## native/lower.tcl
+<<<<
+proc native::lower::ThreadDispatch {fnVar} {
+    upvar 1 $fnVar fn
+    variable threadRecords
+    variable application
+    variable hir
+    if {$threadRecords eq {} && !$application} {
+====
+proc native::lower::ThreadDispatch {fnVar} {
+    upvar 1 $fnVar fn
+    variable threadRecords
+    variable application
+    variable hir
+    if {$threadRecords eq {}} {
+>>>>
+
+@@ modules-initialized-twice the entry program's statements begin with the module sections again: NAME_main initializes the modules twice
+!! al-dispatch-nir
+## native/lower.tcl
+<<<<
+            ThreadDispatch fn
+            if {$own eq {}} {
+====
+            ThreadDispatch fn
+            set own [concat $modules $own]
+            if {$own eq {}} {
+>>>>
+
+@@ entry-selects-thread-entry the entry program's Vm (entry 0) is told it runs the first thread entry
+!! al-thread-entries
+## native/src/runtime/thread.rs
+<<<<
+    if entry == ENTRY_INITIALIZE_ONLY { ENTRY_INDEX_INITIALIZE_ONLY } else { entry as i64 }
+====
+    if entry == ENTRY_INITIALIZE_ONLY { ENTRY_INDEX_INITIALIZE_ONLY } else { entry as i64 + 1 }
+>>>>
+
+@@ export-context-admitted an application library's export may require a context (the entry's authority reaches a C caller)
+!! al-authority
+## hir/exports.tcl
+<<<<
+    set required [hir::contexts::required $hir $e]
+====
+    set required {}
+>>>>
+
+@@ missing-context-admitted an entry program that calls what no installed context implements is built
+!! al-authority
+## hir/contexts.tcl
+<<<<
+        if {[llength $providers] == 0} {
+            set lines [list "installed contexts:"]
+====
+        if {[llength $providers] == 0 && 0} {
+            set lines [list "installed contexts:"]
+>>>>
+
+@@ export-named-main an application library's export may be named main, the entry's symbol
+!! al-library-symbol-main
+## native/library.tcl
+<<<<
+        if {$function in $library::reserved || ($application && $function eq "main")} {
+====
+        if {$function in $library::reserved} {
+>>>>
+
+# ---------------------------------------------------------------------------
+# The C ABI, the header, the manifest
+
+@@ main-forwarder-missing the NIR says nothing of the application: the library has no NAME_main
+!! al-create-initializes-only al-symbols
+## native/lower.tcl
+<<<<
+    if {$application} {
+        lappend header application
+    }
+====
+>>>>
+
+@@ main-not-in-header the header declares no NAME_main
+!! al-header-manifest al-create-initializes-only
+## native/library.tcl
+<<<<
+        append h "int32_t ${N}_main(int argc, char **argv, ${N}_error **error);\n\n"
+====
+>>>>
+
+@@ manifest-no-application an application library's manifest has no application member
+!! al-header-manifest
+## native/library.tcl
+<<<<
+        {*}$entry \
+====
+>>>>
+
+@@ ordinary-manifest-schema-3 an ordinary library's manifest is schema 3
+!! al-ordinary
+## native/library.tcl
+<<<<
+        schema [N [if {$application} {set applicationSchema} else {set schema}]] \
+====
+        schema [N $applicationSchema] \
+>>>>
+
+@@ public-names-without-main NAME_main is no public name: the link localizes it
+!! al-symbols al-create-initializes-only
+## native/library.tcl
+<<<<
+    if {$application} {
+        lappend names ${name}_main
+    }
+====
+>>>>
+
+@@ argv-not-utf8-accepted an argument that is not UTF-8 is passed to argv()
+!! al-argv
+## native/src/runtime/library.rs
+<<<<
+        if std::str::from_utf8(bytes).is_err() {
+====
+        if false {
+>>>>
+
+@@ argv-empty NAME_main's argv() is the empty list, whatever the host passes
+!! al-argv al-contexts
+## native/src/runtime/library.rs
+<<<<
+        vm.set_argv(arguments);
+====
+        vm.set_argv(Vec::new());
+>>>>
+
+@@ argc-negative-accepted a negative argc is taken for none
+!! al-argv
+## native/src/runtime/library.rs
+<<<<
+    if argc < 0 {
+        return Err(invocation("ARGUMENT-COUNT", format!("argc is {argc}: a count of arguments is never negative")));
+    }
+====
+    if argc < 0 {
+        return Ok(Vec::new());
+    }
+>>>>
+
+@@ failure-reported-ok a failing entry returns NAME_STATUS_OK
+!! al-errors al-stack
+## native/src/runtime/library.rs
+<<<<
+        let outcome = if value == NO_VALUE { Err(botlish_error(&mut vm)) } else { Ok(()) };
+====
+        let outcome: Result<(), LibError> = Ok(());
+>>>>
+
+@@ error-not-registered an error handed out is not registered: its release is refused and it leaks
+!! al-errors
+## native/src/runtime/library.rs
+<<<<
+        lock(&ERRORS).insert(raw as usize);
+====
+>>>>
+
+@@ stale-error-pointer a call's error out-parameter is not cleared first: a success leaves what it held
+!! al-errors
+## native/src/runtime/library.rs
+<<<<
+fn guarded(out: *mut *mut LibError, f: impl FnOnce() -> Result<(), LibError>) -> i32 {
+    if !out.is_null() {
+====
+fn guarded(out: *mut *mut LibError, f: impl FnOnce() -> Result<(), LibError>) -> i32 {
+    if false {
+>>>>
+
+@@ abi-ignores-library the ABI fingerprint leaves the library boundary out: a runtime without NAME_main's function passes for this one
+!! rust:abi_fingerprint
+## native/src/runtime/aotimage.rs
+<<<<
+pub const ABI_FINGERPRINT: u64 = fingerprint_of(&ABI_SCALAR_WORDS, super::ops::HELPER_SIGNATURES, super::library::SIGNATURES);
+====
+pub const ABI_FINGERPRINT: u64 = fingerprint_of(&ABI_SCALAR_WORDS, super::ops::HELPER_SIGNATURES, &[]);
+>>>>
+
+@@ signatures-miss-main the library boundary's signatures leave NAME_main's runtime function out
+!! rust:signatures_are_the_forwarders
+## native/src/runtime/library.rs
+<<<<
+    ("botlish_library_main", 4),
+];
+====
+];
+>>>>
+
+# ---------------------------------------------------------------------------
+# Threads, reentrancy, the stack, the VM's lifetime
+
+@@ reentrancy-not-refused NAME_main from inside a call of the same library on this thread runs
+!! al-reentrant
+## native/src/runtime/library.rs
+<<<<
+        if active() > 0 {
+====
+        if active() > 1000 {
+>>>>
+
+@@ calls-not-counted a call of the library running Botlish code is not counted on its thread
+!! al-reentrant
+## native/src/runtime/library.rs
+<<<<
+fn run_vm(vm: &mut Vm, f: impl FnOnce(&mut Vm) -> Value) -> Value {
+    let _active = Active::enter();
+====
+fn run_vm(vm: &mut Vm, f: impl FnOnce(&mut Vm) -> Value) -> Value {
+>>>>
+
+@@ main-stack-unchecked NAME_main's Vm checks no stack limit: deep recursion exhausts the host thread's stack
+!! al-stack
+## native/src/runtime/library.rs
+<<<<
+        vm.thread.entry = 0;
+        vm.check_stack_limit();
+====
+        vm.thread.entry = 0;
+>>>>
+
+@@ vm-never-dropped NAME_main never frees its Vm: every call leaks a heap
+!! al-repeated
+## native/src/runtime/library.rs
+<<<<
+        drop(vm);
+        outcome
+====
+        std::mem::forget(vm);
+        outcome
+>>>>
+
+@@ thread-token-shared every thread has one token: an instance answers calls from any thread
+!! nl-threads
+## native/src/runtime/library.rs
+<<<<
+    let token = NEXT_THREAD.fetch_add(1, Ordering::Relaxed);
+====
+    let token = 1;
+>>>>
+
+# ---------------------------------------------------------------------------
+# Cross-target link plans
+
+@@ link-plan-host-target a library of another target asks for the host's link plan (the census's NATIVE TARGET)
+!! at-link-plan-cross
+## native/library.tcl
+<<<<
+        set dependencies [LinkPlanOf $text {*}$targetArgs]
+====
+        set dependencies [LinkPlanOf $text]
+>>>>
+
+@@ link-plan-dropped a library's link plan is not resolved: its declared libraries are never linked
+!! at-link-plan-cross
+## native/library.tcl
+<<<<
+    set dependencies {}
+    if {[hir::foreign::linkPlan $hir] ne {}} {
+====
+    set dependencies {}
+    if {0} {
+>>>>
+
+@@ cross-plan-judged-for-host the driver resolves another target's link plan for this host's linker and object format
+!! at-link-plan-cross-refusals rust:link_plan_for_another_target
+## native/src/codegen/aot.rs
+<<<<
+    let name = program.target.as_ref().map_or_else(|| target.to_string(), |t| t.name.clone());
+    resolve_plan(flavor_of(target), &machine, &name, program, search, &mut Vec::new)
+====
+    let _ = machine;
+    resolve_link_plan(program, search)
+>>>>
+
+@@ android-linked-with-host-runtime an Android library is linked with this host's runtime archive, not its target support package's
+!! at-application-library at-library-elf
+## native/library.tcl
+<<<<
+proc native::library::LinkWithToolchain {support tools target name object keep linked final static shared dependencies public} {
+    set runtime [dict get $support archive]
+====
+proc native::library::LinkWithToolchain {support tools target name object keep linked final static shared dependencies public} {
+    set runtime [RuntimeArchive]
+>>>>
+
+@@ android-alignment-4k an Android library's segments are aligned to 4 KiB, and the check accepts it
+!! at-application-library at-library-elf
+## native/library.tcl
+<<<<
+    return [dict getdef {android-aarch64 16384} $target 4096]
+====
+    return 4096
+>>>>
+
+# ---------------------------------------------------------------------------
+# The generator's android-aarch64 configuration
+
+@@ android-binding-host-clang an android-aarch64 binding is generated by this host's clang, not the NDK's
+!! cb-sdl3-current-android cb-android-configuration
+## tools/cheader/toolchain.tcl
+<<<<
+        set ndk [AndroidNdk]
+        set ::env(BOTLISH_C_CC) [lindex $ndk 1]
+====
+        set ndk [AndroidNdk]
+        set ::env(BOTLISH_C_CC) clang
+>>>>
+
+@@ android-binding-any-sysroot an android-aarch64 binding is generated against a sysroot that is no Android one (the host's headers)
+!! cb-android-configuration
+## tools/c-bindgen/generate.tcl
+<<<<
+        if {$sysroot eq "" || ![file isfile [file join $sysroot usr include android api-level.h]]} {
+====
+        if {$sysroot eq ""} {
+>>>>
+
+@@ android-binding-ndk-path-shown an android-aarch64 binding names this host's NDK directory
+!! cb-sdl3-current-android cb-android-configuration
+## tools/cheader/toolchain.tcl
+<<<<
+        dict set config hidden [list [lindex $ndk 0] {$ANDROID_NDK_ROOT}]
+====
+>>>>

@@ -77,7 +77,7 @@
 //! A thread runs at most one call of this library's Botlish code at a time
 //! on behalf of `main`: `main` while this thread runs a call of this
 //! library -- `create`'s initialization, an export's call, another `main`
-//! -- is REENTRANT-CALL (`ACTIVE`). Calls on other threads are independent:
+//! -- is REENTRANT-CALL (`Active`). Calls on other threads are independent:
 //! each `main` has its own Vm.
 use super::aot::ProgramEntry;
 use super::error::RtError;
@@ -85,7 +85,6 @@ use super::program::{self, LinkedProgram};
 use super::value::*;
 use super::vm::Vm;
 use crate::nir::{Boundary, ExportDecl};
-use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::{c_char, c_int, c_void};
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -184,22 +183,71 @@ static INSTANCES: Mutex<BTreeMap<usize, Entry>> = Mutex::new(BTreeMap::new());
 static ERRORS: Mutex<BTreeSet<usize>> = Mutex::new(BTreeSet::new());
 static BUFFERS: Mutex<BTreeSet<usize>> = Mutex::new(BTreeSet::new());
 
-thread_local! {
-    /// How many calls of this library run Botlish code on this thread now:
-    /// `create`'s initialization, an export's call, `main`'s entry. `main`
-    /// refuses to start while any does (REENTRANT-CALL). A constant-
-    /// initialized Cell with no destructor: it registers no thread-local
-    /// destructor, so it never keeps the library loaded past the thread's
-    /// last call, nor runs code of an unloaded one at thread exit
-    /// (RN-HOST-STARTABLE-APPLICATION-LIBRARY-MILESTONE-1.md, "Dynamic
-    /// loader and TLS lifetime").
-    static ACTIVE: Cell<u32> = const { Cell::new(0) };
+/// This thread's part in the library: its token for the owner rule
+/// (`this_thread`: drawn once, never reused, 0 before) and how many calls of
+/// this library run Botlish code on it now (`create`'s initialization, an
+/// export's call, `main`'s entry: `main` refuses to start while any does,
+/// REENTRANT-CALL), one word: the token above `ACTIVE_BITS`, the count
+/// below.
+///
+/// Kept where no thread-exit code of the library's runs: on Unix, in the
+/// slot of one pthread key made without a destructor (`thread_word`). A
+/// `thread_local!` -- or std::thread::current() -- registers a destructor
+/// on the thread wherever Rust implements thread-locals with pthread keys
+/// (Android AArch64: std's `os` thread-locals) or holds a handle there (a
+/// thread Rust did not start): a host that unloaded the library before the
+/// thread ended would have the thread's exit run that destructor in
+/// unmapped code, as Bionic's dlclose followed by the thread's end did
+/// (RN-HOST-STARTABLE-APPLICATION-LIBRARY-MILESTONE-1.md, "Dynamic loader
+/// and TLS lifetime"). The key itself is never deleted: a library made of
+/// this runtime holds one.
+const ACTIVE_BITS: u32 = 16;
+const ACTIVE_MASK: usize = (1 << ACTIVE_BITS) - 1;
+
+#[cfg(unix)]
+mod thread_word {
+    use std::ffi::c_void;
+    use std::sync::OnceLock;
+
+    /// The library's key, made on first use, with no destructor.
+    fn key() -> libc::pthread_key_t {
+        static KEY: OnceLock<libc::pthread_key_t> = OnceLock::new();
+        *KEY.get_or_init(|| {
+            let mut key: libc::pthread_key_t = 0;
+            // SAFETY: KEY is the out-parameter; no destructor is registered.
+            let made = unsafe { libc::pthread_key_create(&mut key, None) };
+            assert!(made == 0, "pthread_key_create failed: {made}");
+            key
+        })
+    }
+
+    pub fn get() -> usize {
+        // SAFETY: a key this library made.
+        unsafe { libc::pthread_getspecific(key()) as usize }
+    }
+
+    pub fn set(word: usize) {
+        // SAFETY: a key this library made; the slot holds a plain word,
+        // never a pointer anything frees.
+        unsafe { libc::pthread_setspecific(key(), word as *const c_void) };
+    }
 }
 
-thread_local! {
-    /// This thread's token for the owner rule (`this_thread`), 0 until its
-    /// first use. Constant-initialized, no destructor.
-    static THREAD: Cell<u64> = const { Cell::new(0) };
+#[cfg(not(unix))]
+mod thread_word {
+    use std::cell::Cell;
+    thread_local! {
+        // (No native library is made off Unix: NATIVE-LIBRARY-MILESTONE-1.md.)
+        static WORD: Cell<usize> = const { Cell::new(0) };
+    }
+
+    pub fn get() -> usize {
+        WORD.with(Cell::get)
+    }
+
+    pub fn set(word: usize) {
+        WORD.with(|w| w.set(word));
+    }
 }
 
 /// The next thread token.
@@ -207,37 +255,40 @@ static NEXT_THREAD: AtomicU64 = AtomicU64::new(1);
 
 /// This thread's identity for the owner rule: a token drawn once per thread
 /// and never reused, so an instance of a thread that ended never passes
-/// for another thread's. It registers no thread-local destructor, unlike
-/// std::thread::current(), whose handle on a thread Rust did not start is
-/// released by a pthread key's destructor: a host that unloaded the library
-/// before such a thread ended would have that destructor run in unmapped
-/// code (RN-HOST-STARTABLE-APPLICATION-LIBRARY-MILESTONE-1.md, "Dynamic
-/// loader and TLS lifetime").
+/// for another thread's (std::thread::current()'s ThreadId would register
+/// a destructor: see ACTIVE_BITS).
 fn this_thread() -> u64 {
-    THREAD.with(|t| {
-        let mut id = t.get();
-        if id == 0 {
-            id = NEXT_THREAD.fetch_add(1, Ordering::Relaxed);
-            t.set(id);
-        }
-        id
-    })
+    let word = thread_word::get();
+    let token = (word >> ACTIVE_BITS) as u64;
+    if token != 0 {
+        return token;
+    }
+    let token = NEXT_THREAD.fetch_add(1, Ordering::Relaxed);
+    thread_word::set(((token as usize) << ACTIVE_BITS) | (word & ACTIVE_MASK));
+    token
 }
 
-/// One call of this library running Botlish code on this thread, counted in
-/// ACTIVE while it lives.
+/// How many calls of this library run Botlish code on this thread now.
+fn active() -> usize {
+    thread_word::get() & ACTIVE_MASK
+}
+
+/// One call of this library running Botlish code on this thread, counted
+/// while it lives.
 struct Active;
 
 impl Active {
     fn enter() -> Active {
-        ACTIVE.with(|a| a.set(a.get() + 1));
+        let word = thread_word::get();
+        assert!(word & ACTIVE_MASK < ACTIVE_MASK, "too many nested calls of one library on a thread");
+        thread_word::set(word + 1);
         Active
     }
 }
 
 impl Drop for Active {
     fn drop(&mut self) {
-        ACTIVE.with(|a| a.set(a.get() - 1));
+        thread_word::set(thread_word::get() - 1);
     }
 }
 
@@ -483,7 +534,7 @@ fn run(instance: &mut Instance, f: impl FnOnce(&mut Vm) -> Value) -> Value {
     run_vm(&mut instance.vm, f)
 }
 
-/// `run` on the Vm VM: the call counted in ACTIVE while it runs.
+/// `run` on the Vm VM: the call counted (`Active`) while it runs.
 fn run_vm(vm: &mut Vm, f: impl FnOnce(&mut Vm) -> Value) -> Value {
     let _active = Active::enter();
     let roots = vm.temp_roots.len();
@@ -555,7 +606,7 @@ pub unsafe extern "C" fn botlish_library_create(program: *const LinkedProgram, i
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn botlish_library_main(program: *const LinkedProgram, argc: c_int, argv: *const *const c_char, error: *mut *mut LibError) -> i32 {
     guarded(error, || {
-        if ACTIVE.with(Cell::get) > 0 {
+        if active() > 0 {
             return Err(invocation(
                 "REENTRANT-CALL",
                 "NAME_main was called while this thread runs a call of the same library (from inside its entry, an export's call or an instance's initialization)",

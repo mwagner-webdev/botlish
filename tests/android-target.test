@@ -458,6 +458,151 @@ test at-library-alignment-checked {a shared object with 4 KiB-aligned segments i
     list $failed [dict get $options -errorcode] [string match {*aligned to 4096, not 16384*} $message] [file exists $dir/libgame.so]
 } -result {1 {NATIVE LIBRARY ELF} 1 0}
 
+# ------------------------------------------------------------ cross-target link plans
+#
+# RN-HOST-STARTABLE-APPLICATION-LIBRARY-MILESTONE-1.md, "Cross-target link
+# plans": a library of android-aarch64 resolves its link plan for Android's
+# linker (the driver's link-plan --target), never the host's: the census's
+# probe E2 (a library with `extern c library "log"`) was NATIVE TARGET.
+
+set ::atLinkPlanSource {import std::ffi::c
+
+extern c library "log"
+extern c library "android"
+
+extern c fn android_log_is_loggable named "__android_log_is_loggable"(prio: std::ffi::c::Int, tag: std::ffi::c::Ptr[std::ffi::c::Char] read noescape, default_prio: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn android_api_level named "android_get_device_api_level"() -> std::ffi::c::Int
+
+exported c fn version() -> int:
+    1
+}
+
+test at-link-plan-cross {a library of android-aarch64 that declares Android's platform libraries (liblog, libandroid) builds: its plan is resolved for Android, the shared library needs them, the manifest names them} -constraints {androidRuntime} -body {
+    set app [atGameApp]
+    atWrite $app/plan.bot $::atLinkPlanSource
+    lassign [atRun $app -warnings error -target android-aarch64 -target-support botlish_target_android_aarch64 \
+        -emit-native-library plan -out planlib plan.bot] status output
+    set facts [native::elf::facts $app/planlib/libplan.so]
+    set m [pm::json::decode [atRead $app/planlib/plan.manifest.json]]
+    set dependencies [lmap d [pm::json::payload [dict get [pm::json::payload $m] dependencies]] {
+        pm::json::payload [dict get [pm::json::payload $d] link]
+    }]
+    list $status [dict get $facts machine] [lsort [dict get $facts needed]] $dependencies
+} -result {0 183 {libandroid.so libc.so libdl.so liblog.so libm.so} {-llog -landroid}}
+
+test at-link-plan-cross-refusals {a cross-target link plan is judged for Android: a static archive of this host's x86-64 objects is never linked into an Android library, a static library declared without a path is looked for in the -L directories only (never the host's), and nothing is left behind} -constraints {nativeBuilt linuxX86_64Host clang} -body {
+    set app [atSupportApp [atDescriptor [native::runtimeAbi]]]
+    set ndk [atFakeNdk 29.0 [dict create cc [auto_execok clang] ld [auto_execok ld] objcopy [auto_execok objcopy] ar [auto_execok ar]] 21]
+    atWrite $app/host.c "int host_value(void) \{ return 7; \}\n"
+    exec clang -c -o $app/host.o $app/host.c
+    exec ar rcs $app/libhost.a $app/host.o
+    atWrite $app/declared.bot {import std::ffi::c
+extern c library "host" static at "libhost.a"
+extern c fn host_value() -> std::ffi::c::Int
+exported c fn version() -> int:
+    1
+}
+    atWrite $app/searched.bot {import std::ffi::c
+extern c library "m" static
+extern c fn host_value() -> std::ffi::c::Int
+exported c fn version() -> int:
+    1
+}
+    set results {}
+    foreach file {declared searched} {
+        lassign [withEnvironment [list ANDROID_NDK_ROOT $ndk] {
+            atRun $app -warnings error -target android-aarch64 -target-support android_rt -emit-native-library $file -out out-$file $file.bot
+        }] status out
+        lappend results $status [file exists $app/out-$file/lib$file.so]
+        if {$file eq "declared"} {
+            lappend results [string match {*holds object code for ELF x86-64, and this program is linked for android-aarch64 (ELF AArch64)*(NATIVE LINK ARCHIVE)*} $out]
+        } else {
+            lappend results [string match {*no static archive libm.a is in the library search directories (none)*(NATIVE LINK ARCHIVE)*} $out]
+        }
+    }
+    set results
+} -result {1 0 1 1 0 1}
+
+# ------------------------------------------------------------ application libraries
+#
+# RN-HOST-STARTABLE-APPLICATION-LIBRARY-MILESTONE-1.md, "Android AArch64
+# artifacts": an ordinary entry program built as an application library of
+# android-aarch64 (-application): NAME_main beside the library's API, the
+# manifest's schema 3, an Android shared object; Icy Tower's game modules
+# over the generated android-aarch64 SDL3 binding, linked with Android's
+# libSDL3.so (tests/cffi/sdl3.tcl android), and the SDL_main shim an APK
+# would carry. The fixtures are audit/host-startable-library/android/.
+
+source [file join $::projectRoot tests cffi sdl3.tcl]
+set ::atAppHere [file join $::projectRoot audit host-startable-library android]
+testConstraint androidSdl3 [expr {[testConstraint androidRuntime] && [cffi::sdl3AndroidDir] ne ""}]
+
+# The 2048 application's package tree (atGameApp) with the fixtures FILES of
+# audit/host-startable-library/android beside it.
+proc atApplicationApp {files} {
+    set app [atGameApp]
+    foreach file $files {
+        file copy -force [file join $::atAppHere $file] [file join $app $file]
+    }
+    return $app
+}
+
+test at-application-library {an entry program -- its own IO over liblog and a context holding state -- built as an application library of android-aarch64: an AArch64 shared object, 16 KiB-aligned, needing Bionic's libraries and liblog only, exporting its API and NAME_main; its manifest is schema 3 with the application member and binds its files} -constraints {androidRuntime} -body {
+    set app [atApplicationApp {android_log.bot hello.bot}]
+    lassign [atRun $app -warnings error -target android-aarch64 -target-support botlish_target_android_aarch64 \
+        -emit-native-library hello -application -out lib hello.bot] status output
+    set facts [native::elf::facts $app/lib/libhello.so]
+    set m [pm::json::decode [atRead $app/lib/hello.manifest.json]]
+    set get {{value args} {
+        foreach k $args { set value [dict get [pm::json::payload $value] $k] }
+        pm::json::payload $value
+    }}
+    list $status [dict get $facts machine] [dict get $facts type] [lsort -unique [lmap l [dict get $facts loads] {dict get $l align}]] \
+        [dict get $facts textrel] [lsort [dict get $facts needed]] [lsort -unique [concat {*}[dict values [dict get $facts verneed]]]] \
+        [expr {[dict get $facts exports] eq [lsort [native::library::PublicNames hello {} 1]]}] [expr {"hello_main" in [dict get $facts exports]}] \
+        [apply $get $m schema] [apply $get $m application symbol] [apply $get $m target name] \
+        [apply $get $m targetSupport package] [expr {[apply $get $m sha256 shared] eq [native::library::Sha256 $app/lib/libhello.so]}]
+} -result {0 183 dyn 16384 0 {libc.so libdl.so liblog.so libm.so} LIBC 1 1 3 hello_main android-aarch64 botlish_target_android_aarch64 1}
+
+test at-application-sdl3 {Icy Tower's unchanged game modules with Android's IO, over the generated android-aarch64 SDL3 binding, built as an application library linked with Android's libSDL3.so: it needs libSDL3.so and liblog, imports SDL's functions with SDL's symbol version and no glibc one, 16 KiB-aligned; the SDL_main shim links against it; Linux's libSDL3.so is never linked into it} -constraints {androidSdl3} -body {
+    set app [atApplicationApp {android_log.bot icy-android.bot sdl_main.c}]
+    set src [atDir icysrc]
+    foreach module {game sdl render hud tower options} {
+        file copy [file join $::projectRoot examples games icy-tower $module.bot] [file join $src $module.bot]
+    }
+    # The binding as application modules (sdl3/... beside the entry): the
+    # application's package graph names only the packages it installed.
+    exec [info nameofexecutable] [file join $::projectRoot tools c-bindgen.tcl] stage sdl3 -target android-aarch64 \
+        -app $src -into $app
+    set sdl [cffi::sdl3AndroidDir]
+    lassign [atRun $app -warnings error -target android-aarch64 -target-support botlish_target_android_aarch64 \
+        -emit-native-library icy -application -L $sdl -out lib icy-android.bot] status output
+    if {$status != 0} { error $output }
+    set facts [native::elf::facts $app/lib/libicy.so]
+    set sdlImports [lsort -unique [lmap line [split [exec [file join [atNdk] toolchains llvm prebuilt linux-x86_64 bin llvm-nm] -D --undefined-only $app/lib/libicy.so] \n] {
+        if {![regexp {U (SDL_\w+)@(\S+)} $line -> name version]} continue
+        set version
+    }]]
+    set bin [file join [atNdk] toolchains llvm prebuilt linux-x86_64 bin]
+    exec $bin/clang --target=aarch64-linux-android21 -O2 -Wall -Wextra -Werror -fPIC -shared -Wl,-z,max-page-size=16384 \
+        -Wl,-z,defs -Wl,-soname,libmain.so {-DAPP_HEADER="icy.h"} -DAPP_PREFIX=icy -I $app/lib -o $app/lib/libmain.so \
+        $app/sdl_main.c -L $app/lib -licy -L $sdl -lSDL3 -llog
+    set shim [native::elf::facts $app/lib/libmain.so]
+    set results [list [lsort [dict get $facts needed]] [lsort -unique [lmap l [dict get $facts loads] {dict get $l align}]] \
+        [lsort -unique [concat {*}[dict values [dict get $facts verneed]]]] $sdlImports \
+        [expr {"icy_main" in [dict get $facts exports]}] [expr {"SDL_main" in [dict get $shim exports]}] [expr {"libicy.so" in [dict get $shim needed]}]]
+    # Linux's libSDL3.so (this host's, x86-64 glibc) where Android's belongs:
+    # the target's toolchain refuses it, and no library is left.
+    if {[cffi::sdl3Dir] ne ""} {
+        lassign [atRun $app -warnings error -target android-aarch64 -target-support botlish_target_android_aarch64 \
+            -emit-native-library linux -application -L [cffi::sdl3Dir] -out linuxlib icy-android.bot] linuxStatus linuxOut
+        lappend results $linuxStatus [string match {*(NATIVE LIBRARY TOOL cc)*} $linuxOut] [file exists $app/linuxlib/liblinux.so]
+    } else {
+        lappend results 1 1 0
+    }
+    set results
+} -result {{libSDL3.so libc.so libdl.so liblog.so libm.so} 16384 {LIBC SDL3_0.0.0} SDL3_0.0.0 1 1 1 1 1 0}
+
 # ------------------------------------------------------------ execution
 
 # The hosts (host/host2048.c, host/stress.c) built by the NDK for API 21
@@ -546,5 +691,73 @@ v = stress::vector(5000):
     list $s1 [expr {[lrange $l1 0 4] eq [list "characters\t$chars\t14000" "reversed\t$back" "nested\t$nested" "vector\t$vector" "boom\t1\tBoom\t300\titem-299"]}] \
         $s2 [expr {[lrange $l2 0 4] eq [lrange $l1 0 4]}]
 } -result {0 1 0 1}
+
+# Application libraries in an Android process (RN-HOST-STARTABLE-APPLICATION-
+# LIBRARY-MILESTONE-1.md, "Android execution"): Android's linker64 and Bionic
+# of each installed API level, under qemu-user -- no ART, no Activity.
+
+# The application library hello (audit/host-startable-library/android) of
+# a fresh application, and the hosts host_main and host_dlclose beside it;
+# co, a library whose entry runs a coroutine.
+proc atApplicationHosts {} {
+    if {[info exists ::atApplicationCache]} { return $::atApplicationCache }
+    set app [atApplicationApp {android_log.bot hello.bot co.bot host_main.c host_dlclose.c}]
+    foreach name {hello co} {
+        lassign [atRun $app -warnings error -target android-aarch64 -target-support botlish_target_android_aarch64 \
+            -emit-native-library $name -application -out lib $name.bot] status output
+        if {$status != 0} { error "$name: $output" }
+    }
+    set clang [file join [atNdk] toolchains llvm prebuilt linux-x86_64 bin clang]
+    foreach {out defines} {host_main {} host_untagged -DNO_HEAP_POINTER_TAGGING} {
+        exec $clang --target=aarch64-linux-android21 -std=c11 -O2 -Wall -Wextra -Werror {*}$defines \
+            {-DAPP_HEADER="hello.h"} -DAPP_PREFIX=hello -I $app/lib -o $app/lib/$out $app/host_main.c -L $app/lib -lhello -ldl
+    }
+    exec $clang --target=aarch64-linux-android21 -std=c11 -O2 -Wall -Wextra -Werror -o $app/lib/host_dlclose $app/host_dlclose.c -ldl
+    set ::atApplicationCache $app
+    return $app
+}
+
+# The lines of android-run.sh ROOT PROGRAM ARGS (Android's linker's warnings
+# dropped), and whether it exited 0.
+proc atAndroidLines {root program args} {
+    set code [catch {exec [file join $::atHere tools android-run.sh] $root $program {*}$args 2>@1} output]
+    set lines [lmap line [split [string map [list \0 ""] $output] \n] {
+        if {[string match *linker* $line] || [string match libc:* $line] || [string match qemu* $line] || $line eq ""} continue
+        set line
+    }]
+    return [list [expr {!$code}] $lines]
+}
+
+test at-application-run {NAME_main in an Android process, on a 1 MiB thread named SDLThread, twice: the entry completes on every installed API level; where Bionic tags heap pointers (Android 11 and later) the entry's byte borrowing for liblog is refused (CORE SEMANTIC RANGE: a tagged address), and with the tagging off, as an application's android:allowNativeHeapPointerTagging="false" has it, the entry completes} -constraints {androidRun} -body {
+    set app [atApplicationHosts]
+    set results {}
+    foreach root [atRoots] {
+        set api [string range [file tail $root] 4 end]
+        lassign [atAndroidLines $root/root $app/lib/host_main one two] ok lines
+        set untagged [lindex [atAndroidLines $root/root $app/lib/host_untagged one two] 1]
+        set statuses [lmap line $lines {if {![string match MAIN* $line]} continue; lindex [split $line \t] 2}]
+        set identities [lsort -unique [lmap line $lines {if {![string match MAIN* $line]} continue; lindex [split $line \t] 3}]]
+        lappend results [list [expr {$api >= 30 ? "tagged" : "untagged"}] $ok $statuses $identities [lindex $lines end] \
+            [lmap line $untagged {if {![string match MAIN* $line]} continue; lindex [split $line \t] 2}]]
+    }
+    lsort -unique $results
+} -result {{tagged 1 {2 2} {{CORE SEMANTIC RANGE}} {HOST	done} {0 0}} {untagged 1 {0 0} {{}} {HOST	done} {0 0}}}
+
+test at-application-unload {the dynamic loader's lifetime rule on Android: Rust's thread-locals there are pthread keys whose destructors are in the library, so a library unloaded while a thread that called it lives makes the thread's end crash; kept loaded by a second handle (SDLActivity's System.loadLibrary), or pinned with RTLD_NODELETE where Bionic has it (API 23 and later), the thread ends cleanly} -constraints {androidRun} -body {
+    set app [atApplicationHosts]
+    set results {}
+    foreach root [atRoots] {
+        set api [string range [file tail $root] 4 end]
+        foreach lib {co} {
+            foreach mode {unload kept nodelete} {
+                lassign [atAndroidLines $root/root $app/lib/host_dlclose lib$lib.so ${lib}_main $mode] ok lines
+                set survived [expr {"SURVIVED" in $lines}]
+                set refused [expr {[lsearch -glob $lines {DLOPEN*invalid flags*}] >= 0}]
+                lappend results [list $mode [expr {$api >= 23 ? "23+" : $api}] $survived $refused]
+            }
+        }
+    }
+    lsort -unique $results
+} -result {{kept 21 1 0} {kept 23+ 1 0} {nodelete 21 0 1} {nodelete 23+ 1 0} {unload 21 0 0} {unload 23+ 0 0}}
 
 cleanupTests
