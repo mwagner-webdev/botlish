@@ -1,0 +1,29 @@
+# b-counted-recursive.bot -- b-counted-fold.bot's transitions as a self
+# tail call carrying the List and the count as parameters (the List a plan
+# parameter, M8A-VIRTUAL-IMMUTABLE-CONSTRUCTION.md), the struct built once.
+#
+# expect: [512, 512, 786944]
+
+import std::list
+
+struct Acc:
+    items: List[int]
+    count: int
+
+fn build_from(xs: List[int], i: int, items: List[int], count: int) -> Acc:
+    if i < 0 or i >= xs.length():
+        return Acc {items: items, count: count}
+    x = xs.at(i)
+    if x.mod(2) == 1:
+        return build_from(xs, i + 1, items.append(x * 3 + 1), count)
+    build_from(xs, i + 1, items, count + 1)
+
+fn sum(ys: List[int]) -> int:
+    fold y in ys with intermediate s 0:
+        s + y
+
+n = 1024
+xs = loop i from 0 to n:
+    i
+a = build_from(xs, 0, [], 0)
+[a.items.length(), a.count, sum(a.items)]

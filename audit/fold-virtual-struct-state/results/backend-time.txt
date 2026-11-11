@@ -1,0 +1,10 @@
+program                    compile-us  compile-us*
+width-2.bot                      1936         1914
+width-16.bot                     5914         5833
+width-64.bot                    23266        35316
+nested-5.bot                     5596         5722
+many-10.bot                     11632         9313
+many-80.bot                    115684       129470
+scanner-fold.bot                 6742         5140
+chunks-fold.bot                  5149         4948
+fold-loops.bot                 127027       129347

@@ -1,0 +1,31 @@
+# b-counted-fold.bot -- FOLD-VIRTUAL-STRUCT-STATE-CENSUS-1.md, Probe B: a
+# fold carrying a growing List and a scalar beside it, `Acc {items, count}`
+# -- the commonest shape of a struct state with a List field. Odd elements
+# are appended, even ones only counted, so some completions keep the List
+# unchanged (a field carried through, not rebuilt). tools/measure.tcl
+# rewrites `n = ...` to measure other sizes.
+#
+# expect: [512, 512, 786944]
+
+import std::list
+
+struct Acc:
+    items: List[int]
+    count: int
+
+fn build(xs: List[int]) -> Acc:
+    fold x in xs with intermediate acc Acc {items: [], count: 0}:
+        if x.mod(2) == 1:
+            Acc {items: acc.items.append(x * 3 + 1), count: acc.count}
+        else:
+            Acc {items: acc.items, count: acc.count + 1}
+
+fn sum(ys: List[int]) -> int:
+    fold y in ys with intermediate s 0:
+        s + y
+
+n = 1024
+xs = loop i from 0 to n:
+    i
+a = build(xs)
+[a.items.length(), a.count, sum(a.items)]

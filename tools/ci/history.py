@@ -19,10 +19,16 @@ five commits; a job otherwise reports one or two). Then the durations: each test
 seconds in the newest successful push run of tests.yml on main (the
 `tests (interp)` job, between the lines that start the files) and each
 golden suite's (the golden shards' per-suite seconds, all four backends).
+Last the costs: each item's seconds in the acceptance tier of each host
+that runs one (tests/platform/tier.tcl on macOS and Windows), from the
+acceptance jobs of the newest successful push run on main of the host's
+workflow -- a test file's between the lines that start the files, a golden
+suite's between the lines its predecessor and it print. tier.tcl balances
+its shards by them (CI-RUNS.md, "The canary").
 
 It prints tests/canary.tsv (--write writes it): the history lines, the most
 failing first, of the items that still exist in this checkout, then the
-duration lines. Deterministic for a given API state. tests/canary.tcl reads
+duration lines, then the cost lines. Deterministic for a given API state. tests/canary.tcl reads
 the file; tools/ci/test_runs.py tests this with a fake of the API.
 """
 import argparse
@@ -38,6 +44,9 @@ import runs  # noqa: E402
 
 WORKFLOWS = ("tests.yml", "tests-arm64.yml", "macos-arm64.yml", "windows-x86_64.yml")
 HOSTS = ("linux-x86_64", "linux-aarch64", "macos-aarch64", "windows-x86_64")
+# The hosts whose workflow runs tests/platform/tier.tcl's acceptance tier in
+# shards (jobs named "acceptance ..."): the workflow and the host target.
+ACCEPTANCE = (("macos-arm64.yml", "macos-aarch64"), ("windows-x86_64.yml", "windows-x86_64"))
 BROKEN = 5
 STAMP = re.compile(r"^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?Z) ?")
 
@@ -158,6 +167,32 @@ def suite_durations(text):
     return out
 
 
+def tier_suite_durations(text):
+    """{tests/golden/X.bot: seconds} from tests/platform/tier.tcl's golden
+    phase (tests/golden/run.tcl -quiet): a suite prints its lines when it
+    has run, so its seconds run from the previous suite's lines (or the
+    phase's start) to its own first line."""
+    out = {}
+    start = None
+    current = None
+    for stamp, line in lines_of(text):
+        if re.match(r"^######## \d+ golden suites on \S+$", line):
+            start, current = stamp, None
+            continue
+        if start is None or not stamp:
+            continue
+        if re.match(r"^######## \d+ ", line):
+            # The phase's verdict, or the next phase (the line under the
+            # phase's start echoes its command).
+            start = None
+            continue
+        m = re.match(r"^(?:== )?([\w.+-]+\.bot)(?::|\s)", line)
+        if m and m.group(1) != current:
+            out["tests/golden/" + m.group(1)] = round(max(seconds_between(start, stamp), 0.0), 1)
+            start, current = stamp, m.group(1)
+    return out
+
+
 def history(api, days, today, out=lambda line: None):
     """[(item, hosts, commits, last, reason)], the most failing first."""
     since = (today - datetime.timedelta(days=days)).strftime("%Y-%m-%d")
@@ -218,12 +253,34 @@ def durations(api, out=lambda line: None):
     return {}
 
 
+def costs(api, out=lambda line: None):
+    """{host: {item: seconds}}: for each host of ACCEPTANCE, its items'
+    seconds in the acceptance jobs of the newest successful push run on main
+    of its workflow whose acceptance jobs all succeeded."""
+    found = {}
+    for workflow, host in ACCEPTANCE:
+        for r in api.workflow_runs(workflow, branch="main", event="push", status="success", per_page=10):
+            jobs = [j for j in api.jobs(r["id"]) if (j.get("name") or "").startswith("acceptance")]
+            if not jobs or any(j.get("conclusion") != "success" for j in jobs):
+                continue
+            items = {}
+            for job in jobs:
+                text = api.log(job["id"])
+                items.update(file_durations(text))
+                items.update(tier_suite_durations(text))
+            if items:
+                out("history: %s costs from %s" % (host, runs.link(api, r)))
+                found[host] = items
+                break
+    return found
+
+
 def clean(text):
     """A reason as one field of a tab-separated line."""
     return re.sub(r"\s+", " ", text).strip() or "-"
 
 
-def render(rows, seconds, days, today, root=ROOT):
+def render(rows, seconds, days, today, root=ROOT, costs=None):
     exists = lambda item: os.path.isfile(os.path.join(root, item))  # noqa: E731
     lines = [
         "# canary.tsv -- the canary's records (CI-RUNS.md, \"The canary\"), written by",
@@ -239,6 +296,11 @@ def render(rows, seconds, days, today, root=ROOT):
         "# duration ITEM SECONDS: ITEM's wall seconds on linux-x86_64 (a Tcl test",
         "# file on interp, a golden suite on all four backends), the canary's",
         "# estimate of its cost; an item without one is estimated from its size.",
+        "#",
+        "# cost HOST ITEM SECONDS: ITEM's wall seconds in HOST's acceptance tier",
+        "# (tests/platform/tier.tcl: a Tcl test file on interp, a golden suite on",
+        "# all four backends), by which tier.tcl balances its shards on HOST; an",
+        "# item without one costs its duration's estimate.",
         "",
     ]
     for item, hosts, commits, last, reason in rows:
@@ -248,6 +310,11 @@ def render(rows, seconds, days, today, root=ROOT):
     for item in sorted(seconds):
         if exists(item):
             lines.append("\t".join(["duration", item, "%.1f" % seconds[item]]))
+    for host in sorted(costs or {}):
+        lines.append("")
+        for item in sorted(costs[host]):
+            if exists(item):
+                lines.append("\t".join(["cost", host, item, "%.1f" % costs[host][item]]))
     return "\n".join(lines) + "\n"
 
 
@@ -265,7 +332,7 @@ def main(argv, api=None, out=print, today=None):
         except runs.ApiError as e:
             print("history.py: %s" % e, file=sys.stderr)
             return 2
-    text = render(history(api, a.days, today, out), durations(api, out), a.days, today)
+    text = render(history(api, a.days, today, out), durations(api, out), a.days, today, costs=costs(api, out))
     if a.write:
         with open(os.path.join(ROOT, "tests", "canary.tsv"), "w", encoding="utf-8", newline="\n") as f:
             f.write(text)

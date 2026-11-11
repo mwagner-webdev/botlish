@@ -1,0 +1,31 @@
+# c-vec-literal.bot -- FOLD-VIRTUAL-STRUCT-STATE-CENSUS-1.md, Probe C: a
+# struct intermediate holding a MutableVector beside a scalar. Every
+# iteration pushes onto the vector and completes with a *new literal* of
+# the struct (the count changes), so the consumed fold
+# (CONSUMED-FOLD-INTERMEDIATES-MILESTONE-1.md) takes the vector's header
+# through without a copy, and what is left per iteration is the struct
+# object the literal builds. tools/measure.tcl rewrites `n = ...`.
+#
+# expect: [1024, 1024, 523776]
+
+import std::mutable_vector
+
+struct Acc:
+    count: int
+    items: MutableVector[int]
+
+fn ints() -> MutableVector[int]:
+    std::mutable_vector::from_list([])
+
+fn build(n: int) -> Acc:
+    fold i from 0 to n with intermediate a Acc {count: 0, items: ints()}:
+        a.items.push(i)
+        Acc {count: a.count + 1, items: a.items}
+
+fn total(v: MutableVector[int]) -> int:
+    fold i from 0 to v.length() with intermediate s 0:
+        s + v.at(i)
+
+n = 1024
+r = build(n)
+[r.count, r.items.length(), total(r.items)]

@@ -2099,10 +2099,11 @@ and no acceptance depends on one.
   the host's tools see them), `tests/platform/tier.tcl smoke`, the canary)
   and the same smoke on ubuntu as a control; a push to main and a
   dispatched run (`workflow_dispatch` on the branch) also Tier B
-  (`tier.tcl acceptance`, six shards), the system linker and the
-  application's jobs. Locally, `tclsh9.0
-  tests/platform/tier.tcl smoke` takes seconds, and `tier.tcl X.test
-  Y.bot` runs any file or suite the way CI does.
+  (`tier.tcl acceptance`, six shards balanced by tests/canary.tsv's
+  macOS costs: CI-RUNS.md, "Balanced shards"), the system linker and the
+  application's jobs. Locally, `tclsh9.0 tests/platform/tier.tcl smoke`
+  takes seconds, and `tier.tcl X.test Y.bot` runs any file or suite the
+  way CI does.
 * Tier C is opt-in: `[ci-full]` in the message of a push's head commit
   runs the acceptance tier under GC stress, in three shards; a `CI-Tests:`
   trailer in that message narrows it to tier.tcl items (`CI-Tests:

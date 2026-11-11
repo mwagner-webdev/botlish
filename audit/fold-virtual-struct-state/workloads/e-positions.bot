@@ -1,0 +1,66 @@
+# e-positions.bot -- FOLD-VIRTUAL-STRUCT-STATE-CENSUS-1.md, Probe E: one
+# two-field struct, `P {a, b}`, built in each position the struct
+# scalar replacement (STRUCT-SCALAR-REPLACEMENT.md, VALUE-TRANSPORT-
+# MATERIALIZATION.md) already handles, and carried by a fold's back edge,
+# which it does not. Every function computes the same thing: the sum of a
+# small recurrence over `xs`, so the NIR of each differs only in where the
+# struct lives.
+#
+# expect: "ok"
+
+import std::list
+
+struct P:
+    a: int
+    b: int
+
+# A literal bound to a local and only projected.
+fn local_projected(x: int) -> int:
+    p = P {a: x, b: x + 1}
+    p.a + p.b
+
+# An `if` join bound to a local: the branches' fields join field-wise.
+fn if_join(x: int) -> int:
+    p = if x > 2:
+        P {a: x, b: 1}
+    else:
+        P {a: 1, b: x}
+    p.a * p.b
+
+# A returned struct read by the caller (retmulti / callmulti).
+fn make(x: int) -> P:
+    P {a: x * 2, b: x + 3}
+
+fn returned(x: int) -> int:
+    p = make(x)
+    p.a - p.b
+
+# A struct passed to an exact callee (its `fields` variant).
+fn take(p: P) -> int:
+    p.a + 2 * p.b
+
+fn argument(x: int) -> int:
+    take(P {a: x, b: x})
+
+# A struct carried around a self-tail recursion (a cyclic parameter slot).
+fn step_rec(xs: List[int], i: int, p: P) -> int:
+    if i < 0 or i >= xs.length():
+        return p.a + p.b
+    x = xs.at(i)
+    step_rec(xs, i + 1, P {a: p.b, b: p.a + x})
+
+fn recursion(xs: List[int]) -> int:
+    step_rec(xs, 0, P {a: 0, b: 1})
+
+# The same recurrence carried by a fold's back edge.
+fn fold_backedge(xs: List[int]) -> int:
+    p = fold x in xs with intermediate s P {a: 0, b: 1}:
+        P {a: s.b, b: s.a + x}
+    p.a + p.b
+
+xs = [1, 2, 3, 4, 5, 6, 7, 8]
+check = [local_projected(3), if_join(3), if_join(1), returned(5), argument(4), recursion(xs), fold_backedge(xs)]
+if check == [7, 3, 1, 2, 12, recursion(xs), recursion(xs)]:
+    "ok"
+else:
+    check

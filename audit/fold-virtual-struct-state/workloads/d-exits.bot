@@ -1,0 +1,97 @@
+# d-exits.bot -- FOLD-VIRTUAL-STRUCT-STATE-CENSUS-1.md, Probe D: how a fold
+# carrying a struct leaves an iteration. The value of each function is the
+# semantic oracle (FOLD-LOOPS-MILESTONE-1.md: a normal completion replaces
+# the intermediate, `continue` keeps the iteration's starting value, a bare
+# `break` and exhaustion yield it); tools/probes.tcl compares every
+# backend, and the NIR experiment's field-register program, with the
+# reference interpreter.
+#
+# expect: [[0, 37], [27, 7], [16, 17], [3, 4], [40, 8], [4, 10], [9, 4], [16, 21], [1, 0], [36, 8]]
+
+import std::list
+
+struct P:
+    a: int
+    b: int
+
+xs = [1, 2, 3, 4, 5, 6, 7, 8]
+
+# Every completion a literal of all fields.
+fn plain(xs: List[int]) -> P:
+    fold x in xs with intermediate s P {a: 0, b: 1}:
+        P {a: s.a * 0, b: s.b + x}
+
+# `continue` before any successor is computed: the iteration keeps s.
+fn continue_first(xs: List[int]) -> P:
+    fold x in xs with intermediate s P {a: 0, b: 1}:
+        if x.mod(3) == 0:
+            continue
+        P {a: s.a + x, b: s.b + 1}
+
+# A successor computed, then `continue`: the candidate is dropped and the
+# next iteration starts from s, not from n.
+fn continue_after_candidate(xs: List[int]) -> P:
+    fold x in xs with intermediate s P {a: 0, b: 1}:
+        n = P {a: s.a + x, b: s.b + x}
+        if x.mod(2) == 0:
+            continue
+        n
+
+# A successor computed, then a bare `break`: the fold's value is s, the
+# iteration's starting value, not n.
+fn break_after_candidate(xs: List[int]) -> P:
+    fold x in xs with intermediate s P {a: 0, b: 1}:
+        n = P {a: s.a + x, b: s.b * 2}
+        if x == 3:
+            break
+        n
+
+# Partial updates: one field rebuilt, one carried, on different branches.
+fn partial(xs: List[int]) -> P:
+    fold x in xs with intermediate s P {a: 0, b: 0}:
+        if x.mod(2) == 0:
+            P {a: s.a + x * 2, b: s.b}
+        else:
+            P {a: s.a, b: s.b + 2}
+
+# The intermediate itself as one branch's completion.
+fn identity_branch(xs: List[int]) -> P:
+    fold x in xs with intermediate s P {a: 0, b: 0}:
+        if x > 4:
+            s
+        else:
+            P {a: s.a + 1, b: s.b + x}
+
+# No domain: the fold ends on a field of its own intermediate.
+fn no_domain(limit: int) -> P:
+    fold with intermediate s P {a: 0, b: 1}:
+        if s.a >= limit:
+            break
+        P {a: s.a + 3, b: s.b + 1}
+
+# A completion that swaps the fields (each field's next value reads the
+# other's old one: the field moves must not clobber).
+fn swap(xs: List[int]) -> P:
+    fold x in xs with intermediate s P {a: 0, b: 1}:
+        P {a: s.b, b: s.a + x}
+
+# A completion that only permutes the fields: every source is a field of
+# the iteration's starting value, so the back edge is a parallel move (a
+# sequential one would overwrite `a` before `b` reads it: {1, 1}).
+fn swap_pure(xs: List[int]) -> P:
+    fold x in xs with intermediate s P {a: 0, b: 1}:
+        P {a: s.b, b: s.a}
+
+# The successor built by a helper function: the completion is a call whose
+# result is a struct (a recognized result crosses as `retmulti` fields),
+# its argument the intermediate itself (a `fields` parameter).
+fn advance(s: P, x: int) -> P:
+    P {a: s.a + x, b: s.b + 1}
+
+fn helper(xs: List[int]) -> P:
+    fold x in xs with intermediate s P {a: 0, b: 0}:
+        advance(s, x)
+
+pairs = [plain(xs), continue_first(xs), continue_after_candidate(xs), break_after_candidate(xs), partial(xs), identity_branch(xs), no_domain(7), swap(xs), swap_pure([1, 2, 3]), helper(xs)]
+loop p in pairs:
+    [p.a, p.b]

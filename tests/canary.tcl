@@ -39,14 +39,16 @@ namespace eval canary {
 }
 
 # The records of tests/canary.tsv: a dict with `history`, a list of
-# {item hosts commits last reason} in the file's order, and `durations`, a
-# dict item -> seconds.
+# {item hosts commits last reason} in the file's order, `durations`, a dict
+# item -> seconds, and `costs`, a dict host -> item -> seconds (an item's
+# seconds in that host's acceptance tier: tests/platform/tier.tcl's shards).
 proc canary::records {{path ""}} {
     variable root
     if {$path eq ""} { set path [file join $root tests canary.tsv] }
     set history {}
     set durations [dict create]
-    if {![file exists $path]} { return [dict create history {} durations {}] }
+    set costs [dict create]
+    if {![file exists $path]} { return [dict create history {} durations {} costs {}] }
     set f [open $path r]
     fconfigure $f -encoding utf-8
     set n 0
@@ -69,14 +71,21 @@ proc canary::records {{path ""}} {
                 }
                 dict set durations [lindex $fields 1] [lindex $fields 2]
             }
+            cost {
+                if {[llength $fields] != 4 || ![string is double -strict [lindex $fields 3]]} {
+                    close $f
+                    error "$path:$n: a cost line is: cost HOST ITEM SECONDS"
+                }
+                dict set costs [lindex $fields 1] [lindex $fields 2] [lindex $fields 3]
+            }
             default {
                 close $f
-                error "$path:$n: not a history or duration line"
+                error "$path:$n: not a history, duration or cost line"
             }
         }
     }
     close $f
-    return [dict create history $history durations $durations]
+    return [dict create history $history durations $durations costs $costs]
 }
 
 # Whether PATH (relative to the repository root) is something the canary

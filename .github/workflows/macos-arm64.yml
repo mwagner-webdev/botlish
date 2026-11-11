@@ -817,7 +817,12 @@ jobs:
     # in its golden phase (main's own shard 3, with event-loop.test's 15
     # minutes in warning-gate.test's place, measured 78 minutes of work and
     # was cut off once too), so they became six: 58 minutes at most,
-    # measured. tier.tcl shards round-robin by index, not by cost.
+    # measured. Dealt round-robin by index, the shards were as uneven as the
+    # files fell (25 to 56 minutes of five on one run), and a runner 1.8
+    # times slower than usual came twice a day: tier.tcl now balances them by
+    # each item's seconds on macOS (tests/canary.tsv's cost lines, which
+    # tools/ci/history.py recomputes from main's newest green run), about 34
+    # minutes each (CI-RUNS.md, "Balanced shards").
     strategy:
       fail-fast: false
       matrix:

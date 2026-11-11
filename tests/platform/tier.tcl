@@ -98,8 +98,9 @@
 #                         milestone)
 #
 # -gc-stress 1 runs everything with BOTLISH_NATIVE_GC_STRESS=1. -shard I/N
-# (1 <= I <= N) keeps the Ith of every N test files and of every N suites,
-# for parallel CI jobs; examples, cabi, rust, native-stack-mutants,
+# (1 <= I <= N) keeps the Ith of N shares of the test files and of the
+# suites, for parallel CI jobs, balanced by tests/canary.tsv's costs for this
+# host (the shares, below); examples, cabi, rust, native-stack-mutants,
 # native-aot-mutants, native-stack-bench, c-capture-bench, the darwin-io-*,
 # windows-io-mutants, windows-unwind-mutants, the filesystem-*, the utf16-*
 # and the c-ffi-* and c-borrow-* checks run in shard 1 only. -list 1 prints the commands and runs nothing. Each command is printed before it
@@ -242,20 +243,56 @@ foreach item $items {
     }
 }
 
-# This shard's share.
-proc shardOf {list} {
-    global shard shards
-    set kept {}
+# This shard's share, balanced by estimated time: the items are dealt out
+# the costliest first, each to the shard with the least time so far (the
+# lowest on a tie; equal costs in the list's order), and each shard keeps
+# its items in the list's order. An item's estimate is its seconds in this
+# host's acceptance tier, tests/canary.tsv's cost lines, else the canary's
+# (canary::Estimate: its linux-x86_64 duration, else its size). Every shard
+# of a host computes the same partition from the same file. Dealt round-robin
+# by index, the shards were as uneven as the files fall: macOS's five took
+# 25 to 56 minutes on one run, and one shard twice reached the job's limit
+# on a slower runner.
+proc shardOf {list kind} {
+    global shard shards root
+    if {$shards == 1} { return $list }
+    if {![info exists ::tierCosts]} {
+        namespace eval :: [list source [file join $root tests canary.tcl]]
+        set records [canary::records]
+        set ::tierCosts [list [dict getdef [dict get $records costs] [core::cabi::hostTarget] {}] \
+            [dict get $records durations]]
+    }
+    lassign $::tierCosts costs durations
+    if {$kind eq "golden"} { set prefix tests/golden/ } else { set prefix tests/ }
+    set entries {}
     set i 0
     foreach x $list {
-        if {$i % $shards == $shard - 1} { lappend kept $x }
+        set item $prefix$x
+        if {[dict exists $costs $item]} {
+            set cost [dict get $costs $item]
+        } else {
+            set cost [canary::Estimate $item $durations $root]
+        }
+        lappend entries [list $i $cost]
         incr i
     }
-    return $kept
+    set loads [lrepeat $shards 0.0]
+    set mine {}
+    # lsort is stable: equal costs stay in the list's order.
+    foreach entry [lsort -real -decreasing -index 1 $entries] {
+        lassign $entry i cost
+        set k 0
+        for {set j 1} {$j < $shards} {incr j} {
+            if {[lindex $loads $j] < [lindex $loads $k]} { set k $j }
+        }
+        lset loads $k [expr {[lindex $loads $k] + $cost}]
+        if {$k == $shard - 1} { lappend mine $i }
+    }
+    return [lmap i [lsort -integer $mine] {lindex $list $i}]
 }
-set testFiles [shardOf $testFiles]
+set testFiles [shardOf $testFiles tcl]
 set kept [dict create]
-foreach name [shardOf [dict keys $suites]] {
+foreach name [shardOf [dict keys $suites] golden] {
     dict set kept $name [dict get $suites $name]
 }
 set suites $kept

@@ -1,0 +1,84 @@
+# d-observe.bot -- FOLD-VIRTUAL-STRUCT-STATE-CENSUS-1.md, Probe D: a struct
+# intermediate observed whole, or an earlier version of it kept. Each use
+# here needs a physical struct on its path (storage, equality, an open call,
+# a capture, a return), so a field-register representation must build one
+# there, and two versions that are both observable must both stay intact.
+#
+# expect: [[1, 3, 6, 10], [6, 10], [10, 2], 10, [6, 3], [3, 3], [4, 10], 2]
+
+import std::list
+
+struct P:
+    a: int
+    b: int
+
+xs = [1, 2, 3, 4]
+
+# Every earlier version stored in a List built beside the fold (storage).
+fn history(xs: List[int]) -> List[int]:
+    t = fold x in xs with intermediate s {p: P {a: 0, b: 0}, seen: []}:
+        n = P {a: s.p.a + x, b: s.p.b + 1}
+        {p: n, seen: s.seen.append(n)}
+    loop q in t.seen:
+        q.a
+
+# Two versions observable in one record: the old one and its successor.
+fn both_versions(xs: List[int]) -> List[int]:
+    r = fold x in xs with intermediate s {old: P {a: 0, b: 0}, new: P {a: 0, b: 0}}:
+        {old: s.new, new: P {a: s.new.a + x, b: s.new.b + x}}
+    [r.old.a, r.new.b]
+
+# Passed whole to an exact function and to a function value (open call).
+fn weight(p: P) -> int:
+    p.a + p.b
+
+fn calls(xs: List[int]) -> List[int]:
+    f = weight
+    t = fold x in xs with intermediate s P {a: 0, b: 0}:
+        w = weight(s) + f(s)
+        P {a: s.a + x, b: w.mod(5)}
+    [t.a, t.b]
+
+# Captured by a function made in the body, called after the fold.
+fn captured(xs: List[int]) -> int:
+    t = fold x in xs with intermediate s {p: P {a: 0, b: 0}, last: 0}:
+        fn g() -> int:
+            s.p.a + x
+        {p: P {a: g(), b: 0}, last: g()}
+    t.last
+
+# Returned from the enclosing function in the middle of the fold.
+fn early(xs: List[int]) -> P:
+    fold x in xs with intermediate s P {a: 0, b: 0}:
+        if x == 4:
+            return s
+        P {a: s.a + x, b: s.b + 1}
+
+# Compared whole (structural equality needs the object).
+fn compared(xs: List[int]) -> P:
+    fold x in xs with intermediate s P {a: 1, b: 1}:
+        if s == P {a: 3, b: 3}:
+            s
+        else:
+            P {a: s.a + 1, b: s.b + 1}
+
+# Hand-written field state: the struct only built at the end (the
+# reference the fold's field registers would equal).
+fn fields_only(xs: List[int]) -> P:
+    t = fold x in xs with intermediate s P {a: 0, b: 0}:
+        P {a: s.a + 1, b: s.b + x}
+    t
+
+# The intermediate passed to an exact callee whose parameter takes fields.
+fn first(p: P) -> int:
+    p.a
+
+fn exact(xs: List[int]) -> int:
+    t = fold x in xs with intermediate s P {a: 0, b: 0}:
+        P {a: first(s) + 0 * x, b: s.b}
+    t.a + 2
+
+e = early(xs)
+c = compared(xs)
+fo = fields_only(xs)
+[history(xs), both_versions(xs), calls(xs), captured(xs), [e.a, e.b], [c.a, c.b], [fo.a, fo.b], exact(xs)]

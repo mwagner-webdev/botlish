@@ -1,0 +1,29 @@
+row                                     n  Struct   List  Plan    copied plans extend   mat shr/det/el   new  get  app plan  code-B lower-ms instr/run
+scan2-fold                              -     161      1     0         1     0      0     0      0/0/0     7    9    0    0    3033     53.2 134555 generated=17.7% allocator=61.3% helpers=14.5% collector=4.9% mem=1.5%
+    value {list {{int 26}}}
+scan2-fold+fields                       -       1      1     0         1     0      0     0      0/0/0     1    1    0    0    2490        - 25528 generated=85.8% allocator=3.9% helpers=6.8% collector=2.7% mem=0.8%
+    value {list {{int 26}}}
+scan2-recursive                         -       0      1     0         1     0      0     0      0/0/0     0    0    0    0    2136     74.3 22657 generated=87.6% allocator=2.5% helpers=7.0% collector=2.9% mem=0.0%
+    value {list {{int 26}}}
+scan2-cells                             -       0      1     0         1     0      0     0      0/0/0     0    0    0    0    3381     66.8 49755 generated=46.9% allocator=34.2% helpers=14.6% collector=3.7% mem=0.6%
+    value {list {{int 26}}}
+scan4-fold                              -     161      1     0         3     0      0     0      0/0/0     7   20    0    0    3642     57.7 137530 generated=18.5% allocator=60.1% helpers=14.1% collector=4.8% mem=2.4%
+    value {list {{int 26} {int 15} {int 1116}}}
+scan4-fold+fields                       -       1      1     0         3     0      0     0      0/0/0     1    3    0    0    2963        - 27936 generated=83.0% allocator=3.2% helpers=6.2% collector=2.5% mem=5.1%
+    value {list {{int 26} {int 15} {int 1116}}}
+scan4-recursive                         -       0      1     0         3     0      0     0      0/0/0     0    0    0    0    2612     97.8 24264 generated=86.4% allocator=3.3% helpers=6.7% collector=2.7% mem=0.8%
+    value {list {{int 26} {int 15} {int 1116}}}
+scan4-cells                             -       0      1     0         3     0      0     0      0/0/0     0    0    0    0    4012     70.1 52796 generated=46.4% allocator=34.7% helpers=14.5% collector=3.6% mem=0.7%
+    value {list {{int 26} {int 15} {int 1116}}}
+scan6-fold                              -     161      1     0         4     0      0     0      0/0/0     9   40    0    0    4682     71.2 137933 generated=19.9% allocator=59.5% helpers=14.1% collector=4.8% mem=1.7%
+    value {list {{int 26} {int 15} {int 1116} {int 3}}}
+scan6-fold+fields(scan)                 -      40      1     0         4     0      0     0      0/0/0     3    8    0    0    3850        - 56442 generated=44.8% allocator=39.2% helpers=10.7% collector=3.8% mem=1.5%
+    value {list {{int 26} {int 15} {int 1116} {int 3}}}
+scan6-fold+fields(both)                 -      16      1     0         4     0      0     0      0/0/0     2    6    0    0    3778        - 38659 generated=64.4% allocator=22.1% helpers=8.7% collector=3.2% mem=1.6%
+    value {list {{int 26} {int 15} {int 1116} {int 3}}}
+scan6-fold+fields+ret                   -       1      1     0         4     0      0     0      0/0/0     1    4    0    0    3747        - 28944 generated=85.0% allocator=3.3% helpers=6.0% collector=2.4% mem=3.4%
+    value {list {{int 26} {int 15} {int 1116} {int 3}}}
+scan6-recursive                         -       0      1     0         4     0      0     0      0/0/0     0    0    0    0    3375    117.1 25524 generated=87.4% allocator=2.1% helpers=6.2% collector=2.5% mem=1.7%
+    value {list {{int 26} {int 15} {int 1116} {int 3}}}
+scan6-cells                             -       0      1     0         4     0      0     0      0/0/0     0    0    0    0    5085     88.3 58774 generated=44.0% allocator=35.7% helpers=13.6% collector=3.4% mem=3.3%
+    value {list {{int 26} {int 15} {int 1116} {int 3}}}
