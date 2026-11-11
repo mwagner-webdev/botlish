@@ -15,11 +15,19 @@
 # own reading of the bits it passed, and calls the nesting callbacks with
 # its frame-pointer register holding no frame (what C compiled without frame
 # pointers may leave there), so a runtime that read C's frames would fail
-# here. The system C library's qsort is the real-library acceptance.
+# here. On Windows x86-64 (WINDOWS-X86-64-MILESTONE-9.md) the fixture is
+# MSVC's -- cl's C and ml64's tests/cffi/callback-fixture-win64.asm -- and
+# the nesting callbacks are called from an assembly frame with no function
+# table entry, which Windows' unwinder cannot cross (it takes it for a leaf
+# and finds a return address of 0), so a runtime that unwound C's frames
+# would fail there; the assembly's other caller places a mixed Win64 call
+# by hand and checks every nonvolatile register across it. The system C
+# library's qsort is the real-library acceptance, and on Windows also
+# kernel32's EnumSystemLocalesEx.
 #
 # Static checks run everywhere; running a callback needs the native backend,
 # C calls (nativeCCalls) and callbacks (nativeCCallbacks: Linux x86-64 and
-# AArch64, macOS AArch64).
+# AArch64, macOS AArch64, Windows x86-64).
 
 source [file join [file dirname [file normalize [info script]]] helpers.tcl]
 source [file join $::projectRoot surface surface.tcl]
@@ -32,8 +40,12 @@ set ::cbCounter 0
 set ::cbFixtureDir ""
 if {[testConstraint cToolchain] && [testConstraint nativeCCalls] && [testConstraint nativeCCallbacks]} {
     set ::cbFixtureDir [makeDirectory cbx-fixture-[pid]]
+    set sources [list [file join $::projectRoot tests cffi callback-fixture.c]]
+    if {$::tcl_platform(platform) eq "windows"} {
+        lappend sources [file join $::projectRoot tests cffi callback-fixture-win64.asm]
+    }
     if {[catch {
-        ctool::staticLibrary $::cbFixtureDir botlish_callback_fixture [file join $::projectRoot tests cffi callback-fixture.c]
+        ctool::staticLibrary $::cbFixtureDir botlish_callback_fixture {*}$sources
     } message]} {
         puts stderr "c-callbacks.test: the fixture library did not build: $message"
         set ::cbFixtureDir ""
@@ -41,6 +53,10 @@ if {[testConstraint cToolchain] && [testConstraint nativeCCalls] && [testConstra
 }
 testConstraint cbFixture [expr {$::cbFixtureDir ne "" && [testConstraint nativeBuilt] && [testConstraint cLinker]}]
 testConstraint linuxHost [string match linux-* [core::cabi::hostTarget]]
+testConstraint windowsHost [expr {[core::cabi::hostTarget] eq "windows-x86_64"}]
+# Where the fixture's C can switch to a stack of its own: ucontext on Linux,
+# a fiber of its own on Windows.
+testConstraint otherStackHost [expr {[testConstraint linuxHost] || [testConstraint windowsHost]}]
 testConstraint cbNative [expr {[testConstraint nativeBuilt] && [testConstraint nativeCCalls] && [testConstraint nativeCCallbacks] && [testConstraint cLinker]}]
 
 set ::cbxModule [core::ReadFile [file join $::projectRoot tests cffi cbx.bot]]
@@ -127,6 +143,17 @@ proc cbValues {text backends {stress 0}} {
     } finally {
         if {$saved eq ""} { unset -nocomplain ::env(BOTLISH_NATIVE_GC_STRESS) } else { set ::env(BOTLISH_NATIVE_GC_STRESS) $saved }
     }
+}
+
+# What the standalone executable EXE prints when run with only the
+# environment NAME VALUE ... of PAIRS: `env -i` on Unix; on Windows, whose
+# processes need their system variables, this process's environment with
+# PATH empty and PAIRS set (runStandalone).
+proc cbRunClean {exe args} {
+    if {$::tcl_platform(platform) eq "windows"} {
+        return [runStandalone $exe {*}$args]
+    }
+    return [exec env -i {*}[lmap {name value} $args {string cat $name = $value}] $exe]
 }
 
 # cbValues on both native backends, normally and under GC stress: "same:
@@ -399,6 +426,8 @@ test cb-coroutines {a callback runs a coroutine to completion within its call (i
     list [cbAgree $program] [withoutCoroutineFusion {cbAgree $program}]
 } -cleanup removeCbApps -result {{same: [21, 10, 12]} {same: [21, 10, 12]}}
 
+# qsort's count and size are size_t, 64 bits on every target here: unsigned
+# long long is it on LP64 and LLP64 alike (Windows' unsigned long is 32).
 test cb-qsort {a real C library calls back: the system C library's qsort sorts byte storage it writes (a write noescape exposure) with a Botlish comparator that reads the elements through native views, synchronously, during the call} -constraints cbNative -body {
     set program {direct module
 import std::ffi::c
@@ -407,7 +436,7 @@ import std::binary
 import std::binary::native
 import std::byte
 
-extern c fn qsort(base: std::ffi::c::Ptr[std::ffi::c::Void] write noescape, count: std::ffi::c::ULong, size: std::ffi::c::ULong, compare: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Ptr[std::ffi::c::Void], std::ffi::c::Ptr[std::ffi::c::Void]], return: std::ffi::c::Int}] noescape) -> unit
+extern c fn qsort(base: std::ffi::c::Ptr[std::ffi::c::Void] write noescape, count: std::ffi::c::ULongLong, size: std::ffi::c::ULongLong, compare: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Ptr[std::ffi::c::Void], std::ffi::c::Ptr[std::ffi::c::Void]], return: std::ffi::c::Int}] noescape) -> unit
 
 layout Byte:
     size 1
@@ -442,7 +471,7 @@ cmp = std::ffi::c::callback(compare)
 sorted = qsort(data, 8, 1, cmp)
 [std::abi::bytes::freeze(sorted.base) == bytes([0, 1, 2, 3, 7, 8, 9, 200]), std::abi::bytes::freeze(data) == bytes([9, 3, 7, 1, 8, 2, 200, 0])]
 }
-    if {[core::cabi::hostTarget] eq "linux-aarch64" || [core::cabi::hostTarget] eq "linux-x86_64" || [core::cabi::hostTarget] eq "macos-aarch64"} {
+    if {[core::cabi::hostTarget] in {linux-aarch64 linux-x86_64 macos-aarch64 windows-x86_64}} {
         set dir [cbApp [list main.bot $program]]
         set hir [cbHir $dir]
         set saved [expr {[info exists ::env(BOTLISH_NATIVE_GC_STRESS)] ? $::env(BOTLISH_NATIVE_GC_STRESS) : ""}]
@@ -466,11 +495,124 @@ test cb-executable {a standalone executable runs the nested callbacks with no Tc
     file rename $exe $moved
     file delete -force $dir
     set result [ProtocolResultFile]
-    set stressed [exec env -i BOTLISH_NATIVE_GC_STRESS=1 BOTLISH_NATIVE_RESULT=$result $moved]
+    set stressed [cbRunClean $moved BOTLISH_NATIVE_GC_STRESS 1 BOTLISH_NATIVE_RESULT $result]
     set stressedValue [ProtocolValue $result]
     file delete $result
-    list [bareValue $moved] $stressedValue $stressed [runBare $moved] [exec env -i BOTLISH_NATIVE_GC_STRESS=1 $moved]
+    list [bareValue $moved] $stressedValue $stressed [runBare $moved] [cbRunClean $moved BOTLISH_NATIVE_GC_STRESS 1]
 } -cleanup {removeCbApps; file delete -force [file join [temporaryDirectory] cb-moved-[pid]]} -result {{["kept-by-main-1", "kept-by-main-2", "205"]} {["kept-by-main-1", "kept-by-main-2", "205"]} {} {} {}}
+
+# The central test's shape repeated: main holds a heap value across forty
+# nested round trips (each a transition, a callback that holds its own
+# value across a second transition, a callback that allocates), every C
+# call from a frame no walk can cross (callback-fixture.c's
+# call_without_frame). Each round trip returns 2i + 155 (C's outer and
+# inner around level1 and level2): their sum for i in 0..39 is 7760.
+set ::cbNestedLoop {import std::ffi::c
+import std::int
+import std::list
+import std::str
+import cbx
+
+fn churn(n: int) -> int:
+    xs = loop i from 0 to n:
+        std::str::concat("item", std::int::to_string(i))
+    std::list::length(xs)
+
+callback c fn level2(x: std::ffi::c::Int) -> std::ffi::c::Int:
+    k = churn(50)
+    if x > 1000 or x < -1000 or k > 1000 or k < 0:
+        return 0
+    x + k
+
+callback c fn level1(x: std::ffi::c::Int) -> std::ffi::c::Int:
+    held = std::str::concat("held-by-level-one-", std::int::to_string(x))
+    k = churn(20)
+    cb = std::ffi::c::callback(level2)
+    r = cbx::inner(cb, x)
+    n = std::str::length(held)
+    if r > 100000 or r < -100000 or k > 1000 or k < 0 or n < 19 or n > 20:
+        return 0
+    r + k
+
+fn main() -> List[str]:
+    a = [std::str::concat("kept-by-main-", std::int::to_string(1))]
+    total = fold i from 0 to 40 with intermediate acc 0:
+        cb = std::ffi::c::callback(level1)
+        acc + cbx::outer(cb, i)
+    std::list::append(a, std::int::to_string(total))
+
+main()
+}
+
+test cb-nested-loop {forty nested round trips under one held value: each callback holds its own value across a second transition whose callback allocates (collecting at every allocation under GC stress), every C call from a frame no walk can cross; the held values and C's sum survive} -constraints cbFixture -body {
+    cbAgree $::cbNestedLoop
+} -cleanup removeCbApps -result {same: ["kept-by-main-1", "7760"]}
+
+test cb-nested-in-coroutine {the nested round trips inside a coroutine: its body calls C, whose callback calls C again, between its yields -- on the coroutine's own stack (a fiber on Windows) with the general runtime, inlined into its consumer when fused; the consumer's held value and each answer survive} -constraints cbFixture -body {
+    set program "import std::ffi::c\nimport std::int\nimport std::list\nimport std::str\nimport cbx\n\nfn churn(n: int) -> int:\n    xs = loop i from 0 to n:\n        std::str::concat(\"item\", std::int::to_string(i))\n    std::list::length(xs)\n\ncallback c fn level2(x: std::ffi::c::Int) -> std::ffi::c::Int:\n    k = churn(50)\n    if x > 1000 or x < -1000 or k > 1000 or k < 0:\n        return 0\n    x + k\n\ncallback c fn level1(x: std::ffi::c::Int) -> std::ffi::c::Int:\n    held = std::str::concat(\"held-\", std::int::to_string(x))\n    k = churn(20)\n    cb = std::ffi::c::callback(level2)\n    r = cbx::inner(cb, x)\n    if r > 100000 or r < -100000 or k > 1000 or k < 0 or std::str::length(held) != 6:\n        return 0\n    r + k\n\nfn producer() -> int:\n    loop i from 0 to 3:\n        kept = std::str::concat(\"producer-\", std::int::to_string(i))\n        cb = std::ffi::c::callback(level1)\n        r = cbx::outer(cb, i)\n        yield r + std::str::length(kept) - 10\n    -1\n\nfn main() -> List\[str\]:\n    a = std::str::concat(\"kept-by-\", \"main\")\n    coroutine {step, first} = producer()\n    second = step()\n    third = step()\n    \[a, std::int::to_string(first), std::int::to_string(second), std::int::to_string(third)\]\n\nmain()\n"
+    list [cbAgree $program] [withoutCoroutineFusion {cbAgree $program}]
+} -cleanup removeCbApps -result [lrepeat 2 {same: ["kept-by-main", "155", "157", "159"]}]
+
+# The Win64 ABI by hand (callback-fixture.c's cbx_abi_preserved): on
+# Windows x86-64 the assembly caller places every argument -- an int, a
+# double, a float third, an integer fourth, then a double, an int, a signed
+# char and a double on the stack, the narrow ones with dirty bits above
+# their widths, every unused register of a register position dirty -- with
+# a sentinel in each nonvolatile register (RBX, RBP, RDI, RSI, R12-R15,
+# XMM6-XMM15), and the callback, which allocates, hands its floating
+# arguments back to C; elsewhere a plain C call of the same arguments.
+set ::cbAbi "import std::ffi::c\nimport std::ffi::c::raw\nimport std::int\nimport std::list\nimport std::str\nimport cbx\n\nfn churn(n: int) -> int:\n    xs = loop i from 0 to n:\n        std::str::concat(\"item\", std::int::to_string(i))\n    std::list::length(xs)\n\ncallback c fn abi(a: std::ffi::c::Int, b: std::ffi::c::RawDouble, c: std::ffi::c::RawFloat, d: std::ffi::c::LongLong, e: std::ffi::c::RawDouble, g: std::ffi::c::Int, h: std::ffi::c::SChar, i: std::ffi::c::RawDouble) -> std::ffi::c::LongLong:\n    held = std::str::concat(\"abi-\", std::int::to_string(g))\n    k = churn(12)\n    cbx::record_bits(1, std::ffi::c::raw::double_to_bits(b))\n    cbx::record_bits(2, std::ffi::c::raw::float_to_bits(c))\n    cbx::record_bits(4, std::ffi::c::raw::double_to_bits(e))\n    cbx::record_bits(7, std::ffi::c::raw::double_to_bits(i))\n    if k != 12 or std::str::length(held) != 6 or d > 1000000000000 or d < -1000000000000 or a > 1000000 or a < -1000000 or g > 1000000 or g < -1000000:\n        return 0\n    a + d + g + h\n\nfn run() -> List\[int\]:\n    kept = std::str::concat(\"kept-\", \"by-run\")\n    cb = std::ffi::c::callback(abi)\n    wrong = cbx::abi_preserved(cb)\n    changed = cbx::abi_last_changed()\n    again = cbx::abi_preserved(cb)\n    \[wrong, changed, again, std::str::length(kept)\]\n\nrun()\n"
+
+test cb-abi-preserved {a mixed Win64 call placed by hand -- positions, not per-class counters: a float third, an integer fourth, four on the stack, narrow arguments with dirty upper bits -- reaches the callback exactly, its integer sum comes back, and every nonvolatile register (RBX, RBP, RDI, RSI, R12-R15, XMM6-XMM15) holds its sentinel afterwards, also when the callback allocates and collects (elsewhere the same arguments by C's own call)} -constraints cbFixture -body {
+    cbAgree $::cbAbi
+} -cleanup removeCbApps -result {same: [0, 0, 0, 11]}
+
+# Windows' unwinder through a callback (callback-fixture.c's
+# cbx_trace_check): C's cbx_trace_outer calls a callback that calls C's
+# cbx_trace_inner, whose callback asks C to unwind from where it is with
+# Windows' unwinder alone. It crosses cbx_trace_inner (through the inner
+# callback's entry point and the runtime) and cbx_trace_outer (also through
+# the inner call's transition shim, the outer callback's Botlish frames and
+# its entry point) only when every one of those functions has a function
+# table entry describing its frame: 3, and C's answer 3 * (3 + 11) + 1 =
+# 43. Not Windows: 3 by definition (callback-fixture.c).
+test cb-windows-unwind-through {Windows' unwinder alone, from C called by a nested callback, climbs through the callbacks' entry points, the runtime, a transition shim and the Botlish frames between to both C functions that called back: every function between has unwind information describing its frame} -constraints cbFixture -body {
+    cbAgree "import std::ffi::c\nimport std::int\nimport std::str\nimport cbx\n\ncallback c fn check(x: std::ffi::c::Int) -> std::ffi::c::Int:\n    held = std::str::concat(\"check-\", std::int::to_string(x))\n    t = cbx::trace_check()\n    if std::str::length(held) != 7 or t > 100 or t < -100:\n        return -50\n    t\n\ncallback c fn outer_step(x: std::ffi::c::Int) -> std::ffi::c::Int:\n    held = std::str::concat(\"outer-\", std::int::to_string(x))\n    cb = std::ffi::c::callback(check)\n    r = cbx::trace_inner(cb, x)\n    if std::str::length(held) != 7 or r > 1000 or r < -1000:\n        return -100\n    r\n\ncb = std::ffi::c::callback(outer_step)\n\[cbx::trace_outer(cb, 1)\]\n"
+} -cleanup removeCbApps -result {same: [43]}
+
+# A real Windows API that calls back synchronously: kernel32's
+# EnumSystemLocalesEx calls its LOCALE_ENUMPROCEX for each locale,
+# BOOL CALLBACK (LPWSTR, DWORD, LPARAM) -- a Win32 BOOL is a 32-bit int
+# (std::ffi::c::Int), never C's _Bool; a DWORD is unsigned long (32 bits on
+# Windows: std::ffi::c::ULong); LPARAM is pointer-sized (LongLong).
+# Microsoft documents the callback as called during the call, on the
+# calling thread, and kept no longer (noescape). The callbacks allocate and
+# hand each call to C (callback-fixture.c's cbx_locale_note), which counts;
+# no locale list or order is assumed: the full enumeration has at least
+# three, every one with a name and the program's lParam, and a callback
+# that answers FALSE at the third stops it there.
+test cb-win32-locales {kernel32's EnumSystemLocalesEx calls a Botlish callback for every locale, synchronously, under GC stress too: Win32 BOOL results control the enumeration (it stops when the callback answers 0), and every call carries a name and the program's lParam} -constraints {cbFixture windowsHost} -body {
+    cbAgree "import std::ffi::c\nimport std::int\nimport std::list\nimport std::str\nimport cbx\n\nextern c library \"kernel32\"\nextern c fn enum_locales named \"EnumSystemLocalesEx\"(proc: std::ffi::c::FnPtr\[Fn\{args: \[std::ffi::c::Ptr\[std::ffi::c::UShort\], std::ffi::c::ULong, std::ffi::c::LongLong\], return: std::ffi::c::Int\}\] noescape, flags: std::ffi::c::ULong, param: std::ffi::c::LongLong, reserved: std::ffi::c::Ptr\[std::ffi::c::Void\] noescape) -> std::ffi::c::Int\n\nfn churn(n: int) -> int:\n    xs = loop i from 0 to n:\n        std::str::concat(\"item\", std::int::to_string(i))\n    std::list::length(xs)\n\ncallback c fn every_locale(name: std::ffi::c::Ptr\[std::ffi::c::UShort\], flags: std::ffi::c::ULong, param: std::ffi::c::LongLong) -> std::ffi::c::Int:\n    held = std::str::concat(\"locale-\", std::int::to_string(param))\n    k = churn(8)\n    if k != 8 or std::str::length(held) != 12:\n        return 0\n    cbx::locale_note(name, flags, param, 0)\n\ncallback c fn three_locales(name: std::ffi::c::Ptr\[std::ffi::c::UShort\], flags: std::ffi::c::ULong, param: std::ffi::c::LongLong) -> std::ffi::c::Int:\n    cbx::locale_note(name, flags, param, 3)\n\nfn at_least(n: int, k: int) -> int:\n    if n >= k:\n        return 1\n    0\n\nfn run() -> List\[int\]:\n    kept = std::str::concat(\"kept-\", \"by-run\")\n    none = std::ffi::c::null\[std::ffi::c::Void\]()\n    cbx::locale_reset()\n    every = std::ffi::c::callback(every_locale)\n    all = enum_locales(every, 1, 12345, none)\n    n = cbx::locale_calls()\n    bad = cbx::locale_bad()\n    cbx::locale_reset()\n    three = std::ffi::c::callback(three_locales)\n    enum_locales(three, 1, 12345, none)\n    \[at_least(all, 1), at_least(n, 3), bad, cbx::locale_calls(), cbx::locale_bad(), std::str::length(kept)\]\n\nrun()\n"
+} -cleanup removeCbApps -result {same: [1, 1, 0, 3, 0, 11]}
+
+# BOTLISH_NATIVE_UNWIND_CHECK=1 (WINDOWS-X86-64-MILESTONE-9.md): every
+# transition shim and callback entry point is compared with Windows'
+# unwinder as it runs (framewalk::windows's check_transition,
+# check_entry_point), and every jump of the collector's walk is checked to
+# leave the callback's entry frame; the run's end reports how many, beside
+# the Botlish frames.
+test cb-windows-unwind-check {the nested callbacks' executable under the unwind check and GC stress: every transition shim and callback entry point unwinds as Windows unwinds it, every collection's walk jumps from a callback's entry frame, and the value is the plain run's} -constraints {cbFixture windowsHost} -body {
+    set dir [cbxApp $::cbNested]
+    set exe [native::withLinkDirs [list $::cbFixtureDir] {native::executable [cbHir $dir] [file join $dir program]}]
+    set result [ProtocolResultFile]
+    set output [withEnvironment [list BOTLISH_NATIVE_UNWIND_CHECK 1 BOTLISH_NATIVE_GC_STRESS 1 BOTLISH_NATIVE_RESULT $result] {
+        exec [native::executableFile $exe] 2>@1
+    }]
+    set value [ProtocolValue $result]
+    file delete $result
+    set counts [regexp -inline {native unwind check: (\d+) functions, (\d+) Botlish frames, every one as Windows unwinds it; \d+ walks unwound \d+ other frames; (\d+) transition shims and (\d+) callback entry points as Windows unwinds them, (\d+) jumps across a foreign transition} $output]
+    list $value [llength $counts] [expr {[llength $counts] == 6 && [lindex $counts 2] > 0 && [lindex $counts 3] >= 2 && [lindex $counts 4] >= 2 && [lindex $counts 5] > 0}]
+} -cleanup removeCbApps -result {{["kept-by-main-1", "kept-by-main-2", "205"]} 6 1}
 
 # ---------------------------------------------------------------------------
 # What the runtime refuses: each ends the (linked) program's process, fail-
@@ -480,7 +622,7 @@ test cb-refused-thread {C calling a callback on another thread -- a real C threa
     cbValues "import std::ffi::c\nimport cbx\n\ncallback c fn twice(x: std::ffi::c::Int) -> std::ffi::c::Int:\n    if x > 1000 or x < -1000:\n        return 0\n    x * 2\n\ncb = std::ffi::c::callback(twice)\ncbx::call_on_thread(cb, 5)\n" {cranelift cranelift-generic}
 } -cleanup removeCbApps -result [lrepeat 2 {{CALLBACK THREAD} {callback twice was called on a thread with no Botlish execution environment waiting in a foreign call: a callback runs only synchronously, on the thread of the foreign call that may call it back, never on another thread; nothing ran}}]
 
-test cb-refused-stack {C calling a callback on a stack of its own (ucontext), while the Botlish frames wait on theirs, is refused: the collector's walk crosses from a callback's frames to the waiting ones on one stack only -- NATIVE CALLBACK STACK, nothing ran} -constraints {cbFixture linuxHost} -body {
+test cb-refused-stack {C calling a callback on a stack of its own (ucontext on Linux, a fiber of its own on Windows), while the Botlish frames wait on theirs, is refused: the collector's walk crosses from a callback's frames to the waiting ones on one stack only -- NATIVE CALLBACK STACK, nothing ran} -constraints {cbFixture otherStackHost} -body {
     cbValues "import std::ffi::c\nimport cbx\n\ncallback c fn twice(x: std::ffi::c::Int) -> std::ffi::c::Int:\n    if x > 1000 or x < -1000:\n        return 0\n    x * 2\n\ncb = std::ffi::c::callback(twice)\ncbx::call_on_other_stack(cb, 5)\n" {cranelift cranelift-generic}
 } -cleanup removeCbApps -result [lrepeat 2 {{CALLBACK STACK} {callback twice was called on another stack than the foreign call that may call it back: a callback runs on the stack of that call, which C left; nothing ran}}]
 

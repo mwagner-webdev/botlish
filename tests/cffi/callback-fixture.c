@@ -12,11 +12,20 @@
  * were wrong (0 when every one was right), or the values C computed.
  *
  * Built by the tests into a private static library (botlish_callback_fixture)
- * with the host's C compiler; nothing else links it. */
+ * with the host's C compiler; nothing else links it. On Windows x86-64 that
+ * is MSVC's cl, with callback-fixture-win64.asm assembled by ml64 beside it
+ * (WINDOWS-X86-64-MILESTONE-9.md): Windows threads and fibers stand for
+ * pthreads and ucontext, and the assembly for what cl has no inline
+ * assembly for -- a caller with no function table entry, and one that
+ * checks every nonvolatile register across the callback. */
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
+#ifdef _WIN32
+#include <windows.h>
+#else
 #include <pthread.h>
+#endif
 
 /* ------------------------------------------------------------------------
  * Integer callbacks */
@@ -82,10 +91,20 @@ int cbx_plain(int x) { cbx_sink += x; return x; }
  * ordinary callee-saved register to it), here made certain -- 16, an
  * address no stack has. A runtime that followed the frame-pointer chain
  * from a callback's frames into C's would stop or wander here; Botlish's
- * collector never reads a C frame (framewalk::walk_segmented). Elsewhere
- * (another architecture) a plain call. */
+ * collector never reads a C frame (framewalk::walk_segmented). On Windows
+ * x86-64 the call is made by callback-fixture-win64.asm's
+ * cbx_win64_call_without_frame, whose frame has no function table entry
+ * either: Windows' unwinder takes it for a leaf and finds the return
+ * address 0 at its stack pointer, so a walk that unwound C's frames would
+ * stop there, short of the waiting Botlish frames. Elsewhere (another
+ * architecture) a plain call. */
+#if defined(_WIN32) && defined(_M_X64)
+extern int cbx_win64_call_without_frame(cbx_unary f, int x);
+#endif
 static int call_without_frame(cbx_unary f, int x) {
-#if defined(__x86_64__) && !defined(_WIN32)
+#if defined(_WIN32) && defined(_M_X64)
+    return cbx_win64_call_without_frame(f, x);
+#elif defined(__x86_64__) && !defined(_WIN32)
     long xv = x;
     long r;
     __asm__ volatile(
@@ -399,8 +418,26 @@ int cbx_bytes_around(const unsigned char *data, unsigned long len, cbx_long_unar
  * What a callback contract forbids: each ends the process, refused by the
  * runtime before any Botlish code runs. */
 
-/* Called on another thread, while the calling thread waits in this call. */
+/* Called on another thread, while the calling thread waits in this call
+ * (a pthread; on Windows a thread of CreateThread). */
 struct thread_call { cbx_unary f; int x; int result; };
+#ifdef _WIN32
+static DWORD WINAPI thread_body(LPVOID arg) {
+    struct thread_call *call = arg;
+    call->result = call->f(call->x);
+    return 0;
+}
+int cbx_call_on_thread(cbx_unary f, int x) {
+    struct thread_call call = {f, x, -1};
+    HANDLE thread = CreateThread(NULL, 0, thread_body, &call, 0, NULL);
+    if (thread == NULL) {
+        return -2;
+    }
+    WaitForSingleObject(thread, INFINITE);
+    CloseHandle(thread);
+    return call.result;
+}
+#else
 static void *thread_body(void *arg) {
     struct thread_call *call = arg;
     call->result = call->f(call->x);
@@ -415,10 +452,49 @@ int cbx_call_on_thread(cbx_unary f, int x) {
     pthread_join(thread, 0);
     return call.result;
 }
+#endif
 
 /* Called on another stack: C switches to a stack of its own (ucontext, on
- * Linux) and calls f there, while the Botlish frames wait on theirs. */
-#if defined(__linux__)
+ * Linux; a fiber of its own, on Windows) and calls f there, while the
+ * Botlish frames wait on theirs. */
+#if defined(_WIN32)
+static LPVOID waiting_fiber;
+static cbx_unary other_f;
+static int other_x, other_result;
+static VOID CALLBACK other_body(LPVOID unused) {
+    (void)unused;
+    other_result = other_f(other_x);
+    SwitchToFiber(waiting_fiber);
+}
+int cbx_call_on_other_stack(cbx_unary f, int x) {
+    /* The thread may be a fiber already (the runtime makes it one for its
+     * coroutines): switch from the running fiber then, and convert back
+     * only a conversion of this function's own. */
+    bool converted = false;
+    if (IsThreadAFiber()) {
+        waiting_fiber = GetCurrentFiber();
+    } else {
+        waiting_fiber = ConvertThreadToFiber(NULL);
+        converted = true;
+    }
+    if (waiting_fiber == NULL) {
+        return -2;
+    }
+    other_f = f;
+    other_x = x;
+    other_result = -1;
+    LPVOID other = CreateFiber(1 << 20, other_body, NULL);
+    if (other == NULL) {
+        return -2;
+    }
+    SwitchToFiber(other);
+    DeleteFiber(other);
+    if (converted) {
+        ConvertFiberToThread();
+    }
+    return other_result;
+}
+#elif defined(__linux__)
 #include <ucontext.h>
 #include <stdlib.h>
 static ucontext_t waiting_context, other_context;
@@ -460,3 +536,131 @@ int cbx_bad_pointer(int (*f)(void *)) { return f((void *)0x0800000000001000ull);
 /* An address no C address word holds, as a result: a NATIVE ADDRESS
  * failure of the Botlish code that calls this. */
 void *cbx_unholdable_address(void) { return (void *)0x0800000000001000ull; }
+
+/* ------------------------------------------------------------------------
+ * The Win64 ABI by hand (WINDOWS-X86-64-MILESTONE-9.md): a callback of mixed
+ * classes -- an int, a double, a float third, an integer fourth (Win64
+ * places by position: rcx, xmm1, xmm2, r9), then four on the stack -- that
+ * hands its floating arguments back to C (cbx_record_bits, indices 1, 2, 4
+ * and 7) and returns the sum of its integer ones. On Windows x86-64 the
+ * call is callback-fixture-win64.asm's cbx_win64_abi_call, which places
+ * every argument itself, each narrow one with dirty bits above its width,
+ * and holds a sentinel in every nonvolatile register across the call;
+ * elsewhere a plain C call (the compiler's own placement, no register
+ * check). Returns how many answers were wrong: 1 per floating argument
+ * that came back changed, 100 for a wrong sum, 1000 when a nonvolatile
+ * register was not preserved (which ones: cbx_abi_last_changed). */
+typedef long long (*cbx_abi_fn)(int a, double b, float c, long long d, double e, int g, signed char h, double i);
+#if defined(_WIN32) && defined(_M_X64)
+extern long long cbx_win64_abi_call(cbx_abi_fn f, unsigned long long *changed);
+#endif
+static unsigned long long abi_changed;
+int cbx_abi_preserved(cbx_abi_fn f) {
+    memset(recorded, 0, sizeof recorded);
+    unsigned long long changed = 0;
+#if defined(_WIN32) && defined(_M_X64)
+    long long r = cbx_win64_abi_call(f, &changed);
+#else
+    long long r = f(-5, double_of(0x7ff4000000000abcull), float_of(0x7fa00abcu), 0x123456789ll,
+        double_of(0x8000000000000000ull), 77, -3, double_of(0x0000000000000001ull));
+#endif
+    abi_changed = changed;
+    const int indices[4] = {1, 2, 4, 7};
+    const uint64_t expected[4] = {0x7ff4000000000abcull, 0x7fa00abcu, 0x8000000000000000ull, 0x0000000000000001ull};
+    int wrong = 0;
+    for (int k = 0; k < 4; k++) {
+        if (!recorded[indices[k]] || records[indices[k]] != expected[k]) {
+            wrong++;
+        }
+    }
+    if (r != -5 + 0x123456789ll + 77 - 3) {
+        wrong += 100;
+    }
+    if (changed != 0) {
+        wrong += 1000;
+    }
+    return wrong;
+}
+unsigned long long cbx_abi_last_changed(void) { return abi_changed; }
+
+/* ------------------------------------------------------------------------
+ * Windows' unwinder through a callback (WINDOWS-X86-64-MILESTONE-9.md,
+ * "Unwind information"): cbx_trace_outer calls f, a callback that calls
+ * cbx_trace_inner with g, a callback that calls cbx_trace_check. From
+ * there Windows' unwinder alone -- RtlLookupFunctionEntry, RtlVirtualUnwind,
+ * a function without an entry taken for a leaf -- climbs at most 256
+ * frames of the thread's stack, and the result says which of the two C
+ * functions it crossed: 1 cbx_trace_inner (reached through the callback
+ * g's entry point and the runtime's frames), 2 cbx_trace_outer (reached
+ * also through the transition shim of cbx_trace_inner's call, f's Botlish
+ * frames and its entry point). 3 when every function between has unwind
+ * information that describes its frame. Not Windows: 3 (no such unwinder
+ * to ask). The two are distinct functions (no identical-code folding). */
+int cbx_trace_inner(cbx_unary g, int x) { return g(x) + 11; }
+int cbx_trace_outer(cbx_unary f, int x) { return 3 * f(x) + 1; }
+#ifdef _WIN32
+static DWORD64 function_begin(DWORD64 pc) {
+    DWORD64 base = 0;
+    PRUNTIME_FUNCTION entry = RtlLookupFunctionEntry(pc, &base, NULL);
+    return entry ? base + entry->BeginAddress : 0;
+}
+int cbx_trace_check(void) {
+    CONTEXT context;
+    RtlCaptureContext(&context);
+    ULONG_PTR low = 0, high = 0;
+    GetCurrentThreadStackLimits(&low, &high);
+    DWORD64 inner = function_begin((DWORD64)(uintptr_t)&cbx_trace_inner);
+    DWORD64 outer = function_begin((DWORD64)(uintptr_t)&cbx_trace_outer);
+    int found = 0;
+    for (int i = 0; i < 256; i++) {
+        if (context.Rip == 0 || context.Rsp < low || context.Rsp + 8 > high) {
+            break;
+        }
+        DWORD64 base = 0;
+        PRUNTIME_FUNCTION entry = RtlLookupFunctionEntry(context.Rip, &base, NULL);
+        DWORD64 begin = entry ? base + entry->BeginAddress : 0;
+        if (begin != 0 && begin == inner) {
+            found |= 1;
+        }
+        if (begin != 0 && begin == outer) {
+            found |= 2;
+            break;
+        }
+        if (entry == NULL) {
+            context.Rip = *(DWORD64 *)(uintptr_t)context.Rsp;
+            context.Rsp += 8;
+        } else {
+            PVOID handler_data = NULL;
+            DWORD64 establisher = 0;
+            RtlVirtualUnwind(UNW_FLAG_NHANDLER, base, context.Rip, entry, &context, &handler_data, &establisher, NULL);
+        }
+    }
+    return found;
+}
+#else
+int cbx_trace_check(void) { return 3; }
+#endif
+
+/* ------------------------------------------------------------------------
+ * A real Windows API that calls back (WINDOWS-X86-64-MILESTONE-9.md):
+ * kernel32's EnumSystemLocalesEx calls its LOCALE_ENUMPROCEX for each locale,
+ * synchronously, on the calling thread. The Botlish callback has no state
+ * of its own: it hands each call's arguments here, and the answer says
+ * whether the enumeration goes on (1) or stops (0: after LIMIT calls, when
+ * LIMIT is positive). C counts the calls, and the ones whose name was NULL
+ * or whose lParam was not the 12345 the program passed. Portable (a name
+ * is UTF-16 code units: Windows' wchar_t), so the binding links anywhere. */
+static int locale_calls, locale_bad, locale_empty;
+void cbx_locale_reset(void) { locale_calls = locale_bad = locale_empty = 0; }
+int cbx_locale_note(const unsigned short *name, unsigned long flags, long long param, int limit) {
+    (void)flags;
+    locale_calls++;
+    if (name == NULL || param != 12345) {
+        locale_bad++;
+    } else if (name[0] == 0) {
+        locale_empty++;
+    }
+    return limit > 0 && locale_calls >= limit ? 0 : 1;
+}
+int cbx_locale_calls(void) { return locale_calls; }
+int cbx_locale_bad(void) { return locale_bad; }

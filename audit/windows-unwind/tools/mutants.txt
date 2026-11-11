@@ -264,9 +264,9 @@
 ## native/src/runtime/framewalk.rs
 <<<<
     let mut context = windows::Context::at(start);
-    windows::walk_context(map, &mut context, stack, windows::unwind_check(), &mut visit);
+    windows::walk_context(map, &mut context, stack, windows::unwind_check(), jumps, &mut visit);
 ====
-    let _ = (map, start, stack, &mut visit);
+    let _ = (map, start, stack, jumps, &mut visit);
 >>>>
 
 @@ walk-suspended-with-the-running-bounds a suspended stack walked within the running stack's bounds, not its own: the walk ends at once
@@ -274,11 +274,11 @@
 ## native/src/runtime/framewalk.rs
 <<<<
     let mut context = windows::Context::at(start);
-    windows::walk_context(map, &mut context, stack, windows::unwind_check(), &mut visit);
+    windows::walk_context(map, &mut context, stack, windows::unwind_check(), jumps, &mut visit);
 ====
     let mut context = windows::Context::at(start);
     let _ = stack;
-    windows::walk_context(map, &mut context, None, windows::unwind_check(), &mut visit);
+    windows::walk_context(map, &mut context, None, windows::unwind_check(), jumps, &mut visit);
 >>>>
 
 @@ switch-records-its-callers-stack-pointer the switch records a stack pointer a word off its own: Windows' unwinder climbs from a wrong place

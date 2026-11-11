@@ -309,9 +309,11 @@ testConstraint nativeCCalls [native::hostSupports cCalls]
 testConstraint nativeCVariadics [native::hostSupports cVariadics]
 
 # Synchronous C callbacks (C-CALLBACK-MILESTONE-1.md): where the collector's
-# frame-pointer walk crosses a foreign transition (Linux x86-64 and AArch64,
-# macOS AArch64). A test that runs a callback C calls carries this beside
-# nativeCCalls; Windows refuses one (NATIVE CALLBACK UNSUPPORTED).
+# walk crosses a foreign transition (Linux x86-64 and AArch64 and macOS
+# AArch64 by frame pointer, Windows x86-64 by its unwinder and the same
+# jump: WINDOWS-X86-64-MILESTONE-9.md). A test that runs a callback C calls
+# carries this beside nativeCCalls; a `fallback-roots` driver refuses one
+# (NATIVE CALLBACK UNSUPPORTED).
 testConstraint nativeCCallbacks [native::hostSupports cCallbacks]
 
 # The host's own C toolchain, the one C fixtures are built with

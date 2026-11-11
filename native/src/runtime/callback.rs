@@ -11,7 +11,12 @@
 //! frame record -- whose return address is the Botlish caller's call site, a
 //! safepoint with every live root of that frame in its stack map -- on the
 //! Vm (`Vm::foreign_open`), and makes this thread's *active* execution
-//! environment that Vm (`ACTIVE`): C runs, and the Vm waits in it.
+//! environment that Vm (`ACTIVE`): C runs, and the Vm waits in it. The
+//! record is the shim's frame register as `rt_ffi_open` is entered (a
+//! naked function that hands it on: Cranelift's frame record, which the
+//! shim keeps for its whole body), on every host alike
+//! (WINDOWS-X86-64-MILESTONE-9.md: the Windows frames of this crate keep
+//! no frame record at their frame register to read it from).
 //!
 //! A callback's C entry point (codegen::callback's trampoline) stores its C
 //! arguments as words and calls `rt_callback_call`, which runs the callback
@@ -27,10 +32,12 @@
 //!     Vm, actor, context or heap is ever created here;
 //!   * the callback's code must be that environment's program's
 //!     (`Vm::program_token`): two programs' runtimes never share a Vm;
-//!   * C must call it on the stack the transition left (the running stack,
-//!     below the transition's frame): the collector's walk crosses from the
-//!     callback's frames to the transition's, which only one stack holds
-//!     (NATIVE CALLBACK STACK otherwise).
+//!   * C must call it on the stack the transition left (the running stack --
+//!     a coroutine's, a native library's call's host-made one, or the
+//!     thread's: `Vm::running_stack` -- below the transition's frame): the
+//!     collector's walk crosses from the callback's frames to the
+//!     transition's, which only one stack holds (NATIVE CALLBACK STACK
+//!     otherwise).
 //!
 //! The callback then runs nested in that same Vm: no new heap, context area,
 //! statics or coroutine chain. The Vm is no longer waiting in C (`ACTIVE`
@@ -41,7 +48,10 @@
 //! callback walks its frames, jumps from here to the transition shim's
 //! record, and goes on through the Botlish frame that called C, never
 //! reading C's frames. Returning restores everything exactly: the segment
-//! popped, the Vm waiting in C again.
+//! popped, the Vm waiting in C again. The segment's entry is this frame's
+//! record where frames are walked by frame pointer, and its stack pointer
+//! on Windows, whose walk climbs by stack pointer and Windows' unwinder
+//! (framewalk::frame_record; WINDOWS-X86-64-MILESTONE-9.md).
 //!
 //! # Failure is fatal
 //!
@@ -62,14 +72,16 @@ use crate::nir::CAbi;
 use std::cell::Cell;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-/// Whether this host runs C callbacks: where the collector walks frames by
-/// frame pointer (framewalk's `walk_segmented` crosses a transition), with
-/// the stack guard bounding recursion -- Linux x86-64 and AArch64, macOS
-/// AArch64. Windows walks frames by its unwinder and the fallback plan
-/// keeps roots on a shadow stack, neither of which crosses a transition
-/// yet: there a program with a callback is refused before it runs
-/// (codegen::callback, NATIVE UNSUPPORTED callback).
-pub const SUPPORTED: bool = super::framewalk::NATIVE_FRAME_ROOTS && cfg!(not(windows));
+/// Whether this host runs C callbacks: where the collector finds roots in
+/// native frames and its walk crosses a foreign transition (framewalk's
+/// `CROSSES_TRANSITIONS`: `walk_segmented` jumps from a callback's entry
+/// frame to the transition shim's record) -- Linux x86-64 and AArch64 and
+/// macOS AArch64 by frame pointer, Windows x86-64 (MSVC) by its unwinder
+/// and the same jump (WINDOWS-X86-64-MILESTONE-9.md). The fallback plan
+/// (a `fallback-roots` driver) keeps roots on a shadow stack, which no
+/// transition crosses: there a callback C calls is refused before any
+/// Botlish code runs (NATIVE CALLBACK UNSUPPORTED, `run`).
+pub const SUPPORTED: bool = super::framewalk::NATIVE_FRAME_ROOTS && super::framewalk::CROSSES_TRANSITIONS;
 
 thread_local! {
     /// The execution environment waiting in a transition on this thread:
@@ -181,18 +193,67 @@ fn open(p: *mut Vm, caller: usize) -> *mut Vm {
 }
 
 /// `rt_ffi_open(vm)`, called by a transition shim right before its C call:
-/// records the shim's frame record (its caller's, read from this function's
-/// own record: the frame-pointer chain both keep) as the transition, and
-/// makes VM this thread's active execution environment. Returns the one it
-/// replaces, which `rt_ffi_close` restores.
+/// records the shim's frame record as the transition, and makes VM this
+/// thread's active execution environment. Returns the one it replaces,
+/// which `rt_ffi_close` restores.
+///
+/// A naked function of two instructions: it passes its caller's frame
+/// register (`rbp`, AArch64's `x29`) -- the shim's frame record, which
+/// Cranelift's prologue made (`push rbp; mov rbp, rsp`; `stp x29, x30, [sp,
+/// #-16]!; mov x29, sp`) and the shim keeps for its whole body -- as the
+/// second argument of `rt_ffi_open_at` and jumps there, leaving no frame of
+/// its own. On every host: the frame-pointer hosts' Rust frames would also
+/// hold it as their record's saved frame pointer, but LLVM's Win64 frames
+/// keep no record at their frame register (framewalk's
+/// `NATIVE_FRAME_ROOTS`), and the call's state is the same either way
+/// (WINDOWS-X86-64-MILESTONE-9.md, "The continuation"). Its stack pointer
+/// never moves, so Windows' unwinder needs no function table entry for it.
+#[cfg(all(target_arch = "x86_64", not(windows)))]
+#[unsafe(naked)]
 #[unsafe(no_mangle)]
-#[inline(never)]
+pub extern "C" fn rt_ffi_open(_p: *mut Vm) -> u64 {
+    std::arch::naked_asm!("mov rsi, rbp", "jmp {open}", open = sym rt_ffi_open_at)
+}
+
+/// `rt_ffi_open` in the Win64 convention: the second argument is RDX.
+#[cfg(all(target_arch = "x86_64", windows))]
+#[unsafe(naked)]
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_ffi_open(_p: *mut Vm) -> u64 {
+    std::arch::naked_asm!("mov rdx, rbp", "jmp {open}", open = sym rt_ffi_open_at)
+}
+
+/// `rt_ffi_open` in AAPCS64: the second argument is X1.
+#[cfg(target_arch = "aarch64")]
+#[unsafe(naked)]
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_ffi_open(_p: *mut Vm) -> u64 {
+    std::arch::naked_asm!("mov x1, x29", "b {open}", open = sym rt_ffi_open_at)
+}
+
+/// No frame register to read elsewhere: no host of another architecture
+/// runs callbacks (`SUPPORTED`), and its walk crosses no transition.
+#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+#[unsafe(no_mangle)]
 pub extern "C" fn rt_ffi_open(p: *mut Vm) -> u64 {
-    // SAFETY: this function's own frame record holds its caller's frame
-    // pointer first (both frames keep the chain: codegen's frames, and this
-    // crate's under -C force-frame-pointers=yes, framewalk's header).
-    let caller = unsafe { *(super::framewalk::frame_record() as *const usize) };
-    open(p, caller) as u64
+    rt_ffi_open_at(p, 0)
+}
+
+/// `rt_ffi_open`'s work: RECORD is the transition shim's frame record.
+/// With BOTLISH_NATIVE_UNWIND_CHECK=1 on Windows, the record and the shim's
+/// unwind information are compared with Windows' unwind of the shim
+/// (framewalk::windows::check_transition).
+#[inline(never)]
+extern "C" fn rt_ffi_open_at(p: *mut Vm, record: usize) -> u64 {
+    #[cfg(all(windows, target_arch = "x86_64"))]
+    if super::framewalk::windows::unwind_check() {
+        // SAFETY: generated code passes the Vm it runs on.
+        super::framewalk::windows::check_transition(unsafe { (*p).framemap() }, record);
+    }
+    let previous = open(p, record) as u64;
+    // Keeps this frame from becoming a tail call of `open`: the unwind
+    // check climbs through it.
+    std::hint::black_box(previous)
 }
 
 /// `rt_ffi_close(vm, previous)`, called by a transition shim right after
@@ -233,9 +294,9 @@ impl Fatal {
             super::show::tcl_list(&["error".to_string(), super::show::tcl_list(&self.code.iter().map(|w| w.to_string()).collect::<Vec<_>>()), self.message.clone()])
         );
         let line = format!("{} ({code})\n", self.message);
-        #[cfg(unix)]
+        #[cfg(any(unix, all(windows, target_arch = "x86_64", target_env = "msvc")))]
         super::platform::report_fatal(result.as_bytes(), line.as_bytes());
-        #[cfg(not(unix))]
+        #[cfg(not(any(unix, all(windows, target_arch = "x86_64", target_env = "msvc"))))]
         {
             let _ = result;
             eprint!("{line}");
@@ -276,6 +337,14 @@ pub unsafe extern "C" fn rt_callback_call(entry: u64, desc: u64, desc_len: u64, 
 
 type GenericEntry = unsafe extern "C" fn(*mut Vm, Value, *const Value) -> Value;
 
+/// The address of the function whose frame is a callback's segment entry
+/// (`run`): what BOTLISH_NATIVE_UNWIND_CHECK compares a walk's jump with
+/// (framewalk::windows's `check_entry_frame`).
+#[cfg(all(windows, target_arch = "x86_64"))]
+pub(crate) fn entry_frame_function() -> usize {
+    run as *const () as usize
+}
+
 /// Runs the callback DECL in this thread's active execution environment
 /// (the module header), writing its C result's word to OUT. Never inlined:
 /// its frame record is the segment's entry the collector's walk jumps from,
@@ -289,7 +358,7 @@ unsafe fn run(entry: usize, decl: &Descriptor, args: &[u64], out: *mut u64) -> R
     if !SUPPORTED {
         return Err(Fatal::new(
             &["NATIVE", "CALLBACK", "UNSUPPORTED"],
-            format!("{}: C callbacks run on Linux x86-64 and AArch64 and macOS AArch64, where the collector walks frames by frame pointer across a foreign call (C-CALLBACK-MILESTONE-1.md); nothing ran", decl.what()),
+            format!("{}: C callbacks run where the collector finds roots in native frames and walks across a foreign call (Linux x86-64 and AArch64, macOS AArch64, Windows x86-64; C-CALLBACK-MILESTONE-1.md), never on the fallback root plan's shadow stack; nothing ran", decl.what()),
         ));
     }
     if p.is_null() {
@@ -322,6 +391,10 @@ unsafe fn run(entry: usize, decl: &Descriptor, args: &[u64], out: *mut u64) -> R
             &["NATIVE", "CALLBACK", "STACK"],
             format!("{} was called on another stack than the foreign call that may call it back: a callback runs on the stack of that call, which C left; nothing ran", decl.what()),
         ));
+    }
+    #[cfg(all(windows, target_arch = "x86_64"))]
+    if super::framewalk::windows::unwind_check() {
+        super::framewalk::windows::check_entry_point(rt_callback_call as *const () as usize);
     }
     ACTIVE.with(|a| a.set(std::ptr::null_mut()));
     vm.callback_segments.push((record, transition));

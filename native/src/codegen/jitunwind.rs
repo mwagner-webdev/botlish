@@ -256,19 +256,23 @@ impl Drop for FunctionTable {
 }
 
 /// Where `define_unwind_data` put each function's UNWIND_INFO: the data
-/// object, and per NIR function the offsets in it of its direct function's
-/// and its generic entry's.
+/// object, per NIR function the offsets in it of its direct function's and
+/// its generic entry's, and per transition shim and callback entry point
+/// (codegen::callback, in `Symbols::callback_code`'s order) its own.
 pub struct UnwindData {
     id: cranelift_module::DataId,
     offsets: Vec<(Option<usize>, Option<usize>)>,
+    callbacks: Vec<Option<usize>>,
 }
 
 /// Defines one read-only data object of MODULE holding every UNWIND_INFO of
-/// DEFINES (4-byte aligned, as the format requires): in this module's memory,
-/// so within the function table's reach. Before `finalize_definitions`.
+/// DEFINES and of CALLBACKS, the C side of callbacks (4-byte aligned, as the
+/// format requires): in this module's memory, so within the function table's
+/// reach. Before `finalize_definitions`.
 pub fn define_unwind_data(
     module: &mut cranelift_jit::JITModule,
     defines: &[super::clif::DefineResult],
+    callbacks: &[super::callback::Defined],
 ) -> Result<Option<UnwindData>, super::BackendError> {
     use cranelift_module::Module;
     let mut bytes = Vec::new();
@@ -284,6 +288,7 @@ pub fn define_unwind_data(
     for define in defines {
         offsets.push((place(&define.direct_unwind), place(&define.entry_unwind)));
     }
+    let callbacks: Vec<_> = callbacks.iter().map(|c| place(&c.unwind)).collect();
     if bytes.is_empty() {
         return Ok(None);
     }
@@ -293,11 +298,14 @@ pub fn define_unwind_data(
     data.define(bytes.into_boxed_slice());
     data.set_align(4);
     module.define_data(id, &data).map_err(error)?;
-    Ok(Some(UnwindData { id, offsets }))
+    Ok(Some(UnwindData { id, offsets, callbacks }))
 }
 
-/// Registers every function of DEFINES that has an UNWIND_INFO in DATA, at
-/// the addresses MODULE finalized, relative to BASE (`CodeMemory::base`).
+/// Registers every function of DEFINES, and every transition shim and
+/// callback entry point of SYMBOLS, that has an UNWIND_INFO in DATA, at the
+/// addresses MODULE finalized, relative to BASE (`CodeMemory::base`):
+/// before any of the code can run, so a callback reached through a
+/// JIT-made function pointer is described as one in an executable is.
 pub fn register(
     module: &cranelift_jit::JITModule,
     symbols: &super::clif::Symbols,
@@ -314,6 +322,11 @@ pub fn register(
         }
         if let Some(at) = entry {
             functions.push((module.get_finalized_function(symbols.entry[i]) as usize, define.entry_size, blob as usize + at));
+        }
+    }
+    for (code, at) in symbols.callback_code.iter().zip(&data.callbacks) {
+        if let Some(at) = at {
+            functions.push((module.get_finalized_function(code.id) as usize, code.size, blob as usize + at));
         }
     }
     FunctionTable::register(base, &functions).map(Some).map_err(|e| super::BackendError::Codegen(format!("the JIT's function table: {e}")))

@@ -38,7 +38,7 @@
 //!
 //! Everything a Botlish value is -- conversion, rooting, the activation, the
 //! Vm -- is the runtime's: these functions know machine words only.
-use super::clif::{c_call_signature, c_type, module_error, va_stub_for, Symbols};
+use super::clif::{c_call_signature, c_type, module_error, va_stub_for, windows_unwind, Symbols};
 use super::BackendError;
 use crate::nir::{self, CAbi, Inst, Program};
 use cranelift_codegen::ir::types::{F32, F64, I32, I64};
@@ -46,10 +46,32 @@ use cranelift_codegen::ir::{self, AbiParam, InstBuilder, MemFlagsData, Signature
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
 use cranelift_module::{Linkage, Module};
 
+/// A transition shim or callback entry point `define` wrote: its id, its
+/// code's size and, where the module's code is Windows x86-64's, its
+/// `UNWIND_INFO` (codegen::unwind, from Cranelift's own description of the
+/// prologue, as for every Botlish function). Both shapes have frames --
+/// Cranelift's frame record and the calls they make -- and Windows'
+/// unwinder takes a function without a function table entry for a leaf:
+/// the entry point's frame lies between C's frames and the runtime's, and
+/// the shim's between the Botlish caller's and C's
+/// (WINDOWS-X86-64-MILESTONE-9.md, "Unwind information").
+pub struct Defined {
+    pub id: cranelift_module::FuncId,
+    pub size: u32,
+    pub unwind: Option<Vec<u8>>,
+}
+
+/// The `Defined` of the function just compiled in CTX as ID.
+fn defined<M: Module>(module: &M, ctx: &cranelift_codegen::Context, id: cranelift_module::FuncId, what: &str) -> Result<Defined, BackendError> {
+    let size = ctx.compiled_code().map_or(0, |code| code.code_info().total_size);
+    Ok(Defined { id, size, unwind: windows_unwind(module, ctx, what)? })
+}
+
 /// Defines PROGRAM's transition shims and callback entry points in MODULE,
-/// recording them in SYMBOLS (its `shims` and `callbacks`). SYMBOLS has the
-/// runtime helpers, the foreign functions, the variadic stubs and every
-/// function's generic entry declared.
+/// recording them in SYMBOLS (its `shims`, `callbacks` and
+/// `callback_code`). SYMBOLS has the runtime helpers, the foreign
+/// functions, the variadic stubs and every function's generic entry
+/// declared.
 pub fn define<M: Module>(module: &mut M, program: &Program, symbols: &mut Symbols) -> Result<(), BackendError> {
     let mut fctx = FunctionBuilderContext::new();
     for f in &program.functions {
@@ -63,7 +85,8 @@ pub fn define<M: Module>(module: &mut M, program: &Program, symbols: &mut Symbol
                 continue;
             }
             let name = format!("botlish_transition_{foreign}_{}", symbols.shims.len());
-            let (shim, shown) = shim(module, symbols, &mut fctx, *foreign, varargs, &name)?;
+            let (shim, shown, code) = shim(module, symbols, &mut fctx, *foreign, varargs, &name)?;
+            symbols.callback_code.push(code);
             symbols.callback_clif.push(format!("; transition shim {name} (C {})\n{shown}", program.foreigns[*foreign as usize].name));
             symbols.names.insert(shim.0.as_u32(), format!("{name} (transition shim of C {})", program.foreigns[*foreign as usize].name));
             symbols.shims.insert(key, shim);
@@ -71,7 +94,8 @@ pub fn define<M: Module>(module: &mut M, program: &Program, symbols: &mut Symbol
     }
     for (index, callback) in program.callbacks.iter().enumerate() {
         let name = format!("botlish_callback_{index}");
-        let (id, shown) = entry_point(module, symbols, &mut fctx, index, callback, &name)?;
+        let (id, shown, code) = entry_point(module, symbols, &mut fctx, index, callback, &name)?;
+        symbols.callback_code.push(code);
         symbols.callback_clif.push(format!("; callback entry point {name} (callback {})\n{shown}", callback.name));
         symbols.names.insert(id.as_u32(), format!("{name} (C entry point of callback {})", callback.name));
         symbols.callbacks.push(id);
@@ -88,7 +112,7 @@ fn shim<M: Module>(
     foreign: u32,
     varargs: &[nir::VarArg],
     name: &str,
-) -> Result<((cranelift_module::FuncId, Signature), String), BackendError> {
+) -> Result<((cranelift_module::FuncId, Signature), String, Defined), BackendError> {
     let (import, decl) = symbols.foreigns[foreign as usize].clone();
     let (call_signature, _) = c_call_signature(&*module, &decl, varargs)?;
     // The C call's own signature, the Vm first. Without the extension
@@ -143,8 +167,9 @@ fn shim<M: Module>(
     }
     let shown = ctx.func.display().to_string();
     module.define_function(id, &mut ctx).map_err(|e| BackendError::Codegen(format!("transition shim {name}: {e:?}")))?;
+    let code = defined(&*module, &ctx, id, &format!("transition shim {name}"))?;
     module.clear_context(&mut ctx);
-    Ok(((id, signature), shown))
+    Ok(((id, signature), shown, code))
 }
 
 /// The C signature of callback CALLBACK in the module's target convention.
@@ -175,7 +200,7 @@ fn entry_point<M: Module>(
     index: usize,
     callback: &nir::CallbackDecl,
     name: &str,
-) -> Result<(cranelift_module::FuncId, String), BackendError> {
+) -> Result<(cranelift_module::FuncId, String, Defined), BackendError> {
     let signature = entry_signature(&*module, callback);
     let id = module.declare_function(name, Linkage::Local, &signature).map_err(module_error)?;
     let bytes = crate::runtime::callback::descriptor(&callback.params, callback.result, &callback.name);
@@ -242,8 +267,9 @@ fn entry_point<M: Module>(
     }
     let shown = ctx.func.display().to_string();
     module.define_function(id, &mut ctx).map_err(|e| BackendError::Codegen(format!("callback entry point {name}: {e:?}")))?;
+    let code = defined(&*module, &ctx, id, &format!("callback entry point {name}"))?;
     module.clear_context(&mut ctx);
-    Ok((id, shown))
+    Ok((id, shown, code))
 }
 
 /// The C side of callbacks made for other targets than the host's, on an
@@ -299,6 +325,66 @@ mod tests {
 
     fn listing(symbols: &clif::Symbols, what: &str) -> String {
         symbols.callback_clif.iter().find(|t| t.contains(what)).unwrap_or_else(|| panic!("no {what}")).clone()
+    }
+
+    /// Windows x86-64's COFF object (made here, on any x86-64 host)
+    /// describes every transition shim and callback entry point to Windows'
+    /// unwinder, as it does every Botlish function: a `.pdata`
+    /// RUNTIME_FUNCTION whose start and end are the function's own symbol
+    /// (its end's addend the code's size) and whose UNWIND_INFO in `.xdata`
+    /// is the one Cranelift's prologue description gives
+    /// (WINDOWS-X86-64-MILESTONE-9.md, "Unwind information"). Without it
+    /// Windows' unwinder takes the entry point -- between C's frames and the
+    /// runtime's -- and the shim -- between the Botlish caller's and C's --
+    /// for leaves, and reads a return address where none is. The objects of
+    /// the other targets get no such section.
+    #[test]
+    fn windows_objects_describe_every_shim_and_entry_point() {
+        use cranelift_object::object::{Object, ObjectSection, ObjectSymbol, RelocationTarget};
+        let program = crate::nir::parse(PROGRAM).unwrap_or_else(|e| panic!("{}", e.message));
+        let object = super::super::emit_object_with(&program, isa_for("x86_64-pc-windows-msvc"), None, crate::runtime::program::Startup::Worker)
+            .unwrap_or_else(|e| panic!("{}", e.message()));
+        let file = cranelift_object::object::File::parse(&*object.bytes).unwrap();
+        let pdata = file.section_by_name(".pdata").expect(".pdata");
+        let xdata = file.section_by_name(".xdata").expect(".xdata");
+        let pbytes = pdata.data().unwrap();
+        let xbytes = xdata.data().unwrap();
+        let relocations: Vec<_> = pdata.relocations().collect();
+        // Every RUNTIME_FUNCTION: (the symbol its start names, its end's
+        // addend, its UNWIND_INFO's offset in .xdata).
+        let entries: Vec<(usize, u32, u32)> = (0..pbytes.len() / 12)
+            .map(|j| {
+                let word = |k: usize| u32::from_le_bytes(pbytes[12 * j + 4 * k..][..4].try_into().unwrap());
+                let RelocationTarget::Symbol(start) = relocations[3 * j].1.target() else { panic!("entry {j}: no symbol") };
+                assert_eq!(relocations[3 * j + 1].1.target(), RelocationTarget::Symbol(start), "entry {j}: its end names another symbol");
+                (start.0, word(1), word(2))
+            })
+            .collect();
+        // Each Botlish function and generic entry, then the shim and the two
+        // entry points.
+        assert_eq!(entries.len(), 2 * program.functions.len() + 3, "{entries:?}");
+        let symbols = declared("x86_64-pc-windows-msvc");
+        let mut names = vec!["botlish_transition_0_0".to_string()];
+        names.extend((0..2).map(|i| format!("botlish_callback_{i}")));
+        for (name, code) in names.iter().zip(&symbols.callback_code) {
+            let symbol = file.symbol_by_name(name).unwrap_or_else(|| panic!("no symbol {name}"));
+            let entry = entries.iter().find(|e| e.0 == symbol.index().0).unwrap_or_else(|| panic!("{name} has no .pdata entry"));
+            let info = code.unwind.as_ref().unwrap_or_else(|| panic!("{name} has no UNWIND_INFO"));
+            assert_eq!(entry.1, code.size, "{name}: its entry's end");
+            assert!(code.size > 0, "{name}");
+            assert_eq!(&xbytes[entry.2 as usize..entry.2 as usize + info.len()], &info[..], "{name}: its UNWIND_INFO");
+            // Version 1, a frame register (RBP: Cranelift's frame record),
+            // and at least the push of RBP and the frame register's setting
+            // among its unwind codes: a frame, never a leaf's description.
+            assert_eq!(info[0] & 7, 1, "{name}: version");
+            assert_eq!(info[3] & 15, 5, "{name}: frame register");
+            assert!(info[2] >= 2, "{name}: unwind codes");
+        }
+        // Elsewhere: no unwind section, no unwind information.
+        for (triple, _) in &TARGETS[..2] {
+            let symbols = declared(triple);
+            assert!(symbols.callback_code.iter().all(|c| c.unwind.is_none() && c.size > 0), "{triple}");
+        }
     }
 
     #[test]
