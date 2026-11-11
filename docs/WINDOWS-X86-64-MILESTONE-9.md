@@ -710,6 +710,73 @@ native-library catalog's public-unwind-dropped, the windows-unwind
 catalog's two walk-suspended mutants); `tools/mutant-catalogs.tcl`: 106
 catalogs, 3651 mutants, 0 problems.
 
+## 17. Performance
+
+`bench/c-callbacks.tcl` (C-CALLBACK-MILESTONE-1.md's harness, extended):
+each scenario a linked executable of the callback fixture's program, best
+of RUNS executions, compilation and linking excluded; C's loops in C, a
+Botlish loop's per-call cost its loop minus the same loop without the call
+(so the two loop-differential rows, `botlish-call` and `c-plain`, are
+noise around 0 at these sizes). New scenarios: `collecting` (a List of 40
+Strings per callback: collections inside callbacks, their walks crossing
+the transition) and `in-coroutine` (the callback loop made by a coroutine's
+body on the general runtime: its own stack, a fiber on Windows). On Windows
+the fixture is MSVC's, and a last line measures the rejected alternative A
+(section 4). `bench/native-library.tcl` gained a DLL callback scenario:
+an export of a library whose callback C calls 100 times per call.
+
+### Windows (real Windows)
+
+WINDOWS-BENCH
+
+### Linux, and the milestone's effect there (real Linux)
+
+This container, `cranelift`, N = 2,000,000, best of 7 (ns per call; the
+allocation columns are per call):
+
+| scenario | ns/call | allocs | bytes | collections |
+|---|---:|---:|---:|---:|
+| transition (no callback) | 5.1 | 0 | 0 | 1 |
+| callback-int | 13.6 | 0 | 0 | 0 |
+| callback-decision | 13.8 | 0 | 0 | 0 |
+| raw-float-in | 44.2 | 1 | 16 | 30 |
+| raw-double-in | 44.3 | 1 | 16 | 30 |
+| raw-inspect | 72.5 | 1.33 | 32 | 61 |
+| raw-admit | 76.9 | 2 | 32 | 61 |
+| nested-2 | 34.0 | 0 | 0 | 0 |
+| allocating | 92.4 | 2 | 71.9 | 137 |
+| collecting (N/40 calls) | 4607 | 83 | 2900 | 161 |
+| in-coroutine | 13.4 | 0 | 0 | 0 |
+
+Under GC stress (a collection at every allocation; N = 20,000, best of 3)
+a callback that allocates once (raw-float-in) costs 222 ns against 44: a
+collection inside a callback, its walk across the transition included,
+about 180 ns here; `collecting`'s 83 collections per call about 400 ns
+each, over a larger heap.
+
+Against the branch's base (73c32da8, built in a private worktree, the same
+container and runs; two rounds each), and with the two trees' drivers
+swapped (`BOTLISH_NATIVE_BIN`: each tree's programs and fixture on the
+other's runtime) to tell the runtime's share from the generated program's:
+
+| scenario | base | base programs, new runtime | new programs, base runtime | new |
+|---|---:|---:|---:|---:|
+| transition | 10.7, 10.9 | 11.9, 11.5 | 6.6, 5.6 | 4.7, 5.1 |
+| callback-int | 12.9, 12.8 | 13.6, 13.9 | 12.8, 12.6 | 13.4, 13.6 |
+| nested-2 | 30.3, 30.8 | 34.2, 32.0 | 30.8, 31.2 | 34.3, 34.0 |
+
+* The transition's row follows the *programs*, not the runtime: the naked
+  `rt_ffi_open` (section 4, B') costs nothing measurable, and the
+  difference between the two program sets is the derived differential's
+  sensitivity to the generated loop (the programs' shared header gained two
+  functions).
+* A callback follows the runtime: about +0.7 ns per callback
+  (callback-int), +1 to +3.5 ns for nested-2's two callbacks and one
+  transition. What changed on Linux's callback path is `Vm::running_stack`
+  consulting `entry_stack` first (the defect fix of section 10) and the
+  trampoline's extra jump; the measurement was not taken below that
+  granularity, so no finer attribution is claimed.
+
 ## 19. Remaining limitations
 
 * **No retained registrations**, unchanged: a window procedure, a timer, a
