@@ -1,0 +1,16 @@
+# Footprint, observed (the local release builds, React Native 0.88.1, arm64-v8a only;
+# native libraries extracted at installation, compressed in the APK: the app's packaging)
+tool package botlish_react_native-0.1.0.botpkg   409014 bytes (17 files, 956028 unpacked)
+tool program (static, stripped)                   841736 bytes
+npm tarball react-native-botlish-game-0.1.0.tgz   452355 bytes (14 files, 1151883 unpacked)
+npm tarball react-native-botlish-textkit-0.1.0.tgz 425017 bytes
+libgame.so (package; the manifest's)             1093032 bytes
+libgame.so (APK; strip-unneeded)                  756136 bytes installed, 361015 compressed in the APK
+libtextkit.so (package)                          1055160 bytes
+libtextkit.so (APK)                               732104 bytes installed, 336588 compressed in the APK
+template APK, arm64-v8a, no Botlish package     10622082 bytes  (the same packaging)
+the 2048 app's APK, both packages               11285609 bytes  (+663527, +6.2%)
+libappmodules.so template / app                   145912 / 264680 bytes installed (+118768: both adapters, both Codegen specs, the app)
+assets/index.android.bundle template / app       1012412 / 1031388 bytes (+18976: both entry points, the app's screens)
+installed native code the Botlish packages add   1607008 bytes (libgame.so, libtextkit.so, the libappmodules.so difference)
+compiler, runtime, standard library, single executable: unchanged (no file of them edited)

@@ -19,6 +19,15 @@ set root [file normalize [lindex $argv 0]]
 source [file join $root surface surface.tcl]
 source [file join $here timing.tcl]
 timing::wrap {::hir::semantic::Walk ::hir::semantic::Analyze ::hir::signatures::infer}
+proc peakMb {} {
+    if {[catch {open /proc/self/status} channel]} { return "" }
+    set kb ""
+    foreach line [split [read $channel] \n] {
+        if {[regexp {^VmHWM:\s+(\d+)} $line -> kb]} break
+    }
+    close $channel
+    return [expr {$kb / 1024}]
+}
 foreach path [lrange $argv 1 end] {
     timing::reset
     set t0 [clock microseconds]
@@ -35,7 +44,9 @@ foreach path [lrange $argv 1 end] {
     }
     set copy [expr {[tcl::mathfunc::min {*}$samples] / 1e3}]
     set walks [timing::calls ::hir::semantic::Walk]
-    puts [format "%s: %d exprs; front end %.1f s; signatures::infer %.1f s; %d instance walks, %.1f s in them; one exprs copy %.1f ms; walks x copy = %.1f s" \
+    set instances [dict size [dict get $hir semantic instances]]
+    puts [format "%s: %d exprs; front end %.1f s; signatures::infer %.1f s; %d semantic instances, %d instance walks, %.1f s in them (%.2f ms each); one exprs copy %.1f ms; walks x copy = %.1f s; peak %s MB" \
         [file tail [file dirname $path]] [dict size [dict get $hir exprs]] $front [timing::seconds ::hir::signatures::infer] \
-        $walks [timing::seconds ::hir::semantic::Walk] $copy [expr {$walks * $copy / 1e3}]]
+        $instances $walks [timing::seconds ::hir::semantic::Walk] \
+        [expr {$walks == 0 ? 0.0 : 1e3 * [timing::seconds ::hir::semantic::Walk] / $walks}] $copy [expr {$walks * $copy / 1e3}] [peakMb]]
 }

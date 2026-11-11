@@ -9,7 +9,8 @@
 #
 # -specialize 0 lowers every function once, unspecialized (cranelift-
 # generic's lowering), instead of the specialized program.
-# -semantic-per-block N sets hir::semantic::maxPerBlock (16) for this run.
+# -semantic-per-block N sets hir::semantic::maxPerBlock (16) for this run: a
+# checkout before SEMANTIC-INSTANCE-SCALABILITY-MILESTONE-1.md, which has none.
 #
 # Prints `frontend DICT` once the front end is done, `stage NAME RSS-KB`
 # after each step of the native path, then `final DICT` (the
@@ -120,7 +121,7 @@ set maxPerBlock 0
 dict for {block n} $byBlock { if {$n > $maxPerBlock} { set maxPerBlock $n } }
 dict set result semanticInstances [dict size [dict getdef $semantic instances {}]]
 dict set result semanticMaxPerBlock $maxPerBlock
-dict set result semanticBudget [list perBlock $::hir::semantic::maxPerBlock total $::hir::semantic::maxInstances]
+dict set result semanticBudget [list perBlock [expr {[info exists ::hir::semantic::maxPerBlock] ? $::hir::semantic::maxPerBlock : "none"}] total $::hir::semantic::maxInstances]
 dict set result semanticDeclined [dict getdef $semantic declinedCount {}]
 
 if {![dict get $options -native]} {

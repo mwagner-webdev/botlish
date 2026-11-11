@@ -5276,8 +5276,7 @@ difference from `BOTLISH_STATIC_SCHEDULER=sequential`: add its edge to
 `hir/staticdeps.tcl`, not a special case to the scheduler. The sequential
 order's waiting rule (STATIC-COMPILE.md, "The waiting rule";
 `hir::staticdeps::Waiting`) reads that analysis's waiting channels
-(`C:erased`, `C:budget:B`, `C:unwind`; never the gates `C:verdict` and
-`C:plan`): a
+(`C:erased`, `C:unwind`; never the gates `C:verdict` and `C:plan`): a
 failing block consuming one waits while a failing block contributes to it,
 so a consumer's verdict does not depend on where its contributors are
 written. An edge into a waiting channel's part of the graph, or a new link
@@ -5286,8 +5285,7 @@ count: check the fuzzer's layout claim on several seeds (17 and 41 among
 them). If you change the
 schedulers, the dependency analysis, the method-call seeds or build reuse
 (`hir/hir.tcl`), or add a fact an analysis reads across functions (a summary,
-an inferred contract, the erased-callable contract, an instance budget, a
-yield type, a diagnostic suppressed by reachability or by a whole-program
+an inferred contract, the erased-callable contract, a yield type, a diagnostic suppressed by reachability or by a whole-program
 verdict such as the ownership analysis's, which withholds release scopes and
 `AFFINE-PATH-RELEASE-UNSUPPORTED` from a program it rejects, or the trait
 plan's gate, which reports its diagnostics only for a program with no other;
@@ -6764,6 +6762,104 @@ the driver's runtime archive, and, after `single/build.sh`, the clean room
 single/out/botlish`, then `audit/external-tools/cleanroom/cleanroom.sh
 single/out/botlish OUT/repo RESULTS`; the single-executable workflow's
 build job runs both).
+
+## The React Native integration (botlish_react_native)
+
+`integrations/react-native/` is the external tool package
+`botlish_react_native` (BOTLISH-REACT-NATIVE-2048-PACKAGE-MILESTONE-1.md;
+its README is the tool's documentation). Its protocol 1 tool
+`react-native` turns a Botlish native library into a React Native New
+Architecture npm package: a Pure C++ TurboModule, Android arm64-v8a. It
+reads the library's manifest (schema 2), header and Android AArch64 shared
+object. `examples/react-native/` holds the 2048 facade (`2048/game.bot`), a
+second, unrelated library (`textkit/textkit.bot`) and the React Native
+0.88.1 app that plays 2048 through the generated package
+(`app/`, `useBotlish2048`). Keep it so:
+
+* Nothing of React Native enters the compiler, the runtime, the standard
+  library or the single executable. No Hermes, Node, Gradle, CMake or JNI
+  knowledge, no compiler pass, no export or ABI change made for it. The
+  compiler never loads the tool, and installing it runs nothing.
+* The tool knows Botlish through the request and the manifest only. It
+  reads no source, HIR, compiler internals or checkout file, and its
+  templates are compiled in (`src/embed.c`). It checks every fact before it
+  writes a byte:
+  - the manifest's schema, C ABI version, target and runtime ABI;
+  - the contracts (thread-affine, reentrancy refused, no callbacks, no
+    native dependencies);
+  - every export's C types and ownership;
+  - every artifact's SHA-256;
+  - the shared object's ELF: AArch64, 16 KiB segments, its SONAME, Bionic's
+    libraries only, its C ABI exported.
+
+  It refuses what it cannot read, under a stable `RN-*` code, never
+  guessing a type or an ownership. No function name, method list or 2048
+  rule is built in: names come from the manifest and the options. A new
+  boundary type is a new mapping with its tests, never an `any`.
+* The package's native interface is React Native's own. The app's Codegen
+  generates it from the spec (`includesGeneratedCode` false). The package is
+  a pure C++ dependency of autolinking; never ship Codegen output, a Gradle
+  module, Java or Kotlin, and never patch `node_modules` or React Native.
+  The React Native versions it generates for are a table (`reactNatives`):
+  a version not in it is refused, never assumed compatible.
+* The generated C++ is two layers. The core (`MODULECore`) knows no
+  JavaScript engine. It owns the instance's thread affinity: a call from
+  another thread is refused before the C ABI is entered, and the instance
+  is destroyed on its own thread only (at once, at that thread's next call,
+  or at its exit, never by a foreign thread). It also owns ownership (RAII:
+  every owned result and error released on every path) and the number and
+  string rules:
+  - an int is a safe integer, never rounded;
+  - a float64 is finite;
+  - a string crosses by length, never by NUL.
+
+  The TurboModule only turns a failure into a JavaScript error. Never make
+  an instance `Send`, lock it for another thread, or destroy it from one.
+  Never return a pointer into a Botlish VM to JavaScript, and never fall
+  back to JavaScript when the native module is missing (`BotlishError`
+  category `unavailable`).
+* The 2048 rules stay Botlish's. The facade adds the played game's rules
+  (seeded spawns, two starting tiles, the end and the win) over the
+  unchanged engine, and the hook and the screen compute nothing of them.
+  The hook calls the library only in effects and event handlers, never
+  while rendering.
+* Android: arm64-v8a only. The CMake file refuses another ABI, an API level
+  below the package's, and a library that is not the recorded one. The APK
+  carries the package's library as the Android build strips it
+  (`llvm-strip --strip-unneeded`: `tools/inspect-apk.sh` checks it byte for
+  byte), 16 KiB-aligned and zip-aligned. The example app extracts its
+  native libraries at installation (`useLegacyPackaging`). Left in the
+  APK, an arm64-v8a-only app does not start on a native-bridge device:
+  React Native's SoLoader looks for them under the device's primary ABI.
+  Keep extraction, which `inspect-apk.sh` checks, until SoLoader looks
+  under the process's own ABI.
+* The device builds (`-PbotlishDevice=plain|gc-stress`, the app's
+  build.gradle) are for a phone without adb: a Self-test button, the
+  result on the screen, and for gc-stress `BOTLISH_NATIVE_GC_STRESS=1` set
+  in `MainApplication` as an application of its own. Without the property
+  the build is the acceptance's: never let a device build's button,
+  variable or package reach it. The self-test checks its snapshots on the
+  device by `oracleDigest` (src/directions.ts), which must stay the
+  interpreter's (`rn-selftest-oracle-digest`). `tools/device-builds.sh`
+  runs both on the workflow's emulators and, over USB, on a phone.
+
+If you change `integrations/react-native/`, `examples/react-native/` or the
+native library manifest or C ABI it reads, run
+`tests/react-native-package.test`. It needs ANDROID_NDK_ROOT. Give it
+BOTLISH_RN_PACKAGES, a directory of the prebuilt Android target support
+and game2048 packages, else it builds them. Give it BOTLISH_RN_APP, an app
+`audit/react-native-2048/tools/build.sh` prepared, for its Jest and
+TypeScript tests. Also run `audit/react-native-2048/tools/mutate.tcl`, with
+the same environment (every mutant in its `mutants.txt` must still apply
+and be killed by a test its `!!` line names: update a mutant's text when you
+change the code it mutates, keeping it a mutant of the same rule). Then push
+and read the `react-native 2048` workflow: `build.sh` from checkout to APK,
+then `tools/android-acceptance.sh` on an Android emulator for each image.
+The images are x86_64 ones that run the arm64-v8a APK through Android's
+native bridge, one with 4 KiB and one with 16 KiB pages. After
+`single/build.sh`, also run the clean room
+(`audit/react-native-2048/cleanroom/cleanroom.sh single/out/botlish REPO
+RESULTS`).
 
 ## Diagnostic recovery
 

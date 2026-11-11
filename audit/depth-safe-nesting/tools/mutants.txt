@@ -1800,13 +1800,13 @@ proc core::deep::descend {cmd} {
     }
 >>>>
 
-@@ host-depth-decides-instances hir::semantic declines an instance again where Tcl's frames are deep
+@@ host-depth-decides-instances hir::semantic defers an instance again where Tcl's frames are deep
 !! dsn-census-guarded
 ## hir/semantic.tcl
 <<<<
-            } elseif {[llength [dict get $state stack]] >= $maxDepth} {
+        } elseif {[llength [dict get $state stack]] >= $maxDepth} {
 ====
-            } elseif {[llength [dict get $state stack]] >= $maxDepth || [info level] > 700} {
+        } elseif {[llength [dict get $state stack]] >= $maxDepth || [info level] > 700} {
 >>>>
 
 # ---------------------------------------------------------------------------

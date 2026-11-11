@@ -1,0 +1,5 @@
+# The 32-pass program with the shared untyped helper (synth.tcl -passes 32 -generic 1, 13,899 lines):
+# the front end's outcome (the base, then the branch head; both processes at once, other jobs on the cores).
+
+before: rejected CORE SEMANTIC TYPE in 96.9 s: pass_17.bot:103:23: argument for parameter "x" cannot be proven to satisfy lattice::Fact (argument type: any); peak 1935 MB
+after:  accepted in 113.2 s; 33 instances (at most 32 of one function), 33 walks, declined {}; peak 1972 MB

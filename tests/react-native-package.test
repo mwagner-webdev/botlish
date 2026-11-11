@@ -1,0 +1,817 @@
+# react-native-package.test -- the botlish_react_native tool package
+# (BOTLISH-REACT-NATIVE-2048-PACKAGE-MILESTONE-1.md):
+#
+#   * distribution: an ordinary schema 4 package whose tool `react-native`
+#     installs without running and runs only when `botlish tool` names it;
+#   * generation: from a Botlish native library's manifest, header and
+#     Android AArch64 shared object, a React Native New Architecture npm
+#     package -- files, record, Codegen configuration, autolinking --
+#     deterministic, without a host path, generic (a second, unrelated
+#     library gets a package of its own, with nothing of the first);
+#   * refusals: every manifest, artifact, ELF, name, version, API level,
+#     output and invocation the tool cannot take, each with its code and
+#     nothing written;
+#   * the generated C++ core layer, compiled unchanged on the host against
+#     the host builds of the same libraries: ownership, errors, numbers,
+#     strings, thread affinity, lifecycle, GC stress, the interpreter's 2048;
+#   * the generated CMake file's guards (ABI, API level, the library's
+#     digest), configured with the host's CMake;
+#   * the JavaScript side, with BOTLISH_RN_APP naming an app build.sh
+#     prepared (node_modules installed): the generated entry points and the
+#     2048 hook under Jest, and TypeScript.
+#
+# The Android libraries need the Android NDK (ANDROID_NDK_ROOT naming one of
+# revision 28 or later, the target support package's minimum: it links them)
+# and the Android AArch64 target support package: BOTLISH_RN_PACKAGES
+# names a directory of prebuilt .botpkg files (the target support package
+# and game2048), else it is built here with cargo
+# (audit/android-aarch64-target/tools/package.sh, a few minutes). Without
+# them, every test that needs an Android library is skipped.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot pm pm.tcl]
+
+set ::rnMain [file join $::projectRoot main.tcl]
+set ::rnTool [file join $::projectRoot integrations react-native]
+set ::rnAudit [file join $::projectRoot audit react-native-2048]
+set ::rnCounter 0
+
+testConstraint unix [expr {$::tcl_platform(platform) eq "unix"}]
+testConstraint linuxX86_64Host [expr {[pm::target::host] eq "linux-x86_64"}]
+testConstraint cc [expr {[auto_execok cc] ne ""}]
+testConstraint cxx [expr {[auto_execok c++] ne ""}]
+testConstraint cmake [expr {[auto_execok cmake] ne ""}]
+testConstraint nativeBuilt [expr {![catch {native::binary}]}]
+testConstraint rnTool [expr {[testConstraint unix] && [testConstraint linuxX86_64Host] && [testConstraint cc]}]
+set ::rnPrebuilt [expr {[info exists ::env(BOTLISH_RN_PACKAGES)] && [llength [glob -nocomplain -directory $::env(BOTLISH_RN_PACKAGES) botlish_target_android_aarch64-*.botpkg]]}]
+# The NDK links every Android library; without prebuilt packages, cargo
+# builds the Android runtime too. Only an NDK the target support package
+# accepts counts (revision 28 or later, as tests/android-target.test reads
+# it): GitHub's runner images set ANDROID_NDK_ROOT to an older NDK, whose
+# links fail (NATIVE LIBRARY TOOLCHAIN) rather than skip.
+proc rnNdkRoot {} {
+    if {![info exists ::env(ANDROID_NDK_ROOT)]} { return "" }
+    set root $::env(ANDROID_NDK_ROOT)
+    set props [file join $root source.properties]
+    if {![file isfile $props]} { return "" }
+    set channel [open $props]
+    set text [read $channel]
+    close $channel
+    if {![regexp -line {^Pkg\.Revision\s*=\s*([0-9]+)} $text -> major] || $major < 28} { return "" }
+    if {![file executable [file join $root toolchains llvm prebuilt linux-x86_64 bin clang]]} { return "" }
+    return $root
+}
+set ::rnNdk [expr {[rnNdkRoot] ne ""}]
+set ::rnCargo [expr {[auto_execok cargo] ne "" && [auto_execok rustup] ne ""}]
+testConstraint rnAndroid [expr {[testConstraint rnTool] && [testConstraint nativeBuilt] && $::rnNdk && ($::rnPrebuilt || $::rnCargo)}]
+testConstraint rnHost [expr {[testConstraint rnAndroid] && [testConstraint cxx] && [native::hostSupports libraries]}]
+testConstraint rnApp [expr {[info exists ::env(BOTLISH_RN_APP)] && [file isdirectory [file join $::env(BOTLISH_RN_APP) node_modules react-native]]}]
+
+proc rnDir {{tag t}} {
+    set dir [file join [temporaryDirectory] rn-[pid]-$tag-[incr ::rnCounter]]
+    file delete -force $dir
+    file mkdir $dir
+    return $dir
+}
+
+proc rnWrite {path text} {
+    file mkdir [file dirname $path]
+    set channel [open $path w]
+    fconfigure $channel -encoding utf-8 -translation lf
+    puts -nonewline $channel $text
+    close $channel
+}
+
+proc rnRead {path} {
+    set channel [open $path r]
+    fconfigure $channel -encoding utf-8
+    set text [read $channel]
+    close $channel
+    return $text
+}
+
+proc rnBytes {path} {
+    set channel [open $path rb]
+    set data [read $channel]
+    close $channel
+    return $data
+}
+
+proc rnSha256 {path} {
+    return [lindex [exec sha256sum $path] 0]
+}
+
+# Runs COMMAND... in CWD with ENV ({NAME VALUE ...}) added: {STATUS STDOUT
+# STDERR}. Words go through /bin/sh's trampoline (pm::tools: none is read
+# as a redirection).
+proc rnExec {cwd env args} {
+    set out [file join [temporaryDirectory] rn-out-[pid]]
+    set err [file join [temporaryDirectory] rn-err-[pid]]
+    set here [pwd]
+    # (Each name set and put back on its own: unsetting the env array as a
+    # whole detaches it from the process's environment.)
+    set saved {}
+    foreach {name value} $env {
+        lappend saved $name [expr {[info exists ::env($name)] ? [list 1 $::env($name)] : 0}]
+        set ::env($name) $value
+    }
+    cd $cwd
+    set status 0
+    try {
+        set words [lmap word $args {string cat x $word}]
+        if {[catch {exec /bin/sh -c $::pm::tools::trampoline sh {*}$words >$out 2>$err} message options]} {
+            set code [dict get $options -errorcode]
+            set status [expr {[lindex $code 0] eq "CHILDSTATUS" ? [lindex $code 2] : -1}]
+        }
+    } finally {
+        cd $here
+        foreach {name was} $saved {
+            if {[lindex $was 0]} { set ::env($name) [lindex $was 1] } else { unset -nocomplain ::env($name) }
+        }
+    }
+    return [list $status [string trimright [rnRead $out] \n] [string trimright [rnRead $err] \n]]
+}
+
+# main.tcl ARGS in CWD.
+proc rnRun {cwd args} {
+    return [rnExec $cwd {} [info nameofexecutable] $::rnMain {*}$args]
+}
+
+proc rnOk {result what} {
+    lassign $result status out err
+    if {$status != 0} { error "$what: status $status\n$out\n$err" }
+    return $out
+}
+
+# The package repository: the Android target support package and game2048
+# (prebuilt, or built here), and the tool package built from this tree.
+proc rnRepo {} {
+    if {[info exists ::rnRepoCache]} { return $::rnRepoCache }
+    if {[info exists ::rnRepoError]} { error $::rnRepoError }
+    if {[catch {RnRepo} result]} {
+        set ::rnRepoError $result
+        error $result
+    }
+    return $result
+}
+
+proc RnRepo {} {
+    set dir [rnDir repo]
+    file mkdir $dir/repo
+    if {$::rnPrebuilt} {
+        foreach f [glob -directory $::env(BOTLISH_RN_PACKAGES) *.botpkg] {
+            if {![string match botlish_react_native-* [file tail $f]]} { file copy $f $dir/repo }
+        }
+    } else {
+        exec [file join $::projectRoot audit android-aarch64-target tools package.sh] $dir/android \
+            [info nameofexecutable] $::rnMain 2>@1
+        foreach f [glob -directory $dir/android/repo *.botpkg] { file copy $f $dir/repo }
+    }
+    exec [file join $::rnTool package.sh] $dir/tool [info nameofexecutable] $::rnMain 2>@1
+    foreach f [glob -directory $dir/tool/repo *.botpkg] { file copy -force $f $dir/repo }
+    set ::rnToolProgram [file join $dir tool stage botlish_react_native tools linux-x86_64 react-native]
+    set ::rnRepoCache $dir/repo
+    return $::rnRepoCache
+}
+
+# A library's projects (rnProject game | textkit): DIR/android holds its
+# packages for android-aarch64, the tool package and lib/ (the Android
+# library); DIR/host its packages for the host and lib/ (the host library).
+proc rnProject {name} {
+    if {[info exists ::rnProjects($name)]} { return $::rnProjects($name) }
+    if {[info exists ::rnProjectErrors($name)]} { error $::rnProjectErrors($name) }
+    if {[catch {RnProject $name} result]} {
+        set ::rnProjectErrors($name) $result
+        error $result
+    }
+    return $result
+}
+
+proc RnProject {name} {
+    set repo [rnRepo]
+    set source [dict get {
+        game examples/react-native/2048/game.bot
+        textkit examples/react-native/textkit/textkit.bot
+    } $name]
+    set packages [dict get {game game2048 textkit {}} $name]
+    set dir [rnDir project-$name]
+    foreach side {android host} {
+        rnWrite $dir/$side/botlish.json "\{\"schema\": 1, \"dependencies\": \{\}\}\n"
+        file copy [file join $::projectRoot $source] $dir/$side
+    }
+    foreach package [concat $packages botlish_target_android_aarch64] {
+        rnOk [rnRun $dir/android add $package -repository $repo -target android-aarch64] "add $package"
+    }
+    rnOk [rnRun $dir/android add botlish_react_native -repository $repo] "add the tool"
+    rnOk [rnRun $dir/android -warnings error -target android-aarch64 -target-support botlish_target_android_aarch64 \
+        -emit-native-library $name -out lib [file tail $source]] "the Android library"
+    foreach package $packages {
+        rnOk [rnRun $dir/host add $package -repository $repo] "add $package (host)"
+    }
+    if {[native::hostSupports libraries]} {
+        rnOk [rnRun $dir/host -warnings error -emit-native-library $name -out lib [file tail $source]] "the host library"
+    }
+    set ::rnProjects($name) $dir
+    return $dir
+}
+
+# `botlish tool` running react-native generate for NAME's library into OUT:
+# {STATUS STDOUT STDERR}.
+proc rnGenerate {name out args} {
+    set dir [rnProject $name]/android
+    return [rnRun $dir tool -out $out -artifact lib/$name.manifest.json -target android-aarch64 react-native generate {*}$args]
+}
+
+# The generated package of NAME (generated once).
+proc rnPackage {name} {
+    if {[info exists ::rnPackages($name)]} { return $::rnPackages($name) }
+    if {[info exists ::rnPackageErrors($name)]} { error $::rnPackageErrors($name) }
+    if {[catch {RnPackage $name} result]} {
+        set ::rnPackageErrors($name) $result
+        error $result
+    }
+    return $result
+}
+
+proc RnPackage {name} {
+    set out [rnDir gen]/react-native-botlish-$name
+    rnOk [rnGenerate $name $out] "generate $name"
+    set ::rnPackages($name) $out
+    return $out
+}
+
+# The tool program run directly with a protocol 1 request naming MANIFEST
+# (and TARGET, OUTPUT): {STATUS STDOUT STDERR OUTPUT-FILES}. For the tool's
+# own checks of what `botlish tool` would refuse first, or does not check.
+proc rnDirect {manifest args} {
+    rnRepo
+    set target android-aarch64
+    set protocol 1
+    set output [rnDir direct]/out
+    while {[string match -* [lindex $args 0]] && [lindex $args 0] in {-target -protocol -output}} {
+        set args [lassign $args option value]
+        switch -- $option {
+            -target { set target $value }
+            -protocol { set protocol $value }
+            -output { set output $value }
+        }
+    }
+    set request [rnDir request]/request.json
+    rnWrite $request [format {{"protocol": %s, "kind": "botlish-tool-request", "tool": {"name": "react-native", "package": "botlish_react_native", "version": "0.1.0", "directory": "/nowhere", "program": "%s"}, "compiler": {"revision": null, "command": []}, "project": "/nowhere", "host": "linux-x86_64", "target": "%s", "output": "%s", "artifacts": [{"kind": "native-library", "manifest": "%s", "library": "x", "sha256": "0"}], "targetSupport": null, "environment": [], "arguments": [], "diagnostics": "%s"}} \
+        $protocol $::rnToolProgram $target $output $manifest [file join [file dirname $request] diagnostics.json]]
+    lassign [rnExec [file dirname $request] [list BOTLISH_TOOL_REQUEST $request] $::rnToolProgram generate {*}$args] status out err
+    set files [expr {[file isdirectory $output] ? [glob -nocomplain -directory $output *] : {}}]
+    return [list $status $out $err $files]
+}
+
+# A copy of NAME's Android library directory, with EDITS applied to its
+# manifest text (string map pairs) and the files' digests in the manifest
+# brought up to date with ADJUST (a script run in the copy first): the
+# manifest of the copy.
+proc rnCopy {name {edits {}} {adjust {}}} {
+    set lib [rnProject $name]/android/lib
+    set dir [rnDir copy]
+    foreach f [glob -directory $lib *] { file copy $f $dir }
+    if {$adjust ne ""} {
+        set here [pwd]
+        cd $dir
+        try { uplevel #0 $adjust } finally { cd $here }
+    }
+    set manifest [rnRead $dir/$name.manifest.json]
+    foreach {key file} [list static lib$name.a shared lib$name.so header $name.h] {
+        if {![file exists $dir/$file]} continue
+        set re [format {("sha256": \x7b[^\x7d]*"%s": ")[0-9a-f]{64}"} $key]
+        regsub $re $manifest "\\1[rnSha256 $dir/$file]\"" manifest
+    }
+    set manifest [string map $edits $manifest]
+    rnWrite $dir/$name.manifest.json $manifest
+    return $dir/$name.manifest.json
+}
+
+# Whether RESULT (rnDirect's) is a refusal with STATUS whose standard error
+# names CODE and that wrote nothing.
+proc rnRefused {result code {status 1}} {
+    lassign $result s out err files
+    if {$s == $status && [string match "*($code)*" $err] && $files eq {}} { return 1 }
+    return "status $s files {$files}: $err"
+}
+
+# Every file of DIR, relative, sorted.
+proc rnFiles {dir {prefix ""}} {
+    set files {}
+    foreach entry [lsort [glob -nocomplain -directory $dir -tails *]] {
+        if {[file isdirectory [file join $dir $entry]]} {
+            lappend files {*}[rnFiles [file join $dir $entry] $prefix$entry/]
+        } else {
+            lappend files $prefix$entry
+        }
+    }
+    return $files
+}
+
+# Sets ELF64 PT_LOAD alignments of PATH to ALIGN (a 4 KiB-aligned control).
+proc rnRealign {path align} {
+    set data [rnBytes $path]
+    binary scan $data @32w phoff
+    binary scan $data @54ss phentsize phnum
+    for {set i 0} {$i < $phnum} {incr i} {
+        set at [expr {$phoff + $i * $phentsize}]
+        binary scan $data @${at}i type
+        if {$type == 1} {
+            set data [string replace $data [expr {$at + 48}] [expr {$at + 55}] [binary format w $align]]
+        }
+    }
+    set channel [open $path wb]
+    puts -nonewline $channel $data
+    close $channel
+}
+
+# ---------------------------------------------------------------------------
+# Distribution
+
+test rn-tool-installed-not-run {the tool package installs as an ordinary dependency: `tools` lists its protocol 1 tool for linux-x86_64, the installed program is not executable, and installing created nothing outside .bot_modules} -constraints {rnAndroid} -body {
+    set dir [rnProject game]/android
+    set listing [rnOk [rnRun $dir tools] tools]
+    set program [file join $dir .bot_modules botlish_react_native tools linux-x86_64 react-native]
+    list [string match "botlish_react_native:react-native (botlish_react_native 0.1.0), protocol 1, hosts linux-x86_64, inputs native-library*" $listing] \
+        [file executable $program] [lsort [glob -nocomplain -directory $dir -tails *]]
+} -result {1 0 {botlish.json game.bot lib}}
+
+test rn-tool-descriptor {the package's descriptor is schema 4 with exactly one tool, react-native, protocol 1, a linux-x86_64 program and the native-library input; the program is a static ELF executable} -constraints {rnAndroid} -body {
+    rnRepo
+    set d [pm::json::decode [rnRead [file join $::rnTool package botlish.json]]]
+    set get {{value args} {
+        foreach k $args { set value [dict get [pm::json::payload $value] $k] }
+        pm::json::payload $value
+    }}
+    set tools [dict keys [apply $get $d tools]]
+    set kind [exec file -b $::rnToolProgram]
+    list [apply $get $d schema] $tools [apply $get $d tools react-native protocol] \
+        [dict keys [apply $get $d tools react-native programs]] [lmap i [apply $get $d tools react-native inputs] {pm::json::payload $i}] \
+        [string match "*ELF 64-bit*statically linked*" $kind]
+} -result {4 react-native 1 linux-x86_64 native-library 1}
+
+# ---------------------------------------------------------------------------
+# Generation
+
+test rn-generate-files {`botlish tool ... react-native generate` writes the package: the spec, the entry point, the C++ adapter, the CMake file, the autolinking configuration, the library, its header and manifest, the record and the README} -constraints {rnAndroid} -body {
+    rnFiles [rnPackage game]
+} -result {README.md android/CMakeLists.txt botlish/game.manifest.json botlish-react-native.json cpp/BotlishGameCore.cpp cpp/BotlishGameCore.h cpp/BotlishGameModule.cpp cpp/BotlishGameModule.h include/game.h native/android/arm64-v8a/libgame.so package.json react-native.config.js src/NativeBotlishGame.ts src/index.ts}
+
+test rn-generate-artifacts-unchanged {the package holds the library, header and manifest the tool checked, byte for byte} -constraints {rnAndroid} -body {
+    set p [rnPackage game]
+    set lib [rnProject game]/android/lib
+    list [expr {[rnBytes $p/native/android/arm64-v8a/libgame.so] eq [rnBytes $lib/libgame.so]}] \
+        [expr {[rnBytes $p/include/game.h] eq [rnBytes $lib/game.h]}] \
+        [expr {[rnBytes $p/botlish/game.manifest.json] eq [rnBytes $lib/game.manifest.json]}]
+} -result {1 1 1}
+
+test rn-generate-record {the record names the generator, the library (its target, runtime ABI, every digest: the manifest's), React Native's range, the ABI and the API levels, and exactly the files written} -constraints {rnAndroid} -body {
+    set p [rnPackage game]
+    set lib [rnProject game]/android/lib
+    set r [pm::json::decode [rnRead $p/botlish-react-native.json]]
+    set m [pm::json::decode [rnRead $lib/game.manifest.json]]
+    set get {{value args} {
+        foreach k $args { set value [dict get [pm::json::payload $value] $k] }
+        pm::json::payload $value
+    }}
+    set files [lmap f [apply $get $r files] {pm::json::payload $f}]
+    list [apply $get $r generator name] [apply $get $r generator version] [apply $get $r library target] \
+        [expr {[apply $get $r library runtimeAbi] eq [apply $get $m compiler runtimeAbi]}] \
+        [expr {[apply $get $r library sha256 shared] eq [apply $get $m sha256 shared]}] \
+        [expr {[apply $get $r library sha256 manifest] eq [rnSha256 $lib/game.manifest.json]}] \
+        [apply $get $r reactNative range] [lmap a [apply $get $r android abis] {pm::json::payload $a}] \
+        [apply $get $r android minimumApi library] [apply $get $r android minimumApi reactNative] [apply $get $r android minimumApi package] \
+        [expr {[lsort [concat $files botlish-react-native.json]] eq [lsort [rnFiles $p]]}]
+} -result {botlish-react-native 0.1.0 android-aarch64 1 1 1 {>=0.88.0 <0.89.0} arm64-v8a 21 24 24 1}
+
+test rn-generate-package-json {package.json: the app-owned Codegen configuration (a modules spec, includesGeneratedCode false), React Native as a bounded peer, Android arm64-v8a only and no iOS} -constraints {rnAndroid} -body {
+    set p [pm::json::decode [rnRead [rnPackage game]/package.json]]
+    set get {{value args} {
+        foreach k $args { set value [dict get [pm::json::payload $value] $k] }
+        pm::json::payload $value
+    }}
+    list [apply $get $p name] [apply $get $p main] [apply $get $p codegenConfig name] [apply $get $p codegenConfig type] \
+        [apply $get $p codegenConfig jsSrcsDir] [apply $get $p codegenConfig includesGeneratedCode] \
+        [apply $get $p peerDependencies react-native] [lmap a [apply $get $p botlish platforms android abis] {pm::json::payload $a}] \
+        [apply $get $p botlish platforms ios]
+} -result {react-native-botlish-game src/index.ts BotlishGameSpec modules src 0 {>=0.88.0 <0.89.0} arm64-v8a {}}
+
+test rn-generate-autolinking {react-native.config.js makes the package a pure C++ dependency (cxxModule*: the CMake target, the CMake file, the module's class) and disables iOS} -constraints {rnAndroid} -body {
+    set text [rnRead [rnPackage game]/react-native.config.js]
+    list [regexp {cxxModuleCMakeListsModuleName: 'botlish_rn_botlishgame'} $text] [regexp {cxxModuleCMakeListsPath: 'CMakeLists.txt'} $text] \
+        [regexp {cxxModuleHeaderName: 'BotlishGameModule'} $text] [regexp {ios: null} $text]
+} -result {1 1 1 1}
+
+test rn-generate-methods-from-manifest {the spec's methods are the manifest's exports, camelCased, in its order, with their types -- nothing built in -- for both libraries} -constraints {rnAndroid} -body {
+    set result {}
+    foreach {name module} {game BotlishGame textkit BotlishTextkit} {
+        set spec [rnRead [rnPackage $name]/src/Native$module.ts]
+        lappend result [regexp -all -inline {\n  ([a-zA-Z]+\([^)]*\): [a-z]+);} $spec]
+    }
+    lmap r $result {lmap {- m} $r {set m}}
+} -result {{{newGame(seed: number): string} {move(state: string, directionCode: number): string} {score(state: string): number} {place(state: string, row: number, column: number, tile: number): string} {botlishDiagnostics(): string}} {{scalarCount(text: string): number} {reversed(text: string): string} {palindrome(text: string): boolean} {repeated(text: string, times: number, limit: number): string} {mean(a: number, b: number): number} {alnumShare(text: string): number} {requireText(text: string): void} {botlishDiagnostics(): string}}}
+
+test rn-generate-deterministic {two generations, into directories of different paths, write the same bytes} -constraints {rnAndroid} -body {
+    set a [rnDir det-a]/pkg
+    set b [rnDir det-b-longer-path]/pkg
+    rnOk [rnGenerate game $a] a
+    rnOk [rnGenerate game $b] b
+    list [expr {[rnFiles $a] eq [rnFiles $b]}] [lsort -unique [lmap f [rnFiles $a] {expr {[rnBytes $a/$f] eq [rnBytes $b/$f]}}]]
+} -result {1 1}
+
+test rn-generate-no-host-path {no generated file names a host path: not the checkout, the project, the output or a temporary directory; the CMake file reaches the library through its own directory only} -constraints {rnAndroid} -body {
+    set p [rnPackage game]
+    set bad {}
+    foreach f [rnFiles $p] {
+        if {[string match native/* $f] || [string match botlish/* $f]} continue
+        set text [rnRead $p/$f]
+        foreach needle [list $::projectRoot [rnProject game] $p [temporaryDirectory] /tmp/ /home/] {
+            if {[string first $needle $text] >= 0} { lappend bad "$f: $needle" }
+        }
+    }
+    set cmake [rnRead $p/android/CMakeLists.txt]
+    list $bad [regexp {"\$\{CMAKE_CURRENT_LIST_DIR\}/\.\./native/android/arm64-v8a/libgame\.so"} $cmake]
+} -result {{} 1}
+
+test rn-generate-replace {-replace generates again over a package the tool made; without it, or with a file of someone else's there, the output is refused and left as it was} -constraints {rnAndroid} -body {
+    set out [rnDir replace]/pkg
+    rnOk [rnGenerate game $out] first
+    lassign [rnGenerate game $out] s1 - e1
+    rnOk [rnGenerate game $out -replace] again
+    rnWrite $out/mine.txt mine
+    lassign [rnGenerate game $out -replace] s2 - e2
+    list $s1 [string match *RN-OUTPUT* $e1] $s2 [string match {*files the previous package's record does not name*} $e2] \
+        [file exists $out/mine.txt] [file exists $out/package.json]
+} -result {1 1 1 1 1 0}
+
+test rn-generate-options {-name, -module, -version and -license name the package; the module's spec, class, CMake target and namespace follow the module name} -constraints {rnAndroid} -body {
+    set out [rnDir options]/pkg
+    rnOk [rnGenerate game $out -name @acme/rn-game -module Acme2048 -version 1.2.3-beta.1 -license MIT] options
+    set p [rnRead $out/package.json]
+    list [regexp {"name": "@acme/rn-game"} $p] [regexp {"version": "1.2.3-beta.1"} $p] [regexp {"license": "MIT"} $p] \
+        [regexp {"name": "Acme2048Spec"} $p] [file exists $out/cpp/Acme2048Module.h] [file exists $out/src/NativeAcme2048.ts] \
+        [regexp {namespace botlish_rn_acme2048 } [rnRead $out/cpp/Acme2048Core.h]] [regexp {get<Spec>\('Acme2048'\)} [rnRead $out/src/NativeAcme2048.ts]]
+} -result {1 1 1 1 1 1 1 1}
+
+test rn-two-libraries-apart {the second library's package shares no name with the first's -- module, spec, C++ class and namespace, CMake targets, C prefix -- and holds nothing of 2048} -constraints {rnAndroid} -body {
+    set g [rnPackage game]
+    set t [rnPackage textkit]
+    set names {}
+    foreach p [list $g $t] {
+        set r [rnRead $p/botlish-react-native.json]
+        regexp {"module": "([^"]+)"} $r -> module
+        regexp {"cmakeTarget": "([^"]+)"} $r -> target
+        regexp {namespace (botlish_rn_[a-z0-9]+) } [rnRead [lindex [glob $p/cpp/*Core.h] 0]] -> ns
+        regexp {add_library\((botlish_library_[a-z0-9_]+) SHARED IMPORTED\)} [rnRead $p/android/CMakeLists.txt] -> imported
+        lappend names [list $module $target $ns $imported]
+    }
+    set leaks {}
+    foreach f [rnFiles $t] {
+        if {[string match native/* $f]} continue
+        if {[regexp -nocase {2048|game} [rnRead $t/$f]]} { lappend leaks $f }
+    }
+    list $names $leaks
+} -result {{{BotlishGame botlish_rn_botlishgame botlish_rn_botlishgame botlish_library_game} {BotlishTextkit botlish_rn_botlishtextkit botlish_rn_botlishtextkit botlish_library_textkit}} {}}
+
+# ---------------------------------------------------------------------------
+# Refusals: `botlish tool`'s own, then the tool's (requests made directly,
+# so that each of its checks is reached).
+
+test rn-refuse-unknown-tool {an unknown tool name is refused by `botlish tool` before anything runs} -constraints {rnAndroid} -body {
+    set dir [rnProject game]/android
+    lassign [rnRun $dir tool -out [rnDir unknown] -artifact lib/game.manifest.json -target android-aarch64 react-nativ generate] status - err
+    list $status [string match *TOOL-UNKNOWN* $err]
+} -result {1 1}
+
+test rn-refuse-no-artifact {without -artifact the tool is refused (its input kind native-library)} -constraints {rnAndroid} -body {
+    set dir [rnProject game]/android
+    lassign [rnRun $dir tool -out [rnDir noart] -target android-aarch64 react-native generate] status - err
+    list $status [string match *TOOL-INPUT* $err]
+} -result {1 1}
+
+test rn-refuse-linux-library {a Linux library is refused: by `botlish tool` when the target is android-aarch64 (TOOL-ARTIFACT), by the tool for the Linux target (RN-TARGET)} -constraints {rnHost} -body {
+    set dir [rnProject game]/host
+    set out [rnDir linux]
+    lassign [rnRun [rnProject game]/android tool -out $out/a -artifact $dir/lib/game.manifest.json -target android-aarch64 react-native generate] s1 - e1
+    lassign [rnDirect $dir/lib/game.manifest.json -target linux-x86_64] s2 - e2 files
+    list $s1 [string match *TOOL-ARTIFACT* $e1] $s2 [string match *RN-TARGET* $e2] $files
+} -result {1 1 1 1 {}}
+
+test rn-refuse-output-bot-modules {output inside .bot_modules is refused by `botlish tool` (TOOL-OUTPUT) and by the tool itself (RN-OUTPUT)} -constraints {rnAndroid} -body {
+    set dir [rnProject game]/android
+    lassign [rnRun $dir tool -out $dir/.bot_modules/x -artifact lib/game.manifest.json -target android-aarch64 react-native generate] s1 - e1
+    set inside [rnDir botmods]/.bot_modules/pkg
+    lassign [rnDirect $dir/lib/game.manifest.json -output $inside] s2 - e2
+    list $s1 [string match *TOOL-OUTPUT* $e1] $s2 [string match *RN-OUTPUT* $e2] [file exists $inside]
+} -result {1 1 1 1 0}
+
+test rn-refuse-output-collision {a non-empty output directory the tool did not make is refused, and left alone} -constraints {rnAndroid} -body {
+    set out [rnDir collide]/pkg
+    rnWrite $out/notes.txt "someone's"
+    lassign [rnDirect [rnProject game]/android/lib/game.manifest.json -output $out] s - err
+    list $s [string match *RN-OUTPUT* $err] [glob -tails -directory $out *]
+} -result {1 1 notes.txt}
+
+test rn-refuse-request-protocol {a request of another protocol is refused} -constraints {rnAndroid} -body {
+    rnRefused [rnDirect [rnProject game]/android/lib/game.manifest.json -protocol 2] RN-REQUEST 2
+} -result 1
+
+test rn-refuse-request-target {a request whose target is not the library's is refused} -constraints {rnAndroid} -body {
+    rnRefused [rnDirect [rnProject game]/android/lib/game.manifest.json -target linux-x86_64] RN-TARGET
+} -result 1
+
+test rn-refuse-unknown-command {a command other than generate is a usage error} -constraints {rnAndroid} -body {
+    rnRepo
+    set request [rnDir cmd]/request.json
+    set m [rnProject game]/android/lib/game.manifest.json
+    set out [rnDir cmd-out]/out
+    rnWrite $request [format {{"protocol": 1, "kind": "botlish-tool-request", "host": "linux-x86_64", "target": "android-aarch64", "output": "%s", "artifacts": [{"kind": "native-library", "manifest": "%s"}]}} $out $m]
+    lassign [rnExec [file dirname $request] [list BOTLISH_TOOL_REQUEST $request] $::rnToolProgram frobnicate] s - err
+    list $s [string match *RN-USAGE* $err] [file exists $out]
+} -result {2 1 0}
+
+test rn-refuse-schema {a manifest of schema 1 is refused} -constraints {rnAndroid} -body {
+    rnRefused [rnDirect [rnCopy game {{"schema": 2,} {"schema": 1,}}]] RN-MANIFEST
+} -result 1
+
+test rn-refuse-abi-version {a C ABI version other than 1 is refused} -constraints {rnAndroid} -body {
+    rnRefused [rnDirect [rnCopy game {{"abi": 1,} {"abi": 2,}}]] RN-UNSUPPORTED
+} -result 1
+
+test rn-refuse-missing-shared {a library whose shared object is missing is refused} -constraints {rnAndroid} -body {
+    rnRefused [rnDirect [rnCopy game {} {file delete libgame.so}]] RN-ARTIFACT
+} -result 1
+
+test rn-refuse-header-digest {a header that is not the manifest's is refused} -constraints {rnAndroid} -body {
+    set m [rnCopy game]
+    set h [file dirname $m]/game.h
+    rnWrite $h "[rnRead $h]\n/* edited */\n"
+    rnRefused [rnDirect $m] RN-ARTIFACT
+} -result 1
+
+test rn-refuse-stale-shared {a shared object that is not the manifest's (a stale or substituted build) is refused} -constraints {rnAndroid} -body {
+    set m [rnCopy game]
+    set so [file dirname $m]/libgame.so
+    set channel [open $so ab]
+    puts -nonewline $channel x
+    close $channel
+    rnRefused [rnDirect $m] RN-ARTIFACT
+} -result 1
+
+test rn-refuse-glibc-library {a Linux/glibc shared object in an Android manifest's place, its digest recorded, is refused from its bytes} -constraints {rnHost} -body {
+    set host [rnProject game]/host/lib/libgame.so
+    rnRefused [rnDirect [rnCopy game {} [list file copy -force $host libgame.so]]] RN-ELF
+} -result 1
+
+test rn-refuse-4k-alignment {a shared object aligned for 4 KiB pages is refused: Android's 16 KiB page devices need 16384} -constraints {rnAndroid} -body {
+    set result [rnDirect [rnCopy game {} {rnRealign libgame.so 4096}]]
+    list [rnRefused $result RN-ELF] [string match "*aligned to 4096 bytes*" [lindex $result 2]]
+} -result {1 1}
+
+test rn-refuse-missing-symbol {an export whose C function the shared object does not export is refused} -constraints {rnAndroid} -body {
+    set adjust {
+        set h [rnRead game.h]
+        rnWrite game.h [string map [list "#ifdef __cplusplus\n\x7d" "int32_t game_ghost(game_instance *instance, int64_t *result, game_error **error);\n\n#ifdef __cplusplus\n\x7d"] $h]
+    }
+    set ghost {{"name": "ghost", "module": "", "symbol": "game_ghost", "botlish": "ghost() -> int", "params": [], "result": {"type": "int", "c": "int64_t *", "ownership": "value"}, "error": {"c": "game_error **", "nullable": true, "ownership": "owned", "release": "game_error_release"}, "errors": []}}
+    set result [rnDirect [rnCopy game [list {"exports": [} "\"exports\": \[$ghost, "] $adjust]]
+    list [rnRefused $result RN-ELF] [string match "*does not export game_ghost*" [lindex $result 2]]
+} -result {1 1}
+
+test rn-refuse-param-type {an export parameter of a type the generator does not map is refused, never guessed} -constraints {rnAndroid} -body {
+    rnRefused [rnDirect [rnCopy game {{"name": "direction_code",
+          "type": "int",} {"name": "direction_code",
+          "type": "List[int]",}}]] RN-UNSUPPORTED
+} -result 1
+
+test rn-refuse-result-type {an export result of a type the generator does not map is refused} -constraints {rnAndroid} -body {
+    set m [rnCopy game]
+    set text [rnRead $m]
+    set at [string first {"type": "int",
+        "c": "int64_t *"} $text]
+    rnWrite $m [string replace $text $at [expr {$at + 13}] {"type": "bytes",}]
+    rnRefused [rnDirect $m] RN-UNSUPPORTED
+} -result 1
+
+test rn-refuse-ownership {a str result the manifest says the callee owns is refused} -constraints {rnAndroid} -body {
+    set from "\"str-result\": \x7b\n      \"owner\": \"caller\","
+    set to "\"str-result\": \x7b\n      \"owner\": \"callee\","
+    rnRefused [rnDirect [rnCopy game [list $from $to]]] RN-UNSUPPORTED
+} -result 1
+
+test rn-refuse-threading {a library whose instances are not thread-affine (a contract the adapter does not know) is refused} -constraints {rnAndroid} -body {
+    rnRefused [rnDirect [rnCopy game {{"threading": "thread-affine"} {"threading": "free"}}]] RN-UNSUPPORTED
+} -result 1
+
+test rn-refuse-runtime-abi {a malformed runtime ABI, and one that is not the target support package's, are refused} -constraints {rnAndroid} -body {
+    set m [rnProject game]/android/lib/game.manifest.json
+    regexp {"runtimeAbi": "([0-9a-f]{16})"} [rnRead $m] -> abi
+    list [rnRefused [rnDirect [rnCopy game [list "\"runtimeAbi\": \"$abi\",\n    \"platform\"" "\"runtimeAbi\": \"$abi\",\n    \"platform\"" "\"frontEnd\"" "\"frontEnd\"" "\"runtimeAbi\": \"$abi\"\n" "\"runtimeAbi\": \"xyz\"\n"]]] RN-RUNTIME-ABI] \
+        [rnRefused [rnDirect [rnCopy game [list "\"runtimeAbi\": \"$abi\",\n    \"platform\"" "\"runtimeAbi\": \"0123456789abcdef\",\n    \"platform\""]]] RN-RUNTIME-ABI]
+} -result {1 1}
+
+test rn-refuse-duplicate-names {two exports with one JavaScript name are refused} -constraints {rnAndroid} -body {
+    set adjust {
+        set h [rnRead game.h]
+        rnWrite game.h [string map [list "#ifdef __cplusplus\n\x7d" "int32_t game_new__game(game_instance *instance, int64_t *result, game_error **error);\n\n#ifdef __cplusplus\n\x7d"] $h]
+    }
+    set twin {{"name": "new__game", "module": "", "symbol": "game_new__game", "botlish": "new__game() -> int", "params": [], "result": {"type": "int", "c": "int64_t *", "ownership": "value"}, "error": {"c": "game_error **", "nullable": true, "ownership": "owned", "release": "game_error_release"}, "errors": []}}
+    rnRefused [rnDirect [rnCopy game [list {"exports": [} "\"exports\": \[$twin, "] $adjust]] RN-NAME
+} -result 1
+
+test rn-refuse-reserved-names {an export whose JavaScript name is reserved -- a JavaScript word, a TurboModule member, a name of the entry point -- is refused} -constraints {rnAndroid} -body {
+    lmap reserved {delete constructor diagnostics get_constants} {
+        set adjust [list apply {{name} {
+            set h [rnRead game.h]
+            rnWrite game.h [string map [list "#ifdef __cplusplus\n\x7d" "int32_t game_$name\(game_instance *instance, int64_t *result, game_error **error);\n\n#ifdef __cplusplus\n\x7d"] $h]
+        }} $reserved]
+        set export [format {{"name": "%s", "module": "", "symbol": "game_%s", "botlish": "%s() -> int", "params": [], "result": {"type": "int", "c": "int64_t *", "ownership": "value"}, "error": {"c": "game_error **", "nullable": true, "ownership": "owned", "release": "game_error_release"}, "errors": []}} $reserved $reserved $reserved]
+        rnRefused [rnDirect [rnCopy game [list {"exports": [} "\"exports\": \[$export, "] $adjust]] RN-NAME
+    }
+} -result {1 1 1 1}
+
+test rn-refuse-names {an npm name, a module name, a version or a license that is none, and a malicious identifier, are refused before anything is written} -constraints {rnAndroid} -body {
+    set m [rnProject game]/android/lib/game.manifest.json
+    list [rnRefused [rnDirect $m -name "Bad Name"] RN-NAME] [rnRefused [rnDirect $m -name ../escape] RN-NAME] \
+        [rnRefused [rnDirect $m -module "x;rm -rf /"] RN-NAME] [rnRefused [rnDirect $m -module lower] RN-NAME] \
+        [rnRefused [rnDirect $m -version 1.0] RN-NAME] [rnRefused [rnDirect $m -license {MIT"}] RN-NAME] \
+        [rnRefused [rnDirect [rnCopy game {{"library": "game",} {"library": "../game",}}]] RN-MANIFEST]
+} -result {1 1 1 1 1 1 1}
+
+test rn-refuse-react-native {a React Native version the generator does not know is refused} -constraints {rnAndroid} -body {
+    set m [rnProject game]/android/lib/game.manifest.json
+    list [rnRefused [rnDirect $m -react-native 0.87] RN-REACT-NATIVE] [rnRefused [rnDirect $m -react-native 0.89.0] RN-REACT-NATIVE] \
+        [lindex [rnDirect $m -react-native 0.88.1] 0]
+} -result {1 1 0}
+
+test rn-refuse-android-api {an app API level below the floor (React Native's 24, the library's 21) is refused} -constraints {rnAndroid} -body {
+    set m [rnProject game]/android/lib/game.manifest.json
+    list [rnRefused [rnDirect $m -android-api 21] RN-ANDROID-API] [lindex [rnDirect $m -android-api 26] 0]
+} -result {1 0}
+
+test rn-refuse-diagnostics {a refusal is also a structured diagnostic in the request's diagnostics file} -constraints {rnAndroid} -body {
+    lassign [rnDirect [rnCopy game {{"schema": 2,} {"schema": 1,}}]] status
+    set files [glob [file join [temporaryDirectory] rn-[pid]-request-* diagnostics.json]]
+    set d [rnRead [lindex [lsort -dictionary $files] end]]
+    list $status [regexp {"severity": "error", "code": "RN-MANIFEST"} $d]
+} -result {1 1}
+
+# ---------------------------------------------------------------------------
+# The generated C++ core, on the host
+
+proc rnHarness {} {
+    if {[info exists ::rnHarnessCache]} { return $::rnHarnessCache }
+    if {[info exists ::rnHarnessError]} { error $::rnHarnessError }
+    if {[catch {RnHarness} result]} {
+        set ::rnHarnessError $result
+        error $result
+    }
+    return $result
+}
+
+proc RnHarness {} {
+    set dir [rnDir harness]
+    set game [rnPackage game]/cpp
+    set text [rnPackage textkit]/cpp
+    set glib [rnProject game]/host/lib
+    set tlib [rnProject textkit]/host/lib
+    exec c++ -std=c++20 -O1 -g -Wall -Wextra -Werror -I$game -I$glib -o $dir/game_core \
+        [file join $::rnAudit harness game_core.cpp] $game/BotlishGameCore.cpp -L$glib -lgame -Wl,-rpath,$glib -pthread 2>@1
+    exec c++ -std=c++20 -O1 -g -Wall -Wextra -Werror -DWITH_GAME -I$text -I$game -I$tlib -I$glib -o $dir/textkit_core \
+        [file join $::rnAudit harness textkit_core.cpp] $text/BotlishTextkitCore.cpp $game/BotlishGameCore.cpp \
+        -L$tlib -L$glib -ltextkit -lgame -Wl,-rpath,$tlib:$glib -pthread 2>@1
+    set ::rnHarnessCache $dir
+    return $dir
+}
+
+proc rnChecks {program args} {
+    lassign [rnExec [temporaryDirectory] {} [file join [rnHarness] $program] {*}$args] status out err
+    set failed [lmap line [split $out \n] {expr {[string match FAIL* $line] ? $line : [continue]}}]
+    set passed [llength [lmap line [split $out \n] {expr {[string match "ok *" $line] ? 1 : [continue]}}]]
+    return [list $status $passed $failed]
+}
+
+test rn-core-game {the 2048 package's core on the host: declared errors keep their canonical identities (game2048::CellOccupied), numbers are never rounded, strings cross by length, every owned result and error is released, another thread is refused, an instance is destroyed on its own thread only (at once, at its thread's next call, at its exit), never twice} -constraints {rnHost} -body {
+    rnChecks game_core checks
+} -result {0 34 {}}
+
+test rn-core-textkit {the second library's core: Int, Bool, Float64, str and unit results, Unicode scalars, embedded NULs, a megabyte, a payload's typed fields, NonFiniteFloat, the ownership counters; and both libraries' cores in one process, apart} -constraints {rnHost} -body {
+    rnChecks textkit_core
+} -result {0 24 {}}
+
+test rn-core-gc-stress {the 2048 core under BOTLISH_NATIVE_GC_STRESS=1: twenty games of 200 moves, failures among them, give the same states as without, every owned object released} -constraints {rnHost} -body {
+    set plain [lindex [rnExec [temporaryDirectory] {} [file join [rnHarness] game_core] stress 20] 1]
+    lassign [rnExec [temporaryDirectory] {BOTLISH_NATIVE_GC_STRESS 1} [file join [rnHarness] game_core] stress 20] status stressed
+    set strip {{text} {join [lsearch -all -inline -not [split $text \n] diagnostics*] \n}}
+    list $status [expr {[apply $strip $plain] eq [apply $strip $stressed]}] [regexp {"resultsAcquired": (\d+), "resultsReleased": \1} $stressed]
+} -result {0 1 1}
+
+test rn-core-oracle {the 2048 package's core on the host plays the Botlish interpreter's game: 80 moves from seed 7, every snapshot equal} -constraints {rnHost} -body {
+    set directions 01230123320110223313002120321013003322110223102310320133201002321001230123320110
+    set oracle [exec [info nameofexecutable] [file join $::rnAudit tools oracle.tcl] 7 $directions]
+    set host [lindex [rnExec [temporaryDirectory] {} [file join [rnHarness] game_core] play 7 $directions] 1]
+    list [llength [split $oracle \n]] [expr {$oracle eq $host}]
+} -result {81 1}
+
+# The self-test checks the module's 401 snapshots against the interpreter's
+# on any device by a digest (src/digest.ts: FNV-1a of the lines joined by
+# newlines), the constant oracleDigest of src/directions.ts: it is the
+# interpreter's for the game the self-test plays.
+test rn-selftest-oracle-digest {the self-test's oracleDigest is the digest of the Botlish interpreter's 401 snapshots of its game (seed and moves of src/directions.ts)} -body {
+    set channel [open [file join $::projectRoot examples react-native app src directions.ts]]
+    set source [read $channel]
+    close $channel
+    regexp {export const seed = (\d+);} $source -> seed
+    regexp {export const oracleDigest = '([0-9a-f]{8})';} $source -> recorded
+    regexp {export const directions =\s*'([0-3]+)';} $source -> directions
+    set oracle [exec [info nameofexecutable] [file join $::rnAudit tools oracle.tcl] $seed $directions]
+    set h 0x811c9dc5
+    foreach c [split $oracle ""] {
+        set h [expr {(($h ^ [scan $c %c]) * 0x01000193) & 0xffffffff}]
+    }
+    list [llength [split $oracle \n]] [regexp {^[\x20-\x7e\n]*$} $oracle] [expr {[format %08x $h] eq $recorded ? "equal" : "[format %08x $h], recorded $recorded"}]
+} -result {401 1 equal}
+
+# ---------------------------------------------------------------------------
+# The CMake file's guards (configured with the host's CMake and compiler:
+# the checks run before any target is built)
+
+proc rnCMake {package args} {
+    set build [rnDir cmake]
+    return [rnExec [temporaryDirectory] {} cmake -S $package/android -B $build {*}$args]
+}
+
+test rn-cmake-guards {the generated CMake file accepts arm64-v8a at the package's API level, and refuses another ABI, a lower API level, and a library that is not the recorded one} -constraints {rnAndroid cmake cxx} -body {
+    set p [rnPackage game]
+    lassign [rnCMake $p -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM_LEVEL=24] ok
+    lassign [rnCMake $p -DANDROID_ABI=x86_64 -DANDROID_PLATFORM_LEVEL=24] s1 - e1
+    lassign [rnCMake $p -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM_LEVEL=23] s2 - e2
+    set copy [rnDir cmake-copy]/pkg
+    file copy $p $copy
+    set channel [open $copy/native/android/arm64-v8a/libgame.so ab]
+    puts -nonewline $channel x
+    close $channel
+    lassign [rnCMake $copy -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM_LEVEL=24] s3 - e3
+    # (CMake wraps a long message's lines.)
+    foreach v {e1 e2 e3} { regsub -all {\s+} [set $v] " " $v }
+    list $ok $s1 [string match "*no Botlish library \"game\" for the Android ABI x86_64*" $e1] \
+        $s2 [string match "*minimum Android API level is 23*" $e2] \
+        $s3 [string match "*is not the library this package was generated for*" $e3]
+} -result {0 1 1 1 1 1 1}
+
+# ---------------------------------------------------------------------------
+# JavaScript: the generated entry points and the app's hook, in an app
+# build.sh prepared (BOTLISH_RN_APP), with this tree's packages and sources
+
+test rn-js-jest {Jest in the prepared app, with the packages generated from this tree and the app's sources from this tree: the generated entry points' argument checks and error classes, the unavailable module, the 2048 hook's React contract} -constraints {rnAndroid rnApp} -body {
+    set app [rnDir app]
+    foreach entry [glob -directory $::env(BOTLISH_RN_APP) -tails * .*] {
+        if {$entry in {. .. node_modules android}} continue
+        file copy [file join $::env(BOTLISH_RN_APP) $entry] $app
+    }
+    file mkdir $app/node_modules
+    foreach entry [glob -directory [file join $::env(BOTLISH_RN_APP) node_modules] -tails * .*] {
+        if {$entry in {. .. react-native-botlish-game react-native-botlish-textkit}} continue
+        file link -symbolic $app/node_modules/$entry [file join $::env(BOTLISH_RN_APP) node_modules $entry]
+    }
+    foreach name {game textkit} {
+        file copy [rnPackage $name] $app/node_modules/react-native-botlish-$name
+    }
+    set source [file join $::projectRoot examples react-native app]
+    foreach entry {App.tsx src __tests__ jest.config.js} {
+        file delete -force $app/$entry
+        file copy [file join $source $entry] $app/$entry
+    }
+    lassign [rnExec $app {} npx --no-install jest --ci] status out err
+    regexp {Tests:\s+(.*) total} $err -> tests
+    list $status [string match "*failed*" $tests] [expr {$status == 0 ? "" : $err}]
+} -result {0 0 {}}
+
+test rn-js-typescript {TypeScript checks the app against the packages generated from this tree} -constraints {rnAndroid rnApp} -body {
+    set app [rnDir ts]
+    foreach entry [glob -directory $::env(BOTLISH_RN_APP) -tails * .*] {
+        if {$entry in {. .. node_modules android}} continue
+        file copy [file join $::env(BOTLISH_RN_APP) $entry] $app
+    }
+    file mkdir $app/node_modules
+    foreach entry [glob -directory [file join $::env(BOTLISH_RN_APP) node_modules] -tails * .*] {
+        if {$entry in {. .. react-native-botlish-game react-native-botlish-textkit}} continue
+        file link -symbolic $app/node_modules/$entry [file join $::env(BOTLISH_RN_APP) node_modules $entry]
+    }
+    foreach name {game textkit} {
+        file copy [rnPackage $name] $app/node_modules/react-native-botlish-$name
+    }
+    set source [file join $::projectRoot examples react-native app]
+    foreach entry {App.tsx src __tests__} {
+        file delete -force $app/$entry
+        file copy [file join $source $entry] $app/$entry
+    }
+    lassign [rnExec $app {} npx --no-install tsc --noEmit] status out err
+    list $status $out
+} -result {0 {}}
+
+foreach dir [glob -nocomplain -directory [temporaryDirectory] rn-[pid]-* rn-out-[pid] rn-err-[pid]] {
+    file delete -force $dir
+}
+cleanupTests
