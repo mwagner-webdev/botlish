@@ -491,6 +491,23 @@ backends through `pePlain`, which requires them to agree.
 Rust: `enum_case_objects_are_nominal_and_compare_payloads`,
 `enum_case_objects_hash_and_show_by_names` (runtime/ops.rs).
 
+**(observed)** The golden suite `tests/golden/payload-enums.bot`: 18 tests
+on all four backends. Ten port value tests of the Tcl file
+(`pe-identity-equality`, `pe-hashing`, `pe-hash-pinned`, `pe-transport`,
+`pe-forward-references`, `pe-written-order`, `pe-nested-data`,
+`pe-recursive-enum`, `pe-affine-coroutine`, `pe-kernel-probe`: four
+MIGRATED, six SPLIT, the rendering staying in Tcl), and eight split
+`pe-construction-diagnostics` into one rejected `static compile:` block
+per diagnostic (`std::compiler::DiagnosticCode::UnknownEnumCase`,
+`EnumPayloadUnexpected` twice, `EnumPayloadRequired`, `MissingField`,
+`UnknownField`, `DuplicateField`, `Type`), each located by `rejects_at`.
+The other 30 Tcl tests are classified in
+`audit/golden/migration/census/payload-enums.tsv` (KEEP-INTERNAL for HIR,
+NIR and runtime probes, KEEP-MULTI-PROGRAM, KEEP-PARSER,
+KEEP-NOT-EXPRESSIBLE for top-level declaration errors, rendering, GC
+stress and executables); the manifest is regenerated from it and the
+fragment. `std::test`'s `code_name` names the two new codes.
+
 Changed existing tests (intended): `enum-syntax-no-values-or-aliases`
 (`Car {seats: int}` is now valid; its slot tests `Car {}`) and
 `enum-case-is-not-a-constructor` (braces: ENUM-PAYLOAD-UNEXPECTED, was
@@ -538,6 +555,15 @@ field in a declaration); every fifth program is an affine one (a coroutine
 handle in a payload) that must run on every backend or be rejected with
 USE-AFTER-MOVE or AFFINE-EQUALITY-UNSUPPORTED.
 
+Two operations make values that only identity, not provenance, can tell
+apart: `remake` constructs an existing value again (another object, its
+fields in another written order) and compares it with its source at once;
+and a third of the enums give two cases the same payload fields (a twin),
+which `remake` uses half the time, so two values differ by their case
+alone. Two values statically of one enum are compared, half the time,
+through its typed identity `id_E`, where a backend may decide the
+comparison by the static type.
+
 RESULTS-FUZZ
 
 ## 15. Mutation testing
@@ -550,7 +576,51 @@ identity, case identity, payload comparison, hash composition, payload type
 admission, the construction's field rules, ownership, cleanup, native
 tracing, the representation choices, HIR text and the exact-case fact.
 
-RESULTS-MUTANTS
+**(observed)** 25 mutants, 25 killed, 0 survived (`tclsh9.0
+audit/payload-enums/tools/mutate.tcl`, default detectors, the fuzzer at 25
+programs, seed 11):
+
+| mutant | tests that fail | fuzzer | Rust |
+|---|---|---|---|
+| `payload-ignored-equality-tcl` | 9 (`pe-identity-equality`, `pe-hashing`, `pe-gc-stress`, ...) | 3 of 25 | |
+| `case-ignored-equality-tcl` | `pe-identity-equality` | survived (60: 1) | |
+| `enum-ignored-equality-native-boxed` | `pe-identity-equality` | survived | `enum_case_objects_are_nominal_and_compare_payloads` |
+| `word-compare-for-payload-enums` | 10 (`pe-identity-equality`, `pe-kernel-probe`, ...) | survived (60: 6) | |
+| `payload-order-is-identity` | 10 (`pe-identity-equality`, `pe-forward-references`, ...) | 8 of 25 | |
+| `payload-ignored-equality-native` | 9 | 3 of 25 | `enum_case_objects_are_nominal_and_compare_payloads` |
+| `hash-ignores-payload-tcl` | `pe-hash-pinned`, `pe-hashing` | 2 of 25 | |
+| `hash-ignores-payload-native` | `pe-hash-pinned`, `pe-hashing` | 2 of 25 | `enum_case_objects_hash_and_show_by_names` |
+| `hash-separator-dropped-tcl` | `pe-hash-pinned` | survived | |
+| `payload-types-unchecked` | `pe-construction-diagnostics`, `pe-field-contracts-checked` | 1 of 25 | |
+| `missing-payload-field-accepted` | `pe-construction-diagnostics` | survived | |
+| `unexpected-payload-accepted` | `pe-construction-diagnostics`, `enum-case-is-not-a-constructor` | survived | |
+| `required-payload-defaulted` | `pe-construction-diagnostics`, `pe-nominal-rejections` | 1 of 25 | |
+| `case-type-is-payload` | 10 (`pe-construction-types`, `pe-affine-moves`, ...) | 7 of 25 | |
+| `enum-affinity-ignores-payloads` | 6 (`pe-affine-*`, `pe-recursive-affine-rejected`) | 3 of 25 | |
+| `enum-descriptor-empty` | `pe-affine-descriptor`, `pe-affine-partial-construction`, `pe-affine-releases` | survived | |
+| `drop-first-case-tcl` | `pe-affine-partial-construction`, `pe-affine-releases` | 1 of 25 | |
+| `drop-skipped-native` | `pe-affine-partial-construction`, `pe-affine-releases` | survived | survived |
+| `affine-recursion-accepted` | `pe-recursive-affine-rejected` | survived | |
+| `totality-ignores-payloads` | `pe-recursive-through-struct` | survived | |
+| `payload-enums-sendable` | `pe-c-and-boundaries` | survived | |
+| `payload-untraced-native` | `pe-gc-stress`, `pe-executable-parity` | survived | survived |
+| `payload-key-erased` | `pe-specialization-keys` | survived | |
+| `hir-text-loses-payloads` | `pe-hir-roundtrip` | survived | |
+| `case-fact-lost` | `pe-exact-case-facts` | survived | |
+
+The fuzzer is a second, independent detector, not the primary one: it
+observes values, `==`, hashes and set membership, so it cannot see a drop
+count, a descriptor, a codegen key, HIR text or a compiler fact, and it
+predicts no hash value (the separator mutant changes every payload hash
+consistently on the Tcl backends: only the pinned values and the
+cross-backend comparison of `pe-hash-pinned` see it). Its first version
+missed `case-ignored-equality-tcl` and `word-compare-for-payload-enums`
+for want of the programs that expose them: two cases with the same payload
+fields, and two distinct objects of one equal value compared at the enum's
+static type. The `remake` operation and the twin cases (section 14) were
+added for them; with them the fuzzer alone (`-tests tests/enums.test`, so
+no payload test runs) kills both at 60 programs (1 and 6 disagreeing),
+still neither at 25.
 
 Existing catalogs: six mutants of two catalogs no longer applied after this
 change rewrote the code they mutate (`audit/enums/tools/mutants.txt`'s
@@ -560,7 +630,20 @@ change rewrote the code they mutate (`audit/enums/tools/mutants.txt`'s
 `bearing-own-fields-ignored`, `carried-item-dropped`); each was rewritten to
 the new code, keeping its rule, and re-run through its harness:
 
-RESULTS-OLD-MUTANTS
+| mutant | killed by |
+|---|---|
+| `equal-ignores-enum-tcl` | 10 tests (`enum-equality`, `enum-generic-identity`, ...); fuzzer 10 of 25 |
+| `same-spelled-enums-equal-tcl` | `enum-module-nominal`; fuzzer 10 of 25 |
+| `equal-by-ordinal-tcl` | `enum-equality`, `enum-module-nominal`, `pe-identity-equality`, ...; fuzzer 12 of 25 |
+| `equal-ignores-enum-native` | `enum-immutable-set`; fuzzer 11 of 25; `enum_equality_is_nominal_word_equality` |
+| `bearing-own-fields-ignored` | `pds-nonuniform-own`; fuzzer 33 failures |
+| `carried-item-dropped` | 5 tests (`pds-carried-union`, `pds-isolation`, ...); fuzzer did not complete |
+
+**(observed)** The enum harness's private tree lacked `ccompile/`, so
+`pe-c-and-boundaries` failed under every enum mutant for that reason alone
+(`source` of a missing file); the run above counts it in each "tests"
+column, but every mutant was also killed by the other tests and the
+fuzzer. The harness now copies `ccompile/` (audit/enums/tools/mutate.tcl).
 
 `tools/mutant-catalogs.tcl`: 107 catalogs, 3638 mutants, 0 problems.
 
@@ -582,7 +665,11 @@ resolution, before any walk; a construction's type comes from
 `ShapeResult`, a pure function of the constants and the registry; and the
 exact-case query only reads. `pe-*` programs with generic helpers over
 payload enums (`same(x)` in `pe-identity-equality`, `pe-hashing`,
-`pe-transport`) exercise semantic instances. RESULTS-ROLLBACK
+`pe-transport`) exercise semantic instances. **(observed)** Under
+`BOTLISH_SEMANTIC_ROLLBACK_AUDIT=1`, which compares each walked
+instance's HIR with its snapshot and fails on any change left behind:
+`tests/payload-enums.test` 40 of 40, `tests/enums.test` 66 of 66,
+`tests/semantic-instances.test` 96 of 96.
 
 ## 19. Explicitly unsupported, and why
 
@@ -651,9 +738,15 @@ payload enums (`same(x)` in `pe-identity-equality`, `pe-hashing`,
   `native/src/codegen/clif.rs`, `native/src/runtime/{value,vm,heap,metrics,
   ops,show,affine,mutvec}.rs`.
 * C backend: `ccompile/ccompile.tcl`.
-* Tests: `tests/payload-enums.test` (new), `tests/enums.test`,
-  `tests/one-char-string-literal.test`, `tests/golden/structs-and-enums.bot`,
-  `tests/golden/manifest.tsv`, `audit/golden/migration/{fragments,census}`.
+* Tests: `tests/payload-enums.test` (new), `tests/golden/payload-enums.bot`
+  (new), `tests/enums.test`, `tests/one-char-string-literal.test`,
+  `tests/golden/structs-and-enums.bot`, `tests/golden/manifest.tsv`,
+  `audit/golden/migration/{fragments,census}` (`payload-enums.tsv` new),
+  `audit/golden/migration/tcl-names.txt`; `stdlib/test.bot` (the two codes'
+  names).
+* Compiler service: `service/service.tcl` (tokens of a construction's case
+  and of a declaration's payload fields; `caseOrigin` recorded on the
+  construction's struct node, hir/resolve.tcl).
 * Audit: `audit/payload-enums/tools/{fuzz.tcl,mutate.tcl,mutants.txt}`
   (new); `audit/enums/tools/{mutants.txt,mutate.tcl}`,
   `audit/declaration-summaries/tools/mutants.txt` (updated mutants).
@@ -669,7 +762,8 @@ payload enums (`same(x)` in `pe-identity-equality`, `pe-hashing`,
 `-gc-stress 1`), `audit/payload-enums/tools/mutate.tcl` (every mutant must
 still apply and be killed), `cargo test --release --manifest-path
 native/Cargo.toml --lib enum`, `tclsh9.0 tests/local.tcl
-tests/golden/structs-and-enums.bot`, `tools/mutant-catalogs.tcl`,
+tests/golden/payload-enums.bot tests/golden/structs-and-enums.bot`,
+`tools/mutant-catalogs.tcl`,
 `tools/compilerpedia.tcl check`, and the enum, affine and
 declaration-summaries harnesses for code they share. `bench/enums.tcl`
 regenerates the performance rows.

@@ -17,6 +17,9 @@
 #
 #   make     a construction E::C {f: v, ...}, its fields written in a random
 #            order (a payload-free case written E::C)
+#   remake   a new construction of an existing value (another object, its
+#            fields in another order), or of its twin case: a third of the
+#            enums give two cases the same payload fields
 #   same     a generic identity, same(x)
 #   typed    a function typed on the value's enum, id_E(x)
 #   erase    a function through any, erase(x)
@@ -137,6 +140,39 @@ proc Render {v} {
     error "Render: $v"
 }
 
+# The construction text of model value V, every payload's fields written in
+# a random order (a value of another object than the one V was made as).
+proc Written {v} {
+    switch -- [lindex $v 0] {
+        list { return "\[[join [lmap x [lrange $v 1 end] {Written $x}] {, }]\]" }
+        enum {
+            lassign $v - id case fields
+            if {$fields eq ""} {
+                return "${id}::$case"
+            }
+            set parts [lmap f [dict keys $fields] {string cat $f ": " [Written [dict get $fields $f]]}]
+            return "${id}::$case {[join [Shuffle $parts] {, }]}"
+        }
+    }
+    return [Render $v]
+}
+
+# A case of enum ID other than CASE whose payload fields are CASE's (a twin;
+# "" if none).
+proc Twin {state id case} {
+    set e [EnumOf $state $id]
+    set types [dict get $e fields $case]
+    if {$types eq {}} {
+        return ""
+    }
+    foreach other [dict get $e cases] {
+        if {$other ne $case && [dict get $e fields $other] eq $types} {
+            return $other
+        }
+    }
+    return ""
+}
+
 proc Equal {a b} {
     if {[lindex $a 0] ne [lindex $b 0]} {
         return 0
@@ -201,6 +237,16 @@ proc Enums {} {
                 lappend types $f [Pick $choices]
             }
             dict set fields $case $types
+        }
+        # A third of the enums give two cases the same payload fields (a
+        # twin): their values with equal payloads differ by the case alone.
+        if {[llength $cases] >= 2 && [Rand 3] == 0} {
+            set bearing [lmap c $cases {if {[dict get $fields $c] ne {}} {set c} else continue}]
+            if {$bearing ne {}} {
+                set from [Pick $bearing]
+                set to [Pick [lsearch -all -inline -not -exact $cases $from]]
+                dict set fields $to [dict get $fields $from]
+            }
         }
         dict set enums $name [dict create cases $cases fields $fields]
     }
@@ -358,8 +404,9 @@ proc EnumIds {state} {
 proc Operation {stateVar} {
     upvar 1 $stateVar state
     set vars [dict get $state vars]
-    set op [Pick {make make make same typed erase hold capture listed}]
-    if {$vars eq {}} {
+    set op [Pick {make make make remake same typed erase hold capture listed}]
+    set made [dict filter $vars script {k v} {expr {[lindex $v 1] ne ""}}]
+    if {$vars eq {} || ($op eq "remake" && $made eq {})} {
         set op make
     }
     set name [Fresh state]
@@ -368,6 +415,27 @@ proc Operation {stateVar} {
         lassign [Construction $state $id 2] text model
         Emit state "$name = $text"
         dict set state vars $name [list $model $id]
+    } elseif {$op eq "remake"} {
+        # A new construction of an existing value (its payload's fields in
+        # another written order), or, half the time where the enum has one,
+        # of its twin case with the same payload.
+        set source [Pick [dict keys $made]]
+        lassign [dict get $made $source] model id
+        set original $model
+        lassign $model - - case fields
+        set twin [Twin $state $id $case]
+        if {$twin ne "" && [Rand 2]} {
+            set model [list enum $id $twin $fields]
+        }
+        Emit state "$name = [Written $model]"
+        dict set state vars $name [list $model $id]
+        # Compared with its source at once, half the time as the enum's.
+        set equal [Equal $model $original]
+        if {$id ne "std::fz::Mode" && [Rand 2]} {
+            Observe state "id_$id\($name) == id_$id\($source)" [list bool [expr {$equal ? "true" : "false"}]]
+        } else {
+            Observe state "$name == $source" [list bool [expr {$equal ? "true" : "false"}]]
+        }
     } else {
         set from [Pick [dict keys $vars]]
         lassign [dict get $vars $from] model id
