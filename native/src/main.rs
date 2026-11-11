@@ -39,6 +39,14 @@
 //!                                        library's public C functions;
 //!                                        native/native.tcl's native::library
 //!                                        links it with the runtime
+//!   botlish-native library-dll DIR NAME FILE.nir  Windows x86-64 (MSVC):
+//!                                        native library NAME's DLL and import
+//!                                        library, DIR/NAME.dll and
+//!                                        DIR/NAME.lib, linked by link.exe
+//!                                        from the library's program object
+//!                                        and the runtime archive, exporting
+//!                                        exactly its public C functions
+//!                                        (WINDOWS-X86-64-MILESTONE-8.md)
 //!   botlish-native vms N FILE.nir        compile (JIT) once and run the
 //!                                        program on N Vms at once, one per
 //!                                        thread (a test harness: PER-THREAD-
@@ -54,6 +62,10 @@
 //!                                        framework NAME -- or the NATIVE
 //!                                        LINK ARCHIVE failure a link would
 //!                                        report; nothing is linked
+//!                                        (--target TRIPLE: as that target's
+//!                                        linker links it, resolve_link_plan_
+//!                                        for: a native library of another
+//!                                        target)
 //!   botlish-native system-linker         what the system linker would link
 //!                                        with here: `flavor`, `tool` (the C
 //!                                        driver or link.exe), `runtime` (the
@@ -595,7 +607,7 @@ fn extract_vms_options(args: &[String]) -> Option<(Vec<String>, VmsOptions)> {
 
 fn cli(args: &[String]) -> i32 {
     let usage = || {
-        eprintln!("usage: botlish-native run|clif|vcode|size|roots|calls|check|fusion|fused FILE.nir [--alloc off|summary|sites] [--argv ARGS|--argv-file PATH] | bench RUNS FILE.nir [--alloc ...] | batch CALLS FILE.nir | object|executable OUT FILE.nir [--startup worker|main-thread] | aot-run NAME FILE.nir [--startup ...] [--keep] [--parent-pid PID] [--child-env FILE] [--argv-file PATH] | library OUT NAME FILE.nir [--target TRIPLE] [--application] | link-plan FILE.nir [--target TRIPLE] | target TRIPLE | runtime-abi | system-linker (each also [--result PATH], --link-dir DIR, --framework-dir DIR; executable also --runtime-archive FILE)");
+        eprintln!("usage: botlish-native run|clif|vcode|size|roots|calls|check|fusion|fused FILE.nir [--alloc off|summary|sites] [--argv ARGS|--argv-file PATH] | bench RUNS FILE.nir [--alloc ...] | batch CALLS FILE.nir | object|executable OUT FILE.nir [--startup worker|main-thread] | aot-run NAME FILE.nir [--startup ...] [--keep] [--parent-pid PID] [--child-env FILE] [--argv-file PATH] | library OUT NAME FILE.nir [--target TRIPLE] | library-dll DIR NAME FILE.nir | link-plan FILE.nir [--target TRIPLE] | target TRIPLE | runtime-abi | system-linker (each also [--result PATH], --link-dir DIR, --framework-dir DIR; executable also --runtime-archive FILE)");
         2
     };
     let Some(args) = extract_table_hash_key(args) else { return usage() };
@@ -721,7 +733,7 @@ fn cli(args: &[String]) -> i32 {
             _ => return usage(),
         },
         ("object" | "executable" | "aot-run", [_, file, ..]) => (1, file),
-        ("library", [_, _, file, ..]) => (1, file),
+        ("library" | "library-dll", [_, _, file, ..]) => (1, file),
         ("vms", [n, file, ..]) => match n.parse::<usize>() {
             Ok(n) if (1..=32).contains(&n) => (n, file),
             _ => return usage(),
@@ -776,7 +788,7 @@ fn cli(args: &[String]) -> i32 {
             emit_error(&["NATIVE", "TARGET"], &message);
             return 1;
         }
-    } else if matches!(command, "run" | "bench" | "batch" | "vms" | "object" | "executable" | "aot-run" | "library" | "link-plan") {
+    } else if matches!(command, "run" | "bench" | "batch" | "vms" | "object" | "executable" | "aot-run" | "library" | "library-dll" | "link-plan") {
         // Machine code to run or to keep is the host's own target's only
         // (codegen/target.rs). The diagnostic commands (clif, vcode, size,
         // roots, calls, check) still show this host's view of any program.
@@ -899,6 +911,42 @@ fn cli(args: &[String]) -> i32 {
                 }
                 Err(e) => {
                     emit_error(&e.error_code().split(' ').collect::<Vec<_>>(), e.message());
+                    1
+                }
+            }
+        }
+        "library-dll" => {
+            // A native library of Windows x86-64 (WINDOWS-X86-64-MILESTONE-8.md):
+            // the program object, linked by link.exe into DIR/NAME.dll and its
+            // import library DIR/NAME.lib, exporting exactly the library's
+            // public C functions. This host's own target only.
+            let (dir, name) = (&rest[0], &rest[1]);
+            if !cfg!(all(target_os = "windows", target_env = "msvc", target_arch = "x86_64")) {
+                emit_error(&["NATIVE", "UNSUPPORTED", "library"], "a native library's DLL is linked on Windows x86-64 (MSVC) only, for that host's own target (WINDOWS-X86-64-MILESTONE-8.md); elsewhere native::library makes an ELF library");
+                return 1;
+            }
+            if !nir::is_c_identifier(name) {
+                emit_error(&["NATIVE", "LIBRARY"], &format!("library name {name:?} is not a C identifier"));
+                return 1;
+            }
+            nir::check_stack_limit(&mut program);
+            let object = match codegen::emit_library_object(&program, name, &emit_triple) {
+                Ok(object) => object,
+                Err(e) => {
+                    emit_error(&e.error_code().split(' ').collect::<Vec<_>>(), e.message());
+                    return 1;
+                }
+            };
+            let public = runtime::library::public_names(name, &program.exports, program.application);
+            match codegen::aot::link_windows_library(&program, &object.bytes, name, &public, std::path::Path::new(dir), &link_dirs) {
+                Ok(library) => {
+                    emit(&tcl_list(&["dll".to_string(), library.dll.to_string_lossy().into_owned()]));
+                    emit(&tcl_list(&["import".to_string(), library.import.to_string_lossy().into_owned()]));
+                    0
+                }
+                Err(e) => {
+                    let detail = e.detail.unwrap_or("LINK");
+                    emit_error(&["NATIVE", "LIBRARY", detail], &e.message);
                     1
                 }
             }

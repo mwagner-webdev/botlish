@@ -4695,7 +4695,9 @@ smoke and system-linker jobs (the import-library refusal).
 (NATIVE-LIBRARY-MILESTONE-1.md): an ordinary Botlish function to every
 backend and to its Botlish callers, which `native::library` (`main.tcl
 -emit-native-library NAME`) also gives a C entry point in a static archive,
-a shared library, a C header and a JSON manifest. Keep it so:
+a shared library, a C header and a JSON manifest -- on Windows x86-64 a DLL
+and its import library in place of the two libraries
+(WINDOWS-X86-64-MILESTONE-8.md). Keep it so:
 
 * An export is a compilation root under its declaration only: its generic
   instance, open (`hir::specialize::ProgramValues` materializes it), never
@@ -4741,28 +4743,72 @@ a shared library, a C header and a JSON manifest. Keep it so:
   effects (the guard bounds them). An overflow in C or the runtime, or on
   a host's own stack, is still process-fatal, and no document may claim
   otherwise until a library-owned stack exists.
+* A call made on a stack the instance did not make -- a host's fiber or
+  coroutine stack -- runs there (WINDOWS-X86-64-MILESTONE-8.md, "Calls on
+  a host's stack"): `Vm::entry_stack` (`entry_stack_at`, set by `enter`)
+  is that stack, which bounds the collector's walk of the call and of a
+  coroutine's resumer on it, and code back on it after a switch checks no
+  limit. Never bound such a walk by the thread's own stack (it finds none
+  of the call's frames: their roots are missed) or give it the thread's
+  limit.
+* A library leaves its host's thread as the host gave it: at the end of
+  the outermost call of a library on a thread (`Active`) a Windows
+  fiber conversion its coroutines needed is undone
+  (`coroutine::library_call_ended`; a fiber the host made stays that
+  fiber), and when the thread's last instance of the library is destroyed
+  (or NAME_main's Vm ends with none left) its pooled coroutine stacks are
+  freed (`release_pool`), so a host that destroyed every instance may
+  unload the library with nothing of it left on its threads. Never keep a
+  host thread converted, or a stack pooled, past those points; and never
+  touch the pool's thread-local on a thread that never ran a coroutine
+  (`POOL_USED`): its destructor's registration makes glibc keep the
+  library mapped until the thread ends (`al-dlopen`).
 * Fusion's `drop_unreferenced` keeps what the exports reach, not only
   what the program function reaches: a library export is called from C.
 * A library's entry file holds declarations only (LIBRARY-TOP-LEVEL):
   creating an instance runs module static initialization, never a script.
   An application library's entry file is an entry program, run by
   NAME_main only (next section).
-* Libraries are Linux glibc's (x86_64, aarch64: `codegen::library::
-  SUPPORTED`, `native/native.tcl`'s `libraries`). Never use `ld -r
-  --gc-sections` for the archive: GNU ld 2.42 makes the Rust standard
-  library's weak references strong there and consumers fail to link.
+* Libraries are Linux glibc's (x86_64, aarch64) and Windows x86-64's
+  (MSVC): `codegen::library::SUPPORTED`, `native/native.tcl`'s
+  `libraries`. Never use `ld -r --gc-sections` for the archive: GNU ld
+  2.42 makes the Rust standard library's weak references strong there and
+  consumers fail to link.
+* A Windows library (WINDOWS-X86-64-MILESTONE-8.md) is a DLL and its
+  import library that link.exe links (`botlish-native library-dll`,
+  `codegen::aot::link_windows_library`) from the program object and the
+  runtime archive, its exports a module-definition file listing exactly
+  the public functions (`windows_library_definition`), the static release
+  C runtime and no other (`crt_args_for`'s policy), and both files checked
+  from their bytes before they are reported (`ValidateDll`, native/pe.tcl:
+  exactly the public exports, by name, none forwarded, no C runtime's DLL
+  imported, the import library naming exactly them). Never export a name
+  beyond the public ones (`/EXPORT`, `__declspec(dllexport)`, a .def line),
+  never give the DLL an entry point or initializer of Botlish's (no
+  DllMain, no `.CRT$X*` section: nothing Botlish runs under the loader
+  lock; `nl-windows-loader-lock`), and never ship a static COFF library
+  while two of them in one executable share their runtimes' symbols (the
+  report's section 13). Its public functions carry unwind information like
+  every Botlish function (`codegen::add_windows_unwind`'s `public`).
 
 If you change any of that (NATIVE-LIBRARY-MILESTONE-1.md, "What to run when
-changing this", lists the files), run `tests/native-library.test`,
-`tests/native-executable.test` and `tests/aot-stub-linker.test` (also under
-`BOTLISH_NATIVE_GC_STRESS=1`), `cargo test --release --manifest-path
-native/Cargo.toml --lib program`, for the stack check also
+changing this", lists the files; WINDOWS-X86-64-MILESTONE-8.md's section 19
+the Windows ones), run `tests/native-library.test` (on Windows too: its
+MSVC hosts need Visual Studio's x64 tools; the Windows workflow's smoke job
+runs it), `tests/native-executable.test` and `tests/aot-stub-linker.test`
+(also under `BOTLISH_NATIVE_GC_STRESS=1`), `cargo test --release
+--manifest-path native/Cargo.toml --lib program` and `--bin botlish-native
+windows_library`, `audit/native-library/tools/fuzz.tcl` (several seeds,
+once with `-gc-stress 1`), for the stack check also
 `tests/native-stack-overflow.test` and `audit/native-stack/tools/mutate.tcl`
 (its `effects-*` mutants), and `audit/native-library/tools/mutate.tcl`
-(every mutant in its `mutants.txt` must still apply and be killed: update a
-mutant's text when you change the code it mutates, keeping it a mutant of
-the same rule), plus `audit/native-aot/tools/mutate.tcl` for a change to
-the shared startup. `audit/compiler-service/probes/export/run.sh` (the Tcl
+(every mutant in its `mutants.txt` that applies to the host must still
+apply and be killed: update a mutant's text when you change the code it
+mutates, keeping it a mutant of the same rule; the `%% windows-x86_64` ones
+on Windows: the tier item `native-library-mutants`), plus
+`audit/native-aot/tools/mutate.tcl` for a change to the shared startup.
+`audit/windows-library/probe.tcl` (its workflow) is the COFF/linker census
+and `bench/native-library.tcl` the costs. `audit/compiler-service/probes/export/run.sh` (the Tcl
 extension) and `audit/react-native/tools/host-spike.tcl` (Hermes) are the
 foreign-host probes; `audit/react-native/tools/libmode.tcl` is history and
 no longer runs.
@@ -4810,10 +4856,12 @@ the call, never a context or the application's authority. Keep it so:
 * NAME_main while the thread runs a call of the same library is
   REENTRANT-CALL; calls on different threads are independent Vms.
 * The library's per-thread state (the owner token, the count of active
-  calls) is one pthread key's slot with no destructor (runtime/library.rs's
-  `thread_word`): never a `thread_local!`, never std::thread::current() in
-  library code -- on Android Rust's thread-locals are pthread keys whose
-  destructors run at thread exit, in code a host may have unloaded.
+  calls, the count of live instances) is the slots of pthread keys with no
+  destructor (runtime/library.rs's `thread_word`; on Windows plain
+  thread-local words): never a `thread_local!`, never
+  std::thread::current() in library code -- on Android Rust's
+  thread-locals are pthread keys whose destructors run at thread exit, in
+  code a host may have unloaded.
   Hosts must not unload a library while a thread that called it lives (the
   report's lifetime rule: glibc pins the library for pending thread-local
   destructors, Bionic does not); SDL's Android bootstrap keeps it loaded.

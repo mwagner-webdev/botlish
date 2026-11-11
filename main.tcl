@@ -60,7 +60,9 @@
 #   -emit-native-library NAME ?-export FUNCTION...? ?-out DIR?    build the
 #                          native library NAME (NATIVE-LIBRARY-MILESTONE-1.md:
 #                          libNAME.a, libNAME.so, NAME.h,
-#                          NAME.manifest.json) from the one input; its exports
+#                          NAME.manifest.json; on Windows NAME.dll and its
+#                          import library NAME.lib, WINDOWS-X86-64-
+#                          MILESTONE-8.md) from the one input; its exports
 #                          are its `exported c fn`s, or the top-level
 #                          functions -export names
 #   -application           make that library an application library
@@ -1432,8 +1434,8 @@ proc emitLibrary {path name exports dir} {
     if {$support ne ""} {
         puts "target support: [dict get $support package] ([dict get $support target], runtime [dict get $support archive])"
     }
-    foreach artifact {static shared header manifest} {
-        if {[dict get $built $artifact] ne ""} {
+    foreach artifact {static shared import header manifest} {
+        if {[dict getdef $built $artifact ""] ne ""} {
             puts "$artifact: [dict get $built $artifact]"
         }
     }

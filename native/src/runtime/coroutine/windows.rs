@@ -67,7 +67,7 @@ use super::super::framewalk::windows::Frame;
 use super::super::native_stack::NativeStack;
 use super::super::platform::windows::{confirmed_guard_page, current_stack, stack_guarantee, GUARANTEE};
 use super::super::vm::Vm;
-use super::{co_body, stack_bytes, CoroutineObj, GUARD_BYTES, POOL, POOL_LIMIT};
+use super::{co_body, pool_used, stack_bytes, CoroutineObj, GUARD_BYTES, POOL, POOL_LIMIT};
 use std::cell::Cell;
 use std::ffi::c_void;
 use windows_sys::Win32::System::Threading::{
@@ -251,6 +251,47 @@ pub fn thread_converted() -> bool {
     THREAD_FIBER.with(|t| t.state.get() == CONVERTED)
 }
 
+/// A native library's outermost call ends on this thread (runtime::library's
+/// `enter`, WINDOWS-X86-64-MILESTONE-8.md, "Coroutines inside exported
+/// calls"): the host's thread is left as the host gave it. A conversion the
+/// runtime made for the call's coroutines is undone -- the thread runs on
+/// that fiber again once every coroutine has switched back, which the end of
+/// a call guarantees -- so a host that makes the thread a fiber itself
+/// afterwards (ConvertThreadToFiber fails on a fiber) still can; a fiber the
+/// host made stays as it is. Either way the next call asks again
+/// (`thread_fiber`). Pooled fibers survive: a fiber belongs to no thread
+/// state, and the next conversion switches to them as before.
+pub fn restore_thread() {
+    let _ = THREAD_FIBER.try_with(|t| {
+        // SAFETY: the calling thread's own fiber state.
+        if t.state.get() == CONVERTED && unsafe { IsThreadAFiber() } != 0 && current_fiber() == t.fiber.get() {
+            unsafe { ConvertFiberToThread() };
+        }
+        t.state.set(UNKNOWN);
+        t.fiber.set(0);
+    });
+}
+
+impl CoStack {
+    /// Deletes the stack's fiber, never into the pool (`super::release_pool`).
+    pub(super) fn discard(mut self) {
+        if self.fiber == 0 {
+            return;
+        }
+        if self.fiber == current_fiber() {
+            eprintln!("a running coroutine's fiber was released (NATIVE BUG)");
+            std::process::abort();
+        }
+        // SAFETY: a pooled, parked fiber of this thread and its Slot, which
+        // nothing refers to once the fiber is gone.
+        unsafe {
+            DeleteFiber(self.fiber as *const c_void);
+            drop(Box::from_raw(self.slot));
+        }
+        self.fiber = 0;
+    }
+}
+
 impl CoStack {
     /// The fiber's stack, as Windows reported it to the fiber's setup
     /// (`CoStack::new` returns no stack whose setup reported none).
@@ -268,6 +309,7 @@ impl CoStack {
     pub(super) fn new() -> Result<(CoStack, bool), RtError> {
         thread_fiber()?;
         let usable = stack_bytes();
+        pool_used();
         if let Some(stack) = POOL.with(|pool| {
             let mut pool = pool.borrow_mut();
             let at = pool.iter().position(|s| s.usable == usable)?;

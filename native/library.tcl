@@ -14,6 +14,14 @@
 #                       the default)
 #   NAME.h              the C interface: the types, statuses, lifecycle, error
 #                       and result accessors, and one function per export
+#   NAME.dll, NAME.lib  on Windows x86-64 (WINDOWS-X86-64-MILESTONE-8.md),
+#                       in place of the two libraries above: the DLL -- the
+#                       program and a private runtime, exporting exactly the
+#                       library's public C functions -- and its import
+#                       library, both made by link.exe (botlish-native
+#                       library-dll) and checked from their bytes
+#                       (`ValidateDll`, native/pe.tcl); no static library is
+#                       made there (-shared 0 is refused)
 #   NAME.manifest.json  the same interface as data (manifest schema 2), from
 #                       the compiler's facts: what a binding generator or a
 #                       package tool reads instead of the HIR, and the
@@ -22,8 +30,9 @@
 #                       which the shared library is linked with and a
 #                       consumer of the static library links itself
 #
-# and returns a dict {static PATH shared PATH|"" header PATH manifest PATH
-# exports RECORDS}, RECORDS hir::exports' records. Failures raise
+# and returns a dict {static PATH|"" shared PATH|"" import PATH|"" header
+# PATH manifest PATH exports RECORDS}, RECORDS hir::exports' records (import
+# the import library of a Windows DLL, "" elsewhere). Failures raise
 # core::raiseDiagnostics errors, code {NATIVE LIBRARY KIND} with the
 # location of what is refused as data, or the front end's or the driver's
 # own errors.
@@ -139,12 +148,18 @@ proc native::library {hir args} {
     if {$built ne "" && $built ne $target} {
         throw {NATIVE TARGET} "native::library: the program was built for $built, and the library is made for $target: compile it for $target (-target $target)"
     }
+    # A Windows library (WINDOWS-X86-64-MILESTONE-8.md) is a DLL and its
+    # import library, linked by link.exe on its own host.
+    set windows [expr {$target eq "windows-x86_64"}]
     if {$support eq ""} {
         if {$target ne $host} {
             throw {NATIVE TARGET} "native::library: a library of $target is linked with $target's runtime, which this compiler does not carry: name the target support package of $target (-target-support NAME); this host is $host"
         }
         if {![native::hostSupports libraries]} {
-            throw {NATIVE UNSUPPORTED library} "native libraries are made on Linux glibc (x86_64, aarch64) only; this host is $host (NATIVE-LIBRARY-MILESTONE-1.md)"
+            throw {NATIVE UNSUPPORTED library} "native libraries are made on Linux glibc (x86_64, aarch64) and Windows x86-64 (MSVC) only; this host is $host (NATIVE-LIBRARY-MILESTONE-1.md, WINDOWS-X86-64-MILESTONE-8.md)"
+        }
+        if {$windows && ![dict get $options -shared]} {
+            throw {NATIVE UNSUPPORTED library} "native::library: a Windows library is its DLL and the DLL's import library, and -shared 0 asks for a static library only, which is not made for windows-x86_64: two static Botlish libraries in one executable would share their runtimes' symbols (WINDOWS-X86-64-MILESTONE-8.md, \"Static COFF libraries\")"
         }
     } else {
         if {[dict get $support target] ne $target} {
@@ -188,6 +203,13 @@ proc native::library {hir args} {
         }]
     }
 
+    if {$windows && $support eq ""} {
+        # The toolchain and the runtime archive after the program's own
+        # checks (a program's problem is the program's, whatever the
+        # environment) and before anything is lowered: a missing link.exe is
+        # said at once, never after the whole compilation.
+        library::WindowsToolchain
+    }
     set lowered [lmap record $records {
         dict create symbol ${name}_[dict get $record name] block [dict get $record block] \
             params [lmap {p t} [dict get $record params] {set t}] result [dict get $record result]
@@ -218,12 +240,31 @@ proc native::library {hir args} {
     set work [file tempdir]
     try {
         set object [file join $work $name.program.o]
+        set public [library::PublicNames $name $records $application]
+        if {$windows} {
+            set static ""
+            set shared [file join $out $name.dll]
+            set import [file join $out $name.lib]
+            # A failed link never leaves an earlier build's files under the
+            # new manifest's names.
+            file delete $shared $import [file join $out $name.manifest.json]
+            set lines [Driver library-dll $text $out $name]
+            foreach line $lines {
+                if {[lindex $line 0] eq "error"} { Outcome $lines }
+            }
+            library::ValidateDll $shared $import $name $public
+            set header [file join $out $name.h]
+            library::Write $header [library::Header $hir $name $records $target $application]
+            set manifest [file join $out $name.manifest.json]
+            set digests [dict create shared [library::Sha256 $shared] import [library::Sha256 $import] header [library::Sha256 $header]]
+            library::Write $manifest [library::Manifest $hir $name $records 1 $dependencies $digests $target $support $application]
+            return [dict create static $static shared $shared import $import header $header manifest $manifest exports $records application $application]
+        }
         set lines [Driver library $text $object $name {*}$targetArgs]
         foreach line $lines {
             if {[lindex $line 0] eq "error"} { Outcome $lines }
         }
         set keep [file join $work $name.keep]
-        set public [library::PublicNames $name $records $application]
         library::Write $keep [join $public \n]\n
         set linked [file join $work $name.linked.o]
         set final [file join $work $name.o]
@@ -254,7 +295,7 @@ proc native::library {hir args} {
             dict set support toolchainRevision [dict get $tools revision]
         }
         set header [file join $out $name.h]
-        library::Write $header [library::Header $hir $name $records $application]
+        library::Write $header [library::Header $hir $name $records $target $application]
         set manifest [file join $out $name.manifest.json]
         set digests [dict create static [library::Sha256 $static] header [library::Sha256 $header]]
         if {$shared ne ""} {
@@ -264,7 +305,91 @@ proc native::library {hir args} {
     } finally {
         file delete -force $work
     }
-    return [dict create static $static shared $shared header $header manifest $manifest exports $records application $application]
+    return [dict create static $static shared $shared import "" header $header manifest $manifest exports $records application $application]
+}
+
+# Checks, before a Windows library is lowered, that it can be linked: the
+# system linker's tool (link.exe, from a Developer environment, or
+# BOTLISH_NATIVE_SYSTEM_LINKER) and the driver's runtime archive, as the
+# driver itself finds them (botlish-native system-linker). A missing or
+# wrong tool is {NATIVE LIBRARY TOOLCHAIN}, an unusable runtime archive
+# {NATIVE LIBRARY RUNTIME}, each with the driver's words.
+proc native::library::WindowsToolchain {} {
+    # The driver exits 1 when a fact failed; its lines still say which (and
+    # exec's own last line, "child process exited abnormally", none).
+    catch {exec [native::binary] system-linker 2>@1} output
+    foreach line [split $output \n] {
+        if {[catch {lindex $line 1} second] || $second ne "error"} continue
+        switch -- [lindex $line 0] {
+            tool { throw {NATIVE LIBRARY TOOLCHAIN} "native::library: [lindex $line 2]" }
+            runtime { throw {NATIVE LIBRARY RUNTIME} "native::library: [lindex $line 2]" }
+        }
+    }
+}
+
+# Checks the DLL PATH and its import library IMPORT that link.exe made for
+# library NAME, from their bytes (native/pe.tcl): a PE32+ DLL of x86-64 with
+# ASLR and DEP, exporting exactly the library's PUBLIC functions -- each by
+# name, none forwarded, under the DLL's own name -- and importing no DLL of
+# a C runtime (the static one is linked into it: codegen/aot.rs's
+# crt_args policy); the import library naming exactly those functions, each
+# a code import of NAME.dll. A failure is {NATIVE LIBRARY PE} and both files
+# are removed: a library that fails is never left looking like a build.
+proc native::library::ValidateDll {path import name public} {
+    set problems {}
+    set facts [native::pe::facts $path]
+    if {[dict get $facts machine] != 0x8664} {
+        lappend problems "its machine is [format 0x%x [dict get $facts machine]], not x86-64's 0x8664"
+    }
+    if {![dict get $facts dll]} {
+        lappend problems "it is no DLL (IMAGE_FILE_DLL is not set)"
+    }
+    set characteristics [dict get $facts dllCharacteristics]
+    if {!($characteristics & 0x40) || !($characteristics & 0x100)} {
+        lappend problems "it is not relocatable and DEP-compatible (DllCharacteristics [format 0x%x $characteristics])"
+    }
+    if {[dict get $facts exportName] ne "$name.dll"} {
+        set named [dict get $facts exportName]
+        if {$named eq ""} { set named "no DLL" }
+        lappend problems "its export directory names $named, not $name.dll"
+    }
+    set exports [dict get $facts exports]
+    set expected [lsort $public]
+    set missing [lmap p $expected {if {$p in $exports} continue; set p}]
+    if {[llength $missing]} {
+        lappend problems "it does not export [join $missing {, }]"
+    }
+    set extra [lmap e $exports {if {$e in $public} continue; set e}]
+    if {[llength $extra]} {
+        lappend problems "it exports [llength $extra] names that are no public function of the library: [join [lrange $extra 0 4] {, }][expr {[llength $extra] > 5 ? ", ..." : ""}]"
+    }
+    if {[dict get $facts exportFunctions] != [llength $exports]} {
+        lappend problems "it exports [dict get $facts exportFunctions] functions, [expr {[dict get $facts exportFunctions] - [llength $exports]}] of them by ordinal only"
+    }
+    if {[llength [dict get $facts forwarders]]} {
+        lappend problems "it forwards [join [dict get $facts forwarders] {, }] to another DLL"
+    }
+    set runtimes [lsearch -all -inline -regexp -nocase [dict get $facts imports] {^(vcruntime|msvcp|concrt|ucrtbase|msvcr|api-ms-win-crt-)}]
+    if {[llength $runtimes]} {
+        lappend problems "it imports a C runtime's DLLs ([join $runtimes {, }]): a library links the static C runtime, and its host's runtime is its host's"
+    }
+    set library [native::pe::importLibrary $import]
+    set named [lsort [lmap entry [dict get $library imports] {lindex $entry 0}]]
+    set foreign [lmap entry [dict get $library imports] {
+        lassign $entry symbol dll type
+        if {[string equal -nocase $dll $name.dll] && $type eq "code"} continue
+        set symbol
+    }]
+    if {$named ne $expected} {
+        lappend problems "its import library names [llength $named] functions, not exactly the [llength $expected] public ones"
+    }
+    if {[llength $foreign]} {
+        lappend problems "its import library's [join $foreign {, }] are no code imports of $name.dll"
+    }
+    if {[llength $problems]} {
+        file delete $path $import
+        throw {NATIVE LIBRARY PE} "native::library: the DLL made for windows-x86_64 is not the library: [join $problems {; }]"
+    }
 }
 
 # Links library NAME's program OBJECT with target support SUPPORT's runtime
@@ -397,11 +522,28 @@ proc native::library::RuntimeArchive {} {
     throw {NATIVE NOT-BUILT} "native runtime archive missing: [file join $dir libbotlish_native.a] (or libbotlish_runtime.a); run cargo build --release --manifest-path native/Cargo.toml"
 }
 
-# The SHA-256 of the file PATH, lowercase hexadecimal, from GNU coreutils'
-# sha256sum at its system path (libraries are made on Linux glibc only,
-# whose coreutils has it; never a program found on PATH): the manifest's
-# record of which build's files it describes.
+# The SHA-256 of the file PATH, lowercase hexadecimal, from the system's own
+# tool at its fixed path -- GNU coreutils' sha256sum on Linux glibc,
+# certutil.exe in %SystemRoot%\System32 on Windows -- never a program found
+# on PATH: the manifest's record of which build's files it describes.
 proc native::library::Sha256 {path} {
+    if {$::tcl_platform(platform) eq "windows"} {
+        set root C:/Windows
+        if {[info exists ::env(SystemRoot)] && [regexp {^[A-Za-z]:[\\/][^;]*$} $::env(SystemRoot)]} {
+            set root [file normalize $::env(SystemRoot)]
+        }
+        set tool [file join $root System32 certutil.exe]
+        if {[catch {exec $tool -hashfile [file nativename $path] SHA256} output]} {
+            throw {NATIVE LIBRARY TOOL certutil} "native::library: $tool failed: $output"
+        }
+        # A header line, the digest (spaced in older Windows versions), a
+        # status line.
+        set digest [string tolower [string map {" " ""} [lindex [split [string map {"\r" ""} $output] \n] 1]]]
+        if {![regexp {^[0-9a-f]{64}$} $digest]} {
+            throw {NATIVE LIBRARY TOOL certutil} "native::library: $tool gave no digest: $output"
+        }
+        return $digest
+    }
     foreach tool {/usr/bin/sha256sum /bin/sha256sum} {
         if {![file executable $tool]} continue
         if {[catch {exec $tool -b -- $path} output]} {
@@ -532,9 +674,14 @@ proc native::library::Signature {record} {
     return $text
 }
 
-proc native::library::Header {hir name records {application 0}} {
+proc native::library::Header {hir name records {target ""} {application 0}} {
     variable abiVersion
     set N $name
+    # A Windows library's functions are a DLL's (WINDOWS-X86-64-MILESTONE-8.md):
+    # declared __declspec(dllimport), which a host calls through its import
+    # address table (the import library's), and stated so in the contract.
+    set windows [expr {$target eq "windows-x86_64"}]
+    set api [expr {$windows ? "${N}_API " : ""}]
     set guard [string toupper $name]_BOTLISH_H
     set entry [file tail [dict get [hir::sourceFile $hir f1] path]]
     set h "/* $N.h -- the C interface of the Botlish native library \"$N\".\n"
@@ -588,11 +735,26 @@ proc native::library::Header {hir name records {application 0}} {
     append h " * destruction and other libraries. Releasing a released buffer or error\n"
     append h " * through the same variable is a no-op; releasing one this library does not\n"
     append h " * hold is refused (${N}_STATUS_INVOCATION) and changes nothing.\n"
+    if {$windows} {
+        append h " *\n"
+        append h " * Windows. The library is $N.dll: link its import library $N.lib, or load\n"
+        append h " * it with LoadLibraryW and find each function with GetProcAddress by the\n"
+        append h " * name declared here. Loading runs no Botlish code (${N}_create does). The\n"
+        append h " * DLL holds its own C runtime: release its results and errors with its own\n"
+        append h " * functions, never free() or delete. Before FreeLibrary, destroy every\n"
+        append h " * instance and release every result and error it handed out: nothing of\n"
+        append h " * the library -- a buffer, an error, a function's address -- is usable\n"
+        append h " * once it is unloaded. Define ${N}_API before including this header to\n"
+        append h " * declare the functions otherwise (it is __declspec(dllimport) by default).\n"
+    }
     append h " */\n"
     append h "#ifndef $guard\n#define $guard\n\n"
     append h "#include <stdbool.h>\n#include <stddef.h>\n#include <stdint.h>\n\n"
     append h "#ifdef __cplusplus\nextern \"C\" \{\n#endif\n\n"
     append h "#define ${N}_ABI_VERSION $abiVersion\n\n"
+    if {$windows} {
+        append h "#ifndef ${N}_API\n#define ${N}_API __declspec(dllimport)\n#endif\n\n"
+    }
     append h "typedef struct ${N}_instance ${N}_instance;\n"
     append h "typedef struct ${N}_error ${N}_error;\n"
     append h "typedef struct ${N}_bytes \{\n    uint8_t *ptr;\n    size_t len;\n\} ${N}_bytes;\n\n"
@@ -613,29 +775,29 @@ proc native::library::Header {hir name records {application 0}} {
         append h "    ${N}_FIELD_$type = $value,\n"
     }
     append h "\};\n\n"
-    append h "uint32_t ${N}_abi_version(void);\n"
-    append h "int32_t ${N}_create(${N}_instance **instance, ${N}_error **error);\n"
-    append h "int32_t ${N}_destroy(${N}_instance *instance);\n\n"
-    append h "int32_t ${N}_error_release(${N}_error **error);\n"
-    append h "int32_t ${N}_error_status(const ${N}_error *error);\n"
-    append h "int32_t ${N}_error_identity(const ${N}_error *error, const uint8_t **ptr, size_t *len);\n"
-    append h "int32_t ${N}_error_message(const ${N}_error *error, const uint8_t **ptr, size_t *len);\n"
-    append h "size_t ${N}_error_field_count(const ${N}_error *error);\n"
-    append h "int32_t ${N}_error_field_name(const ${N}_error *error, size_t index, const uint8_t **ptr, size_t *len);\n"
-    append h "int32_t ${N}_error_field_type(const ${N}_error *error, size_t index);\n"
-    append h "int32_t ${N}_error_field_int(const ${N}_error *error, size_t index, int64_t *value);\n"
-    append h "int32_t ${N}_error_field_bool(const ${N}_error *error, size_t index, bool *value);\n"
-    append h "int32_t ${N}_error_field_float64(const ${N}_error *error, size_t index, double *value);\n"
-    append h "int32_t ${N}_error_field_str(const ${N}_error *error, size_t index, const uint8_t **ptr, size_t *len);\n"
-    append h "int32_t ${N}_bytes_release(${N}_bytes *bytes);\n\n"
+    append h "${api}uint32_t ${N}_abi_version(void);\n"
+    append h "${api}int32_t ${N}_create(${N}_instance **instance, ${N}_error **error);\n"
+    append h "${api}int32_t ${N}_destroy(${N}_instance *instance);\n\n"
+    append h "${api}int32_t ${N}_error_release(${N}_error **error);\n"
+    append h "${api}int32_t ${N}_error_status(const ${N}_error *error);\n"
+    append h "${api}int32_t ${N}_error_identity(const ${N}_error *error, const uint8_t **ptr, size_t *len);\n"
+    append h "${api}int32_t ${N}_error_message(const ${N}_error *error, const uint8_t **ptr, size_t *len);\n"
+    append h "${api}size_t ${N}_error_field_count(const ${N}_error *error);\n"
+    append h "${api}int32_t ${N}_error_field_name(const ${N}_error *error, size_t index, const uint8_t **ptr, size_t *len);\n"
+    append h "${api}int32_t ${N}_error_field_type(const ${N}_error *error, size_t index);\n"
+    append h "${api}int32_t ${N}_error_field_int(const ${N}_error *error, size_t index, int64_t *value);\n"
+    append h "${api}int32_t ${N}_error_field_bool(const ${N}_error *error, size_t index, bool *value);\n"
+    append h "${api}int32_t ${N}_error_field_float64(const ${N}_error *error, size_t index, double *value);\n"
+    append h "${api}int32_t ${N}_error_field_str(const ${N}_error *error, size_t index, const uint8_t **ptr, size_t *len);\n"
+    append h "${api}int32_t ${N}_bytes_release(${N}_bytes *bytes);\n\n"
     if {$application} {
         append h "/* The application entry: runs the entry program on the calling thread. */\n"
-        append h "int32_t ${N}_main(int argc, char **argv, ${N}_error **error);\n\n"
+        append h "${api}int32_t ${N}_main(int argc, char **argv, ${N}_error **error);\n\n"
     }
     append h "/* Exports. */\n"
     foreach record $records {
         append h "\n/* [Signature $record] */\n"
-        append h "int32_t ${N}_[dict get $record name]([join [CParams $N $record] {, }]);\n"
+        append h "${api}int32_t ${N}_[dict get $record name]([join [CParams $N $record] {, }]);\n"
     }
     append h "\n#ifdef __cplusplus\n\}\n#endif\n\n#endif\n"
     return $h
@@ -814,9 +976,26 @@ proc native::library::Manifest {hir name records shared {dependencies {}} {diges
             concurrency [S "independent calls on different threads, each with its own VM"] \
             stack [S "the calling thread's, bounded by the library's stack check (NATIVE LIMIT STACK); no signal handler"]]]]
     }
-    set sha256 [list static [S [dict getdef $digests static ""]]]
-    lappend sha256 shared [if {$shared} {S [dict getdef $digests shared ""]} else {list null {}}]
-    lappend sha256 header [S [dict getdef $digests header ""]]
+    # A Windows library (WINDOWS-X86-64-MILESTONE-8.md) is its DLL and import
+    # library, and no static library: `static` is null, `shared` the DLL,
+    # `import` -- a member only a Windows manifest has -- the import library
+    # a consumer links; `link` is empty (the DLL is linked with its
+    # system libraries and holds its C runtime; a consumer links the import
+    # library only), and `lifecycle` states the unloading precondition.
+    set windows [expr {$target eq "windows-x86_64"}]
+    if {$windows} {
+        set links {}
+        set files [list static [list null {}] shared [S $name.dll] import [S $name.lib] header [S $name.h]]
+        set sha256 [list static [list null {}] shared [S [dict getdef $digests shared ""]] \
+            import [S [dict getdef $digests import ""]] header [S [dict getdef $digests header ""]]]
+        set unloading [list unload [S "FreeLibrary only after every instance is destroyed and every result and error it handed out is released: nothing of the library is usable once it is unloaded"]]
+    } else {
+        set files [list static [S lib$name.a] shared [if {$shared} {S lib$name.so} else {list null {}}] header [S $name.h]]
+        set sha256 [list static [S [dict getdef $digests static ""]]]
+        lappend sha256 shared [if {$shared} {S [dict getdef $digests shared ""]} else {list null {}}]
+        lappend sha256 header [S [dict getdef $digests header ""]]
+        set unloading {}
+    }
     set value [list obj [list \
         schema [N [if {$application} {set applicationSchema} else {set schema}]] \
         kind [S botlish-native-library] \
@@ -824,10 +1003,7 @@ proc native::library::Manifest {hir name records shared {dependencies {}} {diges
         abi [N $abiVersion] \
         target [list obj [list name [S $target] triple [S [dict get [core::cabi::target $target] triple]]]] \
         compiler [list obj [list frontEnd [S [hir::interchange::fingerprint]] runtimeAbi [S [native::runtimeAbi]]]] \
-        artifacts [list obj [list \
-            static [S lib$name.a] \
-            shared [if {$shared} {S lib$name.so} else {list null {}}] \
-            header [S $name.h]]] \
+        artifacts [list obj $files] \
         sha256 [list obj $sha256] \
         link [list arr [lmap l $links {S $l}]] \
         dependencies [list arr [lmap d $dependencies {Dependency $d}]] \
@@ -847,7 +1023,7 @@ proc native::library::Manifest {hir name records shared {dependencies {}} {diges
             str-result [list obj [list owner [S caller] release [S ${name}_bytes_release] terminated [S nul-after-length] survives [S "later calls, collections, the instance's destruction"]]] \
             error [list obj [list owner [S caller] release [S ${name}_error_release] survives [S "later calls, collections, the instance's destruction"]]]]] \
         lifecycle [list obj [list create [S ${name}_create] destroy [S ${name}_destroy] \
-            initialization [S $initialization]]] \
+            initialization [S $initialization] {*}$unloading]] \
         api [list arr $api] \
         {*}$entry \
         exports [list arr $exports] {*}$supported]]

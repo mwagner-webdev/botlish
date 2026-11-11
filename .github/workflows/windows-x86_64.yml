@@ -491,8 +491,21 @@ jobs:
           tclsh9.0 tests/platform/tier.tcl smoke argv.test target-model.test native-executable.test \
             main-cli.test application-modules.test workload-2048.test native.test c-abi-types.test \
             c-ffi.test windows-io.test c-byte-borrowing.test c-float-ffi.test native-link-plan.test \
-            filesystem.test abi-bytes.test utf16-bytes.test \
+            filesystem.test abi-bytes.test utf16-bytes.test native-library.test \
             coroutines.test coroutine-fusion.test native-stack-overflow.test coroutines.bot 2>&1 | tee tier.log
+
+      # Native libraries (WINDOWS-X86-64-MILESTONE-8.md): a Botlish DLL in
+      # hosts MSVC's cl builds -- its every host test already runs above,
+      # each plainly and under GC stress -- and the boundary fuzzer against
+      # its independent model, under GC stress, and the library's costs and
+      # sizes against a C library of the same functions.
+      - name: Native libraries (DLL, MSVC hosts)
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: |
+          set -o pipefail
+          tclsh9.0 audit/native-library/tools/fuzz.tcl -seed 1 -gc-stress 1 2>&1 | tee library-fuzz.log
+          tclsh9.0 audit/native-library/tools/fuzz.tcl -seed 2 -exports 12 -lifecycle 120 2>&1 | tee -a library-fuzz.log
+          tclsh9.0 bench/native-library.tcl 2>&1 | tee library-bench.log
 
       # Paths and files on NTFS (WINDOWS-X86-64-MILESTONE-7.md) once more,
       # every run under GC stress: CreateFileW, ReadFile, WriteFile,
@@ -590,7 +603,12 @@ jobs:
             awk '/^######## .*: (ok|FAILED)/ {print} /^######## [0-9]+ commands/ {tail = 1} tail {print}' tier.log 2>/dev/null | grep -a . || echo "the smoke tier did not run"
             [ -f variadic-gc.log ] && grep -a '^c-ffi.test:' variadic-gc.log | sed 's/^/variadic C calls under GC stress: /'
             [ -f filesystem-gc.log ] && grep -a '^filesystem.test:' filesystem-gc.log | sed 's/^/filesystem under GC stress: /'
+            [ -f library-fuzz.log ] && grep -a 'native-library fuzz\|DISAGREE' library-fuzz.log
             echo '```'
+            if [ -f library-bench.log ]; then
+              echo '### Native libraries: costs and sizes (bench/native-library.tcl)'
+              tr -d '\r' < library-bench.log | grep -a '^|\|^native library'
+            fi
             # The Rust tests of this milestone's Windows paths, by name: the
             # evidence that they ran here (WINDOWS-X86-64-MILESTONE-3.md).
             if [ -f rust-tests.log ]; then

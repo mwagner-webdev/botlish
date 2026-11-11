@@ -498,11 +498,19 @@ test mts-panic-native-bug {a Rust panic of the program's body (a damaged constan
     }]
 }]]
 
+# On Windows the library is a DLL (no static library is made: WINDOWS-X86-64-
+# MILESTONE-8.md), linked in vcvars' environment, and the record is read from
+# it.
 test mts-library-record {a native library's program record is the worker's (startup word 0): a library has no startup of its own, its host calls it on the host's thread} -constraints nativeLibraries -body {
     set dir [makeDirectory mts-library]
     set hir [surface::compile "exported c fn step(n: int) -> int:\n    n + 1\n" mtslib.bot -warnings off]
-    set built [native::library $hir -name mtslib -out $dir -shared 0]
-    set word [mtsStartupWord [mtsBytes [dict get $built static]]]
+    if {$::windowsHost} {
+        set built [ctool::withMsvc [list native::library $hir -name mtslib -out $dir]]
+        set word [mtsStartupWord [mtsBytes [dict get $built shared]]]
+    } else {
+        set built [native::library $hir -name mtslib -out $dir -shared 0]
+        set word [mtsStartupWord [mtsBytes [dict get $built static]]]
+    }
     removeDirectory mts-library
     set word
 } -result 0

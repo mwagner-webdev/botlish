@@ -224,6 +224,21 @@ const DEFAULT_STACK_BYTES: usize = 8 << 20;
 
 thread_local! {
     static POOL: RefCell<Vec<CoStack>> = const { RefCell::new(Vec::new()) };
+    /// Whether this thread ever asked the pool for a stack (`pool_used`): a
+    /// plain flag with no destructor, so that `release_pool` on a thread
+    /// that never ran a coroutine touches nothing of POOL's -- whose first
+    /// use registers its destructor on the thread, which glibc counts as a
+    /// reference to the library holding it: unloaded by its host, a native
+    /// library would stay mapped until the thread ended
+    /// (RN-HOST-STARTABLE-APPLICATION-LIBRARY-MILESTONE-1.md, "Dynamic
+    /// loader and TLS lifetime").
+    static POOL_USED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Records that this thread uses the pool (every `CoStack::new`, before it
+/// looks into POOL).
+fn pool_used() {
+    POOL_USED.with(|used| used.set(true));
 }
 
 /// The usable size of every coroutine stack: BOTLISH_NATIVE_COROUTINE_STACK_BYTES
@@ -297,6 +312,7 @@ impl CoStack {
     #[cfg(any(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "android", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64")))]
     fn new() -> Result<(CoStack, bool), RtError> {
         let usable = stack_bytes();
+        pool_used();
         if let Some(stack) = POOL.with(|pool| {
             let mut pool = pool.borrow_mut();
             let at = pool.iter().position(|s| s.size - s.guard == usable)?;
@@ -332,8 +348,26 @@ impl CoStack {
 }
 
 #[cfg(not(all(windows, target_arch = "x86_64", target_env = "msvc")))]
+impl CoStack {
+    /// Frees the stack itself, never into the pool (`release_pool`).
+    fn discard(mut self) {
+        #[cfg(any(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "android", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64")))]
+        // SAFETY: the mapping this stack owns; it is pooled, so no frame on
+        // it is live.
+        unsafe {
+            libc::munmap(self.base as *mut libc::c_void, self.size);
+        }
+        self.size = 0;
+    }
+}
+
+#[cfg(not(all(windows, target_arch = "x86_64", target_env = "msvc")))]
 impl Drop for CoStack {
     fn drop(&mut self) {
+        if self.size == 0 {
+            // Freed already (`discard`).
+            return;
+        }
         let returned = POOL.try_with(|pool| {
             let mut pool = pool.borrow_mut();
             if pool.len() < POOL_LIMIT {
@@ -357,6 +391,38 @@ impl Drop for CoStack {
 /// How many stacks are pooled now (tests and the performance report).
 pub fn pooled_stacks() -> usize {
     POOL.with(|pool| pool.borrow().len())
+}
+
+/// Frees every stack this thread's pool keeps (a native library's, when the
+/// thread's last instance of the library is destroyed: runtime::library's
+/// `destroy`, WINDOWS-X86-64-MILESTONE-8.md, "Coroutines inside exported
+/// calls"): a library's host owns its threads and may unload the library
+/// while they live on, so a thread with no instance left keeps no stack of
+/// the library's -- no mapping, and on Windows no fiber. Nothing on a pooled
+/// stack is live. Returns how many it freed.
+pub fn release_pool() -> usize {
+    if !POOL_USED.with(std::cell::Cell::get) {
+        // A thread that never ran a coroutine: nothing pooled, and POOL's
+        // destructor not registered (POOL_USED).
+        return 0;
+    }
+    let stacks = POOL.try_with(|pool| std::mem::take(&mut *pool.borrow_mut())).unwrap_or_default();
+    let count = stacks.len();
+    for stack in stacks {
+        stack.discard();
+    }
+    count
+}
+
+/// The end of a native library's outermost call on this thread (runtime::
+/// library's `enter`): the thread's own state is what the host gave the
+/// call. On Windows a thread the runtime made a fiber for the call's
+/// coroutines becomes a thread again (coroutine/windows.rs's
+/// `restore_thread`); elsewhere a coroutine switch changes nothing of the
+/// thread's.
+pub fn library_call_ended() {
+    #[cfg(all(windows, target_arch = "x86_64", target_env = "msvc"))]
+    windows::restore_thread();
 }
 
 // ---------------------------------------------------------------------------

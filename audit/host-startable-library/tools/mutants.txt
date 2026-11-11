@@ -167,7 +167,7 @@ proc native::lower::ThreadDispatch {fnVar} {
 !! al-header-manifest al-create-initializes-only
 ## native/library.tcl
 <<<<
-        append h "int32_t ${N}_main(int argc, char **argv, ${N}_error **error);\n\n"
+        append h "${api}int32_t ${N}_main(int argc, char **argv, ${N}_error **error);\n\n"
 ====
 >>>>
 
@@ -313,10 +313,10 @@ fn run_vm(vm: &mut Vm, f: impl FnOnce(&mut Vm) -> Value) -> Value {
 ## native/src/runtime/library.rs
 <<<<
         drop(vm);
-        outcome
+        instance_gone(false);
 ====
         std::mem::forget(vm);
-        outcome
+        instance_gone(false);
 >>>>
 
 @@ thread-token-shared every thread has one token: an instance answers calls from any thread

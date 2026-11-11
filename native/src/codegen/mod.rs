@@ -617,11 +617,12 @@ fn emit_object_with(program: &Program, isa: OwnedTargetIsa, library: Option<&str
     }
     let linkage = if library.is_some() { cranelift_module::Linkage::Local } else { cranelift_module::Linkage::Export };
     let record = define_program_record(&mut module, &symbols, program, &pool, &functions, linkage, startup)?;
-    if let Some(name) = library {
-        library::define(&mut module, program, name, record)?;
-    }
+    let public = match library {
+        Some(name) => library::define(&mut module, program, name, record)?,
+        None => Vec::new(),
+    };
     let mut product = module.finish();
-    add_windows_unwind(&mut product, &symbols, &functions)?;
+    add_windows_unwind(&mut product, &symbols, &functions, &public)?;
     let bytes = product.emit().map_err(|e| BackendError::Codegen(e.to_string()))?;
     Ok(ObjectProgram { bytes, pool, functions })
 }
@@ -716,21 +717,25 @@ fn add_windows_unwind(
     product: &mut cranelift_object::ObjectProduct,
     symbols: &clif::Symbols,
     functions: &[clif::DefineResult],
+    public: &[library::Defined],
 ) -> Result<(), BackendError> {
     use cranelift_object::object::write::{Relocation, SymbolSection};
     use cranelift_object::object::{RelocationEncoding, RelocationFlags, RelocationKind, SectionKind};
-    // (section, offset in it, symbol, size, UNWIND_INFO) of every function.
+    // (section, offset in it, symbol, size, UNWIND_INFO) of every function:
+    // each Botlish function and generic entry, and a native library's public
+    // C functions (its forwarders and trampolines, codegen::library).
     let mut entries = Vec::new();
-    for (i, f) in functions.iter().enumerate() {
-        for (id, size, info) in [(symbols.direct[i], f.direct_size, &f.direct_unwind), (symbols.entry[i], f.entry_size, &f.entry_unwind)] {
-            let Some(info) = info else { continue };
-            let symbol = product.function_symbol(id);
-            let defined = product.object.symbol(symbol);
-            let SymbolSection::Section(section) = defined.section else {
-                return Err(BackendError::Bug(format!("function symbol {:?} is not defined in a section", defined.name)));
-            };
-            entries.push((section, defined.value, symbol, size, info));
-        }
+    let botlish = functions.iter().enumerate().flat_map(|(i, f)| {
+        [(symbols.direct[i], f.direct_size, &f.direct_unwind), (symbols.entry[i], f.entry_size, &f.entry_unwind)]
+    });
+    for (id, size, info) in botlish.chain(public.iter().map(|p| (p.id, p.size, &p.unwind))) {
+        let Some(info) = info else { continue };
+        let symbol = product.function_symbol(id);
+        let defined = product.object.symbol(symbol);
+        let SymbolSection::Section(section) = defined.section else {
+            return Err(BackendError::Bug(format!("function symbol {:?} is not defined in a section", defined.name)));
+        };
+        entries.push((section, defined.value, symbol, size, info));
     }
     if entries.is_empty() {
         return Ok(());

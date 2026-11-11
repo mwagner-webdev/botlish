@@ -1871,6 +1871,157 @@ fn link_system(program: &Program, destination: &Path, search: &LinkSearch, start
     Ok(())
 }
 
+/// A native library made on Windows x86-64 (WINDOWS-X86-64-MILESTONE-8.md):
+/// the DLL and the import library link.exe wrote beside it.
+pub struct WindowsLibrary {
+    pub dll: PathBuf,
+    pub import: PathBuf,
+}
+
+/// The module-definition file of library NAME exporting PUBLIC (its public
+/// C functions: runtime::library's FORWARDERS and the exports'
+/// trampolines): `LIBRARY NAME.dll` and one `EXPORTS` line per name, by
+/// name, in the order given. Every name is a C identifier
+/// (`nir::is_c_identifier`), so none needs quoting; nothing else of the
+/// DLL -- the runtime's functions, the program's, its record -- is listed,
+/// and link.exe exports what the file lists and what an object's `/EXPORT`
+/// directives name (none of a library's do: `windows_library_exports`
+/// checks the result).
+pub fn windows_library_definition(name: &str, public: &[String]) -> String {
+    let mut text = format!("LIBRARY {name}.dll\nEXPORTS\n");
+    for symbol in public {
+        text.push_str("    ");
+        text.push_str(symbol);
+        text.push('\n');
+    }
+    text
+}
+
+/// link.exe's arguments linking library NAME's DLL OUTPUT and import
+/// library IMPORT from OBJECT (its program object) and the runtime archive
+/// RUNTIME, the module-definition file DEFINITION naming its exports
+/// (`windows_library_definition`), with the program's link plan INPUTS
+/// (SEARCH's directories): a DLL (`/DLL`, no entry point of ours -- the C
+/// runtime's `_DllMainCRTStartup` and its default `DllMain`, which run no
+/// Botlish code: an instance is made by NAME_create, after the loader lock
+/// is released), the executable's link otherwise -- no incremental linking
+/// (an incremental link's thunks would move a function's address off the
+/// code its stack maps and unwind entries name), unreferenced code dropped,
+/// ASLR and DEP, the static release C runtime and every other Microsoft
+/// runtime excluded (`crt_args_for`'s policy: the DLL holds its own C
+/// runtime and imports only the system's DLLs, whatever runtime its host
+/// was compiled with).
+fn windows_library_link_args(
+    object: &Path,
+    runtime: &Path,
+    definition: &Path,
+    output: &Path,
+    import: &Path,
+    program: &Program,
+    inputs: &[LinkInput],
+    search: &LinkSearch,
+) -> Vec<OsString> {
+    let mut args: Vec<OsString> = Vec::new();
+    // /Brepro: the DLL's and the import library's time stamps are a hash of
+    // their contents, not the link's time, so two builds of one library are
+    // the same bytes (the manifest records their digests:
+    // WINDOWS-X86-64-MILESTONE-8.md, "Artifacts").
+    for flag in ["/NOLOGO", "/DLL", "/MACHINE:X64", "/INCREMENTAL:NO", "/OPT:REF", "/OPT:ICF", "/NXCOMPAT", "/DYNAMICBASE", "/Brepro"] {
+        args.push(flag.into());
+    }
+    for (option, path) in [("/OUT:", output), ("/IMPLIB:", import), ("/DEF:", definition)] {
+        let mut arg = OsString::from(option);
+        arg.push(path);
+        args.push(arg);
+    }
+    args.push(object.into());
+    // The program's own plan, link.exe's spelling, rustc's wrapping taken
+    // off (as `system_link_args` passes it).
+    for arg in link_plan_args_for(LinkerFlavor::Msvc, program, inputs, search) {
+        if let Some(arg) = arg.strip_prefix("link-arg=") {
+            args.push(arg.into());
+        }
+    }
+    args.push(runtime.into());
+    args.extend(runtime_system_libraries(LinkerFlavor::Msvc).iter().map(OsString::from));
+    for library in ["libcmt.lib", "libvcruntime.lib", "libucrt.lib"] {
+        args.push(library.into());
+    }
+    for library in OTHER_MSVC_RUNTIMES {
+        args.push(format!("/NODEFAULTLIB:{library}").into());
+    }
+    args
+}
+
+/// Library NAME's DLL and import library, linked into DIR (`DIR/NAME.dll`,
+/// `DIR/NAME.lib`) from its program object OBJECT (`emit_library_object`)
+/// by Microsoft's link.exe: the system linker's tool (`system_linker`:
+/// PATH's link.exe in a Developer environment, or
+/// BOTLISH_NATIVE_SYSTEM_LINKER), the driver's runtime archive
+/// (`runtime_archive`: botlish_runtime.lib beside it, or
+/// BOTLISH_NATIVE_RUNTIME) and its system libraries, and the program's own
+/// link plan (`resolve_link_plan`) -- WINDOWS-X86-64-MILESTONE-8.md. The
+/// DLL exports exactly PUBLIC, by name (a module-definition file): every
+/// other symbol of the program and of its private runtime stays inside the
+/// DLL, where no other module's names reach it, so two libraries in one
+/// process share no code and no state. Nothing is published unless both
+/// files were made; a failure is a LinkError of the system linker's kinds
+/// (TOOLCHAIN, RUNTIME, the plan's own words), the linker's diagnostics
+/// kept. Windows (MSVC) only: elsewhere the tool check refuses any linker
+/// that is not link.exe.
+pub fn link_windows_library(program: &Program, object: &[u8], name: &str, public: &[String], dir: &Path, search: &LinkSearch) -> Result<WindowsLibrary, LinkError> {
+    let runtime = runtime_archive(search.runtime_archive.as_deref())?;
+    let tool = system_linker(LinkerFlavor::Msvc)?;
+    let inputs = resolve_link_plan(program, search)?;
+    log_plan(&inputs);
+    let dll = dir.join(format!("{name}.dll"));
+    let import = dir.join(format!("{name}.lib"));
+    let work = WorkDir::beside(&dll).map_err(|e| format!("native library link failed: cannot write {}: {e}", dll.display()))?;
+    let object_path = work.0.join(format!("{name}.program.obj"));
+    let definition = work.0.join(format!("{name}.def"));
+    let linked = work.0.join(format!("{name}.dll"));
+    let linked_import = work.0.join(format!("{name}.lib"));
+    std::fs::write(&object_path, object).map_err(|e| e.to_string())?;
+    std::fs::write(&definition, windows_library_definition(name, public)).map_err(|e| e.to_string())?;
+    let args = windows_library_link_args(&object_path, &runtime, &definition, &linked, &linked_import, program, &inputs, search);
+    let output = Command::new(&tool)
+        .args(&args)
+        .output()
+        .map_err(|e| toolchain_error(format!("native library link failed: cannot run the system linker {}: {e}", tool.display())))?;
+    let text = format!("{}{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+    log_link(&tool, &args, &output.status, &text);
+    if !output.status.success() {
+        if let Some(missing) = undefined_helper(&text) {
+            return Err(runtime_error(format!(
+                "native library link failed: the runtime archive {} does not define the runtime helper {missing} this driver's code calls: it is another build's: {}",
+                runtime.display(),
+                linker_diagnostics(&text)
+            )));
+        }
+        let diagnostics = linker_diagnostics(&text);
+        if calls_c(program) {
+            let hint = link_hint(LinkerFlavor::Msvc, &diagnostics).map(|hint| format!("\n{hint}")).unwrap_or_default();
+            return Err(format!(
+                "native library link failed: link.exe could not link library {name} with the C functions and libraries it declares ({}):\n{diagnostics}{hint}",
+                describe_link_plan_for(LinkerFlavor::Msvc, program)
+            )
+            .into());
+        }
+        return Err(format!("native library link failed ({}, system linker {}):\n{diagnostics}", output.status, tool.display()).into());
+    }
+    for (made, what) in [(&linked, "DLL"), (&linked_import, "import library")] {
+        if !made.is_file() {
+            return Err(format!("native library link failed: link.exe reported success and wrote no {what} {}: {}", made.display(), linker_diagnostics(&text)).into());
+        }
+    }
+    // Published only both made, on the same filesystem (the work directory
+    // is beside them): a failed link leaves no earlier build's files under
+    // these names (native::library deleted them first).
+    std::fs::rename(&linked, &dll).map_err(|e| format!("{}: {e}", dll.display()))?;
+    std::fs::rename(&linked_import, &import).map_err(|e| format!("{}: {e}", import.display()))?;
+    Ok(WindowsLibrary { dll, import })
+}
+
 // The ELF64 x86-64 relocatable object `emit_object` writes: just what `image`
 // reads of it.
 const SHT_RELA: u32 = 4;
@@ -2255,6 +2406,39 @@ mod tests {
     /// program, one that calls C included, and every other Microsoft runtime
     /// excluded from the link, so that a C library's default-library
     /// directive never brings a second one; nothing anywhere else.
+    /// A Windows native library's DLL link (WINDOWS-X86-64-MILESTONE-8.md):
+    /// link.exe's spelling only, a DLL with no entry point of ours, its
+    /// exports from the module-definition file alone (no `/EXPORT`), no
+    /// incremental linking, the static release C runtime and no other.
+    #[test]
+    fn windows_library_link_is_a_dll_of_the_static_runtime() {
+        let program = crate::nir::parse("nir 1\nfunc 0 \"<program>\" params=0 env=0 regs=1 pnames=\"\" captures=0\n    %0 = int 1\n    ret %0\nend\n").unwrap();
+        let args: Vec<String> = windows_library_link_args(
+            Path::new("w/lib.program.obj"),
+            Path::new("r/botlish_runtime.lib"),
+            Path::new("w/lib.def"),
+            Path::new("w/lib.dll"),
+            Path::new("w/lib.lib"),
+            &program,
+            &[],
+            &LinkSearch::libraries(&[]),
+        )
+        .iter()
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect();
+        for flag in ["/DLL", "/INCREMENTAL:NO", "/Brepro", "/OUT:w/lib.dll", "/IMPLIB:w/lib.lib", "/DEF:w/lib.def", "libcmt.lib", "libvcruntime.lib", "libucrt.lib", "/NODEFAULTLIB:msvcrt.lib", "/NODEFAULTLIB:ucrt.lib", "/NODEFAULTLIB:vcruntime.lib"] {
+            assert!(args.iter().any(|a| a == flag), "{flag} missing from {args:?}");
+        }
+        assert!(!args.iter().any(|a| a.starts_with("/EXPORT") || a.starts_with("/ENTRY") || a.starts_with('-') || a.starts_with("/SUBSYSTEM")), "{args:?}");
+        let object = args.iter().position(|a| a == "w/lib.program.obj").unwrap();
+        let runtime = args.iter().position(|a| a == "r/botlish_runtime.lib").unwrap();
+        assert!(object < runtime, "the object before the runtime archive: {args:?}");
+        assert_eq!(
+            windows_library_definition("lib", &["lib_create".to_string(), "lib_f".to_string()]),
+            "LIBRARY lib.dll\nEXPORTS\n    lib_create\n    lib_f\n"
+        );
+    }
+
     #[test]
     fn link_hint_explains_imports_of_the_dynamic_c_runtime() {
         // link.exe's words for a /MD library's runtime call in a static-CRT

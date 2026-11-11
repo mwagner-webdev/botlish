@@ -183,15 +183,18 @@ static INSTANCES: Mutex<BTreeMap<usize, Entry>> = Mutex::new(BTreeMap::new());
 static ERRORS: Mutex<BTreeSet<usize>> = Mutex::new(BTreeSet::new());
 static BUFFERS: Mutex<BTreeSet<usize>> = Mutex::new(BTreeSet::new());
 
-/// This thread's part in the library: its token for the owner rule
-/// (`this_thread`: drawn once, never reused, 0 before) and how many calls of
-/// this library run Botlish code on it now (`create`'s initialization, an
-/// export's call, `main`'s entry: `main` refuses to start while any does,
-/// REENTRANT-CALL), one word: the token above `ACTIVE_BITS`, the count
-/// below.
+/// This thread's part in the library, two words. `Slot::Word`: its token
+/// for the owner rule (`this_thread`: drawn once, never reused, 0 before)
+/// and how many calls of this library run Botlish code on it now (`create`'s
+/// initialization, an export's call, `main`'s entry: `main` refuses to start
+/// while any does, REENTRANT-CALL), the token above `ACTIVE_BITS`, the count
+/// below; the end of the outermost call leaves the thread's own state as the
+/// host gave it (`Active`). `Slot::Live`: the live instances of this library
+/// the thread made (`create`, `destroy`): when the last one goes, the thread
+/// keeps no coroutine stack of the library's (`instance_gone`).
 ///
 /// Kept where no thread-exit code of the library's runs: on Unix, in the
-/// slot of one pthread key made without a destructor (`thread_word`). A
+/// slots of pthread keys made without a destructor (`thread_word`). A
 /// `thread_local!` -- or std::thread::current() -- registers a destructor
 /// on the thread wherever Rust implements thread-locals with pthread keys
 /// (Android AArch64: std's `os` thread-locals) or holds a handle there (a
@@ -199,54 +202,66 @@ static BUFFERS: Mutex<BTreeSet<usize>> = Mutex::new(BTreeSet::new());
 /// thread ended would have the thread's exit run that destructor in
 /// unmapped code, as Bionic's dlclose followed by the thread's end did
 /// (RN-HOST-STARTABLE-APPLICATION-LIBRARY-MILESTONE-1.md, "Dynamic loader
-/// and TLS lifetime"). The key itself is never deleted: a library made of
-/// this runtime holds one.
+/// and TLS lifetime"). The keys themselves are never deleted: a library
+/// made of this runtime holds them.
 const ACTIVE_BITS: u32 = 16;
 const ACTIVE_MASK: usize = (1 << ACTIVE_BITS) - 1;
 
+/// The thread's two words (above).
+#[derive(Clone, Copy)]
+enum Slot {
+    Word = 0,
+    Live = 1,
+}
+
 #[cfg(unix)]
 mod thread_word {
+    use super::Slot;
     use std::ffi::c_void;
     use std::sync::OnceLock;
 
-    /// The library's key, made on first use, with no destructor.
-    fn key() -> libc::pthread_key_t {
-        static KEY: OnceLock<libc::pthread_key_t> = OnceLock::new();
-        *KEY.get_or_init(|| {
-            let mut key: libc::pthread_key_t = 0;
-            // SAFETY: KEY is the out-parameter; no destructor is registered.
-            let made = unsafe { libc::pthread_key_create(&mut key, None) };
-            assert!(made == 0, "pthread_key_create failed: {made}");
-            key
-        })
+    /// The library's keys, made on first use, with no destructor.
+    fn key(slot: Slot) -> libc::pthread_key_t {
+        static KEYS: OnceLock<[libc::pthread_key_t; 2]> = OnceLock::new();
+        KEYS.get_or_init(|| {
+            [0, 1].map(|_| {
+                let mut key: libc::pthread_key_t = 0;
+                // SAFETY: KEY is the out-parameter; no destructor is registered.
+                let made = unsafe { libc::pthread_key_create(&mut key, None) };
+                assert!(made == 0, "pthread_key_create failed: {made}");
+                key
+            })
+        })[slot as usize]
     }
 
-    pub fn get() -> usize {
+    pub fn get(slot: Slot) -> usize {
         // SAFETY: a key this library made.
-        unsafe { libc::pthread_getspecific(key()) as usize }
+        unsafe { libc::pthread_getspecific(key(slot)) as usize }
     }
 
-    pub fn set(word: usize) {
+    pub fn set(slot: Slot, word: usize) {
         // SAFETY: a key this library made; the slot holds a plain word,
         // never a pointer anything frees.
-        unsafe { libc::pthread_setspecific(key(), word as *const c_void) };
+        unsafe { libc::pthread_setspecific(key(slot), word as *const c_void) };
     }
 }
 
 #[cfg(not(unix))]
 mod thread_word {
+    use super::Slot;
     use std::cell::Cell;
     thread_local! {
-        // (No native library is made off Unix: NATIVE-LIBRARY-MILESTONE-1.md.)
-        static WORD: Cell<usize> = const { Cell::new(0) };
+        // Windows: plain words with no destructor, in the module's own TLS
+        // (WINDOWS-X86-64-MILESTONE-8.md, "Unloading").
+        static WORDS: [Cell<usize>; 2] = const { [Cell::new(0), Cell::new(0)] };
     }
 
-    pub fn get() -> usize {
-        WORD.with(Cell::get)
+    pub fn get(slot: Slot) -> usize {
+        WORDS.with(|w| w[slot as usize].get())
     }
 
-    pub fn set(word: usize) {
-        WORD.with(|w| w.set(word));
+    pub fn set(slot: Slot, word: usize) {
+        WORDS.with(|w| w[slot as usize].set(word));
     }
 }
 
@@ -258,37 +273,47 @@ static NEXT_THREAD: AtomicU64 = AtomicU64::new(1);
 /// for another thread's (std::thread::current()'s ThreadId would register
 /// a destructor: see ACTIVE_BITS).
 fn this_thread() -> u64 {
-    let word = thread_word::get();
+    let word = thread_word::get(Slot::Word);
     let token = (word >> ACTIVE_BITS) as u64;
     if token != 0 {
         return token;
     }
     let token = NEXT_THREAD.fetch_add(1, Ordering::Relaxed);
-    thread_word::set(((token as usize) << ACTIVE_BITS) | (word & ACTIVE_MASK));
+    thread_word::set(Slot::Word, ((token as usize) << ACTIVE_BITS) | (word & ACTIVE_MASK));
     token
 }
 
 /// How many calls of this library run Botlish code on this thread now.
 fn active() -> usize {
-    thread_word::get() & ACTIVE_MASK
+    thread_word::get(Slot::Word) & ACTIVE_MASK
 }
 
 /// One call of this library running Botlish code on this thread, counted
-/// while it lives.
+/// when made, uncounted when dropped -- however the call ends, a panic its
+/// boundary code catches (`guarded`) included. A call of another instance
+/// of the library may run inside one, through C. The end of the outermost
+/// one -- of this library: each library has its own runtime copy, and its
+/// own count -- leaves the thread's own state as the host gave it
+/// (`coroutine::library_call_ended`: on Windows a fiber conversion the
+/// call's coroutines needed is undone, WINDOWS-X86-64-MILESTONE-8.md).
 struct Active;
 
 impl Active {
     fn enter() -> Active {
-        let word = thread_word::get();
+        let word = thread_word::get(Slot::Word);
         assert!(word & ACTIVE_MASK < ACTIVE_MASK, "too many nested calls of one library on a thread");
-        thread_word::set(word + 1);
+        thread_word::set(Slot::Word, word + 1);
         Active
     }
 }
 
 impl Drop for Active {
     fn drop(&mut self) {
-        thread_word::set(thread_word::get() - 1);
+        let word = thread_word::get(Slot::Word) - 1;
+        thread_word::set(Slot::Word, word);
+        if word & ACTIVE_MASK == 0 {
+            super::coroutine::library_call_ended();
+        }
     }
 }
 
@@ -363,20 +388,39 @@ type GenericEntry = unsafe extern "C" fn(*mut Vm, Value, *const Value) -> Value;
 /// into the host's frames (whose frame pointers are not Botlish's to read).
 /// Never inlined, so its frame record exists and lies above every Botlish
 /// frame the call makes.
+/// (The call is counted by its caller, `run_vm`: `Active`.)
 #[inline(never)]
 fn enter(vm: &mut Vm, f: impl FnOnce(&mut Vm) -> Value) -> Value {
     let outer = vm.stack_ceiling;
     let outer_limit = vm.stack_limit;
+    let outer_entry = vm.entry_stack;
     let frame = super::framewalk::frame_record();
     vm.stack_ceiling = frame;
     // The call's own stack bounds its recursion: the thread's, or none on a
-    // stack this instance did not make (Vm::stack_limit_at).
+    // stack this instance did not make (Vm::stack_limit_at), which is then
+    // the stack its collections walk (Vm::entry_stack).
     vm.stack_limit = vm.stack_limit_at(frame);
+    vm.entry_stack = vm.entry_stack_at(frame);
     let result = f(vm);
     vm.stack_ceiling = outer;
     vm.stack_limit = outer_limit;
+    vm.entry_stack = outer_entry;
     // Keeps this frame from becoming a tail call of F.
     std::hint::black_box(result)
+}
+
+/// One instance fewer on this thread (or a Vm that ended without one: a
+/// failed creation, `main`'s): with none left, the thread's pooled
+/// coroutine stacks are freed.
+fn instance_gone(destroyed: bool) {
+    let mut left = thread_word::get(Slot::Live);
+    if destroyed {
+        left = left.saturating_sub(1);
+        thread_word::set(Slot::Live, left);
+    }
+    if left == 0 {
+        super::coroutine::release_pool();
+    }
 }
 
 /// The error of the failed Botlish run on VM, which it then clears.
@@ -574,7 +618,12 @@ pub unsafe extern "C" fn botlish_library_create(program: *const LinkedProgram, i
             let value = run(&mut made, |vm| entry(vm));
             if value == NO_VALUE { Err(botlish_error(&mut made.vm)) } else { Ok(()) }
         };
-        initialized?;
+        if let Err(e) = initialized {
+            drop(made);
+            instance_gone(false);
+            return Err(e);
+        }
+        thread_word::set(Slot::Live, thread_word::get(Slot::Live) + 1);
         let handle = Box::into_raw(Box::new(0u64)) as usize;
         let raw = Box::into_raw(Box::new(made));
         lock(&INSTANCES).insert(handle, Entry { instance: raw, owner: this_thread(), busy: false });
@@ -626,8 +675,11 @@ pub unsafe extern "C" fn botlish_library_main(program: *const LinkedProgram, arg
         let value = run_vm(&mut vm, |vm| entry(vm));
         let outcome = if value == NO_VALUE { Err(botlish_error(&mut vm)) } else { Ok(()) };
         // The Vm -- its heap, statics and context area -- ends here, on
-        // this thread, before the status is returned.
+        // this thread, before the status is returned; and, with no instance
+        // of the library left on the thread, the coroutine stacks the entry
+        // pooled (WINDOWS-X86-64-MILESTONE-8.md, "Unloading").
         drop(vm);
+        instance_gone(false);
         outcome
     })
 }
@@ -680,6 +732,7 @@ pub extern "C" fn botlish_library_destroy(_program: *const LinkedProgram, instan
         };
         // SAFETY: removed from the registry above, so this is its one owner.
         drop(unsafe { Box::from_raw(raw) });
+        instance_gone(true);
         Ok(())
     })
 }
@@ -976,6 +1029,20 @@ pub const SIGNATURES: &[(&str, usize)] = &[
     ("botlish_library_call", 6),
     ("botlish_library_main", 4),
 ];
+
+/// Library NAME's public C names, in the order native::library's
+/// `PublicNames` lists them: the runtime API's forwarders (`NAME_SUFFIX`,
+/// FORWARDERS' order), an application library's `NAME_main` (MAIN), then
+/// every export's symbol (EXPORTS' order) -- what a Windows DLL exports, by
+/// name and nothing else (codegen::aot::link_windows_library).
+pub fn public_names(name: &str, exports: &[ExportDecl], application: bool) -> Vec<String> {
+    FORWARDERS
+        .iter()
+        .map(|f| format!("{name}_{}", f.0))
+        .chain(application.then(|| format!("{name}_{}", MAIN.0)))
+        .chain(exports.iter().map(|e| e.symbol.clone()))
+        .collect()
+}
 
 /// The public names a library reserves for its runtime API (`NAME_SUFFIX`):
 /// an export may not take one.
