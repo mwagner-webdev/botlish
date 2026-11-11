@@ -141,12 +141,6 @@ proc native::library {hir args} {
         if {$windows && ![dict get $options -shared]} {
             throw {NATIVE UNSUPPORTED library} "native::library: a Windows library is its DLL and the DLL's import library, and -shared 0 asks for a static library only, which is not made for windows-x86_64: two static Botlish libraries in one executable would share their runtimes' symbols (WINDOWS-X86-64-MILESTONE-8.md, \"Static COFF libraries\")"
         }
-        if {$windows} {
-            # The toolchain and the runtime archive before anything is
-            # lowered: a missing link.exe is said at once, never after the
-            # whole compilation.
-            library::WindowsToolchain
-        }
     } else {
         if {[dict get $support target] ne $target} {
             throw {NATIVE TARGET} "native::library: the target support package [dict get $support package] supports [dict get $support target], and the library is made for $target"
@@ -186,6 +180,13 @@ proc native::library {hir args} {
         }]
     }
 
+    if {$windows && $support eq ""} {
+        # The toolchain and the runtime archive after the program's own
+        # checks (a program's problem is the program's, whatever the
+        # environment) and before anything is lowered: a missing link.exe is
+        # said at once, never after the whole compilation.
+        library::WindowsToolchain
+    }
     set lowered [lmap record $records {
         dict create symbol ${name}_[dict get $record name] block [dict get $record block] \
             params [lmap {p t} [dict get $record params] {set t}] result [dict get $record result]

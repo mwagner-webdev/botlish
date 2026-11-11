@@ -156,7 +156,9 @@ proc nlExecutable {dir source libs args} {
         }
     }
     set exe [file join $lib main.exe]
-    set language [expr {$cxx ? [list /TP /EHsc /std:c++17] : [list /std:c11]}]
+    # The file's extension says its language: /TP would compile the
+    # libraries on the command line as C++ too.
+    set language [expr {$cxx ? [list /EHsc /std:c++17] : [list /std:c11]}]
     ctool::msvc cl /nologo /O1 /W3 {*}$language [ctool::CrtFlag $crt] /D_CRT_SECURE_NO_WARNINGS \
         /I[file nativename $lib] /Fo[file nativename [file join $dir main.obj]] /Fe[file nativename $exe] \
         [file nativename $main] {*}[lmap l $libs {file nativename $l}] {*}$flags
@@ -1610,8 +1612,8 @@ test nl-windows-diagnostics {a missing linker, an unusable runtime archive and a
     lappend results [dict get $options -errorcode] [string match "*fake.lib*" $message]
     unset ::env(BOTLISH_NATIVE_RUNTIME)
     foreach {name source} {
-        nolib "import std::ffi::c\n\nextern c library \"botlish_no_such_library\"\n\nextern c fn labs(x: std::ffi::c::Long) -> std::ffi::c::Long\n\nexported c fn f(n: int) -> int:\n    labs(n) + 0\n"
-        nosym "import std::ffi::c\n\nextern c fn botlish_no_such_function(x: std::ffi::c::Long) -> std::ffi::c::Long\n\nexported c fn f(n: int) -> int:\n    botlish_no_such_function(n) + 0\n"
+        nolib "import std::ffi::c\n\nextern c library \"botlish_no_such_library\"\n\nextern c fn labs(x: std::ffi::c::Long) -> std::ffi::c::Long\n\nexported c fn f(n: int) -> int:\n    if n < -1000 or n > 1000:\n        return 0\n    labs(n) + 0\n"
+        nosym "import std::ffi::c\n\nextern c fn botlish_no_such_function(x: std::ffi::c::Long) -> std::ffi::c::Long\n\nexported c fn f(n: int) -> int:\n    if n < -1000 or n > 1000:\n        return 0\n    botlish_no_such_function(n) + 0\n"
     } {
         nlWrite [file join $dir $name.bot] $source
         catch {nlBuild [nlHir [file join $dir $name.bot]] -name $name -out [file join $dir lib]} message options
@@ -1684,11 +1686,13 @@ outer(20) = 41, the stack trace reached its caller: yes}
 # after the loader lock is released. What runs at load and at a thread's
 # attach or detach is what the DLL's sections hold: the C runtime's entry
 # point and its initializer tables (.CRT$XC*, .CRT$XI*) and the TLS
-# callbacks (.CRT$XL*). The program object holds none of them, and the
-# runtime archive -- Botlish's runtime, the Rust standard library and every
-# dependency -- holds exactly one: the standard library's TLS callback,
-# which runs thread-local destructors when a thread or the process detaches
-# (and nothing at attach). The DLL's TLS directory has that one callback.
+# callbacks (.CRT$XL*). The program object holds none of them; the runtime
+# archive -- Botlish's runtime, the Rust standard library and every
+# dependency -- holds no initializer, and at most the standard library's TLS
+# callback, which runs thread-local destructors when a thread or the process
+# detaches and nothing at attach (a cross-built archive has it; the Windows
+# toolchain's of 2026-11 has none). The DLL has no more TLS callbacks than
+# the archive offers (WINDOWS-X86-64-MILESTONE-8.md, section 7: none).
 # The section names of the COFF object DATA: a plain object (its section
 # table after the 20-byte header) or a "bigobj" one (Sig1 0, Sig2 0xFFFF,
 # Version 2 or more: the table after its 56-byte header); none for anything
@@ -1735,7 +1739,7 @@ proc nlArchiveCrtSections {path} {
     return $found
 }
 
-test nl-windows-loader-lock {loading the DLL runs no Botlish code: no initializer of the program or the runtime, one TLS callback (the standard library's destructors)} -constraints windowsLibraries -body {
+test nl-windows-loader-lock {loading the DLL runs no Botlish code: no initializer of the program or the runtime, no TLS callback but the standard library's destructors} -constraints windowsLibraries -body {
     set dir [nlDir]
     set built [nlLibrary $dir chk $::nlChecked]
     nlWrite [file join $dir chk.nir] [native::nir [nlHir [file join $dir chk.bot]] -exports [lmap r [dict get $built exports] {
@@ -1747,9 +1751,12 @@ test nl-windows-loader-lock {loading the DLL runs no Botlish code: no initialize
     close $channel
     set programSections [lsearch -all -inline [nlCoffSections $object] {.CRT$*}]
     set runtimeSections [nlArchiveCrtSections [file join [file dirname [native::binary]] botlish_runtime.lib]]
+    set initializers [lsearch -all -inline -regexp $runtimeSections {^\.CRT\$X[CI]}]
+    set callbackSections [lsearch -all -inline -glob $runtimeSections {.CRT$XL*}]
     set facts [native::pe::facts [dict get $built shared]]
-    list $programSections $runtimeSections [dict get $facts tls] [llength [dict get $facts tlsCallbacks]] [expr {[dict get $facts entry] != 0}]
-} -result {{} {{.CRT$XLB}} 1 1 1}
+    list $programSections $initializers [expr {[llength [dict get $facts tlsCallbacks]] <= [llength $callbackSections]}] \
+        [expr {[dict get $facts entry] != 0}]
+} -result {{} {} 1 1}
 
 # The generated header from C++ (extern "C", no name mangling: the host links
 # the import library by the undecorated names), and as C and C++ at MSVC's
@@ -2135,8 +2142,8 @@ test nl-library-export-list {-exports exports the entry program's top-level func
     set dir [nlDir]
     set path [file join $dir listed.bot]
     nlWrite $path "fn plus(a: int, b: int) -> int:\n    a + b\n\nfn loose(a) -> int:\n    1\n"
-    set built [native::library [nlHir $path] -name listed -out [file join $dir lib] -exports plus]
-    catch {native::library [nlHir $path] -name listed -out [file join $dir lib] -exports {loose absent}} message options
+    set built [nlBuild [nlHir $path] -name listed -out [file join $dir lib] -exports plus]
+    catch {nlBuild [nlHir $path] -name listed -out [file join $dir lib] -exports {loose absent}} message options
     set exe [nlExecutable $dir "[nlPrelude listed]
 int main(void) {
     listed_instance *in; listed_error *e = NULL; int64_t r;

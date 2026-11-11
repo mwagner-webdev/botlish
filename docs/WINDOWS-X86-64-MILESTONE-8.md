@@ -266,26 +266,30 @@ What runs under the loader lock is what the DLL's initializer tables and
 TLS directory hold, so that is what was checked:
 
 * **The runtime archive** (botlish_runtime.lib: Botlish's runtime, the Rust
-  standard library, every dependency; cross-built and on Windows) has one
-  section of the C runtime's initializer and TLS ranges in all its 1,826
-  members: the standard library's `.CRT$XLB`, its TLS callback, which runs
-  thread-local destructors when a thread or the process *detaches* and does
-  nothing at attach. No `.CRT$XC*` or `.CRT$XI*` initializer (no static
-  constructor), and no member has a `.drectve` section (so none carries
-  `/EXPORT` or `/DEFAULTLIB` directives). 1,379 of the members are short
-  import objects of the standard library's and windows-sys' raw-dylib
-  imports.
+  standard library, every dependency) holds no `.CRT$XC*` or `.CRT$XI*`
+  initializer (no static constructor) in any member. Built on the Windows
+  runner (rustc 1.99.1) it has no `.CRT$` section at all; cross-built from
+  Linux (1,826 members, 1,379 of them short import objects of the standard
+  library's and windows-sys' raw-dylib imports) it has one, the standard
+  library's `.CRT$XLB`, its TLS callback, which runs thread-local
+  destructors when a thread or the process *detaches* and does nothing at
+  attach. No member of the cross-built archive has a `.drectve` section (so
+  none carries `/EXPORT` or `/DEFAULTLIB` directives); E3 shows the same of
+  the Windows-built one by its effect (nothing exported without the .def
+  file).
 * **The program object** has no `.CRT$` section.
-* **The DLL**: no TLS callback at all in the census's DLLs (E1): the
-  linker keeps the standard library's `.CRT$XLB` only where something
-  registers a thread-local destructor, and these runtimes did not. Its
+* **The DLL**: a TLS directory (the C runtime's, for the standard
+  library's `#[thread_local]` statics) with no callback at all, in the
+  census's DLLs (E1) and in `nl-windows-loader-lock`'s. Its
   entry point is link.exe's default for `/DLL` (no `/ENTRY` is given), the
   C runtime's `_DllMainCRTStartup`: it initializes the C runtime and calls
   `DllMain`, which is the C runtime's empty default -- neither the program
   object nor any member of the runtime archive defines or references a
-  `DllMain` (llvm-nm over the cross-built archive). PENDING-TLS-TEST
+  `DllMain` (llvm-nm over the cross-built archive).
 
-`nl-windows-loader-lock` checks all three on every run, and the mutant
+`nl-windows-loader-lock` checks all three on every run (no initializer in
+the program object or the archive, no more TLS callbacks than `.CRT$XL*`
+sections in the archive, the C runtime's entry point), and the mutant
 `loader-lock-initializer` (a `.CRT$XCU` initializer added to the runtime)
 is killed by it. Section 11 has what runs at unload.
 

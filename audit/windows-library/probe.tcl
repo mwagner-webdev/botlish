@@ -147,7 +147,7 @@ foreach {name source} $sources {
     row "E1 $name exports" "[llength $exports] (public functions: [llength [dict get $public $name]]; equal: [expr {[lsort $exports] eq [lsort [dict get $public $name]]}])"
     set facts [native::pe::facts [dict get $built $name shared]]
     row "E1 $name imports" [join [dict get $facts imports] {, }]
-    row "E1 $name TLS callbacks" "[llength [dict get $facts tlsCallbacks]], entry point RVA [format 0x%x [dict get $facts entry]]"
+    row "E1 $name TLS callbacks" "[llength [dict get $facts tlsCallbacks]] (a TLS directory: [dict get $facts tls]), entry point RVA [format 0x%x [dict get $facts entry]]"
     lassign [msvc dumpbin /nologo /headers [file nativename [dict get $built $name shared]]] status headers
     foreach pattern {{size of stack reserve} {DLL characteristics} {Dynamic base} {NX compatible} {High Entropy Virtual Addresses}} {
         foreach line [split [string map {"\r" ""} $headers] \n] {
@@ -276,7 +276,7 @@ lassign [staticHost $host5 one_only one_only.c {one_static.lib} {}] outcome text
 row "E5 one static, alone" "$outcome: [firstLines [string trim $text] 3]"
 lassign [staticHost $host5 both both.c {one_static.lib two_static.lib} {}] outcome text
 set duplicates [regexp -all {LNK2005} $text]
-row "E5 both static" "$outcome: $duplicates LNK2005 (already defined) errors; first: [firstLines [lindex [regexp -inline -line {^.*LNK2005.*$} $text] 0] 1]"
+row "E5 both static" "$outcome: $duplicates LNK2005 (already defined) errors; first: [firstLines [lindex [regexp -inline -line {^.*LNK2005.*$} $text] 0] 1]; [firstLines [lindex [split [string trim $text] \n] end] 1]"
 lassign [staticHost $host5 forced both.c {one_static.lib two_static.lib} {/FORCE:MULTIPLE}] outcome text
 row "E5 both, /FORCE:MULTIPLE" "$outcome: [regexp -all {LNK4006} $text] LNK4006 warnings; [firstLines [lindex [split [string trim $text] \n] end] 1]"
 
@@ -339,7 +339,10 @@ if {$llvm eq ""} {
                 lappend renamedObjects($name) $renamed
             }
         }
-        lassign [msvc lib /NOLOGO /OUT:[file nativename [file join $host6 ${name}_static.lib]] {*}[lmap o $renamedObjects($name) {file nativename $o}]] status text
+        # Some 1,900 objects: their names in a response file (a command line
+        # holds 32,767 characters).
+        write [file join $host6 $name.rsp] [join [lmap o $renamedObjects($name) {string cat \" [file nativename $o] \"}] \n]\n
+        lassign [msvc lib /NOLOGO /OUT:[file nativename [file join $host6 ${name}_static.lib]] @[file nativename [file join $host6 $name.rsp]]] status text
         row "E6 $name renamed" "[llength $defined] defined symbols renamed in [llength $objects] objects ([expr {$failed}] failed), [llength $imports] import objects kept; archive: [expr {$status ? "failed [firstLines $text 3]" : "[file size [file join $host6 ${name}_static.lib]] bytes"}]"
         file copy -force [file join $out $name $name.h] $host6
     }
