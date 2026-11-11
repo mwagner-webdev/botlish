@@ -864,6 +864,24 @@ The dispatched runs, read until each had completed (2026-11-10, 10:00 to
 Read again at 14:25, 16:30, 18:30 and 21:30 UTC: every run has completed,
 as above. Every dispatched workflow is green at 19cc383.
 
+**The merge.** Main at 73c32da merged into the branch (d421a3f) without a
+conflict. Main's latest completed runs (eeaf1e3) were green in tests,
+tests (macos arm64) and tests (windows x86-64); tests (linux arm64) failed
+in 8 jobs before any test, each at `curl: (6) Could not resolve host:
+ports.ubuntu.com` while installing Tcl's packages (read in the logs); the
+runs at 73c32da were queued. On the merged tree, with the native backend
+rebuilt: `tools/mutant-catalogs.tcl` (106 catalogs, 3,632 mutants, 0
+problems), `tools/compilerpedia.tcl check` (0 problems), `tests/local.tcl`
+over the files the emission rules name (emission-claims, csv-emission,
+dfa, interval-sets, dfa-workloads, static-compile,
+static-compile-expected-diagnostics, compiler-service, hir-interchange,
+hir-cache, hir-range, diagnostic-recovery, syntax-recovery, lsp: 713
+passed and 0 failed on interp and on compile; their 7 golden suites 250 of
+250 on all four backends), the dependency census (0 differences from its
+record), and the JSON and CSV probes (trusted, no question asked, every
+claim reused by a second compilation). Main's push runs test the merged
+tree in full.
+
 ## 22. Production files changed
 
 One: `hir/emission.tcl`, 273 lines of code added and 5 removed (comments
@@ -917,11 +935,9 @@ AGENTS.md's emission rules.
 
 ## 24. Recommendation
 
-Merge: every dispatched CI run is green (section 21). Main has moved on
-(ba93014 when last read, 21:35 UTC); it merges into the branch without a
-conflict and changes neither `hir/emission.tcl` nor the emission tests and
-audits, but it changes other `hir/` files, so the merge needs its own CI
-run before it lands. The one
+Merge: every dispatched CI run is green (section 21), and the merged tree
+passed its checks (section 21, "The merge"); main's push runs test it in
+full. The one
 certificate hole the census left -- V2 -- is closed with the four forms of
 it this milestone found, by a question asked only where the walk reads a
 fact of code it does not walk, answered from the HIR's own references, and
