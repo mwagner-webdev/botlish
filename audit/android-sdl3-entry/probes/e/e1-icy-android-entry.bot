@@ -1,0 +1,21 @@
+# Probe E1 (ANDROID-SDL3-NATIVE-APPLICATION-ENTRY-CENSUS-MILESTONE-1.md):
+# probe D1's entry for android-aarch64. Icy Tower's modules are unchanged;
+# the IO context is the application's own (android_log.bot), because
+# std::linux::* is UNSUPPORTED-PLATFORM for Android. Built as a native
+# library with the Android target support package, in the probe's scratch
+# tree without LIBRARY-TOP-LEVEL, to see what an APK would load: its
+# NEEDED libraries, alignment and symbols.
+import android_log
+import game
+import sdl
+import std::io
+
+exported c fn version() -> int:
+    1
+
+with context android_log::create()
+with context sdl::create()
+
+game::main(["--autopilot", "--fixed-step", "--frames", "600", "--seed", "17"]):
+    on std::io::WriteFailed:
+        unit

@@ -1,0 +1,6 @@
+# Probe A3: an export declaring a context parameter. Expected today:
+# EXPORT-SIGNATURE.
+import std::io
+
+exported c fn run(context io: std::io::IO) -> int:
+    0

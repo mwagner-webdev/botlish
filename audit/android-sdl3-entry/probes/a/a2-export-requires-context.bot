@@ -1,0 +1,12 @@
+# Probe A2: an export calling an application function that needs an
+# installed context. Expected today: EXPORT-ENVIRONMENT (requires).
+import std::io
+
+fn greet(context io: std::io::IO) errors std::io::WriteFailed:
+    std::io::print_line("hello")
+
+exported c fn run() -> int:
+    greet():
+        on std::io::WriteFailed:
+            return 1
+    0
