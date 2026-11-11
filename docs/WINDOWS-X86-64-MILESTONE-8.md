@@ -645,7 +645,17 @@ archive), `elfLibraries` (Linux's archive and symbols), `windowsLibraries`,
 
 Linux x86-64, locally: 30 run, 0 failed (12 skipped: the Windows tests and
 the refusal); with `BOTLISH_NATIVE_GC_STRESS=1`, the same. Windows x86-64
-(MSVC, CI): WINDOWS-TESTS-PENDING.
+(MSVC; the canary of run 42945387449 at 8031ed76): 39 run, 0 failed (3
+skipped: `nl-symbols` and `nl-two-libraries-shared`, ELF's, and
+`nl-unsupported-host`); every host built by cl and run plainly and, where
+the test says so (`nlRunBoth`), under GC stress. Getting there took three
+MSVC runs: the first (42922582948) failed five tests -- one a defect of
+`native::library` (the toolchain asked before the program's own checks),
+four of the tests themselves (a `/TP` that compiled the import library as
+C++, a C `long` argument unproven in 32 bits, two builds outside vcvars'
+environment, a TLS callback count taken from the cross-built archive);
+the second (42933903890) failed `nl-manifest` alone, two builds' manifests
+differing, which `/Brepro` fixed (section 4).
 
 **The fuzzer.** `audit/native-library/tools/fuzz.tcl` generates a library
 of eight random exports -- one to eight parameters of int, bool, Float64
