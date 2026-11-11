@@ -809,11 +809,58 @@ deletes the old files before linking; `at-toolchain-failures`,
 `audit/host-startable-library/tools/mutants.txt`: 38 mutants, each naming the
 tests that must kill it (`!!`); a mutant counts as killed only when one of
 its named tests fails. Result (**observed**, with ANDROID_NDK_ROOT and
-BOTLISH_ANDROID_ROOTS set): MUTATION_RESULT_PENDING
+BOTLISH_ANDROID_ROOTS set; the log is
+`audit/host-startable-library/results/mutate-linux-x86_64.txt`): **38
+mutants, 38 killed, 0 survived, 0 untested**, every one by a detector its
+`!!` line names. They cover the entry semantics (admission, the dispatch,
+initialization once, the M4 selector, authority), the C ABI (the header,
+the manifest, the public names, argv, statuses, error ownership, the
+fingerprint), threads and lifetime (reentrancy, the stack check, the VM's
+drop, the owner token), the cross-target link plan (the target passed, the
+plan kept, judged for the target, the target's runtime, 16 KiB alignment)
+and the generator (the NDK's clang, an Android sysroot, the hidden NDK
+path).
 
 | Mutant | Killed by |
 |---|---|
-MUTATION_TABLE_PENDING
+| `app-top-level-refused` | application-library.test (al-create-initializes-only, al-main-cli) |
+| `ordinary-top-level-admitted` | application-library.test (al-ordinary) |
+| `ordinary-no-exports-admitted` | application-library.test (al-ordinary) |
+| `create-runs-entry` | application-library.test (al-create-initializes-only, al-thread-entries) |
+| `main-skips-entry` | application-library.test (al-contexts, al-create-initializes-only) |
+| `init-only-runs-entry` | application-library.test (al-create-initializes-only, al-dispatch-nir) |
+| `dispatch-missing-for-application` | application-library.test (al-create-initializes-only, al-dispatch-nir) |
+| `modules-initialized-twice` | application-library.test (al-dispatch-nir) |
+| `entry-selects-thread-entry` | application-library.test (al-thread-entries) |
+| `export-context-admitted` | application-library.test (al-authority) |
+| `missing-context-admitted` | application-library.test (al-authority) |
+| `export-named-main` | application-library.test (al-library-symbol-main) |
+| `main-forwarder-missing` | application-library.test (al-create-initializes-only, al-symbols) |
+| `main-not-in-header` | application-library.test (al-create-initializes-only, al-header-manifest) |
+| `manifest-no-application` | application-library.test (al-header-manifest) |
+| `ordinary-manifest-schema-3` | application-library.test (al-ordinary) |
+| `public-names-without-main` | application-library.test (al-create-initializes-only, al-symbols) |
+| `argv-not-utf8-accepted` | application-library.test (al-argv) |
+| `argv-empty` | application-library.test (al-argv, al-contexts) |
+| `argc-negative-accepted` | application-library.test (al-argv) |
+| `failure-reported-ok` | application-library.test (al-errors, al-stack) |
+| `error-not-registered` | application-library.test (al-errors) |
+| `stale-error-pointer` | application-library.test (al-errors) |
+| `abi-ignores-library` | rust:abi_fingerprint (runtime::aotimage::tests::abi_fingerprint_constant_is_the_digest_of_its_words) |
+| `signatures-miss-main` | rust:signatures_are_the_forwarders (runtime::library::tests::signatures_are_the_forwarders) |
+| `reentrancy-not-refused` | application-library.test (al-reentrant) |
+| `calls-not-counted` | application-library.test (al-reentrant) |
+| `main-stack-unchecked` | application-library.test (al-stack) |
+| `vm-never-dropped` | application-library.test (al-repeated) |
+| `thread-token-shared` | native-library.test (nl-threads) |
+| `link-plan-host-target` | android-target.test (at-link-plan-cross) |
+| `link-plan-dropped` | android-target.test (at-link-plan-cross) |
+| `cross-plan-judged-for-host` | rust:link_plan_for_another_target (codegen::aot::tests::link_plan_for_another_target_is_that_targets); android-target.test (at-link-plan-cross-refusals) |
+| `android-linked-with-host-runtime` | android-target.test (at-application-library, at-library-elf) |
+| `android-alignment-4k` | android-target.test (at-application-library, at-library-elf) |
+| `android-binding-host-clang` | c-bindgen.test (cb-android-configuration, cb-sdl3-current-android) |
+| `android-binding-any-sysroot` | c-bindgen.test (cb-android-configuration) |
+| `android-binding-ndk-path-shown` | c-bindgen.test (cb-android-configuration, cb-sdl3-current-android) |
 
 Six mutants of other catalogs whose text moved (android-aarch64-target's
 `run-with-target`, `target-not-passed`, `thread-affinity-ignored`;
@@ -828,7 +875,66 @@ REGRESSIONS_PENDING
 
 ## 22. Performance and footprint
 
-PERFORMANCE_PENDING
+Measured here (**observed**; 4-core Xeon 2.1 GHz container, single runs,
+noisy; `audit/host-startable-library/tools/measure.sh`, results in
+`audit/host-startable-library/results/measure-linux-x86_64.txt`).
+
+**Compiler and footprint:**
+
+| Aspect | Before (`eeaf1e3e`) | After | Note |
+|---|---|---|---|
+| single-file compiler (`single/build.sh`) | 15,560,718 bytes | 15,572,402 bytes | +11,684 (0.08%): the new runtime entry, the forwarder, the lowering and library code, the Android row |
+| driver `botlish-native` (release, with debug information) | 61,163,576 | 61,214,424 | +50,848 |
+| runtime archive `libbotlish_runtime.a` (with debug information) | 41,218,306 | 41,321,960 | +103,654 (packed stripped into the single executable) |
+| `-version` of the single executable (10 runs, twice) | 127-134 ms | 136-145 ms | noise: a test file ran beside it |
+| `-emit-native-library` of a one-export program, single executable | 0.66 s | 0.64 s | the same work |
+| `-emit-native-library -application`, the smallest entry | -- | 0.49-0.52 s | (checkout: 0.52 s against 0.44 s for the ordinary one-export library: noise of one run each) |
+| the driver's `link-plan --target aarch64-linux-android` | refused | 2 ms per call, the driver's start included | |
+| manifest generation | -- | not separately measurable (Tcl string building inside the build above) | |
+| application library sizes, smallest entry | -- | libempty.so 974,392 (an ordinary one-export library: 847,512) | the entry's code and `NAME_main` |
+
+No Android Activity, SDL or Gradle code entered the compiler: the additions
+are generic.
+
+**Runtime** (a C host linked with the static library):
+
+| Aspect | Value |
+|---|---|
+| `NAME_main` of an empty entry, on a worker thread (VM made, module initialization, entry, VM dropped) | 3.0 us per call (2,000 calls) |
+| the same on the process's main thread | 17.4 us per call |
+| `NAME_create` + `NAME_destroy` of the same library, main thread | 17.8 us per pair |
+| two contexts and a 1,000-frame loop, worker thread | 8.8 us per call |
+| the same, main thread | 25.8-26.0 us per call |
+| 2,000 calls on 4 threads at once (500 each) | 5.3 ms (17.6 ms on one worker thread: about 3.3x on 4 cores) |
+| under GC stress, main thread | 18.1 us (empty), 27.6 us (two contexts) |
+| resident memory after 10 calls / after 2,000 | 3,404 KiB / 3,468 KiB |
+| stack: non-tail recursion on a 1 MiB thread | NATIVE LIMIT STACK, the host goes on (`al-stack`) |
+
+The main thread's extra 14-17 us per VM is glibc's `pthread_getattr_np`,
+which reads `/proc/self/maps` for the process's main thread when a new VM
+finds its stack's bounds (`NativeStack`); on any other thread it is a few
+system calls. An SDL host's SDLThread is such a thread. The same cost was
+already `NAME_create`'s.
+
+**Icy Tower, 600 autopilot frames, SDL's dummy driver** (wall / user,
+seconds, five runs each):
+
+| Run | Executable | Application library under `SDL_RunApp` |
+|---|---|---|
+| 1 | 0.325 / 0.317 | 0.322 / 0.303 |
+| 2 | 0.321 / 0.315 | 0.370 / 0.365 |
+| 3 | 0.336 / 0.331 | 0.311 / 0.309 |
+| 4 | 0.346 / 0.334 | 0.306 / 0.305 |
+| 5 | 0.336 / 0.322 | 0.344 / 0.331 |
+
+No difference beyond the noise: the game runs the same code in both, and
+one `NAME_main` call costs microseconds against a 300 ms run. The
+architectural point is not speed but what the host-driven shape could not
+keep (contexts, resources, state), as the census measured.
+
+**Android artifacts:** libhello.so 1,100,232 bytes (744,976 stripped),
+libicy.so 1,283,560 (909,536), the shim 6,048 (4,624), Android's
+libSDL3.so 12,141,504 (2,401,784): section 16.
 
 ## 23. Remaining limitations
 
