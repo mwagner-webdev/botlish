@@ -790,7 +790,9 @@ merged (0a518ba4, 2026-11-09). Nothing was implemented a second time. The
 merged correction was checked again on main as it now is (73c32da8), the
 CI this report left pending was read, the census rows the milestone owed
 were added, and one channel of memo validity the shortcut audit had not
-exercised was probed and pinned.
+exercised was probed and pinned. Main then merged the binding provenance
+this milestone had deferred, and everything was checked again on that tree
+(22.6).
 
 ### 22.1 CI at the merge commit
 
@@ -835,9 +837,9 @@ Locally, on a 4-core container with the native backend built:
 | `audit/emission-identity/tools/structure.tcl -seeds 1-40` | identical to `results/structure.md` but for seed 14's discard message, which now ends "(result type: list)" (9a714bd0's wording): 39 programs, 330 claims, 2,604 runs, 0 false certificates, 0 programs whose verdicts depend on history, the same 2 precision losses. `results/structure.md` is regenerated |
 | `audit/emission-dependencies/tools/census.tcl` | 0 differences from its record, 0 false certificates, the same 20 open (deferred) cases |
 | the 15 mutants of section 14 | 15 killed |
-| the whole catalog (`audit/emission-claims/tools/mutate.tcl`) | 102 mutants (with 22.4's), 102 killed, 0 survived, in 3 min 53 s. Each of the other 101 is killed by the same tests as in the committed run, `ec-memo-bindings` joining them for `valid-ignores-functions` and `fingerprint-ignores-constants` (`results/mutants.md` regenerated) |
+| the whole catalog (`audit/emission-claims/tools/mutate.tcl`) | 102 mutants (with 22.4's), 102 killed, 0 survived, in 3 min 53 s. Each of the other 101 is killed by the same tests as in the committed run, `ec-memo-bindings` joining them for `valid-ignores-functions` and `fingerprint-ignores-constants` (the committed `results/mutants.md` is the merged tree's run, 22.6) |
 | `tools/mutant-catalogs.tcl` | 106 catalogs, 3,614 mutants (with 22.4's), 0 problems |
-| tests/golden-duplicates.test, tests/golden.test | 4 of 4, 9 of 9 (after 22.5) |
+| tests/golden-duplicates.test, tests/golden.test | 4 of 4, 9 of 9 (after 22.5; again on the merged tree of 22.6) |
 
 ### 22.4 Meaning carried by bindings, across compilations
 
@@ -875,13 +877,17 @@ top-level emitter beside the edited nested one) stayed proven (observed).
 
 Seven of them are now `ec-memo-bindings` (tested), with the mutant
 `fingerprint-outer-binding-name-only`: `CanonBinding` keeps an outer
-binding's name and drops its exact value and type facts. Nothing else in
-either test file kills it (tested: under it, without `ec-memo-bindings`,
-tests/emission-claims.test passes 123 of 123 and tests/interval-sets.test
-37 of 37), and under it three of the seven cases (the
-captured local, the module binding, the moved capture) reuse the first
-program's certificate for a second program a fresh compilation rejects:
-false certificates. The other four are held by other channels: a
+binding's name and drops its exact value and type facts. At 73c32da8
+nothing else in either test file killed it (tested: under it, without
+`ec-memo-bindings`, tests/emission-claims.test passed 123 of 123 and
+tests/interval-sets.test 37 of 37). After main's binding provenance was
+merged (22.6), `ec-provenance-memo` kills it too, through its module
+binding whose exact value changes (tested: the same run on the merged
+tree fails that test alone, 137 of 138); the captured local and the moved
+capture are caught by `ec-memo-bindings` alone. Under the
+mutant three of the seven cases (the captured local, the module binding,
+the moved capture) reuse the first program's certificate for a second
+program a fresh compilation rejects: false certificates. The other four are held by other channels: a
 parameter's type facts at its uses, the callee's fingerprint in the read
 set, the function value's type. This is accepted programs' memo validity,
 not the binding provenance the milestone defers, which is about rejected
@@ -890,19 +896,47 @@ programs' diagnostics (section 19.2).
 ### 22.5 Golden census rows
 
 AGENTS.md: a new Tcl test gets a census row. This milestone's 13 tests,
-and the 15 `ec-callee-*` tests of EMISSION-CALLEE-DEPENDENCY-CORRECTNESS-
-MILESTONE-1.md, had none, and the names file lacked them, so the manifest
-knew 95 of tests/emission-claims.test's tests. The 28, and
-`ec-memo-bindings`, now have rows (KEEP-INTERNAL, classified as the file's
-other 95) and names lines; `tests/golden/manifest.tsv` is regenerated
-(13,722 to 13,751 rows: those 29 added, nothing else changed), and
+the 15 `ec-callee-*` tests of EMISSION-CALLEE-DEPENDENCY-CORRECTNESS-
+MILESTONE-1.md and, once main was merged (22.6), the 15 tests
+EMISSION-BINDING-PROVENANCE-CORRECTNESS-MILESTONE-1.md added (14
+`ec-provenance-*`, `ec-callee-before-arguments`) had none, and the names
+file lacked them: the manifest knew 95 of tests/emission-claims.test's
+139 tests. The 43, and `ec-memo-bindings`, now have rows (KEEP-INTERNAL,
+classified as the file's other 95) and names lines (every one passed in
+the run that wrote them); `tests/golden/manifest.tsv` is regenerated
+(13,722 to 13,766 rows: those 44 added, nothing else changed), and
 `merge.tcl -check 1` passes.
 
-### 22.6 The final questions, on main
+### 22.6 After main's binding provenance
 
-The answers of section 21 stand on main at 73c32da8: no history tested --
+While this addendum was written, main merged
+EMISSION-BINDING-PROVENANCE-CORRECTNESS-MILESTONE-1.md (f49fd76e): the
+census's section 21.3, which this milestone deferred. It changes
+`hir/emission.tcl` again (a binding read from a diagnosed declaration makes
+a claim dependent, and a compilation with a resolution diagnostic neither
+reuses nor memoizes a certificate) and states that it keeps this
+milestone's two corrections exactly. The branch merged main; on the merged
+tree (observed, locally):
+
+| check | result |
+|---|---|
+| tests/emission-claims.test | 139 of 139 (main's 138 and `ec-memo-bindings`) |
+| tests/csv-emission.test | 36 of 36 |
+| `repro.tcl` | identical to `results/repro-after.md` but for its header; 0 false certificates |
+| `structure.tcl -seeds 1-40` | byte-identical to `results/structure.md` (22.3): 0 false certificates, 0 programs whose verdicts depend on history, none dependent, the same 2 precision losses |
+| `bindings.tcl` | 12 cases, 0 depending on the memo, 0 false certificates |
+| `census.tcl` | 0 differences from the record main's milestone updated; 0 false certificates; 6 open cases (20 before it: its own result) |
+| the whole catalog | 121 mutants (main's 120 and 22.4's), 121 killed, 0 survived, in 6 min 7 s; each of main's 120 killed by the same tests as in main's committed run, `ec-memo-bindings` joining `valid-ignores-functions` and `fingerprint-ignores-constants` (`results/mutants.md` regenerated from this run) |
+| `tools/mutant-catalogs.tcl` | 106 catalogs, 3,633 mutants, 0 problems |
+
+### 22.7 The final questions, on main
+
+The answers of section 21 stand on main at 73c32da8, and on the tree with
+main's binding provenance merged: no history tested --
 a fresh compilation, the memo after the six histories, the service's
 revisions, interchange with the memo on and off, and now the memo after an
 edit of a binding the claimed function reads -- yields a false
-certificate. Nothing new was found beyond the two defect families, and no
-claim changed its verdict.
+certificate. Nothing new was found beyond the two defect families, and
+this addendum changes no production code and no claim's verdict (the
+verdicts main's binding provenance changed are its own, by design: its
+report).

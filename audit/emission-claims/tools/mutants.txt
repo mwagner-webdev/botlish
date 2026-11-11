@@ -708,8 +708,8 @@ proc hir::emission::NativeMayFail {name} {
         }
 >>>>
 
-@@ callee-nested-untainted the callee is read only for a call that is a statement of the function's own body, not one nested in an expression, a condition, a loop or a handled call
-%% match ec-callee-positions
+@@ callee-nested-untainted the callee is read only for a call that is a statement of the function's own body, not one nested in an expression, a condition, a loop or a handled call (since EMISSION-BINDING-PROVENANCE-CORRECTNESS-MILESTONE-1.md a nested unresolved callee whose call is reached is caught again by the provenance question of a call through a value; ec-callee-before-arguments holds the call the walk never reaches)
+%% match ec-callee-positions ec-callee-before-arguments
 ## hir/emission.tcl
 <<<<
         Taint $callee
@@ -724,11 +724,9 @@ proc hir::emission::NativeMayFail {name} {
 ## hir/emission.tcl
 <<<<
                 Read $t $vals
-            }
-            Failing $s
+            } elseif {[CalleeDependent $callee]} {
 ====
-            }
-            Failing $s
+            } elseif {[CalleeDependent $callee]} {
 >>>>
 
 @@ never-helper-judged a never helper's code is judged, not only read: what it cannot follow (a trait operation, EMIT-UNSUPPORTED) rejects an accepted program's claim
@@ -765,13 +763,11 @@ proc hir::emission::NativeMayFail {name} {
 ## hir/emission.tcl
 <<<<
                 Read $t $vals
-            }
-            Failing $s
+            } elseif {[CalleeDependent $callee]} {
 ====
                 Read $t $vals
                 set ::hir::emission::tainted 1
-            }
-            Failing $s
+            } elseif {[CalleeDependent $callee]} {
 >>>>
 
 @@ handled-taint-scoped a handled call's taint is the handler's, dropped with its failure states
@@ -852,7 +848,7 @@ proc hir::emission::NativeMayFail {name} {
 %% match ec-callee-service ec-service
 ## hir/emission.tcl
 <<<<
-        dependent { return "emits [dict get $record recognizer]: not checked -- its code holds another diagnostic" }
+        dependent { return "emits [dict get $record recognizer]: not checked -- its code, or code whose facts it reads, holds another diagnostic" }
 ====
         dependent { return "emits [dict get $record recognizer]: certified to emit [dict get $record recognizer]: every normal completion has yielded exactly one token, every prefix it yields is viable; its token completes on its own last symbol" }
 >>>>
@@ -883,9 +879,9 @@ proc hir::emission::NativeMayFail {name} {
 %% match ec-identity-same-name ec-identity-memo-history ec-identity-service
 ## hir/emission.tcl
 <<<<
-    if {$useMemo && $identified && [dict exists $memo $id]} {
+    if {$useMemo && $identified && $trusted && [dict exists $memo $id]} {
 ====
-    if {$useMemo && [dict exists $memo $id]} {
+    if {$useMemo && $trusted && [dict exists $memo $id]} {
 >>>>
 <<<<
         if {[dict exists $ambiguous $name]} { return [list 0 "$name names more than one function"] }
@@ -896,18 +892,18 @@ proc hir::emission::NativeMayFail {name} {
 %% match ec-identity-read-set ec-identity-composition ec-identity-memo-sequence
 ## hir/emission.tcl
 <<<<
-        if {$useMemo && $identified && [ReadsIdentified $readset]} {
+        if {$useMemo && $identified && $trusted && [ReadsIdentified $readset]} {
 ====
-        if {$useMemo} {
+        if {$useMemo && $trusted} {
 >>>>
 
 @@ memo-read-set-unchecked identity: a proof that read two functions of one name is memoized when its own name is unique (the census prototype's rule): N6b reuses N6a's certificate, which recorded one fingerprint for both
 %% match ec-identity-read-set ec-identity-composition ec-identity-memo-sequence
 ## hir/emission.tcl
 <<<<
-        if {$useMemo && $identified && [ReadsIdentified $readset]} {
+        if {$useMemo && $identified && $trusted && [ReadsIdentified $readset]} {
 ====
-        if {$useMemo && $identified} {
+        if {$useMemo && $identified && $trusted} {
 >>>>
 
 @@ ambiguous-validated identity: Valid takes a dependency's name for the first function of the name (N4b, after a version with unique names, validated against outer1's helper)
@@ -1050,6 +1046,218 @@ proc hir::emission::NativeMayFail {name} {
 ====
         lassign [Facts $cond $outcome] feasible facts
         if {!$feasible || ($facts eq "" && ![dict exists [Node $::hir::emission::block] emits])} continue
+>>>>
+
+# ---------------------------------------------------------------------------
+# Binding provenance (EMISSION-BINDING-PROVENANCE-CORRECTNESS-MILESTONE-1.md):
+# a fact the walk reads of code it does not walk -- a non-local binding's
+# value, a call through a function value's type -- derived from code holding
+# a resolution diagnostic, poison or a syntax-dependent reference makes the
+# claim dependent; a compilation where that can happen neither reuses nor
+# memoizes a certificate. (A poisoned binding's own check is no mutant: Bind
+# poisons every alias and reference of it, which Taint reads -- equivalent.)
+
+@@ provenance-refvalue-unread binding provenance: a non-local binding's facts are read without asking where they came from (R1, B6, D1, SC1, S5d rejected again, B8 and X2 too)
+%% match ec-provenance-*
+## hir/emission.tcl
+<<<<
+        if {[NonLocalDependent $b]} {
+====
+        if {0} {
+>>>>
+
+@@ provenance-own-binding-asked binding provenance: a binding of the walked function's own that the walk did not bind (a list loop's element) is asked about too -- a redundant traversal of code the walk evaluated
+%% match ec-provenance-*
+## hir/emission.tcl
+<<<<
+    if {[dict get $binding kind] ni {local param}
+            || [Within [dict get $binding scope] [dict get [Node $block] bodyScope]]} {
+====
+    if {[dict get $binding kind] ni {local param}} {
+>>>>
+
+@@ provenance-unreachable-trusted binding provenance: a declaration after code that never completes is skipped as dead code, though inference typed it from its code (D1, D2, B8f rejected)
+%% match ec-provenance-*
+## hir/emission.tcl
+<<<<
+    return [list $e [dict get $hir exprs $e reachable]]
+====
+    return [list $e 1]
+>>>>
+
+@@ provenance-alias-unfollowed binding provenance: a value binding's initializer naming another value binding is not followed (an alias chain, B8f, a destructuring's parts)
+%% match ec-provenance-*
+## hir/emission.tcl
+<<<<
+                set n [RefNode [dict get $node binding]]
+                if {$n ne ""} {
+====
+                set n [RefNode [dict get $node binding]]
+                if {$n ne "" && [lindex $n 0] ne "v"} {
+>>>>
+
+@@ provenance-destructure-lost binding provenance: a projection is no part of the value it projects (a destructured binding loses its initializer's dependency: D1, D2)
+%% match ec-provenance-*
+## hir/emission.tcl
+<<<<
+        switch -- [dict get $node kind] {
+            ref {
+                set n [RefNode [dict get $node binding]]
+====
+        switch -- [dict get $node kind] {
+            project { continue }
+            ref {
+                set n [RefNode [dict get $node binding]]
+>>>>
+
+@@ provenance-capture-by-name binding provenance: a non-local reference's binding is taken by its name, the first binding of the spelling (inner2 reads outer1's unresolved `k`)
+%% match ec-provenance-*
+## hir/emission.tcl
+<<<<
+    set n [RefNode $b]
+    return [expr {[lindex $n 0] eq "v" && [Dependent $n]}]
+====
+    set n [RefNode [lindex [lmap {id bd} [dict get $hir bindings] {if {[dict get $bd name] ne [dict get $hir bindings $b name]} continue; set id}] 0]]
+    return [expr {[lindex $n 0] eq "v" && [Dependent $n]}]
+>>>>
+
+@@ provenance-clause-unread binding provenance: a loop's element binding has no defining code (a nested claim reading the element of a loop over an unresolved value rejected)
+%% match ec-provenance-*
+## hir/emission.tcl
+<<<<
+        param {
+            if {[dict exists [ClauseMap] $b]} {
+                return [list v $b]
+            }
+        }
+====
+>>>>
+
+@@ provenance-inferred-callee-ignored binding provenance: a function's inferred result is no fact of its code (B6 rejected, V2 certified again)
+%% match ec-provenance-*
+## hir/emission.tcl
+<<<<
+                if {[dict get $hir exprs $v declaredResult] eq ""} {
+                    return [list f $v]
+                }
+                return ""
+====
+                return ""
+>>>>
+
+@@ provenance-declared-callee-followed binding provenance: a function with a declared result is followed into its body (B5, a contract every repair of the body keeps, made dependent)
+%% match ec-provenance-*
+## hir/emission.tcl
+<<<<
+                if {[dict get $hir exprs $v declaredResult] eq ""} {
+                    return [list f $v]
+                }
+                return ""
+====
+                return [list f $v]
+>>>>
+
+@@ provenance-value-never-unread binding provenance: a call through a function value whose type says it never returns ends the walk without asking where the type came from (V2 certified again, and reused after V1)
+%% match ec-provenance-*
+## hir/emission.tcl
+<<<<
+            } elseif {[CalleeDependent $callee]} {
+====
+            } elseif {0} {
+>>>>
+
+@@ provenance-value-result-unread binding provenance: a call through a function value's narrow result type is believed (V3's Digit, joined from an unresolved name's never, certified)
+%% match ec-provenance-*
+## hir/emission.tcl
+<<<<
+    if {$type ni {any unit} && [CalleeDependent $callee]} {
+====
+    if {0} {
+>>>>
+
+@@ provenance-value-any-checked binding provenance: a call through a value typed `any` asks too -- R2, whose proof uses nothing of its unresolved callee, made dependent
+%% match ec-provenance-*
+## hir/emission.tcl
+<<<<
+    if {$type ni {any unit} && [CalleeDependent $callee]} {
+====
+    if {$type ni {unit} && [CalleeDependent $callee]} {
+>>>>
+
+@@ provenance-reified-escapes binding provenance: a rejected static block's reified failure is a source wherever it is, handled or not (its diagnostic escapes its block)
+%% match ec-provenance-*
+## hir/emission.tcl
+<<<<
+        if {[Source $x]} {
+            return {1 {}}
+        }
+====
+        if {[Source $x] || [dict exists $node static]} {
+            return {1 {}}
+        }
+>>>>
+
+@@ provenance-unrelated-taints binding provenance: in a compilation holding any resolution diagnostic every non-local fact is incomplete (B3b, B5, B8e, an unrelated unresolved name's neighbours dependent)
+%% match ec-provenance-*
+## hir/emission.tcl
+<<<<
+    if {$trusted} {
+        return 0
+    }
+====
+    if {$trusted} {
+        return 0
+    }
+    return 1
+>>>>
+
+@@ provenance-check-diagnostic-source binding provenance: a check diagnostic (an unhandled error) in an initializer makes its facts incomplete, though the analysis that typed them completed
+%% match ec-provenance-*
+## hir/emission.tcl
+<<<<
+    return [expr {[dict exists $sources $e] || [dict exists $hir poisoned $e] || [dict exists $hir syntaxDependent $e]}]
+====
+    return [expr {[dict exists $sources $e] || [dict exists $hir poisoned $e] || [dict exists $hir syntaxDependent $e] || [dict exists $::hir::emission::diagnosed $e]}]
+>>>>
+
+@@ provenance-search-overmarks binding provenance: a search that finds a source marks every node it visited dependent, a clean sibling explored before the source among them
+%% match ec-provenance-*
+## hir/emission.tcl
+<<<<
+            foreach frame $stack {
+                dict set provenance [lindex $frame 0] 1
+            }
+====
+            foreach visit [dict keys $visited] {
+                dict set provenance $visit 1
+            }
+>>>>
+
+@@ provenance-memo-trusts-recovered binding provenance: a compilation with a resolution diagnostic reuses a memoized certificate (V2 reuses V1's)
+%% match ec-provenance-*
+## hir/emission.tcl
+<<<<
+    if {$useMemo && $identified && $trusted && [dict exists $memo $id]} {
+====
+    if {$useMemo && $identified && [dict exists $memo $id]} {
+>>>>
+
+@@ provenance-memo-stores-recovered binding provenance: a compilation with a resolution diagnostic memoizes its certificates
+%% match ec-provenance-*
+## hir/emission.tcl
+<<<<
+        if {$useMemo && $identified && $trusted && [ReadsIdentified $readset]} {
+====
+        if {$useMemo && $identified && [ReadsIdentified $readset]} {
+>>>>
+
+@@ provenance-memo-every-diagnostic binding provenance: a compilation with any diagnostic at all -- an unhandled error, whose facts are complete -- is untrusted (its reuse lost)
+%% match ec-provenance-* ec-memo-reuse
+## hir/emission.tcl
+<<<<
+    set ::hir::emission::trusted [expr {$resolution eq {} && [dict size [dict getdef $hir poisoned {}]] == 0
+====
+    set ::hir::emission::trusted [expr {[dict get $hir diagnostics] eq {} && [dict size [dict getdef $hir poisoned {}]] == 0
 >>>>
 
 # ---------------------------------------------------------------------------

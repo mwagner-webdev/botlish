@@ -28,9 +28,10 @@ it, and neither `tests/local.tcl` nor CI runs it.
   recommends (section 21), as prototyped against the census's commit to
   measure them: never applied to the compiler as it is. Its sections 21.1
   and 21.2 were rewritten, with their tests and mutants, by
-  EMISSION-IDENTITY-AND-FEASIBILITY-CORRECTNESS-MILESTONE-1.md; 21.3 (and
-  the mutant text `dependent-reports` it duplicates) is still a starting
-  point.
+  EMISSION-IDENTITY-AND-FEASIBILITY-CORRECTNESS-MILESTONE-1.md, and 21.3
+  by EMISSION-BINDING-PROVENANCE-CORRECTNESS-MILESTONE-1.md (whose section
+  2 lists the three gaps of the prototype's 21.3 it closed). It is kept as
+  the census's evidence.
 
 ```sh
 LANG=C.utf8 LC_ALL=C.utf8 tclsh9.0 audit/emission-dependencies/tools/census.tcl \
@@ -50,3 +51,13 @@ verdicts, and N6a, N6b and the sequence `identity-read` are its own (the
 gap: a proof that read two functions of one name, memoized). The census
 now finds 0 false certificates and 20 open cases, every one a binding or
 signature case of section 21.3, which that milestone defers.
+
+EMISSION-BINDING-PROVENANCE-CORRECTNESS-MILESTONE-1.md corrected the binding
+cases (section 21.3, rewritten): R1, B3c, B6, D1, D2, B8, B8f, X2, SC1, S5d
+and V2 now record `dependent`, and B3, G1 and B8b, decided `dependent` by
+that milestone's policy, state it as their appropriate verdict. V3 to V7
+(V2's hole through a narrow result, a helper's result, a local, a captured
+value, a List element), L1 and L1v (a captured loop element), Z1v and the
+sequences `callable-narrow` and `trust` are its own. The census now finds 0
+false certificates and 6 open cases: B2b, S1 and K1 (class A), and S4b,
+S5b and S6b (undecided), which that report's section 23 explains.

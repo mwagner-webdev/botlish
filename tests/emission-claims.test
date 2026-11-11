@@ -1903,6 +1903,15 @@ test ec-callee-positions {an unresolved call makes the claim dependent wherever 
     }
 } -result {{UNBOUND {{emitter dependent 0}}} {UNBOUND {{emitter dependent 0}}} {UNBOUND {{emitter dependent 0}}} {UNBOUND {{emitter dependent 0}}} {UNBOUND {{emitter dependent 0}}} {UNBOUND {{emitter dependent 0}}} {UNBOUND {{emitter dependent 0}}}}
 
+test ec-callee-before-arguments {the callee reference is read first, wherever the call is: an unresolved name called with an argument that genuinely never returns -- nested in an expression, a condition, a loop body -- makes the claim dependent though the walk ends at the argument before the call (and before the provenance question a call through a value asks: EMISSION-BINDING-PROVENANCE-CORRECTNESS-MILESTONE-1.md)} -body {
+    set D "${digitDfa}fn spin():\n    loop:\n        continue\n\n"
+    lmap body [list "    yield 48 + missing(spin())" \
+            "    if missing(spin()) > 0:\n        yield 49\n    else:\n        yield 50" \
+            "    loop i from 0 to 3:\n        x = missing(spin())\n        continue\n    yield 49"] {
+        dependency "${D}fn emitter() -> unit emits digit_token:\n$body\n    unit\n\n0\n"
+    }
+} -result {{UNBOUND {{emitter dependent 0}} {}} {UNBOUND {{emitter dependent 0}} {}} {UNBOUND {{emitter dependent 0}} {}}}
+
 test ec-callee-helpers {the dependency follows the helpers the walk reads: a helper declared to return, one whose inferred result is never because of the unresolved call (its body was never read: "proven"), two levels down, a yielding helper (this was "rejected", an EMIT-INCOMPLETE the walk made up), recursion -- every one dependent, with no EMIT diagnostic} -body {
     lmap helper [list "fn helper() -> unit:\n    missing()\n    unit\n\nfn emitter() -> unit emits digit_token:\n    helper()\n    yield 49\n    unit" \
             "fn helper():\n    missing()\n\nfn emitter() -> unit emits digit_token:\n    helper()\n    yield 49\n    unit" \
@@ -2047,7 +2056,7 @@ test ec-callee-service {the compiler service's hover shows the current verdict: 
     }
     service::closeWorkspace $ws
     set out
-} -result {{UNBOUND {emits digit_token: certified to emit digit_token: every normal completion has yielded exactly one token, every prefix it yields is viable; its token completes on its own last symbol} {emits digit_token: not checked -- its code holds another diagnostic}} {{} {emits digit_token: certified to emit digit_token: every normal completion has yielded exactly one token, every prefix it yields is viable; its token completes on its own last symbol} {emits digit_token: certified to emit digit_token: every normal completion has yielded exactly one token, every prefix it yields is viable; its token completes on its own last symbol}} {UNBOUND {emits digit_token: certified to emit digit_token: every normal completion has yielded exactly one token, every prefix it yields is viable; its token completes on its own last symbol} {emits digit_token: not checked -- its code holds another diagnostic}} {{SYNTAX UNBOUND} {emits digit_token: certified to emit digit_token: every normal completion has yielded exactly one token, every prefix it yields is viable; its token completes on its own last symbol} {emits digit_token: not checked -- its code holds another diagnostic}}}
+} -result {{UNBOUND {emits digit_token: certified to emit digit_token: every normal completion has yielded exactly one token, every prefix it yields is viable; its token completes on its own last symbol} {emits digit_token: not checked -- its code, or code whose facts it reads, holds another diagnostic}} {{} {emits digit_token: certified to emit digit_token: every normal completion has yielded exactly one token, every prefix it yields is viable; its token completes on its own last symbol} {emits digit_token: certified to emit digit_token: every normal completion has yielded exactly one token, every prefix it yields is viable; its token completes on its own last symbol}} {UNBOUND {emits digit_token: certified to emit digit_token: every normal completion has yielded exactly one token, every prefix it yields is viable; its token completes on its own last symbol} {emits digit_token: not checked -- its code, or code whose facts it reads, holds another diagnostic}} {{SYNTAX UNBOUND} {emits digit_token: certified to emit digit_token: every normal completion has yielded exactly one token, every prefix it yields is viable; its token completes on its own last symbol} {emits digit_token: not checked -- its code, or code whose facts it reads, holds another diagnostic}}}
 
 # ---------------------------------------------------------------------------
 # Function identity and branch feasibility (EMISSION-IDENTITY-AND-
@@ -2907,6 +2916,286 @@ test ec-feasibility-flag {Facts answers a feasibility flag beside the environmen
     lappend out [lindex [hir::emission::Facts $compare 1] 0] [lindex [hir::emission::Facts $compare 0] 0]
     string map [list $d D] $out
 } -cleanup {set ::hir::emission::hir ""; set ::hir::emission::env [dict create]; set ::hir::emission::exprVal [dict create]} -result {{1 {}} {1 {}} {1 {}} 0 0 {1 {D {{0 20}}}} {1 {D {{0 2} {13 20}}}} {1 {D {{3 12}}}} 0 0}
+
+# ---------------------------------------------------------------------------
+# Binding provenance (EMISSION-BINDING-PROVENANCE-CORRECTNESS-MILESTONE-1.md)
+#
+# What the walk reads of code it does not walk -- a non-local binding's
+# exact value and type, the static type of a call through a function value
+# (a join of function types, no target) -- the front end derived from that
+# code. Where it holds a resolution diagnostic, poison or a syntax-
+# dependent reference, the fact is incomplete, not conservative: a claim
+# that reads it is dependent, as when its own code holds the diagnostic
+# (hir/emission.tcl's Provenance). A compilation where that can happen
+# neither reuses nor memoizes a certificate: V2 (a value that is one of two
+# functions, one of them an unresolved name's `never`) reads exactly as V1
+# (both loop) does. The programs are the census's
+# (EMISSION-BINDING-AND-SIGNATURE-DEPENDENCY-CENSUS-MILESTONE-1.md;
+# audit/emission-dependencies/census/cases.txt), by its case names.
+
+# dependency's {REPORTED CLAIMS EMIT} of HIR.
+proc dependencyOf {hir} {
+    list [lmap d [hir::recovery::reported $hir] {dict get $d kind}] \
+        [lmap r [hir::emission::claims $hir] {list [namespace tail [dict get $r function]] [dict get $r verdict] [dict exists $r certificate]}] \
+        [lmap d [dict get $hir diagnostics] {if {![dict exists $d emission]} continue; dict get $d kind}]
+}
+
+# dependency of TEXT with a fresh memo, which must be what the memo off
+# gives (MEMO-DIFFERS otherwise); with -files, TEXT is main.bot beside
+# those files.
+proc provenance {text args} {
+    set options [dict merge {-files {}} $args]
+    set out {}
+    foreach memo {1 0} {
+        set ::hir::emission::memo [dict create]
+        set ::hir::emission::useMemo $memo
+        if {[dict get $options -files] eq {}} {
+            set hir [surface::compile $text -warnings off -strict 0]
+        } else {
+            set dir [emit::workspace main.bot $text {*}[dict get $options -files]]
+            set hir [emit::compile [file join $dir main.bot]]
+        }
+        lappend out [dependencyOf $hir]
+    }
+    set ::hir::emission::useMemo 1
+    if {[lindex $out 0] ne [lindex $out 1]} {
+        return [list MEMO-DIFFERS {*}$out]
+    }
+    return [lindex $out 0]
+}
+
+# The head of the provenance programs: a digit recognizer, a Digit domain
+# and two helpers.
+set provHead [string cat "import std::compiler\nimport std::list\n" $digitDfa {type Digit = Int in 0..9
+
+fn d3() -> Digit:
+    3
+
+fn pick() -> bool:
+    true
+
+}]
+# PROLOGUE, then a claimed `emitter` yielding 48 + k.
+proc readsK {prologue} {
+    return [string cat $::provHead $prologue "\n\nfn emitter() -> unit emits digit_token:\n    yield 48 + k\n    unit\n\n0\n"]
+}
+# The census's V1 (G and H the two functions' bodies), a value selected at
+# run time between two functions, called between two yields.
+proc vProgram {g h {use "f = if pick():\n    g\nelse:\n    h\n\nfn emitter() -> unit emits digit_token:\n    yield 49\n    f()\n    yield 65\n    unit"}} {
+    return [string cat $::provHead "fn g():\n$g\n\nfn h():\n$h\n\n" $use "\n\n0\n"]
+}
+set provLoop "    loop:\n        continue"
+
+test ec-provenance-module-bindings {a module binding whose facts were derived from code holding an unresolved name -- its initializer's call (R1), the condition of an if whose branches differ (B3c), a helper whose inferred result is that name's never (B6), a destructuring of it (D1), a struct field of it, destructured (D2), a rejected static block's unhandled CompilerError (SC1), a helper whose result type did not resolve (S5d) -- makes the claim reading it dependent, with no EMIT diagnostic (each was "rejected": the rejection rested on the placeholder's `any` or the inferred `int`); the memo on or off} -body {
+    lmap prologue [list "k = missing()" \
+            "k = if missing():\n    1\nelse:\n    2" \
+            "fn helper():\n    missing()\n\nk = helper()" \
+            "{k, j} = missing()" \
+            "struct P:\n    k: int\n    j: int\n\np = P {k: 1, j: missing()}\n{k, j} = p" \
+            "k = static compile:\n    missing()" \
+            "fn helper() -> Missing:\n    5\n\nk = helper()"] {
+        provenance [readsK $prologue]
+    }
+} -result {{UNBOUND {{emitter dependent 0}} {}} {UNBOUND {{emitter dependent 0}} {}} {UNBOUND {{emitter dependent 0}} {}} {UNBOUND {{emitter dependent 0}} {}} {UNBOUND {{emitter dependent 0}} {}} {UNHANDLED-ERROR {{emitter dependent 0}} {}} {TYPE {{emitter dependent 0}} {}}}
+
+test ec-provenance-imported {an imported binding initialized by an unresolved call (X2) is dependent; an imported constant (X1) and one beside a broken function of its module (X5) are certified} -body {
+    set main [string cat "import consts\n" $digitDfa "fn emitter() -> unit emits digit_token:\n    yield 48 + consts::k\n    unit\n\n0\n"]
+    lmap consts [list "k = missing()\n" "k = 1\n" "k = 1\n\nfn broken() -> int:\n    missing()\n"] {
+        provenance $main -files [list consts.bot $consts]
+    }
+} -result {{UNBOUND {{emitter dependent 0}} {}} {{} {{emitter proven 1}} {}} {UNBOUND {{emitter proven 1}} {}}}
+
+test ec-provenance-independent {facts the diagnostic took no part in keep their verdicts, in compilations that hold one: a dead branch's unresolved name (B3b), a declared result over an unresolved body (B5, two calls down too), a valid binding beside an unrelated unresolved one (Z1's), a declaration after it -- unreachable, typed from its own code --, a rejected static block as a statement (SC2), a check diagnostic in the initializer (an unhandled error: the analysis that typed it completed); an unresolved callee read only as a callee (R2: no fact of it is used); the claimed function's own declared static block (SC3, accepted)} -body {
+    set out [lmap prologue [list "k = if true:\n    1\nelse:\n    missing()" \
+            "fn helper() -> Digit:\n    missing()\n\nk = helper()" \
+            "fn h1() -> Digit:\n    missing()\n\nfn h2():\n    h1()\n\nk = h2()" \
+            "z = missing()\nk = 1" \
+            "z = missing()\nk = d3()" \
+            "static compile:\n    missing()\nk = 1" \
+            "error Oops:\n    v: int\n\nfn boom() -> Digit errors Oops:\n    if pick():\n        fail Oops {v: 1}\n    d3()\n\nk = boom()\nz = missing()"] {
+        provenance [readsK $prologue]
+    }]
+    lappend out [provenance [string cat $provHead "f = missing\n\nfn emitter() -> unit emits digit_token:\n    f()\n    yield 49\n    unit\n\n0\n"]] \
+        [provenance [string cat $provHead "fn emitter() -> unit errors std::compiler::CompilerError emits digit_token:\n    k = static compile:\n        missing()\n    yield 48 + k\n    unit\n\n0\n"]]
+} -result {{UNBOUND {{emitter proven 1}} {}} {UNBOUND {{emitter proven 1}} {}} {UNBOUND {{emitter proven 1}} {}} {UNBOUND {{emitter proven 1}} {}} {UNBOUND {{emitter proven 1}} {}} {UNHANDLED-ERROR {{emitter proven 1}} {}} {{UNBOUND UNHANDLED-ERROR} {{emitter proven 1}} {}} {UNBOUND {{emitter proven 1}} {}} {{} {{emitter proven 1}} {}}}
+
+test ec-provenance-captures {a nested claim reads an enclosing function's value through its own type and exact value, never its callers': one initialized by an unresolved call (B8), an alias of one (B8f), a destructuring of one, a loop's element over one -- dependent; the valid value (B8c, accepted), one beside an unrelated unresolved call later in the enclosing function (B8e), a refined one, one whose unresolved branch is dead -- certified; two enclosing functions binding `k` differently, each nested claim reading its own (the binding, never the spelling), also when the nested claims share a name} -body {
+    set out [lmap prologue [list "    k = missing()" "    j = missing()\n    k = j" "    {k, j} = missing()" \
+            "    k = 1" "    k = 1" "    k = d3()" "    k = if true:\n        1\n    else:\n        missing()"] after [list "" "" "" "" "    missing()\n" "" ""] {
+        provenance [string cat $provHead "fn outer() -> int:\n$prologue\n    fn inner() -> unit emits digit_token:\n        yield 48 + k\n        unit\n${after}    3\n\n0\n"]
+    }]
+    lappend out [provenance [string cat $provHead "fn outer(xs: List\[int\]) -> int:\n    ys = missing()\n    loop y in ys:\n        fn inner() -> unit emits digit_token:\n            yield 48 + y\n            unit\n    3\n\n0\n"]]
+    foreach {name1 name2} {inner1 inner2 inner inner} {
+        lappend out [provenance [string cat $provHead "fn outer1() -> int:\n    k = missing()\n    fn $name1\() -> unit emits digit_token:\n        yield 48 + k\n        unit\n    3\n\n" \
+            "fn outer2() -> int:\n    k = 1\n    fn $name2\() -> unit emits digit_token:\n        yield 48 + k\n        unit\n    3\n\n0\n"]]
+    }
+    set out
+} -result {{UNBOUND {{inner dependent 0}} {}} {UNBOUND {{inner dependent 0}} {}} {UNBOUND {{inner dependent 0}} {}} {{} {{inner proven 1}} {}} {UNBOUND {{inner proven 1}} {}} {{} {{inner proven 1}} {}} {UNBOUND {{inner proven 1}} {}} {UNBOUND {{inner dependent 0}} {}} {UNBOUND {{inner1 dependent 0} {inner2 proven 1}} {}} {UNBOUND {{inner dependent 0} {inner proven 1}} {}}}
+
+test ec-provenance-transitive {the dependency follows what typed the facts, as far as it goes: an alias chain, a chain of helpers whose inferred results are the unresolved name's never, a recursive helper reaching it -- dependent; a declared result anywhere on the chain stops it, a recursive helper whose code is clean (beside an unrelated unresolved name) adds nothing; a chain 400 bindings long is one search, and a second claim reading it takes the answer} -body {
+    set out [lmap prologue [list "a = missing()\nb = a\nc = b\nk = c" \
+            "fn h1():\n    missing()\n\nfn h2():\n    h1()\n\nk = h2()" \
+            "fn r(n: int):\n    if n > 0:\n        r(n - 1)\n    else:\n        missing()\n\nk = r(3)" \
+            "fn h1() -> Digit:\n    missing()\n\nfn h2():\n    h1()\n\nfn h3():\n    h2()\n\nk = h3()" \
+            "fn r(n: int):\n    if n > 0:\n        r(n - 1)\n    else:\n        d3()\n\nk = r(3)\nz = missing()"] {
+        provenance [readsK $prologue]
+    }]
+    set chain "a0 = missing()\n"
+    for {set i 1} {$i <= 400} {incr i} {
+        append chain "a$i = a[expr {$i - 1}]\n"
+    }
+    set ::hir::emission::memo [dict create]
+    set hir [surface::compile [string cat $provHead $chain "\nfn e1() -> unit emits digit_token:\n    yield 48 + a400\n    unit\n\nfn e2() -> unit emits digit_token:\n    yield 49 + a400\n    unit\n\n0\n"] -warnings off -strict 0]
+    lappend out [lmap r [hir::emission::claims $hir] {dict get $r verdict}] \
+        [dict get $::hir::emission::stats provenanceSearches] [dict get $::hir::emission::stats provenanceNodes]
+} -result {{UNBOUND {{emitter dependent 0}} {}} {UNBOUND {{emitter dependent 0}} {}} {UNBOUND {{emitter dependent 0}} {}} {UNBOUND {{emitter proven 1}} {}} {UNBOUND {{emitter proven 1}} {}} {dependent dependent} 1 401}
+
+test ec-provenance-structural-never {a call through a function value with no target ends the walk where its static type -- a join of the functions it may be -- says it never returns: genuine for two loops (V1, certified, also beside an unrelated unresolved name), the unresolved name's never for one of them (V2: this was certified), also through a helper's inferred result, a local of the claimed function, a captured value; a call's narrow result type joined from such a function (V3: a Digit, which an edit of the name to 17 would make every Int -- this was certified) -- dependent; the valid programs certified; a value call whose result is used and typed `any` (B2b) keeps its verdict, the limitation the census records} -body {
+    set g "    missing()"
+    set out [list [provenance [vProgram $provLoop $provLoop]] [provenance [vProgram $g $provLoop]]]
+    lappend out [provenance [string cat [vProgram $provLoop $provLoop] "\nz = missing()\n"]]
+    set chooser "fn choose():\n    if pick():\n        g\n    else:\n        h\n\nfn emitter() -> unit emits digit_token:\n    yield 49\n    choose()()\n    yield 65\n    unit"
+    lappend out [provenance [vProgram $g $provLoop $chooser]] [provenance [vProgram $provLoop $provLoop $chooser]]
+    lappend out [provenance [vProgram $g $provLoop "fn emitter() -> unit emits digit_token:\n    f = if pick():\n        g\n    else:\n        h\n    yield 49\n    f()\n    yield 65\n    unit"]]
+    lappend out [provenance [string cat $provHead "fn outer() -> int:\n    fn g():\n        missing()\n    fn h():\n        loop:\n            continue\n    f = if pick():\n        g\n    else:\n        h\n    fn inner() -> unit emits digit_token:\n        yield 49\n        f()\n        yield 65\n        unit\n    3\n\n0\n"]]
+    set narrow "f = if pick():\n    g\nelse:\n    h\n\nfn emitter() -> unit emits digit_token:\n    yield 48 + f()\n    unit"
+    lappend out [provenance [vProgram "    if pick():\n        missing()\n    d3()" "    d3()" $narrow]] \
+        [provenance [vProgram "    if pick():\n        d3()\n    d3()" "    d3()" $narrow]] \
+        [provenance [string cat $provHead "f = missing\n\nfn emitter() -> unit emits digit_token:\n    yield 48 + f()\n    unit\n\n0\n"]]
+    set ::hir::emission::memo [dict create]
+    set hir [surface::compile [vProgram $provLoop $provLoop] -warnings off -strict 0]
+    lappend out [dict keys [dict get [lindex [hir::emission::claims $hir] 0] certificate depends functions]]
+} -result {{{} {{emitter proven 1}} {}} {UNBOUND {{emitter dependent 0}} {}} {UNBOUND {{emitter proven 1}} {}} {UNBOUND {{emitter dependent 0}} {}} {{} {{emitter proven 1}} {}} {UNBOUND {{emitter dependent 0}} {}} {UNBOUND {{inner dependent 0}} {}} {UNBOUND {{emitter dependent 0}} {}} {{} {{emitter proven 1}} {}} {UNBOUND {{emitter rejected 0}} {EMIT-END-SYMBOL EMIT-REJECTED}} emitter}
+
+test ec-provenance-conservative {facts every repair of the program keeps, derived from code holding an unresolved name all the same -- an exact value both of whose branches agree (B3, and captured: B8b), a value the claim guards itself (G1) -- make the claim dependent: the walk does not ask whether a narrower fact would have changed its verdict (the claim's own code holding a diagnostic is dependent the same way); strict compilation reports the UNBOUND} -body {
+    set out [lmap prologue [list "k = if missing():\n    1\nelse:\n    1"] {provenance [readsK $prologue]}]
+    lappend out [provenance [string cat $provHead "fn outer() -> int:\n    k = if missing():\n        1\n    else:\n        1\n    fn inner() -> unit emits digit_token:\n        yield 48 + k\n        unit\n    3\n\n0\n"]]
+    set g1 [string cat $provHead "k = missing()\n\nfn emitter() -> unit emits digit_token:\n    if k >= 0 and k <= 9:\n        yield 48 + k\n    else:\n        yield 48\n    unit\n\n0\n"]
+    lappend out [provenance $g1] [strictOf $g1] [strictOf [readsK "k = if missing():\n    1\nelse:\n    1"]]
+} -result {{UNBOUND {{emitter dependent 0}} {}} {UNBOUND {{inner dependent 0}} {}} {UNBOUND {{emitter dependent 0}} {}} UNBOUND UNBOUND}
+
+test ec-provenance-static-compile {a reified diagnostic stays its block's: a rejected static block whose CompilerError a helper declares and its caller handles, in a module binding's initializer (the compilation holding an unrelated unresolved name), is certified; the same CompilerError unhandled is a diagnostic of the program, and the claim reading the binding dependent} -body {
+    set attempt "fn attempt() errors std::compiler::CompilerError:\n    static compile:\n        missing()\n    d3()\n\n"
+    list [provenance [readsK "${attempt}fn safe():\n    attempt():\n        on std::compiler::CompilerError:\n            d3()\n\nk = safe()\nz = missing()"]] \
+        [provenance [readsK "fn attempt():\n    static compile:\n        missing()\n    d3()\n\nk = attempt()\nz = missing()"]]
+} -result {{UNBOUND {{emitter proven 1}} {}} {{UNHANDLED-ERROR UNBOUND} {{emitter dependent 0}} {}}}
+
+test ec-provenance-search {one search answers for what it visited: a value joined from a valid binding and an unresolved one, the valid one explored first, is dependent; the valid one, read by a later claim, is still certified (the search marks dependent only the path to the source), and read first, it is certified and the joined value still dependent} -body {
+    set decls "good = d3()\nbad = missing()\npair = if pick():\n    bad\nelse:\n    good\n\n"
+    set e1 "fn e1() -> unit emits digit_token:\n    yield 48 + pair\n    unit\n\n"
+    set e2 "fn e2() -> unit emits digit_token:\n    yield 48 + good\n    unit\n\n"
+    list [lindex [provenance [string cat $provHead $decls $e1 $e2 "0\n"]] 1] [lindex [provenance [string cat $provHead $decls $e2 $e1 "0\n"]] 1]
+} -result {{{e1 dependent 0} {e2 proven 1}} {{e2 proven 1} {e1 dependent 0}}}
+
+# {VERDICT REUSED}... of the claims of TEXT, written to PATH and compiled
+# with the memo as it is (reuse), beside the verdicts a compilation with the
+# memo off gives (which must be the same: MEMO-DIFFERS otherwise).
+proc provSteps {path texts} {
+    set out {}
+    foreach text $texts {
+        emit::writeText $path $text
+        set on [reuse $path]
+        set saved $::hir::emission::memo
+        set ::hir::emission::useMemo 0
+        set off [reuse $path]
+        set ::hir::emission::useMemo 1
+        set ::hir::emission::memo $saved
+        if {[lmap c $on {lrange $c 0 1}] ne [lmap c $off {lrange $c 0 1}]} {
+            lappend out [list MEMO-DIFFERS $on $off]
+        } else {
+            lappend out [lmap c $on {lrange $c 1 2}]
+        }
+    }
+    return $out
+}
+
+test ec-provenance-memo {the memo across provenance, in one process: V1, V2, V1 -- V2 is proved fresh and dependent (the census's compiler reused V1's certificate there: V2 changes none of its dependencies), V1 reused after it; a valid binding made unresolved, then repaired; an exact value changed (the fingerprint), a type changed, an unrelated declaration added; every step's verdicts the memo off's} -setup {
+    set ::hir::emission::memo [dict create]
+} -body {
+    set dir [emit::workspace]
+    set path [file join $dir main.bot]
+    list [provSteps $path [list [vProgram $provLoop $provLoop] [vProgram "    missing()" $provLoop] [vProgram $provLoop $provLoop]]] \
+        [provSteps $path [list [readsK "k = 1"] [readsK "k = missing()"] [readsK "k = 1"] [readsK "k = 17"] [readsK "k = 1"] \
+        [readsK "fn i17() -> int:\n    17\n\nk = i17()"] [readsK "k = d3()"] [readsK "k = d3()\nw = 2"]]]
+} -result {{{{proven 0}} {{dependent 0}} {{proven 1}}} {{{proven 0}} {{dependent 0}} {{proven 1}} {{rejected 0}} {{proven 1}} {{rejected 0}} {{proven 0}} {{proven 1}}}}
+
+test ec-provenance-memo-trust {a compilation holding a resolution diagnostic, poison or a syntax-dependent reference memoizes nothing and reuses nothing -- a certificate proved there, its claim independent of the diagnostic (Z1), is proved again in the repaired program, then reused; one whose only diagnostic is a check's (an unhandled error) keeps the memo; a dependent claim is never memoized} -setup {
+    set ::hir::emission::memo [dict create]
+} -body {
+    set dir [emit::workspace]
+    set path [file join $dir main.bot]
+    set z1 [readsK "z = missing()\nk = 1"]
+    set out [provSteps $path [list $z1]]
+    lappend out [dict size $::hir::emission::memo]
+    lappend out {*}[provSteps $path [list [readsK "k = 1"] [readsK "k = 1"] $z1]]
+    set ::hir::emission::memo [dict create]
+    set unhandled [readsK "error Oops:\n    v: int\n\nfn boom() -> Digit errors Oops:\n    if pick():\n        fail Oops {v: 1}\n    d3()\n\nk = boom()"]
+    lappend out {*}[provSteps $path [list $unhandled $unhandled]] [lsort -unique [lmap d [dict get [emit::compile $path] diagnostics] {dict get $d kind}]]
+    set ::hir::emission::memo [dict create]
+    provSteps $path [list [readsK "k = missing()"]]
+    lappend out [dict size $::hir::emission::memo]
+} -result {{{proven 0}} 0 {{proven 0}} {{proven 1}} {{proven 0}} {{proven 0}} {{proven 1}} UNHANDLED-ERROR 0}
+
+test ec-provenance-service {the compiler service across revisions, the process's memo kept: a module binding's claim certified, not checked once its initializer is unresolved, certified again repaired and beside an unrelated edit; a captured binding made unresolved; V2, then V1 -- every hover what a fresh compilation says} -body {
+    set dir [emit::workspace main.bot "0\n"]
+    set path [file join $dir main.bot]
+    set ws [service::workspace -root $dir]
+    set captured [string cat $provHead "fn outer() -> int:\n    k = missing()\n    fn emitter() -> unit emits digit_token:\n        yield 48 + k\n        unit\n    3\n\n0\n"]
+    set out {}
+    foreach text [list [readsK "k = 1"] [readsK "k = missing()"] [readsK "k = 1"] [readsK "k = 1\n\nfn other() -> int:\n    3"] \
+            $captured [vProgram "    missing()" $provLoop] [vProgram $provLoop $provLoop]] {
+        service::setDocument $ws $path $text
+        set rev [service::analyze $ws $path]
+        set lines [split $text \n]
+        set line [expr {[lsearch -regexp $lines {fn emitter\(}] + 1}]
+        set column [expr {[string first emitter [lindex $lines $line-1]] + 2}]
+        set hover [lindex [split [dict get [service::at $rev $path $line $column] hover] \n] 1]
+        set ::hir::emission::useMemo 0
+        set fresh [hir::emission::ClaimText [lindex [hir::emission::claims [surface::compile $text -warnings off -strict 0]] 0]]
+        set ::hir::emission::useMemo 1
+        lappend out [list [lmap d [service::diagnostics $rev] {lindex [dict get $d code] end}] \
+            [expr {$hover eq $fresh}] [string range $hover [string first : $hover]+2 [string first : $hover]+15]]
+    }
+    service::closeWorkspace $ws
+    set out
+} -cleanup {set ::hir::emission::useMemo 1} -result {{{} 1 {certified to e}} {UNBOUND 1 {not checked --}} {{} 1 {certified to e}} {{} 1 {certified to e}} {UNBOUND 1 {not checked --}} {UNBOUND 1 {not checked --}} {{} 1 {certified to e}}}
+
+test ec-provenance-interchange {interchange text of programs whose claims read diagnosed bindings -- a module binding (R1), a captured one (B8), V2 -- and of V1 reads back verified again, the same HIR, with the memo on or off; V2's dependent record forged with V1's certificate is refused} -body {
+    set out {}
+    foreach text [list [readsK "k = missing()"] [string cat $provHead "fn outer() -> int:\n    k = missing()\n    fn emitter() -> unit emits digit_token:\n        yield 48 + k\n        unit\n    3\n\n0\n"] \
+            [vProgram "    missing()" $provLoop] [vProgram $provLoop $provLoop]] {
+        set ::hir::emission::memo [dict create]
+        set hir [surface::compile $text -warnings off -strict 0]
+        set row [lmap r [hir::emission::claims $hir] {dict get $r verdict}]
+        foreach memo {1 0} {
+            set ::hir::emission::useMemo $memo
+            lappend row [expr {[hir::interchange::decode [hir::interchange::encode $hir]] eq $hir}]
+        }
+        set ::hir::emission::useMemo 1
+        lappend out $row
+    }
+    set ::hir::emission::memo [dict create]
+    set v1 [surface::compile [vProgram $provLoop $provLoop] -warnings off -strict 0]
+    set v2 [surface::compile [vProgram "    missing()" $provLoop] -warnings off -strict 0]
+    set record [lindex [dict get $v2 emissions] 0]
+    dict set record verdict proven
+    dict set record certificate [dict get [lindex [dict get $v1 emissions] 0] certificate]
+    lappend out [catch {hir::interchange::decode [hir::interchange::encode [dict replace $v2 emissions [list $record]]]} m o] \
+        [dict get $o -errorcode]
+} -cleanup {set ::hir::emission::useMemo 1} -result {{dependent 1 1} {dependent 1 1} {dependent 1 1} {proven 1 1} 1 {HIR INTERCHANGE EMISSION}}
+
+test ec-provenance-accepted {an accepted program -- no resolution diagnostic, poison or syntax-dependent reference -- asks provenance nothing that searches, whatever it reads (a module binding, a captured value, a call through a function value), every claim certified; a claim that reads only its own bindings (a list loop's element, read through its type: the walk evaluated its iterable) asks no question at all} -body {
+    set out {}
+    foreach text [list [readsK "k = 1"] [string cat $provHead "fn outer() -> int:\n    k = d3()\n    fn emitter() -> unit emits digit_token:\n        yield 48 + k\n        unit\n    3\n\n0\n"] \
+            [vProgram $provLoop $provLoop] [vProgram "    if pick():\n        d3()\n    d3()" "    d3()" "f = if pick():\n    g\nelse:\n    h\n\nfn emitter() -> unit emits digit_token:\n    yield 48 + f()\n    unit"] \
+            [string cat $provHead "fn emitter() -> unit emits digit_token:\n    yield 49\n    loop x in \[d3()\]:\n        if x > 9:\n            yield 65\n        continue\n    unit\n\n0\n"]] {
+        set ::hir::emission::memo [dict create]
+        set hir [surface::compile $text -warnings off]
+        lappend out [list [lmap r [hir::emission::claims $hir] {dict get $r verdict}] \
+            [expr {[dict getdef $::hir::emission::stats provenanceAsked 0] > 0}] [dict getdef $::hir::emission::stats provenanceSearches 0]]
+    }
+    set out
+} -result {{proven 1 0} {proven 1 0} {proven 1 0} {proven 1 0} {proven 0 0}}
 
 test ec-result-not-symbol {a claimed function's result is no symbol, whatever its type: an Int-returning source emits its token and completes with any Int -- its argument, 0, -1 -- certified alike (CSV-EMISSION-VALIDATION-MILESTONE-1.md, section 18; this was EMIT-TERMINAL-VALUE's -1 rule)} -body {
     set hir [surface::compile "${digitDfa}fn s(n: int) -> int emits digit_token:\n    yield 55\n    n\n\nfn z() -> int emits digit_token:\n    yield 55\n    0\n\nfn e() -> int emits digit_token:\n    yield 55\n    -1\n\n0\n" -warnings off -strict 0]
