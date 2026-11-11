@@ -584,9 +584,21 @@ UTC). Every run passed (the last finished 23:40 UTC on 2026-11-10):
 | `tests-arm64.yml` (dispatched) | 42802031961 | passed, every job: canary, interp, compile, GC stress on interp and on compile, cranelift and cranelift-generic coverage, the four golden shards, native Rust unit tests (also under GC stress), system-linked executables. GC stress on compile passed in the run's second attempt: the first was lost to the runner ("The runner has received a shutdown signal", exit 143, during `event-loop.test`, with no test failure before it), and the job was rerun unchanged |
 
 Main was merged into the branch a fourth time after these runs (da61f2d,
-section 3.9); that push runs each host's canary (macOS: the smoke job), the
-Icy Tower builds, ci tools, the raven clean room, package reproducibility
-and react-native 2048, which follow.
+section 3.9). That push's runs all passed (the last finished 01:42 UTC on
+2026-11-11); every canary ran its tests (none deferred to another run):
+
+| workflow | run | state |
+|---|---|---|
+| `tests.yml` | 42931655442 | canary passed: mutant catalogs, warning gate, canary selection |
+| `tests-arm64.yml` | 42931655586 | canary passed |
+| `windows-x86_64.yml` | 42931655496 | canary passed |
+| `macos-arm64.yml` | 42931655676 | smoke (Tier A: Rust unit tests, stack checks, native status, smoke tier, canary, AOT-run costs, objects and executables) and the Linux control passed |
+| `icy-tower-macos.yml`, `icy-tower-windows.yml` | 42931655617, 42931655522 | passed |
+| `ci-tools.yml`, `raven-cleanroom.yml`, `package-reproducibility.yml`, `react-native-2048.yml` | 42931655613, 42931655597, 42931655584, 42931655455 | passed |
+
+The merge brought main's changes in without a conflict and left this
+branch's own changes as they were (section 3.9); the full runs at bbb95fd
+stand for them.
 
 ## 7. Remaining limits and known problems
 
