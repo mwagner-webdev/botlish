@@ -4731,6 +4731,101 @@ mod tests {
         assert_eq!(rt_hash(&mut *vm, car), small(632455997673246507));
     }
 
+    /// A VM whose program has these enums and these anonymous shapes.
+    fn vm_with_enums_and_shapes(enums: &[(&str, &[&str])], shapes: &[&[&str]]) -> Box<Vm> {
+        use crate::runtime::vm::{EnumInfo, ShapeInfo};
+        Vm::new(
+            std::sync::Arc::new(ProgramInfo {
+                functions: Vec::new(),
+                natives: Vec::new(),
+                shapes: shapes
+                    .iter()
+                    .map(|fields| ShapeInfo {
+                        name: None,
+                        fields: fields.iter().map(|f| f.to_string()).collect(),
+                        opaque: false,
+                        identity: None,
+                        tree: None,
+                    })
+                    .collect(),
+                enums: enums
+                    .iter()
+                    .map(|(name, cases)| EnumInfo {
+                        name: name.to_string(),
+                        cases: cases.iter().map(|c| c.to_string()).collect(),
+                    })
+                    .collect(),
+                errors: Vec::new(),
+            }),
+            AllocMode::Summary,
+        )
+    }
+
+    /// PORTABILITY-PAYLOAD-ENUMS-MILESTONE-1.md: a payload-bearing case's
+    /// value is an EnumCaseObj of kind Enum; equal to another iff the same
+    /// enum, the same case and equal payloads -- never by address, never by
+    /// the case number alone -- and never equal to a payload-free word.
+    #[test]
+    fn enum_case_objects_are_nominal_and_compare_payloads() {
+        // Expression {Constant {value}, Parameter, Add {left, right}};
+        // Other {Constant {value}}. Shape 0: {value}; 1: {left, right}.
+        let mut vm = vm_with_enums_and_shapes(
+            &[("Expression", &["Constant", "Parameter", "Add"]), ("Other", &["Constant"])],
+            &[&["value"], &["left", "right"]],
+        );
+        let p42 = rooted!(vm, vm.new_struct(0, vec![small(42)]));
+        let p42b = rooted!(vm, vm.new_struct(0, vec![small(42)]));
+        let p41 = rooted!(vm, vm.new_struct(0, vec![small(41)]));
+        let c42 = rooted!(vm, rt_enum_case(&mut *vm, p42, small(0), small(0)));
+        let c42b = rooted!(vm, rt_enum_case(&mut *vm, p42b, small(0), small(0)));
+        let c41 = rooted!(vm, rt_enum_case(&mut *vm, p41, small(0), small(0)));
+        let other = rooted!(vm, rt_enum_case(&mut *vm, p42, small(1), small(0)));
+        assert_eq!(kind_of(c42), Kind::Enum);
+        assert_eq!(enum_case_parts(c42), (0, 0));
+        assert_eq!(enum_case_parts(make_enum(0, 1)), (0, 1));
+        let eq = |vm: &mut Vm, a, b| rt_value_eq(vm, a, b);
+        assert_ne!(c42, c42b);
+        assert_eq!(eq(&mut vm, c42, c42b), TRUE);
+        assert_eq!(eq(&mut vm, c42, c41), FALSE);
+        // Another enum's same-spelled case with an equal payload.
+        assert_eq!(eq(&mut vm, c42, other), FALSE);
+        // A payload-free case of the same enum, whatever its number.
+        assert_eq!(eq(&mut vm, c42, make_enum(0, 1)), FALSE);
+        assert_eq!(eq(&mut vm, make_enum(0, 1), c42), FALSE);
+        assert_eq!(eq(&mut vm, c42, make_enum(0, 0)), FALSE);
+    }
+
+    /// The hash of a payload-bearing case's value: the payload-free form's
+    /// canonical input, a 0xFF, then the payload (core/hashing.tcl's enum
+    /// case): equal values hash equally, the case and the payload count, and
+    /// the value prints as core::value::show and transports as
+    /// core::value::enumCaseValue does.
+    #[test]
+    fn enum_case_objects_hash_and_show_by_names() {
+        use crate::runtime::show::{show, tcl_value};
+        let mut vm = vm_with_enums_and_shapes(
+            &[("Expression", &["Constant", "Parameter", "Add"])],
+            &[&["value"], &["left", "right"]],
+        );
+        let p = rooted!(vm, vm.new_struct(0, vec![small(42)]));
+        let q = rooted!(vm, vm.new_struct(0, vec![small(42)]));
+        let add = rooted!(vm, vm.new_struct(1, vec![small(3), small(7)]));
+        let a = rooted!(vm, rt_enum_case(&mut *vm, p, small(0), small(0)));
+        let b = rooted!(vm, rt_enum_case(&mut *vm, q, small(0), small(0)));
+        let c = rooted!(vm, rt_enum_case(&mut *vm, add, small(0), small(2)));
+        assert_eq!(rt_hash(&mut *vm, a), rt_hash(&mut *vm, b));
+        assert_ne!(rt_hash(&mut *vm, a), rt_hash(&mut *vm, c));
+        // tests/payload-enums.test's pe-hash-pinned values, byte for byte
+        // core/hashing.tcl's.
+        assert_eq!(rt_hash(&mut *vm, a), small(1115571715604841343));
+        assert_eq!(rt_hash(&mut *vm, c), small(51682743645282670));
+        assert_eq!(rt_hash(&mut *vm, make_enum(0, 1)), small(576369074442151568));
+        assert_eq!(show(&vm.info, a), "Expression::Constant {value: 42}");
+        assert_eq!(show(&vm.info, c), "Expression::Add {left: 3, right: 7}");
+        assert_eq!(show(&vm.info, make_enum(0, 1)), "Expression::Parameter");
+        assert_eq!(tcl_value(&vm.info, a).unwrap(), "enum Expression Constant {struct {{} value} {{int 42}}}");
+    }
+
     // -----------------------------------------------------------------------
     // Structs (STRUCTS.md): equality, hashing and printing by shape.
 

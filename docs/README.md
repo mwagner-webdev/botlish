@@ -152,7 +152,7 @@ Values are immutable. Every value has exactly one kind:
 | `unit`   | `unit`           | value of an empty sequence                         |
 | `list`   | `[1, "a"]`       | an ordered sequence of values                      |
 | `struct` | `{a: 1, b: 2}` / `Name {a: 1}` | fixed named fields (STRUCTS.md): anonymous (structural) or declared by `struct Name:` (nominal) |
-| `enum`   | `Name::Case`     | one case of an enum declared by `enum Name:` (ENUMS.md): nominal (its identity is the enum declaration and the case's name), no integer, String or ordinal meaning; payload-free, unrestricted, compared and hashed by identity |
+| `enum`   | `Name::Case`, `Name::Case {f: v}` | one case of an enum declared by `enum Name:` (ENUMS.md): nominal (its identity is the enum declaration and the case's name), no integer, String or ordinal meaning; a payload-bearing case's value also carries its named-field payload (PORTABILITY-PAYLOAD-ENUMS-MILESTONE-1.md); compared and hashed by identity and payload; affine exactly when a payload can own affine state |
 | `result` | `ok(v)` / `error(v)` | an application-level outcome                   |
 | `block`  | `<block (x y)>`  | a closure: parameters, body, captured environment  |
 | `native` | `<native +>`     | a primitive callable, possibly with refinement metadata |
@@ -932,7 +932,8 @@ Surface syntax beyond the minimal language of §17, macros, objects (structs,
 STRUCTS.md, are immutable values: no mutable struct, update syntax, methods or
 inheritance), assignment, mutable
 variables, exceptions, `?` propagation, pattern matching (enums, ENUMS.md, are
-payload-free closed sums with no `match`, exhaustiveness or payloads yet), a type checker
+closed sums whose cases may carry named-field payloads, with no `match` or
+exhaustiveness yet, so a payload cannot be read back out of a value), a type checker
 beyond refinement tracking (struct destructuring, STRUCT-DESTRUCTURING.md, is
 irrefutable named projection, not pattern matching), async, coroutines, threads, or FFI. A small
 one-file/one-namespace module system *is* implemented (§17's
@@ -1875,14 +1876,18 @@ add10(32)          # 42 (add captures x)
   that field is rejected, never looked up at run time. Struct values are
   immutable.
 * An **enum** is a named, closed, nominal sum (ENUMS.md). `enum VehicleType:`
-  followed by an indented, comma-separated list of payload-free cases
+  followed by an indented, comma-separated list of cases
   (`Boat,` `Car,` ... ; a trailing comma optional) declares one nominal type;
   `VehicleType::Car` is a case value of exactly that type (`geo::VehicleType::Car`
   for a module's, or `VehicleType::Car` after `import type geo::VehicleType`).
-  Two enums are unrelated even with identical cases, a case is never visible
-  by its bare name, and there is no anonymous enum, case value or alias, no
-  ordinal, integer or String conversion and no ordering: `==`, `!=` and `hash`
-  compare the enum and the case. `enum` is a contextual word.
+  A case may carry a named-field payload, `Add {left: int, right: int},`,
+  constructed with every field exactly once, `Expression::Add {left: 3,
+  right: 7}` (PORTABILITY-PAYLOAD-ENUMS-MILESTONE-1.md); its value still has
+  the enum's type. Two enums are unrelated even with identical cases, a case
+  is never visible by its bare name, and there is no anonymous enum, case
+  value or alias, no ordinal, integer or String conversion and no ordering:
+  `==`, `!=` and `hash` compare the enum, the case and the payload. `enum`
+  is a contextual word.
 * **Opaque structs.** `opaque struct Token:` declares an ordinary struct whose
   representation belongs to the module that declares it: only that module may
   construct it (`token::Token {...}`) or inspect it (`x.value`, `{value} = x`);

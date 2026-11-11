@@ -30,6 +30,19 @@ The compiler keeps the complete declaration -- the enum's identity and every
 case's in declaration order -- so a later milestone can give some cases
 named-field payloads and add exhaustive matching on the same construct.
 
+> **Payload-bearing cases** have since been added on this construct
+> (PORTABILITY-PAYLOAD-ENUMS-MILESTONE-1.md): a case may declare a
+> named-field payload, `Add {left: int, right: int},`, and is constructed
+> `Expression::Add {left: 3, right: 7}`. Everything this report says of
+> payload-free cases holds unchanged -- their syntax, identity, immediate
+> native words, inline comparison, hash and rendering -- with three
+> exceptions where the report described the absence of payloads: braces
+> after a payload-free case are now `ENUM-PAYLOAD-UNEXPECTED` (5, 7; it was
+> `NOT-A-STRUCT`), `Car {seats: int}` in a declaration is a valid
+> payload-bearing case (1), and an enum is affine, not Hashable or not
+> Sendable when its payloads make it so (12, 18, 21). That report describes
+> the payloads; this one stays the account of the enum construct itself.
+
 ## Contents
 
 * [The principal program](#the-principal-program)
@@ -950,4 +963,7 @@ enum value, equality or hashing, or the native word, table, `enumeq` or
 seeds, once with `-gc-stress 1`), `audit/enums/tools/mutate.tcl` (every mutant
 in `audit/enums/tools/mutants.txt` must still apply and be killed) and
 `cargo test --release --manifest-path native/Cargo.toml --lib enum`.
+For a change to payload-bearing cases, also `tests/payload-enums.test`,
+`audit/payload-enums/tools/fuzz.tcl` and `audit/payload-enums/tools/mutate.tcl`
+(PORTABILITY-PAYLOAD-ENUMS-MILESTONE-1.md, "What to run when changing this").
 `bench/enums.tcl` regenerates the performance report.

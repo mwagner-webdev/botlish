@@ -2190,6 +2190,8 @@ proc hir::resolve::ResolveStruct {hirVar e node ctx} {
         lassign [dict get $node casePayloadOf] caseEnum caseName
         SetField hir $e casePayloadOf [list $caseEnum $caseName]
         set caseOrigin [dict get $node caseOrigin]
+        # (Where the case is written: the compiler service's tokens.)
+        SetField hir $e caseOrigin $caseOrigin
         if {![hir::enums::hasCase $caseEnum $caseName]} {
             hir::DiagnoseAt hir UNKNOWN-ENUM-CASE [hir::enums::UnknownCaseMessage $caseEnum $caseName] $e $caseOrigin
         } elseif {![hir::enums::hasPayload $caseEnum $caseName]} {

@@ -1,0 +1,333 @@
+# Mutants of payload-bearing enum cases (audit/payload-enums/tools/mutate.tcl;
+# PORTABILITY-PAYLOAD-ENUMS-MILESTONE-1.md): each a deliberate bug in one of
+# the milestone's invariants -- nominal identity, case identity, payload
+# comparison, hash composition, payload type admission, the construction's
+# field rules, ownership transfer, cleanup, native tracing, the
+# representation choices and the HIR text form.
+#
+#   @@ NAME DESCRIPTION
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+#
+# A mutant may have several edits. A mutant editing native/src/ is a native
+# mutant: mutate.tcl rebuilds the native backend for it. Lines starting with
+# # outside an edit are comments.
+#
+# Not here, with the reason:
+#
+#   * the dynamic logical copy of a MutableVector held in a payload (the
+#     `enum` case of core/mutvec.tcl's Share and runtime/mutvec.rs's
+#     share_dynamic): a payload cannot be read back out of a value in this
+#     milestone, so no program can observe whether its vector was shared or
+#     copied -- the mutant would be equivalent until the matching milestone
+#     reads payloads.
+
+# ---------------------------------------------------------------------------
+# Identity and equality
+
+@@ payload-ignored-equality-tcl two values of one payload-bearing case compare equal whatever their payloads (Tcl runtimes)
+## core/value.tcl
+<<<<
+            if {[llength $a] == 4} {
+                return [equal [lindex $a 3] [lindex $b 3]]
+            }
+            return 1
+====
+            return 1
+>>>>
+
+@@ payload-ignored-equality-native two values of one payload-bearing case compare equal whatever their payloads (native runtime)
+## native/src/runtime/ops.rs
+<<<<
+                (Some(x), Some(y)) => equal(p, x, y)?,
+====
+                (Some(_), Some(_)) => true,
+>>>>
+
+@@ case-ignored-equality-tcl two cases of one enum with the same field names and values compare equal: equality reads the enum and the payload, never the case (Tcl runtimes)
+## core/value.tcl
+<<<<
+            if {[lindex $a 1] ne [lindex $b 1] || [lindex $a 2] ne [lindex $b 2]} {
+                return 0
+            }
+            if {[llength $a] != [llength $b]} {
+====
+            if {[lindex $a 1] ne [lindex $b 1] || ([llength $a] == 3 && [lindex $a 2] ne [lindex $b 2])} {
+                return 0
+            }
+            if {[llength $a] != [llength $b]} {
+>>>>
+
+@@ enum-ignored-equality-native-boxed two payload-bearing values of same-spelled cases of different enums with equal payloads compare equal: the boxed comparison reads the case number and the payload only (native runtime)
+## native/src/runtime/ops.rs
+<<<<
+            if enum_case_parts(a) != enum_case_parts(b) {
+                return Ok(false);
+            }
+====
+            if enum_case_parts(a).1 != enum_case_parts(b).1 {
+                return Ok(false);
+            }
+>>>>
+
+@@ word-compare-for-payload-enums the inline word compare (enumeq) is used for every enum, payload-bearing ones included: equal payload-bearing values compare unequal (native lowering)
+## native/lower.tcl
+<<<<
+proc native::lower::ImmediateEnum {type} {
+    return [hir::enums::IsPayloadFree $type]
+}
+====
+proc native::lower::ImmediateEnum {type} {
+    return [expr {[hir::types::IsEnum $type] || $type eq "enum"}]
+}
+>>>>
+
+@@ payload-order-is-identity a payload's fields are laid out in the order a construction writes them, so two constructions of one value in different field orders are different values
+## hir/resolve.tcl
+<<<<
+    if {!$named} {
+        set layout [lsort -unique $names]
+    } elseif {$id ne ""} {
+====
+    if {!$named && [dict exists $node casePayloadOf]} {
+        set layout $names
+    } elseif {!$named} {
+        set layout [lsort -unique $names]
+    } elseif {$id ne ""} {
+>>>>
+
+# ---------------------------------------------------------------------------
+# Hashing
+
+@@ hash-ignores-payload-tcl a payload-bearing case's hash is its payload-free form's, whatever its payload (Tcl runtimes)
+## core/hashing.tcl
+<<<<
+                lappend out 255
+                Child out $mode [core::value::enumPayload $v]
+====
+>>>>
+
+@@ hash-ignores-payload-native a payload-bearing case's hash is its payload-free form's, whatever its payload (native runtime)
+## native/src/runtime/ops.rs
+<<<<
+                sink.bytes(&[0xFF]);
+                sink.child(p, payload)?;
+====
+                let _ = payload;
+>>>>
+
+@@ hash-separator-dropped-tcl the 0xFF between a case's name and its payload is left out (Tcl runtimes): the Tcl and native hashes of a payload-bearing case differ
+## core/hashing.tcl
+<<<<
+                lappend out 255
+                Child out $mode [core::value::enumPayload $v]
+====
+                Child out $mode [core::value::enumPayload $v]
+>>>>
+
+# ---------------------------------------------------------------------------
+# Construction and admission
+
+@@ payload-types-unchecked a payload field's value is never proven of its declared type
+## hir/range.tcl
+<<<<
+    lassign [dict get $node casePayloadOf] id case
+    if {![hir::enums::hasPayload $id $case]} {
+        return
+    }
+====
+    lassign [dict get $node casePayloadOf] id case
+    if {1 || ![hir::enums::hasPayload $id $case]} {
+        return
+    }
+>>>>
+
+@@ missing-payload-field-accepted a construction missing a payload field is accepted
+## hir/resolve.tcl
+<<<<
+            foreach declared $declaredNames {
+                if {$declared ni $names} {
+                    hir::Diagnose hir MISSING-FIELD \
+                        "$what is missing field \"$declared\" (every declared field must be given exactly once; there are no defaults)" $e
+                }
+            }
+        }
+    }
+    if {[dict exists $node payloadOf]} {
+====
+        }
+    }
+    if {[dict exists $node payloadOf]} {
+>>>>
+
+@@ unexpected-payload-accepted braces after a payload-free case are accepted (the construction makes a payload-free case's value with a payload)
+## hir/resolve.tcl
+<<<<
+        } elseif {![hir::enums::hasPayload $caseEnum $caseName]} {
+            hir::DiagnoseAt hir ENUM-PAYLOAD-UNEXPECTED [hir::enums::PayloadUnexpectedMessage $caseEnum $caseName] $e $caseOrigin
+        } else {
+====
+        } elseif {0} {
+        } else {
+>>>>
+
+@@ required-payload-defaulted a payload-bearing case written as a value is accepted, as a payload-free value of the case
+## hir/resolve.tcl
+<<<<
+    if {[hir::enums::hasPayload $id $case]} {
+        # A payload-bearing case written as a value (PORTABILITY-PAYLOAD-
+====
+    if {0 && [hir::enums::hasPayload $id $case]} {
+        # A payload-bearing case written as a value (PORTABILITY-PAYLOAD-
+>>>>
+
+@@ case-type-is-payload a construction is typed as its payload's anonymous struct, never as its enum
+## hir/types.tcl
+<<<<
+                if {[hir::enums::hasPayload $id $case]} {
+                    return [list enum $id]
+                }
+====
+                if {[hir::enums::hasPayload $id $case]} {
+                    return [hir::enums::payloadType $id $case]
+                }
+>>>>
+
+# ---------------------------------------------------------------------------
+# Affinity, ownership and cleanup
+
+@@ enum-affinity-ignores-payloads an enum is never affine, whatever its payloads hold
+## hir/enums.tcl
+<<<<
+    foreach {case descriptor} [dict get $registry $id descriptors] {
+        foreach {field type} [dict get $descriptor payload] {
+            if {[hir::types::IsAffine $type [concat $seen [list $id]]]} {
+                return 1
+            }
+        }
+    }
+    return 0
+}
+====
+    return 0
+}
+>>>>
+
+@@ enum-descriptor-empty an affine enum's drop descriptor is empty: its payloads' affine values are never released
+## hir/affine.tcl
+<<<<
+        if {$n == 0} {
+            return ""
+        }
+        return "e$n.$parts"
+====
+        return ""
+>>>>
+
+@@ drop-first-case-tcl a dying enum value's payload is dropped by the first entry of its descriptor, whatever its case (Tcl runtimes)
+## core/affine.tcl
+<<<<
+                lassign $part name inner
+                if {$name eq $case} {
+====
+                lassign $part name inner
+                if {1} {
+>>>>
+
+@@ drop-skipped-native a dying enum value's payload is never dropped (native runtime)
+## native/src/runtime/affine.rs
+<<<<
+                Some(mut at) => {
+                    let payload = enum_payload(value).expect("a payload-bearing case");
+                    drop_by(p, payload, d, &mut at)
+                }
+====
+                Some(_) => true,
+>>>>
+
+@@ affine-recursion-accepted a recursive affine enum is accepted (its descriptor walk then has no end)
+## hir/enums.tcl
+<<<<
+        if {![hasPayloads $id] || ![hir::types::IsAffine [list enum $id]]} continue
+        set path [RecursionPath $id]
+====
+        if {1 || ![hasPayloads $id] || ![hir::types::IsAffine [list enum $id]]} continue
+        set path [RecursionPath $id]
+>>>>
+
+# ---------------------------------------------------------------------------
+# Component analyses
+
+@@ totality-ignores-payloads an enum is always Hashable and Equatable, whatever its payloads hold (a function field included)
+## hir/types.tcl
+<<<<
+                if {$type in $seen || ![hir::enums::hasPayloads [lindex $type 1]]} {
+                    return {total ""}
+                }
+====
+                if {1 || $type in $seen || ![hir::enums::hasPayloads [lindex $type 1]]} {
+                    return {total ""}
+                }
+>>>>
+
+@@ payload-enums-sendable a payload-bearing enum is Sendable (its payload would be lost in transfer)
+## hir/types.tcl
+<<<<
+    if {[IsEnum $type] && [hir::enums::hasPayloads [lindex $type 1]]} {
+        # PORTABILITY-PAYLOAD-ENUMS-MILESTONE-1.md: the transfer codecs
+====
+    if {0 && [IsEnum $type] && [hir::enums::hasPayloads [lindex $type 1]]} {
+        # PORTABILITY-PAYLOAD-ENUMS-MILESTONE-1.md: the transfer codecs
+>>>>
+
+# ---------------------------------------------------------------------------
+# Native representation and tracing
+
+@@ payload-untraced-native the collector does not trace a payload-bearing case's payload: it is reclaimed while its value lives (native runtime)
+## native/src/runtime/heap.rs
+<<<<
+                KIND_ENUMCASE => stack.push(enum_case_of(v).payload),
+====
+                KIND_ENUMCASE => {}
+>>>>
+
+@@ payload-key-erased a semantic instance's codegen key reduces a payload enum to the broad enum kind, as a payload-free enum's
+## hir/specialize.tcl
+<<<<
+    if {[hir::types::IsEnum $type] && [hir::enums::hasPayloads [lindex $type 1]]} {
+        # An enum with payload-bearing cases (PORTABILITY-PAYLOAD-ENUMS-
+====
+    if {0 && [hir::types::IsEnum $type] && [hir::enums::hasPayloads [lindex $type 1]]} {
+        # An enum with payload-bearing cases (PORTABILITY-PAYLOAD-ENUMS-
+>>>>
+
+# ---------------------------------------------------------------------------
+# HIR text and compiler facts
+
+@@ hir-text-loses-payloads HIR text prints no enumcase line: a text read back has payload-bearing cases without payload fields
+## hir/format.tcl
+<<<<
+            foreach {case fields} [dict getdef $entry payloads {}] {
+                lappend lines [hir::format::EnumPayload [dict get $entry id] $case $fields]
+            }
+====
+>>>>
+
+@@ case-fact-lost the compiler forgets the case of a payload-bearing construction (the matching milestone's fact)
+## hir/enums.tcl
+<<<<
+                if {[hasPayload $id $case]} {
+                    return [list $id $case]
+                }
+                return ""
+            }
+            ref {
+====
+                return ""
+            }
+            ref {
+>>>>
