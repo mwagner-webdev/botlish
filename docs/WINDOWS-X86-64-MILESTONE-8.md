@@ -903,7 +903,7 @@ Runs of this branch:
 | 42945390958 | 8031ed76 | tests (linux x86-64), dispatched: canary, interp, compile, cranelift-generic coverage, system- and stub-linked executables, golden suites (4 shards), Rust tests, the method-call oracle | 13 of 14 jobs **success**; cranelift coverage **failure**: `vt-large` (value-transfer.test), classified a native backend failure; its output is past what the harness prints. It passes locally on cranelift (all 76 tests of the file, 50 s for it alone) and in another branch's run of the same job; this milestone's runtime changes act only inside a library call. VT-LARGE-RERUN |
 | 42945394554 | 8031ed76 | tests (linux arm64), dispatched | **success** (every job) |
 | 42945398195 | 8031ed76 | tests (macos arm64), dispatched: smoke, acceptance (6 shards; `nl-unsupported-host` among them), system linker, Botlish.app and its jobs, main-thread startup | **success** (every job) |
-| WINDOWS-ACCEPTANCE-RUN | 99fc8e51 | tests (windows x86-64), dispatched, `tier: acceptance` | WINDOWS-ACCEPTANCE-RESULT |
+| 42989438885 | 99fc8e51 | tests (windows x86-64), dispatched, `tier: acceptance`: canary, smoke (the native-library step again), root plans, system linker, acceptance shards 1-4 | **success** (every job) |
 
 Earlier canaries on the way: Linux x86-64 at 54174bc2 and 8031ed76,
 Linux arm64 at 0862ab71, all green. The commits after 8031ed76 change
