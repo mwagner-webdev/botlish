@@ -90,7 +90,30 @@ had to add or fix is the rest of this report.
 
 ## 3. The COFF/linker census
 
-PENDING-CENSUS
+`audit/windows-library/probe.tcl` (the `windows library probe` workflow)
+builds two libraries, `one` and `two`, from two programs that both define
+an error `Negative` and export `twice` and `tag`, and records what MSVC's
+tools do with them. It is evidence, not a test: it prints every row and
+fails only when it cannot run. Run 42919823801 (windows-2025, image
+windows-2025-vs2026 20261103.298.1, Windows Server 2025 10.0.26100, rustc
+1.99.1, the runtime archive `botlish_runtime.lib` 22,502,940 bytes):
+
+| Experiment | Result |
+|---|---|
+| E1, the production path (`native::library`: `botlish-native library-dll`, a module-definition file, `link.exe /DLL`) | `one.dll` 592,896 bytes and `one.lib` 4,950 bytes in 2.5 s (the first build, cold); `two.dll` 614,400 bytes in 0.9 s. Each exports 17 names, exactly its public functions. Imports: `kernel32.dll`, `api-ms-win-core-synch-l1-2-0.dll`, `ntdll.dll`, `bcryptprimitives.dll`, and `KERNEL32.dll` again (the C runtime's import, through kernel32.lib, beside the standard library's raw-dylib one). No TLS callback. DLL characteristics 0x160 (dynamic base, NX compatible, high-entropy addresses); stack reserve 1 MiB (the host's matters, not the DLL's). |
+| E1, a host's `GetProcAddress` | all 17 public names found; none of 11 internal ones (`botlish_library_call`, `botlish_library_create`, `botlish_program`, `botlish_fn_0`, `botlish_entry_0`, `rt_fail_declared`, `rust_begin_unwind`, `main`, `DllMain`, ...) |
+| E2, `/EXPORT:` options instead of the .def file | the same 17 names; the export directory names the output file (`e2.dll`). The .def file is kept: one input states the library's name and its exports, and link.exe checks it |
+| E3, neither | 0 exports, no import library: no input exports anything by itself; the program object has no `/EXPORT` directive |
+| E4, `lib /DEF` alone | an import library whose import objects equal link.exe's |
+| E5, static libraries (each program object merged with the runtime archive by `lib.exe`: 22.5 MB each) | one alone in an executable works (`twice: 42`); **both in one executable link with no error at all** (0 LNK2005) and run; with `/FORCE:MULTIPLE` too (0 LNK4006), `twice: 42 63`, and a buffer of one library released through the other is *accepted*: one runtime copy answers for both |
+| E6, the candidate: each library's private symbols renamed (`llvm-objcopy --redefine-syms`), the objects archived again | 4,965 defined symbols renamed in 1,879 objects per library, 0 failures, 3.5 minutes per library; archiving them failed on the command line's length (fixed with a response file: E6-RERUN-PENDING) |
+
+E5 is the decisive row, and stronger than expected: two static Botlish
+libraries in one executable are not refused by the linker. `lib.exe`
+archives are searched member by member, a member is pulled once, so the
+second library's program object binds to the members the first library's
+references already pulled: one runtime silently serves both, by link
+order -- exactly what the brief forbids (section 13).
 
 ## 4. Artifacts
 
@@ -253,7 +276,14 @@ TLS directory hold, so that is what was checked:
   import objects of the standard library's and windows-sys' raw-dylib
   imports.
 * **The program object** has no `.CRT$` section.
-* **The DLL**: PENDING-TLS.
+* **The DLL**: no TLS callback at all in the census's DLLs (E1): the
+  linker keeps the standard library's `.CRT$XLB` only where something
+  registers a thread-local destructor, and these runtimes did not. Its
+  entry point is link.exe's default for `/DLL` (no `/ENTRY` is given), the
+  C runtime's `_DllMainCRTStartup`: it initializes the C runtime and calls
+  `DllMain`, which is the C runtime's empty default -- neither the program
+  object nor any member of the runtime archive defines or references a
+  `DllMain` (llvm-nm over the cross-built archive). PENDING-TLS-TEST
 
 `nl-windows-loader-lock` checks all three on every run, and the mutant
 `loader-lock-initializer` (a `.CRT$XCU` initializer added to the runtime)
@@ -408,7 +438,11 @@ Linux and Windows; the mutant `stacks-kept-after-last-instance` keeps them.
 runtime (libcmt, libvcruntime, the static UCRT) and excludes every other
 Microsoft runtime -- `crt_args_for`'s executable policy
 (WINDOWS-X86-64-MILESTONE-2.md, "The C runtime"), applied to the DLL. It
-imports only the system's DLLs: PENDING-IMPORTS. A host compiled for the
+imports only the system's DLLs: in the census (E1) `kernel32.dll`,
+`api-ms-win-core-synch-l1-2-0.dll`, `ntdll.dll` and `bcryptprimitives.dll`
+(the standard library's raw-dylib imports) and `KERNEL32.dll` (the C
+runtime's), no `VCRUNTIME140.dll`, `ucrtbase.dll` or `api-ms-win-crt-*`;
+`ValidateDll` refuses a DLL that imports a C runtime's DLL, on every build. A host compiled for the
 static runtime (`/MT`) and one compiled for the dynamic runtime (`/MD`)
 use it alike (`nl-windows-crt`: the same output from both, results kept
 across calls and the instance's destruction, the host's own `malloc`/`free`
@@ -456,7 +490,8 @@ is that the export table holds the public functions and nothing else:
   (`windows_library_definition`, unit-tested);
 * no input adds an export: neither the program object nor any member of the
   runtime archive has a `.drectve` section (section 7), and the probe's E3
-  links the DLL without a module-definition file: PENDING-E3;
+  links the DLL without a module-definition file: it exports nothing and
+  link.exe makes no import library;
 * `ValidateDll` compares the export table read from the PE file with the
   public names (and the import library's import objects with them) before
   the build is reported, and `nl-windows-exports` compares them, and
@@ -491,7 +526,26 @@ not reach one another.
 
 The census (section 3, experiments E5 and E6; real Windows):
 
-PENDING-STATIC-EVIDENCE
+* **One static library alone works**: `one_static.lib` (the program
+  object and the runtime archive's members, 22.5 MB) linked into a C host
+  runs (`twice: 42`).
+* **Two do not coexist, and nothing says so.** Both linked into one host:
+  link.exe reports no duplicate symbol (0 LNK2005) and the host runs. An
+  archive member is pulled once, by the first undefined reference it
+  resolves, so the second library's program object binds to the runtime
+  members the first library's references already pulled. With
+  `/FORCE:MULTIPLE` the same (0 LNK4006): `twice: 42 63` from the two
+  libraries, and a result buffer of `one` released through `two`'s
+  release function is *accepted* -- which two independent runtimes refuse
+  (`nl-two-libraries`: "one library's buffer released through the other
+  refused"). One runtime serves both libraries, chosen by link order.
+* **The candidate mechanism (E6)**: renaming every symbol a library's
+  objects define, but its public functions, with a prefix of the library's
+  own (`llvm-objcopy --redefine-syms`, both definitions and references, in
+  the program object and every runtime member) works mechanically -- 4,965
+  symbols in 1,879 objects, no failure -- and costs 3.5 minutes per library
+  on the runner. Whether the renamed archives then coexist:
+  E6-RESULT-PENDING.
 
 **The decision: no static COFF library.** The production path is the DLL
 and its import library; `-shared 0` is refused on Windows, and nothing
@@ -504,8 +558,10 @@ over about 1,800 archive members per build. That is the "large
 general-purpose COFF rewriting subsystem" the brief warns against, and it
 would bring a tool MSVC's toolchain does not have (LLVM's objcopy) into
 every Windows library build. The reproducer of the unresolved isolation
-problem is the probe's E5: `audit/windows-library/probe.tcl` on any Windows
-runner (the `windows library probe` workflow).
+problem is the probe's E5 (`audit/windows-library/probe.tcl` on any Windows
+runner with Visual Studio's x64 tools; the `windows library probe`
+workflow): two static libraries made the obvious way link into one
+executable without a diagnostic and share one runtime.
 
 
 ## 14. Toolchain and diagnostics
