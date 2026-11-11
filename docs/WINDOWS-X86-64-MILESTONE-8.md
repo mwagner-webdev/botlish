@@ -233,7 +233,7 @@ doubles from C, and calls an export through `tests/cffi/nl-win64-probe.asm`,
 an ml64 caller that holds a sentinel in every nonvolatile register (RBX,
 RBP, RDI, RSI, R12 to R15, both halves of XMM6 to XMM15), places nine
 arguments by hand and compares every one afterwards, on a success and on a
-failure that allocates: PENDING-WIN64.
+failure that allocates. On Windows (the first MSVC run, run 42922582948): `mix = 1015347`, `fsum = 18`, `sum6 = 91` and the failing `sum6(-3)`'s `Negative value=0`, every nonvolatile register as the caller left it on both calls, plainly and under GC stress.
 
 Exports are fixed-prototype functions: nothing of the variadic call work
 (WINDOWS-X86-64-MILESTONE-6.md) applies to them, and a host calls them with
@@ -252,7 +252,7 @@ the reference interpreter's count, though the only Botlish caller tokenizes
 six characters), `nl-export-root-no-caller` (an export no Botlish code calls;
 `add1(INT64_MAX)` is `RESULT-OUT-OF-RANGE`), `nl-export-imported-module`,
 and `nl-abi-types`' declared errors (`Odd count=3 flag=true items=(other)
-note="odd ä" ratio=0.5`). PENDING-EXPORT-ROOTS
+note="odd ä" ratio=0.5`). All of them pass on Windows (the first MSVC run, run 42922582948) as on Linux.
 
 ## 7. Initialization and the loader lock
 
@@ -386,7 +386,7 @@ entries, 16 of them the public functions'. `nl-windows-unwind-through`
 finds a function table entry for every public function's address
 (`RtlLookupFunctionEntry`) and, inside a C callback Botlish code called,
 takes a stack trace that crosses the Botlish frames, the runtime and the
-trampoline back to the host function that called the export: PENDING-UNWIND.
+trampoline back to the host function that called the export. On Windows (the first MSVC run, run 42922582948): an entry for each of the 16 public functions at its exact address, and the trace reaches the caller, plainly and under GC stress.
 The mutant `public-unwind-dropped` removes the entries.
 
 **Roots across C transitions and nested instances**: `nl-nested-libraries`
@@ -420,7 +420,7 @@ survive a conversion's end (a fiber belongs to no thread state).
 fiber (and the host converts it afterwards); on the host's own fiber, the
 call's coroutines run and the thread is still that fiber; on a fiber the
 host created, the call runs there; after the host converts back, a call is
-again on a plain thread: PENDING-FIBERS. `nl-coroutine-inside` (201 calls
+again on a plain thread. All as stated on Windows (the first MSVC run, run 42922582948). `nl-coroutine-inside` (201 calls
 driving a recursive yielding function on the general runtime, under GC
 stress) and `nl-stack-safety-coroutine` run on Windows. The mutant
 `fiber-left-converted` removes the restore.
@@ -482,7 +482,7 @@ loads nothing, creates an instance, runs coroutines, destroys it and waits;
 the main thread unloads the DLL while the worker still runs -- the DLL is
 gone (`GetModuleHandleW` finds nothing), no coroutine stack of it is left,
 the worker is no fiber -- and the worker then ends normally (exit code 0);
-twice, the second time after a reload: PENDING-UNLOAD.
+twice, the second time after a reload. On Windows (the first MSVC run, run 42922582948): both rounds unload (`FreeLibrary ok, still loaded: no, coroutine stacks left: 0`) and the worker exits with 0 after each, plainly and under GC stress.
 
 ## 12. Several libraries in one process
 
@@ -501,7 +501,7 @@ is that the export table holds the public functions and nothing else:
 * `ValidateDll` compares the export table read from the PE file with the
   public names (and the import library's import objects with them) before
   the build is reported, and `nl-windows-exports` compares them, and
-  dumpbin's reading of the table, on every run: PENDING-EXPORTS;
+  dumpbin's reading of the table, on every run (on Windows, the first MSVC run, run 42922582948: the same names, none by ordinal only, none forwarded, the import library one code import of `chk.dll` per public function);
 * `nl-windows-load-library`: GetProcAddress finds every public function and
   none of `botlish_library_call`, `botlish_library_create`,
   `botlish_program`, `botlish_fn_0`, `botlish_entry_0`, `rt_fail_declared`,
