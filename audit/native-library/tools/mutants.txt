@@ -57,6 +57,7 @@ proc native::library::TopLevelProblems {hir} {
 >>>>
 
 @@ symbols-global the library's runtime and program symbols stay global (two libraries collide)
+%% linux-x86_64 linux-aarch64
 ## native/library.tcl
 <<<<
         library::Tool objcopy --strip-debug --keep-global-symbols=$keep $linked $final
@@ -214,7 +215,15 @@ proc native::library::TopLevelProblems {hir} {
 ## native/src/main.rs
 <<<<
             nir::check_stack_limit(&mut program);
+            match codegen::emit_library_object(&program, name, &emit_triple) {
 ====
+            match codegen::emit_library_object(&program, name, &emit_triple) {
+>>>>
+<<<<
+            nir::check_stack_limit(&mut program);
+            let object = match codegen::emit_library_object(&program, name, &emit_triple) {
+====
+            let object = match codegen::emit_library_object(&program, name, &emit_triple) {
 >>>>
 
 @@ stack-check-callers-unchecked a library call that can fail for the stack is proven infallible: its callers go on past the failure
@@ -229,7 +238,11 @@ proc native::library::TopLevelProblems {hir} {
 ## native/src/runtime/vm.rs
 <<<<
             if self.stack_limit_checked {
-                self.stack_limit = stack.map_or(0, |s| s.stack_limit());
+                self.stack_limit = match (stack, self.entry_stack) {
+                    (Some(coroutine), _) => coroutine.stack_limit(),
+                    (None, Some(_)) => 0,
+                    (None, None) => self.native_stack.map_or(0, |s| s.stack_limit()),
+                };
             }
 ====
 >>>>
@@ -266,4 +279,174 @@ proc native::library::TopLevelProblems {hir} {
         return Err("the program was compiled for a different native runtime build".to_string());
     }
 ====
+>>>>
+
+# ---------------------------------------------------------------------------
+# Windows x86-64: the DLL and the host it runs in (WINDOWS-X86-64-MILESTONE-8.md)
+#
+# Not here, because it is equivalent with private runtimes: an instance of
+# one library given to another library's function accepted by
+# call_checked's program check. The handle is looked up first in the
+# called library's own registry, which never holds another library's
+# handles (each library, DLL or archive, has its own runtime copy), so the
+# call is INVALID-INSTANCE either way; the check matters only where two
+# libraries share one runtime, which the static COFF libraries the report
+# refuses would make (section 13, E5 with /FORCE:MULTIPLE).
+
+@@ dll-export-omitted the module-definition file leaves out the first public function: a declared function is no export of the DLL
+## native/src/codegen/aot.rs
+<<<<
+    for symbol in public {
+        text.push_str("    ");
+====
+    for symbol in public.iter().skip(1) {
+        text.push_str("    ");
+>>>>
+
+@@ dll-internal-exported the DLL also exports the runtime's call function: an internal symbol any host can find with GetProcAddress
+%% windows-x86_64
+## native/src/runtime/library.rs
+<<<<
+    FORWARDERS.iter().map(|f| format!("{name}_{}", f.0)).chain(exports.iter().map(|e| e.symbol.clone())).collect()
+====
+    FORWARDERS.iter().map(|f| format!("{name}_{}", f.0)).chain(exports.iter().map(|e| e.symbol.clone())).chain(std::iter::once(CALL.to_string())).collect()
+>>>>
+
+@@ dll-import-library-misnamed the import library is written under another name than NAME.lib
+%% windows-x86_64
+## native/src/codegen/aot.rs
+<<<<
+    let import = dir.join(format!("{name}.lib"));
+====
+    let import = dir.join(format!("{name}_import.lib"));
+>>>>
+
+@@ dll-crt-dynamic the DLL is linked with the dynamic C runtime (VCRUNTIME140.dll and the UCRT), not a static one of its own
+## native/src/codegen/aot.rs
+<<<<
+    for library in ["libcmt.lib", "libvcruntime.lib", "libucrt.lib"] {
+        args.push(library.into());
+    }
+    for library in OTHER_MSVC_RUNTIMES {
+        args.push(format!("/NODEFAULTLIB:{library}").into());
+    }
+    args
+}
+
+/// Library NAME's DLL
+====
+    for library in ["msvcrt.lib", "vcruntime.lib", "ucrt.lib"] {
+        args.push(library.into());
+    }
+    args
+}
+
+/// Library NAME's DLL
+>>>>
+
+@@ dll-validation-extra-exports native::library takes a DLL exporting names that are no public function of the library for the library
+%% windows-x86_64
+## native/library.tcl
+<<<<
+    if {[llength $extra]} {
+        lappend problems "it exports [llength $extra] names that are no public function of the library:
+====
+    if {0} {
+        lappend problems "it exports [llength $extra] names that are no public function of the library:
+>>>>
+
+@@ dll-validation-runtime-imports native::library takes a DLL importing a C runtime's DLLs for the library
+%% windows-x86_64
+## native/library.tcl
+<<<<
+    if {[llength $runtimes]} {
+        lappend problems "it imports a C runtime's DLLs
+====
+    if {0} {
+        lappend problems "it imports a C runtime's DLLs
+>>>>
+
+@@ public-unwind-dropped the DLL's public functions have no unwind information: Windows' unwinder takes their frames for leaves
+%% windows-x86_64
+## native/src/codegen/mod.rs
+<<<<
+    for (id, size, info) in botlish.chain(public.iter().map(|p| (p.id, p.size, &p.unwind))) {
+====
+    let _ = public;
+    for (id, size, info) in botlish {
+>>>>
+
+@@ win64-convention-ignored the public functions take their arguments in System V's places, not the target's C convention
+%% windows-x86_64
+## native/src/codegen/library.rs
+<<<<
+    sig.call_conv = super::target::c_call_conv(module.isa().triple());
+====
+    sig.call_conv = cranelift_codegen::isa::CallConv::SystemV;
+>>>>
+
+@@ loader-lock-initializer the runtime runs code when the DLL is loaded (a C runtime initializer, under the loader lock)
+%% windows-x86_64
+## native/src/runtime/library.rs
+<<<<
+/// The runtime function every export's trampoline calls.
+pub const CALL: &str = "botlish_library_call";
+====
+/// The runtime function every export's trampoline calls.
+pub const CALL: &str = "botlish_library_call";
+
+#[used]
+#[unsafe(link_section = ".CRT$XCU")]
+static LOADER_LOCK_INITIALIZER: extern "C" fn() = loader_lock_initializer;
+
+extern "C" fn loader_lock_initializer() {
+    let _ = std::thread::current();
+}
+>>>>
+
+@@ fiber-left-converted a call's coroutines leave the host's thread a fiber (the host can no longer make it one)
+%% windows-x86_64
+## native/src/runtime/coroutine.rs
+<<<<
+    #[cfg(all(windows, target_arch = "x86_64", target_env = "msvc"))]
+    windows::restore_thread();
+====
+>>>>
+
+@@ str-result-borrowed a String result points into the Botlish heap instead of being an owned copy
+## native/src/runtime/library.rs
+<<<<
+            let buffer = owned_buffer(text);
+====
+            let buffer = Bytes { ptr: text.as_ptr() as *mut u8, len: text.len() };
+>>>>
+
+@@ invalid-handle-dereferenced a handle the registry does not hold is taken for an instance's address
+## native/src/runtime/library.rs
+<<<<
+    let Some(entry) = instances.get_mut(&handle) else {
+        return Err(invocation("INVALID-INSTANCE", "not a live instance of this library (never created here, or destroyed)"));
+    };
+====
+    let Some(entry) = instances.get_mut(&handle) else {
+        return Ok(handle as *mut Instance);
+    };
+>>>>
+
+@@ stacks-kept-after-last-instance a thread's pooled coroutine stacks outlive its last instance of the library
+## native/src/runtime/library.rs
+<<<<
+    if left == 0 {
+        super::coroutine::release_pool();
+    }
+====
+    let _ = left;
+>>>>
+
+@@ entry-stack-ignored a call made on a stack the instance did not make is walked within the thread's stack: the call's frames' roots are missed
+## native/src/runtime/library.rs
+<<<<
+    vm.entry_stack = vm.entry_stack_at(frame);
+====
+    vm.entry_stack = None;
 >>>>

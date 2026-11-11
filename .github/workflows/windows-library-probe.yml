@@ -1,0 +1,74 @@
+name: windows library probe
+
+# The COFF/linker census of WINDOWS-X86-64-MILESTONE-8.md (section 3) on a
+# real Windows x86-64 host with MSVC's toolchain: a Botlish native library
+# linked into a DLL by a module-definition file and by /EXPORT options,
+# what its inputs export by themselves, lib.exe's import library, and static
+# COFF libraries -- one alone, two in one executable (link.exe's duplicate
+# symbols), two with /FORCE:MULTIPLE (one runtime answering for both), and
+# the candidate of private symbols renamed per library (llvm-objcopy). It is
+# evidence for the report, not a test tier: the job records what happens
+# (the summary lists every row) and fails only when the probe itself cannot
+# run. The production library tests run in windows-x86_64.yml
+# (tests/native-library.test).
+#
+# It runs on pushes that change it or audit/windows-library/, and on demand
+# (workflow_dispatch) once it is on the default branch.
+
+on:
+  push:
+    paths:
+      - ".github/workflows/windows-library-probe.yml"
+      - "audit/windows-library/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-library-probe-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CC: clang
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  probe:
+    name: library probe (Windows x86-64, MSVC)
+    runs-on: windows-2025
+    timeout-minutes: 60
+    steps:
+      - name: Keep the repository's bytes
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@v5
+
+      - name: Install prerequisites (Tcl 9.0.1, stable Rust for x86_64-pc-windows-msvc)
+        uses: ./.github/actions/setup-windows
+
+      - name: Build native (Cranelift) backend
+        uses: ./.github/actions/build-native
+
+      - name: COFF/linker census
+        run: tclsh9.0 audit/windows-library/probe.tcl -out "$RUNNER_TEMP/windows-library-probe" 2>&1 | tee probe.log
+
+      - name: Publish summary
+        if: always()
+        run: |
+          {
+            echo "## Windows library probe"
+            echo '```'
+            tr -d '\r' < probe.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-library-probe
+          path: probe.log
+          if-no-files-found: ignore

@@ -133,6 +133,7 @@ source [file join [file dirname [file normalize [info script]]] prepare.tcl]
 source [file join [file dirname [file normalize [info script]]] library.tcl]
 source [file join [file dirname [file normalize [info script]]] support.tcl]
 source [file join [file dirname [file normalize [info script]]] elf.tcl]
+source [file join [file dirname [file normalize [info script]]] pe.tcl]
 
 namespace eval native {
     variable home [file dirname [file normalize [info script]]]
@@ -212,10 +213,13 @@ proc native::WithProgramDirs {hir run script} {
 #                runtime/coroutine/windows.rs)
 #   stackGuard   NATIVE LIMIT STACK for any exhausted native stack
 #   libraries    native libraries (native::library, NATIVE-LIBRARY-MILESTONE-1.md:
-#                codegen/library.rs's SUPPORTED; the archive's partial link
-#                and symbol localization are GNU binutils') of this host's
-#                own target; a library of another target is made through its
-#                target support package (`targetCapabilities`, below)
+#                codegen/library.rs's SUPPORTED; on Linux the archive's
+#                partial link and symbol localization are GNU binutils', on
+#                Windows x86-64 the library is a DLL and its import library,
+#                linked by link.exe from a Developer environment:
+#                WINDOWS-X86-64-MILESTONE-8.md) of this host's own target; a
+#                library of another target is made through its target
+#                support package (`targetCapabilities`, below)
 #   mainThreadStartup  executables started on the process's main thread
 #                (native::executable -startup main-thread, MAIN-THREAD-
 #                STARTUP-MILESTONE-1.md: runtime/aot.rs's MAIN_THREAD_STARTUP,
@@ -242,7 +246,9 @@ proc native::WithProgramDirs {hir run script} {
 # Windows fiber per coroutine stack, each with its own stack guarantee) and
 # variadic C calls since WINDOWS-X86-64-MILESTONE-6.md (Win64's variadic
 # rules: a float or a double of the first four positions in both of its
-# position's registers).
+# position's registers) and native libraries since
+# WINDOWS-X86-64-MILESTONE-8.md (a DLL and its import library, exporting
+# exactly the library's public C functions).
 namespace eval native {
     variable capabilities [dict create \
         jit {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
@@ -253,7 +259,7 @@ namespace eval native {
         coroutines {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
         stackGuard {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
         frameRoots {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
-        libraries {linux-x86_64 linux-aarch64} \
+        libraries {linux-x86_64 linux-aarch64 windows-x86_64} \
         mainThreadStartup {macos-aarch64}]
     # What the native backend makes *for* a target, on any host that has the
     # target's support package and toolchain (ANDROID-AARCH64-TARGET-

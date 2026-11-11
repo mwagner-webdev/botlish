@@ -1718,7 +1718,7 @@ title: NATIVE LIBRARY: a program cannot be built as a native library
 summary: NATIVE LIBRARY KIND refuses a native library build: entry statements, no export, a taken C symbol, a library name that is no C identifier, no -out, or a failed build tool.
 index: errors backends
 alias: library build failed; native library refused; declarations only
-keywords: -emit-native-library, native::library, exported c fn, top-level statement, ld, objcopy, ar, cc
+keywords: -emit-native-library, native::library, exported c fn, top-level statement, ld, objcopy, ar, cc, link.exe, DLL, Developer Command Prompt
 related: backend.native-library error.export-signature cli.options
 code: NATIVE LIBRARY
 code: NATIVE LIBRARY LIBRARY-TOP-LEVEL
@@ -1730,6 +1730,9 @@ code: NATIVE LIBRARY TOOL
 code: NATIVE LIBRARY TOOLCHAIN
 code: NATIVE LIBRARY PIC
 code: NATIVE LIBRARY ELF
+code: NATIVE LIBRARY PE
+code: NATIVE LIBRARY RUNTIME
+code: NATIVE LIBRARY LINK
 
 == MEANING
 On -emit-native-library (native::library), after the program compiled:
@@ -1752,7 +1755,15 @@ On -emit-native-library (native::library), after the program compiled:
   * TOOLCHAIN: the toolchain a target support package declares is missing
     on this host -- its environment variable (ANDROID_NDK_ROOT) unset, a
     revision older than the package's minimum, no directory for this host,
-    a missing tool. It is this host's, never the package's fault.
+    a missing tool. It is this host's, never the package's fault. On
+    Windows: no Microsoft link.exe -- none on PATH (run from a Visual
+    Studio Developer Command Prompt, or after vcvars64.bat) or a `link` of
+    another toolset there -- said before anything is compiled.
+  * RUNTIME (Windows): the runtime archive beside the driver
+    (botlish_runtime.lib, or BOTLISH_NATIVE_RUNTIME's) is missing, of
+    another machine, or lacks a runtime function the program's code calls.
+  * LINK (Windows): link.exe could not link the DLL; the message keeps its
+    LNK lines (and for a program that calls C, what it declares).
   * PIC: the shared library cannot be linked because something linked into
     it is not position-independent.
   * ELF: the shared library the toolchain made is not one of the target:
@@ -1760,11 +1771,18 @@ On -emit-native-library (native::library), after the program compiled:
     target's page size (16 KiB on Android), a text relocation, a glibc
     symbol version, a library needed that is no system library of the
     target, or an export that is no public function. It is removed.
+  * PE: the DLL link.exe made is not the library: another machine, no DLL,
+    an export missing, extra, by ordinal only or forwarded, a C runtime's
+    DLL imported, or an import library that names other functions. The
+    DLL and its import library are removed.
 
 == WHAT TO DO
 Move a top-level constant or computation into a function, or into an
 imported module (where a top-level binding is a module static); rename a
-clashing export; install binutils and a C compiler for TOOL.
+clashing export; install binutils and a C compiler for TOOL; on Windows,
+build from a Developer Command Prompt for TOOLCHAIN, and rebuild the
+compiler (cargo build --release --manifest-path native/Cargo.toml) for
+RUNTIME.
 
 @topic error.c-unsupported
 title: C UNSUPPORTED: a construct the C backend does not compile yet
