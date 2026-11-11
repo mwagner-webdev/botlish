@@ -1236,6 +1236,12 @@ fails; a changed snapshot in a second run, a second run's failure, an
 unfinished last run and a stray line fail. When the screen mounts again,
 the summary says so and keeps the ActivityManager lines.
 
+**Main's run for the fix** (`db3599ed`) passed: the build, both Android
+jobs, the clean room's APK, the development reload and both jobs' device
+builds. Each self-test was one run this time (the summary's "1 run(s) of
+401, 1 complete, 0 differing, 0 stray line(s)"); GC stress NOT
+DEMONSTRATED through the bridge, as before (1.0x and 0.9x).
+
 **Locally**, this host has no `/dev/kvm`. Observed, with the emulator 37.2.13
 and `system-images;android-30;aosp_atd;arm64-v8a`:
 
@@ -1705,10 +1711,14 @@ nothing in the release gate requires it. Its runs on this branch:
   both jobs' device builds green; the 4 KiB job's acceptance failed on a
   self-test that ran twice in one process, which the acceptance now
   checks run by run (section 16).
+* main's run for the fix, at `db3599ed`: green, every job and step.
 
 Main's own workflows were queued or in progress, none red among those
 completed, when this branch was made (`a6977d56`) and when it was last
-checked.
+checked. At `db3599ed` the single executable, Icy Tower (Linux, macOS,
+Windows), c-bindgen and bench workflows passed. Its four test workflows
+were cancelled by the next push to main (`90025857`, another branch's
+merge), whose runs test this work too.
 
 ## 24. Remaining platform gaps
 
