@@ -28,7 +28,14 @@
 #     thread that ran NAME_main (or an instance) outliving the library's
 #     unloading (al-dlopen);
 #   * a program with thread entries: the dispatch's three cases (al-thread-
-#     entries).
+#     entries);
+#   * Icy Tower's unchanged main.bot as an application library, started by
+#     a host shaped like SDL3's Android bootstrap -- a 1 MiB thread named
+#     SDLThread, SDL_RunApp, SDL_main calling NAME_main -- 600 autopilot
+#     frames whose summary is the committed executable's, every SDL call on
+#     SDLThread, also under GC stress (al-icy-tower-sdl-runapp; it needs the
+#     package-owned libSDL3.so, tclsh9.0 tests/cffi/sdl3.tcl, and SDL's
+#     pinned headers, tools/c-bindgen.tcl fetch sdl3).
 #
 # Every behavior test links real C (the host's cc) against the generated
 # header and archive only, and runs it, also under BOTLISH_NATIVE_GC_STRESS=1.
@@ -38,12 +45,22 @@ source [file join $::projectRoot surface surface.tcl]
 source [file join $::projectRoot native native.tcl]
 source [file join $::projectRoot pm pm.tcl]
 source [file join $::projectRoot lsp json.tcl]
+source [file join $::projectRoot tests cffi sdl3.tcl]
 
 testConstraint nativeBuilt [expr {![catch {native::binary}]}]
 testConstraint nativeLibraries [expr {[native::hostSupports libraries] && [testConstraint nativeBuilt]
     && [auto_execok cc] ne "" && [auto_execok ld] ne "" && [auto_execok objcopy] ne "" && [auto_execok ar] ne ""
     && [file exists [file join [file dirname [native::binary]] libbotlish_native.a]]}]
 testConstraint nm [expr {[auto_execok nm] ne ""}]
+# The SDL acceptance: Linux x86-64 (the committed Icy Tower executable is its
+# oracle), the package-owned libSDL3.so and SDL's pinned headers.
+proc alSdlSources {} {
+    if {[catch {exec [info nameofexecutable] [file join $::projectRoot tools c-bindgen.tcl] fetch sdl3} out]} { return "" }
+    set dir [lindex [split [string trim $out] \n] end]
+    return [expr {[file isfile [file join $dir include SDL3 SDL_main.h]] ? $dir : ""}]
+}
+testConstraint icyTowerSdl [expr {[testConstraint nativeLibraries] && [core::cabi::hostTarget] eq "linux-x86_64"
+    && [cffi::sdl3Dir] ne "" && [alSdlSources] ne ""}]
 set ::alCounter 0
 
 proc alWrite {path text} {
@@ -826,5 +843,58 @@ int main(void) {
 version: status 0
 entry with a thread entry
 main: status 0}}
+
+# ---------------------------------------------------------------------------
+# SDL3: Icy Tower under SDL_RunApp, the way SDL's Android bootstrap starts it
+
+test al-icy-tower-sdl-runapp {Icy Tower's unchanged main.bot built as an application library and started by SDL_RunApp on a 1 MiB thread named SDLThread through NAME_main: its 600-frame autopilot summary is the committed executable's, byte for byte, also under GC stress, and every SDL call it makes -- initialization, window, renderer, polling, drawing, presenting, destruction, shutdown -- runs on SDLThread} -constraints icyTowerSdl -body {
+    set dir [alDir]
+    set sdl [cffi::sdl3Dir]
+    set include [file join [alSdlSources] include]
+    set game [file join $::projectRoot examples games icy-tower]
+    set here [file join $::projectRoot audit host-startable-library sdl]
+    file mkdir [file join $dir src]
+    foreach module {main game sdl render hud tower options} {
+        file copy [file join $game $module.bot] [file join $dir src $module.bot]
+    }
+    exec [info nameofexecutable] [file join $::projectRoot tools c-bindgen.tcl] stage sdl3 -target linux-x86_64 \
+        -app [file join $dir src] -into [file join $dir app] -package 1
+    set saved [pwd]
+    cd [file join $dir app]
+    try {
+        exec [info nameofexecutable] [file join $::projectRoot main.tcl] -warnings error -emit-native-library icy -application \
+            -L $sdl -out lib main.bot
+        exec cc -O1 -Wall -Wextra -Werror {-DAPP_HEADER="icy.h"} -DAPP_PREFIX=icy -I lib -I $include -o host \
+            [file join $here sdl_runapp_host.c] -L lib -licy -L $sdl -lSDL3 -Wl,-rpath,[file join $dir app lib] -pthread
+        # LD_PRELOAD splits its value at spaces: the observer's directory has
+        # none (the test's directories do).
+        set observer [file join [makeDirectory al-observer-[pid]] observer.so]
+        exec cc -O1 -Wall -Werror -shared -fPIC -I $include -o $observer [file join $here sdl_threads.c] -ldl -pthread
+        set arguments {icy-tower --autopilot --fixed-step --frames 600 --seed 17}
+        set sdlEnv [list SDL_VIDEO_DRIVER dummy LD_LIBRARY_PATH $sdl]
+        set run {{words stress preload} {
+            set command [list env {*}$words BOTLISH_NATIVE_GC_STRESS=$stress]
+            if {$preload} { lappend command LD_PRELOAD=$::observer }
+            set output [exec {*}$command ./host {*}$::arguments 2>@1]
+            return $output
+        }}
+        set ::arguments $arguments
+        set ::observer $observer
+        set traced [apply $run [lmap {k v} $sdlEnv {string cat $k=$v}] 0 1]
+        set stressed [apply $run [lmap {k v} $sdlEnv {string cat $k=$v}] 1 0]
+        set oracle [exec env {*}[lmap {k v} $sdlEnv {string cat $k=$v}] \
+            [file join $::projectRoot audit icy-tower artifacts icy-tower] {*}[lrange $arguments 1 end]]
+    } finally {
+        cd $saved
+    }
+    set summary [lsearch -inline -glob [split $traced \n] frames=*]
+    set threads [lmap line [split $traced \n] {
+        if {![regexp {^observer: (\S+) \d+ calls on (\S+)$} $line -> fn on]} continue
+        list $fn $on
+    }]
+    list [expr {$summary eq $oracle}] [expr {[lsearch -inline -glob [split $stressed \n] frames=*] eq $oracle}] \
+        [lsearch -inline -glob [split $traced \n] {host: SDL_main*}] [lsearch -inline -glob [split $traced \n] {host: the application*}] \
+        [lsort -unique [lmap pair $threads {lindex $pair 1}]] [llength $threads] $oracle
+} -result {1 1 {host: SDL_main on thread SDLThread, SDL_IsMainThread 1} {host: the application returned 0} SDLThread 11 {frames=600 round=1 floor=36 score=360 best=35.5 time=10.0 over=no x=247 y=3469 camera=3211 platforms=11 rng=659525717}}
 
 cleanupTests
