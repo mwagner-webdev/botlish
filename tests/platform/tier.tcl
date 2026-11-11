@@ -108,7 +108,8 @@
 #   c-callbacks-mutants   tclsh9.0 audit/c-callbacks/tools/mutate.tcl ?-only NAMES?
 #   c-callbacks-library-mutants  the same with -tests "tests/c-callbacks.test
 #                         tests/native-library.test" -match "cb-* nl-callbacks*"
-#   c-callbacks-bench     tclsh9.0 bench/c-callbacks.tcl
+#   c-callbacks-bench     tclsh9.0 bench/c-callbacks.tcl, then again under GC
+#                         stress (-gc-stress 1 -n 20000 -runs 3)
 #   native-library-bench  tclsh9.0 bench/native-library.tcl
 #   utf16-bench           tclsh9.0 bench/utf16-bytes.tcl and bench/filesystem.tcl,
 #                         each -baseline-rev f9e0ed0 (the commit before the
@@ -438,6 +439,8 @@ foreach check $checks {
         }
         c-callbacks-bench {
             lappend commands [list "C callback performance" {} [list $tclsh [file join $root bench c-callbacks.tcl]] plain]
+            lappend commands [list "C callback performance under GC stress" {} \
+                [list $tclsh [file join $root bench c-callbacks.tcl] -gc-stress 1 -n 20000 -runs 3] plain]
         }
         utf16-bench {
             # Against the commit before UTF16-BYTE-STORAGE-MILESTONE-1 (its
