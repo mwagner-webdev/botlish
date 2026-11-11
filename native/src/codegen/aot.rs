@@ -1853,7 +1853,11 @@ fn windows_library_link_args(
     search: &LinkSearch,
 ) -> Vec<OsString> {
     let mut args: Vec<OsString> = Vec::new();
-    for flag in ["/NOLOGO", "/DLL", "/MACHINE:X64", "/INCREMENTAL:NO", "/OPT:REF", "/OPT:ICF", "/NXCOMPAT", "/DYNAMICBASE"] {
+    // /Brepro: the DLL's and the import library's time stamps are a hash of
+    // their contents, not the link's time, so two builds of one library are
+    // the same bytes (the manifest records their digests:
+    // WINDOWS-X86-64-MILESTONE-8.md, "Artifacts").
+    for flag in ["/NOLOGO", "/DLL", "/MACHINE:X64", "/INCREMENTAL:NO", "/OPT:REF", "/OPT:ICF", "/NXCOMPAT", "/DYNAMICBASE", "/Brepro"] {
         args.push(flag.into());
     }
     for (option, path) in [("/OUT:", output), ("/IMPLIB:", import), ("/DEF:", definition)] {
@@ -2353,7 +2357,7 @@ mod tests {
         .iter()
         .map(|a| a.to_string_lossy().into_owned())
         .collect();
-        for flag in ["/DLL", "/INCREMENTAL:NO", "/OUT:w/lib.dll", "/IMPLIB:w/lib.lib", "/DEF:w/lib.def", "libcmt.lib", "libvcruntime.lib", "libucrt.lib", "/NODEFAULTLIB:msvcrt.lib", "/NODEFAULTLIB:ucrt.lib", "/NODEFAULTLIB:vcruntime.lib"] {
+        for flag in ["/DLL", "/INCREMENTAL:NO", "/Brepro", "/OUT:w/lib.dll", "/IMPLIB:w/lib.lib", "/DEF:w/lib.def", "libcmt.lib", "libvcruntime.lib", "libucrt.lib", "/NODEFAULTLIB:msvcrt.lib", "/NODEFAULTLIB:ucrt.lib", "/NODEFAULTLIB:vcruntime.lib"] {
             assert!(args.iter().any(|a| a == flag), "{flag} missing from {args:?}");
         }
         assert!(!args.iter().any(|a| a.starts_with("/EXPORT") || a.starts_with("/ENTRY") || a.starts_with('-') || a.starts_with("/SUBSYSTEM")), "{args:?}");

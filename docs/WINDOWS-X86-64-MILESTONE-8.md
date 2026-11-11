@@ -160,7 +160,7 @@ Botlish source
                                     per public function
        link.exe /DLL /DEF:NAME.def /IMPLIB:NAME.lib /OUT:NAME.dll
                 /MACHINE:X64 /INCREMENTAL:NO /OPT:REF /OPT:ICF
-                /NXCOMPAT /DYNAMICBASE
+                /NXCOMPAT /DYNAMICBASE /Brepro
                 NAME.program.obj [the program's link plan]
                 botlish_runtime.lib legacy_stdio_definitions.lib
                 kernel32.lib ntdll.lib userenv.lib ws2_32.lib dbghelp.lib
@@ -174,7 +174,12 @@ Botlish source
 The link runs in a private directory beside the outputs and publishes the
 two files by rename only when both were made; `native::library` deletes the
 previous build's DLL, import library and manifest first, so a failed build
-never leaves another build's files under the new names.
+never leaves another build's files under the new names. `/Brepro` makes the
+time stamps link.exe writes (the PE header's, the export directory's, the
+import library's members') a hash of the contents, not the link's time:
+two builds of one library are the same bytes, as on Linux, so the
+manifest's digests are the library's (`nl-manifest` builds twice and
+compares; without `/Brepro` the first MSVC run's two manifests differed).
 
 **The header** is the Linux header with two Windows additions: a paragraph
 of the contract (loading, `LoadLibraryW`/`GetProcAddress`, no Botlish code
