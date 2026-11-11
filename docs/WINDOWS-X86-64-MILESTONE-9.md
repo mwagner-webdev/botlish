@@ -777,6 +777,45 @@ other's runtime) to tell the runtime's share from the generated program's:
   trampoline's extra jump; the measurement was not taken below that
   granularity, so no finer attribution is claimed.
 
+## 18. CI
+
+Every run below is of the branch `ccr-ded2e6b6-05sy19`. A branch push
+runs only each test workflow's canary (the files the branch changes, then
+the ones that failed recently on that host); the rest was dispatched
+(`workflow_dispatch` on the branch), the Windows workflow with `tier:
+full` and the milestone's tier items (`tests:`). A newer push or dispatch
+on the branch cancels a running test workflow, so the runs that count are
+the last ones at each commit.
+
+**At 0091882e** (the implementation, pushed with `[ci-full]` and
+`CI-Tests: c-callbacks.test native-library.test rust`):
+
+* Windows canary, run 43112406174: c-callbacks.test (all 42, the
+  Windows-only ones included), native-library.test (nl-callbacks,
+  nl-callbacks-two-libraries) and the other files the branch changes --
+  Total 594, Passed 498, Skipped 96, Failed 0 (real Windows). Its full
+  shards were cancelled by the next push.
+* Linux arm64 canary, run 43112406126: 286 tests, 0 failed, c-callbacks
+  and native-library among them (real Linux arm64).
+* macOS smoke, run 43112406310: the Rust tests, native-status.tcl (the
+  `c-callback` probe), the smoke tier and the canary passed (real macOS);
+  its ubuntu control's native-status passed.
+
+**At fcd7aca4** (mutants, fuzzer, benchmark, documentation): dispatched
+runs 43115329429 (Windows), 43115333575 (tests), 43115337678 (Linux
+arm64), 43115341967 (macOS). The Windows canary passed (23:00-23:12
+UTC), the Linux x86-64 canary passed; both were superseded by the next
+push before their other jobs finished. icy-tower (windows x86-64), run
+43115316258: success.
+
+**At 88a5740c** (main merged in; the fuzzer's coroutine mode; the
+middle-callback mutant; the mutant harness's `-first 1`; the benchmark's
+GC-stress run): dispatched runs 43118788340 (Windows: `c-callbacks-fuzz`,
+the 14 Windows-only mutants and the 2 library mutants), 43118793329
+(tests), 43118797190 (Linux arm64), 43118801019 (macOS).
+
+RUNS-FINAL
+
 ## 19. Remaining limitations
 
 * **No retained registrations**, unchanged: a window procedure, a timer, a
