@@ -4,7 +4,7 @@
 #   tclsh9.0 audit/c-callbacks/tools/mutate.tcl ?-only NAME,...? ?-tests FILES?
 #                                               ?-match PATTERNS?
 #                                               ?-fuzz-count N? ?-fuzz-seed N?
-#                                               ?-timeout SECONDS?
+#                                               ?-timeout SECONDS? ?-first 0|1?
 #
 # Each mutant is a deliberate bug, written in mutants.txt (beside this
 # script) as exact source replacements, each replaced text occurring exactly
@@ -31,14 +31,18 @@
 #     the runtime's descriptor and result words, the cross-target entry
 #     points and shims): killed if one fails.
 #
-# Mutants that edit only Tcl run first, against the copy's unmodified native
-# build; native mutants follow, each rebuilding the copy. A mutant every
+# The detectors run in that order: the test files, the fuzzer, the Rust
+# tests. With -first 1 a mutant's later detectors do not run once one has
+# killed it (reported "not run": the tier items on Windows, where a mutant's
+# every detector would take a quarter of an hour). Mutants that edit only
+# Tcl run first, against the copy's unmodified native build; native mutants
+# follow, each rebuilding the copy. A mutant every
 # detector misses SURVIVES. The real checkout, including its native/target,
 # is never modified.
 
 set root [file dirname [file dirname [file dirname [file dirname [file normalize [info script]]]]]]
 
-set options [dict create -only "" -tests {tests/c-callbacks.test} -match "" -fuzz-count 3 -fuzz-seed 7 -timeout 2400]
+set options [dict create -only "" -tests {tests/c-callbacks.test} -match "" -fuzz-count 3 -fuzz-seed 7 -timeout 2400 -first 0]
 foreach {option value} $argv {
     if {![dict exists $options $option]} { error "unknown option $option" }
     dict set options $option $value
@@ -251,15 +255,7 @@ try {
                 }
                 continue
             }
-            # The callbacks' Rust unit tests, in the copy.
-            lassign [run [dict get $options -timeout] cargo test --release --manifest-path $manifest callback] status output
             cd $here
-            if {$status != 0} {
-                set failed [lmap {- n} [regexp -all -inline -line {^test (\S+) \.\.\. FAILED$} $output] {set n}]
-                set rust "killed ([expr {$failed eq {} ? "did not complete: [lastLine $output]" : "[llength $failed] failed: [join $failed {, }]"}])"
-            } else {
-                set rust survived
-            }
         }
         set failedTests {}
         set incomplete ""
@@ -282,11 +278,12 @@ try {
             set tests survived
         }
         set golden ""
+        set firstOnly [dict get $options -first]
         set scratch [file tempdir botlish-callback-mutant-fuzz]
         set here [pwd]
         cd $scratch
         set fuzz survived
-        foreach stress {0 1} {
+        foreach stress [expr {$firstOnly && [string match killed* $tests] ? {} : {0 1}}] {
             lassign [run [dict get $options -timeout] tclsh9.0 [file join $tree audit c-callbacks tools fuzz.tcl] \
                 -n [dict get $options -fuzz-count] -seed [dict get $options -fuzz-seed] -gc-stress $stress -keep 0] status output
             if {[regexp {programs \d+ callbacks \d+ calls \d+ disagreements (\d+)} [lindex [split [string trim $output] \n] end] -> n]} {
@@ -301,6 +298,24 @@ try {
         }
         cd $here
         file delete -force $scratch
+        if {$firstOnly && [string match killed* $tests]} {
+            set fuzz "not run"
+        }
+        if {$native && $firstOnly && ([string match killed* $tests] || [string match killed* $fuzz])} {
+            set rust "not run"
+        } elseif {$native} {
+            # The callbacks' Rust unit tests, in the copy (its
+            # .cargo/config.toml found from the working directory).
+            cd $tree
+            lassign [run [dict get $options -timeout] cargo test --release --manifest-path $manifest callback] status output
+            cd $here
+            if {$status != 0} {
+                set failed [lmap {- n} [regexp -all -inline -line {^test (\S+) \.\.\. FAILED$} $output] {set n}]
+                set rust "killed ([expr {$failed eq {} ? "did not complete: [lastLine $output]" : "[llength $failed] failed: [join $failed {, }]"}])"
+            } else {
+                set rust survived
+            }
+        }
         set verdict [expr {[string match killed* $tests] || [string match killed* $fuzz] || [string match killed* $rust] ? "KILLED" : "SURVIVED"}]
         lappend results [list $name $description $verdict $tests $golden $fuzz $rust]
         puts "$verdict $name -- $description\n    tests:  $tests"

@@ -105,7 +105,7 @@
 #   c-callbacks-fuzz      tclsh9.0 audit/c-callbacks/tools/fuzz.tcl -n 4 -seed S, seeds
 #                         1, 2 and 3, and 9 and 10 with -gc-stress 1
 #                         (WINDOWS-X86-64-MILESTONE-9.md)
-#   c-callbacks-mutants   tclsh9.0 audit/c-callbacks/tools/mutate.tcl ?-only NAMES?
+#   c-callbacks-mutants   tclsh9.0 audit/c-callbacks/tools/mutate.tcl -first 1 ?-only NAMES?
 #   c-callbacks-library-mutants  the same with -tests "tests/c-callbacks.test
 #                         tests/native-library.test" -match "cb-* nl-callbacks*"
 #   c-callbacks-bench     tclsh9.0 bench/c-callbacks.tcl, then again under GC
@@ -471,10 +471,10 @@ foreach check $checks {
                     [list $tclsh [file join $root audit abi-bytes tools utf16-mutate.tcl] {*}[expr {$only ne "" ? [list -only $only] : {}}]] plain]
             } elseif {[regexp {^c-callbacks-mutants(?:=(.*))?$} $check -> only]} {
                 lappend commands [list "C callback mutants" {} \
-                    [list $tclsh [file join $root audit c-callbacks tools mutate.tcl] {*}[expr {$only ne "" ? [list -only $only] : {}}]] plain]
+                    [list $tclsh [file join $root audit c-callbacks tools mutate.tcl] -first 1 {*}[expr {$only ne "" ? [list -only $only] : {}}]] plain]
             } elseif {[regexp {^c-callbacks-library-mutants(?:=(.*))?$} $check -> only]} {
                 lappend commands [list "C callback mutants (with the library callbacks' tests)" {} \
-                    [list $tclsh [file join $root audit c-callbacks tools mutate.tcl] -tests "tests/c-callbacks.test tests/native-library.test" \
+                    [list $tclsh [file join $root audit c-callbacks tools mutate.tcl] -first 1 -tests "tests/c-callbacks.test tests/native-library.test" \
                         -match "cb-* nl-callbacks*" {*}[expr {$only ne "" ? [list -only $only] : {}}]] plain]
             } elseif {[regexp {^native-library-mutants(?:=(.*))?$} $check -> only]} {
                 lappend commands [list "native library mutants" {} \
