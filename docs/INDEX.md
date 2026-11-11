@@ -314,6 +314,7 @@ at its top ("Superseded by ...", "Partially superseded by ...").
 - [TINY-EXACT-LEAF-INLINING.md](TINY-EXACT-LEAF-INLINING.md) -- tiny exact-leaf inlining
 - [TINY-LEAF-DEFAULT-ON.md](TINY-LEAF-DEFAULT-ON.md) -- tiny exact-leaf inlining on by default
 - [OPPORTUNISTIC-SEMANTIC-INSTANCES.md](OPPORTUNISTIC-SEMANTIC-INSTANCES.md) -- opportunistic semantic function instances
+- [SEMANTIC-INSTANCE-SCALABILITY-MILESTONE-1.md](SEMANTIC-INSTANCE-SCALABILITY-MILESTONE-1.md) -- semantic instances walked in place, with no per-function budget
 - [SYMBOLIC-TYPE-IDENTITY.md](SYMBOLIC-TYPE-IDENTITY.md) -- symbolic native result-type identity
 - [NATIVE-OPAQUE-REFINEMENT.md](NATIVE-OPAQUE-REFINEMENT.md) -- trusted opaque refinement across specialization
 

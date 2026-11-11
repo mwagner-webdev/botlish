@@ -3613,8 +3613,15 @@ proc hir::types::Walk {hirVar} {
     for {set round 1} {$round <= [set ::hir::semantic::maxRounds]} {incr round} {
         set typed $base
         hir::semantic::Begin $envs
-        set ctx [NewContext]
-        Sequence typed ctx [dict get $typed roots]
+        try {
+            set ctx [NewContext]
+            Sequence typed ctx [dict get $typed roots]
+        } on error {message options} {
+            # (A compiler failure -- HIR SEMANTIC LIMIT among them -- leaves
+            # no run in progress behind for the next compilation.)
+            hir::semantic::Abandon
+            return -options $options $message
+        }
         set snapshot [hir::semantic::End]
         dict set snapshot rounds $round
         if {$round == [set ::hir::semantic::maxRounds] || ![hir::semantic::WantsRerun $snapshot]} {
@@ -4662,13 +4669,14 @@ namespace eval hir::types {
 # List[never]'s element; a counter is exactly Int. The last walk of a loop is
 # the one its references are typed by. The generic walk's record is the
 # program's (hir::types::Walk), written only when it changes. A semantic
-# instance's walk types a scratch copy of the program's HIR: it records into
-# that copy's `instanceClauses`, a table of its own, which its snapshot keeps
-# (hir::semantic::Snapshot) -- never into the copy's binding table, whose
-# first write would copy every binding of the program for each instance
-# walk. Region inference's copy keeps no record (only its expressions'
-# types reach a specialization's view). So no instance's type ever reaches
-# the program's record, whatever order the instances are analyzed in.
+# instance's walk types the program's HIR in place, its region journaled
+# (hir/semantic.tcl, "Region-local walks"): it records into `instanceClauses`,
+# a top-level table of its own, which its snapshot keeps
+# (hir::semantic::Snapshot) and the walk's Restore drops with its other
+# changes -- never into the binding table, where the generic walk's record
+# is. Region inference's copy keeps no record (only its expressions' types
+# reach a specialization's view). So no instance's type ever reaches the
+# program's record, whatever order the instances are analyzed in.
 proc hir::types::RecordClause {hirVar ctx b type} {
     upvar 1 $hirVar hir
     if {[dict exists $ctx spec]} {
@@ -5680,7 +5688,7 @@ proc hir::types::Call {hirVar ctxVar e} {
                     # this call's concrete argument types. The call is
                     # typed with what that analysis proves; the callee's own
                     # contract and generic result are untouched.
-                    set result [hir::semantic::Call $hir $ctx $e $block $argTypes $result]
+                    set result [hir::semantic::Call hir $ctx $e $block $argTypes $result]
                     if {$result eq "never" && [hir::semantic::PoisonedCall $ctx $e]} {
                         # The instance's every normal completion is poison.
                         set dead 1

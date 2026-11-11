@@ -483,9 +483,9 @@ proc hir::types::TotalityClass {operation type} {
 @@ construction-outward-result-only a construction's instance outward type is its result alone, without the values its yields send
 ## hir/semantic.tcl
 <<<<
-    return [list $result $scratch [Outward $scratch $block $result]]
+        set outward [Outward $hir $block $result]
 ====
-    return [list $result $scratch $result]
+        set outward $result
 >>>>
 
 @@ tree-children-result-any std::tree::children is typed List[any] for a tree too

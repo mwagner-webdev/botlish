@@ -91,6 +91,12 @@ raven` in the pinned author image) has not been built in this change:
 
 ### 3.1 The semantic-instance budget fails with the wrong message
 
+(Fixed by SEMANTIC-INSTANCE-SCALABILITY-MILESTONE-1.md: there is no
+per-callee budget any more, so the 17th and every later `holds` call gets its
+instance -- `tests/semantic-instances.test`'s `si-budget-holds` runs twenty --
+and the one guard left, the total, fails the compilation with HIR SEMANTIC
+LIMIT naming the callee instead of an erasure message.)
+
 `std::test::holds(name, description, predicate, body)` takes untyped
 `predicate` and `body` parameters. A typed predicate (`fn check(p: P) ->
 bool`) keeps its parameter contract only through a semantic instance of
