@@ -66,6 +66,18 @@ proc ::cbind::generate::LabelPrefix {text} {
 # one, clang would read the host's /usr/include as the target's headers --
 # another architecture's bits/, or, where they happen to compile, the
 # host's declarations under the target's name.
+# An Android target's headers are Bionic's, the NDK's (toolchain::configFor
+# gives the NDK's sysroot): a sysroot named for the target must be an Android
+# one, never the host's /usr/include or a Linux C library's. A property of the
+# configuration alone, checked before the profile's sources are looked for.
+proc ::cbind::generate::CheckAndroidSysroot {target config} {
+    if {![string match android-* $target]} { return }
+    set sysroot [dict get $config sysroot]
+    if {$sysroot eq "" || ![file isfile [file join $sysroot usr include android api-level.h]]} {
+        error "c-bindgen: $target is generated against an Android NDK's sysroot (Bionic's headers), and [expr {$sysroot eq "" ? "none is set" : "$sysroot is none (no usr/include/android/api-level.h)"}]: set ANDROID_NDK_ROOT, and leave BOTLISH_C_SYSROOT_[string map {- _} $target] unset or name the NDK's sysroot"
+    }
+}
+
 proc ::cbind::generate::CheckCrossHeaders {target config tool hprofile} {
     if {$target eq "windows-x86_64" && "-nostdlibinc" ni [dict get $hprofile flags]
             && "-nostdinc" ni [dict get $hprofile flags]} {
@@ -87,16 +99,6 @@ proc ::cbind::generate::CheckCrossHeaders {target config tool hprofile} {
         lassign [::chdr::toolchain::searchDirs $config $tool] ok dirs stderr
         if {$ok && [lsearch -glob $dirs *$triple*] >= 0} { return }
         error "c-bindgen: [lindex [dict get $config cc] 0] --target=$triple searches no directory of $target's C headers ([join $dirs {, }]): install MinGW-w64's (Debian and Ubuntu: mingw-w64-x86-64-dev), or set BOTLISH_C_SYSROOT_[string map {- _} $target] (or BOTLISH_C_SYSROOT) to a sysroot"
-    }
-    if {[string match android-* $target]} {
-        # Bionic's headers, the NDK's (toolchain::configFor gives the NDK's
-        # sysroot): a sysroot named for the target must be an Android one,
-        # never the host's /usr/include or a Linux C library's.
-        set sysroot [dict get $config sysroot]
-        if {$sysroot eq "" || ![file isfile [file join $sysroot usr include android api-level.h]]} {
-            error "c-bindgen: $target is generated against an Android NDK's sysroot (Bionic's headers), and [expr {$sysroot eq "" ? "none is set" : "$sysroot is none (no usr/include/android/api-level.h)"}]: set ANDROID_NDK_ROOT, and leave BOTLISH_C_SYSROOT_[string map {- _} $target] unset or name the NDK's sysroot"
-        }
-        return
     }
     if {![string match linux-* $target] || $target eq [core::cabi::hostTarget]
             || [dict get $config sysroot] ne "" || "-nostdlibinc" in [dict get $hprofile flags]
@@ -130,6 +132,7 @@ proc ::cbind::generate::run {profile target {options {}}} {
     set timing [dict create]
     set hprofile [::cbind::profile::headersFor $profile $target]
     set config [::chdr::toolchain::configFor $target]
+    CheckAndroidSysroot $target $config
     set sourceRoot [::cbind::profile::sourceRoot $profile [dict get $options fetch] $target]
     set tool [ToolProfile $hprofile $sourceRoot]
     # A target's own system headers, or none: never the host's. Off a Mac,

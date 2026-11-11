@@ -400,9 +400,9 @@ proc native::library::LinkWithToolchain {support tools target name object keep l
 !! cb-android-configuration
 ## tools/c-bindgen/generate.tcl
 <<<<
-        if {$sysroot eq "" || ![file isfile [file join $sysroot usr include android api-level.h]]} {
+    if {$sysroot eq "" || ![file isfile [file join $sysroot usr include android api-level.h]]} {
 ====
-        if {$sysroot eq ""} {
+    if {$sysroot eq ""} {
 >>>>
 
 @@ android-binding-ndk-path-shown an android-aarch64 binding names this host's NDK directory
