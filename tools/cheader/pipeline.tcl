@@ -49,8 +49,8 @@ proc ::chdr::pipeline::run {profile sourceRoot config {name ""}} {
     set describe [::chdr::toolchain::describe $config]
     set predefined [::chdr::toolchain::predefined $config $tcProfile]
     set result [dict create ok $ok stderr [Sanitize $stderr $sourceRoot $entry] records {} macros {} \
-        text $text command [Sanitize $command $sourceRoot $entry] revision $revision tokens 0 \
-        profileText [ProfileText $name $profile $describe $revision $command $sourceRoot $entry $predefined] \
+        text $text command [::chdr::toolchain::hide $config [Sanitize $command $sourceRoot $entry]] revision $revision tokens 0 \
+        profileText [::chdr::toolchain::hide $config [ProfileText $name $profile $describe $revision $command $sourceRoot $entry $predefined]] \
         predefined [lindex $predefined 1]]
     if {!$ok} {
         file delete -force $tmp

@@ -330,7 +330,7 @@ set cliOptions {
     -native-startup POLICY build {the executable's thread: worker (default) or main-thread}
     -emit-hir-interchange {} build {write each input's analyzed HIR as FILE.hirx}
     -emit-native-library NAME build {build native library NAME from the one input}
-    -application {} build {make that library an application library (NAME_main runs its entry)}
+    -application {} build {make the library an application (NAME_main runs it)}
     -export FUNCTION build {export a top-level function (default: exported c fns)}
     -out DIR build {where -emit-native-library and -emit-c write}
     -emit-c {} build {write each input as freestanding C (FILE.c, FILE.h, ...)}

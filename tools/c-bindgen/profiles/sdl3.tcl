@@ -6,8 +6,11 @@
 # acceptance's library is built from the same source (tests/cffi/sdl3.tcl).
 # Modules: SDL_video.h is sdl3::video, SDL_render.h sdl3::render, ...
 #
-# Targets: the Linux ones are committed (generated/c/sdl3/TARGET/), macOS's
-# needs the macOS SDK, and windows-x86_64 (MSVC's ABI) is generated on
+# Targets: the Linux ones and android-aarch64 are committed
+# (generated/c/sdl3/TARGET/; Android's by the Android NDK's clang against its
+# sysroot, ANDROID_NDK_ROOT: RN-HOST-STARTABLE-APPLICATION-LIBRARY-
+# MILESTONE-1.md), macOS's needs the macOS SDK, and windows-x86_64 (MSVC's
+# ABI) is generated on
 # Windows, where clang's MSVC target finds Visual Studio's and the Windows
 # SDK's headers: the Icy Tower Windows build generates it
 # (examples/games/icy-tower/build-windows.sh, ICY-TOWER-WINDOWS.md), and
@@ -29,7 +32,7 @@ dict create \
         public {include/SDL3/*}
         entry {SDL3/SDL.h}
     } \
-    targets {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
+    targets {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64 android-aarch64} \
     modules {stripPrefix SDL_} \
     libraries {
         {headers * targets * names {SDL3}}
