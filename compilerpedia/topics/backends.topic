@@ -391,9 +391,12 @@ functions check their stack pointer, so recursion that would exhaust that
 stack (or a coroutine's) fails the call with NATIVE LIMIT STACK
 (error.native-limit-stack) and the instance answers the next call. No stack
 guard is installed in a library: a C function or the runtime exhausting the
-stack still ends the process. No callbacks, no Lists, structs or other
-values at the boundary, no asynchronous calls; macOS libraries are not
-made yet, and no static library is made for Windows: two of them in one
+stack still ends the process. No function pointers, Lists, structs or
+other values at the boundary, no asynchronous calls (a library's own
+`callback c fn` may be called back during its C calls, into the waiting
+instance: concept.c-callbacks; a host's call of an instance already in a
+call is REENTRANT-CALL, a callback's is not); macOS libraries are not made
+yet, and no static library is made for Windows: two of them in one
 executable would share their runtimes' symbols.
 
 @topic backend.c

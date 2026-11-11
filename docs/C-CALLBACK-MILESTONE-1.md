@@ -29,6 +29,13 @@ cb = std::ffi::c::callback(decide)
 count_accepted(cb, 10)
 ```
 
+Windows x86-64 runs callbacks too since WINDOWS-X86-64-MILESTONE-9.md:
+the Windows collector's walk jumps across a transition as the
+frame-pointer walk does (section 6), `rt_ffi_open` hands on the shim's
+frame register on every host, and the C side of callbacks has Windows
+unwind information. Sections 5, 6 and 14 below describe this milestone's
+hosts; that report has Windows'.
+
 The architectural rule this milestone keeps: foreign code invokes Botlish
 code only through an entry point whose execution environment, authority and
 lifetime are accounted for. A callback's machine address is no authority: it
@@ -909,6 +916,8 @@ with it).
   time (NATIVE CALLBACK UNSUPPORTED): Windows walks frames with its
   unwinder, which does not yet jump across a transition, and the fallback
   plan keeps roots on a shadow stack the transition does not bracket.
+  (Windows runs them since WINDOWS-X86-64-MILESTONE-9.md; the fallback
+  plan still refuses them.)
   Neither was needed for the milestone's hosts. tests/platform/native-status.tcl
   has no callback probe yet: its Windows expectation (the refusal's report
   through the Windows result path) could not be checked here.

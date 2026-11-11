@@ -922,7 +922,8 @@ only.
   as on Linux; no SEH exception is recovered from.
 * **C callbacks** (`callback c fn`) stay refused on Windows (C-CALLBACK-
   MILESTONE-1.md: the walk does not cross a foreign transition there); a
-  library may call C, and C may call another library's exports.
+  library may call C, and C may call another library's exports. (They run
+  since WINDOWS-X86-64-MILESTONE-9.md, in executables and in DLLs.)
 * **Unloading**: the precondition of section 11 is the host's to keep.
 * **Unchanged from NATIVE-LIBRARY-MILESTONE-1.md**: synchronous, thread-
   affine instances, the boundary types, no macOS or iOS libraries.

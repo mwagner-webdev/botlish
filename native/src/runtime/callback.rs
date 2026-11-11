@@ -30,8 +30,11 @@
 //!     NATIVE CALLBACK INACTIVE before any Botlish code. The pointer
 //!     selects no execution environment and is no authority to make one: no
 //!     Vm, actor, context or heap is ever created here;
-//!   * the callback's code must be that environment's program's
-//!     (`Vm::program_token`): two programs' runtimes never share a Vm;
+//!   * the callback's code is that environment's program's: an executable
+//!     holds one program, and every native library carries its own copy of
+//!     this runtime -- its own ACTIVE, its own `rt_callback_call` -- so a
+//!     library's callback can only enter one of that library's instances,
+//!     and two programs' runtimes never share a Vm;
 //!   * C must call it on the stack the transition left (the running stack --
 //!     a coroutine's, a native library's call's host-made one, or the
 //!     thread's: `Vm::running_stack` -- below the transition's frame): the
@@ -348,7 +351,10 @@ pub(crate) fn entry_frame_function() -> usize {
 /// Runs the callback DECL in this thread's active execution environment
 /// (the module header), writing its C result's word to OUT. Never inlined:
 /// its frame record is the segment's entry the collector's walk jumps from,
-/// on the chain of every Botlish frame the callback makes.
+/// on the chain of every Botlish frame the callback makes -- on Windows its
+/// stack pointer, which its body never moves (no dynamic allocation here:
+/// the arguments' inline array is fixed, more go to a Vec), so that the
+/// walk, arriving from the callback's Botlish frames, finds exactly it.
 ///
 /// # Safety
 /// ENTRY is DECL's function's generic entry; OUT is writable.
