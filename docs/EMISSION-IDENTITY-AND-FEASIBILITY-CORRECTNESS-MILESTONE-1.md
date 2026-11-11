@@ -43,6 +43,7 @@ Evidence is labelled throughout:
 19. [Remaining limitations and the shortcut audit](#19-remaining-limitations-and-the-shortcut-audit)
 20. [Recommendation](#20-recommendation)
 21. [Final evaluation questions](#21-final-evaluation-questions)
+22. [Addendum: re-verification on main](#22-addendum-re-verification-on-main)
 
 ## 1. Result
 
@@ -730,7 +731,8 @@ job of the four workflows, and both Icy Tower workflows, was still queued
 behind the shared runner pool when this report was written: pending, not
 passed. `main` moved on from the branch's base while it ran (53a0d1b to
 d74d5ef); its latest tests run (d2421af) is queued, the earlier ones
-superseded, none failed.
+superseded, none failed. (Resolved after the merge: every workflow of the
+merge commit passed, section 22.1.)
 
 ## 21. Final evaluation questions
 
@@ -780,3 +782,127 @@ first); the composition precision issue of section 19.1, if a two-claim
 never-completing helper ever matters; and, outside the checker, the range
 analysis's rejection of domain admissions in code an `if false:` makes
 unreachable.
+
+## 22. Addendum: re-verification on main
+
+The brief was issued again on 2026-11-11, after this milestone had been
+merged (0a518ba4, 2026-11-09). Nothing was implemented a second time. The
+merged correction was checked again on main as it now is (73c32da8), the
+CI this report left pending was read, the census rows the milestone owed
+were added, and one channel of memo validity the shortcut audit had not
+exercised was probed and pinned.
+
+### 22.1 CI at the merge commit
+
+Every workflow run for 0a518ba4 succeeded (observed):
+
+| workflow | run | |
+|---|---|---|
+| tests | 42606619570 | all 15 jobs: interp and compile (with `BOTLISH_NVIM` set: tests/lsp-neovim.test ran, no test was skipped for Neovim; the interp job's whole suite 11,993 tests, 0 failed), native GC stress on interp and on compile, cranelift and cranelift-generic coverage, the four golden shards, stub- and system-linked executables, the native Rust unit tests, the method-call decision |
+| tests (linux arm64) | 42606619647 | success |
+| tests (macos arm64) | 42606619497 | success |
+| tests (windows x86-64) | 42606619760 | success |
+| static-decisions | 42606619687 | the batched scheduler against the sequential one on every golden suite |
+| icy-tower; (macos arm64); (windows x86-64) | 42606619620; 42606619605; 42606619614 | success |
+| single executable, c-bindgen, bench, scalar-asm-audit | 42606619499, 42606619680, 42606620006, 42606620019 | success |
+
+So what section 20 listed as not run or pending -- tests/lsp-neovim.test,
+the GC-stress runs, the static-decisions comparison, the full test
+workflows on the four hosts -- passed with the correction on main.
+
+### 22.2 What changed underneath
+
+`hir/emission.tcl` is unchanged since 64611f85. The front end it reads
+changed under it: semantic instances became region-local walks
+(SEMANTIC-INSTANCE-SCALABILITY-MILESTONE-1.md, 90025857), the applied-type
+bound gained its exact layer (APPLIED-TYPE-BOUND-PRECISION-MILESTONE-1.md,
+46ab0919), DISCARDED-MUTATION added `checkedSource`
+(WARNINGS-DISCARDED-MUTATION-MILESTONE-1.md, 473a58fa), and the
+declared-result TYPE diagnostic names the inferred type
+(TEXT-AND-COLLECTION-DOCUMENTATION-AND-DIAGNOSTICS-MILESTONE-1.md, 9a714bd0).
+The checker's facts are types, ranges and reachability, so these changes
+could move a verdict. None did.
+
+### 22.3 The evidence re-run at 73c32da8
+
+Locally, on a 4-core container with the native backend built:
+
+| check | result |
+|---|---|
+| tests/emission-claims.test | 123 of 123; with the new test (22.4), 124 of 124 |
+| tests/csv-emission.test | 36 of 36 |
+| `audit/emission-identity/tools/repro.tcl` | identical to `results/repro-after.md` but for its header's revision: the same blocks, keys, fingerprints, `Facts` calls, verdicts and traces on all four backends; 0 false certificates |
+| `audit/emission-identity/tools/structure.tcl -seeds 1-40` | identical to `results/structure.md` but for seed 14's discard message, which now ends "(result type: list)" (9a714bd0's wording): 39 programs, 330 claims, 2,604 runs, 0 false certificates, 0 programs whose verdicts depend on history, the same 2 precision losses. `results/structure.md` is regenerated |
+| `audit/emission-dependencies/tools/census.tcl` | 0 differences from its record, 0 false certificates, the same 20 open (deferred) cases |
+| the 15 mutants of section 14 | 15 killed |
+| the whole catalog (`audit/emission-claims/tools/mutate.tcl`) | 102 mutants (with 22.4's), 102 killed, 0 survived, in 3 min 53 s. Each of the other 101 is killed by the same tests as in the committed run, `ec-memo-bindings` joining them for `valid-ignores-functions` and `fingerprint-ignores-constants` (`results/mutants.md` regenerated) |
+| `tools/mutant-catalogs.tcl` | 106 catalogs, 3,614 mutants (with 22.4's), 0 problems |
+| tests/golden-duplicates.test, tests/golden.test | 4 of 4, 9 of 9 (after 22.5) |
+
+### 22.4 Meaning carried by bindings, across compilations
+
+Section 19.1 asked of every stored result whether its representation could
+also describe another function. A memoized certificate is validated by the
+fingerprints of the functions its proof read, and one channel was not
+exercised: a function whose text and name stay the same while what it reads
+through a binding changes between two compilations of one process. The
+fingerprint takes a binding from outside the function by its name, its
+exact Int value and its type facts (`CanonBinding`), and every expression by
+its type fact (`Canon`); whether that suffices was inferred, not tested.
+
+Twelve probes (`audit/emission-identity/tools/bindings.tcl`,
+`results/bindings.md`) compiled a valid first program, then a second whose claimed
+`emitter` (a unique name) has the same text but yields 'A', with the memo
+kept, and compared the second's verdicts with a fresh compilation's. What
+changed between the two:
+
+* a value read from outside: a captured local (49, then 65), a module
+  binding (49, then 65), the same code moved into another function whose
+  captured local differs;
+* a type read from outside: a captured parameter's declared type (Digit,
+  then int);
+* a callee: a helper's result value; a nested helper's yield; a nested
+  helper replaced by a top-level twin of its name;
+* a function held by a binding: a module binding naming another function;
+  the code of a function held by a module binding, or by a captured local;
+* the shapes of this milestone, through the memo: two same-named emitters,
+  the nested one's `if true:` branch edited; a parameterless helper whose
+  unknown `if` gains a letter.
+
+In all twelve the edited claim was rejected after the first program,
+exactly as in a fresh compilation, and the one unedited claim (the valid
+top-level emitter beside the edited nested one) stayed proven (observed).
+
+Seven of them are now `ec-memo-bindings` (tested), with the mutant
+`fingerprint-outer-binding-name-only`: `CanonBinding` keeps an outer
+binding's name and drops its exact value and type facts. Nothing else in
+either test file kills it (tested: under it, without `ec-memo-bindings`,
+tests/emission-claims.test passes 123 of 123 and tests/interval-sets.test
+37 of 37), and under it three of the seven cases (the
+captured local, the module binding, the moved capture) reuse the first
+program's certificate for a second program a fresh compilation rejects:
+false certificates. The other four are held by other channels: a
+parameter's type facts at its uses, the callee's fingerprint in the read
+set, the function value's type. This is accepted programs' memo validity,
+not the binding provenance the milestone defers, which is about rejected
+programs' diagnostics (section 19.2).
+
+### 22.5 Golden census rows
+
+AGENTS.md: a new Tcl test gets a census row. This milestone's 13 tests,
+and the 15 `ec-callee-*` tests of EMISSION-CALLEE-DEPENDENCY-CORRECTNESS-
+MILESTONE-1.md, had none, and the names file lacked them, so the manifest
+knew 95 of tests/emission-claims.test's tests. The 28, and
+`ec-memo-bindings`, now have rows (KEEP-INTERNAL, classified as the file's
+other 95) and names lines; `tests/golden/manifest.tsv` is regenerated
+(13,722 to 13,751 rows: those 29 added, nothing else changed), and
+`merge.tcl -check 1` passes.
+
+### 22.6 The final questions, on main
+
+The answers of section 21 stand on main at 73c32da8: no history tested --
+a fresh compilation, the memo after the six histories, the service's
+revisions, interchange with the memo on and off, and now the memo after an
+edit of a binding the claimed function reads -- yields a false
+certificate. Nothing new was found beyond the two defect families, and no
+claim changed its verdict.

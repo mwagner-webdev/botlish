@@ -19,7 +19,7 @@ seeds 1-40; compiler: this checkout; the program and an edited version of it, ev
 | 11 | rejected 2, proven 4; shared names: h, g, e; edit: h (line 77): a symbol changed |
 | 12 | proven 5, rejected 1; shared names: g, e; edit: g (line 40): a symbol changed |
 | 13 | proven 6, rejected 2; shared names: h, e; edit: h (line 41): a symbol changed |
-| 14 | (discarded: edited: the erased program does not compile: <input>:110:17: function result does not prove declared type List[int]) |
+| 14 | (discarded: edited: the erased program does not compile: <input>:110:17: function result does not prove declared type List[int] (result type: list)) |
 | 15 | proven 6; shared names: h, e; edit: h (line 34): a symbol changed |
 | 16 | proven 6; shared names: h, g, e; edit: h (line 47): a symbol changed |
 | 17 | proven 14; shared names: h, g, e, f; edit: h (line 25): a symbol changed |

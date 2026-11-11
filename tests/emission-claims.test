@@ -2410,6 +2410,57 @@ test ec-identity-memo-history {a compilation's verdicts, certificates, diagnosti
     set out
 } -result {{1 1 1 1 1 1} {{proven 1} {proven 1} {rejected 0}} EMIT-REJECTED 1 {65 invalid} {1 1 1 1 1 1} {{proven 1} {proven 1} {proven 1}} accepted 1 {50 ok} {1 1 1 1 1 1} {{rejected 0}} EMIT-REJECTED 1 {65 invalid}}
 
+# Pairs {FIRST SECOND} of programs whose one claim, `emitter` (a unique
+# name), has the same text in both, while what it reads through a binding
+# changes: a captured local, a captured parameter's declared type, a module
+# binding, the same code moved into another function, a module binding
+# naming another function, a function held by a module binding or a
+# captured local whose own code changes. The first is valid, the second
+# yields 'A'.
+proc memoBindingCases {} {
+    set h [string cat $::digitDfa "type Digit = Int in 0..9\n\n"]
+    set out {}
+    foreach x {49 65} {
+        lappend out "${h}fn outer() -> int:\n    k = $x\n    fn emitter() -> unit emits digit_token:\n        yield k\n        unit\n    3\n\n0\n"
+    }
+    foreach t {Digit int} {
+        lappend out "${h}fn outer(d: $t) -> int:\n    fn emitter() -> unit emits digit_token:\n        yield 48 + d\n        unit\n    3\n\n0\n"
+    }
+    foreach x {49 65} {
+        lappend out "${h}k = $x\n\nfn emitter() -> unit emits digit_token:\n    yield k\n    unit\n\n0\n"
+    }
+    foreach {o x} {outer1 49 outer2 65} {
+        lappend out "${h}fn ${o}() -> int:\n    k = $x\n    fn emitter() -> unit emits digit_token:\n        yield k\n        unit\n    3\n\n0\n"
+    }
+    foreach f {a b} {
+        lappend out "${h}fn a() -> int:\n    49\n\nfn b() -> int:\n    65\n\nf = $f\n\nfn emitter() -> unit emits digit_token:\n    yield f()\n    unit\n\n0\n"
+    }
+    foreach x {49 65} {
+        lappend out "${h}fn a() -> unit:\n    yield $x\n    unit\n\nf = a\n\nfn emitter() -> unit emits digit_token:\n    f()\n    unit\n\n0\n"
+    }
+    foreach x {49 65} {
+        lappend out "${h}fn a() -> unit:\n    yield $x\n    unit\n\nfn outer() -> int:\n    g = a\n    fn emitter() -> unit emits digit_token:\n        g()\n        unit\n    3\n\n0\n"
+    }
+    return $out
+}
+
+test ec-memo-bindings {a memoized certificate is not reused when what its function reads through a binding changes, its text unchanged and its name unique (the memo validates by the fingerprints of the functions a proof read, which take an outer binding by its name, exact Int value and type facts, and every expression by its type fact): a captured local (49, then 65), a captured parameter's declared type (Digit, then int), a module binding (49, then 65), the same code moved into another function with another captured value, a module binding naming another function, and a function held by a module binding or a captured local whose code yields a letter instead -- each second program, compiled after the first with the memo kept, decides exactly what a fresh compilation of it decides: rejected} -setup {
+    set ::hir::emission::memo [dict create]
+} -body {
+    set out {}
+    foreach {first second} [memoBindingCases] {
+        set ::hir::emission::memo [dict create]
+        set a [identity $first]
+        set after [identity $second]
+        set ::hir::emission::memo [dict create]
+        set fresh [identity $second]
+        lappend out [list [lmap r $a {lindex $r 1}] [lmap r $after {lindex $r 1}] [expr {$after eq $fresh}]]
+    }
+    set out
+} -cleanup {
+    set ::hir::emission::memo [dict create]
+} -result {{proven rejected 1} {proven rejected 1} {proven rejected 1} {proven rejected 1} {proven rejected 1} {proven rejected 1} {proven rejected 1}}
+
 # The 1-based line and column of the name of the Nth (1-based) function
 # declaration `fn NAME(` in TEXT.
 proc declarationOf {text name {nth 1}} {
