@@ -94,7 +94,9 @@ had to add or fix is the rest of this report.
 builds two libraries, `one` and `two`, from two programs that both define
 an error `Negative` and export `twice` and `tag`, and records what MSVC's
 tools do with them. It is evidence, not a test: it prints every row and
-fails only when it cannot run. Run 42919823801 (windows-2025, image
+fails only when it cannot run. Runs 42919823801 and 42933890368 (the
+second with E1's TLS directory, E5's output and E6's response file;
+windows-2025, image
 windows-2025-vs2026 20261103.298.1, Windows Server 2025 10.0.26100, rustc
 1.99.1, the runtime archive `botlish_runtime.lib` 22,502,940 bytes):
 
@@ -105,8 +107,8 @@ windows-2025-vs2026 20261103.298.1, Windows Server 2025 10.0.26100, rustc
 | E2, `/EXPORT:` options instead of the .def file | the same 17 names; the export directory names the output file (`e2.dll`). The .def file is kept: one input states the library's name and its exports, and link.exe checks it |
 | E3, neither | 0 exports, no import library: no input exports anything by itself; the program object has no `/EXPORT` directive |
 | E4, `lib /DEF` alone | an import library whose import objects equal link.exe's |
-| E5, static libraries (each program object merged with the runtime archive by `lib.exe`: 22.5 MB each) | one alone in an executable works (`twice: 42`); **both in one executable link with no error at all** (0 LNK2005) and run; with `/FORCE:MULTIPLE` too (0 LNK4006), `twice: 42 63`, and a buffer of one library released through the other is *accepted*: one runtime copy answers for both |
-| E6, the candidate: each library's private symbols renamed (`llvm-objcopy --redefine-syms`), the objects archived again | 4,965 defined symbols renamed in 1,879 objects per library, 0 failures, 3.5 minutes per library; archiving them failed on the command line's length (fixed with a response file: E6-RERUN-PENDING) |
+| E5, static libraries (each program object merged with the runtime archive by `lib.exe`: 22.5 MB each) | one alone in an executable works (`twice: 42`); **both in one executable link with no error at all** (0 LNK2005) and run: `twice: 42 63`, and a buffer of one library released through the other is *accepted* -- one runtime copy answers for both; with `/FORCE:MULTIPLE` the same (0 LNK4006) |
+| E6, the candidate: each library's private symbols renamed (`llvm-objcopy --redefine-syms`), the objects archived again | 4,965 defined symbols renamed in 1,879 objects per library, 0 failures, about 5 minutes per library; the renamed archives (23.2 MB each) built through a response file; both in one executable: 0 LNK2005, but 4 unresolved externals (LNK2019), so the link fails |
 
 E5 is the decisive row, and stronger than expected: two static Botlish
 libraries in one executable are not refused by the linker. `lib.exe`
@@ -547,9 +549,14 @@ The census (section 3, experiments E5 and E6; real Windows):
   objects define, but its public functions, with a prefix of the library's
   own (`llvm-objcopy --redefine-syms`, both definitions and references, in
   the program object and every runtime member) works mechanically -- 4,965
-  symbols in 1,879 objects, no failure -- and costs 3.5 minutes per library
-  on the runner. Whether the renamed archives then coexist:
-  E6-RESULT-PENDING.
+  symbols in 1,879 objects, no failure -- and costs about 5 minutes per library
+  on the runner -- and is not enough: the two renamed archives in one
+  executable leave 4 externals unresolved (LNK2019; the probe does not name
+  them). E6 extracted none of the archive's short import objects (the
+  standard library's raw-dylib imports of ntdll, bcryptprimitives and the
+  API sets, which no import library on the link line provides), the likely
+  cause, not established. A sound static library would need that step
+  too, and then a test that two of them are independent; neither exists.
 
 **The decision: no static COFF library.** The production path is the DLL
 and its import library; `-shared 0` is refused on Windows, and nothing
