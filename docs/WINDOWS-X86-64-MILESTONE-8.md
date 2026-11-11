@@ -83,7 +83,7 @@ through the import library. Real Windows evidence, all on CI runners:
   functions (`GetProcAddress` finds none of the runtime's), imports only
   system DLLs, runs no Botlish code at load (no initializer, no TLS
   callback), and nothing in the inputs exports anything by itself.
-* WINDOWS-FUZZ-RESULT
+* The fuzzer (random export signatures, positions past the fourth in every class, the boundary's edge values, random lifecycles) against an independent model of the C ABI: 0 disagreements on Windows (two seeds, one under GC stress) and Linux (seven).
 * Mutation testing: the 32 mutants of the catalog's 40 that apply on Linux all killed there (every detector), and 10 on Windows -- the 8 Windows-only ones and the two of the runtime's new coroutine and stack rules -- all killed; none survived.
 
 **Not done: a static COFF library** (section 13). Two static Botlish
@@ -107,7 +107,7 @@ refused on Windows.
 * `native::library` asked for the toolchain before checking the program;
 * two Windows builds of one library were different bytes (`/Brepro`).
 
-Costs (section 16): WINDOWS-PERF-SUMMARY
+Costs (section 16): a library call's fixed cost is about 133 ns on Windows (78 ns on Linux), invisible beside work that allocates; the DLL is 615 KB; loading it costs 242 us and an instance 6.8 us.
 
 ## 2. Starting state
 
@@ -721,8 +721,10 @@ independent model of the C ABI written in Tcl from
 NATIVE-LIBRARY-MILESTONE-1.md's rules, never from the compiler. Linux:
 seeds 1 to 6, 192 calls and 37 to 56 lifecycle steps each, 0
 disagreements; seed 6 again and seed 7 (12 exports, 288 calls, 94
-lifecycle steps) plainly and under GC stress, 0 disagreements. Windows:
-WINDOWS-FUZZ-PENDING.
+lifecycle steps) plainly and under GC stress, 0 disagreements. Windows
+(the smoke job of run 42945387449, MSVC hosts against the DLL): seed 1 (8
+exports, 192 calls, 40 lifecycle steps) plainly and under GC stress, seed 2
+(12 exports, 288 calls, 103 lifecycle steps), 0 disagreements.
 
 **Mutation testing.** `audit/native-library/tools/mutate.tcl` runs on
 Windows too now (a private copy made by Tcl, an overrunning run ended with
@@ -786,7 +788,48 @@ List and returns its length: 17 allocations), `fail_if` (a declared error
 with a payload).
 
 **Windows x86-64** (windows-2025 runner, MSVC 14.4x, `/O1` hosts):
-WINDOWS-PERF-PENDING
+**Windows x86-64** (the smoke job of run 42945387449: windows-2025, its
+hosts and the C reference built by cl `/O1`, the reference DLL with the
+static C runtime as the Botlish DLL has):
+
+| Measure | Value |
+|---|---:|
+| build (`native::library`, five exports; link.exe included) | 1,093 ms |
+| DLL (`bl.dll`) | 615,424 bytes |
+| import library (`bl.lib`) | 5,324 bytes |
+| exported functions | 20 (5 exports, 15 forwarders) |
+| C reference DLL (`cref.dll`, the same five functions, `/MT`) | 103,936 bytes |
+| load and unload (`LoadLibraryW` of a fresh copy, `FreeLibrary`) | 241.7 us |
+| create and destroy | 6.8 us |
+
+| Call | Botlish | Botlish, GC stress | C reference | from Botlish code (an executable's loop) |
+|---|---:|---:|---:|---:|
+| int (`add`) | 135.1 ns | 134.6 ns | 1.5 ns | 1.9 ns |
+| Float64 (`scale`) | 239.4 ns | 909.4 ns | 1.6 ns | |
+| short str (`echo`, 10 bytes) | 256.8 ns | 570.8 ns | 30.6 ns | |
+| longer str (`echo`, 4 KiB) | 557.6 ns | 813.2 ns | 68.2 ns | |
+| allocating (`words(16)`) | 1,690.5 ns | 12,602.8 ns | 487.2 ns | 1,957.1 ns |
+| declared error (`fail_if`) | 862.9 ns | 857.2 ns | 1.4 ns | |
+
+What the Windows numbers say, against Linux's below:
+
+* A call's fixed cost is the boundary's: about 133 ns on Windows (`add`:
+  135.1 ns through the DLL, 1.9 ns from Botlish code), 78 ns on Linux,
+  for the same code (registry lookup and thread check, reentrancy flag,
+  the Vm's entry, `catch_unwind`, conversions). The difference between the
+  hosts -- different machines, C runtimes and thread-local storage models
+  -- was not analysed further. For work that allocates the boundary
+  disappears: `words(16)` costs 1.69 us through the DLL and 1.96 us from
+  an executable's loop.
+* A declared error costs 863 ns on Windows (392 on Linux): it allocates the
+  error object and copies its identity and payload out of the heap.
+* The DLL is 615 KB (the Linux shared library: 880 KB). The C reference DLL
+  is 104 KB because it too holds the static C runtime: roughly 510 KB are
+  the Botlish program and runtime.
+* Loading and unloading cost 242 us (Linux: 32 us), the loader's work and
+  the static C runtime's initialization and termination -- none of it
+  Botlish code; creating and destroying an instance costs 6.8 us (Linux:
+  23.5 us).
 
 **Linux x86-64** (the development container, 4 cores, idle; for
 comparison):
