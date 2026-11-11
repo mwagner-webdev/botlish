@@ -939,7 +939,8 @@ only.
 * `native/src/codegen/clif.rs`: `windows_unwind` shared with the library
   writer.
 * `native/src/codegen/aot.rs`: `windows_library_definition`,
-  `windows_library_link_args`, `link_windows_library` (and the unit test
+  `windows_library_link_args` (`/Brepro` among them), `link_windows_library`
+  (and the unit test
   `windows_library_link_is_a_dll_of_the_static_runtime`).
 * `native/src/main.rs`: the driver's `library-dll DIR NAME FILE.nir`.
 * `native/src/runtime/library.rs`: `public_names`; `enter`'s
@@ -951,8 +952,9 @@ only.
   `CoStack::discard`; `native/src/runtime/coroutine/windows.rs`:
   `restore_thread`, the fiber's `discard`.
 * `native/library.tcl`: the Windows branch of `native::library`,
-  `WindowsToolchain`, `ValidateDll`, the Windows header and manifest,
-  certutil's digests; `native/pe.tcl` (new): the PE and import-library
+  `WindowsToolchain` (asked after the program's own checks, before any
+  lowering), `ValidateDll`, the Windows header and manifest, certutil's
+  digests; `native/pe.tcl` (new): the PE and import-library
   reader; `native/native.tcl`: the `libraries` capability.
 * `main.tcl`: the `import:` line and the help text; `pm/tools.tcl`: an
   artifact's `import` digest.
@@ -962,14 +964,18 @@ only.
 * `tests/native-library.test`: portable harness (MSVC's cl on Windows, the
   import library, `nl_thread`, `nlHostCallback`), the ported tests, and the
   new ones (`nl-coroutine-stacks-released`, `nl-windows-*`,
-  `nl-unsupported-host`); `tests/cffi/nl-win64-probe.asm` (new).
-* `audit/native-library/tools/fuzz.tcl` (new), `mutate.tcl` (Windows),
-  `mutants.txt` (fourteen new, two updated); `audit/target-model/tools/
-  mutants.txt` (one updated).
+  `nl-unsupported-host`, `nl-sample`); `tests/cffi/nl-win64-probe.asm`
+  (new); `tests/main-thread-startup.test`: `mts-library-record` reads a
+  Windows library's record from its DLL.
+* `audit/native-library/tools/fuzz.tcl` (new), `mutate.tcl` (Windows;
+  `-first 1`, the tier item's: the test file first, nothing after the
+  first killer), `mutants.txt` (fourteen new, two updated, `symbols-global`
+  Linux's); `audit/target-model/tools/mutants.txt` (one updated).
 * `audit/windows-library/probe.tcl` and
   `.github/workflows/windows-library-probe.yml` (new): the census.
 * `bench/native-library.tcl` (new).
-* `tests/platform/tier.tcl`: `native-library-fuzz`, `-mutants`, `-bench`.
+* `tests/platform/tier.tcl`: `native-library-fuzz`, `-mutants` (with
+  `-first 1`), `-bench`.
 * `.github/workflows/windows-x86_64.yml`: the smoke job's library step and
   `native-library.test` among its files.
 * `docs/NATIVE-LIBRARY-MILESTONE-1.md` (forward reference),
