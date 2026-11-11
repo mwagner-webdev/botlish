@@ -92,10 +92,10 @@ pub fn abi_fingerprint() -> u64 {
 /// `abi_words`' little-endian bytes. A constant, so that a runtime archive
 /// states the fingerprint of the runtime it holds in its identity record
 /// (`identity_record`) without running anything.
-pub const ABI_FINGERPRINT: u64 = fingerprint_of(&ABI_SCALAR_WORDS, super::ops::HELPER_SIGNATURES);
+pub const ABI_FINGERPRINT: u64 = fingerprint_of(&ABI_SCALAR_WORDS, super::ops::HELPER_SIGNATURES, super::library::SIGNATURES);
 
 /// The fingerprint's words before the helpers' (`abi_words`).
-const ABI_SCALAR_WORDS: [u64; 26] = {
+const ABI_SCALAR_WORDS: [u64; 27] = {
     use super::{bytesobj, strobj, value, vm};
     [
         std::mem::size_of::<Vm>() as u64,
@@ -134,6 +134,12 @@ const ABI_SCALAR_WORDS: [u64; 26] = {
         // policy among them -- refuses it here, before it reads them.
         std::mem::size_of::<LinkedProgram>() as u64,
         std::mem::offset_of!(LinkedProgram, startup) as u64,
+        // The value the entry dispatch reads for a Vm that runs module
+        // initialization only (runtime::thread's ENTRY_INDEX_INITIALIZE_ONLY,
+        // RN-HOST-STARTABLE-APPLICATION-LIBRARY-MILESTONE-1.md): an
+        // application library's program function stops on it, and a runtime
+        // whose `create` selects no such entry would run the application.
+        super::thread::ENTRY_INDEX_INITIALIZE_ONLY as u64,
     ]
 };
 
@@ -149,24 +155,32 @@ const fn fnv_word(mut hash: u64, word: u64) -> u64 {
 }
 
 /// The fingerprint of the scalar words SCALARS followed by the helpers
-/// HELPERS: each name's bytes, one word each, then its
-/// parameter count -- `abi_words`' order.
-const fn fingerprint_of(scalars: &[u64], helpers: &[(&str, usize)]) -> u64 {
+/// HELPERS and then the native-library boundary's functions LIBRARY: each
+/// name's bytes, one word each, then its parameter count -- `abi_words`'
+/// order.
+const fn fingerprint_of(scalars: &[u64], helpers: &[(&str, usize)], library: &[(&str, usize)]) -> u64 {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     let mut i = 0;
     while i < scalars.len() {
         hash = fnv_word(hash, scalars[i]);
         i += 1;
     }
+    hash = fingerprint_signatures(hash, helpers);
+    fingerprint_signatures(hash, library)
+}
+
+/// HASH continued over SIGNATURES: each name's bytes, one word each, then
+/// its parameter count.
+const fn fingerprint_signatures(mut hash: u64, signatures: &[(&str, usize)]) -> u64 {
     let mut h = 0;
-    while h < helpers.len() {
-        let name = helpers[h].0.as_bytes();
+    while h < signatures.len() {
+        let name = signatures[h].0.as_bytes();
         let mut b = 0;
         while b < name.len() {
             hash = fnv_word(hash, name[b] as u64);
             b += 1;
         }
-        hash = fnv_word(hash, helpers[h].1 as u64);
+        hash = fnv_word(hash, signatures[h].1 as u64);
         h += 1;
     }
     hash
@@ -181,6 +195,16 @@ pub fn abi_words() -> Vec<u64> {
     // linked, one that calls five of them too (ops.rs's
     // HELPER_SIGNATURES).
     for &(name, params) in super::ops::HELPER_SIGNATURES {
+        words.extend(name.bytes().map(u64::from));
+        words.push(params as u64);
+    }
+    // The native-library boundary (runtime::library's SIGNATURES): the
+    // runtime functions a library object's public functions call, by name
+    // and word count. A library emitted by this driver -- an application's
+    // `NAME_main` among them -- is linked only with a runtime that has
+    // them (a target support package's identity record says so before
+    // anything is linked).
+    for &(name, params) in super::library::SIGNATURES {
         words.extend(name.bytes().map(u64::from));
         words.push(params as u64);
     }

@@ -301,6 +301,13 @@ namespace eval native::lower {
     # {INDEX NAME}, INDEX 1-based (ThreadDispatch).
     variable threadRecords {}
     variable threadIndex [dict create]
+    # Whether the program is lowered as an application library's (-application
+    # 1, RN-HOST-STARTABLE-APPLICATION-LIBRARY-MILESTONE-1.md): its program
+    # function's entry dispatch (ThreadDispatch) also selects "initialize
+    # only" -- module initialization, and none of the entry program's own
+    # statements -- for a library instance (NAME_create), and its NIR says
+    # `application`.
+    variable application 0
     # NAME -> 1: the payload-bearing builtin errors (core::native::
     # declareErrorPayload: NonFiniteFloat) the native runtime itself may raise
     # in this program (RuntimeRaises). The runtime builds such a payload from
@@ -1484,7 +1491,7 @@ proc native::lower::Program {hirProgram args} {
             -recursive-result-range-opt $recursiveRangeDefault -recursive-range-limit $recursiveLimitDefault \
             -raw-int-abi-opt $rawIntAbiDefault -raw-demand-opt $rawDemandDefault -raw-mixed-policy $rawMixedDefault \
             -short-string-opt $shortStringDefault -ascii-pack-opt $asciiPackDefault -short-demand-opt $shortDemandDefault \
-            -virtual-construction-opt $constructionDefault -dfa-dispatch $dfaDispatchDefault -exports {} \
+            -virtual-construction-opt $constructionDefault -dfa-dispatch $dfaDispatchDefault -exports {} -application 0 \
             -fault [if {[info exists ::env(BOTLISH_NATIVE_FAULT)]} {set ::env(BOTLISH_NATIVE_FAULT)} else {string cat ""}]] $args]
     if {[hir::mode $hirProgram] ne "program"} {
         throw {NATIVE UNSUPPORTED sequence-mode} \
@@ -1571,6 +1578,8 @@ proc native::lower::Program {hirProgram args} {
     # instance is a root, as an export's or a callback's.
     variable threadRecords
     variable threadIndex
+    variable application
+    set application [expr {[dict get $options -application] ? 1 : 0}]
     set threadRecords [hir::threads::of $hirProgram]
     set threadIndex [dict create]
     set k 0
@@ -1746,8 +1755,11 @@ proc native::lower::Program {hirProgram args} {
     set header [list "nir 1 call-effects=$callEffectsOpt statics=[StaticCount][expr {$contextBytes > 0 ? " contexts=$contextBytes" : ""}]"]
     lappend header {*}[ContextHeader]
     lappend header {*}[lmap line $exportLines {string map $map $line}]
+    if {$application} {
+        lappend header application
+    }
     lappend header {*}[lmap line $callbackLines {string map $map $line}]
-    if {[llength $exportLines]} {
+    if {[llength $exportLines] || $application} {
         # A library's error table (NATIVE-LIBRARY-MILESTONE-1.md, "Errors"):
         # the canonical identity of every declared error a call can end in,
         # by its NIR id -- the program's own and the runtime's builtin ones
@@ -10312,11 +10324,13 @@ proc native::lower::ThreadEntryValue {fnVar e node} {
 }
 
 # The program roots BODY as {MODULES OWN} -- the module sections' and the
-# entry program's own -- when the program has thread entries, else "".
+# entry program's own -- when the program has thread entries or is an
+# application library's (the entry dispatch goes between them), else "".
 proc native::lower::ThreadEntryRoots {body} {
     variable threadRecords
+    variable application
     variable hir
-    if {$threadRecords eq {}} {
+    if {$threadRecords eq {} && !$application} {
         return ""
     }
     set modules {}
@@ -10344,12 +10358,20 @@ proc native::lower::ThreadBytesShape {fnVar {e ""}} {
 
 # The thread dispatch of the program function FN (see above), emitted where
 # the entry program's own statements begin. Nothing for a program without
-# thread entries.
+# thread entries that is no application library's. An application
+# library's (RN-HOST-STARTABLE-APPLICATION-LIBRARY-MILESTONE-1.md, "Entry
+# dispatch") has one more case: "initialize only"
+# (core::thread::initializeOnly, the index rt_entry_index reports for a
+# library instance's Vm, NAME_create's), which returns unit -- module
+# initialization done, none of the entry program's statements run. The
+# entry program's case (0, NAME_main's and every executable's) is the
+# default, as before.
 proc native::lower::ThreadDispatch {fnVar} {
     upvar 1 $fnVar fn
     variable threadRecords
+    variable application
     variable hir
-    if {$threadRecords eq {}} {
+    if {$threadRecords eq {} && !$application} {
         return
     }
     set code [Assign fn "int [core::thread::code rt_entry_index]"]
@@ -10370,7 +10392,18 @@ proc native::lower::ThreadDispatch {fnVar} {
         lappend cases "$k:$k:$l"
         lappend labels $l $record
     }
+    set initialize ""
+    if {$application} {
+        # Below every entry's index (the cases are sorted).
+        set initialize [NewLabel fn]
+        set only [core::thread::initializeOnly]
+        set cases [linsert $cases 0 "$only:$only:$initialize"]
+    }
     Emit fn "switch $raw $main [join $cases { }]"
+    if {$initialize ne ""} {
+        EmitLabel fn $initialize
+        Emit fn "ret [Assign fn unit]"
+    }
     foreach {l record} $labels {
         EmitLabel fn $l
         set init [list [Assign fn "int [core::thread::code rt_init]"]]

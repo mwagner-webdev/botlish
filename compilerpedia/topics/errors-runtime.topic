@@ -1730,6 +1730,7 @@ code: NATIVE LIBRARY TOOL
 code: NATIVE LIBRARY TOOLCHAIN
 code: NATIVE LIBRARY PIC
 code: NATIVE LIBRARY ELF
+code: NATIVE LIBRARY APPLICATION
 
 == MEANING
 On -emit-native-library (native::library), after the program compiled:
@@ -1738,11 +1739,18 @@ On -emit-native-library (native::library), after the program compiled:
     function declaration. Creating an instance runs the program's
     initialization, and a library's is only its modules' static
     initialization, so an entry script never runs by accident; each
-    statement is reported at its location.
-  * LIBRARY-NO-EXPORTS: no `exported c fn` (and no -export).
+    statement is reported at its location. A library built with
+    -application is an application library, whose entry program is what
+    NAME_main runs: neither this nor LIBRARY-NO-EXPORTS applies to it
+    (backend.native-library).
+  * LIBRARY-NO-EXPORTS: no `exported c fn` (and no -export), and the
+    library is no application library.
   * LIBRARY-SYMBOL: two exports with one name (from different modules), or
     an export named like the runtime API (create, destroy, abi_version,
-    bytes_release, error_*): each export is NAME_FUNCTION in C.
+    bytes_release, error_*; and, in an application library, main): each
+    export is NAME_FUNCTION in C.
+  * APPLICATION: native::library was called with an -application other
+    than 0 or 1.
   * NAME: the library name is not a C identifier (it prefixes every
     public C name).
   * OUT: native::library was called without -out.
@@ -1763,8 +1771,9 @@ On -emit-native-library (native::library), after the program compiled:
 
 == WHAT TO DO
 Move a top-level constant or computation into a function, or into an
-imported module (where a top-level binding is a module static); rename a
-clashing export; install binutils and a C compiler for TOOL.
+imported module (where a top-level binding is a module static), or, when
+the program is an application a host starts, build it with -application;
+rename a clashing export; install binutils and a C compiler for TOOL.
 
 @topic error.c-unsupported
 title: C UNSUPPORTED: a construct the C backend does not compile yet

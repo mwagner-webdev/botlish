@@ -595,7 +595,7 @@ fn extract_vms_options(args: &[String]) -> Option<(Vec<String>, VmsOptions)> {
 
 fn cli(args: &[String]) -> i32 {
     let usage = || {
-        eprintln!("usage: botlish-native run|clif|vcode|size|roots|calls|check|fusion|fused FILE.nir [--alloc off|summary|sites] [--argv ARGS|--argv-file PATH] | bench RUNS FILE.nir [--alloc ...] | batch CALLS FILE.nir | object|executable OUT FILE.nir [--startup worker|main-thread] | aot-run NAME FILE.nir [--startup ...] [--keep] [--parent-pid PID] [--child-env FILE] [--argv-file PATH] | library OUT NAME FILE.nir [--target TRIPLE] | link-plan FILE.nir | target TRIPLE | runtime-abi | system-linker (each also [--result PATH], --link-dir DIR, --framework-dir DIR; executable also --runtime-archive FILE)");
+        eprintln!("usage: botlish-native run|clif|vcode|size|roots|calls|check|fusion|fused FILE.nir [--alloc off|summary|sites] [--argv ARGS|--argv-file PATH] | bench RUNS FILE.nir [--alloc ...] | batch CALLS FILE.nir | object|executable OUT FILE.nir [--startup worker|main-thread] | aot-run NAME FILE.nir [--startup ...] [--keep] [--parent-pid PID] [--child-env FILE] [--argv-file PATH] | library OUT NAME FILE.nir [--target TRIPLE] [--application] | link-plan FILE.nir [--target TRIPLE] | target TRIPLE | runtime-abi | system-linker (each also [--result PATH], --link-dir DIR, --framework-dir DIR; executable also --runtime-archive FILE)");
         2
     };
     let Some(args) = extract_table_hash_key(args) else { return usage() };
@@ -646,11 +646,13 @@ fn cli(args: &[String]) -> i32 {
         return usage();
     }
     let startup = startup.unwrap_or(runtime::program::Startup::Worker);
-    if emit_target.is_some() && command != "library" {
+    if emit_target.is_some() && !matches!(command, "library" | "link-plan") {
         // Code for another target is kept, never run: only a native
         // library's object is emitted so (ANDROID-AARCH64-TARGET-SUPPORT-
-        // MILESTONE-1.md), and an explicit target is never ignored.
-        eprintln!("botlish-native: --target is an option of library (the target a native library's object is emitted for), not of {command}");
+        // MILESTONE-1.md), and its link plan resolved for that target
+        // (RN-HOST-STARTABLE-APPLICATION-LIBRARY-MILESTONE-1.md); an
+        // explicit target is never ignored.
+        eprintln!("botlish-native: --target is an option of library and link-plan (the target a native library's object is emitted and its link plan resolved for), not of {command}");
         return usage();
     }
     if link_dirs.runtime_archive.is_some() && command != "executable" {
@@ -834,11 +836,17 @@ fn cli(args: &[String]) -> i32 {
         "link-plan" => {
             // The program's link plan as this host links it
             // (codegen::aot::resolve_link_plan, NATIVE-LINK-PLAN-
-            // MILESTONE-1.md): one line per dependency -- `library NAME`,
+            // MILESTONE-1.md), or with --target as that target's linker
+            // links it (resolve_link_plan_for: a native library of another
+            // target): one line per dependency -- `library NAME`,
             // `archive NAME PATH declared WRITTEN` or `archive NAME PATH
             // searched DIR`, `framework NAME` -- or the failure a link
             // would report, before anything is linked.
-            match codegen::aot::resolve_link_plan(&program, &link_dirs) {
+            let resolved = match &emit_target {
+                Some(_) => codegen::aot::resolve_link_plan_for(&program, &link_dirs, &emit_triple),
+                None => codegen::aot::resolve_link_plan(&program, &link_dirs),
+            };
+            match resolved {
                 Ok(inputs) => {
                     for input in &inputs {
                         let words: Vec<String> = match input {

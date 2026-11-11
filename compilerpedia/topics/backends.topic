@@ -289,8 +289,8 @@ TOOLCHAIN, never the package's fault.
 title: Native libraries: Botlish functions a C host calls
 summary: `exported c fn` declares a C export; -emit-native-library NAME builds libNAME.a, libNAME.so, NAME.h and a manifest that any C host can link and call.
 index: backends
-alias: native library; library mode; exported c fn; emit-native-library; static library; shared library; C export; call Botlish from C
-keywords: exported, export, library, .a, .so, header, manifest, instance, create, destroy, thread, C ABI, int64_t, owned buffer, Tcl extension, embedding
+alias: native library; library mode; exported c fn; emit-native-library; static library; shared library; C export; call Botlish from C; application library; host-startable application; NAME_main; start Botlish from C
+keywords: exported, export, library, .a, .so, header, manifest, instance, create, destroy, thread, C ABI, int64_t, owned buffer, Tcl extension, embedding, -application, application, main, SDL_main, host thread
 related: backend.native-executable concept.c-ffi cli.options error.export-signature error.export-placement error.export-name error.export-environment error.native-library error.native-limit-stack
 
 == WHAT IT IS
@@ -318,7 +318,8 @@ target support package: backend.target-support):
                          also each file's SHA-256, the compiler's runtime
                          ABI, and who owns and releases every value that
                          crosses: what an external tool reads instead of
-                         the program, cli.tools)
+                         the program, cli.tools; schema 3 for an
+                         application library, below)
 
 C calls `NAME_checked(instance, int64_t n, int64_t *result, NAME_error
 **error)`. An exported c fn is an ordinary function to Botlish code and to
@@ -347,7 +348,53 @@ An exported function is compiled for every argument its declared types
 admit, never for what its Botlish callers happen to pass: Botlish calls of
 it keep their own specialized code, and the export is a separate entry. A
 library's entry file holds declarations only (NATIVE LIBRARY
-LIBRARY-TOP-LEVEL), so no entry script runs when an instance is created.
+LIBRARY-TOP-LEVEL), so no entry script runs when an instance is created --
+unless the library is an application library (next section).
+
+== APPLICATION LIBRARIES
+`-emit-native-library NAME -application FILE.bot` builds an application
+library: FILE.bot is an ordinary entry program -- it installs its own
+contexts with `with context`, keeps its state and runs its loop -- the
+same file an executable is built from. The library has one more C
+function:
+
+    int32_t NAME_main(int argc, char **argv, NAME_error **error);
+
+which runs that entry program on the calling thread, to its end: it makes
+a fresh VM there (module initialization, then the entry program's
+statements), and drops it on that thread before it returns. The host
+supplies the thread and the call, never a context or the application's
+authority: the entry program is checked as any entry program is
+(installations in order, every requirement met, one selection of each
+context trait), whether it becomes an executable or an application
+library.
+  * argc and argv, argv[0] included, become argv(), copied before any
+    Botlish code runs. Each argument must be UTF-8 (BOUNDARY
+    ARGUMENT-NOT-UTF8 or ARGUMENT-NULL, the argument's index its `argument`
+    field), argc never negative (INVOCATION ARGUMENT-COUNT), argv never
+    NULL when argc is positive (NULL-POINTER).
+  * NAME_STATUS_OK when the entry completed; otherwise the failure's
+    status and the owned error, as for any call. *error is NULL after a
+    success.
+  * No handle escapes: a second call makes a second VM and runs the entry
+    again. Calls on different threads are independent, each with its own
+    VM; a call while the thread runs a call of the same library (from
+    inside the entry, an export or an initialization) is INVOCATION
+    REENTRANT-CALL.
+  * Recursion is bounded by the library's stack check (NATIVE LIMIT STACK
+    on the calling thread's stack); no signal handler is installed in the
+    host.
+  * NAME_create still initializes only: an instance never runs the entry
+    program's statements, and its exports -- which keep every export rule
+    -- never see the entry's contexts. An export may not be named main.
+  * The manifest is schema 3: schema 2 with an `application` member (the
+    symbol, its C signature, the calling thread, blocking to completion,
+    the argument encoding, the error's ownership). Every other library's
+    manifest stays schema 2.
+  * std::thread is not available in an application library (a library has
+    no way to make another VM yet): a start fails at run time.
+SDL3's traditional entry is this shape: a host's `SDL_main(argc, argv)`
+calls NAME_main and returns its status.
 
 == THREE DIFFERENT THINGS
   * A module's top-level functions are visible to every importer unless
@@ -800,7 +847,7 @@ title: Every command-line option
 summary: The options of botlish (tclsh9.0 main.tcl): backend and warning selection, program arguments, building, checking, the language server, inspection output, and the reference.
 index: backends
 alias: options; flags of the command line; command-line options
-keywords: -backend, -warnings, -target, -L, -F, -runtime-path, -target-support, -argv, -argv-hex, -argv-none, -aot-run, -aot-keep, --, -emit-native-executable, -native-startup, -emit-hir-interchange, -emit-native-library, -export, -out, -emit-c, -check, -color, -excerpts, -lsp, -lsp-scheduler, -lsp-worker, -code, -hir, -ast, -aot, -aot-data, -aot-spec, -contexts, -direct, -traits, -emit-nir, -emit-clif, -help, -version
+keywords: -backend, -warnings, -target, -L, -F, -runtime-path, -target-support, -argv, -argv-hex, -argv-none, -aot-run, -aot-keep, --, -emit-native-executable, -native-startup, -emit-hir-interchange, -emit-native-library, -application, -export, -out, -emit-c, -check, -color, -excerpts, -lsp, -lsp-scheduler, -lsp-worker, -code, -hir, -ast, -aot, -aot-data, -aot-spec, -contexts, -direct, -traits, -emit-nir, -emit-clif, -help, -version
 related: cli.usage cli.output cli.exit-status cli.lsp cli.run cli.aot-run lint.policy backend.targets backend.hir-interchange backend.native-executable backend.native-startup backend.native-library backend.target-support backend.c concept.argv
 
 == RUNNING
@@ -871,6 +918,12 @@ own process arguments.
     -emit-native-library NAME the native library NAME from the one input:
                               libNAME.a, libNAME.so, NAME.h and
                               NAME.manifest.json (backend.native-library)
+    -application              make that library an application library:
+                              its input is an ordinary entry program, run
+                              on a host's thread by NAME_main(argc, argv,
+                              &error), in a VM made for the call
+                              (backend.native-library); an option of
+                              -emit-native-library only
     -export FUNCTION          export the entry program's top-level FUNCTION
                               (repeatable; without it the library exports
                               the program's `exported c fn`s)

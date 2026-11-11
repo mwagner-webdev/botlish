@@ -414,9 +414,11 @@ proc native::linkPlan {hir args} {
     return [WithProgramDirs $hir 0 {LinkPlanOf $text}]
 }
 
-# linkPlan of the NIR text TEXT.
-proc native::LinkPlanOf {text} {
-    set lines [Driver link-plan $text]
+# linkPlan of the NIR text TEXT; ARGS the driver's further options (a native
+# library of another target: --target TRIPLE, the plan resolved for that
+# target's linker, RN-HOST-STARTABLE-APPLICATION-LIBRARY-MILESTONE-1.md).
+proc native::LinkPlanOf {text args} {
+    set lines [Driver link-plan $text {*}$args]
     set plan {}
     foreach line $lines {
         if {[catch {lindex $line 0} tag]} continue

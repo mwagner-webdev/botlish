@@ -62,6 +62,16 @@ namespace eval core::thread {
     }
 }
 
+# What rt_entry_index reports for a Vm that runs module initialization and
+# no entry at all -- a native library's instance (NAME_create): the native
+# runtime's thread::ENTRY_INDEX_INITIALIZE_ONLY, part of its ABI
+# fingerprint. An application library's entry dispatch returns on it
+# (native/lower.tcl's ThreadDispatch; RN-HOST-STARTABLE-APPLICATION-LIBRARY-
+# MILESTONE-1.md).
+proc core::thread::initializeOnly {} {
+    return -1
+}
+
 # The code of operation NAME (an rt_* name without its namespace).
 proc core::thread::code {name} {
     variable operations

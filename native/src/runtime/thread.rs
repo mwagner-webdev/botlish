@@ -65,6 +65,24 @@ pub fn linked_factory(linked: &'static super::program::LinkedProgram) -> Arc<VmF
     })
 }
 
+/// The entry of a Vm that runs the program's module initialization and no
+/// entry at all: a native library's instance (`NAME_create`,
+/// runtime::library), whose program function stops where the entry
+/// program's own statements begin (RN-HOST-STARTABLE-APPLICATION-LIBRARY-
+/// MILESTONE-1.md, "Entry dispatch"). `rt_entry_index` reports it as
+/// ENTRY_INDEX_INITIALIZE_ONLY.
+pub const ENTRY_INITIALIZE_ONLY: u32 = u32::MAX;
+
+/// `rt_entry_index`'s report of ENTRY_INITIALIZE_ONLY: the case
+/// native/lower.tcl's ThreadDispatch emits for an application library's
+/// "initialize only" selection.
+pub const ENTRY_INDEX_INITIALIZE_ONLY: i64 = -1;
+
+/// The value `rt_entry_index` reports for a Vm's ENTRY.
+pub const fn entry_index(entry: u32) -> i64 {
+    if entry == ENTRY_INITIALIZE_ONLY { ENTRY_INDEX_INITIALIZE_ONLY } else { entry as i64 }
+}
+
 /// A Vm's own part in threads and the transport: which entry it runs, its
 /// initialization bytes, its thread's record, its port and what it took.
 #[derive(Default)]
@@ -73,7 +91,8 @@ pub struct VmThread {
     /// e.g. a native library's instance).
     pub factory: Option<Arc<VmFactory>>,
     /// The entry this Vm runs: 0 the entry program's, K the K-th thread
-    /// entry's (1-based).
+    /// entry's (1-based), ENTRY_INITIALIZE_ONLY none (a native library's
+    /// instance: module initialization only).
     pub entry: u32,
     pub init: Vec<u8>,
     /// This Vm's thread's record (a worker's).
@@ -1359,7 +1378,7 @@ fn op(p: *mut Vm, code: i64, a: [Value; 6]) -> Result<Value, Value> {
             n(0)
         }
         // rt_entry_index(): this VM's entry (the thread dispatch)
-        29 => n(vm(p).thread.entry as i64),
+        29 => n(entry_index(vm(p).thread.entry)),
         // rt_init(): its initialization bytes
         30 => {
             let init = std::mem::take(&mut vm(p).thread.init);
