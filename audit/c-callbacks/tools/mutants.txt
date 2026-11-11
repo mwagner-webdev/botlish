@@ -370,6 +370,16 @@ pub const SUPPORTED: bool = super::framewalk::NATIVE_FRAME_ROOTS && super::frame
             } else if let Some(&(_, transition)) = jumps.iter().find(|&&(entry, _)| entry == sp).map(|_| jumps.last().unwrap()) {
 >>>>
 
+@@ windows-middle-callback-roots-skipped the Windows walk visits no root of a Botlish frame between two callback segments: a middle callback -- the one that called C again, whose callback is collecting -- loses the values it holds across that C call (killed by a collected value, cb-nested-gc, cb-nested-loop)
+%% windows-x86_64
+## native/src/runtime/framewalk.rs
+<<<<
+                for &entry in function.roots_at(pc) {
+====
+                let middle = jumps.iter().any(|j| j.0 < sp) && jumps.iter().any(|j| j.0 > sp);
+                for &entry in function.roots_at(pc).iter().filter(|_| !middle) {
+>>>>
+
 @@ windows-continuation-wrong-rsp the continuation's stack pointer is a word off (record + 24, not + 16): the waiting frame's stack map is read from the wrong base
 %% windows-x86_64
 ## native/src/runtime/framewalk.rs
