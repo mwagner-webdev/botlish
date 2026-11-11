@@ -566,6 +566,7 @@ proc hir::applied::Needs {hir e} {
 proc hir::applied::Constructs {hir e node} {
     if {![dict get $node named] || [dict getdef $node structId ""] eq ""
             || [dict exists $node opaqueDenied] || [dict exists $node payloadOf]
+            || [dict exists $node casePayloadOf]
             || ![hir::structs::isParameterized [dict get $node structId]]} {
         return 0
     }
@@ -577,6 +578,7 @@ proc hir::applied::Constructs {hir e node} {
 proc hir::applied::NamedConstruction {node} {
     return [expr {[dict get $node named] && [dict getdef $node structId ""] ne ""
         && ![dict exists $node opaqueDenied] && ![dict exists $node payloadOf]
+        && ![dict exists $node casePayloadOf]
         && [hir::structs::declared [dict get $node structId]]
         && ![hir::structs::isParameterized [dict get $node structId]]}]
 }

@@ -123,6 +123,20 @@ proc hir::decimal::Mentions {type {seen {}}} {
         }
         return 0
     }
+    if {[hir::types::IsEnum $type]} {
+        # What a payload-bearing case's payload fields mention: equality
+        # reads them (PORTABILITY-PAYLOAD-ENUMS-MILESTONE-1.md). An enum met
+        # again adds nothing.
+        if {$type in $seen} {
+            return 0
+        }
+        foreach t [hir::enums::payloadTypes [lindex $type 1]] {
+            if {[Mentions $t [concat $seen [list $type]]]} {
+                return 1
+            }
+        }
+        return 0
+    }
     if {[hir::types::IsNamedStruct $type]} {
         # (An application's fields, its slots replaced by the arguments:
         # TRAIT-CONSTRAINED-IMPRINTED-TYPES.md -- answered from the

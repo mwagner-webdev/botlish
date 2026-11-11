@@ -1856,6 +1856,24 @@ proc hir::types::MentionsMutableFrom {type visitedVar} {
             if {[MentionsMutableFrom $t visited]} { return 1 }
         }
     }
+    if {[IsEnum $type]} {
+        # A payload-bearing case's values hold their payloads
+        # (PORTABILITY-PAYLOAD-ENUMS-MILESTONE-1.md); an enum met again adds
+        # nothing.
+        if {[dict exists $visited $type]} {
+            return [dict get $visited $type]
+        }
+        dict set visited $type 0
+        set result 0
+        foreach t [hir::enums::payloadTypes [lindex $type 1]] {
+            if {[MentionsMutableFrom $t visited]} {
+                set result 1
+                break
+            }
+        }
+        dict set visited $type $result
+        return $result
+    }
     if {[IsNamedStruct $type]} {
         if {[dict exists $visited $type]} {
             return [dict get $visited $type]
@@ -2511,6 +2529,19 @@ proc hir::types::Totality {operation type {seen {}}} {
             immutableSet {
                 return [Components $operation [list [list "its members" [lindex $type 1]]] $seen]
             }
+            enum {
+                # An enum (ENUMS.md): its cases' identities are total; a
+                # payload-bearing case's values are compared and hashed by
+                # their payloads too (PORTABILITY-PAYLOAD-ENUMS-
+                # MILESTONE-1.md), so the enum is what every payload field
+                # of every case is. An enum met again inside itself adds
+                # nothing (the least answer); one met through a struct is
+                # that struct's summary's fixpoint, which walks this afresh.
+                if {$type in $seen || ![hir::enums::hasPayloads [lindex $type 1]]} {
+                    return {total ""}
+                }
+                return [Components $operation [hir::enums::payloadParts [lindex $type 1]] [concat $seen [list $type]]]
+            }
             struct {
                 set parts {}
                 foreach {name t} [lindex $type 1] {
@@ -2850,6 +2881,13 @@ proc hir::types::SendClass {type {assumed {}} {seen {}}} {
     }
     if {[IsCPtr $type] || [IsCFnPtr $type] || [IsNativeMemory $type] || $type eq "cptr"} {
         return [list none [NoSending cptr]]
+    }
+    if {[IsEnum $type] && [hir::enums::hasPayloads [lindex $type 1]]} {
+        # PORTABILITY-PAYLOAD-ENUMS-MILESTONE-1.md: the transfer codecs
+        # (core/transfer.tcl, runtime/transfer.rs) write a payload-free
+        # case's name only; a payload-bearing case has no transfer schema
+        # yet. Not sendable, rather than sent without its payload.
+        return [list none "[show $type] has payload-bearing cases, and a payload-bearing enum case has no transfer encoding yet (only an enum whose every case is payload-free is sendable)"]
     }
     if {[hir::cabi::IsFiniteFloating $type]} {
         return [SendClass [hir::cabi::Carrier $type] $assumed $seen]
@@ -3801,6 +3839,24 @@ proc hir::types::ShapeResult {hir shape argExprs argTypes result {ctx {}}} {
         never {
             # context#unreachable (core/contexts.tcl): never completes.
             return never
+        }
+        enum-case {
+            # enum#case(PAYLOAD, "ID", "CASE") (core/enums.tcl,
+            # PORTABILITY-PAYLOAD-ENUMS-MILESTONE-1.md): a value of the enum
+            # ID -- the enum's type, never a case's own or the payload's. A
+            # construction resolution could not make a payload-bearing case
+            # of (an unknown case, a payload-free one: diagnosed there) has
+            # no value: `any` here, poison at the call.
+            set ide [lindex $argExprs [lindex $shape 1]]
+            set casee [lindex $argExprs [expr {[lindex $shape 1] + 1}]]
+            if {$ide ne "" && $casee ne "" && [hir::kind $hir $ide] eq "const" && [hir::kind $hir $casee] eq "const"} {
+                set id [lindex [hir::get $hir $ide literal] end]
+                set case [lindex [hir::get $hir $casee literal] end]
+                if {[hir::enums::hasPayload $id $case]} {
+                    return [list enum $id]
+                }
+            }
+            return any
         }
         coroutine-create - coroutine-outward - coroutine-yield {
             # The coroutine operations (core/coroutines.tcl): typed from the
@@ -5011,6 +5067,14 @@ proc hir::types::Struct {hirVar ctxVar e} {
         }
         return [list nstruct $id]
     }
+    if {[dict exists $node casePayloadOf] && [hir::enums::hasPayload {*}[dict get $node casePayloadOf]]} {
+        # The payload of a payload-bearing enum case's construction
+        # (PORTABILITY-PAYLOAD-ENUMS-MILESTONE-1.md): its declared type, as
+        # an error's payload has -- the anonymous struct type of the case's
+        # declared fields (hir::range::VerifyCasePayload proves each value
+        # admissible).
+        return [hir::enums::payloadType {*}[dict get $node casePayloadOf]]
+    }
     if {[dict exists $node payloadOf] && [hir::errordecls::hasPayload [dict get $node payloadOf]]} {
         # An error's payload (ERROR-PAYLOADS.md) has its declared type,
         # whatever its values are -- the declaration is the contract, as a
@@ -5573,6 +5637,7 @@ proc hir::types::Call {hirVar ctxVar e} {
                                 && [LayoutParseRefused $hir $argExprs [dict get $meta resultShape]])
                             || ($shapeKind eq "layout-read" && [LayoutReadRefused $hir $argExprs [dict get $meta resultShape]])
                             || ($shapeKind eq "callback-pointer" && ![IsCFnPtr $result])
+                            || ($shapeKind eq "enum-case" && ![IsEnum $result])
                             || ($shapeKind eq "thread-entry" && ![IsNamedStruct $result]))} {
                     # std::binary::load of a value not statically a NativeView[L]
                     # (BINARY-OPERAND), or std::binary::parse of a native-only

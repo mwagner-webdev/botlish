@@ -1087,6 +1087,12 @@ proc hir::resolve::ShowTypeExpr {typeExpr} {
 proc hir::resolve::Expr {hirVar node ctx} {
     if {[info level] > $::core::deep::bound} {tailcall ::core::deep::descend [info level 0]}
     upvar 1 $hirVar hir
+    if {[dict get $node kind] eq "struct"} {
+        # `Enum::Case {field: value, ...}` (PORTABILITY-PAYLOAD-ENUMS-
+        # MILESTONE-1.md): the construction of a payload-bearing case, an
+        # ordinary call of enum#case (CaseConstruction).
+        set node [CaseConstruction $node $ctx]
+    }
     set kind [dict get $node kind]
     set origin [dict get $node origin]
     set scope [dict get $ctx scope]
@@ -2134,6 +2140,10 @@ proc hir::resolve::ResolveStruct {hirVar e node ctx} {
         lappend values [Expr hir [dict get $field value] $ctx]
     }
     set what [expr {$named ? "the $spelling construction" : "this struct initializer"}]
+    if {[dict exists $node casePayloadOf]} {
+        # (PORTABILITY-PAYLOAD-ENUMS-MILESTONE-1.md: CaseConstruction.)
+        set what "the payload of case [hir::enums::display [lindex [dict get $node casePayloadOf] 0]]::[lindex [dict get $node casePayloadOf] 1]"
+    }
     if {!$named} {
         set layout [lsort -unique $names]
     } elseif {$id ne ""} {
@@ -2165,6 +2175,41 @@ proc hir::resolve::ResolveStruct {hirVar e node ctx} {
             if {$declared ni $names} {
                 hir::Diagnose hir MISSING-FIELD \
                     "$what is missing field \"$declared\" (every declared field must be given exactly once; there are no defaults)" $e
+            }
+        }
+    }
+    if {[dict exists $node casePayloadOf]} {
+        # The payload of a payload-bearing enum case's construction
+        # (PORTABILITY-PAYLOAD-ENUMS-MILESTONE-1.md; CaseConstruction): an
+        # anonymous struct value checked exactly as a named construction
+        # is, against the case's declared payload fields -- every field
+        # once, none undeclared (hir::range::VerifyCasePayload proves each
+        # value admissible for its declared type). An unknown case, or a
+        # payload-free one given braces, has no fields to check against:
+        # the construction is diagnosed as that, at its case.
+        lassign [dict get $node casePayloadOf] caseEnum caseName
+        SetField hir $e casePayloadOf [list $caseEnum $caseName]
+        set caseOrigin [dict get $node caseOrigin]
+        if {![hir::enums::hasCase $caseEnum $caseName]} {
+            hir::DiagnoseAt hir UNKNOWN-ENUM-CASE [hir::enums::UnknownCaseMessage $caseEnum $caseName] $e $caseOrigin
+        } elseif {![hir::enums::hasPayload $caseEnum $caseName]} {
+            hir::DiagnoseAt hir ENUM-PAYLOAD-UNEXPECTED [hir::enums::PayloadUnexpectedMessage $caseEnum $caseName] $e $caseOrigin
+        } else {
+            set declaredNames [hir::enums::fieldNames $caseEnum $caseName]
+            set what "the payload of case [hir::enums::display $caseEnum]::$caseName"
+            set reported {}
+            foreach name $names origin $fieldOrigins {
+                if {$name ni $declaredNames && $name ni $reported} {
+                    lappend reported $name
+                    hir::DiagnoseAt hir UNKNOWN-FIELD \
+                        "$what has no field \"$name\" (declared fields: [join $declaredNames {, }])" $e $origin
+                }
+            }
+            foreach declared $declaredNames {
+                if {$declared ni $names} {
+                    hir::Diagnose hir MISSING-FIELD \
+                        "$what is missing field \"$declared\" (every declared field must be given exactly once; there are no defaults)" $e
+                }
             }
         }
     }
@@ -2768,10 +2813,57 @@ proc hir::resolve::ResolveEnumCase {hirVar e id case ctx} {
         hir::Diagnose hir UNKNOWN-ENUM-CASE [hir::enums::UnknownCaseMessage $id $case] $e
         return
     }
+    if {[hir::enums::hasPayload $id $case]} {
+        # A payload-bearing case written as a value (PORTABILITY-PAYLOAD-
+        # ENUMS-MILESTONE-1.md): every value of it carries its payload, so
+        # there is no value without one -- never a default, never a
+        # constructor function. No value: like an unknown case.
+        SetField hir $e name "${id}::$case"
+        SetField hir $e binding ""
+        SetField hir $e init yes
+        hir::Diagnose hir ENUM-PAYLOAD-REQUIRED [hir::enums::PayloadRequiredMessage $id $case] $e
+        return
+    }
     dict set hir exprs $e kind const
     set literal [list enum [list $id $case]]
     SetField hir $e literal $literal
     SetField hir $e value [core::ir::literalValue [list const {*}$literal]]
+}
+
+# NODE, a `struct` syntax node, as the construction it is: when its type is
+# `Q::C` and Q names an enum type visible here (hir::enums::lookup, the
+# visibility of a case expression's qualifier), the call
+#
+#   enum#case(PAYLOAD, "ID", "CASE")
+#
+# (core/enums.tcl): PAYLOAD the anonymous struct of NODE's field
+# initializers, marked `casePayloadOf {ID CASE}` -- checked against the
+# case's declared payload fields exactly as a named construction is
+# (ResolveStruct, hir::range::VerifyCasePayload), its fields evaluated in
+# written order before the value is made -- and the two names String
+# constants the front end synthesized. Every analysis already knows calls
+# and anonymous structs, so no HIR node kind is added; the call's type is
+# the enum's (hir::types::ShapeResult). A struct construction of any other
+# type is NODE unchanged.
+proc hir::resolve::CaseConstruction {node ctx} {
+    set type [dict get $node type]
+    if {$type eq "" || [dict getdef $type namespace ""] eq ""
+            || [dict exists $type typeArg] || [dict exists $type typeArgs] || [dict exists $type id]} {
+        return $node
+    }
+    set id [hir::enums::lookup [dict get $type namespace] [CtxNamespace $ctx]]
+    if {$id eq ""} {
+        return $node
+    }
+    set origin [dict get $node origin]
+    set payload [hir::syntax::structNode $origin "" [dict get $node fields]]
+    dict set payload casePayloadOf [list $id [dict get $type name]]
+    dict set payload caseOrigin [dict get $type origin]
+    set idConst [hir::syntax::constNode $origin str $id]
+    dict set idConst synthesized 1
+    set caseConst [hir::syntax::constNode $origin str [dict get $type name]]
+    dict set caseConst synthesized 1
+    return [hir::syntax::callNode $origin [hir::syntax::rootRef $origin enum#case] $payload $idConst $caseConst]
 }
 
 # The hint an UNBOUND diagnostic for the bare NAME adds when NAME is the

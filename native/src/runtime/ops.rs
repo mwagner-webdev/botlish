@@ -152,6 +152,9 @@ pub fn op_may_allocate(op: OpCode) -> bool {
         RawFromBits32 | RawFromBits64 | RawBits64 | RawAdmit32 | RawAdmit64 | RawNarrow32 | RawNarrow64 |
         IAdd | ISub | IMul | IMod | IAnd | IOr | IXor | IShl | IShr | Substr | DecodeCharAt | ShortToStr | AsciiToStr | StrLower | StrCat | StrAppendChar
             | StrUtf8Bytes | Argv | ListNew | ListAppend | ListFlat | MutArrayAllocate | MutArrayFreeze | MkOk
+            // A payload-bearing enum case's value is one object
+            // (PORTABILITY-PAYLOAD-ENUMS-MILESTONE-1.md).
+            | EnumCase
             // The owned byte storage is one allocation (a collection may run
             // first); the empty storage is a shared static (no allocation).
             | BytesFromList | BytesJoin | BytesDecodeUtf8 | BytesSlice
@@ -705,8 +708,26 @@ fn equal(p: *mut Vm, a: Value, b: Value) -> Result<bool, ()> {
         // An enum case word is canonical (ENUMS.md): the same enum
         // declaration and the same case of it have one word, so word
         // equality is exactly nominal equality -- another enum's
-        // same-spelled case is another word.
-        Kind::Enum => a == b,
+        // same-spelled case is another word. A payload-bearing case's value
+        // (PORTABILITY-PAYLOAD-ENUMS-MILESTONE-1.md) is an EnumCaseObj:
+        // equal when its enum and case are and its payload is equal to the
+        // other's (an anonymous struct: field by field, by name), never by
+        // its address -- core::value::equal's enum case, in its order (the
+        // payloads are compared only for the same case).
+        Kind::Enum => {
+            if a == b {
+                return Ok(true);
+            }
+            if enum_case_parts(a) != enum_case_parts(b) {
+                return Ok(false);
+            }
+            match (enum_payload(a), enum_payload(b)) {
+                (Some(x), Some(y)) => equal(p, x, y)?,
+                // (Equal parts and one payload-free word: two different
+                // words of one payload-free case cannot exist.)
+                _ => false,
+            }
+        }
         // A finite number with one representation (no NaN, no negative
         // zero: FloatType::admit), so equal numbers have equal bits.
         Kind::Float64 => float_bits(a) == float_bits(b),
@@ -1588,11 +1609,18 @@ fn walk<S: CanonicalSink>(p: *mut Vm, sink: &mut S, v: Value) -> Result<(), ()> 
         // declaration identity text, a 0xFF separator, the case's declared
         // name -- never the numbers the word carries.
         Kind::Enum => {
-            let (e, c) = enum_parts(v);
+            let (e, c) = enum_case_parts(v);
             let info = &program(p).enums[e as usize];
             sink.text(info.name.as_bytes());
             sink.bytes(&[0xFF]);
             sink.text(info.cases[c as usize].as_bytes());
+            if let Some(payload) = enum_payload(v) {
+                // A payload-bearing case's value (PORTABILITY-PAYLOAD-ENUMS-
+                // MILESTONE-1.md): a second 0xFF, then the payload as a
+                // nested value, as core/hashing.tcl's enum case does.
+                sink.bytes(&[0xFF]);
+                sink.child(p, payload)?;
+            }
         }
         Kind::List => {
             let items = list_of(v).items();
@@ -4029,6 +4057,20 @@ pub extern "C" fn rt_result_payload(p: *mut Vm, v: Value, ok: u64) -> Value {
     r.payload
 }
 
+/// enum#case (core/enums.tcl; PORTABILITY-PAYLOAD-ENUMS-MILESTONE-1.md): the
+/// value of case CASE of the program's enum number INDEX (both small-Int
+/// words NIR's `int` constants made), carrying PAYLOAD. One allocation; a
+/// payload-free case never comes here (its value is its immediate word).
+/// PAYLOAD is a use of the call, so it is rooted across the allocation
+/// (codegen::roots), as a Result's payload is (rt_result_new).
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_enum_case(p: *mut Vm, payload: Value, index: Value, case: Value) -> Value {
+    let (index, case) = (small_of(index), small_of(case));
+    debug_assert!((index as usize) < program(p).enums.len());
+    debug_assert!((case as usize) < program(p).enums[index as usize].cases.len());
+    vm(p).new_enum_case(index as u32, case as u32, payload)
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_result_new(p: *mut Vm, ok: u64, v: Value) -> Value {
     vm(p).new_result(ok != 0, v)
@@ -4237,6 +4279,8 @@ pub fn apply_op(p: *mut Vm, op: OpCode, a: &[Value]) -> Value {
         RawNarrow64 => super::ffi::rt_raw_narrow(p, 1, a[0]),
         MkOk => rt_result_new(p, 1, a[0]),
         MkError => rt_result_new(p, 0, a[0]),
+        // (enum#case is internal: never a Native value, but harmless as one.)
+        EnumCase => rt_enum_case(p, a[0], a[1], a[2]),
         Hash | HashTotal => rt_hash(p, a[0]),
         TableHash | TableHashTotal => rt_table_hash(p, a[0]),
         BytesFromList => rt_bytes_from_list(p, a[0]),
@@ -4493,6 +4537,7 @@ runtime_helpers! {
     (rt_is_result, 3),
     (rt_result_payload, 3),
     (rt_result_new, 3),
+    (rt_enum_case, 4),
     (rt_char_codepoint, 2),
     (rt_closure_new, 5),
     (rt_call_value, 4),

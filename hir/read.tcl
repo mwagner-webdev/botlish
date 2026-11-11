@@ -493,6 +493,43 @@ proc hir::read::ErrorDecls {lines} {
     return $rest
 }
 
+# Consumes LINES' leading "enumcase ID CASE payload F: T, ..." lines
+# (hir::format::EnumPayload, PORTABILITY-PAYLOAD-ENUMS-MILESTONE-1.md): the
+# resolved payload fields of each payload-bearing case of an enum the text
+# declared, set in the registry and in the text's `sourceTypes`. Returns
+# LINES with those consumed.
+proc hir::read::EnumPayloads {lines} {
+    variable lastTypeDecls
+    set rest $lines
+    set any 0
+    foreach entry $lines {
+        lassign $entry indent content number
+        if {$indent != 0 || ![regexp {^enumcase (\S+) (\S+) payload (.+)$} $content -> id case fieldsText]} {
+            break
+        }
+        if {![hir::enums::hasCase $id $case]} {
+            Fail $number "enumcase names no declared case \"$case\" of an enum \"$id\" of this text"
+        }
+        set fields {}
+        foreach item [SplitTop $fieldsText ", "] {
+            if {![regexp {^(\S+): (.+)$} $item -> fname ftype]} {
+                Fail $number "expected \"FIELD: TYPE\" in an enum case payload, got \"$item\""
+            }
+            if {[dict exists $fields $fname]} {
+                Fail $number "duplicate payload field \"$fname\""
+            }
+            lappend fields $fname [ParseType $ftype $number]
+        }
+        hir::enums::setPayload $id $case $fields
+        set any 1
+        set rest [lrange $rest 1 end]
+    }
+    if {$any} {
+        set lastTypeDecls [hir::enums::withPayloads $lastTypeDecls]
+    }
+    return $rest
+}
+
 proc hir::read::Program {text} {
     # Reading registers the text's declarations (TypeDecls, ErrorDecls): the
     # registries' state is the text's once Program stamps the HIR.
@@ -503,6 +540,7 @@ proc hir::read::Program {text} {
     }
     set lines [TypeDecls $lines]
     set lines [ErrorDecls $lines]
+    set lines [EnumPayloads $lines]
     if {$lines eq ""} {
         Fail 0 "empty HIR text"
     }
@@ -1590,6 +1628,11 @@ proc hir::read::Expr {hirVar level s path block} {
             if {[regexp {^payload\((\S+)\)$} $who -> errorName]} {
                 # An error's payload construction (ERROR-PAYLOADS.md).
                 SetField hir $e payloadOf $errorName
+                set who anon
+            } elseif {[regexp {^casepayload\(([^#]+)#(\S+)\)$} $who -> caseEnum caseName]} {
+                # A payload-bearing enum case's payload construction
+                # (PORTABILITY-PAYLOAD-ENUMS-MILESTONE-1.md).
+                SetField hir $e casePayloadOf [list $caseEnum $caseName]
                 set who anon
             }
             set named [expr {$who ne "anon"}]

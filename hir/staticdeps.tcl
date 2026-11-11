@@ -2830,6 +2830,19 @@ proc hir::staticdeps::CanCarry {hir type {seen {}}} {
         }
         return 0
     }
+    if {[hir::types::IsEnum $type]} {
+        # What its cases' payloads can carry (PORTABILITY-PAYLOAD-ENUMS-
+        # MILESTONE-1.md); an enum met again adds nothing.
+        if {$type in $seen} {
+            return 0
+        }
+        foreach t [hir::enums::payloadTypes [lindex $type 1]] {
+            if {[CanCarry $hir $t [concat $seen [list $type]]]} {
+                return 1
+            }
+        }
+        return 0
+    }
     if {[hir::types::IsNamedStruct $type]} {
         # (An application's fields, its slots replaced by the arguments:
         # TRAIT-CONSTRAINED-IMPRINTED-TYPES.md -- answered from the

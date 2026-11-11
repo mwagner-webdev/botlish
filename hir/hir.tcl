@@ -761,6 +761,13 @@ proc hir::BuildOnce {nodes options given choices halt checkedVar} {
         # own types: resolved once those are registered.
         hir::errordecls::resolvePayloads
     }
+    if {[hir::enums::unresolved]} {
+        # So do an enum case's payload field types (PORTABILITY-PAYLOAD-
+        # ENUMS-MILESTONE-1.md), its own enum included; HIR's `sourceTypes`
+        # entries carry them resolved.
+        hir::enums::resolvePayloads
+        set sourceTypes [hir::enums::withPayloads $sourceTypes]
+    }
     # A source program's extern c fn declarations and link plan (C-FFI.md):
     # their C types name the program's own (opaque structs, std::ffi::c's
     # scalars), so they are registered once those are. A frontend that

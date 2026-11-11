@@ -120,6 +120,21 @@ proc core::affine::Parse {text posVar} {
             return {h}
         }
         l { return [list l [Parse $text pos]] }
+        e {
+            # An enum's cases (hir/affine.tcl's Descriptor): each case's
+            # name, its UTF-8 bytes in K hexadecimal digits, then its
+            # payload's descriptor.
+            set n [Number $text pos]
+            set tree {e}
+            for {set i 0} {$i < $n} {incr i} {
+                set k [Number $text pos]
+                set hex [string range $text $pos [expr {$pos + $k - 1}]]
+                incr pos $k
+                set name [encoding convertfrom utf-8 [binary decode hex $hex]]
+                lappend tree [list $name [Parse $text pos]]
+            }
+            return $tree
+        }
         s {
             set n [Number $text pos]
             set tree {s}
@@ -171,6 +186,22 @@ proc core::affine::Drop {value tree} {
             foreach part [lrange $tree 1 end] {
                 lassign $part slot inner
                 Drop [lindex $values $slot] $inner
+            }
+        }
+        e {
+            # An enum value (PORTABILITY-PAYLOAD-ENUMS-MILESTONE-1.md): its
+            # payload, by the descriptor of its own case, when that case's
+            # payload owns something affine.
+            if {![core::value::enumHasPayload $value]} {
+                return
+            }
+            set case [core::value::enumCaseName $value]
+            foreach part [lrange $tree 1 end] {
+                lassign $part name inner
+                if {$name eq $case} {
+                    Drop [core::value::enumPayload $value] $inner
+                    return
+                }
             }
         }
     }

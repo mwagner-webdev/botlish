@@ -161,6 +161,12 @@ pub const KIND_DECIMAL: u8 = 18;
 pub const KIND_RAWF32: u8 = 19;
 /// A raw C double: a FloatObj holding any binary64 bit pattern.
 pub const KIND_RAWF64: u8 = 20;
+/// A value of a payload-bearing enum case (PORTABILITY-PAYLOAD-ENUMS-
+/// MILESTONE-1.md, EnumCaseObj): the case's (enum number, case number) and
+/// its payload, an anonymous struct. Of kind `Kind::Enum` like a payload-free
+/// case's immediate word, which stays the representation of every
+/// payload-free case: the two forms are one semantic kind.
+pub const KIND_ENUMCASE: u8 = 21;
 
 #[repr(C)]
 pub struct Header {
@@ -816,6 +822,19 @@ mod c_float_tests {
     }
 }
 
+/// A value of a payload-bearing enum case (KIND_ENUMCASE): the program's
+/// enum and case numbers -- representation only, as an immediate case word's
+/// are; equality, hashing and printing read the declared names from the
+/// program's enum table -- and the payload, an anonymous struct value of the
+/// case's declared fields. Immutable once made.
+#[repr(C)]
+pub struct EnumCaseObj {
+    pub hdr: Header,
+    pub index: u32,
+    pub case: u32,
+    pub payload: Value,
+}
+
 #[repr(C)]
 pub struct ResultObj {
     pub hdr: Header,
@@ -922,6 +941,34 @@ pub fn make_enum(enum_index: u32, case: u32) -> Value {
 pub fn enum_parts(v: Value) -> (u32, u32) {
     debug_assert!(is_enum(v));
     ((v >> 32) as u32, ((v >> 5) as u32) & MAX_ENUM_CASE)
+}
+
+/// (enum number, case number) of any enum case value V: a payload-free
+/// case's immediate word or a payload-bearing case's EnumCaseObj
+/// (PORTABILITY-PAYLOAD-ENUMS-MILESTONE-1.md).
+#[inline]
+pub fn enum_case_parts(v: Value) -> (u32, u32) {
+    if is_enum(v) {
+        return enum_parts(v);
+    }
+    let obj = enum_case_of(v);
+    (obj.index, obj.case)
+}
+
+/// The payload-bearing case value V's object.
+pub fn enum_case_of<'a>(v: Value) -> &'a EnumCaseObj {
+    debug_assert_eq!(heap_kind(v), KIND_ENUMCASE);
+    unsafe { as_ref(v) }
+}
+
+/// The payload of enum case value V, or None for a payload-free case.
+#[inline]
+pub fn enum_payload(v: Value) -> Option<Value> {
+    if is_enum(v) {
+        None
+    } else {
+        Some(enum_case_of(v).payload)
+    }
 }
 
 /// 1 if V is a C address word (C-ABI-TYPES.md).
@@ -1127,6 +1174,7 @@ pub fn kind_of(v: Value) -> Kind {
         KIND_FLOAT | KIND_DECIMAL => float_type_of(v).kind(),
         KIND_RAWF32 => Kind::RawFloat32,
         KIND_RAWF64 => Kind::RawFloat64,
+        KIND_ENUMCASE => Kind::Enum,
         _ => panic!("not a program value: {v:#x}"),
     }
 }
