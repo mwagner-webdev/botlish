@@ -55,6 +55,10 @@
 # relies on -- holds a diagnostic of its own, poison or a syntax hole:
 # nothing more is said, nothing certified; an unresolved name is typed
 # `never`, which is no divergence: EMISSION-CALLEE-DEPENDENCY-CORRECTNESS-
+# MILESTONE-1.md; or a fact it reads of code it does not walk -- a non-local
+# binding's value, a call through a function value's type -- was derived
+# from code holding a resolution diagnostic, poison or a syntax-dependent
+# reference: Provenance, EMISSION-BINDING-PROVENANCE-CORRECTNESS-
 # MILESTONE-1.md). Every verdict but proven is a diagnostic of the claim: an
 # explicit claim is certified or the compilation is rejected.
 #
@@ -67,7 +71,10 @@
 # table carries them. Only a certificate this process produced is a proof:
 # the in-process memo (`memo`) reuses one in a later compilation exactly when
 # every dependency still holds; a HIR read from text (interchange, the
-# front-end cache) is verified again (reverify), never believed.
+# front-end cache) is verified again (reverify), never believed. Where a
+# fact's provenance can make a claim dependent (a compilation with a
+# resolution diagnostic, poison or a syntax-dependent reference: not
+# `trusted`), nothing is reused or memoized: provenance is no fingerprint.
 #
 # Identity. The memo, the compilation's certificate table and a
 # certificate's dependencies name a function by its binding's name, which
@@ -113,6 +120,18 @@ namespace eval hir::emission {
     variable certs [dict create]
     variable fingerprints [dict create]
     variable diagnosed [dict create]
+    # Provenance (Dependent): 1 when the compilation holds no source --
+    # no resolution diagnostic, poison or syntax-dependent reference --
+    # so every provenance question answers 0 and the memo may be used;
+    # the resolution diagnostics' expressions; the answers and scans,
+    # memoized; the loop clause and fold bindings' loops (ClauseMap,
+    # built on first use).
+    variable trusted 1
+    variable sources [dict create]
+    variable provenance [dict create]
+    variable provenanceEdges [dict create]
+    variable clauses [dict create]
+    variable clausesBuilt 0
     variable round 0
     variable changed 0
     variable touched {}
@@ -216,9 +235,10 @@ proc hir::emission::reverify {hirVar} {
 proc hir::emission::Reset {h} {
     variable hir
     foreach v {names byName ambiguous claimsOf guards guardKeys cache langCache contexts certs fingerprints
-            diagnosed registeredUsed guardsUsed} {
+            diagnosed registeredUsed guardsUsed sources provenance provenanceEdges} {
         set ::hir::emission::$v [dict create]
     }
+    set ::hir::emission::clausesBuilt 0
     set hir $h
     set ::hir::emission::round 0
     set ::hir::emission::computed 0
@@ -259,6 +279,22 @@ proc hir::emission::Reset {h} {
             dict set ::hir::emission::diagnosed $e 1
         }
     }
+    # What makes a fact the walk reads of code it does not walk incomplete
+    # (Dependent): the resolution diagnostics' expressions, poison, syntax-
+    # dependent references. A compilation without any is trusted.
+    set resolution [dict getdef $hir resolutionDiagnostics {}]
+    foreach d $resolution {
+        set e [dict getdef $d expr ""]
+        if {$e eq "" || ![dict exists $hir exprs $e]} {
+            # Located at no expression: recovery takes every unit to
+            # depend on it (hir::recovery::Tainted's `*`), and so does
+            # every provenance question.
+            set e *
+        }
+        dict set ::hir::emission::sources $e 1
+    }
+    set ::hir::emission::trusted [expr {$resolution eq {} && [dict size [dict getdef $hir poisoned {}]] == 0
+        && [dict size [dict getdef $hir syntaxDependent {}]] == 0}]
 }
 
 # The claims of CLAIMBLOCKS checked, callees first: their records.
@@ -663,7 +699,9 @@ proc hir::emission::Within {s target} {
 # around the call starts), its result value, the violations its own yields
 # commit, the summaries it uses (children), the summaries it reads only for
 # their code (reads: Read), the certificates it composed with, and whether
-# its code holds what the program's own diagnostics are about (tainted).
+# its code holds what the program's own diagnostics are about, or a fact it
+# reads of code it does not walk was derived from what the front end could
+# not establish (tainted: Taint, Dependent).
 # Keyed by {B C ARGS}; computed in rounds to a fixpoint
 # (Solve), each value only growing, so recursion is analyzed; a summary of a
 # converged solve is final and reused by every later claim of the
@@ -988,12 +1026,369 @@ proc hir::emission::RefValue {e node} {
         return [Meet [dict get $env $b] $type]
     }
     if {$b ne ""} {
+        if {[NonLocalDependent $b]} {
+            # The facts of a binding the walk did not bind -- a module
+            # binding, a value an enclosing function bound, an imported
+            # one -- derived from code the front end could not establish:
+            # incomplete, not conservative (Provenance).
+            variable tainted
+            set tainted 1
+        }
         set k [hir::exact::BindingIntOf $hir $b]
         if {$k ne ""} {
             return [hir::intset::point $k]
         }
     }
     return [TypeValue $type]
+}
+
+# ---------------------------------------------------------------------------
+# Provenance: facts the walk reads of code it does not walk
+# (EMISSION-BINDING-PROVENANCE-CORRECTNESS-MILESTONE-1.md)
+#
+# Two kinds of fact reach the walk from code it never evaluates: a
+# non-local binding's exact value and static type (RefValue: a module
+# binding, a value an enclosing function bound, an imported one), and the
+# static type of a call through a function value with no target -- a join
+# of function types, whose `never` ends the walk and whose result type is
+# the call's value (EvalCall). The front end derived each from code: the
+# binding's defining code, the bodies of the functions whose inferred
+# results the type joins. Where that code holds what the front end could
+# not establish -- an unresolved name (typed `never`, which is no
+# divergence: its bind leaves the binding `any`, its function's inferred
+# result `never`), poison, a syntax-dependent reference -- the fact is
+# incomplete, not conservative, and a claim whose walk reads it is
+# dependent, exactly as when its own code holds the diagnostic (Taint). The
+# facts are read as before; only the summary's taint is added.
+#
+# The question is reachability over provenance nodes, each memoized for the
+# compilation:
+#
+#   {v B}  the facts of value binding B: its own poison and its defining
+#          code (a bind's value; a loop clause binding's operands; a fold
+#          intermediate's initial value and body: ClauseMap)
+#   {f E}  the inferred result of function block E, whose declaration states
+#          none: E's own resolution diagnostics (an unresolved parameter or
+#          result type is dropped, as an omitted one is) and its body
+#   {x E}  the code of expression E (the callee of a value call)
+#
+# A node depends when its code holds a source -- the expression of a
+# resolution diagnostic, poison, a syntax-dependent reference -- or refers
+# to a node that depends: a value binding, a function that declares no
+# result. Only the code that typed the facts counts: where the code's root
+# is reachable, its reachable part (a dead branch contributes nothing:
+# B3b); where the root itself is unreachable -- a declaration after code
+# that never completes, which inference still types from its code -- all
+# of it. Nothing else is a node: a function with a declared result is typed
+# by its declaration, a contract every repair of its body keeps (B5); a
+# parameter by its declared type (an undeclared one's inferred contract is
+# a signature fact, the census's open S1 and S4b); a nested function's
+# declaration is no part of a value (a reference to it is followed); a
+# callee reference read only as a callee is no fact either (R2). Check
+# diagnostics (an unhandled error, a known failure, an ownership rule) are
+# no sources: the analysis that typed the code completed.
+#
+# Sources exist only in a compilation with resolution diagnostics, poison
+# or syntax-dependent references: in every other one (`trusted`) each
+# question answers 0 without a scan, and no accepted program's verdict
+# changes. Provenance is no fingerprint a certificate records -- V1 (a
+# value that is one of two functions that loop) and V2 (one of them an
+# unresolved name's `never`) have the same claimed function, typed the same
+# -- so an untrusted compilation neither reuses a memoized certificate nor
+# memoizes one (CheckClaim).
+
+# The readers' questions (above), each counted. NonLocalDependent: 1 when
+# binding B, which a reference reads and the walk did not bind, is declared
+# outside the function being walked -- a module binding, a value an
+# enclosing function bound, an imported one -- and its facts depend. A
+# binding of the walked function's own that the walk did not bind (a list
+# loop's element, read through its type) is no question: the walk
+# evaluated the code that typed it (the loop's iterable). CalleeDependent:
+# 1 when the code of CALLEE, a value call's callee, depends. A trusted
+# compilation answers 0 to both without a scan.
+proc hir::emission::NonLocalDependent {b} {
+    variable hir
+    variable block
+    set binding [dict get $hir bindings $b]
+    if {[dict get $binding kind] ni {local param}
+            || [Within [dict get $binding scope] [dict get [Node $block] bodyScope]]} {
+        return 0
+    }
+    if {![Asked]} {
+        return 0
+    }
+    set n [RefNode $b]
+    return [expr {[lindex $n 0] eq "v" && [Dependent $n]}]
+}
+
+proc hir::emission::CalleeDependent {callee} {
+    if {![Asked]} {
+        return 0
+    }
+    return [Dependent [list x $callee]]
+}
+
+# Counts a provenance question; 1 when one may answer 1 here (the
+# compilation is not trusted).
+proc hir::emission::Asked {} {
+    variable trusted
+    dict incr ::hir::emission::stats provenanceAsked
+    return [expr {!$trusted}]
+}
+
+# 1 when the facts provenance node NODE names were derived from code
+# holding a source (above), else 0: depth first over the nodes NODE
+# reaches, on an explicit stack (a chain of declarations is as long as the
+# program writes it). A search that finds a source answers 1 for the nodes
+# on its path; one that finds none answers 0 for every node it visited
+# (each reaches only visited nodes). A node is visited once per search, so
+# cycles -- a recursive function, a fold body naming its intermediate --
+# end.
+proc hir::emission::Dependent {node} {
+    variable trusted
+    variable provenance
+    variable sources
+    if {$trusted} {
+        return 0
+    }
+    if {[dict exists $sources *]} {
+        return 1
+    }
+    if {[dict exists $provenance $node]} {
+        return [dict get $provenance $node]
+    }
+    dict incr ::hir::emission::stats provenanceSearches
+    set visited [dict create $node 1]
+    lassign [Provenance $node] direct succs
+    if {$direct} {
+        dict set provenance $node 1
+        return 1
+    }
+    set stack [list [list $node $succs]]
+    while {[llength $stack]} {
+        lassign [lindex $stack end] n succs
+        if {$succs eq {}} {
+            set stack [lrange $stack 0 end-1]
+            continue
+        }
+        set succs [lassign $succs next]
+        lset stack end [list $n $succs]
+        dict incr ::hir::emission::stats provenanceEdgesFollowed
+        if {[dict exists $visited $next]} continue
+        dict set visited $next 1
+        set known [dict getdef $provenance $next ""]
+        if {$known eq "0"} continue
+        set found [expr {$known eq "1"}]
+        if {!$found} {
+            lassign [Provenance $next] found nsuccs
+        }
+        if {$found} {
+            foreach frame $stack {
+                dict set provenance [lindex $frame 0] 1
+            }
+            dict set provenance $next 1
+            return 1
+        }
+        lappend stack [list $next $nsuccs]
+        if {[llength $stack] > [dict getdef $::hir::emission::stats provenanceDepth 0]} {
+            dict set ::hir::emission::stats provenanceDepth [llength $stack]
+        }
+    }
+    dict for {n -} $visited {
+        dict set provenance $n 0
+    }
+    return 0
+}
+
+# {DIRECT SUCCESSORS} of provenance node NODE (Dependent), memoized: DIRECT
+# 1 when its own code holds a source, the nodes its code refers to
+# otherwise.
+proc hir::emission::Provenance {node} {
+    variable hir
+    variable provenanceEdges
+    if {[dict exists $provenanceEdges $node]} {
+        return [dict get $provenanceEdges $node]
+    }
+    dict incr ::hir::emission::stats provenanceNodes
+    lassign $node kind id
+    switch -- $kind {
+        v {
+            if {[dict exists $hir poisoned $id]} {
+                set out {1 {}}
+            } else {
+                set out [ScanCode [DefiningCode $id]]
+            }
+        }
+        f {
+            if {[Source $id]} {
+                set out {1 {}}
+            } else {
+                set out [ScanCode [lmap x [dict get $hir exprs $id body] {list $x 1}]]
+            }
+        }
+        x {
+            set out [ScanCode [list [list $id 1]]]
+        }
+    }
+    dict set provenanceEdges $node $out
+    return $out
+}
+
+# 1 if expression E is a source (above).
+proc hir::emission::Source {e} {
+    variable hir
+    variable sources
+    return [expr {[dict exists $sources $e] || [dict exists $hir poisoned $e] || [dict exists $hir syntaxDependent $e]}]
+}
+
+# {DIRECT SUCCESSORS} of the code ROOTS ({EXPR FILTER}...: FILTER 1 skips
+# what is unreachable, 0 reads all of it): DIRECT 1 at the first source
+# met; the provenance nodes its references name otherwise (RefNode). An
+# explicit stack: code nests as deep as the program writes it.
+proc hir::emission::ScanCode {roots} {
+    variable hir
+    set succs [dict create]
+    set stack $roots
+    while {[llength $stack]} {
+        lassign [lindex $stack end] x filter
+        set stack [lrange $stack 0 end-1]
+        set node [dict get $hir exprs $x]
+        if {$filter && ![dict get $node reachable]} continue
+        dict incr ::hir::emission::stats provenanceExprs
+        if {[Source $x]} {
+            return {1 {}}
+        }
+        switch -- [dict get $node kind] {
+            ref {
+                set n [RefNode [dict get $node binding]]
+                if {$n ne ""} {
+                    dict set succs $n 1
+                }
+                continue
+            }
+            bind {
+                set v [dict get $node value]
+                if {$v ne "" && [dict exists $hir exprs $v] && [dict get $hir exprs $v kind] eq "block"} {
+                    # A function's declaration: no part of the value (a
+                    # reference to the function is followed).
+                    continue
+                }
+            }
+            block {
+                # (No source form makes a function value but a
+                # declaration; a block in a value's place is one with
+                # no name.)
+                if {[dict get $node declaredResult] eq ""} {
+                    dict set succs [list f $x] 1
+                }
+                continue
+            }
+        }
+        foreach c [hir::children $hir $x] {
+            lappend stack [list $c $filter]
+        }
+    }
+    return [list 0 [dict keys $succs]]
+}
+
+# The provenance node a reference to binding B names (Dependent): {v B}
+# for a value binding -- one a bind of no function declares, a loop clause
+# binding, a fold intermediate --, {f E} for function block E that declares
+# no result, "" for anything else (a function with a declared result, a
+# parameter, a root or ambient binding, an unresolved name: the reference
+# is then a source of its own).
+proc hir::emission::RefNode {b} {
+    variable hir
+    if {$b eq "" || ![dict exists $hir bindings $b]} {
+        return ""
+    }
+    set binding [dict get $hir bindings $b]
+    switch -- [dict get $binding kind] {
+        local {
+            set bind [dict get $binding declaredBy]
+            if {$bind eq "" || ![dict exists $hir exprs $bind] || [dict get $hir exprs $bind kind] ne "bind"} {
+                return ""
+            }
+            set v [dict get $hir exprs $bind value]
+            if {$v ne "" && [dict exists $hir exprs $v] && [dict get $hir exprs $v kind] eq "block"} {
+                if {[dict get $hir exprs $v declaredResult] eq ""} {
+                    return [list f $v]
+                }
+                return ""
+            }
+            return [list v $b]
+        }
+        param {
+            if {[dict exists [ClauseMap] $b]} {
+                return [list v $b]
+            }
+        }
+    }
+    return ""
+}
+
+# The defining code of value binding B, as ScanCode's roots: a bind's
+# value, a loop clause binding's operands, a fold intermediate's initial
+# value(s) -- each read whole when unreachable -- and its body.
+proc hir::emission::DefiningCode {b} {
+    variable hir
+    set binding [dict get $hir bindings $b]
+    if {[dict get $binding kind] eq "param"} {
+        return [dict getdef [ClauseMap] $b {}]
+    }
+    set v [dict get $hir exprs [dict get $binding declaredBy] value]
+    if {$v eq ""} {
+        return {}
+    }
+    return [list [Operand $v]]
+}
+
+# Loop clause bindings and fold intermediates -> their defining code
+# (DefiningCode), built once per compilation, on first use.
+proc hir::emission::ClauseMap {} {
+    variable hir
+    variable clauses
+    variable clausesBuilt
+    if {$clausesBuilt} {
+        return $clauses
+    }
+    set clausesBuilt 1
+    set clauses [dict create]
+    dict for {e node} [dict get $hir exprs] {
+        switch -- [dict get $node kind] {
+            listloop {
+                dict set clauses [dict get $node elementBinding] [list [Operand [dict get $node iterable]]]
+            }
+            countloop {
+                dict set clauses [dict get $node countBinding] \
+                    [list [Operand [dict get $node start]] [Operand [dict get $node end]]]
+            }
+            lockloop {
+                foreach domain [dict get $node domains] {
+                    if {[dict get $domain kind] eq "list"} {
+                        set ops [list [dict get $domain iterable]]
+                    } else {
+                        set ops [list [dict get $domain start] [dict get $domain end]]
+                    }
+                    dict set clauses [dict get $domain binding] [lmap x $ops {Operand $x}]
+                }
+            }
+            loop {}
+            default continue
+        }
+        if {[dict exists $node foldBinding]} {
+            dict set clauses [dict get $node foldBinding] \
+                [concat [lmap x [hir::FoldInitials $node] {Operand $x}] [lmap x [dict get $node body] {list $x 1}]]
+        }
+    }
+    return $clauses
+}
+
+# Operand E as ScanCode's root: its reachable part, or all of it when E
+# itself is unreachable.
+proc hir::emission::Operand {e} {
+    variable hir
+    return [list $e [dict get $hir exprs $e reachable]]
 }
 
 # ---------------------------------------------------------------------------
@@ -1056,6 +1451,15 @@ proc hir::emission::EvalCall {e node s} {
                 # diagnostics it holds (an unresolved name, whose `never` is
                 # no divergence) and its fingerprint are part of the proof.
                 Read $t $vals
+            } elseif {[CalleeDependent $callee]} {
+                # Through a function value with no target: that it never
+                # completes is the callee's static type, a join of the
+                # inferred results of the functions it may be -- code the
+                # walk does not read. Derived from code the front end could
+                # not establish (an unresolved name's `never`: V2), it is
+                # no divergence (Provenance).
+                variable tainted
+                set tainted 1
             }
             Failing $s
         }
@@ -1087,8 +1491,18 @@ proc hir::emission::EvalCall {e node s} {
     }
     # A call through a function value: a function that may yield never
     # becomes a value (COROUTINES.md), so it yields nothing; it may fail.
+    # Its value is its static type's, the callee's result type: a fact of
+    # the functions the callee may be, unless it is `any` (no fact: R2's
+    # unresolved callee) or `unit` (one value) -- incomplete when derived
+    # from code the front end could not establish (V3: a domain joined from
+    # an unresolved name's `never` and a declared Digit; Provenance).
+    set type [TypeOf $e]
+    if {$type ni {any unit} && [CalleeDependent $callee]} {
+        variable tainted
+        set tainted 1
+    }
     Failing $s
-    return [list $s [TypeValue [TypeOf $e]]]
+    return [list $s [TypeValue $type]]
 }
 
 # Records the states S as failure points: a handler of an enclosing
@@ -2048,9 +2462,17 @@ proc hir::emission::CheckClaim {claim} {
     # up nor stored -- the entry under it may be another function's -- and
     # the claim is proved from its own code.
     set identified [Identified $b]
+    # A compilation holding what the front end could not establish (a
+    # resolution diagnostic, poison, a syntax-dependent reference) is not
+    # `trusted`: what its walks find dependent there (Dependent) is no
+    # fingerprint a certificate records -- V2 reads as V1 does -- so it
+    # neither reuses a memoized certificate nor memoizes one. A compilation
+    # whose only diagnostics are the checks' (an unhandled error) keeps the
+    # memo: its facts are complete.
+    variable trusted
     # A certificate this process proved in an earlier compilation, still
     # valid here: reused, not proved again.
-    if {$useMemo && $identified && [dict exists $memo $id]} {
+    if {$useMemo && $identified && $trusted && [dict exists $memo $id]} {
         set t0 [clock microseconds]
         lassign [Valid [dict get $memo $id]] ok why
         dict incr ::hir::emission::stats validateMicroseconds [expr {[clock microseconds] - $t0}]
@@ -2136,7 +2558,7 @@ proc hir::emission::CheckClaim {claim} {
         if {$identified} {
             dict set certs $id $cert
         }
-        if {$useMemo && $identified && [ReadsIdentified $readset]} {
+        if {$useMemo && $identified && $trusted && [ReadsIdentified $readset]} {
             dict set memo $id $cert
         }
         dict set record verdict proven
@@ -2272,7 +2694,7 @@ proc hir::emission::ClaimText {record} {
         proven { return "emits [dict get $record recognizer]: [GuaranteeText [dict get $record certificate]]" }
         rejected { return "emits [dict get $record recognizer]: rejected -- the analysis found a trace the recognizer does not accept (see its diagnostics)" }
         not-proved { return "emits [dict get $record recognizer]: not proved -- the analysis lacks the facts (see its diagnostics)" }
-        dependent { return "emits [dict get $record recognizer]: not checked -- its code holds another diagnostic" }
+        dependent { return "emits [dict get $record recognizer]: not checked -- its code, or code whose facts it reads, holds another diagnostic" }
     }
     return "emits [dict get $record recognizer]: [dict get $record verdict]"
 }

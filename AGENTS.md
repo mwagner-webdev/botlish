@@ -5771,6 +5771,23 @@ backend compiles, or reports why not (EMIT-*). Keep it so:
   code its walk does not read.
   Messages never print an internal id. Every EMIT-* kind has a
   `std::compiler::DiagnosticCode` case and a Compilerpedia topic.
+* Provenance: a fact the walk reads of code it does not walk -- a
+  non-local binding's exact value and type (`RefValue`), the static type
+  of a call through a function value with no target, whose `never` ends
+  the walk or whose result it reads (`EvalCall`) -- is incomplete when the
+  front end derived it from code holding a resolution diagnostic, poison
+  or a syntax-dependent reference, and a claim reading it is dependent
+  (`hir::emission::Dependent`: one memoized, cycle-safe search over the
+  defining code of value bindings and the bodies of functions that declare
+  no result; EMISSION-BINDING-PROVENANCE-CORRECTNESS-MILESTONE-1.md). A
+  function's declared result, a parameter's declared type, a callee read
+  only as a callee and a check diagnostic (an unhandled error) take no
+  part: never follow a declared result into its body, make a check
+  diagnostic a source, or ask at a value call typed `any` or `unit`. A
+  compilation holding a source (`trusted` 0) neither reuses nor memoizes a
+  certificate: provenance is no fingerprint (V2 reads as V1 does). Never
+  record provenance in HIR, a certificate or a fact, and never widen the
+  memo rule to every diagnostic or drop it.
 * A claim is about the yield trace, never the result: a claimed function
   may complete with any value of its declared result (a coroutine source's
   record count, the -1 a protocol uses for its end). Never bring back a rule

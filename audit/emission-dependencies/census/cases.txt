@@ -47,6 +47,20 @@
 # census's were proven+ and accepted, N4b's proven+ reused); N6a, N6b and
 # the `identity-read` sequence are its own (a gap the census's prototype
 # left: a proof that read two functions of one name, memoized).
+#
+# EMISSION-BINDING-PROVENANCE-CORRECTNESS-MILESTONE-1.md corrected the
+# binding cases: the `observed` lines of R1, B3, B3c, B6, D1, D2, G1, B8,
+# B8b, B8f, X2, SC1, V2 and S5d, and the `binding`, `signature` and
+# `callable` sequences' steps, are its verdicts (the census's were rejected,
+# or proven+ for B3, G1, B8b and V2, V2's reused); V3 to V7, L1, L1v and the
+# `callable-narrow` and `trust` sequences are its own (the same hole as V2
+# through a helper's result, a local, a captured value and a narrow result
+# type; a loop's element binding; the memo in compilations with a
+# resolution diagnostic). It decides the census's undecided B3, G1 and B8b
+# `dependent` (its section 14: a fact derived from code holding an
+# unresolved name is incomplete, whether or not a narrower one would have
+# changed the verdict -- the rule for the claim's own code), so their
+# `appropriate` lines say so; their class stays U.
 
 # ---------------------------------------------------------------------------
 # Module bindings
@@ -54,7 +68,7 @@
 @@ R1 a module binding initialized by an unresolved call, read as a value
 section module bindings
 class A
-observed rejected
+observed dependent
 appropriate dependent
 strict UNBOUND
 --- main.bot
@@ -102,8 +116,8 @@ fn emitter() -> unit emits digit_token:
 @@ B3 an exact value whose initializer's condition is unresolved, both branches the same Int
 section module bindings
 class U
-observed proven+
-appropriate undecided
+observed dependent
+appropriate dependent
 strict UNBOUND
 --- main.bot
 import std::dfa
@@ -156,7 +170,7 @@ fn emitter() -> unit emits digit_token:
 @@ B3c a value whose initializer's condition is unresolved, the branches differ
 section module bindings
 class A
-observed rejected
+observed dependent
 appropriate dependent
 strict UNBOUND
 --- main.bot
@@ -236,7 +250,7 @@ fn emitter() -> unit emits digit_token:
 @@ B6 a binding of a helper whose inferred result is never because of an unresolved call
 section module bindings
 class A
-observed rejected
+observed dependent
 appropriate dependent
 strict UNBOUND
 --- main.bot
@@ -263,7 +277,7 @@ fn emitter() -> unit emits digit_token:
 @@ D1 bindings destructured from an unresolved call
 section module bindings
 class A
-observed rejected
+observed dependent
 appropriate dependent
 strict UNBOUND
 --- main.bot
@@ -287,7 +301,7 @@ fn emitter() -> unit emits digit_token:
 @@ D2 bindings destructured from a struct one of whose fields is unresolved
 section module bindings
 class A
-observed rejected
+observed dependent
 appropriate dependent
 strict UNBOUND
 --- main.bot
@@ -345,8 +359,8 @@ fn emitter() -> unit emits digit_token:
 @@ G1 an unresolved binding the claimed function guards itself: the proof uses no fact of it
 section module bindings
 class U
-observed proven+
-appropriate undecided
+observed dependent
+appropriate dependent
 strict UNBOUND
 --- main.bot
 import std::dfa
@@ -393,6 +407,30 @@ fn emitter() -> unit emits digit_token:
 0
 @@end
 
+@@ Z1v Z1 repaired: the unrelated binding is the Int 1
+section module bindings
+class E
+observed proven+
+appropriate proven+
+strict accepted
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+z = 1
+
+fn emitter() -> unit emits digit_token:
+    yield 49
+    unit
+
+0
+@@end
+
 # ---------------------------------------------------------------------------
 # Local and captured bindings
 
@@ -422,7 +460,7 @@ fn emitter() -> unit emits digit_token:
 @@ B8 an enclosing function's local initialized by an unresolved call, captured by a nested claimed function
 section local and captured bindings
 class A
-observed rejected
+observed dependent
 appropriate dependent
 strict UNBOUND
 --- main.bot
@@ -447,8 +485,8 @@ fn outer() -> int:
 @@ B8b a captured exact value whose initializer's condition is unresolved
 section local and captured bindings
 class U
-observed proven+
-appropriate undecided
+observed dependent
+appropriate dependent
 strict UNBOUND
 --- main.bot
 import std::dfa
@@ -551,7 +589,7 @@ fn outer() -> int:
 @@ B8f a captured alias of a local initialized by an unresolved call
 section local and captured bindings
 class A
-observed rejected
+observed dependent
 appropriate dependent
 strict UNBOUND
 --- main.bot
@@ -605,7 +643,7 @@ k = 1
 @@ X2 an imported binding initialized by an unresolved call
 section imported declarations
 class A
-observed rejected
+observed dependent
 appropriate dependent
 strict UNBOUND
 --- main.bot
@@ -715,7 +753,7 @@ fn broken() -> int:
 @@ SC1 a module binding whose initializer is a rejected static block (an unhandled CompilerError)
 section static compile and syntax recovery
 class A
-observed rejected
+observed dependent
 appropriate dependent
 strict UNHANDLED-ERROR
 --- main.bot
@@ -1023,7 +1061,7 @@ fn emitter() -> unit emits digit_token:
 @@ V2 V1 with g's never an unresolved call's: the walk ends at the never without reading anything
 section callable values
 class A
-observed proven+
+observed dependent
 appropriate dependent
 strict UNBOUND
 --- main.bot
@@ -1055,6 +1093,382 @@ fn emitter() -> unit emits digit_token:
     f()
     yield 65
     unit
+
+0
+@@end
+
+@@ V3 a value selected at run time whose call's result type, a Digit, is joined from a function whose inferred result is an unresolved name's never and a declared Digit: an edit of the name to 17 makes it every Int (V3r): the census's compiler certified it
+section callable values
+class A
+observed dependent
+appropriate dependent
+strict UNBOUND
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+fn pick() -> bool:
+    true
+
+type Digit = Int in 0..9
+
+fn d3() -> Digit:
+    3
+
+fn g():
+    if pick():
+        missing()
+    d3()
+
+fn h():
+    d3()
+
+f = if pick():
+    g
+else:
+    h
+
+fn emitter() -> unit emits digit_token:
+    yield 48 + f()
+    unit
+
+0
+@@end
+
+@@ V3v V3 valid: both functions return a Digit
+section callable values
+class E
+observed proven+
+appropriate proven+
+strict accepted
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+fn pick() -> bool:
+    true
+
+type Digit = Int in 0..9
+
+fn d3() -> Digit:
+    3
+
+fn g():
+    if pick():
+        d3()
+    d3()
+
+fn h():
+    d3()
+
+f = if pick():
+    g
+else:
+    h
+
+fn emitter() -> unit emits digit_token:
+    yield 48 + f()
+    unit
+
+0
+@@end
+
+@@ V3r V3 with the unresolved name repaired to 17: the result type is every Int, the claim rejected
+section callable values
+class E
+observed rejected
+appropriate rejected
+strict EMIT-END-SYMBOL
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+fn pick() -> bool:
+    true
+
+type Digit = Int in 0..9
+
+fn d3() -> Digit:
+    3
+
+fn g():
+    if pick():
+        17
+    else:
+        d3()
+
+fn h():
+    d3()
+
+f = if pick():
+    g
+else:
+    h
+
+fn emitter() -> unit emits digit_token:
+    yield 48 + f()
+    unit
+
+0
+@@end
+
+@@ V4 V2 through a helper's inferred result: the callee is the call choose(), whose result joins g and h: the census's compiler certified it
+section callable values
+class A
+observed dependent
+appropriate dependent
+strict UNBOUND
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+fn pick() -> bool:
+    true
+
+fn g():
+    missing()
+
+fn h():
+    loop:
+        continue
+
+fn choose():
+    if pick():
+        g
+    else:
+        h
+
+fn emitter() -> unit emits digit_token:
+    yield 49
+    choose()()
+    yield 65
+    unit
+
+0
+@@end
+
+@@ V4v V4 valid: both functions loop
+section callable values
+class E
+observed proven+
+appropriate proven+
+strict accepted
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+fn pick() -> bool:
+    true
+
+fn g():
+    loop:
+        continue
+
+fn h():
+    loop:
+        continue
+
+fn choose():
+    if pick():
+        g
+    else:
+        h
+
+fn emitter() -> unit emits digit_token:
+    yield 49
+    choose()()
+    yield 65
+    unit
+
+0
+@@end
+
+@@ V5 V2 through a local of the claimed function: the walk binds f, but its type is the join of the functions' inferred results, which it does not read: the census's compiler certified it
+section callable values
+class A
+observed dependent
+appropriate dependent
+strict UNBOUND
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+fn pick() -> bool:
+    true
+
+fn g():
+    missing()
+
+fn h():
+    loop:
+        continue
+
+fn emitter() -> unit emits digit_token:
+    f = if pick():
+        g
+    else:
+        h
+    yield 49
+    f()
+    yield 65
+    unit
+
+0
+@@end
+
+@@ V6 V2 captured: the enclosing function binds f from two nested functions, one of them an unresolved name's never: the census's compiler certified it
+section callable values
+class A
+observed dependent
+appropriate dependent
+strict UNBOUND
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+fn pick() -> bool:
+    true
+
+fn outer() -> int:
+    fn g():
+        missing()
+    fn h():
+        loop:
+            continue
+    f = if pick():
+        g
+    else:
+        h
+    fn inner() -> unit emits digit_token:
+        yield 49
+        f()
+        yield 65
+        unit
+    3
+
+0
+@@end
+
+@@ V7 V2 in a list: the value is an element of [g, h], the call's target no block
+section callable values
+class E
+observed dependent
+appropriate dependent
+strict UNBOUND
+--- main.bot
+import std::dfa
+import std::list
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+fn pick() -> bool:
+    true
+
+fn g():
+    missing()
+
+fn h():
+    loop:
+        continue
+
+fn emitter() -> unit emits digit_token:
+    yield 49
+    fs = [g, h]
+    std::list::at(fs, 0)()
+    yield 65
+    unit
+
+0
+@@end
+
+@@ L1 a loop's element over an unresolved value, captured by a nested claimed function: the element's type is the iterable's
+section local and captured bindings
+class A
+observed dependent
+appropriate dependent
+strict UNBOUND
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+fn outer() -> int:
+    ys = missing()
+    loop y in ys:
+        fn inner() -> unit emits digit_token:
+            yield 48 + y
+            unit
+    3
+
+0
+@@end
+
+@@ L1v L1 valid: the element of a parameter declared List[Digit] (a nested claim inside a loop is a yield there: UNWRAPPED-YIELD)
+section local and captured bindings
+class E
+observed proven+
+appropriate proven+
+strict UNWRAPPED-YIELD
+--- main.bot
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+type Digit = Int in 0..9
+
+fn outer(xs: List[Digit]) -> int:
+    loop y in xs:
+        fn inner() -> unit emits digit_token:
+            yield 48 + y
+            unit
+    3
 
 0
 @@end
@@ -1337,7 +1751,7 @@ fn emitter() -> unit emits digit_token:
 @@ S5d a module binding of a helper whose result type is unresolved: the binding's type is the inferred int
 section signatures
 class A
-observed rejected
+observed dependent
 appropriate dependent
 strict TYPE
 --- main.bot
@@ -2366,9 +2780,9 @@ fn emitter(n: int) -> unit emits digit_token:
 
 @@sequence binding a valid binding becomes unresolved, is repaired, then gets an unresolved condition with equal branches
 step R1v proven+ fresh
-step R1 rejected fresh
+step R1 dependent fresh
 step R1v proven+ reused
-step B3 proven+ fresh
+step B3 dependent fresh
 @@end
 
 @@sequence value the binding's value changes with and without its type; an exact value changes
@@ -2379,12 +2793,12 @@ step R1v proven+ fresh
 step K17 rejected fresh
 @@end
 
-@@sequence signature a helper's parameter type, result type and body change under one name (the memo keeps one certificate per name: MR3 after MRM is proved again)
+@@sequence signature a helper's parameter type, result type and body change under one name (the memo keeps one certificate per name; MRM, a compilation with a resolution diagnostic, memoizes nothing, so MR3 after it reuses MR3's certificate -- at the census's commit MRM overwrote it and MR3 was proved again)
 step MS1 proven+ fresh
 step MS2 proven+ fresh
 step MR3 proven+ fresh
 step MRM proven+ fresh
-step MR3 proven+ fresh
+step MR3 proven+ reused
 step MR4 proven+ fresh
 step MZ proven+ reused
 step MZM proven+ fresh
@@ -2396,9 +2810,9 @@ step MSb rejected fresh
 step MSa proven+ reused
 @@end
 
-@@sequence callable a run-time-selected value's function gains an unresolved call: the certificate, which records neither function, is kept
+@@sequence callable a run-time-selected value's function gains an unresolved call: the certificate records neither function, and the census's compiler kept it for V2; a compilation with a resolution diagnostic reuses nothing, and V2, proved fresh, is dependent
 step V1 proven+ fresh
-step V2 proven+ reused
+step V2 dependent fresh
 step V1 proven+ reused
 @@end
 
@@ -2413,4 +2827,17 @@ step N6a proven+ fresh
 run 1 ok
 step N6b rejected fresh
 run 1 invalid
+@@end
+
+@@sequence callable-narrow V3 valid, V3, V3 valid in one process: the narrow result type reads the same in all three, so the census's compiler reused V3v's certificate for V3
+step V3v proven+ fresh
+step V3 dependent fresh
+step V3v proven+ reused
+@@end
+
+@@sequence trust a certificate proved in a compilation with an unrelated unresolved name (Z1) is not memoized, and such a compilation reuses nothing: Z1 repaired is proved fresh after it, then reused; Z1 again is proved fresh
+step Z1 proven+ fresh
+step Z1v proven+ fresh
+step Z1v proven+ reused
+step Z1 proven+ fresh
 @@end

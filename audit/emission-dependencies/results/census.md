@@ -7,38 +7,39 @@ Columns: the case, its class (the report's section 19), each claim's verdict com
 
 | case | class | verdicts | appropriate | strict | reported | depends | interchange | notes |
 |---|---|---|---|---|---|---|---|---|
-| `R1` | A | rejected | dependent | UNBOUND | UNBOUND | - | kept / kept |  |
+| `R1` | A | dependent | dependent | UNBOUND | UNBOUND | - | kept / kept |  |
 | `R1v` | E | proven+ | proven+ | accepted |  | emitter | kept / kept |  |
-| `B3` | U | proven+ | undecided | UNBOUND | UNBOUND | emitter | kept / kept |  |
+| `B3` | U | dependent | dependent | UNBOUND | UNBOUND | - | kept / kept |  |
 | `B3b` | E | proven+ | proven+ | UNBOUND | UNBOUND | emitter | kept / kept |  |
-| `B3c` | A | rejected | dependent | UNBOUND | UNBOUND | - | kept / kept |  |
+| `B3c` | A | dependent | dependent | UNBOUND | UNBOUND | - | kept / kept |  |
 | `B4` | E | dependent | dependent | TYPE | TYPE | - | kept / kept |  |
 | `B5` | E | proven+ | proven+ | UNBOUND | UNBOUND | emitter | kept / kept |  |
-| `B6` | A | rejected | dependent | UNBOUND | UNBOUND | - | kept / kept |  |
-| `D1` | A | rejected | dependent | UNBOUND | UNBOUND | - | kept / kept |  |
-| `D2` | A | rejected | dependent | UNBOUND | UNBOUND | - | kept / kept |  |
+| `B6` | A | dependent | dependent | UNBOUND | UNBOUND | - | kept / kept |  |
+| `D1` | A | dependent | dependent | UNBOUND | UNBOUND | - | kept / kept |  |
+| `D2` | A | dependent | dependent | UNBOUND | UNBOUND | - | kept / kept |  |
 | `D2v` | D | rejected | rejected | EMIT-END-SYMBOL | EMIT-END-SYMBOL EMIT-REJECTED | - | kept / kept |  |
-| `G1` | U | proven+ | undecided | UNBOUND | UNBOUND | emitter | kept / kept |  |
+| `G1` | U | dependent | dependent | UNBOUND | UNBOUND | - | kept / kept |  |
 | `Z1` | E | proven+ | proven+ | UNBOUND | UNBOUND | emitter | kept / kept |  |
+| `Z1v` | E | proven+ | proven+ | accepted |  | emitter | kept / kept |  |
 
 ## local and captured bindings
 
 | case | class | verdicts | appropriate | strict | reported | depends | interchange | notes |
 |---|---|---|---|---|---|---|---|---|
 | `B7` | E | dependent | dependent | UNBOUND | UNBOUND | - | kept / kept |  |
-| `B8` | A | rejected | dependent | UNBOUND | UNBOUND | - | kept / kept |  |
-| `B8b` | U | proven+ | undecided | UNBOUND | UNBOUND | inner | kept / kept |  |
+| `B8` | A | dependent | dependent | UNBOUND | UNBOUND | - | kept / kept |  |
+| `B8b` | U | dependent | dependent | UNBOUND | UNBOUND | - | kept / kept |  |
 | `B8c` | E | proven+ | proven+ | accepted |  | inner | kept / kept |  |
 | `B8d` | E | dependent | dependent | TYPE | TYPE | - | kept / kept |  |
 | `B8e` | E | proven+ | proven+ | UNBOUND | UNBOUND | inner | kept / kept |  |
-| `B8f` | A | rejected | dependent | UNBOUND | UNBOUND | - | kept / kept |  |
+| `B8f` | A | dependent | dependent | UNBOUND | UNBOUND | - | kept / kept |  |
 
 ## imported declarations
 
 | case | class | verdicts | appropriate | strict | reported | depends | interchange | notes |
 |---|---|---|---|---|---|---|---|---|
 | `X1` | E | proven+ | proven+ | accepted |  | emitter | kept / kept |  |
-| `X2` | A | rejected | dependent | UNBOUND | UNBOUND | - | kept / kept |  |
+| `X2` | A | dependent | dependent | UNBOUND | UNBOUND | - | kept / kept |  |
 | `X3` | E | proven+ | proven+ | TYPE | TYPE | consts::f,emitter | kept / kept |  |
 | `X4` | E | dependent | dependent | UNBOUND | UNBOUND | - | kept / kept |  |
 | `X5` | E | proven+ | proven+ | UNBOUND | UNBOUND | emitter | kept / kept |  |
@@ -47,7 +48,7 @@ Columns: the case, its class (the report's section 19), each claim's verdict com
 
 | case | class | verdicts | appropriate | strict | reported | depends | interchange | notes |
 |---|---|---|---|---|---|---|---|---|
-| `SC1` | A | rejected | dependent | UNHANDLED-ERROR | UNHANDLED-ERROR | - | kept / kept |  |
+| `SC1` | A | dependent | dependent | UNHANDLED-ERROR | UNHANDLED-ERROR | - | kept / kept |  |
 | `SC2` | E | proven+ | proven+ | UNHANDLED-ERROR | UNHANDLED-ERROR | emitter | kept / kept |  |
 | `SC3` | E | proven+ | proven+ | accepted |  | emitter | kept / kept |  |
 | `H1` | E | dependent | dependent | SYNTAX |  | - | kept / kept |  |
@@ -63,7 +64,22 @@ Columns: the case, its class (the report's section 19), each claim's verdict com
 | `C1` | E | proven+ | proven+ | accepted |  | emitter,mk | kept / kept |  |
 | `C2` | E | dependent | dependent | UNBOUND | UNBOUND | - | kept / kept |  |
 | `V1` | E | proven+ | proven+ | accepted |  | emitter | kept / kept |  |
-| `V2` | A | proven+ | dependent | UNBOUND | UNBOUND | emitter | kept / kept |  |
+| `V2` | A | dependent | dependent | UNBOUND | UNBOUND | - | kept / kept |  |
+| `V3` | A | dependent | dependent | UNBOUND | UNBOUND | - | kept / kept |  |
+| `V3v` | E | proven+ | proven+ | accepted |  | emitter | kept / kept |  |
+| `V3r` | E | rejected | rejected | EMIT-END-SYMBOL | EMIT-END-SYMBOL EMIT-REJECTED | - | kept / kept |  |
+| `V4` | A | dependent | dependent | UNBOUND | UNBOUND | - | kept / kept |  |
+| `V4v` | E | proven+ | proven+ | accepted |  | choose,emitter,pick | kept / kept |  |
+| `V5` | A | dependent | dependent | UNBOUND | UNBOUND | - | kept / kept |  |
+| `V6` | A | dependent | dependent | UNBOUND | UNBOUND | - | kept / kept |  |
+| `V7` | E | dependent | dependent | UNBOUND | UNBOUND | - | kept / kept |  |
+
+## local and captured bindings
+
+| case | class | verdicts | appropriate | strict | reported | depends | interchange | notes |
+|---|---|---|---|---|---|---|---|---|
+| `L1` | A | dependent | dependent | UNBOUND | UNBOUND | - | kept / kept |  |
+| `L1v` | E | proven+ | proven+ | UNWRAPPED-YIELD | UNWRAPPED-YIELD | inner | kept / kept |  |
 
 ## signatures
 
@@ -80,7 +96,7 @@ Columns: the case, its class (the report's section 19), each claim's verdict com
 | `S5b` | U | proven+ | undecided | TYPE | TYPE | emitter,helper | kept / kept |  |
 | `S5bv` | D | rejected | rejected | EMIT-AFTER-TOKEN | EMIT-AFTER-TOKEN | - | kept / kept |  |
 | `S5c` | E | dependent | dependent | TYPE | TYPE UNBOUND | - | kept / kept |  |
-| `S5d` | A | rejected | dependent | TYPE | TYPE | - | kept / kept |  |
+| `S5d` | A | dependent | dependent | TYPE | TYPE | - | kept / kept |  |
 | `S6` | E | dependent | dependent | UNDECLARED-ERROR | UNDECLARED-ERROR UNHANDLED-ERROR | - | kept / kept |  |
 | `S6b` | U | proven+ | undecided | UNDECLARED-ERROR | UNDECLARED-ERROR | emitter,helper | kept / kept |  |
 | `S6c` | E | rejected | rejected | EMIT-REJECTED | EMIT-REJECTED | - | kept / kept |  |
@@ -136,9 +152,9 @@ Columns: the case, its class (the report's section 19), each claim's verdict com
 | step | verdicts | reuse | depends | run |
 |---|---|---|---|---|
 | `R1v` | proven+ | fresh | emitter |  |
-| `R1` | rejected | fresh | - |  |
+| `R1` | dependent | fresh | - |  |
 | `R1v` | proven+ | reused | emitter |  |
-| `B3` | proven+ | fresh | emitter |  |
+| `B3` | dependent | fresh | - |  |
 
 **value**: the binding's value changes with and without its type; an exact value changes
 
@@ -150,7 +166,7 @@ Columns: the case, its class (the report's section 19), each claim's verdict com
 | `R1v` | proven+ | fresh | emitter |  |
 | `K17` | rejected | fresh | - |  |
 
-**signature**: a helper's parameter type, result type and body change under one name (the memo keeps one certificate per name: MR3 after MRM is proved again)
+**signature**: a helper's parameter type, result type and body change under one name (the memo keeps one certificate per name; MRM, a compilation with a resolution diagnostic, memoizes nothing, so MR3 after it reuses MR3's certificate -- at the census's commit MRM overwrote it and MR3 was proved again)
 
 | step | verdicts | reuse | depends | run |
 |---|---|---|---|---|
@@ -158,7 +174,7 @@ Columns: the case, its class (the report's section 19), each claim's verdict com
 | `MS2` | proven+ | fresh | emitter,h |  |
 | `MR3` | proven+ | fresh | emitter,r |  |
 | `MRM` | proven+ | fresh | emitter,r |  |
-| `MR3` | proven+ | fresh | emitter,r |  |
+| `MR3` | proven+ | reused | emitter,r |  |
 | `MR4` | proven+ | fresh | emitter,r |  |
 | `MZ` | proven+ | reused | emitter,r |  |
 | `MZM` | proven+ | fresh | emitter,r |  |
@@ -171,12 +187,12 @@ Columns: the case, its class (the report's section 19), each claim's verdict com
 | `MSb` | rejected | fresh | - |  |
 | `MSa` | proven+ | reused | emitter |  |
 
-**callable**: a run-time-selected value's function gains an unresolved call: the certificate, which records neither function, is kept
+**callable**: a run-time-selected value's function gains an unresolved call: the certificate records neither function, and the census's compiler kept it for V2; a compilation with a resolution diagnostic reuses nothing, and V2, proved fresh, is dependent
 
 | step | verdicts | reuse | depends | run |
 |---|---|---|---|---|
 | `V1` | proven+ | fresh | emitter |  |
-| `V2` | proven+ | reused | emitter |  |
+| `V2` | dependent | fresh | - |  |
 | `V1` | proven+ | reused | emitter |  |
 
 **identity**: the edit of N4b after N4a in one process: the census's compiler validated the certificate against the other helper of the name and kept it (the run yields 'A'); a name of two functions validates nothing, so N4b is proved again, and rejected
@@ -193,29 +209,32 @@ Columns: the case, its class (the report's section 19), each claim's verdict com
 | `N6a` | proven+ | fresh | emitter,g,step | interp,compile,cranelift-generic,cranelift: trace 49 65, ok |
 | `N6b` | rejected | fresh | - | interp,compile,cranelift-generic,cranelift: trace 65 65, invalid |
 
+**callable-narrow**: V3 valid, V3, V3 valid in one process: the narrow result type reads the same in all three, so the census's compiler reused V3v's certificate for V3
+
+| step | verdicts | reuse | depends | run |
+|---|---|---|---|---|
+| `V3v` | proven+ | fresh | emitter |  |
+| `V3` | dependent | fresh | - |  |
+| `V3v` | proven+ | reused | emitter |  |
+
+**trust**: a certificate proved in a compilation with an unrelated unresolved name (Z1) is not memoized, and such a compilation reuses nothing: Z1 repaired is proved fresh after it, then reused; Z1 again is proved fresh
+
+| step | verdicts | reuse | depends | run |
+|---|---|---|---|---|
+| `Z1` | proven+ | fresh | emitter |  |
+| `Z1v` | proven+ | fresh | emitter |  |
+| `Z1v` | proven+ | reused | emitter |  |
+| `Z1` | proven+ | fresh | emitter |  |
+
 ## Summary
 
 False certificates (a certified claim whose run is invalid): 0
 
-Open cases (the verdict observed is not the appropriate one): 20
-* R1 (A): rejected -> dependent
-* B3 (U): proven+ -> undecided
-* B3c (A): rejected -> dependent
-* B6 (A): rejected -> dependent
-* D1 (A): rejected -> dependent
-* D2 (A): rejected -> dependent
-* G1 (U): proven+ -> undecided
-* B8 (A): rejected -> dependent
-* B8b (U): proven+ -> undecided
-* B8f (A): rejected -> dependent
-* X2 (A): rejected -> dependent
-* SC1 (A): rejected -> dependent
+Open cases (the verdict observed is not the appropriate one): 6
 * B2b (A): rejected -> dependent
-* V2 (A): proven+ -> dependent
 * S1 (A): rejected -> dependent
 * S4b (U): rejected -> undecided
 * S5b (U): proven+ -> undecided
-* S5d (A): rejected -> dependent
 * S6b (U): proven+ -> undecided
 * K1 (A): rejected -> dependent
 
