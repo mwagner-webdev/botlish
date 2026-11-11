@@ -611,6 +611,8 @@ test cb-windows-unwind-check {the nested callbacks' executable under the unwind 
     set value [ProtocolValue $result]
     file delete $result
     set counts [regexp -inline {native unwind check: (\d+) functions, (\d+) Botlish frames, every one as Windows unwinds it; \d+ walks unwound \d+ other frames; (\d+) transition shims and (\d+) callback entry points as Windows unwinds them, (\d+) jumps across a foreign transition} $output]
+    # The run's account, for the record (WINDOWS-X86-64-MILESTONE-9.md).
+    puts "cb-windows-unwind-check: [lindex $counts 0]"
     list $value [llength $counts] [expr {[llength $counts] == 6 && [lindex $counts 2] > 0 && [lindex $counts 3] >= 2 && [lindex $counts 4] >= 2 && [lindex $counts 5] > 0}]
 } -cleanup removeCbApps -result {{["kept-by-main-1", "kept-by-main-2", "205"]} 6 1}
 

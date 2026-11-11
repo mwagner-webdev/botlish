@@ -142,7 +142,8 @@ set selected [concat $selected $nativeSelected]
 # the native backend. Its native/target is a real copy when a native mutant
 # is selected (it is rebuilt), else a link to this checkout's.
 set tree [file tempdir botlish-callback-mutants]
-foreach dir {compiler core hir surface stdlib tests examples audit/c-callbacks compilerpedia .cargo} {
+# (lsp: native-library.test reads its JSON, for the library mutants' -tests.)
+foreach dir {compiler core hir surface stdlib tests examples audit/c-callbacks compilerpedia lsp .cargo} {
     if {![file exists [file join $root $dir]]} continue
     file mkdir [file dirname [file join $tree $dir]]
     file copy [file join $root $dir] [file join $tree $dir]
