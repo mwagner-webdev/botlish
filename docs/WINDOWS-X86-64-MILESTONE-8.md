@@ -18,8 +18,9 @@ Linux.
 
 Evidence is marked by kind throughout:
 
-* **real Windows**: observed on a `windows-2025` runner (Visual Studio 2022's
-  x64 tools, link.exe, cl, dumpbin) through
+* **real Windows**: observed on a `windows-2025` runner (image
+  windows-2025-vs2026: Visual Studio's x64 tools, link.exe, cl, lib, ml64,
+  dumpbin; Windows Server 2025; rustc 1.99.1) through
   `.github/workflows/windows-library-probe.yml` (the COFF/linker census) or
   `.github/workflows/windows-x86_64.yml` (the production path and its
   tests), run named;
@@ -58,7 +59,55 @@ No Wine and no WSL were used. Commits are on the branch
 
 ## 1. Result
 
-PENDING-RESULT
+**Done.** On Windows x86-64 with MSVC's toolchain, `native::library` (and
+`main.tcl -emit-native-library NAME`) makes `NAME.dll`, its import library
+`NAME.lib`, `NAME.h` and `NAME.manifest.json` -- the same C ABI,
+lifecycle, error data and ownership contracts as on Linux, the same export
+roots, the same thread-affine synchronous instances -- and plain C and C++
+hosts built by cl load it with `LoadLibraryW`/`GetProcAddress` or link it
+through the import library. Real Windows evidence, all on CI runners:
+
+* `native-library.test` passes on Windows (39 tests run, 0 failed): C, C++,
+  `/MT` and `/MD` hosts; explicit loading, unloading and reloading; two
+  libraries, nested libraries, one library's instance or buffer refused by
+  the other; host-controlled threads with small stacks, wrong-thread and
+  reentrant calls refused; coroutines inside exported calls, also on a
+  fiber the host made, the host's fiber state left as it was; Botlish
+  recursion bounded on the instance's stack, a host thread's and a host
+  fiber's; the Win64 convention past the fourth argument with every
+  nonvolatile register preserved (an ml64 caller); unwinding through the
+  public functions; the DLL's exports and imports, its validation, its
+  diagnostics; the report's sample as given. Every MSVC host also under GC
+  stress where the test says so.
+* The COFF/linker census (section 3): the DLL exports exactly its public
+  functions (`GetProcAddress` finds none of the runtime's), imports only
+  system DLLs, runs no Botlish code at load (no initializer, no TLS
+  callback), and nothing in the inputs exports anything by itself.
+* WINDOWS-FUZZ-RESULT
+* WINDOWS-MUTANTS-RESULT
+
+**Not done: a static COFF library** (section 13). Two static Botlish
+libraries made the obvious way link into one executable without any
+diagnostic and silently share one runtime (the census's E5, reproducible
+on any Windows runner); the candidate fix -- renaming every private symbol
+per library -- works mechanically but does not yet link (E6) and would be
+a COFF rewriting step over ~1,900 objects per build. `-shared 0` is
+refused on Windows.
+
+**Found and fixed on the way**, beyond the Windows path itself:
+
+* a garbage-collection defect on every host: a call made on a stack the
+  instance did not make (a host's fiber, a `makecontext` stack) was walked
+  within the thread's own stack, missing the call's frames' roots (a NATIVE
+  BUG under GC stress on Linux); the walk now follows the entry stack
+  (`Vm::entry_stack`, section 9);
+* a thread's coroutine stacks outlived its last instance of a library, and
+  on Windows its thread stayed converted to a fiber: both are now given
+  back (sections 10, 11), so a host may unload the library;
+* `native::library` asked for the toolchain before checking the program;
+* two Windows builds of one library were different bytes (`/Brepro`).
+
+Costs (section 16): WINDOWS-PERF-SUMMARY
 
 ## 2. Starting state
 
