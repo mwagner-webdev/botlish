@@ -360,7 +360,12 @@ pub(crate) mod tests {
     /// JIT (codegen::CraneliftJit; everywhere else foreign symbols resolve to
     /// a stub that never runs).
     pub fn foreign(symbol: &str) -> Option<*const u8> {
-        (symbol == "botlish_test_unwind_probe").then_some(probe as *const u8)
+        match symbol {
+            "botlish_test_unwind_probe" => Some(probe as *const u8),
+            "botlish_test_callback_unwindless" => Some(botlish_test_callback_unwindless as *const u8),
+            "botlish_test_callback_inspect" => Some(inspect_callback as *const u8),
+            _ => None,
+        }
     }
 
     /// One frame of a virtual unwind: its RIP, RSP and RBP, and how many
@@ -658,6 +663,149 @@ pub(crate) mod tests {
         assert_eq!(result, make_small(chain_value(depth as i64)));
         assert!(vm.heap.collections > 0);
         assert!(walk::checked_frames() >= before + depth as usize + 3, "every Botlish frame of the collection checked");
+    }
+
+    // A C caller of a callback's function pointer that Windows' unwinder
+    // cannot cross (WINDOWS-X86-64-MILESTONE-9.md): no function table entry
+    // (assembly without SEH directives), so Windows takes it for a leaf and
+    // finds the return address 0 at its stack pointer, and RBP holding no
+    // frame. botlish_test_callback_unwindless(f, x) is f(x) + 1000.
+    std::arch::global_asm!(
+        ".globl botlish_test_callback_unwindless",
+        "botlish_test_callback_unwindless:",
+        "push rbp",
+        "push rbx",
+        "sub rsp, 40",
+        "xor eax, eax",
+        "mov qword ptr [rsp], rax",
+        "mov qword ptr [rsp + 8], rax",
+        "mov qword ptr [rsp + 16], rax",
+        "mov qword ptr [rsp + 24], rax",
+        "mov qword ptr [rsp + 32], rax",
+        "mov rax, rcx",
+        "mov rcx, rdx",
+        "mov ebp, 16",
+        "call rax",
+        "add rax, 1000",
+        "add rsp, 40",
+        "pop rbx",
+        "pop rbp",
+        "ret",
+    );
+
+    unsafe extern "C" {
+        fn botlish_test_callback_unwindless(f: usize, x: i64) -> i64;
+    }
+
+    /// What `inspect_callback` found: the callback entry point's and the
+    /// transition shim's function table entries (start, end), its own return
+    /// address.
+    static INSPECTED: Mutex<Vec<(usize, usize, usize)>> = Mutex::new(Vec::new());
+
+    /// A C function that calls back (botlish_test_callback_inspect(f, x),
+    /// f(x) + 1000), noting first the function table entries Windows finds
+    /// for the callback's entry point F and for its own caller, the
+    /// transition shim.
+    extern "C" fn inspect_callback(f: usize, x: i64) -> i64 {
+        let lookup = |pc: u64| {
+            let mut base = 0u64;
+            // SAFETY: a lookup of an address of this process.
+            let entry = unsafe { RtlLookupFunctionEntry(pc, &mut base, std::ptr::null_mut()) };
+            // SAFETY: an entry Windows returned.
+            (!entry.is_null()).then(|| unsafe { (base as usize + (*entry).BeginAddress as usize, base as usize + (*entry).EndAddress as usize) })
+        };
+        let mut context = Context::captured();
+        // SAFETY: this thread's exact context, unwound one frame: to the
+        // shim's call of this function.
+        unsafe { walk::unwind_one(&mut context, None) };
+        let shim = context.0.Rip as usize;
+        let mut found = INSPECTED.lock().unwrap_or_else(|p| p.into_inner());
+        for (pc, what) in [(f, f), (shim, shim)] {
+            let (start, end) = lookup(pc as u64).unwrap_or((0, 0));
+            found.push((start, end, what));
+        }
+        drop(found);
+        // SAFETY: F is the callback entry point the program passed: `extern
+        // "C" fn(i64) -> i64`, called during the transition.
+        let f: extern "C" fn(i64) -> i64 = unsafe { std::mem::transmute(f) };
+        f(x) + 1000
+    }
+
+    /// `<program>` holds a list of three across its call of the foreign
+    /// function FOREIGN with the callback's pointer and 20, then adds the
+    /// list's length to the result; the callback allocates two lists and
+    /// returns x + 3. FOREIGN(f, 20) is f(20) + 1000: the value is 1026.
+    fn callback_program(foreign: &str) -> String {
+        format!(
+            concat!(
+                "nir 1 call-effects=1 statics=0\n",
+                "callback 0 func=1 params=\"i64\" result=i64 name=\"t::cb\"\n",
+                "foreign 0 \"{foreign}\" params=\"ptr i64\" result=i64 callbacks=1 name=\"t::caller\"\n\n",
+                "func 0 \"<program>\" params=0 env=0 regs=7 pnames=\"\" captures=0\n",
+                "    %0 = int 5\n    %1 = op listnew %0 %0 %0\n    %2 = cbaddr 0\n    %3 = int 20\n",
+                "    %4 = foreigncall 0 %2 %3\n    %5 = op listlen %1\n    %6 = op iadd %4 %5\n    ret %6\nend\n\n",
+                "func 1 \"cb\" params=1 env=0 regs=5 pnames=\"x\" captures=0\n",
+                "    %1 = op listnew %0 %0\n    %2 = op listnew %1 %1 %1\n    %3 = op listlen %2\n    %4 = op iadd %0 %3\n    ret %4\nend\n",
+            ),
+            foreign = foreign,
+        )
+    }
+
+    /// A JIT program's callback (WINDOWS-X86-64-MILESTONE-9.md), called by
+    /// a C frame Windows' unwinder cannot cross, collecting at every
+    /// allocation, every collection's walk checked against Windows' unwinder
+    /// (BOTLISH_NATIVE_UNWIND_CHECK, forced on): the walk jumps from the
+    /// callback's entry frame to the transition shim's record, the transition
+    /// shim and the entry point unwind as Windows unwinds them (the JIT's
+    /// function table has them), and the list the program holds across the
+    /// C call survives.
+    #[test]
+    fn jit_callbacks_cross_a_frame_windows_cannot_unwind() {
+        if !crate::runtime::callback::SUPPORTED {
+            return; // a fallback-roots build refuses callbacks
+        }
+        walk::force_unwind_check();
+        let (transitions, entries, jumped) = walk::transition_counts();
+        let compiled = compile(&callback_program("botlish_test_callback_unwindless"));
+        let mut vm = vm(&compiled, true);
+        for _ in 0..3 {
+            let result = (compiled.entry)(&mut *vm);
+            assert_eq!(result, make_small(1026));
+        }
+        assert!(vm.heap.collections > 0);
+        let (t, e, j) = walk::transition_counts();
+        assert!(t >= transitions + 3 && e >= entries + 3, "every transition and entry checked: {t} {e}");
+        assert!(j > jumped, "the collections' walks jumped across the transition");
+    }
+
+    /// The JIT registers the C side of callbacks with Windows: the entry
+    /// point (the program's `cbaddr`) starts a function table entry, and the
+    /// transition shim that called C is inside one. Released with the code.
+    #[test]
+    fn jit_callback_code_is_in_the_function_table() {
+        if !crate::runtime::callback::SUPPORTED {
+            return;
+        }
+        let compiled = compile(&callback_program("botlish_test_callback_inspect"));
+        let mut vm = vm(&compiled, false);
+        INSPECTED.lock().unwrap_or_else(|p| p.into_inner()).clear();
+        let result = (compiled.entry)(&mut *vm);
+        assert_eq!(result, make_small(1026));
+        let found = INSPECTED.lock().unwrap_or_else(|p| p.into_inner()).clone();
+        assert_eq!(found.len(), 2, "{found:#x?}");
+        let (entry_start, entry_end, entry) = found[0];
+        assert_eq!(entry_start, entry, "the entry point's function table entry starts at it: {found:#x?}");
+        assert!(entry_end > entry_start);
+        let (shim_start, shim_end, shim) = found[1];
+        assert!(shim_start != 0 && shim_start < shim && shim < shim_end, "the shim's call is inside its entry: {found:#x?}");
+        assert!(compiled.framemap.find(shim).is_none(), "the shim is no Botlish function of the stack-map table");
+        drop(compiled);
+        for pc in [entry_start, shim_start] {
+            let mut base = 0u64;
+            // SAFETY: a lookup only.
+            let gone = unsafe { RtlLookupFunctionEntry(pc as u64 + 1, &mut base, std::ptr::null_mut()) };
+            assert!(gone.is_null(), "{pc:#x} still registered after its code was released");
+        }
     }
 
     /// What Win64 preserves across a call: RBX, RBP, RSI, RDI, R12-R15 and

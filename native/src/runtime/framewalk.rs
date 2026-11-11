@@ -509,6 +509,13 @@ pub mod windows {
         CHECKED.load(Ordering::Relaxed)
     }
 
+    /// How many transition shims and callback entry points the check has
+    /// compared with Windows' unwinder, and how many jumps across a foreign
+    /// transition it has checked, in this process (tests).
+    pub fn transition_counts() -> (usize, usize, usize) {
+        (TRANSITIONS.load(Ordering::Relaxed), ENTRY_POINTS.load(Ordering::Relaxed), JUMPED.load(Ordering::Relaxed))
+    }
+
     static CHECKED_FUNCTIONS: AtomicUsize = AtomicUsize::new(0);
 
     /// BOTLISH_NATIVE_UNWIND_CHECK, when a program's stack-map table is
