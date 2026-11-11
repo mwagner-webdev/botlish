@@ -1,0 +1,33 @@
+== d-coroutine.bot
+   interp [[10], [21], [32], [6, 3]]
+   census: materialized(control) 2
+   native Struct allocations: 4; field registers (1 webs): 4 -> 0, same value, same under GC stress
+== d-errors.bot
+   interp [[-1, 3], [12, 5], [7, 3]]
+   census: local 2 materialized(control) 6 materialized(other) 1
+   native Struct allocations: 14; field registers (3 webs): 14 -> 0, same value, same under GC stress
+== d-exits.bot
+   interp [[0, 37], [27, 7], [16, 17], [3, 4], [40, 8], [4, 10], [9, 4], [16, 21], [1, 0], [36, 8]]
+   census: materialized(control) 20 materialized(return) 1
+   native Struct allocations: 69; field registers (11 webs): 69 -> 18, same value, same under GC stress
+== d-identity-materialize.bot
+   interp [1, 1024, 1024]
+   census: materialized(control) 3
+   native Struct allocations: 2; field registers (1 webs): 2 -> 1025, same value, same under GC stress
+== d-nested.bot
+   interp [[9, 6], [10, 3], [3, 12], [123, 3]]
+   census: materialized(control) 8
+   native Struct allocations: 19; field registers (4 webs): 19 -> 4, same value, same under GC stress
+== d-observe.bot
+   interp [[1, 3, 6, 10], [6, 10], [10, 2], 10, [6, 3], [3, 3], [4, 10], 2]
+   census: materialized(control) 16 materialized(equality) 1 {materialized(nested field)} 7
+   native Struct allocations: 57; field registers (16 webs): 57 -> 51, same value, same under GC stress
+== d-shapes.bot
+   interp [[6, 3], [6, 3, 3], [6, 3], 14, 6, 6]
+   census: materialized(control) 12 {materialized(nested field)} 2
+   native Struct allocations: 28; field registers (8 webs): 28 -> 4, same value, same under GC stress
+== e-positions.bot
+   interp "ok"
+   census: call 3 local 3 materialized(control) 2 return 1
+   native Struct allocations: 9; field registers (1 webs): 9 -> 0, same value, same under GC stress
+failures: 0

@@ -205,8 +205,8 @@ test tp-converter-unproven-rejected {a converter is no cast: a body returning an
     } {
         lappend results [lindex [tpRejection "type Small = Int in 0..9\nerror OutOfRange\n\nfn small(x: int) -> Small errors OutOfRange:\n$body\n\n1\n"] 1]
     }
-    lsort -unique [lmap r $results {regsub {\(facts: [^)]*\)} $r {(facts: ...)}}]
-} -result {{function result does not prove declared type int[Small] (facts: ...)}}
+    lsort -unique [lmap r $results {regsub {, facts: [^)]*\)} $r {, facts: ...)}}]
+} -result {{function result does not prove declared type int[Small] (result type: int, facts: ...)}}
 
 test tp-converter-module {a module's converter is an ordinary member: called qualified, by method sugar, through `import type` for the result; its error is the module's, handled by its qualified name} -body {
     withPrivateLibrary {

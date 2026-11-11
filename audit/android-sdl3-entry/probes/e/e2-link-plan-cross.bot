@@ -1,0 +1,14 @@
+# Probe E2 (ANDROID-SDL3-NATIVE-APPLICATION-ENTRY-CENSUS-MILESTONE-1.md):
+# the smallest cross-target native library with a link plan -- one
+# platform library (liblog) and no top-level statement. Built for
+# android-aarch64 with the Android target support package on an x86-64
+# host. Observed on the unmodified tree: NATIVE TARGET from the driver's
+# link-plan command, which native/library.tcl runs without --target.
+import std::ffi::c
+
+extern c library "log"
+
+extern c fn android_log_is_loggable named "__android_log_is_loggable"(prio: std::ffi::c::Int, tag: std::ffi::c::Ptr[std::ffi::c::Char] read noescape, default_prio: std::ffi::c::Int) -> std::ffi::c::Int
+
+exported c fn version() -> int:
+    1

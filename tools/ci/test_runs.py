@@ -806,6 +806,31 @@ Golden suites, wall seconds per suite (compile once, run on interp, compile, cra
 """)
 
 
+# A shard of tests/platform/tier.tcl's acceptance tier: its Tcl phase (one
+# tests/all.tcl run), then its golden phase (tests/golden/run.tcl -quiet,
+# which prints a suite's lines when the suite has run), a line a second.
+TIER_LOG = stamped("""
+######## 2 Tcl test files on interp
+######## CORE_BACKEND=interp tclsh9.0 tests/all.tcl -tmpdir T -file affine.test lists.test
+affine.test
+++++ af-1 PASSED
+lists.test
+all.tcl:\tTotal\t9\tPassed\t9\tSkipped\t0\tFailed\t0
+Sourced 2 Test Files.
+######## 2 Tcl test files on interp: ok (5.0 s)
+
+######## 3 golden suites on interp,compile,cranelift-generic,cranelift
+########  tclsh9.0 tests/golden/run.tcl -quiet -backends interp,compile,cranelift-generic,cranelift
+== abi-numeric-native.bot: not run on this host (needs linux-x86_64) -- a live syscall
+types.bot                    interp     3 passed, 0 failed (compile 1.00s, run 0.10s)
+types.bot                    compile    3 passed, 0 failed (compile 1.00s, run 0.10s)
+types.bot                    cranelift  3 passed, 0 failed (compile 1.00s, run 0.10s)
+variadics.bot                interp     2 passed, 0 failed (compile 1.00s, run 0.10s)
+######## 3 golden suites on interp,compile,cranelift-generic,cranelift: ok (6.0 s)
+######## 2 commands, 0 failed (11.0 s; 2 Tcl test files on interp, 3 golden suites, 0 checks)
+""")
+
+
 class History(unittest.TestCase):
     def test_failures_of_the_test_runners(self):
         self.assertEqual(history.failures(TCLTEST_LOG), {
@@ -829,6 +854,46 @@ class History(unittest.TestCase):
                          {"tests/abi-bytes.test": 1.0, "tests/affine.test": 5.0, "tests/coroutines.test": 1.0})
         self.assertEqual(history.suite_durations(GOLDEN_LOG),
                          {"tests/golden/lists.bot": 12.5, "tests/golden/loops.bot": 3.0})
+
+    def test_tier_durations_from_a_shard_log(self):
+        # The Tcl phase as tests/all.tcl's log; the golden phase from the
+        # phase's start (its command echoed under it), suite by suite.
+        self.assertEqual(history.file_durations(TIER_LOG), {"tests/affine.test": 2.0, "tests/lists.test": 1.0})
+        self.assertEqual(history.tier_suite_durations(TIER_LOG), {
+            "tests/golden/abi-numeric-native.bot": 2.0, "tests/golden/types.bot": 1.0,
+            "tests/golden/variadics.bot": 3.0})
+        self.assertEqual(history.tier_suite_durations(GOLDEN_LOG), {}, "no tier golden phase")
+
+    def test_costs_from_the_newest_run_whose_acceptance_succeeded(self):
+        api = FakeApi(*linear("a", "b", "c", "d"))
+        shard = lambda c, log="": ("acceptance (Tier B, macOS arm64, shard 1/6)", c, ["macos-15"], log)  # noqa: E731
+        api.run("macos-arm64.yml", "a", jobs=[shard("success", stamped("affine.test\nall.tcl:\tTotal\t1"))])
+        chosen = api.run("macos-arm64.yml", "b", jobs=[shard("success", TIER_LOG),
+                                                        ("smoke (Tier A, macOS arm64)", "success", ["macos-15"], "")])
+        # Newer runs that do not count: a shard skipped, a branch's, a failed one.
+        api.run("macos-arm64.yml", "c", jobs=[shard("skipped"), shard("success", TIER_LOG)])
+        api.run("macos-arm64.yml", "d", branch="topic", jobs=[shard("success", stamped("lists.test\nall.tcl:"))])
+        api.run("macos-arm64.yml", "d", conclusion="failure", jobs=[shard("failure", TIER_LOG)])
+        # A run without its acceptance tier gives no costs.
+        api.run("windows-x86_64.yml", "d", jobs=[("canary (Windows x86-64, MSVC)", "success", ["windows-2025"], "")])
+        said = []
+        found = history.costs(api, said.append)
+        self.assertEqual(found, {"macos-aarch64": {
+            "tests/affine.test": 2.0, "tests/lists.test": 1.0, "tests/golden/abi-numeric-native.bot": 2.0,
+            "tests/golden/types.bot": 1.0, "tests/golden/variadics.bot": 3.0}})
+        self.assertEqual(said, ["history: macos-aarch64 costs from %s" % chosen["html_url"]])
+        import datetime
+        today = datetime.datetime(2026, 11, 5, tzinfo=datetime.timezone.utc)
+        found["macos-aarch64"]["tests/gone.test"] = 9.0
+        text = history.render([], {}, 21, today, costs=found)
+        body = [line.split("\t") for line in text.splitlines() if line and not line.startswith("#")]
+        self.assertEqual(body, [
+            ["cost", "macos-aarch64", "tests/affine.test", "2.0"],
+            ["cost", "macos-aarch64", "tests/golden/abi-numeric-native.bot", "2.0"],
+            ["cost", "macos-aarch64", "tests/golden/types.bot", "1.0"],
+            ["cost", "macos-aarch64", "tests/golden/variadics.bot", "3.0"],
+            ["cost", "macos-aarch64", "tests/lists.test", "1.0"]])
+        self.assertIn("# cost HOST ITEM SECONDS", text)
 
     def api(self):
         api = FakeApi(*linear("a", "b", "c", "d"))
@@ -1133,6 +1198,23 @@ class Workflows(unittest.TestCase):
         self.assertIn("needs.tested.outputs.green == 'true'", jobs["game"]["if"])
         self.assertFalse(jobs["tested"]["name"].startswith("release"), "runs.deferred reads the release job by its name")
         self.assertTrue(jobs["release"]["name"].startswith("release"))
+
+    def test_botlish_release_waits_for_green(self):
+        """Botlish.app's tagged release (botlish-macos.yml) waits for its commit's tests as the game's does."""
+        w = workflow(runs.RELEASES["botlish-macos"].workflow)
+        jobs = w["jobs"]
+        tested = jobs["tested"]
+        self.assertEqual(tested["permissions"], {"contents": "read", "actions": "read"})
+        body = "\n".join(st.get("run") or "" for st in tested["steps"])
+        self.assertIn('tools/ci/runs.py check "$GITHUB_SHA" --for botlish-macos', body)
+        self.assertIn("tested", jobs["release"]["needs"])
+        self.assertIn("needs.tested.outputs.green == 'true'", jobs["release"]["if"])
+        self.assertFalse(jobs["tested"]["name"].startswith("release"), "runs.deferred reads the release job by its name")
+        self.assertTrue(jobs["release"]["name"].startswith("release"))
+        self.assertEqual(triggers(w)["push"]["tags"], ["botlish-macos-v*"])
+        self.assertNotIn("branches", triggers(w)["push"])
+        writers = [n for n, j in jobs.items() if (j.get("permissions") or {}).get("contents") == "write"]
+        self.assertEqual(writers, ["publish"])
 
     def test_gate_listens_to_every_requirement(self):
         w = workflow("release-gate.yml")

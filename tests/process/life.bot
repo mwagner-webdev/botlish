@@ -1,0 +1,622 @@
+# life.bot -- the process_linux tests' lifetime, cancellation and
+# termination scenarios (tests/process-linux.test; PROCESS-LINUX-PACKAGE-
+# MILESTONE-1.md), ported from the census's lab-life
+# (audit/managed-subprocess/slice/lab-life.bot):
+#
+#   life HELPER SCENARIO TMPDIR
+#
+# Lines "desc PID" and "pid PID" name processes the test checks from
+# outside after the run (gone, or alive and reparented).
+import event_loop_linux
+import kit
+import probe
+import process_linux
+import std::abi::bytes
+import std::event_loop
+import std::int
+import std::linux::io
+import std::list
+import std::mutable_array
+import std::mutable_vector
+import std::str
+import type std::event_loop::Delivery
+import type std::event_loop::Wake
+
+# A reader whose read is interrupted: it reports, then reads again.
+fn interrupted_reader(c: process_linux::Child, done: std::event_loop::Reg, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    start = process_linux::now_us()
+    process_linux::read(c, process_linux::Stream::Stdout):
+        on process_linux::Interrupted:
+            kit::say_int("read interrupted after-us ", kit::since(start))
+            kit::empty()
+        on process_linux::StaleChild:
+            fail std::event_loop::TaskFailed {code: 11}
+        on process_linux::StreamClosed:
+            fail std::event_loop::TaskFailed {code: 12}
+        on process_linux::ProcessFault:
+            fail std::event_loop::TaskFailed {code: 14}
+    kit::say("child still running after the interrupt ".concat(kit::yes(not kit::exited?(c))))
+    rest = kit::drain(c, process_linux::Stream::Stdout)
+    kit::say_int("second read got bytes ", kit::size(rest))
+    done.post(1, 0)
+    0
+
+# A waiter whose wait is interrupted: the child keeps running.
+fn interrupted_waiter(c: process_linux::Child, done: std::event_loop::Reg, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    process_linux::wait(c):
+        on process_linux::Interrupted:
+            kit::say("wait interrupted")
+            process_linux::ExitStatus {ending: process_linux::Ending::Exited, code: -1}
+        on process_linux::StaleChild:
+            fail std::event_loop::TaskFailed {code: 11}
+        on process_linux::ProcessFault:
+            fail std::event_loop::TaskFailed {code: 14}
+    done.post(1, 0)
+    0
+
+fn sc_cancel(helper: str, tmp: str, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    {owner, child} = kit::spawn(process_linux::command(helper, ["sleep:400", "out:after\\n", "exit:0"]))
+    done = std::event_loop::channel(Delivery::Reliable, 4)
+    coroutine {step, first} = interrupted_reader(child, done)
+    std::event_loop::adopt(step, first)
+    coroutine {step: s2, first: f2} = interrupted_waiter(child, done)
+    std::event_loop::adopt(s2, f2)
+    kit::sleep(100000)
+    kit::interrupt(child)
+    kit::interrupt(child)
+    std::event_loop::wait(done)
+    std::event_loop::wait(done)
+    kit::status_line("status", kit::wait(child))
+    process_linux::release(owner)
+    0
+
+# terminate(): graceful (the child traps SIGTERM and takes 150 ms), ignored
+# (escalated to SIGKILL after 300 ms), the child exiting by itself during the
+# grace period, an already exited child, terminate twice, kill, and a signal
+# after release.
+fn sc_terminate(helper: str, tmp: str, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    {owner: o1, child: c1} = kit::spawn(process_linux::command(helper, ["trap:15:150", "sleep:10000"]))
+    kit::sleep(50000)
+    t1 = process_linux::now_us()
+    kit::status_line("graceful", kit::terminate(c1, 1000000))
+    kit::say("graceful in 0.14 to 0.6 s ".concat(kit::yes(kit::since(t1) >= 140000 and kit::since(t1) < 600000)))
+    process_linux::release(o1)
+    e0 = process_linux::stats().escalations
+    {owner: o2, child: c2} = kit::spawn(process_linux::command(helper, ["ignore:15", "sleep:10000"]))
+    kit::sleep(50000)
+    t2 = process_linux::now_us()
+    kit::status_line("ignored", kit::terminate(c2, 300000))
+    kit::say("escalated at 0.3 to 0.8 s ".concat(kit::yes(kit::since(t2) >= 300000 and kit::since(t2) < 800000)))
+    kit::say_int("escalations ", process_linux::stats().escalations - e0)
+    process_linux::release(o2)
+    {owner: o3, child: c3} = kit::spawn(process_linux::command(helper, ["ignore:15", "sleep:200", "exit:0"]))
+    kit::sleep(50000)
+    kit::status_line("exits-during-grace", kit::terminate(c3, 1000000))
+    process_linux::release(o3)
+    {owner: o4, child: c4} = kit::spawn(process_linux::command(helper, ["exit:0"]))
+    kit::wait(c4)
+    kit::signal(c4, process_linux::Signal::Terminate)
+    kit::say("signal to an exited, unreaped child: accepted")
+    kit::status_line("already-exited", kit::terminate(c4, 100000))
+    kit::status_line("terminate-again", kit::terminate(c4, 100000))
+    process_linux::release(o4)
+    process_linux::send_signal(c4, process_linux::Signal::Kill):
+        on process_linux::StaleChild:
+            kit::say("signal after release: stale")
+        on process_linux::ProcessFault:
+            kit::say("signal after release: fault")
+    {owner: o5, child: c5} = kit::spawn(process_linux::command(helper, ["ignore:15", "sleep:10000"]))
+    kit::sleep(50000)
+    process_linux::kill(c5):
+        on process_linux::StaleChild:
+            fail std::event_loop::TaskFailed {code: 11}
+        on process_linux::ProcessFault:
+            fail std::event_loop::TaskFailed {code: 14}
+    kit::status_line("killed", kit::wait(c5))
+    process_linux::release(o5)
+    {owner: o6, child: c6} = kit::spawn(process_linux::command(helper, ["sleep:10000"]))
+    process_linux::status(c6):
+        on process_linux::StillRunning:
+            kit::say("status of a running child: still running")
+            process_linux::ExitStatus {ending: process_linux::Ending::Exited, code: -1}
+        on process_linux::StaleChild:
+            fail std::event_loop::TaskFailed {code: 11}
+    kit::signal(c6, process_linux::Signal::Hangup)
+    kit::status_line("hangup", kit::wait(c6))
+    after = process_linux::status(c6):
+        on process_linux::StillRunning:
+            fail std::event_loop::TaskFailed {code: 18}
+        on process_linux::StaleChild:
+            fail std::event_loop::TaskFailed {code: 11}
+    kit::status_line("status after", after)
+    process_linux::release(o6)
+    0
+
+# Descendants: one in the group (killed with it), one that left with setsid
+# (survives the group's termination: the operating system offers no group
+# guarantee for it; the test kills it).
+fn sc_descendants(helper: str, tmp: str, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    {owner: o1, child: c1} = kit::spawn(process_linux::command(helper, ["child:sleep:30000", "sleep:30000"]))
+    kit::first_line(c1)
+    kit::say_pid(c1)
+    kit::status_line("group", kit::terminate(c1, 300000))
+    process_linux::release(o1)
+    {owner: o2, child: c2} = kit::spawn(process_linux::command(helper, ["child:setsid,sleep:30000", "sleep:30000"]))
+    kit::first_line(c2)
+    kit::sleep(50000)
+    kit::status_line("escaped", kit::terminate(c2, 300000))
+    process_linux::release(o2)
+    # A descendant in the group whose leader exits normally: the end of
+    # supervision kills what is left of the group.
+    {owner: o3, child: c3} = kit::spawn(process_linux::command(helper, ["child:ignore:15,sleep:30000", "exit:0"]).with_stdout(process_linux::Output::Pipe))
+    kit::first_line(c3)
+    kit::status_line("leader", kit::wait(c3))
+    process_linux::release(o3)
+    0
+
+# The same in-group descendant with the pre-6.9 fallback (the testing
+# build's fault 64: no group signal through a pidfd, so kill(-pgid) while
+# the leader is unreaped).
+fn sc_old_kernel(helper: str, tmp: str, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    probe::faults(64)
+    {owner: o1, child: c1} = kit::spawn(process_linux::command(helper, ["child:sleep:30000", "sleep:30000"]))
+    kit::first_line(c1)
+    kit::status_line("group", kit::terminate(c1, 300000))
+    process_linux::release(o1)
+    {owner: o2, child: c2} = kit::spawn(process_linux::command(helper, ["child:sleep:30000", "exit:0"]))
+    kit::first_line(c2)
+    kit::wait(c2)
+    process_linux::release(o2)
+    probe::faults(0)
+    0
+
+# Shared group: the child stays in the supervisor's group, and a signal
+# reaches the child alone. Its descendant is forked before anything is
+# written (so it exists once any output has arrived) and reports its own
+# ids -- its group is the child's -- then a second later its pid in
+# TMP/desc-alive. After the termination the rest of stdout is drained: its
+# end comes only when the descendant exits, so it outlived the child. No
+# line of the child's own is relied on: the termination may come before it
+# writes one.
+fn sc_shared_group(helper: str, tmp: str, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    {owner, child} = kit::spawn(process_linux::command(helper, ["child:ids,sleep:1000,pidfile:".concat(kit::join_path(tmp, "desc-alive")), "sleep:30000"]).with_group(process_linux::Group::Shared))
+    kit::say_int("child pid ", kit::pid(child))
+    kit::first_line(child)
+    t = process_linux::now_us()
+    kit::status_line("shared", kit::terminate(child, 300000))
+    rest = kit::drain(child, process_linux::Stream::Stdout)
+    kit::say("rest: ".concat(kit::text_of(rest)))
+    kit::say("stdout's end of file over half a second after the termination ".concat(kit::yes(kit::since(t) > 500000)))
+    process_linux::release(owner)
+    kit::say("second child")
+    {owner: o2, child: c2} = kit::spawn(process_linux::command(helper, ["ids"]))
+    kit::first_line(c2)
+    kit::wait(c2)
+    process_linux::release(o2)
+    0
+
+# A descendant that inherited the child's stdout keeps it open: the child's
+# exit is not the stream's end of file. Terminating the group after the
+# leader exited (still unreaped, so its group ID is reserved) ends it.
+fn sc_inherited(helper: str, tmp: str, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    {owner, child} = kit::spawn(process_linux::command(helper, ["child:sleep:1500", "exit:0"]))
+    t = process_linux::now_us()
+    kit::status_line("leader", kit::wait(child))
+    leader = kit::since(t)
+    kit::drain(child, process_linux::Stream::Stdout)
+    kit::say("stdout's end of file over 1 s after the leader's exit ".concat(kit::yes(kit::since(t) - leader > 1000000)))
+    process_linux::release(owner)
+    {owner: o2, child: c2} = kit::spawn(process_linux::command(helper, ["child:sleep:5000", "exit:0"]))
+    t2 = process_linux::now_us()
+    kit::wait(c2)
+    kit::status_line("terminated after the leader's exit", kit::terminate(c2, 100000))
+    kit::drain(c2, process_linux::Stream::Stdout)
+    kit::say("stdout's end of file at once ".concat(kit::yes(kit::since(t2) < 1000000)))
+    process_linux::release(o2)
+    0
+
+# The reap order: the adapter refuses every signal once a child is reaped,
+# so it reaps last -- a group signal after the leader's exit (the leader
+# still unreaped) reaches its descendants. With the negative control (fault
+# 4: reap at the first status check) the same signal is refused and the
+# descendant survives (the test kills it).
+fn sc_reap_order(helper: str, tmp: str, bits: int, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    probe::faults(bits)
+    {owner, child} = kit::spawn(process_linux::command(helper, ["child:sleep:30000", "exit:0"]).with_stdin(process_linux::Input::Null).with_stderr(process_linux::Output::Null))
+    kit::first_line(child)
+    kit::wait(child)
+    probe::faults(0)
+    kit::signal(child, process_linux::Signal::Kill)
+    kit::sleep(50000)
+    process_linux::release(owner)
+    0
+
+# The end of a release's own scope: one where its function returns.
+fn scoped(helper: str, args: List[str], context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) errors std::event_loop::TaskFailed:
+    {owner, child} = kit::spawn(process_linux::command(helper, args))
+    kit::say_pid(child)
+    # Let the child install its signal disposition first: a SIGTERM sent
+    # right after spawn ends a child that has not yet set it up.
+    kit::sleep(50000)
+    kit::say("leaving the owner's scope")
+
+# Releasing a running child (explicitly, and by its owner's scope ending):
+# the reaper terminates it in the background; the loop runs until it is
+# reaped.
+fn sc_release(helper: str, tmp: str, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    {owner, child} = kit::spawn(process_linux::command(helper, ["trap:15:100", "sleep:10000"]))
+    kit::say_pid(child)
+    kit::sleep(50000)
+    t = process_linux::now_us()
+    process_linux::release(owner)
+    kit::say("release returned within 10 ms ".concat(kit::yes(kit::since(t) < 10000)))
+    kit::say_int("dying right after release ", process_linux::stats().dying)
+    process_linux::exited?(child):
+        on process_linux::StaleChild:
+            kit::say("the identity is stale after release")
+            false
+    scoped(helper, ["ignore:15", "sleep:10000"])
+    kit::say_int("dying after the scope ", process_linux::stats().dying)
+    0
+
+# A reader suspended in a read of a child that another task releases: the
+# read ends StaleChild at once (never waits for the child's end).
+fn suspended_reader(c: process_linux::Child, done: std::event_loop::Reg, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    t = process_linux::now_us()
+    process_linux::read(c, process_linux::Stream::Stdout):
+        on process_linux::StaleChild:
+            kit::say("the suspended read: stale")
+            kit::empty()
+        on process_linux::StreamClosed:
+            kit::say("the suspended read: closed")
+            kit::empty()
+        on process_linux::Interrupted:
+            kit::say("the suspended read: interrupted")
+            kit::empty()
+        on process_linux::ProcessFault:
+            fail std::event_loop::TaskFailed {code: 14}
+    kit::say("the read ended within 50 ms of the release ".concat(kit::yes(kit::since(t) < 150000)))
+    done.post(1, 0)
+    0
+
+fn sc_release_reader(helper: str, tmp: str, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    {owner, child} = kit::spawn(process_linux::command(helper, ["ignore:15", "sleep:30000"]))
+    done = std::event_loop::channel(Delivery::Reliable, 2)
+    coroutine {step, first} = suspended_reader(child, done)
+    std::event_loop::adopt(step, first)
+    kit::sleep(100000)
+    process_linux::release(owner)
+    std::event_loop::wait(done)
+    0
+
+# finish: waits for the termination sequence and returns how the child
+# ended; interrupted, it hands the child to the reaper.
+fn interrupter(c: process_linux::Child, us: int, context p: process_linux::Processes, ev: std::event_loop::Loop, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    kit::sleep(us)
+    kit::interrupt(c)
+    0
+
+fn sc_finish(helper: str, tmp: str, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    {owner: o1, child: c1} = kit::spawn(process_linux::command(helper, ["exit:9"]))
+    kit::wait(c1)
+    kit::status_line("finished exited", kit::finish(o1, 100000))
+    {owner: o2, child: c2} = kit::spawn(process_linux::command(helper, ["trap:15:50", "sleep:10000"]))
+    kit::sleep(50000)
+    kit::status_line("finished running", kit::finish(o2, 1000000))
+    {owner: o3, child: c3} = kit::spawn(process_linux::command(helper, ["ignore:15", "sleep:10000"]))
+    kit::say_pid(c3)
+    kit::sleep(50000)
+    coroutine {step, first} = interrupter(c3, 100000)
+    std::event_loop::adopt(step, first)
+    process_linux::finish(o3, 2000000):
+        on process_linux::Interrupted:
+            kit::say("finish interrupted: handed to the reaper")
+            process_linux::ExitStatus {ending: process_linux::Ending::Exited, code: -1}
+        on process_linux::StaleChild:
+            fail std::event_loop::TaskFailed {code: 11}
+        on process_linux::ProcessFault:
+            fail std::event_loop::TaskFailed {code: 14}
+    kit::say_int("dying after the interrupted finish ", process_linux::stats().dying)
+    0
+
+# A coroutine owning a child, suspended in a read, is dropped without being
+# resumed: its unwinding releases the owner (lexical cleanup).
+fn holder(helper: str, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    {owner, child} = kit::spawn(process_linux::command(helper, ["sleep:30000"]))
+    kit::say_pid(child)
+    kit::read(child, process_linux::Stream::Stdout)
+    kit::say("holder resumed (never expected)")
+    process_linux::release(owner)
+    0
+
+fn drop_holder(helper: str, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    coroutine {step, first} = holder(helper)
+    kit::say_int("holder suspended at ", first)
+    kit::say("dropping the holder")
+
+fn sc_abandon(helper: str, tmp: str, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    kit::sleep(1000)
+    r0 = process_linux::stats().released
+    drop_holder(helper)
+    kit::say_int("dying after the drop ", process_linux::stats().dying)
+    kit::say_int("releases ", process_linux::stats().released - r0)
+    0
+
+# A task owning a child waits in a read when the application stops and
+# shuts the loop down: its wait is revoked, it ends, its owner is released;
+# process_linux::shutdown kills and reaps what the reaper did not get to.
+fn waiter(helper: str, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    {owner, child} = kit::spawn(process_linux::command(helper, ["ignore:15", "sleep:30000"]))
+    kit::say_pid(child)
+    process_linux::read(child, process_linux::Stream::Stdout):
+        on process_linux::StreamClosed:
+            kit::say("waiter: its read was revoked by the shutdown")
+            kit::empty()
+        on process_linux::Interrupted:
+            kit::empty()
+        on process_linux::StaleChild:
+            kit::empty()
+        on process_linux::ProcessFault:
+            kit::empty()
+    process_linux::release(owner)
+    0
+
+fn stopper(us: int, context ev: std::event_loop::Loop) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    kit::sleep(us)
+    std::event_loop::stop()
+    0
+
+fn sc_shutdown(helper: str, tmp: str, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    coroutine {step, first} = waiter(helper)
+    std::event_loop::adopt(step, first)
+    coroutine {step: s2, first: f2} = stopper(200000)
+    std::event_loop::adopt(s2, f2)
+    kit::sleep(1000)
+    0
+
+# Detaching: the process outlives its owner (and, in detach-outlive, the
+# supervisor); while the loop runs, its exit is reaped, without the loop
+# being kept alive by it.
+fn sc_detach(helper: str, tmp: str, ms: int, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    c = process_linux::command(helper, ["pidfile:".concat(kit::join_path(tmp, "detached.pid")), "sleep:".concat(std::int::to_string(ms)), "pidfile:".concat(kit::join_path(tmp, "detached.done"))]).with_stdin(process_linux::Input::Null).with_stdout(process_linux::Output::Null).with_stderr(process_linux::Output::Null)
+    {owner, child} = kit::spawn(c)
+    kit::say_pid(child)
+    pid = process_linux::detach(owner):
+        on process_linux::StaleChild:
+            fail std::event_loop::TaskFailed {code: 11}
+        on process_linux::ProcessFault:
+            fail std::event_loop::TaskFailed {code: 14}
+    kit::say("detach returned the pid ".concat(kit::yes(pid == kit::pid(child) or kit::pid(child) == -1)))
+    kit::say_int("detached pid ", pid)
+    kit::say_int("owned after detach ", process_linux::stats().owned)
+    process_linux::exited?(child):
+        on process_linux::StaleChild:
+            kit::say("the identity is stale after detach")
+            false
+    if ms < 1000:
+        kit::sleep(ms * 1000 + 200000)
+        kit::say_int("the detached child after its end: state ", probe::proc_state(pid))
+    0
+
+# Two tasks wait for the same child's exit: both must be woken (one
+# readiness record, passed on by re-arming the level-triggered pidfd watch).
+fn exit_waiter(c: process_linux::Child, id: int, done: std::event_loop::Reg, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    st = kit::wait(c)
+    kit::status_line("waiter ".concat(std::int::to_string(id)).concat(" saw"), st)
+    done.post(id, 0)
+    0
+
+fn sc_waiters(helper: str, tmp: str, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    {owner, child} = kit::spawn(process_linux::command(helper, ["sleep:200", "exit:6"]))
+    done = std::event_loop::channel(Delivery::Reliable, 4)
+    coroutine {step: s1, first: f1} = exit_waiter(child, 1, done)
+    std::event_loop::adopt(s1, f1)
+    coroutine {step: s2, first: f2} = exit_waiter(child, 2, done)
+    std::event_loop::adopt(s2, f2)
+    coroutine {step: s3, first: f3} = exit_waiter(child, 3, done)
+    std::event_loop::adopt(s3, f3)
+    std::event_loop::wait(done)
+    std::event_loop::wait(done)
+    std::event_loop::wait(done)
+    std::event_loop::revoke(done)
+    process_linux::release(owner)
+    0
+
+# A child is released while a readiness record of its stdout is queued and
+# nobody reads it: the record must not reach the slot's next child.
+fn sc_watch_release(helper: str, tmp: str, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    {owner, child} = kit::spawn(process_linux::command(helper, ["out:old\n", "sleep:2000"]))
+    kit::sleep(100000)
+    process_linux::release(owner)
+    kit::sleep(400000)
+    {owner: o2, child: c2} = kit::spawn(process_linux::command(helper, ["sleep:200", "out:new\n", "exit:0"]))
+    kit::say("the next child's first chunk: ".concat(kit::text_of(kit::read(c2, process_linux::Stream::Stdout))))
+    kit::status_line("status", kit::wait(c2))
+    process_linux::release(o2)
+    0
+
+# Descriptor exhaustion (the test starts this scenario with RLIMIT_NOFILE
+# 128): launches fail at the pipe stage with EMFILE, never half-made.
+fn sc_exhaust(helper: str, tmp: str, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    kit::sleep(1000)
+    {owner: o0, child: c0} = kit::spawn(process_linux::command(helper, ["sleep:5000"]))
+    owners = std::mutable_vector::from_list([o0])
+    loop i from 1 to 300:
+        {owner, child} = process_linux::spawn(process_linux::command(helper, ["sleep:5000"])):
+            on process_linux::LaunchFailed {stage, code}:
+                kit::say("launch ".concat(std::int::to_string(i)).concat(" failed at ").concat(kit::stage_text(stage)).concat(" ").concat(std::int::to_string(code)))
+                break
+            on process_linux::ProcessFault {reason, code}:
+                kit::say("fault ".concat(reason).concat(" ").concat(std::int::to_string(code)))
+                break
+            on process_linux::InvalidCommand:
+                break
+            on process_linux::Unsupported:
+                break
+        owners.push(owner)
+    kit::say_int("running ", std::mutable_vector::length(owners))
+    kit::say_int("descriptors before the release ", process_linux::stats().descriptors)
+    loop i from 0 to std::mutable_vector::length(owners):
+        o = owners.pop()
+        process_linux::release(o)
+    0
+
+# A released child's identity names nothing, also once its slot is reused.
+fn sc_stale(helper: str, tmp: str, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    {owner: oa, child: a} = kit::spawn(process_linux::command(helper, ["exit:0"]))
+    kit::wait(a)
+    process_linux::release(oa)
+    {owner: ob, child: b} = kit::spawn(process_linux::command(helper, ["sleep:2000"]))
+    process_linux::exited?(a):
+        on process_linux::StaleChild:
+            kit::say("old identity: stale")
+            false
+    process_linux::send_signal(a, process_linux::Signal::Kill):
+        on process_linux::StaleChild:
+            kit::say("signal through the old identity: stale")
+        on process_linux::ProcessFault:
+            kit::say("signal through the old identity: fault")
+    process_linux::read(a, process_linux::Stream::Stdout):
+        on process_linux::StaleChild:
+            kit::say("read through the old identity: stale")
+            kit::empty()
+        on process_linux::StreamClosed:
+            kit::empty()
+        on process_linux::Interrupted:
+            kit::empty()
+        on process_linux::ProcessFault:
+            kit::empty()
+    kit::say("the new child unaffected ".concat(kit::yes(not kit::exited?(b))))
+    kit::status_line("new", kit::terminate(b, 100000))
+    process_linux::release(ob)
+    0
+
+# Many short-lived children: sequentially, then 64 at once.
+fn sc_many(helper: str, tmp: str, count: int, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    wrong = std::mutable_array::create(2, 0)
+    loop i from 0 to count:
+        code = if i < 200:
+            i
+        else:
+            i - 200
+        {owner, child} = kit::spawn(process_linux::command(helper, ["exit:".concat(std::int::to_string(code))]).with_stdin(process_linux::Input::Null).with_stderr(process_linux::Output::Null))
+        st = kit::wait(child)
+        if st.code != code or st.ending != process_linux::Ending::Exited:
+            wrong.set(0, wrong.at(0) + 1)
+        process_linux::release(owner)
+    # No typed empty vector: the first owner makes the vector.
+    {owner: o0, child: c0} = kit::spawn(process_linux::command(helper, ["sleep:20", "exit:0"]).with_stdin(process_linux::Input::Null).with_stderr(process_linux::Output::Null))
+    owners = std::mutable_vector::from_list([o0])
+    kids = std::mutable_vector::from_list([c0])
+    loop i from 1 to 64:
+        {owner, child} = kit::spawn(process_linux::command(helper, ["sleep:20", "exit:".concat(std::int::to_string(i))]).with_stdin(process_linux::Input::Null).with_stderr(process_linux::Output::Null))
+        owners.push(owner)
+        kids.push(child)
+    kit::say_int("concurrent children ", process_linux::stats().children)
+    loop i from 0 to 64:
+        st = kit::wait(kids.at(i))
+        if st.code != i:
+            wrong.set(1, wrong.at(1) + 1)
+    loop i from 0 to 64:
+        o = owners.pop()
+        process_linux::release(o)
+    kit::say_int("wrong sequential ", wrong.at(0))
+    kit::say_int("wrong concurrent ", wrong.at(1))
+    0
+
+fn main(helper: str, scenario: str, tmp: str, context ev: std::event_loop::Loop, d: event_loop_linux::Linux, n: event_loop_linux::Native, p: process_linux::Processes, io: std::linux::io::LinuxIO) -> int errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered, std::event_loop::TaskFailed, IndexNotFound:
+    std::event_loop::sync()
+    fds = probe::open_fds()
+    if scenario == "cancel":
+        coroutine {step, first} = sc_cancel(helper, tmp)
+        std::event_loop::adopt(step, first)
+    elif scenario == "terminate":
+        coroutine {step, first} = sc_terminate(helper, tmp)
+        std::event_loop::adopt(step, first)
+    elif scenario == "descendants":
+        coroutine {step, first} = sc_descendants(helper, tmp)
+        std::event_loop::adopt(step, first)
+    elif scenario == "old-kernel":
+        coroutine {step, first} = sc_old_kernel(helper, tmp)
+        std::event_loop::adopt(step, first)
+    elif scenario == "shared-group":
+        coroutine {step, first} = sc_shared_group(helper, tmp)
+        std::event_loop::adopt(step, first)
+    elif scenario == "inherited":
+        coroutine {step, first} = sc_inherited(helper, tmp)
+        std::event_loop::adopt(step, first)
+    elif scenario == "reap-order":
+        coroutine {step, first} = sc_reap_order(helper, tmp, 0)
+        std::event_loop::adopt(step, first)
+    elif scenario == "eager-reap":
+        coroutine {step, first} = sc_reap_order(helper, tmp, 4)
+        std::event_loop::adopt(step, first)
+    elif scenario == "release":
+        coroutine {step, first} = sc_release(helper, tmp)
+        std::event_loop::adopt(step, first)
+    elif scenario == "release-reader":
+        coroutine {step, first} = sc_release_reader(helper, tmp)
+        std::event_loop::adopt(step, first)
+    elif scenario == "finish":
+        coroutine {step, first} = sc_finish(helper, tmp)
+        std::event_loop::adopt(step, first)
+    elif scenario == "abandon":
+        coroutine {step, first} = sc_abandon(helper, tmp)
+        std::event_loop::adopt(step, first)
+    elif scenario == "shutdown":
+        coroutine {step, first} = sc_shutdown(helper, tmp)
+        std::event_loop::adopt(step, first)
+    elif scenario == "detach":
+        coroutine {step, first} = sc_detach(helper, tmp, 300)
+        std::event_loop::adopt(step, first)
+    elif scenario == "detach-outlive":
+        coroutine {step, first} = sc_detach(helper, tmp, 3000)
+        std::event_loop::adopt(step, first)
+    elif scenario == "waiters":
+        coroutine {step, first} = sc_waiters(helper, tmp)
+        std::event_loop::adopt(step, first)
+    elif scenario == "watch-release":
+        coroutine {step, first} = sc_watch_release(helper, tmp)
+        std::event_loop::adopt(step, first)
+    elif scenario == "exhaust":
+        coroutine {step, first} = sc_exhaust(helper, tmp)
+        std::event_loop::adopt(step, first)
+    elif scenario == "stale":
+        coroutine {step, first} = sc_stale(helper, tmp)
+        std::event_loop::adopt(step, first)
+    elif scenario == "many":
+        coroutine {step, first} = sc_many(helper, tmp, 400)
+        std::event_loop::adopt(step, first)
+    else:
+        kit::say("no such scenario: ".concat(scenario))
+        return 2
+    std::event_loop::run()
+    loop o in std::event_loop::take_outcomes():
+        if o.ending != std::event_loop::Ending::Returned:
+            kit::say_int("task failed ", o.value)
+    kit::say_int("end owned before shutdown ", process_linux::stats().owned)
+    kit::say_int("abandoned ", std::event_loop::shutdown(4))
+    kit::say_int("end killed by shutdown ", process_linux::shutdown())
+    kit::end(fds)
+    kit::say_int("end fds delta ", probe::open_fds() - fds)
+    0
+
+args = argv():
+    on InvalidArgumentEncoding:
+        []
+with context std::event_loop::create(64)
+with context event_loop_linux::create()
+with context event_loop_linux::native()
+with context process_linux::create_with(kit::options())
+with context std::linux::io::create()
+main(std::list::get(args, 1, ""), std::list::get(args, 2, ""), std::list::get(args, 3, "/tmp")):
+    on std::event_loop::SchedulerFault:
+        -1
+    on std::event_loop::DriverFault:
+        -2
+    on std::event_loop::LoopReentered:
+        -3
+    on std::event_loop::TaskFailed:
+        -4
+    on IndexNotFound:
+        -5

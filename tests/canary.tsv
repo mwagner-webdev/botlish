@@ -1,6 +1,6 @@
 # canary.tsv -- the canary's records (CI-RUNS.md, "The canary"), written by
 # tools/ci/history.py from the pushes to main of the four test workflows in
-# the 21 days before 2026-11-05. tests/canary.tcl reads it.
+# the 21 days before 2026-11-10. tests/canary.tcl reads it.
 #
 # history ITEM HOSTS COMMITS LAST REASON: ITEM (a test file or golden suite)
 # failed in CI at COMMITS commits of main, on HOSTS (comma-separated host
@@ -11,397 +11,1235 @@
 # duration ITEM SECONDS: ITEM's wall seconds on linux-x86_64 (a Tcl test
 # file on interp, a golden suite on all four backends), the canary's
 # estimate of its cost; an item without one is estimated from its size.
+#
+# cost HOST ITEM SECONDS: ITEM's wall seconds in HOST's acceptance tier
+# (tests/platform/tier.tcl: a Tcl test file on interp, a golden suite on
+# all four backends), by which tier.tcl balances its shards on HOST; an
+# item without one costs its duration's estimate.
 
-history	tests/c-bindgen.test	linux-x86_64,linux-aarch64,windows-x86_64	16	2026-10-27	cb-win32-current
 history	tests/workload-icy-tower.test	linux-aarch64	14	2026-11-02	workload-icy-tower-release-tooling
 history	tests/c-ffi.test	linux-x86_64,macos-aarch64,windows-x86_64	13	2026-10-27	cf-wrong-architecture
+history	tests/c-bindgen.test	linux-x86_64,linux-aarch64,windows-x86_64	11	2026-10-27	cb-win32-current
 history	tests/package-native.test	linux-aarch64,macos-aarch64,windows-x86_64	9	2026-11-04	pn-concurrent-target-compiles
 history	tests/main-thread-startup.test	macos-aarch64	8	2026-11-02	mts-main-process-semantics
 history	tests/package-manager.test	windows-x86_64	8	2026-11-02	pm-remove
 history	tests/package-authoring.test	linux-x86_64,windows-x86_64	6	2026-11-04	pa-compare-git-tree-matches-git
-history	tests/c-pointer-borrowing.test	linux-aarch64	5	2026-10-18	cb-liveness-mutant-detected
 history	tests/c-byte-borrowing.test	macos-aarch64	4	2026-10-21	bb-guard-malloc
-history	tests/workload-2048.test	linux-aarch64	3	2026-10-17	workload-2048-demo-executable
 history	tests/dfa-workloads.test	windows-x86_64	2	2026-10-24	dfa-json-model
 history	tests/dfa.test	windows-x86_64	2	2026-10-24	dfa-protocol-unread-counts
 history	tests/coroutine-fusion.test	windows-x86_64	2	2026-10-23	cf-workloads-fused
 history	tests/hir-text.test	windows-x86_64	2	2026-10-21	ht-coroutine-protocols
 history	tests/event-loop-linux.test	linux-aarch64	1	2026-11-01	el-linux-inflight
 
-duration	tests/abi-bytes.test	27.5
-duration	tests/abi-mutable-bytes.test	29.3
-duration	tests/abi-numeric.test	11.0
+duration	tests/abi-bytes.test	30.1
+duration	tests/abi-mutable-bytes.test	31.4
+duration	tests/abi-numeric.test	12.0
 duration	tests/acceptance.test	0.1
-duration	tests/actor.test	539.5
-duration	tests/affine-applications.test	2.8
-duration	tests/affine.test	11.8
-duration	tests/aot-stub-linker.test	4.9
-duration	tests/application-modules.test	2.9
-duration	tests/applied-types.test	0.6
-duration	tests/argv.test	14.5
-duration	tests/ascii.test	4.6
+duration	tests/actor.test	572.6
+duration	tests/affine-applications.test	3.2
+duration	tests/affine.test	14.6
+duration	tests/android-target.test	13.3
+duration	tests/aot-stub-linker.test	5.5
+duration	tests/application-modules.test	3.3
+duration	tests/applied-types.test	0.7
+duration	tests/argv.test	15.6
+duration	tests/ascii.test	5.4
 duration	tests/backends.test	0.2
 duration	tests/bench-backends.test	0.4
-duration	tests/bench-corpus.test	19.7
-duration	tests/binary-layout.test	10.9
+duration	tests/bench-corpus.test	27.4
+duration	tests/binary-layout.test	12.7
 duration	tests/bindings.test	0.2
-duration	tests/blockescape-called-generic.test	0.4
-duration	tests/blockescape-nested-capturers.test	1.4
+duration	tests/blockescape-called-generic.test	0.5
+duration	tests/blockescape-nested-capturers.test	1.6
 duration	tests/blocks.test	0.1
-duration	tests/bot-modules.test	104.8
-duration	tests/branch-form-boolean.test	77.7
-duration	tests/byte-set.test	1.5
-duration	tests/c-abi-types.test	4.3
-duration	tests/c-bindgen.test	43.8
-duration	tests/c-byte-borrowing.test	21.0
-duration	tests/c-callbacks.test	17.4
-duration	tests/c-ffi-error-capture.test	69.2
-duration	tests/c-ffi.test	71.5
-duration	tests/c-float-ffi.test	12.4
-duration	tests/c-pointer-borrowing.test	27.0
+duration	tests/bot-modules.test	116.6
+duration	tests/branch-form-boolean.test	89.4
+duration	tests/byte-set.test	1.7
+duration	tests/c-abi-types.test	4.6
+duration	tests/c-bindgen.test	43.6
+duration	tests/c-byte-borrowing.test	22.8
+duration	tests/c-callbacks.test	18.0
+duration	tests/c-compile.test	31.5
+duration	tests/c-ffi-error-capture.test	71.6
+duration	tests/c-ffi.test	76.1
+duration	tests/c-float-ffi.test	13.2
+duration	tests/c-pointer-borrowing.test	30.4
 duration	tests/calls.test	0.1
+duration	tests/canary.test	0.2
 duration	tests/checked-domain-proof-provenance.test	0.7
 duration	tests/close-callers-convergence.test	0.7
-duration	tests/closed-closure-entry-facts.test	0.9
-duration	tests/closure-int-keys.test	4.1
-duration	tests/collection-iteration.test	40.8
-duration	tests/collection-reorder.test	204.8
-duration	tests/compilation-isolation.test	25.4
-duration	tests/compiler-opt.test	16.5
-duration	tests/compiler-service.test	4.6
-duration	tests/compilerpedia.test	82.6
-duration	tests/conjunctive-entry-facts.test	0.5
-duration	tests/context-affine.test	3.7
-duration	tests/context-resource-escape.test	4.3
-duration	tests/context-traits.test	17.9
-duration	tests/contexts.test	14.7
+duration	tests/closed-closure-entry-facts.test	1.0
+duration	tests/closure-int-keys.test	4.7
+duration	tests/collection-iteration.test	46.9
+duration	tests/collection-reorder.test	243.8
+duration	tests/compilation-isolation.test	27.3
+duration	tests/compiler-opt.test	23.3
+duration	tests/compiler-service.test	5.4
+duration	tests/compilerpedia.test	105.7
+duration	tests/concurrent-vms.test	76.1
+duration	tests/conjunctive-entry-facts.test	0.6
+duration	tests/consumed-fold-intermediates.test	36.7
+duration	tests/context-affine.test	3.9
+duration	tests/context-resource-escape.test	4.5
+duration	tests/context-traits.test	20.1
+duration	tests/contexts.test	16.7
 duration	tests/control.test	0.1
-duration	tests/coroutine-fusion.test	23.6
-duration	tests/coroutines.test	13.3
-duration	tests/darwin-io.test	58.8
-duration	tests/decimal-rounded.test	5.5
-duration	tests/depth-safe-nesting.test	1254.3
-duration	tests/dfa-workloads.test	185.7
-duration	tests/dfa.test	66.4
-duration	tests/diagnostic-recovery.test	6.1
-duration	tests/direct-hir-native.test	58.6
-duration	tests/direct-modules.test	8.7
-duration	tests/dormant-instances.test	4.6
-duration	tests/elif.test	24.1
-duration	tests/emailish-predicate.test	10.1
-duration	tests/emission-claims.test	66.6
-duration	tests/empty-collection-admissibility.test	1.2
-duration	tests/enums.test	2.9
-duration	tests/error-payloads.test	7.1
-duration	tests/errors.test	2.7
-duration	tests/event-loop-linux.test	188.2
-duration	tests/event-loop.test	742.0
-duration	tests/exact-callable-executable.test	14.4
-duration	tests/exact-callable-key.test	8.3
-duration	tests/exact-value-facts.test	3.2
-duration	tests/filesystem.test	415.7
-duration	tests/fixed-arity-list-return.test	33.1
-duration	tests/flags.test	10.7
-duration	tests/float64.test	4.0
-duration	tests/fold-loops.test	7.2
+duration	tests/coroutine-fusion.test	24.0
+duration	tests/coroutines.test	14.2
+duration	tests/csv-emission.test	72.7
+duration	tests/darwin-io.test	58.0
+duration	tests/decimal-rounded.test	5.8
+duration	tests/depth-safe-nesting.test	1151.2
+duration	tests/dfa-workloads.test	202.9
+duration	tests/dfa.test	71.0
+duration	tests/diagnostic-recovery.test	6.2
+duration	tests/direct-hir-native.test	78.8
+duration	tests/direct-modules.test	9.3
+duration	tests/dormant-instances.test	5.2
+duration	tests/elif.test	26.9
+duration	tests/emailish-predicate.test	11.3
+duration	tests/emission-claims.test	98.9
+duration	tests/empty-collection-admissibility.test	1.4
+duration	tests/enums.test	3.4
+duration	tests/error-payloads.test	8.4
+duration	tests/errors.test	3.3
+duration	tests/event-loop-linux.test	227.5
+duration	tests/event-loop.test	715.3
+duration	tests/exact-callable-executable.test	20.2
+duration	tests/exact-callable-key.test	8.8
+duration	tests/exact-value-facts.test	3.3
+duration	tests/external-tools.test	127.2
+duration	tests/filesystem.test	271.4
+duration	tests/fixed-arity-list-return.test	34.8
+duration	tests/flags.test	11.6
+duration	tests/float64.test	4.3
+duration	tests/fold-loops.test	7.3
+duration	tests/fold-virtual-construction.test	12.4
 duration	tests/golden-duplicates.test	1.3
-duration	tests/golden-framework.test	73.7
-duration	tests/golden.test	62.7
-duration	tests/golden/abi-bytes-native.bot	2.3
-duration	tests/golden/abi-bytes.bot	10.1
-duration	tests/golden/abi-numeric-native.bot	1.9
-duration	tests/golden/abi-numeric.bot	12.4
-duration	tests/golden/affinity.bot	13.0
-duration	tests/golden/binary-layout.bot	5.2
-duration	tests/golden/bits-bytes-hashing.bot	6.7
-duration	tests/golden/branch-form-boolean.bot	8.4
-duration	tests/golden/c-callbacks.bot	2.4
-duration	tests/golden/c-float-ffi.bot	1.8
-duration	tests/golden/callable-contracts-contravariant-rejected.bot	2.4
-duration	tests/golden/callable-contracts-contravariant.bot	2.3
-duration	tests/golden/callable-contracts-fallback.bot	2.2
-duration	tests/golden/callable-contracts-handle.bot	0.9
-duration	tests/golden/callable-contracts-returned.bot	2.9
-duration	tests/golden/callable-contracts-unerased.bot	1.5
-duration	tests/golden/callable-contracts.bot	27.9
-duration	tests/golden/callables.bot	15.7
-duration	tests/golden/closure-escape-instances.bot	1.5
-duration	tests/golden/closure-escape.bot	7.8
-duration	tests/golden/collection-iteration.bot	11.0
-duration	tests/golden/collection-reorder.bot	22.5
-duration	tests/golden/collections.bot	12.4
-duration	tests/golden/compiled-values-struct-transport.bot	4.3
-duration	tests/golden/compiled-values.bot	57.9
-duration	tests/golden/completion-regressions.bot	2.1
-duration	tests/golden/contexts.bot	36.9
-duration	tests/golden/core-semantics.bot	14.6
-duration	tests/golden/coroutines.bot	20.2
-duration	tests/golden/decimal-rounded.bot	5.6
-duration	tests/golden/declared-errors-imports.bot	3.1
-duration	tests/golden/declared-errors.bot	17.8
-duration	tests/golden/destructuring-instances.bot	4.3
-duration	tests/golden/destructuring.bot	39.0
-duration	tests/golden/diagnostic-recovery-imported.bot	1.7
-duration	tests/golden/diagnostic-recovery.bot	2.6
-duration	tests/golden/diagnostics.bot	7.5
-duration	tests/golden/errors.bot	2.9
-duration	tests/golden/flags.bot	16.1
-duration	tests/golden/float64.bot	9.2
-duration	tests/golden/fold-loops.bot	18.4
-duration	tests/golden/framework-semantics.bot	9.1
-duration	tests/golden/gc-sensitive-values.bot	6.3
-duration	tests/golden/harness.bot	3.2
-duration	tests/golden/hashable-admission.bot	2.5
-duration	tests/golden/hashable.bot	3.8
-duration	tests/golden/hir-values.bot	3.5
-duration	tests/golden/immutable-map.bot	61.4
-duration	tests/golden/imports-abi-child.bot	3.2
-duration	tests/golden/imports-abi-family.bot	1.1
-duration	tests/golden/imports-library-modules.bot	6.7
-duration	tests/golden/imports-unimported.bot	3.0
-duration	tests/golden/imports.bot	12.8
-duration	tests/golden/layout-arrays.bot	7.3
-duration	tests/golden/layout-unions.bot	8.1
-duration	tests/golden/linux-io-native.bot	2.0
-duration	tests/golden/linux-io.bot	6.5
-duration	tests/golden/linux-transports.bot	2.3
-duration	tests/golden/list-flat.bot	12.7
-duration	tests/golden/lists-and-sets.bot	8.2
-duration	tests/golden/loop-collecting-refined-checks.bot	13.0
-duration	tests/golden/loop-collecting.bot	8.4
-duration	tests/golden/loops.bot	6.3
-duration	tests/golden/method-equivalence-imported.bot	6.1
-duration	tests/golden/method-equivalence.bot	6.5
-duration	tests/golden/methods-byte-without-list.bot	1.5
-duration	tests/golden/methods-list-without-str.bot	2.7
-duration	tests/golden/methods-struct-instances.bot	1.6
-duration	tests/golden/methods-type-import-only.bot	1.9
-duration	tests/golden/methods.bot	18.8
-duration	tests/golden/modules.bot	17.0
-duration	tests/golden/mutable-array.bot	57.6
-duration	tests/golden/mutable-map.bot	64.4
-duration	tests/golden/mutable-set.bot	14.0
-duration	tests/golden/mutable-vector-str.bot	1.9
-duration	tests/golden/mutable-vector.bot	19.2
-duration	tests/golden/names-and-scoping.bot	5.0
-duration	tests/golden/native-aggregates.bot	6.7
-duration	tests/golden/native-values.bot	13.2
-duration	tests/golden/numeric-looking-names.bot	1.4
-duration	tests/golden/numeric-text.bot	11.6
-duration	tests/golden/opaque-instances.bot	0.8
-duration	tests/golden/opaque.bot	29.1
-duration	tests/golden/ownership.bot	9.4
-duration	tests/golden/place-parameters.bot	7.3
-duration	tests/golden/range-and-contract-values.bot	21.2
-duration	tests/golden/raw-c-float-ffi.bot	6.7
-duration	tests/golden/raw-int-abi.bot	19.2
-duration	tests/golden/recursive-types.bot	2.5
-duration	tests/golden/refinements.bot	19.4
-duration	tests/golden/representation.bot	4.5
-duration	tests/golden/static-compile-erased-consumer.bot	2.0
-duration	tests/golden/static-compile.bot	32.6
-duration	tests/golden/stdlib-namespaces-entry-members.bot	0.9
-duration	tests/golden/stdlib-namespaces-str-only.bot	2.0
-duration	tests/golden/stdlib-namespaces-unimported.bot	1.8
+duration	tests/golden-framework.test	73.3
+duration	tests/golden.test	61.6
+duration	tests/golden/abi-bytes-native.bot	2.5
+duration	tests/golden/abi-bytes.bot	13.4
+duration	tests/golden/abi-numeric-native.bot	1.3
+duration	tests/golden/abi-numeric.bot	10.8
+duration	tests/golden/affinity.bot	14.8
+duration	tests/golden/binary-layout.bot	7.2
+duration	tests/golden/bits-bytes-hashing.bot	4.4
+duration	tests/golden/branch-form-boolean.bot	7.2
+duration	tests/golden/c-callbacks.bot	2.6
+duration	tests/golden/c-float-ffi.bot	2.6
+duration	tests/golden/callable-contracts-contravariant-rejected.bot	1.5
+duration	tests/golden/callable-contracts-contravariant.bot	2.1
+duration	tests/golden/callable-contracts-fallback.bot	2.5
+duration	tests/golden/callable-contracts-handle.bot	1.2
+duration	tests/golden/callable-contracts-returned.bot	2.0
+duration	tests/golden/callable-contracts-unerased.bot	1.3
+duration	tests/golden/callable-contracts.bot	31.1
+duration	tests/golden/callables.bot	21.5
+duration	tests/golden/closure-escape-instances.bot	1.0
+duration	tests/golden/closure-escape.bot	6.5
+duration	tests/golden/collection-iteration.bot	13.8
+duration	tests/golden/collection-reorder.bot	32.5
+duration	tests/golden/collections.bot	8.2
+duration	tests/golden/compiled-values-struct-transport.bot	3.5
+duration	tests/golden/compiled-values.bot	71.3
+duration	tests/golden/completion-regressions.bot	3.3
+duration	tests/golden/contexts.bot	25.0
+duration	tests/golden/core-semantics.bot	12.6
+duration	tests/golden/coroutines.bot	22.3
+duration	tests/golden/decimal-rounded.bot	7.6
+duration	tests/golden/declared-errors-imports.bot	2.0
+duration	tests/golden/declared-errors.bot	15.0
+duration	tests/golden/destructuring-instances.bot	4.7
+duration	tests/golden/destructuring.bot	61.9
+duration	tests/golden/diagnostic-recovery-imported.bot	1.1
+duration	tests/golden/diagnostic-recovery.bot	2.1
+duration	tests/golden/diagnostics.bot	8.3
+duration	tests/golden/errors.bot	4.4
+duration	tests/golden/flags.bot	10.6
+duration	tests/golden/float64.bot	7.3
+duration	tests/golden/fold-loops.bot	21.3
+duration	tests/golden/fold-virtual-construction.bot	12.1
+duration	tests/golden/framework-semantics.bot	11.8
+duration	tests/golden/gc-sensitive-values.bot	4.5
+duration	tests/golden/harness.bot	3.6
+duration	tests/golden/hashable-admission.bot	2.3
+duration	tests/golden/hashable.bot	5.3
+duration	tests/golden/hir-values.bot	2.2
+duration	tests/golden/immutable-map.bot	71.5
+duration	tests/golden/imports-abi-child.bot	2.8
+duration	tests/golden/imports-abi-family.bot	1.4
+duration	tests/golden/imports-library-modules.bot	4.3
+duration	tests/golden/imports-unimported.bot	3.3
+duration	tests/golden/imports.bot	11.9
+duration	tests/golden/layout-arrays.bot	10.4
+duration	tests/golden/layout-unions.bot	5.8
+duration	tests/golden/linux-io-native.bot	2.3
+duration	tests/golden/linux-io.bot	5.7
+duration	tests/golden/linux-transports.bot	3.1
+duration	tests/golden/list-flat.bot	9.4
+duration	tests/golden/lists-and-sets.bot	8.9
+duration	tests/golden/loop-collecting-refined-checks.bot	13.4
+duration	tests/golden/loop-collecting.bot	10.7
+duration	tests/golden/loops.bot	4.6
+duration	tests/golden/method-equivalence-imported.bot	7.0
+duration	tests/golden/method-equivalence.bot	5.8
+duration	tests/golden/methods-byte-without-list.bot	1.8
+duration	tests/golden/methods-list-without-str.bot	2.1
+duration	tests/golden/methods-struct-instances.bot	1.8
+duration	tests/golden/methods-type-import-only.bot	1.7
+duration	tests/golden/methods.bot	27.9
+duration	tests/golden/modules.bot	13.0
+duration	tests/golden/mutable-array.bot	68.3
+duration	tests/golden/mutable-map.bot	56.2
+duration	tests/golden/mutable-set.bot	19.2
+duration	tests/golden/mutable-vector-str.bot	1.3
+duration	tests/golden/mutable-vector.bot	21.1
+duration	tests/golden/names-and-scoping.bot	4.3
+duration	tests/golden/native-aggregates.bot	9.2
+duration	tests/golden/native-values.bot	10.1
+duration	tests/golden/nonplace-parameter-mutation.bot	22.1
+duration	tests/golden/numeric-looking-names.bot	1.2
+duration	tests/golden/numeric-text.bot	10.3
+duration	tests/golden/opaque-instances.bot	1.1
+duration	tests/golden/opaque.bot	29.0
+duration	tests/golden/ownership.bot	8.3
+duration	tests/golden/place-parameters.bot	6.3
+duration	tests/golden/range-and-contract-values.bot	29.9
+duration	tests/golden/raw-c-float-ffi.bot	6.1
+duration	tests/golden/raw-int-abi.bot	14.5
+duration	tests/golden/recursive-types.bot	2.0
+duration	tests/golden/refinements.bot	27.4
+duration	tests/golden/representation.bot	4.3
+duration	tests/golden/static-compile-erased-consumer.bot	1.7
+duration	tests/golden/static-compile-expected-diagnostics.bot	12.5
+duration	tests/golden/static-compile.bot	31.9
+duration	tests/golden/stdlib-namespaces-entry-members.bot	1.8
+duration	tests/golden/stdlib-namespaces-str-only.bot	1.5
+duration	tests/golden/stdlib-namespaces-unimported.bot	1.4
 duration	tests/golden/stdlib-namespaces.bot	16.3
-duration	tests/golden/string-natives.bot	5.5
-duration	tests/golden/string-representations.bot	6.8
-duration	tests/golden/strings.bot	16.3
-duration	tests/golden/struct-representation-instances.bot	2.2
-duration	tests/golden/struct-representation.bot	10.9
-duration	tests/golden/structs-and-enums-instances.bot	1.6
-duration	tests/golden/structs-and-enums.bot	19.2
-duration	tests/golden/trait-constrained-types.bot	12.4
-duration	tests/golden/traits-path.bot	3.5
-duration	tests/golden/traits.bot	33.1
-duration	tests/golden/tree-struct.bot	130.5
-duration	tests/golden/type-predicates.bot	5.4
-duration	tests/golden/types.bot	7.7
-duration	tests/golden/unicode-strings.bot	9.6
-duration	tests/golden/validators-and-proofs.bot	28.9
-duration	tests/golden/value-identity.bot	14.3
-duration	tests/golden/values.bot	3.5
-duration	tests/golden/variadics.bot	11.2
-duration	tests/golden/warning-programs.bot	5.6
-duration	tests/hashable.test	4.1
-duration	tests/higher-order-completions.test	5.0
-duration	tests/hir-aot.test	5.4
+duration	tests/golden/string-natives.bot	10.2
+duration	tests/golden/string-representations.bot	5.2
+duration	tests/golden/strings.bot	12.8
+duration	tests/golden/struct-representation-instances.bot	2.1
+duration	tests/golden/struct-representation.bot	19.3
+duration	tests/golden/structs-and-enums-instances.bot	1.2
+duration	tests/golden/structs-and-enums.bot	17.6
+duration	tests/golden/trait-constrained-types.bot	10.4
+duration	tests/golden/traits-path.bot	6.1
+duration	tests/golden/traits.bot	33.8
+duration	tests/golden/tree-struct.bot	75.5
+duration	tests/golden/type-predicates.bot	4.9
+duration	tests/golden/types.bot	15.1
+duration	tests/golden/unicode-strings.bot	7.8
+duration	tests/golden/validators-and-proofs.bot	27.5
+duration	tests/golden/value-identity.bot	13.3
+duration	tests/golden/values.bot	6.9
+duration	tests/golden/variadics.bot	8.5
+duration	tests/golden/warning-programs.bot	4.6
+duration	tests/hashable.test	4.2
+duration	tests/higher-order-completions.test	5.3
+duration	tests/hir-aot.test	5.7
 duration	tests/hir-cache.test	1.7
 duration	tests/hir-call-facts.test	0.5
 duration	tests/hir-callable-target.test	0.8
 duration	tests/hir-cardinality.test	0.2
 duration	tests/hir-closed-call-params.test	2.2
-duration	tests/hir-interchange.test	3.3
-duration	tests/hir-lowering.test	0.5
+duration	tests/hir-interchange.test	3.4
+duration	tests/hir-lowering.test	0.6
 duration	tests/hir-range-bitop.test	0.1
 duration	tests/hir-range-exact.test	0.2
-duration	tests/hir-range.test	2.9
+duration	tests/hir-range.test	3.2
 duration	tests/hir-refinement.test	0.2
-duration	tests/hir-resolution.test	0.2
+duration	tests/hir-resolution.test	0.3
 duration	tests/hir-samples.test	0.3
-duration	tests/hir-specialize.test	9.9
+duration	tests/hir-specialize.test	9.7
 duration	tests/hir-syntax.test	0.2
 duration	tests/hir-text.test	1.1
 duration	tests/hir-types.test	0.3
-duration	tests/immutable-map.test	144.8
-duration	tests/immutable-set.test	1.3
+duration	tests/http-client.test	0.2
+duration	tests/immutable-map.test	140.9
+duration	tests/immutable-set.test	1.4
 duration	tests/imports.test	4.4
 duration	tests/inference.test	0.4
 duration	tests/instance-entry-range-facts.test	0.8
-duration	tests/interval-sets.test	2.6
-duration	tests/intrinsic-contracts.test	4.2
-duration	tests/layout-arrays.test	53.2
-duration	tests/layout-unions.test	42.3
-duration	tests/linux-path.test	66.1
-duration	tests/linux-syscall-transports.test	4.4
-duration	tests/linux-syscall.test	6.3
-duration	tests/list-flat.test	6.4
-duration	tests/list-length-refinement.test	4.4
+duration	tests/interval-sets.test	3.0
+duration	tests/intrinsic-contracts.test	4.4
+duration	tests/layout-arrays.test	54.4
+duration	tests/layout-unions.test	41.9
+duration	tests/linux-path.test	63.0
+duration	tests/linux-syscall-transports.test	4.5
+duration	tests/linux-syscall.test	6.5
+duration	tests/list-flat.test	6.8
+duration	tests/list-length-refinement.test	4.3
 duration	tests/list-stdlib.test	0.9
 duration	tests/lists.test	0.2
-duration	tests/loop-collecting.test	3.8
-duration	tests/loop-counted.test	1.3
+duration	tests/loop-clause-binding-types.test	1.3
+duration	tests/loop-collecting.test	3.9
+duration	tests/loop-counted.test	1.4
 duration	tests/loop-in.test	0.6
 duration	tests/loops.test	0.1
-duration	tests/lsp-neovim.test	2.4
-duration	tests/lsp.test	56.6
-duration	tests/main-cli.test	17.3
-duration	tests/main-recursion.test	8.8
+duration	tests/lsp-neovim.test	2.9
+duration	tests/lsp.test	60.9
+duration	tests/main-cli.test	21.1
+duration	tests/main-recursion.test	10.2
 duration	tests/main-thread-startup.test	5.7
-duration	tests/many-boolean-arguments.test	48.9
-duration	tests/method-eligible.test	57.2
-duration	tests/method-filter.test	139.3
-duration	tests/method-receiver-types.test	124.5
-duration	tests/method-resolution.test	97.3
-duration	tests/method-sugar.test	36.9
-duration	tests/module-privacy.test	1.4
-duration	tests/module-static-values.test	4.4
-duration	tests/mutable-array-type.test	4.7
-duration	tests/mutable-array.test	9.4
-duration	tests/mutable-map.test	114.0
-duration	tests/mutable-set.test	29.0
-duration	tests/mutable-vector.test	21.4
-duration	tests/mutarray-construction.test	4.1
-duration	tests/namespaced-errors.test	2.9
+duration	tests/many-boolean-arguments.test	52.5
+duration	tests/method-eligible.test	63.0
+duration	tests/method-filter.test	160.6
+duration	tests/method-receiver-types.test	146.0
+duration	tests/method-resolution.test	128.6
+duration	tests/method-sugar.test	40.0
+duration	tests/module-privacy.test	1.5
+duration	tests/module-static-values.test	4.6
+duration	tests/mutable-array-type.test	5.1
+duration	tests/mutable-array.test	10.6
+duration	tests/mutable-map.test	124.7
+duration	tests/mutable-set.test	31.2
+duration	tests/mutable-vector.test	24.3
+duration	tests/mutarray-construction.test	4.4
+duration	tests/namespaced-errors.test	3.2
 duration	tests/native-alloc.test	0.5
-duration	tests/native-bitshift.test	4.5
+duration	tests/native-bitshift.test	4.8
 duration	tests/native-bitwise-fold.test	0.5
-duration	tests/native-block-escape.test	7.3
-duration	tests/native-byte.test	3.9
-duration	tests/native-csv-records.test	137.2
-duration	tests/native-edit.test	38.2
-duration	tests/native-escape.test	3.6
-duration	tests/native-executable.test	9.4
-duration	tests/native-hashing.test	1.4
-duration	tests/native-hashtable.test	44.6
-duration	tests/native-library.test	19.8
-duration	tests/native-link-plan.test	4.7
-duration	tests/native-listloop.test	0.9
-duration	tests/native-lockstep-rejected.test	0.3
-duration	tests/native-mod-lowering.test	2.8
-duration	tests/native-mutarray.test	5.2
-duration	tests/native-param-aggregate.test	7.9
-duration	tests/native-program-output.test	14.7
-duration	tests/native-refinement-propagation.test	4.1
-duration	tests/native-report-inlined-leaf.test	3.8
+duration	tests/native-block-escape.test	8.0
+duration	tests/native-byte.test	4.6
+duration	tests/native-csv-records.test	186.1
+duration	tests/native-edit.test	42.1
+duration	tests/native-escape.test	4.0
+duration	tests/native-executable.test	10.9
+duration	tests/native-hashing.test	1.6
+duration	tests/native-hashtable.test	46.6
+duration	tests/native-library.test	19.9
+duration	tests/native-link-plan.test	4.5
+duration	tests/native-listloop.test	1.0
+duration	tests/native-lockstep-rejected.test	0.4
+duration	tests/native-mod-lowering.test	3.3
+duration	tests/native-mutarray.test	5.9
+duration	tests/native-param-aggregate.test	8.8
+duration	tests/native-program-output.test	15.5
+duration	tests/native-refinement-propagation.test	4.6
+duration	tests/native-report-inlined-leaf.test	4.2
 duration	tests/native-report-skipped-code.test	0.9
-duration	tests/native-result-bounds.test	1.9
+duration	tests/native-result-bounds.test	2.0
 duration	tests/native-root-liveness.test	0.7
 duration	tests/native-root-storage.test	0.3
 duration	tests/native-stack-map.test	0.6
-duration	tests/native-stack-overflow.test	15.8
-duration	tests/native-string-region.test	2.6
-duration	tests/native-string-traversal.test	1.2
-duration	tests/native-string-view.test	2.8
-duration	tests/native-tcl-unicode.test	31.0
-duration	tests/native-tiny-leaf-inline.test	8.7
-duration	tests/native-tiny-leaf-pressure.test	222.7
-duration	tests/native-uri-escape.test	16.9
-duration	tests/native-view.test	18.9
-duration	tests/native.test	15.6
-duration	tests/numeric-looking-names.test	9.1
-duration	tests/numeric-text.test	2.1
-duration	tests/one-char-string-literal.test	42.7
-duration	tests/opaque-struct.test	10.9
-duration	tests/ordered-table.test	149.9
-duration	tests/package-manager.test	29.9
-duration	tests/package-native.test	14.1
-duration	tests/package-workloads.test	7.7
-duration	tests/packed-ascii.test	8.2
-duration	tests/place-parameters.test	1.9
-duration	tests/portable-io.test	8.8
+duration	tests/native-stack-overflow.test	16.0
+duration	tests/native-string-region.test	2.7
+duration	tests/native-string-traversal.test	1.3
+duration	tests/native-string-view.test	3.0
+duration	tests/native-tcl-unicode.test	33.3
+duration	tests/native-tiny-leaf-inline.test	9.2
+duration	tests/native-tiny-leaf-pressure.test	184.4
+duration	tests/native-uri-escape.test	18.6
+duration	tests/native-view.test	19.7
+duration	tests/native.test	17.1
+duration	tests/nonplace-parameter-mutation.test	11.2
+duration	tests/not-callable.test	1.5
+duration	tests/numeric-looking-names.test	10.1
+duration	tests/numeric-text.test	2.3
+duration	tests/one-char-string-literal.test	47.2
+duration	tests/opaque-struct.test	12.0
+duration	tests/ordered-table.test	160.4
+duration	tests/owned-recursion.test	17.4
+duration	tests/package-authoring.test	6.6
+duration	tests/package-manager.test	33.2
+duration	tests/package-native.test	13.8
+duration	tests/package-workloads.test	9.6
+duration	tests/packed-ascii.test	8.5
+duration	tests/parameterized-declaration-summaries.test	286.8
+duration	tests/place-parameters.test	2.1
+duration	tests/portable-io.test	8.9
 duration	tests/proof-loop-intervals.test	1.9
-duration	tests/proven-bounds.test	16.7
-duration	tests/proves-naming.test	41.3
-duration	tests/range-completions-crosscheck.test	5.5
-duration	tests/range-fixpoint-scaling.test	5.5
+duration	tests/proven-bounds.test	18.1
+duration	tests/proves-naming.test	44.3
+duration	tests/range-completions-crosscheck.test	5.9
+duration	tests/range-fixpoint-scaling.test	5.7
 duration	tests/raven.test	0.1
 duration	tests/raw-c-float-ffi.test	13.8
-duration	tests/raw-count-loops.test	5.4
-duration	tests/raw-int-abi.test	46.5
-duration	tests/raw-internal-abi.test	4.9
+duration	tests/raw-count-loops.test	5.8
+duration	tests/raw-int-abi.test	52.5
+duration	tests/raw-internal-abi.test	5.4
 duration	tests/refined-signatures.test	0.7
-duration	tests/refined.test	0.2
-duration	tests/refinement-validators.test	7.6
-duration	tests/refinement-values.test	9.2
+duration	tests/refined.test	0.3
+duration	tests/refinement-validators.test	8.4
+duration	tests/refinement-values.test	9.9
 duration	tests/refinements.test	0.1
 duration	tests/regex.test	0.1
-duration	tests/resources.test	16.8
-duration	tests/restricted-injection.test	23.2
-duration	tests/result-range-narrowing.test	1.8
+duration	tests/resources.test	16.6
+duration	tests/restricted-injection.test	21.2
+duration	tests/result-range-narrowing.test	2.0
 duration	tests/results.test	0.1
-duration	tests/same-failure.test	33.8
+duration	tests/same-failure.test	37.2
 duration	tests/scalarbits.test	0.2
-duration	tests/self-recursive-result-ranges.test	26.0
-duration	tests/semantic-instances.test	2.0
-duration	tests/setcontains-equality-total.test	2.5
-duration	tests/setfromlist-equality-total.test	1.8
-duration	tests/short-demand.test	2.9
-duration	tests/short-string.test	8.6
+duration	tests/self-recursive-result-ranges.test	30.0
+duration	tests/semantic-instances.test	2.3
+duration	tests/sendability.test	32.4
+duration	tests/setcontains-equality-total.test	2.7
+duration	tests/setfromlist-equality-total.test	1.9
+duration	tests/short-demand.test	2.8
+duration	tests/short-string.test	9.1
 duration	tests/source-types.test	0.8
-duration	tests/static-compile.test	6.3
-duration	tests/static-economics.test	94.8
-duration	tests/std-namespace.test	27.5
-duration	tests/stdlib-namespaces.test	7.6
-duration	tests/stdlib.test	136.9
-duration	tests/str-append-char.test	0.8
-duration	tests/str-char-at.test	0.6
-duration	tests/strict-references.test	3.8
-duration	tests/string-allocation.test	4.2
-duration	tests/struct-destructuring.test	24.7
-duration	tests/struct-scalar-replacement.test	12.3
-duration	tests/structs-syntax.test	13.6
-duration	tests/structs.test	2.4
-duration	tests/structural-contract-completions.test	10.1
-duration	tests/structural-fn-types.test	2.8
+duration	tests/static-compile-expected-diagnostics.test	67.6
+duration	tests/static-compile.test	6.8
+duration	tests/static-economics.test	97.4
+duration	tests/std-namespace.test	27.8
+duration	tests/stdlib-namespaces.test	8.8
+duration	tests/stdlib.test	158.2
+duration	tests/str-append-char.test	0.9
+duration	tests/str-char-at.test	0.7
+duration	tests/strict-references.test	4.3
+duration	tests/string-allocation.test	4.8
+duration	tests/struct-destructuring.test	27.0
+duration	tests/struct-scalar-replacement.test	13.6
+duration	tests/structs-syntax.test	16.0
+duration	tests/structs.test	2.7
+duration	tests/structural-contract-completions.test	11.4
+duration	tests/structural-fn-types.test	3.2
 duration	tests/surface-lexer.test	0.1
-duration	tests/surface-lowering.test	1.0
-duration	tests/surface-modules.test	2.9
-duration	tests/surface-parser.test	0.4
-duration	tests/surface-samples.test	0.9
-duration	tests/symbolic-type-identity.test	0.8
-duration	tests/syntax-recovery.test	76.7
-duration	tests/system-linker.test	17.5
-duration	tests/target-model.test	15.7
-duration	tests/trait-constrained-types.test	15.5
-duration	tests/traits.test	15.3
-duration	tests/tree-struct.test	281.6
-duration	tests/type-predicates.test	11.1
-duration	tests/typed-callable-escape.test	0.8
-duration	tests/typed-mutarray-builder.test	78.2
+duration	tests/surface-lowering.test	1.2
+duration	tests/surface-modules.test	3.3
+duration	tests/surface-parser.test	0.5
+duration	tests/surface-samples.test	1.1
+duration	tests/symbolic-type-identity.test	0.9
+duration	tests/syntax-highlighting.test	9.2
+duration	tests/syntax-recovery.test	79.1
+duration	tests/system-linker.test	18.0
+duration	tests/target-model.test	16.2
+duration	tests/threads.test	209.9
+duration	tests/trait-constrained-types.test	17.2
+duration	tests/traits.test	16.9
+duration	tests/tree-struct.test	305.6
+duration	tests/type-predicates.test	9.5
+duration	tests/typed-callable-escape.test	0.9
+duration	tests/typed-mutarray-builder.test	89.2
 duration	tests/typed-parameters.test	0.6
 duration	tests/types.test	0.1
-duration	tests/unicode-char.test	0.8
-duration	tests/utf16-bytes.test	25.9
-duration	tests/value-display.test	1.1
-duration	tests/value-identity.test	7.4
-duration	tests/value-transport.test	24.2
-duration	tests/variadics.test	3.3
-duration	tests/vector-bounds.test	0.8
-duration	tests/virtual-construction.test	10.7
-duration	tests/warning-gate.test	891.2
-duration	tests/warnings.test	9.1
-duration	tests/web-unreserved.test	5.7
-duration	tests/windows-io.test	8.6
-duration	tests/workload-2048.test	52.9
-duration	tests/workload-icy-tower.test	174.6
+duration	tests/unicode-char.test	0.9
+duration	tests/unused-context.test	19.5
+duration	tests/utf16-bytes.test	23.7
+duration	tests/value-display.test	1.0
+duration	tests/value-identity.test	8.0
+duration	tests/value-transfer.test	340.6
+duration	tests/value-transport.test	26.2
+duration	tests/variadics.test	3.5
+duration	tests/vector-bounds.test	0.9
+duration	tests/virtual-construction.test	11.6
+duration	tests/warning-gate.test	1109.5
+duration	tests/warnings.test	9.4
+duration	tests/web-unreserved.test	5.9
+duration	tests/windows-io.test	8.5
+duration	tests/workload-2048.test	55.9
+duration	tests/workload-icy-tower.test	173.4
+duration	tests/written-affine-applications.test	7.1
+
+cost	macos-aarch64	tests/abi-bytes.test	10.2
+cost	macos-aarch64	tests/abi-mutable-bytes.test	18.3
+cost	macos-aarch64	tests/abi-numeric.test	9.4
+cost	macos-aarch64	tests/acceptance.test	0.2
+cost	macos-aarch64	tests/actor.test	731.2
+cost	macos-aarch64	tests/affine-applications.test	2.4
+cost	macos-aarch64	tests/affine.test	14.8
+cost	macos-aarch64	tests/android-target.test	0.1
+cost	macos-aarch64	tests/aot-run.test	122.0
+cost	macos-aarch64	tests/aot-stub-linker.test	0.1
+cost	macos-aarch64	tests/application-modules.test	2.7
+cost	macos-aarch64	tests/applied-type-bound.test	31.6
+cost	macos-aarch64	tests/applied-types.test	0.9
+cost	macos-aarch64	tests/argv.test	30.6
+cost	macos-aarch64	tests/ascii.test	4.4
+cost	macos-aarch64	tests/backends.test	0.1
+cost	macos-aarch64	tests/bench-backends.test	0.4
+cost	macos-aarch64	tests/bench-corpus.test	22.0
+cost	macos-aarch64	tests/binary-layout.test	16.0
+cost	macos-aarch64	tests/bindings.test	0.2
+cost	macos-aarch64	tests/blockescape-called-generic.test	0.4
+cost	macos-aarch64	tests/blockescape-nested-capturers.test	1.1
+cost	macos-aarch64	tests/blocks.test	0.1
+cost	macos-aarch64	tests/bot-modules.test	118.8
+cost	macos-aarch64	tests/branch-form-boolean.test	99.7
+cost	macos-aarch64	tests/byte-set.test	1.5
+cost	macos-aarch64	tests/c-abi-types.test	5.1
+cost	macos-aarch64	tests/c-bindgen.test	33.4
+cost	macos-aarch64	tests/c-byte-borrowing.test	37.2
+cost	macos-aarch64	tests/c-callbacks.test	27.4
+cost	macos-aarch64	tests/c-compile.test	39.6
+cost	macos-aarch64	tests/c-ffi-error-capture.test	69.2
+cost	macos-aarch64	tests/c-ffi.test	66.3
+cost	macos-aarch64	tests/c-float-ffi.test	16.3
+cost	macos-aarch64	tests/c-pointer-borrowing.test	37.4
+cost	macos-aarch64	tests/calls.test	0.1
+cost	macos-aarch64	tests/canary.test	0.8
+cost	macos-aarch64	tests/checked-domain-proof-provenance.test	0.6
+cost	macos-aarch64	tests/close-callers-convergence.test	0.6
+cost	macos-aarch64	tests/closed-closure-entry-facts.test	1.3
+cost	macos-aarch64	tests/closure-int-keys.test	5.8
+cost	macos-aarch64	tests/collection-iteration.test	55.6
+cost	macos-aarch64	tests/collection-reorder.test	203.6
+cost	macos-aarch64	tests/compilation-isolation.test	16.3
+cost	macos-aarch64	tests/compiler-opt.test	21.0
+cost	macos-aarch64	tests/compiler-service.test	5.5
+cost	macos-aarch64	tests/compilerpedia.test	92.7
+cost	macos-aarch64	tests/concurrent-vms.test	64.7
+cost	macos-aarch64	tests/conjunctive-entry-facts.test	0.4
+cost	macos-aarch64	tests/consumed-fold-intermediates.test	44.7
+cost	macos-aarch64	tests/context-affine.test	3.6
+cost	macos-aarch64	tests/context-resource-escape.test	3.3
+cost	macos-aarch64	tests/context-traits.test	18.0
+cost	macos-aarch64	tests/contexts.test	5.6
+cost	macos-aarch64	tests/control.test	0.1
+cost	macos-aarch64	tests/coroutine-fusion.test	25.4
+cost	macos-aarch64	tests/coroutines.test	13.0
+cost	macos-aarch64	tests/csv-emission.test	60.8
+cost	macos-aarch64	tests/darwin-io.test	103.8
+cost	macos-aarch64	tests/decimal-rounded.test	4.2
+cost	macos-aarch64	tests/depth-safe-nesting.test	1326.5
+cost	macos-aarch64	tests/dfa-workloads.test	285.4
+cost	macos-aarch64	tests/dfa.test	68.4
+cost	macos-aarch64	tests/diagnostic-recovery.test	8.0
+cost	macos-aarch64	tests/direct-hir-native.test	50.0
+cost	macos-aarch64	tests/direct-modules.test	8.5
+cost	macos-aarch64	tests/dormant-instances.test	9.2
+cost	macos-aarch64	tests/elif.test	23.6
+cost	macos-aarch64	tests/emailish-predicate.test	10.2
+cost	macos-aarch64	tests/emission-claims.test	75.9
+cost	macos-aarch64	tests/empty-collection-admissibility.test	1.3
+cost	macos-aarch64	tests/enums.test	5.2
+cost	macos-aarch64	tests/error-payloads.test	6.4
+cost	macos-aarch64	tests/errors.test	2.6
+cost	macos-aarch64	tests/event-loop-linux.test	0.1
+cost	macos-aarch64	tests/event-loop.test	862.7
+cost	macos-aarch64	tests/exact-callable-executable.test	28.1
+cost	macos-aarch64	tests/exact-callable-key.test	7.1
+cost	macos-aarch64	tests/exact-value-facts.test	2.6
+cost	macos-aarch64	tests/external-tools.test	0.3
+cost	macos-aarch64	tests/filesystem.test	172.4
+cost	macos-aarch64	tests/fixed-arity-list-return.test	52.6
+cost	macos-aarch64	tests/flags.test	10.0
+cost	macos-aarch64	tests/float64.test	4.7
+cost	macos-aarch64	tests/fold-loops.test	5.6
+cost	macos-aarch64	tests/fold-virtual-construction.test	14.6
+cost	macos-aarch64	tests/golden-duplicates.test	1.7
+cost	macos-aarch64	tests/golden-framework.test	75.0
+cost	macos-aarch64	tests/golden.test	37.8
+cost	macos-aarch64	tests/golden/abi-bytes-native.bot	1.6
+cost	macos-aarch64	tests/golden/abi-bytes.bot	13.5
+cost	macos-aarch64	tests/golden/abi-numeric-native.bot	1.0
+cost	macos-aarch64	tests/golden/abi-numeric.bot	12.1
+cost	macos-aarch64	tests/golden/affinity.bot	12.9
+cost	macos-aarch64	tests/golden/binary-layout.bot	10.2
+cost	macos-aarch64	tests/golden/bits-bytes-hashing.bot	5.9
+cost	macos-aarch64	tests/golden/branch-form-boolean.bot	7.6
+cost	macos-aarch64	tests/golden/c-callbacks.bot	1.8
+cost	macos-aarch64	tests/golden/c-float-ffi.bot	2.6
+cost	macos-aarch64	tests/golden/callable-contracts-contravariant-rejected.bot	2.2
+cost	macos-aarch64	tests/golden/callable-contracts-contravariant.bot	1.9
+cost	macos-aarch64	tests/golden/callable-contracts-fallback.bot	1.9
+cost	macos-aarch64	tests/golden/callable-contracts-handle.bot	1.0
+cost	macos-aarch64	tests/golden/callable-contracts-returned.bot	2.1
+cost	macos-aarch64	tests/golden/callable-contracts-unerased.bot	1.5
+cost	macos-aarch64	tests/golden/callable-contracts.bot	41.1
+cost	macos-aarch64	tests/golden/callables.bot	24.3
+cost	macos-aarch64	tests/golden/closure-escape-instances.bot	0.9
+cost	macos-aarch64	tests/golden/closure-escape.bot	7.8
+cost	macos-aarch64	tests/golden/collection-iteration.bot	14.4
+cost	macos-aarch64	tests/golden/collection-reorder.bot	41.6
+cost	macos-aarch64	tests/golden/collections.bot	9.3
+cost	macos-aarch64	tests/golden/compiled-values-struct-transport.bot	4.5
+cost	macos-aarch64	tests/golden/compiled-values.bot	56.7
+cost	macos-aarch64	tests/golden/completion-regressions.bot	4.9
+cost	macos-aarch64	tests/golden/contexts.bot	31.4
+cost	macos-aarch64	tests/golden/core-semantics.bot	14.2
+cost	macos-aarch64	tests/golden/coroutines.bot	21.7
+cost	macos-aarch64	tests/golden/decimal-rounded.bot	10.0
+cost	macos-aarch64	tests/golden/declared-errors-imports.bot	3.4
+cost	macos-aarch64	tests/golden/declared-errors.bot	24.2
+cost	macos-aarch64	tests/golden/destructuring-instances.bot	4.6
+cost	macos-aarch64	tests/golden/destructuring.bot	76.4
+cost	macos-aarch64	tests/golden/diagnostic-recovery-imported.bot	1.4
+cost	macos-aarch64	tests/golden/diagnostic-recovery.bot	2.6
+cost	macos-aarch64	tests/golden/diagnostics.bot	9.3
+cost	macos-aarch64	tests/golden/errors.bot	5.1
+cost	macos-aarch64	tests/golden/flags.bot	19.4
+cost	macos-aarch64	tests/golden/float64.bot	9.2
+cost	macos-aarch64	tests/golden/fold-loops.bot	27.8
+cost	macos-aarch64	tests/golden/fold-virtual-construction.bot	15.2
+cost	macos-aarch64	tests/golden/framework-semantics.bot	17.1
+cost	macos-aarch64	tests/golden/gc-sensitive-values.bot	6.8
+cost	macos-aarch64	tests/golden/harness.bot	3.4
+cost	macos-aarch64	tests/golden/hashable-admission.bot	3.4
+cost	macos-aarch64	tests/golden/hashable.bot	7.7
+cost	macos-aarch64	tests/golden/hir-values.bot	2.2
+cost	macos-aarch64	tests/golden/immutable-map.bot	72.5
+cost	macos-aarch64	tests/golden/imports-abi-child.bot	2.3
+cost	macos-aarch64	tests/golden/imports-abi-family.bot	2.4
+cost	macos-aarch64	tests/golden/imports-library-modules.bot	5.2
+cost	macos-aarch64	tests/golden/imports-unimported.bot	2.5
+cost	macos-aarch64	tests/golden/imports.bot	15.7
+cost	macos-aarch64	tests/golden/layout-arrays.bot	14.3
+cost	macos-aarch64	tests/golden/layout-unions.bot	9.3
+cost	macos-aarch64	tests/golden/linux-io-native.bot	1.3
+cost	macos-aarch64	tests/golden/linux-io.bot	4.9
+cost	macos-aarch64	tests/golden/linux-transports.bot	3.2
+cost	macos-aarch64	tests/golden/list-flat.bot	11.4
+cost	macos-aarch64	tests/golden/lists-and-sets.bot	11.1
+cost	macos-aarch64	tests/golden/loop-collecting-refined-checks.bot	15.2
+cost	macos-aarch64	tests/golden/loop-collecting.bot	15.5
+cost	macos-aarch64	tests/golden/loops.bot	7.4
+cost	macos-aarch64	tests/golden/method-equivalence-imported.bot	7.6
+cost	macos-aarch64	tests/golden/method-equivalence.bot	9.8
+cost	macos-aarch64	tests/golden/methods-byte-without-list.bot	2.4
+cost	macos-aarch64	tests/golden/methods-list-without-str.bot	2.3
+cost	macos-aarch64	tests/golden/methods-struct-instances.bot	1.8
+cost	macos-aarch64	tests/golden/methods-type-import-only.bot	1.9
+cost	macos-aarch64	tests/golden/methods.bot	52.9
+cost	macos-aarch64	tests/golden/modules.bot	12.9
+cost	macos-aarch64	tests/golden/mutable-array.bot	59.4
+cost	macos-aarch64	tests/golden/mutable-map.bot	70.8
+cost	macos-aarch64	tests/golden/mutable-set.bot	28.5
+cost	macos-aarch64	tests/golden/mutable-vector-str.bot	2.3
+cost	macos-aarch64	tests/golden/mutable-vector.bot	20.5
+cost	macos-aarch64	tests/golden/names-and-scoping.bot	6.0
+cost	macos-aarch64	tests/golden/native-aggregates.bot	18.5
+cost	macos-aarch64	tests/golden/native-values.bot	16.2
+cost	macos-aarch64	tests/golden/nonplace-parameter-mutation.bot	26.4
+cost	macos-aarch64	tests/golden/numeric-looking-names.bot	1.4
+cost	macos-aarch64	tests/golden/numeric-text.bot	15.9
+cost	macos-aarch64	tests/golden/opaque-instances.bot	1.6
+cost	macos-aarch64	tests/golden/opaque.bot	23.9
+cost	macos-aarch64	tests/golden/ownership.bot	12.6
+cost	macos-aarch64	tests/golden/place-parameters.bot	8.5
+cost	macos-aarch64	tests/golden/range-and-contract-values.bot	38.9
+cost	macos-aarch64	tests/golden/raw-c-float-ffi.bot	7.7
+cost	macos-aarch64	tests/golden/raw-int-abi.bot	20.4
+cost	macos-aarch64	tests/golden/recursive-types.bot	3.4
+cost	macos-aarch64	tests/golden/refinements.bot	33.5
+cost	macos-aarch64	tests/golden/representation.bot	6.3
+cost	macos-aarch64	tests/golden/static-compile-erased-consumer.bot	2.4
+cost	macos-aarch64	tests/golden/static-compile-expected-diagnostics.bot	21.7
+cost	macos-aarch64	tests/golden/static-compile.bot	48.5
+cost	macos-aarch64	tests/golden/stdlib-namespaces-entry-members.bot	1.6
+cost	macos-aarch64	tests/golden/stdlib-namespaces-str-only.bot	2.3
+cost	macos-aarch64	tests/golden/stdlib-namespaces-unimported.bot	2.0
+cost	macos-aarch64	tests/golden/stdlib-namespaces.bot	21.7
+cost	macos-aarch64	tests/golden/string-natives.bot	20.9
+cost	macos-aarch64	tests/golden/string-representations.bot	7.4
+cost	macos-aarch64	tests/golden/strings.bot	22.2
+cost	macos-aarch64	tests/golden/struct-representation-instances.bot	2.5
+cost	macos-aarch64	tests/golden/struct-representation.bot	30.5
+cost	macos-aarch64	tests/golden/structs-and-enums-instances.bot	2.4
+cost	macos-aarch64	tests/golden/structs-and-enums.bot	24.8
+cost	macos-aarch64	tests/golden/trait-constrained-types.bot	13.3
+cost	macos-aarch64	tests/golden/traits-path.bot	5.3
+cost	macos-aarch64	tests/golden/traits.bot	48.6
+cost	macos-aarch64	tests/golden/tree-struct.bot	136.3
+cost	macos-aarch64	tests/golden/type-predicates.bot	6.2
+cost	macos-aarch64	tests/golden/types.bot	14.1
+cost	macos-aarch64	tests/golden/unicode-strings.bot	11.5
+cost	macos-aarch64	tests/golden/validators-and-proofs.bot	26.6
+cost	macos-aarch64	tests/golden/value-identity.bot	17.6
+cost	macos-aarch64	tests/golden/values.bot	8.1
+cost	macos-aarch64	tests/golden/variadics.bot	9.6
+cost	macos-aarch64	tests/golden/warning-programs.bot	9.7
+cost	macos-aarch64	tests/hashable.test	4.0
+cost	macos-aarch64	tests/higher-order-completions.test	5.4
+cost	macos-aarch64	tests/hir-aot.test	6.5
+cost	macos-aarch64	tests/hir-cache.test	1.7
+cost	macos-aarch64	tests/hir-call-facts.test	0.5
+cost	macos-aarch64	tests/hir-callable-target.test	0.6
+cost	macos-aarch64	tests/hir-cardinality.test	0.2
+cost	macos-aarch64	tests/hir-closed-call-params.test	2.8
+cost	macos-aarch64	tests/hir-interchange.test	2.9
+cost	macos-aarch64	tests/hir-lowering.test	0.6
+cost	macos-aarch64	tests/hir-range-bitop.test	0.1
+cost	macos-aarch64	tests/hir-range-exact.test	0.1
+cost	macos-aarch64	tests/hir-range.test	2.9
+cost	macos-aarch64	tests/hir-refinement.test	0.3
+cost	macos-aarch64	tests/hir-resolution.test	0.2
+cost	macos-aarch64	tests/hir-samples.test	0.4
+cost	macos-aarch64	tests/hir-specialize.test	9.1
+cost	macos-aarch64	tests/hir-syntax.test	0.2
+cost	macos-aarch64	tests/hir-text.test	1.0
+cost	macos-aarch64	tests/hir-types.test	0.4
+cost	macos-aarch64	tests/http-client.test	0.4
+cost	macos-aarch64	tests/immutable-map.test	122.6
+cost	macos-aarch64	tests/immutable-set.test	1.0
+cost	macos-aarch64	tests/imports.test	5.5
+cost	macos-aarch64	tests/inference.test	0.3
+cost	macos-aarch64	tests/instance-entry-range-facts.test	1.0
+cost	macos-aarch64	tests/interval-sets.test	2.3
+cost	macos-aarch64	tests/intrinsic-contracts.test	4.1
+cost	macos-aarch64	tests/layout-arrays.test	45.0
+cost	macos-aarch64	tests/layout-unions.test	37.2
+cost	macos-aarch64	tests/linux-path.test	71.5
+cost	macos-aarch64	tests/linux-syscall-transports.test	3.4
+cost	macos-aarch64	tests/linux-syscall.test	3.4
+cost	macos-aarch64	tests/list-flat.test	5.8
+cost	macos-aarch64	tests/list-length-refinement.test	4.0
+cost	macos-aarch64	tests/list-stdlib.test	1.0
+cost	macos-aarch64	tests/lists.test	0.2
+cost	macos-aarch64	tests/loop-clause-binding-types.test	1.2
+cost	macos-aarch64	tests/loop-collecting.test	4.9
+cost	macos-aarch64	tests/loop-counted.test	1.1
+cost	macos-aarch64	tests/loop-in.test	0.6
+cost	macos-aarch64	tests/loops.test	0.1
+cost	macos-aarch64	tests/lsp-neovim.test	0.1
+cost	macos-aarch64	tests/lsp.test	63.2
+cost	macos-aarch64	tests/main-cli.test	17.8
+cost	macos-aarch64	tests/main-recursion.test	7.2
+cost	macos-aarch64	tests/main-thread-startup.test	65.9
+cost	macos-aarch64	tests/many-boolean-arguments.test	62.6
+cost	macos-aarch64	tests/method-eligible.test	50.3
+cost	macos-aarch64	tests/method-filter.test	122.2
+cost	macos-aarch64	tests/method-receiver-types.test	109.7
+cost	macos-aarch64	tests/method-resolution.test	99.2
+cost	macos-aarch64	tests/method-sugar.test	44.9
+cost	macos-aarch64	tests/module-privacy.test	1.3
+cost	macos-aarch64	tests/module-static-values.test	4.0
+cost	macos-aarch64	tests/mutable-array-type.test	4.7
+cost	macos-aarch64	tests/mutable-array.test	9.3
+cost	macos-aarch64	tests/mutable-map.test	118.6
+cost	macos-aarch64	tests/mutable-set.test	23.4
+cost	macos-aarch64	tests/mutable-vector.test	23.4
+cost	macos-aarch64	tests/mutarray-construction.test	3.2
+cost	macos-aarch64	tests/namespaced-errors.test	3.4
+cost	macos-aarch64	tests/native-alloc.test	0.7
+cost	macos-aarch64	tests/native-bitshift.test	4.1
+cost	macos-aarch64	tests/native-bitwise-fold.test	0.5
+cost	macos-aarch64	tests/native-block-escape.test	5.3
+cost	macos-aarch64	tests/native-byte.test	3.2
+cost	macos-aarch64	tests/native-csv-records.test	177.9
+cost	macos-aarch64	tests/native-edit.test	34.8
+cost	macos-aarch64	tests/native-escape.test	4.1
+cost	macos-aarch64	tests/native-executable.test	7.6
+cost	macos-aarch64	tests/native-hashing.test	1.6
+cost	macos-aarch64	tests/native-hashtable.test	42.2
+cost	macos-aarch64	tests/native-library.test	0.3
+cost	macos-aarch64	tests/native-link-plan.test	7.3
+cost	macos-aarch64	tests/native-listloop.test	0.7
+cost	macos-aarch64	tests/native-lockstep-rejected.test	0.4
+cost	macos-aarch64	tests/native-mod-lowering.test	2.7
+cost	macos-aarch64	tests/native-mutarray.test	6.8
+cost	macos-aarch64	tests/native-param-aggregate.test	7.6
+cost	macos-aarch64	tests/native-program-output.test	0.5
+cost	macos-aarch64	tests/native-refinement-propagation.test	3.4
+cost	macos-aarch64	tests/native-report-inlined-leaf.test	3.2
+cost	macos-aarch64	tests/native-report-skipped-code.test	1.2
+cost	macos-aarch64	tests/native-result-bounds.test	1.8
+cost	macos-aarch64	tests/native-root-liveness.test	0.6
+cost	macos-aarch64	tests/native-root-storage.test	0.3
+cost	macos-aarch64	tests/native-stack-map.test	0.5
+cost	macos-aarch64	tests/native-stack-overflow.test	10.1
+cost	macos-aarch64	tests/native-string-region.test	2.8
+cost	macos-aarch64	tests/native-string-traversal.test	0.9
+cost	macos-aarch64	tests/native-string-view.test	2.4
+cost	macos-aarch64	tests/native-tcl-unicode.test	27.0
+cost	macos-aarch64	tests/native-tiny-leaf-inline.test	7.1
+cost	macos-aarch64	tests/native-tiny-leaf-pressure.test	143.7
+cost	macos-aarch64	tests/native-uri-escape.test	11.9
+cost	macos-aarch64	tests/native-view.test	15.2
+cost	macos-aarch64	tests/native.test	16.8
+cost	macos-aarch64	tests/nonplace-parameter-mutation.test	10.0
+cost	macos-aarch64	tests/not-callable.test	1.6
+cost	macos-aarch64	tests/numeric-looking-names.test	8.0
+cost	macos-aarch64	tests/numeric-text.test	2.2
+cost	macos-aarch64	tests/one-char-string-literal.test	40.2
+cost	macos-aarch64	tests/opaque-struct.test	10.8
+cost	macos-aarch64	tests/ordered-table.test	119.7
+cost	macos-aarch64	tests/owned-recursion.test	15.7
+cost	macos-aarch64	tests/package-authoring.test	1.3
+cost	macos-aarch64	tests/package-manager.test	27.0
+cost	macos-aarch64	tests/package-native.test	6.3
+cost	macos-aarch64	tests/package-workloads.test	6.4
+cost	macos-aarch64	tests/packed-ascii.test	7.8
+cost	macos-aarch64	tests/parameterized-declaration-summaries.test	205.7
+cost	macos-aarch64	tests/place-parameters.test	1.9
+cost	macos-aarch64	tests/portable-io.test	3.5
+cost	macos-aarch64	tests/proof-loop-intervals.test	1.8
+cost	macos-aarch64	tests/proven-bounds.test	12.6
+cost	macos-aarch64	tests/proves-naming.test	35.8
+cost	macos-aarch64	tests/range-completions-crosscheck.test	4.5
+cost	macos-aarch64	tests/range-fixpoint-scaling.test	4.1
+cost	macos-aarch64	tests/raven.test	0.2
+cost	macos-aarch64	tests/raw-c-float-ffi.test	11.1
+cost	macos-aarch64	tests/raw-count-loops.test	4.8
+cost	macos-aarch64	tests/raw-int-abi.test	51.3
+cost	macos-aarch64	tests/raw-internal-abi.test	4.6
+cost	macos-aarch64	tests/refined-signatures.test	0.7
+cost	macos-aarch64	tests/refined.test	0.2
+cost	macos-aarch64	tests/refinement-validators.test	6.7
+cost	macos-aarch64	tests/refinement-values.test	8.3
+cost	macos-aarch64	tests/refinements.test	0.2
+cost	macos-aarch64	tests/regex.test	0.1
+cost	macos-aarch64	tests/resources.test	10.9
+cost	macos-aarch64	tests/restricted-injection.test	22.3
+cost	macos-aarch64	tests/result-range-narrowing.test	1.4
+cost	macos-aarch64	tests/results.test	0.1
+cost	macos-aarch64	tests/same-failure.test	29.3
+cost	macos-aarch64	tests/scalarbits.test	0.2
+cost	macos-aarch64	tests/self-recursive-result-ranges.test	24.5
+cost	macos-aarch64	tests/semantic-instances.test	2.6
+cost	macos-aarch64	tests/sendability.test	25.7
+cost	macos-aarch64	tests/setcontains-equality-total.test	1.9
+cost	macos-aarch64	tests/setfromlist-equality-total.test	1.3
+cost	macos-aarch64	tests/short-demand.test	3.0
+cost	macos-aarch64	tests/short-string.test	13.9
+cost	macos-aarch64	tests/source-types.test	0.7
+cost	macos-aarch64	tests/static-compile-expected-diagnostics.test	51.6
+cost	macos-aarch64	tests/static-compile.test	5.3
+cost	macos-aarch64	tests/static-economics.test	82.3
+cost	macos-aarch64	tests/std-namespace.test	11.5
+cost	macos-aarch64	tests/stdlib-namespaces.test	6.1
+cost	macos-aarch64	tests/stdlib.test	132.5
+cost	macos-aarch64	tests/str-append-char.test	0.7
+cost	macos-aarch64	tests/str-char-at.test	0.8
+cost	macos-aarch64	tests/strict-references.test	3.3
+cost	macos-aarch64	tests/string-allocation.test	3.7
+cost	macos-aarch64	tests/struct-destructuring.test	28.2
+cost	macos-aarch64	tests/struct-scalar-replacement.test	12.1
+cost	macos-aarch64	tests/structs-syntax.test	16.2
+cost	macos-aarch64	tests/structs.test	3.1
+cost	macos-aarch64	tests/structural-contract-completions.test	8.5
+cost	macos-aarch64	tests/structural-fn-types.test	3.4
+cost	macos-aarch64	tests/surface-lexer.test	0.1
+cost	macos-aarch64	tests/surface-lowering.test	1.1
+cost	macos-aarch64	tests/surface-modules.test	2.8
+cost	macos-aarch64	tests/surface-parser.test	0.4
+cost	macos-aarch64	tests/surface-samples.test	0.8
+cost	macos-aarch64	tests/symbolic-type-identity.test	0.7
+cost	macos-aarch64	tests/syntax-highlighting.test	8.6
+cost	macos-aarch64	tests/syntax-recovery.test	19.5
+cost	macos-aarch64	tests/system-linker.test	11.7
+cost	macos-aarch64	tests/target-model.test	11.8
+cost	macos-aarch64	tests/threads.test	32.3
+cost	macos-aarch64	tests/trait-constrained-types.test	19.6
+cost	macos-aarch64	tests/traits.test	18.9
+cost	macos-aarch64	tests/tree-struct.test	269.9
+cost	macos-aarch64	tests/type-predicates.test	6.6
+cost	macos-aarch64	tests/typed-callable-escape.test	0.9
+cost	macos-aarch64	tests/typed-mutarray-builder.test	88.9
+cost	macos-aarch64	tests/typed-parameters.test	0.6
+cost	macos-aarch64	tests/types.test	0.1
+cost	macos-aarch64	tests/unicode-char.test	0.7
+cost	macos-aarch64	tests/unused-context.test	16.9
+cost	macos-aarch64	tests/utf16-bytes.test	23.9
+cost	macos-aarch64	tests/value-display.test	2.1
+cost	macos-aarch64	tests/value-identity.test	7.0
+cost	macos-aarch64	tests/value-transfer.test	221.9
+cost	macos-aarch64	tests/value-transport.test	22.2
+cost	macos-aarch64	tests/variadics.test	4.5
+cost	macos-aarch64	tests/vector-bounds.test	1.0
+cost	macos-aarch64	tests/virtual-construction.test	10.9
+cost	macos-aarch64	tests/warning-gate.test	844.6
+cost	macos-aarch64	tests/warnings.test	8.5
+cost	macos-aarch64	tests/web-unreserved.test	5.7
+cost	macos-aarch64	tests/windows-io.test	9.7
+cost	macos-aarch64	tests/workload-2048.test	44.7
+cost	macos-aarch64	tests/workload-icy-tower.test	309.7
+cost	macos-aarch64	tests/written-affine-applications.test	6.0
+
+cost	windows-x86_64	tests/abi-bytes.test	19.4
+cost	windows-x86_64	tests/abi-mutable-bytes.test	16.3
+cost	windows-x86_64	tests/abi-numeric.test	13.5
+cost	windows-x86_64	tests/acceptance.test	3.8
+cost	windows-x86_64	tests/actor.test	555.2
+cost	windows-x86_64	tests/affine-applications.test	3.0
+cost	windows-x86_64	tests/affine.test	14.6
+cost	windows-x86_64	tests/android-target.test	1.7
+cost	windows-x86_64	tests/aot-run.test	47.0
+cost	windows-x86_64	tests/aot-stub-linker.test	1.1
+cost	windows-x86_64	tests/application-modules.test	7.0
+cost	windows-x86_64	tests/applied-type-bound.test	32.7
+cost	windows-x86_64	tests/applied-types.test	2.8
+cost	windows-x86_64	tests/argv.test	15.6
+cost	windows-x86_64	tests/ascii.test	5.8
+cost	windows-x86_64	tests/backends.test	1.8
+cost	windows-x86_64	tests/bench-backends.test	2.2
+cost	windows-x86_64	tests/bench-corpus.test	15.1
+cost	windows-x86_64	tests/binary-layout.test	11.9
+cost	windows-x86_64	tests/bindings.test	1.9
+cost	windows-x86_64	tests/blockescape-called-generic.test	2.0
+cost	windows-x86_64	tests/blockescape-nested-capturers.test	3.7
+cost	windows-x86_64	tests/blocks.test	1.6
+cost	windows-x86_64	tests/bot-modules.test	68.9
+cost	windows-x86_64	tests/branch-form-boolean.test	71.8
+cost	windows-x86_64	tests/byte-set.test	3.5
+cost	windows-x86_64	tests/c-abi-types.test	7.7
+cost	windows-x86_64	tests/c-bindgen.test	77.9
+cost	windows-x86_64	tests/c-byte-borrowing.test	40.5
+cost	windows-x86_64	tests/c-callbacks.test	4.6
+cost	windows-x86_64	tests/c-compile.test	4.5
+cost	windows-x86_64	tests/c-ffi-error-capture.test	20.3
+cost	windows-x86_64	tests/c-ffi.test	112.5
+cost	windows-x86_64	tests/c-float-ffi.test	24.7
+cost	windows-x86_64	tests/c-pointer-borrowing.test	37.0
+cost	windows-x86_64	tests/calls.test	1.0
+cost	windows-x86_64	tests/canary.test	2.5
+cost	windows-x86_64	tests/checked-domain-proof-provenance.test	2.0
+cost	windows-x86_64	tests/close-callers-convergence.test	2.3
+cost	windows-x86_64	tests/closed-closure-entry-facts.test	3.1
+cost	windows-x86_64	tests/closure-int-keys.test	3.3
+cost	windows-x86_64	tests/collection-iteration.test	41.7
+cost	windows-x86_64	tests/collection-reorder.test	261.5
+cost	windows-x86_64	tests/compilation-isolation.test	32.5
+cost	windows-x86_64	tests/compiler-opt.test	12.4
+cost	windows-x86_64	tests/compiler-service.test	6.1
+cost	windows-x86_64	tests/compilerpedia.test	120.2
+cost	windows-x86_64	tests/concurrent-vms.test	96.3
+cost	windows-x86_64	tests/conjunctive-entry-facts.test	1.3
+cost	windows-x86_64	tests/consumed-fold-intermediates.test	35.6
+cost	windows-x86_64	tests/context-affine.test	5.5
+cost	windows-x86_64	tests/context-resource-escape.test	7.1
+cost	windows-x86_64	tests/context-traits.test	14.7
+cost	windows-x86_64	tests/contexts.test	12.0
+cost	windows-x86_64	tests/control.test	1.5
+cost	windows-x86_64	tests/coroutine-fusion.test	27.6
+cost	windows-x86_64	tests/coroutines.test	21.4
+cost	windows-x86_64	tests/csv-emission.test	37.2
+cost	windows-x86_64	tests/darwin-io.test	56.2
+cost	windows-x86_64	tests/decimal-rounded.test	10.3
+cost	windows-x86_64	tests/depth-safe-nesting.test	1388.8
+cost	windows-x86_64	tests/dfa-workloads.test	114.7
+cost	windows-x86_64	tests/dfa.test	63.8
+cost	windows-x86_64	tests/diagnostic-recovery.test	10.1
+cost	windows-x86_64	tests/direct-hir-native.test	89.4
+cost	windows-x86_64	tests/direct-modules.test	5.4
+cost	windows-x86_64	tests/dormant-instances.test	6.1
+cost	windows-x86_64	tests/elif.test	32.7
+cost	windows-x86_64	tests/emailish-predicate.test	13.1
+cost	windows-x86_64	tests/emission-claims.test	63.7
+cost	windows-x86_64	tests/empty-collection-admissibility.test	2.5
+cost	windows-x86_64	tests/enums.test	5.9
+cost	windows-x86_64	tests/error-payloads.test	11.2
+cost	windows-x86_64	tests/errors.test	3.0
+cost	windows-x86_64	tests/event-loop-linux.test	1.4
+cost	windows-x86_64	tests/event-loop.test	907.3
+cost	windows-x86_64	tests/exact-callable-executable.test	24.7
+cost	windows-x86_64	tests/exact-callable-key.test	6.7
+cost	windows-x86_64	tests/exact-value-facts.test	4.3
+cost	windows-x86_64	tests/external-tools.test	3.4
+cost	windows-x86_64	tests/filesystem.test	260.1
+cost	windows-x86_64	tests/fixed-arity-list-return.test	22.5
+cost	windows-x86_64	tests/flags.test	13.5
+cost	windows-x86_64	tests/float64.test	8.4
+cost	windows-x86_64	tests/fold-loops.test	10.4
+cost	windows-x86_64	tests/fold-virtual-construction.test	9.6
+cost	windows-x86_64	tests/golden-duplicates.test	5.2
+cost	windows-x86_64	tests/golden-framework.test	81.8
+cost	windows-x86_64	tests/golden.test	50.6
+cost	windows-x86_64	tests/golden/abi-bytes-native.bot	1.8
+cost	windows-x86_64	tests/golden/abi-bytes.bot	14.6
+cost	windows-x86_64	tests/golden/abi-numeric-native.bot	0.8
+cost	windows-x86_64	tests/golden/abi-numeric.bot	10.8
+cost	windows-x86_64	tests/golden/affinity.bot	15.2
+cost	windows-x86_64	tests/golden/binary-layout.bot	9.5
+cost	windows-x86_64	tests/golden/bits-bytes-hashing.bot	3.3
+cost	windows-x86_64	tests/golden/branch-form-boolean.bot	7.1
+cost	windows-x86_64	tests/golden/c-callbacks.bot	2.5
+cost	windows-x86_64	tests/golden/c-float-ffi.bot	2.9
+cost	windows-x86_64	tests/golden/callable-contracts-contravariant-rejected.bot	1.1
+cost	windows-x86_64	tests/golden/callable-contracts-contravariant.bot	1.8
+cost	windows-x86_64	tests/golden/callable-contracts-fallback.bot	2.3
+cost	windows-x86_64	tests/golden/callable-contracts-handle.bot	1.3
+cost	windows-x86_64	tests/golden/callable-contracts-returned.bot	1.4
+cost	windows-x86_64	tests/golden/callable-contracts-unerased.bot	1.0
+cost	windows-x86_64	tests/golden/callable-contracts.bot	34.7
+cost	windows-x86_64	tests/golden/callables.bot	29.0
+cost	windows-x86_64	tests/golden/closure-escape-instances.bot	0.6
+cost	windows-x86_64	tests/golden/closure-escape.bot	7.1
+cost	windows-x86_64	tests/golden/collection-iteration.bot	13.8
+cost	windows-x86_64	tests/golden/collection-reorder.bot	38.6
+cost	windows-x86_64	tests/golden/collections.bot	6.4
+cost	windows-x86_64	tests/golden/compiled-values-struct-transport.bot	3.9
+cost	windows-x86_64	tests/golden/compiled-values.bot	73.3
+cost	windows-x86_64	tests/golden/completion-regressions.bot	4.4
+cost	windows-x86_64	tests/golden/contexts.bot	14.6
+cost	windows-x86_64	tests/golden/core-semantics.bot	13.7
+cost	windows-x86_64	tests/golden/coroutines.bot	24.6
+cost	windows-x86_64	tests/golden/decimal-rounded.bot	10.7
+cost	windows-x86_64	tests/golden/declared-errors-imports.bot	1.8
+cost	windows-x86_64	tests/golden/declared-errors.bot	16.0
+cost	windows-x86_64	tests/golden/destructuring-instances.bot	5.7
+cost	windows-x86_64	tests/golden/destructuring.bot	64.1
+cost	windows-x86_64	tests/golden/diagnostic-recovery-imported.bot	0.8
+cost	windows-x86_64	tests/golden/diagnostic-recovery.bot	2.4
+cost	windows-x86_64	tests/golden/diagnostics.bot	9.7
+cost	windows-x86_64	tests/golden/errors.bot	6.4
+cost	windows-x86_64	tests/golden/flags.bot	9.9
+cost	windows-x86_64	tests/golden/float64.bot	8.2
+cost	windows-x86_64	tests/golden/fold-loops.bot	26.2
+cost	windows-x86_64	tests/golden/fold-virtual-construction.bot	15.0
+cost	windows-x86_64	tests/golden/framework-semantics.bot	11.2
+cost	windows-x86_64	tests/golden/gc-sensitive-values.bot	5.2
+cost	windows-x86_64	tests/golden/harness.bot	3.8
+cost	windows-x86_64	tests/golden/hashable-admission.bot	2.9
+cost	windows-x86_64	tests/golden/hashable.bot	5.1
+cost	windows-x86_64	tests/golden/hir-values.bot	2.4
+cost	windows-x86_64	tests/golden/immutable-map.bot	80.9
+cost	windows-x86_64	tests/golden/imports-abi-child.bot	2.6
+cost	windows-x86_64	tests/golden/imports-abi-family.bot	1.3
+cost	windows-x86_64	tests/golden/imports-library-modules.bot	3.7
+cost	windows-x86_64	tests/golden/imports-unimported.bot	4.1
+cost	windows-x86_64	tests/golden/imports.bot	15.1
+cost	windows-x86_64	tests/golden/layout-arrays.bot	10.6
+cost	windows-x86_64	tests/golden/layout-unions.bot	6.6
+cost	windows-x86_64	tests/golden/linux-io-native.bot	1.2
+cost	windows-x86_64	tests/golden/linux-io.bot	6.0
+cost	windows-x86_64	tests/golden/linux-transports.bot	2.2
+cost	windows-x86_64	tests/golden/list-flat.bot	10.1
+cost	windows-x86_64	tests/golden/lists-and-sets.bot	11.2
+cost	windows-x86_64	tests/golden/loop-collecting-refined-checks.bot	20.8
+cost	windows-x86_64	tests/golden/loop-collecting.bot	11.4
+cost	windows-x86_64	tests/golden/loops.bot	5.5
+cost	windows-x86_64	tests/golden/method-equivalence-imported.bot	8.5
+cost	windows-x86_64	tests/golden/method-equivalence.bot	7.8
+cost	windows-x86_64	tests/golden/methods-byte-without-list.bot	2.0
+cost	windows-x86_64	tests/golden/methods-list-without-str.bot	2.1
+cost	windows-x86_64	tests/golden/methods-struct-instances.bot	1.8
+cost	windows-x86_64	tests/golden/methods-type-import-only.bot	2.1
+cost	windows-x86_64	tests/golden/methods.bot	27.3
+cost	windows-x86_64	tests/golden/modules.bot	11.8
+cost	windows-x86_64	tests/golden/mutable-array.bot	92.3
+cost	windows-x86_64	tests/golden/mutable-map.bot	79.5
+cost	windows-x86_64	tests/golden/mutable-set.bot	16.1
+cost	windows-x86_64	tests/golden/mutable-vector-str.bot	1.3
+cost	windows-x86_64	tests/golden/mutable-vector.bot	25.4
+cost	windows-x86_64	tests/golden/names-and-scoping.bot	6.1
+cost	windows-x86_64	tests/golden/native-aggregates.bot	7.7
+cost	windows-x86_64	tests/golden/native-values.bot	12.2
+cost	windows-x86_64	tests/golden/nonplace-parameter-mutation.bot	28.5
+cost	windows-x86_64	tests/golden/numeric-looking-names.bot	1.4
+cost	windows-x86_64	tests/golden/numeric-text.bot	8.2
+cost	windows-x86_64	tests/golden/opaque-instances.bot	1.2
+cost	windows-x86_64	tests/golden/opaque.bot	30.6
+cost	windows-x86_64	tests/golden/ownership.bot	10.9
+cost	windows-x86_64	tests/golden/place-parameters.bot	5.0
+cost	windows-x86_64	tests/golden/range-and-contract-values.bot	33.9
+cost	windows-x86_64	tests/golden/raw-c-float-ffi.bot	8.0
+cost	windows-x86_64	tests/golden/raw-int-abi.bot	22.5
+cost	windows-x86_64	tests/golden/recursive-types.bot	1.7
+cost	windows-x86_64	tests/golden/refinements.bot	24.8
+cost	windows-x86_64	tests/golden/representation.bot	5.3
+cost	windows-x86_64	tests/golden/static-compile-erased-consumer.bot	2.2
+cost	windows-x86_64	tests/golden/static-compile-expected-diagnostics.bot	9.7
+cost	windows-x86_64	tests/golden/static-compile.bot	26.1
+cost	windows-x86_64	tests/golden/stdlib-namespaces-entry-members.bot	1.7
+cost	windows-x86_64	tests/golden/stdlib-namespaces-str-only.bot	1.7
+cost	windows-x86_64	tests/golden/stdlib-namespaces-unimported.bot	1.3
+cost	windows-x86_64	tests/golden/stdlib-namespaces.bot	17.3
+cost	windows-x86_64	tests/golden/string-natives.bot	13.7
+cost	windows-x86_64	tests/golden/string-representations.bot	7.5
+cost	windows-x86_64	tests/golden/strings.bot	11.3
+cost	windows-x86_64	tests/golden/struct-representation-instances.bot	2.3
+cost	windows-x86_64	tests/golden/struct-representation.bot	27.3
+cost	windows-x86_64	tests/golden/structs-and-enums-instances.bot	1.6
+cost	windows-x86_64	tests/golden/structs-and-enums.bot	14.1
+cost	windows-x86_64	tests/golden/trait-constrained-types.bot	12.0
+cost	windows-x86_64	tests/golden/traits-path.bot	6.1
+cost	windows-x86_64	tests/golden/traits.bot	40.6
+cost	windows-x86_64	tests/golden/tree-struct.bot	76.3
+cost	windows-x86_64	tests/golden/type-predicates.bot	5.6
+cost	windows-x86_64	tests/golden/types.bot	19.3
+cost	windows-x86_64	tests/golden/unicode-strings.bot	10.7
+cost	windows-x86_64	tests/golden/validators-and-proofs.bot	20.0
+cost	windows-x86_64	tests/golden/value-identity.bot	15.1
+cost	windows-x86_64	tests/golden/values.bot	9.3
+cost	windows-x86_64	tests/golden/variadics.bot	12.2
+cost	windows-x86_64	tests/golden/warning-programs.bot	5.0
+cost	windows-x86_64	tests/hashable.test	5.8
+cost	windows-x86_64	tests/higher-order-completions.test	5.9
+cost	windows-x86_64	tests/hir-aot.test	7.6
+cost	windows-x86_64	tests/hir-cache.test	4.4
+cost	windows-x86_64	tests/hir-call-facts.test	1.3
+cost	windows-x86_64	tests/hir-callable-target.test	2.0
+cost	windows-x86_64	tests/hir-cardinality.test	1.8
+cost	windows-x86_64	tests/hir-closed-call-params.test	4.0
+cost	windows-x86_64	tests/hir-interchange.test	3.4
+cost	windows-x86_64	tests/hir-lowering.test	2.1
+cost	windows-x86_64	tests/hir-range-bitop.test	1.4
+cost	windows-x86_64	tests/hir-range-exact.test	1.8
+cost	windows-x86_64	tests/hir-range.test	5.1
+cost	windows-x86_64	tests/hir-refinement.test	1.0
+cost	windows-x86_64	tests/hir-resolution.test	1.5
+cost	windows-x86_64	tests/hir-samples.test	2.0
+cost	windows-x86_64	tests/hir-specialize.test	11.8
+cost	windows-x86_64	tests/hir-syntax.test	1.9
+cost	windows-x86_64	tests/hir-text.test	1.7
+cost	windows-x86_64	tests/hir-types.test	1.6
+cost	windows-x86_64	tests/http-client.test	2.1
+cost	windows-x86_64	tests/immutable-map.test	157.4
+cost	windows-x86_64	tests/immutable-set.test	1.9
+cost	windows-x86_64	tests/imports.test	6.6
+cost	windows-x86_64	tests/inference.test	1.1
+cost	windows-x86_64	tests/instance-entry-range-facts.test	2.4
+cost	windows-x86_64	tests/interval-sets.test	5.4
+cost	windows-x86_64	tests/intrinsic-contracts.test	3.8
+cost	windows-x86_64	tests/layout-arrays.test	48.2
+cost	windows-x86_64	tests/layout-unions.test	52.0
+cost	windows-x86_64	tests/linux-path.test	55.2
+cost	windows-x86_64	tests/linux-syscall-transports.test	3.2
+cost	windows-x86_64	tests/linux-syscall.test	5.2
+cost	windows-x86_64	tests/list-flat.test	10.0
+cost	windows-x86_64	tests/list-length-refinement.test	6.9
+cost	windows-x86_64	tests/list-stdlib.test	1.6
+cost	windows-x86_64	tests/lists.test	1.5
+cost	windows-x86_64	tests/loop-clause-binding-types.test	2.5
+cost	windows-x86_64	tests/loop-collecting.test	8.4
+cost	windows-x86_64	tests/loop-counted.test	3.3
+cost	windows-x86_64	tests/loop-in.test	1.4
+cost	windows-x86_64	tests/loops.test	1.8
+cost	windows-x86_64	tests/lsp-neovim.test	1.4
+cost	windows-x86_64	tests/lsp.test	76.0
+cost	windows-x86_64	tests/main-cli.test	25.1
+cost	windows-x86_64	tests/main-recursion.test	6.4
+cost	windows-x86_64	tests/main-thread-startup.test	5.1
+cost	windows-x86_64	tests/many-boolean-arguments.test	61.6
+cost	windows-x86_64	tests/method-eligible.test	74.9
+cost	windows-x86_64	tests/method-filter.test	94.0
+cost	windows-x86_64	tests/method-receiver-types.test	116.8
+cost	windows-x86_64	tests/method-resolution.test	149.2
+cost	windows-x86_64	tests/method-sugar.test	54.3
+cost	windows-x86_64	tests/module-privacy.test	2.4
+cost	windows-x86_64	tests/module-static-values.test	5.1
+cost	windows-x86_64	tests/mutable-array-type.test	9.0
+cost	windows-x86_64	tests/mutable-array.test	14.2
+cost	windows-x86_64	tests/mutable-map.test	77.2
+cost	windows-x86_64	tests/mutable-set.test	26.2
+cost	windows-x86_64	tests/mutable-vector.test	30.6
+cost	windows-x86_64	tests/mutarray-construction.test	7.2
+cost	windows-x86_64	tests/namespaced-errors.test	4.5
+cost	windows-x86_64	tests/native-alloc.test	2.0
+cost	windows-x86_64	tests/native-bitshift.test	7.0
+cost	windows-x86_64	tests/native-bitwise-fold.test	2.2
+cost	windows-x86_64	tests/native-block-escape.test	6.8
+cost	windows-x86_64	tests/native-byte.test	5.0
+cost	windows-x86_64	tests/native-csv-records.test	204.0
+cost	windows-x86_64	tests/native-edit.test	45.5
+cost	windows-x86_64	tests/native-escape.test	3.8
+cost	windows-x86_64	tests/native-executable.test	16.8
+cost	windows-x86_64	tests/native-hashing.test	3.8
+cost	windows-x86_64	tests/native-hashtable.test	54.0
+cost	windows-x86_64	tests/native-library.test	1.4
+cost	windows-x86_64	tests/native-link-plan.test	16.6
+cost	windows-x86_64	tests/native-listloop.test	2.9
+cost	windows-x86_64	tests/native-lockstep-rejected.test	2.4
+cost	windows-x86_64	tests/native-mod-lowering.test	3.3
+cost	windows-x86_64	tests/native-mutarray.test	6.6
+cost	windows-x86_64	tests/native-param-aggregate.test	11.3
+cost	windows-x86_64	tests/native-program-output.test	2.5
+cost	windows-x86_64	tests/native-refinement-propagation.test	3.8
+cost	windows-x86_64	tests/native-report-inlined-leaf.test	4.5
+cost	windows-x86_64	tests/native-report-skipped-code.test	2.8
+cost	windows-x86_64	tests/native-result-bounds.test	4.3
+cost	windows-x86_64	tests/native-root-liveness.test	1.7
+cost	windows-x86_64	tests/native-root-storage.test	1.6
+cost	windows-x86_64	tests/native-stack-map.test	2.4
+cost	windows-x86_64	tests/native-stack-overflow.test	23.4
+cost	windows-x86_64	tests/native-string-region.test	3.5
+cost	windows-x86_64	tests/native-string-traversal.test	2.5
+cost	windows-x86_64	tests/native-string-view.test	5.3
+cost	windows-x86_64	tests/native-tcl-unicode.test	38.4
+cost	windows-x86_64	tests/native-tiny-leaf-inline.test	6.3
+cost	windows-x86_64	tests/native-tiny-leaf-pressure.test	139.0
+cost	windows-x86_64	tests/native-uri-escape.test	21.2
+cost	windows-x86_64	tests/native-view.test	22.7
+cost	windows-x86_64	tests/native.test	12.8
+cost	windows-x86_64	tests/nonplace-parameter-mutation.test	11.1
+cost	windows-x86_64	tests/not-callable.test	3.8
+cost	windows-x86_64	tests/numeric-looking-names.test	15.1
+cost	windows-x86_64	tests/numeric-text.test	3.1
+cost	windows-x86_64	tests/one-char-string-literal.test	42.9
+cost	windows-x86_64	tests/opaque-struct.test	21.4
+cost	windows-x86_64	tests/ordered-table.test	170.2
+cost	windows-x86_64	tests/owned-recursion.test	12.6
+cost	windows-x86_64	tests/package-authoring.test	5.4
+cost	windows-x86_64	tests/package-manager.test	30.9
+cost	windows-x86_64	tests/package-native.test	11.9
+cost	windows-x86_64	tests/package-workloads.test	6.3
+cost	windows-x86_64	tests/packed-ascii.test	12.0
+cost	windows-x86_64	tests/parameterized-declaration-summaries.test	273.6
+cost	windows-x86_64	tests/place-parameters.test	4.2
+cost	windows-x86_64	tests/portable-io.test	4.2
+cost	windows-x86_64	tests/proof-loop-intervals.test	3.1
+cost	windows-x86_64	tests/proven-bounds.test	23.7
+cost	windows-x86_64	tests/proves-naming.test	54.9
+cost	windows-x86_64	tests/range-completions-crosscheck.test	4.4
+cost	windows-x86_64	tests/range-fixpoint-scaling.test	5.7
+cost	windows-x86_64	tests/raven.test	1.8
+cost	windows-x86_64	tests/raw-c-float-ffi.test	24.4
+cost	windows-x86_64	tests/raw-count-loops.test	4.9
+cost	windows-x86_64	tests/raw-int-abi.test	49.7
+cost	windows-x86_64	tests/raw-internal-abi.test	7.7
+cost	windows-x86_64	tests/refined-signatures.test	2.5
+cost	windows-x86_64	tests/refined.test	1.1
+cost	windows-x86_64	tests/refinement-validators.test	8.6
+cost	windows-x86_64	tests/refinement-values.test	13.2
+cost	windows-x86_64	tests/refinements.test	1.8
+cost	windows-x86_64	tests/regex.test	1.0
+cost	windows-x86_64	tests/resources.test	15.4
+cost	windows-x86_64	tests/restricted-injection.test	14.2
+cost	windows-x86_64	tests/result-range-narrowing.test	2.9
+cost	windows-x86_64	tests/results.test	1.4
+cost	windows-x86_64	tests/same-failure.test	44.0
+cost	windows-x86_64	tests/scalarbits.test	2.0
+cost	windows-x86_64	tests/self-recursive-result-ranges.test	18.3
+cost	windows-x86_64	tests/semantic-instances.test	3.3
+cost	windows-x86_64	tests/sendability.test	36.6
+cost	windows-x86_64	tests/setcontains-equality-total.test	4.5
+cost	windows-x86_64	tests/setfromlist-equality-total.test	2.2
+cost	windows-x86_64	tests/short-demand.test	4.8
+cost	windows-x86_64	tests/short-string.test	16.1
+cost	windows-x86_64	tests/source-types.test	2.6
+cost	windows-x86_64	tests/static-compile-expected-diagnostics.test	37.1
+cost	windows-x86_64	tests/static-compile.test	7.2
+cost	windows-x86_64	tests/static-economics.test	99.3
+cost	windows-x86_64	tests/std-namespace.test	8.5
+cost	windows-x86_64	tests/stdlib-namespaces.test	8.1
+cost	windows-x86_64	tests/stdlib.test	126.8
+cost	windows-x86_64	tests/str-append-char.test	2.6
+cost	windows-x86_64	tests/str-char-at.test	2.6
+cost	windows-x86_64	tests/strict-references.test	3.4
+cost	windows-x86_64	tests/string-allocation.test	6.3
+cost	windows-x86_64	tests/struct-destructuring.test	39.6
+cost	windows-x86_64	tests/struct-scalar-replacement.test	20.1
+cost	windows-x86_64	tests/structs-syntax.test	11.2
+cost	windows-x86_64	tests/structs.test	4.7
+cost	windows-x86_64	tests/structural-contract-completions.test	13.8
+cost	windows-x86_64	tests/structural-fn-types.test	5.9
+cost	windows-x86_64	tests/surface-lexer.test	1.0
+cost	windows-x86_64	tests/surface-lowering.test	2.3
+cost	windows-x86_64	tests/surface-modules.test	5.1
+cost	windows-x86_64	tests/surface-parser.test	2.2
+cost	windows-x86_64	tests/surface-samples.test	2.7
+cost	windows-x86_64	tests/symbolic-type-identity.test	1.5
+cost	windows-x86_64	tests/syntax-highlighting.test	6.7
+cost	windows-x86_64	tests/syntax-recovery.test	24.2
+cost	windows-x86_64	tests/system-linker.test	14.5
+cost	windows-x86_64	tests/target-model.test	10.3
+cost	windows-x86_64	tests/threads.test	32.5
+cost	windows-x86_64	tests/trait-constrained-types.test	21.6
+cost	windows-x86_64	tests/traits.test	28.4
+cost	windows-x86_64	tests/tree-struct.test	181.6
+cost	windows-x86_64	tests/type-predicates.test	9.2
+cost	windows-x86_64	tests/typed-callable-escape.test	2.6
+cost	windows-x86_64	tests/typed-mutarray-builder.test	101.9
+cost	windows-x86_64	tests/typed-parameters.test	1.5
+cost	windows-x86_64	tests/types.test	1.4
+cost	windows-x86_64	tests/unicode-char.test	2.8
+cost	windows-x86_64	tests/unused-context.test	24.9
+cost	windows-x86_64	tests/utf16-bytes.test	21.5
+cost	windows-x86_64	tests/value-display.test	3.0
+cost	windows-x86_64	tests/value-identity.test	10.8
+cost	windows-x86_64	tests/value-transfer.test	380.6
+cost	windows-x86_64	tests/value-transport.test	19.9
+cost	windows-x86_64	tests/variadics.test	5.0
+cost	windows-x86_64	tests/vector-bounds.test	2.6
+cost	windows-x86_64	tests/virtual-construction.test	15.3
+cost	windows-x86_64	tests/warning-gate.test	778.3
+cost	windows-x86_64	tests/warnings.test	10.0
+cost	windows-x86_64	tests/web-unreserved.test	7.9
+cost	windows-x86_64	tests/windows-io.test	30.7
+cost	windows-x86_64	tests/workload-2048.test	35.9
+cost	windows-x86_64	tests/workload-icy-tower.test	147.6
+cost	windows-x86_64	tests/written-affine-applications.test	9.5

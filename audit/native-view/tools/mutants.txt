@@ -263,7 +263,7 @@ core::native::declareDirectNamespace std::binary::native
 @@ untyped-receiver-accepted a field read through a view whose type is not static (an untyped function's instance) is accepted
 ## hir/semantic.tcl
 <<<<
-        hir::layouts::verifyInstance view $hir [Region $view $block]
+            hir::layouts::verifyInstance hir $generic $region
 ====
 >>>>
 

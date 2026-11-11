@@ -1,0 +1,8 @@
+# Probe A4: an export whose body may suspend (it yields). Expected today:
+# EXPORT-ENVIRONMENT (may suspend).
+struct Tick:
+    n: int
+
+exported c fn step(resume Tick) -> int:
+    t = yield 1
+    t.n

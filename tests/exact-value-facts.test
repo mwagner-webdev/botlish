@@ -616,11 +616,11 @@ test ev-outer-constant-proves-domain {a program-level constant is its exact valu
 
 test ev-outer-constant-out-of-domain {the constant's value is read, not assumed: size = 5 makes size - 1 exactly 4 and the loop variable [0, 4], both outside 0..3, and the program is rejected at both} -body {
     evDiagnostics [evOuterProgram 5]
-} -result {{TYPE {function result does not prove declared type int[Coordinate] (facts: [4, 4] {4})}} {TYPE {argument for parameter "n" cannot be proven to satisfy int[Coordinate] (argument type: int, facts: [0, 4])}}}
+} -result {{TYPE {function result does not prove declared type int[Coordinate] (result type: int, facts: [4, 4] {4})}} {TYPE {argument for parameter "n" cannot be proven to satisfy int[Coordinate] (argument type: int, facts: [0, 4])}}}
 
 test ev-outer-computed-not-a-fact {a binding of a value the compiler does not know exactly is no fact: size = four() (a user function's result, 4 at run time) leaves size - 1 unknown, the loop variable [0, +inf] and TooBig possible -- rejected as before} -body {
     evDiagnostics "fn four() -> int:\n    4\n\n[evOuterProgram {four()}]"
-} -result {{TYPE {function result does not prove declared type int[Coordinate] (facts: [-∞, +∞])}} {TYPE {argument for parameter "n" cannot be proven to satisfy int[Coordinate] (argument type: int, facts: [0, +∞])}} {UNHANDLED-ERROR {this call may produce the declared error "TooBig", which is neither handled here nor admitted by the enclosing function's own "errors" declaration}} {UNHANDLED-ERROR {this call may produce the declared error "TooBig", which is neither handled here nor admitted by the enclosing function's own "errors" declaration}}}
+} -result {{TYPE {function result does not prove declared type int[Coordinate] (result type: int, facts: [-∞, +∞])}} {TYPE {argument for parameter "n" cannot be proven to satisfy int[Coordinate] (argument type: int, facts: [0, +∞])}} {UNHANDLED-ERROR {this call may produce the declared error "TooBig", which is neither handled here nor admitted by the enclosing function's own "errors" declaration}} {UNHANDLED-ERROR {this call may produce the declared error "TooBig", which is neither handled here nor admitted by the enclosing function's own "errors" declaration}}}
 
 test ev-outer-constant-both-walks {the range analysis and the completion walk read one fact for a binding from outside the function: `size` in last's body is the point 4 in both (size = base * 2, an exact fold through base), and unknown in both for size = four()} -body {
     list [evOuterRanges [evOuterProgram {base * 2}]] \

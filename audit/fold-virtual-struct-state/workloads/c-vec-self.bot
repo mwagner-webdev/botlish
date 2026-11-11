@@ -1,0 +1,29 @@
+# c-vec-self.bot -- FOLD-VIRTUAL-STRUCT-STATE-CENSUS-1.md, Probe C: the
+# struct of c-vec-literal.bot completed by the intermediate itself (`a`):
+# no struct is built per iteration (the consumed fold's own struct shape,
+# bench/consumed-folds.tcl's fold-struct). The count is the vector's length.
+# The control for c-vec-literal.bot: what a literal completion adds.
+#
+# expect: [1024, 523776]
+
+import std::mutable_vector
+
+struct Acc:
+    count: int
+    items: MutableVector[int]
+
+fn ints() -> MutableVector[int]:
+    std::mutable_vector::from_list([])
+
+fn build(n: int) -> Acc:
+    fold i from 0 to n with intermediate a Acc {count: 0, items: ints()}:
+        a.items.push(i)
+        a
+
+fn total(v: MutableVector[int]) -> int:
+    fold i from 0 to v.length() with intermediate s 0:
+        s + v.at(i)
+
+n = 1024
+r = build(n)
+[r.items.length(), total(r.items)]

@@ -36,8 +36,16 @@ use cranelift_module::{DataId, Linkage, Module};
 /// Whether this host makes native libraries: Linux glibc on x86-64 and
 /// AArch64, where the library's archive is made with GNU binutils' partial
 /// link and symbol localization (native::library) and the runtime walks
-/// frames by frame pointer up to the call's ceiling.
-pub const SUPPORTED: bool = cfg!(all(target_os = "linux", target_env = "gnu", any(target_arch = "x86_64", target_arch = "aarch64")));
+/// frames by frame pointer up to the call's ceiling; and Windows x86-64 with
+/// MSVC's toolchain (WINDOWS-X86-64-MILESTONE-8.md), where the library is a
+/// DLL link.exe links from the program object and the runtime archive
+/// (codegen::aot's `link_windows_library`), exporting exactly its public
+/// functions, and the runtime walks Botlish frames by their records and the
+/// others with Windows' unwinder, up to the call's ceiling.
+pub const SUPPORTED: bool = cfg!(any(
+    all(target_os = "linux", target_env = "gnu", any(target_arch = "x86_64", target_arch = "aarch64")),
+    all(target_os = "windows", target_env = "msvc", target_arch = "x86_64")
+));
 
 /// Whether a native library of TARGET is made: Linux glibc on x86-64 and
 /// AArch64, and Android on AArch64 (ANDROID-AARCH64-TARGET-SUPPORT-
@@ -48,12 +56,17 @@ pub const SUPPORTED: bool = cfg!(all(target_os = "linux", target_env = "gnu", an
 pub fn supports(target: &target_lexicon::Triple) -> bool {
     use target_lexicon::{Architecture, Environment, OperatingSystem};
     let aarch64 = matches!(target.architecture, Architecture::Aarch64(_));
-    target.operating_system == OperatingSystem::Linux
-        && match target.environment {
+    match target.operating_system {
+        OperatingSystem::Linux => match target.environment {
             Environment::Gnu => aarch64 || target.architecture == Architecture::X86_64,
             Environment::Android => aarch64,
             _ => false,
-        }
+        },
+        // Windows x86-64, MSVC's ABI (WINDOWS-X86-64-MILESTONE-8.md): a DLL,
+        // made on its own host only (the driver's `library-dll`).
+        OperatingSystem::Windows => target.environment == Environment::Msvc && target.architecture == Architecture::X86_64,
+        _ => false,
+    }
 }
 
 fn module_error(e: cranelift_module::ModuleError) -> BackendError {
@@ -79,9 +92,25 @@ fn result_type(spelling: &str) -> Option<cranelift_codegen::ir::Type> {
     }
 }
 
+/// A public C function `define` wrote: its id, its code's size and, where
+/// the module's code is Windows x86-64's, its `UNWIND_INFO`
+/// (codegen::unwind), which the object's `.pdata` and `.xdata` carry as
+/// every Botlish function's do (codegen::add_windows_unwind): a trampoline
+/// and a forwarder have frames, and Windows' unwinder -- an exception
+/// dispatched through the call, a debugger's or a profiler's stack trace,
+/// the host's own unwinding -- must never take one for a leaf
+/// (WINDOWS-X86-64-MILESTONE-8.md, "Unwind information").
+pub struct Defined {
+    pub id: cranelift_module::FuncId,
+    pub size: u32,
+    pub unwind: Option<Vec<u8>>,
+}
+
 /// Defines the public C functions of library NAME over PROGRAM in MODULE,
-/// RECORD being the program's `botlish_program` record.
-pub fn define<M: Module>(module: &mut M, program: &Program, name: &str, record: DataId) -> Result<(), BackendError> {
+/// RECORD being the program's `botlish_program` record. Returns each one's
+/// `Defined`.
+pub fn define<M: Module>(module: &mut M, program: &Program, name: &str, record: DataId) -> Result<Vec<Defined>, BackendError> {
+    let mut defined = Vec::new();
     let mut fctx = FunctionBuilderContext::new();
     for &(suffix, runtime, words, result, with_program) in FORWARDERS {
         let ret = result_type(result);
@@ -114,6 +143,7 @@ pub fn define<M: Module>(module: &mut M, program: &Program, name: &str, record: 
             b.finalize(module.isa().frontend_config());
         }
         module.define_function(id, &mut ctx).map_err(module_error)?;
+        defined.push(compiled(module, &ctx, id, &format!("the forwarder {name}_{suffix}"))?);
         module.clear_context(&mut ctx);
     }
 
@@ -183,7 +213,15 @@ pub fn define<M: Module>(module: &mut M, program: &Program, name: &str, record: 
             b.finalize(module.isa().frontend_config());
         }
         module.define_function(id, &mut ctx).map_err(module_error)?;
+        defined.push(compiled(module, &ctx, id, &format!("the trampoline {}", export.symbol))?);
         module.clear_context(&mut ctx);
     }
-    Ok(())
+    Ok(defined)
+}
+
+/// The `Defined` of function ID, just compiled in CTX.
+fn compiled<M: Module>(module: &M, ctx: &cranelift_codegen::Context, id: cranelift_module::FuncId, what: &str) -> Result<Defined, BackendError> {
+    let size = ctx.compiled_code().map_or(0, |code| code.code_info().total_size);
+    let unwind = super::clif::windows_unwind(module, ctx, what)?;
+    Ok(Defined { id, size, unwind })
 }

@@ -1,0 +1,54 @@
+# a-scan2-recursive.bot -- FOLD-VIRTUAL-STRUCT-STATE-CENSUS-1.md, Probe A: a-scan2-fold.bot's transitions as self tail calls, the 2 fields as parameters (audit/fold-loops/workloads/scanner-recursive.bot reduced).
+#
+# expect: [26]
+
+import std::char
+import std::str
+
+struct Scan:
+    pos: int
+    idents: int
+
+struct Number:
+    pos: int
+    value: int
+
+fn ident_char?(c: UnicodeChar) -> bool:
+    std::char::is_tcl_alpha(c) or c == '_'
+
+fn ident_end(text: str, p: int) -> int:
+    if p < 0 or p >= std::str::length(text) or not ident_char?(text.char_at(p)):
+        return p
+    text.ident_end(p + 1)
+
+fn line_end(text: str, p: int) -> int:
+    if p < 0 or p >= std::str::length(text) or text.char_at(p) == '\n':
+        return p
+    text.line_end(p + 1)
+
+fn number_from(text: str, p: int, value: int) -> Number:
+    if p < 0 or p >= std::str::length(text):
+        return Number {pos: p, value: value}
+    v = std::char::scalar_value(text.char_at(p))
+    if v < 48 or v > 57:
+        return Number {pos: p, value: value}
+    text.number_from(p + 1, value * 10 + v - 48)
+
+fn scan_from(text: str, p: int, idents: int) -> Scan:
+    if p < 0 or p >= std::str::length(text):
+        return Scan {pos: p, idents: idents}
+    c = text.char_at(p)
+    v = std::char::scalar_value(c)
+    if v >= 48 and v <= 57:
+        num = text.number_from(p, 0)
+        return text.scan_from(num.pos, idents)
+    if ident_char?(c):
+        return text.scan_from(text.ident_end(p), idents + 1)
+    if c == '#':
+        return text.scan_from(text.line_end(p), idents)
+    text.scan_from(p + 1, idents)
+
+text = "(define (square x) (mul x x)) # squares 12\nlet total_42 = 7 (plus 100 (minus 3 2))\n(define (cube y) (mul y (mul y y))) # 3 levels\nlet limit = 250 (max 9 (min 81 (abs 6)))\n(list 1 2 3) # done 999\n(sum (range 0 10) 600)\n"
+
+r = text.scan_from(0, 0)
+[r.idents]

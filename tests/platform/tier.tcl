@@ -43,8 +43,14 @@
 # (audit/abi-bytes/tools/utf16-mutate.tcl: the codec's mutants, Tcl and
 # native; `utf16-mutants=NAME,...` only those) or `utf16-bench`
 # (bench/utf16-bytes.tcl and bench/filesystem.tcl, each against the tree
-# before UTF16-BYTE-STORAGE-MILESTONE-1, on the same runner); the last twenty
-# are never part of a tier.
+# before UTF16-BYTE-STORAGE-MILESTONE-1, on the same runner),
+# `native-library-fuzz` (audit/native-library/tools/fuzz.tcl: the C
+# boundary and the lifecycle against an independent model),
+# `native-library-mutants` (audit/native-library/tools/mutate.tcl: native
+# libraries' mutants for this host, WINDOWS-X86-64-MILESTONE-8.md;
+# `native-library-mutants=NAME,...` only those) or `native-library-bench`
+# (bench/native-library.tcl: the library boundary's costs and sizes); the
+# last twenty-three are never part of a tier.
 #
 #   smoke       cabi, examples and a dozen front-end test files that never
 #               reach the native backend: about 15 seconds
@@ -93,16 +99,22 @@
 #   utf16-fuzz            tclsh9.0 audit/abi-bytes/tools/utf16-fuzz.tcl -seed S,
 #                         seeds 1 and 2, and -seed 9 -gc-stress 1
 #   utf16-mutants         tclsh9.0 audit/abi-bytes/tools/utf16-mutate.tcl ?-only NAMES?
+#   native-library-fuzz   tclsh9.0 audit/native-library/tools/fuzz.tcl -seed S, seeds 1
+#                         and 2, and -seed 9 -gc-stress 1
+#   native-library-mutants  tclsh9.0 audit/native-library/tools/mutate.tcl -first 1 ?-only NAMES?
+#   native-library-bench  tclsh9.0 bench/native-library.tcl
 #   utf16-bench           tclsh9.0 bench/utf16-bytes.tcl and bench/filesystem.tcl,
 #                         each -baseline-rev f9e0ed0 (the commit before the
 #                         milestone)
 #
 # -gc-stress 1 runs everything with BOTLISH_NATIVE_GC_STRESS=1. -shard I/N
-# (1 <= I <= N) keeps the Ith of every N test files and of every N suites,
-# for parallel CI jobs; examples, cabi, rust, native-stack-mutants,
+# (1 <= I <= N) keeps the Ith of N shares of the test files and of the
+# suites, for parallel CI jobs, balanced by tests/canary.tsv's costs for this
+# host (the shares, below); examples, cabi, rust, native-stack-mutants,
 # native-aot-mutants, native-stack-bench, c-capture-bench, the darwin-io-*,
-# windows-io-mutants, windows-unwind-mutants, the filesystem-*, the utf16-*
-# and the c-ffi-* and c-borrow-* checks run in shard 1 only. -list 1 prints the commands and runs nothing. Each command is printed before it
+# windows-io-mutants, windows-unwind-mutants, the filesystem-*, the utf16-*,
+# the native-library-* and the c-ffi-* and c-borrow-* checks run in shard 1
+# only. -list 1 prints the commands and runs nothing. Each command is printed before it
 # runs and streams its output; at the end a summary lists every failure with
 # the command that reruns it alone. Exits 1 on any failure. It never uses
 # the front-end cache.
@@ -138,7 +150,7 @@ set notYet [dict getdef $notYetByHost [core::cabi::hostTarget] {}]
 
 proc usage {} {
     puts stderr "usage: tclsh9.0 tests/platform/tier.tcl ?-backends LIST? ?-golden-backends LIST? ?-example-backends LIST? ?-gc-stress 0|1? ?-shard I/N? ?-list 0|1? ITEM ..."
-    puts stderr "  ITEM: smoke | acceptance | all | tests/X.test | X.test | tests/golden/X.bot | X.bot | examples | cabi | rust | native-stack-mutants?=NAME,...? | native-aot-mutants?=NAME,...? | native-stack-bench | c-ffi-fuzz | c-ffi-mutants?=NAME,...? | c-ffi-bench | c-borrow-fuzz | c-borrow-mutants?=NAME,...? | c-borrow-bench | darwin-io-mutants | darwin-io-bench | c-capture-bench | windows-io-mutants | windows-unwind-mutants?=NAME,...? | filesystem-fuzz | filesystem-mutants?=NAME,...? | filesystem-bench | utf16-fuzz | utf16-mutants?=NAME,...? | utf16-bench"
+    puts stderr "  ITEM: smoke | acceptance | all | tests/X.test | X.test | tests/golden/X.bot | X.bot | examples | cabi | rust | native-stack-mutants?=NAME,...? | native-aot-mutants?=NAME,...? | native-stack-bench | c-ffi-fuzz | c-ffi-mutants?=NAME,...? | c-ffi-bench | c-borrow-fuzz | c-borrow-mutants?=NAME,...? | c-borrow-bench | darwin-io-mutants | darwin-io-bench | c-capture-bench | windows-io-mutants | windows-unwind-mutants?=NAME,...? | filesystem-fuzz | filesystem-mutants?=NAME,...? | filesystem-bench | utf16-fuzz | utf16-mutants?=NAME,...? | utf16-bench | native-library-fuzz | native-library-mutants?=NAME,...? | native-library-bench"
     exit 2
 }
 
@@ -229,33 +241,69 @@ proc addTier {name} {
 foreach item $items {
     if {$item in {smoke acceptance all}} {
         addTier $item
-    } elseif {$item in {examples cabi rust native-stack-mutants native-aot-mutants native-stack-bench c-ffi-fuzz c-ffi-bench c-borrow-fuzz c-borrow-bench darwin-io-mutants darwin-io-bench c-capture-bench windows-io-mutants filesystem-fuzz filesystem-bench utf16-fuzz utf16-bench}
-            || [regexp {^(c-ffi|c-borrow|windows-unwind|filesystem|utf16|native-aot|native-stack)-mutants(=[A-Za-z0-9,_-]+)?$} $item]} {
+    } elseif {$item in {examples cabi rust native-stack-mutants native-aot-mutants native-stack-bench c-ffi-fuzz c-ffi-bench c-borrow-fuzz c-borrow-bench darwin-io-mutants darwin-io-bench c-capture-bench windows-io-mutants filesystem-fuzz filesystem-bench utf16-fuzz utf16-bench native-library-fuzz native-library-bench}
+            || [regexp {^(c-ffi|c-borrow|windows-unwind|filesystem|utf16|native-aot|native-stack|native-library)-mutants(=[A-Za-z0-9,_-]+)?$} $item]} {
         addCheck $item
     } elseif {[string match *.test $item]} {
         addFile $item
     } elseif {[string match *.bot $item]} {
         addSuite $item $goldenBackends
     } else {
-        puts stderr "not a tier, test file, golden suite, examples, cabi, rust, native-stack-mutants, native-aot-mutants, native-stack-bench, c-ffi-fuzz, c-ffi-mutants, c-ffi-bench, c-borrow-fuzz, c-borrow-mutants, c-borrow-bench, darwin-io-mutants, darwin-io-bench, c-capture-bench, windows-io-mutants, windows-unwind-mutants, filesystem-fuzz, filesystem-mutants, filesystem-bench, utf16-fuzz, utf16-mutants or utf16-bench: $item"
+        puts stderr "not a tier, test file, golden suite, examples, cabi, rust, native-stack-mutants, native-aot-mutants, native-stack-bench, c-ffi-fuzz, c-ffi-mutants, c-ffi-bench, c-borrow-fuzz, c-borrow-mutants, c-borrow-bench, darwin-io-mutants, darwin-io-bench, c-capture-bench, windows-io-mutants, windows-unwind-mutants, filesystem-fuzz, filesystem-mutants, filesystem-bench, utf16-fuzz, utf16-mutants, utf16-bench, native-library-fuzz, native-library-mutants or native-library-bench: $item"
         usage
     }
 }
 
-# This shard's share.
-proc shardOf {list} {
-    global shard shards
-    set kept {}
+# This shard's share, balanced by estimated time: the items are dealt out
+# the costliest first, each to the shard with the least time so far (the
+# lowest on a tie; equal costs in the list's order), and each shard keeps
+# its items in the list's order. An item's estimate is its seconds in this
+# host's acceptance tier, tests/canary.tsv's cost lines, else the canary's
+# (canary::Estimate: its linux-x86_64 duration, else its size). Every shard
+# of a host computes the same partition from the same file. Dealt round-robin
+# by index, the shards were as uneven as the files fall: macOS's five took
+# 25 to 56 minutes on one run, and one shard twice reached the job's limit
+# on a slower runner.
+proc shardOf {list kind} {
+    global shard shards root
+    if {$shards == 1} { return $list }
+    if {![info exists ::tierCosts]} {
+        namespace eval :: [list source [file join $root tests canary.tcl]]
+        set records [canary::records]
+        set ::tierCosts [list [dict getdef [dict get $records costs] [core::cabi::hostTarget] {}] \
+            [dict get $records durations]]
+    }
+    lassign $::tierCosts costs durations
+    if {$kind eq "golden"} { set prefix tests/golden/ } else { set prefix tests/ }
+    set entries {}
     set i 0
     foreach x $list {
-        if {$i % $shards == $shard - 1} { lappend kept $x }
+        set item $prefix$x
+        if {[dict exists $costs $item]} {
+            set cost [dict get $costs $item]
+        } else {
+            set cost [canary::Estimate $item $durations $root]
+        }
+        lappend entries [list $i $cost]
         incr i
     }
-    return $kept
+    set loads [lrepeat $shards 0.0]
+    set mine {}
+    # lsort is stable: equal costs stay in the list's order.
+    foreach entry [lsort -real -decreasing -index 1 $entries] {
+        lassign $entry i cost
+        set k 0
+        for {set j 1} {$j < $shards} {incr j} {
+            if {[lindex $loads $j] < [lindex $loads $k]} { set k $j }
+        }
+        lset loads $k [expr {[lindex $loads $k] + $cost}]
+        if {$k == $shard - 1} { lappend mine $i }
+    }
+    return [lmap i [lsort -integer $mine] {lindex $list $i}]
 }
-set testFiles [shardOf $testFiles]
+set testFiles [shardOf $testFiles tcl]
 set kept [dict create]
-foreach name [shardOf [dict keys $suites]] {
+foreach name [shardOf [dict keys $suites] golden] {
     dict set kept $name [dict get $suites $name]
 }
 set suites $kept
@@ -366,6 +414,15 @@ foreach check $checks {
                     [list $tclsh [file join $root audit abi-bytes tools utf16-fuzz.tcl] -seed $seed -gc-stress $stress] plain]
             }
         }
+        native-library-fuzz {
+            foreach {seed stress} {1 0 2 0 9 1} {
+                lappend commands [list "native library fuzzer, seed $seed[expr {$stress ? " (GC stress)" : ""}]" {} \
+                    [list $tclsh [file join $root audit native-library tools fuzz.tcl] -seed $seed -gc-stress $stress] plain]
+            }
+        }
+        native-library-bench {
+            lappend commands [list "native library performance" {} [list $tclsh [file join $root bench native-library.tcl]] plain]
+        }
         utf16-bench {
             # Against the commit before UTF16-BYTE-STORAGE-MILESTONE-1 (its
             # report's baseline), on the same runner.
@@ -393,6 +450,9 @@ foreach check $checks {
             } elseif {[regexp {^utf16-mutants(?:=(.*))?$} $check -> only]} {
                 lappend commands [list "UTF-16LE codec mutants" {} \
                     [list $tclsh [file join $root audit abi-bytes tools utf16-mutate.tcl] {*}[expr {$only ne "" ? [list -only $only] : {}}]] plain]
+            } elseif {[regexp {^native-library-mutants(?:=(.*))?$} $check -> only]} {
+                lappend commands [list "native library mutants" {} \
+                    [list $tclsh [file join $root audit native-library tools mutate.tcl] -first 1 {*}[expr {$only ne "" ? [list -only $only] : {}}]] plain]
             } elseif {[regexp {^filesystem-mutants(?:=(.*))?$} $check -> only]} {
                 lappend commands [list "filesystem mutants" {} \
                     [list $tclsh [file join $root audit filesystem tools mutate.tcl] {*}[expr {$only ne "" ? [list -only $only] : {}}]] plain]

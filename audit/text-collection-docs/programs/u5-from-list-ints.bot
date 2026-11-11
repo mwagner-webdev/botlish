@@ -1,0 +1,4 @@
+import std::abi::bytes
+
+x = std::abi::bytes::from_list([104, 105])
+0

@@ -22,7 +22,7 @@
 
 @@ base64-permissive the decoder accepts malformed Base64: no alphabet check, a permissive decode that discards what it does not know
 !! test_credentials.Preflight.test_invalid_base64_character test_credentials.Preflight.test_url_safe_alphabet
-## examples/games/icy-tower/macos/credentials.py
+## tools/macos-release/credentials.py
 <<<<
         raise Problem("MACOS-CREDENTIAL-BASE64", variable, "is not valid Base64: %s at character %d" % (what, i + 1),
                       "Encode the file with the standard alphabet: base64 < FILE | tr -d '\\n' (macOS and Linux)")
@@ -30,7 +30,7 @@
         text = text.replace(c, "")
         break
 >>>>
-## examples/games/icy-tower/macos/credentials.py
+## tools/macos-release/credentials.py
 <<<<
         data = binascii.a2b_base64(text, strict_mode=True)
 ====
@@ -39,7 +39,7 @@
 
 @@ base64-padding-unchecked a value cut short (its padding lost) is decoded anyway
 !! test_credentials.Preflight.test_invalid_base64_padding
-## examples/games/icy-tower/macos/credentials.py
+## tools/macos-release/credentials.py
 <<<<
     if len(text) % 4:
         raise Problem("MACOS-CREDENTIAL-BASE64", variable, "is not valid Base64: invalid padding (%d characters, not a "
@@ -49,7 +49,7 @@
     if False:
         raise Problem("MACOS-CREDENTIAL-BASE64", variable, "is not valid Base64: invalid padding (%d characters, not a "
 >>>>
-## examples/games/icy-tower/macos/credentials.py
+## tools/macos-release/credentials.py
 <<<<
         data = binascii.a2b_base64(text, strict_mode=True)
     except (binascii.Error, ValueError):
@@ -60,7 +60,7 @@
 
 @@ p8-double-encoding-accepted a .p8 Base64-encoded twice is not recognized: it fails later, as some other format problem
 !! test_credentials.Preflight.test_double_encoded_p8
-## examples/games/icy-tower/macos/credentials.py
+## tools/macos-release/credentials.py
 <<<<
         if again is not None and b"-----BEGIN" in again:
 ====
@@ -69,7 +69,7 @@
 
 @@ p12-accepts-pem the .p12's container check takes PEM text for a container (it then fails as an undecryptable file, the wrong diagnosis)
 !! test_credentials.Preflight.test_base64_of_pem_certificate
-## examples/games/icy-tower/macos/credentials.py
+## tools/macos-release/credentials.py
 <<<<
     v = "MACOS_CERTIFICATE_P12_BASE64"
     text = as_text(data)
@@ -83,7 +83,7 @@
 
 @@ no-private-key-accepted a .p12 holding only a certificate is not refused for its missing key
 !! test_credentials.Preflight.test_certificate_only
-## examples/games/icy-tower/macos/credentials.py
+## tools/macos-release/credentials.py
 <<<<
     if key is None:
         if cert is None and not leaves:
@@ -94,7 +94,7 @@
 
 @@ certificate-type-unchecked any Apple certificate kind passes: Developer ID Installer, Apple Development, Apple Distribution
 !! test_credentials.Preflight.test_developer_id_installer test_credentials.Preflight.test_apple_development test_credentials.Preflight.test_apple_distribution
-## examples/games/icy-tower/macos/credentials.py
+## tools/macos-release/credentials.py
 <<<<
     kind = certificate_kind(cert)
 ====
@@ -103,7 +103,7 @@
 
 @@ team-unchecked the certificate's team is never compared with APPLE_TEAM_ID
 !! test_credentials.Preflight.test_team_mismatch test_credentials.Preflight.test_other_teams_certificate
-## examples/games/icy-tower/macos/credentials.py
+## tools/macos-release/credentials.py
 <<<<
     elif team is not None and TEAM_ID.fullmatch(team) and teams != {team}:
 ====
@@ -112,7 +112,7 @@
 
 @@ apple-chain-unchecked the issuer is never verified: a self-signed "Developer ID Application" certificate passes
 !! test_credentials.Preflight.test_self_signed_refused test_credentials.Preflight.test_synthetic_identity_refused_under_apple_anchors
-## examples/games/icy-tower/macos/credentials.py
+## tools/macos-release/credentials.py
 <<<<
     if issuer is None:
         issuer_cn = [a.value for a in cert.issuer.get_attributes_for_oid(x509.ObjectIdentifier("2.5.4.3"))]
@@ -120,7 +120,7 @@
     if False:
         issuer_cn = [a.value for a in cert.issuer.get_attributes_for_oid(x509.ObjectIdentifier("2.5.4.3"))]
 >>>>
-## examples/games/icy-tower/macos/credentials.py
+## tools/macos-release/credentials.py
 <<<<
         "issuer": cn(issuer[1]),
         "intermediate": issuer[0],
@@ -131,7 +131,7 @@
 
 @@ validity-unchecked an expired certificate is accepted
 !! test_credentials.Preflight.test_expired_certificate
-## examples/games/icy-tower/macos/credentials.py
+## tools/macos-release/credentials.py
 <<<<
     if t > cert.not_valid_after_utc:
 ====
@@ -140,19 +140,19 @@
 
 @@ p8-algorithm-unchecked a .p8 of any algorithm is accepted (RSA, Ed25519)
 !! test_credentials.Preflight.test_rsa_key test_credentials.Preflight.test_ed25519_key
-## examples/games/icy-tower/macos/credentials.py
+## tools/macos-release/credentials.py
 <<<<
     if not isinstance(key, ec.EllipticCurvePrivateKey):
 ====
     if False:
 >>>>
-## examples/games/icy-tower/macos/credentials.py
+## tools/macos-release/credentials.py
 <<<<
     if key.curve.name != "secp256r1":
 ====
     if isinstance(key, ec.EllipticCurvePrivateKey) and key.curve.name != "secp256r1":
 >>>>
-## examples/games/icy-tower/macos/credentials.py
+## tools/macos-release/credentials.py
 <<<<
     pem = "-----BEGIN PRIVATE KEY-----\n" + "\n".join(lines) + "\n-----END PRIVATE KEY-----\n"
     return pem, {"algorithm": "EC P-256", "public_sha256": hashlib.sha256(key.public_key().public_bytes(
@@ -163,7 +163,7 @@
 
 @@ p8-curve-unchecked an EC key on another curve than P-256 is accepted
 !! test_credentials.Preflight.test_wrong_curve
-## examples/games/icy-tower/macos/credentials.py
+## tools/macos-release/credentials.py
 <<<<
     if key.curve.name != "secp256r1":
 ====
@@ -172,13 +172,13 @@
 
 @@ pkcs8-unchecked a SEC1 (BEGIN EC PRIVATE KEY) key is not refused as the wrong container: it is read on as if it were PKCS#8
 !! test_credentials.Preflight.test_sec1_container
-## examples/games/icy-tower/macos/credentials.py
+## tools/macos-release/credentials.py
 <<<<
     if label in wrong:
 ====
     if label in wrong and label != "EC PRIVATE KEY":
 >>>>
-## examples/games/icy-tower/macos/credentials.py
+## tools/macos-release/credentials.py
 <<<<
     if label != "PRIVATE KEY":
 ====
@@ -187,7 +187,7 @@
 
 @@ p8-layout-unchecked a P-256 key re-encoded without the curve in its ECPrivateKey is accepted, and notarytool traps on it later without a message
 !! test_credentials.Preflight.test_reencoded_p8_without_curve
-## examples/games/icy-tower/macos/credentials.py
+## tools/macos-release/credentials.py
 <<<<
     if 0xA0 not in tags:
 ====
@@ -196,7 +196,7 @@
 
 @@ issuer-uuid-unchecked a malformed Issuer ID is accepted
 !! test_credentials.Preflight.test_malformed_issuer
-## examples/games/icy-tower/macos/credentials.py
+## tools/macos-release/credentials.py
 <<<<
     if not UUID.fullmatch(value):
         raise Problem("MACOS-NOTARY-CONFIG", v, "is not a valid UUID (8-4-4-4-12 hexadecimal digits)", remedy)
@@ -207,7 +207,7 @@
 
 @@ preflight-prints-a-secret a diagnostic quotes the start of the value it refuses
 !! test_credentials.Preflight.test_invalid_base64_character test_credentials.Preflight.test_wrong_password
-## examples/games/icy-tower/macos/credentials.py
+## tools/macos-release/credentials.py
 <<<<
     def render(self):
         line = "%s: %s %s" % (self.code, self.variable, self.text) if self.variable else "%s: %s" % (self.code, self.text)
@@ -222,7 +222,7 @@
 
 @@ continue-after-failed-preflight release mode records a failed preflight as passed and goes on to the keychain and Apple's tools
 !! test_release.Stages.test_failed_preflight_stops_everything
-## examples/games/icy-tower/macos/release.py
+## tools/macos-release/release.py
 <<<<
         work.add("preflight", False, {"codes": sorted({p.code for p in problems})})
 ====
@@ -233,7 +233,7 @@
 
 @@ test-anchors-in-release a release accepts the test trust anchors
 !! test_release.Stages.test_release_refuses_test_anchors
-## examples/games/icy-tower/macos/release.py
+## tools/macos-release/release.py
 <<<<
     if work.mode == "release" and anchors:
 ====
@@ -242,7 +242,7 @@
 
 @@ remote-auth-skipped signing does not wait for Apple's validation of the notarization credentials
 !! test_release.Stages.test_notary_auth_rejected
-## examples/games/icy-tower/macos/release.py
+## tools/macos-release/release.py
 <<<<
         if mode == "release":
             work.require("notary-auth")
@@ -253,7 +253,7 @@
 
 @@ continue-after-auth-failure a rejected notarization credential is recorded as validated
 !! test_release.Stages.test_notary_auth_rejected test_release.Stages.test_notary_service_unreachable
-## examples/games/icy-tower/macos/release.py
+## tools/macos-release/release.py
 <<<<
         work.add("notary-auth", False, {"code": cls, "status": code})
         raise Failed(cls, why, remedy)
@@ -264,7 +264,7 @@
 
 @@ unspecific-auth-unexplained store-credentials' bare "Credential validation failed" left unexplained: no read request asks Apple why, the release reports an unrecognized tool failure
 !! test_release.Stages.test_notary_unspecific_validation_failure_asks_apple_why test_release.Stages.test_notary_unspecific_validation_failure_offline
-## examples/games/icy-tower/macos/release.py
+## tools/macos-release/release.py
 <<<<
         if cls == "MACOS-NOTARY-TOOL" and re.search(r"Credential validation failed", text, re.I):
 ====
@@ -273,7 +273,7 @@
 
 @@ auth-misclassified every notarytool failure is reported as a malformed key
 !! test_release.Stages.test_notary_service_unreachable test_release.Stages.test_notary_auth_rejected
-## examples/games/icy-tower/macos/release.py
+## tools/macos-release/release.py
 <<<<
     for code, pattern, why, remedy in AUTH_CLASSES:
         if pattern.search(text):
@@ -284,7 +284,7 @@
 
 @@ secrets-printed tools' output is printed unredacted (security echoing its -P password)
 !! test_release.Stages.test_secrets_redacted_from_tool_output
-## examples/games/icy-tower/macos/release.py
+## tools/macos-release/release.py
 <<<<
 def redact(text):
     for v in SECRET_VALUES:
@@ -296,7 +296,7 @@ def redact(text):
 
 @@ secret-files-kept cleanup leaves the decoded credentials in the work directory (which a diagnostics upload could take)
 !! test_release.Stages.test_full_release_is_publishable
-## examples/games/icy-tower/macos/release.py
+## tools/macos-release/release.py
 <<<<
     if os.path.isdir(work.secret):
         shutil.rmtree(work.secret, ignore_errors=True)
@@ -304,7 +304,7 @@ def redact(text):
     if False:
         shutil.rmtree(work.secret, ignore_errors=True)
 >>>>
-## examples/games/icy-tower/macos/release.py
+## tools/macos-release/release.py
 <<<<
     if os.path.exists(work.secret):
         problems.append("the decoded credentials still exist")
@@ -313,7 +313,7 @@ def redact(text):
 
 @@ adhoc-fallback a release without its keychain identity signs ad hoc instead of refusing
 !! test_release.Stages.test_release_never_signs_ad_hoc
-## examples/games/icy-tower/macos/release.py
+## tools/macos-release/release.py
 <<<<
     if mode == "adhoc":
         identity, keychain_args, timestamp = "-", [], "--timestamp=none"
@@ -324,7 +324,7 @@ def redact(text):
 
 @@ adhoc-signature-accepted verification takes an ad hoc signature for a release's
 !! test_release.Stages.test_release_refuses_an_ad_hoc_signature test_release.Stages.test_adopt_refuses_another_signature
-## examples/games/icy-tower/macos/release.py
+## tools/macos-release/release.py
 <<<<
         if f["Signature"] == "adhoc" or not f["authority"]:
             problems.append("it is an ad hoc signature, not the %s identity's: no fallback is allowed" % mode)
@@ -335,7 +335,7 @@ def redact(text):
 
 @@ no-hardened-runtime the bundle is signed without the hardened runtime
 !! test_release.Stages.test_full_release_is_publishable
-## examples/games/icy-tower/macos/release.py
+## tools/macos-release/release.py
 <<<<
         run(["codesign", "--force", "--sign", identity] + keychain_args + ["--options", "runtime", timestamp, app], timeout=600)
 ====
@@ -344,7 +344,7 @@ def redact(text):
 
 @@ runtime-unchecked verification never asks for the hardened runtime
 !! test_release.Stages.test_missing_hardened_runtime
-## examples/games/icy-tower/macos/release.py
+## tools/macos-release/release.py
 <<<<
     if "runtime" not in f["flags"]:
 ====
@@ -353,7 +353,7 @@ def redact(text):
 
 @@ no-timestamp a release is signed without a secure timestamp
 !! test_release.Stages.test_full_release_is_publishable
-## examples/games/icy-tower/macos/release.py
+## tools/macos-release/release.py
 <<<<
         timestamp = "--timestamp" if mode == "release" else "--timestamp=none"
 ====
@@ -362,7 +362,7 @@ def redact(text):
 
 @@ timestamp-unchecked verification never asks for the secure timestamp
 !! test_release.Stages.test_missing_secure_timestamp
-## examples/games/icy-tower/macos/release.py
+## tools/macos-release/release.py
 <<<<
             if not f["Timestamp"]:
 ====
@@ -371,7 +371,7 @@ def redact(text):
 
 @@ entitlements-unchecked verification lets entitlements through (a JIT entitlement nothing needs)
 !! test_release.Stages.test_entitlement_refused
-## examples/games/icy-tower/macos/release.py
+## tools/macos-release/release.py
 <<<<
     if ents:
 ====
@@ -380,7 +380,7 @@ def redact(text):
 
 @@ seal-unchecked notarization does not verify the seal: a bundle changed after signing is submitted
 !! test_release.Stages.test_modified_after_signing
-## examples/games/icy-tower/macos/release.py
+## tools/macos-release/release.py
 <<<<
     cdhash = sealed(app, "MACOS-NOTARIZE")
 ====
@@ -389,7 +389,7 @@ def redact(text):
 
 @@ notarization-ignored the notarization's result is ignored: an Invalid submission goes on to stapling
 !! test_release.Stages.test_notarization_invalid
-## examples/games/icy-tower/macos/release.py
+## tools/macos-release/release.py
 <<<<
     if status != "Accepted":
         work.add("notarize", False, {"id": sid, "status": status, "issues": len(issues)})
@@ -397,7 +397,7 @@ def redact(text):
     if False:
         work.add("notarize", False, {"id": sid, "status": status, "issues": len(issues)})
 >>>>
-## examples/games/icy-tower/macos/release.py
+## tools/macos-release/release.py
 <<<<
     if entry.get("status") != "Accepted" or errors:
 ====
@@ -406,7 +406,7 @@ def redact(text):
 
 @@ rejected-as-accepted a Rejected notarization is treated as Accepted
 !! test_release.Stages.test_notarization_rejected
-## examples/games/icy-tower/macos/release.py
+## tools/macos-release/release.py
 <<<<
     if status != "Accepted":
         work.add("notarize", False, {"id": sid, "status": status, "issues": len(issues)})
@@ -414,7 +414,7 @@ def redact(text):
     if status not in ("Accepted", "Rejected"):
         work.add("notarize", False, {"id": sid, "status": status, "issues": len(issues)})
 >>>>
-## examples/games/icy-tower/macos/release.py
+## tools/macos-release/release.py
 <<<<
     if entry.get("status") != "Accepted" or errors:
 ====
@@ -423,7 +423,7 @@ def redact(text):
 
 @@ ticket-unchecked the notarization's ticket is not compared with the bundle's CDHash
 !! test_release.Stages.test_notarization_ticket_of_another_artifact
-## examples/games/icy-tower/macos/release.py
+## tools/macos-release/release.py
 <<<<
     if cdhash.lower() not in tickets:
 ====
@@ -432,7 +432,7 @@ def redact(text):
 
 @@ timeout-as-failure a notarization timeout uploads again instead of resuming the submission
 !! test_release.Stages.test_notarization_timeout_then_resume
-## examples/games/icy-tower/macos/release.py
+## tools/macos-release/release.py
 <<<<
     if args.resume:
         if not credentials.UUID.fullmatch(args.resume):
@@ -443,7 +443,7 @@ def redact(text):
 
 @@ staple-retries-everything stapling retries a fatal failure as if Apple had not published the ticket yet
 !! test_release.Stages.test_staple_fatal_is_not_retried
-## examples/games/icy-tower/macos/release.py
+## tools/macos-release/release.py
 <<<<
         if not TRANSIENT_STAPLE.search(last):
 ====
@@ -452,13 +452,13 @@ def redact(text):
 
 @@ stapling-omitted Gatekeeper's check, the package and publication no longer require the stapled ticket
 !! test_release.Stages.test_stapling_required
-## examples/games/icy-tower/macos/release.py
+## tools/macos-release/release.py
 <<<<
         work.require("staple", "verify-signature:stapled", code="MACOS-GATEKEEPER")
 ====
         work.require("verify-signature:stapled", code="MACOS-GATEKEEPER")
 >>>>
-## examples/games/icy-tower/macos/release.py
+## tools/macos-release/release.py
 <<<<
         work.require("staple", "gatekeeper", "tamper", "verify-signature:stapled", code="MACOS-PUBLISH")
 ====
@@ -467,7 +467,7 @@ def redact(text):
 
 @@ gatekeeper-ignored Gatekeeper's rejection is ignored
 !! test_release.Stages.test_gatekeeper_failure_blocks_publication
-## examples/games/icy-tower/macos/release.py
+## tools/macos-release/release.py
 <<<<
         if not ok:
             work.add("gatekeeper", False, facts)
@@ -478,7 +478,7 @@ def redact(text):
 
 @@ gatekeeper-origin-required Gatekeeper's acceptance needs an origin line, which macOS 15's spctl never prints (the first release run's false refusal)
 !! test_release.Stages.test_gatekeeper_without_origin_line
-## examples/games/icy-tower/macos/release.py
+## tools/macos-release/release.py
 <<<<
         ok = code == 0 and re.search(r":\s*accepted\b", text) and "source=Notarized Developer ID" in text
 ====
@@ -488,7 +488,7 @@ def redact(text):
 
 @@ gatekeeper-origin-unchecked an origin line naming another team's Developer ID is accepted
 !! test_release.Stages.test_gatekeeper_origin_of_another_team_refused
-## examples/games/icy-tower/macos/release.py
+## tools/macos-release/release.py
 <<<<
         if wrong:
 ====
@@ -497,13 +497,13 @@ def redact(text):
 
 @@ gatekeeper-team-unanchored Gatekeeper's acceptance is taken without the verified stapled signature of the same bundle
 !! test_release.Stages.test_gatekeeper_requires_the_stapled_signature_verified test_release.Stages.test_gatekeeper_of_another_bundle_than_the_verified_one_refused
-## examples/games/icy-tower/macos/release.py
+## tools/macos-release/release.py
 <<<<
         work.require("staple", "verify-signature:stapled", code="MACOS-GATEKEEPER")
 ====
         work.require("staple", code="MACOS-GATEKEEPER")
 >>>>
-## examples/games/icy-tower/macos/release.py
+## tools/macos-release/release.py
 <<<<
         if stapled["team"] != team or current_cdhash(app) != stapled["cdhash"]:
 ====
@@ -512,7 +512,7 @@ def redact(text):
 
 @@ tamper-not-tampered the tamper control changes nothing in its copy
 !! test_release.Stages.test_tamper_control
-## examples/games/icy-tower/macos/release.py
+## tools/macos-release/release.py
 <<<<
                 f.write(bytes([b[0] ^ 0x01]))
 ====
@@ -521,7 +521,7 @@ def redact(text):
 
 @@ zip-modes-unchecked a ZIP that loses the executable's permissions is packaged
 !! test_release.Stages.test_zip_losing_permissions_refused
-## examples/games/icy-tower/macos/release.py
+## tools/macos-release/release.py
 <<<<
         if tree(unpacked) != tree(app):
             raise Failed("MACOS-PUBLISH", "the ZIP's bundle differs from the bundle it was made of (files, modes or bytes)")
@@ -531,7 +531,7 @@ def redact(text):
         mode = os.stat(os.path.join(unpacked, "Contents", "MacOS", bundle.EXECUTABLE)).st_mode & 0o777
         if False:
 >>>>
-## examples/games/icy-tower/macos/release.py
+## tools/macos-release/release.py
 <<<<
         check_signature(unpacked, work.mode)
         if work.mode == "release":
@@ -541,7 +541,7 @@ def redact(text):
 
 @@ sums-unchecked publishable trusts its record instead of the files: a swapped ZIP (the unstapled submission) is published
 !! test_release.Stages.test_unstapled_submission_zip_never_published test_release.Stages.test_damaged_zip_refused
-## examples/games/icy-tower/macos/release.py
+## tools/macos-release/release.py
 <<<<
     sums = check_sums(os.path.abspath(args.out))
 ====
@@ -550,13 +550,13 @@ def redact(text):
 
 @@ publish-before-final-launch publication does not wait for the downloaded artifact's launch
 !! test_release.Stages.test_final_artifact_must_be_launched
-## examples/games/icy-tower/macos/release.py
+## tools/macos-release/release.py
 <<<<
                 "notarize", "staple", "verify-signature:stapled", "gatekeeper", "tamper", "package", "record:final-artifact"],
 ====
                 "notarize", "staple", "verify-signature:stapled", "gatekeeper", "tamper", "package"],
 >>>>
-## examples/games/icy-tower/macos/release.py
+## tools/macos-release/release.py
 <<<<
     if sums[ZIP] != digest or work.last("record:final-artifact").get("zip_sha256") != digest:
 ====
@@ -565,13 +565,13 @@ def redact(text):
 
 @@ acceptance-not-required notarization does not wait for the signed application's graphical acceptance
 !! test_release.Stages.test_failed_acceptance_blocks_notarization
-## examples/games/icy-tower/macos/release.py
+## tools/macos-release/release.py
 <<<<
     work.require("verify-signature", "record:hardened-runtime", code="MACOS-NOTARIZE")
 ====
     work.require("verify-signature", code="MACOS-NOTARIZE")
 >>>>
-## examples/games/icy-tower/macos/release.py
+## tools/macos-release/release.py
 <<<<
     if cdhash != work.last("sign")["cdhash"] or cdhash != work.last("record:hardened-runtime").get("cdhash"):
 ====
@@ -580,7 +580,7 @@ def redact(text):
 
 @@ identity-may-change a release with another bundle identifier than an earlier release's goes on
 !! test_release.Stages.test_identity_never_changes
-## examples/games/icy-tower/macos/release.py
+## tools/macos-release/release.py
 <<<<
         if other and other != mine:
 ====
@@ -589,7 +589,7 @@ def redact(text):
 
 @@ ambiguous-identity-chosen several identities in the keychain: the first is used
 !! test_release.Stages.test_keychain_refuses_ambiguous_identities
-## examples/games/icy-tower/macos/release.py
+## tools/macos-release/release.py
 <<<<
     if len(set(hashes)) != 1:
 ====
@@ -599,19 +599,19 @@ def redact(text):
 
 @@ adhoc-publishable an ad hoc build is judged publishable
 !! test_release.Stages.test_adhoc_build_never_publishable test_release.Stages.test_dry_run_never_publishable
-## examples/games/icy-tower/macos/release.py
+## tools/macos-release/release.py
 <<<<
     if work.mode not in SEQUENCE:
 ====
     if work.mode not in SEQUENCE and False:
 >>>>
-## examples/games/icy-tower/macos/release.py
+## tools/macos-release/release.py
 <<<<
     seq = SEQUENCE[work.mode]
 ====
     seq = SEQUENCE.get(work.mode, [])
 >>>>
-## examples/games/icy-tower/macos/release.py
+## tools/macos-release/release.py
 <<<<
     if work.last("preflight")["anchors"] != "apple":
         raise Failed("MACOS-PUBLISH", "the identity was not checked against Apple's certificate authorities")
@@ -926,9 +926,192 @@ rm -rf "$out/Icy Tower.app"
 
 @@ sign-remedy-misleads every codesign failure reported as a locked keychain, a chain that reaches no trusted root among them
 !! test_release.Stages.test_sign_failures_explained
-## examples/games/icy-tower/macos/release.py
+## tools/macos-release/release.py
 <<<<
     if "unable to build chain to self-signed root" in text:
 ====
     if False:
+>>>>
+
+# ---------------------------------------------------------------------------
+# Botlish.app's release (MACOS-BOTLISH-DISTRIBUTION-MILESTONE-1.md): the
+# shared stages with single/macos/bundle.py and single/macos/sign.sh
+
+@@ botlish-identifier-from-variable the compiler's release takes MACOS_BUNDLE_ID (the game's variable) for its identifier
+!! test_botlish_release.BotlishRelease.test_botlish_ignores_macos_bundle_id test_botlish_release.BotlishRelease.test_botlish_release_is_publishable
+## tools/macos-release/release.py
+<<<<
+    problems, facts = credentials.check(dict(os.environ), work.secret, anchors, getattr(bundle, "BUNDLE_ID", None))
+====
+    problems, facts = credentials.check(dict(os.environ), work.secret, anchors, None)
+>>>>
+
+@@ nested-components-unchecked the nested signing units (the framework, the driver) are never verified: only the application's signature is
+!! test_botlish_release.BotlishRelease.test_nested_unit_without_hardened_runtime_refused test_botlish_release.BotlishRelease.test_nested_unit_with_entitlement_refused test_botlish_release.BotlishRelease.test_driver_signed_ad_hoc_refused
+## tools/macos-release/release.py
+<<<<
+    for path, identifier in getattr(bundle, "COMPONENTS", ()):
+====
+    for path, identifier in ():
+>>>>
+
+@@ nested-entitlements-unchecked a nested unit's entitlements are read from the application instead of the unit
+!! test_botlish_release.BotlishRelease.test_nested_unit_with_entitlement_refused
+## tools/macos-release/release.py
+<<<<
+        problems += ["%s: %s" % (path, p) for p in signature_problems(nested, signature_facts(nested), d, mode, team, identifier, dry_subject)]
+====
+        problems += ["%s: %s" % (path, p) for p in signature_problems(app, signature_facts(nested), d, mode, team, identifier, dry_subject)]
+>>>>
+
+@@ botlish-signs-ad-hoc the compiler's sign stage signs ad hoc whatever the release's identity
+!! test_botlish_release.BotlishRelease.test_botlish_release_is_publishable
+## single/macos/bundle.py
+<<<<
+    command = ["bash", SIGN, "--identity", identity] + keychain_args + (["--timestamp"] if timestamp == "--timestamp" else []) \
+====
+    command = ["bash", SIGN, "--identity", "-"] + (["--timestamp"] if timestamp == "--timestamp" else []) \
+>>>>
+
+@@ botlish-no-timestamp the compiler's release is signed without a secure timestamp
+!! test_botlish_release.BotlishRelease.test_botlish_release_is_publishable
+## single/macos/bundle.py
+<<<<
+    command = ["bash", SIGN, "--identity", identity] + keychain_args + (["--timestamp"] if timestamp == "--timestamp" else []) \
+====
+    command = ["bash", SIGN, "--identity", identity] + keychain_args \
+>>>>
+
+@@ botlish-deep-signing the application is signed with --deep: its nested code signed by the outer signature's run, not each unit by itself
+!! test_botlish_release.BotlishRelease.test_botlish_release_is_publishable
+## single/macos/sign.sh
+<<<<
+sign "$app"
+====
+codesign --force --deep --sign "$identity" ${keychain[@]+"${keychain[@]}"} --options runtime "$timestamp" "$app"
+>>>>
+
+@@ botlish-layout-unchecked the compiler's bundle check takes any layout: an executable nothing builds signed and shipped
+!! test_botlish_release.BotlishRelease.test_extra_executable_refused
+## single/macos/bundle.py
+<<<<
+        if got != want and got != [n for n in want if n != "_CodeSignature"]:
+====
+        if False:
+>>>>
+
+@@ botlish-identifier-unchecked a bundle whose Info.plist names another application's identifier is signed as the compiler
+!! test_botlish_release.BotlishRelease.test_wrong_identifier_refused
+## single/macos/bundle.py
+<<<<
+    if d.get("CFBundleIdentifier") != (bundle_id or BUNDLE_ID):
+====
+    if False:
+>>>>
+
+@@ botlish-archive-before-driver the compiler archive is written before the driver's signature: its native-bin/ID names the driver as it was
+!! test_botlish_release.BotlishRelease.test_botlish_archive_names_the_signed_driver
+## single/macos/sign.sh
+<<<<
+sign --identifier "$identifier.native" "$contents/MacOS/botlish-native"
+====
+>>>>
+## single/macos/sign.sh
+<<<<
+chmod 644 "$contents/Resources/botlish.zip"
+====
+chmod 644 "$contents/Resources/botlish.zip"
+sign --identifier "$identifier.native" "$contents/MacOS/botlish-native"
+>>>>
+
+@@ botlish-release-on-branches the compiler's release workflow also runs for branch pushes: unreviewed code reaches the release job's condition
+!! test_botlish_workflow.BotlishWorkflow.test_only_tags_and_manual_runs
+## .github/workflows/botlish-macos.yml
+<<<<
+    tags: ["botlish-macos-v*"]
+====
+    tags: ["botlish-macos-v*"]
+    branches: ["**"]
+>>>>
+
+@@ botlish-release-reads-game-id the compiler's preflight is given the game's MACOS_BUNDLE_ID
+!! test_botlish_workflow.BotlishWorkflow.test_the_compilers_identifier_never_the_games
+## .github/workflows/botlish-macos.yml
+<<<<
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+        run: |
+          started=$(date +%s)
+====
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+          MACOS_BUNDLE_ID: ${{ vars.MACOS_BUNDLE_ID }}
+        run: |
+          started=$(date +%s)
+>>>>
+
+@@ botlish-secret-in-job-env the compiler's release job hands the .p12 to every step (the job's env)
+!! test_botlish_workflow.BotlishWorkflow.test_secrets_reach_only_their_steps
+## .github/workflows/botlish-macos.yml
+<<<<
+    outputs:
+      zip_sha256: ${{ steps.package.outputs.zip_sha256 }}
+====
+    env:
+      MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+    outputs:
+      zip_sha256: ${{ steps.package.outputs.zip_sha256 }}
+>>>>
+
+@@ botlish-release-writes the compiler's release job, which holds the credentials, may write the repository
+!! test_botlish_workflow.BotlishWorkflow.test_release_cannot_write_and_only_publish_writes
+## .github/workflows/botlish-macos.yml
+<<<<
+    environment: macos-release
+    permissions:
+      contents: read
+      actions: read
+====
+    environment: macos-release
+    permissions:
+      contents: write
+      actions: read
+>>>>
+
+@@ botlish-release-before-green the compiler's release is built and signed before its commit's tests are green
+!! test_botlish_workflow.BotlishWorkflow.test_release_job_is_protected
+## .github/workflows/botlish-macos.yml
+<<<<
+      && needs.tested.outputs.green == 'true'
+      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: macos-15
+====
+      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: macos-15
+>>>>
+
+@@ botlish-final-not-quarantined the final ZIP's bundle is accepted without the quarantine a download carries: Gatekeeper's first-launch assessment never runs
+!! test_botlish_workflow.BotlishWorkflow.test_acceptance_of_the_final_artifact
+## .github/workflows/botlish-macos.yml
+<<<<
+          xattr -w -r com.apple.quarantine "0081;$(printf %x "$(date +%s)");Safari;$(uuidgen)" "$app"
+====
+>>>>
+
+@@ botlish-publish-unchecked-zip the published ZIP is not compared with the release job's
+!! test_botlish_workflow.BotlishWorkflow.test_publish_checks_the_release_jobs_zip
+## .github/workflows/botlish-macos.yml
+<<<<
+          [ "$got" = "$ZIP_SHA256" ] || { echo "::error::MACOS-PUBLISH: the ZIP is not the release job's ($got, not $ZIP_SHA256)"; exit 1; }
+====
+>>>>
+
+
+@@ zip-links-followed the package stage compares the ZIP's bundle by what its symbolic links point to, not by their targets: a ZIP whose framework links point at the build machine's files is packaged as the bundle that was signed
+!! test_botlish_release.BotlishRelease.test_zip_that_changes_links_refused
+## tools/macos-release/release.py
+<<<<
+            if os.path.islink(p):
+                out[os.path.relpath(p, root)] = ("link", os.readlink(p))
+            elif n in filenames:
+====
+            if n in filenames:
 >>>>

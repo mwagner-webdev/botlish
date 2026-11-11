@@ -1,0 +1,6 @@
+import std::list
+
+fn pair(a, b) -> List[str]:
+    [a, b]
+
+[pair(1, 2), pair("a", "b")]

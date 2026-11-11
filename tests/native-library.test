@@ -35,11 +35,27 @@ source [file join $::projectRoot surface surface.tcl]
 source [file join $::projectRoot native native.tcl]
 source [file join $::projectRoot lsp json.tcl]
 
+# Windows x86-64 (WINDOWS-X86-64-MILESTONE-8.md): a library is a DLL and its
+# import library, linked by link.exe, and every C host is built by MSVC's
+# cl (tests/ctoolchain.tcl), both in vcvars64's environment; a host is
+# linked with the import library and runs beside the DLLs.
+set ::nlWindows [expr {$::tcl_platform(platform) eq "windows"}]
 testConstraint nativeBuilt [expr {![catch {native::binary}]}]
-testConstraint nativeLibraries [expr {[native::hostSupports libraries] && [testConstraint nativeBuilt]
-    && [auto_execok cc] ne "" && [auto_execok ld] ne "" && [auto_execok objcopy] ne "" && [auto_execok ar] ne ""
-    && [file exists [file join [file dirname [native::binary]] libbotlish_native.a]]}]
+if {$::nlWindows} {
+    testConstraint nativeLibraries [expr {[native::hostSupports libraries] && [testConstraint nativeBuilt]
+        && [ctool::available] && [file exists [file join [file dirname [native::binary]] botlish_runtime.lib]]}]
+} else {
+    testConstraint nativeLibraries [expr {[native::hostSupports libraries] && [testConstraint nativeBuilt]
+        && [auto_execok cc] ne "" && [auto_execok ld] ne "" && [auto_execok objcopy] ne "" && [auto_execok ar] ne ""
+        && [file exists [file join [file dirname [native::binary]] libbotlish_native.a]]}]
+}
+# A library's ELF artifacts (a static archive and a shared object: Linux),
+# or a Windows DLL and its import library.
+testConstraint elfLibraries [expr {[testConstraint nativeLibraries] && !$::nlWindows}]
+testConstraint windowsLibraries [expr {[testConstraint nativeLibraries] && $::nlWindows}]
 testConstraint nm [expr {[auto_execok nm] ne ""}]
+# A host the capability table gives no libraries (macOS today).
+testConstraint noNativeLibraries [expr {![native::hostSupports libraries]}]
 set ::nlCounter 0
 
 proc nlWrite {path text} {
@@ -66,20 +82,91 @@ proc nlLibrary {dir name source {modules {}} args} {
         nlWrite [file join $dir $module.bot] $text
     }
     nlWrite [file join $dir $name.bot] $source
-    return [native::library [nlHir [file join $dir $name.bot]] -name $name -out [file join $dir lib] {*}$args]
+    return [nlBuild [nlHir [file join $dir $name.bot]] -name $name -out [file join $dir lib] {*}$args]
 }
 
-# A C executable from SOURCE, linked with the static libraries LIBS
-# (archive paths) or, with -shared, the shared library DIR/lib/libNAME.so.
+# native::library HIR ARGS. On Windows in vcvars64's environment (link.exe
+# and the libraries a Developer Command Prompt has), with the library's own
+# directory searched for the libraries a program declares, and without
+# -shared 0 (a Linux test's way to skip a shared object its host-defined C
+# function would leave unresolved; a Windows DLL's comes from a DLL of its
+# own: nlHostCallback).
+proc nlBuild {hir args} {
+    if {!$::nlWindows} {
+        return [native::library $hir {*}$args]
+    }
+    set options {}
+    foreach {option value} $args {
+        if {$option eq "-shared" && !$value} continue
+        lappend options $option $value
+    }
+    set saved $::native::linkDirs
+    if {[dict exists $options -out]} {
+        lappend ::native::linkDirs [dict get $options -out]
+    }
+    try {
+        return [ctool::withMsvc [list native::library $hir {*}$options]]
+    } finally {
+        set ::native::linkDirs $saved
+    }
+}
+
+# The file a C host links library BUILT through: its static archive, or on
+# Windows its DLL's import library.
+proc nlLink {built} {
+    return [dict get $built [expr {$::nlWindows ? "import" : "static"}]]
+}
+
+# A C executable from SOURCE (C++ with -cxx 1), linked with the libraries
+# LIBS (archive or import library paths) and ARGS: `cc` on Linux (-Wall
+# -Werror); on Windows MSVC's cl, its program in DIR/lib beside the DLLs it
+# loads (the loader's first directory), the Unix-only flags tests pass
+# (-lm, -lpthread, -pthread, -fno-omit-frame-pointer: frames there are
+# walked by their unwind information) left out, and -crt dynamic for the
+# dynamic C runtime (/MD; /MT, cl's default, otherwise).
 proc nlExecutable {dir source libs args} {
-    nlWrite [file join $dir main.c] $source
-    set exe [file join $dir main]
-    exec cc -O1 -Wall -Werror -I[file join $dir lib] [file join $dir main.c] {*}$libs \
-        {*}$native::library::systemLibraries -o $exe {*}$args
+    set cxx 0
+    set crt static
+    set extra {}
+    for {set i 0} {$i < [llength $args]} {incr i} {
+        switch -- [lindex $args $i] {
+            -cxx { set cxx [lindex $args [incr i]] }
+            -crt { set crt [lindex $args [incr i]] }
+            default { lappend extra [lindex $args $i] }
+        }
+    }
+    if {!$::nlWindows} {
+        set main [file join $dir [expr {$cxx ? "main.cpp" : "main.c"}]]
+        nlWrite $main $source
+        set exe [file join $dir main]
+        set compiler [expr {$cxx ? "c++" : "cc"}]
+        exec $compiler -O1 -Wall -Werror -I[file join $dir lib] $main {*}$libs \
+            {*}$native::library::systemLibraries -o $exe {*}$extra
+        return $exe
+    }
+    set lib [file join $dir lib]
+    file mkdir $lib
+    set main [file join $dir [expr {$cxx ? "main.cpp" : "main.c"}]]
+    nlWrite $main $source
+    set flags {}
+    foreach arg $extra {
+        switch -- $arg {
+            -lm - -lpthread - -pthread - -fno-omit-frame-pointer {}
+            default { error "nlExecutable: no Windows spelling of $arg" }
+        }
+    }
+    set exe [file join $lib main.exe]
+    # The file's extension says its language: /TP would compile the
+    # libraries on the command line as C++ too.
+    set language [expr {$cxx ? [list /EHsc /std:c++17] : [list /std:c11]}]
+    ctool::msvc cl /nologo /O1 /W3 {*}$language [ctool::CrtFlag $crt] /D_CRT_SECURE_NO_WARNINGS \
+        /I[file nativename $lib] /Fo[file nativename [file join $dir main.obj]] /Fe[file nativename $exe] \
+        [file nativename $main] {*}[lmap l $libs {file nativename $l}] {*}$flags
     return $exe
 }
 
-# EXE's output; with STRESS 1 under BOTLISH_NATIVE_GC_STRESS=1.
+# EXE's output (as UTF-8, its line ends as written); with STRESS 1 under
+# BOTLISH_NATIVE_GC_STRESS=1. A failed run is an error holding its output.
 proc nlRun {exe {stress 0}} {
     set saved [array get ::env BOTLISH_NATIVE_GC_STRESS]
     if {$stress} {
@@ -88,7 +175,14 @@ proc nlRun {exe {stress 0}} {
         unset -nocomplain ::env(BOTLISH_NATIVE_GC_STRESS)
     }
     try {
-        return [exec $exe 2>@1]
+        set pipe [open |[list $exe 2>@1] r]
+        fconfigure $pipe -encoding utf-8 -translation auto
+        set output [read $pipe]
+        if {[catch {close $pipe} message]} {
+            error "$output\n$message"
+        }
+        regsub {\n$} $output "" output
+        return $output
     } finally {
         unset -nocomplain ::env(BOTLISH_NATIVE_GC_STRESS)
         array set ::env $saved
@@ -105,14 +199,67 @@ proc nlRunBoth {exe} {
     return $plain
 }
 
+# A library's C callback `host_callback` (an `extern c fn` its program
+# declares, which a C host defines): on Linux the host's own function the
+# static library's call resolves to; on Windows a DLL cannot import from
+# the executable that loads it, so it imports `host_callback` from the
+# small DLL nlhost.dll built here (in DIR/lib), which forwards to the
+# function the host registers with NL_REGISTER. Returns {DECLARATION LIBS}:
+# the source line declaring that library (Windows) and what the host links
+# besides the Botlish library.
+proc nlHostCallback {dir} {
+    if {!$::nlWindows} {
+        return [list "" {}]
+    }
+    set lib [file join $dir lib]
+    file mkdir $lib
+    set source [file join $lib nlhost.c]
+    nlWrite $source {static long long (*target)(long long);
+__declspec(dllexport) void nlhost_register(long long (*f)(long long)) { target = f; }
+__declspec(dllexport) long long host_callback(long long n) { return target(n); }
+}
+    lassign [ctool::sharedLibrary $lib nlhost $source] dll import
+    return [list "extern c library \"nlhost\"\n" [list $import]]
+}
+
 # The C helpers every harness of library NAME uses: `report` prints a
 # failed call's status, identity and fields (and releases its error),
-# `check` aborts on an unexpected status.
+# `check` aborts on an unexpected status; `NL_REGISTER(f)` hands a library's
+# C callback to the DLL a Windows library imports it from (nlHostCallback;
+# nothing on Linux, where the library calls the host's own function), and
+# `nl_thread_start`/`nl_thread_join` start a thread with a given stack
+# reservation (0: the default) and wait for its result.
 proc nlPrelude {name} {
     return [string map [list LIB $name] {
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
+#include <windows.h>
+__declspec(dllimport) void nlhost_register(long long (*f)(long long));
+#define NL_REGISTER(f) nlhost_register(f)
+typedef struct { HANDLE h; void *(*fn)(void *); void *arg; void *result; } nl_thread;
+static inline DWORD WINAPI nl_trampoline(LPVOID p) { nl_thread *t = (nl_thread *) p; t->result = t->fn(t->arg); return 0; }
+static inline int nl_thread_start(nl_thread *t, size_t stack, void *(*fn)(void *), void *arg) {
+    t->fn = fn; t->arg = arg; t->result = NULL;
+    t->h = CreateThread(NULL, stack, nl_trampoline, t, stack ? STACK_SIZE_PARAM_IS_A_RESERVATION : 0, NULL);
+    return t->h == NULL;
+}
+static inline void *nl_thread_join(nl_thread *t) { WaitForSingleObject(t->h, INFINITE); CloseHandle(t->h); return t->result; }
+#else
+#include <pthread.h>
+#define NL_REGISTER(f) ((void) 0)
+typedef struct { pthread_t t; } nl_thread;
+static inline int nl_thread_start(nl_thread *t, size_t stack, void *(*fn)(void *), void *arg) {
+    pthread_attr_t attr; int r;
+    pthread_attr_init(&attr);
+    if (stack) pthread_attr_setstacksize(&attr, stack);
+    r = pthread_create(&t->t, &attr, fn, arg);
+    pthread_attr_destroy(&attr);
+    return r;
+}
+static inline void *nl_thread_join(nl_thread *t) { void *r; pthread_join(t->t, &r); return r; }
+#endif
 #include "LIB.h"
 static void report(const char *what, int32_t status, LIB_error **ep) {
     const uint8_t *p; size_t l;
@@ -184,7 +331,7 @@ int main(void) {
     check(\"destroy\", chk_destroy(in), NULL);
     return 0;
 }
-" [list [dict get $built static]]]
+" [list [nlLink $built]]]
     nlRunBoth $exe
 } -result {internal() = 2
 checked: status 1 Rejected code=-5
@@ -277,7 +424,7 @@ int main(void) {
     tok_destroy(in);
     return 0;
 }
-" [list [dict get $built static]]]
+" [list [nlLink $built]]]
     list [nlRunBoth $exe] $oracle
 } -result {{sample = 5
 5
@@ -312,7 +459,7 @@ int main(void) {
     tiny_destroy(in);
     return 0;
 }
-" [list [dict get $built static]]]
+" [list [nlLink $built]]]
     nlRunBoth $exe
 } -result {lonely = -2993
 uses_add1 = 43
@@ -352,7 +499,7 @@ int main(void) {
     mod_destroy(in);
     return 0;
 }
-" [list [dict get $built static]]]
+" [list [nlLink $built]]]
     list [nlRunBoth $exe] [lmap r [dict get $built exports] {list [dict get $r module] [dict get $r name]}]
 } -result {{hello, wörld (13 bytes)
 greet: status 1 greeting::TooLong length=11} {{greeting greet} {{} local}}}
@@ -441,7 +588,7 @@ int main(void) {
     ty_destroy(in);
     return 0;
 }
-" [list [dict get $built static]] -lm]
+" [list [nlLink $built]] -lm]
     nlRunBoth $exe
 } -result {negate(true) = 0
 half(5) = 2.5
@@ -484,7 +631,7 @@ int main(void) {
     ty_bytes_release(&a);
     return 0;
 }
-" [list [dict get $built static]]]
+" [list [nlLink $built]]]
     nlRunBoth $exe
 } -result {first
 kept: status 1 Odd count=5 flag=true items=(other) note="odd ä" ratio=0.5}
@@ -519,7 +666,7 @@ int main(void) {
     check(\"destroy b\", chk_destroy(b), NULL);
     return 0;
 }
-" [list [dict get $built static]]]
+" [list [nlLink $built]]]
     nlRunBoth $exe
 } -result {abi 1
 distinct: 1
@@ -548,7 +695,6 @@ exported c fn add(a: int, b: int) -> int:
 }
     set built [nlLibrary $dir thr "import std::list\n$source"]
     set exe [nlExecutable $dir "[nlPrelude thr]
-#include <pthread.h>
 static thr_instance *shared;
 static void *foreign_call(void *arg) {
     int64_t r; thr_error *e = NULL;
@@ -569,19 +715,19 @@ static void *own(void *arg) {
 int main(void) {
     thr_error *e = NULL; int64_t r;
     check(\"create\", thr_create(&shared, &e), &e);
-    pthread_t t;
-    pthread_create(&t, NULL, foreign_call, NULL);
-    pthread_join(t, NULL);
+    nl_thread t;
+    nl_thread_start(&t, 0, foreign_call, NULL);
+    nl_thread_join(&t);
     check(\"own thread still works\", thr_add(shared, 1, 2, &r, &e), &e);
     printf(\"add = %lld\\n\", (long long) r);
-    pthread_t ts\[4\]; void *results\[4\];
-    for (int i = 0; i < 4; i++) pthread_create(&ts\[i\], NULL, own, (void *) (intptr_t) i);
-    for (int i = 0; i < 4; i++) pthread_join(ts\[i\], &results\[i\]);
+    nl_thread ts\[4\]; void *results\[4\];
+    for (int i = 0; i < 4; i++) nl_thread_start(&ts\[i\], 0, own, (void *) (intptr_t) i);
+    for (int i = 0; i < 4; i++) results\[i\] = nl_thread_join(&ts\[i\]);
     for (int i = 0; i < 4; i++) printf(\"thread %d: %s\\n\", i, results\[i\] == NULL ? \"ok\" : \"failed\");
     check(\"destroy\", thr_destroy(shared), NULL);
     return 0;
 }
-" [list [dict get $built static]] -lpthread]
+" [list [nlLink $built]] -lpthread]
     nlRunBoth $exe
 } -result {call from another thread: status 4 WRONG-THREAD
 destroy from another thread: 4
@@ -604,7 +750,8 @@ exported c fn outer(n: int) -> int:
 exported c fn inner(n: int) -> int:
     n * 10
 }
-    set built [nlLibrary $dir re "import std::ffi::c\n$source" {} -shared 0]
+    lassign [nlHostCallback $dir] declaration hostLibs
+    set built [nlLibrary $dir re "import std::ffi::c\n$declaration$source" {} -shared 0]
     set exe [nlExecutable $dir "[nlPrelude re]
 static re_instance *first, *second;
 long long host_callback(long long n) {
@@ -616,6 +763,7 @@ long long host_callback(long long n) {
 }
 int main(void) {
     re_error *e = NULL; int64_t r;
+    NL_REGISTER(host_callback);
     check(\"create\", re_create(&first, &e), &e);
     check(\"create\", re_create(&second, &e), &e);
     check(\"outer\", re_outer(first, 7, &r, &e), &e);
@@ -625,11 +773,38 @@ int main(void) {
     re_destroy(first); re_destroy(second);
     return 0;
 }
-" [list [dict get $built static]]]
+" [list [nlLink $built] {*}$hostLibs]]
     nlRunBoth $exe
 } -result {reentrant call of the same instance: status 4 REENTRANT-CALL
 outer(7) = 70
 inner(1) = 10}
+
+# The general coroutine runtime inside a call: chain(n) drives a recursive
+# yielding function, allocating on both stacks, and returns 2n.
+set ::nlChain {
+import std::str
+
+struct Message:
+    text: str
+
+fn produce(i: int, n: int, acc: str, resume Message) -> str:
+    if i >= n:
+        return acc
+    message = yield std::str::concat("item ", acc)
+    produce(i + 1, n, std::str::concat(acc, message.text))
+
+fn drive(step: Coroutine{args: [Message], return: str}, k: int, last: str) -> str:
+    if k <= 0:
+        return last
+    next = step(Message {text: std::str::concat("x", "y")})
+    drive(step, k - 1, next)
+
+exported c fn chain(n: int) -> int:
+    if n < 0 or n > 10000:
+        return 0
+    coroutine {step, first} = produce(0, n, "")
+    std::str::length(drive(step, n + 1, first))
+}
 
 # A coroutine inside a call: the export drives a recursive yielding
 # function (recursive, so never fused: the general runtime's stacks and
@@ -674,7 +849,7 @@ int main(void) {
     co_destroy(in);
     return 0;
 }
-" [list [dict get $built static]]]
+" [list [nlLink $built]]]
     nlRunBoth $exe
 } -result {200 calls: 39800; chain(3000) = 6000}
 
@@ -698,7 +873,6 @@ test nl-stack-safety {exhausting a thread's stack is NATIVE LIMIT STACK, never t
     set dir [nlDir]
     set built [nlLibrary $dir st $::nlDepth]
     set exe [nlExecutable $dir "[nlPrelude st]
-#include <pthread.h>
 static void probe(const char *where) {
     st_instance *in; st_error *e = NULL; int64_t r = -1; int32_t s;
     check(\"create\", st_create(&in, &e), &e);
@@ -716,15 +890,13 @@ int main(void) {
     size_t sizes\[\] = {512 * 1024, 1024 * 1024};
     const char *names\[\] = {\"512 KiB thread\", \"1 MiB thread\"};
     for (int i = 0; i < 2; i++) {
-        pthread_attr_t attr; pthread_t t;
-        pthread_attr_init(&attr);
-        pthread_attr_setstacksize(&attr, sizes\[i\]);
-        pthread_create(&t, &attr, thread, (void *) names\[i\]);
-        pthread_join(t, NULL);
+        nl_thread t;
+        nl_thread_start(&t, sizes\[i\], thread, (void *) names\[i\]);
+        nl_thread_join(&t);
     }
     return 0;
 }
-" [list [dict get $built static]] -pthread]
+" [list [nlLink $built]] -pthread]
     nlRunBoth $exe
 } -result {main thread: depth(2000) status 0 = 2000
 main thread: status 2 NATIVE LIMIT STACK
@@ -768,7 +940,6 @@ exported c fn fused(n: int) -> int:
     step(Go {extra: first})
 "]
     set exe [nlExecutable $dir "[nlPrelude sc]
-#include <pthread.h>
 static void call(sc_instance *in, const char *name, int64_t n) {
     sc_error *e = NULL; int64_t r = -1; int32_t s;
     if (name\[0\] == 'd') s = sc_depth(in, n, &r, &e);
@@ -795,14 +966,12 @@ static void *thread(void *unused) {
     return NULL;
 }
 int main(void) {
-    pthread_attr_t attr; pthread_t t;
-    pthread_attr_init(&attr);
-    pthread_attr_setstacksize(&attr, 512 * 1024);
-    pthread_create(&t, &attr, thread, NULL);
-    pthread_join(t, NULL);
+    nl_thread t;
+    nl_thread_start(&t, 512 * 1024, thread, NULL);
+    nl_thread_join(&t);
     return 0;
 }
-" [list [dict get $built static]] -pthread]
+" [list [nlLink $built]] -pthread]
     nlRunBoth $exe
 } -result {depth(3000) = 3000
 depth(50000): status 2 NATIVE LIMIT STACK
@@ -817,14 +986,18 @@ depth(1000) = 1000}
 # or fiber stack, here a ucontext on mapped memory -- has no limit of ours
 # (Vm::stack_limit_at): it is never checked against the thread's stack, which
 # would fail every call there. The thread's limit is back for the next call.
-test nl-stack-safety-foreign-stack {a call on a host-made stack is not checked against the thread's limit; the next call on the thread is} -constraints nativeLibraries -body {
+test nl-stack-safety-foreign-stack {a call on a host-made stack is not checked against the thread's limit, and its collections walk that stack; the next call on the thread is checked} -constraints {nativeLibraries nativeCoroutines} -body {
     set dir [nlDir]
-    set built [nlLibrary $dir fs $::nlDepth]
+    set built [nlLibrary $dir fs "$::nlChain$::nlDepth"]
     set exe [nlExecutable $dir "[nlPrelude fs]
+#ifndef _WIN32
 #include <sys/mman.h>
 #include <ucontext.h>
-static fs_instance *in;
 static ucontext_t back, there;
+#else
+static void *back;
+#endif
+static fs_instance *in;
 static void call(const char *where, int64_t n) {
     fs_error *e = NULL; int64_t r = -1;
     int32_t s = fs_depth(in, n, &r, &e);
@@ -833,11 +1006,26 @@ static void call(const char *where, int64_t n) {
     if (s != fs_STATUS_OK) report(what, s, &e);
     else printf(\"%s = %lld\\n\", what, (long long) r);
 }
-static void on_foreign_stack(void) { call(\"host stack\", 2000); }
+/* Coroutines and allocation on the host's stack: the collector walks it,
+   the coroutine's resumer frames on it included, and code back on it after
+   a switch checks no limit of the thread's. */
+static void chain_there(void) {
+    fs_error *e = NULL; int64_t r = -1;
+    int32_t s = fs_chain(in, 300, &r, &e);
+    if (s != fs_STATUS_OK) report(\"host stack: chain(300)\", s, &e);
+    else printf(\"host stack: chain(300) = %lld\\n\", (long long) r);
+}
+#ifndef _WIN32
+static void on_foreign_stack(void) { call(\"host stack\", 2000); chain_there(); }
+#else
+/* Windows: the host's own fiber, a stack of 1 MiB the host made. */
+static void WINAPI on_foreign_stack(void *unused) { (void) unused; call(\"host stack\", 2000); chain_there(); SwitchToFiber(back); }
+#endif
 int main(void) {
     fs_error *e = NULL;
     check(\"create\", fs_create(&in, &e), &e);
     size_t size = 1024 * 1024;
+#ifndef _WIN32
     void *stack = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_STACK, -1, 0);
     if (stack == MAP_FAILED) return 1;
     getcontext(&there);
@@ -846,15 +1034,24 @@ int main(void) {
     there.uc_link = &back;
     makecontext(&there, on_foreign_stack, 0);
     swapcontext(&back, &there);
+#else
+    back = ConvertThreadToFiber(NULL);
+    void *there = CreateFiber(size, on_foreign_stack, NULL);
+    if (back == NULL || there == NULL) return 1;
+    SwitchToFiber(there);
+    DeleteFiber(there);
+    ConvertFiberToThread();
+#endif
     call(\"thread\", 2000);
     call(\"thread\", 100000000);
     call(\"thread\", 1000);
     check(\"destroy\", fs_destroy(in), NULL);
     return 0;
 }
-" [list [dict get $built static]]]
+" [list [nlLink $built]]]
     nlRunBoth $exe
 } -result {host stack: depth(2000) = 2000
+host stack: chain(300) = 600
 thread: depth(2000) = 2000
 thread: depth(100000000): status 2 NATIVE LIMIT STACK
 thread: depth(1000) = 1000}
@@ -875,7 +1072,7 @@ import std::list
 import std::mutable_vector
 import std::str
 
-extern c fn host_callback(n: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+DECLARATIONextern c fn host_callback(n: std::ffi::c::LongLong) -> std::ffi::c::LongLong
 
 fn churn(k: int) -> int:
     xs = loop i from 0 to k:
@@ -900,7 +1097,8 @@ exported c fn busy(n: int) -> int:
         return 0
     churn(n)
 }
-    set built [nlLibrary $dir wb $source {} -shared 0]
+    lassign [nlHostCallback $dir] declaration hostLibs
+    set built [nlLibrary $dir wb [string map [list DECLARATION $declaration] $source] {} -shared 0]
     set exe [nlExecutable $dir "[nlPrelude wb]
 static wb_instance *second;
 long long host_callback(long long n) {
@@ -910,6 +1108,7 @@ long long host_callback(long long n) {
 }
 int main(void) {
     wb_instance *first; wb_error *e = NULL; int64_t r;
+    NL_REGISTER(host_callback);
     check(\"create\", wb_create(&first, &e), &e);
     check(\"create\", wb_create(&second, &e), &e);
     for (int i = 0; i < 3; i++) {
@@ -919,7 +1118,7 @@ int main(void) {
     wb_destroy(second); wb_destroy(first);
     return 0;
 }
-" [list [dict get $built static]] -fno-omit-frame-pointer]
+" [list [nlLink $built] {*}$hostLibs] -fno-omit-frame-pointer]
     nlRun $exe
 } -result {outer = 28
 outer = 28
@@ -990,15 +1189,19 @@ int main(void) {
     report2(\"two twice(-1)\", two_twice(b, -1, &r, &eb), &eb);
     printf(\"releasing one's buffer through two: %d\\n\", (one_tag(a, (const uint8_t *) \"z\", 1, &oa, &ea), two_bytes_release((two_bytes *) &oa)));
     one_bytes_release(&oa);
+    report(\"one's instance given to two\", (int32_t) two_twice((two_instance *) a, 1, &r, NULL), NULL);
+    printf(\"destroying one's instance through two: %d\\n\", two_destroy((two_instance *) a));
     one_destroy(a); two_destroy(b);
     return 0;
 }
-" [list [dict get $first static] [dict get $second static]]]
+" [list [nlLink $first] [nlLink $second]]]
     nlRunBoth $exe
 } -result {300 alternating rounds right
 one twice(-1): status 1 Negative value=-1
 two twice(-1): status 1 Negative fields 2
-releasing one's buffer through two: 4}
+releasing one's buffer through two: 4
+one's instance given to two: status 4
+destroying one's instance through two: 4}
 
 test nl-two-instances {two instances of one library alternate allocating calls; destroying one leaves the other, and its own results, intact} -constraints nativeLibraries -body {
     set dir [nlDir]
@@ -1025,12 +1228,12 @@ int main(void) {
     check(\"destroy a\", two_destroy(a), NULL);
     return 0;
 }
-" [list [dict get $built static]]]
+" [list [nlLink $built]]]
     nlRunBoth $exe
 } -result {twice(-2) on the new a: status 1 Negative value=-2 why="second"
 a:second b:second}
 
-test nl-two-libraries-shared {the same two libraries as shared libraries} -constraints nativeLibraries -body {
+test nl-two-libraries-shared {the same two libraries as shared libraries} -constraints elfLibraries -body {
     set dir [nlDir]
     set first [nlLibrary $dir one $::nlFirst]
     set second [nlLibrary $dir two $::nlSecond]
@@ -1056,9 +1259,8 @@ int main(void) {
 # with its own thread-local -- leaves alone.
 test nl-nested-libraries {a library called from inside another library's call leaves the outer call its own program} -constraints nativeLibraries -body {
     set dir [nlDir]
-    set outer [nlLibrary $dir outer {
-import std::ffi::c
-
+    lassign [nlHostCallback $dir] declaration hostLibs
+    set outer [nlLibrary $dir outer "import std::ffi::c\n$declaration[string trimleft {
 enum Color:
     Red,
     Green
@@ -1074,7 +1276,7 @@ exported c fn paint(n: int) -> int errors Painted:
     if host_callback(n) > 0:
         fail Painted {color: Color::Green}
     n
-} {} -shared 0]
+}]" {} -shared 0]
     set inner [nlLibrary $dir inner {
 enum Shape:
     Circle,
@@ -1097,6 +1299,7 @@ long long host_callback(long long n) {
 int main(void) {
     outer_instance *in; outer_error *e = NULL; inner_error *ie = NULL; int64_t r;
     const uint8_t *p; size_t l;
+    NL_REGISTER(host_callback);
     check(\"create\", outer_create(&in, &e), &e);
     if (inner_create(&helper, &ie) != inner_STATUS_OK) return 1;
     int32_t s = outer_paint(in, 7, &r, &e);
@@ -1106,11 +1309,11 @@ int main(void) {
     inner_destroy(helper); outer_destroy(in);
     return 0;
 }
-" [list [dict get $outer static] [dict get $inner static]]]
+" [list [nlLink $outer] [nlLink $inner] {*}$hostLibs]]
     nlRunBoth $exe
 } -result {paint(7): status 1 uncaught propagated error: <error Painted {color: Color::Green}>}
 
-test nl-symbols {a library's only global symbols are its public C functions; its runtime and program are local} -constraints {nativeLibraries nm} -body {
+test nl-symbols {a library's only global symbols are its public C functions; its runtime and program are local} -constraints {elfLibraries nm} -body {
     set dir [nlDir]
     set built [nlLibrary $dir chk $::nlChecked]
     set defined [lsort [lmap line [split [exec nm -g --defined-only [dict get $built static]] \n] {
@@ -1127,6 +1330,705 @@ test nl-symbols {a library's only global symbols are its public C functions; its
         [regexp -line {^\S+ t botlish_fn_0$} $local] [regexp -line {^\S+ t rt_fail_declared$} $local] \
         [regexp -line {^\S+ T (botlish_|rt_)} $local]
 } -result {1 1 1 1 0}
+
+# A thread's pooled coroutine stacks are freed when its last instance of the
+# library is destroyed (runtime::library's `instance_gone`,
+# coroutine::release_pool; WINDOWS-X86-64-MILESTONE-8.md, "Unloading"): a
+# host may unload a library once its instances are gone, and no stack of the
+# library's -- a mapping, a Windows fiber -- is left behind on the threads
+# that used it. The stacks are made of an unusual size (12.5 MiB usable) so
+# that the host can count them: the mappings of exactly that size (Linux:
+# /proc/self/maps), or the allocations of that reservation (Windows:
+# VirtualQuery's regions summed by allocation base).
+
+set ::nlStacksC {
+#define NL_USABLE ((size_t) 13107200)
+/* How many coroutine stacks of NL_USABLE bytes exist in the process. */
+static int nl_stacks(void) {
+    int n = 0;
+#ifdef _WIN32
+    MEMORY_BASIC_INFORMATION m;
+    char *p = NULL;
+    void *base = NULL;
+    size_t total = 0;
+    while (VirtualQuery(p, &m, sizeof m) == sizeof m) {
+        if (m.State != MEM_FREE) {
+            if (m.AllocationBase != base) {
+                if (base != NULL && total >= NL_USABLE && total < NL_USABLE + 2 * 1024 * 1024) n++;
+                base = m.AllocationBase;
+                total = 0;
+            }
+            total += m.RegionSize;
+        }
+        if ((char *) m.BaseAddress + m.RegionSize <= p) break;
+        p = (char *) m.BaseAddress + m.RegionSize;
+    }
+    if (base != NULL && total >= NL_USABLE && total < NL_USABLE + 2 * 1024 * 1024) n++;
+#else
+    FILE *maps = fopen("/proc/self/maps", "r");
+    char line[512];
+    if (maps == NULL) return -1;
+    while (fgets(line, sizeof line, maps)) {
+        unsigned long low, high; char perms[8];
+        if (sscanf(line, "%lx-%lx %7s", &low, &high, perms) == 3 && high - low == NL_USABLE && perms[0] == 'r' && perms[1] == 'w') n++;
+    }
+    fclose(maps);
+#endif
+    return n;
+}
+}
+
+test nl-coroutine-stacks-released {a thread's coroutine stacks are pooled while it has an instance, and freed with its last one} -constraints {nativeLibraries nativeCoroutines} -setup {
+    set savedStack [array get ::env BOTLISH_NATIVE_COROUTINE_STACK_BYTES]
+    set ::env(BOTLISH_NATIVE_COROUTINE_STACK_BYTES) 13107200
+} -body {
+    set dir [nlDir]
+    set built [nlLibrary $dir co $::nlChain]
+    set exe [nlExecutable $dir "[nlPrelude co]
+$::nlStacksC
+static void *worker(void *unused) {
+    co_instance *in; co_error *e = NULL; int64_t r;
+    (void) unused;
+    if (co_create(&in, &e) != co_STATUS_OK || co_chain(in, 10, &r, &e) != co_STATUS_OK) return (void *) 1;
+    co_destroy(in);
+    return nl_stacks() == 0 ? NULL : (void *) 2;
+}
+int main(void) {
+    co_instance *a, *b; co_error *e = NULL; int64_t r;
+    int before = nl_stacks();
+    check(\"create a\", co_create(&a, &e), &e);
+    check(\"create b\", co_create(&b, &e), &e);
+    check(\"chain\", co_chain(a, 10, &r, &e), &e);
+    int during = nl_stacks();
+    check(\"destroy a\", co_destroy(a), NULL);
+    int one_left = nl_stacks();
+    check(\"chain\", co_chain(b, 10, &r, &e), &e);
+    check(\"destroy b\", co_destroy(b), NULL);
+    int after = nl_stacks();
+    printf(\"before: %d\\n\", before);
+    printf(\"pooled while instances live: %s\\n\", during > before ? \"yes\" : \"no\");
+    printf(\"one instance left: %s\\n\", one_left > before ? \"kept\" : \"freed\");
+    printf(\"the last destroyed: %s\\n\", after == before ? \"freed\" : \"kept\");
+    nl_thread t;
+    nl_thread_start(&t, 0, worker, NULL);
+    printf(\"a worker thread's, at its last destroy: %s\\n\", nl_thread_join(&t) == NULL ? \"freed\" : \"kept\");
+    return 0;
+}
+" [list [nlLink $built]] -lpthread]
+    nlRunBoth $exe
+} -cleanup {
+    unset -nocomplain ::env(BOTLISH_NATIVE_COROUTINE_STACK_BYTES)
+    array set ::env $savedStack
+} -result {before: 0
+pooled while instances live: yes
+one instance left: kept
+the last destroyed: freed
+a worker thread's, at its last destroy: freed}
+
+# ---------------------------------------------------------------------------
+# Windows x86-64: the DLL in a host it does not own (WINDOWS-X86-64-MILESTONE-8.md)
+
+# The C declarations of a host that loads library LIB itself (LoadLibraryW,
+# GetProcAddress): for each function FN it uses, its pointer type
+# LIB_FN_t -- TYPE with T standing for that name, e.g. "int32_t (*T)(void)"
+# -- and a variable LIB_p_FN; and `LIB_resolve`, which loads the DLL and
+# finds them, printing what it could not find.
+proc nlLoaderC {lib functions} {
+    set c "static HMODULE ${lib}_module;\n"
+    foreach {fn type} $functions {
+        append c "typedef [string map [list (*T) "(*${lib}_${fn}_t)"] $type];\nstatic ${lib}_${fn}_t ${lib}_p_$fn;\n"
+    }
+    append c "static int ${lib}_resolve(void) \{\n"
+    append c "    ${lib}_module = LoadLibraryW(L\"$lib.dll\");\n"
+    append c "    if (${lib}_module == NULL) \{ printf(\"LoadLibraryW($lib.dll) failed: %lu\\n\", GetLastError()); return 0; \}\n"
+    foreach {fn type} $functions {
+        append c "    ${lib}_p_$fn = (${lib}_${fn}_t) (void (*)(void)) GetProcAddress(${lib}_module, \"${lib}_$fn\");\n"
+        append c "    if (${lib}_p_$fn == NULL) \{ printf(\"no ${lib}_$fn\\n\"); return 0; \}\n"
+    }
+    append c "    return 1;\n\}\n"
+    return $c
+}
+
+test nl-windows-load-library {a host loads the DLL with LoadLibraryW, finds its functions with GetProcAddress, and unloads and reloads it; internal names are not found} -constraints windowsLibraries -body {
+    set dir [nlDir]
+    set built [nlLibrary $dir chk $::nlChecked]
+    set first [nlLibrary $dir one $::nlFirst]
+    set second [nlLibrary $dir two $::nlSecond]
+    set public [native::library::PublicNames chk [dict get $built exports]]
+    set exe [nlExecutable $dir "#include <windows.h>
+#include <stdio.h>
+#include <stdint.h>
+#include <stdbool.h>
+typedef struct chk_instance chk_instance;
+typedef struct chk_error chk_error;
+typedef struct one_instance one_instance;
+typedef struct two_instance two_instance;
+[nlLoaderC chk {
+    create {int32_t (*T)(chk_instance **, chk_error **)}
+    destroy {int32_t (*T)(chk_instance *)}
+    checked {int32_t (*T)(chk_instance *, int64_t, int64_t *, chk_error **)}
+    error_identity {int32_t (*T)(const chk_error *, const uint8_t **, size_t *)}
+    error_field_int {int32_t (*T)(const chk_error *, size_t, int64_t *)}
+    error_release {int32_t (*T)(chk_error **)}
+}]
+[nlLoaderC one {
+    create {int32_t (*T)(one_instance **, void **)}
+    twice {int32_t (*T)(one_instance *, int64_t, int64_t *, void **)}
+    destroy {int32_t (*T)(one_instance *)}
+}]
+[nlLoaderC two {
+    create {int32_t (*T)(two_instance **, void **)}
+    twice {int32_t (*T)(two_instance *, int64_t, int64_t *, void **)}
+    destroy {int32_t (*T)(two_instance *)}
+}]
+static const char *public_names\[\] = {[join [lmap n $public {string cat \"$n\"}] {, }]};
+static const char *internal_names\[\] = {\"botlish_library_call\", \"botlish_library_create\", \"botlish_program\", \"botlish_fn_0\",
+    \"botlish_entry_0\", \"rt_fail_declared\", \"main\", \"DllMain\", \"rust_begin_unwind\"};
+static void cycle(int round) {
+    chk_instance *in; chk_error *e = NULL; int64_t r = 0, code = 0; const uint8_t *p; size_t l;
+    if (!chk_resolve()) return;
+    int found = 0;
+    for (size_t i = 0; i < sizeof public_names / sizeof *public_names; i++)
+        found += GetProcAddress(chk_module, public_names\[i\]) != NULL;
+    int internal = 0;
+    for (size_t i = 0; i < sizeof internal_names / sizeof *internal_names; i++)
+        internal += GetProcAddress(chk_module, internal_names\[i\]) != NULL;
+    if (chk_p_create(&in, &e) != 0) { printf(\"create failed\\n\"); return; }
+    int32_t s = chk_p_checked(in, -5, &r, &e);
+    chk_p_error_identity(e, &p, &l);
+    chk_p_error_field_int(e, 0, &code);
+    printf(\"round %d: %d of %zu public functions found, %d internal; checked(-5): status %d %.*s code=%lld\", round,
+        found, sizeof public_names / sizeof *public_names, internal, (int) s, (int) l, (const char *) p, (long long) code);
+    chk_p_error_release(&e);
+    chk_p_checked(in, 21, &r, &e);
+    printf(\"; checked(21) = %lld\\n\", (long long) r);
+    chk_p_destroy(in);
+    BOOL freed = FreeLibrary(chk_module);
+    printf(\"round %d: FreeLibrary %s, still loaded: %s\\n\", round, freed ? \"ok\" : \"failed\", GetModuleHandleW(L\"chk.dll\") ? \"yes\" : \"no\");
+}
+int main(void) {
+    for (int round = 1; round <= 3; round++) cycle(round);
+    one_instance *a; two_instance *b; int64_t r1 = 0, r2 = 0;
+    if (!one_resolve() || !two_resolve()) return 1;
+    one_p_create(&a, NULL); two_p_create(&b, NULL);
+    one_p_twice(a, 21, &r1, NULL); two_p_twice(b, 21, &r2, NULL);
+    printf(\"one and two: %lld %lld\\n\", (long long) r1, (long long) r2);
+    one_p_destroy(a);
+    FreeLibrary(one_module);
+    two_p_twice(b, 7, &r2, NULL);
+    printf(\"one unloaded, two still: %lld\\n\", (long long) r2);
+    if (!one_resolve()) return 1;
+    one_p_create(&a, NULL);
+    one_p_twice(a, 7, &r1, NULL);
+    printf(\"one reloaded: %lld\\n\", (long long) r1);
+    one_p_destroy(a); two_p_destroy(b);
+    FreeLibrary(one_module); FreeLibrary(two_module);
+    return 0;
+}
+" {}]
+    nlRunBoth $exe
+} -result {round 1: 17 of 17 public functions found, 0 internal; checked(-5): status 1 Rejected code=-5; checked(21) = 42
+round 1: FreeLibrary ok, still loaded: no
+round 2: 17 of 17 public functions found, 0 internal; checked(-5): status 1 Rejected code=-5; checked(21) = 42
+round 2: FreeLibrary ok, still loaded: no
+round 3: 17 of 17 public functions found, 0 internal; checked(-5): status 1 Rejected code=-5; checked(21) = 42
+round 3: FreeLibrary ok, still loaded: no
+one and two: 42 63
+one unloaded, two still: 21
+one reloaded: 14}
+
+# The artifacts as Windows sees them, from their bytes (native/pe.tcl) and
+# as MSVC's dumpbin reads them: the DLL exports exactly the library's public
+# functions, by name, under its own name, imports only the system's DLLs --
+# no C runtime's (it holds the static one) -- and is relocatable and
+# DEP-compatible; the import library names exactly those functions, each a
+# code import of the DLL.
+test nl-windows-exports {the DLL exports exactly the public C functions and imports only the system's DLLs; the import library names exactly them} -constraints windowsLibraries -body {
+    set dir [nlDir]
+    set built [nlLibrary $dir chk $::nlChecked]
+    set dll [dict get $built shared]
+    set facts [native::pe::facts $dll]
+    set public [lsort [native::library::PublicNames chk [dict get $built exports]]]
+    set dumped [ctool::msvc dumpbin /nologo /exports [file nativename $dll]]
+    set dumpbinNames [lsort [lmap {- name} [regexp -all -inline -line {^\s+\d+\s+[0-9A-F]+\s+[0-9A-F]{8}\s+(\S+)} $dumped] {set name}]]
+    set system [file join [if {[info exists ::env(SystemRoot)]} {set ::env(SystemRoot)} else {set ::env(WINDIR)}] System32]
+    set foreign [lmap d [dict get $facts imports] {
+        expr {[string match -nocase api-ms-win-* $d] || [string match -nocase ext-ms-* $d] || [file isfile [file join $system $d]] ? [continue] : $d}
+    }]
+    set runtimes [lsearch -all -inline -regexp -nocase [dict get $facts imports] {^(vcruntime|msvcp|ucrtbase|api-ms-win-crt-)}]
+    set library [native::pe::importLibrary [dict get $built import]]
+    list [dict get $facts dll] [dict get $facts exportName] \
+        [expr {[lsort [dict get $facts exports]] eq $public}] [expr {$dumpbinNames eq $public}] \
+        [llength [dict get $facts forwarders]] [expr {[dict get $facts exportFunctions] == [llength $public]}] \
+        [expr {$foreign eq ""}] [expr {$runtimes eq ""}] \
+        [expr {([dict get $facts dllCharacteristics] & 0x140) == 0x140}] \
+        [expr {[lsort [lmap i [dict get $library imports] {lindex $i 0}]] eq $public}] \
+        [lsort -unique [lmap i [dict get $library imports] {string tolower [lrange $i 1 2]}]]
+} -result {1 chk.dll 1 1 0 1 1 1 1 1 {{chk.dll code}}}
+
+# native::library checks the DLL link.exe made before it reports it
+# (`ValidateDll`): a DLL that exports a name that is no public function of
+# the library, or that imports a C runtime's DLL, is refused and removed,
+# with its import library.
+test nl-windows-validate {a DLL exporting a name of its own, or importing a C runtime's DLLs, is refused and removed} -constraints windowsLibraries -body {
+    set dir [nlDir]
+    set results {}
+    foreach {name crt source} {
+        extra static "__declspec(dllexport) int extra_create(void) { return 1; }\n__declspec(dllexport) int extra_hidden(void) { return 2; }\n"
+        dynamic dynamic "#include <stdlib.h>\n__declspec(dllexport) void *dynamic_create(size_t n) { return malloc(n); }\n"
+    } {
+        set lib [file join $dir $name]
+        file mkdir $lib
+        nlWrite [file join $lib $name.c] $source
+        lassign [ctool::sharedLibrary $lib $name [file join $lib $name.c] -crt $crt] dll import
+        catch {native::library::ValidateDll $dll $import $name [list ${name}_create]} message options
+        lappend results [dict get $options -errorcode] \
+            [regexp {no public function of the library: extra_hidden} $message] [regexp {imports a C runtime's DLLs} $message] \
+            [file exists $dll] [file exists $import]
+    }
+    set results
+} -result {{NATIVE LIBRARY PE} 1 0 0 0 {NATIVE LIBRARY PE} 0 1 0 0}
+
+# The Windows library build's failures, each its own kind with the tool's
+# words kept (WINDOWS-X86-64-MILESTONE-8.md, "Toolchain and diagnostics"): a
+# linker that is not there (NATIVE LIBRARY TOOLCHAIN, before anything is
+# compiled), a runtime archive that is none (NATIVE LIBRARY RUNTIME), a
+# library or a C function no input provides (NATIVE LIBRARY LINK, with
+# link.exe's LNK lines); nothing is left under the library's names.
+test nl-windows-diagnostics {a missing linker, an unusable runtime archive and a failed link are each said as such} -constraints windowsLibraries -setup {
+    set saved [array get ::env BOTLISH_NATIVE_*]
+} -body {
+    set dir [nlDir]
+    set results {}
+    nlWrite [file join $dir chk.bot] $::nlChecked
+    set hir [nlHir [file join $dir chk.bot]]
+    set ::env(BOTLISH_NATIVE_SYSTEM_LINKER) [file join $dir no-such-dir link.exe]
+    catch {nlBuild $hir -name chk -out [file join $dir lib]} message options
+    lappend results [dict get $options -errorcode] [string match "*no-such-dir*" $message]
+    unset ::env(BOTLISH_NATIVE_SYSTEM_LINKER)
+    nlWrite [file join $dir fake.lib] "not an archive\n"
+    set ::env(BOTLISH_NATIVE_RUNTIME) [file join $dir fake.lib]
+    catch {nlBuild $hir -name chk -out [file join $dir lib]} message options
+    lappend results [dict get $options -errorcode] [string match "*fake.lib*" $message]
+    unset ::env(BOTLISH_NATIVE_RUNTIME)
+    foreach {name source} {
+        nolib "import std::ffi::c\n\nextern c library \"botlish_no_such_library\"\n\nextern c fn labs(x: std::ffi::c::Long) -> std::ffi::c::Long\n\nexported c fn f(n: int) -> int:\n    if n < -1000 or n > 1000:\n        return 0\n    labs(n) + 0\n"
+        nosym "import std::ffi::c\n\nextern c fn botlish_no_such_function(x: std::ffi::c::Long) -> std::ffi::c::Long\n\nexported c fn f(n: int) -> int:\n    if n < -1000 or n > 1000:\n        return 0\n    botlish_no_such_function(n) + 0\n"
+    } {
+        nlWrite [file join $dir $name.bot] $source
+        catch {nlBuild [nlHir [file join $dir $name.bot]] -name $name -out [file join $dir lib]} message options
+        lappend results [dict get $options -errorcode] [regexp {LNK\d+} $message] \
+            [file exists [file join $dir lib $name.dll]] [file exists [file join $dir lib $name.manifest.json]]
+    }
+    set results
+} -cleanup {
+    unset -nocomplain ::env(BOTLISH_NATIVE_SYSTEM_LINKER) ::env(BOTLISH_NATIVE_RUNTIME)
+    array set ::env $saved
+} -result {{NATIVE LIBRARY TOOLCHAIN} 1 {NATIVE LIBRARY RUNTIME} 1 {NATIVE LIBRARY LINK} 1 0 0 {NATIVE LIBRARY LINK} 1 0 0}
+
+# Every public function has unwind information (WINDOWS-X86-64-MILESTONE-8.md,
+# "Unwind information"): Windows finds a function entry for each one's
+# address, and a stack trace a host takes inside a C callback that Botlish
+# code called -- through the export's trampoline, the runtime and the
+# Botlish frames -- reaches the host function that called the export.
+test nl-windows-unwind-through {Windows unwinds through the public functions: a stack trace inside a callback reaches the export's caller} -constraints windowsLibraries -body {
+    set dir [nlDir]
+    lassign [nlHostCallback $dir] declaration hostLibs
+    set built [nlLibrary $dir un "import std::ffi::c\n$declaration
+extern c fn host_callback(n: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+
+exported c fn outer(n: int) -> int:
+    if n < -1000 or n > 1000:
+        return 0
+    host_callback(n) + 1
+"]
+    set public [native::library::PublicNames un [dict get $built exports]]
+    set exe [nlExecutable $dir "[nlPrelude un]
+static const char *names\[\] = {[join [lmap n $public {string cat \"$n\"}] {, }]};
+static int reached;
+static __declspec(noinline) int64_t call_outer(un_instance *in, int64_t n);
+long long host_callback(long long n) {
+    void *frames\[128\];
+    USHORT count = RtlCaptureStackBackTrace(0, 128, frames, NULL);
+    for (USHORT i = 0; i < count; i++)
+        if ((char *) frames\[i\] > (char *) call_outer && (char *) frames\[i\] < (char *) call_outer + 512) reached = 1;
+    return n * 2;
+}
+static __declspec(noinline) int64_t call_outer(un_instance *in, int64_t n) {
+    int64_t r = -1; un_error *e = NULL;
+    check(\"outer\", un_outer(in, n, &r, &e), &e);
+    return r;
+}
+int main(void) {
+    un_instance *in; un_error *e = NULL;
+    HMODULE module = GetModuleHandleW(L\"un.dll\");
+    int entries = 0;
+    for (size_t i = 0; i < sizeof names / sizeof *names; i++) {
+        DWORD64 base = 0;
+        FARPROC f = GetProcAddress(module, names\[i\]);
+        PRUNTIME_FUNCTION entry = f ? RtlLookupFunctionEntry((DWORD64) (uintptr_t) f, &base, NULL) : NULL;
+        if (entry != NULL && base + entry->BeginAddress == (DWORD64) (uintptr_t) f) entries++;
+    }
+    printf(\"function entries: %d of %zu public functions\\n\", entries, sizeof names / sizeof *names);
+    NL_REGISTER(host_callback);
+    check(\"create\", un_create(&in, &e), &e);
+    int64_t r = call_outer(in, 20);
+    printf(\"outer(20) = %lld, the stack trace reached its caller: %s\\n\", (long long) r, reached ? \"yes\" : \"no\");
+    un_destroy(in);
+    return 0;
+}
+" [list [nlLink $built] {*}$hostLibs]]
+    nlRunBoth $exe
+} -result {function entries: 16 of 16 public functions
+outer(20) = 41, the stack trace reached its caller: yes}
+
+# Loading the DLL runs no Botlish code: the instance is made by NAME_create,
+# after the loader lock is released. What runs at load and at a thread's
+# attach or detach is what the DLL's sections hold: the C runtime's entry
+# point and its initializer tables (.CRT$XC*, .CRT$XI*) and the TLS
+# callbacks (.CRT$XL*). The program object holds none of them; the runtime
+# archive -- Botlish's runtime, the Rust standard library and every
+# dependency -- holds no initializer, and at most the standard library's TLS
+# callback, which runs thread-local destructors when a thread or the process
+# detaches and nothing at attach (a cross-built archive has it; the Windows
+# toolchain's of 2026-11 has none). The DLL has no more TLS callbacks than
+# the archive offers (WINDOWS-X86-64-MILESTONE-8.md, section 7: none).
+# The section names of the COFF object DATA: a plain object (its section
+# table after the 20-byte header) or a "bigobj" one (Sig1 0, Sig2 0xFFFF,
+# Version 2 or more: the table after its 56-byte header); none for anything
+# else -- an archive's short import objects (Version 0) have no sections.
+proc nlCoffSections {data} {
+    binary scan $data susu machine count
+    if {$machine == 0 && $count == 0xffff} {
+        binary scan $data @4su@6su@44iu version machine count
+        if {$version < 2 || $machine != 0x8664} {
+            return {}
+        }
+        set table 56
+    } else {
+        binary scan $data @16su optional
+        if {$machine != 0x8664 || $optional != 0} {
+            return {}
+        }
+        set table 20
+    }
+    set names {}
+    for {set i 0} {$i < $count} {incr i} {
+        lappend names [string trimright [string range $data [expr {$table + 40 * $i}] [expr {$table + 7 + 40 * $i}]] \x00]
+    }
+    return $names
+}
+proc nlArchiveCrtSections {path} {
+    set channel [open $path rb]
+    set data [read $channel]
+    close $channel
+    set at 8
+    set found {}
+    while {$at + 60 <= [string length $data]} {
+        set name [string trimright [string range $data $at [expr {$at + 15}]]]
+        set size [string trim [string range $data [expr {$at + 48}] [expr {$at + 57}]]]
+        if {$name ni {/ //}} {
+            foreach section [nlCoffSections [string range $data [expr {$at + 60}] [expr {$at + 59 + $size}]]] {
+                if {[string match {.CRT$*} $section]} {
+                    lappend found $section
+                }
+            }
+        }
+        set at [expr {$at + 60 + $size + ($size % 2)}]
+    }
+    return $found
+}
+
+test nl-windows-loader-lock {loading the DLL runs no Botlish code: no initializer of the program or the runtime, no TLS callback but the standard library's destructors} -constraints windowsLibraries -body {
+    set dir [nlDir]
+    set built [nlLibrary $dir chk $::nlChecked]
+    nlWrite [file join $dir chk.nir] [native::nir [nlHir [file join $dir chk.bot]] -exports [lmap r [dict get $built exports] {
+        dict create symbol chk_[dict get $r name] block [dict get $r block] params [lmap {p t} [dict get $r params] {set t}] result [dict get $r result]
+    }]]
+    exec [native::binary] library [file join $dir chk.obj] chk [file join $dir chk.nir]
+    set channel [open [file join $dir chk.obj] rb]
+    set object [read $channel]
+    close $channel
+    set programSections [lsearch -all -inline [nlCoffSections $object] {.CRT$*}]
+    set runtimeSections [nlArchiveCrtSections [file join [file dirname [native::binary]] botlish_runtime.lib]]
+    set initializers [lsearch -all -inline -regexp $runtimeSections {^\.CRT\$X[CI]}]
+    set callbackSections [lsearch -all -inline -glob $runtimeSections {.CRT$XL*}]
+    set facts [native::pe::facts [dict get $built shared]]
+    list $programSections $initializers [expr {[llength [dict get $facts tlsCallbacks]] <= [llength $callbackSections]}] \
+        [expr {[dict get $facts entry] != 0}]
+} -result {{} {} 1 1}
+
+# The generated header from C++ (extern "C", no name mangling: the host links
+# the import library by the undecorated names), and as C and C++ at MSVC's
+# fourth warning level with warnings as errors.
+test nl-windows-cxx-host {a C++ host includes the header and links the import library; the header compiles cleanly as C and C++} -constraints windowsLibraries -body {
+    set dir [nlDir]
+    set built [nlLibrary $dir ty $::nlTypes]
+    set lib [file join $dir lib]
+    foreach {source flags} {header.c {/TC /std:c11} header.cpp {/TP /std:c++17}} {
+        nlWrite [file join $dir $source] "#include \"ty.h\"\nint header_compiles(void) { return ty_STATUS_OK; }\n"
+        ctool::msvc cl /nologo /c /W4 /WX {*}$flags /I[file nativename $lib] /Fo[file nativename [file join $dir [file rootname $source].obj]] [file nativename [file join $dir $source]]
+    }
+    set exe [nlExecutable $dir {#include <cstdio>
+#include <string>
+#include "ty.h"
+int main() {
+    ty_instance *in = nullptr; ty_error *e = nullptr; ty_bytes out{}; int64_t n = 0;
+    if (ty_create(&in, &e) != ty_STATUS_OK) return 1;
+    ty_echo(in, reinterpret_cast<const uint8_t *>("from C++"), 8, &out, &e);
+    std::string text(reinterpret_cast<const char *>(out.ptr), out.len);
+    ty_bytes_release(&out);
+    int32_t s = ty_odd(in, 3, &n, &e);
+    const uint8_t *p = nullptr; size_t l = 0;
+    ty_error_identity(e, &p, &l);
+    std::printf("%s; odd(3): status %d %.*s\n", text.c_str(), static_cast<int>(s), static_cast<int>(l), reinterpret_cast<const char *>(p));
+    ty_error_release(&e);
+    ty_destroy(in);
+    return 0;
+}
+} [list [nlLink $built]] -cxx 1]
+    nlRunBoth $exe
+} -result {from C++; odd(3): status 1 Odd}
+
+# The DLL holds its own C runtime (the static one: codegen/aot.rs's CRT
+# policy), whatever runtime its host was compiled with: a host built for the
+# static runtime (/MT) and one built for the dynamic runtime (/MD) both get
+# the same results, keep results across calls, release them with the
+# library's own functions, and allocate and free their own memory beside it.
+test nl-windows-crt {hosts of the static (/MT) and the dynamic (/MD) C runtime use the DLL alike} -constraints windowsLibraries -body {
+    set dir [nlDir]
+    set built [nlLibrary $dir ty $::nlTypes]
+    set results {}
+    foreach crt {static dynamic} {
+        set exe [nlExecutable $dir "[nlPrelude ty]
+int main(void) {
+    ty_instance *in; ty_error *e = NULL, *kept = NULL; ty_bytes a, b; int64_t n;
+    check(\"create\", ty_create(&in, &e), &e);
+    char *mine = malloc(64);
+    check(\"echo\", ty_echo(in, (const uint8_t *) \"kept text\", 9, &a, &e), &e);
+    ty_odd(in, 4, &n, &kept);
+    for (int i = 0; i < 500; i++) {
+        check(\"joined\", ty_joined(in, (const uint8_t *) \"a\", 1, (const uint8_t *) \"b\", 1, (const uint8_t *) \"c\", 1, &b, &e), &e);
+        ty_bytes_release(&b);
+    }
+    strcpy(mine, \"the host's own\");
+    ty_destroy(in);
+    printf(\"%.*s; %s\\n\", (int) a.len, (const char *) a.ptr, mine);
+    free(mine);
+    report(\"kept\", ty_error_status(kept), &kept);
+    printf(\"release: %d, again: %d\\n\", ty_bytes_release(&a), ty_bytes_release(&a));
+    return 0;
+}
+" [list [nlLink $built]] -crt $crt]
+        lappend results [nlRunBoth $exe]
+    }
+    list [lindex $results 0] [expr {[lindex $results 0] eq [lindex $results 1]}]
+} -result {{kept text; the host's own
+kept: status 1 Odd count=4 flag=true items=(other) note="odd ä" ratio=0.5
+release: 0, again: 0} 1}
+
+# A library's coroutines are Windows fibers (WINDOWS-X86-64-MILESTONE-5.md),
+# which need the calling thread to be a fiber too. A host's thread is left as
+# the host gave it: one that was no fiber is no fiber after a call that ran
+# coroutines (so the host may make it one itself), and one the host made a
+# fiber stays that fiber; a call on a fiber the host created runs its
+# coroutines there and returns to it.
+test nl-windows-fibers {a call's coroutines leave the host thread's fiber state as the host gave it} -constraints windowsLibraries -body {
+    set dir [nlDir]
+    set built [nlLibrary $dir co $::nlChain]
+    set exe [nlExecutable $dir "[nlPrelude co]
+static co_instance *in;
+static void *home;
+static void chain(const char *where) {
+    co_error *e = NULL; int64_t r = 0;
+    check(where, co_chain(in, 20, &r, &e), &e);
+    printf(\"%s: chain(20) = %lld\", where, (long long) r);
+}
+static void WINAPI on_host_fiber(void *unused) {
+    (void) unused;
+    void *self = GetCurrentFiber();
+    chain(\"a fiber the host created\");
+    printf(\", still that fiber: %s\\n\", GetCurrentFiber() == self ? \"yes\" : \"no\");
+    SwitchToFiber(home);
+}
+int main(void) {
+    co_error *e = NULL;
+    check(\"create\", co_create(&in, &e), &e);
+    chain(\"a thread\");
+    printf(\", a fiber after: %s\\n\", IsThreadAFiber() ? \"yes\" : \"no\");
+    home = ConvertThreadToFiber(NULL);
+    printf(\"the host converts it afterwards: %s\\n\", home != NULL ? \"yes\" : \"no\");
+    chain(\"the host's fiber\");
+    printf(\", still the host's fiber: %s\\n\", IsThreadAFiber() && GetCurrentFiber() == home ? \"yes\" : \"no\");
+    void *there = CreateFiber(1024 * 1024, on_host_fiber, NULL);
+    SwitchToFiber(there);
+    DeleteFiber(there);
+    printf(\"the host converts it back: %s\\n\", ConvertFiberToThread() ? \"yes\" : \"no\");
+    chain(\"the thread again\");
+    printf(\", a fiber after: %s\\n\", IsThreadAFiber() ? \"yes\" : \"no\");
+    check(\"destroy\", co_destroy(in), NULL);
+    return 0;
+}
+" [list [nlLink $built]]]
+    nlRunBoth $exe
+} -result {a thread: chain(20) = 40, a fiber after: no
+the host converts it afterwards: yes
+the host's fiber: chain(20) = 40, still the host's fiber: yes
+a fiber the host created: chain(20) = 40, still that fiber: yes
+the host converts it back: yes
+the thread again: chain(20) = 40, a fiber after: no}
+
+# Unloading (WINDOWS-X86-64-MILESTONE-8.md, "Unloading"): once every instance
+# is destroyed and every result and error released, FreeLibrary unloads the
+# DLL with nothing of it left -- here while the worker thread that used it,
+# coroutines included, still runs: its coroutine stacks went with its last
+# instance, and its thread is no fiber -- and the thread then ends normally.
+# A reload makes fresh instances.
+test nl-windows-unload {after every instance is destroyed the DLL unloads, a thread that used it still running, and reloads} -constraints windowsLibraries -setup {
+    set savedStack [array get ::env BOTLISH_NATIVE_COROUTINE_STACK_BYTES]
+    set ::env(BOTLISH_NATIVE_COROUTINE_STACK_BYTES) 13107200
+} -body {
+    set dir [nlDir]
+    set built [nlLibrary $dir co $::nlChain]
+    set exe [nlExecutable $dir "#include <windows.h>
+#include <stdio.h>
+#include <stdint.h>
+typedef struct co_instance co_instance;
+[nlLoaderC co {
+    create {int32_t (*T)(co_instance **, void **)}
+    chain {int32_t (*T)(co_instance *, int64_t, int64_t *, void **)}
+    destroy {int32_t (*T)(co_instance *)}
+}]
+$::nlStacksC
+static HANDLE used, unloaded;
+static DWORD WINAPI worker(LPVOID arg) {
+    co_instance *in; int64_t r = 0;
+    (void) arg;
+    co_p_create(&in, NULL);
+    co_p_chain(in, 30, &r, NULL);
+    co_p_destroy(in);
+    printf(\"worker: chain(30) = %lld, a fiber: %s\\n\", (long long) r, IsThreadAFiber() ? \"yes\" : \"no\");
+    fflush(stdout);
+    SetEvent(used);
+    WaitForSingleObject(unloaded, INFINITE);
+    printf(\"worker: ends after the unload\\n\");
+    return 0;
+}
+int main(void) {
+    used = CreateEventW(NULL, FALSE, FALSE, NULL);
+    unloaded = CreateEventW(NULL, FALSE, FALSE, NULL);
+    for (int round = 1; round <= 2; round++) {
+        if (!co_resolve()) return 1;
+        HANDLE t = CreateThread(NULL, 0, worker, NULL, 0, NULL);
+        WaitForSingleObject(used, INFINITE);
+        BOOL freed = FreeLibrary(co_module);
+        printf(\"round %d: FreeLibrary %s, still loaded: %s, coroutine stacks left: %d\\n\", round, freed ? \"ok\" : \"failed\",
+            GetModuleHandleW(L\"co.dll\") ? \"yes\" : \"no\", nl_stacks());
+        fflush(stdout);
+        SetEvent(unloaded);
+        WaitForSingleObject(t, INFINITE);
+        DWORD code = 1;
+        GetExitCodeThread(t, &code);
+        CloseHandle(t);
+        printf(\"round %d: the worker exited with %lu\\n\", round, code);
+    }
+    return 0;
+}
+" {}]
+    nlRunBoth $exe
+} -cleanup {
+    unset -nocomplain ::env(BOTLISH_NATIVE_COROUTINE_STACK_BYTES)
+    array set ::env $savedStack
+} -result {worker: chain(30) = 60, a fiber: no
+round 1: FreeLibrary ok, still loaded: no, coroutine stacks left: 0
+worker: ends after the unload
+round 1: the worker exited with 0
+worker: chain(30) = 60, a fiber: no
+round 2: FreeLibrary ok, still loaded: no, coroutine stacks left: 0
+worker: ends after the unload
+round 2: the worker exited with 0}
+
+# The Win64 calling convention at the boundary: an export whose parameters
+# fill every register position and spill onto the stack, integers, doubles
+# and bools mixed; and, called by an assembly caller that holds a sentinel in
+# every nonvolatile register (tests/cffi/nl-win64-probe.asm: RBX, RBP, RDI,
+# RSI, R12-R15, XMM6-XMM15), an export that succeeds and one that fails and
+# allocates on the way: every nonvolatile register is as the caller left it.
+test nl-windows-win64-abi {arguments past the fourth position, mixed classes; every nonvolatile register preserved} -constraints windowsLibraries -body {
+    set dir [nlDir]
+    set built [nlLibrary $dir ab {
+import std::str
+
+error Negative:
+    value: int
+
+fn weight(flag: bool, n: int) -> int:
+    if flag:
+        return n
+    0
+
+fn greater(x: Float64, y: Float64) -> bool:
+    x > y
+
+exported c fn mix(a: int, x: Float64, b: bool, s: str, c: int, y: Float64, d: bool, t: str) -> int:
+    a + c * 10 + std::str::length(s) * 100 + std::str::length(t) * 1000 + weight(b, 10000) + weight(d, 100000) + weight(greater(x, y), 1000000)
+
+exported c fn fsum(x1: Float64, x2: Float64, x3: Float64, x4: Float64, x5: Float64, x6: Float64) -> Float64 errors NonFiniteFloat:
+    x1 + 2.0 * x2 + 3.0 * x3 + 4.0 * x4 + 5.0 * x5 + 6.0 * x6
+
+exported c fn sum6(a: int, b: int, c: int, d: int, e: int, f: int) -> int errors Negative:
+    if a < 0:
+        fail Negative {value: std::str::length(std::str::concat("x", "yz")) + a}
+    a + 2 * b + 3 * c + 4 * d + 5 * e + 6 * f
+}]
+    set probe [ctool::staticLibrary [file join $dir lib] nlprobe [file join $::projectRoot tests cffi nl-win64-probe.asm]]
+    set exe [nlExecutable $dir "[nlPrelude ab]
+extern int32_t nl_probe(void *fn, const uint64_t *args, uint64_t *changed);
+int main(void) {
+    ab_instance *in; ab_error *e = NULL; int64_t r = 0; double x = 0; uint64_t changed = 0;
+    check(\"create\", ab_create(&in, &e), &e);
+    check(\"mix\", ab_mix(in, 7, 2.5, true, (const uint8_t *) \"abc\", 3, 4, 1.5, false, (const uint8_t *) \"hello\", 5, &r, &e), &e);
+    printf(\"mix = %lld\\n\", (long long) r);
+    check(\"fsum\", ab_fsum(in, 1.0, 1.0, 1.0, 1.0, 1.0, 0.5, &x, &e), &e);
+    printf(\"fsum = %g\\n\", x);
+    uint64_t args\[9\] = {(uint64_t) (uintptr_t) in, 1, 2, 3, 4, 5, 6, (uint64_t) (uintptr_t) &r, (uint64_t) (uintptr_t) &e};
+    int32_t s = nl_probe((void *) ab_sum6, args, &changed);
+    printf(\"sum6: status %d = %lld, nonvolatile registers changed: %llx\\n\", (int) s, (long long) r, (unsigned long long) changed);
+    args\[1\] = (uint64_t) -3;
+    s = nl_probe((void *) ab_sum6, args, &changed);
+    report(\"sum6(-3)\", s, &e);
+    printf(\"nonvolatile registers changed: %llx\\n\", (unsigned long long) changed);
+    ab_destroy(in);
+    return 0;
+}
+" [list [nlLink $built] $probe]]
+    nlRunBoth $exe
+} -result {mix = 1015347
+fsum = 18
+sum6: status 0 = 91, nonvolatile registers changed: 0
+sum6(-3): status 1 Negative value=0
+nonvolatile registers changed: 0}
+
+# Where the capability table gives no native libraries (macOS: neither its
+# Mach-O library link nor its runtime's library mode exists), native::library
+# refuses the build before anything is lowered, and the driver refuses its
+# library commands: no host gains libraries by accident
+# (WINDOWS-X86-64-MILESTONE-8.md enabled Windows x86-64 alone).
+test nl-unsupported-host {a host without native libraries refuses them before lowering, in native::library and in the driver} -constraints {nativeBuilt noNativeLibraries} -body {
+    set dir [nlDir]
+    nlWrite [file join $dir chk.bot] $::nlChecked
+    set hir [nlHir [file join $dir chk.bot]]
+    catch {native::library $hir -name chk -out [file join $dir lib]} message options
+    set text [native::nir $hir -exports [lmap r [hir::exports::of $hir] {
+        dict create symbol chk_[dict get $r name] block [dict get $r block] params [lmap {p t} [dict get $r params] {set t}] result [dict get $r result]
+    }]]
+    set driver {}
+    foreach command {library library-dll} {
+        set lines [native::Driver $command $text [file join $dir out.o] chk]
+        lappend driver [lindex [lsearch -inline -index 0 $lines error] 1]
+    }
+    list [dict get $options -errorcode] [file exists [file join $dir lib]] $driver
+} -result {{NATIVE UNSUPPORTED library} 0 {{NATIVE UNSUPPORTED library} {NATIVE UNSUPPORTED library}}}
 
 # ---------------------------------------------------------------------------
 # The front end
@@ -1240,8 +2142,8 @@ test nl-library-export-list {-exports exports the entry program's top-level func
     set dir [nlDir]
     set path [file join $dir listed.bot]
     nlWrite $path "fn plus(a: int, b: int) -> int:\n    a + b\n\nfn loose(a) -> int:\n    1\n"
-    set built [native::library [nlHir $path] -name listed -out [file join $dir lib] -exports plus]
-    catch {native::library [nlHir $path] -name listed -out [file join $dir lib] -exports {loose absent}} message options
+    set built [nlBuild [nlHir $path] -name listed -out [file join $dir lib] -exports plus]
+    catch {nlBuild [nlHir $path] -name listed -out [file join $dir lib] -exports {loose absent}} message options
     set exe [nlExecutable $dir "[nlPrelude listed]
 int main(void) {
     listed_instance *in; listed_error *e = NULL; int64_t r;
@@ -1251,7 +2153,7 @@ int main(void) {
     listed_destroy(in);
     return 0;
 }
-" [list [dict get $built static]]]
+" [list [nlLink $built]]]
     list [nlRun $exe] [lmap d [dict get $options -diagnostics] {dict get $d shown}]
 } -result {42 {EXPORT-SIGNATURE EXPORT-PLACEMENT}}
 
@@ -1264,22 +2166,76 @@ test nl-manifest {the manifest states the interface as data, from the compiler's
         set e
     }] 0]
     set error [lindex [lsp::json::elements [lsp::json::get $odd errors]] 0]
+    set artifacts [lsp::json::get $manifest artifacts]
     list [lsp::json::integer [lsp::json::get $manifest schema]] [lsp::json::text [lsp::json::get $manifest library]] \
-        [lsp::json::text [lsp::json::get [lsp::json::get $manifest artifacts] static]] \
+        [if {$::nlWindows} {
+            # A DLL and its import library, and no static library.
+            list [lsp::json::text [lsp::json::get $artifacts shared]] [lsp::json::text [lsp::json::get $artifacts import]] \
+                [lsp::json::type [lsp::json::get $artifacts static]]
+        } else {
+            lsp::json::text [lsp::json::get $artifacts static]
+        }] \
         [lsp::json::text [lsp::json::get $odd symbol]] [lsp::json::text [lsp::json::get $odd botlish]] \
         [lmap f [lsp::json::elements [lsp::json::get $error fields]] {
             list [lsp::json::text [lsp::json::get $f name]] [lsp::json::text [lsp::json::get $f type]]
         }] \
         [lmap e [lsp::json::elements [lsp::json::get $manifest exports]] {lsp::json::text [lsp::json::get $e name]}] \
         [expr {[core::ReadFile [dict get $built manifest]] eq [core::ReadFile [dict get [nlLibrary $dir ty $::nlTypes] manifest]]}]
-} -result {2 ty libty.a ty_odd {odd(n: int) -> int errors Odd {count: int, flag: bool, items: other, note: str, ratio: Float64}} {{count int} {flag bool} {items other} {note str} {ratio float64}} {negate half echo length joined nothing odd huge range_error} 1}
+} -result [list 2 ty [expr {$::nlWindows ? "ty.dll ty.lib null" : "libty.a"}] ty_odd {odd(n: int) -> int errors Odd {count: int, flag: bool, items: other, note: str, ratio: Float64}} {{count int} {flag bool} {items other} {note str} {ratio float64}} {negate half echo length joined nothing odd huge range_error} 1]
 
 test nl-main-cli {main.tcl -emit-native-library builds a library from one input} -constraints nativeLibraries -body {
     set dir [nlDir]
     nlWrite [file join $dir cli.bot] $::nlChecked
-    set out [exec [info nameofexecutable] [file join $::projectRoot main.tcl] -warnings off \
+    set command [list exec [info nameofexecutable] [file join $::projectRoot main.tcl] -warnings off \
         -emit-native-library cli -out [file join $dir lib] [file join $dir cli.bot]]
+    set out [if {$::nlWindows} {ctool::withMsvc $command} else {{*}$command}]
     lmap line [split $out \n] {lindex [split $line :] 0}
-} -result {static shared header manifest}
+} -result [expr {$::nlWindows ? "shared import header manifest" : "static shared header manifest"}]
+
+# The sample WINDOWS-X86-64-MILESTONE-8.md's last section gives, as it gives
+# it: example.bot built by main.tcl's command line in the directory that
+# holds it, host.c compiled with the header and linked with the import
+# library (Linux: the shared library), the host run from the output
+# directory. The two texts here are the report's: change them together.
+test nl-sample {the report's sample library builds and its host runs} -constraints nativeLibraries -body {
+    set dir [nlDir]
+    nlWrite [file join $dir example.bot] {error Rejected:
+    code: int
+
+exported c fn checked(n: int) -> int errors Rejected:
+    if n < 0:
+        fail Rejected {code: n}
+    n * 2
+}
+    nlWrite [file join $dir host.c] {#include <stdio.h>
+#include "example.h"
+
+int main(void) {
+    example_instance *in; example_error *e = NULL; int64_t r;
+    if (example_create(&in, &e) != example_STATUS_OK) return 1;
+    if (example_checked(in, 21, &r, &e) == example_STATUS_OK)
+        printf("%lld\n", (long long) r);
+    example_destroy(in);
+    return 0;
+}
+}
+    set here [pwd]
+    cd $dir
+    try {
+        set emit [list exec [info nameofexecutable] [file join $::projectRoot main.tcl] -emit-native-library example -out output example.bot 2>@1]
+        if {$::nlWindows} {
+            ctool::withMsvc $emit
+            ctool::msvc cl /nologo /W4 /Ioutput host.c output\\example.lib /Fe:output\\host.exe
+            set out [exec [file join $dir output host.exe]]
+        } else {
+            {*}$emit
+            exec cc -Wall -Ioutput host.c output/libexample.so -Wl,-rpath,[file join $dir output] -o output/host
+            set out [exec [file join $dir output host]]
+        }
+    } finally {
+        cd $here
+    }
+    list [lsort [glob -tails -directory [file join $dir output] example.*]] $out
+} -result [list [lsort [expr {$::nlWindows ? {example.dll example.h example.lib example.manifest.json} : {example.h example.manifest.json}}]] 42]
 
 cleanupTests

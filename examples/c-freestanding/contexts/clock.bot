@@ -1,0 +1,10 @@
+# clock -- the time of day an application may ask for
+# (C-CONTEXTS-FREESTANDING-MILESTONE-1.md): a context trait, so the
+# application names what it needs, never which device provides it.
+# simclock.bot and rtc.bot are two implementations; the entry program
+# installs one.
+
+type Tick = Int in 0..86400
+
+context trait Clock:
+    fn now() -> Tick

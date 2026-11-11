@@ -1,0 +1,9 @@
+type Digit = Int in 0..9
+
+fn digit(n: int) -> Digit:
+    n
+
+fn small(n: Digit) -> Digit:
+    n + 1
+
+[digit(4), small(3)]

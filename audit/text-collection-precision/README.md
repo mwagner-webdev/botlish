@@ -8,7 +8,8 @@ follow-up milestone can show what it changed.
   outcome in its leading comments (`# outcome:`, `# value:`,
   `# diagnostic: L:C TEXT`, `# error:`, `# binding: L NAME TYPE`). A
   milestone that changes a probe's outcome updates its expectation in the
-  same change.
+  same change (M1 did for `c1` and `c6`, M2 for `j3`, whose result
+  diagnostic names the inferred type since).
 * `tools/probes.tcl` -- runs every probe (or the ones named): `main.tcl
   -check`, each accepted or run-time-failing probe on interp, compile,
   cranelift and cranelift-generic (`-backends` narrows), and the binding
@@ -36,6 +37,10 @@ follow-up milestone can show what it changed.
 
 * `tools/bench.tcl` -- section G's text-construction strategies at chosen
   sizes and backends: time and (natively) String bytes copied.
+  TEXT-AND-COLLECTION-DOCUMENTATION-AND-DIAGNOSTICS-MILESTONE-1.md added the
+  shapes Compilerpedia's `task.string-concatenation` documents
+  (`tail-join-list`, `tail-char-concat`) and the one it warns about
+  (`tail-append-char`).
 
       tclsh9.0 audit/text-collection-precision/tools/bench.tcl -sizes "250 1000 4000" -markdown
       tclsh9.0 audit/text-collection-precision/tools/bench.tcl -sizes "4000 16000 64000" -backends cranelift -markdown

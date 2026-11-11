@@ -1,0 +1,288 @@
+# kit.bot -- the process_linux tests' wrappers (tests/process-linux.test;
+# PROCESS-LINUX-PACKAGE-MILESTONE-1.md), ported from the census's labkit and
+# report (audit/managed-subprocess/slice/): the package's operations with
+# every failure reported on stdout and turned into the task's own
+# TaskFailed, so a scenario reads as its steps. Failure codes: 10 launch, 11
+# stale, 12 closed, 13 interrupted, 14 fault, 15 scheduler, 16 invalid, 17
+# unsupported, 18 still running.
+import event_loop_linux
+import process_linux
+import std::abi::bytes
+import std::event_loop
+import std::int
+import std::io
+import std::linux::io
+import std::mutable_array
+import std::str
+import type std::byte::Byte
+
+nomethod fn say(text: str, context io: std::linux::io::LinuxIO):
+    std::linux::io::write_text(text.concat("\n")):
+        on std::io::WriteFailed:
+            unit
+
+nomethod fn say_int(label: str, v: int, context io: std::linux::io::LinuxIO):
+    say(label.concat(std::int::to_string(v)))
+
+nomethod fn text_of(b: std::abi::bytes::Bytes) -> str:
+    std::abi::bytes::decode_utf8(b):
+        on InvalidUtf8:
+            "<invalid utf-8>"
+
+nomethod fn cat(a: std::abi::bytes::Bytes, b: std::abi::bytes::Bytes) -> std::abi::bytes::Bytes:
+    std::abi::bytes::join([a, b])
+
+nomethod fn empty() -> std::abi::bytes::Bytes:
+    std::abi::bytes::from_list([])
+
+nomethod fn cell(a: MutableArray[int], i: int) -> int:
+    a.at(i):
+        on IndexNotFound:
+            0
+
+nomethod fn yes(b: bool) -> str:
+    if b:
+        "yes"
+    else:
+        "no"
+
+nomethod fn bit(b: bool) -> int:
+    if b:
+        1
+    else:
+        0
+
+nomethod fn zero_byte() -> Byte:
+    0
+
+# A String holding U+0000 (a C string cannot carry it).
+nomethod fn nul_text() -> str:
+    text_of(std::abi::bytes::from_list([zero_byte()]))
+
+nomethod fn bytes_of(t: str) -> std::abi::bytes::Bytes:
+    std::abi::bytes::from_list(std::str::encode_utf8(t))
+
+nomethod fn size(b: std::abi::bytes::Bytes) -> int:
+    std::abi::bytes::length(b).value
+
+nomethod fn since(start: int) -> int:
+    process_linux::now_us() - start
+
+nomethod fn join_path(dir: str, name: str) -> str:
+    dir.concat("/").concat(name)
+
+nomethod fn stage_text(stage: process_linux::Stage) -> str:
+    if stage == process_linux::Stage::WorkingDirectory:
+        "working-directory"
+    elif stage == process_linux::Stage::File:
+        "file"
+    elif stage == process_linux::Stage::Pipe:
+        "pipe"
+    elif stage == process_linux::Stage::Exec:
+        "exec"
+    elif stage == process_linux::Stage::Pidfd:
+        "pidfd"
+    else:
+        "limit"
+
+nomethod fn spawn(c: process_linux::Command, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> process_linux::Spawned errors std::event_loop::TaskFailed:
+    process_linux::spawn(c):
+        on process_linux::InvalidCommand {item, reason}:
+            say("invalid ".concat(item).concat(" ").concat(reason))
+            fail std::event_loop::TaskFailed {code: 16}
+        on process_linux::LaunchFailed {stage, code}:
+            say("launch-failed ".concat(stage_text(stage)).concat(" ").concat(std::int::to_string(code)))
+            fail std::event_loop::TaskFailed {code: 10}
+        on process_linux::Unsupported {reason}:
+            say("unsupported ".concat(reason))
+            fail std::event_loop::TaskFailed {code: 17}
+        on process_linux::ProcessFault {reason}:
+            say("fault ".concat(reason))
+            fail std::event_loop::TaskFailed {code: 14}
+        on std::event_loop::SchedulerFault:
+            fail std::event_loop::TaskFailed {code: 15}
+
+nomethod fn read(c: process_linux::Child, s: process_linux::Stream, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> std::abi::bytes::Bytes errors std::event_loop::TaskFailed:
+    process_linux::read(c, s):
+        on process_linux::StaleChild:
+            say("read: stale")
+            fail std::event_loop::TaskFailed {code: 11}
+        on process_linux::StreamClosed {stream}:
+            say("read: closed ".concat(stream))
+            fail std::event_loop::TaskFailed {code: 12}
+        on process_linux::Interrupted:
+            say("read: interrupted")
+            fail std::event_loop::TaskFailed {code: 13}
+        on process_linux::ProcessFault {reason, code}:
+            say("read: fault ".concat(reason).concat(" ").concat(std::int::to_string(code)))
+            fail std::event_loop::TaskFailed {code: 14}
+        on std::event_loop::SchedulerFault:
+            fail std::event_loop::TaskFailed {code: 15}
+
+# Every byte of stream S to its end of file.
+nomethod fn drain(c: process_linux::Child, s: process_linux::Stream, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> std::abi::bytes::Bytes errors std::event_loop::TaskFailed:
+    acc = std::mutable_array::create(1, empty())
+    loop:
+        b = read(c, s)
+        if size(b) == 0:
+            break
+        acc.set(0, cat(acc.at(0), b)):
+            on IndexNotFound:
+                unit
+    acc.at(0):
+        on IndexNotFound:
+            empty()
+
+# How many bytes stream S holds to its end of file, and in how many reads
+# (counted, never kept: a sink that persists nothing).
+struct Counted:
+    bytes: int
+    reads: int
+
+nomethod fn count(c: process_linux::Child, s: process_linux::Stream, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> Counted errors std::event_loop::TaskFailed:
+    acc = std::mutable_array::create(2, 0)
+    loop:
+        k = size(read(c, s))
+        if k == 0:
+            break
+        acc.set(0, acc.at(0) + k):
+            on IndexNotFound:
+                unit
+        acc.set(1, acc.at(1) + 1):
+            on IndexNotFound:
+                unit
+    Counted {bytes: cell(acc, 0), reads: cell(acc, 1)}
+
+nomethod fn write(c: process_linux::Child, data: std::abi::bytes::Bytes, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) errors std::event_loop::TaskFailed:
+    process_linux::write(c, data):
+        on process_linux::StaleChild:
+            say("write: stale")
+            fail std::event_loop::TaskFailed {code: 11}
+        on process_linux::StreamClosed {stream}:
+            say("write: closed ".concat(stream))
+            fail std::event_loop::TaskFailed {code: 12}
+        on process_linux::Interrupted:
+            say("write: interrupted")
+            fail std::event_loop::TaskFailed {code: 13}
+        on process_linux::ProcessFault {reason}:
+            say("write: fault ".concat(reason))
+            fail std::event_loop::TaskFailed {code: 14}
+        on std::event_loop::SchedulerFault:
+            fail std::event_loop::TaskFailed {code: 15}
+
+nomethod fn close_stdin(c: process_linux::Child, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) errors std::event_loop::TaskFailed:
+    process_linux::close_stdin(c):
+        on process_linux::StaleChild:
+            fail std::event_loop::TaskFailed {code: 11}
+        on process_linux::ProcessFault:
+            fail std::event_loop::TaskFailed {code: 14}
+
+nomethod fn wait(c: process_linux::Child, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> process_linux::ExitStatus errors std::event_loop::TaskFailed:
+    process_linux::wait(c):
+        on process_linux::StaleChild:
+            say("wait: stale")
+            fail std::event_loop::TaskFailed {code: 11}
+        on process_linux::Interrupted:
+            say("wait: interrupted")
+            fail std::event_loop::TaskFailed {code: 13}
+        on process_linux::ProcessFault {reason}:
+            say("wait: fault ".concat(reason))
+            fail std::event_loop::TaskFailed {code: 14}
+        on std::event_loop::SchedulerFault:
+            fail std::event_loop::TaskFailed {code: 15}
+
+nomethod fn wait_until(c: process_linux::Child, deadline: int, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> bool errors std::event_loop::TaskFailed:
+    process_linux::wait_until(c, deadline):
+        on process_linux::StaleChild:
+            fail std::event_loop::TaskFailed {code: 11}
+        on process_linux::Interrupted:
+            say("wait: interrupted")
+            fail std::event_loop::TaskFailed {code: 13}
+        on process_linux::ProcessFault:
+            fail std::event_loop::TaskFailed {code: 14}
+        on std::event_loop::SchedulerFault:
+            fail std::event_loop::TaskFailed {code: 15}
+
+nomethod fn terminate(c: process_linux::Child, grace_us: int, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> process_linux::ExitStatus errors std::event_loop::TaskFailed:
+    process_linux::terminate(c, grace_us):
+        on process_linux::StaleChild:
+            say("terminate: stale")
+            fail std::event_loop::TaskFailed {code: 11}
+        on process_linux::Interrupted:
+            say("terminate: interrupted")
+            fail std::event_loop::TaskFailed {code: 13}
+        on process_linux::ProcessFault:
+            fail std::event_loop::TaskFailed {code: 14}
+        on std::event_loop::SchedulerFault:
+            fail std::event_loop::TaskFailed {code: 15}
+
+nomethod fn finish(owner: process_linux::ChildOwner, grace_us: int, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) -> process_linux::ExitStatus errors std::event_loop::TaskFailed:
+    process_linux::finish(owner, grace_us):
+        on process_linux::StaleChild:
+            say("finish: stale")
+            fail std::event_loop::TaskFailed {code: 11}
+        on process_linux::Interrupted:
+            say("finish: interrupted")
+            fail std::event_loop::TaskFailed {code: 13}
+        on process_linux::ProcessFault {reason}:
+            say("finish: fault ".concat(reason))
+            fail std::event_loop::TaskFailed {code: 14}
+        on std::event_loop::SchedulerFault:
+            fail std::event_loop::TaskFailed {code: 15}
+
+nomethod fn interrupt(c: process_linux::Child, context p: process_linux::Processes, ev: std::event_loop::Loop, io: std::linux::io::LinuxIO) errors std::event_loop::TaskFailed:
+    process_linux::interrupt(c):
+        on process_linux::StaleChild:
+            fail std::event_loop::TaskFailed {code: 11}
+        on process_linux::ProcessFault:
+            fail std::event_loop::TaskFailed {code: 14}
+        on std::event_loop::SchedulerFault:
+            fail std::event_loop::TaskFailed {code: 15}
+
+nomethod fn signal(c: process_linux::Child, sig: process_linux::Signal, context p: process_linux::Processes, io: std::linux::io::LinuxIO) errors std::event_loop::TaskFailed:
+    process_linux::send_signal(c, sig):
+        on process_linux::StaleChild:
+            say("signal: stale")
+            fail std::event_loop::TaskFailed {code: 11}
+        on process_linux::ProcessFault:
+            fail std::event_loop::TaskFailed {code: 14}
+
+nomethod fn pid(c: process_linux::Child, context p: process_linux::Processes) -> int:
+    process_linux::pid(c):
+        on process_linux::StaleChild:
+            -1
+
+nomethod fn exited?(c: process_linux::Child, context p: process_linux::Processes) -> bool:
+    process_linux::exited?(c):
+        on process_linux::StaleChild:
+            false
+
+nomethod fn status_line(label: str, s: process_linux::ExitStatus, context io: std::linux::io::LinuxIO):
+    say(label.concat(" ").concat(process_linux::status_text(s)))
+
+nomethod fn sleep(us: int, context ev: std::event_loop::Loop) errors std::event_loop::TaskFailed:
+    std::event_loop::sleep(us):
+        on std::event_loop::SchedulerFault:
+            fail std::event_loop::TaskFailed {code: 15}
+
+nomethod fn say_pid(c: process_linux::Child, context p: process_linux::Processes, io: std::linux::io::LinuxIO):
+    say_int("pid ", pid(c))
+
+# The child's first chunk of stdout, reported (a "desc PID" line).
+nomethod fn first_line(c: process_linux::Child, context p: process_linux::Processes, ev: std::event_loop::Loop, n: event_loop_linux::Native, io: std::linux::io::LinuxIO) errors std::event_loop::TaskFailed:
+    say("first: ".concat(text_of(read(c, process_linux::Stream::Stdout))))
+
+# The options of the tests' contexts: a 200 ms release grace.
+nomethod fn options() -> process_linux::Options:
+    process_linux::Options {release_grace_us: 200000, burst: 4}
+
+# The end-of-run counters every scenario reports.
+nomethod fn end(fds: int, context p: process_linux::Processes, io: std::linux::io::LinuxIO):
+    st = process_linux::stats()
+    say_int("end owned ", st.owned)
+    say_int("end dying ", st.dying)
+    say_int("end watches ", st.watches)
+    say_int("end children ", st.children)
+    say_int("end descriptors ", st.descriptors)
+    say_int("end escalations ", st.escalations)
+    say_int("end released ", st.released)

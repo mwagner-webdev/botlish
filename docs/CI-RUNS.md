@@ -69,7 +69,7 @@ The exceptions never cancel a running member:
   be cut off;
 * `react-native-probe.yml` records every run as census evidence;
 * `release-gate.yml` reads the state as it is when it runs (section 3);
-* a tag's run is the release's (icy-tower-macos.yml:
+* a tag's run is the release's (icy-tower-macos.yml, botlish-macos.yml:
   `cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}`);
 * a release run is in a group of its own (section 3).
 
@@ -123,7 +123,7 @@ A commit's tests are **green** for a release when all of these hold:
 | the commit is main's head or an ancestor of it | only reviewed code is released |
 | `tests.yml`: a successful run whose GC-stress jobs (`tests (native GC-stress, interp/compile)`) succeeded | GC stress runs only on pushes: a manual run skips it, and a skipped job is no success |
 | `tests-arm64.yml`: a successful run whose GC-stress jobs (`arm64 tests (native GC-stress, interp/compile)`) succeeded | the same, on Linux AArch64 |
-| `macos-arm64.yml`: a successful run whose acceptance jobs (`acceptance (Tier B, macOS arm64, shard N/5)`) succeeded | macOS; a branch push runs only the smoke job (section 4), a deferred run nothing (section 5), a manual run with `app_only` only the application's jobs |
+| `macos-arm64.yml`: a successful run whose acceptance jobs (`acceptance (Tier B, macOS arm64, shard N/6)`) succeeded | macOS; a branch push runs only the smoke job (section 4), a deferred run nothing (section 5), a manual run with `app_only` only the application's jobs |
 | `windows-x86_64.yml`: a successful run whose acceptance jobs (`acceptance (Windows x86-64, shard N/4)`) succeeded | Windows; a branch push runs only the canary, a deferred run nothing |
 | `static-decisions.yml`: a successful run, if it ran at the commit | it runs only when the commit changed what it compares |
 | the release's own build workflow: a successful run | single-executable.yml, icy-tower-windows.yml (the macOS release builds in its own run) |
@@ -197,6 +197,13 @@ cancelled run, or a release that exists already leaves the tag to its runs
 and to a person. The release job also checks `needs.tested.outputs.green`
 itself (audit/macos-release/tests/test_workflow.py's
 `test_release_waits_for_green_tests`; the mutant `release-before-green`).
+
+botlish-macos.yml (MACOS-BOTLISH-DISTRIBUTION-MILESTONE-1.md) is a tagged
+release of the same kind, for `botlish-macos-vX.Y.Z`: its `tested` job is
+the same check (`runs.py check SHA --for botlish-macos`), its release job
+the only one in the `macos-release` environment, and the gate dispatches
+it on a deferred tag by the same rule (audit/macos-release/tests/
+test_botlish_workflow.py; the mutant `botlish-release-before-green`).
 
 A tag on a commit that will never be green waits forever. That happens to a
 commit whose main runs a later push cancelled, or whose GC-stress jobs
@@ -301,7 +308,10 @@ commit, on the host its job ran on. A job that reports more than five
 items is left out: a whole layer broke there, for one cause any of its
 items shows. Durations come from the newest successful push run of
 tests.yml on main (the interp job's per-file times, the golden shards'
-per-suite times).
+per-suite times); costs, for each host that runs the acceptance tier in
+shards (macOS, Windows), from the acceptance jobs of the newest successful
+push run of its workflow on main (each item's seconds between the lines
+tier.tcl's test runners print: next section).
 
 The first file, from 2026-10-15 to 11-05: 107 failed runs, the logs of
 370 of their 373 failed jobs. A job reported zero to two items, or 15 to 30
@@ -316,6 +326,28 @@ shows the difference from the committed file, and its log and its
 `canary-records` artifact hold the new one. Commit it. Locally, with a
 token: `GH_TOKEN=... GITHUB_REPOSITORY=mwagner-webdev/botlish python3 -I
 tools/ci/history.py --write`.
+
+### Balanced shards
+
+`tests/platform/tier.tcl -shard I/N` deals the test files, and apart from
+them the golden suites, out by estimated time: the costliest first, each
+to the shard with the least time so far, every shard keeping its items in
+the tier's order. An item's estimate is its `cost` line for the host (its
+seconds in that host's acceptance tier), else the canary's estimate (its
+`duration`, else its size). Every shard of a host reads the same file, so
+the shares partition the tier whatever the costs say.
+
+Dealt round-robin by index, as before, a shard's time was whatever its
+files happened to be, and a new test file moved every later file a shard:
+macOS's five shards took 25 to 56 minutes on main at `0a518ba4`, Windows's
+four 32 to 82 at `46ab0919`. On a macOS runner 1.8 times slower than usual
+(it came twice in one day), shard 3 of five, 56 minutes at `0a518ba4`, was
+cut off at the job's 75 minutes twice on one branch and once on another.
+Balanced by the costs measured
+at `46ab0919`, the same work is about 34 minutes in each of macOS's six
+shards and 51 in each of Windows's four. A test file that has no cost yet
+is estimated from its Linux duration or its size until the `ci tools`
+workflow's recomputed file is committed.
 
 ### Locally
 
@@ -424,8 +456,11 @@ the workflows' side of the rules:
 
 It also tests `tools/ci/history.py` against fake runs and job logs: what
 each test runner's report names, a commit counted once, the host from the
-runner, a broken layer left out, a reason from the newest failure, and
-items that no longer exist dropped.
+runner, a broken layer left out, a reason from the newest failure, items
+that no longer exist dropped, and the costs: per host, from the newest run
+whose acceptance jobs all succeeded, tier.tcl's golden phase read suite by
+suite. `tests/canary.test` checks that tier.tcl's shares partition the
+tier and that each is within the costliest item of the mean.
 
 `ci-tools.yml` runs the tests on every push that changes `tools/ci/` or a
 workflow, on any branch. Then it runs the gate and the pruning against the
@@ -442,8 +477,8 @@ release job, or to the name of a workflow or a GC-stress job that a
 requirement names:
 
 * `python3 -I tools/ci/test_runs.py`;
-* for the canary, `tclsh9.0 tests/canary.test`, and a push to a branch:
-  read every workflow's canary;
+* for the canary or tier.tcl's shards, `tclsh9.0 tests/canary.test`, and
+  a push to a branch: read every workflow's canary;
 * `python3 -I audit/macos-release/tests/test_workflow.py` and that audit's
   mutants (`audit/macos-release/tools/mutate.py`) for icy-tower-macos.yml;
 * `tclsh9.0 tools/mutant-catalogs.tcl`;

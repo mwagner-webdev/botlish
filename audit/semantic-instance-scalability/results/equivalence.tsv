@@ -1,0 +1,244 @@
+# equivalence.tcl on every tests/golden/*.bot, examples/**/*.bot and bench/*.bot (239 programs):
+# the base (53a0d1b) against this milestone's first commit (5471d1e), same machine, 2026-11-08.
+# CLASS: identical HIR and semantic table; more-instances (the base declined requests for its
+# per-function budget: the decline counts it recorded); or a difference the tool now normalizes.
+# Summary: identical 74, identical (checker fingerprint normalized) 6, identical (run-varying fields normalized) 45, more-instances 67, same-error 46, static economics: 3 rounds/6 builds -> 2 rounds/5 builds 1
+bench/fib.bot	identical	instances 1 -> 1
+bench/lex-strategy.bot	identical	instances 14 -> 14
+bench/loop-count.bot	identical	instances 2 -> 2
+bench/refined-checks.bot	identical	instances 22 -> 22
+bench/source-checks.bot	identical	instances 5 -> 5
+bench/sum-refined.bot	identical	instances 2 -> 2
+bench/test-selection.bot	identical	instances 12 -> 12
+bench/uri-steady.bot	identical	instances 21 -> 21
+examples/abi/numeric-domains.bot	identical	instances 0 -> 0
+examples/binary/c-structs.bot	identical	instances 0 -> 0
+examples/c-freestanding/programs/factorial.bot	identical	instances 0 -> 0
+examples/c-freestanding/programs/traffic.bot	identical	instances 0 -> 0
+examples/dfa/csv/csv_common.bot	identical	instances 0 -> 0
+examples/dfa/csv/csv_strict.bot	identical	instances 0 -> 0
+examples/dfa/csv/csv_utf8.bot	same-error	instances UNWRAPPED-YIELD -> UNWRAPPED-YIELD
+examples/dfa/csv/export.bot	identical (checker fingerprint normalized)	instances 4 -> 4
+examples/dfa/csv/probes.bot	identical (checker fingerprint normalized)	instances 6 -> 6
+examples/dfa/csv/selective_emit.bot	same-error	instances UNWRAPPED-YIELD -> UNWRAPPED-YIELD
+examples/dfa/csv/sinks.bot	identical (checker fingerprint normalized)	instances 0 -> 0
+examples/dfa/csv/sources.bot	same-error	instances UNWRAPPED-YIELD -> UNWRAPPED-YIELD
+examples/dfa/csv/strict_emit.bot	same-error	instances UNWRAPPED-YIELD -> UNWRAPPED-YIELD
+examples/dfa/csv/utf8_emit.bot	same-error	instances UNWRAPPED-YIELD -> UNWRAPPED-YIELD
+examples/dfa/json/by_hand.bot	same-error	instances UNWRAPPED-YIELD -> UNWRAPPED-YIELD
+examples/dfa/json/composition.bot	identical (run-varying fields normalized)	instances 0 -> 0
+examples/dfa/json/conformance.bot	identical (run-varying fields normalized)	instances 0 -> 0
+examples/dfa/json/emit_demo.bot	identical (checker fingerprint normalized)	instances 1 -> 1
+examples/dfa/json/emit_probes.bot	identical (checker fingerprint normalized)	instances 2 -> 2
+examples/dfa/json/emitlib.bot	same-error	instances UNWRAPPED-YIELD -> UNWRAPPED-YIELD
+examples/dfa/json/invalid_emitter.bot	same-error	instances EMIT-BOUNDARY -> EMIT-BOUNDARY
+examples/dfa/json/json.bot	identical (run-varying fields normalized)	instances 0 -> 0
+examples/dfa/json/json_grammar.bot	identical (run-varying fields normalized)	instances 0 -> 0
+examples/dfa/json/json_lex.bot	same-error	instances UNWRAPPED-YIELD -> UNWRAPPED-YIELD
+examples/dfa/json/number_emit.bot	same-error	instances UNWRAPPED-YIELD -> UNWRAPPED-YIELD
+examples/dfa/json/sinks.bot	identical (checker fingerprint normalized)	instances 0 -> 0
+examples/dfa/json/string_emit.bot	same-error	instances UNWRAPPED-YIELD -> UNWRAPPED-YIELD
+examples/dfa/json/value_emit.bot	same-error	instances UNWRAPPED-YIELD -> UNWRAPPED-YIELD
+examples/dfa/yaml/yaml.bot	identical (run-varying fields normalized)	instances 0 -> 0
+examples/dfa/yaml/yaml_lex.bot	same-error	instances UNWRAPPED-YIELD -> UNWRAPPED-YIELD
+examples/event-loop/01-run-task.bot	identical (run-varying fields normalized)	instances 7 -> 7
+examples/event-loop/02-wait.bot	identical (run-varying fields normalized)	instances 7 -> 7
+examples/event-loop/03-child.bot	identical (run-varying fields normalized)	instances 14 -> 14
+examples/event-loop/04-observer.bot	identical (run-varying fields normalized)	instances 14 -> 14
+examples/event-loop/05-revoke.bot	identical (run-varying fields normalized)	instances 7 -> 7
+examples/event-loop/native/main.bot	same-error	instances UNKNOWN-NAMESPACE -> UNKNOWN-NAMESPACE
+examples/event-loop/native/test.bot	identical (run-varying fields normalized)	instances 7 -> 7
+examples/event-loop/native/ticker.bot	same-error	instances UNKNOWN-NAMESPACE -> UNKNOWN-NAMESPACE
+examples/event-loop/native/ticks.bot	same-error	instances CONTEXT-FUNCTION-VALUE -> CONTEXT-FUNCTION-VALUE
+examples/event-loop/shared/app/main.bot	same-error	instances UNKNOWN-NAMESPACE -> UNKNOWN-NAMESPACE
+examples/event-loop/shared/beats/beats.bot	same-error	instances UNKNOWN-NAMESPACE -> UNKNOWN-NAMESPACE
+examples/event-loop/shared/probes/probes.bot	same-error	instances UNKNOWN-NAMESPACE -> UNKNOWN-NAMESPACE
+examples/ffi/bindgen/raven/demo.bot	same-error	instances UNKNOWN-NAMESPACE -> UNKNOWN-NAMESPACE
+examples/ffi/bindgen/sdl3/demo.bot	same-error	instances UNKNOWN-NAMESPACE -> UNKNOWN-NAMESPACE
+examples/ffi/bindgen/sha256/demo.bot	same-error	instances UNKNOWN-NAMESPACE -> UNKNOWN-NAMESPACE
+examples/ffi/bindgen/sha256/sha256.bot	same-error	instances UNKNOWN-NAMESPACE -> UNKNOWN-NAMESPACE
+examples/ffi/bindgen/tcl/demo.bot	same-error	instances UNKNOWN-NAMESPACE -> UNKNOWN-NAMESPACE
+examples/ffi/sha256/boringssl.bot	identical	instances 0 -> 0
+examples/ffi/sha256/demo.bot	identical (run-varying fields normalized)	instances 0 -> 0
+examples/ffi/sha256/sha256.bot	identical (run-varying fields normalized)	instances 0 -> 0
+examples/ffi/tcl/demo.bot	identical (run-varying fields normalized)	instances 0 -> 0
+examples/ffi/tcl/tcl.bot	identical	instances 0 -> 0
+examples/games/2048/bench.bot	identical (run-varying fields normalized)	instances 7 -> 7
+examples/games/2048/demo-darwin.bot	same-error	instances UNSUPPORTED-PLATFORM -> UNSUPPORTED-PLATFORM
+examples/games/2048/demo-windows.bot	same-error	instances UNSUPPORTED-PLATFORM -> UNSUPPORTED-PLATFORM
+examples/games/2048/demo.bot	identical (run-varying fields normalized)	instances 8 -> 8
+examples/games/2048/demo_play.bot	same-error	instances CONTEXT-FUNCTION-VALUE -> CONTEXT-FUNCTION-VALUE
+examples/games/2048/game2048.bot	identical	instances 6 -> 6
+examples/games/2048/golden.bot	more-instances (old declined: declined={budget-block)	instances 42 -> 106
+examples/games/icy-tower/game.bot	same-error	instances UNKNOWN-NAMESPACE -> UNKNOWN-NAMESPACE
+examples/games/icy-tower/golden.bot	more-instances (old declined: declined={budget-block)	instances 40 -> 108
+examples/games/icy-tower/headless.bot	identical (run-varying fields normalized)	instances 1 -> 1
+examples/games/icy-tower/hud.bot	identical (run-varying fields normalized)	instances 1 -> 1
+examples/games/icy-tower/macos_app.bot	same-error	instances UNSUPPORTED-PLATFORM -> UNSUPPORTED-PLATFORM
+examples/games/icy-tower/macos_link.bot	same-error	instances UNSUPPORTED-PLATFORM -> UNSUPPORTED-PLATFORM
+examples/games/icy-tower/main-macos.bot	same-error	instances UNKNOWN-NAMESPACE -> UNKNOWN-NAMESPACE
+examples/games/icy-tower/main-windows.bot	same-error	instances UNKNOWN-NAMESPACE -> UNKNOWN-NAMESPACE
+examples/games/icy-tower/main.bot	same-error	instances UNKNOWN-NAMESPACE -> UNKNOWN-NAMESPACE
+examples/games/icy-tower/options.bot	identical	instances 1 -> 1
+examples/games/icy-tower/render.bot	same-error	instances UNKNOWN-NAMESPACE -> UNKNOWN-NAMESPACE
+examples/games/icy-tower/sdl.bot	same-error	instances UNKNOWN-NAMESPACE -> UNKNOWN-NAMESPACE
+examples/games/icy-tower/tower.bot	identical	instances 0 -> 0
+examples/io/child-path.bot	identical (run-varying fields normalized)	instances 5 -> 5
+examples/io/hello-darwin.bot	same-error	instances UNSUPPORTED-PLATFORM -> UNSUPPORTED-PLATFORM
+examples/io/hello-windows.bot	same-error	instances UNSUPPORTED-PLATFORM -> UNSUPPORTED-PLATFORM
+examples/io/hello.bot	identical (run-varying fields normalized)	instances 0 -> 0
+examples/io/show-path.bot	identical (run-varying fields normalized)	instances 5 -> 5
+examples/linux/context-hello.bot	identical (run-varying fields normalized)	instances 0 -> 0
+examples/linux/getpid.bot	identical	instances 0 -> 0
+examples/linux/read-stdin.bot	identical	instances 1 -> 1
+examples/linux/write.bot	identical	instances 0 -> 0
+examples/raven/counter.bot	same-error	instances UNKNOWN-NAMESPACE -> UNKNOWN-NAMESPACE
+examples/raven/headless.bot	same-error	instances UNKNOWN-NAMESPACE -> UNKNOWN-NAMESPACE
+examples/raven/main.bot	same-error	instances UNKNOWN-NAMESPACE -> UNKNOWN-NAMESPACE
+examples/refinement/refined-strings.bot	identical	instances 20 -> 20
+examples/stdlib/ai_text_clean.bot	identical	instances 6 -> 6
+examples/stdlib/csv.bot	identical	instances 17 -> 17
+examples/stdlib/csv_chunked.bot	identical	instances 16 -> 16
+examples/stdlib/csv_geometric.bot	identical	instances 29 -> 29
+examples/stdlib/csv_records.bot	identical	instances 92 -> 92
+examples/stdlib/hashtable.bot	identical	instances 46 -> 46
+examples/stdlib/matmul.bot	identical	instances 19 -> 19
+examples/stdlib/string_replace.bot	identical	instances 6 -> 6
+examples/stdlib/string_reverse.bot	identical	instances 3 -> 3
+examples/surface/01-arithmetic.bot	identical	instances 0 -> 0
+examples/surface/02-recursion.bot	identical	instances 1 -> 1
+examples/surface/03-closure.bot	identical	instances 2 -> 2
+examples/surface/04-branch-value.bot	identical	instances 1 -> 1
+examples/surface/05-shadowing.bot	identical	instances 0 -> 0
+examples/surface/06-list.bot	identical	instances 0 -> 0
+examples/surface/07-loop-break.bot	identical	instances 0 -> 0
+examples/surface/08-return.bot	identical	instances 2 -> 2
+examples/surface/09-mutual-recursion.bot	same-error	instances UNBOUND -> UNBOUND
+examples/surface/10-duplicate-binding.bot	same-error	instances DUPLICATE -> DUPLICATE
+examples/surface/11-boolean-operators.bot	identical	instances 2 -> 2
+examples/surface/12-if-value.bot	identical	instances 1 -> 1
+examples/surface/13-hygiene.bot	identical	instances 1 -> 1
+examples/surface/14-modules.bot	identical	instances 1 -> 1
+examples/surface/15-enums.bot	identical	instances 2 -> 2
+examples/threads/broker/broker.bot	same-error	instances CONTEXT-FUNCTION-VALUE -> CONTEXT-FUNCTION-VALUE
+examples/threads/broker/device.bot	same-error	instances CONTEXT-FUNCTION-VALUE -> CONTEXT-FUNCTION-VALUE
+examples/threads/broker/main.bot	same-error	instances UNKNOWN-NAMESPACE -> UNKNOWN-NAMESPACE
+examples/threads/broker/worker.bot	same-error	instances UNKNOWN-NAMESPACE -> UNKNOWN-NAMESPACE
+tests/golden/abi-bytes-native.bot	identical	instances 19 -> 19
+tests/golden/abi-bytes.bot	more-instances (old declined: declined={budget-block)	instances 58 -> 130
+tests/golden/abi-numeric-native.bot	identical	instances 11 -> 11
+tests/golden/abi-numeric.bot	more-instances (old declined: declined={budget-block)	instances 69 -> 112
+tests/golden/affinity.bot	more-instances (old declined: declined={budget-block)	instances 64 -> 91
+tests/golden/binary-layout.bot	more-instances (old declined: declined={budget-block)	instances 54 -> 78
+tests/golden/bits-bytes-hashing.bot	more-instances (old declined: declined={budget-block)	instances 75 -> 102
+tests/golden/branch-form-boolean.bot	more-instances (old declined: declined={budget-block)	instances 41 -> 42
+tests/golden/c-callbacks.bot	identical (run-varying fields normalized)	instances 24 -> 24
+tests/golden/c-float-ffi.bot	identical	instances 17 -> 17
+tests/golden/callable-contracts-contravariant-rejected.bot	identical	instances 10 -> 10
+tests/golden/callable-contracts-contravariant.bot	identical	instances 17 -> 17
+tests/golden/callable-contracts-fallback.bot	identical (run-varying fields normalized)	instances 17 -> 17
+tests/golden/callable-contracts-handle.bot	identical	instances 14 -> 14
+tests/golden/callable-contracts-returned.bot	identical (run-varying fields normalized)	instances 18 -> 18
+tests/golden/callable-contracts-unerased.bot	identical	instances 11 -> 11
+tests/golden/callable-contracts.bot	more-instances (old declined: declined={budget-block)	instances 137 -> 174
+tests/golden/callables.bot	more-instances (old declined: declined={budget-block)	instances 218 -> 316
+tests/golden/closure-escape-instances.bot	identical	instances 13 -> 13
+tests/golden/closure-escape.bot	more-instances (old declined: declined={budget-block)	instances 132 -> 179
+tests/golden/collection-iteration.bot	identical (run-varying fields normalized)	instances 27 -> 27
+tests/golden/collection-reorder.bot	more-instances (old declined: declined={budget-block)	instances 58 -> 104
+tests/golden/collections.bot	more-instances (old declined: declined={budget-block)	instances 70 -> 78
+tests/golden/compiled-values-struct-transport.bot	more-instances (old declined: declined={budget-block)	instances 121 -> 123
+tests/golden/compiled-values.bot	more-instances (old declined: declined={budget-block)	instances 242 -> 318
+tests/golden/completion-regressions.bot	identical (run-varying fields normalized)	instances 42 -> 42
+tests/golden/contexts.bot	more-instances (old declined: declined={budget-block)	instances 91 -> 130
+tests/golden/core-semantics.bot	more-instances (old declined: declined={budget-block)	instances 134 -> 247
+tests/golden/coroutines.bot	more-instances (old declined: declined={budget-block)	instances 56 -> 87
+tests/golden/decimal-rounded.bot	more-instances (old declined: declined={budget-block)	instances 54 -> 61
+tests/golden/declared-errors-imports.bot	identical (run-varying fields normalized)	instances 18 -> 18
+tests/golden/declared-errors.bot	more-instances (old declined: declined={budget-block)	instances 76 -> 149
+tests/golden/destructuring-instances.bot	more-instances (old declined: declined={budget-block)	instances 96 -> 141
+tests/golden/destructuring.bot	more-instances (old declined: declined={budget-block)	instances 121 -> 464
+tests/golden/diagnostic-recovery-imported.bot	identical	instances 11 -> 11
+tests/golden/diagnostic-recovery.bot	identical (run-varying fields normalized)	instances 14 -> 14
+tests/golden/diagnostics.bot	identical (run-varying fields normalized)	instances 58 -> 58
+tests/golden/errors.bot	identical (run-varying fields normalized)	instances 50 -> 50
+tests/golden/flags.bot	more-instances (old declined: declined={budget-block)	instances 140 -> 203
+tests/golden/float64.bot	more-instances (old declined: declined={budget-block)	instances 53 -> 56
+tests/golden/fold-loops.bot	more-instances (old declined: declined={budget-block)	instances 53 -> 109
+tests/golden/framework-semantics.bot	static economics: 3 rounds/6 builds -> 2 rounds/5 builds	instances 51 -> 51
+tests/golden/gc-sensitive-values.bot	more-instances (old declined: declined={budget-block)	instances 67 -> 75
+tests/golden/harness.bot	identical	instances 38 -> 38
+tests/golden/hashable-admission.bot	identical (run-varying fields normalized)	instances 16 -> 16
+tests/golden/hashable.bot	identical (run-varying fields normalized)	instances 33 -> 33
+tests/golden/hir-values.bot	identical	instances 38 -> 38
+tests/golden/immutable-map.bot	identical (run-varying fields normalized)	instances 48 -> 48
+tests/golden/imports-abi-child.bot	identical	instances 31 -> 31
+tests/golden/imports-abi-family.bot	identical	instances 23 -> 23
+tests/golden/imports-library-modules.bot	identical	instances 52 -> 52
+tests/golden/imports-unimported.bot	identical (run-varying fields normalized)	instances 27 -> 27
+tests/golden/imports.bot	more-instances (old declined: declined={budget-block)	instances 81 -> 122
+tests/golden/layout-arrays.bot	more-instances (old declined: declined={budget-block)	instances 62 -> 112
+tests/golden/layout-unions.bot	more-instances (old declined: declined={budget-block)	instances 53 -> 75
+tests/golden/linux-io-native.bot	identical	instances 19 -> 19
+tests/golden/linux-io.bot	more-instances (old declined: declined={budget-block)	instances 71 -> 82
+tests/golden/linux-transports.bot	identical (run-varying fields normalized)	instances 22 -> 22
+tests/golden/list-flat.bot	more-instances (old declined: declined={budget-block)	instances 55 -> 77
+tests/golden/lists-and-sets.bot	more-instances (old declined: declined={budget-block)	instances 102 -> 153
+tests/golden/loop-collecting-refined-checks.bot	identical	instances 33 -> 33
+tests/golden/loop-collecting.bot	more-instances (old declined: declined={budget-block)	instances 92 -> 191
+tests/golden/loops.bot	more-instances (old declined: declined={budget-block)	instances 85 -> 124
+tests/golden/method-equivalence-imported.bot	identical	instances 62 -> 62
+tests/golden/method-equivalence.bot	more-instances (old declined: declined={budget-block)	instances 146 -> 169
+tests/golden/methods-byte-without-list.bot	identical (run-varying fields normalized)	instances 11 -> 11
+tests/golden/methods-list-without-str.bot	identical (run-varying fields normalized)	instances 11 -> 11
+tests/golden/methods-struct-instances.bot	identical	instances 34 -> 34
+tests/golden/methods-type-import-only.bot	identical	instances 9 -> 9
+tests/golden/methods.bot	more-instances (old declined: declined={budget-block)	instances 182 -> 361
+tests/golden/modules.bot	identical (run-varying fields normalized)	instances 85 -> 85
+tests/golden/mutable-array.bot	more-instances (old declined: declined={budget-block)	instances 113 -> 324
+tests/golden/mutable-map.bot	more-instances (old declined: declined={budget-block)	instances 41 -> 46
+tests/golden/mutable-set.bot	identical (run-varying fields normalized)	instances 26 -> 26
+tests/golden/mutable-vector-str.bot	identical	instances 11 -> 11
+tests/golden/mutable-vector.bot	more-instances (old declined: declined={budget-block)	instances 59 -> 95
+tests/golden/names-and-scoping.bot	more-instances (old declined: declined={budget-block)	instances 64 -> 91
+tests/golden/native-aggregates.bot	more-instances (old declined: declined={budget-block)	instances 127 -> 176
+tests/golden/native-values.bot	more-instances (old declined: declined={budget-block)	instances 141 -> 215
+tests/golden/nonplace-parameter-mutation.bot	more-instances (old declined: declined={budget-block)	instances 55 -> 64
+tests/golden/numeric-looking-names.bot	identical	instances 12 -> 12
+tests/golden/numeric-text.bot	more-instances (old declined: declined={budget-block)	instances 45 -> 51
+tests/golden/opaque-instances.bot	identical	instances 13 -> 13
+tests/golden/opaque.bot	more-instances (old declined: declined={budget-block)	instances 103 -> 137
+tests/golden/ownership.bot	more-instances (old declined: declined={budget-block)	instances 53 -> 57
+tests/golden/place-parameters.bot	more-instances (old declined: declined={budget-block)	instances 48 -> 59
+tests/golden/range-and-contract-values.bot	more-instances (old declined: declined={budget-block)	instances 158 -> 208
+tests/golden/raw-c-float-ffi.bot	identical (run-varying fields normalized)	instances 31 -> 31
+tests/golden/raw-int-abi.bot	more-instances (old declined: declined={budget-block)	instances 124 -> 162
+tests/golden/recursive-types.bot	identical	instances 21 -> 21
+tests/golden/refinements.bot	more-instances (old declined: declined={budget-block)	instances 82 -> 112
+tests/golden/representation.bot	identical	instances 41 -> 41
+tests/golden/static-compile-erased-consumer.bot	identical (run-varying fields normalized)	instances 13 -> 13
+tests/golden/static-compile-expected-diagnostics.bot	more-instances (old declined: declined={budget-block)	instances 40 -> 47
+tests/golden/static-compile.bot	more-instances (old declined: declined={budget-block)	instances 128 -> 163
+tests/golden/stdlib-namespaces-entry-members.bot	identical	instances 20 -> 20
+tests/golden/stdlib-namespaces-str-only.bot	identical	instances 9 -> 9
+tests/golden/stdlib-namespaces-unimported.bot	identical	instances 10 -> 10
+tests/golden/stdlib-namespaces.bot	more-instances (old declined: declined={budget-block)	instances 147 -> 235
+tests/golden/string-natives.bot	more-instances (old declined: declined={budget-block)	instances 142 -> 179
+tests/golden/string-representations.bot	more-instances (old declined: declined={budget-block)	instances 120 -> 159
+tests/golden/strings.bot	more-instances (old declined: declined={budget-block)	instances 89 -> 141
+tests/golden/struct-representation-instances.bot	identical	instances 53 -> 53
+tests/golden/struct-representation.bot	more-instances (old declined: declined={budget-block)	instances 183 -> 290
+tests/golden/structs-and-enums-instances.bot	identical	instances 27 -> 27
+tests/golden/structs-and-enums.bot	more-instances (old declined: declined={budget-block)	instances 86 -> 167
+tests/golden/trait-constrained-types.bot	more-instances (old declined: declined={budget-block)	instances 73 -> 109
+tests/golden/traits-path.bot	identical (run-varying fields normalized)	instances 19 -> 19
+tests/golden/traits.bot	more-instances (old declined: declined={budget-block)	instances 99 -> 121
+tests/golden/tree-struct.bot	more-instances (old declined: declined={budget-block)	instances 41 -> 44
+tests/golden/type-predicates.bot	more-instances (old declined: declined={budget-block)	instances 51 -> 66
+tests/golden/types.bot	more-instances (old declined: declined={budget-block)	instances 123 -> 191
+tests/golden/unicode-strings.bot	identical (run-varying fields normalized)	instances 51 -> 51
+tests/golden/validators-and-proofs.bot	more-instances (old declined: declined={budget-block)	instances 83 -> 213
+tests/golden/value-identity.bot	identical (run-varying fields normalized)	instances 32 -> 32
+tests/golden/values.bot	more-instances (old declined: declined={budget-block)	instances 55 -> 73
+tests/golden/variadics.bot	more-instances (old declined: declined={budget-block)	instances 65 -> 68
+tests/golden/warning-programs.bot	more-instances (old declined: declined={budget-block)	instances 63 -> 73

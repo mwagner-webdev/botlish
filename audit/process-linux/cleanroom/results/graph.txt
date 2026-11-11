@@ -1,0 +1,14 @@
+the dependency graph of /home/dev/app: 3 packages, one instance of each
+application uses: event_loop_linux, process_linux, ticker
+event_loop_linux 0.5.0 (sha256 ecd9e8114fa5): used by the application, process_linux, ticker; installed
+  locked by: the application (request "0.5"), process_linux 0.1.0, ticker 1.0.0
+  shared: one instance, event_loop_linux, for the application, process_linux, ticker
+  path: the project -> event_loop_linux 0.5.0
+process_linux 0.1.0 (sha256 c2a04db5df8a): used by the application; installed
+  locked by: the application (request "0.1")
+  uses: event_loop_linux 0.5.0
+  path: the project -> process_linux 0.1.0
+ticker 1.0.0 (sha256 31ce05541f80): used by the application; installed
+  locked by: the application (request "1.0")
+  uses: event_loop_linux 0.5.0
+  path: the project -> ticker 1.0.0

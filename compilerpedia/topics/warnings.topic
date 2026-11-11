@@ -984,3 +984,199 @@ fn fill(renderer: std::ffi::c::Ptr[std::ffi::c::Void], x: std::ffi::c::Int) -> s
 @nowarn CONTEXT-RESOURCE-ESCAPE
 @value 0
 @end
+
+@topic warning.discarded-mutation
+title: DISCARDED-MUTATION: a mutation no computation can see
+summary: A mutating call whose new state is never read before its place goes out of scope, or a fold's continue or break that carries the intermediate as it was before the iteration mutated it.
+index: warnings lint
+code: DISCARDED-MUTATION
+code: CORE SEMANTIC DISCARDED-MUTATION
+alias: discarded mutation; dead mutation; lost update; mutation not observed; unused mutation; loop variable mutation; mutating a loop variable; push to loop variable; fold continue discards; fold break discards
+keywords: mutation, MutableVector, MutableArray, MutableMap, MutableSet, push, set, add, loop variable, copy, fold, intermediate, continue, break, place, dead store
+related: concept.loops concept.values concept.mutable-vector concept.mutable-array concept.folds concept.place-parameters error.nonplace-parameter-mutation
+
+== WHAT IT DETECTS
+Two situations, one code; each is a fact the compiler proves, never a
+guess about intent.
+  * A dead mutation: a collection operation (push, set, pop, swap, clear,
+    ...) or a call giving a place to a function, whose every mutated place
+    is one that dies with its scope -- a local, a loop or lockstep
+    variable, a fold intermediate, a handler's payload, a destructured
+    field -- and is not read again on any path before it does, while the
+    call's own value is discarded:
+        f.bot:4:9: warning: this mutation of `row` is never observed:
+            nothing reads `row` again before it goes out of scope (`row` is
+            this iteration's own copy of an element, not the element of the
+            iterated collection) (DISCARDED-MUTATION)
+        f.bot:3:10: note: `row` is bound here
+  * A discarded fold update: a `continue` or bare `break` of a fold that
+    every path reaching it has mutated the fold's intermediate on, in the
+    same iteration. The exit carries the intermediate the iteration started
+    with (concept.folds), so the mutation is undone:
+        f.bot:10:13: warning: this `continue` discards this iteration's
+            mutation of the fold's intermediate `acc` (every path to it
+            mutates `acc`): the fold carries the intermediate this iteration
+            started with to the next iteration, not its modified value
+            (DISCARDED-MUTATION)
+        f.bot:8:9: note: a mutation of `acc` before this `continue`, in the
+            same iteration
+
+== WHY IT MATTERS
+A collection is a value (concept.values). A loop variable, a fold's
+intermediate and a handler's payload are places of their construct, each
+holding its own logical copy: `loop row in rows: row.push(42)` changes the
+iteration's copy of each row, and `rows` keeps its rows. The same holds for
+the working copy error.nonplace-parameter-mutation suggests (`working =
+tiles`, then mutate `working`): a copy that is mutated and never used again
+loses the write exactly as the rejected program did. And a fold's
+`continue` or bare `break` deliberately keeps the iteration's starting
+intermediate, which reads naturally for `acc + x` but surprises after
+`acc.push(x)`. In every case the program compiles and runs; the update
+simply goes nowhere.
+
+== RECOMMENDED PRACTICE
+Make the computation you mean explicit:
+  * To change the elements of a collection, build the changed collection
+    and continue with it: `rows = loop row in rows: row.push(42); row`
+    (on two lines), or keep the collection in a place and mutate it there.
+  * To change a caller's collection, declare the parameter `place` and give
+    it the caller's place (concept.place-parameters).
+  * Return or use the working copy you mutated.
+  * In a fold, complete the iteration with the updated intermediate
+    (`acc` as the body's last expression) instead of `continue`, or mutate
+    only after the exit's test.
+  * If the mutation is genuinely unnecessary, remove it -- but its other
+    behavior goes with it: `a.set(i, x)` with `i` out of range fails
+    whether or not anyone reads `a` (the message says so when the call can
+    fail), and its arguments are still evaluated.
+
+== EVIDENCE
+The mutations hir::mutvec judges (a native whose receiver role is `place`,
+a function's place parameters), only calls the program wrote; the last-use
+analysis the copy convention's moves rely on (hir::mutvec::NoLaterUse:
+every later statement, operand, branch, handler and later iteration of a
+loop the place outlives); whether the call's value is used; the callee's
+effects for a call of a function -- every function it can reach touches
+only its own places and its place parameters (no context, no function
+value, no syscall, C call or yield, nothing affine); for a fold, a walk of
+the iteration that reports an exit only when every path to it has mutated
+the intermediate; and the completion analysis's reachability inside
+functions. All of it on the checked program as written, the same for every
+backend.
+
+== LEGITIMATE EXCEPTIONS
+Silent by construction: a mutation whose state is read on some path, a
+destructive read whose element is used (`x = q.pop()`), a place parameter's
+or a context's mutation (they outlive the call), a call of a function with
+another effect (a context, I/O, a callback) or with a second place that is
+read, anything involving an affine value (releasing a resource runs its
+cleanup), and a fold exit only some paths reach after the mutation.
+Not detected: a local mutated in every iteration of a loop and never read
+after it (the next iteration counts as a reader), and a read whose own
+value is unused. A deliberate dead mutation -- a test that pins a call's
+failure or a copy's independence -- can read the place afterwards, or drop
+the write if the failure is not its point.
+
+== EXAMPLES
+@example accept
+import std::mutable_vector
+
+rows = [std::mutable_vector::from_list([1]), std::mutable_vector::from_list([2, 3])]
+loop row in rows:
+    row.push(42)
+loop row in rows:
+    row.length()
+@caption Pushing to a loop variable changes the iteration's copy only
+@warn DISCARDED-MUTATION
+@value [1, 2]
+@end
+
+@example accept
+import std::mutable_vector
+
+rows = [std::mutable_vector::from_list([1]), std::mutable_vector::from_list([2, 3])]
+updated = loop row in rows:
+    row.push(42)
+    row
+loop row in updated:
+    row.length()
+@caption Collect the changed copies and continue with them
+@nowarn DISCARDED-MUTATION
+@value [2, 3]
+@end
+
+@example accept
+import std::mutable_vector
+
+fn ints() -> MutableVector[int]:
+    std::mutable_vector::from_list([])
+
+fn f(xs: List[int]) -> List[int]:
+    w = fold x in xs with intermediate acc ints():
+        acc.push(x)
+        if x < 0:
+            continue
+        acc
+    loop y in w:
+        y
+
+f([1, -2, 3])
+@caption A continue after a push carries the intermediate from before it
+@warn DISCARDED-MUTATION
+@value [1, 3]
+@end
+
+@example accept
+import std::mutable_vector
+
+fn ints() -> MutableVector[int]:
+    std::mutable_vector::from_list([])
+
+fn f(xs: List[int]) -> List[int]:
+    w = fold x in xs with intermediate acc ints():
+        if x < 0:
+            continue
+        acc.push(x)
+        acc
+    loop y in w:
+        y
+
+f([1, -2, 3])
+@caption Test first, then mutate and complete with the intermediate
+@nowarn DISCARDED-MUTATION
+@value [1, 3]
+@end
+
+@example accept
+import std::mutable_array
+
+fn zone(tiles: MutableArray[int], i: int, kind: int) -> MutableArray[int] errors IndexNotFound:
+    working = tiles
+    working.set(i, kind)
+    working
+
+tiles = std::mutable_array::create(6, 0)
+t = tiles.zone(4, 2):
+    on IndexNotFound:
+        std::mutable_array::create(1, 0)
+t.at(4):
+    on IndexNotFound:
+        -1
+@caption A working copy that is returned is used
+@nowarn DISCARDED-MUTATION
+@value 2
+@end
+
+@example accept
+import std::mutable_vector
+
+queues = [std::mutable_vector::from_list([1, 2]), std::mutable_vector::from_list([3])]
+loop q in queues:
+    x = q.pop():
+        on IndexNotFound:
+            -1
+    x
+@caption A destructive read whose element is used is a read
+@nowarn DISCARDED-MUTATION
+@value [2, 3]
+@end

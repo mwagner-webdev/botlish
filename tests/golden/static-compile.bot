@@ -402,7 +402,7 @@ fn register_rejected_block_tests():
             fn g() -> str:
                 1
             0
-    rejects_with("sc-diag-exact-result-type", std::compiler::DiagnosticCode::Type, 402, 17, [], "function result does not prove declared type str", b_exact_result_type)
+    rejects_with("sc-diag-exact-result-type", std::compiler::DiagnosticCode::Type, 402, 17, [], "function result does not prove declared type str (result type: int)", b_exact_result_type)
 
     fn b_exact_unknown_field() errors std::compiler::CompilerError:
         static compile:

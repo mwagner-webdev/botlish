@@ -1,0 +1,15 @@
+# Probe F2: the same shape, whose entry computation fails at run time:
+# non-tail recursion deeper than the host thread's stack holds. A library's
+# code bounds its own recursion against the running stack's limit
+# (NATIVE-LIBRARY-MILESTONE-1.md, "Stack safety"), so the failure is
+# NATIVE LIMIT STACK, returned to the host by create -- no signal handler,
+# no _exit. How does a failure of the entry reach the host?
+exported c fn version() -> int:
+    1
+
+fn depth(n: int) -> int:
+    if n == 0:
+        return 0
+    1 + depth(n - 1)
+
+depth(10000000)

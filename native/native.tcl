@@ -133,6 +133,7 @@ source [file join [file dirname [file normalize [info script]]] prepare.tcl]
 source [file join [file dirname [file normalize [info script]]] library.tcl]
 source [file join [file dirname [file normalize [info script]]] support.tcl]
 source [file join [file dirname [file normalize [info script]]] elf.tcl]
+source [file join [file dirname [file normalize [info script]]] pe.tcl]
 
 namespace eval native {
     variable home [file dirname [file normalize [info script]]]
@@ -212,10 +213,13 @@ proc native::WithProgramDirs {hir run script} {
 #                runtime/coroutine/windows.rs)
 #   stackGuard   NATIVE LIMIT STACK for any exhausted native stack
 #   libraries    native libraries (native::library, NATIVE-LIBRARY-MILESTONE-1.md:
-#                codegen/library.rs's SUPPORTED; the archive's partial link
-#                and symbol localization are GNU binutils') of this host's
-#                own target; a library of another target is made through its
-#                target support package (`targetCapabilities`, below)
+#                codegen/library.rs's SUPPORTED; on Linux the archive's
+#                partial link and symbol localization are GNU binutils', on
+#                Windows x86-64 the library is a DLL and its import library,
+#                linked by link.exe from a Developer environment:
+#                WINDOWS-X86-64-MILESTONE-8.md) of this host's own target; a
+#                library of another target is made through its target
+#                support package (`targetCapabilities`, below)
 #   mainThreadStartup  executables started on the process's main thread
 #                (native::executable -startup main-thread, MAIN-THREAD-
 #                STARTUP-MILESTONE-1.md: runtime/aot.rs's MAIN_THREAD_STARTUP,
@@ -242,7 +246,9 @@ proc native::WithProgramDirs {hir run script} {
 # Windows fiber per coroutine stack, each with its own stack guarantee) and
 # variadic C calls since WINDOWS-X86-64-MILESTONE-6.md (Win64's variadic
 # rules: a float or a double of the first four positions in both of its
-# position's registers).
+# position's registers) and native libraries since
+# WINDOWS-X86-64-MILESTONE-8.md (a DLL and its import library, exporting
+# exactly the library's public C functions).
 namespace eval native {
     variable capabilities [dict create \
         jit {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
@@ -253,7 +259,7 @@ namespace eval native {
         coroutines {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
         stackGuard {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
         frameRoots {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
-        libraries {linux-x86_64 linux-aarch64} \
+        libraries {linux-x86_64 linux-aarch64 windows-x86_64} \
         mainThreadStartup {macos-aarch64}]
     # What the native backend makes *for* a target, on any host that has the
     # target's support package and toolchain (ANDROID-AARCH64-TARGET-
@@ -277,6 +283,31 @@ proc native::targetSupports {capability target} {
 proc native::hostSupports {capability} {
     variable capabilities
     return [expr {[core::cabi::hostTarget] in [dict get $capabilities $capability]}]
+}
+
+# Whether the native backend's driver can run programs in-process (the
+# JIT: -backend cranelift and cranelift-generic, native::evalHir and every
+# measurement built on it). A capability of the driver's build, not of the
+# host: the JIT is a cargo feature (`jit`, on by default), and a driver
+# built without it -- the macOS application's,
+# MACOS-BOTLISH-DISTRIBUTION-MILESTONE-1.md -- refuses every in-process run
+# ({NATIVE UNSUPPORTED jit}) while it compiles, links and runs executables
+# as any other. The driver says which it is (botlish-native capabilities),
+# asked once per process; a driver too old to answer has a JIT.
+proc native::jitAvailable {} {
+    variable jitAvailable
+    if {![info exists jitAvailable]} {
+        set available 1
+        if {![catch {exec [binary] capabilities 2>@1} output]} {
+            foreach line [split $output \n] {
+                if {[lindex $line 0] eq "jit"} {
+                    set available [expr {[lindex $line 1] eq "1"}]
+                }
+            }
+        }
+        set jitAvailable $available
+    }
+    return $jitAvailable
 }
 
 # Evaluates SCRIPT in the caller's scope with DIRS the linker search
@@ -454,7 +485,7 @@ proc native::RunDriver {output command nirText arguments} {
     foreach dir $runtimePaths {
         lappend args --runtime-path $dir
     }
-    if {$command in {run bench batch} && $::core::hashing::tableKeyOverride ne ""} {
+    if {$command in {run bench batch aot-run} && $::core::hashing::tableKeyOverride ne ""} {
         # A test harness fixed the private table hash's key
         # (core::hashing::useTableHashKey): the same key for this run, so
         # every backend computes the same keyed hashes. Never set in
@@ -471,7 +502,7 @@ proc native::RunDriver {output command nirText arguments} {
     # argv of the enclosing core::process::withArgv, else the synthetic
     # default), as raw bytes -- never this Tcl process's own argv.
     set argvPath ""
-    if {$command in {run bench batch}} {
+    if {$command in {run bench batch aot-run}} {
         # Through a file: one command-line argument is capped at 128 KiB,
         # a large vector is not.
         lassign [file tempfile argvPath botlish.argv] argvChannel
@@ -482,13 +513,23 @@ proc native::RunDriver {output command nirText arguments} {
     }
     set resultPath ""
     try {
-        if {$output eq "inherit"} {
+        if {$output in {inherit run-command}} {
             lassign [file tempfile resultPath botlish.result] resultChannel
             close $resultChannel
             # (exec flushes this process's stdout before the program writes.)
-            set failed [catch {exec $binary $command --result $resultPath {*}$args $path >@stdout 2>@stderr} closeMessage]
+            # A program run as a command (run-command, native::aotRun) has
+            # this process's standard input too, and its exit status is its
+            # own: the driver's is the program's, never a failure of its own
+            # unless the result says so.
+            if {$output eq "run-command"} {
+                set failed [catch {exec $binary $command --result $resultPath {*}$args $path <@stdin >@stdout 2>@stderr} closeMessage]
+                set done {^(status|interrupted|error) }
+            } else {
+                set failed [catch {exec $binary $command --result $resultPath {*}$args $path >@stdout 2>@stderr} closeMessage]
+                set done {^(value|error) }
+            }
             set output [core::ReadFile $resultPath]
-            if {$failed && ![regexp -line {^(value|error) } $output]} {
+            if {$failed && ![regexp -line $done $output]} {
                 throw {NATIVE BUG} "native backend failed: $closeMessage\n$output"
             }
         } else {
@@ -630,6 +671,27 @@ proc native::executable {hir path args} {
         set runtimeArchive [list --runtime-archive [file normalize [dict get $args -runtime-archive]]]
         dict unset args -runtime-archive
     }
+    set text [ExecutableText $hir {*}$args]
+    set lines [WithProgramDirs $hir 0 {Driver executable $text [file normalize $path] --startup $startup {*}$runtimeArchive}]
+    foreach line $lines {
+        if {[lindex $line 0] eq "error"} { Outcome $lines }
+    }
+    if {[llength $lines] != 1 || [lindex [lindex $lines 0] 0] ne "executable"} {
+        throw {NATIVE BUG} "native backend produced no executable result:\n[join $lines \n]"
+    }
+    # PATH as the caller spelled it, with the suffix the driver gave the file
+    # (.exe on Windows).
+    set written [file tail [lindex [lindex $lines 0] 1]]
+    return $path[string range $written [string length [file tail $path]] end]
+}
+
+# The NIR text of a standalone executable of HIR (native::executable's
+# OPTIONS: lowering's, and the analyses' -call-facts-opt, ...): readiness is
+# the public -aot-spec contract, checked before expanding native
+# implementations (which are runtime support, like the Rust helpers), and a
+# program that is not ready is {NATIVE AOT NOT-READY}. The one compilation
+# of an executable, for native::executable and native::aotRun alike.
+proc native::ExecutableText {hir args} {
     set analysisOptions [dict create -specialize 1]
     foreach {option variable} {
         -call-facts-opt BOTLISH_NATIVE_CALL_FACTS_OPT
@@ -661,18 +723,81 @@ proc native::executable {hir path args} {
     if {$failures ne ""} {
         throw {NATIVE AOT NOT-READY} "program is not AOT-ready:\n[join $failures \n]"
     }
-    set text [nir $hir {*}$args {*}$analysisOptions]
-    set lines [WithProgramDirs $hir 0 {Driver executable $text [file normalize $path] --startup $startup {*}$runtimeArchive}]
+    return [nir $hir {*}$args {*}$analysisOptions]
+}
+
+# Builds the program-mode HIR program HIR as the standalone executable
+# native::executable links -- the same NIR, link plan, linker and startup
+# policy -- in a private directory of its own (the driver's aot-run,
+# native/src/aotrun.rs, AOT-RUN-MILESTONE-1.md) and runs it as a command:
+# its standard input, output and error this process's own, its argument
+# vector the enclosing core::process::withArgv's snapshot (argument zero
+# included), its working directory and environment this process's. NAME is
+# the executable's file name. Options: -startup worker|main-thread (the
+# executable's policy), -keep 1 (keep the private directory, with the NIR
+# beside the executable), -environment {NAME CHANGE ...} (variables the
+# child gets otherwise than this process has them: CHANGE {TEXT} sets one to
+# TEXT, {} unsets it -- a packaged compiler's own settings, put back as the
+# user had them), and lowering's.
+#
+# Returns a dict: status ({exit CODE} or {signal N NAME}; {interrupted N
+# NAME} when a signal or the parent's end came before the program started,
+# so nothing ran), executable (its path), kept (the directory, with -keep),
+# timing ({BUILD-US START-US}). A program that is not ready, cannot be
+# compiled or linked, or cannot be started raises its error, and nothing
+# runs.
+proc native::aotRun {hir name args} {
+    lassign [StartupOption native::aotRun {*}$args] startup args
+    set keep 0
+    if {[dict exists $args -keep]} {
+        set keep [dict get $args -keep]
+        dict unset args -keep
+    }
+    set environment {}
+    if {[dict exists $args -environment]} {
+        set environment [dict get $args -environment]
+        dict unset args -environment
+    }
+    set text [ExecutableText $hir {*}$args]
+    set options [list --startup $startup --parent-pid [pid]]
+    if {$keep} {
+        lappend options --keep
+    }
+    set envPath ""
+    if {[llength $environment]} {
+        lassign [file tempfile envPath botlish.env] envChannel
+        fconfigure $envChannel -encoding ascii -translation lf
+        foreach {variable value} $environment {
+            if {$value eq {}} {
+                puts $envChannel "unset $variable"
+            } else {
+                puts $envChannel "set $variable [::binary encode hex [encoding convertto utf-8 [lindex $value 0]]]"
+            }
+        }
+        close $envChannel
+        lappend options --child-env $envPath
+    }
+    try {
+        set lines [WithProgramDirs $hir 1 {RunDriver run-command aot-run $text [list $name {*}$options]}]
+    } finally {
+        if {$envPath ne ""} { file delete $envPath }
+    }
+    set result [dict create]
     foreach line $lines {
-        if {[lindex $line 0] eq "error"} { Outcome $lines }
+        if {[catch {lindex $line 0} tag]} continue
+        switch -- $tag {
+            error { Outcome [list $line] }
+            executable { dict set result executable [lindex $line 1] }
+            timing { dict set result timing [lrange $line 1 2] }
+            status { dict set result status [lrange $line 1 end] }
+            interrupted { dict set result status $line }
+            kept { dict set result kept [lindex $line 1] }
+        }
     }
-    if {[llength $lines] != 1 || [lindex [lindex $lines 0] 0] ne "executable"} {
-        throw {NATIVE BUG} "native backend produced no executable result:\n[join $lines \n]"
+    if {![dict exists $result status]} {
+        throw {NATIVE BUG} "native backend reported no status of the program it ran:\n[join $lines \n]"
     }
-    # PATH as the caller spelled it, with the suffix the driver gave the file
-    # (.exe on Windows).
-    set written [file tail [lindex [lindex $lines 0] 1]]
-    return $path[string range $written [string length [file tail $path]] end]
+    return $result
 }
 
 proc native::clif {hir args} {

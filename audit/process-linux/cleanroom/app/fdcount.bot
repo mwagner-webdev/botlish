@@ -1,0 +1,20 @@
+# fdcount.bot -- the clean-room consumer's descriptor count: the entries of
+# /proc/self/fd (std::linux::fs), the program's own way to see that nothing
+# leaked. A module of its own, with qualified calls only.
+import std::io::fs
+import std::io::path
+import std::linux::fs
+import std::list
+
+# The entries of /proc/self/fd.
+nomethod fn fd_entries(context fs: std::linux::fs::LinuxFS) -> List[std::linux::fs::Entry] errors std::io::path::NotAPath, std::io::fs::FileError:
+    std::linux::fs::entries(std::linux::fs::from_text("/proc/self/fd"))
+
+# The descriptors open in this process (-1 when /proc cannot be read).
+fn open_fds(context fs: std::linux::fs::LinuxFS) -> int:
+    entries = fd_entries():
+        on std::io::path::NotAPath:
+            []
+        on std::io::fs::FileError:
+            []
+    std::list::length(entries)

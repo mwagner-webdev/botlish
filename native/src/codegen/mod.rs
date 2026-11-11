@@ -4,9 +4,13 @@
 //! only one today is Cranelift (`clif`), used two ways that share all of the
 //! translation:
 //!
-//!   * JIT (`CraneliftJit`): compile in memory and run in this process
+//!   * JIT (`CraneliftJit`): compile in memory and run in this process -- the
+//!     `jit` cargo feature, on by default; a driver built without it (the
+//!     macOS application's, MACOS-BOTLISH-DISTRIBUTION-MILESTONE-1.md) has
+//!     no code that makes executable memory
 //!   * object (`emit_object`): position-independent code and relative GC maps
 //!     for AOT linking; `aot::emit_executable` adds startup and the runtime
+//!     (`inspect` shows its code without the JIT)
 //!
 //! Semantics live in NIR and the runtime; nothing here may change what a
 //! program means.
@@ -16,7 +20,7 @@ pub mod callback;
 pub mod clif;
 pub mod fusion;
 pub mod library;
-#[cfg(all(windows, target_arch = "x86_64"))]
+#[cfg(all(windows, target_arch = "x86_64", feature = "jit"))]
 pub mod jitunwind;
 pub mod nirtext;
 pub mod roots;
@@ -24,13 +28,16 @@ pub mod target;
 pub mod unwind;
 
 use crate::nir::{FuncId, Program};
+#[cfg(feature = "jit")]
 use crate::runtime::framemap;
+#[cfg(feature = "jit")]
 use crate::runtime::ops::helpers;
 use crate::runtime::program::Startup;
 use crate::runtime::value::*;
 use crate::runtime::vm::Vm;
 use cranelift_codegen::isa::OwnedTargetIsa;
 use cranelift_codegen::settings::{self, Configurable};
+#[cfg(feature = "jit")]
 use cranelift_jit::{JITBuilder, JITModule};
 use std::collections::HashMap;
 
@@ -76,6 +83,7 @@ impl ConstPool {
     }
 }
 
+#[cfg_attr(not(feature = "jit"), allow(dead_code))]
 pub type ProgramEntry = extern "C" fn(*mut Vm) -> Value;
 
 /// One allocating NIR instruction, compiled (CompileOptions::alloc_sites):
@@ -87,6 +95,7 @@ pub type ProgramEntry = extern "C" fn(*mut Vm) -> Value;
 /// `hir_expr`: it is native/lower.tcl's opaque "@ExprId" annotation
 /// (nir::Function::origins), resolved to a source location only on the Tcl
 /// side (native.tcl), which is where HIR lives.
+#[cfg_attr(not(feature = "jit"), allow(dead_code))]
 pub struct Site {
     pub func: FuncId,
     pub func_name: String,
@@ -99,6 +108,7 @@ pub struct Site {
 }
 
 /// A program compiled to machine code, ready to run.
+#[cfg(feature = "jit")]
 pub struct CompiledProgram {
     pub entry: ProgramEntry,
     pub pool: ConstPool,
@@ -139,6 +149,7 @@ pub struct CompiledProgram {
     _module: JITModule,
 }
 
+#[cfg(feature = "jit")]
 impl CompiledProgram {
     /// Builds the VM's constant table (static objects for this program),
     /// sizes its module-static slot table (MODULE-STATIC-RETAINED-VALUES.md)
@@ -174,6 +185,7 @@ impl CompiledProgram {
 /// context area, roots). The JIT module that owns the code outlives every
 /// borrow of it.
 #[derive(Clone, Copy)]
+#[cfg(feature = "jit")]
 pub struct ProgramImage<'a> {
     pub entry: ProgramEntry,
     pub constants: &'a [Const],
@@ -186,9 +198,12 @@ pub struct ProgramImage<'a> {
 // SAFETY: every field is read-only after compilation (the entry is a code
 // address, the rest immutable data), so sharing one between threads shares
 // read-only memory.
+#[cfg(feature = "jit")]
 unsafe impl Send for ProgramImage<'_> {}
+#[cfg(feature = "jit")]
 unsafe impl Sync for ProgramImage<'_> {}
 
+#[cfg(feature = "jit")]
 impl ProgramImage<'_> {
     /// Installs this program in VM, a Vm made on the thread that will run
     /// it: its constant table, module-static slots, context area and frame
@@ -199,6 +214,7 @@ impl ProgramImage<'_> {
     }
 }
 
+#[cfg_attr(not(feature = "jit"), allow(dead_code))]
 pub struct CompileOptions {
     /// Keep the CLIF of every function.
     pub clif: bool,
@@ -218,6 +234,7 @@ pub struct CompileOptions {
 }
 
 /// A code generator for NIR programs.
+#[cfg(feature = "jit")]
 pub trait Backend {
     fn compile(&mut self, program: &Program, options: &CompileOptions) -> Result<CompiledProgram, BackendError>;
 }
@@ -300,8 +317,10 @@ fn isa_flags(pic: bool, probes: bool) -> Result<settings::Flags, BackendError> {
     Ok(settings::Flags::new(flags))
 }
 
+#[cfg(feature = "jit")]
 pub struct CraneliftJit;
 
+#[cfg(feature = "jit")]
 impl CraneliftJit {
     fn compile_actual(&mut self, program: &Program, options: &CompileOptions) -> Result<CompiledProgram, BackendError> {
         let mut builder = JITBuilder::with_isa(isa(false)?, cranelift_module::default_libcall_names());
@@ -418,6 +437,7 @@ impl CraneliftJit {
     }
 }
 
+#[cfg(feature = "jit")]
 impl Backend for CraneliftJit {
     fn compile(&mut self, program: &Program, options: &CompileOptions) -> Result<CompiledProgram, BackendError> {
         if options.vcode {
@@ -495,6 +515,59 @@ impl VCodeCapture {
     }
 }
 
+/// What `inspect` shows of a program: its CLIF, its VCode and its functions'
+/// machine code sizes (each with its generic entry), as `CraneliftJit`'s
+/// `CompiledProgram` has them.
+#[cfg_attr(feature = "jit", allow(dead_code))]
+pub struct Inspection {
+    pub clif: Option<String>,
+    pub vcode: Option<String>,
+    pub code_sizes: Vec<u32>,
+}
+
+/// The code of PROGRAM as an executable's program object holds it
+/// (`emit_executable_object`'s translation and ISA), for a driver's
+/// `clif`, `vcode` and `size` without the JIT: compiled into an object in
+/// memory, never into executable memory, never run. A JIT build shows its
+/// in-process code instead (non-PIC, the host's CPU features), which may
+/// differ in relocations and instruction selection, never in meaning.
+#[cfg_attr(feature = "jit", allow(dead_code))]
+pub fn inspect(program: &Program, clif_text: bool, vcode: bool) -> Result<Inspection, BackendError> {
+    let compile = || -> Result<Inspection, BackendError> {
+        let builder = cranelift_object::ObjectBuilder::new(isa(true)?, "botlish", cranelift_module::default_libcall_names())
+            .map_err(|e| BackendError::Codegen(format!("{e:?}")))?;
+        let mut module = cranelift_object::ObjectModule::new(builder);
+        let symbols = clif::declare(&mut module, program, true, false)?;
+        let mut pool = ConstPool::default();
+        let mut sites = Vec::new();
+        let mut listing = clif_text.then(|| {
+            let mut text = clif::legend(&symbols);
+            for shown in &symbols.callback_clif {
+                text.push('\n');
+                text.push_str(shown);
+            }
+            text
+        });
+        let mut code_sizes = Vec::with_capacity(program.functions.len());
+        for f in &program.functions {
+            let result = clif::define(&mut module, &symbols, f, &mut pool, &mut sites, false, false, clif_text)?;
+            code_sizes.push(result.direct_size + result.entry_size);
+            if let (Some(listing), Some(text)) = (listing.as_mut(), &result.clif_text) {
+                listing.push('\n');
+                listing.push_str(text);
+            }
+        }
+        Ok(Inspection { clif: listing, vcode: None, code_sizes })
+    };
+    if vcode {
+        let capture = VCodeCapture::new();
+        let mut inspected = capture.run(compile)?;
+        inspected.vcode = capture.take();
+        return Ok(inspected);
+    }
+    compile()
+}
+
 /// The program as an object file (AOT). Functions are exported as
 /// botlish_fn_N / botlish_entry_N; runtime helpers are undefined imports.
 pub struct ObjectProgram {
@@ -544,11 +617,12 @@ fn emit_object_with(program: &Program, isa: OwnedTargetIsa, library: Option<&str
     }
     let linkage = if library.is_some() { cranelift_module::Linkage::Local } else { cranelift_module::Linkage::Export };
     let record = define_program_record(&mut module, &symbols, program, &pool, &functions, linkage, startup)?;
-    if let Some(name) = library {
-        library::define(&mut module, program, name, record)?;
-    }
+    let public = match library {
+        Some(name) => library::define(&mut module, program, name, record)?,
+        None => Vec::new(),
+    };
     let mut product = module.finish();
-    add_windows_unwind(&mut product, &symbols, &functions)?;
+    add_windows_unwind(&mut product, &symbols, &functions, &public)?;
     let bytes = product.emit().map_err(|e| BackendError::Codegen(e.to_string()))?;
     Ok(ObjectProgram { bytes, pool, functions })
 }
@@ -643,21 +717,25 @@ fn add_windows_unwind(
     product: &mut cranelift_object::ObjectProduct,
     symbols: &clif::Symbols,
     functions: &[clif::DefineResult],
+    public: &[library::Defined],
 ) -> Result<(), BackendError> {
     use cranelift_object::object::write::{Relocation, SymbolSection};
     use cranelift_object::object::{RelocationEncoding, RelocationFlags, RelocationKind, SectionKind};
-    // (section, offset in it, symbol, size, UNWIND_INFO) of every function.
+    // (section, offset in it, symbol, size, UNWIND_INFO) of every function:
+    // each Botlish function and generic entry, and a native library's public
+    // C functions (its forwarders and trampolines, codegen::library).
     let mut entries = Vec::new();
-    for (i, f) in functions.iter().enumerate() {
-        for (id, size, info) in [(symbols.direct[i], f.direct_size, &f.direct_unwind), (symbols.entry[i], f.entry_size, &f.entry_unwind)] {
-            let Some(info) = info else { continue };
-            let symbol = product.function_symbol(id);
-            let defined = product.object.symbol(symbol);
-            let SymbolSection::Section(section) = defined.section else {
-                return Err(BackendError::Bug(format!("function symbol {:?} is not defined in a section", defined.name)));
-            };
-            entries.push((section, defined.value, symbol, size, info));
-        }
+    let botlish = functions.iter().enumerate().flat_map(|(i, f)| {
+        [(symbols.direct[i], f.direct_size, &f.direct_unwind), (symbols.entry[i], f.entry_size, &f.entry_unwind)]
+    });
+    for (id, size, info) in botlish.chain(public.iter().map(|p| (p.id, p.size, &p.unwind))) {
+        let Some(info) = info else { continue };
+        let symbol = product.function_symbol(id);
+        let defined = product.object.symbol(symbol);
+        let SymbolSection::Section(section) = defined.section else {
+            return Err(BackendError::Bug(format!("function symbol {:?} is not defined in a section", defined.name)));
+        };
+        entries.push((section, defined.value, symbol, size, info));
     }
     if entries.is_empty() {
         return Ok(());

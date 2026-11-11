@@ -1,0 +1,8 @@
+import std::char
+import std::str
+
+quoted = "say \"hi\"\tC:\\dir\r\n"
+chars = ['\\', '\'', '\n', '\r', '\t']
+values = loop c in chars:
+    c.scalar_value()
+[quoted.length(), values]

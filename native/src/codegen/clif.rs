@@ -613,7 +613,7 @@ pub struct DefineResult {
 
 /// The Windows x64 `UNWIND_INFO` of the function just compiled in CTX, or
 /// None where the module's code is not Windows x86-64's.
-fn windows_unwind<M: Module>(module: &M, ctx: &cranelift_codegen::Context, what: &str) -> Result<Option<Vec<u8>>, BackendError> {
+pub(super) fn windows_unwind<M: Module>(module: &M, ctx: &cranelift_codegen::Context, what: &str) -> Result<Option<Vec<u8>>, BackendError> {
     if !super::unwind::windows_x64(module.isa()) {
         return Ok(None);
     }

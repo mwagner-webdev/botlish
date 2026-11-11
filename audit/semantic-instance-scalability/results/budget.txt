@@ -1,0 +1,18 @@
+# audit/mid-end-port/tools/budget.tcl -types "16 17 64 256 1024" (one process: the peak is the process's so far),
+# the base (53a0d1b) and the branch head, on a quiet 4-core machine, 2026-11-08.
+
+== before (53a0d1b)
+# budget: maxPerBlock 16, maxInstances 2000; choose's body: 0 extra statements; distinct types: N
+16 types: accepted in 0.17 s; 16 semantic instances, at most 16 of one function; declined: ; peak 29 MB
+17 types: rejected TYPE in 0.10 s: budget-17.bot:114:27: argument for parameter "f" cannot be proven to satisfy Fact (argument type: any)
+64 types: rejected TYPE in 0.37 s: budget-64.bot:302:27: argument for parameter "f" cannot be proven to satisfy Fact (argument type: any)
+256 types: rejected TYPE in 1.99 s: budget-256.bot:1070:27: argument for parameter "f" cannot be proven to satisfy Fact (argument type: any)
+1024 types: rejected TYPE in 8.55 s: budget-1024.bot:4142:27: argument for parameter "f" cannot be proven to satisfy Fact (argument type: any)
+
+== after
+# budget: maxPerBlock 16, maxInstances 2000; choose's body: 0 extra statements; distinct types: N
+16 types: accepted in 0.14 s; 16 semantic instances, at most 16 of one function; declined: ; peak 29 MB
+17 types: accepted in 0.13 s; 17 semantic instances, at most 17 of one function; declined: ; peak 33 MB
+64 types: accepted in 0.44 s; 64 semantic instances, at most 64 of one function; declined: ; peak 51 MB
+256 types: accepted in 2.01 s; 256 semantic instances, at most 256 of one function; declined: ; peak 126 MB
+1024 types: accepted in 8.83 s; 1024 semantic instances, at most 1024 of one function; declined: ; peak 430 MB

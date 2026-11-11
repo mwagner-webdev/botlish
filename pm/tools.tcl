@@ -644,7 +644,9 @@ proc pm::tools::Artifact {manifest target} {
     set dir [file dirname $path]
     set artifacts [{*}$get $value artifacts]
     set digests [{*}$get $value sha256]
-    foreach key {static shared header} {
+    # (`import`: a Windows library's import library,
+    # WINDOWS-X86-64-MILESTONE-8.md; absent elsewhere.)
+    foreach key {static shared import header} {
         set file [{*}$get $artifacts $key]
         if {[pm::json::type $file] ne "str"} continue
         set file [pm::json::payload $file]

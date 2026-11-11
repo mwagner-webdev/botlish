@@ -688,11 +688,18 @@ domain is exactly a function whose declared result is the domain.
 
 == WHAT IS REPORTED
     function result does not prove declared type int[Digit]
-    (facts: [-∞, +∞])
-at the function (the column of its parameter list). The facts are the
-range proven for the result when it is an integer. A `return` of another
-type (`return "pos"` in an `-> int` function) is reported the same way,
-at the function.
+    (result type: int, facts: [-∞, +∞])
+at the function (the column of its parameter list): the declared type,
+then the result type the compiler inferred for the body -- the type of
+every normal completion joined, the last value's and every `return`'s --
+and, when both may be Ints, the range proven for it (facts). A `return`
+of another type (`return "pos"` in an `-> int` function) is reported the
+same way, at the function: the result type is then the join of the two
+(here `any`), not the type of one branch. A List is held to its declared
+element type exactly (rule.type-argument), so a List of Bytes returned
+as `-> List[int]` reads
+    function result does not prove declared type List[int]
+    (result type: List[int[std::byte::Byte]])
 
 == WHAT TO DO
   * Guard the value: reject the out-of-range case first, with `fail` of a
@@ -711,6 +718,21 @@ digit(4)
 @caption An unconstrained int does not prove Digit
 @error CORE SEMANTIC TYPE
 @at 3:9
+@message function result does not prove declared type int\[Digit\] (result type: int, facts: *)
+@end
+
+@example reject
+import std::byte
+import std::str
+
+fn utf8(s: str) -> List[int]:
+    s.encode_utf8()
+
+0
+@caption List element types are held exactly: the diagnostic names both
+@error CORE SEMANTIC TYPE
+@at 4:8
+@message function result does not prove declared type List\[int\] (result type: List\[int\[std::byte::Byte\]\])
 @end
 
 @example accept

@@ -1,0 +1,59 @@
+# probe.bot -- the testing build's own exports (native/process_linux.c with
+# PL_TESTING: tools/process-linux.tcl archive -testing 1), for the test
+# programs: fault bits (negative controls) and probes. A program importing
+# this module links only with the testing archive; the released archive has
+# none of these symbols.
+import std::ffi::c
+
+extern c fn pl_t_faults(bits: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+extern c fn pl_t_open_fds() -> std::ffi::c::LongLong
+extern c fn pl_t_token() -> std::ffi::c::LongLong
+extern c fn pl_t_proc_state(pid: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+extern c fn pl_t_plain_fd() -> std::ffi::c::LongLong
+extern c fn pl_t_close(fd: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+extern c fn pl_t_ignore_sigchld(ignored: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+
+nomethod fn cll(x: int) -> std::ffi::c::LongLong:
+    if x < 0:
+        0
+    elif x > 4294967295:
+        4294967295
+    else:
+        x
+
+# The fault bits (native/process_linux.c's F_*): 1 keep the supervisor's
+# signal dispositions and mask, 2 keep its descriptors, 4 reap at the first
+# status check, 8 glibc's pidfd_spawn, 16 no pidfd_open (ENOSYS), 32
+# pidfd_open fails after the spawn (EMFILE), 64 no group signal through a
+# pidfd (the kill(-pgid) fallback). The previous bits.
+fn faults(bits: int) -> int:
+    pl_t_faults(cll(bits)) + 0
+
+# Descriptors open in this process.
+fn open_fds() -> int:
+    pl_t_open_fds() + 0
+
+# The calling thread's token in the adapter's table.
+fn token() -> int:
+    pl_t_token() + 0
+
+# PID's state letter as a code (84 'T' stopped, 90 'Z' zombie), or a
+# negative errno (-2: no such process).
+fn proc_state(pid: int) -> int:
+    pl_t_proc_state(cll(pid)) + 0
+
+# Ignore SIGCHLD (IGNORED) or restore its default disposition.
+fn ignore_sigchld(ignored: bool) -> int:
+    v = if ignored:
+        1
+    else:
+        0
+    pl_t_ignore_sigchld(cll(v)) + 0
+
+# A descriptor opened without close-on-exec (closefrom(3) keeps it out of
+# every child), and its close.
+fn plain_fd() -> int:
+    pl_t_plain_fd() + 0
+
+fn close(fd: int) -> int:
+    pl_t_close(cll(fd)) + 0

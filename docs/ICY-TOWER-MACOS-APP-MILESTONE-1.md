@@ -1,5 +1,13 @@
 # ICY-TOWER-MACOS-APP-MILESTONE-1.md
 
+> Since MACOS-BOTLISH-DISTRIBUTION-MILESTONE-1.md the release tooling this
+> report describes is shared with Botlish.app's release:
+> `credentials.py`, the stages of `release.py`, `apple-ca/` and
+> `requirements.txt` live in `tools/macos-release/`, and
+> `examples/games/icy-tower/macos/` keeps the game's description
+> (`bundle.py`) and its entry point (`release.py`). The commands below run
+> unchanged; the paths in the file tables name where the files were.
+
 ## A Finder-launchable, Developer ID-signed, notarized and distributable Icy Tower.app
 
 The macOS AArch64 Icy Tower (ICY-TOWER-MACOS-MILESTONE-1.md) as an

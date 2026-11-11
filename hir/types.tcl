@@ -3613,8 +3613,15 @@ proc hir::types::Walk {hirVar} {
     for {set round 1} {$round <= [set ::hir::semantic::maxRounds]} {incr round} {
         set typed $base
         hir::semantic::Begin $envs
-        set ctx [NewContext]
-        Sequence typed ctx [dict get $typed roots]
+        try {
+            set ctx [NewContext]
+            Sequence typed ctx [dict get $typed roots]
+        } on error {message options} {
+            # (A compiler failure -- HIR SEMANTIC LIMIT among them -- leaves
+            # no run in progress behind for the next compilation.)
+            hir::semantic::Abandon
+            return -options $options $message
+        }
         set snapshot [hir::semantic::End]
         dict set snapshot rounds $round
         if {$round == [set ::hir::semantic::maxRounds] || ![hir::semantic::WantsRerun $snapshot]} {
@@ -4662,13 +4669,14 @@ namespace eval hir::types {
 # List[never]'s element; a counter is exactly Int. The last walk of a loop is
 # the one its references are typed by. The generic walk's record is the
 # program's (hir::types::Walk), written only when it changes. A semantic
-# instance's walk types a scratch copy of the program's HIR: it records into
-# that copy's `instanceClauses`, a table of its own, which its snapshot keeps
-# (hir::semantic::Snapshot) -- never into the copy's binding table, whose
-# first write would copy every binding of the program for each instance
-# walk. Region inference's copy keeps no record (only its expressions'
-# types reach a specialization's view). So no instance's type ever reaches
-# the program's record, whatever order the instances are analyzed in.
+# instance's walk types the program's HIR in place, its region journaled
+# (hir/semantic.tcl, "Region-local walks"): it records into `instanceClauses`,
+# a top-level table of its own, which its snapshot keeps
+# (hir::semantic::Snapshot) and the walk's Restore drops with its other
+# changes -- never into the binding table, where the generic walk's record
+# is. Region inference's copy keeps no record (only its expressions' types
+# reach a specialization's view). So no instance's type ever reaches the
+# program's record, whatever order the instances are analyzed in.
 proc hir::types::RecordClause {hirVar ctx b type} {
     upvar 1 $hirVar hir
     if {[dict exists $ctx spec]} {
@@ -4862,8 +4870,11 @@ proc hir::types::LoopResult {hir ctx e result clauses} {
 # (recorded on E as structInferProblem, diagnosed by hir::imprint::verify):
 # the type is then "" (the construction is poison), and the application
 # must be written.
-proc hir::types::InferApplication {hirVar e id fieldTypes} {
+proc hir::types::InferApplication {hirVar e id fieldTypes {ctxVar ""}} {
     upvar 1 $hirVar hir
+    if {$ctxVar ne ""} {
+        upvar 1 $ctxVar ctx
+    }
     set binding [dict create]
     set problem ""
     set index 0
@@ -4879,6 +4890,19 @@ proc hir::types::InferApplication {hirVar e id fieldTypes} {
             set problem [format {the construction %s {...} cannot establish its type slots from field "%s": %s} \
                 [hir::structs::display $id] $name [regsub {argument ([0-9]+)} $problem {field \1}]]
             break
+        }
+    }
+    if {$problem ne "" && $ctxVar ne "" && [dict exists $ctx applied]} {
+        # Fields whose values the type bound cut establish the slots from
+        # what they hold (hir/applied.tcl): a variable read out of a cut
+        # argument is cut one application earlier than the same type read
+        # from a value of its own, which is no conflict of the program's.
+        set exact [hir::applied::TypedBinding $hir $ctx $e $id]
+        if {[lindex $exact 0] eq "ok"} {
+            set binding [lindex $exact 1]
+            set problem ""
+        } elseif {[lindex $exact 0] eq "conflict"} {
+            set problem [lindex $exact 1]
         }
     }
     set slots [hir::structs::slots $id]
@@ -4950,12 +4974,18 @@ proc hir::types::Struct {hirVar ctxVar e} {
             if {[dict exists $node structArgs]} {
                 set type [MakeApplied $id [dict get $node structArgs]]
             } else {
-                set type [InferApplication hir $e $id $fieldTypes]
+                set type [InferApplication hir $e $id $fieldTypes ctx]
                 if {$type eq ""} {
                     return [Poison hir $e]
                 }
             }
             set issue [hir::structs::ApplicationIssue $type]
+            if {[lindex $issue 0] eq "TRAIT-NOT-SATISFIED" && [dict exists $ctx applied]
+                    && [hir::applied::Cut $type]} {
+                # A constrained slot's argument the type bound cut: judged on
+                # what the field values hold (hir/applied.tcl).
+                set issue [hir::applied::TypedIssue $hir $ctx $e $type]
+            }
             if {$issue ne ""} {
                 lassign $issue kind problem
                 if {[dict getdef $hir exprs $e structApplicationProblem ""] ne $problem} {
@@ -4968,7 +4998,16 @@ proc hir::types::Struct {hirVar ctxVar e} {
                 dict unset hir exprs $e structApplicationProblem
                 dict unset hir exprs $e structApplicationKind
             }
+            # (Where the type bound cut the application, its evidence --
+            # what the field values or the written application establish --
+            # for a projection of it: hir/applied.tcl.)
+            hir::applied::TypedConstruction hir ctx $e $type
             return $type
+        }
+        if {[dict exists $ctx applied]} {
+            # (A field holding the evidence of an application the type bound
+            # cut, read by a projection: hir/applied.tcl.)
+            hir::applied::TypedNamed hir ctx $e $node
         }
         return [list nstruct $id]
     }
@@ -5033,6 +5072,16 @@ proc hir::types::Project {hirVar ctxVar e} {
     }
     if {[IsStructLike $receiver]} {
         set t [StructField $receiver $name]
+        if {$t ne "" && [dict exists $ctx applied] && (![IsAppliedStruct $receiver] || [hir::applied::Cut $receiver])} {
+            # A field of an application the type bound cut: the type of the
+            # field value the program constructed, where it has its evidence
+            # (APPLIED-TYPE-BOUND-PRECISION-MILESTONE-1.md), never the cut
+            # argument, which is cut one application earlier than that value.
+            set exact [hir::applied::TypedProjection hir ctx $e [dict get $node receiver] $name]
+            if {$exact ne ""} {
+                return $exact
+            }
+        }
         if {$t ne ""} {
             # A field of an exact copy of a layout -- what std::binary::parse or
             # std::binary::load made, or a field of one (hir::completions::
@@ -5639,7 +5688,7 @@ proc hir::types::Call {hirVar ctxVar e} {
                     # this call's concrete argument types. The call is
                     # typed with what that analysis proves; the callee's own
                     # contract and generic result are untouched.
-                    set result [hir::semantic::Call $hir $ctx $e $block $argTypes $result]
+                    set result [hir::semantic::Call hir $ctx $e $block $argTypes $result]
                     if {$result eq "never" && [hir::semantic::PoisonedCall $ctx $e]} {
                         # The instance's every normal completion is poison.
                         set dead 1

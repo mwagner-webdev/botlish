@@ -231,20 +231,83 @@ type GenericEntry = unsafe extern "C" fn(*mut Vm, Value, *const Value) -> Value;
 /// into the host's frames (whose frame pointers are not Botlish's to read).
 /// Never inlined, so its frame record exists and lies above every Botlish
 /// frame the call makes.
+///
+/// The outermost such call on the thread -- of this library: each library
+/// has its own runtime copy, and its own count -- leaves the thread's own
+/// state as the host gave it (`coroutine::library_call_ended`: on Windows a
+/// fiber conversion the call's coroutines needed is undone,
+/// WINDOWS-X86-64-MILESTONE-8.md).
 #[inline(never)]
 fn enter(vm: &mut Vm, f: impl FnOnce(&mut Vm) -> Value) -> Value {
     let outer = vm.stack_ceiling;
     let outer_limit = vm.stack_limit;
+    let outer_entry = vm.entry_stack;
     let frame = super::framewalk::frame_record();
     vm.stack_ceiling = frame;
     // The call's own stack bounds its recursion: the thread's, or none on a
-    // stack this instance did not make (Vm::stack_limit_at).
+    // stack this instance did not make (Vm::stack_limit_at), which is then
+    // the stack its collections walk (Vm::entry_stack).
     vm.stack_limit = vm.stack_limit_at(frame);
+    vm.entry_stack = vm.entry_stack_at(frame);
+    let depth = CallDepth::enter();
     let result = f(vm);
     vm.stack_ceiling = outer;
     vm.stack_limit = outer_limit;
+    vm.entry_stack = outer_entry;
+    drop(depth);
     // Keeps this frame from becoming a tail call of F.
     std::hint::black_box(result)
+}
+
+/// One call of this library in progress on this thread (`CALL_DEPTH`):
+/// counted when made, uncounted when dropped -- however the call ends, a
+/// panic its boundary code catches (`guarded`) included -- and the end of
+/// the outermost one leaves the thread's own state as the host gave it.
+struct CallDepth;
+
+impl CallDepth {
+    fn enter() -> CallDepth {
+        CALL_DEPTH.with(|d| d.set(d.get() + 1));
+        CallDepth
+    }
+}
+
+impl Drop for CallDepth {
+    fn drop(&mut self) {
+        let outermost = CALL_DEPTH.with(|d| {
+            d.set(d.get().saturating_sub(1));
+            d.get() == 0
+        });
+        if outermost {
+            super::coroutine::library_call_ended();
+        }
+    }
+}
+
+thread_local! {
+    /// The calls of this library in progress on this thread (`enter`): a
+    /// call of another instance of it may run inside one, through C.
+    static CALL_DEPTH: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// The live instances of this library this thread made (`create`,
+    /// `destroy`): when the last one goes, the thread keeps no coroutine
+    /// stack of the library's (`coroutine::release_pool`), so that a host
+    /// which destroyed every instance may unload the library with nothing of
+    /// it left on any thread (WINDOWS-X86-64-MILESTONE-8.md, "Unloading").
+    static LIVE_INSTANCES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// One instance fewer on this thread (or a failed creation): with none
+/// left, the thread's pooled coroutine stacks are freed.
+fn instance_gone(destroyed: bool) {
+    let left = LIVE_INSTANCES.with(|n| {
+        if destroyed {
+            n.set(n.get().saturating_sub(1));
+        }
+        n.get()
+    });
+    if left == 0 {
+        super::coroutine::release_pool();
+    }
 }
 
 /// The error of the failed Botlish run on VM, which it then clears.
@@ -433,7 +496,12 @@ pub unsafe extern "C" fn botlish_library_create(program: *const LinkedProgram, i
             let value = run(&mut made, |vm| entry(vm));
             if value == NO_VALUE { Err(botlish_error(&mut made.vm)) } else { Ok(()) }
         };
-        initialized?;
+        if let Err(e) = initialized {
+            drop(made);
+            instance_gone(false);
+            return Err(e);
+        }
+        LIVE_INSTANCES.with(|n| n.set(n.get() + 1));
         let handle = Box::into_raw(Box::new(0u64)) as usize;
         let raw = Box::into_raw(Box::new(made));
         lock(&INSTANCES).insert(handle, Entry { instance: raw, owner: std::thread::current().id(), busy: false });
@@ -463,6 +531,7 @@ pub extern "C" fn botlish_library_destroy(_program: *const LinkedProgram, instan
         };
         // SAFETY: removed from the registry above, so this is its one owner.
         drop(unsafe { Box::from_raw(raw) });
+        instance_gone(true);
         Ok(())
     })
 }
@@ -727,6 +796,15 @@ pub const FORWARDERS: &[(&str, &str, usize, &str, bool)] = &[
 
 /// The runtime function every export's trampoline calls.
 pub const CALL: &str = "botlish_library_call";
+
+/// Library NAME's public C names, in the order native::library's
+/// `PublicNames` lists them: the runtime API's forwarders (`NAME_SUFFIX`,
+/// FORWARDERS' order), then every export's symbol (EXPORTS' order) -- what a
+/// Windows DLL exports, by name and nothing else
+/// (codegen::aot::link_windows_library).
+pub fn public_names(name: &str, exports: &[ExportDecl]) -> Vec<String> {
+    FORWARDERS.iter().map(|f| format!("{name}_{}", f.0)).chain(exports.iter().map(|e| e.symbol.clone())).collect()
+}
 
 /// The public names a library reserves for its runtime API (`NAME_SUFFIX`):
 /// an export may not take one.

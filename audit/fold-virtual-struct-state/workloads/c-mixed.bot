@@ -1,0 +1,34 @@
+# c-mixed.bot -- FOLD-VIRTUAL-STRUCT-STATE-CENSUS-1.md, Probe C: a struct
+# holding an immutable List that grows (a plan candidate if it were a
+# carrier) and a MutableVector that is pushed (a consumed header), both
+# changed in every iteration, completed by a new literal.
+# tools/measure.tcl rewrites `n = ...`.
+#
+# expect: [1024, 1024, 1572352, 523776]
+
+import std::list
+import std::mutable_vector
+
+struct Acc:
+    log: List[int]
+    items: MutableVector[int]
+
+fn ints() -> MutableVector[int]:
+    std::mutable_vector::from_list([])
+
+fn build(n: int) -> Acc:
+    fold i from 0 to n with intermediate a Acc {log: [], items: ints()}:
+        a.items.push(i)
+        Acc {log: a.log.append(i * 3 + 1), items: a.items}
+
+fn total(xs: List[int]) -> int:
+    fold x in xs with intermediate s 0:
+        s + x
+
+fn vtotal(v: MutableVector[int]) -> int:
+    fold i from 0 to v.length() with intermediate s 0:
+        s + v.at(i)
+
+n = 1024
+r = build(n)
+[r.log.length(), r.items.length(), total(r.log), vtotal(r.items)]
