@@ -987,12 +987,34 @@ react-native 2048 dispatched; the rest by the push):
 | raven clean room | 43103680865 | failure: building its author image, snapshot.ubuntu.com answered 502 Bad Gateway to apt (infrastructure) |
 | tests (linux arm64), tests (windows x86-64), react-native 2048 | 43103703421, 43103713265, 43103766038 | superseded by the merged tip's runs before they finished |
 
-The merged tip `c0985c69`: tests, tests (linux arm64), tests (macos arm64),
-tests (windows x86-64), c-bindgen and react-native 2048 dispatched, with the
-push's own runs: **pending** at the time of writing.
+The merged tip `c0985c69` (the four test workflows, c-bindgen and
+react-native 2048 dispatched; the rest by the push):
 
-main's latest runs, at `73c32da8` (the Windows DLL merge): queued for more
-than an hour at the time of writing, **pending**.
+| Workflow | Run | Result |
+|---|---|---|
+| c-bindgen | 43111921640 | success |
+| react-native 2048 | 43111925541 | success: `build.sh` from checkout to APK, the acceptance on both emulator images |
+| tests | 43111904452 | failure: the canary's tests all passed (348: 281 passed, 67 skipped, 0 failed), but "Every mutant applies" found c-bindgen's `target-preprocessing-ignored` displaced by `c0985c69` (fixed in `943b75c0`, above); the expensive jobs then never started |
+| tests (linux arm64) | 43111909118 | cancelled by the push of `943b75c0` after its canary, the native Rust unit tests (also under GC stress) and all four golden shards had passed; its seven other jobs were still running |
+| tests (macos arm64), tests (windows x86-64) | 43111913477, 43111917452 | queued for runners until the same push cancelled them |
+| raven clean room, package reproducibility, windows library probe | 43111894335, 43111894468, 43111894458 | success |
+| icy-tower (windows x86-64), icy-tower (macos arm64) | 43111894344, 43111894281 | success |
+| ci tools | 43111894247 | failure: recomputing the canary's records, the GitHub API answered HTTP 502 (infrastructure); its tests, the release gate, pruning and deferral passed |
+
+The tip `943b75c0` (the mutant's text and this report beside `c0985c69`'s
+code): the four test workflows dispatched, with the push's own runs:
+**pending** at the time of writing.
+
+main has since moved on to `f49fd76e`, through
+EMISSION-BINDING-PROVENANCE-CORRECTNESS-MILESTONE-1.md (`cdb751b0`; the
+emission checker, its tests and audits, and other sections of AGENTS.md
+and docs/INDEX.md): no file this milestone changes besides those two, and it
+merges into the branch without a conflict (`git merge-tree`). Its runs at
+`cdb751b0`: c-bindgen, single executable, bench, icy-tower and both icy-tower
+ports succeeded; tests, tests (linux arm64), tests (macos arm64) and tests
+(windows x86-64) were queued and static-decisions was running at the time of
+writing: **pending**. Its runs at `73c32da8` were superseded by those before
+they ran.
 
 ## 22. Performance and footprint
 
