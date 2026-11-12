@@ -1006,27 +1006,30 @@ react-native 2048 dispatched; the rest by the push):
 | ci tools | 43111894247 | failure: recomputing the canary's records, the GitHub API answered HTTP 502 (infrastructure); its tests, the release gate, pruning and deferral passed |
 
 The tip `943b75c0` (the mutant's text and this report beside `c0985c69`'s
-code), the four test workflows dispatched; read at 02:15 UTC, two hours
-after dispatch, with the runner pool saturated (main's own runs queued
-too). No job had failed; every unfinished one is **pending**:
+code), the four test workflows dispatched; read at 04:50 UTC, four and a
+half hours after dispatch, with the runner pool saturated. No job had
+failed; every unfinished one is **pending**:
 
-| Workflow | Run | Finished, all successful | Still running or queued |
+| Workflow | Run | Finished, all successful | Running or queued (**pending**) |
 |---|---|---|---|
-| tests | 43125443568 | canary (every mutant applies, warning gate, the changed files), stub-linked executables | interp, compile; queued: system-linked executables, the four golden shards, the Rust unit tests, cranelift and cranelift-generic coverage, the method-call decision's oracle |
-| tests (linux arm64) | 43125447186 | canary | interp, GC stress (interp), system-linked executables (their tests passed; the GC-stress step running); queued: compile, GC stress (compile), the four golden shards, the Rust unit tests, both coverage jobs |
-| tests (macos arm64) | 43125451321 | the smoke job (Rust unit tests, native stack, status, smoke tier, canary, executables) and its Linux control; acceptance shards 1 and 4 of 6 | queued: acceptance shards 2, 3, 5, 6, the system linker, Botlish.app |
-| tests (windows x86-64) | 43125455003 | canary; root plans (native frames and the fallback) | the smoke job: its Rust unit tests, stack guard, C ABI facts, status, objects and executables, GC workloads, unwind checks, Windows I/O and dumpbin steps passed; the smoke tier and the Windows-relevant files, then the native libraries (DLL, MSVC hosts), still to come |
+| tests | 43125443568 | canary (every mutant applies, warning gate, the changed files); the Tcl suite on interp and on compile; stub-linked executables; system-linked executables (also under GC stress); golden suites shard 1 of 4 | cranelift coverage running; queued: golden shards 2-4, the Rust unit tests, cranelift-generic coverage, the method-call decision's oracle |
+| tests (linux arm64) | 43125447186 | canary; the Tcl suite on interp, also under GC stress; system-linked executables (also under GC stress); all four golden shards | cranelift-generic coverage running; queued: compile, GC stress (compile), the Rust unit tests, cranelift coverage |
+| tests (macos arm64) | 43125451321 | the smoke job and its Linux control; Botlish.app (its smoke, FFI smoke, acceptance, comparison and ad hoc release stages); the system linker (also under GC stress); acceptance shards 1, 2, 4 and 6 of 6 | acceptance shard 3 running; queued: shard 5, main-thread startup, static SDL3 through Botlish.app, Botlish.app without developer tools |
+| tests (windows x86-64) | 43125455003 | canary; root plans (native frames and the fallback); the smoke job, its native libraries (DLL, MSVC hosts) and GC-stress steps included; the system linker; acceptance shards 1-3 of 4 | acceptance shard 4 running |
+
+Skipped by design on a branch: tests' GC-stress job (pushes to main), the
+Tier C and Windows full tiers (`[ci-full]`), Botlish.app's mutants
+(`[ci-app-mutants]`).
 
 main has since moved on to `f49fd76e`, through
 EMISSION-BINDING-PROVENANCE-CORRECTNESS-MILESTONE-1.md (`cdb751b0`; the
 emission checker, its tests and audits, and other sections of AGENTS.md
 and docs/INDEX.md): no file this milestone changes besides those two, and it
 merges into the branch without a conflict (`git merge-tree`). Its runs at
-`cdb751b0`: c-bindgen, single executable, bench, icy-tower, both icy-tower
-ports and static-decisions (the batched against the sequential scheduler)
-succeeded; tests, tests (linux arm64), tests (macos arm64) and tests
-(windows x86-64) were still queued at 02:15 UTC, as were its runs at
-`73c32da8`: **pending**.
+`cdb751b0`: tests (linux arm64), tests (macos arm64), tests (windows
+x86-64), static-decisions (the batched against the sequential scheduler),
+c-bindgen, single executable, bench, icy-tower and both icy-tower ports
+succeeded; tests was still running at 04:50 UTC: **pending**.
 
 ## 22. Performance and footprint
 
