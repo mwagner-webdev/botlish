@@ -948,7 +948,7 @@ skipped there; with the NDK and the system images, the row below).
 | `tests/application-library.test` | 18 of 18 |
 | `tests/android-target.test` (ANDROID_NDK_ROOT, BOTLISH_ANDROID_ROOTS) | 27 of 27 |
 | `tests/native-library.test` | 30 passed, 12 skipped (Windows' and macOS's) |
-| `tests/c-bindgen.test` (with the NDK; before the merge, which changed no generator file) | 60 passed, 35 skipped (sources and toolchains not here) |
+| `tests/c-bindgen.test` (with the NDK, after `c0985c69`) | 63 passed, 32 skipped (sources and toolchains not here) |
 | `tests/external-tools.test` | 49 of 49 |
 | `tests/coroutines.test` | 81 of 81 |
 | `tests/main-cli.test` | 72 of 72 |
@@ -956,7 +956,14 @@ skipped there; with the NDK and the system images, the row below).
 | `tests/threads.test` (before the merge) | 21 of 21 |
 | `tools/compilerpedia.tcl check` | 1298 topics, 776 examples, 0 problems |
 | `tools/mutant-catalogs.tcl` | 107 catalogs, 3651 mutants, 0 problems |
-| `audit/host-startable-library/tools/mutate.tcl` | 38 of 38 killed before the merge (section 20); the run on the merged tip is pending |
+| `audit/host-startable-library/tools/mutate.tcl` | 38 of 38 killed, before the merge (section 20) and on the merged tip: the same log, line for line |
+| `audit/c-bindgen/tools/mutate.tcl -only target-preprocessing-ignored` | killed by 9 tests of behavior (next paragraph) |
+
+`c0985c69` moved the generator's Android sysroot check between the two
+lines c-bindgen's catalog mutant `target-preprocessing-ignored` replaces;
+it no longer applied (tests.yml's canary, "Every mutant applies", run
+43111904452) and now holds the check, unchanged, still a mutant of the same
+rule (the host's toolchain configuration for every target).
 
 android-target.test runs its Android processes from its temporary
 directory: API 21's linker refuses a `dlopen` path of 128 bytes or more
