@@ -1006,16 +1006,16 @@ react-native 2048 dispatched; the rest by the push):
 | ci tools | 43111894247 | failure: recomputing the canary's records, the GitHub API answered HTTP 502 (infrastructure); its tests, the release gate, pruning and deferral passed |
 
 The tip `943b75c0` (the mutant's text and this report beside `c0985c69`'s
-code), the four test workflows dispatched; read at 07:23 UTC, seven hours
-after dispatch, with the runner pool saturated. No job had failed; every
-unfinished one is **pending**:
+code), the four test workflows dispatched: **every one succeeded, every job
+it ran green** (read at 10:25 UTC; the runner pool kept them queued for
+hours, the last finished at 10:09):
 
 | Workflow | Run | Result |
 |---|---|---|
-| tests (windows x86-64) | 43125455003 | **success, every job**: canary; root plans (native frames and the fallback); the smoke job, its native libraries (DLL, MSVC hosts) and GC-stress steps included; the system linker; acceptance shards 1-4 |
-| tests (macos arm64) | 43125451321 | successful: the smoke job and its Linux control; Botlish.app (smoke, FFI smoke, acceptance, comparison, ad hoc release stages); Botlish.app without developer tools; static SDL3 through Botlish.app; the system linker (also under GC stress); acceptance shards 1-6. Queued: main-thread startup (**pending**) |
-| tests (linux arm64) | 43125447186 | successful: canary; the Tcl suite on interp, also under GC stress; system-linked executables (also under GC stress); golden shards 1-4. Running: the Tcl suite on compile, also under GC stress; cranelift and cranelift-generic coverage. Queued: the Rust unit tests (**pending**) |
-| tests | 43125443568 | successful: canary (every mutant applies, warning gate, the changed files); the Tcl suite on interp and on compile; stub-linked and system-linked executables (the latter also under GC stress); golden shards 1-2; cranelift coverage. Queued: golden shards 3-4, the Rust unit tests, cranelift-generic coverage, the method-call decision's oracle (**pending**) |
+| tests | 43125443568 | **success**: canary (every mutant applies, warning gate, the changed files); the Tcl suite on interp and on compile; stub-linked and system-linked executables (the latter also under GC stress); the four golden shards; the native Rust unit tests; cranelift and cranelift-generic coverage; the method-call decision's oracle and reference audit |
+| tests (linux arm64) | 43125447186 | **success**: canary; the Tcl suite on interp and on compile, each also under GC stress; system-linked executables (also under GC stress); the four golden shards; the native Rust unit tests; cranelift and cranelift-generic coverage |
+| tests (macos arm64) | 43125451321 | **success**: the smoke job and its Linux control; Botlish.app (smoke, FFI smoke, acceptance, comparison, ad hoc release stages); Botlish.app without developer tools; static SDL3 through Botlish.app; main-thread startup; the system linker (also under GC stress); acceptance shards 1-6 |
+| tests (windows x86-64) | 43125455003 | **success**: canary; root plans (native frames and the fallback); the smoke job, its native libraries (DLL, MSVC hosts) and GC-stress steps included; the system linker; acceptance shards 1-4 |
 
 Skipped by design on a branch: tests' GC-stress job (pushes to main), the
 Tier C and Windows full tiers (`[ci-full]`), Botlish.app's mutants
