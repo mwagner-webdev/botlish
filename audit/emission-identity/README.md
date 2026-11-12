@@ -28,19 +28,26 @@ audit/emission-claims/tools/mutants.txt.
   with a fresh memo, with it off and after an edited version of itself
   (the memo kept, both directions), every emitter of both versions run for
   every argument tuple. `-root DIR` runs it against another checkout.
+* `tools/bindings.tcl` -- memo validity when what a claimed function reads
+  through a binding changes between two compilations of one process (a
+  captured local or parameter's type, a module binding, a callee, a
+  function a binding holds): twelve pairs, the second compiled after the
+  first with the memo kept and fresh (the report's section 22.4; seven of
+  them are tests/emission-claims.test's `ec-memo-bindings`).
 * `tools/bench.tcl` -- the checker's costs on the JSON and CSV probes
   (fresh processes), memo reuse on a second compilation, and the cost of
   the ambiguous-name fallback. `-root DIR` measures another checkout.
 * `results/` -- the committed runs: `repro-before.md` and
   `repro-after.md` (the tree before the milestone, then with it),
-  `structure.md` (this checkout), `structure-before.md` (the tree before
-  the milestone: what the audit finds there), `structure-prototype.md`
-  (the census's prototype corrections 21.1 and 21.2 alone), `bench.md`
-  and `bench-before.md`.
+  `structure.md` and `bindings.md` (this checkout), `structure-before.md`
+  (the tree before the milestone: what the audit finds there),
+  `structure-prototype.md` (the census's prototype corrections 21.1 and
+  21.2 alone), `bench.md` and `bench-before.md`.
 
 ```sh
 LANG=C.utf8 LC_ALL=C.utf8 tclsh9.0 audit/emission-identity/tools/repro.tcl -out audit/emission-identity/results/repro-after.md
 LANG=C.utf8 LC_ALL=C.utf8 tclsh9.0 audit/emission-identity/tools/structure.tcl -seeds 1-40 -out audit/emission-identity/results/structure.md
+LANG=C.utf8 LC_ALL=C.utf8 tclsh9.0 audit/emission-identity/tools/bindings.tcl -out audit/emission-identity/results/bindings.md
 LANG=C.utf8 LC_ALL=C.utf8 tclsh9.0 audit/emission-identity/tools/bench.tcl -out audit/emission-identity/results/bench.md
 ```
 

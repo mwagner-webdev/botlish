@@ -535,6 +535,15 @@ proc hir::emission::NativeMayFail {name} {
     set out [list $kind [dict get $node reachable]]
 >>>>
 
+@@ fingerprint-outer-binding-name-only a function's fingerprint takes a binding it reads from outside (a captured local or parameter, a module binding) by its name alone, without its exact value and type facts: a certificate memoized when a captured k was 49 is reused once k is 65
+%% match ec-fingerprint ec-memo-*
+## hir/emission.tcl
+<<<<
+    return [list outer [dict get $binding name] $exact $fact]
+====
+    return [list outer [dict get $binding name]]
+>>>>
+
 @@ statement-without-exits a certificate's statement digest without its exits
 %% match ec-statement-digest
 ## hir/emission.tcl
