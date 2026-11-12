@@ -894,9 +894,11 @@ fuzz`, all 29 mutants of the brief's table and the 2 library mutants,
   acceptance tier, c-callbacks.test and native-library.test among them.
 * Windows full shard (the tier items): the fuzzer passed again on every
   seed; the mutant run's first mutant, entry-system-v-convention, was
-  killed (c-callbacks.test did not complete: a callback entered with
-  System V's convention clobbers C's RDI and RSI, which Win64 keeps, and
-  the test hung), but the harness then ended the timed-out test with
+  killed (c-callbacks.test did not complete within the harness's limit:
+  its first failure was cb-nested-repeated, then a test hung; why was not
+  examined -- an entry point with System V's convention reads its
+  arguments from other registers and may change RDI, RSI and XMM6-XMM15,
+  which Win64 callers keep), but the harness then ended the timed-out test with
   `kill -9`, which Windows has not: the hung executable kept the private
   tree's botlish-native.exe locked, every later mutant's build failed
   (reported NOT-BUILT, never killed) and the job's 240 minutes ran out.
