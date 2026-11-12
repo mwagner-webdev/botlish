@@ -188,9 +188,12 @@ involved has truthful unwind information -- the shim then needs it, which
 this milestone gives it anyway (section 9) -- but it costs a context
 capture, a function-table search and a virtual unwind on every call of
 every C function that may call back, whether it calls back or not:
-measured on Windows at UNWINDER-COST per capture (bench/c-callbacks.tcl's
-last line, run RUN-BENCH), against TRANSITION-COST for the whole transition
-today. It also stores a 1232-byte CONTEXT (or its three words) per open
+measured on Windows at 88 ns per capture (bench/c-callbacks.tcl's last
+line: 88.1 ns, and 85.6 ns in its GC-stress run; run 43226964148), against
+about 11 ns for the whole transition today (its `transition` row: 11.4 ns
+on cranelift, 11.0 on cranelift-generic) -- some eight times the cost of
+every call of a C function that may call back, whether it calls back or
+not. It also stores a 1232-byte CONTEXT (or its three words) per open
 transition. Rejected for its cost; its correctness argument is kept as a
 check (`check_transition`, below).
 
@@ -238,7 +241,7 @@ the whole foreign call; read only while a callback of that call runs.
 | nested transitions | one capture each | one record each | one record each |
 | coroutine stacks | yes | yes | yes |
 | walk overhead | none extra | none extra | none extra |
-| per-transition cost | UNWINDER-COST | one argument | two instructions |
+| per-transition cost | 88 ns more (measured) | one argument | two instructions |
 | JIT, AOT, DLL | yes | needs a global flag | yes |
 | other hosts | Windows only | all, changed codegen | all, unchanged codegen |
 
@@ -692,7 +695,8 @@ mode: 0 disagreements.
 ### The mutants
 
 The brief's 27 mutations, each a mutant of `audit/c-callbacks/tools/
-mutants.txt` (14 of them new and `%% windows-x86_64`, four new and run on
+mutants.txt` (14 of them new for Windows -- 12 run on Windows only, the
+two unwind mutants on Windows and Linux x86-64 --, four new and run on
 every host, the rest the catalog's since C-CALLBACK-MILESTONE-1.md), with
 the test of its contract that kills it on Windows. The GC mutants
 (2-8, 13-16) are killed by a value collected while still in use -- a
@@ -701,36 +705,61 @@ check of the record, never by an assertion that callbacks are enabled. A
 mutant that does not build is reported NOT-BUILT by the harness, never
 killed.
 
-| # | the brief's mutation | catalog mutant (audit/c-callbacks/tools/mutants.txt) | Windows verdict | killed by |
+| # | the brief's mutation | catalog mutant | on Windows (run 43226964148) | what failed there |
 |---|---|---|---|---|
-| 1 | restore Windows' refusal | windows-callbacks-refused | W1 | every callback test (NATIVE CALLBACK UNSUPPORTED) |
-| 2 | ignore callback segments in the walk | windows-walk-ignores-segments | W2 | cb-nested-gc, cb-nested-loop: a held value collected |
-| 3 | resume from the wrong transition | windows-jump-to-innermost-transition | W3 | cb-nested-gc: the outer callback's walk resumes in the middle frames |
-| 4 | the outermost transition instead of the innermost | windows-jump-to-outermost-transition; actor-outermost-transition | W4 | cb-nested-gc, cb-nested-loop: the middle callback's values collected |
-| 5 | a temporary helper frame for the continuation | transition-records-helper-frame | W5 | NATIVE CALLBACK BUG at the first collection in a callback |
-| 6 | an incorrect RSP | windows-transition-records-stack-pointer | W6 | the jump's check (the record's return address is no Botlish code) |
-| 7 | an incorrect RIP | windows-continuation-wrong-rip | W7 | no safepoint at the continuation: the waiting frame's roots unvisited |
-| 8 | incorrect stack-map offsets after the jump | windows-continuation-wrong-rsp | W8 | the waiting frame's slots read a word off: values collected |
-| 9 | a transition from another stack | stack-unchecked | W9 | cb-refused-stack (a fiber of the fixture's) |
-| 10 | a callback on another thread | thread-unchecked | W10 | cb-refused-thread (CreateThread) |
-| 11 | activation left set during the callback | activation-kept-during-callback | W11 | cb-refused-inside-callback |
-| 12 | activation not restored after return | activation-lost-after-callback | W12 | cb-decisions, cb-qsort, cb-scalars, ... |
-| 13 | a callback segment left after return | segment-not-popped | W13 | the next collection's jump into frames gone |
-| 14 | the foreign-call safepoint removed | foreign-call-not-safepoint | W14 | cb-nested-gc: the waiting frame's values in no stack map |
-| 15 | the waiting caller's roots omitted | windows-waiting-caller-skipped | W15 | cb-nested-gc, cb-exposure-survives |
-| 16 | a middle callback's roots omitted | windows-middle-callback-roots-skipped | W16 | cb-nested-gc, cb-nested-loop: level1's held String |
-| 17 | no unwind information for the entry point | windows-entry-point-unwind-dropped | W17 | cb-windows-unwind-check, cb-windows-unwind-through |
-| 18 | no unwind information for the shim | windows-shim-unwind-dropped | W18 | cb-windows-unwind-check |
-| 19 | JIT unwind information not registered | windows-jit-callback-code-unregistered | W19 | the Rust test jit_callback_code_is_in_the_function_table |
-| 20 | System V instead of Win64 for the entry | entry-system-v-convention | W20 | every callback test with an argument |
-| 21 | mixed arguments past the fourth misplaced | arguments-past-fourth-swapped | W21 | cb-abi-preserved, cb-mixed-abi, the fuzzer |
-| 22 | a nonvolatile XMM register clobbered | windows-xmm6-clobbered | W22 | cb-abi-preserved (the sentinel in XMM6) |
-| 23 | raw floating values converted | raw-float-argument-promoted; raw-result-through-double; raw-nan-canonicalized | W23 | cb-raw-floats, cb-abi-preserved |
-| 24 | a retained callback treated as active | activation-kept-after-call | W24 | cb-refused-retained |
-| 25 | a callback error unwinding into C | failure-panics-into-c | W25 | cb-failure-is-fatal, cb-executable-failure |
-| 26 | an invalid _Bool accepted | bool-argument-unchecked | W26 | cb-refused-arguments |
-| 27 | a callback entering the wrong DLL instance | library-wrong-instance | W27 | nl-callbacks (cbhost.dll's two instances) |
-MUTANTS-WINDOWS
+| 1 | restore Windows' refusal | windows-callbacks-refused | killed | 26 tests of c-callbacks.test |
+| 2 | ignore callback segments in the walk | windows-walk-ignores-segments | killed | cb-executable, cb-nested-gc, cb-nested-in-coroutine, cb-nested-loop, cb-windows-unwind-check |
+| 3 | resume from the wrong transition | windows-jump-to-innermost-transition | killed | 8: cb-executable, cb-nested-gc, cb-nested-in-coroutine, cb-nested-loop, cb-nested-repeated, cb-recursion, ... |
+| 4 | the outermost transition instead of the innermost | windows-jump-to-outermost-transition; actor-outermost-transition | both killed | 7 each: cb-executable, cb-nested-gc, cb-nested-in-coroutine, cb-nested-loop, cb-nested-repeated, cb-recursion, ... |
+| 5 | a temporary helper frame for the continuation | transition-records-helper-frame | killed | 14: cb-abi-preserved, cb-coroutines, cb-executable, cb-exposure-survives, cb-nested-gc, ... |
+| 6 | an incorrect RSP recorded | windows-transition-records-stack-pointer | killed | 15: cb-abi-preserved, cb-coroutines, cb-executable, cb-exposure-survives, cb-mixed-abi, ... |
+| 7 | an incorrect RIP | windows-continuation-wrong-rip | killed | cb-executable, cb-nested-gc, cb-nested-in-coroutine, cb-nested-loop, cb-nested-repeated, cb-windows-unwind-check |
+| 8 | incorrect stack-map offsets after the jump | windows-continuation-wrong-rsp | killed | 7: cb-executable, cb-exposure-survives, cb-mixed-abi, cb-nested-gc, cb-nested-loop, cb-recursion, ... |
+| 9 | a transition from another stack | stack-unchecked | killed | cb-refused-stack |
+| 10 | a callback on another thread | thread-unchecked | killed | cb-refused-inside-callback, cb-refused-retained, cb-refused-thread |
+| 11 | activation left set during the callback | activation-kept-during-callback | killed | cb-refused-inside-callback |
+| 12 | activation not restored after return | activation-lost-after-callback | killed | cb-decisions, cb-nested-repeated, cb-qsort, cb-raw-floats, cb-scalars, cb-win32-locales |
+| 13 | a callback segment left after return | segment-not-popped | killed | 20 tests |
+| 14 | the foreign-call safepoint removed | foreign-call-not-safepoint | killed | cb-executable, cb-nested-gc, cb-nested-in-coroutine, cb-nested-loop, cb-nested-repeated, cb-windows-unwind-check |
+| 15 | the waiting caller's roots omitted | windows-waiting-caller-skipped | killed | cb-executable, cb-nested-gc, cb-nested-in-coroutine, cb-nested-loop, cb-nested-repeated, cb-windows-unwind-check |
+| 16 | a middle callback's roots omitted | windows-middle-callback-roots-skipped | killed | 7: cb-executable, cb-nested-gc, cb-nested-in-coroutine, cb-nested-loop, cb-nested-repeated, cb-recursion, ... |
+| 17 | no unwind information for the entry point | windows-entry-point-unwind-dropped | WIN-ENTRY | (rewritten: below) |
+| 18 | no unwind information for the shim | windows-shim-unwind-dropped | WIN-SHIM | (rewritten: below) |
+| 19 | JIT unwind information not registered | windows-jit-callback-code-unregistered | killed | the Rust test jit_callback_code_is_in_the_function_table |
+| 20 | System V instead of Win64 for the entry | entry-system-v-convention | killed | c-callbacks.test did not complete (cb-nested-repeated failed, then a test hung) |
+| 21 | mixed arguments past the fourth misplaced | arguments-past-fourth-swapped | killed | cb-abi-preserved, cb-mixed-abi |
+| 22 | a nonvolatile XMM register clobbered | windows-xmm6-clobbered | WIN-XMM | (rewritten: below) |
+| 23 | raw floating values converted | raw-float-argument-promoted; raw-result-through-double; raw-nan-canonicalized | all killed | cb-abi-preserved, cb-mixed-abi, cb-raw-floats; cb-raw-floats; cb-abi-preserved, cb-mixed-abi, cb-raw-floats |
+| 24 | a retained callback treated as active | activation-kept-after-call | killed | cb-refused-retained |
+| 25 | a callback error unwinding into C | failure-panics-into-c | killed | 7: cb-executable-failure, cb-failure-is-fatal, cb-refused-arguments, ... |
+| 26 | an invalid _Bool accepted | bool-argument-unchecked | killed | cb-refused-arguments |
+| 27 | a callback entering the wrong DLL instance | library-wrong-instance | killed | cb-refused-retained, nl-callbacks (cbhost.dll's two instances) |
+| -- | (the defect of section 10) | running-stack-ignores-entry-stack | killed | nl-callbacks |
+
+Every GC mutant (2-8, 13-16) failed tests that check values held across
+the callbacks' collections -- cb-nested-gc, cb-nested-loop,
+cb-nested-in-coroutine, cb-exposure-survives -- and, for the ones that
+make the jump read a record that is not one (3, 5, 6), the walk's own
+check ended the run (NATIVE CALLBACK BUG); none was killed only by an
+assertion that callbacks are enabled. With `-first 1` a mutant's later
+detectors were not run once the test files had killed it.
+
+Three mutants were rewritten after that run. windows-xmm6-clobbered
+survived it because it was equivalent: it zeroed XMM6 inside `run`, which
+saves and restores XMM6 itself (its prologue's `movaps %xmm6, 544(%rbp)`
+and `.seh_savexmm %xmm6, 672`, read in the Windows assembly of the
+driver: the 16-word argument array is initialized with SSE stores), so
+the C caller never saw the change. It now zeroes XMM6 in
+`rt_callback_call` after `run` returns, a function that saves no XMM
+register (its assembly: no `.seh_savexmm`): the C caller finds the
+register changed. windows-entry-point-unwind-dropped and
+windows-shim-unwind-dropped read a field (`Defined::entry_point`) a
+later cleanup removed, so that run could not build them (NOT-BUILT, never
+counted); they now drop an entry point's or a shim's UNWIND_INFO where
+`codegen::callback` defines it, and run on Linux x86-64 too, where the
+cross-built COFF test kills both (real Linux). Their Windows run:
+WIN-RERUN.
+
 
 On Linux (real Linux, this container): the five new mutants that run on
 every host, all killed (arguments-past-fourth-swapped by cb-abi-preserved,
@@ -765,7 +794,61 @@ an export of a library whose callback C calls 100 times per call.
 
 ### Windows (real Windows)
 
-WINDOWS-BENCH
+Run 43226964148 (a `windows-2025` runner, at 9f5b1a2e), `cranelift`,
+N = 200,000, best of 5 (ns per call; allocations per call;
+`cranelift-generic` within a few percent of each):
+
+| scenario | ns/call | allocs | bytes | collections |
+|---|---:|---:|---:|---:|
+| c-plain (an ordinary C call, no callback) | 2.2 | 0 | 0 | 1 |
+| transition (may call back, does not) | 11.4 | 0 | 0 | 1 |
+| callback-int | 26.0 | 0 | 0 | 0 |
+| callback-decision (C acts on the answer) | 26.7 | 0 | 0 | 0 |
+| raw-float-in | 93.3 | 1 | 16 | 3 |
+| raw-double-in | 92.2 | 1 | 16 | 3 |
+| raw-float-trip | 90.8 | 1 | 16 | 3 |
+| raw-double-trip | 90.0 | 1 | 16 | 3 |
+| raw-inspect | 151.7 | 1.33 | 32 | 6 |
+| raw-admit | 165.9 | 2 | 32 | 6 |
+| nested-2 (two callback levels, one inner transition) | 63.3 | 0 | 0 | 0 |
+| allocating (a String per call) | 209.9 | 2 | 69.9 | 13 |
+| collecting (N/40 calls, 40 Strings each) | 9275 | 83 | 2900 | 16 |
+| in-coroutine (on a fiber, unfused) | 25.2 | 0 | 0 | 0 |
+
+* **A callback** costs about 26 ns over the C loop that makes it (entry,
+  activation, the Int's conversions, `run`'s checks), with no allocation:
+  a successful callback of scalars allocates nothing on Windows either; a
+  raw floating value allocates its one FloatObj, as on Linux.
+* **Opening and closing a transition** costs about 11 ns (the
+  loop-differential `transition` row; on Linux that row turned out to
+  follow the generated loop's layout more than the runtime, so read it as
+  an order of magnitude). Recording the continuation is the naked
+  trampoline's two instructions; the rejected alternative, Windows'
+  unwinder at every transition, measured 88 ns on its own.
+* **Nesting** is linear: two levels and an inner transition, 63 ns.
+* **Inside a coroutine** (the general runtime: a fiber of its own) a
+  callback costs what it costs on the thread's stack.
+* **Under GC stress** (a collection at every allocation; N = 20,000, best
+  of 3) a callback that allocates once costs about 1,050-1,070 ns against
+  91-93: a collection inside a callback, its walk across the transition
+  included, about 1 microsecond on this runner; `collecting`'s 83
+  collections per call about 1.7 microseconds each over a larger heap;
+  callbacks that allocate nothing are unchanged (27 ns).
+* **Virtual unwinds**: none for C. A collection's walk unwinds the
+  runtime's own frames with Windows' unwinder and jumps across every
+  transition: cb-windows-unwind-check's run under GC stress counted 218
+  walks unwinding 2,273 non-Botlish frames (about ten each, the
+  collector's and the runtime's) and 251 jumps (real Windows, run
+  43118788340's canary).
+* **In a DLL** (`bench/native-library.tcl`, the same run): an export whose
+  callback C calls 100 times costs 2,850 ns per call (3,036 under GC
+  stress), against 168 ns for an export that calls nothing back: about
+  27 ns per callback, as in an executable. The C reference library makes
+  the same 100 calls through a function pointer in 24 ns.
+
+These are a GitHub runner's numbers, not this container's: Windows' and
+Linux's tables below are of different machines and compare only within
+themselves.
 
 ### Linux, and the milestone's effect there (real Linux)
 
