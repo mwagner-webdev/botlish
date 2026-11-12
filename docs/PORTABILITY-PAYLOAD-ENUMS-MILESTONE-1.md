@@ -568,7 +568,24 @@ alone. Two values statically of one enum are compared, half the time,
 through its typed identity `id_E`, where a backend may decide the
 comparison by the static type.
 
-RESULTS-FUZZ
+**(observed)** `-seed` is the first program's number (the convention of
+the enum and error-payload fuzzers), so disjoint ranges were run: 200
+distinct programs, 0 disagreements --
+
+| programs | accepted | rejected as predicted | observations | disagreements |
+|---|---:|---:|---:|---:|
+| 101-140 | 29 | 11 | 344 | 0 |
+| 201-240 | 19 | 21 | 196 | 0 |
+| 301-340 | 27 | 13 | 316 | 0 |
+| 401-440 | 26 | 14 | 320 | 0 |
+| 501-540, `-gc-stress 1` | 24 | 16 | 307 | 0 |
+
+-- the rejections spread over every predicted code (AFFINE-EQUALITY-
+UNSUPPORTED, USE-AFTER-MOVE, DUPLICATE-FIELD, ENUM-PAYLOAD-REQUIRED,
+ENUM-PAYLOAD-UNEXPECTED, MISSING-FIELD, UNKNOWN-FIELD, UNKNOWN-ENUM-CASE,
+TYPE). Programs 1-43 (the first, overlapping run of `-seed 1` to `4`) also
+agreed. Every accepted program ran on all four backends; every rejection
+was the model's predicted code.
 
 ## 15. Mutation testing
 
