@@ -190,7 +190,16 @@ proc run {timeout args} {
     vwait ::runDone
     after cancel $timer
     if {$::runDone eq "timeout"} {
-        catch {exec kill -9 {*}[pid $pipe]}
+        # The whole process tree: on Windows a test file's hung executable
+        # would keep the copy's botlish-native.exe locked, and every later
+        # mutant's build would fail (taskkill; there is no kill).
+        foreach id [pid $pipe] {
+            if {$::tcl_platform(platform) eq "windows"} {
+                catch {exec taskkill /F /T /PID $id}
+            } else {
+                catch {exec kill -9 $id}
+            }
+        }
         catch {close $pipe}
         return [list timeout $::runOutput]
     }
@@ -331,7 +340,11 @@ try {
         }
     }
 } finally {
-    file delete -force $tree
+    # A file a killed process held may not go yet (Windows): never let the
+    # cleanup hide the verdicts.
+    if {[catch {file delete -force $tree} message]} {
+        puts "the private tree $tree was not removed: $message"
+    }
 }
 
 set survivors [lmap r $results {if {[lindex $r 2] ne "SURVIVED"} continue; lindex $r 0}]
