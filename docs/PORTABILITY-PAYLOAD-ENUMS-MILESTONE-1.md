@@ -799,11 +799,20 @@ This branch (`ccr-4f03745b-acaeyt`):
 | canaries of a branch push: tests (linux arm64), tests (macos arm64), tests (windows x86-64) | b7e6c35c | success |
 | icy-tower (windows x86-64), a branch push | b7e6c35c, ffb76147 | success |
 | tests.yml dispatched: canary (the mutant catalogs, the warning gate, the changed test files) | ffb76147 | success |
-| tests.yml dispatched: the Tcl suites, coverage, golden shards, executables, Rust tests | ffb76147 | pending (the runner pool was saturated; jobs queued) |
-| tests-arm64.yml, macos-arm64.yml, windows-x86_64.yml dispatched | ffb76147 | pending |
-| static-decisions.yml dispatched (batched against sequential over the golden suites) | 2207c8f6 | pending; later commits change no front-end code but a comment |
+| tests.yml dispatched: golden suites shard 2/4 | ffb76147 | success |
+| tests.yml dispatched: tests (compile), cranelift-generic coverage, the method-call decision's oracle and fuzzer (success) and reference audit | ffb76147 | running |
+| tests.yml dispatched: tests (interp), cranelift coverage, golden shards 1, 3, 4, Rust tests, stub- and system-linked executables | ffb76147 | queued (the runner pool was saturated) |
+| tests-arm64.yml dispatched: canary, golden shards 1, 3, 4, Rust tests (also under GC stress) | ffb76147 | success |
+| tests-arm64.yml dispatched: GC stress (interp, compile), cranelift coverage | ffb76147 | running |
+| tests-arm64.yml dispatched: tests (interp, compile), cranelift-generic coverage, golden shard 2, system-linked executables | ffb76147 | queued |
+| macos-arm64.yml dispatched: smoke (Tier A) and its Linux control, the system linker (also under GC stress), Botlish.app (smoke tests, acceptance, ad hoc release stages), acceptance shard 3/6 | ffb76147 | success |
+| macos-arm64.yml dispatched: acceptance shard 1/6 | ffb76147 | running |
+| macos-arm64.yml dispatched: acceptance shards 2, 4, 5, 6, static SDL3, main-thread startup, Botlish.app without developer tools | ffb76147 | queued |
+| windows-x86_64.yml dispatched: canary, smoke (Rust tests, stack guard, C ABI, executables, GC workloads, Windows I/O, the Windows-relevant test files, DLLs), root plans | ffb76147 | success |
+| windows-x86_64.yml dispatched: acceptance shards 1-4, system linker | ffb76147 | queued |
+| static-decisions.yml dispatched (batched against sequential over every golden suite, payload-enums.bot included: mutable-array.bot and four shards) | 2207c8f6 | success; later commits change no front-end code but a comment |
 
-Every later commit changes only tests, audit tooling and documents
+No job has failed. Every later commit changes only tests, audit tooling and documents
 (the comment in hir/mutvec.tcl aside); the dispatched runs test the
 branch's last code commit with every test.
 
