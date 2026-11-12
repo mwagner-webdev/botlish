@@ -90,7 +90,27 @@ What makes it sound, and what was changed for it:
   CROSSES_TRANSITIONS`; `cCallbacks` names windows-x86_64; the fallback root
   plan still refuses.
 
-RESULT-EVIDENCE
+The evidence, by kind (sections 16-18 have it in full):
+
+* **Real Windows** (`windows-2025` runners, the Windows workflow at
+  4499c79e and 9f5b1a2e): c-callbacks.test's 42 tests (the Windows-only
+  ones: the ml64 ABI caller with sentinels in every nonvolatile register,
+  Windows' unwinder through the callback path, EnumSystemLocalesEx, the
+  unwind check under GC stress), native-library.test's callback tests
+  through DLLs, the JIT's callback tests, native-status's `c-callback`
+  probe, the smoke job, the four acceptance shards, the system linker and
+  the root plans -- all passed; the fuzzer passed on every seed, under GC
+  stress too; 26 of the 29 c-callbacks mutants and both library mutants
+  were killed by tests of their contracts, the other three rewritten
+  (section 16): WIN-SUMMARY. The rejected alternative's cost was measured
+  there: 88 ns per transition.
+* **Real Linux and macOS**: the Linux x86-64, Linux arm64 and macOS arm64
+  workflows passed every job at 4499c79e; this container ran the callback
+  test files under GC stress, the mutants of the code the milestone
+  changed (17 of 17 killed), and the before-and-after costs.
+* **Cross-built**: the COFF object's `.pdata` for every shim and entry
+  point (a Rust test on any x86-64 host); the Windows driver checked and
+  its assembly read on Linux (`run`'s XMM6 save, section 16).
 
 ## 2. Starting state
 
@@ -771,7 +791,9 @@ mutants of the code this milestone changed -- activation-kept-after-call,
 activation-lost-after-callback, activation-kept-during-callback,
 thread-unchecked, actor-outermost-transition, stack-unchecked,
 walk-reads-c-frames, segment-not-popped, transition-not-popped,
-foreign-call-not-safepoint -- all killed. The other audits' mutants that
+foreign-call-not-safepoint -- all killed; and the two rewritten unwind
+mutants, killed by the cross-built COFF test
+(windows_objects_describe_every_shim_and_entry_point). The other audits' mutants that
 this milestone's edits touched were updated to apply again (the
 native-library catalog's public-unwind-dropped, the windows-unwind
 catalog's two walk-suspended mutants); `tools/mutant-catalogs.tcl`: 106
