@@ -889,6 +889,21 @@ fuzz`, all 29 mutants of the brief's table and the 2 library mutants,
   (c-callbacks.test among them), the native libraries' DLL hosts
   (native-library.test: nl-callbacks, nl-callbacks-two-libraries), the
   filesystem and the variadic C calls under GC stress.
+* Windows root plans (05:30-05:43), system linker (07:55-08:19) and the
+  four acceptance shards (06:56-09:32): passed -- every test file of the
+  acceptance tier, c-callbacks.test and native-library.test among them.
+* Windows full shard (the tier items): the fuzzer passed again on every
+  seed; the mutant run's first mutant, entry-system-v-convention, was
+  killed (c-callbacks.test did not complete: a callback entered with
+  System V's convention clobbers C's RDI and RSI, which Win64 keeps, and
+  the test hung), but the harness then ended the timed-out test with
+  `kill -9`, which Windows has not: the hung executable kept the private
+  tree's botlish-native.exe locked, every later mutant's build failed
+  (reported NOT-BUILT, never killed) and the job's 240 minutes ran out.
+  Fixed (taskkill /F /T, a ten-minute limit per test file in the tier
+  items).
+* Linux arm64: passed (run 43135870665, every job). macOS: passed (run
+  43135873858, every job).
 
 RUNS-FINAL
 
