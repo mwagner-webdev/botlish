@@ -55,6 +55,43 @@ No Wine and no WSL were used. Commits are on the branch
 19. Remaining limitations
 20. Files changed, and what to run
 
+## 1. Result
+
+**Done.** On Windows x86-64 with MSVC's toolchain, `callback c fn`
+executes synchronously: C compiled by cl (and hand-written ml64 assembly,
+and kernel32) calls a Botlish callback's pointer during a foreign call
+whose FnPtr parameter is noescape, and the callback runs in the waiting
+Botlish execution environment -- in standalone executables (the rustc and
+system linkers), in the native backends' linked runs (cranelift,
+cranelift-generic), in the JIT (Rust tests), and inside Botlish DLLs.
+Source semantics are unchanged: no language change, no new syntax, type,
+diagnostic, or contract; the same program compiles to the same HIR and NIR
+on every target.
+
+What makes it sound, and what was changed for it:
+
+* **The Windows walk crosses a foreign transition** (sections 3-7): from a
+  callback's entry frame it jumps to the transition shim's frame record and
+  resumes in the Botlish frame that called C at its call's safepoint --
+  never unwinding C, the entry point or the shim, never reading a C frame,
+  checking the record before using it.
+* **The transition is the shim's frame register**, handed on by a naked
+  two-instruction `rt_ffi_open` on every host (Linux and macOS read the same
+  value as before, from a different place).
+* **The C side of callbacks has Windows unwind information** (section 9):
+  every transition shim and callback entry point, in COFF objects,
+  executables, DLLs and the JIT's function table.
+* **Failures are coded on Windows** (section 14): a Windows `report_fatal`
+  gives the driver its result line, an executable its message and status 1.
+* **A defect on every host fixed** (section 10): a library's callback during
+  a call made on a host-made stack (a host's fiber, a `ucontext` stack) was
+  refused NATIVE CALLBACK STACK.
+* **The capability is the walk's**: `SUPPORTED = NATIVE_FRAME_ROOTS &&
+  CROSSES_TRANSITIONS`; `cCallbacks` names windows-x86_64; the fallback root
+  plan still refuses.
+
+RESULT-EVIDENCE
+
 ## 2. Starting state
 
 Before this milestone a Windows program with a callback compiled, linked
@@ -865,3 +902,83 @@ RUNS-FINAL
   allocated dynamically on `run`'s stack would break the match;
   BOTLISH_NATIVE_UNWIND_CHECK's `check_entry_frame` and every GC-stress
   callback test would catch it.
+
+
+## 20. Files changed, and what to run
+
+**The runtime.**
+
+* `native/src/runtime/callback.rs`: `SUPPORTED` is `NATIVE_FRAME_ROOTS &&
+  framewalk::CROSSES_TRANSITIONS`; `rt_ffi_open` is a naked trampoline on
+  x86-64 (System V, Win64) and AArch64 handing the shim's frame register to
+  `rt_ffi_open_at`, which runs the transition check under
+  BOTLISH_NATIVE_UNWIND_CHECK on Windows; `run` runs the entry-point check;
+  `Fatal::terminate` reports through `platform::report_fatal` on Windows
+  too; `entry_frame_function`; the module doc's stale `Vm::program_token`
+  claim replaced by what holds.
+* `native/src/runtime/framewalk.rs`: `CROSSES_TRANSITIONS`; the Windows
+  `walk`, `walk_from`, `walk_segmented`, `walk_from_segmented` with jumps;
+  `windows::walk_context`'s jump case, `jump`, `transition_failed`,
+  `check_entry_frame`, `check_transition`, `check_entry_point`, their
+  counters, `transition_counts`, the summary's extension.
+* `native/src/runtime/platform/windows.rs`, `platform/mod.rs`: Windows'
+  `report_fatal`.
+* `native/src/runtime/vm.rs`: `running_stack` prefers `entry_stack`;
+  `framemap()` (Windows).
+
+**Code generation.**
+
+* `native/src/codegen/callback.rs`: `Defined` (id, size, UNWIND_INFO) for
+  every shim and entry point, in `Symbols::callback_code`; the cross-built
+  `.pdata` test.
+* `native/src/codegen/clif.rs`: `Symbols::callback_code`.
+* `native/src/codegen/mod.rs`: `add_windows_unwind` writes them;
+  the JIT passes them to the function table.
+* `native/src/codegen/jitunwind.rs`: `define_unwind_data`, `register` take
+  them; the Windows JIT tests of callbacks (an assembly caller with no
+  function table entry, the function table's entries).
+
+**Capabilities and documentation of them.** `native/native.tcl`
+(`cCallbacks` names windows-x86_64), `tests/helpers.tcl`,
+`tests/platform/native-status.tcl` (the `c-callback` probe, every host's
+row), `AGENTS.md` ("C callbacks (callback c fn)"), Compilerpedia
+(`error.native-callback`, `concept.c-callbacks`, `backend.native-library`),
+`docs/C-CALLBACK-MILESTONE-1.md`, `docs/WINDOWS-X86-64-MILESTONE-3.md`,
+`docs/WINDOWS-X86-64-MILESTONE-8.md`, `docs/INDEX.md`.
+
+**Tests, fixtures and tools.** `tests/c-callbacks.test` (the Windows
+fixture build, `otherStackHost`, `windowsHost`, `cbRunClean`, qsort's
+size_t, cb-nested-loop, cb-nested-in-coroutine, cb-abi-preserved,
+cb-windows-unwind-through, cb-win32-locales, cb-windows-unwind-check),
+`tests/cffi/callback-fixture.c` (Windows threads and fibers, the ABI
+wrapper, the unwinder trace, the locale bookkeeping, the rejected
+alternative's measurement), `tests/cffi/callback-fixture-win64.asm` (new),
+`tests/cffi/cbx.bot`, `tests/native-library.test` (`nlCallbackHost`,
+nl-callbacks, nl-callbacks-two-libraries), `audit/c-callbacks/tools/`
+(mutants.txt's Windows section and generic additions; mutate.tcl's Windows
+host, `-match`, `-first`, `lsp/` and `-translation auto`; fuzz.tcl's
+toolchain and coroutine programs), `audit/native-library/tools/mutants.txt` and
+`audit/windows-unwind/tools/mutants.txt` (three mutants' text moved),
+`bench/c-callbacks.tcl`, `bench/native-library.tcl`,
+`tests/platform/tier.tcl` (the `c-callbacks-*` items; the bench item's
+GC-stress run).
+
+**What to run** (AGENTS.md, "C callbacks (callback c fn)"):
+
+    tclsh9.0 tests/c-callbacks.test                       # every host
+    tclsh9.0 tests/native-library.test -match nl-callbacks*
+    cargo test --release --manifest-path native/Cargo.toml callback
+    tclsh9.0 audit/c-callbacks/tools/fuzz.tcl -n 4 -seed S [-gc-stress 1]
+    tclsh9.0 audit/c-callbacks/tools/mutate.tcl [-first 1] [-only NAMES]
+    tclsh9.0 audit/c-callbacks/tools/mutate.tcl -first 1 -tests "tests/c-callbacks.test tests/native-library.test" -match "cb-* nl-callbacks*" -only library-wrong-instance,running-stack-ignores-entry-stack
+    tclsh9.0 tests/platform/native-status.tcl
+    tclsh9.0 tools/mutant-catalogs.tcl
+    tclsh9.0 bench/c-callbacks.tcl [-gc-stress 1 -n 20000 -runs 3]
+    tclsh9.0 bench/native-library.tcl
+
+On Windows, the Windows workflow dispatched on the branch with `tier`
+full and `tests` naming the tier items: `c-callbacks-fuzz`,
+`c-callbacks-mutants=...`, `c-callbacks-library-mutants=...`,
+`c-callbacks-bench`, `native-library-bench` (or a `[ci-full]` push with a
+`CI-Tests:` trailer); its smoke job runs the Rust tests (the JIT callback
+tests among them) and native-status, its acceptance shards every test file.
