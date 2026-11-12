@@ -791,9 +791,9 @@ main. Main has since moved to 023dfaa3 (binding provenance, emission
 work, then a merge of re-verification material). At cdb751b0 its tests,
 tests (linux arm64), tests (macos arm64) and tests (windows x86-64) runs
 all succeeded. At 023dfaa3 the three Icy Tower workflows, c-bindgen,
-bench and single executable succeeded; tests, tests (linux arm64) and
-tests (macos arm64) were still queued and tests (windows x86-64) in
-progress (pending). Nothing on main is red. Main at 023dfaa3 merges into
+bench, single executable and tests (windows x86-64) succeeded; tests was
+in progress and tests (linux arm64) and tests (macos arm64) queued
+(pending). Nothing on main is red. Main at 023dfaa3 merges into
 this branch without conflict (a trial merge: AGENTS.md and docs/INDEX.md
 auto-merged), and the merged golden manifest is exactly what merge.tcl
 regenerates.
@@ -807,8 +807,8 @@ This branch (`ccr-4f03745b-acaeyt`):
 | tests.yml dispatched: canary (the mutant catalogs, the warning gate, the changed test files) | ffb76147 | success |
 | tests.yml dispatched: tests (compile: the whole Tcl suite), golden shards 1-4, cranelift and cranelift-generic coverage, Rust tests (and the driver without its JIT), stub- and system-linked executables (also under GC stress), the method-call decision's oracle, fuzzer and reference audit over the golden suites | ffb76147 | success |
 | tests.yml dispatched: tests (interp) | ffb76147 | running |
-| tests-arm64.yml dispatched: canary, golden shards 1-4, Rust tests (also under GC stress), GC stress (interp, compile), cranelift coverage, system-linked executables (also under GC stress) | ffb76147 | success |
-| tests-arm64.yml dispatched: tests (interp, compile), cranelift-generic coverage | ffb76147 | running |
+| tests-arm64.yml dispatched: canary, tests (compile: the whole Tcl suite), golden shards 1-4, Rust tests (also under GC stress), GC stress (interp, compile), cranelift coverage, system-linked executables (also under GC stress) | ffb76147 | success |
+| tests-arm64.yml dispatched: tests (interp), cranelift-generic coverage | ffb76147 | running |
 | macos-arm64.yml dispatched: smoke (Tier A) and its Linux control, the system linker (also under GC stress), Botlish.app (smoke tests, acceptance, ad hoc release stages), acceptance shards 1-6, static SDL3, main-thread startup, Botlish.app without developer tools | ffb76147 | success (every job that runs in a dispatched run) |
 | windows-x86_64.yml dispatched: canary, smoke (Rust tests, stack guard, C ABI, executables, GC workloads, Windows I/O, the Windows-relevant test files, DLLs), root plans, system linker, acceptance shards 1-4 | ffb76147 | success (the whole run) |
 | static-decisions.yml dispatched (batched against sequential over every golden suite, payload-enums.bot included: mutable-array.bot and four shards) | 2207c8f6 | success; later commits change no front-end code but a comment |
