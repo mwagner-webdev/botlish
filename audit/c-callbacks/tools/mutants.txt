@@ -427,22 +427,22 @@ pub const SUPPORTED: bool = super::framewalk::NATIVE_FRAME_ROOTS && super::frame
     let previous = open(p, super::framewalk::frame_record()) as u64;
 >>>>
 
-@@ windows-entry-point-unwind-dropped a COFF object's callback entry points get no .pdata entry: Windows' unwinder takes an entry point's frame, between C's and the runtime's, for a leaf
-%% windows-x86_64
-## native/src/codegen/mod.rs
+@@ windows-entry-point-unwind-dropped a callback entry point's UNWIND_INFO is dropped where it is defined: a COFF object (and the JIT's function table) has no entry for it, and Windows' unwinder takes its frame, between C's and the runtime's, for a leaf
+%% linux-x86_64 windows-x86_64
+## native/src/codegen/callback.rs
 <<<<
-    let callbacks = symbols.callback_code.iter().map(|c| (c.id, c.size, &c.unwind));
+    let code = defined(&*module, &ctx, id, &format!("callback entry point {name}"))?;
 ====
-    let callbacks = symbols.callback_code.iter().filter(|c| !c.entry_point).map(|c| (c.id, c.size, &c.unwind));
+    let code = Defined { unwind: None, ..defined(&*module, &ctx, id, &format!("callback entry point {name}"))? };
 >>>>
 
-@@ windows-shim-unwind-dropped a COFF object's transition shims get no .pdata entry: Windows' unwinder takes a shim's frame, between the Botlish caller's and C's, for a leaf
-%% windows-x86_64
-## native/src/codegen/mod.rs
+@@ windows-shim-unwind-dropped a transition shim's UNWIND_INFO is dropped where it is defined: a COFF object (and the JIT's function table) has no entry for it, and Windows' unwinder takes its frame, between the Botlish caller's and C's, for a leaf
+%% linux-x86_64 windows-x86_64
+## native/src/codegen/callback.rs
 <<<<
-    let callbacks = symbols.callback_code.iter().map(|c| (c.id, c.size, &c.unwind));
+    let code = defined(&*module, &ctx, id, &format!("transition shim {name}"))?;
 ====
-    let callbacks = symbols.callback_code.iter().filter(|c| c.entry_point).map(|c| (c.id, c.size, &c.unwind));
+    let code = Defined { unwind: None, ..defined(&*module, &ctx, id, &format!("transition shim {name}"))? };
 >>>>
 
 @@ windows-jit-callback-code-unregistered the JIT's function table leaves out transition shims and callback entry points: a callback reached through a JIT-made function pointer has no unwind information
@@ -456,17 +456,17 @@ pub const SUPPORTED: bool = super::framewalk::NATIVE_FRAME_ROOTS && super::frame
         if let Some(at) = at.filter(|_| false) {
 >>>>
 
-@@ windows-xmm6-clobbered the callback path changes XMM6, a Win64 nonvolatile register, and restores nothing: the C caller finds its value gone
+@@ windows-xmm6-clobbered the callback path changes XMM6, a Win64 nonvolatile register, and restores nothing: rt_callback_call, which saves no XMM register (run saves and restores XMM6 itself, so a change inside run is undone), zeroes it after run returns, and the C caller finds its value gone
 %% windows-x86_64
 ## native/src/runtime/callback.rs
 <<<<
-    // Keeps this frame from becoming a tail call of the entry.
-    std::hint::black_box(());
+        Ok(Ok(())) => 0,
 ====
-    // Keeps this frame from becoming a tail call of the entry.
-    std::hint::black_box(());
-    // SAFETY: (the mutant) an undeclared change of a nonvolatile register.
-    unsafe { std::arch::asm!("xorps xmm6, xmm6", options(nostack, nomem)) };
+        Ok(Ok(())) => {
+            // SAFETY: (the mutant) an undeclared change of a nonvolatile register.
+            unsafe { std::arch::asm!("xorps xmm6, xmm6", options(nostack, nomem)) };
+            0
+        }
 >>>>
 
 @@ arguments-past-fourth-swapped the entry point stores its fifth and sixth C arguments in each other's words: the stack-passed arguments reach the callback swapped
