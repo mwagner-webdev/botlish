@@ -928,9 +928,19 @@ milestones); Windows itself is CI's.
 
 ### Local regressions (**observed**, at the merged tip)
 
-`tests/local.tcl` (every Tcl test file on interp and compile, every golden
-suite on the four backends) was running at the time of writing: pending.
-The files this branch changes ran first and passed.
+`tests/local.tcl` (every Tcl test file on interp and compile, golden
+duplicates skipped; every golden suite on the four backends, through the
+front-end cache) passed, exit 0, in 6,902 s with 4 jobs; the files this
+branch changes ran first:
+
+| Layer | Result |
+|---|---|
+| 290 Tcl test files on interp | 9,544 passed, 0 failed, 301 skipped (constraints), 2,493 golden duplicates skipped |
+| the same on compile | 9,539 passed, 0 failed, 306 skipped, 2,493 golden duplicates skipped |
+| 119 golden suites | 0 failed: interp 5,682/5,682, compile 5,682/5,682, cranelift-generic 5,590/5,590, cranelift 5,692/5,692 |
+
+local.tcl ran without ANDROID_NDK_ROOT (android-target.test 12 passed, 15
+skipped there; with the NDK and the system images, the row below).
 
 | Check | Result |
 |---|---|
