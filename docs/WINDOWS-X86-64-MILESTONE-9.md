@@ -101,8 +101,10 @@ The evidence, by kind (sections 16-18 have it in full):
   probe, the smoke job, the four acceptance shards, the system linker and
   the root plans -- all passed; the fuzzer passed on every seed, under GC
   stress too; 26 of the 29 c-callbacks mutants and both library mutants
-  were killed by tests of their contracts, the other three rewritten
-  (section 16): WIN-SUMMARY. The rejected alternative's cost was measured
+  were killed by tests of their contracts, and the other three, rewritten
+  (section 16: one was equivalent, two no longer built), were killed in
+  the next run -- every mutant of the brief's list killed on Windows. The
+  rejected alternative's cost was measured
   there: 88 ns per transition.
 * **Real Linux and macOS**: the Linux x86-64, Linux arm64 and macOS arm64
   workflows passed every job at 4499c79e; this container ran the callback
@@ -725,7 +727,7 @@ check of the record, never by an assertion that callbacks are enabled. A
 mutant that does not build is reported NOT-BUILT by the harness, never
 killed.
 
-| # | the brief's mutation | catalog mutant | on Windows (run 43226964148) | what failed there |
+| # | the brief's mutation | catalog mutant | on Windows (runs 43226964148; 17, 18, 22: 43248724909) | what failed there |
 |---|---|---|---|---|
 | 1 | restore Windows' refusal | windows-callbacks-refused | killed | 26 tests of c-callbacks.test |
 | 2 | ignore callback segments in the walk | windows-walk-ignores-segments | killed | cb-executable, cb-nested-gc, cb-nested-in-coroutine, cb-nested-loop, cb-windows-unwind-check |
@@ -743,12 +745,12 @@ killed.
 | 14 | the foreign-call safepoint removed | foreign-call-not-safepoint | killed | cb-executable, cb-nested-gc, cb-nested-in-coroutine, cb-nested-loop, cb-nested-repeated, cb-windows-unwind-check |
 | 15 | the waiting caller's roots omitted | windows-waiting-caller-skipped | killed | cb-executable, cb-nested-gc, cb-nested-in-coroutine, cb-nested-loop, cb-nested-repeated, cb-windows-unwind-check |
 | 16 | a middle callback's roots omitted | windows-middle-callback-roots-skipped | killed | 7: cb-executable, cb-nested-gc, cb-nested-in-coroutine, cb-nested-loop, cb-nested-repeated, cb-recursion, ... |
-| 17 | no unwind information for the entry point | windows-entry-point-unwind-dropped | WIN-ENTRY | (rewritten: below) |
-| 18 | no unwind information for the shim | windows-shim-unwind-dropped | WIN-SHIM | (rewritten: below) |
+| 17 | no unwind information for the entry point | windows-entry-point-unwind-dropped | killed | cb-windows-unwind-check, cb-windows-unwind-through |
+| 18 | no unwind information for the shim | windows-shim-unwind-dropped | killed | cb-windows-unwind-check |
 | 19 | JIT unwind information not registered | windows-jit-callback-code-unregistered | killed | the Rust test jit_callback_code_is_in_the_function_table |
 | 20 | System V instead of Win64 for the entry | entry-system-v-convention | killed | c-callbacks.test did not complete (cb-nested-repeated failed, then a test hung) |
 | 21 | mixed arguments past the fourth misplaced | arguments-past-fourth-swapped | killed | cb-abi-preserved, cb-mixed-abi |
-| 22 | a nonvolatile XMM register clobbered | windows-xmm6-clobbered | WIN-XMM | (rewritten: below) |
+| 22 | a nonvolatile XMM register clobbered | windows-xmm6-clobbered | killed | cb-abi-preserved (the sentinel in XMM6) |
 | 23 | raw floating values converted | raw-float-argument-promoted; raw-result-through-double; raw-nan-canonicalized | all killed | cb-abi-preserved, cb-mixed-abi, cb-raw-floats; cb-raw-floats; cb-abi-preserved, cb-mixed-abi, cb-raw-floats |
 | 24 | a retained callback treated as active | activation-kept-after-call | killed | cb-refused-retained |
 | 25 | a callback error unwinding into C | failure-panics-into-c | killed | 7: cb-executable-failure, cb-failure-is-fatal, cb-refused-arguments, ... |
@@ -777,8 +779,13 @@ windows-shim-unwind-dropped read a field (`Defined::entry_point`) a
 later cleanup removed, so that run could not build them (NOT-BUILT, never
 counted); they now drop an entry point's or a shim's UNWIND_INFO where
 `codegen::callback` defines it, and run on Linux x86-64 too, where the
-cross-built COFF test kills both (real Linux). Their Windows run:
-WIN-RERUN.
+cross-built COFF test kills both (real Linux). Their Windows run
+(43248724909, at b3b7e738) killed all three: windows-xmm6-clobbered by
+cb-abi-preserved, windows-entry-point-unwind-dropped by
+cb-windows-unwind-check and cb-windows-unwind-through,
+windows-shim-unwind-dropped by cb-windows-unwind-check. So every mutant
+of the table, and running-stack-ignores-entry-stack, is killed on real
+Windows by a test of its contract.
 
 
 On Linux (real Linux, this container): the five new mutants that run on
@@ -1024,7 +1031,19 @@ items alone that 4499c79e's run could not finish -- `c-callbacks-bench`,
 `native-library-bench`, `c-callbacks-fuzz`, the 29 mutants and the 2
 library mutants (run 43226964148).
 
-RUNS-FINAL
+**At b3b7e738** (the three mutants rewritten): the Windows workflow
+dispatched for them (run 43248724909): the canary and the root plans
+passed and the three mutants were killed (above); its other jobs test the
+code 9f5b1a2e's run already passed (b3b7e738 changes only the mutant
+catalog) and were still running when this was written.
+
+The branch's latest runs of the four test workflows, by commit: Linux
+x86-64, Linux arm64 and macOS arm64 passed every job at 4499c79e (the
+commits after it change the mutant harness, its tier items, the mutant
+catalog and this report only); Windows passed every job at 9f5b1a2e but
+the full shard, whose one failure was the mutants' verdict
+(windows-xmm6-clobbered surviving, two not building), and that shard's
+three mutants passed at b3b7e738.
 
 ## 19. Remaining limitations
 
