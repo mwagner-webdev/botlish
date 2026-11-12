@@ -812,7 +812,35 @@ push before their other jobs finished. icy-tower (windows x86-64), run
 middle-callback mutant; the mutant harness's `-first 1`; the benchmark's
 GC-stress run): dispatched runs 43118788340 (Windows: `c-callbacks-fuzz`,
 the 14 Windows-only mutants and the 2 library mutants), 43118793329
-(tests), 43118797190 (Linux arm64), 43118801019 (macOS).
+(tests), 43118797190 (Linux arm64), 43118801019 (macOS). What finished
+before the next push superseded them:
+
+* Windows: the canary passed (23:31-23:44 UTC; 594 tests, 0 failed, the
+  unwind check's account above); the root plans job passed (the fallback
+  plan's Rust tests and GC workloads); the fuzzer passed on every seed,
+  1-3 and 9-10 under GC stress, its coroutine programs included (real
+  Windows). The mutant run exposed a defect of the harness, not of the
+  callbacks: it read the test files' output with `-translation lf`, and on
+  Windows every failing test's line kept its carriage return, so the
+  test-file detector reported every mutant surviving --
+  windows-callbacks-refused too, which ends every callback. The fuzzer and
+  the Rust tests, parsed otherwise, still killed nine (windows-callbacks-
+  refused, windows-jump-to-innermost-transition, windows-continuation-
+  wrong-rsp, windows-transition-records-stack-pointer and
+  transition-records-helper-frame by the fuzzer, the last four only under
+  GC stress; windows-walk-ignores-segments and
+  windows-jit-callback-code-unregistered by the JIT's Rust tests;
+  windows-entry-point-unwind-dropped and windows-shim-unwind-dropped by
+  the COFF test). Fixed in 4499c79e (`-translation auto`, as the other
+  mutation harnesses read their pipes).
+* Linux x86-64: the canary (00:16-00:20) and the native Rust unit tests
+  passed.
+
+**At 4499c79e** (the harness fixed; `Defined::entry_point`, a field only a
+test read, removed): dispatched runs 43135863896 (Windows: `c-callbacks-
+fuzz`, all 29 mutants of the brief's table and the 2 library mutants,
+`c-callbacks-bench`, `native-library-bench`), 43135867330 (tests),
+43135870665 (Linux arm64), 43135873858 (macOS).
 
 RUNS-FINAL
 
