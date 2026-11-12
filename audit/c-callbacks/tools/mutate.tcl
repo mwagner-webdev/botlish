@@ -177,7 +177,9 @@ foreach entry [glob -directory $root -types f *.tcl] {
 # runs longer than TIMEOUT seconds. No timeout(1): macOS has none.
 proc run {timeout args} {
     set pipe [open |[concat $args [list 2>@1]] r]
-    fconfigure $pipe -blocking 0 -translation lf -encoding utf-8
+    # auto: a Windows child's lines end in CRLF, and a line still holding
+    # its carriage return matches no `FAILED$` (every test failure missed).
+    fconfigure $pipe -blocking 0 -translation auto -encoding utf-8
     set ::runOutput ""
     set ::runDone 0
     fileevent $pipe readable [list apply {{pipe} {
