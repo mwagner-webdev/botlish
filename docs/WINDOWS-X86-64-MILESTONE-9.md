@@ -685,7 +685,8 @@ another stack, a retained pointer, a call inside a callback) ends the
 process by design, so it is exercised by c-callbacks.test's refusal tests,
 each in a child process, not by the fuzzer. On Windows the tier item
 `c-callbacks-fuzz` runs seeds 1, 2 and 3, and 9 and 10 under GC stress:
-FUZZ-WINDOWS. On Linux seeds 11-13 (13 under GC stress) after the coroutine
+all five passed, 0 disagreements, with the coroutine programs (real
+Windows, run 43118788340 at 88a5740c; 7-16 s each). On Linux seeds 11-13 (13 under GC stress) after the coroutine
 mode: 0 disagreements.
 
 ### The mutants
