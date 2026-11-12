@@ -906,6 +906,18 @@ fuzz`, all 29 mutants of the brief's table and the 2 library mutants,
   items).
 * Linux arm64: passed (run 43135870665, every job). macOS: passed (run
   43135873858, every job).
+* Linux x86-64: passed (run 43135867330, every job: the canary with the
+  warning gate and the mutant catalogs, the Tcl suite on interp and
+  compile, its cranelift and cranelift-generic coverage, the golden suites
+  in four shards, the native Rust unit tests, the stub- and system-linked
+  executables, the system-linked ones under GC stress too, the method-call
+  decision's oracle).
+
+**At 9f5b1a2e** (the harness's timeout fixed; nothing else): the push's
+canaries, and the Windows workflow dispatched once more for the tier
+items alone that 4499c79e's run could not finish -- `c-callbacks-bench`,
+`native-library-bench`, `c-callbacks-fuzz`, the 29 mutants and the 2
+library mutants (run 43226964148).
 
 RUNS-FINAL
 
