@@ -880,6 +880,16 @@ fuzz`, all 29 mutants of the brief's table and the 2 library mutants,
 `c-callbacks-bench`, `native-library-bench`), 43135867330 (tests),
 43135870665 (Linux arm64), 43135873858 (macOS).
 
+* Windows canary: passed (03:26-03:34 UTC).
+* Windows smoke: passed (04:36-05:19) -- the native Rust unit tests (the
+  JIT callback tests and the COFF test among them), the native stack
+  guard checks, native-status (the `c-callback` probe: `[true, true]`
+  under GC stress), the GC workloads under GC stress and under the unwind
+  check, the smoke tier and the Windows-relevant test files
+  (c-callbacks.test among them), the native libraries' DLL hosts
+  (native-library.test: nl-callbacks, nl-callbacks-two-libraries), the
+  filesystem and the variadic C calls under GC stress.
+
 RUNS-FINAL
 
 ## 19. Remaining limitations
