@@ -1120,7 +1120,8 @@ alternative's measurement), `tests/cffi/callback-fixture-win64.asm` (new),
 `tests/cffi/cbx.bot`, `tests/native-library.test` (`nlCallbackHost`,
 nl-callbacks, nl-callbacks-two-libraries), `audit/c-callbacks/tools/`
 (mutants.txt's Windows section and generic additions; mutate.tcl's Windows
-host, `-match`, `-first`, `lsp/` and `-translation auto`; fuzz.tcl's
+host, `-match`, `-first`, `lsp/`, `-translation auto` and a timed-out
+test's process tree ended with taskkill on Windows; fuzz.tcl's
 toolchain and coroutine programs), `audit/native-library/tools/mutants.txt` and
 `audit/windows-unwind/tools/mutants.txt` (three mutants' text moved),
 `bench/c-callbacks.tcl`, `bench/native-library.tcl`,
