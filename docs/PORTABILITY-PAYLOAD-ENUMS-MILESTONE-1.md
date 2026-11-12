@@ -507,6 +507,10 @@ NIR and runtime probes, KEEP-MULTI-PROGRAM, KEEP-PARSER,
 KEEP-NOT-EXPRESSIBLE for top-level declaration errors, rendering, GC
 stress and executables); the manifest is regenerated from it and the
 fragment. `std::test`'s `code_name` names the two new codes.
+`tclsh9.0 tests/local.tcl tests/golden/payload-enums.bot`: 18 of 18 on
+each backend; `audit/golden/tools/perturb.tcl` on the suite: every test
+fails when its expectation is inverted (18) or altered (18), and every
+`rejects_at` when its column moves (8).
 
 Changed existing tests (intended): `enum-syntax-no-values-or-aliases`
 (`Car {seats: int}` is now valid; its slot tests `Car {}`) and
