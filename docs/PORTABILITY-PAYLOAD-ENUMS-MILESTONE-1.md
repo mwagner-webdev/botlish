@@ -670,11 +670,110 @@ fuzzer. The harness now copies `ccompile/` (audit/enums/tools/mutate.tcl).
 
 ## 16. Performance and allocations
 
-RESULTS-BENCH
+**(observed)** `tclsh9.0 bench/enums.tcl` (defaults: best of 5 runs,
+n = 2000 on the Tcl backends, 200000 natively), on this tree and on the
+commit it starts from (73c32da8, a worktree with its own native build), one
+after the other on the otherwise idle 4-core container. Times are whole
+programs per operation; the bench's other column (minus a baseline
+program) is noisier than the differences it would show.
+
+**Payload-free enums, before and after** (ns per operation):
+
+| operation | Tcl interp | Tcl compile | Cranelift |
+|---|---:|---:|---:|
+| case constant | 19882 -> 21414 | 1157 -> 1194 | 43.3 -> 42.8 |
+| copy through two bindings | 379926 -> 390537 | 11354 -> 11558 | 44.3 -> 43.4 |
+| compare with a case (==) | 350474 -> 355210 | 14049 -> 14814 | 45.7 -> 43.2 |
+| pass and return, typed | 365303 -> 361537 | 11509 -> 11753 | 44.0 -> 43.4 |
+| iterate List[Kind] | 369540 -> 376895 | 15205 -> 15279 | 83.6 -> 76.7 |
+| MutableArray[Kind] at / set / swap | 65398 / 73355 / 74228 -> 65074 / 74071 / 74003 | 5891 / 6156 / 6785 -> 5930 / 6235 / 6988 | 41.7 / 42.9 / 45.0 -> 41.5 / 44.3 / 44.9 |
+| MutableVector[Kind] push, pop | 395644 -> 407358 | 25866 -> 26227 | 53.8 -> 49.2 |
+| ImmutableSet[Kind] contains | 357914 -> 371699 | 20465 -> 20296 | 56.3 -> 57.9 |
+
+The Int and Bool rows beside them, which no line of this change reaches,
+moved as much (an Int `==` natively 44.1 -> 54.8 ns, `List[int]` 82.1 ->
+96.7 ns, the Int constant on Tcl compile 1075 -> 1919 ns): the differences
+are the container's noise. What does not move is exact: natively every
+payload-free program allocates the same number of objects and bytes before
+and after (all 33 programs of the allocation table, identical), and
+`pe-free-programs-unchanged` and `pe-payload-free-unchanged` pin that a
+payload-free enum's NIR is unchanged (`enumeq`, no `enumcase`).
+
+**Payload-bearing cases beside a named struct with the same fields**
+(ns per operation, whole program):
+
+| operation | Tcl interp | Tcl compile | Cranelift |
+|---|---:|---:|---:|
+| construction `Expr::Add {left, right}` / `Pair {left, right}` | 92973 / 51642 | 9399 / 6030 | 143.5 / 105.4 |
+| a payload-free case of an enum with payloads (`Expr::Param`) | 21777 | 1271 | 44.6 |
+| `==` of two equal values | 289301 / 208452 | 26656 / 20711 | 386.3 / 265.2 |
+| `hash` | 307071 / 235458 | 155778 / 120367 | 261.7 / 185.6 |
+| pass and return | 177367 / 141820 | 9701 / 6630 | 140.1 / 107.4 |
+| MutableArray set | 183595 / 143036 | 14204 / 11361 | 195.9 / 117.8 |
+| MutableVector push, pop | 210863 / 170451 | 24673 / 20772 | 141.4 / 109.7 |
+| a larger nested payload (a List of 4, a nested struct) | 181245 / 136195 | 16034 / 12562 | 292.9 / 258.1 |
+
+Native allocations per value (N = 200000 values):
+
+| program | allocations | Structs | EnumCases | bytes |
+|---|---:|---:|---:|---:|
+| payload construction | 400003 | 200000 | 200000 | 16000120 |
+| struct construction | 200003 | 200000 | 0 | 11200120 |
+| a payload-free case of an enum with payloads | 3 | 0 | 0 | 1600120 |
+| larger payload / struct | 800003 / 600003 | 400000 / 400000 | 200000 / 0 | 36800120 / 32000120 |
+
+What this shows:
+
+* A payload-free case costs what it did, also in an enum with
+  payload-bearing cases: an immediate word, no allocation (3 allocations
+  for the whole program, the loop's Lists).
+* A payload-bearing value costs one more allocation than the struct of its
+  fields, natively: its payload is an anonymous struct object (the
+  construction's argument) and the case an EnumCase object pointing at it,
+  80 bytes against the struct's 56 (16 + 24 bytes more per value). That is
+  the whole of the construction's extra cost on every backend (1.4x
+  natively, 1.6x and 1.8x on the Tcl backends, whose value is a list
+  holding the payload dict). Every operation that makes a value pays it
+  (the array, vector and larger-payload rows construct one per iteration);
+  passing one (a word, a pointer) costs what passing a struct does.
+* `==` and `hash` read the enum's and the case's names before the payload;
+  they cost 1.3x to 1.5x the struct's, mostly the construction rows'
+  difference again (both programs build their operands per iteration).
+* **(projected)** The second allocation is a representation choice, and
+  nothing in the language depends on it: storing the payload's fields in
+  the EnumCase object, or scalar-replacing a case whose value does not
+  escape as structs already are, would remove it. The bench shows the
+  difference: its `==` baselines build two values per iteration and use
+  one (`a = smk(i)`, `b = smk(i)`, `a`); natively the struct program
+  allocates 200000 structs, the unused one never made, and the
+  payload-bearing one 400000 of each kind, `enum#case` an allocating call
+  that nothing removes. (The same is why the native `==` rows' "minus
+  baseline" column, 79 ns against 163, favors the enum: the struct
+  baseline was spared an allocation the struct `==` program pays.) Neither
+  is done here; both are optimizations of the native backend alone, with
+  no change to what a program means.
 
 ## 17. Regression results and CI
 
-RESULTS-REGRESSION
+**(observed)** Locally (a 4-core Linux x86-64 container, Tcl 9.0.1, the
+release native build):
+
+| run | result |
+|---|---|
+| `tclsh9.0 tests/local.tcl` (290 Tcl test files on interp and compile, golden duplicates skipped; 119 golden suites on the four backends, through the front-end cache) | 697 of 699 items finished before the run's time limit: 690 passed, 7 failed; the two unfinished were `warning-gate.test` (run below) |
+| the 7 failures | three intended changes the tests pinned, fixed: `sc-codes-one-to-one` (static-compile.test) and `gf-code-name-complete` (golden-framework.test) count the DiagnosticCode cases, 143 -> 145; `ns-root-inventory` (stdlib-namespaces.test) lists the internal root natives, now with `enum#case`. One transient: `syntax-highlighting.test` on the compile pass (its interp pass passed, and both passes passed in three later runs) |
+| the four files again, whole, on both passes | 0 failures (55, 52, 34, 26 passed) |
+| `tests/warning-gate.test`, both passes | 6 of 6 |
+| `tests/local.tcl tests/golden/payload-enums.bot` (not yet in the run above) | 18 of 18 on each backend |
+| `tests/payload-enums.test`, `tests/enums.test`, `tests/semantic-instances.test` under the rollback audit | 40, 66, 96 passed |
+| `cargo test --release --lib` (native/) | 345 passed (7 of them `enum`) |
+| `audit/payload-enums/tools/mutate.tcl` | 25 of 25 killed |
+| `audit/payload-enums/tools/fuzz.tcl` | 200 programs, 0 disagreements |
+| `tools/mutant-catalogs.tcl` | 107 catalogs, 3638 mutants, 0 problems |
+| `merge.tcl -check 1` | 13,769 rows, consistent |
+| `tools/compilerpedia.tcl generate`, `check` (through `tests/compilerpedia.test`) | the generated topic unchanged; 0 problems |
+
+RESULTS-CI
 
 ## 18. Compatibility with the semantic-instance rollback design
 
