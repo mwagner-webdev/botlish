@@ -781,7 +781,31 @@ release native build):
 | `merge.tcl -check 1` | 13,770 rows, consistent |
 | `tools/compilerpedia.tcl generate`, `check` (through `tests/compilerpedia.test`) | the generated topic unchanged; 0 problems |
 
-RESULTS-CI
+**(CI)** `main` when this branch started (73c32da8): its own tests and
+tests (linux arm64) runs had not started (still queued, later superseded);
+the latest finished runs were eeaf1e3e's -- tests green, tests (linux
+arm64) red before any test ran (DNS: ports.ubuntu.com could not be
+resolved while installing Tcl's packages), and, by that merge's own
+record, macOS, Windows and the rest green. So no test was known to fail on
+main. Main has since moved 13 commits (to f49fd76e: binding provenance,
+emission work); tests (linux arm64) is green at cdb751b0, tests in
+progress there. Main merges into this branch without conflict (a trial
+merge: 11 files, AGENTS.md and docs/INDEX.md auto-merged).
+
+This branch (`ccr-4f03745b-acaeyt`):
+
+| run | commit | result |
+|---|---|---|
+| canaries of a branch push: tests (linux arm64), tests (macos arm64), tests (windows x86-64) | b7e6c35c | success |
+| icy-tower (windows x86-64), a branch push | b7e6c35c, ffb76147 | success |
+| tests.yml dispatched: canary (the mutant catalogs, the warning gate, the changed test files) | ffb76147 | success |
+| tests.yml dispatched: the Tcl suites, coverage, golden shards, executables, Rust tests | ffb76147 | pending (the runner pool was saturated; jobs queued) |
+| tests-arm64.yml, macos-arm64.yml, windows-x86_64.yml dispatched | ffb76147 | pending |
+| static-decisions.yml dispatched (batched against sequential over the golden suites) | 2207c8f6 | pending; later commits change no front-end code but a comment |
+
+Every later commit changes only tests, audit tooling and documents
+(the comment in hir/mutvec.tcl aside); the dispatched runs test the
+branch's last code commit with every test.
 
 ## 18. Compatibility with the semantic-instance rollback design
 
