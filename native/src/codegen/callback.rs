@@ -59,8 +59,6 @@ pub struct Defined {
     pub id: cranelift_module::FuncId,
     pub size: u32,
     pub unwind: Option<Vec<u8>>,
-    /// A callback entry point (else a transition shim).
-    pub entry_point: bool,
 }
 
 /// The `Defined` of the function just compiled in CTX as ID.
@@ -68,11 +66,10 @@ fn defined<M: Module>(
     module: &M,
     ctx: &cranelift_codegen::Context,
     id: cranelift_module::FuncId,
-    entry_point: bool,
     what: &str,
 ) -> Result<Defined, BackendError> {
     let size = ctx.compiled_code().map_or(0, |code| code.code_info().total_size);
-    Ok(Defined { id, size, unwind: windows_unwind(module, ctx, what)?, entry_point })
+    Ok(Defined { id, size, unwind: windows_unwind(module, ctx, what)? })
 }
 
 /// Defines PROGRAM's transition shims and callback entry points in MODULE,
@@ -175,7 +172,7 @@ fn shim<M: Module>(
     }
     let shown = ctx.func.display().to_string();
     module.define_function(id, &mut ctx).map_err(|e| BackendError::Codegen(format!("transition shim {name}: {e:?}")))?;
-    let code = defined(&*module, &ctx, id, false, &format!("transition shim {name}"))?;
+    let code = defined(&*module, &ctx, id, &format!("transition shim {name}"))?;
     module.clear_context(&mut ctx);
     Ok(((id, signature), shown, code))
 }
@@ -275,7 +272,7 @@ fn entry_point<M: Module>(
     }
     let shown = ctx.func.display().to_string();
     module.define_function(id, &mut ctx).map_err(|e| BackendError::Codegen(format!("callback entry point {name}: {e:?}")))?;
-    let code = defined(&*module, &ctx, id, true, &format!("callback entry point {name}"))?;
+    let code = defined(&*module, &ctx, id, &format!("callback entry point {name}"))?;
     module.clear_context(&mut ctx);
     Ok((id, shown, code))
 }
@@ -374,7 +371,7 @@ mod tests {
         let symbols = declared("x86_64-pc-windows-msvc");
         let mut names = vec!["botlish_transition_0_0".to_string()];
         names.extend((0..2).map(|i| format!("botlish_callback_{i}")));
-        assert_eq!(symbols.callback_code.iter().map(|c| c.entry_point).collect::<Vec<_>>(), vec![false, true, true]);
+        assert_eq!(symbols.callback_code.len(), names.len(), "the shim and the two entry points, in order");
         for (name, code) in names.iter().zip(&symbols.callback_code) {
             let symbol = file.symbol_by_name(name).unwrap_or_else(|| panic!("no symbol {name}"));
             let entry = entries.iter().find(|e| e.0 == symbol.index().0).unwrap_or_else(|| panic!("{name} has no .pdata entry"));
