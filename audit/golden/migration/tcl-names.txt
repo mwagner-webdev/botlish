@@ -11876,5 +11876,6 @@ tests/payload-enums.test pe-native-representation pass
 tests/payload-enums.test pe-native-allocation pass
 tests/payload-enums.test pe-free-programs-unchanged pass
 tests/payload-enums.test pe-specialization-keys pass
+tests/payload-enums.test pe-service-tokens pass
 tests/payload-enums.test pe-c-and-boundaries pass
 tests/payload-enums.test pe-kernel-probe pass

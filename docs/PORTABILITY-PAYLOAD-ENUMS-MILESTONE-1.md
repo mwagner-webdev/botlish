@@ -427,8 +427,8 @@ accepted example; `error.enum-payload-required` and
 tokens (`service::tokens`, which the language server serves) mark a
 construction's case as an enum member with its enum before it, from the
 `caseOrigin` the resolver records on the construction's struct node, and
-a declaration's payload fields as property declarations with their types;
-nothing else in the service changed (hover and definition read the HIR as
+a declaration's payload fields as property declarations with their types
+(`pe-service-tokens`); nothing else in the service changed (hover and definition read the HIR as
 before).
 
 ## 11. Boundaries and other targets
@@ -477,7 +477,7 @@ fuzzer is a diagnostic, never a crash.
 
 ## 13. Tests
 
-**(observed)** `tests/payload-enums.test`: 40 tests, sections A-I of the
+**(observed)** `tests/payload-enums.test`: 41 tests, sections A-I of the
 brief and the compiler-shaped probe; every program runs on all four
 backends through `pePlain`, which requires them to agree.
 
@@ -491,7 +491,7 @@ backends through `pePlain`, which requires them to agree.
 | F. affinity | `pe-affine-type`, `pe-affine-moves`, `pe-affine-releases`, `pe-affine-partial-construction`, `pe-affine-descriptor`, `pe-affine-coroutine` |
 | G. backend parity | `pe-gc-stress`, `pe-executable-parity` |
 | H. HIR round-trip | `pe-hir-roundtrip`, `pe-interchange` |
-| I. isolation and optimization | `pe-native-representation`, `pe-native-allocation`, `pe-free-programs-unchanged`, `pe-specialization-keys`, `pe-c-and-boundaries` |
+| I. isolation and optimization | `pe-native-representation`, `pe-native-allocation`, `pe-free-programs-unchanged`, `pe-specialization-keys`, `pe-service-tokens`, `pe-c-and-boundaries` |
 | section 11 probe | `pe-kernel-probe` |
 
 Rust: `enum_case_objects_are_nominal_and_compare_payloads`,
@@ -507,7 +507,7 @@ MIGRATED, six SPLIT, the rendering staying in Tcl), and eight split
 per diagnostic (`std::compiler::DiagnosticCode::UnknownEnumCase`,
 `EnumPayloadUnexpected` twice, `EnumPayloadRequired`, `MissingField`,
 `UnknownField`, `DuplicateField`, `Type`), each located by `rejects_at`.
-The other 30 Tcl tests are classified in
+The other 31 Tcl tests are classified in
 `audit/golden/migration/census/payload-enums.tsv` (KEEP-INTERNAL for HIR,
 NIR and runtime probes, KEEP-MULTI-PROGRAM, KEEP-PARSER,
 KEEP-NOT-EXPRESSIBLE for top-level declaration errors, rendering, GC
@@ -773,12 +773,12 @@ release native build):
 | the four files again, whole, on both passes | 0 failures (55, 52, 34, 26 passed) |
 | `tests/warning-gate.test`, both passes | 6 of 6 |
 | `tests/local.tcl tests/golden/payload-enums.bot` (not yet in the run above) | 18 of 18 on each backend |
-| `tests/payload-enums.test`, `tests/enums.test`, `tests/semantic-instances.test` under the rollback audit | 40, 66, 96 passed |
+| `tests/payload-enums.test` (before `pe-service-tokens` was added), `tests/enums.test`, `tests/semantic-instances.test` under the rollback audit | 40, 66, 96 passed |
 | `cargo test --release --lib` (native/) | 345 passed (7 of them `enum`) |
 | `audit/payload-enums/tools/mutate.tcl` | 25 of 25 killed |
 | `audit/payload-enums/tools/fuzz.tcl` | 200 programs, 0 disagreements |
 | `tools/mutant-catalogs.tcl` | 107 catalogs, 3638 mutants, 0 problems |
-| `merge.tcl -check 1` | 13,769 rows, consistent |
+| `merge.tcl -check 1` | 13,770 rows, consistent |
 | `tools/compilerpedia.tcl generate`, `check` (through `tests/compilerpedia.test`) | the generated topic unchanged; 0 problems |
 
 RESULTS-CI
@@ -796,7 +796,7 @@ payload enums (`same(x)` in `pe-identity-equality`, `pe-hashing`,
 `pe-transport`) exercise semantic instances. **(observed)** Under
 `BOTLISH_SEMANTIC_ROLLBACK_AUDIT=1`, which compares each walked
 instance's HIR with its snapshot and fails on any change left behind:
-`tests/payload-enums.test` 40 of 40, `tests/enums.test` 66 of 66,
+`tests/payload-enums.test` 40 of 40 (its 41st test, `pe-service-tokens`, came later), `tests/enums.test` 66 of 66,
 `tests/semantic-instances.test` 96 of 96.
 
 ## 19. Explicitly unsupported, and why

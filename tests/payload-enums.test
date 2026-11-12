@@ -511,6 +511,26 @@ test pe-specialization-keys {a semantic instance of a generic function keeps a p
     list [hir::specialize::ElementKeyType {enum Expression}] [hir::specialize::ElementKeyType {enum Light}]
 } -result {{enum Expression} enum}
 
+test pe-service-tokens {the compiler service's highlight tokens (service::tokens, which the language server serves) mark a payload-bearing case's declaration and its payload fields (property declarations, their types), and a construction's case as an enum member after its enum, its fields as properties} -body {
+    source [file join $::projectRoot service service.tcl]
+    set dir [file tempdir pe-tokens]
+    set path [file join $dir t.bot]
+    peWrite $path "enum Expr:\n    Lit {value: int},\n    Neg,\ne = Expr::Lit {value: 3}\nf = Expr::Neg\n"
+    set ws [service::workspace -warnings off -cache ""]
+    try {
+        set rev [service::analyze $ws $path]
+        set source [service::sourceText $rev $path]
+        lmap token [service::tokens $rev $path] {
+            lassign $token start end type modifiers
+            if {$type eq "operator"} continue
+            list [string range $source $start [expr {$end - 1}]] $type {*}$modifiers
+        }
+    } finally {
+        service::closeWorkspace $ws
+        file delete -force $dir
+    }
+} -cleanup {unset -nocomplain dir path ws rev source} -result {{enum keyword} {Expr enum declaration} {Lit enumMember declaration} {value property declaration} {int type} {Neg enumMember declaration} {e variable declaration} {Expr enum} {Lit enumMember} {value property} {3 number} {f variable declaration} {Expr enum} {Neg enumMember}}
+
 test pe-c-and-boundaries {a payload-bearing enum is refused, with its reason, where a representation or an encoding is committed to: the C backend (C UNSUPPORTED), a C export's signature, the value transfer (not Sendable) and a context struct's native layout} -body {
     source [file join $::projectRoot ccompile ccompile.tcl]
     set c [catch {ccompile::program [surface::compile "enum S:\n    P,\n    C {r: int},\nfn f(s: S) -> int:\n    1\nf(S::C {r: 2})\n" pe.bot -warnings off] -prefix pe} message]
