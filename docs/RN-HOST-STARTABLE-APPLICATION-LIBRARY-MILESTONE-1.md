@@ -765,7 +765,9 @@ the compiler or the runtime.
 (**observed**, results in
 `audit/host-startable-library/results/cleanroom-linux-x86_64.txt`):
 
-* the single-file compiler built by `single/build.sh` (15,572,402 bytes),
+* the single-file compiler built by `single/build.sh` (15,572,402 bytes
+  before the merge of main; 15,592,777 at the merged tip, where the clean
+  room ran again with the same results and `single/smoke-test.sh` passed),
   copied into a fresh directory and run with an emptied environment (PATH
   `/usr/bin:/bin`, a fresh HOME): no checkout, no development driver, no
   package cache;
@@ -956,6 +958,8 @@ skipped there; with the NDK and the system images, the row below).
 | `tests/threads.test` (before the merge) | 21 of 21 |
 | `tools/compilerpedia.tcl check` | 1298 topics, 776 examples, 0 problems |
 | `tools/mutant-catalogs.tcl` | 107 catalogs, 3651 mutants, 0 problems |
+| the clean room (section 18) with the single executable rebuilt from the merged tip and the Android package rebuilt for its runtime (ABI `14aa5041bb46ae5d`) | every step as before the merge; only the package's digest (`10d5f483a7c4` for `3ea34bd0a5c1`) and the Android library's segment sizes differ from the committed record, which is the pre-merge run's |
+| `single/smoke-test.sh` on that single executable | passed |
 | `audit/host-startable-library/tools/mutate.tcl` | 38 of 38 killed, before the merge (section 20) and on the merged tip: the same log, line for line |
 | `audit/c-bindgen/tools/mutate.tcl -only target-preprocessing-ignored` | killed by 9 tests of behavior (next paragraph) |
 
