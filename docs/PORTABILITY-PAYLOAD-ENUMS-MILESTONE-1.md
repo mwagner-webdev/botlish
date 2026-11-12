@@ -423,7 +423,13 @@ accepted example; `error.enum-payload-required` and
 `capability.match` says a payload cannot be read back yet.
 `std::compiler::DiagnosticCode` gained `EnumPayloadRequired` and
 `EnumPayloadUnexpected` (both recoverable in a `static compile:` block;
-`sc-census-exhaustive` classifies them).
+`sc-census-exhaustive` classifies them). The compiler service's semantic
+tokens (`service::tokens`, which the language server serves) mark a
+construction's case as an enum member with its enum before it, from the
+`caseOrigin` the resolver records on the construction's struct node, and
+a declaration's payload fields as property declarations with their types;
+nothing else in the service changed (hover and definition read the HIR as
+before).
 
 ## 11. Boundaries and other targets
 
@@ -729,11 +735,13 @@ What this shows:
   for the whole program, the loop's Lists).
 * A payload-bearing value costs one more allocation than the struct of its
   fields, natively: its payload is an anonymous struct object (the
-  construction's argument) and the case an EnumCase object pointing at it,
-  80 bytes against the struct's 56 (16 + 24 bytes more per value). That is
-  the whole of the construction's extra cost on every backend (1.4x
-  natively, 1.6x and 1.8x on the Tcl backends, whose value is a list
-  holding the payload dict). Every operation that makes a value pays it
+  construction's argument) and the case an EnumCase object pointing at it:
+  72 bytes per value against the struct's 48 (the programs' bytes minus the
+  loop's 1600120, over 200000 values), the EnumCase object's 24. That
+  accounts for the construction's extra cost natively (1.4x); on the Tcl
+  backends (1.8x on the interpreter, 1.6x on the Tcl compiler) the value
+  is a list holding the enum's and the case's names and the payload
+  struct, built by a call of `enum#case`. Every operation that makes a value pays it
   (the array, vector and larger-payload rows construct one per iteration);
   passing one (a word, a pointer) costs what passing a struct does.
 * `==` and `hash` read the enum's and the case's names before the payload;
