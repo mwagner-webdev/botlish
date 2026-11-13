@@ -26,24 +26,24 @@
 ## surface/modules.tcl
 <<<<
     while 1 {
-        set wanted [ContractOwners $state]
+        set wanted [ContractOwners [dict get $state imports]]
 ====
     while 0 {
-        set wanted [ContractOwners $state]
+        set wanted [ContractOwners [dict get $state imports]]
 >>>>
 
 @@ transitive-lost only the entry program's imports are reachable: a module that imports std::str and returns the result, consumed by a program that does not, loses the Byte
 !! eut-modules eut-package
 ## surface/modules.tcl
 <<<<
-    dict for {key environment} [dict get $state imports] {
+    dict for {key environment} $imports {
         if {$key ne ""} {
             lappend reachable $key
         }
         lappend reachable {*}[dict get $environment namespaces]
     }
 ====
-    dict for {key environment} [dict get $state imports] {
+    dict for {key environment} $imports {
         if {$key ne ""} {
             continue
         }
@@ -86,14 +86,15 @@
             if {[core::type::isNamed ${owner}::[lindex [dict keys [dict get $wanted $owner]] 0]]} continue
 >>>>
 
-@@ cache-dependency-dropped the module loaded for the contract is no probe: no import names it, so a cached program importing only std::str keeps an old declaration of std::byte::Byte after std::byte's file changes
-!! eut-cache-dependency
-## surface/modules.tcl
+@@ cache-dependency-dropped the modules loaded for contract types are no dependency of a cache entry: no import names them, so a cached program importing only std::str keeps an old declaration of std::byte::Byte after std::byte's file changes, or its plain list after the file appears
+!! eut-cache-dependency eut-cache-dependency-absent
+## surface/cache.tcl
 <<<<
-            Probe file $path
-            LoadNamespace state $owner "" $path "#std" $owner
+    foreach owner [surface::modules::ContractModules [dict get $hir declarations imports]] {
+        lappend paths [surface::modules::ModulePath $owner]
 ====
-            LoadNamespace state $owner "" $path "#std" $owner
+    foreach owner [surface::modules::ContractModules {}] {
+        lappend paths [surface::modules::ModulePath $owner]
 >>>>
 
 @@ undeclared-type-unchecked a loaded module that does not declare the contract's type is not reported: the result silently drops to the plain list

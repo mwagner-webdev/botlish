@@ -1990,8 +1990,10 @@ proc surface::modules::LoadNamespace {stateVar name usedAtSpan {path ""} {scope 
 # module's declarations (a trait's conformance reads the witness's owner
 # namespace, hir::traits::satisfies), so a type declared without its module
 # would satisfy a trait in a program that imports the module and fail it in
-# one that does not. The module's file is a probe (the front-end cache's
-# dependency: no import names it). Loading repeats until no reachable
+# one that does not. The module's paths are the front-end cache's
+# dependencies, which surface::cache::Dependencies derives from the HIR's
+# import environments as this does (ContractModules): no import names it.
+# Loading repeats until no reachable
 # namespace names a module that is not loaded (a loaded module's own imports
 # are reachable), in sorted order: the result does not depend on the order of
 # the program's imports.
@@ -2014,7 +2016,7 @@ proc surface::modules::ContractTypes {stateVar} {
     # library): no import could load it either, so nothing is declared.
     set absent [dict create]
     while 1 {
-        set wanted [ContractOwners $state]
+        set wanted [ContractOwners [dict get $state imports]]
         set missing [lmap owner [lsort [dict keys $wanted]] {
             if {[dict exists $state loaded $owner] || [dict exists $absent $owner]} continue
             set owner
@@ -2038,11 +2040,10 @@ proc surface::modules::ContractTypes {stateVar} {
                     "\"$owner\" is a platform's module, which not every target has"
             }
             set path [ModuleFile $owner [dict get $state target] ""]
-            Probe file $path
             LoadNamespace state $owner "" $path "#std" $owner
         }
     }
-    dict for {owner names} [ContractOwners $state] {
+    dict for {owner names} [ContractOwners [dict get $state imports]] {
         if {[dict exists $absent $owner]} continue
         foreach name [lsort [dict keys $names]] {
             if {$name ni [dict get $state loadedTypes $owner]} {
@@ -2054,11 +2055,14 @@ proc surface::modules::ContractTypes {stateVar} {
 }
 
 # OWNER -> {NAME -> NATIVE} for every type ${OWNER}::NAME the result contract
-# of a native of a namespace STATE's compilation can reach names, NATIVE the
-# first such native in sorted order (ContractTypes).
-proc surface::modules::ContractOwners {state} {
+# of a native of a namespace a compilation can reach names, NATIVE the first
+# such native in sorted order (ContractTypes). IMPORTS is the compilation's
+# import environments (the loader's `imports`, a HIR's `declarations
+# imports`): module identity ("" the entry program) -> {namespaces NS...
+# types ...}.
+proc surface::modules::ContractOwners {imports} {
     set reachable [list ""]
-    dict for {key environment} [dict get $state imports] {
+    dict for {key environment} $imports {
         if {$key ne ""} {
             lappend reachable $key
         }
@@ -2075,6 +2079,14 @@ proc surface::modules::ContractOwners {state} {
         }
     }
     return $wanted
+}
+
+# The standard modules the loader loads, or would load were they there, for
+# the contract types of the compilation whose import environments are
+# IMPORTS (ContractOwners), sorted: the front-end cache's dependencies
+# (surface::cache::Dependencies), which no import names.
+proc surface::modules::ContractModules {imports} {
+    return [lsort [dict keys [ContractOwners $imports]]]
 }
 
 # Raises the COMPILER-INTERNAL failure of the result contract of native

@@ -2012,6 +2012,7 @@ tests/encode-utf8-type-stability.test eut-application-byte-module pass
 tests/encode-utf8-type-stability.test eut-broken-module-same-outcome pass
 tests/encode-utf8-type-stability.test eut-c4-c5-same-outcome pass
 tests/encode-utf8-type-stability.test eut-cache-dependency pass
+tests/encode-utf8-type-stability.test eut-cache-dependency-absent pass
 tests/encode-utf8-type-stability.test eut-cache-hit-equals-miss pass
 tests/encode-utf8-type-stability.test eut-contract-census pass
 tests/encode-utf8-type-stability.test eut-contract-import-independent pass

@@ -686,6 +686,30 @@ test eut-cache-dependency {the module loaded for the contract is a dependency of
     }
 } -cleanup {unset -nocomplain dir cache first path channel text second} -result {{std::byte::Byte Int {interval 0 255}} {std::byte::Byte Int {interval 0 1000}} 0}
 
+test eut-cache-dependency-absent {in a library without std::byte, a cached program importing only std::str (the plain list) is compiled again once stdlib/byte.bot appears, and gets std::byte::Byte: the module's path is a dependency whether or not it was there, derived from the HIR's imports as the loader derives it} -body {
+    withPrivateLibrary {
+        set dir [eut::App {p.bot {import std::str
+
+"a".encode_utf8()
+}}]
+        set cache [file join $dir cache]
+        set path [file join $::core::libraryDir byte.bot]
+        set channel [open $path r]
+        set text [read $channel]
+        close $channel
+        file delete $path
+        set first [eut::CallTypes [surface::readProgramFile [file join $dir p.bot] -warnings off -cache $cache] std::str::encode_utf8]
+        set hir [surface::readProgramFile [file join $dir p.bot] -warnings off -cache ""]
+        set listed [expr {$path in [lmap d [surface::cache::Dependencies $hir {}] {lindex $d 0}]}]
+        set channel [open $path w]
+        puts -nonewline $channel $text
+        close $channel
+        surface::cache::resetStats
+        set second [eut::CallTypes [surface::readProgramFile [file join $dir p.bot] -warnings off -cache $cache] std::str::encode_utf8]
+        list $first $listed $second [dict get [surface::cache::stats] hits]
+    }
+} -cleanup {unset -nocomplain dir cache path channel text first hir listed second} -result {list 1 {{List[int[std::byte::Byte]]}} 0}
+
 test eut-isolation {compiling A (std::str only), then B (a private library whose std::byte::Byte is 0..1000), then A again in one process: both As declare the 0..255 Byte and type the call alike, and the first A's HIR, activated after B, still sees its own declaration} -body {
     set src "import std::str\n\n\"a\".encode_utf8()\n"
     set a1 [eut::Compile $src]

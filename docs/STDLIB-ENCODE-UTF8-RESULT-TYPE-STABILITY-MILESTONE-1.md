@@ -348,23 +348,30 @@ mutant that adds it is killed (section M).
 | file | change |
 |---|---|
 | `core/native.tcl` | `contractTypes NS`: the `{TYPE NATIVE}` pairs of the `typed` shapes of `NS`'s natives, memoized per namespace and forgotten by `register` and `unregister`; `ValidShape` requires a `typed` NAME to be `std::NS::Name`; the shape's documentation |
-| `surface/modules.tcl` | `ContractTypes` (the fixpoint that loads contract modules, skipping a module the library at hand lacks, then checks each loaded one declares its type), `ContractOwners` (reachable namespaces to `OWNER -> {NAME -> NATIVE}`), `ContractError` (the COMPILER-INTERNAL failure); called by `BuildProgram` and `LoadNamespaces` after the import closure and before reference errors are raised; the header's account of loading |
+| `surface/modules.tcl` | `ContractTypes` (the fixpoint that loads contract modules, skipping a module the library at hand lacks, then checks each loaded one declares its type), `ContractOwners` (an import environment's reachable namespaces to `OWNER -> {NAME -> NATIVE}`), `ContractModules` (their sorted owners, for the cache), `ContractError` (the COMPILER-INTERNAL failure); called by `BuildProgram` and `LoadNamespaces` after the import closure and before reference errors are raised; the header's account of loading |
 | `hir/types.tcl` | `ShapeResult`'s `typed` case: the fallback only for an undeclared NAME (no loader), an unproven domain a COMPILER-INTERNAL failure; comments |
-| `surface/cache.tcl` | comments: the contract module is a probe, hence a dependency |
+| `surface/cache.tcl` | `Dependencies` adds the contract modules' paths (`surface::modules::ContractModules` of the HIR's import environments), there or not |
 | `compilerpedia/notes/stdlib.notes` (and the generated page) | `encode_utf8`'s note and examples, `decode_utf8`'s note (section O) |
 | `docs/README.md`, `docs/IMPORTS.md`, `docs/STATIC-COMPLETION-PROOFS.md`, `docs/SYMBOLIC-TYPE-IDENTITY.md`, the census | the unconditional contract, the loading rule, update notes |
-| `tests/encode-utf8-type-stability.test` | new, 39 tests |
+| `tests/encode-utf8-type-stability.test` | new, 40 tests |
 | `tests/symbolic-type-identity.test`, `tests/loop-clause-binding-types.test`, `tests/text-collection-docs-diagnostics.test`, `tests/traits.test` | expectations of the old conditional rule flipped (section H) |
 | `audit/text-collection-precision/probes/` | `c3`, `c4`, `c5` updated, `c7` added |
 | `audit/text-collection-docs/tools/mutants.txt` | M2's documentation mutant rewritten to the new text (same rule) |
 | `audit/encode-utf8-type-stability/` | the reproducer, the evidence and benchmark tools, the mutation catalog and harness |
 
-The front-end cache needs no new key input: the contract module's file is a
-loader probe, so its text is a dependency of every entry that loaded it
-(`eut-cache-dependency`), and every cache entry and interchange text made by
-the previous front end is refused by the front-end fingerprint, which covers
-`core/`, `hir/` and `surface/` (Inspected: `surface::cache::Key`,
-`hir::interchange::fingerprint`). The interchange format does not change;
+The front-end cache needs no new key input. `surface::cache::Dependencies`
+adds the paths of every contract module, derived from the HIR's import
+environments exactly as the loader derives them
+(`surface::modules::ContractModules`), there or not: an entry depends on
+`stdlib/byte.bot`'s text when the module was loaded, and on its absence when
+the library had none (`eut-cache-dependency`, `eut-cache-dependency-absent`).
+A first version recorded the file as a loader probe; the cache round-trip
+audit (`roundtrip.tcl -via cache`) refused it, since a caller with a HIR
+alone must find every file the HIR was built from among its dependencies,
+and the absent case was then no dependency at all. Every cache entry and
+interchange text made by the previous front end is refused by the front-end
+fingerprint, which covers `core/`, `hir/` and `surface/` (Inspected:
+`surface::cache::Key`, `hir::interchange::fingerprint`). The interchange format does not change;
 its content does (the loaded module's section and declarations).
 
 ## H. Observable semantic changes
@@ -422,7 +429,9 @@ Executed (`tests/encode-utf8-type-stability.test`):
 * **Cache:** a miss then a hit give the same declaration and type
   (`eut-cache-hit-equals-miss`); after `stdlib/byte.bot` changes (a private
   library), a program importing only `std::str` is compiled again, not read
-  from its entry, and gets the new declaration (`eut-cache-dependency`).
+  from its entry, and gets the new declaration (`eut-cache-dependency`); in a
+  library without `stdlib/byte.bot`, the entry (the plain `list`) is
+  compiled again once the file appears (`eut-cache-dependency-absent`).
 * **Isolation:** A, B, A in one process (`eut-isolation`, above).
 
 ## L. Backend parity

@@ -40,10 +40,11 @@
 # no search path), so nothing else can change which files a program reads --
 # but which packages are installed, below the root: every package directory
 # the loader asked about (there or not) and every file of a package's tree
-# it probed are dependencies too (BOT-MODULES-MILESTONE-1.md), and so is a
-# standard-library module the loader loads for a native's contract type,
-# which no import names (surface/modules.tcl's ContractTypes: a probe;
-# STDLIB-ENCODE-UTF8-RESULT-TYPE-STABILITY-MILESTONE-1.md).
+# it probed are dependencies too (BOT-MODULES-MILESTONE-1.md), and so are
+# the paths of each standard-library module the loader loads for a native's
+# contract type, which no import names (surface/modules.tcl's
+# ContractModules; STDLIB-ENCODE-UTF8-RESULT-TYPE-STABILITY-MILESTONE-1.md),
+# there or not: a library without the module declares no such type.
 #
 # Targets: the key holds the full target name (macos-aarch64, never its
 # architecture alone), so a compilation for one target never reads another
@@ -147,7 +148,8 @@ proc surface::cache::Contents {path existsVar} {
 # ModuleFile: the host's when "", as the build's) and its application-module
 # path under ROOT, the program's application root ("" for none) -- imports
 # are the only thing that loads a module (IMPORTS.md: dependencies are
-# declared, never discovered), so these are every module file its build read
+# declared, never discovered), so these -- with the modules a native's
+# contract type loads, below -- are every module file its build read
 # besides the program, and the paths it found no file at -- with the text
 # its build read (READS: PATH -> text). Every candidate path of every
 # namespace is kept, whichever exists: a file appearing at another one
@@ -160,15 +162,13 @@ proc surface::cache::Contents {path existsVar} {
 # qualifier names a namespace at all depends on a file no import names (an
 # enum's case Color::Red, while no file Color.bot makes Color a namespace:
 # AMBIGUOUS-QUALIFIER). The loader records every file and directory it asks
-# about -- each candidate file of the application's or a package's tree,
-# each package directory (OWNER/.bot_modules/NAME), there or not, and each
-# standard-library module loaded for a native's contract type
-# (surface/modules.tcl's ContractTypes) -- in PROBES (PATH -> file or
-# directory, surface/modules.tcl's Probe), and every one is a dependency:
-# {PATH EXISTS "" directory} for a directory, which must still be one (or
-# still none). A build's application-module paths are among its probes; the
-# HIR's own candidates above are what a caller with a HIR alone (no probes)
-# gets.
+# about -- each candidate file of the application's or a package's tree and
+# each package directory (OWNER/.bot_modules/NAME), there or not -- in PROBES
+# (PATH -> file or directory, surface/modules.tcl's Probe), and every one is
+# a dependency: {PATH EXISTS "" directory} for a directory, which must still
+# be one (or still none). A build's application-module paths are among its
+# probes; the HIR's own candidates above are what a caller with a HIR alone
+# (no probes) gets.
 proc surface::cache::Dependencies {hir reads {target ""} {root ""} {probes ""}} {
     set target [hir::cabi::ResolveTarget $target]
     if {$target eq ""} {
@@ -200,6 +200,15 @@ proc surface::cache::Dependencies {hir reads {target ""} {root ""} {probes ""}} 
             if {$root ne ""} {
                 lappend paths [surface::modules::NamespaceFile $root $namespace]
             }
+        }
+    }
+    # The modules loaded for natives' contract types (surface/modules.tcl's
+    # ContractTypes), there or not: derived from the import environments as
+    # the loader derives them, so a caller with a HIR alone has them too.
+    foreach owner [surface::modules::ContractModules [dict get $hir declarations imports]] {
+        lappend paths [surface::modules::ModulePath $owner]
+        if {$arch ne ""} {
+            lappend paths [surface::modules::ArchModulePath $owner $arch]
         }
     }
     set directories {}
