@@ -607,7 +607,61 @@ LOCAL-SUITE-PLACEHOLDER
 
 ## N. Performance
 
-(Pending.)
+Executed: `audit/encode-utf8-type-stability/tools/bench.tcl` with the
+compiler of the pristine `bd6f99f9` worktree (`-root`) and of the change, one
+after the other, on the same 4-core container with nothing else running, each
+program compiled 7 times in one process after a warm-up (no cache), then
+once into an empty cache (a miss) and once from it (a hit). Times are
+milliseconds of the whole front end (`surface::readProgramFile`); this is a
+shared machine, so the fastest of seven is the figure to compare, and the
+two large programs vary by more than the change between runs.
+
+| program | fastest, before | fastest, after | median, before | median, after | modules | source types | interned types | interchange bytes | cache miss | cache hit |
+|---|---:|---:|---:|---:|---|---|---|---|---|---|
+| `str-call`: `import std::str`, one `encode_utf8` call | 3.9 | 19.3 | 4.1 | 23.2 | 0 -> 1 | 0 -> 4 | 3 -> 31 | 66,754 -> 101,919 | 7.1 -> 22.3 | 3.0 -> 3.3 |
+| `str-nocall`: `import std::str`, no `encode_utf8` | 3.7 | 19.1 | 4.0 | 19.6 | 0 -> 1 | 0 -> 4 | 3 -> 31 | 66,584 -> 101,750 | 5.9 -> 22.1 | 1.3 -> 2.6 |
+| `str-byte`: `str-call` with `import std::byte` | 21.2 | 18.9 | 22.5 | 19.6 | 1 -> 1 | 4 -> 4 | 31 -> 31 | 102,000 -> 101,931 | 27.3 -> 27.1 | 3.2 -> 3.6 |
+| `modules-20`: 20 application modules each importing `std::str` | 63.3 | 79.7 | 66.3 | 90.7 | 20 -> 21 | 0 -> 4 | 45 -> 73 | 191,887 -> 230,387 | 74.4 -> 91.0 | 6.5 -> 7.3 |
+| `instances-60`: 10 untyped helpers, 60 semantic instances | 101.7 | 124.0 | 112.5 | 128.5 | 1 -> 2 | 0 -> 4 | 33 -> 57 | 243,331 -> 281,463 | 119.7 -> 133.5 | 7.5 -> 9.2 |
+| `examples/stdlib/csv_records.bot` | 580.4 | 585.8 | 596.3 | 639.1 | 2 -> 3 | 1 -> 5 | 113 -> 135 | 766,540 -> 803,321 | 743.4 -> 687.9 | 30.2 -> 29.7 |
+| `examples/dfa/json/json.bot` | 1,836.0 | 1,619.1 | 2,018.3 | 2,065.7 | 4 -> 5 | 4 -> 8 | 137 -> 157 | 1,351,231 -> 1,386,896 | 2,148.6 -> 1,886.5 | 71.5 -> 68.0 |
+
+What it shows:
+
+* **The cost is `std::byte`'s front end, once per compilation, and nothing
+  else.** `str-byte`, which imported `std::byte` already, does the same work
+  before and after (one module, four source types, 31 interned types, the
+  same interchange size within 70 bytes of ids; its times differ by noise).
+  Every other program pays what that import cost it: about 15 ms of front
+  end (`str-call` 3.9 -> 19.3, `str-nocall` 3.7 -> 19.1, `modules-20` +16,
+  `instances-60` +22), one module, four source types, 24 to 28 interned
+  types and about 35 KB of interchange text.
+* **It does not grow with the program.** Twenty modules importing
+  `std::str` load `std::byte` once (`modules-20`: 20 -> 21 modules), and the
+  60 semantic instances are 60 after as before: the type is
+  argument-independent and makes no new instance (section I).
+* **Whether the program calls `encode_utf8` does not matter**
+  (`str-nocall`): the contract is the namespace's, decided before any
+  analysis. This is the price of the rule being independent of how the
+  native is reached (through a function value, a module, a package); a
+  program importing `std::str` for `length` alone now pays the 15 ms too.
+* **A cache hit stays cheap** (1.3 to 3.6 ms for the small programs): the
+  entry holds the loaded module's text like any other module's, and reading
+  it back builds nothing. A miss pays the build.
+* **Real programs:** for `csv_records` and the JSON recognizer the
+  difference is inside the runs' noise (their medians moved by +43 and +47
+  ms and their fastest runs by +5 and -217 ms).
+
+**What the backends compile (Executed, `main.tcl -emit-nir` and
+`core::compiler::compileHir` with both trees).** Native lowering compiles
+what the program reaches: the NIR of `str-call` and `str-nocall` is the same
+before and after, line for line, but for the expression ids its `@` marks
+carry (`@e3` became `@e82`: `std::byte`'s expressions are numbered first).
+The Tcl compiler compiles every function of every loaded module, so it now
+emits `std::byte`'s eight functions as procs: `str-call`'s generated code
+grows from 392 to 5,975 characters (1 proc to 9) and `compileHir` from about
+2 to 3-7 ms -- exactly what the program with `import std::byte` generated
+before (5,987 characters, 9 procs). The values are unchanged.
 
 ## O. Documentation
 
