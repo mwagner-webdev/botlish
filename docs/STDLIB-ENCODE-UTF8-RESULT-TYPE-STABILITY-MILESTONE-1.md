@@ -376,7 +376,71 @@ its content does (the loaded module's section and declarations).
 
 ## H. Observable semantic changes
 
-(Pending: the corpus comparison against `bd6f99f9` is running.)
+**The corpus comparison (Executed).** `audit/method-resolution/tools/
+invariance.tcl` recorded 282 programs with the front end of the pristine
+`bd6f99f9` worktree and of the change -- every golden suite, the 2048 and Icy
+Tower suites, every `.bot` file of `examples/` and `bench/`, the census's 19
+probes and the reproducer pair -- each in a process of its own, `-strict 0`,
+no cache, then compared them (`-compare`). One probe, `f1-escapes.bot` (a
+deliberate syntax error whose truncated message the tool cannot read back as
+a record), was compared as raw text instead: identical.
+
+| compared | differences |
+|---|---|
+| method-call decisions (`methodDecided`) | none |
+| every call's candidate (`methodChoices`) | none |
+| static sites' outcomes | 1: `methods-list-without-str.bot`'s `x.complement()` block reifies MISSING-IMPORT, was NOT-A-STRUCT (below) |
+| acceptance | 1: probe `c4`, now accepted (the intended correction) |
+| reported diagnostics | 2: probe `c4` and `repro.bot` (the intended correction, section B) |
+| HIR text of accepted programs | 108 programs, each now loading `std::byte`: the text grew by 5,695 to 6,178 characters (59 of them by exactly 5,981), `std::byte`'s section and declarations with the expression ids after them renumbered; the other 173 are identical |
+| front-end counters, summed | identical: 602 builds, 122 method trial builds, 22 single deviations, 5 final rebuilds, 88 reused builds, 9 reported forms |
+
+No program gained or lost a diagnostic other than these, and no method
+decision, static decision or dependency-driven rebuild changed: the extra
+module is code nothing calls (Inspected: no reachable function of `std::byte`
+is introduced, and its functions are no method candidates where it is not
+imported).
+
+**Classification of every change found.**
+
+| change | where | class |
+|---|---|---|
+| `encode_utf8()` is `List[std::byte::Byte]` without `std::byte`; `c4` accepted; the reproducer's three diagnostics gone; hovers and facts precise | every program reaching `std::str` | 1, the intended correction |
+| `std::byte` (4 types, 2 errors, 8 functions) loaded into every program reaching `std::str` without it | the HIR, `-traits`'s declared types, native error numbering, the generic-blocker census (+6: its six untyped functions; never compiled, no guard emitted), front-end time (section N) | 2, a justified consequence: exactly what an import of `std::byte` by another module has always brought (Executed: `ai_text_clean.bot` with an explicit `import std::byte` on `bd6f99f9` has the new numbers) |
+| `b.complement()` in a file not importing `std::byte` reports `std::byte`'s missing import, was "no function named complement is visible" | method-style calls of `std::byte`'s names | 2: still rejected, `complement` still no candidate; byte for byte the diagnosis `bd6f99f9` gives when `std::byte` is loaded through `std::abi::bytes` |
+| a standard library whose `std::byte::Byte` contradicts the native (narrower domain, refinement, missing) fails as COMPILER-INTERNAL, was a silent `list` | a broken or test library only | 2: the contract is no longer optional, so a silent fallback could only hide a standard-library bug |
+| none | -- | 3, unrelated regressions: none found |
+
+**Tests that changed, and why (Executed).** Each changed expectation stated
+the old conditional rule or assumed that a program importing `std::str`
+loads no other module:
+
+* the old rule, now flipped: `symbolic-type-identity.test` (five tests: no
+  `Byte` loaded, the program's own `Byte`, the narrow and the non-Int
+  `std::byte::Byte`), `loop-clause-binding-types.test`'s
+  `lcb-unknown-elements`, `text-collection-docs-diagnostics.test`'s
+  `tcd-doc-utf8-static-type`, probes `c3`-`c5`;
+* the loaded module stated: `traits.test`'s `trait-report` (four more
+  declared types), `error-payloads.test` (two more declared errors, native
+  error number 2 -> 4), `native.test`'s `native-spec-14` and
+  `hir-specialize.test`'s corpus and explanation tests (+6 generic blockers),
+  the golden `methods-list-without-str.bot` case (MISSING-IMPORT; its manifest
+  row marked weaker, so its Tcl original, whose program loads no module at
+  all and is not expressible as a suite any more, runs locally again), the
+  method-sugar fuzzer's hidden-module case;
+* a premise about the HIR made explicit (the entry program's nodes, block
+  ids normalized, NIR error numbers matched as any number, counts relative
+  to the same program without its function): `stdlib-namespaces.test`,
+  `method-sugar.test`, `structural-fn-types.test`, `std-namespace.test`,
+  `hir-specialize.test`'s `hir-specialize-11`, `exact-callable-key.test`,
+  `direct-hir-native.test`, `checked-domain-proof-provenance.test` (whose
+  fixed error numbers would otherwise have let its counts of 0 pass for no
+  reason), `refinement-values.test`, `intrinsic-contracts.test` (core IR text
+  has no declarations, so `std::byte`'s `errors` clauses come back as
+  UNHANDLED-ERRORs of its own functions there); the census's type matrix
+  takes its `unknown` column from a List erased to the bare `list` (it used
+  `encode_utf8` without `std::byte`) and is the census's again, cell for
+  cell.
 
 ## I. Semantic instances
 
