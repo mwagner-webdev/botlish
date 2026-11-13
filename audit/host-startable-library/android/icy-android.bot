@@ -1,0 +1,18 @@
+# icy-android.bot -- Icy Tower's entry for android-aarch64
+# (RN-HOST-STARTABLE-APPLICATION-LIBRARY-MILESTONE-1.md, "Android AArch64
+# artifacts"): examples/games/icy-tower/main.bot with Android's IO
+# (android_log, beside it) in place of std::linux::io, which is the Linux
+# platform's (UNSUPPORTED-PLATFORM for Android) -- as main-windows.bot is
+# with std::windows::io. Every game module is unchanged; SDL is the
+# generated android-aarch64 binding, staged as the sdl3 package.
+import android_log
+import game
+import sdl
+import std::io
+
+with context android_log::create()
+with context sdl::create()
+
+game::main(game::arguments()):
+    on std::io::WriteFailed:
+        unit

@@ -1,0 +1,932 @@
+# application-library.test -- host-startable application libraries
+# (RN-HOST-STARTABLE-APPLICATION-LIBRARY-MILESTONE-1.md): an ordinary
+# Botlish entry program built with -emit-native-library NAME -application,
+# run by a C host through NAME_main(argc, argv, &error) on the host's
+# thread, in a VM made and dropped inside the call.
+#
+#   * NAME_create initializes only (al-create-initializes-only): an
+#     instance never runs the entry program's statements; NAME_main runs
+#     them, once per call, each call a fresh VM;
+#   * the entry's own contexts, their state and a long loop on a 1 MiB host
+#     thread, the output the same as the executable's (al-contexts);
+#   * argv: argv[0] included, empty, non-ASCII and large arguments; the
+#     refusals -- negative argc, NULL argv, a NULL argument, invalid UTF-8
+#     -- before anything runs (al-argv);
+#   * failures as statuses and owned errors, the error out-parameter's
+#     contract, NATIVE LIMIT STACK on a host thread, no signal handler
+#     installed (al-errors, al-stack);
+#   * reentrancy refused, the next call accepted; another instance from
+#     inside the entry (al-reentrant);
+#   * independent VMs on concurrent host threads, sequential calls on one
+#     thread, GC stress (al-threads, al-repeated);
+#   * authority: an export of an application library keeps every export
+#     rule, a missing installation is MISSING-CONTEXT (al-authority);
+#   * an ordinary library unchanged: no NAME_main, schema 2 (al-ordinary);
+#   * the header, the manifest (schema 3), the symbols, main.tcl
+#     (al-header-manifest, al-symbols, al-main-cli);
+#   * the dynamic loader: dlopen, NAME_main, dlclose and dlopen again; a
+#     thread that ran NAME_main (or an instance) outliving the library's
+#     unloading (al-dlopen);
+#   * a program with thread entries: the dispatch's three cases (al-thread-
+#     entries);
+#   * Icy Tower's unchanged main.bot as an application library, started by
+#     a host shaped like SDL3's Android bootstrap -- a 1 MiB thread named
+#     SDLThread, SDL_RunApp, SDL_main calling NAME_main -- 600 autopilot
+#     frames whose summary is the committed executable's, every SDL call on
+#     SDLThread, also under GC stress (al-icy-tower-sdl-runapp; it needs the
+#     package-owned libSDL3.so, tclsh9.0 tests/cffi/sdl3.tcl, and SDL's
+#     pinned headers, tools/c-bindgen.tcl fetch sdl3).
+#
+# Every behavior test links real C (the host's cc) against the generated
+# header and archive only, and runs it, also under BOTLISH_NATIVE_GC_STRESS=1.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+source [file join $::projectRoot native native.tcl]
+source [file join $::projectRoot pm pm.tcl]
+source [file join $::projectRoot lsp json.tcl]
+source [file join $::projectRoot tests cffi sdl3.tcl]
+
+testConstraint nativeBuilt [expr {![catch {native::binary}]}]
+testConstraint nativeLibraries [expr {[native::hostSupports libraries] && [testConstraint nativeBuilt]
+    && [auto_execok cc] ne "" && [auto_execok ld] ne "" && [auto_execok objcopy] ne "" && [auto_execok ar] ne ""
+    && [file exists [file join [file dirname [native::binary]] libbotlish_native.a]]}]
+testConstraint nm [expr {[auto_execok nm] ne ""}]
+# The SDL acceptance: Linux x86-64 (the committed Icy Tower executable is its
+# oracle), the package-owned libSDL3.so and SDL's pinned headers.
+proc alSdlSources {} {
+    if {[catch {exec [info nameofexecutable] [file join $::projectRoot tools c-bindgen.tcl] fetch sdl3} out]} { return "" }
+    set dir [lindex [split [string trim $out] \n] end]
+    return [expr {[file isfile [file join $dir include SDL3 SDL_main.h]] ? $dir : ""}]
+}
+testConstraint icyTowerSdl [expr {[testConstraint nativeLibraries] && [core::cabi::hostTarget] eq "linux-x86_64"
+    && [cffi::sdl3Dir] ne "" && [alSdlSources] ne ""}]
+set ::alCounter 0
+
+proc alWrite {path text} {
+    set channel [open $path w]
+    fconfigure $channel -encoding utf-8 -translation lf
+    puts -nonewline $channel $text
+    close $channel
+}
+
+proc alRead {path} {
+    set channel [open $path]
+    fconfigure $channel -encoding utf-8
+    set text [read $channel]
+    close $channel
+    return $text
+}
+
+# A fresh directory, its name with a space in it.
+proc alDir {} {
+    return [makeDirectory "al [pid]-[incr ::alCounter]"]
+}
+
+proc alHir {path args} {
+    return [surface::readProgramFile $path -warnings off -warning-channel "" {*}$args]
+}
+
+# Application library NAME from SOURCE (FILE.bot in DIR, beside MODULES
+# {NAME TEXT}), built into DIR/lib with ARGS (native::library's options;
+# -application 1 unless ARGS say otherwise). Returns native::library's
+# result.
+proc alLibrary {dir name source {modules {}} args} {
+    foreach {module text} $modules {
+        alWrite [file join $dir $module.bot] $text
+    }
+    alWrite [file join $dir $name.bot] $source
+    return [native::library [alHir [file join $dir $name.bot]] -name $name -out [file join $dir lib] \
+        -application 1 {*}$args]
+}
+
+# A C executable from SOURCE (the placeholder LIB replaced by NAME), linked
+# with the static libraries LIBS and EXTRA.
+proc alExecutable {dir name source libs args} {
+    alWrite [file join $dir main.c] [string map [list LIB $name] $source]
+    set exe [file join $dir main]
+    exec cc -O1 -Wall -Werror -I[file join $dir lib] [file join $dir main.c] {*}$libs \
+        {*}$native::library::systemLibraries -lpthread -o $exe {*}$args
+    return $exe
+}
+
+# EXE ARGS' output; with STRESS 1 under BOTLISH_NATIVE_GC_STRESS=1.
+proc alRun {exe {stress 0} args} {
+    set saved [array get ::env BOTLISH_NATIVE_GC_STRESS]
+    if {$stress} {
+        set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    } else {
+        unset -nocomplain ::env(BOTLISH_NATIVE_GC_STRESS)
+    }
+    try {
+        return [exec $exe {*}$args 2>@1]
+    } finally {
+        unset -nocomplain ::env(BOTLISH_NATIVE_GC_STRESS)
+        array set ::env $saved
+    }
+}
+
+# EXE ARGS' output, which must be the same with and without GC stress.
+proc alRunBoth {exe args} {
+    set plain [alRun $exe 0 {*}$args]
+    set stressed [alRun $exe 1 {*}$args]
+    if {$plain ne $stressed} {
+        error "output differs under GC stress:\n$plain\n--- stressed:\n$stressed"
+    }
+    return $plain
+}
+
+# The C helpers of a harness of library LIB: `report` prints a call's status
+# and its error's identity and fields (and releases it), `on_thread` runs
+# FN(ARG) on a new thread of STACK bytes and waits for it. Every line goes
+# through `say`, which flushes, so the host's lines and the program's own
+# (written to the same descriptor by the program's IO) stay in order.
+set ::alPrelude {
+#include <pthread.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include "LIB.h"
+__attribute__((unused)) static void say(const char *format, ...) {
+    va_list ap;
+    va_start(ap, format);
+    vprintf(format, ap);
+    va_end(ap);
+    fflush(stdout);
+}
+__attribute__((unused)) static void report(const char *what, int32_t status, LIB_error **ep) {
+    const uint8_t *p; size_t l;
+    LIB_error *e = ep ? *ep : NULL;
+    printf("%s: status %d", what, (int) status);
+    if (e != NULL) {
+        LIB_error_identity(e, &p, &l);
+        printf(" %.*s", (int) l, (const char *) p);
+        for (size_t i = 0; i < LIB_error_field_count(e); i++) {
+            int64_t n;
+            LIB_error_field_name(e, i, &p, &l);
+            printf(" %.*s=", (int) l, (const char *) p);
+            if (LIB_error_field_type(e, i) == LIB_FIELD_INT && LIB_error_field_int(e, i, &n) == LIB_STATUS_OK)
+                printf("%lld", (long long) n);
+            else
+                printf("(other)");
+        }
+        LIB_error_release(ep);
+    }
+    printf("\n");
+    fflush(stdout);
+}
+__attribute__((unused)) static void on_thread(size_t stack, void *(*fn)(void *), void *arg) {
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setstacksize(&attr, stack);
+    pthread_t t;
+    if (pthread_create(&t, &attr, fn, arg) != 0) { perror("pthread_create"); exit(1); }
+    pthread_join(t, NULL);
+    pthread_attr_destroy(&attr);
+}
+}
+
+# ---------------------------------------------------------------------------
+# NAME_create initializes only; NAME_main runs the entry program
+
+set ::alSideEffect {
+import std::int
+import std::io
+import std::linux::io
+import std::str
+
+exported c fn twice(n: int) -> int:
+    n * 2
+
+with context std::linux::io::create()
+
+std::io::print_line("the entry program ran"):
+    on std::io::WriteFailed:
+        unit
+}
+
+test al-create-initializes-only {NAME_create never runs the entry program: its instance's exports work and it is destroyed; NAME_main runs the entry once per call, a fresh VM each time} -constraints nativeLibraries -body {
+    set dir [alDir]
+    set built [alLibrary $dir side $::alSideEffect]
+    set exe [alExecutable $dir side "$::alPrelude
+int main(void) {
+    side_instance *in = NULL; side_error *e = NULL; int64_t r = 0;
+    int32_t s = side_create(&in, &e);
+    say(\"create: %d\\n\", s);
+    s = side_twice(in, 21, &r, &e);
+    say(\"twice: %d %lld\\n\", s, (long long) r);
+    say(\"destroy: %d\\n\", side_destroy(in));
+    char *argv\[\] = {\"side\", NULL};
+    say(\"main: %d\\n\", side_main(1, argv, &e));
+    say(\"main again: %d\\n\", side_main(1, argv, &e));
+    return 0;
+}
+" [list [dict get $built static]]]
+    alRunBoth $exe
+} -result {create: 0
+twice: 0 42
+destroy: 0
+the entry program ran
+main: 0
+the entry program ran
+main again: 0}
+
+# ---------------------------------------------------------------------------
+# Contexts, state and a loop on a host thread; the executable's output
+
+set ::alContexts {
+import std::int
+import std::io
+import std::linux::io
+import std::list
+import std::mutable_vector
+import std::str
+
+# Application state owned by an installed context: one count per frame.
+context struct Frames:
+    seen: MutableVector[int]
+
+# A second context, its settings.
+type Step = Int in 1..9
+
+context struct Settings:
+    step: Step
+
+# The frame loop: one self-tail-recursive function.
+fn frames(n: int, total: int, context f: Frames, s: Settings) -> int:
+    if n == 0:
+        return total
+    f.seen.push(n)
+    frames(n - 1, total + n * s.step)
+
+fn recorded(context f: Frames) -> int:
+    f.seen.length()
+
+with context std::linux::io::create()
+with context Frames {seen: std::mutable_vector::from_list([])}
+with context Settings {step: 3}
+
+total = frames(100000, 0)
+args = argv():
+    on InvalidArgumentEncoding:
+        []
+std::io::print_line("total ".concat(total.to_string()).concat(", frames ").concat(recorded().to_string()).concat(", arguments ").concat(std::list::length(args).to_string())):
+    on std::io::WriteFailed:
+        unit
+}
+
+test al-contexts {the entry installs its own contexts, keeps context-owned state through a 100,000-frame loop on a 1 MiB host thread, and prints what the same program's executable prints} -constraints nativeLibraries -body {
+    set dir [alDir]
+    set built [alLibrary $dir ctx $::alContexts]
+    set exe [alExecutable $dir ctx "$::alPrelude
+static void *run(void *unused) {
+    (void) unused;
+    char *argv\[\] = {\"ctx\", \"a\", \"b\", NULL};
+    ctx_error *e = NULL;
+    int32_t s = ctx_main(3, argv, &e);
+    report(\"main\", s, &e);
+    return NULL;
+}
+int main(void) {
+    on_thread(1024 * 1024, run, NULL);
+    return 0;
+}
+" [list [dict get $built static]]]
+    set library [alRunBoth $exe]
+    # The same entry program as an executable, run with the same arguments.
+    set program [native::executable [alHir [file join $dir ctx.bot]] [file join $dir ctx-exe]]
+    set executable [exec $program a b 2>@1]
+    list $library [expr {[lindex [split $library \n] 0] eq $executable}]
+} -result {{total 15000150000, frames 100000, arguments 3
+main: status 0} 1}
+
+# ---------------------------------------------------------------------------
+# argv
+
+set ::alArgv {
+import std::int
+import std::io
+import std::linux::io
+import std::list
+import std::str
+
+fn shown(a: str) -> str:
+    if std::str::length(a) > 40:
+        return "(long)"
+    a
+
+fn show(args: List[str], i: int, context io: std::io::IO) -> unit errors std::io::WriteFailed:
+    if i >= std::list::length(args):
+        return unit
+    a = args.at(i):
+        on IndexNotFound:
+            ""
+    std::io::print_line("  [".concat(i.to_string()).concat("] ").concat(std::str::length(a).to_string()).concat(" chars: <").concat(shown(a)).concat(">"))
+    show(args, i + 1)
+
+with context std::linux::io::create()
+
+args = argv():
+    on InvalidArgumentEncoding:
+        []
+std::io::print_line("argc ".concat(std::list::length(args).to_string())):
+    on std::io::WriteFailed:
+        unit
+show(args, 0):
+    on std::io::WriteFailed:
+        unit
+}
+
+test al-argv {argc and argv become argv(), argv[0] included, copied first; negative argc, a NULL argv, a NULL argument and invalid UTF-8 are refused before anything runs} -constraints nativeLibraries -body {
+    set dir [alDir]
+    set built [alLibrary $dir av $::alArgv]
+    set exe [alExecutable $dir av "$::alPrelude
+int main(void) {
+    av_error *e = NULL;
+    char *none\[\] = {NULL};
+    char *three\[\] = {\"av\", \"\", \"gr\\xc3\\xbc\\xc3\\x9f \\xf0\\x9f\\x98\\x80\", NULL};
+    char *bad\[\] = {\"av\", \"ok\", \"\\xff\\xfe\", NULL};
+    char *holes\[\] = {\"av\", NULL, \"x\", NULL};
+    report(\"argc 0\", av_main(0, none, &e), &e);
+    report(\"argc 0, argv NULL\", av_main(0, NULL, &e), &e);
+    report(\"three\", av_main(3, three, &e), &e);
+    report(\"one of three\", av_main(1, three, &e), &e);
+    size_t n = 1000000;
+    char *big = malloc(n + 1);
+    memset(big, 'z', n); big\[n\] = 0;
+    char *large\[\] = {\"av\", big, NULL};
+    report(\"large\", av_main(2, large, &e), &e);
+    free(big);
+    report(\"negative\", av_main(-1, three, &e), &e);
+    report(\"argv NULL\", av_main(2, NULL, &e), &e);
+    report(\"NULL argument\", av_main(3, holes, &e), &e);
+    report(\"not UTF-8\", av_main(3, bad, &e), &e);
+    report(\"after the refusals\", av_main(1, three, &e), &e);
+    return 0;
+}
+" [list [dict get $built static]]]
+    alRunBoth $exe
+} -result {argc 0
+argc 0: status 0
+argc 0
+argc 0, argv NULL: status 0
+argc 3
+  [0] 2 chars: <av>
+  [1] 0 chars: <>
+  [2] 6 chars: <grüß 😀>
+three: status 0
+argc 1
+  [0] 2 chars: <av>
+one of three: status 0
+argc 2
+  [0] 2 chars: <av>
+  [1] 1000000 chars: <(long)>
+large: status 0
+negative: status 4 ARGUMENT-COUNT
+argv NULL: status 4 NULL-POINTER
+NULL argument: status 3 ARGUMENT-NULL argument=1
+not UTF-8: status 3 ARGUMENT-NOT-UTF8 argument=2
+argc 1
+  [0] 2 chars: <av>
+after the refusals: status 0}
+
+# ---------------------------------------------------------------------------
+# Failures
+
+set ::alFails {
+import std::list
+
+fn depth(n: int) -> int:
+    if n == 0:
+        return 0
+    1 + depth(n - 1)
+
+args = argv():
+    on InvalidArgumentEncoding:
+        []
+if std::list::length(args) == 2:
+    depth(10000000)
+elif std::list::length(args) == 3:
+    std::list::length(args)
+else:
+    100.mod(std::list::length(args) - 1)
+}
+
+test al-errors {a failing entry is its status and an owned error; *error is NULL after a success whatever it held; a NULL error out-parameter is allowed; the next call succeeds} -constraints nativeLibraries -body {
+    set dir [alDir]
+    set built [alLibrary $dir fl $::alFails]
+    set exe [alExecutable $dir fl "$::alPrelude
+int main(void) {
+    fl_error *e = NULL;
+    char *one\[\] = {\"fl\", NULL};
+    char *three\[\] = {\"fl\", \"b\", \"c\", NULL};
+    report(\"runtime error\", fl_main(1, one, &e), &e);
+    say(\"error released: %s\\n\", e == NULL ? \"yes\" : \"no\");
+    e = (fl_error *) 0x1;
+    int32_t s = fl_main(3, three, &e);
+    say(\"success: %d, error %s\\n\", s, e == NULL ? \"NULL\" : \"stale\");
+    say(\"failure, no error out-parameter: %d\\n\", fl_main(1, one, NULL));
+    report(\"after the failures\", fl_main(3, three, &e), &e);
+    return 0;
+}
+" [list [dict get $built static]]]
+    alRunBoth $exe
+} -result {runtime error: status 2 CORE SEMANTIC ARITHMETIC
+error released: yes
+success: 0, error NULL
+failure, no error out-parameter: 2
+after the failures: status 0}
+
+test al-stack {on a 1 MiB host thread, recursion that would exhaust its stack is NATIVE LIMIT STACK and the host goes on; no signal handler is installed in the host} -constraints nativeLibraries -body {
+    set dir [alDir]
+    set built [alLibrary $dir st $::alFails]
+    set exe [alExecutable $dir st "$::alPrelude
+#include <signal.h>
+static void *run(void *unused) {
+    (void) unused;
+    st_error *e = NULL;
+    char *deep\[\] = {\"st\", \"deep\", NULL};
+    char *three\[\] = {\"st\", \"b\", \"c\", NULL};
+    struct sigaction before, after;
+    sigaction(SIGSEGV, NULL, &before);
+    report(\"deep\", st_main(2, deep, &e), &e);
+    sigaction(SIGSEGV, NULL, &after);
+    say(\"SIGSEGV handler unchanged: %s\\n\", before.sa_handler == after.sa_handler && after.sa_handler == SIG_DFL ? \"yes\" : \"no\");
+    report(\"next\", st_main(3, three, &e), &e);
+    return NULL;
+}
+int main(void) {
+    on_thread(1024 * 1024, run, NULL);
+    say(\"the host lives\\n\");
+    return 0;
+}
+" [list [dict get $built static]]]
+    alRunBoth $exe
+} -result {deep: status 2 NATIVE LIMIT STACK
+SIGSEGV handler unchanged: yes
+next: status 0
+the host lives}
+
+# ---------------------------------------------------------------------------
+# Reentrancy
+
+set ::alReentrant {
+import std::ffi::c
+import std::int
+import std::io
+import std::linux::io
+import std::str
+
+extern c fn host_reenter() -> std::ffi::c::Int
+
+exported c fn version() -> int:
+    7
+
+with context std::linux::io::create()
+
+r = host_reenter()
+std::io::print_line("the entry goes on after the host's call: ".concat(r.to_string())):
+    on std::io::WriteFailed:
+        unit
+}
+
+test al-reentrant {NAME_main from inside the entry (through C) is REENTRANT-CALL and changes nothing; the entry goes on; an instance made from inside the entry initializes only and answers; the next NAME_main runs} -constraints nativeLibraries -body {
+    set dir [alDir]
+    set built [alLibrary $dir re $::alReentrant {} -shared 0]
+    set exe [alExecutable $dir re "$::alPrelude
+static char *argv1\[\] = {\"re\", NULL};
+static int depth = 0;
+int host_reenter(void) {
+    re_error *e = NULL;
+    depth++;
+    report(\"nested main\", re_main(1, argv1, &e), &e);
+    re_instance *in = NULL; int64_t v = 0;
+    int32_t s = re_create(&in, &e);
+    s = s ? s : re_version(in, &v, &e);
+    say(\"instance inside the entry: %d version %lld\\n\", s, (long long) v);
+    re_destroy(in);
+    depth--;
+    return 5;
+}
+int main(void) {
+    re_error *e = NULL;
+    report(\"main\", re_main(1, argv1, &e), &e);
+    report(\"again\", re_main(1, argv1, &e), &e);
+    return depth;
+}
+" [list [dict get $built static]]]
+    alRunBoth $exe
+} -result {nested main: status 4 REENTRANT-CALL
+instance inside the entry: 0 version 7
+the entry goes on after the host's call: 5
+main: status 0
+nested main: status 4 REENTRANT-CALL
+instance inside the entry: 0 version 7
+the entry goes on after the host's call: 5
+again: status 0}
+
+# ---------------------------------------------------------------------------
+# Threads: independent VMs; many calls on one thread
+
+set ::alWorker {
+import std::int
+import std::list
+import std::mutable_vector
+
+context struct Tally:
+    seen: MutableVector[int]
+
+fn count(n: int, context t: Tally) -> int:
+    if n == 0:
+        return t.seen.length()
+    t.seen.push(n)
+    count(n - 1)
+
+fn arg_count() -> int:
+    args = argv():
+        on InvalidArgumentEncoding:
+            []
+    std::list::length(args)
+
+with context Tally {seen: std::mutable_vector::from_list([])}
+
+# Each VM's own state: the frames its argument count asks for.
+expected = arg_count() * 1000
+if count(expected) != expected:
+    100.mod(0)
+}
+
+test al-threads {four host threads run NAME_main at once, each with its own VM and context-owned state, a hundred times each, under GC stress too} -constraints nativeLibraries -body {
+    set dir [alDir]
+    set built [alLibrary $dir wk $::alWorker]
+    set exe [alExecutable $dir wk "$::alPrelude
+static void *run(void *arg) {
+    long k = (long) arg;
+    char *argv\[\] = {\"wk\", \"a\", \"b\", \"c\", \"d\", NULL};
+    int failures = 0;
+    for (int i = 0; i < 100; i++) {
+        wk_error *e = NULL;
+        if (wk_main((int) k, argv, &e) != 0) { failures++; wk_error_release(&e); }
+    }
+    say(\"thread %ld: %d failures\\n\", k, failures);
+    return NULL;
+}
+int main(void) {
+    pthread_t t\[4\];
+    for (long k = 0; k < 4; k++) pthread_create(&t\[k\], NULL, run, (void *) (k + 1));
+    for (int k = 0; k < 4; k++) pthread_join(t\[k\], NULL);
+    return 0;
+}
+" [list [dict get $built static]]]
+    list [lsort [split [alRun $exe] \n]] [lsort [split [alRun $exe 1] \n]]
+} -result {{{thread 1: 0 failures} {thread 2: 0 failures} {thread 3: 0 failures} {thread 4: 0 failures}} {{thread 1: 0 failures} {thread 2: 0 failures} {thread 3: 0 failures} {thread 4: 0 failures}}}
+
+test al-repeated {a thousand sequential NAME_main calls on one thread leave no VM behind: the resident memory after them is within a few MiB of after the first ten} -constraints nativeLibraries -body {
+    set dir [alDir]
+    set built [alLibrary $dir rp $::alWorker]
+    set exe [alExecutable $dir rp "$::alPrelude
+static long resident_kib(void) {
+    FILE *f = fopen(\"/proc/self/statm\", \"r\");
+    long pages = 0, resident = 0;
+    if (f == NULL || fscanf(f, \"%ld %ld\", &pages, &resident) != 2) return -1;
+    fclose(f);
+    return resident * 4;
+}
+int main(void) {
+    char *argv\[\] = {\"rp\", \"a\", \"b\", NULL};
+    long early = 0;
+    int failures = 0;
+    for (int i = 0; i < 1000; i++) {
+        rp_error *e = NULL;
+        if (rp_main(3, argv, &e) != 0) { failures++; rp_error_release(&e); }
+        if (i == 9) early = resident_kib();
+    }
+    long late = resident_kib();
+    say(\"failures %d, growth within 4 MiB: %s\\n\", failures, late - early < 4096 ? \"yes\" : \"no\");
+    return 0;
+}
+" [list [dict get $built static]]]
+    alRun $exe
+} -result {failures 0, growth within 4 MiB: yes}
+
+# ---------------------------------------------------------------------------
+# Authority
+
+test al-authority {an application library's export keeps every export rule (no context, so no access to the entry's); an entry that calls what it does not install is MISSING-CONTEXT} -constraints nativeLibraries -body {
+    set dir [alDir]
+    set leak [catch {alLibrary $dir leak {
+import std::io
+import std::linux::io
+
+fn say(context io: std::io::IO) -> unit errors std::io::WriteFailed:
+    std::io::print_line("hello")
+
+exported c fn hello() -> int:
+    say():
+        on std::io::WriteFailed:
+            unit
+    1
+
+with context std::linux::io::create()
+say():
+    on std::io::WriteFailed:
+        unit
+}} leakMessage leakOptions]
+    set dir [alDir]
+    set missing [catch {alLibrary $dir missing {
+import std::io
+import std::linux::io
+
+fn say(context io: std::io::IO) -> unit errors std::io::WriteFailed:
+    std::io::print_line("hello")
+
+say():
+    on std::io::WriteFailed:
+        unit
+}} missingMessage missingOptions]
+    list $leak [lindex [dict get $leakOptions -errorcode] end] [string match {*exported c fn "hello" requires the context std::io::IO*} $leakMessage] \
+        $missing [lindex [dict get $missingOptions -errorcode] end]
+} -result {1 EXPORT-ENVIRONMENT 1 1 MISSING-CONTEXT}
+
+test al-library-symbol-main {an application library's export may not be named main: NAME_main is its entry (an ordinary library's may)} -constraints nativeLibraries -body {
+    set source {
+exported c fn main() -> int:
+    1
+}
+    set app [catch {alLibrary [alDir] mn $source} appMessage appOptions]
+    set built [alLibrary [alDir] mo $source {} -application 0]
+    list $app [lindex [dict get $appOptions -errorcode] end] [string match {*would be mn_main*} $appMessage] \
+        [expr {"mo_main" in [native::library::PublicNames mo [dict get $built exports]]}]
+} -result {1 LIBRARY-SYMBOL 1 1}
+
+test al-dispatch-nir {an application library's program function: the module sections once, then the entry dispatch, whose "initialize only" case (the index rt_entry_index reports for NAME_create's Vm) returns at once; the entry program's statements follow, for NAME_main} -constraints nativeBuilt -body {
+    set dir [alDir]
+    alWrite [file join $dir m.bot] "import std::list\n\ntable = \[1, 2, 3\]\n\nfn size() -> int:\n    std::list::length(table)\n"
+    alWrite [file join $dir app.bot] "import m\n\nif m::size() != 3:\n    100.mod(0)\n"
+    set nir [native::nir [alHir [file join $dir app.bot]] -application 1]
+    set lines {}
+    set on 0
+    foreach line [split $nir \n] {
+        if {[string match {func 0 *} $line]} { set on 1; continue }
+        if {[string match {func *} $line] || $line eq "end"} { set on 0 }
+        if {$on} { lappend lines [string trim $line] }
+    }
+    set switch [lsearch -regexp $lines {^switch }]
+    regexp {^switch %\d+ (L\d+) -1:-1:(L\d+)$} [lindex $lines $switch] -> main only
+    set at [lsearch -exact $lines "label $only"]
+    set statics [lsearch -all -regexp $lines {^staticset }]
+    list [llength $statics] [expr {[lindex $statics end] < $switch}] [regexp {^%\d+ = unit$} [lindex $lines $at+1]] \
+        [regexp {^ret %\d+$} [lindex $lines $at+2]] [expr {[lsearch -exact $lines "label $main"] > $at}] \
+        [expr {"application" in [split $nir \n]}] [core::thread::initializeOnly]
+} -result {1 1 1 1 1 1 -1}
+
+# ---------------------------------------------------------------------------
+# An ordinary library is what it was
+
+test al-ordinary {without -application: no NAME_main in the header, the symbols or the manifest (schema 2), no `application` in the NIR, and LIBRARY-TOP-LEVEL and LIBRARY-NO-EXPORTS still refuse} -constraints {nativeLibraries nm} -body {
+    set dir [alDir]
+    set built [alLibrary $dir plain {
+exported c fn twice(n: int) -> int:
+    n * 2
+} {} -application 0]
+    set header [alRead [dict get $built header]]
+    set manifest [pm::json::decode [alRead [dict get $built manifest]]]
+    set symbols [exec nm -g --defined-only [dict get $built shared]]
+    set nir [native::nir [alHir [file join $dir plain.bot]] -exports {}]
+    set top [catch {alLibrary [alDir] top $::alSideEffect {} -application 0} topMessage topOptions]
+    set none [catch {alLibrary [alDir] none "fn f() -> int:\n    1\n" {} -application 0} noneMessage noneOptions]
+    list [string match *plain_main* $header] [string match *plain_main* $symbols] \
+        [pm::json::payload [dict get [pm::json::payload $manifest] schema]] \
+        [dict exists [pm::json::payload $manifest] application] [string match "*\napplication*" $nir] \
+        $top [lindex [dict get $topOptions -errorcode] end] $none [lindex [dict get $noneOptions -errorcode] end]
+} -result {0 0 2 0 0 1 LIBRARY-TOP-LEVEL 1 LIBRARY-NO-EXPORTS}
+
+test al-header-manifest {the header declares NAME_main with its contract; the manifest is schema 3 with an application member, NAME_main among the API, and each file's SHA-256} -constraints nativeLibraries -body {
+    set dir [alDir]
+    set built [alLibrary $dir hm $::alSideEffect]
+    set header [alRead [dict get $built header]]
+    set m [pm::json::decode [alRead [dict get $built manifest]]]
+    set get {{value args} {
+        foreach k $args { set value [dict get [pm::json::payload $value] $k] }
+        pm::json::payload $value
+    }}
+    list [string match "*\nint32_t hm_main(int argc, char \*\*argv, hm_error \*\*error);\n*" $header] \
+        [string match "*Application. This is an application library*" $header] \
+        [apply $get $m schema] [apply $get $m application symbol] [apply $get $m application c] \
+        [apply $get $m application thread] [apply $get $m application execution] [apply $get $m application argv encoding] \
+        [apply $get $m application error release] \
+        [expr {"hm_main" in [lmap a [apply $get $m api] {pm::json::payload $a}]}] \
+        [apply $get $m lifecycle initialization] \
+        [lmap f {static shared header} file {libhm.a libhm.so hm.h} {
+            expr {[apply $get $m sha256 $f] eq [native::library::Sha256 [file join $dir lib $file]]}
+        }] [dict get $built application]
+} -result {1 1 3 hm_main {int32_t hm_main(int argc, char **argv, hm_error **error)} calling blocking-to-completion utf-8 hm_error_release 1 {module static initialization only: the entry program's statements run in hm_main, never in hm_create} {1 1 1} 1}
+
+test al-symbols {an application library's global symbols are its public C functions, NAME_main among them, and nothing else} -constraints {nativeLibraries nm} -body {
+    set dir [alDir]
+    set built [alLibrary $dir sy $::alSideEffect]
+    set static [lsort [lmap line [split [exec nm -g --defined-only [dict get $built static]] \n] {
+        if {[llength $line] != 3} continue
+        lindex $line 2
+    }]]
+    set public [lsort [native::library::PublicNames sy [dict get $built exports] 1]]
+    list [expr {$static eq $public}] [expr {"sy_main" in $static}] [llength $public]
+} -result {1 1 17}
+
+test al-main-cli {main.tcl -application builds an application library; -application without -emit-native-library is a malformed invocation} -constraints nativeLibraries -body {
+    set dir [alDir]
+    alWrite [file join $dir app.bot] $::alSideEffect
+    set here [pwd]
+    cd $dir
+    try {
+        set status [catch {exec [info nameofexecutable] [file join $::projectRoot main.tcl] -emit-native-library app -application -out lib app.bot 2>@1} output]
+        set usage [catch {exec [info nameofexecutable] [file join $::projectRoot main.tcl] -application app.bot 2>@1} usageOutput usageOptions]
+    } finally {
+        cd $here
+    }
+    list $status [file exists [file join $dir lib libapp.a]] [string match {*int32_t app_main*} [alRead [file join $dir lib app.h]]] \
+        $usage [lindex [dict get $usageOptions -errorcode] 2] [string match {*-application is an option of -emit-native-library*} $usageOutput]
+} -result {0 1 1 1 2 1}
+
+# ---------------------------------------------------------------------------
+# The dynamic loader
+
+test al-dlopen {the shared library loaded with dlopen: NAME_main, dlclose and dlopen again, repeatedly; a host thread that ran NAME_main or an instance outlives the library's unloading, which neither the thread's later life nor its end notices} -constraints nativeLibraries -body {
+    set dir [alDir]
+    set built [alLibrary $dir dl $::alSideEffect]
+    alWrite [file join $dir main.c] [string map [list LIBPATH [dict get $built shared]] {
+#include <dlfcn.h>
+#include <pthread.h>
+#include <semaphore.h>
+#include <stdio.h>
+#include <string.h>
+typedef int (*main_fn)(int, char **, void **);
+typedef int (*create_fn)(void **, void **);
+typedef int (*destroy_fn)(void *);
+static void *handle;
+static sem_t ran, may_exit;
+static int mode;
+static int mapped(void) {
+    FILE *f = fopen("/proc/self/maps", "r");
+    char line[4096];
+    int n = 0;
+    while (fgets(line, sizeof line, f)) if (strstr(line, "libdl.so") && strstr(line, "/lib/libdl.so")) n++;
+    fclose(f);
+    return n;
+}
+static void *thread(void *unused) {
+    (void) unused;
+    char *argv[] = {"dl", NULL};
+    void *e = NULL;
+    if (mode == 0) {
+        printf("main on the thread: %d\n", ((main_fn) dlsym(handle, "dl_main"))(1, argv, &e));
+    } else {
+        void *in = NULL;
+        int s = ((create_fn) dlsym(handle, "dl_create"))(&in, &e);
+        printf("an instance on the thread: %d %d\n", s, ((destroy_fn) dlsym(handle, "dl_destroy"))(in));
+    }
+    fflush(stdout);
+    sem_post(&ran);
+    sem_wait(&may_exit);
+    return NULL;
+}
+int main(void) {
+    char *argv[] = {"dl", NULL};
+    for (int round = 0; round < 3; round++) {
+        void *h = dlopen("LIBPATH", RTLD_NOW | RTLD_LOCAL);
+        void *e = NULL;
+        printf("round %d: %d\n", round, ((main_fn) dlsym(h, "dl_main"))(1, argv, &e));
+        fflush(stdout);
+        dlclose(h);
+    }
+    for (mode = 0; mode < 2; mode++) {
+        sem_init(&ran, 0, 0);
+        sem_init(&may_exit, 0, 0);
+        handle = dlopen("LIBPATH", RTLD_NOW | RTLD_LOCAL);
+        pthread_t t;
+        pthread_create(&t, NULL, thread, NULL);
+        sem_wait(&ran);
+        dlclose(handle);
+        printf("unloaded while the thread lives: %s\n", mapped() == 0 ? "yes" : "no");
+        fflush(stdout);
+        sem_post(&may_exit);
+        pthread_join(t, NULL);
+        printf("the thread ended\n");
+        fflush(stdout);
+    }
+    return 0;
+}
+}]
+    exec cc -O1 -Wall -Werror -o [file join $dir host] [file join $dir main.c] -ldl -lpthread
+    alRunBoth [file join $dir host]
+} -result {the entry program ran
+round 0: 0
+the entry program ran
+round 1: 0
+the entry program ran
+round 2: 0
+the entry program ran
+main on the thread: 0
+unloaded while the thread lives: yes
+the thread ended
+an instance on the thread: 0 0
+unloaded while the thread lives: yes
+the thread ended}
+
+# ---------------------------------------------------------------------------
+# Thread entries: the dispatch's three cases
+
+test al-thread-entries {a program with a thread entry built as an application library: create initializes only, main runs the entry program, and the thread entry stays a case of its own} -constraints nativeLibraries -body {
+    set dir [alDir]
+    set built [alLibrary $dir te {
+import std::io
+import std::linux::io
+import std::thread
+import workers
+
+exported c fn version() -> int:
+    3
+
+with context std::linux::io::create()
+
+std::io::print_line("entry with a thread entry"):
+    on std::io::WriteFailed:
+        unit
+} {workers {
+thread fn worker(n: int) -> int:
+    n + 1
+}}]
+    set nir [native::nir [alHir [file join $dir te.bot]] -application 1]
+    set switch [lsearch -inline -regexp [split $nir \n] {^\s+switch }]
+    set exe [alExecutable $dir te "$::alPrelude
+int main(void) {
+    te_instance *in = NULL; te_error *e = NULL; int64_t r = 0;
+    report(\"create\", te_create(&in, &e), &e);
+    report(\"version\", te_version(in, &r, &e), &e);
+    te_destroy(in);
+    char *argv\[\] = {\"te\", NULL};
+    report(\"main\", te_main(1, argv, &e), &e);
+    return 0;
+}
+" [list [dict get $built static]]]
+    list [regexp {switch %\d+ L\d+ -1:-1:L\d+ 1:1:L\d+$} $switch] [alRunBoth $exe]
+} -result {1 {create: status 0
+version: status 0
+entry with a thread entry
+main: status 0}}
+
+# ---------------------------------------------------------------------------
+# SDL3: Icy Tower under SDL_RunApp, the way SDL's Android bootstrap starts it
+
+test al-icy-tower-sdl-runapp {Icy Tower's unchanged main.bot built as an application library and started by SDL_RunApp on a 1 MiB thread named SDLThread through NAME_main: its 600-frame autopilot summary is the committed executable's, byte for byte, also under GC stress, and every SDL call it makes -- initialization, window, renderer, polling, drawing, presenting, destruction, shutdown -- runs on SDLThread} -constraints icyTowerSdl -body {
+    set dir [alDir]
+    set sdl [cffi::sdl3Dir]
+    set include [file join [alSdlSources] include]
+    set game [file join $::projectRoot examples games icy-tower]
+    set here [file join $::projectRoot audit host-startable-library sdl]
+    file mkdir [file join $dir src]
+    foreach module {main game sdl render hud tower options} {
+        file copy [file join $game $module.bot] [file join $dir src $module.bot]
+    }
+    exec [info nameofexecutable] [file join $::projectRoot tools c-bindgen.tcl] stage sdl3 -target linux-x86_64 \
+        -app [file join $dir src] -into [file join $dir app] -package 1
+    set saved [pwd]
+    cd [file join $dir app]
+    try {
+        exec [info nameofexecutable] [file join $::projectRoot main.tcl] -warnings error -emit-native-library icy -application \
+            -L $sdl -out lib main.bot
+        exec cc -O1 -Wall -Wextra -Werror {-DAPP_HEADER="icy.h"} -DAPP_PREFIX=icy -I lib -I $include -o host \
+            [file join $here sdl_runapp_host.c] -L lib -licy -L $sdl -lSDL3 -Wl,-rpath,[file join $dir app lib] -pthread
+        # LD_PRELOAD splits its value at spaces: the observer's directory has
+        # none (the test's directories do).
+        set observer [file join [makeDirectory al-observer-[pid]] observer.so]
+        exec cc -O1 -Wall -Werror -shared -fPIC -I $include -o $observer [file join $here sdl_threads.c] -ldl -pthread
+        set arguments {icy-tower --autopilot --fixed-step --frames 600 --seed 17}
+        set sdlEnv [list SDL_VIDEO_DRIVER dummy LD_LIBRARY_PATH $sdl]
+        set run {{words stress preload} {
+            set command [list env {*}$words BOTLISH_NATIVE_GC_STRESS=$stress]
+            if {$preload} { lappend command LD_PRELOAD=$::observer }
+            set output [exec {*}$command ./host {*}$::arguments 2>@1]
+            return $output
+        }}
+        set ::arguments $arguments
+        set ::observer $observer
+        set traced [apply $run [lmap {k v} $sdlEnv {string cat $k=$v}] 0 1]
+        set stressed [apply $run [lmap {k v} $sdlEnv {string cat $k=$v}] 1 0]
+        set oracle [exec env {*}[lmap {k v} $sdlEnv {string cat $k=$v}] \
+            [file join $::projectRoot audit icy-tower artifacts icy-tower] {*}[lrange $arguments 1 end]]
+    } finally {
+        cd $saved
+    }
+    set summary [lsearch -inline -glob [split $traced \n] frames=*]
+    set threads [lmap line [split $traced \n] {
+        if {![regexp {^observer: (\S+) \d+ calls on (\S+)$} $line -> fn on]} continue
+        list $fn $on
+    }]
+    list [expr {$summary eq $oracle}] [expr {[lsearch -inline -glob [split $stressed \n] frames=*] eq $oracle}] \
+        [lsearch -inline -glob [split $traced \n] {host: SDL_main*}] [lsearch -inline -glob [split $traced \n] {host: the application*}] \
+        [lsort -unique [lmap pair $threads {lindex $pair 1}]] [llength $threads] $oracle
+} -result {1 1 {host: SDL_main on thread SDLThread, SDL_IsMainThread 1} {host: the application returned 0} SDLThread 11 {frames=600 round=1 floor=36 score=360 best=35.5 time=10.0 over=no x=247 y=3469 camera=3211 platforms=11 rng=659525717}}
+
+cleanupTests

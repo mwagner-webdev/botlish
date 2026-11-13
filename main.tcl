@@ -65,6 +65,10 @@
 #                          MILESTONE-8.md) from the one input; its exports
 #                          are its `exported c fn`s, or the top-level
 #                          functions -export names
+#   -application           make that library an application library
+#                          (RN-HOST-STARTABLE-APPLICATION-LIBRARY-MILESTONE-1.md):
+#                          its input is an ordinary entry program, run on a
+#                          host's thread through NAME_main(argc, argv, &error)
 #   -check                 analyze each .bot input, report its diagnostics,
 #                          run and build nothing (the compiler service)
 #   -color WHEN / -excerpts WHEN    auto (a terminal), always or never: color
@@ -328,6 +332,7 @@ set cliOptions {
     -native-startup POLICY build {the executable's thread: worker (default) or main-thread}
     -emit-hir-interchange {} build {write each input's analyzed HIR as FILE.hirx}
     -emit-native-library NAME build {build native library NAME from the one input}
+    -application {} build {make the library an application (NAME_main runs it)}
     -export FUNCTION build {export a top-level function (default: exported c fns)}
     -out DIR build {where -emit-native-library and -emit-c write}
     -emit-c {} build {write each input as freestanding C (FILE.c, FILE.h, ...)}
@@ -1388,7 +1393,7 @@ proc printWarning {channel text location} {
 # exports are the program's `exported c fn`s, or EXPORTS (top-level function
 # names) when given.
 proc emitLibrary {path name exports dir} {
-    global warnings target hintsShown
+    global warnings target hintsShown applicationLibrary
     set hintsShown {}
     if {[catch {
         switch -- [file extension $path] {
@@ -1402,7 +1407,7 @@ proc emitLibrary {path name exports dir} {
         if {$dir eq ""} {
             set dir [file dirname $path]
         }
-        set options [list -name $name -out $dir -target [hir::cabi::ResolveTarget $target]]
+        set options [list -name $name -out $dir -target [hir::cabi::ResolveTarget $target] -application $applicationLibrary]
         if {[llength $exports]} {
             lappend options -exports $exports
         }
@@ -1533,6 +1538,7 @@ set injectedArgv [core::process::defaultArgv]
 set injectedArgvGiven 0
 set libraryName ""
 set libraryExports {}
+set applicationLibrary 0
 set libraryDir ""
 set nativeStartup ""
 set aotRun 0
@@ -1630,6 +1636,7 @@ foreach option [dict get $commandLine options] {
             set nativeStartup $value
         }
         -export { lappend libraryExports $value }
+        -application { set applicationLibrary 1 }
         -out { set libraryDir $value }
         -argv - -argv-hex {
             if {!$injectedArgvGiven} { set injectedArgv {}; set injectedArgvGiven 1 }
@@ -1674,6 +1681,12 @@ foreach option [dict get $commandLine options] {
 }
 if {$showNative ne "library" && $libraryExports ne ""} {
     usageError "-export is an option of -emit-native-library"
+}
+if {$showNative ne "library" && $applicationLibrary} {
+    # An application library is a native library with an entry
+    # (RN-HOST-STARTABLE-APPLICATION-LIBRARY-MILESTONE-1.md): nothing else
+    # this invocation does makes one, and the option is never ignored.
+    usageError "-application is an option of -emit-native-library: it builds the library as an application library, whose entry program NAME_main runs on its host's thread (an executable runs its entry program already)"
 }
 if {$showNative ni {library c} && $libraryDir ne ""} {
     usageError "-out is an option of -emit-native-library and -emit-c"

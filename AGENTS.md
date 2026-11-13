@@ -2473,6 +2473,14 @@ package. Keep it so:
   descriptor adds no flag, and its system libraries must equal the target's
   (`targetLibraries`). A missing toolchain is {NATIVE LIBRARY TOOLCHAIN},
   never a target support refusal.
+* A library of another target resolves its link plan for that target's
+  linker (the driver's `link-plan --target`, codegen::aot's
+  `resolve_link_plan_for`; RN-HOST-STARTABLE-APPLICATION-LIBRARY-
+  MILESTONE-1.md): that target's flavor and object format, a static
+  archive holding its objects, a static library declared without a path
+  searched in the -L directories only (never the host's toolchain
+  directories). Never resolve another target's plan as the host's, drop it,
+  or relax a host check (run, JIT) to make one pass.
 * The shared object is checked from its bytes before it is reported
   (`ValidateShared`, native/elf.tcl): machine, type, alignment, no text
   relocation, no glibc symbol version, only the stated system libraries,
@@ -4744,18 +4752,23 @@ and its import library in place of the two libraries
   of the call's frames: their roots are missed) or give it the thread's
   limit.
 * A library leaves its host's thread as the host gave it: at the end of
-  the outermost call of a library on a thread (`CALL_DEPTH`) a Windows
+  the outermost call of a library on a thread (`Active`) a Windows
   fiber conversion its coroutines needed is undone
   (`coroutine::library_call_ended`; a fiber the host made stays that
   fiber), and when the thread's last instance of the library is destroyed
-  its pooled coroutine stacks are freed (`release_pool`), so a host that
-  destroyed every instance may unload the library with nothing of it left
-  on its threads. Never keep a host thread converted, or a stack pooled,
-  past those points.
+  (or NAME_main's Vm ends with none left) its pooled coroutine stacks are
+  freed (`release_pool`), so a host that destroyed every instance may
+  unload the library with nothing of it left on its threads. Never keep a
+  host thread converted, or a stack pooled, past those points; and never
+  touch the pool's thread-local on a thread that never ran a coroutine
+  (`POOL_USED`): its destructor's registration makes glibc keep the
+  library mapped until the thread ends (`al-dlopen`).
 * Fusion's `drop_unreferenced` keeps what the exports reach, not only
   what the program function reaches: a library export is called from C.
 * A library's entry file holds declarations only (LIBRARY-TOP-LEVEL):
   creating an instance runs module static initialization, never a script.
+  An application library's entry file is an entry program, run by
+  NAME_main only (next section).
 * Libraries are Linux glibc's (x86_64, aarch64) and Windows x86-64's
   (MSVC): `codegen::library::SUPPORTED`, `native/native.tcl`'s
   `libraries`. Never use `ld -r --gc-sections` for the archive: GNU ld
@@ -4799,6 +4812,79 @@ and `bench/native-library.tcl` the costs. `audit/compiler-service/probes/export/
 extension) and `audit/react-native/tools/host-spike.tcl` (Hermes) are the
 foreign-host probes; `audit/react-native/tools/libmode.tcl` is history and
 no longer runs.
+
+## Application libraries (NAME_main: a host-startable entry program)
+
+`-emit-native-library NAME -application FILE.bot` builds an ordinary entry
+program as an application library
+(RN-HOST-STARTABLE-APPLICATION-LIBRARY-MILESTONE-1.md): a native library
+with one more C function, `int32_t NAME_main(int argc, char **argv,
+NAME_error **error)`, which makes a Vm on the calling thread, runs module
+initialization and the entry program's own statements -- its
+installations, its state, its loop -- to their end, and drops the Vm on
+that thread before it returns its status. The host supplies the thread and
+the call, never a context or the application's authority. Keep it so:
+
+* No language construct, no resumable or host-driven Vm, no handle: a call
+  is a whole run. Never keep a Vm between calls, hand C a Vm or instance of
+  NAME_main's, add an init/event/iterate ABI, or let C put a context into a
+  Vm. The entry program is checked as every entry program is
+  (installations, requirements, one selection per context trait), for an
+  executable or an application library alike; never relax a check for
+  -application.
+* One dispatch: NAME_create selects "initialize only"
+  (runtime::thread::ENTRY_INITIALIZE_ONLY, reported -1:
+  `core::thread::initializeOnly`) through M4's entry dispatch
+  (native/lower.tcl's ThreadDispatch, emitted for an application or a
+  program with thread entries), NAME_main the entry program (0). Never
+  lower the entry program a second time, run module initialization twice,
+  or let NAME_create run the entry program's statements. An application
+  library's exports keep every export rule (EXPORT-ENVIRONMENT: the
+  entry's authority never reaches a C caller); `main` is a reserved export
+  name only there.
+* Ordinary libraries are unchanged, byte for byte: no NAME_main, no
+  `application` NIR line, LIBRARY-TOP-LEVEL and LIBRARY-NO-EXPORTS, manifest
+  schema 2 (the React Native tool reads schema 2 only). Schema 3 is an
+  application library's alone: schema 2 plus the `application` member;
+  `botlish tool` (pm/tools.tcl) takes both, protocol 1 unchanged.
+* argv is UTF-8, argv[0] included, copied before any Botlish code runs;
+  refusals are statuses (ARGUMENT-COUNT, NULL-POINTER: INVOCATION;
+  ARGUMENT-NULL, ARGUMENT-NOT-UTF8: BOUNDARY). *error is NULL after a
+  success. A failure is the status and an owned error; nothing unwinds,
+  nothing exits, no signal handler is installed (the library's stack check
+  bounds recursion: NATIVE LIMIT STACK).
+* NAME_main while the thread runs a call of the same library is
+  REENTRANT-CALL; calls on different threads are independent Vms.
+* The library's per-thread state (the owner token, the count of active
+  calls, the count of live instances) is the slots of pthread keys with no
+  destructor (runtime/library.rs's `thread_word`; on Windows plain
+  thread-local words): never a `thread_local!`, never
+  std::thread::current() in library code -- on Android Rust's
+  thread-locals are pthread keys whose destructors run at thread exit, in
+  code a host may have unloaded.
+  Hosts must not unload a library while a thread that called it lives (the
+  report's lifetime rule: glibc pins the library for pending thread-local
+  destructors, Bionic does not); SDL's Android bootstrap keeps it loaded.
+* The runtime ABI fingerprint digests the library boundary
+  (runtime::library::SIGNATURES, `signatures_are_the_forwarders`) and the
+  initialize-only index: change either and every target support package is
+  rebuilt.
+
+If you change any of that (native/library.tcl's application, the lowering
+option `-application`, ThreadDispatch, runtime/library.rs, thread.rs's
+entry index, codegen/library.rs's forwarder, aotimage.rs's fingerprint,
+pm/tools.tcl's artifact check), run `tests/application-library.test` (its
+`al-icy-tower-sdl-runapp` needs the package-owned libSDL3.so,
+`tests/cffi/sdl3.tcl`, and SDL's pinned headers), `tests/native-library.test`,
+`tests/external-tools.test`, `tests/threads.test`, `tests/android-target.test`
+(with ANDROID_NDK_ROOT; its `at-application-run` and `at-application-unload`
+also qemu-aarch64 and BOTLISH_ANDROID_ROOTS), `cargo test --release
+--manifest-path native/Cargo.toml -- signatures abi_fingerprint` and
+`audit/host-startable-library/tools/mutate.tcl` (every mutant in its
+`mutants.txt` must still apply and be killed by a detector its `!!` line
+names: update a mutant's text when you change the code it mutates, keeping
+it a mutant of the same rule), plus the native-library and android-target
+harnesses for a change to code they share.
 
 ## C callbacks (callback c fn)
 
@@ -5219,11 +5305,20 @@ fixture's `tools/c-bindgen/fixture/expected/TARGET/`. Keep it so:
   MSVC's, and add no MSVC tool beyond clang's MSVC target and no GNU-vs-MSVC
   comparison. No MSVC binding is committed (no Linux job could check one):
   the Icy Tower Windows build generates SDL3's where it builds the game.
+* android-aarch64 is Android's, at API 21: the Android NDK's clang
+  (`--target=aarch64-linux-android21`) against the NDK's sysroot, both from
+  ANDROID_NDK_ROOT (toolchain.tcl's `AndroidNdk`), the NDK's directory shown
+  as `$ANDROID_NDK_ROOT` in every generated file (`hide`). Never generate
+  one with another compiler, the host's or a Linux C library's headers, or
+  relabel linux-aarch64's (the same layouts, other prototypes and
+  functions). SDL3's is committed; the c-bindgen workflow installs NDK r29
+  by its SHA-256 to check it.
 
 If you change `tools/c-bindgen/`, `tools/cheader/`, a profile or the
 fixture, run `tclsh9.0 tests/c-bindgen.test`, `tools/c-bindgen.tcl check
 PROFILE -target committed` for every profile (fixture, tcl, tclstubs,
-boringssl, sdl3, win32), `audit/c-bindgen/tools/fuzz.tcl` (several seeds),
+boringssl, sdl3, win32; sdl3's android-aarch64 with ANDROID_NDK_ROOT),
+`audit/c-bindgen/tools/fuzz.tcl` (several seeds),
 `audit/c-bindgen/tools/layout-fuzz.tcl` (several seeds, for the host and
 with `-target` for each cross target), `audit/c-bindgen/tools/layout-scale.tcl`
 for a change to the layout pass (linear in the records) and

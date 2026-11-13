@@ -1,0 +1,31 @@
+# hello.bot -- the smallest Android application library
+# (RN-HOST-STARTABLE-APPLICATION-LIBRARY-MILESTONE-1.md, "Android AArch64
+# artifacts"): an entry program that installs its own IO (android_log, over
+# liblog) and a context holding state, counts its arguments and reports
+# through std::io. Built with -target android-aarch64 -target-support ...
+# -emit-native-library hello -application.
+import android_log
+import std::int
+import std::io
+import std::list
+import std::mutable_vector
+import std::str
+
+context struct Counter:
+    seen: MutableVector[int]
+
+fn count(n: int, context c: Counter) -> int:
+    if n == 0:
+        return c.seen.length()
+    c.seen.push(n)
+    count(n - 1)
+
+with context android_log::create()
+with context Counter {seen: std::mutable_vector::from_list([])}
+
+args = argv():
+    on InvalidArgumentEncoding:
+        []
+std::io::print_line("hello from the application entry: ".concat(std::list::length(args).to_string()).concat(" arguments, ").concat(count(10000).to_string()).concat(" frames")):
+    on std::io::WriteFailed:
+        unit

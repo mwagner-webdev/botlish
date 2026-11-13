@@ -611,19 +611,17 @@ if {$nativeStartup eq ""} {
 @@ fingerprint-ignores-record the ABI fingerprint leaves the program record's layout out: a runtime reads another layout's startup word
 ## native/src/runtime/aotimage.rs
 <<<<
-const ABI_SCALAR_WORDS: [u64; 26] = {
+const ABI_SCALAR_WORDS: [u64; 27] = {
 ====
-const ABI_SCALAR_WORDS: [u64; 24] = {
+const ABI_SCALAR_WORDS: [u64; 25] = {
 >>>>
 ## native/src/runtime/aotimage.rs
 <<<<
         std::mem::size_of::<LinkedProgram>() as u64,
         std::mem::offset_of!(LinkedProgram, startup) as u64,
-    ]
-};
+        // The value the entry dispatch reads
 ====
-    ]
-};
+        // The value the entry dispatch reads
 >>>>
 
 @@ system-link-no-stack-size the system linker links a main-thread executable without LC_MAIN's stack size: the 8 MiB default main stack

@@ -224,6 +224,21 @@ const DEFAULT_STACK_BYTES: usize = 8 << 20;
 
 thread_local! {
     static POOL: RefCell<Vec<CoStack>> = const { RefCell::new(Vec::new()) };
+    /// Whether this thread ever asked the pool for a stack (`pool_used`): a
+    /// plain flag with no destructor, so that `release_pool` on a thread
+    /// that never ran a coroutine touches nothing of POOL's -- whose first
+    /// use registers its destructor on the thread, which glibc counts as a
+    /// reference to the library holding it: unloaded by its host, a native
+    /// library would stay mapped until the thread ended
+    /// (RN-HOST-STARTABLE-APPLICATION-LIBRARY-MILESTONE-1.md, "Dynamic
+    /// loader and TLS lifetime").
+    static POOL_USED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Records that this thread uses the pool (every `CoStack::new`, before it
+/// looks into POOL).
+fn pool_used() {
+    POOL_USED.with(|used| used.set(true));
 }
 
 /// The usable size of every coroutine stack: BOTLISH_NATIVE_COROUTINE_STACK_BYTES
@@ -297,6 +312,7 @@ impl CoStack {
     #[cfg(any(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "android", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64")))]
     fn new() -> Result<(CoStack, bool), RtError> {
         let usable = stack_bytes();
+        pool_used();
         if let Some(stack) = POOL.with(|pool| {
             let mut pool = pool.borrow_mut();
             let at = pool.iter().position(|s| s.size - s.guard == usable)?;
@@ -385,6 +401,11 @@ pub fn pooled_stacks() -> usize {
 /// the library's -- no mapping, and on Windows no fiber. Nothing on a pooled
 /// stack is live. Returns how many it freed.
 pub fn release_pool() -> usize {
+    if !POOL_USED.with(std::cell::Cell::get) {
+        // A thread that never ran a coroutine: nothing pooled, and POOL's
+        // destructor not registered (POOL_USED).
+        return 0;
+    }
     let stacks = POOL.try_with(|pool| std::mem::take(&mut *pool.borrow_mut())).unwrap_or_default();
     let count = stacks.len();
     for stack in stacks {

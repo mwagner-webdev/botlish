@@ -1,0 +1,25 @@
+machine: 4 cores, x86_64, Intel(R) Xeon(R) Processor @ 2.10GHz
+build: -emit-native-library empty -application: .517999511 s
+build: -emit-native-library ctx -application: .568612211 s
+build: -emit-native-library ordinary (no -application): .441838654 s
+empty entry: 17.4 us per NAME_main
+empty entry: 17.8 us per NAME_create + NAME_destroy
+two contexts, 1000-frame loop: 25.8 us per NAME_main
+two contexts: 52.0 ms for 2000 calls on the process's main thread
+two contexts: 17.6 ms for 2000 calls on 1 other thread (8.8 us each)
+two contexts: 5.3 ms for 2000 calls on 4 threads
+empty entry: 6.0 ms for 2000 calls on 1 other thread (3.0 us each)
+empty entry, GC stress: 18.1 us per NAME_main
+two contexts, GC stress: 27.6 us per NAME_main
+two contexts: RSS after 10 calls 3404 KiB, after 2000 calls 3468 KiB
+library sizes: libempty.a 14049398, libempty.so 974392, libordinary.so 847512
+icy tower 600 frames, executable: wall/user/sys 0.325 0.317 0.004
+icy tower 600 frames, executable: wall/user/sys 0.321 0.315 0.000
+icy tower 600 frames, executable: wall/user/sys 0.336 0.331 0.004
+icy tower 600 frames, executable: wall/user/sys 0.346 0.334 0.004
+icy tower 600 frames, executable: wall/user/sys 0.336 0.322 0.008
+icy tower 600 frames, library: wall/user/sys 0.322 0.303 0.016
+icy tower 600 frames, library: wall/user/sys 0.370 0.365 0.004
+icy tower 600 frames, library: wall/user/sys 0.311 0.309 0.000
+icy tower 600 frames, library: wall/user/sys 0.306 0.305 0.000
+icy tower 600 frames, library: wall/user/sys 0.344 0.331 0.004

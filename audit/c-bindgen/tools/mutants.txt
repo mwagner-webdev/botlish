@@ -204,9 +204,11 @@ $ctype eq "char"
 ## tools/c-bindgen/generate.tcl
 <<<<
     set config [::chdr::toolchain::configFor $target]
+    CheckAndroidSysroot $target $config
     set sourceRoot [::cbind::profile::sourceRoot $profile [dict get $options fetch] $target]
 ====
     set config [::chdr::toolchain::configFor [core::cabi::hostTarget]]
+    CheckAndroidSysroot $target $config
     set sourceRoot [::cbind::profile::sourceRoot $profile [dict get $options fetch] $target]
 >>>>
 

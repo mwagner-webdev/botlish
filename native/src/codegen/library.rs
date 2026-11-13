@@ -10,6 +10,11 @@
 //!     to the runtime's `botlish_library_*` function, with the address of the
 //!     library's program record (runtime::program's LinkedProgram,
 //!     `botlish_program`) first where the program matters;
+//!   * an application library's **entry** (`NAME_main`, only when the
+//!     program is an application's: RN-HOST-STARTABLE-APPLICATION-LIBRARY-
+//!     MILESTONE-1.md): `int argc`, `char **argv` and the error
+//!     out-parameter passed on to `botlish_library_main` after the program
+//!     record, `argc` as the C `int` it is (32 bits, never read wider);
 //!   * a **trampoline** per export (`NAME_FN`): its C arguments -- an int64_t,
 //!     a bool, a double, a String's pointer and length -- stored as 64-bit
 //!     words in a stack array, then one call of `botlish_library_call` with
@@ -27,7 +32,7 @@
 //! their public ones.
 use super::BackendError;
 use crate::nir::{Boundary, Program};
-use crate::runtime::library::{CALL, FORWARDERS};
+use crate::runtime::library::{CALL, FORWARDERS, MAIN};
 use cranelift_codegen::ir::types::{F64, I8, I32, I64};
 use cranelift_codegen::ir::{AbiParam, InstBuilder, MemFlagsData, Signature, StackSlotData, StackSlotKind, UserFuncName};
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
@@ -144,6 +149,37 @@ pub fn define<M: Module>(module: &mut M, program: &Program, name: &str, record: 
         }
         module.define_function(id, &mut ctx).map_err(module_error)?;
         defined.push(compiled(module, &ctx, id, &format!("the forwarder {name}_{suffix}"))?);
+        module.clear_context(&mut ctx);
+    }
+
+    if program.application {
+        // NAME_main(int argc, char **argv, NAME_error **error) -> int32_t,
+        // forwarded with the program record first.
+        let (suffix, runtime) = MAIN;
+        let public_sig = c_signature(module, &[I32, I64, I64], Some(I32));
+        let runtime_sig = c_signature(module, &[I64, I32, I64, I64], Some(I32));
+        let callee = module.declare_function(runtime, Linkage::Import, &runtime_sig).map_err(module_error)?;
+        let id = module.declare_function(&format!("{name}_{suffix}"), Linkage::Export, &public_sig).map_err(module_error)?;
+        let mut ctx = module.make_context();
+        ctx.func.signature = public_sig;
+        ctx.func.name = UserFuncName::user(0, id.as_u32());
+        {
+            let mut b = FunctionBuilder::new(&mut ctx.func, &mut fctx);
+            let block = b.create_block();
+            b.append_block_params_for_function_params(block);
+            b.switch_to_block(block);
+            b.seal_block(block);
+            let mut args: Vec<_> = b.block_params(block).to_vec();
+            let gv = module.declare_data_in_func(record, b.func);
+            args.insert(0, b.ins().symbol_value(I64, gv));
+            let fref = module.declare_func_in_func(callee, b.func);
+            let call = b.ins().call(fref, &args);
+            let results = b.inst_results(call).to_vec();
+            b.ins().return_(&results);
+            b.finalize(module.isa().frontend_config());
+        }
+        module.define_function(id, &mut ctx).map_err(module_error)?;
+        defined.push(compiled(module, &ctx, id, &format!("the entry {name}_{suffix}"))?);
         module.clear_context(&mut ctx);
     }
 

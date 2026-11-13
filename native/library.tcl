@@ -2,7 +2,7 @@
 # program compiled into a library a C host calls.
 #
 #   native::library HIR -name NAME -out DIR ?-exports NAMES? ?-shared 0|1?
-#       ?-target TARGET? ?LOWERING-OPTIONS...?
+#       ?-target TARGET? ?-application 0|1? ?LOWERING-OPTIONS...?
 #
 # writes into DIR (made if missing; files of these names replaced):
 #
@@ -51,6 +51,20 @@
 #     like the runtime API, create, destroy, error_*, bytes_release,
 #     abi_version).
 #
+# With -application 1 the library is an application library
+# (RN-HOST-STARTABLE-APPLICATION-LIBRARY-MILESTONE-1.md): its entry file is
+# an ordinary entry program -- installations, statements, a loop -- which
+# the library runs through one more public function, NAME_main(argc, argv,
+# &error), on the calling thread, in a Vm made and dropped inside the call.
+# LIBRARY-TOP-LEVEL and LIBRARY-NO-EXPORTS are waived for it (the entry
+# program is checked as any entry program is, for an executable as for
+# this); its exports, if any, keep every export rule (they are reached
+# through NAME_create instances, whose initialization never runs the entry
+# program's statements, and never see its contexts), and `main` is one more
+# reserved name. The NIR says `application`, the header declares NAME_main,
+# and the manifest is schema 3 with an `application` member; an ordinary
+# library's files are what they were (schema 2).
+#
 # How the archive is made (Linux glibc, x86_64 and aarch64: native::
 # capabilities' `libraries`): the driver writes the library's program object
 # (botlish-native library: the program's code, descriptor and record with
@@ -73,8 +87,10 @@ namespace eval native::library {
     # standard library's on Linux glibc (rustc's native-static-libs for the
     # runtime archive). A shared library is linked with them already.
     variable systemLibraries {-lgcc_s -lutil -lrt -lpthread -lm -ldl -lc}
-    # The manifest's schema revision (its "schema" member).
+    # The manifest's schema revision (its "schema" member): 2, and 3 for an
+    # application library's (its `application` member).
     variable schema 2
+    variable applicationSchema 3
     # The C ABI version (runtime::library's ABI_VERSION, NAME_ABI_VERSION).
     variable abiVersion 1
     # The runtime API's public function suffixes (runtime::library's
@@ -91,7 +107,7 @@ namespace eval native::library {
 }
 
 proc native::library {hir args} {
-    set options [dict create -name "" -out "" -shared 1 -target "" -support ""]
+    set options [dict create -name "" -out "" -shared 1 -target "" -support "" -application 0]
     set selected 0
     set names {}
     set lowering {}
@@ -107,6 +123,10 @@ proc native::library {hir args} {
     }
     set name [dict get $options -name]
     set out [dict get $options -out]
+    set application [dict get $options -application]
+    if {$application ni {0 1}} {
+        throw {NATIVE LIBRARY APPLICATION} "native::library: -application is 0 or 1, not \"$application\""
+    }
     if {![regexp {^[A-Za-z_][A-Za-z0-9_]*$} $name]} {
         throw {NATIVE LIBRARY NAME} "native::library: the library name \"$name\" is not a C identifier (it prefixes every public C name: NAME_create)"
     }
@@ -150,7 +170,10 @@ proc native::library {hir args} {
         }
     }
 
-    set problems [library::TopLevelProblems $hir]
+    # An application library's entry file is an entry program: its
+    # statements are what NAME_main runs (LIBRARY-TOP-LEVEL is a library
+    # instance's rule, and NAME_create never runs them).
+    set problems [if {$application} {list} else {library::TopLevelProblems $hir}]
     if {$selected} {
         lassign [hir::exports::select $hir $names] records refused
         foreach problem $refused {
@@ -160,13 +183,13 @@ proc native::library {hir args} {
     } else {
         set records [hir::exports::of $hir]
     }
-    if {![llength $records] && ![llength $problems]} {
-        lappend problems [list LIBRARY-NO-EXPORTS "the program exports nothing: declare its C exports with \"exported c fn NAME(...) -> T:\" (or name top-level functions with -exports)" ""]
+    if {![llength $records] && ![llength $problems] && !$application} {
+        lappend problems [list LIBRARY-NO-EXPORTS "the program exports nothing: declare its C exports with \"exported c fn NAME(...) -> T:\" (or name top-level functions with -exports; or build it as an application library, -application, whose entry program NAME_main runs)" ""]
     }
     set symbols [dict create]
     foreach record $records {
         set function [dict get $record name]
-        if {$function in $library::reserved} {
+        if {$function in $library::reserved || ($application && $function eq "main")} {
             lappend problems [list LIBRARY-SYMBOL "the export \"$function\" would be ${name}_$function, a function of the library's runtime API: rename it" [dict get $record origin]]
         } elseif {[dict exists $symbols $function]} {
             lappend problems [list LIBRARY-SYMBOL "two exports are named \"$function\" ([library::Where $hir [dict get $symbols $function]] and [library::Where $hir $record]): each export's C symbol, ${name}_$function, is its own" [dict get $record origin]]
@@ -191,29 +214,33 @@ proc native::library {hir args} {
         dict create symbol ${name}_[dict get $record name] block [dict get $record block] \
             params [lmap {p t} [dict get $record params] {set t}] result [dict get $record result]
     }]
-    set text [nir $hir -exports $lowered {*}$lowering]
+    set text [nir $hir -exports $lowered -application $application {*}$lowering]
     if {$support ne ""} {
         # The toolchain is the host's, found before anything is written: a
         # missing one is never mistaken for a broken package.
         set tools [support::toolchain $support]
     }
     # The program's native dependencies (NATIVE-LINK-PLAN-MILESTONE-1.md),
-    # resolved as an executable's link would resolve them: the shared
-    # library is linked with them, and the manifest names them for a
-    # consumer of the static library, which holds none of them.
+    # resolved as the library's link resolves them -- for the library's
+    # target, by that target's linker (a library of another target: the
+    # driver's link-plan --target, RN-HOST-STARTABLE-APPLICATION-LIBRARY-
+    # MILESTONE-1.md, "Cross-target link plans"; never the host's plan for
+    # another target's object): the shared library is linked with them, and
+    # the manifest names them for a consumer of the static library, which
+    # holds none of them.
+    set targetArgs {}
+    if {$target ne $host} {
+        lappend targetArgs --target [dict get [core::cabi::target $target] triple]
+    }
     set dependencies {}
     if {[hir::foreign::linkPlan $hir] ne {}} {
-        set dependencies [LinkPlanOf $text]
+        set dependencies [LinkPlanOf $text {*}$targetArgs]
     }
     file mkdir $out
     set work [file tempdir]
     try {
         set object [file join $work $name.program.o]
-        set targetArgs {}
-        if {$target ne $host} {
-            lappend targetArgs --target [dict get [core::cabi::target $target] triple]
-        }
-        set public [library::PublicNames $name $records]
+        set public [library::PublicNames $name $records $application]
         if {$windows} {
             set static ""
             set shared [file join $out $name.dll]
@@ -227,11 +254,11 @@ proc native::library {hir args} {
             }
             library::ValidateDll $shared $import $name $public
             set header [file join $out $name.h]
-            library::Write $header [library::Header $hir $name $records $target]
+            library::Write $header [library::Header $hir $name $records $target $application]
             set manifest [file join $out $name.manifest.json]
             set digests [dict create shared [library::Sha256 $shared] import [library::Sha256 $import] header [library::Sha256 $header]]
-            library::Write $manifest [library::Manifest $hir $name $records 1 $dependencies $digests $target $support]
-            return [dict create static $static shared $shared import $import header $header manifest $manifest exports $records]
+            library::Write $manifest [library::Manifest $hir $name $records 1 $dependencies $digests $target $support $application]
+            return [dict create static $static shared $shared import $import header $header manifest $manifest exports $records application $application]
         }
         set lines [Driver library $text $object $name {*}$targetArgs]
         foreach line $lines {
@@ -268,17 +295,17 @@ proc native::library {hir args} {
             dict set support toolchainRevision [dict get $tools revision]
         }
         set header [file join $out $name.h]
-        library::Write $header [library::Header $hir $name $records]
+        library::Write $header [library::Header $hir $name $records $target $application]
         set manifest [file join $out $name.manifest.json]
         set digests [dict create static [library::Sha256 $static] header [library::Sha256 $header]]
         if {$shared ne ""} {
             dict set digests shared [library::Sha256 $shared]
         }
-        library::Write $manifest [library::Manifest $hir $name $records [expr {$shared ne ""}] $dependencies $digests $target $support]
+        library::Write $manifest [library::Manifest $hir $name $records [expr {$shared ne ""}] $dependencies $digests $target $support $application]
     } finally {
         file delete -force $work
     }
-    return [dict create static $static shared $shared import "" header $header manifest $manifest exports $records]
+    return [dict create static $static shared $shared import "" header $header manifest $manifest exports $records application $application]
 }
 
 # Checks, before a Windows library is lowered, that it can be linked: the
@@ -567,11 +594,15 @@ proc native::library::Where {hir record} {
     return "[expr {$module eq "" ? "" : "${module}::"}][dict get $record name] at [hir::originLocation $hir [dict get $record origin]]"
 }
 
-# The library's public C names: the runtime API's and the exports'.
-proc native::library::PublicNames {name records} {
+# The library's public C names: the runtime API's, an application
+# library's entry (NAME_main, when APPLICATION) and the exports'.
+proc native::library::PublicNames {name records {application 0}} {
     variable reserved
-    return [concat [lmap suffix $reserved {string cat ${name}_$suffix}] \
-        [lmap record $records {string cat ${name}_[dict get $record name]}]]
+    set names [lmap suffix $reserved {string cat ${name}_$suffix}]
+    if {$application} {
+        lappend names ${name}_main
+    }
+    return [concat $names [lmap record $records {string cat ${name}_[dict get $record name]}]]
 }
 
 # Runs the build tool TOOL with ARGS (an argv list: no shell), raising its
@@ -643,7 +674,7 @@ proc native::library::Signature {record} {
     return $text
 }
 
-proc native::library::Header {hir name records {target ""}} {
+proc native::library::Header {hir name records {target ""} {application 0}} {
     variable abiVersion
     set N $name
     # A Windows library's functions are a DLL's (WINDOWS-X86-64-MILESTONE-8.md):
@@ -657,6 +688,25 @@ proc native::library::Header {hir name records {target ""}} {
     append h " * Generated by the Botlish compiler from $entry (native::library,\n"
     append h " * NATIVE-LIBRARY-MILESTONE-1.md); do not edit.\n"
     append h " *\n"
+    if {$application} {
+        append h " * Application. This is an application library: its entry program runs\n"
+        append h " * through ${N}_main (below), on the calling thread, blocking, to its end.\n"
+        append h " * Each call makes a fresh Botlish VM there -- module initialization, then the\n"
+        append h " * entry program's statements, which install its own contexts -- and drops it\n"
+        append h " * on that thread before returning: no handle escapes, nothing is left behind,\n"
+        append h " * and the host supplies the thread, never a context. argc and argv (argv\[0\]\n"
+        append h " * included) become argv(), copied first; each argument must be UTF-8\n"
+        append h " * (${N}_STATUS_BOUNDARY ARGUMENT-NOT-UTF8 or ARGUMENT-NULL), argc never\n"
+        append h " * negative (${N}_STATUS_INVOCATION ARGUMENT-COUNT) and argv never NULL when\n"
+        append h " * argc is positive (NULL-POINTER). It returns ${N}_STATUS_OK when the entry\n"
+        append h " * completed; otherwise the failure's status, with *error as below. A call\n"
+        append h " * while this thread runs a call of this library (from inside the entry, an\n"
+        append h " * export or an initialization) is ${N}_STATUS_INVOCATION REENTRANT-CALL;\n"
+        append h " * calls on different threads are independent, each with its own VM.\n"
+        append h " * ${N}_create never runs the entry program: its instances are initialized\n"
+        append h " * only, and their exports never see the entry's contexts.\n"
+        append h " *\n"
+    }
     append h " * Lifecycle. ${N}_create makes an instance on the calling thread and runs the\n"
     append h " * program's initialization; every call on it, and its ${N}_destroy, must come\n"
     append h " * from that thread, one at a time, never from inside one of its own calls\n"
@@ -740,6 +790,10 @@ proc native::library::Header {hir name records {target ""}} {
     append h "${api}int32_t ${N}_error_field_float64(const ${N}_error *error, size_t index, double *value);\n"
     append h "${api}int32_t ${N}_error_field_str(const ${N}_error *error, size_t index, const uint8_t **ptr, size_t *len);\n"
     append h "${api}int32_t ${N}_bytes_release(${N}_bytes *bytes);\n\n"
+    if {$application} {
+        append h "/* The application entry: runs the entry program on the calling thread. */\n"
+        append h "${api}int32_t ${N}_main(int argc, char **argv, ${N}_error **error);\n\n"
+    }
     append h "/* Exports. */\n"
     foreach record $records {
         append h "\n/* [Signature $record] */\n"
@@ -844,8 +898,9 @@ proc native::library::Dependency {dependency} {
 # ownership of every value that crosses the boundary as data (each
 # parameter's and result's `ownership`, the release function of what the
 # caller owns, each export's `error` out-parameter).
-proc native::library::Manifest {hir name records shared {dependencies {}} {digests {}} {target ""} {support ""}} {
+proc native::library::Manifest {hir name records shared {dependencies {}} {digests {}} {target ""} {support ""} {application 0}} {
     variable schema
+    variable applicationSchema
     variable abiVersion
     variable systemLibraries
     variable reserved
@@ -897,6 +952,30 @@ proc native::library::Manifest {hir name records shared {dependencies {}} {diges
             errors [list arr $errors]]]
     }
     set api [lmap suffix $reserved {S ${name}_$suffix}]
+    set initialization "module static initialization only: the entry file holds declarations"
+    set entry {}
+    if {$application} {
+        # The application entry (RN-HOST-STARTABLE-APPLICATION-LIBRARY-
+        # MILESTONE-1.md): schema 3's one addition, what a tool that needs an
+        # application reads instead of the header.
+        lappend api [S ${name}_main]
+        set initialization "module static initialization only: the entry program's statements run in ${name}_main, never in ${name}_create"
+        set entry [list application [list obj [list \
+            symbol [S ${name}_main] \
+            c [S "int32_t ${name}_main(int argc, char **argv, ${name}_error **error)"] \
+            thread [S calling] \
+            execution [S blocking-to-completion] \
+            vm [S "made and dropped on the calling thread inside each call; no handle escapes"] \
+            argv [list obj [list encoding [S utf-8] includes [S argv0] copied [list bool 1] \
+                refusals [list arr [list [S ARGUMENT-COUNT] [S NULL-POINTER] [S ARGUMENT-NULL] [S ARGUMENT-NOT-UTF8]]]]] \
+            contexts [S "installed by the entry program itself; the host supplies none"] \
+            returns [list obj [list ok [S "the entry completed"] otherwise [S "the failure's status"]]] \
+            status [S native-library] \
+            error [list obj [list c [S "${name}_error **"] nullable [list bool 1] ownership [S owned] release [S ${name}_error_release]]] \
+            reentrancy [S "refused while this thread runs a call of this library (REENTRANT-CALL)"] \
+            concurrency [S "independent calls on different threads, each with its own VM"] \
+            stack [S "the calling thread's, bounded by the library's stack check (NATIVE LIMIT STACK); no signal handler"]]]]
+    }
     # A Windows library (WINDOWS-X86-64-MILESTONE-8.md) is its DLL and import
     # library, and no static library: `static` is null, `shared` the DLL,
     # `import` -- a member only a Windows manifest has -- the import library
@@ -918,7 +997,7 @@ proc native::library::Manifest {hir name records shared {dependencies {}} {diges
         set unloading {}
     }
     set value [list obj [list \
-        schema [N $schema] \
+        schema [N [if {$application} {set applicationSchema} else {set schema}]] \
         kind [S botlish-native-library] \
         library [S $name] \
         abi [N $abiVersion] \
@@ -944,8 +1023,9 @@ proc native::library::Manifest {hir name records shared {dependencies {}} {diges
             str-result [list obj [list owner [S caller] release [S ${name}_bytes_release] terminated [S nul-after-length] survives [S "later calls, collections, the instance's destruction"]]] \
             error [list obj [list owner [S caller] release [S ${name}_error_release] survives [S "later calls, collections, the instance's destruction"]]]]] \
         lifecycle [list obj [list create [S ${name}_create] destroy [S ${name}_destroy] \
-            initialization [S "module static initialization only: the entry file holds declarations"] {*}$unloading]] \
+            initialization [S $initialization] {*}$unloading]] \
         api [list arr $api] \
+        {*}$entry \
         exports [list arr $exports] {*}$supported]]
     return "[Json $value]\n"
 }

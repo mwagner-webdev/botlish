@@ -1,0 +1,267 @@
+c-bindgen manifest (C-BINDGEN.md, "Manifest")
+generator_version 2
+profile sdl3
+profile_file tools/c-bindgen/profiles/sdl3.tcl 6b99b250
+target android-aarch64
+library sdl3
+source {url https://github.com/libsdl-org/SDL tag release-3.4.18 commit 829a65d769d935c4852f8159e964312c0957260a}
+revision 829a65d769d935c4852f8159e964312c0957260a
+entry SDL3/SDL.h
+include include
+defines {}
+undefines {}
+flags {}
+command {$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/clang -E -x c --target=aarch64-linux-android21 --sysroot=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/sysroot -I$SRC/include $TU/entry.c}
+toolchain_family clang
+toolchain_version {Android (13989888, +pgo, +bolt, +lto, +mlgo, based on r563880c) clang version 21.0.0 (https://android.googlesource.com/toolchain/llvm-project 5e96669f06077099aa41290cdb4c5e6fa0f59349)}
+toolchain_target aarch64-linux-android21
+toolchain_sysroot set
+user_label_prefix {}
+evidence llvm {Android (13989888, +pgo, +bolt, +lto, +mlgo, based on r563880c) clang version 21.0.0 (https://android.googlesource.com/toolchain/llvm-project 5e96669f06077099aa41290cdb4c5e6fa0f59349)}
+preprocessed_tokens 44626
+header include/SDL3/SDL_assert.h 233ed9fb
+header include/SDL3/SDL_asyncio.h b2330779
+header include/SDL3/SDL_atomic.h 0e777d61
+header include/SDL3/SDL_audio.h d8b64409
+header include/SDL3/SDL_bits.h fe24c1f2
+header include/SDL3/SDL_blendmode.h 9cdf18e3
+header include/SDL3/SDL_camera.h 7cc22002
+header include/SDL3/SDL_clipboard.h 3671cf83
+header include/SDL3/SDL_cpuinfo.h 8b6c1c16
+header include/SDL3/SDL_dialog.h 029e868a
+header include/SDL3/SDL_endian.h c8c6b824
+header include/SDL3/SDL_error.h c18f0e02
+header include/SDL3/SDL_events.h b7eefd92
+header include/SDL3/SDL_filesystem.h 70af96a5
+header include/SDL3/SDL_gamepad.h d108a5ab
+header include/SDL3/SDL_gpu.h 09fb6bce
+header include/SDL3/SDL_guid.h 1aa14c40
+header include/SDL3/SDL_haptic.h a8787889
+header include/SDL3/SDL_hidapi.h 761bb0fe
+header include/SDL3/SDL_hints.h 5f4c2d15
+header include/SDL3/SDL_init.h 16cf1973
+header include/SDL3/SDL_iostream.h c7559c15
+header include/SDL3/SDL_joystick.h fc95ee3b
+header include/SDL3/SDL_keyboard.h 631d51d8
+header include/SDL3/SDL_keycode.h bfd524ae
+header include/SDL3/SDL_loadso.h Inf
+header include/SDL3/SDL_locale.h 330ccdf0
+header include/SDL3/SDL_log.h f74aa8b6
+header include/SDL3/SDL_messagebox.h 91961cd7
+header include/SDL3/SDL_metal.h 4f74fe12
+header include/SDL3/SDL_misc.h df454578
+header include/SDL3/SDL_mouse.h ea902020
+header include/SDL3/SDL_mutex.h bfeaa034
+header include/SDL3/SDL_pen.h 745df2e4
+header include/SDL3/SDL_pixels.h 01dd7a2d
+header include/SDL3/SDL_platform.h f1d8b6c3
+header include/SDL3/SDL_power.h e3e8056d
+header include/SDL3/SDL_process.h 0ebe81c9
+header include/SDL3/SDL_properties.h e580757b
+header include/SDL3/SDL_rect.h b9ca66c7
+header include/SDL3/SDL_render.h 69ee9d13
+header include/SDL3/SDL_scancode.h 778a5b70
+header include/SDL3/SDL_sensor.h 711d0d5a
+header include/SDL3/SDL_stdinc.h 8ed78fc6
+header include/SDL3/SDL_storage.h 4a42fbd7
+header include/SDL3/SDL_surface.h 0026f5c9
+header include/SDL3/SDL_system.h b44826c9
+header include/SDL3/SDL_thread.h 4bbeaa26
+header include/SDL3/SDL_time.h c1e5d62d
+header include/SDL3/SDL_timer.h 69c9aebd
+header include/SDL3/SDL_touch.h 99f027fa
+header include/SDL3/SDL_tray.h 380205fe
+header include/SDL3/SDL_version.h 19dc7d48
+header include/SDL3/SDL_video.h 8c3dde2c
+shim_library botlish_shim_sdl3_c54c5df8
+file layouts-check.c 883 d5c9129e
+file layouts.tsv 1030 5d17e611
+file report.tsv 4999 532e9c0b
+file report.txt 156 2384ee02
+file sdl3/assert.bot 47 06348de4
+file sdl3/asyncio.bot 88 8de98116
+file sdl3/atomic.bot 88 0cfbc26c
+file sdl3/audio.bot 353 83abbf2d
+file sdl3/blendmode.bot 43 73f465df
+file sdl3/camera.bot 86 60e5fb33
+file sdl3/clipboard.bot 54 b741fa8a
+file sdl3/cpuinfo.bot 66 25cebb61
+file sdl3/ctypes.bot 459 231d8211
+file sdl3/dialog.bot 50 8a74c503
+file sdl3/endian.bot 9 b5d557e8
+file sdl3/error_h.bot 21 a49d1cfc
+file sdl3/events.bot 236 56ce4036
+file sdl3/filesystem.bot 85 39885d6c
+file sdl3/gamepad.bot 446 8896535e
+file sdl3/gpu.bot 900 d20e126b
+file sdl3/haptic.bot 195 b20b0032
+file sdl3/hidapi.bot 149 8a68bf78
+file sdl3/hints.bot 56 9ec54133
+file sdl3/init.bot 63 534cf546
+file sdl3/iostream.bot 300 7d297b5f
+file sdl3/joystick.bot 325 3a381fc0
+file sdl3/keyboard.bot 136 3c310551
+file sdl3/keycode.bot 282 3759f5a8
+file sdl3/layouts.bot 1133 f7327f94
+file sdl3/loadso.bot 21 83b88f7f
+file sdl3/locale.bot 12 14b36bc3
+file sdl3/log.bot 140 06f1fd6c
+file sdl3/messagebox.bot 36 4a271d5f
+file sdl3/metal.bot 20 86adf377
+file sdl3/misc.bot 9 a17c622a
+file sdl3/mouse.bot 163 bbd4e741
+file sdl3/mutex.bot 126 6899593a
+file sdl3/pen.bot 35 90c4f48a
+file sdl3/pixels.bot 293 96f7aad7
+file sdl3/platform.bot 9 fc555d8e
+file sdl3/platform_defines.bot 7 370e1937
+file sdl3/power.bot 21 a00c8c70
+file sdl3/process.bot 62 7154f0ed
+file sdl3/properties.bot 140 8ff65fdc
+file sdl3/rect.bot 81 084066a1
+file sdl3/render.bot 723 38f4c331
+file sdl3/scancode.bot 256 b054c3e1
+file sdl3/sensor.bot 84 954f6eaa
+file sdl3/stdinc.bot 852 4c1af30f
+file sdl3/storage.bot 119 aa04f837
+file sdl3/surface.bot 490 e31df769
+file sdl3/system.bot 101 f50a33c6
+file sdl3/thread.bot 79 f5d8e18b
+file sdl3/thunks/bits.bot 19 a08e2d38
+file sdl3/thunks/endian.bot 14 be181234
+file sdl3/thunks/rect.bot 57 a8ab772c
+file sdl3/thunks/stdinc.bot 37 fc44a2c8
+file sdl3/time.bot 70 5077f6dd
+file sdl3/timer.bot 51 a5946513
+file sdl3/touch.bot 34 2415c571
+file sdl3/tray.bot 132 6db6d0eb
+file sdl3/version.bot 18 8fc60c02
+file sdl3/video.bot 715 38c057b7
+file shim.c 66 c54c5df8
+libraries sdl3/assert.bot SDL3
+libraries sdl3/asyncio.bot SDL3
+libraries sdl3/atomic.bot SDL3
+libraries sdl3/audio.bot SDL3
+libraries sdl3/blendmode.bot SDL3
+libraries sdl3/camera.bot SDL3
+libraries sdl3/clipboard.bot SDL3
+libraries sdl3/cpuinfo.bot SDL3
+libraries sdl3/dialog.bot SDL3
+libraries sdl3/error_h.bot SDL3
+libraries sdl3/events.bot SDL3
+libraries sdl3/filesystem.bot SDL3
+libraries sdl3/gamepad.bot SDL3
+libraries sdl3/gpu.bot SDL3
+libraries sdl3/haptic.bot SDL3
+libraries sdl3/hidapi.bot SDL3
+libraries sdl3/hints.bot SDL3
+libraries sdl3/init.bot SDL3
+libraries sdl3/iostream.bot SDL3
+libraries sdl3/joystick.bot SDL3
+libraries sdl3/keyboard.bot SDL3
+libraries sdl3/loadso.bot SDL3
+libraries sdl3/locale.bot SDL3
+libraries sdl3/log.bot SDL3
+libraries sdl3/messagebox.bot SDL3
+libraries sdl3/metal.bot SDL3
+libraries sdl3/misc.bot SDL3
+libraries sdl3/mouse.bot SDL3
+libraries sdl3/mutex.bot SDL3
+libraries sdl3/pen.bot SDL3
+libraries sdl3/pixels.bot SDL3
+libraries sdl3/platform.bot SDL3
+libraries sdl3/power.bot SDL3
+libraries sdl3/process.bot SDL3
+libraries sdl3/properties.bot SDL3
+libraries sdl3/rect.bot SDL3
+libraries sdl3/render.bot SDL3
+libraries sdl3/sensor.bot SDL3
+libraries sdl3/stdinc.bot SDL3
+libraries sdl3/storage.bot SDL3
+libraries sdl3/surface.bot SDL3
+libraries sdl3/system.bot SDL3
+libraries sdl3/thread.bot SDL3
+libraries sdl3/thunks/bits.bot {botlish_shim_sdl3_c54c5df8 SDL3}
+libraries sdl3/thunks/endian.bot {botlish_shim_sdl3_c54c5df8 SDL3}
+libraries sdl3/thunks/rect.bot {botlish_shim_sdl3_c54c5df8 SDL3}
+libraries sdl3/thunks/stdinc.bot {botlish_shim_sdl3_c54c5df8 SDL3}
+libraries sdl3/time.bot SDL3
+libraries sdl3/timer.bot SDL3
+libraries sdl3/touch.bot SDL3
+libraries sdl3/tray.bot SDL3
+libraries sdl3/version.bot SDL3
+libraries sdl3/video.bot SDL3
+count alias 3
+count aliases 0
+count bool 509
+count boolOnly 508
+count callbacks 39
+count complete 122
+count constants 1657
+count constantsSeen 1071
+count declared 1244
+count direct 1226
+count enumerators 1166
+count excluded 0
+count fnmacros 143
+count fnptrTypedefs 36
+count inline 15
+count manual 2
+count opaque 43
+count proven 18
+count ptrParams 1524
+count ptrResults 267
+count resultAlias 0
+count resultIndependent 1
+count resultUnknown 266
+count tablestubs 0
+count thunk 15
+count unknownParams 1504
+count unknownRetention 915
+count unsupported 158
+count views 244
+blocked by-value-aggregate 8
+blocked macro-needs-signature 100
+blocked unsupported-macro 43
+blocked va-list 7
+layout_abi android-aarch64 clang aarch64-linux-android21 {Android (13989888, +pgo, +bolt, +lto, +mlgo, based on r563880c) clang version 21.0.0 (https://android.googlesource.com/toolchain/llvm-project 5e96669f06077099aa41290cdb4c5e6fa0f59349)}
+layout_count anonymous 5
+layout_count blocked 24
+layout_count blockedDirect 21
+layout_count blockedStructs 23
+layout_count blockedTransitive 3
+layout_count blockedUnions 1
+layout_count emitted 103
+layout_count emittedSynthetic 0
+layout_count emittedUnions 3
+layout_count incomplete 43
+layout_count promoted 0
+layout_count public 127
+layout_count structs 123
+layout_count synthetic 0
+layout_count system 0
+layout_count unheld 0
+layout_count unions 4
+layout_blocked c-bool 21
+layout_blocked nested-layout-blocked 3
+contract SDL_size_mul_check_overflow ret {escape proven-noescape access write} compiler {nocapture writeonly}
+contract SDL_size_mul_check_overflow_builtin ret {escape proven-noescape access write} compiler {nocapture writeonly}
+contract SDL_size_add_check_overflow ret {escape proven-noescape access write} compiler {nocapture writeonly}
+contract SDL_size_add_check_overflow_builtin ret {escape proven-noescape access write} compiler {nocapture writeonly}
+contract SDL_RectToFRect rect {escape proven-noescape access read} compiler {nocapture readonly}
+contract SDL_RectToFRect frect {escape proven-noescape access write} compiler {nocapture writeonly}
+contract SDL_PointInRect p {access read} compiler readonly
+contract SDL_PointInRect r {access read} compiler readonly
+contract SDL_RectEmpty r {access read} compiler readonly
+contract SDL_RectsEqual a {access read} compiler readonly
+contract SDL_RectsEqual b {access read} compiler readonly
+contract SDL_PointInRectFloat p {access read} compiler readonly
+contract SDL_PointInRectFloat r {access read} compiler readonly
+contract SDL_RectEmptyFloat r {access read} compiler readonly
+contract SDL_RectsEqualEpsilon a {access read} compiler readonly
+contract SDL_RectsEqualEpsilon b {access read} compiler readonly
+contract SDL_RectsEqualFloat a {access read} compiler readonly
+contract SDL_RectsEqualFloat b {access read} compiler readonly
+contract SDL_CreateWindow title {access read escape declared-noescape} manual {contract SDL_CreateWindow}
+contract SDL_CreateWindow result independent manual {contract SDL_CreateWindow}
+contract SDL_SetWindowTitle title {access read escape declared-noescape} manual {contract SDL_SetWindowTitle}

@@ -611,8 +611,12 @@ proc pm::tools::Run {name args options outcomeVar} {
 # The input artifact whose manifest is MANIFEST (a native library's,
 # NAME.manifest.json), checked for the compilation TARGET: its schema, kind
 # and target, and every file it describes being the one it describes (its
-# sha256). A record {kind native-library manifest PATH library NAME sha256
-# DIGEST}.
+# sha256). Schema 2 is every native library's; schema 3 an application
+# library's (RN-HOST-STARTABLE-APPLICATION-LIBRARY-MILESTONE-1.md), schema
+# 2 with an `application` member naming NAME_main, which a tool that needs
+# an application reads from the manifest itself (the request is protocol
+# 1's, unchanged). A record {kind native-library manifest PATH library NAME
+# sha256 DIGEST}.
 proc pm::tools::Artifact {manifest target} {
     set path [file normalize $manifest]
     if {![file isfile $path]} {
@@ -630,13 +634,22 @@ proc pm::tools::Artifact {manifest target} {
         pm::Fail TOOL-ARTIFACT "$path is no native library manifest (its kind is not botlish-native-library)"
     }
     set schema [{*}$get $value schema]
-    if {$schema ne {num 2}} {
+    if {$schema ni {{num 2} {num 3}}} {
         if {$schema eq {num 1}} {
             pm::Fail TOOL-ARTIFACT "$path is a schema 1 native library manifest, which records neither the files it describes nor their ownership: rebuild the library with this compiler (-emit-native-library)"
         }
-        pm::Fail TOOL-ARTIFACT "$path is a native library manifest of schema [lindex $schema 1], and this Botlish reads schema 2"
+        pm::Fail TOOL-ARTIFACT "$path is a native library manifest of schema [lindex $schema 1], and this Botlish reads schemas 2 and 3"
     }
     set library [lindex [{*}$get $value library] 1]
+    # Schema 3 is an application library's, and says so; schema 2 never has
+    # an application member.
+    set application [{*}$get $value application]
+    if {$schema eq {num 3} && [lindex [{*}$get $application symbol] 1] ne "${library}_main"} {
+        pm::Fail TOOL-ARTIFACT "$path is a schema 3 native library manifest without its application member (the symbol ${library}_main): it is no application library's"
+    }
+    if {$schema eq {num 2} && $application ne ""} {
+        pm::Fail TOOL-ARTIFACT "$path is a schema 2 native library manifest with an application member, which only schema 3 has"
+    }
     set built [lindex [{*}$get [{*}$get $value target] name] 1]
     if {$built ne $target} {
         pm::Fail TOOL-ARTIFACT "$path describes a library built for $built, and the tool runs for the target $target (-target)"

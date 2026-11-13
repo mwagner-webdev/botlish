@@ -5,6 +5,10 @@
 #                                          directory
 #   source tests/cffi/sdl3.tcl            cffi::sdl3Dir: the directory, ""
 #                                          when not built
+#   tclsh9.0 tests/cffi/sdl3.tcl android  the same SDL3 for Android
+#                                          (arm64-v8a, API 21), built with
+#                                          the Android NDK (ANDROID_NDK_ROOT):
+#                                          cffi::sdl3AndroidDir
 #
 # The library is the SDL3 release the binding profile pins
 # (tools/c-bindgen/profiles/sdl3.tcl: its tag and commit), fetched into the
@@ -134,6 +138,53 @@ proc cffi::SdlBuild {} {
     return $dir
 }
 
+# Android (RN-HOST-STARTABLE-APPLICATION-LIBRARY-MILESTONE-1.md): the same
+# pinned SDL3 as Android's shared libSDL3.so for arm64-v8a at API 21 (the
+# Android target support package's), built with the NDK's CMake toolchain
+# file -- every loadable segment 16 KiB-aligned, NDK r28 and later's
+# default -- into sdl3-android/COMMIT under Botlish's cache directory
+# ($BOTLISH_SDL3_ANDROID_DIR when set). What an Android application library
+# that calls SDL is linked with in the tests; never a Linux build of SDL.
+proc cffi::SdlAndroidBuildDir {} {
+    if {[info exists ::env(BOTLISH_SDL3_ANDROID_DIR)] && $::env(BOTLISH_SDL3_ANDROID_DIR) ne ""} {
+        return [file normalize $::env(BOTLISH_SDL3_ANDROID_DIR)]
+    }
+    return [file join [SdlCacheDir] sdl3-android [dict get [SdlSource] commit]]
+}
+
+# The directory holding the Android libSDL3.so, or "" when it is not built.
+proc cffi::sdl3AndroidDir {} {
+    set dir [SdlAndroidBuildDir]
+    return [expr {[file isfile [file join $dir libSDL3.so]] ? $dir : ""}]
+}
+
+proc cffi::SdlAndroidBuild {} {
+    set dir [SdlAndroidBuildDir]
+    if {[sdl3AndroidDir] ne ""} {
+        return $dir
+    }
+    if {![info exists ::env(ANDROID_NDK_ROOT)] || $::env(ANDROID_NDK_ROOT) eq ""} {
+        error "sdl3: an Android build needs the Android NDK: set ANDROID_NDK_ROOT"
+    }
+    set toolchain [file join $::env(ANDROID_NDK_ROOT) build cmake android.toolchain.cmake]
+    set fetched [exec [info nameofexecutable] [file join [SdlRoot] tools c-bindgen.tcl] fetch sdl3]
+    set source [lindex [split [string trim $fetched] \n] end]
+    file mkdir $dir
+    puts "sdl3: building Android's libSDL3.so (arm64-v8a, API 21) in $dir"
+    exec cmake -S $source -B $dir -GNinja -DCMAKE_TOOLCHAIN_FILE=$toolchain -DANDROID_ABI=arm64-v8a \
+        -DANDROID_PLATFORM=android-21 -DCMAKE_BUILD_TYPE=Release -DSDL_SHARED=ON -DSDL_STATIC=OFF \
+        -DSDL_TEST_LIBRARY=OFF -DSDL_TESTS=OFF -DSDL_EXAMPLES=OFF -DSDL_INSTALL=OFF >@stdout 2>@stderr
+    exec ninja -C $dir SDL3-shared >@stdout 2>@stderr
+    if {[sdl3AndroidDir] eq ""} {
+        error "sdl3: the Android build produced no libSDL3.so in $dir"
+    }
+    return $dir
+}
+
 if {[info exists ::argv0] && [file normalize $::argv0] eq [file normalize [info script]]} {
-    puts [cffi::SdlBuild]
+    if {[lindex $::argv 0] eq "android"} {
+        puts [cffi::SdlAndroidBuild]
+    } else {
+        puts [cffi::SdlBuild]
+    }
 }

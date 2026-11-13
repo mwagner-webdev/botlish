@@ -860,6 +860,62 @@ pub fn resolve_link_plan(program: &Program, search: &LinkSearch) -> Result<Vec<L
     resolve_link_plan_with(LINKER, program, search, &mut || default_library_dirs(LINKER))
 }
 
+/// PROGRAM's link plan resolved for TARGET's linker rather than this host's
+/// (RN-HOST-STARTABLE-APPLICATION-LIBRARY-MILESTONE-1.md, "Cross-target link
+/// plans"): what a native library of another target -- an Android one, made
+/// on a Linux x86-64 host with the target support package's toolchain -- is
+/// linked with. The same rules as `resolve_link_plan`, judged for TARGET:
+/// its linker's flavor (`flavor_of`: GNU-style for Linux and Android), its
+/// object format and architecture (`machine_of`: a static archive must hold
+/// TARGET's objects, never the host's), its name in every message. A static
+/// library declared without a path is found in SEARCH's directories (-L)
+/// only: this host's toolchain directories hold this host's libraries, never
+/// TARGET's. TARGET this host's own (`target::same_target`) is
+/// `resolve_link_plan` exactly.
+pub fn resolve_link_plan_for(program: &Program, search: &LinkSearch, target: &target_lexicon::Triple) -> Result<Vec<LinkInput>, LinkError> {
+    if super::target::same_target(target, &target_lexicon::Triple::host()) {
+        return resolve_link_plan(program, search);
+    }
+    let Some(machine) = machine_of(target) else {
+        return Err(archive_error(format!("native link failed: no link plan is resolved for {target}: Botlish links no object format or architecture of it")));
+    };
+    let name = program.target.as_ref().map_or_else(|| target.to_string(), |t| t.name.clone());
+    resolve_plan(flavor_of(target), &machine, &name, program, search, &mut Vec::new)
+}
+
+/// The linker flavor that links for TARGET: Apple's ld for Darwin,
+/// link.exe for Windows with the MSVC environment, GNU-style (GNU ld, lld,
+/// the NDK's lld) for everything else Botlish links -- Linux and Android.
+fn flavor_of(target: &target_lexicon::Triple) -> LinkerFlavor {
+    use target_lexicon::{Environment, OperatingSystem};
+    match (target.operating_system, target.environment) {
+        (OperatingSystem::Darwin(_) | OperatingSystem::MacOSX(_), _) => LinkerFlavor::Apple,
+        (OperatingSystem::Windows, Environment::Msvc) => LinkerFlavor::Msvc,
+        _ => LinkerFlavor::Gnu,
+    }
+}
+
+/// TARGET's object format and architecture, as `archive_machine` names an
+/// archive member's, or None for one Botlish links nothing of.
+fn machine_of(target: &target_lexicon::Triple) -> Option<String> {
+    use target_lexicon::{Architecture, BinaryFormat};
+    let arch = match target.architecture {
+        Architecture::X86_64 => "x86-64",
+        Architecture::Aarch64(_) => match target.binary_format {
+            BinaryFormat::Macho => "arm64",
+            _ => "AArch64",
+        },
+        _ => return None,
+    };
+    let format = match target.binary_format {
+        BinaryFormat::Elf => "ELF",
+        BinaryFormat::Macho => "Mach-O",
+        BinaryFormat::Coff => "COFF",
+        _ => return None,
+    };
+    Some(format!("{format} {arch}"))
+}
+
 /// `resolve_link_plan` for a FLAVOR linker, whose default library
 /// directories DEFAULTS gives (asked once, and only when a static library is
 /// in none of SEARCH's).
@@ -869,16 +925,29 @@ fn resolve_link_plan_with(
     search: &LinkSearch,
     defaults: &mut dyn FnMut() -> Vec<PathBuf>,
 ) -> Result<Vec<LinkInput>, LinkError> {
+    resolve_plan(flavor, flavor_machine(flavor), HOST_TARGET, program, search, defaults)
+}
+
+/// The link plan of PROGRAM for a FLAVOR linker of the target named TARGET,
+/// whose archives hold MACHINE's objects (`resolve_link_plan_with`,
+/// `resolve_link_plan_for`).
+fn resolve_plan(
+    flavor: LinkerFlavor,
+    machine: &str,
+    target: &str,
+    program: &Program,
+    search: &LinkSearch,
+    defaults: &mut dyn FnMut() -> Vec<PathBuf>,
+) -> Result<Vec<LinkInput>, LinkError> {
     let mut inputs = Vec::with_capacity(program.links.len());
     let mut default_dirs: Option<Vec<PathBuf>> = None;
-    let machine = flavor_machine(flavor);
     for link in &program.links {
         match link {
             Link::Library(name) => inputs.push(LinkInput::Library(name.clone())),
             Link::Framework(name) => {
                 if flavor != LinkerFlavor::Apple {
                     return Err(archive_error(format!(
-                        "native link failed: framework {name:?} (`extern c framework`) is an Apple framework, which only macOS's linker links, and this program is linked for {HOST_TARGET}: a framework is never mapped to a library or linked for another operating system"
+                        "native link failed: framework {name:?} (`extern c framework`) is an Apple framework, which only macOS's linker links, and this program is linked for {target}: a framework is never mapped to a library or linked for another operating system"
                     )));
                 }
                 inputs.push(LinkInput::Framework(name.clone()));
@@ -897,7 +966,7 @@ fn resolve_link_plan_with(
                 };
                 let how = format!("declared at {:?}, relative to the application root {}", declared.written, declared.base);
                 let how = if written.is_absolute() { format!("declared at {:?}", declared.written) } else { how };
-                check_static_archive(flavor, machine, name, &path, &how)?;
+                check_static_archive(flavor, machine, target, name, &path, &how)?;
                 inputs.push(LinkInput::Archive { name: name.clone(), path, from: ArchiveSource::Declared(declared.written.clone()) });
             }
             Link::Static { name, archive: None } => {
@@ -932,7 +1001,7 @@ fn resolve_link_plan_with(
                     )));
                 };
                 let path = dir.join(&file);
-                check_static_archive(flavor, machine, name, &path, &format!("found in {}", dir.display()))?;
+                check_static_archive(flavor, machine, target, name, &path, &format!("found in {}", dir.display()))?;
                 inputs.push(LinkInput::Archive { name: name.clone(), path, from: ArchiveSource::Searched(dir) });
             }
         }
@@ -948,7 +1017,7 @@ fn resolve_link_plan_with(
 /// slice, on macOS), and no DLL import member -- a Windows import library is
 /// a `.lib` too, and links the executable to a DLL, which a static
 /// declaration never does.
-fn check_static_archive(flavor: LinkerFlavor, machine: &str, name: &str, path: &Path, how: &str) -> Result<(), LinkError> {
+fn check_static_archive(flavor: LinkerFlavor, machine: &str, target: &str, name: &str, path: &Path, how: &str) -> Result<(), LinkError> {
     let what = format!("the static archive {} of library {name:?} ({how})", path.display());
     let metadata = match std::fs::metadata(path) {
         Ok(m) => m,
@@ -963,7 +1032,7 @@ fn check_static_archive(flavor: LinkerFlavor, machine: &str, name: &str, path: &
     let facts = archive_facts(path, flavor).map_err(|why| archive_error(format!("native link failed: {what} is no static archive: {why}")))?;
     if let Some(other) = facts.machines.iter().find(|m| m.as_str() != machine) {
         return Err(archive_error(format!(
-            "native link failed: {what} holds object code for {other}, and this program is linked for {HOST_TARGET} ({machine}): an archive of another architecture or object format never links"
+            "native link failed: {what} holds object code for {other}, and this program is linked for {target} ({machine}): an archive of another architecture or object format never links"
         )));
     }
     if facts.machines.is_empty() {
@@ -3101,6 +3170,56 @@ mod tests {
         assert_eq!(static_archive_name(LinkerFlavor::Msvc, "SDL3-static"), "SDL3-static.lib");
     }
 
+    /// A link plan resolved for another target is that target's
+    /// (RN-HOST-STARTABLE-APPLICATION-LIBRARY-MILESTONE-1.md): its linker's
+    /// flavor and object format decide, a static archive must hold its
+    /// objects -- never the host's -- a framework is refused off Apple's
+    /// linker naming the target, and a static library declared without a
+    /// path is looked for in the -L directories only (never this host's
+    /// toolchain directories, which hold this host's libraries). This
+    /// host's own target is `resolve_link_plan` exactly.
+    #[test]
+    fn link_plan_for_another_target_is_that_targets() {
+        use std::str::FromStr;
+        let android = target_lexicon::Triple::from_str("aarch64-linux-android").unwrap();
+        let linux_x86 = target_lexicon::Triple::from_str("x86_64-unknown-linux-gnu").unwrap();
+        let macos = target_lexicon::Triple::from_str("aarch64-apple-darwin").unwrap();
+        let windows = target_lexicon::Triple::from_str("x86_64-pc-windows-msvc").unwrap();
+        assert_eq!(machine_of(&android).as_deref(), Some("ELF AArch64"));
+        assert_eq!(machine_of(&linux_x86).as_deref(), Some("ELF x86-64"));
+        assert_eq!(machine_of(&macos).as_deref(), Some("Mach-O arm64"));
+        assert_eq!(machine_of(&windows).as_deref(), Some("COFF x86-64"));
+        assert_eq!(machine_of(&target_lexicon::Triple::from_str("riscv64gc-unknown-linux-gnu").unwrap()), None);
+        assert!(flavor_of(&android) == LinkerFlavor::Gnu && flavor_of(&macos) == LinkerFlavor::Apple && flavor_of(&windows) == LinkerFlavor::Msvc);
+        // Libraries by name: the plan as declared, for any target.
+        let named = resolve_link_plan_for(&with_links("link \"log\"\nlink \"SDL3\"\n"), &LinkSearch::default(), &android).unwrap_or_else(|e| panic!("{}", e.message));
+        assert_eq!(named, vec![LinkInput::Library("log".into()), LinkInput::Library("SDL3".into())]);
+        // A framework is Apple's only: refused for Android, naming it.
+        let framework = resolve_link_plan_for(&with_links("framework \"Cocoa\"\n"), &LinkSearch::default(), &android).unwrap_err();
+        assert!(framework.message.contains("aarch64-linux-android") && framework.detail == Some("ARCHIVE"), "{}", framework.message);
+        // A static archive of AArch64 objects links for Android; one of
+        // x86-64 objects never does, whatever the host is.
+        let dir = scratch("cross-target");
+        archive_at(&dir, "libgood.a", &[member("good.o/", &elf(183, 1))]);
+        archive_at(&dir, "libhost.a", &[member("host.o/", &elf(62, 1))]);
+        let search = LinkSearch::libraries(&[dir.display().to_string()]);
+        let good = resolve_link_plan_for(&with_links("link \"good\" static\n"), &search, &android).unwrap_or_else(|e| panic!("{}", e.message));
+        assert!(matches!(&good[0], LinkInput::Archive { name, .. } if name == "good"));
+        let host = resolve_link_plan_for(&with_links("link \"host\" static\n"), &search, &android).unwrap_err();
+        assert!(host.message.contains("holds object code for ELF x86-64") && host.message.contains("aarch64-linux-android (ELF AArch64)"), "{}", host.message);
+        // Without -L, a cross-target static library is found nowhere: the
+        // host's toolchain directories are never searched for it.
+        let missing = resolve_link_plan_for(&with_links("link \"good\" static\n"), &LinkSearch::default(), &android).unwrap_err();
+        assert!(missing.message.contains("search directories (none)"), "{}", missing.message);
+        // The host's own target: resolve_link_plan's plan.
+        let host_triple = target_lexicon::Triple::host();
+        let program = with_links("link \"m\"\n");
+        assert_eq!(
+            resolve_link_plan_for(&program, &LinkSearch::default(), &host_triple).unwrap_or_else(|e| panic!("{}", e.message)),
+            resolve_link_plan(&program, &LinkSearch::default()).unwrap_or_else(|e| panic!("{}", e.message))
+        );
+    }
+
     /// What a static declaration's file must be: an archive of objects of
     /// the linked machine, and no import library -- never a shared
     /// library, a text stub, a linker script, a thin archive or another
@@ -3111,7 +3230,7 @@ mod tests {
         let check = |name: &str, bytes: &[u8], flavor: LinkerFlavor| -> Result<(), String> {
             let path = dir.join(name);
             std::fs::write(&path, bytes).unwrap();
-            check_static_archive(flavor, flavor_machine(flavor), "fx", &path, "test").map_err(|e| e.message)
+            check_static_archive(flavor, flavor_machine(flavor), HOST_TARGET, "fx", &path, "test").map_err(|e| e.message)
         };
         let archive = |members: &[Vec<u8>]| {
             let mut bytes = b"!<arch>\n".to_vec();

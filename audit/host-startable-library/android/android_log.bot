@@ -1,0 +1,51 @@
+# android_log.bot -- a std::io::IO for Android over liblog
+# (RN-HOST-STARTABLE-APPLICATION-LIBRARY-MILESTONE-1.md, "Android AArch64
+# artifacts"; the census's probe E): no standard namespace is Android's
+# platform interface (std::linux is Linux's), so an Android application that
+# reports through std::io installs its own IO. This one writes each text to
+# Android's log (liblog's __android_log_write, a platform library). A test
+# fixture of the application-library acceptance, not a proposal for the
+# standard library: the Android IO package is a later milestone's.
+import std::abi::bytes
+import std::byte
+import std::ffi::c
+import std::io
+import std::list
+import std::str
+
+extern c library "log"
+
+# int __android_log_write(int prio, const char *tag, const char *text):
+# both strings are only read during the call.
+private extern c fn android_log_write named "__android_log_write"(prio: std::ffi::c::Int, tag: std::ffi::c::Ptr[std::ffi::c::Char] read noescape, text: std::ffi::c::Ptr[std::ffi::c::Char] read noescape) -> std::ffi::c::Int
+
+# The log environment: the priorities of output and of errors (a context
+# field of type str has no native context slot: the tag is a constant).
+opaque context struct AndroidLog:
+    output: std::ffi::c::Int
+    failures: std::ffi::c::Int
+
+# ANDROID_LOG_INFO (4) for output, ANDROID_LOG_ERROR (6) for errors.
+fn create() -> AndroidLog:
+    AndroidLog {output: 4, failures: 6}
+
+private fn tag() -> str:
+    "Botlish"
+
+private fn nul() -> std::byte::Byte:
+    0
+
+private fn cstring(text: str) -> std::abi::bytes::Bytes:
+    std::abi::bytes::from_list(std::str::encode_utf8(text).append(nul()))
+
+# (nomethod: a priority is not a receiver.)
+private nomethod fn logged(priority: std::ffi::c::Int, text: str, context log: AndroidLog) -> unit errors std::io::WriteFailed:
+    if priority.android_log_write(cstring(tag()), cstring(text)) < 0:
+        fail std::io::WriteFailed
+    unit
+
+fn write_text(text: str, context log: AndroidLog) -> unit errors std::io::WriteFailed:
+    logged(log.output, text)
+
+fn write_error_text(text: str, context log: AndroidLog) -> unit errors std::io::WriteFailed:
+    logged(log.failures, text)

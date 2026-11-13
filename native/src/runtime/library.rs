@@ -57,6 +57,28 @@
 //! Botlish error unwinds into the caller: a Botlish error is a status, and a
 //! panic in this runtime's boundary code is caught and reported as INTERNAL
 //! (an `extern "C"` function aborts on any panic that escapes it).
+//!
+//! # Application libraries
+//!
+//! A library built as an application (`-emit-native-library NAME
+//! -application`, RN-HOST-STARTABLE-APPLICATION-LIBRARY-MILESTONE-1.md) has
+//! one more public function, `NAME_main(argc, argv, &error)` (`main`): it
+//! makes a fresh Vm on the calling thread, runs the program function with
+//! the entry program selected -- module initialization, then the entry
+//! program's own statements, which install its contexts and run its loop --
+//! to its end, and drops the Vm on that thread before it returns its status.
+//! No handle escapes it and nothing is left behind: a second call makes a
+//! second Vm and runs the entry again. `create` selects "initialize only"
+//! for every library (thread::ENTRY_INITIALIZE_ONLY): the program function
+//! of an application library stops where the entry program's statements
+//! begin (native/lower.tcl's ThreadDispatch), so an instance never runs
+//! them; an ordinary library's entry file has none.
+//!
+//! A thread runs at most one call of this library's Botlish code at a time
+//! on behalf of `main`: `main` while this thread runs a call of this
+//! library -- `create`'s initialization, an export's call, another `main`
+//! -- is REENTRANT-CALL (`Active`). Calls on other threads are independent:
+//! each `main` has its own Vm.
 use super::aot::ProgramEntry;
 use super::error::RtError;
 use super::program::{self, LinkedProgram};
@@ -64,10 +86,10 @@ use super::value::*;
 use super::vm::Vm;
 use crate::nir::{Boundary, ExportDecl};
 use std::collections::{BTreeMap, BTreeSet};
-use std::ffi::c_void;
+use std::ffi::{c_char, c_int, c_void};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Mutex;
-use std::thread::ThreadId;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// The version of the C ABI a library's header describes
 /// (`NAME_ABI_VERSION`): what the statuses, the handle, result and error
@@ -146,7 +168,8 @@ struct Instance {
 
 struct Entry {
     instance: *mut Instance,
-    owner: ThreadId,
+    /// Its thread's token (`this_thread`).
+    owner: u64,
     busy: bool,
 }
 
@@ -159,6 +182,140 @@ static INSTANCES: Mutex<BTreeMap<usize, Entry>> = Mutex::new(BTreeMap::new());
 /// Live error objects and result buffers this library handed out.
 static ERRORS: Mutex<BTreeSet<usize>> = Mutex::new(BTreeSet::new());
 static BUFFERS: Mutex<BTreeSet<usize>> = Mutex::new(BTreeSet::new());
+
+/// This thread's part in the library, two words. `Slot::Word`: its token
+/// for the owner rule (`this_thread`: drawn once, never reused, 0 before)
+/// and how many calls of this library run Botlish code on it now (`create`'s
+/// initialization, an export's call, `main`'s entry: `main` refuses to start
+/// while any does, REENTRANT-CALL), the token above `ACTIVE_BITS`, the count
+/// below; the end of the outermost call leaves the thread's own state as the
+/// host gave it (`Active`). `Slot::Live`: the live instances of this library
+/// the thread made (`create`, `destroy`): when the last one goes, the thread
+/// keeps no coroutine stack of the library's (`instance_gone`).
+///
+/// Kept where no thread-exit code of the library's runs: on Unix, in the
+/// slots of pthread keys made without a destructor (`thread_word`). A
+/// `thread_local!` -- or std::thread::current() -- registers a destructor
+/// on the thread wherever Rust implements thread-locals with pthread keys
+/// (Android AArch64: std's `os` thread-locals) or holds a handle there (a
+/// thread Rust did not start): a host that unloaded the library before the
+/// thread ended would have the thread's exit run that destructor in
+/// unmapped code, as Bionic's dlclose followed by the thread's end did
+/// (RN-HOST-STARTABLE-APPLICATION-LIBRARY-MILESTONE-1.md, "Dynamic loader
+/// and TLS lifetime"). The keys themselves are never deleted: a library
+/// made of this runtime holds them.
+const ACTIVE_BITS: u32 = 16;
+const ACTIVE_MASK: usize = (1 << ACTIVE_BITS) - 1;
+
+/// The thread's two words (above).
+#[derive(Clone, Copy)]
+enum Slot {
+    Word = 0,
+    Live = 1,
+}
+
+#[cfg(unix)]
+mod thread_word {
+    use super::Slot;
+    use std::ffi::c_void;
+    use std::sync::OnceLock;
+
+    /// The library's keys, made on first use, with no destructor.
+    fn key(slot: Slot) -> libc::pthread_key_t {
+        static KEYS: OnceLock<[libc::pthread_key_t; 2]> = OnceLock::new();
+        KEYS.get_or_init(|| {
+            [0, 1].map(|_| {
+                let mut key: libc::pthread_key_t = 0;
+                // SAFETY: KEY is the out-parameter; no destructor is registered.
+                let made = unsafe { libc::pthread_key_create(&mut key, None) };
+                assert!(made == 0, "pthread_key_create failed: {made}");
+                key
+            })
+        })[slot as usize]
+    }
+
+    pub fn get(slot: Slot) -> usize {
+        // SAFETY: a key this library made.
+        unsafe { libc::pthread_getspecific(key(slot)) as usize }
+    }
+
+    pub fn set(slot: Slot, word: usize) {
+        // SAFETY: a key this library made; the slot holds a plain word,
+        // never a pointer anything frees.
+        unsafe { libc::pthread_setspecific(key(slot), word as *const c_void) };
+    }
+}
+
+#[cfg(not(unix))]
+mod thread_word {
+    use super::Slot;
+    use std::cell::Cell;
+    thread_local! {
+        // Windows: plain words with no destructor, in the module's own TLS
+        // (WINDOWS-X86-64-MILESTONE-8.md, "Unloading").
+        static WORDS: [Cell<usize>; 2] = const { [Cell::new(0), Cell::new(0)] };
+    }
+
+    pub fn get(slot: Slot) -> usize {
+        WORDS.with(|w| w[slot as usize].get())
+    }
+
+    pub fn set(slot: Slot, word: usize) {
+        WORDS.with(|w| w[slot as usize].set(word));
+    }
+}
+
+/// The next thread token.
+static NEXT_THREAD: AtomicU64 = AtomicU64::new(1);
+
+/// This thread's identity for the owner rule: a token drawn once per thread
+/// and never reused, so an instance of a thread that ended never passes
+/// for another thread's (std::thread::current()'s ThreadId would register
+/// a destructor: see ACTIVE_BITS).
+fn this_thread() -> u64 {
+    let word = thread_word::get(Slot::Word);
+    let token = (word >> ACTIVE_BITS) as u64;
+    if token != 0 {
+        return token;
+    }
+    let token = NEXT_THREAD.fetch_add(1, Ordering::Relaxed);
+    thread_word::set(Slot::Word, ((token as usize) << ACTIVE_BITS) | (word & ACTIVE_MASK));
+    token
+}
+
+/// How many calls of this library run Botlish code on this thread now.
+fn active() -> usize {
+    thread_word::get(Slot::Word) & ACTIVE_MASK
+}
+
+/// One call of this library running Botlish code on this thread, counted
+/// when made, uncounted when dropped -- however the call ends, a panic its
+/// boundary code catches (`guarded`) included. A call of another instance
+/// of the library may run inside one, through C. The end of the outermost
+/// one -- of this library: each library has its own runtime copy, and its
+/// own count -- leaves the thread's own state as the host gave it
+/// (`coroutine::library_call_ended`: on Windows a fiber conversion the
+/// call's coroutines needed is undone, WINDOWS-X86-64-MILESTONE-8.md).
+struct Active;
+
+impl Active {
+    fn enter() -> Active {
+        let word = thread_word::get(Slot::Word);
+        assert!(word & ACTIVE_MASK < ACTIVE_MASK, "too many nested calls of one library on a thread");
+        thread_word::set(Slot::Word, word + 1);
+        Active
+    }
+}
+
+impl Drop for Active {
+    fn drop(&mut self) {
+        let word = thread_word::get(Slot::Word) - 1;
+        thread_word::set(Slot::Word, word);
+        if word & ACTIVE_MASK == 0 {
+            super::coroutine::library_call_ended();
+        }
+    }
+}
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     // A panic never happens while one of these is held; recover anyway.
@@ -202,7 +359,7 @@ fn checkout(handle: usize) -> Result<*mut Instance, LibError> {
     let Some(entry) = instances.get_mut(&handle) else {
         return Err(invocation("INVALID-INSTANCE", "not a live instance of this library (never created here, or destroyed)"));
     };
-    if entry.owner != std::thread::current().id() {
+    if entry.owner != this_thread() {
         return Err(invocation("WRONG-THREAD", "an instance is called only on the thread that created it"));
     }
     if entry.busy {
@@ -231,12 +388,7 @@ type GenericEntry = unsafe extern "C" fn(*mut Vm, Value, *const Value) -> Value;
 /// into the host's frames (whose frame pointers are not Botlish's to read).
 /// Never inlined, so its frame record exists and lies above every Botlish
 /// frame the call makes.
-///
-/// The outermost such call on the thread -- of this library: each library
-/// has its own runtime copy, and its own count -- leaves the thread's own
-/// state as the host gave it (`coroutine::library_call_ended`: on Windows a
-/// fiber conversion the call's coroutines needed is undone,
-/// WINDOWS-X86-64-MILESTONE-8.md).
+/// (The call is counted by its caller, `run_vm`: `Active`.)
 #[inline(never)]
 fn enter(vm: &mut Vm, f: impl FnOnce(&mut Vm) -> Value) -> Value {
     let outer = vm.stack_ceiling;
@@ -249,62 +401,23 @@ fn enter(vm: &mut Vm, f: impl FnOnce(&mut Vm) -> Value) -> Value {
     // the stack its collections walk (Vm::entry_stack).
     vm.stack_limit = vm.stack_limit_at(frame);
     vm.entry_stack = vm.entry_stack_at(frame);
-    let depth = CallDepth::enter();
     let result = f(vm);
     vm.stack_ceiling = outer;
     vm.stack_limit = outer_limit;
     vm.entry_stack = outer_entry;
-    drop(depth);
     // Keeps this frame from becoming a tail call of F.
     std::hint::black_box(result)
 }
 
-/// One call of this library in progress on this thread (`CALL_DEPTH`):
-/// counted when made, uncounted when dropped -- however the call ends, a
-/// panic its boundary code catches (`guarded`) included -- and the end of
-/// the outermost one leaves the thread's own state as the host gave it.
-struct CallDepth;
-
-impl CallDepth {
-    fn enter() -> CallDepth {
-        CALL_DEPTH.with(|d| d.set(d.get() + 1));
-        CallDepth
-    }
-}
-
-impl Drop for CallDepth {
-    fn drop(&mut self) {
-        let outermost = CALL_DEPTH.with(|d| {
-            d.set(d.get().saturating_sub(1));
-            d.get() == 0
-        });
-        if outermost {
-            super::coroutine::library_call_ended();
-        }
-    }
-}
-
-thread_local! {
-    /// The calls of this library in progress on this thread (`enter`): a
-    /// call of another instance of it may run inside one, through C.
-    static CALL_DEPTH: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-    /// The live instances of this library this thread made (`create`,
-    /// `destroy`): when the last one goes, the thread keeps no coroutine
-    /// stack of the library's (`coroutine::release_pool`), so that a host
-    /// which destroyed every instance may unload the library with nothing of
-    /// it left on any thread (WINDOWS-X86-64-MILESTONE-8.md, "Unloading").
-    static LIVE_INSTANCES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-}
-
-/// One instance fewer on this thread (or a failed creation): with none
-/// left, the thread's pooled coroutine stacks are freed.
+/// One instance fewer on this thread (or a Vm that ended without one: a
+/// failed creation, `main`'s): with none left, the thread's pooled
+/// coroutine stacks are freed.
 fn instance_gone(destroyed: bool) {
-    let left = LIVE_INSTANCES.with(|n| {
-        if destroyed {
-            n.set(n.get().saturating_sub(1));
-        }
-        n.get()
-    });
+    let mut left = thread_word::get(Slot::Live);
+    if destroyed {
+        left = left.saturating_sub(1);
+        thread_word::set(Slot::Live, left);
+    }
     if left == 0 {
         super::coroutine::release_pool();
     }
@@ -462,7 +575,12 @@ fn owned_buffer(text: &[u8]) -> Bytes {
 /// discipline (frame-walk ceiling, rooted arguments; the caller holds the
 /// program scope), and returns the raw result: NO_VALUE when Botlish failed.
 fn run(instance: &mut Instance, f: impl FnOnce(&mut Vm) -> Value) -> Value {
-    let vm = &mut *instance.vm;
+    run_vm(&mut instance.vm, f)
+}
+
+/// `run` on the Vm VM: the call counted (`Active`) while it runs.
+fn run_vm(vm: &mut Vm, f: impl FnOnce(&mut Vm) -> Value) -> Value {
+    let _active = Active::enter();
     let roots = vm.temp_roots.len();
     let value = enter(vm, f);
     vm.temp_roots.truncate(roots);
@@ -488,6 +606,10 @@ pub unsafe extern "C" fn botlish_library_create(program: *const LinkedProgram, i
         let (descriptor, code) = unsafe { program::read_linked(&*program) }.map_err(|e| LibError::new(STATUS_INTERNAL, "NATIVE STARTUP", e))?;
         let (mut vm, entry): (Box<Vm>, ProgramEntry) = program::instantiate(&descriptor, &code);
         vm.set_argv(Vec::new());
+        // Module initialization only: the program function stops where the
+        // entry program's own statements begin (an application library's
+        // run in `main`, never here).
+        vm.thread.entry = super::thread::ENTRY_INITIALIZE_ONLY;
         // A library's code checks its stack (codegen::clif's
         // `prologue_stack_limit`): no guard of ours runs in the host.
         vm.check_stack_limit();
@@ -501,14 +623,93 @@ pub unsafe extern "C" fn botlish_library_create(program: *const LinkedProgram, i
             instance_gone(false);
             return Err(e);
         }
-        LIVE_INSTANCES.with(|n| n.set(n.get() + 1));
+        thread_word::set(Slot::Live, thread_word::get(Slot::Live) + 1);
         let handle = Box::into_raw(Box::new(0u64)) as usize;
         let raw = Box::into_raw(Box::new(made));
-        lock(&INSTANCES).insert(handle, Entry { instance: raw, owner: std::thread::current().id(), busy: false });
+        lock(&INSTANCES).insert(handle, Entry { instance: raw, owner: this_thread(), busy: false });
         // SAFETY: the caller's contract.
         unsafe { *instance = handle };
         Ok(())
     })
+}
+
+/// `NAME_main(int argc, char **argv, NAME_error **error)`: an application
+/// library's entry (RN-HOST-STARTABLE-APPLICATION-LIBRARY-MILESTONE-1.md).
+/// Makes a Vm on the calling thread, runs the program's module
+/// initialization and its entry program's own statements -- which install
+/// its contexts -- to their end, and drops the Vm on this thread before it
+/// returns: OK when the entry completed, otherwise its failure's status with
+/// *ERROR (when ERROR is not NULL) an error the caller owns. ARGV's ARGC
+/// strings, argv[0] included, become argv(), copied before any Botlish code
+/// runs; each must be UTF-8 (ARGUMENT-NOT-UTF8, ARGUMENT-NULL: BOUNDARY, the
+/// argument's index its `argument` field), ARGC never negative and ARGV
+/// never NULL when ARGC is positive (ARGUMENT-COUNT, NULL-POINTER:
+/// INVOCATION). Refused, before anything is made, while this thread runs a
+/// call of this library (REENTRANT-CALL). Botlish code runs on this thread
+/// and stack, bounding its own recursion (NATIVE LIMIT STACK); nothing
+/// unwinds into the caller.
+///
+/// # Safety
+/// PROGRAM is the library's own record; ARGV holds ARGC pointers to
+/// NUL-terminated strings, readable for the call; ERROR may be NULL.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn botlish_library_main(program: *const LinkedProgram, argc: c_int, argv: *const *const c_char, error: *mut *mut LibError) -> i32 {
+    guarded(error, || {
+        if active() > 0 {
+            return Err(invocation(
+                "REENTRANT-CALL",
+                "NAME_main was called while this thread runs a call of the same library (from inside its entry, an export's call or an instance's initialization)",
+            ));
+        }
+        // SAFETY: the caller's contract.
+        let arguments = unsafe { main_arguments(argc, argv) }?;
+        // SAFETY: PROGRAM is the record the library object emitted.
+        let (descriptor, code) = unsafe { program::read_linked(&*program) }.map_err(|e| LibError::new(STATUS_INTERNAL, "NATIVE STARTUP", e))?;
+        let (mut vm, entry): (Box<Vm>, ProgramEntry) = program::instantiate(&descriptor, &code);
+        vm.set_argv(arguments);
+        // The entry program (thread::VmThread's entry 0), on this thread's
+        // stack, bounded by the library's stack check: no guard of ours
+        // runs in the host.
+        vm.thread.entry = 0;
+        vm.check_stack_limit();
+        let value = run_vm(&mut vm, |vm| entry(vm));
+        let outcome = if value == NO_VALUE { Err(botlish_error(&mut vm)) } else { Ok(()) };
+        // The Vm -- its heap, statics and context area -- ends here, on
+        // this thread, before the status is returned; and, with no instance
+        // of the library left on the thread, the coroutine stacks the entry
+        // pooled (WINDOWS-X86-64-MILESTONE-8.md, "Unloading").
+        drop(vm);
+        instance_gone(false);
+        outcome
+    })
+}
+
+/// The argv() of a `main` call: ARGV's ARGC strings, copied, each UTF-8.
+///
+/// # Safety
+/// As `botlish_library_main`'s.
+unsafe fn main_arguments(argc: c_int, argv: *const *const c_char) -> Result<Vec<Vec<u8>>, LibError> {
+    if argc < 0 {
+        return Err(invocation("ARGUMENT-COUNT", format!("argc is {argc}: a count of arguments is never negative")));
+    }
+    if argc > 0 && argv.is_null() {
+        return Err(invocation("NULL-POINTER", format!("argv is NULL with argc {argc}")));
+    }
+    let mut arguments = Vec::with_capacity(argc as usize);
+    for index in 0..argc as usize {
+        // SAFETY: ARGV holds ARGC pointers.
+        let pointer = unsafe { *argv.add(index) };
+        if pointer.is_null() {
+            return Err(LibError::new(STATUS_BOUNDARY, "ARGUMENT-NULL", format!("argv[{index}] is NULL")).with_argument(index));
+        }
+        // SAFETY: a NUL-terminated string, by the caller's contract.
+        let bytes = unsafe { std::ffi::CStr::from_ptr(pointer) }.to_bytes();
+        if std::str::from_utf8(bytes).is_err() {
+            return Err(LibError::new(STATUS_BOUNDARY, "ARGUMENT-NOT-UTF8", format!("argv[{index}] is not UTF-8")).with_argument(index));
+        }
+        arguments.push(bytes.to_vec());
+    }
+    Ok(arguments)
 }
 
 /// `NAME_destroy(NAME_instance *instance)`: frees the instance's Vm and
@@ -521,7 +722,7 @@ pub extern "C" fn botlish_library_destroy(_program: *const LinkedProgram, instan
             let Some(entry) = instances.get(&instance) else {
                 return Err(invocation("INVALID-INSTANCE", "not a live instance of this library"));
             };
-            if entry.owner != std::thread::current().id() {
+            if entry.owner != this_thread() {
                 return Err(invocation("WRONG-THREAD", "an instance is destroyed on the thread that created it"));
             }
             if entry.busy {
@@ -797,17 +998,82 @@ pub const FORWARDERS: &[(&str, &str, usize, &str, bool)] = &[
 /// The runtime function every export's trampoline calls.
 pub const CALL: &str = "botlish_library_call";
 
+/// An application library's entry (RN-HOST-STARTABLE-APPLICATION-LIBRARY-
+/// MILESTONE-1.md): the public suffix and the runtime function its
+/// forwarder calls, with the program record, `int argc`, `char **argv` and
+/// the error out-parameter. Only an application library has it (its NIR's
+/// `application` line): an ordinary library's public names are unchanged.
+pub const MAIN: (&str, &str) = ("main", "botlish_library_main");
+
+/// The runtime functions a library object's public functions call, by
+/// symbol and parameter words (the program record counted): FORWARDERS',
+/// CALL's and MAIN's -- what runtime::aotimage's fingerprint digests, so
+/// that a library object is linked only with a runtime that has exactly
+/// these (`signatures_are_the_forwarders`).
+pub const SIGNATURES: &[(&str, usize)] = &[
+    ("botlish_library_create", 3),
+    ("botlish_library_destroy", 2),
+    ("botlish_library_abi_version", 0),
+    ("botlish_library_error_release", 1),
+    ("botlish_library_error_status", 1),
+    ("botlish_library_error_identity", 3),
+    ("botlish_library_error_message", 3),
+    ("botlish_library_error_field_count", 1),
+    ("botlish_library_error_field_name", 4),
+    ("botlish_library_error_field_type", 2),
+    ("botlish_library_error_field_int", 3),
+    ("botlish_library_error_field_bool", 3),
+    ("botlish_library_error_field_float64", 3),
+    ("botlish_library_error_field_str", 4),
+    ("botlish_library_bytes_release", 1),
+    ("botlish_library_call", 6),
+    ("botlish_library_main", 4),
+];
+
 /// Library NAME's public C names, in the order native::library's
 /// `PublicNames` lists them: the runtime API's forwarders (`NAME_SUFFIX`,
-/// FORWARDERS' order), then every export's symbol (EXPORTS' order) -- what a
-/// Windows DLL exports, by name and nothing else
-/// (codegen::aot::link_windows_library).
-pub fn public_names(name: &str, exports: &[ExportDecl]) -> Vec<String> {
-    FORWARDERS.iter().map(|f| format!("{name}_{}", f.0)).chain(exports.iter().map(|e| e.symbol.clone())).collect()
+/// FORWARDERS' order), an application library's `NAME_main` (MAIN), then
+/// every export's symbol (EXPORTS' order) -- what a Windows DLL exports, by
+/// name and nothing else (codegen::aot::link_windows_library).
+pub fn public_names(name: &str, exports: &[ExportDecl], application: bool) -> Vec<String> {
+    FORWARDERS
+        .iter()
+        .map(|f| format!("{name}_{}", f.0))
+        .chain(application.then(|| format!("{name}_{}", MAIN.0)))
+        .chain(exports.iter().map(|e| e.symbol.clone()))
+        .collect()
 }
 
 /// The public names a library reserves for its runtime API (`NAME_SUFFIX`):
 /// an export may not take one.
 pub fn reserved(suffix: &str) -> bool {
     FORWARDERS.iter().any(|f| f.0 == suffix)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// SIGNATURES lists every runtime function a library object calls --
+    /// each forwarder's (its words, plus the program record where it passes
+    /// one), the export trampolines' CALL and an application's MAIN -- in
+    /// that order: the fingerprint digests exactly the boundary there is.
+    #[test]
+    fn signatures_are_the_forwarders() {
+        let mut expected: Vec<(&str, usize)> = FORWARDERS.iter().map(|f| (f.1, f.2 + usize::from(f.4))).collect();
+        expected.push((CALL, 6));
+        expected.push((MAIN.1, 4));
+        assert_eq!(SIGNATURES, expected.as_slice());
+    }
+
+    /// `create` selects no entry: the dispatch reads -1, which no thread
+    /// entry's index (1-based) and not the entry program's (0) is.
+    #[test]
+    fn initialize_only_is_no_entry_index() {
+        use super::super::thread::{ENTRY_INDEX_INITIALIZE_ONLY, ENTRY_INITIALIZE_ONLY, entry_index};
+        assert_eq!(entry_index(ENTRY_INITIALIZE_ONLY), ENTRY_INDEX_INITIALIZE_ONLY);
+        assert_eq!(entry_index(0), 0);
+        assert_eq!(entry_index(3), 3);
+        assert!(ENTRY_INDEX_INITIALIZE_ONLY < 0);
+    }
 }

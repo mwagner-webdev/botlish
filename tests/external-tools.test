@@ -568,6 +568,22 @@ test et-tool-artifact-checked {an artifact manifest is checked against the files
     lappend results $status [string match {*schema 1 native library manifest*rebuild*} $err]
 } -result {0 1 1 1 1 1 1}
 
+test et-tool-application-artifact {an application library's manifest (schema 3, RN-HOST-STARTABLE-APPLICATION-LIBRARY-MILESTONE-1.md) is a native-library artifact a protocol 1 tool takes; schema 3 without its application member, or schema 2 with one, is refused} -constraints {nativeLibraries tools} -body {
+    set app [etProject {probe_tools}]
+    etWrite $app/app.bot "x = 1\n"
+    etRun $app -emit-native-library app -application -out libapp app.bot
+    set results {}
+    lassign [etRun $app tool -out [etDir out] -artifact libapp/app.manifest.json needs-library ok] status
+    lappend results $status [pm::json::payload [etGet [etJson $app/libapp/app.manifest.json] schema]]
+    set text [etRead $app/libapp/app.manifest.json]
+    etWrite $app/libapp/app.manifest.json [string map {{"symbol": "app_main"} {"symbol": "other"}} $text]
+    lassign [etRun $app tool -out [etDir out] -artifact libapp/app.manifest.json needs-library ok] status - err
+    lappend results $status [string match {*schema 3 native library manifest without its application member*(PM TOOL-ARTIFACT)*} $err]
+    etWrite $app/libapp/app.manifest.json [string map {{"schema": 3} {"schema": 2}} $text]
+    lassign [etRun $app tool -out [etDir out] -artifact libapp/app.manifest.json needs-library ok] status - err
+    lappend results $status [string match {*schema 2 native library manifest with an application member*(PM TOOL-ARTIFACT)*} $err]
+} -result {0 3 1 1 1 1}
+
 # ----------------------------------------------------------- target support
 
 # A program and a project with the target support package installed, its

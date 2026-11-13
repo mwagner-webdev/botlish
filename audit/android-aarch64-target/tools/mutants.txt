@@ -52,7 +52,7 @@
 !! at-driver-refusals
 ## native/src/main.rs
 <<<<
-    if emit_target.is_some() && command != "library" {
+    if emit_target.is_some() && !matches!(command, "library" | "link-plan") {
 ====
     if emit_target.is_some() && command == "never" {
 >>>>
@@ -80,9 +80,9 @@
 !! at-library-elf
 ## native/library.tcl
 <<<<
-            lappend targetArgs --target [dict get [core::cabi::target $target] triple]
+        lappend targetArgs --target [dict get [core::cabi::target $target] triple]
 ====
-            lappend targetArgs
+        lappend targetArgs
 >>>>
 
 # ---------------------------------------------------------------- the link
@@ -255,10 +255,10 @@
 !! at-android-lifecycle
 ## native/src/runtime/library.rs
 <<<<
-    if entry.owner != std::thread::current().id() {
+    if entry.owner != this_thread() {
         return Err(invocation("WRONG-THREAD", "an instance is called only on the thread that created it"));
 ====
-    if entry.owner != std::thread::current().id() && false {
+    if entry.owner != this_thread() && false {
         return Err(invocation("WRONG-THREAD", "an instance is called only on the thread that created it"));
 >>>>
 

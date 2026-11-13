@@ -1,0 +1,51 @@
+== the compiler: Botlish compiler (no release version; this is a development build)
+== Linux: -emit-native-library app -application
+static: lib/libapp.a
+shared: lib/libapp.so
+header: lib/app.h
+manifest: lib/app.manifest.json
+== Linux: the host
+entry: 5000050000, 3 arguments
+host: app_main 0
+entry: 5000050000, 3 arguments
+host: app_main 0
+== Linux: an external tool's view of the manifest
+kind botlish-native-library
+schema 3
+application app_main | int32_t app_main(int argc, char **argv, app_error **error)
+thread calling
+execution blocking-to-completion
+sha256 static ok
+sha256 shared ok
+sha256 header ok
+defines app_main yes
+== Android: the target support package from the repository
+botlish_target_android_aarch64 0.1.0 (sha256 3ea34bd0a5c1): installed
+view android-aarch64: derived (5 files, 1 native library)
+added botlish_target_android_aarch64 (request "0.1", lock 0.1.0)
+== Android: -target android-aarch64 -emit-native-library hello -application
+target support: botlish_target_android_aarch64 (android-aarch64, runtime ROOM/android/.bot_modules/.targets/android-aarch64/botlish_target_android_aarch64/runtime/libbotlish_runtime.a)
+static: lib/libhello.a
+shared: lib/libhello.so
+header: lib/hello.h
+manifest: lib/hello.manifest.json
+  Machine:                           AArch64
+  LOAD           0x000000 0x0000000000000000 0x0000000000000000 0x0b0b90 0x0b0b90 R E 0x4000
+  LOAD           0x0b0b90 0x00000000000b4b90 0x00000000000b4b90 0x003eb8 0x004470 RW  0x4000
+  LOAD           0x0b4a48 0x00000000000bca48 0x00000000000bca48 0x000ad8 0x0032c8 RW  0x4000
+ 0x0000000000000001 (NEEDED)             Shared library: [liblog.so]
+ 0x0000000000000001 (NEEDED)             Shared library: [libdl.so]
+ 0x0000000000000001 (NEEDED)             Shared library: [libm.so]
+ 0x0000000000000001 (NEEDED)             Shared library: [libc.so]
+ 0x000000000000000e (SONAME)             Library soname: [libhello.so]
+== Android: an external tool's view of the manifest
+kind botlish-native-library
+schema 3
+application hello_main | int32_t hello_main(int argc, char **argv, hello_error **error)
+thread calling
+execution blocking-to-completion
+sha256 static ok
+sha256 shared ok
+sha256 header ok
+defines hello_main yes
+== done

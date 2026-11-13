@@ -170,7 +170,7 @@ proc native::library::TopLevelProblems {hir} {
 @@ wrong-thread-accepted an instance runs a call on a thread that did not create it
 ## native/src/runtime/library.rs
 <<<<
-    if entry.owner != std::thread::current().id() {
+    if entry.owner != this_thread() {
         return Err(invocation("WRONG-THREAD", "an instance is called only on the thread that created it"));
     }
 ====
@@ -207,8 +207,10 @@ proc native::library::TopLevelProblems {hir} {
 @@ stack-limit-never-set an instance's code checks against a zero limit: deep recursion exhausts the host's stack
 ## native/src/runtime/library.rs
 <<<<
+        // `prologue_stack_limit`): no guard of ours runs in the host.
         vm.check_stack_limit();
 ====
+        // `prologue_stack_limit`): no guard of ours runs in the host.
 >>>>
 
 @@ stack-check-not-emitted the driver emits a library without the prologue check: deep recursion exhausts the host's stack
@@ -307,9 +309,12 @@ proc native::library::TopLevelProblems {hir} {
 %% windows-x86_64
 ## native/src/runtime/library.rs
 <<<<
-    FORWARDERS.iter().map(|f| format!("{name}_{}", f.0)).chain(exports.iter().map(|e| e.symbol.clone())).collect()
+        .chain(exports.iter().map(|e| e.symbol.clone()))
+        .collect()
 ====
-    FORWARDERS.iter().map(|f| format!("{name}_{}", f.0)).chain(exports.iter().map(|e| e.symbol.clone())).chain(std::iter::once(CALL.to_string())).collect()
+        .chain(exports.iter().map(|e| e.symbol.clone()))
+        .chain(std::iter::once(CALL.to_string()))
+        .collect()
 >>>>
 
 @@ dll-import-library-misnamed the import library is written under another name than NAME.lib

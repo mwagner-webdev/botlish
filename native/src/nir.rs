@@ -2127,6 +2127,13 @@ pub struct Program {
     /// The exported functions (`export` declarations, in order;
     /// NATIVE-LIBRARY-MILESTONE-1.md): empty but for a library's program.
     pub exports: Vec<ExportDecl>,
+    /// Whether the program is an application library's (the `application`
+    /// declaration; RN-HOST-STARTABLE-APPLICATION-LIBRARY-MILESTONE-1.md):
+    /// its program function selects between module initialization only and
+    /// the entry program (native/lower.tcl's ThreadDispatch), and the
+    /// library gets `NAME_main` (codegen::library). False for every other
+    /// program.
+    pub application: bool,
     /// The program's C callbacks (`callback` declarations, dense, in order;
     /// C-CALLBACK-MILESTONE-1.md): each one's C entry point is a root of the
     /// program, whether or not an instruction refers to it.
@@ -2300,6 +2307,7 @@ pub fn parse(text: &str) -> Result<Program, NirError> {
         context_bytes: 0,
         contexts: Vec::new(),
         exports: Vec::new(),
+        application: false,
         callbacks: Vec::new(),
         errors: Vec::new(),
         call_effects: true,
@@ -2388,6 +2396,15 @@ pub fn parse(text: &str) -> Result<Program, NirError> {
                     program.foreigns.push(decl.1);
                 }
                 "export" => program.exports.push(parse_export(&p, &tokens)?),
+                "application" => {
+                    if tokens.len() != 1 {
+                        return p.err("application takes no operands");
+                    }
+                    if program.application {
+                        return p.err("a program is an application once");
+                    }
+                    program.application = true;
+                }
                 "callback" => {
                     let (index, decl) = parse_callback(&p, &tokens)?;
                     if index as usize != program.callbacks.len() {

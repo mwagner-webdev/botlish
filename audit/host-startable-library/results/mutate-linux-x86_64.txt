@@ -1,0 +1,78 @@
+KILLED app-top-level-refused -- an application library's entry program is refused LIBRARY-TOP-LEVEL, as an ordinary library's
+    application-library.test (al-create-initializes-only, al-main-cli)
+KILLED ordinary-top-level-admitted -- an ordinary library's entry file may hold statements, which every create would run
+    application-library.test (al-ordinary)
+KILLED ordinary-no-exports-admitted -- an ordinary library that exports nothing is built
+    application-library.test (al-ordinary)
+KILLED create-runs-entry -- NAME_create runs the entry program: the instance's Vm selects no "initialize only"
+    application-library.test (al-create-initializes-only, al-thread-entries)
+KILLED main-skips-entry -- NAME_main initializes only: the entry program never runs
+    application-library.test (al-contexts, al-create-initializes-only)
+KILLED init-only-runs-entry -- the dispatch's "initialize only" case runs the entry program's statements
+    application-library.test (al-create-initializes-only, al-dispatch-nir)
+KILLED dispatch-missing-for-application -- an application without thread entries gets no entry dispatch: NAME_create runs the entry program
+    application-library.test (al-create-initializes-only, al-dispatch-nir)
+KILLED modules-initialized-twice -- the entry program's statements begin with the module sections again: NAME_main initializes the modules twice
+    application-library.test (al-dispatch-nir)
+KILLED entry-selects-thread-entry -- the entry program's Vm (entry 0) is told it runs the first thread entry
+    application-library.test (al-thread-entries)
+KILLED export-context-admitted -- an application library's export may require a context (the entry's authority reaches a C caller)
+    application-library.test (al-authority)
+KILLED missing-context-admitted -- an entry program that calls what no installed context implements is built
+    application-library.test (al-authority)
+KILLED export-named-main -- an application library's export may be named main, the entry's symbol
+    application-library.test (al-library-symbol-main)
+KILLED main-forwarder-missing -- the NIR says nothing of the application: the library has no NAME_main
+    application-library.test (al-create-initializes-only, al-symbols)
+KILLED main-not-in-header -- the header declares no NAME_main
+    application-library.test (al-create-initializes-only, al-header-manifest)
+KILLED manifest-no-application -- an application library's manifest has no application member
+    application-library.test (al-header-manifest)
+KILLED ordinary-manifest-schema-3 -- an ordinary library's manifest is schema 3
+    application-library.test (al-ordinary)
+KILLED public-names-without-main -- NAME_main is no public name: the link localizes it
+    application-library.test (al-create-initializes-only, al-symbols)
+KILLED argv-not-utf8-accepted -- an argument that is not UTF-8 is passed to argv()
+    application-library.test (al-argv)
+KILLED argv-empty -- NAME_main's argv() is the empty list, whatever the host passes
+    application-library.test (al-argv, al-contexts)
+KILLED argc-negative-accepted -- a negative argc is taken for none
+    application-library.test (al-argv)
+KILLED failure-reported-ok -- a failing entry returns NAME_STATUS_OK
+    application-library.test (al-errors, al-stack)
+KILLED error-not-registered -- an error handed out is not registered: its release is refused and it leaks
+    application-library.test (al-errors)
+KILLED stale-error-pointer -- a call's error out-parameter is not cleared first: a success leaves what it held
+    application-library.test (al-errors)
+KILLED abi-ignores-library -- the ABI fingerprint leaves the library boundary out: a runtime without NAME_main's function passes for this one
+    rust:abi_fingerprint (runtime::aotimage::tests::abi_fingerprint_constant_is_the_digest_of_its_words)
+KILLED signatures-miss-main -- the library boundary's signatures leave NAME_main's runtime function out
+    rust:signatures_are_the_forwarders (runtime::library::tests::signatures_are_the_forwarders)
+KILLED reentrancy-not-refused -- NAME_main from inside a call of the same library on this thread runs
+    application-library.test (al-reentrant)
+KILLED calls-not-counted -- a call of the library running Botlish code is not counted on its thread
+    application-library.test (al-reentrant)
+KILLED main-stack-unchecked -- NAME_main's Vm checks no stack limit: deep recursion exhausts the host thread's stack
+    application-library.test (al-stack)
+KILLED vm-never-dropped -- NAME_main never frees its Vm: every call leaks a heap
+    application-library.test (al-repeated)
+KILLED thread-token-shared -- every thread has one token: an instance answers calls from any thread
+    native-library.test (nl-threads)
+KILLED link-plan-host-target -- a library of another target asks for the host's link plan (the census's NATIVE TARGET)
+    android-target.test (at-link-plan-cross)
+KILLED link-plan-dropped -- a library's link plan is not resolved: its declared libraries are never linked
+    android-target.test (at-link-plan-cross)
+KILLED cross-plan-judged-for-host -- the driver resolves another target's link plan for this host's linker and object format
+    rust:link_plan_for_another_target (codegen::aot::tests::link_plan_for_another_target_is_that_targets)
+    android-target.test (at-link-plan-cross-refusals)
+KILLED android-linked-with-host-runtime -- an Android library is linked with this host's runtime archive, not its target support package's
+    android-target.test (at-application-library, at-library-elf)
+KILLED android-alignment-4k -- an Android library's segments are aligned to 4 KiB, and the check accepts it
+    android-target.test (at-application-library, at-library-elf)
+KILLED android-binding-host-clang -- an android-aarch64 binding is generated by this host's clang, not the NDK's
+    c-bindgen.test (cb-android-configuration, cb-sdl3-current-android)
+KILLED android-binding-any-sysroot -- an android-aarch64 binding is generated against a sysroot that is no Android one (the host's headers)
+    c-bindgen.test (cb-android-configuration)
+KILLED android-binding-ndk-path-shown -- an android-aarch64 binding names this host's NDK directory
+    c-bindgen.test (cb-android-configuration, cb-sdl3-current-android)
+38 mutants: 38 killed, 0 survived, 0 untested, 0 not applied or not built

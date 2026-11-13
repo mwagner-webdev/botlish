@@ -67,7 +67,7 @@ use super::super::framewalk::windows::Frame;
 use super::super::native_stack::NativeStack;
 use super::super::platform::windows::{confirmed_guard_page, current_stack, stack_guarantee, GUARANTEE};
 use super::super::vm::Vm;
-use super::{co_body, stack_bytes, CoroutineObj, GUARD_BYTES, POOL, POOL_LIMIT};
+use super::{co_body, pool_used, stack_bytes, CoroutineObj, GUARD_BYTES, POOL, POOL_LIMIT};
 use std::cell::Cell;
 use std::ffi::c_void;
 use windows_sys::Win32::System::Threading::{
@@ -309,6 +309,7 @@ impl CoStack {
     pub(super) fn new() -> Result<(CoStack, bool), RtError> {
         thread_fiber()?;
         let usable = stack_bytes();
+        pool_used();
         if let Some(stack) = POOL.with(|pool| {
             let mut pool = pool.borrow_mut();
             let at = pool.iter().position(|s| s.usable == usable)?;
