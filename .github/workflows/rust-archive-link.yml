@@ -152,6 +152,11 @@ jobs:
           }
           EOF
           cd "$out"
+          # Apple's nm reads the Rust standard library's embedded LLVM
+          # bitcode (of an LLVM newer than Xcode's) unless told not to.
+          nm() { command nm --no-llvm-bc "$@"; }
+          echo "== Apple nm on the unit without --no-llvm-bc (the bitcode reader)"; if command nm -m librustlink.a > /dev/null 2> plain-nm.err; then echo "exit 0"; else echo "exit $?"; fi; head -3 plain-nm.err
+          echo "== __LLVM sections of the localized member"; otool -l librustlink.a | grep -A2 'segname __LLVM' | head -12 || true
           echo "== ar members and index"; ar -t librustlink.a; nm -s librustlink.a 2>/dev/null | sed -n '/Archive index/,/^$/p' | head -20
           echo "== nm -m: external definitions"; nm -m librustlink.a | grep -v undefined | grep ' external ' | grep -v 'non-external\|private external'
           echo "== nm -m: weak or undefined Rust and integration symbols"; nm -m librustlink.a | grep -E 'botlish_event_post2|rust_eh_personality|___rust_alloc$' || true

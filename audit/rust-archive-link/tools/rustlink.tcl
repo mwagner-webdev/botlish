@@ -281,10 +281,16 @@ proc rustlink::run {exe} {
 # The definitions of symbol NAME (a C name) in EXE: how many are global and
 # how many local (nm: an upper-case or lower-case type).
 proc rustlink::copies {exe name} {
-    set sym [expr {[format] eq "macho" ? "_$name" : $name}]
+    if {[format] eq "macho"} {
+        set sym _$name
+        set listed [rustunit::MachoNm $exe]
+    } else {
+        set sym $name
+        set listed [rustunit::Nm $exe]
+    }
     set global 0
     set local 0
-    foreach line [split [rustunit::Nm $exe] \n] {
+    foreach line [split $listed \n] {
         if {[llength $line] != 3 || [lindex $line 2] ne $sym} continue
         set type [lindex $line 1]
         if {$type in {U u w v}} continue

@@ -103,6 +103,24 @@ proc rustunit::Nm {args} {
     return $out
 }
 
+# nm ARGS for a Mach-O file. A Rust unit holds the Rust standard
+# library's objects, which embed their LLVM bitcode (__LLVM,__bitcode), and
+# Apple's nm reads an object's symbols from its bitcode when it has some --
+# bitcode of a newer LLVM than Xcode's (rustc 1.97.0's LLVM 22 against
+# Xcode 16.4's) it cannot read, and prints nothing. --no-llvm-bc makes it
+# read the Mach-O symbol table, which is what a link uses (a link that is
+# no LTO link never reads the bitcode). An nm without the option (an older
+# one) is asked without it.
+proc rustunit::MachoNm {args} {
+    if {[catch {Nm --no-llvm-bc {*}$args} out]} {
+        if {![regexp -nocase {unknown (command line )?(argument|option)|unrecognized option} $out]} {
+            error $out $::errorInfo $::errorCode
+        }
+        set out [Nm {*}$args]
+    }
+    return $out
+}
+
 # The defined (DEFINED 1) or undefined (DEFINED 0) global symbols of FILE,
 # C names, sorted and unique. ELF: nm's upper-case types (a weak definition,
 # W or V, included; U excluded). Mach-O: nm -m's "external" and "weak
@@ -120,7 +138,7 @@ proc rustunit::Symbols {file format defined} {
             lappend out $sym
         }
     } elseif {$format eq "macho"} {
-        foreach line [split [Nm -m $file] \n] {
+        foreach line [split [MachoNm -m $file] \n] {
             set undefined [string match "*(undefined)*" $line]
             if {$defined == $undefined} continue
             if {[string match "*non-external*" $line] || [string match "*private external*" $line]} continue

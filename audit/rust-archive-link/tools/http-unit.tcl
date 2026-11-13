@@ -142,20 +142,23 @@ if {$format eq "elf"} {
     }
     set target [file join $cache cargo]
     file delete -force $target
-    set home [expr {[info exists ::env(CARGO_HOME)] && $::env(CARGO_HOME) ne "" ? $::env(CARGO_HOME) : [file join [file home] .cargo]}]
-    set env [dict create BORING_BSSL_PATH $stub BORING_BSSL_INCLUDE_PATH [file join $src include] \
+    set home [file join [file home] .cargo]
+    if {[info exists ::env(CARGO_HOME)] && $::env(CARGO_HOME) ne ""} {
+        set home $::env(CARGO_HOME)
+    }
+    set buildEnv [dict create BORING_BSSL_PATH $stub BORING_BSSL_INCLUDE_PATH [file join $src include] \
         BOTLISH_BORINGSSL_PROVIDER $id CARGO_TARGET_DIR $target MACOSX_DEPLOYMENT_TARGET 11.0 \
         RUSTFLAGS "--remap-path-prefix=$crate=/botlish_http --remap-path-prefix=$home=/cargo --remap-path-prefix=$target=/target" \
         CFLAGS "-ffile-prefix-map=$crate=/botlish_http -ffile-prefix-map=$target=/target" SOURCE_DATE_EPOCH 0 CARGO_INCREMENTAL 0]
     set dev [exec xcode-select -p]
     foreach candidate [list [file join $dev Toolchains XcodeDefault.xctoolchain usr lib] [file join $dev usr lib]] {
         if {[file exists [file join $candidate libclang.dylib]]} {
-            dict set env LIBCLANG_PATH $candidate
+            dict set buildEnv LIBCLANG_PATH $candidate
             break
         }
     }
     record rustc [exec rustc +$toolchain --version]
-    rustlink::WithEnv $env {
+    rustlink::WithEnv $buildEnv {
         exec cargo +$toolchain build --release --locked --manifest-path [file join $crate Cargo.toml] >@stdout 2>@stderr
     }
     set raw [file join $target release libbotlish_http.a]

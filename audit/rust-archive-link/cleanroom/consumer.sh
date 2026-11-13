@@ -31,6 +31,13 @@ SRC=${3:?}
 OUT=${4:?}
 fail=0
 note() { printf '%s\n' "$*"; }
+# Apple's nm reads an object's symbols from its embedded LLVM bitcode when
+# it has some -- the Rust standard library's objects do, of an LLVM newer
+# than Xcode's -- and then prints nothing: --no-llvm-bc reads the symbol
+# table a link uses.
+syms() {
+    if [ "$(uname -s)" = Darwin ]; then nm --no-llvm-bc "$@"; else nm "$@"; fi
+}
 bad() { printf 'FAIL %s\n' "$*"; fail=1; }
 
 case "$PKG" in /*) ;; *) PKG=$PWD/$PKG ;; esac
@@ -74,7 +81,7 @@ unit=$view/rustlink/native/librustlink.a
 
 # The unit's own standard library's crate hash: from the name its localized
 # allocator shim keeps as a local symbol (_RNvCs<HASH>_7___rustc12___rust_alloc).
-unit_hash=$(nm "$unit" 2>/dev/null | grep -E ' [a-z] _?_RNvCs[0-9A-Za-z_]+_7___rustc12___rust_alloc$' | head -1 | sed -E 's/.*_RNvCs([0-9A-Za-z_]+)_7___rustc.*/\1/')
+unit_hash=$(syms "$unit" 2>/dev/null | grep -E ' [a-z] _?_RNvCs[0-9A-Za-z_]+_7___rustc12___rust_alloc$' | head -1 | sed -E 's/.*_RNvCs([0-9A-Za-z_]+)_7___rustc.*/\1/')
 note "== the unit's __rustc crate hash: ${unit_hash:-(not found)}"
 
 for p in without_provider with_provider; do
@@ -108,20 +115,20 @@ for p in without_provider with_provider; do
     fi
     # Symbols both copies of Rust's standard library define.
     for sym in rust_eh_personality; do
-        g=$(nm "$p" | awk -v s="$prefix$sym" '$NF==s && $(NF-1) ~ /^[A-Z]$/ && $(NF-1) != "U"' | wc -l | tr -d ' ')
-        l=$(nm "$p" | awk -v s="$prefix$sym" '$NF==s && $(NF-1) ~ /^[a-z]$/ && $(NF-1) != "u"' | wc -l | tr -d ' ')
+        g=$(syms "$p" | awk -v s="$prefix$sym" '$NF==s && $(NF-1) ~ /^[A-Z]$/ && $(NF-1) != "U"' | wc -l | tr -d ' ')
+        l=$(syms "$p" | awk -v s="$prefix$sym" '$NF==s && $(NF-1) ~ /^[a-z]$/ && $(NF-1) != "u"' | wc -l | tr -d ' ')
         note "== $p $sym: $g global, $l local"
         [ "$g" = 1 ] || bad "$p: $g global definitions of $sym (one, the runtime's, expected)"
         [ "$l" -ge 1 ] || bad "$p: no local definition of $sym (the unit's own)"
     done
-    ga=$(nm "$p" | grep -cE ' [A-Z] _?_RNvCs[0-9A-Za-z_]+_7___rustc12___rust_alloc$')
-    la=$(nm "$p" | grep -cE ' [a-z] _?_RNvCs[0-9A-Za-z_]+_7___rustc12___rust_alloc$')
+    ga=$(syms "$p" | grep -cE ' [A-Z] _?_RNvCs[0-9A-Za-z_]+_7___rustc12___rust_alloc$')
+    la=$(syms "$p" | grep -cE ' [a-z] _?_RNvCs[0-9A-Za-z_]+_7___rustc12___rust_alloc$')
     note "== $p __rust_alloc: $ga global, $la local"
     [ "$ga" = 1 ] || bad "$p: $ga global allocator shims (one, the runtime's, expected)"
     [ "$la" -ge 1 ] || bad "$p: no local allocator shim (the unit's own)"
     if [ -n "$unit_hash" ]; then
-        leaked=$(nm "$p" | awk '$(NF-1) ~ /^[A-TV-Z]$/' | grep -c "Cs${unit_hash}_" || true)
-        runtime_hash=$(nm "$p" | grep -E ' [A-Z] _?_RNvCs[0-9A-Za-z_]+_7___rustc12___rust_alloc$' | sed -E 's/.*_RNvCs([0-9A-Za-z_]+)_7___rustc.*/\1/')
+        leaked=$(syms "$p" | awk '$(NF-1) ~ /^[A-TV-Z]$/' | grep -c "Cs${unit_hash}_" || true)
+        runtime_hash=$(syms "$p" | grep -E ' [A-Z] _?_RNvCs[0-9A-Za-z_]+_7___rustc12___rust_alloc$' | sed -E 's/.*_RNvCs([0-9A-Za-z_]+)_7___rustc.*/\1/')
         note "== $p: global symbols carrying the unit's crate hash: $leaked (the runtime's: $runtime_hash)"
         if [ "$runtime_hash" != "$unit_hash" ]; then
             [ "$leaked" = 0 ] || bad "$p: $leaked global symbols of the unit's standard library"

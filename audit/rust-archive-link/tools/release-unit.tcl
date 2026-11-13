@@ -48,7 +48,7 @@ proc firstLine {args} {
 set dir [file join [rustlink::CacheDir] release-target]
 file delete -force $dir
 set raw [rustlink::unit -notify weakdef -toolchain $toolchain -dir $dir]
-set kept [rustlink::localized $raw -out [file join $out librustlink.a]]
+rustlink::localized $raw -out [file join $out librustlink.a]
 rustunit::check [file join $out librustlink.a] [rustlink::surface weakdef] -format [rustlink::format]
 rustlink::provider -out [file join $out librustlink_provider.a]
 set record [list \
@@ -65,7 +65,7 @@ set record [list \
     unit_sha256 [sha256 [file join $out librustlink.a]] \
     unit_bytes [file size [file join $out librustlink.a]] \
     provider_sha256 [sha256 [file join $out librustlink_provider.a]] \
-    exports $kept]
+    exports [join [rustunit::globals [file join $out librustlink.a] -format [rustlink::format]] " "]]
 file delete -force $dir
 set f [open [file join $out RECORD.txt] w]
 foreach {k v} $record {
