@@ -673,8 +673,8 @@ jobs:
         uses: actions/cache@v4
         with:
           path: native/target-fallback
-          key: native-fallback-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('native/Cargo.lock') }}
-          restore-keys: native-fallback-${{ runner.os }}-${{ runner.arch }}-
+          key: native-fallback-${{ runner.os }}-${{ runner.arch }}-${{ steps.build.outputs.rustc }}-${{ hashFiles('native/Cargo.lock') }}
+          restore-keys: native-fallback-${{ runner.os }}-${{ runner.arch }}-${{ steps.build.outputs.rustc }}-
 
       - name: Build the fallback-roots driver
         id: fallback

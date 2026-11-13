@@ -134,6 +134,26 @@ const C_CALLS: bool = cfg!(any(
         ])
 >>>>
 
+@@ rustc-deps-layout-only the rustc linker looks for the runtime library's dependencies in deps/ only, which cargo 1.100's build-dir layout no longer writes (every rustc-linked executable fails E0463)
+## native/src/codegen/aot.rs
+<<<<
+    for package in std::fs::read_dir(release.join("build")).into_iter().flatten().flatten() {
+====
+    for package in std::fs::read_dir(release.join("deps").join("build")).into_iter().flatten().flatten() {
+>>>>
+
+@@ rustc-build-layout-only the rustc linker no longer looks in deps/, where cargo before 1.100 keeps the runtime library's dependencies
+## native/src/codegen/aot.rs
+<<<<
+    if deps.is_dir() {
+        dirs.push(deps);
+    }
+====
+    if deps.is_dir() && false {
+        dirs.push(deps);
+    }
+>>>>
+
 @@ linker-status-ignored a failed link is not recognized as one
 ## native/src/codegen/aot.rs
 <<<<
