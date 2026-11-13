@@ -447,7 +447,53 @@ with seed 4 under `-gc-stress 1`: 63 and 37; 40 with seed 1: 26 and 14.
 26 mutants of mutants.txt to a private copy (rebuilding a private native
 backend for the two Rust mutants) and runs tests/exhaustive-match.test,
 the fuzzer (40 programs, seed 11) and, for a native mutant, `cargo test
---lib enum`. MUTATION-RESULTS
+--lib enum`.
+
+**26 of 26 killed** (two runs, `-only` batches of 13). Which detector
+killed each (tests: tests/exhaustive-match.test, the number of its tests
+that failed; fuzz: programs of 40 that disagreed; rust: the unit test):
+
+| mutant | tests | fuzz | rust |
+|---|---:|---:|---|
+| missing-case-accepted | 3 | -- | |
+| duplicate-case-accepted | 2 | 2 | |
+| foreign-case-counted | 2 | 1 | |
+| any-scrutinee-accepted | 2 | 3 | |
+| check-not-run | 6 | 6 | |
+| reader-trusts-text | 1 | -- | |
+| interchange-trusts-text | 1 | -- | |
+| stolen-payload-accepted | 1 | -- | |
+| not-a-case-silent | 1 | -- | |
+| payload-free-binding-accepted | 1 | 1 | |
+| case-of-first-arm | 32 | 29 | |
+| scrutinee-per-selection | 32 | 35 | |
+| unbound-arm-keeps-scrutinee | 31 | 31 | |
+| payload-type-of-first-case | 19 | 17 | |
+| constant-branch-taken | 1 | -- | |
+| test-consumes | 4 | -- | |
+| payload-observes | 2 | -- | |
+| selection-erases-contract | 1 | -- | |
+| tcl-select-by-case-name | 1 | -- | |
+| tcl-select-by-equality | 25 | 25 | |
+| tcl-payload-unchecked | 1 | -- | |
+| native-immediate-always-first | 1 | 3 | |
+| native-payload-is-value | 25 | 22 | |
+| c-select-negated | 1 | -- | |
+| rt-select-by-case-number | -- | -- | killed |
+| rt-payload-unchecked | -- | -- | killed |
+
+The fuzzer's programs are well typed by construction (its faults are
+static), so a mutant that only a forged text, a C translation unit or an
+ownership diagnostic can show (reader-trusts-text, c-select-negated,
+constant-branch-taken, ...) is killed by a targeted test.
+`native-immediate-always-first` was first killed by the fuzzer alone (its
+test count is a re-run after `em-payload-free` was added); that
+is why `em-payload-free` exists (a payload-free match selecting each case
+natively, the C backend and an immediate word against an EnumCaseObj).
+The two runtime mutants are unobservable to a program: a well-typed
+selection's enum number always matches, and a payload is only ever taken
+under its own selection -- the checks they remove are the backstop for a
+lenient build, which the Rust unit test exercises directly.
 
 The catalog's header lists what is deliberately not mutated, with the
 reason: a binding escaping its arm and an arm left out of the join or
@@ -498,7 +544,19 @@ six compute one value.
 
 **(observed)** 1,500 functions, depth 8, best of 5:
 
-KERNEL-TABLE
+| version | seconds | `tcl dict` / this | this / `native tables` |
+|---|---:|---:|---:|
+| `tcl dict` | 5.270 | 1.0 | 16.7 |
+| `tcl list` | 2.880 | 1.8 | 9.1 |
+| `tcl tables` | 2.546 | 2.1 | 8.1 |
+| `native structs` | 0.814 | 6.5 | 2.6 |
+| **`native enums`** | **0.769** | 6.9 | 2.4 |
+| `native tables` | 0.315 | 16.7 | 1.0 |
+
+(audit/mid-end-port/results/kernel-enums.txt; a native time is the whole
+executable's. An earlier run in the same container under load measured
+0.718 s for `native enums` and 0.765 s for `native structs`: the enum
+version was faster in both, by 6 % here.)
 
 The payload-enum version computes the committed reference -- 455,468
 nodes, 6 rounds, checksum 275164515 -- and so do the five others; at 40
@@ -512,22 +570,69 @@ three generic fields, and `Param` is an immediate word.
 
 ## 17. Performance and allocations
 
-**(observed)** bench/exhaustive-match.tcl, natively (Cranelift, JIT
-compile excluded), N = 200,000 operations per program, best of 5; time per
-operation over the baseline that makes the same value and keeps it, the
-whole program per operation in parentheses:
+**(observed)** bench/exhaustive-match.tcl (bench/enums.tcl's method):
+each program repeats one operation inside a collecting loop, N = 2,000
+times on the Tcl backends and 200,000 times natively (Cranelift, JIT
+compilation excluded), best of 5 runs, on the quiet container. A cell is
+the time per operation over its baseline -- a program that makes the same
+value and keeps it -- with the whole program per operation in parentheses:
 
-MATCH-BENCH-TABLE
+| operation | Tcl interp, us | Tcl compile, us | Cranelift, ns |
+|---|---:|---:|---:|
+| match over a payload-free enum (4 cases) | 320.7 (624.0) | 16.9 (27.0) | -13.2 (38.5) |
+| ... the if/== chain it replaces | 149.7 (440.8) | 5.8 (16.4) | 3.2 (39.3) |
+| match over a payload enum, a payload-free case's value | 261.1 (312.4) | 12.8 (14.1) | 4.3 (42.2) |
+| match selecting a payload-bearing case, binding two fields | 469.9 (610.2) | 21.0 (28.9) | 34.3 (204.5) |
+| ... binding nothing | 343.5 (492.3) | 19.9 (27.3) | 3.4 (173.5) |
+| ... binding the whole payload | 400.4 (549.3) | 24.3 (31.7) | 69.6 (231.0) |
+| the kernel's struct shape: a Kind selected by `==` | 290.4 (411.5) | 15.8 (21.9) | -3.3 (36.1) |
+| match selecting the last of 32 cases | 4,305.0 (4,443.2) | 133.2 (140.3) | 62.5 (233.8) |
+| match of a scrutinee known to be one case | 375.7 (471.2) | 20.1 (27.0) | 19.5 (184.2) |
+| match binding a payload's MutableVector | 241.0 (401.2) | 16.4 (23.4) | 8.8 (176.7) |
+| match binding and calling a payload's function | 362.3 (514.8) | 22.7 (30.0) | -2.1 (168.5) |
 
-Every match program allocates exactly what its baseline does (the
-allocation table): a selection, a payload read and a binding allocate
-nothing, and a match over a payload-free enum, or a payload-free case's
-value, involves no EnumCaseObj. A payload-free match is the inline word
-comparison; a payload match is two runtime helper calls on the selected
-arm's path (one `rt_enum_is` per arm tested before it, one `rt_enum_payload`)
--- the chain is as long as the arms (`em-many-cases`: 120 arms, 120
-selections), so selecting the last of 32 cases costs 32 tests. Compilation
-is linear in the arms (one `if` per arm).
+Reading it:
+
+* **Natively a selection is a few nanoseconds.** A match over a
+  payload-free enum is the inline word comparison and costs nothing
+  measurable (the negative deltas are the noise floor of comparing two
+  programs, about +-15 ns at this N); selecting a payload-bearing case and
+  binding nothing is 3.4 ns (one `rt_enum_is` per arm tested, one
+  `rt_enum_payload`); the last of 32 cases is 62.5 ns, about 2 ns per arm
+  tested. A binding is a static `structget` of the payload (the NIR of the
+  destructured and the whole-payload forms is the same); the bodies' work
+  -- the addition, the call -- is in their rows, within the noise between
+  two rows.
+* **The Tcl compiler's match is slower than the chain it replaces** (16.9
+  against 5.8 us): it calls `enum#is` and `enum#payload` as natives in
+  every arm -- `payloadImpl` even for a payload-free case, whose value is
+  unit -- where `==` of two immediate enum values is one Tcl comparison.
+  Inlining the selections in compiler/compiler.tcl is later work
+  (section 18); the Tcl backends are the reference, natively the match is
+  free. The interpreter's numbers are the semantic interpreter's.
+
+Native heap allocations of each whole program (Cranelift's counters),
+N = 200,000:
+
+| program | allocations | Lists | Structs | EnumCases |
+|---|---:|---:|---:|---:|
+| free-keep / free-match / free-chain | 3 | 2 | 0 | 0 |
+| mixed-keep / mixed-free | 3 | 2 | 0 | 0 |
+| payload-keep / -fields / -none / -whole | 400,003 | 2 | 200,000 | 200,000 |
+| struct-keep / struct-select | 3 | 2 | 0 | 0 |
+| many-keep / many-last | 400,003 | 2 | 200,000 | 200,000 |
+| known-base / known-case | 400,003 | 2 | 200,000 | 200,000 |
+| vector-keep / vector-match | 400,005 | 3 | 200,000 | 200,000 |
+| fn-keep / fn-match | 400,003 | 2 | 200,000 | 200,000 |
+
+**Every match program allocates exactly what its baseline does**: a
+selection, a payload read and a binding allocate nothing, a match over a
+payload-free enum or of a payload-free case's value involves no
+EnumCaseObj, and the two allocations of a payload-bearing value (its
+payload struct and its EnumCaseObj, the payload milestone's
+representation) are its construction's. The chain is as long as the arms
+(`em-many-cases`: 120 arms, 120 selections), so compilation is linear in
+the arms.
 
 ## 18. Remaining limitations and later work
 
@@ -538,6 +643,12 @@ is linear in the arms (one `if` per arm).
   brief; nested matches compose.
 * **Untyped scrutinees are rejected**, never inferred: a generic helper
   that matches needs its parameter annotated.
+* **The Tcl compiler calls the selections.** compiler/compiler.tcl emits
+  `enum#is` and `enum#payload` as native calls in every arm, three times
+  the cost of the `==` chain a payload-free match replaces (section 17);
+  inlining them (an identity comparison of the value's two names, no call
+  for a payload-free case's unit) is a Tcl-backend optimization left for
+  later.
 * **Selection is a chain.** Natively a payload match calls `rt_enum_is`
   per arm tested and `rt_enum_payload` once; a jump on the case number (or
   inline tests of the word and the object's two numbers) would make a long

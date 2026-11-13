@@ -519,4 +519,9 @@ test em-coroutine-suspension {a match inside a coroutine suspends in an arm and 
     emReleases $src
 } -result {{value {[[3, 200, 4, 123], 0]}} 1}
 
+test em-no-synthesized-warning {a match's selections carry the enum's identity and the case's name as String constants the front end synthesized: a case or an enum whose name is one character long draws no ONE-CHAR-STRING-LITERAL (the constants are marked `synthesized`), and a program of matches compiles under -warnings error} -body {
+    set text "enum E:\n    A,\n    B \{x: int\},\n\nfn f(e: E) -> int:\n    match e:\n        case E::A:\n            1\n        case E::B \{x\}:\n            x\n\nf(E::B \{x: 4\}) + f(E::A)\n"
+    list [catch {surface::compile $text -warnings error} message] [emRun $text]
+} -result {0 {same: 5}}
+
 cleanupTests

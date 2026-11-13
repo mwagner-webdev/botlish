@@ -3213,6 +3213,7 @@ tests/exhaustive-match.test em-match-in-value-positions pass
 tests/exhaustive-match.test em-modules pass
 tests/exhaustive-match.test em-native-shape pass
 tests/exhaustive-match.test em-never pass
+tests/exhaustive-match.test em-no-synthesized-warning pass
 tests/exhaustive-match.test em-non-equatable-payloads pass
 tests/exhaustive-match.test em-not-exhaustive pass
 tests/exhaustive-match.test em-payload-binding-diagnostics pass

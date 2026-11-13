@@ -199,10 +199,11 @@ executable's, whose process start is about 2 ms):
 | `native structs` | 0.762 | 6.7 | 2.6 |
 | `native tables` | 0.293 | 17.5 | 1.0 |
 
-(PORTABILITY-EXHAUSTIVE-MATCH-MILESTONE-1.md added `native enums`; its
-report has the six-version table. On one machine the payload-enum version
-took 0.718 s against the struct version's 0.765 s, computing the same
-455,468 nodes, 6 rounds and checksum 275164515.)
+(PORTABILITY-EXHAUSTIVE-MATCH-MILESTONE-1.md added `native enums`:
+payload-bearing nodes and exhaustive matches. `results/kernel-enums.txt` is
+its six-version run, on another day: `native enums` 0.769 s against
+`native structs` 0.814 s, every version computing the same 455,468 nodes,
+6 rounds and checksum 275164515.)
 
 * **Like for like, native Botlish is 3.7 times faster when each call
   returns a small value, and 8.8 times faster when nothing is allocated**

@@ -4112,7 +4112,7 @@ pub extern "C" fn rt_enum_payload(p: *mut Vm, v: Value, index: Value, case: Valu
     enum_payload(v).unwrap_or(UNIT)
 }
 
-/// enum#unmatched: the end of a match's chain of selections, which no arm
+/// enum#unmatched: the end of a match's chain of case tests, which no arm
 /// selected -- never reached by a match hir/match.tcl proved exhaustive.
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_enum_unmatched(p: *mut Vm) -> Value {

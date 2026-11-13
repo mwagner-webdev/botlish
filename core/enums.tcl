@@ -43,7 +43,7 @@ core::native::register enum#case -arity 3 -impl core::enums::caseImpl \
 #   enum#unmatched()                   the end of a match no arm selected
 #
 # The three runtime operations of a match: hir/resolve.tcl writes every
-# `match` (surface/lower.tcl's Match) as a chain of selections -- an `if`
+# `match` (surface/lower.tcl's Match) as a chain of case tests -- an `if`
 # per arm testing enum#is, whose then-branch takes the payload out with
 # enum#payload first -- ending in enum#unmatched, which an exhaustive
 # match never reaches (hir/match.tcl proves every case is named; it is the

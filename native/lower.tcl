@@ -273,7 +273,7 @@ namespace eval native::lower {
     # A payload-bearing enum case's construction (core/enums.tcl,
     # PORTABILITY-PAYLOAD-ENUMS-MILESTONE-1.md): `op enumcase`.
     dict set natives enum#case enumcase
-    # A match's selections (core/enums.tcl, PORTABILITY-EXHAUSTIVE-MATCH-
+    # A match's case tests (core/enums.tcl, PORTABILITY-EXHAUSTIVE-MATCH-
     # MILESTONE-1.md): `op enumis`, `op enumpayload` (EnumSelection) and the
     # end of an unmatched chain.
     dict set natives enum#is enumis
