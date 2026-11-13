@@ -588,13 +588,16 @@ test exact-callable-budget-stress {N exact call sites into one helper: the insta
     }
 } -result {1 2 4 5 5}
 
+# (The exact key names its block by expression id, which the modules a
+# program loads shift: std::str's encode_utf8 contract loads std::byte,
+# STDLIB-ENCODE-UTF8-RESULT-TYPE-STABILITY-MILESTONE-1.md.)
 test exact-callable-limit-option {-exact-callable-limit N is the per-function budget as an ordinary option (and BOTLISH_NATIVE_EXACT_CALLABLE_LIMIT): with 1 the first target stays exact and the second shares the kind-only key and callvalue; with 0 it is the kind-only baseline; the default (4) keeps both exact} -body {
     set one [nirOf $::mixedHof -exact-callable-limit 1]
     set zero [nirOf $::mixedHof -exact-callable-limit 0]
     list [instancesNamed $one count_while] [expr {[callvalues $one] >= 1}] \
         [instancesNamed $zero count_while] [expr {[callvalues $zero] >= 1}] \
         $::hir::specialize::exactLimit [callvalues [nirOf $::mixedHof]]
-} -result {{{block(e2), str} {native, str}} 1 {{block, str} {native, str}} 1 4 0}
+} -match glob -result {{{block(e*), str} {native, str}} 1 {{block, str} {native, str}} 1 4 0}
 
 test exact-callable-opt-off-restores-kind-keys {-exact-callable-opt 0 restores the kind-only keys: one shared instance and a callvalue, same value} -body {
     set nir [nirOf $::mixedHof -exact-callable-opt 0]
