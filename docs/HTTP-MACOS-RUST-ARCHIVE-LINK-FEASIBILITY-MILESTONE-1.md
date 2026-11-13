@@ -447,7 +447,48 @@ unit byte for byte as before: `6f1f0649...8784` before and after.
 
 ## 16. Remaining gaps and risks
 
-PENDING.
+* **The localized object keeps Rust's bitcode** [inspection, CI]. `ld -r`
+  concatenates the standard library's `__LLVM,__bitcode` sections into
+  the one localized member. A non-LTO link ignores them (every link in
+  this milestone is one); an LTO link of a consumer's own, or a tool
+  reading symbols through Apple's bitcode reader, would meet bitcode of a
+  newer LLVM than Xcode's. Dropping the section (a strip step of its own)
+  was not needed for anything this milestone links and was not added.
+* **Two copies of Rust's standard library remain** [executed, CI]. Each
+  is complete and private to its owner: two allocators (the unit's
+  counting one sits on `malloc`, as the runtime's does), two panic
+  runtimes, two personality routines. That is the price of a prebuilt
+  unit; the localization makes it correct, not small. A unit's panic is
+  caught at its own C boundary; nothing unwinds from one copy into the
+  other.
+* **One unwinder per process** [inference]. Linux: libgcc_s for both
+  copies; macOS: the system unwinder in libSystem for both (Rust's
+  `unwind` crate links the system one on Apple targets). Each copy's
+  personality routine reads its own unwind tables; a local
+  `rust_eh_personality` is still referenced by the unit's FDEs/compact
+  unwind entries, which the executables' `__unwind_info` and the caught
+  panics exercise.
+* **Deployment target** [inspection]. The unit is built for rustc's
+  default macOS 11.0, its C object with `-mmacosx-version-min=11.0`, the
+  runtime links with `-mmacosx-version-min=11.0.0`. A unit built for a
+  newer target than the consumer's link makes Apple's ld warn; nothing
+  checks it at packing.
+* **Toolchain coverage** [CI]. The runtime is built by the runners'
+  stable rustc (1.100.0 on 2026-11-13), the unit by 1.97.0 and by the
+  stable one in the experiments; the same-toolchain case (the silent
+  allocator rebinding when unlocalized) and the different-toolchain case
+  are both covered on both hosts. One Xcode (16.4) and one macOS image.
+* **Dead stripping** [inference]. `ld -r` merges the unit into one object;
+  whether Apple's `-dead_strip` can still drop the unit's unused std code
+  depends on the merged object keeping subsections via symbols. Size was
+  not measured.
+* **Only the fixture is packaged** [executed, CI]. No `http` release is
+  made or implied; the real unit is built, localized and linked by a
+  probe on both hosts (section 14), not packed, installed or exercised
+  against a server on macOS.
+
+PENDING (CI): the weak-reference finding on Apple's ld, anything the
+macOS runs add.
 
 ## 17. Changes made to the main repository
 
