@@ -440,7 +440,36 @@ PENDING
 
 ## 24. Cleanroom
 
-PENDING
+`audit/android-tagged-pointers/cleanroom/cleanroom.sh` (**observed**;
+`results/cleanroom/`): the single-file compiler built from this change
+(`single/build.sh`, 15,610,549 bytes) copied into a fresh directory and run
+with an emptied environment (`env -i PATH=/usr/bin:/bin`, a fresh HOME,
+`ANDROID_NDK_ROOT`), nothing of the checkout reachable. Its inputs are what
+a developer has: the Android target support package packed by that compiler
+(`package.sh OUT single/out/botlish`: runtime ABI `637264e0003a0b68`,
+archive SHA-256 `6fbd8f342ecc733e...`), the probe's sources and the
+userspace runner copied into the room, Android's libSDL3.so and the
+committed android-aarch64 SDL3 binding staged as sources, the NDK and the
+three Android userspaces.
+
+1. The package is installed (`botlish add ... -target android-aarch64`).
+2. hello, heap, tagged and sdl_surface are compiled as application
+   libraries of android-aarch64 (`-target-support
+   botlish_target_android_aarch64 -emit-native-library NAME -application`),
+   tagged and heap linking the probe's NDK-built static archive (`static
+   at`), sdl_surface libSDL3.so; the hosts by the NDK.
+3. Each manifest is schema 3 with `compiler.runtimeAbi` and
+   `targetSupport.runtimeAbi` both `637264e0003a0b68`
+   (`results/cleanroom/tagged.manifest.json`).
+4. Run in Android processes: every program `MAIN 0 0`, `MAIN 1 0` on API 21,
+   24 and 35; on API 35 with tagging on `exposure 180 36`, `heap 180 same`,
+   `sdl surface 180 180 8x8 32` and every other check; also with 16 KiB
+   pages and under GC stress (`results/cleanroom/cleanroom.txt`).
+5. The base commit's Android package installed by the same compiler is
+   refused before anything links: `NATIVE TARGET-SUPPORT ABI`, "the
+   package's runtime ABI fingerprint is 14aa5041bb46ae5d, and this
+   compiler's for android-aarch64 is 637264e0003a0b68"
+   (`results/cleanroom/stale-package.txt`).
 
 ## 25. Remaining limitations
 
