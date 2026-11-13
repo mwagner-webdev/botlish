@@ -558,8 +558,15 @@ toolchain), whose runs were queued.
 The four test workflows are dispatched again on the fix's commit
 `e63466e8` (superseding the runs above where they were unfinished): tests
 43505390208, tests (linux arm64) 43505394990, tests (macos arm64)
-43505400374, tests (windows x86-64) 43505405543 -- pending (next update of
-this section).
+43505400374, tests (windows x86-64) 43505405543. Read at 22:35 UTC
+(**CI**):
+
+| Workflow | Passed | Failed | Pending |
+|---|---|---|---|
+| tests | canary | -- | every other job (interp running; the rest queued) |
+| tests (linux arm64) | canary, native Rust unit tests, golden shards 1/4 and 3/4 | -- | cranelift coverage (running), interp, compile, cranelift-generic coverage, both GC-stress jobs, system-linked executables, golden shards 2, 4 |
+| tests (macos arm64) | smoke, the Linux control | -- | acceptance shards 1-6, system linker, Botlish.app |
+| tests (windows x86-64) | canary, root plans, every smoke check but one (C calls and libraries, filesystem and variadic C calls under GC stress included) | smoke's tier step: `argv-focused-valid-fuzz` alone (1 of 1,287 on each pass), the same three iterations as main's | acceptance shards 1-4, system linker |
 
 ## 24. Cleanroom
 
