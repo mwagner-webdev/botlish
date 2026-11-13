@@ -507,6 +507,41 @@ fn link_hint(flavor: LinkerFlavor, diagnostics: &str) -> Option<&'static str> {
     None
 }
 
+/// The directories of RELEASE (the driver's own build directory) that hold
+/// the runtime library's dependencies, which rustc searches (`-L
+/// dependency=`) to link the startup crate against `libbotlish_native.rlib`,
+/// in either of cargo's layouts: `deps/`, every crate's artifacts in one
+/// directory (cargo before 1.100), and `build/PACKAGE/HASH/out/`, one
+/// directory per compilation unit (cargo 1.100's build-dir layout, which
+/// writes no `deps/`); only a unit directory that holds an rlib is one. A
+/// build directory may hold both layouts and earlier builds' artifacts (an
+/// older toolchain's, a restored cache's): rustc takes, by name, the crate
+/// whose hash the runtime library records and passes over the others, as
+/// it always did within `deps/`. Sorted: the same directory gives the same
+/// command.
+fn dependency_dirs(release: &Path) -> Vec<PathBuf> {
+    fn holds_rlib(dir: &Path) -> bool {
+        std::fs::read_dir(dir)
+            .map(|entries| entries.flatten().any(|e| e.path().extension().is_some_and(|x| x == "rlib")))
+            .unwrap_or(false)
+    }
+    let mut dirs = Vec::new();
+    let deps = release.join("deps");
+    if deps.is_dir() {
+        dirs.push(deps);
+    }
+    for package in std::fs::read_dir(release.join("build")).into_iter().flatten().flatten() {
+        for unit in std::fs::read_dir(package.path()).into_iter().flatten().flatten() {
+            let out = unit.path().join("out");
+            if holds_rlib(&out) {
+                dirs.push(out);
+            }
+        }
+    }
+    dirs.sort();
+    dirs
+}
+
 /// The `rustc` linker: a generated startup crate, compiled and linked
 /// against this build's runtime library, started by STARTUP.
 fn link_rustc(program: &Program, destination: &Path, search: &LinkSearch, startup: Startup) -> Result<(), LinkError> {
@@ -517,6 +552,15 @@ fn link_rustc(program: &Program, destination: &Path, search: &LinkSearch, startu
         return Err(format!(
             "runtime library missing: {}; run cargo build --release --manifest-path native/Cargo.toml",
             library.display()
+        )
+        .into());
+    }
+    let dependencies = dependency_dirs(release);
+    if dependencies.is_empty() {
+        return Err(format!(
+            "runtime library's dependencies missing: neither {} nor a unit directory of {} holds a crate; run cargo build --release --manifest-path native/Cargo.toml",
+            release.join("deps").display(),
+            release.join("build").display()
         )
         .into());
     }
@@ -531,6 +575,16 @@ fn link_rustc(program: &Program, destination: &Path, search: &LinkSearch, startu
     let executable = work.0.join(format!("executable{}", std::env::consts::EXE_SUFFIX));
     std::fs::write(&object_path, &object.bytes).map_err(|e| e.to_string())?;
     std::fs::write(&source_path, STARTUP).map_err(|e| e.to_string())?;
+    // The search directories go in an argument file (one argument a line,
+    // rustc's `@FILE`): cargo 1.100's layout gives each dependency a
+    // directory of its own, and a build directory that keeps earlier
+    // builds' grows a command past Windows' 32767 units.
+    let arguments_path = work.0.join("dependencies.args");
+    let mut arguments = String::new();
+    for dir in &dependencies {
+        let _ = writeln!(arguments, "-L\ndependency={}", dir.display());
+    }
+    std::fs::write(&arguments_path, arguments).map_err(|e| e.to_string())?;
     // rustc compiles the startup crate for the driver's own target, the one
     // the runtime library was built for, whatever rustc's own host is: a
     // Windows machine commonly has both Rust Windows host toolchains, and a
@@ -549,8 +603,7 @@ fn link_rustc(program: &Program, destination: &Path, search: &LinkSearch, startu
         ])
         .arg("--extern")
         .arg(format!("botlish_native={}", library.display()))
-        .arg("-L")
-        .arg(format!("dependency={}", release.join("deps").display()))
+        .arg(format!("@{}", arguments_path.display()))
         .arg("-C")
         .arg(format!("link-arg={}", object_path.display()))
         .args(link_plan_args(program, &inputs, search))
@@ -2961,6 +3014,53 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         Scratch(dir)
+    }
+
+    /// The rustc linker finds the runtime library's dependencies in either of
+    /// cargo's layouts, and in a build directory holding both: `deps/`
+    /// (before cargo 1.100) and every `build/PACKAGE/HASH/out/` holding an
+    /// rlib (cargo 1.100's build-dir layout) -- never a unit directory
+    /// without one (a build script's, a unit's other outputs), sorted.
+    #[test]
+    fn rustc_linker_dependency_dirs_in_both_cargo_layouts() {
+        let empty = scratch("deps-empty");
+        assert!(dependency_dirs(&empty).is_empty());
+
+        let old = scratch("deps-old");
+        std::fs::create_dir_all(old.join("deps")).unwrap();
+        assert_eq!(dependency_dirs(&old), vec![old.join("deps")]);
+
+        let new = scratch("deps-new");
+        for (unit, file) in [
+            ("num-bigint/a476ce76b73c867c", Some("libnum_bigint-a476ce76b73c867c.rlib")),
+            ("libc/8b5f069fb45da6a4", Some("liblibc-8b5f069fb45da6a4.rlib")),
+            ("libc/c0640d1a901c962b", None),
+            ("cranelift-codegen/0123456789abcdef", Some("cranelift_codegen-0123456789abcdef.d")),
+        ] {
+            let out = new.join("build").join(unit).join("out");
+            std::fs::create_dir_all(&out).unwrap();
+            if let Some(file) = file {
+                std::fs::write(out.join(file), b"").unwrap();
+            }
+        }
+        std::fs::create_dir_all(new.join("build/botlish-native/c2d53212a999baa3/fingerprint")).unwrap();
+        let found = dependency_dirs(&new);
+        assert_eq!(
+            found,
+            vec![
+                new.join("build/libc/8b5f069fb45da6a4/out"),
+                new.join("build/num-bigint/a476ce76b73c867c/out"),
+            ]
+        );
+
+        // A restored cache of an older toolchain beside a new build: both.
+        std::fs::create_dir_all(new.join("deps")).unwrap();
+        let both = dependency_dirs(&new);
+        assert_eq!(both.len(), 3);
+        assert!(both.contains(&new.join("deps")) && found.iter().all(|d| both.contains(d)));
+        let mut sorted = both.clone();
+        sorted.sort();
+        assert_eq!(both, sorted);
     }
 
     /// An ELF64 object header of MACHINE (62 x86-64, 183 AArch64) and type
