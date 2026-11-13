@@ -95,11 +95,15 @@ proc appCore {dir} {
     return [hir::lower [appHir $dir]]
 }
 
-# The targets of every call of HIR whose callee is a native, in walk order.
+# The targets of every call of HIR's entry program whose callee is a native,
+# in walk order.
 proc nativeTargets {hir} {
     set targets {}
     foreach e [hir::walk $hir] {
-        if {[hir::kind $hir $e] eq "call"} {
+        # The entry program's own calls (file f1): std::str's encode_utf8
+        # contract loads std::byte, whose functions call natives of their
+        # own (STDLIB-ENCODE-UTF8-RESULT-TYPE-STABILITY-MILESTONE-1.md).
+        if {[hir::kind $hir $e] eq "call" && [lindex [dict get [hir::node $hir $e] origin] 1] eq "f1"} {
             lassign [hir::get $hir $e target] kind target
             if {$kind eq "native"} {
                 lappend targets [dict get [hir::symbol $hir $target] name]
