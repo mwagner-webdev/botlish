@@ -768,7 +768,7 @@ test pn-index-apple {Apple's own archives -- ar rcs (its ranlib's __.SYMDEF SORT
         catch {exec nm -g -U -j {*}$objects 2>/dev/null} listed
         set nm [lsort -unique [lmap s [split $listed \n] {
             expr {[string match _* $s] ? [string range $s 1 end] : [continue]}}]]
-        lappend out [lindex [dict get $facts members] 0 name] [dict get $facts index] [expr {[dict get $facts index] eq $nm}]
+        lappend out [dict get [lindex [dict get $facts members] 0] name] [dict get $facts index] [expr {[dict get $facts index] eq $nm}]
     }
     set out
 } -cleanup cleanup -result {{__.SYMDEF SORTED} {mac_other mac_value second_fn use_local} 1 {__.SYMDEF SORTED} {mac_other mac_value second_fn use_local} 1}

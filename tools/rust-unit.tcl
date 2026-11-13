@@ -75,8 +75,9 @@ proc rustunit::HostFormat {} {
 
 # nm ARGS: its standard output. Apple's nm (llvm-nm) exits non-zero when it
 # warns -- a member with no symbols, which a Rust static library has --
-# after printing every other file's symbols: its output is taken then, and
-# only an nm that printed nothing is an error (with what it said).
+# after printing every other file's symbols: its output is taken then, when
+# all it said is that some member has no symbols; an nm that printed
+# nothing, or said anything else, is an error (with what it said).
 proc rustunit::Nm {args} {
     set err [file join [expr {[info exists ::env(TMPDIR)] && $::env(TMPDIR) ne "" ? $::env(TMPDIR) : "/tmp"}] rustunit-nm-[pid].err]
     set failed [catch {exec nm {*}$args 2>$err} out opts]
@@ -98,6 +99,12 @@ proc rustunit::Nm {args} {
         }
         if {[string trim $out] eq ""} {
             Fail "nm [join $args] printed nothing (exit [lindex [dict get $opts -errorcode] 2]): [string range $said 0 600]"
+        }
+        # Only a member with no symbols may have made it fail: anything else
+        # it said may be a member it did not read (a partial list).
+        foreach line [split $said \n] {
+            if {[string trim $line] eq "" || [string match "*no symbols*" $line]} continue
+            Fail "nm [join $args] failed (exit [lindex [dict get $opts -errorcode] 2]) after printing: [string range $line 0 600]"
         }
     }
     return $out
