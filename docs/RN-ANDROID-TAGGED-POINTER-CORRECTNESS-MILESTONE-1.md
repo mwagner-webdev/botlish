@@ -555,8 +555,11 @@ rustc-linked tests (the cargo 1.100 layout `ce54fead` fixes). main has
 since moved to `14937461` (native build caches keyed by the Rust
 toolchain), whose runs were queued.
 
-The four test workflows are dispatched again on the fix's commit; their
-runs are pending (next update of this section).
+The four test workflows are dispatched again on the fix's commit
+`e63466e8` (superseding the runs above where they were unfinished): tests
+43505390208, tests (linux arm64) 43505394990, tests (macos arm64)
+43505400374, tests (windows x86-64) 43505405543 -- pending (next update of
+this section).
 
 ## 24. Cleanroom
 
