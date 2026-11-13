@@ -818,6 +818,41 @@ Every job succeeded. Every later commit changes only tests, audit tooling and do
 (the comment in hir/mutvec.tcl aside); the dispatched runs test the
 branch's last code commit with every test.
 
+**(merge)** Merged into main at bd6f99f9, which had moved 69 commits past
+this branch's base (host-startable application libraries, cross-target
+link plans, Android C bindings, Windows C callbacks, emission work). Git
+merged it without a conflict: AGENTS.md, docs/INDEX.md,
+compilerpedia/topics/concepts.topic, native/lower.tcl, native/src/nir.rs,
+native/src/codegen/clif.rs, native/src/runtime/vm.rs, the golden manifest
+and tcl-names.txt merged automatically, and the merged manifest is exactly
+what merge.tcl regenerates (13,814 rows: main's 13,766 and this branch's
+48; its nine notices "census row for a test that did not run" are main's
+own, Android tests of android-target.test and c-bindgen.test). On the
+merged tree:
+
+| run | result |
+|---|---|
+| `tclsh9.0 tests/local.tcl` (the merge with ede621b1) | all 702 items passed: 291 Tcl test files on interp and compile, 120 golden suites on the four backends (the run reached its time limit after 474 items; the other 228 passed in a second, narrowed run) |
+| the merge with bd6f99f9 (main's 37 later files: Windows callbacks, the rustc linker) | `cargo test --release --lib --bins` passed; `tools/mutant-catalogs.tcl`: 108 catalogs, 3,715 mutants, 0 problems; `tools/compilerpedia.tcl check`: 1,300 topics, 778 examples, 0 problems; `tests/local.tcl` over c-callbacks.test, native-library.test, native-executable.test, payload-enums.test, enums.test and the golden suites payload-enums.bot, c-callbacks.bot, structs-and-enums.bot: 0 failures |
+
+Main's CI when merged. At 023dfaa3 its tests run failed in one job,
+tests (cranelift coverage), on one test, `vt-large` of
+tests/value-transfer.test, reported as a native backend failure;
+023dfaa3 changes no production code, the same test passed at cdb751b0 and
+on this branch, the canary history records no failure of the file in the
+21 days before 2026-11-10, and it passed on cranelift on the merged tree
+(52 s); its cause is not known. Every other workflow at 023dfaa3
+succeeded. At ede621b1 tests, tests (linux arm64), tests (macos arm64),
+tests (windows x86-64), c-bindgen, icy-tower, icy-tower (windows x86-64)
+and ci tools failed; ce54fead's message attributes the test failures to
+Rust 1.100.0's cargo, whose build directory has no target/release/deps,
+where the rustc linker looked for the runtime's crates, and fixes the
+linker. At ce54fead c-bindgen, bench, single executable, scalar-asm-audit
+and the three Icy Tower workflows succeeded; tests and tests (linux
+arm64) were running and tests (macos arm64) and tests (windows x86-64)
+queued (pending). Local runs here used rustc 1.97.0 (cargo's earlier
+layout).
+
 ## 18. Compatibility with the semantic-instance rollback design
 
 **(inspection, observed)** SEMANTIC-INSTANCE-SCALABILITY-MILESTONE-1.md's
