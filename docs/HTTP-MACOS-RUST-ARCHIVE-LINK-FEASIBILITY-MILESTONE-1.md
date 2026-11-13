@@ -454,7 +454,56 @@ PENDING (CI).
 
 ## 12. Negative tests and mutants
 
-PENDING (CI for the macOS mutant).
+**Negative tests** (each expects a failure, and says which):
+
+| Test | What must fail, and how |
+|---|---|
+| `ral-raw-*-{rustc,system}` (4 per host) | the raw archive linked into each program: the link fails, or a check of the program fails -- never a pass |
+| `ral-check-refuses-raw` | `rustunit::check` on the raw archive: "global definitions differ ... N more" |
+| `ral-require-missing-export` | localizing with a required export the unit lacks: "does not define rl_absent" |
+| `ral-kept-glob-misses` | a keep list missing an export: the consumer's link fails on it |
+| `ral-native-add-symbols` | `native add -symbol` with a misspelled symbol: refused |
+| `ral-native-add-wrong-target` | the host's archive declared for the other OS's target: refused, naming the members' format |
+| `ral-weakdef-localized-away-*` | the fallback localized away: the program with the provider gets -38 |
+| `ral-weakref-without_provider-*` | Mach-O: the link fails on the undefined weak import (ELF: null, -38) |
+| `ral-nm-partial-refused` | an nm that fails after printing for any other reason than an empty member: an error |
+| `pn-index-bsd-malformed` | three corrupt BSD indexes (pairs, string table, member offset): `{PM BINARY}` |
+| `pn-index-bsd-symbols-checked` | `-symbol` naming a symbol the Apple index lacks: refused |
+| `pn-index-weak-elf`, `pn-index-weak-macho-install` | two strong definitions in two packages: refused at installation |
+
+**Mutants** (audit/rust-archive-link/tools/mutants.txt, 25; each must be
+killed by a test its `!!` line names, the test that states the rule, run
+by `mutate.tcl` on a private copy of the tree):
+
+| Mutant | Breaks | Killed by | Linux [executed] | macOS [CI] |
+|---|---|---|---|---|
+| `elf-unlocalized` | objcopy without `--keep-global-symbols` | `ral-localized-*` | killed | not applicable |
+| `elf-comdat-kept` | Rust's COMDAT group not renamed (B3) | `ral-localized-comdat` | killed | not applicable |
+| `macho-unlocalized` | `ld -r` without the exported-symbols list | `ral-localized-*` | not applicable | killed (43516411953) |
+| `keep-everything` | every global kept | `ral-localized-*` | killed | killed (43516411953) |
+| `require-ignored` | a missing required export accepted | `ral-require-missing-export` | killed | killed (43516411953) |
+| `check-lenient` | the surface check accepts anything | `ral-check-refuses-raw` | killed | killed (43516411953) |
+| `fallback-localized` | the weak fallback localized | `ral-localized-surface`, `-with_provider-*` | killed | killed (43516411953) |
+| `macho-bitcode-reader` | Mach-O read without `--no-llvm-bc` | `ral-nm-bitcode-reader-off` (stand-in); on macOS also `ral-raw-surface`, `ral-localized-surface` | killed | killed (43516411953) |
+| `macho-private-extern-local` | private externals not counted | `ral-macho-private-extern` (stand-in); on macOS `ral-raw-surface` | killed | PENDING |
+| `nm-no-fallback` | an nm without `--no-llvm-bc` is an error | `ral-nm-old-nm-fallback` | killed | killed (43516411953) |
+| `nm-partial-accepted` | any failure after output accepted | `ral-nm-partial-refused` | killed | killed (43516411953) |
+| `nm-no-symbols-refused` | Apple's empty-member warning refused | `ral-nm-no-symbols-accepted` | killed | killed (43516411953) |
+| `bsd-index-ignored` | F-16 again | `pn-index-bsd-*`, `pn-index-apple`, `ral-native-add-symbols` | killed | killed (43516411953) |
+| `underscore-kept` | Mach-O names keep `_` | the same | killed | killed (43516411953) |
+| `underscore-always` | every name loses `_` | `pn-index-bsd-forms` | killed | killed (43516411953) |
+| `offset-unchecked`, `pairs-unchecked`, `strtab-unchecked` | a malformed index read as fewer names | `pn-index-bsd-malformed` | killed | killed (43516411953) |
+| `block-freed-by-libc` | the lent block given to libc's `free` | `ral-localized-*` (the unit's live heap) | killed | killed (43516411953) |
+| `weak-elf-unread` | ELF weak definitions not read | `pn-index-weak-elf` | killed | not applicable |
+| `weak-macho-unread` | `N_WEAK_DEF` not read | `pn-index-weak-macho` | killed (llvm-ar) | killed (43516411953) |
+| `weak-any-member` | weak when any member is | `pn-index-weak-elf`, `pn-index-weak-macho` | killed | killed (43516411953) |
+| `install-weak-counted` | the installation counts weak as duplicate | `pn-index-weak-elf`, `pn-index-weak-macho-install` | killed | PENDING (survived in 43516411953, before the macOS installation test existed) |
+| `install-all-weak` | the installation exempts everything | the same, `pn-native-conflicts` | killed | PENDING (as above) |
+| `audit-weak-counted` | the pack audit counts weak as duplicate | `ral-pack-weak-beside-strong` | killed | killed (43516411953) |
+
+The first macOS mutant run is the reason two tests exist: three mutants
+"survived" there only because the one test naming them was ELF-only and
+skipped, which the harness rightly reports as a survivor.
 
 ## 13. Reproducibility evidence
 
