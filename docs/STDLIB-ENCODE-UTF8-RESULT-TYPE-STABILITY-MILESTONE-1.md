@@ -606,7 +606,61 @@ change; each exit 0):**
 The batched-against-sequential comparison of the golden suites
 (`static-decisions.yml`) is CI's alone (AGENTS.md); its state is below.
 
-LOCAL-SUITE-PLACEHOLDER
+**The local suite (Executed, `tclsh9.0 tests/local.tcl`, four jobs).** Every
+Tcl test file on interp and compile and every golden suite on the four
+backends passed on the final code, in three runs (the background-task limit
+of two hours cut the first):
+
+* the whole suite on an earlier commit of the branch: all 119 golden suites
+  on interp, compile, cranelift-generic and cranelift passed, and 358 of the
+  582 Tcl test runs before the limit; its failures were the fragile tests
+  section H lists, fixed since;
+* the 119 Tcl test files that run had not finished or had failed, on
+  `1dea3c1c` (whose compiler, library and tools are the final ones: only
+  tests and documents changed after it): 232 of 238 runs passed; the 6
+  failures were `hir-aot.test`, `not-callable.test` and
+  `str-append-char.test` on both backends, three more tests that walked the
+  whole HIR, fixed since and passed in the next run;
+* on the final code: the golden layer (119 suites on four backends, through
+  the front-end cache, 478 s: all passed), then the other 172 Tcl test files
+  and the three fixed ones (350 runs): all passed but one,
+  `syntax-highlighting.test` on compile, whose `sh-grammar-vim-corpus` saw
+  `vim -es` exit with status 1 while checking `stdlib/actor.bot` and a CSV
+  example against the Vim grammar -- files, lexer and grammar this change does
+  not touch. It passed on interp in the same run, on both backends in the
+  first run, and four times on compile alone afterwards: an intermittent
+  failure of the external tool under load.
+
+**CI on the branch (as of 2026-11-13, 21:45 UTC).** At `5b193430`, whose
+code is the final code (only this report changed after it):
+
+| workflow | run | state |
+|---|---|---|
+| tests (windows x86-64), push | canary (Windows x86-64, MSVC) | **succeeded** (a branch push runs only the canary) |
+| tests (linux arm64), dispatched | canary (linux arm64) | **succeeded**; its 12 full jobs (interp, compile, the cranelift and cranelift-generic coverage, the golden suites in four shards, the native Rust unit tests, GC stress, the system-linked executables) **pending** (queued) |
+| tests (macos arm64), push | Linux control (Tier A) | **succeeded**; the macOS smoke job **pending** (queued) |
+| icy-tower (windows x86-64), push | -- | **succeeded** |
+| icy-tower (macos arm64), push | -- | **pending** (queued) |
+| tests, dispatched | every job | **pending** (queued) |
+| static-decisions, dispatched at `1dea3c1c` (the same front end) | the golden suites' batched against sequential decisions | **pending** (queued) |
+
+The shared runners were saturated all afternoon (main's own runs at
+`14937461` were queued for over two hours); none of the pending runs is
+reported here as passed. Not dispatched: the macOS and Windows acceptance
+tiers (`macos-arm64.yml`, `windows-x86_64.yml` on the branch).
+
+**`main`'s CI, for comparison (AGENTS.md).** When the branch was made from
+`bd6f99f9`, `main`'s latest completed runs (at `ede621b1`) had all four test
+workflows' canaries red (x86-64: `application-library`, `c-bindgen`,
+`c-ffi`, `external-tools`) and `ci tools` red: stable Rust had become
+1.100.0, whose cargo writes no `target/release/deps`; `ce54fead`, an
+ancestor of `bd6f99f9` and so in this branch, fixed the rustc linker's
+search, and its runs were still pending then. `main` has since moved to `14937461` (24 commits,
+payload-bearing enums among them, not merged here): there its `ci tools`
+run failed, its four test workflows were still queued, and single
+executable, c-bindgen, bench and the three Icy Tower workflows succeeded.
+The branch's canaries that ran are green where `main`'s were red at the
+branch point.
 
 ## N. Performance
 
