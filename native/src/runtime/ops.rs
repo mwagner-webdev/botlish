@@ -4071,6 +4071,57 @@ pub extern "C" fn rt_enum_case(p: *mut Vm, payload: Value, index: Value, case: V
     vm(p).new_enum_case(index as u32, case as u32, payload)
 }
 
+/// enum#is (core/enums.tcl; PORTABILITY-EXHAUSTIVE-MATCH-MILESTONE-1.md):
+/// true iff V -- an immediate payload-free case word or an EnumCaseObj -- is
+/// a value of case CASE of the program's enum number INDEX (small-Int words
+/// NIR's `int` constants made). Reads the identity only (enum_case_parts):
+/// never the payload, never an equality, so a value whose payload has none
+/// (a function, an affine value) is selected the same way. V is an enum
+/// value of the match's scrutinee type (hir/match.tcl); anything else is no
+/// value of the case.
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_enum_is(_p: *mut Vm, v: Value, index: Value, case: Value) -> Value {
+    bool_value(enum_value_is(v, small_of(index) as u32, small_of(case) as u32))
+}
+
+/// 1 if V is an enum value of case CASE of enum INDEX (rt_enum_is).
+fn enum_value_is(v: Value, index: u32, case: u32) -> bool {
+    (is_enum(v) || heap_kind(v) == KIND_ENUMCASE) && enum_case_parts(v) == (index, case)
+}
+
+/// enum#payload: the payload of V, a value of case CASE of enum INDEX -- its
+/// EnumCaseObj's payload struct, or unit for a payload-free case. A match
+/// takes it only under its own enum#is (hir/match.tcl), so the identity is
+/// that case's; it is checked again (no payload of another case is ever
+/// read: a program run despite a rejected match fails here, UNMATCHED).
+/// Reads one field: never allocates, so nothing needs rooting.
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_enum_payload(p: *mut Vm, v: Value, index: Value, case: Value) -> Value {
+    let (index, case) = (small_of(index) as u32, small_of(case) as u32);
+    if !enum_value_is(v, index, case) {
+        let info = program(p);
+        let e = &info.enums[index as usize];
+        return vm(p).fail(RtError::Semantic {
+            kind: "UNMATCHED",
+            message: format!(
+                "enum#payload: the payload of {}::{} was taken from a value of another case (a compiler bug: a payload is taken only under its own case's selection)",
+                e.name, e.cases[case as usize]
+            ),
+        });
+    }
+    enum_payload(v).unwrap_or(UNIT)
+}
+
+/// enum#unmatched: the end of a match's chain of selections, which no arm
+/// selected -- never reached by a match hir/match.tcl proved exhaustive.
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_enum_unmatched(p: *mut Vm) -> Value {
+    vm(p).fail(RtError::Semantic {
+        kind: "UNMATCHED",
+        message: "enum#unmatched: no arm of a match selected the value's case (a compiler bug, or a program run despite its rejected match: a match is proven to name every case)".to_string(),
+    })
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_result_new(p: *mut Vm, ok: u64, v: Value) -> Value {
     vm(p).new_result(ok != 0, v)
@@ -4281,6 +4332,9 @@ pub fn apply_op(p: *mut Vm, op: OpCode, a: &[Value]) -> Value {
         MkError => rt_result_new(p, 0, a[0]),
         // (enum#case is internal: never a Native value, but harmless as one.)
         EnumCase => rt_enum_case(p, a[0], a[1], a[2]),
+        EnumIs => rt_enum_is(p, a[0], a[1], a[2]),
+        EnumPayload => rt_enum_payload(p, a[0], a[1], a[2]),
+        EnumUnmatched => rt_enum_unmatched(p),
         Hash | HashTotal => rt_hash(p, a[0]),
         TableHash | TableHashTotal => rt_table_hash(p, a[0]),
         BytesFromList => rt_bytes_from_list(p, a[0]),
@@ -4538,6 +4592,9 @@ runtime_helpers! {
     (rt_result_payload, 3),
     (rt_result_new, 3),
     (rt_enum_case, 4),
+    (rt_enum_is, 4),
+    (rt_enum_payload, 4),
+    (rt_enum_unmatched, 1),
     (rt_char_codepoint, 2),
     (rt_closure_new, 5),
     (rt_call_value, 4),
@@ -4793,6 +4850,37 @@ mod tests {
         assert_eq!(eq(&mut vm, c42, make_enum(0, 1)), FALSE);
         assert_eq!(eq(&mut vm, make_enum(0, 1), c42), FALSE);
         assert_eq!(eq(&mut vm, c42, make_enum(0, 0)), FALSE);
+    }
+
+    /// PORTABILITY-EXHAUSTIVE-MATCH-MILESTONE-1.md: a match's selection
+    /// reads a value's identity only -- an EnumCaseObj's and an immediate
+    /// word's alike, never its payload or another enum's same-numbered case
+    /// -- and a payload is read only from a value of its own case: another
+    /// case's value is UNMATCHED, never its payload.
+    #[test]
+    fn enum_selection_reads_identity_never_payload() {
+        let mut vm = vm_with_enums_and_shapes(&[("E", &["A", "B", "C"]), ("F", &["A"])], &[&["x"]]);
+        let p = rooted!(vm, vm.new_struct(0, vec![small(7)]));
+        let a = rooted!(vm, rt_enum_case(&mut *vm, p, small(0), small(0)));
+        let f = rooted!(vm, rt_enum_case(&mut *vm, p, small(1), small(0)));
+        assert_eq!(rt_enum_is(&mut *vm, a, small(0), small(0)), TRUE);
+        assert_eq!(rt_enum_is(&mut *vm, a, small(0), small(1)), FALSE);
+        assert_eq!(rt_enum_is(&mut *vm, a, small(1), small(0)), FALSE);
+        assert_eq!(rt_enum_is(&mut *vm, f, small(1), small(0)), TRUE);
+        assert_eq!(rt_enum_is(&mut *vm, make_enum(0, 1), small(0), small(1)), TRUE);
+        assert_eq!(rt_enum_is(&mut *vm, make_enum(0, 1), small(0), small(0)), FALSE);
+        assert_eq!(rt_enum_is(&mut *vm, make_enum(1, 0), small(0), small(0)), FALSE);
+        assert_eq!(rt_enum_is(&mut *vm, small(3), small(0), small(0)), FALSE);
+        assert_eq!(rt_enum_payload(&mut *vm, a, small(0), small(0)), p);
+        assert_eq!(rt_enum_payload(&mut *vm, make_enum(0, 1), small(0), small(1)), UNIT);
+        assert!(vm.error.is_none());
+        assert_eq!(rt_enum_payload(&mut *vm, a, small(0), small(2)), NO_VALUE);
+        match vm.error.take() {
+            Some(RtError::Semantic { kind: "UNMATCHED", message }) => assert!(message.contains("E::C"), "{message}"),
+            other => panic!("expected UNMATCHED, got {other:?}"),
+        }
+        assert_eq!(rt_enum_unmatched(&mut *vm), NO_VALUE);
+        assert!(matches!(vm.error.take(), Some(RtError::Semantic { kind: "UNMATCHED", .. })));
     }
 
     /// The hash of a payload-bearing case's value: the payload-free form's

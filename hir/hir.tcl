@@ -1069,6 +1069,7 @@ proc hir::CheckOnce {hirVar demote {roundsVar ""}} {
     } else {
         hir::signatures::infer hir $demote
     }
+    hir::match::verify hir
     hir::range::verifyDeclaredResults hir
     hir::structs::verifyApplications hir
     hir::imprint::verify hir
@@ -1486,7 +1487,7 @@ proc hir::exprsAt {hir origin} {
 }
 
 apply {{dir} {
-    foreach file {summaries ownership syntax static staticdeps imports resolve flags variadic contexts injection direct privacy coroutines affine resources mutvec iteration relations transfer refcheck hygiene sourcetypes structs enums layouts cabi imprint traits syscall internal borrow foreign errordecls refinements types operators decimal listlength exactvalue signatures modulebinding refine repeatable lower condition format read aot specialize range applied intset emitdfa emission rangerec callables containers semantic exports callbacks threads completions errorsets induction transport escape blockescape stringregion traversal construction cardinality lockstep fold resourceescape discarded warnings recovery methods declarations interchange} {
+    foreach file {summaries ownership syntax static staticdeps imports resolve flags variadic contexts injection direct privacy coroutines affine resources mutvec iteration relations transfer refcheck hygiene sourcetypes structs enums match layouts cabi imprint traits syscall internal borrow foreign errordecls refinements types operators decimal listlength exactvalue signatures modulebinding refine repeatable lower condition format read aot specialize range applied intset emitdfa emission rangerec callables containers semantic exports callbacks threads completions errorsets induction transport escape blockescape stringregion traversal construction cardinality lockstep fold resourceescape discarded warnings recovery methods declarations interchange} {
         uplevel #0 [list source [file join $dir $file.tcl]]
     }
 }} $hir::home

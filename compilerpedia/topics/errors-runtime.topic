@@ -400,6 +400,27 @@ native code compiles it to a trap.
 Report the program: the reachability proof was wrong. -contexts and
 -traits show what the compiler selected for each call.
 
+@topic error.unmatched
+title: UNMATCHED: a match selected no arm at run time
+summary: CORE SEMANTIC UNMATCHED is a defensive run-time check a checked program cannot reach: a match found no arm for its value's case, or an arm read the payload of another case.
+index: errors
+alias: enum#unmatched; enum#payload
+keywords: match, case, exhaustive, compiler bug, lenient, payload
+related: capability.match error.match-not-exhaustive error.unreachable
+code: CORE SEMANTIC UNMATCHED
+
+== MEANING
+Run time; never an error of a program the compiler accepted. A match is
+proven at compile time to name every case of its enum exactly once
+(MATCH-NOT-EXHAUSTIVE), so its chain of selections always finds the arm.
+UNMATCHED means one did not -- a program run despite its rejected match
+(a lenient build), or a compiler bug -- and the run stops there instead of
+reading a value of another case.
+
+== WHAT TO DO
+Fix the diagnostics the compilation reported; if there were none, report
+the program.
+
 @topic error.coroutine-running
 title: COROUTINE-RUNNING: a coroutine resumed while it runs
 summary: CORE SEMANTIC COROUTINE-RUNNING is a defensive run-time check that a checked program cannot reach: a coroutine was resumed from inside its own running body.
@@ -632,6 +653,26 @@ plausible its contents: reading HIR text verifies every claim again from
 the HIR, and refuses text whose claims' verdicts, certificates or
 diagnostics differ from what that verification finds. A cache entry that
 differs is a miss, rebuilt from the source.
+
+== WHAT TO DO
+Regenerate the .hirx file from its source with this compiler.
+
+@topic error.hir-interchange-match
+title: HIR INTERCHANGE MATCH: a .hirx file whose match is not one
+summary: HIR INTERCHANGE MATCH refuses a .hirx file with a match that does not name every case of its enum once, or a payload read outside its own case's selection.
+index: errors backends
+alias: forged match; malformed match in hirx
+keywords: hirx, interchange, match, exhaustive, payload, trust
+related: backend.hir-interchange capability.match error.hir-interchange-compiler error.match-not-exhaustive
+code: HIR INTERCHANGE MATCH
+
+== MEANING
+When a .hirx file is read; not an error of the program. Every match the
+file holds is checked again against the enum declarations it carries --
+one arm per case, each payload taken only under its own case's selection
+-- and text that fails is refused (HIR text read with -hir fails the same
+check as HIR PARSE). A cache entry that fails is a miss, rebuilt from the
+source.
 
 == WHAT TO DO
 Regenerate the .hirx file from its source with this compiler.

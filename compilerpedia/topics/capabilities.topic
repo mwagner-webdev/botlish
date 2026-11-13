@@ -349,28 +349,87 @@ x
 @end
 
 @topic capability.match
-title: switch, match and pattern matching: absent
-summary: There is no switch or match statement: branch with if/elif/else (conditions in order), compare enum cases with ==, and destructure structs by field.
+title: match: exhaustive enum case selection (limited: no general patterns)
+summary: `match VALUE:` runs the one `case Enum::Case:` arm of an enum value's case, binding its payload by name, and every case must be named once; no wildcard, guard or literal patterns.
 index: concepts
-alias: switch; match; case statement; pattern matching
-keywords: switch, match, case, pattern, enum, elif
-related: concept.if-expressions concept.enums concept.destructuring capability.null
+alias: switch; match; case statement; pattern matching; match expression; exhaustive match; case analysis; destructure enum; read enum payload
+keywords: match, case, switch, pattern, enum, payload, exhaustive, wildcard, guard, default, MATCH-NOT-EXHAUSTIVE, MATCH-DUPLICATE-CASE, MATCH-NOT-A-CASE
+related: concept.enums concept.if-expressions concept.destructuring concept.affine error.match-not-exhaustive error.match-duplicate-case error.match-not-a-case error.enum-payload-unexpected capability.null
 
 == STATUS
-No switch/match/case construct and no patterns beyond struct
-destructuring (which binds fields; it never tests values). An enum case's
-payload (concept.enums) can be constructed, compared and hashed, but not
-read back out of a value: that needs case selection, which does not exist
-yet.
+A match selects among the cases of a closed enum:
+
+    match node:
+        case Node::Const {value}:        the payload destructured by name
+            value
+        case Node::Param:                a payload-free case (or a payload
+            0                            the arm does not need)
+        case Node::Add p:                the whole payload bound to `p`
+            p.left + p.right
+
+The scrutinee is evaluated once; the arm naming its case runs, and the
+match is that arm's value (like an if: a statement, or the value of `=`,
+`return` or a destructuring; an arm may return, fail, break or continue).
+The compiler proves the arms name every case of the scrutinee's enum
+exactly once (MATCH-NOT-EXHAUSTIVE, MATCH-DUPLICATE-CASE), so a case added
+to an enum is a compile-time error at every match until it is handled.
+
+== RULES
+  * The scrutinee's static type is one enum: a value of `any` (an
+    untyped parameter) or of another type is a TYPE error -- annotate it.
+  * An arm names one case through its enum's type (`Node::Add`,
+    `geo::Shape::Dot`, or `Shape::Dot` after `import type`); there is no
+    wildcard, default, guard, `A | B`, literal or positional pattern.
+  * Bindings are values, local to their arm, with the case's declared
+    field types; a payload-free case binds nothing.
+  * Matching an affine enum moves it: what an arm does not bind is
+    released. An unrestricted value stays usable after the match.
+  * Selection compares the case only (no `==`): a payload holding a
+    function, a mutable collection or an affine value is matched the same.
 
 == NEAREST ALTERNATIVE
-    if d == Direction::Up:
-        ...
-    elif d == Direction::Down:
-        ...
-    else:
-        ...
-The chain is an expression too (`name = if ...`).
+For values that are not enums (an Int, a String), branch with
+if/elif/else; for several cases of one arm, write one arm per case calling
+a shared function.
+
+@example accept
+enum Node:
+    Const {value: int},
+    Param,
+    Add {left: int, right: int},
+
+fn eval(node: Node) -> int:
+    match node:
+        case Node::Const {value}:
+            value
+        case Node::Param:
+            0
+        case Node::Add p:
+            p.left + p.right
+
+[eval(Node::Const {value: 7}), eval(Node::Add {left: 2, right: 3}), eval(Node::Param)]
+@caption One arm per case: destructured, payload-free, whole
+@value [7, 5, 0]
+@end
+
+@example reject
+enum Light:
+    Red,
+    Amber,
+    Green,
+
+fn stop?(l: Light) -> bool:
+    match l:
+        case Light::Red:
+            true
+        case Light::Amber:
+            true
+
+stop?(Light::Green)
+@caption Light::Green has no arm
+@error CORE SEMANTIC MATCH-NOT-EXHAUSTIVE
+@at 7:5
+@end
 
 @topic capability.lambdas
 title: Anonymous functions (lambdas): absent

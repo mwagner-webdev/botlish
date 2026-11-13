@@ -37,13 +37,16 @@
 #                                        "= true"/"= false" when decided;
 #                                        "installs ID" on a verified context
 #                                        installation (CONTEXTS.md)
-#   eN if ?injects (IDS)?                followed by "then SCOPE ..." and
+#   eN if ?match? ?injects (IDS)?        followed by "then SCOPE ..." and
 #                                        "else SCOPE ..." lines with the
 #                                        refinements proven on entry;
-#                                        "injects" on an inject block, the
-#                                        contexts its code may use
-#                                        (RESTRICTED-CONTEXT-INJECTION-
-#                                        MILESTONE-1.md)
+#                                        "match" on a match's block, the
+#                                        chain of selections hir/match.tcl
+#                                        checks (PORTABILITY-EXHAUSTIVE-
+#                                        MATCH-MILESTONE-1.md); "injects" on
+#                                        an inject block, the contexts its
+#                                        code may use (RESTRICTED-CONTEXT-
+#                                        INJECTION-MILESTONE-1.md)
 #   eN loop SCOPE
 #   eN listloop SCOPE (ELEM)             children: the iterable, then the body
 #   eN countloop SCOPE (I) ?DIR KIND?    DIR up|down, KIND exclusive|inclusive,
@@ -736,6 +739,11 @@ proc hir::format::Expr {hir e indent origins linesVar} {
         }
         if {
             set text if
+            if {[dict exists $node match]} {
+                # A match's block (PORTABILITY-EXHAUSTIVE-MATCH-MILESTONE-
+                # 1.md): its chain is checked again where it is read.
+                append text " match"
+            }
             if {[dict exists $node injects]} {
                 # An inject block (RESTRICTED-CONTEXT-INJECTION-
                 # MILESTONE-1.md): the contexts its code may use.

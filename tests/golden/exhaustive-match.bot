@@ -1,0 +1,570 @@
+# exhaustive-match.bot -- exhaustive case selection and typed payload
+# binding: the source-level specification of
+# (PORTABILITY-EXHAUSTIVE-MATCH-MILESTONE-1.md)
+#
+#   * `match VALUE:` with one `case Enum::Case:` arm per case: the arm's
+#     payload destructured by name, renamed, bound whole, or not bound;
+#   * a match is an expression: the value of a binding, a return, a
+#     function's last statement, a collecting loop's iteration, a fold's
+#     body; matches nest;
+#   * the scrutinee is evaluated once and only the selected arm runs;
+#     arms return, fail (payload kept), break and continue through it;
+#   * each arm's bindings have their own case's field types; the match's
+#     type is the join of its arms';
+#   * an unrestricted value stays usable after it is matched, and a
+#     MutableVector bound out of a payload is the arm's own copy;
+#   * selection never compares payloads: a payload holding a function or a
+#     MutableVector is matched the same;
+#   * the diagnostics: MatchNotExhaustive (at the match), MatchDuplicateCase
+#     (at the later arm), a case of another enum and a scrutinee of no
+#     enum's type (Type), UnknownEnumCase, MatchNotACase,
+#     EnumPayloadUnexpected, UnknownField, and the affine scrutinee used
+#     again after it is matched (UseAfterMove).
+#
+# Ported from tests/exhaustive-match.test (manifest rows: its census and
+# this suite's fragment). A wrong arm selected, a binding of another case,
+# a scrutinee evaluated twice or a lost completion changes a value below.
+import std::compiler
+import std::coroutine
+import std::int
+import std::list
+import std::mutable_vector
+import std::test
+
+enum Node:
+    Const {value: int},
+    Param,
+    Add {left: int, right: int},
+    If {condition: int, yes: int, no: int},
+    Call {function: int},
+
+enum State:
+    Idle,
+    Running,
+    Failed,
+    Done,
+
+enum Other:
+    Idle,
+
+struct P:
+    x: int
+    y: int
+
+enum R:
+    Number {value: int},
+    Text {value: str},
+    Point {at: P},
+    Empty,
+
+enum Box:
+    Items {v: MutableVector[int]},
+    Nothing,
+
+enum Op:
+    Apply {f: Fn{args: [int], return: int}, x: int},
+    Collect {v: MutableVector[int]},
+    Skip,
+
+struct Message:
+    value: int
+
+struct Event:
+    value: int
+
+enum Job:
+    Idle,
+    Running {task: Coroutine{args: [Message], return: Event}},
+
+error Bad:
+    code: int
+
+fn evaluate(node: Node) -> int:
+    match node:
+        case Node::Const {value}:
+            value
+        case Node::Param:
+            0
+        case Node::Add {left, right}:
+            left + right
+        case Node::If {condition, yes, no}:
+            if condition != 0:
+                yes
+            else:
+                no
+        case Node::Call {function}:
+            function
+
+fn register_exhaustive_match_tests():
+    # em-syntax-forms
+    fn b_forms() errors std::compiler::CompilerError:
+        static compile:
+            fn sum(n: Node) -> int:
+                match n:
+                    case Node::Call:
+                        100
+                    case Node::Add {left: a, right: b}:
+                        a * b
+                    case Node::Const c:
+                        c.value + 1
+                    case Node::If p:
+                        p.condition + p.yes + p.no
+                    case Node::Param:
+                        -1
+            [evaluate(Node::Const {value: 7}), evaluate(Node::Param), evaluate(Node::Add {left: 2, right: 3}), evaluate(Node::If {condition: 0, yes: 1, no: 2}), evaluate(Node::Call {function: 9}), sum(Node::Add {left: 2, right: 3}), sum(Node::Const {value: 7}), sum(Node::If {condition: 1, yes: 2, no: 3}), sum(Node::Call {function: 1}), sum(Node::Param)]
+    std::test::value("em-syntax-forms", [7, 0, 5, 2, 9, 6, 8, 6, 100, -1], b_forms)
+
+    # em-contextual-words
+    fn b_words() errors std::compiler::CompilerError:
+        static compile:
+            fn match(x: int) -> int:
+                x + 1
+            fn case(x: int) -> int:
+                x * 2
+            s = {match: 3, case: 4}
+            fn g():
+                match = match(1)
+                case = case(match)
+                [match, case, s.match, s.case, match - 1]
+            g()
+    std::test::value("em-contextual-words", [2, 4, 3, 4, 1], b_words)
+
+    # em-match-in-value-positions
+    fn b_positions() errors std::compiler::CompilerError:
+        static compile:
+            fn kind(n: Node) -> str:
+                return match n:
+                    case Node::Const:
+                        "const"
+                    case Node::Param:
+                        "param"
+                    case Node::Add:
+                        "add"
+                    case Node::If:
+                        "if"
+                    case Node::Call:
+                        "call"
+            fn pair(n: Node):
+                match n:
+                    case Node::Const {value}:
+                        {lo: value, hi: value}
+                    case Node::Add {left, right}:
+                        {lo: left, hi: right}
+                    case Node::Param:
+                        {lo: 0, hi: 10}
+                    case Node::If {yes, no}:
+                        {lo: yes, hi: no}
+                    case Node::Call:
+                        {lo: 0, hi: 0}
+            nodes = [Node::Const {value: 4}, Node::Param, Node::Add {left: 1, right: 2}]
+            names = loop n in nodes:
+                kind(n)
+            total = fold n in nodes with intermediate acc 0:
+                v = match n:
+                    case Node::Const {value}:
+                        value
+                    case Node::Param:
+                        100
+                    case Node::Add {left, right}:
+                        match Node::Const {value: left + right}:
+                            case Node::Const {value}:
+                                value * 10
+                            case Node::Param:
+                                0
+                            case Node::Add:
+                                0
+                            case Node::If:
+                                0
+                            case Node::Call:
+                                0
+                    case Node::If:
+                        0
+                    case Node::Call:
+                        0
+                acc + v
+            {lo, hi} = pair(Node::Add {left: 5, right: 6})
+            [names.length(), total, lo, hi]
+    std::test::value("em-match-in-value-positions", [3, 134, 5, 6], b_positions)
+
+    # em-scrutinee-once
+    fn b_once() errors std::compiler::CompilerError:
+        static compile:
+            fn pick(place log: MutableVector[str], n: int) -> Node:
+                log.push("scrutinee")
+                if n == 0:
+                    return Node::Param
+                Node::Const {value: n}
+            fn go(n: int) -> int:
+                log = std::mutable_vector::from_list(["start"])
+                v = match pick(log, n):
+                    case Node::Const {value}:
+                        log.push("const")
+                        value
+                    case Node::Param:
+                        log.push("param")
+                        0
+                    case Node::Add:
+                        log.push("add")
+                        1
+                    case Node::If:
+                        log.push("if")
+                        2
+                    case Node::Call:
+                        log.push("call")
+                        3
+                log.push("end")
+                log.length() * 10 + v
+            [go(0), go(4)]
+    std::test::value("em-scrutinee-once", [40, 44], b_once)
+
+    # em-completions
+    fn b_completions() errors std::compiler::CompilerError:
+        static compile:
+            fn f(n: Node) -> int errors Bad:
+                v = match n:
+                    case Node::Const {value}:
+                        if value < 0:
+                            fail Bad {code: value}
+                        value
+                    case Node::Param:
+                        return 99
+                    case Node::Add:
+                        1
+                    case Node::If:
+                        2
+                    case Node::Call:
+                        3
+                v + 1000
+            fn g(n: Node) -> int:
+                f(n):
+                    on Bad {code}:
+                        code
+            fn first_const(ns: List[Node]) -> int:
+                found = fold n in ns with intermediate acc -1:
+                    match n:
+                        case Node::Const:
+                            if acc > 0:
+                                break
+                            acc
+                        case Node::Param:
+                            continue
+                        case Node::Add {left}:
+                            left
+                        case Node::If:
+                            acc
+                        case Node::Call:
+                            acc
+                found
+            fn mk(n: int) -> Node errors Bad:
+                if n < 0:
+                    fail Bad {code: n * 10}
+                Node::Const {value: n}
+            fn h(n: int) -> int errors Bad:
+                match mk(n):
+                    case Node::Const {value}:
+                        value
+                    case Node::Param:
+                        0
+                    case Node::Add:
+                        0
+                    case Node::If:
+                        0
+                    case Node::Call:
+                        0
+            fn safe(n: int) -> int:
+                h(n):
+                    on Bad {code}:
+                        code
+            [g(Node::Const {value: 5}), g(Node::Const {value: -3}), g(Node::Param), first_const([Node::Param, Node::Add {left: 4, right: 0}, Node::Const {value: 1}, Node::Add {left: 8, right: 0}]), safe(2), safe(-2)]
+    std::test::value("em-completions", [1005, -3, 99, 4, 2, -20], b_completions)
+
+    # em-never
+    fn b_never() errors std::compiler::CompilerError:
+        static compile:
+            fn f(n: Node) -> int:
+                match n:
+                    case Node::Const {value}:
+                        return value
+                    case Node::Param:
+                        return 0
+                    case Node::Add:
+                        return 1
+                    case Node::If:
+                        return 2
+                    case Node::Call:
+                        return 3
+                "never reached"
+            [f(Node::Const {value: 7}), f(Node::Call {function: 1}), f(Node::Param)]
+    std::test::value("em-never", [7, 3, 0], b_never)
+
+    # em-binding-types
+    fn b_types() errors std::compiler::CompilerError:
+        static compile:
+            fn describe(r: R) -> str:
+                match r:
+                    case R::Number {value}:
+                        std::int::to_string(value)
+                    case R::Text {value}:
+                        value
+                    case R::Point {at: {x, y}}:
+                        std::int::to_string(x + y)
+                    case R::Empty:
+                        ""
+            fn back(r: R) -> R:
+                match r:
+                    case R::Number {value}:
+                        R::Text {value: std::int::to_string(value)}
+                    case R::Text:
+                        R::Empty
+                    case R::Point p:
+                        R::Number {value: p.at.x}
+                    case R::Empty:
+                        r
+            [describe(R::Number {value: 4}), describe(R::Text {value: "t"}), describe(R::Point {at: P {x: 1, y: 2}}), describe(R::Empty), back(R::Point {at: P {x: 7, y: 0}}) == R::Number {value: 7}]
+    std::test::value("em-binding-types", ["4", "t", "3", "", true], b_types)
+
+    # em-unrestricted-reuse
+    fn b_reuse() errors std::compiler::CompilerError:
+        static compile:
+            x = R::Number {value: 7}
+            y = match x:
+                case R::Number {value}:
+                    value
+                case R::Text:
+                    0
+                case R::Point:
+                    0
+                case R::Empty:
+                    0
+            z = x
+            fn bump(b: Box) -> int:
+                match b:
+                    case Box::Items {v}:
+                        v.push(4)
+                        v.length()
+                    case Box::Nothing:
+                        0
+            fn bump_whole(b: Box) -> int:
+                match b:
+                    case Box::Items p:
+                        w = p.v
+                        w.push(5)
+                        w.push(6)
+                        w.length()
+                    case Box::Nothing:
+                        0
+            fn len(b: Box) -> int:
+                match b:
+                    case Box::Items {v}:
+                        v.length()
+                    case Box::Nothing:
+                        -1
+            box = Box::Items {v: std::mutable_vector::from_list([1, 2])}
+            [y, z == R::Number {value: 7}, bump(box), bump_whole(box), len(box)]
+    std::test::value("em-unrestricted-reuse", [7, true, 3, 4, 2], b_reuse)
+
+    # em-non-equatable-payloads
+    fn b_non_equatable() errors std::compiler::CompilerError:
+        static compile:
+            fn run(op: Op) -> int:
+                match op:
+                    case Op::Apply {f, x}:
+                        f(x)
+                    case Op::Collect {v}:
+                        v.length()
+                    case Op::Skip:
+                        0
+            fn double(x: int) -> int:
+                x * 2
+            [run(Op::Apply {f: double, x: 21}), run(Op::Collect {v: std::mutable_vector::from_list([1, 2, 3])}), run(Op::Skip)]
+    std::test::value("em-non-equatable-payloads", [42, 3, 0], b_non_equatable)
+
+    # em-affine-match-consumes
+    fn b_affine() errors std::compiler::CompilerError:
+        static compile:
+            fn worker(seed: int, resume Message) -> Event:
+                message = yield Event {value: seed}
+                return Event {value: message.value + seed}
+            fn make(seed: int) -> Coroutine{args: [Message], return: Event}:
+                coroutine {step} = worker(seed)
+                step
+            fn go(j: Job) -> int:
+                match j:
+                    case Job::Idle:
+                        0
+                    case Job::Running {task}:
+                        e = task(Message {value: 5})
+                        e.value
+            [go(Job::Idle), go(Job::Running {task: make(1)}), go(Job::Running {task: make(10)})]
+    std::test::value("em-affine-match-consumes", [0, 6, 15], b_affine)
+
+    # em-workload
+    fn b_workload() errors std::compiler::CompilerError:
+        static compile:
+            fn depth(n: Node, nodes: List[Node]) -> int errors IndexNotFound:
+                match n:
+                    case Node::Const:
+                        1
+                    case Node::Param:
+                        1
+                    case Node::Add {left, right}:
+                        1 + depth(nodes.at(left), nodes) + depth(nodes.at(right), nodes)
+                    case Node::If {condition, yes, no}:
+                        1 + depth(nodes.at(condition), nodes) + depth(nodes.at(yes), nodes) + depth(nodes.at(no), nodes)
+                    case Node::Call:
+                        1
+            fn total(xs: List[Node]) -> int:
+                fold x in xs with intermediate acc 0:
+                    acc + evaluate(x)
+            nodes = [Node::Const {value: 3}, Node::Param, Node::Add {left: 0, right: 1}, Node::If {condition: 0, yes: 2, no: 1}, Node::Call {function: 7}]
+            v = std::mutable_vector::from_list(nodes)
+            v.push(Node::Add {left: 2, right: 3})
+            h = {n: Node::If {condition: 1, yes: 0, no: 2}}
+            d = depth(h.n, nodes):
+                on IndexNotFound:
+                    -1
+            item = v.at(5):
+                on IndexNotFound:
+                    Node::Param
+            last = match item:
+                case Node::Add {left}:
+                    left
+                case Node::Const:
+                    -1
+                case Node::Param:
+                    -1
+                case Node::If:
+                    -1
+                case Node::Call:
+                    -1
+            [total(nodes), d, v.length(), last]
+    std::test::value("em-workload", [12, 6, 6, 2], b_workload)
+
+    # em-not-exhaustive, em-duplicate-case and the coverage diagnostics:
+    # the codes, at the match or the arm.
+    fn b_not_exhaustive() errors std::compiler::CompilerError:
+        static compile:
+            fn active?(state: State) -> bool:
+                match state:
+                    case State::Running:
+                        true
+                    case State::Idle:
+                        false
+            active?(State::Idle)
+    std::test::rejects_at("em-not-exhaustive", std::compiler::DiagnosticCode::MatchNotExhaustive, 448, 17, b_not_exhaustive)
+    fn b_duplicate() errors std::compiler::CompilerError:
+        static compile:
+            fn f(state: State) -> int:
+                match state:
+                    case State::Idle:
+                        0
+                    case State::Running:
+                        1
+                    case State::Idle:
+                        2
+                    case State::Failed:
+                        3
+                    case State::Done:
+                        4
+            f(State::Idle)
+    std::test::rejects_at("em-duplicate-case", std::compiler::DiagnosticCode::MatchDuplicateCase, 463, 26, b_duplicate)
+    fn b_other_enum() errors std::compiler::CompilerError:
+        static compile:
+            fn f(s: State) -> int:
+                match s:
+                    case State::Idle:
+                        0
+                    case State::Running:
+                        1
+                    case State::Failed:
+                        2
+                    case State::Done:
+                        3
+                    case Other::Idle:
+                        4
+            f(State::Idle)
+    std::test::rejects_at("em-coverage-diagnostics/other-enum", std::compiler::DiagnosticCode::Type, 483, 26, b_other_enum)
+    fn b_untyped() errors std::compiler::CompilerError:
+        static compile:
+            fn f(x) -> int:
+                match x:
+                    case Other::Idle:
+                        0
+            f(Other::Idle)
+    std::test::rejects_at("em-coverage-diagnostics/untyped", std::compiler::DiagnosticCode::Type, 490, 23, b_untyped)
+    fn b_not_enum() errors std::compiler::CompilerError:
+        static compile:
+            fn f(x: int) -> int:
+                match x:
+                    case Other::Idle:
+                        0
+            f(1)
+    std::test::rejects_at("em-coverage-diagnostics/not-enum", std::compiler::DiagnosticCode::Type, 498, 23, b_not_enum)
+    fn b_unknown_case() errors std::compiler::CompilerError:
+        static compile:
+            fn f(s: Other) -> int:
+                match s:
+                    case Other::Idel:
+                        0
+            f(Other::Idle)
+    std::test::rejects_at("em-coverage-diagnostics/unknown-case", std::compiler::DiagnosticCode::UnknownEnumCase, 507, 26, b_unknown_case)
+    fn b_not_a_case() errors std::compiler::CompilerError:
+        static compile:
+            fn f(s: Other) -> int:
+                match s:
+                    case std::list::at:
+                        0
+                    case Other::Idle:
+                        1
+            f(Other::Idle)
+    std::test::rejects_at("em-coverage-diagnostics/not-a-case", std::compiler::DiagnosticCode::MatchNotACase, 515, 26, b_not_a_case)
+    fn b_exact() errors std::compiler::CompilerError:
+        static compile:
+            match R::Empty:
+                case R::Empty:
+                    1
+    std::test::rejects_at("em-exact-case-still-exhaustive", std::compiler::DiagnosticCode::MatchNotExhaustive, 523, 13, b_exact)
+
+    # em-payload-binding-diagnostics
+    fn b_unexpected() errors std::compiler::CompilerError:
+        static compile:
+            fn f(o: Other) -> int:
+                match o:
+                    case Other::Idle p:
+                        0
+            f(Other::Idle)
+    std::test::rejects_at("em-payload-binding-diagnostics/unexpected", std::compiler::DiagnosticCode::EnumPayloadUnexpected, 533, 38, b_unexpected)
+    fn b_unknown_field() errors std::compiler::CompilerError:
+        static compile:
+            fn f(r: R) -> int:
+                match r:
+                    case R::Number {count}:
+                        count
+                    case R::Text:
+                        0
+                    case R::Point:
+                        0
+                    case R::Empty:
+                        0
+            f(R::Empty)
+    std::test::rejects_at("em-payload-binding-diagnostics/unknown-field", std::compiler::DiagnosticCode::UnknownField, 541, 37, b_unknown_field)
+
+    # em-affine-match-consumes/used-again
+    fn b_used_again() errors std::compiler::CompilerError:
+        static compile:
+            fn keep(j: Job) -> Job:
+                j
+            fn go(j: Job) -> int:
+                n = match j:
+                    case Job::Idle:
+                        0
+                    case Job::Running:
+                        1
+                k = keep(j)
+                n
+            go(Job::Idle)
+    std::test::rejects_at("em-affine-match-consumes/used-again", std::compiler::DiagnosticCode::UseAfterMove, 563, 26, b_used_again)
+
+with context std::test::suite()
+register_exhaustive_match_tests()
+std::test::report()

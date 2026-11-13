@@ -94,6 +94,11 @@ inject context Session:
 static compile:
     3
 coroutine {step: s} = counter()
+shade = match Color::Red:
+    case Color::Red:
+        1
+    case Color::Green:
+        2
 total = fold x in [1, 2] with intermediate acc 0:
     acc + x
 loop i from 0 to 3:
@@ -104,4 +109,6 @@ k = 31 + 1.5e3 + 'a'
 at = "words used as names stay names"
 size = at
 to = size
+match = to
+case = match
 true and not false

@@ -3858,6 +3858,36 @@ proc hir::types::ShapeResult {hir shape argExprs argTypes result {ctx {}}} {
             }
             return any
         }
+        enum-test {
+            # enum#is(VALUE, "ID", "CASE") (core/enums.tcl,
+            # PORTABILITY-EXHAUSTIVE-MATCH-MILESTONE-1.md): a match's
+            # selection, a Bool.
+            return bool
+        }
+        enum-payload {
+            # enum#payload(VALUE, "ID", "CASE") (core/enums.tcl,
+            # PORTABILITY-EXHAUSTIVE-MATCH-MILESTONE-1.md): the payload a
+            # match arm takes out of the value its selection proved is of
+            # case CASE of enum ID -- the case's declared payload, its
+            # anonymous struct type (hir::enums::payloadType, the type a
+            # construction's payload is checked against), unit for a
+            # payload-free case. A selection resolution could not make (an
+            # unknown enum or case: diagnosed there) has no payload: `any`
+            # here, poison at the call.
+            set ide [lindex $argExprs [lindex $shape 1]]
+            set casee [lindex $argExprs [expr {[lindex $shape 1] + 1}]]
+            if {$ide ne "" && $casee ne "" && [hir::kind $hir $ide] eq "const" && [hir::kind $hir $casee] eq "const"} {
+                set id [lindex [hir::get $hir $ide literal] end]
+                set case [lindex [hir::get $hir $casee literal] end]
+                if {[hir::enums::declared $id] && [hir::enums::hasCase $id $case]} {
+                    if {[hir::enums::hasPayload $id $case]} {
+                        return [hir::enums::payloadType $id $case]
+                    }
+                    return unit
+                }
+            }
+            return any
+        }
         coroutine-create - coroutine-outward - coroutine-yield {
             # The coroutine operations (core/coroutines.tcl): typed from the
             # program's coroutine analysis (hir/coroutines.tcl), in CTX, the
@@ -5638,6 +5668,7 @@ proc hir::types::Call {hirVar ctxVar e} {
                             || ($shapeKind eq "layout-read" && [LayoutReadRefused $hir $argExprs [dict get $meta resultShape]])
                             || ($shapeKind eq "callback-pointer" && ![IsCFnPtr $result])
                             || ($shapeKind eq "enum-case" && ![IsEnum $result])
+                            || ($shapeKind eq "enum-payload" && $result eq "any")
                             || ($shapeKind eq "thread-entry" && ![IsNamedStruct $result]))} {
                     # std::binary::load of a value not statically a NativeView[L]
                     # (BINARY-OPERAND), or std::binary::parse of a native-only

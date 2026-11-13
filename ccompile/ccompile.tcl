@@ -1782,6 +1782,38 @@ proc ccompile::NativeCall {fnVar e node name} {
                 UNREACHABLE_CONTEXT]
             return [list never ""]
         }
+        enum#is - enum#payload {
+            # A match's selection (PORTABILITY-EXHAUSTIVE-MATCH-MILESTONE-
+            # 1.md). The C subset has payload-free enums only (a payload
+            # enum's type is C UNSUPPORTED where it is typed), whose value
+            # is its C enumeration constant: the test is one comparison and
+            # a payload-free case's payload is unit.
+            # (The scrutinee only: the two names are constants of the call,
+            # read here, never C values.)
+            set subject [Expr fn [lindex $argExprs 0] value]
+            if {[lindex $subject 0] eq "never"} {
+                return [list never ""]
+            }
+            set hir [set ::ccompile::hir]
+            set id [lindex [hir::get $hir [lindex $argExprs 1] literal] end]
+            set case [lindex [hir::get $hir [lindex $argExprs 2] literal] end]
+            if {[hir::enums::hasPayload $id $case]} {
+                Unsupported $e "the payload of a payload-bearing case ([hir::enums::display $id]::$case)"
+            }
+            if {$name eq "enum#payload"} {
+                return [list unit 0]
+            }
+            return [list bool "([lindex $subject 1] == [EnumConstant $id $case])"]
+        }
+        enum#unmatched {
+            # The end of a match's chain of selections, which an exhaustive
+            # match never reaches (hir/match.tcl): should it run, it is the
+            # Tcl backends' error, as a status -- never a trap or an exit.
+            Fail fn [StatusOf {semantic UNMATCHED match} {CORE SEMANTIC UNMATCHED} \
+                "enum#unmatched: no arm of a match selected the value's case (a compiler bug, or a program run despite its rejected match: a match is proven to name every case)" \
+                UNMATCHED_MATCH]
+            return [list never ""]
+        }
         list {
             set ops [Operands fn $node]
             if {$ops eq "" && $argExprs ne ""} {

@@ -226,6 +226,9 @@ proc surface::recover::Suites {node} {
         handledcall {
             return [lmap handler [dict get $node handlers] {dict get $handler body}]
         }
+        match {
+            return [lmap arm [dict get $node arms] {dict get $arm body}]
+        }
         bind - return - destructure - coroutinebind - with {
             return [Suites [dict get $node value]]
         }
@@ -321,6 +324,12 @@ proc surface::recover::Rebuild {node stateVar topLevel} {
             dict set node handlers [lmap handler [dict get $node handlers] {
                 dict set handler body [Rebuild [dict get $handler body] state 0]
                 set handler
+            }]
+        }
+        match {
+            dict set node arms [lmap arm [dict get $node arms] {
+                dict set arm body [Rebuild [dict get $arm body] state 0]
+                set arm
             }]
         }
         bind - return - destructure - coroutinebind - with {

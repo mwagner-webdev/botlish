@@ -210,6 +210,8 @@
 ::core::compiler::LayoutValueText	Tcl compiler	a layout representation's leaves and values
 ::surface::parser::ArrayTypeExpr	parse	a written `array N of ...` representation
 ::surface::parser::Injection	parse	an inject block's header and suite
+::surface::parser::Match	parse	a match's scrutinee, arms and their suites
+::surface::lower::Match	surface lowering	a match's chain of selections, one call per nested match
 ::core::binary::EncodeForeign	layouts	a layout descriptor's representation, one level per nested array, union or record (the Tcl compiler's static descriptors; the Tcl backends' codec)
 ::core::binary::Rows	layouts	a layout descriptor's representation, one level per nested array, union or record (the Tcl compiler's static descriptors; the Tcl backends' codec)
 ::core::binary::DecodeRepr	layouts	a layout descriptor's representation, one level per nested array, union or record (the Tcl compiler's static descriptors; the Tcl backends' codec)

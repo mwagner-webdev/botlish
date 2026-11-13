@@ -1,0 +1,472 @@
+# exhaustive-match.test -- exhaustive case selection and typed payload
+# binding for enums (PORTABILITY-EXHAUSTIVE-MATCH-MILESTONE-1.md).
+#
+#   match node:
+#       case Node::Const {value}:
+#           value
+#       case Node::Param:
+#           0
+#       case Node::Add p:
+#           p.left + p.right
+#
+# A match evaluates its scrutinee once, runs the one arm naming its case,
+# and is that arm's value; the compiler proves every case of the
+# scrutinee's enum is named exactly once (hir/match.tcl). These tests cover
+# the brief's sections: syntax (2), expressions and completions (3),
+# exhaustiveness (4), payload bindings (5), typing (6), ownership (7), the
+# representation and its checks (8, 10), the backends (9) and diagnostics
+# (11). Every accepted program runs on the Tcl interpreter, the Tcl compiler
+# and Cranelift without and with specialization, which must agree.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+set emBackends {interp compile cranelift-generic cranelift}
+
+# The outcome of SOURCE on every backend: "same: VALUE" or "same error:
+# KIND: MESSAGE" when they agree, else each backend's.
+proc emRun {source {backends ""}} {
+    if {$backends eq ""} {
+        set backends $::emBackends
+    }
+    set hir [surface::compile $source em.bot -warnings off]
+    set outcomes [lmap backend $backends {lrange [outcomeUnderHir $backend $hir] 0 2}]
+    if {[llength [lsort -unique $outcomes]] == 1} {
+        set first [lindex $outcomes 0]
+        if {[lindex $first 0] eq "value"} {
+            return "same: [lindex $first 1]"
+        }
+        return "same error: [lindex $first 1]: [lindex $first 2]"
+    }
+    return [join [lmap backend $backends outcome $outcomes {list $backend $outcome}] " / "]
+}
+
+# KIND: MESSAGE of SOURCE's compile error, or "no error".
+proc emError {source} {
+    if {[catch {surface::compile $source em.bot -warnings off} message options]} {
+        return "[lindex [dict get $options -errorcode] end]: $message"
+    }
+    return "no error"
+}
+
+# The error code of SOURCE's compile error, or "ok".
+proc emCode {source} {
+    if {[catch {surface::compile $source em.bot -warnings off} message options]} {
+        return [lindex [dict get $options -errorcode] end]
+    }
+    return ok
+}
+
+# {KIND LINE:COLUMN} of every diagnostic SOURCE's compilation reports.
+proc emDiagnostics {source} {
+    if {![catch {surface::compile $source em.bot -warnings off} message options]} {
+        return {}
+    }
+    set result {}
+    foreach d [dict getdef $options -diagnostics {}] {
+        set location [dict getdef $d location {}]
+        set at [if {$location eq ""} {list ?} else {string cat [dict get $location line] : [dict get $location column]}]
+        lappend result [list [lindex [dict get $d errorcode] end] $at]
+    }
+    return $result
+}
+
+# NAME:TYPE of each top-level binding of SOURCE, the program's own.
+proc emTypes {source} {
+    set hir [surface::compile $source em.bot -warnings off]
+    set result {}
+    foreach e [hir::roots $hir] {
+        if {[dict get $hir exprs $e origin file] ne "f1"} continue
+        if {[hir::kind $hir $e] eq "bind"} {
+            lappend result "[hir::get $hir $e name] : [hir::types::show [hir::typeOf $hir $e]]"
+        }
+    }
+    return [join $result " | "]
+}
+
+# Writes TEXT to the file PATH.
+proc emWrite {path text} {
+    set f [open $path w]
+    puts -nonewline $f $text
+    close $f
+}
+
+# The message of SOURCE's parse error, or "no error".
+proc emSyntax {source} {
+    if {[catch {surface::parse $source em.bot} message options]} {
+        return $message
+    }
+    return "no error"
+}
+
+set node {enum Node:
+    Const {value: int},
+    Param,
+    Add {left: int, right: int},
+    If {condition: int, yes: int, no: int},
+    Call {function: int},
+
+}
+
+set evaluate {fn evaluate(node: Node) -> int:
+    match node:
+        case Node::Const {value}:
+            value
+        case Node::Param:
+            0
+        case Node::Add {left, right}:
+            left + right
+        case Node::If {condition, yes, no}:
+            if condition != 0:
+                yes
+            else:
+                no
+        case Node::Call {function}:
+            function
+
+}
+
+# ---------------------------------------------------------------------------
+# 2. Syntax
+
+test em-syntax-forms {the three payload forms of an arm -- destructured, renamed, whole -- and an arm that binds nothing; arms in any order} -body {
+    emRun "${node}${evaluate}fn sum(n: Node) -> int:\n    match n:\n        case Node::Call:\n            100\n        case Node::Add {left: a, right: b}:\n            a * b\n        case Node::Const c:\n            c.value + 1\n        case Node::If p:\n            p.condition + p.yes + p.no\n        case Node::Param:\n            -1\n\[evaluate(Node::Const {value: 7}), evaluate(Node::Param), evaluate(Node::Add {left: 2, right: 3}), evaluate(Node::If {condition: 0, yes: 1, no: 2}), evaluate(Node::Call {function: 9}), sum(Node::Add {left: 2, right: 3}), sum(Node::Const {value: 7}), sum(Node::If {condition: 1, yes: 2, no: 3}), sum(Node::Call {function: 1}), sum(Node::Param)\]\n"
+} -result {same: [7, 0, 5, 2, 9, 6, 8, 6, 100, -1]}
+
+test em-contextual-words {match and case are contextual: an ordinary name called match or case, a call of a function named match or case, a field named match, all keep their meaning} -body {
+    emRun "fn match(x: int) -> int:\n    x + 1\nfn case(x: int) -> int:\n    x * 2\ns = {match: 3, case: 4}\nfn g():\n    match = match(1)\n    case = case(match)\n    \[match, case, s.match, s.case, match - 1\]\ng()\n"
+} -result {same: [2, 4, 3, 4, 1]}
+
+test em-syntax-errors {a wildcard, a default, a bare case name, a literal, a guard, several cases in one arm, a positional payload, an arm without case, an inline body: each a syntax error with its own message} -body {
+    set m "enum E:\n    A,\n    B,\n\nfn f(e: E) -> int:\n    match e:\n"
+    list \
+        [emSyntax "${m}        case _:\n            1\n"] \
+        [emSyntax "${m}        case E::A:\n            1\n        else:\n            2\n"] \
+        [emSyntax "${m}        case A:\n            1\n"] \
+        [emSyntax "${m}        case 1:\n            1\n"] \
+        [emSyntax "${m}        case E::A if true:\n            1\n"] \
+        [emSyntax "${m}        case E::A, E::B:\n            1\n"] \
+        [emSyntax "${m}        case E::A(x):\n            1\n"] \
+        [emSyntax "${m}        E::A:\n            1\n"] \
+        [emSyntax "${m}        case E::A: 1\n"]
+} -match glob -result {{*no wildcard arm*} {*no default arm*} {*write "case Enum::A:"*} {*never a literal*} {*there are no guards*} {*exactly one case*} {*never positionally*} {*expected "case"*} {*expected a new line and an indented block*}}
+
+test em-match-in-value-positions {a match is the value of a binding, a return, a destructuring, a function's last statement, a collecting loop's iteration and a fold's body; matches nest} -body {
+    emRun "${node}fn kind(n: Node) -> str:\n    return match n:\n        case Node::Const:\n            \"const\"\n        case Node::Param:\n            \"param\"\n        case Node::Add:\n            \"add\"\n        case Node::If:\n            \"if\"\n        case Node::Call:\n            \"call\"\nfn pair(n: Node):\n    match n:\n        case Node::Const {value}:\n            {lo: value, hi: value}\n        case Node::Add {left, right}:\n            {lo: left, hi: right}\n        case Node::Param:\n            {lo: 0, hi: 10}\n        case Node::If {yes, no}:\n            {lo: yes, hi: no}\n        case Node::Call:\n            {lo: 0, hi: 0}\nnodes = \[Node::Const {value: 4}, Node::Param, Node::Add {left: 1, right: 2}\]\nnames = loop n in nodes:\n    kind(n)\ntotal = fold n in nodes with intermediate acc 0:\n    v = match n:\n        case Node::Const {value}:\n            value\n        case Node::Param:\n            100\n        case Node::Add {left, right}:\n            match Node::Const {value: left + right}:\n                case Node::Const {value}:\n                    value * 10\n                case Node::Param:\n                    0\n                case Node::Add:\n                    0\n                case Node::If:\n                    0\n                case Node::Call:\n                    0\n        case Node::If:\n            0\n        case Node::Call:\n            0\n    acc + v\n{lo, hi} = pair(Node::Add {left: 5, right: 6})\n\[names, total, lo, hi\]\n"
+} -result {same: [["const", "param", "add"], 134, 5, 6]}
+
+# ---------------------------------------------------------------------------
+# 7. Ownership
+
+set affine {import std::coroutine
+
+error Boom
+
+struct Message:
+    value: int
+
+struct Event:
+    value: int
+
+fn worker(seed: int, resume Message) -> Event:
+    message = yield Event {value: seed}
+    return Event {value: message.value}
+
+fn make(seed: int) -> Coroutine{args: [Message], return: Event}:
+    coroutine {step} = worker(seed)
+    step
+
+fn boom(x: int) -> int errors Boom:
+    if x > 0:
+        fail Boom
+    x
+
+struct Two:
+    a: Coroutine{args: [Message], return: Event}
+    b: Coroutine{args: [Message], return: Event}
+
+enum Job:
+    Idle,
+    Running {name: str, task: Coroutine{args: [Message], return: Event}},
+    Pair {a: Coroutine{args: [Message], return: Event}, b: Coroutine{args: [Message], return: Event}},
+    Nested {two: Two, tag: int},
+
+fn keep(j: Job) -> Job:
+    j
+
+fn run(task: Coroutine{args: [Message], return: Event}) -> int:
+    e = task(Message {value: 5})
+    e.value
+
+}
+
+# Test-only probe of the Tcl runtime: the Tcl coroutines alive (a suspended
+# coroutine not released yet).
+proc emLiveCoroutines {} {
+    return [core::value::int [llength [info commands {::core::coroutines::co[0-9]*}]]]
+}
+if {"test_em_live" ni [core::native::names]} {
+    core::registerNative test_em_live -arity 0 -impl emLiveCoroutines
+}
+
+# {TCL-VALUE NATIVE-RELEASED}: TEXT on the two Tcl backends with the
+# live-coroutine probe, and natively (the probe replaced by 0) the number
+# of coroutines released, which must be every coroutine made.
+proc emReleases {text} {
+    set tcl [sourceAgree $text {interp compile}]
+    set plain [string map {test_em_live() 0} $text]
+    set hir [surface::compile $plain em.bot -warnings off]
+    set native [dict getdef [native::allocationReport $hir summary] coroutines {released 0}]
+    return [list $tcl [dict get $native released]]
+}
+
+test em-affine-match-consumes {matching an affine enum consumes the scrutinee: the arm owns what it binds and runs it; a second use of the matched binding is USE-AFTER-MOVE; matching a payload-free case of an affine enum consumes it too} -body {
+    list \
+        [emRun "${affine}fn go(j: Job) -> int:\n    match j:\n        case Job::Idle:\n            0\n        case Job::Running {task}:\n            run(task)\n        case Job::Pair {a, b}:\n            run(a) + run(b)\n        case Job::Nested {two: {a, b}, tag}:\n            run(a) + run(b) + tag\n\[go(Job::Idle), go(Job::Running {name: \"r\", task: make(1)}), go(Job::Pair {a: make(1), b: make(2)}), go(Job::Nested {two: Two {a: make(1), b: make(2)}, tag: 100})\]\n"] \
+        [emCode "${affine}fn go(j: Job) -> int:\n    n = match j:\n        case Job::Idle:\n            0\n        case Job::Running:\n            1\n        case Job::Pair:\n            2\n        case Job::Nested:\n            3\n    k = keep(j)\n    n\ngo(Job::Idle)\n"] \
+        [emCode "${affine}j = Job::Idle\nn = match j:\n    case Job::Idle:\n        0\n    case Job::Running:\n        1\n    case Job::Pair:\n        2\n    case Job::Nested:\n        3\nm = match j:\n    case Job::Idle:\n        0\n    case Job::Running:\n        1\n    case Job::Pair:\n        2\n    case Job::Nested:\n        3\n\[n, m\]\n"]
+} -result {{same: [0, 5, 10, 110]} USE-AFTER-MOVE USE-AFTER-MOVE}
+
+test em-affine-releases {what an arm does not take of an affine payload is released exactly once, by its owner: a partly bound payload releases its unbound fields, an ignored payload all of them, a whole-payload binding after its last use's statement (the probe in that statement still sees both), a returned field is the caller's; nothing is released twice and nothing leaks} -constraints nativeCoroutines -body {
+    set go "fn go(j: Job, which: int):\n    match j:\n        case Job::Idle:\n            test_em_live()\n        case Job::Running:\n            test_em_live()\n        case Job::Pair {a}:\n            n = run(a)\n            test_em_live()\n        case Job::Nested p:\n            p.tag + test_em_live()\n"
+    list \
+        [emReleases "${affine}${go}\[go(Job::Running {name: \"r\", task: make(1)}, 0), test_em_live()\]\n"] \
+        [emReleases "${affine}${go}\[go(Job::Pair {a: make(1), b: make(2)}, 0), test_em_live()\]\n"] \
+        [emReleases "${affine}${go}\[go(Job::Nested {two: Two {a: make(1), b: make(2)}, tag: 10}, 0), test_em_live()\]\n"] \
+        [emReleases "${affine}${go}\[go(Job::Idle, 0), test_em_live()\]\n"] \
+        [emReleases "${affine}fn take(j: Job) -> Coroutine{args: \[Message\], return: Event}:\n    match j:\n        case Job::Idle:\n            make(9)\n        case Job::Running {task}:\n            task\n        case Job::Pair {b}:\n            b\n        case Job::Nested {two: {a}}:\n            a\nt = take(Job::Pair {a: make(1), b: make(2)})\nn1 = test_em_live()\nv = run(t)\n\[n1, v, test_em_live()\]\n"]
+} -result {{{value {[0, 0]}} 1} {{value {[0, 0]}} 2} {{value {[12, 0]}} 2} {{value {[0, 0]}} 0} {{value {[1, 5, 0]}} 2}}
+
+test em-affine-early-exits {an arm that fails, returns or a scrutinee that fails releases what it owns exactly once on that exit} -constraints nativeCoroutines -body {
+    list \
+        [emReleases "${affine}fn go(j: Job, x: int) -> int errors Boom:\n    match j:\n        case Job::Idle:\n            0\n        case Job::Running {task}:\n            k = boom(x)\n            run(task)\n        case Job::Pair {a, b}:\n            if x > 5:\n                return 7\n            run(a) + run(b)\n        case Job::Nested:\n            1\nfn h(j: Job, x: int) -> int:\n    go(j, x):\n        on Boom:\n            -1\n\[h(Job::Running {name: \"r\", task: make(1)}, 1), h(Job::Pair {a: make(1), b: make(2)}, 9), h(Job::Running {name: \"s\", task: make(1)}, 0), test_em_live()\]\n"] \
+        [emReleases "${affine}fn pick(x: int) -> Job errors Boom:\n    k = boom(x)\n    Job::Running {name: \"r\", task: make(1)}\nfn go(x: int) -> int errors Boom:\n    match pick(x):\n        case Job::Idle:\n            0\n        case Job::Running {task}:\n            run(task)\n        case Job::Pair:\n            2\n        case Job::Nested:\n            3\nfn h(x: int) -> int:\n    go(x):\n        on Boom:\n            -1\n\[h(1), h(0), test_em_live()\]\n"]
+} -result {{{value {[-1, 7, 5, 0]}} 4} {{value {[-1, 5, 0]}} 1}}
+
+# ---------------------------------------------------------------------------
+# 3. A match is an expression: evaluation order and completions
+
+test em-scrutinee-once {the scrutinee is evaluated exactly once, before any arm; only the selected arm runs; arms do not test one after another observably (a later arm's body never runs for an earlier case)} -body {
+    emRun "import std::mutable_vector\n${node}fn pick(place log: MutableVector\[str\], n: int) -> Node:\n    log.push(\"scrutinee\")\n    if n == 0:\n        return Node::Param\n    Node::Const {value: n}\nfn go(n: int) -> List\[str\]:\n    log = std::mutable_vector::from_list(\[\"start\"\])\n    v = match pick(log, n):\n        case Node::Const {value}:\n            log.push(\"const\")\n            value\n        case Node::Param:\n            log.push(\"param\")\n            0\n        case Node::Add:\n            log.push(\"add\")\n            1\n        case Node::If:\n            log.push(\"if\")\n            2\n        case Node::Call:\n            log.push(\"call\")\n            3\n    log.push(\"end\")\n    loop i from 0 to log.length():\n        log.at(i):\n            on IndexNotFound:\n                \"?\"\n\[go(0), go(4)\]\n"
+} -result {same: [["start", "scrutinee", "param", "end"], ["start", "scrutinee", "const", "end"]]}
+
+test em-completions {an arm may return, fail with a declared error (its payload kept), break or continue: the match propagates it; a scrutinee that fails propagates before any arm; a match whose every arm leaves completes never} -body {
+    emRun "${node}error Bad:\n    code: int\nfn f(n: Node) -> int errors Bad:\n    v = match n:\n        case Node::Const {value}:\n            if value < 0:\n                fail Bad {code: value}\n            value\n        case Node::Param:\n            return 99\n        case Node::Add:\n            1\n        case Node::If:\n            2\n        case Node::Call:\n            3\n    v + 1000\nfn g(n: Node) -> int:\n    f(n):\n        on Bad {code}:\n            code\nfn first_const(ns: List\[Node\]) -> int:\n    found = fold n in ns with intermediate acc -1:\n        match n:\n            case Node::Const {value}:\n                if acc > 0:\n                    break\n                acc\n            case Node::Param:\n                continue\n            case Node::Add {left}:\n                left\n            case Node::If:\n                acc\n            case Node::Call:\n                acc\n    found\nfn mk(n: int) -> Node errors Bad:\n    if n < 0:\n        fail Bad {code: n * 10}\n    Node::Const {value: n}\nfn h(n: int) -> int errors Bad:\n    r = match mk(n):\n        case Node::Const {value}:\n            value\n        case Node::Param:\n            0\n        case Node::Add:\n            0\n        case Node::If:\n            0\n        case Node::Call:\n            0\n    r\nfn safe(n: int) -> int:\n    h(n):\n        on Bad {code}:\n            code\n\[g(Node::Const {value: 5}), g(Node::Const {value: -3}), g(Node::Param), first_const(\[Node::Param, Node::Add {left: 4, right: 0}, Node::Const {value: 1}, Node::Add {left: 8, right: 0}\]), safe(2), safe(-2)\]\n"
+} -result {same: [1005, -3, 99, 4, 2, -20]}
+
+test em-never {a match whose every arm returns has no normal completion: code after it is unreachable and the function's result is the arms' returns} -body {
+    list [emRun "${node}fn f(n: Node) -> int:\n    match n:\n        case Node::Const {value}:\n            return value\n        case Node::Param:\n            return 0\n        case Node::Add:\n            return 1\n        case Node::If:\n            return 2\n        case Node::Call:\n            return 3\n\[f(Node::Const {value: 7}), f(Node::Call {function: 1})\]\n"] \
+        [emRun "${node}fn f(n: Node) -> int:\n    match n:\n        case Node::Const {value}:\n            return value\n        case Node::Param:\n            return 0\n        case Node::Add:\n            return 1\n        case Node::If:\n            return 2\n        case Node::Call:\n            return 3\n    \"never reached\"\nf(Node::Param)\n"]
+} -result {{same: [7, 3]} {same: 0}}
+
+# ---------------------------------------------------------------------------
+# 4. Exhaustiveness
+
+test em-not-exhaustive {a match that does not name every case of its enum is MATCH-NOT-EXHAUSTIVE at the match, listing the missing cases in declaration order whatever order the arms are in} -body {
+    emError "enum State:\n    Idle,\n    Running,\n    Failed,\n    Done,\n\nfn active?(state: State) -> bool:\n    match state:\n        case State::Running:\n            true\n        case State::Idle:\n            false\nactive?(State::Idle)\n"
+} -result {MATCH-NOT-EXHAUSTIVE: em.bot:8:5: this match does not handle every case of enum State: State::Failed, State::Done are not handled (a match names every case of its enum exactly once; add an arm for each)}
+
+test em-duplicate-case {a case named twice is MATCH-DUPLICATE-CASE at the later arm, naming the earlier one} -body {
+    emError "enum State:\n    Idle,\n    Running,\n\nfn f(state: State) -> int:\n    match state:\n        case State::Idle:\n            0\n        case State::Running:\n            1\n        case State::Idle:\n            2\nf(State::Idle)\n"
+} -result {MATCH-DUPLICATE-CASE: em.bot:11:14: case State::Idle is already handled by an earlier arm of this match (at em.bot:7:14): a match names each case exactly once}
+
+test em-coverage-diagnostics {an arm of another enum is a TYPE error naming both enums; a scrutinee that is not an enum, or is untyped (any), is a TYPE error -- never a run-time type test; an unknown case is UNKNOWN-ENUM-CASE with a suggestion, and the match's coverage is then not restated; a qualifier that is no enum type is MATCH-NOT-A-CASE; one case of an enum of one case is a complete match} -body {
+    set e "enum State:\n    Idle,\n    Running,\n\nenum Other:\n    Idle,\n\nenum One:\n    Only {n: int},\n\n"
+    list \
+        [emDiagnostics "${e}fn f(s: State) -> int:\n    match s:\n        case State::Idle:\n            0\n        case State::Running:\n            1\n        case Other::Idle:\n            2\nf(State::Idle)\n"] \
+        [emError "${e}fn f(x) -> int:\n    match x:\n        case State::Idle:\n            0\n        case State::Running:\n            1\nf(State::Idle)\n"] \
+        [emError "${e}fn f(x: int) -> int:\n    match x:\n        case State::Idle:\n            0\n        case State::Running:\n            1\nf(1)\n"] \
+        [emDiagnostics "${e}fn f(s: State) -> int:\n    match s:\n        case State::Idel:\n            0\n        case State::Running:\n            1\nf(State::Idle)\n"] \
+        [emError "${e}fn f(s: State) -> int:\n    match s:\n        case State::Idel:\n            0\n        case State::Running:\n            1\nf(State::Idle)\n"] \
+        [emError "import std::list\n${e}fn f(s: State) -> int:\n    match s:\n        case std::list::at:\n            0\n        case State::Running:\n            1\n        case State::Idle:\n            2\nf(State::Idle)\n"] \
+        [emRun "${e}fn f(o: One) -> int:\n    match o:\n        case One::Only {n}:\n            n\nf(One::Only {n: 4})\n"]
+} -match glob -result {{{TYPE 17:14}} {TYPE: em.bot:12:11: a match selects a case of a value whose enum is known statically, but the matched value's type is any: a match never tests a type at run time*} {TYPE: em.bot:12:11: a match selects a case of an enum value, but the matched value is int} {{UNKNOWN-ENUM-CASE 13:14}} {UNKNOWN-ENUM-CASE: em.bot:13:14: enum State has no case "Idel" (its cases: Idle, Running); did you mean State::Idle?} {MATCH-NOT-A-CASE: em.bot:14:14: std::list::at names no enum case: std::list is not an enum type visible here*} {same: 4}}
+
+test em-payload-binding-diagnostics {a payload-free case binds no payload (ENUM-PAYLOAD-UNEXPECTED, whole or destructured); an unknown payload field and a duplicate binding are the ordinary destructuring diagnostics; an arm's binding is not visible outside its arm} -body {
+    set e "enum E:\n    A,\n    B {x: int, y: int},\n\n"
+    list \
+        [emError "${e}fn f(e: E) -> int:\n    match e:\n        case E::A p:\n            0\n        case E::B:\n            1\nf(E::A)\n"] \
+        [emCode "${e}fn f(e: E) -> int:\n    match e:\n        case E::A {x}:\n            0\n        case E::B:\n            1\nf(E::A)\n"] \
+        [emCode "${e}fn f(e: E) -> int:\n    match e:\n        case E::A:\n            0\n        case E::B {z}:\n            1\nf(E::A)\n"] \
+        [emCode "${e}fn f(e: E) -> int:\n    match e:\n        case E::A:\n            0\n        case E::B {x, y: x}:\n            1\nf(E::A)\n"] \
+        [emCode "${e}fn f(e: E) -> int:\n    match e:\n        case E::A:\n            0\n        case E::B {x}:\n            x\n    x\nf(E::A)\n"]
+} -result {{ENUM-PAYLOAD-UNEXPECTED: em.bot:7:19: case E::A carries no payload, so its arm binds none: write "case E::A:" (only a case declared with payload fields has one to bind)} ENUM-PAYLOAD-UNEXPECTED UNKNOWN-FIELD DUPLICATE UNBOUND}
+
+test em-exact-case-still-exhaustive {a scrutinee known to be one case (a constant, a construction) still needs every arm: coverage is the declared case set, never what the analyses know} -body {
+    list [emCode "enum E:\n    A,\n    B {n: int},\n\nmatch E::A:\n    case E::A:\n        1\n"] \
+        [emRun "enum E:\n    A,\n    B {n: int},\n\nx = E::B {n: 3}\nmatch x:\n    case E::A:\n        1\n    case E::B {n}:\n        n\n"]
+} -result {MATCH-NOT-EXHAUSTIVE {same: 3}}
+
+# ---------------------------------------------------------------------------
+# 5, 6. Payload bindings and typing
+
+test em-binding-types {each arm's bindings have their own case's declared field types, by name: two arms binding the same name to different types; a nested struct payload destructured; the match's type is the join of its arms'} -body {
+    set src "import std::int\nstruct P:\n    x: int\n    y: int\n\nenum R:\n    Number {value: int},\n    Text {value: str},\n    Point {at: P},\n    Empty,\n\nfn describe(r: R) -> str:\n    match r:\n        case R::Number {value}:\n            std::int::to_string(value)\n        case R::Text {value}:\n            value\n        case R::Point {at: {x, y}}:\n            std::int::to_string(x + y)\n        case R::Empty:\n            \"\"\nfn back(r: R) -> R:\n    match r:\n        case R::Number {value}:\n            R::Text {value: std::int::to_string(value)}\n        case R::Text:\n            R::Empty\n        case R::Point p:\n            R::Number {value: p.at.x}\n        case R::Empty:\n            r\nd = \[describe(R::Number {value: 4}), describe(R::Text {value: \"t\"}), describe(R::Point {at: P {x: 1, y: 2}}), describe(R::Empty)\]\nb = back(R::Point {at: P {x: 7, y: 0}})\n\[d, b\]\n"
+    list [emRun $src] [regexp {b : R} [emTypes $src]]
+} -result {{same: [["4", "t", "3", ""], R::Number {value: 7}]} 1}
+
+test em-unrestricted-reuse {matching an unrestricted value leaves it usable: the matched binding is read again after the match, and a payload holding a MutableVector bound in an arm is the arm's own copy, which the original never sees mutated} -body {
+    emRun "import std::mutable_vector\nenum Small:\n    A {n: int},\n    B,\n\nenum Box:\n    Items {v: MutableVector\[int\]},\n    Nothing,\n\nx = Small::A {n: 7}\ny = match x:\n    case Small::A {n}:\n        n\n    case Small::B:\n        0\nz = x\nfn bump(b: Box) -> int:\n    match b:\n        case Box::Items {v}:\n            v.push(4)\n            v.length()\n        case Box::Nothing:\n            0\nfn bump_whole(b: Box) -> int:\n    match b:\n        case Box::Items p:\n            w = p.v\n            w.push(5)\n            w.push(6)\n            w.length()\n        case Box::Nothing:\n            0\nfn len(b: Box) -> int:\n    match b:\n        case Box::Items {v}:\n            v.length()\n        case Box::Nothing:\n            -1\nbox = Box::Items {v: std::mutable_vector::from_list(\[1, 2\])}\n\[y, z, bump(box), bump_whole(box), len(box)\]\n"
+} -result {same: [7, Small::A {n: 7}, 3, 4, 2]}
+
+test em-non-equatable-payloads {selection compares the case identity only: an enum whose payload holds a function value, a MutableVector or an affine value has no equality, and is matched all the same} -body {
+    emRun "import std::mutable_vector\nenum Op:\n    Apply {f: Fn{args: \[int\], return: int}, x: int},\n    Collect {v: MutableVector\[int\]},\n    Skip,\n\nfn run(op: Op) -> int:\n    match op:\n        case Op::Apply {f, x}:\n            f(x)\n        case Op::Collect {v}:\n            v.length()\n        case Op::Skip:\n            0\nfn double(x: int) -> int:\n    x * 2\n\[run(Op::Apply {f: double, x: 21}), run(Op::Collect {v: std::mutable_vector::from_list(\[1, 2, 3\])}), run(Op::Skip)\]\n"
+} -result {same: [42, 3, 0]}
+
+test em-generic-instances {a generic helper with an untyped parameter used inside arms is instantiated per argument type; a helper matching one enum and another matching another are independent; the match itself needs its scrutinee typed} -body {
+    emRun "import std::int\nenum A:\n    X {n: int},\n    Y,\n\nenum B:\n    P {s: str},\n    Q {n: int},\n\nfn wrap(v):\n    \[v\]\nfn pick(a: A, fallback):\n    match a:\n        case A::X {n}:\n            wrap(n)\n        case A::Y:\n            wrap(fallback)\nfn other(b: B):\n    match b:\n        case B::P {s}:\n            wrap(s)\n        case B::Q {n}:\n            wrap(std::int::to_string(n))\n\[pick(A::X {n: 1}, 0), pick(A::Y, 5), other(B::P {s: \"p\"}), other(B::Q {n: 3})\]\n"
+} -result {same: [[1], [5], ["p"], ["3"]]}
+
+# ---------------------------------------------------------------------------
+# Modules
+
+test em-modules {a module's enum is matched with its qualified cases after `import NS` and by the short name after `import type`; another module's same-spelled enum is unrelated (its cases are another enum's: a TYPE error)} -body {
+    set dir [makeDirectory em-modules-[pid]]
+    try {
+        emWrite [file join $dir geo.bot] "enum Shape:\n    Dot {x: int},\n    Blank,\n\nfn area(s: Shape) -> int:\n    match s:\n        case Shape::Dot {x}:\n            x * x\n        case Shape::Blank:\n            0\n"
+        emWrite [file join $dir other.bot] "enum Shape:\n    Dot {x: int},\n    Blank,\n"
+        emWrite [file join $dir a.bot] "import geo\n\[geo::area(geo::Shape::Dot {x: 3}), match geo::Shape::Blank:\n    case geo::Shape::Dot:\n        1\n    case geo::Shape::Blank:\n        2\n\]\n"
+        emWrite [file join $dir a.bot] "import geo\nfn f(s: geo::Shape) -> int:\n    match s:\n        case geo::Shape::Dot {x}:\n            x\n        case geo::Shape::Blank:\n            -1\n\[geo::area(geo::Shape::Dot {x: 3}), f(geo::Shape::Dot {x: 5}), f(geo::Shape::Blank)\]\n"
+        emWrite [file join $dir b.bot] "import geo\nimport type geo::Shape\nfn f(s: Shape) -> int:\n    match s:\n        case Shape::Dot {x}:\n            x\n        case Shape::Blank:\n            -1\nf(Shape::Dot {x: 8})\n"
+        emWrite [file join $dir c.bot] "import geo\nimport other\nfn f(s: geo::Shape) -> int:\n    match s:\n        case other::Shape::Dot {x}:\n            x\n        case geo::Shape::Blank:\n            -1\nf(geo::Shape::Blank)\n"
+        set results {}
+        foreach f {a b} {
+            set hir [surface::readProgramFile [file join $dir $f.bot] -warnings off]
+            lappend results [lsort -unique [lmap be $::emBackends {lrange [outcomeUnderHir $be $hir] 0 1}]]
+        }
+        catch {surface::readProgramFile [file join $dir c.bot] -warnings off} message options
+        lappend results [lindex [dict get $options -errorcode] end]
+    } finally {
+        removeDirectory [file tail $dir]
+    }
+    set results
+} -result {{{value {[9, 5, -1]}}} {{value 8}} TYPE}
+
+# ---------------------------------------------------------------------------
+# 8, 10. The representation, HIR text and interchange
+
+test em-representation {a match is an ordinary if chain: one `if true` block marked match, the scrutinee bound once, an enum#is selection per arm whose then-branch first takes enum#payload, ending in enum#unmatched; no node kind is added} -body {
+    set hir [surface::compile "${node}${evaluate}evaluate(Node::Param)\n" em.bot -warnings off]
+    set kinds [lsort -unique [lmap {e n} [dict get $hir exprs] {dict get $n kind}]]
+    set chains [hir::match::chains $hir]
+    lassign $chains m chain
+    list [expr {"match" ni $kinds}] [llength $chains] \
+        [lmap arm [dict get $chain arms] {string cat [dict get $arm id] :: [dict get $arm case]}] \
+        [hir::match::Native $hir [dict get $chain end]] [hir::match::validate $hir]
+} -result {1 2 {Node::Const Node::Param Node::Add Node::If Node::Call} enum#unmatched {}}
+
+test em-hir-roundtrip {HIR text prints a match's block as `if match`; format, read and format again is identical, the text read back runs on every backend, and text whose match is not complete, or whose payload is taken outside its selection, is refused when read} -body {
+    set hir [surface::compile "${node}${evaluate}\[evaluate(Node::Add {left: 2, right: 3}), evaluate(Node::Param)\]\n" em.bot -warnings off]
+    set text [hir::format $hir]
+    set back [hir::parse $text]
+    # The Call arm's selection and payload made the Param case's: Param
+    # twice, Call never.
+    set forged [string map {{const str Call : str} {const str Param : str}} $text]
+    catch {hir::parse $forged} message options
+    # A payload taken under another case's selection.
+    set stolen [regsub {(enum#payload\) : struct\{function: int\}\n[^\n]*\n[^\n]*\n[^\n]*const str Node : str\n[^\n]*const str )Call} $text {\1Add} stolenText]
+    catch {hir::parse $stolenText} stolenMessage stolenOptions
+    list [expr {[hir::format $back] eq $text}] [llength [regexp -all -inline { if match } $text]] \
+        [lsort -unique [lmap be $::emBackends {lrange [outcomeUnderHir $be $back] 0 1}]] \
+        [dict get $options -errorcode] [string match {*names Node::Param twice*} $message] \
+        $stolen [dict get $stolenOptions -errorcode] [string match {*takes the payload of another case*} $stolenMessage]
+} -result {1 1 {{value {[5, 0]}}} {HIR PARSE} 1 1 {HIR PARSE} 1}
+
+test em-interchange {HIR interchange keeps every match: a HIR written and read back, with no build, has the same text and the same outcome on every backend; interchange text whose match is not complete is refused} -body {
+    set hir [surface::compile "${node}${evaluate}\[evaluate(Node::Add {left: 2, right: 3}), evaluate(Node::Call {function: 4})\]\n" em.bot -warnings off]
+    set read [hir::interchange::decode [hir::interchange::encode $hir]]
+    list [expr {[hir::format $read] eq [hir::format $hir]}] \
+        [lsort -unique [lmap be $::emBackends {lrange [outcomeUnderHir $be $read] 0 1}]]
+} -result {1 {{value {[5, 4]}}}}
+# ---------------------------------------------------------------------------
+# 9. The backends
+
+set emWorkload "import std::list\nimport std::mutable_vector\n${node}${evaluate}struct Holder:\n    n: Node\n\nfn depth(n: Node, nodes: List\[Node\]) -> int errors IndexNotFound:\n    match n:\n        case Node::Const:\n            1\n        case Node::Param:\n            1\n        case Node::Add {left, right}:\n            1 + depth(nodes.at(left), nodes) + depth(nodes.at(right), nodes)\n        case Node::If {condition, yes, no}:\n            1 + depth(nodes.at(condition), nodes) + depth(nodes.at(yes), nodes) + depth(nodes.at(no), nodes)\n        case Node::Call:\n            1\nfn total(xs: List\[Node\]) -> int:\n    fold x in xs with intermediate acc 0:\n        acc + evaluate(x)\nnodes = \[Node::Const {value: 3}, Node::Param, Node::Add {left: 0, right: 1}, Node::If {condition: 0, yes: 2, no: 1}, Node::Call {function: 7}\]\nv = std::mutable_vector::from_list(nodes)\nv.push(Node::Add {left: 2, right: 3})\nh = Holder {n: Node::If {condition: 1, yes: 0, no: 2}}\nd = depth(h.n, nodes):\n    on IndexNotFound:\n        -1\nitem = v.at(5):\n    on IndexNotFound:\n        Node::Param\nlast = match item:\n    case Node::Add {left}:\n        left\n    case Node::Const:\n        -1\n    case Node::Param:\n        -1\n    case Node::If:\n        -1\n    case Node::Call:\n        -1\n\[total(nodes), d, v.length(), last\]\n"
+
+test em-workload {a workload of matches over payload-bearing values -- nested in arms, through a struct field, a List and a MutableVector, recursive -- agrees on every backend} -body {
+    emRun $emWorkload
+} -result {same: [12, 6, 6, 2]}
+
+test em-native-shape {natively a match over an enum without payload-bearing cases selects by the inline word comparison (enumeq) and takes no payload (unit, no operation); one over a payload enum selects with op enumis and reads only a payload-bearing case's payload with op enumpayload; no match allocates} -body {
+    set free [native::nir [surface::compile "enum L:\n    R,\n    G,\nfn f(l: L) -> int:\n    match l:\n        case L::R:\n            1\n        case L::G:\n            2\nf(L::G)\n" em.bot -warnings off]]
+    set payload [native::nir [surface::compile "${node}${evaluate}evaluate(Node::Param)\n" em.bot -warnings off]]
+    list [regexp -all {op enumeq} $free] [regexp -all {op enumis|op enumpayload} $free] [regexp -all {op enumunmatched} $free] \
+        [regexp -all {op enumis} $payload] [regexp -all {op enumpayload} $payload] [regexp -all {op enumeq} $payload]
+} -result {2 0 1 5 4 0}
+
+test em-gc-stress {payload-bearing values selected and their payloads bound survive a collection at every allocation natively, and agree with every backend} -body {
+    set hir [surface::compile $emWorkload em.bot -warnings off]
+    set plain [outcomeUnderHir cranelift $hir]
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    try {
+        set stressed [outcomeUnderHir cranelift $hir]
+        set generic [outcomeUnderHir cranelift-generic $hir]
+    } finally {
+        unset ::env(BOTLISH_NATIVE_GC_STRESS)
+    }
+    list [expr {$plain eq $stressed}] [expr {$plain eq $generic}] [lrange $plain 0 1]
+} -result {1 1 {value {[12, 6, 6, 2]}}}
+
+test em-executable {a standalone executable runs matches as every backend does, also under GC stress (its value read through the driver protocol)} -constraints executableAot -body {
+    set dir [makeDirectory em-exe-[pid]]
+    try {
+        set path [file join $dir program.bot]
+        emWrite $path $emWorkload
+        set hir [surface::readProgramFile $path -warnings off]
+        set expected [lindex [outcomeUnderHir interp $hir] 1]
+        native::executable $hir [file rootname $path]
+        set plain [standaloneValue [file rootname $path]]
+        set stressed [standaloneValue [file rootname $path] BOTLISH_NATIVE_GC_STRESS 1]
+        list [expr {$plain eq $stressed}] [expr {$plain eq $expected}] $plain
+    } finally {
+        removeDirectory [file tail $dir]
+    }
+} -result {1 1 {[12, 6, 6, 2]}}
+
+test em-c-backend {the C backend compiles a match over a payload-free enum to comparisons with its enumeration constants and the unmatched end to a status; a match over a payload enum is refused where the payload enum is typed (C UNSUPPORTED)} -body {
+    source [file join $::projectRoot ccompile ccompile.tcl]
+    set out [ccompile::program [surface::compile "enum L:\n    R,\n    A,\n    G,\nfn code(l: L) -> int:\n    match l:\n        case L::R:\n            1\n        case L::A:\n            2\n        case L::G:\n            3\ncode(L::A)\n" em.bot -warnings off] -prefix em]
+    set c [dict get $out files em.c]
+    set refused [catch {ccompile::program [surface::compile "${node}${evaluate}evaluate(Node::Param)\n" em.bot -warnings off] -prefix em} message]
+    list [regexp -all {== em_L_[RAG]\)} $c] [regexp {return em_UNMATCHED_MATCH;} $c] \
+        [expr {$refused && [string match "*C UNSUPPORTED*" $::errorCode]}]
+} -result {3 1 1}
+
+test em-many-cases {a match over an enum of 120 cases, each arm binding its case's payload, compiles and runs on every backend: its selections are a chain as long as its arms, never more} -body {
+    set decl "enum Big:\n"
+    set arms ""
+    for {set i 0} {$i < 120} {incr i} {
+        append decl "    C$i {v: int},\n"
+        append arms "        case Big::C$i {v}:\n            v + $i\n"
+    }
+    set src "${decl}\nfn f(b: Big) -> int:\n    match b:\n${arms}\[f(Big::C0 {v: 1}), f(Big::C77 {v: 1}), f(Big::C119 {v: 1})\]\n"
+    set hir [surface::compile $src em.bot -warnings off]
+    lassign [hir::match::chains $hir] m chain
+    list [emRun $src] [llength [dict get $chain arms]]
+} -result {{same: [1, 78, 120]} 120}
+
+test em-scheduler-parity {static compile blocks with matches decide the same under the batched scheduler and the sequential reference: an accepted block, a block rejected for a missing case, for a duplicate and for an untyped scrutinee} -body {
+    set src "import std::compiler\n${node}fn ok() errors std::compiler::CompilerError:\n    static compile:\n        fn f(n: Node) -> int:\n            match n:\n                case Node::Const {value}:\n                    value\n                case Node::Param:\n                    0\n                case Node::Add:\n                    1\n                case Node::If:\n                    2\n                case Node::Call:\n                    3\n        f(Node::Const {value: 4})\nfn missing() errors std::compiler::CompilerError:\n    static compile:\n        match Node::Param:\n            case Node::Param:\n                0\nfn twice() errors std::compiler::CompilerError:\n    static compile:\n        fn g(n: Node) -> int:\n            match n:\n                case Node::Const:\n                    0\n                case Node::Const:\n                    0\n                case Node::Param:\n                    0\n                case Node::Add:\n                    1\n                case Node::If:\n                    2\n                case Node::Call:\n                    3\n        g(Node::Param)\nfn untyped() errors std::compiler::CompilerError:\n    static compile:\n        fn h(x) -> int:\n            match x:\n                case Node::Param:\n                    0\n        h(Node::Param)\nfn code(f) -> str:\n    f():\n        on std::compiler::CompilerError {code}:\n            std::test::code_name(code)\nimport std::test\n\[ok(), code(missing), code(twice), code(untyped)\]\n"
+    set src [string map {"import std::test\n" ""} $src]
+    set src "import std::test\n$src"
+    set batched [lindex [outcomeUnderHir interp [surface::compile $src em.bot -warnings off]] 1]
+    set ::env(BOTLISH_STATIC_SCHEDULER) sequential
+    try {
+        set sequential [lindex [outcomeUnderHir interp [surface::compile $src em.bot -warnings off]] 1]
+    } finally {
+        unset ::env(BOTLISH_STATIC_SCHEDULER)
+    }
+    list [expr {$batched eq $sequential}] $batched
+} -result {1 {[4, "MatchNotExhaustive", "MatchDuplicateCase", "Type"]}}
+
+test em-rollback-audit {a generic helper instantiated with values of two enums and called from arms of matches leaves no semantic instance's facts behind: the rollback audit compares every walked instance with its snapshot} -body {
+    set saved $::hir::semantic::auditRollback
+    set ::hir::semantic::auditRollback 1
+    try {
+        emRun "enum A:\n    X {n: int},\n    Y,\n\nenum B:\n    P {s: str},\n    Q,\n\nfn first(v, w):\n    \[v, w\]\nfn pick(a: A, b: B):\n    match a:\n        case A::X {n}:\n            match b:\n                case B::P {s}:\n                    first(n, s)\n                case B::Q:\n                    first(n, n)\n        case A::Y:\n            match b:\n                case B::P {s}:\n                    first(s, s)\n                case B::Q:\n                    first(0, \"q\")\n\[pick(A::X {n: 1}, B::P {s: \"p\"}), pick(A::Y, B::Q), pick(A::X {n: 2}, B::Q)\]\n"
+    } finally {
+        set ::hir::semantic::auditRollback $saved
+    }
+} -result {same: [[1, "p"], [0, "q"], [2, 2]]}
+
+cleanupTests

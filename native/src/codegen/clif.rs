@@ -3233,6 +3233,14 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                             self.check(v);
                             return v;
                         }
+                        // Case selection (PORTABILITY-EXHAUSTIVE-MATCH-
+                        // MILESTONE-1.md): an identity test that never
+                        // fails, a payload read that fails only on another
+                        // case's value (a selection hir/match.tcl proved
+                        // never happens), and the end of an unmatched chain.
+                        EnumIs => ("rt_enum_is", None, false, None),
+                        EnumPayload => ("rt_enum_payload", None, true, None),
+                        EnumUnmatched => ("rt_enum_unmatched", None, true, None),
                         IsOk => ("rt_is_result", Some(1), false, None),
                         IsError => ("rt_is_result", Some(0), false, None),
                         ResultValue => ("rt_result_payload", Some(1), true, None),

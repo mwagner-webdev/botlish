@@ -318,6 +318,9 @@ namespace eval hir::static {
         LAYOUT-UNION                             LayoutUnion
         LOCKSTEP-UNEQUAL                         LockstepUnequal
         LOCKSTEP-UNPROVEN                        LockstepUnproven
+        MATCH-DUPLICATE-CASE                     MatchDuplicateCase
+        MATCH-NOT-A-CASE                         MatchNotACase
+        MATCH-NOT-EXHAUSTIVE                     MatchNotExhaustive
         MISSING-CONTEXT                          MissingContext
         MISSING-ERROR-PAYLOAD                    MissingErrorPayload
         MISSING-FIELD                            MissingField

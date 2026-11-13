@@ -4230,3 +4230,145 @@ capped(5)
 @error CORE SEMANTIC EXPORT-ENVIRONMENT
 @at 3:21
 @end
+
+@topic error.match-not-exhaustive
+title: MATCH-NOT-EXHAUSTIVE: a match that does not name every case
+summary: A match names every case of its scrutinee's enum exactly once; this one has no arm for the cases the message lists, in the enum's declaration order.
+index: errors
+alias: non-exhaustive match; missing case; missing match arm; incomplete match
+keywords: match, case, exhaustive, missing, arm, enum, wildcard, default
+related: capability.match concept.enums error.match-duplicate-case error.match-not-a-case
+code: CORE SEMANTIC MATCH-NOT-EXHAUSTIVE
+
+== MEANING
+An enum is a closed set of cases, and a match handles all of them:
+
+    this match does not handle every case of enum State: State::Failed
+    is not handled (a match names every case of its enum exactly once;
+    add an arm for it)
+
+Coverage is the enum's declared case set, never what the compiler knows
+about the value: a match of a constant still names every case.
+
+== LIKELY CAUSES
+  * A case was added to the enum after the match was written.
+  * One arm was meant to handle several cases: a match has no `A | B`,
+    wildcard or default arm.
+
+== WHAT TO DO
+Add an arm for each case listed. Several cases with the same code are
+several arms calling one function.
+
+@example reject
+enum State:
+    Idle,
+    Running,
+    Failed,
+
+fn busy?(s: State) -> bool:
+    match s:
+        case State::Running:
+            true
+        case State::Idle:
+            false
+
+busy?(State::Idle)
+@caption State::Failed has no arm
+@error CORE SEMANTIC MATCH-NOT-EXHAUSTIVE
+@at 7:5
+@end
+
+@topic error.match-duplicate-case
+title: MATCH-DUPLICATE-CASE: a case named by two arms of one match
+summary: Each case of the matched enum is named by exactly one arm; this arm names a case an earlier arm already handles.
+index: errors
+alias: duplicate match arm; case handled twice; unreachable match arm
+keywords: match, case, duplicate, arm, enum
+related: capability.match error.match-not-exhaustive
+code: CORE SEMANTIC MATCH-DUPLICATE-CASE
+
+== MEANING
+Arms are not tested in order: the one arm naming the value's case runs.
+Two arms naming one case would leave one of them meaningless, so the
+later one is rejected, and the message says where the earlier one is.
+
+== WHAT TO DO
+Merge the two arms' code into one arm, or name the case that was meant.
+
+@example reject
+enum Light:
+    Red,
+    Green,
+
+fn code(l: Light) -> int:
+    match l:
+        case Light::Red:
+            1
+        case Light::Green:
+            2
+        case Light::Red:
+            3
+
+code(Light::Red)
+@caption Light::Red is named twice
+@error CORE SEMANTIC MATCH-DUPLICATE-CASE
+@at 11:14
+@end
+
+@topic error.match-not-a-case
+title: MATCH-NOT-A-CASE: a match arm whose name is no enum case
+summary: A match arm names a case as Enum::Case, through an enum type visible in the file; this arm's qualifier is a namespace or another name, not an enum type.
+index: errors
+alias: match arm names no case; case of no enum
+keywords: match, case, enum, qualifier, namespace
+related: capability.match error.unknown-enum-case concept.enums
+code: CORE SEMANTIC MATCH-NOT-A-CASE
+
+== MEANING
+In `case Q::C:`, Q must be an enum type visible where the match is
+written: one the file declares, an `import type` binds, or `NS::Enum` of
+an imported namespace. A case of a known enum that does not exist is
+UNKNOWN-ENUM-CASE instead.
+
+== WHAT TO DO
+Write the arm through the enum's type name (`case Shape::Dot:`, or
+`case geo::Shape::Dot:` for a module's enum).
+
+@example reject
+import std::list
+
+enum Light:
+    Red,
+    Green,
+
+fn code(l: Light) -> int:
+    match l:
+        case std::list::at:
+            1
+        case Light::Green:
+            2
+
+code(Light::Red)
+@caption std::list is a namespace, not an enum type
+@error CORE SEMANTIC MATCH-NOT-A-CASE
+@at 9:14
+@end
+
+@topic error.match-invalid
+title: MATCH-INVALID: an internal failure of a match's representation
+summary: The compiler built a match whose chain of case selections is not the shape it checks; this is a compiler bug, never a problem of the program.
+index: errors
+alias: malformed match
+keywords: match, internal, compiler bug, selection, payload
+related: capability.match error.compiler-internal
+code: CORE SEMANTIC MATCH-INVALID
+
+== MEANING
+A match is compiled as one selection per arm, each taking its case's
+payload only after testing for that case. MATCH-INVALID means a match, or
+a payload read, is not in that shape: the compiler built something its own
+check refuses.
+
+== WHAT TO DO
+You should never see this: it is a compiler bug. Please report the
+program (as small as you can make it) with the full message.

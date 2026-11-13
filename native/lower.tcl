@@ -273,6 +273,12 @@ namespace eval native::lower {
     # A payload-bearing enum case's construction (core/enums.tcl,
     # PORTABILITY-PAYLOAD-ENUMS-MILESTONE-1.md): `op enumcase`.
     dict set natives enum#case enumcase
+    # A match's selections (core/enums.tcl, PORTABILITY-EXHAUSTIVE-MATCH-
+    # MILESTONE-1.md): `op enumis`, `op enumpayload` (EnumSelection) and the
+    # end of an unmatched chain.
+    dict set natives enum#is enumis
+    dict set natives enum#payload enumpayload
+    dict set natives enum#unmatched {op enumunmatched}
     # The borrow test fixture's synthetic foreign operations (core/cabi.tcl's
     # installBorrowFixture; runtime/ffifixture.rs), one op per behavior.
     foreach {name behavior} [core::cabi::borrowFixture] {
@@ -4335,6 +4341,39 @@ proc native::lower::EnumCaseValue {fnVar e argExprs payload} {
     set index [Assign fn "int [EnumIndex $id]" $e]
     set number [Assign fn "int $case" $e]
     return [Assign fn "op enumcase $payload $index $number" $e]
+}
+
+# A match's selection E (PORTABILITY-EXHAUSTIVE-MATCH-MILESTONE-1.md):
+# enum#is(VALUE, "ID", "CASE") (OP enumis) or enum#payload(VALUE, "ID",
+# "CASE") (OP enumpayload), VALUE in register VALUE. The two names are
+# constants of the call, read here (their own registers are never used): E
+# the enum's number and C the case's position in its declaration, as a
+# case's word has them (representation only). A test of a value whose
+# every possible value is an immediate word (ImmediateEnum: an enum with no
+# payload-bearing case) is the word comparison `enumeq` with the case's
+# word; any other is `op enumis VALUE E C`, which reads the identity of a
+# word or an EnumCaseObj alike, never its payload. A payload-free case's
+# payload is unit, with no operation; a payload-bearing case's is
+# `op enumpayload VALUE E C` (one field read).
+proc native::lower::EnumSelection {fnVar e op argExprs value} {
+    upvar 1 $fnVar fn
+    variable hir
+    set id [lindex [hir::get $hir [lindex $argExprs 1] literal] end]
+    set caseName [lindex [hir::get $hir [lindex $argExprs 2] literal] end]
+    if {![hir::enums::declared $id] || [set case [lsearch -exact [hir::enums::cases $id] $caseName]] < 0} {
+        throw {NATIVE INVALID-HIR} "native lowering: enum \"$id\" has no case \"$caseName\" ($e)"
+    }
+    if {$op eq "enumpayload"} {
+        if {![hir::enums::hasPayload $id $caseName]} {
+            return [Assign fn unit $e]
+        }
+    } elseif {[ImmediateEnum [hir::typeOf $hir [lindex $argExprs 0]]]} {
+        set word [Assign fn "enum [EnumIndex $id] $case" $e]
+        return [Assign fn "op enumeq $value $word" $e]
+    }
+    set index [Assign fn "int [EnumIndex $id]" $e]
+    set number [Assign fn "int $case" $e]
+    return [Assign fn "op $op $value $index $number" $e]
 }
 
 # The NIR constant `enum E C` of the case value V ({enum ID CASE}): E the
@@ -10186,6 +10225,10 @@ proc native::lower::NativeCallOp {e node} {
             # enum#case(PAYLOAD, "ID", "CASE") (EnumCaseValue).
             return [list $name enumcase]
         }
+        enumis - enumpayload {
+            # enum#is / enum#payload(VALUE, "ID", "CASE") (EnumSelection).
+            return [list $name [lindex $impl 0]]
+        }
         equality {
             if {[llength $argExprs] != 2} {
                 return [list $name veq]
@@ -11103,6 +11146,9 @@ proc native::lower::NativeCall {fnVar e node name argRegs rawEligible op want} {
     }
     if {$op eq "enumcase"} {
         return [list [EnumCaseValue fn $e $argExprs [lindex $argRegs 0]] tagged]
+    }
+    if {$op in {enumis enumpayload}} {
+        return [list [EnumSelection fn $e $op $argExprs [lindex $argRegs 0]] tagged]
     }
     set big [BigConstantResult $e $argExprs $op]
     if {$big ne ""} {

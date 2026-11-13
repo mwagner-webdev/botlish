@@ -434,6 +434,13 @@ proc hir::affine::IsThunkTemp {hir b} {
     return [string match coroutine#*#arg* [dict get $hir bindings $b name]]
 }
 
+# 1 if binding B is a match's scrutinee temporary (surface/lower.tcl's
+# Match, PORTABILITY-EXHAUSTIVE-MATCH-MILESTONE-1.md): a hygienic name no
+# source can spell.
+proc hir::affine::IsMatchTemp {hir b} {
+    return [expr {$b ne "" && [string match match#* [dict get $hir bindings $b name]]}]
+}
+
 # The root binding name call E calls (a native), or "".
 proc hir::affine::NativeName {hir e} {
     if {![dict exists $hir exprs $e] || [dict get $hir exprs $e kind] ne "call"} {
@@ -1157,6 +1164,25 @@ proc hir::affine::verifyInstance {viewVar block exprs} {
 # State: BindingId -> live | {moved MOVE...} | {maybe MOVE...} (MOVE: the
 # moving reference, or a binding statement whose value moves on); or the
 # word `dead` for a path that cannot complete normally.
+# 1 or 0 when the condition E is a reference to the root binding `true` or
+# `false` (the constant a front end writes, never a value an analysis
+# decided), else "".
+proc hir::affine::ConstantCondition {hir e} {
+    set node [dict get $hir exprs $e]
+    if {[dict get $node kind] ne "ref" || [dict get $node binding] eq ""} {
+        return ""
+    }
+    set binding [dict get $hir bindings [dict get $node binding]]
+    if {[dict get $binding kind] ne "root"} {
+        return ""
+    }
+    switch -- [dict get $binding name] {
+        true { return 1 }
+        false { return 0 }
+    }
+    return ""
+}
+
 proc hir::affine::Join {a b} {
     if {$a eq "dead"} { return $b }
     if {$b eq "dead"} { return $a }
@@ -1294,6 +1320,15 @@ proc hir::affine::Flow {hirVar e state} {
             }
             set then [Seq hir [dict get $node thenBody] $state]
             set else [Seq hir [dict get $node elseBody] $state]
+            # A branch a constant condition never takes -- the root `true`
+            # or `false` the front end writes for a block (a match's or an
+            # inject block's `if true:`, PORTABILITY-EXHAUSTIVE-MATCH-
+            # MILESTONE-1.md) -- reaches no join: what the block moves is
+            # moved after it, not maybe moved.
+            switch -- [ConstantCondition $hir [dict get $node condition]] {
+                1 { set else dead }
+                0 { set then dead }
+            }
             dict set joinStates $e [list $then $else]
             return [Join $then $else]
         }
@@ -1517,6 +1552,11 @@ proc hir::affine::MoveText {hir move} {
     set source [hir::semantic::RefName $hir $move]
     switch -- $where {
         bind {
+            if {[IsMatchTemp $hir [dict get $hir exprs $at binding]]} {
+                # A match's scrutinee (surface/lower.tcl's Match): the match
+                # took it, whatever arm ran.
+                return "$source matched by a match  ([Where $hir $at])"
+            }
             return "[hir::semantic::RefName $hir $at] = $source  ([Where $hir $at])"
         }
         arg {
