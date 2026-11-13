@@ -263,14 +263,18 @@
 #                  by hir/traits.tcl where it is meaning
 #
 #   enumDecl     = "enum" IDENT ":" NEWLINE INDENT enumCase { "," enumCase } [ "," ] DEDENT
-#   enumCase     = IDENT
+#   enumCase     = IDENT [ "{" payloadField { sep payloadField } [ "," ] "}" ]
+#   payloadField = IDENT ":" typeExpr          (sep: "," or a line break)
 #                  -- ENUMS.md: a named, closed, nominal sum type and its
-#                  payload-free cases, one comma-separated list (a newline
-#                  may follow any comma; the trailing comma is optional).
-#                  "enum" is contextual, like "trait": a declaration only as
-#                  the first word of a top-level statement directly followed
-#                  by a name, an ordinary name everywhere else. A case has
-#                  no value, alias, payload or parameter list (each is a
+#                  cases, one comma-separated list (a newline may follow any
+#                  comma; the trailing comma is optional). A case is
+#                  payload-free (a bare name) or carries a named-field
+#                  payload in braces (PORTABILITY-PAYLOAD-ENUMS-MILESTONE-
+#                  1.md: `Add {left: int, right: int}`), never positional
+#                  fields. "enum" is contextual, like "trait": a declaration
+#                  only as the first word of a top-level statement directly
+#                  followed by a name, an ordinary name everywhere else. A
+#                  case has no value, alias or parameter list (each is a
 #                  located error), and there is no anonymous `enum {...}`
 #                  (ANONYMOUS-ENUM) and no empty enum (ENUM-EMPTY)
 #   layoutDecl   = "layout" IDENT ":" NEWLINE INDENT layoutItem { layoutItem } DEDENT
@@ -1121,15 +1125,18 @@ proc surface::parser::AnonymousEnumError {token} {
         "anonymous enum types do not exist: an enum's identity is its declaration, so an enum is always a named top-level declaration (\"enum Name:\" with its cases on indented lines), and a value of it is written Name::Case"
 }
 
-# "enum" IDENT ":" NEWLINE INDENT IDENT { "," IDENT } [ "," ] DEDENT -- a
-# top-level enum declaration (ENUMS.md): an `enumdecl` node {name nameSpan
-# cases}, CASES a list of {name nameSpan} dicts in declaration order. The
-# cases are one comma-separated list: a comma separates two cases (a newline
-# may follow it) and may end the list. A case is a bare name: no value
-# (`Foo = 17`), alias (`Foo = Bar`), payload (`Foo: T`, `Foo(T)`) or other
-# form exists, each a located error. Duplicate cases are left to HIR
-# (hir/enums.tcl), which owns case identity; an enum without a case is
-# ENUM-EMPTY here.
+# "enum" IDENT ":" NEWLINE INDENT enumCase { "," enumCase } [ "," ] DEDENT --
+# a top-level enum declaration (ENUMS.md): an `enumdecl` node {name nameSpan
+# cases}, CASES a list of {name nameSpan} dicts in declaration order, each
+# with `payload {FIELD ...}` too when the case carries one
+# (PORTABILITY-PAYLOAD-ENUMS-MILESTONE-1.md), FIELD a {name nameSpan type
+# typeSpan} dict in written order. The cases are one comma-separated list: a
+# comma separates two cases (a newline may follow it) and may end the list.
+# A case is a bare name or a name and a named-field payload in braces
+# (EnumPayload): no value (`Foo = 17`), alias (`Foo = Bar`), positional
+# payload (`Foo: T`, `Foo(T)`) or other form exists, each a located error.
+# Duplicate cases and payload fields are left to HIR (hir/enums.tcl), which
+# owns case identity; an enum without a case is ENUM-EMPTY here.
 proc surface::parser::EnumDecl {pVar} {
     upvar 1 $pVar p
     set start [dict get [Word p] span]
@@ -1179,19 +1186,20 @@ proc surface::parser::EnumDecl {pVar} {
                 Fail [Peek p] "enum case \"$caseName\" cannot be given a value or an alias: a case is a nominal value of its enum only, with no integer, String or other case behind it (write any mapping as ordinary code)"
             }
             : {
-                Fail [Peek p] "enum case \"$caseName\" cannot carry a payload: payload-bearing enum cases are not supported yet (every case is payload-free)"
+                Fail [Peek p] "enum case \"$caseName\" cannot be declared with \":\": a payload is a named-field product written in braces after the case name, $caseName \{field: Type, ...\}"
             }
             ( {
-                Fail [Peek p] "enum case \"$caseName\" cannot take a parameter list: a case is written as a bare name (payload-bearing cases are not supported)"
-            }
-            \{ {
-                Fail [Peek p] "enum case \"$caseName\" cannot carry a payload: payload-bearing enum cases are not supported yet (every case is payload-free)"
+                Fail [Peek p] "enum case \"$caseName\" cannot take a parameter list: a payload has named fields, never positional ones, written in braces after the case name, $caseName \{field: Type, ...\}"
             }
             . - :: {
                 Fail [Peek p] "an enum case is declared by its bare name, found [Describe [Peek p]] after \"$caseName\""
             }
         }
-        lappend cases [dict create name $caseName nameSpan [dict get $caseToken span]]
+        set case [dict create name $caseName nameSpan [dict get $caseToken span]]
+        if {[Kind p] eq "\{"} {
+            dict set case payload [EnumPayload p $caseName]
+        }
+        lappend cases $case
         set separated 0
         if {[Kind p] eq ","} {
             Advance p
@@ -1205,6 +1213,73 @@ proc surface::parser::EnumDecl {pVar} {
     }
     return [surface::ast::node enumdecl [SpanFrom p $start] \
         name [dict get $name value] nameSpan [dict get $name span] cases $cases]
+}
+
+# "{" field { separator field } [ "," ] "}" after the enum case CASE
+# (PORTABILITY-PAYLOAD-ENUMS-MILESTONE-1.md):
+#
+#   field     = IDENT ":" typeExpr
+#   separator = "," | a line break
+#
+# The case's named-field payload: a statically typed product whose fields
+# are declared exactly as a struct's or an error payload's are (a name and a
+# type, never a default or a positional field). The fields of one line are
+# separated by commas; a field on a line of its own needs none (newlines
+# inside braces are no tokens):
+#
+#   Add {left: int, right: int},
+#   Call {
+#       function: int
+#       arguments: List[int]
+#   },
+#
+# Returns the fields, {name nameSpan type typeSpan} dicts in written order.
+# A payload has at least one field: a case without one is written without
+# braces. What the types mean, and duplicate names, are HIR's
+# (hir/enums.tcl).
+proc surface::parser::EnumPayload {pVar caseName} {
+    upvar 1 $pVar p
+    set open [Advance p]
+    set fields {}
+    set separated 1
+    set previousLine [dict get $open span line]
+    while {[Kind p] ne "\}"} {
+        set token [Peek p]
+        if {[dict get $token kind] in {.. .}} {
+            Fail $token "an enum case payload has no rest field: declare every payload field of $caseName by name"
+        }
+        if {[dict get $token kind] ne "IDENT"} {
+            Fail $token "expected a payload field declaration \"name: Type\" in $caseName \{...\}, found [Describe $token]"
+        }
+        if {!$separated && [dict get $token span line] == $previousLine} {
+            Fail $token "expected \",\" between the payload fields of $caseName \{...\} on one line, found [Describe $token]"
+        }
+        Advance p
+        if {[Kind p] ne ":"} {
+            Fail [Peek p] "expected \":\" and a type after the payload field name \"[dict get $token value]\" of case $caseName (a payload field always has an explicit type), found [Describe [Peek p]]"
+        }
+        Advance p
+        set typeStart [dict get [Peek p] span]
+        set type [TypeExpr p "a payload field type after \":\""]
+        set typeSpan [SpanFrom p $typeStart]
+        if {[Kind p] eq "="} {
+            Fail [Peek p] "an enum case payload field cannot have a default value (every payload field is given explicitly by each construction of $caseName)"
+        }
+        lappend fields [dict create name [dict get $token value] nameSpan [dict get $token span] \
+            type $type typeSpan $typeSpan]
+        set previousLine [dict get $p last line]
+        set separated 0
+        if {[Kind p] eq ","} {
+            Advance p
+            set separated 1
+        }
+    }
+    set close [Peek p]
+    if {$fields eq {}} {
+        Fail $close "enum case \"$caseName\" declares an empty payload: a payload has at least one named field, and a case without one is written without braces ($caseName)"
+    }
+    Advance p
+    return $fields
 }
 
 # 1 if the next tokens start a layout declaration (BINARY-LAYOUT.md): the

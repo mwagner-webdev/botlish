@@ -2570,6 +2570,10 @@ proc hir::range::VerifyStruct {hirVar ranges e node} {
         VerifyPayload hir $ranges $e $node
         return
     }
+    if {[dict exists $node casePayloadOf]} {
+        VerifyCasePayload hir $ranges $e $node
+        return
+    }
     if {![dict get $node named] || [dict get $node structId] eq ""} {
         return
     }
@@ -2649,6 +2653,37 @@ proc hir::range::VerifyPayload {hirVar ranges e node} {
         hir::DiagnoseAt hir TYPE [format \
             {payload field "%s" of error %s cannot be proven to satisfy its declared type %s (value type: %s%s)%s} \
             $name $errorName [hir::types::show $declared] \
+            [hir::types::show [ShownArgType $valueType $declared]] [FactsClause $valueType $declared $valueRange] [MismatchClause $valueType $declared]] $field $origin
+    }
+}
+
+# The payload construction E of a payload-bearing enum case
+# (PORTABILITY-PAYLOAD-ENUMS-MILESTONE-1.md, hir/resolve.tcl's
+# CaseConstruction): each field value proven admissible for the declared type
+# of that payload field of the case, exactly as a named construction's
+# (VerifyStruct) and an error payload's (VerifyPayload).
+proc hir::range::VerifyCasePayload {hirVar ranges e node} {
+    upvar 1 $hirVar hir
+    lassign [dict get $node casePayloadOf] id case
+    if {![hir::enums::hasPayload $id $case]} {
+        return
+    }
+    foreach name [dict get $node names] field [dict get $node fields] origin [dict get $node fieldOrigins] {
+        set declared [hir::enums::fieldType $id $case $name]
+        if {$declared eq ""} {
+            continue
+        }
+        set valueType [hir::typeOf $hir $field]
+        if {$valueType eq "never" || ![hir::get $hir $field reachable]} {
+            continue
+        }
+        set valueRange [dict getdef $ranges $field [unknown]]
+        if {[ProvesValueAcceptedBy $valueType $valueRange $declared]} {
+            continue
+        }
+        hir::DiagnoseAt hir TYPE [format \
+            {payload field "%s" of case %s::%s cannot be proven to satisfy its declared type %s (value type: %s%s)%s} \
+            $name [hir::enums::display $id] $case [hir::types::show $declared] \
             [hir::types::show [ShownArgType $valueType $declared]] [FactsClause $valueType $declared $valueRange] [MismatchClause $valueType $declared]] $field $origin
     }
 }

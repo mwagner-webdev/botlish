@@ -125,6 +125,13 @@ proc hir::format {hir args} {
     foreach name [hir::errorDecls $hir] {
         lappend lines [hir::format::ErrorDecl $hir $name]
     }
+    foreach entry [hir::sourceTypes $hir] {
+        if {[dict getdef $entry kind ""] eq "enum"} {
+            foreach {case fields} [dict getdef $entry payloads {}] {
+                lappend lines [hir::format::EnumPayload [dict get $entry id] $case $fields]
+            }
+        }
+    }
     set top [dict get $hir top]
     lappend lines [string trimright "[dict get $hir scopes $top kind] $top [hir::format::Binds $hir $top]"]
     foreach {ns s roots} [hir::format::Sections $hir] {
@@ -326,6 +333,17 @@ proc hir::format::ErrorDecl {hir name} {
     }]
     set ns [dict get $entry namespace]
     return "error $name ns [if {$ns eq ""} {string cat "-"} else {set ns}] payload [join $fields {, }]"
+}
+
+# One line for the payload of case CASE of enum ID
+# (PORTABILITY-PAYLOAD-ENUMS-MILESTONE-1.md, the `payloads` of HIR's enum
+# `sourceTypes` entry): "enumcase ID CASE payload F1: T1, F2: T2" -- the
+# declared fields in declaration order with their resolved types. Printed
+# after every declaration their types may name; read back by
+# hir::read::EnumPayloads.
+proc hir::format::EnumPayload {id case fields} {
+    set text [lmap {field type} $fields {format {%s: %s} $field [hir::types::show $type]}]
+    return "enumcase $id $case payload [join $text {, }]"
 }
 
 # One line for a trait declaration (TRAITS.md, HIR's `traits`): "trait ID
@@ -836,6 +854,12 @@ proc hir::format::Expr {hir e indent origins linesVar} {
             }
             if {[dict exists $node payloadOf]} {
                 set who "payload([dict get $node payloadOf])"
+            }
+            if {[dict exists $node casePayloadOf]} {
+                # A payload-bearing enum case's payload construction
+                # (PORTABILITY-PAYLOAD-ENUMS-MILESTONE-1.md):
+                # "struct casepayload(ID#CASE) (...)".
+                set who "casepayload([join [dict get $node casePayloadOf] #])"
             }
             Line $hir $e "struct $who ([join [dict get $node names] {, }])" $indent $origins lines
             foreach field [dict get $node fields] {

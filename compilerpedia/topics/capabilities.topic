@@ -358,7 +358,10 @@ related: concept.if-expressions concept.enums concept.destructuring capability.n
 
 == STATUS
 No switch/match/case construct and no patterns beyond struct
-destructuring (which binds fields; it never tests values).
+destructuring (which binds fields; it never tests values). An enum case's
+payload (concept.enums) can be constructed, compared and hashed, but not
+read back out of a value: that needs case selection, which does not exist
+yet.
 
 == NEAREST ALTERNATIVE
     if d == Direction::Up:

@@ -245,6 +245,17 @@ proc core::hashing::Encode {mode v} {
             Text out $mode [Utf8Bytes [core::value::enumId $v]]
             lappend out 255
             Text out $mode [Utf8Bytes [core::value::enumCaseName $v]]
+            if {[core::value::enumHasPayload $v]} {
+                # A payload-bearing case's value (PORTABILITY-PAYLOAD-ENUMS-
+                # MILESTONE-1.md): a second 0xFF separator, then the payload
+                # as a nested value -- an anonymous struct, hashed by its
+                # field names and values, so field order takes no part,
+                # consistent with core::value::equal. A payload-free case's
+                # input is unchanged. (In either mode the byte after a case's
+                # name is 0xFF or the next value's kind tag, never both.)
+                lappend out 255
+                Child out $mode [core::value::enumPayload $v]
+            }
         }
         bytestore - mutbytes {
             # The byte count (8 bytes, little-endian), then every byte in

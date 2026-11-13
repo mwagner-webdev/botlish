@@ -1089,6 +1089,19 @@ proc service::TokenIndex {path revision} {
                             lappend enumQualifiers $start $end
                         }
                     }
+                    struct {
+                        set caseOrigin [dict getdef $node caseOrigin ""]
+                        if {[dict exists $node casePayloadOf] && [lindex $caseOrigin 0] eq "file"
+                                && [lindex $caseOrigin 1] eq $f} {
+                            # `Type::Case {...}`, a payload-bearing case's
+                            # construction (PORTABILITY-PAYLOAD-ENUMS-
+                            # MILESTONE-1.md): the case, and its enum
+                            # before it.
+                            set caseSpan [lrange $caseOrigin 2 end]
+                            dict set names [dict get $caseSpan end] [list enumMember {}]
+                            lappend enumQualifiers [dict get $caseSpan start] [dict get $caseSpan end]
+                        }
+                    }
                 }
             }
             set declarations [Derived [dict get $revision id] declarations $f [list service::DeclarationIndex $f]]
@@ -1209,6 +1222,12 @@ proc service::TokenSyntax {node factsVar rangesVar namespacesVar} {
             }
             foreach param [dict getdef $item params {}] {
                 TokenParamType $param ranges
+            }
+            foreach field [dict getdef $item payload {}] {
+                # A payload-bearing enum case's fields
+                # (PORTABILITY-PAYLOAD-ENUMS-MILESTONE-1.md).
+                dict set facts [dict get $field nameSpan start] [list property declaration]
+                lappend ranges [dict get $field typeSpan start] [dict get $field typeSpan end]
             }
         }
     }

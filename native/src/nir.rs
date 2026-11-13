@@ -239,6 +239,11 @@ pub enum OpCode {
     RawNarrow64,
     MkOk,
     MkError,
+    /// enum#case (core/enums.tcl; PORTABILITY-PAYLOAD-ENUMS-MILESTONE-1.md):
+    /// `op enumcase PAYLOAD E C`, E and C the program's enum and case
+    /// numbers as `int` constants -- the value of a payload-bearing case,
+    /// one EnumCaseObj (runtime::ops's rt_enum_case). Never fails.
+    EnumCase,
     /// Structural hash (core/hashing.tcl's hash): consistent with VEq,
     /// masked to 61 bits so the result never needs a BigInt. Bootstrap
     /// native, candidate for stdlib replacement: see core/hashing.tcl's
@@ -1020,6 +1025,7 @@ op_spellings! {
     "d64tostr" => D64ToStr,
     "mkok" => MkOk,
     "mkerror" => MkError,
+    "enumcase" => EnumCase,
     "hash" => Hash,
     "hashtotal" => HashTotal,
     "tablehash" => TableHash,
@@ -1228,7 +1234,7 @@ impl OpCode {
             | MBytesClone | MBytesFreeze | MBytesAddr | CoCreate | CoStart | CoResume0 | CoYield | CoDone
             | CoRelease | CoAbandon | CPtrIsNull | CPtrSame | CPtrFixture | CPtrFixtureAddress | CPtrFixtureMemory | MvFromList | MvLen | MvEmpty | MvPop | MvClear | MvToList | MvTakeFront | CtxRoot
             | MutArrayFromList | MutArrayToList | MutArrayEmpty | MutArrayTakeFront => Some(1),
-            D64Lt | D64Le | D64Gt | D64Ge | D64Eq => Some(3),
+            D64Lt | D64Le | D64Gt | D64Ge | D64Eq | EnumCase => Some(3),
             Substr | SubstrProven | BytesSlice | BytesUtf16LeNul | MutArraySet | MutArraySetProven | MBytesSet | BinLoad | NativeLoad | NativeLoadPtr | RegionCheck | StrRegionIsTclAlpha | StrRegionIsTclAlnum | StrSliceShort
             | MvSwap | MutArraySwap | MutArrayGenerateDrop | FfiFixtureFill | FfiFixtureFillChecked | FfiFixtureCopy
             | TransferEncode | TransferDecode => Some(3),

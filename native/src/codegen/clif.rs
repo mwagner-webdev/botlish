@@ -3237,6 +3237,16 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                         IsError => ("rt_is_result", Some(0), false, None),
                         ResultValue => ("rt_result_payload", Some(1), true, None),
                         ResultError => ("rt_result_payload", Some(0), true, None),
+                        EnumCase => {
+                            // A payload-bearing enum case's value
+                            // (PORTABILITY-PAYLOAD-ENUMS-MILESTONE-1.md).
+                            return self.call_allocating(
+                                "rt_enum_case",
+                                &[self.vm, a[0], a[1], a[2]],
+                                "enumcase",
+                                KIND_ENUMCASE,
+                            );
+                        }
                         MkOk | MkError => {
                             let ok = self.iconst((op == MkOk) as u64);
                             let operation = if op == MkOk { "mkok" } else { "mkerror" };

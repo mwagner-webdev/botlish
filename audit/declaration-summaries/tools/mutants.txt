@@ -160,13 +160,13 @@
 @@ bearing-own-fields-ignored Bearing reads only the fields that mention a slot: a declaration's own Fn field (Tree, OwnGrow) is no obligation
 ## hir/callables.tcl
 <<<<
-        if {[Bearing {} $t]} {
-            return 1
-        }
+            if {[Bearing {} $t]} {
+                return 1
+            }
 ====
-        if {[hir::summaries::Variables [hir::structs::fieldType $id $name]] ne {} && [Bearing {} $t]} {
-            return 1
-        }
+            if {[hir::summaries::Variables [hir::structs::fieldType $id $name]] ne {} && [Bearing {} $t]} {
+                return 1
+            }
 >>>>
 
 @@ bearing-slot-ignored an argument's Bearing class is always `any`: no argument ever contributes (Box[Fn{args: [int], ...}] bears nothing)
@@ -229,11 +229,13 @@
 @@ carried-item-dropped a declaration's own errors lose one: the last of them in order
 ## hir/callables.tcl
 <<<<
-        CarriedInto {} $t errors
+            CarriedInto {} $t errors
+        }
     }
     return [lsort -unique $errors]
 ====
-        CarriedInto {} $t errors
+            CarriedInto {} $t errors
+        }
     }
     return [lrange [lsort -unique $errors] 0 end-1]
 >>>>

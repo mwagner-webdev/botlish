@@ -90,9 +90,16 @@
 #                             integer and no String meaning is carried or
 #                             implied (the case's position in its
 #                             declaration is not part of the value).
-#                             Immutable, unrestricted, no heap state. A
-#                             future payload-bearing case extends this
-#                             form; it does not replace it.
+#                             Immutable, unrestricted, no heap state.
+#   {enum ID CASE PAYLOAD}    a value of a payload-bearing case
+#                             (PORTABILITY-PAYLOAD-ENUMS-MILESTONE-1.md):
+#                             the payload-free form extended by the value's
+#                             payload, an anonymous struct value of the
+#                             case's declared fields. Its identity is still
+#                             (ID, CASE); two values are equal iff both
+#                             parts are and their payloads are equal.
+#                             Immutable; affine exactly when the enum's
+#                             static type is (hir/enums.tcl's IsAffine).
 #   {bytestore HEX}           the owned byte storage behind std::abi::bytes::Bytes (ABI-
 #                             BYTES.md): an immutable, finite sequence of
 #                             bytes, HEX its lowercase hexadecimal text (two
@@ -316,6 +323,16 @@ proc core::value::enumValue {id case} {
     return [list enum $id $case]
 }
 
+# The value of the payload-bearing case CASE of the enum declared as ID,
+# carrying PAYLOAD, an anonymous struct value (PORTABILITY-PAYLOAD-ENUMS-
+# MILESTONE-1.md): {enum ID CASE PAYLOAD}.
+proc core::value::enumCaseValue {id case payload} {
+    if {$id eq "" || $case eq "" || [string first :: $case] >= 0 || [kind $payload] ne "struct"} {
+        error "core::value::enumCaseValue: not a payload-bearing enum case: \"$id\" \"$case\""
+    }
+    return [list enum $id $case $payload]
+}
+
 proc core::value::ok {payload} {
     return [list result ok [check $payload]]
 }
@@ -444,6 +461,10 @@ proc core::value::structGet {v name} {
 
 proc core::value::enumId {v}       { Require enum $v; return [lindex $v 1] }
 proc core::value::enumCaseName {v} { Require enum $v; return [lindex $v 2] }
+# 1 if enum case value V carries a payload; its payload (an anonymous struct
+# value), "" for a payload-free case (PORTABILITY-PAYLOAD-ENUMS-MILESTONE-1.md).
+proc core::value::enumHasPayload {v} { Require enum $v; return [expr {[llength $v] == 4}] }
+proc core::value::enumPayload {v}    { Require enum $v; return [lindex $v 3] }
 
 proc core::value::nativeName {v}  { Require native $v; return [lindex $v 1] }
 proc core::value::mutarrayId {v}  { Require mutarray $v; return [lindex $v 1] }
@@ -535,8 +556,24 @@ proc core::value::equal {a b} {
         enum {
             # Nominal (ENUMS.md): the same enum declaration and the same
             # case of it. A same-spelled case of another enum is unequal,
-            # and no position or number of a case takes part.
-            return [expr {[lindex $a 1] eq [lindex $b 1] && [lindex $a 2] eq [lindex $b 2]}]
+            # and no position or number of a case takes part. A
+            # payload-bearing case's values are equal when their payloads
+            # are too (PORTABILITY-PAYLOAD-ENUMS-MILESTONE-1.md): the
+            # payload is an anonymous struct of the case's declared fields,
+            # compared field by field by name, so neither the order the
+            # fields were declared in nor the order a construction wrote
+            # them in takes part. (A case has a payload in all its values or
+            # in none: the payload's presence is the case's.)
+            if {[lindex $a 1] ne [lindex $b 1] || [lindex $a 2] ne [lindex $b 2]} {
+                return 0
+            }
+            if {[llength $a] != [llength $b]} {
+                return 0
+            }
+            if {[llength $a] == 4} {
+                return [equal [lindex $a 3] [lindex $b 3]]
+            }
+            return 1
         }
         list {
             set xs [lindex $a 1]
@@ -1032,7 +1069,14 @@ proc core::value::show {v {debug 0} {reveal 0}} {
         result { return "[lindex $v 1]([show [lindex $v 2] $debug $reveal])" }
         enum {
             # Debug rendering only (ENUMS.md): the qualified spelling of the
-            # case, never a String conversion or a serialization contract.
+            # case, never a String conversion or a serialization contract;
+            # a payload-bearing case's value adds its payload's fields
+            # (Expression::Add {left: 3, right: 7}), in the canonical order
+            # of an anonymous struct's (PORTABILITY-PAYLOAD-ENUMS-
+            # MILESTONE-1.md).
+            if {[llength $v] == 4} {
+                return "[lindex $v 1]::[lindex $v 2] [show [lindex $v 3] $debug $reveal]"
+            }
             return "[lindex $v 1]::[lindex $v 2]"
         }
         struct {

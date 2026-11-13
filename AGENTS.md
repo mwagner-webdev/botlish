@@ -3649,6 +3649,59 @@ mutant's text when you change the code it mutates, keeping it a mutant of the
 same rule) and `cargo test --release --manifest-path native/Cargo.toml --lib
 enum`. `bench/enums.tcl` regenerates the performance report.
 
+### Payload-bearing cases
+
+A case may declare a named-field payload, `Add {left: int, right: int},`,
+constructed `Enum::Case {field: value, ...}` with every field exactly once
+(PORTABILITY-PAYLOAD-ENUMS-MILESTONE-1.md). Its value has the enum's type;
+its identity is still (enum, case), its payload part of its value. Keep it
+so:
+
+* One construct: never a second tagged-union kind, a union layout, a
+  positional case, a constructor function (a payload-free case stays a
+  value: `E::C {}` is ENUM-PAYLOAD-UNEXPECTED; a payload-bearing case alone
+  is ENUM-PAYLOAD-REQUIRED), a default field, a case type, a discriminant,
+  an ordinal or a layout guarantee. A construction is an ordinary call of
+  the internal root native `enum#case(PAYLOAD, "ID", "CASE")`
+  (hir/resolve.tcl's CaseConstruction) whose payload is an anonymous struct
+  checked like an error payload (`casePayloadOf`, VerifyCasePayload): never
+  add a HIR node kind for it, and never let any other code call enum#case.
+* Equality, hashing and rendering read (enum, case, payload), the payload by
+  field name (never declaration or construction order); a payload-free
+  case's hash, word and rendering are unchanged. Change core/value.tcl,
+  core/hashing.tcl and ops.rs together.
+* Representation is the backend's: natively a payload-free case stays an
+  immediate word (also in an enum with payload-bearing cases) and a
+  payload-bearing value is one EnumCaseObj (KIND_ENUMCASE) holding its
+  payload; `enumeq` only for operands statically of payload-free enums
+  (`hir::enums::IsPayloadFree`). Never box a payload-free case, read a word
+  as a discriminant, or expose either.
+* Every analysis that answers for a value from its components walks an
+  enum's payloads (affinity, Totality, Sendable -- refused for payload enums
+  until a transfer encoding exists --, MentionsMutable, MayHoldVector,
+  Bearing, CarriedInto, CanCarry, MutableComponent, the DecimalRounded
+  guard, privacy), an enum met again adding nothing; a new component
+  analysis does too. An affine enum's values are released by a descriptor
+  naming cases by their hexadecimal UTF-8 names (`e N.(K.HEX D)*`, never a
+  position, never the letters `r`/`C`), and a recursive affine enum is
+  AFFINE-CONTAINER-UNSUPPORTED (hir::enums::VerifyRecursion).
+* A boundary that commits to a representation refuses a payload enum with
+  its reason (C UNSUPPORTED, EXPORT-SIGNATURE, NOT-SENDABLE, a context
+  struct's native layout); never emit a guessed one.
+
+If you change any of that (hir/enums.tcl's payload section, CaseConstruction,
+core/enums.tcl, the enum cases of core/value.tcl, core/hashing.tcl,
+core/affine.tcl, core/mutvec.tcl, native/lower.tcl's EnumCaseValue and
+ImmediateEnum, runtime/{value,heap,ops,show,affine,mutvec}.rs, the
+component analyses' enum cases, HIR text's `enumcase` lines), run
+`tests/payload-enums.test`, `tests/enums.test`, `audit/payload-enums/tools/fuzz.tcl`
+(several seeds, once with `-gc-stress 1`), `audit/payload-enums/tools/mutate.tcl`
+(every mutant in its `mutants.txt` must still apply and be killed: update a
+mutant's text when you change the code it mutates, keeping it a mutant of
+the same rule), `cargo test --release --manifest-path native/Cargo.toml --lib
+enum`, the enum, affine and declaration-summary harnesses for code they
+share, and `tclsh9.0 tests/local.tcl tests/golden/structs-and-enums.bot`.
+
 ## Error payloads
 
 An error is a nominal identity that may carry a statically known named-field

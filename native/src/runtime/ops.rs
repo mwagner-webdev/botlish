@@ -152,6 +152,9 @@ pub fn op_may_allocate(op: OpCode) -> bool {
         RawFromBits32 | RawFromBits64 | RawBits64 | RawAdmit32 | RawAdmit64 | RawNarrow32 | RawNarrow64 |
         IAdd | ISub | IMul | IMod | IAnd | IOr | IXor | IShl | IShr | Substr | DecodeCharAt | ShortToStr | AsciiToStr | StrLower | StrCat | StrAppendChar
             | StrUtf8Bytes | Argv | ListNew | ListAppend | ListFlat | MutArrayAllocate | MutArrayFreeze | MkOk
+            // A payload-bearing enum case's value is one object
+            // (PORTABILITY-PAYLOAD-ENUMS-MILESTONE-1.md).
+            | EnumCase
             // The owned byte storage is one allocation (a collection may run
             // first); the empty storage is a shared static (no allocation).
             | BytesFromList | BytesJoin | BytesDecodeUtf8 | BytesSlice
@@ -705,8 +708,26 @@ fn equal(p: *mut Vm, a: Value, b: Value) -> Result<bool, ()> {
         // An enum case word is canonical (ENUMS.md): the same enum
         // declaration and the same case of it have one word, so word
         // equality is exactly nominal equality -- another enum's
-        // same-spelled case is another word.
-        Kind::Enum => a == b,
+        // same-spelled case is another word. A payload-bearing case's value
+        // (PORTABILITY-PAYLOAD-ENUMS-MILESTONE-1.md) is an EnumCaseObj:
+        // equal when its enum and case are and its payload is equal to the
+        // other's (an anonymous struct: field by field, by name), never by
+        // its address -- core::value::equal's enum case, in its order (the
+        // payloads are compared only for the same case).
+        Kind::Enum => {
+            if a == b {
+                return Ok(true);
+            }
+            if enum_case_parts(a) != enum_case_parts(b) {
+                return Ok(false);
+            }
+            match (enum_payload(a), enum_payload(b)) {
+                (Some(x), Some(y)) => equal(p, x, y)?,
+                // (Equal parts and one payload-free word: two different
+                // words of one payload-free case cannot exist.)
+                _ => false,
+            }
+        }
         // A finite number with one representation (no NaN, no negative
         // zero: FloatType::admit), so equal numbers have equal bits.
         Kind::Float64 => float_bits(a) == float_bits(b),
@@ -1588,11 +1609,18 @@ fn walk<S: CanonicalSink>(p: *mut Vm, sink: &mut S, v: Value) -> Result<(), ()> 
         // declaration identity text, a 0xFF separator, the case's declared
         // name -- never the numbers the word carries.
         Kind::Enum => {
-            let (e, c) = enum_parts(v);
+            let (e, c) = enum_case_parts(v);
             let info = &program(p).enums[e as usize];
             sink.text(info.name.as_bytes());
             sink.bytes(&[0xFF]);
             sink.text(info.cases[c as usize].as_bytes());
+            if let Some(payload) = enum_payload(v) {
+                // A payload-bearing case's value (PORTABILITY-PAYLOAD-ENUMS-
+                // MILESTONE-1.md): a second 0xFF, then the payload as a
+                // nested value, as core/hashing.tcl's enum case does.
+                sink.bytes(&[0xFF]);
+                sink.child(p, payload)?;
+            }
         }
         Kind::List => {
             let items = list_of(v).items();
@@ -4029,6 +4057,20 @@ pub extern "C" fn rt_result_payload(p: *mut Vm, v: Value, ok: u64) -> Value {
     r.payload
 }
 
+/// enum#case (core/enums.tcl; PORTABILITY-PAYLOAD-ENUMS-MILESTONE-1.md): the
+/// value of case CASE of the program's enum number INDEX (both small-Int
+/// words NIR's `int` constants made), carrying PAYLOAD. One allocation; a
+/// payload-free case never comes here (its value is its immediate word).
+/// PAYLOAD is a use of the call, so it is rooted across the allocation
+/// (codegen::roots), as a Result's payload is (rt_result_new).
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_enum_case(p: *mut Vm, payload: Value, index: Value, case: Value) -> Value {
+    let (index, case) = (small_of(index), small_of(case));
+    debug_assert!((index as usize) < program(p).enums.len());
+    debug_assert!((case as usize) < program(p).enums[index as usize].cases.len());
+    vm(p).new_enum_case(index as u32, case as u32, payload)
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_result_new(p: *mut Vm, ok: u64, v: Value) -> Value {
     vm(p).new_result(ok != 0, v)
@@ -4237,6 +4279,8 @@ pub fn apply_op(p: *mut Vm, op: OpCode, a: &[Value]) -> Value {
         RawNarrow64 => super::ffi::rt_raw_narrow(p, 1, a[0]),
         MkOk => rt_result_new(p, 1, a[0]),
         MkError => rt_result_new(p, 0, a[0]),
+        // (enum#case is internal: never a Native value, but harmless as one.)
+        EnumCase => rt_enum_case(p, a[0], a[1], a[2]),
         Hash | HashTotal => rt_hash(p, a[0]),
         TableHash | TableHashTotal => rt_table_hash(p, a[0]),
         BytesFromList => rt_bytes_from_list(p, a[0]),
@@ -4493,6 +4537,7 @@ runtime_helpers! {
     (rt_is_result, 3),
     (rt_result_payload, 3),
     (rt_result_new, 3),
+    (rt_enum_case, 4),
     (rt_char_codepoint, 2),
     (rt_closure_new, 5),
     (rt_call_value, 4),
@@ -4684,6 +4729,101 @@ mod tests {
         assert_eq!(show(&vm.info, make_enum(0, 2)), "VehicleType::Truck");
         assert_ne!(rt_hash(&mut *vm, make_enum(0, 2)), small(632455997673246507));
         assert_eq!(rt_hash(&mut *vm, car), small(632455997673246507));
+    }
+
+    /// A VM whose program has these enums and these anonymous shapes.
+    fn vm_with_enums_and_shapes(enums: &[(&str, &[&str])], shapes: &[&[&str]]) -> Box<Vm> {
+        use crate::runtime::vm::{EnumInfo, ShapeInfo};
+        Vm::new(
+            std::sync::Arc::new(ProgramInfo {
+                functions: Vec::new(),
+                natives: Vec::new(),
+                shapes: shapes
+                    .iter()
+                    .map(|fields| ShapeInfo {
+                        name: None,
+                        fields: fields.iter().map(|f| f.to_string()).collect(),
+                        opaque: false,
+                        identity: None,
+                        tree: None,
+                    })
+                    .collect(),
+                enums: enums
+                    .iter()
+                    .map(|(name, cases)| EnumInfo {
+                        name: name.to_string(),
+                        cases: cases.iter().map(|c| c.to_string()).collect(),
+                    })
+                    .collect(),
+                errors: Vec::new(),
+            }),
+            AllocMode::Summary,
+        )
+    }
+
+    /// PORTABILITY-PAYLOAD-ENUMS-MILESTONE-1.md: a payload-bearing case's
+    /// value is an EnumCaseObj of kind Enum; equal to another iff the same
+    /// enum, the same case and equal payloads -- never by address, never by
+    /// the case number alone -- and never equal to a payload-free word.
+    #[test]
+    fn enum_case_objects_are_nominal_and_compare_payloads() {
+        // Expression {Constant {value}, Parameter, Add {left, right}};
+        // Other {Constant {value}}. Shape 0: {value}; 1: {left, right}.
+        let mut vm = vm_with_enums_and_shapes(
+            &[("Expression", &["Constant", "Parameter", "Add"]), ("Other", &["Constant"])],
+            &[&["value"], &["left", "right"]],
+        );
+        let p42 = rooted!(vm, vm.new_struct(0, vec![small(42)]));
+        let p42b = rooted!(vm, vm.new_struct(0, vec![small(42)]));
+        let p41 = rooted!(vm, vm.new_struct(0, vec![small(41)]));
+        let c42 = rooted!(vm, rt_enum_case(&mut *vm, p42, small(0), small(0)));
+        let c42b = rooted!(vm, rt_enum_case(&mut *vm, p42b, small(0), small(0)));
+        let c41 = rooted!(vm, rt_enum_case(&mut *vm, p41, small(0), small(0)));
+        let other = rooted!(vm, rt_enum_case(&mut *vm, p42, small(1), small(0)));
+        assert_eq!(kind_of(c42), Kind::Enum);
+        assert_eq!(enum_case_parts(c42), (0, 0));
+        assert_eq!(enum_case_parts(make_enum(0, 1)), (0, 1));
+        let eq = |vm: &mut Vm, a, b| rt_value_eq(vm, a, b);
+        assert_ne!(c42, c42b);
+        assert_eq!(eq(&mut vm, c42, c42b), TRUE);
+        assert_eq!(eq(&mut vm, c42, c41), FALSE);
+        // Another enum's same-spelled case with an equal payload.
+        assert_eq!(eq(&mut vm, c42, other), FALSE);
+        // A payload-free case of the same enum, whatever its number.
+        assert_eq!(eq(&mut vm, c42, make_enum(0, 1)), FALSE);
+        assert_eq!(eq(&mut vm, make_enum(0, 1), c42), FALSE);
+        assert_eq!(eq(&mut vm, c42, make_enum(0, 0)), FALSE);
+    }
+
+    /// The hash of a payload-bearing case's value: the payload-free form's
+    /// canonical input, a 0xFF, then the payload (core/hashing.tcl's enum
+    /// case): equal values hash equally, the case and the payload count, and
+    /// the value prints as core::value::show and transports as
+    /// core::value::enumCaseValue does.
+    #[test]
+    fn enum_case_objects_hash_and_show_by_names() {
+        use crate::runtime::show::{show, tcl_value};
+        let mut vm = vm_with_enums_and_shapes(
+            &[("Expression", &["Constant", "Parameter", "Add"])],
+            &[&["value"], &["left", "right"]],
+        );
+        let p = rooted!(vm, vm.new_struct(0, vec![small(42)]));
+        let q = rooted!(vm, vm.new_struct(0, vec![small(42)]));
+        let add = rooted!(vm, vm.new_struct(1, vec![small(3), small(7)]));
+        let a = rooted!(vm, rt_enum_case(&mut *vm, p, small(0), small(0)));
+        let b = rooted!(vm, rt_enum_case(&mut *vm, q, small(0), small(0)));
+        let c = rooted!(vm, rt_enum_case(&mut *vm, add, small(0), small(2)));
+        assert_eq!(rt_hash(&mut *vm, a), rt_hash(&mut *vm, b));
+        assert_ne!(rt_hash(&mut *vm, a), rt_hash(&mut *vm, c));
+        // tests/payload-enums.test's pe-hash-pinned values, byte for byte
+        // core/hashing.tcl's.
+        assert_eq!(rt_hash(&mut *vm, a), small(1115571715604841343));
+        assert_eq!(rt_hash(&mut *vm, c), small(51682743645282670));
+        assert_eq!(rt_hash(&mut *vm, make_enum(0, 1)), small(576369074442151568));
+        assert_eq!(show(&vm.info, a), "Expression::Constant {value: 42}");
+        assert_eq!(show(&vm.info, c), "Expression::Add {left: 3, right: 7}");
+        assert_eq!(show(&vm.info, make_enum(0, 1)), "Expression::Parameter");
+        assert_eq!(tcl_value(&vm.info, a).unwrap(), "enum Expression Constant {struct {{} value} {{int 42}}}");
     }
 
     // -----------------------------------------------------------------------

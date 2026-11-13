@@ -105,6 +105,8 @@ enum DiagnosticCode:
     EmitRejected,
     EmitUnknownValue,
     EmitUnsupported,
+    EnumPayloadRequired,
+    EnumPayloadUnexpected,
     ExportEnvironment,
     ExportName,
     ExportPlacement,

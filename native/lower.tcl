@@ -270,6 +270,9 @@ namespace eval native::lower {
         dict set natives std::thread::$name [list threadop [lindex $spec 0]]
     }
     dict set natives std::thread::entry threadentry
+    # A payload-bearing enum case's construction (core/enums.tcl,
+    # PORTABILITY-PAYLOAD-ENUMS-MILESTONE-1.md): `op enumcase`.
+    dict set natives enum#case enumcase
     # The borrow test fixture's synthetic foreign operations (core/cabi.tcl's
     # installBorrowFixture; runtime/ffifixture.rs), one op per behavior.
     foreach {name behavior} [core::cabi::borrowFixture] {
@@ -4305,6 +4308,35 @@ proc native::lower::EnumIndex {id} {
     return [dict get $enumIds $id]
 }
 
+# 1 if every value of static type TYPE is an immediate enum case word: an
+# enum declared with no payload-bearing case (PORTABILITY-PAYLOAD-ENUMS-
+# MILESTONE-1.md). The broad `enum` kind, or an enum with a payload, may be
+# an EnumCaseObj.
+proc native::lower::ImmediateEnum {type} {
+    return [hir::enums::IsPayloadFree $type]
+}
+
+# The value of the payload-bearing enum case construction E, enum#case(
+# PAYLOAD, "ID", "CASE") (core/enums.tcl, PORTABILITY-PAYLOAD-ENUMS-
+# MILESTONE-1.md), its payload in register PAYLOAD: `op enumcase PAYLOAD E C`,
+# E the enum's number and C the case's position in its declaration (as a
+# payload-free case's word has them: representation only), one EnumCaseObj.
+# The two names are constants of the call, read here; their own registers
+# are never used.
+proc native::lower::EnumCaseValue {fnVar e argExprs payload} {
+    upvar 1 $fnVar fn
+    variable hir
+    set id [lindex [hir::get $hir [lindex $argExprs 1] literal] end]
+    set caseName [lindex [hir::get $hir [lindex $argExprs 2] literal] end]
+    set case [lsearch -exact [hir::enums::cases $id] $caseName]
+    if {$case < 0 || ![hir::enums::hasPayload $id $caseName]} {
+        throw {NATIVE INVALID-HIR} "native lowering: enum \"$id\" has no payload-bearing case \"$caseName\" ($e)"
+    }
+    set index [Assign fn "int [EnumIndex $id]" $e]
+    set number [Assign fn "int $case" $e]
+    return [Assign fn "op enumcase $payload $index $number" $e]
+}
+
 # The NIR constant `enum E C` of the case value V ({enum ID CASE}): E the
 # enum's number, C the case's position in its declaration (ENUMS.md).
 proc native::lower::EnumConst {fnVar v e} {
@@ -4750,6 +4782,12 @@ proc native::lower::ContextLeaves {id {seen {}}} {
             continue
         }
         set kind [hir::types::kindOf $type]
+        if {$kind eq "enum" && ![ImmediateEnum $type]} {
+            # A value of an enum with payload-bearing cases may be an object
+            # (PORTABILITY-PAYLOAD-ENUMS-MILESTONE-1.md), never an immediate
+            # leaf: the area holds no GC root.
+            return [list no "field \"$field\" ([hir::types::show $type]) is an enum with payload-bearing cases, whose values may be heap objects, and a context's leaves are immediate words"]
+        }
         switch -- $kind {
             bool - unit - UnicodeChar - enum - cptr {
                 # (An enum case, ENUMS.md, is an immediate word: never a
@@ -10144,6 +10182,10 @@ proc native::lower::NativeCallOp {e node} {
             # std::thread::entry(NAME): a constant (ThreadEntryValue).
             return [list $name threadentry]
         }
+        enumcase {
+            # enum#case(PAYLOAD, "ID", "CASE") (EnumCaseValue).
+            return [list $name enumcase]
+        }
         equality {
             if {[llength $argExprs] != 2} {
                 return [list $name veq]
@@ -10160,11 +10202,15 @@ proc native::lower::NativeCallOp {e node} {
                 # Two UnicodeChar immediates: scalar equality is word
                 # equality, and it cannot fail (std::str::char_at(s, i) == '%').
                 set op chareq
-            } elseif {$ka eq $kb && $ka eq "enum"} {
+            } elseif {$ka eq $kb && $ka eq "enum" && [ImmediateEnum [hir::typeOf $hir $a]]
+                    && [ImmediateEnum [hir::typeOf $hir $b]]} {
                 # Two enum case immediates (ENUMS.md): nominal equality is
                 # word equality (one word per case of one declaration, so a
                 # same-spelled case of another enum is another word), and it
-                # cannot fail.
+                # cannot fail. Only for enums whose every case is
+                # payload-free: a payload-bearing case's value is an object
+                # compared by its payload (PORTABILITY-PAYLOAD-ENUMS-
+                # MILESTONE-1.md), through veq or veqtotal below.
                 set op enumeq
             } elseif {$ka eq $kb && $ka eq "Float64"} {
                 # Two Float64 values (FLOAT64-MILESTONE-1.md): a number has
@@ -11054,6 +11100,9 @@ proc native::lower::NativeCall {fnVar e node name argRegs rawEligible op want} {
     }
     if {$op eq "threadentry"} {
         return [list [ThreadEntryValue fn $e $node] tagged]
+    }
+    if {$op eq "enumcase"} {
+        return [list [EnumCaseValue fn $e $argExprs [lindex $argRegs 0]] tagged]
     }
     set big [BigConstantResult $e $argExprs $op]
     if {$big ne ""} {

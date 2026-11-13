@@ -1236,13 +1236,12 @@ Q {x: 1}
 
 @topic error.not-a-struct
 title: NOT-A-STRUCT: a field read from a value that is not a struct
-summary: A field projection or destructuring reads a field of a value whose type is not a struct (an int, a str, a List ...), or braces follow an enum case.
+summary: A field projection or destructuring reads a field of a value whose type is not a struct (an int, a str, a List ...).
 index: errors
 alias: only a struct has fields; cannot project field
-keywords: projection, field, dot, struct, method syntax, destructuring, enum case braces
-related: concept.structs concept.method-sugar concept.enums error.unknown-field error.missing-import rule.method-requires-import
+keywords: projection, field, dot, struct, method syntax, destructuring
+related: concept.structs concept.method-sugar concept.enums error.unknown-field error.missing-import rule.method-requires-import error.enum-payload-unexpected
 code: CORE SEMANTIC NOT-A-STRUCT
-code: SURFACE MODULE NOT-A-STRUCT
 
 == MEANING
 `value.name` reads field `name` of a struct value. For a value whose
@@ -1251,10 +1250,9 @@ type is known not to be a struct, there is no field to read:
     cannot project field "size" from a value of type int: only a struct
     has fields
 
-The same holds for a destructuring `{a} = n` of a non-struct. The loader
-reports one more case (SURFACE MODULE NOT-A-STRUCT): braces after an
-enum case, `Color::Red {}` -- a case is a value, written without braces,
-and cases carry no payload.
+The same holds for a destructuring `{a} = n` of a non-struct. (Braces
+after a payload-free enum case, `Color::Red {}`, are ENUM-PAYLOAD-
+UNEXPECTED: error.enum-payload-unexpected.)
 
 == LIKELY CAUSES
   * Method syntax with no function of that name visible: `n.size()` is a
@@ -1283,17 +1281,6 @@ n.size()
 @caption A field call on an int: no function size
 @error CORE SEMANTIC NOT-A-STRUCT
 @at 2:3
-@end
-
-@example reject
-enum Color:
-    Red,
-    Green,
-
-Color::Red {}
-@caption An enum case is a value: no braces
-@error SURFACE MODULE NOT-A-STRUCT
-@at 5:1
 @end
 
 @topic error.unproven-field
@@ -1637,6 +1624,93 @@ enum Color:
 Color::Gren
 @caption A misspelled case
 @error CORE SEMANTIC UNKNOWN-ENUM-CASE
+@at 5:1
+@end
+
+@topic error.enum-payload-required
+title: ENUM-PAYLOAD-REQUIRED: a payload-bearing case written without its payload
+summary: A case declared with payload fields, written Enum::Case alone; every value of it is constructed with its fields, Enum::Case {field: value, ...}.
+index: errors
+alias: case carries a payload; missing enum payload; enum case without payload
+keywords: enum, case, payload, construction, fields, default
+related: concept.enums error.enum-payload-unexpected error.missing-field error.unknown-enum-case
+code: CORE SEMANTIC ENUM-PAYLOAD-REQUIRED
+
+== MEANING
+A payload-bearing case has no value without its payload: there is no
+default for a field and no payload-free value of the case. `Shape::Circle`
+alone, for `Circle {radius: int}`, names nothing to compute:
+
+    case Shape::Circle carries a payload {radius: int}: a value of it is
+    constructed with every payload field, Shape::Circle {radius: ...}
+    (there is no payload-free value of a payload-bearing case, and no
+    default)
+
+A case is also never a constructor function: there is no
+`Shape::Circle(3)` and no value `Shape::Circle` to pass around.
+
+== LIKELY CAUSES
+  * The payload was forgotten.
+  * The case gained a payload after the code was written.
+
+== HOW TO INVESTIGATE
+The message lists the case's fields; the enum's declaration gives their
+types.
+
+== WHAT TO DO
+Construct the value with every field, `Shape::Circle {radius: 3}`; or, if
+the case should not carry data, declare it without braces.
+
+@example reject
+enum Shape:
+    Point,
+    Circle {radius: int},
+
+Shape::Circle
+@caption A payload-bearing case written as a bare value
+@error CORE SEMANTIC ENUM-PAYLOAD-REQUIRED
+@at 5:1
+@end
+
+@topic error.enum-payload-unexpected
+title: ENUM-PAYLOAD-UNEXPECTED: braces given to a payload-free case
+summary: Enum::Case {...} for a case declared without payload fields; a payload-free case is a value written Enum::Case, without braces.
+index: errors
+alias: case carries no payload; payload-free case with braces; enum case is not a constructor
+keywords: enum, case, payload, braces, construction
+related: concept.enums error.enum-payload-required error.unknown-enum-case
+code: CORE SEMANTIC ENUM-PAYLOAD-UNEXPECTED
+
+== MEANING
+Only a case declared with payload fields is constructed with braces. A
+payload-free case is one value, written by its qualified name:
+
+    case Shape::Point carries no payload: its value is written
+    Shape::Point, without braces (only a case declared with payload fields
+    is constructed with them)
+
+Empty braces are no exception: `Shape::Point {}` is rejected too.
+
+== LIKELY CAUSES
+  * The wrong case: a payload-bearing case of the same enum was meant.
+  * The case's payload was removed from its declaration.
+
+== HOW TO INVESTIGATE
+Read the enum's declaration: a payload-bearing case lists its fields in
+braces after its name.
+
+== WHAT TO DO
+Write the case without braces, or declare the fields the construction
+gives.
+
+@example reject
+enum Shape:
+    Point,
+    Circle {radius: int},
+
+Shape::Point {}
+@caption Braces after a payload-free case
+@error CORE SEMANTIC ENUM-PAYLOAD-UNEXPECTED
 @at 5:1
 @end
 

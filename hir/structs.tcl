@@ -786,6 +786,22 @@ proc hir::structs::VerifyDeclarations {} {
             Fail $span $message TRAIT-NOT-SATISFIED
         }
     }
+    # An enum case's payload fields (PORTABILITY-PAYLOAD-ENUMS-MILESTONE-1.md)
+    # are written types like a struct's fields: the same applications rule,
+    # and an affine enum must have a finite drop descriptor
+    # (hir::enums::RecursionProblem).
+    foreach {enum case name t span} [hir::enums::payloadFieldList] {
+        set issue [ApplicationIssue $t]
+        if {$issue eq ""} continue
+        lassign $issue kind problem
+        set message [format {invalid type %s for payload field "%s" of case %s::%s: %s} \
+            [hir::types::show $t] $name $enum $case $problem]
+        if {$span eq ""} {
+            core::semanticError $kind $message
+        }
+        Fail $span $message $kind
+    }
+    hir::enums::VerifyRecursion
 }
 
 # The type of field NAME of the named struct type TYPE (AppliedFieldTypes),
@@ -1813,6 +1829,23 @@ proc hir::structs::MutableComponent {type {seen {}}} {
             set why [MutableComponent $t $seen]
             if {$why ne ""} {
                 return $why
+            }
+        }
+        return ""
+    }
+    if {[hir::types::IsEnum $type]} {
+        # A payload-bearing case's values hold their payloads
+        # (PORTABILITY-PAYLOAD-ENUMS-MILESTONE-1.md): the first payload field
+        # that holds a mutable component, in declaration order. An enum met
+        # again adds nothing.
+        if {$type in $seen} {
+            return ""
+        }
+        foreach part [hir::enums::payloadParts [lindex $type 1]] {
+            lassign $part what t
+            set why [MutableComponent $t [concat $seen [list $type]]]
+            if {$why ne ""} {
+                return "$what holds $why"
             }
         }
         return ""

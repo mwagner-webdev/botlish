@@ -195,8 +195,11 @@
 #              declaration like structdecl: no runtime meaning, no binding;
 #              the owner (the declaring module) is supplied by the loader.
 #   enumdecl   name, nameSpan, cases ({name nameSpan} dicts in declaration
-#              order) -- a top-level enum declaration ("enum NAME:" followed
-#              by its indented, comma-separated payload-free cases; ENUMS.md).
+#              order, with `payload` -- {name nameSpan type typeSpan} dicts
+#              in written order -- for a payload-bearing case) -- a
+#              top-level enum declaration ("enum NAME:" followed by its
+#              indented, comma-separated cases; ENUMS.md,
+#              PORTABILITY-PAYLOAD-ENUMS-MILESTONE-1.md).
 #              A declaration like structdecl: no runtime meaning, no binding;
 #              the owner (the declaring module) is supplied by the loader.
 #   traitdecl  name, nameSpan, requirements ({name nameSpan params paramsSpan
@@ -1097,7 +1100,15 @@ proc surface::ast::StatementLines {node indent show linesVar} {
         enumdecl {
             lappend lines "${pad}enum [dict get $node name]$at"
             foreach case [dict get $node cases] {
-                lappend lines "${pad}    [dict get $case name],"
+                if {[dict exists $case payload]} {
+                    # A payload-bearing case (PORTABILITY-PAYLOAD-ENUMS-
+                    # MILESTONE-1.md): its named fields, in written order.
+                    lappend lines "${pad}    [dict get $case name] \{[join [lmap field [dict get $case payload] {
+                        string cat [dict get $field name] ": " [showType [dict get $field type]]
+                    }] {, }]\},"
+                } else {
+                    lappend lines "${pad}    [dict get $case name],"
+                }
             }
             return
         }

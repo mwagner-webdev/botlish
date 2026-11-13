@@ -1152,6 +1152,13 @@ impl Vm {
         self.alloc(ResultObj { hdr: Header::new(KIND_RESULT, false), ok, payload }, 0)
     }
 
+    /// A value of the payload-bearing case CASE of the program's enum number
+    /// INDEX, carrying PAYLOAD (PORTABILITY-PAYLOAD-ENUMS-MILESTONE-1.md).
+    /// The caller keeps PAYLOAD rooted across the allocation.
+    pub fn new_enum_case(&mut self, index: u32, case: u32, payload: Value) -> Value {
+        self.alloc(EnumCaseObj { hdr: Header::new(KIND_ENUMCASE, false), index, case, payload }, 0)
+    }
+
     /// A fresh MutableArray of CAPACITY slots, every slot initialized to
     /// UNIT (never uninitialized memory: see MutArrayObj's doc comment).
     /// Rejects a capacity outside 0..=MAX_COLLECTION_LENGTH with RANGE, the

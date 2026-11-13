@@ -46,17 +46,21 @@
 @@ equal-ignores-enum-tcl case equality ignores the enum's identity (Tcl runtimes, and the compiler's decided comparisons)
 ## core/value.tcl
 <<<<
-            return [expr {[lindex $a 1] eq [lindex $b 1] && [lindex $a 2] eq [lindex $b 2]}]
+            if {[lindex $a 1] ne [lindex $b 1] || [lindex $a 2] ne [lindex $b 2]} {
 ====
-            return [expr {[lindex $a 2] eq [lindex $b 2]}]
+            if {[lindex $a 2] ne [lindex $b 2]} {
 >>>>
 
 @@ equal-ignores-enum-native case equality ignores the enum's identity (native runtime equality)
 ## native/src/runtime/ops.rs
 <<<<
-        Kind::Enum => a == b,
+        // payloads are compared only for the same case).
+        Kind::Enum => {
+            if a == b {
 ====
-        Kind::Enum => enum_parts(a).1 == enum_parts(b).1,
+        // payloads are compared only for the same case).
+        Kind::Enum => {
+            if a == b || (is_enum(a) && is_enum(b) && enum_parts(a).1 == enum_parts(b).1) {
 >>>>
 
 @@ enumeq-ignores-enum-native the inline enum comparison ignores the enum's number (native code)
@@ -82,9 +86,9 @@
 @@ same-spelled-enums-equal-tcl same-spelled cases of same-spelled enums of different modules compare equal (Tcl runtimes)
 ## core/value.tcl
 <<<<
-            return [expr {[lindex $a 1] eq [lindex $b 1] && [lindex $a 2] eq [lindex $b 2]}]
+            if {[lindex $a 1] ne [lindex $b 1] || [lindex $a 2] ne [lindex $b 2]} {
 ====
-            return [expr {[namespace tail [lindex $a 1]] eq [namespace tail [lindex $b 1]] && [lindex $a 2] eq [lindex $b 2]}]
+            if {[namespace tail [lindex $a 1]] ne [namespace tail [lindex $b 1]] || [lindex $a 2] ne [lindex $b 2]} {
 >>>>
 
 @@ same-spelled-enums-share-number-native same-spelled enums of different modules share one native enum number
@@ -106,9 +110,9 @@
 @@ equal-by-ordinal-tcl case equality compares declaration positions, not identities (Tcl runtimes)
 ## core/value.tcl
 <<<<
-            return [expr {[lindex $a 1] eq [lindex $b 1] && [lindex $a 2] eq [lindex $b 2]}]
+            if {[lindex $a 1] ne [lindex $b 1] || [lindex $a 2] ne [lindex $b 2]} {
 ====
-            return [expr {[lsearch -exact [hir::enums::cases [lindex $a 1]] [lindex $a 2]] == [lsearch -exact [hir::enums::cases [lindex $b 1]] [lindex $b 2]]}]
+            if {[lsearch -exact [hir::enums::cases [lindex $a 1]] [lindex $a 2]] != [lsearch -exact [hir::enums::cases [lindex $b 1]] [lindex $b 2]]} {
 >>>>
 
 @@ resolution-searches-scope an unknown case falls back to an ordinary lookup of its name in the surrounding scope

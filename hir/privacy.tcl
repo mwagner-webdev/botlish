@@ -484,6 +484,25 @@ proc hir::privacy::CheckSourceType {hirVar decls entry} {
                 }
             }
         }
+        enum {
+            # A public enum's payload fields are its interface
+            # (PORTABILITY-PAYLOAD-ENUMS-MILESTONE-1.md): every importer
+            # constructs its cases with them.
+            set id [dict get $entry id]
+            lassign [Member $id] ns name
+            if {![Judged $decls $ns] || [Entry $decls $ns types $name] ne ""} return
+            foreach {case fields} [dict getdef $entry payloads {}] {
+                set descriptor [hir::enums::caseDescriptor $id $case]
+                foreach {field t} $fields {
+                    set found [Find $decls $t]
+                    if {$found ne ""} {
+                        Escape hir "enum $id" $found "the payload field \"$field\" of its case $case" "" \
+                            [Located $hir [dict getdef [dict getdef $descriptor typeSpans {}] $field ""] $decls $ns types $name]
+                        return
+                    }
+                }
+            }
+        }
         layout {
             set id [dict get $entry id]
             lassign [Member $id] ns name
