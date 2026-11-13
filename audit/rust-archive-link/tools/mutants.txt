@@ -79,6 +79,15 @@
     if {0} {
 >>>>
 
+@@ fallback-localized the fixture's recipe keeps only the C ABI global: the weak fallback of botlish_event_post2 becomes local, and a program with the provider calls the fallback (the provider is silently ignored)
+!! ral-localized-surface ral-localized-with_provider-rustc ral-localized-with_provider-system
+## audit/rust-archive-link/tools/rustlink.tcl
+<<<<
+    set opts [Options [dict create -keep {rl_* botlish_event_post2} -require [exports] -out ""] $args]
+====
+    set opts [Options [dict create -keep {rl_*} -require [exports] -out ""] $args]
+>>>>
+
 # ---------------------------------------------------------------------------
 # The archive symbol index (pm/binary.tcl)
 
@@ -162,4 +171,73 @@ private extern c fn free(p: std::ffi::c::Ptr[std::ffi::c::Void] noescape) -> uni
 ====
     free(p)
     0
+>>>>
+
+# ---------------------------------------------------------------------------
+# Weak definitions are no duplicates (pm/binary.tcl, pm/native.tcl,
+# pm/author.tcl)
+
+@@ weak-elf-unread ELF: a relocatable member's .symtab is not read for weak definitions: a weak fallback counts as a duplicate again
+!! pn-index-weak-definitions
+%% tests/package-native.test
+## pm/binary.tcl
+<<<<
+                    if {($info >> 4) != 2} continue
+                    if {[U $data [expr {$sym + 6}] 2 $label] == 0} continue
+====
+                    continue
+>>>>
+
+@@ weak-macho-unread Mach-O: N_WEAK_DEF is not read: a member's weak definitions are taken for strong ones
+!! pn-index-weak-definitions
+%% tests/package-native.test
+## pm/binary.tcl
+<<<<
+                    if {[U $data [expr {$sym + 6}] 2 $label] & 0x0080} {
+====
+                    if {0} {
+>>>>
+
+@@ weak-any-member an index name is weak when any member defining it is, not every one: a strong definition elsewhere in the archive is hidden from the duplicate check
+!! pn-index-bsd-forms pn-index-weak-definitions
+%% tests/package-native.test
+## pm/binary.tcl
+<<<<
+            dict set weakEntry $symbol [dict getdef $weakEntry $symbol 1]
+        } else {
+            dict set weakEntry $symbol 0
+        }
+====
+            dict set weakEntry $symbol 1
+        } elseif {![dict exists $weakEntry $symbol]} {
+            dict set weakEntry $symbol 0
+        }
+>>>>
+
+@@ install-weak-counted the installation's closure counts a weak definition as a duplicate again: a unit with a weak fallback and its driver cannot both be installed
+!! pn-index-weak-definitions
+%% tests/package-native.test
+## pm/native.tcl
+<<<<
+            if {$symbol in [dict getdef $entry weak {}]} continue
+====
+>>>>
+
+@@ install-all-weak the installation's closure exempts every symbol: two strong definitions install
+!! pn-index-weak-definitions
+%% tests/package-native.test
+## pm/native.tcl
+<<<<
+            if {$symbol in [dict getdef $entry weak {}]} continue
+====
+            continue
+>>>>
+
+@@ audit-weak-counted the pack-time audit counts a weak definition as a duplicate again
+!! ral-pack-weak-beside-strong
+## pm/author.tcl
+<<<<
+                        if {$symbol in [dict getdef $facts weak {}]} {
+====
+                        if {0} {
 >>>>

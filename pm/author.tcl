@@ -1099,13 +1099,18 @@ proc pm::author::Audit {files descriptor {targets ""}} {
                 } else {
                     foreach symbol [dict get $facts symbols] {
                         if {[string match __* $symbol]} continue
+                        # A weak definition is no duplicate (the link takes
+                        # the other definition first).
+                        if {$symbol in [dict getdef $facts weak {}]} {
+                            dict set exports $symbol "bundled $name"
+                            continue
+                        }
                         if {[dict exists $definers $symbol] && [dict get $definers $symbol] ne $name} {
                             lappend problems "the static libraries [dict get $definers $symbol] and $name both define $symbol: linking both is a duplicate definition"
                         }
                         dict set definers $symbol $name
-                        if {[dict get $t format] eq "macho" && [string index $symbol 0] eq "_"} {
-                            dict set exports [string range $symbol 1 end] "bundled $name"
-                        }
+                        # (C names: pm::binary takes a Mach-O member's
+                        # leading underscore off its index names.)
                         dict set exports $symbol "bundled $name"
                     }
                 }

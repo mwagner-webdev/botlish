@@ -10,8 +10,10 @@
 #
 # OUTDIR/results.tsv, OUTDIR/surfaces.txt (each archive's global
 # definitions and undefined references), OUTDIR/logs/CASE.txt (a failed
-# link's or run's output). -toolchain2 T adds the unit built by another
-# rustc (a rustup toolchain) than the Botlish runtime's.
+# link's or run's output). The units: default-weakdef (the weak fallback,
+# the package's), default-weakref (http's notify.c), both built by cargo's
+# default rustc -- the Botlish runtime's -- and, with -toolchain2 T, the
+# weak-fallback unit built by another rustc (a rustup toolchain).
 source [file join [file dirname [file normalize [info script]]] rustlink.tcl]
 
 set out [file normalize [lindex $argv 0]]
@@ -40,22 +42,19 @@ proc first {text} {
     return [string range [string trim [lindex [split $text \n] 0]] 0 200]
 }
 
-set units [list default-weakref [rustlink::unit -notify weakref] default-weakdef [rustlink::unit -notify weakdef]]
+set units [list default-weakdef [rustlink::unit -notify weakdef] default-weakref [rustlink::unit -notify weakref]]
 if {[dict get $opts -toolchain2] ne ""} {
     set t [dict get $opts -toolchain2]
-    lappend units $t-weakref [rustlink::unit -notify weakref -toolchain $t]
+    lappend units $t-weakdef [rustlink::unit -notify weakdef -toolchain $t]
 }
 set provider [rustlink::provider]
 set surfaces [open [file join $out surfaces.txt] w]
 set results [open [file join $out results.tsv] w]
 puts $results [join {unit form program linker link status verdict personality_global personality_local detail} \t]
 foreach {name raw} $units {
-    set forms [list raw $raw]
-    if {[string match *weakdef $name]} {
-        lappend forms localized [rustlink::localized $raw -keep {rl_* botlish_event_post2} -out [file join $work $name-localized librustlink.a]]
+    set forms [list raw $raw localized [rustlink::localized $raw -out [file join $work $name-localized librustlink.a]]]
+    if {$name eq "default-weakdef"} {
         lappend forms fallback-localized-away [rustlink::localized $raw -keep {rl_*} -out [file join $work $name-hidden librustlink.a]]
-    } else {
-        lappend forms localized [rustlink::localized $raw -out [file join $work $name-localized librustlink.a]]
     }
     foreach {form archive} $forms {
         set g [rustunit::globals $archive -format [rustlink::format]]

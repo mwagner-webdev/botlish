@@ -18,7 +18,8 @@ name: rust archive link
 #   units         per host, twice on two runners: the release archives
 #                 (audit/rust-archive-link/tools/release-unit.tcl, rustc
 #                 1.97.0, fresh target directory)
-#   package       one multi-target artifact packed from each runner's set
+#   package       the two multi-target artifacts (rustlink, the unit's;
+#                 rustlink_provider) packed from each runner's set
 #                 (audit/rust-archive-link/tools/pack.sh, each packed twice);
 #                 the archives and the artifacts compared
 #   reproducible  fails unless both sets and both artifacts are identical
@@ -133,9 +134,10 @@ jobs:
           tclsh9.0 - "$out" <<'EOF' 2>&1 | tee "$out/facts.txt"
           source audit/rust-archive-link/tools/rustlink.tcl
           set out [lindex $argv 0]
-          set raw [rustlink::unit -notify weakref]
+          set raw [rustlink::unit]
           set loc [rustlink::localized $raw -out [file join $out librustlink.a]]
           puts "== raw [file size $raw] bytes, localized [file size [file join $out librustlink.a]] bytes"
+          rustlink::localized [rustlink::unit -notify weakref] -out [file join $out weakref librustlink.a]
           set app [rustlink::app [file join $out app] [file join $out librustlink.a] [rustlink::provider]]
           foreach linker {rustc system} {
               set l [rustlink::link $app with_provider.bot -linker $linker]
@@ -147,10 +149,12 @@ jobs:
           echo "== ar members and index"; ar -t librustlink.a; nm -s librustlink.a 2>/dev/null | sed -n '/Archive index/,/^$/p' | head -20
           echo "== nm -m: external definitions"; nm -m librustlink.a | grep -v undefined | grep ' external ' | grep -v 'non-external\|private external'
           echo "== nm -m: weak or undefined Rust and integration symbols"; nm -m librustlink.a | grep -E 'botlish_event_post2|rust_eh_personality|___rust_alloc$' || true
+          echo "== nm -m: http's notify.c (weakref) unit"; nm -m weakref/librustlink.a | grep -E 'botlish_event_post2' || true
           echo "== nm -m: counts"; nm -m librustlink.a | awk '{for(i=1;i<=NF;i++) if ($i=="external") {k=$(i-1); print (k=="private"||k=="non-") ? k"external" : "external"}}' | sort | uniq -c
           echo "== otool -hv (the member)"; otool -hv librustlink.a | head -8
           for exe in with_provider-rustc with_provider-system; do
-            echo "== $exe"; file "$exe"; otool -L "$exe"
+            echo "== $exe"; file "$exe"; otool -L "$exe"; otool -hv "$exe" | tail -2
+            echo "botlish_event_post2:"; nm -m "$exe" | grep botlish_event_post2 || true
             echo "personality:"; nm "$exe" | grep -E ' _rust_eh_personality$'
             echo "allocator shims:"; nm "$exe" | grep -E '_7___rustc12___rust_alloc$'
             echo "exports trie (the unit's and Rust's):"; dyld_info -exports "$exe" 2>/dev/null | grep -cE '_rl_|_RNv|_ZN' || true
@@ -306,8 +310,10 @@ jobs:
                 echo "- $t $f: a $a, b $b: $([ "$a" = "$b" ] && echo identical || echo DIFFERENT)"
               done
             done
-            a=$(sha256sum < "$RUNNER_TEMP/pack-a/rustlink-0.1.0.botpkg" | cut -c1-64); b=$(sha256sum < "$RUNNER_TEMP/pack-b/rustlink-0.1.0.botpkg" | cut -c1-64)
-            echo "- rustlink-0.1.0.botpkg: from a $a, from b $b: $([ "$a" = "$b" ] && echo identical || echo DIFFERENT)"
+            for p in rustlink rustlink_provider; do
+              a=$(sha256sum < "$RUNNER_TEMP/pack-a/$p-0.1.0.botpkg" | cut -c1-64); b=$(sha256sum < "$RUNNER_TEMP/pack-b/$p-0.1.0.botpkg" | cut -c1-64)
+              echo "- $p-0.1.0.botpkg: from a $a, from b $b: $([ "$a" = "$b" ] && echo identical || echo DIFFERENT)"
+            done
             echo "- each set packed twice: byte-identical (pack.sh's cmp)"
           } | tee reproducibility.md >> "$GITHUB_STEP_SUMMARY"
           for t in linux-x86_64 macos-aarch64; do
@@ -319,7 +325,8 @@ jobs:
           mkdir -p kit/consumer
           cp audit/rust-archive-link/consumer/*.bot audit/rust-archive-link/consumer/*.expected kit/consumer/
           cp audit/rust-archive-link/cleanroom/consumer.sh kit/
-          cp "$RUNNER_TEMP/pack-a/rustlink-0.1.0.botpkg" kit/
+          mkdir -p kit/packages
+          cp "$RUNNER_TEMP/pack-a/rustlink-0.1.0.botpkg" "$RUNNER_TEMP/pack-a/rustlink_provider-0.1.0.botpkg" kit/packages/
           cp reproducibility.md kit/
 
       - uses: actions/upload-artifact@v4
@@ -418,7 +425,7 @@ jobs:
       - name: The consumer (PATH /usr/bin:/bin)
         run: |
           env -i HOME="$HOME" PATH=/usr/bin:/bin LANG=C.UTF-8 \
-            bash pkg/kit/consumer.sh "$PWD/compiler/botlish" pkg/kit/rustlink-0.1.0.botpkg pkg/kit/consumer "$RUNNER_TEMP/consumer" 2>&1 | tee consumer-linux.log
+            bash pkg/kit/consumer.sh "$PWD/compiler/botlish" pkg/kit/packages pkg/kit/consumer "$RUNNER_TEMP/consumer" 2>&1 | tee consumer-linux.log
           grep -q '^CONSUMER OK$' consumer-linux.log
       - uses: actions/upload-artifact@v4
         if: always()
@@ -449,7 +456,7 @@ jobs:
       - name: The consumer (PATH /usr/bin:/bin:/usr/sbin:/sbin)
         run: |
           env -i HOME="$HOME" PATH=/usr/bin:/bin:/usr/sbin:/sbin \
-            bash pkg/kit/consumer.sh "$PWD/compiler/Botlish.app/Contents/MacOS/botlish" pkg/kit/rustlink-0.1.0.botpkg pkg/kit/consumer "$RUNNER_TEMP/consumer" 2>&1 | tee consumer-macos.log
+            bash pkg/kit/consumer.sh "$PWD/compiler/Botlish.app/Contents/MacOS/botlish" pkg/kit/packages pkg/kit/consumer "$RUNNER_TEMP/consumer" 2>&1 | tee consumer-macos.log
           grep -q '^CONSUMER OK$' consumer-macos.log
       - uses: actions/upload-artifact@v4
         if: always()

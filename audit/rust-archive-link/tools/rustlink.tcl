@@ -10,13 +10,18 @@
 #
 #   rustlink::target                    the host's target (linux-x86_64, ...)
 #   rustlink::format                    its object format (elf, macho)
-#   rustlink::unit ?-notify weakref|weakdef|FILE? ?-toolchain T? ?-dir D?
+#   rustlink::unit ?-notify weakdef|weakref|FILE? ?-toolchain T? ?-dir D?
 #                                       the raw static library cargo built
 #   rustlink::localized RAW ?-keep G? ?-require N? ?-out FILE?
 #                                       the localized archive (rust-unit.tcl)
 #   rustlink::exports                   the unit's C ABI (rl_*)
+#   rustlink::surface NOTIFY            what the localized unit defines
+#                                       globally: the C ABI, and with
+#                                       weakdef the weak fallback
 #   rustlink::provider ?-out FILE?      the provider's archive
-#   rustlink::app DIR UNIT ?PROVIDER?   an application of the package
+#   rustlink::app DIR UNIT ?PROVIDER?   an application of the packages
+#                                       rustlink and (unless PROVIDER is "")
+#                                       rustlink_provider
 #   rustlink::link APP PROGRAM ?-linker L?  {ok 1 exe PATH output TEXT} | {ok 0 error TEXT}
 #   rustlink::run EXE                   {status N value {STR...} raw TEXT}
 #   rustlink::copies EXE NAME           {global N local M}: definitions of NAME
@@ -70,6 +75,17 @@ proc rustlink::exports {} {
     return $exports
 }
 
+# The unit's global definitions once localized with NOTIFY's object:
+# weakdef's fallback definition of botlish_event_post2 stays global (the
+# final link must be able to override it); weakref's reference is no
+# definition.
+proc rustlink::surface {notify} {
+    if {$notify eq "weakdef"} {
+        return [lsort [list {*}[exports] botlish_event_post2]]
+    }
+    return [exports]
+}
+
 # Run SCRIPT in the caller's frame with the environment variables of VARS
 # set, then put back exactly those variables.
 proc rustlink::WithEnv {vars script} {
@@ -101,15 +117,17 @@ proc rustlink::Options {defaults argv} {
 
 # The raw static library of the fixture built by cargo --locked (TOOLCHAIN:
 # a rustup toolchain, "" for cargo's default) with the notification object
-# NOTIFY: weakref (packages/http/native/src/notify.c, the default), weakdef
-# (unit/notify-weakdef.c) or a file. DIR: the cargo target directory (each
+# NOTIFY: weakdef (unit/notify-weakdef.c: a weak definition, the default --
+# the mechanism that links with or without a provider on ELF and on Mach-O),
+# weakref (packages/http/native/src/notify.c, http's weak reference) or a
+# file. DIR: the cargo target directory (each
 # variant its own by default; a fresh one for a reproducibility build).
 # Paths are mapped out of the objects (the crate, the cargo home, the target
 # directory, the checkout), as tools/http-package.tcl does for botlish_http.
 proc rustlink::unit {args} {
     variable fixture
     variable root
-    set opts [Options [dict create -notify weakref -toolchain "" -dir ""] $args]
+    set opts [Options [dict create -notify weakdef -toolchain "" -dir ""] $args]
     set notify [dict get $opts -notify]
     switch -- $notify {
         weakref { set file [file join $root packages http native src notify.c] }
@@ -142,9 +160,11 @@ proc rustlink::unit {args} {
 }
 
 # RAW localized into OUT (default: beside RAW, librustlink.a); KEEP the
-# global definitions kept (rl_* by default), REQUIRE those that must be.
+# global definitions kept (the C ABI and, where the unit defines it, the
+# weak fallback botlish_event_post2, by default), REQUIRE those that must
+# be.
 proc rustlink::localized {raw args} {
-    set opts [Options [dict create -keep {rl_*} -require [exports] -out ""] $args]
+    set opts [Options [dict create -keep {rl_* botlish_event_post2} -require [exports] -out ""] $args]
     set out [dict get $opts -out]
     if {$out eq ""} {
         set out [file join [file dirname $raw] localized librustlink.a]
@@ -184,22 +204,26 @@ proc rustlink::provider {args} {
     return $out
 }
 
-# An application in DIR: the consumer programs at its root and the package
-# at .bot_modules/rustlink, its unit archive UNIT and, unless PROVIDER is
-# "", the provider's archive, at the paths the modules declare.
+# An application in DIR: the consumer programs at its root, the package
+# rustlink at .bot_modules/rustlink with its unit archive UNIT and, unless
+# PROVIDER is "", the package rustlink_provider with the provider's archive
+# PROVIDER, each archive at the path its module declares (as the package
+# manager's installation lays them out).
 proc rustlink::app {dir unit {provider ""}} {
     variable fixture
     file delete -force $dir
     set pkg [file join $dir .bot_modules rustlink]
-    file mkdir [file join $pkg native] [file join $pkg rustlink]
+    file mkdir [file join $pkg native]
     foreach f [glob -directory [file join $fixture consumer] *.bot] {
         file copy $f $dir
     }
     file copy [file join $fixture package rustlink.bot] $pkg
-    file copy [file join $fixture package rustlink provider.bot] [file join $pkg rustlink]
     file copy $unit [file join $pkg native librustlink.a]
     if {$provider ne ""} {
-        file copy $provider [file join $pkg native librustlink_provider.a]
+        set prov [file join $dir .bot_modules rustlink_provider]
+        file mkdir [file join $prov native]
+        file copy [file join $fixture provider package rustlink_provider.bot] $prov
+        file copy $provider [file join $prov native librustlink_provider.a]
     }
     return [file normalize $dir]
 }

@@ -3,17 +3,23 @@
 #
 # The fixture (audit/rust-archive-link/unit, crate botlish_rustlink) is a
 # Rust static library built as packages/http/native is: a C ABI, unwinding,
-# a counting global allocator, a panic hook, std threads, and the http
-# unit's own notification object (packages/http/native/src/notify.c, a weak
-# reference to botlish_event_post2). tools/rust-unit.tcl localizes it --
-# ELF: ld -r, objcopy --keep-global-symbols; Mach-O: ld -r with an
-# exported-symbols list -- into an archive whose only global definitions are
-# the rl_* C functions. Its package (audit/rust-archive-link/package) and
-# the consumer programs (audit/rust-archive-link/consumer) are linked with
-# both Botlish linkers and run; each program checks the unit's answers,
-# its failures (two panics caught inside the unit), callbacks, repeated
-# creation and destruction, the provider's presence or absence, and that
-# the Botlish runtime's allocations never reach the unit's allocator.
+# a counting global allocator, a panic hook, std threads, a block it lends
+# and takes back, and a notification object calling the event loop's
+# integration point botlish_event_post2 from a thread of the unit's -- by
+# default unit/notify-weakdef.c (a weak definition: a fallback the
+# provider's strong definition overrides), as the variant `weakref` the http
+# unit's own packages/http/native/src/notify.c (a weak reference).
+# tools/rust-unit.tcl localizes it -- ELF: ld -r, objcopy
+# --keep-global-symbols; Mach-O: ld -r with an exported-symbols list -- into
+# an archive whose only global definitions are the rl_* C functions (and the
+# weak fallback). Its package (audit/rust-archive-link/package), the
+# provider's package (audit/rust-archive-link/provider/package) and the
+# consumer programs (audit/rust-archive-link/consumer) are linked with both
+# Botlish linkers and run; each program checks the unit's answers, its
+# failures (two panics caught inside the unit), callbacks, repeated creation
+# and destruction, the provider's presence or absence, the lent block's
+# return, and that the Botlish runtime's allocations never reach the unit's
+# allocator.
 #
 # What must hold on every host (Linux x86-64 and AArch64, macOS AArch64):
 #
@@ -24,9 +30,10 @@
 #   * the raw (unlocalized) archive never passes: its link fails (duplicate
 #     definitions) or a check fails (the linker bound the runtime's
 #     allocator shim to the unit's allocator) -- never a silent success;
-#   * a weak definition of botlish_event_post2 (unit/notify-weakdef.c) works
-#     with and without the provider when it stays global, and, localized
-#     away, makes a program with the provider call the fallback.
+#   * the weak fallback, localized away, makes a program with the provider
+#     call the fallback;
+#   * http's weak reference links with the provider everywhere, and without
+#     it as the host's linker decides (`ralWeakReferenceAlone`).
 #
 # The builds go to Botlish's cache (rust-archive-link/); the applications
 # to the tcltest temporary directory.
@@ -94,29 +101,31 @@ proc ralVerdict {c} {
     return "[dict get $c verdict] [dict get $c status]"
 }
 
-test ral-localized-surface {the localized archive's global definitions are exactly the unit's C ABI} -constraints rustlinkHost -body {
-    rustunit::check [ralLocalized weakref] [rustlink::exports] -format [rustlink::format]
-} -result {rl_close rl_digest rl_each rl_fail rl_notify rl_open rl_put rl_stats rl_text_free rl_text_new rl_toolchain rl_version}
+test ral-localized-surface {the localized archive's global definitions are exactly the unit's C ABI and its weak fallback} -constraints rustlinkHost -body {
+    rustunit::check [ralLocalized weakdef] [rustlink::surface weakdef] -format [rustlink::format]
+} -result {botlish_event_post2 rl_close rl_digest rl_each rl_fail rl_notify rl_open rl_put rl_stats rl_text_free rl_text_new rl_toolchain rl_version}
 
-test ral-localized-weak-reference {localization leaves the weak reference to botlish_event_post2 undefined for the final link} -constraints rustlinkHost -body {
-    expr {"botlish_event_post2" in [rustunit::undefined [ralLocalized weakref] -format [rustlink::format]]}
-} -result 1
+test ral-weakref-surface {http's notify.c: the localized archive defines the C ABI only, and its weak reference to botlish_event_post2 stays undefined for the final link} -constraints rustlinkHost -body {
+    set archive [ralLocalized weakref]
+    list [rustunit::check $archive [rustlink::surface weakref] -format [rustlink::format]] \
+        [expr {"botlish_event_post2" in [rustunit::undefined $archive -format [rustlink::format]]}]
+} -result {{rl_close rl_digest rl_each rl_fail rl_notify rl_open rl_put rl_stats rl_text_free rl_text_new rl_toolchain rl_version} 1}
 
 test ral-raw-surface {the raw archive defines Rust's personality routine and allocator shim globally: what meets the runtime's} -constraints rustlinkHost -body {
-    set g [rustunit::globals [ralUnit weakref] -format [rustlink::format]]
+    set g [rustunit::globals [ralUnit weakdef] -format [rustlink::format]]
     list [expr {"rust_eh_personality" in $g}] [expr {[llength [lsearch -all -glob $g *___rust_alloc]] > 0}] [expr {[llength $g] > 1000}]
 } -result {1 1 1}
 
 test ral-check-refuses-raw {the surface check refuses the raw archive: thousands of global definitions besides the unit's C ABI} -constraints rustlinkHost -body {
-    rustunit::check [ralUnit weakref] [rustlink::exports] -format [rustlink::format]
+    rustunit::check [ralUnit weakdef] [rustlink::surface weakdef] -format [rustlink::format]
 } -returnCodes error -match glob -result {*global definitions differ from the unit's exports: * more (*), 0 missing ()}
 
 test ral-require-missing-export {an export the unit was meant to have and does not is the localizer's error} -constraints rustlinkHost -body {
-    rustlink::localized [ralUnit weakref] -require [list {*}[rustlink::exports] rl_absent] -out [file join [ralDir missing] librustlink.a]
+    rustlink::localized [ralUnit weakdef] -require [list {*}[rustlink::exports] rl_absent] -out [file join [ralDir missing] librustlink.a]
 } -returnCodes error -match glob -result {*does not define rl_absent (required exports*}
 
 test ral-kept-glob-misses {a keep list that misses an export leaves it local: a consumer cannot link it} -constraints {rustlinkHost rustcLinkerBuilt} -body {
-    set archive [ralLocalized weakref -keep {rl_[a-s]*} -require {}]
+    set archive [ralLocalized weakdef -keep {rl_[a-s]* botlish_event_post2} -require {}]
     set c [ralCase $archive without_provider.bot rustc]
     list [expr {"rl_toolchain" in [rustunit::globals $archive -format [rustlink::format]]}] [ralVerdict $c] \
         [regexp {rl_toolchain} [dict get $c error]]
@@ -126,7 +135,7 @@ test ral-localized-comdat {ELF: the localized unit's COMDAT group of Rust's pers
     if {[rustlink::format] ne "elf"} {
         return {botlish_rustlink.DW.ref.rust_eh_personality}
     }
-    set groups [regexp -all -inline {COMDAT group section \[[^\]]*\] `[^']*' \[([^\]]+)\]} [exec readelf -g [ralLocalized weakref]]]
+    set groups [regexp -all -inline {COMDAT group section \[[^\]]*\] `[^']*' \[([^\]]+)\]} [exec readelf -g [ralLocalized weakdef]]]
     lsort -unique [lmap {- sig} $groups {set sig}]
 } -result {botlish_rustlink.DW.ref.rust_eh_personality}
 
@@ -152,21 +161,53 @@ proc ralNativeAdd {archive target args} {
 }
 
 test ral-native-add-symbols {native add verifies every C function the package declares against the localized archive's index, and refuses a misspelled one} -constraints rustlinkHost -body {
-    set archive [ralLocalized weakref]
+    set archive [ralLocalized weakdef]
     set target [core::cabi::hostTarget]
     set all {}
     foreach s [rustlink::exports] { lappend all -symbol $s }
     lassign [ralNativeAdd $archive $target {*}$all] failed out
     lassign [ralNativeAdd $archive $target -symbol rl_open -symbol rl_opne] failed2 out2
-    list $failed [regexp {12 exported symbols; required by the package: rl_close, .*rl_version \(present\)} $out] \
+    list $failed [regexp {13 exported symbols; required by the package: rl_close, .*rl_version \(present\)} $out] \
         $failed2 [regexp {does not define the declared symbol rl_opne} $out2]
 } -result {0 1 1 1}
 
 test ral-native-add-wrong-target {native add refuses the host's localized archive declared for the other operating system's target, naming the members' format} -constraints rustlinkHost -body {
     set other [expr {[rustlink::format] eq "macho" ? "linux-x86_64" : "macos-aarch64"}]
-    lassign [ralNativeAdd [ralLocalized weakref] $other -symbol rl_open] failed out
+    lassign [ralNativeAdd [ralLocalized weakdef] $other -symbol rl_open] failed out
     list $failed [regexp "holds members that are not $other objects" $out]
 } -result {1 1}
+
+test ral-pack-weak-beside-strong {one package bundling the unit's weak fallback beside a strong definition of the same symbol packs: the audit counts no weak definition as a duplicate (pm/binary.tcl's `weak` fact; before this milestone it refused it, though the link takes the strong one: ral-localized-with_provider-*)} -constraints rustlinkHost -body {
+    set dir [ralDir weakstrong]
+    file mkdir $dir
+    set f [open [file join $dir botlish.json] w]
+    puts $f "{\n  \"schema\": 1,\n  \"name\": \"rustlink\",\n  \"version\": \"0.1.0\"\n}"
+    close $f
+    file copy [file join $::projectRoot audit rust-archive-link package rustlink.bot] $dir
+    set here [pwd]
+    cd $dir
+    try {
+        set main [list [info nameofexecutable] [file join $::projectRoot main.tcl]]
+        exec {*}$main native add [ralLocalized weakdef] -target [core::cabi::hostTarget] -name rustlink -symbol rl_open -license MIT 2>@1
+        exec {*}$main native add [ralProvider] -target [core::cabi::hostTarget] -name rustlink_provider -symbol rlp_posts -license MIT 2>@1
+        set failed [catch {exec {*}$main native audit . 2>@1} out]
+    } finally {
+        cd $here
+    }
+    list $failed [regexp {both define botlish_event_post2} $out] [regexp {no problem that blocks packing} $out]
+} -result {0 0 1}
+
+# What a program linked with http's weak reference and no provider does: on
+# ELF the reference resolves to null and the notification object answers
+# -38; on Mach-O Apple's ld reports the undefined weak reference and links
+# nothing (an undefined weak import must be found at link time).
+proc ralWeakReferenceAlone {c} {
+    if {[rustlink::format] eq "elf"} {
+        return [ralVerdict $c]
+    }
+    list [ralVerdict $c] [regexp {botlish_event_post2} [dict get $c error]]
+}
+set ::ralWeakReferenceAloneExpected [expr {$::ralMacho ? {{link failed} 1} : {pass 0}}]
 
 foreach linker {rustc system} {
     set constraints [list rustlinkHost [expr {$linker eq "rustc" ? "rustcLinkerBuilt" : "systemLinkerBuilt"}]]
@@ -174,24 +215,27 @@ foreach linker {rustc system} {
         set tag [file rootname $program]
         test ral-localized-$tag-$linker "the localized unit, $tag, the $linker linker: every check passes; one global personality routine, the unit's local" \
                 -constraints $constraints -body [string map [list PROGRAM $program LINKER $linker] {
-            set c [ralCase [ralLocalized weakref] PROGRAM LINKER]
+            set c [ralCase [ralLocalized weakdef] PROGRAM LINKER]
             set p [rustlink::copies [dict get $c exe] rust_eh_personality]
             list [ralVerdict $c] [dict get $p global] [expr {[dict get $p local] >= 1}]
         }] -result {{pass 0} 1 1}
 
         test ral-raw-$tag-$linker "the raw unit, $tag, the $linker linker: never a silent success" \
                 -constraints $constraints -body [string map [list PROGRAM $program LINKER $linker] {
-            set c [ralCase [ralUnit weakref] PROGRAM LINKER]
+            set c [ralCase [ralUnit weakdef] PROGRAM LINKER]
             expr {[dict get $c verdict] eq "pass" ? "passed silently: [dict get $c value]" : "detected"}
         }] -result detected
-
-        test ral-weakdef-$tag-$linker "a weak definition of botlish_event_post2 kept global, $tag, the $linker linker" \
-                -constraints $constraints -body [string map [list PROGRAM $program LINKER $linker] {
-            set archive [ralLocalized weakdef -keep {rl_* botlish_event_post2}]
-            list [expr {"botlish_event_post2" in [rustunit::globals $archive -format [rustlink::format]]}] \
-                [ralVerdict [ralCase $archive PROGRAM LINKER]]
-        }] -result {1 {pass 0}}
     }
+
+    test ral-weakref-with_provider-$linker "http's weak reference, the provider linked, the $linker linker: the post reaches the provider" \
+            -constraints $constraints -body [string map [list LINKER $linker] {
+        ralVerdict [ralCase [ralLocalized weakref] with_provider.bot LINKER]
+    }] -result {pass 0}
+
+    test ral-weakref-without_provider-$linker "http's weak reference, no provider, the $linker linker: ELF resolves it to null (-38); Apple's ld refuses the undefined weak import" \
+            -constraints $constraints -body [string map [list LINKER $linker] {
+        ralWeakReferenceAlone [ralCase [ralLocalized weakref] without_provider.bot LINKER]
+    }] -result $::ralWeakReferenceAloneExpected
 
     test ral-weakdef-localized-away-$linker "a weak fallback localized away: a program with the provider calls the fallback ($linker linker)" \
             -constraints $constraints -body [string map [list LINKER $linker] {

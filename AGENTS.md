@@ -6855,6 +6855,56 @@ installs or links (`audit/http-client/cleanroom/cleanroom.sh image`, then
 after `single/build.sh`: the report's "Clean room").
 `audit/http-client/tools/measure.tcl` regenerates the measurements.
 
+## Rust native units (tools/rust-unit.tcl)
+
+A package's native unit written in Rust (`packages/http/native`,
+`audit/rust-archive-link/unit`) is linked into executables that also hold
+the Botlish runtime, which is Rust too
+(HTTP-MACOS-RUST-ARCHIVE-LINK-FEASIBILITY-MILESTONE-1.md).
+`tools/rust-unit.tcl` localizes the archive cargo made into one object
+whose only global definitions are the unit's C ABI: on ELF GNU `ld -r`,
+`objcopy --keep-global-symbols` and Rust's COMDAT group renamed (B3), on
+Mach-O Apple's `ld -r -S -force_load` with an exported-symbols list and
+`libtool -static -D`. Keep it so:
+
+* Never ship or link a raw cargo static library beside the runtime: it
+  fails to link (duplicate allocator shim, or `rust_eh_personality` when
+  the toolchains differ) or, with the system linker, links and silently
+  binds the runtime's own allocations to the unit's allocator (the
+  report's section 3; `ral-raw-*`). A new Rust unit goes through
+  `rustunit::localize`, never a recipe of its own.
+* Visibility is the platform linker's decision, read back with nm
+  (`rustunit::check`): never compute a binding, a visibility or a symbol
+  list in Tcl beyond the keep globs, and never weaken the check to make an
+  archive pass.
+* A weak *definition* the final link must be able to override (a fallback
+  of an optional integration point) is kept global (`-keep`): localized,
+  every program calls the fallback, provider or not
+  (`ral-weakdef-localized-away-*`).
+* tools/http-package.tcl's ELF unit is this procedure's output, byte for
+  byte what its own sequence made before: a change to the ELF steps is a
+  change to http's released bytes (a new http version).
+* The package manager reads an archive's symbol index from its bytes --
+  GNU's and Apple's BSD forms (`__.SYMDEF`, `__.SYMDEF SORTED`,
+  `__.SYMDEF_64`), every entry checked against the archive, a Mach-O
+  member's names without their leading underscore (pm/binary.tcl): never
+  trust a declared symbol because of its target, and never read a
+  malformed index as fewer names.
+
+If you change `tools/rust-unit.tcl`, `pm/binary.tcl`'s archive index or
+`audit/rust-archive-link/`, run `tests/rust-archive-link.test`,
+`tests/package-native.test` (its `pn-index-*`),
+`audit/rust-archive-link/tools/experiments.tcl OUT` (the matrix; read it)
+and `audit/rust-archive-link/tools/mutate.tcl` (every mutant in its
+`mutants.txt` for the host must still apply and be killed by a test its
+`!!` line names: update a mutant's text when you change the code it
+mutates, keeping it a mutant of the same rule), and push to read
+`.github/workflows/rust-archive-link.yml` (the Mach-O half, the real http
+unit on macOS, the reproducibility comparison and the toolchain-free
+consumers run only there). A change to `tools/http-package.tcl`'s Unit
+also rebuilds the unit before and after (`tclsh9.0 tools/http-package.tcl
+unit`) and compares the archives' SHA-256.
+
 ## The process_linux package (supervised child processes)
 
 `packages/process_linux` is the official package for launching,

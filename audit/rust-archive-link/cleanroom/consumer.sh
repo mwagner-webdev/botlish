@@ -1,10 +1,11 @@
 #!/bin/bash
 # consumer.sh -- the independent consumer of HTTP-MACOS-RUST-ARCHIVE-LINK-
 # FEASIBILITY-MILESTONE-1.md, section 6, on a machine that has the packaged
-# compiler, the package artifact and the consumer's sources, and nothing of
+# compiler, the package artifacts and the consumer's sources, and nothing of
 # the fixture's: no checkout, no Rust toolchain, no cargo, no fixture source
-# or build directory. A fresh project installs the artifact through the
-# package manager (add, verify, native plan), compiles both consumer programs
+# or build directory. A fresh project installs the artifacts (rustlink, the
+# Rust unit's package, and rustlink_provider) through the package manager
+# (add, verify, native plan), compiles both consumer programs
 # to native executables (AOT, -warnings error, no -L, the compiler's own
 # linker choice) and runs them; each program's value must be its expected
 # value (audit/rust-archive-link/consumer/*.expected; the unit's rustc
@@ -15,14 +16,16 @@
 # own local, and no global symbol carrying the unit's standard library's
 # crate hash.
 #
-#   consumer.sh BOTLISH PACKAGE.botpkg SOURCES OUTDIR
+#   consumer.sh BOTLISH PACKAGES SOURCES OUTDIR
 #
 # BOTLISH: the single-file compiler (Linux) or Botlish.app's
-# Contents/MacOS/botlish (macOS). SOURCES: the consumer's .bot files and
+# Contents/MacOS/botlish (macOS). PACKAGES: the directory of
+# rustlink-0.1.0.botpkg and rustlink_provider-0.1.0.botpkg. SOURCES: the
+# consumer's .bot files and
 # their .expected values. OUTDIR: the project, its logs, its executables.
 # Exit status 0 only when every step held; every failure is printed.
 set -u
-BOT=${1:?usage: consumer.sh BOTLISH PACKAGE.botpkg SOURCES OUTDIR}
+BOT=${1:?usage: consumer.sh BOTLISH PACKAGES SOURCES OUTDIR}
 PKG=${2:?}
 SRC=${3:?}
 OUT=${4:?}
@@ -53,7 +56,8 @@ done
 
 cp "$SRC"/*.bot . || exit 1
 printf '{\n  "schema": 1,\n  "name": "rustlink_consumer",\n  "version": "0.1.0"\n}\n' > botlish.json
-"$BOT" add "$PKG" > add.log 2>&1 || { cat add.log; bad "add"; exit 1; }
+"$BOT" add "$PKG/rustlink-0.1.0.botpkg" > add.log 2>&1 || { cat add.log; bad "add rustlink"; exit 1; }
+"$BOT" add "$PKG/rustlink_provider-0.1.0.botpkg" >> add.log 2>&1 || { cat add.log; bad "add rustlink_provider"; exit 1; }
 sed 's/^/== add: /' add.log
 "$BOT" verify > verify.log 2>&1 || { cat verify.log; bad "verify"; }
 sed 's/^/== verify: /' verify.log | head -3

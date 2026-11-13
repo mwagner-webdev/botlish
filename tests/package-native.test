@@ -681,6 +681,36 @@ test pn-index-llvm-darwin {an archive written by llvm-ar --format=darwin (an ind
     list [lmap m [dict get $facts members] {dict get $m kind}] [dict get $facts index]
 } -cleanup cleanup -result {{symbols macho macho} {mac_hidden mac_value second_fn}}
 
+test pn-index-weak-definitions {an archive's weak definitions are its `weak` fact, from each member's own symbol table (ELF: .symtab's STB_WEAK; Mach-O: N_WEAK_DEF), and are no duplicates: a static archive's weak definition beside another's strong one installs (the link takes the strong one), two strong ones stay refused} -constraints {linuxCc llvmDarwinAr} -body {
+    set dir [fresh bin]
+    writeText [file join $dir weak.c] "__attribute__((weak)) int shared_hook(void) { return -1; }\nint weak_user(void) { return shared_hook(); }\n"
+    writeText [file join $dir strong.c] "int shared_hook(void) { return 7; }\nint strong_user(void) { return 1; }\n"
+    foreach f {weak strong} {
+        exec cc -c -fPIC [file join $dir $f.c] -o [file join $dir $f.o]
+        exec ar rcs [file join $dir lib$f.a] [file join $dir $f.o]
+        exec clang --target=arm64-apple-macos11 -c [file join $dir $f.c] -o [file join $dir $f-mac.o]
+        exec llvm-ar --format=darwin rcs [file join $dir lib$f-mac.a] [file join $dir $f-mac.o]
+    }
+    set facts {}
+    foreach lib {libweak.a libstrong.a libweak-mac.a libstrong-mac.a} {
+        set x [pm::binary::inspect [readBytes [file join $dir $lib]] $lib]
+        lappend facts $lib [dict get $x index] [dict get $x weak]
+    }
+    set src [fresh src]
+    set repo [fresh repo]
+    pack [nativePackage $src fweak 1.0.0 [list {{"name": "weakhook", "origin": "bundled", "linkage": "static", "file": "native/libweakhook.a"}}] [list native/libweakhook.a [file join $dir libweak.a]] "fn n() -> int:\n    1\n"] $repo
+    pack [nativePackage $src fstrong 1.0.0 [list {{"name": "stronghook", "origin": "bundled", "linkage": "static", "file": "native/libstronghook.a"}}] [list native/libstronghook.a [file join $dir libstrong.a]] "fn n() -> int:\n    1\n"] $repo
+    pack [nativePackage $src fstrong2 1.0.0 [list {{"name": "stronghook2", "origin": "bundled", "linkage": "static", "file": "native/libstronghook2.a"}}] [list native/libstronghook2.a [file join $dir libstrong.a]] "fn n() -> int:\n    1\n"] $repo
+    set out {}
+    foreach {tag first second} {weak-strong fweak fstrong strong-strong fstrong fstrong2} {
+        set app [application "1\n"]
+        pm add $first -project $app -repository $repo
+        set r [pm add $second -project $app -repository $repo]
+        lappend out [list $tag [dict get $r status] [lindex [split [dict get $r err] \n] 1]]
+    }
+    list $facts $out
+} -cleanup cleanup -result {{libweak.a {shared_hook weak_user} shared_hook libstrong.a {shared_hook strong_user} {} libweak-mac.a {shared_hook weak_user} shared_hook libstrong-mac.a {shared_hook strong_user} {}} {{weak-strong 0 {}} {strong-strong 1 {  the static libraries stronghook and stronghook2 both define shared_hook: linking both into one executable is a duplicate definition}}}}
+
 testConstraint appleAr [expr {[string match macos-* [core::cabi::hostTarget]] && [auto_execok cc] ne ""
     && [auto_execok ar] ne "" && [auto_execok libtool] ne "" && [auto_execok nm] ne ""}]
 

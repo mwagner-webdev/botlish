@@ -1,6 +1,7 @@
 # release-unit.tcl -- the fixture's native files as a release recipe builds
 # them (HTTP-MACOS-RUST-ARCHIVE-LINK-FEASIBILITY-MILESTONE-1.md, section
-# 7): the unit by cargo --locked with a pinned rustc in a fresh target
+# 7): the unit (its notification object the weak fallback, unit/notify-
+# weakdef.c) by cargo --locked with a pinned rustc in a fresh target
 # directory, localized (tools/rust-unit.tcl), and the provider's archive,
 # into OUTDIR with a record of the toolchain and every file's SHA-256.
 # Two runs on two machines with the same pin must write the same archives:
@@ -46,9 +47,9 @@ proc firstLine {args} {
 # incremental, nothing reused.
 set dir [file join [rustlink::CacheDir] release-target]
 file delete -force $dir
-set raw [rustlink::unit -notify weakref -toolchain $toolchain -dir $dir]
+set raw [rustlink::unit -notify weakdef -toolchain $toolchain -dir $dir]
 set kept [rustlink::localized $raw -out [file join $out librustlink.a]]
-rustunit::check [file join $out librustlink.a] [rustlink::exports] -format [rustlink::format]
+rustunit::check [file join $out librustlink.a] [rustlink::surface weakdef] -format [rustlink::format]
 rustlink::provider -out [file join $out librustlink_provider.a]
 set record [list \
     target [rustlink::target] \

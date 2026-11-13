@@ -121,7 +121,8 @@ proc pm::native::ArchiveFacts {target archive label} {
         if {[llength $foreign] > 5} { lappend shown "... ([llength $foreign] members)" }
         Fail "$label holds members that are not $target objects: [join $shown {; }]"
     }
-    return [dict create objects $objects imports [lsort -unique -nocase $imports] index [dict get $archive index]]
+    return [dict create objects $objects imports [lsort -unique -nocase $imports] index [dict get $archive index] \
+        weak [dict getdef $archive weak {}]]
 }
 
 # The highest version of PREFIX (GLIBC_) in VERSIONS, as a list of numbers,
@@ -177,6 +178,7 @@ proc pm::native::CheckBundled {target library bytes label {importBytes ""}} {
             }
         }
         dict set result symbols [dict get $archive index]
+        dict set result weak [dict get $archive weak]
         dict set result description "$what"
         return $result
     }
@@ -685,6 +687,7 @@ proc pm::native::Plan {target instances origins} {
             dict set entry glibc [dict get $facts glibc]
             dict set entry signed [dict get $facts signed]
             dict set entry symbols [dict get $facts symbols]
+            dict set entry weak [dict getdef $facts weak {}]
             dict set entry rpath [dict get $facts rpath]
             dict set entry verified 1
             dict set entry evidence "bundled file, sha256 [pm::Short [dict get $entry sha256]]"
@@ -773,11 +776,13 @@ proc pm::native::Plan {target instances origins} {
             }
         }
     }
-    # Symbols two different static archives both define.
+    # Symbols two different static archives both define (a weak definition
+    # is no duplicate: the link takes the other definition first).
     set definers [dict create]
     foreach entry $libraries {
         if {[dict get $entry origin] ne "bundled" || [dict get $entry linkage] ne "static"} continue
         foreach symbol [dict get $entry symbols] {
+            if {$symbol in [dict getdef $entry weak {}]} continue
             if {[dict exists $definers $symbol] && [dict get $definers $symbol] ne [dict get $entry name]} {
                 lappend problems "the static libraries [dict get $definers $symbol] and [dict get $entry name] both define $symbol: linking both into one executable is a duplicate definition"
             }

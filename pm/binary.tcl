@@ -9,11 +9,15 @@
 #   elf       class 32|64, endian le|be, type rel|program|dyn|other, machine N,
 #             osabi N, interpreter PATH, soname S, needed {S...},
 #             runpath {P...}, rpath {P...}, verneed {LIBRARY {VERSION...}},
-#             verdef {VERSION...}, symbols {NAME...} (defined dynamic ones)
+#             verdef {VERSION...}, symbols {NAME...} (defined dynamic ones),
+#             weak {NAME...} (a relocatable object's defined weak symbols,
+#             from its .symtab: STB_WEAK)
 #   macho     cputype N, filetype object|execute|dylib|bundle|other,
 #             id NAME (LC_ID_DYLIB), needed {NAME...} (every LC_*_DYLIB),
 #             rpath {P...}, signed 0|1 (LC_CODE_SIGNATURE), platform N,
-#             minos X.Y.Z, symbols {NAME...} (defined external)
+#             minos X.Y.Z, symbols {NAME...} (defined external), weak
+#             {NAME...} (those of them that are weak definitions,
+#             N_WEAK_DEF)
 #   fat       slices {{cputype N macho FACTS} ...}
 #   pe        machine N, dll 0|1, executable 0|1, needed {DLL...} (imports
 #             and delay-load imports), name DLL (its export directory's),
@@ -23,7 +27,9 @@
 #             each member's kind is elf, macho, coff, import (a short import
 #             object: machine N, dll DLL, symbol S), bitcode, symbols (the
 #             archive's index), names (GNU's long-name table) or unknown;
-#             `index` {SYMBOL...} from a GNU or BSD symbol index
+#             `index` {SYMBOL...} from a GNU or BSD symbol index, `weak`
+#             {SYMBOL...} those of them every member defining them
+#             defines weakly (a linker takes any other definition first)
 #   thin      a thin archive (it holds no members, only paths)
 #   script    a GNU linker script
 #   tbd       an Apple text-based stub (.tbd)
@@ -137,7 +143,7 @@ proc pm::binary::Elf {data label} {
     set typeName [dict getdef {1 rel 2 program 3 dyn} $type other]
     set facts [dict create kind elf class [expr {$class == 2 ? 64 : 32}] endian $endian type $typeName \
         machine $machine osabi $osabi interpreter "" soname "" needed {} runpath {} rpath {} \
-        verneed {} verdef {} symbols {}]
+        verneed {} verdef {} symbols {} weak {}]
     if {$class != 2 || $endian ne "le"} {
         # No target of the compiler's is 32-bit or big-endian: the identity
         # facts suffice to refuse it.
@@ -249,6 +255,32 @@ proc pm::binary::Elf {data label} {
             }
             dict set facts symbols [lsort -unique $symbols]
         }
+        # A relocatable object's weak definitions, from its SHT_SYMTAB: what
+        # a static link may replace with another definition (a duplicate
+        # check must not count them).
+        if {$typeName eq "rel"} {
+            set weak {}
+            for {set i 0} {$i < $shnum} {incr i} {
+                set at [expr {$shoff + $i * 64}]
+                if {[U $data [expr {$at + 4}] 4 $label] != 2} continue
+                set offset [U $data [expr {$at + 24}] 8 $label]
+                set size [U $data [expr {$at + 32}] 8 $label]
+                set link [U $data [expr {$at + 40}] 4 $label]
+                set strOffset [U $data [expr {$shoff + $link * 64 + 24}] 8 $label]
+                set n [expr {$size / 24}]
+                if {$n > $maxSymbols} {
+                    Fail $label "more than $maxSymbols symbols"
+                }
+                for {set k 1} {$k < $n} {incr k} {
+                    set sym [expr {$offset + $k * 24}]
+                    set info [U $data [expr {$sym + 4}] 1 $label]
+                    if {($info >> 4) != 2} continue
+                    if {[U $data [expr {$sym + 6}] 2 $label] == 0} continue
+                    lappend weak [CString $data [expr {$strOffset + [U $data $sym 4 $label]}] $label]
+                }
+            }
+            dict set facts weak [lsort -unique $weak]
+        }
     }
     return $facts
 }
@@ -276,7 +308,7 @@ proc pm::binary::MachO {data label} {
     set ncmds [U $data 16 4 $label]
     set facts [dict create kind macho bits [expr {$magic == 0xfeedfacf ? 64 : 32}] cputype $cputype \
         filetype [dict getdef {1 object 2 execute 6 dylib 8 bundle} $filetype other] \
-        id "" needed {} rpath {} signed 0 platform 0 minos "" symbols {}]
+        id "" needed {} rpath {} signed 0 platform 0 minos "" symbols {} weak {}]
     if {$magic != 0xfeedfacf} {
         return $facts
     }
@@ -307,6 +339,7 @@ proc pm::binary::MachO {data label} {
                 set nsyms [U $data [expr {$at + 12}] 4 $label]
                 set stroff [U $data [expr {$at + 16}] 4 $label]
                 set symbols {}
+                set weak {}
                 for {set k 0} {$k < $nsyms && $k < 2000000} {incr k} {
                     set sym [expr {$symoff + $k * 16}]
                     set type [U $data [expr {$sym + 4}] 1 $label]
@@ -317,8 +350,13 @@ proc pm::binary::MachO {data label} {
                         set name [string range $name 1 end]
                     }
                     lappend symbols $name
+                    # N_WEAK_DEF: a weak definition.
+                    if {[U $data [expr {$sym + 6}] 2 $label] & 0x0080} {
+                        lappend weak $name
+                    }
                 }
                 dict set facts symbols [lsort -unique $symbols]
+                dict set facts weak [lsort -unique $weak]
             }
         }
         incr at $size
@@ -506,6 +544,7 @@ proc pm::binary::Archive {data label} {
     set index {}
     set entries {}
     set objects [dict create]
+    set weakOf [dict create]
     set names ""
     set at 8
     set length [string length $data]
@@ -565,6 +604,7 @@ proc pm::binary::Archive {data label} {
                 set facts [inspect $body "${label}($name)"]
                 lappend members [dict merge $facts [dict create name $name]]
                 dict set objects $at [dict get $facts kind]
+                dict set weakOf $at [dict getdef $facts weak {}]
             }
         }
         if {[llength $members] > $maxMembers} {
@@ -572,6 +612,7 @@ proc pm::binary::Archive {data label} {
         }
         set at [expr {$start + $size + ($size % 2)}]
     }
+    set weakEntry [dict create]
     foreach {symbol offset} $entries {
         if {![dict exists $objects $offset]} {
             Fail $label "its symbol index names $symbol at offset $offset, where no member of it begins"
@@ -580,8 +621,14 @@ proc pm::binary::Archive {data label} {
             set symbol [string range $symbol 1 end]
         }
         lappend index $symbol
+        if {$symbol in [dict get $weakOf $offset]} {
+            dict set weakEntry $symbol [dict getdef $weakEntry $symbol 1]
+        } else {
+            dict set weakEntry $symbol 0
+        }
     }
-    return [dict create kind archive members $members index [lsort -unique $index]]
+    set weak [lsort [lmap {symbol w} $weakEntry {expr {$w ? $symbol : [continue]}}]]
+    return [dict create kind archive members $members index [lsort -unique $index] weak $weak]
 }
 
 # The entries of a BSD symbol index BODY (WIDE: 64-bit fields), a flat list
