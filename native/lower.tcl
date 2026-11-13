@@ -6177,7 +6177,6 @@ proc native::lower::BorrowCall {fnVar e node {wantVirtual ""} {wantCut ""} {want
         if {[llength $writable]} {
             append text " mutable=[join [lsort -integer $writable] ,]"
         }
-
         if {[dict exists $node cvarargs] && [dict get $node cvarargs] ne {}} {
             # A variadic C call (VARIADICS-VERTICAL-SLICE-1.md): each
             # trailing operand's own C ABI class and the class C's default

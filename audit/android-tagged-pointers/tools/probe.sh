@@ -28,6 +28,14 @@
 # can load (libSDL3 needs libandroid, which on Android 10 and later needs
 # the i18n APEX's ICU: apex.sh); one whose libraries cannot load is
 # reported as not run, with the library the linker did not find.
+#
+# Outside a checkout (the clean room: cleanroom/cleanroom.sh) PROBE_SOURCES
+# names a directory holding the probe's sources (this experiment's android/
+# and the earlier milestone's android_log.bot, hello.bot and host_main.c),
+# PROBE_RUN the userspace runner (audit/android-aarch64-target/tools/
+# android-run.sh) and SDL3_BINDING a directory staged from the committed
+# binding (`tools/c-bindgen.tcl stage sdl3 -target android-aarch64`'s sdl3/),
+# copied into the application in place of staging it.
 set -euo pipefail
 out=$(realpath -m "${1:?usage: probe.sh OUT REPO ROOTS BOTLISH...}")
 repo=$(realpath "${2:?usage: probe.sh OUT REPO ROOTS BOTLISH...}")
@@ -40,16 +48,20 @@ experiment=$(dirname "$here")
 root=$(cd "$experiment/../.." && pwd)
 ndk=${ANDROID_NDK_ROOT:?probe.sh: set ANDROID_NDK_ROOT to the Android NDK}
 bin="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin"
-run="$root/audit/android-aarch64-target/tools/android-run.sh"
+run=${PROBE_RUN:-$root/audit/android-aarch64-target/tools/android-run.sh}
+sources=${PROBE_SOURCES:-}
 
 app="$out/app"
 rm -rf "$out"
 mkdir -p "$app" "$out/runs"
 printf '{"schema": 1, "dependencies": {}}\n' >"$app/botlish.json"
 (cd "$app" && "${botlish[@]}" add botlish_target_android_aarch64 -repository "$repo" -target android-aarch64 >/dev/null)
-cp "$root/audit/host-startable-library/android/android_log.bot" "$root/audit/host-startable-library/android/hello.bot" \
-    "$root/audit/host-startable-library/android/host_main.c" "$experiment/android/tp.c" "$experiment/android/tp.bot" \
-    "$experiment/android/tagged.bot" "$experiment/android/heap.bot" "$app/"
+if [[ -n $sources ]]; then
+    cp "$sources"/{android_log.bot,hello.bot,host_main.c,tp.c,tp.bot,tagged.bot,heap.bot,sdl_surface.bot,stdio_io.bot} "$app/"
+else
+    cp "$root/audit/host-startable-library/android/android_log.bot" "$root/audit/host-startable-library/android/hello.bot" \
+        "$root/audit/host-startable-library/android/host_main.c" "$experiment/android/"{tp.c,tp.bot,tagged.bot,heap.bot,sdl_surface.bot,stdio_io.bot} "$app/"
+fi
 "$bin/clang" --target=aarch64-linux-android21 -std=c11 -O2 -Wall -Wextra -Werror -fPIC -fvisibility=hidden -c -o "$app/tp.o" "$app/tp.c"
 "$bin/llvm-ar" rcs "$app/libtp.a" "$app/tp.o"
 for name in hello heap tagged; do
@@ -63,11 +75,14 @@ for name in hello heap tagged; do
 done
 sdl=${SDL3_ANDROID:-}
 if [[ -n $sdl ]]; then
-    cp "$experiment/android/sdl_surface.bot" "$experiment/android/stdio_io.bot" "$app/"
-    src=$(mktemp -d)
-    cp "$app/sdl_surface.bot" "$src/"
-    tclsh9.0 "$root/tools/c-bindgen.tcl" stage sdl3 -target android-aarch64 -app "$src" -into "$app" >/dev/null
-    rm -rf "$src"
+    if [[ -n ${SDL3_BINDING:-} ]]; then
+        cp -r "$SDL3_BINDING" "$app/sdl3"
+    else
+        src=$(mktemp -d)
+        cp "$app/sdl_surface.bot" "$src/"
+        tclsh9.0 "$root/tools/c-bindgen.tcl" stage sdl3 -target android-aarch64 -app "$src" -into "$app" >/dev/null
+        rm -rf "$src"
+    fi
     (cd "$app" && "${botlish[@]}" -warnings error -target android-aarch64 -target-support botlish_target_android_aarch64 \
         -emit-native-library sdl_surface -application -L "$sdl" -out lib sdl_surface.bot >/dev/null)
     for variant in host untagged; do

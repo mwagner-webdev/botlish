@@ -931,7 +931,7 @@ struct Translator<'a, 'b, M: Module> {
     root_init_opt: bool,
     /// The C address encoding of the module's target (codegen::target's
     /// `address_word`, RN-ANDROID-TAGGED-POINTER-CORRECTNESS-MILESTONE-1.md):
-    /// how `cptr_word`/`cptr_address` encode and decode a C address word
+    /// how `cptr_rotated`/`cptr_address` encode and decode a C address word
     /// inline -- the target's, never the host's (a driver on Linux x86-64
     /// emits an Android library's object with Android's).
     address_word: AddressWord,

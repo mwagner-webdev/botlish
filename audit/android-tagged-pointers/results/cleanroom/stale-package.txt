@@ -1,0 +1,10 @@
+# The Android target support package built at the base commit (ce54fead:
+# runtime ABI 14aa5041bb46ae5d, its C address words without the tag) installed
+# by the single-file compiler of this change, in an emptied environment:
+$ botlish add botlish_target_android_aarch64 -repository BASELINE-REPO -target android-aarch64
+view android-aarch64: derived (5 files, 1 native library)
+added botlish_target_android_aarch64 (request "0.1", lock 0.1.0)
+$ botlish -warnings error -target android-aarch64 -target-support botlish_target_android_aarch64 -emit-native-library heap -application -out lib heap.bot
+heap.bot: target support: the package botlish_target_android_aarch64's runtime ABI fingerprint is 14aa5041bb46ae5d, and this compiler's for android-aarch64 is 637264e0003a0b68: its runtime was built by another compiler build, whose generated code addresses another runtime (use the target support package of this build) (NATIVE TARGET-SUPPORT ABI)
+help: botlish -help error.native-target-support
+(exit status 2; no lib/ written)

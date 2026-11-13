@@ -1,3 +1,3 @@
-MAIN	0	2	CORE SEMANTIC RANGE	std::abi::x86_64::from_bytes: the payload address 0xb400400103713830 is outside the small-Int range
-MAIN	1	2	CORE SEMANTIC RANGE	std::abi::x86_64::from_bytes: the payload address 0xb4004001037139b0 is outside the small-Int range
+MAIN	0	2	CORE SEMANTIC RANGE	std::abi::x86_64::from_bytes: the payload address 0xb40040011b51c620 is outside the small-Int range
+MAIN	1	2	CORE SEMANTIC RANGE	std::abi::x86_64::from_bytes: the payload address 0xb40040011b51c920 is outside the small-Int range
 HOST	done

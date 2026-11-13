@@ -1,0 +1,175 @@
+{
+  "schema": 3,
+  "kind": "botlish-native-library",
+  "library": "tagged",
+  "abi": 1,
+  "target": {
+    "name": "android-aarch64",
+    "triple": "aarch64-linux-android"
+  },
+  "compiler": {
+    "frontEnd": "d50a55cd47d0595e-5527455",
+    "runtimeAbi": "637264e0003a0b68"
+  },
+  "artifacts": {
+    "static": "libtagged.a",
+    "shared": "libtagged.so",
+    "header": "tagged.h"
+  },
+  "sha256": {
+    "static": "19458c8aab2cdb117ff3af3e5d59f26d0d5f467abc13d838c09d79a199bd7ede",
+    "shared": "76143e72bb71d61bba73a82ca63ffa707bfc1d2a911f498272a7cd785ec4187e",
+    "header": "42f5dd80fe42260d371b8bd3f2579336043b6f09aea0a169d69c9ed1c25d1c58"
+  },
+  "link": [
+    "-ldl",
+    "-llog",
+    "-lunwind",
+    "-ldl",
+    "-lm",
+    "-lc"
+  ],
+  "dependencies": [
+    {
+      "kind": "library",
+      "name": "log",
+      "linkage": "default",
+      "link": "-llog"
+    },
+    {
+      "kind": "library",
+      "name": "tp",
+      "linkage": "static",
+      "archive": "/tmp/tmp.cDFMnDCLYk/out/app/libtp.a",
+      "link": "/tmp/tmp.cDFMnDCLYk/out/app/libtp.a"
+    }
+  ],
+  "threading": "thread-affine",
+  "reentrancy": "refused",
+  "callbacks": [],
+  "statuses": {
+    "ok": 0,
+    "declared": 1,
+    "runtime": 2,
+    "boundary": 3,
+    "invocation": 4,
+    "internal": 5
+  },
+  "fieldTypes": {
+    "int": 1,
+    "bool": 2,
+    "float64": 3,
+    "str": 4,
+    "other": 5
+  },
+  "types": {
+    "int": {
+      "c": "int64_t",
+      "rule": "every int64_t is an Int; an Int result outside int64_t is a BOUNDARY error RESULT-OUT-OF-RANGE"
+    },
+    "bool": {
+      "c": "bool"
+    },
+    "float64": {
+      "c": "double",
+      "rule": "a NaN or infinite argument is a BOUNDARY error ARGUMENT-NOT-FINITE; -0.0 enters as 0.0"
+    },
+    "str": {
+      "c": "const uint8_t *, size_t",
+      "result": "tagged_bytes",
+      "rule": "UTF-8, validated and copied; NULL allowed for length 0; embedded NULs allowed; a result is an owned buffer, NUL-terminated after len bytes, released with tagged_bytes_release"
+    }
+  },
+  "ownership": {
+    "instance": {
+      "owner": "caller",
+      "create": "tagged_create",
+      "release": "tagged_destroy"
+    },
+    "str-argument": {
+      "owner": "caller",
+      "lifetime": "call",
+      "copied": true,
+      "null": "length-zero"
+    },
+    "str-result": {
+      "owner": "caller",
+      "release": "tagged_bytes_release",
+      "terminated": "nul-after-length",
+      "survives": "later calls, collections, the instance's destruction"
+    },
+    "error": {
+      "owner": "caller",
+      "release": "tagged_error_release",
+      "survives": "later calls, collections, the instance's destruction"
+    }
+  },
+  "lifecycle": {
+    "create": "tagged_create",
+    "destroy": "tagged_destroy",
+    "initialization": "module static initialization only: the entry program's statements run in tagged_main, never in tagged_create"
+  },
+  "api": [
+    "tagged_create",
+    "tagged_destroy",
+    "tagged_abi_version",
+    "tagged_error_release",
+    "tagged_error_status",
+    "tagged_error_identity",
+    "tagged_error_message",
+    "tagged_error_field_count",
+    "tagged_error_field_name",
+    "tagged_error_field_type",
+    "tagged_error_field_int",
+    "tagged_error_field_bool",
+    "tagged_error_field_float64",
+    "tagged_error_field_str",
+    "tagged_bytes_release",
+    "tagged_main"
+  ],
+  "application": {
+    "symbol": "tagged_main",
+    "c": "int32_t tagged_main(int argc, char **argv, tagged_error **error)",
+    "thread": "calling",
+    "execution": "blocking-to-completion",
+    "vm": "made and dropped on the calling thread inside each call; no handle escapes",
+    "argv": {
+      "encoding": "utf-8",
+      "includes": "argv0",
+      "copied": true,
+      "refusals": [
+        "ARGUMENT-COUNT",
+        "NULL-POINTER",
+        "ARGUMENT-NULL",
+        "ARGUMENT-NOT-UTF8"
+      ]
+    },
+    "contexts": "installed by the entry program itself; the host supplies none",
+    "returns": {
+      "ok": "the entry completed",
+      "otherwise": "the failure's status"
+    },
+    "status": "native-library",
+    "error": {
+      "c": "tagged_error **",
+      "nullable": true,
+      "ownership": "owned",
+      "release": "tagged_error_release"
+    },
+    "reentrancy": "refused while this thread runs a call of this library (REENTRANT-CALL)",
+    "concurrency": "independent calls on different threads, each with its own VM",
+    "stack": "the calling thread's, bounded by the library's stack check (NATIVE LIMIT STACK); no signal handler"
+  },
+  "exports": [],
+  "targetSupport": {
+    "package": "botlish_target_android_aarch64",
+    "runtimeAbi": "637264e0003a0b68",
+    "platform": {
+      "minimumApi": 21
+    },
+    "toolchain": {
+      "name": "Android NDK",
+      "revision": "29.0.14206865"
+    }
+  }
+}

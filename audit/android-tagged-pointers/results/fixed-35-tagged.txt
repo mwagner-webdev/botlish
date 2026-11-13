@@ -1,4 +1,4 @@
-log true
+log called
 exposure 180 36
 write true
 heap 180 same
@@ -9,7 +9,7 @@ qsort true
 null true same
 release done
 MAIN	0	0
-log true
+log called
 exposure 180 36
 write true
 heap 180 same
