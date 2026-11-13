@@ -205,9 +205,12 @@ proc native::WithProgramDirs {hir run script} {
 #                convention a variadic call is a codegen error)
 #   cCallbacks   synchronous C callbacks (`callback c fn`,
 #                C-CALLBACK-MILESTONE-1.md: runtime/callback.rs's SUPPORTED):
-#                where the collector walks frames by frame pointer across a
-#                foreign transition; Windows (its unwinder) refuses one at
-#                run time (NATIVE CALLBACK UNSUPPORTED)
+#                where the collector finds roots in native frames and its
+#                walk crosses a foreign transition -- by frame pointer on
+#                Linux and macOS, by Windows' unwinder and the same jump
+#                on Windows x86-64 (WINDOWS-X86-64-MILESTONE-9.md); a
+#                `fallback-roots` driver refuses one at run time (NATIVE
+#                CALLBACK UNSUPPORTED)
 #   coroutines   native coroutines (stack switching, runtime/coroutine.rs;
 #                on Windows a fiber per coroutine stack,
 #                runtime/coroutine/windows.rs)
@@ -248,14 +251,18 @@ proc native::WithProgramDirs {hir run script} {
 # rules: a float or a double of the first four positions in both of its
 # position's registers) and native libraries since
 # WINDOWS-X86-64-MILESTONE-8.md (a DLL and its import library, exporting
-# exactly the library's public C functions).
+# exactly the library's public C functions) and synchronous C callbacks
+# since WINDOWS-X86-64-MILESTONE-9.md (the collector's walk jumps from a
+# callback's entry frame to the transition shim's frame record, never
+# unwinding C's frames; every shim and entry point has unwind
+# information).
 namespace eval native {
     variable capabilities [dict create \
         jit {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
         executables {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
         cCalls {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
         cVariadics {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
-        cCallbacks {linux-x86_64 linux-aarch64 macos-aarch64} \
+        cCallbacks {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
         coroutines {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
         stackGuard {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
         frameRoots {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \

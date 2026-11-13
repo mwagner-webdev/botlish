@@ -61,3 +61,17 @@ extern c fn call_stored named "cbx_call_stored"(x: std::ffi::c::Int) -> std::ffi
 extern c fn bad_bool named "cbx_bad_bool"(f: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Bool], return: std::ffi::c::Int}] noescape) -> std::ffi::c::Int
 extern c fn bad_pointer named "cbx_bad_pointer"(f: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Ptr[std::ffi::c::Void]], return: std::ffi::c::Int}] noescape) -> std::ffi::c::Int
 extern c fn unholdable_address named "cbx_unholdable_address"() -> std::ffi::c::Ptr[std::ffi::c::Void]
+
+# The Win64 ABI by hand, Windows' unwinder through a callback, and the
+# bookkeeping of a real Windows API's callback (WINDOWS-X86-64-MILESTONE-9.md;
+# every host links them).
+extern c fn abi_preserved named "cbx_abi_preserved"(f: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Int, std::ffi::c::RawDouble, std::ffi::c::RawFloat, std::ffi::c::LongLong, std::ffi::c::RawDouble, std::ffi::c::Int, std::ffi::c::SChar, std::ffi::c::RawDouble], return: std::ffi::c::LongLong}] noescape) -> std::ffi::c::Int
+extern c fn abi_last_changed named "cbx_abi_last_changed"() -> std::ffi::c::ULongLong
+extern c fn trace_inner named "cbx_trace_inner"(g: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Int], return: std::ffi::c::Int}] noescape, x: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn trace_outer named "cbx_trace_outer"(f: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Int], return: std::ffi::c::Int}] noescape, x: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn trace_check named "cbx_trace_check"() -> std::ffi::c::Int
+extern c fn locale_reset named "cbx_locale_reset"() -> unit
+extern c fn locale_note named "cbx_locale_note"(name: std::ffi::c::Ptr[std::ffi::c::UShort] noescape, flags: std::ffi::c::ULong, param: std::ffi::c::LongLong, limit: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn locale_calls named "cbx_locale_calls"() -> std::ffi::c::Int
+extern c fn locale_bad named "cbx_locale_bad"() -> std::ffi::c::Int
+extern c fn unwinder_capture_ps named "cbx_unwinder_capture_ps"(n: std::ffi::c::Int) -> std::ffi::c::LongLong

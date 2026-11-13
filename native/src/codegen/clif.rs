@@ -158,6 +158,15 @@ pub struct Symbols {
     /// The CLIF of each transition shim and callback entry point, for
     /// listings (`--clif`): what codegen::callback compiled.
     pub callback_clif: Vec<String>,
+    /// Each transition shim and callback entry point codegen::callback
+    /// defined: its id, its machine code's size and, where the module's code
+    /// is Windows x86-64's, its `UNWIND_INFO` (codegen::unwind). Both have
+    /// frames (Cranelift's frame record, a call), so Windows' unwinder must
+    /// never take one for a leaf: the AOT object's `.pdata` and `.xdata`
+    /// carry them (codegen::add_windows_unwind), the JIT registers them
+    /// (codegen::jitunwind), as every Botlish function's
+    /// (WINDOWS-X86-64-MILESTONE-9.md, "Unwind information").
+    pub callback_code: Vec<super::callback::Defined>,
 }
 
 /// How many machine words F's direct function returns. Ordinarily
@@ -514,6 +523,7 @@ pub fn declare<M: Module>(module: &mut M, program: &nir::Program, export: bool, 
         shims: HashMap::new(),
         callbacks: vec![],
         callback_clif: vec![],
+        callback_code: vec![],
     };
     for (name, params, _) in helpers() {
         let id = module.declare_function(name, Linkage::Import, &signature(module, params)).map_err(module_error)?;

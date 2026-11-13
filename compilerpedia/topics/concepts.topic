@@ -5245,7 +5245,14 @@ pointer to a parameter that may keep it is a direct edge (DIRECT): a
 retained registration is not provided yet.
 
 Native backends only: on the Tcl backends std::ffi::c::callback is
-NATIVE-ONLY, and a callback c fn is an ordinary function.
+NATIVE-ONLY, and a callback c fn is an ordinary function. Callbacks run on
+Linux x86-64 and AArch64, macOS AArch64 and Windows x86-64, in executables
+and in native libraries (a library's callback enters the instance whose
+call is waiting in C), and the C calling convention is the target's
+(Win64's on Windows: arguments by position, nonvolatile registers kept).
+A Win32 API that calls back synchronously (EnumSystemLocalesEx, qsort) is
+such a call; one that keeps its callback (a window procedure, a timer, a
+thread pool) is a retained registration, not provided yet.
 
 @example accept
 import std::ffi::c

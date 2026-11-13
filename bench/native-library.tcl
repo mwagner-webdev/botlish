@@ -40,11 +40,30 @@ proc write {path text} {
 
 set dir [file tempdir botlish-native-library-bench]
 set source {
+import std::ffi::c
 import std::list
 import std::str
 
 error Negative:
     value: int
+
+extern c library "cref"
+extern c fn cref_sum(f: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::LongLong], return: std::ffi::c::LongLong}] noescape, n: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+
+callback c fn identity(x: std::ffi::c::LongLong) -> std::ffi::c::LongLong:
+    x
+
+# C calls the library's own callback back N times during the export's call
+# (WINDOWS-X86-64-MILESTONE-9.md): the transition, then N entries into the
+# waiting instance.
+exported c fn callback_sum(n: int) -> int:
+    if n < 0 or n > 1000000:
+        return 0
+    cb = std::ffi::c::callback(identity)
+    s = cref_sum(cb, n)
+    if s < 0 or s > 1000000000000:
+        return -1
+    s
 
 exported c fn add(a: int, b: int) -> int:
     a + b
@@ -67,16 +86,8 @@ exported c fn fail_if(n: int) -> int errors Negative:
         fail Negative {value: n}
     n
 }
-write [file join $dir bench.bot] $source
-set hir [surface::readProgramFile [file join $dir bench.bot] -warnings off -warning-channel ""]
 set lib [file join $dir lib]
-set started [clock milliseconds]
-if {$windows} {
-    set built [ctool::withMsvc [list native::library $hir -name bl -out $lib]]
-} else {
-    set built [native::library $hir -name bl -out $lib]
-}
-set buildMs [expr {[clock milliseconds] - $started}]
+file mkdir $lib
 
 # The C reference: the same functions as C, the same calling convention
 # (a status, the result through a pointer, a String as an owned malloc'd
@@ -106,8 +117,24 @@ API int32_t cref_words(void *in, int64_t n, int64_t *out, void **e) {
     free(xs); *out = n; return 0;
 }
 API int32_t cref_fail_if(void *in, int64_t n, int64_t *out, void **e) { (void) in; if (n < 0) { if (e) *e = NULL; return 1; } *out = n; return 0; }
+API long long cref_sum(long long (*f)(long long), long long n) { long long s = 0; for (long long i = 0; i < n; i++) s += f(i); return s; }
+static long long cref_identity(long long x) { return x; }
+API int32_t cref_callback_sum(void *in, int64_t n, int64_t *out, void **e) { (void) in; (void) e; *out = cref_sum(cref_identity, n); return 0; }
 }
 lassign [ctool::sharedLibrary $lib cref $reference] crefLibrary crefLink
+
+# The library, linked against the C reference (its callback test's C
+# function, cref_sum).
+write [file join $dir bench.bot] $source
+set hir [surface::readProgramFile [file join $dir bench.bot] -warnings off -warning-channel ""]
+set started [clock milliseconds]
+lappend ::native::linkDirs $lib
+if {$windows} {
+    set built [ctool::withMsvc [list native::library $hir -name bl -out $lib]]
+} else {
+    set built [native::library $hir -name bl -out $lib]
+}
+set buildMs [expr {[clock milliseconds] - $started}]
 
 set host [file join $dir host.c]
 write $host [string map [list CALLS [dict get $options -calls] ROUNDS [dict get $options -rounds]] {#include <stdio.h>
@@ -135,6 +162,7 @@ REF_IMPORT int32_t cref_echo(void *, const uint8_t *, size_t, cref_bytes *, void
 REF_IMPORT int32_t cref_bytes_release(cref_bytes *);
 REF_IMPORT int32_t cref_words(void *, int64_t, int64_t *, void **);
 REF_IMPORT int32_t cref_fail_if(void *, int64_t, int64_t *, void **);
+REF_IMPORT int32_t cref_callback_sum(void *, int64_t, int64_t *, void **);
 #define N CALLS
 #define R ROUNDS
 static char longer[4097];
@@ -155,6 +183,7 @@ static double botlish(int which) {
         case 3: bl_echo(in, (const uint8_t *) longer, 4096, &out, NULL); bl_bytes_release(&out); break;
         case 4: bl_words(in, 16, &r, NULL); break;
         case 5: bl_fail_if(in, -1, &r, &e); bl_error_release(&e); break;
+        case 6: bl_callback_sum(in, 100, &r, NULL); break;
         }
     }
     return (now() - t0) / N * 1e9;
@@ -170,6 +199,7 @@ static double reference(int which) {
         case 3: cref_echo(NULL, (const uint8_t *) longer, 4096, &out, NULL); cref_bytes_release(&out); break;
         case 4: cref_words(NULL, 16, &r, NULL); break;
         case 5: cref_fail_if(NULL, -1, &r, &e); break;
+        case 6: cref_callback_sum(NULL, 100, &r, NULL); break;
         }
     }
     return (now() - t0) / N * 1e9;
@@ -193,8 +223,8 @@ int main(int argc, char **argv) {
     printf("load and unload\t%.1f us\n", load_best);
     printf("create and destroy\t%.1f us\n", create_best);
     if (bl_create(&in, NULL) != bl_STATUS_OK) return 1;
-    const char *names[] = {"int (add)", "Float64 (scale)", "short str (echo, 10 bytes)", "longer str (echo, 4 KiB)", "allocating (words(16))", "declared error (fail_if)"};
-    for (int w = 0; w < 6; w++)
+    const char *names[] = {"int (add)", "Float64 (scale)", "short str (echo, 10 bytes)", "longer str (echo, 4 KiB)", "allocating (words(16))", "declared error (fail_if)", "100 callbacks (callback_sum(100))"};
+    for (int w = 0; w < 7; w++)
         printf("%s\t%.1f ns\t%.1f ns\n", names[w], best(botlish, w), best(reference, w));
     bl_destroy(in);
     return 0;
@@ -206,7 +236,7 @@ if {$windows} {
         /Fe[file nativename $exe] [file nativename $host] [file nativename [dict get $built import]] [file nativename $crefLink]
 } else {
     set exe [file join $dir host]
-    exec cc -O2 -I$lib $host -L$lib -lbl -lcref -Wl,-rpath,$lib -ldl -o $exe
+    exec cc -O2 -I$lib $host -L$lib -lbl -lcref -Wl,-rpath,$lib -ldl {*}$native::library::systemLibraries -o $exe
 }
 
 # A copy of the shared library under a name this host never loads, for the
@@ -282,7 +312,7 @@ puts "native library performance and size ([core::cabi::hostTarget], [dict get $
 puts ""
 puts "| Measure | Value |"
 puts "|---|---:|"
-puts "| build (native::library, five exports) | $buildMs ms |"
+puts "| build (native::library, six exports) | $buildMs ms |"
 puts "| shared library ([file tail $shared]) | [file size $shared] bytes |"
 if {$windows} {
     puts "| import library ([file tail [dict get $built import]]) | [file size [dict get $built import]] bytes |"

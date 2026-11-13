@@ -327,3 +327,191 @@ proc hir::callbacks::ReferenceProblem {hir arg} {
     if {0 && $values ne {}} {
         lappend problems [list CALLBACK-ENVIRONMENT "$what captures
 >>>>
+
+# --- Windows x86-64 (WINDOWS-X86-64-MILESTONE-9.md) ---------------------------
+# The Windows walk's jump across a foreign transition, the transition's
+# record, the unwind information of the C side of callbacks, the Win64 ABI.
+# Run with -tests "tests/c-callbacks.test tests/native-library.test" for
+# the library mutants (their detectors are nl-callbacks*).
+
+@@ windows-callbacks-refused Windows refuses callbacks again (the runtime's capability excludes it): every callback C calls ends the process with NATIVE CALLBACK UNSUPPORTED
+%% windows-x86_64
+## native/src/runtime/callback.rs
+<<<<
+pub const SUPPORTED: bool = super::framewalk::NATIVE_FRAME_ROOTS && super::framewalk::CROSSES_TRANSITIONS;
+====
+pub const SUPPORTED: bool = super::framewalk::NATIVE_FRAME_ROOTS && super::framewalk::CROSSES_TRANSITIONS && cfg!(not(windows));
+>>>>
+
+@@ windows-walk-ignores-segments the Windows walk never jumps: it unwinds the callback's entry frame, the entry point and C's frames with Windows' unwinder -- which stops at a C frame without a function table entry -- and the waiting Botlish frames' roots are missed
+%% windows-x86_64
+## native/src/runtime/framewalk.rs
+<<<<
+            } else if let Some(&(_, transition)) = jumps.iter().find(|&&(entry, _)| entry == sp) {
+====
+            } else if let Some(&(_, transition)) = jumps.iter().find(|&&(entry, _)| entry == sp && false) {
+>>>>
+
+@@ windows-jump-to-outermost-transition the Windows walk jumps from every callback's entry frame to the outermost transition: a nested callback's walk skips the middle callback's frames, whose roots are missed
+%% windows-x86_64
+## native/src/runtime/framewalk.rs
+<<<<
+            } else if let Some(&(_, transition)) = jumps.iter().find(|&&(entry, _)| entry == sp) {
+====
+            } else if let Some(&(_, transition)) = jumps.iter().find(|&&(entry, _)| entry == sp).map(|_| &jumps[0]) {
+>>>>
+
+@@ windows-jump-to-innermost-transition the Windows walk jumps from every callback's entry frame to the innermost transition: an outer callback's entry frame jumps below itself (the walk refuses the backward record, NATIVE CALLBACK BUG)
+%% windows-x86_64
+## native/src/runtime/framewalk.rs
+<<<<
+            } else if let Some(&(_, transition)) = jumps.iter().find(|&&(entry, _)| entry == sp) {
+====
+            } else if let Some(&(_, transition)) = jumps.iter().find(|&&(entry, _)| entry == sp).map(|_| jumps.last().unwrap()) {
+>>>>
+
+@@ windows-middle-callback-roots-skipped the Windows walk visits no root of a Botlish frame between two callback segments: a middle callback -- the one that called C again, whose callback is collecting -- loses the values it holds across that C call (killed by a collected value, cb-nested-gc, cb-nested-loop)
+%% windows-x86_64
+## native/src/runtime/framewalk.rs
+<<<<
+                for &entry in function.roots_at(pc) {
+====
+                let middle = jumps.iter().any(|j| j.0 < sp) && jumps.iter().any(|j| j.0 > sp);
+                for &entry in function.roots_at(pc).iter().filter(|_| !middle) {
+>>>>
+
+@@ windows-continuation-wrong-rsp the continuation's stack pointer is a word off (record + 24, not + 16): the waiting frame's stack map is read from the wrong base
+%% windows-x86_64
+## native/src/runtime/framewalk.rs
+<<<<
+        (ret, transition as u64 + 16, caller_fp)
+====
+        (ret, transition as u64 + 24, caller_fp)
+>>>>
+
+@@ windows-continuation-wrong-rip the continuation's instruction pointer is one past the shim's return address: still Botlish code, but no safepoint -- the waiting frame contributes no roots
+%% windows-x86_64
+## native/src/runtime/framewalk.rs
+<<<<
+        (ret, transition as u64 + 16, caller_fp)
+====
+        (ret + 1, transition as u64 + 16, caller_fp)
+>>>>
+
+@@ windows-waiting-caller-skipped the jump resumes at the waiting Botlish frame's caller, not at the frame itself: the frame that called C contributes no roots
+%% windows-x86_64
+## native/src/runtime/framewalk.rs
+<<<<
+        (ret, transition as u64 + 16, caller_fp)
+====
+        // SAFETY: (the mutant) the waiting frame's own record.
+        unsafe { (*((caller_fp + 8) as *const u64), caller_fp + 16, *(caller_fp as *const u64)) }
+>>>>
+
+@@ windows-transition-records-stack-pointer the naked rt_ffi_open hands on its stack pointer (where the shim's return address is) instead of the shim's frame register: the walk's jump reads no frame record there
+%% windows-x86_64
+## native/src/runtime/callback.rs
+<<<<
+    std::arch::naked_asm!("mov rdx, rbp", "jmp {open}", open = sym rt_ffi_open_at)
+====
+    std::arch::naked_asm!("mov rdx, rsp", "jmp {open}", open = sym rt_ffi_open_at)
+>>>>
+
+@@ transition-records-helper-frame the transition records rt_ffi_open_at's own frame -- a runtime helper's, gone when it returns -- instead of the shim's frame record: the walk jumps into frames C has since overwritten
+%% windows-x86_64
+## native/src/runtime/callback.rs
+<<<<
+    let previous = open(p, record) as u64;
+====
+    let _ = record;
+    let previous = open(p, super::framewalk::frame_record()) as u64;
+>>>>
+
+@@ windows-entry-point-unwind-dropped a callback entry point's UNWIND_INFO is dropped where it is defined: a COFF object (and the JIT's function table) has no entry for it, and Windows' unwinder takes its frame, between C's and the runtime's, for a leaf
+%% linux-x86_64 windows-x86_64
+## native/src/codegen/callback.rs
+<<<<
+    let code = defined(&*module, &ctx, id, &format!("callback entry point {name}"))?;
+====
+    let code = Defined { unwind: None, ..defined(&*module, &ctx, id, &format!("callback entry point {name}"))? };
+>>>>
+
+@@ windows-shim-unwind-dropped a transition shim's UNWIND_INFO is dropped where it is defined: a COFF object (and the JIT's function table) has no entry for it, and Windows' unwinder takes its frame, between the Botlish caller's and C's, for a leaf
+%% linux-x86_64 windows-x86_64
+## native/src/codegen/callback.rs
+<<<<
+    let code = defined(&*module, &ctx, id, &format!("transition shim {name}"))?;
+====
+    let code = Defined { unwind: None, ..defined(&*module, &ctx, id, &format!("transition shim {name}"))? };
+>>>>
+
+@@ windows-jit-callback-code-unregistered the JIT's function table leaves out transition shims and callback entry points: a callback reached through a JIT-made function pointer has no unwind information
+%% windows-x86_64
+## native/src/codegen/jitunwind.rs
+<<<<
+    for (code, at) in symbols.callback_code.iter().zip(&data.callbacks) {
+        if let Some(at) = at {
+====
+    for (code, at) in symbols.callback_code.iter().zip(&data.callbacks) {
+        if let Some(at) = at.filter(|_| false) {
+>>>>
+
+@@ windows-xmm6-clobbered the callback path changes XMM6, a Win64 nonvolatile register, and restores nothing: rt_callback_call, which saves no XMM register (run saves and restores XMM6 itself, so a change inside run is undone), zeroes it after run returns, and the C caller finds its value gone
+%% windows-x86_64
+## native/src/runtime/callback.rs
+<<<<
+        Ok(Ok(())) => 0,
+====
+        Ok(Ok(())) => {
+            // SAFETY: (the mutant) an undeclared change of a nonvolatile register.
+            unsafe { std::arch::asm!("xorps xmm6, xmm6", options(nostack, nomem)) };
+            0
+        }
+>>>>
+
+@@ arguments-past-fourth-swapped the entry point stores its fifth and sixth C arguments in each other's words: the stack-passed arguments reach the callback swapped
+## native/src/codegen/callback.rs
+<<<<
+            b.ins().stack_store(I64, word, words, (8 * i) as i32);
+====
+            b.ins().stack_store(I64, word, words, (8 * if i == 4 { 5 } else if i == 5 { 4 } else { i }) as i32);
+>>>>
+
+@@ bool-argument-unchecked a C _Bool argument byte other than 0 or 1 is taken for true instead of being refused (NATIVE CALLBACK ARGUMENT)
+## native/src/runtime/callback.rs
+<<<<
+            byte => return Err(format!("the C _Bool byte {byte} is neither 0 nor 1 (NATIVE BOOL)")),
+====
+            _ => TRUE,
+>>>>
+
+@@ failure-panics-into-c a callback's failure is a Rust panic out of its entry point instead of the process's coded end: it unwinds toward C (the runtime aborts the process uncoded)
+## native/src/runtime/callback.rs
+<<<<
+        Ok(Err(fatal)) => fatal.terminate(),
+====
+        Ok(Err(fatal)) => panic!("{}", fatal.message),
+>>>>
+
+@@ library-wrong-instance a transition's close makes the Vm whose call just closed the active one, not the one active before: a library's later callback during an outer call of another instance enters the instance whose call has returned
+## native/src/runtime/callback.rs
+<<<<
+    ACTIVE.with(|a| a.set(previous as *mut Vm));
+    // Every callback that entered through this transition has returned:
+====
+    let _ = previous;
+    ACTIVE.with(|a| a.set(p));
+    // Every callback that entered through this transition has returned:
+>>>>
+
+@@ running-stack-ignores-entry-stack the stack a callback must run on is the thread's even during a library call on a stack the host made (a fiber, a ucontext stack): a callback there is refused NATIVE CALLBACK STACK
+## native/src/runtime/vm.rs
+<<<<
+        if self.co_current.is_null() {
+            self.entry_stack.or(self.native_stack)
+        } else {
+====
+        if self.co_current.is_null() {
+            self.native_stack
+        } else {
+>>>>

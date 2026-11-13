@@ -4916,6 +4916,27 @@ callback runs nested in that execution environment
   calling), and the segment stack balanced (`rt_ffi_close` refuses a
   stale one). The tests' C fixture calls the nesting callbacks with its
   frame-pointer register holding no frame; keep it adversarial.
+* The transition is the shim's frame record, handed on by the naked
+  `rt_ffi_open` (its caller's frame register) on every host: never read it
+  from a Rust frame's record (LLVM's Win64 frames keep none at their frame
+  register) or derive it from a runtime helper's frame, which is gone
+  when the helper returns. On Windows x86-64 (WINDOWS-X86-64-MILESTONE-9.md)
+  a segment's entry is `run`'s stack pointer (`framewalk::frame_record`),
+  the frame `windows::walk_context` arrives in from the callback's
+  Botlish frames, and the jump resumes in the waiting Botlish frame at
+  exactly its call of the shim (RIP `[t + 8]`, RSP `t + 16`, RBP `[t]`),
+  never unwinding C, the entry point or the shim; a transition that is not
+  a frame record above the entry on the walked stack, or whose return
+  address is no Botlish code, is NATIVE CALLBACK BUG, never a walk that
+  guesses. Keep `run`'s body at one stack pointer (no dynamic allocation
+  in it). Every transition shim and callback entry point has unwind
+  information (`codegen::callback::Defined`: the COFF object's `.pdata`,
+  the JIT's function table), so that Windows' unwinder -- an exception's,
+  a debugger's, BOTLISH_NATIVE_UNWIND_CHECK's -- never takes one for a
+  leaf; the Windows fixture's nesting callbacks are called from an
+  assembly frame with no function table entry (callback-fixture-win64.asm):
+  keep it so, and keep the mixed-call fixture's nonvolatile registers
+  checked.
 * No Botlish error, panic or suspension crosses C, and no answer is made
   up: a failure the front end cannot exclude ends the process after its
   report (`Fatal::terminate`, `platform::report_fatal`), never returns a
@@ -4931,25 +4952,40 @@ callback runs nested in that execution environment
 * A callback's function is a root: its generic instance (open, its
   declared contract) through specialization's `-exports`, kept by fusion's
   dead-code elimination. Never let a caller's facts reach it.
-* Windows (its unwinder walk) and the fallback root plan refuse a callback
-  at run time (NATIVE CALLBACK UNSUPPORTED, `runtime::callback::SUPPORTED`);
-  never enable one there without a walk that crosses a transition.
+* The fallback root plan refuses a callback at run time (NATIVE CALLBACK
+  UNSUPPORTED, `runtime::callback::SUPPORTED`: `NATIVE_FRAME_ROOTS` and
+  `framewalk::CROSSES_TRANSITIONS`); never enable one on a configuration
+  whose collector does not cross a transition, and never by host name.
+* A callback runs on the stack its transition left: the running stack
+  (`Vm::running_stack`: a coroutine's, a native library call's host-made
+  stack -- a host's fiber, a ucontext stack -- or the thread's). A
+  library's callback enters its own waiting instance, never through the
+  registry: a host's call of that instance stays REENTRANT-CALL.
 
 If you change any of that (hir/callbacks.tcl, `hir::foreign::CallsBack`,
 the callback-pointer shape, NIR's `callback`/`cbaddr`/`callbacks=1`,
 codegen/callback.rs, the shim's call in clif.rs's `foreign_call`,
-runtime/callback.rs, `walk_segmented`, `Vm::foreign_open` or
-`callback_segments`), run `tests/c-callbacks.test` (also under
+runtime/callback.rs, `walk_segmented`, the Windows walk's `jump`,
+`Vm::foreign_open`, `callback_segments` or `running_stack`, the C side's
+unwind information), run `tests/c-callbacks.test` (also under
 `BOTLISH_NATIVE_GC_STRESS=1`), its golden suite (`tclsh9.0 tests/local.tcl
-tests/golden/c-callbacks.bot`), `cargo test --release --manifest-path
-native/Cargo.toml callback`, `audit/c-callbacks/tools/fuzz.tcl` (several
-seeds, once with `-gc-stress 1`) and `audit/c-callbacks/tools/mutate.tcl`
-(every mutant in its `mutants.txt` must still apply and be killed: update a
-mutant's text when you change the code it mutates, keeping it a mutant of
-the same rule), plus `tests/c-ffi.test`, `tests/native-library.test`,
-`tests/coroutines.test` and `tests/raw-c-float-ffi.test` for a change to
-code they share. `bench/c-callbacks.tcl` regenerates the performance table;
-`audit/c-callbacks/tools/raven-census.tcl` the Raven census.
+tests/golden/c-callbacks.bot`), `tests/native-library.test` (its
+`nl-callbacks*`), `cargo test --release --manifest-path native/Cargo.toml
+callback`, `audit/c-callbacks/tools/fuzz.tcl` (several seeds, once with
+`-gc-stress 1`) and `audit/c-callbacks/tools/mutate.tcl` (every mutant in
+its `mutants.txt` that applies to the host must still apply and be killed:
+update a mutant's text when you change the code it mutates, keeping it a
+mutant of the same rule; the library mutants with `-tests
+"tests/c-callbacks.test tests/native-library.test" -match "cb-*
+nl-callbacks*"`), plus `tests/c-ffi.test`, `tests/coroutines.test` and
+`tests/raw-c-float-ffi.test` for a change to code they share. On Windows
+the same runs on the Windows workflow (dispatched on the branch, or a
+`[ci-full]` push with `CI-Tests: c-callbacks.test native-library.test rust
+c-callbacks-fuzz c-callbacks-mutants c-callbacks-library-mutants`), with
+`tests/platform/native-status.tcl` (its `c-callback` probe) and
+`tests/platform/gc-workloads.tcl -unwind-check 1`. `bench/c-callbacks.tcl`
+regenerates the performance table (the tier item `c-callbacks-bench` on
+Windows); `audit/c-callbacks/tools/raven-census.tcl` the Raven census.
 
 ## C FFI error capture
 

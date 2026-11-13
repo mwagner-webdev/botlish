@@ -1313,6 +1313,243 @@ int main(void) {
     nlRunBoth $exe
 } -result {paint(7): status 1 uncaught propagated error: <error Painted {color: Color::Green}>}
 
+# ---------------------------------------------------------------------------
+# C callbacks inside a library's call (C-CALLBACK-MILESTONE-1.md;
+# WINDOWS-X86-64-MILESTONE-9.md): an export calls C with a `callback c fn`'s
+# pointer, and C calls it back during the call -- into the library's own
+# active instance, nested in the call: not a host call of the instance (no
+# REENTRANT-CALL), and with the waiting export's values rooted across C.
+
+# The host's C functions a callback library calls (an `extern c library`'s
+# on Windows, where a DLL cannot import from its executable: cbhost.dll,
+# built here, in DIR/lib; on Linux the host's own definitions, which the
+# static library's calls resolve to): cbhost_other_then_apply(f, n) calls
+# the host's slot 0 with n, then f(n), and returns 1000 times the first plus
+# the second; cbhost_inner(n) calls slot 1 (0 for an empty slot); the host
+# fills the slots with cbhost_register. Returns {DECLARATION LIBS SOURCE}:
+# the line declaring the DLL (Windows), what the host links besides the
+# Botlish libraries, and the C a host's main.c starts with (the definitions,
+# or their DLL import declarations).
+proc nlCallbackHost {dir} {
+    set body {static long long (*cbhost_slots[2])(long long);
+EXPORT void cbhost_register(int slot, long long (*g)(long long)) { cbhost_slots[slot] = g; }
+EXPORT long long cbhost_inner(long long n) { return cbhost_slots[1] ? cbhost_slots[1](n) : 0; }
+EXPORT long long cbhost_other_then_apply(long long (*f)(long long), long long n) {
+    long long o = cbhost_slots[0] ? cbhost_slots[0](n) : 0;
+    return o * 1000 + f(n);
+}
+}
+    if {!$::nlWindows} {
+        return [list "" {} [string map {EXPORT ""} $body]]
+    }
+    set lib [file join $dir lib]
+    file mkdir $lib
+    set source [file join $lib cbhost.c]
+    nlWrite $source [string map {EXPORT __declspec(dllexport)} $body]
+    lassign [ctool::sharedLibrary $lib cbhost $source] dll import
+    return [list "extern c library \"cbhost\"\n" [list $import] \
+        "__declspec(dllimport) void cbhost_register(int slot, long long (*g)(long long));\n"]
+}
+
+# A callback library: run(n) holds a String across C's cbhost_other_then_apply
+# with the callback step, which allocates (a collection at every allocation
+# under GC stress), asks the host's slot 1 (cbhost_inner) and allocates
+# again. run(7) is 1000 * slot0(7) + 100 * slot1(7) + 26 (step(7) = 14 + 6 +
+# 100 * slot1(7), run adds 6).
+set ::nlCallbackLibrary {
+import std::ffi::c
+import std::int
+import std::list
+import std::str
+
+DECLARATIONextern c fn cbhost_other_then_apply(f: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::LongLong], return: std::ffi::c::LongLong}] noescape, n: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+extern c fn cbhost_inner(n: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+
+fn churn(k: int) -> int:
+    xs = loop i from 0 to k:
+        std::str::concat("churn ", std::int::to_string(i))
+    std::list::length(xs)
+
+callback c fn step(n: std::ffi::c::LongLong) -> std::ffi::c::LongLong:
+    if n < 0 or n > 1000000:
+        return -1
+    held = std::str::concat("step-", std::int::to_string(n))
+    a = churn(40)
+    i = cbhost_inner(n)
+    b = churn(20)
+    if a != 40 or b != 20 or i < -1000000 or i > 1000000:
+        return -2
+    n * 2 + std::str::length(held) + i * 100
+
+exported c fn run(n: int) -> int:
+    if n < 0 or n > 1000000:
+        return -1
+    kept = std::str::concat("kept-", std::int::to_string(n))
+    cb = std::ffi::c::callback(step)
+    r = cbhost_other_then_apply(cb, n)
+    c = churn(30)
+    if c != 30 or r < -1000000000000 or r > 1000000000000:
+        return -3
+    r + std::str::length(kept)
+}
+
+test nl-callbacks {an export's C call calls the library's callback back into the active instance: plainly and repeatedly; from inside the callback a host call of the same instance is still REENTRANT-CALL; another instance's call, with its own transition and callback, runs inside the first's and the first's callback then enters the first; on a stack the host made (a fiber on Windows, ucontext elsewhere) -- under GC stress too} -constraints {nativeLibraries nativeCCallbacks} -body {
+    set dir [nlDir]
+    lassign [nlCallbackHost $dir] declaration hostLibs hostSource
+    set built [nlLibrary $dir cba [string map [list DECLARATION $declaration] $::nlCallbackLibrary] {} -shared 0]
+    set exe [nlExecutable $dir "[nlPrelude cba]
+$hostSource
+#ifndef _WIN32
+#include <sys/mman.h>
+#include <ucontext.h>
+static ucontext_t back, there;
+#else
+static void *back;
+#endif
+static cba_instance *first, *second;
+static int depth;
+static void run(const char *what, cba_instance *in, int64_t n) {
+    cba_error *e = NULL; int64_t r = -1;
+    int32_t s = cba_run(in, n, &r, &e);
+    if (s != cba_STATUS_OK) report(what, s, &e);
+    else printf(\"%s: run(%lld) = %lld\\n\", what, (long long) n, (long long) r);
+}
+/* Slot 1 from inside the callback: a host call of the instance whose call
+   is running -- refused, its status printed, -1 handed back. */
+static long long reenter(long long n) {
+    cba_error *e = NULL; int64_t r = -1;
+    int32_t s = cba_run(first, n, &r, &e);
+    if (s != cba_STATUS_OK) { report(\"reentrant\", s, &e); return -1; }
+    return r;
+}
+/* Slot 0 before the callback: the other instance's call, whose own
+   transition and callback open and close inside the first's call; at depth
+   1 nothing (the second's own slot-0 call). */
+static long long other_instance(long long n) {
+    cba_error *e = NULL; int64_t r = -1;
+    if (depth > 0) return 0;
+    depth++;
+    int32_t s = cba_run(second, n, &r, &e);
+    depth--;
+    if (s != cba_STATUS_OK) { report(\"second\", s, &e); return -1; }
+    return r;
+}
+#ifndef _WIN32
+static void on_host_stack(void) { run(\"host stack\", first, 7); run(\"host stack\", first, 8); }
+#else
+static void WINAPI on_host_stack(void *unused) { (void) unused; run(\"host stack\", first, 7); run(\"host stack\", first, 8); SwitchToFiber(back); }
+#endif
+int main(void) {
+    cba_error *e = NULL;
+    check(\"create\", cba_create(&first, &e), &e);
+    check(\"create\", cba_create(&second, &e), &e);
+    for (int i = 0; i < 3; i++) run(\"plain\", first, 7);
+    cbhost_register(1, reenter);
+    run(\"reentry\", first, 7);
+    cbhost_register(1, NULL);
+    cbhost_register(0, other_instance);
+    run(\"instances\", first, 7);
+    cbhost_register(0, NULL);
+    size_t size = 1024 * 1024;
+#ifndef _WIN32
+    void *stack = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_STACK, -1, 0);
+    if (stack == MAP_FAILED) return 1;
+    getcontext(&there);
+    there.uc_stack.ss_sp = stack;
+    there.uc_stack.ss_size = size;
+    there.uc_link = &back;
+    makecontext(&there, on_host_stack, 0);
+    swapcontext(&back, &there);
+#else
+    back = ConvertThreadToFiber(NULL);
+    void *there = CreateFiber(size, on_host_stack, NULL);
+    if (back == NULL || there == NULL) return 1;
+    SwitchToFiber(there);
+    DeleteFiber(there);
+    ConvertFiberToThread();
+#endif
+    run(\"thread again\", first, 7);
+    check(\"destroy\", cba_destroy(second), NULL);
+    check(\"destroy\", cba_destroy(first), NULL);
+    return 0;
+}
+" [list [nlLink $built] {*}$hostLibs]]
+    nlRunBoth $exe
+} -result {plain: run(7) = 26
+plain: run(7) = 26
+plain: run(7) = 26
+reentrant: status 4 REENTRANT-CALL
+reentry: run(7) = -74
+instances: run(7) = 26026
+host stack: run(7) = 26
+host stack: run(8) = 28
+thread again: run(7) = 26}
+
+# Two independently compiled libraries (each its own runtime: on Windows two
+# DLLs): library cba's callback asks the host's slot 1, which calls library
+# cbb's export, which allocates and collects in its own instance, then
+# cba's callback allocates and collects again in cba's. Each runtime's
+# activation is its own: cbb's call makes no transition of cba's, and
+# cba's callback enters cba's instance.
+test nl-callbacks-two-libraries {a callback of one library calls another library's export through C: the other allocates and collects in its own instance, the callback then allocates and collects in its own, and both results are their own programs' -- under GC stress too} -constraints {nativeLibraries nativeCCallbacks} -body {
+    set dir [nlDir]
+    lassign [nlCallbackHost $dir] declaration hostLibs hostSource
+    set a [nlLibrary $dir cba [string map [list DECLARATION $declaration] $::nlCallbackLibrary] {} -shared 0]
+    set b [nlLibrary $dir cbb {
+import std::int
+import std::list
+import std::str
+
+error Odd:
+    value: int
+
+exported c fn busy(n: int) -> int errors Odd:
+    if n < 0 or n > 1000000:
+        return 0
+    xs = loop i from 0 to 50:
+        std::str::concat("busy ", std::int::to_string(i))
+    if std::list::length(xs) != 50:
+        return -1
+    if n == 13:
+        fail Odd {value: n}
+    n + 7
+}]
+    set exe [nlExecutable $dir "[nlPrelude cba]
+#include \"cbb.h\"
+$hostSource
+static cbb_instance *helper;
+static long long call_busy(long long n) {
+    cbb_error *e = NULL; int64_t r = -1;
+    int32_t s = cbb_busy(helper, n, &r, &e);
+    if (s != cbb_STATUS_OK) {
+        const uint8_t *p; size_t l;
+        cbb_error_identity(e, &p, &l);
+        printf(\"busy(%lld): status %d %.*s\\n\", n, (int) s, (int) l, (const char *) p);
+        cbb_error_release(&e);
+        return -1;
+    }
+    return r;
+}
+int main(void) {
+    cba_instance *in; cba_error *e = NULL; cbb_error *be = NULL; int64_t r = -1;
+    check(\"create\", cba_create(&in, &e), &e);
+    if (cbb_create(&helper, &be) != cbb_STATUS_OK) return 1;
+    cbhost_register(1, call_busy);
+    for (int64_t n = 7; n <= 13; n += 6) {
+        int32_t s = cba_run(in, n, &r, &e);
+        if (s != cba_STATUS_OK) report(\"run\", s, &e);
+        else printf(\"run(%lld) = %lld\\n\", (long long) n, (long long) r);
+    }
+    cbb_destroy(helper);
+    check(\"destroy\", cba_destroy(in), NULL);
+    return 0;
+}
+" [list [nlLink $a] [nlLink $b] {*}$hostLibs]]
+    nlRunBoth $exe
+} -result {run(7) = 1426
+busy(13): status 1 Odd
+run(13) = -60}
+
 test nl-symbols {a library's only global symbols are its public C functions; its runtime and program are local} -constraints {elfLibraries nm} -body {
     set dir [nlDir]
     set built [nlLibrary $dir chk $::nlChecked]

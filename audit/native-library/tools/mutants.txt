@@ -375,10 +375,10 @@ proc native::library::TopLevelProblems {hir} {
 %% windows-x86_64
 ## native/src/codegen/mod.rs
 <<<<
-    for (id, size, info) in botlish.chain(public.iter().map(|p| (p.id, p.size, &p.unwind))) {
+    for (id, size, info) in botlish.chain(callbacks).chain(public.iter().map(|p| (p.id, p.size, &p.unwind))) {
 ====
     let _ = public;
-    for (id, size, info) in botlish {
+    for (id, size, info) in botlish.chain(callbacks) {
 >>>>
 
 @@ win64-convention-ignored the public functions take their arguments in System V's places, not the target's C convention

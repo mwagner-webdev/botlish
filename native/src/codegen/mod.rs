@@ -375,7 +375,7 @@ impl CraneliftJit {
             defines.push(result);
         }
         #[cfg(all(windows, target_arch = "x86_64"))]
-        let unwind_data = jitunwind::define_unwind_data(&mut module, &defines)?;
+        let unwind_data = jitunwind::define_unwind_data(&mut module, &defines, &symbols.callback_code)?;
         module.finalize_definitions().map_err(|e| BackendError::Codegen(format!("{e:?}")))?;
         // Registered before any of the code can run: the code is reachable
         // only through the CompiledProgram returned below.
@@ -704,7 +704,8 @@ fn define_program_record(
 }
 
 /// Adds the Windows x64 unwind sections to PRODUCT when its functions have
-/// unwind information (`DefineResult::direct_unwind`/`entry_unwind`: Windows
+/// unwind information (`DefineResult::direct_unwind`/`entry_unwind`, the C
+/// side of callbacks' `clif::Symbols::callback_code`: Windows
 /// x86-64's COFF object, both Windows environments alike): every function's
 /// `UNWIND_INFO` in `.xdata`, and in `.pdata` one `RUNTIME_FUNCTION` per
 /// function -- its start, its end and its `UNWIND_INFO`, image-relative
@@ -722,13 +723,15 @@ fn add_windows_unwind(
     use cranelift_object::object::write::{Relocation, SymbolSection};
     use cranelift_object::object::{RelocationEncoding, RelocationFlags, RelocationKind, SectionKind};
     // (section, offset in it, symbol, size, UNWIND_INFO) of every function:
-    // each Botlish function and generic entry, and a native library's public
-    // C functions (its forwarders and trampolines, codegen::library).
+    // each Botlish function and generic entry, each transition shim and
+    // callback entry point (codegen::callback), and a native library's
+    // public C functions (its forwarders and trampolines, codegen::library).
     let mut entries = Vec::new();
     let botlish = functions.iter().enumerate().flat_map(|(i, f)| {
         [(symbols.direct[i], f.direct_size, &f.direct_unwind), (symbols.entry[i], f.entry_size, &f.entry_unwind)]
     });
-    for (id, size, info) in botlish.chain(public.iter().map(|p| (p.id, p.size, &p.unwind))) {
+    let callbacks = symbols.callback_code.iter().map(|c| (c.id, c.size, &c.unwind));
+    for (id, size, info) in botlish.chain(callbacks).chain(public.iter().map(|p| (p.id, p.size, &p.unwind))) {
         let Some(info) = info else { continue };
         let symbol = product.function_symbol(id);
         let defined = product.object.symbol(symbol);

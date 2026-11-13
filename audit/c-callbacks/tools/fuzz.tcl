@@ -22,14 +22,22 @@
 #     constant the generator chose;
 #   * sometimes it allocates (a List of Strings, its length checked) and
 #     sometimes it calls C, which calls a second callback back -- nested in
-#     the same execution environment -- whose answer it checks.
+#     the same execution environment -- whose answer it checks;
+#   * about half the programs call the drivers from a coroutine's body,
+#     one per segment after its first yield, so the callbacks run with the
+#     coroutine's stack below them.
+#
+# Every host that runs callbacks runs it: Linux and macOS with cc, Windows
+# x86-64 with MSVC's cl (the Win64 convention's positions: an argument's
+# register is its position's, whatever the others' classes).
 #
 # C is the oracle: the driver compares every recorded word with the one it
 # passed and the result with the one it expects (floating values by their
 # bits), and returns how many were wrong; Botlish's own checks record a fault
 # C counts too. A program's value must be a list of zeros, on each native
-# backend of BACKENDS, also under GC stress with -gc-stress 1 (a collection
-# at every allocation, the callback's included).
+# backend of BACKENDS (and, for a coroutine's, cranelift-unfused when
+# BACKENDS has cranelift), also under GC stress with -gc-stress 1 (a
+# collection at every allocation, the callback's included).
 #
 # The last line is "programs N callbacks C calls K disagreements X" (exit
 # status 1 on any); every disagreement is printed with its directory, kept
@@ -268,7 +276,17 @@ proc programOf {callbacks} {
     append bot "\nfn churn(n: int) -> int:\n    xs = loop i from 0 to n:\n        std::str::concat(\"fuzz-item-\", std::int::to_string(i))\n    std::list::length(xs)\n\n"
     append bot "callback c fn leaf(x: std::ffi::c::Int) -> std::ffi::c::Int:\n    if churn(3) != 3 or x > 1000 or x < -1000:\n        return 0\n    x + 1\n\n"
     append bot $callbackDecls
-    append bot "fn run():\n$binds    \[[join $calls {, }]\]\n\nrun()\n"
+    if {$::inCoroutine} {
+        # The drivers run in a coroutine's body, one per segment after its
+        # first yield: on its own stack (a fiber on Windows) when it is not
+        # fused, its callback pointers held across the yields.
+        append bot "fn runner():\n    loop i from 0 to 1:\n        yield 0\n$binds"
+        foreach call [lrange $calls 0 end-1] { append bot "    yield $call\n" }
+        append bot "    [lindex $calls end]\n\n"
+        append bot "coroutine {step, first} = runner()\n\[[join [lrepeat [llength $calls] step()] {, }]\]\n"
+    } else {
+        append bot "fn run():\n$binds    \[[join $calls {, }]\]\n\nrun()\n"
+    }
     set expected "\[[join [lrepeat [llength $callbacks] 0] {, }]\]"
     return [list $c $bot $expected]
 }
@@ -286,7 +304,7 @@ set programs 0
 set callbackCount 0
 set callCount 0
 set disagreements 0
-set canRun [expr {[auto_execok cc] ne "" && ![catch {native::binary}] && [testConstraint nativeCCalls]
+set canRun [expr {[ctool::available] && ![catch {native::binary}] && [testConstraint nativeCCalls]
     && [testConstraint nativeCCallbacks] && [testConstraint cLinker]}]
 if {!$canRun} {
     puts "this host does not run C callbacks (or has no C compiler or native backend): nothing to fuzz"
@@ -298,20 +316,28 @@ for {set p 0} {$p < [dict get $options -n]} {incr p} {
     file mkdir $dir
     set problem ""
     set callbacks [lmap i [lrepeat [dict get $options -callbacks] 0] {drawCallback}]
+    set ::inCoroutine [chance 0.5]
     lassign [programOf $callbacks] csource main expected
     writeFile [file join $dir fz.c] $csource
     writeFile [file join $dir main.bot] $main
     if {[dict get $options -gc-stress]} { set ::env(BOTLISH_NATIVE_GC_STRESS) 1 }
     if {[catch {
-        exec cc -c -O2 -fPIC [file join $dir fz.c] -o [file join $dir fz.o]
-        exec ar rcs [file join $dir libbotlish_callback_fuzz.a] [file join $dir fz.o]
+        # The host's C toolchain (tests/ctoolchain.tcl): cc and ar, or on
+        # Windows MSVC's cl and lib (WINDOWS-X86-64-MILESTONE-9.md).
+        ctool::staticLibrary $dir botlish_callback_fuzz [file join $dir fz.c]
     } message]} {
         append problem "\nthe C library did not build: $message"
     } elseif {[catch {surface::compile $main main.bot -warnings off} hir]} {
         append problem "\nthe program did not compile: $hir"
     } else {
         native::withLinkDirs [list $dir] {
-            foreach backend [dict get $options -backends] {
+            set backends [dict get $options -backends]
+            if {$::inCoroutine && "cranelift" in $backends} {
+                # Fused, the coroutine is inlined into its consumer: the
+                # general runtime runs it on a stack of its own.
+                lappend backends cranelift-unfused
+            }
+            foreach backend $backends {
                 set got [outcome $backend $hir]
                 if {$got ne $expected} {
                     append problem "\non $backend: expected $expected\n  got $got"
@@ -329,7 +355,7 @@ for {set p 0} {$p < [dict get $options -n]} {incr p} {
         puts "DISAGREEMENT program $p ($dir):\n$problem"
         if {![dict get $options -keep]} { file delete -force $dir }
     } else {
-        if {[dict get $options -verbose]} { puts "program $p: ok" }
+        if {[dict get $options -verbose]} { puts "program $p: ok[expr {$::inCoroutine ? " (in a coroutine)" : ""}]" }
         file delete -force $dir
     }
 }

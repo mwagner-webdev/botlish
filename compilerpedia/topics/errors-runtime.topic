@@ -846,7 +846,12 @@ an address a C pointer word cannot hold). NATIVE CALLBACK FAILED is a run-
 time failure of the callback's body (its own error code in the message):
 since C has no error channel, the failure is never turned into a value C
 receives. The report is the driver's result line, or the message on
-standard error of a standalone executable (exit status 1).
+standard error of a standalone executable (exit status 1). Callbacks run on
+Linux x86-64 and AArch64, macOS AArch64 and Windows x86-64; NATIVE CALLBACK
+UNSUPPORTED is a driver built with its fallback root plan (a test build),
+whose collector cannot cross the C frames between a callback and the
+Botlish code waiting for C. NATIVE CALLBACK BUG is a defect of the runtime
+(the collector met a foreign call it cannot cross), never of the program.
 
 == WHAT TO DO
 Declare a callback parameter noescape only for a C function that calls it

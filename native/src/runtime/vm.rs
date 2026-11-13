@@ -459,12 +459,15 @@ impl Vm {
     }
 
     /// The native stack running now: the innermost running coroutine's, or
-    /// the thread's own (None on a host without stack discovery). Where a
-    /// callback must run (runtime::callback: on the stack its transition
-    /// left).
+    /// the stack the code outside every coroutine runs on -- a native
+    /// library's call's host-made stack (`entry_stack`: a host's fiber, a
+    /// `ucontext` stack), else the thread's own (None on a host without
+    /// stack discovery). Where a callback must run (runtime::callback: on the
+    /// stack its transition left), and what the collector walks
+    /// (`collect_with`'s `main_stack`, the same choice).
     pub fn running_stack(&self) -> Option<NativeStack> {
         if self.co_current.is_null() {
-            self.native_stack
+            self.entry_stack.or(self.native_stack)
         } else {
             // SAFETY: a running coroutine is alive while it runs.
             unsafe { (*self.co_current).stack.as_ref().map(|s| s.bounds()) }
@@ -546,6 +549,13 @@ impl Vm {
         self.const_table = table;
         self.consts = self.const_table.as_ptr();
         self.statics = statics;
+    }
+
+    /// This program's stack-map table: what Botlish code is, for the
+    /// unwind check of a foreign transition (runtime::callback, Windows).
+    #[cfg(all(windows, target_arch = "x86_64"))]
+    pub fn framemap(&self) -> &ProgramMap {
+        &self.framemap
     }
 
     /// Installs this program's stack-map table (see `framemap`'s own doc).

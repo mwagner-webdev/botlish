@@ -2,19 +2,24 @@
 # (C-CALLBACK-MILESTONE-1.md).
 #
 #   tclsh9.0 audit/c-callbacks/tools/mutate.tcl ?-only NAME,...? ?-tests FILES?
+#                                               ?-match PATTERNS?
 #                                               ?-fuzz-count N? ?-fuzz-seed N?
-#                                               ?-timeout SECONDS?
+#                                               ?-timeout SECONDS? ?-first 0|1?
 #
 # Each mutant is a deliberate bug, written in mutants.txt (beside this
 # script) as exact source replacements, each replaced text occurring exactly
 # once. A mutant of code one host compiles differently (a `%% TARGET ...`
-# line after its header: linux-x86_64, linux-aarch64, macos-aarch64) runs
-# only on those hosts and is SKIPPED elsewhere. For each, a private copy of
+# line after its header: linux-x86_64, linux-aarch64, macos-aarch64,
+# windows-x86_64) runs only on those hosts and is SKIPPED elsewhere (on
+# Windows the tier item `c-callbacks-mutants`, WINDOWS-X86-64-MILESTONE-9.md). For each, a private copy of
 # the compiler, library and native backend (a temporary directory) gets the
 # replacements, and the detectors run against it:
 #
 #   * the test files FILES (default tests/c-callbacks.test, each with a
-#     private -tmpdir): killed if any test fails or a file does not complete;
+#     private -tmpdir; with -match only the tests PATTERNS name, tcltest's
+#     -match: `-tests "tests/c-callbacks.test tests/native-library.test"
+#     -match "cb-* nl-callbacks*"` for the library mutants): killed if any
+#     test fails or a file does not complete;
 #   * audit/c-callbacks/tools/fuzz.tcl -n N -seed S (random callbacks and C
 #     drivers that check every argument and result, on both native
 #     backends, once under GC stress): killed if it reports a disagreement
@@ -26,22 +31,26 @@
 #     the runtime's descriptor and result words, the cross-target entry
 #     points and shims): killed if one fails.
 #
-# Mutants that edit only Tcl run first, against the copy's unmodified native
-# build; native mutants follow, each rebuilding the copy. A mutant every
+# The detectors run in that order: the test files, the fuzzer, the Rust
+# tests. With -first 1 a mutant's later detectors do not run once one has
+# killed it (reported "not run": the tier items on Windows, where a mutant's
+# every detector would take a quarter of an hour). Mutants that edit only
+# Tcl run first, against the copy's unmodified native build; native mutants
+# follow, each rebuilding the copy. A mutant every
 # detector misses SURVIVES. The real checkout, including its native/target,
 # is never modified.
 
 set root [file dirname [file dirname [file dirname [file dirname [file normalize [info script]]]]]]
 
-set options [dict create -only "" -tests {tests/c-callbacks.test} -fuzz-count 3 -fuzz-seed 7 -timeout 2400]
+set options [dict create -only "" -tests {tests/c-callbacks.test} -match "" -fuzz-count 3 -fuzz-seed 7 -timeout 2400 -first 0]
 foreach {option value} $argv {
     if {![dict exists $options $option]} { error "unknown option $option" }
     dict set options $option $value
 }
 
 # This host's target, named as core::cabi names it (linux-x86_64,
-# linux-aarch64, macos-aarch64).
-set host [string cat [expr {$::tcl_platform(os) eq "Darwin" ? "macos" : [string tolower $::tcl_platform(os)]}] - \
+# linux-aarch64, macos-aarch64, windows-x86_64).
+set host [string cat [expr {$::tcl_platform(os) eq "Darwin" ? "macos" : $::tcl_platform(platform) eq "windows" ? "windows" : [string tolower $::tcl_platform(os)]}] - \
     [expr {$::tcl_platform(machine) in {arm64 aarch64} ? "aarch64" : ($::tcl_platform(machine) in {amd64 x86_64} ? "x86_64" : $::tcl_platform(machine))}]]
 
 # The mutants of mutants.txt (its header has the format), as
@@ -137,7 +146,8 @@ set selected [concat $selected $nativeSelected]
 # the native backend. Its native/target is a real copy when a native mutant
 # is selected (it is rebuilt), else a link to this checkout's.
 set tree [file tempdir botlish-callback-mutants]
-foreach dir {compiler core hir surface stdlib tests examples audit/c-callbacks compilerpedia .cargo} {
+# (lsp: native-library.test reads its JSON, for the library mutants' -tests.)
+foreach dir {compiler core hir surface stdlib tests examples audit/c-callbacks compilerpedia lsp .cargo} {
     if {![file exists [file join $root $dir]]} continue
     file mkdir [file dirname [file join $tree $dir]]
     file copy [file join $root $dir] [file join $tree $dir]
@@ -167,7 +177,9 @@ foreach entry [glob -directory $root -types f *.tcl] {
 # runs longer than TIMEOUT seconds. No timeout(1): macOS has none.
 proc run {timeout args} {
     set pipe [open |[concat $args [list 2>@1]] r]
-    fconfigure $pipe -blocking 0 -translation lf -encoding utf-8
+    # auto: a Windows child's lines end in CRLF, and a line still holding
+    # its carriage return matches no `FAILED$` (every test failure missed).
+    fconfigure $pipe -blocking 0 -translation auto -encoding utf-8
     set ::runOutput ""
     set ::runDone 0
     fileevent $pipe readable [list apply {{pipe} {
@@ -178,7 +190,16 @@ proc run {timeout args} {
     vwait ::runDone
     after cancel $timer
     if {$::runDone eq "timeout"} {
-        catch {exec kill -9 {*}[pid $pipe]}
+        # The whole process tree: on Windows a test file's hung executable
+        # would keep the copy's botlish-native.exe locked, and every later
+        # mutant's build would fail (taskkill; there is no kill).
+        foreach id [pid $pipe] {
+            if {$::tcl_platform(platform) eq "windows"} {
+                catch {exec taskkill /F /T /PID $id}
+            } else {
+                catch {exec kill -9 $id}
+            }
+        }
         catch {close $pipe}
         return [list timeout $::runOutput]
     }
@@ -245,21 +266,14 @@ try {
                 }
                 continue
             }
-            # The callbacks' Rust unit tests, in the copy.
-            lassign [run [dict get $options -timeout] cargo test --release --manifest-path $manifest callback] status output
             cd $here
-            if {$status != 0} {
-                set failed [lmap {- n} [regexp -all -inline -line {^test (\S+) \.\.\. FAILED$} $output] {set n}]
-                set rust "killed ([expr {$failed eq {} ? "did not complete: [lastLine $output]" : "[llength $failed] failed: [join $failed {, }]"}])"
-            } else {
-                set rust survived
-            }
         }
         set failedTests {}
         set incomplete ""
         foreach testFile [dict get $options -tests] {
             set tmp [file tempdir botlish-callback-mutant-run]
-            lassign [run [dict get $options -timeout] tclsh9.0 [file join $tree $testFile] -tmpdir $tmp] status output
+            set match [expr {[dict get $options -match] ne "" ? [list -match [dict get $options -match]] : {}}]
+            lassign [run [dict get $options -timeout] tclsh9.0 [file join $tree $testFile] -tmpdir $tmp {*}$match] status output
             file delete -force $tmp
             lappend failedTests {*}[lmap {- n} [regexp -all -inline -line {^==== (\S+) .*FAILED$} $output] {set n}]
             if {$incomplete eq "" && ![regexp {Total\s+\d+\s+Passed\s+\d+\s+Skipped\s+\d+\s+Failed\s+(\d+)} $output]} {
@@ -275,11 +289,12 @@ try {
             set tests survived
         }
         set golden ""
+        set firstOnly [dict get $options -first]
         set scratch [file tempdir botlish-callback-mutant-fuzz]
         set here [pwd]
         cd $scratch
         set fuzz survived
-        foreach stress {0 1} {
+        foreach stress [expr {$firstOnly && [string match killed* $tests] ? {} : {0 1}}] {
             lassign [run [dict get $options -timeout] tclsh9.0 [file join $tree audit c-callbacks tools fuzz.tcl] \
                 -n [dict get $options -fuzz-count] -seed [dict get $options -fuzz-seed] -gc-stress $stress -keep 0] status output
             if {[regexp {programs \d+ callbacks \d+ calls \d+ disagreements (\d+)} [lindex [split [string trim $output] \n] end] -> n]} {
@@ -294,6 +309,24 @@ try {
         }
         cd $here
         file delete -force $scratch
+        if {$firstOnly && [string match killed* $tests]} {
+            set fuzz "not run"
+        }
+        if {$native && $firstOnly && ([string match killed* $tests] || [string match killed* $fuzz])} {
+            set rust "not run"
+        } elseif {$native} {
+            # The callbacks' Rust unit tests, in the copy (its
+            # .cargo/config.toml found from the working directory).
+            cd $tree
+            lassign [run [dict get $options -timeout] cargo test --release --manifest-path $manifest callback] status output
+            cd $here
+            if {$status != 0} {
+                set failed [lmap {- n} [regexp -all -inline -line {^test (\S+) \.\.\. FAILED$} $output] {set n}]
+                set rust "killed ([expr {$failed eq {} ? "did not complete: [lastLine $output]" : "[llength $failed] failed: [join $failed {, }]"}])"
+            } else {
+                set rust survived
+            }
+        }
         set verdict [expr {[string match killed* $tests] || [string match killed* $fuzz] || [string match killed* $rust] ? "KILLED" : "SURVIVED"}]
         lappend results [list $name $description $verdict $tests $golden $fuzz $rust]
         puts "$verdict $name -- $description\n    tests:  $tests"
@@ -307,7 +340,11 @@ try {
         }
     }
 } finally {
-    file delete -force $tree
+    # A file a killed process held may not go yet (Windows): never let the
+    # cleanup hide the verdicts.
+    if {[catch {file delete -force $tree} message]} {
+        puts "the private tree $tree was not removed: $message"
+    }
 }
 
 set survivors [lmap r $results {if {[lindex $r 2] ne "SURVIVED"} continue; lindex $r 0}]

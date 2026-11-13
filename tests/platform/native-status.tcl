@@ -6,7 +6,9 @@
 # Runs one small probe per native capability -- the JIT, the GC's frame walk
 # under stress, a native stack overflow (of the thread's stack and of a
 # coroutine's), coroutines (fused and on the general runtime, coroutine
-# fusion off: COROUTINE-FUSION-MILESTONE-1.md), a Linux syscall, a C call, byte storage exposed
+# fusion off: COROUTINE-FUSION-MILESTONE-1.md), a Linux syscall, a C call, a
+# C callback under GC stress (the system C library's qsort calling a
+# Botlish comparator: C-CALLBACK-MILESTONE-1.md), byte storage exposed
 # to the system C library, Darwin I/O (libSystem's read and write, errno,
 # the portable std::io::IO through DarwinIO, an executable), Windows I/O
 # (kernel32's WriteFile, the portable std::io::IO through WindowsIO, an
@@ -173,6 +175,58 @@ extern c fn labs(x: std::ffi::c::Long) -> std::ffi::c::Long
 
 labs(-5)
 } {}] \
+    c-callback [list program {direct module
+import std::ffi::c
+import std::abi::bytes
+import std::binary
+import std::binary::native
+import std::byte
+import std::str
+
+extern c fn qsort(base: std::ffi::c::Ptr[std::ffi::c::Void] write noescape, count: std::ffi::c::ULongLong, size: std::ffi::c::ULongLong, compare: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Ptr[std::ffi::c::Void], std::ffi::c::Ptr[std::ffi::c::Void]], return: std::ffi::c::Int}] noescape) -> unit
+
+layout Byte:
+    size 1
+    align 1
+    field v: std::binary::U8 at 0
+
+# A synchronous C callback (C-CALLBACK-MILESTONE-1.md): the system C
+# library's qsort sorts byte storage with a Botlish comparator, which
+# allocates (a collection at every allocation: the probe runs under GC
+# stress) while the Botlish caller waits in qsort, its values rooted across
+# C's frames (WINDOWS-X86-64-MILESTONE-9.md on Windows). size_t is
+# unsigned long long, 64 bits on every target here.
+fn byte(n: int) -> std::byte::Byte:
+    if n >= 0 and n <= 255:
+        return n
+    0
+
+fn bytes(values: List[int]) -> std::abi::bytes::Bytes:
+    bs = loop n in values:
+        byte(n)
+    std::abi::bytes::from_list(bs)
+
+callback c fn compare(a: std::ffi::c::Ptr[std::ffi::c::Void], b: std::ffi::c::Ptr[std::ffi::c::Void]) -> std::ffi::c::Int:
+    held = std::str::concat("held-", "value")
+    x = std::binary::native::view(Byte, a):
+        on NativeViewNull:
+            return 0
+    y = std::binary::native::view(Byte, b):
+        on NativeViewNull:
+            return 0
+    if std::str::length(held) != 10:
+        return 0
+    if x.v < y.v:
+        return -1
+    if x.v > y.v:
+        return 1
+    0
+
+data = std::abi::bytes::from_bytes(bytes([9, 3, 7, 1, 8, 2, 200, 0]))
+cmp = std::ffi::c::callback(compare)
+sorted = qsort(data, 8, 1, cmp)
+[std::abi::bytes::freeze(sorted.base) == bytes([0, 1, 2, 3, 7, 8, 9, 200]), std::abi::bytes::freeze(data) == bytes([9, 3, 7, 1, 8, 2, 200, 0])]
+} {BOTLISH_NATIVE_GC_STRESS 1}] \
     c-access-violation [list program {direct module
 import std::ffi::c
 
@@ -447,6 +501,7 @@ set linux [dict create \
     coroutine-general {value {[10, 7]}} \
     linux-syscall {value 0} \
     c-call {value 5} \
+    c-callback {value {[true, true]}} \
     c-access-violation {error {NATIVE BUG} {the linked program reported no result (signal: 11 (SIGSEGV)*}} \
     c-byte-borrow {value {[true, true, 0, true, 0]}} \
     darwin-read-write {error {SURFACE MODULE UNSUPPORTED-PLATFORM} {*namespace "std::darwin" belongs to the macOS platform (the standard namespace std::darwin and every namespace under it)*unavailable for target linux-*}} \
@@ -484,6 +539,7 @@ set expected [dict create \
         coroutine-general {value {[10, 7]}} \
         linux-syscall {error {SURFACE MODULE UNSUPPORTED-PLATFORM} {*namespace "std::linux" belongs to the Linux platform*unavailable for target macos-aarch64 (macOS on aarch64)*}} \
         c-call {value 5} \
+        c-callback {value {[true, true]}} \
         c-access-violation {error {NATIVE BUG} {the linked program reported no result (signal: *}} \
         c-byte-borrow {value {[true, true, 0, true, 0]}} \
         darwin-read-write {value {[0, 0, -1, 9]}} \
@@ -514,6 +570,7 @@ set expected [dict create \
         coroutine-general {value {[10, 7]}} \
         linux-syscall {error {SURFACE MODULE UNSUPPORTED-PLATFORM} {*namespace "std::linux" belongs to the Linux platform*unavailable for target windows-x86_64 (Windows on x86_64)*}} \
         c-call {value 5} \
+        c-callback {value {[true, true]}} \
         c-access-violation {error {NATIVE BUG} {the linked program reported no result (exit code: * (0xc0000005))}} \
         c-byte-borrow {value {[true, true, 0, true, 0]}} \
         darwin-read-write {error {SURFACE MODULE UNSUPPORTED-PLATFORM} {*namespace "std::darwin" belongs to the macOS platform*unavailable for target windows-x86_64 (Windows on x86_64)*}} \

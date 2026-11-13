@@ -290,6 +290,43 @@ fn terminate(executable: bool) -> ! {
     unsafe { std::arch::asm!("int 0x29", in("ecx") 7, options(noreturn, nostack)) }
 }
 
+/// Writes the fatal report of a run that cannot go on and ends the process
+/// (C-CALLBACK-MILESTONE-1.md, WINDOWS-X86-64-MILESTONE-9.md: a callback C
+/// called that failed, or that ran where no execution environment permits
+/// it), as the POSIX guard's `report_fatal` does: RESULT, the driver's
+/// result line, to the record's destination (the `--result` file) with exit
+/// status 0 while a driver's guard is installed -- after this thread's label
+/// when the guard is this thread's own; a thread C created holds none, and
+/// its report is the process's, through any guarded thread's record -- else
+/// LINE on standard error with exit status 1 (a standalone executable, a
+/// native library's host). Only WriteFile and TerminateProcess, and the
+/// records' atomic lookups: it runs inside C's frames, whose locks the C
+/// runtime's exit handlers might need, and never returns to them.
+pub fn report_fatal(result: &[u8], line: &[u8]) -> ! {
+    let own = records::find(thread_token());
+    let record = own.or_else(records::any).filter(|r| !r.executable());
+    match record {
+        Some(record) => {
+            let out = record.destination() as HANDLE;
+            if own.is_some() {
+                let mut label = [0u8; records::LABEL_BYTES];
+                let len = record.label(&mut label);
+                write_all(out, &label[..len]);
+            }
+            write_all(out, result);
+        }
+        // SAFETY: GetStdHandle has no preconditions; a null or invalid
+        // handle makes WriteFile fail, which ends the attempt.
+        None => write_all(unsafe { GetStdHandle(STD_ERROR_HANDLE) }, line),
+    }
+    let status = if record.is_some() { 0 } else { 1 };
+    // SAFETY: ends this process; TerminateProcess of the calling process
+    // does not return.
+    unsafe { TerminateProcess(GetCurrentProcess(), status) };
+    // SAFETY: __fastfail(FAST_FAIL_FATAL_APP_EXIT), should it have returned.
+    unsafe { std::arch::asm!("int 0x29", in("ecx") 7, options(noreturn, nostack)) }
+}
+
 /// The installed guard of one thread: its record and, while any guard is
 /// installed, the process's vectored handler, first in the chain. Dropping
 /// it releases the record; the last one dropped removes the handler (the

@@ -29,7 +29,7 @@ pub use linux::{current_stack, thread_token};
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 pub use macos::{current_stack, thread_token};
 #[cfg(all(windows, target_arch = "x86_64", target_env = "msvc"))]
-pub use windows::{current_stack, guarded_threads, published_stack, set_active_stack, set_result_file, thread_token, OverflowGuard};
+pub use windows::{current_stack, guarded_threads, published_stack, report_fatal, set_active_stack, set_result_file, thread_token, OverflowGuard};
 
 /// A guard record reserved for a Botlish thread that does not run yet
 /// (runtime/thread.rs, BOTLISH-OWNED-THREADS-AND-CROSS-THREAD-ACTORS-

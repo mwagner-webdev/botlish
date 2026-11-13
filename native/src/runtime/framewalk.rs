@@ -130,6 +130,18 @@ pub const NATIVE_FRAME_ROOTS: bool = cfg!(all(
     not(feature = "fallback-roots")
 ));
 
+/// Whether this host's walk crosses a foreign transition (C-CALLBACK-
+/// MILESTONE-1.md, runtime::callback): whether `walk_segmented` and
+/// `walk_from_segmented` jump from a callback's entry frame to the frame
+/// record of the transition shim its Botlish caller called C through,
+/// never reading the C frames between. The frame-pointer walk does
+/// (`walk_from_segmented`, Linux and macOS), and the Windows walk does since
+/// WINDOWS-X86-64-MILESTONE-9.md (`windows::walk_context`'s jumps); a host
+/// with no walk (the stubs at the end of this file) does not. With
+/// `NATIVE_FRAME_ROOTS` it is what makes callbacks run
+/// (runtime::callback's `SUPPORTED`).
+pub const CROSSES_TRANSITIONS: bool = cfg!(any(target_arch = "x86_64", target_arch = "aarch64"));
+
 /// Defensive cap against a malformed frame-pointer chain. The native
 /// stack bound is the authoritative address range on Linux.
 const MAX_FRAMES: usize = 1 << 22;
@@ -357,12 +369,8 @@ pub fn walk_from_segmented(map: &ProgramMap, start: usize, stack: Option<&Native
 /// must be restored from inside the frame. A difference ends the process
 /// with a NATIVE BUG report (`windows::check_failed`).
 #[cfg(all(target_arch = "x86_64", windows))]
-pub fn walk(map: &ProgramMap, stack: Option<&NativeStack>, mut visit: impl FnMut(*mut Value)) {
-    if !NATIVE_FRAME_ROOTS {
-        return;
-    }
-    let mut context = windows::Context::captured();
-    windows::walk_context(map, &mut context, stack, windows::unwind_check(), &mut visit);
+pub fn walk(map: &ProgramMap, stack: Option<&NativeStack>, visit: impl FnMut(*mut Value)) {
+    walk_segmented(map, stack, &[], visit)
 }
 
 /// `walk` of a stack that is not running now -- a suspended coroutine's, or
@@ -377,24 +385,49 @@ pub fn walk(map: &ProgramMap, stack: Option<&NativeStack>, mut visit: impl FnMut
 ///
 /// Without `NATIVE_FRAME_ROOTS` it walks nothing, as elsewhere.
 #[cfg(all(target_arch = "x86_64", windows))]
-pub fn walk_from(map: &ProgramMap, start: windows::Frame, stack: Option<&NativeStack>, mut visit: impl FnMut(*mut Value)) {
+pub fn walk_from(map: &ProgramMap, start: windows::Frame, stack: Option<&NativeStack>, visit: impl FnMut(*mut Value)) {
+    walk_from_segmented(map, start, stack, &[], visit)
+}
+
+/// `walk` across the foreign transitions JUMPS (C-CALLBACK-MILESTONE-1.md,
+/// WINDOWS-X86-64-MILESTONE-9.md): a stack that holds, between two Botlish
+/// activations of one execution environment, a transition shim, C's frames
+/// and a callback's entry point. C's frames are never unwound -- neither by
+/// a frame record (MSVC keeps none) nor by Windows' unwinder, which would
+/// need every C function to describe its frame truthfully (a function
+/// without a function table entry is taken for a leaf, and hand-written
+/// assembly may have none). Each pair (ENTRY, TRANSITION) names the frame
+/// the walk jumps from and the one it jumps to: ENTRY is the stack pointer
+/// of the callback's entry frame -- runtime::callback's `run`, whose body
+/// keeps one stack pointer (`frame_record` reads it there), which is the
+/// RSP the walk has when it arrives in that frame from the Botlish callback
+/// `run` called -- and TRANSITION the frame record of the transition shim
+/// (codegen::callback: Cranelift's `push rbp; mov rbp, rsp`, read at the
+/// shim's call of `rt_ffi_open`). The shim is an ordinary callee of the
+/// Botlish frame that called C, so the walk resumes in that frame exactly as
+/// the frame-record step of any Botlish callee does: RIP the shim's return
+/// address `[t + 8]` (the call's safepoint, whose stack map holds the
+/// frame's live roots), RSP `t + 16` (its stack pointer at the call), RBP
+/// `[t]`. Everything between -- `run`'s callers in the runtime, the entry
+/// point, C, the shim -- is skipped, never read. Pairs nest (a callback that
+/// calls C that calls back), each ENTRY distinct (`windows::walk_context`).
+#[cfg(all(target_arch = "x86_64", windows))]
+pub fn walk_segmented(map: &ProgramMap, stack: Option<&NativeStack>, jumps: &[(usize, usize)], mut visit: impl FnMut(*mut Value)) {
+    if !NATIVE_FRAME_ROOTS {
+        return;
+    }
+    let mut context = windows::Context::captured();
+    windows::walk_context(map, &mut context, stack, windows::unwind_check(), jumps, &mut visit);
+}
+
+/// `walk_from` across the foreign transitions JUMPS (`walk_segmented`).
+#[cfg(all(target_arch = "x86_64", windows))]
+pub fn walk_from_segmented(map: &ProgramMap, start: windows::Frame, stack: Option<&NativeStack>, jumps: &[(usize, usize)], mut visit: impl FnMut(*mut Value)) {
     if !NATIVE_FRAME_ROOTS {
         return;
     }
     let mut context = windows::Context::at(start);
-    windows::walk_context(map, &mut context, stack, windows::unwind_check(), &mut visit);
-}
-
-/// Windows makes no foreign transitions (C callbacks are refused there,
-/// runtime::callback's `SUPPORTED`): JUMPS is always empty.
-#[cfg(all(target_arch = "x86_64", windows))]
-pub fn walk_segmented(map: &ProgramMap, stack: Option<&NativeStack>, _jumps: &[(usize, usize)], visit: impl FnMut(*mut Value)) {
-    walk(map, stack, visit)
-}
-
-#[cfg(all(target_arch = "x86_64", windows))]
-pub fn walk_from_segmented(map: &ProgramMap, start: windows::Frame, stack: Option<&NativeStack>, _jumps: &[(usize, usize)], visit: impl FnMut(*mut Value)) {
-    walk_from(map, start, stack, visit)
+    windows::walk_context(map, &mut context, stack, windows::unwind_check(), jumps, &mut visit);
 }
 
 #[cfg(all(target_arch = "x86_64", windows))]
@@ -450,6 +483,12 @@ pub mod windows {
     /// collector's way across Rust frames costs, in RtlVirtualUnwind calls.
     static WALKS: AtomicUsize = AtomicUsize::new(0);
     static UNWOUND: AtomicUsize = AtomicUsize::new(0);
+    /// The check's foreign transitions: jumps the walks made across one,
+    /// transitions opened (`check_transition`) and callbacks entered
+    /// (`check_entry_point`), each compared with Windows' unwinder.
+    static JUMPED: AtomicUsize = AtomicUsize::new(0);
+    static TRANSITIONS: AtomicUsize = AtomicUsize::new(0);
+    static ENTRY_POINTS: AtomicUsize = AtomicUsize::new(0);
 
     /// Whether BOTLISH_NATIVE_UNWIND_CHECK=1 (read once), or a test turned
     /// the check on (`force_unwind_check`).
@@ -468,6 +507,13 @@ pub mod windows {
     /// test's evidence that it ran.
     pub fn checked_frames() -> usize {
         CHECKED.load(Ordering::Relaxed)
+    }
+
+    /// How many transition shims and callback entry points the check has
+    /// compared with Windows' unwinder, and how many jumps across a foreign
+    /// transition it has checked, in this process (tests).
+    pub fn transition_counts() -> (usize, usize, usize) {
+        (TRANSITIONS.load(Ordering::Relaxed), ENTRY_POINTS.load(Ordering::Relaxed), JUMPED.load(Ordering::Relaxed))
     }
 
     static CHECKED_FUNCTIONS: AtomicUsize = AtomicUsize::new(0);
@@ -509,15 +555,29 @@ pub mod windows {
     /// functions' entries and Botlish frames it compared, when it is on and
     /// a program ran (a command that only compiles or links has nothing to
     /// account for, and prints nothing).
+    ///
+    /// A run that made foreign transitions (C-CALLBACK-MILESTONE-1.md) adds
+    /// what the check compared of them: the transition shims and callback
+    /// entry points Windows unwound (`check_transition`,
+    /// `check_entry_point`) and the walks' jumps across one (`walk_context`).
+    /// A run without one prints the line it always printed.
     pub fn summary() -> Option<String> {
         (unwind_check() && CHECKED_FUNCTIONS.load(Ordering::Relaxed) > 0).then(|| {
-            format!(
+            let mut line = format!(
                 "native unwind check: {} functions, {} Botlish frames, every one as Windows unwinds it; {} walks unwound {} other frames",
                 CHECKED_FUNCTIONS.load(Ordering::Relaxed),
                 CHECKED.load(Ordering::Relaxed),
                 WALKS.load(Ordering::Relaxed),
                 UNWOUND.load(Ordering::Relaxed)
-            )
+            );
+            let (transitions, entries, jumped) =
+                (TRANSITIONS.load(Ordering::Relaxed), ENTRY_POINTS.load(Ordering::Relaxed), JUMPED.load(Ordering::Relaxed));
+            if transitions + entries + jumped > 0 {
+                line.push_str(&format!(
+                    "; {transitions} transition shims and {entries} callback entry points as Windows unwinds them, {jumped} jumps across a foreign transition"
+                ));
+            }
+            line
         })
     }
 
@@ -555,8 +615,20 @@ pub mod windows {
         true
     }
 
-    /// `super::walk` from CONTEXT, within STACK (the thread's own when None).
-    pub fn walk_context(map: &ProgramMap, context: &mut Context, stack: Option<&NativeStack>, check: bool, visit: &mut dyn FnMut(*mut Value)) {
+    /// `super::walk` from CONTEXT, within STACK (the thread's own when None),
+    /// across the foreign transitions JUMPS (`super::walk_segmented`): a
+    /// frame that is no Botlish code and whose stack pointer is a jump's
+    /// entry -- runtime::callback's `run` -- is not unwound; the walk goes on
+    /// in the Botlish frame that called C, from the transition shim's frame
+    /// record (`jump`).
+    pub fn walk_context(
+        map: &ProgramMap,
+        context: &mut Context,
+        stack: Option<&NativeStack>,
+        check: bool,
+        jumps: &[(usize, usize)],
+        visit: &mut dyn FnMut(*mut Value),
+    ) {
         let (low, high) = stack.map_or_else(thread_stack, |s| (s.low_bound, s.high_bound));
         let within = |address: usize, size: usize| address >= low && address.checked_add(size).is_some_and(|end| end <= high);
         if check {
@@ -586,6 +658,19 @@ pub mod windows {
                 context.0.Rip = ret;
                 context.0.Rsp = fp as u64 + 16;
                 context.0.Rbp = caller_fp;
+            } else if let Some(&(_, transition)) = jumps.iter().find(|&&(entry, _)| entry == sp) {
+                // A callback's entry frame: the next frame walked is the
+                // Botlish one that called C (`jump`).
+                if check {
+                    check_entry_frame(pc, sp);
+                }
+                let (ret, rsp, rbp) = jump(map, sp, transition, &within);
+                context.0.Rip = ret;
+                context.0.Rsp = rsp;
+                context.0.Rbp = rbp;
+                if check {
+                    JUMPED.fetch_add(1, Ordering::Relaxed);
+                }
             } else {
                 // SAFETY: the context is exact for this frame (super::walk).
                 unsafe { unwind_one(context, None) };
@@ -597,6 +682,151 @@ pub mod windows {
                 break;
             }
         }
+    }
+
+    /// The step across a foreign transition: from the callback entry frame
+    /// at stack pointer SP to the Botlish frame that called C through the
+    /// transition shim whose frame record is at TRANSITION -- its (RIP, RSP,
+    /// RBP) at its call of the shim: the shim's return address, the record's
+    /// address plus 16, the frame pointer the record saved (Cranelift's
+    /// frame record, as the Botlish step reads every callee's). The record
+    /// must lie on the walked stack above SP (8-aligned: the frame register
+    /// of a Cranelift frame), and its return address must be Botlish code
+    /// -- the shim is called by Botlish code only. Anything else is a defect
+    /// of the runtime, never a walk to guess on: the process ends, NATIVE
+    /// CALLBACK BUG (`transition_failed`).
+    fn jump(map: &ProgramMap, sp: usize, transition: usize, within: &dyn Fn(usize, usize) -> bool) -> (u64, u64, u64) {
+        if transition <= sp || transition % 8 != 0 || !within(transition, 16) {
+            transition_failed(sp, transition, "the transition's frame record is not on the walked stack above the callback's entry frame");
+        }
+        // SAFETY: a frame record inside the walked stack (checked above):
+        // the live transition shim's, which stays until its C call returns.
+        let (caller_fp, ret) = unsafe { (*(transition as *const u64), *((transition + 8) as *const u64)) };
+        if map.find(ret as usize).is_none() {
+            transition_failed(sp, transition, &format!("its return address {ret:#x} is no Botlish code"));
+        }
+        (ret, transition as u64 + 16, caller_fp)
+    }
+
+    /// Ends the process with the report of a foreign transition the walk
+    /// cannot cross (`jump`): a NATIVE CALLBACK BUG.
+    fn transition_failed(sp: usize, transition: usize, what: &str) -> ! {
+        eprintln!(
+            "native frame walk: the callback entry frame at {sp:#x} jumps to the transition shim's frame record at {transition:#x}: {what} (NATIVE CALLBACK BUG)"
+        );
+        std::process::abort();
+    }
+
+    /// BOTLISH_NATIVE_UNWIND_CHECK: the frame a jump leaves (its RIP PC, its
+    /// RSP SP) is runtime::callback's `run` -- its function table entry is
+    /// that function's -- and no other frame of the stack.
+    fn check_entry_frame(pc: usize, sp: usize) {
+        let begin = |address: usize| {
+            let mut image_base = 0u64;
+            // SAFETY: looks up an address of this process's code.
+            let entry = unsafe { RtlLookupFunctionEntry(address as u64, &mut image_base, std::ptr::null_mut()) };
+            // SAFETY: a function entry Windows returned.
+            (!entry.is_null()).then(|| image_base as usize + unsafe { (*entry).BeginAddress } as usize)
+        };
+        let run = crate::runtime::callback::entry_frame_function();
+        if begin(pc).is_none() || begin(pc) != begin(run) {
+            check_failed(pc as u64, &format!("a jump across a foreign transition leaves the frame at {sp:#x}, which is not the callback entry frame's (runtime::callback's run, at {run:#x})"));
+        }
+    }
+
+    /// BOTLISH_NATIVE_UNWIND_CHECK, at a transition's opening (runtime::
+    /// callback's `rt_ffi_open_at`, its caller): Windows' unwinder, from this
+    /// function's own context, unwinds `rt_ffi_open_at` into the transition
+    /// shim -- whose frame register must be RECORD, the frame record the
+    /// transition holds -- and unwinds the shim, from its own function table
+    /// entry, to exactly what the walk's jump makes of RECORD: the Botlish
+    /// caller's (RIP, RSP, RBP) at its call of the shim. The record the
+    /// walk will jump to is the shim's, and the shim's unwind information
+    /// describes it. A difference ends the process (`check_failed`).
+    #[inline(never)]
+    pub fn check_transition(map: &ProgramMap, record: usize) {
+        let mut context = Context::captured();
+        // SAFETY: an exact context of this thread: this function's, then
+        // rt_ffi_open_at's (its caller; the naked rt_ffi_open jumped to it
+        // and left no frame), then the shim's.
+        unsafe {
+            unwind_one(&mut context, None);
+            unwind_one(&mut context, None);
+        }
+        let pc = context.0.Rip;
+        if context.0.Rbp as usize != record {
+            check_failed(pc, &format!("the transition records the frame record {record:#x}, but its shim's frame register is {:#x}", context.0.Rbp));
+        }
+        let mut image_base = 0u64;
+        // SAFETY: looks up an address of the shim's code.
+        if unsafe { RtlLookupFunctionEntry(pc, &mut image_base, std::ptr::null_mut()) }.is_null() {
+            check_failed(pc, "the transition shim has no function table entry: Windows takes it for a leaf");
+        }
+        // SAFETY: the shim's frame record, live (its function is running).
+        let expected = unsafe { (*((record + 8) as *const u64), record as u64 + 16, *(record as *const u64)) };
+        // SAFETY: the context is exact for the shim's frame.
+        unsafe { unwind_one(&mut context, None) };
+        let got = (context.0.Rip, context.0.Rsp, context.0.Rbp);
+        if got != expected {
+            check_failed(pc, &format!("Windows unwinds the transition shim to (rip, rsp, rbp) {got:#x?}, its frame record to {expected:#x?}"));
+        }
+        if map.find(expected.0 as usize).is_none() {
+            check_failed(pc, &format!("the transition shim returns to {:#x}, which is no Botlish code", expected.0));
+        }
+        TRANSITIONS.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// BOTLISH_NATIVE_UNWIND_CHECK, as a callback enters (runtime::callback's
+    /// `run`): Windows' unwinder climbs from here through the runtime's
+    /// frames to the frame of RUNTIME_ENTRY's caller -- RUNTIME_ENTRY is
+    /// `rt_callback_call`, the function the callback's C entry point calls --
+    /// which must have a function table entry (no leaf: the entry point has a
+    /// frame) and unwind to exactly what its frame record says: Cranelift's
+    /// `[rbp + 8]`, `rbp + 16`, `[rbp]`, the C caller's state at its call of
+    /// the entry point. A difference ends the process (`check_failed`).
+    #[inline(never)]
+    pub fn check_entry_point(runtime_entry: usize) {
+        let function_of = |address: u64| {
+            let mut image_base = 0u64;
+            // SAFETY: looks up an address of this process's code.
+            let entry = unsafe { RtlLookupFunctionEntry(address, &mut image_base, std::ptr::null_mut()) };
+            // SAFETY: a function entry Windows returned.
+            (!entry.is_null()).then(|| unsafe { (image_base + (*entry).BeginAddress as u64, image_base + (*entry).EndAddress as u64) })
+        };
+        let Some((begin, end)) = function_of(runtime_entry as u64) else {
+            check_failed(runtime_entry as u64, "rt_callback_call has no function table entry");
+        };
+        let mut context = Context::captured();
+        let mut found = false;
+        for _ in 0..32 {
+            // SAFETY: an exact context of this thread, climbing the
+            // runtime's frames (each with a function table entry).
+            unsafe { unwind_one(&mut context, None) };
+            if (begin..end).contains(&context.0.Rip) {
+                found = true;
+                break;
+            }
+        }
+        if !found {
+            check_failed(runtime_entry as u64, "rt_callback_call is not among the callback's runtime frames");
+        }
+        // SAFETY: rt_callback_call's frame, exact: unwinding it reaches the
+        // callback entry point's.
+        unsafe { unwind_one(&mut context, None) };
+        let pc = context.0.Rip;
+        if function_of(pc).is_none() {
+            check_failed(pc, "the callback's C entry point has no function table entry: Windows takes it for a leaf");
+        }
+        let fp = context.0.Rbp as usize;
+        // SAFETY: the entry point's frame record, live (it is running).
+        let expected = unsafe { (*((fp + 8) as *const u64), fp as u64 + 16, *(fp as *const u64)) };
+        // SAFETY: the context is exact for the entry point's frame.
+        unsafe { unwind_one(&mut context, None) };
+        let got = (context.0.Rip, context.0.Rsp, context.0.Rbp);
+        if got != expected {
+            check_failed(pc, &format!("Windows unwinds the callback's C entry point to (rip, rsp, rbp) {got:#x?}, its frame record to {expected:#x?}"));
+        }
+        ENTRY_POINTS.fetch_add(1, Ordering::Relaxed);
     }
 
     /// BOTLISH_NATIVE_UNWIND_CHECK: Windows' unwind of the Botlish frame

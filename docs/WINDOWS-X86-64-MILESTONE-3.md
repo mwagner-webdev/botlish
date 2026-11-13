@@ -490,6 +490,13 @@ capability: there is one answer to "are the roots in native frames".
    callee-saved register restored from inside the frame (`check_frame`); a
    difference ends the process as a NATIVE BUG.
 
+Since WINDOWS-X86-64-MILESTONE-9.md the walk also crosses a foreign
+transition (a C callback's): from the callback's entry frame it jumps to
+the transition shim's frame record and resumes in the Botlish frame that
+called C, never unwinding C's frames (`windows::walk_context`'s `jump`).
+Invariant 2 holds across it: the waiting frame's stack pointer is the
+record's address plus 16, its call's.
+
 ### 4.3 Root correctness cases
 
 | Case | Where tested | How |
