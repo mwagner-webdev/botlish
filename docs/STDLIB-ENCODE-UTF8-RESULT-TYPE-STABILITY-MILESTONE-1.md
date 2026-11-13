@@ -354,7 +354,8 @@ mutant that adds it is killed (section M).
 | `compilerpedia/notes/stdlib.notes` (and the generated page) | `encode_utf8`'s note and examples, `decode_utf8`'s note (section O) |
 | `docs/README.md`, `docs/IMPORTS.md`, `docs/STATIC-COMPLETION-PROOFS.md`, `docs/SYMBOLIC-TYPE-IDENTITY.md`, the census | the unconditional contract, the loading rule, update notes |
 | `tests/encode-utf8-type-stability.test` | new, 40 tests |
-| `tests/symbolic-type-identity.test`, `tests/loop-clause-binding-types.test`, `tests/text-collection-docs-diagnostics.test`, `tests/traits.test` | expectations of the old conditional rule flipped (section H) |
+| `tests/symbolic-type-identity.test`, `tests/loop-clause-binding-types.test`, `tests/text-collection-docs-diagnostics.test` | expectations of the old conditional rule flipped |
+| 16 more test files, the golden case `methods-list-without-str.bot` and its manifest row, the method-sugar fuzzer | the loaded module stated, or a premise about the whole HIR narrowed to the entry program (section H lists each) |
 | `audit/text-collection-precision/probes/` | `c3`, `c4`, `c5` updated, `c7` added |
 | `audit/text-collection-docs/tools/mutants.txt` | M2's documentation mutant rewritten to the new text (same rule) |
 | `audit/encode-utf8-type-stability/` | the reproducer, the evidence and benchmark tools, the mutation catalog and harness |
@@ -424,6 +425,8 @@ loads no other module:
   declared types), `error-payloads.test` (two more declared errors, native
   error number 2 -> 4), `native.test`'s `native-spec-14` and
   `hir-specialize.test`'s corpus and explanation tests (+6 generic blockers),
+  `hir-aot.test`'s corpus statuses (`std::byte`'s eight functions listed,
+  as `std::list`'s already were),
   the golden `methods-list-without-str.bot` case (MISSING-IMPORT; its manifest
   row marked weaker, so its Tcl original, whose program loads no module at
   all and is not expressible as a suite any more, runs locally again), the
@@ -432,7 +435,9 @@ loads no other module:
   ids normalized, NIR error numbers matched as any number, counts relative
   to the same program without its function): `stdlib-namespaces.test`,
   `method-sugar.test`, `structural-fn-types.test`, `std-namespace.test`,
-  `hir-specialize.test`'s `hir-specialize-11`, `exact-callable-key.test`,
+  `hir-specialize.test`'s `hir-specialize-11`, `not-callable.test`'s
+  `nc-method-binding-not-a-candidate`, `str-append-char.test`'s
+  `str-append-char-method-is-the-intrinsic`, `exact-callable-key.test`,
   `direct-hir-native.test`, `checked-domain-proof-provenance.test` (whose
   fixed error numbers would otherwise have let its counts of 0 pass for no
   reason), `refinement-values.test`, `intrinsic-contracts.test` (core IR text
@@ -500,11 +505,105 @@ Executed (`tests/encode-utf8-type-stability.test`):
 
 ## L. Backend parity
 
-(Pending.)
+The change is front-end only: no backend, runtime, NIR instruction or
+native registration's implementation was touched (Inspected: the diff
+changes `core/native.tcl`'s registry query and shape validation, the
+loader, `hir/types.tcl`'s `typed` result and the cache's dependency list),
+so a backend sees a HIR whose one difference is the loaded module and the
+more precise type. Executed, each through `sourceAgree` (tests/helpers.tcl:
+the program compiled once, run on interp, compile, cranelift-generic and
+cranelift, every outcome required equal) on Linux x86-64:
+
+| test | what the four backends agree on |
+|---|---|
+| `eut-utf8-values` | encode_utf8's bytes for "", ASCII, a control character, Latin-1, a BMP and an astral character and mixed text, against bytes written out in the test: `[[], [65, 122], [9, 10], [195, 169], [226, 130, 172], [240, 159, 152, 128], [97, 195, 169, 226, 130, 172, 240, 159, 152, 128]]` |
+| `eut-every-context` | one program indexing a 256-entry table by elements reached directly, by method syntax, through a collecting loop, a fold, an undeclared result, an anonymous struct's field, a closure's capture, a nested List and a lockstep loop: 23 values |
+| `eut-c4-c5-same-outcome` | probes `c4` (no `std::byte`) and `c5` (with it): one outcome, `[105, 196, 170, 109, 109, 112]`, for both |
+| `eut-instances-order-independent` | the two orders of the semantic-instance program (section I) |
+
+The evidence tool (`audit/encode-utf8-type-stability/tools/evidence.tcl`)
+runs `c4` and `c5` through `main.tcl` on the four backends with each tree:
+on `bd6f99f9`, `c4` is rejected (two UNHANDLED-ERRORs) and `c5` prints
+`[105, 196, 170, 109, 109, 112]` everywhere; after the change both print it
+everywhere (Executed). `eut-modules` runs its consumer on interp and
+cranelift (section J).
+
+**The single-file compiler (Executed).** `single/build.sh` built it from
+this change (the cached base kit of Tcl 9.0.1; the native backend's cargo
+step a no-op, the release build being current). From an empty directory,
+with an empty environment (`env -i HOME=DIR`), it runs probes `c4` and `c5`
+on interp, compile, cranelift-generic and cranelift to
+`[105, 196, 170, 109, 109, 112]` each; `botlish run c4-unused-import-decides.bot`
+exits 0; `botlish -check repro.bot` reports the reproducer's one deliberate
+diagnostic, `argument type: int[std::byte::Byte], facts: [0, 255]`. Its
+packed `stdlib/` holds `std::byte`, so nothing is installed for the contract.
+`single/smoke-test.sh` on it passed (every backend runs the sample programs
+to the same values, -help, the inspection options, executables with the
+stub linker, -aot-run, -lsp, the package commands; no toolchain, no PATH,
+a fresh HOME).
+
+**Not executed here:** Linux AArch64, macOS AArch64 and Windows x86-64. The
+change has no platform-dependent part (Inspected: no target, C ABI or
+runtime code), and the census's probes import no platform module; whether
+the hosts' CI agrees is reported in section M as their runs stand.
 
 ## M. Regression and mutation testing
 
-(Pending: the full local run and the mutation harness are running.)
+**The milestone's own tests (Executed).**
+`tests/encode-utf8-type-stability.test` has 40 tests; all pass on interp
+and compile (their four-backend parts through `sourceAgree`). Copied into
+the `bd6f99f9` worktree and run there, 30 fail and 10 pass. The 30 are the
+rule (the result's type, the loaded module, its order and import
+independence, every context, instances, modules, packages, interchange,
+cache, isolation, the validation of a broken contract); one of them,
+`eut-probe-native`, fails there only because `core::native::contractTypes`
+does not exist yet. The 10 that pass state what must not change:
+`eut-typed-parameter` (invariance), `eut-utf8-values` (values),
+`eut-visibility-qualified`, `eut-element-is-int-and-byte`,
+`eut-no-native-reachable`, `eut-no-loader-no-claim` (core IR text),
+`eut-contract-module-absent`, `eut-scratch-library`, `eut-import-order`
+and `eut-named-struct-census`.
+
+**The census's probes (Executed).** `audit/text-collection-precision/
+probes/`: 19 of 19 as their headers state (`c3` the precise types, `c4` and
+`c5` accepted with one value, `c7` the visibility negative). The type
+matrix (`tools/matrix.py`) prints the census's table cell for cell.
+
+**Mutation testing (Executed).** `audit/encode-utf8-type-stability/tools/
+mutate.tcl`: 18 mutants (`mutants.txt`: the loader's fixpoint, reachability
+through modules, the import order, an implicit import, the process-wide
+registry, the cache dependency, an undeclared type, an absent module, the
+registry's memo, the shape's validation, three wrong result types, the
+domain proof, the fallback, the semantic-instance walk, the loop element,
+interchange's declarations), each applied to a private copy of the tree.
+All 18 are killed, each by a test its `!!` line names (run on the final tree, `tests/encode-utf8-type-stability.test` and `tests/symbolic-type-identity.test` against each mutant). M2's documentation mutant
+(`audit/text-collection-docs/tools/mutants.txt`, `doc-static-type-
+conditional`) now restores the old conditional sentence and is killed by
+`tcd-doc-utf8-static-type`. `tools/mutant-catalogs.tcl`: every mutant of
+every catalog still applies (0 problems).
+
+**The harnesses of the subsystems the change touches (Executed, on the
+change; each exit 0):**
+
+| harness | result |
+|---|---|
+| `audit/compilation-isolation/tools/interleave.tcl` | 12 suites, 96 artifacts and outcomes compared, 0 differ |
+| `audit/compilation-isolation/tools/mutate.tcl` | 14 mutants, 14 killed |
+| `audit/hir-interchange/tools/roundtrip.tcl -via interchange` | 12 suites, 108 compared, 0 differ |
+| `audit/hir-interchange/tools/roundtrip.tcl -via cache` | 12 suites, 120 compared, 0 differ |
+| `audit/hir-interchange/tools/mutate.tcl` | 29 mutants, 29 killed |
+| `audit/bot-modules/tools/mutate.tcl` | 26 mutants, 26 killed |
+| `audit/refactor/tools/gate.tcl` (the warning gate) | passed: the observed warnings are exactly the manifest |
+| `audit/imports/tools/fuzz.tcl` | 60 programs, 0 disagreements of any kind |
+| `audit/method-sugar/tools/fuzz.tcl -n 40`, seeds 11 and 23 | 0 equivalence disagreements, 0 negative escapes, 0 backend disagreements |
+| `audit/static-decisions/tools/fuzz.tcl`, seeds 17 and 41 | 20 programs each, 0 failures (every layout gives the nested layout's verdicts); the same statistics as `bd6f99f9` run on the same seeds (seed 17: 484 sites, 260 rejected, 0 layout pairs taking different rounds; seed 41: 564, 340 and 2) |
+| `audit/method-resolution/tools/oracle.tcl 200` | 200 programs, 1,128 calls, 0 disagreements |
+| `tools/compilerpedia.tcl check` | 1,298 topics, 777 examples, 0 problems |
+
+The batched-against-sequential comparison of the golden suites
+(`static-decisions.yml`) is CI's alone (AGENTS.md); its state is below.
+
+LOCAL-SUITE-PLACEHOLDER
 
 ## N. Performance
 
@@ -535,7 +634,15 @@ M2 documented the conditional type; it is replaced:
 * `tests/text-collection-docs-diagnostics.test`'s `tcd-doc-utf8-static-type`
   now checks the new statements and the absence of the old ones.
 
-(Pending: the single-file compiler's help.)
+**The single-file compiler's help (Executed).** `botlish -help
+std::str::encode_utf8`, run by the single-file compiler built from this
+change in an empty directory with an empty environment, prints the new note
+("Its static type is List[std::byte::Byte] in every program that calls it:
+importing std::str is enough, whatever else the program imports. ...") and
+none of the old conditional text; it creates no file there. Its SIGNATURE
+line still reads `std::str::encode_utf8(str) -> list`: the registry's result
+kind, the same text the native's value type shows (section P), which the
+note beneath it makes precise.
 
 ## P. Remaining limitations
 
