@@ -496,6 +496,38 @@ fn relay(s):
     set outcomes
 } -cleanup {unset -nocomplain helpers functions calls outcomes order fs cs src} -result {{{List[int[std::byte::Byte]]}} {value {[[97], [477], [240, 159, 152, 128]]}} {{List[int[std::byte::Byte]]}} {value {[[240, 159, 152, 128], [477], [97]]}}}
 
+test eut-instance-snapshots {each semantic instance of an untyped helper -- one per argument type its callers give it -- records encode_utf8's call and its own result as List[Byte] in its snapshot, as the generic walk does: the contract reads nothing of an instance} -body {
+    set hir [eut::Compile {import std::str
+import std::list
+
+fn helper(s, x):
+    std::list::length([x])
+    s.encode_utf8()
+
+[helper("a", 1), helper("b", "c"), helper("d", true), helper("e", [2])]
+}]
+    hir::activate $hir
+    set calls {}
+    foreach e [hir::walk $hir] {
+        if {[hir::kind $hir $e] ne "call"} continue
+        set callee [dict get $hir exprs [dict get $hir exprs $e callee]]
+        if {[dict get $callee kind] eq "ref"
+                && [hir::semantic::SourceName $hir [dict get $callee binding]] eq "std::str::encode_utf8"} {
+            lappend calls $e
+        }
+    }
+    set seen {}
+    dict for {id inst} [dict get $hir semantic instances] {
+        foreach e $calls {
+            if {[dict exists $inst snapshot exprs $e type]} {
+                lappend seen [list [dict get $inst args] [hir::types::presented [dict get $inst snapshot exprs $e type]] \
+                    [hir::types::presented [dict get $inst result]]]
+            }
+        }
+    }
+    list [llength $calls] [lsort $seen] [hir::types::presented [hir::typeOf $hir [lindex $calls 0]]]
+} -cleanup {unset -nocomplain hir calls e callee seen id inst} -result {1 {{{str bool} {List[int[std::byte::Byte]]} {List[int[std::byte::Byte]]}} {{str int} {List[int[std::byte::Byte]]} {List[int[std::byte::Byte]]}} {{str str} {List[int[std::byte::Byte]]} {List[int[std::byte::Byte]]}} {{str {list int}} {List[int[std::byte::Byte]]} {List[int[std::byte::Byte]]}}} {List[int[std::byte::Byte]]}}
+
 # ---------------------------------------------------------------------------
 # Modules and packages
 
@@ -769,16 +801,33 @@ test eut-probe-native {a native of another namespace whose contract names std::b
     unset -nocomplain before hir during
 } -result [list {} {std::byte::Nibble std::eutprobe::nibbles} $::eutByteNames {{List[int[std::byte::Nibble]]}} {}]
 
-test eut-contract-module-missing {a contract naming a type of a standard module that does not exist fails the compilation as COMPILER-INTERNAL, never as a diagnostic of the program (UNKNOWN-NAMESPACE) and never by falling back} -body {
+test eut-contract-module-absent {a contract naming a type of a standard module the library at hand does not have declares nothing and loads nothing: the result is the native's plain -result-type, never a diagnostic of the program (UNKNOWN-NAMESPACE) or a compiler failure -- no import could load that module either} -body {
     core::native::register std::eutprobe::missing -arity 1 -impl core::strings::encodeUtf8 \
         -param-types {str} -result-type list -runtime list-alloc -context-free 1 \
         -result-shape {typed std::eutnosuch::Thing 0 255}
-    catch {eut::Compile "import std::eutprobe\n\nstd::eutprobe::missing(\"a\")\n"} message options
-    list [dict get $options -errorcode] [string match "*std::eutprobe::missing names std::eutnosuch::Thing*no module*" $message]
+    set hir [eut::Compile "import std::eutprobe\n\nstd::eutprobe::missing(\"a\")\n"]
+    list [eut::CallTypes $hir std::eutprobe::missing] [eut::Outcome "import std::eutnosuch\n\n1\n"]
 } -cleanup {
     catch {core::native::unregister std::eutprobe::missing}
-    unset -nocomplain message options
-} -result {{CORE SEMANTIC COMPILER-INTERNAL} 1}
+    unset -nocomplain hir
+} -result {list {error UNKNOWN-NAMESPACE}}
+
+test eut-scratch-library {a test's scratch standard library holding only its own modules has no std::byte: encode_utf8's result is the plain list there, the program is accepted, and no import can change it (`import std::byte` is UNKNOWN-NAMESPACE) -- the type depends on the library, never on the imports} -body {
+    set saved $::core::libraryDir
+    set dir [makeDirectory eut-scratch-[pid]]
+    set channel [open [file join $dir m.bot] w]
+    puts -nonewline $channel "fn one(a):\n    a\n"
+    close $channel
+    set ::core::libraryDir $dir
+    try {
+        set hir [eut::Compile "import std::m\nimport std::str\n\nstd::m::one(\"a\".encode_utf8())\n"]
+        list [eut::CallTypes $hir std::str::encode_utf8] [eut::ByteTypes $hir] \
+            [eut::Outcome "import std::str\nimport std::byte\n\n\"a\".encode_utf8()\n"]
+    } finally {
+        set ::core::libraryDir $saved
+        removeDirectory eut-scratch-[pid]
+    }
+} -cleanup {unset -nocomplain saved dir channel hir} -result {list {} {error UNKNOWN-NAMESPACE}}
 
 test eut-contract-census {every `typed` result shape of the registry names a type its standard-library module declares as an integer domain admitting the shape's range: a program that only imports the native's namespace types its result so} -body {
     set problems {}

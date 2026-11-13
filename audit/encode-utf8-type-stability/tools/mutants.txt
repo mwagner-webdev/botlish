@@ -79,10 +79,10 @@
 ## surface/modules.tcl
 <<<<
         set missing [lmap owner [lsort [dict keys $wanted]] {
-            if {[dict exists $state loaded $owner]} continue
+            if {[dict exists $state loaded $owner] || [dict exists $absent $owner]} continue
 ====
         set missing [lmap owner [lsort [dict keys $wanted]] {
-            if {[dict exists $state loaded $owner]} continue
+            if {[dict exists $state loaded $owner] || [dict exists $absent $owner]} continue
             if {[core::type::isNamed ${owner}::[lindex [dict keys [dict get $wanted $owner]] 0]]} continue
 >>>>
 
@@ -107,13 +107,15 @@
 ====
 >>>>
 
-@@ missing-module-unchecked a contract naming a standard module that does not exist is not refused as the standard library's error: the program gets an UNKNOWN-NAMESPACE it never wrote
-!! eut-contract-module-missing
+@@ absent-module-loaded a contract module the library at hand does not have is loaded anyway: a program on a scratch library gets an UNKNOWN-NAMESPACE it never wrote, for a module no import of it names
+!! eut-contract-module-absent eut-scratch-library
 ## surface/modules.tcl
 <<<<
-            if {![StandardNamespace $owner] || ![HasModule $owner]} {
+            if {![HasModule $owner]} {
+                dict set absent $owner 1
+                continue
+            }
 ====
-            if {![StandardNamespace $owner]} {
 >>>>
 
 # ---------------------------------------------------------------------------
@@ -190,7 +192,7 @@
 >>>>
 
 @@ instance-view-fallback a semantic instance's walk (its typing context's `inst`) falls back to the plain list: an untyped helper's call is List[Byte] in its generic walk but not in the instance its typed caller reads
-!! eut-instances-order-independent
+!! eut-instance-snapshots eut-instances-order-independent
 ## hir/types.tcl
 <<<<
             if {![core::type::isNamed $name]} {

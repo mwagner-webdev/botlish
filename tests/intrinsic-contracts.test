@@ -33,6 +33,18 @@ set ::icDeclsStr "import std::str\ntype Byte = Int in 0..255\nerror NotFound\ner
 # which would shift with every module a program loads.
 set ::icDeclsPlain "type Byte = Int in 0..255\nerror NotFound\nerror PermissionDenied\n"
 
+# The diagnostics of the core-IR-built HIR H that are not std::byte's: a
+# program importing std::str loads std::byte (std::str::encode_utf8's
+# contract, STDLIB-ENCODE-UTF8-RESULT-TYPE-STABILITY-MILESTONE-1.md), and
+# core IR text carries no declarations, so its declared errors come back
+# from core IR as UNHANDLED-ERRORs of its own functions.
+proc icOwnDiagnostics {h} {
+    lmap d [hir::diagnostics $h] {
+        if {[string match {*std::byte::*} [dict get $d message]]} continue
+        set d
+    }
+}
+
 proc icCompile {src {strict 1} {decls default}} {
     if {$decls eq "default"} { set decls $::icDecls }
     set path [makeFile "$decls$src" ic-program.bot]
@@ -407,7 +419,7 @@ test ic-native-wrapper-before {what that call used to do, and still does where n
     set exprs [hir::lower [icCompile "${::icWrapper}wrapper(\"abc\")" 1 $::icDeclsStr]]
     set exprs [lreplace $exprs end end {call {ref wrapper} {const 123}}]
     list [differential $exprs] [lrange [outcomeUnder interp $exprs] 1 2] \
-        [llength [hir::diagnostics [hir::build $exprs -strict 0]]]
+        [llength [icOwnDiagnostics [hir::build $exprs -strict 0]]]
 } -result {same {{CORE SEMANTIC TYPE} {std::str::length: expected str, got 123}} 1}
 
 test ic-native-wrapper-valid {a proven str argument is accepted and runs on every backend} -body {
@@ -457,7 +469,7 @@ pred_use(std::str::is_tcl_alpha)} 1 $::icDeclsStr]]
     set exprs [lreplace $exprs end end {call {ref pred_use} {block {c} {const 5}}}]
     set h [hir::build $exprs -strict 0]
     set e [icBlock $h pred_use]
-    list [llength [hir::diagnostics $h]] [hir::signatures::entryTypes $h $e] [differential $exprs] \
+    list [llength [icOwnDiagnostics $h]] [hir::signatures::entryTypes $h $e] [differential $exprs] \
         [lindex [outcomeUnder interp $exprs] 1]
 } -result {1 {{}} same {CORE SEMANTIC NOT-BOOLEAN}}
 

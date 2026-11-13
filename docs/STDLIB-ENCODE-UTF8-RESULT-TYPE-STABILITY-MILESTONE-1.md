@@ -327,10 +327,17 @@ mutant that adds it is killed (section M).
   standard-library identity (`std::NS::Name`) with `LO <= HI`; an
   unqualified, application or package name, or a reversed range, is refused
   at registration (`eut-registration-validates-name`). A contract naming a
-  standard module that does not exist, a platform's module, or a type its
-  module does not declare is a COMPILER-INTERNAL failure of the compilation,
-  never a diagnostic of the program and never a fallback
-  (`eut-contract-module-missing`, `eut-missing-declaration`). A `std::byte`
+  platform's module, or a type its module does not declare, is a
+  COMPILER-INTERNAL failure of the compilation, never a diagnostic of the
+  program and never a fallback (`eut-missing-declaration`). A standard
+  library that has no module for the type at all -- in practice a test's
+  scratch library, `$::core::libraryDir` holding only the test's own
+  modules -- declares no such type and loads nothing: the result is the
+  plain `list` there, and no import can change it, because `import
+  std::byte` is UNKNOWN-NAMESPACE in such a library (`eut-scratch-library`,
+  `eut-contract-module-absent`). The type depends on the standard library
+  at hand, never on the imports; the shipped library has every contract's
+  module (`eut-contract-census`). A `std::byte`
   whose own declaration is in error reports that diagnostic identically
   whether imported or not (`eut-broken-module-same-outcome`). Only a program
   no loader built (core IR text, which declares no type) still has the plain
@@ -341,12 +348,12 @@ mutant that adds it is killed (section M).
 | file | change |
 |---|---|
 | `core/native.tcl` | `contractTypes NS`: the `{TYPE NATIVE}` pairs of the `typed` shapes of `NS`'s natives, memoized per namespace and forgotten by `register` and `unregister`; `ValidShape` requires a `typed` NAME to be `std::NS::Name`; the shape's documentation |
-| `surface/modules.tcl` | `ContractTypes` (the fixpoint that loads contract modules, then checks each declares its type), `ContractOwners` (reachable namespaces to `OWNER -> {NAME -> NATIVE}`), `ContractError` (the COMPILER-INTERNAL failure); called by `BuildProgram` and `LoadNamespaces` after the import closure and before reference errors are raised; the header's account of loading |
+| `surface/modules.tcl` | `ContractTypes` (the fixpoint that loads contract modules, skipping a module the library at hand lacks, then checks each loaded one declares its type), `ContractOwners` (reachable namespaces to `OWNER -> {NAME -> NATIVE}`), `ContractError` (the COMPILER-INTERNAL failure); called by `BuildProgram` and `LoadNamespaces` after the import closure and before reference errors are raised; the header's account of loading |
 | `hir/types.tcl` | `ShapeResult`'s `typed` case: the fallback only for an undeclared NAME (no loader), an unproven domain a COMPILER-INTERNAL failure; comments |
 | `surface/cache.tcl` | comments: the contract module is a probe, hence a dependency |
 | `compilerpedia/notes/stdlib.notes` (and the generated page) | `encode_utf8`'s note and examples, `decode_utf8`'s note (section O) |
 | `docs/README.md`, `docs/IMPORTS.md`, `docs/STATIC-COMPLETION-PROOFS.md`, `docs/SYMBOLIC-TYPE-IDENTITY.md`, the census | the unconditional contract, the loading rule, update notes |
-| `tests/encode-utf8-type-stability.test` | new, 37 tests |
+| `tests/encode-utf8-type-stability.test` | new, 39 tests |
 | `tests/symbolic-type-identity.test`, `tests/loop-clause-binding-types.test`, `tests/text-collection-docs-diagnostics.test`, `tests/traits.test` | expectations of the old conditional rule flipped (section H) |
 | `audit/text-collection-precision/probes/` | `c3`, `c4`, `c5` updated, `c7` added |
 | `audit/text-collection-docs/tools/mutants.txt` | M2's documentation mutant rewritten to the new text (same rule) |

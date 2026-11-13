@@ -2015,7 +2015,7 @@ tests/encode-utf8-type-stability.test eut-cache-dependency pass
 tests/encode-utf8-type-stability.test eut-cache-hit-equals-miss pass
 tests/encode-utf8-type-stability.test eut-contract-census pass
 tests/encode-utf8-type-stability.test eut-contract-import-independent pass
-tests/encode-utf8-type-stability.test eut-contract-module-missing pass
+tests/encode-utf8-type-stability.test eut-contract-module-absent pass
 tests/encode-utf8-type-stability.test eut-contract-without-byte pass
 tests/encode-utf8-type-stability.test eut-domain-not-admitting pass
 tests/encode-utf8-type-stability.test eut-element-is-int-and-byte pass
@@ -2025,6 +2025,7 @@ tests/encode-utf8-type-stability.test eut-import-order pass
 tests/encode-utf8-type-stability.test eut-import-order-unrelated pass
 tests/encode-utf8-type-stability.test eut-incompatible-registration pass
 tests/encode-utf8-type-stability.test eut-index-and-imprint pass
+tests/encode-utf8-type-stability.test eut-instance-snapshots pass
 tests/encode-utf8-type-stability.test eut-instances-order-independent pass
 tests/encode-utf8-type-stability.test eut-interchange-fresh-process pass
 tests/encode-utf8-type-stability.test eut-isolation pass
@@ -2040,6 +2041,7 @@ tests/encode-utf8-type-stability.test eut-own-byte-is-not-the-natives pass
 tests/encode-utf8-type-stability.test eut-package pass
 tests/encode-utf8-type-stability.test eut-probe-native pass
 tests/encode-utf8-type-stability.test eut-registration-validates-name pass
+tests/encode-utf8-type-stability.test eut-scratch-library pass
 tests/encode-utf8-type-stability.test eut-trait-conformance pass
 tests/encode-utf8-type-stability.test eut-typed-parameter pass
 tests/encode-utf8-type-stability.test eut-utf8-values pass

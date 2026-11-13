@@ -1996,18 +1996,27 @@ proc surface::modules::LoadNamespace {stateVar name usedAtSpan {path ""} {scope 
 # are reachable), in sorted order: the result does not depend on the order of
 # the program's imports.
 #
-# A contract the loader cannot satisfy -- a type of no standard module, of
-# a platform's module, or one its module does not declare -- is the standard
-# library's error: a COMPILER-INTERNAL failure, never a diagnostic of the
-# program and never a fallback to a less precise type. So is, at type
+# A standard library that has no module for the type (a test's scratch
+# library, $::core::libraryDir holding only its own modules) declares no
+# such type, and nothing is loaded: no import could load the module either
+# (`import` of it is UNKNOWN-NAMESPACE), so the result -- the native's plain
+# -result-type -- still does not depend on what the program imports. The
+# shipped library has every contract's module (tests/encode-utf8-type-
+# stability.test's census). A contract the library contradicts -- a type of
+# a platform's module, or a module that does not declare the type -- is the
+# standard library's error: a COMPILER-INTERNAL failure, never a diagnostic
+# of the program and never a fallback to a less precise type. So is, at type
 # inference, a declaration whose domain does not admit the contract's range
 # (hir::types::ShapeResult's `typed` case).
 proc surface::modules::ContractTypes {stateVar} {
     upvar 1 $stateVar state
+    # The standard library at hand has no such module (a test's scratch
+    # library): no import could load it either, so nothing is declared.
+    set absent [dict create]
     while 1 {
         set wanted [ContractOwners $state]
         set missing [lmap owner [lsort [dict keys $wanted]] {
-            if {[dict exists $state loaded $owner]} continue
+            if {[dict exists $state loaded $owner] || [dict exists $absent $owner]} continue
             set owner
         }]
         if {$missing eq {}} {
@@ -2016,9 +2025,13 @@ proc surface::modules::ContractTypes {stateVar} {
         foreach owner $missing {
             set names [dict get $wanted $owner]
             set first [lindex [lsort [dict keys $names]] 0]
-            if {![StandardNamespace $owner] || ![HasModule $owner]} {
+            if {![StandardNamespace $owner]} {
                 ContractError [dict get $names $first] ${owner}::$first \
-                    "the standard library has no module \"$owner\""
+                    "\"$owner\" is no standard namespace"
+            }
+            if {![HasModule $owner]} {
+                dict set absent $owner 1
+                continue
             }
             if {[PlatformOf $owner] ne ""} {
                 ContractError [dict get $names $first] ${owner}::$first \
@@ -2030,6 +2043,7 @@ proc surface::modules::ContractTypes {stateVar} {
         }
     }
     dict for {owner names} [ContractOwners $state] {
+        if {[dict exists $absent $owner]} continue
         foreach name [lsort [dict keys $names]] {
             if {$name ni [dict get $state loadedTypes $owner]} {
                 ContractError [dict get $names $name] ${owner}::$name \

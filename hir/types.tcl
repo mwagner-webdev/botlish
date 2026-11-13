@@ -4208,9 +4208,12 @@ proc hir::types::ShapeResult {hir shape argExprs argTypes result {ctx {}}} {
             # imports or else by the loader for the contract
             # (surface/modules.tcl's ContractTypes;
             # STDLIB-ENCODE-UTF8-RESULT-TYPE-STABILITY-MILESTONE-1.md). Only a
-            # program no loader built (core IR text, which declares no type)
-            # has NAME undeclared: its result is the native's plain declared
-            # -result-type, never a claim about a type that does not exist.
+            # program no loader built (core IR text, which declares no type),
+            # or one built on a standard library without NAME's module (a
+            # test's scratch library, where no import could declare it
+            # either), has NAME undeclared: its result is the native's plain
+            # declared -result-type, never a claim about a type that does not
+            # exist.
             #
             # Declaring NAME is not, by itself, proof that the native's
             # elements inhabit it: NAME's resolved type is validated against
