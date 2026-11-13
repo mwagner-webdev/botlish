@@ -243,9 +243,9 @@ visited in sorted order, so the result does not depend on import order.
   where facts are not carried (a declared result, a field) the way a domain
   type does.
 
-**Why this is the smallest coherent solution.** Two procedures in the loader
-(`ContractTypes`, `ContractOwners`) and one query in the registry
-(`contractTypes`); no new syntax, declaration form, module state, HIR field
+**Why this is the smallest coherent solution.** Four small procedures in the
+loader (`ContractTypes`, `ContractOwners`, `ContractModules` for the cache,
+`ContractError`) and one query in the registry (`contractTypes`); no new syntax, declaration form, module state, HIR field
 or interchange field; no special case for `encode_utf8` (a probe native of
 another namespace whose contract names `std::byte::Nibble` gets the same
 treatment: `eut-probe-native`). The cost is the module's front end, once per
@@ -407,7 +407,7 @@ imported).
 | change | where | class |
 |---|---|---|
 | `encode_utf8()` is `List[std::byte::Byte]` without `std::byte`; `c4` accepted; the reproducer's three diagnostics gone; hovers and facts precise | every program reaching `std::str` | 1, the intended correction |
-| `std::byte` (4 types, 2 errors, 8 functions) loaded into every program reaching `std::str` without it | the HIR, `-traits`'s declared types, native error numbering, the generic-blocker census (+6: its six untyped functions; never compiled, no guard emitted), front-end time (section N) | 2, a justified consequence: exactly what an import of `std::byte` by another module has always brought (Executed: `ai_text_clean.bot` with an explicit `import std::byte` on `bd6f99f9` has the new numbers) |
+| `std::byte` (4 types, 2 errors, 8 functions) loaded into every program reaching `std::str` without it | the HIR, `-traits`'s declared types, native error numbering, the generic-blocker census (+6: its six untyped functions; natively never compiled, no guard emitted), the Tcl compiler's generated code (its eight functions as procs), front-end time (section N) | 2, a justified consequence: exactly what an import of `std::byte` by another module has always brought (Executed: `ai_text_clean.bot` with an explicit `import std::byte` on `bd6f99f9` has the new numbers) |
 | `b.complement()` in a file not importing `std::byte` reports `std::byte`'s missing import, was "no function named complement is visible" | method-style calls of `std::byte`'s names | 2: still rejected, `complement` still no candidate; byte for byte the diagnosis `bd6f99f9` gives when `std::byte` is loaded through `std::abi::bytes` |
 | a standard library whose `std::byte::Byte` contradicts the native (narrower domain, refinement, missing) fails as COMPILER-INTERNAL, was a silent `list` | a broken or test library only | 2: the contract is no longer optional, so a silent fallback could only hide a standard-library bug |
 | none | -- | 3, unrelated regressions: none found |
@@ -576,7 +576,10 @@ registry, the cache dependency, an undeclared type, an absent module, the
 registry's memo, the shape's validation, three wrong result types, the
 domain proof, the fallback, the semantic-instance walk, the loop element,
 interchange's declarations), each applied to a private copy of the tree.
-All 18 are killed, each by a test its `!!` line names (run on the final tree, `tests/encode-utf8-type-stability.test` and `tests/symbolic-type-identity.test` against each mutant). M2's documentation mutant
+All 18 are killed, each by a test its `!!` line names (run on the final
+tree: `tests/encode-utf8-type-stability.test` and
+`tests/symbolic-type-identity.test` against each mutant). M2's documentation
+mutant
 (`audit/text-collection-docs/tools/mutants.txt`, `doc-static-type-
 conditional`) now restores the old conditional sentence and is killed by
 `tcd-doc-utf8-static-type`. `tools/mutant-catalogs.tcl`: every mutant of
@@ -632,10 +635,10 @@ What it shows:
   else.** `str-byte`, which imported `std::byte` already, does the same work
   before and after (one module, four source types, 31 interned types, the
   same interchange size within 70 bytes of ids; its times differ by noise).
-  Every other program pays what that import cost it: about 15 ms of front
-  end (`str-call` 3.9 -> 19.3, `str-nocall` 3.7 -> 19.1, `modules-20` +16,
-  `instances-60` +22), one module, four source types, 24 to 28 interned
-  types and about 35 KB of interchange text.
+  Every other program now pays what importing `std::byte` would have cost
+  it: about 15 ms of front end (`str-call` 3.9 -> 19.3, `str-nocall` 3.7 ->
+  19.1, `modules-20` +16, `instances-60` +22), one module, four source
+  types, 20 to 28 interned types and 35 to 39 KB of interchange text.
 * **It does not grow with the program.** Twenty modules importing
   `std::str` load `std::byte` once (`modules-20`: 20 -> 21 modules), and the
   60 semantic instances are 60 after as before: the type is
