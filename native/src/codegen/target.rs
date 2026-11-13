@@ -124,6 +124,37 @@ pub fn main_thread_startup(target: &Triple) -> bool {
         && matches!(target.architecture, target_lexicon::Architecture::Aarch64(_))
 }
 
+/// The C address encoding of TARGET's runtime (runtime::value's
+/// AddressWord, RN-ANDROID-TAGGED-POINTER-CORRECTNESS-MILESTONE-1.md): what
+/// generated code for TARGET encodes and decodes C address words with
+/// (codegen::clif), and whose fingerprint its program record states
+/// (runtime::aotimage's `fingerprint_for`). Android on AArch64 -- whose
+/// Bionic heap pointers carry a tag in their top byte (Android 11 and
+/// later) -- keeps the top byte (`TopByteTagged`); every other target's
+/// pointers carry no tag (`Canonical60`, the word every earlier runtime
+/// made). The one statement of it for every target; a target's runtime
+/// states its own (`runtime::value::ADDRESS_WORD`), which a build for this
+/// host agrees with (`address_word_is_the_runtimes`).
+pub fn address_word(target: &Triple) -> crate::runtime::value::AddressWord {
+    use crate::runtime::value::AddressWord;
+    let android = target.operating_system == OperatingSystem::Linux
+        && target.environment == target_lexicon::Environment::Android;
+    if android && matches!(target.architecture, target_lexicon::Architecture::Aarch64(_)) {
+        AddressWord::TopByteTagged
+    } else {
+        AddressWord::Canonical60
+    }
+}
+
+/// The runtime ABI fingerprint of TARGET's runtime of this source
+/// (runtime::aotimage's `fingerprint_for` of its `address_word`): what a
+/// program record emitted for TARGET states, and a target support
+/// package's runtime archive for TARGET must state (the driver's
+/// `runtime-abi TRIPLE`).
+pub fn runtime_fingerprint(target: &Triple) -> u64 {
+    crate::runtime::aotimage::fingerprint_for(address_word(target))
+}
+
 /// The target an executable of PROGRAM is for: its own target's triple
 /// (NIR's `target` line), or this host's for a program every target shares.
 pub fn executable_triple(program: &crate::nir::Program) -> Result<Triple, String> {
@@ -339,6 +370,23 @@ mod tests {
     #[test]
     fn main_thread_startup_is_the_runtimes() {
         assert_eq!(main_thread_startup(&Triple::host()), crate::runtime::aot::MAIN_THREAD_STARTUP);
+    }
+
+    /// The C address encoding's one statement agrees with this host's
+    /// runtime, Android's is the tagged one and no desktop target's is
+    /// (RN-ANDROID-TAGGED-POINTER-CORRECTNESS-MILESTONE-1.md); the
+    /// fingerprints of the two runtimes differ.
+    #[test]
+    fn address_word_is_the_runtimes() {
+        use crate::runtime::value::{ADDRESS_WORD, AddressWord};
+        assert_eq!(address_word(&Triple::host()), ADDRESS_WORD);
+        assert_eq!(runtime_fingerprint(&Triple::host()), crate::runtime::aotimage::ABI_FINGERPRINT);
+        let android = parse_triple("aarch64-linux-android").unwrap();
+        assert_eq!(address_word(&android), AddressWord::TopByteTagged);
+        for desktop in ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu", "aarch64-apple-darwin", "x86_64-pc-windows-msvc"] {
+            assert_eq!(address_word(&parse_triple(desktop).unwrap()), AddressWord::Canonical60, "{desktop}");
+        }
+        assert_ne!(runtime_fingerprint(&android), runtime_fingerprint(&parse_triple("aarch64-unknown-linux-gnu").unwrap()));
     }
 
     /// The table states this driver's own runtime: code generation reads

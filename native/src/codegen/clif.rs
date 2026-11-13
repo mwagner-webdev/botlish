@@ -929,6 +929,12 @@ struct Translator<'a, 'b, M: Module> {
     /// policy, for differential testing (mirrors `listget_fast`'s own env
     /// var, same reasoning).
     root_init_opt: bool,
+    /// The C address encoding of the module's target (codegen::target's
+    /// `address_word`, RN-ANDROID-TAGGED-POINTER-CORRECTNESS-MILESTONE-1.md):
+    /// how `cptr_word`/`cptr_address` encode and decode a C address word
+    /// inline -- the target's, never the host's (a driver on Linux x86-64
+    /// emits an Android library's object with Android's).
+    address_word: AddressWord,
 }
 
 impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
@@ -965,6 +971,7 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
         let listget_fast = std::env::var("BOTLISH_NATIVE_LISTGET_FAST_OPT").ok().as_deref() != Some("0");
         let mutarray_inline = std::env::var("BOTLISH_NATIVE_MUTARRAY_INLINE_OPT").ok().as_deref() != Some("0");
         let root_init_opt = std::env::var("BOTLISH_NATIVE_ROOT_INIT_OPT").ok().as_deref() != Some("0");
+        let address_word = super::target::address_word(module.isa().triple());
         Translator {
             b,
             module,
@@ -999,6 +1006,7 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             mutarray_inline,
             mutarray_access: mutarray_inline && !count_accesses,
             root_init_opt,
+            address_word,
         }
     }
 
@@ -1364,6 +1372,7 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
         foreign: u32,
         args: &[Reg],
         exposed: &[bool],
+        mutable: &[bool],
         discard: bool,
         varargs: &[nir::VarArg],
         word: bool,
@@ -1408,9 +1417,9 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                 continue;
             }
             let word = if exposed[i] {
-                self.b.ins().sshr_imm_s(v, 1)
+                self.exposure_address(v, mutable[i])
             } else if class == nir::CAbi::Ptr {
-                self.b.ins().sshr_imm_s(v, 4)
+                self.cptr_address(v)
             } else if class == nir::CAbi::Bool {
                 let shifted = self.b.ins().ushr_imm_s(v, 2);
                 self.b.ins().band_imm_s(shifted, 1)
@@ -1496,6 +1505,56 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
         Ok(self.foreign_result(&decl, returned))
     }
 
+    /// The payload address of the byte storage STORAGE a C call exposes
+    /// (C-POINTER-BORROWING.md): its kind checked -- the writable one
+    /// (KIND_MUTBYTES) when WRITABLE, else the readable one (KIND_BYTES),
+    /// never interchanged; the check `rt_bytes_addr`/`rt_mbytes_addr` make,
+    /// whose TYPE failure the slow path raises -- then the storage's address
+    /// plus the payload offset, the machine address C receives. Made at the
+    /// call, after every argument, and never a Botlish value: a machine
+    /// word of the full width, whatever the address -- an Android heap
+    /// address's top-byte tag included (RN-ANDROID-TAGGED-POINTER-
+    /// CORRECTNESS-MILESTONE-1.md), which the small Int an exposure was
+    /// carried in before could not hold. No allocation, no helper call on
+    /// the path a checked program takes; the storage is kept alive by the
+    /// keepalive after the call (native/lower.tcl's BorrowCall).
+    fn exposure_address(&mut self, storage: ir::Value, writable: bool) -> ir::Value {
+        let kind = if writable { Kind::MutByteStore } else { Kind::ByteStore };
+        let right = self.is_kind(storage, kind);
+        let ok = self.b.create_block();
+        let bad = self.b.create_block();
+        self.b.ins().brif(right, ok, &[], bad, &[]);
+        self.b.switch_to_block(bad);
+        self.fail_with(if writable { "rt_mbytes_addr" } else { "rt_bytes_addr" }, &[self.vm, storage]);
+        self.b.switch_to_block(ok);
+        self.b.ins().iadd_imm_s(storage, crate::runtime::bytesobj::BYTES_PAYLOAD_OFFSET as i64)
+    }
+
+    /// The address the C address word V holds, inline: the target's
+    /// encoding read back (runtime::value's `AddressWord::decode`) -- an
+    /// arithmetic shift, and for an encoding that rotates (Android's
+    /// top-byte tags, RN-ANDROID-TAGGED-POINTER-CORRECTNESS-MILESTONE-1.md)
+    /// one rotation back. Every bit of the address, its tag included: never
+    /// a mask. On a target of the default encoding exactly the one shift
+    /// every earlier driver emitted.
+    fn cptr_address(&mut self, v: ir::Value) -> ir::Value {
+        let shifted = self.b.ins().sshr_imm_s(v, 4);
+        match self.address_word.rotation() {
+            0 => shifted,
+            r => self.b.ins().rotr_imm_u(shifted, r as i64),
+        }
+    }
+
+    /// ADDRESS rotated as the target's C address word holds it (the payload
+    /// before `<< 4 | CPTR_TAG`): ADDRESS itself under the default
+    /// encoding.
+    fn cptr_rotated(&mut self, address: ir::Value) -> ir::Value {
+        match self.address_word.rotation() {
+            0 => address,
+            r => self.b.ins().rotl_imm_u(address, r as i64),
+        }
+    }
+
     /// The machine value of the trailing argument V of a variadic C call,
     /// tagged as ARG's class says (an Int, a bool, a Float64, a C address
     /// word), passed as ARG's promoted class: an F64 for a double, else an
@@ -1507,7 +1566,7 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
     fn vararg_value(&mut self, v: ir::Value, arg: nir::VarArg, apple: bool) -> ir::Value {
         let word = match arg.class {
             nir::CAbi::F64 => return self.float_number(FloatType::Float64, v),
-            nir::CAbi::Ptr => self.b.ins().sshr_imm_s(v, 4),
+            nir::CAbi::Ptr => self.cptr_address(v),
             nir::CAbi::Bool => {
                 let shifted = self.b.ins().ushr_imm_s(v, 2);
                 self.b.ins().band_imm_s(shifted, 1)
@@ -1557,10 +1616,13 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             return self.call_allocating("rt_float_new", &[self.vm, code, bits], "foreigncall", KIND_FLOAT);
         }
         if class == nir::CAbi::Ptr {
-            // (address << 4) | tag when the word holds the address.
-            let shifted = self.b.ins().ishl_imm_s(returned, 4);
+            // (rotl(address, R) << 4) | tag when the word holds the address
+            // (the target's encoding: `cptr_rotated`), NATIVE ADDRESS when
+            // it does not -- never truncated, masked or untagged.
+            let rotated = self.cptr_rotated(returned);
+            let shifted = self.b.ins().ishl_imm_s(rotated, 4);
             let back = self.b.ins().sshr_imm_s(shifted, 4);
-            let fits = self.b.ins().icmp(IntCC::Equal, back, returned);
+            let fits = self.b.ins().icmp(IntCC::Equal, back, rotated);
             let ok = self.b.create_block();
             let bad = self.b.create_block();
             self.b.ins().brif(fits, ok, &[], bad, &[]);
@@ -2136,13 +2198,15 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             Inst::CallbackAddress { dst, callback } => {
                 // The callback's C entry point (codegen::callback), as a C
                 // address word: its address, tagged (runtime::value's
-                // make_cptr). Code addresses fit the word's 60 bits.
+                // make_cptr, the target's encoding). Code addresses carry no
+                // tag and fit the word of every encoding.
                 let id = *self.symbols.callbacks.get(*callback as usize).ok_or_else(|| {
                     BackendError::Bug(format!("cbaddr of undeclared callback {callback}"))
                 })?;
                 let fref = self.func_ref(id);
                 let address = self.b.ins().func_addr(I64, fref);
-                let shifted = self.b.ins().ishl_imm_u(address, 4);
+                let rotated = self.cptr_rotated(address);
+                let shifted = self.b.ins().ishl_imm_u(rotated, 4);
                 let v = self.b.ins().bor_imm_u(shifted, crate::runtime::value::CPTR_TAG as i64);
                 self.def(*dst, v);
             }
@@ -2334,13 +2398,13 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                 self.check(v);
                 self.def(*dst, v);
             }
-            Inst::ForeignCall { dst, foreign, args, exposed, discard, varargs } => {
+            Inst::ForeignCall { dst, foreign, args, exposed, mutable, discard, varargs } => {
                 // A destination declared a C word keeps the 64-bit result as
                 // C returned it (C-FFI-ERROR-CAPTURE-MILESTONE-2.md): no
                 // conversion runs after the call; `cwbox` makes the Int at
                 // its first use that needs one.
                 let word = self.f.kind_of(*dst).is_word();
-                let v = self.foreign_call(*foreign, args, exposed, *discard, varargs, word)?;
+                let v = self.foreign_call(*foreign, args, exposed, mutable, *discard, varargs, word)?;
                 if word {
                     self.def_raw(*dst, v);
                 } else {
@@ -4781,6 +4845,68 @@ mod aarch64_float_tests {
     }
 }
 
+
+/// C address words and byte exposures as each target's code has them
+/// (RN-ANDROID-TAGGED-POINTER-CORRECTNESS-MILESTONE-1.md): Android's code
+/// rotates a pointer by the top byte's 8 bits on its way into and out of a
+/// C address word, every other target's code is the one shift it always
+/// was; a C call makes an exposed storage's payload address itself (the
+/// storage plus the payload offset), never untagging a small Int.
+#[cfg(test)]
+mod address_word_tests {
+    use crate::codegen::clif_for_target;
+    use crate::nir;
+    use std::str::FromStr;
+
+    /// A program that hands a C pointer to C and back (`echo`), and exposes
+    /// a byte storage to C (`sum`): the four inline sites of the encoding.
+    const PROGRAM: &str = "nir 1\n\n\
+        foreign 0 \"probe_echo\" params=\"ptr\" result=ptr name=\"m::echo\"\n\
+        foreign 1 \"probe_sum\" params=\"ptr u64\" result=u64 name=\"m::sum\"\n\n\
+        func 0 \"<program>\" params=0 env=0 regs=6 pnames=\"\" captures=0\n\
+        \x20   %0 = op cptrnull\n\
+        \x20   %1 = foreigncall 0 %0\n\
+        \x20   %2 = bytes \"616263\"\n\
+        \x20   %3 = int 3\n\
+        \x20   %4 = foreigncall 1 %2 %3 exposed=0\n\
+        \x20   %5 = op keepalive %2\n\
+        \x20   ret %4\n\
+        end\n";
+
+    fn clif(triple: &str) -> String {
+        let program = nir::parse(PROGRAM).unwrap_or_else(|e| panic!("{e}"));
+        clif_for_target(&program, &target_lexicon::Triple::from_str(triple).unwrap()).expect("compiles")
+    }
+
+    #[test]
+    fn android_code_rotates_by_the_top_byte() {
+        let text = clif("aarch64-linux-android");
+        // Decode (the argument of echo): an arithmetic shift, then the
+        // rotation back; encode (echo's result): the rotation, then the
+        // shift into the word.
+        // (The builder's `_imm` forms print as an iconst operand.)
+        assert!(text.contains(" = rotr "), "{text}");
+        assert!(text.contains(" = rotl "), "{text}");
+        assert!(text.contains("iconst.i64 8\n"), "{text}");
+    }
+
+    #[test]
+    fn desktop_code_never_rotates() {
+        for triple in ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu", "aarch64-apple-darwin", "x86_64-pc-windows-msvc"] {
+            let text = clif(triple);
+            assert!(!text.contains("rotr") && !text.contains("rotl"), "{triple}: {text}");
+        }
+    }
+
+    #[test]
+    fn an_exposure_is_the_storage_plus_the_payload_offset() {
+        for triple in ["x86_64-unknown-linux-gnu", "aarch64-linux-android"] {
+            let text = clif(triple);
+            let offset = crate::runtime::bytesobj::BYTES_PAYLOAD_OFFSET;
+            assert!(text.contains(" = iadd.i64 ") && text.contains(&format!("iconst.i64 {offset}\n")), "{triple}: {text}");
+        }
+    }
+}
 
 #[cfg(test)]
 mod switch_tests {

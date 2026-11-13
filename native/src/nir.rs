@@ -1386,12 +1386,19 @@ pub enum Inst {
     Call { dst: Reg, func: FuncId, args: Vec<Reg>, may_error: bool, may_gc: bool },
     CallEnv { dst: Reg, func: FuncId, closure: Reg, args: Vec<Reg>, may_error: bool, may_gc: bool },
     CallValue { dst: Reg, callee: Reg, args: Vec<Reg> },
-    /// `%d = foreigncall F %a... [exposed=I,J] [discard]`: a C call
-    /// (C-FFI.md) of the program's foreign function F. Every operand is
+    /// `%d = foreigncall F %a... [exposed=I,J] [mutable=J] [discard]`: a C
+    /// call (C-FFI.md) of the program's foreign function F. Every operand is
     /// tagged: a C integer argument an Int, a raw pointer a C address word,
-    /// and an operand EXPOSED a byte exposure's payload address (a small
-    /// Int: native/lower.tcl's ExposeStorage, kept alive by its keepalive
-    /// after this call). codegen::clif converts each to its C ABI class,
+    /// and an operand EXPOSED the byte storage whose payload the call
+    /// exposes (C-POINTER-BORROWING.md; native/lower.tcl's BorrowCall, kept
+    /// alive by its keepalive after this call): the readable kind
+    /// (KIND_BYTES), or the writable one (KIND_MUTBYTES) for an operand also
+    /// MUTABLE -- a run-time kind check of the call, never interchanged.
+    /// The call itself makes the payload address, the storage's address
+    /// plus the payload offset, at the call: a machine address of its full
+    /// width, which no Botlish value holds (an Android heap address's tag
+    /// included: RN-ANDROID-TAGGED-POINTER-CORRECTNESS-MILESTONE-1.md).
+    /// codegen::clif converts each to its C ABI class,
     /// calls the linked symbol directly with the platform C calling
     /// convention (no helper, no symbol lookup, no Tcl), and converts the
     /// result back: an Int of its class, a C address word (a raw address
@@ -1410,7 +1417,7 @@ pub enum Inst {
     /// default argument promotion makes it (VarArg). The call's machine
     /// signature is this call's own (codegen::clif::c_call_signature); no
     /// list or argument array exists at run time.
-    ForeignCall { dst: Reg, foreign: u32, args: Vec<Reg>, exposed: Vec<bool>, discard: bool, varargs: Vec<VarArg> },
+    ForeignCall { dst: Reg, foreign: u32, args: Vec<Reg>, exposed: Vec<bool>, mutable: Vec<bool>, discard: bool, varargs: Vec<VarArg> },
     /// A direct call of a scalar-replacement companion function (a function
     /// with `results` > 1: see Function::results): like Call, but the
     /// callee returns several tagged Values at once -- the fields of a
@@ -3218,6 +3225,7 @@ fn parse_inst(p: &Parser, tokens: &[Token], program: &Program) -> Result<Inst, N
                     j += 1;
                 }
                 let mut exposed = vec![false; args.len()];
+                let mut mutable = vec![false; args.len()];
                 let mut discard = false;
                 let mut varargs = Vec::new();
                 for t in &tokens[j..] {
@@ -3235,6 +3243,14 @@ fn parse_inst(p: &Parser, tokens: &[Token], program: &Program) -> Result<Inst, N
                                 match w.parse::<usize>() {
                                     Ok(i) if i < args.len() && !exposed[i] => exposed[i] = true,
                                     _ => return p.err("foreigncall exposed= must list distinct operand indices"),
+                                }
+                            }
+                        }
+                        Token::Pair(k, v) if k == "mutable" => {
+                            for w in v.split(',') {
+                                match w.parse::<usize>() {
+                                    Ok(i) if i < args.len() && !mutable[i] => mutable[i] = true,
+                                    _ => return p.err("foreigncall mutable= must list distinct operand indices"),
                                 }
                             }
                         }
@@ -3264,10 +3280,13 @@ fn parse_inst(p: &Parser, tokens: &[Token], program: &Program) -> Result<Inst, N
                 if let Some(i) = exposed.iter().zip(&decl.params).position(|(e, c)| *e && *c != CAbi::Ptr) {
                     return p.err(format!("foreigncall of {}: operand {i} is exposed at a non-pointer parameter", decl.name));
                 }
+                if let Some(i) = mutable.iter().zip(&exposed).position(|(m, e)| *m && !*e) {
+                    return p.err(format!("foreigncall of {}: operand {i} is mutable= but not exposed=", decl.name));
+                }
                 if discard && !decl.alias.is_some_and(|a| exposed[a as usize]) {
                     return p.err(format!("foreigncall of {}: discard needs a result aliasing an exposed operand", decl.name));
                 }
-                Inst::ForeignCall { dst, foreign, args, exposed, discard, varargs }
+                Inst::ForeignCall { dst, foreign, args, exposed, mutable, discard, varargs }
             }
             "callmulti" => Inst::CallMulti { dsts, func: num(i)?, args: regs_from(i + 1)?, may_error: true, may_gc: true },
             "callenvmulti" => {

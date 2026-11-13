@@ -545,7 +545,11 @@ payload is the address as a sign-extended 60-bit number: every canonical
 x86-64 address (user or kernel, 4- or 5-level paging) and every untagged
 AArch64 address round-trips; an AArch64 pointer with a top-byte tag
 (TBI/MTE) does not, and the C call boundary will have to check (or box)
-such an address, the way an Int has small and big forms. (The test
+such an address, the way an Int has small and big forms. (Since
+RN-ANDROID-TAGGED-POINTER-CORRECTNESS-MILESTONE-1.md the word is the
+target's: `(rotl(address, R) << 4) | 0b1110`, R 0 everywhere this paragraph
+describes and 8 on Android AArch64, whose words keep the top byte whole --
+one immediate word either way, no box. The test
 fixture makes addresses 0..2^59-1 only, so `ca-ptr-wide-address` exercises
 the non-negative half up to its top; the negative half waits for a C call
 to return one.) NIR has five ops: `cptrnull` (a constant), `cptrisnull` (one

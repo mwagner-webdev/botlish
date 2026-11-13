@@ -75,12 +75,14 @@
 @@ owner-liveness-dropped no keepalive of the exposed storage after the foreign operation
 ## native/lower.tcl
 <<<<
-        set result [Assign fn "[dict get $natives $name] [join $operands { }]" $e]
+    if {$extern} {
+        # Every storage the call exposed stays alive until here, as every
+        # storage an address points into does (KeepExposedAlive).
+        KeepStoragesAlive fn [lmap i [lsort -integer [dict keys $access]] {lindex $operands $i}] $e
+    } else {
+        KeepExposedAlive fn $operands $e
     }
-    KeepExposedAlive fn $operands $e
 ====
-        set result [Assign fn "[dict get $natives $name] [join $operands { }]" $e]
-    }
 >>>>
 
 @@ mutable-exclusivity-dropped a write exposure hands C the owner's own (shared, published) storage instead of a private copy
@@ -107,12 +109,11 @@
 >>>>
 ## native/lower.tcl
 <<<<
-    dict for {i how} $access {
-        # The address op follows the storage's kind (a MutableBytes' storage
+        if {!$extern} {
+            # The fixture's operations take the payload address
 ====
-    dict for {i how} $access {
-        if {$how eq "read"} continue
-        # The address op follows the storage's kind (a MutableBytes' storage
+        if {!$extern && $how ne "read"} {
+            # The fixture's operations take the payload address
 >>>>
 
 @@ capturing-parameter-accepts-borrow a parameter that captures the pointer admits byte storage (only an unknown escape is refused)
@@ -280,27 +281,27 @@ proc hir::borrow::Decide {param argType} {
 ## native/src/codegen/clif.rs
 <<<<
             let word = if exposed[i] {
-                self.b.ins().sshr_imm_s(v, 1)
+                self.exposure_address(v, mutable[i])
             } else if class == nir::CAbi::Ptr {
 ====
             let word = if exposed[i] {
-                let address = self.b.ins().sshr_imm_s(v, 1);
+                let address = self.exposure_address(v, mutable[i]);
                 self.b.ins().band_imm_s(address, 0xffff_ffff)
             } else if class == nir::CAbi::Ptr {
 >>>>
 
-@@ apple-exposure-tagged under Apple's C convention an exposure's address is passed as its tagged small-Int word (2a + 1), not the address
+@@ apple-exposure-tagged under Apple's C convention an exposure is passed as its Botlish word (the storage's header address), not its payload's address
 %% macos-aarch64
 ## native/src/codegen/clif.rs
 <<<<
             let word = if exposed[i] {
-                self.b.ins().sshr_imm_s(v, 1)
+                self.exposure_address(v, mutable[i])
             } else if class == nir::CAbi::Ptr {
 ====
             let word = if exposed[i] && apple {
                 v
             } else if exposed[i] {
-                self.b.ins().sshr_imm_s(v, 1)
+                self.exposure_address(v, mutable[i])
             } else if class == nir::CAbi::Ptr {
 >>>>
 
@@ -328,24 +329,35 @@ proc hir::borrow::Decide {param argType} {
 @@ read-exposure-copied a MutableBytes exposed for reading is copied first (a size-linear copy no read needs)
 ## native/lower.tcl
 <<<<
-        set owner [hir::typeOf $hir [lindex [dict get $node args] $i]]
-        lset operands $i [ExposeStorage fn [lindex $operands $i] [hir::borrow::IsMutableOwner $owner] $e]
+        if {[hir::borrow::IsMutableOwner $owner]} {
+            lappend writable $i
+        }
 ====
-        set owner [hir::typeOf $hir [lindex [dict get $node args] $i]]
+        if {[hir::borrow::IsMutableOwner $owner]} {
+            lappend writable $i
+        }
         if {$how eq "read" && [hir::borrow::IsMutableOwner $owner]} {
             lset operands $i [Assign fn "op mbytesclone [lindex $operands $i]" $e]
         }
-        lset operands $i [ExposeStorage fn [lindex $operands $i] [hir::borrow::IsMutableOwner $owner] $e]
 >>>>
 
 @@ exposure-wrong-owner every exposure of a call is the storage of its first exposed argument
 ## native/lower.tcl
 <<<<
-        set owner [hir::typeOf $hir [lindex [dict get $node args] $i]]
-        lset operands $i [ExposeStorage fn [lindex $operands $i] [hir::borrow::IsMutableOwner $owner] $e]
+        if {!$extern} {
+            # The fixture's operations take the payload address
+            # (ExposeStorage); a C call makes it itself (below).
+            lset operands $i [ExposeStorage fn [lindex $operands $i] [expr {$i in $writable}] $e]
+        }
 ====
-        set owner [hir::typeOf $hir [lindex [dict get $node args] $i]]
-        lset operands $i [ExposeStorage fn [lindex $operands [lindex [dict keys $access] 0]] [hir::borrow::IsMutableOwner $owner] $e]
+        set first [lindex $operands [lindex [dict keys $access] 0]]
+        if {!$extern} {
+            # The fixture's operations take the payload address
+            # (ExposeStorage); a C call makes it itself (below).
+            lset operands $i [ExposeStorage fn $first [expr {$i in $writable}] $e]
+        } else {
+            lset operands $i $first
+        }
 >>>>
 
 @@ variadic-byte-argument-admitted byte storage is accepted as a trailing argument of a variadic C call, as if it were a pointer
@@ -421,10 +433,12 @@ proc hir::borrow::Decide {param argType} {
 @@ allocation-after-c-call native lowering builds a List of the C result right after the call, before the program reads it
 ## native/lower.tcl
 <<<<
-    KeepExposedAlive fn $operands $e
+        KeepExposedAlive fn $operands $e
+    }
     if {[dict size $written] == 0} {
 ====
-    KeepExposedAlive fn $operands $e
+        KeepExposedAlive fn $operands $e
+    }
     Assign fn "op listnew [TaggedField fn $result $e]" $e
     if {[dict size $written] == 0} {
 >>>>

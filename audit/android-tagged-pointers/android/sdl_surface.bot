@@ -1,0 +1,73 @@
+direct module
+# sdl_surface.bot -- the SDL3 half of the tagged-pointer probe
+# (RN-ANDROID-TAGGED-POINTER-CORRECTNESS-MILESTONE-1.md, "SDL3
+# integration"), over the committed android-aarch64 SDL3 binding (staged as
+# the sdl3 package) and Android's libSDL3.so: SDL objects whose pointers
+# Bionic tags, made and released through SDL's own API, with no SDL_Init --
+# SDL_Init needs Android's Java side (JNI), which an Android process without
+# ART has not, while SDL's surfaces need nothing of it. A surface SDL
+# allocates (SDL_CreateSurface: a tagged SDL_Surface *), filled by SDL
+# (SDL_FillSurfaceRect: the pointer handed back), its `pixels` -- a tagged
+# pointer in an SDL struct field -- read through the generated layout's
+# native view and read through again, duplicated by SDL (a pointer argument
+# and a tagged result), both destroyed (SDL_DestroySurface). tp_top_byte
+# reports the tags C reads.
+import sdl3::ctypes
+import sdl3::layouts
+import sdl3::pixels
+import sdl3::surface
+import std::binary
+import std::binary::native
+import std::ffi::c
+import std::int
+import std::io
+import std::str
+import stdio_io
+import tp
+
+# The first row's first pixel and the pixel at (3, 3) of an 8x8 RGBA8888
+# surface (pitch 32).
+layout Pixels:
+    size 256
+    align 4
+    field first: std::binary::U32 at 0
+    field middle: std::binary::U32 at 108
+
+nomethod fn top(p: std::ffi::c::Ptr[std::ffi::c::Void]) -> str:
+    q = std::ffi::c::retype[std::ffi::c::UChar](std::ffi::c::clone(p))
+    q.top_byte().to_string()
+
+fn flag(b: bool) -> str:
+    if b:
+        return "true"
+    "false"
+
+fn surfaces() -> unit errors std::io::WriteFailed, NativeViewNull:
+    s = sdl3::surface::SDL_CreateSurface(8, 8, sdl3::pixels::SDL_PIXELFORMAT_RGBA8888)
+    nowhere = std::ffi::c::null[sdl3::ctypes::SDL_Rect]()
+    filled = s.SDL_FillSurfaceRect(nowhere, 287454020)
+    v = std::binary::native::view(sdl3::layouts::SDL_Surface, s)
+    pixels = v.pixels
+    p = std::binary::native::view(Pixels, pixels)
+    d = s.SDL_DuplicateSurface()
+    dv = std::binary::native::view(sdl3::layouts::SDL_Surface, d)
+    copied = dv.pixels
+    dp = std::binary::native::view(Pixels, copied)
+    whole = std::ffi::c::erase(std::ffi::c::clone(s))
+    std::io::print_line("sdl surface ".concat(top(whole)).append_char(' ').concat(top(pixels)).append_char(' ')
+        .concat(v.w.to_string()).append_char('x').concat(v.h.to_string()).append_char(' ').concat(v.pitch.to_string()))
+    std::io::print_line("sdl fill ".concat(flag(filled)).append_char(' ').concat(p.first.to_string()).append_char(' ').concat(p.middle.to_string()))
+    std::io::print_line("sdl duplicate ".concat(dp.middle.to_string()))
+    d.SDL_DestroySurface()
+    s.SDL_DestroySurface()
+    std::io::print_line("sdl destroyed")
+
+with context stdio_io::create()
+
+surfaces():
+    on std::io::WriteFailed:
+        unit
+    on NativeViewNull:
+        std::io::print_line("sdl null surface"):
+            on std::io::WriteFailed:
+                unit

@@ -5993,7 +5993,13 @@ proc native::lower::ExposedOwner {parent x} {
 #                       the payload address, a small Int; never a copy and
 #                       never an allocation. The collector never moves an
 #                       object, so the address is valid exactly while %s is
-#                       live, which `fn keepAddr` (%a -> %s) records.
+#                       live, which `fn keepAddr` (%a -> %s) records. (A C
+#                       call, BorrowCall's `foreigncall ... exposed=`, takes
+#                       %s itself and makes the address at the call: a
+#                       machine word of the full width, which an Android
+#                       heap address's tag needs and a small Int has no
+#                       room for -- RN-ANDROID-TAGGED-POINTER-CORRECTNESS-
+#                       MILESTONE-1.md.)
 #   KeepExposedAlive    op keepalive %s, after the operation that consumed
 #                       the addresses, for every storage they point into:
 #                       %s is then a GC root at every safepoint up to and
@@ -6023,10 +6029,23 @@ proc native::lower::KeepExposedAlive {fnVar operands e} {
     foreach operand $operands {
         if {[dict exists $fn keepAddr $operand]} {
             foreach storage [dict get $fn keepAddr $operand] {
-                if {$storage ni $kept} {
-                    lappend kept $storage
-                }
+                lappend kept $storage
             }
+        }
+    }
+    KeepStoragesAlive fn $kept $e
+}
+
+# Keeps every one of the storage registers STORAGES alive until here, each
+# once, in order: `op keepalive` -- what KeepExposedAlive emits for the
+# storages behind addresses, and BorrowCall for the storages a C call
+# exposes itself (`foreigncall ... exposed=`).
+proc native::lower::KeepStoragesAlive {fnVar storages e} {
+    upvar 1 $fnVar fn
+    set kept {}
+    foreach storage $storages {
+        if {$storage ni $kept} {
+            lappend kept $storage
         }
     }
     foreach storage $kept {
@@ -6045,10 +6064,14 @@ proc native::lower::KeepExposedAlive {fnVar operands e} {
 #     code -- a call, an allocation, a yield -- runs between an exposure
 #     and the call: each write exposure's private copy first (the detach,
 #     `op mbytesclone`, the only allocation: MUTABLE-BYTES.md's "published
-#     storage is never written"), then every address (ExposeStorage);
-#   * the operation (`op NAME`, the native's own op), every address its
-#     argument;
-#   * KeepExposedAlive: a keepalive of every exposed storage after it;
+#     storage is never written"), then, for the fixture's operations, every
+#     address (ExposeStorage);
+#   * the operation: a C call's `foreigncall`, every exposed storage its
+#     argument (`exposed=`, the writable kind's also `mutable=`), whose
+#     payload address the call makes itself at the call; the fixture's
+#     `op NAME` (the native's own op), every address its argument;
+#   * a keepalive of every exposed storage after it (KeepStoragesAlive,
+#     KeepExposedAlive);
 #   * with a write exposure, the call's value is the write-back struct
 #     {result: R, NAME: MutableBytes} (sorted fields), each NAME the
 #     MutableBytes over the private copy C wrote.
@@ -6121,24 +6144,40 @@ proc native::lower::BorrowCall {fnVar e node {wantVirtual ""} {wantCut ""} {want
             dict set written $i $private
         }
     }
+    set writable {}
     dict for {i how} $access {
-        # The address op follows the storage's kind (a MutableBytes' storage
-        # is the writable kind whether it is exposed for reading or writing).
+        # The storage's kind follows its owner's (a MutableBytes' storage is
+        # the writable kind whether it is exposed for reading or writing).
         set owner [hir::typeOf $hir [lindex [dict get $node args] $i]]
-        lset operands $i [ExposeStorage fn [lindex $operands $i] [hir::borrow::IsMutableOwner $owner] $e]
+        if {[hir::borrow::IsMutableOwner $owner]} {
+            lappend writable $i
+        }
+        if {!$extern} {
+            # The fixture's operations take the payload address
+            # (ExposeStorage); a C call makes it itself (below).
+            lset operands $i [ExposeStorage fn [lindex $operands $i] [expr {$i in $writable}] $e]
+        }
     }
     if {$extern} {
         # A C call (C-FFI.md): the operation is the foreign function itself,
         # called with the platform C ABI (codegen/clif.rs). `exposed=` marks
-        # the operands that are exposure addresses (small Ints), the others
-        # being C scalars (Ints) and raw pointers (C address words);
-        # `discard` a pointer result that aliases an exposure (the call
-        # yields unit: hir::borrow::Type), still checked against it.
+        # the operands that are exposed byte storages -- the call makes each
+        # payload address itself, at the call, a machine word of its full
+        # width (RN-ANDROID-TAGGED-POINTER-CORRECTNESS-MILESTONE-1.md: an
+        # Android heap address's tag included), after checking the
+        # storage's kind: the writable one for those `mutable=` also marks
+        # -- the others being C scalars (Ints) and raw pointers (C address
+        # words); `discard` a pointer result that aliases an exposure (the
+        # call yields unit: hir::borrow::Type), still checked against it.
         set key [core::native::displayName $name]
         set text "foreigncall [ForeignIndex $key] [join $operands { }]"
         if {[dict size $access]} {
             append text " exposed=[join [lsort -integer [dict keys $access]] ,]"
         }
+        if {[llength $writable]} {
+            append text " mutable=[join [lsort -integer $writable] ,]"
+        }
+
         if {[dict exists $node cvarargs] && [dict get $node cvarargs] ne {}} {
             # A variadic C call (VARIADICS-VERTICAL-SLICE-1.md): each
             # trailing operand's own C ABI class and the class C's default
@@ -6165,7 +6204,13 @@ proc native::lower::BorrowCall {fnVar e node {wantVirtual ""} {wantCut ""} {want
     } else {
         set result [Assign fn "[dict get $natives $name] [join $operands { }]" $e]
     }
-    KeepExposedAlive fn $operands $e
+    if {$extern} {
+        # Every storage the call exposed stays alive until here, as every
+        # storage an address points into does (KeepExposedAlive).
+        KeepStoragesAlive fn [lmap i [lsort -integer [dict keys $access]] {lindex $operands $i}] $e
+    } else {
+        KeepExposedAlive fn $operands $e
+    }
     if {[dict size $written] == 0} {
         if {[WordKind fn $result] ne ""} {
             if {$want eq "cword"} {

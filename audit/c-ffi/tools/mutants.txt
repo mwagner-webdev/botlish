@@ -87,7 +87,7 @@
 ## native/src/codegen/clif.rs
 <<<<
             } else if class == nir::CAbi::Ptr {
-                self.b.ins().sshr_imm_s(v, 4)
+                self.cptr_address(v)
 ====
             } else if class == nir::CAbi::Ptr {
                 v
@@ -148,13 +148,9 @@
 @@ keepalive-dropped no keepalive of the exposed storage after the C call
 ## native/lower.tcl
 <<<<
-        set result [Assign fn "[dict get $natives $name] [join $operands { }]" $e]
-    }
-    KeepExposedAlive fn $operands $e
+        KeepStoragesAlive fn [lmap i [lsort -integer [dict keys $access]] {lindex $operands $i}] $e
 ====
-        set result [Assign fn "[dict get $natives $name] [join $operands { }]" $e]
-        KeepExposedAlive fn $operands $e
-    }
+        list
 >>>>
 
 @@ argument-after-exposure a read exposure is made where its argument is evaluated, so later arguments' code runs while it is open
@@ -171,12 +167,11 @@
 >>>>
 ## native/lower.tcl
 <<<<
-    dict for {i how} $access {
-        # The address op follows the storage's kind (a MutableBytes' storage
+        if {!$extern} {
+            # The fixture's operations take the payload address
 ====
-    dict for {i how} $access {
-        if {$how eq "read"} continue
-        # The address op follows the storage's kind (a MutableBytes' storage
+        if {!$extern && $how ne "read"} {
+            # The fixture's operations take the payload address
 >>>>
 
 @@ every-extern-direct every call of a C function is an authority source, noescape ones included
@@ -255,7 +250,7 @@
 @@ address-masked a returned address the C pointer word cannot hold is masked into one instead of failing
 ## native/src/codegen/clif.rs
 <<<<
-            let fits = self.b.ins().icmp(IntCC::Equal, back, returned);
+            let fits = self.b.ins().icmp(IntCC::Equal, back, rotated);
             let ok = self.b.create_block();
             let bad = self.b.create_block();
             self.b.ins().brif(fits, ok, &[], bad, &[]);
@@ -486,13 +481,13 @@ pub fn c_call_conv(triple: &Triple) -> CallConv {
 @@ pointer-result-truncated a pointer result keeps its low 32 bits only
 ## native/src/codegen/clif.rs
 <<<<
-            // (address << 4) | tag when the word holds the address.
-            let shifted = self.b.ins().ishl_imm_s(returned, 4);
+            let rotated = self.cptr_rotated(returned);
+            let shifted = self.b.ins().ishl_imm_s(rotated, 4);
 ====
-            // (address << 4) | tag when the word holds the address.
             let low = self.b.ins().ireduce(types::I32, returned);
             let returned = self.b.ins().uextend(I64, low);
-            let shifted = self.b.ins().ishl_imm_s(returned, 4);
+            let rotated = self.cptr_rotated(returned);
+            let shifted = self.b.ins().ishl_imm_s(rotated, 4);
 >>>>
 
 @@ macos-plain-char-unsigned plain C char unsigned on macOS AArch64, as on Linux AArch64
@@ -743,12 +738,12 @@ pub fn c_call_conv(triple: &Triple) -> CallConv {
 @@ va-pointer-truncated a trailing pointer is passed with its low 32 bits only
 ## native/src/codegen/clif.rs
 <<<<
-            nir::CAbi::Ptr => self.b.ins().sshr_imm_s(v, 4),
+            nir::CAbi::Ptr => self.cptr_address(v),
             nir::CAbi::Bool => {
                 let shifted = self.b.ins().ushr_imm_s(v, 2);
 ====
             nir::CAbi::Ptr => {
-                let address = self.b.ins().sshr_imm_s(v, 4);
+                let address = self.cptr_address(v);
                 let low = self.b.ins().ireduce(types::I32, address);
                 self.b.ins().uextend(I64, low)
             }
@@ -931,11 +926,9 @@ pub fn c_call_conv(triple: &Triple) -> CallConv {
 @@ va-keepalive-dropped a variadic C call keeps no exposed storage alive after it: the storage a trailing call's fixed pointer parameters borrow is dead at the call
 ## native/lower.tcl
 <<<<
-    KeepExposedAlive fn $operands $e
-    if {[dict size $written] == 0} {
+        KeepStoragesAlive fn [lmap i [lsort -integer [dict keys $access]] {lindex $operands $i}] $e
 ====
-    if {![dict exists $node cvarargs] || [dict get $node cvarargs] eq {}} {
-        KeepExposedAlive fn $operands $e
-    }
-    if {[dict size $written] == 0} {
+        if {![dict exists $node cvarargs] || [dict get $node cvarargs] eq {}} {
+            KeepStoragesAlive fn [lmap i [lsort -integer [dict keys $access]] {lindex $operands $i}] $e
+        }
 >>>>

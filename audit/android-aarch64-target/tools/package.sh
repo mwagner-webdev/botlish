@@ -10,8 +10,10 @@
 # BOTLISH... is the compiler command that packs the packages (`tclsh9.0
 # main.tcl` in a checkout, or the single-file compiler) and whose native
 # driver states the runtime ABI the archive must have (`botlish-native
-# runtime-abi` beside it: the checkout's native/target/release, or
-# BOTLISH_NATIVE_BIN). Writes
+# runtime-abi aarch64-linux-android` beside it: the checkout's
+# native/target/release, or BOTLISH_NATIVE_BIN -- Android's runtime of the
+# driver's source, whose C address words keep Android's top-byte tags:
+# RN-ANDROID-TAGGED-POINTER-CORRECTNESS-MILESTONE-1.md). Writes
 #
 #   OUT/repo/botlish_target_android_aarch64-0.1.0.botpkg
 #       the runtime archive (native/runtime-archive built with cargo for
@@ -42,7 +44,7 @@ bin="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin"
 [[ -x $bin/clang ]] || { echo "package.sh: $bin/clang is missing: ANDROID_NDK_ROOT is no NDK for linux-x86_64" >&2; exit 1; }
 revision=$(sed -n 's/^Pkg.Revision *= *//p' "$ndk/source.properties")
 driver=${BOTLISH_NATIVE_BIN:-$root/native/target/release/botlish-native}
-abi=$("$driver" runtime-abi | awk '$1 == "runtime-abi" { print $2 }')
+abi=$("$driver" runtime-abi aarch64-linux-android | awk '$1 == "runtime-abi" { print $2 }')
 [[ $abi =~ ^[0-9a-f]{16}$ ]] || { echo "package.sh: the driver states no runtime ABI" >&2; exit 1; }
 
 rustup target add aarch64-linux-android >/dev/null 2>&1 || true

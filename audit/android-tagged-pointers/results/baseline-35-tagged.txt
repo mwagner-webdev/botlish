@@ -1,0 +1,3 @@
+MAIN	0	2	NATIVE ADDRESS	the C function tp::alloc returned the address 0xb400400174b14f10, which a Botlish C pointer cannot hold (its word keeps a sign-extended 60-bit address: a top-byte-tagged pointer is not one); the pointer is never truncated or masked
+MAIN	1	2	NATIVE ADDRESS	the C function tp::alloc returned the address 0xb400400174b14d80, which a Botlish C pointer cannot hold (its word keeps a sign-extended 60-bit address: a top-byte-tagged pointer is not one); the pointer is never truncated or masked
+HOST	done

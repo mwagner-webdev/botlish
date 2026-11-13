@@ -2078,12 +2078,16 @@ pub extern "C" fn rt_bytes_len(p: *mut Vm, v: Value) -> Value {
 /// (the object's address plus the constant payload offset; no read of the
 /// payload, no allocation). Valid only while V is live and unmoved -- the
 /// collector never moves objects, and native lowering keeps V live through the
-/// syscall or C call that consumes the address (`op keepalive`). A heap
-/// object's address on every host the native backend runs on -- Linux
-/// x86-64 (47-bit user space), Linux AArch64 (48-bit, or 52 with large
-/// virtual addresses) and macOS AArch64 (47-bit; its heap is above 4 GiB,
-/// tests/c-byte-borrowing.test's bb-read-address-above-4gib) -- is below the
-/// small-Int ceiling (2^62); anything else is refused rather than truncated.
+/// syscall that consumes the address (`op keepalive`). A heap object's
+/// address on every host the Linux syscall transports run on -- Linux
+/// x86-64 (47-bit user space) and Linux AArch64 (48-bit, or 52 with large
+/// virtual addresses), whose glibc heaps carry no tag -- is below the
+/// small-Int ceiling (2^62); anything else (an Android heap address's
+/// top-byte tag) is refused rather than truncated. A C call's byte exposure
+/// is no small Int: the call makes the payload address itself, a machine
+/// word of its full width (codegen::clif's `exposure_address`,
+/// RN-ANDROID-TAGGED-POINTER-CORRECTNESS-MILESTONE-1.md), and reaches this
+/// helper only to raise the TYPE refusal of a storage of the wrong kind.
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_bytes_addr(p: *mut Vm, v: Value) -> Value {
     if let Err(failed) = bytes_operand(p, v, "std::abi::x86_64::from_bytes") {

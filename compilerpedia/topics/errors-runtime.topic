@@ -861,26 +861,38 @@ yet. Handle failures inside the callback's body.
 
 @topic error.native-address
 title: NATIVE ADDRESS: a C function returned an address Botlish cannot hold
-summary: NATIVE ADDRESS stops a run when a C function's pointer result does not fit Botlish's C pointer word (a sign-extended 60-bit address): the pointer is never truncated or masked.
+summary: NATIVE ADDRESS stops a run when a C function's pointer result does not fit the target's C pointer word: the pointer is never truncated, masked or untagged.
 index: errors backends
 alias: C pointer too wide; tagged pointer result
-keywords: extern c fn, pointer, address, std::ffi::c::Ptr, top byte, tagged pointer, aarch64
+keywords: extern c fn, pointer, address, std::ffi::c::Ptr, top byte, tagged pointer, aarch64, android, Bionic
 related: concept.c-ffi backend.native-only error.native-bool error.native-contract-violation
 code: NATIVE ADDRESS
 
 == MEANING
 Run time, native backends only (a C call runs nowhere else). An
-std::ffi::c::Ptr is a tagged word holding a sign-extended 60-bit address.
-Every canonical x86-64 address and every untagged AArch64 address fits; a
-top-byte-tagged AArch64 pointer, or a garbage value returned as a pointer,
-does not, and the call fails with "the C function NAME returned the address
-0x..., which a Botlish C pointer cannot hold ...".
+std::ffi::c::Ptr is one tagged word holding 60 bits of address, laid out
+as the target's pointers need:
+
+* On Linux, macOS and Windows the word keeps a sign-extended 60-bit
+  address: every canonical x86-64 address and every untagged AArch64
+  address fits, a top-byte-tagged one does not.
+* On Android AArch64, whose heap pointers carry a tag in their top byte
+  (Android 11 and later), the word keeps the whole top byte and a 52-bit
+  address: every address of a 48-bit address space fits, tagged or not.
+
+An address the target's word cannot hold -- a garbage value returned as a
+pointer, a top-byte-tagged pointer on a desktop target -- fails with "the
+C function NAME returned the address 0x..., which a Botlish C pointer
+cannot hold ...". A pointer read from a native view's pointer field is
+held to the same rule.
 
 == WHAT TO DO
 Check the declaration against the C header: a function declared to return
-a pointer that really returns an integer or a tagged pointer is
-mis-declared. A C library that tags its pointers needs a C wrapper that
-returns them untagged.
+a pointer that really returns an integer is mis-declared. On a desktop
+target, a C library that tags its pointers in their top byte needs a C
+wrapper that returns them untagged. On Android nothing is needed: the
+heap's tags are kept, and an application never turns Android's heap
+pointer tagging off for Botlish.
 
 @topic error.native-aot-not-ready
 title: NATIVE AOT NOT-READY: the program cannot be compiled ahead of time

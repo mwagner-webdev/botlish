@@ -680,6 +680,27 @@ fn cli(args: &[String]) -> i32 {
         // in its identity record, and a native library's manifest records.
         emit(&tcl_list(&["runtime-abi".to_string(), format!("{:016x}", runtime::aotimage::ABI_FINGERPRINT)]));
         emit(&tcl_list(&["target".to_string(), codegen::aot::host_target().to_string()]));
+        emit(&tcl_list(&["address-word".to_string(), runtime::value::ADDRESS_WORD.name().to_string()]));
+        return 0;
+    }
+    if command == "runtime-abi" && rest.len() == 1 {
+        // `runtime-abi TRIPLE`: the runtime ABI of TRIPLE's runtime of this
+        // source -- what the program record of code this driver emits for
+        // TRIPLE states, and so what a target support package's runtime
+        // archive for TRIPLE must state. It differs from this driver's own
+        // where the targets' C address encodings differ
+        // (RN-ANDROID-TAGGED-POINTER-CORRECTNESS-MILESTONE-1.md: Android's
+        // top-byte tags).
+        let triple = match codegen::target::parse_triple(&rest[0]) {
+            Ok(triple) => triple,
+            Err(message) => {
+                emit_error(&["NATIVE", "TARGET"], &message);
+                return 1;
+            }
+        };
+        emit(&tcl_list(&["runtime-abi".to_string(), format!("{:016x}", codegen::target::runtime_fingerprint(&triple))]));
+        emit(&tcl_list(&["triple".to_string(), triple.to_string()]));
+        emit(&tcl_list(&["address-word".to_string(), codegen::target::address_word(&triple).name().to_string()]));
         return 0;
     }
     if command == "system-linker" && rest.is_empty() {

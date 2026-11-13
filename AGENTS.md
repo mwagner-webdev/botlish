@@ -4556,10 +4556,14 @@ and a byte-sized pointee (Char, SChar, UChar by registry metadata, or Void).
   `{result: R, NAME: MutableBytes}`. Never expose an owner's own storage
   writable.
 * Exposures are made after every argument is evaluated and kept alive by a
-  `keepalive` after the operation; the syscall bridges and the foreign call
-  share `ExposeStorage`/`KeepExposedAlive` (native/lower.tcl): no other code
-  emits an address op or a keepalive. The C side never names the Linux
-  syscall ABI and the syscall side never names `std::ffi::c`.
+  `keepalive` after the operation; the syscall bridges and the fixture's
+  operations share `ExposeStorage`/`KeepExposedAlive`, and a C call's
+  exposure is made by the call itself (`foreigncall ... exposed=`,
+  codegen::clif's `exposure_address`: the full-width address,
+  RN-ANDROID-TAGGED-POINTER-CORRECTNESS-MILESTONE-1.md), its storages kept
+  by `KeepStoragesAlive` (native/lower.tcl): no other code emits an address
+  op, an exposure or a keepalive. The C side never names the Linux syscall
+  ABI and the syscall side never names `std::ffi::c`.
 * The borrow fixture (`core::cabi::installBorrowFixture`, `ffi_fixture::`) is
   a test process's own; nothing else may call it.
 
@@ -4577,6 +4581,71 @@ only: the tier item `c-borrow-mutants`, MACOS-AARCH64-MILESTONE-7.md), plus
 `tests/linux-syscall.test` and the abi-bytes and mutable-bytes mutation tools
 for a change to the shared exposure mechanism. `bench/c-pointer-borrowing.tcl`
 regenerates the performance table.
+
+## The target's C address word (tagged pointers)
+
+A C address word (`std::ffi::c::Ptr`, `FnPtr`, a native view or edit) is
+one immediate holding 60 bits of address, laid out as the target's
+pointers need (RN-ANDROID-TAGGED-POINTER-CORRECTNESS-MILESTONE-1.md):
+`(rotl(address, R) << 4) | 0b1110`, read back by an arithmetic shift and
+`rotr`, an address held exactly when its rotation is a sign-extended 60-bit
+number. R is 0 on every target whose pointers carry no tag (Linux, macOS,
+Windows: the word every earlier runtime made) and 8 on Android AArch64,
+whose Bionic heap pointers carry a tag in their top byte (the whole top
+byte kept, bits 52..55 the extension of bit 51). Keep it so:
+
+* One encoding per target, stated twice and checked equal: the runtime's
+  own (runtime::value's `ADDRESS_WORD`, by its build's cfg) and code
+  generation's for any target (codegen::target's `address_word`, by the
+  triple; `address_word_is_the_runtimes`). Never read the host's encoding
+  for another target's code (a Linux driver emits Android libraries), never
+  decide it by an OS name anywhere else, and never add a per-call run-time
+  choice. A desktop target's code and objects stay byte-identical to the
+  default encoding's (`desktop_code_never_rotates`); a target joins the
+  tagged encoding by its row, with its own measurements.
+* Never truncate, mask, untag or reconstruct a pointer: an address the
+  word cannot hold is NATIVE ADDRESS (refused, never fixed), and every
+  runtime read goes through `cptr_fits`/`make_cptr`/`cptr_address` and
+  every generated one through clif.rs's `cptr_address`/`cptr_rotated`.
+  A pointer is never an Int (the encoding adds no conversion), and the
+  low four bits stay the tag (never a GC root).
+* The ABI fingerprint states a non-default encoding (aotimage's
+  `fingerprint_for`: the default's words are unchanged, so desktop
+  fingerprints are what they were); code emitted for a target records its
+  runtime's fingerprint (codegen::target's `runtime_fingerprint`), and the
+  compiler compares a target support package and a library manifest with
+  `native::runtimeAbi TRIPLE` (`botlish-native runtime-abi TRIPLE`), never
+  with the driver's own. An Android runtime built before the tagged
+  encoding is refused by its fingerprint.
+* A C call's byte exposure is made by the call itself
+  (`foreigncall ... exposed=I [mutable=I]`: the storage operand, its kind
+  checked inline, plus the payload offset; codegen::clif's
+  `exposure_address`): a machine word of the full width, never a small Int
+  or any Botlish value, kept alive by the keepalive after the call. The
+  fixture's operations and the Linux syscall bridges keep `bytesaddr`'s
+  small Int (Register64 is an Int; Linux heaps carry no tag).
+* Never turn Android's heap pointer tagging off for Botlish
+  (`allowNativeHeapPointerTagging="false"`, `mallopt`), in a generated
+  manifest, a host or a test of the fixed runtime.
+
+If you change the encoding, its statements, the fingerprint's words, the
+exposure or what reads them, run `cargo test --release --manifest-path
+native/Cargo.toml -- address_word fingerprint`, `tests/c-ffi.test`,
+`tests/c-pointer-borrowing.test`, `tests/c-byte-borrowing.test`,
+`tests/c-callbacks.test`, `tests/native-view.test`, `tests/native-edit.test`,
+`tests/native-library.test`, `tests/android-target.test` (its `at-tagged-*`
+need ANDROID_NDK_ROOT, the Android runtime archive, qemu-aarch64 and
+BOTLISH_ANDROID_ROOTS; at-tagged-sdl3 Android's libSDL3.so,
+`tests/cffi/sdl3.tcl android`, and on Android 10+ images the i18n APEX,
+`audit/android-tagged-pointers/tools/apex.sh`) and
+`audit/android-tagged-pointers/tools/mutate.tcl` (every mutant in its
+`mutants.txt` must still apply and be killed by a detector its `!!` line
+names: update a mutant's text when you change the code it mutates,
+keeping it a mutant of the same rule), plus the c-ffi, c-pointer-borrowing
+and c-abi-types mutation tools for a change to code they mutate.
+`audit/android-tagged-pointers/tools/probe.sh` runs the probe from
+installed packages (the clean room's too); `bench/tagged-pointers.tcl
+-root DIR` is the desktop before/after report.
 
 ## C calls (extern c fn, extern c library)
 

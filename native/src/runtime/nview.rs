@@ -139,7 +139,8 @@ pub extern "C" fn rt_native_load_ptr(p: *mut Vm, view: Value, offset: Value, wid
     let stored = u64::from_le_bytes(bytes) as i64;
     if !cptr_fits(stored) {
         return vm(p).fail(RtError::ForeignAddress(format!(
-            "the native view's pointer field at address 0x{address:x} holds 0x{stored:x}, which a Botlish C pointer cannot hold (its word keeps a sign-extended 60-bit address: a top-byte-tagged pointer is not one); the pointer is never truncated or masked"
+            "the native view's pointer field at address 0x{address:x} holds 0x{stored:x}, which a Botlish C pointer cannot hold (its word keeps {}); the pointer is never truncated or masked",
+            ADDRESS_WORD.holds()
         )));
     }
     make_cptr(stored)

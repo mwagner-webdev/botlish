@@ -30,13 +30,23 @@
 //!                 a value a program can observe -- printing and hashing go
 //!                 through the declared names.
 //!   aaa...aaa1110 a raw C address (C-ABI-TYPES.md: a data or a function
-//!                 pointer), stored as (address << 4) | 0b1110: an immediate
-//!                 (never heap-allocated, never a GC root) whose payload is
-//!                 the address as a sign-extended 60-bit number, so every
-//!                 canonical x86-64 address (user or kernel, 4- or 5-level
-//!                 paging) and every untagged AArch64 one round-trips; the
-//!                 null pointer is the bare tag, 14. Low four bits `0b1110`
-//!                 are disjoint from a small Int's `0b...1`, a UnicodeChar's
+//!                 pointer), stored as (rotl(address, R) << 4) | 0b1110: an
+//!                 immediate (never heap-allocated, never a GC root) whose
+//!                 60-bit payload is the address rotated left by the
+//!                 target's R (`ADDRESS_WORD`, RN-ANDROID-TAGGED-POINTER-
+//!                 CORRECTNESS-MILESTONE-1.md) and read back sign-extended,
+//!                 so it holds every address whose 4 bits the rotation puts
+//!                 on top repeat the bit below them, and refuses -- never
+//!                 truncates -- any other. R is 0 on every target whose
+//!                 pointers carry no tag (every canonical x86-64 address,
+//!                 user or kernel, 4- or 5-level paging, and every untagged
+//!                 AArch64 one round-trips), and 8 on Android AArch64,
+//!                 whose heap pointers carry a tag in their top byte: the
+//!                 whole top byte is kept and bits 52..55 must repeat bit
+//!                 51 (every user and kernel address of a 48-bit or smaller
+//!                 address space, tagged or not). The null pointer is the
+//!                 bare tag, 14, whatever R. Low four bits `0b1110` are
+//!                 disjoint from a small Int's `0b...1`, a UnicodeChar's
 //!                 `0b100`, an enum case's `0b10010`, a pointer's `0b000`
 //!                 and the fixed constants 2/6/10. The static pointee type is
 //!                 not in the word: Ptr[A] and Ptr[B] values are the same
@@ -82,8 +92,91 @@ pub const MAX_ENUM_CASE: u32 = (1 << 27) - 1;
 /// Low-bits tag of an immediate C address word (see this module's header).
 pub const CPTR_TAG: u64 = 0b1110;
 pub const CPTR_TAG_MASK: u64 = 0b1111;
-/// The null C pointer: address 0.
+/// The null C pointer: address 0 (rotated by any amount, still 0).
 pub const CPTR_NULL: Value = CPTR_TAG;
+
+/// How a C address word holds its address: what the target's pointer ABI
+/// keeps in the bits a 60-bit payload has no room for
+/// (RN-ANDROID-TAGGED-POINTER-CORRECTNESS-MILESTONE-1.md). One word, no
+/// allocation, either way: the encoding is `(rotl(address, R) << 4) |
+/// CPTR_TAG`, read back as `rotr(word >> 4, R)` (an arithmetic shift), and
+/// an address is held exactly when its rotation is a sign-extended 60-bit
+/// number (`cptr_fits`). A target's runtime has one (`ADDRESS_WORD`) and
+/// code generation emits the same for that target
+/// (codegen::target::address_word); the ABI fingerprint holds the
+/// non-default one, so code of one encoding never runs on a runtime of the
+/// other.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AddressWord {
+    /// R = 0: the address sign-extended from bit 59. Every target whose
+    /// pointers carry nothing in their top bits: x86-64's canonical
+    /// addresses (4- and 5-level paging), untagged AArch64 ones of a
+    /// 48- or 52-bit address space.
+    Canonical60,
+    /// R = 8: the top byte (Android's heap pointer tag, an MTE tag) kept
+    /// whole, bits 0..51 as they are and bits 52..55 the sign extension of
+    /// bit 51 -- every user and kernel address of a 48-bit (or smaller)
+    /// AArch64 address space, whatever its tag. Android AArch64.
+    TopByteTagged,
+}
+
+impl AddressWord {
+    /// The rotation R of the encoding.
+    #[inline]
+    pub const fn rotation(self) -> u32 {
+        match self {
+            AddressWord::Canonical60 => 0,
+            AddressWord::TopByteTagged => 8,
+        }
+    }
+
+    /// The encoding's name, as the driver's `target` report and the ABI
+    /// fingerprint's documentation spell it.
+    pub const fn name(self) -> &'static str {
+        match self {
+            AddressWord::Canonical60 => "canonical-60",
+            AddressWord::TopByteTagged => "top-byte-tagged",
+        }
+    }
+
+    /// What a word of this encoding holds, as a NATIVE ADDRESS refusal says
+    /// it (the default encoding's words are every earlier runtime's).
+    pub const fn holds(self) -> &'static str {
+        match self {
+            AddressWord::Canonical60 => "a sign-extended 60-bit address: a top-byte-tagged pointer is not one",
+            AddressWord::TopByteTagged => {
+                "a pointer's top byte, its tag, whole and a 52-bit address whose bits 52..55 repeat bit 51: every address of a 48-bit address space, tagged or not"
+            }
+        }
+    }
+
+    /// 1 if ADDRESS is representable in a C address word of this encoding.
+    #[inline]
+    pub const fn fits(self, address: i64) -> bool {
+        let rotated = address.rotate_left(self.rotation());
+        (rotated << 4) >> 4 == rotated
+    }
+
+    /// The C address word of ADDRESS (which must fit: `fits`).
+    #[inline]
+    pub const fn encode(self, address: i64) -> Value {
+        ((address.rotate_left(self.rotation()) as u64) << 4) | CPTR_TAG
+    }
+
+    /// The address the C address word V of this encoding holds.
+    #[inline]
+    pub const fn decode(self, v: Value) -> i64 {
+        ((v as i64) >> 4).rotate_right(self.rotation())
+    }
+}
+
+/// This runtime's C address encoding: its target's (codegen::target's
+/// `address_word` states the same for every target, which a build for its
+/// own host agrees with: `address_word_is_the_runtimes`). Android's heap
+/// pointers are tagged in their top byte (Bionic, Android 11 and later);
+/// no other target's runtime holds a tag.
+pub const ADDRESS_WORD: AddressWord =
+    if cfg!(target_os = "android") { AddressWord::TopByteTagged } else { AddressWord::Canonical60 };
 
 pub const MAX_SCALAR: u32 = 0x10FFFF;
 pub const SURROGATE_LO: u32 = 0xD800;
@@ -930,24 +1023,26 @@ pub fn is_cptr(v: Value) -> bool {
     v & CPTR_TAG_MASK == CPTR_TAG
 }
 
-/// 1 if ADDRESS is representable in a C address word (sign-extended 60 bits).
+/// 1 if ADDRESS is representable in a C address word of this runtime's
+/// encoding (`ADDRESS_WORD`: the rotated address a sign-extended 60-bit
+/// number).
 #[inline]
 pub fn cptr_fits(address: i64) -> bool {
-    (address << 4) >> 4 == address
+    ADDRESS_WORD.fits(address)
 }
 
 /// The C address word of ADDRESS (which must fit: `cptr_fits`).
 #[inline]
 pub fn make_cptr(address: i64) -> Value {
     debug_assert!(cptr_fits(address));
-    ((address as u64) << 4) | CPTR_TAG
+    ADDRESS_WORD.encode(address)
 }
 
-/// The address a C address word V holds.
+/// The address a C address word V holds: every bit of it, its tag included.
 #[inline]
 pub fn cptr_address(v: Value) -> i64 {
     debug_assert!(is_cptr(v));
-    (v as i64) >> 4
+    ADDRESS_WORD.decode(v)
 }
 
 #[inline]
@@ -1219,4 +1314,85 @@ pub fn big_of<'a>(v: Value) -> &'a BigInt {
 /// The Int V as an i64, if it is small.
 pub fn int_small(v: Value) -> Option<i64> {
     if is_small(v) { Some(small_of(v)) } else { None }
+}
+
+#[cfg(test)]
+mod address_word_tests {
+    use super::*;
+
+    /// The address Android API 35's Bionic gave the liblog exposure that
+    /// RN-HOST-STARTABLE-APPLICATION-LIBRARY-MILESTONE-1.md recorded refused.
+    const BIONIC_TAGGED: u64 = 0xb400_4000_b48d_15c0;
+
+    /// The tagged addresses the encodings are judged by: Bionic's heap tag
+    /// (0xb4), every tag value, an MTE tag (bits 56..59), user and kernel
+    /// halves, the edges of a 48-bit address space, null, all ones (a C
+    /// API's (void *)-1 sentinel: MAP_FAILED).
+    fn tagged_samples() -> Vec<u64> {
+        let mut samples = vec![0, u64::MAX, BIONIC_TAGGED, 0x0000_7fff_ffff_fff0, 0xffff_8000_0000_0000, 0x0007_ffff_ffff_fff8];
+        for tag in 0..=255u64 {
+            samples.push((tag << 56) | 0x0000_7a3b_c0de_0010);
+            samples.push((tag << 56) | 0x00ff_f000_0000_1000);
+            samples.push((tag << 56) | 0x0000_0000_0000_1000);
+        }
+        samples
+    }
+
+    #[test]
+    fn canonical60_is_the_sign_extended_60_bit_word() {
+        // R = 0 is exactly the word every earlier runtime made: (a << 4) | 14
+        // and an arithmetic shift back -- a desktop target's code and objects
+        // are unchanged by the encoding being a parameter.
+        let w = AddressWord::Canonical60;
+        for a in [0i64, 1, 0x1234, 0x0000_7fff_ffff_f000, -1, -0x1000, (1 << 59) - 1, -(1 << 59)] {
+            assert!(w.fits(a), "{a:#x}");
+            assert_eq!(w.encode(a), ((a as u64) << 4) | CPTR_TAG);
+            assert_eq!(w.decode(w.encode(a)), a);
+        }
+        for a in [1i64 << 59, -(1 << 59) - 1, BIONIC_TAGGED as i64, i64::MAX, i64::MIN] {
+            assert!(!w.fits(a), "{a:#x}");
+        }
+    }
+
+    #[test]
+    fn top_byte_tagged_keeps_every_tag() {
+        let w = AddressWord::TopByteTagged;
+        for a in tagged_samples() {
+            let a = a as i64;
+            assert!(w.fits(a), "{a:#x}");
+            let v = w.encode(a);
+            assert!(is_cptr(v), "{v:#x}");
+            assert_eq!(w.decode(v), a, "{a:#x}: the tag is never cleared, masked or reconstructed");
+        }
+        assert_eq!(w.encode(0), CPTR_NULL);
+        assert_eq!(w.decode(CPTR_NULL), 0);
+    }
+
+    #[test]
+    fn top_byte_tagged_refuses_what_it_cannot_hold() {
+        // Bits 52..55 that are not bit 51's extension: no address of a
+        // 48-bit space, and no value the word could give back exactly.
+        let w = AddressWord::TopByteTagged;
+        for a in [0x0010_0000_0000_0000u64, 0xb4f0_0000_0000_1000, 0x0008_0000_0000_0000, 0xfff7_ffff_ffff_ffff] {
+            assert!(!w.fits(a as i64), "{a:#x}");
+        }
+    }
+
+    #[test]
+    fn distinct_addresses_are_distinct_words() {
+        // Identity: two addresses that differ only in their tag are two
+        // words, never the same pointer.
+        let w = AddressWord::TopByteTagged;
+        let a = BIONIC_TAGGED as i64;
+        let b = (BIONIC_TAGGED & 0x00ff_ffff_ffff_ffff) as i64;
+        assert_ne!(w.encode(a), w.encode(b));
+        assert_eq!(w.decode(w.encode(b)), b);
+    }
+
+    #[test]
+    fn this_runtime_is_its_targets() {
+        assert_eq!(ADDRESS_WORD, if cfg!(target_os = "android") { AddressWord::TopByteTagged } else { AddressWord::Canonical60 });
+        assert!(cptr_fits(0x1000));
+        assert_eq!(cptr_address(make_cptr(0x1000)), 0x1000);
+    }
 }

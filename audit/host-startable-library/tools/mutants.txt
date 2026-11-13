@@ -261,9 +261,9 @@ fn guarded(out: *mut *mut LibError, f: impl FnOnce() -> Result<(), LibError>) ->
 !! rust:abi_fingerprint
 ## native/src/runtime/aotimage.rs
 <<<<
-pub const ABI_FINGERPRINT: u64 = fingerprint_of(&ABI_SCALAR_WORDS, super::ops::HELPER_SIGNATURES, super::library::SIGNATURES);
+    fingerprint_of(&ABI_SCALAR_WORDS, address_word_words(word), super::ops::HELPER_SIGNATURES, super::library::SIGNATURES)
 ====
-pub const ABI_FINGERPRINT: u64 = fingerprint_of(&ABI_SCALAR_WORDS, super::ops::HELPER_SIGNATURES, &[]);
+    fingerprint_of(&ABI_SCALAR_WORDS, address_word_words(word), super::ops::HELPER_SIGNATURES, &[])
 >>>>
 
 @@ signatures-miss-main the library boundary's signatures leave NAME_main's runtime function out

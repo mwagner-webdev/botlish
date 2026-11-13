@@ -1,0 +1,11 @@
+sdl surface 180 180 8x8 32
+sdl fill true 287454020 287454020
+sdl duplicate 287454020
+sdl destroyed
+MAIN	0	0
+sdl surface 180 180 8x8 32
+sdl fill true 287454020 287454020
+sdl duplicate 287454020
+sdl destroyed
+MAIN	1	0
+HOST	done

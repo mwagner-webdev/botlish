@@ -392,17 +392,22 @@ proc native::targetFacts {triple} {
     return [lrange $output 2 end]
 }
 
-# This driver's runtime ABI fingerprint (runtime::aotimage::ABI_FINGERPRINT,
-# 16 lowercase hexadecimal digits: botlish-native runtime-abi), asked once
-# per process: what a native library's manifest records and a target
-# support package's runtime archive must state
-# (EXTERNAL-COMPILER-TOOLS-AND-TARGET-PACKAGES-MILESTONE-1.md).
-proc native::runtimeAbi {} {
+# The runtime ABI fingerprint of TRIPLE's runtime of this source (16
+# lowercase hexadecimal digits: botlish-native runtime-abi TRIPLE), or, with
+# no TRIPLE, this driver's own (runtime::aotimage::ABI_FINGERPRINT:
+# botlish-native runtime-abi), asked once per process each: what a native
+# library's manifest records for its target and a target support package's
+# runtime archive for its target must state
+# (EXTERNAL-COMPILER-TOOLS-AND-TARGET-PACKAGES-MILESTONE-1.md). The two
+# differ where the targets' C address encodings do: code the driver emits
+# for Android encodes C address words Android's way and runs only on a
+# runtime that does (RN-ANDROID-TAGGED-POINTER-CORRECTNESS-MILESTONE-1.md).
+proc native::runtimeAbi {{triple ""}} {
     variable runtimeAbiCache
-    if {[info exists runtimeAbiCache]} {
-        return $runtimeAbiCache
+    if {[info exists runtimeAbiCache] && [dict exists $runtimeAbiCache $triple]} {
+        return [dict get $runtimeAbiCache $triple]
     }
-    set pipe [open |[list [binary] runtime-abi 2>@1] r]
+    set pipe [open |[list [binary] runtime-abi {*}[expr {$triple eq "" ? {} : [list $triple]}] 2>@1] r]
     fconfigure $pipe -encoding utf-8 -translation lf
     set output [string trimright [read $pipe] \n]
     catch {close $pipe}
@@ -410,8 +415,8 @@ proc native::runtimeAbi {} {
     if {[lindex $first 0] ne "runtime-abi" || ![regexp {^[0-9a-f]{16}$} [lindex $first 1]]} {
         throw {NATIVE BUG} "native backend gave no runtime ABI: $output"
     }
-    set runtimeAbiCache [lindex $first 1]
-    return $runtimeAbiCache
+    dict set runtimeAbiCache $triple [lindex $first 1]
+    return [lindex $first 1]
 }
 
 # The link plan of the program-mode HIR program HIR as the driver resolves

@@ -16,8 +16,10 @@
 //!   no allocation, so a comparison never changes the C error state;
 //! * a returned address the C address word cannot hold
 //!   (`rt_ffi_bad_address`): a NATIVE ADDRESS failure, never a masked or
-//!   truncated pointer -- every canonical x86-64 address and every untagged
-//!   AArch64 one fits; an AArch64 top-byte-tagged one does not;
+//!   truncated pointer -- under the default encoding every canonical x86-64
+//!   address and every untagged AArch64 one fits; under Android's
+//!   (value.rs's `AddressWord::TopByteTagged`) every tagged or untagged
+//!   address of a 48-bit address space;
 //! * a C `_Bool` result whose byte is neither 0 nor 1 (`rt_ffi_bad_bool`):
 //!   a NATIVE BOOL failure. The platform ABIs (x86-64 SysV, AAPCS64) define
 //!   a `_Bool` result as one byte holding 0 or 1, the register's other bits
@@ -116,13 +118,14 @@ pub extern "C" fn rt_ffi_box_u64(p: *mut Vm, n: u64) -> Value {
 }
 
 /// The failure of a C function NAME (a String constant) that returned the
-/// address ADDRESS, which no C address word can hold (value.rs: the payload
-/// is a sign-extended 60-bit number). Records it and returns NO_VALUE.
+/// address ADDRESS, which no C address word of this runtime's encoding can
+/// hold (value.rs's ADDRESS_WORD). Records it and returns NO_VALUE.
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_ffi_bad_address(p: *mut Vm, name: Value, address: u64) -> Value {
     let name = text_of(p, name);
     vm(p).fail(RtError::ForeignAddress(format!(
-        "the C function {name} returned the address 0x{address:x}, which a Botlish C pointer cannot hold (its word keeps a sign-extended 60-bit address: a top-byte-tagged pointer is not one); the pointer is never truncated or masked"
+        "the C function {name} returned the address 0x{address:x}, which a Botlish C pointer cannot hold (its word keeps {}); the pointer is never truncated or masked",
+        ADDRESS_WORD.holds()
     )))
 }
 

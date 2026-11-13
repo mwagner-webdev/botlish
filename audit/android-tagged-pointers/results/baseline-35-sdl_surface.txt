@@ -1,0 +1,3 @@
+MAIN	0	2	NATIVE ADDRESS	the C function sdl3::surface::SDL_CreateSurface returned the address 0xb40040022f251e50, which a Botlish C pointer cannot hold (its word keeps a sign-extended 60-bit address: a top-byte-tagged pointer is not one); the pointer is never truncated or masked
+MAIN	1	2	NATIVE ADDRESS	the C function sdl3::surface::SDL_CreateSurface returned the address 0xb40040022f2539d0, which a Botlish C pointer cannot hold (its word keeps a sign-extended 60-bit address: a top-byte-tagged pointer is not one); the pointer is never truncated or masked
+HOST	done

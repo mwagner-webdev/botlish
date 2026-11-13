@@ -1,0 +1,149 @@
+direct module
+# tagged.bot -- the tagged-pointer probe's application entry
+# (RN-ANDROID-TAGGED-POINTER-CORRECTNESS-MILESTONE-1.md, "Android
+# execution"): every way a C pointer and a byte exposure cross the
+# boundary, run where Bionic tags heap pointers in their top byte (Android
+# 11 and later), each reported on a line of its own through tp_say (itself
+# a byte exposure):
+#
+#   log            liblog's __android_log_write of two exposed strings
+#                  returned (whatever liblog answered)
+#   exposure       the top byte of the address C receives for a Botlish
+#                  byte exposure (Botlish's heap is Bionic's malloc), and
+#                  the sum C reads there
+#   write          a write exposure: C writes the private copy, Botlish
+#                  reads the bytes back
+#   heap           a heap block C allocates, its top byte as C reads it,
+#                  kept in an installed context (an opaque resource handle)
+#                  and handed back: tp_same compares it bit for bit
+#   view           a native view through that pointer reads what C wrote
+#   record         a pointer C keeps in a struct field, read through a
+#                  native view and handed back; stored through a native
+#                  edit and compared by C
+#   callback       a callback given the pointer as its user data returns it
+#   qsort          Bionic's qsort of an exposed buffer, its callback reading
+#                  each element through a native view of the pointer C gives
+#   null           a null pointer from C, null?, and handed back
+#   release        the block freed
+import android_log
+import std::abi
+import std::abi::bytes
+import std::binary
+import std::binary::native
+import std::byte
+import std::ffi::c
+import std::int
+import std::io
+import std::list
+import std::str
+import tp
+
+opaque context struct Heap:
+    block: std::ffi::c::Ptr[std::ffi::c::UChar]
+
+fn heap() -> Heap:
+    Heap {block: tp::alloc(64)}
+
+fn say(text: str) -> unit:
+    codes = std::str::encode_utf8(text)
+    std::abi::bytes::from_list(codes).say(std::list::length(codes))
+
+fn yes(c: std::ffi::c::Int) -> str:
+    if c == 1:
+        return "same"
+    "different"
+
+fn flag(b: bool) -> str:
+    if b:
+        return "true"
+    "false"
+
+# liblog given two exposed strings: the call returns to the program whatever
+# liblog answers (where no log daemon runs, older releases answer an error,
+# WriteFailed: the strings were still exposed and read).
+fn logged() -> unit:
+    std::io::print_line("tagged-pointer probe"):
+        on std::io::WriteFailed:
+            unit
+
+nomethod fn byte(n: int) -> std::byte::Byte:
+    if n >= 0 and n <= 255:
+        return n
+    0
+
+fn bytes(values: List[int]) -> std::abi::bytes::Bytes:
+    bs = loop n in values:
+        byte(n)
+    std::abi::bytes::from_list(bs)
+
+callback c fn echo(data: std::ffi::c::Ptr[std::ffi::c::Void]) -> std::ffi::c::Ptr[std::ffi::c::Void]:
+    data
+
+nomethod fn order(a: std::ffi::c::Ptr[std::ffi::c::Void], b: std::ffi::c::Ptr[std::ffi::c::Void]) -> std::ffi::c::Int errors NativeViewNull:
+    x = std::binary::native::view(tp::Byte, a)
+    y = std::binary::native::view(tp::Byte, b)
+    if x.v < y.v:
+        return -1
+    if x.v > y.v:
+        return 1
+    0
+
+callback c fn compare(a: std::ffi::c::Ptr[std::ffi::c::Void], b: std::ffi::c::Ptr[std::ffi::c::Void]) -> std::ffi::c::Int:
+    order(a, b):
+        on NativeViewNull:
+            0
+
+fn exposures() -> unit:
+    data = bytes([1, 2, 3, 4, 5, 6, 7, 8])
+    top = data.exposed_top_byte()
+    say("exposure ".concat(top.to_string()).append_char(' ').concat(data.sum(8).to_string()))
+    m = std::abi::bytes::zeroed(std::abi::usize(4))
+    r = m.fill(4, 40)
+    say("write ".concat(flag(std::abi::bytes::freeze(r.out) == bytes([40, 41, 42, 43]))))
+
+fn handle(context h: Heap) -> unit errors NativeViewNull, NativeEditNull:
+    say("heap ".concat(h.block.top_byte().to_string()).append_char(' ').concat(yes(h.block.same())))
+    h.block.poke(3, 77)
+    v = std::binary::native::view(tp::Block, h.block)
+    say("view ".concat(v.b3.to_string()).append_char(' ').concat(v.b0.to_string()))
+    held = tp::holder()
+    record = std::binary::native::view(tp::Holder, held)
+    q = record.pointer
+    read = q.same()
+    tp::holder_clear()
+    e = std::binary::native::edit(tp::Holder, held)
+    block = std::ffi::c::clone(h.block)
+    std::binary::store(e, tp::Holder.pointer, block)
+    say("record ".concat(yes(read)).append_char(' ').concat(yes(tp::holder_matches())))
+    f = std::ffi::c::callback(echo)
+    data = std::ffi::c::erase(std::ffi::c::clone(h.block))
+    say("callback ".concat(yes(f.call_back(data))))
+
+fn sorted() -> unit:
+    data = std::abi::bytes::from_bytes(bytes([9, 3, 7, 1, 8, 2, 200, 0]))
+    f = std::ffi::c::callback(compare)
+    r = data.qsort(8, 1, f)
+    say("qsort ".concat(flag(std::abi::bytes::freeze(r.base) == bytes([0, 1, 2, 3, 7, 8, 9, 200]))))
+
+fn nulls() -> unit:
+    p = tp::null()
+    say("null ".concat(flag(p.null?())).append_char(' ').concat(yes(p.is_null())))
+
+fn release(context h: Heap) -> unit:
+    h.block.release()
+    say("release done")
+
+with context android_log::create()
+with context heap()
+
+logged()
+say("log called")
+exposures()
+handle():
+    on NativeViewNull:
+        say("view null")
+    on NativeEditNull:
+        say("edit null")
+sorted()
+nulls()
+release()

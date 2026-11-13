@@ -92,7 +92,36 @@ pub fn abi_fingerprint() -> u64 {
 /// `abi_words`' little-endian bytes. A constant, so that a runtime archive
 /// states the fingerprint of the runtime it holds in its identity record
 /// (`identity_record`) without running anything.
-pub const ABI_FINGERPRINT: u64 = fingerprint_of(&ABI_SCALAR_WORDS, super::ops::HELPER_SIGNATURES, super::library::SIGNATURES);
+pub const ABI_FINGERPRINT: u64 = fingerprint_for(super::value::ADDRESS_WORD);
+
+/// The fingerprint of this source's runtime built with the C address
+/// encoding WORD (runtime::value's AddressWord): `ABI_FINGERPRINT` of the
+/// runtime of every target whose encoding WORD is. Code generation records
+/// the fingerprint of the target it emits for
+/// (RN-ANDROID-TAGGED-POINTER-CORRECTNESS-MILESTONE-1.md): a driver on
+/// Linux x86-64 emitting an Android library states Android's, which only an
+/// Android runtime of this source has.
+pub const fn fingerprint_for(word: super::value::AddressWord) -> u64 {
+    fingerprint_of(&ABI_SCALAR_WORDS, address_word_words(word), super::ops::HELPER_SIGNATURES, super::library::SIGNATURES)
+}
+
+/// The fingerprint's words for the C address encoding WORD: none for the
+/// default one (`Canonical60`, every runtime's before
+/// RN-ANDROID-TAGGED-POINTER-CORRECTNESS-MILESTONE-1.md: a desktop
+/// runtime's fingerprint, and so its stubs, archives and records, are what
+/// they were), a mark and the rotation for another -- so a runtime of one
+/// encoding never accepts code of the other, and an Android runtime built
+/// before the tagged encoding (whose fingerprint lacks them) is refused.
+const fn address_word_words(word: super::value::AddressWord) -> &'static [u64] {
+    match word {
+        super::value::AddressWord::Canonical60 => &[],
+        super::value::AddressWord::TopByteTagged => &[ADDRESS_WORD_MARK, 8],
+    }
+}
+
+/// "CPTRWORD", little-endian: the fingerprint word announcing a C address
+/// encoding other than the default one.
+const ADDRESS_WORD_MARK: u64 = u64::from_le_bytes(*b"CPTRWORD");
 
 /// The fingerprint's words before the helpers' (`abi_words`).
 const ABI_SCALAR_WORDS: [u64; 27] = {
@@ -154,16 +183,21 @@ const fn fnv_word(mut hash: u64, word: u64) -> u64 {
     hash
 }
 
-/// The fingerprint of the scalar words SCALARS followed by the helpers
-/// HELPERS and then the native-library boundary's functions LIBRARY: each
-/// name's bytes, one word each, then its parameter count -- `abi_words`'
-/// order.
-const fn fingerprint_of(scalars: &[u64], helpers: &[(&str, usize)], library: &[(&str, usize)]) -> u64 {
+/// The fingerprint of the scalar words SCALARS and the address-encoding
+/// words ADDRESS followed by the helpers HELPERS and then the
+/// native-library boundary's functions LIBRARY: each name's bytes, one word
+/// each, then its parameter count -- `abi_words`' order.
+const fn fingerprint_of(scalars: &[u64], address: &[u64], helpers: &[(&str, usize)], library: &[(&str, usize)]) -> u64 {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     let mut i = 0;
     while i < scalars.len() {
         hash = fnv_word(hash, scalars[i]);
         i += 1;
+    }
+    let mut a = 0;
+    while a < address.len() {
+        hash = fnv_word(hash, address[a]);
+        a += 1;
     }
     hash = fingerprint_signatures(hash, helpers);
     fingerprint_signatures(hash, library)
@@ -188,7 +222,16 @@ const fn fingerprint_signatures(mut hash: u64, signatures: &[(&str, usize)]) -> 
 
 /// What `abi_fingerprint` digests, word by word.
 pub fn abi_words() -> Vec<u64> {
+    abi_words_for(super::value::ADDRESS_WORD)
+}
+
+/// What `fingerprint_for(WORD)` digests, word by word.
+pub fn abi_words_for(word: super::value::AddressWord) -> Vec<u64> {
     let mut words: Vec<u64> = ABI_SCALAR_WORDS.to_vec();
+    // The C address encoding (runtime::value's AddressWord), when it is not
+    // the default one: generated code encodes and decodes C address words
+    // inline (codegen::clif), so it runs only on a runtime of its encoding.
+    words.extend_from_slice(address_word_words(word));
     // The helpers' names and parameter counts, never their addresses: an
     // executable whose startup computes this (every executable's, through
     // runtime::program::read_linked) would otherwise keep every helper
@@ -593,6 +636,30 @@ mod tests {
         }
         assert_eq!(hash, ABI_FINGERPRINT);
         assert_eq!(abi_fingerprint(), ABI_FINGERPRINT);
+    }
+
+    /// Every encoding's fingerprint is FNV-1a over its own words, and the
+    /// two differ (RN-ANDROID-TAGGED-POINTER-CORRECTNESS-MILESTONE-1.md):
+    /// the default encoding's words are the scalar words, the helpers and
+    /// the library boundary exactly as before -- a desktop runtime's
+    /// fingerprint is unchanged -- and the tagged one's add the mark and
+    /// its rotation.
+    #[test]
+    fn abi_fingerprint_states_the_address_encoding() {
+        use super::super::value::AddressWord;
+        for word in [AddressWord::Canonical60, AddressWord::TopByteTagged] {
+            let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+            for byte in abi_words_for(word).iter().flat_map(|w| w.to_le_bytes()) {
+                hash = (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3);
+            }
+            assert_eq!(hash, fingerprint_for(word), "{word:?}");
+        }
+        assert_ne!(fingerprint_for(AddressWord::Canonical60), fingerprint_for(AddressWord::TopByteTagged));
+        let plain = abi_words_for(AddressWord::Canonical60);
+        let tagged = abi_words_for(AddressWord::TopByteTagged);
+        assert_eq!(tagged.len(), plain.len() + 2);
+        assert_eq!(&tagged[ABI_SCALAR_WORDS.len()..ABI_SCALAR_WORDS.len() + 2], &[ADDRESS_WORD_MARK, 8]);
+        assert_eq!(ABI_FINGERPRINT, fingerprint_for(super::super::value::ADDRESS_WORD));
     }
 
     /// The identity record names the triple and the fingerprint, NUL-padded.

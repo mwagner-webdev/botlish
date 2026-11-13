@@ -233,9 +233,13 @@ proc native::support::select {root target name {artifact native-executable}} {
     if {[catch {file lstat $archive stat}] || $stat(type) ne "file"} {
         Fail RUNTIME "the package $name's runtime archive $relative is missing (or not a regular file: a link is never followed)"
     }
-    set mine [native::runtimeAbi]
+    # The fingerprint of TARGET's runtime of this compiler's source -- the
+    # one its program record states for code emitted for TARGET -- which
+    # is this driver's own unless the targets' C address encodings differ
+    # (RN-ANDROID-TAGGED-POINTER-CORRECTNESS-MILESTONE-1.md).
+    set mine [native::runtimeAbi $triple]
     if {$abi ne $mine} {
-        Fail ABI "the package $name's runtime ABI fingerprint is $abi, and this compiler's is $mine: its runtime was built by another compiler build, whose generated code addresses another runtime (use the target support package of this build)"
+        Fail ABI "the package $name's runtime ABI fingerprint is $abi, and this compiler's for $target is $mine: its runtime was built by another compiler build, whose generated code addresses another runtime (use the target support package of this build)"
     }
     set record [identity $archive]
     if {$record eq ""} {

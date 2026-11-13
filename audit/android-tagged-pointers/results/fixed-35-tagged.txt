@@ -1,0 +1,23 @@
+log true
+exposure 180 36
+write true
+heap 180 same
+view 77 0
+record same same
+callback same
+qsort true
+null true same
+release done
+MAIN	0	0
+log true
+exposure 180 36
+write true
+heap 180 same
+view 77 0
+record same same
+callback same
+qsort true
+null true same
+release done
+MAIN	1	0
+HOST	done

@@ -1,0 +1,45 @@
+# tp.bot -- the binding of tp.c, the tagged-pointer probe's C side
+# (RN-ANDROID-TAGGED-POINTER-CORRECTNESS-MILESTONE-1.md, "Android
+# execution"), and Bionic's qsort. Its archive is the application's own
+# (libtp.a beside the entry, built by the NDK for Android AArch64).
+import std::binary
+import std::ffi::c
+
+extern c library "tp" static at "libtp.a"
+
+# struct tp_holder { void *pointer; unsigned long size; }
+layout Holder:
+    size 16
+    align 8
+    field pointer: std::ffi::c::Ptr[std::ffi::c::UChar] at 0
+    field size: std::binary::U64 at 8
+
+# The first bytes of a heap block.
+layout Block:
+    size 4
+    align 1
+    field b0: std::binary::U8 at 0
+    field b3: std::binary::U8 at 3
+
+# One byte (qsort's elements).
+layout Byte:
+    size 1
+    align 1
+    field v: std::binary::U8 at 0
+
+extern c fn alloc named "tp_alloc"(n: std::ffi::c::ULong) -> std::ffi::c::Ptr[std::ffi::c::UChar] independent
+extern c fn same named "tp_same"(p: std::ffi::c::Ptr[std::ffi::c::UChar] noescape) -> std::ffi::c::Int
+extern c fn top_byte named "tp_top_byte"(p: std::ffi::c::Ptr[std::ffi::c::UChar] noescape) -> std::ffi::c::UChar
+extern c fn release named "tp_free"(p: std::ffi::c::Ptr[std::ffi::c::UChar] noescape) -> unit
+extern c fn null named "tp_null"() -> std::ffi::c::Ptr[std::ffi::c::Void] independent
+extern c fn is_null named "tp_is_null"(p: std::ffi::c::Ptr[std::ffi::c::Void] noescape) -> std::ffi::c::Int
+extern c fn poke named "tp_poke"(p: std::ffi::c::Ptr[std::ffi::c::UChar] noescape, i: std::ffi::c::ULong, v: std::ffi::c::UChar) -> unit
+extern c fn sum named "tp_sum"(data: std::ffi::c::Ptr[std::ffi::c::UChar] read noescape, count: std::ffi::c::ULong) -> std::ffi::c::ULong
+extern c fn exposed_top_byte named "tp_exposed_top_byte"(data: std::ffi::c::Ptr[std::ffi::c::UChar] read noescape) -> std::ffi::c::UChar
+extern c fn fill named "tp_fill"(out: std::ffi::c::Ptr[std::ffi::c::UChar] write noescape, count: std::ffi::c::ULong, seed: std::ffi::c::UChar) -> unit
+extern c fn holder named "tp_holder"() -> std::ffi::c::Ptr[std::ffi::c::Void] independent
+extern c fn holder_clear named "tp_holder_clear"() -> unit
+extern c fn holder_matches named "tp_holder_matches"() -> std::ffi::c::Int
+extern c fn call_back named "tp_call_back"(f: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Ptr[std::ffi::c::Void]], return: std::ffi::c::Ptr[std::ffi::c::Void]}] noescape, data: std::ffi::c::Ptr[std::ffi::c::Void] noescape) -> std::ffi::c::Int
+extern c fn say named "tp_say"(text: std::ffi::c::Ptr[std::ffi::c::UChar] read noescape, count: std::ffi::c::ULong) -> unit
+extern c fn qsort(base: std::ffi::c::Ptr[std::ffi::c::Void] write noescape, count: std::ffi::c::ULongLong, size: std::ffi::c::ULongLong, compare: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Ptr[std::ffi::c::Void], std::ffi::c::Ptr[std::ffi::c::Void]], return: std::ffi::c::Int}] noescape) -> unit
