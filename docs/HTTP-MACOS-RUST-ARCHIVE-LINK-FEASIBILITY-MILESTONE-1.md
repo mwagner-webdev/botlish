@@ -158,31 +158,49 @@ among them the unmangled `rust_eh_personality` and the allocator shim
 mangled with the `__rustc` crate's hash, which differs between rustc
 versions (1.100.0's is `Cs5WqGp7zLRnA`); `rust_eh_personality` is not.
 
-### 5.2 Is localization necessary? The negative control [executed]
+### 5.2 Is localization necessary? The negative control [executed, CI]
 
 The raw archive was linked in place of the localized one into both
 consumer programs with both linkers, the unit built by the runtime's own
-rustc and by another (audit/rust-archive-link/results/
-linux-x86_64-local-results.tsv; the same matrix runs in CI on both
-hosts, section 11):
+rustc and by another (audit/rust-archive-link/tools/experiments.tcl;
+Linux locally, audit/rust-archive-link/results/
+linux-x86_64-local-results.tsv, and in CI; macOS in CI, run 43516411953,
+job `experiments (macos-aarch64)`; the runtime there is built by the
+runner's rustc 1.100.0):
 
-| Unit's rustc vs runtime's | rustc linker | system linker |
-|---|---|---|
-| the same (1.97.0 / 1.97.0) | **link fails**: `rust-lld: error: duplicate symbol: __rustc::__rust_alloc` (and `__rust_dealloc`, `__rust_realloc`, `__rust_alloc_zeroed`) | **links and runs, wrongly**: the runtime's own allocations (40,047 in the consumer's Botlish work) go through the *unit's* counting allocator |
-| different (1.100.0 / 1.97.0) | **link fails**: `duplicate symbol: rust_eh_personality` | **link fails**: GNU ld, `in function 'rust_eh_personality'` (multiple definition) |
+| Host | Unit's rustc vs runtime's | rustc linker | system linker |
+|---|---|---|---|
+| Linux x86-64 | the same | **link fails**: `rust-lld: error: duplicate symbol: __rustc::__rust_alloc` (and `__rust_dealloc`, `__rust_realloc`, `__rust_alloc_zeroed`) | **links and runs, wrongly**: the runtime's own allocations (40,047 in the consumer's Botlish work) go through the *unit's* counting allocator |
+| Linux x86-64 | different | **link fails**: `duplicate symbol: rust_eh_personality` | **link fails**: GNU ld, multiple definition of `rust_eh_personality` |
+| macOS arm64 | the same (1.100.0) | **links and runs, wrongly**: the unit's live-heap count drifts (-9,589 after 100 rounds where -1,389 is expected): its allocator calls are split between the two copies' allocator shims | **links and runs, wrongly**: the runtime's 40,047 allocations go through the unit's allocator, as on Linux |
+| macOS arm64 | different (unit 1.97.0) | **links and passes every check** | **links and passes every check** |
+
+Apple's ld reports no duplicate definition in any case: it loads archive
+members lazily and takes the first definition it meets, so the second
+copy's members that define the same names are never loaded. The last row
+is the most instructive. Every check passes, yet the executable holds
+**one** `rust_eh_personality` (`personality_global 1, personality_local
+0`): the unit's standard library unwinds through the other rustc's
+personality routine, and every other unmangled C-ABI symbol of std is
+likewise taken from whichever copy came first. That it works is an
+accident of compatible versions, and nothing in the build or the link
+says so.
 
 The collisions were not manufactured: the fixture defines nothing a real
 unit would not (its counting allocator is the one botlish_http's test
-unit has). The silent case is the dangerous one. The system linker passes
-the program object, then the package archives, then the runtime archive;
-the unit's std members are pulled first, and with one rustc their symbol
-names are the runtime's own, so the runtime's references to
+unit has). The silent cases are the dangerous ones. The system linker
+passes the program object, then the package archives, then the runtime
+archive; the unit's std members are pulled first, and with one rustc
+their symbol names are the runtime's own, so the runtime's references to
 `__rust_alloc` resolve to the unit's shim, which calls the unit's
 `#[global_allocator]`. Two Rust "runtimes" became one, chosen by archive
 order. The consumer detects it only because its allocator counts.
 
 With the localized archive every one of those combinations links and
-passes (sections 10 and 11). Localization is necessary.
+passes, on both hosts, with one global `rust_eh_personality` and the
+unit's own as a local symbol (sections 10 and 11). Localization is
+necessary; on macOS it is the only thing standing between a Rust unit and
+a silently merged runtime.
 
 ### 5.3 The ownership model the fixture enforces
 
@@ -261,7 +279,59 @@ facts, the final executable's symbols and exports.
 
 ## 7. Weak-reference and callback findings
 
-PENDING (CI).
+The event loop's integration point `botlish_event_post2` is called from a
+thread of the unit (http: its resolver threads) and provided by the
+driver's C adapter when the driver package is linked.
+
+**http's weak reference** (packages/http/native/src/notify.c, `extern int
+botlish_event_post2(...) __attribute__((weak))`, the null check before
+the call) [executed, CI]:
+
+| | Linux (GNU ld, rust-lld) | macOS (Apple ld) |
+|---|---|---|
+| provider linked | the post reaches the provider | the post reaches the provider |
+| no provider | links; the reference is null; the unit reports -38 (`ral-weakref-without_provider-*`) | **link fails**: `Undefined symbols for architecture arm64: "_botlish_event_post2"` (both linkers, raw and localized; run 43516411953) |
+
+A Mach-O weak reference is a weak *import*: the symbol may be missing at
+run time from a dylib that exports it at link time, but a static link
+must still find a definition. So http's integration ABI can stay as it is
+on macOS only as long as every program linking the unit also links a
+provider -- which is the case for any http program (the driver is its
+dependency), but not for a program that links the unit without a driver,
+and not for the fixture's "no provider" program.
+
+**A portable fallback: a weak definition** [executed, CI]. The fixture's
+default notification object (audit/rust-archive-link/unit/
+notify-weakdef.c) *defines* `botlish_event_post2` weakly, returning -38;
+the provider's strong definition overrides it. Kept global by the
+localizer (`-keep {rl_* botlish_event_post2}`):
+
+| | Linux | macOS |
+|---|---|---|
+| provider linked | the provider's definition wins (both linkers) | the provider's definition wins (both linkers) |
+| no provider | the fallback answers -38 | the fallback answers -38 |
+| fallback localized away (`-keep {rl_*}`) | **the provider is silently ignored**: -38 with the provider linked | the same |
+
+The last row is why the localizer's keep list must name the weak
+definition: localized, the fallback is a local symbol that the unit's own
+call binds to at `ld -r` time, before the final link could offer the
+provider (mutant `fallback-localized`). The weak definition needs no
+consumer linker flag on either platform and keeps the integration ABI
+(the same name, signature and meaning). Its cost: the package manager
+must not take it for a duplicate of the provider's definition (section
+8.2).
+
+**Archive loading for a weak reference** [unverified]. In every program
+here the provider object is pulled by the provider module's own calls,
+not by the unit's reference to `botlish_event_post2`. Whether a weak
+reference alone would pull an archive member was not isolated (on ELF it
+does not; on Mach-O it was not tested).
+
+**Callbacks** [executed, CI]. `rl_each` calls a Botlish `callback c fn`
+synchronously, through the transition shim, from Rust code inside the
+localized unit: the callback machinery is unaffected by localization (it
+is the C ABI), and both programs check its result (`weight 44`) on both
+hosts with both linkers.
 
 ## 8. Package-manager findings and fixes
 
