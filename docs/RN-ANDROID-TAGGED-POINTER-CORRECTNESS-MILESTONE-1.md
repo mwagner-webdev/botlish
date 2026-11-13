@@ -432,11 +432,91 @@ dereferenced or freed came from Bionic or SDL.
 
 ## 22. Mutation testing
 
-PENDING
+`audit/android-tagged-pointers/tools/mutate.tcl` over its `mutants.txt`
+(**observed**; ANDROID_NDK_ROOT, qemu-aarch64 and the three Android
+userspaces present, so every Android detector ran -- each mutant's private
+copy rebuilt its own Android runtime archive through `package.sh`): **23
+mutants, 23 killed**, none surviving, untested, not applied or not built.
+(The run was split across two harness processes, the second taking the last
+ten with `-only`.) Each was killed by a detector its `!!` line names:
+
+| Mutant | The defect | Killed by |
+|---|---|---|
+| decode-masks-tag | decode clears the top byte | rust `address_word_tests`; at-tagged-pointers |
+| encode-clears-tag | encode drops the top byte | rust `address_word_tests` (also `distinct_addresses_are_distinct_words`); at-tagged-pointers |
+| fits-ignores-rotation | the old 60-bit fits check on every encoding | rust `top_byte_tagged_keeps_every_tag`, `..._refuses_what_it_cannot_hold` |
+| android-runtime-untagged | Android's runtime keeps the default encoding | at-tagged-pointers |
+| desktop-rotates | the default encoding rotates | rust `canonical60_is_the_sign_extended_60_bit_word` |
+| null-word | null no longer the bare tag | rust `top_byte_tagged_keeps_every_tag` |
+| android-codegen-untagged | Android's code uses the default encoding | rust `address_word_is_the_runtimes`, `android_code_rotates_by_the_top_byte`; at-tagged-pointers |
+| every-aarch64-tagged | every AArch64 target's code rotates | rust `address_word_is_the_runtimes`, `desktop_code_never_rotates` |
+| fingerprint-ignores-encoding | a stale Android runtime accepted | rust `abi_fingerprint_states_the_address_encoding`, `address_word_is_the_runtimes`; at-runtime-identity |
+| record-host-fingerprint | an Android record states the host's fingerprint | at-application-run, at-tagged-heap-pointer |
+| runtime-abi-host | `runtime-abi TRIPLE` ignores the triple | at-runtime-identity |
+| support-host-abi | packages compared with the host's fingerprint | at-library-elf |
+| manifest-host-abi | manifests record the host's fingerprint | at-tagged-manifest |
+| codegen-decode-unrotated | generated decode without the rotation | rust `android_code_rotates_by_the_top_byte`; at-tagged-pointers |
+| codegen-encode-unrotated | generated encode without the rotation | rust `android_code_rotates_by_the_top_byte`; at-tagged-heap-pointer |
+| callback-address-unrotated | a callback's entry encoded unrotated | at-tagged-pointers (qsort, user-data callback) |
+| result-fits-unrotated | the result check compares the unrotated address | at-tagged-heap-pointer, at-tagged-sdl3 |
+| exposure-small-int | the old small-Int exposure restored | rust `an_exposure_is_the_storage_plus_the_payload_offset`; cf-nir; at-application-run |
+| exposure-masks-tag | the exposure loses its top byte | at-tagged-pointers |
+| exposure-header-address | C given the storage's header | rust `an_exposure_...`; cf-borrow-sha256-shape |
+| exposure-kinds-swapped | readable and writable kind checks swapped | cf-borrow-sha256-shape |
+| exposure-writable-unmarked | a writable storage not marked `mutable=` | cf-borrow-sha256-shape, cf-nir |
+| exposure-no-keepalive | exposed storages not kept alive | cf-nir |
+
+Timing was never a detector. The brief's runtime-safety mutants on code
+this change does not touch -- resource cleanup, thread affinity,
+integer-to-pointer conversion, released handles, GC root classification
+(the four-bit tag is unchanged) -- are the existing catalogs'
+(`audit/c-abi-types`, `audit/context-affine`, `audit/per-thread-runtime`,
+`audit/c-pointer-borrowing`), whose mutants all still apply
+(`tools/mutant-catalogs.tcl`: 108 catalogs, 3713 mutants, 0 problems). A
+NUL-terminated-length mutant has no place here: exposures take explicit
+lengths, which nothing in this change touched.
+
+**Other catalogs' mutants of the changed code.** Sixteen mutants of
+`audit/c-abi-types`, `audit/c-ffi`, `audit/c-pointer-borrowing` and
+`audit/host-startable-library` replaced code this change rewrote; each was
+updated to the new code as a mutant of the same rule and run through its
+own harness (**observed**): `address-word-truncated` (c-abi-types: killed by
+ca-ptr-wide-address and its fuzzer); `pointer-untag-forgotten`,
+`keepalive-dropped`, `argument-after-exposure`, `address-masked`,
+`pointer-result-truncated`, `va-pointer-truncated`, `va-keepalive-dropped`
+(c-ffi: 7 killed); `owner-liveness-dropped`, `borrow-allowed-across-yield`,
+`exposure-address-truncated`, `read-exposure-copied`,
+`exposure-wrong-owner`, `allocation-after-c-call` (c-pointer-borrowing: 6
+killed; `apple-exposure-tagged` is macOS-only and was skipped here -- the
+macOS tier item `c-borrow-mutants` runs it); `abi-ignores-library`
+(host-startable-library: killed by `abi_fingerprint_constant_is_the_digest_of_its_words`
+and `abi_fingerprint_states_the_address_encoding`).
 
 ## 23. Regression and CI
 
-PENDING
+**Local** (**observed**, Linux x86-64, each file with a private `-tmpdir`;
+no failures, the skips host constraints):
+
+| Area | Files (passed / total) |
+|---|---|
+| C calls, pointers, exposures | c-ffi 123/129, c-pointer-borrowing 62/62, c-byte-borrowing 19/20, c-abi-types 73/73, c-ffi-error-capture 27/27, variadics 58/58 |
+| Native memory | native-view 39/39, native-edit 55/55, binary-layout 51/51, layout-arrays 53/53, layout-unions 43/43 |
+| Callbacks and floats | c-callbacks 40/42, c-float-ffi 37/37, raw-c-float-ffi 31/31 |
+| Libraries, linkers, executables | native-library 32/44, application-library 17/18, external-tools 49/49, system-linker 15/15, native-executable 20/20, aot-stub-linker 6/6, native-link-plan 34/37 |
+| Platforms and targets | target-model 25/25, windows-io 12/27, darwin-io 13/28, linux-syscall 37/37, abi-bytes 73/73, abi-mutable-bytes 76/76, context-affine 28/28 |
+| Android (NDK, runtime, qemu, three images, SDL3) | android-target: the whole file 30/31, its one failure at-tagged-pointers' own expectation (liblog's answer on API 21 and 24, section 15), then fixed; at-runtime-identity, at-application-run and the at-tagged-* tests 7/7 after; a full rerun pending |
+| Workloads | workload-icy-tower 25/43 (the 18 skips: macOS and Windows executables, release tooling), react-native-package 46/48 (the 2 skips: no prepared React Native app) |
+| Native unit tests | `cargo test --release -- address_word fingerprint target::` (the encoding, the fingerprints, the code-generation test) |
+| Catalogs, reference | `tools/mutant-catalogs.tcl` 0 problems; `tools/compilerpedia.tcl check` 0 problems (1298 topics, 776 examples) |
+
+**CI** (dispatched on the branch tip, `workflow_dispatch`): the Linux x86-64
+canary passed (**CI**: its mutant-catalog and warning-gate steps included);
+tests.yml's full jobs, tests-arm64.yml, macos-arm64.yml and
+windows-x86_64.yml were queued at the time of writing -- pending, not
+passed. main at the base commit `ce54fead`: c-bindgen, bench, icy-tower
+(Linux, macOS, Windows), single executable and scalar-asm-audit green; its
+previous commit's canaries had failed in rustc-linked tests (the cargo
+1.100 layout `ce54fead` fixes).
 
 ## 24. Cleanroom
 
