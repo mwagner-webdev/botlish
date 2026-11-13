@@ -189,7 +189,7 @@
                 return $result
 >>>>
 
-@@ instance-view-fallback a semantic instance's walk falls back to the plain list: an untyped helper's call is List[Byte] in its generic walk but not in the instance its typed caller reads
+@@ instance-view-fallback a semantic instance's walk (its typing context's `inst`) falls back to the plain list: an untyped helper's call is List[Byte] in its generic walk but not in the instance its typed caller reads
 !! eut-instances-order-independent
 ## hir/types.tcl
 <<<<
@@ -198,7 +198,7 @@
             }
             set resolved [core::type::normalize $name]
 ====
-            if {![core::type::isNamed $name] || [dict exists $hir semanticContext]} {
+            if {![core::type::isNamed $name] || [dict exists $ctx inst]} {
                 return $result
             }
             set resolved [core::type::normalize $name]
