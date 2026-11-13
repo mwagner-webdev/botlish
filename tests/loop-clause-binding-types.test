@@ -184,7 +184,7 @@ f(2)
 }]
 } -result {{i: int} {t: int} {p: List[int]{length: 2}} {q: int[Small]}}
 
-test lcb-unknown-elements {a genuinely unknown element stays any: an untyped parameter's in its generic walk, a bare list's, encode_utf8's without std::byte loaded (M3); an empty List's element, which never exists, is never} -body {
+test lcb-unknown-elements {a genuinely unknown element stays any: an untyped parameter's in its generic walk, a bare list's; an empty List's element, which never exists, is never -- and encode_utf8's without std::byte imported is no longer unknown but the Byte (STDLIB-ENCODE-UTF8-RESULT-TYPE-STABILITY-MILESTONE-1.md, the census's M3)} -body {
     lcb::Records [lcb::Compile {import std::str
 import std::list
 
@@ -205,7 +205,7 @@ e = loop z in []:
 
 [untyped([1]), bare([2]), bytes("a"), e]
 }]
-} -result {{x: any} {y: any} {b: any} {z: never}}
+} -result {{x: any} {y: any} {b: int[std::byte::Byte]} {z: never}}
 
 test lcb-poisoned-iterable {a poisoned iterable (an unknown field) records its element never and poison, as a poisoned bind records its binding: no reference restates the diagnostic} -body {
     set hir [lcb::Compile "struct P:\n    n: int\n\nfn f(p: P):\n    loop x in p.nosuch:\n        x + 1\n\nf(P {n: 1})\n" -strict 0]

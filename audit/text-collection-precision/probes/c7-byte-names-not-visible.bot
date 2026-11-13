@@ -1,0 +1,15 @@
+# probe: c4's program, which does not import std::byte, using a member of
+# std::byte: still MISSING-IMPORT. The loader loads std::byte for the
+# native's contract (std::byte::Byte) without making any name of it visible
+# to a file that does not import it (STDLIB-ENCODE-UTF8-RESULT-TYPE-
+# STABILITY-MILESTONE-1.md) (C).
+# outcome: reject
+# diagnostic: 13:9 namespace "std::byte" is not imported; add `import std::byte` to use `std::byte::from_int`
+import std::str
+import std::list
+
+fn classes(s: str) -> List[int]:
+    loop b in s.encode_utf8():
+        std::byte::from_int(b)
+
+classes("héllo")

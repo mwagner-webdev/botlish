@@ -351,7 +351,7 @@ fn any_list(s: str) -> list:
 } -cleanup {removeFile tcd-one.bot; unset -nocomplain path message options} -result {{CORE SEMANTIC TYPE} 1 rule.type-result accepted}
 
 # ---------------------------------------------------------------------------
-# UTF-8: encode_utf8, decode_utf8 and encode_utf8's import-dependent type
+# UTF-8: encode_utf8, decode_utf8 and encode_utf8's static type
 
 test tcd-doc-utf8-decoding {encode_utf8's page names the way back -- std::abi::bytes::from_list, std::abi::bytes::decode_utf8 and its declared error InvalidUtf8 -- and no longer says there is none; decode utf8 finds std::abi::bytes::decode_utf8, which exists with that contract} -body {
     set page [tcd::Page stdlib.std::str::encode_utf8]
@@ -361,7 +361,7 @@ test tcd-doc-utf8-decoding {encode_utf8's page names the way back -- std::abi::b
         [tcd::Found "decode utf8"] [string match {*fn decode_utf8(data: Bytes) -> str errors InvalidUtf8*} $decl]
 } -cleanup {unset -nocomplain page decl} -result {1 1 1 0 {page stdlib.std::abi::bytes::decode_utf8} 1}
 
-test tcd-doc-utf8-static-type {encode_utf8's documented static type is the compiler's: List[std::byte::Byte] when std::byte is loaded (directly, or by std::abi::bytes), the plain list otherwise -- the page states both and the condition, and so does README §8} -body {
+test tcd-doc-utf8-static-type {encode_utf8's documented static type is the compiler's: List[std::byte::Byte] whatever the program imports -- std::str alone, with std::abi::bytes, with std::byte (STDLIB-ENCODE-UTF8-RESULT-TYPE-STABILITY-MILESTONE-1.md) -- and the page and README §8 say so, no longer state the plain list or a condition on std::byte, and the page says std::byte's names still need its import} -body {
     set types {}
     foreach imports {{import std::str} {import std::str
 import std::abi::bytes} {import std::str
@@ -373,9 +373,12 @@ import std::byte}} {
     set page [tcd::Page stdlib.std::str::encode_utf8]
     set readme [regsub -all {\s+} [tcd::Read docs/README.md] " "]
     regexp {\| `std::str::encode_utf8` \|([^|]*)\|} $readme -> row
-    list $types [string match {*has loaded std::byte*it is List\[std::byte::Byte\]; otherwise*} $page] [string match {*plain `list`*} $page] \
-        [string match {*std::abi::bytes*} $page] [string match {*List\[std::byte::Byte\]` when*plain `list`*} $row]
-} -cleanup {unset -nocomplain types imports report type page readme row} -result {{list {List[int[std::byte::Byte]]} {List[int[std::byte::Byte]]}} 1 1 1 1}
+    list $types [string match {*importing std::str is enough, whatever else the program imports*} $page] \
+        [string match {*plain `list`*} $page] [string match {*loaded std::byte*} $page] \
+        [string match {*import type std::byte::Byte*} $page] \
+        [string match {*List\[std::byte::Byte\]` in every program, whatever it imports*} $row] \
+        [string match {*plain `list`*} $row]
+} -cleanup {unset -nocomplain types imports report type page readme row} -result {{{List[int[std::byte::Byte]]} {List[int[std::byte::Byte]]} {List[int[std::byte::Byte]]}} 1 0 0 1 1 0}
 
 test tcd-doc-utf8-from-list-invariant {the documentation does not claim an arbitrary List of Ints is accepted by from_list: the compiler rejects one, and both pages say a List[std::byte::Byte] is needed (std::byte::from_int converts each Int)} -body {
     set report [tcd::Report "import std::abi::bytes\n\nx = std::abi::bytes::from_list(\[104, 105\])\n0\n"]

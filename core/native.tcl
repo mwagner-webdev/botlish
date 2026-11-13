@@ -261,15 +261,14 @@
 #                                     core/contexts.tcl; CONTEXTS.md)
 #                     typed NAME LO HI  every element is an Int in LO..HI (a
 #                                     fixed fact about the native itself, not
-#                                     derived from this call's own arguments);
-#                                     additionally NAME-typed iff NAME
-#                                     currently resolves, in the compiling
-#                                     program's own source-defined-type
-#                                     registry, to a type whose domain
-#                                     provably admits every value in LO..HI
-#                                     (hir::range::ProvesType) -- never merely
-#                                     because NAME resolves at all
-#                                     (SYMBOLIC-TYPE-IDENTITY.md)
+#                                     derived from this call's own arguments)
+#                                     and the result is List[NAME]: NAME is a
+#                                     standard-library integer domain
+#                                     (std::NS::Name) whose module the loader
+#                                     loads in every compilation that can
+#                                     reach the native (contractTypes), whose
+#                                     domain must provably admit LO..HI
+#                                     (hir::range::ProvesType)
 #   imprint         "" or the native's imprint signature (hir/imprint.tcl,
 #                   C-ABI-TYPES.md "Imprinting"): {vars {T...} params {P...}
 #                   result R}, P and R static HIR types (hir/types.tcl) in
@@ -400,6 +399,9 @@
 
 namespace eval core::native {
     variable registry [dict create]
+    # contractTypes's answers, by namespace (forgotten by register and
+    # unregister).
+    variable contractTypes [dict create]
     # Runtime requirement tags (-runtime):
     #   bigint               arbitrary-precision integer arithmetic or
     #                        comparison (a small-integer fast path still needs
@@ -830,6 +832,8 @@ proc core::native::register {name args} {
         mutationStable [dict get $options -mutation-stable] fold [dict get $options -fold] \
         measures $measures hashing $hashing elementPlace $elementPlace elementKinds $elementKinds \
         sending $sending]
+    variable contractTypes
+    set contractTypes [dict create]
     return [core::value::native $name]
 }
 
@@ -1126,29 +1130,31 @@ proc core::native::ValidShape {shape count} {
             && ($count eq "" || [lindex $shape 1] < $count)}]
     }
     if {[lindex $shape 0] eq {typed}} {
-        # {typed NAME LO HI}: every element of the result List is an Int
-        # in LO..HI -- a semantic fact this native's own implementation
-        # actually guarantees, independent of any source-defined type --
-        # *and*, if the symbolic name NAME currently resolves (in whatever
-        # source-defined-type registry a compiling program has loaded) to a
-        # type whose own domain admits every value in LO..HI, the result is
-        # additionally NAME-typed. NAME is resolved lazily by hir::types::
-        # ShapeResult at type-inference time (never here at registration
-        # time, since a native like std::str::encode_utf8 is registered once at core
-        # bootstrap, long before a compiling program's own `type NAME = ...`
-        # declaration -- e.g. stdlib/byte.bot's Byte -- has been parsed; NAME
-        # is just a symbolic reference until then). Resolving the name is
-        # not, by itself, proof of membership: the same spelling can denote
-        # an unrelated or narrower domain in a different compiling program
-        # (SYMBOLIC-TYPE-IDENTITY.md) -- ShapeResult verifies LO..HI is
-        # actually admissible in whatever NAME resolves to before ever
-        # narrowing the result to it, falling back to this native's own
-        # plain declared -result-type otherwise. LO and HI are a fixed
-        # fact about the native itself, not argument indices, so this whole
-        # shape is exempt from the digit-index check below.
+        # {typed NAME LO HI}: every element of the result List is an Int in
+        # LO..HI -- a semantic fact this native's own implementation
+        # guarantees -- and the result is List[NAME], NAME a source-declared
+        # integer domain of the standard library whose domain admits every
+        # value in LO..HI. NAME is resolved at type-inference time
+        # (hir::types::ShapeResult), never here: a native like
+        # std::str::encode_utf8 is registered once at core bootstrap, before
+        # any program's declarations exist. Every compilation that can reach
+        # the native has NAME declared, whatever it imports: the loader
+        # loads NAME's module (contractTypes, surface/modules.tcl's
+        # ContractTypes; STDLIB-ENCODE-UTF8-RESULT-TYPE-STABILITY-
+        # MILESTONE-1.md). ShapeResult still proves LO..HI admissible in NAME's
+        # domain before claiming it (hir::range::ProvesType): a declaration
+        # that does not admit it is the standard library's error, and fails
+        # the compilation. LO and HI are a fixed fact about the native itself,
+        # not argument indices, so this whole shape is exempt from the
+        # digit-index check below.
         if {$length != 4} { return 0 }
         lassign $shape _ name lo hi
-        return [expr {[string is entier -strict $lo] && [string is entier -strict $hi] && $lo <= $hi}]
+        # NAME is the canonical identity of a type a module of the standard
+        # library declares (std::NS::Name): the loader loads that module
+        # (contractTypes), so it can never denote a program's own type or a
+        # package's.
+        return [expr {[regexp {^std(::[A-Za-z_][A-Za-z0-9_]*)+::[A-Za-z_][A-Za-z0-9_]*$} $name]
+            && [string is entier -strict $lo] && [string is entier -strict $hi] && $lo <= $hi}]
     }
     if {[lindex $shape 0] eq {element-type}} {
         # {element-type TYPE}: every element of the result List has type
@@ -1363,7 +1369,40 @@ proc core::native::qualifiedMembers {ns} {
 # declaration registers none (ELIMINATE-AUTOMATIC-TYPE-PREDICATES.md).
 proc core::native::unregister {name} {
     variable registry
+    variable contractTypes
     dict unset registry $name
+    set contractTypes [dict create]
+}
+
+# The source-declared types the result contracts of the natives of namespace
+# NS name ("" for the root natives), as {TYPE NATIVE} pairs sorted by TYPE
+# and then NATIVE: the NAME of every `typed` result shape (STDLIB-ENCODE-
+# UTF8-RESULT-TYPE-STABILITY-MILESTONE-1.md). A native's contract is the
+# native's whatever a program imports, so the loader loads the module that
+# declares each such type in every compilation that can reach a native of NS
+# -- a file of it imports NS, or NS is a loaded module's own -- without
+# making any name of that module visible to a file that does not import it
+# (surface/modules.tcl's ContractTypes). Computed once per namespace; a
+# registration or removal of a native forgets every answer.
+proc core::native::contractTypes {ns} {
+    variable registry
+    variable contractTypes
+    if {[dict exists $contractTypes $ns]} {
+        return [dict get $contractTypes $ns]
+    }
+    set pairs {}
+    dict for {name entry} $registry {
+        set shape [dict get $entry resultShape]
+        if {[lindex $shape 0] eq "typed" && [namespaceOf $name] eq $ns} {
+            lappend pairs [list [lindex $shape 1] $name]
+        }
+    }
+    # (lsort is stable: by TYPE, then by NATIVE.)
+    set pairs [lsort -index 1 $pairs]
+    set pairs [lsort -index 0 $pairs]
+    set result [concat {*}$pairs]
+    dict set contractTypes $ns $result
+    return $result
 }
 
 proc core::native::metadata {name} {

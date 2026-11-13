@@ -2195,10 +2195,10 @@ skipped, nothing normalized.
 
 == NOTES
 Takes a std::abi::bytes::Bytes; std::abi::bytes::from_list makes one from
-a List[std::byte::Byte], such as std::str::encode_utf8's result (with
-std::abi::bytes imported, std::byte is loaded and that result has the
-type). The List's element type must be exactly std::byte::Byte: a List of
-plain Ints is converted element by element with std::byte::from_int.
+a List[std::byte::Byte], such as std::str::encode_utf8's result (which
+has that type whatever the program imports). The List's element type must
+be exactly std::byte::Byte: a List of plain Ints is converted element by
+element with std::byte::from_int.
 
 Strict: ill-formed UTF-8 -- an overlong form, an encoded surrogate, a
 value above U+10FFFF, a truncated sequence, a stray continuation byte --
@@ -17000,15 +17000,18 @@ String's size in bytes, not its character count. It never fails: every
 String has exactly one UTF-8 encoding. To classify characters, prefer
 std::str::char_at, which reads a character without building a List.
 
-Its static type depends, today, on what the compilation has loaded. When
-the program has loaded std::byte -- an `import std::byte` in any of its
-files, or an import of a module that loads it, such as std::abi::bytes --
-it is List[std::byte::Byte]; otherwise it is the plain `list`, whose
-elements the compiler knows nothing about. The values are the same either
-way; only what the compiler can prove about them differs. So where an
-element must be proven a Byte (a std::byte::Byte parameter, an index into
-a 256-entry table, std::abi::bytes::from_list's List[std::byte::Byte]),
-import std::byte or std::abi::bytes.
+Its static type is List[std::byte::Byte] in every program that calls it:
+importing std::str is enough, whatever else the program imports. Every
+element is proven a std::byte::Byte, an Int in 0..255, wherever it flows
+-- through a local, a loop, a fold, a function's result, a field -- so it
+indexes a 256-entry table without an IndexNotFound handler and is admitted
+where a std::byte::Byte is required. The type is std::byte's own Byte:
+the compiler loads std::byte for this contract without making any name of
+it visible, so to write std::byte::Byte, std::byte::from_int or any
+other member of std::byte, a file still imports std::byte (or imports the
+type alone with `import type std::byte::Byte`). List element types are held
+exactly (rule.type-argument): the result is not a List[int], and is not
+accepted where one is declared.
 
 The way back is std::abi::bytes::decode_utf8, which takes a
 std::abi::bytes::Bytes: make one from the List with
@@ -17051,17 +17054,32 @@ bad = text_of([std::byte::from_int(255)]):
 @value ["héllo", "not UTF-8"]
 @end
 
+@example accept
+import std::list
+import std::str
+
+fn classes(s: str) -> List[int]:
+    table = loop i from 0 to 256:
+        i * 2
+    loop b in s.encode_utf8():
+        table.at(b)
+
+classes("héllo")
+@caption Importing std::str is enough: every element is a std::byte::Byte, so indexing a 256-entry table needs no handler
+@value [208, 390, 338, 216, 216, 222]
+@end
+
 @example reject
 import std::str
 
-fn needs_text(t: str) -> str:
-    t
+fn count(xs: List[int]) -> int:
+    1
 
-needs_text("é".encode_utf8())
-@caption Without std::byte loaded the compiler knows only the plain list
+count("é".encode_utf8())
+@caption The element type is held exactly: a List[std::byte::Byte] is not accepted as a List[int]
 @error CORE SEMANTIC TYPE
-@at 6:12
-@message *(argument type: list)
+@at 6:7
+@message *(argument type: List[int[std::byte::Byte]])
 @end
 
 @topic stdlib.std::str::is_tcl_alnum

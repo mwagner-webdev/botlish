@@ -7,14 +7,19 @@
 #
 # std::str::encode_utf8 (core/strings.tcl) is this milestone's only current use of
 # {typed NAME LO HI} (STATIC-COMPLETION-PROOFS.md's own "UTF-8 result
-# type" section): its every element is definitionally an Int in 0..255;
-# whether that also makes the result List[std::byte::Byte] depends on what the
-# qualified identity `std::byte::Byte` resolves to in the compiling program's own
-# source-defined-type registry (the module `byte` the program loads), not on
-# a spelling alone. Since source types are namespace members (IMPORTS.md),
-# a program's own `type Byte` is a different type, `Byte`, and never
-# `std::byte::Byte`; the narrower/wider domains below come from a scratch library
-# whose `byte` module declares `Byte` differently.
+# type" section): its every element is definitionally an Int in 0..255, and
+# its result is List[std::byte::Byte] only when the declaration of the
+# qualified identity `std::byte::Byte` proves that domain admissible, not on
+# a spelling alone. Since STDLIB-ENCODE-UTF8-RESULT-TYPE-STABILITY-
+# MILESTONE-1.md the loader declares std::byte::Byte, from std::byte's file,
+# in every compilation that can reach the native, whatever it imports
+# (tests/encode-utf8-type-stability.test), and a declaration that does not
+# admit 0..255 is the standard library contradicting its native: the
+# compilation fails (COMPILER-INTERNAL) rather than silently falling back.
+# Since source types are namespace members (IMPORTS.md), a program's own
+# `type Byte` is a different type, `Byte`, and never `std::byte::Byte`; the
+# narrower/wider domains below come from a scratch library whose `byte`
+# module declares `Byte` differently.
 
 source [file join [file dirname [file normalize [info script]]] helpers.tcl]
 source [file join $::projectRoot surface surface.tcl]
@@ -67,15 +72,16 @@ std::str::encode_utf8("A")
 }
 } -result {List[int[std::byte::Byte]]}
 
-test symbolic-type-identity-narrow-byte-rejected {a byte module whose Byte is the narrower 0..15 cannot prove membership (UTF-8 may emit values above 15): std::str::encode_utf8 must not be typed List[std::byte::Byte]} -body {
+test symbolic-type-identity-narrow-byte-rejected {a byte module whose Byte is the narrower 0..15 cannot prove membership (UTF-8 may emit values above 15): std::str::encode_utf8 is never typed List[std::byte::Byte] -- the compilation fails, a standard library contradicting its native (COMPILER-INTERNAL), rather than claim it or quietly drop to the plain list} -body {
     withByteDomain 0..15 {
-        lastCallType {import std::byte
+        catch {lastCallType {import std::byte
 import std::str
 
 std::str::encode_utf8("A")
-}
+}} message options
+        dict get $options -errorcode
     }
-} -result list
+} -cleanup {unset -nocomplain message options} -result {CORE SEMANTIC COMPILER-INTERNAL}
 
 test symbolic-type-identity-wide-superset-byte {a byte module whose Byte is a compatible superset 0..1000 admits the native's 0..255 guarantee: this is a sound narrowing (semantic admissibility, not canonical-name identity)} -body {
     withByteDomain 0..1000 {
@@ -87,21 +93,21 @@ std::str::encode_utf8("A")
     }
 } -result {List[int[std::byte::Byte]]}
 
-test symbolic-type-identity-no-byte-declared {the program never loads module byte: no std::byte::Byte exists, so the result falls back to std::str::encode_utf8's own plain declared -result-type, never a false claim -- the `Unrelated` decl exists only to force hir::sourcetypes::apply's own Reset (compilation isolation), clearing any std::byte::Byte a prior test in this process may have left registered} -body {
+test symbolic-type-identity-no-byte-declared {the program never imports module byte: the loader declares std::byte::Byte from std::byte's file for the native's contract (STDLIB-ENCODE-UTF8-RESULT-TYPE-STABILITY-MILESTONE-1.md), so the result is List[std::byte::Byte] all the same -- it was the plain list before} -body {
     lastCallType {import std::str
 
 type Unrelated = Int in 0..1
 std::str::encode_utf8("A")
 }
-} -result list
+} -result {List[int[std::byte::Byte]]}
 
-test symbolic-type-identity-own-byte-is-not-the-natives {a program's own `type Byte = Int in 0..255` is the type Byte, not std::byte::Byte: std::str::encode_utf8 is not List[Byte] on the strength of a spelling} -body {
+test symbolic-type-identity-own-byte-is-not-the-natives {a program's own `type Byte = Int in 0..255` is the type Byte, not std::byte::Byte: std::str::encode_utf8 is not List[Byte] on the strength of a spelling -- it is List[std::byte::Byte], the standard library's, declared beside the program's own} -body {
     lastCallType {import std::str
 
 type Byte = Int in 0..255
 std::str::encode_utf8("A")
 }
-} -result list
+} -result {List[int[std::byte::Byte]]}
 
 # ---------------------------------------------------------------------------
 # Incompatible same-name kind (spec items 11, 13): Botlish's current type-
@@ -119,14 +125,16 @@ std::str::encode_utf8("A")
 # construct: core::type::register itself, with a non-int -base, is
 # pre-existing, general machinery (every compiler-registered validator
 # type -- Emailish, UriQueryValue, NonEmpty -- already uses it).
-test symbolic-type-identity-incompatible-kind {a same-named but non-int-based std::byte::Byte cannot make an Int-producing native's result List[std::byte::Byte]: name resolution succeeds (isNamed is true) but semantic membership is not proven, so this falls back} -setup {
+test symbolic-type-identity-incompatible-kind {a same-named but non-int-based std::byte::Byte cannot make an Int-producing native's result List[std::byte::Byte]: name resolution succeeds (isNamed is true) but semantic membership is not proven, so the type is never claimed -- the compilation fails (COMPILER-INTERNAL) rather than fall back} -setup {
+    hir::sourcetypes::Reset
     core::type::register std::byte::Byte -base str -validator {apply {v} {return 1}} -source 1
 } -cleanup {
     core::type::unregister std::byte::Byte
+    unset -nocomplain message options
 } -body {
-    list [core::type::isNamed std::byte::Byte] \
-        [hir::types::show [hir::types::ShapeResult {} {typed std::byte::Byte 0 255} {} {} list]]
-} -result {1 list}
+    catch {hir::types::ShapeResult {} {typed std::byte::Byte 0 255} {} {} list} message options
+    list [core::type::isNamed std::byte::Byte] [dict get $options -errorcode]
+} -result {1 {CORE SEMANTIC COMPILER-INTERNAL}}
 
 # ---------------------------------------------------------------------------
 # Canonical standard-library case, static-only (spec item 23): representative
@@ -242,7 +250,7 @@ consume(std::str::encode_utf8("A"))
     list [dict get $options -errorcode] [string match {*cannot be proven to satisfy*} $message]
 } -result {{CORE SEMANTIC TYPE} 1}
 
-test symbolic-type-identity-narrow-byte-param-still-rejected {with a byte module whose Byte is the narrower 0..15, std::str::encode_utf8 still falls back to the broad list kind (symbolic-type-identity-narrow-byte-rejected above), so it still does NOT satisfy a declared List[std::byte::Byte] parameter -- the aggregate/parameter-boundary case inherits the identical domain-admissibility proof, not a Byte-name shortcut} -body {
+test symbolic-type-identity-narrow-byte-param-still-rejected {with a byte module whose Byte is the narrower 0..15, std::str::encode_utf8 is never typed List[std::byte::Byte] (symbolic-type-identity-narrow-byte-rejected above), so it never satisfies a declared List[std::byte::Byte] parameter: the compilation fails as the standard library's error -- the aggregate/parameter-boundary case inherits the identical domain-admissibility proof, not a Byte-name shortcut} -body {
     withByteDomain 0..15 {
         catch {surface::compile {import std::byte
 import std::str
@@ -252,8 +260,8 @@ fn consume(xs: List[std::byte::Byte]) -> int:
 
 consume(std::str::encode_utf8("A"))
 } rejectnarrowbyte.bot} message options
-        list [dict get $options -errorcode] [string match {*cannot be proven to satisfy*} $message]
+        list [dict get $options -errorcode] [string match {*does not admit every value in 0..255*} $message]
     }
-} -result {{CORE SEMANTIC TYPE} 1}
+} -result {{CORE SEMANTIC COMPILER-INTERNAL} 1}
 
 ::tcltest::cleanupTests

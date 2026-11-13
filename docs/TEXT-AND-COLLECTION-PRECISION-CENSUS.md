@@ -889,6 +889,10 @@ Done: TEXT-AND-COLLECTION-DOCUMENTATION-AND-DIAGNOSTICS-MILESTONE-1.md (probe
 
 ### M3. `encode_utf8`'s element type independent of imports
 
+Done: STDLIB-ENCODE-UTF8-RESULT-TYPE-STABILITY-MILESTONE-1.md (probes `c3`,
+`c4` and `c5` record the precise types since, and `c7` that no name of
+`std::byte` became visible).
+
 * **Problem.** Probes c3, c4/c5.
 * **Rule.** `std::str::encode_utf8(s)` is `List[std::byte::Byte]` in every
   compilation.

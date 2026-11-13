@@ -1,11 +1,13 @@
 # probe: without `import std::byte` anywhere in the program,
-# s.encode_utf8() is plain `list` (List[any]): both the indexed element and
-# the loop variable are `any` (hir/types.tcl's `typed` result shape falls
-# back when std::byte::Byte is not registered) (C).
+# s.encode_utf8() is List[std::byte::Byte] all the same: both the indexed
+# element and the loop variable are the Byte (the loader declares
+# std::byte::Byte for the native's contract,
+# STDLIB-ENCODE-UTF8-RESULT-TYPE-STABILITY-MILESTONE-1.md; before it, both
+# were `any` and `bs` the plain `list`) (C).
 # outcome: reject
-# diagnostic: 17:11 argument for parameter "t" cannot be proven to satisfy str (argument type: any)
-# diagnostic: 21:15 argument for parameter "t" cannot be proven to satisfy str (argument type: any)
-# binding: 16 bs list
+# diagnostic: 19:11 argument for parameter "t" cannot be proven to satisfy str (argument type: int[std::byte::Byte])
+# diagnostic: 23:15 argument for parameter "t" cannot be proven to satisfy str (argument type: int[std::byte::Byte])
+# binding: 18 bs List[int[std::byte::Byte]]
 import std::str
 import std::list
 

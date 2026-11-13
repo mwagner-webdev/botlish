@@ -1,9 +1,11 @@
 # probe: the same program as c5 without `import std::byte`: the byte index
-# is not proven to lie in the 256-entry table, so the call needs
-# IndexNotFound handled (C: an import nothing uses changes acceptance).
-# outcome: reject
-# diagnostic: 16:1 this call may produce the declared error "IndexNotFound"
-# diagnostic: 14:9 this call of "std::list::at" may produce the declared error "IndexNotFound"
+# is proven to lie in the 256-entry table, so no IndexNotFound handler is
+# needed, as in c5. Before STDLIB-ENCODE-UTF8-RESULT-TYPE-STABILITY-
+# MILESTONE-1.md this program was rejected (two UNHANDLED-ERROR
+# diagnostics): an import nothing used decided acceptance (C).
+# outcome: accept
+# value: [105, 196, 170, 109, 109, 112]
+# binding: 15 b int[std::byte::Byte]
 import std::str
 import std::list
 

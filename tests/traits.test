@@ -1120,7 +1120,7 @@ found:
     fn b(P) -> int   (at <input>:8:1)
 return type int does not satisfy required str}
 
-test trait-report {main.tcl -traits: traits, the conformances the program uses with their implementations, every declared type against every trait (how or why not), and specializations} -body {
+test trait-report {main.tcl -traits: traits, the conformances the program uses with their implementations, every declared type against every trait (how or why not), and specializations -- std::byte's four types among the declared types: std::services imports std::str, whose encode_utf8 contract names std::byte::Byte, so std::byte is loaded as if imported (STDLIB-ENCODE-UTF8-RESULT-TYPE-STABILITY-MILESTONE-1.md)} -body {
     set hir [moduleHir $principalLib "${principalHeader}struct Thing:\n    v: int\n\[describe(Person {value: \"Alice\"}), describe(std::services::make_service(\"db\"))\]\n"]
     hir::traits::report $hir
 } -result {trait std::ui::named::Named (owner: std::ui::named)
@@ -1131,6 +1131,10 @@ conformance:
     std::services::Service satisfies std::ui::named::Named
         name -> std::services::name
 declared types:
+    int[std::byte::Byte] does not satisfy std::ui::named::Named: no function std::byte::name exists: "name" is not defined by module "std::byte"
+    int[std::byte::Nibble] does not satisfy std::ui::named::Named: no function std::byte::name exists: "name" is not defined by module "std::byte"
+    int[std::byte::LowNibble] does not satisfy std::ui::named::Named: no function std::byte::name exists: "name" is not defined by module "std::byte"
+    int[std::byte::HighNibble] does not satisfy std::ui::named::Named: no function std::byte::name exists: "name" is not defined by module "std::byte"
     std::services::Service satisfies std::ui::named::Named (name -> std::services::name)
     Person satisfies std::ui::named::Named (name -> name)
     Thing does not satisfy std::ui::named::Named: parameter 1 requires Person, which does not admit the required Thing

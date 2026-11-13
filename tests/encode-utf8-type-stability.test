@@ -1,0 +1,831 @@
+# encode-utf8-type-stability.test -- a standard-library native's result
+# type does not depend on what else the program imports
+# (STDLIB-ENCODE-UTF8-RESULT-TYPE-STABILITY-MILESTONE-1.md).
+#
+# std::str::encode_utf8's result contract is List[std::byte::Byte] (its
+# `typed` result shape, core/strings.tcl): every element is an Int in 0..255.
+# The loader loads std::byte in every compilation that can reach the native
+# (surface/modules.tcl's ContractTypes), as another module's import would:
+# no name of it becomes visible to a file that does not import it. Before,
+# the result was the plain `list` unless the compilation happened to load
+# std::byte, so an import nothing named decided whether a program was
+# accepted (TEXT-AND-COLLECTION-PRECISION-CENSUS.md, C.3; probes c3-c5).
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+source [file join $::projectRoot native native.tcl]
+source [file join $::projectRoot service service.tcl]
+
+interp recursionlimit {} 100000
+
+testConstraint nativeBuilt [expr {![catch {native::binary}]}]
+
+set ::eutCounter 0
+
+namespace eval eut {}
+
+# The HIR of the source program SRC (errors raised).
+proc eut::Compile {src args} {
+    return [surface::compile $src t.bot -warnings off {*}$args]
+}
+
+# The presented static types of the calls of NAME (a callee's written name:
+# std::str::encode_utf8 for both spellings of the native) in SRC's HIR, in
+# pre-order.
+proc eut::CallTypes {hir name} {
+    hir::activate $hir
+    set types {}
+    foreach e [hir::walk $hir] {
+        if {[hir::kind $hir $e] ne "call"} continue
+        set callee [dict get $hir exprs [dict get $hir exprs $e callee]]
+        if {[dict get $callee kind] ne "ref"} continue
+        set binding [dict get $callee binding]
+        set target [dict get $hir bindings $binding name]
+        if {$target eq $name || [hir::semantic::SourceName $hir $binding] eq $name} {
+            lappend types [hir::types::presented [hir::typeOf $hir $e]]
+        }
+    }
+    return $types
+}
+
+# The sourceTypes entries of HIR naming a type of std::byte, as
+# {NAME PARENT DOMAIN}.
+proc eut::ByteTypes {hir} {
+    set result {}
+    foreach entry [dict get $hir sourceTypes] {
+        if {[dict exists $entry name] && [string match std::byte::* [dict get $entry name]]} {
+            lappend result [list [dict get $entry name] [dict get $entry parent] [dict get $entry domain]]
+        }
+    }
+    return $result
+}
+
+# The sourceTypes entry of std::byte::Byte in HIR, as {NAME PARENT DOMAIN},
+# or "".
+proc eut::Byte {hir} {
+    return [lsearch -inline -index 0 [eut::ByteTypes $hir] std::byte::Byte]
+}
+
+# The four types std::byte declares, in its order.
+set ::eutByteNames {std::byte::Byte std::byte::Nibble std::byte::LowNibble std::byte::HighNibble}
+
+# {OUTCOME KIND} of compiling SRC: {ok ""}, or {error KIND} with KIND the
+# last element of the first diagnostic's error code.
+proc eut::Outcome {src} {
+    if {[catch {eut::Compile $src} message options]} {
+        return [list error [lindex [dict get $options -errorcode] end]]
+    }
+    return [list ok ""]
+}
+
+# A directory holding FILES ({RELATIVE TEXT ...}), for a program with
+# application modules or packages.
+proc eut::App {files} {
+    set dir [makeDirectory eut-[pid]-[incr ::eutCounter]]
+    foreach {relative text} $files {
+        set path [file join $dir {*}[file split $relative]]
+        file mkdir [file dirname $path]
+        set channel [open $path w]
+        fconfigure $channel -encoding utf-8 -translation lf
+        puts -nonewline $channel $text
+        close $channel
+    }
+    return $dir
+}
+
+# The table program of probes c4 and c5: a 256-entry table indexed by each
+# byte of a String. IMPORTS is the header.
+proc eut::Table {imports} {
+    return "$imports
+
+fn classes(s: str) -> List\[int\]:
+    table = loop i from 0 to 256:
+        i + 1
+    loop b in s.encode_utf8():
+        table.at(b)
+
+classes(\"héllo\")
+"
+}
+
+# ---------------------------------------------------------------------------
+# The contract, whatever is imported
+
+test eut-contract-without-byte {importing only std::str, the result of encode_utf8 is List[std::byte::Byte], in both spellings (method-style and qualified): no import of std::byte is needed} -body {
+    eut::CallTypes [eut::Compile {import std::str
+
+fn a(s: str):
+    s.encode_utf8()
+
+fn b(s: str):
+    std::str::encode_utf8(s)
+
+[a("x"), b("y")]
+}] std::str::encode_utf8
+} -result {{List[int[std::byte::Byte]]} {List[int[std::byte::Byte]]}}
+
+test eut-contract-import-independent {the same call has one canonical type -- structurally the same Tcl value -- whether the program imports std::byte, std::abi::bytes (which imports std::byte's type), both, or neither} -body {
+    set types {}
+    foreach imports {
+        {import std::str}
+        {import std::str
+import std::byte}
+        {import std::str
+import std::abi::bytes}
+        {import std::str
+import std::byte
+import std::abi::bytes}
+    } {
+        set hir [eut::Compile "$imports\n\n\"é\".encode_utf8()\n"]
+        hir::activate $hir
+        set call ""
+        foreach e [hir::walk $hir] {
+            if {[hir::kind $hir $e] eq "call"} { set call $e }
+        }
+        lappend types [hir::typeOf $hir $call]
+    }
+    list [llength [lsort -unique $types]] [hir::types::presented [lindex $types 0]] \
+        [expr {[lindex $types 0] eq [hir::types::MakeList [core::type::normalize std::byte::Byte]]}]
+} -cleanup {unset -nocomplain types imports hir call e} -result {1 {List[int[std::byte::Byte]]} 1}
+
+test eut-c4-c5-same-outcome {the census's c4 and c5 are one program differing only in an import nothing names: both are accepted and give the same value on every backend} -constraints nativeBuilt -body {
+    list [sourceAgree [eut::Table "import std::str\nimport std::list"]] \
+        [sourceAgree [eut::Table "import std::str\nimport std::list\nimport std::byte"]]
+} -result {{value {[105, 196, 170, 109, 109, 112]}} {value {[105, 196, 170, 109, 109, 112]}}}
+
+test eut-every-context {without std::byte imported, every way the result flows keeps its Byte elements: each function below indexes a 256-entry table (a List[int]{length: 256}) by an element and declares no error, which compiles only when the element is proven in 0..255 -- a qualified and a method-style call, a collecting loop, a fold, an undeclared function result, an anonymous struct's field, a closure's capture, a nested List and a lockstep loop} -constraints nativeBuilt -body {
+    sourceAgree {import std::str
+import std::list
+
+fn table() -> List[int]{length: 256}:
+    loop i from 0 to 256:
+        i * 2
+
+fn produced(s: str):
+    s.encode_utf8()
+
+fn direct(t: List[int]{length: 256}, s: str) -> List[int]:
+    loop b in std::str::encode_utf8(s):
+        t.at(b)
+
+fn collected(t: List[int]{length: 256}, s: str) -> List[int]:
+    bs = loop b in s.encode_utf8():
+        b
+    loop c in bs:
+        t.at(c)
+
+fn folded(t: List[int]{length: 256}, s: str) -> int:
+    fold b in s.encode_utf8() with intermediate acc 0:
+        acc + t.at(b)
+
+fn result(t: List[int]{length: 256}, s: str) -> List[int]:
+    loop b in produced(s):
+        t.at(b)
+
+fn field(t: List[int]{length: 256}, s: str) -> List[int]:
+    h = {bytes: s.encode_utf8()}
+    loop b in h.bytes:
+        t.at(b)
+
+fn closure(t: List[int]{length: 256}, s: str) -> List[int]:
+    bs = s.encode_utf8()
+    fn look() -> List[int]:
+        loop b in bs:
+            t.at(b)
+    look()
+
+fn nested(t: List[int]{length: 256}, s: str) -> List[List[int]]:
+    rows = [s.encode_utf8(), "z".encode_utf8()]
+    loop row in rows:
+        loop b in row:
+            t.at(b)
+
+fn lockstep(t: List[int]{length: 256}, s: str) -> List[int]:
+    bs = s.encode_utf8()
+    loop b in bs and j from 0 to std::list::length(bs):
+        t.at(b) + j
+
+t = table()
+s = "Aé"
+std::list::flat([direct(t, s), collected(t, s), [folded(t, s)], result(t, s), field(t, s),
+    closure(t, s), std::list::flat(nested(t, s)), lockstep(t, s)])
+}
+} -result {value {[130, 390, 338, 130, 390, 338, 858, 130, 390, 338, 130, 390, 338, 130, 390, 338, 130, 390, 338, 244, 130, 391, 340]}}
+
+test eut-index-and-imprint {without std::byte imported, an indexed element and an imprinted function's result over the List (fn first(xs: List[T]) -> T) are int[std::byte::Byte], as a TYPE diagnostic states them} -body {
+    set hir [eut::Compile {import std::str
+import std::list
+
+fn probe(t: str) -> int:
+    1
+
+fn first(xs: List[T]) -> T errors IndexNotFound:
+    xs.at(0)
+
+fn f(s: str) -> int errors IndexNotFound:
+    bs = s.encode_utf8()
+    probe(bs.at(0)) + probe(first(bs))
+
+1
+} -strict 0]
+    lmap d [dict get $hir diagnostics] {
+        regexp {argument type: ([^,)]+)} [dict get $d message] -> type
+        set type
+    }
+} -cleanup {unset -nocomplain hir d type} -result {{int[std::byte::Byte]} {int[std::byte::Byte]}}
+
+test eut-typed-parameter {a typed List[std::byte::Byte] parameter, written where the type is available to source (`import type std::byte::Byte`), admits the result directly; a declared List[int] boundary still rejects it (invariant applied collections: unchanged)} -body {
+    list [eut::Outcome {import std::str
+import type std::byte::Byte
+
+fn take(xs: List[Byte]) -> int:
+    1
+
+take("a".encode_utf8())
+}] [eut::Outcome {import std::str
+
+fn take(xs: List[int]) -> int:
+    1
+
+take("a".encode_utf8())
+}]
+} -result {{ok {}} {error TYPE}}
+
+test eut-element-is-int-and-byte {an element is admitted where a Byte is required (with std::byte imported to name it) and where an int is required, and a Byte argument discharges std::byte::from_int's range errors; an unconstrained int still owes them} -body {
+    list [eut::Outcome {import std::str
+import std::byte
+
+fn need(b: std::byte::Byte) -> int:
+    b
+
+fn plain(n: int) -> int:
+    n
+
+fn f(s: str) -> List[int]:
+    loop b in s.encode_utf8():
+        need(b) + plain(b) + std::byte::from_int(b)
+
+f("a")
+}] [eut::Outcome {import std::byte
+
+fn f(n: int) -> int:
+    std::byte::from_int(n)
+
+f(1)
+}]
+} -result {{ok {}} {error UNHANDLED-ERROR}}
+
+test eut-loop-binding-recorded {the loop element's recorded type (M1's binding table, what a hover shows at its declaration) is the Byte without std::byte imported} -body {
+    set dir [eut::App {p.bot {import std::str
+
+fn f(s: str) -> int:
+    fold b in s.encode_utf8() with intermediate acc 0:
+        acc + b
+
+f("ab")
+}}]
+    set ws [service::workspace -warnings off -cache ""]
+    set path [file join $dir p.bot]
+    set rev [service::analyze $ws $path]
+    list [dict get [service::at $rev $path 4 10] hover] [dict get [service::at $rev $path 5 15] hover]
+} -cleanup {
+    service::closeWorkspace $ws
+    unset -nocomplain dir ws path rev
+} -result {{b: int[std::byte::Byte]} {b: int[std::byte::Byte]}}
+
+# ---------------------------------------------------------------------------
+# The module is loaded; nothing of it becomes visible
+
+test eut-visibility-qualified {loading std::byte for the contract makes no name of it visible: its functions, errors and the type itself still need `import std::byte` in source (MISSING-IMPORT)} -body {
+    lmap src {
+        {import std::str
+
+fn f(s: str):
+    loop b in s.encode_utf8():
+        std::byte::from_int(b)
+
+f("a")
+}
+        {import std::str
+
+fn f(b: std::byte::Byte) -> int:
+    b
+
+f(1)
+}
+        {import std::str
+
+fn f(s: str):
+    std::byte::BelowRange
+
+f("a")
+}
+    } {eut::Outcome $src}
+} -cleanup {unset -nocomplain src} -result {{error MISSING-IMPORT} {error MISSING-IMPORT} {error MISSING-IMPORT}}
+
+test eut-visibility-short-and-method {the short name Byte is still unknown, and no function of std::byte becomes a method-style candidate: b.complement() is rejected with the MISSING-IMPORT a module loaded through another import (std::abi::bytes's) has always given, naming the import that makes it visible} -body {
+    set method {fn f(s: str):
+    loop b in s.encode_utf8():
+        b.complement()
+
+f("a")
+}
+    set messages {}
+    foreach imports {{import std::str} {import std::str
+import std::abi::bytes}} {
+        catch {eut::Compile "$imports\n\n$method"} message options
+        lappend messages [list [lindex [dict get $options -errorcode] end] \
+            [regsub {^t\.bot:[0-9]+:[0-9]+: } $message ""]]
+    }
+    list [eut::Outcome {import std::str
+
+fn f(b: Byte) -> int:
+    b
+
+f(1)
+}] [llength [lsort -unique $messages]] [lindex $messages 0]
+} -cleanup {unset -nocomplain method messages imports message options} -result {{error TYPE} 1 {MISSING-IMPORT {namespace "std::byte" is not imported; add `import std::byte` to use `std::byte::complement` (the method-style call ".complement(...)" applies only a function visible by that name)}}}
+
+test eut-module-loaded {without std::byte imported, the program loads std::byte as an import by another standard-library module would: its section, its four types, its errors and its own import environment are there, exactly as with `import std::byte` -- only no file's import environment names it} -body {
+    set only [eut::Compile "import std::str\n\n\"a\".encode_utf8()\n"]
+    set full [eut::Compile "import std::str\nimport std::byte\n\n\"a\".encode_utf8()\n"]
+    hir::activate $only
+    set errors [hir::errordecls::isDeclared std::byte::BelowRange]
+    list [expr {[eut::ByteTypes $only] eq [eut::ByteTypes $full]}] [lmap t [eut::ByteTypes $only] {lindex $t 0}] \
+        [dict exists $only modules std::byte] $errors \
+        [dict exists $only declarations imports std::byte] \
+        [expr {"std::byte" in [dict get $only declarations imports "" namespaces]}] \
+        [expr {"std::byte" in [dict get $full declarations imports "" namespaces]}]
+} -cleanup {unset -nocomplain only full errors} -result [list 1 $::eutByteNames 1 1 1 0 1]
+
+test eut-trait-conformance {a Byte witness satisfies a trait through std::byte's own complement whether or not the program imports std::byte: a type is its module's, and the module is loaded with it (a type declared without its module would satisfy the trait only with the import)} -body {
+    lmap imports {{import std::str
+import std::list} {import std::str
+import std::list
+import std::byte}} {
+        eut::Outcome "$imports
+
+trait Complementable:
+    fn complement(value: Complementable) -> int
+
+fn use(c: Complementable) -> int:
+    c.complement()
+
+fn f(s: str) -> List\[int\]:
+    loop b in s.encode_utf8():
+        use(b)
+
+f(\"ab\")
+"
+    }
+} -cleanup {unset -nocomplain imports} -result {{ok {}} {ok {}}}
+
+test eut-own-byte-is-not-the-natives {a program's own `type Byte = Int in 0..15` is the type Byte, never std::byte::Byte: the native's result is the standard library's Byte beside it, and the program's narrower Byte does not admit it} -body {
+    set hir [eut::Compile {import std::str
+
+type Byte = Int in 0..15
+
+"A".encode_utf8()
+}]
+    list [lindex [eut::CallTypes $hir std::str::encode_utf8] 0] [eut::Outcome {import std::str
+import std::list
+
+type Byte = Int in 0..15
+
+fn need(b: Byte) -> int:
+    b
+
+fn f(s: str) -> List[int]:
+    loop b in s.encode_utf8():
+        need(b)
+
+f("A")
+}]
+} -cleanup {unset -nocomplain hir} -result {{List[int[std::byte::Byte]]} {error TYPE}}
+
+test eut-application-byte-module {an application module named byte (identity byte, never std::byte) changes nothing: the native's result is std::byte::Byte, and the application's byte::Byte is another type} -body {
+    set dir [eut::App {
+        byte.bot {type Byte = Int in 0..15
+}
+        main.bot {import std::str
+import byte
+
+fn need(b: byte::Byte) -> int:
+    b
+
+fn f(s: str):
+    s.encode_utf8()
+
+f("A")
+}}]
+    set hir [surface::readProgramFile [file join $dir main.bot] -warnings off -cache ""]
+    list [eut::CallTypes $hir std::str::encode_utf8] [eut::Byte $hir] \
+        [lsearch -inline -glob [lmap e [dict get $hir sourceTypes] {dict getdef $e name ""}] byte::Byte]
+} -cleanup {unset -nocomplain dir hir} -result {{{List[int[std::byte::Byte]]}} {std::byte::Byte Int {interval 0 255}} byte::Byte}
+
+# ---------------------------------------------------------------------------
+# Negative controls: the rule is the native's, not "a List of Ints is Bytes"
+
+test eut-negative-controls {other Lists keep their own element types, which a TYPE diagnostic states: an untyped parameter's and a bare list's elements stay any, a List literal of small Ints is int, a user domain's elements stay that domain, std::list::append of an encoded List and an int joins to int -- and only encode_utf8's elements are std::byte::Byte} -body {
+    set hir [eut::Compile {import std::str
+import std::list
+
+type Small = Int in 0..9
+
+fn probe(t: str) -> int:
+    1
+
+fn untyped(xs):
+    loop x in xs:
+        probe(x)
+
+fn bare(ys: list):
+    loop y in ys:
+        probe(y)
+
+fn literal():
+    loop w in [1, 2]:
+        probe(w)
+
+fn small(zs: List[Small]):
+    loop z in zs:
+        probe(z)
+
+fn joined(s: str):
+    loop v in std::list::append(s.encode_utf8(), 300):
+        probe(v)
+
+fn encoded(s: str):
+    loop u in s.encode_utf8():
+        probe(u)
+
+1
+} -strict 0]
+    lmap d [lsort -command {apply {{a b} {expr {[dict get $a line] - [dict get $b line]}}}} [lmap d [dict get $hir diagnostics] {
+        dict create line [dict get [lrange [dict get $hir exprs [dict get $d expr] origin] 2 end] line] message [dict get $d message]
+    }]] {
+        regexp {argument type: ([^,)]+)} [dict get $d message] -> type
+        set type
+    }
+} -cleanup {unset -nocomplain hir d type} -result {any any int {int[Small]} int {int[std::byte::Byte]}}
+
+# ---------------------------------------------------------------------------
+# Semantic instances
+
+test eut-instances-order-independent {an untyped helper returning encode_utf8's result, reached from typed consumers with different String expressions, directly and through another untyped function: every call of the helper is List[Byte], the consumers' table indexes need no handler, and reversing the order of the consumers and of the calls changes neither the types nor the values} -constraints nativeBuilt -body {
+    set helpers {fn helper(s):
+    s.encode_utf8()
+
+fn relay(s):
+    helper(s)}
+    set functions {{fn via_loop(t: List[int]{length: 256}, s: str) -> List[int]:
+    loop b in helper(s):
+        t.at(b)} {fn via_fold(t: List[int]{length: 256}, s: str) -> int:
+    fold b in helper(std::str::concat(s, "é")) with intermediate acc 0:
+        acc + t.at(b)} {fn via_relay(t: List[int]{length: 256}) -> List[int]:
+    loop b in relay("😀"):
+        t.at(b)}}
+    set calls {{via_loop(t, "a")} {[via_fold(t, "q")]} {via_relay(t)}}
+    set outcomes {}
+    foreach order {0 1} {
+        set fs [expr {$order ? [lreverse $functions] : $functions}]
+        set cs [expr {$order ? [lreverse $calls] : $calls}]
+        set src "import std::str\nimport std::list\n\n$helpers\n\n[join $fs \n\n]\n\nt = loop i from 0 to 256:\n    i\n\n\[[join $cs {, }]\]\n"
+        lappend outcomes [lsort -unique [eut::CallTypes [eut::Compile $src] helper]] [sourceAgree $src]
+    }
+    set outcomes
+} -cleanup {unset -nocomplain helpers functions calls outcomes order fs cs src} -result {{{List[int[std::byte::Byte]]}} {value {[[97], [477], [240, 159, 152, 128]]}} {{List[int[std::byte::Byte]]}} {value {[[240, 159, 152, 128], [477], [97]]}}}
+
+# ---------------------------------------------------------------------------
+# Modules and packages
+
+test eut-modules {a module importing std::str whose function returns the result, consumed by an entry program that imports neither std::str nor std::byte, through a transitive chain: the entry program's index of a 256-entry table needs no handler} -constraints nativeBuilt -body {
+    set dir [eut::App {
+        encoder.bot {import std::str
+
+fn bytes(s: str):
+    s.encode_utf8()
+}
+        relay.bot {import encoder
+
+fn bytes(s: str):
+    encoder::bytes(s)
+}
+        main.bot {import relay
+import std::list
+
+fn classes(s: str) -> List[int]:
+    t = loop i from 0 to 256:
+        i
+    loop b in relay::bytes(s):
+        t.at(b)
+
+classes("éa")
+}}]
+    set hir [surface::readProgramFile [file join $dir main.bot] -warnings off -cache ""]
+    list [lrange [outcomeUnderHir interp $hir] 0 1] [lrange [outcomeUnderHir cranelift $hir] 0 1] \
+        [lmap t [eut::ByteTypes $hir] {lindex $t 0}]
+} -cleanup {unset -nocomplain dir hir} -result [list {value {[195, 169, 97]}} {value {[195, 169, 97]}} $::eutByteNames]
+
+test eut-package {a package module's exported function returning the result, used by a consumer that installs the package and imports neither std::str nor std::byte: the element is a Byte in the consumer} -body {
+    set dir [eut::App {
+        .bot_modules/textpkg/textpkg.bot {import std::str
+
+fn bytes(s: str):
+    s.encode_utf8()
+}
+        main.bot {import textpkg
+import std::list
+
+fn classes(s: str) -> List[int]:
+    t = loop i from 0 to 256:
+        i
+    loop b in textpkg::bytes(s):
+        t.at(b)
+
+classes("a")
+}}]
+    set hir [surface::readProgramFile [file join $dir main.bot] -warnings off -cache ""]
+    list [lrange [outcomeUnderHir interp $hir] 0 1] [lmap t [eut::ByteTypes $hir] {lindex $t 0}]
+} -cleanup {unset -nocomplain dir hir} -result [list {value {[97]}} $::eutByteNames]
+
+test eut-no-native-reachable {a program that cannot reach encode_utf8 (it imports neither std::str nor a module that does) declares no std::byte type, and still may not name the native (MISSING-IMPORT)} -body {
+    set hir [eut::Compile "import std::list\n\nstd::list::length(\[1\])\n"]
+    list [eut::ByteTypes $hir] [eut::Outcome "std::str::encode_utf8(\"a\")\n"]
+} -cleanup {unset -nocomplain hir} -result {{} {error MISSING-IMPORT}}
+
+test eut-import-order-unrelated {the table program with std::str imported first or last among unrelated imports: accepted either way, and its loop element is the Byte} -body {
+    lmap imports {
+        {import std::str
+import std::list
+import std::char}
+        {import std::char
+import std::list
+import std::str}
+    } {
+        eut::Outcome [eut::Table $imports]
+    }
+} -cleanup {unset -nocomplain imports} -result {{ok {}} {ok {}}}
+
+test eut-import-order {std::str imported before or after std::abi::bytes (which loads std::byte's module), or after std::byte itself: one declaration of std::byte::Byte, the module's, and one result type} -body {
+    lmap imports {
+        {import std::str
+import std::abi::bytes}
+        {import std::abi::bytes
+import std::str}
+        {import std::byte
+import std::str}
+        {import std::str
+import std::byte}
+    } {
+        set hir [eut::Compile "$imports\n\n\"a\".encode_utf8()\n"]
+        list [llength [lsearch -all [lmap t [eut::ByteTypes $hir] {lindex $t 0}] std::byte::Byte]] \
+            [eut::CallTypes $hir std::str::encode_utf8] [dict exists $hir modules std::byte]
+    }
+} -cleanup {unset -nocomplain imports hir} -result {{1 {{List[int[std::byte::Byte]]}} 1} {1 {{List[int[std::byte::Byte]]}} 1} {1 {{List[int[std::byte::Byte]]}} 1} {1 {{List[int[std::byte::Byte]]}} 1}}
+
+# ---------------------------------------------------------------------------
+# HIR text, interchange, the front-end cache, isolation
+
+test eut-hir-text-roundtrip {HIR text carries the declaration: read back, the program declares std::byte::Byte and the call is List[std::byte::Byte]} -body {
+    set hir [eut::Compile "import std::str\n\n\"a\".encode_utf8()\n"]
+    set text [hir::format $hir]
+    set read [hir::parse $text]
+    list [string match "*type std::byte::Byte*" $text] [eut::Byte $read] \
+        [eut::CallTypes $read std::str::encode_utf8] [expr {[hir::format $read] eq $text}]
+} -cleanup {unset -nocomplain hir text read} -result {1 {std::byte::Byte Int {interval 0 255}} {{List[int[std::byte::Byte]]}} 1}
+
+test eut-interchange-fresh-process {interchange text written here and read by a fresh process that builds nothing keeps the type: the process reads the .hirx (whose decoding installs its declarations) and reports the call's type and the domain of the std::byte::Byte it declares} -body {
+    set dir [eut::App {p.bot {import std::str
+
+"é".encode_utf8()
+}}]
+    set hir [surface::readProgramFile [file join $dir p.bot] -warnings off -cache ""]
+    hir::interchange::writeFile [file join $dir p.hirx] $hir
+    set script [file join $dir read.tcl]
+    set channel [open $script w]
+    puts $channel [string map [list @ROOT@ $::projectRoot @FILE@ [file join $dir p.hirx]] {
+source [file join {@ROOT@} compiler compiler.tcl]
+source [file join {@ROOT@} surface surface.tcl]
+set hir [hir::interchange::readFile {@FILE@}]
+set call ""
+foreach e [hir::walk $hir] {
+    if {[hir::kind $hir $e] eq "call"} { set call $e }
+}
+puts [list [hir::types::presented [hir::typeOf $hir $call]] [dict get [core::type::metadata std::byte::Byte] integerDomain]]
+}]
+    close $channel
+    set out [exec [info nameofexecutable] $script]
+    set out
+} -cleanup {unset -nocomplain dir hir script channel out} -result {{List[int[std::byte::Byte]]} {interval 0 255}}
+
+test eut-cache-hit-equals-miss {a cache hit has the declaration and the type a miss has} -body {
+    set dir [eut::App {p.bot {import std::str
+
+"a".encode_utf8()
+}}]
+    set cache [file join $dir cache]
+    surface::cache::resetStats
+    set miss [surface::readProgramFile [file join $dir p.bot] -warnings off -cache $cache]
+    set hit [surface::readProgramFile [file join $dir p.bot] -warnings off -cache $cache]
+    set stats [surface::cache::stats]
+    list [dict get $stats misses] [dict get $stats hits] [eut::Byte $hit] \
+        [eut::CallTypes $hit std::str::encode_utf8] [expr {[eut::ByteTypes $miss] eq [eut::ByteTypes $hit]}]
+} -cleanup {unset -nocomplain dir cache miss hit stats} -result {1 1 {std::byte::Byte Int {interval 0 255}} {{List[int[std::byte::Byte]]}} 1}
+
+test eut-cache-dependency {the module loaded for the contract is a dependency of the cached entry, though no import names it: a program importing only std::str is compiled again when std::byte's file changes, and gets the new declaration} -body {
+    withPrivateLibrary {
+        set dir [eut::App {p.bot {import std::str
+
+"a".encode_utf8()
+}}]
+        set cache [file join $dir cache]
+        set first [eut::Byte [surface::readProgramFile [file join $dir p.bot] -warnings off -cache $cache]]
+        set path [file join $::core::libraryDir byte.bot]
+        set channel [open $path r]
+        set text [read $channel]
+        close $channel
+        set channel [open $path w]
+        puts -nonewline $channel [string map {"type Byte = Int in 0..255" "type Byte = Int in 0..1000"} $text]
+        close $channel
+        surface::cache::resetStats
+        set second [eut::Byte [surface::readProgramFile [file join $dir p.bot] -warnings off -cache $cache]]
+        list $first $second [dict get [surface::cache::stats] hits]
+    }
+} -cleanup {unset -nocomplain dir cache first path channel text second} -result {{std::byte::Byte Int {interval 0 255}} {std::byte::Byte Int {interval 0 1000}} 0}
+
+test eut-isolation {compiling A (std::str only), then B (a private library whose std::byte::Byte is 0..1000), then A again in one process: both As declare the 0..255 Byte and type the call alike, and the first A's HIR, activated after B, still sees its own declaration} -body {
+    set src "import std::str\n\n\"a\".encode_utf8()\n"
+    set a1 [eut::Compile $src]
+    set b [withPrivateLibrary {
+        set channel [open [file join $::core::libraryDir byte.bot] w]
+        puts -nonewline $channel "type Byte = Int in 0..1000\n"
+        close $channel
+        eut::Compile $src
+    }]
+    set a2 [eut::Compile $src]
+    set types [list [eut::Byte $a1] [eut::Byte $b] [eut::Byte $a2]]
+    hir::activate $a1
+    list $types [dict get [core::type::metadata std::byte::Byte] integerDomain] \
+        [expr {[eut::CallTypes $a1 std::str::encode_utf8] eq [eut::CallTypes $a2 std::str::encode_utf8]}]
+} -cleanup {unset -nocomplain src a1 b a2 types channel} -result {{{std::byte::Byte Int {interval 0 255}} {std::byte::Byte Int {interval 0 1000}} {std::byte::Byte Int {interval 0 255}}} {interval 0 255} 1}
+
+# ---------------------------------------------------------------------------
+# Malformed contracts: never trusted, never a silent fallback
+
+test eut-registration-validates-name {a `typed` result shape must name a standard-library type by its canonical identity, with LO <= HI: an unqualified name, an application's or a package's, and a reversed range are refused at registration} -body {
+    lmap shape {
+        {typed Byte 0 255}
+        {typed byte::Byte 0 255}
+        {typed std::Byte 0 255}
+        {typed std::byte::Byte 255 0}
+        {typed std::byte::Byte 0 255}
+    } {
+        catch {core::native::ValidShape $shape 1} ok
+        set ok
+    }
+} -cleanup {unset -nocomplain shape ok} -result {0 0 0 0 1}
+
+test eut-missing-declaration {a standard library whose std::byte declares no Byte, or declares it as a refinement, fails the compilation as a COMPILER-INTERNAL error naming the type -- never a fallback to a less precise type, never a diagnostic of the program -- with std::byte imported or not} -body {
+    set results {}
+    foreach text {"type Other = Int in 0..1\n" "refined type Byte = int\n"} {
+        foreach imports [list "import std::str" "import std::str\nimport std::byte"] {
+            withPrivateLibrary {
+                set channel [open [file join $::core::libraryDir byte.bot] w]
+                puts -nonewline $channel $text
+                close $channel
+                catch {eut::Compile "$imports\n\n\"a\".encode_utf8()\n"} message options
+                lappend results [list [dict get $options -errorcode] [string match "*names std::byte::Byte*" $message]]
+            }
+        }
+    }
+    set results
+} -cleanup {unset -nocomplain results text imports channel message options} -result {{{CORE SEMANTIC COMPILER-INTERNAL} 1} {{CORE SEMANTIC COMPILER-INTERNAL} 1} {{CORE SEMANTIC COMPILER-INTERNAL} 1} {{CORE SEMANTIC COMPILER-INTERNAL} 1}}
+
+test eut-broken-module-same-outcome {a std::byte whose declaration is itself in error (a parent no module declares) reports its own diagnostic, the same one whether the program imports std::byte or only reaches it through std::str's contract} -body {
+    set results {}
+    foreach imports [list "import std::str" "import std::str\nimport std::byte"] {
+        withPrivateLibrary {
+            set channel [open [file join $::core::libraryDir byte.bot] w]
+            puts -nonewline $channel "type Byte = Elsewhere in 0..255\n"
+            close $channel
+            catch {eut::Compile "$imports\n\n\"a\".encode_utf8()\n"} message options
+            lappend results [list [dict get $options -errorcode] [string match "*byte.bot:1:*" $message]]
+        }
+    }
+    list [llength [lsort -unique $results]] [lindex $results 0 1]
+} -cleanup {unset -nocomplain results imports channel message options} -result {1 1}
+
+test eut-domain-not-admitting {a std::byte::Byte whose domain does not admit 0..255 (0..15) fails the compilation (COMPILER-INTERNAL), with std::byte imported or not; a superset (0..1000) is a sound claim and is made} -body {
+    set results {}
+    foreach domain {0..15 0..1000} {
+        foreach imports [list "import std::str" "import std::str\nimport std::byte"] {
+            withPrivateLibrary {
+                set channel [open [file join $::core::libraryDir byte.bot] w]
+                puts -nonewline $channel "type Byte = Int in $domain\n"
+                close $channel
+                if {[catch {eut::Compile "$imports\n\n\"a\".encode_utf8()\n"} hir options]} {
+                    lappend results [dict get $options -errorcode]
+                } else {
+                    lappend results [eut::CallTypes $hir std::str::encode_utf8]
+                }
+            }
+        }
+    }
+    set results
+} -cleanup {unset -nocomplain results domain imports channel hir options} -result {{CORE SEMANTIC COMPILER-INTERNAL} {CORE SEMANTIC COMPILER-INTERNAL} {{List[int[std::byte::Byte]]}} {{List[int[std::byte::Byte]]}}}
+
+test eut-incompatible-registration {a std::byte::Byte registered with another carrier (str) is never claimed for an Int-producing native: ShapeResult fails rather than trust or drop it} -setup {
+    hir::sourcetypes::Reset
+    core::type::register std::byte::Byte -base str -validator {apply {v} {return 1}} -source 1
+} -cleanup {
+    core::type::unregister std::byte::Byte
+    unset -nocomplain message options
+} -body {
+    catch {hir::types::ShapeResult {} {typed std::byte::Byte 0 255} {} {} list} message options
+    list [core::type::isNamed std::byte::Byte] [dict get $options -errorcode]
+} -result {1 {CORE SEMANTIC COMPILER-INTERNAL}}
+
+test eut-no-loader-no-claim {a program no loader built (core IR text) declares no type: its result is the native's plain -result-type, never a claim about a type that does not exist} -body {
+    hir::sourcetypes::Reset
+    hir::types::show [hir::types::ShapeResult {} {typed std::byte::Byte 0 255} {} {} list]
+} -result list
+
+# ---------------------------------------------------------------------------
+# The mechanism is the contract's, not encode_utf8's
+
+test eut-probe-native {a native of another namespace whose contract names std::byte::Nibble gets it: the loader loads std::byte for it as for encode_utf8 -- the mechanism is the contract's, not one native's; registering the native makes core::native::contractTypes answer anew, and removing it forgets it again} -body {
+    set before [core::native::contractTypes std::eutprobe]
+    core::native::register std::eutprobe::nibbles -arity 1 -impl core::strings::encodeUtf8 \
+        -param-types {str} -result-type list -runtime list-alloc -context-free 1 \
+        -result-shape {typed std::byte::Nibble 0 15}
+    set hir [eut::Compile "import std::eutprobe\n\nstd::eutprobe::nibbles(\"\\t\")\n"]
+    set during [list $before [core::native::contractTypes std::eutprobe] [lmap t [eut::ByteTypes $hir] {lindex $t 0}] \
+        [eut::CallTypes $hir std::eutprobe::nibbles]]
+    core::native::unregister std::eutprobe::nibbles
+    lappend during [core::native::contractTypes std::eutprobe]
+} -cleanup {
+    catch {core::native::unregister std::eutprobe::nibbles}
+    unset -nocomplain before hir during
+} -result [list {} {std::byte::Nibble std::eutprobe::nibbles} $::eutByteNames {{List[int[std::byte::Nibble]]}} {}]
+
+test eut-contract-module-missing {a contract naming a type of a standard module that does not exist fails the compilation as COMPILER-INTERNAL, never as a diagnostic of the program (UNKNOWN-NAMESPACE) and never by falling back} -body {
+    core::native::register std::eutprobe::missing -arity 1 -impl core::strings::encodeUtf8 \
+        -param-types {str} -result-type list -runtime list-alloc -context-free 1 \
+        -result-shape {typed std::eutnosuch::Thing 0 255}
+    catch {eut::Compile "import std::eutprobe\n\nstd::eutprobe::missing(\"a\")\n"} message options
+    list [dict get $options -errorcode] [string match "*std::eutprobe::missing names std::eutnosuch::Thing*no module*" $message]
+} -cleanup {
+    catch {core::native::unregister std::eutprobe::missing}
+    unset -nocomplain message options
+} -result {{CORE SEMANTIC COMPILER-INTERNAL} 1}
+
+test eut-contract-census {every `typed` result shape of the registry names a type its standard-library module declares as an integer domain admitting the shape's range: a program that only imports the native's namespace types its result so} -body {
+    set problems {}
+    foreach name [lsort [core::native::names]] {
+        set shape [dict get [core::native::metadata $name] resultShape]
+        if {[lindex $shape 0] ne "typed"} continue
+        lassign $shape _ type lo hi
+        set ns [core::native::namespaceOf $name]
+        set hir [eut::Compile "import $ns\n\n1\n"]
+        hir::activate $hir
+        if {![core::type::isNamed $type]
+                || ![hir::range::ProvesType [dict create min $lo max $hi] [core::type::normalize $type]]} {
+            lappend problems $name
+        }
+    }
+    set problems
+} -cleanup {unset -nocomplain problems name shape type lo hi ns hir} -result {}
+
+test eut-named-struct-census {every `named-struct` result shape names a struct that importing the native's namespace declares, except the syscall transports, whose argument contract already requires a value of that struct (an accepted call has it declared): a new exception fails this test} -body {
+    set exceptions {}
+    foreach name [lsort [core::native::names]] {
+        set shape [dict get [core::native::metadata $name] resultShape]
+        if {[lindex $shape 0] ne "named-struct" || [string first # $name] >= 0} continue
+        set ns [core::native::namespaceOf $name]
+        set src "import $ns\n\n1\n"
+        if {[catch {eut::Compile $src -target [linuxTarget]} hir]} {
+            lappend exceptions "$name: $hir"
+            continue
+        }
+        hir::activate $hir
+        if {![hir::structs::declared [lindex $shape 1]]} {
+            lappend exceptions $name
+        }
+    }
+    set exceptions
+} -cleanup {unset -nocomplain exceptions name shape ns src hir} -result {std::linux::abi::aarch64::syscall std::linux::abi::x86_64::syscall}
+
+# ---------------------------------------------------------------------------
+# The values are unchanged: the contract describes what every backend
+# already produced
+
+test eut-utf8-values {encode_utf8's values on every backend, against bytes written out here (not computed by either runtime): empty, ASCII, a control character, Latin-1, a BMP character, an astral character and mixed text} -constraints nativeBuilt -body {
+    sourceAgree {import std::str
+
+["".encode_utf8(), "Az".encode_utf8(), "\t\n".encode_utf8(), "é".encode_utf8(),
+    "€".encode_utf8(), "😀".encode_utf8(), "aé€😀".encode_utf8()]
+}
+} -result {value {[[], [65, 122], [9, 10], [195, 169], [226, 130, 172], [240, 159, 152, 128], [97, 195, 169, 226, 130, 172, 240, 159, 152, 128]]}}
+
+::tcltest::cleanupTests

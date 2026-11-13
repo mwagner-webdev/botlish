@@ -14,6 +14,17 @@
 > describes the mechanism; read it as `std::byte::Byte` for the standard
 > library's type.
 
+> **Update (STDLIB-ENCODE-UTF8-RESULT-TYPE-STABILITY-MILESTONE-1.md).** The
+> "no `Byte` type loaded" case no longer exists: the loader loads
+> `std::byte` in every compilation that can reach `encode_utf8`, so its
+> result is `List[std::byte::Byte]` whatever the program imports. The
+> admissibility proof below still decides whether the type is claimed, but a
+> declaration that fails it (a narrower or non-Int `std::byte::Byte`) is now
+> the standard library contradicting its own native and fails the
+> compilation (`CORE SEMANTIC COMPILER-INTERNAL`) instead of the broader
+> `list` fallback the tables below describe; the program-local `type Byte`
+> is still never the native's.
+
 ## Outcome
 
 `encode_utf8`'s native result-shape metadata (`core/strings.tcl`,
