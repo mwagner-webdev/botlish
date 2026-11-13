@@ -197,7 +197,11 @@ test str-append-char-registration {a context-free str intrinsic: (str, UnicodeCh
 
 test str-append-char-method-is-the-intrinsic {text.append_char(c) is the very call std::str::append_char(text, c): the same native call target} -body {
     set hir [surface::compile "import std::str\nfn f(t: str) -> str:\n    t.append_char('x')\nfn g(t: str) -> str:\n    std::str::append_char(t, 'x')\n\[f(\"a\"), g(\"a\")\]\n" -warnings off]
+    # The entry program's own calls (file f1): std::str's encode_utf8
+    # contract loads std::byte, whose functions call natives of their own
+    # (STDLIB-ENCODE-UTF8-RESULT-TYPE-STABILITY-MILESTONE-1.md).
     lsort -unique [lmap e [hirFind $hir call] {
+        if {[lindex [dict get [hir::node $hir $e] origin] 1] ne "f1"} continue
         set target [hir::get $hir $e target]
         if {[lindex $target 0] ne "native"} continue
         dict get [hir::symbol $hir [lindex $target 1]] name
