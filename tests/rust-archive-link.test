@@ -58,7 +58,10 @@ testConstraint systemLinkerBuilt [expr {[testConstraint rustlinkHost] && [file i
 
 if {[testConstraint rustlinkHost]} {
     source [file join $::projectRoot audit rust-archive-link tools rustlink.tcl]
+} else {
+    source [file join $::projectRoot tools rust-unit.tcl]
 }
+testConstraint posixShell [expr {$::tcl_platform(platform) eq "unix" && [auto_execok sh] ne ""}]
 
 set ::ralCounter 0
 proc ralDir {tag} {
@@ -243,6 +246,72 @@ foreach linker {rustc system} {
         list [ralVerdict $c] [lrange [dict get $c value] 0 2]
     }] -result {{fail 0} {FAIL {a post with the provider} {got -38}}}
 }
+
+# rustunit::Nm and MachoNm against stand-ins for nm (a script named nm
+# first on PATH), on every host: what an nm that fails after printing may
+# have said, and Apple's nm, which reads an object's symbols from its
+# embedded LLVM bitcode -- the Rust standard library's objects carry some,
+# of an LLVM newer than Xcode's -- unless given --no-llvm-bc.
+proc ralFakeNm {script body} {
+    set dir [ralDir fakenm]
+    file mkdir $dir
+    set f [open [file join $dir nm] w]
+    puts $f "#!/bin/sh\n$script"
+    close $f
+    file attributes [file join $dir nm] -permissions 0755
+    set saved $::env(PATH)
+    set ::env(PATH) $dir:$saved
+    try {
+        uplevel 1 $body
+    } finally {
+        set ::env(PATH) $saved
+    }
+}
+proc ralError {script} {
+    if {[catch {uplevel 1 $script} message]} {
+        return $message
+    }
+    return "no error: $message"
+}
+
+test ral-nm-no-symbols-accepted {an nm that fails after printing because a member has no symbols (Apple's, for a Rust static library): its output is taken} -constraints posixShell -body {
+    ralFakeNm {echo 'a.o:'; echo '0000000000000000 T _rl_open'; echo 'nm: warning: lib.a(empty.o): no symbols' >&2; exit 1} {
+        rustunit::Nm -A lib.a
+    }
+} -result "a.o:\n0000000000000000 T _rl_open"
+
+test ral-nm-partial-refused {an nm that fails after printing for any other reason may have skipped members: an error, never a partial list} -constraints posixShell -body {
+    ralFakeNm {echo '0000000000000000 T _rl_open'; echo 'nm: error: whole.o: Unknown attribute kind (102)' >&2; exit 1} {
+        ralError {rustunit::Nm -A lib.a}
+    }
+} -match glob -result {*failed (exit 1) after printing: nm: error: whole.o: Unknown attribute kind (102)*}
+
+test ral-nm-bitcode-reader-off {Mach-O symbols are read with --no-llvm-bc: an nm reading the bitcode instead fails, as Xcode 16.4's does on rustc 1.97's} -constraints posixShell -body {
+    ralFakeNm {
+for a in "$@"; do
+  if [ "$a" = --no-llvm-bc ]; then
+    echo '0000000000000000 (__TEXT,__text) external _rl_open'
+    echo '0000000000000010 (__TEXT,__text) non-external _local_helper'
+    echo '0000000000000020 (__TEXT,__text) private external _hidden'
+    echo '                 (undefined) external _botlish_event_post2'
+    exit 0
+  fi
+done
+echo "nm: error: $2: Unknown attribute kind (102) (Producer: 'LLVM22.1.6-rust-1.97.0-stable' Reader: 'LLVM APPLE_1_1700.0.13.5_0')" >&2
+exit 1} {
+        list [rustunit::globals x.a -format macho] [rustunit::undefined x.a -format macho]
+    }
+} -result {rl_open botlish_event_post2}
+
+test ral-nm-old-nm-fallback {an nm without --no-llvm-bc (it refuses the option) is asked without it} -constraints posixShell -body {
+    ralFakeNm {
+for a in "$@"; do
+  if [ "$a" = --no-llvm-bc ]; then echo "nm: error: unknown argument '--no-llvm-bc'" >&2; exit 1; fi
+done
+echo '0000000000000000 (__TEXT,__text) external _rl_open'} {
+        rustunit::globals x.a -format macho
+    }
+} -result rl_open
 
 foreach dir [glob -nocomplain -directory [::tcltest::temporaryDirectory] ral-[pid]-*] {
     file delete -force $dir

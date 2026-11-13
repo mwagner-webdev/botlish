@@ -88,6 +88,42 @@
     set opts [Options [dict create -keep {rl_*} -require [exports] -out ""] $args]
 >>>>
 
+@@ macho-bitcode-reader Mach-O symbols read without --no-llvm-bc: Apple's nm reads the Rust standard library's embedded bitcode, of a newer LLVM than Xcode's, and fails (or, on a raw archive, skips those members)
+!! ral-nm-bitcode-reader-off ral-raw-surface ral-localized-surface
+## tools/rust-unit.tcl
+<<<<
+    if {[catch {Nm --no-llvm-bc {*}$args} out]} {
+====
+    if {[catch {Nm {*}$args} out]} {
+>>>>
+
+@@ nm-no-fallback an nm that does not know --no-llvm-bc is an error instead of being asked without it
+!! ral-nm-old-nm-fallback
+## tools/rust-unit.tcl
+<<<<
+        if {![regexp -nocase {unknown (command line )?(argument|option)|unrecognized option} $out]} {
+====
+        if {1} {
+>>>>
+
+@@ nm-partial-accepted an nm that fails after printing is taken whatever it said: a member it could not read is silently missing from the list
+!! ral-nm-partial-refused
+## tools/rust-unit.tcl
+<<<<
+            if {[string trim $line] eq "" || [string match "*no symbols*" $line]} continue
+====
+            continue
+>>>>
+
+@@ nm-no-symbols-refused an nm that fails after printing only because a member has no symbols is an error: Apple's nm on any Rust static library
+!! ral-nm-no-symbols-accepted
+## tools/rust-unit.tcl
+<<<<
+            if {[string trim $line] eq "" || [string match "*no symbols*" $line]} continue
+====
+            if {[string trim $line] eq ""} continue
+>>>>
+
 # ---------------------------------------------------------------------------
 # The archive symbol index (pm/binary.tcl)
 

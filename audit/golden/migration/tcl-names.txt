@@ -6799,6 +6799,10 @@ tests/rust-archive-link.test ral-raw-with_provider-system pass
 tests/rust-archive-link.test ral-weakref-with_provider-system pass
 tests/rust-archive-link.test ral-weakref-without_provider-system pass
 tests/rust-archive-link.test ral-weakdef-localized-away-system pass
+tests/rust-archive-link.test ral-nm-no-symbols-accepted pass
+tests/rust-archive-link.test ral-nm-partial-refused pass
+tests/rust-archive-link.test ral-nm-bitcode-reader-off pass
+tests/rust-archive-link.test ral-nm-old-nm-fallback pass
 tests/same-failure.test sf-a-a-b-b-c pass
 tests/same-failure.test sf-anchor-first-in-source-order pass
 tests/same-failure.test sf-backend-independent pass
