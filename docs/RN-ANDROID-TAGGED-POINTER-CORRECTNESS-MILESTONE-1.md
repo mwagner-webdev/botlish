@@ -385,9 +385,10 @@ Footprint (**observed**, Linux x86-64; stripped sizes in parentheses):
 | Icy Tower program object (`botlish-native object`) | 160,208 | 160,264 |
 | `handle` benchmark executable (rustc linker, unstripped) | 11,501,880 | 11,537,440 |
 
-Code generation time for Icy Tower's program (`botlish-native object`,
-alternating, best of 7 on the loaded machine): 69 ms before, 74 ms after,
-the runs' ranges (69-100, 74-107) overlapping; the change adds a handful of
+Code generation time for Icy Tower's program (`botlish-native object` of
+its NIR, each driver on its own checkout's, alternating, 15 runs each on the
+idle machine): best 68.0 ms before and 67.6 ms after, means 74.8 and 76.5 ms
+(single runs scatter from 67 to 98 ms); the change adds a handful of
 Cranelift instructions per exposure site and none elsewhere.
 
 ## 19. Android performance
