@@ -1031,6 +1031,22 @@ tests (windows x86-64), static-decisions (the batched against the
 sequential scheduler), c-bindgen, single executable, bench, icy-tower and
 both icy-tower ports. main is green at `cdb751b0`.
 
+### The merge into main (**CI**)
+
+Merged into main at `023dfaa3` (main's EMISSION-IDENTITY-AND-FEASIBILITY
+re-verification: the emission checker's tests, audits and census rows,
+none of this milestone's files; `git merge-tree` clean). Main's runs at
+`023dfaa3`: tests (linux arm64), tests (macos arm64), tests (windows
+x86-64), the Icy Tower workflows, single executable, c-bindgen and bench
+succeeded; tests failed in one job, cranelift coverage, on one test,
+`vt-large` (tests/value-transfer.test), with every other job green. The
+test belongs to no file this milestone changes, passed in this branch's
+cranelift coverage at `943b75c0`, and failed once in the same job before,
+passing when rerun on the same commit (main's merge of
+WINDOWS-X86-64-MILESTONE-8.md, `73c32da8`, records it): an intermittent
+failure on main, not one this merge adds. The merge's own push runs every
+workflow on main again.
+
 ## 22. Performance and footprint
 
 Measured here (**observed**; 4-core Xeon 2.1 GHz container, single runs,
