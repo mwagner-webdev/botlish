@@ -1,0 +1,35 @@
+# botlish_rustlink: the Rust fixture of
+# HTTP-MACOS-RUST-ARCHIVE-LINK-FEASIBILITY-MILESTONE-1.md. A small native
+# unit built the way packages/http/native (botlish_http) is built -- a Rust
+# static library with a C ABI, unwinding on, one codegen unit, a C object
+# of its own compiled by the build script -- so that localizing it
+# (tools/rust-unit.tcl) and linking it beside the Botlish runtime's own
+# Rust code exercise what the http unit does, without Hyper, h2 or
+# BoringSSL. It depends on the standard library only: it builds offline,
+# on every host the tests run on.
+#
+# The build script compiles one C file into the unit: by default
+# packages/http/native/src/notify.c itself (the weak reference to
+# botlish_event_post2), else the file RUSTLINK_NOTIFY names (the
+# experiments' variants, audit/rust-archive-link/unit/notify-*.c).
+[package]
+name = "botlish_rustlink"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "MIT"
+description = "The Rust fixture of Botlish's Rust-archive link feasibility milestone"
+
+[lib]
+crate-type = ["staticlib"]
+path = "src/lib.rs"
+
+[dependencies]
+
+[profile.release]
+# As botlish_http's: every export catches panics, so unwinding stays on and
+# the unit carries its own personality routine and unwind tables.
+panic = "unwind"
+debug = false
+codegen-units = 1
+incremental = false

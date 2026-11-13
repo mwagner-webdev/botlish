@@ -1,0 +1,30 @@
+# The acceptance with rustlink::provider linked: the unit's post, from a
+# thread of its own, reaches the provider's botlish_event_post2 with its
+# arguments intact. Its value lists what was observed, or starts with
+# "FAIL".
+import checks
+import rustlink
+import rustlink::provider
+import std::list
+
+fn run() -> List[str] errors checks::Check, rustlink::Failed:
+    seen = checks::common()
+    checks::expect("no post before", rustlink::provider::posts(), 0)
+    r = rustlink::notify(1, 2, 3, 4, 77)
+    checks::expect("a post with the provider", r, 0)
+    checks::expect("posts", rustlink::provider::posts(), 1)
+    checks::expect("loop", rustlink::provider::last(0), 1)
+    checks::expect("endpoint", rustlink::provider::last(1), 2)
+    checks::expect("slot", rustlink::provider::last(2), 3)
+    checks::expect("generation", rustlink::provider::last(3), 4)
+    checks::expect("first value", rustlink::provider::last(4), 77)
+    checks::expect("second value", rustlink::provider::last(5), 1)
+    checks::expect("a refused post", rustlink::notify(0, 2, 3, 4, 78), -9)
+    checks::expect("posts after the refusal", rustlink::provider::posts(), 1)
+    seen.append("notify with provider 0")
+
+run():
+    on checks::Check {what, got, want}:
+        checks::check_failed(what, got, want)
+    on rustlink::Failed {operation, code}:
+        checks::unit_failed(operation, code)

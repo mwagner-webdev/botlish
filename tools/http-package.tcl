@@ -34,7 +34,8 @@
 # the provider's archives -- then localized: one relocatable object (ld -r)
 # whose only global definitions are the bh_* functions (objcopy
 # --keep-global-symbols), its debug sections stripped, its Rust COMDAT
-# group renamed (the census's B3), in a deterministic archive. The unit
+# group renamed (the census's B3), in a deterministic archive
+# (tools/rust-unit.tcl's ELF localization). The unit
 # references the provider's identity symbol: with another provider the link
 # fails (the census's B2). -testing 1 builds the test unit (feature
 # `testing`: fault injection, counters, a counting allocator), never
@@ -50,6 +51,7 @@ namespace eval httppkg {
     variable here [file dirname [file normalize [info script]]]
     variable root [file dirname $here]
 }
+source [file join $httppkg::here rust-unit.tcl]
 
 proc httppkg::Log {text} {
     puts stderr "http-package: $text"
@@ -295,31 +297,19 @@ proc httppkg::Unit {{target ""} {testing 0}} {
         exec {*}$cmd >@stderr 2>@stderr
     }
     set raw [file join $targetDir release libbotlish_http.a]
-    set object [file join $dir botlish_http.o]
-    file delete -force $object
     # One relocatable object of the whole unit, whose only global
     # definitions are the bh_* functions: its private Rust standard library
     # never meets the Botlish runtime's. BoringSSL's and libc's references
-    # stay undefined (global) for the final link.
-    exec ld -r --whole-archive $raw -o $object
-    set exports [lmap s [Defined $object] {expr {[string match bh_* $s] ? $s : [continue]}}]
-    set keep [file join $dir keep.txt]
-    set f [open $keep w]
-    puts $f [join $exports \n]
-    close $f
-    # Rust's one COMDAT group (DW.ref.rust_eh_personality) is deduplicated
-    # by its signature's name across the whole link: beside the Botlish
-    # runtime's own Rust code the unit's must be its own (B3).
-    set groups [regexp -all -inline {COMDAT group section \[[^\]]*\] `[^']*' \[([^\]]+)\]} [exec readelf -g $object]]
-    set rename {}
-    foreach {- sig} $groups {
-        lappend rename --redefine-sym $sig=botlish_http.$sig
-    }
-    exec objcopy --strip-debug {*}$rename --keep-global-symbols=$keep $object
+    # stay undefined (global) for the final link. Rust's one COMDAT group
+    # (DW.ref.rust_eh_personality) is deduplicated by its signature's name
+    # across the whole link: beside the Botlish runtime's own Rust code the
+    # unit's is renamed botlish_http.DW.ref.rust_eh_personality (B3). The
+    # steps are tools/rust-unit.tcl's ELF localization
+    # (HTTP-MACOS-RUST-ARCHIVE-LINK-FEASIBILITY-MILESTONE-1.md), the
+    # sequence this procedure ran itself before, unchanged: the archive is
+    # byte for byte what it was (its one member still botlish_http.o).
     set unit [file join $dir libbotlish_http.a]
-    file delete -force $unit
-    exec ar rcsD $unit $object
-    file delete $object
+    set exports [rustunit::localize $raw $unit -format elf -keep {bh_*} -label botlish_http -member botlish_http.o]
     set f [open [file join $dir UNIT.txt] w]
     puts $f [dict create kind $kind target $target provider [ProviderId] exports $exports sha256 [Sha256 $unit] cargo $cmd]
     close $f

@@ -486,10 +486,26 @@ proc pm::binary::CoffObject {data label} {
 # ---------------------------------------------------------------------------
 # ar archives
 
+# An archive's symbol index (its `index` fact) is read from the member that
+# holds it -- GNU's `/` (a big-endian count, member offsets, names) or BSD's
+# `__.SYMDEF`, `__.SYMDEF SORTED` (Apple's ar and ranlib, little-endian
+# 32-bit fields: the byte size of the ranlib array, its {string offset,
+# member offset} entries, the byte size of the string table, the strings)
+# and `__.SYMDEF_64` (the same with 64-bit fields) -- and checked against
+# the archive: every entry's name lies in the string table and is
+# terminated, and its member offset is where an object member's header
+# begins. A Mach-O symbol's leading underscore is the C name's mangling on
+# Apple targets: an entry naming a Mach-O member loses it, as that member's
+# own `symbols` do; every other entry is kept as written. A malformed index
+# is {PM BINARY}; an archive without one has an empty index (no linker
+# links it: GNU ld and Apple's ld both refuse an archive without a table of
+# contents).
 proc pm::binary::Archive {data label} {
     variable maxMembers
     set members {}
     set index {}
+    set entries {}
+    set objects [dict create]
     set names ""
     set at 8
     set length [string length $data]
@@ -522,7 +538,7 @@ proc pm::binary::Archive {data label} {
                 set position $strings
                 for {set i 0} {$i < $count && $position < [string length $body]} {incr i} {
                     set symbol [CString $body $position $label]
-                    lappend index $symbol
+                    lappend entries $symbol [U $body [expr {4 + 4 * $i}] 4 $label be]
                     incr position [expr {[string length $symbol] + 1}]
                 }
             }
@@ -544,9 +560,11 @@ proc pm::binary::Archive {data label} {
             }
             if {$name in {__.SYMDEF {__.SYMDEF SORTED} __.SYMDEF_64 {__.SYMDEF_64 SORTED}}} {
                 lappend members [dict create name $name kind symbols]
+                lappend entries {*}[BsdIndex $body [string match __.SYMDEF_64* $name] "${label}($name)"]
             } else {
                 set facts [inspect $body "${label}($name)"]
                 lappend members [dict merge $facts [dict create name $name]]
+                dict set objects $at [dict get $facts kind]
             }
         }
         if {[llength $members] > $maxMembers} {
@@ -554,7 +572,49 @@ proc pm::binary::Archive {data label} {
         }
         set at [expr {$start + $size + ($size % 2)}]
     }
+    foreach {symbol offset} $entries {
+        if {![dict exists $objects $offset]} {
+            Fail $label "its symbol index names $symbol at offset $offset, where no member of it begins"
+        }
+        if {[dict get $objects $offset] in {macho fat} && [string index $symbol 0] eq "_"} {
+            set symbol [string range $symbol 1 end]
+        }
+        lappend index $symbol
+    }
     return [dict create kind archive members $members index [lsort -unique $index]]
+}
+
+# The entries of a BSD symbol index BODY (WIDE: 64-bit fields), a flat list
+# {NAME MEMBER-OFFSET ...}, every one checked against BODY's bounds.
+proc pm::binary::BsdIndex {body wide label} {
+    variable maxSymbols
+    set w [expr {$wide ? 8 : 4}]
+    set size [U $body 0 $w $label]
+    if {$size % (2 * $w) != 0} {
+        Fail $label "a ranlib array of $size bytes, not a whole number of $w-byte pairs"
+    }
+    set count [expr {$size / (2 * $w)}]
+    if {$count > $maxSymbols} {
+        Fail $label "$count index entries"
+    }
+    set strSizeAt [expr {$w + $size}]
+    set strSize [U $body $strSizeAt $w $label]
+    set strAt [expr {$strSizeAt + $w}]
+    if {$strAt + $strSize > [string length $body]} {
+        Fail $label "a string table of $strSize bytes running past the index's [string length $body] bytes"
+    }
+    set table [string range $body $strAt [expr {$strAt + $strSize - 1}]]
+    set out {}
+    for {set i 0} {$i < $count} {incr i} {
+        set entry [expr {$w + 2 * $w * $i}]
+        set strx [U $body $entry $w $label]
+        set offset [U $body [expr {$entry + $w}] $w $label]
+        if {$strx >= $strSize} {
+            Fail $label "index entry $i names string offset $strx outside its $strSize-byte string table"
+        }
+        lappend out [CString $table $strx $label] $offset
+    }
+    return $out
 }
 
 # ---------------------------------------------------------------------------

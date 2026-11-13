@@ -1,0 +1,18 @@
+# The acceptance with nothing defining botlish_event_post2: the unit's
+# notification object answers on its own (rustlink::not_implemented()).
+# Its value lists what was observed, or starts with "FAIL".
+import checks
+import rustlink
+import std::list
+
+fn run() -> List[str] errors checks::Check, rustlink::Failed:
+    seen = checks::common()
+    r = rustlink::notify(1, 2, 3, 4, 77)
+    checks::expect("a post with no provider", r, rustlink::not_implemented())
+    seen.append("notify without provider -38")
+
+run():
+    on checks::Check {what, got, want}:
+        checks::check_failed(what, got, want)
+    on rustlink::Failed {operation, code}:
+        checks::unit_failed(operation, code)

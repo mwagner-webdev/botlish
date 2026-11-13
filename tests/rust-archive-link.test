@@ -1,0 +1,156 @@
+# rust-archive-link.test -- a Rust native unit beside the Botlish runtime's
+# own Rust (HTTP-MACOS-RUST-ARCHIVE-LINK-FEASIBILITY-MILESTONE-1.md).
+#
+# The fixture (audit/rust-archive-link/unit, crate botlish_rustlink) is a
+# Rust static library built as packages/http/native is: a C ABI, unwinding,
+# a counting global allocator, a panic hook, std threads, and the http
+# unit's own notification object (packages/http/native/src/notify.c, a weak
+# reference to botlish_event_post2). tools/rust-unit.tcl localizes it --
+# ELF: ld -r, objcopy --keep-global-symbols; Mach-O: ld -r with an
+# exported-symbols list -- into an archive whose only global definitions are
+# the rl_* C functions. Its package (audit/rust-archive-link/package) and
+# the consumer programs (audit/rust-archive-link/consumer) are linked with
+# both Botlish linkers and run; each program checks the unit's answers,
+# its failures (two panics caught inside the unit), callbacks, repeated
+# creation and destruction, the provider's presence or absence, and that
+# the Botlish runtime's allocations never reach the unit's allocator.
+#
+# What must hold on every host (Linux x86-64 and AArch64, macOS AArch64):
+#
+#   * the localized archive defines exactly the unit's exports;
+#   * every program passes with the localized unit, with both linkers, and
+#     its executable holds one global rust_eh_personality (the runtime's)
+#     and the unit's own as a local symbol;
+#   * the raw (unlocalized) archive never passes: its link fails (duplicate
+#     definitions) or a check fails (the linker bound the runtime's
+#     allocator shim to the unit's allocator) -- never a silent success;
+#   * a weak definition of botlish_event_post2 (unit/notify-weakdef.c) works
+#     with and without the provider when it stays global, and, localized
+#     away, makes a program with the provider call the fallback.
+#
+# The builds go to Botlish's cache (rust-archive-link/); the applications
+# to the tcltest temporary directory.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot native native.tcl]
+
+set ::ralHost [expr {[string match linux-* [core::cabi::hostTarget]] || [string match macos-* [core::cabi::hostTarget]]}]
+testConstraint nativeBuilt [expr {![catch {native::binary}]}]
+if {[testConstraint nativeBuilt]} {
+    set ::release [file dirname [native::binary]]
+} else {
+    set ::release [file join $native::home target release]
+}
+set ::ralMacho [string match macos-* [core::cabi::hostTarget]]
+set ::ralTools [expr {$::ralMacho ? {cargo cc nm ld libtool} : {cargo cc nm ld objcopy readelf ar}}]
+testConstraint rustlinkHost [expr {$::ralHost && [testConstraint nativeBuilt] && [testConstraint executableAot]
+    && [testConstraint nativeCCalls] && [llength [lmap t $::ralTools {expr {[auto_execok $t] eq "" ? $t : [continue]}}]] == 0}]
+testConstraint rustcLinkerBuilt [expr {[testConstraint rustlinkHost] && [auto_execok rustc] ne ""
+    && [file isfile [file join $::release libbotlish_native.rlib]]}]
+testConstraint systemLinkerBuilt [expr {[testConstraint rustlinkHost] && [file isfile [file join $::release libbotlish_runtime.a]]}]
+
+if {[testConstraint rustlinkHost]} {
+    source [file join $::projectRoot audit rust-archive-link tools rustlink.tcl]
+}
+
+set ::ralCounter 0
+proc ralDir {tag} {
+    file normalize [file join [::tcltest::temporaryDirectory] ral-[pid]-[incr ::ralCounter]-$tag]
+}
+
+# The units and archives, built once per file run.
+proc ralUnit {notify} {
+    if {![info exists ::ralUnits($notify)]} {
+        set ::ralUnits($notify) [rustlink::unit -notify $notify]
+    }
+    return $::ralUnits($notify)
+}
+proc ralLocalized {notify args} {
+    set key [list $notify {*}$args]
+    if {![info exists ::ralArchives($key)]} {
+        set ::ralArchives($key) [rustlink::localized [ralUnit $notify] {*}$args \
+            -out [file join [ralDir archive] librustlink.a]]
+    }
+    return $::ralArchives($key)
+}
+proc ralProvider {} {
+    if {![info exists ::ralProviderArchive]} {
+        set ::ralProviderArchive [rustlink::provider -out [file join [ralDir provider] librustlink_provider.a]]
+    }
+    return $::ralProviderArchive
+}
+
+# Link and run PROGRAM against the unit archive ARCHIVE with LINKER: the
+# case's dict (rustlink::case).
+proc ralCase {archive program linker} {
+    set app [rustlink::app [ralDir app] $archive [ralProvider]]
+    rustlink::case $app $program $linker
+}
+
+proc ralVerdict {c} {
+    if {[dict get $c verdict] eq "link"} {
+        return "link failed"
+    }
+    return "[dict get $c verdict] [dict get $c status]"
+}
+
+test ral-localized-surface {the localized archive's global definitions are exactly the unit's C ABI} -constraints rustlinkHost -body {
+    rustunit::check [ralLocalized weakref] [rustlink::exports] -format [rustlink::format]
+} -result {rl_close rl_digest rl_each rl_fail rl_notify rl_open rl_put rl_stats rl_toolchain rl_version}
+
+test ral-localized-weak-reference {localization leaves the weak reference to botlish_event_post2 undefined for the final link} -constraints rustlinkHost -body {
+    expr {"botlish_event_post2" in [rustunit::undefined [ralLocalized weakref] -format [rustlink::format]]}
+} -result 1
+
+test ral-raw-surface {the raw archive defines Rust's personality routine and allocator shim globally: what meets the runtime's} -constraints rustlinkHost -body {
+    set g [rustunit::globals [ralUnit weakref] -format [rustlink::format]]
+    list [expr {"rust_eh_personality" in $g}] [expr {[llength [lsearch -all -glob $g *___rust_alloc]] > 0}] [expr {[llength $g] > 1000}]
+} -result {1 1 1}
+
+test ral-require-missing-export {an export the unit was meant to have and does not is the localizer's error} -constraints rustlinkHost -body {
+    rustlink::localized [ralUnit weakref] -require [list {*}[rustlink::exports] rl_absent] -out [file join [ralDir missing] librustlink.a]
+} -returnCodes error -match glob -result {*does not define rl_absent (required exports*}
+
+test ral-kept-glob-misses {a keep list that misses an export leaves it local: a consumer cannot link it} -constraints {rustlinkHost rustcLinkerBuilt} -body {
+    set archive [ralLocalized weakref -keep {rl_[a-s]*} -require {}]
+    set c [ralCase $archive without_provider.bot rustc]
+    list [expr {"rl_toolchain" in [rustunit::globals $archive -format [rustlink::format]]}] [ralVerdict $c] \
+        [regexp {rl_toolchain} [dict get $c error]]
+} -result {0 {link failed} 1}
+
+foreach linker {rustc system} {
+    set constraints [list rustlinkHost [expr {$linker eq "rustc" ? "rustcLinkerBuilt" : "systemLinkerBuilt"}]]
+    foreach program {without_provider.bot with_provider.bot} {
+        set tag [file rootname $program]
+        test ral-localized-$tag-$linker "the localized unit, $tag, the $linker linker: every check passes; one global personality routine, the unit's local" \
+                -constraints $constraints -body [string map [list PROGRAM $program LINKER $linker] {
+            set c [ralCase [ralLocalized weakref] PROGRAM LINKER]
+            set p [rustlink::copies [dict get $c exe] rust_eh_personality]
+            list [ralVerdict $c] [dict get $p global] [expr {[dict get $p local] >= 1}]
+        }] -result {{pass 0} 1 1}
+
+        test ral-raw-$tag-$linker "the raw unit, $tag, the $linker linker: never a silent success" \
+                -constraints $constraints -body [string map [list PROGRAM $program LINKER $linker] {
+            set c [ralCase [ralUnit weakref] PROGRAM LINKER]
+            expr {[dict get $c verdict] eq "pass" ? "passed silently: [dict get $c value]" : "detected"}
+        }] -result detected
+
+        test ral-weakdef-$tag-$linker "a weak definition of botlish_event_post2 kept global, $tag, the $linker linker" \
+                -constraints $constraints -body [string map [list PROGRAM $program LINKER $linker] {
+            set archive [ralLocalized weakdef -keep {rl_* botlish_event_post2}]
+            list [expr {"botlish_event_post2" in [rustunit::globals $archive -format [rustlink::format]]}] \
+                [ralVerdict [ralCase $archive PROGRAM LINKER]]
+        }] -result {1 {pass 0}}
+    }
+
+    test ral-weakdef-localized-away-$linker "a weak fallback localized away: a program with the provider calls the fallback ($linker linker)" \
+            -constraints $constraints -body [string map [list LINKER $linker] {
+        set c [ralCase [ralLocalized weakdef -keep {rl_*}] with_provider.bot LINKER]
+        list [ralVerdict $c] [lrange [dict get $c value] 0 2]
+    }] -result {{fail 0} {FAIL {a post with the provider} {got -38}}}
+}
+
+foreach dir [glob -nocomplain -directory [::tcltest::temporaryDirectory] ral-[pid]-*] {
+    file delete -force $dir
+}
+cleanupTests

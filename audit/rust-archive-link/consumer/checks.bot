@@ -1,0 +1,126 @@
+# checks -- the consumer's acceptance of the packaged Rust unit
+# (HTTP-MACOS-RUST-ARCHIVE-LINK-FEASIBILITY-MILESTONE-1.md, section 6). The
+# same source on every target: an entry program runs `common()` and adds
+# its notification check (with the provider linked, or without it).
+#
+# A wrong answer fails with Check (the executable ends with status 1 and the
+# check's name); a right run's value lists what was observed.
+
+import rustlink
+import std::abi::bytes
+import std::int
+import std::list
+import std::str
+
+error Check:
+    what: str
+    got: int
+    want: int
+
+nomethod fn expect(what: str, got: int, want: int) errors Check:
+    if got != want:
+        fail Check {what: what, got: got, want: want}
+
+nomethod fn expect_text(what: str, got: str, want: str) errors Check:
+    if got != want:
+        fail Check {what: what.concat(": ".concat(got)), got: std::str::length(got), want: std::str::length(want)}
+
+# What an entry program's value is when a check failed (a Botlish program
+# cannot choose its exit status: the harness reads the value).
+nomethod fn check_failed(what: str, got: int, want: int) -> List[str]:
+    ["FAIL", what, "got ".concat(std::int::to_string(got)), "want ".concat(std::int::to_string(want))]
+
+nomethod fn unit_failed(operation: str, code: int) -> List[str]:
+    ["FAIL", "the unit's ".concat(operation), "code ".concat(std::int::to_string(code))]
+
+# The code of a call that must fail with rustlink::Failed.
+nomethod fn failed_put(s: rustlink::Store, text: str) -> int errors Check:
+    s.put_text(text):
+        on rustlink::Failed {code}:
+            return code
+    fail Check {what: "a put that must fail succeeded", got: 0, want: -1}
+
+# Botlish work that allocates through the Botlish runtime (and so through
+# its Rust allocator): a List of strings and their total length.
+fn runtime_work(n: int) -> int:
+    words = loop i from 0 to n:
+        "word-".concat(std::int::to_string(i))
+    fold w in words with intermediate total 0:
+        total + std::str::length(w)
+
+# Open, fill, read and close a store N times (each owner released at the
+# end of its iteration's scope): the digests' total length.
+fn churn(n: int) -> int errors rustlink::Failed:
+    fold i from 0 to n with intermediate total 0:
+        {owner, store} = rustlink::open(8)
+        store.put_text("alpha")
+        store.put_text(std::int::to_string(i))
+        total + std::str::length(rustlink::digest(store))
+
+fn common() -> List[str] errors rustlink::Failed, Check:
+    expect("version", rustlink::version(), 1)
+    tool = rustlink::toolchain()
+    head = tool.substring(0, 6):
+        on UpperOverrun:
+            ""
+    expect_text("toolchain is rustc's", head, "rustc ")
+    s0 = rustlink::stats()
+    expect("no store open at the start", s0.open, 0)
+
+    {owner, store} = rustlink::open(4)
+    expect("first put", store.put_text("hello"), 1)
+    expect("second put", store.put_text("wörld ✓"), 2)
+    expect("third put", store.put_text("hello"), 3)
+    d = rustlink::digest(store)
+    expect_text("digest", d, "items=3 unique=2 bytes=20 longest=10 fnv1a=ddc03a852782f54b")
+    expect("fourth put", store.put_text(""), 4)
+    expect("a full store refuses", failed_put(store, "x5"), rustlink::full())
+    # Callbacks: per item, the length of "item-INDEX" and the item's.
+    expect("callback weight", rustlink::weight(store), 6 + 5 + 6 + 10 + 6 + 5 + 6 + 0)
+
+    # Failures: a refusal, then two panics inside the unit, caught there by
+    # its own unwinder (its personality routine and unwind tables).
+    p0 = rustlink::stats().panics
+    expect("refusal", store.failure(0), rustlink::refused())
+    expect("index panic", store.failure(1), rustlink::panicked())
+    expect("explicit panic", store.failure(2), rustlink::panicked())
+    p1 = rustlink::stats()
+    expect("panics counted", p1.panics - p0, 2)
+    if p1.last_panic_length <= 0:
+        fail Check {what: "the unit's panic hook recorded no message", got: p1.last_panic_length, want: 1}
+
+    # Allocator isolation: Botlish work allocates nothing from the unit's
+    # allocator, and the unit's work allocates from it.
+    a0 = rustlink::stats()
+    n = runtime_work(20000)
+    a1 = rustlink::stats()
+    expect("runtime work allocated from the unit's allocator", a1.allocations - a0.allocations, 0)
+    store.put_text("one more"):
+        on rustlink::Failed:
+            0
+    rustlink::digest(store)
+    a2 = rustlink::stats()
+    if a2.allocations <= a1.allocations:
+        fail Check {what: "the unit's work was not counted by its own allocator", got: a2.allocations - a1.allocations, want: 1}
+
+    # Repeated creation and destruction: no store left open, and the unit's
+    # live heap the same after 100 more rounds as after the first 20.
+    churn(20)
+    l0 = rustlink::stats().live_bytes
+    c = churn(100)
+    l1 = rustlink::stats()
+    expect("live heap after 100 rounds", l1.live_bytes, l0)
+    expect("stores open after the rounds (the first is still)", l1.open, 1)
+
+    # The identity of a closed store is stale.
+    rustlink::close(owner)
+    expect("closed store's identity", failed_put(store, "late"), rustlink::stale())
+    expect("no store open at the end", rustlink::stats().open, 0)
+
+    ["version ".concat(std::int::to_string(rustlink::version())),
+     "toolchain ".concat(tool),
+     "digest ".concat(d),
+     "runtime work ".concat(std::int::to_string(n)),
+     "churn ".concat(std::int::to_string(c)),
+     "panics ".concat(std::int::to_string(p1.panics)),
+     "unit allocator counts the unit only"]

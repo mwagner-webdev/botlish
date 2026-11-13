@@ -1,0 +1,186 @@
+# rustlink -- the Botlish side of the Rust fixture of
+# HTTP-MACOS-RUST-ARCHIVE-LINK-FEASIBILITY-MILESTONE-1.md
+# (audit/rust-archive-link/unit, crate botlish_rustlink).
+#
+# Declared the way packages/http/http.bot declares its unit: one static
+# archive at a path inside the package instance, private C declarations of
+# the unit's i64 C ABI, caller-lent buffers (write noescape) for what the
+# unit copies out, an owner resource that closes what it opened where its
+# scope ends, and an identity the operations take.
+#
+# The archive is per target (native/librustlink.a: a localized static
+# archive, tools/rust-unit.tcl); this source is every target's.
+
+import std::abi
+import std::abi::bytes
+import std::binary
+import std::byte
+import std::ffi::c
+import std::int
+import std::list
+import std::str
+
+extern c library "rustlink" static at "native/librustlink.a"
+
+private extern c fn rl_version() -> std::ffi::c::LongLong
+private extern c fn rl_open(capacity: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+private extern c fn rl_close(h: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+private extern c fn rl_put(h: std::ffi::c::LongLong, data: std::ffi::c::Ptr[std::ffi::c::Void] read noescape, len: std::ffi::c::ULong) -> std::ffi::c::LongLong
+private extern c fn rl_digest(h: std::ffi::c::LongLong, buf: std::ffi::c::Ptr[std::ffi::c::Void] write noescape, cap: std::ffi::c::ULong) -> std::ffi::c::LongLong
+private extern c fn rl_fail(h: std::ffi::c::LongLong, kind: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+private extern c fn rl_each(h: std::ffi::c::LongLong, cb: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::LongLong, std::ffi::c::LongLong], return: std::ffi::c::LongLong}] noescape) -> std::ffi::c::LongLong
+private extern c fn rl_notify(lp: std::ffi::c::LongLong, ep: std::ffi::c::LongLong, slot: std::ffi::c::LongLong, generation: std::ffi::c::LongLong, a: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+private extern c fn rl_stats(buf: std::ffi::c::Ptr[std::ffi::c::Void] write noescape, cap: std::ffi::c::ULong) -> std::ffi::c::LongLong
+private extern c fn rl_toolchain(buf: std::ffi::c::Ptr[std::ffi::c::Void] write noescape, cap: std::ffi::c::ULong) -> std::ffi::c::LongLong
+
+# A call of the unit's that failed: the operation and the unit's code (-1 a
+# stale handle, -2 a full store, -4 a refusal, -5 an argument out of range,
+# -90001 a panic the unit caught).
+error Failed:
+    operation: str
+    code: int
+
+# The unit's error codes.
+fn stale() -> int:
+    -1
+
+fn full() -> int:
+    -2
+
+fn refused() -> int:
+    -4
+
+fn panicked() -> int:
+    -90001
+
+# What the notification boundary answers where nothing defines
+# botlish_event_post2 (packages/http/native/src/notify.c's -ENOSYS).
+fn not_implemented() -> int:
+    -38
+
+private nomethod fn cll(x: int) -> std::ffi::c::LongLong:
+    if x < -9223372036854775808:
+        -9223372036854775808
+    elif x > 9223372036854775807:
+        9223372036854775807
+    else:
+        x
+
+private nomethod fn checked(operation: str, r: int) -> int errors Failed:
+    if r < 0:
+        fail Failed {operation: operation, code: r}
+    r
+
+# A store the unit holds: its owner closes it (rl_close) where the owner's
+# scope ends, or when closed explicitly; the identity is what the
+# operations take, and is stale once its store is closed.
+opaque resource struct StoreOwner:
+    handle: int
+
+opaque struct Store:
+    handle: int
+
+struct Opened:
+    owner: StoreOwner
+    store: Store
+
+cleanup fn close(owner: StoreOwner):
+    {handle} = owner
+    rl_close(cll(handle))
+
+# The unit's ABI version.
+fn version() -> int:
+    rl_version()
+
+# Open a store of at most CAPACITY items.
+fn open(capacity: int) -> Opened errors Failed:
+    h = checked("open", rl_open(cll(capacity)))
+    Opened {owner: StoreOwner {handle: h}, store: Store {handle: h}}
+
+# Add a copy of DATA to S: its item count after.
+fn put(s: Store, data: std::abi::bytes::Bytes) -> int errors Failed:
+    checked("put", cll(s.handle).rl_put(data, std::abi::bytes::length(data).value))
+
+fn put_text(s: Store, text: str) -> int errors Failed:
+    s.put(std::abi::bytes::from_list(std::str::encode_utf8(text)))
+
+private nomethod fn text_of(data: std::abi::bytes::Bytes) -> str:
+    std::abi::bytes::decode_utf8(data):
+        on InvalidUtf8:
+            "(not UTF-8)"
+
+private nomethod fn prefix(buf: std::abi::bytes::MutableBytes, n: int) -> std::abi::bytes::Bytes errors Failed:
+    count = std::abi::usize(n):
+        on std::abi::AbiIntegerBelowRange:
+            fail Failed {operation: "copy", code: n}
+        on std::abi::AbiIntegerAboveRange:
+            fail Failed {operation: "copy", code: n}
+    buf.freeze_prefix(count):
+        on UpperOverrun:
+            fail Failed {operation: "copy", code: n}
+
+# S's summary, as the unit formats it.
+fn digest(s: Store) -> str errors Failed:
+    r = cll(s.handle).rl_digest(std::abi::bytes::zeroed(std::abi::usize(256)), 256)
+    n = checked("digest", r.result)
+    if n > 256:
+        fail Failed {operation: "digest", code: n}
+    text_of(prefix(r.buf, n))
+
+# What the unit answers for a failure of KIND (0 a refusal, 1 and 2 a panic
+# inside the unit, caught there): its code.
+fn failure(s: Store, kind: int) -> int:
+    cll(s.handle).rl_fail(cll(kind))
+
+# Called back by the unit for each item: Botlish code (allocating) between
+# the unit's frames.
+callback c fn weigh(index: std::ffi::c::LongLong, length: std::ffi::c::LongLong) -> std::ffi::c::LongLong:
+    label = "item-".concat(std::int::to_string(index))
+    cll(std::str::length(label) + length)
+
+# The sum, over S's items, of what the callback answered.
+fn weight(s: Store) -> int errors Failed:
+    cb = std::ffi::c::callback(weigh)
+    checked("each", cll(s.handle).rl_each(cb))
+
+# Post A to endpoint EP of loop LP with the tag (SLOT, GEN) from a thread of
+# the unit's: what the post answered (not_implemented() where no provider
+# of botlish_event_post2 is linked).
+fn notify(lp: int, ep: int, slot: int, gen: int, a: int) -> int:
+    cll(lp).rl_notify(cll(ep), cll(slot), cll(gen), cll(a))
+
+struct Stats:
+    open: int
+    opened: int
+    allocations: int
+    frees: int
+    live_bytes: int
+    panics: int
+    last_panic_length: int
+
+layout StatsRecord:
+    size 64
+    align 8
+    field values: array 8 of std::binary::I64 at 0
+
+# The unit's counters (its allocator's are the unit's own Rust heap only).
+fn stats() -> Stats errors Failed:
+    r = std::abi::bytes::zeroed(std::abi::usize(64)).rl_stats(64)
+    checked("stats", r.result)
+    rec = std::binary::parse(StatsRecord, std::abi::bytes::freeze(r.buf)):
+        on LayoutLengthMismatch:
+            fail Failed {operation: "stats", code: r.result}
+    v = rec.values
+    fn at_v(i: int) -> int:
+        v.at(i):
+            on IndexNotFound:
+                -1
+    Stats {open: at_v(0), opened: at_v(1), allocations: at_v(2), frees: at_v(3), live_bytes: at_v(4), panics: at_v(5), last_panic_length: at_v(6)}
+
+# The version of the rustc that built the unit.
+fn toolchain() -> str errors Failed:
+    r = std::abi::bytes::zeroed(std::abi::usize(128)).rl_toolchain(128)
+    n = checked("toolchain", r.result)
+    if n > 128:
+        fail Failed {operation: "toolchain", code: n}
+    text_of(prefix(r.buf, n))

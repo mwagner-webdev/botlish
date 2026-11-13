@@ -512,6 +512,199 @@ test pn-inspect-foreign-formats {objects of other targets are recognized for wha
         $refused $message [dict get [pm::native::ArchiveFacts macos-aarch64 [pm::binary::inspect [readBytes $mac] mac] libmac.a] objects]
 } -cleanup cleanup -result {{an ar archive of 1 ELF AArch64 object} {an ar archive of 1 Mach-O arm64 object} 1 {libarm.a holds members that are not linux-x86_64 objects: arm_value.o: ELF AArch64 object} 1}
 
+# Archive symbol indexes (HTTP-MACOS-RUST-ARCHIVE-LINK-FEASIBILITY-
+# MILESTONE-1.md, section 5; the SQLite package's finding F-16: Apple ar's
+# `__.SYMDEF SORTED` index read as no names, so `native add -symbol` and
+# every view refused a macOS archive's declared symbols). The synthetic
+# archives below are written byte by byte, independently of
+# pm/binary.tcl's reader and of any toolchain: an ar member header, Apple's
+# BSD long-name form (#1/LEN, the name first in the body, NUL-padded),
+# cctools' ranlib index (little-endian: the ranlib array's byte size,
+# {string offset, member offset} pairs, the string table's byte size, the
+# strings; __.SYMDEF_64 the same in 64-bit fields), GNU's index (a
+# big-endian count, offsets, names), and members that are minimal objects:
+# a Mach-O arm64 MH_OBJECT header with no load commands, and bytes of no
+# known format.
+proc arHeader {name size} {
+    format "%-16s%-12s%-6s%-6s%-8s%-10s`\n" $name 0 0 0 644 $size
+}
+
+# A minimal Mach-O arm64 object: its header and nothing else.
+proc machoObject {} {
+    binary format iiiiiiii 0xfeedfacf 0x0100000c 0 1 0 0 0 0
+}
+
+# An archive whose first member is a symbol index of FORM (`__.SYMDEF`,
+# `__.SYMDEF SORTED`, `__.SYMDEF_64`, `gnu`) over MEMBERS ({NAME BODY ...},
+# each a BSD long-name member, or GNU's short form for `gnu`) and ENTRIES
+# ({SYMBOL MEMBER-INDEX ...}; a MEMBER-INDEX of "self" names the index
+# member, "at N" a raw offset). TAMPER rewrites the index body: a script
+# with the variable `body` (the index member's body after its name).
+proc indexedArchive {form members entries {tamper ""}} {
+    set wide [string match __.SYMDEF_64* $form]
+    set w [expr {$wide ? 8 : 4}]
+    set f [expr {$wide ? "w" : "i"}]
+    # The members' bodies, then the index, whose size the offsets depend on:
+    # computed with a placeholder of the final size (offsets are fixed-width).
+    set strings ""
+    set strx {}
+    foreach {symbol -} $entries {
+        lappend strx [string length $strings]
+        append strings $symbol\x00
+    }
+    while {[string length $strings] % 4} { append strings \x00 }
+    set count [expr {[llength $entries] / 2}]
+    if {$form eq "gnu"} {
+        set indexSize [expr {4 + 4 * $count + [string length $strings]}]
+        set indexName /
+    } else {
+        set nameField [string length $form]
+        set nameField [expr {($nameField + 3) / 4 * 4 + 4}]
+        set indexSize [expr {$nameField + $w + 2 * $w * $count + $w + [string length $strings]}]
+        set indexName "#1/$nameField"
+    }
+    set indexSize [expr {$indexSize + ($indexSize % 2)}]
+    set offsets {}
+    set at [expr {8 + 60 + $indexSize}]
+    foreach {name body} $members {
+        lappend offsets $at
+        if {$form eq "gnu"} {
+            set size [string length $body]
+        } else {
+            set nl [expr {([string length $name] + 3) / 4 * 4 + 4}]
+            set size [expr {$nl + [string length $body]}]
+        }
+        set at [expr {$at + 60 + $size + ($size % 2)}]
+    }
+    set resolved {}
+    foreach {symbol which} $entries {
+        if {$which eq "self"} {
+            lappend resolved 8
+        } elseif {[lindex $which 0] eq "at"} {
+            lappend resolved [lindex $which 1]
+        } else {
+            lappend resolved [lindex $offsets $which]
+        }
+    }
+    if {$form eq "gnu"} {
+        set body [binary format I $count]
+        foreach o $resolved { append body [binary format I $o] }
+        append body $strings
+    } else {
+        set body [binary format $f [expr {2 * $w * $count}]]
+        foreach x $strx o $resolved { append body [binary format $f$f $x $o] }
+        append body [binary format $f [string length $strings]] $strings
+    }
+    if {$tamper ne ""} {
+        eval $tamper
+    }
+    if {$form eq "gnu"} {
+        set member $body
+    } else {
+        set member [binary format a${nameField} $form]$body
+    }
+    while {[string length $member] < $indexSize} { append member \x00 }
+    set data "!<arch>\n[arHeader $indexName [string length $member]]$member"
+    foreach {name body} $members {
+        if {$form eq "gnu"} {
+            set m $body
+            set header [arHeader $name/ [string length $m]]
+        } else {
+            set nl [expr {([string length $name] + 3) / 4 * 4 + 4}]
+            set m [binary format a$nl $name]$body
+            set header [arHeader "#1/$nl" [string length $m]]
+        }
+        append data $header $m
+        if {[string length $m] % 2} { append data \n }
+    }
+    return $data
+}
+
+test pn-index-bsd-forms {Apple's index forms are read -- __.SYMDEF, __.SYMDEF SORTED, __.SYMDEF_64 -- and GNU's beside them: the names of a Mach-O member lose their leading underscore (the C names), another member's are kept as written; the index is sorted and unique, the same on every reading} -body {
+    set members [list a.o [machoObject] b.o [machoObject] data.txt "plain bytes\n"]
+    set entries [list _mac_value 0 _mac_other 0 _second_fn 1 _mac_value 0 _kept_as_written 2]
+    set out {}
+    foreach form {__.SYMDEF {__.SYMDEF SORTED} __.SYMDEF_64 gnu} {
+        set data [indexedArchive $form $members $entries]
+        set facts [pm::binary::inspect $data lib.a]
+        lappend out [dict get $facts index]
+        lappend out [expr {$facts eq [pm::binary::inspect $data lib.a]}]
+    }
+    set out
+} -result {{_kept_as_written mac_other mac_value second_fn} 1 {_kept_as_written mac_other mac_value second_fn} 1 {_kept_as_written mac_other mac_value second_fn} 1 {_kept_as_written mac_other mac_value second_fn} 1}
+
+test pn-index-bsd-symbols-checked {a macOS archive's declared symbols are checked against its BSD index, as a Linux archive's against GNU's: present ones are accepted, a missing one is refused naming it; an archive with no index defines nothing} -body {
+    set data [indexedArchive {__.SYMDEF SORTED} [list a.o [machoObject]] [list _mac_value 0 _mac_other 0]]
+    pm::authoring
+    set facts [pm::author::LibraryFacts macos-aarch64 $data libmac.a]
+    set library [dict create name mac linkage static symbols {mac_value mac_other}]
+    set accepted [dict get [pm::native::CheckBundled macos-aarch64 $library $data libmac.a] symbols]
+    dict set library symbols {mac_value mac_absent}
+    set refused [list [catch {pm::native::CheckBundled macos-aarch64 $library $data libmac.a} message] $message]
+    set bare "!<arch>\n[arHeader #1/4 [expr {4 + [string length [machoObject]]}]]a.o\x00[machoObject]"
+    list [dict get $facts symbols] $accepted $refused [dict get [pm::binary::inspect $bare bare.a] index]
+} -result {{mac_other mac_value} {mac_other mac_value} {1 {libmac.a: library mac does not define the declared symbol mac_absent (its archive index)}} {}}
+
+test pn-index-bsd-malformed {a malformed BSD or GNU index is {PM BINARY} naming what is wrong -- never read as fewer names: a ranlib array not of whole pairs, a string table past the index, a string offset outside it, an unterminated name, a member offset where no member begins, the index naming itself} -body {
+    set members [list a.o [machoObject]]
+    set entries [list _mac_value 0]
+    set cases [list \
+        pairs {set body [binary format i 12][string range $body 4 end]} \
+        strings {set body [string range $body 0 11][binary format i 4096][string range $body 16 end]} \
+        strx {set body [string range $body 0 3][binary format i 999][string range $body 8 end]} \
+        unterminated {set body [string map [list _mac_value\x00\x00 _mac_valueXX] $body]}]
+    set out {}
+    foreach {what tamper} $cases {
+        set data [indexedArchive __.SYMDEF $members $entries $tamper]
+        lappend out $what [catch {pm::binary::inspect $data lib.a} message opts] [dict get $opts -errorcode]
+        lappend out [regexp -inline {ranlib array of 12 bytes|string table of 4096 bytes|string offset 999|unterminated string} $message]
+    }
+    foreach {what form which} {nowhere __.SYMDEF {at 13} self __.SYMDEF self gnu-nowhere gnu {at 13}} {
+        set data [indexedArchive $form $members [list _mac_value $which]]
+        lappend out $what [catch {pm::binary::inspect $data lib.a} message opts] [dict get $opts -errorcode]
+        lappend out [regexp -inline {names _mac_value at offset [0-9]+, where no member of it begins} $message]
+    }
+    set out
+} -result {pairs 1 {PM BINARY} {{ranlib array of 12 bytes}} strings 1 {PM BINARY} {{string table of 4096 bytes}} strx 1 {PM BINARY} {{string offset 999}} unterminated 1 {PM BINARY} {{unterminated string}} nowhere 1 {PM BINARY} {{names _mac_value at offset 13, where no member of it begins}} self 1 {PM BINARY} {{names _mac_value at offset 8, where no member of it begins}} gnu-nowhere 1 {PM BINARY} {{names _mac_value at offset 13, where no member of it begins}}}
+
+testConstraint llvmDarwinAr [expr {[auto_execok clang] ne "" && [auto_execok llvm-ar] ne ""}]
+
+test pn-index-llvm-darwin {an archive written by llvm-ar --format=darwin (an independent producer of Apple's format) of clang's Mach-O objects: its index is its external symbols, private externs included (a static link resolves them), its locals not} -constraints llvmDarwinAr -body {
+    set dir [fresh bin]
+    writeText [file join $dir a.c] "int mac_value(void) { return 1; }\nstatic int local_one(void) { return 2; }\n__attribute__((visibility(\"hidden\"))) int mac_hidden(void) { return local_one(); }\n"
+    writeText [file join $dir b.c] "int second_fn(void) { return 3; }\n"
+    foreach f {a b} {
+        exec clang --target=arm64-apple-macos11 -c [file join $dir $f.c] -o [file join $dir $f.o]
+    }
+    exec llvm-ar --format=darwin rcs [file join $dir libmac.a] [file join $dir a.o] [file join $dir b.o]
+    set facts [pm::binary::inspect [readBytes [file join $dir libmac.a]] libmac.a]
+    list [lmap m [dict get $facts members] {dict get $m kind}] [dict get $facts index]
+} -cleanup cleanup -result {{symbols macho macho} {mac_hidden mac_value second_fn}}
+
+testConstraint appleAr [expr {[string match macos-* [core::cabi::hostTarget]] && [auto_execok cc] ne ""
+    && [auto_execok ar] ne "" && [auto_execok libtool] ne "" && [auto_execok nm] ne ""}]
+
+test pn-index-apple {Apple's own archives -- ar rcs (its ranlib's __.SYMDEF SORTED) and libtool -static -- read as the external symbols nm lists for their members, with a member of another name length (#1/LEN) and an empty object beside them} -constraints appleAr -body {
+    set dir [fresh bin]
+    writeText [file join $dir a.c] "int mac_value(void) { return 1; }\nint mac_other(void) { return 2; }\nstatic int local_one(void) { return 3; }\nint use_local(void) { return local_one(); }\n"
+    writeText [file join $dir bb_long_member_name.c] "long long second_fn(long long x) { return x + 1; }\n"
+    writeText [file join $dir e.c] "/* no symbols */\n"
+    foreach f {a bb_long_member_name e} {
+        exec cc -c [file join $dir $f.c] -o [file join $dir $f.o]
+    }
+    set objects [lmap f {a bb_long_member_name e} {file join $dir $f.o}]
+    exec ar rcs [file join $dir libar.a] {*}$objects 2>@1
+    exec libtool -static -no_warning_for_no_symbols -o [file join $dir libtool.a] {*}$objects 2>@1
+    set out {}
+    foreach lib {libar.a libtool.a} {
+        set facts [pm::binary::inspect [readBytes [file join $dir $lib]] $lib]
+        set nm [lsort -unique [lmap s [split [exec nm -g -U -j {*}$objects 2>/dev/null] \n] {
+            expr {[string match _* $s] ? [string range $s 1 end] : [continue]}}]]
+        lappend out [lindex [dict get $facts members] 0 name] [dict get $facts index] [expr {[dict get $facts index] eq $nm}]
+    }
+    set out
+} -cleanup cleanup -result {{__.SYMDEF SORTED} {mac_other mac_value second_fn use_local} 1 {__.SYMDEF SORTED} {mac_other mac_value second_fn use_local} 1}
+
 test pn-inspect-windows {MinGW-w64's DLL, its import library and an MSVC-style short-import library are read for what they are: a DLL's exports and imports, an import library naming its DLL -- refused as a static archive, accepted as the DLL's import library} -constraints {mingw} -body {
     set dir [fresh bin]
     writeText [file join $dir w.c] "__declspec(dllexport) int w_value(void) { return 5; }\n"

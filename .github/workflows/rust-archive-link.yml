@@ -1,0 +1,450 @@
+name: rust archive link
+
+# A Rust native unit beside the Botlish runtime's own Rust, on Linux x86-64
+# and macOS arm64 (HTTP-MACOS-RUST-ARCHIVE-LINK-FEASIBILITY-MILESTONE-1.md):
+#
+#   experiments   per host: the archive index tests (tests/package-native.test
+#                 pn-index-*: on macOS Apple's own ar and libtool), the
+#                 fixture's tests (tests/rust-archive-link.test) and the
+#                 whole matrix (audit/rust-archive-link/tools/experiments.tcl:
+#                 raw and localized units, both notification objects, the
+#                 unit built by the runtime's rustc and by the pinned 1.97.0,
+#                 both programs, both Botlish linkers), the localized
+#                 archive's and an executable's Mach-O facts
+#   http-unit     per host: the real http unit (packages/http/native)
+#                 localized and linked beside the runtime by a probe program
+#                 (audit/rust-archive-link/tools/http-unit.tcl; on macOS from
+#                 a copy with one portability change)
+#   units         per host, twice on two runners: the release archives
+#                 (audit/rust-archive-link/tools/release-unit.tcl, rustc
+#                 1.97.0, fresh target directory)
+#   package       one multi-target artifact packed from each runner's set
+#                 (audit/rust-archive-link/tools/pack.sh, each packed twice);
+#                 the archives and the artifacts compared
+#   reproducible  fails unless both sets and both artifacts are identical
+#   compiler-*    this commit's packaged compilers: the single-file compiler
+#                 (Linux) and Botlish.app (macOS)
+#   consumer-*    a fresh runner with no checkout, no Rust and no cargo: the
+#                 artifact installed, both programs compiled with the
+#                 packaged compiler and run (audit/rust-archive-link/
+#                 cleanroom/consumer.sh)
+
+on:
+  push:
+    paths:
+      - "tools/rust-unit.tcl"
+      - "tools/http-package.tcl"
+      - "pm/binary.tcl"
+      - "pm/native.tcl"
+      - "audit/rust-archive-link/**"
+      - "tests/rust-archive-link.test"
+      - "tests/package-native.test"
+      - "packages/http/native/**"
+      - ".github/workflows/rust-archive-link.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push (or run on the same ref) cancels the running one, on main
+# too (CI-RUNS.md).
+concurrency:
+  group: rust-archive-link-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  # The unit's pinned toolchain: the author image's (tools/package-build/
+  # Dockerfile). The runners' stable toolchain builds the Botlish runtime.
+  UNIT_RUST: "1.97.0"
+
+jobs:
+  experiments:
+    name: experiments (${{ matrix.host }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - host: linux-x86_64
+            os: ubuntu-24.04
+          - host: macos-aarch64
+            os: macos-15
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Host
+        run: |
+          uname -a
+          if [[ $(uname -s) == Darwin ]]; then
+            sw_vers
+            echo "Xcode: $(xcode-select -p), SDK $(xcrun --show-sdk-version)"
+            [[ $(uname -m) == arm64 ]] || { echo "::error::not an arm64 macOS runner"; exit 1; }
+            [[ $(sysctl -n sysctl.proc_translated 2>/dev/null || echo 0) != 1 ]] || { echo "::error::running under Rosetta"; exit 1; }
+          fi
+
+      - name: Install prerequisites (Linux)
+        if: runner.os == 'Linux'
+        run: bash .devcontainer/setup.sh
+
+      - name: Install prerequisites (macOS)
+        if: runner.os == 'macOS'
+        uses: ./.github/actions/setup-macos
+
+      - name: The unit's pinned toolchain
+        run: rustup toolchain install "$UNIT_RUST" --profile minimal
+
+      - name: Build native (Cranelift) backend
+        uses: ./.github/actions/build-native
+
+      - name: Toolchains
+        run: |
+          echo "runtime: $(rustc --version)"
+          echo "unit:    $(rustc +"$UNIT_RUST" --version)"
+          cc --version | head -2
+          if [[ $(uname -s) == Darwin ]]; then ld -v 2>&1 | head -3; xcodebuild -version; else ld --version | head -1; fi
+
+      - name: Archive symbol indexes (F-16)
+        run: tclsh9.0 tests/package-native.test -tmpdir "$RUNNER_TEMP/pn" -match 'pn-index-*' -verbose bpe
+
+      - name: The Rust fixture's tests
+        run: tclsh9.0 tests/rust-archive-link.test -tmpdir "$RUNNER_TEMP/ral" -verbose bpe
+
+      - name: The matrix
+        if: ${{ !cancelled() }}
+        run: |
+          tclsh9.0 audit/rust-archive-link/tools/experiments.tcl "$RUNNER_TEMP/experiments" -toolchain2 "$UNIT_RUST"
+          {
+            echo "### Rust archive link matrix (${{ matrix.host }})"
+            echo '```'
+            cut -c1-220 "$RUNNER_TEMP/experiments/results.tsv"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Mach-O facts of the localized archive and an executable
+        if: ${{ !cancelled() && runner.os == 'macOS' }}
+        run: |
+          out="$RUNNER_TEMP/experiments/macho"
+          mkdir -p "$out"
+          tclsh9.0 - "$out" <<'EOF' 2>&1 | tee "$out/facts.txt"
+          source audit/rust-archive-link/tools/rustlink.tcl
+          set out [lindex $argv 0]
+          set raw [rustlink::unit -notify weakref]
+          set loc [rustlink::localized $raw -out [file join $out librustlink.a]]
+          puts "== raw [file size $raw] bytes, localized [file size [file join $out librustlink.a]] bytes"
+          set app [rustlink::app [file join $out app] [file join $out librustlink.a] [rustlink::provider]]
+          foreach linker {rustc system} {
+              set l [rustlink::link $app with_provider.bot -linker $linker]
+              file rename -force [dict get $l exe] [file join $out with_provider-$linker]
+              puts "== linked with $linker: [file join $out with_provider-$linker]"
+          }
+          EOF
+          cd "$out"
+          echo "== ar members and index"; ar -t librustlink.a; nm -s librustlink.a 2>/dev/null | sed -n '/Archive index/,/^$/p' | head -20
+          echo "== nm -m: external definitions"; nm -m librustlink.a | grep -v undefined | grep ' external ' | grep -v 'non-external\|private external'
+          echo "== nm -m: weak or undefined Rust and integration symbols"; nm -m librustlink.a | grep -E 'botlish_event_post2|rust_eh_personality|___rust_alloc$' || true
+          echo "== nm -m: counts"; nm -m librustlink.a | awk '{for(i=1;i<=NF;i++) if ($i=="external") {k=$(i-1); print (k=="private"||k=="non-") ? k"external" : "external"}}' | sort | uniq -c
+          echo "== otool -hv (the member)"; otool -hv librustlink.a | head -8
+          for exe in with_provider-rustc with_provider-system; do
+            echo "== $exe"; file "$exe"; otool -L "$exe"
+            echo "personality:"; nm "$exe" | grep -E ' _rust_eh_personality$'
+            echo "allocator shims:"; nm "$exe" | grep -E '_7___rustc12___rust_alloc$'
+            echo "exports trie (the unit's and Rust's):"; dyld_info -exports "$exe" 2>/dev/null | grep -cE '_rl_|_RNv|_ZN' || true
+            dyld_info -exports "$exe" 2>/dev/null | grep -E '_rl_' | head -12
+            echo "unwind info:"; otool -l "$exe" | grep -A3 '__unwind_info' | head -4
+          done
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: experiments-${{ matrix.host }}
+          path: |
+            ${{ runner.temp }}/experiments/results.tsv
+            ${{ runner.temp }}/experiments/surfaces.txt
+            ${{ runner.temp }}/experiments/logs
+            ${{ runner.temp }}/experiments/macho/facts.txt
+          if-no-files-found: warn
+
+  http-unit:
+    name: http unit (${{ matrix.host }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - host: linux-x86_64
+            os: ubuntu-24.04
+          - host: macos-aarch64
+            os: macos-15
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install prerequisites (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          bash .devcontainer/setup.sh
+          command -v ninja || sudo apt-get install -y ninja-build
+
+      - name: Install prerequisites (macOS)
+        if: runner.os == 'macOS'
+        uses: ./.github/actions/setup-macos
+
+      - name: Ninja (macOS)
+        if: runner.os == 'macOS'
+        run: command -v ninja || brew install ninja
+
+      - name: The unit's pinned toolchain
+        run: rustup toolchain install "$UNIT_RUST" --profile minimal
+
+      - name: Build native (Cranelift) backend
+        uses: ./.github/actions/build-native
+
+      - name: The http unit, localized and linked
+        run: |
+          tclsh9.0 audit/rust-archive-link/tools/http-unit.tcl "$RUNNER_TEMP/http" -toolchain "$UNIT_RUST"
+          {
+            echo "### http unit (${{ matrix.host }})"
+            echo '```'
+            cut -c1-300 "$RUNNER_TEMP/http/RESULTS.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          grep -q $'^surface-equals-abi\t1' "$RUNNER_TEMP/http/RESULTS.txt"
+          grep -q $'^link-rustc\tok.*verdict\tpass' "$RUNNER_TEMP/http/RESULTS.txt"
+          grep -q $'^link-system\tok.*verdict\tpass' "$RUNNER_TEMP/http/RESULTS.txt"
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: http-unit-${{ matrix.host }}
+          path: |
+            ${{ runner.temp }}/http/RESULTS.txt
+            ${{ runner.temp }}/http/probe/probe.bot
+          if-no-files-found: warn
+
+  units:
+    name: release unit (${{ matrix.host }}, build ${{ matrix.replica }})
+    strategy:
+      fail-fast: false
+      matrix:
+        host: [linux-x86_64, macos-aarch64]
+        replica: [a, b]
+        include:
+          - host: linux-x86_64
+            os: ubuntu-24.04
+          - host: macos-aarch64
+            os: macos-15
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install prerequisites (Linux)
+        if: runner.os == 'Linux'
+        run: bash .devcontainer/setup.sh
+
+      - name: Install prerequisites (macOS)
+        if: runner.os == 'macOS'
+        uses: ./.github/actions/setup-macos
+
+      - name: The unit's pinned toolchain
+        run: rustup toolchain install "$UNIT_RUST" --profile minimal
+
+      - name: Build the release archives
+        run: |
+          tclsh9.0 audit/rust-archive-link/tools/release-unit.tcl "$RUNNER_TEMP/unit" -toolchain "$UNIT_RUST"
+          echo "runner: $(uname -n), image ${ImageOS:-?} ${ImageVersion:-?}" | tee -a "$RUNNER_TEMP/unit/RECORD.txt"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: unit-${{ matrix.host }}-${{ matrix.replica }}
+          path: ${{ runner.temp }}/unit
+          if-no-files-found: error
+
+  package:
+    name: package (both targets, from each build)
+    needs: units
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install prerequisites
+        run: bash .devcontainer/setup.sh
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: unit-*
+          path: units
+
+      - name: Pack from build a, then from build b (each packed twice)
+        run: |
+          for r in a b; do
+            audit/rust-archive-link/tools/pack.sh "$RUNNER_TEMP/pack-$r" \
+              linux-x86_64=units/unit-linux-x86_64-$r macos-aarch64=units/unit-macos-aarch64-$r 2>&1 | tee "pack-$r.log"
+          done
+
+      - name: Compare the builds and the artifacts
+        run: |
+          {
+            echo "### Reproducibility"
+            for t in linux-x86_64 macos-aarch64; do
+              for f in librustlink.a librustlink_provider.a; do
+                a=$(sha256sum < "units/unit-$t-a/$f" | cut -c1-64); b=$(sha256sum < "units/unit-$t-b/$f" | cut -c1-64)
+                echo "- $t $f: a $a, b $b: $([ "$a" = "$b" ] && echo identical || echo DIFFERENT)"
+              done
+            done
+            a=$(sha256sum < "$RUNNER_TEMP/pack-a/rustlink-0.1.0.botpkg" | cut -c1-64); b=$(sha256sum < "$RUNNER_TEMP/pack-b/rustlink-0.1.0.botpkg" | cut -c1-64)
+            echo "- rustlink-0.1.0.botpkg: from a $a, from b $b: $([ "$a" = "$b" ] && echo identical || echo DIFFERENT)"
+            echo "- each set packed twice: byte-identical (pack.sh's cmp)"
+          } | tee reproducibility.md >> "$GITHUB_STEP_SUMMARY"
+          for t in linux-x86_64 macos-aarch64; do
+            for r in a b; do echo "== $t $r"; cat "units/unit-$t-$r/RECORD.txt"; done
+          done
+
+      - name: The consumer's kit
+        run: |
+          mkdir -p kit/consumer
+          cp audit/rust-archive-link/consumer/*.bot audit/rust-archive-link/consumer/*.expected kit/consumer/
+          cp audit/rust-archive-link/cleanroom/consumer.sh kit/
+          cp "$RUNNER_TEMP/pack-a/rustlink-0.1.0.botpkg" kit/
+          cp reproducibility.md kit/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rustlink-package
+          path: |
+            kit
+            pack-a.log
+            pack-b.log
+          if-no-files-found: error
+
+  reproducible:
+    name: reproducible (both builds, both artifacts identical)
+    needs: package
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: rustlink-package
+          path: pkg
+      - run: |
+          cat pkg/kit/reproducibility.md
+          if grep -q DIFFERENT pkg/kit/reproducibility.md; then
+            echo "::error::the independent builds or the artifacts differ"
+            exit 1
+          fi
+
+  compiler-linux:
+    name: single-file compiler (linux-x86_64)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install prerequisites
+        run: bash .devcontainer/setup.sh
+      - name: Build native (Cranelift) backend
+        uses: ./.github/actions/build-native
+      - name: Cache the static Tcl build (single/basekit.sh)
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/botlish-single
+          key: single-basekit-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('single/build.sh', 'single/basekit.sh') }}
+      - name: Build the single executable
+        run: single/build.sh -o dist/botlish
+      - uses: actions/upload-artifact@v4
+        with:
+          name: compiler-linux-x86_64
+          path: dist/botlish
+          if-no-files-found: error
+
+  compiler-macos:
+    name: Botlish.app (macos-aarch64)
+    runs-on: macos-15
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install prerequisites (Tcl 9.0.1, stable Rust)
+        uses: ./.github/actions/setup-macos
+      - name: Build native (Cranelift) backend
+        uses: ./.github/actions/build-native
+      - name: Cache the Tcl.framework build
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/botlish-app
+          key: app-tcl-framework-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('single/macos/tcl-framework.sh', 'single/build.sh') }}
+      - name: Build Botlish.app
+        run: single/macos/build.sh -o dist 2>&1 | tail -40
+      - uses: actions/upload-artifact@v4
+        with:
+          name: compiler-macos-aarch64
+          path: |
+            dist/botlish-macos-aarch64.zip
+            dist/botlish-macos-aarch64.zip.sha256
+          if-no-files-found: error
+
+  consumer-linux:
+    name: consumer, no checkout and no Rust (linux-x86_64)
+    needs: [package, compiler-linux]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: rustlink-package
+          path: pkg
+      - uses: actions/download-artifact@v4
+        with:
+          name: compiler-linux-x86_64
+          path: compiler
+      - name: Rust and cargo moved away
+        run: |
+          chmod +x compiler/botlish
+          mv ~/.cargo ~/.cargo.hidden 2>/dev/null || true
+          mv ~/.rustup ~/.rustup.hidden 2>/dev/null || true
+          ls -a "$GITHUB_WORKSPACE"
+      - name: The consumer (PATH /usr/bin:/bin)
+        run: |
+          env -i HOME="$HOME" PATH=/usr/bin:/bin LANG=C.UTF-8 \
+            bash pkg/kit/consumer.sh "$PWD/compiler/botlish" pkg/kit/rustlink-0.1.0.botpkg pkg/kit/consumer "$RUNNER_TEMP/consumer" 2>&1 | tee consumer-linux.log
+          grep -q '^CONSUMER OK$' consumer-linux.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: consumer-linux-x86_64
+          path: consumer-linux.log
+
+  consumer-macos:
+    name: consumer, no checkout and no Rust (macos-aarch64)
+    needs: [package, compiler-macos]
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: rustlink-package
+          path: pkg
+      - uses: actions/download-artifact@v4
+        with:
+          name: compiler-macos-aarch64
+          path: compiler
+      - name: Unpack Botlish.app; Rust and cargo moved away
+        run: |
+          (cd compiler && shasum -a 256 -c botlish-macos-aarch64.zip.sha256 && unzip -q botlish-macos-aarch64.zip)
+          mv ~/.cargo ~/.cargo.hidden 2>/dev/null || true
+          mv ~/.rustup ~/.rustup.hidden 2>/dev/null || true
+          ls -a "$GITHUB_WORKSPACE"
+      - name: The consumer (PATH /usr/bin:/bin:/usr/sbin:/sbin)
+        run: |
+          env -i HOME="$HOME" PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+            bash pkg/kit/consumer.sh "$PWD/compiler/Botlish.app/Contents/MacOS/botlish" pkg/kit/rustlink-0.1.0.botpkg pkg/kit/consumer "$RUNNER_TEMP/consumer" 2>&1 | tee consumer-macos.log
+          grep -q '^CONSUMER OK$' consumer-macos.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: consumer-macos-aarch64
+          path: consumer-macos.log

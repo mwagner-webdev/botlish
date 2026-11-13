@@ -1,0 +1,26 @@
+# rustlink::provider -- a minimal provider of botlish_event_post2
+# (audit/rust-archive-link/provider/provider.c): imported, it is linked, and
+# the Rust unit's posts reach it; not imported, nothing defines the symbol
+# and the unit's notification object answers on its own.
+#
+# A program calls one of its functions to use it: that call pulls the
+# provider's object, which also defines botlish_event_post2, out of its
+# archive (a weak reference pulls no member).
+
+import std::ffi::c
+
+extern c library "rustlink_provider" static at "native/librustlink_provider.a"
+
+private extern c fn rlp_posts() -> std::ffi::c::LongLong
+private extern c fn rlp_last(field: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+
+# How many posts reached the provider.
+fn posts() -> int:
+    rlp_posts()
+
+# The last post's arguments: 0 loop, 1 endpoint, 2 slot, 3 generation, 4 a,
+# 5 b (-1 for another field).
+fn last(field: int) -> int:
+    if field < 0 or field > 5:
+        return -1
+    rlp_last(field)
