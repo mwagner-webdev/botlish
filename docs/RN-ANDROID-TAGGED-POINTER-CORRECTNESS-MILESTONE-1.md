@@ -504,7 +504,7 @@ no failures, the skips host constraints):
 | Callbacks and floats | c-callbacks 40/42, c-float-ffi 37/37, raw-c-float-ffi 31/31 |
 | Libraries, linkers, executables | native-library 32/44, application-library 17/18, external-tools 49/49, system-linker 15/15, native-executable 20/20, aot-stub-linker 6/6, native-link-plan 34/37 |
 | Platforms and targets | target-model 25/25, windows-io 12/27, darwin-io 13/28, linux-syscall 37/37, abi-bytes 73/73, abi-mutable-bytes 76/76, context-affine 28/28 |
-| Android (NDK, runtime, qemu, three images, SDL3) | android-target: the whole file 30/31, its one failure at-tagged-pointers' own expectation (liblog's answer on API 21 and 24, section 15), then fixed; at-runtime-identity, at-application-run and the at-tagged-* tests 7/7 after; a full rerun pending |
+| Android (NDK, runtime, qemu, three images, SDL3) | android-target 32/32, none skipped (an earlier run's one failure was at-tagged-pointers' own expectation of liblog's answer on API 21 and 24, fixed before this run) |
 | Workloads | workload-icy-tower 25/43 (the 18 skips: macOS and Windows executables, release tooling), react-native-package 46/48 (the 2 skips: no prepared React Native app) |
 | Native unit tests | `cargo test --release -- address_word fingerprint target::` (the encoding, the fingerprints, the code-generation test) |
 | Catalogs, reference | `tools/mutant-catalogs.tcl` 0 problems; `tools/compilerpedia.tcl check` 0 problems (1298 topics, 776 examples) |
