@@ -1,0 +1,165 @@
+# Mutants of HTTP-MACOS-RUST-ARCHIVE-LINK-FEASIBILITY-MILESTONE-1.md
+# (audit/rust-archive-link/tools/mutate.tcl): deliberate breaks of the
+# Rust unit's localization (tools/rust-unit.tcl), of the package manager's
+# archive symbol index (pm/binary.tcl: the SQLite package's F-16) and of
+# the fixture's binding's ownership of a block the unit lends out. Each
+# must be killed by one of the tests its `!!` line names -- the test that
+# states the rule it breaks, never an unrelated failure.
+#
+#   @@ NAME DESCRIPTION
+#   !! TEST ...            the tests, one of which must fail
+#   %% FILE.test ...       the test files to run (default
+#                          tests/rust-archive-link.test)
+#   ?? HOST-GLOB           only on hosts whose target matches (linux-*,
+#                          macos-*); elsewhere reported as not for this host
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+
+# ---------------------------------------------------------------------------
+# Localization (tools/rust-unit.tcl)
+
+@@ elf-unlocalized ELF: objcopy keeps every global definition (no --keep-global-symbols): the unit's whole Rust standard library stays global beside the runtime's
+!! ral-localized-surface ral-localized-without_provider-rustc ral-localized-with_provider-rustc ral-localized-without_provider-system ral-localized-with_provider-system
+?? linux-*
+## tools/rust-unit.tcl
+<<<<
+            exec objcopy --strip-debug {*}$rename --keep-global-symbols=$keep $object
+====
+            exec objcopy --strip-debug {*}$rename $object
+>>>>
+
+@@ elf-comdat-kept ELF: Rust's personality-reference COMDAT group keeps its signature, which the final link deduplicates against the runtime's (the http census's B3)
+!! ral-localized-comdat
+?? linux-*
+## tools/rust-unit.tcl
+<<<<
+                lappend rename --redefine-sym $sig=[dict get $opts -label].$sig
+====
+                lappend rename
+>>>>
+
+@@ macho-unlocalized Mach-O: ld -r without the exported-symbols list: every global definition of the unit stays global
+!! ral-localized-surface ral-localized-without_provider-rustc ral-localized-with_provider-rustc ral-localized-without_provider-system ral-localized-with_provider-system
+?? macos-*
+## tools/rust-unit.tcl
+<<<<
+            exec ld -r -arch $arch -S -force_load $raw -exported_symbols_list $keep -o $object 2>@stderr
+====
+            exec ld -r -arch $arch -S -force_load $raw -o $object 2>@stderr
+>>>>
+
+@@ keep-everything every global definition matches the keep list: the localized archive is the raw one's surface
+!! ral-localized-surface ral-localized-without_provider-rustc ral-localized-with_provider-rustc ral-localized-without_provider-system ral-localized-with_provider-system
+## tools/rust-unit.tcl
+<<<<
+            if {[string match $g $name]} {
+====
+            if {1} {
+>>>>
+
+@@ require-ignored an export the unit was meant to have and does not passes the localizer (the consumer's link would find out)
+!! ral-require-missing-export
+## tools/rust-unit.tcl
+<<<<
+        if {$missing ne ""} {
+====
+        if {0} {
+>>>>
+
+@@ check-lenient the surface check accepts any archive
+!! ral-check-refuses-raw
+## tools/rust-unit.tcl
+<<<<
+    if {$have ne $want} {
+====
+    if {0} {
+>>>>
+
+# ---------------------------------------------------------------------------
+# The archive symbol index (pm/binary.tcl)
+
+@@ bsd-index-ignored Apple's BSD index is recognized but not read: a macOS archive defines nothing (F-16 again)
+!! pn-index-bsd-forms pn-index-bsd-symbols-checked pn-index-llvm-darwin pn-index-apple ral-native-add-symbols
+%% tests/package-native.test tests/rust-archive-link.test
+## pm/binary.tcl
+<<<<
+                lappend entries {*}[BsdIndex $body [string match __.SYMDEF_64* $name] "${label}($name)"]
+====
+>>>>
+
+@@ underscore-kept a Mach-O member's index names keep their leading underscore: the C name rl_open is never found (_rl_open is)
+!! pn-index-bsd-forms pn-index-bsd-symbols-checked pn-index-llvm-darwin pn-index-apple ral-native-add-symbols
+%% tests/package-native.test tests/rust-archive-link.test
+## pm/binary.tcl
+<<<<
+        if {[dict get $objects $offset] in {macho fat} && [string index $symbol 0] eq "_"} {
+====
+        if {0} {
+>>>>
+
+@@ underscore-always every index name loses a leading underscore, whatever its member: an ELF or unknown member's name is misread
+!! pn-index-bsd-forms
+%% tests/package-native.test
+## pm/binary.tcl
+<<<<
+        if {[dict get $objects $offset] in {macho fat} && [string index $symbol 0] eq "_"} {
+====
+        if {[string index $symbol 0] eq "_"} {
+>>>>
+
+@@ offset-unchecked an index entry naming no member is dropped instead of refused: a malformed index reads as fewer names
+!! pn-index-bsd-malformed
+%% tests/package-native.test
+## pm/binary.tcl
+<<<<
+        if {![dict exists $objects $offset]} {
+            Fail $label "its symbol index names $symbol at offset $offset, where no member of it begins"
+        }
+====
+        if {![dict exists $objects $offset]} {
+            continue
+        }
+>>>>
+
+@@ pairs-unchecked a ranlib array that is not whole pairs is read anyway
+!! pn-index-bsd-malformed
+%% tests/package-native.test
+## pm/binary.tcl
+<<<<
+    if {$size % (2 * $w) != 0} {
+====
+    if {0} {
+>>>>
+
+@@ strtab-unchecked a string table running past the index member is read as far as it goes
+!! pn-index-bsd-malformed
+%% tests/package-native.test
+## pm/binary.tcl
+<<<<
+    if {$strAt + $strSize > [string length $body]} {
+====
+    if {0} {
+>>>>
+
+# ---------------------------------------------------------------------------
+# Ownership across the boundary (audit/rust-archive-link/package/rustlink.bot)
+
+@@ block-freed-by-libc the binding gives the unit's block to libc's free instead of back to the unit: no crash (the unit's allocator is the system's underneath), and the unit's live heap never comes back
+!! ral-localized-without_provider-rustc ral-localized-with_provider-rustc ral-localized-without_provider-system ral-localized-with_provider-system
+## audit/rust-archive-link/package/rustlink.bot
+<<<<
+private extern c fn rl_text_free(p: std::ffi::c::Ptr[std::ffi::c::Void] noescape) -> std::ffi::c::LongLong
+====
+private extern c fn rl_text_free(p: std::ffi::c::Ptr[std::ffi::c::Void] noescape) -> std::ffi::c::LongLong
+private extern c fn free(p: std::ffi::c::Ptr[std::ffi::c::Void] noescape) -> unit
+>>>>
+<<<<
+    p.rl_text_free()
+====
+    free(p)
+    0
+>>>>

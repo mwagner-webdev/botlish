@@ -30,7 +30,7 @@ namespace eval rustlink {
     variable here [file dirname [file normalize [info script]]]
     variable fixture [file dirname $here]
     variable root [file dirname [file dirname $fixture]]
-    variable exports {rl_close rl_digest rl_each rl_fail rl_notify rl_open rl_put rl_stats rl_toolchain rl_version}
+    variable exports {rl_close rl_digest rl_each rl_fail rl_notify rl_open rl_put rl_stats rl_text_free rl_text_new rl_toolchain rl_version}
 }
 source [file join $rustlink::root tools rust-unit.tcl]
 

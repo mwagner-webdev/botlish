@@ -96,7 +96,7 @@ proc ralVerdict {c} {
 
 test ral-localized-surface {the localized archive's global definitions are exactly the unit's C ABI} -constraints rustlinkHost -body {
     rustunit::check [ralLocalized weakref] [rustlink::exports] -format [rustlink::format]
-} -result {rl_close rl_digest rl_each rl_fail rl_notify rl_open rl_put rl_stats rl_toolchain rl_version}
+} -result {rl_close rl_digest rl_each rl_fail rl_notify rl_open rl_put rl_stats rl_text_free rl_text_new rl_toolchain rl_version}
 
 test ral-localized-weak-reference {localization leaves the weak reference to botlish_event_post2 undefined for the final link} -constraints rustlinkHost -body {
     expr {"botlish_event_post2" in [rustunit::undefined [ralLocalized weakref] -format [rustlink::format]]}
@@ -106,6 +106,10 @@ test ral-raw-surface {the raw archive defines Rust's personality routine and all
     set g [rustunit::globals [ralUnit weakref] -format [rustlink::format]]
     list [expr {"rust_eh_personality" in $g}] [expr {[llength [lsearch -all -glob $g *___rust_alloc]] > 0}] [expr {[llength $g] > 1000}]
 } -result {1 1 1}
+
+test ral-check-refuses-raw {the surface check refuses the raw archive: thousands of global definitions besides the unit's C ABI} -constraints rustlinkHost -body {
+    rustunit::check [ralUnit weakref] [rustlink::exports] -format [rustlink::format]
+} -returnCodes error -match glob -result {*global definitions differ from the unit's exports: * more (*), 0 missing ()}
 
 test ral-require-missing-export {an export the unit was meant to have and does not is the localizer's error} -constraints rustlinkHost -body {
     rustlink::localized [ralUnit weakref] -require [list {*}[rustlink::exports] rl_absent] -out [file join [ralDir missing] librustlink.a]
@@ -117,6 +121,52 @@ test ral-kept-glob-misses {a keep list that misses an export leaves it local: a 
     list [expr {"rl_toolchain" in [rustunit::globals $archive -format [rustlink::format]]}] [ralVerdict $c] \
         [regexp {rl_toolchain} [dict get $c error]]
 } -result {0 {link failed} 1}
+
+test ral-localized-comdat {ELF: the localized unit's COMDAT group of Rust's personality reference is renamed, so the final link never merges it with the runtime's (the http census's B3)} -constraints rustlinkHost -body {
+    if {[rustlink::format] ne "elf"} {
+        return {botlish_rustlink.DW.ref.rust_eh_personality}
+    }
+    set groups [regexp -all -inline {COMDAT group section \[[^\]]*\] `[^']*' \[([^\]]+)\]} [exec readelf -g [ralLocalized weakref]]]
+    lsort -unique [lmap {- sig} $groups {set sig}]
+} -result {botlish_rustlink.DW.ref.rust_eh_personality}
+
+# The package manager's view of the localized archive: `native add` checks
+# each declared symbol against the archive's index (on macOS Apple's BSD
+# index, which it reads since this milestone: the SQLite package's F-16)
+# and refuses an archive of another target's objects.
+proc ralNativeAdd {archive target args} {
+    set dir [ralDir stage]
+    file mkdir $dir
+    set f [open [file join $dir botlish.json] w]
+    puts $f "{\n  \"schema\": 1,\n  \"name\": \"rustlink\",\n  \"version\": \"0.1.0\"\n}"
+    close $f
+    set here [pwd]
+    cd $dir
+    try {
+        set failed [catch {exec [info nameofexecutable] [file join $::projectRoot main.tcl] native add $archive \
+            -target $target -name rustlink {*}$args -license MIT 2>@1} out]
+    } finally {
+        cd $here
+    }
+    list $failed $out
+}
+
+test ral-native-add-symbols {native add verifies every C function the package declares against the localized archive's index, and refuses a misspelled one} -constraints rustlinkHost -body {
+    set archive [ralLocalized weakref]
+    set target [core::cabi::hostTarget]
+    set all {}
+    foreach s [rustlink::exports] { lappend all -symbol $s }
+    lassign [ralNativeAdd $archive $target {*}$all] failed out
+    lassign [ralNativeAdd $archive $target -symbol rl_open -symbol rl_opne] failed2 out2
+    list $failed [regexp {12 exported symbols; required by the package: rl_close, .*rl_version \(present\)} $out] \
+        $failed2 [regexp {does not define the declared symbol rl_opne} $out2]
+} -result {0 1 1 1}
+
+test ral-native-add-wrong-target {native add refuses the host's localized archive declared for the other operating system's target, naming the members' format} -constraints rustlinkHost -body {
+    set other [expr {[rustlink::format] eq "macho" ? "linux-x86_64" : "macos-aarch64"}]
+    lassign [ralNativeAdd [ralLocalized weakref] $other -symbol rl_open] failed out
+    list $failed [regexp "holds members that are not $other objects" $out]
+} -result {1 1}
 
 foreach linker {rustc system} {
     set constraints [list rustlinkHost [expr {$linker eq "rustc" ? "rustcLinkerBuilt" : "systemLinkerBuilt"}]]

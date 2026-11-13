@@ -32,6 +32,8 @@ private extern c fn rl_each(h: std::ffi::c::LongLong, cb: std::ffi::c::FnPtr[Fn{
 private extern c fn rl_notify(lp: std::ffi::c::LongLong, ep: std::ffi::c::LongLong, slot: std::ffi::c::LongLong, generation: std::ffi::c::LongLong, a: std::ffi::c::LongLong) -> std::ffi::c::LongLong
 private extern c fn rl_stats(buf: std::ffi::c::Ptr[std::ffi::c::Void] write noescape, cap: std::ffi::c::ULong) -> std::ffi::c::LongLong
 private extern c fn rl_toolchain(buf: std::ffi::c::Ptr[std::ffi::c::Void] write noescape, cap: std::ffi::c::ULong) -> std::ffi::c::LongLong
+private extern c fn rl_text_new(h: std::ffi::c::LongLong) -> std::ffi::c::Ptr[std::ffi::c::Void] independent
+private extern c fn rl_text_free(p: std::ffi::c::Ptr[std::ffi::c::Void] noescape) -> std::ffi::c::LongLong
 
 # A call of the unit's that failed: the operation and the unit's code (-1 a
 # stale handle, -2 a full store, -4 a refusal, -5 an argument out of range,
@@ -184,3 +186,12 @@ fn toolchain() -> str errors Failed:
     if n > 128:
         fail Failed {operation: "toolchain", code: n}
     text_of(prefix(r.buf, n))
+
+# Borrow a block the unit owns and give it back to the unit (its owner):
+# 0, or the unit's code. A block given to anyone else -- libc's free --
+# would leave the unit's live-byte counter short (stats().live_bytes).
+fn text_round(s: Store) -> int:
+    p = cll(s.handle).rl_text_new()
+    if std::ffi::c::null?(p):
+        return stale()
+    p.rl_text_free()

@@ -17,7 +17,12 @@
 //! * opaque state behind i64 handles (a slab with generations, as
 //!   botlish_http's exchanges), created and destroyed explicitly;
 //! * caller-lent buffers (`buf`, `cap`: a Botlish write exposure, valid for
-//!   one call) -- nothing the unit allocates is ever freed by anyone else;
+//!   one call), and one block the unit lends out and takes back
+//!   (`rl_text_new`, `rl_text_free`: the caller holds it as an affine
+//!   pointer and must give it back to the unit, never to libc's free --
+//!   which, the unit's allocator being the system's underneath, would not
+//!   crash but leave the unit's live-byte counter short: the violation is
+//!   observable, not undefined);
 //! * a synchronous C callback (a Botlish `callback c fn`), called with no
 //!   lock held;
 //! * the notification boundary: a foreign thread of the unit's calls
@@ -37,6 +42,8 @@
 //!   rl_notify(loop, ep, slot, gen, a) what the post returned (from a thread)
 //!   rl_stats(buf, cap)                bytes written: 8 i64s (see STATS)
 //!   rl_toolchain(buf, cap)            the rustc version's length (copied: min(cap))
+//!   rl_text_new(h)                    a 64-byte block the unit owns (null: stale)
+//!   rl_text_free(p)                   0: the block given back to the unit's allocator
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
@@ -379,4 +386,43 @@ pub unsafe extern "C" fn rl_stats(buf: *mut u8, cap: u64) -> i64 {
 #[no_mangle]
 pub unsafe extern "C" fn rl_toolchain(buf: *mut u8, cap: u64) -> i64 {
     guard(|| copy_out(env!("RUSTLINK_RUSTC").as_bytes(), buf, cap))
+}
+
+const TEXT_BLOCK: usize = 64;
+
+/// A block of TEXT_BLOCK bytes the unit allocates and owns, holding the
+/// start of store H's summary: the caller must give it back with
+/// rl_text_free. Null for a stale handle.
+#[no_mangle]
+pub extern "C" fn rl_text_new(h: i64) -> *mut u8 {
+    let mut block = Box::new([0u8; TEXT_BLOCK]);
+    let r = guard(|| {
+        let n = with_store(h, |s| s.items.len()).unwrap_or(usize::MAX);
+        if n == usize::MAX {
+            return ERR_STALE;
+        }
+        let text = format!("{n} items");
+        let k = text.len().min(TEXT_BLOCK);
+        block[..k].copy_from_slice(&text.as_bytes()[..k]);
+        0
+    });
+    if r != 0 {
+        return std::ptr::null_mut();
+    }
+    Box::into_raw(block).cast::<u8>()
+}
+
+/// Give back a block of rl_text_new's: 0, or ERR_ARGUMENT for null.
+///
+/// # Safety
+/// P must be a block rl_text_new returned and not given back since.
+#[no_mangle]
+pub unsafe extern "C" fn rl_text_free(p: *mut u8) -> i64 {
+    if p.is_null() {
+        return ERR_ARGUMENT;
+    }
+    guard(|| {
+        drop(Box::from_raw(p.cast::<[u8; TEXT_BLOCK]>()));
+        0
+    })
 }

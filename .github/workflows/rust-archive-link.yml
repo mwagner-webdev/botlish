@@ -158,11 +158,19 @@ jobs:
             echo "unwind info:"; otool -l "$exe" | grep -A3 '__unwind_info' | head -4
           done
 
+      # Every mutant of audit/rust-archive-link/tools/mutants.txt for this
+      # host must be killed by a test its `!!` line names (the Mach-O ones
+      # on macOS, the ELF ones on Linux).
+      - name: Mutants
+        if: ${{ !cancelled() }}
+        run: tclsh9.0 audit/rust-archive-link/tools/mutate.tcl 2>&1 | tee "$RUNNER_TEMP/experiments/mutants.txt"
+
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() }}
         with:
           name: experiments-${{ matrix.host }}
           path: |
+            ${{ runner.temp }}/experiments/mutants.txt
             ${{ runner.temp }}/experiments/results.tsv
             ${{ runner.temp }}/experiments/surfaces.txt
             ${{ runner.temp }}/experiments/logs

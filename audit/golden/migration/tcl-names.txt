@@ -6794,6 +6794,10 @@ tests/rust-archive-link.test ral-localized-with_provider-system pass
 tests/rust-archive-link.test ral-raw-with_provider-system pass
 tests/rust-archive-link.test ral-weakdef-with_provider-system pass
 tests/rust-archive-link.test ral-weakdef-localized-away-system pass
+tests/rust-archive-link.test ral-localized-comdat pass
+tests/rust-archive-link.test ral-native-add-symbols pass
+tests/rust-archive-link.test ral-native-add-wrong-target pass
+tests/rust-archive-link.test ral-check-refuses-raw pass
 tests/same-failure.test sf-a-a-b-b-c pass
 tests/same-failure.test sf-anchor-first-in-source-order pass
 tests/same-failure.test sf-backend-independent pass

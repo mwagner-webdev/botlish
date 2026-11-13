@@ -50,10 +50,11 @@ fn runtime_work(n: int) -> int:
 
 # Open, fill, read and close a store N times (each owner released at the
 # end of its iteration's scope): the digests' total length.
-fn churn(n: int) -> int errors rustlink::Failed:
+fn churn(n: int) -> int errors rustlink::Failed, Check:
     fold i from 0 to n with intermediate total 0:
         {owner, store} = rustlink::open(8)
         store.put_text("alpha")
+        expect("a block lent and given back", store.text_round(), 0)
         store.put_text(std::int::to_string(i))
         total + std::str::length(rustlink::digest(store))
 
