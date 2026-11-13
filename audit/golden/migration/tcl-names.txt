@@ -3198,6 +3198,7 @@ tests/exhaustive-match.test em-binding-types pass
 tests/exhaustive-match.test em-c-backend pass
 tests/exhaustive-match.test em-completions pass
 tests/exhaustive-match.test em-contextual-words pass
+tests/exhaustive-match.test em-coroutine-suspension pass
 tests/exhaustive-match.test em-coverage-diagnostics pass
 tests/exhaustive-match.test em-duplicate-case pass
 tests/exhaustive-match.test em-exact-case-still-exhaustive pass
