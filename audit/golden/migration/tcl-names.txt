@@ -6802,6 +6802,7 @@ tests/rust-archive-link.test ral-weakdef-localized-away-system pass
 tests/rust-archive-link.test ral-nm-no-symbols-accepted pass
 tests/rust-archive-link.test ral-nm-partial-refused pass
 tests/rust-archive-link.test ral-nm-bitcode-reader-off pass
+tests/rust-archive-link.test ral-macho-private-extern pass
 tests/rust-archive-link.test ral-nm-old-nm-fallback pass
 tests/same-failure.test sf-a-a-b-b-c pass
 tests/same-failure.test sf-anchor-first-in-source-order pass
@@ -11313,6 +11314,7 @@ tests/package-native.test pn-index-bsd-malformed pass
 tests/package-native.test pn-index-llvm-darwin pass
 tests/package-native.test pn-index-weak-elf pass
 tests/package-native.test pn-index-weak-macho pass
+tests/package-native.test pn-index-weak-macho-install skip
 tests/package-native.test pn-index-apple skip
 tests/package-workloads.test pw-pure-botlish-package pass
 tests/package-workloads.test pw-pure-botlish-same-hir pass

@@ -137,9 +137,9 @@ jobs:
         run: |
           out="$RUNNER_TEMP/experiments/macho"
           mkdir -p "$out"
-          tclsh9.0 - "$out" <<'EOF' 2>&1 | tee "$out/facts.txt"
+          FACTS_OUT="$out" tclsh9.0 <<'EOF' 2>&1 | tee "$out/facts.txt"
           source audit/rust-archive-link/tools/rustlink.tcl
-          set out [lindex $argv 0]
+          set out $::env(FACTS_OUT)
           set raw [rustlink::unit]
           set loc [rustlink::localized $raw -out [file join $out librustlink.a]]
           puts "== raw [file size $raw] bytes, localized [file size [file join $out librustlink.a]] bytes"

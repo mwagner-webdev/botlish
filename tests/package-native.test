@@ -727,14 +727,17 @@ proc weakArchives {dir flavor} {
     return $facts
 }
 
-test pn-index-weak-elf {an ELF archive's weak definitions are its `weak` fact, from each relocatable member's .symtab (STB_WEAK) -- a name another member defines strongly is not weak -- and are no duplicates: a static archive's weak definition beside another's strong one installs (the link takes the strong one), two strong ones stay refused} -constraints {linuxCc} -body {
-    set dir [fresh bin]
-    set facts [weakArchives $dir elf]
+# Packages bundling DIR's libweak.a or libstrong.a (weakArchives) for
+# TARGET, installed pairwise: a weak definition beside a strong one installs
+# (the link takes the strong one), two strong ones are refused.
+proc weakInstall {dir target} {
     set src [fresh src]
     set repo [fresh repo]
-    pack [nativePackage $src fweak 1.0.0 [list {{"name": "weakhook", "origin": "bundled", "linkage": "static", "file": "native/libweakhook.a"}}] [list native/libweakhook.a [file join $dir libweak.a]] "fn n() -> int:\n    1\n"] $repo
-    pack [nativePackage $src fstrong 1.0.0 [list {{"name": "stronghook", "origin": "bundled", "linkage": "static", "file": "native/libstronghook.a"}}] [list native/libstronghook.a [file join $dir libstrong.a]] "fn n() -> int:\n    1\n"] $repo
-    pack [nativePackage $src fstrong2 1.0.0 [list {{"name": "stronghook2", "origin": "bundled", "linkage": "static", "file": "native/libstronghook2.a"}}] [list native/libstronghook2.a [file join $dir libstrong.a]] "fn n() -> int:\n    1\n"] $repo
+    foreach {name lib archive} {fweak weakhook libweak.a fstrong stronghook libstrong.a fstrong2 stronghook2 libstrong.a} {
+        set library "{\"name\": \"$lib\", \"origin\": \"bundled\", \"linkage\": \"static\", \"file\": \"native/lib$lib.a\"}"
+        set files [list $name.bot "fn n() -> int:\n    1\n" targets/$target/native/lib$lib.a [list @file [file join $dir $archive]]]
+        pack [packageDir $src $name 1.0.0 "{\"schema\": 2, \"name\": \"$name\", \"version\": \"1.0.0\", \"targets\": {\"$target\": {\"files\": \"targets/$target\", \"libraries\": \[$library\]}}}" $files] $repo
+    }
     set out {}
     foreach {tag first second} {weak-strong fweak fstrong strong-strong fstrong fstrong2} {
         set app [application "1\n"]
@@ -742,12 +745,24 @@ test pn-index-weak-elf {an ELF archive's weak definitions are its `weak` fact, f
         set r [pm add $second -project $app -repository $repo]
         lappend out [list $tag [dict get $r status] [lindex [split [dict get $r err] \n] 1]]
     }
-    list $facts $out
+    return $out
+}
+
+test pn-index-weak-elf {an ELF archive's weak definitions are its `weak` fact, from each relocatable member's .symtab (STB_WEAK) -- a name another member defines strongly is not weak -- and are no duplicates: a static archive's weak definition beside another's strong one installs (the link takes the strong one), two strong ones stay refused} -constraints {linuxCc} -body {
+    set dir [fresh bin]
+    set facts [weakArchives $dir elf]
+    list $facts [weakInstall $dir linux-x86_64]
 } -cleanup cleanup -result {{libweak.a {shared_hook weak_user} shared_hook libstrong.a {shared_hook strong_user} {} libmixed.a {shared_hook strong_user weak_user} {}} {{weak-strong 0 {}} {strong-strong 1 {  the static libraries stronghook and stronghook2 both define shared_hook: linking both into one executable is a duplicate definition}}}}
 
 test pn-index-weak-macho {a Mach-O archive's weak definitions are its `weak` fact, from each member's symbol table (N_WEAK_DEF) -- a name another member defines strongly is not weak: on macOS Apple's own cc and ar, elsewhere clang's Mach-O target and llvm-ar's Darwin format} -constraints {machoAr} -body {
     weakArchives [fresh bin] macho
 } -cleanup cleanup -result {libweak.a {shared_hook weak_user} shared_hook libstrong.a {shared_hook strong_user} {} libmixed.a {shared_hook strong_user weak_user} {}}
+
+test pn-index-weak-macho-install {on macOS, packages bundling Apple-made archives for macos-aarch64: a weak definition beside a strong one installs, two strong ones stay refused} -constraints {appleAr} -body {
+    set dir [fresh bin]
+    weakArchives $dir macho
+    weakInstall $dir macos-aarch64
+} -cleanup cleanup -result {{weak-strong 0 {}} {strong-strong 1 {  the static libraries stronghook and stronghook2 both define shared_hook: linking both into one executable is a duplicate definition}}}
 
 test pn-index-apple {Apple's own archives -- ar rcs (its ranlib's __.SYMDEF SORTED) and libtool -static -- read as the external symbols nm lists for their members, with a member of another name length (#1/LEN) and an empty object beside them} -constraints appleAr -body {
     set dir [fresh bin]

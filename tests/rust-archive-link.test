@@ -301,7 +301,19 @@ echo "nm: error: $2: Unknown attribute kind (102) (Producer: 'LLVM22.1.6-rust-1.
 exit 1} {
         list [rustunit::globals x.a -format macho] [rustunit::undefined x.a -format macho]
     }
-} -result {rl_open botlish_event_post2}
+} -result {{hidden rl_open} botlish_event_post2}
+
+test ral-macho-private-extern {Mach-O: a private external definition (visibility hidden: Rust's allocator shim on Apple targets) is a global definition -- the objects of a link resolve against it -- and a non-external one is not} -constraints posixShell -body {
+    ralFakeNm {
+echo 'x.a(a.o):'
+echo '0000000000000000 (__TEXT,__text) external _rl_open'
+echo '0000000000000008 (__TEXT,__text) weak external _botlish_event_post2'
+echo '0000000000000010 (__TEXT,__text) private external __RNvCs9hJ03s5DiqP_7___rustc12___rust_alloc'
+echo '0000000000000018 (__TEXT,__text) non-external _rl_helper'
+echo '                 (undefined) external _malloc'} {
+        list [rustunit::globals x.a -format macho] [rustunit::undefined x.a -format macho]
+    }
+} -result {{_RNvCs9hJ03s5DiqP_7___rustc12___rust_alloc botlish_event_post2 rl_open} malloc}
 
 test ral-nm-old-nm-fallback {an nm without --no-llvm-bc (it refuses the option) is asked without it} -constraints posixShell -body {
     ralFakeNm {

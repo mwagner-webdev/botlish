@@ -129,9 +129,14 @@ proc rustunit::MachoNm {args} {
 }
 
 # The defined (DEFINED 1) or undefined (DEFINED 0) global symbols of FILE,
-# C names, sorted and unique. ELF: nm's upper-case types (a weak definition,
-# W or V, included; U excluded). Mach-O: nm -m's "external" and "weak
-# external" symbols, never "private external" or "non-external" ones.
+# C names, sorted and unique: every symbol another object of the final
+# link can resolve against. ELF: nm's upper-case types (a weak definition,
+# W or V, included; U excluded; a hidden one too: visibility binds only
+# the linked image, not the link). Mach-O: nm -m's "external", "weak
+# external" and "private external" symbols -- a private external
+# (visibility hidden, as Rust's allocator shim is on Apple targets) is
+# resolved between the objects of a link like any external -- never
+# "non-external" ones.
 proc rustunit::Symbols {file format defined} {
     set out {}
     if {$format eq "elf"} {
@@ -148,7 +153,7 @@ proc rustunit::Symbols {file format defined} {
         foreach line [split [MachoNm -m $file] \n] {
             set undefined [string match "*(undefined)*" $line]
             if {$defined == $undefined} continue
-            if {[string match "*non-external*" $line] || [string match "*private external*" $line]} continue
+            if {[string match "*non-external*" $line]} continue
             if {![regexp {\mexternal (\S+)} $line -> sym]} continue
             if {[string index $sym 0] eq "_"} {
                 set sym [string range $sym 1 end]
