@@ -17079,7 +17079,7 @@ count("é".encode_utf8())
 @caption The element type is held exactly: a List[std::byte::Byte] is not accepted as a List[int]
 @error CORE SEMANTIC TYPE
 @at 6:7
-@message *(argument type: List[int[std::byte::Byte]])
+@message *(argument type: List\[int\[std::byte::Byte\]\])
 @end
 
 @topic stdlib.std::str::is_tcl_alnum
