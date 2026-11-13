@@ -1,0 +1,13 @@
+# case: precision -- an untyped source yielding and returning its parameter: each construction's outward type is its root call's semantic instance's (int for 5, str for "a"), not the generic body's
+# class: intended
+# expect: precise
+# value: [5, "a"]
+import std::coroutine
+
+fn source(x):
+    yield x
+    x
+
+coroutine {step: s1, first: f1} = source(5)
+coroutine {step: s2, first: f2} = source("a")
+[f1, f2]

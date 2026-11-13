@@ -1,0 +1,20 @@
+# case: errors -- a resume whose segment may fail, neither handled nor admitted: UNHANDLED-ERROR at the resume ("this coroutine resume may produce ...")
+# class: rejected-correct
+# expect: rejected UNHANDLED-ERROR
+import std::coroutine
+
+error Broke
+
+fn source(n: int) -> int errors Broke:
+    yield n
+    if n > 3:
+        fail Broke
+    n
+
+fn run(n: int) -> int:
+    coroutine {step, first} = source(n):
+        on Broke:
+            0
+    step()
+
+run(1)

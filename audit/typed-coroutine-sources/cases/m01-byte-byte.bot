@@ -1,0 +1,20 @@
+# case: matrix -- yields Byte, returns Byte: the outward type is Byte and the consumer takes `first` as a Byte with no narrowing
+# class: intended
+# expect: precise
+# value: [65, 65, 7, true]
+import std::coroutine
+import std::byte
+
+fn source(b: std::byte::Byte, last: std::byte::Byte, n: int) -> std::byte::Byte:
+    loop i from 0 to n:
+        yield b
+        continue
+    last
+
+fn take(b: std::byte::Byte) -> int:
+    b
+
+coroutine {step, first} = source(65, 7, 2)
+second = step()
+final = step()
+[take(first), take(second), take(final), std::coroutine::done?(step)]

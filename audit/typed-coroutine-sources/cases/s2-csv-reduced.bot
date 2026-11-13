@@ -1,0 +1,65 @@
+# case: the CSV symptom, reduced: a quoted-field byte source over int-literal yields returns how many characters it wrote; the consumer narrows each symbol to a Byte, as export.bot does
+# class: narrowing
+# expect: facts-widened
+# value: [[34, 97, 34, 34, 98, 34], [3, 6]]
+import std::coroutine
+import std::byte
+import std::str
+import std::char
+import std::mutable_vector
+import std::mutable_array
+
+error Unsupported
+
+error NotByte
+
+# A field's characters quoted, a quotation mark doubled (csv_strict's
+# always-quoted policy): every yield an int, the result the field's length.
+fn field_source(value: str) -> int errors Unsupported:
+    yield 34
+    loop i from 0 to value.length():
+        c = value.char_at(i).scalar_value()
+        if c < 32 or c > 126:
+            fail Unsupported
+        if c == 34:
+            yield 34
+        yield c
+        continue
+    yield 34
+    value.length()
+
+fn bytes_of(value: str) -> List[std::byte::Byte] errors NotByte, Unsupported:
+    coroutine {step, first} = field_source(value)
+    out = std::mutable_vector::from_list("".encode_utf8())
+    c = std::mutable_array::create(1, first)
+    loop:
+        if std::coroutine::done?(step):
+            break
+        b = c.at(0)
+        if b < 0 or b > 255:
+            # Never: but c.at(0) is an int.
+            fail NotByte
+        out.push(b)
+        c.set(0, step())
+    loop x in out:
+        x
+
+fn count_of(value: str) -> List[int] errors Unsupported:
+    coroutine {step, first} = field_source(value)
+    c = std::mutable_array::create(2, 0)
+    c.set(1, first)
+    loop:
+        if std::coroutine::done?(step):
+            break
+        c.set(0, c.at(0) + 1)
+        c.set(1, step())
+    [c.at(1), c.at(0)]
+
+fn run() -> List[List[int]] errors NotByte, Unsupported:
+    [bytes_of("a\"b"), count_of("a\"b")]
+
+run():
+    on NotByte:
+        []
+    on Unsupported:
+        []

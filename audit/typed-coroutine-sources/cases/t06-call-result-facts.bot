@@ -1,0 +1,13 @@
+# case: precision -- for comparison, an ordinary call with an undeclared int result: its result's range facts do not cross the call either (facts cross a function boundary only as a declaration), so a Byte parameter rejects symbol(3) while it admits the literal 65 + 3
+# class: intended
+# expect: rejected TYPE
+import std::byte
+import std::int
+
+fn symbol(i: int) -> int:
+    65 + i.mod(26)
+
+fn take(b: std::byte::Byte) -> int:
+    b
+
+[take(symbol(3)), take(65 + 3)]

@@ -1,0 +1,302 @@
+c01-sentinel-end: narrowing / precise / ok
+    sentinel -- examples/dfa/json's and examples/event-loop's generator shape: symbols, then -1, which the consumer compares (a terminal value read as a value; done? is not consulted)
+    symbols: declared int, R int, Y int, O int, Yr [-∞, +∞]; first int [-∞, +∞]
+    run (yes): value {[3, 4, 5]}
+c02-sentinel-collision: narrowing / precise / ok
+    sentinel -- the same consumer over a stream in which -1 is an ordinary symbol: the sentinel consumer stops at the yielded -1, the done? consumer takes every symbol (why the CSV milestone removed the -1 rule: COROUTINES.md's done? is the phase, never a value)
+    symbols: declared int, R int, Y int, O int, Yr [-∞, +∞]; first int [-∞, +∞]
+    symbols: declared int, R int, Y int, O int, Yr [-∞, +∞]; first int [-∞, +∞]
+    run (yes): value {[[3], [3, -1, 4]]}
+d01-deep-byte-helper: narrowing / widened / ok
+    deep yields -- a helper yields Bytes (deep), the root returns a count: the helper's yields are the coroutine's, joined with the root's result
+    source: declared int, R int, Y int[std::byte::Byte], O int, Yr [66, 66] {66}; first int [-∞, +∞]
+    run (yes): value {[66, 66, 2]}
+d02-two-helpers: rejected-correct / rejected COROUTINE-RESULT-MISMATCH / ok
+    deep yields -- two helpers yield different types (int and str): rejected at the construction, the diagnostic naming the root
+    source: declared int, R int, Y any, O int, Yr -; first int 
+d03-helper-return-separate: intended / facts-widened / ok
+    deep yields -- a helper yields ints and returns a str to its caller: the helper's return never mixes with the outward type (COROUTINES.md 20)
+    source: declared int, R int, Y int, O int, Yr [0, 4611686018427387903]; first int [-∞, +∞]
+    run (yes): value {[1, 5, 4]}
+d04-recursive-helper: intended / facts-widened / ok
+    deep yields -- a self-recursive yielding helper (a countdown) under a root returning the count
+    source: declared int, R int, Y int, O int, Yr [-∞, 3]; first int [-∞, +∞]
+    run (yes): value {[3, 2, 1, 3]}
+d05-generic-helper: rejected-precision / rejected COROUTINE-RESULT-MISMATCH / ok
+    deep yields -- an untyped helper yielding its parameter, called by two roots with an int and a str: a helper has no outward type of its own (COROUTINES.md 9), and its yield is typed by its generic body (any), which neither root's declared result (int, str) admits
+    ints: declared int, R int, Y any, O int, Yr -; first int 
+    texts: declared str, R str, Y any, O str, Yr -; first str 
+d05b-generic-helper-undeclared: narrowing / precise / ok
+    deep yields -- an untyped helper yielding its parameter, called by two roots with an int and a str: a helper has no outward type of its own (COROUTINES.md 9), and its yield is typed by its generic body (any), so with no declared result each root's outward type is the join with it: any (Y and O agree, both any; what the consumer loses is the instance types int and str)
+    ints: declared -, R int, Y any, O any, Yr [-∞, +∞]; first any [-∞, +∞]
+    texts: declared -, R str, Y any, O any, Yr [-∞, +∞]; first any [-∞, +∞]
+    run (yes): value {[1, 2, "a", "b"]}
+d06-branch-yield-return: intended / facts-widened / ok
+    deep yields -- yields on one branch, returns early on another
+    source: declared int, R int, Y int, O int, Yr [1, 2]; first int [-∞, +∞]
+    run (yes): value {[[1, 2, 9], [9]]}
+d07-handled-helper-error: intended / precise / ok
+    deep yields -- the root handles a yielding helper's failure; the coroutine's segments never fail, and the handler's value joins the root's result
+    source: declared int, R int, Y int, O int, Yr [-∞, +∞]; first int [-∞, +∞]
+    run (yes): value {[[1, 1, 2, -1], [0]]}
+d07b-known-error-helper: rejected-correct / rejected KNOWN-ERROR / ok
+    deep yields -- a helper that always fails after its yield: its call never returns, so the root's handled call of it is KNOWN-ERROR (a root that always fails after yielding is not: its segments complete by yielding)
+    source: declared int, R int, Y int, O int, Yr -; first int 
+d08-nested-coroutine: intended / facts-widened / ok
+    deep yields -- a coroutine constructed inside another coroutine's root: the inner yields strs to the outer, which yields ints; the boundary isolates the two outward types
+    words: declared str, R str, Y str, O str, Yr [-∞, +∞]; first str [-∞, +∞]
+    lengths: declared int, R int, Y int, O int, Yr [0, 4611686018427387903]; first int [-∞, +∞]
+    run (yes): value {[1, 3, 2]}
+e01-fail-before-first: intended / facts-widened / ok
+    errors -- a failure before the first yield crosses the construction: its handler's value is `first`, and the coroutine is failed (every later resume raises it again)
+    source: declared int, R int, Y int, O int, Yr [0, -5]; first int [-∞, +∞]
+    run (yes): value {[-1, -2, 1]}
+e02-fail-after-yields: intended / facts-widened / ok
+    errors -- a failure after several yields crosses the resume that ran the failing segment; the consumer's handler value stands in for the value, and joins the outward type
+    source: declared int, R int, Y int, O int, Yr [1, 2]; first int [-∞, +∞]
+    run (yes): value {[1, 2, -1, -1, 1]}
+e03-unhandled-resume: rejected-correct / rejected UNHANDLED-ERROR / ok
+    errors -- a resume whose segment may fail, neither handled nor admitted: UNHANDLED-ERROR at the resume ("this coroutine resume may produce ...")
+    source: declared int, R int, Y int, O int, Yr -; first int 
+e04-handled-inside: intended / facts-widened / ok
+    errors -- a failure handled inside the source never reaches a resume; the source's handle carries no error
+    source: declared int, R int, Y int, O int, Yr [5, 5] {5}; first int [-∞, +∞]
+    run (yes): value {[5, -1]}
+e05-handler-sentinel: intended / precise / ok
+    errors -- the consumer's handler value on a Byte source's resume: a handler that supplies -1 makes the bound value an int again; a Byte handler value keeps it a Byte (the handler is one more producer of the value)
+    source: declared int[std::byte::Byte], R int[std::byte::Byte], Y int[std::byte::Byte], O int[std::byte::Byte], Yr [65, 65] {65}; first int[std::byte::Byte] [0, 255]
+    run (yes): value {[65, 65]}
+e05b-handler-sentinel-int: intended / rejected TYPE / ok
+    errors -- the same with a handler value of -1: the bound value is an int, and passing it to a Byte parameter is rejected
+    source: declared int[std::byte::Byte], R int[std::byte::Byte], Y int[std::byte::Byte], O int[std::byte::Byte], Yr -; first int[std::byte::Byte] 
+m01-byte-byte: intended / precise / ok
+    matrix -- yields Byte, returns Byte: the outward type is Byte and the consumer takes `first` as a Byte with no narrowing
+    source: declared int[std::byte::Byte], R int[std::byte::Byte], Y int[std::byte::Byte], O int[std::byte::Byte], Yr [65, 65] {65}; first int[std::byte::Byte] [0, 255]
+    run (yes): value {[65, 65, 7, true]}
+m02-byte-int: narrowing / widened / ok
+    matrix -- yields Byte, returns int: accepted, outward int (the join); a Byte consumer narrows (s2-byte-typed-source-direct is the rejection)
+    source: declared int, R int, Y int[std::byte::Byte], O int, Yr [65, 65] {65}; first int [-∞, +∞]
+    run (yes): value {[65, 65, 2, true]}
+m03-byte-unit-declared: rejected-precision / rejected COROUTINE-RESULT-MISMATCH / ok
+    matrix -- yields Byte, declared result unit (a source with nothing to report): rejected, the yields must fit the declared result
+    source: declared unit, R unit, Y int[std::byte::Byte], O unit, Yr -; first unit 
+m03-byte-unit-inferred: rejected-precision / rejected COROUTINE-RESULT-MISMATCH / ok
+    matrix -- yields Byte, no declared result, the body ends with unit: rejected, Byte and unit have no common outward type
+    source: declared -, R List[never], Y int[std::byte::Byte], O any, Yr -; first any 
+m04-byte-struct-inferred: rejected-precision / rejected COROUTINE-RESULT-MISMATCH / ok
+    matrix -- yields Byte, returns a struct with no declared result: rejected, the diagnostic lists both types a segment can end with
+    source: declared -, R Summary, Y int[std::byte::Byte], O any, Yr -; first any 
+m04-byte-struct: rejected-precision / rejected COROUTINE-RESULT-MISMATCH / ok
+    matrix -- yields Byte, returns a struct (a summary): rejected, no common outward type
+    source: declared Summary, R Summary, Y int[std::byte::Byte], O Summary, Yr -; first Summary 
+m05-int-str: rejected-precision / rejected COROUTINE-RESULT-MISMATCH / ok
+    matrix -- yields int, returns str: rejected
+    source: declared str, R str, Y int, O str, Yr -; first str 
+m06-str-int-any: narrowing / widened / ok
+    matrix -- yields str, returns int, declared result any: accepted, and the consumer receives any (the only common supertype)
+    source: declared any, R any, Y str, O any, Yr [-∞, +∞]; first any [-∞, +∞]
+    run (yes): value {["a", "b", 2, true]}
+m06-str-int: rejected-precision / rejected COROUTINE-RESULT-MISMATCH / ok
+    matrix -- yields str, returns int (lines and a line count): rejected
+    source: declared int, R int, Y str, O int, Yr -; first int 
+m07-nested-yield-types: intended / precise / ok
+    matrix -- yields of two domain types one inside the other (Nibble within Byte), terminal Byte: accepted, outward Byte, precise
+    source: declared int[std::byte::Byte], R int[std::byte::Byte], Y int[std::byte::Byte], O int[std::byte::Byte], Yr [3, 200] {3,200}; first int[std::byte::Byte] [0, 255]
+    run (yes): value {[3, 200, 9]}
+m07-two-yield-types: rejected-correct / rejected COROUTINE-RESULT-MISMATCH / ok
+    matrix -- two unrelated yield types (int and str), one terminal int: rejected
+    source: declared int, R int, Y any, O int, Yr -; first int 
+m08-no-yield-result: rejected-correct / rejected COROUTINE-RHS-NOT-YIELDING / ok
+    matrix -- no yields, a non-unit result: a coroutine construction of a function that cannot yield is rejected
+    source: declared int, R int, Y -, O any, Yr -; first any 
+m08-unexecuted-yield: intended / precise / ok
+    matrix -- a yield the run never reaches (a loop over an empty List): construction completes, `first` is the final result, done? is true
+    source: declared int, R int, Y int, O int, Yr [-∞, +∞]; first int [-∞, +∞]
+    run (yes): value {[7, true, 7]}
+m09-always-fails: intended / facts-widened / ok
+    matrix -- yields, then always fails: no normal completion; the outward type is the yields' (R is never); the failure crosses the last resume
+    source: declared int, R int, Y int, O int, Yr [10, 11]; first int [-∞, +∞]
+    run (yes): value {[10, 11, -1, -2, 1]}
+m09-never-completes: intended / facts-widened / ok
+    matrix -- yields, never completes normally (an unbounded loop): the root's result is never, the outward type is the yields' alone
+    counter: declared -, R never, Y int, O int, Yr [0, 1000000]; first int [-∞, +∞]
+    run (yes): value {[1, 2, 3, false]}
+m10-no-yield-never: rejected-correct / rejected COROUTINE-RHS-NOT-YIELDING TYPE / ok
+    matrix -- no yields and no normal completion (always fails): no coroutine can be built of it; the rejected construction is typed any, not poison, so `first` against the declared int adds a dependent TYPE (a diagnostic-recovery imprecision)
+    source: declared int, R int, Y -, O any, Yr -; first any 
+n01-done-guard-no-narrowing: narrowing / rejected TYPE / ok
+    phase -- a value read and then guarded by `not done?`: on that path it can only be a yield (a Byte), but the type checker relates no value to the handle's state, so the Byte parameter rejects it
+    source: declared int, R int, Y int[std::byte::Byte], O int, Yr -; first int 
+n02-fold-consumer: narrowing / widened / ok
+    phase -- the consumer as a fold whose intermediate is the latest segment's value (std::actor's host shape): the shape a done?-guarded segment fact could type (Byte inside, the count after the break); today the Byte use needs the narrowing comparison
+    source: declared int, R int, Y int[std::byte::Byte], O int, Yr [65, 65] {65}; first int [-∞, +∞]
+    run (yes): value {[195, 3]}
+o01-yield-affine: rejected-precision / rejected AFFINE-ERASURE-UNSUPPORTED COROUTINE-CONTRACT / ok
+    ownership -- yielding an affine value (a struct owning a coroutine handle) with an unrestricted terminal result is impossible to state: the yields and the return share one outward type, which is then affine, and an affine outward type is COROUTINE-CONTRACT (the reason given is the cached final result); independently, coroutine#yield takes any value, a position that carries no ownership: AFFINE-ERASURE-UNSUPPORTED at the yield
+    child: declared int, R int, Y int, O int, Yr -; first int 
+    child: declared int, R int, Y int, O int, Yr -; first int 
+    source: declared Holder, R Holder, Y Holder, O Holder, Yr -; first Holder 
+o02-hold-affine-across: intended / facts-widened / ok
+    ownership -- an affine value (a child coroutine) held across the source's suspensions, never sent outward: accepted
+    child: declared int, R int, Y int, O int, Yr [1, 1] {1}; first int [-∞, +∞]
+    source: declared int, R int, Y int, O int, Yr [-∞, +∞]; first int [-∞, +∞]
+    run (yes): value {[10, 1, 2]}
+o03-move-in: intended / facts-widened / ok
+    ownership -- an affine value moved into a coroutine at construction (the child handle as an argument): accepted; the yields stay unrestricted
+    child: declared int, R int, Y int, O int, Yr [1, 1] {1}; first int [-∞, +∞]
+    relay: declared int, R int, Y int, O int, Yr [-∞, +∞]; first int [-∞, +∞]
+    run (yes): value {[1, 2]}
+o04-resource-abandon: intended / facts-widened / ok
+    ownership -- a source owning a resource across its suspensions: completed, its cleanup runs at its end; abandoned, at the end of its handle's scope (the program unwinds); the typing of yields and result is unaffected
+    source: declared int, R int, Y int, O int, Yr [1, 2]; first int [-∞, +∞]
+    source: declared int, R int, Y int, O int, Yr [1, 2]; first int [-∞, +∞]
+    run (yes): value {[[1, 7, 2, 7], [1, 8]]}
+o05-context-source: intended / facts-widened / ok
+    contexts -- a source requiring a context the entry program installs: the provider is fixed at construction; contexts add nothing to the yield or result types
+    source: declared int, R int, Y int, O int, Yr [1, 257]; first int [-∞, +∞]
+    run (yes): value {[11, 12, 2]}
+o06-inject-no-context: intended / facts-widened / ok
+    contexts -- a source constructed and resumed inside `inject no context:`: it needs no authority, and its yields and result are typed as anywhere else
+    source: declared int, R int, Y int, O int, Yr [1, 1] {1}; first int [-∞, +∞]
+    run (yes): value {[1, 2]}
+p01-protocol-trace: intended / precise / ok
+    protocol -- eager construction (arguments, then the body to its first yield), one segment per resume, done? false while suspended and true after the root returns, the cached result on every later resume with no body code (the log counts body steps)
+    source: declared int, R int, Y int, O int, Yr [-∞, +∞]; first int [-∞, +∞]
+    run (yes): value {[1, 2, 0, 3, 0, 400, 1, 400, 400, 4]}
+p02-same-type-phases: intended / facts-widened / ok
+    protocol -- yield 2 then return 2: the yielded 2 and the terminal 2 are the same value of the same type; only done? tells the phases apart
+    source: declared int, R int, Y int, O int, Yr [2, 2] {2}; first int [-∞, +∞]
+    run (yes): value {[2, 0, 2, 1, 2]}
+p03-abandon: intended / precise / ok
+    protocol -- abandonment: a consumer that stops after the first value releases the suspended coroutine at its handle's last use; no further body code runs
+    source: declared int, R int, Y int, O int, Yr [-∞, +∞]; first int [-∞, +∞]
+    run (yes): value {[1, 1]}
+p04-message-protocol: intended / precise / ok
+    protocol -- a struct resume protocol: the message type (Msg) is a channel of its own, independent of the outward type (Event), which yields and the return share
+    source: declared Event, R Event, Y Event, O Event, Yr [-∞, +∞]; first Event [-∞, +∞]
+    run (yes): value {[10, 15, 107]}
+s2-byte-typed-source-direct: narrowing / rejected TYPE / ok
+    the Byte-yielding source's first value passed to a Byte parameter: rejected (argument type int, no facts), though every yield sends a Byte
+    source: declared int, R int, Y int[std::byte::Byte], O int, Yr -; first int 
+s2-byte-typed-source: narrowing / widened / ok
+    a source whose yields are statically Bytes (a Byte parameter) and whose result is a count: the outward type is int, the join, so `first` is no Byte
+    source: declared int, R int, Y int[std::byte::Byte], O int, Yr [65, 65] {65}; first int [-∞, +∞]
+    run (yes): value {[65, 3]}
+s2-csv-reduced-direct: narrowing / rejected TYPE / ok
+    the same consumer without the narrowing comparison: pushing the resume's value into a MutableVector[Byte] is rejected, because the value is an int with no facts
+    field_source: declared int, R int, Y int, O int, Yr -; first int 
+s2-csv-reduced: narrowing / facts-widened / ok
+    the CSV symptom, reduced: a quoted-field byte source over int-literal yields returns how many characters it wrote; the consumer narrows each symbol to a Byte, as export.bot does
+    field_source: declared int, R int, Y int, O int, Yr [32, 126]; first int [-∞, +∞]
+    field_source: declared int, R int, Y int, O int, Yr [32, 126]; first int [-∞, +∞]
+    run (yes): value {[[34, 97, 34, 34, 98, 34], [3, 6]]}
+s2-csv-typed-yields: narrowing / widened / ok
+    the reduced CSV source with every yield wrapped in a Byte-typed helper (a declaration, no new syntax): the yields' static type becomes Byte (Y), and the outward type is still int, the join with the count
+    field_source: declared int, R int, Y int[std::byte::Byte], O int, Yr [0, 255]; first int [-∞, +∞]
+    run (yes): value {[34, 97, 34, 34, 98, 34, 3]}
+t01-yields-str: intended / precise / ok
+    precision -- yields only strings, returns a string, no declared result: outward str, precise, as an ordinary function returning those strings would be
+    source: declared -, R str, Y str, O str, Yr [-∞, +∞]; first str [-∞, +∞]
+    run (yes): value {["a", "b", "end"]}
+t02-yields-struct: intended / precise / ok
+    precision -- yields a struct and returns the same struct: outward Event, precise
+    source: declared -, R Event, Y Event, O Event, Yr [-∞, +∞]; first Event [-∞, +∞]
+    run (yes): value {[1, 2]}
+t03-yields-payload-enum: intended / precise / ok
+    precision -- yields one payload-bearing case, returns another of the same enum: one common type, accepted (an envelope); the cases are told apart here only by equality with a known value
+    source: declared Out, R Out, Y Out, O Out, Yr [-∞, +∞]; first Out [-∞, +∞]
+    run (yes): value {[true, false, true]}
+t04-generic-instance: intended / precise / ok
+    precision -- an untyped source yielding and returning its parameter: each construction's outward type is its root call's semantic instance's (int for 5, str for "a"), not the generic body's
+    source: declared -, R any, Y any, O int, Yr [-∞, +∞]; first int [-∞, +∞]
+    source: declared -, R any, Y any, O str, Yr [-∞, +∞]; first str [-∞, +∞]
+    run (yes): value {[5, "a"]}
+t05-yields-int-literals: narrowing / facts-widened / ok
+    precision -- yields int literals inside the Byte range, returns a large int: Y int (a literal is an int; its value is a range fact, not a type), the facts stop at the boundary
+    source: declared int, R int, Y int, O int, Yr [34, 44] {34,44}; first int [-∞, +∞]
+    run (yes): value {[34, 1000]}
+t06-call-result-facts: intended / rejected TYPE / ok
+    precision -- for comparison, an ordinary call with an undeclared int result: its result's range facts do not cross the call either (facts cross a function boundary only as a declaration), so a Byte parameter rejects symbol(3) while it admits the literal 65 + 3
+t07-declared-call-result: intended / none / ok
+    precision -- the same function with a declared Byte result (its body proves the domain): the declaration carries the domain to every caller; a coroutine source has one such declaration for two channels
+    run (yes): value {[68, 90]}
+w01-parser-records-summary: rejected-precision / rejected COROUTINE-RESULT-MISMATCH UNKNOWN-FIELD / ok
+    workload -- a streaming parser that yields records and returns a summary: the natural shape, rejected (no common outward type of Record and Summary); and `first`, a Record at run time, is typed Summary (the declared result), so reading its key is UNKNOWN-FIELD
+    parse: declared Summary, R Summary, Y Record, O Summary, Yr -; first Summary 
+w01b-parser-envelope: narrowing / precise / ok
+    workload -- the streaming parser today: one envelope struct for both channels (a record's fields, a summary's fields, a flag), every yield carrying an empty summary and the result an empty record; the consumer reads the record part while done? is false and the summary part after
+    parse: declared Out, R Out, Y Out, O Out, Yr [-∞, +∞]; first Out [-∞, +∞]
+    parse: declared Out, R Out, Y Out, O Out, Yr [-∞, +∞]; first Out [-∞, +∞]
+    run (yes): value {[["a", "b"], 2]}
+w01c-parser-payload-enum: unsupported / rejected NOT-A-STRUCT / ok
+    workload -- the streaming parser over a payload enum (Record | Summary): the source compiles, but no program can read a payload today (no match), so a consumer cannot take the record's fields out
+    parse: declared Out, R Out, Y Out, O Out, Yr -; first Out 
+w02-events-status: rejected-precision / rejected COROUTINE-RESULT-MISMATCH NOT-A-STRUCT / ok
+    workload -- an incremental processor that yields application events and returns a terminal status code: rejected (Event and int); `first`, an Event at run time, is typed int (the declared result), so reading its kind is NOT-A-STRUCT
+    process: declared int, R int, Y Event, O int, Yr -; first int 
+w02b-events-status-in-event: narrowing / precise / ok
+    workload -- the processor today: the status travels in an Event (the actor library's shape: std::actor::exit builds the final Exit request), and the consumer reads it after done?
+    process: declared Event, R Event, Y Event, O Event, Yr [-∞, +∞]; first Event [-∞, +∞]
+    run (yes): value {[["positive", "positive"], 0]}
+w03-option-by-list: narrowing / widened / ok
+    workload -- std::test::run's shape: each yield a one-element List, the end an empty List, so that the result fits the yields' type; the yields are List[int]{length: 1}, the outward type List[int]: the length fact is lost too
+    run: declared List[int], R List[int], Y List[int]{length: 1}, O List[int], Yr [-∞, +∞]; first List[int] [-∞, +∞]
+    run (yes): value {[[1], [2], []]}
+w04-last-item-is-result: intended / precise / ok
+    workload -- std::tree::walk's shape: every item but the last yielded, the last one returned, so the result is an item and a consumer handles `first` and every resume alike
+    items: declared int, R int, Y int, O int, Yr [-∞, +∞]; first int [-∞, +∞]
+    run (yes): value {[10, 20, 30]}
+x01-emits-certified: narrowing / facts-widened / ok
+    emits -- a byte source whose claim the compiler certifies (every yield in 0..255, the trace one token): the certificate is no type, so the consumer still receives an int with no facts
+    source: declared int, R int, Y int, O int, Yr [65, 66]; first int [-∞, +∞]
+    run (yes): value {[65, 66, 2]}
+x01b-emits-direct: narrowing / rejected TYPE / ok
+    emits -- the certified byte source's first value passed to a Byte parameter: rejected, the certificate does not reach the type checker (by design: emits defines no yield type)
+    source: declared int, R int, Y int, O int, Yr -; first int 
+examples/dfa/csv/export.bot:  / facts-widened / ok
+    
+    sources::bytes_document_source: declared int, R int, Y int, O int, Yr [0, 244]; first int [-∞, +∞]
+examples/dfa/csv/sinks.bot:  / facts-widened / ok
+    
+    sources::strict_field_source: declared int, R int, Y int, O int, Yr -; first int ?
+    sources::strict_document_source: declared int, R int, Y int, O int, Yr -; first int ?
+    sources::utf8_field_source: declared int, R int, Y int, O int, Yr -; first int ?
+    sources::utf8_document_source: declared int, R int, Y int, O int, Yr -; first int ?
+    sources::bytes_field_source: declared int, R int, Y int, O int, Yr [0, 244]; first int ?
+    sources::bytes_field_from_bytes_source: declared int, R int, Y int, O int, Yr [0, 244]; first int ?
+    sources::bytes_document_source: declared int, R int, Y int, O int, Yr [0, 244]; first int ?
+    sources::bytes_stream_source: declared int, R int, Y int, O int, Yr [0, 244]; first int ?
+    sources::bytes_unterminated_source: declared int, R int, Y int, O int, Yr [0, 244]; first int ?
+    sources::selective_field_source: declared int, R int, Y int, O int, Yr -; first int ?
+    sources::selective_document_source: declared int, R int, Y int, O int, Yr -; first int ?
+    sources::selective_strict_document_source: declared int, R int, Y int, O int, Yr -; first int ?
+    sources::bytes_document_source: declared int, R int, Y int, O int, Yr [0, 244]; first int ?
+    sources::bytes_document_source: declared int, R int, Y int, O int, Yr [0, 244]; first int ?
+    sources::bytes_document_source: declared int, R int, Y int, O int, Yr [0, 244]; first int ?
+    sources::bytes_document_source: declared int, R int, Y int, O int, Yr [0, 244]; first int ?
+    sources::bytes_document_source: declared int, R int, Y int, O int, Yr [0, 244]; first int ?
+    sources::bytes_document_source: declared int, R int, Y int, O int, Yr [0, 244]; first int ?
+    sources::bytes_stream_source: declared int, R int, Y int, O int, Yr [0, 244]; first int ?
+    sources::bytes_document_source: declared int, R int, Y int, O int, Yr [0, 244]; first int [-∞, +∞]
+    csv_utf8::document3_bytes: declared int, R int, Y int, O int, Yr [0, 0] {0}; first int [-∞, +∞]
+examples/dfa/json/sinks.bot:  / facts-widened / ok
+    
+    number_emit::integer_source: declared int, R int, Y int, O int, Yr -; first int ?
+    number_emit::integer_text_source: declared int, R int, Y int, O int, Yr -; first int ?
+    number_emit::integer_trusted_source: declared int, R int, Y int, O int, Yr [0, 1114111]; first int [-∞, +∞]
+    string_emit::string_source: declared int, R int, Y int, O int, Yr -; first int ?
+    string_emit::string_ascii_source: declared int, R int, Y int, O int, Yr -; first int ?
+    string_emit::string_bytes_source: declared int, R int, Y int, O int, Yr -; first int ?
+    string_emit::string_codes_source: declared int, R int, Y int, O int, Yr -; first int ?
+    value_emit::text_source: declared int, R int, Y int, O int, Yr -; first int ?
+    value_emit::stacked_source: declared int, R int, Y int, O int, Yr -; first int ?
+    value_emit::flat_source: declared int, R int, Y int, O int, Yr -; first int ?
+    value_emit::stacked_source: declared int, R int, Y int, O int, Yr -; first int ?
+    value_emit::text_source: declared int, R int, Y int, O int, Yr -; first int ?
+    value_emit::stacked_source: declared int, R int, Y int, O int, Yr -; first int ?
+    value_emit::text_source: declared int, R int, Y int, O int, Yr -; first int ?
+    value_emit::text_source: declared int, R int, Y int, O int, Yr -; first int ?
+    number_emit::integer_source: declared int, R int, Y int, O int, Yr -; first int ?
+    number_emit::integer_trusted_source: declared int, R int, Y int, O int, Yr [0, 1114111]; first int ?
+    json_lex::json_number: declared int, R int, Y int, O int, Yr [0, 0] {0}; first int ?
+    json_lex::json_number: declared int, R int, Y int, O int, Yr [0, 0] {0}; first int [-∞, +∞]

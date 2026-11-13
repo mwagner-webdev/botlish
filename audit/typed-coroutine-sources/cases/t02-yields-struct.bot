@@ -1,0 +1,16 @@
+# case: precision -- yields a struct and returns the same struct: outward Event, precise
+# class: intended
+# expect: precise
+# value: [1, 2]
+import std::coroutine
+
+struct Event:
+    n: int
+
+fn source():
+    yield Event {n: 1}
+    Event {n: 2}
+
+coroutine {step, first} = source()
+final = step()
+[first.n, final.n]

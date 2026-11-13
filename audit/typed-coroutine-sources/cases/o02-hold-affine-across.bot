@@ -1,0 +1,20 @@
+# case: ownership -- an affine value (a child coroutine) held across the source's suspensions, never sent outward: accepted
+# class: intended
+# expect: facts-widened
+# value: [10, 1, 2]
+import std::coroutine
+
+fn child() -> int:
+    yield 1
+    2
+
+fn source() -> int:
+    coroutine {step, first} = child()
+    yield 10
+    yield first
+    step()
+
+coroutine {step, first} = source()
+a = step()
+b = step()
+[first, a, b]

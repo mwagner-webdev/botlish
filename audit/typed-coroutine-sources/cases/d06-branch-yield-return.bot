@@ -1,0 +1,26 @@
+# case: deep yields -- yields on one branch, returns early on another
+# class: intended
+# expect: facts-widened
+# value: [[1, 2, 9], [9]]
+import std::coroutine
+import std::mutable_vector
+import std::mutable_array
+
+fn source(go: bool) -> int:
+    if not go:
+        return 9
+    yield 1
+    yield 2
+    9
+
+fn drain(go: bool) -> List[int]:
+    coroutine {step, first} = source(go)
+    out = std::mutable_vector::from_list([first])
+    loop:
+        if std::coroutine::done?(step):
+            break
+        out.push(step())
+    loop x in out:
+        x
+
+[drain(true), drain(false)]

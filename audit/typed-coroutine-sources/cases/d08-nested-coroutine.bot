@@ -1,0 +1,21 @@
+# case: deep yields -- a coroutine constructed inside another coroutine's root: the inner yields strs to the outer, which yields ints; the boundary isolates the two outward types
+# class: intended
+# expect: facts-widened
+# value: [1, 3, 2]
+import std::coroutine
+import std::str
+
+fn words() -> str:
+    yield "abc"
+    "de"
+
+fn lengths() -> int:
+    coroutine {step, first} = words()
+    yield 1
+    yield first.length()
+    step().length()
+
+coroutine {step, first} = lengths()
+a = step()
+b = step()
+[first, a, b]

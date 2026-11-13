@@ -1,0 +1,27 @@
+# case: workload -- std::tree::walk's shape: every item but the last yielded, the last one returned, so the result is an item and a consumer handles `first` and every resume alike
+# class: intended
+# expect: precise
+# value: [10, 20, 30]
+import std::coroutine
+import std::list
+import std::mutable_vector
+
+fn items(xs: List[int]) -> int errors IndexNotFound:
+    loop i from 0 to xs.length() - 1:
+        yield xs.at(i)
+        continue
+    xs.at(xs.length() - 1)
+
+fn all(xs: List[int]) -> List[int] errors IndexNotFound:
+    coroutine {step, first} = items(xs)
+    out = std::mutable_vector::from_list([first])
+    loop:
+        if std::coroutine::done?(step):
+            break
+        out.push(step())
+    loop x in out:
+        x
+
+all([10, 20, 30]):
+    on IndexNotFound:
+        []

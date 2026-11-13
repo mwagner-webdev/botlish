@@ -1,0 +1,17 @@
+# case: workload -- the streaming parser over a payload enum (Record | Summary): the source compiles, but no program can read a payload today (no match), so a consumer cannot take the record's fields out
+# class: unsupported
+# expect: rejected NOT-A-STRUCT
+import std::coroutine
+import std::list
+
+enum Out:
+    Record {key: str, value: int},
+    Summary {records: int, skipped: int},
+
+fn parse(lines: List[str]) -> Out:
+    loop line in lines:
+        yield Out::Record {key: line, value: 1}
+    Out::Summary {records: lines.length(), skipped: 0}
+
+coroutine {step, first} = parse(["a", "b"])
+first.key

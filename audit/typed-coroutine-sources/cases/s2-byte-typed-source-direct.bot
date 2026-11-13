@@ -1,0 +1,17 @@
+# case: the Byte-yielding source's first value passed to a Byte parameter: rejected (argument type int, no facts), though every yield sends a Byte
+# class: narrowing
+# expect: rejected TYPE
+import std::coroutine
+import std::byte
+
+fn source(b: std::byte::Byte, n: int) -> int:
+    loop i from 0 to n:
+        yield b
+        continue
+    n
+
+fn take(b: std::byte::Byte) -> int:
+    b
+
+coroutine {step, first} = source(65, 3)
+take(first)

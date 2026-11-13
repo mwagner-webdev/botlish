@@ -1,0 +1,21 @@
+# case: matrix -- a yield the run never reaches (a loop over an empty List): construction completes, `first` is the final result, done? is true
+# class: intended
+# expect: precise
+# value: [7, true, 7]
+import std::coroutine
+
+fn source(items: List[int], last: int) -> int:
+    loop x in items:
+        yield x
+    last
+
+fn empty() -> List[int]:
+    xs = [0]
+    loop x in xs:
+        if x == 0:
+            continue
+        x
+
+coroutine {step, first} = source(empty(), 7)
+again = step()
+[first, std::coroutine::done?(step), again]

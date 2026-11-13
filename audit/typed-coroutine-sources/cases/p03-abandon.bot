@@ -1,0 +1,36 @@
+# case: protocol -- abandonment: a consumer that stops after the first value releases the suspended coroutine at its handle's last use; no further body code runs
+# class: intended
+# expect: precise
+# value: [1, 1]
+import std::coroutine
+import std::mutable_array
+
+context struct Log:
+    a: MutableArray[int]
+
+fn tick(context log: Log) -> int:
+    v = std::mutable_array::at(log.a, 0):
+        on IndexNotFound:
+            0
+    std::mutable_array::set(log.a, 0, v + 1):
+        on IndexNotFound:
+            unit
+    v + 1
+
+fn steps(context log: Log) -> int:
+    std::mutable_array::at(log.a, 0):
+        on IndexNotFound:
+            -1
+
+fn source() -> int:
+    yield tick()
+    yield tick()
+    tick()
+
+fn take_one() -> int:
+    coroutine {step, first} = source()
+    first
+
+with context Log {a: std::mutable_array::create(1, 0)}
+first = take_one()
+[first, steps()]

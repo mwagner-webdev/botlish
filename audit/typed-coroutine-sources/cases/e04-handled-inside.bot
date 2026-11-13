@@ -1,0 +1,22 @@
+# case: errors -- a failure handled inside the source never reaches a resume; the source's handle carries no error
+# class: intended
+# expect: facts-widened
+# value: [5, -1]
+import std::coroutine
+
+error Broke
+
+fn risky(n: int) -> int errors Broke:
+    if n > 3:
+        fail Broke
+    n
+
+fn source(n: int) -> int:
+    yield n
+    risky(n):
+        on Broke:
+            -1
+
+coroutine {step, first} = source(5)
+final = step()
+[first, final]

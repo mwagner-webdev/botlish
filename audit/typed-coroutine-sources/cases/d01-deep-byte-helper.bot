@@ -1,0 +1,21 @@
+# case: deep yields -- a helper yields Bytes (deep), the root returns a count: the helper's yields are the coroutine's, joined with the root's result
+# class: narrowing
+# expect: widened
+# value: [66, 66, 2]
+import std::coroutine
+import std::byte
+
+fn emit(b: std::byte::Byte) -> unit:
+    yield b
+    unit
+
+fn source(b: std::byte::Byte, n: int) -> int:
+    loop i from 0 to n:
+        emit(b)
+        continue
+    n
+
+coroutine {step, first} = source(66, 2)
+second = step()
+final = step()
+[first, second, final]

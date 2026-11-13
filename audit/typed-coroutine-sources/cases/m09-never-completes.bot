@@ -1,0 +1,17 @@
+# case: matrix -- yields, never completes normally (an unbounded loop): the root's result is never, the outward type is the yields' alone
+# class: intended
+# expect: facts-widened
+# value: [1, 2, 3, false]
+import std::coroutine
+
+fn counter(start: int):
+    loop i from start to start + 1000000:
+        yield i
+        continue
+    loop:
+        yield 0
+
+coroutine {step, first} = counter(1)
+second = step()
+third = step()
+[first, second, third, std::coroutine::done?(step)]

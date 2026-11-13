@@ -1,0 +1,18 @@
+# case: ownership -- an affine value moved into a coroutine at construction (the child handle as an argument): accepted; the yields stay unrestricted
+# class: intended
+# expect: facts-widened
+# value: [1, 2]
+import std::coroutine
+
+fn child() -> int:
+    yield 1
+    2
+
+fn relay(c: Coroutine{args: [], return: int, errors: []}, first: int) -> int:
+    yield first
+    c()
+
+coroutine {step: c, first: cf} = child()
+coroutine {step, first} = relay(c, cf)
+final = step()
+[first, final]

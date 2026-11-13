@@ -1,0 +1,15 @@
+# case: precision -- yields int literals inside the Byte range, returns a large int: Y int (a literal is an int; its value is a range fact, not a type), the facts stop at the boundary
+# class: narrowing
+# expect: facts-widened
+# value: [34, 1000]
+import std::coroutine
+
+fn source() -> int:
+    yield 34
+    yield 44
+    1000
+
+coroutine {step, first} = source()
+step()
+final = step()
+[first, final]

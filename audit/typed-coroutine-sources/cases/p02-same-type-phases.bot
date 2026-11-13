@@ -1,0 +1,21 @@
+# case: protocol -- yield 2 then return 2: the yielded 2 and the terminal 2 are the same value of the same type; only done? tells the phases apart
+# class: intended
+# expect: facts-widened
+# value: [2, 0, 2, 1, 2]
+import std::coroutine
+
+fn source() -> int:
+    yield 2
+    2
+
+fn flag(b: bool) -> int:
+    if b:
+        1
+    else:
+        0
+
+coroutine {step, first} = source()
+d0 = flag(std::coroutine::done?(step))
+final = step()
+d1 = flag(std::coroutine::done?(step))
+[first, d0, final, d1, step()]

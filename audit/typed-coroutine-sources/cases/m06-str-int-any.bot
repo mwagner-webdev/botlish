@@ -1,0 +1,16 @@
+# case: matrix -- yields str, returns int, declared result any: accepted, and the consumer receives any (the only common supertype)
+# class: narrowing
+# expect: widened
+# value: ["a", "b", 2, true]
+import std::coroutine
+import std::list
+
+fn source(lines: List[str]) -> any:
+    loop line in lines:
+        yield line
+    lines.length()
+
+coroutine {step, first} = source(["a", "b"])
+second = step()
+final = step()
+[first, second, final, std::coroutine::done?(step)]

@@ -1,0 +1,15 @@
+# case: workload -- std::test::run's shape: each yield a one-element List, the end an empty List, so that the result fits the yields' type; the yields are List[int]{length: 1}, the outward type List[int]: the length fact is lost too
+# class: narrowing
+# expect: widened
+# value: [[1], [2], []]
+import std::coroutine
+
+fn run(xs: List[int]) -> List[int]:
+    loop x in xs:
+        yield [x]
+    return []
+
+coroutine {step, first} = run([1, 2])
+second = step()
+final = step()
+[first, second, final]

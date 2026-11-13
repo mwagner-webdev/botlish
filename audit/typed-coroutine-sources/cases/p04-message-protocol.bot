@@ -1,0 +1,21 @@
+# case: protocol -- a struct resume protocol: the message type (Msg) is a channel of its own, independent of the outward type (Event), which yields and the return share
+# class: intended
+# expect: precise
+# value: [10, 15, 107]
+import std::coroutine
+
+struct Msg:
+    add: int
+
+struct Event:
+    value: int
+
+fn source(base: int, resume Msg) -> Event:
+    m = yield Event {value: base}
+    n = yield Event {value: base + m.add}
+    Event {value: base + m.add + n.add * 2 + 1 - 1 + 0}
+
+coroutine {step, first} = source(10)
+second = step(Msg {add: 5})
+final = step(Msg {add: 46})
+[first.value, second.value, final.value]

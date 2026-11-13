@@ -1,0 +1,27 @@
+# case: sentinel -- examples/dfa/json's and examples/event-loop's generator shape: symbols, then -1, which the consumer compares (a terminal value read as a value; done? is not consulted)
+# class: narrowing
+# expect: precise
+# value: [3, 4, 5]
+import std::coroutine
+import std::mutable_vector
+import std::mutable_array
+
+fn symbols(xs: List[int]) -> int:
+    loop x in xs:
+        yield x
+    -1
+
+fn drain(xs: List[int]) -> List[int]:
+    coroutine {step, first} = symbols(xs)
+    out = std::mutable_vector::from_list([0])
+    out.clear()
+    c = std::mutable_array::create(1, first)
+    loop:
+        if c.at(0) == -1:
+            break
+        out.push(c.at(0))
+        c.set(0, step())
+    loop x in out:
+        x
+
+drain([3, 4, 5])

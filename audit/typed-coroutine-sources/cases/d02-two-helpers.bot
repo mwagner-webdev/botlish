@@ -1,0 +1,20 @@
+# case: deep yields -- two helpers yield different types (int and str): rejected at the construction, the diagnostic naming the root
+# class: rejected-correct
+# expect: rejected COROUTINE-RESULT-MISMATCH
+import std::coroutine
+
+fn ints(n: int) -> unit:
+    yield n
+    unit
+
+fn texts(s: str) -> unit:
+    yield s
+    unit
+
+fn source() -> int:
+    ints(1)
+    texts("a")
+    0
+
+coroutine {step, first} = source()
+first

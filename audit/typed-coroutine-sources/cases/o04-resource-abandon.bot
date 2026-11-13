@@ -1,0 +1,33 @@
+# case: ownership -- a source owning a resource across its suspensions: completed, its cleanup runs at its end; abandoned, at the end of its handle's scope (the program unwinds); the typing of yields and result is unaffected
+# class: intended
+# expect: facts-widened
+# value: [[1, 7, 2, 7], [1, 8]]
+import std::coroutine
+import std::list
+import support::handle
+
+fn source(n: int, context log: support::handle::Log) -> int:
+    h = support::handle::open(n)
+    yield 1
+    yield 2
+    3
+
+fn completed(context log: support::handle::Log) -> int:
+    coroutine {step, first} = source(7)
+    a = step()
+    b = step()
+    first + a + b
+
+fn abandoned(context log: support::handle::Log) -> int:
+    coroutine {step, first} = source(8)
+    first
+
+fn run(context log: support::handle::Log) -> List[List[int]] errors IndexNotFound:
+    x = completed()
+    y = abandoned()
+    [[1, support::handle::closed().at(0), 2, 7], [y, support::handle::closed().at(1)]]
+
+with context support::handle::create()
+run():
+    on IndexNotFound:
+        []

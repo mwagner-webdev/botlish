@@ -1,0 +1,14 @@
+# case: precision -- the same function with a declared Byte result (its body proves the domain): the declaration carries the domain to every caller; a coroutine source has one such declaration for two channels
+# class: intended
+# expect: none
+# value: [68, 90]
+import std::byte
+import std::int
+
+fn symbol(i: int) -> std::byte::Byte:
+    65 + i.mod(26)
+
+fn take(b: std::byte::Byte) -> int:
+    b
+
+[take(symbol(3)), take(symbol(25))]

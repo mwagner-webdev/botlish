@@ -1,0 +1,49 @@
+# case: workload -- the streaming parser today: one envelope struct for both channels (a record's fields, a summary's fields, a flag), every yield carrying an empty summary and the result an empty record; the consumer reads the record part while done? is false and the summary part after
+# class: narrowing
+# expect: precise
+# value: [["a", "b"], 2]
+import std::coroutine
+import std::list
+import std::mutable_vector
+import std::mutable_array
+
+struct Out:
+    key: str
+    value: int
+    records: int
+    skipped: int
+
+fn record(key: str, value: int) -> Out:
+    Out {key: key, value: value, records: 0, skipped: 0}
+
+fn summary(records: int, skipped: int) -> Out:
+    Out {key: "", value: 0, records: records, skipped: skipped}
+
+fn parse(lines: List[str]) -> Out:
+    loop line in lines:
+        yield record(line, 1)
+    summary(lines.length(), 0)
+
+fn keys(lines: List[str]) -> List[str]:
+    coroutine {step, first} = parse(lines)
+    out = std::mutable_vector::from_list([first.key])
+    out.clear()
+    c = std::mutable_array::create(1, first)
+    loop:
+        if std::coroutine::done?(step):
+            break
+        out.push(c.at(0).key)
+        c.set(0, step())
+    loop k in out:
+        k
+
+fn total(lines: List[str]) -> int:
+    coroutine {step, first} = parse(lines)
+    c = std::mutable_array::create(1, first)
+    loop:
+        if std::coroutine::done?(step):
+            break
+        c.set(0, step())
+    c.at(0).records
+
+[keys(["a", "b"]), total(["a", "b"])]

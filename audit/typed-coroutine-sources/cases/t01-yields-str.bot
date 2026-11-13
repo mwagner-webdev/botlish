@@ -1,0 +1,15 @@
+# case: precision -- yields only strings, returns a string, no declared result: outward str, precise, as an ordinary function returning those strings would be
+# class: intended
+# expect: precise
+# value: ["a", "b", "end"]
+import std::coroutine
+
+fn source():
+    yield "a"
+    yield "b"
+    "end"
+
+coroutine {step, first} = source()
+second = step()
+final = step()
+[first, second, final]

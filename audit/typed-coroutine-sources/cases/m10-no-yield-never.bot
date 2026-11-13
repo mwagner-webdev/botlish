@@ -1,0 +1,17 @@
+# case: matrix -- no yields and no normal completion (always fails): no coroutine can be built of it; the rejected construction is typed any, not poison, so `first` against the declared int adds a dependent TYPE (a diagnostic-recovery imprecision)
+# class: rejected-correct
+# expect: rejected COROUTINE-RHS-NOT-YIELDING TYPE
+import std::coroutine
+
+error Broke
+
+fn source(n: int) -> int errors Broke:
+    fail Broke
+
+fn run() -> int:
+    coroutine {step, first} = source(1):
+        on Broke:
+            0
+    first
+
+run()

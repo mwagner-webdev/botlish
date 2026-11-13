@@ -1,0 +1,23 @@
+# case: phase -- a value read and then guarded by `not done?`: on that path it can only be a yield (a Byte), but the type checker relates no value to the handle's state, so the Byte parameter rejects it
+# class: narrowing
+# expect: rejected TYPE
+import std::coroutine
+import std::byte
+
+fn source(b: std::byte::Byte, n: int) -> int:
+    loop i from 0 to n:
+        yield b
+        continue
+    n
+
+fn take(b: std::byte::Byte) -> int:
+    b
+
+fn second_or_count() -> int:
+    coroutine {step, first} = source(65, 3)
+    x = step()
+    if std::coroutine::done?(step):
+        return x
+    take(x)
+
+second_or_count()

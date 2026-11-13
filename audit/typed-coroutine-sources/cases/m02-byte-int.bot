@@ -1,0 +1,17 @@
+# case: matrix -- yields Byte, returns int: accepted, outward int (the join); a Byte consumer narrows (s2-byte-typed-source-direct is the rejection)
+# class: narrowing
+# expect: widened
+# value: [65, 65, 2, true]
+import std::coroutine
+import std::byte
+
+fn source(b: std::byte::Byte, n: int) -> int:
+    loop i from 0 to n:
+        yield b
+        continue
+    n
+
+coroutine {step, first} = source(65, 2)
+second = step()
+final = step()
+[first, second, final, std::coroutine::done?(step)]
