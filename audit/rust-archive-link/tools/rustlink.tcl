@@ -284,7 +284,7 @@ proc rustlink::copies {exe name} {
     set sym [expr {[format] eq "macho" ? "_$name" : $name}]
     set global 0
     set local 0
-    foreach line [split [exec nm $exe] \n] {
+    foreach line [split [rustunit::Nm $exe] \n] {
         if {[llength $line] != 3 || [lindex $line 2] ne $sym} continue
         set type [lindex $line 1]
         if {$type in {U u w v}} continue

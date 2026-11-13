@@ -109,11 +109,17 @@ jobs:
           cc --version | head -2
           if [[ $(uname -s) == Darwin ]]; then ld -v 2>&1 | head -3; xcodebuild -version; else ld --version | head -1; fi
 
+      # (A tcltest file exits 0 whatever failed: its totals line decides.)
       - name: Archive symbol indexes (F-16)
-        run: tclsh9.0 tests/package-native.test -tmpdir "$RUNNER_TEMP/pn" -match 'pn-index-*' -verbose bpe
+        run: |
+          tclsh9.0 tests/package-native.test -tmpdir "$RUNNER_TEMP/pn" -match 'pn-index-*' -verbose bpe 2>&1 | tee "$RUNNER_TEMP/pn.log"
+          grep -qE $'Total\t[0-9]+\tPassed\t[0-9]+\tSkipped\t[0-9]+\tFailed\t0$' "$RUNNER_TEMP/pn.log"
 
       - name: The Rust fixture's tests
-        run: tclsh9.0 tests/rust-archive-link.test -tmpdir "$RUNNER_TEMP/ral" -verbose bpe
+        if: ${{ !cancelled() }}
+        run: |
+          tclsh9.0 tests/rust-archive-link.test -tmpdir "$RUNNER_TEMP/ral" -verbose bpe 2>&1 | tee "$RUNNER_TEMP/ral.log"
+          grep -qE $'Total\t[0-9]+\tPassed\t[0-9]+\tSkipped\t[0-9]+\tFailed\t0$' "$RUNNER_TEMP/ral.log"
 
       - name: The matrix
         if: ${{ !cancelled() }}
@@ -175,6 +181,8 @@ jobs:
           name: experiments-${{ matrix.host }}
           path: |
             ${{ runner.temp }}/experiments/mutants.txt
+            ${{ runner.temp }}/pn.log
+            ${{ runner.temp }}/ral.log
             ${{ runner.temp }}/experiments/results.tsv
             ${{ runner.temp }}/experiments/surfaces.txt
             ${{ runner.temp }}/experiments/logs

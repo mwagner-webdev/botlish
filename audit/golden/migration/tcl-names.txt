@@ -11307,7 +11307,8 @@ tests/package-native.test pn-index-bsd-forms pass
 tests/package-native.test pn-index-bsd-symbols-checked pass
 tests/package-native.test pn-index-bsd-malformed pass
 tests/package-native.test pn-index-llvm-darwin pass
-tests/package-native.test pn-index-weak-definitions pass
+tests/package-native.test pn-index-weak-elf pass
+tests/package-native.test pn-index-weak-macho pass
 tests/package-native.test pn-index-apple skip
 tests/package-workloads.test pw-pure-botlish-package pass
 tests/package-workloads.test pw-pure-botlish-same-hir pass

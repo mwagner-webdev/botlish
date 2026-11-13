@@ -162,6 +162,7 @@ if {$format eq "elf"} {
     record raw-unit [file size $raw] [sha256 $raw] "[llength [rustunit::globals $raw -format macho]] global definitions"
     set unit [file join $native libbotlish_http.a]
     rustunit::localize $raw $unit -format macho -keep {bh_*} -label botlish_http -member botlish_http.o
+    record ld-r-form $rustunit::macho(form) [join $rustunit::macho(tried) "; "]
     set links "extern c library \"botlish_http\" static at \"native/libbotlish_http.a\"\nextern c library \"crypto\" static at \"native/libcrypto.a\"\nextern c library \"ssl\" static at \"native/libssl.a\"\nextern c library \"botlish_boringssl_identity\" static at \"native/libbotlish_boringssl_identity.a\"\nextern c library \"c++\"\n"
 }
 set unit [file join $native libbotlish_http.a]

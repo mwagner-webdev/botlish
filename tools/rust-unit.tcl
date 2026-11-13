@@ -43,7 +43,12 @@
 # is archived by libtool -static -D (no dates, owners or modes;
 # ZERO_AR_DATE for the index). Nothing is computed about a symbol's binding
 # or visibility here: ld decides, and `check` reads the result with nm.
-namespace eval rustunit {}
+namespace eval rustunit {
+    # The Mach-O input form the last localization used, and the forms that
+    # failed before it (MachoInputs).
+    variable macho
+    array set macho {form "" tried {}}
+}
 
 proc rustunit::Fail {message} {
     return -code error -errorcode {RUSTUNIT} "rust-unit: $message"
@@ -68,6 +73,36 @@ proc rustunit::HostFormat {} {
     return elf
 }
 
+# nm ARGS: its standard output. Apple's nm (llvm-nm) exits non-zero when it
+# warns -- a member with no symbols, which a Rust static library has --
+# after printing every other file's symbols: its output is taken then, and
+# only an nm that printed nothing is an error (with what it said).
+proc rustunit::Nm {args} {
+    set err [file join [expr {[info exists ::env(TMPDIR)] && $::env(TMPDIR) ne "" ? $::env(TMPDIR) : "/tmp"}] rustunit-nm-[pid].err]
+    set failed [catch {exec nm {*}$args 2>$err} out opts]
+    set said ""
+    if {[file exists $err]} {
+        set f [open $err r]
+        set said [string trim [read $f]]
+        close $f
+        file delete $err
+    }
+    if {$failed} {
+        if {[lindex [dict get $opts -errorcode] 0] ne "CHILDSTATUS"} {
+            Fail "nm [join $args]: $out"
+        }
+        # exec's message is the output and a last line of its own.
+        set lines [split $out \n]
+        if {[lindex $lines end] eq "child process exited abnormally"} {
+            set out [join [lrange $lines 0 end-1] \n]
+        }
+        if {[string trim $out] eq ""} {
+            Fail "nm [join $args] printed nothing (exit [lindex [dict get $opts -errorcode] 2]): [string range $said 0 600]"
+        }
+    }
+    return $out
+}
+
 # The defined (DEFINED 1) or undefined (DEFINED 0) global symbols of FILE,
 # C names, sorted and unique. ELF: nm's upper-case types (a weak definition,
 # W or V, included; U excluded). Mach-O: nm -m's "external" and "weak
@@ -75,7 +110,7 @@ proc rustunit::HostFormat {} {
 proc rustunit::Symbols {file format defined} {
     set out {}
     if {$format eq "elf"} {
-        foreach line [split [exec nm -A $file 2>/dev/null] \n] {
+        foreach line [split [Nm -A $file] \n] {
             if {![regexp {^(.*):([0-9a-f]+)? +([A-Za-z]) +(\S+)$} $line -> where addr type sym]} continue
             if {$defined} {
                 if {![string is upper $type] || $type eq "U"} continue
@@ -85,7 +120,7 @@ proc rustunit::Symbols {file format defined} {
             lappend out $sym
         }
     } elseif {$format eq "macho"} {
-        foreach line [split [exec nm -m $file 2>/dev/null] \n] {
+        foreach line [split [Nm -m $file] \n] {
             set undefined [string match "*(undefined)*" $line]
             if {$defined == $undefined} continue
             if {[string match "*non-external*" $line] || [string match "*private external*" $line]} continue
@@ -130,6 +165,67 @@ proc rustunit::WriteLines {path lines} {
     close $f
 }
 
+# An error unless PATH is a Mach-O 64-bit object that HOW wrote.
+proc rustunit::MachoObject {path how} {
+    if {![file isfile $path] || [file size $path] < 32} {
+        Fail "$how wrote no object ([file tail $path] [expr {[file exists $path] ? "has [file size $path] bytes" : "does not exist"}])"
+    }
+    set f [open $path rb]
+    set head [read $f 4]
+    close $f
+    if {$head ne "\xcf\xfa\xed\xfe"} {
+        Fail "$how wrote [file tail $path], which is no Mach-O 64-bit object"
+    }
+}
+
+# How Apple's ld -r takes every member of the archive RAW: the first of
+# -force_load RAW, -all_load RAW, and RAW's members extracted (refused when
+# two share a name, which extraction would merge) whose relocatable link
+# into PROBE makes an object. Its input arguments; rustunit::macho(form)
+# records which it was.
+proc rustunit::MachoInputs {raw arch probe work} {
+    variable macho
+    set tried {}
+    foreach form {force_load all_load members} {
+        file delete -force $probe
+        switch -- $form {
+            force_load { set inputs [list -force_load $raw] }
+            all_load { set inputs [list -all_load $raw] }
+            members {
+                set names [split [string trim [exec ar -t $raw]] \n]
+                set names [lmap n $names {expr {[string match __.SYMDEF* $n] ? [continue] : $n}}]
+                if {[llength [lsort -unique $names]] != [llength $names]} {
+                    lappend tried "members: two members share a name"
+                    continue
+                }
+                set dir [file join $work members]
+                file delete -force $dir
+                file mkdir $dir
+                set here [pwd]
+                cd $dir
+                try {
+                    exec ar -x $raw
+                } finally {
+                    cd $here
+                }
+                set inputs [lmap n $names {file join $dir $n}]
+            }
+        }
+        if {[catch {exec ld -r -arch $arch -S {*}$inputs -o $probe 2>@1} said]} {
+            lappend tried "$form: [string range $said 0 300]"
+            continue
+        }
+        if {[catch {MachoObject $probe "ld -r ($form)"} why]} {
+            lappend tried "$form: $why[expr {$said ne "" ? " ($said)" : ""}]"
+            continue
+        }
+        set macho(form) $form
+        set macho(tried) $tried
+        return $inputs
+    }
+    Fail "Apple's ld -r took no form of $raw: [join $tried {; }]"
+}
+
 proc rustunit::localize {raw out args} {
     set opts [Options [dict create -format [HostFormat] -keep {} -require {} -label unit -arch arm64 -member ""] $args]
     set format [dict get $opts -format]
@@ -167,13 +263,16 @@ proc rustunit::localize {raw out args} {
         } elseif {$format eq "macho"} {
             set arch [dict get $opts -arch]
             # The whole unit once, to read its global definitions; then
-            # again with the list of those it keeps.
+            # again with the list of those it keeps. The archive's every
+            # member goes in: by the first of these forms that makes an
+            # object (`MachoInputs`).
             set whole [file join $work whole.o]
-            exec ld -r -arch $arch -S -force_load $raw -o $whole 2>@stderr
+            set inputs [MachoInputs $raw $arch $whole $work]
             set kept [Matching [Symbols $whole macho 1] [dict get $opts -keep]]
             set keep [file join $work exported.txt]
             WriteLines $keep [lmap s $kept {string cat _ $s}]
-            exec ld -r -arch $arch -S -force_load $raw -exported_symbols_list $keep -o $object 2>@stderr
+            exec ld -r -arch $arch -S {*}$inputs -exported_symbols_list $keep -o $object 2>@stderr
+            MachoObject $object "ld -r [join $inputs] -exported_symbols_list"
             file delete -force $out
             set saved [expr {[info exists ::env(ZERO_AR_DATE)] ? [list 1 $::env(ZERO_AR_DATE)] : {0 {}}}]
             set ::env(ZERO_AR_DATE) 1

@@ -667,7 +667,17 @@ test pn-index-bsd-malformed {a malformed BSD or GNU index is {PM BINARY} naming 
     set out
 } -result {pairs 1 {PM BINARY} {{ranlib array of 12 bytes}} strings 1 {PM BINARY} {{string table of 4096 bytes}} strx 1 {PM BINARY} {{string offset 999}} unterminated 1 {PM BINARY} {{unterminated string}} nowhere 1 {PM BINARY} {{names _mac_value at offset 13, where no member of it begins}} self 1 {PM BINARY} {{names _mac_value at offset 8, where no member of it begins}} gnu-nowhere 1 {PM BINARY} {{names _mac_value at offset 13, where no member of it begins}}}
 
-testConstraint llvmDarwinAr [expr {[auto_execok clang] ne "" && [auto_execok llvm-ar] ne ""}]
+# llvm-ar under its plain name or a versioned one (Ubuntu's runners ship
+# llvm-ar-18 and no plain llvm-ar).
+proc llvmAr {} {
+    foreach name {llvm-ar llvm-ar-22 llvm-ar-21 llvm-ar-20 llvm-ar-19 llvm-ar-18 llvm-ar-17 llvm-ar-16} {
+        if {[auto_execok $name] ne ""} {
+            return $name
+        }
+    }
+    return ""
+}
+testConstraint llvmDarwinAr [expr {[auto_execok clang] ne "" && [llvmAr] ne ""}]
 
 test pn-index-llvm-darwin {an archive written by llvm-ar --format=darwin (an independent producer of Apple's format) of clang's Mach-O objects: its index is its external symbols, private externs included (a static link resolves them), its locals not} -constraints llvmDarwinAr -body {
     set dir [fresh bin]
@@ -676,30 +686,50 @@ test pn-index-llvm-darwin {an archive written by llvm-ar --format=darwin (an ind
     foreach f {a b} {
         exec clang --target=arm64-apple-macos11 -c [file join $dir $f.c] -o [file join $dir $f.o]
     }
-    exec llvm-ar --format=darwin rcs [file join $dir libmac.a] [file join $dir a.o] [file join $dir b.o]
+    exec [llvmAr] --format=darwin rcs [file join $dir libmac.a] [file join $dir a.o] [file join $dir b.o]
     set facts [pm::binary::inspect [readBytes [file join $dir libmac.a]] libmac.a]
     list [lmap m [dict get $facts members] {dict get $m kind}] [dict get $facts index]
 } -cleanup cleanup -result {{symbols macho macho} {mac_hidden mac_value second_fn}}
 
-test pn-index-weak-definitions {an archive's weak definitions are its `weak` fact, from each member's own symbol table (ELF: .symtab's STB_WEAK; Mach-O: N_WEAK_DEF) -- a name another member defines strongly is not weak -- and are no duplicates: a static archive's weak definition beside another's strong one installs (the link takes the strong one), two strong ones stay refused} -constraints {linuxCc llvmDarwinAr} -body {
-    set dir [fresh bin]
+testConstraint appleAr [expr {[string match macos-* [core::cabi::hostTarget]] && [auto_execok cc] ne ""
+    && [auto_execok ar] ne "" && [auto_execok libtool] ne "" && [auto_execok nm] ne ""}]
+# A Mach-O archive maker: Apple's (macOS) or clang and llvm-ar's (elsewhere).
+testConstraint machoAr [expr {[testConstraint appleAr] || [testConstraint llvmDarwinAr]}]
+
+# Objects defining shared_hook weakly (weak.c) and strongly (strong.c), as
+# archives of one member each and one archive of both (libmixed): FLAVOR elf
+# (the host's cc and ar) or macho (Apple's cc and ar on macOS; clang's
+# arm64-apple-macos11 target and llvm-ar's Darwin format elsewhere).
+proc weakArchives {dir flavor} {
     writeText [file join $dir weak.c] "__attribute__((weak)) int shared_hook(void) { return -1; }\nint weak_user(void) { return shared_hook(); }\n"
     writeText [file join $dir strong.c] "int shared_hook(void) { return 7; }\nint strong_user(void) { return 1; }\n"
+    set apple [string match macos-* [core::cabi::hostTarget]]
     foreach f {weak strong} {
-        exec cc -c -fPIC [file join $dir $f.c] -o [file join $dir $f.o]
-        exec ar rcs [file join $dir lib$f.a] [file join $dir $f.o]
-        exec clang --target=arm64-apple-macos11 -c [file join $dir $f.c] -o [file join $dir $f-mac.o]
-        exec llvm-ar --format=darwin rcs [file join $dir lib$f-mac.a] [file join $dir $f-mac.o]
+        if {$flavor eq "elf" || $apple} {
+            exec cc -c -fPIC [file join $dir $f.c] -o [file join $dir $f.o]
+        } else {
+            exec clang --target=arm64-apple-macos11 -c [file join $dir $f.c] -o [file join $dir $f.o]
+        }
     }
-    # One archive holding both: a name some member defines strongly is no
-    # weak name of the archive.
-    exec ar rcs [file join $dir libmixed.a] [file join $dir weak.o] [file join $dir strong.o]
-    exec llvm-ar --format=darwin rcs [file join $dir libmixed-mac.a] [file join $dir weak-mac.o] [file join $dir strong-mac.o]
+    foreach {lib members} {libweak.a weak libstrong.a strong libmixed.a {weak strong}} {
+        set objects [lmap m $members {file join $dir $m.o}]
+        if {$flavor eq "elf" || $apple} {
+            exec ar rcs [file join $dir $lib] {*}$objects 2>@1
+        } else {
+            exec [llvmAr] --format=darwin rcs [file join $dir $lib] {*}$objects
+        }
+    }
     set facts {}
-    foreach lib {libweak.a libstrong.a libmixed.a libweak-mac.a libstrong-mac.a libmixed-mac.a} {
+    foreach lib {libweak.a libstrong.a libmixed.a} {
         set x [pm::binary::inspect [readBytes [file join $dir $lib]] $lib]
         lappend facts $lib [dict get $x index] [dict get $x weak]
     }
+    return $facts
+}
+
+test pn-index-weak-elf {an ELF archive's weak definitions are its `weak` fact, from each relocatable member's .symtab (STB_WEAK) -- a name another member defines strongly is not weak -- and are no duplicates: a static archive's weak definition beside another's strong one installs (the link takes the strong one), two strong ones stay refused} -constraints {linuxCc} -body {
+    set dir [fresh bin]
+    set facts [weakArchives $dir elf]
     set src [fresh src]
     set repo [fresh repo]
     pack [nativePackage $src fweak 1.0.0 [list {{"name": "weakhook", "origin": "bundled", "linkage": "static", "file": "native/libweakhook.a"}}] [list native/libweakhook.a [file join $dir libweak.a]] "fn n() -> int:\n    1\n"] $repo
@@ -713,10 +743,11 @@ test pn-index-weak-definitions {an archive's weak definitions are its `weak` fac
         lappend out [list $tag [dict get $r status] [lindex [split [dict get $r err] \n] 1]]
     }
     list $facts $out
-} -cleanup cleanup -result {{libweak.a {shared_hook weak_user} shared_hook libstrong.a {shared_hook strong_user} {} libmixed.a {shared_hook strong_user weak_user} {} libweak-mac.a {shared_hook weak_user} shared_hook libstrong-mac.a {shared_hook strong_user} {} libmixed-mac.a {shared_hook strong_user weak_user} {}} {{weak-strong 0 {}} {strong-strong 1 {  the static libraries stronghook and stronghook2 both define shared_hook: linking both into one executable is a duplicate definition}}}}
+} -cleanup cleanup -result {{libweak.a {shared_hook weak_user} shared_hook libstrong.a {shared_hook strong_user} {} libmixed.a {shared_hook strong_user weak_user} {}} {{weak-strong 0 {}} {strong-strong 1 {  the static libraries stronghook and stronghook2 both define shared_hook: linking both into one executable is a duplicate definition}}}}
 
-testConstraint appleAr [expr {[string match macos-* [core::cabi::hostTarget]] && [auto_execok cc] ne ""
-    && [auto_execok ar] ne "" && [auto_execok libtool] ne "" && [auto_execok nm] ne ""}]
+test pn-index-weak-macho {a Mach-O archive's weak definitions are its `weak` fact, from each member's symbol table (N_WEAK_DEF) -- a name another member defines strongly is not weak: on macOS Apple's own cc and ar, elsewhere clang's Mach-O target and llvm-ar's Darwin format} -constraints {machoAr} -body {
+    weakArchives [fresh bin] macho
+} -cleanup cleanup -result {libweak.a {shared_hook weak_user} shared_hook libstrong.a {shared_hook strong_user} {} libmixed.a {shared_hook strong_user weak_user} {}}
 
 test pn-index-apple {Apple's own archives -- ar rcs (its ranlib's __.SYMDEF SORTED) and libtool -static -- read as the external symbols nm lists for their members, with a member of another name length (#1/LEN) and an empty object beside them} -constraints appleAr -body {
     set dir [fresh bin]
@@ -732,7 +763,10 @@ test pn-index-apple {Apple's own archives -- ar rcs (its ranlib's __.SYMDEF SORT
     set out {}
     foreach lib {libar.a libtool.a} {
         set facts [pm::binary::inspect [readBytes [file join $dir $lib]] $lib]
-        set nm [lsort -unique [lmap s [split [exec nm -g -U -j {*}$objects 2>/dev/null] \n] {
+        # (Apple's nm exits non-zero for the object with no symbols, after
+        # printing the others'.)
+        catch {exec nm -g -U -j {*}$objects 2>/dev/null} listed
+        set nm [lsort -unique [lmap s [split $listed \n] {
             expr {[string match _* $s] ? [string range $s 1 end] : [continue]}}]]
         lappend out [lindex [dict get $facts members] 0 name] [dict get $facts index] [expr {[dict get $facts index] eq $nm}]
     }

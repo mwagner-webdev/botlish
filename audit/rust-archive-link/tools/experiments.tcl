@@ -59,7 +59,8 @@ foreach {name raw} $units {
     foreach {form archive} $forms {
         set g [rustunit::globals $archive -format [rustlink::format]]
         set u [rustunit::undefined $archive -format [rustlink::format]]
-        puts $surfaces "== $name $form [file size $archive] bytes: [llength $g] global definitions, [llength $u] undefined references"
+        set how [expr {$form ne "raw" && [rustlink::format] eq "macho" ? ", Apple ld -r input form: $rustunit::macho(form) (before it: [join $rustunit::macho(tried) {; }])" : ""}]
+        puts $surfaces "== $name $form [file size $archive] bytes: [llength $g] global definitions, [llength $u] undefined references$how"
         puts $surfaces "   global: [join [lrange $g 0 39] { }][expr {[llength $g] > 40 ? " ..." : ""}]"
         puts $surfaces "   undefined (weak or Rust/C runtime): [join [lmap s $u {expr {[string match *post2* $s] || [string match *personality* $s] || [string match __rust* $s] ? $s : [continue]}}] { }]"
         foreach program {without_provider.bot with_provider.bot} {
