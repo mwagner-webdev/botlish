@@ -1,0 +1,182 @@
+# p1/listen.bot -- census probe P1 (HTTP-SSE-SERVER-CENSUS-MILESTONE-1.md):
+# a blocking HTTP/1.1 responder in Botlish over raw syscalls (rawnet.bot),
+# no C and no event loop. It binds 127.0.0.1:PORT (argument 1; 0 for any
+# free port, reported through getsockname), serves COUNT connections
+# (argument 2) one after another, and for each: reads until the end of the
+# request head ("\r\n\r\n"), however many reads that takes, answers the
+# request line in a Content-Length response and closes. Every fact it
+# relies on is printed as a trace line on standard output.
+direct module
+
+import rawnet
+import std::abi
+import std::abi::bytes
+import std::char
+import std::int
+import std::list
+import std::linux
+import std::mutable_array
+import std::str
+import type std::byte::Byte
+
+error Failed:
+    step: str
+    code: int
+
+fn out(text: str):
+    std::abi::i32(1).write(std::abi::bytes::from_list(text.concat("\n").encode_utf8()))
+
+fn utf8(text: str) -> std::abi::bytes::Bytes:
+    std::abi::bytes::from_list(text.encode_utf8())
+
+fn fd(n: int) -> std::abi::I32 errors Failed:
+    std::abi::i32(n):
+        on std::abi::AbiIntegerBelowRange:
+            fail Failed {step: "descriptor", code: n}
+        on std::abi::AbiIntegerAboveRange:
+            fail Failed {step: "descriptor", code: n}
+
+# The index of PAT in TEXT at or after FROM, or -1 (ASCII scan).
+fn find(text: str, pat: str, from: int) -> int errors IndexNotFound:
+    n = text.length()
+    m = pat.length()
+    found = std::mutable_array::create(1, -1)
+    loop i from from to n - m + 1:
+        hit = std::mutable_array::create(1, 1)
+        loop j from 0 to m:
+            if text.char_at(i + j) != pat.char_at(j):
+                hit.set(0, 0)
+                break
+        if hit.at(0) == 1:
+            found.set(0, i)
+            break
+    found.at(0)
+
+# Send all of DATA (partial sends continue from where the kernel stopped).
+fn send_all(c: std::abi::I32, data: std::abi::bytes::Bytes) -> int errors Failed:
+    total = std::abi::bytes::length(data).value
+    sent = std::mutable_array::create(2, 0)
+    loop:
+        done = sent.at(0):
+            on IndexNotFound:
+                total
+        if done >= total:
+            break
+        rest = std::abi::bytes::slice(data, done, total):
+            on LowerUnderrun:
+                fail Failed {step: "slice", code: done}
+            on UpperOverrun:
+                fail Failed {step: "slice", code: done}
+        w = rawnet::send(c, rest, rawnet::c32(16384))
+        if w < 0:
+            fail Failed {step: "send", code: w}
+        sent.set(0, done + w):
+            on IndexNotFound:
+                unit
+        sent.set(1, sent.at(1) + 1):
+            on IndexNotFound:
+                unit
+    sent.at(1):
+        on IndexNotFound:
+            0
+
+fn serve_one(listener: std::abi::I32, k: int) errors Failed, IndexNotFound:
+    c = fd(rawnet::accept4(listener, rawnet::c32(524288)))
+    # The head, accumulated as text across reads.
+    head = std::mutable_array::create(1, "")
+    reads = std::mutable_array::create(1, 0)
+    end = std::mutable_array::create(1, -1)
+    loop:
+        r = std::linux::read(c, std::abi::bytes::zeroed(std::abi::usize(7)))
+        if r.result < 0:
+            fail Failed {step: "read", code: r.result}
+        if r.result == 0:
+            break
+        count = std::abi::usize(r.result):
+            on std::abi::AbiIntegerBelowRange:
+                fail Failed {step: "count", code: r.result}
+            on std::abi::AbiIntegerAboveRange:
+                fail Failed {step: "count", code: r.result}
+        chunk = r.data.freeze_prefix(count):
+            on UpperOverrun:
+                fail Failed {step: "prefix", code: r.result}
+        text = std::abi::bytes::decode_utf8(chunk):
+            on InvalidUtf8:
+                fail Failed {step: "utf8 (a character split across reads would fail here)", code: r.result}
+        head.set(0, head.at(0).concat(text))
+        reads.set(0, reads.at(0) + 1)
+        e = find(head.at(0), "\r\n\r\n", 0)
+        if e >= 0:
+            end.set(0, e)
+            break
+    whole = head.at(0)
+    if end.at(0) < 0:
+        out("conn ".concat(std::int::to_string(k)).concat(" ended before the head: ").concat(std::int::to_string(whole.length())).concat(" chars"))
+        rawnet::shutdown(c, rawnet::c32(2))
+        std::linux::close(c)
+        return unit
+    line_end = find(whole, "\r\n", 0)
+    line = whole.substring(0, line_end):
+        on LowerUnderrun:
+            ""
+        on UpperOverrun:
+            ""
+    body = "you asked: ".concat(line).concat("\n")
+    response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: ".concat(std::int::to_string(body.encode_utf8().length())).concat("\r\nConnection: close\r\n\r\n").concat(body)
+    sends = send_all(c, utf8(response))
+    out("conn ".concat(std::int::to_string(k)).concat(" reads ").concat(std::int::to_string(reads.at(0))).concat(" head chars ").concat(std::int::to_string(end.at(0) + 4)).concat(" line [").concat(line).concat("] sends ").concat(std::int::to_string(sends)))
+    rawnet::shutdown(c, rawnet::c32(1))
+    std::linux::close(c)
+    unit
+
+fn port_of(p: int) -> rawnet::Port:
+    if p < 0 or p > 65535:
+        0
+    else:
+        p
+
+fn main(port: int, count: int) errors Failed, IndexNotFound:
+    s = rawnet::socket(rawnet::c32(2), rawnet::c32(1 + 524288), rawnet::c32(0))
+    out("socket ".concat(std::int::to_string(s)))
+    listener = fd(s)
+    reuse = rawnet::setsockopt_int(listener, rawnet::c32(1), rawnet::c32(2), rawnet::c_int_bytes(1))
+    out("setsockopt SO_REUSEADDR ".concat(std::int::to_string(reuse)))
+    b = rawnet::bind(listener, rawnet::loopback(port_of(port)))
+    out("bind ".concat(std::int::to_string(b)))
+    if b < 0:
+        fail Failed {step: "bind", code: b}
+    l = rawnet::listen(listener, rawnet::c32(64))
+    out("listen ".concat(std::int::to_string(l)))
+    named = rawnet::getsockname(listener, std::abi::bytes::zeroed(std::abi::usize(16)), rawnet::c_int_bytes(16).from_bytes())
+    p = std::abi::bytes::freeze(named.address)
+    hi = std::abi::bytes::slice(p, 2, 3):
+        on LowerUnderrun:
+            fail Failed {step: "port", code: 0}
+        on UpperOverrun:
+            fail Failed {step: "port", code: 0}
+    out("getsockname ".concat(std::int::to_string(named.result)).concat(" address bytes ").concat(std::int::to_string(std::abi::bytes::length(p).value)))
+    loop k from 0 to count:
+        serve_one(listener, k)
+    std::linux::close(listener)
+    out("done")
+
+arguments = argv():
+    on InvalidArgumentEncoding:
+        []
+port = if std::list::length(arguments) > 1:
+    std::int::from_string(std::list::at(arguments, 1)):
+        on InvalidIntegerText:
+            0
+else:
+    0
+count = if std::list::length(arguments) > 2:
+    std::int::from_string(std::list::at(arguments, 2)):
+        on InvalidIntegerText:
+            1
+else:
+    1
+main(port, count):
+    on Failed {step, code}:
+        out("FAILED ".concat(step).concat(" ").concat(std::int::to_string(code)))
+    on IndexNotFound:
+        out("FAILED index")

@@ -1,0 +1,54 @@
+# ipv6.bot -- census probe P4 (HTTP-SSE-SERVER-CENSUS-MILESTONE-1.md): an
+# IPv6 listener on [::1]:PORT over the same raw syscalls (rawnet.bot), one
+# request answered, then the program ends.
+direct module
+
+import rawnet
+import std::abi
+import std::abi::bytes
+import std::int
+import std::linux
+import std::list
+import std::str
+import type std::byte::Byte
+
+fn out(text: str):
+    std::abi::i32(1).write(std::abi::bytes::from_list(text.append_char('\n').encode_utf8()))
+
+fn fdv(n: int) -> std::abi::I32:
+    std::abi::i32(n):
+        on std::abi::AbiIntegerBelowRange:
+            std::abi::I32 {value: -1}
+        on std::abi::AbiIntegerAboveRange:
+            std::abi::I32 {value: -1}
+
+arguments = argv():
+    on InvalidArgumentEncoding:
+        []
+port0 = if std::list::length(arguments) > 1:
+    std::int::from_string(std::list::at(arguments, 1)):
+        on InvalidIntegerText:
+            18300
+        on IndexNotFound:
+            18300
+else:
+    18300
+port = if port0 < 0 or port0 > 65535:
+    18300
+else:
+    port0
+s = rawnet::socket(rawnet::c32(10), rawnet::c32(1 + 524288), rawnet::c32(0))
+out("socket AF_INET6 ".concat(std::int::to_string(s)))
+b = rawnet::bind(fdv(s), rawnet::loopback6(port))
+out("bind [::1] ".concat(std::int::to_string(b)))
+l = rawnet::listen(fdv(s), rawnet::c32(16))
+out("listen ".concat(std::int::to_string(l)))
+c = rawnet::accept4(fdv(s), rawnet::c32(524288))
+out("accept ".concat(std::int::to_string(c)))
+r = std::linux::read(fdv(c), std::abi::bytes::zeroed(std::abi::usize(4096)))
+out("read ".concat(std::int::to_string(r.result)))
+body = "hello over IPv6\n"
+w = rawnet::send(fdv(c), std::abi::bytes::from_list("HTTP/1.1 200 OK\r\nContent-Length: 16\r\nConnection: close\r\n\r\n".concat(body).encode_utf8()), rawnet::c32(16384))
+out("send ".concat(std::int::to_string(w)))
+std::linux::close(fdv(c))
+std::linux::close(fdv(s))

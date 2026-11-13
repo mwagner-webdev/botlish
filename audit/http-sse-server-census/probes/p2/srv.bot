@@ -1,0 +1,598 @@
+# srv.bot -- census probe P2 (HTTP-SSE-SERVER-CENSUS-MILESTONE-1.md): a
+# minimal HTTP/1.1 + Server-Sent Events server written in Botlish over
+# std::event_loop, the Linux driver package's readiness watches and raw
+# socket syscalls (rawnet.bot). Probe code, deliberately unpolished: it
+# exists to establish which server behaviors are expressible today, not to
+# be a package. Every connection is one task (an ordinary coroutine adopted
+# by the loop); one registration per connection receives its socket's
+# readiness, the publisher's notifications and the ticker's ticks, so a
+# task waits on one thing and checks everything when it wakes.
+direct module
+
+import event_loop_linux
+import http1
+import rawnet
+import std::abi
+import std::abi::bytes
+import std::char
+import std::event_loop
+import std::int
+import std::list
+import std::linux
+import std::mutable_array
+import std::mutable_vector
+import std::str
+import type std::byte::Byte
+import type std::event_loop::Delivery
+import type std::event_loop::Wake
+
+error Failed:
+    step: str
+    code: int
+
+# Configuration slots (App.config).
+private c_max_head = 0
+private c_max_body = 1
+private c_sub_limit = 2
+private c_heartbeat = 3
+private c_idle = 4
+private c_stopping = 5
+private c_sndbuf = 6
+private c_seq = 7
+private c_max_conns = 8
+private c_ring = 9
+
+# Counters (App.stats).
+private s_accepted = 0
+private s_closed = 1
+private s_requests = 2
+private s_subscribers = 3
+private s_sub_ended = 4
+private s_slow_dropped = 5
+private s_max_pending = 6
+private s_idle_closed = 7
+private s_bad_requests = 8
+private s_too_large = 9
+private s_events = 10
+private s_released = 11
+private s_eagain = 12
+private s_mode_switches = 13
+private s_refused = 14
+private s_lagged = 15
+private s_live = 16
+private n_stats = 17
+
+opaque context struct App:
+    config: MutableArray[int]
+    stats: MutableArray[int]
+    items: MutableVector[str]
+    ring: MutableArray[str]
+    regs: MutableVector[std::event_loop::Reg]
+    live: MutableVector[int]
+    subs: MutableVector[int]
+    watches: MutableVector[event_loop_linux::Watch]
+    watched: MutableVector[int]
+    acceptor: MutableVector[std::event_loop::Reg]
+
+fn create(max_head: int, max_body: int, sub_limit: int, heartbeat_us: int, idle_us: int, sndbuf: int, max_conns: int, ring: int) -> App:
+    App {
+        config: std::mutable_array::from_list([max_head, max_body, sub_limit, heartbeat_us, idle_us, 0, sndbuf, 0, max_conns, ring]),
+        stats: std::mutable_array::create(n_stats, 0),
+        items: std::mutable_vector::from_list([]),
+        ring: std::mutable_array::create(ring, ""),
+        regs: std::mutable_vector::from_list([]),
+        live: std::mutable_vector::from_list([]),
+        subs: std::mutable_vector::from_list([]),
+        watches: std::mutable_vector::from_list([]),
+        watched: std::mutable_vector::from_list([]),
+        acceptor: std::mutable_vector::from_list([])
+    }
+
+fn out(text: str):
+    std::abi::i32(1).write(std::abi::bytes::from_list(text.append_char('\n').encode_utf8()))
+
+
+fn fdv(n: int) -> std::abi::I32:
+    std::abi::i32(n):
+        on std::abi::AbiIntegerBelowRange:
+            std::abi::I32 {value: -1}
+        on std::abi::AbiIntegerAboveRange:
+            std::abi::I32 {value: -1}
+
+fn conf(i: int, context app: App) -> int:
+    app.config.at(i):
+        on IndexNotFound:
+            0
+
+fn set_conf(i: int, v: int, context app: App):
+    app.config.set(i, v):
+        on IndexNotFound:
+            unit
+
+fn stat(i: int, context app: App) -> int:
+    app.stats.at(i):
+        on IndexNotFound:
+            0
+
+fn bump(i: int, context app: App):
+    app.stats.set(i, stat(i) + 1):
+        on IndexNotFound:
+            unit
+
+fn drop_stat(i: int, context app: App):
+    app.stats.set(i, stat(i) - 1):
+        on IndexNotFound:
+            unit
+
+fn raise_max(i: int, v: int, context app: App):
+    if v > stat(i):
+        app.stats.set(i, v):
+            on IndexNotFound:
+                unit
+
+fn stopping?(context app: App) -> bool:
+    conf(c_stopping) == 1
+
+fn now(context nat: event_loop_linux::Native) -> int:
+    event_loop_linux::now_us()
+
+# --- the request head ----------------------------------------------------
+
+
+
+
+fn ring_size(context app: App) -> int:
+    conf(c_ring)
+
+# Publish one event to every subscriber: framed once into the ring (seq
+# mod ring size), then one post per subscriber registration.
+fn publish(event: str, data: str, context app: App, ev: std::event_loop::Loop) errors std::event_loop::SchedulerFault:
+    seq = conf(c_seq) + 1
+    framed = http1::cat("id: ", seq).concat("\nevent: ").concat(event).append_char('\n').concat(http1::data_lines(data)).append_char('\n')
+    app.ring.set(seq.mod(ring_size()), framed):
+        on IndexNotFound:
+            unit
+    set_conf(c_seq, seq)
+    bump(s_events)
+    n = app.subs.length()
+    loop i from 0 to n:
+        s = app.subs.at(i):
+            on IndexNotFound:
+                0
+        l = app.live.at(i):
+            on IndexNotFound:
+                0
+        if s == 1 and l == 1:
+            r = app.regs.at(i):
+                on IndexNotFound:
+                    fail std::event_loop::SchedulerFault
+            std::event_loop::post(r, 1, seq)
+
+# Wake every live connection with KIND (2 tick, 9 shutdown), and the acceptor.
+fn broadcast(kind: int, context app: App, ev: std::event_loop::Loop) errors std::event_loop::SchedulerFault:
+    n = app.live.length()
+    loop i from 0 to n:
+        l = app.live.at(i):
+            on IndexNotFound:
+                0
+        if l == 1:
+            r = app.regs.at(i):
+                on IndexNotFound:
+                    fail std::event_loop::SchedulerFault
+            std::event_loop::post(r, kind, 0)
+    if kind == 9:
+        loop a in app.acceptor:
+            std::event_loop::post(a, 9, 0)
+
+fn stats_json(context app: App) -> str:
+    names = ["accepted", "closed", "requests", "subscribers", "subscribers_ended", "slow_dropped", "max_pending", "idle_closed", "bad_requests", "too_large", "events", "released", "eagain", "mode_switches", "refused", "lagged", "live"]
+    acc = std::mutable_array::create(1, "{")
+    loop i from 0 to std::list::length(names):
+        name = std::list::at(names, i):
+            on IndexNotFound:
+                "?"
+        sep = if i == 0:
+            ""
+        else:
+            ", "
+        acc.set(0, acc.at(0).concat(sep).append_char('"').concat(name).concat("\": ").concat(std::int::to_string(stat(i)))):
+            on IndexNotFound:
+                unit
+    acc.at(0).concat(http1::cat(", \"items\": ", app.items.length())).concat(http1::cat(", \"seq\": ", conf(c_seq))).append_char('}'):
+        on IndexNotFound:
+            "{}"
+
+fn items_json(context app: App) -> str:
+    acc = std::mutable_array::create(1, "[")
+    loop item in app.items:
+        sep = if acc.at(0) == "[":
+            ""
+        else:
+            ", "
+        acc.set(0, acc.at(0).concat(sep).concat(item)):
+            on IndexNotFound:
+                unit
+    acc.at(0).append_char(']'):
+        on IndexNotFound:
+            "[]"
+
+# What a request's handling produced: the response bytes, whether the
+# connection closes after them, and, for an event stream, the first event
+# sequence number to send (-1: not a stream).
+struct Reply:
+    bytes: std::abi::bytes::Bytes
+    close: bool
+    stream_from: int
+
+fn plain(status: int, body: str, close: bool) -> Reply:
+    Reply {bytes: http1::response(status, "text/plain", body, close), close: close, stream_from: -1}
+
+fn json(status: int, body: str, close: bool) -> Reply:
+    Reply {bytes: http1::response(status, "application/json", body, close), close: close, stream_from: -1}
+
+fn handle(req: http1::Request, body: std::abi::bytes::Bytes, context app: App, ev: std::event_loop::Loop) -> Reply errors std::event_loop::SchedulerFault:
+    path = http1::path_of(req.target)
+    m = req.method
+    if path == "/health":
+        if m != "GET":
+            return plain(405, "method not allowed\n", req.close)
+        return plain(200, "ok\n", req.close)
+    if path == "/items":
+        if m == "GET":
+            return json(200, items_json(), req.close)
+        if m == "POST":
+            text = std::abi::bytes::decode_utf8(body):
+                on InvalidUtf8:
+                    ""
+            t = http1::trim_spaces(text)
+            n = t.length()
+            first = t.char_at(0):
+                on IndexNotFound:
+                    ' '
+            last = t.char_at(n - 1):
+                on IndexNotFound:
+                    ' '
+            if n < 2 or first != '{' or last != '}':
+                bump(s_bad_requests)
+                return json(400, "{\"error\": \"expected a JSON object\"}", req.close)
+            app.items.push(t)
+            publish("item", t)
+            return json(201, http1::cat("{\"id\": ", app.items.length()).append_char('}'), req.close)
+        return plain(405, "method not allowed\n", req.close)
+    if path == "/events" and m == "GET":
+        seq = conf(c_seq)
+        from = if req.last_event_id >= 0 and seq - req.last_event_id < ring_size():
+            req.last_event_id + 1
+        else:
+            seq + 1
+        return Reply {bytes: http1::sse_head(), close: false, stream_from: from}
+    if path == "/burst" and m == "POST":
+        count = http1::query_int(req.target, "n", 1)
+        size = http1::query_int(req.target, "size", 16)
+        filler = std::mutable_array::create(1, "")
+        loop i from 0 to size:
+            filler.set(0, filler.at(0).append_char('x')):
+                on IndexNotFound:
+                    unit
+        payload = filler.at(0):
+            on IndexNotFound:
+                ""
+        # The publisher yields every 32 events: subscribers run in between.
+        loop i from 0 to count:
+            publish("burst", http1::cat("", i).append_char(' ').concat(payload))
+            if i.mod(32) == 31:
+                std::event_loop::yield_now()
+        return plain(200, http1::cat("published ", count).append_char('\n'), req.close)
+    if path == "/stats" and m == "GET":
+        return json(200, stats_json(), req.close)
+    if path == "/shutdown" and m == "POST":
+        set_conf(c_stopping, 1)
+        broadcast(9)
+        return plain(200, "stopping\n", true)
+    plain(404, "not found\n", req.close)
+
+# --- connection lifetimes -------------------------------------------------
+
+# A connection's socket: a resource (LEXICAL-RESOURCE-CLEANUP-EXPLORATION-
+# MILESTONE-1.md) whose cleanup stops the watch recorded for its slot (if
+# any is left) and closes the descriptor -- wherever its owner's scope
+# ends: the task's return, a failure, or the loop abandoning the task.
+opaque resource struct SocketOwner:
+    slot: int
+    fd: int
+
+fn own(slot: int, fd: int) -> SocketOwner:
+    SocketOwner {slot: slot, fd: fd}
+
+fn record_watch(slot: int, w: event_loop_linux::Watch, context app: App):
+    if app.watches.length() > slot:
+        app.watches.swap(slot, w):
+            on IndexNotFound:
+                w
+        app.watched.swap(slot, 1):
+            on IndexNotFound:
+                0
+    else:
+        app.watches.push(w)
+        app.watched.push(1)
+
+fn forget_watch(slot: int, context app: App, nat: event_loop_linux::Native):
+    watching = app.watched.at(slot):
+        on IndexNotFound:
+            0
+    if watching == 1:
+        w = app.watches.at(slot):
+            on IndexNotFound:
+                return unit
+        event_loop_linux::unwatch(w)
+        app.watched.swap(slot, 0):
+            on IndexNotFound:
+                0
+
+cleanup fn release(owner: SocketOwner, context app: App, nat: event_loop_linux::Native):
+    {slot, fd} = owner
+    forget_watch(slot)
+    rawnet::shutdown(fdv(fd), rawnet::c32(2))
+    std::linux::close(fdv(fd))
+    bump(s_released)
+
+# Per-connection task state, a task-local MutableArray (kept across its
+# suspensions by the coroutine).
+private k_both = 0
+private k_close_after = 1
+private k_stream = 2
+private k_next = 3
+private k_active = 4
+private k_beat = 5
+private k_gone = 6
+private k_done = 7
+
+fn get(st: MutableArray[int], i: int) -> int:
+    st.at(i):
+        on IndexNotFound:
+            0
+
+fn bytes_at(a: MutableArray[std::abi::bytes::Bytes]) -> std::abi::bytes::Bytes:
+    a.at(0):
+        on IndexNotFound:
+            http1::empty()
+
+# The connection task: reads requests, answers them in order, keeps the
+# connection for the next one (HTTP/1.1 persistence), and turns into an
+# event stream on GET /events. Ends on the peer's end of input, an error,
+# a protocol violation, idle time, a slow subscriber, or shutdown.
+fn connection(slot: int, fd: int, reg_owner: std::event_loop::Owner, reg: std::event_loop::Reg, context app: App, ev: std::event_loop::Loop, nat: event_loop_linux::Native) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    sock = own(slot, fd)
+    w0 = event_loop_linux::watch(fd, event_loop_linux::Interest::Readable, reg)
+    record_watch(slot, w0)
+    watch = std::mutable_vector::from_list([w0])
+    inbuf = std::mutable_array::create(1, http1::empty())
+    outbuf = std::mutable_array::create(1, http1::empty())
+    st = std::mutable_array::create(8, 0)
+    st.set(k_active, now())
+    st.set(k_beat, now())
+    loop:
+        # 1. Whatever the socket holds now (bounded per wake).
+        loop k from 0 to 16:
+            r = std::linux::read(fdv(fd), std::abi::bytes::zeroed(std::abi::usize(4096)))
+            if r.result == -11:
+                break
+            if r.result <= 0:
+                st.set(k_gone, 1)
+                break
+            count = std::abi::usize(r.result):
+                on std::abi::AbiIntegerBelowRange:
+                    std::abi::usize(0)
+                on std::abi::AbiIntegerAboveRange:
+                    std::abi::usize(0)
+            chunk = r.data.freeze_prefix(count):
+                on UpperOverrun:
+                    http1::empty()
+            if get(st, k_stream) == 0:
+                inbuf.set(0, std::abi::bytes::join([bytes_at(inbuf), chunk]))
+            st.set(k_active, now())
+        # 2. Every complete request, in order.
+        if get(st, k_stream) == 0 and get(st, k_close_after) == 0 and not stopping?():
+            loop:
+                buf = bytes_at(inbuf)
+                s = http1::scan(buf, conf(c_max_head))
+                if s.state == 0:
+                    break
+                if s.state != 1:
+                    status = if s.state == 2:
+                        431
+                    else:
+                        400
+                    bump(s_bad_requests)
+                    outbuf.set(0, std::abi::bytes::join([bytes_at(outbuf), http1::response(status, "text/plain", "bad request head\n", true)]))
+                    st.set(k_close_after, 1)
+                    break
+                req = http1::parse(s.text)
+                if req.status != 0:
+                    bump(s_bad_requests)
+                    outbuf.set(0, std::abi::bytes::join([bytes_at(outbuf), http1::response(req.status, "text/plain", "rejected\n", true)]))
+                    st.set(k_close_after, 1)
+                    break
+                if req.content_length > conf(c_max_body):
+                    bump(s_too_large)
+                    outbuf.set(0, std::abi::bytes::join([bytes_at(outbuf), http1::response(413, "text/plain", "body too large\n", true)]))
+                    st.set(k_close_after, 1)
+                    break
+                total = s.bytes + req.content_length
+                if http1::blen(buf) < total:
+                    break
+                body = http1::bslice(buf, s.bytes, total)
+                inbuf.set(0, http1::bslice(buf, total, http1::blen(buf)))
+                bump(s_requests)
+                reply = handle(req, body)
+                outbuf.set(0, std::abi::bytes::join([bytes_at(outbuf), reply.bytes]))
+                if reply.stream_from >= 0:
+                    st.set(k_stream, 1)
+                    st.set(k_next, reply.stream_from)
+                    app.subs.swap(slot, 1)
+                    bump(s_subscribers)
+                    inbuf.set(0, http1::empty())
+                    break
+                if reply.close:
+                    st.set(k_close_after, 1)
+                    break
+        # 3. A stream: the events it has not sent, a heartbeat when due.
+        if get(st, k_stream) == 1:
+            seq = conf(c_seq)
+            next = get(st, k_next)
+            if seq + 1 - next > ring_size():
+                bump(s_lagged)
+                st.set(k_done, 1)
+            else:
+                loop s from next to seq + 1:
+                    framed = app.ring.at(s.mod(ring_size()))
+                    outbuf.set(0, std::abi::bytes::join([bytes_at(outbuf), http1::utf8(framed)]))
+                st.set(k_next, seq + 1)
+            if now() - get(st, k_beat) >= conf(c_heartbeat):
+                outbuf.set(0, std::abi::bytes::join([bytes_at(outbuf), http1::utf8(": heartbeat\n\n")]))
+                st.set(k_beat, now())
+            if stopping?() and get(st, k_close_after) == 0:
+                outbuf.set(0, std::abi::bytes::join([bytes_at(outbuf), http1::utf8("event: shutdown\ndata: bye\n\n")]))
+                st.set(k_close_after, 1)
+        # 4. Bounded output: a stream whose client does not read is dropped.
+        pending = http1::blen(bytes_at(outbuf))
+        raise_max(s_max_pending, pending)
+        if get(st, k_stream) == 1 and pending > conf(c_sub_limit):
+            bump(s_slow_dropped)
+            st.set(k_done, 1)
+        # 5. As much as the socket takes now.
+        if get(st, k_done) == 0:
+            loop:
+                o = bytes_at(outbuf)
+                if http1::blen(o) == 0:
+                    break
+                sent = rawnet::send(fdv(fd), o, rawnet::c32(16384))
+                if sent > 0:
+                    outbuf.set(0, http1::bslice(o, sent, http1::blen(o)))
+                elif sent == -11:
+                    bump(s_eagain)
+                    break
+                else:
+                    st.set(k_gone, 1)
+                    outbuf.set(0, http1::empty())
+                    break
+        # 6. The end?
+        left = http1::blen(bytes_at(outbuf))
+        if get(st, k_done) == 1 or get(st, k_gone) == 1:
+            break
+        if get(st, k_close_after) == 1 and left == 0:
+            break
+        if stopping?() and get(st, k_stream) == 0 and left == 0:
+            break
+        if get(st, k_stream) == 0 and now() - get(st, k_active) > conf(c_idle):
+            bump(s_idle_closed)
+            break
+        # 7. What to wait for: writability only while output is pending
+        # (a watch's interest is fixed: switching is unwatch + watch).
+        want = if left > 0:
+            1
+        else:
+            0
+        if want != get(st, k_both):
+            event_loop_linux::unwatch(watch.at(0))
+            interest = if want == 1:
+                event_loop_linux::Interest::Both
+            else:
+                event_loop_linux::Interest::Readable
+            nw = event_loop_linux::watch(fd, interest, reg)
+            watch.swap(0, nw)
+            record_watch(slot, nw)
+            st.set(k_both, want)
+            bump(s_mode_switches)
+        else:
+            event_loop_linux::rearm(watch.at(0))
+        e = std::event_loop::wait(reg)
+        if e.reason == Wake::Revoked:
+            break
+    # Leaving: the watch first (forget_watch), the slot freed; the socket
+    # and the registration are released where their owners' scopes end.
+    forget_watch(slot)
+    if get(st, k_stream) == 1:
+        app.subs.swap(slot, 0)
+        bump(s_sub_ended)
+    app.live.swap(slot, 0)
+    bump(s_closed)
+    drop_stat(s_live)
+    slot
+
+# A free connection slot (its registration recorded), or a new one.
+fn slot_for(reg: std::event_loop::Reg, context app: App) -> int:
+    n = app.live.length()
+    found = std::mutable_array::create(1, -1)
+    loop i from 0 to n:
+        l = app.live.at(i):
+            on IndexNotFound:
+                1
+        if l == 0:
+            found.set(0, i):
+                on IndexNotFound:
+                    unit
+            break
+    i = found.at(0):
+        on IndexNotFound:
+            -1
+    if i >= 0:
+        app.regs.swap(i, reg):
+            on IndexNotFound:
+                reg
+        app.live.swap(i, 1):
+            on IndexNotFound:
+                0
+        app.subs.swap(i, 0):
+            on IndexNotFound:
+                0
+        return i
+    app.regs.push(reg)
+    app.live.push(1)
+    app.subs.push(0)
+    n
+
+# The acceptor task: accepts every waiting connection when the listening
+# socket is readable, one connection task each.
+fn acceptor(lfd: int, context app: App, ev: std::event_loop::Loop, nat: event_loop_linux::Native) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    {owner, reg} = std::event_loop::owned_source(Delivery::Coalesce, 1, :keep_alive)
+    app.acceptor.push(reg)
+    w = event_loop_linux::watch(lfd, event_loop_linux::Interest::Readable, reg)
+    loop:
+        if stopping?():
+            break
+        loop:
+            c = rawnet::accept4(fdv(lfd), rawnet::c32(2048 + 524288))
+            if c < 0:
+                break
+            if stat(s_live) >= conf(c_max_conns):
+                bump(s_refused)
+                std::linux::close(fdv(c))
+                continue
+            if conf(c_sndbuf) > 0:
+                rawnet::setsockopt_int(fdv(c), rawnet::c32(1), rawnet::c32(7), rawnet::c_int_bytes(conf(c_sndbuf)))
+            {owner: conn_owner, reg: conn_reg} = std::event_loop::owned_source(Delivery::Coalesce, 1, :keep_alive)
+            slot = slot_for(conn_reg)
+            bump(s_accepted)
+            bump(s_live)
+            coroutine {step, first} = connection(slot, c, conn_owner, conn_reg)
+            std::event_loop::adopt(step, first)
+        event_loop_linux::rearm(w)
+        e = std::event_loop::wait(reg)
+        if e.reason == Wake::Revoked:
+            break
+    event_loop_linux::unwatch(w)
+    std::linux::close(fdv(lfd))
+    0
+
+# The ticker: every PERIOD microseconds, a tick to every live connection
+# (heartbeats and idle deadlines: a task waits on one registration, so its
+# timeouts arrive as posts).
+fn ticker(period: int, context app: App, ev: std::event_loop::Loop) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    {owner, reg} = std::event_loop::owned_every(period)
+    loop:
+        e = std::event_loop::wait(reg)
+        if e.reason != Wake::Timer or stopping?():
+            break
+        broadcast(2)
+    0

@@ -1,0 +1,44 @@
+# protocol.bot -- census probe P2's protocol half on every backend
+# (HTTP-SSE-SERVER-CENSUS-MILESTONE-1.md): http1.bot's head scanner, parser,
+# response writer and SSE framing over byte prefixes a read could deliver,
+# with no socket and no authority. Its value is the observations.
+import http1
+import std::abi
+import std::abi::bytes
+import std::byte
+import std::list
+import std::str
+
+fn bytes_of(text: str) -> std::abi::bytes::Bytes:
+    std::abi::bytes::from_list(text.encode_utf8())
+
+req = bytes_of("POST /items?x=1 HTTP/1.1\r\nHost: t\r\nContent-Length: 14\r\nConnection: keep-alive\r\n\r\n{\"name\": \"é\"}")
+# The scanner's state for prefixes a read could deliver: 0 incomplete, 1 complete.
+states = loop k in [10, 40, 80, 81, http1::blen(req)]:
+    http1::scan(http1::bslice(req, 0, k), 8192).state
+s = http1::scan(req, 8192)
+r = http1::parse(s.text)
+body = http1::bslice(req, s.bytes, s.bytes + r.content_length)
+decoded = std::abi::bytes::decode_utf8(body):
+    on InvalidUtf8:
+        "InvalidUtf8"
+# A head whose character a read cut in two: incomplete, not invalid.
+cut = http1::scan(http1::bslice(bytes_of("GET /é HTTP/1.1\r\nHost: t\r\n\r\n"), 0, 6), 8192).state
+# Bytes that are not UTF-8: state 3.
+# (A List of Int literals is no List of Byte: each is converted explicitly.)
+ff = std::byte::from_int(255):
+    on std::byte::BelowRange:
+        0
+    on std::byte::AboveRange:
+        0
+invalid = http1::scan(std::abi::bytes::join([bytes_of("GET /"), std::abi::bytes::from_list([ff]), bytes_of(" HTTP/1.1\r\nHost: t\r\n\r\n")]), 8192).state
+# Too long without a blank line: state 2.
+long = http1::scan(bytes_of("GET /aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), 32).state
+no_host = http1::parse("GET / HTTP/1.1\r\nAccept: x").status
+chunked = http1::parse("POST / HTTP/1.1\r\nHost: t\r\nTransfer-Encoding: chunked").status
+http10 = http1::parse("GET / HTTP/1.0").close
+framed = http1::data_lines("a\r\nb\nc\rd")
+resp = std::abi::bytes::decode_utf8(http1::response(200, "text/plain", "ok\n", false)):
+    on InvalidUtf8:
+        "InvalidUtf8"
+[states, s.bytes, r.method, r.target, r.content_length, r.close, decoded, cut, invalid, long, no_host, chunked, http10, framed, resp]

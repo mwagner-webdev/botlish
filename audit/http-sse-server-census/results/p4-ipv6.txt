@@ -1,0 +1,8 @@
+# P4: IPv6 listener on [::1] over raw syscalls, 2026-11-13T16:37:31Z
+# the container's kernel has no IPv6: /proc/net/if_inet6 absent; Python: OSError: [Errno 97] Address family not supported by protocol
+socket AF_INET6 -97
+bind [::1] -9
+listen -9
+accept -9
+read -9
+send -9

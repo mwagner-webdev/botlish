@@ -1,0 +1,54 @@
+# p_bytes_list.bot -- census probe: getting at the bytes of a received
+# chunk. std::abi::bytes has no indexing and no conversion to a List; a
+# fixed layout of N one-byte elements turns an N-byte Bytes into a List of
+# N ints (std::binary::parse requires exactly the layout's size), so a
+# fixed-size read buffer can be inspected byte by byte -- and the CRLFCRLF
+# that ends a request head found -- without decoding it as UTF-8.
+import std::abi
+import std::abi::bytes
+import std::binary
+import std::list
+import std::mutable_array
+import std::str
+import type std::byte::Byte
+
+layout Chunk:
+    size 16
+    align 1
+    field b: array 16 of std::binary::U8 at 0
+
+# Index of the first CR LF CR LF in XS, or -1.
+fn head_end(xs: List[std::binary::U8]) -> int errors IndexNotFound:
+    n = std::list::length(xs)
+    found = std::mutable_array::create(1, -1)
+    loop i from 0 to n - 3:
+        if std::list::at(xs, i) == 13 and std::list::at(xs, i + 1) == 10 and std::list::at(xs, i + 2) == 13 and std::list::at(xs, i + 3) == 10:
+            found.set(0, i)
+            break
+    found.at(0)
+
+# A 16-byte buffer as a read(2) could leave it: a request head's start, a
+# two-byte character in its path.
+raw = std::abi::bytes::from_list("GET /é H\r\n\r\nxyz".encode_utf8())
+# Decoding the first 6 bytes (a read that stopped inside the character)
+# fails; the layout gives every byte whatever was cut.
+half = std::abi::bytes::slice(raw, 0, 6):
+    on LowerUnderrun:
+        raw
+    on UpperOverrun:
+        raw
+decoded = std::abi::bytes::decode_utf8(half):
+    on InvalidUtf8:
+        "InvalidUtf8"
+# What the layout gives: the length of the List, the head's end, the
+# sixth byte (the first byte of the two-byte character the slice above cut).
+fn inspect(data: std::abi::bytes::Bytes) -> List[int] errors LayoutLengthMismatch, IndexNotFound:
+    bytes = std::binary::parse(Chunk, data)
+    [std::list::length(bytes.b), head_end(bytes.b), std::list::at(bytes.b, 5)]
+
+seen = inspect(raw):
+    on LayoutLengthMismatch:
+        [-1]
+    on IndexNotFound:
+        [-2]
+[decoded, seen]

@@ -1,0 +1,13 @@
+# run.sh p1 (P1: probes/p1/listen.bot over raw syscalls; drivers/p1_driver.py), 2026-11-13T16:56:18Z, commit ede621b1
+[1 curl] curl exit 0; status line 'HTTP/1.1 200 OK'; body 'you asked: GET /health HTTP/1.1\n'; stderr ''
+[2 fragmented] fragments 26; response b'HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 35\r\nConnection: close\r\n\r\nyou asked: GET /items?x=1 HTTP/1.1\n'
+[3 utf8 split] cut at byte 9 (inside U+00E9); response b''
+[server exit 0]
+socket 3
+setsockopt SO_REUSEADDR 0
+bind 0
+listen 0
+getsockname 0 address bytes 16
+conn 0 reads 12 head chars 84 line [GET /health HTTP/1.1] sends 1
+conn 1 reads 26 head chars 54 line [GET /items?x=1 HTTP/1.1] sends 1
+FAILED utf8 (a character split across reads would fail here) 2

@@ -1,0 +1,11 @@
+# tools/alloc.tcl: native heap allocations per operation (N=110 minus N=10, /100), 2026-11-13T17:06:32Z, commit ede621b1
+operation                       allocs/op     bytes/op  by kind (allocations/op)
+zeroed-4096+freeze_prefix            3.00       4200.0  Struct 1.0, Bytes 1.0, MutableBytes 1.0
+linux-read-4096-fd0                  3.00       8264.0  Struct 1.0, MutableBytes 2.0
+join-32-onto-buffer                  6.00       2168.0  List 3.0, Struct 1.0, Bytes 1.0, ListPlan 1.0
+scan-head-130-bytes                248.00      11558.0  String 126.0, List 2.0, Struct 3.0, MutableArray 115.0, Bytes 1.0, MutableVector 1.0
+scan+parse-head                    323.00      18728.0  String 26.0, List 3.0, Struct 3.0, MutableArray 289.0, Bytes 1.0, MutableVector 1.0
+response-200-ok                     18.00       1446.0  String 5.0, List 5.0, Struct 2.0, Bytes 3.0, StringPlan 2.0, ListPlan 1.0
+sse-frame-to-bytes                   2.00        400.0  List 1.0, Bytes 1.0
+sse-data_lines-30-chars             30.00       1398.0  String 29.0, MutableArray 1.0
+exit 0

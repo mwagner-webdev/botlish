@@ -1,0 +1,67 @@
+# signal.bot -- census probe P3 (HTTP-SSE-SERVER-CENSUS-MILESTONE-1.md):
+# whether a Botlish program can take SIGTERM as an event (a graceful
+# shutdown) with raw syscalls alone: block SIGTERM with rt_sigprocmask(2),
+# open a signalfd(2) for it, read the signalfd. The program prints
+# "ready", then blocks in the read; the driver sends SIGTERM to the
+# process. Printed afterwards: what the read returned.
+direct module
+
+import rawnet
+import std::abi
+import std::abi::bytes
+import std::abi::x86_64
+import std::int
+import std::linux
+import std::linux::abi::x86_64
+import std::str
+import type std::byte::Byte
+
+fn out(text: str):
+    std::abi::i32(1).write(std::abi::bytes::from_list(text.append_char('\n').encode_utf8()))
+
+# A sigset_t (8 bytes) holding SIGTERM (15: bit 14, byte 1's bit 6).
+fn sigterm_set() -> std::abi::bytes::Bytes:
+    z = rawnet::byte(0)
+    std::abi::bytes::from_list([z, rawnet::byte(64), z, z, z, z, z, z])
+
+fn block(set: std::abi::bytes::Bytes) -> int:
+    std::abi::x86_64::to_int(
+        std::linux::abi::x86_64::syscall({
+            rax: std::abi::x86_64::register64(14),
+            rdi: std::abi::x86_64::register64(0),
+            rsi: std::abi::x86_64::from_bytes(set),
+            r10: std::abi::x86_64::register64(8),
+        })
+    )
+
+fn signalfd(set: std::abi::bytes::Bytes) -> int:
+    std::abi::x86_64::to_int(
+        std::linux::abi::x86_64::syscall({
+            rax: std::abi::x86_64::register64(289),
+            rdi: std::abi::x86_64::register64(-1),
+            rsi: std::abi::x86_64::from_bytes(set),
+            rdx: std::abi::x86_64::register64(8),
+            r10: std::abi::x86_64::register64(524288),
+        })
+    )
+
+# gettid(2) and getpid(2): which thread runs the program.
+fn tid() -> int:
+    std::abi::x86_64::to_int(std::linux::abi::x86_64::syscall({rax: std::abi::x86_64::register64(186)}))
+
+fn pid() -> int:
+    std::abi::x86_64::to_int(std::linux::abi::x86_64::syscall({rax: std::abi::x86_64::register64(39)}))
+
+set = sigterm_set()
+out("pid ".concat(std::int::to_string(pid())).concat(" tid ").concat(std::int::to_string(tid())))
+out("block ".concat(std::int::to_string(block(set))))
+sfd = signalfd(set)
+out("signalfd ".concat(std::int::to_string(sfd)))
+out("ready")
+fdv = std::abi::i32(sfd):
+    on std::abi::AbiIntegerBelowRange:
+        std::abi::I32 {value: -1}
+    on std::abi::AbiIntegerAboveRange:
+        std::abi::I32 {value: -1}
+r = std::linux::read(fdv, std::abi::bytes::zeroed(std::abi::usize(128)))
+out("read ".concat(std::int::to_string(r.result)))

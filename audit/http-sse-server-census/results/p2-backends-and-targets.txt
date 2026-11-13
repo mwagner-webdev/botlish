@@ -1,0 +1,17 @@
+# P2 server.bot on the interp backend (main.tcl run -backend interp), 2026-11-13T16:55:01Z
+event_loop_linux::evl_abi is a C function (extern c fn): calling it runs only on the native backends (cranelift, cranelift-generic, a native executable), which link and call the C library; the Tcl backends have no machine to call it on (CORE SEMANTIC NATIVE-ONLY)
+
+# P2 server.bot checked for other targets (main.tcl -check -target T); run in
+# the probe directory before tools/run.sh assembled it elsewhere, so the
+# messages name probes/p2/rawnet.bot (now probes/rawnet.bot, copied in).
+== target linux-aarch64
+== server.bot (check)
+   ok
+== target macos-aarch64
+== server.bot (check)
+   error: /home/user/botlish/audit/http-sse-server-census/probes/p2/rawnet.bot:12:8: namespace "std::linux::abi::x86_64" belongs to the Linux platform (the standard namespace std::linux and every namespace under it), which is unavailable for target macos-aarch64 (macOS on aarch64): a Linux module is never chosen for, mapped to or substituted on another operating system, whatever the architecture; compile for a Linux target (-target linux-aarch64) or import no Linux namespace (SURFACE MODULE UNSUPPORTED-PLATFORM)
+   note: audit/http-sse-server-census/probes/p2/server.bot:8:8: the import of "rawnet" here loads rawnet.bot
+== target windows-x86_64
+== server.bot (check)
+   error: /home/user/botlish/audit/http-sse-server-census/probes/p2/rawnet.bot:12:8: namespace "std::linux::abi::x86_64" belongs to the Linux platform (the standard namespace std::linux and every namespace under it), which is unavailable for target windows-x86_64 (Windows on x86_64): a Linux module is never chosen for, mapped to or substituted on another operating system, whatever the architecture; compile for a Linux target (-target linux-x86_64) or import no Linux namespace (SURFACE MODULE UNSUPPORTED-PLATFORM)
+   note: audit/http-sse-server-census/probes/p2/server.bot:8:8: the import of "rawnet" here loads rawnet.bot

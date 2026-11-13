@@ -1,0 +1,83 @@
+# server.bot -- census probe P2's entry program: installs the contexts and
+# runs the loop (HTTP-SSE-SERVER-CENSUS-MILESTONE-1.md).
+#
+#   server PORT [SNDBUF] [SUB_LIMIT] [HEARTBEAT_US] [IDLE_US] [MAX_CONNS] [RING]
+direct module
+
+import event_loop_linux
+import rawnet
+import http1
+import srv
+import std::abi
+import std::event_loop
+import std::int
+import std::linux
+import std::list
+import std::str
+
+fn arg(arguments: List[str], i: int, default: int) -> int:
+    if std::list::length(arguments) > i:
+        s = std::list::at(arguments, i):
+            on IndexNotFound:
+                ""
+        std::int::from_string(s):
+            on InvalidIntegerText:
+                default
+    else:
+        default
+
+arguments = argv():
+    on InvalidArgumentEncoding:
+        []
+port = arg(arguments, 1, 18080)
+with context std::event_loop::create(64)
+with context event_loop_linux::create()
+with context event_loop_linux::native()
+with context srv::create(8192, 65536, arg(arguments, 3, 65536), arg(arguments, 4, 1000000), arg(arguments, 5, 10000000), arg(arguments, 2, 0), arg(arguments, 6, 1000), arg(arguments, 7, 4096))
+
+fn listen_on(port: int) -> int:
+    s = rawnet::socket(rawnet::c32(2), rawnet::c32(1 + 2048 + 524288), rawnet::c32(0))
+    if s < 0:
+        return s
+    fd = srv::fdv(s)
+    rawnet::setsockopt_int(fd, rawnet::c32(1), rawnet::c32(2), rawnet::c_int_bytes(1))
+    p = if port < 0 or port > 65535:
+        0
+    else:
+        port
+    b = rawnet::bind(fd, rawnet::loopback(p))
+    if b < 0:
+        return b
+    l = rawnet::listen(fd, rawnet::c32(128))
+    if l < 0:
+        return l
+    s
+
+fn serve(lfd: int, context app: srv::App, ev: std::event_loop::Loop, d: event_loop_linux::Linux, nat: event_loop_linux::Native) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    coroutine {step, first} = srv::acceptor(lfd)
+    std::event_loop::adopt(step, first)
+    coroutine {step: tstep, first: tfirst} = srv::ticker(100000)
+    std::event_loop::adopt(tstep, tfirst)
+    std::event_loop::run()
+
+lfd = listen_on(port)
+srv::out(http1::cat("listen ", lfd).concat(http1::cat(" port ", port)))
+if lfd >= 0:
+    turns = serve(lfd):
+        on std::event_loop::TaskFailed {code}:
+            -1000 - code
+        on IndexNotFound:
+            -1
+        on std::event_loop::SchedulerFault:
+            -2
+        on std::event_loop::DriverFault {code}:
+            -3000 + code
+        on std::event_loop::LoopReentered:
+            -4
+    srv::out(http1::cat("run ", turns))
+    srv::out("stats ".concat(srv::stats_json()))
+    outcomes = std::event_loop::take_outcomes():
+        on std::event_loop::SchedulerFault:
+            []
+    srv::out(http1::cat("outcomes ", std::list::length(outcomes)))
+    event_loop_linux::close()

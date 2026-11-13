@@ -1,0 +1,60 @@
+# app.bot -- census probe P5's application: implements weblib::Routes with a
+# context of its own (its state), installs it, runs two library connection
+# tasks under the deterministic driver (every backend).
+import std::event_loop
+import std::event_loop::deterministic
+import std::mutable_vector
+import std::int
+import std::str
+import weblib
+import type std::event_loop::Delivery
+import type std::event_loop::Wake
+
+opaque context struct Items:
+    names: MutableVector[str]
+
+fn create() -> Items:
+    Items {names: std::mutable_vector::from_list([])}
+
+# Routes::route, the application's implementation: its own state, the Loop
+# reached through a helper (an implementation declares exactly one context,
+# the one it implements: a second declared context makes it no
+# implementation, MISSING-CONTEXT), and a yield, inside the library's task.
+# A helper with the Loop requirement: route reaches it transitively.
+fn announce(text: str, context ev: std::event_loop::Loop) errors std::event_loop::SchedulerFault:
+    std::event_loop::log(text)
+
+fn route(path: str, context items: Items) -> str errors std::event_loop::SchedulerFault:
+    if path == "/add":
+        items.names.push("item")
+        announce("logged through the Loop from the implementation")
+        std::event_loop::yield_now()
+        return "added"
+    if path == "/count":
+        return "count ".concat(std::int::to_string(items.names.length()))
+    "not found"
+
+with context std::event_loop::create(16, :trace)
+with context std::event_loop::deterministic::create()
+with context create()
+
+fn main(context ev: std::event_loop::Loop, d: std::event_loop::deterministic::Deterministic, items: Items) -> List[str] errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    done = std::event_loop::channel(Delivery::Reliable, 16)
+    coroutine {step, first} = weblib::connection(["/add", "/count"], done)
+    std::event_loop::adopt(step, first)
+    coroutine {step: s2, first: f2} = weblib::connection(["/add", "/count", "/nope"], done)
+    std::event_loop::adopt(s2, f2)
+    std::event_loop::run()
+    std::event_loop::trace()
+
+main():
+    on std::event_loop::TaskFailed:
+        ["task failed"]
+    on IndexNotFound:
+        ["index"]
+    on std::event_loop::SchedulerFault:
+        ["scheduler fault"]
+    on std::event_loop::DriverFault:
+        ["driver fault"]
+    on std::event_loop::LoopReentered:
+        ["reentered"]

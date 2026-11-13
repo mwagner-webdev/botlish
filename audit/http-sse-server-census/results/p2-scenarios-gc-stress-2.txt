@@ -1,0 +1,34 @@
+# run.sh p2-gc: P2's scenarios under BOTLISH_NATIVE_GC_STRESS=1 (the committed layout), 2026-11-13T17:09:14Z, commit ede621b1
+S01-curl: PASS (0.2s)
+    curl /health exit 0 'HTTP/1.1 200 OK'; POST '{"id": 1}'; GET /items parsed by json.loads: [{'name': 'first'}]; server exit 0
+S02-keepalive-pipelining: PASS (0.1s)
+    5 responses on one connection [200, 200, 200, 200, 200], 3 of them pipelined in one send; closed after 'Connection: close' (tail b''); accepted connections 3 (the driver's readiness probe, this one, the stats request)
+S03-fragmented: PASS (0.3s)
+    74 one-byte sends (the UTF-8 body split inside multi-byte characters): status 201; stored item [{'name': 'café ☕'}]
+S04-concurrency: PASS (2.2s)
+    20 requests while another connection holds half a head: max latency 5.1 ms, median 3.5 ms; the stalled connection closed by the idle deadline after 1.98s more (idle_closed 1)
+S05-sse-stream: PASS (1.4s)
+    status 'HTTP/1.1 200 OK'; 3 events over one response, 300 ms apart: ids ['1', '2', '3'], events ['item', 'item', 'item'], latency after each POST [5.6, 7.6, 5.2] ms; a CRLF inside the data arrived as two data lines, rejoined by the client: '{"n": 0,\n "text": "x"}' -> {'n': 0, 'text': 'x'}; connection still open after the last event: True
+S06-requests-beside-streams: PASS (0.8s)
+    5 open streams; 50 ordinary requests: max 9.9 ms, median 3.9 ms; one POST reached every stream: [1, 1, 1, 1, 1]
+S07-heartbeat: PASS (1.8s)
+    an idle stream received 4 heartbeat comments in 1.65 s (period 300 ms, ticked by the 100 ms ticker)
+S08-disconnect: PASS (0.4s)
+    server descriptors: 6 idle, 9 with 3 streams, 6 after the clients closed; all 3 streams ended 5 ms after the close with no event written to them (EOF seen by the read side); released 4 == closed 4
+S09-last-event-id: PASS (0.4s)
+    reconnect with Last-Event-ID: 2 after 5 events: received ids ['3', '4', '5'] from the in-memory ring (no durable replay)
+S10-slow-consumer: PASS (10.5s)
+    2000 events of ~230 bytes: the healthy stream received 2000; the stream that never reads was dropped (slow_dropped 1) with at most 67475 bytes queued (limit 65536); it received 14426 bytes before the close; RSS 4388 -> 4968 KiB; eagain 9, mode switches 1; burst took 8.99s; ordinary requests afterwards: max 10.8 ms
+S11-limits-and-malformed: PASS (5.3s)
+    {'header > 8 KiB': 431, 'body > 64 KiB': 413, 'garbage request line': 400, 'no Host (HTTP/1.1)': 400, 'chunked request body': 501, 'HTTP/2.0 version': 505, 'invalid UTF-8 head': 400, 'non-JSON body': 400, 'unknown path': 404, 'HTTP/1.0 default close': 200}; server still answers: 200
+S12-many-connections: PASS (21.3s)
+    200 concurrent clients x 5 keep-alive requests: 200 completed, 0 errors [], 21.05s wall (client timeout 10.0s); requests 1001; server descriptors afterwards 6
+S13-shutdown-with-active-connections: PASS (0.5s)
+    POST /shutdown with 3 streams, a half-sent head and an idle keep-alive connection: server exit 0 after 0.02s; every stream got 'event: shutdown' [True, True, True] then EOF [True, True, True]; the other two saw EOF [True, True]; final: ['run 11', 'stats {"accepted": 7, "closed": 7, "requests": 5, "subscribers": 3, "subscribers_ended": 3, "slow_dropped": 0, "max_pending": 92, "idle_closed": 0, "bad_requests": 0, "too_large": 0, "events": 0, "released": 7, "eagain": 0, "mode_switches": 0, "refused": 0, "lagged": 0, "live": 0, "items": 0, "seq": 0}', 'outcomes 9']
+S14-rst-during-burst: PASS (2.0s)
+    client reset its stream while the server was writing (SO_LINGER 0): server still answers 200, exit 0 (sendto with MSG_NOSIGNAL; the runtime also ignores SIGPIPE); stream ended 1
+S15-memory-steady: PASS (15.7s)
+    VmRSS after 1000 keep-alive requests 4344 KiB, after 6000 4344 KiB, after 20 more connections 4344 KiB
+
+summary: S01-curl=PASS S02-keepalive-pipelining=PASS S03-fragmented=PASS S04-concurrency=PASS S05-sse-stream=PASS S06-requests-beside-streams=PASS S07-heartbeat=PASS S08-disconnect=PASS S09-last-event-id=PASS S10-slow-consumer=PASS S11-limits-and-malformed=PASS S12-many-connections=PASS S13-shutdown-with-active-connections=PASS S14-rst-during-burst=PASS S15-memory-steady=PASS
+exit 0

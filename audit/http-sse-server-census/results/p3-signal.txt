@@ -1,0 +1,7 @@
+# p3_driver.py: SIGTERM to a program that blocked it and opened a signalfd, 2026-11-13T16:37:21Z
+threads of the process: ['6263', '6264']
+pid 6263 tid 6264
+block 0
+signalfd 3
+ready
+exit status: -15 (negative: killed by that signal)

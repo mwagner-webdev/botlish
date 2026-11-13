@@ -1,0 +1,391 @@
+# http1.bot -- census probe P2's protocol half (HTTP-SSE-SERVER-CENSUS-
+# MILESTONE-1.md): HTTP/1.1 request heads and responses and SSE framing as
+# ordinary, pure Botlish -- no socket, no event loop, no authority -- so it
+# runs, and is measured, on every backend. srv.bot is the server around it.
+import std::abi
+import std::abi::bytes
+import std::char
+import std::int
+import std::list
+import std::mutable_array
+import std::mutable_vector
+import std::str
+import type std::byte::Byte
+
+fn cat(a: str, n: int) -> str:
+    a.concat(std::int::to_string(n))
+
+# --- text helpers (ASCII heads) -----------------------------------------
+
+fn utf8(text: str) -> std::abi::bytes::Bytes:
+    std::abi::bytes::from_list(text.encode_utf8())
+
+# The index of PAT in TEXT at or after FROM, or -1.
+fn find(text: str, pat: str, from: int) -> int:
+    n = text.length()
+    m = pat.length()
+    found = std::mutable_array::create(1, -1)
+    loop i from from to n - m + 1:
+        hit = std::mutable_array::create(1, 1)
+        loop j from 0 to m:
+            a = text.char_at(i + j):
+                on IndexNotFound:
+                    'a'
+            b = pat.char_at(j):
+                on IndexNotFound:
+                    'b'
+            if a != b:
+                hit.set(0, 0):
+                    on IndexNotFound:
+                        unit
+                break
+        whole = hit.at(0):
+            on IndexNotFound:
+                0
+        if whole == 1:
+            found.set(0, i):
+                on IndexNotFound:
+                    unit
+            break
+    found.at(0):
+        on IndexNotFound:
+            -1
+
+fn sub(text: str, a: int, b: int) -> str:
+    text.substring(a, b):
+        on LowerUnderrun:
+            ""
+        on UpperOverrun:
+            ""
+
+fn trim_spaces(text: str) -> str:
+    n = text.length()
+    first = std::mutable_array::create(2, 0)
+    first.set(1, n):
+        on IndexNotFound:
+            unit
+    loop i from 0 to n:
+        c = text.char_at(i):
+            on IndexNotFound:
+                'x'
+        if c != ' ' and c != '\t':
+            break
+        first.set(0, i + 1):
+            on IndexNotFound:
+                unit
+    a = first.at(0):
+        on IndexNotFound:
+            0
+    loop k from 0 to n - a:
+        i = n - 1 - k
+        c = text.char_at(i):
+            on IndexNotFound:
+                'x'
+        if c != ' ' and c != '\t':
+            break
+        first.set(1, i):
+            on IndexNotFound:
+                unit
+    b = first.at(1):
+        on IndexNotFound:
+            n
+    sub(text, a, b)
+
+# The value of TEXT when it is 1 to 11 ASCII digits, else -1.
+fn decimal(text: str) -> int:
+    n = text.length()
+    if n == 0 or n > 11:
+        return -1
+    acc = std::mutable_array::create(1, 0)
+    loop i from 0 to n:
+        c = text.char_at(i):
+            on IndexNotFound:
+                'x'
+        v = std::char::scalar_value(c) - 48
+        if v < 0 or v > 9:
+            return -1
+        acc.set(0, acc.at(0) * 10 + v):
+            on IndexNotFound:
+                unit
+    acc.at(0):
+        on IndexNotFound:
+            -1
+
+fn empty() -> std::abi::bytes::Bytes:
+    std::abi::bytes::from_list([])
+
+fn blen(b: std::abi::bytes::Bytes) -> int:
+    std::abi::bytes::length(b).value
+
+fn bslice(b: std::abi::bytes::Bytes, from: int, to: int) -> std::abi::bytes::Bytes:
+    std::abi::bytes::slice(b, from, to):
+        on LowerUnderrun:
+            empty()
+        on UpperOverrun:
+            empty()
+
+# A decoded prefix of a buffer: TEXT is BUF's first bytes as UTF-8, up to a
+# character a read may have cut (at most 3 bytes left out); OK false when
+# the bytes are not UTF-8 at all.
+struct Decoded:
+    ok: bool
+    text: str
+
+fn decoded(buf: std::abi::bytes::Bytes, n: int) -> Decoded:
+    result = std::mutable_vector::from_list([Decoded {ok: false, text: ""}])
+    loop k from 0 to 4:
+        if n - k < 0:
+            break
+        bad = std::mutable_array::create(1, 0)
+        t = std::abi::bytes::decode_utf8(bslice(buf, 0, n - k)):
+            on InvalidUtf8:
+                bad.set(0, 1):
+                    on IndexNotFound:
+                        unit
+                ""
+        flag = bad.at(0):
+            on IndexNotFound:
+                1
+        if flag == 0:
+            result.swap(0, Decoded {ok: true, text: t}):
+                on IndexNotFound:
+                    Decoded {ok: false, text: ""}
+            break
+    result.at(0):
+        on IndexNotFound:
+            Decoded {ok: false, text: ""}
+
+# Where the head in BUF ends: STATE 0 incomplete, 1 complete (TEXT the
+# decoded head without its blank line, BYTES the head's length in bytes
+# with it), 2 longer than MAX bytes, 3 not UTF-8.
+struct Scan:
+    state: int
+    text: str
+    bytes: int
+
+fn scan(buf: std::abi::bytes::Bytes, max: int) -> Scan:
+    n = blen(buf)
+    look = if n > max + 4:
+        max + 4
+    else:
+        n
+    d = decoded(buf, look)
+    if not d.ok:
+        return Scan {state: 3, text: "", bytes: 0}
+    e = find(d.text, "\r\n\r\n", 0)
+    if e < 0:
+        if n > max:
+            return Scan {state: 2, text: "", bytes: 0}
+        return Scan {state: 0, text: "", bytes: 0}
+    head = sub(d.text, 0, e)
+    Scan {state: 1, text: head, bytes: std::list::length(head.encode_utf8()) + 4}
+
+struct Request:
+    status: int
+    method: str
+    target: str
+    content_length: int
+    close: bool
+    last_event_id: int
+
+fn bad(status: int) -> Request:
+    Request {status: status, method: "", target: "", content_length: 0, close: true, last_event_id: -1}
+
+fn field(f: MutableArray[int], i: int) -> int:
+    f.at(i):
+        on IndexNotFound:
+            0
+
+# Parse HEAD (the request line and header lines, CRLF-separated).
+fn parse(head: str) -> Request:
+    n = head.length()
+    line_end0 = find(head, "\r\n", 0)
+    line_end = if line_end0 < 0:
+        n
+    else:
+        line_end0
+    line = sub(head, 0, line_end)
+    sp1 = find(line, " ", 0)
+    if sp1 <= 0:
+        return bad(400)
+    sp2 = find(line, " ", sp1 + 1)
+    if sp2 <= sp1 + 1:
+        return bad(400)
+    method = sub(line, 0, sp1)
+    target = sub(line, sp1 + 1, sp2)
+    version = sub(line, sp2 + 1, line.length())
+    if version != "HTTP/1.1" and version != "HTTP/1.0":
+        return bad(505)
+    # [content-length, close, host seen, last-event-id, keep-alive, chunked]
+    default_close = if version == "HTTP/1.0":
+        1
+    else:
+        0
+    f = std::mutable_array::from_list([0, default_close, 0, -1, 0, 0])
+    pos = std::mutable_array::create(1, line_end + 2)
+    loop:
+        at = pos.at(0):
+            on IndexNotFound:
+                n
+        if at >= n:
+            break
+        e0 = find(head, "\r\n", at)
+        e = if e0 < 0:
+            n
+        else:
+            e0
+        hl = sub(head, at, e)
+        pos.set(0, e + 2):
+            on IndexNotFound:
+                unit
+        first = hl.char_at(0):
+            on IndexNotFound:
+                ' '
+        if first == ' ' or first == '\t':
+            return bad(400)
+        colon = find(hl, ":", 0)
+        if colon <= 0:
+            return bad(400)
+        name = sub(hl, 0, colon).lowercase()
+        value = trim_spaces(sub(hl, colon + 1, hl.length()))
+        if name == "content-length":
+            v = decimal(value)
+            if v < 0:
+                return bad(400)
+            f.set(0, v):
+                on IndexNotFound:
+                    unit
+        elif name == "transfer-encoding":
+            f.set(5, 1):
+                on IndexNotFound:
+                    unit
+        elif name == "connection":
+            lv = value.lowercase()
+            if find(lv, "close", 0) >= 0:
+                f.set(1, 1):
+                    on IndexNotFound:
+                        unit
+            elif find(lv, "keep-alive", 0) >= 0:
+                f.set(1, 0):
+                    on IndexNotFound:
+                        unit
+        elif name == "host":
+            f.set(2, 1):
+                on IndexNotFound:
+                    unit
+        elif name == "last-event-id":
+            f.set(3, decimal(value)):
+                on IndexNotFound:
+                    unit
+    if field(f, 5) == 1:
+        return bad(501)
+    if version == "HTTP/1.1" and field(f, 2) == 0:
+        return bad(400)
+    Request {status: 0, method: method, target: target, content_length: field(f, 0), close: field(f, 1) == 1, last_event_id: field(f, 3)}
+
+# --- responses -------------------------------------------------------------
+
+fn reason(status: int) -> str:
+    if status == 200:
+        "OK"
+    elif status == 201:
+        "Created"
+    elif status == 400:
+        "Bad Request"
+    elif status == 404:
+        "Not Found"
+    elif status == 405:
+        "Method Not Allowed"
+    elif status == 408:
+        "Request Timeout"
+    elif status == 413:
+        "Content Too Large"
+    elif status == 431:
+        "Request Header Fields Too Large"
+    elif status == 501:
+        "Not Implemented"
+    elif status == 503:
+        "Service Unavailable"
+    elif status == 505:
+        "HTTP Version Not Supported"
+    else:
+        "Unknown"
+
+fn response(status: int, ctype: str, body: str, close: bool) -> std::abi::bytes::Bytes:
+    b = body.encode_utf8()
+    connection = if close:
+        "Connection: close\r\n"
+    else:
+        ""
+    head = cat("HTTP/1.1 ", status).append_char(' ').concat(reason(status)).concat("\r\nContent-Type: ").concat(ctype).concat(cat("\r\nContent-Length: ", std::list::length(b))).concat("\r\n").concat(connection).concat("\r\n")
+    std::abi::bytes::join([utf8(head), std::abi::bytes::from_list(b)])
+
+fn sse_head() -> std::abi::bytes::Bytes:
+    utf8("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\n\r\nretry: 1000\n\n")
+
+# --- events ----------------------------------------------------------------
+
+# DATA as SSE data lines: every CR, LF or CRLF in it starts a new data line
+# (a field value can hold neither).
+fn data_lines(data: str) -> str:
+    n = data.length()
+    acc = std::mutable_array::create(2, "data: ")
+    loop i from 0 to n:
+        c = data.char_at(i):
+            on IndexNotFound:
+                ' '
+        prev = acc.at(1):
+            on IndexNotFound:
+                ""
+        if c == '\r':
+            acc.set(0, acc.at(0).concat("\ndata: ")):
+                on IndexNotFound:
+                    unit
+            acc.set(1, "cr"):
+                on IndexNotFound:
+                    unit
+        elif c == '\n':
+            if prev != "cr":
+                acc.set(0, acc.at(0).concat("\ndata: ")):
+                    on IndexNotFound:
+                        unit
+            acc.set(1, ""):
+                on IndexNotFound:
+                    unit
+        else:
+            acc.set(0, acc.at(0).append_char(c)):
+                on IndexNotFound:
+                    unit
+            acc.set(1, ""):
+                on IndexNotFound:
+                    unit
+    acc.at(0).append_char('\n'):
+        on IndexNotFound:
+            "data: \n"
+
+# The value of query parameter NAME in TARGET, or DEFAULT.
+fn query_int(target: str, name: str, default: int) -> int:
+    q = find(target, "?", 0)
+    if q < 0:
+        return default
+    k = find(target, name.append_char('='), q)
+    if k < 0:
+        return default
+    start = k + name.length() + 1
+    e0 = find(target, "&", start)
+    e = if e0 < 0:
+        target.length()
+    else:
+        e0
+    v = decimal(sub(target, start, e))
+    if v < 0:
+        default
+    else:
+        v
+
+fn path_of(target: str) -> str:
+    q = find(target, "?", 0)
+    if q < 0:
+        target
+    else:
+        sub(target, 0, q)

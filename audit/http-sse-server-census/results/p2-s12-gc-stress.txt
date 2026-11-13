@@ -1,0 +1,15 @@
+# S12 under BOTLISH_NATIVE_GC_STRESS=1 with CLIENT_TIMEOUT=10 (the default) and then 120
+S12-many-connections: PASS (18.3s)
+    200 concurrent clients x 5 keep-alive requests: 200 completed, 0 errors [], 18.07s wall (client timeout 10.0s); requests 1001; server descriptors afterwards 6
+
+summary: S12-many-connections=PASS
+S12-many-connections: PASS (18.8s)
+    200 concurrent clients x 5 keep-alive requests: 200 completed, 0 errors [], 18.57s wall (client timeout 120.0s); requests 1001; server descriptors afterwards 6
+
+summary: S12-many-connections=PASS
+S12-many-connections: PASS (18.3s)
+    200 concurrent clients x 5 keep-alive requests: 200 completed, 0 errors [], 18.02s wall (client timeout 10.0s); requests 1001; server descriptors afterwards 6
+S12-many-connections: PASS (18.4s)
+    200 concurrent clients x 5 keep-alive requests: 200 completed, 0 errors [], 18.03s wall (client timeout 10.0s); requests 1001; server descriptors afterwards 6
+S12-many-connections: PASS (20.1s)
+    200 concurrent clients x 5 keep-alive requests: 200 completed, 0 errors [], 19.72s wall (client timeout 10.0s); requests 1001; server descriptors afterwards 6

@@ -1,0 +1,143 @@
+# rawnet.bot -- census probe (HTTP-SSE-SERVER-CENSUS-MILESTONE-1.md): TCP
+# sockets over the raw Linux x86-64 syscall transport, written in Botlish
+# with no C. A direct module, as stdlib/linux.bot is: every function takes
+# any descriptor and exposes raw process authority. Probe code, not a
+# package: one syscall each, the kernel's raw signed result (-errno on
+# failure), no retry.
+direct module
+
+import std::abi
+import std::abi::bytes
+import std::abi::x86_64
+import std::linux::abi::x86_64
+import std::byte
+import type std::byte::Byte
+
+# socket(2) = 41.
+fn socket(domain: std::abi::I32, kind: std::abi::I32, protocol: std::abi::I32) -> int:
+    std::abi::x86_64::to_int(
+        std::linux::abi::x86_64::syscall({
+            rax: std::abi::x86_64::register64(41),
+            rdi: std::abi::x86_64::from_i32(domain),
+            rsi: std::abi::x86_64::from_i32(kind),
+            rdx: std::abi::x86_64::from_i32(protocol),
+        })
+    )
+
+# setsockopt(2) = 54, an int option.
+fn setsockopt_int(fd: std::abi::I32, level: std::abi::I32, name: std::abi::I32, value: std::abi::bytes::Bytes) -> int:
+    std::abi::x86_64::to_int(
+        std::linux::abi::x86_64::syscall({
+            rax: std::abi::x86_64::register64(54),
+            rdi: std::abi::x86_64::from_i32(fd),
+            rsi: std::abi::x86_64::from_i32(level),
+            rdx: std::abi::x86_64::from_i32(name),
+            r10: std::abi::x86_64::from_bytes(value),
+            r8: std::abi::x86_64::from_usize(std::abi::bytes::length(value)),
+        })
+    )
+
+# bind(2) = 49: ADDRESS is a struct sockaddr's bytes.
+fn bind(fd: std::abi::I32, address: std::abi::bytes::Bytes) -> int:
+    std::abi::x86_64::to_int(
+        std::linux::abi::x86_64::syscall({
+            rax: std::abi::x86_64::register64(49),
+            rdi: std::abi::x86_64::from_i32(fd),
+            rsi: std::abi::x86_64::from_bytes(address),
+            rdx: std::abi::x86_64::from_usize(std::abi::bytes::length(address)),
+        })
+    )
+
+# listen(2) = 50.
+fn listen(fd: std::abi::I32, backlog: std::abi::I32) -> int:
+    std::abi::x86_64::to_int(
+        std::linux::abi::x86_64::syscall({
+            rax: std::abi::x86_64::register64(50),
+            rdi: std::abi::x86_64::from_i32(fd),
+            rsi: std::abi::x86_64::from_i32(backlog),
+        })
+    )
+
+# accept4(2) = 288, the peer's address not asked for.
+fn accept4(fd: std::abi::I32, flags: std::abi::I32) -> int:
+    std::abi::x86_64::to_int(
+        std::linux::abi::x86_64::syscall({
+            rax: std::abi::x86_64::register64(288),
+            rdi: std::abi::x86_64::from_i32(fd),
+            r10: std::abi::x86_64::from_i32(flags),
+        })
+    )
+
+# sendto(2) = 44 with FLAGS (MSG_NOSIGNAL = 16384: EPIPE, never SIGPIPE),
+# no destination.
+fn send(fd: std::abi::I32, data: std::abi::bytes::Bytes, flags: std::abi::I32) -> int:
+    std::abi::x86_64::to_int(
+        std::linux::abi::x86_64::syscall({
+            rax: std::abi::x86_64::register64(44),
+            rdi: std::abi::x86_64::from_i32(fd),
+            rsi: std::abi::x86_64::from_bytes(data),
+            rdx: std::abi::x86_64::from_usize(std::abi::bytes::length(data)),
+            r10: std::abi::x86_64::from_i32(flags),
+        })
+    )
+
+# shutdown(2) = 48 (HOW: 0 read, 1 write, 2 both).
+fn shutdown(fd: std::abi::I32, how: std::abi::I32) -> int:
+    std::abi::x86_64::to_int(
+        std::linux::abi::x86_64::syscall({
+            rax: std::abi::x86_64::register64(48),
+            rdi: std::abi::x86_64::from_i32(fd),
+            rsi: std::abi::x86_64::from_i32(how),
+        })
+    )
+
+# getsockname(2) = 51: the bound address into a 16-byte buffer, its length
+# into a 4-byte one -- two writable exposures in one syscall.
+struct Named:
+    result: int
+    address: std::abi::bytes::MutableBytes
+    length: std::abi::bytes::MutableBytes
+
+fn getsockname(fd: std::abi::I32, address: std::abi::bytes::MutableBytes, length: std::abi::bytes::MutableBytes) -> Named:
+    a = std::abi::bytes::detach(address)
+    l = std::abi::bytes::detach(length)
+    r = std::abi::x86_64::to_int(
+        std::linux::abi::x86_64::syscall({
+            rax: std::abi::x86_64::register64(51),
+            rdi: std::abi::x86_64::from_i32(fd),
+            rsi: std::abi::x86_64::from_mutable_bytes(a),
+            rdx: std::abi::x86_64::from_mutable_bytes(l),
+        })
+    )
+    Named {result: r, address: a, length: l}
+
+type Port = Int in 0..65535
+
+# The low eight bits of V.
+fn byte(v: int) -> Byte:
+    b = bit_and(v, 255)
+    std::byte::from_int(b):
+        on std::byte::BelowRange:
+            0
+        on std::byte::AboveRange:
+            0
+
+# A struct sockaddr_in for 127.0.0.1:PORT (PORT in network byte order).
+fn loopback(port: Port) -> std::abi::bytes::Bytes:
+    z = byte(0)
+    std::abi::bytes::from_list([byte(2), z, byte(port.shift_right(8)), byte(port), byte(127), z, z, byte(1), z, z, z, z, z, z, z, z])
+
+
+# A C int's four bytes (little-endian), for setsockopt.
+fn c_int_bytes(v: int) -> std::abi::bytes::Bytes:
+    std::abi::bytes::from_list([byte(v), byte(v.shift_right(8)), byte(v.shift_right(16)), byte(v.shift_right(24))])
+
+# A literal's I32.
+fn c32(v: std::abi::I32Value) -> std::abi::I32:
+    std::abi::I32 {value: v}
+
+# A struct sockaddr_in6 for [::1]:PORT (28 bytes: family 10, the port in
+# network byte order, flow info, the address, the scope).
+fn loopback6(port: Port) -> std::abi::bytes::Bytes:
+    z = byte(0)
+    std::abi::bytes::from_list([byte(10), z, byte(port.shift_right(8)), byte(port), z, z, z, z, z, z, z, z, z, z, z, z, z, z, z, z, z, z, z, byte(1), z, z, z, z])

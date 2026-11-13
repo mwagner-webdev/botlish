@@ -1,0 +1,22 @@
+# weblib.bot -- census probe P5 (HTTP-SSE-SERVER-CENSUS-MILESTONE-1.md): how
+# a server library could hand requests to the application. A function that
+# requires a context is no value (CONTEXT-FUNCTION-VALUE), so no stateful
+# handler callback exists; the designed seam is a context trait the
+# application implements, selected statically. This library's "connection
+# task" calls the trait's operation, and the implementation -- the
+# application's -- reads and changes its own state, posts to the loop and
+# yields inside this library's task.
+import std::event_loop
+import std::str
+import type std::event_loop::Wake
+
+context trait Routes:
+    fn route(path: str) -> str errors std::event_loop::SchedulerFault
+
+# A connection task: three requests, each answered by the application.
+fn connection(paths: List[str], out: std::event_loop::Reg, context ev: std::event_loop::Loop, r: Routes) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    loop p in paths:
+        answer = r.route(p)
+        std::event_loop::log("answered ".concat(p).concat(" -> ").concat(answer))
+        std::event_loop::post(out, 1, 0)
+    0
