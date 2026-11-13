@@ -407,7 +407,11 @@ proc native::runtimeAbi {{triple ""}} {
     if {[info exists runtimeAbiCache] && [dict exists $runtimeAbiCache $triple]} {
         return [dict get $runtimeAbiCache $triple]
     }
-    set pipe [open |[list [binary] runtime-abi {*}[expr {$triple eq "" ? {} : [list $triple]}] 2>@1] r]
+    set command [list [binary] runtime-abi]
+    if {$triple ne ""} {
+        lappend command $triple
+    }
+    set pipe [open |[list {*}$command 2>@1] r]
     fconfigure $pipe -encoding utf-8 -translation lf
     set output [string trimright [read $pipe] \n]
     catch {close $pipe}

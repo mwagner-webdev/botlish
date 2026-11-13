@@ -511,27 +511,42 @@ no failures, the skips host constraints):
 | Catalogs, reference | `tools/mutant-catalogs.tcl` 0 problems; `tools/compilerpedia.tcl check` 0 problems (1298 topics, 776 examples) |
 
 **CI** (**CI**; the four test workflows dispatched on `bc160372` with
-`workflow_dispatch`, read at 19:30 UTC on 2026-11-13; later commits change
-only this report). A job not listed as passed or failed is pending, not
-passed:
+`workflow_dispatch`, read at 20:46 UTC on 2026-11-13). A job not listed as
+passed or failed is pending, not passed:
 
 | Workflow (run) | Passed | Failed | Pending |
 |---|---|---|---|
-| tests (43479266196) | canary (mutant catalogs, warning gate, canary files), native Rust unit tests and the driver without its JIT, golden shard 2/4 | -- | interp, compile, cranelift and cranelift-generic coverage, system- and stub-linked executables, golden shards 1, 3, 4, the method-call decision's reference audit |
-| tests (linux arm64) (43479271138) | canary, native Rust unit tests (also under GC stress), golden shards 1/4 and 2/4 | -- | interp, compile, both coverage jobs, both GC-stress jobs, system-linked executables, golden shards 3, 4 |
-| tests (macos arm64) (43479276703) | smoke (Tier A: Rust tests, native status, aot facts, the canary), the Linux control, acceptance shards 2/6 and 4/6 | -- | acceptance shards 1, 3, 5, 6; system linker; Botlish.app |
-| tests (windows x86-64) (43479281847) | canary; root plans; in the smoke job every check but one: Rust tests, the stack guard, native status (C calls, callbacks, byte borrowing), objects and executables (C runtime matrix), GC workloads and the unwind check, Windows I/O, DLL libraries, variadic C calls and the filesystem under GC stress | smoke's tier step: one test, `argv-focused-valid-fuzz` (tests/argv.test), on interp and compile alike | acceptance shards 1-4, system linker |
+| tests (43479266196) | canary (mutant catalogs, warning gate, canary files), native Rust unit tests and the driver without its JIT, golden shard 2/4, the method-call decision's reference audit | interp (3 of 12,367: `argv-focused-valid-fuzz`, `native-tcl-unicode-lowercase-all-scalars`, `nl-no-string-ternary`); cranelift coverage (the same three, its only "native backend bugs") | compile, cranelift-generic coverage, system- and stub-linked executables, golden shards 1, 3, 4 |
+| tests (linux arm64) (43479271138) | canary, native Rust unit tests (also under GC stress), golden shards 1-4 | system-linked executables (1 of 4,615: `argv-focused-valid-fuzz`) | interp, compile, both coverage jobs, both GC-stress jobs |
+| tests (macos arm64) (43479276703) | smoke (Tier A: Rust tests, native status, aot facts, the canary), the Linux control, acceptance shards 2/6 and 4/6 | acceptance shard 5/6 (1 of 2,415: `argv-focused-valid-fuzz`); system linker (its own tests 15/15, then 1 of 4,615 system-linked: `argv-focused-valid-fuzz`) | acceptance shards 1, 3, 6; Botlish.app |
+| tests (windows x86-64) (43479281847) | canary; root plans; in the smoke job every check but one: Rust tests, the stack guard, native status (C calls, callbacks, byte borrowing), objects and executables (C runtime matrix), GC workloads and the unwind check, Windows I/O, DLL libraries, variadic C calls and the filesystem under GC stress | smoke's tier step: `argv-focused-valid-fuzz`, on interp and compile alike | acceptance shards 1-4, system linker |
 | react-native 2048 (43477196183, the push of `401ac700`) | every job | -- | -- |
 
-The Windows failure is main's, not this branch's: main's own smoke job at
-the base commit `ce54fead` (run 43467261271, job 132035849002) fails the
-same test on the same three iterations (11, 22 and 29 of its seeded
-vectors: 7, 260 and 240 arguments, the backends disagreeing) on both
-passes. The program it runs calls no C and holds no C pointer, and a
-desktop target's code is byte-identical under this change (section 18).
-The previous green Windows run of main, `023dfaa3` (2026-11-12), predates
-the Rust 1.100.0 toolchain CI took on 2026-11-13; that the toolchain
-change is the cause is a guess, not established here.
+Three tests failed, two causes:
+
+* `nl-no-string-ternary` was this branch's: `native::runtimeAbi` chose its
+  argument list with `expr`'s `?:` (the rule of AGENTS.md, "Tcl's `expr`
+  reads a numeric-looking result as a number"). The commit after
+  `bc160372` builds the list with `if`; tests/numeric-looking-names.test
+  5/5, the runtime ABI answers unchanged (`14aa5041bb46ae5d`, Android's
+  `637264e0003a0b68`; at-runtime-identity, at-tagged-manifest,
+  at-library-elf and at-tagged-heap-pointer pass, **observed**).
+* `native-tcl-unicode-lowercase-all-scalars` and `argv-focused-valid-fuzz`
+  (whose program lowercases its arguments) are main's, the toolchain's: CI
+  installs stable Rust, 1.100.0 since 2026-11-12, whose standard library is
+  Unicode 18 (`char::UNICODE_VERSION`; 1.97.0's is 17) with 20 more simple
+  lowercase mappings (1,507 against 1,487, counted over every scalar,
+  **observed**). The native runtime's `std::str::lowercase` is Rust's
+  `char::to_lowercase` adjusted to the Tcl backends' Unicode 16, and the
+  new mappings are not adjusted: the native backends disagree with interp
+  and compile on planes 0 and 1. Both tests pass on this branch built with
+  rustc 1.97.0 (**observed**), and main's own Windows smoke job at the
+  base commit `ce54fead` (run 43467261271, job 132035849002) fails argv's
+  fuzz on the same three iterations (11, 22, 29) on both passes. Nothing of
+  either test calls C or holds a C pointer, and a desktop target's code is
+  byte-identical under this change (section 18). Fixing it -- making the
+  runtime's case mapping independent of the toolchain's Unicode version --
+  is main's, not this milestone's.
 
 main at the base commit `ce54fead`: c-bindgen, bench, icy-tower (Linux,
 macOS, Windows), single executable and scalar-asm-audit green, the Windows
@@ -539,6 +554,9 @@ smoke failure above; its previous commit's canaries had failed in
 rustc-linked tests (the cargo 1.100 layout `ce54fead` fixes). main has
 since moved to `14937461` (native build caches keyed by the Rust
 toolchain), whose runs were queued.
+
+The four test workflows are dispatched again on the fix's commit; their
+runs are pending (next update of this section).
 
 ## 24. Cleanroom
 
