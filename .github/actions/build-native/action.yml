@@ -10,14 +10,47 @@ description: >
   cranelift-*/wasmtime-internal-* crates (see AGENTS.md) -- this action
   does not repeat that pin itself.
 
+outputs:
+  rustc:
+    description: >
+      The Rust toolchain the build used, as it appears in the cache key
+      (rustc-RELEASE-COMMIT), for a caller's own cache of another target
+      directory (windows-x86_64.yml's fallback-roots build).
+    value: ${{ steps.rustc.outputs.rustc }}
+
 runs:
   using: composite
   steps:
-    # native/Cargo.lock pins the dependency graph, so it is the cache key: a
-    # hit skips rebuilding cranelift/wasmtime-internal-* (the bulk of
-    # native/'s build time) entirely. The runner's architecture is part of the
-    # key: native/target holds host binaries, and the x86-64 and arm64
-    # runners (tests-arm64.yml) must never restore each other's.
+    # The toolchain the setup step installed: stable moves (1.99.1 to
+    # 1.100.0 on 2026-11-12), and a target directory another rustc wrote is
+    # no cache of this one. Cargo rebuilds every crate for a new compiler
+    # (the fingerprints hold its version) and keeps the old artifacts beside
+    # the new ones; 1.100's cargo even writes another layout (build/PACKAGE/
+    # HASH/out, no deps/), so a restored 1.99.1 tree held a stale deps/ that
+    # the rustc linker searched (main's runs at ede621b1: "can't find crate
+    # for `botlish_native`"). A cache is the toolchain's own.
+    - name: Rust toolchain
+      id: rustc
+      shell: bash
+      run: |
+        info=$(rustc -vV | tr -d '\r')
+        release=$(printf '%s\n' "$info" | sed -n 's/^release: //p')
+        commit=$(printf '%s\n' "$info" | sed -n 's/^commit-hash: //p' | cut -c1-12)
+        if [ -z "$release" ] || [ -z "$commit" ]; then
+          printf '::error::cannot identify the Rust toolchain from rustc -vV:\n%s\n' "$info"
+          exit 1
+        fi
+        echo "rustc=rustc-$release-$commit" >> "$GITHUB_OUTPUT"
+        echo "Rust toolchain: rustc-$release-$commit"
+
+    # The key is the toolchain and native/Cargo.lock, which pins the
+    # dependency graph: a hit skips rebuilding cranelift/wasmtime-internal-*
+    # (the bulk of native/'s build time) entirely. The runner's architecture
+    # is part of the key: native/target holds host binaries, and the x86-64
+    # and arm64 runners (tests-arm64.yml) must never restore each other's.
+    # A miss restores only the same toolchain's build (another Cargo.lock's),
+    # never another toolchain's: a new rustc builds from nothing, once, and
+    # saves its own.
     - name: Cache native backend build
       uses: actions/cache@v4
       with:
@@ -25,8 +58,8 @@ runs:
           ~/.cargo/registry
           ~/.cargo/git
           native/target
-        key: native-cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('native/Cargo.lock') }}
-        restore-keys: native-cargo-${{ runner.os }}-${{ runner.arch }}-
+        key: native-cargo-${{ runner.os }}-${{ runner.arch }}-${{ steps.rustc.outputs.rustc }}-${{ hashFiles('native/Cargo.lock') }}
+        restore-keys: native-cargo-${{ runner.os }}-${{ runner.arch }}-${{ steps.rustc.outputs.rustc }}-
 
     - name: Build native backend
       shell: bash
