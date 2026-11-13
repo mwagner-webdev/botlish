@@ -510,14 +510,35 @@ no failures, the skips host constraints):
 | Native unit tests | `cargo test --release -- address_word fingerprint target::` (the encoding, the fingerprints, the code-generation test) |
 | Catalogs, reference | `tools/mutant-catalogs.tcl` 0 problems; `tools/compilerpedia.tcl check` 0 problems (1298 topics, 776 examples) |
 
-**CI** (dispatched on the branch tip, `workflow_dispatch`): the Linux x86-64
-canary passed (**CI**: its mutant-catalog and warning-gate steps included);
-tests.yml's full jobs, tests-arm64.yml, macos-arm64.yml and
-windows-x86_64.yml were queued at the time of writing -- pending, not
-passed. main at the base commit `ce54fead`: c-bindgen, bench, icy-tower
-(Linux, macOS, Windows), single executable and scalar-asm-audit green; its
-previous commit's canaries had failed in rustc-linked tests (the cargo
-1.100 layout `ce54fead` fixes).
+**CI** (**CI**; the four test workflows dispatched on `bc160372` with
+`workflow_dispatch`, read at 19:30 UTC on 2026-11-13; later commits change
+only this report). A job not listed as passed or failed is pending, not
+passed:
+
+| Workflow (run) | Passed | Failed | Pending |
+|---|---|---|---|
+| tests (43479266196) | canary (mutant catalogs, warning gate, canary files), native Rust unit tests and the driver without its JIT, golden shard 2/4 | -- | interp, compile, cranelift and cranelift-generic coverage, system- and stub-linked executables, golden shards 1, 3, 4, the method-call decision's reference audit |
+| tests (linux arm64) (43479271138) | canary, native Rust unit tests (also under GC stress), golden shards 1/4 and 2/4 | -- | interp, compile, both coverage jobs, both GC-stress jobs, system-linked executables, golden shards 3, 4 |
+| tests (macos arm64) (43479276703) | smoke (Tier A: Rust tests, native status, aot facts, the canary), the Linux control, acceptance shards 2/6 and 4/6 | -- | acceptance shards 1, 3, 5, 6; system linker; Botlish.app |
+| tests (windows x86-64) (43479281847) | canary; root plans; in the smoke job every check but one: Rust tests, the stack guard, native status (C calls, callbacks, byte borrowing), objects and executables (C runtime matrix), GC workloads and the unwind check, Windows I/O, DLL libraries, variadic C calls and the filesystem under GC stress | smoke's tier step: one test, `argv-focused-valid-fuzz` (tests/argv.test), on interp and compile alike | acceptance shards 1-4, system linker |
+| react-native 2048 (43477196183, the push of `401ac700`) | every job | -- | -- |
+
+The Windows failure is main's, not this branch's: main's own smoke job at
+the base commit `ce54fead` (run 43467261271, job 132035849002) fails the
+same test on the same three iterations (11, 22 and 29 of its seeded
+vectors: 7, 260 and 240 arguments, the backends disagreeing) on both
+passes. The program it runs calls no C and holds no C pointer, and a
+desktop target's code is byte-identical under this change (section 18).
+The previous green Windows run of main, `023dfaa3` (2026-11-12), predates
+the Rust 1.100.0 toolchain CI took on 2026-11-13; that the toolchain
+change is the cause is a guess, not established here.
+
+main at the base commit `ce54fead`: c-bindgen, bench, icy-tower (Linux,
+macOS, Windows), single executable and scalar-asm-audit green, the Windows
+smoke failure above; its previous commit's canaries had failed in
+rustc-linked tests (the cargo 1.100 layout `ce54fead` fixes). main has
+since moved to `14937461` (native build caches keyed by the Rust
+toolchain), whose runs were queued.
 
 ## 24. Cleanroom
 
