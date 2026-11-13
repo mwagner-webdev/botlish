@@ -42,6 +42,15 @@ named-field payloads and add exhaustive matching on the same construct.
 > payload-bearing case (1), and an enum is affine, not Hashable or not
 > Sendable when its payloads make it so (12, 18, 21). That report describes
 > the payloads; this one stays the account of the enum construct itself.
+>
+> **Exhaustive matching** has since been added too
+> (PORTABILITY-EXHAUSTIVE-MATCH-MILESTONE-1.md): `match VALUE:` with one
+> `case Enum::Case:` arm per case selects the arm of the value's case and
+> binds its payload by name, and the compiler proves every case of the
+> scrutinee's enum is named exactly once. Selection compares the case's
+> identity (enum, case) only -- never `==`, never a position -- so the
+> closed case set this report retains (11) is what every match is checked
+> against.
 
 ## Contents
 
@@ -793,7 +802,8 @@ loop that collects Ints.
   enum). Supporting it needs a refinement representation over nominal types;
   enum nominality was not weakened to accommodate it.
 * **No `switch` or `match`** exists in Botlish, so neither was extended: the
-  closed case set is retained for them (11).
+  closed case set is retained for them (11). (Since added: an exhaustive
+  `match` over enums, PORTABILITY-EXHAUSTIVE-MATCH-MILESTONE-1.md.)
 * **Module-qualified case spellings are long** (`fleet::kinds::VehicleType::Car`);
   `import type` gives the short form. No enum-specific import exists, as the
   brief requires.

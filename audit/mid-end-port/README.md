@@ -63,8 +63,8 @@ the mutual-recursion design it depends on is MUTUAL-RECURSION.md.
 | file | what it is |
 |---|---|
 | `tools/workload.tcl` | the warning gate's compilations as a workload: per-unit times (`units`), the phase split (`phases`), a per-analysis profile of one program (`analyses`), the cost of HIR interchange (`interchange`) |
-| `kernel/ranges.tcl`, `kernel/ranges-structs.bot`, `kernel/ranges-tables.bot` | the mid-end-shaped kernel: one algorithm, three Tcl versions and two Botlish versions |
-| `tools/kernel.tcl` | builds and times the five versions (best of N) and checks that they compute the same value |
+| `kernel/ranges.tcl`, `kernel/ranges-structs.bot`, `kernel/ranges-enums.bot`, `kernel/ranges-tables.bot` | the mid-end-shaped kernel: one algorithm, three Tcl versions and three Botlish versions |
+| `tools/kernel.tcl` | builds and times the six versions (best of N) and checks that they compute the same value |
 | `tools/kernel-callgrind.tcl` | where the native struct version's instructions go, under callgrind |
 | `tools/synth.tcl` | generates a synthetic Botlish program shaped like a mid-end, of any size |
 | `tools/measure.tcl` | measures one compilation: front-end phases, builds, memory, semantic and specializer instances against their budgets, native lowering and its analyses, Cranelift and the link, a run |
@@ -155,7 +155,7 @@ No existing benchmark compares hand-written Tcl with native Botlish; the
 repository's comparisons are Botlish on the Tcl backends against Botlish
 native (HASH-TABLE-EXPERIMENT.md: about 1,500 times for table operations),
 which says nothing about a Tcl compiler. So `kernel/` holds one mid-end-
-shaped algorithm in five versions.
+shaped algorithm in six versions.
 
 **The algorithm.** An interval analysis of a synthetic program: 1,500
 expression trees ("functions") of constants, the parameter, additions, ifs
@@ -179,6 +179,12 @@ node's range.
 * `ranges-structs.bot` -- native Botlish: an enum of kinds, a `Node` struct
   in a MutableVector, MutableArray side tables through `place` parameters,
   each evaluation returning a `Range` struct.
+* `ranges-enums.bot` -- `ranges-structs.bot` with payload-bearing nodes
+  (PORTABILITY-EXHAUSTIVE-MATCH-MILESTONE-1.md): one `enum Node` whose
+  every case carries exactly its own typed fields (`Const {value}`,
+  `Add {left, right}`, ...) instead of a Kind beside three generic integer
+  fields, the evaluator an exhaustive `match` binding only the selected
+  case's fields; the same generator, analysis, widening and value.
 * `ranges-tables.bot` -- the same, each evaluation returning the node's
   index, its range only in the side tables.
 
@@ -192,6 +198,11 @@ executable's, whose process start is about 2 ms):
 | `tcl tables` | 2.587 | 2.0 | 8.8 |
 | `native structs` | 0.762 | 6.7 | 2.6 |
 | `native tables` | 0.293 | 17.5 | 1.0 |
+
+(PORTABILITY-EXHAUSTIVE-MATCH-MILESTONE-1.md added `native enums`; its
+report has the six-version table. On one machine the payload-enum version
+took 0.718 s against the struct version's 0.765 s, computing the same
+455,468 nodes, 6 rounds and checksum 275164515.)
 
 * **Like for like, native Botlish is 3.7 times faster when each call
   returns a small value, and 8.8 times faster when nothing is allocated**

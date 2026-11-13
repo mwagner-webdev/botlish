@@ -3702,6 +3702,76 @@ the same rule), `cargo test --release --manifest-path native/Cargo.toml --lib
 enum`, the enum, affine and declaration-summary harnesses for code they
 share, and `tclsh9.0 tests/local.tcl tests/golden/structs-and-enums.bot`.
 
+### Exhaustive match
+
+`match VALUE:` with one `case Enum::Case:` arm per case
+(PORTABILITY-EXHAUSTIVE-MATCH-MILESTONE-1.md) selects the arm of the
+value's case; the arm receives the payload whole (`case E::C p:`),
+destructured (`case E::C {a, b: c}:`, struct destructuring's pattern) or
+not at all. It is no node kind: surface/lower.tcl's Match writes an `if
+true:` block (carrying `match`) binding the scrutinee once to a hygienic
+`match#N`, then an `if` per arm testing the internal root native
+`enum#is(match#N, "ID", "CASE")`, whose then-branch first binds
+`enum#payload(match#N, "ID", "CASE")`, ending in `enum#unmatched()`;
+hir/resolve.tcl's MatchSyntax resolves each arm's written case name as a
+case expression's qualifier is. Keep it so:
+
+* Exhaustiveness is proven, never tested at run time: hir/match.tcl holds
+  every match to the scrutinee's statically known enum (TYPE for `any`, a
+  non-enum, another enum's case), each case named exactly once
+  (MATCH-DUPLICATE-CASE) and every declared case named
+  (MATCH-NOT-EXHAUSTIVE, against EnumCases(E), never what an analysis
+  knows of the value). Never add a wildcard, default, guard, alternative,
+  literal, positional or nested-enum pattern, a dynamic type test or a
+  fallback arm, and never let an exact-case fact excuse an arm.
+* Selection reads the case's identity (enum, case) only: never `==`, a
+  hash, a payload or a position (a payload holding a function, a mutable
+  collection or an affine value is matched the same). enum#is observes the
+  scrutinee; enum#payload moves it -- every arm takes the payload, so an
+  affine scrutinee is moved on every path (a resource's included) and what
+  an arm does not bind is released by its owner. Never make a selection
+  consume, or an arm skip its payload.
+* A payload is taken only under its own selection: the chain's shape
+  (hir::match::chain) is checked in every compilation (MATCH-INVALID, the
+  compiler's own failure) and again by every reader of HIR it did not
+  build (hir/read.tcl, hir::interchange::decode: HIR PARSE, HIR
+  INTERCHANGE MATCH), and enum#payload checks the identity at run time on
+  every backend (UNMATCHED, never another case's payload). Never trust a
+  match's exhaustiveness from text, and never add a public payload or
+  discriminant accessor.
+* The ownership analysis treats a branch of a constant condition (the root
+  `true`/`false` a front end writes for a block) as never taken
+  (hir::affine::ConstantCondition): a match's block always runs. Never
+  widen that to a value an analysis decided.
+* `match` and `case` are contextual words (surface/parser.tcl's AtMatch;
+  `case` only as an arm's first word): `match = 1` and `case(name, check)`
+  stay ordinary code. A match is a statement or the value of a binding,
+  return or destructuring, like an if.
+* Representation is the backends': natively `enumeq` with the case's word
+  for an enum without payload-bearing cases (no payload operation: unit),
+  `op enumis`/`op enumpayload` otherwise; the C backend compiles payload-
+  free matches only, as it compiles payload-free enums only.
+
+If you change any of that (the parser's Match, AtMatch, MatchCaseName,
+surface/lower.tcl's Match, MatchSyntax and MatchSelection, hir/match.tcl,
+the `enum-test`/`enum-payload` cases of hir/types.tcl and hir/callables.tcl,
+core/enums.tcl's selections, `ConstantCondition`, native/lower.tcl's
+EnumSelection, nir.rs's EnumIs/EnumPayload/EnumUnmatched, ops.rs's
+rt_enum_is/rt_enum_payload, ccompile's selections, the HIR text's `if
+match`), run `tests/exhaustive-match.test` (also with
+`BOTLISH_SEMANTIC_ROLLBACK_AUDIT=1`), its golden suite (`tclsh9.0
+tests/local.tcl tests/golden/exhaustive-match.bot`), `tests/payload-enums.test`,
+`tests/enums.test`, `audit/exhaustive-match/tools/fuzz.tcl` (several seeds,
+once with `-gc-stress 1`), `audit/exhaustive-match/tools/mutate.tcl`
+(every mutant in its `mutants.txt` must still apply and be killed: update a
+mutant's text when you change the code it mutates, keeping it a mutant of
+the same rule), `cargo test --release --manifest-path native/Cargo.toml
+--lib enum`, plus the affine and coroutine harnesses for a change to
+hir/affine.tcl and `tools/compilerpedia.tcl check` for a diagnostic.
+`audit/mid-end-port/tools/kernel.tcl` compares the payload-enum kernel
+(kernel/ranges-enums.bot) with the other five; `bench/exhaustive-match.tcl`
+is the performance report.
+
 ## Error payloads
 
 An error is a nominal identity that may carry a statically known named-field

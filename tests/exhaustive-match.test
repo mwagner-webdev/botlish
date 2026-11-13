@@ -469,4 +469,49 @@ test em-rollback-audit {a generic helper instantiated with values of two enums a
     }
 } -result {same: [[1, "p"], [0, "q"], [2, 2]]}
 
+test em-resource-payload {a payload holding a resource (a scoped cleanup): every arm takes the scrutinee, so it is moved on every path -- never AFFINE-PATH-RELEASE-UNSUPPORTED, also for a payload-free arm -- and what an arm does not bind runs its cleanup at the end of the arm, after the arm's own code; a field the arm takes apart runs none} -body {
+    set dir [makeDirectory em-resource-[pid]]
+    try {
+        file copy -force [file join $::projectRoot tests resources handle.bot] [file join $dir handle.bot]
+        emWrite [file join $dir main.bot] "import handle\n\nenum Slot:\n    Empty,\n    Holding \{h: handle::Handle, tag: int\},\n    Pair \{a: handle::Handle, b: handle::Handle\},\n\nfn use(s: Slot) -> int:\n    match s:\n        case Slot::Empty:\n            handle::note(-1)\n            0\n        case Slot::Holding \{tag\}:\n            handle::note(tag)\n            tag\n        case Slot::Pair \{a\}:\n            n = handle::number(a)\n            handle::note(n * 100)\n            n\n\nwith context handle::create()\nx = use(Slot::Empty)\ny = use(Slot::Holding \{h: handle::open(5), tag: 7\})\nz = use(Slot::Pair \{a: handle::open(1), b: handle::open(2)\})\nlog = handle::closed():\n    on IndexNotFound:\n        \[\]\n\[x, y, z, log\]\n"
+        set hir [surface::readProgramFile [file join $dir main.bot] -warnings off]
+        lsort -unique [lmap be $::emBackends {lrange [outcomeUnderHir $be $hir] 0 1}]
+    } finally {
+        removeDirectory [file tail $dir]
+    }
+} -result {{value {[0, 7, 1, [-1, 7, 5, 100, 2]]}}}
+
+test em-tcl-selection-identity {the Tcl runtime's selection compares the enum's identity and the case, never the case's name alone, and a payload is read only from a value of its own case} -body {
+    set a [core::value::enumCaseValue E A [core::value::structOf {{} x} [list [core::value::int 1]]]]
+    set f [core::value::enumCaseValue F A [core::value::structOf {{} x} [list [core::value::int 1]]]]
+    set str [list core::value::str]
+    list [core::enums::isImpl $a [core::value::str E] [core::value::str A]] \
+        [core::enums::isImpl $f [core::value::str E] [core::value::str A]] \
+        [core::enums::isImpl $a [core::value::str E] [core::value::str B]] \
+        [core::enums::isImpl [core::value::enumValue E B] [core::value::str E] [core::value::str B]] \
+        [catch {core::enums::payloadImpl $a [core::value::str E] [core::value::str B]} message] \
+        [string match *UNMATCHED* $::errorCode]
+} -result {{bool true} {bool false} {bool false} {bool true} 1 1}
+
+test em-interchange-forged {interchange text whose match does not name every case of its enum is refused when it is read (HIR INTERCHANGE MATCH): text is never trusted to be exhaustive} -body {
+    set hir [surface::compile "${node}${evaluate}evaluate(Node::Param)\n" em.bot -warnings off]
+    # The Call arm's selection and payload made the Param case's.
+    dict for {e n} [dict get $hir exprs] {
+        if {[dict get $n kind] eq "const" && [dict get $n literal] eq {str Call}} {
+            dict set hir exprs $e literal {str Param}
+            dict set hir exprs $e value [core::value::str Param]
+        }
+    }
+    catch {hir::interchange::decode [hir::interchange::encode $hir]} message options
+    list [dict get $options -errorcode] [string match {*names Node::Param twice*} $message]
+} -result {{HIR INTERCHANGE MATCH} 1}
+
+test em-payload-vector-whole {a MutableVector of a payload bound whole is the arm's own: mutating it through the payload binding never changes the matched value} -body {
+    emRun "import std::mutable_vector\nenum Box:\n    Items \{v: MutableVector\[int\]\},\n    Nothing,\n\nfn grow(b: Box) -> int:\n    match b:\n        case Box::Items p:\n            p.v.push(7)\n            p.v.push(8)\n            p.v.length()\n        case Box::Nothing:\n            0\nfn len(b: Box) -> int:\n    match b:\n        case Box::Items \{v\}:\n            v.length()\n        case Box::Nothing:\n            -1\nbox = Box::Items \{v: std::mutable_vector::from_list(\[1\])\}\n\[grow(box), len(box), grow(box), len(box)\]\n"
+} -result {same: [3, 1, 3, 1]}
+
+test em-payload-free {a match over an enum with no payload-bearing case selects every case, on every backend (natively by comparing words), its arms in any order} -body {
+    emRun "enum Light:\n    Red,\n    Amber,\n    Green,\n    Off,\n\nfn next(l: Light) -> Light:\n    match l:\n        case Light::Green:\n            Light::Amber\n        case Light::Off:\n            Light::Off\n        case Light::Red:\n            Light::Green\n        case Light::Amber:\n            Light::Red\nfn code(l: Light) -> int:\n    match l:\n        case Light::Amber:\n            2\n        case Light::Red:\n            1\n        case Light::Off:\n            0\n        case Light::Green:\n            3\n\[code(Light::Red), code(Light::Amber), code(Light::Green), code(Light::Off), code(next(Light::Red)), code(next(Light::Green)), code(next(Light::Amber)), code(next(Light::Off))\]\n"
+} -result {same: [1, 2, 3, 0, 3, 2, 1, 0]}
+
 cleanupTests

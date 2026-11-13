@@ -3206,6 +3206,7 @@ tests/exhaustive-match.test em-gc-stress pass
 tests/exhaustive-match.test em-generic-instances pass
 tests/exhaustive-match.test em-hir-roundtrip pass
 tests/exhaustive-match.test em-interchange pass
+tests/exhaustive-match.test em-interchange-forged pass
 tests/exhaustive-match.test em-many-cases pass
 tests/exhaustive-match.test em-match-in-value-positions pass
 tests/exhaustive-match.test em-modules pass
@@ -3214,12 +3215,16 @@ tests/exhaustive-match.test em-never pass
 tests/exhaustive-match.test em-non-equatable-payloads pass
 tests/exhaustive-match.test em-not-exhaustive pass
 tests/exhaustive-match.test em-payload-binding-diagnostics pass
+tests/exhaustive-match.test em-payload-free pass
+tests/exhaustive-match.test em-payload-vector-whole pass
 tests/exhaustive-match.test em-representation pass
+tests/exhaustive-match.test em-resource-payload pass
 tests/exhaustive-match.test em-rollback-audit pass
 tests/exhaustive-match.test em-scheduler-parity pass
 tests/exhaustive-match.test em-scrutinee-once pass
 tests/exhaustive-match.test em-syntax-errors pass
 tests/exhaustive-match.test em-syntax-forms pass
+tests/exhaustive-match.test em-tcl-selection-identity pass
 tests/exhaustive-match.test em-unrestricted-reuse pass
 tests/exhaustive-match.test em-workload pass
 tests/external-tools.test et-2048-caller pass
