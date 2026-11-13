@@ -199,7 +199,7 @@ private extern c fn free(p: std::ffi::c::Ptr[std::ffi::c::Void] noescape) -> uni
 >>>>
 
 @@ weak-any-member an index name is weak when any member defining it is, not every one: a strong definition elsewhere in the archive is hidden from the duplicate check
-!! pn-index-bsd-forms pn-index-weak-definitions
+!! pn-index-weak-definitions
 %% tests/package-native.test
 ## pm/binary.tcl
 <<<<

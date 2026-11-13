@@ -1,0 +1,29 @@
+unit	form	program	linker	link	status	verdict	personality_global	personality_local	detail
+default-weakdef	raw	without_provider	rustc	failed		link	-	-	= note: rust-lld: error: duplicate symbol: __rustc::__rust_alloc
+default-weakdef	raw	without_provider	system	ok	0	fail	1	0	FAIL | runtime work allocated from the unit's allocator | got 40047 | want 0
+default-weakdef	raw	with_provider	rustc	failed		link	-	-	= note: rust-lld: error: duplicate symbol: __rustc::__rust_alloc
+default-weakdef	raw	with_provider	system	ok	0	fail	1	0	FAIL | runtime work allocated from the unit's allocator | got 40047 | want 0
+default-weakdef	localized	without_provider	rustc	ok	0	pass	1	1	toolchain rustc 1.97.0 (2d8144b78 2026-07-07)
+default-weakdef	localized	without_provider	system	ok	0	pass	1	1	toolchain rustc 1.97.0 (2d8144b78 2026-07-07)
+default-weakdef	localized	with_provider	rustc	ok	0	pass	1	1	toolchain rustc 1.97.0 (2d8144b78 2026-07-07)
+default-weakdef	localized	with_provider	system	ok	0	pass	1	1	toolchain rustc 1.97.0 (2d8144b78 2026-07-07)
+default-weakdef	fallback-localized-away	without_provider	rustc	ok	0	pass	1	1	toolchain rustc 1.97.0 (2d8144b78 2026-07-07)
+default-weakdef	fallback-localized-away	without_provider	system	ok	0	pass	1	1	toolchain rustc 1.97.0 (2d8144b78 2026-07-07)
+default-weakdef	fallback-localized-away	with_provider	rustc	ok	0	fail	1	1	FAIL | a post with the provider | got -38 | want 0
+default-weakdef	fallback-localized-away	with_provider	system	ok	0	fail	1	1	FAIL | a post with the provider | got -38 | want 0
+default-weakref	raw	without_provider	rustc	failed		link	-	-	= note: rust-lld: error: duplicate symbol: __rustc::__rust_alloc
+default-weakref	raw	without_provider	system	ok	0	fail	1	0	FAIL | runtime work allocated from the unit's allocator | got 40047 | want 0
+default-weakref	raw	with_provider	rustc	failed		link	-	-	= note: rust-lld: error: duplicate symbol: __rustc::__rust_alloc
+default-weakref	raw	with_provider	system	ok	0	fail	1	0	FAIL | runtime work allocated from the unit's allocator | got 40047 | want 0
+default-weakref	localized	without_provider	rustc	ok	0	pass	1	1	toolchain rustc 1.97.0 (2d8144b78 2026-07-07)
+default-weakref	localized	without_provider	system	ok	0	pass	1	1	toolchain rustc 1.97.0 (2d8144b78 2026-07-07)
+default-weakref	localized	with_provider	rustc	ok	0	pass	1	1	toolchain rustc 1.97.0 (2d8144b78 2026-07-07)
+default-weakref	localized	with_provider	system	ok	0	pass	1	1	toolchain rustc 1.97.0 (2d8144b78 2026-07-07)
+1.100.0-weakdef	raw	without_provider	rustc	failed		link	-	-	= note: rust-lld: error: duplicate symbol: rust_eh_personality
+1.100.0-weakdef	raw	without_provider	system	failed		link	-	-	/usr/bin/ld: CHECKOUT/native/target/release/libbotlish_runtime.a(std-ca8536218e109c03.std.bcb96dfbba0ab899-cgu.0.rcgu.o): in function `rust_eh_personality':
+1.100.0-weakdef	raw	with_provider	rustc	failed		link	-	-	= note: rust-lld: error: duplicate symbol: rust_eh_personality
+1.100.0-weakdef	raw	with_provider	system	failed		link	-	-	/usr/bin/ld: CHECKOUT/native/target/release/libbotlish_runtime.a(std-ca8536218e109c03.std.bcb96dfbba0ab899-cgu.0.rcgu.o): in function `rust_eh_personality':
+1.100.0-weakdef	localized	without_provider	rustc	ok	0	pass	1	1	toolchain rustc 1.100.0 (0ef1bc386 2026-11-09)
+1.100.0-weakdef	localized	without_provider	system	ok	0	pass	1	1	toolchain rustc 1.100.0 (0ef1bc386 2026-11-09)
+1.100.0-weakdef	localized	with_provider	rustc	ok	0	pass	1	1	toolchain rustc 1.100.0 (0ef1bc386 2026-11-09)
+1.100.0-weakdef	localized	with_provider	system	ok	0	pass	1	1	toolchain rustc 1.100.0 (0ef1bc386 2026-11-09)
