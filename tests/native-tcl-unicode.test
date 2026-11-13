@@ -406,18 +406,30 @@ foreach {label s expect} {
     unicode17-A7D2       ꟒         ꟒
     unicode17-A7D4       ꟔         ꟔
     unicode17-beria-erfe \U00016ea0     \U00016ea0
+    rustc100-A7DD        \uA7DD         \uA7DD
+    rustc100-A7E2        \uA7E2         \uA7E2
+    rustc100-AB6C        \uAB6C         \uAB6C
+    rustc100-1DF40       \U0001DF40     \U0001DF40
 } {
     test native-tcl-unicode-lowercase-$label "std::str::lowercase($label) is the Unicode 16 simple mapping on interp/compile/cranelift-generic/cranelift" -body {
         fourWay [list [list call {ref std::str::lowercase} [list const str $s]]]
     } -result \"$expect\"
 }
 
+# The native runtime's lowercase table (native/src/runtime/lower16.rs) is
+# what tools/unicode-lowercase.tcl generates from the reference: never Rust's
+# own tables, which each stable Rust that updates its Unicode data changes
+# (rustc 1.97 and rustc 1.100 both did: MAIN-CI-FAILURES-2026-11-13.md).
+test native-tcl-unicode-lowercase-table-generated "the native lowercase table is the one tools/unicode-lowercase.tcl generates from core::strings::lowercase" -body {
+    exec [info nameofexecutable] [file join $::projectRoot tools unicode-lowercase.tcl] check
+} -result "ok: [file join $::projectRoot native src runtime lower16.rs]"
+
 # Every scalar, one plane per program: each backend's lowercase of the plane
 # must equal the reference core::strings::lowercase (Tcl's `string tolower`
 # plus its two U+023A/U+023E patches). The mapping is one-to-one, so this is
-# a scalar-by-scalar comparison, and it is what pins native's Rust tables to
-# Unicode 16: a Tcl or Rust upgrade that changes a mapping fails here and
-# names the backend and plane.
+# a scalar-by-scalar comparison, and it is what pins native's generated table
+# to Unicode 16: a Tcl upgrade or a table edit that changes a mapping fails
+# here and names the backend and plane.
 test native-tcl-unicode-lowercase-all-scalars "every scalar's lowercase agrees with the reference on interp/compile/cranelift-generic/cranelift" -body {
     set bad {}
     for {set plane 0} {$plane <= 16} {incr plane} {

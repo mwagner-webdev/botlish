@@ -103,7 +103,33 @@ if {[dict get $counts failed]} {
         }
     }
     puts ""
-    puts [string range $output 0 20000]
+    # Each failed test's own report from the suite's output (tcltest's
+    # "==== NAME ..." to "==== NAME FAILED"), never the output's first
+    # characters: the unsupported tests' reports come first in it, and a cut
+    # at 20,000 characters hid the one failure that mattered (vt-large on
+    # main at 023dfaa3; MAIN-CI-FAILURES-2026-11-13.md). A failed test with
+    # no report (its file's process died) is named, with the output's end.
+    set unreported {}
+    foreach line $lines {
+        if {![string match "  failed *" $line]} continue
+        set name [lindex $line 1]
+        set start [string first "==== $name " $output]
+        set end [string first "==== $name FAILED" $output $start]
+        if {$start < 0 || $end < 0} {
+            lappend unreported $name
+            continue
+        }
+        set report [string range $output $start [expr {$end + [string length "==== $name FAILED"] - 1}]]
+        if {[string length $report] > 12000} {
+            set report "[string range $report 0 5999]\n... ([string length $report] characters; the middle left out) ...\n[string range $report end-5999 end]"
+        }
+        puts $report
+        puts ""
+    }
+    if {$unreported ne ""} {
+        puts "No report in the suite's output for: [join $unreported {, }]; its last 6,000 characters:"
+        puts [string range $output end-5999 end]
+    }
 }
 if {$verbose} {
     puts ""

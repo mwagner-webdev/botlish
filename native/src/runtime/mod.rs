@@ -18,6 +18,7 @@ pub mod framewalk;
 pub mod heap;
 pub mod inttext;
 pub mod library;
+pub(crate) mod lower16;
 pub mod metrics;
 pub mod mutvec;
 pub mod native_stack;

@@ -29,9 +29,15 @@ if ! command -v tclsh9.0 >/dev/null 2>&1; then
     arm64) base=http://ports.ubuntu.com/ubuntu-ports/pool/universe ;;
     *) echo "no Tcl 9 packages configured for architecture $arch" >&2; exit 1 ;;
   esac
-  curl -fsSLO "$base/libt/libtommath/libtommath1_1.3.0-1_${arch}.deb"
-  curl -fsSLO "$base/t/tcl9.0/libtcl9.0_9.0.1+dfsg-1_${arch}.deb"
-  curl -fsSLO "$base/t/tcl9.0/tcl9.0_9.0.1+dfsg-1_${arch}.deb"
+  # A download that fails is tried again, whatever the failure: the arm64
+  # runners lost ports.ubuntu.com twice in a week (a connection reset at
+  # 46ab0919, a name not resolved at eeaf1e3e), each time failing every job
+  # of main's tests-arm64.yml run before it tested anything
+  # (MAIN-CI-FAILURES-2026-11-13.md).
+  fetch() { curl -fsSLO --retry 5 --retry-all-errors --retry-delay 10 --connect-timeout 30 "$1"; }
+  fetch "$base/libt/libtommath/libtommath1_1.3.0-1_${arch}.deb"
+  fetch "$base/t/tcl9.0/libtcl9.0_9.0.1+dfsg-1_${arch}.deb"
+  fetch "$base/t/tcl9.0/tcl9.0_9.0.1+dfsg-1_${arch}.deb"
   $SUDO dpkg -i "libtommath1_1.3.0-1_${arch}.deb" "libtcl9.0_9.0.1+dfsg-1_${arch}.deb" "tcl9.0_9.0.1+dfsg-1_${arch}.deb"
 fi
 
