@@ -32,7 +32,11 @@ rather than on a run, it says so.
   - A multi-line extension admits LF under two conditions: the value does not
     start with a LF, and it holds no `#`, U+2028 or U+2029. It passes
     the same test (900 files).
-  - These are the Linux results. macOS and Windows: section 19.
+  - Hosts: the single-line profile holds on Linux, macOS and Windows. The
+    multi-line extension holds on Linux and macOS only. On Windows,
+    dotenv.net reads every LF of a multi-line value as CRLF: it joins the
+    lines with `Environment.NewLine`. So no multi-line value is portable
+    there while dotenv.net is a consumer (section 19.1).
 * **Some data has no portable encoding at all.**
   - The double quote, the backslash, the dollar sign, the backtick, CR, NUL
     and a value that starts with a LF have no encoding that every reference
@@ -476,8 +480,16 @@ Duplicates disagree only where the second line is something else:
 - a reference to the first (`dup-interp`, section 10);
 - a duplicate after a malformed line (DotNetEnv and Java reject the file).
 
-Case variants are distinct keys on Linux. On Windows the environment is
-case-insensitive (section 19).
+Case variants are distinct keys on Linux and macOS. On Windows the process
+environment is case-insensitive, so the loading targets merge them
+(section 19.1):
+- `node --env-file` ends with the uppercase spelling and its value, in
+  both orders (`dup-case`: `KEY=upper` then `key=lower`; `name-case-pair`:
+  the reverse);
+- Bun keeps the first spelling with the last value;
+- DotNetEnv's environment holds the last value under both names.
+
+The parse APIs keep both keys on every host.
 
 **Precedence over the process environment** is the other duplicate question.
 In the conflict mode, `env-preset-assigned` assigns a variable the
@@ -577,6 +589,17 @@ single characters:
 - U+0099 in a quoted value: DotNetEnv rejects the file.
 - `#` then a newline: dotenv-java reports unmatched quotes.
 
+**On other hosts** (CI, section 19.1).
+- macOS reads every candidate and every round trip exactly as Linux does.
+  - The one exception is outside the profile: `/bin/bash` 3.2 stops reading
+    the file at its first NUL.
+- Windows reads the single-line profile exactly as well.
+- The multi-line extension fails on Windows for one reason, stated
+  exactly: dotenv.net reads each LF of a multi-line value as CRLF. CI
+  requires that deviation and no other.
+- So an emitter for consumers that include dotenv.net on Windows writes
+  single-line values only.
+
 ## 15. Values that cannot be emitted portably
 
 | category | best encoding and what breaks it | consumers that cause the restriction |
@@ -586,10 +609,11 @@ single characters:
 | `$` | only a trailing `$` survives unquoted; `$NAME` expands in Bash, Bun, Python, Ruby, DotNetEnv; single quotes protect it except in Bun and Java | the expanding dialects, Java |
 | literal `${NAME}`, `$(cmd)` | single quotes: all but Bun, Python and Java (`${NAME}`), Java (`$(...)`) | Bun, Python, Java; Ruby runs `$(...)` unquoted |
 | backtick | single quotes: all but Java; Bash treats a backtick in double quotes as a command (unverifiable) | Java, Bash |
-| CR | no encoding: `\r` escapes are read literally by Bash, Node, Ruby, dotenv.net and Java; a raw CR is a line end | almost all |
-| NUL | no encoding: Bash drops it, `--env-file` truncates at it, DotNetEnv rejects it | Bash, Node `--env-file`, DotNetEnv, every process environment |
+| CR | no encoding: `\r` escapes are read literally by Bash, Node, Ruby, dotenv.net and Java; a raw CR is a line end; Git for Windows' Bash deletes every CR | almost all |
+| NUL | no encoding: Bash 5 drops it, Bash 3.2 (macOS) stops reading at it, `--env-file` truncates at it, DotNetEnv rejects it | Bash, Node `--env-file`, DotNetEnv, every process environment |
 | C0 controls but TAB/LF, DEL, C1 | DotNetEnv rejects them in every quoting | DotNetEnv |
 | LF as the first character, or with `#`/LS/PS | dotenv-java's line accumulation | Java |
+| LF on Windows | dotenv.net reads it as CRLF (`Environment.NewLine`) | dotenv.net |
 | non-ASCII keys, dotted or hyphenated keys | Bash (not names), npm dotenv/Bun/Ruby (ignored), Java (rejects) | several |
 
 A portable emitter must fail on these, never transform them. The failure
@@ -740,12 +764,15 @@ touches the audit, and on demand:
   against the registries.
 - **The macOS (arm64) and Windows (x86-64) jobs** run the same census on
   their host's runtimes:
-  - macOS: `/bin/bash` 3.2.
-  - Windows: Git for Windows' MSYS Bash.
+  - macOS: `/bin/bash` 3.2.57.
+  - Windows: Git for Windows' `usr\bin\bash.exe`, Bash 5.3.15
+    (`x86_64-pc-cygwin`).
 
-  They compare under the portable policy: host differences are reported, and
-  a portable category that stops being universal, or a portable round trip
-  that reads back differently, fails.
+  They compare under the portable policy. Host differences are reported.
+  Two things fail: a portable category that stops being universal, and a
+  portable round trip that reads back differently. The one exception is a
+  host's declared deviation (`compare.py`'s `HOST_DEVIATIONS`), which must
+  then appear.
 - **The real-world job** fetches the pinned example files, parses them with
   the pure targets and compares with `results/realworld.json`.
 
@@ -755,7 +782,89 @@ The first runs' results are recorded in section 19.1.
 
 ### 19.1 Recorded runs
 
-_Pending: filled in from the workflow's first runs on this branch._
+**Run 4** ([43577660873](https://github.com/mwagner-webdev/botlish/actions/runs/43577660873),
+commit fbbe8cd1):
+
+| job | runner | result | census step |
+|---|---|---|---|
+| census, baseline policy | ubuntu-24.04 | passed | 3 min 28 s |
+| census, portable policy | macos-15 (arm64) | passed | 5 min 42 s |
+| census, portable policy | windows-2025 (x86-64) | cancelled by the next push | - |
+| real-world files | ubuntu-24.04 | passed | 2 s |
+
+- **Linux.**
+  - The fresh tree equals `results/` exactly: every status, map and error
+    class, in every corpus and mode.
+  - Every pin is as recorded.
+  - The emits probe certified the four claims, rejected the fold claim and
+    rejected all ten mutants.
+- **Real-world files.** Every reading equals `results/realworld.json`.
+
+**macOS** (Bash 3.2.57; every other target at its pin):
+- **The profile holds.** The classification of all 26 categories equals
+  Linux's. All six round trips (11,550 assignments) read back exactly on
+  every reference.
+- **Every other observation equals the baseline,** in all four corpora and
+  both modes, except Bash's reading of NUL. Bash 3.2 stops reading the file
+  at its first NUL byte:
+  - `enc-nul-in-value` (`KEY=a<NUL>b`) is `a`;
+  - `enc-nul-in-double` assigns nothing (the quote never closes);
+  - `enc-nul-in-comment` (a comment holding a NUL, then `KEY=value`) assigns
+    nothing;
+  - the nine `pe-*-nul-0` encodings behave the same way.
+
+  Bash 5.2 drops the byte instead (`ab`). NUL was already outside the
+  profile, so nothing about the profile changes.
+- **An added variable.** macOS adds `__CF_USER_TEXT_ENCODING` to every
+  process. The loading targets now subtract a control run on an empty file,
+  and record what the host added (`host_added_variables` in each result's
+  meta).
+
+**Windows** (Git for Windows' Bash 5.3.15; every other target at its pin).
+These are the partial trees of the cancelled jobs of runs 3 and 4: every
+corpus and four of the six round trips. Run 6 (commit 266f8bec) is the
+first complete Windows run, and this entry records it once it ends.
+- **Single-line round trips** (seeds 1 to 3): every reference but Bash read
+  every file back exactly. Bash differed only by `BASH_MONOSECONDS`, which
+  the harness now ignores.
+- **Multi-line extension.** dotenv.net reads every LF of a multi-line value
+  as CRLF. That is 40 hand observations in each of its three
+  configurations, 30 portable ones and 259 of 300 files of round-trip seed
+  101, and every one is exactly that reading. This is `compare.py`'s one
+  declared deviation for Windows.
+- **Bash deletes CR.** Git for Windows' Bash deletes every CR byte of the
+  sourced file, quoted or not:
+  - `assign-crlf` reads `1` and `2` (Linux Bash: `1\r`, `2\r`);
+  - `assign-cr-only` (`A=1\rB=2\r`) reads `A` as `1B=2`;
+  - a CR inside double quotes disappears (`enc-lone-cr-in-double`: `ab`).
+
+  CR was already outside the profile.
+- **Case.** The environment is case-insensitive: four observations each
+  for `node --env-file`, Bun and DotNetEnv (section 12).
+- **Ruby.** `ruby`'s `name-shell-special-home` and `-path` read the clean
+  environment itself. On Windows that environment needs a real `HOME` and
+  `PATH`, and it is recorded with the results.
+- **ruby-trusted.** The audited commands run through the host's command
+  interpreter, which on Windows is `cmd.exe`:
+  - `cmd-nested`'s `echo $(echo inner)` prints its argument literally;
+  - `cmd-arithmetic` records no executed command and assigns nothing. The
+    cause was not determined; it is a configuration target, not a
+    reference.
+- **Two harness defects** came out of these trees and are fixed:
+  - Bash 5.3's clock variable was counted as an assignment.
+  - A `declare -p` process per variable made the 10,000-assignment fixture
+    time out.
+
+  Neither fix changed a Linux observation.
+
+**Earlier runs**, each superseded by the fix it exposed:
+- run 1: the macOS job on macos-14 was cancelled before it started.
+- run 2: the real-world report wrote into a results root that did not
+  exist.
+- run 3: on macOS, `__CF_USER_TEXT_ENCODING` turned into an assignment of
+  every loading-target observation, and the round-trip step stopped the
+  census.
+- run 5: cancelled by the next push.
 
 ## 20. Existing linter landscape
 
@@ -960,8 +1069,11 @@ A regular recognizer cannot prove what `\n` or `$` means to Bun.
 **EMISSION-DOTENV-READER-AND-EMITTER-MILESTONE-1.** A pure Botlish package.
 Acceptance:
 - **The portable emitter** with its `emits` certificate, its failure
-  values, and the seeded round trips. They run in CI against the pinned
-  oracles: zero differences on Linux, macOS and Windows.
+  values, and the seeded round trips, run in CI against the pinned oracles:
+  - the single-line profile with zero differences on Linux, macOS and
+    Windows;
+  - the multi-line extension with zero differences on Linux and macOS, and
+    on Windows with exactly dotenv.net's CRLF reading, no other difference.
 - **The syntax-preserving reader.** It reads every fixture without a crash.
   Its strict portable projection accepts exactly the portable corpus and
   diagnoses the rest.
@@ -1005,19 +1117,19 @@ both modes. Correctness, not speed, governed the harness.
 
 ## 26. Remaining uncertainties
 
-* **macOS and Windows** results are CI's (section 19.1).
-  - On Windows the environment is case-insensitive, and setting an empty
-    string through .NET may delete the variable.
-  - dotenv.net joins multi-line values with `Environment.NewLine` (source
-    reading), so CRLF is expected inside its multi-line values there.
-  - The portable profile is claimed for a host only once its run is green.
+* **Hosts.** macOS and Windows are CI's runners (section 19.1), one image
+  each.
+  - The Windows Bash is Git for Windows', not a distribution's.
+  - Each reading recorded there is a fact of those versions on those
+    images.
 * **Consumers outside the reference set**: Docker Compose, PHP phpdotenv,
   Go, Rust and dotenvx. Several real-world files are written for them.
 * **dotenv-expand and `@next/env`.** The expansion layer most Node
   applications actually use (Next.js, NestJS) is not a target. npm dotenv
   alone does not expand.
-* **Windows Bash** (Git for Windows) is a defense-in-depth weaker host: its
-  MSYS layer adds paths. The static classifier remains the safety boundary.
+* **Windows Bash** (Git for Windows) runs on an emulation layer. The census
+  did not audit its restricted mode and its program lookup separately. The
+  static classifier remains the safety boundary there.
 * **Coverage is finite.** The generated corpus samples combinations; it does
   not enumerate them. Real-world coverage is 19 files.
 * **Versions.** The census holds for the pinned versions; section 18 shows
@@ -1034,7 +1146,10 @@ both modes. Correctness, not speed, governed the harness.
    - **Multi-line extension:** LF, subject to the restrictions of section 14.
 
    The evidence is every candidate and 1,800 random files on all ten
-   references, Bash included, with zero differences on Linux.
+   references, Bash included, with zero differences on Linux and macOS.
+   On Windows the single-line profile has zero differences too. The
+   multi-line extension does not hold there: dotenv.net reads its LFs as
+   CRLF.
 2. **What cannot be represented universally?** The double quote (Java,
    Node/npm dotenv/Bun), the backslash (Bash, Ruby against Node/Bun/Java),
    `$` and literal templates (the expanding dialects and Java), the backtick
