@@ -542,12 +542,39 @@ skipped, which the harness rightly reports as a survivor.
 
 ## 13. Reproducibility evidence
 
-PENDING (CI).
+Three claims, kept apart. The release recipe is
+`audit/rust-archive-link/tools/release-unit.tcl` (rustc 1.97.0 pinned,
+`cargo --locked`, one codegen unit, paths remapped, a fixed target
+directory emptied first, `ar rcsD` on Linux, `ZERO_AR_DATE=1 libtool -static
+-D` on macOS); the packing is `audit/rust-archive-link/tools/pack.sh`.
 
-Locally [executed]: two release builds of the fixture in fresh target
-directories (rustc 1.97.0) wrote identical archives (unit
-`a65bcc85...e6af`, provider `a5dcfbd0...5324`); two packs of each package
-are byte-identical (pack.sh's `cmp`).
+**A. Deterministic pack** [executed, CI]. The same native files packed
+twice give byte-identical artifacts: pack.sh `cmp`s both packs of each
+package, locally and in the `package` job.
+
+**B. Reproducible native build** [executed, CI]. The release recipe run on
+two different runners per host, each from nothing (run 43526167818,
+`ca8e7b0b`, jobs `release unit (..., build a|b)`):
+
+| Host | Runners (image) | raw archive | localized unit | provider |
+|---|---|---|---|---|
+| linux-x86_64 | `runnervm8axu0`, `ip-10-0-131-132` (ubuntu24 20261111.370.1 and .127.1) | `225f2061...4f1d` both | `a65bcc85...e6af` both | `a5dcfbd0...5324` both |
+| macos-aarch64 | two hosts, `sat12-...` and `iad20-...` (macos15 20261104.0514.1; Xcode 16.4, SDK 15.5, ld-1167.5) | `6357502b...f0c9` both | `36890ca6...7c20` both | `dfd01591...47ba` both |
+
+The Linux unit is also byte for byte the one this repository's container
+builds locally (`a65bcc85...e6af`). What the claim does not cover: another
+Xcode, SDK or macOS image, another GNU binutils, another rustc (the unit
+depends on the toolchain by design: its symbols carry its standard
+library's crate hash).
+
+**C. Reproducible complete package** [CI]. Each runner pair's set of
+native files packed into the two multi-target artifacts (Linux x86-64 and
+macOS arm64 in one artifact each) gives the same artifacts from build a as
+from build b: `rustlink-0.1.0.botpkg` `a09f2509...5917`,
+`rustlink_provider-0.1.0.botpkg` `077bac1b...6dc8` (job `package`).
+
+PENDING (CI): the same three claims at the final commit, whose macOS unit
+differs (its `LC_BUILD_VERSION`, section 6.2).
 
 ## 14. Actual HTTP native-unit feasibility
 
