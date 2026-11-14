@@ -45,22 +45,35 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import common  # noqa: E402
 import corpus  # noqa: E402
+import safety  # noqa: E402
 
 # Sourced with every assignment exported (the usual `set -a; . ./.env` idiom),
 # then every shell variable printed NUL-delimited: name, its declare flags,
-# value. Portable to Bash 3.2 (macOS's /bin/bash): no ${!x@a}.
+# value. The flags come from ${!x@a} on Bash 4.4 and later (no process per
+# variable: Git for Windows' fork made a 10,000-variable dump time out) and
+# from a `declare -p` substitution on Bash 3.2 (macOS's /bin/bash), which
+# never even parses the newer form (it is inside an `eval` that 3.2 skips).
 BASH_SCRIPT = (
     'shopt -u sourcepath; set -a; source fixture.env; __census_rc=$?; set +a; '
+    '__census_at=0; (( BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4) )) '
+    '&& __census_at=1; '
     'for __census_n in $(compgen -v); do case $__census_n in __census_*) continue;; esac; '
-    '__census_d=$(declare -p "$__census_n"); __census_d=${__census_d#declare }; '
-    'printf "%s\\0%s\\0%s\\0" "$__census_n" "${__census_d%% *}" "${!__census_n}"; done; '
+    'if (( __census_at )); then eval \'__census_d=${!__census_n@a}\'; __census_d=-${__census_d:--}; '
+    'else __census_d=$(declare -p "$__census_n"); __census_d=${__census_d#declare }; '
+    '__census_d=${__census_d%% *}; fi; '
+    'printf "%s\\0%s\\0%s\\0" "$__census_n" "$__census_d" "${!__census_n}"; done; '
     'printf "%s\\0%s\\0%s\\0" __census_rc - "$__census_rc"'
 )
 # Bash variables whose value changes from run to run or reflects the dump
-# itself, never a fixture's doing (the fixtures cannot assign them: safety.SPECIAL).
+# itself. A variable Bash treats specially is never a fixture's doing either:
+# the classifier runs no fixture that names one (safety.SPECIAL), so a change
+# to one is Bash's own (Bash 5.3's BASH_MONOSECONDS, a clock, is the case
+# that made every Windows observation differ before it was listed).
 BASH_DYNAMIC = {"BASHPID", "BASH_COMMAND", "BASH_EXECUTION_STRING", "EPOCHREALTIME", "EPOCHSECONDS",
                 "LINENO", "RANDOM", "SRANDOM", "SECONDS", "PIPESTATUS", "BASH_LINENO", "_", "PPID",
-                "HISTCMD", "BASH_SUBSHELL", "COLUMNS", "LINES", "PWD", "OLDPWD"}
+                "HISTCMD", "BASH_SUBSHELL", "COLUMNS", "LINES", "PWD", "OLDPWD", "BASH_MONOSECONDS",
+                "BASH_TRAPSIG"}
+BASH_SPECIAL = {n.decode("ascii") for n in safety.SPECIAL} | BASH_DYNAMIC
 ELIDE = 8192
 DECLARED = re.compile(rb"^[ \t]*(?:export[ \t]+)?([A-Za-z_][A-Za-z0-9_.\-]*)[ \t]*[=:]", re.M)
 
@@ -89,6 +102,12 @@ def scrub(s, paths):
     <CACHE>, so results do not depend on where the census ran."""
     if not isinstance(s, str):
         return s
+    if "Bun has crashed" in s:
+        # a crash report's header holds the argv, timings and the machine's
+        # memory, and its report link encodes addresses: kept as the panic
+        m = re.search(r"panic\([^\n]*", s)
+        if m:
+            s = m.group(0) + " [Bun crash report; its header and report link dropped]"
     for p in paths:
         s = s.replace(p, "<FIXTURE>")
         s = s.replace(p.replace("\\", "/"), "<FIXTURE>")
@@ -301,7 +320,7 @@ class Runner:
             src_rc = int(vars_.pop("__census_rc")[1] or b"0")
             delta = []
             for k, (attrs, val) in sorted(vars_.items()):
-                if k in BASH_DYNAMIC or "a" in attrs or "A" in attrs:
+                if k in BASH_SPECIAL or "a" in attrs or "A" in attrs:
                     continue
                 if control.get(k) != (attrs, val):
                     delta.append([k, text_value(val)])
