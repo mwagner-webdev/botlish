@@ -23,7 +23,13 @@
 #             each member's kind is elf, macho, coff, import (a short import
 #             object: machine N, dll DLL, symbol S), bitcode, symbols (the
 #             archive's index), names (GNU's long-name table) or unknown;
-#             `index` {SYMBOL...} from a GNU or BSD symbol index
+#             `index` {SYMBOL...} from a GNU ("/", "/SYM64/") or BSD
+#             (__.SYMDEF, __.SYMDEF SORTED, __.SYMDEF_64) symbol index, every
+#             entry naming a member's header offset, a Mach-O member's
+#             entries by their C names (no leading underscore); `weak`
+#             {SYMBOL...} the indexed symbols only weak definitions define
+#   (an elf relocatable object's and a macho object's facts hold `weak`
+#   {SYMBOL...}, their defined weak symbols)
 #   thin      a thin archive (it holds no members, only paths)
 #   script    a GNU linker script
 #   tbd       an Apple text-based stub (.tbd)
@@ -137,7 +143,7 @@ proc pm::binary::Elf {data label} {
     set typeName [dict getdef {1 rel 2 program 3 dyn} $type other]
     set facts [dict create kind elf class [expr {$class == 2 ? 64 : 32}] endian $endian type $typeName \
         machine $machine osabi $osabi interpreter "" soname "" needed {} runpath {} rpath {} \
-        verneed {} verdef {} symbols {}]
+        verneed {} verdef {} symbols {} weak {}]
     if {$class != 2 || $endian ne "le"} {
         # No target of the compiler's is 32-bit or big-endian: the identity
         # facts suffice to refuse it.
@@ -250,6 +256,32 @@ proc pm::binary::Elf {data label} {
             dict set facts symbols [lsort -unique $symbols]
         }
     }
+    # A relocatable object's weak definitions (STB_WEAK, defined), from its
+    # SHT_SYMTAB: an archive member's, which a link replaces by a strong
+    # definition elsewhere and never reports as a duplicate.
+    if {$typeName eq "rel" && $shoff > 0 && $shentsize == 64} {
+        set weak {}
+        for {set i 0} {$i < $shnum} {incr i} {
+            set at [expr {$shoff + $i * 64}]
+            if {[U $data [expr {$at + 4}] 4 $label] != 2} continue
+            set offset [U $data [expr {$at + 24}] 8 $label]
+            set size [U $data [expr {$at + 32}] 8 $label]
+            set link [U $data [expr {$at + 40}] 4 $label]
+            set strOffset [U $data [expr {$shoff + $link * 64 + 24}] 8 $label]
+            set n [expr {$size / 24}]
+            if {$n > $maxSymbols} {
+                Fail $label "more than $maxSymbols symbols"
+            }
+            for {set k 1} {$k < $n} {incr k} {
+                set sym [expr {$offset + $k * 24}]
+                set info [U $data [expr {$sym + 4}] 1 $label]
+                set shndx [U $data [expr {$sym + 6}] 2 $label]
+                if {$shndx == 0 || ($info >> 4) != 2} continue
+                lappend weak [CString $data [expr {$strOffset + [U $data $sym 4 $label]}] $label]
+            }
+        }
+        dict set facts weak [lsort -unique $weak]
+    }
     return $facts
 }
 
@@ -276,7 +308,7 @@ proc pm::binary::MachO {data label} {
     set ncmds [U $data 16 4 $label]
     set facts [dict create kind macho bits [expr {$magic == 0xfeedfacf ? 64 : 32}] cputype $cputype \
         filetype [dict getdef {1 object 2 execute 6 dylib 8 bundle} $filetype other] \
-        id "" needed {} rpath {} signed 0 platform 0 minos "" symbols {}]
+        id "" needed {} rpath {} signed 0 platform 0 minos "" symbols {} weak {}]
     if {$magic != 0xfeedfacf} {
         return $facts
     }
@@ -307,6 +339,7 @@ proc pm::binary::MachO {data label} {
                 set nsyms [U $data [expr {$at + 12}] 4 $label]
                 set stroff [U $data [expr {$at + 16}] 4 $label]
                 set symbols {}
+                set weak {}
                 for {set k 0} {$k < $nsyms && $k < 2000000} {incr k} {
                     set sym [expr {$symoff + $k * 16}]
                     set type [U $data [expr {$sym + 4}] 1 $label]
@@ -317,8 +350,13 @@ proc pm::binary::MachO {data label} {
                         set name [string range $name 1 end]
                     }
                     lappend symbols $name
+                    # N_WEAK_DEF (n_desc): a weak definition.
+                    if {[U $data [expr {$sym + 6}] 2 $label] & 0x0080} {
+                        lappend weak $name
+                    }
                 }
                 dict set facts symbols [lsort -unique $symbols]
+                dict set facts weak [lsort -unique $weak]
             }
         }
         incr at $size
@@ -489,7 +527,11 @@ proc pm::binary::CoffObject {data label} {
 proc pm::binary::Archive {data label} {
     variable maxMembers
     set members {}
-    set index {}
+    # The symbol index as read: {SYMBOL HEADER-OFFSET} pairs, each naming
+    # the member whose header starts at the offset (Index, below).
+    set entries {}
+    set linkerMembers 0
+    set kinds [dict create]
     set names ""
     set at 8
     set length [string length $data]
@@ -515,16 +557,12 @@ proc pm::binary::Archive {data label} {
         set name $rawName
         if {$rawName in {/ /SYM64/}} {
             lappend members [dict create name $rawName kind symbols]
-            if {$rawName eq "/" && [string length $body] >= 4} {
-                # GNU's index: a big-endian count, offsets, names.
-                set count [U $body 0 4 $label be]
-                set strings [expr {4 + 4 * $count}]
-                set position $strings
-                for {set i 0} {$i < $count && $position < [string length $body]} {incr i} {
-                    set symbol [CString $body $position $label]
-                    lappend index $symbol
-                    incr position [expr {[string length $symbol] + 1}]
-                }
+            # GNU's index (System V's), and Microsoft's first linker member,
+            # which is the same: a big-endian count, the members' header
+            # offsets, the names. A second "/" is Microsoft's second linker
+            # member (little-endian, another layout): the first said it all.
+            if {[incr linkerMembers] == 1} {
+                lappend entries {*}[GnuIndex $body [expr {$rawName eq "/" ? 4 : 8}] "${label}($rawName)"]
             }
         } elseif {$rawName eq "//"} {
             set names $body
@@ -543,10 +581,14 @@ proc pm::binary::Archive {data label} {
                 set name [string trimright $name /]
             }
             if {$name in {__.SYMDEF {__.SYMDEF SORTED} __.SYMDEF_64 {__.SYMDEF_64 SORTED}}} {
+                # BSD's index (Apple's ar and libtool, llvm-ar's darwin
+                # format): <ar.h>/<mach-o/ranlib.h>'s ranlib table.
                 lappend members [dict create name $name kind symbols]
+                lappend entries {*}[BsdIndex $body [expr {[string match __.SYMDEF_64* $name] ? 8 : 4}] "${label}($name)"]
             } else {
                 set facts [inspect $body "${label}($name)"]
                 lappend members [dict merge $facts [dict create name $name]]
+                dict set kinds $at [list [dict get $facts kind] [dict getdef $facts weak {}]]
             }
         }
         if {[llength $members] > $maxMembers} {
@@ -554,7 +596,109 @@ proc pm::binary::Archive {data label} {
         }
         set at [expr {$start + $size + ($size % 2)}]
     }
-    return [dict create kind archive members $members index [lsort -unique $index]]
+    lassign [Index $entries $kinds $label] index weak
+    return [dict create kind archive members $members index $index weak $weak]
+}
+
+# The entries of a GNU (System V) symbol index BODY whose count and offsets
+# are WIDTH-byte big-endian integers (4: "/", 8: "/SYM64/"): {SYMBOL OFFSET}
+# pairs.
+proc pm::binary::GnuIndex {body width label} {
+    variable maxSymbols
+    if {[string length $body] < $width} {
+        Fail $label "a symbol index of [string length $body] bytes"
+    }
+    set count [U $body 0 $width $label be]
+    if {$count > $maxSymbols} {
+        Fail $label "a symbol index of $count symbols"
+    }
+    set position [expr {$width + $width * $count}]
+    if {$position > [string length $body]} {
+        Fail $label "a symbol index of $count symbols whose offsets run past its [string length $body] bytes"
+    }
+    set entries {}
+    for {set i 0} {$i < $count} {incr i} {
+        if {$position >= [string length $body]} {
+            Fail $label "a symbol index of $count symbols with names for only $i"
+        }
+        set symbol [CString $body $position $label]
+        lappend entries $symbol [U $body [expr {$width + $width * $i}] $width $label be]
+        incr position [expr {[string length $symbol] + 1}]
+    }
+    return $entries
+}
+
+# The entries of a BSD symbol index BODY (__.SYMDEF, __.SYMDEF SORTED: WIDTH
+# 4; __.SYMDEF_64 and its sorted form: 8): the size in bytes of the ranlib
+# table, the table -- each entry a name's offset in the string table and its
+# member's header offset -- the string table's size, the string table;
+# little-endian, as every Mach-O target this package manager knows writes
+# it. {SYMBOL OFFSET} pairs.
+proc pm::binary::BsdIndex {body width label} {
+    variable maxSymbols
+    set length [string length $body]
+    set table [U $body 0 $width $label]
+    set entry [expr {2 * $width}]
+    if {$table % $entry != 0} {
+        Fail $label "a ranlib table of $table bytes, not a whole number of $entry-byte entries"
+    }
+    if {$table / $entry > $maxSymbols} {
+        Fail $label "a symbol index of [expr {$table / $entry}] symbols"
+    }
+    set strings [expr {$width + $table}]
+    if {$strings + $width > $length} {
+        Fail $label "a ranlib table of $table bytes running past the index's $length bytes"
+    }
+    set stringSize [U $body $strings $width $label]
+    set stringStart [expr {$strings + $width}]
+    if {$stringStart + $stringSize > $length} {
+        Fail $label "a string table of $stringSize bytes running past the index's $length bytes"
+    }
+    set stringTable [string range $body $stringStart [expr {$stringStart + $stringSize - 1}]]
+    set entries {}
+    for {set at $width} {$at < $strings} {incr at $entry} {
+        set strx [U $body $at $width $label]
+        if {$strx >= $stringSize} {
+            Fail $label "a symbol name at offset $strx of a $stringSize-byte string table"
+        }
+        lappend entries [CString $stringTable $strx $label] [U $body [expr {$at + $width}] $width $label]
+    }
+    return $entries
+}
+
+# The archive's index: the symbol of every entry of ENTRIES ({SYMBOL OFFSET}
+# pairs) whose OFFSET is where a member's header starts (KINDS: header
+# offset -> {the member's kind, its weak definitions}) -- an entry naming no
+# member is a malformed index, never a guess. A Mach-O member's C symbols
+# carry a leading underscore (Apple's convention, as the Mach-O reader's
+# `symbols`): its entries are the C names, so a declared C function is
+# looked up by the same name on every target. {INDEX WEAK}: WEAK the
+# indexed symbols every defining member defines weakly (a weak fallback a
+# strong definition elsewhere replaces at link time).
+proc pm::binary::Index {entries kinds label} {
+    set index {}
+    set strong [dict create]
+    foreach {symbol offset} $entries {
+        if {![dict exists $kinds $offset]} {
+            Fail $label "the symbol index names $symbol in a member at offset $offset, where no member starts"
+        }
+        lassign [dict get $kinds $offset] kind weak
+        if {$kind eq "macho" && [string index $symbol 0] eq "_"} {
+            set symbol [string range $symbol 1 end]
+        }
+        lappend index $symbol
+        if {$symbol ni $weak} {
+            dict set strong $symbol 1
+        }
+    }
+    set index [lsort -unique $index]
+    set weakOnly {}
+    foreach symbol $index {
+        if {![dict exists $strong $symbol]} {
+            lappend weakOnly $symbol
+        }
+    }
+    return [list $index $weakOnly]
 }
 
 # ---------------------------------------------------------------------------

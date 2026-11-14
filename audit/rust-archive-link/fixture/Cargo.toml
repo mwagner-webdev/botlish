@@ -1,0 +1,42 @@
+# botlish_rlf: the Rust link fixture of HTTP-MACOS-RUST-ARCHIVE-LINK-FEASIBILITY-MILESTONE-1.md.
+# A native unit with the http package's unit's linkage shape (a staticlib with
+# a C shim built by its build script, the C ABI as i64 functions, opaque
+# state behind handles, a foreign-thread notification through an optional
+# provider symbol, panics caught at the boundary) and none of its protocol
+# code: it has no dependency, so it builds offline and in seconds.
+#
+#   default    the packaged unit: the rlf_* C ABI, a counting global
+#              allocator (the unit's own Rust allocation, counted: two Rust
+#              runtimes in one executable, each with its own allocator)
+#   plain      no global allocator (the negative controls' "silent sharing"
+#              case: an unlocalized unit whose standard library coincides
+#              with the Botlish runtime's)
+#
+# The C shim's provider reference is chosen by RLF_NOTIFY when it is built
+# (build.rs): weakdef (a weak fallback definition), weakref (a weak
+# reference, the http unit's notify.c), strong (a plain reference).
+[package]
+name = "botlish_rlf"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "MIT"
+description = "The Rust link fixture of Botlish's Rust native-archive feasibility milestone"
+
+[lib]
+crate-type = ["staticlib", "rlib"]
+path = "src/lib.rs"
+
+[features]
+default = ["counting"]
+counting = []
+
+[dependencies]
+
+[profile.release]
+# Unwinding stays on: every export catches panics (guard), the unit's own
+# personality routine runs.
+panic = "unwind"
+debug = false
+codegen-units = 1
+incremental = false

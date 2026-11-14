@@ -1,0 +1,67 @@
+# rlfchecks.bot -- the consumer's checks of the `rlf` package
+# (HTTP-MACOS-RUST-ARCHIVE-LINK-FEASIBILITY-MILESTONE-1.md, "Independent
+# consumer acceptance"): an application module of the clean consumer, which
+# imports the installed packages only. Each check is a word of the summary
+# the harness compares (rlf.tcl's `expected`): one text for every target.
+import rlf
+import std::int
+import std::str
+
+private nomethod fn t(n: int) -> str:
+    std::int::to_string(n)
+
+# One store through its life: pushes, the sum, the unit's own formatting,
+# a full store, a panic caught inside the unit, the store still usable
+# after it, its destruction, a stale handle refused.
+fn store_checks() -> str errors rlf::StoreError:
+    s = rlf::create(3)
+    a = s.push(10)
+    b = s.push(20)
+    c = s.push(30)
+    total = rlf::sum(s)
+    text = rlf::describe(s)
+    full = s.push(40):
+        on rlf::StoreError e:
+            e.code
+    panicked = rlf::panic_inside(s)
+    after = rlf::sum(s)
+    held = rlf::allocated()
+    gone = rlf::destroy(s)
+    stale = s.push(1):
+        on rlf::StoreError e:
+            e.code
+    holding = if held > 0:
+        "yes"
+    else:
+        "no"
+    "pushes ".concat(t(a)).concat(", ").concat(t(b)).concat(", ").concat(t(c)).concat("; sum ").concat(t(total)).concat("; describe [").concat(text).concat("]; full ").concat(t(full)).concat("; panic ").concat(t(panicked)).concat("; after ").concat(t(after)).concat("; held ").concat(holding).concat("; destroy ").concat(t(gone)).concat("; stale ").concat(t(stale))
+
+# N stores made, filled and destroyed: none left live, and the unit's
+# allocator holds what it held before (every block it allocated, it
+# released: nothing crossed to another allocator).
+fn cycle_checks(n: int) -> str errors rlf::StoreError:
+    warm = rlf::create(16)
+    warm.push(1)
+    rlf::destroy(warm)
+    before = rlf::allocated()
+    count = rlf::allocations()
+    loop i from 0 to n:
+        s = rlf::create(16)
+        loop j from 0 to 16:
+            s.push(i * 16 + j)
+        rlf::describe(s)
+        rlf::destroy(s)
+    after = rlf::allocated()
+    more = rlf::allocations() - count
+    balance = if after == before:
+        "balanced"
+    else:
+        "unbalanced ".concat(t(after - before))
+    counted = if more > n:
+        "counted"
+    else:
+        "uncounted"
+    "cycles ".concat(t(n)).concat("; live ").concat(t(rlf::live())).concat("; allocator ").concat(balance).concat("; allocations ").concat(counted)
+
+fn version_check() -> str:
+    "version ".concat(t(rlf::version()))

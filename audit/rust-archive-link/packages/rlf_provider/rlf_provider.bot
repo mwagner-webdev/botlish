@@ -1,0 +1,24 @@
+# rlf_provider.bot -- the package `rlf_provider`: the Rust link fixture's
+# optional provider (HTTP-MACOS-RUST-ARCHIVE-LINK-FEASIBILITY-MILESTONE-1.md).
+# Its archive defines rlfp_post, the symbol the `rlf` unit's notify.c posts
+# through -- the event loop driver's botlish_event_post2 is that symbol for
+# the http unit -- and records what it receives. A program that calls this
+# module links the archive, and with it the provider; one that does not
+# links neither.
+import std::ffi::c
+
+extern c library "rlf_provider" static at "native/librlf_provider.a"
+
+private extern c fn rlfp_read(what: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+
+# The posts the provider received.
+fn posts() -> int:
+    rlfp_read(0)
+
+# The sum of their values.
+fn total() -> int:
+    rlfp_read(1)
+
+# The sum of their tags.
+fn tags() -> int:
+    rlfp_read(2)

@@ -1,0 +1,23 @@
+# probe.bot -- the http unit's link probe on macOS
+# (HTTP-MACOS-RUST-ARCHIVE-LINK-FEASIBILITY-MILESTONE-1.md, "The http
+# unit"): the localized unit, the pinned BoringSSL provider and the Botlish
+# runtime in one executable, through the native link plan only. It declares
+# the unit's C functions itself (http.bot needs the Linux event loop
+# driver, which macOS has none of) and calls those that need no loop: the
+# provider's API version, the bridge opened and closed.
+import std::ffi::c
+import std::int
+import std::str
+
+extern c library "botlish_http" static at "native/libbotlish_http.a"
+extern c library "botlish_boringssl" static at "native/libbotlish_boringssl.a"
+extern c library "c++"
+
+extern c fn bh_provider() -> std::ffi::c::LongLong
+extern c fn bh_open(flags: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+extern c fn bh_close() -> std::ffi::c::LongLong
+
+opened = bh_open(0)
+api = bh_provider()
+closed = bh_close()
+"open ".concat(std::int::to_string(opened)).concat("; api ").concat(std::int::to_string(api)).concat("; close ").concat(std::int::to_string(closed))

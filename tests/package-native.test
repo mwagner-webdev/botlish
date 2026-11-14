@@ -39,6 +39,10 @@ testConstraint clangAarch64 [expr {[auto_execok clang] ne "" && [testConstraint 
 # Linking a library of another architecture takes LLVM's linker (the host's
 # GNU ld links only its own); compiling objects and archiving them does not.
 testConstraint lld [expr {[auto_execok ld.lld] ne ""}]
+testConstraint llvmAr [expr {[auto_execok llvm-ar] ne ""}]
+# Apple's own archivers, on a macOS arm64 host (pn-inspect-apple-archive).
+testConstraint appleArchiver [expr {$hostTarget eq "macos-aarch64" && [file executable /usr/bin/ar]
+    && [file executable /usr/bin/libtool] && [auto_execok cc] ne ""}]
 testConstraint mingw [expr {[auto_execok x86_64-w64-mingw32-gcc] ne "" && [auto_execok x86_64-w64-mingw32-dlltool] ne ""}]
 testConstraint llvmDlltool [expr {[auto_execok llvm-dlltool] ne "" || [auto_execok llvm-dlltool-18] ne ""}]
 testConstraint dpkgZlib [expr {[testConstraint linuxX86Host] && [file isdirectory /var/lib/dpkg/info]
@@ -526,6 +530,161 @@ test pn-inspect-windows {MinGW-w64's DLL, its import library and an MSVC-style s
     list [pm::binary::describe $dll] [dict get $dll name] [dict get $dll symbols] [expr {"KERNEL32.dll" in [dict get $dll needed]}] \
         $asStatic $message [dict get $facts identity]
 } -cleanup cleanup -match glob -result {{PE x86-64 DLL} w.dll w_value 1 1 {libw.dll.a is an import library of w.dll, and library w is declared a static archive: *} w.dll}
+
+# Archive symbol indexes (HTTP-MACOS-RUST-ARCHIVE-LINK-FEASIBILITY-MILESTONE-1.md,
+# "Package-manager findings"): BSD's ranlib table (__.SYMDEF, __.SYMDEF
+# SORTED, __.SYMDEF_64), the one Apple's ar and libtool write, read as GNU's
+# is -- every entry naming the member it is in, a Mach-O member's names the C
+# names. Before, a BSD index read as no names (sqlite-botpkg's F-16), so a
+# declared symbol of a macOS archive was never found. The archives below are
+# made byte by byte (bsdArchive), so every form and every malformation is
+# read on any host.
+
+# An ar member: its header (a BSD long name, #1/N, when NAME is longer than
+# 15 bytes or holds a space, as Apple's ar writes them) and its body, padded
+# to an even size.
+proc arMember {name body} {
+    if {[string length $name] > 15 || [string first " " $name] >= 0} {
+        set long [expr {([string length $name] + 1 + 3) / 4 * 4}]
+        set padded [string range "$name[string repeat \x00 $long]" 0 [expr {$long - 1}]]
+        set body $padded$body
+        set name "#1/$long"
+    }
+    set header [format %-16s%-12s%-6s%-6s%-8s%-10s $name 0 0 0 644 [string length $body]]
+    append header "`\n"
+    if {[string length $body] % 2} { append body "\n" }
+    return $header$body
+}
+
+# A Mach-O arm64 object's header and nothing else (no load command): a member
+# the reader takes for a Mach-O object.
+proc machoStub {} {
+    binary format iiiiiiii 0xfeedfacf 0x0100000c 0 1 0 0 0 0
+}
+
+# A BSD archive: NAME (__.SYMDEF, __.SYMDEF SORTED, __.SYMDEF_64, ...), whose
+# ranlib table has a WIDTH-byte entry {name offset, member} per pair of
+# ENTRIES ({SYMBOL MEMBER-NUMBER}), then MEMBERS ({NAME BODY} ...).
+# OVERRIDES replace computed fields (table, strx.N, offset.N, strings) to
+# malform it.
+proc bsdArchive {name width entries members {overrides {}}} {
+    set fmt [expr {$width == 8 ? "w" : "i"}]
+    set strings ""
+    set strx {}
+    foreach {symbol member} $entries {
+        lappend strx [string length $strings]
+        append strings $symbol\x00
+    }
+    while {[string length $strings] % $width} { append strings \x00 }
+    set count [expr {[llength $entries] / 2}]
+    set table [expr {$count * 2 * $width}]
+    # The index member's size is fixed by its contents, so the members'
+    # header offsets are known before the index is written.
+    set indexMember [arMember $name [string repeat x [expr {$width + $table + $width + [string length $strings]}]]]
+    set offsets {}
+    set at [expr {8 + [string length $indexMember]}]
+    set rest ""
+    foreach {mname mbody} $members {
+        lappend offsets $at
+        set m [arMember $mname $mbody]
+        append rest $m
+        incr at [string length $m]
+    }
+    if {[dict exists $overrides table]} { set table [dict get $overrides table] }
+    set body [binary format $fmt $table]
+    set i 0
+    foreach {symbol member} $entries s $strx {
+        if {[dict exists $overrides strx.$i]} { set s [dict get $overrides strx.$i] }
+        set off [lindex $offsets $member]
+        if {[dict exists $overrides offset.$i]} { set off [dict get $overrides offset.$i] }
+        append body [binary format $fmt$fmt $s $off]
+        incr i
+    }
+    set size [string length $strings]
+    if {[dict exists $overrides strings]} { set size [dict get $overrides strings] }
+    append body [binary format $fmt $size] $strings
+    return "!<arch>\n[arMember $name $body]$rest"
+}
+
+test pn-inspect-bsd-index {a BSD symbol index -- __.SYMDEF, Apple's __.SYMDEF SORTED behind a #1/N name, __.SYMDEF_64 -- is read: each entry names the Mach-O member it is in, by its C name (the leading underscore of Apple's symbols dropped, as the Mach-O reader drops it); the index is sorted and unique, whatever the table's order} -body {
+    set members [list a.o [machoStub] b.o [machoStub]]
+    set entries {_f16_value 0 _f16_other 0 _f16_b 1 _f16_value 0}
+    set out {}
+    foreach {name width} {__.SYMDEF 4 {__.SYMDEF SORTED} 4 __.SYMDEF_64 8 {__.SYMDEF_64 SORTED} 8} {
+        set facts [pm::binary::inspect [bsdArchive $name $width $entries $members] lib.a]
+        lappend out [list [lindex [dict get $facts members] 0] [dict get $facts index] [pm::binary::describe $facts]]
+    }
+    set out
+} -result {{{name __.SYMDEF kind symbols} {f16_b f16_other f16_value} {an ar archive of 2 Mach-O arm64 object}} {{name {__.SYMDEF SORTED} kind symbols} {f16_b f16_other f16_value} {an ar archive of 2 Mach-O arm64 object}} {{name __.SYMDEF_64 kind symbols} {f16_b f16_other f16_value} {an ar archive of 2 Mach-O arm64 object}} {{name {__.SYMDEF_64 SORTED} kind symbols} {f16_b f16_other f16_value} {an ar archive of 2 Mach-O arm64 object}}}
+
+test pn-inspect-bsd-index-declared-symbols {a macOS static archive's declared symbols are checked against its BSD index by their C names: a symbol it defines passes, a misspelled one and one only another archive defines are refused naming the symbol; nothing is trusted for the target} -body {
+    set bytes [bsdArchive {__.SYMDEF SORTED} 4 {_sqlite3_open 0 _sqlite3_bind_blob64 0} [list s.o [machoStub]]]
+    set ok [dict create name s origin bundled linkage static file native/libs.a symbols {sqlite3_open sqlite3_bind_blob64}]
+    set facts [pm::native::CheckBundled macos-aarch64 $ok $bytes libs.a]
+    set out [list [dict get $facts symbols]]
+    foreach declared {sqlite3_bind_blob46 _sqlite3_open sqlite3_close} {
+        set library [dict replace $ok symbols [list sqlite3_open $declared]]
+        lappend out [list [catch {pm::native::CheckBundled macos-aarch64 $library $bytes libs.a} message] $message]
+    }
+    set out
+} -result {{sqlite3_bind_blob64 sqlite3_open} {1 {libs.a: library s does not define the declared symbol sqlite3_bind_blob46 (its archive index)}} {1 {libs.a: library s does not define the declared symbol _sqlite3_open (its archive index)}} {1 {libs.a: library s does not define the declared symbol sqlite3_close (its archive index)}}}
+
+test pn-inspect-bsd-index-malformed {a malformed BSD index is {PM BINARY} naming what is wrong, never a guess: a table that is no whole number of entries, a table or a string table past the index, a name outside the string table, an entry naming an offset where no member starts} -body {
+    set members [list a.o [machoStub]]
+    set entries {_x 0 _y 0}
+    set out {}
+    foreach overrides {{table 12} {table 4000} {strings 4000} {strx.1 99} {offset.1 70}} {
+        set code [catch {pm::binary::inspect [bsdArchive __.SYMDEF 4 $entries $members $overrides] lib.a} message options]
+        lappend out [list $code [dict get $options -errorcode] $message]
+    }
+    set out
+} -result {{1 {PM BINARY} {lib.a(__.SYMDEF): a ranlib table of 12 bytes, not a whole number of 8-byte entries}} {1 {PM BINARY} {lib.a(__.SYMDEF): a ranlib table of 4000 bytes running past the index's 32 bytes}} {1 {PM BINARY} {lib.a(__.SYMDEF): a string table of 4000 bytes running past the index's 32 bytes}} {1 {PM BINARY} {lib.a(__.SYMDEF): a symbol name at offset 99 of a 8-byte string table}} {1 {PM BINARY} {lib.a: the symbol index names _y in a member at offset 70, where no member starts}}}
+
+test pn-inspect-gnu-index-members {a GNU index is read the same way: each entry must name a member's header offset (else {PM BINARY}), a Mach-O member's entries are its C names (llvm-ar's GNU format over Mach-O objects), an ELF member's are as they are} -constraints {clangAarch64} -body {
+    set dir [fresh bin]
+    set mac [staticArchive $dir libmac.a mac_value 1 clang {--target=arm64-apple-macos11}]
+    file delete $mac
+    exec [expr {[auto_execok llvm-ar] ne "" ? "llvm-ar" : "ar"}] rcs $mac [file join $dir mac_value.o]
+    set elf [staticArchive $dir libelf.a elf_value 2]
+    set bytes [readBytes $elf]
+    # The first index entry's offset (bytes 4..7 of the "/" member's body)
+    # moved off its member's header.
+    set at [expr {8 + 60 + 4}]
+    binary scan [string range $bytes $at [expr {$at + 3}]] I offset
+    set broken [string replace $bytes $at [expr {$at + 3}] [binary format I [expr {$offset + 2}]]]
+    list [dict get [pm::binary::inspect [readBytes $mac] mac] index] [dict get [pm::binary::inspect $bytes elf] index] \
+        [catch {pm::binary::inspect $broken elf} message] $message
+} -cleanup cleanup -match glob -result {mac_value elf_value 1 {elf: the symbol index names elf_value in a member at offset *, where no member starts}}
+
+test pn-inspect-darwin-archive-llvm {Mach-O objects in a darwin-format archive (llvm-ar's BSD index, made from clang's arm64 objects) are a macOS static library whose declared symbols are found} -constraints {clangAarch64 llvmAr} -body {
+    set dir [fresh bin]
+    staticArchive $dir unused.a f16_value 7 clang {--target=arm64-apple-macos11}
+    set lib [file join $dir libf16.a]
+    exec llvm-ar --format=darwin rcs $lib [file join $dir f16_value.o]
+    set library [dict create name f16 origin bundled linkage static file native/libf16.a symbols f16_value]
+    set facts [pm::native::CheckBundled macos-aarch64 $library [readBytes $lib] libf16.a]
+    list [lindex [dict get [pm::binary::inspect [readBytes $lib] lib] members] 0] [dict get $facts symbols]
+} -cleanup cleanup -result {{name __.SYMDEF kind symbols} f16_value}
+
+test pn-inspect-apple-archive {an archive Apple's own ar makes (its __.SYMDEF SORTED index behind a #1/20 name) and one libtool -static makes are read on macOS: their indexes hold the C names, and a declared symbol is found (sqlite-botpkg's F-16)} -constraints {appleArchiver} -body {
+    set dir [fresh bin]
+    set out {}
+    foreach tool {ar libtool} {
+        set lib [file join $dir lib$tool.a]
+        writeText [file join $dir $tool.c] "int ${tool}_value(void) { return 3; }\n"
+        exec cc -c -o [file join $dir $tool.o] [file join $dir $tool.c]
+        if {$tool eq "ar"} {
+            exec /usr/bin/ar rcs $lib [file join $dir $tool.o]
+        } else {
+            exec /usr/bin/libtool -static -o $lib [file join $dir $tool.o]
+        }
+        set library [dict create name $tool origin bundled linkage static file native/lib$tool.a symbols ${tool}_value]
+        set facts [pm::native::CheckBundled macos-aarch64 $library [readBytes $lib] lib$tool.a]
+        lappend out [dict get [lindex [dict get [pm::binary::inspect [readBytes $lib] lib] members] 0] name] [dict get $facts symbols]
+    }
+    set out
+} -cleanup cleanup -result {{__.SYMDEF SORTED} ar_value {__.SYMDEF SORTED} libtool_value}
+
 
 # ---------------------------------------------------------------------------
 # 4. Bundled native libraries: pack and install checks

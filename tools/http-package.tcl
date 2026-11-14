@@ -31,10 +31,11 @@
 # --locked against the provider's headers in link-only mode -- boring-sys is
 # given empty archives, so nothing of BoringSSL is bundled (the census's
 # B1) and every reference stays undefined for the final link, which takes
-# the provider's archives -- then localized: one relocatable object (ld -r)
-# whose only global definitions are the bh_* functions (objcopy
-# --keep-global-symbols), its debug sections stripped, its Rust COMDAT
-# group renamed (the census's B3), in a deterministic archive. The unit
+# the provider's archives -- then localized by tools/rust-unit.tcl: one
+# relocatable object (ld -r) whose only global definitions are the bh_*
+# functions (objcopy --keep-global-symbols), its debug sections stripped,
+# its Rust COMDAT group renamed (the census's B3), in a deterministic
+# archive. The unit
 # references the provider's identity symbol: with another provider the link
 # fails (the census's B2). -testing 1 builds the test unit (feature
 # `testing`: fault injection, counters, a counting allocator), never
@@ -50,6 +51,7 @@ namespace eval httppkg {
     variable here [file dirname [file normalize [info script]]]
     variable root [file dirname $here]
 }
+source [file join $httppkg::here rust-unit.tcl]
 
 proc httppkg::Log {text} {
     puts stderr "http-package: $text"
@@ -247,17 +249,9 @@ proc httppkg::ProviderArchives {{target ""}} {
     return $dir
 }
 
-# Defined global symbols of FILE (nm).
+# Defined global symbols of FILE (nm): tools/rust-unit.tcl's reading.
 proc httppkg::Defined {file} {
-    set out {}
-    foreach line [split [exec nm -A --defined-only $file 2>/dev/null] \n] {
-        if {[regexp {^(.*):([0-9a-f]+)? +([A-Za-z]) +(\S+)$} $line -> where addr type sym]} {
-            if {![string is lower $type] && $type ni {U w v}} {
-                lappend out $sym
-            }
-        }
-    }
-    return [lsort -unique $out]
+    return [rustunit::DefinedElf $file]
 }
 
 # The localized unit for TARGET (TESTING 1: the test unit): its archive.
@@ -295,31 +289,14 @@ proc httppkg::Unit {{target ""} {testing 0}} {
         exec {*}$cmd >@stderr 2>@stderr
     }
     set raw [file join $targetDir release libbotlish_http.a]
-    set object [file join $dir botlish_http.o]
-    file delete -force $object
     # One relocatable object of the whole unit, whose only global
     # definitions are the bh_* functions: its private Rust standard library
-    # never meets the Botlish runtime's. BoringSSL's and libc's references
-    # stay undefined (global) for the final link.
-    exec ld -r --whole-archive $raw -o $object
-    set exports [lmap s [Defined $object] {expr {[string match bh_* $s] ? $s : [continue]}}]
-    set keep [file join $dir keep.txt]
-    set f [open $keep w]
-    puts $f [join $exports \n]
-    close $f
-    # Rust's one COMDAT group (DW.ref.rust_eh_personality) is deduplicated
-    # by its signature's name across the whole link: beside the Botlish
-    # runtime's own Rust code the unit's must be its own (B3).
-    set groups [regexp -all -inline {COMDAT group section \[[^\]]*\] `[^']*' \[([^\]]+)\]} [exec readelf -g $object]]
-    set rename {}
-    foreach {- sig} $groups {
-        lappend rename --redefine-sym $sig=botlish_http.$sig
-    }
-    exec objcopy --strip-debug {*}$rename --keep-global-symbols=$keep $object
+    # never meets the Botlish runtime's (tools/rust-unit.tcl: ld -r,
+    # objcopy --keep-global-symbols, the Rust COMDAT group renamed -- B3 --,
+    # a deterministic archive). BoringSSL's and libc's references stay
+    # undefined (global) for the final link.
     set unit [file join $dir libbotlish_http.a]
-    file delete -force $unit
-    exec ar rcsD $unit $object
-    file delete $object
+    set exports [rustunit::Localize $target $raw $unit {bh_*} $dir]
     set f [open [file join $dir UNIT.txt] w]
     puts $f [dict create kind $kind target $target provider [ProviderId] exports $exports sha256 [Sha256 $unit] cargo $cmd]
     close $f

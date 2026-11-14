@@ -1,0 +1,27 @@
+# probe-testing.bot -- the http test unit's link probe on macOS: the unit
+# built with its own #[global_allocator] (feature `testing`), whose
+# unlocalized form collides with the Botlish runtime's allocator shim
+# (the HTTP stack census's B3), linked localized; its allocator counts the
+# unit's own allocations only.
+import std::ffi::c
+import std::int
+import std::str
+
+extern c library "botlish_http" static at "native/libbotlish_http.a"
+extern c library "botlish_boringssl" static at "native/libbotlish_boringssl.a"
+extern c library "c++"
+
+extern c fn bh_provider() -> std::ffi::c::LongLong
+extern c fn bh_open(flags: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+extern c fn bh_close() -> std::ffi::c::LongLong
+extern c fn bh_t_alloc(i: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+
+opened = bh_open(0)
+api = bh_provider()
+closed = bh_close()
+allocs = bh_t_alloc(0)
+counted = if allocs > 0:
+    "counted"
+else:
+    "uncounted"
+"open ".concat(std::int::to_string(opened)).concat("; api ").concat(std::int::to_string(api)).concat("; close ").concat(std::int::to_string(closed)).concat("; allocations ").concat(counted)

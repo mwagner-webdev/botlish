@@ -121,7 +121,8 @@ proc pm::native::ArchiveFacts {target archive label} {
         if {[llength $foreign] > 5} { lappend shown "... ([llength $foreign] members)" }
         Fail "$label holds members that are not $target objects: [join $shown {; }]"
     }
-    return [dict create objects $objects imports [lsort -unique -nocase $imports] index [dict get $archive index]]
+    return [dict create objects $objects imports [lsort -unique -nocase $imports] index [dict get $archive index] \
+        weak [dict getdef $archive weak {}]]
 }
 
 # The highest version of PREFIX (GLIBC_) in VERSIONS, as a list of numbers,
@@ -159,7 +160,7 @@ proc pm::native::CheckBundled {target library bytes label {importBytes ""}} {
     set t [pm::target::facts $target]
     set facts [pm::binary::inspect $bytes $label]
     set what [pm::binary::describe $facts]
-    set result [dict create description $what identity "" needs {} glibc "" signed "" rpath {} symbols {}]
+    set result [dict create description $what identity "" needs {} glibc "" signed "" rpath {} symbols {} weak {}]
     if {$linkage eq "static"} {
         if {[dict get $facts kind] ne "archive"} {
             Fail "$label is $what, and library $name is declared a static archive for $target: a static library is an ar archive of $target objects (never a shared library, a stub, a linker script or a thin archive)"
@@ -177,6 +178,7 @@ proc pm::native::CheckBundled {target library bytes label {importBytes ""}} {
             }
         }
         dict set result symbols [dict get $archive index]
+        dict set result weak [dict get $archive weak]
         dict set result description "$what"
         return $result
     }
@@ -617,7 +619,7 @@ proc pm::native::Plan {target instances origins} {
         lassign [lindex $offerList 0] firstId firstInstance first
         set entry [dict create name $name origin [dict get $first origin] linkage [dict get $first linkage] \
             instances {} file "" import "" identity [dict get $first identity] needs [dict get $first needs] \
-            facts "" evidence "" version "" verified 0 glibc "" signed "" symbols {} requests {} \
+            facts "" evidence "" version "" verified 0 glibc "" signed "" symbols {} weak {} requests {} \
             declared [dict get $first symbols]]
         set digest ""
         set ok 1
@@ -685,6 +687,7 @@ proc pm::native::Plan {target instances origins} {
             dict set entry glibc [dict get $facts glibc]
             dict set entry signed [dict get $facts signed]
             dict set entry symbols [dict get $facts symbols]
+            dict set entry weak [dict get $facts weak]
             dict set entry rpath [dict get $facts rpath]
             dict set entry verified 1
             dict set entry evidence "bundled file, sha256 [pm::Short [dict get $entry sha256]]"
@@ -773,11 +776,16 @@ proc pm::native::Plan {target instances origins} {
             }
         }
     }
-    # Symbols two different static archives both define.
+    # Symbols two different static archives both define. A weak definition
+    # (an optional provider's fallback: HTTP-MACOS-RUST-ARCHIVE-LINK-
+    # FEASIBILITY-MILESTONE-1.md) is no duplicate: the linker takes the one
+    # strong definition, or one of the weak ones; only two strong ones fail.
     set definers [dict create]
     foreach entry $libraries {
         if {[dict get $entry origin] ne "bundled" || [dict get $entry linkage] ne "static"} continue
+        set weak [dict getdef $entry weak {}]
         foreach symbol [dict get $entry symbols] {
+            if {$symbol in $weak} continue
             if {[dict exists $definers $symbol] && [dict get $definers $symbol] ne [dict get $entry name]} {
                 lappend problems "the static libraries [dict get $definers $symbol] and [dict get $entry name] both define $symbol: linking both into one executable is a duplicate definition"
             }

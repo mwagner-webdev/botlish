@@ -1,0 +1,473 @@
+name: rust archive link
+
+# A Rust native unit beside the Botlish runtime, on Linux x86-64 and macOS
+# AArch64 (HTTP-MACOS-RUST-ARCHIVE-LINK-FEASIBILITY-MILESTONE-1.md):
+#
+#   native           the Rust link fixture (audit/rust-archive-link/fixture)
+#                    built and localized (tools/rust-unit.tcl) on each host,
+#                    twice: two runners, two directories (sides a and b);
+#                    its surface read by the host's own tools (nm, otool);
+#                    side a also runs the negative controls (tools/rlf.tcl
+#                    controls: unlocalized units, a missing export, the
+#                    provider reference made weak, weak-defined and strong,
+#                    a unit of an older Rust) with both linkers, and on
+#                    macOS the package reader's test of Apple's archives
+#   reproducibility  the two sides' units and provider archives compared
+#                    byte for byte, per host
+#   package          the packages `rlf` and `rlf_provider` for both targets
+#                    from side a's archives, packed twice and compared
+#   consumer-linux   a clean consumer of the packed artifacts with the
+#                    single-file compiler built here, Rust moved away and
+#                    the checkout deleted: add, verify, native plan, two
+#                    programs compiled, run and their symbols inspected
+#   consumer-macos   the same with Botlish.app built here; and the packages
+#                    packed again on the Mac, compared with the Linux pack
+#   http-macos       the http unit (a copy, with audit/rust-archive-link/
+#                    http/macos.patch) built against the pinned BoringSSL,
+#                    localized, its surface checked, linked into probe
+#                    programs beside the Botlish runtime and run
+#
+# Every job uploads what it built and read (archives, reports, nm and otool
+# output) for diagnosis.
+
+on:
+  push:
+    paths:
+      - ".github/workflows/rust-archive-link.yml"
+      - "tools/rust-unit.tcl"
+      - "tools/http-package.tcl"
+      - "pm/binary.tcl"
+      - "pm/native.tcl"
+      - "audit/rust-archive-link/**"
+      - "packages/http/native/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rust-archive-link-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  LANG: C.utf8
+  LC_ALL: C.utf8
+  # The older toolchain of the version-skew controls (a unit built by
+  # another Rust than the Botlish runtime, as a released unit is).
+  RLF_SKEW: 1.88.0
+
+jobs:
+  native-linux:
+    name: native (linux x86-64, side ${{ matrix.side }})
+    strategy:
+      fail-fast: false
+      matrix:
+        side: [a, b]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install project prerequisites
+        run: bash .devcontainer/setup.sh
+
+      - name: Build native (Cranelift) backend
+        if: matrix.side == 'a'
+        uses: ./.github/actions/build-native
+
+      # Side b builds from a copy of the checkout elsewhere, into another
+      # directory: the crate's, the build's and the checkout's paths all
+      # differ from side a's.
+      - name: Where this side builds
+        run: |
+          if [ "${{ matrix.side }}" = a ]; then
+            echo "RLF_ROOT=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+            echo "RLF_OUT=$RUNNER_TEMP/rlf-a" >> "$GITHUB_ENV"
+          else
+            mkdir -p "$HOME/elsewhere/side-b/botlish"
+            tar -C "$GITHUB_WORKSPACE" --exclude=./native/target --exclude=./.git -cf - . | tar -C "$HOME/elsewhere/side-b/botlish" -xf -
+            echo "RLF_ROOT=$HOME/elsewhere/side-b/botlish" >> "$GITHUB_ENV"
+            echo "RLF_OUT=$HOME/elsewhere/out-b/deeper" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build and localize the fixture; the provider archive
+        run: |
+          tclsh9.0 "$RLF_ROOT/audit/rust-archive-link/tools/rlf.tcl" unit -out "$RLF_OUT/unit"
+          tclsh9.0 "$RLF_ROOT/audit/rust-archive-link/tools/rlf.tcl" provider -out "$RLF_OUT/provider"
+          cat "$RLF_OUT/unit/UNIT.txt" "$RLF_OUT/provider/PROVIDER.txt"
+
+      - name: The unit's surface (GNU nm)
+        run: |
+          mkdir -p "$RLF_OUT/inspect"
+          tclsh9.0 tools/rust-unit.tcl surface -target linux-x86_64 "$RLF_OUT/unit/libbotlish_rlf.a" | tee "$RLF_OUT/inspect/surface.txt"
+          nm "$RLF_OUT/unit/libbotlish_rlf.a" > "$RLF_OUT/inspect/nm.txt"
+          readelf -g "$RLF_OUT/unit/libbotlish_rlf.a" > "$RLF_OUT/inspect/readelf-groups.txt" || true
+          echo "global definitions: $(grep -c . "$RLF_OUT/inspect/surface.txt"); undefined: $(grep -c ' U ' "$RLF_OUT/inspect/nm.txt")"
+
+      - name: Install the version-skew toolchain
+        if: matrix.side == 'a'
+        run: rustup toolchain install "$RLF_SKEW" --profile minimal
+
+      - name: Negative controls and variants (both linkers)
+        if: matrix.side == 'a'
+        run: tclsh9.0 audit/rust-archive-link/tools/rlf.tcl controls -compiler "tclsh9.0 $GITHUB_WORKSPACE/main.tcl" -work "$RUNNER_TEMP/controls" -skew "$RLF_SKEW" -report "$RLF_OUT/inspect/CONTROLS.txt"
+
+      - name: The archive reader's tests
+        if: matrix.side == 'a'
+        run: tclsh9.0 tests/package-native.test -match 'pn-inspect-*' -tmpdir "$(mktemp -d)"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-linux-x86_64-${{ matrix.side }}
+          path: |
+            ${{ env.RLF_OUT }}/unit/libbotlish_rlf.a
+            ${{ env.RLF_OUT }}/unit/UNIT.txt
+            ${{ env.RLF_OUT }}/provider/librlf_provider.a
+            ${{ env.RLF_OUT }}/provider/PROVIDER.txt
+            ${{ env.RLF_OUT }}/inspect/
+
+  native-macos:
+    name: native (macos arm64, side ${{ matrix.side }})
+    strategy:
+      fail-fast: false
+      matrix:
+        side: [a, b]
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Host and toolchain
+        run: |
+          sw_vers; uname -a
+          echo "arch: $(uname -m); translated: $(sysctl -n sysctl.proc_translated 2>/dev/null || echo 0)"
+          xcode-select -p; xcrun --show-sdk-version; cc --version | head -2; ld -v 2>&1 | head -3
+          [ "$(uname -m)" = arm64 ] || { echo "::error::not an arm64 runner"; exit 1; }
+
+      - name: Install prerequisites (Tcl 9.0.1, stable Rust)
+        uses: ./.github/actions/setup-macos
+
+      - name: Build native (Cranelift) backend
+        if: matrix.side == 'a'
+        uses: ./.github/actions/build-native
+
+      - name: Where this side builds
+        run: |
+          if [ "${{ matrix.side }}" = a ]; then
+            echo "RLF_ROOT=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+            echo "RLF_OUT=$RUNNER_TEMP/rlf-a" >> "$GITHUB_ENV"
+          else
+            mkdir -p "$HOME/elsewhere/side-b/botlish"
+            tar -C "$GITHUB_WORKSPACE" --exclude=./native/target --exclude=./.git -cf - . | tar -C "$HOME/elsewhere/side-b/botlish" -xf -
+            echo "RLF_ROOT=$HOME/elsewhere/side-b/botlish" >> "$GITHUB_ENV"
+            echo "RLF_OUT=$HOME/elsewhere/out-b/deeper" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build and localize the fixture; the provider archive
+        run: |
+          tclsh9.0 "$RLF_ROOT/audit/rust-archive-link/tools/rlf.tcl" unit -out "$RLF_OUT/unit"
+          tclsh9.0 "$RLF_ROOT/audit/rust-archive-link/tools/rlf.tcl" provider -out "$RLF_OUT/provider"
+          cat "$RLF_OUT/unit/UNIT.txt" "$RLF_OUT/provider/PROVIDER.txt"
+
+      # Apple's own tools read the localized unit: its global definitions
+      # (nm -g), none left private extern (nm -m: a private extern is still
+      # global to a static link), its load commands (otool), the archive's
+      # index (ar's __.SYMDEF SORTED).
+      - name: The unit's surface (Apple's nm, otool)
+        run: |
+          set -o pipefail
+          u="$RLF_OUT/unit/libbotlish_rlf.a"
+          mkdir -p "$RLF_OUT/inspect"
+          tclsh9.0 tools/rust-unit.tcl surface -target macos-aarch64 "$u" | tee "$RLF_OUT/inspect/surface.txt"
+          nm -m "$u" > "$RLF_OUT/inspect/nm-m.txt"
+          nm -g -U "$u" > "$RLF_OUT/inspect/nm-gU.txt"
+          otool -l "$u" > "$RLF_OUT/inspect/otool-l.txt"
+          otool -h "$u" | tee "$RLF_OUT/inspect/otool-h.txt"
+          ar -t "$u" | tee "$RLF_OUT/inspect/members.txt"
+          echo "external definitions: $(grep -c ' external ' "$RLF_OUT/inspect/nm-m.txt" || true) (with undefined)"
+          echo "private externals left: $(grep -c 'private external' "$RLF_OUT/inspect/nm-m.txt" || true)"
+          echo "weak definitions: $(grep 'weak' "$RLF_OUT/inspect/nm-m.txt" || true)"
+          if grep -E '\(__[A-Z]+,[^)]*\) private external' "$RLF_OUT/inspect/nm-m.txt"; then
+            echo "::error::the localized unit keeps private external definitions"; exit 1
+          fi
+          lines=$(grep -c . "$RLF_OUT/inspect/surface.txt")
+          [ "$lines" = 14 ] || { echo "::error::the localized unit defines $lines global symbols, 14 expected"; exit 1; }
+
+      - name: Install the version-skew toolchain
+        if: matrix.side == 'a'
+        run: rustup toolchain install "$RLF_SKEW" --profile minimal
+
+      - name: Negative controls and variants (both linkers)
+        if: matrix.side == 'a'
+        run: tclsh9.0 audit/rust-archive-link/tools/rlf.tcl controls -compiler "tclsh9.0 $GITHUB_WORKSPACE/main.tcl" -work "$RUNNER_TEMP/controls" -skew "$RLF_SKEW" -report "$RLF_OUT/inspect/CONTROLS.txt"
+
+      - name: The archive reader's tests (Apple's ar and libtool among them)
+        if: always() && matrix.side == 'a'
+        run: tclsh9.0 tests/package-native.test -match 'pn-inspect-*' -tmpdir "$(mktemp -d)"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-macos-aarch64-${{ matrix.side }}
+          path: |
+            ${{ env.RLF_OUT }}/unit/libbotlish_rlf.a
+            ${{ env.RLF_OUT }}/unit/UNIT.txt
+            ${{ env.RLF_OUT }}/provider/librlf_provider.a
+            ${{ env.RLF_OUT }}/provider/PROVIDER.txt
+            ${{ env.RLF_OUT }}/inspect/
+
+  reproducibility:
+    name: reproducibility (two runners, two directories)
+    needs: [native-linux, native-macos]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: native-*
+          path: native
+      - name: Compare the two sides
+        run: |
+          status=0
+          for t in linux-x86_64 macos-aarch64; do
+            for f in unit/libbotlish_rlf.a provider/librlf_provider.a; do
+              a=$(find "native/native-$t-a" -path "*/$f" | head -1)
+              b=$(find "native/native-$t-b" -path "*/$f" | head -1)
+              if [ -z "$a" ] || [ -z "$b" ]; then echo "$t $f: missing ($a | $b)"; status=1; continue; fi
+              sa=$(sha256sum "$a" | cut -d' ' -f1); sb=$(sha256sum "$b" | cut -d' ' -f1)
+              if [ "$sa" = "$sb" ]; then
+                echo "$t $f: identical, sha256 $sa ($(stat -c %s "$a") bytes)"
+              else
+                echo "$t $f: DIFFERENT: a $sa, b $sb"; cmp -l "$a" "$b" | head -20 || true
+                echo "  differing bytes: $(cmp -l "$a" "$b" | wc -l) of $(stat -c %s "$a")"
+                status=1
+              fi
+            done
+          done | tee reproducibility.txt
+          exit $(grep -c DIFFERENT reproducibility.txt || true)
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: reproducibility
+          path: reproducibility.txt
+
+  package:
+    name: package rlf and rlf_provider (both targets)
+    needs: [native-linux, native-macos]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install project prerequisites
+        run: bash .devcontainer/setup.sh
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: native-*-a
+          path: native
+      - name: Stage, audit and pack (twice, compared)
+        run: |
+          l=$(dirname "$(find native/native-linux-x86_64-a -name libbotlish_rlf.a)")
+          m=$(dirname "$(find native/native-macos-aarch64-a -name libbotlish_rlf.a)")
+          lp=$(dirname "$(find native/native-linux-x86_64-a -name librlf_provider.a)")
+          mp=$(dirname "$(find native/native-macos-aarch64-a -name librlf_provider.a)")
+          tclsh9.0 audit/rust-archive-link/tools/rlf.tcl stage -compiler "tclsh9.0 $GITHUB_WORKSPACE/main.tcl" -out "$RUNNER_TEMP/pkg" \
+            linux-x86_64 "$l" "$lp" macos-aarch64 "$m" "$mp"
+          cat "$RUNNER_TEMP/pkg/STAGE.txt"
+          for p in "$RUNNER_TEMP"/pkg/repo/*.botpkg; do tclsh9.0 main.tcl package inspect "$p"; done
+          sha256sum "$RUNNER_TEMP"/pkg/repo/*.botpkg | tee "$RUNNER_TEMP/pkg/repo/SHA256SUMS"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages
+          path: |
+            ${{ runner.temp }}/pkg/repo/
+            ${{ runner.temp }}/pkg/STAGE.txt
+
+  consumer-linux:
+    name: clean consumer (linux x86-64, single-file compiler)
+    needs: package
+    runs-on: ubuntu-24.04
+    steps:
+      # (No credentials kept: the checkout is deleted before the job ends.)
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Install project prerequisites
+        run: bash .devcontainer/setup.sh
+      - name: Build native (Cranelift) backend
+        uses: ./.github/actions/build-native
+      - name: Cache the static Tcl build (single/basekit.sh)
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/botlish-single
+          key: single-basekit-${{ runner.os }}-${{ hashFiles('single/build.sh', 'single/basekit.sh') }}
+      - name: Build the single executable
+        run: single/build.sh -o "$RUNNER_TEMP/botlish"
+      - uses: actions/download-artifact@v4
+        with:
+          name: packages
+          path: ${{ runner.temp }}/download
+      # The kit: the harness and the consumer's programs, nothing else of
+      # the checkout; then the checkout, Rust and cargo go.
+      - name: Keep the harness; delete the checkout; move Rust away
+        run: |
+          kit="$RUNNER_TEMP/kit"
+          mkdir -p "$kit/tools" "$kit/audit/rust-archive-link"
+          cp tools/rust-unit.tcl "$kit/tools/"
+          cp -R audit/rust-archive-link/tools audit/rust-archive-link/consumer "$kit/audit/rust-archive-link/"
+          cd /
+          rm -rf "${GITHUB_WORKSPACE:?}"/* "${GITHUB_WORKSPACE:?}"/.[!.]*
+          mv ~/.cargo ~/.cargo.hidden; mv ~/.rustup ~/.rustup.hidden
+          echo "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" >> "$GITHUB_ENV"
+      - name: Clean consumer
+        run: |
+          set -o pipefail
+          for t in cargo rustc rustup; do if command -v "$t"; then echo "::error::$t is still on PATH"; exit 1; fi; done
+          repo=$(dirname "$(find "$RUNNER_TEMP/download" -name 'rlf-0.1.0.botpkg')")
+          tclsh9.0 "$RUNNER_TEMP/kit/audit/rust-archive-link/tools/rlf.tcl" consumer -compiler "$RUNNER_TEMP/botlish" \
+            -repository "$repo" -dir "$RUNNER_TEMP/consumer" -report "$RUNNER_TEMP/consumer.txt"
+          file "$RUNNER_TEMP/consumer/basic" "$RUNNER_TEMP/consumer/provided"
+          ldd "$RUNNER_TEMP/consumer/provided"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: consumer-linux-x86_64
+          path: |
+            ${{ runner.temp }}/consumer.txt
+            ${{ runner.temp }}/consumer/basic
+            ${{ runner.temp }}/consumer/provided
+            ${{ runner.temp }}/consumer/botlish.json
+
+  consumer-macos:
+    name: clean consumer (macos arm64, Botlish.app)
+    needs: package
+    runs-on: macos-15
+    timeout-minutes: 120
+    steps:
+      # (No credentials kept: the checkout is deleted before the job ends.)
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Install prerequisites (Tcl 9.0.1, stable Rust)
+        uses: ./.github/actions/setup-macos
+      - name: Build native (Cranelift) backend
+        uses: ./.github/actions/build-native
+      - name: Cache the Tcl.framework build
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/botlish-app
+          key: app-tcl-framework-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('single/macos/tcl-framework.sh', 'single/build.sh') }}
+      - name: Build Botlish.app
+        run: single/macos/build.sh -o "$RUNNER_TEMP/dist" 2>&1 | tail -20
+      - uses: actions/download-artifact@v4
+        with:
+          name: packages
+          path: ${{ runner.temp }}/download
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: native-*-a
+          path: ${{ runner.temp }}/native
+      - name: Keep the harness; delete the checkout; move Rust away
+        run: |
+          kit="$RUNNER_TEMP/kit"
+          mkdir -p "$kit/tools" "$kit/audit/rust-archive-link/packages"
+          cp tools/rust-unit.tcl "$kit/tools/"
+          cp -R audit/rust-archive-link/tools audit/rust-archive-link/consumer "$kit/audit/rust-archive-link/"
+          cp -R audit/rust-archive-link/packages/rlf audit/rust-archive-link/packages/rlf_provider "$kit/audit/rust-archive-link/packages/"
+          cd /
+          rm -rf "${GITHUB_WORKSPACE:?}"/* "${GITHUB_WORKSPACE:?}"/.[!.]*
+          mv ~/.cargo ~/.cargo.hidden; mv ~/.rustup ~/.rustup.hidden
+          echo "PATH=$(dirname "$(command -v tclsh9.0)"):/usr/bin:/bin:/usr/sbin:/sbin" >> "$GITHUB_ENV"
+      - name: Clean consumer
+        run: |
+          set -o pipefail
+          for t in cargo rustc rustup; do if command -v "$t"; then echo "::error::$t is still on PATH"; exit 1; fi; done
+          app="$RUNNER_TEMP/dist/Botlish.app/Contents/MacOS/botlish"
+          "$app" -version
+          repo=$(dirname "$(find "$RUNNER_TEMP/download" -name 'rlf-0.1.0.botpkg')")
+          tclsh9.0 "$RUNNER_TEMP/kit/audit/rust-archive-link/tools/rlf.tcl" consumer -compiler "$app" \
+            -repository "$repo" -dir "$RUNNER_TEMP/consumer" -report "$RUNNER_TEMP/consumer.txt"
+          for p in basic provided; do
+            file "$RUNNER_TEMP/consumer/$p"; lipo -archs "$RUNNER_TEMP/consumer/$p"; otool -L "$RUNNER_TEMP/consumer/$p"
+          done
+          nm -m "$RUNNER_TEMP/consumer/provided" | grep -E 'rust_eh_personality|rlfp_post|___rust_alloc$' || true
+          nm -m "$RUNNER_TEMP/consumer/basic" | grep -E 'rust_eh_personality|rlfp_post|___rust_alloc$' || true
+      # The same packages packed on this Mac by Botlish.app from the same
+      # archives: package assembly does not depend on the host.
+      - name: Pack again on macOS; compare with the Linux pack
+        run: |
+          l=$(dirname "$(find "$RUNNER_TEMP/native/native-linux-x86_64-a" -name libbotlish_rlf.a)")
+          m=$(dirname "$(find "$RUNNER_TEMP/native/native-macos-aarch64-a" -name libbotlish_rlf.a)")
+          lp=$(dirname "$(find "$RUNNER_TEMP/native/native-linux-x86_64-a" -name librlf_provider.a)")
+          mp=$(dirname "$(find "$RUNNER_TEMP/native/native-macos-aarch64-a" -name librlf_provider.a)")
+          tclsh9.0 "$RUNNER_TEMP/kit/audit/rust-archive-link/tools/rlf.tcl" stage -compiler "$RUNNER_TEMP/dist/Botlish.app/Contents/MacOS/botlish" \
+            -out "$RUNNER_TEMP/macpkg" linux-x86_64 "$l" "$lp" macos-aarch64 "$m" "$mp"
+          cat "$RUNNER_TEMP/macpkg/STAGE.txt"
+          repo=$(dirname "$(find "$RUNNER_TEMP/download" -name 'rlf-0.1.0.botpkg')")
+          for p in rlf rlf_provider; do
+            if cmp "$repo/$p-0.1.0.botpkg" "$RUNNER_TEMP/macpkg/repo/$p-0.1.0.botpkg"; then
+              echo "$p-0.1.0.botpkg: the macOS pack is the Linux pack, byte for byte ($(shasum -a 256 "$repo/$p-0.1.0.botpkg" | cut -d' ' -f1))"
+            else
+              echo "::error::$p-0.1.0.botpkg: the macOS pack differs from the Linux pack"; exit 1
+            fi
+          done | tee "$RUNNER_TEMP/cross-host-pack.txt"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: consumer-macos-aarch64
+          path: |
+            ${{ runner.temp }}/consumer.txt
+            ${{ runner.temp }}/cross-host-pack.txt
+            ${{ runner.temp }}/macpkg/STAGE.txt
+            ${{ runner.temp }}/consumer/basic
+            ${{ runner.temp }}/consumer/provided
+            ${{ runner.temp }}/consumer/botlish.json
+
+  http-macos:
+    name: the http unit on macOS (link feasibility)
+    runs-on: macos-15
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install prerequisites (Tcl 9.0.1, stable Rust)
+        uses: ./.github/actions/setup-macos
+      - name: Build native (Cranelift) backend
+        uses: ./.github/actions/build-native
+      - name: Ninja
+        run: brew list ninja >/dev/null 2>&1 || brew install ninja
+      - name: Cache the cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: http-unit-registry-${{ runner.os }}-${{ hashFiles('packages/http/native/Cargo.lock') }}
+      - name: The pinned BoringSSL provider
+        run: |
+          tclsh9.0 audit/rust-archive-link/tools/http-macos.tcl provider "$RUNNER_TEMP/provider"
+          cat "$RUNNER_TEMP/provider/PROVIDER.txt"
+      - name: The unit, release and testing (patched copy), localized
+        run: |
+          tclsh9.0 audit/rust-archive-link/tools/http-macos.tcl unit "$RUNNER_TEMP/provider" "$RUNNER_TEMP/unit-release"
+          tclsh9.0 audit/rust-archive-link/tools/http-macos.tcl unit "$RUNNER_TEMP/provider" "$RUNNER_TEMP/unit-testing" testing
+          cat "$RUNNER_TEMP/unit-release/UNIT.txt" "$RUNNER_TEMP/unit-testing/UNIT.txt"
+          for k in release testing; do
+            nm -m "$RUNNER_TEMP/unit-$k/libbotlish_http.a" > "$RUNNER_TEMP/unit-$k/nm-m.txt"
+            echo "$k: private externals left $(grep -c 'private external' "$RUNNER_TEMP/unit-$k/nm-m.txt" || true); undefined $(grep -c undefined "$RUNNER_TEMP/unit-$k/nm-m.txt" || true)"
+            grep -E 'botlish_event_post2|botlish_boringssl_' "$RUNNER_TEMP/unit-$k/nm-m.txt" || true
+          done
+      - name: Link probes (with and without the driver's stand-in; both linkers)
+        run: |
+          tclsh9.0 audit/rust-archive-link/tools/http-macos.tcl probe "tclsh9.0 $GITHUB_WORKSPACE/main.tcl" "$RUNNER_TEMP/unit-release" "$RUNNER_TEMP/provider" "$RUNNER_TEMP/probe-release"
+          rm -f "$RUNNER_TEMP/probe-release/probe-testing.bot"
+          mkdir -p "$RUNNER_TEMP/probe-testing"
+          tclsh9.0 audit/rust-archive-link/tools/http-macos.tcl probe "tclsh9.0 $GITHUB_WORKSPACE/main.tcl" "$RUNNER_TEMP/unit-testing" "$RUNNER_TEMP/provider" "$RUNNER_TEMP/probe-testing"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: http-macos
+          path: |
+            ${{ runner.temp }}/provider/PROVIDER.txt
+            ${{ runner.temp }}/unit-*/UNIT.txt
+            ${{ runner.temp }}/unit-*/nm-m.txt
+            ${{ runner.temp }}/unit-*/libbotlish_http.a
+            ${{ runner.temp }}/probe-*/PROBE.txt

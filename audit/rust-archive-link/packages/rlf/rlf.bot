@@ -1,0 +1,132 @@
+# rlf.bot -- the package `rlf`: the Rust link fixture
+# (HTTP-MACOS-RUST-ARCHIVE-LINK-FEASIBILITY-MILESTONE-1.md). Its archive,
+# libbotlish_rlf.a, is a localized Rust staticlib (tools/rust-unit.tcl):
+# its only global definitions are the rlf_* C functions and the weak
+# fallback of the provider's rlfp_post; its own Rust standard library,
+# panic runtime and counting allocator are its own, beside the Botlish
+# runtime's. Nothing the unit allocates is released here, nor anything
+# here by the unit: every buffer it writes is lent for one call.
+#
+# Stores are opaque handles the unit checks (a destroyed or foreign handle
+# is refused, never dereferenced). A notification is a thread of the
+# unit's posting records to the optional provider (the package
+# `rlf_provider`): without it linked, the unit's weak fallback refuses
+# every post with the target's ENOSYS.
+import std::abi
+import std::abi::bytes
+import std::ffi::c
+
+extern c library "botlish_rlf" static at "native/libbotlish_rlf.a"
+
+private extern c fn rlf_version() -> std::ffi::c::LongLong
+private extern c fn rlf_create(capacity: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+private extern c fn rlf_push(h: std::ffi::c::LongLong, value: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+private extern c fn rlf_sum(h: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+private extern c fn rlf_describe(h: std::ffi::c::LongLong, buf: std::ffi::c::Ptr[std::ffi::c::Void] write noescape, cap: std::ffi::c::ULong) -> std::ffi::c::LongLong
+private extern c fn rlf_destroy(h: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+private extern c fn rlf_live() -> std::ffi::c::LongLong
+private extern c fn rlf_alloc_live() -> std::ffi::c::LongLong
+private extern c fn rlf_alloc_total() -> std::ffi::c::LongLong
+private extern c fn rlf_panic(h: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+private extern c fn rlf_notify_start(h: std::ffi::c::LongLong, count: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+private extern c fn rlf_notify_join(h: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+private extern c fn rlf_no_provider() -> std::ffi::c::LongLong
+
+# A failed store operation: the unit's code (-2 no such store, -3 full,
+# -4 an argument out of range, -5 busy, -99 a panic caught in the unit).
+error StoreError:
+    code: int
+
+# A notification no provider accepted: the provider's refusal (the
+# target's -ENOSYS when none is linked).
+error NoProvider:
+    code: int
+
+opaque struct Store:
+    handle: int
+
+# A C long long of X, clamped (every value this module passes is in range).
+private nomethod fn cll(x: int) -> std::ffi::c::LongLong:
+    if x < -9223372036854775808:
+        -9223372036854775808
+    elif x > 9223372036854775807:
+        9223372036854775807
+    else:
+        x
+
+private nomethod fn checked(code: int) -> int errors StoreError:
+    if code < 0:
+        fail StoreError {code: code}
+    code
+
+# The unit's ABI version.
+fn version() -> int:
+    rlf_version()
+
+# A new store of CAPACITY integers.
+fn create(capacity: int) -> Store errors StoreError:
+    Store {handle: checked(rlf_create(cll(capacity)))}
+
+# Push VALUE to S: how many values S holds.
+fn push(s: Store, value: int) -> int errors StoreError:
+    checked(cll(s.handle).rlf_push(cll(value)))
+
+# The sum of S's values.
+fn sum(s: Store) -> int errors StoreError:
+    r = rlf_sum(cll(s.handle))
+    if r == -2:
+        fail StoreError {code: r}
+    r
+
+# S described by the unit (its formatting, its allocations).
+fn describe(s: Store) -> str errors StoreError:
+    r = cll(s.handle).rlf_describe(std::abi::bytes::zeroed(std::abi::usize(256)), 256)
+    n = checked(r.result)
+    count = std::abi::usize(n):
+        on std::abi::AbiIntegerBelowRange:
+            fail StoreError {code: -4}
+        on std::abi::AbiIntegerAboveRange:
+            fail StoreError {code: -4}
+    text = r.buf.freeze_prefix(count):
+        on UpperOverrun:
+            fail StoreError {code: -4}
+    std::abi::bytes::decode_utf8(text):
+        on InvalidUtf8:
+            fail StoreError {code: -4}
+
+# Destroy S (the unit releases what S held).
+fn destroy(s: Store) -> int errors StoreError:
+    checked(rlf_destroy(cll(s.handle)))
+
+# How many stores are live.
+fn live() -> int:
+    rlf_live()
+
+# The bytes the unit's own allocator holds, and how many allocations it
+# made: the unit's Rust allocation, apart from the Botlish runtime's.
+fn allocated() -> int:
+    rlf_alloc_live()
+
+fn allocations() -> int:
+    rlf_alloc_total()
+
+# A panic inside the unit, caught at its boundary: the unit's code for it
+# (-99), after unwinding on the unit's own personality routine.
+fn panic_inside(s: Store) -> int errors StoreError:
+    r = rlf_panic(cll(s.handle))
+    if r == -2:
+        fail StoreError {code: r}
+    r
+
+# COUNT records posted from a thread of the unit's to the provider: how
+# many it accepted.
+fn notify(s: Store, count: int) -> int errors StoreError, NoProvider:
+    checked(cll(s.handle).rlf_notify_start(cll(count)))
+    r = rlf_notify_join(cll(s.handle))
+    if r < 0 and r != -2 and r != -5 and r != -99:
+        fail NoProvider {code: r}
+    checked(r)
+
+# The target's ENOSYS (38 on Linux, 78 on macOS).
+fn no_provider_code() -> int:
+    rlf_no_provider()

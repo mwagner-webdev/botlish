@@ -1,0 +1,29 @@
+# basic.bot -- the clean consumer without the provider: every check of
+# rlfchecks, and a notification refused by the unit's weak fallback with
+# the target's ENOSYS (no provider is linked: nothing here calls one).
+import rlf
+import rlfchecks
+import std::int
+import std::str
+
+fn notify_check() -> str errors rlf::StoreError:
+    s = rlf::create(2)
+    r = s.notify(5):
+        on rlf::NoProvider e:
+            if e.code == 0 - rlf::no_provider_code():
+                -1
+            else:
+                e.code
+    rlf::destroy(s)
+    outcome = if r == -1:
+        "refused-enosys"
+    else:
+        "unexpected ".concat(std::int::to_string(r))
+    "notify ".concat(outcome)
+
+fn all() -> str errors rlf::StoreError:
+    rlfchecks::version_check().concat("; ").concat(rlfchecks::store_checks()).concat("; ").concat(rlfchecks::cycle_checks(100)).concat("; ").concat(notify_check())
+
+all():
+    on rlf::StoreError e:
+        "store error ".concat(std::int::to_string(e.code))

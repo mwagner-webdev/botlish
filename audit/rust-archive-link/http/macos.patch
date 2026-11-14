@@ -1,0 +1,31 @@
+--- a/src/net.rs
++++ b/src/net.rs
+@@ -282,6 +282,28 @@
+ 
+ fn open_socket(addr: &SocketAddr) -> Result<Socket, ConnectError> {
+     let family = if addr.is_ipv4() { libc::AF_INET } else { libc::AF_INET6 };
++    // Apple's socket() takes no SOCK_NONBLOCK or SOCK_CLOEXEC (the libc
++    // crate defines neither for Apple targets): set both with fcntl, and
++    // ask for no SIGPIPE on this socket (SO_NOSIGPIPE: Apple's mechanism).
++    #[cfg(target_vendor = "apple")]
++    let fd = unsafe {
++        let fd = libc::socket(family, libc::SOCK_STREAM, 0);
++        if fd >= 0 {
++            let flags = libc::fcntl(fd, libc::F_GETFL);
++            let one: libc::c_int = 1;
++            if flags < 0
++                || libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) < 0
++                || libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) < 0
++                || libc::setsockopt(fd, libc::SOL_SOCKET, libc::SO_NOSIGPIPE, (&one as *const libc::c_int).cast(), 4) < 0
++            {
++                let code = errno();
++                libc::close(fd);
++                return Err(ConnectError { code, text: os_text(code), addr: Some(*addr) });
++            }
++        }
++        fd
++    };
++    #[cfg(not(target_vendor = "apple"))]
+     let fd = unsafe { libc::socket(family, libc::SOCK_STREAM | libc::SOCK_NONBLOCK | libc::SOCK_CLOEXEC, 0) };
+     if fd < 0 {
+         let code = errno();

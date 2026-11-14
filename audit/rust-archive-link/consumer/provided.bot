@@ -1,0 +1,24 @@
+# provided.bot -- the clean consumer with the provider: every check of
+# rlfchecks, and a notification whose posts -- from a thread of the Rust
+# unit -- the provider package's strong rlfp_post receives (the weak
+# fallback replaced at link time), as the provider's own count says.
+import rlf
+import rlf_provider
+import rlfchecks
+import std::int
+import std::str
+
+fn notify_check() -> str errors rlf::StoreError, rlf::NoProvider:
+    s = rlf::create(2)
+    accepted = s.notify(5)
+    rlf::destroy(s)
+    "notify accepted ".concat(std::int::to_string(accepted)).concat("; provider posts ").concat(std::int::to_string(rlf_provider::posts())).concat(" total ").concat(std::int::to_string(rlf_provider::total()))
+
+fn all() -> str errors rlf::StoreError, rlf::NoProvider:
+    rlfchecks::version_check().concat("; ").concat(rlfchecks::store_checks()).concat("; ").concat(rlfchecks::cycle_checks(100)).concat("; ").concat(notify_check())
+
+all():
+    on rlf::StoreError e:
+        "store error ".concat(std::int::to_string(e.code))
+    on rlf::NoProvider e:
+        "no provider ".concat(std::int::to_string(e.code))
