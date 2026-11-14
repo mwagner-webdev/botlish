@@ -250,6 +250,7 @@ MODES = ("clean", "conflict")
 
 
 def dump_json(obj, path):
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
     tmp = str(path) + ".tmp"
     with open(tmp, "w", encoding="utf-8", newline="\n") as f:
         json.dump(obj, f, ensure_ascii=True, indent=1, sort_keys=True)
@@ -260,6 +261,7 @@ def dump_json(obj, path):
 def dump_results(obj, path):
     """A target's results: the header indented, then one compact line per
     fixture (small files, one diff line per changed observation)."""
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
     head = {k: v for k, v in obj.items() if k != "results"}
     lines = ["{"]
     for k in sorted(head):
