@@ -11692,6 +11692,7 @@ tests/fold-virtual-struct-state.test fvs-ref-join-materialized-source pass
 tests/fold-virtual-struct-state.test fvs-legacy-policy pass
 tests/fold-virtual-struct-state.test fvs-struct-opt-off pass
 tests/fold-virtual-struct-state.test fvs-explain pass
+tests/fold-virtual-struct-state.test fvs-executable pass
 tests/fold-virtual-struct-state.test fvs-nir-defined pass
 tests/csv-emission.test csv-quote-ambiguity pass
 tests/csv-emission.test csv-record-structure pass

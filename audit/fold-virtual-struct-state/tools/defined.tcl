@@ -17,9 +17,13 @@
 # defined after it; a block's state is the intersection of its
 # predecessors'. Edges: br, switch and jump to their labels; every other
 # instruction falls through unless it is a terminator; and every
-# instruction inside a pusherrorexit/poperrorexit span may reach the span's
-# handler label before its destinations are defined (a superset of the
-# instructions that can fail, as nir.rs's validate_plans assumes). tail and
+# instruction inside a pusherrorexit/poperrorexit span that can fail
+# reaches the span's handler label before its destinations are defined.
+# "Can fail" is everything but a short list of instructions that cannot
+# (constants, `move`, and the inline `op rbox`/`op runbox` of a proven
+# small Int: codegen::clif emits a shift for each): an instruction wrongly
+# taken for infallible could hide an undefined read on its error edge, one
+# wrongly taken for fallible only adds a false report. tail and
 # tailenv restart the function, whose entry state is its parameters: no
 # edge needed. An instruction naming a label the check does not know is an
 # error of the check, never ignored.
@@ -180,7 +184,7 @@ proc defined::Function {id name params body} {
                 }
             }
             set h [lindex $handlers $i]
-            if {$h ne "" && $op ni {pusherrorexit poperrorexit label}} {
+            if {$h ne "" && [Fallible $op $line]} {
                 set succ [list [dict get $blockOf [dict get $labels $h]]]
                 foreach s $succ { Merge in work $s $state }
             }
@@ -209,6 +213,18 @@ proc defined::Function {id name params body} {
         if {![dict exists $state $r]} { lappend result $v }
     }
     return $result
+}
+
+# 1 unless the instruction OP (its LINE) certainly cannot fail.
+proc defined::Fallible {op line} {
+    if {$op in {pusherrorexit poperrorexit label move int rawint cword shortlit
+            asciilit str bytes char float enum bool unit cleardeclarederror declarederroreq}} {
+        return 0
+    }
+    if {$op eq "op" && [regexp {= op (rbox|runbox) } $line]} {
+        return 0
+    }
+    return 1
 }
 
 # Merges STATE into block S's entry state (intersection), queueing S when it

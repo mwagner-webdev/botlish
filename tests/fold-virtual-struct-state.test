@@ -918,6 +918,63 @@ r = run(10)
         [hir::escape::explain $hir $spec $analysis]
 } -result 1
 
+# Standalone executables (main.tcl -emit-native-executable) of the
+# workloads and of a permuting nested-result program, plain and under GC
+# stress, against the interpreter.
+test fvs-executable {carried folds in standalone executables, plain and under GC stress, agree with the interpreter} -constraints {nativeBuilt executableAot} -body {
+    set dir [makeDirectory {fvs executable test}]
+    set programs {}
+    foreach name {d-exits d-errors d-coroutine d-observe d-shapes c-vec-continue b-counted-fold} {
+        lappend programs $name [core::ReadFile [file join $::projectRoot audit fold-virtual-struct-state workloads $name.bot]]
+    }
+    lappend programs scanner [core::ReadFile [file join $::projectRoot audit fold-loops workloads scanner-fold.bot]]
+    lappend programs permute {struct Inner:
+    a: int
+    b: int
+
+struct Outer:
+    inner: Inner
+    n: int
+
+fn step(o: Outer, i: int) -> Outer:
+    Outer {inner: Inner {a: o.inner.b, b: o.inner.a + i}, n: o.n + 1}
+
+fn run(n: int) -> List[int]:
+    t = fold i from 0 to n with intermediate s Outer {inner: Inner {a: 1, b: 2}, n: 0}:
+        if i.mod(4) == 3:
+            continue
+        if i == 9:
+            break
+        if i.mod(3) == 0:
+            Outer {inner: Inner {a: s.inner.b, b: s.inner.a}, n: s.n}
+        else:
+            step(s, i)
+    [t.inner.a, t.inner.b, t.n]
+
+[run(0), run(5), run(20)]
+}
+    set bad {}
+    try {
+        foreach {name text} $programs {
+            set path [file join $dir $name.bot]
+            set channel [open $path w]
+            fconfigure $channel -encoding utf-8 -translation lf
+            puts -nonewline $channel $text
+            close $channel
+            set expected [lindex [outcomeUnderHir interp [surface::readProgramFile $path -warnings off]] 1]
+            exec [info nameofexecutable] [file join $::projectRoot main.tcl] -warnings off -emit-native-executable $path
+            set plain [standaloneValue [file rootname $path]]
+            set stressed [standaloneValue [file rootname $path] BOTLISH_NATIVE_GC_STRESS 1]
+            if {$plain ne $expected || $stressed ne $expected} {
+                lappend bad [list $name $expected $plain $stressed]
+            }
+        }
+    } finally {
+        removeDirectory {fvs executable test}
+    }
+    list [llength $programs] $bad
+} -result {18 {}}
+
 # Every register the lowering reads is defined on every path to the read
 # (section 13 of the report): the independent check of NIR text,
 # audit/fold-virtual-struct-state/tools/defined.tcl, over every program the
