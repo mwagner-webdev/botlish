@@ -36,6 +36,18 @@ namespace eval hir::transport {
     # Option defaults. policy: "transport" (this model) or "legacy" (the
     # struct-scalar-replacement milestone's width-only caps, kept as the
     # comparison oracle: local 16, return 8, argument 4, no distance).
+    #
+    # foldSlots and refJoins (FOLD-VIRTUAL-STRUCT-STATE-MILESTONE-1.md, under
+    # the transport policy only): a fold's struct intermediate carried as
+    # field registers (hir/escape.tcl's fold slots), and a struct join or a
+    # whole-struct share taking a reference to a struct binding a slot
+    # carries; with both off the lowering is the one before the milestone,
+    # byte for byte. foldWidth is a fold slot's ceiling: a fold slot crosses
+    # no call boundary, so no transport score applies; its cost is register
+    # pressure and code inside one function, measured to win at run time at
+    # every width up to 256 fields (the report's width section), the
+    # ceiling a resource bound on code size and backend time, not a tuned
+    # threshold.
     variable defaults {
         policy transport
         localWidth 16
@@ -58,6 +70,10 @@ namespace eval hir::transport {
         densityWeight 0.5
         allocUnits 13.0
         nesting 1
+        foldSlots 1
+        refJoins 1
+        foldWidth 64
+        legacyFoldWidth 0
     }
 }
 

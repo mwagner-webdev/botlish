@@ -1,9 +1,10 @@
 # audit/fold-virtual-struct-state
 
 The material of FOLD-VIRTUAL-STRUCT-STATE-CENSUS-1.md (docs/): how a fold's
-struct intermediate is represented today, what carrying it as field
-registers would save, and what a design must prove. Nothing here is loaded
-by the compiler.
+struct intermediate was represented before FOLD-VIRTUAL-STRUCT-STATE-
+MILESTONE-1.md, what carrying it as field registers would save, and what a
+design must prove -- and the milestone's own tests, fuzzer, mutants and
+measurements (below). Nothing here is loaded by the compiler.
 
 * `workloads/` -- the census's probe programs, each with its `# expect:`
   value (checked against the reference interpreter):
@@ -49,6 +50,28 @@ by the compiler.
 * `results/` -- the census's evidence: `probes.txt`, `probe-a.txt`,
   `probe-a-width.txt`, `probe-b.txt`, `probe-c.txt`, `economics.txt`,
   `backend-time.txt`.
+
+FOLD-VIRTUAL-STRUCT-STATE-MILESTONE-1.md (the implementation: fold slots in
+hir/escape.tcl, native lowering's `vfold` mode) adds:
+
+* `width/` -- the milestone's width inputs (`tools/gen-width.tcl` writes
+  them): `few-W`, `most-W`, `branch-W`, `ret-W`, `nested-W` at 2-64 fields,
+  `most-W` and `spill-W` up to 256;
+* `tools/`:
+  - `fuzz.tcl` -- the differential fuzzer: random folds over a struct
+    intermediate (scalar, history and vector templates), values on eight
+    configurations, the fold slot's decision against the fuzzer's own model,
+    and no program building more structs with fold slots than without;
+  - `mutate.tcl` and `mutants.txt` -- the mutation catalog of the
+    milestone's rules, each mutant killed by the tests its `!!` line names;
+  - `golden-port.tcl` -- writes tests/golden/fold-virtual-struct-state.bot,
+    its manifest fragment and census from the Tcl tests' own programs;
+  - `corpus.tcl` and `corpus-compare.py` -- a corpus's NIR digests, struct
+    census classes, fold slots and Struct allocations under several lowering
+    configurations, compared with another checkout's (`-root DIR`);
+  - `gen-width.tcl` -- writes `width/`.
+* `results/` -- the milestone's evidence: `m1-*.txt` (the report's section
+  17 regenerates them).
 
 ```sh
 export LANG=C.utf8 LC_ALL=C.utf8

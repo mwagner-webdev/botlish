@@ -1326,6 +1326,83 @@ it a mutant of the same rule; its native mutant rebuilds a private copy).
 `audit/fold-virtual-construction/tools/measure.tcl` regenerates the
 report's tables (`-root DIR` measures another checkout).
 
+## Fold slots (struct intermediates as field registers)
+
+A fold whose every incoming value -- its initial value and every normal
+completion -- is one struct descriptor carries its intermediate as N
+loop-carried field registers instead of one object
+(FOLD-VIRTUAL-STRUCT-STATE-MILESTONE-1.md): hir/escape.tcl's *fold slot*,
+the fourth slot kind beside bound locals, instance parameters and instance
+results, lowered by native/lower.tcl's `vfold` accumulator mode
+(`LoopResultStart` .. `LoopResultFinish`, `FoldBackEdge`, `FoldObject`).
+Keep it so:
+
+* One representation: the existing virtual struct machinery (descriptors,
+  `VirtualValue`, the virtual local entry, `MaterializeVirtual`, `If`'s
+  field joins, `retmulti`/`callmulti`). Never a fold-specific struct
+  representation, HIR node, NIR instruction, runtime object or helper, and
+  never a NIR-level rewrite deciding representation (the census's
+  `nir-sra.tcl` is an oracle, never production).
+* The back edge is a parallel move (`FoldBackEdge`: every source that is a
+  carried register another move writes is copied first), written in exactly
+  one place, a normal completion's end: `continue` skips it, a bare `break`
+  and exhaustion read the carried registers, never a candidate. Never move
+  fields sequentially or commit anything before the completion.
+* A fold is a recognized construction (`Classify`) exactly when its slot is
+  virtual: `analyze` runs in rounds, denying the construction of every fold
+  whose slot fell (STRUCTOPTS' `foldDeny`); never recognize a fold whose slot
+  is one register, and never let a shape fact depend on eligibility.
+* A reference entering a slot (an identity completion, a candidate local, an
+  outer intermediate, a join's reference branch, a share's argument) is free
+  only while the binding it names is virtual, and the slot stands only while
+  every such source does (`Eligible`'s `sources`). A parameter is never a
+  source (it is virtual only in its instance's `fields` variant); its
+  descriptor comes from its static type only for a local or an intermediate
+  (`RefShape`, `TypeShape`: nominal named structs, anonymous ones by field
+  set).
+* No loss: a slot is declined when a materializing use may run in an
+  iteration that then keeps the intermediate unchanged (an identity
+  completion or a `continue`; `FoldNoLoss`, a path walk with a dead state for
+  `return`, `fail` and the fold's own `break`). Never drop it: the object
+  would be rebuilt every iteration where today it is passed on.
+* A whole-struct share of a carried binding (a copying fold's entry copy) is
+  lowered field-wise (`ShareFields`: one `mvshare` per header the descriptor
+  lists, exactly runtime/mutvec.rs's `share_by`'s copies, and no struct).
+  Ownership stays hir/mutvec.tcl's, decided before representation: never add
+  or drop a share, and never share an unlisted field.
+* A fold slot's representation class is opaque (`NestingPlan`'s `opq`): no
+  cut is chosen for it or for any class it touches; an inner struct stays one
+  carried field.
+* Options: `-struct-fold 0` and `-struct-ref-joins 0` (or
+  `BOTLISH_NATIVE_STRUCT_FOLD`, `BOTLISH_NATIVE_STRUCT_REF_JOINS`) turn the
+  two features off; with both off the NIR is the lowering before the
+  milestone, byte for byte (`audit/fold-virtual-struct-state/tools/
+  corpus.tcl`). `-struct-fold-width` is the fold ceiling (a resource bound,
+  not a tuned threshold: the report's width section). The legacy policy has
+  no fold slots and no reference joins.
+
+If you change any of that, or what the loop lowering does with a fold's
+result, or what hir/escape.tcl's slot analysis reads, run
+`tests/fold-virtual-struct-state.test` (also under
+`BOTLISH_NATIVE_GC_STRESS=1`), its golden suite (`tclsh9.0 tests/local.tcl
+tests/golden/fold-virtual-struct-state.bot`; generated with its fragment
+and census by `tclsh9.0 audit/fold-virtual-struct-state/tools/golden-port.tcl`
+from the Tcl tests' own programs), `tests/fold-loops.test`,
+`tests/struct-scalar-replacement.test`, `tests/value-transport.test`,
+`tests/consumed-fold-intermediates.test`,
+`tests/fold-virtual-construction.test`, `tests/coroutines.test`,
+`audit/fold-virtual-struct-state/tools/fuzz.tcl` (several seeds, once with
+`-gc-stress 1`: values on eight configurations, decisions against the
+fuzzer's own model, no program building more structs than without fold
+slots), `audit/fold-virtual-struct-state/tools/mutate.tcl` (every mutant in
+its `mutants.txt` must still apply and be killed by a test its `!!` line
+names: update a mutant's text when you change the code it mutates, keeping
+it a mutant of the same rule) and the census's probes
+(`audit/fold-virtual-struct-state/tools/probes.tcl`). `corpus.tcl` with
+`corpus-compare.py` compares a corpus's NIR, census and Struct allocations
+with another checkout (`-root DIR`); `measure.tcl` and `gen-width.tcl`
+regenerate the report's tables.
+
 ## Flattening Lists (std::list::flat)
 
 `std::list::flat[T](lists: List[List[T]]) -> List[T]`

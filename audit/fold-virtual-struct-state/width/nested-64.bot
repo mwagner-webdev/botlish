@@ -1,0 +1,80 @@
+# nested-64.bot -- 64 fields, one of them a nested struct rebuilt per iteration (tools/gen-width.tcl).
+import std::list
+
+struct P:
+    a: int
+    b: int
+
+struct S:
+    f0: int
+    f1: int
+    f2: int
+    f3: int
+    f4: int
+    f5: int
+    f6: int
+    f7: int
+    f8: int
+    f9: int
+    f10: int
+    f11: int
+    f12: int
+    f13: int
+    f14: int
+    f15: int
+    f16: int
+    f17: int
+    f18: int
+    f19: int
+    f20: int
+    f21: int
+    f22: int
+    f23: int
+    f24: int
+    f25: int
+    f26: int
+    f27: int
+    f28: int
+    f29: int
+    f30: int
+    f31: int
+    f32: int
+    f33: int
+    f34: int
+    f35: int
+    f36: int
+    f37: int
+    f38: int
+    f39: int
+    f40: int
+    f41: int
+    f42: int
+    f43: int
+    f44: int
+    f45: int
+    f46: int
+    f47: int
+    f48: int
+    f49: int
+    f50: int
+    f51: int
+    f52: int
+    f53: int
+    f54: int
+    f55: int
+    f56: int
+    f57: int
+    f58: int
+    f59: int
+    f60: int
+    f61: int
+    f62: int
+    inner: P
+
+fn f(n: int) -> int:
+    t = fold i from 0 to n with intermediate s S {f0: 0, f1: 0, f2: 0, f3: 0, f4: 0, f5: 0, f6: 0, f7: 0, f8: 0, f9: 0, f10: 0, f11: 0, f12: 0, f13: 0, f14: 0, f15: 0, f16: 0, f17: 0, f18: 0, f19: 0, f20: 0, f21: 0, f22: 0, f23: 0, f24: 0, f25: 0, f26: 0, f27: 0, f28: 0, f29: 0, f30: 0, f31: 0, f32: 0, f33: 0, f34: 0, f35: 0, f36: 0, f37: 0, f38: 0, f39: 0, f40: 0, f41: 0, f42: 0, f43: 0, f44: 0, f45: 0, f46: 0, f47: 0, f48: 0, f49: 0, f50: 0, f51: 0, f52: 0, f53: 0, f54: 0, f55: 0, f56: 0, f57: 0, f58: 0, f59: 0, f60: 0, f61: 0, f62: 0, inner: P {a: 0, b: 0}}:
+        S {f0: (s.f0 + i).mod(1000), f1: (s.f1 + i).mod(1000), f2: (s.f2 + i).mod(1000), f3: (s.f3 + i).mod(1000), f4: (s.f4 + i).mod(1000), f5: (s.f5 + i).mod(1000), f6: (s.f6 + i).mod(1000), f7: (s.f7 + i).mod(1000), f8: (s.f8 + i).mod(1000), f9: (s.f9 + i).mod(1000), f10: (s.f10 + i).mod(1000), f11: (s.f11 + i).mod(1000), f12: (s.f12 + i).mod(1000), f13: (s.f13 + i).mod(1000), f14: (s.f14 + i).mod(1000), f15: (s.f15 + i).mod(1000), f16: (s.f16 + i).mod(1000), f17: (s.f17 + i).mod(1000), f18: (s.f18 + i).mod(1000), f19: (s.f19 + i).mod(1000), f20: (s.f20 + i).mod(1000), f21: (s.f21 + i).mod(1000), f22: (s.f22 + i).mod(1000), f23: (s.f23 + i).mod(1000), f24: (s.f24 + i).mod(1000), f25: (s.f25 + i).mod(1000), f26: (s.f26 + i).mod(1000), f27: (s.f27 + i).mod(1000), f28: (s.f28 + i).mod(1000), f29: (s.f29 + i).mod(1000), f30: (s.f30 + i).mod(1000), f31: (s.f31 + i).mod(1000), f32: (s.f32 + i).mod(1000), f33: (s.f33 + i).mod(1000), f34: (s.f34 + i).mod(1000), f35: (s.f35 + i).mod(1000), f36: (s.f36 + i).mod(1000), f37: (s.f37 + i).mod(1000), f38: (s.f38 + i).mod(1000), f39: (s.f39 + i).mod(1000), f40: (s.f40 + i).mod(1000), f41: (s.f41 + i).mod(1000), f42: (s.f42 + i).mod(1000), f43: (s.f43 + i).mod(1000), f44: (s.f44 + i).mod(1000), f45: (s.f45 + i).mod(1000), f46: (s.f46 + i).mod(1000), f47: (s.f47 + i).mod(1000), f48: (s.f48 + i).mod(1000), f49: (s.f49 + i).mod(1000), f50: (s.f50 + i).mod(1000), f51: (s.f51 + i).mod(1000), f52: (s.f52 + i).mod(1000), f53: (s.f53 + i).mod(1000), f54: (s.f54 + i).mod(1000), f55: (s.f55 + i).mod(1000), f56: (s.f56 + i).mod(1000), f57: (s.f57 + i).mod(1000), f58: (s.f58 + i).mod(1000), f59: (s.f59 + i).mod(1000), f60: (s.f60 + i).mod(1000), f61: (s.f61 + i).mod(1000), f62: (s.f62 + i).mod(1000), inner: P {a: (s.inner.a + i).mod(1000), b: s.inner.b + 1}}
+    t.f0 + t.inner.a + t.inner.b
+
+n = 1000
+f(n)
