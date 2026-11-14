@@ -782,88 +782,96 @@ The first runs' results are recorded in section 19.1.
 
 ### 19.1 Recorded runs
 
-**Run 4** ([43577660873](https://github.com/mwagner-webdev/botlish/actions/runs/43577660873),
-commit fbbe8cd1):
+**Run 6** ([43579633973](https://github.com/mwagner-webdev/botlish/actions/runs/43579633973),
+commit 266f8bec): every job passed.
 
 | job | runner | result | census step |
 |---|---|---|---|
-| census, baseline policy | ubuntu-24.04 | passed | 3 min 28 s |
-| census, portable policy | macos-15 (arm64) | passed | 5 min 42 s |
-| census, portable policy | windows-2025 (x86-64) | cancelled by the next push | - |
-| real-world files | ubuntu-24.04 | passed | 2 s |
+| census, baseline policy | ubuntu-24.04 | passed | 3 min 19 s |
+| census, portable policy | macos-15 (arm64) | passed | 5 min 8 s |
+| census, portable policy | windows-2025 (x86-64) | passed | 6 min 25 s |
+| real-world files | ubuntu-24.04 | passed | 4 s |
 
-- **Linux.**
-  - The fresh tree equals `results/` exactly: every status, map and error
-    class, in every corpus and mode.
-  - Every pin is as recorded.
-  - The emits probe certified the four claims, rejected the fold claim and
-    rejected all ten mutants.
-- **Real-world files.** Every reading equals `results/realworld.json`.
+**Linux.**
+- The fresh tree equals `results/` exactly: every status, map and error
+  class, in every corpus and mode.
+- Every pin is as recorded.
+- The emits probe certified the four claims, rejected the fold claim and
+  rejected all ten mutants.
+- The real-world readings equal `results/realworld.json`.
 
-**macOS** (Bash 3.2.57; every other target at its pin):
+**macOS** (Bash 3.2.57; every other target at its pin).
 - **The profile holds.** The classification of all 26 categories equals
   Linux's. All six round trips (11,550 assignments) read back exactly on
   every reference.
 - **Every other observation equals the baseline,** in all four corpora and
   both modes, except Bash's reading of NUL. Bash 3.2 stops reading the file
-  at its first NUL byte:
+  at its first NUL byte (6 hand and 9 portable observations):
   - `enc-nul-in-value` (`KEY=a<NUL>b`) is `a`;
   - `enc-nul-in-double` assigns nothing (the quote never closes);
   - `enc-nul-in-comment` (a comment holding a NUL, then `KEY=value`) assigns
     nothing;
-  - the nine `pe-*-nul-0` encodings behave the same way.
+  - the `pe-*-nul-0` encodings behave the same way.
 
-  Bash 5.2 drops the byte instead (`ab`). NUL was already outside the
-  profile, so nothing about the profile changes.
+  Bash 5 drops the byte instead (`ab`). NUL was already outside the
+  profile.
 - **An added variable.** macOS adds `__CF_USER_TEXT_ENCODING` to every
-  process. The loading targets now subtract a control run on an empty file,
-  and record what the host added (`host_added_variables` in each result's
-  meta).
+  process. The loading targets therefore subtract a control run on an empty
+  file, and record what the host added (`host_added_variables` in each
+  result's meta). Linux and Windows add nothing.
 
-**Windows** (Git for Windows' Bash 5.3.15; every other target at its pin).
-These are the partial trees of the cancelled jobs of runs 3 and 4: every
-corpus and four of the six round trips. Run 6 (commit 266f8bec) is the
-first complete Windows run, and this entry records it once it ends.
-- **Single-line round trips** (seeds 1 to 3): every reference but Bash read
-  every file back exactly. Bash differed only by `BASH_MONOSECONDS`, which
-  the harness now ignores.
-- **Multi-line extension.** dotenv.net reads every LF of a multi-line value
-  as CRLF. That is 40 hand observations in each of its three
-  configurations, 30 portable ones and 259 of 300 files of round-trip seed
-  101, and every one is exactly that reading. This is `compare.py`'s one
-  declared deviation for Windows.
-- **Bash deletes CR.** Git for Windows' Bash deletes every CR byte of the
-  sourced file, quoted or not:
+**Windows** (Git for Windows' `usr\bin\bash.exe`, Bash 5.3.15
+`x86_64-pc-cygwin`; every other target at its pin). Every observation
+equals the Linux baseline except the ones the next table classifies, each
+by its exact pattern:
+
+| cause | hand | generated | portable |
+|---|---|---|---|
+| Git for Windows' Bash deletes every CR byte | 14 | 6 | 14 |
+| dotenv.net reads each LF of a multi-line value as CRLF | 40 in each of its 3 configurations | 36 | 30 |
+| the environment is case-insensitive: case variants merge in `node --env-file`, Bun, DotNetEnv (section 12) | 4 + 4 + 4 | 8 + 20 + 8 | 0 |
+| the clean environment itself: Ruby's `name-shell-special-home`/`-path` read the `HOME` and `PATH` Windows needs | 2 | - | - |
+| `ruby-trusted` runs its audited commands through `cmd.exe` | 4 | - | - |
+
+- **Round trips.**
+  - Single-line, seeds 1 to 3 (5,716 assignments): exact on every
+    reference.
+  - Multi-line, seeds 101 to 103: every difference is dotenv.net's CRLF
+    reading. That is 259, 266 and 274 files, and nothing else differs.
+- **Classification.** Every category Linux classifies universal stays
+  universal. `newline` falls from restricted to subset, with dotenv.net and
+  Java excluded.
+- **Bash and CR.** Bash deletes every CR, quoted or not:
   - `assign-crlf` reads `1` and `2` (Linux Bash: `1\r`, `2\r`);
   - `assign-cr-only` (`A=1\rB=2\r`) reads `A` as `1B=2`;
   - a CR inside double quotes disappears (`enc-lone-cr-in-double`: `ab`).
 
-  CR was already outside the profile.
-- **Case.** The environment is case-insensitive: four observations each
-  for `node --env-file`, Bun and DotNetEnv (section 12).
-- **Ruby.** `ruby`'s `name-shell-special-home` and `-path` read the clean
-  environment itself. On Windows that environment needs a real `HOME` and
-  `PATH`, and it is recorded with the results.
-- **ruby-trusted.** The audited commands run through the host's command
-  interpreter, which on Windows is `cmd.exe`:
-  - `cmd-nested`'s `echo $(echo inner)` prints its argument literally;
+  So it reads a CRLF file as an LF file. CR was already outside the
+  profile.
+- **ruby-trusted.**
+  - `cmd-nested`'s `echo $(echo inner)` goes to `cmd.exe`, which prints its
+    argument literally.
   - `cmd-arithmetic` records no executed command and assigns nothing. The
     cause was not determined; it is a configuration target, not a
     reference.
-- **Two harness defects** came out of these trees and are fixed:
-  - Bash 5.3's clock variable was counted as an assignment.
-  - A `declare -p` process per variable made the 10,000-assignment fixture
-    time out.
 
-  Neither fix changed a Linux observation.
-
-**Earlier runs**, each superseded by the fix it exposed:
-- run 1: the macOS job on macos-14 was cancelled before it started.
+**Earlier runs on this branch**, each superseded by the fix it exposed:
+- run 1: the macOS job on macos-14 was cancelled before it started; the job
+  moved to macos-15.
 - run 2: the real-world report wrote into a results root that did not
   exist.
 - run 3: on macOS, `__CF_USER_TEXT_ENCODING` turned into an assignment of
-  every loading-target observation, and the round-trip step stopped the
-  census.
+  every loading-target observation, and a round trip's difference stopped
+  the census. The cancelled Windows job's partial tree showed two harness
+  defects, both now fixed and neither changing a Linux observation:
+  - Bash 5.3's clock variable `BASH_MONOSECONDS` was counted as an
+    assignment;
+  - a `declare -p` process per variable made the 10,000-assignment fixture
+    time out.
+- run 4: Linux, macOS and the real-world job passed. The Windows job was
+  cancelled by the next push. Its partial tree showed dotenv.net's CRLF
+  reading in the multi-line round trips, which `compare.py` now declares
+  (`HOST_DEVIATIONS`).
 - run 5: cancelled by the next push.
 
 ## 20. Existing linter landscape
