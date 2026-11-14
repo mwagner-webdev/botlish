@@ -1,0 +1,8 @@
+{
+  "name": "dotenv-census-bun",
+  "private": true,
+  "description": "Pins the Bun runtime for audit/dotenv-interoperability: npm ci --ignore-scripts installs the platform package (@oven/bun-*), whose bin/bun is run directly.",
+  "dependencies": {
+    "bun": "1.4.4"
+  }
+}
