@@ -1033,7 +1033,25 @@ backend built from this checkout (rustc 1.97.0):
 
 ### CI on the branch
 
-See section 25 (written once the branch's runs have finished).
+The branch's commit b41cfbd5 was pushed to `claude/keen-johnson-7anjf5` and
+the four test workflows were dispatched on it, as AGENTS.md asks of a
+finished milestone (a branch push runs only each host's canary; the
+dispatched runs superseded the push's canary runs, which GitHub cancelled,
+and include the canaries themselves):
+
+| workflow | run | state when this report was written |
+|---|---|---|
+| tests (dispatched: canary, interp, compile, cranelift and cranelift-generic coverage, golden 1-4, stub- and system-linked executables, Rust unit tests, GC stress) | 43628474879 | **pending** (queued) |
+| tests (linux arm64), dispatched | 43628477381 | **pending** (queued) |
+| tests (macos arm64), dispatched | 43628480407 | **pending** (queued) |
+| tests (windows x86-64), dispatched | 43628483103 | **pending** (queued) |
+| icy-tower (windows x86-64), icy-tower (macos arm64), on the push | 43628461129, 43628461060 | **pending** (queued) |
+
+Pending, not passed. Against main's latest runs, two failures are expected
+on every host whatever this branch does -- `argv-focused-valid-fuzz` and
+`native-tcl-unicode-lowercase-all-scalars` (above); any other failure would
+be this branch's to fix. The branch was not merged into main: this
+session's instructions keep its work on the branch.
 
 ## 22. Known limitations
 
