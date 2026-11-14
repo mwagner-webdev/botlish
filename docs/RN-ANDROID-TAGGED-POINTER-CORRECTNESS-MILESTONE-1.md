@@ -558,15 +558,19 @@ toolchain), whose runs were queued.
 The four test workflows are dispatched again on the fix's commit
 `e63466e8` (superseding the runs above where they were unfinished): tests
 43505390208, tests (linux arm64) 43505394990, tests (macos arm64)
-43505400374, tests (windows x86-64) 43505405543. Read at 22:35 UTC
-(**CI**):
+43505400374, tests (windows x86-64) 43505405543. Read at 00:38 UTC on
+2026-11-14 (**CI**):
 
 | Workflow | Passed | Failed | Pending |
 |---|---|---|---|
-| tests | canary | -- | every other job (interp running; the rest queued) |
-| tests (linux arm64) | canary, native Rust unit tests, golden shards 1/4 and 3/4 | -- | cranelift coverage (running), interp, compile, cranelift-generic coverage, both GC-stress jobs, system-linked executables, golden shards 2, 4 |
-| tests (macos arm64) | smoke, the Linux control | -- | acceptance shards 1-6, system linker, Botlish.app |
-| tests (windows x86-64) | canary, root plans, every smoke check but one (C calls and libraries, filesystem and variadic C calls under GC stress included) | smoke's tier step: `argv-focused-valid-fuzz` alone (1 of 1,287 on each pass), the same three iterations as main's | acceptance shards 1-4, system linker |
+| tests | canary | system-linked executables (1 of 4,615: `argv-focused-valid-fuzz`) | interp (running); the rest queued: compile, both coverage jobs, stub-linked executables, native Rust unit tests, the method-call decision's audit, golden shards 1-4 |
+| tests (linux arm64) | canary, native Rust unit tests, golden shards 1/4 and 3/4 | -- | both coverage jobs (running); interp, compile, both GC-stress jobs, system-linked executables, golden shards 2, 4 |
+| tests (macos arm64) | smoke, the Linux control, Botlish.app | acceptance shard 6/6 (1 of 2,255: `native-tcl-unicode-lowercase-all-scalars`; its 20 golden suites on the four backends ok) | acceptance shards 2, 3 (running), 1, 4, 5; system linker; Botlish.app without developer tools; main-thread startup; static SDL3 through Botlish.app |
+| tests (windows x86-64) | canary, root plans, acceptance shard 4/4, every smoke check but one (C calls and libraries, filesystem and variadic C calls under GC stress included) | smoke's tier step: `argv-focused-valid-fuzz` alone (1 of 1,287 on each pass), the same three iterations as main's | acceptance shards 1-3, system linker |
+
+Every failure so far is one of main's two (above); `nl-no-string-ternary`
+has not failed anywhere it ran. main's latest runs (`14937461`): tests
+queued, tests (windows x86-64) in progress.
 
 ## 24. Cleanroom
 
