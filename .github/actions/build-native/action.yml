@@ -5,10 +5,10 @@ description: >
   workflow that touches the native backend needs, so it is fixed and
   upgraded in one place instead of three near-identical copies. Assumes
   the caller already ran .devcontainer/setup.sh (the "Install project
-  prerequisites" step every such workflow runs first), which is what pins
-  rustc to a stable toolchain new enough for the pinned
-  cranelift-*/wasmtime-internal-* crates (see AGENTS.md) -- this action
-  does not repeat that pin itself.
+  prerequisites" step every such workflow runs first) or an equivalent,
+  which installs the toolchain rust-toolchain.toml pins and makes it the
+  default (tools/rust-toolchain.sh; see AGENTS.md) -- this action does not
+  repeat that pin itself.
 
 outputs:
   rustc:

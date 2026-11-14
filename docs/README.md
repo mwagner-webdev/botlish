@@ -2826,14 +2826,18 @@ language. Consequences: `İ` (U+0130) lowercases to `i` (not the full mapping's
 final `ς`), and `ẞ` lowercases to `ß`. It is the reference interpreter's
 `string tolower` (Tcl 9.0.x, Unicode 16 tables) plus a patch for the two
 scalars Tcl leaves unchanged against the standard, U+023A and U+023E (they
-lowercase to U+2C65 and U+2C66), and native uses Rust's tables adjusted the
-same way: U+0130 is mapped to `i`, and the scalars Unicode 17 gave a
-lowercase mapping (U+A7CE, U+A7D2, U+A7D4, U+16EA0..U+16EB8) stay unchanged.
+lowercase to U+2C65 and U+2C66). Native reads a table generated from that
+reference (`native/src/runtime/lower16.rs`, by `tools/unicode-lowercase.tcl`),
+never Rust's own case tables: those are the toolchain's, and newer stable
+Rusts add the mappings of newer Unicode versions (U+A7CE, U+A7D2, U+A7D4 and
+U+16EA0..U+16EB8 in rustc 1.97; U+A7DD, U+A7E2, U+AB6C, U+AB6D and 16
+scalars of U+1DF40..U+1DF7E more in rustc 1.100), which here stay unchanged.
 Not implemented here, on purpose: the full mapping (`SpecialCasing.txt`, where
 a scalar can become several, plus the final-sigma and language rules), which
 is planned for a `grapheme::` namespace, and Unicode 17 and later. The
-all-scalars comparison in `tests/native-tcl-unicode.test` fails if a Tcl or
-Rust upgrade changes any mapping.
+all-scalars comparison in `tests/native-tcl-unicode.test` fails if a Tcl
+upgrade or a table edit changes any mapping, and the same file checks that the
+table is what the generator writes.
 
 **Lists** are immutable vectors of values. `std::list::append` copies, as the
 reference runtime does, so CSV's quadratic behavior is kept deliberately

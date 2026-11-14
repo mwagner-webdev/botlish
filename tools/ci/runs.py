@@ -50,10 +50,12 @@ reads the checkout: only the REST API. tools/ci/test_runs.py tests it with
 a fake of the API.
 """
 import argparse
+import http.client
 import json
 import os
 import re
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -64,6 +66,18 @@ SHA = re.compile(r"^[0-9a-f]{40}$")
 # (single-executable.yml, icy-tower-windows.yml: `run-name: release SHA`).
 RELEASE_RUN = re.compile(r"^release ([0-9a-f]{40})$")
 UNFINISHED = ("queued", "in_progress", "waiting", "pending", "requested")
+# A read (GET) that fails transiently is asked again, at most this many times
+# in all, waiting RETRY_WAIT[i] seconds before attempt i+2: GitHub's API
+# answers 5xx and drops connections now and then (main's `ci tools` runs at
+# cfd6ecfa and ede621b1 failed on one HTTP 502 each, at 14937461 on a body
+# cut short: MAIN-CI-FAILURES-2026-11-13.md). A write (POST: a dispatch, a
+# cancel) is never repeated: a dispatch repeated is a second release run.
+# Retrying changes no decision: a read that still fails raises ApiError, and
+# every command treats that as it did (the twin defers on none).
+RETRY_ATTEMPTS = 4
+RETRY_WAIT = (2, 5, 10)
+TRANSIENT_CODES = (500, 502, 503, 504)
+TRANSIENT_ERRORS = (urllib.error.URLError, http.client.HTTPException, ConnectionError, TimeoutError)
 
 
 class Requirement:
@@ -145,7 +159,7 @@ class Api:
     tests of the requests themselves."""
 
     def __init__(self, token, repo, base="https://api.github.com", urlopen=urllib.request.urlopen,
-                 first_hop=None):
+                 first_hop=None, sleep=time.sleep):
         if not token:
             raise ApiError("no token: set GH_TOKEN (or GITHUB_TOKEN)")
         if not re.match(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", repo or ""):
@@ -157,6 +171,26 @@ class Api:
         # A request whose redirect is not followed: a job log's answer is a
         # redirect to storage, which must not be sent the token.
         self.first_hop = first_hop or urllib.request.build_opener(NoRedirect).open
+        self.sleep = sleep
+
+    def reading(self, what, attempt):
+        """ATTEMPT() for a read, asked again on a transient failure (an HTTP
+        5xx, a connection or a body lost: RETRY_ATTEMPTS); every other
+        answer, and the last failure, is ATTEMPT's own."""
+        for n in range(RETRY_ATTEMPTS):
+            last = n == RETRY_ATTEMPTS - 1
+            try:
+                return attempt()
+            except urllib.error.HTTPError as e:
+                if last or e.code not in TRANSIENT_CODES:
+                    raise
+                why = "HTTP %d" % e.code
+            except TRANSIENT_ERRORS as e:
+                if last:
+                    raise ApiError("%s: %s" % (what, e)) from None
+                why = type(e).__name__
+            print("runs: %s: %s; asking again in %d s" % (what, why, RETRY_WAIT[n]), file=sys.stderr)
+            self.sleep(RETRY_WAIT[n])
 
     def headers(self, data=None):
         return {
@@ -173,10 +207,19 @@ class Api:
             url += "?" + urllib.parse.urlencode(params)
         data = json.dumps(body).encode() if body is not None else None
         req = urllib.request.Request(url, data=data, method=method, headers=self.headers(data))
-        try:
+
+        def attempt():
             with self.urlopen(req, timeout=60) as resp:
-                text = resp.read().decode() or "null"
-                return json.loads(text)
+                return json.loads(resp.read().decode() or "null")
+        try:
+            if method == "GET":
+                return self.reading("%s %s" % (method, path), attempt)
+            try:
+                return attempt()
+            except urllib.error.HTTPError:
+                raise
+            except TRANSIENT_ERRORS as e:
+                raise ApiError("%s %s: %s" % (method, path, e)) from None
         except urllib.error.HTTPError as e:
             if missing_ok and e.code == 404:
                 return None
@@ -221,17 +264,23 @@ class Api:
         which is followed without the token."""
         path = "/actions/jobs/%d/logs" % job_id
         req = urllib.request.Request("%s/repos/%s%s" % (self.base, self.repo, path), headers=self.headers())
-        try:
+
+        def first():
             with self.first_hop(req, timeout=60) as resp:
                 return resp.read().decode("utf-8", "replace")
+        try:
+            return self.reading("GET " + path, first)
         except urllib.error.HTTPError as e:
             location = e.headers.get("Location") if e.code in (301, 302, 303, 307, 308) else None
             if not location:
                 raise ApiError("GET %s: HTTP %d" % (path, e.code)) from None
-        try:
+
+        def redirect():
             with self.urlopen(urllib.request.Request(location, headers={"User-Agent": "botlish-ci-runs"}),
                               timeout=120) as resp:
                 return resp.read().decode("utf-8", "replace")
+        try:
+            return self.reading("GET %s (its redirect)" % path, redirect)
         except urllib.error.HTTPError as e:
             raise ApiError("GET %s (its redirect): HTTP %d" % (path, e.code)) from None
 
