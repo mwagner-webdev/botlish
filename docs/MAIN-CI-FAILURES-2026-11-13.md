@@ -309,12 +309,14 @@ much of this window each would have caught before main.
 - The `ci tools` job's recomputation failed on three of its recent runs
   (section 2.3), so `tests/canary.tsv` still describes the 21 days before
   2026-11-10.
-- Once this change is on main, the next `ci tools` run's `canary-records`
-  artifact will hold records with this window's failures. Commit them.
-  They should add application-library.test, external-tools.test and
-  argv.test, which are new to the history, to the existing c-ffi.test and
-  c-bindgen.test lines. They should add coroutine-fusion.test on Windows,
-  and native-tcl-unicode.test once main's interp jobs report it.
+- This branch's `ci tools` run (43524786870) recomputed it with the
+  retrying reads. Its `canary-records` artifact adds application-library.test
+  (linux-x86_64, linux-aarch64), external-tools.test (linux-x86_64) and
+  coroutine-fusion.test (windows-x86_64), and moves c-ffi.test and
+  c-bindgen.test to 2026-11-13.
+- main's runs at 14937461 had not finished, so argv.test and
+  native-tcl-unicode.test are not in it yet. Commit the records of the
+  first `ci tools` run after those runs finish.
 
 **C3. Select by source, not only by test file.**
 
