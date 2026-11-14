@@ -44,7 +44,47 @@ on the branch `claude/rust-macos-linking-feasibility-gk62wh`.
 
 ## 1. Executive result and verdict
 
-PENDING (CI run 43494070779).
+**Verdict: feasible, with the localization this milestone adds.** A Rust
+native unit built on macOS AArch64, localized into a Mach-O static archive
+by `tools/rust-unit.tcl`, packaged in one multi-target `.botpkg` with its
+Linux build and installed by the package manager links into an
+independently compiled Botlish executable beside the runtime's own Rust,
+with both Botlish linkers, on both hosts [CI]. The executables hold one
+global `rust_eh_personality` and allocator shim (the runtime's), the
+unit's own as local symbols, no global symbol of the unit's standard
+library, and nothing of it exported. The real http unit takes the same
+path on macOS [CI]: it compiles with one portability change, localizes to
+exactly its 20 C functions, and links and starts beside the runtime
+wherever an event-loop provider is linked.
+
+The findings that decide it:
+
+1. **Localization is necessary, and on macOS nothing else warns.** An
+   unlocalized unit on Linux either fails to link (duplicate definitions)
+   or links with the runtime's allocations routed into the unit's
+   allocator. On macOS Apple's ld never reports a duplicate: the same
+   rustc gives a silently rebound allocator, another rustc a link that
+   passes every check while one copy's personality routine serves both
+   (section 5.2).
+2. **Mach-O localization** is `ld -r -force_load` with an
+   exported-symbols list and a platform load command, archived by
+   `libtool -static -D`, checked by reading the result with nm (section 6).
+   Its traps were in the tools, not the link: Apple's nm reads Rust's
+   embedded bitcode and fails on a newer LLVM's (section 6.1); a private
+   external is link-visible; `ld -r` writes no `LC_BUILD_VERSION` unless
+   told (section 6.2).
+3. **The integration point** `botlish_event_post2`: http's weak reference
+   links on macOS only when a provider is linked (Apple's ld refuses an
+   undefined weak import); a weak *definition* is the portable fallback,
+   needing no linker flag (section 7). The ABI is kept.
+4. **F-16 is fixed** (pm/binary.tcl reads Apple's BSD symbol index, every
+   entry checked), and the package manager no longer takes a weak
+   definition for a duplicate (section 8).
+5. **Reproducible** [CI]: two independent runners per host build
+   identical units, and the multi-target artifacts packed from each set
+   are identical (section 13).
+
+Section 16 lists what this does not establish.
 
 ## 2. Starting revisions and environment
 
@@ -520,7 +560,30 @@ Locally [executed]: the same script with `PATH=/usr/bin:/bin`, a fresh
 
 ## 11. Linux/macOS parity
 
-PENDING (CI).
+| | Linux x86-64 | macOS arm64 |
+|---|---|---|
+| Unit build (cargo, pinned rustc 1.97.0) | same recipe | same recipe |
+| Localization | `ld -r --whole-archive`, `objcopy --keep-global-symbols`, COMDAT renamed, `ar rcsD` | `ld -r -force_load -exported_symbols_list -platform_version`, `libtool -static -D` |
+| Localized surface | the C ABI and the weak fallback (13) | the same 13 |
+| Archive index the package manager reads | GNU `/` | `__.SYMDEF SORTED` (F-16, fixed) |
+| `native add -symbol` of every declared C function | passes | passes |
+| Fixture tests (`tests/rust-archive-link.test`) | all pass [executed, CI] | all pass [CI] |
+| Localized unit, both programs, both linkers | pass | pass |
+| Unlocalized, same rustc | rustc linker: link fails; system linker: silent rebinding (detected) | both linkers: silent (detected) |
+| Unlocalized, other rustc | link fails | links and passes every check (one personality) |
+| http's weak reference, no provider | null, -38 | link fails |
+| weak fallback, provider linked | provider wins | provider wins |
+| a weak reference pulls an archive member | no | yes |
+| Real http unit: compiles | production code | one change (net.rs) |
+| Real http unit: probe with provider | pass | pass |
+| Reproducible build (two runners) | identical | identical |
+| Clean consumer, no Rust, no checkout | `CONSUMER OK` [CI] | PENDING |
+| Mutants of this host | all killed | all killed |
+
+Differences that remain are the platforms' own: the localization
+commands, the index format, weak-import semantics, Apple's ld's lack of
+duplicate diagnostics, the C++ runtime's name. Nothing in the package,
+the Botlish binding or the consumer's source differs by host.
 
 ## 12. Negative tests and mutants
 
