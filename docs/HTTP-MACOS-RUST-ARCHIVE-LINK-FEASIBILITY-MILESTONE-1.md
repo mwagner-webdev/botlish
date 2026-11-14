@@ -609,16 +609,41 @@ differs (its `LC_BUILD_VERSION`, section 6.2).
 
 ## 14. Actual HTTP native-unit feasibility
 
-PENDING (CI).
+`audit/rust-archive-link/tools/http-unit.tcl` builds the real
+`botlish_http` unit, localizes it with `tools/rust-unit.tcl` and links it
+into a Botlish probe beside the runtime: open the bridge, read the
+BoringSSL provider's API version, make a client trusting the system
+bundle (a BoringSSL `SSL_CTX` with its store loaded), read the 21
+counters, release, close. The probe links three ways per linker: no
+provider of `botlish_event_post2`; the fixture's C provider declared and
+never called; and that provider called, as a driver's own calls into its
+C adapter pull it in a real program. No event loop driver, no network: a
+link and start-up feasibility check, not the port.
 
-Linux control [executed]: the production path (tools/http-package.tcl:
-BoringSSL 0.20261020.0, the unit localized) -- its 20 global definitions
-are exactly abi.rs's `bh_*`; a Botlish probe linked with both linkers
-opens the bridge, reads the provider's API version, builds a client
-trusting the system bundle (BoringSSL's `SSL_CTX` and store), reads the
-21 counters, releases and closes: `0 -90003 1 1 168 0 0`, one global and
-one local `rust_eh_personality`. The refactored localization leaves the
-unit byte for byte as before: `6f1f0649...8784` before and after.
+What each fact rests on:
+
+| Fact | Linux x86-64 | macOS arm64 |
+|---|---|---|
+| Source | the **existing** http code, its production path (tools/http-package.tcl), unchanged | a **modified copy** of packages/http/native: net.rs's `SOCK_NONBLOCK \| SOCK_CLOEXEC` (Linux's) replaced by `fcntl` after `socket()`; nothing else |
+| BoringSSL | the provider package's pinned 0.20261020.0, its own build | the same pin (tag object and commit checked), built by upstream's CMake for arm64, macOS 11.0, three archives (libcrypto, libssl, the identity object) |
+| The unit builds | yes [executed, CI] | **yes**, cargo --locked, rustc 1.97.0, link-only BoringSSL; `MSG_NOSIGNAL` (bridge/io.rs) exists in the libc crate's Apple target and compiled [CI] |
+| Localized surface | 20 global definitions = abi.rs's `bh_*` [executed, CI] | **20 = abi.rs's `bh_*`** (raw: 4,316) [CI] |
+| Undefined references | 760 (BoringSSL, libc, libstdc++, `botlish_event_post2`) | 775 (BoringSSL, libSystem, libc++, `botlish_event_post2`) [CI] |
+| Probe, provider called | links and runs: `0 -90003 1 1 168 0 0`, both linkers [executed] | PENDING (run 43551304938) |
+| Probe, no provider | links and runs (the weak reference is null) [executed] | **link fails on exactly one symbol**, `_botlish_event_post2`, both linkers [CI, run 43526167818]: everything else -- BoringSSL, libc++, the identity, the unit's own Rust -- resolved |
+| Probe, provider declared, not called | links; the executables are byte for byte the size of the no-provider ones: the weak reference did not pull the provider's member [executed] | PENDING |
+
+The Linux unit is byte for byte the production one (`6f1f0649...8784`):
+the refactor of tools/http-package.tcl onto `rustunit::localize` changed
+nothing, checked before and after and again from an empty cache after the
+container's restart.
+
+So on macOS the technique carries the real unit as far as a link can show
+without a driver: it compiles with one portability change, localizes to
+exactly its C ABI, and every reference but the event loop's integration
+point resolves against BoringSSL and the system. The integration point is
+the one ABI question (section 7): with a provider present it links on
+both platforms; without one, Apple's ld refuses it.
 
 ## 15. Rejected approaches and tradeoffs
 
