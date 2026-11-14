@@ -29,7 +29,8 @@ Windows are for CI to confirm.
 ## 1. Summary
 
 14 push runs on `main` failed in the window, plus three jobs of the runs
-still in progress at 14937461. They have six causes. Two of them are the same
+still in progress at 14937461. They have six causes, and a seventh showed
+up on this branch's own Windows run (section 2.8). Three of them are the same
 event: stable Rust moved from 1.99.1 to 1.100.0 under `main` (on the
 runners from 2026-11-12; main's first run with it was at ede621b1 on 11-13),
 and no commit changed.
@@ -42,6 +43,7 @@ and no commit changed.
 | 4 | every arm64 job fails installing Tcl | `ports.ubuntu.com` unresolved or reset, with no retry | 2 (9 jobs) | **fixed here** |
 | 5 | React Native self-test "802 lines" | the self-test ran twice in one process | 1 | fixed on main (db3599ed) |
 | 6 | `vt-large` under cranelift coverage | not reproduced; its report was cut off | 1 | **made diagnosable here** |
+| 7 | Windows system linker: "the runtime archive's system libraries changed" | rustc 1.100's standard library needs `synchronization.lib`; the driver's list lacked it | found on this branch's dispatched run; main's job had not run | **fixed here** |
 
 Main's last commit with every test green is cdb751b0 (2026-11-11 22:34),
 which is what the release gate still publishes.
@@ -195,6 +197,23 @@ Run ids are GitHub Actions run ids on `main`.
   characters). A failed test with no report is named, followed by the
   output's last 6,000 characters. The next occurrence will say what
   happened.
+
+### 2.8 Rust 1.100: the Windows runtime archive's system libraries (fixed here)
+
+- **Where:** this branch's dispatched tests (windows x86-64) run 43524813663
+  at e35204ef, `system linker (Windows x86-64, MSVC)`. Every test passed;
+  the step failed on the check of
+  `native/runtime-archive/libraries.tcl`. Main's own system-linker job at
+  14937461 was still queued, so main would have failed the same way.
+- **Symptom:** "the runtime archive's system libraries changed: rustc says
+  '... dbghelp.lib synchronization.lib', the driver passes '... dbghelp.lib'".
+- **Cause:** rustc 1.100's standard library waits on its locks with
+  WaitOnAddress, so `--print native-static-libs` for the runtime archive
+  now names `synchronization.lib`. codegen/aot.rs's
+  `runtime_system_libraries` did not. The executable still linked, through
+  kernel32's forwarders.
+- **Fix:** `synchronization.lib` added to the MSVC list, as AGENTS.md says:
+  change the list, never the check. The list's unit test is updated too.
 
 ### 2.7 Also seen: runs that never start
 
