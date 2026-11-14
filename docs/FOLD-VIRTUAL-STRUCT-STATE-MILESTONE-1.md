@@ -696,7 +696,7 @@ join applies (section 6).
 | neighbor catalogs | consumed-folds all killed; fold-virtual-construction 18/18; fold-loops 22/22 (after a test extension, below); depth-safe-nesting `native-recursion` killed |
 | legacy parity (value-transport-materialization) | 28/28 NIR identical to base |
 | corpus (163 programs: every golden suite, `bench/`, the fold workloads; tools/corpus.tcl and corpus-compare.py) | `off` = base byte for byte, every program; default: 137 unchanged, 21 changed by fold slots, 3 by reference joins alone, 2 by both, none by neither; Struct allocations 105,061 -> 95,992, no program more |
-| full local suite (`tests/local.tcl`) | @LOCAL_SUITE@ |
+| full local suite (`tests/local.tcl`) | every Tcl test file on interp and compile (292 files) and every golden suite on interp, compile, cranelift-generic and cranelift (121 suites): all pass. One test, `syntax-highlighting.test`'s `sh-grammar-vim-corpus` on compile, failed once in the 4-job run (its vim child exited 1) and passed on all three reruns; the branch changes none of its files. (The run was split in two after a wrapper's time limit stopped the first at 410 of 705.) |
 | CI | @CI@ |
 
 The required mutant kinds map to the catalog as: sequential back edge
