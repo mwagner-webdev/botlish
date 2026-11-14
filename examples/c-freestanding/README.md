@@ -14,6 +14,8 @@ is part of the compiler or of the generated C:
 | `programs/traffic.bot` | a program that needs no runtime service |
 | `programs/factorial.bot` | a program that needs `int.mul` |
 | `contexts/` | an application whose dependencies are contexts: `shop.bot` needs a `payment::Payment` (a context trait); `terminal.bot`, its implementation, needs a `clock::Clock`, which `simclock.bot` and `rtc.bot` implement; `store_bench.bot` and `store_field.bot` install it two ways. No runtime service |
-| `demo.sh` | the demonstrations: a no-libc build, a link error naming the missing service, the same program linked with the provider, both shop configurations in one no-libc executable |
+| `kiosk/` | coroutines (C-COROUTINE-FRAMES-MILESTONE-1.md): a parking meter whose session interleaves three coroutines -- `keypad` (resumed with one key press each), `payment` (asks a `devices::Payment`, may fail with `Declined`), `housekeeping` (a heartbeat stamped by a `devices::Clock`) -- installed two ways (`kiosk_bench.bot`: `bench.bot`'s simulated clock and strict terminal; `kiosk_field.bot`: `field.bot`'s real-time clock and terminal). No runtime service, no allocation: each coroutine's frame is an object of the function that constructs it |
+| `frame-sizes.sh` | the size and alignment of every coroutine type of a generated program (the manifest's `coroutine_frames`), as a target's C compiler lays them out, read from a probe object with nm: nothing runs |
+| `demo.sh` | the demonstrations: a no-libc build, a link error naming the missing service, the same program linked with the provider, both shop configurations in one no-libc executable, both kiosk configurations in one no-libc executable |
 
     examples/c-freestanding/demo.sh OUT

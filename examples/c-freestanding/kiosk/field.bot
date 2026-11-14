@@ -1,0 +1,25 @@
+# field -- the meter's devices in the street: a real-time clock's registers
+# (hours, minutes) and a terminal with a higher limit.
+
+import devices
+
+type Hour = Int in 0..23
+type Minute = Int in 0..59
+
+context struct Rtc:
+    hours: Hour
+    minutes: Minute
+
+fn now(context r: Rtc) -> devices::Tick:
+    r.hours * 3600 + r.minutes * 60
+
+context struct FieldTerminal:
+    limit: devices::Amount
+
+fn stamp(context c: devices::Clock) -> devices::Tick:
+    c.now()
+
+fn authorize(amount: devices::Amount, context t: FieldTerminal) -> devices::Receipt errors devices::Declined:
+    if amount > t.limit:
+        fail devices::Declined
+    devices::Receipt {amount: amount, stamp: stamp()}

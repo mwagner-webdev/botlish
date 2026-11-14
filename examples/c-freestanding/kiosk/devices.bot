@@ -1,0 +1,18 @@
+# devices -- what the parking meter needs of its hardware, as context
+# traits: a clock and a card terminal. bench.bot and field.bot implement
+# them; the entry program chooses which.
+
+type Tick = Int in 0..86399
+type Amount = Int in 0..1000
+
+error Declined
+
+struct Receipt:
+    amount: Amount
+    stamp: Tick
+
+context trait Clock:
+    fn now() -> Tick
+
+context trait Payment:
+    fn authorize(amount: Amount) -> Receipt errors Declined

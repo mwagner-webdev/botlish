@@ -1,0 +1,9 @@
+# kiosk_field -- the meter in the street: a real-time clock at 14:34, a
+# terminal that accepts up to 500.
+# expect: meter::Day {morning: meter::Summary {zone: 42, minutes: 30, price: 60, outcome: meter::Stage::Paid, again: meter::Stage::Paid, paid_at: 52440, beats: 4, keypad_done: true, repeat: meter::Prompt::Done}, evening: meter::Summary {zone: 17, minutes: 99, price: 198, outcome: meter::Stage::Paid, again: meter::Stage::Paid, paid_at: 52440, beats: 4, keypad_done: true, repeat: meter::Prompt::Done}}
+import field
+import meter
+
+with context field::Rtc {hours: 14, minutes: 34}
+with context field::FieldTerminal {limit: 500}
+meter::day()
