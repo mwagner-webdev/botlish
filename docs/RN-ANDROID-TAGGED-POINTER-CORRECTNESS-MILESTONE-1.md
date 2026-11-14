@@ -558,19 +558,25 @@ toolchain), whose runs were queued.
 The four test workflows are dispatched again on the fix's commit
 `e63466e8` (superseding the runs above where they were unfinished): tests
 43505390208, tests (linux arm64) 43505394990, tests (macos arm64)
-43505400374, tests (windows x86-64) 43505405543. Read at 00:38 UTC on
+43505400374, tests (windows x86-64) 43505405543. Read at 03:15 UTC on
 2026-11-14 (**CI**):
 
 | Workflow | Passed | Failed | Pending |
 |---|---|---|---|
-| tests | canary | system-linked executables (1 of 4,615: `argv-focused-valid-fuzz`) | interp (running); the rest queued: compile, both coverage jobs, stub-linked executables, native Rust unit tests, the method-call decision's audit, golden shards 1-4 |
-| tests (linux arm64) | canary, native Rust unit tests, golden shards 1/4 and 3/4 | -- | both coverage jobs (running); interp, compile, both GC-stress jobs, system-linked executables, golden shards 2, 4 |
-| tests (macos arm64) | smoke, the Linux control, Botlish.app | acceptance shard 6/6 (1 of 2,255: `native-tcl-unicode-lowercase-all-scalars`; its 20 golden suites on the four backends ok) | acceptance shards 2, 3 (running), 1, 4, 5; system linker; Botlish.app without developer tools; main-thread startup; static SDL3 through Botlish.app |
-| tests (windows x86-64) | canary, root plans, acceptance shard 4/4, every smoke check but one (C calls and libraries, filesystem and variadic C calls under GC stress included) | smoke's tier step: `argv-focused-valid-fuzz` alone (1 of 1,287 on each pass), the same three iterations as main's | acceptance shards 1-3, system linker |
+| tests | canary, native Rust unit tests, golden shards 1, 3, 4 | interp (2 of 12,367: `argv-focused-valid-fuzz`, `native-tcl-unicode-lowercase-all-scalars`; `nl-no-string-ternary` passes); system-linked executables (1 of 4,615: argv's fuzz) | compile, both coverage jobs, stub-linked executables, the method-call decision's audit, golden shard 2 |
+| tests (linux arm64) | canary, native Rust unit tests, golden shards 1, 3 | cranelift coverage (its "native backend bugs": the same two tests and nothing else) | interp, compile, cranelift-generic coverage, system-linked executables (running), both GC-stress jobs, golden shards 2, 4 |
+| tests (macos arm64) | smoke, the Linux control, acceptance shards 1-4, Botlish.app, Botlish.app without developer tools | acceptance shard 5 (1 of 2,415: argv's fuzz), shard 6 (1 of 2,255: lowercase); system linker (its own tests 15/15, then 1 of 4,615 system-linked: argv's fuzz) | main-thread startup, static SDL3 through Botlish.app |
+| tests (windows x86-64) | canary, root plans, acceptance shards 3, 4, every smoke check but one (C calls and libraries, filesystem and variadic C calls under GC stress included) | smoke (argv's fuzz, 1 of 1,287 on each pass); acceptance shard 1 (2 of 2,820: argv's fuzz and lowercase); system linker (its own tests 15/15 and under GC stress 181/181; argv's fuzz 1 of 401 on each pass; the runtime archive's system-library check: rustc now names `synchronization.lib`, which `runtime_system_libraries` lacks) | acceptance shard 2 |
 
-Every failure so far is one of main's two (above); `nl-no-string-ternary`
-has not failed anywhere it ran. main's latest runs (`14937461`): tests
-queued, tests (windows x86-64) in progress.
+Every failure is main's. The tests that fail are the two Unicode 18 ones
+(above), wherever they run; the Windows system-library check is the same
+toolchain: Rust 1.100.0's standard library links `synchronization.lib`
+(rustc's `--print native-static-libs`), and this change touches neither
+the runtime's system libraries nor the check. main's Windows run at its
+latest commit `14937461` (run 43489783453) fails the same three jobs the
+same way: smoke (argv's fuzz), system linker (the same
+`synchronization.lib` line, argv's fuzz), acceptance shard 1 (argv's fuzz
+and lowercase). Its tests run was still queued.
 
 ## 24. Cleanroom
 
