@@ -110,9 +110,16 @@ native build caches by the Rust toolchain). At `14937461`, read
 2026-11-13 22:00 UTC, the four test workflows were still queued (since
 19:11 UTC); its `ci tools` run failed on a truncated API response
 (`http.client.IncompleteRead` in tools/ci/history.py, run 43489783093), not
-on a test. So main has no completed test run newer than `ede621b1`'s red
-ones, and this branch's failures are compared with none: every failure
-reported below was read and attributed one by one.
+on a test. Those runs completed later (read 2026-11-14 08:15 UTC), all
+four **failed**: tests 43489783150 (eight jobs, among them interp: 2
+failures -- `argv-focused-valid-fuzz` in argv.test and
+`native-tcl-unicode-lowercase-all-scalars` in native-tcl-unicode.test --
+and the system-linked executables: `argv-focused-valid-fuzz`), tests
+(linux arm64) 43489783116 (seven jobs), tests (macos arm64) 43489783290
+(the system linker and two acceptance shards) and tests (windows x86-64)
+43489783453 (smoke, system linker, one acceptance shard). None of those
+tests is one this branch adds or changes. Every failure this branch's own
+runs reported was read and attributed one by one (sections 6, 8, 12).
 
 ## 3. Relevant existing architecture
 
