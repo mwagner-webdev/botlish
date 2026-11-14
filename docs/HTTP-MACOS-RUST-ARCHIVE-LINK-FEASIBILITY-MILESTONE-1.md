@@ -475,13 +475,44 @@ every target.
 
 ## 10. Independent consumer acceptance
 
-PENDING (CI).
+`audit/rust-archive-link/cleanroom/consumer.sh` is the consumer: a fresh
+project, the two artifacts added through the package manager (`add`,
+`verify`, `native plan`: no `-L`, the archives found in the target view),
+both programs compiled with `-warnings error` to native executables by
+the packaged compiler's own linker choice, each run three times against
+its expected value, and each executable inspected (format and
+architecture, dynamic libraries, the shared Rust symbols, the export trie
+on macOS). The CI jobs run it on a fresh runner that downloads only the
+artifacts, the packaged compiler of the same commit and the consumer's
+sources: no checkout, `~/.cargo` and `~/.rustup` moved away, `env -i` with
+`PATH=/usr/bin:/bin` (macOS: `/usr/bin:/bin:/usr/sbin:/sbin`); the script
+records that cargo, rustc and rustup are not on PATH.
 
-Locally [executed]: `audit/rust-archive-link/cleanroom/consumer.sh` with
-`PATH=/usr/bin:/bin`, a fresh `HOME`, the checkout's compiler through a
-wrapper and the system linker -- add, verify, native plan (no `-L`),
-`-warnings error` builds, three runs of each program, symbol checks --
-`CONSUMER OK`.
+**Linux x86-64** [CI] (run 43526167818, job `consumer, no checkout and no
+Rust (linux-x86_64)`): the single-file compiler (runtime built by rustc
+1.100.0) and the artifacts packed from the 1.97.0 units:
+
+```
+== add: rustlink 0.1.0 (sha256 a09f250934a6): installed
+== add: rustlink_provider 0.1.0 (sha256 077bac1b97cc): installed
+== native plan:   library rustlink: bundled static (instance rustlink)
+== native plan:     an ar archive of 1 ELF x86-64 object; bundled file, sha256 a65bcc85ea7a
+== native plan: link: ... no -L is needed for bundled libraries
+PASS without_provider: toolchain rustc 1.97.0 (2d8144b78 2026-07-07)
+== without_provider rust_eh_personality: 1 global, 1 local
+== without_provider __rust_alloc: 1 global, 1 local
+== without_provider: global symbols carrying the unit's crate hash: 0 (the runtime's: 5WqGp7zLRnA)
+PASS with_provider: ...                   (the same facts)
+CONSUMER OK
+```
+
+Dynamic libraries: libgcc_s, libm, libc only.
+
+**macOS arm64** [CI]: PENDING (job `consumer, no checkout and no Rust
+(macos-aarch64)`, Botlish.app of the same commit).
+
+Locally [executed]: the same script with `PATH=/usr/bin:/bin`, a fresh
+`HOME` and the checkout's compiler through a wrapper: `CONSUMER OK`.
 
 ## 11. Linux/macOS parity
 
