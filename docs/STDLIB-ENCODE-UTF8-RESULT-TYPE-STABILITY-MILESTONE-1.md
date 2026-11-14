@@ -752,8 +752,8 @@ change in an empty directory with an empty environment, prints the new note
 importing std::str is enough, whatever else the program imports. ...") and
 none of the old conditional text; it creates no file there. Its SIGNATURE
 line still reads `std::str::encode_utf8(str) -> list`: the registry's result
-kind, the same text the native's value type shows (section P), which the
-note beneath it makes precise.
+kind, which the native's value type also uses (section P); the note beneath
+it states the precise type.
 
 ## P. Remaining limitations
 
@@ -761,11 +761,27 @@ note beneath it makes precise.
   `std::str::encode_utf8` still gets the plain `list` (Executed:
   `eut-no-loader-no-claim`). Core IR text is a harness format, not a
   language entry point (AGENTS.md, "Compiler architecture").
-* **The callee's hover** at `encode_utf8` shows the native's value type,
-  `Fn{args: [any], return: list, errors: []}`, before and after: it is the
-  presentation of the native as a function value, unrelated to imports. A
-  call through that value is precise (Executed: `g = std::str::encode_utf8;
-  g(s)` is `List[int[std::byte::Byte]]`, was `list`).
+* **The native as a function value** still has the registered result kind:
+  `hir::types::structuralOf` builds an exact native's function type from its
+  `-result-type` (`list`), never from its `-result-shape`, because most
+  shapes depend on a call's arguments. So the hover at `encode_utf8` shows
+  `Fn{args: [any], return: list, errors: []}`, and -- more than presentation
+  -- the native passed as a value is rejected at a parameter of type
+  `Fn{args: [str], return: List[std::byte::Byte], errors: []}` ("the callable
+  returns list, not usable as List[int[std::byte::Byte]]"), as at one
+  returning `List[int]` (Executed, before and after the change, with or
+  without `import std::byte`: it never depended on imports, so it is not
+  this milestone's defect). A call through the value is precise (`g =
+  std::str::encode_utf8; g(s)` is `List[int[std::byte::Byte]]`, was `list`):
+  that call still reaches `ShapeResult`. The `typed` shape is
+  argument-independent, so `structuralOf` could state it, the type now
+  being declared in every compilation that can reach the native; but
+  `structuralOf` has 21 readers (callable contracts, the completion
+  analysis's subsumption, signatures, traits, containers), so that is a
+  change to function-value admission, with its own tests, not a display fix.
+  Compilerpedia's SIGNATURE line (`tools/compilerpedia.tcl`'s
+  `NativeSignature`) prints the same `-result-type`, and the generator runs
+  outside any compilation, so it would print the shape's symbolic type.
 * **The syscall transports' `named-struct` result** is `struct` without
   `std::abi::ARCH` loaded; only rejected programs can observe it (section C).
   Extending contract types to structs would load `std::abi::ARCH` for every
