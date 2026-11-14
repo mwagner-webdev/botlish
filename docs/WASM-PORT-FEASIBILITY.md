@@ -35,7 +35,7 @@ differs more by *what* is ported than by *where* it runs.
 |---|---|---|---|
 | **C** -- the C backend's freestanding C, compiled by clang for wasm32 | **Works today** for its subset (Int, Bool, enums, structs, loops, declared errors). One 3.5–4.8 KB module with no imports printed exactly what `-backend interp` prints [run]. | The same module runs on any engine: it has no imports at all. | Works for integer kernels once the C backend emits `exported c fn` entry points. Today it exports only `NAME_run`, which takes no inputs. |
 | **N** -- the native backend's NIR, lowered to wasm, linked with the Rust runtime compiled for wasm32 | Feasible, and the largest job. Coroutines need JSPI or Asyncify. There is no stdio or filesystem, and threads become Web Workers. | **Feasible, and the best fit for full programs.** Wasmtime shares Cranelift's lineage and has WASI 0.2/0.3. Coroutines need Asyncify, a compiler transform, or Wasmtime's experimental stack switching. Threads move into the embedder. | **Feasible, and the smallest native-backend deliverable:** library mode (`exported c fn` as wasm exports). There are no coroutines at the boundary, and no threads, event loop or I/O in the kernel. |
-| **T** -- the compiler itself (Tcl 9) running in wasm | Section 8. | Section 8. | Not useful: a Worker cannot compile wasm at run time, and a kernel is built ahead of time anyway. |
+| **T** -- the compiler itself (Tcl 9) running in wasm | **Feasible now as a playground:** the same WASI module behind a JS WASI shim, about 3–3.5 MB compressed with its sources. It checks and runs programs on the Tcl backends; native execution is not included. | **Works today.** Tcl 9.0.1 builds for `wasm32-wasip1` with no change to Tcl's source. `-check`, `interp` and `compile` matched native byte for byte on 51 of 51 runs under Wasmtime 50, at 1.2–1.6× native time [run]. | Not useful: a Worker cannot compile wasm at run time, and a kernel is built ahead of time anyway. |
 
 **What changed since CRANELIFT-WASM.md (section 3):**
 * **The runtime still builds for wasm32.** It builds for
@@ -105,6 +105,9 @@ differs more by *what* is ported than by *where* it runs.
    About **30–50 person-days** (section 9).
 2. **C-backend exports**, as a cheap early option for integer kernels:
    about **3–6 person-days**, before or beside 1.
+   * **Independently,** the compiler on WASI and as a browser playground
+     (route T, section 8) works now and needs packaging: about **8–15
+     person-days**.
 3. **Server programs on WASI next** (Wasmtime). This adds the WASI platform
    layer, the C FFI on wasm, coroutines, an event-loop driver and threads in
    the embedder: about **60–110 person-days** on top of 1.
@@ -603,17 +606,131 @@ family and the same API path].
 
 ## 8. The compiler itself in wasm
 
-**Pending.** This section reports an experiment that builds Tcl 9.0.1 for
-`wasm32-wasip1` and runs `main.tcl`'s front end and Tcl backends under
-Wasmtime and Node's `node:wasi`. The experiment was still running when this
-document was first committed, and a follow-up commit adds its results.
+**The compiler, with its two Tcl backends, runs on WASI today, unmodified,
+with no change to Tcl's source either.** No published Tcl 9 WASI build
+existed [source]. Emscripten builds of Tcl 8.6 do (tcltk.wasm), and Magic
+VLSI's merged browser build of Tcl 9 (2026-10-07) had to replace Tcl's
+threaded notifier.
 
-The known facts so far [source]:
-* No published Tcl 9 WASI build was found.
-* Emscripten builds of Tcl 8.6 exist (tcltk.wasm).
-* Magic VLSI's merged browser build of Tcl 9 (2026-10-07) had to install a
-  single-threaded notifier: Tcl 9 is always threaded, and its Unix notifier
-  starts a helper thread (https://github.com/RTimothyEdwards/magic/pull/563).
+### 8.1 The build [run]
+
+* **Inputs.** The pinned Tcl 9.0.1 source (single/build.sh's tarball,
+  SHA-256 checked), built for `wasm32-wasip1` with wasi-sdk 34 (clang
+  23.1).
+* **`unix/configure`:**
+  * the flags `--host=wasm32-wasi --disable-shared --enable-zipfs
+    --with-system-libtommath=no --disable-load`;
+  * wasi-libc's emulated signal, process-clock, getpid and mman libraries;
+  * `-DTCL_THREADS=0`. Tcl 9's headers still honour it, and it avoids the
+    select notifier's helper thread, which Magic's build had to replace at
+    run time.
+* **Four small compatibility headers and a stub library** (172 lines in
+  all). They declare what wasi-libc hides on `wasip1`: sockets,
+  `fork`/`exec`, `pwd.h`, `grp.h`, `netdb.h` and the like. Every one fails
+  with ENOSYS or "not found".
+* **The link.** An 8 MiB linear-memory stack (`-Wl,-z,stack-size`). The
+  zipfs archive `make` appends to the binary is cut off, because Wasmtime
+  rejects trailing bytes.
+* **Size:**
+  * `tclsh.wasm`: 2,412,268 B (756 KB gzipped);
+  * stripped: 1,929,777 B (594 KB gzipped);
+  * Tcl's script library: a 1.16 MB zip;
+  * the compiler's sources (`main.tcl`, `core/`, `compiler/`, `hir/`,
+    `surface/`, `service/`, `stdlib/`): 1.65 MB gzipped.
+
+### 8.2 What ran [run]
+
+* **Under Wasmtime 50.0.1:** 17 programs (all 16 of `examples/surface/`,
+  plus a mixed program and a rejected one), each with
+  `main.tcl -backend interp`, `-backend compile` and `-check`.
+  * **51 of 51 runs matched native `tclsh9.0` byte for byte:** stdout,
+    stderr and exit status.
+  * The 51 saved output pairs were re-compared here, read-only: all
+    identical.
+* **Deep programs** (a 1,000-deep nested expression, a 300-deep List,
+  interpreted recursion 13,000 deep) were identical too. Recursion 100,000
+  deep fails with TCL LIMIT STACK, exactly as natively (the program
+  recursion limit).
+* **Golden suites** (`tests/golden/run.tcl -backends interp,compile`; 40
+  suites):
+  * 32 are identical apart from timing figures (re-checked here).
+  * The other 8 fail with `SURFACE MODULE UNKNOWN-TARGET`. They import
+    `std::ffi::c` or `std::linux::*`, which needs a compilation target, and
+    a compiler running on a `wasi`/`wasm32` host has no host target row.
+    With `-target linux-x86_64`, `hashable.bot` ran identically. This is a
+    policy gap, not a defect: decision 8 in section 10.
+* **Node 22's `node:wasi`:** 54 of 54 runs identical. One golden suite
+  (`fold-loops.bot`) crashed Node in V8's GC, entered from uvwasi's
+  fast-call path. With `--no-turbo-fast-api-calls` it ran identically. That
+  is a Node bug, in code a browser's JS WASI shim does not use.
+* **Not available:**
+  * the native backends (`NATIVE NOT-BUILT`: the Rust driver is a native
+    program);
+  * `exec`, sockets and processes.
+* **Not tried:** the language server over stdio, and the front-end cache on
+  a writable preopen.
+
+### 8.3 Speed and limits [run]
+
+| Median wall time (ms) | native | Wasmtime | Node 22 |
+|---|---|---|---|
+| tclsh `puts hi` | 7 | 30 (cached) | 176 |
+| a mixed program, `interp` | 324 | 423 (1.3×) | 577 (1.8×) |
+| a mixed program, `compile` | 262 | 391 (1.5×) | 503 (1.9×) |
+| a mixed program, `-check` | 282 | 389 (1.4×) | 466 (1.7×) |
+| a 1,000-deep expression, `-check` | 1,162 | 1,681 (1.45×) | 1,736 (1.5×) |
+| recursion 13,000 deep, `interp` | 3,027 | 4,948 (1.6×) | 4,338 (1.4×) |
+| golden `values.bot` | 4,564 | 6,711 (1.5×) | 6,184 (1.35×) |
+| golden `fold-loops.bot` | 16,704 | 21,881 (1.3×) | about 22,000 (with the workaround) |
+
+* **Startup.** Compiling the 2.4 MB module costs 600–714 ms without
+  Wasmtime's cache, 27–33 ms with it, and 10–13 ms precompiled (`.cwasm`).
+  A deployment ships the precompiled form.
+* **Stacks: there are two.**
+  * **The linear-memory stack.** The compiler's own walks keep C recursion
+    shallow (Tcl's NRE engine and DEPTH-SAFE-NESTED-EXPRESSION-FRONTEND-
+    MILESTONE-1.md's segments), so every compiler run above passed even
+    with wasm-ld's default 64 KiB. A pure-Tcl probe of nested command
+    substitution needs 8 MiB for 10,000 levels.
+  * **The engine stack.** Wasmtime's default `max_wasm_stack` (512 KiB)
+    traps that probe at 500 levels, and raising it fixes that. None of the
+    compiler's runs reached it.
+  * Browsers fix the engine stack at about 1 MB. That matters only for
+    deep Tcl-level nesting, which the compiler avoids by design.
+
+### 8.4 What it means
+
+* **Server (WASI).**
+  * **It works today:** `-check`, `interp` and `compile` run as a
+    sandboxed WASI module at 1.2–1.6× native time, about 30 ms to start
+    when precompiled.
+  * **Uses:** a compile and check service in a wasm sandbox, or a CI step
+    that runs the reference interpreter in isolation.
+  * **What productizing takes:**
+    * a build recipe beside `single/basekit.sh`;
+    * the compiler packed with Tcl's library in one zipfs archive (the
+      experiment showed Tcl mounts its library from an appended zip by
+      itself);
+    * the host-target policy (decision 8);
+    * a CI lane running part of the Tcl suite under Wasmtime.
+  * **Edge platforms are a poor fit.** Checking a small program costs
+    200–400 ms of CPU, against Fastly's 50 ms per request [source].
+* **Browser playground.**
+  * **The shape:** the same `wasip1` module behind a JS WASI shim with an
+    in-memory filesystem (the compiler's sources and Tcl's library,
+    possibly one zip), in a Web Worker, since a run is synchronous.
+  * **Speed:** V8 ran it at 1.2–2× native.
+  * **Download:** about 3–3.5 MB compressed in all (the module, Tcl's
+    library, the sources), cached after the first visit.
+  * **What it gives:** check, run (`interp`, `compile`) and Compilerpedia
+    in the page, with no server.
+  * **What it does not give:** native execution. That would need route N's
+    code generator compiled to wasm, emitting a module the page
+    instantiates, as in CRANELIFT-WASM.md's two-module mode (O4).
+    Browsers allow runtime compilation; Workers do not.
+* **Cloudflare Workers:** not useful. The 128 MB isolate would hold it, but
+  Workers have no native WASI and a 1 s startup budget, and a kernel is
+  compiled ahead of time anyway.
 
 ## 9. Plan and effort
 
@@ -655,6 +772,16 @@ The known facts so far [source]:
 Strings and floating point in the C backend are milestones of their own and
 are not estimated here.
 
+### T. The compiler on WASI, and a browser playground
+
+| Item | pd |
+|---|---|
+| A reproducible WASI build of Tcl 9.0.1 (the recipe and compatibility stubs of section 8.1), beside `single/basekit.sh` | 2–3 |
+| Packing the compiler and Tcl's library into one zipfs archive; the host-target policy (decision 8) | 2–4 |
+| A CI lane running part of the Tcl suite and some golden suites under Wasmtime | 2–4 |
+| A browser loader: a JS WASI shim with an in-memory filesystem, a Web Worker, an example page | 2–4 |
+| **Total** | **8–15** |
+
 ### S. Server programs on WASI (Wasmtime), on top of K
 
 | Item | pd |
@@ -684,6 +811,7 @@ are not estimated here.
 |---|---|
 | K alone (kernels for browsers and Workers) | 30–50 |
 | C alone (integer kernels through the C backend) | 3–6 |
+| T alone (the compiler on WASI and in a browser playground) | 8–15 |
 | K + S (server programs) | 90–160 |
 | K + S + B (full parity in both) | 110–200 |
 
@@ -725,6 +853,15 @@ are not estimated here.
 7. **`rustc` at wasm link time,** or CRANELIFT-WASM.md's two-module mode
    (O4). For kernels built in CI the former is fine. A playground would want
    the latter.
+8. **The host target of a compiler running on wasm.** `hostTarget` finds no
+   row for `wasi`/`wasm32`, so a program importing `std::ffi::c` or
+   `std::linux::*` is `UNKNOWN-TARGET` unless `-target` is given (8.2). The
+   options:
+   * require `-target`;
+   * default to a wasm target once one exists;
+   * have the packaging pass the target the user chose.
+
+   Never guess a native target for such a host.
 
 ---
 
@@ -819,7 +956,30 @@ with:
   21 a platform I/O namespace and 12 the C FFI. 54 match none.
 * **Golden suites.** All 120 `tests/golden/*.bot` import `std::test`.
 
-### A.7 Not run
+### A.7 The compiler under WASI (section 8)
+
+* **Who ran it.** A delegated experiment in the same session, on a
+  `git archive` snapshot of `b0ae98fe`, with wasi-sdk 34.0, Wasmtime 50.0.1
+  and Node 22.23.4.
+* **The recipe.** It runs `unix/configure` with the overrides of section
+  8.1, then `make libtcl9.0.a tclsh`, then strips the appended zip.
+* **The runs.** It ran `main.tcl` under `wasmtime run --argv0 tclsh9.0
+  --env PATH=/bin --dir BIN::/bin --dir SNAPSHOT::/ --dir LIBRARY::/tcllib
+  --env TCL_LIBRARY=/tcllib tclsh.wasm main.tcl ...`, and saved each run's
+  stdout, stderr and status beside native `tclsh9.0`'s.
+* **One fix along the way.** `--argv0` and a file named `tclsh9.0` on the
+  guest's PATH make `info nameofexecutable` non-empty. Without them,
+  main.tcl's "help:" lines lack the executable's name. That accounts for
+  its first run's 9 differing pairs.
+* **The check here.** The saved pairs were compared read-only:
+  * the headline run's 51 pairs are identical;
+  * of the golden runs, after replacing timing figures, exactly the 8
+    `UNKNOWN-TARGET` suites still differ.
+* **Not done here.** Re-running the downloaded Wasmtime in this session was
+  refused by the session's permission policy, so the comparison is of the
+  experiment's saved outputs.
+
+### A.8 Not run
 
 * **JSPI's per-switch cost.** Node 22 lacks the current JSPI API, and
   downloading Node 24 was refused by this session's permission policy.
@@ -904,6 +1064,16 @@ no source states.
   * **Akamai Functions** (Spin): 20 or 128 MiB of memory; 500 or 1,000 ms
     of CPU
     (https://techdocs.akamai.com/akamai-functions/docs/quotas-and-limits).
+
+**Tcl on wasm**
+* **No published Tcl 9 WASI build was found.** Nixpkgs lists wasi among Tcl
+  9's platforms, which is weak evidence.
+* **Emscripten builds of Tcl 8.6 exist:** tcltk.wasm
+  (https://github.com/t3tra-dev/tcltk.wasm).
+* **Magic VLSI's browser build of Tcl 9** (merged 2026-10-07) installs a
+  single-threaded notifier before creating the interpreter, because Tcl 9's
+  Unix notifier starts a thread
+  (https://github.com/RTimothyEdwards/magic/pull/563).
 
 **Cloudflare**
 * **Workers:**
