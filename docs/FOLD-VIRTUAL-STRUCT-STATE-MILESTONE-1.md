@@ -85,8 +85,9 @@ node, core IR form, NIR instruction, runtime helper or heap object.**
   field registers ran faster at every width measured up to 256, the code
   is smaller up to 8 fields and up to 15% larger beyond (smaller at every
   width when one field changes per iteration), and Cranelift's
-  compile time is neutral to 16, up to +39% at 32-64, and more than doubled
-  at 128-256 for a gain per iteration near 1.2x (section 14).
+  compile time is neutral to 16 fields, 12-23% higher at 32 and 28-47%
+  at 64 where most fields change, and 1.6-2.6 times at 128-256 for a gain
+  per iteration near 1.2x (section 14).
 * **Off is the old lowering, byte for byte.** (*Observation.*)
   `-struct-fold 0 -struct-ref-joins 0` reproduces the base tree's NIR for
   every one of 163 corpus programs; with the default, no program
@@ -654,16 +655,30 @@ slots), object lowering -> fold slot:
 | spill-32 | 371 -> 401 | 67 -> 66 | 33 -> 33 | 33 -> 33 | 1072 -> 848 | 373 -> 568 |
 | spill-64 | 723 -> 785 | 131 -> 130 | 65 -> 65 | 65 -> 65 | 2096 -> 1616 | 725 -> 1080 |
 
-Machine code and Cranelift compile time (best of 5) for the same inputs:
+Cranelift's compile time of the whole program (the driver's `timing`
+line, best of 5 processes, milliseconds), object lowering -> fold slot:
 
-@WIDTH_COMPILE_TABLE@
+| shape | 2 | 4 | 6 | 8 | 16 | 32 | 64 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| few | 1.3 -> 1.4 (+4%) | 1.3 -> 1.4 (+1%) | 1.3 -> 1.2 (-9%) | 1.4 -> 1.2 (-10%) | 1.6 -> 1.3 (-13%) | 1.9 -> 1.9 (-3%) | 2.9 -> 2.8 (-2%) |
+| most | 1.6 -> 1.6 (-3%) | 2.1 -> 2.1 (-1%) | 2.6 -> 2.5 (-4%) | 3.1 -> 3.0 (-2%) | 5.0 -> 5.4 (+8%) | 9.7 -> 11.9 (+23%) | 24.9 -> 36.5 (+47%) |
+| branch | 1.7 -> 1.5 (-16%) | 2.2 -> 2.1 (-7%) | 2.6 -> 2.6 (-3%) | 3.0 -> 2.9 (-2%) | 5.0 -> 5.3 (+6%) | 9.8 -> 12.1 (+23%) | 25.4 -> 36.1 (+42%) |
+| ret | 1.8 -> 1.7 (-7%) | 2.3 -> 2.4 (+6%) | 3.0 -> 2.8 (-4%) | 3.2 -> 3.3 (+3%) | 5.1 -> 5.6 (+8%) | 9.6 -> 11.4 (+19%) | 26.0 -> 35.1 (+35%) |
+| nested | 1.7 -> 1.7 (+0%) | 2.0 -> 1.9 (-2%) | 2.3 -> 2.5 (+8%) | 2.9 -> 2.8 (-4%) | 4.6 -> 4.3 (-5%) | 7.4 -> 8.7 (+17%) | 18.4 -> 24.1 (+31%) |
+| spill | 1.8 -> 1.7 (-7%) | 2.3 -> 2.1 (-10%) | 2.6 -> 2.4 (-7%) | 2.8 -> 2.8 (+1%) | 4.7 -> 4.7 (-0%) | 8.5 -> 9.6 (+12%) | 20.6 -> 26.4 (+28%) |
+
+At 128 and 256 fields (`-struct-fold-width 256`): `most` 89.0 -> 169.4 ms
+and 456.6 -> 1,198.2 ms, `spill` 64.7 -> 104.3 ms and 303.4 -> 681.4 ms.
 
 **Policy.** (*Judgment.*) Field registers win at run time at every width
 (the allocation they remove costs more than the spills they add, even at
 256 fields live across a call), and their frames are smaller up to 64
-fields; the price is code and compile time beyond 16 fields, growing
-superlinearly past 64 (Cranelift's register allocation over hundreds of
-loop-carried values). So the fold slot's ceiling is 64 -- a resource bound
+fields; the price is code (up to 15%) and compile time beyond 16 fields
+-- +12-23% at 32, +28-47% at 64, 1.6-2.6 times at 128-256 (Cranelift's
+register allocation over hundreds of loop-carried values; stack traffic
+grows past 8 fields, the table above) -- where most fields change; when
+one field changes, compile time and code fall at every width. So the fold
+slot's ceiling is 64 -- a resource bound
 on compile time for a gain that has flattened to about 1.2x by then -- not
 the local ceiling, which would decline 17-64-field folds that run 1.2 to
 1.5 times faster (over 20 times when one field changes per iteration). It
@@ -676,13 +691,49 @@ width`).
 **Compiler economics.** (*Observation*, `tools/economics.tcl`, base ->
 M1, best of 5 on this container; times are wall-clock and noisy.)
 
-@ECONOMICS_TABLE@
+| program | escape analysis, us (base -> M1) | use verdicts | classifications | native lowering, us | NIR instructions | machine code, bytes | live/shadow/safepoints |
+|---|---:|---:|---:|---:|---:|---:|---|
+| width-2 | 517 -> 750 (+45%) | 1 -> 5 | 13 -> 24 | 7,016 -> 7,093 (+1%) | 47 -> 44 | 1,317 -> 1,189 | 7/7/8 -> 7/7/6 |
+| width-4 | 719 -> 973 (+35%) | 1 -> 5 | 17 -> 28 | 9,924 -> 9,527 (-4%) | 65 -> 64 | 2,133 -> 1,853 | 9/9/14 -> 9/9/12 |
+| width-8 | 1,262 -> 1,542 (+22%) | 1 -> 5 | 25 -> 36 | 16,709 -> 15,810 (-5%) | 101 -> 104 | 3,629 -> 3,285 | 13/13/26 -> 13/13/24 |
+| width-16 | 1,968 -> 2,385 (+21%) | 1 -> 5 | 41 -> 52 | 28,361 -> 26,037 (-8%) | 173 -> 184 | 6,669 -> 6,413 | 21/21/50 -> 21/21/48 |
+| width-32 | 3,931 -> 4,399 (+12%) | 1 -> 3 | 73 -> 81 | 53,774 -> 53,249 (-1%) | 317 -> 377 | 12,853 -> 13,261 | 37/37/98 -> 37/37/97 |
+| width-64 | 8,357 -> 10,913 (+31%) | 1 -> 3 | 137 -> 145 | 113,167 -> 130,318 (+15%) | 605 -> 729 | 25,173 -> 26,149 | 69/69/194 -> 69/69/193 |
+| nested-1 | 606 -> 893 (+47%) | 1 -> 5 | 18 -> 29 | 11,175 -> 8,835 (-21%) | 55 -> 52 | 1,517 -> 1,301 | 8/8/9 -> 9/9/7 |
+| nested-2 | 949 -> 1,336 (+41%) | 1 -> 9 | 26 -> 48 | 13,432 -> 11,962 (-11%) | 94 -> 90 | 2,605 -> 2,413 | 12/12/16 -> 16/16/12 |
+| nested-3 | 1,123 -> 1,829 (+63%) | 1 -> 13 | 34 -> 67 | 15,495 -> 16,438 (+6%) | 133 -> 128 | 3,709 -> 3,549 | 16/16/23 -> 23/23/17 |
+| nested-4 | 1,475 -> 2,056 (+39%) | 1 -> 17 | 42 -> 86 | 20,123 -> 18,200 (-10%) | 172 -> 166 | 5,029 -> 4,805 | 20/20/30 -> 30/30/22 |
+| nested-5 | 1,730 -> 2,723 (+57%) | 1 -> 21 | 50 -> 105 | 23,298 -> 23,373 (+0%) | 211 -> 204 | 6,261 -> 5,765 | 24/24/37 -> 37/37/27 |
+| many-10 | 4,485 -> 8,115 (+81%) | 1 -> 41 | 112 -> 272 | 61,757 -> 68,441 (+11%) | 540 -> 567 | 13,533 -> 10,645 | 8/8/83 -> 9/9/53 |
+| many-20 | 9,155 -> 16,675 (+82%) | 1 -> 81 | 212 -> 532 | 118,642 -> 129,242 (+9%) | 1060 -> 1117 | 25,941 -> 19,629 | 8/8/163 -> 9/9/103 |
+| many-40 | 24,429 -> 39,672 (+62%) | 1 -> 161 | 412 -> 1052 | 274,247 -> 288,243 (+5%) | 2100 -> 2217 | 51,005 -> 38,493 | 8/8/323 -> 9/9/203 |
+| many-80 | 56,117 -> 94,622 (+69%) | 1 -> 321 | 812 -> 2092 | 589,668 -> 666,061 (+13%) | 4180 -> 4417 | 100,669 -> 76,157 | 8/8/643 -> 9/9/403 |
+| locals-10 | 3,072 -> 3,291 (+7%) | 10 -> 10 | 80 -> 80 | 29,390 -> 29,872 (+2%) | 56 -> 56 | 453 -> 453 | 4/4/4 -> 4/4/4 |
+| locals-20 | 6,485 -> 6,587 (+2%) | 20 -> 20 | 150 -> 150 | 58,530 -> 57,424 (-2%) | 96 -> 96 | 453 -> 453 | 4/4/4 -> 4/4/4 |
+| locals-40 | 14,508 -> 16,852 (+16%) | 40 -> 40 | 290 -> 290 | 124,482 -> 136,259 (+9%) | 176 -> 176 | 453 -> 453 | 4/4/4 -> 4/4/4 |
+| locals-80 | 33,908 -> 33,694 (-1%) | 80 -> 80 | 570 -> 570 | 270,365 -> 267,691 (-1%) | 336 -> 336 | 455 -> 455 | 4/4/4 -> 4/4/4 |
+| scanner-fold | 3,342 -> 5,019 (+50%) | 0 -> 4 | 70 -> 122 | 60,245 -> 66,291 (+10%) | 286 -> 306 | 4,682 -> 3,482 | -/-/- -> -/-/- |
+| chunks-fold | 1,691 -> 2,199 (+30%) | 0 -> 2 | 34 -> 61 | 27,770 -> 27,505 (-1%) | 200 -> 194 | 4,420 -> 4,100 | -/-/- -> -/-/- |
+| fold-loops | 114,760 -> 126,149 (+10%) | 59 -> 83 | 1671 -> 1881 | 5,615,916 -> 6,065,584 (+8%) | 6034 -> 6015 | 129,222 -> 128,490 | 5/5/2 -> 5/5/2 |
 
-The analysis cost grows with the folds and their bodies, not with the
-fields: one shape fact per fold, one use verdict per slot, one no-loss
-walk per slot and set of materializing references. Programs without an
-eligible fold slot run one round and keep their NIR unless a reference
-join applies (section 6).
+(`width-W`: one W-field struct local and fold; `nested-N`: N nested
+folds; `many-N`: N folds in one function; `locals-N`: N struct locals and
+no fold -- tools/gen-economics.tcl; then the census's workloads and the
+fold-loops golden suite. `-/-/-`: no fold function reported.)
+
+* The escape analysis costs more where there are folds: +12-82% on the
+  synthetic inputs, +50% on the scanner, +10% on the fold-loops golden
+  suite; on `locals-N` (no fold) it is unchanged within noise. It stays a
+  small part of native lowering (the scanner: 5.0 of 66.3 ms), whose total
+  changes by -21% to +15%.
+* The work is linear in folds, not fields: use verdicts grow by 4 per
+  fold (`many-N`: 1 -> 4N+1; `nested-N`: 1 -> 4N+1) and stay at 3-5 for
+  a single fold of any width; the escape time of `many-N` doubles with N
+  in both trees. One shape fact per fold, one use verdict per slot and
+  round, one no-loss walk per slot and set of materializing references:
+  no walk per field, and no multiplicative work in nesting or count.
+* Programs without an eligible fold slot run one round and keep their
+  NIR unless a whole-struct share applies (section 6).
 
 ## 15. Differential, mutation and regression testing
 
