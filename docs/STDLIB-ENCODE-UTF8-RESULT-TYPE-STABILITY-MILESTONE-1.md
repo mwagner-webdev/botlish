@@ -631,23 +631,33 @@ of two hours cut the first):
   first run, and four times on compile alone afterwards: an intermittent
   failure of the external tool under load.
 
-**CI on the branch (as of 2026-11-13, 21:45 UTC).** At `5b193430`, whose
-code is the final code (only this report changed after it):
+**CI on the branch (completed by 2026-11-14).** At `5b193430`, whose
+code is the milestone's final code (only this report changed after it),
+and `static-decisions` at `1dea3c1c` (the same front end):
 
-| workflow | run | state |
-|---|---|---|
-| tests (windows x86-64), push | canary (Windows x86-64, MSVC) | **succeeded** (a branch push runs only the canary) |
-| tests (linux arm64), dispatched | canary (linux arm64) | **succeeded**; its 12 full jobs (interp, compile, the cranelift and cranelift-generic coverage, the golden suites in four shards, the native Rust unit tests, GC stress, the system-linked executables) **pending** (queued) |
-| tests (macos arm64), push | Linux control (Tier A) | **succeeded**; the macOS smoke job **pending** (queued) |
-| icy-tower (windows x86-64), push | -- | **succeeded** |
-| icy-tower (macos arm64), push | -- | **pending** (queued) |
-| tests, dispatched | every job | **pending** (queued) |
-| static-decisions, dispatched at `1dea3c1c` (the same front end) | the golden suites' batched against sequential decisions | **pending** (queued) |
+| workflow | result |
+|---|---|
+| static-decisions, dispatched | **succeeded**: the golden suites' batched and sequential decisions agree |
+| tests (macos arm64), push | **succeeded** (the Linux control, and the macOS smoke job with its canary) |
+| tests (windows x86-64), push | **succeeded** (the canary; a branch push runs no other job) |
+| icy-tower (windows x86-64), icy-tower (macos arm64), push | **succeeded** |
+| tests, dispatched | **failed**: 8 jobs succeeded (the canary, the four golden-suite shards, the native Rust unit tests, the method-call decision's oracle and reference audit) and 6 failed, every one on tests `main` fails too (below): interp and compile on `argv-focused-valid-fuzz` and `native-tcl-unicode-lowercase-all-scalars`, the stub- and system-linked executables on `argv-focused-valid-fuzz`, both native coverage jobs on the same 10 tests as `main`'s coverage jobs at `14937461`, name for name (`acceptance-4`, `argv-focused-valid-fuzz`, `block-1`, `block-2`, `call-1`, `call-2`, `cc-ctx-big-int-field`, `closure-4`, `malformed-6`, `scope-5`) |
+| tests (linux arm64), dispatched | **failed**: 7 of 13 jobs, with the same pattern (the two tests on interp, compile, both GC-stress jobs and the system-linked executables; the same 10 on both coverage jobs) |
 
-The shared runners were saturated all afternoon (main's own runs at
-`14937461` were queued for over two hours); none of the pending runs is
-reported here as passed. Not dispatched: the macOS and Windows acceptance
-tiers (`macos-arm64.yml`, `windows-x86_64.yml` on the branch).
+No failure is the branch's: each failing test fails identically on
+`main` at `14937461` (Executed: the failing test names of every failed
+job, compared with `main`'s logs, and `main`'s own merge commit
+`b0ae98fe`, which records the two on every host). They are outside this
+change: `native-tcl-unicode-lowercase-all-scalars` finds the native
+backends' lowercase disagreeing with the reference on Unicode planes 0 and
+1, and the argv fuzzer's program lowercases its arguments
+(`std::str::lowercase`), so both read the native runtime's case mapping,
+which nothing here touches (Inspected;
+that CI's newer Rust brought other case tables is an inference, not
+verified); the coverage jobs' `block-1` and the others fail because native
+lowering has no implementation of a test-only native (`test-log`). The two
+passed in this checkout's local runs on interp and compile; the native
+coverage run is not part of `tests/local.tcl` and was not run here.
 
 **`main`'s CI, for comparison (AGENTS.md).** When the branch was made from
 `bd6f99f9`, `main`'s latest completed runs (at `ede621b1`) had all four test
@@ -751,9 +761,8 @@ change in an empty directory with an empty environment, prints the new note
 ("Its static type is List[std::byte::Byte] in every program that calls it:
 importing std::str is enough, whatever else the program imports. ...") and
 none of the old conditional text; it creates no file there. Its SIGNATURE
-line still reads `std::str::encode_utf8(str) -> list`: the registry's result
-kind, which the native's value type also uses (section P); the note beneath
-it states the precise type.
+line read `std::str::encode_utf8(str) -> list`, the registry's result kind;
+since the follow-up it reads `-> List[int[std::byte::Byte]]` (section Q).
 
 ## P. Remaining limitations
 
@@ -761,27 +770,9 @@ it states the precise type.
   `std::str::encode_utf8` still gets the plain `list` (Executed:
   `eut-no-loader-no-claim`). Core IR text is a harness format, not a
   language entry point (AGENTS.md, "Compiler architecture").
-* **The native as a function value** still has the registered result kind:
-  `hir::types::structuralOf` builds an exact native's function type from its
-  `-result-type` (`list`), never from its `-result-shape`, because most
-  shapes depend on a call's arguments. So the hover at `encode_utf8` shows
-  `Fn{args: [any], return: list, errors: []}`, and -- more than presentation
-  -- the native passed as a value is rejected at a parameter of type
-  `Fn{args: [str], return: List[std::byte::Byte], errors: []}` ("the callable
-  returns list, not usable as List[int[std::byte::Byte]]"), as at one
-  returning `List[int]` (Executed, before and after the change, with or
-  without `import std::byte`: it never depended on imports, so it is not
-  this milestone's defect). A call through the value is precise (`g =
-  std::str::encode_utf8; g(s)` is `List[int[std::byte::Byte]]`, was `list`):
-  that call still reaches `ShapeResult`. The `typed` shape is
-  argument-independent, so `structuralOf` could state it, the type now
-  being declared in every compilation that can reach the native; but
-  `structuralOf` has 21 readers (callable contracts, the completion
-  analysis's subsumption, signatures, traits, containers), so that is a
-  change to function-value admission, with its own tests, not a display fix.
-  Compilerpedia's SIGNATURE line (`tools/compilerpedia.tcl`'s
-  `NativeSignature`) prints the same `-result-type`, and the generator runs
-  outside any compilation, so it would print the shape's symbolic type.
+* **The native as a function value** had the registered result kind
+  (`list`) while its calls had the precise one; fixed in the follow-up,
+  section Q.
 * **The syscall transports' `named-struct` result** is `struct` without
   `std::abi::ARCH` loaded; only rejected programs can observe it (section C).
   Extending contract types to structs would load `std::abi::ARCH` for every
@@ -794,3 +785,167 @@ it states the precise type.
   Int-to-UnicodeChar conversion, no numeric escape, no covariant collection
   admission (the invariance pins are unchanged), no fold construction
   change.
+
+## Q. The native as a function value (follow-up)
+
+Two texts still said `list` after the milestone: `encode_utf8`'s
+Compilerpedia SIGNATURE and the hover on the native itself. Both read the
+native's registered `-result-type`, never its result contract, which only
+a call reaches (`ShapeResult`). The hover's source,
+`hir::types::structuralOf`, is also the native's function type -- the type
+it has as a value -- so the gap was not presentation: a typed function
+parameter rejected the native. It never depended on imports (the same on
+`bd6f99f9` with or without `import std::byte`), so it was no defect of the
+milestone; this follow-up, on the same branch, closes it.
+
+**Before (Executed, on the milestone's code, `5b193430`).**
+
+| program | outcome |
+|---|---|
+| hover at `std::str::encode_utf8` (a value, or a callee) and at `g = std::str::encode_utf8` | `Fn{args: [any], return: list, errors: []}` |
+| `apply(std::str::encode_utf8, s)` at `f: Fn{args: [str], return: List[std::byte::Byte], errors: []}` (written qualified, or as `List[Byte]` through `import type`) | rejected: "the callable returns list, not usable as List[int[std::byte::Byte]]" |
+| the same at `Fn{..., return: List[int], ...}` | rejected, likewise |
+| `argv` at `Fn{args: [], return: List[str], errors: [InvalidArgumentEncoding]}` | rejected: "the callable returns list" |
+| `std::transfer::encode` at `Fn{args: [int], return: std::abi::bytes::Bytes, errors: []}` | rejected: "the callable returns struct" |
+| `std::transfer::encode` through an untyped parameter | accepted, then fails when run: "std::transfer: a call that hir::transfer::Elaborate did not write out (internal)" on interp and compile, NATIVE UNSUPPORTED on the native backends |
+| Compilerpedia SIGNATURE | `std::str::encode_utf8(str) -> list`, `argv() -> list`, `std::binary::emit(struct) -> struct`, ... |
+
+**The rule.** A native's function type states the result every call of
+it has. Four result-shape kinds read no argument -- `never`,
+`named-struct`, `element-type` and `typed`: their comments in `ValidShape`
+call each "a fixed fact about the native itself" -- and are now classified
+so in the registry (`core::native::argumentIndependentShapes`, beside the
+shape documentation). `hir::types::NativeResult META` gives what such a
+shape gives (`ShapeResult` with no arguments, so the shape's own rules
+decide: a `typed` NAME or a `named-struct` declaration the compilation
+does not have gives the `-result-type`, as for a call), and the
+`-result-type` for every other kind, whose result depends on the call.
+`structuralOf` builds an exact native's function type from it, so the
+hover, function-value admission, callable contracts and the completion
+analysis's subsumption all read the one result. Sixteen named natives
+have such a shape (Executed: a census of the registry), twelve of them
+public -- `encode_utf8` (`typed`), `argv` (`element-type`), and
+`std::binary::emit`, `write`, `write_foreign`, `std::transfer::encode`,
+`std::abi::ARCH::from_bytes` and `from_mutable_bytes` and the two syscall
+transports (`named-struct`) -- and four internal members of the standard
+library (`std::byte_store::utf16le_units`, `std::thread::rt_init`,
+`rt_result`, `rt_take_bytes`); four internal `#` natives (`binary#emit`,
+`transfer#encode`, `context#unreachable`, `foreign#refused`) have one too,
+but no program names them.
+
+**Covariance, stated correctly.** I first wrote that a `Fn{..., return:
+List[int]}` parameter would still reject the native. It does not, and
+must not: a function type's result is covariant (`hir::types::ReturnFits`,
+"subtype, consistent with lub's own joins of values";
+concept.function-types), while a declared *parameter* holds a collection
+exactly. A program's own `fn own(s: str) -> List[std::byte::Byte]` was
+already accepted at that parameter, on `bd6f99f9` too (Executed). The
+native taken as a value is now admitted exactly where such a function is
+(`eut-value-agrees-with-a-function`: at results `List[std::byte::Byte]`,
+`List[int]`, `list` and `any` both are, at `List[str]` and `str` neither),
+and a List a call through the value returns is still held exactly at a
+declared `List[int]` parameter (`eut-value-boundary-invariant`).
+
+**A defect found on the way: `std::transfer::encode` as a value.** A
+transfer's schema is the static type of the value at the call, which
+`hir::transfer::Elaborate` writes into that call; a function value has no
+call, and a call through it reaches the unelaborated implementation (the
+internal error above). Through an untyped parameter that was reachable
+before; with the precise function type a typed `Fn{..., return:
+std::abi::bytes::Bytes}` parameter would have admitted it too. The other
+argument-independent natives that cannot be values were already refused
+as values (Executed): the layout operations (BINARY-OPERAND), the address
+bridges and the syscall transports ("can only be called directly"), and
+`decode` is imprinted (IMPRINT). `hir::transfer::verifyValues` now refuses a
+reference to a non-imprinted transfer operation that is not a call's
+callee -- an argument, an alias, a stored or returned value -- as
+TRANSFER-OPEN-TYPE (the code whose rule is that a transfer's schema must
+be known where the call is written), as `hir::layouts::verify` refuses the
+layout operations' references. A direct call is unchanged; `decode` as a
+value is still reported once, as IMPRINT.
+
+**After (Executed).**
+
+| program | outcome |
+|---|---|
+| the hovers | `Fn{args: [any], return: List[int[std::byte::Byte]], errors: []}`; `argv`'s `Fn{args: [], return: List[str], errors: [InvalidArgumentEncoding]}` |
+| `apply(std::str::encode_utf8, s)` at `Fn{..., return: List[std::byte::Byte], ...}` | accepted, `[104, 195, 169]` on interp, compile, cranelift-generic and cranelift; through `import type` too |
+| a function indexing a 256-entry table by the elements a `Fn{..., return: List[std::byte::Byte], ...}` parameter returns | accepted, no handler, `[130, 390, 338]` on the four backends |
+| at `Fn{..., return: List[int], ...}`, `list`, `any` | accepted (covariant results, as for a program's own function) |
+| at `Fn{..., return: List[str], ...}` or `str` | rejected; the reason names the result: "the callable returns List[int[std::byte::Byte]], not usable as List[str]" |
+| `argv` at `Fn{args: [], return: List[str], errors: [InvalidArgumentEncoding]}` | accepted |
+| `std::transfer::encode` as a value (typed or untyped parameter, alias, list element) | TRANSFER-OPEN-TYPE |
+| without `std::byte` in the library (a scratch library) | the function type returns `list`: no claim of an undeclared type (`eut-value-without-declaration`) |
+
+**Compilerpedia.** `NativeSignature` (tools/compilerpedia.tcl) prints
+`NativeResult` too. The generator runs outside any compilation, where no
+contract's declaration exists, so it first compiles one program importing
+the modules the public natives' argument-independent contracts name
+(`cpt::ContractHir`, from `core::native::namedDeclaration`: `std::abi::
+aarch64`, `std::abi::bytes`, `std::abi::x86_64`, `std::byte`) and asks with
+it active: the SIGNATURE shows the result every call has, as the hover and
+the diagnostics print it. Twelve signatures changed:
+`std::str::encode_utf8(str) -> List[int[std::byte::Byte]]`, `argv() ->
+List[str]`, `std::binary::emit(struct) -> std::abi::bytes::Bytes`,
+`std::binary::write` and `write_foreign` `-> std::abi::bytes::MutableBytes`,
+`std::transfer::encode(any) -> std::abi::bytes::Bytes`, the four
+`std::abi::ARCH::from_bytes`/`from_mutable_bytes` and the two syscall
+transports `-> std::abi::ARCH::Register64`. The pages: `encode_utf8`'s note
+says what it is as a value, with an accepted example (`"hé".bytes_of(
+std::str::encode_utf8)`); `std::transfer::encode`'s that it can only be
+called directly; error.transfer-open-type covers the value case (summary,
+meaning, what to do, a rejected example and the accepted wrapper);
+concept.function-types states the rule for natives. `tools/
+compilerpedia.tcl check`: 1,298 topics, 780 examples, 0 problems.
+
+**Documentation.** docs/README.md's account of exact and structural
+callables (a native's structural supertype, which also said "natives
+declare no errors", false since natives register errors) and its
+`encode_utf8` row; AGENTS.md's new section "A native's function type (its
+result as a value)", with what to run; the code comments of
+`core::native::argumentIndependentShapes`, `namedDeclaration`,
+`hir::types::NativeResult`, `hir::transfer::verifyValues` and
+`cpt::ContractHir`.
+
+**Tests and mutants (Executed).** Ten tests in
+`tests/encode-utf8-type-stability.test` (`eut-value-*`): the function type
+(`g = std::str::encode_utf8`, `argv`), the compiler service's hover at the
+reference as a value and as a callee, admission at
+`Fn{..., return: List[std::byte::Byte], ...}` (qualified, through `import
+type`, and indexing a 256-entry table through the parameter; four backends
+through `sourceAgree`), the agreement with a program's own function at six
+result types, the reason naming the precise result, the invariant value
+boundary, no claim in a library without `std::byte`, the classification of
+the shape kinds (and, for every native with one, that two calls with
+different arguments get the same result and that `NativeResult` is it), the
+transfer refusals (typed and untyped parameter, alias, list element; a
+direct call accepted; `decode` reported once, as IMPRINT), and the
+Compilerpedia signatures (the committed page, and that it is what the
+generator writes now: `check -examples 0`). Run against the milestone's
+code, 8 of the 10 fail; the 2 that pass pin what must not change
+(`eut-value-boundary-invariant`, `eut-value-without-declaration`). Eight
+mutants join `audit/encode-utf8-type-stability/tools/mutants.txt` (the
+harness now copies `tools/`, for the generator): the function type keeping
+the `-result-type`, `typed` unclassified, an argument-reading kind
+(`element`) classified, the generator printing the `-result-type`, the
+generator's compilation declaring nothing, the transfer check off, the
+imprinted transfer operations refused again, a direct call refused. All
+eight are killed by the tests their `!!` lines name.
+`tools/mutant-catalogs.tcl`: 108 catalogs, 3,716 mutants, 0 problems.
+
+**Regressions (Executed).**
+
+| run | result |
+|---|---|
+| `tests/local.tcl` narrowed to the 19 files of the areas touched (encode-utf8-type-stability, symbolic-type-identity, sendability, value-transfer, structural-contract-completions, higher-order-completions, traits, argv, structural-fn-types, exact-callable-key, typed-callable-escape, binary-layout, native-edit, threads, static-compile, compilerpedia, text-collection-docs-diagnostics, intrinsic-contracts, compiler-service) and the 16 golden suites holding their ported tests | 54 of 54 runs passed |
+| `audit/value-transfer/tools/mutate.tcl` (AGENTS.md, for `hir/transfer.tcl`) | 29 mutants, 29 killed by a named detector |
+| `tools/compilerpedia.tcl check` | 1,298 topics, 780 examples, 0 problems |
+| the corpus comparison of section H (`audit/method-resolution/tools/invariance.tcl`, 282 programs), the milestone's front end against this one | 0 semantic differences, 0 programs reporting differently, the front-end counters identical (602 builds, 122 method trial builds, ...); the `f1-escapes` probe, compared as text, identical: no corpus program takes a native as a typed function value |
+| the single-file compiler built from this commit, `-help std::str::encode_utf8` in an empty directory with an empty environment | `SIGNATURE std::str::encode_utf8(str) -> List[int[std::byte::Byte]]` and the new paragraph and example |
+
+Not run: the native Rust tests that AGENTS.md lists for the transfer codec
+(`cargo test ... transfer`): no Rust file changed, and the codecs are
+untouched.
+
+QFULL-PLACEHOLDER
+
