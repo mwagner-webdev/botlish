@@ -269,6 +269,16 @@
 #                                     reach the native (contractTypes), whose
 #                                     domain must provably admit LO..HI
 #                                     (hir::range::ProvesType)
+#                   Four kinds read no argument -- never, named-struct,
+#                   element-type and typed (argumentIndependent): the
+#                   result they give is the native's for every call, so it
+#                   is also the result of the native's own function type,
+#                   the type the native has as a value (hir::types::
+#                   NativeResult, structuralOf) and the result its
+#                   Compilerpedia signature shows. Every other kind refines
+#                   one call's result from that call's arguments; the
+#                   native's function type and signature state its
+#                   -result-type for them.
 #   imprint         "" or the native's imprint signature (hir/imprint.tcl,
 #                   C-ABI-TYPES.md "Imprinting"): {vars {T...} params {P...}
 #                   result R}, P and R static HIR types (hir/types.tcl) in
@@ -1372,6 +1382,37 @@ proc core::native::unregister {name} {
     variable contractTypes
     dict unset registry $name
     set contractTypes [dict create]
+}
+
+# The -result-shape kinds that read none of a call's arguments: a fixed fact
+# about the native itself, the same for every call (ValidShape's comments
+# say so of each). A native's function type -- the type it has as a value --
+# states the result such a shape gives (hir::types::NativeResult), and so
+# does its Compilerpedia signature (tools/compilerpedia.tcl's
+# NativeSignature); a kind that reads an argument refines only a call
+# (STDLIB-ENCODE-UTF8-RESULT-TYPE-STABILITY-MILESTONE-1.md, "The native as a
+# function value"). A new kind that reads no argument belongs here, and one
+# that reads an argument never does.
+namespace eval core::native {
+    variable argumentIndependentShapes {never named-struct element-type typed}
+}
+
+# 1 if SHAPE, a valid -result-shape, reads none of a call's arguments.
+proc core::native::argumentIndependent {shape} {
+    variable argumentIndependentShapes
+    return [expr {[llength $shape] > 0 && [lindex $shape 0] in $argumentIndependentShapes}]
+}
+
+# The source declaration SHAPE, a valid -result-shape, names -- a typed
+# shape's integer domain NAME, a named-struct shape's struct ID -- or "" for
+# a shape that names none. The result such a shape gives exists only where
+# the compilation declares it (hir::types::ShapeResult); Compilerpedia's
+# generator declares them to show it (tools/compilerpedia.tcl's ContractHir).
+proc core::native::namedDeclaration {shape} {
+    switch -- [lindex $shape 0] {
+        typed - named-struct { return [lindex $shape 1] }
+        default { return "" }
+    }
 }
 
 # The source-declared types the result contracts of the natives of namespace

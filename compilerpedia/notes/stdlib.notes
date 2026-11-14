@@ -1177,6 +1177,15 @@ type alone with `import type std::byte::Byte`). List element types are held
 exactly (rule.type-argument): the result is not a List[int], and is not
 accepted where one is declared.
 
+Taken as a value -- passed, stored or returned -- std::str::encode_utf8 has
+the function type Fn{args: [any], return: List[std::byte::Byte], errors:
+[]}: its result does not depend on its argument, so its function type
+states it as a call does, and its SIGNATURE above shows it. A parameter of
+type Fn{args: [str], return: List[std::byte::Byte], errors: []} accepts it.
+A function type's result is covariant (concept.function-types), so one
+returning List[int] accepts it too, as it accepts a function of your own
+declared -> List[std::byte::Byte]; one returning List[str] or str does not.
+
 The way back is std::abi::bytes::decode_utf8, which takes a
 std::abi::bytes::Bytes: make one from the List with
 std::abi::bytes::from_list. That needs a List[std::byte::Byte]: List
@@ -1231,6 +1240,18 @@ fn classes(s: str) -> List[int]:
 classes("héllo")
 @caption Importing std::str is enough: every element is a std::byte::Byte, so indexing a 256-entry table needs no handler
 @value [208, 390, 338, 216, 216, 222]
+@end
+
+@example accept
+import std::byte
+import std::str
+
+fn bytes_of(s: str, f: Fn{args: [str], return: List[std::byte::Byte], errors: []}) -> List[std::byte::Byte]:
+    f(s)
+
+"hé".bytes_of(std::str::encode_utf8)
+@caption Taken as a value, encode_utf8 is a function returning List[std::byte::Byte]
+@value [104, 195, 169]
 @end
 
 @example reject
@@ -4991,7 +5012,10 @@ value's schema (its static type, by canonical names), then the value
 itself: no address, no shape or enum number of this compilation, nothing a
 receiver could take for an object of the sender. The value is unchanged;
 encoding a map or set calls its owner's projection (its entries, in its
-order). It declares no error.
+order). It declares no error. It can only be called directly: the schema is
+the static type of the value at the call, so std::transfer::encode passed,
+stored or returned as a function value is TRANSFER-OPEN-TYPE (wrap the call
+in a function of your own whose parameter has the concrete type).
 
 == EXAMPLES
 @example accept

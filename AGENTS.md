@@ -5685,6 +5685,45 @@ If you change any of that, or a native's `-param-types`, run
 update a mutant's text when you change the code it mutates, keeping it a
 mutant of the same rule), plus the method-call decision's harnesses (above).
 
+## A native's function type (its result as a value)
+
+A native taken as a value -- passed, stored, returned -- has the function
+type `hir::types::structuralOf` builds, and its result is the result every
+call of the native has (STDLIB-ENCODE-UTF8-RESULT-TYPE-STABILITY-MILESTONE-1.md,
+"The native as a function value"): `hir::types::NativeResult`, its
+`-result-shape`'s result when the shape reads no argument
+(`core::native::argumentIndependentShapes`: never, named-struct,
+element-type, typed), its `-result-type` otherwise. So
+`std::str::encode_utf8` as a value returns `List[std::byte::Byte]`, `argv`
+`List[str]`. Keep it so:
+
+* One rule: the function type, the hover (through `structuralOf`) and
+  Compilerpedia's SIGNATURE (tools/compilerpedia.tcl's `NativeSignature`,
+  in the compilation `ContractHir` makes) all read `NativeResult`. Never a
+  second statement of a native's value result, and never one keyed on a
+  native's name. A new shape kind that reads no argument joins
+  `argumentIndependentShapes` (and `core::native::namedDeclaration`, when it
+  names a declaration); one that reads an argument never does.
+* A function type's result is covariant (`hir::types::ReturnFits`) while a
+  declared parameter holds a collection exactly: the native as a value is
+  admitted wherever a program's own function of the same declared result
+  is, and nowhere else. Never special-case either rule for natives.
+* A native whose calls are elaborated per call is only ever called: the
+  layout operations (BINARY-OPERAND), the address bridges and C functions
+  (TYPE), `std::transfer::encode` (TRANSFER-OPEN-TYPE,
+  `hir::transfer::verifyValues`), an imprinted one (IMPRINT). Before a
+  native's function type states a result through a new shape, check that
+  the native works as a value: a typed parameter will then admit it.
+
+If you change any of that, run `tests/encode-utf8-type-stability.test` (its
+`eut-value-*` tests), `tests/sendability.test`, `tests/value-transfer.test`,
+`tests/structural-contract-completions.test`, `tclsh9.0
+tools/compilerpedia.tcl generate` and `check` (the generated page must be
+what the generator writes), and `audit/encode-utf8-type-stability/tools/
+mutate.tcl` (every mutant in its `mutants.txt` must still apply and be
+killed: update a mutant's text when you change the code it mutates, keeping
+it a mutant of the same rule).
+
 ## Callee kinds (NOT-CALLABLE)
 
 A call whose callee's static type is of a known kind no call accepts -- an

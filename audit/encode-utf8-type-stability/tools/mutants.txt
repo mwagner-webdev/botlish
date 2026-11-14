@@ -4,7 +4,10 @@
 # (surface/modules.tcl's ContractTypes, ContractOwners), the registry's query
 # and validation (core/native.tcl's contractTypes, ValidShape), the `typed`
 # result shape (hir/types.tcl's ShapeResult), and what carries the type
-# (interchange, the loop element). Each must be killed by
+# (interchange, the loop element), and the native as a function value (the
+# argument-independent shape kinds, hir::types::NativeResult's use in
+# structuralOf, Compilerpedia's signature, the transfer value refusal). Each
+# must be killed by
 # tests/encode-utf8-type-stability.test or tests/symbolic-type-identity.test,
 # by one of the tests its `!!` line names -- the test that states the rule it
 # breaks, never an unrelated failure.
@@ -236,4 +239,89 @@
     # Emission certificates (EMISSION-CLAIMS-MILESTONE-1.md, "Trust"): text
 ====
     # Emission certificates (EMISSION-CLAIMS-MILESTONE-1.md, "Trust"): text
+>>>>
+
+# ---------------------------------------------------------------------------
+# The native as a function value
+
+@@ value-type-declared-kind the native's function type keeps the declared -result-type: taken as a value, encode_utf8 returns `list`, its hover says so, and a Fn{..., return: List[std::byte::Byte]} parameter rejects it
+!! eut-value-function-type eut-value-hover eut-value-admitted eut-value-agrees-with-a-function eut-value-unrelated-result-named
+## hir/types.tcl
+<<<<
+        return [MakeFn [lrepeat $arity any] [NativeResult $meta] [dict get $meta errors]]
+====
+        return [MakeFn [lrepeat $arity any] [dict get $meta resultType] [dict get $meta errors]]
+>>>>
+
+@@ typed-shape-unclassified the typed kind is not classified argument-independent: encode_utf8's function type returns `list` while its calls return List[std::byte::Byte]
+!! eut-value-function-type eut-value-hover eut-value-admitted eut-value-argument-independent-shapes
+## core/native.tcl
+<<<<
+    variable argumentIndependentShapes {never named-struct element-type typed}
+====
+    variable argumentIndependentShapes {never named-struct element-type}
+>>>>
+
+@@ argument-reading-shape-classified an argument-reading kind (element) is classified argument-independent: a native's function type would state one call's result for every call
+!! eut-value-argument-independent-shapes
+## core/native.tcl
+<<<<
+    variable argumentIndependentShapes {never named-struct element-type typed}
+====
+    variable argumentIndependentShapes {never named-struct element-type typed element}
+>>>>
+
+@@ generator-declared-kind Compilerpedia's signature prints the declared -result-type, not what the native's function type states: the committed page is no longer what the generator writes
+!! eut-value-compilerpedia-signature
+## tools/compilerpedia.tcl
+<<<<
+    return "${name}($shown) -> [hir::types::show [hir::types::NativeResult $meta]]"
+====
+    return "${name}($shown) -> [hir::types::show [dict get $meta resultType]]"
+>>>>
+
+@@ generator-declares-nothing the generator's compilation imports no module: no contract's declaration exists there, so every signature falls back to the plain kind
+!! eut-value-compilerpedia-signature
+## tools/compilerpedia.tcl
+<<<<
+        append text "import $module\n"
+====
+        append text ""
+>>>>
+
+@@ transfer-value-unchecked std::transfer::encode as a function value is not refused: a typed Fn{..., return: Bytes} parameter takes it, and its call reaches the unelaborated implementation
+!! eut-value-transfer-call-only
+## hir/hir.tcl
+<<<<
+    hir::transfer::verifyValues hir
+====
+>>>>
+
+@@ transfer-imprinted-twice the imprinted transfer operations are refused here too: decode as a value is reported twice, IMPRINT and TRANSFER-OPEN-TYPE
+!! eut-value-transfer-call-only
+## hir/transfer.tcl
+<<<<
+        if {[catch {core::native::metadata $name} meta] || [dict getdef $meta sending ""] eq ""
+                || [dict getdef $meta imprint ""] ne ""} continue
+====
+        if {[catch {core::native::metadata $name} meta] || [dict getdef $meta sending ""] eq ""} continue
+>>>>
+
+@@ transfer-callee-refused a direct call of std::transfer::encode is refused as if it were a value: the callee of a call is no function value
+!! eut-value-transfer-call-only
+## hir/transfer.tcl
+<<<<
+        if {[dict get $node kind] ne "ref" || [dict exists $callees $e]} continue
+        set b [dict get $node binding]
+        if {$b eq "" || ![dict exists $hir bindings $b]} continue
+        set binding [hir::binding $hir $b]
+        if {[dict get $binding kind] ne "root"} continue
+        set name [dict get $binding name]
+====
+        if {[dict get $node kind] ne "ref"} continue
+        set b [dict get $node binding]
+        if {$b eq "" || ![dict exists $hir bindings $b]} continue
+        set binding [hir::binding $hir $b]
+        if {[dict get $binding kind] ne "root"} continue
+        set name [dict get $binding name]
 >>>>

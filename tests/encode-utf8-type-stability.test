@@ -901,4 +901,143 @@ test eut-utf8-values {encode_utf8's values on every backend, against bytes writt
 }
 } -result {value {[[], [65, 122], [9, 10], [195, 169], [226, 130, 172], [240, 159, 152, 128], [97, 195, 169, 226, 130, 172, 240, 159, 152, 128]]}}
 
+# ---------------------------------------------------------------------------
+# The native as a function value (STDLIB-ENCODE-UTF8-RESULT-TYPE-STABILITY-
+# MILESTONE-1.md, "The native as a function value"): a native's function
+# type states the result every call of it has when its result shape reads no
+# argument (core::native::argumentIndependent, hir::types::NativeResult), so
+# std::str::encode_utf8 taken as a value is a function returning
+# List[std::byte::Byte], argv one returning List[str]; std::transfer::encode,
+# which such a type would otherwise let a typed parameter take, is only ever
+# called (TRANSFER-OPEN-TYPE, hir::transfer::verifyValues).
+
+# The presented static types of the bindings NAMES of HIR's entry program,
+# in order.
+proc eut::BindingTypes {hir names} {
+    hir::activate $hir
+    set types [dict create]
+    foreach e [hir::walk $hir] {
+        if {[hir::kind $hir $e] ne "bind"} continue
+        set node [hir::node $hir $e]
+        if {[lindex [dict get $node origin] 1] ne "f1"} continue
+        dict set types [hir::semantic::SourceName $hir [dict get $node binding]] \
+            [hir::types::presented [hir::typeOf $hir $e]]
+    }
+    return [lmap name $names {dict getdef $types $name ""}]
+}
+
+# A program passing CALLABLE to apply, whose parameter's function type
+# returns RESULT (IMPORTS heading it), and apply's result unused.
+proc eut::Apply {imports callable result} {
+    return "$imports
+
+fn apply(f: Fn{args: \[str\], return: $result, errors: \[\]}, s: str):
+    f(s)
+
+apply($callable, \"hé\")
+"
+}
+
+test eut-value-function-type {taken as a value -- bound, passed, stored -- std::str::encode_utf8 has the function type its calls agree with, Fn{args: [any], return: List[std::byte::Byte], errors: []}, importing std::str only; argv's is a function returning List[str]} -body {
+    set hir [eut::Compile "import std::str\nimport std::list\n\ng = std::str::encode_utf8\nh = argv\nfs = \[std::str::encode_utf8\]\n\[g(\"a\"), fs.at(0)(\"b\")\]\n"]
+    eut::BindingTypes $hir {g h}
+} -cleanup {unset -nocomplain hir} -result {{Fn{args: [any], return: List[int[std::byte::Byte]], errors: []}} {Fn{args: [], return: List[str], errors: [InvalidArgumentEncoding]}}}
+
+test eut-value-hover {the compiler service's hover at the native reference, as a value and as a callee, shows the function type with the precise result -- it showed `return: list` -- and at the call's result its List[std::byte::Byte]} -body {
+    set dir [eut::App [list h.bot "import std::str\n\ng = std::str::encode_utf8\nbs = std::str::encode_utf8(\"a\")\n\[g(\"b\"), bs\]\n"]]
+    set path [file join $dir h.bot]
+    set ws [service::workspace -warnings off -cache ""]
+    try {
+        set rev [service::analyze $ws $path]
+        lmap {line column} {3 15 4 15 4 1} {dict getdef [service::at $rev $path $line $column] hover ""}
+    } finally {
+        service::closeWorkspace $ws
+    }
+} -cleanup {unset -nocomplain dir path ws rev} -result {{std::str::encode_utf8: Fn{args: [any], return: List[int[std::byte::Byte]], errors: []}} {std::str::encode_utf8: Fn{args: [any], return: List[int[std::byte::Byte]], errors: []}} {bs: List[int[std::byte::Byte]]}}
+
+test eut-value-admitted {a parameter of type Fn{args: [str], return: List[std::byte::Byte], errors: []} admits std::str::encode_utf8 -- spelled qualified (with std::byte imported) or through `import type` -- and a call through it keeps the elements' facts: indexing a 256-entry table needs no handler; the four backends agree (all three were rejected: "the callable returns list")} -constraints nativeBuilt -body {
+    list [sourceAgree "import std::str\nimport std::byte\n\nfn apply(f: Fn{args: \[str\], return: List\[std::byte::Byte\], errors: \[\]}, s: str) -> List\[std::byte::Byte\]:\n    f(s)\n\napply(std::str::encode_utf8, \"hé\")\n"] \
+        [sourceAgree "import std::str\nimport type std::byte::Byte\n\nfn apply(f: Fn{args: \[str\], return: List\[Byte\], errors: \[\]}, s: str) -> List\[Byte\]:\n    f(s)\n\napply(std::str::encode_utf8, \"hé\")\n"] \
+        [sourceAgree "import std::str\nimport std::list\nimport std::byte\n\nfn classify(f: Fn{args: \[str\], return: List\[std::byte::Byte\], errors: \[\]}, t: List\[int\]{length: 256}, s: str) -> List\[int\]:\n    loop b in f(s):\n        t.at(b)\n\nt = loop i from 0 to 256:\n    i * 2\nclassify(std::str::encode_utf8, t, \"Aé\")\n"]
+} -result {{value {[104, 195, 169]}} {value {[104, 195, 169]}} {value {[130, 390, 338]}}}
+
+test eut-value-agrees-with-a-function {the native taken as a value is accepted and rejected exactly where a function of the program's own declared -> List[std::byte::Byte] is: a function type's result is covariant (hir::types::ReturnFits), so List[std::byte::Byte], List[int], list and any admit both, List[str] and str neither} -body {
+    set imports "import std::str\nimport std::byte\n\nfn own(s: str) -> List\[std::byte::Byte\]:\n    s.encode_utf8()\n"
+    lmap result {List[std::byte::Byte] List[int] list any List[str] str} {
+        list $result [lindex [eut::Outcome [eut::Apply $imports std::str::encode_utf8 $result]] 0] \
+            [lindex [eut::Outcome [eut::Apply $imports own $result]] 0]
+    }
+} -cleanup {unset -nocomplain imports} -result {{{List[std::byte::Byte]} ok ok} {{List[int]} ok ok} {list ok ok} {any ok ok} {{List[str]} error error} {str error error}}
+
+test eut-value-unrelated-result-named {a function type whose result the native's does not fit still rejects it, and the reason names the precise result (it said "the callable returns list")} -body {
+    catch {eut::Compile [eut::Apply "import std::str" std::str::encode_utf8 {List[str]}]} message options
+    list [lindex [dict get $options -errorcode] end] \
+        [string match {*return incompatible: the callable returns List\[int\[std::byte::Byte\]\], not usable as List\[str\]*} $message]
+} -cleanup {unset -nocomplain message options} -result {TYPE 1}
+
+test eut-value-boundary-invariant {what a call through the value returns is held exactly at a declared List[int] parameter, as the direct call's result is: only a function type's result is covariant} -body {
+    eut::Outcome "import std::str\n\nfn take(xs: List\[int\]) -> List\[int\]:\n    xs\n\ng = std::str::encode_utf8\ntake(g(\"hé\"))\n"
+} -result {error TYPE}
+
+test eut-value-without-declaration {in a standard library without std::byte the native's function type returns the plain list, as its calls do: no claim of a type the compilation does not declare} -body {
+    set saved $::core::libraryDir
+    set dir [makeDirectory eut-value-scratch-[pid]]
+    set channel [open [file join $dir m.bot] w]
+    puts -nonewline $channel "fn one(a):\n    a\n"
+    close $channel
+    set ::core::libraryDir $dir
+    try {
+        eut::BindingTypes [eut::Compile "import std::m\nimport std::str\n\ng = std::str::encode_utf8\nstd::m::one(g)\n"] {g}
+    } finally {
+        set ::core::libraryDir $saved
+        removeDirectory eut-value-scratch-[pid]
+    }
+} -cleanup {unset -nocomplain saved dir channel} -result {{Fn{args: [any], return: list, errors: []}}}
+
+test eut-value-argument-independent-shapes {exactly the shape kinds that read no argument are classified so -- never, named-struct, element-type, typed -- and for every public native with one, its function type's result is what two calls with different arguments both get from ShapeResult, in a compilation declaring what the shapes name} -body {
+    set kinds [lsort $::core::native::argumentIndependentShapes]
+    set problems {}
+    set hir [eut::Compile "import std::byte\nimport std::abi::bytes\nimport std::abi::x86_64\nimport std::abi::aarch64\n\n1\n"]
+    hir::activate $hir
+    foreach name [lsort [core::native::names]] {
+        set meta [core::native::metadata $name]
+        set shape [dict get $meta resultShape]
+        if {![core::native::argumentIndependent $shape]} continue
+        set result [dict get $meta resultType]
+        set a [hir::types::ShapeResult $hir $shape {} {} $result]
+        set b [hir::types::ShapeResult $hir $shape {e1 e2 e3} {int str bool} $result]
+        if {$a ne $b || [hir::types::NativeResult $meta] ne $a} {
+            lappend problems $name
+        }
+    }
+    list $kinds $problems [core::native::argumentIndependent {element 0 1}] [core::native::argumentIndependent {}]
+} -cleanup {unset -nocomplain kinds problems hir name meta shape result a b} -result {{element-type named-struct never typed} {} 0 0}
+
+test eut-value-transfer-call-only {std::transfer::encode is only ever called: as a function value -- a typed or untyped parameter's argument, an alias, a stored value -- it is TRANSFER-OPEN-TYPE (it reached the unelaborated implementation at run time through an untyped parameter, and a typed Fn{..., return: Bytes} parameter now admits its function type); a direct call is unchanged; decode stays an IMPRINT refusal, reported once} -body {
+    set h "import std::transfer\nimport std::abi::bytes\n\n"
+    list [eut::Outcome "${h}fn run(f: Fn{args: \[int\], return: std::abi::bytes::Bytes, errors: \[\]}) -> std::abi::bytes::Bytes:\n    f(7)\n\nrun(std::transfer::encode)\n"] \
+        [eut::Outcome "${h}fn run(f, x):\n    f(x)\n\nrun(std::transfer::encode, 7)\n"] \
+        [eut::Outcome "${h}e = std::transfer::encode\n1\n"] \
+        [eut::Outcome "${h}fs = \[std::transfer::encode\]\n1\n"] \
+        [eut::Outcome "${h}std::abi::bytes::length(std::transfer::encode(7))\n"] \
+        [catch {eut::Compile "${h}fn run(f, x):\n    f(x)\n\nb = std::transfer::encode(7)\nrun(std::transfer::decode, b)\n"} message options] \
+        [lmap d [dict get $options -diagnostics] {lindex [dict get $d errorcode] end}]
+} -cleanup {unset -nocomplain h message options} -result {{error TRANSFER-OPEN-TYPE} {error TRANSFER-OPEN-TYPE} {error TRANSFER-OPEN-TYPE} {error TRANSFER-OPEN-TYPE} {ok {}} 1 {IMPRINT UNHANDLED-ERROR}}
+
+test eut-value-compilerpedia-signature {Compilerpedia's SIGNATURE of a native with an argument-independent result shows the result its function type states, as the hover prints it: encode_utf8's is List[int[std::byte::Byte]] (it was `list`), argv's List[str], std::binary::emit's std::abi::bytes::Bytes; a shape that reads its arguments keeps the declared kind; and the committed page is what the generator writes now (tools/compilerpedia.tcl check -examples 0)} -body {
+    set channel [open [file join $::projectRoot compilerpedia generated stdlib.topic] r]
+    fconfigure $channel -encoding utf-8
+    set text [read $channel]
+    close $channel
+    set fresh [exec [info nameofexecutable] [file join $::projectRoot tools compilerpedia.tcl] check -examples 0 -format data]
+    list [lmap line {
+        {std::str::encode_utf8(str) -> List[int[std::byte::Byte]]}
+        {argv() -> List[str]}
+        {std::binary::emit(struct) -> std::abi::bytes::Bytes}
+        {std::str::encode_utf8(str) -> list}
+        {std::list::at(list, int) -> any}
+    } {expr {[string first "    $line\n" $text] >= 0}}] \
+        [lsearch -all -inline -glob [dict get $fresh problems] *stdlib.topic*]
+} -cleanup {unset -nocomplain channel text fresh} -result {{1 1 1 0 1} {}}
+
 ::tcltest::cleanupTests

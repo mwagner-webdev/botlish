@@ -109,7 +109,7 @@ foreach {name description expected edits} [readMutants [file join [file dirname 
 }
 
 set tree [file tempdir botlish-encode-utf8-type-mutants]
-foreach dir {compiler core hir surface stdlib service lsp compilerpedia tests audit/encode-utf8-type-stability audit/text-collection-precision .cargo} {
+foreach dir {compiler core hir surface stdlib service lsp compilerpedia tools tests audit/encode-utf8-type-stability audit/text-collection-precision .cargo} {
     if {![file exists [file join $root $dir]]} continue
     file mkdir [file dirname [file join $tree $dir]]
     file copy [file join $root $dir] [file join $tree $dir]

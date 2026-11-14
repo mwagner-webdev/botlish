@@ -351,7 +351,7 @@ keywords: command line arguments; program arguments; args; parameters; process a
 related: stdlib.module.root concept.argv task.read-arguments concept.errors
 
 == SIGNATURE
-    argv() -> list
+    argv() -> List[str]
 
 == ERRORS
     InvalidArgumentEncoding
@@ -1917,7 +1917,7 @@ keywords: buffer address; raw address; syscall argument; arm64
 related: stdlib.module.std::abi::aarch64 backend.native-only stdlib.std::abi::x86_64::from_bytes stdlib.std::linux::abi::aarch64::syscall
 
 == SIGNATURE
-    std::abi::aarch64::from_bytes(struct) -> struct
+    std::abi::aarch64::from_bytes(struct) -> std::abi::aarch64::Register64
 
 == USE
 An intrinsic of namespace std::abi::aarch64: import std::abi::aarch64,
@@ -1943,7 +1943,7 @@ keywords: writable buffer address; raw address; arm64
 related: stdlib.module.std::abi::aarch64 backend.native-only stdlib.std::abi::x86_64::from_mutable_bytes stdlib.std::abi::aarch64::from_bytes
 
 == SIGNATURE
-    std::abi::aarch64::from_mutable_bytes(struct) -> struct
+    std::abi::aarch64::from_mutable_bytes(struct) -> std::abi::aarch64::Register64
 
 == USE
 An intrinsic of namespace std::abi::aarch64: import std::abi::aarch64,
@@ -2864,7 +2864,7 @@ keywords: buffer address; pointer to bytes; raw address; syscall argument
 related: stdlib.module.std::abi::x86_64 backend.native-only stdlib.std::linux::abi::x86_64::syscall stdlib.std::abi::x86_64::from_mutable_bytes stdlib.module.std::abi::bytes
 
 == SIGNATURE
-    std::abi::x86_64::from_bytes(struct) -> struct
+    std::abi::x86_64::from_bytes(struct) -> std::abi::x86_64::Register64
 
 == USE
 An intrinsic of namespace std::abi::x86_64: import std::abi::x86_64, then
@@ -2901,7 +2901,7 @@ keywords: writable buffer address; raw address; read buffer
 related: stdlib.module.std::abi::x86_64 backend.native-only stdlib.std::abi::x86_64::from_bytes stdlib.std::mutable_byte_store::detach
 
 == SIGNATURE
-    std::abi::x86_64::from_mutable_bytes(struct) -> struct
+    std::abi::x86_64::from_mutable_bytes(struct) -> std::abi::x86_64::Register64
 
 == USE
 An intrinsic of namespace std::abi::x86_64: import std::abi::x86_64, then
@@ -4609,7 +4609,7 @@ keywords: serialize; encode; write struct; pack; to bytes
 related: stdlib.module.std::binary concept.binary-layouts stdlib.std::binary::parse
 
 == SIGNATURE
-    std::binary::emit(struct) -> struct
+    std::binary::emit(struct) -> std::abi::bytes::Bytes
 
 == ERRORS
     LayoutExtentMismatch, NonFiniteFloat
@@ -4976,7 +4976,7 @@ keywords: write field into bytes; build record; fill struct in bytes; set field;
 related: stdlib.module.std::binary stdlib.std::binary::write_foreign stdlib.std::binary::store stdlib.std::binary::emit stdlib.module.std::abi::bytes concept.binary-layouts
 
 == SIGNATURE
-    std::binary::write(struct, str, any) -> struct
+    std::binary::write(struct, str, any) -> std::abi::bytes::MutableBytes
 
 == ERRORS
     LayoutExtentMismatch, LayoutLengthMismatch, NonFiniteFloat
@@ -5041,7 +5041,7 @@ keywords: write pointer into bytes; encode pointer; build C struct; pointer fiel
 related: stdlib.module.std::binary stdlib.std::binary::write stdlib.std::binary::store concept.c-ffi concept.binary-layouts
 
 == SIGNATURE
-    std::binary::write_foreign(struct, str, any) -> struct
+    std::binary::write_foreign(struct, str, any) -> std::abi::bytes::MutableBytes
 
 == ERRORS
     LayoutExtentMismatch, LayoutLengthMismatch
@@ -12669,7 +12669,7 @@ keywords: syscall; system call; kernel call; raw syscall; arm64; aarch64
 related: stdlib.module.std::linux::abi::aarch64 backend.native-only stdlib.std::linux::abi::x86_64::syscall stdlib.module.std::linux
 
 == SIGNATURE
-    std::linux::abi::aarch64::syscall(struct) -> struct
+    std::linux::abi::aarch64::syscall(struct) -> std::abi::aarch64::Register64
 
 == USE
 An intrinsic of namespace std::linux::abi::aarch64: import
@@ -12719,7 +12719,7 @@ keywords: syscall; system call; kernel call; raw syscall; x86-64
 related: stdlib.module.std::linux::abi::x86_64 backend.native-only concept.direct-modules stdlib.module.std::linux stdlib.std::abi::x86_64::from_bytes
 
 == SIGNATURE
-    std::linux::abi::x86_64::syscall(struct) -> struct
+    std::linux::abi::x86_64::syscall(struct) -> std::abi::x86_64::Register64
 
 == USE
 An intrinsic of namespace std::linux::abi::x86_64: import
@@ -16983,7 +16983,7 @@ keywords: utf-8; utf8 bytes; encode; byte count; decode; bytes to string; utf8 r
 related: stdlib.module.std::str concept.strings stdlib.module.std::byte stdlib.std::abi::bytes::from_list stdlib.std::abi::bytes::decode_utf8 stdlib.std::str::char_at rule.type-argument
 
 == SIGNATURE
-    std::str::encode_utf8(str) -> list
+    std::str::encode_utf8(str) -> List[int[std::byte::Byte]]
 
 == USE
 An intrinsic of namespace std::str: import std::str, then write
@@ -17012,6 +17012,15 @@ other member of std::byte, a file still imports std::byte (or imports the
 type alone with `import type std::byte::Byte`). List element types are held
 exactly (rule.type-argument): the result is not a List[int], and is not
 accepted where one is declared.
+
+Taken as a value -- passed, stored or returned -- std::str::encode_utf8 has
+the function type Fn{args: [any], return: List[std::byte::Byte], errors:
+[]}: its result does not depend on its argument, so its function type
+states it as a call does, and its SIGNATURE above shows it. A parameter of
+type Fn{args: [str], return: List[std::byte::Byte], errors: []} accepts it.
+A function type's result is covariant (concept.function-types), so one
+returning List[int] accepts it too, as it accepts a function of your own
+declared -> List[std::byte::Byte]; one returning List[str] or str does not.
 
 The way back is std::abi::bytes::decode_utf8, which takes a
 std::abi::bytes::Bytes: make one from the List with
@@ -17067,6 +17076,18 @@ fn classes(s: str) -> List[int]:
 classes("héllo")
 @caption Importing std::str is enough: every element is a std::byte::Byte, so indexing a 256-entry table needs no handler
 @value [208, 390, 338, 216, 216, 222]
+@end
+
+@example accept
+import std::byte
+import std::str
+
+fn bytes_of(s: str, f: Fn{args: [str], return: List[std::byte::Byte], errors: []}) -> List[std::byte::Byte]:
+    f(s)
+
+"hé".bytes_of(std::str::encode_utf8)
+@caption Taken as a value, encode_utf8 is a function returning List[std::byte::Byte]
+@value [104, 195, 169]
 @end
 
 @example reject
@@ -18980,7 +19001,7 @@ keywords: serialize; send a value; encode; to bytes; Sendable; NOT-SENDABLE
 related: stdlib.module.std::transfer stdlib.std::transfer::decode concept.sendability error.not-sendable error.transfer-open-type
 
 == SIGNATURE
-    std::transfer::encode(any) -> struct
+    std::transfer::encode(any) -> std::abi::bytes::Bytes
 
 == USE
 An intrinsic of namespace std::transfer: import std::transfer, then write
@@ -18996,7 +19017,10 @@ value's schema (its static type, by canonical names), then the value
 itself: no address, no shape or enum number of this compilation, nothing a
 receiver could take for an object of the sender. The value is unchanged;
 encoding a map or set calls its owner's projection (its entries, in its
-order). It declares no error.
+order). It declares no error. It can only be called directly: the schema is
+the static type of the value at the call, so std::transfer::encode passed,
+stored or returned as a function value is TRANSFER-OPEN-TYPE (wrap the call
+in a function of your own whose parameter has the concrete type).
 
 == EXAMPLES
 @example accept

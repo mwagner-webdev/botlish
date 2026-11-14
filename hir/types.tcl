@@ -1513,6 +1513,29 @@ proc hir::types::CallableErrors {hir type} {
     return {}
 }
 
+# The result every call of the native whose registry entry is META has,
+# whatever the call's arguments: what its -result-shape gives when the shape
+# reads no argument (core::native::argumentIndependent: std::str::
+# encode_utf8's List[std::byte::Byte], argv's List[str], std::binary::emit's
+# std::abi::bytes::Bytes), else its declared -result-type, the kind each
+# call's own shape refines (ShapeResult). It is the result of the native's
+# function type (structuralOf below), so the native taken as a value, its
+# hover and a call of it agree: a Fn{args: [str], return:
+# List[std::byte::Byte]} parameter admits std::str::encode_utf8, and one
+# returning List[int] still rejects it (applied collections are invariant).
+# The shape's own rules decide: a named-struct declaration the program does
+# not have, or a typed NAME no loader declared, gives the -result-type, as
+# for a call (STDLIB-ENCODE-UTF8-RESULT-TYPE-STABILITY-MILESTONE-1.md, "The
+# native as a function value").
+proc hir::types::NativeResult {meta} {
+    set result [dict get $meta resultType]
+    set shape [dict getdef $meta resultShape ""]
+    if {[core::native::argumentIndependent $shape]} {
+        return [ShapeResult "" $shape {} {} $result]
+    }
+    return $result
+}
+
 proc hir::types::structuralOf {type} {
     if {[IsFn $type]} {
         return $type
@@ -1525,7 +1548,7 @@ proc hir::types::structuralOf {type} {
         if {$arity eq "*"} {
             return ""
         }
-        return [MakeFn [lrepeat $arity any] [dict get $meta resultType] [dict get $meta errors]]
+        return [MakeFn [lrepeat $arity any] [NativeResult $meta] [dict get $meta errors]]
     }
     if {[IsExactBlock $type]} {
         lassign $type _ e arity result contract
