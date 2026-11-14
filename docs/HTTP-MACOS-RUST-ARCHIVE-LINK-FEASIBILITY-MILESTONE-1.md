@@ -49,9 +49,9 @@ native unit built on macOS AArch64, localized into a Mach-O static archive
 by `tools/rust-unit.tcl`, packaged in one multi-target `.botpkg` with its
 Linux build and installed by the package manager links into an
 independently compiled Botlish executable beside the runtime's own Rust,
-with both Botlish linkers, on both hosts [CI] (the clean-room consumer of
-the packaged artifacts: Linux [CI]; macOS PENDING, section 10). The
-executables hold one
+with both Botlish linkers, on both hosts, and in a clean-room consumer
+with no Rust toolchain on each [CI, run 43553765190: all 14 jobs green].
+The executables hold one
 global `rust_eh_personality` and allocator shim (the runtime's), the
 unit's own as local symbols, no global symbol of the unit's standard
 library, and nothing of it exported. The real http unit takes the same
@@ -514,6 +514,21 @@ index names itself (written when the index was always empty). With
 pm::binary giving C names, that strip was a second one, over-lenient for
 a C name that starts with an underscore; removed.
 
+### 8.5 Deployment notes for a static archive [CI, executed]
+
+The macOS clean-room consumer (section 10) showed `add` and `native plan`
+reporting, for each bundled static archive, two deployment requirements of
+a *loaded* library: an install name that "is not @rpath-relative" (the
+name printed empty: a static archive has none) and a missing code
+signature ("macOS on arm64 loads only signed code"). A static archive is
+linked into the executable, which the linker signs; it is never loaded.
+pm/native.tcl now states those requirements for a macOS library that is
+not static only. `pn-macos-static-no-deployment-notes` (a Mach-O static
+archive bundled for macos-aarch64, added and planned from any host)
+reproduced both notes against the old code and pins their absence;
+`pn-macos-deployment-requirements` still requires them for a dylib; the
+mutant `static-deployment-notes` brings the old condition back.
+
 ### 8.4 What is not verified on macOS [inspection]
 
 The package manager reads bytes; a macOS archive's architecture, index,
@@ -585,8 +600,34 @@ CONSUMER OK
 
 Dynamic libraries: libgcc_s, libm, libc only.
 
-**macOS arm64** [CI]: PENDING (job `consumer, no checkout and no Rust
-(macos-aarch64)`, Botlish.app of the same commit).
+**macOS arm64** [CI] (run 43553765190, `40dbd064`, job `consumer, no
+checkout and no Rust (macos-aarch64)`): macOS 15.8.2, Botlish.app built by
+the same run, the artifacts packed from the 1.97.0 units:
+
+```
+== cargo: not on PATH   == rustc: not on PATH   == rustup: not on PATH
+== add: rustlink 0.1.0 (sha256 1e28db098b19): installed
+== add: view macos-aarch64: derived (5 files, 1 native library)
+== native plan:   library rustlink: bundled static (instance rustlink)
+== native plan:     an ar archive of 1 Mach-O arm64 object; bundled file, sha256 1cf981a64c5e
+== native plan: link: ... no -L is needed for bundled libraries
+PASS without_provider: toolchain rustc 1.97.0 (2d8144b78 2026-07-07)
+== without_provider architectures: arm64
+== otool -L: /usr/lib/libiconv.2.dylib, /usr/lib/libSystem.B.dylib
+== without_provider rust_eh_personality: 1 global, 1 local
+== without_provider __rust_alloc: 1 global, 1 local
+== without_provider: global symbols carrying the unit's crate hash: 0 (the runtime's: 5WqGp7zLRnA)
+== without_provider exports trie: 766 lines, 12 of the unit's C ABI, 0 of the unit's standard library
+PASS with_provider: ...                   (the same facts; 772 lines)
+CONSUMER OK
+```
+
+The same consumer surfaced a package-manager defect: `add` and `native
+plan` printed, for each of the two *static* archives, "its install name
+is not @rpath-relative" (with an empty name) and "carries no code
+signature: macOS on arm64 loads only signed code" -- requirements of a
+loaded library, which a static archive linked into an executable is not.
+Fixed (section 8.5).
 
 Locally [executed]: the same script with `PATH=/usr/bin:/bin`, a fresh
 `HOME` and the checkout's compiler through a wrapper: `CONSUMER OK`.
@@ -610,7 +651,7 @@ Locally [executed]: the same script with `PATH=/usr/bin:/bin`, a fresh
 | Real http unit: compiles | production code | one change (net.rs) |
 | Real http unit: probe with provider | pass | pass |
 | Reproducible build (two runners) | identical | identical |
-| Clean consumer, no Rust, no checkout | `CONSUMER OK` [CI] | PENDING |
+| Clean consumer, no Rust, no checkout | `CONSUMER OK` [CI] | `CONSUMER OK` [CI] |
 | Mutants of this host | all killed | all killed |
 
 Differences that remain are the platforms' own: the localization
@@ -638,7 +679,7 @@ the Botlish binding or the consumer's source differs by host.
 | `pn-index-bsd-symbols-checked` | `-symbol` naming a symbol the Apple index lacks: refused |
 | `pn-index-weak-elf`, `pn-index-weak-macho-install` | two strong definitions in two packages: refused at installation |
 
-**Mutants** (audit/rust-archive-link/tools/mutants.txt, 27; each must be
+**Mutants** (audit/rust-archive-link/tools/mutants.txt, 28; each must be
 killed by a test its `!!` line names, the test that states the rule, run
 by `mutate.tcl` on a private copy of the tree):
 
@@ -646,29 +687,30 @@ by `mutate.tcl` on a private copy of the tree):
 |---|---|---|---|---|
 | `elf-unlocalized` | objcopy without `--keep-global-symbols` | `ral-localized-*` | killed | not applicable |
 | `elf-comdat-kept` | Rust's COMDAT group not renamed (B3) | `ral-localized-comdat` | killed | not applicable |
-| `macho-unlocalized` | `ld -r` without the exported-symbols list | `ral-localized-*` | not applicable | killed (43516411953) |
-| `keep-everything` | every global kept | `ral-localized-*` | killed | killed (43516411953) |
-| `require-ignored` | a missing required export accepted | `ral-require-missing-export` | killed | killed (43516411953) |
-| `check-lenient` | the surface check accepts anything | `ral-check-refuses-raw` | killed | killed (43516411953) |
-| `fallback-localized` | the weak fallback localized | `ral-localized-surface`, `-with_provider-*` | killed | killed (43516411953) |
-| `macho-bitcode-reader` | Mach-O read without `--no-llvm-bc` | `ral-nm-bitcode-reader-off` (stand-in); on macOS also `ral-raw-surface`, `ral-localized-surface` | killed | killed (43516411953) |
+| `macho-unlocalized` | `ld -r` without the exported-symbols list | `ral-localized-*` | not applicable | killed (43516411953, 43553765190) |
+| `keep-everything` | every global kept | `ral-localized-*` | killed | killed (43516411953, 43553765190) |
+| `require-ignored` | a missing required export accepted | `ral-require-missing-export` | killed | killed (43516411953, 43553765190) |
+| `check-lenient` | the surface check accepts anything | `ral-check-refuses-raw` | killed | killed (43516411953, 43553765190) |
+| `fallback-localized` | the weak fallback localized | `ral-localized-surface`, `-with_provider-*` | killed | killed (43516411953, 43553765190) |
+| `macho-bitcode-reader` | Mach-O read without `--no-llvm-bc` | `ral-nm-bitcode-reader-off` (stand-in); on macOS also `ral-raw-surface`, `ral-localized-surface` | killed | killed (43516411953, 43553765190) |
 | `macho-private-extern-local` | private externals not counted | `ral-macho-private-extern` (stand-in); on macOS `ral-raw-surface` | killed | killed (43553765190) |
 | `macho-no-platform` | `ld -r` without `-platform_version` | `ral-localized-build-version` | not applicable | killed (43553765190) |
 | `build-version-shortest` | `LC_BUILD_VERSION` read with a non-greedy expression | `ral-build-version-reader` (stand-in), `ral-localized-build-version` | killed | killed (43553765190) |
-| `nm-no-fallback` | an nm without `--no-llvm-bc` is an error | `ral-nm-old-nm-fallback` | killed | killed (43516411953) |
-| `nm-partial-accepted` | any failure after output accepted | `ral-nm-partial-refused` | killed | killed (43516411953) |
-| `nm-no-symbols-refused` | Apple's empty-member warning refused | `ral-nm-no-symbols-accepted` | killed | killed (43516411953) |
-| `bsd-index-ignored` | F-16 again | `pn-index-bsd-*`, `pn-index-apple`, `ral-native-add-symbols` | killed | killed (43516411953) |
-| `underscore-kept` | Mach-O names keep `_` | the same | killed | killed (43516411953) |
-| `underscore-always` | every name loses `_` | `pn-index-bsd-forms` | killed | killed (43516411953) |
-| `offset-unchecked`, `pairs-unchecked`, `strtab-unchecked` | a malformed index read as fewer names | `pn-index-bsd-malformed` | killed | killed (43516411953) |
-| `block-freed-by-libc` | the lent block given to libc's `free` | `ral-localized-*` (the unit's live heap) | killed | killed (43516411953) |
+| `nm-no-fallback` | an nm without `--no-llvm-bc` is an error | `ral-nm-old-nm-fallback` | killed | killed (43516411953, 43553765190) |
+| `nm-partial-accepted` | any failure after output accepted | `ral-nm-partial-refused` | killed | killed (43516411953, 43553765190) |
+| `nm-no-symbols-refused` | Apple's empty-member warning refused | `ral-nm-no-symbols-accepted` | killed | killed (43516411953, 43553765190) |
+| `bsd-index-ignored` | F-16 again | `pn-index-bsd-*`, `pn-index-apple`, `ral-native-add-symbols` | killed | killed (43516411953, 43553765190) |
+| `underscore-kept` | Mach-O names keep `_` | the same | killed | killed (43516411953, 43553765190) |
+| `underscore-always` | every name loses `_` | `pn-index-bsd-forms` | killed | killed (43516411953, 43553765190) |
+| `offset-unchecked`, `pairs-unchecked`, `strtab-unchecked` | a malformed index read as fewer names | `pn-index-bsd-malformed` | killed | killed (43516411953, 43553765190) |
+| `block-freed-by-libc` | the lent block given to libc's `free` | `ral-localized-*` (the unit's live heap) | killed | killed (43516411953, 43553765190) |
 | `weak-elf-unread` | ELF weak definitions not read | `pn-index-weak-elf` | killed | not applicable |
-| `weak-macho-unread` | `N_WEAK_DEF` not read | `pn-index-weak-macho` | killed (llvm-ar) | killed (43516411953) |
-| `weak-any-member` | weak when any member is | `pn-index-weak-elf`, `pn-index-weak-macho` | killed | killed (43516411953) |
+| `weak-macho-unread` | `N_WEAK_DEF` not read | `pn-index-weak-macho` | killed (llvm-ar) | killed (43516411953, 43553765190) |
+| `weak-any-member` | weak when any member is | `pn-index-weak-elf`, `pn-index-weak-macho` | killed | killed (43516411953, 43553765190) |
 | `install-weak-counted` | the installation counts weak as duplicate | `pn-index-weak-elf`, `pn-index-weak-macho-install` | killed | killed (43553765190; it survived in 43516411953, before the macOS installation test existed) |
 | `install-all-weak` | the installation exempts everything | the same, `pn-native-conflicts` | killed | killed (43553765190; as above) |
-| `audit-weak-counted` | the pack audit counts weak as duplicate | `ral-pack-weak-beside-strong` | killed | killed (43516411953) |
+| `audit-weak-counted` | the pack audit counts weak as duplicate | `ral-pack-weak-beside-strong` | killed | killed (43516411953, 43553765190) |
+| `static-deployment-notes` | a static archive's deployment notes come back | `pn-macos-static-no-deployment-notes` | killed | PENDING (the run after `40dbd064`) |
 
 The first macOS mutant run is the reason two tests exist: three mutants
 "survived" there only because the one test naming them was ELF-only and
@@ -707,8 +749,23 @@ macOS arm64 in one artifact each) gives the same artifacts from build a as
 from build b: `rustlink-0.1.0.botpkg` `a09f2509...5917`,
 `rustlink_provider-0.1.0.botpkg` `077bac1b...6dc8` (job `package`).
 
-PENDING (CI): the same three claims at the final commit, whose macOS unit
-differs (its `LC_BUILD_VERSION`, section 6.2).
+At the final code commit (run 43553765190, `40dbd064`), whose macOS unit
+differs from the table's by its `LC_BUILD_VERSION` (section 6.2), the
+same three claims hold:
+
+| | build a | build b |
+|---|---|---|
+| linux-x86_64 unit / provider | `a65bcc85...e6af` / `a5dcfbd0...5324` | the same |
+| macos-aarch64 unit / provider | `1cf981a6...a498` / `dfd01591...47ba` | the same |
+| `rustlink-0.1.0.botpkg` | `1e28db09...3b6f` | the same |
+| `rustlink_provider-0.1.0.botpkg` | `077bac1b...6dc8` | the same |
+
+The macOS builds ran on two different hosts (`iad20-fj923-...`,
+`iad20-gt1024-...`); the two Linux jobs of this run both report the runner
+name `runnervm8axu0` (GitHub's hosted runners are fresh VMs per job and
+their names recur), so the two-machine claim for Linux rests on run
+43526167818's pair. The Linux unit is still the one the local container
+builds.
 
 ## 14. Actual HTTP native-unit feasibility
 
@@ -845,7 +902,7 @@ Production and tooling:
 | `tools/rust-unit.tcl` | new: `rustunit::localize` (ELF: the sequence http used; Mach-O: `ld -r -exported_symbols_list`, `libtool -static -D`), `globals`, `undefined`, `check` |
 | `tools/http-package.tcl` | its unit's ELF localization is `rustunit::localize` (byte-identical output, checked: `6f1f0649...8784` before and after) |
 | `pm/binary.tcl` | Apple's BSD symbol index read and checked (F-16); index entries checked against member offsets; Mach-O underscore stripped per member; weak definitions recorded (ELF `.symtab` of relocatable members, Mach-O `N_WEAK_DEF`) and an archive's `weak` names |
-| `pm/native.tcl` | the installation's native closure skips weak definitions in its duplicate check; archive facts carry `weak` |
+| `pm/native.tcl` | the installation's native closure skips weak definitions in its duplicate check; archive facts carry `weak`; a macOS static archive gets no install-name or signature note |
 | `pm/author.tcl` | the pack-time audit skips weak definitions; no second underscore strip |
 | `.github/workflows/rust-archive-link.yml` | new (section 11) |
 | `AGENTS.md` | "Rust native units (tools/rust-unit.tcl)": the rules and what to run |
@@ -854,8 +911,8 @@ Tests, fixture and evidence:
 
 | Path | What |
 |---|---|
-| `tests/rust-archive-link.test` | 28 tests (section 12) |
-| `tests/package-native.test` | `pn-index-*` (7 tests) |
+| `tests/rust-archive-link.test` | 31 tests (section 12) |
+| `tests/package-native.test` | `pn-index-*` (7 tests), `pn-macos-static-no-deployment-notes` |
 | `audit/rust-archive-link/` | the fixture, packages, consumer, harness, scripts, mutants, results (its README) |
 | `audit/golden/migration/census/`, `tcl-names.txt`, `tests/golden/manifest.tsv` | census rows for the new tests, the manifest regenerated by merge.tcl |
 | `docs/INDEX.md` | this report's line |

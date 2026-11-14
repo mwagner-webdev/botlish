@@ -816,8 +816,10 @@ proc pm::native::Plan {target instances origins} {
             }
             dict set placed [string tolower $file] [dict create file $file source $source library $name]
         }
-        # Deployment requirements the plan reports.
-        if {$os eq "macos"} {
+        # Deployment requirements the plan reports: a loaded library's (a
+        # static archive is linked into the executable, which the linker
+        # signs; it has no install name and is never loaded).
+        if {$os eq "macos" && [dict get $entry linkage] ne "static"} {
             if {![string match @rpath/* [dict get $entry identity]]} {
                 lappend notes "$name: its install name [dict get $entry identity] is not @rpath-relative: an executable linked with it loads it from that absolute path, wherever the application is deployed"
             }

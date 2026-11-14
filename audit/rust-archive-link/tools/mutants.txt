@@ -306,3 +306,13 @@ private extern c fn free(p: std::ffi::c::Ptr[std::ffi::c::Void] noescape) -> uni
 ====
                         if {0} {
 >>>>
+
+@@ static-deployment-notes the plan states a loaded library's deployment requirements -- an install name, a signature -- for a macOS static archive too, which has neither and is never loaded
+!! pn-macos-static-no-deployment-notes
+%% tests/package-native.test
+## pm/native.tcl
+<<<<
+        if {$os eq "macos" && [dict get $entry linkage] ne "static"} {
+====
+        if {$os eq "macos"} {
+>>>>

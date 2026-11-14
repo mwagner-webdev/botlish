@@ -1062,6 +1062,18 @@ test pn-macos-deployment-requirements {a macOS target's bundled dylib (a real Ma
     lappend out [catch {pm::native::CheckBundled macos-aarch64 $wrong [readBytes $intel] intel} message] $message
 } -cleanup cleanup -result {{macgood 0 {}} {macbad 0 {{note: macos-aarch64: mac: its install name /usr/local/lib/libmac.1.dylib is not @rpath-relative: an executable linked with it loads it from that absolute path, wherever the application is deployed} {note: macos-aarch64: mac: libmac.1.dylib carries no code signature: macOS on arm64 loads only signed code, so sign it when the application is signed (codesign; the package manager signs nothing)}}} {macfat 0 {}} 0 {{deployed lib/libmac.1.dylib}} {note: sign the deployed libraries with the application (codesign): macOS arm64 loads only signed code, and the package manager signs nothing} 1 {intel is Mach-O x86_64 dynamic library, and macos-aarch64's libraries are macho aarch64}}
 
+test pn-macos-static-no-deployment-notes {a macOS target's bundled static archive states no deployment requirement: it has no install name and is never loaded (the executable it is linked into is what is signed) -- the plan's notes are a loaded library's} -constraints machoAr -body {
+    set dir [fresh bin]
+    weakArchives $dir macho
+    set src [fresh src]
+    set repo [fresh repo]
+    pack [packageDir $src macstatic 1.0.0 "{\"schema\": 2, \"name\": \"macstatic\", \"version\": \"1.0.0\", \"targets\": {\"macos-aarch64\": {\"files\": \"t\", \"libraries\": \[{\"name\": \"strong\", \"origin\": \"bundled\", \"linkage\": \"static\", \"file\": \"native/libstrong.a\"}\]}}}" [list macstatic.bot "fn n() -> int:\n    1\n" t/native/libstrong.a [list @file [file join $dir libstrong.a]]]] $repo
+    set app [application "1\n"]
+    set r [pm add macstatic -project $app -repository $repo -target macos-aarch64]
+    set p [pm native plan -project $app -target macos-aarch64]
+    list [dict get $r status] [lsearch -all -inline [split [dict get $r out] \n] *note:*] [dict get $p status] [lsearch -all -inline [split [dict get $p out] \n] *note:*]
+} -cleanup cleanup -result {0 {} 0 {}}
+
 # ---------------------------------------------------------------------------
 # 7. SHA-256 backends
 

@@ -11307,6 +11307,7 @@ tests/package-native.test pn-deploy-ownership-and-faults pass
 tests/package-native.test pn-headers pass
 tests/package-native.test pn-runtime-path-option pass
 tests/package-native.test pn-macos-deployment-requirements pass
+tests/package-native.test pn-macos-static-no-deployment-notes pass
 tests/package-native.test pn-sha256-backends-agree pass
 tests/package-native.test pn-sha256-ignores-path pass
 tests/package-native.test pn-sha256-forced-tool-missing pass
