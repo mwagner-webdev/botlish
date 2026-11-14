@@ -1,0 +1,115 @@
+# dotenv_emit.bot -- emitters claiming dotenv_portable's recognizers
+# (the census's emits probe). Each yields the output's Unicode scalar
+# values; a character outside the profile fails UnsupportedDotenv before
+# anything unportable is yielded, never replaced or stripped.
+
+import std::dfa
+import std::char
+import std::str
+import std::list
+import dotenv_portable
+
+error UnsupportedDotenv:
+    at: int
+    value: int
+
+struct Pair:
+    key: str
+    value: str
+
+fn key(name: str) -> unit errors UnsupportedDotenv:
+    if name.length() == 0:
+        fail UnsupportedDotenv {at: 0, value: -1}
+    first = name.char_at(0).scalar_value()
+    dotenv_portable::name_start_char(first):
+        on std::dfa::UnrecognizedInput:
+            fail UnsupportedDotenv {at: 0, value: first}
+        on std::dfa::UnexpectedEnd:
+            fail UnsupportedDotenv {at: 0, value: first}
+    yield first
+    loop i from 1 to name.length():
+        c = name.char_at(i).scalar_value()
+        dotenv_portable::name_char(c):
+            on std::dfa::UnrecognizedInput:
+                fail UnsupportedDotenv {at: i, value: c}
+            on std::dfa::UnexpectedEnd:
+                fail UnsupportedDotenv {at: i, value: c}
+        yield c
+        continue
+    unit
+
+nomethod fn assignment(name: str, value: str) -> unit errors UnsupportedDotenv emits dotenv_portable::assignment, dotenv_portable::assignment_ml:
+    key(name)
+    yield 61
+    yield 34
+    loop i from 0 to value.length():
+        c = value.char_at(i).scalar_value()
+        dotenv_portable::value_char(c):
+            on std::dfa::UnrecognizedInput:
+                fail UnsupportedDotenv {at: i, value: c}
+            on std::dfa::UnexpectedEnd:
+                fail UnsupportedDotenv {at: i, value: c}
+        yield c
+        continue
+    yield 34
+    yield 10
+    unit
+
+fn document(pairs: List[Pair]) -> unit errors UnsupportedDotenv emits dotenv_portable::document:
+    loop p in pairs:
+        assignment(p.key, p.value)
+        continue
+    unit
+
+# The same extension restructured so that the recognizer's state follows
+# the code's shape instead of a value: the value as its lines (none holding
+# a LF), a one-line value written with the single-line guard, a multiline
+# one with the plain guard only and its first line peeled off the loop.
+fn plain_line(line: str) -> unit errors UnsupportedDotenv:
+    loop i from 0 to line.length():
+        c = line.char_at(i).scalar_value()
+        dotenv_portable::plain_char(c):
+            on std::dfa::UnrecognizedInput:
+                fail UnsupportedDotenv {at: i, value: c}
+            on std::dfa::UnexpectedEnd:
+                fail UnsupportedDotenv {at: i, value: c}
+        yield c
+        continue
+    unit
+
+nomethod fn assignment_lines(name: str, lines: List[str]) -> unit errors UnsupportedDotenv emits dotenv_portable::assignment_ml:
+    key(name)
+    yield 61
+    yield 34
+    if lines.length() == 1:
+        only = lines.at(0)
+        loop i from 0 to only.length():
+            c = only.char_at(i).scalar_value()
+            dotenv_portable::value_char(c):
+                on std::dfa::UnrecognizedInput:
+                    fail UnsupportedDotenv {at: i, value: c}
+                on std::dfa::UnexpectedEnd:
+                    fail UnsupportedDotenv {at: i, value: c}
+            yield c
+            continue
+    elif lines.length() > 1:
+        first = lines.at(0)
+        n = first.length()
+        if n == 0:
+            fail UnsupportedDotenv {at: 0, value: 10}
+        loop i from 0 to n:
+            c = first.char_at(i).scalar_value()
+            dotenv_portable::plain_char(c):
+                on std::dfa::UnrecognizedInput:
+                    fail UnsupportedDotenv {at: i, value: c}
+                on std::dfa::UnexpectedEnd:
+                    fail UnsupportedDotenv {at: i, value: c}
+            yield c
+            continue
+        loop j from 1 to lines.length():
+            yield 10
+            plain_line(lines.at(j))
+            continue
+    yield 34
+    yield 10
+    unit

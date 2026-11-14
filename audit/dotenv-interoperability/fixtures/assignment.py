@@ -1,0 +1,45 @@
+# Assignment syntax: delimiters, whitespace around them, export, line
+# structure and line endings.
+
+A = "assignment"
+
+F("assign-basic", A, "The simplest assignment", "KEY=value\n", intended={"KEY": "value"})
+F("assign-empty", A, "An empty value: KEY=", "KEY=\n", intended={"KEY": ""})
+F("assign-bare", A, "A key without = (missing value)", "KEY\n", intended=None)
+F("assign-bare-then-assign", A, "A bare key, then a normal assignment", "BARE\nKEY=value\n", intended=None)
+F("assign-spaces-around-eq", A, "Spaces around =: KEY = value", "KEY = value\n", intended=None)
+F("assign-space-before-eq", A, "A space before =: KEY =value", "KEY =value\n", intended=None)
+F("assign-space-after-eq", A, "A space after =: KEY= value", "KEY= value\n", intended=None)
+F("assign-tab-around-eq", A, "Tabs around =", "KEY\t=\tvalue\n", intended=None)
+F("assign-leading-spaces", A, "Leading spaces before the key", "   KEY=value\n", intended=None)
+F("assign-leading-tab", A, "A leading tab before the key", "\tKEY=value\n", intended=None)
+F("assign-trailing-spaces", A, "Trailing spaces after an unquoted value", "KEY=value   \n", intended=None)
+F("assign-export", A, "export KEY=value", "export KEY=value\n", intended={"KEY": "value"})
+F("assign-export-spaces", A, "export KEY = value", "export KEY = value\n", intended=None)
+F("assign-export-two-spaces", A, "export followed by two spaces", "export  KEY=value\n", intended={"KEY": "value"})
+F("assign-export-tab", A, "export followed by a tab", "export\tKEY=value\n", intended={"KEY": "value"})
+F("assign-export-bare-after", A, "export KEY after KEY was assigned", "KEY=value\nexport KEY\n",
+  intended={"KEY": "value"})
+F("assign-export-bare-alone", A, "export KEY with no assignment anywhere", "export KEY\n", intended=None)
+F("assign-export-uppercase", A, "EXPORT KEY=value (uppercase keyword)", "EXPORT KEY=value\n", intended=None)
+F("assign-export-two", A, "export with two assignments on one line", "export A=1 B=2\n", intended=None)
+F("assign-double-eq", A, "A value starting with =: KEY==value", "KEY==value\n", intended={"KEY": "=value"})
+F("assign-eq-inside", A, "A value containing =: KEY=a=b", "KEY=a=b\n", intended={"KEY": "a=b"})
+F("assign-colon", A, "YAML-style colon separator: KEY: value", "KEY: value\n", intended=None)
+F("assign-colon-nospace", A, "A colon without a space: KEY:value", "KEY:value\n", intended=None)
+F("assign-semicolon", A, "A trailing semicolon: KEY=value;", "KEY=value;\n", intended=None)
+F("assign-two-on-line", A, "Two assignments on one line: A=1 B=2", "A=1 B=2\n", intended=None)
+F("assign-blank-lines", A, "Blank lines between assignments", "\n\nA=1\n\n\nB=2\n\n", intended={"A": "1", "B": "2"})
+F("assign-whitespace-lines", A, "Lines holding only spaces and tabs", "A=1\n   \n\t\nB=2\n", intended={"A": "1", "B": "2"})
+F("assign-no-final-newline", A, "No newline at the end of the file", "A=1\nB=2", intended={"A": "1", "B": "2"})
+F("assign-crlf", A, "CRLF line endings", "A=1\r\nB=2\r\n", intended={"A": "1", "B": "2"})
+F("assign-cr-only", A, "Old-Mac CR-only line endings", "A=1\rB=2\r", intended={"A": "1", "B": "2"})
+F("assign-mixed-endings", A, "LF, CRLF and CR mixed", "A=1\nB=2\r\nC=3\rD=4\n",
+  intended={"A": "1", "B": "2", "C": "3", "D": "4"})
+F("assign-empty-file", A, "An empty file", "", intended={})
+F("assign-only-newlines", A, "A file of newlines", "\n\n\n", intended={})
+F("assign-many", A, "Twenty assignments", "".join("K%02d=v%02d\n" % (i, i) for i in range(20)),
+  intended={"K%02d" % i: "v%02d" % i for i in range(20)})
+F("assign-set-prefix", A, "A shell-style prefix: set KEY=value", "set KEY=value\n", intended=None)
+F("assign-colon-eq", A, "Make-style KEY := value", "KEY := value\n", intended=None)
+F("assign-ini-section", A, "An INI section header before an assignment", "[section]\nKEY=value\n", intended=None)

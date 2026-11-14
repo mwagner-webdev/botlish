@@ -1,0 +1,1906 @@
+{
+ "files": [
+  {
+   "classes": 2,
+   "commit": "a255d7688770af9713daff1439c47ff9bc6abd47",
+   "consumer": "PHP vlucas/phpdotenv (Laravel)",
+   "differing_keys": [
+    {
+     "groups": [
+      {
+       "targets": [
+        "node-builtin",
+        "node-envfile",
+        "node-dotenv",
+        "dotenvnet",
+        "java"
+       ],
+       "value": "len 11 sha 11d9d450"
+      },
+      {
+       "targets": [
+        "bun",
+        "python",
+        "ruby",
+        "dotnetenv"
+       ],
+       "value": "len 7 sha ab5d684a"
+      }
+     ],
+     "key": "MAIL_FROM_NAME"
+    },
+    {
+     "groups": [
+      {
+       "targets": [
+        "node-builtin",
+        "node-envfile",
+        "node-dotenv",
+        "dotenvnet",
+        "java"
+       ],
+       "value": "len 11 sha 11d9d450"
+      },
+      {
+       "targets": [
+        "bun",
+        "python",
+        "ruby",
+        "dotnetenv"
+       ],
+       "value": "len 7 sha ab5d684a"
+      }
+     ],
+     "key": "VITE_APP_NAME"
+    }
+   ],
+   "license": "MIT",
+   "outcomes": {
+    "bun": {
+     "keys": 43,
+     "status": "ok"
+    },
+    "dotenvnet": {
+     "keys": 43,
+     "status": "ok"
+    },
+    "dotnetenv": {
+     "keys": 43,
+     "status": "ok"
+    },
+    "java": {
+     "keys": 43,
+     "status": "ok"
+    },
+    "node-builtin": {
+     "keys": 43,
+     "status": "ok"
+    },
+    "node-dotenv": {
+     "keys": 43,
+     "status": "ok"
+    },
+    "node-envfile": {
+     "keys": 43,
+     "status": "ok"
+    },
+    "python": {
+     "keys": 43,
+     "status": "ok"
+    },
+    "ruby": {
+     "keys": 43,
+     "status": "ok"
+    }
+   },
+   "path": ".env.example",
+   "repo": "laravel/laravel",
+   "ruby_command_substitutions": 0,
+   "safety": {
+    "bash": {
+     "reasons": [
+      "parameter-expansion"
+     ],
+     "run": true
+    },
+    "commands": false,
+    "loader": {
+     "reasons": [],
+     "run": true
+    }
+   },
+   "sha256": "cc816d67d5b55939f8f282b56d46445c148fc96262eb6eb19ff8ae9d437676da",
+   "static": {
+    "assignment_lines": 43,
+    "comment_lines": 8,
+    "duplicate_keys": [],
+    "features": {
+     "double-quoted": 3,
+     "empty-value": 4,
+     "interpolation": 2
+    },
+    "lines": 65
+   }
+  },
+  {
+   "classes": 1,
+   "commit": "33c8ab1dbf6ab4e48b560e1e343d34fc1ee07094",
+   "consumer": "Docker Compose .env interpolation",
+   "differing_keys": [],
+   "license": "Apache-2.0",
+   "outcomes": {
+    "bun": {
+     "keys": 72,
+     "status": "ok"
+    },
+    "dotenvnet": {
+     "keys": 72,
+     "status": "ok"
+    },
+    "dotnetenv": {
+     "keys": 72,
+     "status": "ok"
+    },
+    "java": {
+     "keys": 72,
+     "status": "ok"
+    },
+    "node-builtin": {
+     "keys": 72,
+     "status": "ok"
+    },
+    "node-dotenv": {
+     "keys": 72,
+     "status": "ok"
+    },
+    "node-envfile": {
+     "keys": 72,
+     "status": "ok"
+    },
+    "python": {
+     "keys": 72,
+     "status": "ok"
+    },
+    "ruby": {
+     "keys": 72,
+     "status": "ok"
+    }
+   },
+   "path": "docker/.env.example",
+   "repo": "supabase/supabase",
+   "ruby_command_substitutions": 0,
+   "safety": {
+    "bash": {
+     "reasons": [
+      "command: a statement that is not an assignment"
+     ],
+     "run": false
+    },
+    "commands": true,
+    "loader": {
+     "reasons": [],
+     "run": true
+    }
+   },
+   "sha256": "bc2763a3676fd9f9b27fd8b166f54110c49773c2bedb09888c665b4be8025933",
+   "static": {
+    "assignment_lines": 72,
+    "comment_lines": 224,
+    "duplicate_keys": [],
+    "features": {
+     "double-quoted": 4,
+     "empty-value": 7,
+     "unquoted-space": 2
+    },
+    "lines": 392
+   }
+  },
+  {
+   "classes": 1,
+   "commit": "29f044b57602e251058925988cba693bbea56370",
+   "consumer": "Docker Compose",
+   "differing_keys": [],
+   "license": "Dify Open Source License (Apache-2.0 with conditions)",
+   "outcomes": {
+    "bun": {
+     "keys": 2,
+     "status": "ok"
+    },
+    "dotenvnet": {
+     "keys": 2,
+     "status": "ok"
+    },
+    "dotnetenv": {
+     "keys": 2,
+     "status": "ok"
+    },
+    "java": {
+     "keys": 2,
+     "status": "ok"
+    },
+    "node-builtin": {
+     "keys": 2,
+     "status": "ok"
+    },
+    "node-dotenv": {
+     "keys": 2,
+     "status": "ok"
+    },
+    "node-envfile": {
+     "keys": 2,
+     "status": "ok"
+    },
+    "python": {
+     "keys": 2,
+     "status": "ok"
+    },
+    "ruby": {
+     "keys": 2,
+     "status": "ok"
+    }
+   },
+   "path": "docker/.env.example",
+   "repo": "langgenius/dify",
+   "ruby_command_substitutions": 0,
+   "safety": {
+    "bash": {
+     "reasons": [],
+     "run": true
+    },
+    "commands": false,
+    "loader": {
+     "reasons": [],
+     "run": true
+    }
+   },
+   "sha256": "ff2e6a7909506f487284dbc53025602b36dccb3f8204338ea852a29796cbd154",
+   "static": {
+    "assignment_lines": 2,
+    "comment_lines": 11,
+    "duplicate_keys": [],
+    "features": {
+     "empty-value": 1
+    },
+    "lines": 15
+   }
+  },
+  {
+   "classes": 2,
+   "commit": "b0e6098e940942281d9c83f3529ea117287a3a22",
+   "consumer": "python-dotenv / Docker",
+   "differing_keys": [
+    {
+     "groups": [
+      {
+       "targets": [
+        "node-builtin",
+        "node-envfile",
+        "node-dotenv",
+        "bun",
+        "python",
+        "ruby",
+        "dotenvnet",
+        "dotnetenv"
+       ],
+       "value": "len 1 sha 684888c0"
+      },
+      {
+       "targets": [
+        "java"
+       ],
+       "value": "len 3 sha 15a7e30e"
+      }
+     ],
+     "key": "CORS_ALLOW_ORIGIN"
+    },
+    {
+     "groups": [
+      {
+       "targets": [
+        "node-builtin",
+        "node-envfile",
+        "node-dotenv",
+        "bun",
+        "python",
+        "ruby",
+        "dotenvnet",
+        "dotnetenv"
+       ],
+       "value": "len 1 sha 684888c0"
+      },
+      {
+       "targets": [
+        "java"
+       ],
+       "value": "len 3 sha 15a7e30e"
+      }
+     ],
+     "key": "FORWARDED_ALLOW_IPS"
+    },
+    {
+     "groups": [
+      {
+       "targets": [
+        "node-builtin",
+        "node-envfile",
+        "node-dotenv",
+        "bun",
+        "python",
+        "ruby",
+        "dotenvnet",
+        "dotnetenv"
+       ],
+       "value": "len 22 sha 7866d638"
+      },
+      {
+       "targets": [
+        "java"
+       ],
+       "value": "len 24 sha 9860bab2"
+      }
+     ],
+     "key": "OLLAMA_BASE_URL"
+    },
+    {
+     "groups": [
+      {
+       "targets": [
+        "node-builtin",
+        "node-envfile",
+        "node-dotenv",
+        "bun",
+        "python",
+        "ruby",
+        "dotenvnet",
+        "dotnetenv"
+       ],
+       "value": "len 0 sha e3b0c442"
+      },
+      {
+       "targets": [
+        "java"
+       ],
+       "value": "len 2 sha 6f49cdbd"
+      }
+     ],
+     "key": "OPENAI_API_BASE_URL"
+    },
+    {
+     "groups": [
+      {
+       "targets": [
+        "node-builtin",
+        "node-envfile",
+        "node-dotenv",
+        "bun",
+        "python",
+        "ruby",
+        "dotenvnet",
+        "dotnetenv"
+       ],
+       "value": "len 0 sha e3b0c442"
+      },
+      {
+       "targets": [
+        "java"
+       ],
+       "value": "len 2 sha 6f49cdbd"
+      }
+     ],
+     "key": "OPENAI_API_KEY"
+    },
+    {
+     "groups": [
+      {
+       "targets": [
+        "node-builtin",
+        "node-envfile",
+        "node-dotenv",
+        "bun",
+        "python",
+        "ruby",
+        "dotenvnet",
+        "dotnetenv"
+       ],
+       "value": "len 0 sha e3b0c442"
+      },
+      {
+       "targets": [
+        "java"
+       ],
+       "value": "len 2 sha 6f49cdbd"
+      }
+     ],
+     "key": "RAG_SOURCE_METADATA_KEYS"
+    }
+   ],
+   "license": "Open WebUI License (BSD-3-Clause with a branding clause)",
+   "outcomes": {
+    "bun": {
+     "keys": 25,
+     "status": "ok"
+    },
+    "dotenvnet": {
+     "keys": 25,
+     "status": "ok"
+    },
+    "dotnetenv": {
+     "keys": 25,
+     "status": "ok"
+    },
+    "java": {
+     "keys": 25,
+     "status": "ok"
+    },
+    "node-builtin": {
+     "keys": 25,
+     "status": "ok"
+    },
+    "node-dotenv": {
+     "keys": 25,
+     "status": "ok"
+    },
+    "node-envfile": {
+     "keys": 25,
+     "status": "ok"
+    },
+    "python": {
+     "keys": 25,
+     "status": "ok"
+    },
+    "ruby": {
+     "keys": 25,
+     "status": "ok"
+    }
+   },
+   "path": ".env.example",
+   "repo": "open-webui/open-webui",
+   "ruby_command_substitutions": 0,
+   "safety": {
+    "bash": {
+     "reasons": [],
+     "run": true
+    },
+    "commands": false,
+    "loader": {
+     "reasons": [],
+     "run": true
+    }
+   },
+   "sha256": "7ce4707b3eabedf25324a43c14ed2b863350ab6e8517711c5ab58b4042d06a0c",
+   "static": {
+    "assignment_lines": 25,
+    "comment_lines": 47,
+    "duplicate_keys": [],
+    "features": {
+     "single-quoted": 6
+    },
+    "lines": 89
+   }
+  },
+  {
+   "classes": 2,
+   "commit": "aabb90126964a164e02aff39e7c385bb0598236d",
+   "consumer": "Docker Compose; pydantic-settings (python-dotenv)",
+   "differing_keys": [
+    {
+     "groups": [
+      {
+       "targets": [
+        "node-builtin",
+        "node-envfile",
+        "node-dotenv",
+        "dotenvnet",
+        "java"
+       ],
+       "value": "len 61 sha 86b45b63"
+      },
+      {
+       "targets": [
+        "bun",
+        "python",
+        "ruby",
+        "dotnetenv"
+       ],
+       "value": "len 51 sha fce89ffe"
+      }
+     ],
+     "key": "DATABASE_URL"
+    }
+   ],
+   "license": "MIT",
+   "outcomes": {
+    "bun": {
+     "keys": 11,
+     "status": "ok"
+    },
+    "dotenvnet": {
+     "keys": 11,
+     "status": "ok"
+    },
+    "dotnetenv": {
+     "keys": 11,
+     "status": "ok"
+    },
+    "java": {
+     "keys": 11,
+     "status": "ok"
+    },
+    "node-builtin": {
+     "keys": 11,
+     "status": "ok"
+    },
+    "node-dotenv": {
+     "keys": 11,
+     "status": "ok"
+    },
+    "node-envfile": {
+     "keys": 11,
+     "status": "ok"
+    },
+    "python": {
+     "keys": 11,
+     "status": "ok"
+    },
+    "ruby": {
+     "keys": 11,
+     "status": "ok"
+    }
+   },
+   "path": ".env",
+   "repo": "fastapi/full-stack-fastapi-template",
+   "ruby_command_substitutions": 0,
+   "safety": {
+    "bash": {
+     "reasons": [
+      "parameter-expansion"
+     ],
+     "run": true
+    },
+    "commands": false,
+    "loader": {
+     "reasons": [],
+     "run": true
+    }
+   },
+   "sha256": "4d23d87d64b8b2537539b374a1b88db3fc494da4c22bac793e991277f8f2d982",
+   "static": {
+    "assignment_lines": 11,
+    "comment_lines": 3,
+    "duplicate_keys": [],
+    "features": {
+     "double-quoted": 1,
+     "interpolation": 1
+    },
+    "lines": 18
+   }
+  },
+  {
+   "classes": 3,
+   "commit": "adcbd39660c1fc5d40086ad8837099bdbc8b0b54",
+   "consumer": "Docker Compose env_file; django-environ",
+   "differing_keys": [
+    {
+     "groups": [
+      {
+       "targets": [
+        "node-dotenv",
+        "bun",
+        "python",
+        "ruby"
+       ],
+       "value": "missing"
+      },
+      {
+       "targets": [
+        "node-builtin",
+        "node-envfile",
+        "dotenvnet"
+       ],
+       "value": "len 8 sha ca7640de"
+      }
+     ],
+     "key": "{%- if cookiecutter.use_celery"
+    }
+   ],
+   "license": "BSD-3-Clause",
+   "outcomes": {
+    "bun": {
+     "keys": 5,
+     "status": "ok"
+    },
+    "dotenvnet": {
+     "keys": 6,
+     "status": "ok"
+    },
+    "dotnetenv": {
+     "keys": null,
+     "status": "error"
+    },
+    "java": {
+     "keys": null,
+     "status": "error"
+    },
+    "node-builtin": {
+     "keys": 6,
+     "status": "ok"
+    },
+    "node-dotenv": {
+     "keys": 5,
+     "status": "ok"
+    },
+    "node-envfile": {
+     "keys": 6,
+     "status": "ok"
+    },
+    "python": {
+     "keys": 5,
+     "status": "ok"
+    },
+    "ruby": {
+     "keys": 5,
+     "status": "ok"
+    }
+   },
+   "path": "{{cookiecutter.project_slug}}/.envs/.local/.django",
+   "repo": "cookiecutter/cookiecutter-django",
+   "ruby_command_substitutions": 0,
+   "safety": {
+    "bash": {
+     "reasons": [
+      "command: a statement that is not an assignment"
+     ],
+     "run": false
+    },
+    "commands": false,
+    "loader": {
+     "reasons": [],
+     "run": true
+    }
+   },
+   "sha256": "d84d75c75b735ca1d12e37d1cf1dd0212b3a4194767b5b357d38fdb74ee3be49",
+   "static": {
+    "assignment_lines": 5,
+    "comment_lines": 7,
+    "duplicate_keys": [],
+    "features": {
+     "unquoted-space": 2
+    },
+    "lines": 17
+   }
+  },
+  {
+   "classes": 1,
+   "commit": "179ae84efec61b14206d0305d941daed6c6d07f9",
+   "consumer": "npm dotenv",
+   "differing_keys": [],
+   "license": "MIT",
+   "outcomes": {
+    "bun": {
+     "keys": 12,
+     "status": "ok"
+    },
+    "dotenvnet": {
+     "keys": 12,
+     "status": "ok"
+    },
+    "dotnetenv": {
+     "keys": 12,
+     "status": "ok"
+    },
+    "java": {
+     "keys": 12,
+     "status": "ok"
+    },
+    "node-builtin": {
+     "keys": 12,
+     "status": "ok"
+    },
+    "node-dotenv": {
+     "keys": 12,
+     "status": "ok"
+    },
+    "node-envfile": {
+     "keys": 12,
+     "status": "ok"
+    },
+    "python": {
+     "keys": 12,
+     "status": "ok"
+    },
+    "ruby": {
+     "keys": 12,
+     "status": "ok"
+    }
+   },
+   "path": ".env.example",
+   "repo": "hagopj13/node-express-boilerplate",
+   "ruby_command_substitutions": 0,
+   "safety": {
+    "bash": {
+     "reasons": [],
+     "run": true
+    },
+    "commands": false,
+    "loader": {
+     "reasons": [],
+     "run": true
+    }
+   },
+   "sha256": "27268d3d1952b3eccdd5a5e334e1beef00fe2049ee716cf4abf45e1a2acf3519",
+   "static": {
+    "assignment_lines": 12,
+    "comment_lines": 10,
+    "duplicate_keys": [],
+    "features": {},
+    "lines": 25
+   }
+  },
+  {
+   "classes": 2,
+   "commit": "8d5559c74e9d8ef336713cabfb9b512fdb86c5b1",
+   "consumer": "Docker Compose",
+   "differing_keys": [],
+   "license": "BSD-3-Clause",
+   "outcomes": {
+    "bun": {
+     "keys": 0,
+     "status": "ok"
+    },
+    "dotenvnet": {
+     "keys": 0,
+     "status": "ok"
+    },
+    "dotnetenv": {
+     "keys": 0,
+     "status": "ok"
+    },
+    "java": {
+     "keys": 0,
+     "status": "ok"
+    },
+    "node-builtin": {
+     "keys": 0,
+     "status": "ok"
+    },
+    "node-dotenv": {
+     "keys": 0,
+     "status": "ok"
+    },
+    "node-envfile": {
+     "keys": 0,
+     "status": "ok"
+    },
+    "python": {
+     "keys": 0,
+     "status": "ok"
+    },
+    "ruby": {
+     "keys": 0,
+     "status": "ok"
+    }
+   },
+   "path": ".env",
+   "repo": "appwrite/appwrite",
+   "ruby_command_substitutions": 0,
+   "safety": {
+    "bash": {
+     "reasons": [],
+     "run": true
+    },
+    "commands": false,
+    "loader": {
+     "reasons": [],
+     "run": true
+    }
+   },
+   "sha256": "327ad5f9978b879cb8698d03f4f4f99392d7d8cf8a7fe6eac27e623c0b4e44c7",
+   "static": {
+    "assignment_lines": 226,
+    "comment_lines": 4,
+    "duplicate_keys": [],
+    "features": {
+     "empty-value": 70,
+     "single-quoted": 1
+    },
+    "lines": 230
+   }
+  },
+  {
+   "classes": 2,
+   "commit": "43db6086490e3914816f33ecccd318416a34bfb6",
+   "consumer": "Docker Compose env_file",
+   "differing_keys": [
+    {
+     "groups": [
+      {
+       "targets": [
+        "node-builtin",
+        "node-envfile",
+        "node-dotenv",
+        "bun",
+        "python",
+        "ruby",
+        "dotenvnet",
+        "dotnetenv"
+       ],
+       "value": "len 50 sha 31a7e4d0"
+      },
+      {
+       "targets": [
+        "java"
+       ],
+       "value": "len 52 sha e7d53804"
+      }
+     ],
+     "key": "API_TOKEN_PEPPER_1"
+    },
+    {
+     "groups": [
+      {
+       "targets": [
+        "node-builtin",
+        "node-envfile",
+        "node-dotenv",
+        "bun",
+        "python",
+        "ruby",
+        "dotenvnet",
+        "dotnetenv"
+       ],
+       "value": "len 60 sha c221bcec"
+      },
+      {
+       "targets": [
+        "java"
+       ],
+       "value": "len 62 sha d3b2dbd3"
+      }
+     ],
+     "key": "SECRET_KEY"
+    }
+   ],
+   "license": "Apache-2.0",
+   "outcomes": {
+    "bun": {
+     "keys": 33,
+     "status": "ok"
+    },
+    "dotenvnet": {
+     "keys": 33,
+     "status": "ok"
+    },
+    "dotnetenv": {
+     "keys": 33,
+     "status": "ok"
+    },
+    "java": {
+     "keys": 33,
+     "status": "ok"
+    },
+    "node-builtin": {
+     "keys": 33,
+     "status": "ok"
+    },
+    "node-dotenv": {
+     "keys": 33,
+     "status": "ok"
+    },
+    "node-envfile": {
+     "keys": 33,
+     "status": "ok"
+    },
+    "python": {
+     "keys": 33,
+     "status": "ok"
+    },
+    "ruby": {
+     "keys": 33,
+     "status": "ok"
+    }
+   },
+   "path": "env/netbox.env",
+   "repo": "netbox-community/netbox-docker",
+   "ruby_command_substitutions": 0,
+   "safety": {
+    "bash": {
+     "reasons": [],
+     "run": true
+    },
+    "commands": true,
+    "loader": {
+     "reasons": [],
+     "run": true
+    }
+   },
+   "sha256": "3b85fab8e940ad7125cca7bbf3625fd3f2d84b0dafdcd6bd1c7269399f9b31f0",
+   "static": {
+    "assignment_lines": 33,
+    "comment_lines": 17,
+    "duplicate_keys": [],
+    "features": {
+     "command-substitution": 1,
+     "empty-value": 3,
+     "hash-in-value": 1,
+     "single-quoted": 2
+    },
+    "lines": 51
+   }
+  },
+  {
+   "classes": 2,
+   "commit": "ae027bb70e694e2d2c44569f398d6cbcee0389b1",
+   "consumer": "Next.js @next/env (dotenv + dotenv-expand)",
+   "differing_keys": [
+    {
+     "groups": [
+      {
+       "targets": [
+        "node-builtin",
+        "node-dotenv",
+        "python",
+        "ruby",
+        "dotenvnet"
+       ],
+       "value": "len 33 sha ddcdaf14"
+      },
+      {
+       "targets": [
+        "java"
+       ],
+       "value": "len 35 sha dca0f120"
+      }
+     ],
+     "key": "ALLOWED_HOSTNAMES"
+    },
+    {
+     "groups": [
+      {
+       "targets": [
+        "node-builtin",
+        "node-dotenv",
+        "python",
+        "ruby",
+        "dotenvnet"
+       ],
+       "value": "len 32 sha 350e5529"
+      },
+      {
+       "targets": [
+        "java"
+       ],
+       "value": "len 34 sha bee2daa0"
+      }
+     ],
+     "key": "CRON_API_KEY"
+    },
+    {
+     "groups": [
+      {
+       "targets": [
+        "node-builtin",
+        "node-dotenv",
+        "python",
+        "ruby",
+        "dotenvnet"
+       ],
+       "value": "len 35 sha bea9554b"
+      },
+      {
+       "targets": [
+        "java"
+       ],
+       "value": "len 37 sha 9557fcc9"
+      }
+     ],
+     "key": "EMAIL_FROM"
+    },
+    {
+     "groups": [
+      {
+       "targets": [
+        "node-builtin",
+        "node-dotenv",
+        "python",
+        "ruby",
+        "dotenvnet"
+       ],
+       "value": "len 7 sha 108061eb"
+      },
+      {
+       "targets": [
+        "java"
+       ],
+       "value": "len 9 sha a7534769"
+      }
+     ],
+     "key": "EMAIL_FROM_NAME"
+    },
+    {
+     "groups": [
+      {
+       "targets": [
+        "node-builtin",
+        "node-dotenv",
+        "python",
+        "ruby",
+        "dotenvnet"
+       ],
+       "value": "len 9 sha 49960de5"
+      },
+      {
+       "targets": [
+        "java"
+       ],
+       "value": "len 11 sha 6d6bda3b"
+      }
+     ],
+     "key": "EMAIL_SERVER_HOST"
+    },
+    {
+     "groups": [
+      {
+       "targets": [
+        "node-builtin",
+        "node-dotenv",
+        "python",
+        "ruby",
+        "dotenvnet"
+       ],
+       "value": "len 21 sha f1de9e48"
+      },
+      {
+       "targets": [
+        "java"
+       ],
+       "value": "len 23 sha bf2b0c98"
+      }
+     ],
+     "key": "NEXTAUTH_URL"
+    },
+    {
+     "groups": [
+      {
+       "targets": [
+        "node-builtin",
+        "node-dotenv",
+        "python",
+        "ruby",
+        "dotenvnet"
+       ],
+       "value": "len 36 sha 61853d88"
+      },
+      {
+       "targets": [
+        "java"
+       ],
+       "value": "len 38 sha 422b959f"
+      }
+     ],
+     "key": "NEXT_PUBLIC_EMBED_LIB_URL"
+    },
+    {
+     "groups": [
+      {
+       "targets": [
+        "node-builtin",
+        "node-dotenv",
+        "python",
+        "ruby",
+        "dotenvnet"
+       ],
+       "value": "len 21 sha f1de9e48"
+      },
+      {
+       "targets": [
+        "java"
+       ],
+       "value": "len 23 sha bf2b0c98"
+      }
+     ],
+     "key": "NEXT_PUBLIC_WEBAPP_URL"
+    },
+    {
+     "groups": [
+      {
+       "targets": [
+        "node-builtin",
+        "node-dotenv",
+        "python",
+        "ruby",
+        "dotenvnet"
+       ],
+       "value": "len 21 sha f1de9e48"
+      },
+      {
+       "targets": [
+        "java"
+       ],
+       "value": "len 23 sha bf2b0c98"
+      }
+     ],
+     "key": "NEXT_PUBLIC_WEBSITE_URL"
+    },
+    {
+     "groups": [
+      {
+       "targets": [
+        "node-builtin",
+        "node-dotenv",
+        "python",
+        "ruby",
+        "dotenvnet"
+       ],
+       "value": "len 154 sha a3a35c53"
+      },
+      {
+       "targets": [
+        "java"
+       ],
+       "value": "len 156 sha 5bbcefe9"
+      }
+     ],
+     "key": "RESERVED_SUBDOMAINS"
+    }
+   ],
+   "license": "MIT (LICENSE at the pinned commit; the repository also has commercial ee directories)",
+   "outcomes": {
+    "bun": {
+     "keys": null,
+     "status": "not-run"
+    },
+    "dotenvnet": {
+     "keys": 165,
+     "status": "ok"
+    },
+    "dotnetenv": {
+     "keys": null,
+     "status": "not-run"
+    },
+    "java": {
+     "keys": 165,
+     "status": "ok"
+    },
+    "node-builtin": {
+     "keys": 165,
+     "status": "ok"
+    },
+    "node-dotenv": {
+     "keys": 165,
+     "status": "ok"
+    },
+    "node-envfile": {
+     "keys": null,
+     "status": "not-run"
+    },
+    "python": {
+     "keys": 165,
+     "status": "ok"
+    },
+    "ruby": {
+     "keys": 165,
+     "status": "ok"
+    }
+   },
+   "path": ".env.example",
+   "repo": "calcom/cal.com",
+   "ruby_command_substitutions": 0,
+   "safety": {
+    "bash": {
+     "reasons": [],
+     "run": true
+    },
+    "commands": true,
+    "loader": {
+     "reasons": [
+      "runtime-control-variable: TZ"
+     ],
+     "run": false
+    }
+   },
+   "sha256": "6dc5b16f444b56d56fbff0acd0c2623d49727b474f5f2ca69aa4464ef051acef",
+   "static": {
+    "assignment_lines": 165,
+    "comment_lines": 205,
+    "duplicate_keys": [],
+    "features": {
+     "dollar-literal": 1,
+     "double-quoted": 15,
+     "empty-value": 116,
+     "inline-comment": 6,
+     "non-ascii": 3,
+     "single-quoted": 10,
+     "unquoted-space": 5
+    },
+    "lines": 465
+   }
+  },
+  {
+   "classes": 1,
+   "commit": "e5d6eb7be67834f59d90e4b7a86f5dec7ac9af86",
+   "consumer": "Docker Compose env_file",
+   "differing_keys": [],
+   "license": "AGPL-3.0",
+   "outcomes": {
+    "bun": {
+     "keys": 6,
+     "status": "ok"
+    },
+    "dotenvnet": {
+     "keys": 6,
+     "status": "ok"
+    },
+    "dotnetenv": {
+     "keys": 6,
+     "status": "ok"
+    },
+    "java": {
+     "keys": 6,
+     "status": "ok"
+    },
+    "node-builtin": {
+     "keys": 6,
+     "status": "ok"
+    },
+    "node-dotenv": {
+     "keys": 6,
+     "status": "ok"
+    },
+    "node-envfile": {
+     "keys": 6,
+     "status": "ok"
+    },
+    "python": {
+     "keys": 6,
+     "status": "ok"
+    },
+    "ruby": {
+     "keys": 6,
+     "status": "ok"
+    }
+   },
+   "path": "docker/example.env",
+   "repo": "immich-app/immich",
+   "ruby_command_substitutions": 0,
+   "safety": {
+    "bash": {
+     "reasons": [],
+     "run": true
+    },
+    "commands": true,
+    "loader": {
+     "reasons": [],
+     "run": true
+    }
+   },
+   "sha256": "dda820cecbcf5fd5d6afecc54107bbd3c973088c631d380dfc83e9f0f2c6b210",
+   "static": {
+    "assignment_lines": 6,
+    "comment_lines": 10,
+    "duplicate_keys": [],
+    "features": {},
+    "lines": 22
+   }
+  },
+  {
+   "classes": 1,
+   "commit": "ff6ecfe7dfa9887f7ddbe0c7282cd29a99385598",
+   "consumer": "Ruby dotenv (dotenv-rails)",
+   "differing_keys": [],
+   "license": "AGPL-3.0",
+   "outcomes": {
+    "bun": {
+     "keys": 28,
+     "status": "ok"
+    },
+    "dotenvnet": {
+     "keys": 28,
+     "status": "ok"
+    },
+    "dotnetenv": {
+     "keys": 28,
+     "status": "ok"
+    },
+    "java": {
+     "keys": 28,
+     "status": "ok"
+    },
+    "node-builtin": {
+     "keys": 28,
+     "status": "ok"
+    },
+    "node-dotenv": {
+     "keys": 28,
+     "status": "ok"
+    },
+    "node-envfile": {
+     "keys": 28,
+     "status": "ok"
+    },
+    "python": {
+     "keys": 28,
+     "status": "ok"
+    },
+    "ruby": {
+     "keys": 28,
+     "status": "ok"
+    }
+   },
+   "path": ".env.production.sample",
+   "repo": "mastodon/mastodon",
+   "ruby_command_substitutions": 0,
+   "safety": {
+    "bash": {
+     "reasons": [],
+     "run": true
+    },
+    "commands": true,
+    "loader": {
+     "reasons": [],
+     "run": true
+    }
+   },
+   "sha256": "2d610161f060fe501a2904b5cb63c4007b54fc135f6c209113ea1172c690921d",
+   "static": {
+    "assignment_lines": 28,
+    "comment_lines": 50,
+    "duplicate_keys": [],
+    "features": {
+     "empty-value": 9
+    },
+    "lines": 90
+   }
+  },
+  {
+   "classes": 1,
+   "commit": "a7852fb92d0e4ac2bcce1d9a755717ba6cf53ffd",
+   "consumer": "dotenv-defaults (npm dotenv)",
+   "differing_keys": [],
+   "license": "MIT",
+   "outcomes": {
+    "bun": {
+     "keys": 2,
+     "status": "ok"
+    },
+    "dotenvnet": {
+     "keys": 2,
+     "status": "ok"
+    },
+    "dotnetenv": {
+     "keys": 2,
+     "status": "ok"
+    },
+    "java": {
+     "keys": 2,
+     "status": "ok"
+    },
+    "node-builtin": {
+     "keys": 2,
+     "status": "ok"
+    },
+    "node-dotenv": {
+     "keys": 2,
+     "status": "ok"
+    },
+    "node-envfile": {
+     "keys": 2,
+     "status": "ok"
+    },
+    "python": {
+     "keys": 2,
+     "status": "ok"
+    },
+    "ruby": {
+     "keys": 2,
+     "status": "ok"
+    }
+   },
+   "path": "packages/create-redwood-app/templates/ts/.env.defaults",
+   "repo": "redwoodjs/redwood",
+   "ruby_command_substitutions": 0,
+   "safety": {
+    "bash": {
+     "reasons": [],
+     "run": true
+    },
+    "commands": false,
+    "loader": {
+     "reasons": [],
+     "run": true
+    }
+   },
+   "sha256": "3a7f16f5e7e3f0b9a3bccea618c8493301e6c17487c3e7bdfb74d4dd3d5025f2",
+   "static": {
+    "assignment_lines": 2,
+    "comment_lines": 13,
+    "duplicate_keys": [],
+    "features": {},
+    "lines": 19
+   }
+  },
+  {
+   "classes": 1,
+   "commit": "6ed1be0fd1a0d37f25a0e0a74ecac2bebb9f14f3",
+   "consumer": "npm dotenv",
+   "differing_keys": [],
+   "license": "MIT (with a commercial ee directory)",
+   "outcomes": {
+    "bun": {
+     "keys": 7,
+     "status": "ok"
+    },
+    "dotenvnet": {
+     "keys": 7,
+     "status": "ok"
+    },
+    "dotnetenv": {
+     "keys": 7,
+     "status": "ok"
+    },
+    "java": {
+     "keys": 7,
+     "status": "ok"
+    },
+    "node-builtin": {
+     "keys": 7,
+     "status": "ok"
+    },
+    "node-dotenv": {
+     "keys": 7,
+     "status": "ok"
+    },
+    "node-envfile": {
+     "keys": 7,
+     "status": "ok"
+    },
+    "python": {
+     "keys": 7,
+     "status": "ok"
+    },
+    "ruby": {
+     "keys": 7,
+     "status": "ok"
+    }
+   },
+   "path": "templates/website/.env.example",
+   "repo": "strapi/strapi",
+   "ruby_command_substitutions": 0,
+   "safety": {
+    "bash": {
+     "reasons": [],
+     "run": true
+    },
+    "commands": false,
+    "loader": {
+     "reasons": [],
+     "run": true
+    }
+   },
+   "sha256": "6471e7fafabfab21be059f36ea18739d7deab565a1f968ee57bf5a1c6c34d790",
+   "static": {
+    "assignment_lines": 7,
+    "comment_lines": 0,
+    "duplicate_keys": [],
+    "features": {
+     "double-quoted": 1
+    },
+    "lines": 7
+   }
+  },
+  {
+   "classes": 2,
+   "commit": "7c5ab183a9d3c112e64a5d16e378d5efd5966050",
+   "consumer": "Docker Compose; python-dotenv",
+   "differing_keys": [
+    {
+     "groups": [
+      {
+       "targets": [
+        "node-builtin",
+        "node-envfile",
+        "node-dotenv",
+        "bun",
+        "python",
+        "dotnetenv"
+       ],
+       "value": "len 1703 sha eb7ba419"
+      },
+      {
+       "targets": [
+        "ruby",
+        "dotenvnet",
+        "java"
+       ],
+       "value": "len 1730 sha 504a9171"
+      }
+     ],
+     "key": "OIDC_RSA_PRIVATE_KEY"
+    },
+    {
+     "groups": [
+      {
+       "targets": [
+        "node-builtin",
+        "node-envfile",
+        "node-dotenv",
+        "bun",
+        "python",
+        "dotnetenv"
+       ],
+       "value": "len 1703 sha fef135e4"
+      },
+      {
+       "targets": [
+        "ruby",
+        "dotenvnet",
+        "java"
+       ],
+       "value": "len 1730 sha 906ce617"
+      }
+     ],
+     "key": "SANDBOX_JWT_PRIVATE_KEY"
+    }
+   ],
+   "license": "MIT (with a commercial ee directory)",
+   "outcomes": {
+    "bun": {
+     "keys": 10,
+     "status": "ok"
+    },
+    "dotenvnet": {
+     "keys": 10,
+     "status": "ok"
+    },
+    "dotnetenv": {
+     "keys": 10,
+     "status": "ok"
+    },
+    "java": {
+     "keys": 10,
+     "status": "ok"
+    },
+    "node-builtin": {
+     "keys": 10,
+     "status": "ok"
+    },
+    "node-dotenv": {
+     "keys": 10,
+     "status": "ok"
+    },
+    "node-envfile": {
+     "keys": 10,
+     "status": "ok"
+    },
+    "python": {
+     "keys": 10,
+     "status": "ok"
+    },
+    "ruby": {
+     "keys": 10,
+     "status": "ok"
+    }
+   },
+   "path": ".env.example",
+   "repo": "PostHog/posthog",
+   "ruby_command_substitutions": 0,
+   "safety": {
+    "bash": {
+     "reasons": [],
+     "run": true
+    },
+    "commands": true,
+    "loader": {
+     "reasons": [],
+     "run": true
+    }
+   },
+   "sha256": "c67133523eddbbcd41d131e262042d8ea589d5f74adca77980c26a0131ae2117",
+   "static": {
+    "assignment_lines": 10,
+    "comment_lines": 48,
+    "duplicate_keys": [],
+    "features": {
+     "backslash": 54,
+     "double-quoted": 2,
+     "empty-value": 3,
+     "interpolation": 1,
+     "non-ascii": 3
+    },
+    "lines": 69
+   }
+  },
+  {
+   "classes": 1,
+   "commit": "6a6987ec2d8aad62877f1dbd80a56ae73c493ace",
+   "consumer": "npm dotenv",
+   "differing_keys": [],
+   "license": "BSL-1.1",
+   "outcomes": {
+    "bun": {
+     "keys": null,
+     "status": "not-run"
+    },
+    "dotenvnet": {
+     "keys": 87,
+     "status": "ok"
+    },
+    "dotnetenv": {
+     "keys": null,
+     "status": "not-run"
+    },
+    "java": {
+     "keys": 87,
+     "status": "ok"
+    },
+    "node-builtin": {
+     "keys": 87,
+     "status": "ok"
+    },
+    "node-dotenv": {
+     "keys": 87,
+     "status": "ok"
+    },
+    "node-envfile": {
+     "keys": null,
+     "status": "not-run"
+    },
+    "python": {
+     "keys": 87,
+     "status": "ok"
+    },
+    "ruby": {
+     "keys": 87,
+     "status": "ok"
+    }
+   },
+   "path": ".env.sample",
+   "repo": "outline/outline",
+   "ruby_command_substitutions": 0,
+   "safety": {
+    "bash": {
+     "reasons": [
+      "command: a statement that is not an assignment"
+     ],
+     "run": false
+    },
+    "commands": true,
+    "loader": {
+     "reasons": [
+      "runtime-control-variable: NODE_ENV, SSL_CERT"
+     ],
+     "run": false
+    }
+   },
+   "sha256": "42392b59c197b4d0f2a78cb177bc4e698e079b4751ed35f81327f315f8c9546d",
+   "static": {
+    "assignment_lines": 87,
+    "comment_lines": 159,
+    "duplicate_keys": [],
+    "features": {
+     "empty-value": 52,
+     "non-ascii": 1012,
+     "unquoted-space": 2
+    },
+    "lines": 313
+   }
+  },
+  {
+   "classes": 1,
+   "commit": "a489128d2b752fc3b501404c5c923935953619e1",
+   "consumer": "Docker Compose",
+   "differing_keys": [],
+   "license": "FSL-1.1-Apache-2.0 (Functional Source License)",
+   "outcomes": {
+    "bun": {
+     "keys": 22,
+     "status": "ok"
+    },
+    "dotenvnet": {
+     "keys": 22,
+     "status": "ok"
+    },
+    "dotnetenv": {
+     "keys": 22,
+     "status": "ok"
+    },
+    "java": {
+     "keys": 22,
+     "status": "ok"
+    },
+    "node-builtin": {
+     "keys": 22,
+     "status": "ok"
+    },
+    "node-dotenv": {
+     "keys": 22,
+     "status": "ok"
+    },
+    "node-envfile": {
+     "keys": 22,
+     "status": "ok"
+    },
+    "python": {
+     "keys": 22,
+     "status": "ok"
+    },
+    "ruby": {
+     "keys": 22,
+     "status": "ok"
+    }
+   },
+   "path": ".env",
+   "repo": "getsentry/self-hosted",
+   "ruby_command_substitutions": 0,
+   "safety": {
+    "bash": {
+     "reasons": [],
+     "run": true
+    },
+    "commands": false,
+    "loader": {
+     "reasons": [],
+     "run": true
+    }
+   },
+   "sha256": "0c9fd0159095a26ebf100559a039ef7d09f369a7f8babacca716c2f3b4605767",
+   "static": {
+    "assignment_lines": 22,
+    "comment_lines": 27,
+    "duplicate_keys": [],
+    "features": {
+     "non-ascii": 1
+    },
+    "lines": 52
+   }
+  },
+  {
+   "classes": 1,
+   "commit": "cbd8159c02ea96064457f7b654bbb9d4eab45137",
+   "consumer": "Next.js @next/env (dotenv + dotenv-expand)",
+   "differing_keys": [],
+   "license": "MIT",
+   "outcomes": {
+    "bun": {
+     "keys": 2,
+     "status": "ok"
+    },
+    "dotenvnet": {
+     "keys": 2,
+     "status": "ok"
+    },
+    "dotnetenv": {
+     "keys": 2,
+     "status": "ok"
+    },
+    "java": {
+     "keys": 2,
+     "status": "ok"
+    },
+    "node-builtin": {
+     "keys": 2,
+     "status": "ok"
+    },
+    "node-dotenv": {
+     "keys": 2,
+     "status": "ok"
+    },
+    "node-envfile": {
+     "keys": 2,
+     "status": "ok"
+    },
+    "python": {
+     "keys": 2,
+     "status": "ok"
+    },
+    "ruby": {
+     "keys": 2,
+     "status": "ok"
+    }
+   },
+   "path": "examples/with-supabase/.env.example",
+   "repo": "vercel/next.js",
+   "ruby_command_substitutions": 0,
+   "safety": {
+    "bash": {
+     "reasons": [],
+     "run": true
+    },
+    "commands": false,
+    "loader": {
+     "reasons": [],
+     "run": true
+    }
+   },
+   "sha256": "387083d6394c4509f17353a2bda4e9c55c71f3cab167d44ee0dfc4def689593a",
+   "static": {
+    "assignment_lines": 2,
+    "comment_lines": 2,
+    "duplicate_keys": [],
+    "features": {},
+    "lines": 4
+   }
+  },
+  {
+   "classes": 1,
+   "commit": "1dd1c249ad213de6883be5296deb3bbba8420a22",
+   "consumer": "NestJS ConfigModule (dotenv + dotenv-expand)",
+   "differing_keys": [],
+   "license": "AGPL-3.0 (with a commercial directory)",
+   "outcomes": {
+    "bun": {
+     "keys": null,
+     "status": "not-run"
+    },
+    "dotenvnet": {
+     "keys": 7,
+     "status": "ok"
+    },
+    "dotnetenv": {
+     "keys": null,
+     "status": "not-run"
+    },
+    "java": {
+     "keys": 7,
+     "status": "ok"
+    },
+    "node-builtin": {
+     "keys": 7,
+     "status": "ok"
+    },
+    "node-dotenv": {
+     "keys": 7,
+     "status": "ok"
+    },
+    "node-envfile": {
+     "keys": null,
+     "status": "not-run"
+    },
+    "python": {
+     "keys": 7,
+     "status": "ok"
+    },
+    "ruby": {
+     "keys": 7,
+     "status": "ok"
+    }
+   },
+   "path": "packages/twenty-server/.env.example",
+   "repo": "twentyhq/twenty",
+   "ruby_command_substitutions": 0,
+   "safety": {
+    "bash": {
+     "reasons": [],
+     "run": true
+    },
+    "commands": false,
+    "loader": {
+     "reasons": [
+      "runtime-control-variable: NODE_ENV"
+     ],
+     "run": false
+    }
+   },
+   "sha256": "6315e19532cb2d2779d92901cc43cea9cbc2fc89f04f88eb304696f4504dcb68",
+   "static": {
+    "assignment_lines": 7,
+    "comment_lines": 142,
+    "duplicate_keys": [],
+    "features": {
+     "non-ascii": 96
+    },
+    "lines": 156
+   }
+  }
+ ],
+ "targets": [
+  "node-builtin",
+  "node-envfile",
+  "node-dotenv",
+  "bun",
+  "python",
+  "ruby",
+  "dotenvnet",
+  "dotnetenv",
+  "java"
+ ]
+}

@@ -1,0 +1,48 @@
+# dotenv_emit_fold.bot -- the multiline extension written the natural way,
+# kept apart because the emission checker rejects it (the census's emits
+# probe, results/emits.json): the recognizer state a yield happens in
+# depends on the fold's intermediate, a relation between a value and the
+# state the checker does not track. dotenv_emit::assignment_lines writes the
+# same language with the state following the code's shape, and is proven.
+
+import std::dfa
+import std::char
+import std::str
+import dotenv_portable
+import dotenv_emit
+
+# The multiline extension: the value's mode is a fold's intermediate (0:
+# nothing yet, 1: plain characters only, 2: a marked character seen, 3: a
+# LF seen) -- Botlish has no mutable binding, so loop-carried state is a
+# fold's (FOLD-LOOPS-MILESTONE-1.md).
+nomethod fn assignment_ml(name: str, value: str) -> unit errors dotenv_emit::UnsupportedDotenv emits dotenv_portable::assignment_ml:
+    dotenv_emit::key(name)
+    yield 61
+    yield 34
+    fold i from 0 to value.length() with intermediate mode 0:
+        c = value.char_at(i).scalar_value()
+        if c == 10:
+            if mode != 1 and mode != 3:
+                fail dotenv_emit::UnsupportedDotenv {at: i, value: c}
+            yield c
+            3
+        elif c == 35 or c == 8232 or c == 8233:
+            if mode == 3:
+                fail dotenv_emit::UnsupportedDotenv {at: i, value: c}
+            yield c
+            2
+        else:
+            dotenv_portable::plain_char(c):
+                on std::dfa::UnrecognizedInput:
+                    fail dotenv_emit::UnsupportedDotenv {at: i, value: c}
+                on std::dfa::UnexpectedEnd:
+                    fail dotenv_emit::UnsupportedDotenv {at: i, value: c}
+            yield c
+            if mode == 0:
+                1
+            else:
+                mode
+    yield 34
+    yield 10
+    unit
+

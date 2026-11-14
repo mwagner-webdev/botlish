@@ -1,0 +1,293 @@
+{
+ "claims": {
+  "assignment:dotenv_portable::assignment": {
+   "kinds": [],
+   "verdict": "proven"
+  },
+  "assignment:dotenv_portable::assignment_ml": {
+   "kinds": [],
+   "verdict": "proven"
+  },
+  "assignment_lines:dotenv_portable::assignment_ml": {
+   "kinds": [],
+   "verdict": "proven"
+  },
+  "document:dotenv_portable::document": {
+   "kinds": [],
+   "verdict": "proven"
+  }
+ },
+ "mutants": {
+  "dollar-yielded": {
+   "claims": {
+    "assignment:dotenv_portable::assignment": {
+     "kinds": [
+      "EMIT-REJECTED"
+     ],
+     "verdict": "rejected"
+    },
+    "assignment:dotenv_portable::assignment_ml": {
+     "kinds": [
+      "EMIT-REJECTED"
+     ],
+     "verdict": "rejected"
+    },
+    "assignment_lines:dotenv_portable::assignment_ml": {
+     "kinds": [],
+     "verdict": "proven"
+    },
+    "document:dotenv_portable::document": {
+     "kinds": [
+      "EMIT-REJECTED"
+     ],
+     "verdict": "rejected"
+    }
+   },
+   "status": "killed"
+  },
+  "empty-key-written": {
+   "claims": {
+    "assignment:dotenv_portable::assignment": {
+     "kinds": [
+      "EMIT-REJECTED"
+     ],
+     "verdict": "rejected"
+    },
+    "assignment:dotenv_portable::assignment_ml": {
+     "kinds": [
+      "EMIT-REJECTED"
+     ],
+     "verdict": "rejected"
+    },
+    "assignment_lines:dotenv_portable::assignment_ml": {
+     "kinds": [
+      "EMIT-REJECTED"
+     ],
+     "verdict": "rejected"
+    },
+    "document:dotenv_portable::document": {
+     "kinds": [
+      "EMIT-REJECTED"
+     ],
+     "verdict": "rejected"
+    }
+   },
+   "status": "killed"
+  },
+  "first-line-may-be-empty": {
+   "claims": {
+    "assignment:dotenv_portable::assignment": {
+     "kinds": [],
+     "verdict": "proven"
+    },
+    "assignment:dotenv_portable::assignment_ml": {
+     "kinds": [],
+     "verdict": "proven"
+    },
+    "assignment_lines:dotenv_portable::assignment_ml": {
+     "kinds": [
+      "EMIT-REJECTED"
+     ],
+     "verdict": "rejected"
+    },
+    "document:dotenv_portable::document": {
+     "kinds": [],
+     "verdict": "proven"
+    }
+   },
+   "status": "killed"
+  },
+  "hash-after-lf": {
+   "claims": {
+    "assignment:dotenv_portable::assignment": {
+     "kinds": [],
+     "verdict": "proven"
+    },
+    "assignment:dotenv_portable::assignment_ml": {
+     "kinds": [],
+     "verdict": "proven"
+    },
+    "assignment_lines:dotenv_portable::assignment_ml": {
+     "kinds": [
+      "EMIT-REJECTED"
+     ],
+     "verdict": "rejected"
+    },
+    "document:dotenv_portable::document": {
+     "kinds": [],
+     "verdict": "proven"
+    }
+   },
+   "status": "killed"
+  },
+  "key-first-digit": {
+   "claims": {
+    "assignment:dotenv_portable::assignment": {
+     "kinds": [
+      "EMIT-REJECTED"
+     ],
+     "verdict": "rejected"
+    },
+    "assignment:dotenv_portable::assignment_ml": {
+     "kinds": [
+      "EMIT-REJECTED"
+     ],
+     "verdict": "rejected"
+    },
+    "assignment_lines:dotenv_portable::assignment_ml": {
+     "kinds": [
+      "EMIT-REJECTED"
+     ],
+     "verdict": "rejected"
+    },
+    "document:dotenv_portable::document": {
+     "kinds": [
+      "EMIT-REJECTED"
+     ],
+     "verdict": "rejected"
+    }
+   },
+   "status": "killed"
+  },
+  "lf-in-single-line-claim": {
+   "claims": {
+    "assignment:dotenv_portable::assignment": {
+     "kinds": [],
+     "verdict": "proven"
+    },
+    "assignment:dotenv_portable::assignment_ml": {
+     "kinds": [],
+     "verdict": "proven"
+    },
+    "assignment_lines:dotenv_portable::assignment": {
+     "kinds": [
+      "EMIT-REJECTED"
+     ],
+     "verdict": "rejected"
+    },
+    "document:dotenv_portable::document": {
+     "kinds": [],
+     "verdict": "proven"
+    }
+   },
+   "status": "killed"
+  },
+  "lf-yielded-first": {
+   "claims": {
+    "assignment:dotenv_portable::assignment": {
+     "kinds": [],
+     "verdict": "proven"
+    },
+    "assignment:dotenv_portable::assignment_ml": {
+     "kinds": [],
+     "verdict": "proven"
+    },
+    "assignment_lines:dotenv_portable::assignment_ml": {
+     "kinds": [
+      "EMIT-REJECTED"
+     ],
+     "verdict": "rejected"
+    },
+    "document:dotenv_portable::document": {
+     "kinds": [],
+     "verdict": "proven"
+    }
+   },
+   "status": "killed"
+  },
+  "no-closing-quote": {
+   "claims": {
+    "assignment:dotenv_portable::assignment": {
+     "kinds": [
+      "EMIT-INCOMPLETE",
+      "EMIT-REJECTED"
+     ],
+     "verdict": "rejected"
+    },
+    "assignment:dotenv_portable::assignment_ml": {
+     "kinds": [
+      "EMIT-INCOMPLETE",
+      "EMIT-REJECTED"
+     ],
+     "verdict": "rejected"
+    },
+    "assignment_lines:dotenv_portable::assignment_ml": {
+     "kinds": [],
+     "verdict": "proven"
+    },
+    "document:dotenv_portable::document": {
+     "kinds": [
+      "EMIT-REJECTED"
+     ],
+     "verdict": "rejected"
+    }
+   },
+   "status": "killed"
+  },
+  "no-terminator": {
+   "claims": {
+    "assignment:dotenv_portable::assignment": {
+     "kinds": [
+      "EMIT-INCOMPLETE"
+     ],
+     "verdict": "rejected"
+    },
+    "assignment:dotenv_portable::assignment_ml": {
+     "kinds": [
+      "EMIT-INCOMPLETE"
+     ],
+     "verdict": "rejected"
+    },
+    "assignment_lines:dotenv_portable::assignment_ml": {
+     "kinds": [],
+     "verdict": "proven"
+    },
+    "document:dotenv_portable::document": {
+     "kinds": [
+      "EMIT-INCOMPLETE",
+      "EMIT-REJECTED"
+     ],
+     "verdict": "rejected"
+    }
+   },
+   "status": "killed"
+  },
+  "unguarded-value": {
+   "claims": {
+    "assignment:dotenv_portable::assignment": {
+     "kinds": [
+      "EMIT-AFTER-TOKEN",
+      "EMIT-REJECTED"
+     ],
+     "verdict": "rejected"
+    },
+    "assignment:dotenv_portable::assignment_ml": {
+     "kinds": [
+      "EMIT-AFTER-TOKEN",
+      "EMIT-REJECTED"
+     ],
+     "verdict": "rejected"
+    },
+    "assignment_lines:dotenv_portable::assignment_ml": {
+     "kinds": [],
+     "verdict": "proven"
+    },
+    "document:dotenv_portable::document": {
+     "kinds": [
+      "EMIT-REJECTED"
+     ],
+     "verdict": "rejected"
+    }
+   },
+   "status": "killed"
+  }
+ },
+ "precision_limit": {
+  "assignment_ml:dotenv_portable::assignment_ml": {
+   "kinds": [
+    "EMIT-REJECTED"
+   ],
+   "verdict": "rejected"
+  }
+ }
+}
