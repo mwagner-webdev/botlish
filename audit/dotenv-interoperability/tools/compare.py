@@ -12,7 +12,9 @@ Policies:
   portable  (macOS, Windows) the host is not the baseline's: differences are
             reported as host observations, never failures -- except that every
             category the baseline classifies as universally portable must stay
-            so, and every portable round trip must read back exactly.
+            so, and every portable round trip must read back exactly, but
+            for the host's declared deviations (HOST_DEVIATIONS), which must
+            then be observed.
 
 Both policies fail when a reference target produced adapter failures or is
 missing: a missing oracle is never a passing one.
@@ -28,6 +30,16 @@ import analyze  # noqa: E402
 import common  # noqa: E402
 
 BASE = common.AUDIT / "results"
+
+# The deviations a host is known to make from the portable round trips, each
+# stated exactly (the round trip's verdict, the target, which profile). Under
+# the portable policy a round trip's difference fails unless it is a declared
+# deviation of this host, and a declared deviation the host's run does not
+# show fails too: the report states it, and drift either way must be seen.
+HOST_DEVIATIONS = {
+    "win-x64": [{"multiline": True, "target": "dotenvnet", "verdict": "lf-as-crlf",
+                 "why": "dotenv.net joins a multi-line value's lines with Environment.NewLine (CRLF)"}],
+}
 
 
 def observation(r):
@@ -104,13 +116,40 @@ def compare_portable(fresh, lines):
             bad += 1
         elif was != now:
             lines.append("- portable category `%s`: %s, baseline %s" % (cat, now, was))
-    for p in sorted((Path(fresh) / "portable").glob("roundtrip-*.json")):
+    declared = HOST_DEVIATIONS.get(common.HOST, [])
+    seen = set()
+    trips = sorted((Path(fresh) / "portable").glob("roundtrip-*.json"))
+    if not trips:
+        lines.append("- no portable round trip ran")
+        bad += 1
+    for p in trips:
         r = common.load_json(p)
-        if r["failures"]:
+        profile = "multiline" if r.get("multiline") else "single-line"
+        unexplained = {}
+        explained = 0
+        for fid, per in r["failures"].items():
+            for t, verdict in per.items():
+                hit = [i for i, d in enumerate(declared) if d["target"] == t and d["verdict"] == verdict
+                       and d["multiline"] == bool(r.get("multiline"))]
+                if hit:
+                    seen.update(hit)
+                    explained += 1
+                else:
+                    unexplained.setdefault(fid, {})[t] = verdict
+        if explained:
+            lines.append("- round trip seed %d (%s): %d readings are this host's declared deviation" % (
+                r["seed"], profile, explained))
+        if unexplained:
             lines.append("- round trip seed %d (%s): %d files read back differently: %s" % (
-                r["seed"], "multiline" if r.get("multiline") else "single-line", len(r["failures"]),
-                json.dumps(dict(list(r["failures"].items())[:3]))))
+                r["seed"], profile, len(unexplained), json.dumps(dict(list(unexplained.items())[:3]))))
             bad += 1
+    for i, d in enumerate(declared):
+        if trips and i not in seen:
+            lines.append("- declared deviation of %s not observed (the report states it): %s %s, %s" % (
+                common.HOST, d["target"], d["verdict"], d["why"]))
+            bad += 1
+        elif i in seen:
+            lines.append("- declared deviation of %s observed: %s %s (%s)" % (common.HOST, d["target"], d["verdict"], d["why"]))
     return bad
 
 

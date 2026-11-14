@@ -140,5 +140,7 @@ touches this directory: the Linux baseline (a fresh census compared with
 `results/` under the baseline policy: any drift fails; the self-test; the
 emits probe; the pins against the registries), macOS and Windows (the same
 census under the portable policy: host differences are reported, a lost
-portable category or a round trip that reads back differently fails) and the
-real-world files. A missing or crashed oracle is never a pass.
+portable category or a round trip that reads back differently fails, unless
+the difference is one of the host's declared deviations, `compare.py`'s
+`HOST_DEVIATIONS`, stated exactly and required to appear) and the real-world
+files. A missing or crashed oracle is never a pass.

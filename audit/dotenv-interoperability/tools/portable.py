@@ -131,12 +131,21 @@ def exact(r, intended):
     return r is not None and r["status"] == "ok" and r["map"] == intended
 
 
+def lf_as_crlf(r, intended):
+    """Read back exactly but for every LF of a value read as CRLF (dotenv.net
+    on Windows, whose multi-line values join lines with Environment.NewLine)."""
+    return (r is not None and r["status"] == "ok" and any("\n" in v for v in intended.values())
+            and r["map"] == {k: v.replace("\n", "\r\n") for k, v in intended.items()})
+
+
 def load_run(name):
     return analyze.load_results(common.RESULTS / name)
 
 
 def verdicts(results, recs, targets):
-    """Per fixture: the targets that read back exactly the intended map."""
+    """Per fixture and target: exact (the intended map read back exactly),
+    lf-as-crlf (exactly but for every LF read as CRLF), differs, or why it
+    did not run."""
     out = {}
     for rec in recs:
         per = {}
@@ -147,7 +156,8 @@ def verdicts(results, recs, targets):
             elif r["status"] in ("not-run", "adapter-failure"):
                 per[t] = r["status"]
             else:
-                per[t] = "exact" if exact(r, rec["intended"]) else "differs"
+                per[t] = ("exact" if exact(r, rec["intended"]) else
+                          "lf-as-crlf" if lf_as_crlf(r, rec["intended"]) else "differs")
         out[rec["id"]] = per
     return out
 
