@@ -271,10 +271,18 @@ All checks were run on Linux x86-64 with rustc 1.100.0 (0ef1bc386
 | Tcl download (2.4) | `fetch` with `--retry 5 --retry-all-errors` in `.devcontainer/setup.sh` | `bash -n`; CI decides (arm64 runners) |
 | Coverage report (2.6) | each failed test's own report, from tcltest's output | the reporting path with a synthetic log (`-log`); CI decides |
 
-Also run: `tools/mutant-catalogs.tcl` (108 catalogs, 3,717 mutants, 0
-problems). The whole local suite, `tests/local.tcl` (every Tcl test file on
-interp and compile, every golden suite on four backends), with the results
-in section 7.
+Also run:
+
+- `tools/mutant-catalogs.tcl`: 108 catalogs, 3,717 mutants, 0 problems.
+- `tools/compilerpedia.tcl check`: 1,300 topics, 778 examples, 0 problems.
+- `cargo test --release --lib`: 348 of 348.
+- The whole local suite, `tests/local.tcl`: every Tcl test file on interp
+  and compile, and every golden suite on four backends, through the
+  front-end cache from empty.
+  - 700 of its 702 items passed and none failed.
+  - The two left were warning-gate.test's passes, still running when the
+    background task's two-hour limit stopped it.
+  - warning-gate.test, run on its own afterwards, passed 6 of 6.
 
 ## 5. Proposed changes to the canary
 
