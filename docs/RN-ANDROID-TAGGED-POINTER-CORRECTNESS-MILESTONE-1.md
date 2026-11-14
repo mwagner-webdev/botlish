@@ -558,12 +558,12 @@ toolchain), whose runs were queued.
 The four test workflows are dispatched again on the fix's commit
 `e63466e8` (superseding the runs above where they were unfinished): tests
 43505390208, tests (linux arm64) 43505394990, tests (macos arm64)
-43505400374, tests (windows x86-64) 43505405543. Read at 09:47 UTC on
-2026-11-14 (**CI**); every run has finished but tests' cranelift coverage job:
+43505400374, tests (windows x86-64) 43505405543, all four finished (the
+last job at 10:06 UTC on 2026-11-14; **CI**):
 
 | Workflow | Passed | Failed | Pending |
 |---|---|---|---|
-| tests | canary, native Rust unit tests, the method-call decision's reference audit, golden shards 1-4 | interp (2 of 12,367: `argv-focused-valid-fuzz`, `native-tcl-unicode-lowercase-all-scalars`; `nl-no-string-ternary` passes); system-linked executables (1 of 4,615: argv's fuzz); stub-linked executables (1 of 4,244: argv's fuzz); compile (2 of 12,367: the same two); cranelift-generic coverage (its "native backend bugs": the same two and nothing else) | cranelift coverage (running) |
+| tests, finished | canary, native Rust unit tests, the method-call decision's reference audit, golden shards 1-4 | interp (2 of 12,367: `argv-focused-valid-fuzz`, `native-tcl-unicode-lowercase-all-scalars`; `nl-no-string-ternary` passes); system-linked executables (1 of 4,615: argv's fuzz); stub-linked executables (1 of 4,244: argv's fuzz); compile (2 of 12,367: the same two); cranelift and cranelift-generic coverage (their "native backend bugs": the same two and nothing else; at `bc160372` cranelift coverage listed `nl-no-string-ternary` as a third) | -- |
 | tests (linux arm64), finished | canary, native Rust unit tests, golden shards 1-4 | interp and compile (2 of 12,367 each: the same two); system-linked executables (1 of 4,615: argv's fuzz); cranelift and cranelift-generic coverage (their "native backend bugs": the same two and nothing else); both GC-stress jobs, interp and compile (2 of 12,367 each: the same two) | -- |
 | tests (macos arm64), finished | smoke, the Linux control, acceptance shards 1-4, Botlish.app, Botlish.app without developer tools, main-thread startup, static SDL3 through Botlish.app | acceptance shard 5 (1 of 2,415: argv's fuzz), shard 6 (1 of 2,255: lowercase); system linker (its own tests 15/15, then 1 of 4,615 system-linked: argv's fuzz) | -- |
 | tests (windows x86-64), finished | canary, root plans, acceptance shards 2-4, every smoke check but one (C calls and libraries, filesystem and variadic C calls under GC stress included) | smoke (argv's fuzz, 1 of 1,287 on each pass); acceptance shard 1 (2 of 2,820: argv's fuzz and lowercase); system linker (its own tests 15/15 and under GC stress 181/181; argv's fuzz 1 of 401 on each pass; the runtime archive's system-library check: rustc now names `synchronization.lib`, which `runtime_system_libraries` lacks) | -- |
@@ -580,6 +580,19 @@ fuzz and lowercase); tests (linux arm64) (run 43489783116) interp,
 compile, both GC-stress jobs (2 failures each: the same two tests), both
 coverage jobs (the same two as their only "native backend bugs") and
 system-linked executables (argv's fuzz). Its tests run was in progress.
+
+**The verdict** (**CI**): every job of the four test workflows on the
+fix's commit `e63466e8` has finished. Every job that failed failed only on
+main's toolchain failures -- `argv-focused-valid-fuzz` and
+`native-tcl-unicode-lowercase-all-scalars` (Rust 1.100.0's Unicode 18) and,
+on Windows, the runtime archive's system-library check (`synchronization.lib`)
+-- and main's own runs at `14937461` fail the same jobs the same way.
+None is this change's: the one failure that was (`nl-no-string-ternary`,
+at `bc160372`) is fixed and passes in every job that runs it. Every check
+of C calls, C pointers, byte exposures, callbacks, native libraries, the
+linkers and executables, the C runtime matrix, the golden suites and GC
+stress passed on every host it ran on. The branch's CI is not green, and
+cannot be before main's toolchain failures are fixed on main.
 
 ## 24. Cleanroom
 
