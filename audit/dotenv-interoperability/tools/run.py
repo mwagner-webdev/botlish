@@ -214,6 +214,17 @@ class Runner:
         results, runtimes = {}, set()
         cwd = os.path.join(self.scratch, "empty-cwd")
         os.makedirs(cwd, exist_ok=True)
+        # A control run on an empty file: what the runtime's process holds
+        # without any fixture -- the supplied environment plus whatever the
+        # host adds to every process (macOS adds __CF_USER_TEXT_ENCODING).
+        # A fixture's assignments are the differences from it.
+        empty = os.path.join(self.scratch, "empty.env")
+        with open(empty, "wb"):
+            pass
+        p = subprocess.run(t["cmd"](empty), env=env, cwd=cwd, capture_output=True, timeout=60)
+        lines = [l for l in p.stdout.decode("utf-8", "replace").split("\n") if l.strip()]
+        control = json.loads(lines[-1])["env"] if p.returncode == 0 and lines else dict(env)
+        host_added = sorted(k for k in control if env.get(k) != control[k])
 
         def one(r):
             path = self.file(r)
@@ -230,7 +241,7 @@ class Runner:
                                                  "message": err.decode("utf-8", "replace").strip()[-600:]}}
             o = json.loads(line[-1])
             got = o["env"]
-            delta = [[k, v] for k, v in sorted(got.items()) if env.get(k) != v]
+            delta = [[k, v] for k, v in sorted(got.items()) if control.get(k) != v]
             kept = [[k, env[k]] for k in declared_keys(corpus.data_of(r)) if k in env and got.get(k) == env[k]]
             removed = [[k, env[k]] for k in sorted(env) if k not in got]
             views = {}
@@ -250,6 +261,8 @@ class Runner:
                     runtimes.add(rt)
         meta = {"runtime": ", ".join(sorted(runtimes)), "library": t["name"], "library_version": t["version"],
                 "options": {"api": t["api"]}}
+        if host_added:
+            meta["host_added_variables"] = host_added
         return meta, results
 
     def bash(self, t, recs, env):

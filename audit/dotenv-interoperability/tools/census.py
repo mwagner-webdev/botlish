@@ -13,7 +13,9 @@ fixed; CI fails on a difference); the hand corpus runs through every target
 (both environment modes), the generated corpus through the reference
 targets (clean mode), the minimized corpus (both modes), the portable
 candidates (clean); six seeded round trips check the two portable profiles;
-then analyze.py, portable.py analyze, the matrix and the portable report.
+then analyze.py, portable.py analyze, the matrix and the portable report. A
+round trip's differences are recorded (results/portable/roundtrip-N.json),
+never a reason to stop: tools/compare.py decides what fails.
 --host-only skips what needs the Linux-only pins (cross-version targets);
 --any-runtime lets a host runtime differ from versions.json (macOS's Bash
 3.2, Git for Windows' Bash), recorded with the results.
@@ -37,10 +39,10 @@ MULTILINE_SEEDS = [101, 102, 103]
 ANY_RUNTIME = "--any-runtime" in sys.argv
 
 
-def py(*args):
+def py(*args, check=True):
     print("[census] tools/" + " ".join(str(a) for a in args), flush=True)
     extra = ["--any-runtime"] if ANY_RUNTIME and args[0] == "run.py" else []
-    subprocess.run([sys.executable, "-I", str(TOOLS / args[0])] + [str(a) for a in args[1:]] + extra, check=True)
+    subprocess.run([sys.executable, "-I", str(TOOLS / args[0])] + [str(a) for a in args[1:]] + extra, check=check)
 
 
 def all_(host_only):
@@ -55,10 +57,11 @@ def all_(host_only):
     py("portable.py", "corpus")
     py("run.py", "--corpus", "portable", "--targets", ref, "--modes", "clean")
     for s in SINGLE_SEEDS:
-        py("portable.py", "roundtrip", "--seed", s, "--files", 300, *(["--any-runtime"] if ANY_RUNTIME else []))
+        py("portable.py", "roundtrip", "--seed", s, "--files", 300, *(["--any-runtime"] if ANY_RUNTIME else []),
+           check=False)
     for s in MULTILINE_SEEDS:
         py("portable.py", "roundtrip", "--seed", s, "--files", 300, "--multiline",
-           *(["--any-runtime"] if ANY_RUNTIME else []))
+           *(["--any-runtime"] if ANY_RUNTIME else []), check=False)
     for c in ("hand", "generated", "minimized"):
         py("analyze.py", "--corpus", c)
     py("portable.py", "analyze")

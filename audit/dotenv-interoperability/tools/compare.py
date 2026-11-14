@@ -91,7 +91,11 @@ def short(o):
 def compare_portable(fresh, lines):
     bad = 0
     be = common.load_json(BASE / "portable" / "encodings.json")
-    fe = common.load_json(Path(fresh) / "portable" / "encodings.json")
+    fpath = Path(fresh) / "portable" / "encodings.json"
+    if not fpath.exists():
+        lines.append("- the portable analysis did not run (no portable/encodings.json)")
+        return 1
+    fe = common.load_json(fpath)
     for cat, row in be["categories"].items():
         was = row["classification"]["class"]
         now = fe["categories"].get(cat, {}).get("classification", {}).get("class")
