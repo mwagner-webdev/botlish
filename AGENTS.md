@@ -6865,14 +6865,27 @@ the Botlish runtime, which is Rust too
 whose only global definitions are the unit's C ABI: on ELF GNU `ld -r`,
 `objcopy --keep-global-symbols` and Rust's COMDAT group renamed (B3), on
 Mach-O Apple's `ld -r -S -force_load` with an exported-symbols list and
-`libtool -static -D`. Keep it so:
+a platform load command (`-platform_version`), archived by `libtool
+-static -D`. Keep it so:
 
-* Never ship or link a raw cargo static library beside the runtime: it
-  fails to link (duplicate allocator shim, or `rust_eh_personality` when
-  the toolchains differ) or, with the system linker, links and silently
-  binds the runtime's own allocations to the unit's allocator (the
-  report's section 3; `ral-raw-*`). A new Rust unit goes through
-  `rustunit::localize`, never a recipe of its own.
+* Never ship or link a raw cargo static library beside the runtime: on
+  Linux it fails to link (duplicate allocator shim, or
+  `rust_eh_personality` when the toolchains differ) or, with the system
+  linker, links and silently binds the runtime's own allocations to the
+  unit's allocator; on macOS Apple's ld reports no duplicate at all, and
+  it links silently with either toolchain (the report's section 5.2;
+  `ral-raw-*`). A new Rust unit goes through `rustunit::localize`, never a
+  recipe of its own.
+* Mach-O symbols are read with `nm --no-llvm-bc`: the Rust standard
+  library's objects embed LLVM bitcode, which Apple's nm otherwise reads
+  instead of the symbol table and cannot parse when rustc's LLVM is newer
+  than Xcode's (`ral-nm-bitcode-reader-off`). A private external is a
+  global definition for the link (`ral-macho-private-extern`), and an nm
+  that fails after printing is accepted only when all it said is that a
+  member has no symbols (`ral-nm-partial-refused`): never a partial list.
+* Every `ld -r` output on Mach-O records its platform and deployment
+  target (`ral-localized-build-version`); Apple's ld -r writes none
+  unless told, and every final link would warn.
 * Visibility is the platform linker's decision, read back with nm
   (`rustunit::check`): never compute a binding, a visibility or a symbol
   list in Tcl beyond the keep globs, and never weaken the check to make an

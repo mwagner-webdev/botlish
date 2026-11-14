@@ -50,7 +50,8 @@ by `tools/rust-unit.tcl`, packaged in one multi-target `.botpkg` with its
 Linux build and installed by the package manager links into an
 independently compiled Botlish executable beside the runtime's own Rust,
 with both Botlish linkers, on both hosts, and in a clean-room consumer
-with no Rust toolchain on each [CI, run 43553765190: all 14 jobs green].
+with no Rust toolchain on each [CI: runs 43553765190 at `40dbd064` and
+43574703630 at `977cdd2c`, all 14 jobs green in each].
 The executables hold one
 global `rust_eh_personality` and allocator shim (the runtime's), the
 unit's own as local symbols, no global symbol of the unit's standard
@@ -120,6 +121,14 @@ and the system-linked executables: `argv-focused-valid-fuzz`), tests
 43489783453 (smoke, system linker, one acceptance shard). None of those
 tests is one this branch adds or changes. Every failure this branch's own
 runs reported was read and attributed one by one (sections 6, 8, 12).
+
+**This branch's CI at its last code commit** (`977cdd2c`) [CI]: the four
+test workflows' branch runs (each host's canary, which runs the test files
+this branch changes) passed -- tests 43574703609, tests (linux arm64)
+43574703613, tests (macos arm64) 43574703675, tests (windows x86-64)
+43574703643 -- and `rust archive link` 43574703630 passed all 14 jobs. The
+full suites run only on main or when dispatched (AGENTS.md); they were not
+dispatched on this branch.
 
 ## 3. Relevant existing architecture
 
@@ -269,8 +278,9 @@ a silently merged runtime.
 ELF step):
 
 ```
-ld -r -arch arm64 -S -force_load RAW -o whole.o           # read the globals
-ld -r -arch arm64 -S -force_load RAW -exported_symbols_list keep.txt -o unit.o
+P="-platform_version macos 11.0 $(xcrun --show-sdk-version)"
+ld -r -arch arm64 $P -S -force_load RAW -o whole.o        # read the globals (nm --no-llvm-bc)
+ld -r -arch arm64 $P -S -force_load RAW -exported_symbols_list keep.txt -o unit.o
 ZERO_AR_DATE=1 libtool -static -D -no_warning_for_no_symbols -o OUT unit.o
 ```
 
@@ -280,8 +290,9 @@ extern, and `ld -r` without `-keep_private_externs` turns private
 externs into local symbols; `-S` leaves debug information out. Mach-O
 has no COMDAT groups, so the ELF renaming step has no counterpart. The
 tool computes nothing about binding or visibility itself: `rustunit::check`
-reads the result with `nm -m` and requires the global definitions to be
-exactly the kept ones.
+reads the result with `nm -m --no-llvm-bc` and requires the global
+definitions -- external, weak external or private external -- to be
+exactly the kept ones. Sections 6.1 and 6.2 say why each flag is there.
 
 ### 6.1 Apple's nm and Rust's embedded bitcode [CI]
 
@@ -534,7 +545,10 @@ not static only. `pn-macos-static-no-deployment-notes` (a Mach-O static
 archive bundled for macos-aarch64, added and planned from any host)
 reproduced both notes against the old code and pins their absence;
 `pn-macos-deployment-requirements` still requires them for a dylib; the
-mutant `static-deployment-notes` brings the old condition back.
+mutant `static-deployment-notes` brings the old condition back. Run
+43574703630 (`977cdd2c`): the macOS clean-room consumer's `add` and
+`native plan` print no such note, the archives byte for byte the previous
+run's.
 
 ### 8.4 What is not verified on macOS [inspection]
 
@@ -717,7 +731,7 @@ by `mutate.tcl` on a private copy of the tree):
 | `install-weak-counted` | the installation counts weak as duplicate | `pn-index-weak-elf`, `pn-index-weak-macho-install` | killed | killed (43553765190; it survived in 43516411953, before the macOS installation test existed) |
 | `install-all-weak` | the installation exempts everything | the same, `pn-native-conflicts` | killed | killed (43553765190; as above) |
 | `audit-weak-counted` | the pack audit counts weak as duplicate | `ral-pack-weak-beside-strong` | killed | killed (43516411953, 43553765190) |
-| `static-deployment-notes` | a static archive's deployment notes come back | `pn-macos-static-no-deployment-notes` | killed | PENDING (the run after `40dbd064`) |
+| `static-deployment-notes` | a static archive's deployment notes come back | `pn-macos-static-no-deployment-notes` | killed | killed (43574703630) |
 
 The first macOS mutant run is the reason two tests exist: three mutants
 "survived" there only because the one test naming them was ELF-only and
@@ -815,11 +829,18 @@ both platforms; without one, Apple's ld refuses it.
 ## 15. Rejected approaches and tradeoffs
 
 * **Shipping the raw cargo archive** (no localization). Rejected by
-  evidence, not by assumption: section 5.2 -- duplicate definitions, or a
-  link that succeeds and binds the runtime's allocator to the unit's.
-* **Relying on "first archive wins".** With one rustc, the GNU system
-  link succeeds by archive order -- which is exactly what silently
-  rebinds the runtime's allocator shim. Order is not isolation.
+  evidence, not by assumption: section 5.2 -- on Linux duplicate
+  definitions or a silently rebound allocator; on macOS a silent link in
+  every case.
+* **Relying on "first archive wins".** That is Apple's ld's whole rule
+  and the GNU system link's with one rustc: it is exactly what rebinds the
+  runtime's allocator shim, or makes one copy's personality routine serve
+  both. Order is not isolation.
+* **Falling back to other `ld -r` input forms** (`-all_load`, extracted
+  members) when `-force_load` seemed to produce nothing: added after the
+  first macOS run, removed when the matrix showed `-force_load` had worked
+  every time and the empty symbol list was nm's bitcode reader (section
+  6.1). The fix belongs where the fault is.
 * **Renaming or prefixing the unit's Rust symbols** (objcopy
   `--prefix-symbols`, a custom rustc `-C metadata`): changes nothing about
   `rust_eh_personality` and other unmangled C-ABI symbols of std, and
@@ -906,13 +927,13 @@ Production and tooling:
 
 | File | Change |
 |---|---|
-| `tools/rust-unit.tcl` | new: `rustunit::localize` (ELF: the sequence http used; Mach-O: `ld -r -exported_symbols_list`, `libtool -static -D`), `globals`, `undefined`, `check` |
+| `tools/rust-unit.tcl` | new: `rustunit::localize` (ELF: the sequence http used; Mach-O: `ld -r -force_load -exported_symbols_list -platform_version`, `libtool -static -D`), `globals`, `undefined`, `check`, `buildVersion`; Mach-O symbols read with `nm --no-llvm-bc`, private externals counted, partial nm output refused |
 | `tools/http-package.tcl` | its unit's ELF localization is `rustunit::localize` (byte-identical output, checked: `6f1f0649...8784` before and after) |
 | `pm/binary.tcl` | Apple's BSD symbol index read and checked (F-16); index entries checked against member offsets; Mach-O underscore stripped per member; weak definitions recorded (ELF `.symtab` of relocatable members, Mach-O `N_WEAK_DEF`) and an archive's `weak` names |
 | `pm/native.tcl` | the installation's native closure skips weak definitions in its duplicate check; archive facts carry `weak`; a macOS static archive gets no install-name or signature note |
 | `pm/author.tcl` | the pack-time audit skips weak definitions; no second underscore strip |
-| `.github/workflows/rust-archive-link.yml` | new (section 11) |
-| `AGENTS.md` | "Rust native units (tools/rust-unit.tcl)": the rules and what to run |
+| `.github/workflows/rust-archive-link.yml` | new: the experiments, the http unit, the release units twice per host, the package, the reproducibility check, both packaged compilers and both clean-room consumers (sections 10-14) |
+| `AGENTS.md` | "Rust native units (tools/rust-unit.tcl)": the rules (the Mach-O traps among them) and what to run |
 
 Tests, fixture and evidence:
 
