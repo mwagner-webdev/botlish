@@ -1,0 +1,5 @@
+# probe.bot -- the entry of the census's emits probe: loading the emitters
+# checks every claim (tools/claims: audit/csv-emission/tools/claims.tcl).
+import dotenv_emit
+
+dotenv_emit::Pair {key: "APP_NAME", value: "census app"}

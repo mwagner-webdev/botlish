@@ -1,0 +1,4 @@
+# Ruby dotenv for audit/dotenv-interoperability (bundle install --frozen into the census cache).
+source "https://rubygems.org"
+
+gem "dotenv", "2.8.1"

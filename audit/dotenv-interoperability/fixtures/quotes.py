@@ -1,0 +1,38 @@
+# Quotes: single, double, backtick; empty, nested, escaped, unterminated,
+# text around them.
+
+Q = "quotes"
+
+F("quote-unquoted", Q, "An unquoted value", "KEY=value\n", intended={"KEY": "value"})
+F("quote-single", Q, "A single-quoted value", "KEY='value'\n", intended={"KEY": "value"})
+F("quote-double", Q, "A double-quoted value", 'KEY="value"\n', intended={"KEY": "value"})
+F("quote-backtick", Q, "A backtick-quoted value", "KEY=`value`\n", intended=None)
+F("quote-single-empty", Q, "An empty single-quoted value", "KEY=''\n", intended={"KEY": ""})
+F("quote-double-empty", Q, "An empty double-quoted value", 'KEY=""\n', intended={"KEY": ""})
+F("quote-backtick-empty", Q, "An empty backtick-quoted value", "KEY=``\n", intended=None)
+F("quote-single-spaces", Q, "Spaces kept inside single quotes", "KEY='  a b  '\n", intended={"KEY": "  a b  "})
+F("quote-double-spaces", Q, "Spaces kept inside double quotes", 'KEY="  a b  "\n', intended={"KEY": "  a b  "})
+F("quote-double-in-single", Q, "A double quote inside single quotes", "KEY='a\"b'\n", intended={"KEY": 'a"b'})
+F("quote-single-in-double", Q, "A single quote inside double quotes", "KEY=\"a'b\"\n", intended={"KEY": "a'b"})
+F("quote-escaped-double", Q, "An escaped double quote inside double quotes", 'KEY="a\\"b"\n', intended={"KEY": 'a"b'})
+F("quote-escaped-single", Q, "A backslash-quote inside single quotes", "KEY='a\\'b'\n", intended=None)
+F("quote-unterminated-double", Q, "An unterminated double quote", 'KEY="abc\n', intended=None)
+F("quote-unterminated-single", Q, "An unterminated single quote", "KEY='abc\n", intended=None)
+F("quote-unterminated-backtick", Q, "An unterminated backtick", "KEY=`abc\n", intended=None)
+F("quote-unterminated-then-more", Q, "An unterminated double quote followed by assignments",
+  'KEY="abc\nNEXT=1\nLAST=2\n', intended=None)
+F("quote-text-after-double", Q, "Text right after a closing double quote", 'KEY="abc"def\n', intended=None)
+F("quote-text-after-double-space", Q, "A word after a closing double quote and a space", 'KEY="abc" def\n', intended=None)
+F("quote-text-after-single", Q, "Text right after a closing single quote", "KEY='abc'def\n", intended=None)
+F("quote-embedded-unquoted-double", Q, "Double quotes inside an unquoted value", 'KEY=a"b"c\n', intended=None)
+F("quote-embedded-unquoted-single", Q, "Single quotes inside an unquoted value", "KEY=a'b'c\n", intended=None)
+F("quote-mismatched", Q, "Opening double, closing single", "KEY=\"abc'\n", intended=None)
+F("quote-lone-double", Q, "A value that is one double quote", 'KEY="\n', intended=None)
+F("quote-four-doubles", Q, 'A value of four double quotes: """"', 'KEY=""""\n', intended=None)
+F("quote-space-before-open", Q, "A space between = and the opening quote", 'KEY= "abc"\n', intended=None)
+F("quote-trailing-space-after", Q, "Spaces after the closing quote", 'KEY="abc"   \n', intended={"KEY": "abc"})
+F("quote-adjacent-concat", Q, "Adjacent quoted parts: 'a'\"b\"", "KEY='a'\"b\"\n", intended=None)
+F("quote-double-unicode", Q, "Non-ASCII inside double quotes", 'KEY="caf\u00e9 \u2603"\n', intended={"KEY": "caf\u00e9 \u2603"})
+F("quote-single-dollar", Q, "A dollar sign inside single quotes", "KEY='$value'\n", intended={"KEY": "$value"})
+F("quote-single-backslash-n", Q, "Backslash-n inside single quotes", "KEY='a\\nb'\n", intended={"KEY": "a\\nb"})
+F("quote-double-hash-escape", Q, "A backslash before # inside double quotes", 'KEY="a\\#b"\n', intended=None)

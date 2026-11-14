@@ -1,0 +1,254 @@
+name: dotenv interoperability
+
+# EMISSION-DOTENV-INTEROPERABILITY-CENSUS-MILESTONE-1.md: the dotenv census's
+# reference implementations (GNU Bash, Node's util.parseEnv and --env-file,
+# npm dotenv, Bun, python-dotenv, Ruby dotenv, dotenv.net, DotNetEnv,
+# dotenv-java -- and the older releases of the cross-version targets),
+# installed from their pinned locks (audit/dotenv-interoperability/tools/
+# setup.py) and run on every fixture.
+#
+# * linux: the baseline. A fresh census, compared with the committed results
+#   (tools/compare.py --policy baseline): any behavioral drift, a version
+#   that differs from its pin, an adapter failure or a missing oracle fails.
+#   It also runs the self-test, the emits probe (the portable profiles as
+#   declared recognizers, certified by the Botlish compiler, and their
+#   negative controls) and reports newer releases (informational).
+# * hosts (macOS arm64, Windows x86-64): the same census on another operating
+#   system (--host-only: no cross-version pins), compared with the portable
+#   policy: differences are host observations, reported; a portable category
+#   that stops being universal, or a portable round trip that reads back
+#   differently, fails.
+# * realworld: the pinned public example files, parsed by the pure targets
+#   (never sourced, never executed), compared with results/realworld.json.
+#
+# Every job uploads its fresh results tree and comparison report.
+
+on:
+  push:
+    paths:
+      - "audit/dotenv-interoperability/**"
+      - ".github/workflows/dotenv-interoperability.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push (or run on the same ref) cancels the running one, on main
+# too (CI-RUNS.md).
+concurrency:
+  group: dotenv-interoperability-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  LANG: C.utf8
+  LC_ALL: C.utf8
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+  DOTNET_NOLOGO: "1"
+
+jobs:
+  linux:
+    name: census (linux x86-64, baseline)
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: audit/dotenv-interoperability
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3.6"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: audit/dotenv-interoperability/oracles/dotnet/global.json
+
+      - name: Cache the census's pinned downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/botlish/dotenv-census/dl
+          key: dotenv-census-dl-${{ runner.os }}-${{ hashFiles('audit/dotenv-interoperability/versions.json') }}
+
+      - name: Install the reference implementations (pinned, verified)
+        run: |
+          gem install bundler -v 4.0.18 --no-document
+          python3 -I tools/setup.py install
+
+      - name: Host runtimes
+        run: |
+          bash --version | head -1
+          ruby -v; python3 --version; java -version 2>&1 | head -1; dotnet --version
+
+      - name: Self-test (no reference implementation needed)
+        run: python3 -I tools/selftest.py
+
+      - name: The census
+        run: DOTENV_CENSUS_RESULTS="$RUNNER_TEMP/fresh" python3 -I tools/census.py all
+
+      - name: Compare with the committed baseline
+        run: |
+          python3 -I tools/compare.py --fresh "$RUNNER_TEMP/fresh" --policy baseline \
+            --report "$RUNNER_TEMP/fresh/compare.md"
+      - name: Summary
+        if: always()
+        run: |
+          [ -f "$RUNNER_TEMP/fresh/compare.md" ] && cat "$RUNNER_TEMP/fresh/compare.md" >> "$GITHUB_STEP_SUMMARY"
+          [ -f "$RUNNER_TEMP/fresh/matrix.md" ] && cat "$RUNNER_TEMP/fresh/matrix.md" >> "$GITHUB_STEP_SUMMARY"
+          true
+
+      - name: Install Tcl 9.0.1 (the emits probe's compiler)
+        working-directory: .
+        run: |
+          set -eu
+          cd /tmp
+          base=http://archive.ubuntu.com/ubuntu/pool/universe
+          curl -fsSLO "$base/libt/libtommath/libtommath1_1.3.0-1_amd64.deb"
+          curl -fsSLO "$base/t/tcl9.0/libtcl9.0_9.0.1+dfsg-1_amd64.deb"
+          curl -fsSLO "$base/t/tcl9.0/tcl9.0_9.0.1+dfsg-1_amd64.deb"
+          sudo dpkg -i libtommath1_1.3.0-1_amd64.deb libtcl9.0_9.0.1+dfsg-1_amd64.deb tcl9.0_9.0.1+dfsg-1_amd64.deb
+
+      - name: The emits probe (claims certified, every mutant rejected)
+        run: |
+          DOTENV_CENSUS_RESULTS="$RUNNER_TEMP/fresh" python3 -I tools/emits.py
+
+      - name: Newer releases than the pins (informational)
+        if: always()
+        continue-on-error: true
+        run: |
+          echo '### Pins against the registries' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          python3 -I tools/setup.py check-latest | tee -a "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dotenv-census-linux
+          path: ${{ runner.temp }}/fresh
+          retention-days: 30
+
+  hosts:
+    name: census (${{ matrix.name }}, portable policy)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            name: macos arm64
+          - os: windows-2025
+            name: windows x86-64
+    defaults:
+      run:
+        working-directory: audit/dotenv-interoperability
+        shell: bash
+    steps:
+      - name: Keep the repository's bytes
+        run: git config --global core.autocrlf false
+        working-directory: .
+
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3.6"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: audit/dotenv-interoperability/oracles/dotnet/global.json
+
+      - name: Which Bash
+        run: |
+          # Windows: Git for Windows' MSYS Bash itself (usr\bin: its bin\bash.exe
+          # launcher would put /usr/bin back on PATH), never System32's WSL
+          # launcher. macOS: the system's /bin/bash (3.2), what `source .env`
+          # runs there.
+          if [ "$RUNNER_OS" = Windows ]; then
+            echo "DOTENV_CENSUS_BASH=C:\\Program Files\\Git\\usr\\bin\\bash.exe" >> "$GITHUB_ENV"
+          else
+            echo "DOTENV_CENSUS_BASH=/bin/bash" >> "$GITHUB_ENV"
+          fi
+
+      - name: Install the reference implementations (pinned, verified)
+        run: |
+          gem install bundler -v 4.0.18 --no-document
+          python -I tools/setup.py install node npm python ruby java dotnet
+
+      - name: Self-test
+        run: python -I tools/selftest.py
+
+      - name: The census (this host)
+        run: DOTENV_CENSUS_RESULTS="$RUNNER_TEMP/fresh" python -I tools/census.py all --host-only --any-runtime
+
+      - name: Compare (portable policy)
+        run: |
+          python -I tools/compare.py --fresh "$RUNNER_TEMP/fresh" --policy portable \
+            --report "$RUNNER_TEMP/fresh/compare.md"
+
+      - name: Summary
+        if: always()
+        run: |
+          [ -f "$RUNNER_TEMP/fresh/compare.md" ] && cat "$RUNNER_TEMP/fresh/compare.md" >> "$GITHUB_STEP_SUMMARY"
+          true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dotenv-census-${{ runner.os }}
+          path: ${{ runner.temp }}/fresh
+          retention-days: 30
+
+  realworld:
+    name: real-world example files (pure parsers only)
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: audit/dotenv-interoperability
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3.6"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: audit/dotenv-interoperability/oracles/dotnet/global.json
+
+      - name: Install the reference implementations
+        run: |
+          gem install bundler -v 4.0.18 --no-document
+          python3 -I tools/setup.py install
+
+      - name: Fetch (pinned by commit and SHA-256), parse, report
+        run: |
+          python3 -I tools/realworld.py run
+          DOTENV_CENSUS_RESULTS="$RUNNER_TEMP/fresh" python3 -I tools/realworld.py report
+          diff -u results/realworld.json "$RUNNER_TEMP/fresh/realworld.json"

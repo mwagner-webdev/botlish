@@ -1,0 +1,19 @@
+{
+ "assignments": 1943,
+ "failures": {},
+ "files": 300,
+ "multiline": false,
+ "seed": 1,
+ "targets": [
+  "bash",
+  "bun",
+  "dotenvnet",
+  "dotnetenv",
+  "java",
+  "node-builtin",
+  "node-dotenv",
+  "node-envfile",
+  "python",
+  "ruby"
+ ]
+}

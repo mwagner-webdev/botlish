@@ -1,0 +1,8 @@
+{
+  "name": "dotenv-census-node-dotenv",
+  "private": true,
+  "description": "Pins npm dotenv for audit/dotenv-interoperability (installed with npm ci --ignore-scripts into the census cache, never into the repository).",
+  "dependencies": {
+    "dotenv": "17.4.2"
+  }
+}
