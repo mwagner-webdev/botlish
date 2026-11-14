@@ -571,7 +571,31 @@ mutate.tcl` 25 of 25 killed, `audit/enums/tools/mutate.tcl` 26 of 26,
 `audit/lexical-cleanup/tools/mutate.tcl` 24 of 24,
 `audit/context-affine/tools/mutate.tcl` 18 of 18.
 
-CI-RESULTS
+**(CI)** On the branch at 02b188e9 (workflows dispatched as AGENTS.md
+asks; state at 2026-11-14 00:40 UTC):
+
+| workflow | run | state |
+|---|---|---|
+| tests (linux x86-64) | 43521515930 | canary **succeeded** (every mutant applies, the warning gate, the changed test files first); the interp, compile, coverage, linker, golden and Rust jobs **pending** (queued) |
+| tests (linux arm64) | 43521520591 | canary **succeeded**; the other jobs **pending** |
+| tests (macos arm64) | 43521524495 | Linux control **succeeded**; the macOS smoke job and everything after it **pending** |
+| tests (windows x86-64) | 43521528557 | canary **succeeded**; smoke and root plans **pending** |
+| static-decisions | 43499634980 (at 32211f9f) | **succeeded**: no disagreement in any suite (section 11) |
+
+The shared runner pool was backed up for hours (main's own run at
+14937461 waited over an hour for its first expensive job), so the pending
+jobs are reported as pending, not passed. 32211f9f differs from 02b188e9
+only in comments, tests and documents, none of which a static decision
+reads.
+
+**Main's own state.** Main's latest tests run (43489783150, at 14937461,
+before this branch merged it) is red independently of this milestone:
+tests (compile) fails in argv.test and native-tcl-unicode.test (2 of 12,403
+tests), and the cranelift and cranelift-generic coverage, stub- and
+system-linked executable and GC-stress jobs fail as well. Both files pass
+in this container (rustc 1.97.0, section 15's local run); CI builds with
+the newer stable rustc. A failure this branch's runs show beyond main's
+list would be this milestone's to fix before a merge.
 
 ## 16. The mid-end kernel with payload-bearing nodes
 
