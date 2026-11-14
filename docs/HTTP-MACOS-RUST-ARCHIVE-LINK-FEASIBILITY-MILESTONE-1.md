@@ -274,8 +274,43 @@ tool that reads symbols through Apple's bitcode reader, would trip on it
 
 ### 6.2 What Apple's linker did [CI]
 
-PENDING (CI): the ld -r form that worked, the localized archive's `nm -m`
-facts, the final executable's symbols and exports.
+Run 43526167818 (`ca8e7b0b`), job `experiments (macos-aarch64)`, Xcode
+16.4 (ld-1167.5), the unit by rustc 1.100.0 and by 1.97.0:
+
+| Archive | Size | Global definitions | Undefined references |
+|---|---:|---:|---:|
+| raw (cargo's), rustc 1.100.0 | 19,011,152 | 2,345 | 441 |
+| localized, weak fallback kept | 11,897,480 | 13: `rl_*` and `botlish_event_post2` | 199 |
+| localized, http's weak reference | 11,897,440 | 12: `rl_*` | 200 (`botlish_event_post2` among them) |
+| raw, rustc 1.97.0 | 17,750,432 | 2,202 | 407 |
+| localized, rustc 1.97.0 | 11,011,040 | 13 | 194 |
+
+* `ld -r -force_load RAW` took the archive the first time; the
+  `-all_load` and extracted-members forms an earlier version tried after
+  it were never needed (the first runs' "no symbols" was nm's bitcode
+  failure, section 6.1) and were removed.
+* The localized archive is libtool's: an `__.SYMDEF SORTED` index and one
+  member, `librustlink.o`. About 9.8 MB of its 11.9 MB is the `__LLVM`
+  segment, the standard library's bitcode concatenated by `ld -r`.
+* Every program linked against it passes, with both linkers (section 11);
+  the executables hold one global `rust_eh_personality` and the unit's as
+  a local symbol.
+* **A platform load command was missing** [CI]. Apple's ld -r writes no
+  `LC_BUILD_VERSION` unless told one, and every final link warned:
+
+  ```
+  ld: warning: no platform load command found in
+    '.../rustlink/native/librustlink.a[2](librustlink.o)', assuming: macOS
+  ```
+
+  Harmless for a macOS link, but an object that does not say which
+  platform and deployment target it was built for is not a finished
+  unit. `rustunit::localize` now passes `-platform_version macos MIN SDK`
+  (MIN: `-macos`, else `MACOSX_DEPLOYMENT_TARGET`, else 11.0, rustc's for
+  aarch64-apple-darwin; the SDK: `xcrun --show-sdk-version`) to both
+  `ld -r` calls; `ral-localized-build-version` (macOS) requires
+  `LC_BUILD_VERSION` platform macOS, minos 11.0, and the mutant
+  `macho-no-platform` removes it. PENDING (CI): the run that shows it.
 
 ## 7. Weak-reference and callback findings
 
