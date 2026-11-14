@@ -1860,7 +1860,8 @@ proc native::lower::Program {hirProgram args} {
     set text "[join $header \n]\n\n[join $texts \n\n]\n"
     return [dict create text $text functions $infos statistics [Statistics $infos] \
         specialization $spec abiPlan $abiPlan shortPlan $shortPlan construction $construction structCensus [hir::escape::census $escape] \
-        transportFacts [hir::escape::transportFacts $escape] foldSlots [FoldSlotReport $hirProgram $spec $escape]]
+        transportFacts [hir::escape::transportFacts $escape] foldSlots [FoldSlotReport $hirProgram $spec $escape] \
+        escapeRounds [dict getdef $escape rounds 1]]
 }
 
 # The fold slots of ESCAPE (FOLD-VIRTUAL-STRUCT-STATE-MILESTONE-1.md), one

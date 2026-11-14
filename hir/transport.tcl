@@ -44,10 +44,13 @@ namespace eval hir::transport {
     # carries; with both off the lowering is the one before the milestone,
     # byte for byte. foldWidth is a fold slot's ceiling: a fold slot crosses
     # no call boundary, so no transport score applies; its cost is register
-    # pressure and code inside one function, measured to win at run time at
-    # every width up to 256 fields (the report's width section), the
-    # ceiling a resource bound on code size and backend time, not a tuned
-    # threshold.
+    # pressure, code and backend time inside one function. Measured (the
+    # report's width section): faster at run time at every width up to 256
+    # fields; code smaller up to 8 fields and 4-15% larger beyond; Cranelift's
+    # compile time neutral up to 16 fields, up to +39% at 32-64, and more than
+    # doubled at 128-256 for a gain per iteration that stays near 1.2x. The
+    # ceiling (64) is that compile-time bound -- not the local ceiling (16),
+    # which would decline 17-64-field folds that run 1.25-1.9x faster.
     variable defaults {
         policy transport
         localWidth 16
