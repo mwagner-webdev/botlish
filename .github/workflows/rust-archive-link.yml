@@ -148,10 +148,13 @@ jobs:
           foreach linker {rustc system} {
               set l [rustlink::link $app with_provider.bot -linker $linker]
               file rename -force [dict get $l exe] [file join $out with_provider-$linker]
-              puts "== linked with $linker: [file join $out with_provider-$linker]"
+              puts "== linked with $linker: [file join $out with_provider-$linker]; its linker's warnings about a missing platform load command: [regexp -all {no platform load command} [dict get $l output]]"
           }
           EOF
           cd "$out"
+          # Facts only from here: a tool that exits non-zero after printing
+          # (nm on an archive with an empty member) fails nothing.
+          set +e +o pipefail
           # Apple's nm reads the Rust standard library's embedded LLVM
           # bitcode (of an LLVM newer than Xcode's) unless told not to.
           nm() { command nm --no-llvm-bc "$@"; }
@@ -163,6 +166,7 @@ jobs:
           echo "== nm -m: http's notify.c (weakref) unit"; nm -m weakref/librustlink.a | grep -E 'botlish_event_post2' || true
           echo "== nm -m: counts"; nm -m librustlink.a | awk '{for(i=1;i<=NF;i++) if ($i=="external") {k=$(i-1); print (k=="private"||k=="non-") ? k"external" : "external"}}' | sort | uniq -c
           echo "== otool -hv (the member)"; otool -hv librustlink.a | head -8
+          echo "== LC_BUILD_VERSION (the member)"; otool -l librustlink.a | grep -A5 LC_BUILD_VERSION
           for exe in with_provider-rustc with_provider-system; do
             echo "== $exe"; file "$exe"; otool -L "$exe"; otool -hv "$exe" | tail -2
             echo "botlish_event_post2:"; nm -m "$exe" | grep botlish_event_post2 || true
@@ -239,8 +243,18 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
           grep -q $'^surface-equals-abi\t1' "$RUNNER_TEMP/http/RESULTS.txt"
-          grep -q $'^link-rustc\tok.*verdict\tpass' "$RUNNER_TEMP/http/RESULTS.txt"
-          grep -q $'^link-system\tok.*verdict\tpass' "$RUNNER_TEMP/http/RESULTS.txt"
+          # With the provider called: links and runs everywhere.
+          grep -q $'^link-called-rustc\tok.*verdict\tpass' "$RUNNER_TEMP/http/RESULTS.txt"
+          grep -q $'^link-called-system\tok.*verdict\tpass' "$RUNNER_TEMP/http/RESULTS.txt"
+          # Without a provider: ELF resolves http's weak reference to null;
+          # Apple's ld refuses the undefined weak import, and nothing else.
+          if [[ $(uname -s) == Darwin ]]; then
+            grep -q $'^link-none-rustc\tfailed\tundefined\tbotlish_event_post2\t' "$RUNNER_TEMP/http/RESULTS.txt"
+            grep -q $'^link-none-system\tfailed\tundefined\tbotlish_event_post2\t' "$RUNNER_TEMP/http/RESULTS.txt"
+          else
+            grep -q $'^link-none-rustc\tok.*verdict\tpass' "$RUNNER_TEMP/http/RESULTS.txt"
+            grep -q $'^link-none-system\tok.*verdict\tpass' "$RUNNER_TEMP/http/RESULTS.txt"
+          fi
 
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() }}
@@ -248,7 +262,7 @@ jobs:
           name: http-unit-${{ matrix.host }}
           path: |
             ${{ runner.temp }}/http/RESULTS.txt
-            ${{ runner.temp }}/http/probe/probe.bot
+            ${{ runner.temp }}/http/probe/probe_*.bot
           if-no-files-found: warn
 
   units:

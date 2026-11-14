@@ -10,7 +10,7 @@
 # localized archive and runs none of this.
 #
 #   rustunit::localize RAW OUT -format elf|macho -keep GLOBS ?-require NAMES?
-#                      ?-label LABEL? ?-arch ARCH? ?-member NAME.o?
+#                      ?-label LABEL? ?-arch ARCH? ?-member NAME.o? ?-macos MIN?
 #       RAW, the archive cargo made, into OUT, a deterministic archive of
 #       one relocatable object: global definitions matching GLOBS are kept
 #       (C names: without Mach-O's leading underscore), every other one
@@ -20,7 +20,7 @@
 #       link). MEMBER: the object's name in OUT (default OUT's root name
 #       with .o). Returns the kept names.
 #   rustunit::globals FILE ?-format F?    FILE's global definitions (C names),
-#                                         private externs and locals excluded
+#                                         locals excluded
 #   rustunit::undefined FILE ?-format F?  FILE's undefined references
 #   rustunit::check ARCHIVE NAMES ?-format F?
 #       an error unless ARCHIVE's global definitions are exactly NAMES
@@ -34,8 +34,10 @@
 # this procedure, unchanged, so its archives are byte for byte what they
 # were.
 #
-# Mach-O (macOS): Apple's ld -r -S with the archive force-loaded and an
-# exported-symbols list: every global definition the list does not name
+# Mach-O (macOS): Apple's ld -r -S with the archive force-loaded, the
+# platform and deployment target (-platform_version: ld -r writes none
+# otherwise) and an exported-symbols list: every global definition the
+# list does not name
 # becomes private extern, which ld -r (without -keep_private_externs) makes
 # a local symbol; the debug information is left out (-S). Mach-O has no
 # COMDAT groups: a weak definition (Rust's generic instances, its
@@ -43,12 +45,7 @@
 # is archived by libtool -static -D (no dates, owners or modes;
 # ZERO_AR_DATE for the index). Nothing is computed about a symbol's binding
 # or visibility here: ld decides, and `check` reads the result with nm.
-namespace eval rustunit {
-    # The Mach-O input form the last localization used, and the forms that
-    # failed before it (MachoInputs).
-    variable macho
-    array set macho {form "" tried {}}
-}
+namespace eval rustunit {}
 
 proc rustunit::Fail {message} {
     return -code error -errorcode {RUSTUNIT} "rust-unit: $message"
@@ -208,56 +205,27 @@ proc rustunit::MachoObject {path how} {
     }
 }
 
-# How Apple's ld -r takes every member of the archive RAW: the first of
-# -force_load RAW, -all_load RAW, and RAW's members extracted (refused when
-# two share a name, which extraction would merge) whose relocatable link
-# into PROBE makes an object. Its input arguments; rustunit::macho(form)
-# records which it was.
-proc rustunit::MachoInputs {raw arch probe work} {
-    variable macho
-    set tried {}
-    foreach form {force_load all_load members} {
-        file delete -force $probe
-        switch -- $form {
-            force_load { set inputs [list -force_load $raw] }
-            all_load { set inputs [list -all_load $raw] }
-            members {
-                set names [split [string trim [exec ar -t $raw]] \n]
-                set names [lmap n $names {expr {[string match __.SYMDEF* $n] ? [continue] : $n}}]
-                if {[llength [lsort -unique $names]] != [llength $names]} {
-                    lappend tried "members: two members share a name"
-                    continue
-                }
-                set dir [file join $work members]
-                file delete -force $dir
-                file mkdir $dir
-                set here [pwd]
-                cd $dir
-                try {
-                    exec ar -x $raw
-                } finally {
-                    cd $here
-                }
-                set inputs [lmap n $names {file join $dir $n}]
-            }
+# The deployment target and the SDK a Mach-O unit's object records
+# (LC_BUILD_VERSION): Apple's ld -r writes no platform load command unless
+# told one, and every final link then warns "no platform load command
+# found ..., assuming: macOS". MIN: the -macos option, else
+# MACOSX_DEPLOYMENT_TARGET, else 11.0 (rustc's for aarch64-apple-darwin);
+# the SDK: xcrun's.
+proc rustunit::MacosPlatform {min} {
+    if {$min eq ""} {
+        set min 11.0
+        if {[info exists ::env(MACOSX_DEPLOYMENT_TARGET)] && $::env(MACOSX_DEPLOYMENT_TARGET) ne ""} {
+            set min $::env(MACOSX_DEPLOYMENT_TARGET)
         }
-        if {[catch {exec ld -r -arch $arch -S {*}$inputs -o $probe 2>@1} said]} {
-            lappend tried "$form: [string range $said 0 300]"
-            continue
-        }
-        if {[catch {MachoObject $probe "ld -r ($form)"} why]} {
-            lappend tried "$form: $why[expr {$said ne "" ? " ($said)" : ""}]"
-            continue
-        }
-        set macho(form) $form
-        set macho(tried) $tried
-        return $inputs
     }
-    Fail "Apple's ld -r took no form of $raw: [join $tried {; }]"
+    if {[catch {exec xcrun --show-sdk-version 2>@1} sdk]} {
+        Fail "xcrun --show-sdk-version: $sdk"
+    }
+    return [list -platform_version macos $min [string trim $sdk]]
 }
 
 proc rustunit::localize {raw out args} {
-    set opts [Options [dict create -format [HostFormat] -keep {} -require {} -label unit -arch arm64 -member ""] $args]
+    set opts [Options [dict create -format [HostFormat] -keep {} -require {} -label unit -arch arm64 -member "" -macos ""] $args]
     set format [dict get $opts -format]
     if {![file isfile $raw]} {
         Fail "$raw: no such archive"
@@ -292,17 +260,18 @@ proc rustunit::localize {raw out args} {
             exec ar rcsD $out $object
         } elseif {$format eq "macho"} {
             set arch [dict get $opts -arch]
-            # The whole unit once, to read its global definitions; then
-            # again with the list of those it keeps. The archive's every
-            # member goes in: by the first of these forms that makes an
-            # object (`MachoInputs`).
+            set platform [MacosPlatform [dict get $opts -macos]]
+            # The whole unit (-force_load: every member of the archive)
+            # once, to read its global definitions; then again with the
+            # list of those it keeps.
             set whole [file join $work whole.o]
-            set inputs [MachoInputs $raw $arch $whole $work]
+            exec ld -r -arch $arch {*}$platform -S -force_load $raw -o $whole 2>@stderr
+            MachoObject $whole "ld -r -force_load"
             set kept [Matching [Symbols $whole macho 1] [dict get $opts -keep]]
             set keep [file join $work exported.txt]
             WriteLines $keep [lmap s $kept {string cat _ $s}]
-            exec ld -r -arch $arch -S {*}$inputs -exported_symbols_list $keep -o $object 2>@stderr
-            MachoObject $object "ld -r [join $inputs] -exported_symbols_list"
+            exec ld -r -arch $arch {*}$platform -S -force_load $raw -exported_symbols_list $keep -o $object 2>@stderr
+            MachoObject $object "ld -r -force_load -exported_symbols_list"
             file delete -force $out
             set saved [expr {[info exists ::env(ZERO_AR_DATE)] ? [list 1 $::env(ZERO_AR_DATE)] : {0 {}}}]
             set ::env(ZERO_AR_DATE) 1

@@ -47,9 +47,19 @@
 ?? macos-*
 ## tools/rust-unit.tcl
 <<<<
-            exec ld -r -arch $arch -S {*}$inputs -exported_symbols_list $keep -o $object 2>@stderr
+            exec ld -r -arch $arch {*}$platform -S -force_load $raw -exported_symbols_list $keep -o $object 2>@stderr
 ====
-            exec ld -r -arch $arch -S {*}$inputs -o $object 2>@stderr
+            exec ld -r -arch $arch {*}$platform -S -force_load $raw -o $object 2>@stderr
+>>>>
+
+@@ macho-no-platform Mach-O: ld -r without -platform_version: the localized object records no platform, and every final link warns that it assumes macOS
+!! ral-localized-build-version
+?? macos-*
+## tools/rust-unit.tcl
+<<<<
+            set platform [MacosPlatform [dict get $opts -macos]]
+====
+            set platform {}
 >>>>
 
 @@ keep-everything every global definition matches the keep list: the localized archive is the raw one's surface

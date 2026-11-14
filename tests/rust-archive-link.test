@@ -134,6 +134,13 @@ test ral-kept-glob-misses {a keep list that misses an export leaves it local: a 
         [regexp {rl_toolchain} [dict get $c error]]
 } -result {0 {link failed} 1}
 
+testConstraint ralMachoHost [expr {[testConstraint rustlinkHost] && $::ralMacho}]
+test ral-localized-build-version {Mach-O: the localized object records its platform and deployment target (LC_BUILD_VERSION: macOS, 11.0) -- Apple's ld -r writes none unless told, and every final link would warn "no platform load command found ..., assuming: macOS"} -constraints ralMachoHost -body {
+    set loads [exec otool -l [ralLocalized weakdef]]
+    regexp {cmd LC_BUILD_VERSION.*?platform (\S+).*?minos (\S+)} $loads -> platform minos
+    list [expr {[info exists platform] && $platform in {1 MACOS macos}}] [expr {[info exists minos] ? $minos : "none"}]
+} -result {1 11.0}
+
 test ral-localized-comdat {ELF: the localized unit's COMDAT group of Rust's personality reference is renamed, so the final link never merges it with the runtime's (the http census's B3)} -constraints rustlinkHost -body {
     if {[rustlink::format] ne "elf"} {
         return {botlish_rustlink.DW.ref.rust_eh_personality}

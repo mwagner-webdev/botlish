@@ -6781,6 +6781,7 @@ tests/rust-archive-link.test ral-raw-surface pass
 tests/rust-archive-link.test ral-check-refuses-raw pass
 tests/rust-archive-link.test ral-require-missing-export pass
 tests/rust-archive-link.test ral-kept-glob-misses pass
+tests/rust-archive-link.test ral-localized-build-version skip
 tests/rust-archive-link.test ral-localized-comdat pass
 tests/rust-archive-link.test ral-native-add-symbols pass
 tests/rust-archive-link.test ral-native-add-wrong-target pass

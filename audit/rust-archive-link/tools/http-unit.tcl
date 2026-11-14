@@ -26,7 +26,9 @@
 # its archives declared `static at` beside it) that opens the bridge, asks
 # the provider's API version, makes a client trusting the system bundle (a
 # BoringSSL SSL_CTX, its store loaded) and closes everything is linked with
-# both Botlish linkers and run. OUTDIR/RESULTS.txt records what happened.
+# both Botlish linkers and run -- without a provider of the event loop's
+# botlish_event_post2, with one declared, and with one called.
+# OUTDIR/RESULTS.txt records what happened.
 set here [file dirname [file normalize [info script]]]
 source [file join $here rustlink.tcl]
 source [file join $rustlink::root tools http-package.tcl]
@@ -165,7 +167,7 @@ if {$format eq "elf"} {
     record raw-unit [file size $raw] [sha256 $raw] "[llength [rustunit::globals $raw -format macho]] global definitions"
     set unit [file join $native libbotlish_http.a]
     rustunit::localize $raw $unit -format macho -keep {bh_*} -label botlish_http -member botlish_http.o
-    record ld-r-form $rustunit::macho(form) [join $rustunit::macho(tried) "; "]
+    record build-version [regexp -inline {cmd LC_BUILD_VERSION.*?platform \S+.*?minos \S+.*?sdk \S+} [exec otool -l $unit]]
     set links "extern c library \"botlish_http\" static at \"native/libbotlish_http.a\"\nextern c library \"crypto\" static at \"native/libcrypto.a\"\nextern c library \"ssl\" static at \"native/libssl.a\"\nextern c library \"botlish_boringssl_identity\" static at \"native/libbotlish_boringssl_identity.a\"\nextern c library \"c++\"\n"
 }
 set unit [file join $native libbotlish_http.a]
@@ -179,20 +181,26 @@ foreach probe {botlish_event_post2 rust_eh_personality ___gxx_personality_v0 __g
 }
 record undefined-provider-identity [llength [lsearch -all -glob $undefined botlish_boringssl_*]]
 
-# The probe program.
+# The probe programs, one application (OUTDIR/probe): the unit and its
+# provider's archives, and the fixture's C provider of the event loop's
+# integration point botlish_event_post2 (audit/rust-archive-link/provider:
+# the role the event loop's driver plays beside http), in three forms --
+# none: no provider (http's weak reference must resolve without one);
+# declared: the provider's archive declared, nothing of it called (does
+# the unit's weak reference alone take the provider's member?); called:
+# the provider declared and called, as a driver's own calls into its C
+# adapter do in a real program.
+file copy -force [rustlink::provider] [file join $native librustlink_provider.a]
+set provider "extern c library \"rustlink_provider\" static at \"native/librustlink_provider.a\"\n"
 set ll std::ffi::c::LongLong
-set f [open [file join $out probe probe.bot] w]
-puts $f "# A link-feasibility probe of the http unit (written by audit/rust-archive-link/tools/http-unit.tcl)."
-puts $f "import std::abi\nimport std::abi::bytes\nimport std::ffi::c\n"
-puts -nonewline $f $links
-puts $f "
+set body "
 extern c fn bh_open(flags: $ll) -> $ll
 extern c fn bh_close() -> $ll
 extern c fn bh_provider() -> $ll
 extern c fn bh_client(versions: $ll, connect_us: $ll, idle_us: $ll, max_per_origin: $ll, max_header_bytes: $ll, pool_idle_us: $ll, window: $ll, system_trust: $ll, anchors: std::ffi::c::Ptr\[std::ffi::c::Void\] read noescape, anchors_len: std::ffi::c::ULong) -> $ll
 extern c fn bh_release(h: $ll) -> $ll
 extern c fn bh_stats(buf: std::ffi::c::Ptr\[std::ffi::c::Void\] write noescape, cap: std::ffi::c::ULong) -> $ll
-
+EXTERNS
 fn positive(x: int) -> int:
     if x > 0:
         return 1
@@ -206,32 +214,49 @@ client = bh_client(0, 0, 0, 8, 65536, 0, 65535, 1, none, 0)
 s = bh_stats(std::abi::bytes::zeroed(std::abi::usize(168)), 168)
 released = bh_release(client)
 closed = bh_close()
-\[opened, again, positive(api), positive(client), s.result, released, closed\]"
-close $f
+\[opened, again, positive(api), positive(client), s.result, released, closed, EXTRA\]"
+foreach {form declares externs extra} [list \
+        none "" "" 0 \
+        declared $provider "" 0 \
+        called $provider "extern c fn rlp_posts() -> $ll\n" "rlp_posts()"] {
+    set f [open [file join $out probe probe_$form.bot] w]
+    puts $f "# A link-feasibility probe of the http unit, provider: $form (written by audit/rust-archive-link/tools/http-unit.tcl)."
+    puts $f "import std::abi\nimport std::abi::bytes\nimport std::ffi::c\n"
+    puts -nonewline $f $links$declares
+    puts $f [string map [list EXTERNS $externs EXTRA $extra] $body]
+    close $f
+}
+
+# What each probe's link must do on this host: the provider called links
+# everywhere; without one, ELF resolves http's weak reference to null and
+# Apple's ld refuses the undefined weak import (section 7 of the report).
 set expected {0 -90003 1 1 168}
-foreach linker {rustc system} {
-    set l [rustlink::link [file join $out probe] probe.bot -linker $linker]
-    if {![dict get $l ok]} {
-        record link-$linker failed [string map {\n " | "} [string range [dict get $l error] 0 1500]]
-        continue
-    }
-    set exe [dict get $l exe]
-    foreach line [split [dict get $l output] \n] {
-        if {[regexp -nocase {warning} $line]} {
-            record link-warning-$linker [string range $line 0 300]
+proc undefinedSymbols {text} {
+    lsort -unique [lmap {- s} [regexp -all -inline {"_?([A-Za-z0-9_]+)", referenced from} $text] {set s}]
+}
+foreach form {none declared called} {
+    foreach linker {rustc system} {
+        set l [rustlink::link [file join $out probe] probe_$form.bot -linker $linker]
+        if {![dict get $l ok]} {
+            record link-$form-$linker failed undefined [undefinedSymbols [dict get $l error]] \
+                [string map {\n " | "} [string range [dict get $l error] 0 1500]]
+            continue
         }
-    }
-    file rename -force $exe $exe-$linker
-    set exe $exe-$linker
-    set r [rustlink::run $exe]
-    set value [lindex [regexp -inline {value \{list \{(.*)\}\}} [dict get $r raw]] 1]
-    set ints [lmap item $value {lindex $item 1}]
-    set p [rustlink::copies $exe rust_eh_personality]
-    record link-$linker ok status [dict get $r status] value $ints \
-        verdict [expr {[dict get $r status] == 0 && [lrange $ints 0 4] eq $expected ? "pass" : "fail"}] \
-        personality "[dict get $p global] global [dict get $p local] local" bytes [file size $exe]
-    if {[dict get $r status] != 0} {
-        record output-$linker [string map {\n " | "} [string range [dict get $r output] 0 1500]]
+        set exe [dict get $l exe]
+        set warnings [lmap line [split [dict get $l output] \n] {expr {[regexp -nocase {warning} $line] ? [string trim $line] : [continue]}}]
+        file rename -force $exe $exe-$linker
+        set exe $exe-$linker
+        set r [rustlink::run $exe]
+        set value [lindex [regexp -inline {value \{list \{(.*)\}\}} [dict get $r raw]] 1]
+        set ints [lmap item $value {lindex $item 1}]
+        set p [rustlink::copies $exe rust_eh_personality]
+        record link-$form-$linker ok status [dict get $r status] value $ints \
+            verdict [expr {[dict get $r status] == 0 && [lrange $ints 0 4] eq $expected ? "pass" : "fail"}] \
+            personality "[dict get $p global] global [dict get $p local] local" bytes [file size $exe] \
+            warnings [llength $warnings] [join $warnings " | "]
+        if {[dict get $r status] != 0} {
+            record output-$form-$linker [string map {\n " | "} [string range [dict get $r output] 0 1500]]
+        }
     }
 }
 close $results
