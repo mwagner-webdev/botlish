@@ -22,6 +22,8 @@
 #   rustunit::globals FILE ?-format F?    FILE's global definitions (C names),
 #                                         locals excluded
 #   rustunit::undefined FILE ?-format F?  FILE's undefined references
+#   rustunit::buildVersion FILE           Mach-O: FILE's LC_BUILD_VERSION, as
+#                                         {platform P minos M sdk S}, or {}
 #   rustunit::check ARCHIVE NAMES ?-format F?
 #       an error unless ARCHIVE's global definitions are exactly NAMES
 #
@@ -222,6 +224,18 @@ proc rustunit::MacosPlatform {min} {
         Fail "xcrun --show-sdk-version: $sdk"
     }
     return [list -platform_version macos $min [string trim $sdk]]
+}
+
+# The platform, deployment target and SDK FILE's LC_BUILD_VERSION records
+# (otool -l), as a dict {platform P minos M sdk S}, or {} when it records
+# none. (Every quantifier greedy: in Tcl, a non-greedy first quantifier
+# makes the whole expression match as little as it can, \S+ included.)
+proc rustunit::buildVersion {file} {
+    if {[regexp {cmd LC_BUILD_VERSION\s+cmdsize\s+\d+\s+platform\s+(\S+)\s+minos\s+(\S+)\s+sdk\s+(\S+)} \
+            [exec otool -l $file] -> platform minos sdk]} {
+        return [dict create platform $platform minos $minos sdk $sdk]
+    }
+    return {}
 }
 
 proc rustunit::localize {raw out args} {

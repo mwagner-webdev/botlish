@@ -61,7 +61,7 @@ foreach {name raw} $units {
         set u [rustunit::undefined $archive -format [rustlink::format]]
         set how ""
         if {$form ne "raw" && [rustlink::format] eq "macho"} {
-            set how ", [regexp -inline {cmd LC_BUILD_VERSION.*?platform \S+.*?minos \S+} [exec otool -l $archive]]"
+            set how ", LC_BUILD_VERSION [rustunit::buildVersion $archive]"
         }
         puts $surfaces "== $name $form [file size $archive] bytes: [llength $g] global definitions, [llength $u] undefined references$how"
         puts $surfaces "   global: [join [lrange $g 0 39] { }][expr {[llength $g] > 40 ? " ..." : ""}]"

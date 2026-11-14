@@ -356,11 +356,15 @@ consumer linker flag on either platform and keeps the integration ABI
 must not take it for a duplicate of the provider's definition (section
 8.2).
 
-**Archive loading for a weak reference** [unverified]. In every program
-here the provider object is pulled by the provider module's own calls,
-not by the unit's reference to `botlish_event_post2`. Whether a weak
-reference alone would pull an archive member was not isolated (on ELF it
-does not; on Mach-O it was not tested).
+**Archive loading for a weak reference** [executed, CI]. The http probe
+(section 14) declares the provider's archive without calling anything in
+it. On Linux the provider's member is not loaded: the executable is byte
+for byte the size of the one without a provider, and the weak reference
+is null. On macOS Apple's ld loads the member for the weak reference
+alone and the program links (run 43551304938). So on Mach-O a driver
+package's archive satisfies http's weak reference merely by being in the
+link; on ELF only the driver module's own calls bring its object in --
+which they do in every real program.
 
 **Callbacks** [executed, CI]. `rl_each` calls a Botlish `callback c fn`
 synchronously, through the transition shim, from Rust code inside the
@@ -627,11 +631,11 @@ What each fact rests on:
 | Source | the **existing** http code, its production path (tools/http-package.tcl), unchanged | a **modified copy** of packages/http/native: net.rs's `SOCK_NONBLOCK \| SOCK_CLOEXEC` (Linux's) replaced by `fcntl` after `socket()`; nothing else |
 | BoringSSL | the provider package's pinned 0.20261020.0, its own build | the same pin (tag object and commit checked), built by upstream's CMake for arm64, macOS 11.0, three archives (libcrypto, libssl, the identity object) |
 | The unit builds | yes [executed, CI] | **yes**, cargo --locked, rustc 1.97.0, link-only BoringSSL; `MSG_NOSIGNAL` (bridge/io.rs) exists in the libc crate's Apple target and compiled [CI] |
-| Localized surface | 20 global definitions = abi.rs's `bh_*` [executed, CI] | **20 = abi.rs's `bh_*`** (raw: 4,316) [CI] |
+| Localized surface | 20 global definitions = abi.rs's `bh_*` [executed, CI] | **20 = abi.rs's `bh_*`** (raw: 4,316); `LC_BUILD_VERSION` macOS 11.0 [CI] |
 | Undefined references | 760 (BoringSSL, libc, libstdc++, `botlish_event_post2`) | 775 (BoringSSL, libSystem, libc++, `botlish_event_post2`) [CI] |
-| Probe, provider called | links and runs: `0 -90003 1 1 168 0 0`, both linkers [executed] | PENDING (run 43551304938) |
+| Probe, provider called | links and runs: `0 -90003 1 1 168 0 0`, both linkers [executed] | **links and runs: `0 -90003 1 1 168 0 0`, both linkers**; one global and one local `rust_eh_personality`; 6.1 MB executables [CI, run 43551304938] |
 | Probe, no provider | links and runs (the weak reference is null) [executed] | **link fails on exactly one symbol**, `_botlish_event_post2`, both linkers [CI, run 43526167818]: everything else -- BoringSSL, libc++, the identity, the unit's own Rust -- resolved |
-| Probe, provider declared, not called | links; the executables are byte for byte the size of the no-provider ones: the weak reference did not pull the provider's member [executed] | PENDING |
+| Probe, provider declared, not called | links; the executables are byte for byte the size of the no-provider ones: the weak reference did not pull the provider's member [executed] | **links and runs**: Apple's ld loaded the provider's member for the unit's weak reference alone (nothing else names it) [CI, run 43551304938] |
 
 The Linux unit is byte for byte the production one (`6f1f0649...8784`):
 the refactor of tools/http-package.tcl onto `rustunit::localize` changed

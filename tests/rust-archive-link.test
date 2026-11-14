@@ -136,9 +136,8 @@ test ral-kept-glob-misses {a keep list that misses an export leaves it local: a 
 
 testConstraint ralMachoHost [expr {[testConstraint rustlinkHost] && $::ralMacho}]
 test ral-localized-build-version {Mach-O: the localized object records its platform and deployment target (LC_BUILD_VERSION: macOS, 11.0) -- Apple's ld -r writes none unless told, and every final link would warn "no platform load command found ..., assuming: macOS"} -constraints ralMachoHost -body {
-    set loads [exec otool -l [ralLocalized weakdef]]
-    regexp {cmd LC_BUILD_VERSION.*?platform (\S+).*?minos (\S+)} $loads -> platform minos
-    list [expr {[info exists platform] && $platform in {1 MACOS macos}}] [expr {[info exists minos] ? $minos : "none"}]
+    set v [rustunit::buildVersion [ralLocalized weakdef]]
+    list [expr {[dict getdef $v platform ""] in {1 MACOS macos}}] [dict getdef $v minos none]
 } -result {1 11.0}
 
 test ral-localized-comdat {ELF: the localized unit's COMDAT group of Rust's personality reference is renamed, so the final link never merges it with the runtime's (the http census's B3)} -constraints rustlinkHost -body {
@@ -260,12 +259,15 @@ foreach linker {rustc system} {
 # embedded LLVM bitcode -- the Rust standard library's objects carry some,
 # of an LLVM newer than Xcode's -- unless given --no-llvm-bc.
 proc ralFakeNm {script body} {
-    set dir [ralDir fakenm]
+    uplevel 1 [list ralFakeTool nm $script $body]
+}
+proc ralFakeTool {tool script body} {
+    set dir [ralDir fake$tool]
     file mkdir $dir
-    set f [open [file join $dir nm] w]
+    set f [open [file join $dir $tool] w]
     puts $f "#!/bin/sh\n$script"
     close $f
-    file attributes [file join $dir nm] -permissions 0755
+    file attributes [file join $dir $tool] -permissions 0755
     set saved $::env(PATH)
     set ::env(PATH) $dir:$saved
     try {
@@ -321,6 +323,16 @@ echo '                 (undefined) external _malloc'} {
         list [rustunit::globals x.a -format macho] [rustunit::undefined x.a -format macho]
     }
 } -result {{_RNvCs9hJ03s5DiqP_7___rustc12___rust_alloc botlish_event_post2 rl_open} malloc}
+
+test ral-build-version-reader {Mach-O: a file's LC_BUILD_VERSION read from otool -l -- platform, deployment target and SDK whole (not their first characters), and nothing for a file without one} -constraints posixShell -body {
+    ralFakeTool otool {
+case "$2" in
+  with.o) printf 'with.o:\nLoad command 3\n      cmd LC_BUILD_VERSION\n  cmdsize 32\n platform 1\n    minos 11.0\n      sdk 15.5\n   ntools 0\nLoad command 4\n      cmd LC_SYMTAB\n' ;;
+  *) printf 'without.o:\nLoad command 0\n      cmd LC_SEGMENT_64\n' ;;
+esac} {
+        list [rustunit::buildVersion with.o] [rustunit::buildVersion without.o]
+    }
+} -result {{platform 1 minos 11.0 sdk 15.5} {}}
 
 test ral-nm-old-nm-fallback {an nm without --no-llvm-bc (it refuses the option) is asked without it} -constraints posixShell -body {
     ralFakeNm {

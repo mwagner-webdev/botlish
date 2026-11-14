@@ -167,7 +167,7 @@ if {$format eq "elf"} {
     record raw-unit [file size $raw] [sha256 $raw] "[llength [rustunit::globals $raw -format macho]] global definitions"
     set unit [file join $native libbotlish_http.a]
     rustunit::localize $raw $unit -format macho -keep {bh_*} -label botlish_http -member botlish_http.o
-    record build-version [regexp -inline {cmd LC_BUILD_VERSION.*?platform \S+.*?minos \S+.*?sdk \S+} [exec otool -l $unit]]
+    record build-version {*}[rustunit::buildVersion $unit]
     set links "extern c library \"botlish_http\" static at \"native/libbotlish_http.a\"\nextern c library \"crypto\" static at \"native/libcrypto.a\"\nextern c library \"ssl\" static at \"native/libssl.a\"\nextern c library \"botlish_boringssl_identity\" static at \"native/libbotlish_boringssl_identity.a\"\nextern c library \"c++\"\n"
 }
 set unit [file join $native libbotlish_http.a]
