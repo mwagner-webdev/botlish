@@ -158,7 +158,7 @@ script refuses any host but Linux (`httppkg::Host`).
 | 2 | Rust native unit | its own copy of std and its allocator shim, its own personality routine and unwind tables, its global allocator if it has one | the package author, pinned rustc (1.97.0) | archive and object format |
 | 3 | Externally visible C symbols | the unit's C ABI (`bh_*`, `rl_*`), an interposable weak fallback if any | the unit | Mach-O's leading underscore |
 | 4 | Internal Rust symbols | std/core/alloc (v0-mangled with a crate hash), the allocator shim `__rustc::__rust_alloc` (mangled, its hash toolchain-specific), `rust_eh_personality` (**unmangled**), ELF's `DW.ref.rust_eh_personality` COMDAT group, compiler-builtins (weak) | the unit | ELF COMDAT vs Mach-O (none) |
-| 5 | Callbacks and notifications | `callback c fn` (synchronous, through the transition shim); `botlish_event_post2` from a foreign thread (the driver's) | Botlish / the driver's C adapter | weak references: ELF tolerates an undefined one, Mach-O (PENDING) |
+| 5 | Callbacks and notifications | `callback c fn` (synchronous, through the transition shim); `botlish_event_post2` from a foreign thread (the driver's) | Botlish / the driver's C adapter | weak references: ELF tolerates an undefined one and pulls no member for it; Mach-O refuses an undefined one and pulls a member for it (section 7) |
 | 6 | System libraries and frameworks | Linux: libc, libgcc_s (unwinding), libm, libstdc++ for BoringSSL; macOS: libSystem, libc++, libiconv | the platform | the C++ runtime's name; deployment target |
 | 7 | Package metadata | `botlish.json` targets: bundled static libraries, their declared symbols, license; views; `static at` paths | the author (`native add`) | the archive index format (GNU `/` vs BSD `__.SYMDEF SORTED`) |
 | 8 | Final executable link | archive order, which copy of a symbol wins, what the executable exports | the consumer's compiler | linker semantics (GNU ld, rust-lld, Apple ld) |
@@ -352,7 +352,35 @@ Run 43526167818 (`ca8e7b0b`), job `experiments (macos-aarch64)`, Xcode
   aarch64-apple-darwin; the SDK: `xcrun --show-sdk-version`) to both
   `ld -r` calls; `ral-localized-build-version` (macOS) requires
   `LC_BUILD_VERSION` platform macOS, minos 11.0, and the mutant
-  `macho-no-platform` removes it. PENDING (CI): the run that shows it.
+  `macho-no-platform` removes it. Run 43553765190 (`40dbd064`): every
+  localized archive records `platform 1, minos 11.0, sdk 15.5`, and the
+  final links print the warning 0 times.
+
+The localized member's symbols, as nm -m prints them there:
+
+```
+0000000000006380 (__TEXT,__text) weak external _botlish_event_post2
+0000000000004dbc (__TEXT,__text) external _rl_open            (and the other 11 rl_*)
+0000000000002a98 (__TEXT,__text) non-external (was a private external) __RNvCs5WqGp7zLRnA_7___rustc12___rust_alloc
+0000000000051e04 (__TEXT,__text) non-external (was a private external) _rust_eh_personality
+```
+
+and an executable linked with it (rustc linker; the system linker's is
+the same):
+
+```
+0000000100098cc4 T _rust_eh_personality                      the runtime's
+0000000100103744 t _rust_eh_personality                      the unit's
+0000000100000964 T __RNvCs5WqGp7zLRnA_7___rustc12___rust_alloc   the runtime's
+00000001000b43d8 t __RNvCs5WqGp7zLRnA_7___rustc12___rust_alloc   the unit's
+```
+
+-- one rustc (1.100.0) for both in this unit, so the two shims share a
+name, and only the localization keeps them apart. Dynamic libraries:
+libSystem and libiconv only. The export trie lists the unit's 12 `rl_*`
+functions and no symbol of the unit's Rust (they are local); it also
+lists the runtime's own external symbols (Apple's ld exports every
+external symbol of an executable by default: section 16).
 
 ## 7. Weak-reference and callback findings
 
@@ -440,10 +468,13 @@ entries are now checked against member offsets too.
 
 Tests: synthetic archives written byte by byte (no toolchain), llvm-ar's
 Darwin output of clang Mach-O objects, and on macOS Apple's own `ar rcs`
-and `libtool -static` compared with `nm` (`pn-index-apple`, PENDING in
-CI). `native add -symbol` against the localized Rust archive, and its
-refusal of a misspelled symbol, run on both hosts
-(`ral-native-add-symbols`).
+and `libtool -static` compared with `nm` (`pn-index-apple`: passed on
+macOS in runs 43526167818 and 43553765190; its first version failed on
+its own `lindex`, run 43506350138). `native add -symbol` against the
+localized Rust archive, and its refusal of a misspelled symbol, run on
+both hosts (`ral-native-add-symbols`, CI on both). The package job packs
+the macOS archives on Linux: every `-symbol` of the Mach-O unit is
+verified there from the bytes of Apple's index.
 
 ### 8.2 A weak definition was counted as a duplicate [executed]
 
@@ -601,12 +632,13 @@ the Botlish binding or the consumer's source differs by host.
 | `ral-native-add-wrong-target` | the host's archive declared for the other OS's target: refused, naming the members' format |
 | `ral-weakdef-localized-away-*` | the fallback localized away: the program with the provider gets -38 |
 | `ral-weakref-without_provider-*` | Mach-O: the link fails on the undefined weak import (ELF: null, -38) |
+| the http probe without a provider (CI's assertion) | Mach-O: the link fails on exactly `_botlish_event_post2` |
 | `ral-nm-partial-refused` | an nm that fails after printing for any other reason than an empty member: an error |
 | `pn-index-bsd-malformed` | three corrupt BSD indexes (pairs, string table, member offset): `{PM BINARY}` |
 | `pn-index-bsd-symbols-checked` | `-symbol` naming a symbol the Apple index lacks: refused |
 | `pn-index-weak-elf`, `pn-index-weak-macho-install` | two strong definitions in two packages: refused at installation |
 
-**Mutants** (audit/rust-archive-link/tools/mutants.txt, 25; each must be
+**Mutants** (audit/rust-archive-link/tools/mutants.txt, 27; each must be
 killed by a test its `!!` line names, the test that states the rule, run
 by `mutate.tcl` on a private copy of the tree):
 
@@ -620,7 +652,9 @@ by `mutate.tcl` on a private copy of the tree):
 | `check-lenient` | the surface check accepts anything | `ral-check-refuses-raw` | killed | killed (43516411953) |
 | `fallback-localized` | the weak fallback localized | `ral-localized-surface`, `-with_provider-*` | killed | killed (43516411953) |
 | `macho-bitcode-reader` | Mach-O read without `--no-llvm-bc` | `ral-nm-bitcode-reader-off` (stand-in); on macOS also `ral-raw-surface`, `ral-localized-surface` | killed | killed (43516411953) |
-| `macho-private-extern-local` | private externals not counted | `ral-macho-private-extern` (stand-in); on macOS `ral-raw-surface` | killed | PENDING |
+| `macho-private-extern-local` | private externals not counted | `ral-macho-private-extern` (stand-in); on macOS `ral-raw-surface` | killed | killed (43553765190) |
+| `macho-no-platform` | `ld -r` without `-platform_version` | `ral-localized-build-version` | not applicable | killed (43553765190) |
+| `build-version-shortest` | `LC_BUILD_VERSION` read with a non-greedy expression | `ral-build-version-reader` (stand-in), `ral-localized-build-version` | killed | killed (43553765190) |
 | `nm-no-fallback` | an nm without `--no-llvm-bc` is an error | `ral-nm-old-nm-fallback` | killed | killed (43516411953) |
 | `nm-partial-accepted` | any failure after output accepted | `ral-nm-partial-refused` | killed | killed (43516411953) |
 | `nm-no-symbols-refused` | Apple's empty-member warning refused | `ral-nm-no-symbols-accepted` | killed | killed (43516411953) |
@@ -632,8 +666,8 @@ by `mutate.tcl` on a private copy of the tree):
 | `weak-elf-unread` | ELF weak definitions not read | `pn-index-weak-elf` | killed | not applicable |
 | `weak-macho-unread` | `N_WEAK_DEF` not read | `pn-index-weak-macho` | killed (llvm-ar) | killed (43516411953) |
 | `weak-any-member` | weak when any member is | `pn-index-weak-elf`, `pn-index-weak-macho` | killed | killed (43516411953) |
-| `install-weak-counted` | the installation counts weak as duplicate | `pn-index-weak-elf`, `pn-index-weak-macho-install` | killed | PENDING (survived in 43516411953, before the macOS installation test existed) |
-| `install-all-weak` | the installation exempts everything | the same, `pn-native-conflicts` | killed | PENDING (as above) |
+| `install-weak-counted` | the installation counts weak as duplicate | `pn-index-weak-elf`, `pn-index-weak-macho-install` | killed | killed (43553765190; it survived in 43516411953, before the macOS installation test existed) |
+| `install-all-weak` | the installation exempts everything | the same, `pn-native-conflicts` | killed | killed (43553765190; as above) |
 | `audit-weak-counted` | the pack audit counts weak as duplicate | `ral-pack-weak-beside-strong` | killed | killed (43516411953) |
 
 The first macOS mutant run is the reason two tests exist: three mutants
@@ -788,13 +822,19 @@ both platforms; without one, Apple's ld refuses it.
   whether Apple's `-dead_strip` can still drop the unit's unused std code
   depends on the merged object keeping subsections via symbols. Size was
   not measured.
+* **A macOS executable exports its whole runtime** [CI]. Apple's ld puts
+  every external symbol of an executable in its export trie unless told
+  otherwise: an executable linked with the localized unit exports the
+  unit's 12 `rl_*` C functions and about 500 Rust symbols of the Botlish
+  runtime's own standard library (`_RNv...`), none of the unit's (they are
+  local). That is a property of every Botlish executable on macOS, not of
+  this unit; an export list for executables would be a change to the
+  compiler's link, not done here.
 * **Only the fixture is packaged** [executed, CI]. No `http` release is
   made or implied; the real unit is built, localized and linked by a
   probe on both hosts (section 14), not packed, installed or exercised
   against a server on macOS.
 
-PENDING (CI): the weak-reference finding on Apple's ld, anything the
-macOS runs add.
 
 ## 17. Changes made to the main repository
 
